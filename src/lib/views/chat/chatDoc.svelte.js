@@ -23,11 +23,19 @@
 //   itself a version, so it can be undone too).
 // - Copy (the whole document as Markdown) and Export as Markdown (the Notes
 //   view's `note_export`): `docTools.js`, in the panel's own chunk.
+// - **Stream-in** (2026-10-31): each section on its way to the page is
+//   `live` (key → its text as it came); the panel lets it flow in at its
+//   own pace (DocPanel, docStream.js), so it reads line by line instead of
+//   in the bursts it comes in. A section that lands stays live as saved
+//   (`settled`) until the panel has all of it shown (`release`); while a
+//   turn writes, one a provider sent whole is live too.
 import { invoke } from '@tauri-apps/api/core';
 import { toast } from '../../ui/toast.svelte.js';
 import { showSaveError } from '../../notices/saveErrors.js';
 import { isPlaceholder, pendingSections } from '../../core/markdown.js';
-import { closePartial } from '../../core/streaming.js';
+import { sectionText } from './docSections.js';
+
+export { sectionRange } from './docSections.js';
 
 /** The origin of the panel's saves (`yap-note-changed`): its own aren't news. */
 export const PANEL_ORIGIN = 'chat-panel';
@@ -83,56 +91,8 @@ export function undoTarget(versions) {
   return versions[i] ?? null;
 }
 
-/** A section's text as it streams, under its own heading when it wrote one, else the key's. */
-function liveBlock(key, text) {
-  const own = /^#{1,2}\s+\S/.test(text.trimStart());
-  return own ? closePartial(text.trimStart().replace(/^#\s/, '## ')) : `## ${key}\n\n${closePartial(text)}`;
-}
-
-/**
- * Section `key`'s lines in `lines`, `[start, end)`: its `##` heading to the
- * next `#`/`##` heading or placeholder (blank lines at its end left out),
- * as documents.rs `section_range` finds it; `null` if there's none.
- */
-export function sectionRange(lines, key) {
-  const want = String(key).trim().replace(/\s+/g, ' ').toLowerCase();
-  const start = lines.findIndex((l) => {
-    const m = /^\s*##\s+(.*?)\s*$/.exec(l);
-    return !!m && m[1].replace(/#+$/, '').trim().replace(/\s+/g, ' ').toLowerCase() === want;
-  });
-  if (start < 0) return null;
-  let end = start + 1;
-  while (end < lines.length && !/^\s*#{1,2}\s+\S/.test(lines[end]) && !isPlaceholder(lines[end])) end++;
-  while (end > start + 1 && !lines[end - 1].trim()) end--;
-  return [start, end];
-}
-
-/**
- * A document's text as the panel shows it: without its first line when
- * that's the title (the panel shows it), and each section being written in
- * its place as it streams (`live`: key → its text so far) — a placeholder's
- * place (`write_section`), the section it rewrites, or a new one at the end
- * (`rewrite_section`). Pure.
- */
-export function shownText(content, title, live = {}) {
-  let lines = String(content || '').split('\n');
-  const first = lines[0]?.trim() ?? '';
-  if (/^#\s+/.test(first) && first.replace(/^#\s+/, '').trim() === String(title || '').trim()) {
-    lines = lines.slice(1);
-  }
-  for (const key of Object.keys(live)) {
-    const block = liveBlock(key, live[key] ?? '');
-    const at = lines.findIndex((l) => isPlaceholder(l, key));
-    if (at >= 0) {
-      lines.splice(at, 1, block);
-      continue;
-    }
-    const range = sectionRange(lines, key);
-    if (range) lines.splice(range[0], range[1] - range[0], block);
-    else lines.push('', block);
-  }
-  return lines.join('\n').replace(/^\n+/, '');
-}
+/** `key` among `keys`, as documents.rs matches a section's key (case aside). */
+const hasKey = (keys, key) => keys.some((k) => k.trim().toLowerCase() === String(key).trim().toLowerCase());
 
 /**
  * The panel's state. `onopennote({id})`: ControlPanel's Open in Notes, as
@@ -154,12 +114,15 @@ export function createDocPanel({ onopennote = () => null } = {}) {
   let saveTimer = null;
   let saving = null;
   // A turn is writing it now; the section on the way (its key, '' not
-  // known yet); each section's text as it streams; 'writing' a section or
-  // 'editing' its blocks (edit_document, restore_document).
+  // known yet); 'writing' a section or 'editing' its blocks (edit_document,
+  // restore_document).
   let busy = $state(false);
   let writing = $state(null);
-  let live = $state({});
   let action = $state('writing');
+  // Each section on its way to the page: its text as it came (key → text).
+  // One that landed (`settled`) leaves when the panel has it all shown.
+  let live = $state({});
+  const settled = new Set();
   // The newest change is Chat's (Undo shows).
   let canUndo = $state(false);
   let width = $state(loadWidth());
@@ -168,7 +131,19 @@ export function createDocPanel({ onopennote = () => null } = {}) {
   let landed = $state(0);
 
   const pending = $derived(pendingSections(content));
-  const shown = $derived(shownText(content, title, live));
+
+  /** Nothing on its way to the page any more (another document, the panel closed). */
+  function stopFlow() {
+    settled.clear();
+    live = {};
+  }
+
+  /** The panel has all of section `key` shown: once it has landed, it leaves. */
+  function release(key) {
+    if (!settled.has(key)) return;
+    settled.delete(key);
+    live = Object.fromEntries(Object.entries(live).filter(([k]) => k !== key));
+  }
 
   async function load() {
     const want = id;
@@ -178,6 +153,9 @@ export function createDocPanel({ onopennote = () => null } = {}) {
       if (id !== want) return;
       gone = false;
       title = n.title || '';
+      // A change that came this way first (a turn's `document` event can
+      // beat the note's own `yap-note-changed`): marked as it lands too.
+      if (content && (n.content || '') !== content) landed += 1;
       take(n.content || '');
       refreshUndo();
     } catch {
@@ -187,10 +165,40 @@ export function createDocPanel({ onopennote = () => null } = {}) {
 
   /** The document's text now (Rust's): shown, and the Source box's too unless typing is waiting to be saved. */
   function take(text) {
+    const was = content;
     content = text;
-    // The sections that have landed aren't live any more.
-    const left = Object.fromEntries(Object.entries(live).filter(([k]) => text.split('\n').some((l) => isPlaceholder(l, k))));
-    if (Object.keys(left).length !== Object.keys(live).length) live = left;
+    const lines = text.split('\n');
+    const waiting = (k) => lines.some((l) => isPlaceholder(l, k));
+    const next = { ...live };
+    let changed = false;
+    // A section that landed (or was rewritten) stays live as saved until
+    // the panel has it all shown — unless it changed again since it landed
+    // (a later edit): then it's shown as it is now, the change marked.
+    for (const k of Object.keys(live)) {
+      if (waiting(k)) continue;
+      const saved = sectionText(text, k, live[k]);
+      if (settled.has(k) && saved === live[k]) continue;
+      changed = true;
+      if (saved == null || settled.has(k)) {
+        delete next[k];
+        settled.delete(k);
+      } else {
+        next[k] = saved;
+        settled.add(k);
+      }
+    }
+    // While a turn writes: a section a provider sent whole flows in too.
+    if (busy) {
+      for (const { key } of pendingSections(was)) {
+        if (waiting(key) || hasKey(Object.keys(next), key)) continue;
+        const saved = sectionText(text, key);
+        if (saved == null) continue;
+        next[key] = saved;
+        settled.add(key);
+        changed = true;
+      }
+    }
+    if (changed) live = next;
     if (!dirty) {
       draft = text;
       base = text;
@@ -226,7 +234,7 @@ export function createDocPanel({ onopennote = () => null } = {}) {
       base = '';
       dirty = false;
       view = 'preview';
-      live = {};
+      stopFlow();
       gone = false;
     }
     open = true;
@@ -247,6 +255,7 @@ export function createDocPanel({ onopennote = () => null } = {}) {
     if (!open || id !== ev.noteId) show(ev.noteId);
     writing = ev.key ?? '';
     live = { ...live, [ev.key]: ev.text ?? '' };
+    settled.delete(ev.key);
   }
 
   /** A tool call began (`tool` event): a section on its way, or an edit of its blocks. */
@@ -269,8 +278,10 @@ export function createDocPanel({ onopennote = () => null } = {}) {
     busy = false;
     writing = null;
     action = 'writing';
-    live = {};
+    // What's still flowing in finishes (as saved, once `load` takes it), then leaves.
+    for (const k of Object.keys(live)) settled.add(k);
     if (open) load();
+    else stopFlow();
   }
 
   /** Another window (or Chat's tools) changed a note (`yap-note-changed`). */
@@ -296,6 +307,7 @@ export function createDocPanel({ onopennote = () => null } = {}) {
     open = false;
     expanded = false;
     view = 'preview';
+    stopFlow();
   }
 
   /** Preview (the page) or Source (the markdown, editable). */
@@ -414,7 +426,10 @@ export function createDocPanel({ onopennote = () => null } = {}) {
     get id() { return id; },
     get title() { return title; },
     get content() { return content; },
-    get shown() { return shown; },
+    get live() { return live; },
+    get streaming() { return busy || Object.keys(live).length > 0; },
+    isSettled: (key) => settled.has(key),
+    release,
     get pending() { return pending; },
     get gone() { return gone; },
     get expanded() { return expanded; },

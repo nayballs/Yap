@@ -71,9 +71,10 @@ md.block.ruler.before(
 
 // A document's section still to be written (Chat's documents beside the
 // chat, src-tauri/src/chat/documents.rs): its placeholder line, an HTML
-// comment the person never types by accident, drawn as a quiet line —
-// "Writing: Gear…" while Chat writes the document (`options.writing`),
-// else "Gear: not written yet" — never as the raw syntax.
+// comment the person never types by accident, drawn as a quiet line with
+// the section's name and what it will say ("Gear: what to wear and where to
+// find it", after Claude's own documents' grey intents) — never as the raw
+// syntax.
 const PENDING = /^<!--\s*yap:section\s+([^|]*?)\s*(?:\|\s*(.*?))?\s*-->\s*$/;
 md.block.ruler.before(
   'paragraph',
@@ -290,10 +291,12 @@ rules.yap_cite = (tokens, idx) => {
   return `<span class="md-cites">${pills.join('')}</span>`;
 };
 
-rules.yap_pending = (tokens, idx, _options, env) => {
+// A section still to write: its name, and what it will say when the outline
+// gave that ("Gear: what to wear…").
+rules.yap_pending = (tokens, idx) => {
   const { key, intent } = tokens[idx].meta;
-  const label = env?.writing ? `Writing: ${key}…` : `${key}: not written yet`;
-  return `<p class="md-pending"${lineAttr(tokens[idx])} title="${escapeHtml(intent)}">${escapeHtml(label)}</p>\n`;
+  const what = intent ? `: <span class="md-pending-intent">${escapeHtml(intent)}</span>` : '';
+  return `<p class="md-pending"${lineAttr(tokens[idx])} title="Not written yet"><span class="md-pending-key">${escapeHtml(key)}</span>${what}</p>\n`;
 };
 
 rules.yap_task = (tokens, idx) => {
@@ -336,7 +339,7 @@ const PURIFY = {
   ALLOW_DATA_ATTR: false,
   ALLOW_ARIA_ATTR: false,
 };
-const CLASSES = new Set(['md-link', 'md-cite', 'md-cites', 'md-passage', 'md-code', 'md-table', 'md-quote', 'md-rule', 'md-loose', 'md-pending', 'task', 'c', 'r']);
+const CLASSES = new Set(['md-link', 'md-cite', 'md-cites', 'md-passage', 'md-code', 'md-table', 'md-quote', 'md-rule', 'md-loose', 'md-pending', 'md-pending-key', 'md-pending-intent', 'task', 'c', 'r']);
 // The one in-page address: a passage pill's (rendered by yap_cite only).
 const PASSAGE_HREF = /^#passage-\d{1,2}$/;
 // Which elements may carry which of the narrower attributes.
@@ -385,13 +388,11 @@ function purify() {
  * citations become pills, and only the sources' links stay links.
  * `options.tickable`: task checkboxes you can tick (a note's summary; the
  * view maps each one to its line with `taskLines`).
- * `options.writing`: a document Chat is writing now — its sections still to
- * come say "Writing: Gear…" (else "Gear: not written yet").
  * `options.lines`: each top-level block carries its source lines
  * (`data-line="3-7"`): the document panel maps a selection back to them.
  */
 export function renderMarkdown(text, options = {}) {
-  const env = { web: webContext(options.sources), writing: !!options.writing, lines: !!options.lines };
+  const env = { web: webContext(options.sources), lines: !!options.lines };
   const html = md.render(bulletsToDashes(text || ''), env);
   tickable = !!options.tickable;
   try {

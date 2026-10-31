@@ -1240,14 +1240,46 @@ screenshots and their prompts, +, the box, the mic, Send / ■, `ModelChip`).
 **The document panel** (2026-10-30, `DocPanel.svelte` + `chatDoc.svelte.js`;
 `chat/documents.rs` above): a document a turn makes or changes opens to
 the right of the conversation. **Opens** on the turn's `document` event
-(the outline at once: each section still to come a quiet "Writing: Gear…"
-line — `markdown.js`' `md-pending`, `renderMarkdown(md, {writing})` —
-never the placeholder's syntax), **fills** as `section` events stream a
+(the outline at once: each section still to come a quiet grey line, its
+name and what it will say — "[**Gear**: what to wear and where to find
+it]", after Claude's own documents' grey intents; `markdown.js`'
+`md-pending`, the brackets drawn by the panel's CSS — never the
+placeholder's syntax), **fills** as `section` events stream a
 `write_section`'s text into its placeholder's place, or a
 `rewrite_section`'s over the section it rewrites (a new one at the end;
-`shownText`, `sectionRange`; half-written markdown closed off), and takes
-the note's text as each section lands (`yap-note-changed`, origin
-"chat"). **A page to read** (2026-10-30, measured against Claude's own
+`docStream.js` `shownSegments`, `docSections.js` `sectionRange`;
+half-written markdown closed off), and takes the note's text as each
+section lands (`yap-note-changed`, origin "chat"). **Stream-in**
+(2026-10-31, after Claude's documents filling while you watch): the text
+comes in bursts — Rust sends a call's arguments so far at most every
+50 ms, the fake model's in thirds, a provider that won't stream the
+section whole — and the page lets it **flow in line by line** at a pace
+that follows how far behind it is (`revealStep`: at least 90 characters a
+second, else the backlog over 0.3 s, so a burst is caught up in about a
+second; a frame at a time, a timer standing in when frames don't come; a
+section's own heading shown whole from the start, `revealFrom`; never
+inside an emoji, `revealCut`). Each section on its way is `chatDoc`'s
+`live` (key → its text as it came); one that **lands** stays live as
+saved (`settled`, found by its own heading, `sectionText`) until the
+panel has all of it shown (`release`), so the end of a section never
+jumps in; while a turn writes, a section a provider sent whole flows in
+the same way; one changed again after it landed (a later edit) is shown
+at once with the change marked. A **caret** sits at the end of the text
+being written: a thin bar in the accent with a small tab over it,
+"Chat" (Claude's documents label theirs "Claude"; in Yap the writer is
+Chat whichever model answers, as "Undo Chat's last change" says), one
+element moved as the text grows, its label drawn by CSS
+(`::after { content: attr(data-who) }`) so find and a copy never meet
+it (`docPieces.js` `placeCaret`); the page **follows** it while it's in
+view, and stays put once you scroll away. **The page is drawn a piece
+at a time** (`docPieces.js`: `splitSections` cuts it at each `#`/`##`
+heading and placeholder outside code — where a block always starts, so
+each piece draws as it would in the whole — and `drawParts` keeps every
+piece whose HTML is unchanged, setting its blocks' `data-line` to the
+page's): only the section being written is drawn again as it grows, so
+a long document costs nothing per frame and a selection elsewhere stays.
+**Motion reduced** (Settings or Windows): the text shows as it comes,
+the caret still there. **A page to read** (2026-10-30, measured against Claude's own
 document view, none of its code or CSS): a reading-width column (68ch,
 centred when the panel is wide or expanded); the title large in EB
 Garamond (`--yap-font-display`, 27px × Text size) and each section's
@@ -1325,7 +1357,9 @@ its blocks washed in the accent a moment (`data-changed`, 1.6 s; the wash
 held, no fade, under reduced motion) and the first scrolled into view if
 it's off screen (the blocks new since the last drawing, by their HTML).
 **Each document's scroll** is kept per view while Yap runs (closed and
-opened again, switched to Source and back). Lighter details from the same
+opened again, switched to Source and back). (A change that lands the
+moment a turn's `document` event reloads the note, before the note's own
+`yap-note-changed`, is marked too: `load` counts it.) Lighter details from the same
 study: two headings in a row sit closer, paragraphs and list items wrap
 `pretty`, a code block gets a filled box, the table's header row balances
 its wrap. **Not yet: pinned comment threads** (Claude's comments on a
@@ -1352,7 +1386,11 @@ Tool chips for a document carry a document mark. Its own chunk, loaded
 the first time a document opens (the main window's stays near 710 kB).
 E2e: `chat-documents.spec.js` (the fake model's scripted calls; a step's
 `gate` holds it mid-turn while the spec types; Undo of a whole turn, none
-for a document the last turn made) and
+for a document the last turn made; the grey intent lines; a section
+flowing in frame by frame — many small steps, none near a burst — under
+the "Chat" caret, ending exactly as saved; motion reduced, in its
+bursts), `doc-stream.spec.js` (no app: the shown pieces, the pace, the
+page cut and drawn a piece at a time, the caret) and
 `chat-documents-rich.spec.js` (a fake named like a GPT-5 model gets the
 rich set: a table row added, a stale edit refused, "Change this…" from a
 selection — typed, dictated with test mode's `e2e_chat_dictation`, asked
