@@ -475,18 +475,18 @@ pub(crate) async fn chat_beside_dictation(
 /// [`chat_beside_dictation`], **streamed** to `sink` when someone watches
 /// (the notepad's Ask sheet, `stream.rs`): the answer as it's written, and
 /// the same rule beside a dictation — on a model on this PC it waits one out
-/// first and drops the stream when one starts, then asks again.
+/// first and drops the stream when one starts, then asks again. `asked`: a
+/// question the person typed (the meeting's Ask), which goes at the model's
+/// effort (`ai/effort.rs`); the one-tap helpers keep their quick requests.
 pub(crate) async fn chat_beside_dictation_live(
     app: &AppHandle,
     ep: &Endpoint,
     messages: Value,
     opts: &ChatOptions,
     sink: Option<&dyn crate::chat::stream::Sink>,
+    asked: bool,
 ) -> Result<String, String> {
-    let Some(sink) = sink else {
-        return chat_beside_dictation(app, ep, messages, opts).await;
-    };
-    let req = crate::ai::llm::ChatRequest::with_options(
+    let mut req = crate::ai::llm::ChatRequest::with_options(
         &ep.base_url,
         &ep.api_key,
         &ep.model,
@@ -495,6 +495,14 @@ pub(crate) async fn chat_beside_dictation_live(
         opts,
         serde_json::Map::new(),
     );
+    let effort = asked && crate::ai::effort::apply(&mut req);
+    let Some(sink) = sink else {
+        if effort {
+            let message = crate::privacy::net::within(crate::privacy::net::Feature::Meetings, crate::ai::llm::post_whole(&req)).await?;
+            return crate::ai::llm::answer_text(&message, opts.disable_thinking);
+        }
+        return chat_beside_dictation(app, ep, req.messages, opts).await;
+    };
     let beside = crate::chat::stream::AnyDictation(app.clone());
     let live = crate::chat::stream::Live { sink, beside: ep.is_local().then_some(&beside as &dyn crate::chat::stream::Dictations) };
     let message = crate::privacy::net::within(crate::privacy::net::Feature::Meetings, crate::chat::stream::call(live, &req, false, opts.disable_thinking)).await?;

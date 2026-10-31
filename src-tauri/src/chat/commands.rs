@@ -142,8 +142,8 @@ pub async fn chat_send(
     }
     let turn = send_turn(&app, conversation_id, text, scope, voice, on_stream, turn_id, image_ids, as_text);
     let send = crate::chat::skills::with(skill_turn, crate::chat::documents::with_selection(selection, turn));
-    // Chat's own turn: Think pressed, or turned on by Yap for a strong
-    // model's document (`think::auto_on`, `turn.rs`).
+    // Chat's own turn: Think pressed (the model on this PC), or a cloud
+    // model at its effort (`ai/effort.rs`): what it thought comes back.
     let (out, thought) = crate::chat::think::scoped(think.unwrap_or(false), send).await;
     // Thought through: its thinking kept with the answer, and on the reply.
     let out = match (out, thought) {

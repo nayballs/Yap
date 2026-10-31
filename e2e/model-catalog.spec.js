@@ -123,7 +123,7 @@ async function languageModels(main, tab) {
 
 test('the Chat picker shows a model Groq added as New and hides one it dropped', async ({ yap, main, fakeLlm, shot }) => {
   await openView(main, 'Chat');
-  await expect(chip(main)).toHaveText('GPT-OSS 20B · Groq');
+  await expect(chip(main)).toHaveText('GPT-OSS 20B Medium · Groq');
   await chip(main).click();
   const pop = popover(main);
   await expect(pop).toBeVisible();
@@ -186,7 +186,7 @@ test('Settings lists the live models: New after the curated ones, older ones beh
 test('a saved model the provider no longer offers says so, and stays selectable', async ({ yap, main, fakeLlm, shot }) => {
   await setConfig(yap, main, { llmScopes: { ...(await yap.invoke('get_config')).llmScopes, chat: groqChat(fakeLlm, 'openai/gpt-oss-120b') } });
   await openView(main, 'Chat');
-  await expect(chip(main)).toHaveText('GPT-OSS 120B · Groq · no longer offered');
+  await expect(chip(main)).toHaveText('GPT-OSS 120B Medium · Groq · no longer offered');
   await chip(main).click();
   const pop = popover(main);
   await expect(pop.getByRole('alert')).toHaveText('Groq no longer offers GPT-OSS 120B. Pick another model.');
@@ -213,7 +213,7 @@ test('a saved model the provider no longer offers says so, and stays selectable'
   await expect(groq).not.toContainText('GPT-OSS 120B');
   await expectStore(yap, 'config.json', (c) => c.llmScopes.chat.model === 'openai/gpt-oss-20b');
   await closeSettings(main);
-  await expect(chip(main)).toHaveText('GPT-OSS 20B · Groq');
+  await expect(chip(main)).toHaveText('GPT-OSS 20B Medium · Groq');
 });
 
 test('a check that fails shows Yap’s own list, and Try again brings the live one back', async ({ main, fakeLlm, shot }) => {

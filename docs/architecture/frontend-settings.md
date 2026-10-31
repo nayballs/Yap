@@ -587,7 +587,14 @@ style neither).
   The other tabs (`VoiceAgentConfig`, `NoteFormattingConfig`, `ChatConfig`,
   sharing `ScopeProviderConfig`): their switch first; off, one line; on, the
   model and the prompt. Commands' tab links to the Commands page for the name
-  and shortcut; Chat's to the Voice Assistant page.
+  and shortcut; Chat's to the Voice Assistant page. Chat's has **Effort**
+  between them (2026-10-31, `ai/effort.rs`): "How hard it thinks" for the
+  Chat model, the levels it takes (`effort_info`: one table, in Rust) as a
+  Segmented choice with the line on what the one in effect does
+  (`core/effort.js`, shared with Chat's model picker); kept in this copy's
+  `chatEffort` under the model's key, which the auto-save saves (a choice
+  made in the picker comes in through `yap-config-saved`). None for a model
+  without a reasoning control or the on-device one.
 - **Connectors** (`ConnectorsSection.svelte`, Wispr's): a card per source —
   Google Calendar (the browser, "Finish in your browser…" + Cancel; a build
   without the client says so), Outlook Calendar (the guided ICS form), Other
