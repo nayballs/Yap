@@ -287,22 +287,24 @@ pub fn rev_seen(id: u64, content: &str) -> u64 {
 /// stands for each now (none: deleted): an op naming one again (the same
 /// edit sent twice — the 4B did, 31 Oct 2026) is told it's done already,
 /// never "there's no such block". The newest few, in memory.
-#[cfg(not(test))]
-static RETIRED: std::sync::Mutex<Option<HashMap<u64, Vec<(String, Vec<String>)>>>> = std::sync::Mutex::new(None);
+type Retired = HashMap<u64, Vec<(String, Vec<String>)>>;
 
 #[cfg(not(test))]
-fn with_retired<R>(f: impl FnOnce(&mut HashMap<u64, Vec<(String, Vec<String>)>>) -> R) -> R {
+static RETIRED: std::sync::Mutex<Option<Retired>> = std::sync::Mutex::new(None);
+
+#[cfg(not(test))]
+fn with_retired<R>(f: impl FnOnce(&mut Retired) -> R) -> R {
     let mut g = RETIRED.lock().unwrap_or_else(|p| p.into_inner());
     f(g.get_or_insert_with(HashMap::new))
 }
 
 #[cfg(test)]
 thread_local! {
-    static RETIRED_TEST: std::cell::RefCell<HashMap<u64, Vec<(String, Vec<String>)>>> = std::cell::RefCell::new(HashMap::new());
+    static RETIRED_TEST: std::cell::RefCell<Retired> = std::cell::RefCell::new(HashMap::new());
 }
 
 #[cfg(test)]
-fn with_retired<R>(f: impl FnOnce(&mut HashMap<u64, Vec<(String, Vec<String>)>>) -> R) -> R {
+fn with_retired<R>(f: impl FnOnce(&mut Retired) -> R) -> R {
     RETIRED_TEST.with(|s| f(&mut s.borrow_mut()))
 }
 
