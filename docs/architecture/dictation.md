@@ -712,7 +712,10 @@ to **Run again** from Home.
   `e2e_mouse_button { button, phase }` (`shell/e2e.rs` →
   `stand_in_mouse`) runs a button through `mouse_button` itself, saying
   whether the hook would have swallowed it. The robot's `hookKeys` sends
-  real ones (`xd:1` / `xu:1`, marked, `e2e-real/support/yaprobot.cs`).
+  real ones (`xd:1` / `xu:1`, marked, `e2e-real/support/yaprobot.cs`),
+  with the pointer over the test pad's middle and back after: a mouse
+  button goes to the window under the pointer, not the one in front, and
+  one the hook lets by brings that window to the front.
   **`clashes(a, b)`** (pure, unit-tested;
   `hotkeysClash` in `lib/core/hotkeys.js` is the same rule, Settings refuses with
   it): the same key however written, combos on one key nesting (Ctrl+Space
@@ -818,7 +821,10 @@ to **Run again** from Home.
   button moved when asked, Swap, Skip, the tip once and its Set up), robot
   `e2e-real/side-buttons.real.js` (real XBUTTON events through the real
   hook: heard while listening, a dictation in toggle and push-to-talk,
-  Enter in the test pad, nothing once removed; written, not yet run).
+  Enter in the test pad, nothing once removed and the pad still in front;
+  first run 2026-10-31: all but the removed half passed — its unbound
+  buttons had gone to the window under the pointer, which took the front
+  —, since split off with the pointer over the pad).
 - **`dictation/transforms.rs`** — **saved transforms** (2026-10-24; Wispr Flow's
   Transforms, OpenWhispr's translation hotkey, Murmure's numbered rewrites,
   by behaviour): one-key rewrites applied **without speaking**. The list

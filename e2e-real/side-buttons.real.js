@@ -11,10 +11,15 @@
 // - Back set to dictate (toggle): a click starts a dictation, the next stops
 //   it, and it's pasted; push-to-talk: held while it records;
 // - Forward set to Send: the send key (Enter) pressed in the test pad;
-// - unbound (Remove): the hook leaves them alone — no dictation, no Enter.
+// - unbound (Remove): the hook leaves them alone — no dictation, no Enter —
+//   and the pad, under the pointer (hookKeys puts it there), keeps the front.
 //
-// Written 2026-10-31; not run yet (the maintainer runs the robot suite).
+// Written 2026-10-31. First run (2026-10-31): 1 and 2 passed; the unbound
+// half of 3 was refused ("the test's window isn't in front": its buttons
+// went to whatever window the pointer was over, which came to the front),
+// since split off and with the pointer over the pad.
 import { test, expect, lf } from './support/robot.js';
+import { foreground } from './support/targets.js';
 
 const MIC = { id: 'desk', name: 'Microphone (Contoso Desk Mic)' };
 
@@ -83,26 +88,40 @@ test('Back set to dictate starts and stops a dictation; held, push-to-talk recor
   await idle(robot);
 });
 
-test('Forward set to Send presses Enter where you are typing; removed, the buttons do nothing in Yap', async ({ robot }) => {
+test('Forward set to Send presses Enter where you are typing', async ({ robot }) => {
   const { pad } = robot;
   await robot.yap.invoke('side_buttons_apply', { choice: { dictate: 4, send: 5, hold: false } });
   await expect.poll(async () => (await bindings(robot)).actions.sendHotkey[0].key).toBe('mouse button 5');
   await idle(robot);
 
   await pad.set('box', 'Ready');
-  let mark = robot.logMark();
+  const mark = robot.logMark();
   await robot.hookKeys('xd:2,w:60,xu:2');
   await expect.poll(async () => lf(await pad.text('box'))).toBe('Ready\n');
   expect(robot.logSince(mark)).toContain('Send shortcut: pressed the send key');
+});
 
-  // Removed: the hook lets them by — no dictation starts, nothing is sent.
+// Unbound, a side button isn't swallowed: it goes on to the window under the
+// pointer (the pad's middle, hookKeys), and a click there would bring that
+// window to the front. (It used to go to wherever the pointer happened to
+// be — another window, which then took the front, and the helper refused
+// the next button: "the test's window isn't in front".)
+test('removed, the side buttons do nothing in Yap and the pad keeps the front', async ({ robot }) => {
+  const { pad } = robot;
+  await robot.yap.invoke('side_buttons_apply', { choice: { dictate: 4, send: 5, hold: false } });
+  await expect.poll(async () => (await bindings(robot)).actions.sendHotkey[0].key).toBe('mouse button 5');
   await robot.yap.invoke('side_buttons_remove');
   await expect.poll(async () => (await bindings(robot)).actions.sendHotkey[0].key).toBe('none');
+  expect((await bindings(robot)).actions.hotkey.map((b) => b.key)).not.toContain('mouse button 4');
+  await idle(robot);
+
+  // The hook lets them by: no dictation starts, nothing is sent.
   await pad.set('box', 'Ready');
-  mark = robot.logMark();
+  const mark = robot.logMark();
   await robot.hookKeys('xd:2,w:60,xu:2,w:200,xd:1,w:60,xu:1');
   await sleep(1_000);
   await expect(capsule(robot)).toBeHidden();
   expect(lf(await pad.text('box'))).toBe('Ready');
+  expect(foreground()).toBe(pad.hwnd);
   expect(robot.logSince(mark)).not.toContain('Input hook: emitting');
 });
