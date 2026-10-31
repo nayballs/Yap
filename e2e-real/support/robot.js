@@ -155,7 +155,10 @@ export class Robot {
    * down/up, U a key-up marked for the hook to miss (one the lock screen
    * took), xd/xu a mouse side button down/up (1: XBUTTON1, Back; 2:
    * XBUTTON2, Forward), w a wait in ms. The pad gets the keys the hook
-   * doesn't swallow.
+   * doesn't swallow. A mouse button goes to the window under the pointer
+   * (not the one in front), and one the hook lets by activates it: side
+   * buttons go out with the pointer over the pad's middle (refused when
+   * another window covers it), put back where it was afterwards.
    */
   async hookKeys(seq) {
     await this.pad.focus();

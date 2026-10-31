@@ -27,7 +27,9 @@
 //                                 — d/u a key down/up, U a key-up marked for
 //                                 the hook to miss (a key-up the lock screen
 //                                 took), xd/xu a mouse side button down/up
-//                                 (1: XBUTTON1, Back; 2: XBUTTON2, Forward),
+//                                 (1: XBUTTON1, Back; 2: XBUTTON2, Forward;
+//                                 with the pointer over that window's
+//                                 middle, put back afterwards),
 //                                 w a wait in ms — only while that
 //                                 window is in front and titled with the nonce
 //   yaprobot close <hwnd> <nonce> ask a window titled with the nonce to close
@@ -401,25 +403,46 @@ static class Program {
     static Dictionary<string, object> HookKeys(IntPtr h, string nonce, string seq) {
         const long MARK = 0x59415052, UNHEARD = 0x59415055;
         if (!Ours(h, nonce)) return Obj("ok", false, "error", "not the test's window");
+        // A mouse button goes to the window under the pointer, not the one
+        // in front, and one no hook swallows (a side button bound to
+        // nothing) activates that window: so side buttons go out only with
+        // the pointer over the test's window (its middle), checked before
+        // each, and the pointer goes back where it was afterwards.
+        bool mouse = Array.Exists(seq.Split(','), s => s.StartsWith("x"));
+        Native.POINT back = new Native.POINT(), over = new Native.POINT();
+        if (mouse) {
+            Native.SetProcessDpiAwarenessContext(new IntPtr(-4)); // per-monitor v2: physical pixels
+            Native.RECT r;
+            Native.GetWindowRect(h, out r);
+            over.X = (r.Left + r.Right) / 2;
+            over.Y = (r.Top + r.Bottom) / 2;
+            Native.GetCursorPos(out back);
+        }
         int sent = 0;
-        foreach (var step in seq.Split(',')) {
-            var parts = step.Split(':');
-            string op = parts[0];
-            int n = int.Parse(parts[1]);
-            if (op == "w") { Thread.Sleep(n); continue; }
-            if (op != "d" && op != "u" && op != "U" && op != "xd" && op != "xu") return Obj("ok", false, "error", "unknown step " + step, "sent", sent);
-            if (Native.Root(Native.GetForegroundWindow()) != h) return Obj("ok", false, "error", "the test's window isn't in front", "sent", sent);
-            if (op == "xd" || op == "xu") {
-                // A side button (XBUTTON1 / XBUTTON2), marked as the robot's.
-                if (n != 1 && n != 2) return Obj("ok", false, "error", "no such side button " + step, "sent", sent);
-                var m = new Native.INPUT { type = 0 };
-                m.u.mi = new Native.MOUSEINPUT { mouseData = (uint)n, dwFlags = op == "xd" ? 0x0080u : 0x0100u, dwExtraInfo = new IntPtr(MARK) };
-                sent += (int)Native.SendInput(1, new[] { m }, Marshal.SizeOf(typeof(Native.INPUT)));
-                continue;
+        try {
+            foreach (var step in seq.Split(',')) {
+                var parts = step.Split(':');
+                string op = parts[0];
+                int n = int.Parse(parts[1]);
+                if (op == "w") { Thread.Sleep(n); continue; }
+                if (op != "d" && op != "u" && op != "U" && op != "xd" && op != "xu") return Obj("ok", false, "error", "unknown step " + step, "sent", sent);
+                if (Native.Root(Native.GetForegroundWindow()) != h) return Obj("ok", false, "error", "the test's window isn't in front", "sent", sent);
+                if (op == "xd" || op == "xu") {
+                    // A side button (XBUTTON1 / XBUTTON2), marked as the robot's.
+                    if (n != 1 && n != 2) return Obj("ok", false, "error", "no such side button " + step, "sent", sent);
+                    Native.SetCursorPos(over.X, over.Y);
+                    if (Native.Root(Native.WindowFromPoint(over)) != h) return Obj("ok", false, "error", "the test's window isn't under the pointer (another window covers its middle)", "sent", sent);
+                    var m = new Native.INPUT { type = 0 };
+                    m.u.mi = new Native.MOUSEINPUT { mouseData = (uint)n, dwFlags = op == "xd" ? 0x0080u : 0x0100u, dwExtraInfo = new IntPtr(MARK) };
+                    sent += (int)Native.SendInput(1, new[] { m }, Marshal.SizeOf(typeof(Native.INPUT)));
+                    continue;
+                }
+                var i = new Native.INPUT { type = 1 };
+                i.u.ki = new Native.KEYBDINPUT { wVk = (ushort)n, dwFlags = op == "d" ? 0u : 2u, dwExtraInfo = new IntPtr(op == "U" ? UNHEARD : MARK) };
+                sent += (int)Native.SendInput(1, new[] { i }, Marshal.SizeOf(typeof(Native.INPUT)));
             }
-            var i = new Native.INPUT { type = 1 };
-            i.u.ki = new Native.KEYBDINPUT { wVk = (ushort)n, dwFlags = op == "d" ? 0u : 2u, dwExtraInfo = new IntPtr(op == "U" ? UNHEARD : MARK) };
-            sent += (int)Native.SendInput(1, new[] { i }, Marshal.SizeOf(typeof(Native.INPUT)));
+        } finally {
+            if (mouse) Native.SetCursorPos(back.X, back.Y);
         }
         return Obj("ok", true, "sent", sent);
     }
