@@ -7,6 +7,7 @@
 // meeting notepad showing it follows at once, the thread's chips say what
 // happened, and they're still there when the chat is opened again.
 import { test as base, expect, openView, expectStore } from './support/fixtures.js';
+import { expectText } from './support/notePage.js';
 import { startFakeLlm } from './support/fake-llm.js';
 
 const test = base.extend({
@@ -48,7 +49,7 @@ test('the chat edits one place in a note, and is told when its text is in two', 
   await yap.invoke('notepad_open', { noteId: note.id });
   await expect.poll(() => visible(yap, 'notepad')).toBe(true);
   const thoughts = yap.notepad.getByRole('textbox', { name: 'My thoughts' });
-  await expect(thoughts).toHaveValue(PLAN);
+  await expectText(thoughts, PLAN);
 
   fakeLlm.scriptChat([
     { tools: [{ name: 'search_in_note', args: { note_id: note.id, query: 'beta' } }] },
@@ -95,7 +96,7 @@ test('the chat edits one place in a note, and is told when its text is in two', 
   // The note changed in that one place, and the notepad followed.
   const edited = PLAN.replace('Friday', 'Monday');
   await expectStore(yap, 'notes.json', (s) => s.notes.find((n) => n.id === note.id)?.content === edited);
-  await expect(thoughts).toHaveValue(edited);
+  await expectText(thoughts, edited);
   await shot(yap.notepad, '02-notepad-followed-the-edit');
 
   // What the model was told: the matches with their lines, why the first
@@ -122,7 +123,7 @@ test('the chat edits one place in a note, and is told when its text is in two', 
   // The Notes view shows the edited note.
   await openView(main, 'Notes');
   await main.locator('.item').filter({ hasText: 'Launch plan' }).click();
-  await expect(main.locator('textarea.raw')).toHaveValue(edited);
+  await expectText(main.getByRole('textbox', { name: 'My thoughts' }), edited);
 
   // Tidy up: the notepad isn't reset between tests.
   await yap.notepad.getByRole('button', { name: 'Close notepad' }).click();

@@ -799,10 +799,11 @@ impl Shared {
             // Read-only text selected (a web page, a mail being read):
             // nothing could be put in its place, so what's said about it is
             // answered ("Answer questions about the selected text",
-            // `ask_or_edit::settled`). One time-boxed look at the focus.
+            // `ask_or_edit::settled`). The selection's own ranges as UI
+            // Automation reads them (Read aloud's look), else the focus.
             if sel.is_some() && !self.selection_read_only.load(Ordering::SeqCst) {
                 let on = self.config.read().map(|c| c.ask_about_selection).unwrap_or(true);
-                if on && crate::pasting::selection::focus_editable(target) == crate::pasting::selection::Editable::No {
+                if on && crate::pasting::selection::selection_read_only(target) {
                     tracing::info!("Rewrite shortcut: the selection is read-only text");
                     self.selection_read_only.store(true, Ordering::SeqCst);
                 }

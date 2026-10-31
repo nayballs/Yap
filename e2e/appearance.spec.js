@@ -14,6 +14,7 @@
 //   main window, the notepad and the Yap bar (spinners and countdowns stay);
 //   System follows `prefers-reduced-motion` (Windows' "Animation effects").
 import { test as base, expect, openView, openSettings, closeSettings, sidebar, expectStore } from './support/fixtures.js';
+import { expectText } from './support/notePage.js';
 import { startFakeLlm } from './support/fake-llm.js';
 
 const NOW = Math.floor(Date.now() / 1000);
@@ -184,7 +185,7 @@ async function openNote(main) {
   await openView(main, 'Notes');
   await main.locator('.folder').filter({ hasText: 'Meetings' }).click();
   await main.locator('.item').filter({ hasText: 'Offsite plan' }).click();
-  await expect(main.locator('textarea.raw')).toHaveValue(/venue deposit/);
+  await expectText(main.getByRole('textbox', { name: 'My thoughts' }), /venue deposit/);
 }
 
 async function closeNotepad(yap) {
@@ -250,7 +251,7 @@ test('the reading font: every choice reaches chats and notes, never the sidebar;
     await shot(main, `0${n}-chat-${id}`);
 
     await openNote(main);
-    expect(await family(main.locator('textarea.raw'))).toBe(name);
+    expect(await family(main.getByRole('textbox', { name: 'My thoughts' }))).toBe(name);
     expect(await family(sidebar(main))).toBe(uiFont);
     await main.locator('.tabs .tab').filter({ hasText: 'Summary' }).click();
     const rendered = main.locator('.editor .rendered');
@@ -292,7 +293,7 @@ test('text size: a few steps around each view’s own size, for the reading text
 
   // A note: 13 px by default, ×1.25.
   await openNote(main);
-  expect(await css(main.locator('textarea.raw'), 'fontSize')).toBe('16.25px');
+  expect(await css(main.getByRole('textbox', { name: 'My thoughts' }), 'fontSize')).toBe('16.25px');
 
   // OpenDyslexic's wide letters come a little smaller (×0.9), with more room between lines.
   await pick(main, yap, { font: 'dyslexic', size: 'default' });
@@ -316,7 +317,7 @@ test('the meeting notepad follows the font and size live: My thoughts, Transcrip
   await expect.poll(() => visible(yap, 'notepad')).toBe(true);
   const pad = yap.notepad;
   const thoughts = pad.getByRole('textbox', { name: 'My thoughts' });
-  await expect(thoughts).toHaveValue(/venue deposit/);
+  await expectText(thoughts, /venue deposit/);
   expect(await family(thoughts)).toBe('Figtree Variable');
   expect(await css(thoughts, 'fontSize')).toBe('15px');
 

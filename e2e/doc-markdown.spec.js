@@ -1,64 +1,20 @@
 // Chat's document editor's markdown, in and out, on its own (no app
-// needed): src/lib/views/chat/docMarkdown.js over docSchema.js (TipTap on
-// ProseMirror). The note stays markdown: read into the editor and written
-// back untouched it must come out character for character, and a change
-// must change only the block it's in — the line of a list item, the row of
-// a table, a paragraph — however the rest was written.
+// needed): src/lib/components/richtext/richMarkdown.js over richSchema.js
+// (TipTap on ProseMirror; the harness in support/richtext.js, shared with
+// note-markdown.spec.js). The note stays markdown: read into the editor and
+// written back untouched it must come out character for character, and a
+// change must change only the block it's in — the line of a list item, the
+// row of a table, a paragraph — however the rest was written.
 import { test, expect } from '@playwright/test';
-import { JSDOM } from 'jsdom';
 import { EditorState, TextSelection } from '@tiptap/pm/state';
-import { docSchema } from '../src/lib/views/chat/docSchema.js';
-import { readMarkdown, writeMarkdown, splitHead } from '../src/lib/views/chat/docMarkdown.js';
+import { readMarkdown, writeMarkdown, splitHead } from '../src/lib/components/richtext/richMarkdown.js';
+import { withDom, withoutDom, roundTrip, edit, find, changedLines } from './support/richtext.js';
 
-let dom;
 let schema;
 test.beforeAll(() => {
-  dom = new JSDOM('');
-  globalThis.window = dom.window;
-  schema = docSchema();
+  schema = withDom();
 });
-test.afterAll(() => {
-  delete globalThis.window;
-  dom.window.close();
-});
-
-/** `md` read and written back, untouched. */
-const roundTrip = (md) => {
-  const r = readMarkdown(schema, md);
-  return writeMarkdown(schema, r.doc, { kept: r.kept, tail: r.tail }).text;
-};
-
-/** `md` read, `change(state) → tr` applied, written back. */
-function edit(md, change) {
-  const r = readMarkdown(schema, md);
-  const state = EditorState.create({ doc: r.doc, schema });
-  const tr = change(state);
-  return writeMarkdown(schema, tr.doc, { kept: r.kept, tail: r.tail }).text;
-}
-
-/** Where `text` starts in the document (the position before its first character). */
-function find(doc, text) {
-  let at = -1;
-  doc.descendants((node, pos) => {
-    if (at >= 0) return false;
-    if (node.isText) {
-      const i = node.text.indexOf(text);
-      if (i >= 0) at = pos + i;
-    }
-    return true;
-  });
-  if (at < 0) throw new Error(`"${text}" isn't in the document`);
-  return at;
-}
-
-/** The lines `a` and `b` differ in (by index; same length assumed unless noted). */
-const changedLines = (a, b) => {
-  const x = a.split('\n');
-  const y = b.split('\n');
-  const out = [];
-  for (let i = 0; i < Math.max(x.length, y.length); i++) if (x[i] !== y[i]) out.push([x[i], y[i]]);
-  return out;
-};
+test.afterAll(() => withoutDom());
 
 // A document as Chat writes them (fictional), and the ways people and
 // models write markdown: every one must come back exactly.

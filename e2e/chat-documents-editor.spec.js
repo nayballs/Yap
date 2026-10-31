@@ -1,5 +1,5 @@
 // Chat's document as a page you can edit (2026-10-31; src/lib/views/chat/
-// DocPanel.svelte, docEditor.js, docMarkdown.js, DocToolbar.svelte):
+// DocPanel.svelte; components/richtext/: richEditor.js, richMarkdown.js, RichToolbar.svelte):
 // - once Chat has written it, Preview is an editor (TipTap on ProseMirror)
 //   with a toolbar over it — text style, code, table, checklist, + insert;
 // - the note stays markdown: a word typed changes only its own line, a

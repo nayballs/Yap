@@ -1,27 +1,41 @@
-// Chat's document, editable as a page (2026-10-31; after Claude's own
-// documents, which edit on TipTap and ProseMirror too — none of their code):
-// the panel's Preview, loaded the first time it's shown (its own chunk, on
-// top of DocPanel's). The note stays markdown (docMarkdown.js): what comes
-// in is read block by block, and every change goes out as the markdown of
-// the block it's in, the rest exactly as it was — saved as the Source box's
-// typing is (chatDoc `input`: merged with Chat's writing in Rust, a typed
-// version that Undo and Version history know).
+// Yap's rich text editor (2026-10-31; after Claude's own documents, which
+// edit on TipTap and ProseMirror too — none of their code): Chat's document
+// panel's Preview, and notes' My thoughts, the meeting notepad's and the
+// quick note's page (RichNote.svelte). Its own chunk, loaded the first time
+// it's wanted. The note stays markdown (richMarkdown.js): what comes in is
+// read block by block, and every change goes out as the markdown of the
+// block it's in, the rest exactly as it was — saved as the place's own
+// typing is (Chat: chatDoc `input`, merged with Chat's writing in Rust;
+// notes: their save as you type, a typed or dictated version).
 //
-// - `load(text)`: the document's markdown, from outside (Chat's writing
-//   merged, Undo, another window): only the blocks that differ are
-//   replaced, so the caret and the person's own undo stay; never in the
-//   editor's undo history. `mark`: the blocks that changed are washed a
-//   moment, as the page marks a change that landed.
+// - `load(text)`: the note's markdown, from outside (Chat's writing merged,
+//   Undo, another window): only the blocks that differ are replaced, so
+//   the caret and the person's own undo stay; never in the editor's undo
+//   history. `mark`: the blocks that changed are washed a moment, as the
+//   page marks a change that landed.
 // - The toolbar's commands (`run`) and what's on at the caret (`onstate`):
 //   text style, code, tables, checklists, the insert menu.
 // - `selectionLines()`: the note lines a selection covers ("Ask about
 //   this" / "Change this…").
+// - Where the words are (`sourceRange`, `selectSource`): the selection as a
+//   stretch of the note's text and back (a transform on it, its result
+//   selected; a search's words); with `textbox`, the editor's own element
+//   answers as a text box does (`value`, `selectionStart` / `End`,
+//   `setSelectionRange`, `select`, `readOnly`), so what works on a note's
+//   text box works on the page.
+// - `insertPlain(piece)`: words put in at the caret as plain text (a
+//   dictation into the quick note: Ctrl+Z takes it back out in one step).
+//   A paste of plain text (Yap pasting a dictation) goes in the same way
+//   (richMarkdown.js `plainSlice`: one line as its words, several as the
+//   markdown the note's box would have held — a spoken list a list);
+//   `onchange`'s `paste` says it was one.
 // - Links: a click puts the caret in one; Ctrl+click opens it.
 import { Editor, Extension } from '@tiptap/core';
-import { Plugin, PluginKey } from '@tiptap/pm/state';
+import { Plugin, PluginKey, TextSelection } from '@tiptap/pm/state';
 import { Decoration, DecorationSet } from '@tiptap/pm/view';
-import { docExtensions, rawRenderer, SAFE_URL } from './docSchema.js';
-import { readMarkdown, writeMarkdown, splitHead } from './docMarkdown.js';
+import { closeHistory } from '@tiptap/pm/history';
+import { richExtensions, rawRenderer, SAFE_URL } from './richSchema.js';
+import { readMarkdown, writeMarkdown, splitHead, sourceMap, sourceRange, sourcePositions, plainSlice } from './richMarkdown.js';
 import { renderMarkdown } from '../../core/markdown.js';
 import { openExternalLink } from '../../core/externalLinks.js';
 
@@ -55,41 +69,59 @@ const Landed = Extension.create({
 });
 
 /**
- * The editor in `mount` (its root: the page's `.docmd`), on `text` (the
- * note's markdown, its title line `title` shown above the page).
- * `onchange(markdown)`: the person changed it. `onstate(state)`: what's on
- * at the caret, after every change.
+ * The editor in `mount` (its root, which becomes the editable element), on
+ * `text` (the note's markdown; its title line `title`, when it has one, is
+ * shown above the page). `onchange(markdown, {paste})`: the person changed
+ * it (`paste`: by pasting). `onstate(state)`: what's on at the caret, after
+ * every change. `label`: the page's name to a screen reader;
+ * `placeholder()`: what an empty one says; `rawTitle`: where a raw block is
+ * edited; `textbox`: `mount` answers as a text box does (above).
  */
-export function createDocEditor({ mount, text, title, editable = true, onchange = () => {}, onstate = () => {} }) {
+export function createRichEditor({
+  mount,
+  text,
+  title,
+  editable = true,
+  label = 'Document text',
+  placeholder = null,
+  rawTitle = null,
+  textbox = false,
+  onchange = () => {},
+  onstate = () => {},
+}) {
   let head = '';
   let kept = new Map();
   let tail = [''];
+  let blank = false;
   let last = null;
   let docTitle = title ?? '';
   let clearTimer = 0;
 
   const editor = new Editor({
     element: { mount },
-    extensions: [...docExtensions(), Landed],
+    extensions: [...richExtensions({ placeholder, rawTitle }), Landed],
     injectCSS: false,
     editable,
     enableContentCheck: false,
     editorProps: {
-      attributes: { role: 'textbox', 'aria-multiline': 'true', 'aria-label': 'Document text', spellcheck: 'true' },
+      attributes: { role: 'textbox', 'aria-multiline': 'true', 'aria-label': label, spellcheck: 'true' },
       handleDOMEvents: { click: linkClick, auxclick: linkClick },
+      clipboardTextParser: (pasted, $context) => plainSlice(editor.schema, pasted, $context.marks()),
     },
     onTransaction: ({ transaction }) => {
-      onstate(state());
+      // (Only what can change the pressed buttons: not the page losing the
+      // focus, which happens as a window takes it away from a page it removes.)
+      if (transaction.docChanged || transaction.selectionSet || transaction.storedMarksSet) onstate(state());
       if (!transaction.docChanged || transaction.getMeta(OUTSIDE)) return;
       const md = write().text;
       if (md === last) return;
       last = md;
-      onchange(md);
+      onchange(md, { paste: transaction.getMeta('paste') === true || transaction.getMeta('uiEvent') === 'paste' });
     },
   });
 
   function write() {
-    return writeMarkdown(editor.schema, editor.state.doc, { kept, head, tail });
+    return writeMarkdown(editor.schema, editor.state.doc, { kept, head, tail, blank });
   }
 
   /** The document's markdown from outside; `mark`: wash the blocks that changed. */
@@ -103,6 +135,7 @@ export function createDocEditor({ mount, text, title, editable = true, onchange 
     head = h;
     kept = read.kept;
     tail = read.tail;
+    blank = read.blank;
     last = value;
     const now = editor.state.doc;
     const start = now.content.findDiffStart(read.doc.content);
@@ -273,6 +306,77 @@ export function createDocEditor({ mount, text, title, editable = true, onchange 
     return { fromLine: blocks[a][0], toLine: blocks[b][1] - 1 };
   }
 
+  // ---- where the words are -------------------------------------------------------------
+
+  /** The note's markdown now, and where each of the page's characters is in it. */
+  function located() {
+    const w = write();
+    return { text: w.text, map: sourceMap(editor.state.doc, w.text, w.blocks) };
+  }
+
+  /** The selection as a stretch of the note's markdown, `{start, end}` (a caret: both the same). */
+  function sourceSelection() {
+    if (editor.isDestroyed) return { start: 0, end: 0 };
+    const { text: md, map } = located();
+    const sel = editor.state.selection;
+    return sourceRange(map, sel.from, sel.to, { length: md.length, block: sel.$from.parent.isTextblock ? sel.$from.start() : null });
+  }
+
+  /** Select the stretch `start`..`end` of the note's markdown on the page (shown, not focused). */
+  function selectSource(start, end) {
+    if (editor.isDestroyed) return;
+    const { map } = located();
+    const at = sourcePositions(map, Math.max(0, start ?? 0), Math.max(0, end ?? start ?? 0));
+    const doc = editor.state.doc;
+    const size = doc.content.size;
+    const sel = at
+      ? TextSelection.between(doc.resolve(Math.min(at.from, size)), doc.resolve(Math.min(at.to, size)))
+      : TextSelection.atStart(doc);
+    editor.view.dispatch(editor.state.tr.setSelection(sel).scrollIntoView());
+  }
+
+  /**
+   * Words in at the caret as plain text, as typing would put them: `piece(before,
+   * after)` gives them from the line's text either side of the selection
+   * (a new line after them when they end in "\n"); `atEnd`: at the end of
+   * the note instead. One step for Ctrl+Z. Returns whether anything went in.
+   */
+  function insertPlain(piece, { atEnd = false } = {}) {
+    if (editor.isDestroyed || !editor.isEditable) return false;
+    if (atEnd) editor.view.dispatch(editor.state.tr.setSelection(TextSelection.atEnd(editor.state.doc)));
+    const { $from, $to, from, to } = editor.state.selection;
+    const before = $from.parent.isTextblock ? $from.parent.textBetween(0, $from.parentOffset, '\n', '\n') : '';
+    const after = $to.parent.isTextblock ? $to.parent.textBetween($to.parentOffset, $to.parent.content.size, '\n', '\n') : '';
+    const words = String(piece(before, after) ?? '');
+    if (!words) return false;
+    const newline = words.endsWith('\n');
+    const body = newline ? words.slice(0, -1) : words;
+    const tr = editor.state.tr;
+    if (body.includes('\n')) tr.replaceRange(from, to, plainSlice(editor.schema, body, $from.marks()));
+    else if (body) tr.insertText(body, from, to);
+    else if (from !== to) tr.deleteRange(from, to);
+    // Its own step in the undo history: never merged with the typing before.
+    editor.view.dispatch(closeHistory(tr).scrollIntoView());
+    if (newline) editor.commands.enter();
+    // Nor with the typing after it.
+    editor.view.dispatch(closeHistory(editor.state.tr));
+    return true;
+  }
+
+  // ---- the editor's element as a text box ---------------------------------------------
+
+  const BOX = ['value', 'selectionStart', 'selectionEnd', 'readOnly', 'setSelectionRange', 'select'];
+  if (textbox) {
+    Object.defineProperties(mount, {
+      value: { configurable: true, get: () => last ?? '' },
+      selectionStart: { configurable: true, get: () => sourceSelection().start },
+      selectionEnd: { configurable: true, get: () => sourceSelection().end },
+      readOnly: { configurable: true, get: () => editor.isDestroyed || !editor.isEditable },
+      setSelectionRange: { configurable: true, value: (a, b) => selectSource(a, b) },
+      select: { configurable: true, value: () => !editor.isDestroyed && editor.commands.selectAll() },
+    });
+  }
+
   load(text);
   onstate(state());
 
@@ -282,6 +386,9 @@ export function createDocEditor({ mount, text, title, editable = true, onchange 
     run,
     selectionLines,
     markBlocks,
+    sourceSelection,
+    selectSource,
+    insertPlain,
     /** The markdown the editor holds now. */
     get text() {
       return last;
@@ -293,8 +400,17 @@ export function createDocEditor({ mount, text, title, editable = true, onchange 
     focus(at = null) {
       if (!editor.isDestroyed) editor.commands.focus(at);
     },
+    /** The page has the keyboard. */
+    get focused() {
+      return !editor.isDestroyed && editor.isFocused;
+    },
+    /** What an empty page says changed: drawn again. */
+    refresh() {
+      if (!editor.isDestroyed) editor.view.dispatch(editor.state.tr.setMeta(OUTSIDE, true).setMeta('addToHistory', false));
+    },
     destroy() {
       clearTimeout(clearTimer);
+      if (textbox) for (const k of BOX) delete mount[k];
       editor.destroy();
     },
   };

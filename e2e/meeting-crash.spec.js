@@ -60,7 +60,7 @@ test('a meeting Yap was killed during is transcribed at the next start, then sum
   try {
     const main = first.main;
     await newMeetingNote(main, TITLE);
-    await main.getByPlaceholder('Start writing…').fill('Check the delivery dates');
+    await main.getByRole('textbox', { name: 'My thoughts' }).fill('Check the delivery dates');
     await main.getByRole('button', { name: 'Record' }).click();
     // The first lines are in; the audio plays out, and its last stretch
     // waits in the recorder for its chunk.

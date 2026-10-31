@@ -15,7 +15,9 @@
 // shortcuts and the speech: the window in front, its selection read as at
 // the key press (UI Automation; no Ctrl+C in robot mode). Stand-in AI
 // models answer (e2e/support/fake-llm.js: Commands' rewrite, Chat's
-// answer). Written 2026-10-31, not yet run.
+// answer). Written 2026-10-31; its first run found the page's text (the
+// focus on a `tabindex` block of it) taken for a text box: the selected
+// range's own IsReadOnly decides now (pasting/selection.rs).
 import { test, expect } from './support/robot.js';
 import { edgeExe } from './support/targets.js';
 import { startFakeLlm, rewriteText, rewriteInstruction } from '../e2e/support/fake-llm.js';

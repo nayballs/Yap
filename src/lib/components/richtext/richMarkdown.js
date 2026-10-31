@@ -1,6 +1,7 @@
-// A document's markdown in and out of its editor (DocPanel's own chunk),
-// exactly: the note stays markdown, and what the person didn't change goes
-// back out character for character (2026-10-31).
+// A note's markdown in and out of the rich text editor (Chat's documents,
+// notes' My thoughts, the quick note), exactly: the note stays markdown, and
+// what the person didn't change goes back out character for character
+// (2026-10-31).
 //
 // In (`readMarkdown`): markdown-it reads it as the page does (markdown.js
 // `markdownTokens`, Yap's rules and all) and each block becomes the
@@ -26,6 +27,13 @@
 // be typed and every few characters a mark can cover:
 // e2e/doc-markdown.spec.js). `head` (the title line, which the panel shows
 // above the page) and the lines after the last block come back as they were.
+//
+// Where the words are (`sourceMap`): each character of the editor's text
+// and the place in the markdown it's written at, so a selection on the page
+// is a stretch of the note's text (a transform works on it, Send sends it)
+// and a stretch of the text is a selection on the page (a transform's
+// result, a search's words).
+import { Slice, Fragment } from '@tiptap/pm/model';
 import { markdownTokens } from '../../core/markdown.js';
 
 const BLANK = /^[ \t]*\r?$/;
@@ -78,9 +86,10 @@ export function splitHead(text, title) {
 // ---- in --------------------------------------------------------------------------------
 
 /**
- * `body` read for the editor: `{doc, kept, tail}` — the editor's document
- * (`schema`'s nodes), the blocks as read (by their `md`: `isKept`), and the
- * lines after the last block. Pure.
+ * `body` read for the editor: `{doc, kept, tail, blank}` — the editor's
+ * document (`schema`'s nodes), the blocks as read (by their `md`:
+ * `isKept`), the lines after the last block, and whether it had none (a
+ * new note: its first words don't take a line break after them). Pure.
  */
 export function readMarkdown(schema, body) {
   const text = String(body ?? '');
@@ -113,7 +122,7 @@ export function readMarkdown(schema, body) {
     i = j + 1;
   }
   const doc = schema.nodes.doc.create(null, blocks.length ? blocks : [schema.nodes.paragraph.create()]);
-  return { doc, kept: ctx.kept, tail: lines.slice(end) };
+  return { doc, kept: ctx.kept, tail: lines.slice(end), blank: !blocks.length };
 }
 
 /** Remember `node` as read: written back verbatim while it's the same. */
@@ -325,9 +334,10 @@ function isKept(kept, node) {
  * every block (as it was read where it's the same, else written afresh),
  * then `tail`; `blocks[i]` is the `[start, end)` lines of the document's
  * i-th block in the whole text (`null` for one that writes nothing: an
- * empty paragraph). Pure.
+ * empty paragraph). `blank`: what was read had no blocks (`readMarkdown`),
+ * so its one line is where the first words go. Pure.
  */
-export function writeMarkdown(schema, doc, { kept = new Map(), head = '', tail = [''] } = {}) {
+export function writeMarkdown(schema, doc, { kept = new Map(), head = '', tail = [''], blank = false } = {}) {
   const ctx = { schema, kept };
   const out = [];
   const blocks = [];
@@ -347,7 +357,7 @@ export function writeMarkdown(schema, doc, { kept = new Map(), head = '', tail =
     blocks[i] = [headLines + out.length, headLines + out.length + lines.length];
     out.push(...lines);
   });
-  out.push(...tail);
+  out.push(...(blank && out.length ? tail.slice(1) : tail));
   return { text: head + out.join('\n'), blocks };
 }
 
@@ -735,4 +745,158 @@ function linkForm(split, k, mark) {
 /** A link's address in markdown: spaces and brackets that would end it, encoded. */
 function linkTarget(href) {
   return String(href ?? '').replace(/[ ()<>]/g, (c) => encodeURIComponent(c));
+}
+
+// ---- pasted text -----------------------------------------------------------------------
+
+/** `node` and everything in it as new: no lines of its own to be written back as. */
+function fresh(node) {
+  if (node.isText) return node;
+  const kids = [];
+  node.forEach((child) => kids.push(fresh(child)));
+  // (A raw block's lines are what it is: kept.)
+  const raw = node.type.name === 'rawBlock';
+  const attrs = 'md' in node.attrs ? { ...node.attrs, md: raw ? node.attrs.md : null, before: null } : node.attrs;
+  return node.type.create(attrs, kids, node.marks);
+}
+
+/**
+ * Plain text pasted, or a dictation, as the page's content (the editor's
+ * `clipboardTextParser`): one line goes in as its words, whatever they
+ * say (in `marks`, those at the caret — markup in them escaped when it's
+ * written); several are read as the markdown a note's box would have held
+ * (a spoken list laid out by the cleanup a list, a blank line a new
+ * paragraph, each other line break a line break), written afresh, its
+ * first and last paragraphs joining the text either side. Pure.
+ */
+export function plainSlice(schema, text, marks = []) {
+  const s = String(text ?? '').replace(/\r\n?/g, '\n');
+  if (!s) return Slice.empty;
+  if (!s.includes('\n')) return new Slice(Fragment.from(schema.text(s, marks)), 0, 0);
+  const { doc } = readMarkdown(schema, s);
+  const nodes = [];
+  doc.forEach((n) => nodes.push(fresh(n)));
+  const para = (n) => n?.type === schema.nodes.paragraph;
+  return new Slice(Fragment.from(nodes), para(nodes[0]) ? 1 : 0, para(nodes.at(-1)) ? 1 : 0);
+}
+
+// ---- where the words are -------------------------------------------------------------
+
+/** What starts a line of a block and isn't its words: a quote's ">", a list's marker and box, a heading's "#". */
+const LINE_MARKUP = /^[ \t]*(?:>[ \t]?)*(?:(?:[-*+]|\d{1,9}[.)])[ \t]+(?:\[[ xX]\][ \t]+)?|#{1,6}[ \t]+)?/;
+
+/**
+ * Each character of `doc`'s text (and each line break) with the place in
+ * `text` — the markdown `writeMarkdown` wrote for it, with its `blocks` —
+ * that it's written at: `[pos, offset, block]` triples in order (`pos` the
+ * document position before the character, `offset` its index in `text`,
+ * `block` the position its textblock starts at). Found block by block, a
+ * character at a time from where the one before was (its markup and escapes
+ * passed over), never past its block's lines. Pure.
+ */
+export function sourceMap(doc, text, blocks) {
+  const s = String(text ?? '');
+  const starts = [0];
+  for (let i = 0; i < s.length; i++) if (s[i] === '\n') starts.push(i + 1);
+  const out = [];
+  doc.forEach((node, offset, i) => {
+    const range = blocks?.[i];
+    if (!range) return;
+    let at = starts[range[0]] ?? s.length;
+    const stop = range[1] < starts.length ? starts[range[1]] - 1 : s.length;
+    // At a line's start: past its block markup.
+    const skip = () => {
+      if (at === 0 || s[at - 1] === '\n') at += LINE_MARKUP.exec(s.slice(at, stop))[0].length;
+    };
+    const take = (ch, pos, block) => {
+      const found = s.indexOf(ch, at);
+      if (found < 0 || found >= stop) return;
+      out.push([pos, found, block]);
+      at = found + 1;
+    };
+    // One textblock's characters, `start` the position its content starts at.
+    const walk = (tb, start) => {
+      // A fenced code block's words start on the line after its fence.
+      if (tb.type.name === 'codeBlock' && tb.attrs.fence) {
+        const nl = s.indexOf('\n', at);
+        if (nl >= 0 && nl < stop) at = nl + 1;
+      } else skip();
+      tb.forEach((leaf, lo) => {
+        const pos = start + lo;
+        if (leaf.isText) {
+          for (let k = 0; k < leaf.text.length; k++) take(leaf.text[k], pos + k, start);
+        } else if (leaf.type.name === 'hardBreak') {
+          take('\n', pos, start);
+          skip();
+        }
+      });
+    };
+    if (node.isTextblock) walk(node, offset + 1);
+    else {
+      node.descendants((child, rel) => {
+        if (!child.isTextblock) return true;
+        walk(child, offset + 1 + rel + 1);
+        return false;
+      });
+    }
+  });
+  return out;
+}
+
+/** The first of `map`'s entries whose `key` (0: pos, 1: offset) is at least `at`, by index (`map.length`: none). */
+function firstAtLeast(map, key, at) {
+  let lo = 0;
+  let hi = map.length;
+  while (lo < hi) {
+    const mid = (lo + hi) >> 1;
+    if (map[mid][key] < at) lo = mid + 1;
+    else hi = mid;
+  }
+  return lo;
+}
+
+/**
+ * The document positions `from`..`to` as a stretch of the markdown:
+ * `{start, end}`, the offsets of the first character in it and just past
+ * the last. A caret (`from === to`; `block`: where its textblock starts)
+ * is just after the character before it in its textblock, else just before
+ * the one after it, else (an empty line) after the text before it. Pure.
+ */
+export function sourceRange(map, from, to, { length = 0, block = null } = {}) {
+  if (!map.length) return { start: 0, end: 0 };
+  if (from === to) {
+    const i = firstAtLeast(map, 0, from);
+    const before = map[i - 1];
+    const after = map[i];
+    let at;
+    if (before && before[2] === block) at = before[1] + 1;
+    else if (after && after[2] === block) at = after[1];
+    else at = before ? before[1] + 1 : after ? after[1] : length;
+    return { start: at, end: at };
+  }
+  const a = firstAtLeast(map, 0, from);
+  const b = firstAtLeast(map, 0, to) - 1;
+  const start = a < map.length ? map[a][1] : length;
+  const end = b >= 0 ? map[b][1] + 1 : 0;
+  return end >= start ? { start, end } : { start, end: start };
+}
+
+/**
+ * A stretch of the markdown, `start`..`end` (offsets), as document
+ * positions: `{from, to}` over the characters written there; a caret
+ * (`start === end`) just after the character written just before it, else
+ * before the first one at or after it. Pure.
+ */
+export function sourcePositions(map, start, end) {
+  if (!map.length) return null;
+  const a = firstAtLeast(map, 1, start);
+  if (start === end || end <= start) {
+    const prev = map[a - 1];
+    const at = prev && prev[1] === start - 1 ? prev[0] + 1 : a < map.length ? map[a][0] : map[map.length - 1][0] + 1;
+    return { from: at, to: at };
+  }
+  const b = firstAtLeast(map, 1, end) - 1;
+  const from = a < map.length ? map[a][0] : map[map.length - 1][0] + 1;
+  const to = b >= 0 ? map[b][0] + 1 : from;
+  return to >= from ? { from, to } : { from, to: from };
 }

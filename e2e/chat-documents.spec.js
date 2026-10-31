@@ -19,6 +19,7 @@
 // The model is a local fake (support/fake-llm.js) scripted call by call; a
 // step's `gate` holds it mid-turn while the spec edits.
 import { test as base, expect, openView, expectStore, setConfig } from './support/fixtures.js';
+import { expectText } from './support/notePage.js';
 import { startFakeLlm } from './support/fake-llm.js';
 
 const test = base.extend({
@@ -544,7 +545,7 @@ test('the panel closes, expands, moves its split from the keyboard and opens in 
   // Open in Notes (in ⋯): the note itself, in Chat documents.
   await panel(main).getByRole('button', { name: 'More for the document' }).click();
   await main.getByRole('menuitem', { name: 'Open in Notes' }).click();
-  await expect(main.locator('textarea.raw')).toHaveValue(/## Beds\n\nBeans by the fence\./);
+  await expectText(main.getByRole('textbox', { name: 'My thoughts' }), /## Beds\n\nBeans by the fence\./);
   await expect(main.locator('.items .item').filter({ hasText: 'Garden plan' })).toBeVisible();
   const n = (await yap.invoke('notes_list')).find((x) => x.title === 'Garden plan');
   expect(n.folder).toBe('Chat documents');

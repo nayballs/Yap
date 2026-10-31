@@ -13,6 +13,7 @@ import {
   expectStore,
   pressHotkey,
 } from './support/fixtures.js';
+import { expectText } from './support/notePage.js';
 
 test('launches into Home, isolated in portable mode', async ({ yap, main, shot }) => {
   const greeting = main.getByRole('heading', { level: 1 });
@@ -95,7 +96,7 @@ test('notes: a new note keeps its text across a view switch', async ({ yap, main
   await openView(main, 'Notes');
   await main.getByRole('button', { name: 'New note' }).first().click();
   await main.getByPlaceholder('Untitled Note').fill('Groceries');
-  await main.getByPlaceholder('Start writing…').fill('Oat milk, coffee, and bread.');
+  await main.getByRole('textbox', { name: 'My thoughts' }).fill('Oat milk, coffee, and bread.');
 
   // Leave straight away: leaving Notes must flush the pending save.
   await openView(main, 'Home');
@@ -104,7 +105,7 @@ test('notes: a new note keeps its text across a view switch', async ({ yap, main
   await expect(item).toBeVisible();
   await item.click();
   await expect(main.getByPlaceholder('Untitled Note')).toHaveValue('Groceries');
-  await expect(main.getByPlaceholder('Start writing…')).toHaveValue('Oat milk, coffee, and bread.');
+  await expectText(main.getByRole('textbox', { name: 'My thoughts' }), 'Oat milk, coffee, and bread.');
   await expectStore(yap, 'notes.json', (s) =>
     JSON.stringify(s).includes('Oat milk, coffee, and bread.')
   );

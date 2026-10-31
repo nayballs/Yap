@@ -25,6 +25,7 @@ import {
   closeToasts,
   openModelPicker,
 } from './support/fixtures.js';
+import { expectText } from './support/notePage.js';
 
 const NOW = Math.floor(Date.now() / 1000);
 const DAY = 86_400;
@@ -501,7 +502,7 @@ test('every view, every Settings page, the notepad, onboarding, a toast, the dia
     if (view === 'Notes') {
       await main.locator('.folder').filter({ hasText: 'Meetings' }).click();
       await main.locator('.item').filter({ hasText: 'Design review' }).click();
-      await expect(main.locator('textarea.raw')).toHaveValue(/venue deposit/);
+      await expectText(main.getByRole('textbox', { name: 'My thoughts' }), /venue deposit/);
     }
     await main.waitForTimeout(250);
     await shot(main, `view-${view.toLowerCase()}`);
@@ -559,7 +560,7 @@ test('every view, every Settings page, the notepad, onboarding, a toast, the dia
   await expect.poll(() => visible(yap, 'notepad')).toBe(true);
   const pad = yap.notepad;
   await expect.poll(() => themeOf(pad)).toBe('dark');
-  await expect(pad.getByRole('textbox', { name: 'My thoughts' })).toHaveValue(/venue deposit/);
+  await expectText(pad.getByRole('textbox', { name: 'My thoughts' }), /venue deposit/);
   await shot(pad, 'notepad-thoughts');
   await pad.getByRole('tab', { name: 'Transcript' }).click();
   await shot(pad, 'notepad-transcript');

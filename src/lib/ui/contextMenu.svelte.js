@@ -55,6 +55,9 @@ function nativeTarget(e) {
   if (e?.type !== 'contextmenu') return false;
   const t = e.target;
   if (t?.closest?.(EDITABLE) && t.closest(EDITABLE) !== e.currentTarget) return true;
+  // The item is the editable page itself (a note's, components/richtext):
+  // its selected words are its own menu's.
+  if (e.currentTarget?.matches?.(EDITABLE)) return false;
   const sel = window.getSelection?.();
   if (sel && !sel.isCollapsed && String(sel).trim() && t) {
     for (let i = 0; i < sel.rangeCount; i++) {

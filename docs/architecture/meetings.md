@@ -746,7 +746,12 @@ The meeting recorder and its audio kept on disk, rolling digests and the action 
   its lines; a made-up title stays muted until the AI or the person names it;
   the date in the locale's format ("5 Oct, 22:32"). **Tabs** (15/600, ink
   underline, a hairline under the row): My thoughts (the note's `content`,
-  autosaved, synced with NotesView both ways via `yap-note-changed`/`origin`),
+  autosaved, synced with NotesView both ways via `yap-note-changed`/`origin`;
+  since 2026-10-31 a page you can format — `components/richtext/RichNote` in
+  `ThoughtsTab`, the toolbar over it, Ctrl+F, the note kept markdown, a
+  dictation pasted in at the caret as plain text; its plain box until the
+  editor's chunk has loaded, which the window starts with its first meeting:
+  [notes.md](./notes.md#notes-as-pages-you-can-format-componentsrichtext-2026-10-31)),
   Transcript (a 3-bar burnt-orange waveform while recording), Summary ("+" until a
   summary exists). **Transcript**: the timer box (clock, elapsed, search —
   an inline input that filters and highlights lines, dividers hidden — and

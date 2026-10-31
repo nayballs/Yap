@@ -257,8 +257,9 @@ to **Run again** from Home.
   and words said (`ask_or_edit::route`, pure — nothing selected keeps
   today's behaviour, the last dictation's rewrite included) decides first
   (`settled`: read-only text — `capture_target` asks
-  `selection::focus_editable` once when it captured a selection,
-  `selection_read_only` — is always answered; else the rule; where the rule
+  `selection::selection_read_only` once when it captured a selection (the
+  selected ranges' own `IsReadOnly` first, then the focus: [pasting.md](./pasting.md)),
+  `Shared::selection_read_only` — is always answered; else the rule; where the rule
   can't tell, `decide` asks the Commands scope's model for a structured
   `{"action": "replace" | "answer"}`, and anything but a clear "replace"
   answers). Answered (`answer_about_selection`): the instruction corrected
@@ -903,7 +904,7 @@ to **Run again** from Home.
   (`ask_or_edit::tests`: a table of instructions in all seven languages,
   the languages counted, the reply's parsing, the route); e2e
   `ask-selection.spec.js` (fake-llm's `askOrEdit` kind); robot
-  `e2e-real/ask-selection.real.js` (written, not yet run).
+  `e2e-real/ask-selection.real.js` (passing, 31 Oct).
 - **`dictation/languages.rs`** (+ `languages/catalog.rs`, `languages/nudge.rs`, `languages/text_id.rs`)
   — **My languages** (2026-10-25; Wispr Flow's languages and its "Speaking a
   different language?" nudge of 28 Sep, OpenWhispr's dual-language hotkeys

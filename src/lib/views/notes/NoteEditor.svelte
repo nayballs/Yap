@@ -4,7 +4,9 @@
   // with copy (the summary edited in place: NoteSummary), what's being
   // written and what it needs, the meeting transcript (NoteTranscript) and
   // the note's own chat with the action picker (NoteChat). With no note
-  // open, OpenWhispr's empty state.
+  // open, OpenWhispr's empty state. My thoughts is a page you can format
+  // (NoteThoughts, its own chunk with the editor), the note kept markdown;
+  // its plain box until the page has loaded.
   import NoteMeta from './NoteMeta.svelte';
   import NoteSummary from './NoteSummary.svelte';
   import NoteTranscript from './NoteTranscript.svelte';
@@ -12,6 +14,7 @@
   import MeetingTasks from '../../components/MeetingTasks.svelte';
   import { openContextMenu, menuKey } from '../../ui/contextMenu.svelte.js';
   import { selectionMenu } from './noteMenus.js';
+  import { loadPage } from '../../components/richtext/richtext.svelte.js';
 
   /** `notes`: the view's state; `onopensettings(section)`: ControlPanel's Settings. */
   let { notes, onopensettings = null } = $props();
@@ -31,6 +34,12 @@
     const items = selectionMenu(notes, e.currentTarget, { field: 'notes', openSettings: onopensettings });
     if (items) openContextMenu(e, items, { label: 'Selected text', row: e.currentTarget });
   }
+
+  // My thoughts as a page: loaded the first time a note is open here.
+  let Thoughts = $state(null);
+  $effect(() => {
+    if (notes.selected && !Thoughts) loadPage(() => import('./NoteThoughts.svelte')).then((c) => (Thoughts ??= c));
+  });
 </script>
 
 <section class="editor">
@@ -157,10 +166,14 @@
       <MeetingTasks noteId={notes.selected.id} look="app" />
     {:else if notes.tab === 'enhanced' && (notes.selected.enhancedContent || notes.summaryEditing)}
       <NoteSummary {notes} {onopensettings} />
+    {:else if Thoughts}
+      <Thoughts {notes} {onopensettings} />
     {:else}
+      <!-- Until the page has loaded (or if it can't): the note's markdown, plain. -->
       <textarea
         class="raw"
         aria-label="My thoughts"
+        data-rich-fallback
         bind:this={notes.rawEl}
         placeholder={notes.recordingThisNote
           ? 'Take rough notes while Yap listens — they get woven into the minutes…'
