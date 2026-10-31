@@ -1580,6 +1580,8 @@ fn forget_extras(id: u64) {
     // Its version history and its pin (notes/versions.rs, notes/pins.rs).
     versions::forget(id);
     pins::forget(id);
+    // Its attendees' companies, kept for the folder rules by company.
+    crate::calendar::filing::forget_note(id);
 }
 
 #[cfg(test)]

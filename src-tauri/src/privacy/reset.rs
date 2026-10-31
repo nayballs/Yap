@@ -229,6 +229,8 @@ fn run(app: &AppHandle) -> Result<Done, String> {
     // Their version history and pins (notes/versions.rs, notes/pins.rs).
     crate::notes::versions::reset();
     crate::notes::pins::reset();
+    // The meetings' companies the folder rules kept (the rules stay).
+    crate::calendar::filing::forget_notes();
     for id in &ids {
         let _ = app.emit(crate::meetings::meeting_end::EVENT_DELETED, serde_json::json!({ "id": id }));
         crate::meetings::notepad::on_note_deleted(app, *id);

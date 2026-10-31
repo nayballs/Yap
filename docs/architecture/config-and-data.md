@@ -489,7 +489,20 @@
   or calendar.json: an older Yap never reads it, so the notes it makes for
   the series go to Meetings and stay there. A renamed folder's rules
   follow it; a deleted one's go. Reset app keeps it (setup, like the
-  folders).
+  folders). Since 2026-10-31 also the **rules by company**
+  (`calendar/filing/companies.rs`): "Meetings with people from example.com
+  go in Clients" as a `rules` entry under `company:<domain>` (`{folder:
+  "Clients", title: "example.com", createdTs}`: an older Yap that reads the
+  file keeps it, renames or drops it with its folder, and never matches it
+  to a series), `companyOffers {lastTs, asked: ["example.com|clients"],
+  never: ["example.net"]}` (the offer's answers; one a day) and
+  `noteDomains {<noteId>: {createdTs, domains}}` (each meeting note's
+  attendees' companies, for the past meetings a new rule moves; matched by
+  `createdTs`, as note ids come round again). Those two are fields an
+  older Yap's save drops: an offer may then come once more, and past
+  meetings are found by the calendar's kept invites alone. A deleted
+  note's `noteDomains` entry goes with it; Reset app empties
+  `noteDomains` (its notes went) and keeps the rest.
 - Skills: `%APPDATA%/yap/skills.json` (2026-10-29) — the person's own Skills
   (`{skills: [{id, name, command, description, instructions, runsOn,
   basedOn, createdMs, updatedMs}]}`, ≤ 50; Yap's own are in code, never
@@ -634,7 +647,10 @@
   sync), and since 2026-10-29 each meeting's **join codes** (`codes`:
   "meet:abc-defg-hij", "zoom:81234567890"…, to match a call by the code its
   window shows; an older Yap's save drops them until the next sync, and
-  calls match by time and service meanwhile) (`calendar.rs`). Chats' answers may cite calendar meetings
+  calls match by time and service meanwhile), and since 2026-10-31 each
+  connection's `own` (the domains of the addresses its meetings list as
+  you, so the folder rules by company leave the person's own company out;
+  an older Yap's save drops them until the next sync) (`calendar.rs`). Chats' answers may cite calendar meetings
   (`chats.json` sources with `event`, `field: "calendar"`; an older Yap's
   save drops `event`, and such a pill then shows as plain "[1]"). Never a token or a link: those are Credential
   Manager generic credentials `yap-calendar-<1-8>.com.yap.dictation` (Local

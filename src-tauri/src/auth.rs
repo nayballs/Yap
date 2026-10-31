@@ -219,6 +219,13 @@ pub fn status() -> Status {
     }
 }
 
+/// The signed-in account's address, from the session Yap holds (never the
+/// network): the folder rules by company leave the person's own company
+/// out (`calendar/filing/companies.rs`).
+pub fn account_email() -> Option<String> {
+    lock().session.as_ref().map(|s| s.user.email.clone()).filter(|e| !e.trim().is_empty())
+}
+
 fn emit_status(app: &AppHandle) {
     let _ = app.emit("yap-auth-changed", status());
 }

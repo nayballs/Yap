@@ -31,6 +31,7 @@
   import { initAlerts } from '../notices/alerts.js';
   import { initMicOffers } from '../notices/micOffer.js';
   import { initMicTips } from '../notices/micTips.js';
+  import { initCompanyFolders } from '../notices/companyFolders.js';
   import { initUpload } from '../stores/upload.svelte.js';
   import { initMemory } from '../stores/memory.svelte.js';
   import { initCleanupOffer } from '../notices/cleanupOffer.js';
@@ -127,6 +128,9 @@
   initMicOffers();
   // "Yap didn't hear you clearly" with one tip (dictation/mic_tips.rs).
   initMicTips();
+  // "File every meeting with example.com in Clients?" after a meeting filed
+  // by hand (calendar/filing/companies.rs), with Undo after Yes.
+  initCompanyFolders();
   // Reset app (privacy/reset.rs): the views below are shown afresh.
   let dataGeneration = $state(0);
   listen('yap-data-reset', () => dataGeneration++);

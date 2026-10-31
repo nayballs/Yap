@@ -255,7 +255,13 @@ opens on the drawn page and swaps the editor in.
   (`snippetSuggestions.js` — dictionary/snippet_offer.rs's
   `yap-snippet-suggestion`: "Type that often? Save it as a snippet" with Save
   snippet / Not now / "Don't suggest this again", chip Dictionary, 30 s; ✕ =
-  Not now; after Save "Snippet saved" + Open Dictionary), **alerts** (`alerts.js` — notices/alert.rs's
+  Not now; after Save "Snippet saved" + Open Dictionary), **company folder
+  offers** (`companyFolders.js` — calendar/filing/companies.rs's
+  `yap-company-folder-offer`: "File every meeting with example.com in
+  Clients? (3 past ones too)" with Yes / Just this one / "Never for
+  example.com", chip Folders, 30 s; ✕ = Just this one; after Yes "Meetings
+  with example.com go in Clients · Moved 3 past meetings to Clients too."
+  + Undo), **alerts** (`alerts.js` — notices/alert.rs's
   `yap-alert`, kind `alert` (a test's `level` may name another): "Your text
   is copied: press Ctrl+V" with chip Paste, `icon: 'clipboard'`; "Windows is
   blocking microphone access for desktop apps" + Open settings, chip

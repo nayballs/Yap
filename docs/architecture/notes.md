@@ -108,7 +108,16 @@ The AI Notepad: the notes store, folders, the Actions engine, notes you can fix 
   this meeting in…" (one note, through `notes::update`, so `folder_chosen`)
   and "Always file Weekly sync in…" (every note of the calendar series: the
   earlier ones when asked, each new one as the calendar makes it or a
-  recording ties it to its meeting — never one the person moved). **Actions** (named
+  recording ties it to its meeting — never one the person moved). **By
+  company** (2026-10-31, `calendar/filing/companies.rs`): a meeting filed by
+  hand — the Meetings view's "File this meeting in…" or the Notes view's
+  Move to / folder chip (`note_update` with a new folder) — in a folder of
+  the person's own offers "File every meeting with example.com in
+  Clients? (3 past ones too)" once per company and folder, one a day
+  (Yes, with Undo / Just this one / Never for example.com); the rule files
+  each new meeting with someone from that company there, after a series
+  rule and never over the person's own move; Settings → Meetings → Folders
+  by company lists them, with Remove. **Actions** (named
   prompt fragments) are built-in protected set (seeded "Generate Notes",
   "Meeting Notes", "Action Items", "Action Plan") + user-created; `note_enhance`
   (`notes/commands.rs`) invokes the **Actions engine**: picks an action by id, runs the

@@ -123,7 +123,7 @@
     <Toggle
       bind:checked={cfg.notifySuggestions}
       label="Suggestions"
-      desc="Words and snippets to save, languages to add. At most three a day"
+      desc="Words and snippets to save, languages to add, a folder for a company's meetings. At most three a day"
     />
   </Row>
   <Row setting="notify-feature-tips">
