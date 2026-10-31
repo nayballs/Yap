@@ -1,9 +1,12 @@
 // What the Chat model picker (ChatModelPicker.svelte, a provider rail)
 // lists, built from what Yap already knows:
 // - the cloud providers' models: modelCatalog.js's merge of Yap's curated
-//   list with the provider's live one, exactly the rows Settings shows
-//   (items, then "Show N more"); a provider without a key shows its curated
-//   models greyed with "Add key";
+//   list with the provider's live one (the models Settings shows), split
+//   into Latest, the newest of each family, and "More models (N)", the rest
+//   newest first (core/latestModels.js; More open or closed as the person
+//   left it while Yap runs, else open when the model in use is in it, which
+//   stays on show under it when it's closed by hand); a provider without a
+//   key shows its curated models greyed with "Add key";
 // - "On this PC": Yap's on-device models (local_llm_status: the curated set
 //   with "Recommended for this PC" from the graphics card check, GGUFs of
 //   the person's own in <data>/llm/), downloaded right here through
@@ -24,6 +27,7 @@ import { cancelDownload, downloadLine, fromEvent, isCancelled } from '../../core
 import { familyIcon, providerIcon, modelName } from '../../core/aiModel.js';
 import { contextInfo, fmtTokens } from '../../core/localContext.js';
 import { readsImages } from '../../stores/visionTags.svelte.js';
+import { latestModels } from '../../core/latestModels.js';
 
 /** The rail's cloud providers, in its order. `short` names the rail entry. */
 export const CLOUD_PROVIDERS = [
@@ -317,7 +321,13 @@ export function serverRows(s, status) {
 
 // ------------------------------------------------------------ the cloud
 
-/** A provider's rows as Settings lists them: `{ connected, rows, more }`. */
+/**
+ * A provider's rows, split as the picker shows them (core/latestModels.js):
+ * `{ connected, split, latest, older, live, missing }` — `latest` the
+ * newest of each family, `older` the rest under "More models (N)", newest
+ * first (each marked `older`). `split` false: none of its models is in a
+ * family, so `latest` and `older` are Settings' list and its "more".
+ */
 export function cloudRows(p, status) {
   const connected = !!status?.keyed?.includes(p);
   const cur = connected && status?.ready && status.model?.provider === p ? status.model.id : '';
@@ -326,26 +336,32 @@ export function cloudRows(p, status) {
   // The context the provider's live list gives ("1M context"), as info:
   // only from the list Yap already has, never a call of its own.
   const live = catalog.providers[p]?.models ?? [];
-  const ctxOf = (id) => live.find((m) => m.id === id || m.aliases?.includes(id) || m.base === id)?.context ?? null;
-  const descOf = (i) => {
-    const info = contextInfo(ctxOf(i.value));
+  const liveOf = (id) => live.find((m) => m.id === id || m.aliases?.includes(id) || m.base === id) ?? null;
+  const descOf = (i, lm) => {
+    const info = contextInfo(lm?.context ?? null);
     return !info || /context/i.test(i.desc || '') ? i.desc : [i.desc, info].filter(Boolean).join(' · ');
   };
   const row = (i) => {
     const images = readsImages(p, i.value);
+    const lm = liveOf(i.value);
     return {
       key: `${p}:${i.value}`,
       kind: 'cloud',
       provider: p,
       model: i.value,
       name: i.label,
-      desc: descOf(i),
+      desc: descOf(i, lm),
       where: short,
       icon: familyIcon(i.label, i.value) ?? providerIcon(p),
       current: !!cur && i.value === cur,
       action: connected ? 'pick' : 'key',
       tools: i.tools !== false,
       images,
+      // For Latest (core/latestModels.js): when the provider says it came
+      // out, and whether it's on its way out or gone.
+      created: lm?.created ?? null,
+      deprecated: !!lm?.deprecated,
+      missing: !!i.missing,
       tags: connected
         ? cap([
             i.missing && tag('gone', 'No longer offered'),
@@ -362,7 +378,33 @@ export function cloudRows(p, status) {
   if (cur && !rows.some((r) => r.current) && !more.some((r) => r.current)) {
     rows.unshift(row({ value: cur, label: modelName(status.model), desc: 'The model id saved in Settings', tools: status.tools ? null : false }));
   }
-  return { connected, rows, more, live: merged.live, missing: merged.missing };
+  const split = latestModels(p, [...rows, ...more]);
+  const latest = split ? split.latest : rows;
+  const older = (split ? split.older : more).map((r) => ({ ...r, older: true }));
+  return { connected, split: !!split, latest, older, live: merged.live, missing: merged.missing };
+}
+
+/** Every model a provider offers, as the picker lists them: Latest, then More models. */
+export function allCloudRows(p, status) {
+  const { latest, older } = cloudRows(p, status);
+  return [...latest, ...older];
+}
+
+// "More models (N)" per cloud provider: open or closed as the person left
+// it, while Yap runs (this window's module, kept when the picker closes).
+const moreChoice = $state({});
+
+/**
+ * Is `p`'s More models open: as the person left it, else when the model in
+ * use is one of them (so it shows, ✓ where it is).
+ */
+export function moreIsOpen(p, older) {
+  return moreChoice[p] ?? older.some((r) => r.current);
+}
+
+/** The person opened or closed `p`'s More models (or picked one of them: open). */
+export function setMoreOpen(p, open) {
+  moreChoice[p] = !!open;
 }
 
 /** The pane's status line for a cloud provider. */
@@ -413,8 +455,7 @@ export function recentRows(status) {
   for (const e of readRecent()) {
     let row = null;
     if (isCloud(e.provider)) {
-      const { rows, more } = cloudRows(e.provider, status);
-      row = [...rows, ...more].find((r) => r.model === e.model) ?? null;
+      row = allCloudRows(e.provider, status).find((r) => r.model === e.model) ?? null;
     } else if (e.provider === 'ondevice') {
       row = localRows(status).installed.find((r) => r.file === e.file) ?? null;
     } else {
@@ -428,7 +469,10 @@ export function recentRows(status) {
 
 // ------------------------------------------------------------- search
 
-/** Every model the picker knows matching `q`, grouped by where it runs. */
+/**
+ * Every model the picker knows matching `q`, grouped by where it runs: a
+ * provider's older models too, More models open or not (Latest first).
+ */
 export function searchGroups(q, status) {
   const terms = q.toLowerCase().split(/\s+/).filter(Boolean);
   if (terms.length === 0) return [];
@@ -439,8 +483,7 @@ export function searchGroups(q, status) {
   };
   const groups = [];
   for (const p of CLOUD_PROVIDERS) {
-    const { rows, more } = cloudRows(p.id, status);
-    const hits = [...rows, ...more].filter((r) => match(r, `${p.name} ${p.short}`));
+    const hits = allCloudRows(p.id, status).filter((r) => match(r, `${p.name} ${p.short}`));
     if (hits.length) groups.push({ id: p.id, label: p.short, icon: providerIcon(p.id), rows: hits });
   }
   const { installed, available } = localRows(status);
