@@ -131,6 +131,9 @@
       <path d="M5 10v4h3l4 4V6L8 10z" /><path d="M16 9a4 4 0 0 1 0 6M18.5 6.5a8 8 0 0 1 0 11" />
     {:else if kind === 'models'}
       <path d="M8 6h12M8 12h12M8 18h12M4 6h.01M4 12h.01M4 18h.01" />
+    {:else if kind === 'phone'}
+      <!-- Yap Link: a paired phone on your network (link.rs). -->
+      <rect x="7" y="2.5" width="10" height="19" rx="2.5" /><path d="M11 18h2" />
     {:else}
       <path d="M9 7V3M15 7V3M7 7h10v4a5 5 0 0 1-10 0zM12 16v5" />
     {/if}

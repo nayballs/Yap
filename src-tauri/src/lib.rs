@@ -18,6 +18,7 @@ mod config;
 mod dictation;
 mod dictionary;
 mod integrations;
+mod link;
 mod meetings;
 mod memory;
 mod notes;
@@ -66,6 +67,8 @@ pub(crate) fn shutdown_cleanup() {
     // Meeting search's model (search/embedder.rs) on the same engine.
     search::shutdown();
     integrations::bridge::stop();
+    // Yap Link: no more phones (link.rs).
+    link::stop();
     dictation::mute::restore_all();
     // The week of network receipts, as it stands (net.rs).
     privacy::net::flush();
@@ -444,6 +447,12 @@ pub fn run() {
             voice::tts::tts_cloud_usage,
             voice::tts::tts_cloud_preview,
             integrations::bridge::bridge_status,
+            link::link_status,
+            link::link_pair_start,
+            link::link_pair_cancel,
+            link::link_pair_answer,
+            link::link_remove,
+            link::link_network_settings,
             integrations::mcp_clients::mcp_clients_status,
             integrations::mcp_clients::mcp_client_add,
             integrations::mcp_clients::mcp_client_remove,
@@ -970,6 +979,8 @@ pub fn run() {
 
             // Local API bridge (Integrations): loopback server for CLIs/agents.
             integrations::bridge::sync(&handle, cfg.bridge_enabled);
+            // Yap Link (Settings → Phone): HTTPS for paired phones on the home Wi-Fi.
+            link::sync(&handle, cfg.link_enabled);
 
             // Yap accounts: sign-in deep links + restore the stored session.
             auth::init(&handle);

@@ -402,6 +402,9 @@
     {:else if id === 'mcp'}
       <!-- The Model Context Protocol's knot mark, redrawn on the 24 grid. -->
       <path d="M3.1 12 11.4 3.7c1.2-1.2 3.1-1.2 4.2 0s1.2 3.1 0 4.2L9.3 14.2" /><path d="m9.4 14.1 6.2-6.2c1.2-1.2 3.1-1.2 4.2 0c1.2 1.2 1.2 3.1 0 4.2l-7.6 7.6c-.4.4-.4 1 0 1.4l1.6 1.6" /><path d="M13.5 5.8 7.3 12c-1.2 1.2-1.2 3.1 0 4.2s3.1 1.2 4.2 0l6.2-6.2" />
+    {:else if id === 'phone'}
+      <!-- A phone (Yap Link). -->
+      <rect x="7" y="2.5" width="10" height="19" rx="2.5" /><path d="M11 18h2" />
     {:else if id === 'privacy'}
       <path d="M12 3 5 6v5c0 4.5 3 8 7 10 4-2 7-5.5 7-10V6z" /><path d="m9 12 2 2 4-4" />
     {:else if id === 'about'}
@@ -606,6 +609,11 @@
               <p>Let your AI apps read your meeting transcripts and notes, through Yap on this PC. Never your dictations.</p>
             </div>
             <McpSection {cfg} {goto} />
+          {:else if section === 'phone'}
+            <!-- Its own chunk, as Memory and Account are. -->
+            {#await import('./PhonePage.svelte') then { default: PhonePage }}
+              <PhonePage {cfg} />
+            {/await}
           {:else if section === 'privacy'}
             <PrivacyPage {cfg} {goto} bind:connections={privacyConnections} />
           {:else if section === 'about'}
@@ -1008,11 +1016,12 @@
     padding: 0;
     scrollbar-width: none;
   }
-  /* 14 pages, the search and the account in 600 px of window: every icon
-     on screen without scrolling the rail (27 px each since Skills, 28 before). */
+  /* 16 pages, the search and the account in 600 px of window: every icon
+     on screen without scrolling the rail (24 px each and closer separators
+     since Phone, 27 px since Skills, 28 before). */
   .shell.rail .navitem {
     width: 38px;
-    height: 27px;
+    height: 24px;
     padding: 0;
     justify-content: center;
   }
@@ -1020,7 +1029,7 @@
     flex: 0 0 auto;
     width: 24px;
     height: 1px;
-    margin: 3px 0;
+    margin: 2px 0;
     background: var(--yap-border);
   }
   .navdot {

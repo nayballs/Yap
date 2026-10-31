@@ -690,6 +690,18 @@ export function createChatState({ onopensettings = () => null, onopennote = () =
         id: chatId(id, i),
         revisedFrom: i === streamedAt && streamed && streamed.trim() !== m.text.trim() ? fromHeight : 0,
       }));
+      // Its answer is saved already: a quick one's "answered" came while this
+      // view was still opening for the question (ControlPanel brought Chat up
+      // on "asked", before this view listened), and it'd say "Thinking" for
+      // good. The saved answer after the question ends the wait.
+      if (p?.phase === 'asked' && assistantPending === id && assistantTurn === p.userMessageId) {
+        const at = Number(String(p.userMessageId ?? '').split(':').pop());
+        if (Number.isInteger(at) && conv.messages?.[at + 1]?.role === 'assistant') {
+          assistantPending = null;
+          assistantTurn = null;
+          doc.turnEnded();
+        }
+      }
       refreshList();
       scrollThread();
       contextStamp += 1;

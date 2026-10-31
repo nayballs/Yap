@@ -606,6 +606,20 @@ style neither).
   apps save notes to Yap" (`mcpAllowWrites`), the Local-API-off warning with
   "Turn on the Local API", and one line on where their reads go with a link to
   Privacy & data.
+- **Phone** (`PhonePage.svelte`, its own chunk, 2026-10-31; Yap Link,
+  [link.md](./link.md)): "Use Yap from your phone (on your home Wi-Fi)"
+  (`linkEnabled`; an error line when the port can't be had; "Windows treats this
+  network as Public" with Open network settings, `link_network_settings`, when
+  phones would be refused), **Pair a phone**
+  while it's on (`link_pair_start`: the QR code — dark on white whatever the
+  theme, as Account's — the steps with the one-time certificate warning, the
+  link with Copy, "Good once, for 5 min.", another address when the PC has
+  several, New code once it runs out, Done = `link_pair_cancel`; a phone paired
+  meanwhile closes it with a toast), **Paired phones** (connected now / last
+  used, Remove = `link_remove`) and **Good to know** (same Wi-Fi, the screen on,
+  no headset button yet). Follows `yap-link-changed`. The main window's pairing
+  question is `components/LinkPairPrompt.svelte` (ConfirmDialog with
+  `cancelLabel` "Deny").
 - **Privacy & data** (`settings/PrivacyPage.svelte`, OpenWhispr's Privacy &
   Data, Claude's Privacy; replaces History and gathers the scattered privacy
   notes): **What leaves this PC** — a table by feature as Yap is set up now

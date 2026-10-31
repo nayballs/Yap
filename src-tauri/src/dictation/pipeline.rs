@@ -1045,6 +1045,24 @@ impl Pipeline {
     pub(crate) fn transformer(&self) -> Transformer {
         Transformer(Arc::clone(&self.shared))
     }
+
+    /// Yap Link's way to the warm speech engine (`link/session.rs`).
+    pub(crate) fn phone_ear(&self) -> PhoneEar {
+        PhoneEar(Arc::clone(&self.shared))
+    }
+}
+
+/// **A question a phone heard** (Yap Link), transcribed on the warm engine
+/// — lent as a dictation's is, never a second copy — and corrected with the
+/// dictionary, as the Voice Assistant's question is. No `processing` guard:
+/// a dictation at the PC meanwhile takes its turn on the engine.
+pub(crate) struct PhoneEar(Arc<Shared>);
+
+impl PhoneEar {
+    /// See `Shared::phone_question`.
+    pub(crate) async fn question(&self, audio: Vec<f32>) -> Result<String, String> {
+        self.0.phone_question(audio).await
+    }
 }
 
 /// Runs a saved transform (`transforms.rs`) never beside a dictation: it

@@ -1147,6 +1147,19 @@ The AI Chat surface (conversations, the tool-calling loop and its note tools) an
   key joins it and its release ends it (`gesture::State::Joinable`); Esc in
   Chat (`assistantListening`) or ✕ cancel it; never while the assistant is
   off (`is_off`). Test runs stage its transcript (`e2e_snip_question`).
+  **Asked from a phone** (Yap Link, 2026-10-31, [link.md](./link.md)):
+  `ask_from_phone(app, question, phone)` runs the same `answer` with an
+  `Asker::Phone` in the shortcut's `Asker::Shortcut(generation)` place — the
+  conversation choice, the endpoint and its "Pick an AI model…" / "couldn't
+  answer" words (sent to the phone as `error`, not alerts), `chat_turn` with
+  scope "assistant", the `Streamed` sink (its text and steps to the phone,
+  `Phone::answer` / `Phone::step`; the voice from `Phone::voice`, the phone's
+  output, always on: the phone was asked into a headset), the Chat view's
+  `yap-assistant-turn` / `-stream`, the receipts' `AssistantPhone`. It leaves
+  the PC's own things alone: the capsule's phase and generation, the bar's
+  card, the window in front, the screenshots in Chat's box, a quoted passage.
+  The phone's own turn says whether it's still current (an interrupt) and
+  names its `Stoppable`.
 - **`chat/assistant/screen.rs`** — **the Voice Assistant sees the window in
   front** (2026-10-29): a spoken question about the screen ("what's this
   error?", "summarise this page", "what does this chart say?") takes a
@@ -1812,6 +1825,10 @@ and its Undo, Preview / Source, find, copy, light and dark).
   the question with its mic, the line of what it's doing (`assistantPending`), the answer
   (Rust reads it aloud); ControlPanel brings Chat up for one asked while the
   window is in front (`show`) or "Open in Chat" (`chatRequest {assistant}`).
+  A quick answer's "answered" can arrive while the view is still opening for
+  the question (before it listens itself): when the conversation it reads for
+  "asked" already has the answer after the question, the wait ends there
+  (2026-10-31; before, it said "Thinking" with ■ for good).
   An empty chat says "Or press F8 in any app to ask out loud…", or offers
   **Set an assistant shortcut** (→ Settings `voice#assistant-shortcut`).
   **Streamed answers** (`chat/stream.rs`, `streaming.js`; 2026-10-22): `send`

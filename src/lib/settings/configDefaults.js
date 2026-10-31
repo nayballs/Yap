@@ -180,6 +180,8 @@ export const FIELD_DEFAULTS = {
   assistantScreen: true,
   assistantScreenCloud: false,
   assistantScreenAsked: false,
+  // Settings → Phone (link.rs): Yap Link for paired phones on the home Wi-Fi.
+  linkEnabled: false,
   spokenLength: '1m',
   openApps: true,
   appsBlocked: [],

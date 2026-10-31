@@ -610,13 +610,26 @@ pub fn speak(text: &str, message_id: Option<String>) -> Result<(), String> {
 /// the voice Settings picked, as [`speak`] uses it, with no sentences yet —
 /// they come through the returned [`Feed`] as the answer is written.
 pub fn speak_streamed(message_id: Option<String>) -> Result<Arc<Feed>, String> {
+    let cfg = crate::config::load();
+    let opener = if crate::shell::e2e::active() { sim_opener() } else { rodio_opener(cfg.output_device.clone()) };
+    streamed(message_id, voicing(&cfg), opener, &cfg)
+}
+
+/// **Say a streamed answer somewhere other than this PC's speakers** (Yap
+/// Link: the phone, `link/voice.rs`): [`speak_streamed`] with `voicing` and
+/// the audio handed to `open`'s playback — the same speaker, one voice at a
+/// time, never over a dictation or a meeting.
+pub fn speak_streamed_to(message_id: Option<String>, voicing: Voicing, open: Opener) -> Result<Arc<Feed>, String> {
+    streamed(message_id, voicing, open, &crate::config::load())
+}
+
+fn streamed(message_id: Option<String>, voicing: Voicing, opener: Opener, cfg: &crate::config::YapConfig) -> Result<Arc<Feed>, String> {
     if let Some(why) = meeting_quiet() {
         return Err(why.into());
     }
     let speaker = speaker().ok_or("Spoken replies aren't ready yet")?;
-    let cfg = crate::config::load();
     let rate = if cfg.tts_rate.is_finite() && cfg.tts_rate > 0.0 { cfg.tts_rate.clamp(0.5, 2.0) } else { 1.0 };
-    let Voicing { engine, voice, cloud } = voicing(&cfg);
+    let Voicing { engine, voice, cloud } = voicing;
     let feed = Arc::new(Feed::default());
     #[cfg(debug_assertions)]
     if crate::shell::e2e::active() {
@@ -633,7 +646,6 @@ pub fn speak_streamed(message_id: Option<String>) -> Result<Arc<Feed>, String> {
         });
     }
     let fallback = cloud.map(|plan| fallback_for(plan, message_id.clone(), rate));
-    let opener = if crate::shell::e2e::active() { sim_opener() } else { rodio_opener(cfg.output_device) };
     let job = Job { message_id, sentences: Vec::new(), engine, voice, rate, fallback, track: None, first: 0, feed: Some(Arc::clone(&feed)) };
     let generation = speaker.start(job, opener)?;
     feed.attach(speaker, generation);

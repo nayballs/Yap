@@ -378,6 +378,43 @@ impl Shared {
             None => self.end_state(offer),
         }
     }
+    /// **A phone's question** (Yap Link, `PhoneEar`): 16 kHz mono `audio`
+    /// transcribed on the warm engine (waiting for the startup load, or for
+    /// a dictation or a meeting's chunk that has it out; loaded into the slot
+    /// when nobody has it) in My languages, then the correction dictionary
+    /// (exact, then near-misses), as the Voice Assistant's question gets it:
+    /// no AI cleanup, snippets or voice commands. Nothing kept, listed or
+    /// pasted; the language heard isn't this PC's dictation's.
+    pub(super) async fn phone_question(self: &Arc<Self>, audio: Vec<f32>) -> Result<String, String> {
+        if audio.is_empty() {
+            return Ok(String::new());
+        }
+        let cfg = self.config.read().map(|c| c.clone()).map_err(|_| "Yap's settings couldn't be read")?;
+        let lease = lease_engine(&self.engine, DICTATION_ENGINE_WAIT)
+            .await
+            .map_err(|e| format!("No speech model was ready: {e}"))?;
+        let (_, translate) = self.language_settings();
+        let spoken = crate::dictation::languages::plan(&cfg, None);
+        let prompt = self.dictionary_prompt();
+        let samples = audio.len();
+        let (mut lease, result) = tokio::task::spawn_blocking(move || {
+            let r = match lease.engine() {
+                Some(engine) => engine.transcribe_spoken(&audio, &spoken, translate, prompt.as_deref()),
+                None => Err(SttError::NotReady),
+            };
+            (lease, r)
+        })
+        .await
+        .map_err(|e| format!("The transcription crashed: {e}"))?;
+        lease.after_transcribing(&result);
+        drop(lease);
+        self.touch_activity();
+        let said = result.map_err(|e| format!("The transcription failed: {e}"))?;
+        let question = apply_corrections(said.text.trim(), &cfg).trim().to_string();
+        tracing::info!(samples, len = question.len(), "Yap Link: a phone's question transcribed");
+        Ok(question)
+    }
+
     /// **Run again** (Home's feed, `recent_audio::history_rerun`): a kept
     /// dictation's `audio` transcribed afresh — on `model` (an installed
     /// one; `None` = the one in use: the warm engine, else loaded for this

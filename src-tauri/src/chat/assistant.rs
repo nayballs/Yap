@@ -98,6 +98,16 @@
 //! read images gets the window's text, read on this PC. The capsule says
 //! "Looking at the window…" meanwhile.
 //!
+//! **Asked from a phone** (Yap Link, `link.rs`, 2026-10-31): a question a
+//! paired phone heard goes the same way ([`ask_from_phone`]) — the same
+//! conversation choice, Chat's model and the short spoken answer, kept in
+//! Chat, the Chat view following it live — with the phone in the bar's
+//! place: its own turn ([`Phone`]: interrupted from the phone, never the
+//! capsule's generation), the answer's text and steps sent to it, and its
+//! voice on the phone ([`Phone::voice`]), never this PC's speakers. Not the
+//! window in front, the screenshots waiting in Chat's box, a quoted passage
+//! or the bar's card: those are the PC's. Off during meetings, as here.
+//!
 //! Events: `yap-assistant {phase, conversationId, messageId, about?}` (the bar's
 //! capsule), `yap-assistant-turn {phase: asked | answered | failed |
 //! superseded | open, conversationId, userMessageId, text, show}` (the main
@@ -526,7 +536,7 @@ pub fn heard(app: &AppHandle, question: String) {
     // A dictation starting from now on means you've moved on.
     let since = crate::dictation::pipeline::dictation_state().0;
     let app = app.clone();
-    tauri::async_runtime::spawn(async move { answer(app, generation, since, question).await });
+    tauri::async_runtime::spawn(async move { answer(app, Asker::Shortcut(generation), since, question).await });
 }
 
 /// The window in front is being taken and read for question `generation`
@@ -583,6 +593,82 @@ fn give_up(app: &AppHandle, generation: u64) {
     if current(generation) {
         nothing(app);
     }
+}
+
+// ---- who asked ------------------------------------------------------------------------
+
+/// **A question asked from a phone** (Yap Link, `link/session.rs`): what the
+/// phone's turn takes from the Voice Assistant's path, in the bar's place.
+pub trait Phone: Send + Sync {
+    /// Still the phone's latest question (not interrupted, not replaced).
+    fn current(&self) -> bool;
+    /// What its answer's stream stops by (`stream::Stoppable`).
+    fn stop_id(&self) -> String;
+    /// What the answer is doing: Chat's activity line (`activity.rs`).
+    fn step(&self, label: &str);
+    /// The answer so far ("" = taken back); `done`: the checked answer.
+    fn answer(&self, text: &str, done: bool);
+    /// Start the phone's voice for answer `message_id`: its sentences go
+    /// through the feed, its audio to the phone.
+    fn voice(&self, message_id: &str) -> Result<std::sync::Arc<crate::voice::tts::Feed>, String>;
+    /// It went no further: why, in plain words.
+    fn failed(&self, message: &str);
+}
+
+/// Who asked a question.
+#[derive(Clone)]
+enum Asker {
+    /// The assistant shortcut on this PC, question `generation`: the bar's
+    /// capsule and card, this PC's speakers.
+    Shortcut(u64),
+    /// A paired phone (Yap Link).
+    Phone(std::sync::Arc<dyn Phone>),
+}
+
+impl Asker {
+    fn current(&self) -> bool {
+        match self {
+            Asker::Shortcut(g) => current(*g),
+            Asker::Phone(p) => p.current(),
+        }
+    }
+
+    fn stop_id(&self) -> String {
+        match self {
+            Asker::Shortcut(g) => stop_id(*g),
+            Asker::Phone(p) => p.stop_id(),
+        }
+    }
+
+    fn shortcut(&self) -> Option<u64> {
+        match self {
+            Asker::Shortcut(g) => Some(*g),
+            Asker::Phone(_) => None,
+        }
+    }
+
+    /// Back to idle on the bar (a phone's turn ends on its own).
+    fn give_up(&self, app: &AppHandle) {
+        if let Asker::Shortcut(g) = self {
+            give_up(app, *g);
+        }
+    }
+
+    /// An alert on this PC, or the same words on the phone.
+    fn alert(&self, app: &AppHandle, alert: crate::notices::alert::Alert) {
+        match self {
+            Asker::Shortcut(_) => crate::notices::alert::show_soon(app, alert),
+            Asker::Phone(p) => p.failed(&format!("{}. {}", alert.title.trim_end_matches('.'), alert.body)),
+        }
+    }
+}
+
+/// **A question from a phone** (Yap Link), transcribed and corrected: asked
+/// as the shortcut's is ([`answer`]), the phone in the bar's place. Returns
+/// once the answer is in (its voice may still be going on the phone).
+pub(crate) async fn ask_from_phone(app: AppHandle, question: String, phone: std::sync::Arc<dyn Phone>) {
+    let since = crate::dictation::pipeline::dictation_state().0;
+    answer(app, Asker::Phone(phone), since, question).await;
 }
 
 /// "Pick an AI model for the Voice Assistant", with Open settings.
@@ -652,10 +738,11 @@ pub fn mentions_price(sentence: &str) -> bool {
 /// **A spoken question's answer as it's written** (a `stream::Sink` for
 /// `chat_turn`): the Chat view follows it (`yap-assistant-stream`), and the
 /// voice starts at its first whole sentence ([`STREAM_SAY`] at most until
-/// the answer is whole), with the card on the Yap bar.
+/// the answer is whole), with the card on the Yap bar — or, asked from a
+/// phone, the phone follows it and its voice is the phone's.
 struct Streamed {
     app: AppHandle,
-    generation: u64,
+    asker: Asker,
     /// Dictations started when the question was heard.
     since: u64,
     question: String,
@@ -693,7 +780,7 @@ impl Streamed {
     /// or new dictation since it was asked.
     fn may_speak(&self) -> bool {
         self.voice_on
-            && current(self.generation)
+            && self.asker.current()
             && crate::voice::tts::meeting_quiet().is_none()
             && crate::dictation::pipeline::dictation_state().0 == self.since
     }
@@ -737,7 +824,11 @@ impl Streamed {
                 }
                 None => {
                     let Some(id) = st.message_id.clone() else { return };
-                    match crate::voice::tts::speak_streamed(Some(id.clone())) {
+                    let started = match &self.asker {
+                        Asker::Shortcut(_) => crate::voice::tts::speak_streamed(Some(id.clone())),
+                        Asker::Phone(p) => p.voice(&id),
+                    };
+                    match started {
                         Ok(feed) => {
                             feed.push(new);
                             st.feed = Some(feed);
@@ -753,12 +844,14 @@ impl Streamed {
                 }
             }
         };
-        // The voice started: "Speaking" on the capsule, and the card.
+        // The voice started: "Speaking" on the capsule, and the card (a
+        // phone's voice is the phone's alone).
         let Some(id) = started_id else { return };
-        tracing::info!("Voice Assistant: speaking from the answer's first sentence");
+        tracing::info!(phone = self.asker.shortcut().is_none(), "Voice Assistant: speaking from the answer's first sentence");
+        let Some(generation) = self.asker.shortcut() else { return };
         let ev = {
             let mut s = lock();
-            if s.generation != self.generation {
+            if s.generation != generation {
                 return;
             }
             s.phase = Phase::Speaking;
@@ -795,14 +888,18 @@ impl Streamed {
         let Some(feed) = feed else { return };
         tracing::info!("Voice Assistant: the words it was saying came before a tool call; stopped");
         // "Thinking…" before the voice stops, so its end isn't the answer's.
-        let (ev, id) = {
-            let mut s = lock();
-            if s.generation == self.generation && s.phase == Phase::Speaking {
-                s.phase = Phase::Thinking;
-                (Some(snapshot(&s)), s.message_id.take())
-            } else {
-                (None, None)
+        let (ev, id) = match self.asker.shortcut() {
+            Some(generation) => {
+                let mut s = lock();
+                if s.generation == generation && s.phase == Phase::Speaking {
+                    s.phase = Phase::Thinking;
+                    (Some(snapshot(&s)), s.message_id.take())
+                } else {
+                    (None, None)
+                }
             }
+            // A phone's: its answer's own id.
+            None => (None, self.lock().message_id.clone()),
         };
         feed.close();
         if id.is_some() && crate::voice::tts::speaking_id() == id {
@@ -829,12 +926,22 @@ impl crate::chat::stream::Sink for Streamed {
         // What it's doing, for the capsule (this question's, while it's
         // still the one asked).
         if let crate::chat::stream::Event::Step { step } = &ev {
-            let current = lock().generation == self.generation;
-            if current {
-                let _ = self.app.emit(STEP, step);
+            if self.asker.current() {
+                match &self.asker {
+                    Asker::Shortcut(_) => {
+                        let _ = self.app.emit(STEP, step);
+                    }
+                    Asker::Phone(p) => p.step(&step.line),
+                }
             }
         }
         if let crate::chat::stream::Event::Text { text } = &ev {
+            // The phone shows it as it's written ("" = taken back).
+            if let Asker::Phone(p) = &self.asker {
+                if p.current() {
+                    p.answer(text, false);
+                }
+            }
             if text.trim().is_empty() {
                 // Taken back: it came before a tool call.
                 self.taken_back();
@@ -849,15 +956,20 @@ impl crate::chat::stream::Sink for Streamed {
     }
 }
 
-async fn answer(app: AppHandle, generation: u64, since: u64, question: String) {
+/// **One spoken question, answered** — the shortcut's ([`Asker::Shortcut`])
+/// or a phone's ([`Asker::Phone`], which leaves the PC's own things alone:
+/// the screenshots in Chat's box, a quoted passage, the window in front, the
+/// bar).
+async fn answer(app: AppHandle, asker: Asker, since: u64, question: String) {
     let cfg = crate::config::load();
+    let pc = asker.shortcut().is_some();
     let viewing = view();
     let open_exists = matches!(viewing, Viewing::Conversation(id) if crate::chat::chats::get(id).is_some());
     let choice = choose_conversation(viewing, open_exists, crate::chat::chats::latest(), now_secs());
     // Screenshots waiting in Chat's box (snip/waiting.rs): the question goes
     // with them, to the conversation they wait in.
     let waiting = crate::snip::waiting::now();
-    let shots_wait = !waiting.images.is_empty();
+    let shots_wait = pc && !waiting.images.is_empty();
     let conversation_id = match choice {
         _ if shots_wait => waiting.conversation_id,
         Choice::Continue(id) => Some(id),
@@ -872,8 +984,8 @@ async fn answer(app: AppHandle, generation: u64, since: u64, question: String) {
         match crate::chat::turn::resolve_chat_endpoint(&cfg) {
             Ok(e) => Some(e),
             Err(why) => {
-                crate::notices::alert::show_soon(&app, no_model_alert(&why));
-                give_up(&app, generation);
+                asker.alert(&app, no_model_alert(&why));
+                asker.give_up(&app);
                 return;
             }
         }
@@ -888,7 +1000,7 @@ async fn answer(app: AppHandle, generation: u64, since: u64, question: String) {
     if let (true, Some((base_url, _key, model, provider, _persona, _thinking))) = (shots_wait, &endpoint) {
         if crate::snip::vision::reads_images(provider, model) == Some(false) {
             cant_read(&app, &question, waiting.conversation_id, false);
-            give_up(&app, generation);
+            asker.give_up(&app);
             return;
         }
         if let Some((conv, images)) = crate::snip::waiting::take_for_question(&app) {
@@ -898,7 +1010,7 @@ async fn answer(app: AppHandle, generation: u64, since: u64, question: String) {
                     tracing::info!("Voice Assistant: the on-device model can't read the screenshots now ({e})");
                     crate::snip::waiting::put_back(&app, conv, images);
                     cant_read(&app, &question, conv, true);
-                    give_up(&app, generation);
+                    asker.give_up(&app);
                     return;
                 }
             }
@@ -913,8 +1025,8 @@ async fn answer(app: AppHandle, generation: u64, since: u64, question: String) {
                 Err(e) => {
                     tracing::warn!("Voice Assistant: the screenshots couldn't go ({e})");
                     crate::snip::waiting::put_back(&app, conv, images);
-                    crate::notices::alert::show_soon(&app, failed_alert(&e));
-                    give_up(&app, generation);
+                    asker.alert(&app, failed_alert(&e));
+                    asker.give_up(&app);
                     return;
                 }
             }
@@ -923,14 +1035,15 @@ async fn answer(app: AppHandle, generation: u64, since: u64, question: String) {
     // The person is in Yap's main window: Chat comes up there with the
     // question. In front, or beside the app in front showing Chat: the
     // answer is in view there (a document's line points at the panel).
-    let seen = crate::notices::notice::window_seen(&app);
+    // (Asked from a phone: nobody's at the PC to see it come up.)
+    let seen = if pc { crate::notices::notice::window_seen(&app) } else { crate::notices::notice::Seen::No };
     let focused = seen == crate::notices::notice::Seen::Front;
     let in_chat = answer_in_view(seen, viewing, conversation_id);
     // The passage quoted over Chat's box (a document's "Change this…"): it
     // goes with a question asked with Chat in view, to the conversation it's
     // quoted in, as a typed or dictated question takes it
     // (`documents::quote_goes`); the box's quote goes.
-    let quote = if opens_an_app { None } else { crate::chat::documents::take_waiting_quote(&app, in_chat, conversation_id) };
+    let quote = if opens_an_app || !pc { None } else { crate::chat::documents::take_waiting_quote(&app, in_chat, conversation_id) };
     // A question about the screen (screen.rs): the window in front goes
     // with it — its picture, or its text read on this PC — or a line tells
     // the model why it can't see it. Not beside screenshots already waiting
@@ -939,7 +1052,9 @@ async fn answer(app: AppHandle, generation: u64, since: u64, question: String) {
     let mut ask = question.clone();
     let mut window_picture: Option<(String, String)> = None;
     let mut took_window = false;
-    if let (false, Some((base_url, api_key, model, provider, _persona, _thinking))) = (shots_wait || quote.is_some(), &endpoint) {
+    if let (Some(generation), false, Some((base_url, api_key, model, provider, _persona, _thinking))) =
+        (asker.shortcut(), shots_wait || quote.is_some(), &endpoint)
+    {
         let ep = screen::Endpoint { base_url, api_key, model, provider };
         let look_app = app.clone();
         let show = move |on: bool| looking(&look_app, generation, on);
@@ -954,22 +1069,26 @@ async fn answer(app: AppHandle, generation: u64, since: u64, question: String) {
             shots = look.images;
         }
     }
-    tracing::info!(?viewing, ?choice, ?seen, shots = shots.images.len(), window = took_window, quoted = quote.is_some(), "Voice Assistant: asking Chat");
+    tracing::info!(phone = !pc, ?viewing, ?choice, ?seen, shots = shots.images.len(), window = took_window, quoted = quote.is_some(), "Voice Assistant: asking Chat");
     let asked_app = app.clone();
     let asked_text = question.clone();
     // The answer as it's written: the Chat view follows it, the voice
     // starts at its first sentence.
+    // A phone's answer is always said (it was asked into a headset), on the
+    // phone, with no card on this PC's bar.
     let streamed = Streamed {
         app: app.clone(),
-        generation,
+        asker: asker.clone(),
         since,
         question: question.clone(),
-        voice_on: cfg.speak_replies,
-        show_card: cfg.assistant_answer_card,
+        voice_on: cfg.speak_replies || !pc,
+        show_card: cfg.assistant_answer_card && pc,
         s: Mutex::new(Speaking::default()),
     };
     let asked = |conv: u64, index: usize| {
-        lock().conversation = Some(conv);
+        if pc {
+            lock().conversation = Some(conv);
+        }
         {
             let mut st = streamed.lock();
             st.conversation = Some(conv);
@@ -989,7 +1108,7 @@ async fn answer(app: AppHandle, generation: u64, since: u64, question: String) {
     };
     // ■ (the capsule's, the card's ✕, Chat's box, Esc) closes the model's
     // stream too, not just the voice: a model on this PC stops writing.
-    let stoppable = crate::chat::stream::Stoppable::new(Some(&stop_id(generation)));
+    let stoppable = crate::chat::stream::Stoppable::new(Some(&asker.stop_id()));
     let turn = crate::snip::turn::with(
         shots,
         crate::chat::turn::chat_turn(
@@ -1010,8 +1129,14 @@ async fn answer(app: AppHandle, generation: u64, since: u64, question: String) {
     let turn = IN_CHAT.scope(in_chat, turn);
     // Its AI calls and searches are the Voice Assistant's in the network
     // receipts (net.rs), though they run Chat's code — and say so when the
-    // window in front went with them.
-    let feature = if took_window { crate::privacy::net::Feature::AssistantScreen } else { crate::privacy::net::Feature::Assistant };
+    // window in front went with them, or the question came from a phone.
+    let feature = if !pc {
+        crate::privacy::net::Feature::AssistantPhone
+    } else if took_window {
+        crate::privacy::net::Feature::AssistantScreen
+    } else {
+        crate::privacy::net::Feature::Assistant
+    };
     let turn = crate::privacy::net::within(feature, turn).await;
     let (feed, said, carded_early, question_id, answer_id) = {
         let st = streamed.lock();
@@ -1038,14 +1163,17 @@ async fn answer(app: AppHandle, generation: u64, since: u64, question: String) {
                 TURN,
                 serde_json::json!({ "phase": "superseded", "conversationId": conv, "userMessageId": question_id }),
             );
-            give_up(&app, generation);
+            asker.give_up(&app);
             return;
         }
         Err(e) => {
-            // Half an answer said: it stops there.
+            // Half an answer said: it stops there (a phone's only if it's
+            // still its voice speaking).
             if let Some(feed) = &feed {
                 feed.close();
-                crate::voice::tts::stop();
+                if pc || (answer_id.is_some() && crate::voice::tts::speaking_id() == answer_id) {
+                    crate::voice::tts::stop();
+                }
             }
             // ■ before any of the answer came: the question stays, nothing
             // went wrong.
@@ -1059,7 +1187,7 @@ async fn answer(app: AppHandle, generation: u64, since: u64, question: String) {
                     TURN,
                     serde_json::json!({ "phase": "failed", "conversationId": conv, "userMessageId": question_id, "error": e }),
                 );
-                give_up(&app, generation);
+                asker.give_up(&app);
                 return;
             }
             // The passage it was about back over the box, to ask again (as a
@@ -1081,7 +1209,7 @@ async fn answer(app: AppHandle, generation: u64, since: u64, question: String) {
                         serde_json::json!({ "phase": "failed", "conversationId": conv, "userMessageId": question_id, "error": e }),
                     );
                     cant_read(&app, &question, conv, true);
-                    give_up(&app, generation);
+                    asker.give_up(&app);
                     return;
                 }
             }
@@ -1097,10 +1225,10 @@ async fn answer(app: AppHandle, generation: u64, since: u64, question: String) {
                 TURN,
                 serde_json::json!({ "phase": "failed", "conversationId": conv, "userMessageId": question_id, "error": e }),
             );
-            if current(generation) {
-                crate::notices::alert::show_soon(&app, failed_alert(&e));
+            if asker.current() {
+                asker.alert(&app, failed_alert(&e));
             }
-            give_up(&app, generation);
+            asker.give_up(&app);
             return;
         }
     };
@@ -1115,19 +1243,46 @@ async fn answer(app: AppHandle, generation: u64, since: u64, question: String) {
             "show": focused,
         }),
     );
+    // The phone has the checked answer.
+    if let Asker::Phone(p) = &asker {
+        if p.current() {
+            p.answer(&turn.reply, true);
+        }
+    }
     // Already speaking (the answer was spoken as it came): the rest of what's
     // said, now the answer is whole and checked.
     if let Some(feed) = feed {
-        finish_streamed(&app, generation, since, &question, &turn, &feed, said, carded_early, &cfg);
+        finish_streamed(&app, &asker, since, &question, &turn, &feed, said, carded_early, &cfg);
         return;
     }
     // A meeting or a call that started while the answer was coming: shown,
     // not read aloud.
     let meeting = crate::voice::tts::meeting_quiet().is_some();
     let interrupted = crate::dictation::pipeline::dictation_state().0 != since;
-    // Read now: the switch may have moved while the answer was coming.
-    let voice_on = crate::config::load().speak_replies;
+    // Read now: the switch may have moved while the answer was coming (a
+    // phone's is always said).
+    let voice_on = crate::config::load().speak_replies || !pc;
     let mut how = reply(voice_on, meeting, interrupted);
+    // A phone's answer: the whole of what's said through its voice, nothing
+    // on this PC's bar.
+    if let Asker::Phone(p) = &asker {
+        if !p.current() {
+            return;
+        }
+        let (said, _) = spoken_answer(&turn.reply, web_sources(&turn), SpokenLength::configured(&crate::config::load()));
+        if how == Reply::Speak {
+            match p.voice(&message_id) {
+                Ok(feed) => {
+                    feed.push(crate::voice::tts::utterances(&said));
+                    feed.close();
+                }
+                Err(e) => tracing::info!("Voice Assistant: couldn't start the phone's voice ({e})"),
+            }
+        }
+        tracing::info!(spoken = how == Reply::Speak, phone = true, meeting, interrupted, "Voice Assistant: answered");
+        return;
+    }
+    let Some(generation) = asker.shortcut() else { return };
     // Set before speaking: the voice may end (and say so) before `speak`
     // returns.
     let ev = {
@@ -1207,7 +1362,7 @@ async fn answer(app: AppHandle, generation: u64, since: u64, question: String) {
 #[allow(clippy::too_many_arguments)]
 fn finish_streamed(
     app: &AppHandle,
-    generation: u64,
+    asker: &Asker,
     since: u64,
     question: &str,
     turn: &crate::chat::turn::ChatTurn,
@@ -1218,9 +1373,23 @@ fn finish_streamed(
 ) {
     let meeting = crate::voice::tts::meeting_quiet().is_some();
     let interrupted = crate::dictation::pipeline::dictation_state().0 != since;
-    let how = reply(crate::config::load().speak_replies, meeting, interrupted);
+    // A phone's answer is always said.
+    let how = reply(crate::config::load().speak_replies || asker.shortcut().is_none(), meeting, interrupted);
     let (said_text, shown) = spoken_answer(&turn.reply, web_sources(turn), SpokenLength::configured(&crate::config::load()));
-    let still = current(generation);
+    let still = asker.current();
+    // A phone's: the rest of it on the phone, or nothing more; this PC's bar
+    // and capsule aren't its.
+    let Some(generation) = asker.shortcut() else {
+        if how == Reply::Speak && still {
+            let rest: Vec<String> = crate::voice::tts::utterances(&said_text).into_iter().skip(said).collect();
+            if !rest.is_empty() {
+                feed.push(rest);
+            }
+        }
+        feed.close();
+        tracing::info!(spoken = how == Reply::Speak && still, streamed = true, phone = true, meeting, interrupted, "Voice Assistant: answered");
+        return;
+    };
     if how == Reply::Speak && still {
         let rest: Vec<String> = crate::voice::tts::utterances(&said_text).into_iter().skip(said).collect();
         if !rest.is_empty() {

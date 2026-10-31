@@ -74,7 +74,16 @@ Reading answers aloud: Kokoro and Windows' voices on this PC, or ElevenLabs on t
   `push` says so (`false`). `ready_sentences(md, n, done)`: the sentences
   of a streamed answer's first block the voice can have now — never the
   one still being written. Test mode records the whole streamed utterance
-  when its feed closes (`streamed: true`). **A read-aloud job** (`Job.track`
+  when its feed closes (`streamed: true`). **Somewhere else than this PC's
+  speakers** (Yap Link, 2026-10-31, [link.md](./link.md)):
+  `speak_streamed_to(message_id, voicing, opener)` is the same streamed job
+  with the caller's output — the phone's `PhonePlayback` (`link/voice.rs`:
+  each piece brought to mono 24 kHz and sent down its socket; "done" on a
+  clock of the audio's length; `Opened.keep` a guard whose drop says
+  `speak_end`) — and `phone_voicing(cfg)` its voice: the one Settings picked
+  with "Speak replies" on, else Kokoro if downloaded, else Windows voices
+  (never a cloud voice not switched on). One speaker still: it stops what this
+  PC was saying, and a dictation or a meeting stops it. **A read-aloud job** (`Job.track`
   + `first`: the `Track`'s shown sentences from there): each sentence is
   said as `said_text` writes it (`inline_text` + `normalize::for_speech`),
   made only once the one before it **plays** (`wait_turn`: one sentence

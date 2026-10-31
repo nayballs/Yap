@@ -58,10 +58,10 @@ pub mod registry;
 mod speaker;
 mod text;
 
-pub use playback::set_volume;
+pub use playback::{set_volume, Opened, Opener, Playback};
 pub use speaker::{
     init, meeting_quiet, pause, position, prepare_for_reading, read, ready_sentences, resume, speak, speak_streamed,
-    speaking_id, stop, stop_for_dictation, Feed, Track, TtsState,
+    speak_streamed_to, speaking_id, stop, stop_for_dictation, Feed, Track, TtsState,
 };
 pub use text::{brief, lead, sentences, speakable_blocks, utterances};
 
@@ -261,6 +261,21 @@ pub fn voicing_for(cfg: &crate::config::YapConfig, timed: bool) -> Voicing {
         voice: choice.voice,
         cloud: Some(CloudPlan { provider: elevenlabs::ID, local: fallback, key: key_fp, choice: choice_fp }),
     }
+}
+
+/// **Who reads an answer on a phone** (Yap Link, `link/voice.rs`): with
+/// "Speak replies" on, the voice Settings picked ([`voicing`]: ElevenLabs
+/// too, with its local stand-in); with it off, the phone still talks — it
+/// was asked out loud, into a headset — in Yap's own voice: Kokoro when it's
+/// downloaded, else Windows voices (never a cloud voice the person didn't
+/// switch on).
+pub fn phone_voicing(cfg: &crate::config::YapConfig) -> Voicing {
+    if cfg.speak_replies {
+        return voicing(cfg);
+    }
+    let engine = engine(kokoro::ID);
+    let voice = if engine.id() == kokoro::ID { kokoro::spoken_voice(&cfg.tts_voice).to_string() } else { cfg.tts_windows_voice.clone() };
+    Voicing { engine, voice, cloud: None }
 }
 
 /// The engines Settings lists: `(id, name)`.

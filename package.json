@@ -12,6 +12,7 @@
     "test:app:build": "node e2e/build.mjs",
     "test:real": "node e2e-real/build.mjs && playwright test -c e2e-real",
     "test:real:build": "node e2e-real/build.mjs",
+    "test:link": "node --test e2e-link/dsp.test.mjs && playwright test -c e2e-link",
     "eval": "node scripts/eval.mjs",
     "hooks:install": "node scripts/install-hooks.mjs",
     "privacy:scan": "node scripts/privacy-guard.mjs --scan-tree",

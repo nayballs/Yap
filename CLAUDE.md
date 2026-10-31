@@ -267,6 +267,9 @@ One folder per area (an area's `<area>.rs` lists its modules); a big module's pa
 - `integrations/mcp.rs` — `yap.exe mcp`: Yap's MCP server over the local API (meetings + notes only).
 - `integrations/mcp_clients.rs` — "Add to Claude / ChatGPT / …": edits AI apps' configs safely.
 
+**Yap Link (the phone)** — [link.md](./docs/architecture/link.md)
+- `link.rs` (+ `link/`: server, cert, pairing, devices, session, voice, models, lan, wire, page) — Yap's AI from a paired phone on the home Wi-Fi (Settings → Phone, off by default): HTTPS on 51443 to home-network peers only (never a Public network), a self-signed certificate (`<data>/link/`), the phone's page embedded from `src-tauri/link-page/`, a WebSocket (protocol v1, `wire.rs`); pairing by a one-time QR token and a 4-digit code on both screens (`link_devices.json`: secrets' hashes); a question transcribed on the warm engine, asked as the Voice Assistant asks (`assistant::ask_from_phone`), its voice rendered for the phone (`speak_streamed_to`), never this PC's speakers; Chat's model switched from the phone.
+
 **Accounts** — [accounts.md](./docs/architecture/accounts.md)
 - `auth.rs` — optional accounts: browser/email/phone sign-in, the session, where you're signed in.
 
@@ -322,6 +325,7 @@ One folder per area (an area's `<area>.rs` lists its modules); a big module's pa
 - `settings/MemorySection.svelte` + `stores/memory.svelte.js` — Settings → Assistant → Memory and the "Yap remembered…" toast ([memory.md](./docs/architecture/memory.md)).
 - `settings/SkillsPage.svelte` + `stores/skills.svelte.js` + `core/skills.js` + `components/SkillMenu.svelte` — Settings → Assistant → Skills (Yap's, a copy, your own) and the "/" menu in every box that runs one (the notepad's and Notes' Ask, Chat, the Meetings view's Ask bar); Chat's and the Meetings view's one-tap prompts ([chat-and-assistant.md](./docs/architecture/chat-and-assistant.md#skills-and-one-tap-prompts-2026-10-29)).
 - `settings/AccountSection.svelte` — Settings → Account ([accounts.md](./docs/architecture/accounts.md)).
+- `settings/PhonePage.svelte` + `components/LinkPairPrompt.svelte` — Settings → Phone (Yap Link: the switch, Pair a phone's QR code, the paired phones with Remove) and the main window's "Allow ‘…’ to use Yap? Code 4821" ([link.md](./docs/architecture/link.md)).
 - `settings/ModelManager` / `ModelRow` (downloads in `stores/modelStore.svelte.js`, kept when you leave the page; the catalogue `core/speechModels.js`), `onboarding/` (`Onboarding.svelte`, its eight steps — model, languages, mic and its quiz, cleanup, calendar, tray, try it, typing speed — `setupState.svelte.js`), `ui/` — speech models, first run, primitives, right-click menus.
 - Window config (`tauri.conf.json`) — [app-shell.md](./docs/architecture/app-shell.md#window-config-src-tauritauriconfjson).
 
@@ -384,6 +388,7 @@ the **latest stable** toolchain — keep local Rust current (`rustup update`).
 - **Say in bold whether the maintainer can use the PC** whenever a big run starts or ends: **Hands off the keyboard (about N min)** for robot tests, which take the keyboard and focus; **You can use the PC** for the UI suite, builds and agent batches, adding that it may feel slower. Repeat it when it changes, and say plainly when it's all clear.
 - `npm run test:app` — the end-to-end UI suite: Playwright drives a real stub debug build over CDP (~35 min for all 530+; one spec in seconds), leaving named screenshots in `test-results/app/screenshots/`; its windows sit behind yours. Guide: [`docs/e2e-tests.md`](./docs/e2e-tests.md).
 - `npm run test:real` — real-app robot tests: a robot-mode Yap pastes into real windows the harness opens (`--engines` build: real STT). ⚠ **It takes the keyboard focus for ~2 min** (local only, not CI): it starts only when the PC has been idle 10 min (`YAP_ROBOT_FORCE=1` when the person says so) and stops on any real input. Guide: [`docs/e2e-tests.md`](./docs/e2e-tests.md) "Real-app robot tests".
+- `npm run test:link` — Yap Link's phone page (`src-tauri/link-page/`): its sound maths in Node, then the page in headless Chromium (or Edge) against a mocked PC and a faked mic (~40 s, nothing on screen, no Yap build). Guide: [its README](./src-tauri/link-page/README.md).
 - `npm run privacy:scan` / `npm run test:privacy` — the privacy guard over the whole tree, and its own tests ([build-and-test.md](./docs/architecture/build-and-test.md#the-privacy-guard-scriptsprivacy-guardmjs)).
 - `npm run eval` — model evaluations: real models through Yap's own Chat code, every request logged; use it before changing a prompt, a tool or the default local model. Guide: [`docs/model-evals.md`](./docs/model-evals.md).
 - `yap.exe dictation-check run <dir> --cleanup` (an engines debug build, e.g. `E:\t-real`) — the maintainer's own dictations replayed through speech-to-text and cleanup against a baseline: before pushing any change to either. The set is private (`../yap-private/dictation-tests/`, its README); never copy it here. [build-and-test.md](./docs/architecture/build-and-test.md#your-own-dictations-as-a-test-set-yapexe-dictation-check).
@@ -459,7 +464,7 @@ Everything lives in `%APPDATA%/yap/` (portable: `<exe>/Data/`): `config.json`,
 `language_nudges.json` (the "You spoke French" answers), `notices.json`, `memory.json` (what Yap remembers about you), `writing_samples.json` (your writing samples), `chat-images/` (Chat's screenshots, Snip to Chat), `connections.json` (a week of network receipts: hosts and purposes, never content), `quieted_apps.json`
 (only mid-dictation), `stt_speed.json` (each model's device timings),
 `recent-audio/` (a day of dictation audio), `meeting-audio/` (each meeting's audio as
-FLAC, 14 days; `cuts.json`: lines deleted from it), `search-index/` (search by meaning's vectors: notes, chats, memory; no text), `icons/`, `logs/`. Every JSON
+FLAC, 14 days; `cuts.json`: lines deleted from it), `search-index/` (search by meaning's vectors: notes, chats, memory; no text), `link_devices.json` (paired phones: secrets' hashes only) and `link/` (Yap Link's certificate), `icons/`, `logs/`. Every JSON
 store writes atomically and quarantines a corrupt file instead of crashing —
 config.json too: set aside, never saved over, the person told; its saves one at a time
 (`config::update`; [config-and-data.md](./docs/architecture/config-and-data.md)). A write
@@ -482,7 +487,7 @@ web search, spoken replies and search by meaning (its model downloads on demand)
 - **Dictation is complete and real**: local transcription (Whisper/Vulkan + ONNX/DirectML, or the processor where that's faster on the PC), push-to-talk, AI cleanup (cloud or on-device Qwen; a style per kind of app, offered in first setup) with "Use what I said", Commands, saved transforms on one key (Polish, Translate…), My languages (several languages, a language or translation per shortcut, the "You spoke French" nudge), smart pasting into terminals and chat apps, dictionary learning, Undo, a day of audio to run a dictation again.
 - **Meetings**: recorder (You/Them), its audio kept on disk (crash recovery, Transcribe again, ▶ a line), rolling digests + action plan, the notepad, call detection, guard rails, the calendar, beta speaker separation.
 - **AI**: Chat with note tools, Ask across meetings (search by meaning on this PC, answers citing the moment), the Voice Assistant, spoken replies (Kokoro, or ElevenLabs on your key), Read aloud anywhere (karaoke card on the bar), web search, opening apps, memory (learned from chats, kept on this PC, names fed to dictation), Snip to Chat (a screenshot of any screen into Chat, HDR right; the overlay up ~50–60 ms after Win+Alt+S; read by the on-device 4B itself with its optional projector).
-- **Around it**: MCP server + local API, optional accounts (live at `auth.contextmirror.com`), installer + auto-updater on stable and nightly, network receipts (every connection, by purpose) and Report a problem (a diagnostic file you check, never uploaded).
+- **Around it**: MCP server + local API, Yap Link (home preview: ask Yap's AI from a paired phone on the home Wi-Fi, the answer spoken on the phone), optional accounts (live at `auth.contextmirror.com`), installer + auto-updater on stable and nightly, network receipts (every connection, by purpose) and Report a problem (a diagnostic file you check, never uploaded).
 - Much is unit-, e2e- and robot-tested but not yet tried in real use (a real call, real AI apps, answers heard on speakers…).
 - **Not yet done**: search by meaning outside Ask across meetings, a rich notes editor, the call app's speaker names checked in a real call, one-click Outlook, a streaming STT model, Authenticode signing, non-Windows.
 

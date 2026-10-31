@@ -73,7 +73,9 @@ points the suite at an exe directly), so it never competes with a running
   `e2e_dictation_timing { floorMs,
   sttMs, forget }` brings "Taking longer than usual…" sooner and slows the
   stub's transcription, `e2e_dictation_cap { limitMs, warnMs }` shortens
-  the 15-minute length limit, `YAP_E2E_MODEL_LOAD_MS` slows the
+  the 15-minute length limit, `YAP_E2E_LINK_PORT` (0 = a free one) is the
+  port Yap Link listens on, on 127.0.0.1 only in a test run (`link_status` says which; `e2e/link.spec.js`
+  drives the real phone page in a headless browser), `YAP_E2E_MODEL_LOAD_MS` slows the
   startup model load down, `e2e_coaching_reset` makes every
   push-to-talk hint due again, `e2e_mic_privacy { blocked }` stands in for
   Windows' microphone privacy switches (a test run reads no registry) and
