@@ -1603,6 +1603,21 @@ pub fn reset() -> Vec<u64> {
     })
 }
 
+/// Delete some of your data (`privacy/reset.rs`): the notes `gone` picks
+/// (the meetings, or the other notes) taken away in one write; the folders
+/// and actions stay. Returns their ids: the caller clears what went with
+/// them store by store, as [`reset`]'s does.
+pub fn remove_where(gone: impl Fn(&Note) -> bool) -> Vec<u64> {
+    with_store(|store| {
+        let ids: Vec<u64> = store.notes.iter().filter(|n| gone(n)).map(|n| n.id).collect();
+        if !ids.is_empty() {
+            store.notes.retain(|n| !ids.contains(&n.id));
+            save_to_disk(store);
+        }
+        ids
+    })
+}
+
 /// [`modify`], then the note taken away for good when `gone` says so of it
 /// as changed, under the same lock: a quick note emptied (`quick_note.rs`:
 /// a blank note is never kept). `Ok(None)`: it went.
@@ -1642,19 +1657,27 @@ pub fn modify_or_remove<R>(
 fn forget_extras(id: u64) {
     // Tasks added in its Tasks tab, and its archive marks, go with it (note
     // ids come round again: tasks.json, task_store.rs).
-    task_store::forget_note(id);
+    task_store::forget_notes(&[id]);
     // Its meeting audio goes with it (meeting_audio.rs), its Ask threads
     // (chat/note_chats.rs) and its vectors in the search index
     // (search/index.rs).
     crate::meetings::meeting_audio::forget(id);
-    // Its summary job, retired (its run never writes into a new note given
-    // the id: `still_the_note`).
-    crate::meetings::meeting_end::forget(id);
-    crate::chat::chats::delete_for_note(id);
+    crate::chat::chats::delete_for_notes(&[id]);
     crate::search::removed();
-    // Its version history and its pin (notes/versions.rs, notes/pins.rs).
-    versions::forget(id);
-    pins::forget(id);
+    forget_own(&[id]);
+}
+
+/// What only the notes store keeps of deleted notes `ids`, outside its
+/// lock: each one's summary job, retired (its run never writes into a new
+/// note given the id: `still_the_note`), its version history and its pin
+/// (notes/versions.rs, notes/pins.rs). [`forget_extras`] and Delete some of
+/// your data (`privacy/reset.rs`, which clears the other stores its own way).
+pub fn forget_own(ids: &[u64]) {
+    for &id in ids {
+        crate::meetings::meeting_end::forget(id);
+        versions::forget(id);
+    }
+    pins::forget_many(ids);
 }
 
 #[cfg(test)]

@@ -197,6 +197,40 @@ pub fn reset() -> usize {
     gone
 }
 
+/// Delete some of your data (`privacy/reset.rs`): conversations
+/// `conversations` and notes `notes` went while what Yap remembers stays.
+/// What the passes read of them, and the chats waiting for one, go (ids
+/// come round again: a new chat given one is read from its start), and an
+/// item that came from one keeps where it came from by kind and title only.
+/// What's remembered is never changed. Whether anything was.
+pub fn forget_sources(conversations: &[u64], notes: &[u64]) -> bool {
+    if conversations.is_empty() && notes.is_empty() {
+        return false;
+    }
+    with_store(|s| {
+        let before = (s.read.len(), s.pending.len(), s.meetings.len());
+        s.read.retain(|c, _| !conversations.contains(c));
+        s.pending.retain(|c| !conversations.contains(c));
+        s.meetings.retain(|n| !notes.contains(n));
+        let mut changed = before != (s.read.len(), s.pending.len(), s.meetings.len());
+        for item in s.items.iter_mut() {
+            let gone = match (item.source.kind.as_str(), item.source.id) {
+                ("chat", Some(id)) => conversations.contains(&id),
+                ("meeting", Some(id)) => notes.contains(&id),
+                _ => false,
+            };
+            if gone {
+                item.source.id = None;
+                changed = true;
+            }
+        }
+        if changed {
+            save_to_disk(s);
+        }
+        changed
+    })
+}
+
 // ---- app handle, events ------------------------------------------------------------------------
 
 static APP: OnceLock<AppHandle> = OnceLock::new();

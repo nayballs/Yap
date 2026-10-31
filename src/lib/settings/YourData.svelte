@@ -1,16 +1,21 @@
 <script>
-  // Settings → Privacy & data → Your data: Download your data and Reset
-  // app (src-tauri/src/privacy/export.rs, reset.rs).
+  // Settings → Privacy & data → Your data: Download your data, Delete some
+  // of your data and Reset app (src-tauri/src/privacy/export.rs, reset.rs).
   //
   // - Download your data: one .zip of everything Yap keeps about you —
   //   history, notes and meetings, chats, tasks, memory, the dictionary and
   //   snippets, settings without keys —, through Windows' Save dialog, never
   //   uploaded. The tick box adds the audio and screenshots and says their
   //   size. A big one shows its progress, with Cancel.
-  // - Reset app: "Clear everything and keep my settings". Yap's confirm
-  //   dialog names exactly what goes and what stays (`data_reset_plan`), and
-  //   offers Download your data first. Done without a restart: every window
-  //   is told (`yap-data-reset`).
+  // - Delete some of your data: a tick box per kind (DeleteSomeData.svelte,
+  //   each with how much there is), then Yap's confirm dialog naming what
+  //   goes and how much; each kind cleared as Reset app clears it
+  //   (`data_delete`).
+  // - Reset app: "Clear everything and keep my settings" — every kind. Yap's
+  //   confirm dialog names exactly what goes and what stays
+  //   (`data_reset_plan`), and offers Download your data first.
+  // Both are done without a restart: every window is told (`yap-data-reset`),
+  // and both wait for a dictation or a meeting (said in a toast, no dialog).
   import { invoke } from '@tauri-apps/api/core';
   import { listen } from '@tauri-apps/api/event';
   import { onMount, tick } from 'svelte';
@@ -19,6 +24,7 @@
   import Button from '../ui/Button.svelte';
   import ConfirmDialog from '../ui/ConfirmDialog.svelte';
   import DownloadProgress from '../ui/DownloadProgress.svelte';
+  import DeleteSomeData, { amount } from './DeleteSomeData.svelte';
   import { toast } from '../ui/toast.svelte.js';
   import { showSaveError } from '../notices/saveErrors.js';
   import { formatBytes } from '../core/downloads.js';
@@ -88,21 +94,80 @@
     saved = null;
   }
 
+  // reset.rs `Plan`: every kind with how much there is, what stays, and why
+  // nothing can go now (a dictation, a meeting recording).
+  let plan = $state(null);
+
+  async function loadPlan(failTitle) {
+    try {
+      plan = await invoke('data_reset_plan');
+      return plan;
+    } catch (err) {
+      toast({ title: failTitle, description: String(err), variant: 'destructive' });
+      return null;
+    }
+  }
+
+  // ---- Delete some of your data ----
+  let pickOpen = $state(false);
+  let pickButton = $state(null);
+  let confirmOpen = $state(false);
+  let deleting = $state(false);
+  let chosen = $state([]); // kinds, as the picker handed them back
+
+  const chosenLines = $derived((plan?.goes ?? []).filter((l) => chosen.includes(l.kind)));
+
+  async function askDelete() {
+    const p = await loadPlan("Couldn't look at your data");
+    if (!p) return;
+    if (p.blocked) {
+      toast({ title: "Yap can't delete your data right now", description: p.blocked, variant: 'destructive' });
+      return;
+    }
+    pickOpen = true;
+  }
+
+  function confirmDelete(kinds) {
+    chosen = kinds;
+    confirmOpen = true;
+  }
+
+  async function doDelete() {
+    if (deleting || !chosen.length) return;
+    deleting = true;
+    const names = chosenLines.map((l) => l.label);
+    try {
+      await invoke('data_delete', { kinds: chosen });
+      confirmOpen = false;
+      pickOpen = false;
+      toast({ kind: 'done', title: 'Deleted from this PC', description: `${names.join(', ')}. No restart needed.` });
+      tick().then(() => pickButton?.querySelector('button')?.focus({ preventScroll: true }));
+    } catch (err) {
+      // Cleared in memory; a store that couldn't be saved is said, with Try again.
+      if (!showSaveError(err)) {
+        toast({ title: "Couldn't delete your data", description: String(err), variant: 'destructive' });
+      } else {
+        confirmOpen = false;
+        pickOpen = false;
+      }
+    } finally {
+      deleting = false;
+      loadSummary();
+    }
+  }
+
   // ---- Reset app ----
   let resetOpen = $state(false);
   let resetting = $state(false);
-  let plan = $state(null); // reset.rs `Plan`
   let resetButton = $state(null);
 
   async function askReset() {
-    try {
-      plan = await invoke('data_reset_plan');
-    } catch (err) {
-      toast({ title: "Couldn't reset Yap", description: String(err), variant: 'destructive' });
-      return;
-    }
-    if (plan?.blocked) {
-      toast({ title: "Yap can't reset right now", description: plan.blocked, variant: 'destructive' });
+    const p = await loadPlan("Couldn't reset Yap");
+    if (!p) return;
+    // A store Yap couldn't read just now holds a reset back (it'd come back).
+    const why = p.blocked || p.goes.find((l) => l.unread)?.unread;
+    if (why) {
+      toast({ title: "Yap can't reset right now", description: why, variant: 'destructive' });
       return;
     }
     resetOpen = true;
@@ -169,12 +234,50 @@
       {#if audioText}<span class="size">{audioText}</span>{/if}
     </label>
   {/if}
+  <Row
+    label="Delete some of your data"
+    desc="Pick what goes: your dictation history, meetings, chats, memory, logs and more. Your settings stay"
+    setting="delete-some-data"
+  >
+    <span bind:this={pickButton}>
+      <Button variant="secondary" size="sm" disabled={stage === 'saving'} onclick={askDelete}>Delete…</Button>
+    </span>
+  </Row>
   <Row label="Reset app" desc="Clear everything and keep your settings, dictionary and models" setting="reset-app">
     <span bind:this={resetButton}>
       <Button variant="danger" size="sm" disabled={stage === 'saving'} onclick={askReset}>Reset app…</Button>
     </span>
   </Row>
 </Group>
+
+{#if pickOpen && plan}
+  <DeleteSomeData
+    {plan}
+    busy={deleting}
+    returnFocus={pickButton?.querySelector('button')}
+    onnext={confirmDelete}
+    onclose={() => (pickOpen = false)}
+  />
+{/if}
+
+<ConfirmDialog
+  bind:open={confirmOpen}
+  title="Delete these for good?"
+  body="They go from this PC and can't be brought back."
+  confirmLabel="Delete"
+  busyLabel="Deleting…"
+  busy={deleting}
+  onconfirm={doDelete}
+>
+  <ul class="goes" aria-label="What goes">
+    {#each chosenLines as g (g.kind)}
+      <li>
+        {g.label}{#if !g.empty}<span class="count">{` · ${amount(g)}`}</span>{/if}
+      </li>
+    {/each}
+  </ul>
+  <p class="stays-h">Your settings, dictionary, snippets and models stay.</p>
+</ConfirmDialog>
 
 <ConfirmDialog
   bind:open={resetOpen}
@@ -188,10 +291,12 @@
 >
   {#if plan}
     <ul class="goes" aria-label="What goes">
-      {#each plan.goes as g (g.id)}
+      {#each plan.goes.filter((g) => !g.empty) as g (g.kind)}
         <li>
-          {g.label}{#if g.count}<span class="count">{` · ${g.count}`}</span>{/if}
+          {g.label}<span class="count">{` · ${amount(g)}`}</span>
         </li>
+      {:else}
+        <li>Nothing is kept yet: your settings are all there is.</li>
       {/each}
     </ul>
     <p class="stays-h">These stay:</p>
