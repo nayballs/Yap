@@ -1241,7 +1241,31 @@ keeps the simple set). **Not yet tried**: a cloud model's run (the
 Haiku command is ready: credits), the dev build by hand, the scroll kept
 per view (in the code, not in a spec), a long document's pages read by a
 real model. **Not done**: pinned comment threads (how they'd fit:
-chat-and-assistant.md), a rich editor.
+chat-and-assistant.md).
+
+**Documents: stream-in and the page you can edit** (2026-10-31,
+chat-and-assistant.md "The Chat view"). Stage 1: Chat's writing flows onto
+the page line by line under a "Chat" caret (paced in from the bursts it
+comes in; as it comes with motion reduced), the sections still to write as
+grey intent lines, the page drawn a piece at a time. Stage 2: Preview is an
+editor once Chat has written (TipTap on ProseMirror, its own chunk), with a
+toolbar — text style, code, table, checklist, + insert — and the note stays
+markdown: read and written back untouched it comes out character for
+character, a change touches only its block. **Tested**: no-app specs
+(`doc-stream.spec.js`: the shown pieces, the pace, the page drawn in
+pieces, the caret; `doc-markdown.spec.js`: the round trip over a build and
+20 odd cases, a change per kind of block, escapes, new blocks), e2e
+(`chat-documents.spec.js`: the intent lines, a section flowing in frame by
+frame and ending as saved, motion reduced; `chat-documents-editor.spec.js`,
+3 tests: typing a word, a cell, an item with the note otherwise unchanged,
+Ctrl+Z, every toolbar action, the toolbar waiting while Chat writes, Chat's
+change landing with the person's words kept, Undo, find; light and dark;
+the rich spec's "Change this…" and find now run on the editor). **Not yet
+tried**: the dev build by hand (how it feels to type in, the swap from the
+drawn page to the editor as a turn ends), a real model's stream (the
+fake's comes in thirds), dictating into the page, pasting from a browser,
+a very long document's typing speed. **Not done**: typing on the page while
+Chat writes (Source takes it), pictures, column alignment from the toolbar.
 
 **Meeting search and Ask across meetings** (2026-10-25,
 [search.md](./search.md)): every meeting and note cut into passages and read

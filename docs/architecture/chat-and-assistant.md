@@ -1385,14 +1385,46 @@ screenshots and their prompts, +, the box, the mic, Send / ■, `ModelChip`).
 **The document panel** (2026-10-30, `DocPanel.svelte` + `chatDoc.svelte.js`;
 `chat/documents.rs` above): a document a turn makes or changes opens to
 the right of the conversation. **Opens** on the turn's `document` event
-(the outline at once: each section still to come a quiet "Writing: Gear…"
-line — `markdown.js`' `md-pending`, `renderMarkdown(md, {writing})` —
-never the placeholder's syntax), **fills** as `section` events stream a
+(the outline at once: each section still to come a quiet grey line, its
+name and what it will say — "[**Gear**: what to wear and where to find
+it]", after Claude's own documents' grey intents; `markdown.js`'
+`md-pending`, the brackets drawn by the panel's CSS — never the
+placeholder's syntax), **fills** as `section` events stream a
 `write_section`'s text into its placeholder's place, or a
 `rewrite_section`'s over the section it rewrites (a new one at the end;
-`shownText`, `sectionRange`; half-written markdown closed off), and takes
-the note's text as each section lands (`yap-note-changed`, origin
-"chat"). **A page to read** (2026-10-30, measured against Claude's own
+`docStream.js` `shownSegments`, `docSections.js` `sectionRange`;
+half-written markdown closed off), and takes the note's text as each
+section lands (`yap-note-changed`, origin "chat"). **Stream-in**
+(2026-10-31, after Claude's documents filling while you watch): the text
+comes in bursts — Rust sends a call's arguments so far at most every
+50 ms, the fake model's in thirds, a provider that won't stream the
+section whole — and the page lets it **flow in line by line** at a pace
+that follows how far behind it is (`revealStep`: at least 90 characters a
+second, else the backlog over 0.3 s, so a burst is caught up in about a
+second; a frame at a time, a timer standing in when frames don't come; a
+section's own heading shown whole from the start, `revealFrom`; never
+inside an emoji, `revealCut`). Each section on its way is `chatDoc`'s
+`live` (key → its text as it came); one that **lands** stays live as
+saved (`settled`, found by its own heading, `sectionText`) until the
+panel has all of it shown (`release`), so the end of a section never
+jumps in; while a turn writes, a section a provider sent whole flows in
+the same way; one changed again after it landed (a later edit) is shown
+at once with the change marked. A **caret** sits at the end of the text
+being written: a thin bar in the accent with a small tab over it,
+"Chat" (Claude's documents label theirs "Claude"; in Yap the writer is
+Chat whichever model answers, as "Undo Chat's last change" says), one
+element moved as the text grows, its label drawn by CSS
+(`::after { content: attr(data-who) }`) so find and a copy never meet
+it (`docPieces.js` `placeCaret`); the page **follows** it while it's in
+view, and stays put once you scroll away. **The page is drawn a piece
+at a time** (`docPieces.js`: `splitSections` cuts it at each `#`/`##`
+heading and placeholder outside code — where a block always starts, so
+each piece draws as it would in the whole — and `drawParts` keeps every
+piece whose HTML is unchanged, setting its blocks' `data-line` to the
+page's): only the section being written is drawn again as it grows, so
+a long document costs nothing per frame and a selection elsewhere stays.
+**Motion reduced** (Settings or Windows): the text shows as it comes,
+the caret still there. **A page to read** (2026-10-30, measured against Claude's own
 document view, none of its code or CSS): a reading-width column (68ch,
 centred when the panel is wide or expanded); the title large in EB
 Garamond (`--yap-font-display`, 27px × Text size) and each section's
@@ -1434,7 +1466,8 @@ not written yet" for a document Chat stopped short of finishing.
 
 **After Claude Code's markdown file view** (2026-10-31; measured from the
 Claude desktop app's file panel and its document page, `.epitaxy-*`, none
-of its code or CSS). **Two views**: **Preview**, the page, and **Source**,
+of its code or CSS). **Two views**: **Preview**, the page (editable once
+Chat has written it: below), and **Source**,
 the markdown itself, coloured (`core/markdownSource.js`: heading marks,
 list and quote marks, a table's pipes, code, **bold** underlined, links, a
 section still to write — colour only, never a bolder or slanted face, and
@@ -1470,7 +1503,9 @@ its blocks washed in the accent a moment (`data-changed`, 1.6 s; the wash
 held, no fade, under reduced motion) and the first scrolled into view if
 it's off screen (the blocks new since the last drawing, by their HTML).
 **Each document's scroll** is kept per view while Yap runs (closed and
-opened again, switched to Source and back). Lighter details from the same
+opened again, switched to Source and back). (A change that lands the
+moment a turn's `document` event reloads the note, before the note's own
+`yap-note-changed`, is marked too: `load` counts it.) Lighter details from the same
 study: two headings in a row sit closer, paragraphs and list items wrap
 `pretty`, a code block gets a filled box, the table's header row balances
 its wrap. **Not yet: pinned comment threads** (Claude's comments on a
@@ -1481,7 +1516,93 @@ beside the note (`note-comments/<id>.json`, never notes.json, which an
 older Yap rewrites), shown in the page's margin; the open threads would go
 to the model in the question's context like the selection does, with a
 `reply_to_comment` / `resolve_comment` pair, and "Change this…" would
-become one kind of thread. **The split** (`role="separator"`): dragged, or ←/→ (Shift:
+become one kind of thread.
+
+**A page you can edit, with a toolbar** (2026-10-31, after Claude's own
+documents, which edit on TipTap and ProseMirror — nothing of their code;
+the toolbar's commands read from their bundle: text style, code, table,
+image, checklist, + insert). **Preview is an editor** once nothing's
+flowing in (`doc.streaming` false: no turn writing, no section still
+flowing in); while Chat writes, the page is drawn as stage 1 draws it and
+the toolbar waits ("Chat is writing…", its buttons off) — typing while
+Chat writes goes in Source, merged as before. **The editor**
+(`docEditor.js`, TipTap 3 on ProseMirror, MIT; its own chunk, imported
+the first time it's wanted — the panel opens on the drawn page and swaps
+the editor in, ~130 kB gzipped on top of the panel's 10): its root is the
+page's own `.docmd` (`element: {mount}`), so it reads exactly as the page
+does (headings a level down with `data-level`, tables in
+`.tableWrapper` styled as `.md-table`, a checklist item's box where its
+bullet was, the sections still to write as their grey lines); TipTap's
+own stylesheet is left out (its colours aren't Yap's: the gap cursor,
+selected node and cells are drawn from tokens). **Why TipTap, not
+Milkdown**: Milkdown's markdown goes through remark, a second markdown
+reader beside markdown-it that writes markdown back its own way (lists
+re-marked, tables re-padded), and Yap's own rules (placeholders, tasks,
+merged lists, `breaks`) would need porting to it; TipTap is the
+ProseMirror layer Claude's documents use, its nodes and commands came
+ready (lists and their keys, tables from prosemirror-tables, input rules
+like "## "), and the markdown in and out is Yap's (below). **The note
+stays markdown, exactly** (`docMarkdown.js`): `readMarkdown` reads it with
+markdown.js' own markdown-it (`markdownTokens`: Yap's rules and all) and
+each block keeps the lines it came from (`md`) and the lines before it
+(`before`): the document's blocks, every list item (its lines without
+their indent), every table row; how each was written is kept too (a
+list's `*`, a fence's `~~~`, a rule's `***`, `__bold__`, `_italic_`, a
+code span's backticks, a bare link). `writeMarkdown` writes a block that's
+as it was read (equal to the block read from those lines: `isKept`) as
+those lines, character for character, and one the person changed
+afresh — the way it was written where that's known, its unchanged items
+and rows still verbatim (a numbered list numbered in order stays so) —
+then reads it back to check it says the same (`sameBlock`: words, marks,
+links; spaces markdown drops aside) and escapes its words only when it
+doesn't ("1. " at a line's start, a `*` that would turn bold, `|` in a
+cell); a new block is plain markdown, a blank line before it. Read and
+written back untouched, every document comes out character for character
+(CRLF lines, `• ` bullets, setext headings, reference links, escapes and
+entities included); a word typed changes its line, a cell its row, a
+tick its item. What the editor can't hold as such (a list item that
+starts with a heading…) is a **raw block**: drawn as the page draws it,
+kept exactly, edited in Source. The title line (`# Title`, shown above
+the page) stays outside the editor (`splitHead`). **Saving**: every change
+goes through `doc.input` as Source's typing does (600 ms, `merge3` with
+Chat's writing, a typed version: Undo of Chat's last change and Version
+history know it); a change from outside (Chat's writing merged, Undo,
+another window) is `load`ed by replacing only the blocks that differ
+(`findDiffStart`/`End`), never in the editor's own undo history, the
+caret kept, its blocks washed a moment as the page marks them (a wash
+the page showed as the turn ended carries on in the editor). Ctrl+Z /
+Ctrl+Y are the editor's own (the person's typing); the header's Undo is
+still Chat's whole last turn. **The toolbar** (`DocToolbar.svelte`, a
+`role="toolbar"` row under the header in Preview, 28 px buttons, the ones
+on at the caret pressed): **text style** (Paragraph, Heading 1–3 — `#`,
+`##`, `###` — a menu with the current one ticked), **code** (Ctrl+E),
+**a table** (3 × 3 with a header row; in a table its menu: add a row
+below, a column to the right, delete the row, the column, the table),
+**checklist** (`- [ ] `; a numbered list or none becomes a bulleted one;
+its box ticks with a click or Ctrl+Enter) and **+** (Divider — the caret
+then on a line of its own under it —, Quote, Bulleted list, Numbered
+list, Code block); TipTap's keys too (Ctrl+B / I, Ctrl+Alt+1–6, "## ",
+"- ", "1. ", "> ", "```"). **No image button**: markdown.js draws no
+images (a model's would make Yap fetch an address), and the person's own
+pictures would need a store beside the note (`note-images/`, a URL scheme
+to draw them, Export and Copy as Markdown carrying them) — not a toolbar
+button. **No tab switcher**: Claude's tabs are pages inside one document;
+a Chat document is one note, an answer's (a second "tab" is a second
+document, with its own pill). Links: a click puts the caret in one,
+Ctrl+click opens it. **Find, "Ask about this" / "Change this…", the
+sections' rail and the scroll** work on the editor as on the page (a
+selection's lines from `selectionLines`, what's typed saved first). Not
+yet: typing on the page while Chat writes (it would need the editor to
+take Chat's streaming sections as it takes a landed change), an input
+rule for "[ ] ", column alignment from the toolbar, pasted pictures.
+Unit-tested without the app (`doc-markdown.spec.js`: the round trip,
+every block's kind, a change touching only its block, escapes, new
+blocks); e2e `chat-documents-editor.spec.js` (a word, a cell, an item typed
+— the note otherwise unchanged —, the editor's Ctrl+Z, every toolbar
+action as plain markdown, the toolbar waiting while Chat writes, Chat's
+change landing with the person's words kept, Undo marked, find, dark).
+
+**The split** (`role="separator"`): dragged, or ←/→ (Shift:
 further), Home/End on its handle; at least 320 px, the thread keeps 340;
 its width remembered in this window's `localStorage` (`yapChatDocWidth`).
 **Room**: the conversation list steps aside while a document is open
@@ -1497,7 +1618,11 @@ Tool chips for a document carry a document mark. Its own chunk, loaded
 the first time a document opens (the main window's stays near 710 kB).
 E2e: `chat-documents.spec.js` (the fake model's scripted calls; a step's
 `gate` holds it mid-turn while the spec types; Undo of a whole turn, none
-for a document the last turn made) and
+for a document the last turn made; the grey intent lines; a section
+flowing in frame by frame — many small steps, none near a burst — under
+the "Chat" caret, ending exactly as saved; motion reduced, in its
+bursts), `doc-stream.spec.js` (no app: the shown pieces, the pace, the
+page cut and drawn a piece at a time, the caret) and
 `chat-documents-rich.spec.js` (a fake named like a GPT-5 model gets the
 rich set: a table row added, a stale edit refused, "Change this…" from a
 selection — typed, dictated with test mode's `e2e_chat_dictation`, asked

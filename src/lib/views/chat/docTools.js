@@ -1,7 +1,8 @@
 // The document panel's own helpers (DocPanel.svelte's chunk, loaded the
 // first time a document opens, so the main window's stays small): where a
 // rendered block's lines are in the note, the text Copy as Markdown copies,
-// and Export as Markdown (the Notes view's `note_export`).
+// and Export as Markdown (the Notes view's `note_export`). The page itself
+// is drawn by docPieces.js.
 import { invoke } from '@tauri-apps/api/core';
 import { toast } from '../../ui/toast.svelte.js';
 import { isPlaceholder } from '../../core/markdown.js';
@@ -9,7 +10,7 @@ import { copyText } from '../../core/itemMenus.js';
 
 /**
  * How many of `content`'s lines come before the first line the panel's page
- * shows (`chatDoc`'s `shownText`: the title's, and the blank lines after
+ * shows (docStream.js `shownText`: the title's, and the blank lines after
  * it): a rendered block's `data-line` plus this is its line in the note
  * (with nothing streaming). Pure.
  */
