@@ -88,7 +88,7 @@ notepad's, the quick note's) is the same editor in `RichNote`'s chunk (5.2
 kB with its CSS on top; the Notes view's own `NoteThoughts`, 2.1 kB),
 imported the first time a window shows a note to edit, the note's plain
 box standing in until then: the main chunk keeps only that box and the
-switch to the page (+0.8 kB on 2026-10-31's 727.6 kB, most of it Vite's
+switch to the page (+0.8 kB: 738.0 → 738.8 kB on 2026-10-31, most of it Vite's
 preload lists naming two small chunks Rollup now cuts out — `SummaryFind`
 from `streaming`, Svelte's `html` helper from `markdown` — as RichNote
 shares them; the main window's first load +1.6 kB gzipped in all, the Yap
