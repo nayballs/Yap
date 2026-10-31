@@ -1,0 +1,42 @@
+---
+// The opening of a feature page: what it is in one line, the button, and the
+// page's picture beside it (a placeholder until it's captured).
+import DownloadButton from './DownloadButton.astro';
+interface Props {
+  title: string;
+  lede: string;
+  kicker?: string;
+  cta?: boolean;
+}
+const { title, lede, kicker, cta = true } = Astro.props;
+const hasVisual = Astro.slots.has('visual');
+---
+<section class="phero">
+  <div class:list={['wrap', hasVisual ? 'split split-media' : 'phero-solo']}>
+    <div class="phero-copy">
+      {kicker && <p class="kicker">{kicker}</p>}
+      <h1>{title}</h1>
+      <p class="lede">{lede}</p>
+      <slot />
+      {cta && <div class="btn-row phero-cta"><DownloadButton size="lg" meta primary /></div>}
+    </div>
+    {hasVisual && <div class="phero-visual"><slot name="visual" /></div>}
+  </div>
+</section>
+
+<style>
+  .phero {
+    padding-block: clamp(48px, 7vw, 96px) clamp(48px, 6vw, 88px);
+  }
+  .phero-copy {
+    display: grid;
+    gap: 20px;
+    justify-items: start;
+  }
+  .phero-solo .phero-copy {
+    max-width: 46rem;
+  }
+  .phero-cta {
+    margin-top: 12px;
+  }
+</style>

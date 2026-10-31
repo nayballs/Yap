@@ -1,0 +1,537 @@
+---
+import Layout from '../layouts/Layout.astro';
+import HeroDemo from '../components/HeroDemo.astro';
+import DownloadButton from '../components/DownloadButton.astro';
+import DraftNote from '../components/DraftNote.astro';
+import Placeholder from '../components/Placeholder.astro';
+import LeavesTable from '../components/LeavesTable.astro';
+import Shot from '../components/Shot.astro';
+import Faq from '../components/Faq.astro';
+import Closing from '../components/Closing.astro';
+import Keys from '../components/Keys.astro';
+import { NAME, HOTKEY, TAGLINE, REPO_URL, RELEASES_URL, SITE_URL, DOWNLOAD_STABLE } from '../brand';
+import { faqFor } from '../data/faq';
+import { stableRelease } from '../lib/release';
+import notesShot from '../../../docs/screenshot-notes.png';
+
+const rel = await stableRelease();
+const jsonLd = {
+  '@context': 'https://schema.org',
+  '@type': 'SoftwareApplication',
+  name: NAME,
+  description: TAGLINE,
+  operatingSystem: 'Windows 10, Windows 11',
+  applicationCategory: 'ProductivityApplication',
+  url: SITE_URL,
+  downloadUrl: DOWNLOAD_STABLE,
+  ...(rel?.version ? { softwareVersion: rel.version } : {}),
+  license: 'https://opensource.org/licenses/MIT',
+  offers: { '@type': 'Offer', price: '0', priceCurrency: 'GBP' },
+};
+
+const pairs = [
+  {
+    title: 'Ums and false starts',
+    said: 'so um I was thinking we could, like, push the launch back a week',
+    typed: 'I was thinking we could push the launch back a week.',
+  },
+  {
+    title: 'A change of mind',
+    said: 'send the contract to Priya, no actually send it to Sam, he’s got the latest version',
+    typed: 'Send the contract to Sam; he’s got the latest version.',
+  },
+  {
+    title: 'A list, said out loud',
+    said: 'for the trip we need three things, one passports, two the chargers, three the train tickets',
+    typed: 'For the trip we need three things:\n1. Passports\n2. The chargers\n3. The train tickets',
+  },
+];
+---
+<Layout
+  description={`${NAME}: free, open-source dictation and meeting notes for Windows. Speech and AI run on your PC; no account, no cloud required. A local alternative to Wispr Flow and Granola.`}
+  jsonLd={jsonLd}
+>
+  <!-- Hero: the key -->
+  <section class="hero">
+    <div class="wrap hero-grid">
+      <div class="hero-copy">
+        <p class="kicker">For Windows 10 and 11. Free and open source.</p>
+        <h1>Press a key and talk. {NAME} types it.</h1>
+        <p class="lede">
+          Dictation, meeting notes and a voice assistant that run on your own PC. Speak into any app and tidy text lands
+          where your cursor is. Your voice never leaves the computer.
+        </p>
+        <div class="btn-row hero-cta">
+          <DownloadButton size="lg" meta primary />
+        </div>
+        <ul class="ticks hero-ticks">
+          <li>Speech turned into text on your PC</li>
+          <li>Dictation keeps working with the Wi-Fi off</li>
+          <li>No account, no email, no word limit</li>
+        </ul>
+        <DraftNote>
+          The plan puts “Watch the 60-second tour” (A16) beside the button; it waits for the video. Check “keeps working
+          with the Wi-Fi off” per feature before launch (plan §4.1).
+        </DraftNote>
+      </div>
+      <div class="hero-visual">
+        <HeroDemo />
+      </div>
+    </div>
+  </section>
+
+  <!-- Plain facts in place of a logo wall -->
+  <section class="facts" aria-label={`${NAME} in numbers`}>
+    <div class="wrap facts-row">
+      <p><span class="num">14</span> speech models to choose from, on any graphics card or none</p>
+      <p><span class="num">0</span> accounts or emails asked for, to download or to use it</p>
+      <p><span class="num">0</span> cookies or trackers on this site, and no telemetry in the app</p>
+      <p><span class="num">MIT</span> licence: read it, build it, change it</p>
+    </div>
+  </section>
+
+  <!-- How it works: a real sequence -->
+  <section class="section" id="how" aria-labelledby="how-h">
+    <div class="wrap">
+      <div class="section-head">
+        <h2 id="how-h">Three steps, and no account</h2>
+      </div>
+      <ol class="steps">
+        <li>
+          <div class="step-art" aria-hidden="true"><span class="step-key">{HOTKEY}</span></div>
+          <h3><span class="num step-n">1</span> Press your key</h3>
+          <p><Keys combo={HOTKEY} /> by default. Any key, combination or mouse button will do.</p>
+        </li>
+        <li>
+          <div class="step-art" aria-hidden="true">
+            <span class="step-pill">{Array.from({ length: 9 }, () => <i></i>)}</span>
+          </div>
+          <h3><span class="num step-n">2</span> Talk the way you talk</h3>
+          <p>The bar above your taskbar shows it’s listening, and the words as they’re heard.</p>
+        </li>
+        <li>
+          <div class="step-art" aria-hidden="true"><span class="step-text">Friday at 10 works for me<i></i></span></div>
+          <h3><span class="num step-n">3</span> Tidy text appears</h3>
+          <p>Right where your cursor is, in whichever app you were using. Your clipboard is put back after.</p>
+        </li>
+      </ol>
+      <p class="mt-4 muted small">Press once to start and again to stop, or hold the key while you talk. Double-tap it to keep going hands-free.</p>
+    </div>
+  </section>
+
+  <!-- Messy in, tidy out -->
+  <section class="section ruled" aria-labelledby="tidy-h">
+    <div class="wrap">
+      <div class="section-head">
+        <h2 id="tidy-h">Say it however it comes out</h2>
+        <p>
+          With AI cleanup on, {NAME} drops the ums, fixes punctuation and keeps the version you meant. If it changed too
+          much, <strong>Use what I said</strong> swaps in your exact words.
+        </p>
+      </div>
+      <div class="grid grid-3 pairs">
+        {pairs.map((p) => (
+          <figure class="pair">
+            <figcaption>{p.title}</figcaption>
+            <p class="pair-said"><span class="sr-only">You say: </span>“{p.said}”</p>
+            <p class="pair-typed"><span class="sr-only">{NAME} types: </span>{p.typed}</p>
+          </figure>
+        ))}
+      </div>
+      <p class="mt-4 muted small">
+        Cleanup is off until you choose a model: one that runs on your PC, or a provider you have a key for. Its style
+        follows the app: more formal in email, casual in chat, literal in AI prompts.
+      </p>
+    </div>
+  </section>
+
+  <!-- Windows depth -->
+  <section class="section ruled" aria-labelledby="where-h">
+    <div class="wrap split split-media">
+      <div>
+        <div class="section-head">
+          <h2 id="where-h">It knows where it’s typing</h2>
+          <p>Pasting into Windows apps has a lot of small rules. {NAME} follows them, so you don’t have to.</p>
+        </div>
+        <div class="rows">
+          <div class="row">
+            <h3>Terminals</h3>
+            <p>Each terminal gets its own paste keys. Claude Code and Codex keep your line breaks; elsewhere a command arrives as one tidy line.</p>
+          </div>
+          <div class="row">
+            <h3>Chat apps</h3>
+            <p>A short message loses its full stop. Say “at Sam” in Slack or Discord and it picks Sam from the list.</p>
+          </div>
+          <div class="row">
+            <h3>Your clipboard</h3>
+            <p>Put back after every paste, and nothing you dictate lands in Win+V history.</p>
+          </div>
+          <div class="row">
+            <h3>Admin windows</h3>
+            <p>Windows blocks pasting into them, so {NAME} leaves the text on your clipboard and tells you.</p>
+          </div>
+          <div class="row">
+            <h3>Names on screen</h3>
+            <p>Names and terms are spelled the way the window in front writes them.</p>
+          </div>
+        </div>
+      </div>
+      <figure class="term-fig">
+        <div class="term" role="img" aria-label="A coding agent in Windows Terminal with a three-line prompt that kept its line breaks">
+          <div class="term-top" aria-hidden="true"><span>Windows Terminal</span></div>
+          <div class="term-body" aria-hidden="true">
+            <p class="term-dim">PS C:\projects\shop&gt; claude</p>
+            <div class="term-box">
+              <p><span class="term-prompt">&gt;</span> Refactor the date helpers in utils/dates.ts.</p>
+              <p>&nbsp;&nbsp;Keep the public function names.</p>
+              <p>&nbsp;&nbsp;Add tests for leap years.<span class="term-caret"></span></p>
+            </div>
+            <p class="term-dim">? for shortcuts</p>
+          </div>
+        </div>
+        <figcaption class="figure-note">Three lines said in one go arrive as three lines. Drawn for this page; a real recording is to come (A4).</figcaption>
+      </figure>
+    </div>
+  </section>
+
+  <!-- Meetings -->
+  <section class="section ruled" aria-labelledby="meet-h">
+    <div class="wrap split split-media">
+      <div class="stack">
+        <h2 id="meet-h">Notes from every call, made on your PC</h2>
+        <p class="lede">
+          {NAME} notices a Teams, Zoom or Meet call and asks before it takes notes. No bot joins. Afterwards you get a
+          summary and an action plan whose owners and dates are checked against what was actually said.
+        </p>
+        <p><a href="/meetings">How meetings work</a></p>
+        <DraftNote>Every meetings claim waits for the “one real call, end to end” test (plan §3.2).</DraftNote>
+      </div>
+      <Shot
+        src={notesShot}
+        alt={`${NAME}’s notes window showing a fictional meeting, Weekly product sync: a summary with decisions and action items, and the transcript split into You and Them.`}
+        caption="A screenshot from October 2026, with made-up data. To be recaptured in light and dark (A7)."
+      />
+    </div>
+  </section>
+
+  <!-- Assistant -->
+  <section class="section ruled" aria-labelledby="ask-h">
+    <div class="wrap split split-flip split-media">
+      <div class="stack">
+        <h2 id="ask-h">Ask out loud. Hear the answer.</h2>
+        <p class="lede">
+          From any app, press the assistant’s shortcut and ask: about your notes, your meetings, your calendar, or the
+          web if you switch search on. The answer is spoken in a natural voice that runs on your PC, starting with its first sentence.
+        </p>
+        <p>Or select any text, in any app, and have it read to you, each word lit up as it’s read.</p>
+        <p><a href="/assistant">Chat and the assistant</a></p>
+      </div>
+      <Placeholder id="A9" title="The Voice Assistant, with sound" shows="Ask about a fictional meeting from another app, hear the answer start, interrupt it once. Captioned." format="MP4, 12–15 s" ratio="video" />
+    </div>
+  </section>
+
+  <!-- Your AI -->
+  <section class="section ruled" aria-labelledby="ai-h">
+    <div class="wrap">
+      <div class="section-head">
+        <h2 id="ai-h">Your AI, your choice</h2>
+        <p>Cleanup, Commands and Chat can use any of these. Every option is free in {NAME}.</p>
+      </div>
+      <div class="grid grid-3">
+        <div class="col card">
+          <span class="tag tag-amber">Works offline</span>
+          <h3>On your PC</h3>
+          <p>One click downloads a model sized to your graphics card. Nothing to sign up for, and nothing leaves the computer.</p>
+        </div>
+        <div class="col card">
+          <span class="tag">Your network</span>
+          <h3>On your own server</h3>
+          <p>Point it at Ollama, LM Studio or any OpenAI-compatible server you run.</p>
+        </div>
+        <div class="col card">
+          <span class="tag">Your key</span>
+          <h3>With a cloud provider</h3>
+          <p>Groq, OpenAI, Anthropic, Gemini or OpenRouter, on your own key. You pay them directly; {NAME} adds nothing.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Privacy -->
+  <section class="section ruled" aria-labelledby="priv-h">
+    <div class="wrap">
+      <div class="section-head">
+        <h2 id="priv-h">Your voice doesn’t leave your PC. Here’s how to check.</h2>
+        <p>
+          Not “encrypted and deleted later”: transcribed on your own hardware. Settings lists every connection
+          {NAME} makes, by purpose and host, so you can see for yourself.
+        </p>
+      </div>
+      <LeavesTable short />
+      <p class="mt-3"><a href="/privacy#what-leaves">Everything that does and doesn’t leave your PC</a></p>
+    </div>
+  </section>
+
+  <!-- Open source -->
+  <section class="section ruled" aria-labelledby="oss-h">
+    <div class="wrap split">
+      <div class="stack">
+        <h2 id="oss-h">Open code, public builds</h2>
+        <p class="lede">Every line of {NAME} is on GitHub under the MIT licence. The installers are built there in public, from the code you can read.</p>
+        <div class="btn-row mt-3">
+          <a class="btn btn-quiet" href={REPO_URL}>Read the code</a>
+          <a class="btn btn-quiet" href={RELEASES_URL}>Release notes</a>
+        </div>
+      </div>
+      <ul class="ticks oss-list">
+        <li>Built by GitHub Actions in public, not on someone’s laptop</li>
+        <li>New releases list each file’s SHA-256 checksum and a signed build provenance you can verify</li>
+        <li>Updates are signed, and the app checks the signature before installing</li>
+        <li>Issues, fixes and the docs for every part of the app are public</li>
+      </ul>
+    </div>
+    <div class="wrap mt-3">
+      <DraftNote>Checksums and build provenance landed on 25 Oct; the current stable (v0.1.0, 4 Oct) has neither. Confirm both on the next stable before launch (plan §4.2).</DraftNote>
+    </div>
+  </section>
+
+  <Faq items={faqFor('home')} />
+  <Closing />
+</Layout>
+
+<style>
+  .hero {
+    padding-block: clamp(40px, 6vw, 88px) clamp(48px, 6vw, 96px);
+  }
+  .hero-grid {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1.05fr);
+    gap: clamp(40px, 6vw, 88px);
+    align-items: start;
+  }
+  .hero-copy {
+    display: grid;
+    gap: 22px;
+    justify-items: start;
+    padding-top: clamp(0px, 3vw, 40px);
+  }
+  .hero-cta {
+    margin-top: 8px;
+  }
+  .hero-ticks {
+    font-size: 0.9375rem;
+    color: var(--t-fg-80);
+    gap: 6px;
+  }
+  @media (max-width: 1000px) {
+    .hero-grid {
+      grid-template-columns: 1fr;
+    }
+  }
+
+  .facts {
+    border-block: 1px solid var(--t-rule);
+    background: var(--t-raised-soft);
+  }
+  .facts-row {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+  .facts p {
+    padding: 26px 24px 26px 0;
+    font-size: 0.9375rem;
+    color: var(--t-fg-80);
+    line-height: 1.45;
+  }
+  .facts p + p {
+    padding-left: 24px;
+    border-left: 1px solid var(--t-rule);
+  }
+  .facts .num {
+    display: block;
+    font-size: 2.5rem;
+    line-height: 1;
+    margin-bottom: 8px;
+    color: var(--t-fg);
+  }
+  @media (max-width: 860px) {
+    .facts-row {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+    .facts p:nth-child(3) {
+      padding-left: 0;
+      border-left: 0;
+    }
+    .facts p:nth-child(n + 3) {
+      border-top: 1px solid var(--t-rule);
+    }
+  }
+
+  .steps {
+    list-style: none;
+    padding: 0;
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: clamp(20px, 3vw, 36px);
+  }
+  @media (max-width: 860px) {
+    .steps {
+      grid-template-columns: 1fr;
+    }
+  }
+  .steps li {
+    display: grid;
+    gap: 10px;
+    align-content: start;
+  }
+  .steps p {
+    color: var(--t-fg-80);
+  }
+  .step-n {
+    font-size: 1.35em;
+    margin-right: 6px;
+    color: var(--t-link);
+  }
+  .step-art {
+    display: grid;
+    place-items: center;
+    height: 132px;
+    margin-bottom: 8px;
+    border-radius: 16px;
+    background: var(--t-bg);
+    border: 1px solid var(--t-border-subtle);
+  }
+  .step-key {
+    display: grid;
+    place-items: center;
+    width: 64px;
+    height: 60px;
+    border-radius: 14px;
+    border: 1.5px solid var(--t-key-border);
+    background: var(--t-key-bg);
+    color: var(--t-key-fg);
+    font-weight: 720;
+    font-size: 1.3rem;
+    box-shadow: 0 5px 0 var(--t-key-border);
+  }
+  .step-pill {
+    display: flex;
+    align-items: center;
+    gap: 3px;
+    height: 38px;
+    padding-inline: 18px;
+    border-radius: 999px;
+    background: var(--bar-surface);
+    border: 1px solid var(--bar-border);
+    box-shadow: var(--bar-shadow);
+  }
+  .step-pill i {
+    width: 3px;
+    border-radius: 2px;
+    background: var(--bar-wave);
+    height: 8px;
+  }
+  .step-pill i:nth-child(2),
+  .step-pill i:nth-child(8) { height: 14px; }
+  .step-pill i:nth-child(3),
+  .step-pill i:nth-child(6) { height: 20px; }
+  .step-pill i:nth-child(4) { height: 12px; }
+  .step-pill i:nth-child(5) { height: 18px; }
+  .step-pill i:nth-child(7) { height: 10px; }
+  .step-text {
+    padding: 10px 14px;
+    border-radius: 10px;
+    border: 1px solid var(--t-border);
+    background: var(--t-s2);
+    font-size: 0.9375rem;
+  }
+  .step-text i {
+    display: inline-block;
+    width: 2px;
+    height: 1.1em;
+    margin-left: 2px;
+    vertical-align: -0.2em;
+    background: var(--t-fg);
+  }
+
+  .pair {
+    margin: 0;
+    display: grid;
+    gap: 10px;
+    align-content: start;
+  }
+  .pair figcaption {
+    font-weight: 640;
+  }
+  .pair-said {
+    padding: 12px 14px;
+    border-radius: 12px;
+    background: var(--bar-surface);
+    border: 1px dashed var(--t-border-hover);
+    color: var(--t-muted);
+    font-size: 0.9375rem;
+  }
+  .pair-typed {
+    padding: 12px 14px;
+    border-radius: 12px;
+    background: var(--t-s2);
+    border: 1px solid var(--t-border);
+    box-shadow: var(--t-shadow-sm);
+    white-space: pre-line;
+  }
+
+  .term-fig {
+    margin: 0;
+  }
+  .term {
+    border-radius: 12px;
+    overflow: hidden;
+    background: #1c1a16;
+    color: #eae6dc;
+    border: 1px solid #3a352b;
+    box-shadow: var(--t-shadow-menu);
+    font-family: ui-monospace, 'Cascadia Code', 'Cascadia Mono', Consolas, monospace;
+    font-size: 0.875rem;
+    line-height: 1.6;
+  }
+  .term-top {
+    padding: 8px 14px;
+    background: #2b2722;
+    color: #b8b1a2;
+    font-family: var(--font-sans);
+    font-size: 0.8125rem;
+    font-weight: 600;
+  }
+  .term-body {
+    padding: 16px 18px 18px;
+    display: grid;
+    gap: 10px;
+  }
+  .term-body p {
+    max-width: none;
+  }
+  .term-dim {
+    color: #9d968a;
+  }
+  .term-box {
+    padding: 10px 12px;
+    border: 1px solid #5b5446;
+    border-radius: 8px;
+  }
+  .term-prompt {
+    color: #f0b04a;
+  }
+  .term-caret {
+    display: inline-block;
+    width: 0.55em;
+    height: 1.1em;
+    margin-left: 2px;
+    vertical-align: -0.2em;
+    background: #eae6dc;
+  }
+
+  .oss-list {
+    font-size: 1.0625rem;
+    gap: 14px;
+  }
+</style>
