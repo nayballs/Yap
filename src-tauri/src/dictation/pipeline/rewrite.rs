@@ -183,7 +183,7 @@ impl Shared {
                     "Set up AI cleanup to use edit mode"
                 },
             );
-            let _ = self.app.emit("yap-state", "error");
+            self.say_failed();
             return;
         }
 
@@ -199,7 +199,7 @@ impl Shared {
                 DICTATION_ERROR,
                 format!("Commands: no {provider} API key — add one in Language Models"),
             );
-            let _ = self.app.emit("yap-state", "error");
+            self.say_failed();
             return;
         }
 
@@ -318,6 +318,7 @@ impl Shared {
                     // clipboard, said once (the mic's alert says it, if that went).
                     Ok(crate::pasting::text_injector::Delivery::LeftOnClipboard(left)) => {
                         crate::pasting::as_said::forget();
+                        crate::dictation::sound::cue(crate::dictation::sound::Cue::Error);
                         if !self.tell_unplugged(super::unplugged::Outcome::OnClipboard) {
                             crate::notices::alert::show_soon(&self.app, left.alert());
                         }
@@ -350,7 +351,7 @@ impl Shared {
                     DICTATION_ERROR,
                     format!("Rewrite failed via {provider} — check its key in Language Models"),
                 );
-                let _ = self.app.emit("yap-state", "error");
+                self.say_failed();
             }
         }
     }

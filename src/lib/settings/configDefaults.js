@@ -33,6 +33,18 @@ export const FIELD_DEFAULTS = {
   autostart: false,
   audioFeedbackVolume: 1.0,
   soundEnabled: true,
+  // Settings → Dictation → Sounds (dictation/sound.rs): the pack and each
+  // moment's switch (a config from before them keeps only start and stop:
+  // config::migrate_once v6).
+  soundPack: 'classic',
+  soundStart: true,
+  soundStop: true,
+  soundLocked: true,
+  soundCancelled: true,
+  soundError: false,
+  soundSlow: false,
+  soundMeeting: false,
+  soundNotice: false,
   useGpu: true,
   // Settings → Speech-to-Text → Runs on (dictation/stt_speed.rs): auto | gpu | cpu.
   sttDevice: 'auto',

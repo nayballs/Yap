@@ -4,7 +4,7 @@
 //! watch; cancel and Undo; and the stop that hands the audio to
 //! `run_stt`. The mic's audio comes in here (`mic::Sink`).
 
-use std::sync::atomic::Ordering;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -12,6 +12,7 @@ use tauri::Emitter;
 
 use crate::dictation::gesture::Action;
 use crate::dictation::mic_watch::{DeadMicWatch, MicSilent, MicStep};
+use crate::dictation::sound::{self, Cue};
 
 use super::busy::{spawn_busy, Busy, Job};
 #[cfg(debug_assertions)]
@@ -39,22 +40,49 @@ const UNDO_MIN_SAMPLES: usize = 8_000;
 /// ignored, as ever).
 const HOLD_ON: &str = "yap-dictation-busy";
 
+/// The recording (its session) that went hands-free before its start sound
+/// played (a mic still opening): the hands-free sound follows the start's.
+static LOCKED_EARLY: AtomicU64 = AtomicU64::new(0);
+/// The recording (its session) whose start sound has been played (or
+/// passed over, when it's off).
+static START_SOUNDED: AtomicU64 = AtomicU64::new(0);
+
 impl Shared {
-    /// The stop chime (if it's on), then the recording lets go of the mic
+    /// The stop sound (if it's on), then the recording lets go of the mic
     /// (`mic.rs`: it stays warm a while, or a Bluetooth headset's closes now,
-    /// once the chime has played on it) and the other apps' sound comes
+    /// once the sound has played on it) and the other apps' sound comes
     /// back (`mute.rs`), in that order; `token` from `mute::end`.
     fn stop_chime_then_restore(self: &Arc<Self>, token: u64) {
+        self.sound_then_release(Cue::Stop, token);
+    }
+
+    /// `cue`'s sound (a stop's or a cancel's, if it's on), then the mic let
+    /// go and the other apps' sound back, as [`Self::stop_chime_then_restore`].
+    fn sound_then_release(self: &Arc<Self>, cue: Cue, token: u64) {
         let shared = Arc::clone(self);
         let lease = self.mic_lease.load(Ordering::SeqCst);
-        let restore: crate::dictation::sound::Played = Box::new(move || {
+        let restore: sound::Played = Box::new(move || {
             let closed_bluetooth = shared.mic.release(lease);
             crate::dictation::mute::after_stop_chime_mic(token, closed_bluetooth);
         });
-        if self.sound_enabled() {
-            crate::dictation::sound::play_stop(self.audio_feedback_volume(), self.output_device().as_deref(), Some(restore));
-        } else {
-            std::thread::spawn(restore);
+        sound::play(cue, Some(restore));
+    }
+
+    /// Push-to-talk's double-tap locked recording `session` hands-free: its
+    /// sound (if it's on), after the start sound — which, with a mic still
+    /// opening, may not have played yet ([`LOCKED_EARLY`]).
+    fn locked_sound(&self, session: u64) {
+        if START_SOUNDED.load(Ordering::SeqCst) == session {
+            sound::cue(Cue::Locked);
+            return;
+        }
+        // Left for the start sound to play after it — unless that went
+        // meanwhile without seeing it: then here (once, either way).
+        LOCKED_EARLY.store(session, Ordering::SeqCst);
+        if START_SOUNDED.load(Ordering::SeqCst) == session
+            && LOCKED_EARLY.compare_exchange(session, 0, Ordering::SeqCst, Ordering::SeqCst).is_ok()
+        {
+            sound::cue(Cue::Locked);
         }
     }
 
@@ -90,12 +118,13 @@ impl Shared {
             return; // that recording is over
         }
         let token = start.token;
-        let quiet: Option<crate::dictation::sound::Played> =
-            start.plan.any().then(|| Box::new(move || crate::dictation::mute::after_start_chime(token)) as crate::dictation::sound::Played);
-        if self.sound_enabled() {
-            crate::dictation::sound::play_start(self.audio_feedback_volume(), self.output_device().as_deref(), quiet);
-        } else if let Some(quiet) = quiet {
-            std::thread::spawn(quiet);
+        let quiet: Option<sound::Played> =
+            start.plan.any().then(|| Box::new(move || crate::dictation::mute::after_start_chime(token)) as sound::Played);
+        sound::play(Cue::Start, quiet);
+        START_SOUNDED.store(session, Ordering::SeqCst);
+        // Locked hands-free before this: its sound after the start's.
+        if LOCKED_EARLY.compare_exchange(session, 0, Ordering::SeqCst, Ordering::SeqCst).is_ok() {
+            sound::cue(Cue::Locked);
         }
         let _ = self.app.emit("yap-mic-ready", true);
     }
@@ -174,7 +203,7 @@ impl Shared {
                 .app
                 .emit(DICTATION_ERROR, "No microphone found — connect one and try again");
         }
-        let _ = self.app.emit("yap-state", "error");
+        self.say_failed();
     }
     /// Mic audio (16 kHz mono) as it arrives: while recording — or while one
     /// is starting (`gather`) — into the buffer (and the dead-mic watchdog's
@@ -419,6 +448,7 @@ impl Shared {
             Action::Lock => {
                 tracing::info!("Push-to-talk: double-tap, recording hands-free");
                 let _ = self.app.emit("yap-dictation-locked", true);
+                self.locked_sound(self.rec_session.load(Ordering::SeqCst));
                 std::thread::spawn(crate::dictation::coaching::hands_free_used);
             }
             Action::Unstick => {
@@ -877,10 +907,16 @@ impl Shared {
         }
         dictation_ended();
         self.drop_pending_start();
-        // No stop chime for a cancel: the mic and the other apps' sound go
+        // The person's cancel has its own sound (if it's on), then the mic
+        // and the other apps' sound go back, as after a stop's; one Yap
+        // throws away itself (a lone tap, a chord) is silent, and they go
         // back now.
         let token = crate::dictation::mute::end();
-        self.release_now(token);
+        if undo {
+            self.sound_then_release(Cue::Cancelled, token);
+        } else {
+            self.release_now(token);
+        }
         let audio = self.buffer.lock().map(|mut b| std::mem::take(&mut *b)).unwrap_or_default();
         // The edit-mode selection/state goes with it (into the kept
         // recording, or nowhere), so it can't leak into a later session.
@@ -1055,8 +1091,8 @@ impl Shared {
             }
             tracing::info!("Recording stopped: the mic gave nothing but silence, not transcribed");
             let _ = self.app.emit("yap-mic-silent", Some(self.mic_silent()));
-            let _ = self.app.emit("yap-state", "error");
             self.stop_chime_then_restore(quiet_token);
+            self.say_failed();
             return;
         }
         let _ = self.app.emit("yap-state", "processing");

@@ -713,6 +713,7 @@ pub fn run(app: &AppHandle, cfg: &YapConfig, t: &Transform, origin: Origin, stan
                 }
                 Ok(crate::pasting::text_injector::Delivery::LeftOnClipboard(left)) => {
                     crate::pasting::as_said::forget();
+                    crate::dictation::sound::cue(crate::dictation::sound::Cue::Error);
                     crate::notices::alert::show_soon(app, left.alert());
                     idle(app);
                     return r.ended("copied", Some(left.not_pasted().into()));
@@ -829,6 +830,7 @@ fn copied(app: &AppHandle, name: &str, why: &str, text: &str, copy: bool) {
 fn failed(app: &AppHandle, message: String) {
     let _ = app.emit("yap-dictation-error", message);
     let _ = app.emit("yap-state", "error");
+    crate::dictation::sound::cue(crate::dictation::sound::Cue::Error);
 }
 
 fn idle(app: &AppHandle) {

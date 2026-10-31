@@ -519,6 +519,8 @@ impl Shared {
                     if submit.is_some() {
                         tracing::info!(why = left.code(), "Not pressing the submit key: nothing was pasted");
                     }
+                    // "Couldn't paste": the error sound, if it's on.
+                    crate::dictation::sound::cue(crate::dictation::sound::Cue::Error);
                     if !self.tell_unplugged(super::unplugged::Outcome::OnClipboard) {
                         crate::notices::alert::show_soon(&self.app, left.alert());
                     }

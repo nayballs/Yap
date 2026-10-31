@@ -9,7 +9,7 @@ its one line in CLAUDE.md's module index).
 
 ## The files
 
-- [dictation.md](./dictation.md) — the pipeline order, `dictation/pipeline.rs`, push-to-talk gestures and coaching, the input hook, the mic (dead-mic watchdog, Windows' privacy switches), STT and which device each model runs on (`dictation/stt_speed.rs`), Upload's decoding, chimes, other apps' sound while dictating, history and a day of dictation audio to run one again (`dictation/recent_audio.rs`).
+- [dictation.md](./dictation.md) — the pipeline order, `dictation/pipeline.rs`, push-to-talk gestures and coaching, the input hook, the mic (dead-mic watchdog, Windows' privacy switches), STT and which device each model runs on (`dictation/stt_speed.rs`), Upload's decoding, Yap's sounds in packs (`dictation/sound.rs`), other apps' sound while dictating, history and a day of dictation audio to run one again (`dictation/recent_audio.rs`).
 - [pasting.md](./pasting.md) — the paste and the submit key, apps running as administrator, UI Automation reads of the field, smart spacing, the kind of app (terminals, coding CLIs, chat apps), the last paste: "Use what I said" and rewriting the last dictation (`pasting/as_said.rs`).
 - [dictionary.md](./dictionary.md) — near-miss (fuzzy) correction, the vocabulary's order, learning words from corrections, the Dictionary view.
 - [ai-models.md](./ai-models.md) — what every model is told about the person (About you), the LLM client and its prompts, the on-device model (llamafile, GGUF headers, the graphics card, context length), which model a call goes to, the providers' live model lists, the AI usage tracker (every call's tokens, Groq's meter, cost estimates, Chat's context ring's numbers), the model evaluations.

@@ -106,7 +106,7 @@ impl Holder for Shared {
                 // Listed with its audio, to run again (if it wasn't yet).
                 self.list_failed("The dictation crashed");
                 let _ = self.app.emit(DICTATION_ERROR, CRASHED);
-                let _ = self.app.emit("yap-state", "error");
+                self.say_failed();
             }
             Job::Upload => {
                 let _ = self.app.emit("yap-upload-error", "The transcription crashed — try again");
@@ -116,7 +116,7 @@ impl Holder for Shared {
             }
             Job::Transform => {
                 let _ = self.app.emit(DICTATION_ERROR, "The transform failed — Yap hit an error. Try again");
-                let _ = self.app.emit("yap-state", "error");
+                self.say_failed();
             }
         }
     }

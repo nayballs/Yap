@@ -373,7 +373,7 @@ impl Shared {
         match error_msg {
             Some(msg) => {
                 let _ = self.app.emit(DICTATION_ERROR, msg);
-                let _ = self.app.emit("yap-state", "error");
+                self.say_failed();
             }
             None => self.end_state(offer),
         }

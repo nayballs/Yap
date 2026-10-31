@@ -1,7 +1,7 @@
 //! Dictation: from the shortcut to the words. The pipeline and its
 //! gestures, the microphone and its level meter, speech-to-text and which
 //! device runs it, "Taking longer than usual…", the length limit, Upload's
-//! decoding, the chimes, other apps' sound while you talk, history and a
+//! decoding, Yap's sounds (in packs), other apps' sound while you talk, history and a
 //! day of dictation audio, the stats that outlast it and word milestones,
 //! saved transforms, My languages.
 //! How it works: docs/architecture/dictation.md.

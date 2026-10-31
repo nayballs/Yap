@@ -670,7 +670,14 @@ validated live 2026-07-10), transcription history + stats, cleanup presets,
 2026-10-17: per app after the start chime, never calls, back to exactly
 their level after the stop chime; the rules unit-tested, the volume drop and
 restore and the pause and resume checked by the robot on an Edge page it
-opened),
+opened), **sounds in packs** (`dictation/sound.rs`, 2026-10-31: Classic, Soft,
+Crisp and Minimal for a dictation's start, stop, hands-free and cancel, an
+error, "Taking longer than usual", meeting notes' start and stop and a bar
+card; every pack's lengths, levels and start/stop contours unit-tested,
+Classic unchanged sample for sample; Settings, ▶ and which sound each
+moment plays e2e-tested in test mode, which plays nothing; not yet heard on
+speakers by a person, nor a meeting's start sound checked absent from a
+real loopback recording),
 the dictionary's **snippets**, the **"press enter" voice command** and a Whisper
 vocabulary ranked by use (2026-10-17: unit-tested, the Dictionary/Settings UI
 e2e-tested, not yet tried with real speech), **terminal & coding-CLI pasting**

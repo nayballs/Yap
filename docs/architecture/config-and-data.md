@@ -84,8 +84,19 @@
   default instead of "No microphone found". It stays for an older Yap, which
   reads only this: `save` writes the first of `mic_order` there, and a
   different name on load — picked in an older build — goes first,
-  `follow_an_older_builds_mic`), sound +
-  volume, output_device, quiet_other_apps ("Silence other apps while you
+  `follow_an_older_builds_mic`), sounds (Settings → Dictation → Sounds,
+  `dictation/sound.rs`, 2026-10-31): sound_enabled (all of them; an older
+  Yap reads only this, its start and stop chime) + audio_feedback_volume
+  (their volume) + sound_pack ("classic" — the chime Yap always played —,
+  "soft", "crisp", "minimal"; one this build doesn't know plays Classic) +
+  a switch per moment: sound_start, sound_stop, sound_locked (push-to-talk
+  gone hands-free), sound_cancelled — on — and sound_error, sound_slow,
+  sound_meeting (meeting notes' start and stop, one switch), sound_notice (a
+  card on the Yap bar) — off. **`migrate_once` v6** turns sound_locked and
+  sound_cancelled off for a config from before them, so an existing install
+  keeps exactly the sounds it had; an older Yap drops the new fields when it
+  saves, and their defaults come back. output_device (the sounds' and
+  spoken replies' speakers), quiet_other_apps ("Silence other apps while you
   dictate", off; reads old configs' `muteWhileRecording`) + pause_media
   ("Pause music and videos while you dictate", off; both `dictation/mute.rs`),
   keep_mic_ready ("Keep the microphone ready", off: the mic opens when you
