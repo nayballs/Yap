@@ -24,7 +24,9 @@
 //!    ([`choose_conversation`]) — through `turn::chat_turn`, as a typed
 //!    question would. The Chat view follows live (`yap-assistant-turn`), the
 //!    question marked as asked by voice; with the main window in front, Chat
-//!    comes up with it.
+//!    comes up with it. The capsule says what the answer is doing in
+//!    "Thinking…"'s place — "Searching the web · …", "Reading …"
+//!    (`yap-assistant-step`, `chat/activity.rs`).
 //! 3. **Speaking**: the answer is read aloud whatever "When to speak" says
 //!    (that's the shortcut's point), in the chosen voice — never while a
 //!    meeting records (its recorder would hear it) and not when a dictation
@@ -123,6 +125,10 @@ const EVENT: &str = "yap-assistant";
 const TURN: &str = "yap-assistant-turn";
 /// The Chat view follows the answer as it's written.
 const STREAM: &str = "yap-assistant-stream";
+/// The bar's capsule shows what the answer is doing ("Searching the web ·
+/// …" in "Thinking…"'s place, `chat/activity.rs`): its own small event, so
+/// the bar never gets the answer's text.
+const STEP: &str = "yap-assistant-step";
 /// How many sentences go to the voice while the answer is still being
 /// written: the short version's ([`spoken_answer`]'s `tts::brief(…, 2)`).
 const STREAM_SAY: usize = 2;
@@ -819,6 +825,14 @@ impl crate::chat::stream::Sink for Streamed {
         };
         if let crate::chat::stream::Event::Chips { web, .. } = &ev {
             self.lock().web = *web;
+        }
+        // What it's doing, for the capsule (this question's, while it's
+        // still the one asked).
+        if let crate::chat::stream::Event::Step { step } = &ev {
+            let current = lock().generation == self.generation;
+            if current {
+                let _ = self.app.emit(STEP, step);
+            }
         }
         if let crate::chat::stream::Event::Text { text } = &ev {
             if text.trim().is_empty() {

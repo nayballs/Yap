@@ -761,6 +761,59 @@ The AI Chat surface (conversations, the tool-calling loop and its note tools) an
   `chat-documents-rich.spec.js`; evaluations `--documents --tag
   documents-edits --doc-tools rich|simple`
   ([model-evals.md](../model-evals.md#the-rich-document-tools-31-oct-2026)).
+- **`chat/activity.rs`** — **what Chat is doing now** (2026-10-31): while
+  a turn runs, the thread shows one line — a small moving mark, the step
+  under way and the turn's time — as the Claude Code app does:
+  "Searching the web · tidecaller lone wolf build · 1m 59s", "Reading
+  emberfall.example/wiki/Talents · 6m 30s", "Writing ‘Character
+  creation’", "Thinking". Before, it mostly said "Thinking…" for minutes
+  while a strong model searched, read and wrote a document. **One event,
+  one place**: every step is an `Activity {mark, line}` (`mark`: think,
+  answer, search, read, notes, doc, calendar, memory, apps, chats, tool)
+  sent through `activity::tell` as `stream::Event::Step` (`{kind: "step",
+  step}`); the wording is this file's alone — `of_call(name, args)` for
+  every tool, Yap's own and the provider's server tools alike (a note or
+  document named by its id gets its title from the notes store;
+  `describe` is the pure core), `thinking()`, `answering()`,
+  `searching_meetings(skill)`. **Where steps come from**: the stream
+  (`stream::Step`, each step once until it changes: thinking — Anthropic's
+  `thinking_delta`, a model's `reasoning_content`, whether or not Think
+  asked, none of its text shown —; a tool call as it begins, before its
+  arguments, "Searching the web"; a `write_section` / `rewrite_section`'s
+  key once its arguments have it, "Writing ‘Gear’"; the answer's first
+  words shown, "Writing the answer"; Claude's own `web_search` /
+  `web_fetch` on the Messages API — the `server_tool_use` block, then its
+  input whole at `content_block_stop`, `llm::Delta::ServerInput`, the query
+  or address); the tool loop (`tools/agent.rs`: each call as it runs, with
+  its arguments as they ran — a search's query after Yap's fixes, so a
+  provider's native search sub-call, `web/native.rs`, and Exa / Tavily
+  alike name the query searched for; Yap's own searches for the model,
+  `search_for_the_model`); `turn.rs` (a small model's web pipeline's
+  search; Ask across meetings' "Searching your meetings" / "Running
+  /todos"). A search that must come first (`ChipsOnly`) never says
+  "Writing the answer". **On the page** (`ActivityLine.svelte` at the
+  thread's foot while the turn runs: the latest step, "Thinking" until one
+  comes, "Waiting for your dictation to finish" while a model on this PC
+  steps aside, the time from `waitedS` — "12s", "1m 59s"; a model on this
+  PC slow to start adds "Still working: the model runs on this PC, so this
+  can take a minute."). **Once the answer is in** the line goes and the
+  steps done — the answer's **chips**, not a second list — fold into one
+  line under it that opens to them (`ChatSteps.svelte`; `chatSteps.js`
+  `stepsSummary`: "Searched the web 3 times, read 2 pages, wrote 4
+  sections", in the order they came, what didn't go through last — "1
+  didn't go through"); while the answer is written it grows step by step
+  above the line. **The Voice Assistant**: the bar's capsule says the step
+  in "Thinking…"'s place ("Searching the web · …", cut with "…";
+  `yap-assistant-step`, a small event of its own so the bar never gets the
+  answer's text; this question's only). **Privacy**: a line may carry a
+  query or an address — the page shows them; nothing logs them (no
+  tracing in `activity.rs` or where it's told). Unit-tested (`activity`:
+  every tool's line, a long query cut, the event's shape; `stream`: an
+  OpenAI-shaped stream and Claude's Messages API events through the wire
+  and a step — fixtures, no network —, a forced search; `tools/agent`: the
+  loop's steps in order); e2e `chat-activity.spec.js` (Exa's search and a
+  page read with the time going up, then folded under the answer; Claude's
+  own search and page from its stream; the capsule).
 - **`chat/stream.rs`** — **streaming answers** (2026-10-22): every model call
   of a Chat turn — each step of the tool loop, a small model's plain
   answer, the loop's last no-tools call — the notepad's Ask sheet and the
@@ -820,7 +873,8 @@ The AI Chat surface (conversations, the tool-calling loop and its note tools) an
   written), `waiting {waiting}`, `thinking {text}` (a question asked to
   think it through, `chat/think.rs`: the thinking so far, apart from the
   answer), `document {noteId, title}` and `section {noteId, key, text}`
-  (documents beside the chat, `chat/documents.rs` above); `chat_send` adds `turn {conversationId,
+  (documents beside the chat, `chat/documents.rs` above), `step {step:
+  {mark, line}}` (what the turn is doing now, `chat/activity.rs` above); `chat_send` adds `turn {conversationId,
   userMessageId}` once the question is saved. The command's own reply is
   still the **checked** answer (`chats::checked_answer` and the price
   fixes), which the page puts in place of what streamed. **The channel**:
@@ -1319,8 +1373,10 @@ list, its menus, rename in place, the selection bar, the search box and the
 Archived button; its search results and the archive are
 `ChatLibraryList.svelte`, loaded the first time one shows, over
 `chatLibrary.svelte.js`), `ChatThread` (the
-empty state, "Thinking…") with `ChatMessage` (tool chips, the bubble,
-Stopped, Sources — `SourcesRow` with `sources.js`, 2026-10-31: four, then
+empty state; at its foot while an answer comes, `ActivityLine`: what the
+turn is doing now and its time, `chat/activity.rs` above) with
+`ChatMessage` (the bubble, its tools' chips folded under it in
+`ChatSteps`, Stopped, Sources — `SourcesRow` with `sources.js`, 2026-10-31: four, then
 "+N more" —, ▶ and the model under an answer) and `Composer` (the
 screenshots and their prompts, +, the box, the mic, Send / ■, `ModelChip`).
 [frontend.md](./frontend.md#the-folder-layout-2026-10-24).
@@ -1471,8 +1527,9 @@ and its Undo, Preview / Source, find, copy, light and dark).
   copy_to_clipboard, plus search_in_note/read_note/edit_note for changing
   part of a note, executed locally, ≤20-step loop over the OpenAI tool
   protocol, gated to cloud or ≥4B local models — smaller models fall back to
-  plain RAG chat; tool-activity chips render in the thread above the answer
-  and are kept with it in chats.json; a question from
+  plain RAG chat; tool-activity chips are kept with the answer in
+  chats.json and fold into one line under it that opens to them — above
+  it until 31 Oct 2026, `ChatSteps.svelte`; a question from
   the Meetings view's Ask bar arrives through `chatRequest` and is sent with
   `scope: 'meetings'`, as is one in a chat started with **Ask across your
   meetings** on the empty thread; such a chat says "Asking across your
@@ -1607,21 +1664,24 @@ and its Undo, Preview / Source, find, copy, light and dark).
   Assistant** (`chat/assistant.rs`): the view reports what it shows
   (`chat_view_state`: the conversation, or "New chat" clicked) and follows
   `yap-assistant-turn` live — it switches to the question's conversation,
-  the question with its mic, "Thinking…" (`assistantPending`), the answer
+  the question with its mic, the line of what it's doing (`assistantPending`), the answer
   (Rust reads it aloud); ControlPanel brings Chat up for one asked while the
   window is in front (`show`) or "Open in Chat" (`chatRequest {assistant}`).
   An empty chat says "Or press F8 in any app to ask out loud…", or offers
   **Set an assistant shortcut** (→ Settings `voice#assistant-shortcut`).
   **Streamed answers** (`chat/stream.rs`, `streaming.js`; 2026-10-22): `send`
   calls `chat_send` through `streamCall` (a Tauri `Channel` as `onStream`,
-  a `turnId`); the answer's bubble appears with its first text or tool
-  call ("Thinking…" until then) and **grows in place** — markdown rendered
+  a `turnId`); the answer's bubble appears with its first words and
+  **grows in place** — markdown rendered
   as it comes through `renderMarkdown(closePartial(text))` (an open code
   fence closed, a half-written `**bold**` or `` `code` `` on the last line
   closed, a half-typed "[1" or link left out until whole), a caret at the
-  end of its last line, the chip of the tool call under way (spinner,
-  "Searching the web…"), "Waiting for your dictation to finish…" while a
-  model on this PC steps aside; the thread follows the newest words unless
+  end of its last line; under it the steps done so far, folded, and at the
+  thread's foot what's under way with the turn's time (`ActivityLine`:
+  "Thinking" until a step comes, "Searching the web · …", "Waiting for
+  your dictation to finish" while a model on this PC steps aside;
+  `chat/activity.rs` above — until 31 Oct 2026 a "Thinking…" bubble and
+  the call's chip with a spinner); the thread follows the newest words unless
   you scrolled up. **■** (the composer's Send becomes Stop while an answer
   comes — a Voice Assistant answer being written or said in this chat
   too, `assistantAnswering` from `yap-assistant`'s phase; Esc) stops it:

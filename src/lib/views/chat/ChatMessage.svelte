@@ -1,14 +1,15 @@
 <script>
-  // One message in Chat's thread: over an answer, what its tools did as
-  // chips ("Edited "Launch plan": …"; a globe for the web, a shield for an
-  // action refused after reading it; the call under way while it streams);
-  // the bubble — an answer's markdown, written as it streams (half-written
-  // markdown closed off, a soft caret at its end) with its citations as
-  // pills, or a question with its screenshots and the mic if it was asked
-  // by voice; "Stopped" under a question stopped before any answer came;
-  // a web answer's Sources; and under an answer, ▶ Read aloud and the model
-  // that wrote it. Its right-click menu: Copy / Copy as Markdown / Read
-  // aloud, a question's Copy.
+  // One message in Chat's thread: the bubble — an answer's markdown,
+  // written as it streams (half-written markdown closed off, a soft caret at
+  // its end) with its citations as pills, or a question with its
+  // screenshots and the mic if it was asked by voice; under an answer, what
+  // its tools did folded into one line that opens to the steps
+  // (ChatSteps.svelte: "Searched the web 3 times, read 2 pages ▸"; growing
+  // while it streams, the thread's line saying what's under way);
+  // "Stopped" under a question stopped before any answer came; a web
+  // answer's Sources; and ▶ Read aloud and the model that wrote it. Its
+  // right-click menu: Copy / Copy as Markdown / Read aloud, a question's
+  // Copy.
   import { renderMarkdown } from '../../core/markdown.js';
   import { modelLine, whereItRuns } from '../../core/aiModel.js';
   import { closePartial, settle } from '../../core/streaming.js';
@@ -16,6 +17,7 @@
   import { chatImageUrl, removedLine, sizeLine, imageItems, splitScreenText } from './chatImages.js';
   import { thoughtLabel } from './chatThink.svelte.js';
   import SourcesRow from './SourcesRow.svelte';
+  import ChatSteps from './ChatSteps.svelte';
 
   /**
    * `m`: the message; `last`: the thread's last; `sources`: what its
@@ -32,24 +34,6 @@
   // The documents it made or changed: saved with it, or (while it's
   // written) as they come.
   const docs = $derived(m.role === 'assistant' ? (m.documents?.length ? m.documents : m.liveDocs || []) : []);
-
-  // A chip about the web (web.rs) or the safety rule (chat/tools.rs).
-  const WEB_CHIP = /^(Searched the web|Couldn't search the web|Didn't search for|Read [^"]|Couldn't read [^"]|Didn't read |Answered from )/;
-  // The calendar's (chat/tools/calendar.rs).
-  const CALENDAR_CHIP = /^(Checked your calendar|Found \d+ meetings? with|No meetings with|Free |Busy |No calendar connected|Couldn't read the (day|time) )/;
-  // A document's (chat/documents.rs, and the rich tools': documents/rich.rs).
-  const DOC_CHIP =
-    /^(Started "|(Re)?[Ww]rote (\d+ sections|"[^"]*") in "|Added "[^"]*" to "|Didn't (re)?write "|"[^"]*" is already written in "|Couldn't (start a document|rewrite a section)|Read (the document|what changed in) "|Changed (a table in|a part of) "|Added to "|Took a part out of "|Moved a part of "|Made \d+ changes in "|Didn't (change|restore) "|Couldn't (change|restore) ("|a document)|Looked at the history of "|Restored version \d+ of "|"[^"]*" is already as version )/;
-  const chipKind = (t) =>
-    /: not after reading the web$/.test(t)
-      ? 'guard'
-      : WEB_CHIP.test(t)
-        ? 'web'
-        : CALENDAR_CHIP.test(t)
-          ? 'calendar'
-          : DOC_CHIP.test(t)
-            ? 'doc'
-            : 'tool';
 
   // A question whose screenshot went as its text (snip/ocr.rs): its own
   // words, and the text read from the picture, folded under them.
@@ -77,35 +61,6 @@
   }
 </script>
 
-{#if m.role === 'assistant' && (m.tools?.length || m.doing)}
-  <!-- Tool-activity chips (OpenWhispr shows tool calls above the answer) -->
-  <div class="toolchips">
-    {#each m.tools as t, j (j)}
-      {@const kind = chipKind(t)}
-      <span class="toolchip {kind}">
-        {#if kind === 'web'}
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9" /><path d="M3 12h18" /><path d="M12 3a14 14 0 0 1 0 18a14 14 0 0 1 0-18z" /></svg>
-        {:else if kind === 'calendar'}
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3.5" y="5" width="17" height="15" rx="2.5" /><path d="M3.5 10h17" /><path d="M8 3v4M16 3v4" /></svg>
-        {:else if kind === 'doc'}
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z" /><path d="M14 3v5h5" /></svg>
-        {:else if kind === 'guard'}
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3 4.5 6v5.5c0 4.6 3.1 8.2 7.5 9.5 4.4-1.3 7.5-4.9 7.5-9.5V6z" /><path d="m9 12 2 2 4-4" /></svg>
-        {:else}
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14.7 6.3a4.5 4.5 0 0 0 5.8 5.8L17 15.6a4.5 4.5 0 0 1-5.8-5.8z" transform="rotate(90 12 12)" /><path d="m3 21 6.5-6.5" /><path d="M14.7 6.3 21 3l-3.3 6.3" /></svg>
-        {/if}
-        {t}
-      </span>
-    {/each}
-    {#if m.streaming && m.doing}
-      <!-- The tool call under way. -->
-      <span class="toolchip doing" data-testid="chat-doing" aria-live="polite">
-        <span class="spin" aria-hidden="true"></span>
-        {m.doing}
-      </span>
-    {/if}
-  </div>
-{/if}
 {#if m.role === 'assistant' && !(m.streaming && !m.text) && (m.thinking || m.liveThinking)}
   <!-- Thought through (Think, chat/think.rs): the thinking, folded above
        the answer; only the time when the model doesn't send it back. -->
@@ -120,17 +75,15 @@
   {/if}
 {/if}
 {#if m.role === 'assistant' && m.streaming && !m.text}
-  <!-- Tools run, or a dictation is being waited out, before the first words. -->
-  <div class="cbubble assistant" aria-busy="true">
-    <p class="cbody thinking">{m.waiting ? 'Waiting for your dictation to finish…' : 'Thinking…'}</p>
-    {#if m.liveThinking}
-      <!-- Its thinking as it comes (Think), folded. -->
-      <details class="thought live" data-testid="chat-thinking">
-        <summary>Show its thinking</summary>
-        <div class="thoughttext">{m.liveThinking}</div>
-      </details>
-    {/if}
-  </div>
+  <!-- Before the first words (tools run, a dictation waited out): no bubble
+       yet, the thread's line says what's under way. Its thinking as it
+       comes (Think), folded. -->
+  {#if m.liveThinking}
+    <details class="thought live" data-testid="chat-thinking">
+      <summary>Show its thinking</summary>
+      <div class="thoughttext">{m.liveThinking}</div>
+    </details>
+  {/if}
 {:else}
 <!-- Focusable for its menu from the keyboard (the ContextMenu key, Shift+F10). -->
 <!-- svelte-ignore a11y_no_noninteractive_tabindex, a11y_no_noninteractive_element_interactions -->
@@ -201,6 +154,10 @@
     {/if}
   {/if}
 </div>
+{/if}
+{#if m.role === 'assistant' && m.tools?.length}
+  <!-- What its tools did, folded under it (chat/activity.rs). -->
+  <ChatSteps tools={m.tools} />
 {/if}
 {#if m.role === 'user' && m.stopped && last}
   <!-- Stopped before any of the answer came. -->
@@ -281,10 +238,6 @@
     margin: 0;
     overflow-wrap: anywhere;
   }
-  .cbody.thinking {
-    color: var(--yap-muted-55);
-    font-style: italic;
-  }
   /* An answer being written: a soft caret at the end of its last line. */
   .cbubble.streaming .cbody > :global(:is(p, h2, h3, h4, h5, blockquote):last-child)::after,
   .cbubble.streaming .cbody > :global(:is(ul, ol):last-child > li:last-child)::after {
@@ -307,32 +260,14 @@
       opacity: 0.9;
     }
   }
-  .toolchip.doing {
-    color: var(--yap-fg);
-  }
-  .spin {
-    width: 9px;
-    height: 9px;
-    border: 1.5px solid var(--yap-border);
-    border-top-color: var(--yap-primary);
-    border-radius: 50%;
-    animation: spin 0.8s linear infinite;
-  }
-  @keyframes spin {
-    to {
-      transform: rotate(360deg);
-    }
-  }
   @media (prefers-reduced-motion: reduce) {
     .cbubble.streaming .cbody > :global(*)::after,
-    .cbubble.streaming .cbody > :global(* > li)::after,
-    .spin {
+    .cbubble.streaming .cbody > :global(* > li)::after {
       animation: none;
     }
   }
   :global(:root[data-motion='reduced']) .cbubble.streaming .cbody > :global(*)::after,
-  :global(:root[data-motion='reduced']) .cbubble.streaming .cbody > :global(* > li)::after,
-  :global(:root[data-motion='reduced']) .spin {
+  :global(:root[data-motion='reduced']) .cbubble.streaming .cbody > :global(* > li)::after {
     animation: none;
   }
   .stoppednote {
@@ -345,48 +280,6 @@
     margin: 4px 0 0;
     font-size: 12px;
     color: var(--yap-muted);
-  }
-  .toolchips {
-    align-self: flex-start;
-    display: flex;
-    flex-wrap: wrap;
-    gap: 4px;
-    max-width: 78%;
-  }
-  .toolchip {
-    display: inline-flex;
-    align-items: center;
-    gap: 5px;
-    padding: 2px 8px;
-    border: 1px solid var(--yap-border-subtle);
-    border-radius: var(--yap-r);
-    background: var(--yap-s2);
-    font-size: 10.5px;
-    color: var(--yap-muted);
-  }
-  .toolchip svg {
-    width: 10px;
-    height: 10px;
-    flex: 0 0 auto;
-    color: var(--yap-primary);
-  }
-  .toolchip.guard svg {
-    color: var(--yap-success);
-  }
-  /* A tool's own chip ("Found "beta" on 2 lines in "Launch plan"") is a
-     full-width row, 30 px tall, the text turning ink on hover: before
-     ChatView was split (2026-10-24) the New chat row's rule (`.tool`)
-     reached these chips too, and that's how they look. Kept as they are. */
-  .toolchip.tool {
-    flex: 1 1 auto;
-    width: 100%;
-    height: 30px;
-    text-align: left;
-    cursor: pointer;
-  }
-  .toolchip.tool:hover {
-    background: var(--yap-s2);
-    color: var(--yap-fg);
   }
   /* A web answer's citations: small numbered pills in the text. */
   .cbubble.assistant :global(.md-cites) {
@@ -696,9 +589,9 @@
     outline-offset: 1px;
     border-radius: var(--yap-r-sm, 6px);
   }
+  /* (Its thinking as it comes, over the thread's line.) */
   .thought.live {
-    max-width: none;
-    margin-top: 4px;
+    width: 78%;
   }
   .thoughttext {
     max-height: 220px;

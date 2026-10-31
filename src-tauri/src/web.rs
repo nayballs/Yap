@@ -88,7 +88,7 @@ pub use grounding::{
 };
 #[cfg(debug_assertions)]
 pub use page::clear_caches;
-pub use turn::{bracket_citations, citations, normal_url, Reach, Turn};
+pub use turn::{bracket_citations, citations, normal_url, short_url, Reach, Turn};
 
 use page::check_url;
 use wiki::{game_for, keyless, wiki_lookup};

@@ -47,7 +47,8 @@
   // isn't 'idle') has its own variant, never mistaken for a dictation: an
   // amber edge and a ✦ where the red dot was; "Ask Yap…" beside the
   // waveform (or your words) while it listens, "Thinking…" while it's
-  // transcribed and answered, then "Speaking…" with three bars while the
+  // transcribed and answered (what the answer is doing once it says:
+  // "Searching the web · …", chat/activity.rs), then "Speaking…" with three bars while the
   // answer is read aloud. ■ stops the answer (`assistant-stop`) while it
   // thinks or speaks; ✕ / ✓ work as for a dictation while it listens.
   import { untrack } from 'svelte';
@@ -110,6 +111,10 @@
   const askListening = $derived(ask && recording);
   const askSpeaking = $derived(ask && !recording && dictation.assistant === 'speaking');
   const askThinking = $derived(ask && !recording && !askSpeaking);
+  // What the answer is doing, as the capsule's other words end ("…").
+  const askStepLine = $derived(
+    !dictation.askStep ? 'Thinking…' : dictation.askStep.endsWith('…') ? dictation.askStep : `${dictation.askStep}…`
+  );
 
   // Every button goes through `bar_action` (Rust gives the focus back to the
   // app you're in, should the click have activated the bar).
@@ -171,8 +176,11 @@
       {/if}
     {:else if askThinking}
       <!-- (A question about the screen: the window in front is being taken
-           and read first, chat/assistant/screen.rs.) -->
-      <span class="txt" role="status">{dictation.askAbout === 'window' ? 'Looking at the window…' : 'Thinking…'}</span>
+           and read first, chat/assistant/screen.rs. Then what the answer is
+           doing, as Chat's line says it: chat/activity.rs.) -->
+      <span class="txt step" role="status" title={dictation.askStep || undefined}
+        >{dictation.askAbout === 'window' ? 'Looking at the window…' : askStepLine}</span
+      >
     {:else}
       <span class="speakbars" aria-hidden="true"><i></i><i></i><i></i></span>
       <span class="txt" role="status">Speaking…</span>
@@ -600,6 +608,11 @@
   .txt.soft {
     color: var(--bar-text-soft);
     font-weight: 550;
+  }
+  /* What the Voice Assistant's answer is doing ("Searching the web · …"):
+     one line, a long query cut with "…" (the whole is its tooltip). */
+  .txt.step {
+    max-width: 260px;
   }
   /* The dead-mic warning: one line, cut with "…" if a device's name is
      long (the whole message is its tooltip and the main window's toast). */

@@ -30,7 +30,9 @@
 //! (the server's tool loop paused) is asked to go on, a few times at most.
 //! Streamed as its events come ([`Stream`]): text, tool calls and their
 //! arguments (a document's section into the panel), thinking, and each
-//! server tool as "Searching the web…" / "Reading a page…".
+//! server tool as "Searching the web…" / "Reading a page…", then with its
+//! query or address once its input is whole (`Delta::ServerInput`: the step
+//! the page shows, `chat/activity.rs`).
 //!
 //! Every request goes through the network receipts (`privacy/net.rs`:
 //! `Purpose::Ai`) as every Chat call does; the pages Claude opens are opened
@@ -433,6 +435,11 @@ impl Stream {
                             b["input"] = json!({});
                         }
                     }
+                    // Its search or page, whole: the step the page shows
+                    // ("Searching the web · …", `chat/activity.rs`).
+                    if b["type"] == "server_tool_use" {
+                        on(Delta::ServerInput { name: b["name"].as_str().unwrap_or(""), input: &b["input"] });
+                    }
                 }
             }
             "message_delta" => {
@@ -756,6 +763,7 @@ mod tests {
                 Delta::Reasoning(t) => format!("thinking:{t}"),
                 Delta::ToolCall(n) => format!("call:{n}"),
                 Delta::Server(n) => format!("server:{n}"),
+                Delta::ServerInput { name, input } => format!("input:{name}:{input}"),
                 Delta::ToolArgs { name, .. } => format!("args:{name}"),
                 Delta::Restart => "restart".into(),
             })
@@ -764,7 +772,19 @@ mod tests {
             s.push(e, &mut on);
         }
         assert!(s.done);
-        assert_eq!(heard, ["thinking:Levels first.", "server:web_search", "text:It's ", "text:open.", "call:write_section", "args:write_section", "args:write_section"]);
+        assert_eq!(
+            heard,
+            [
+                "thinking:Levels first.",
+                "server:web_search",
+                r#"input:web_search:{"query":"tide"}"#,
+                "text:It's ",
+                "text:open.",
+                "call:write_section",
+                "args:write_section",
+                "args:write_section"
+            ]
+        );
         let whole = s.whole();
         assert_eq!(whole["usage"]["output_tokens"], 120);
         assert_eq!(whole["usage"]["cache_read_input_tokens"], 800);

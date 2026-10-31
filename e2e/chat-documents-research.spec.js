@@ -169,7 +169,7 @@ test('after the web a strong model still edits notes and writes its document; an
   await expect(chips.filter({ hasText: "Didn't open an app: not after reading the web" })).toHaveCount(1);
   await expect(chips.filter({ hasText: 'not after reading the web' })).toHaveCount(1);
   await expect(chips.filter({ hasText: 'Wizard notes' })).toHaveCount(1);
-  await expect(chips.filter({ hasText: 'Gale guide' }).first()).toBeVisible();
+  await expect(chips.filter({ hasText: 'Gale guide' }).first()).toBeAttached();
   await shot(main, '01-edits-after-the-web');
   // The note changed (a version: Undo), the document written, no app opened.
   await expectStore(yap, 'notes.json', (s) => s.notes.some((n) => n.title === 'Wizard notes' && n.content.includes('crash site')));

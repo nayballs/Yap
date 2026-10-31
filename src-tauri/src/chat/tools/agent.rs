@@ -148,11 +148,19 @@ fn empty_notes_rule(local: bool) -> EmptyNotes {
 /// Yap's own search for the model, handed over as the `web_search` call the
 /// model would have made: its chip, its result in the messages (numbered
 /// sources, the safety rule's flag and the 3-search cap all as for a call
-/// of the model's).
-async fn search_for_the_model(turn: &mut crate::web::Turn, query: &str, messages: &mut Vec<Value>, tools_used: &mut Vec<String>, room: Room<'_>) {
+/// of the model's). `live`: the page sees it under way, and its query.
+async fn search_for_the_model(
+    turn: &mut crate::web::Turn,
+    query: &str,
+    messages: &mut Vec<Value>,
+    tools_used: &mut Vec<String>,
+    room: Room<'_>,
+    live: Option<crate::chat::stream::Live<'_>>,
+) {
     // A price question's search names the person's country ("… UK").
     let query = turn.local_query(query).unwrap_or_else(|| query.to_string());
     let args = json!({ "query": query });
+    searching(live, &args);
     let result = turn.execute("web_search", &args).await;
     tracing::info!(success = %result["success"], "Chat: Yap searched the web for the model");
     crate::ai::eval::post_fix("yap_search");
@@ -243,9 +251,11 @@ async fn ask(live: Option<crate::chat::stream::Live<'_>>, req: &crate::ai::llm::
     crate::privacy::net::within(crate::privacy::net::Feature::Chat, step).await
 }
 
-/// Yap's own web search is under way (the page shows it as a chip).
-fn searching(live: Option<crate::chat::stream::Live<'_>>) {
+/// Yap's own web search is under way (`args`: its query): the page's line
+/// says so ("Searching the web · …").
+fn searching(live: Option<crate::chat::stream::Live<'_>>, args: &Value) {
     if let Some(live) = live {
+        crate::chat::activity::tell(live.sink, crate::chat::activity::of_call("web_search", args));
         live.sink.send(crate::chat::stream::Event::Tool { name: "web_search".into(), doing: crate::chat::stream::doing("web_search").into() });
     }
 }
@@ -393,8 +403,7 @@ async fn tool_loop(
 
     // Yap searches first: the results go to the model as its own call's.
     if let (FirstStep::YapSearches(query), Some(turn)) = (&first, web.as_deref_mut()) {
-        searching(live);
-        search_for_the_model(turn, query, &mut messages, &mut tools_used, room).await;
+        search_for_the_model(turn, query, &mut messages, &mut tools_used, room, live).await;
         report(live, &tools_used, Some(turn), extra.calendar.map(|c| c.log));
     }
     let mut must_search = must_search_first;
@@ -469,8 +478,7 @@ async fn tool_loop(
             if !searched {
                 tracing::info!(provider, "Chat: the model wasn't made to search; Yap searches for it");
                 if let Some(turn) = web.as_deref_mut() {
-                    searching(live);
-                    search_for_the_model(turn, &crate::web::search_query(question), &mut messages, &mut tools_used, room).await;
+                    search_for_the_model(turn, &crate::web::search_query(question), &mut messages, &mut tools_used, room, live).await;
                     report(live, &tools_used, Some(turn), extra.calendar.map(|c| c.log));
                 }
                 continue;
@@ -673,6 +681,12 @@ async fn tool_loop(
                 }
             }
             let ran_with = args.clone();
+            // The page's line: what this call does, with what ("Searching the
+            // web · …" — a provider's native search or Exa's alike —,
+            // "Reading …", "Writing ‘Gear’").
+            if let Some(live) = live {
+                crate::chat::activity::tell(live.sink, crate::chat::activity::of_call(name, &args));
+            }
             let web_seen = web.as_deref().is_some_and(crate::web::Turn::seen);
             let mut result = if hold_web && crate::web::TOOL_NAMES.contains(&name) {
                 tracing::info!(tool = %name, "Chat: a new document's outline comes before any search; refused");
@@ -780,8 +794,7 @@ async fn tool_loop(
         if let Some(turn) = web.as_deref_mut() {
             if let Some(q) = turn.take_local_retry() {
                 tracing::info!(provider, "Chat: no local prices in the results; Yap searches again for them");
-                searching(live);
-                search_for_the_model(turn, &q, &mut messages, &mut tools_used, room).await;
+                search_for_the_model(turn, &q, &mut messages, &mut tools_used, room, live).await;
                 report(live, &tools_used, Some(turn), extra.calendar.map(|c| c.log));
             }
         }
@@ -792,8 +805,7 @@ async fn tool_loop(
             if let Some(turn) = web.as_deref_mut().filter(|t| !t.looked()) {
                 led_to_web = true;
                 tracing::info!(provider, "Chat: nothing in the notes; Yap searches the web for the model");
-                searching(live);
-                search_for_the_model(turn, &crate::web::search_query(question), &mut messages, &mut tools_used, room).await;
+                search_for_the_model(turn, &crate::web::search_query(question), &mut messages, &mut tools_used, room, live).await;
                 report(live, &tools_used, Some(turn), extra.calendar.map(|c| c.log));
             }
         }
@@ -1700,6 +1712,16 @@ mod tests {
         let chips_at = events.iter().position(|e| matches!(e, crate::chat::stream::Event::Chips { .. })).expect("the chips");
         let first_text = events.iter().position(|e| matches!(e, crate::chat::stream::Event::Text { text } if !text.is_empty())).expect("text");
         assert!(tool_at < chips_at && chips_at < first_text, "{events:?}");
+        // The page's line (activity.rs): the call as it began, then with its
+        // query as it ran, then the answer being written — each once.
+        let steps: Vec<String> = events
+            .iter()
+            .filter_map(|e| match e {
+                crate::chat::stream::Event::Step { step } => Some(step.line.clone()),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(steps, ["Searching your notes", "Searching your notes · kitchen budget", "Writing the answer"], "{events:?}");
         // The answer grew, and ended whole.
         let texts = seen.texts();
         assert!(texts.len() >= 2, "{texts:?}");
