@@ -9,6 +9,7 @@
 //! must be:
 //!
 //! - `contains_any`: one of these words (it's about what was said);
+//!   `contains_all`: every one of these;
 //! - `not_contains`: words that mean it made something up;
 //! - `cites` (smart, skill): it cites at least one of the meeting's
 //!   passages, and isn't marked as tied to none (made-up numbers are
@@ -64,6 +65,9 @@ pub struct Case {
 pub struct Expect {
     #[serde(default)]
     pub contains_any: Vec<String>,
+    /// Every one of these (both unanswered questions, say).
+    #[serde(default)]
+    pub contains_all: Vec<String>,
     #[serde(default)]
     pub not_contains: Vec<String>,
     #[serde(default)]
@@ -125,7 +129,7 @@ fn request(c: &Case, note: &crate::notes::Note) -> Result<Asked, String> {
         }
         "skill" => {
             let skill = crate::chat::skills::by_command(&c.skill).ok_or_else(|| format!("no Skill /{}", c.skill))?;
-            let cited = chips::skill_input(note, &format!("{} {}", skill.instructions, c.words)).ok_or("nothing in the meeting")?;
+            let cited = crate::meetings::meeting_assist::skill_input_for(&skill, note, &c.words).ok_or("nothing in the meeting")?;
             let m = crate::meetings::meeting_assist::skill_messages(&skill, &cited.text, &c.words);
             Ok(Asked { messages: m, cap: chips::SKILL_REPLY_TOKENS, temperature: 0.3, passages: cited.passages, longer: None })
         }
@@ -159,6 +163,11 @@ pub fn judge(c: &Case, raw: &str, shown: &str, cited: usize, passages: usize) ->
     let lower = shown.to_lowercase();
     if !c.expect.contains_any.is_empty() && !c.expect.contains_any.iter().any(|w| lower.contains(&w.to_lowercase())) {
         why.push(format!("none of {:?}", c.expect.contains_any));
+    }
+    for w in &c.expect.contains_all {
+        if !lower.contains(&w.to_lowercase()) {
+            why.push(format!("no {w:?}"));
+        }
     }
     for n in &c.expect.not_contains {
         if lower.contains(&n.to_lowercase()) {
@@ -246,7 +255,12 @@ pub async fn run(cases: &[Case], ep: &Endpoint<'_>, repeat: u32) -> Value {
                             None => {
                                 let allowed: Vec<usize> = passages.iter().map(|p| p.n).collect();
                                 let made_up = crate::search::ask::cited_numbers(&raw).iter().filter(|n| !allowed.contains(n)).count();
-                                let (shown, sources) = chips::checked(&raw, &passages, true);
+                                // As the app shows a Skill's answer (`skills::tidy_answer`).
+                                let tidy = match crate::chat::skills::by_command(&c.skill).filter(|_| c.kind == "skill") {
+                                    Some(s) => crate::chat::skills::tidy_answer(&s, &raw),
+                                    None => raw.clone(),
+                                };
+                                let (shown, sources) = chips::checked(&tidy, &passages, true);
                                 (raw, shown, sources.len(), passages.len(), None, made_up, 0)
                             }
                         },
@@ -378,7 +392,7 @@ mod tests {
             typed: String::new(),
             summary: String::new(),
             lines: vec![],
-            expect: Expect { contains_any: vec!["budget".into()], not_contains: vec!["million".into()], cites: true, max_bullets: Some(2) },
+            expect: Expect { contains_any: vec!["budget".into()], contains_all: vec![], not_contains: vec!["million".into()], cites: true, max_bullets: Some(2) },
         };
         assert!(judge(&c, "", "- Ask about the budget [2].", 1, 3).is_empty());
         assert_eq!(judge(&c, "", "- One million [2].\n- b\n- c", 1, 3).len(), 3);

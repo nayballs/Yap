@@ -353,6 +353,15 @@ fn update_record(f: impl FnOnce(Record) -> Record) {
     *guard = Some(rec);
 }
 
+/// Delete some of your data's dictionary suggestions (`privacy/reset.rs`):
+/// the phrases noted (typed after a dictation), the ones offered and
+/// answered and the last offer's time, forgotten; the switch ("Suggest
+/// snippets for text you use often") stays as it is. Nothing pending.
+pub fn forget_noted() {
+    *pending() = None;
+    update_record(|r| Record { off: r.off, ..Record::default() });
+}
+
 /// snippet_suggestions.json's saves (`saving.rs`): a small store; a failed
 /// save is only logged, and tried again with the next.
 pub static SAVER: crate::shell::saving::Saver =
@@ -379,7 +388,8 @@ pub struct Found {
 /// Is `p` already a snippet's text, or inside one?
 fn a_snippet_already(p: &Phrase, dict: &[DictionaryEntry]) -> bool {
     dict.iter().filter(|e| e.snippet).any(|e| {
-        let k = key(&e.to);
+        // (A rich snippet as dictations have it: its plain text.)
+        let k = key(&e.typed());
         !k.is_empty() && (k == p.key || format!(" {k} ").contains(&format!(" {} ", p.key)))
     })
 }

@@ -3,9 +3,10 @@
 Two trust features (2026-10-24): **Network connections**, a list of every
 connection Yap made and why (`privacy/net.rs`, Settings → Privacy & data), and
 **Report a problem**, a diagnostic file the person checks before saving it
-(`privacy/diagnostics.rs`, Settings → About). And two for the person's data
+(`privacy/diagnostics.rs`, Settings → About). And three for the person's data
 (2026-10-29, Settings → Privacy & data → Your data): **Download your data**
-(`privacy/export.rs`) and **Reset app** (`privacy/reset.rs`). Logging's own
+(`privacy/export.rs`), **Delete some of your data** (2026-10-31) and **Reset
+app** (`privacy/reset.rs`). Logging's own
 rules (no user content at `info` and above) are in
 [app-shell.md](./app-shell.md) (Logging).
 
@@ -286,59 +287,115 @@ uploaded…", **Open a GitHub issue**, Show in folder, Done.
   pause after each MB, so a test can press Cancel). The log says counts and
   bytes only.
 
-## `privacy/reset.rs` — Reset app
+## `privacy/reset.rs` — Delete some of your data, and Reset app
 
-"Clear everything and keep my settings".
+"Delete some of your data" (2026-10-31, after Wispr Flow's delete by kind):
+a tick box per **kind** of data. "Clear everything and keep my settings"
+(Reset app) is every kind at once: the same code, store by store.
 
-- **What goes** (`GOES`, the dialog's words and each one's files): the
-  dictation history and the day of dictation audio (`history.json`,
-  `recent-audio/`); every note and meeting with their audio, earlier
-  versions and pins (`notes.json`'s notes — the folders and actions stay —,
-  `meeting-audio/`, `note-versions/`, `note_pins.json`); every chat with
-  its screenshots (`chats.json`, `chat-images/`, the ones waiting in Chat's
-  box); memory (`memory.json`, and what the passes had read or were waiting
-  to read); tasks (`tasks.json`); the search index (`search-index/`); usage
-  stats (`dictation_stats.json` — Home's and Insights' numbers, which
-  outlast clearing history but not a reset: a fresh start, and they name
-  the apps dictated into; Keep history's copy in it stays —, `ai_usage.json`,
-  `groq_usage.json` — Groq's request cap kept); the
-  pre-meeting briefs (they quote notes and memory; `calendar.json`'s
-  `briefs`). Set-aside copies of those stores (`<name>.corrupt-…`) go too.
-- **What stays** (`STAYS`): config.json (every setting, the dictionary and
-  snippets, the keys) and `dictionary_usage.json`; the person's own Skills
-  (`skills.json`: setup, like folders and actions); the models (`models/`,
-  `llm/`); the account's sign-in and the calendars (Credential Manager,
-  `calendar.json`'s connections and meetings); Yap's own records — tips
-  shown (`hints.json`, `mic_tips.json`), answers to its offers
-  (`notices.json`, `word_suggestions.json`, `snippet_suggestions.json`,
-  `language_nudges.json`), the network receipts, caches, the log.
-- **Every file the docs name is decided**: a unit test reads this folder's
-  `config-and-data.md`, takes every `%APPDATA%/yap/…` and `<data>/…` it names
-  and fails on one in neither list — a store added later has to be put in one
-  (and the dialog's words with it).
+- **The kinds** (`KINDS`: each one's heading, words, files and stores, in
+  the dialog's order):
+  - *Dictation* — **Dictation history** (`history.json`, and its audio:
+    `recent-audio/`; the stats stay), **Dictation audio** (`recent-audio/`
+    alone: the day's recordings and any kept; the history stays),
+    **Dictation stats** (`dictation_stats.json`: Home's and Insights'
+    numbers, which outlast clearing history on purpose; Keep history's copy
+    in it stays).
+  - *Notes and meetings* — **Meetings** (every note `is_meeting` says is
+    one, with all its recordings in `meeting-audio/`, its summary and
+    version history, its tasks and archive marks, its Ask threads and pin),
+    **Other notes** (the rest: quick notes and Chat's documents too, their
+    tasks, Ask threads, versions and pins, and the quick note's tabs,
+    `quick_note_tabs.json`; the folders and actions stay), **Tasks you
+    added** (tasks.json's tasks with no note; a note's go with it).
+  - *Chat and memory* — **Chats** (Chat's conversations, archived ones too,
+    not notes' Ask threads, and every screenshot in `chat-images/`, the ones
+    waiting in Chat's box too; the documents Chat wrote stay in Notes),
+    **What Yap remembers** (`memory.json`: every item, what the passes read
+    and what waited for one, and Undo's copies).
+  - *Dictionary* — **Dictionary suggestions** (`word_suggestions.json`:
+    the words offered, the answers and the words removed from the
+    dictionary — so one may be offered again —; snippet_suggestions.json's
+    noted phrases, answers and last offer, its switch kept). The dictionary
+    and snippets themselves are config.json's and stay.
+  - *Yap's own records* — **AI usage counts** (`ai_usage.json`,
+    `groq_usage.json`, Groq's request cap kept), **Network receipts**
+    (`connections.json`), **Search index** (`search-index/`: built again from
+    what's left while search by meaning is on), **Logs** (`logs/`: every
+    file but the one being written, which is emptied and carries on —
+    `logging::clear`; the log's writer appends, so it goes on at the new
+    end).
+- **One way per store** (`Choice`, pure: what the kinds chosen do to each
+  store, `Cut::Keep | Part | Whole`). A store several kinds share goes
+  whole only when they all go: `notes.json` (with `note-versions/` and
+  `note_pins.json`) with Meetings and Other notes, `tasks.json` with those
+  and Tasks you added, `chats.json` with those and Chats; else only the
+  chosen kinds' part (`notes::remove_where`, `task_store::forget_where`,
+  `chats::delete_where`, `notes::forget_own` for the versions, pins and
+  summary jobs). What names a note that's no longer there (an older Yap
+  deleted it) goes with Meetings or Other notes. Kept consistent: memory
+  forgets what it read of the chats and meetings that went, and an item
+  that came from one keeps its kind and title, never the id
+  (`memory::forget_sources`; ids come round again); the search index drops
+  their vectors (`search::removed`); the pre-meeting briefs (they quote
+  notes and memory; `calendar.json`'s `briefs`) go with Meetings, Other
+  notes or memory and are made again from what's left. Set-aside copies of
+  a store (`<name>.corrupt-…`, `<name>.unsaved-…`) go when the whole store
+  does (one going in part keeps them: they may hold what stays).
+- **What stays** (`STAYS`), whatever is ticked, Reset app too:
+  config.json (every setting, the dictionary, snippets, transforms, the
+  keys) and `dictionary_usage.json`; the person's own Skills (`skills.json`)
+  and meeting folder rules (setup, like folders and actions); the writing
+  samples; the models (`models/`, `llm/`); the account's sign-in, the
+  calendars (Credential Manager, `calendar.json`'s connections and
+  meetings) and paired phones; Yap's own records — tips shown
+  (`hints.json`, `mic_tips.json`, `onboarding.json`), answers to its offers
+  (`notices.json`, `call_apps.json`, `language_nudges.json`, the snippet
+  offer's switch), caches.
+- **Every file the docs name is decided, kind by kind**: unit tests read
+  this folder's `config-and-data.md`, take every `%APPDATA%/yap/…` and
+  `<data>/…` it names, and hold each to the kinds that own it — each kind
+  on its own changes exactly the files it names (`Choice::touches`), a file
+  that stays loses at most a part a kind names, one that doesn't goes whole
+  with its kinds together, and Reset app (every kind) takes every store
+  whole. A store added later has to be decided (and the dialog's words with
+  it). The in-memory stores' tests seed a note, a meeting, a chat, each
+  note's Ask thread, tasks of each kind, a pin and memory, and delete one
+  kind at a time.
 - **Each store is emptied through its own module, under its own lock**
-  (`history::clear`, `notes::reset`, `chats::reset`, `memory::reset` — its
-  Undo batches dropped —, `task_store::reset`, `search::index::forget`,
-  `ai::usage::store::reset` — what this Yap had counted but not written too
-  —, `groq::reset`, `calendar::forget_briefs`, `meeting_audio::clear`,
-  `snip::chat_images_delete_all`), so no copy held in memory writes the old
-  data back with a later save; a save that fails is said (`saving.rs`, Try
-  again) and the store stays empty in memory.
-- **No restart**: every window lets go of each note (`yap-note-deleted`: the
-  notepad hides, the quick note starts fresh), the stores' own events go
-  out (`yap-history-changed`, `yap-notes-changed`, `yap-tasks-changed`,
-  `yap-memory-changed`, `yap-chat-images-deleted`), then `yap-data-reset`:
-  the main window shows its views afresh (`{#key}` in ControlPanel), the
-  briefs' cache empties (`stores/calendar.svelte.js`). `Done.restart` is
-  there for the page, never set so far.
+  (`history::clear`, `recent_audio::clear`, `stats::clear`, `notes::reset` /
+  `remove_where`, `versions::reset`, `pins::reset`, `meeting_audio::clear` /
+  `forget`, `task_store::reset` / `forget_where`, `chats::reset` /
+  `delete_where`, `memory::reset` — its Undo batches dropped —,
+  `search::index::forget`, `ai::usage::store::reset` — what this Yap had
+  counted but not written too —, `groq::reset`, `net::clear`,
+  `learn::forget_all`, `snippet_offer::forget_noted`,
+  `calendar::forget_briefs`, `snip::chat_images_delete_all`,
+  `logging::clear`), so no copy held in memory writes the old data back
+  with a later save; a save that fails is said (`saving.rs`, Try again) and
+  the store stays empty in memory. It can't be undone: no store keeps an
+  Undo copy of what went (memory's are dropped on purpose).
+- **No restart**: every window lets go of each note that went
+  (`yap-note-deleted`: the notepad hides, the quick note starts fresh), the
+  stores' own events go out (`yap-history-changed`, `yap-stats-changed`,
+  `yap-notes-changed`, `yap-tasks-changed`, `yap-memory-changed`,
+  `yap-meeting-audio`, `yap-chat-images-deleted`, `yap-connections`,
+  `yap-ai-usage`), then `yap-data-reset` with what went (`Done`: the kinds
+  and counts): the main window shows its views afresh (`{#key}` in
+  ControlPanel), the briefs' cache empties (`stores/calendar.svelte.js`).
+  `Done.restart` is there for the page, never set so far.
 - **Refused while a dictation or a meeting records** ("Finish the dictation
   first.", "Stop the meeting first: Yap is recording it."): what they'd save
-  next would come back. Another Yap running on the same data folder (the
+  next would come back. And a kind whose store Yap couldn't read just now
+  (`saving::unread_among`, its `stores`) waits: its tick box says so, Reset
+  app says so in a toast. Another Yap running on the same data folder (the
   installed nightly beside Yap - Dev) still holds its own copies in memory:
   quit it first.
-- **Commands**: `data_reset_plan` (what goes with counts — "1 note, 1
-  meeting" —, what stays, why it can't run now), `data_reset` (counts only,
-  in the log too).
+- **Commands**: `data_reset_plan` (every kind with its heading, words,
+  count — "1 note", "3 chats, 4 screenshots" —, size on disk, whether
+  there's any, why it can't go now, its files; what stays; why nothing can
+  go now), `data_delete {kinds}` and `data_reset` (every kind); counts and
+  the files' names only, in the log too.
 
 ## Settings → Privacy & data → Your data
 
@@ -348,13 +405,28 @@ the search index): its row, then the tick box "Include audio and
 screenshots · 1.2 GB" (none kept: off and greyed); Download… → Windows' Save
 dialog → the progress (`ui/DownloadProgress.svelte`: "Saving your data…
 42 %", the bytes, **Cancel**) → **Saved Yap data 2026-10-29.zip**, its size,
-"Nothing was uploaded", Show in folder, Done. **Reset app** (anchor
-`reset-app`): Reset app… → Yap's confirm dialog (`ui/ConfirmDialog.svelte`,
-which now takes `children`): "Clear everything and keep your settings?",
-what goes, each with its count, what stays, **Download your data first**
-(closes it and starts the download), Cancel / **Reset app** (red) → "Yap is
-reset · Your settings, dictionary and models are as they were. No restart
-needed." A dictation or meeting going on: said in a toast, no dialog.
+"Nothing was uploaded", Show in folder, Done.
+
+**Delete some of your data** (anchor `delete-some-data`): Delete… → the
+picker (`settings/DeleteSomeData.svelte`, a dialog like Import…'s preview):
+"Tick what goes from this PC", what stays, then each heading (Dictation,
+Notes and meetings, Chat and memory, Dictionary, Yap's own records) with
+its tick boxes — the kind, what it removes, and how much there is now on
+the right ("1 meeting · 2 MB", "3 chats, 4 screenshots · 1 KB"; "Nothing
+kept" greys the box; the files in a tooltip); "2 kinds ticked · 2 MB",
+Cancel / **Delete…** (red, off until one is ticked) → Yap's confirm dialog
+(`ui/ConfirmDialog.svelte`): "Delete these for good?", "They go from this
+PC and can't be brought back.", each with how much, what stays, Cancel
+(back to the ticks) / **Delete** (red) → "Deleted from this PC · Chats,
+Meetings. No restart needed."
+
+**Reset app** (anchor `reset-app`): Reset app… → Yap's confirm dialog:
+"Clear everything and keep your settings?", every kind there's something
+of with how much, what stays, **Download your data first** (closes it and
+starts the download), Cancel / **Reset app** (red) → "Yap is reset · Your
+settings, dictionary and models are as they were. No restart needed."
+
+A dictation or meeting going on: said in a toast, no dialog, for both.
 
 ## e2e
 
@@ -365,10 +437,26 @@ box says the audio's size; Download… writes the zip through
 line in its Markdown, the dictionary's CSV as the view writes it, settings
 naming what was left out), the audio and the screenshot, no key anywhere in
 the file's bytes; a slowed one shows its progress and Cancel leaves no file;
-Reset app's dialog lists what goes with counts and what stays, Download your
-data first saves the file, the reset empties every store on disk, keeps
-config.json (keys, dictionary, About you), Home and Notes show it at once,
-and the next note and dictation are all that's saved after.
+Reset app's dialog lists every kind with how much and what stays, Download
+your data first saves the file, the reset empties every store on disk (the
+logs too), keeps config.json (keys, dictionary, About you), Home and Notes
+show it at once, and the next note and dictation are all that's saved
+after.
+
+`e2e/your-data-delete.spec.js` (seeded history with audio, two notes, a
+meeting with audio, a chat with a screenshot, each note's Ask thread, tasks
+of each kind, a pin, memory and what it read, a word suggestion): the
+picker's headings and each kind's amount ("1 meeting · 2 MB", "Nothing
+kept" for the search index, its box off), Delete… off until a tick, the
+confirm dialog naming what goes and how much, its Cancel back to the ticks
+and nothing deleted; **Chats alone**: Chat's conversation and screenshot
+go, the Ask threads, notes, meetings, tasks, history and audio stay, memory
+forgets what it read of the chat and keeps what it remembers, the picker
+then says "Nothing kept" for chats, Chat and Notes show it at once;
+**Meetings alone**: the meeting, its audio, task and Ask thread go, the
+other notes keep theirs and their pin; **refused while a test meeting
+records** (the toast, no dialog; `data_delete` and `data_reset` both
+refuse).
 
 `e2e/network-receipts.spec.js`: two fake AI servers, one aliased to
 api.groq.com — a Chat answer from each shows as "Chat · Groq" (Internet,

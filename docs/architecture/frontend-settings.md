@@ -334,11 +334,23 @@ style neither).
   2026-10-29; the Help menu's Microphone help lands here): "Find my best
   microphone" loads `components/MicQuiz.svelte` (`dictation/mic_quiz.rs`),
   whose "Use this one" puts a microphone first in Settings' copy of the
-  order (the auto-save saves it). "Chime when recording starts and stops" (the
-  volume slider and the switch on one row: `audioFeedbackVolume`,
-  `soundEnabled`), "Chime plays on" (`outputDevice`), "Silence other apps while
+  order (the auto-save saves it). "Silence other apps while
   you dictate" (`quietOtherApps`; ⓘ: calls are never silenced), "Pause music
-  and videos while you dictate" (`pauseMedia`). **While you dictate**: "Live
+  and videos while you dictate" (`pauseMedia`). **Sounds**
+  (`SoundsSettings.svelte`, 2026-10-31; the packs and moments in
+  `core/sounds.js`, the sounds made in `dictation/sound/packs.rs`): "Sounds"
+  (the volume slider and the switch on one row: `audioFeedbackVolume`,
+  `soundEnabled`; anchor `chime`, as the old "Chime when recording starts and
+  stops"), "Sound pack" (a radio group of Classic, Soft, Crisp and Minimal →
+  `soundPack`, each with ▶ beside it: `sound_preview` plays its whole set,
+  ■ stops it), "Sounds play on" (`outputDevice`, anchor `chime-output`),
+  then a row per moment, its ▶ (that sound in the pack picked) and its
+  switch: Dictation starts / stops, Hands-free, Dictation cancelled,
+  Something went wrong, Taking longer than usual, Meeting notes start and
+  stop, A notice on the Yap bar (`soundStart` … `soundNotice`). With Sounds
+  off the pack, the device and the switches are greyed out (kept as they
+  were); ▶ still plays, to listen before switching them on. **While you
+  dictate**: "Live
   preview on the Yap bar" (`streamingPartials`), "Offer what you said after AI
   cleanup" (`asSaidOffer`, off since 2026-10-25: the bar's "Cleaned up · Use what I said",
   `pasting/as_said.rs`), "Cancel and finish buttons"
@@ -421,7 +433,13 @@ style neither).
   live transcript" (`meetingLiveTranscript`), Meeting shortcut
   (`meetingHotkey`, clearable). **Calendar**: "Remind me before scheduled
   meetings" (Right before / 1 / 2 minutes / Never → `meetingReminder`) and a
-  Calendars link row to Connectors. Last, the consent line.
+  Calendars link row to Connectors. **Folders by company**
+  (`CompanyFolders.svelte`, `#settings-company-folders`, 2026-10-31;
+  [calendar.md](./calendar.md)): a row per company rule ("example.com ·
+  Meetings with people from example.com go in Clients") with Remove
+  (`company_folders`, `company_folder_remove`; kept current by
+  `yap-company-folders`), else "No company rules yet" and how one is made.
+  Last, the consent line.
 - **Commands** (`commands`): "Tell Yap's AI what to write, and it types the
   result where you are", with an example note (`role="note"`) linking to the
   Voice Assistant. **Say its name** (`#settings-wake-word`): "Answer to its

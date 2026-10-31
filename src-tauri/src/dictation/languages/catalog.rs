@@ -291,6 +291,12 @@ pub fn covers(id: &str, code: &str) -> bool {
     of_model(id).covers.covers(code)
 }
 
+/// Whether model `id` knows English and nothing else (Parakeet V2,
+/// Moonshine, Distil Whisper, the `.en` Whispers).
+pub fn english_only(id: &str) -> bool {
+    of_model(id).covers == Covers::Only(ENGLISH)
+}
+
 /// The codes of `langs` model `id` doesn't understand.
 pub fn missing(id: &str, langs: &[String]) -> Vec<String> {
     langs.iter().filter(|c| !covers(id, c)).cloned().collect()

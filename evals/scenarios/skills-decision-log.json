@@ -1,0 +1,79 @@
+{
+  "name": "skills-decision-log",
+  "description": "/decision-log: the decisions of the last 4 weeks' meetings, oldest first, each with its meeting's day and why; the one from 40 days ago left out, and the option only discussed never logged as a decision.",
+  "tags": ["skills", "meetings"],
+  "apps": "standard",
+  "seed": {
+    "notes": [
+      {
+        "title": "Old kick-off",
+        "folder": "Meetings",
+        "meeting": true,
+        "days_ago": 40,
+        "participants": ["Tom Reid"],
+        "enhanced": "## Recap\nThe project started.\n\n## Decisions\n- Stay with the old supplier for now",
+        "transcript": [
+          { "source": "you", "text": "For now we stay with the old supplier.", "ts": 0 },
+          { "source": "them", "text": "Fine, we can look again in the spring.", "ts": 15 }
+        ]
+      },
+      {
+        "title": "Offsite planning",
+        "folder": "Meetings",
+        "meeting": true,
+        "days_ago": 20,
+        "participants": ["Alice Moreno"],
+        "enhanced": "## Recap\nThe team planned the spring offsite.\n\n## Decisions\n- Hold the offsite in Lisbon, because flights are cheaper for most of the team",
+        "transcript": [
+          { "source": "you", "text": "Berlin or Lisbon for the offsite?", "ts": 0 },
+          { "source": "them", "text": "Lisbon. Flights are cheaper for most of the team.", "ts": 12 },
+          { "source": "you", "text": "Agreed, Lisbon it is.", "ts": 25 }
+        ]
+      },
+      {
+        "title": "Pricing sync",
+        "folder": "Meetings",
+        "meeting": true,
+        "days_ago": 10,
+        "participants": ["Ana Ruiz"],
+        "enhanced": "## Recap\nThe team went through the new prices.\n\n## Decisions\n- Keep the free plan after the price change, so new users can still try it\n\n## Open questions\n- Should the annual plan get a discount?",
+        "transcript": [
+          { "source": "them", "text": "Do we keep the free plan?", "ts": 0 },
+          { "source": "you", "text": "Yes, we keep it, so new users can still try us.", "ts": 10 },
+          { "source": "them", "text": "We could also give the annual plan a discount, maybe.", "ts": 22 },
+          { "source": "you", "text": "Let's think about that one.", "ts": 30 }
+        ]
+      },
+      {
+        "title": "Launch review",
+        "folder": "Meetings",
+        "meeting": true,
+        "days_ago": 3,
+        "participants": ["Lena Fischer"],
+        "enhanced": "## Recap\nThe launch can't happen on the first date.\n\n## Decisions\n- Move the launch to 12 March, because the copy isn't ready",
+        "transcript": [
+          { "source": "them", "text": "The copy isn't ready, so the first date won't work.", "ts": 0 },
+          { "source": "you", "text": "Then we move the launch to the twelfth of March.", "ts": 14 }
+        ]
+      }
+    ]
+  },
+  "turns": [
+    {
+      "user": "/decision-log",
+      "skill": "decision-log",
+      "expect": {
+        "answer_contains": ["Lisbon", "free plan"],
+        "answer_contains_any": ["12 March", "March 12", "twelfth of March", "12th"],
+        "answer_not_contains": ["old supplier", "Yap couldn't tie"],
+        "min_sources": 2,
+        "tools_not_called": ["create_note", "update_note", "edit_note", "open_app"]
+      },
+      "soft": {
+        "answer_not_contains": ["discount"],
+        "answer_matches": "(?is)lisbon.*free plan.*march",
+        "max_words": 200
+      }
+    }
+  ]
+}

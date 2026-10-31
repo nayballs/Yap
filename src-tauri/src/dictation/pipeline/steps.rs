@@ -19,6 +19,9 @@ pub(super) struct Steps {
     /// not only cleaned up: its words as said are another text, never
     /// split in its place.
     pub rewritten: bool,
+    /// The rich snippets in it (their markdown, in order), when the app
+    /// takes HTML (`pasting/rich.rs`); else none.
+    pub rich: Vec<String>,
 }
 
 impl Shared {

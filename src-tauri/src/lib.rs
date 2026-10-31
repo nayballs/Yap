@@ -228,8 +228,12 @@ pub fn run() {
             pipeline: Mutex::new(None),
         })
         // Chat's screenshots, by id only (Snip to Chat, snip.rs):
-        // yapsnip://localhost/img/<id> (http://yapsnip.localhost/… in WebView2).
-        .register_uri_scheme_protocol("yapsnip", |_ctx, request| snip::serve(&request))
+        // yapsnip://localhost/img/<id> (http://yapsnip.localhost/… in WebView2),
+        // `?w=&h=` a thumbnail (snip/thumbs.rs). Answered off the main thread:
+        // a big PNG's read, or a thumbnail being made, never holds up the windows.
+        .register_asynchronous_uri_scheme_protocol("yapsnip", |_ctx, request, responder| {
+            tauri::async_runtime::spawn_blocking(move || responder.respond(snip::serve(&request)));
+        })
         .invoke_handler(tauri::generate_handler![
             dictation::commands::toggle_recording,
             dictation::commands::dictation_key,
@@ -244,6 +248,9 @@ pub fn run() {
             shell::window::close_onboarding,
             dictation::commands::list_audio_devices,
             dictation::commands::list_output_devices,
+            // Settings → Dictation → Sounds' ▶ and ■ (dictation/sound.rs).
+            dictation::sound::sound_preview,
+            dictation::sound::sound_preview_stop,
             dictation::commands::set_mic_test,
             dictation::mics::list_mics,
             // Getting started (2026-10-29): the mic quiz, the bar's first-use
@@ -396,8 +403,14 @@ pub fn run() {
             privacy::export::e2e_export_pace,
             privacy::reset::data_reset_plan,
             privacy::reset::data_reset,
+            privacy::reset::data_delete,
             meetings::commands::meeting_start,
             meetings::commands::meeting_state,
+            meetings::import::transcript_import_pick,
+            meetings::import::transcript_import_add,
+            meetings::import::transcript_import_forget,
+            meetings::import::transcript_import_clear,
+            meetings::import::transcript_import_run,
             notes::commands::note_export,
             notes::commands::note_ask,
             chat::commands::chats_list,
@@ -574,6 +587,10 @@ pub fn run() {
             calendar::filing::meeting_file,
             calendar::filing::meeting_file_past,
             calendar::filing::meeting_unfile,
+            calendar::filing::companies::company_folder_respond,
+            calendar::filing::companies::company_folder_undo,
+            calendar::filing::companies::company_folders,
+            calendar::filing::companies::company_folder_remove,
             search::commands::search_status,
             search::commands::search_install,
             search::commands::search_set_enabled,
@@ -647,6 +664,8 @@ pub fn run() {
             meetings::meeting_audio::e2e_meeting_recovery_offer,
             #[cfg(debug_assertions)]
             meetings::disk_watch::e2e_disk_space,
+            #[cfg(debug_assertions)]
+            meetings::import::e2e_transcript_files,
             #[cfg(debug_assertions)]
             meetings::meeting_audio::export::e2e_audio_export_file,
             #[cfg(debug_assertions)]
@@ -767,6 +786,8 @@ pub fn run() {
             #[cfg(debug_assertions)]
             voice::tts::tts_e2e_spoken,
             #[cfg(debug_assertions)]
+            dictation::sound::sound_e2e_heard,
+            #[cfg(debug_assertions)]
             dictation::commands::e2e_chat_dictation,
             #[cfg(debug_assertions)]
             notes::quick_note::e2e_quick_note_dictation,
@@ -872,6 +893,8 @@ pub fn run() {
             ai::usage::store::init(&handle);
             // Spoken replies (tts.rs): its state goes to every window.
             voice::tts::init(&handle);
+            // Yap's sounds: the pack, the volume and each moment's switch (sound.rs).
+            dictation::sound::sync(&cfg);
 
             // Global input hook + dictation hotkey. (Not in e2e test runs: a
             // test instance must never see, or swallow, the developer's keys.

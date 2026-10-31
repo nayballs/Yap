@@ -14,7 +14,7 @@
   import { openExternalLink } from '../core/externalLinks.js';
   import { noteMarkdown, noteText, mailtoUrl } from '../core/notepadText.js';
   import { copySummaryForEmail } from '../core/summaryTools.js';
-  import { refreshAudio, cantTranscribeAgain, askTranscribeAgain, cantFindSpeakers, findSpeakers, cantExportAudio, exportAudio } from '../stores/meetingAudio.svelte.js';
+  import { refreshAudio, cantTranscribeAgain, askTranscribeAgain, cantFindSpeakers, findSpeakers, cantExportAudio, exportAudio, isImported } from '../stores/meetingAudio.svelte.js';
   import { copyToClipboard, openSettings, openNoteInYap } from './actions.js';
   import Icon from './NotepadIcon.svelte';
 
@@ -210,7 +210,8 @@
             <button role="menuitem" class="item" onclick={saveNote}>
               <Icon name="save" /><span>Save as .md</span>
             </button>
-            {#if !recordingThis && (note.noteType === 'meeting' || lineCount)}
+            <!-- Not for a meeting imported from a transcript file: no audio. -->
+            {#if !recordingThis && !isImported(note) && (note.noteType === 'meeting' || lineCount)}
               <button
                 role="menuitem"
                 class="item"

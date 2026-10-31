@@ -1,0 +1,41 @@
+{
+  "name": "skills-prd-document",
+  "description": "/prd in Chat, across the meetings: a short requirements draft of the latest meeting's discussion as a Chat document (Problem, Goals, Requirements, Out of scope, Open questions), filled, from what was said; a short line in the chat.",
+  "tags": ["skills", "meetings", "documents"],
+  "apps": "standard",
+  "seed": {
+    "notes": [
+      {
+        "title": "Offline mode",
+        "folder": "Meetings",
+        "meeting": true,
+        "days_ago": 1,
+        "participants": ["Lena Fischer"],
+        "transcript": [
+          { "source": "them", "text": "Our field engineers lose signal in basements and plant rooms, so they can't log a job until they're back outside.", "ts": 0 },
+          { "source": "them", "text": "They write it on paper and type it up later, and half the time the photos never make it in.", "ts": 18 },
+          { "source": "you", "text": "So the must-have is logging a job with no signal and syncing it when they're back online.", "ts": 34 },
+          { "source": "them", "text": "Yes. Photos too, ideally, but the job log comes first.", "ts": 48 },
+          { "source": "you", "text": "And editing other people's jobs offline is out, too risky with conflicts.", "ts": 60 },
+          { "source": "them", "text": "Agreed. What I don't know is how long the app should keep jobs that never sync.", "ts": 75 }
+        ]
+      }
+    ]
+  },
+  "turns": [
+    {
+      "user": "/prd",
+      "skill": "prd",
+      "expect": {
+        "document": { "made": true, "outline_first": true, "filled": true, "min_sections": 4, "contains": ["signal"], "citations_real": true },
+        "answer_not_contains": ["Yap couldn't tie"],
+        "max_words": 60,
+        "tools_not_called": ["create_note", "open_app"]
+      },
+      "soft": {
+        "document": { "made": true, "parts": ["problem", "requirements", "out of scope", "open questions"] },
+        "max_words": 30
+      }
+    }
+  ]
+}

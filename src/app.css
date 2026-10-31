@@ -108,6 +108,16 @@ body {
   /* the light tile under brand marks drawn in black or their own colours
      (the AI apps' logos, the call apps' icons), in both themes */
   --yap-mark-tile: #ffffff;
+  /* Chat's screenshots (the box's tiles, a question's pictures, the viewer;
+     after the Claude app's, snip.md "How a screenshot looks"): the fill under
+     a picture where it doesn't reach, the ring laid over its edge
+     (--yap-hairline wide: one device pixel), a soft drop, and the viewer's
+     darker scrim */
+  --yap-shot-fill: #ffffff;
+  --yap-shot-ring: rgba(35, 33, 27, 0.16);
+  --yap-shot-ring-hover: rgba(35, 33, 27, 0.3);
+  --yap-shot-drop: 0 1px 2px rgba(60, 50, 30, 0.08);
+  --yap-shot-scrim: rgba(28, 23, 14, 0.62);
 
   /* display face — EB Garamond, Wispr's exact serif (stat numerals, hero
      headlines, settings titles; bundled in main.js) */
@@ -209,6 +219,44 @@ body {
   --bar-sep: rgba(35, 33, 27, 0.14);          /* the open pill's divider */
   --bar-track: rgba(35, 33, 27, 0.12);        /* countdown rings and timers, on the card */
   --bar-mark-tile: #f2efe9;                   /* the app icon's tile on a call card */
+}
+
+/* One device pixel, in CSS pixels, at Windows' scalings (100 %, 125 %,
+ * 150 %, 175 %, 200 %, 250 %, 300 %): a ring this wide is one crisp line of
+ * device pixels, never a 1.5-pixel blur (Chat's screenshots' ring; the
+ * Claude app has steps at 2x, 3x and 4x only). */
+:root {
+  --yap-hairline: 1px;
+}
+@media (resolution >= 1.25x) {
+  :root {
+    --yap-hairline: 0.8px;
+  }
+}
+@media (resolution >= 1.5x) {
+  :root {
+    --yap-hairline: calc(1px / 1.5);
+  }
+}
+@media (resolution >= 1.75x) {
+  :root {
+    --yap-hairline: calc(1px / 1.75);
+  }
+}
+@media (resolution >= 2x) {
+  :root {
+    --yap-hairline: 0.5px;
+  }
+}
+@media (resolution >= 2.5x) {
+  :root {
+    --yap-hairline: 0.4px;
+  }
+}
+@media (resolution >= 3x) {
+  :root {
+    --yap-hairline: calc(1px / 3);
+  }
 }
 
 /* ------------------------------------------------------------------ *
@@ -428,6 +476,13 @@ body {
   --yap-feature-cta-fg: #1c1a16;
   --yap-feature-cta-hover: #ffffff;
   --yap-mark-tile: #ece8df;
+  /* the "white tinge": white at 20 % over the picture's edge (the Claude
+     app's exact ring), on a fill a step under the page */
+  --yap-shot-fill: #12100d;
+  --yap-shot-ring: rgba(255, 255, 255, 0.2);
+  --yap-shot-ring-hover: rgba(255, 255, 255, 0.34);
+  --yap-shot-drop: 0 1px 2px rgba(0, 0, 0, 0.28);
+  --yap-shot-scrim: rgba(4, 3, 2, 0.74);
 
   --yap-rule: #2c2822;
   --yap-link: #f0b04a;
@@ -604,4 +659,49 @@ mark.found {
   border-radius: 3px;
   background: var(--yap-primary-tint);
   color: inherit;
+}
+
+/* ------------------------------------------------------------------ *
+ * Chat's screenshots (views/chat: the box's tiles, a question's pictures,
+ * the viewer), after the Claude app's (snip.md "How a screenshot looks"):
+ * a frame with a fill and a soft drop, the picture in it on whole device
+ * pixels (chatImages.js `placed`: Rust's thumbnail at exactly that size, or
+ * its own pixels) faded in once loaded, and a ring laid OVER the picture's
+ * edge, one device pixel wide (--yap-hairline) — white at 20 % in the dark
+ * theme, the "white tinge" — rather than a border round it. A frame sets
+ * its width and aspect-ratio; what's clickable fills it.
+ * ------------------------------------------------------------------ */
+.shotframe {
+  position: relative;
+  isolation: isolate;
+  box-sizing: border-box;
+  max-width: 100%;
+  border-radius: 10px;
+  background: var(--yap-shot-fill);
+  box-shadow: var(--yap-shot-drop);
+}
+.shotframe::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  border-radius: inherit;
+  box-shadow: inset 0 0 0 var(--yap-hairline) var(--yap-shot-ring);
+  pointer-events: none;
+  transition: box-shadow var(--yap-dur);
+}
+.shotframe:hover::after {
+  box-shadow: inset 0 0 0 var(--yap-hairline) var(--yap-shot-ring-hover);
+}
+.shotframe img {
+  position: absolute;
+  display: block;
+  max-width: none;
+  object-fit: contain; /* (only a picture of unknown size isn't placed exactly) */
+  opacity: 0;
+  transition: opacity 200ms ease-out;
+  user-select: none;
+}
+.shotframe img.shown {
+  opacity: 1;
 }

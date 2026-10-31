@@ -63,9 +63,20 @@ pub fn note_update(
 ) -> Result<(), String> {
     use crate::notes::versions::{by, kind, How};
     let how = How::new(if how.as_deref() == Some("dictated") { kind::DICTATED } else { kind::TYPED });
+    // A move (the Notes view's Move to, the folder chip): where it was.
+    let moved_to = folder.as_ref().map(|f| f.trim().to_string()).filter(|f| !f.is_empty());
+    let was = moved_to.as_ref().and_then(|_| crate::notes::get(id)).map(|n| n.folder);
     by(how, || crate::notes::update(id, title, content, folder, participants))?;
     note_changed(&app, id, origin.as_deref().unwrap_or(""));
-    Ok(crate::notes::saved()?)
+    crate::notes::saved()?;
+    // A meeting filed by hand: every meeting with its company there too?
+    // (Asked once, calendar/filing/companies.rs.)
+    if let (Some(to), Some(was)) = (moved_to, was) {
+        if !was.trim().eq_ignore_ascii_case(&to) {
+            crate::calendar::filing::companies::after_move(&app, id, &to);
+        }
+    }
+    Ok(())
 }
 
 /// Tell every window that note `id`'s editable fields changed (`origin`:

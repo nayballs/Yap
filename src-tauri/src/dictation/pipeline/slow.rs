@@ -47,6 +47,11 @@ impl SlowWatch {
                 tracing::info!(stage = ?notice.stage, after_ms, usual_ms = ?usual, "Dictation: taking longer than usual");
                 let _ = bar.emit(slow::EVENT, Some(notice));
                 let _ = bar.emit("yap-state", "processing-slow");
+                // "Taking longer than usual…" has its sound, if it's on
+                // (not "Loading the AI model…": that's no slower than usual).
+                if notice.stage != Stage::Loading {
+                    crate::dictation::sound::cue(crate::dictation::sound::Cue::Slow);
+                }
             }
         });
         SlowWatch { state, task, app: app.clone() }

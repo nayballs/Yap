@@ -37,6 +37,10 @@ The full stack list, the app's entry and plumbing (`lib.rs`, the tray, context m
   wraps **whisper.cpp** (Vulkan) *and* a family of **ONNX** models (Parakeet, Moonshine,
   SenseVoice, GigaAM, Canary, Cohere) via `ort`/ONNX Runtime (DirectML). Behind the
   `engines` feature flag (see below).
+- **Language of a transcript's text:** [`whatlang`](https://crates.io/crates/whatlang) 0.16
+  (trigram profiles, pure Rust, MIT, ~0.3 MB) with Yap's own function-word lists, for
+  the "You spoke French" nudge with models that don't say what they heard
+  (`dictation/languages/text_id.rs`, [dictation.md](./dictation.md)).
 - **AI cleanup:** `reqwest` → any **OpenAI-compatible** chat endpoint (Groq/OpenAI/
   OpenRouter, or local Ollama/LM Studio). `src/llm.rs`.
 - **Text injection:** the Win32 clipboard (`windows` crate: private formats + a

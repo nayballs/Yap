@@ -26,7 +26,9 @@
 //   long screenshots are kept; ✂ on the bar, Chat's + and the in-page
 //   Win+Alt+S start one.
 // - Kept for their time: a screenshot past "Keep chat screenshots" goes and
-//   its message says so; deleting a conversation deletes its screenshots.
+//   its message says so; deleting a conversation deletes its screenshots
+//   (their thumbnails too: snip/thumbs.rs; how they look:
+//   chat-shots.spec.js).
 //
 // Phase 2 (2026-10-25):
 // - A click takes the whole monitor, Enter the one under the pointer; Space
@@ -146,6 +148,12 @@ function imageFile(yap, id) {
   return path.join(yap.dataDir, 'chat-images', `${id}.png`);
 }
 
+/** An image's thumbnails (snip/thumbs.rs: chat-images/thumbs/<id>-<w>x<h>.png). */
+function thumbsOf(yap, id) {
+  const dir = path.join(yap.dataDir, 'chat-images', 'thumbs');
+  return fs.existsSync(dir) ? fs.readdirSync(dir).filter((n) => n.startsWith(`${id}-`)) : [];
+}
+
 async function inChat(main) {
   await expect(sidebar(main).getByRole('button', { name: 'Chat', exact: true })).toHaveAttribute('aria-current', 'page');
 }
@@ -177,10 +185,12 @@ test('a snip from the shortcut lands in a new chat: the screenshot in the box, t
   const png = readPng(fs.readFileSync(imageFile(yap, img.id)));
   expect([png.width, png.height]).toEqual([200, 100]);
   expect(worstError(png, GREY)).toBeLessThanOrEqual(1);
-  // The thumbnail draws.
+  // The tile draws: Rust's thumbnail at the 120 px tile's device pixels
+  // (snip/thumbs.rs; at 100 % a 200 × 100 snip is 120 × 60 in it).
   await expect
     .poll(() => attachments(main).locator('img').first().evaluate((el) => el.complete && el.naturalWidth))
-    .toBe(200);
+    .toBe(120);
+  await expect(attachments(main).locator('img').first()).toHaveAttribute('src', /\?w=120&h=60$/);
   await shot(main, '01-snip-in-the-box');
 });
 
@@ -463,11 +473,15 @@ test('screenshots are kept their time: removed after 7 days, and with their conv
   const olderId = older.messages.find((m) => m.images?.length).images[0].id;
   const otherIds = other.messages.flatMap((m) => (m.images ?? []).map((i) => i.id));
   expect(fs.existsSync(imageFile(yap, olderId))).toBe(true);
-  // Written 40 days ago; "Keep chat screenshots" set to 7 days: it goes.
+  // Its tile's thumbnail, made as it landed, beside it.
+  await expect.poll(() => thumbsOf(yap, olderId).length, { message: 'the tile thumbnail' }).toBeGreaterThan(0);
+  // Written 40 days ago; "Keep chat screenshots" set to 7 days: it goes,
+  // its thumbnails with it.
   const old = new Date(Date.now() - 40 * 86_400_000);
   fs.utimesSync(imageFile(yap, olderId), old, old);
   await setConfig(yap, main, { chatImageDays: 7 });
   await expect.poll(() => fs.existsSync(imageFile(yap, olderId)), { message: 'the old screenshot to go' }).toBe(false);
+  expect(thumbsOf(yap, olderId)).toEqual([]);
   // Its message keeps its place and says why the picture is gone.
   await openConversation(main, older.id);
   await expect(main.getByTestId('chat-shot-gone').first()).toHaveText('Screenshot removed after 7 days');
@@ -477,8 +491,10 @@ test('screenshots are kept their time: removed after 7 days, and with their conv
   // Deleting a conversation deletes its screenshots.
   expect(otherIds.length).toBeGreaterThan(0);
   expect(otherIds.every((id) => fs.existsSync(imageFile(yap, id)))).toBe(true);
+  expect(otherIds.some((id) => thumbsOf(yap, id).length > 0)).toBe(true);
   await yap.invoke('chat_delete', { id: other.id });
   await expect.poll(() => otherIds.some((id) => fs.existsSync(imageFile(yap, id)))).toBe(false);
+  expect(otherIds.flatMap((id) => thumbsOf(yap, id))).toEqual([]);
 });
 
 // ---- Phase 2 -----------------------------------------------------------------------------

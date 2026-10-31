@@ -555,6 +555,135 @@ test("a snippet shows its length, and warns when its phrase is near another's or
   await setConfig(yap, main, { dictionary: DICT });
 });
 
+// Rich snippets (2026-10-31; pasting/rich.rs, richSnippet.js): the
+// formatting bar writes Yap's markdown into the snippet's text, the preview
+// shows how it pastes (formatted, or plain), config.json keeps the markdown
+// (an older Yap reads it as text) and the plain snippets exactly as they
+// were. Dictated, the paste carries an HTML fragment beside the plain text
+// in an app that takes it (Outlook), none in a code editor or an AI chat
+// box, and none for a plain snippet; spoken words are escaped in it. (A
+// test run pastes nothing: the dictation's report says what would go.)
+test('a rich snippet: the formatting bar, its preview, saved as markdown; plain snippets unchanged; HTML only where it goes', async ({
+  yap,
+  main,
+  shot,
+}) => {
+  await freshView(yap, main);
+  const plainBefore = (await yap.invoke('get_config')).dictionary.filter((e) => e.snippet);
+  await snippets(main).getByRole('button', { name: '+ Add snippet' }).click();
+  const fresh = snippets(main).locator('.snip-row').last();
+  await fresh.getByRole('textbox', { name: 'Phrase you say' }).fill('my agenda');
+  const box = fresh.getByRole('textbox', { name: 'Text Yap types' });
+  await box.fill('Thanks Sam\nUpdates\nRisks\nBook a call');
+  const preview = fresh.getByRole('group', { name: 'How it pastes' });
+  // No formatting yet: no preview, and none on the plain snippets.
+  await expect(preview).toHaveCount(0);
+  await expect(snippets(main).getByRole('group', { name: 'How it pastes' })).toHaveCount(0);
+  const bar = fresh.getByRole('toolbar', { name: 'Format the snippet “my agenda”' });
+  const select = (word, length = word.length) =>
+    box.evaluate((el, [w, n]) => {
+      const at = el.value.indexOf(w);
+      el.focus();
+      el.setSelectionRange(at, at + n);
+    }, [word, length]);
+
+  // Bold on a word; Ctrl+Z takes it back (the bar's edits are typing); again.
+  await select('Sam');
+  await bar.getByRole('button', { name: 'Bold' }).click();
+  await expect(box).toHaveValue('Thanks **Sam**\nUpdates\nRisks\nBook a call');
+  await box.press('Control+z');
+  await expect(box).toHaveValue('Thanks Sam\nUpdates\nRisks\nBook a call');
+  await select('Sam');
+  await bar.getByRole('button', { name: 'Bold' }).click();
+  // A bulleted list over two lines.
+  await select('Updates', 'Updates\nRisks'.length);
+  await bar.getByRole('button', { name: 'Bulleted list' }).click();
+  await expect(box).toHaveValue('Thanks **Sam**\n- Updates\n- Risks\nBook a call');
+  // Italic with Ctrl+I.
+  await select('Risks');
+  await box.press('Control+i');
+  await expect(box).toHaveValue('Thanks **Sam**\n- Updates\n- *Risks*\nBook a call');
+  // A link: the words its text, the address typed over "https://".
+  await select('Book a call');
+  await bar.getByRole('button', { name: 'Link' }).click();
+  await main.keyboard.type('https://example.com/book');
+  const MD = 'Thanks **Sam**\n- Updates\n- *Risks*\n[Book a call](https://example.com/book)';
+  await expect(box).toHaveValue(MD);
+  // The length counts the text as kept.
+  await expect(fresh.locator('.snip-count')).toHaveText(`${[...MD].length} characters`);
+  // The bar is one tab stop: ← → move along it.
+  await bar.getByRole('button', { name: 'Bold' }).focus();
+  await main.keyboard.press('ArrowRight');
+  await expect(bar.getByRole('button', { name: 'Italic' })).toBeFocused();
+  await expect(bar.getByRole('button', { name: 'Italic' })).toHaveAttribute('tabindex', '0');
+  await expect(bar.getByRole('button', { name: 'Bold' })).toHaveAttribute('tabindex', '-1');
+
+  // The preview: formatted…
+  const shown = preview.getByTestId('snippet-preview');
+  await expect(shown.locator('.pv-line').first()).toHaveText('Thanks Sam');
+  await expect(shown.locator('b')).toHaveText('Sam');
+  await expect(shown.locator('li')).toHaveText(['Updates', 'Risks']);
+  await expect(shown.locator('i')).toHaveText('Risks');
+  await expect(shown.locator('.pv-link')).toHaveText('Book a call');
+  await expect(shown.locator('.pv-link')).toHaveAttribute('title', 'https://example.com/book');
+  await expect(shown.locator('a')).toHaveCount(0); // never a link to follow from Yap's window
+  await preview.scrollIntoViewIfNeeded();
+  await shot(main, '13-rich-snippet-preview');
+  // (The dark theme's tokens, for a look.)
+  const theme = await main.evaluate(() => document.documentElement.dataset.yapTheme ?? null);
+  await main.evaluate(() => (document.documentElement.dataset.yapTheme = 'dark'));
+  await shot(main, '13-rich-snippet-preview-dark');
+  await main.evaluate((t) => (t ? (document.documentElement.dataset.yapTheme = t) : delete document.documentElement.dataset.yapTheme), theme);
+  // …and as plain text.
+  await preview.getByRole('tab', { name: 'Plain text' }).click();
+  await expect(preview.getByTestId('snippet-preview-plain')).toHaveText('Thanks Sam\n• Updates\n• Risks\nBook a call (https://example.com/book)');
+  await expect(preview).toContainText('In terminals, code editors and AI chat boxes');
+  await preview.scrollIntoViewIfNeeded();
+  await shot(main, '14-rich-snippet-plain');
+  await preview.getByRole('tab', { name: 'Formatted' }).click();
+
+  // Saved as markdown in the snippet's text; the plain snippets as they were
+  // (nothing added to them).
+  await expectStore(yap, 'config.json', (c) => c.dictionary.some((e) => e.snippet && e.from === 'my agenda' && e.to === MD));
+  const saved = yap.readJson('config.json').dictionary;
+  expect(saved.filter((e) => e.snippet && e.from !== 'my agenda')).toEqual(plainBefore);
+  expect(Object.keys(saved.find((e) => e.from === 'my agenda')).sort()).toEqual(['from', 'fuzzy', 'snippet', 'to']);
+
+  const PLAIN = 'Thanks Sam\n• Updates\n• Risks\nBook a call (https://example.com/book)';
+  const HTML = 'Thanks <b>Sam</b><ul><li>Updates</li><li><i>Risks</i></li></ul><a href="https://example.com/book">Book a call</a>';
+  try {
+    // Outlook: the HTML beside the plain text, the spoken words in it too.
+    await yap.invoke('e2e_style_app', { exe: 'OUTLOOK.EXE', title: 'Inbox - user@example.com - Outlook' });
+    let r = await yap.invoke('e2e_dictation', { text: 'Hello. My agenda.' });
+    expect(r.text).toBe(`Hello. ${PLAIN}`);
+    expect(r.html).toBe(`Hello. ${HTML}`);
+    // Spoken words that look like HTML are text in it.
+    r = await yap.invoke('e2e_dictation', { text: 'Use <b> tags & "quotes". My agenda' });
+    expect(r.text).toBe(`Use <b> tags & "quotes". ${PLAIN}`);
+    expect(r.html).toBe(`Use &lt;b&gt; tags &amp; &quot;quotes&quot;. ${HTML}`);
+    // A plain snippet: as it always pasted, no HTML.
+    r = await yap.invoke('e2e_dictation', { text: 'It goes to my address.' });
+    expect(r.text).toBe('It goes to 1 Long Lane\nLeeds');
+    expect(r.html).toBeNull();
+    // A code editor, and an AI chat box in a browser: the plain text only.
+    await yap.invoke('e2e_style_app', { exe: 'Code.exe', title: 'notes.md - Visual Studio Code' });
+    r = await yap.invoke('e2e_dictation', { text: 'My agenda.' });
+    expect(r.text).toBe(PLAIN);
+    expect(r.html).toBeNull();
+    await yap.invoke('e2e_style_app', { exe: 'msedge.exe', title: 'ChatGPT - Microsoft Edge' });
+    r = await yap.invoke('e2e_dictation', { text: 'My agenda.' });
+    expect(r.html).toBeNull();
+    // Gmail in the same browser: formatted.
+    await yap.invoke('e2e_style_app', { exe: 'msedge.exe', title: 'Inbox (3) - user@example.com - Gmail - Microsoft Edge' });
+    r = await yap.invoke('e2e_dictation', { text: 'My agenda.' });
+    expect(r.html).toBe(HTML);
+  } finally {
+    await yap.invoke('e2e_style_app', { exe: null, title: null });
+  }
+  await openView(main, 'Home');
+  await setConfig(yap, main, { dictionary: DICT });
+});
+
 test('in the dark theme: the tools, a star, a selection, a search and the import preview', async ({ yap, main, shot }) => {
   await freshView(yap, main, DICT.map((e) => (e.to === 'Vexwell' ? { ...e, starred: true } : e)));
   const pick = async (label) => {

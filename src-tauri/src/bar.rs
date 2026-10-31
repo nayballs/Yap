@@ -1280,7 +1280,7 @@ pub fn show_card(app: &AppHandle, card: Card, on_action: OnAction) -> bool {
 /// count given back (`kinds::give_back`).
 fn repick(app: &AppHandle) -> bool {
     let moment = crate::notices::notice::moment();
-    let (changed, stale, unseen) = {
+    let (changed, stale, unseen, first_seen) = {
         let mut s = lock();
         let m = crate::notices::notice::Moment {
             meeting: s.meeting || moment.meeting,
@@ -1312,6 +1312,9 @@ fn repick(app: &AppHandle) -> bool {
             }
         }
         let changed = front != s.front || !stale.is_empty();
+        // A card seen for the first time: its sound (the Voice Assistant's
+        // answer, which Yap speaks, has none).
+        let mut first_seen = false;
         if let Some(id) = &front {
             if s.front.as_ref() != Some(id) {
                 tracing::info!(card = %id, waiting = s.cards.len().saturating_sub(1), "bar: card on screen");
@@ -1319,16 +1322,21 @@ fn repick(app: &AppHandle) -> bool {
             // Seen once it's really on screen (not waiting out a game in
             // exclusive fullscreen): from then on it never goes stale.
             if cards_seen() {
+                let answer = s.cards.iter().any(|c| &c.id == id && c.style == "answer");
                 if let Some(q) = s.queued.get_mut(id) {
+                    first_seen = !q.1 && !answer;
                     q.1 = true;
                 }
             }
         }
         s.front = front;
-        (changed, stale, unseen)
+        (changed, stale, unseen, first_seen)
     };
     if changed {
         after_cards_changed(app);
+    }
+    if first_seen {
+        crate::dictation::sound::cue(crate::dictation::sound::Cue::Notice);
     }
     for id in unseen {
         crate::notices::kinds::give_back(&id);

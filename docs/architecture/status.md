@@ -139,8 +139,11 @@ sound smart** while a meeting records — one or two things to say, built
 on the latest talk, the brief and the invite, each citing the line it
 builds on (a pill opens it) — and **Make notes longer** after it (the
 summary written out in more detail, every task kept, Undo); **Skills**,
-saved instructions run with "/" — built-ins (/followup-email, /decisions,
-/risks, /coach, /todos, /weekly-recap) copyable as your own, your own made
+saved instructions run with "/" — 15 built-ins (/followup-email, /decisions,
+/risks, /coach, /todos, /weekly-recap; since 31 Oct /summary-for,
+/decision-log, /open-questions, /tickets and /prd — a Chat document —,
+/standup, /prep and /one-to-one — the calendar's next meeting —,
+/project-update) copyable as your own, your own made
 in Settings → Skills (`skills.json`) — on the meeting in its Ask box, or
 across the meetings in Chat and the Meetings view's Ask bar with their own
 passages (open tasks, a week, the latest meeting's talk) and Ask across
@@ -150,9 +153,11 @@ recorded meeting's two coach marks (once each, `hints.json`); a meeting's
 past chat renamed from Past chats. Unit-tested (the passages, the checks,
 longer notes and their Undo, every Skill rule and gathering, the coach
 marks), e2e-tested with the fake model (`meeting-chips.spec.js`,
-`coach-marks.spec.js`, `notepad.spec.js`'s chips) and the prompts measured
-on the on-device Qwen3.5-4B (`yap.exe eval --chips`,
-[model-evals.md](../model-evals.md#meeting-chips-and-skills-29-oct-2026)). Not
+`skills.spec.js`, `coach-marks.spec.js`, `notepad.spec.js`'s chips) and the
+prompts measured on the on-device Qwen3.5-4B (`yap.exe eval --chips` and the
+`skills` scenarios,
+[model-evals.md](../model-evals.md#meeting-chips-and-skills-29-oct-2026),
+[More Skills](../model-evals.md#more-skills-31-oct-2026)). Not
 tried yet: a real meeting (what's worth saying, live), a cloud model on
 these prompts (no paid calls tonight), a Skill's answer read aloud by the
 Voice Assistant (it doesn't run Skills).
@@ -209,17 +214,20 @@ Settings → Privacy & data → **Download your data** saves one .zip (history
 as CSV and JSON, notes and meetings as Markdown, chats, tasks, memory, the
 Dictionary's CSV, settings with every key, token and password left out; the
 audio and screenshots with a tick box that says their size) through the Save
-dialog, with progress and Cancel, never uploaded; **Reset app** clears the
-history, notes and meetings, chats, memory, tasks, the search index and the
-usage counts, keeps the settings, dictionary, models and account, names it
-all first (with Download your data first) and needs no restart.
+dialog, with progress and Cancel, never uploaded; **Delete some of your
+data** (2026-10-31) deletes the kinds ticked — dictation history, its audio,
+stats, meetings, other notes, tasks, chats, memory, dictionary suggestions,
+AI usage, network receipts, the search index, logs —, each with its size or
+count, confirmed first; **Reset app** is every kind at once, keeps the
+settings, dictionary, models and account, names it all first (with Download
+your data first); neither needs a restart.
 After a dictation with a weak signal (quiet, noisy, clipped), or on a
 Bluetooth headset in hands-free mode, one tip, rarely ("Yap didn't hear you
 clearly"); with a laptop's lid closed its own microphone gives way to the
 next one, or Yap says why it can't hear. Unit-tested (the zip, no secret in
-it, the reset's lists against config-and-data.md, the signal on synthetic
-speech, the lid's order) and e2e-tested (`your-data.spec.js`,
-`mic-tips.spec.js`). Not tried yet: a real laptop's lid (this PC is a
+it, each kind of data against the files config-and-data.md names, the signal
+on synthetic speech, the lid's order) and e2e-tested (`your-data.spec.js`,
+`your-data-delete.spec.js`, `mic-tips.spec.js`). Not tried yet: a real laptop's lid (this PC is a
 desktop), a real Bluetooth headset, the thresholds on the robot's real
 speech (`e2e-real/mic-tips.real.js`, written, not run), a reset of a big
 real data folder.
@@ -584,12 +592,21 @@ languages?"). Whisper picks the likeliest of your languages from its own
 detection (74 / 56 ms for large-v3 on an RTX 5070 Ti: the work it already
 did when not given a language); Parakeet V3 and SenseVoice recognise the
 language by themselves, Canary and Cohere are told your first language,
-Parakeet V2 (English only) is unchanged — only Whisper says what it heard,
-so the nudge works with Whisper models alone. The rules (plans, slots,
-coverage, the nudge's limits, the language line, the leading filler)
-unit-tested; Settings, a translating shortcut through the fake AI (and
-through the stub speech engine), the AI failing and the nudge in the main
-window and on the bar e2e-tested (`languages.spec.js`); the prompts measured
+Parakeet V2 (English only) is unchanged — only Whisper says what it heard;
+for the others the nudge reads the language from the text (2026-10-31,
+`languages/text_id.rs`: function words and whatlang's trigrams agreeing,
+five words at least; measured on 421 fictional sentences in 29 languages
+and 60 tricky English ones: never a wrong language, never an English one),
+and an English-only model's says "Parakeet V2 only knows English" — once,
+the first time one of your languages is recognised, "Yap recognised
+French". The rules (plans, slots, coverage, the nudge's limits, the
+language line, the leading filler, the text's gate) unit-tested; Settings,
+a translating shortcut through the fake AI (and through the stub speech
+engine), the AI failing and the nudge in the main window and on the bar,
+Parakeet V3's French read from its text (and through the stub engine's
+transcript), Parakeet V2's offer and the one-time tip e2e-tested
+(`languages.spec.js`); not yet tried on Parakeet V3's or V2's real output
+from real speech; the prompts measured
 on the 4B (cleanup 27/27 after vs 21/27 before, translation 12/12), the 1.5B
 (0/27 → 15/27: it still writes German in English) and Groq's gpt-oss-20b
 (13/13, docs/model-evals.md "My languages"); robot tests run with Whisper
@@ -692,7 +709,14 @@ validated live 2026-07-10), transcription history + stats, cleanup presets,
 2026-10-17: per app after the start chime, never calls, back to exactly
 their level after the stop chime; the rules unit-tested, the volume drop and
 restore and the pause and resume checked by the robot on an Edge page it
-opened),
+opened), **sounds in packs** (`dictation/sound.rs`, 2026-10-31: Classic, Soft,
+Crisp and Minimal for a dictation's start, stop, hands-free and cancel, an
+error, "Taking longer than usual", meeting notes' start and stop and a bar
+card; every pack's lengths, levels and start/stop contours unit-tested,
+Classic unchanged sample for sample; Settings, ▶ and which sound each
+moment plays e2e-tested in test mode, which plays nothing; not yet heard on
+speakers by a person, nor a meeting's start sound checked absent from a
+real loopback recording),
 the dictionary's **snippets**, the **"press enter" voice command** and a Whisper
 vocabulary ranked by use (2026-10-17: unit-tested, the Dictionary/Settings UI
 e2e-tested, not yet tried with real speech), **terminal & coding-CLI pasting**
@@ -734,6 +758,15 @@ warnings** — the rules unit-tested, all five e2e-tested through the stub
 engine's dictations (the snippet offer's bar card too); not yet tried with
 real speech, a real week of dictations, or text typed after a real paste
 (the watch's `typed_after` is unit-tested only),
+**rich snippets** (2026-10-31, `pasting/rich.rs`: bold, italic, links and
+lists in Yap's markdown subset, pasted as CF_HTML beside the plain text
+except into terminals, code editors and AI prompt boxes; the Dictionary
+view's formatting bar and preview) — unit-tested (the subset, escaping,
+CF_HTML's offsets read back, which apps), the promise of both formats in
+`read_check.rs`'s private clipboard round trip (run), the view and the
+per-app choice e2e-tested; the robot spec `rich-snippets.real.js` (Edge's
+contenteditable, the pad's RichEdit, PowerShell) written but not yet run,
+and not yet tried in a real Outlook, Word, Gmail, Teams or Slack,
 the Groq usage meter, and the installer + auto-updater (background checks + download
 while Yap runs, "Restart to update" from toast/tray/About/Windows notification —
 `updates.rs`, 2026-10-05) + portable mode + release CI (since 2026-10-25 every
@@ -1395,7 +1428,8 @@ its notes both say can pass (no "In short" from a small on-device model for
 that reason);
 a true streaming model for the partial pass (spike-gated
 Stage 2 — see `ROADMAP.md` Phase 1);
-rich-text snippets (bold, links, lists pasted as HTML beside plain text);
+a rich snippet through Paste last transcript (its plain text only) or
+in a dictation pasted in steps (stacked messages, a picked mention);
 snippets with several spoken phrases; the clipboard-read check in Notepad,
 Electron, VS Code and real slow apps (Outlook, Word, a remote desktop), and
 a page in Edge that ignores the paste (Edge reads the clipboard anyway); a JetBrains IDE's or Visual Studio's terminal, and a browser's

@@ -4,7 +4,9 @@
 //! NULL)` from a window of Yap's own (a message-only window on a thread of
 //! its own, [`Offer::put`]). Windows asks that window for the text
 //! (`WM_RENDERFORMAT`) the moment an app reads it, and that moment says the
-//! paste reached an app:
+//! paste reached an app. A rich snippet's paste promises its HTML
+//! (CF_HTML, `pasting/rich.rs`) beside the text the same way: a read of
+//! either is the app's.
 //!
 //! - **Who read it.** The window that has the clipboard open
 //!   (`GetOpenClipboardWindow`), its process against the target's
@@ -371,6 +373,9 @@ mod win {
         owner: isize,
         /// UTF-16 with its terminating NUL, as CF_UNICODETEXT holds it.
         text: Vec<u8>,
+        /// A rich snippet's CF_HTML ("HTML Format", its registered
+        /// number), promised beside the text (`pasting/rich.rs`).
+        html: Option<(u32, Vec<u8>)>,
         targets: Targets,
         phase: Phase,
         open: bool,
@@ -380,9 +385,27 @@ mod win {
         first: Option<(Reader, Phase, Instant)>,
         keys_at: Option<Instant>,
         refused: u32,
+        /// The text given (to a reader, or written out)…
         rendered: bool,
+        /// …and the HTML, when there is some.
+        html_rendered: bool,
         /// Someone else took the clipboard (or Yap put the person's back).
         gone: bool,
+    }
+
+    impl Live {
+        /// The bytes for `format`, if it's one this promise has.
+        fn data(&self, format: u32) -> Option<&[u8]> {
+            if format == CF_UNICODETEXT {
+                return Some(&self.text);
+            }
+            self.html.as_ref().filter(|(f, _)| *f == format).map(|(_, b)| &b[..])
+        }
+
+        /// Every promised format given already.
+        fn all_rendered(&self) -> bool {
+            self.rendered && (self.html.is_none() || self.html_rendered)
+        }
     }
 
     /// A restore waiting for its time (a slow app's paste).
@@ -601,18 +624,19 @@ mod win {
         pid
     }
 
-    /// Someone opened the clipboard and asked for the text: give it or not
+    /// Someone opened the clipboard and asked for the text (or a rich
+    /// snippet's HTML beside it: the app reads either): give it or not
     /// ([`answer`]), and note the first read that got it.
     fn on_render(window: HWND, format: u32) {
-        if format != CF_UNICODETEXT {
-            return;
-        }
         // (No window: an app that opened the clipboard without one.)
         let opener = unsafe { GetOpenClipboardWindow() }.unwrap_or_default();
         let pid = (!opener.is_invalid()).then(|| window_pid(opener)).filter(|&p| p != 0);
         let (id, text, reader, phase) = {
             let mut st = state();
             let Some(live) = st.offer.as_mut().filter(|l| !l.gone && l.owner == window.0 as isize) else {
+                return;
+            };
+            let Some(data) = live.data(format).map(<[u8]>::to_vec) else {
                 return;
             };
             // Yap's own reads open the clipboard with no window: told by
@@ -633,14 +657,18 @@ mod win {
                 debug!(reader = reader.name(), "Kept the clipboard's text from a read before the paste keys");
                 return;
             }
-            (live.id, live.text.clone(), reader, live.phase)
+            (live.id, data, reader, live.phase)
         };
         // The clipboard is the reader's, open: the data goes in as is.
-        let rendered = unsafe { set_data(&text) };
+        let rendered = unsafe { set_data(format, &text) };
         let mut st = state();
         let first = match st.offer.as_mut().filter(|l| l.id == id) {
             Some(live) if rendered => {
-                live.rendered = true;
+                if format == CF_UNICODETEXT {
+                    live.rendered = true;
+                } else {
+                    live.html_rendered = true;
+                }
                 if live.first.is_some() {
                     None
                 } else {
@@ -667,9 +695,10 @@ mod win {
         CHANGED.notify_all();
     }
 
-    /// The text as CF_UNICODETEXT's data (the clipboard open by whoever
-    /// asked, or by Yap's window). `false` if it didn't take.
-    unsafe fn set_data(text: &[u8]) -> bool {
+    /// `format`'s data (the text as CF_UNICODETEXT holds it, or the HTML)
+    /// on the clipboard, open by whoever asked or by Yap's window. `false`
+    /// if it didn't take.
+    unsafe fn set_data(format: u32, text: &[u8]) -> bool {
         let Ok(global) = GlobalAlloc(GMEM_MOVEABLE, text.len().max(1)) else { return false };
         let ptr = GlobalLock(global) as *mut u8;
         if ptr.is_null() {
@@ -678,7 +707,7 @@ mod win {
         }
         std::ptr::copy_nonoverlapping(text.as_ptr(), ptr, text.len());
         let _ = GlobalUnlock(global);
-        if SetClipboardData(CF_UNICODETEXT, Some(HANDLE(global.0))).is_err() {
+        if SetClipboardData(format, Some(HANDLE(global.0))).is_err() {
             let _ = GlobalFree(Some(global));
             return false;
         }
@@ -698,18 +727,22 @@ mod win {
         CHANGED.notify_all();
     }
 
-    /// The promised text written out for good (offer `id`, or whichever is
-    /// current), while the clipboard is still Yap's: it no longer depends
-    /// on Yap's window.
+    /// The promised text (and HTML) written out for good (offer `id`, or
+    /// whichever is current), while the clipboard is still Yap's: it no
+    /// longer depends on Yap's window.
     fn write_out(window: HWND, id: Option<u64>) {
-        let text = {
+        let left = {
             let st = state();
             match st.offer.as_ref() {
-                Some(l) if !l.gone && !l.rendered && id.is_none_or(|id| l.id == id) => Some((l.id, l.text.clone())),
+                Some(l) if !l.gone && !l.all_rendered() && id.is_none_or(|id| l.id == id) => {
+                    let text = (!l.rendered).then(|| l.text.clone());
+                    let html = l.html.clone().filter(|_| !l.html_rendered);
+                    Some((l.id, text, html))
+                }
                 _ => None,
             }
         };
-        let Some((id, text)) = text else { return };
+        let Some((id, text, html)) = left else { return };
         unsafe {
             let mut open = false;
             for i in 0..10u64 {
@@ -724,13 +757,15 @@ mod win {
                 return;
             }
             let ours = GetClipboardOwner().is_ok_and(|o| o == window);
-            let wrote = ours && set_data(&text);
+            let wrote_text = ours && text.as_ref().is_some_and(|t| set_data(CF_UNICODETEXT, t));
+            let wrote_html = ours && html.as_ref().is_some_and(|(f, b)| set_data(*f, b));
             let _ = CloseClipboard();
-            if wrote {
+            if wrote_text || wrote_html {
                 if let Some(live) = state().offer.as_mut().filter(|l| l.id == id) {
-                    live.rendered = true;
+                    live.rendered |= wrote_text;
+                    live.html_rendered |= wrote_html;
                 }
-                debug!("The dictation left on the clipboard, written out");
+                debug!(html = wrote_html, "The dictation left on the clipboard, written out");
             }
         }
     }
@@ -826,18 +861,27 @@ mod win {
         /// may read it before the keys — a remote desktop's sync), and check
         /// it took (the sequence number moved), retrying with a short
         /// backoff as a plain write does. `None`: it didn't (no window, the
-        /// clipboard stayed busy): put it there plainly instead.
-        pub fn put(text: &str, private: bool, targets: Targets, open: bool) -> Option<Offer> {
-            Offer::put_with(owner()?, text, private, targets, open)
+        /// clipboard stayed busy): put it there plainly instead. `html`: a
+        /// rich snippet's CF_HTML (`rich::cf_html`), promised beside it.
+        pub fn put(text: &str, html: Option<&[u8]>, private: bool, targets: Targets, open: bool) -> Option<Offer> {
+            Offer::put_with(owner()?, text, html, private, targets, open)
         }
 
-        pub(crate) fn put_with(owner: isize, text: &str, private: bool, targets: Targets, open: bool) -> Option<Offer> {
+        pub(crate) fn put_with(
+            owner: isize,
+            text: &str,
+            html: Option<&[u8]>,
+            private: bool,
+            targets: Targets,
+            open: bool,
+        ) -> Option<Offer> {
             let bytes: Vec<u8> = text.encode_utf16().chain(std::iter::once(0)).flat_map(|u| u.to_le_bytes()).collect();
+            let html = html.map(|h| (clip::html_format(), h.to_vec()));
             let refuse_all = crate::pasting::text_injector::test_refuses_reads();
             for (attempt, wait_ms) in [0u64, 15, 40, 80].into_iter().enumerate() {
                 std::thread::sleep(Duration::from_millis(wait_ms));
                 let before = unsafe { GetClipboardSequenceNumber() };
-                let id = match Offer::try_put(owner, &bytes, private, &targets, open, refuse_all) {
+                let id = match Offer::try_put(owner, &bytes, html.as_ref(), private, &targets, open, refuse_all) {
                     Ok(id) => id,
                     Err(e) => {
                         debug!(attempt, error = %e, "The clipboard promise didn't go on");
@@ -856,7 +900,15 @@ mod win {
             None
         }
 
-        fn try_put(owner: isize, bytes: &[u8], private: bool, targets: &Targets, open: bool, refuse_all: bool) -> Result<u64, String> {
+        fn try_put(
+            owner: isize,
+            bytes: &[u8],
+            html: Option<&(u32, Vec<u8>)>,
+            private: bool,
+            targets: &Targets,
+            open: bool,
+            refuse_all: bool,
+        ) -> Result<u64, String> {
             unsafe {
                 // Open as Yap's window: emptying makes it the owner, so the
                 // reads come to it.
@@ -887,6 +939,7 @@ mod win {
                         id,
                         owner,
                         text: bytes.to_vec(),
+                        html: html.cloned(),
                         targets: targets.clone(),
                         phase: Phase::Waiting,
                         open,
@@ -895,6 +948,7 @@ mod win {
                         keys_at: None,
                         refused: 0,
                         rendered: false,
+                        html_rendered: false,
                         gone: false,
                     });
                     id
@@ -909,6 +963,16 @@ mod win {
                 }
                 if IsClipboardFormatAvailable(CF_UNICODETEXT).is_err() {
                     return Err("the promised text isn't listed".into());
+                }
+                // A rich snippet's HTML, promised the same way (no fallback:
+                // without it the text alone is the paste).
+                if let Some((format, _)) = html {
+                    SetLastError(WIN32_ERROR(0));
+                    if let Err(e) = SetClipboardData(*format, None) {
+                        if e.code().is_err() {
+                            return Err(format!("SetClipboardData (the HTML's promise): {e}"));
+                        }
+                    }
                 }
                 if private {
                     clip::add_privacy_formats();
@@ -1269,7 +1333,7 @@ mod tests {
             // them gets the text and counts; the person's clipboard back.
             assert!(clip::put_text_verified("What you had copied", true));
             let before = clip::snapshot();
-            let offer = Offer::put_with(owner, "Hello from Yap", true, targets.clone(), false).expect("promised");
+            let offer = Offer::put_with(owner, "Hello from Yap", None, true, targets.clone(), false).expect("promised");
             for (name, bytes) in clip::privacy_formats() {
                 assert_eq!(bytes.as_deref(), Some(&[0u8, 0, 0, 0][..]), "{name} written at once");
             }
@@ -1289,7 +1353,7 @@ mod tests {
 
             // 2. A reader with no window (Windows Terminal's way): refused
             // before the keys, taken for the target's after them.
-            let offer = Offer::put_with(owner, "Second", true, targets.clone(), false).expect("promised");
+            let offer = Offer::put_with(owner, "Second", None, true, targets.clone(), false).expect("promised");
             assert_eq!(read(0), None);
             offer.keys_going();
             assert_eq!(read(0).as_deref(), Some("Second"));
@@ -1297,21 +1361,21 @@ mod tests {
 
             // 3. Another app first, after the keys: it gets the text (a paste
             // is never broken), and whether the target read it can't be told.
-            let offer = Offer::put_with(owner, "Third", true, targets.clone(), false).expect("promised");
+            let offer = Offer::put_with(owner, "Third", None, true, targets.clone(), false).expect("promised");
             offer.keys_going();
             assert_eq!(read(other).as_deref(), Some("Third"));
             assert_eq!(offer.seen(), Seen::Taken);
 
             // 4. An app asking for ANSI text: Windows makes it from the
             // promise, and that read counts.
-            let offer = Offer::put_with(owner, "Plain text", true, targets.clone(), false).expect("promised");
+            let offer = Offer::put_with(owner, "Plain text", None, true, targets.clone(), false).expect("promised");
             offer.keys_going();
             assert_eq!(read_as(target, CF_TEXT).as_deref(), Some("Plain text"));
             assert_eq!(offer.seen(), Seen::Target { sure: true });
 
             // 5. Nobody reads it: nothing seen; left, it's written out by
             // Yap's window, and then anyone reads it without asking Yap.
-            let offer = Offer::put_with(owner, "Left for you", true, targets.clone(), false).expect("promised");
+            let offer = Offer::put_with(owner, "Left for you", None, true, targets.clone(), false).expect("promised");
             offer.keys_going();
             assert_eq!(offer.wait(Instant::now() + Duration::from_millis(150)), Seen::Nothing);
             offer.leave(Duration::ZERO);
@@ -1320,7 +1384,7 @@ mod tests {
             assert!(offer.first_read().is_none(), "written out, not read off a promise");
 
             // 6. Left with a late wait: the target's late read is noted.
-            let offer = Offer::put_with(owner, "Late", true, targets.clone(), false).expect("promised");
+            let offer = Offer::put_with(owner, "Late", None, true, targets.clone(), false).expect("promised");
             offer.keys_going();
             offer.leave(Duration::from_secs(5));
             assert_eq!(read(target).as_deref(), Some("Late"));
@@ -1328,7 +1392,7 @@ mod tests {
             assert!(report.late && report.late_target, "{report:?}");
 
             // 7. Someone copies something before the restore: theirs stays.
-            let offer = Offer::put_with(owner, "Fourth", true, targets.clone(), false).expect("promised");
+            let offer = Offer::put_with(owner, "Fourth", None, true, targets.clone(), false).expect("promised");
             offer.keys_going();
             assert_eq!(read(target).as_deref(), Some("Fourth"));
             assert!(clip::put_text_verified("Copied meanwhile", false));
@@ -1337,7 +1401,7 @@ mod tests {
 
             // 8. A slow app's restore, in the background.
             let before = clip::snapshot();
-            let offer = Offer::put_with(owner, "Fifth", true, targets.clone(), false).expect("promised");
+            let offer = Offer::put_with(owner, "Fifth", None, true, targets.clone(), false).expect("promised");
             offer.keys_going();
             assert_eq!(read(target).as_deref(), Some("Fifth"));
             offer.restore_later(before, true, Duration::from_millis(150));
@@ -1346,7 +1410,7 @@ mod tests {
 
             // 9. A remote desktop's paste (plain, open to all): its sync's
             // read before the keys gets the text.
-            let offer = Offer::put_with(owner, "Remote", false, targets.clone(), true).expect("promised");
+            let offer = Offer::put_with(owner, "Remote", None, false, targets.clone(), true).expect("promised");
             assert!(clip::privacy_formats().iter().all(|(_, b)| b.is_none()), "plain");
             assert_eq!(read(other).as_deref(), Some("Remote"));
             assert_eq!(offer.seen(), Seen::Taken);
@@ -1359,20 +1423,47 @@ mod tests {
                 std::thread::sleep(Duration::from_millis(300));
             };
             let gone = super::start_owner(desktop).expect("a second clipboard window");
-            let offer = Offer::put_with(gone, "Lost with Yap", true, targets.clone(), false).expect("promised");
+            let offer = Offer::put_with(gone, "Lost with Yap", None, true, targets.clone(), false).expect("promised");
             offer.keys_going();
             offer.leave(Duration::from_secs(5));
             quit(gone);
             assert_eq!(read(other), None, "a promise outlives no window: Yap must write it out as it quits");
             // …unless it's written out first (`shutdown_cleanup`).
             let kept = super::start_owner(desktop).expect("a third clipboard window");
-            let offer = Offer::put_with(kept, "Outlasts Yap", true, targets.clone(), false).expect("promised");
+            let offer = Offer::put_with(kept, "Outlasts Yap", None, true, targets.clone(), false).expect("promised");
             offer.keys_going();
             offer.leave(Duration::from_secs(5));
             super::write_out_at(kept);
             quit(kept);
             assert_eq!(read(other).as_deref(), Some("Outlasts Yap"));
             assert!(offer.first_read().is_none(), "written out, not read off a promise");
+
+            // 11. A rich snippet's paste (`rich.rs`): the text and its HTML
+            // both promised. Another app's read of the HTML before the keys
+            // is refused; the target's after them counts (an app reads
+            // either), and the text is there too for a plain-text app.
+            let html_format = clip::html_format();
+            let cf = crate::pasting::rich::cf_html("<b>Robin</b>");
+            let cf_text = String::from_utf8_lossy(&cf[..cf.len() - 1]).into_owned();
+            let offer = Offer::put_with(owner, "Robin", Some(&cf), true, targets.clone(), false).expect("promised");
+            assert_eq!(read_as(other, html_format), None, "the HTML before the keys: refused");
+            assert_eq!(offer.seen(), Seen::Nothing);
+            offer.keys_going();
+            assert_eq!(read_as(target, html_format).as_deref(), Some(cf_text.as_str()));
+            assert_eq!(offer.wait(soon()), Seen::Target { sure: true }, "the HTML's read is the paste's");
+            assert_eq!(read(other).as_deref(), Some("Robin"), "the text beside it");
+            // Nobody read it: left, both are written out.
+            let offer = Offer::put_with(owner, "Left rich", Some(&cf), true, targets.clone(), false).expect("promised");
+            offer.keys_going();
+            offer.leave(Duration::ZERO);
+            std::thread::sleep(Duration::from_millis(200));
+            assert_eq!(read_as(other, html_format).as_deref(), Some(cf_text.as_str()));
+            assert_eq!(read(other).as_deref(), Some("Left rich"));
+            assert!(offer.first_read().is_none(), "written out, not read off a promise");
+            // The plain write (no clipboard window): both formats too.
+            assert!(clip::put_rich_verified("Plain rich", Some(&cf), true));
+            assert_eq!(read_as(other, html_format).as_deref(), Some(cf_text.as_str()));
+            assert_eq!(read(other).as_deref(), Some("Plain rich"));
         });
         let result = run.join();
         assert!(result.is_ok(), "the promise's round trip failed (see above)");

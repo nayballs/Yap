@@ -155,7 +155,8 @@ function processesWith(marker, names) {
  * test pad <label>". `call({cmd, …})` → its answer: `set {field, text, caret?}`,
  * `select {field, start, length}`, `focus {field}`, `get {field}` →
  * `{text, caret}`, `pastes` → what the clipboard held at each Ctrl+V since
- * the last ask (format names only).
+ * the last ask (format names only: `text`, `html` — CF_HTML beside it —,
+ * the privacy formats).
  */
 export async function startTestPad(label) {
   compileHelper();

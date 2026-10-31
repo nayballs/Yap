@@ -1000,9 +1000,10 @@ pub fn drop_chat_full_stop(text: &str, ctx: Option<&FieldContext>, dictionary: &
     if !last.is_empty() && is_abbreviation(last) {
         return text.to_string();
     }
-    let snippet_ends_so = dictionary.iter().any(|e| {
-        let to = e.to.trim();
-        e.snippet && to.ends_with('.') && body.ends_with(to)
+    let snippet_ends_so = dictionary.iter().filter(|e| e.snippet).any(|e| {
+        let typed = e.typed();
+        let to = typed.trim();
+        to.ends_with('.') && body.ends_with(to)
     });
     if snippet_ends_so || sentence_count(&message) > 2 {
         return text.to_string();

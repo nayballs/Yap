@@ -1,15 +1,18 @@
 // "You spoke French · Add it to My languages?" in the main window
 // (dictation/languages/nudge.rs). Rust decides — a Whisper model sure of a
-// language the person didn't pick, at most one offer in ten minutes, never
-// during a dictation — and this shows its question while the window is in
-// front (else it's a card on the Yap bar):
+// language the person didn't pick, or the language read from the text of a
+// model that doesn't say (languages/text_id.rs), at most one offer in ten
+// minutes, never during a dictation — and this shows its question while the
+// window is in front (else it's a card on the Yap bar):
 //
-// `yap-language-nudge` { id, code, language, title, body, add, never }:
+// `yap-language-nudge` { id, code, language, kind, title, body, add, never }:
 //   Add French / Not now, and a small "Don't ask about French" link. The
 //   answer goes back with `language_nudge_respond` ("add" | "later" |
 //   "never" | "expire"): the toast's ✕ is "Not now", running out is no
 //   answer at all. After Add, Rust saves My languages (Settings adopts the
-//   save); this confirms it, with Open settings.
+//   save); this confirms it, with Open settings. `kind` "model" ("Parakeet
+//   V2 only knows English", Choose a model): Rust opens Settings at My
+//   languages itself, so nothing more is said here.
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import { toast } from '../ui/toast.svelte.js';
@@ -28,7 +31,7 @@ export function initLanguageNudge(opts = {}) {
   listen('yap-language-nudge', (e) => askLanguageNudge(e.payload));
 }
 
-/** Ask about a language (`{ id, code, language, title, body, add, never }`, nudge.rs `Prompt`). */
+/** Ask about a language (`{ id, code, language, kind, title, body, add, never }`, nudge.rs `Prompt`). */
 export function askLanguageNudge(n) {
   if (!n?.id || !n.title) return;
   const answer = (a) => invoke('language_nudge_respond', { id: n.id, answer: a });
@@ -45,7 +48,8 @@ export function askLanguageNudge(n) {
       onClick: async () => {
         try {
           const added = await answer('add');
-          if (!added) return;
+          // Settings is open at My languages (Rust), naming the model.
+          if (!added || n.kind === 'model') return;
           toast({
             title: `${n.language} is in My languages`,
             description: 'Yap tells it apart from your other languages from now on.',

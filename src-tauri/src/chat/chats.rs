@@ -557,14 +557,21 @@ pub fn for_note(note: u64) -> Vec<Conversation> {
     })
 }
 
-/// Note `note` was deleted: its Ask threads go with it (in one write).
-/// Returns how many.
-pub fn delete_for_note(note: u64) -> usize {
-    let ids: Vec<u64> = with_store(|s| s.conversations.iter().filter(|c| c.note == Some(note)).map(|c| c.id).collect());
-    if ids.is_empty() {
-        return 0;
+/// Notes `notes` were deleted: their Ask threads go with them (in one
+/// write). Returns how many.
+pub fn delete_for_notes(notes: &[u64]) -> usize {
+    delete_where(|c| c.note.is_some_and(|n| notes.contains(&n))).len()
+}
+
+/// Delete some of your data (`privacy/reset.rs`): the conversations `gone`
+/// picks (Chat's own, or the Ask threads of notes that went), in one write,
+/// their screenshots and search vectors with them. Their ids.
+pub fn delete_where(gone: impl Fn(&Conversation) -> bool) -> Vec<u64> {
+    let ids: Vec<u64> = with_store(|s| s.conversations.iter().filter(|c| gone(c)).map(|c| c.id).collect());
+    if !ids.is_empty() {
+        delete_many(&ids);
     }
-    delete_many(&ids)
+    ids
 }
 
 /// Add a whole message to a conversation (a note's Ask thread keeps what

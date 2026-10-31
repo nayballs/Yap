@@ -39,6 +39,7 @@
   import { skills, SkillPicker } from '../stores/skills.svelte.js';
   import { promptChips } from '../core/skills.js';
   import SkillMenu from '../components/SkillMenu.svelte';
+  import { openTranscriptImport } from '../stores/transcriptImport.svelte.js';
 
   // `onnavigate(view)` switches the main window's view; `onopensettings(section)`;
   // `onopennote({id, line, ts, field})` opens a moment of a meeting or note
@@ -403,6 +404,16 @@
   // Copy as Markdown, Delete… (asked first; a recording one stops first —
   // meeting_delete, the notepad's way).
   let pastEls = $state({});
+
+  // The header's ⋯: Import a transcript… (transcriptImport.svelte.js).
+  let moreEl = $state(null);
+  function moreMenu(e) {
+    openContextMenu(
+      e,
+      [{ label: 'Import a transcript…', icon: 'import', onselect: () => openTranscriptImport() }],
+      { label: 'More', row: moreEl }
+    );
+  }
   function pastMenu(e, n) {
     const title = n.title || 'Untitled meeting';
     if (!(n.id in meetingAudio.byNote)) refreshAudio(n.id);
@@ -417,11 +428,12 @@
         { separator: true },
         { label: 'Copy as Markdown', icon: 'copy', onselect: () => copyMeeting(n.id) },
         // The speaker engine run again over its audio (speakers/rerun.rs):
-        // its progress and Cancel on the row.
-        !n.recording && n.hasTalk ? { label: 'Find speakers', icon: 'person', onselect: () => findSpeakers(n.id) } : null,
+        // its progress and Cancel on the row. Never an imported meeting's:
+        // there's no audio (meetings/import.rs).
+        !n.recording && n.hasTalk && !n.imported ? { label: 'Find speakers', icon: 'person', onselect: () => findSpeakers(n.id) } : null,
         // Its kept audio, where you pick (meetings/meeting_audio/export.rs):
         // only a meeting whose audio Yap still has.
-        ...(n.recording || !meetingAudio.byNote[n.id]?.recordings
+        ...(n.recording || n.imported || !meetingAudio.byNote[n.id]?.recordings
           ? []
           : [
               { label: 'Export audio…', icon: 'audio', onselect: () => exportPast(n, false) },
@@ -696,6 +708,18 @@
               <svg class:spin={calendar.syncing} viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12a9 9 0 0 1-15.5 6.2L3 16" /><path d="M3 21v-5h5" /><path d="M3 12a9 9 0 0 1 15.5-6.2L21 8" /><path d="M21 3v5h-5" /></svg>
             </button>
           {/if}
+          <!-- More: Import a transcript… (meetings/import.rs). -->
+          <button
+            class="hbtn icononly"
+            bind:this={moreEl}
+            onclick={moreMenu}
+            aria-label="More"
+            aria-haspopup="menu"
+            title="More"
+            data-more
+          >
+            <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><circle cx="5" cy="12" r="1.7" /><circle cx="12" cy="12" r="1.7" /><circle cx="19" cy="12" r="1.7" /></svg>
+          </button>
           <button class="hbtn icononly" onclick={() => onopensettings('meetings')} aria-label="Meeting settings" title="Meeting settings">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3" /><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09a1.65 1.65 0 0 0 1.51-1 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33h.01a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51h.01a1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82v.01a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" /></svg>
           </button>
@@ -871,6 +895,7 @@
                       >{n.title || 'Untitled meeting'}</button>
                       {#if n.recording}<span class="recpill small"><span class="recdot" aria-hidden="true"></span>Recording</span>{/if}
                       {#if n.hasPlan}<span class="tag plan">Action plan</span>{/if}
+                      {#if n.imported}<span class="tag imported" title="Imported from a transcript file: no audio">Imported</span>{/if}
                     </span>
                     <span class="pmeta">
                       <span>{clockTime(n.when)}</span>
@@ -1271,7 +1296,8 @@
     color: var(--yap-success);
     background: color-mix(in srgb, var(--yap-success) 10%, transparent);
   }
-  .tag.nonotes {
+  .tag.nonotes,
+  .tag.imported {
     color: var(--yap-muted);
     background: var(--yap-s1);
   }

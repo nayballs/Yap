@@ -156,7 +156,7 @@ impl Shared {
                 tracing::warn!(samples, "Dictation: the microphone was disconnected before it heard anything");
                 let short = crate::dictation::mics::short_name(device);
                 let _ = self.app.emit(DICTATION_ERROR, format!("{short} was disconnected"));
-                let _ = self.app.emit("yap-state", "error");
+                self.say_failed();
                 crate::notices::alert::show_soon(&self.app, lost_alert(device, next.as_deref(), Outcome::Empty));
             }
         }

@@ -538,7 +538,17 @@ to **Run again** from Home.
   `features`. "Show tips" or Feature tips off: none. The log says the kind,
   never the words. Test mode notices nothing unless a spec asks
   (`e2e_feature_tips`, which forgets those shown). Unit tests; e2e
-  `feature-tips.spec.js`.
+  `feature-tips.spec.js`. **"Yap recognised French"** (2026-10-31; Wispr
+  Flow's one-time "we auto-detected your language", by behaviour;
+  `language`, `language_due`, `language_text`): `languages::heard` calls it
+  the first time a dictation is sure to be in one of the person's
+  languages other than English with two or more picked
+  (`languages::recognised`: Whisper's own pick, at least `MIN_P`; or the
+  language read from Parakeet V3's or SenseVoice's text past `text_id::sure`
+  against their other languages; never an English-only model's) —
+  `Feature::Language` ("language" in hints.json's `features`), never in
+  `ORDER`, once ever, 10 minutes from any other tip, the same thread and
+  places (`show`); e2e `languages.spec.js`.
 - **`dictation/input_hook.rs`** — low-level Windows keyboard + mouse hooks; specs `kb:VKEY`,
   `kb:ctrl+shift+VKEY` (modifier combo; `win` is a modifier too, e.g. the
   meeting shortcut `kb:alt+win+77` = Win+Alt+M), `kb:165` (single right-side modifier, e.g.
@@ -801,7 +811,7 @@ to **Run again** from Home.
   the languages counted, the reply's parsing, the route); e2e
   `ask-selection.spec.js` (fake-llm's `askOrEdit` kind); robot
   `e2e-real/ask-selection.real.js` (passing, 31 Oct).
-- **`dictation/languages.rs`** (+ `languages/catalog.rs`, `languages/nudge.rs`)
+- **`dictation/languages.rs`** (+ `languages/catalog.rs`, `languages/nudge.rs`, `languages/text_id.rs`)
   — **My languages** (2026-10-25; Wispr Flow's languages and its "Speaking a
   different language?" nudge of 28 Sep, OpenWhispr's dual-language hotkeys
   request, by behaviour; Settings → Dictation → My languages,
@@ -884,14 +894,61 @@ to **Run again** from Home.
   (`notice::moment`, up to a minute; the policy holds the card too); at most
   one per 10 minutes, Not now twice or Don't ask → never again for that
   language (`<data>/language_nudges.json`); Add → `shell::settings::
-  change_config` (saved, applied, every window told). Only Whisper says
-  which language it heard: with any other model Settings says the nudge
-  can't work. Test mode: the stub engine's detection stands in
-  (`e2e_language_stage {shortcut?, heard?, fresh?}`, also the next
-  `e2e_dictation`'s language), `e2e_language_heard {heard, secs}` (a
+  change_config` (saved, applied, every window told). **Models that don't
+  say** (2026-10-31, `languages/text_id.rs`): only Whisper says which
+  language it heard, so for Parakeet V3 and SenseVoice (`Tells::Itself`) and
+  the English-only models (`catalog::english_only`: Parakeet V2, Moonshine,
+  Distil Whisper, the `.en` Whispers) `heard` reads it from the transcript
+  (`read_language`; never with a fixed language — a language shortcut or
+  the main shortcut's — nor for Canary and Cohere, which are told one: a
+  language added wouldn't change what they're told). `text_id::identify`
+  (pure, well under a millisecond, the first 1,000 characters, never the
+  network): the candidates are the model's languages and the person's
+  (`candidates`; an English-only model's are Parakeet V3's 25); a script one
+  language writes decides by itself (Greek, Hangul, kana, Han — Cantonese by
+  any of its own characters, `CANTONESE`); Maltese by ħ/ġ/ċ and its words
+  (whatlang has none); Latin and Cyrillic by two signals that must agree:
+  the most distinct **function words** (`WORDS`: ~60–100 per language —
+  articles, pronouns, prepositions, the commonest dictation words — for the
+  25, Norwegian, Catalan and English; a word in several lists counts for
+  each; elisions and hyphens split, "l'ancienne" → "l'") and **whatlang**'s
+  trigram profiles (0.16, MIT, ~0.3 MB; allowlisted to the same candidates).
+  `sure` (pure) wants at least `MIN_WORDS` 5 words (10 CJK characters),
+  `MIN_HITS` 2 of its own function words, more than any other candidate's
+  and more than twice the person's languages' (so English full of names or
+  code — "Ask Ingrid about the Göteborg office", "git rebase origin main" —
+  never reads as Swedish), and the trigrams agreeing. Measured on 262 + 159
+  (held out) fictional sentences in the 25 European languages, Chinese,
+  Cantonese, Japanese and Korean, and 60 English ones (45 full of foreign
+  names, brands, borrowed words and code): the language right 98% / 93% of
+  the time (whatlang alone 85%; lingua 99% but +145 MB); past the gate a
+  nudge for 86% / 70% of 5–9-word dictations and 99% / 88% of longer ones,
+  never a wrong language, never an English one. `nudge::text_verdict`
+  (pure) is `verdict` with `text_id::sure` in `MIN_P`'s place and the same
+  `limits` after (2 s, a language Yap knows, not turned down, 10 minutes
+  apart); its offer: "You spoke French · Add it to My languages?" ("Then AI
+  cleanup keeps your French dictations in French.", `read_prompt_text`), or
+  for an English-only model **"Parakeet V2 only knows English"** ("You
+  spoke French. Parakeet V3 writes French as you say it: switch to it in
+  Settings.", `model_prompt_text`, the model `catalog::recommend` names for
+  their languages and this one, an installed one first) with **Choose a
+  model** (`Kind::Model`: the language put in My languages, Settings opened
+  at it — `yap-open-settings` "dictation#languages" — where the model to
+  switch to is named; the model is never switched) — whatever My languages
+  holds, since the model can't write it. Whisper's detection on the audio
+  would catch more of an English-only model's dictations (its text is
+  English-ish words, rarely the language itself) but means loading a second
+  model (hundreds of MB, seconds of the processor) after every dictation:
+  not done. The log says the code, the word count and the hits, never the
+  text. Settings' "Tell me when I speak a language I didn't pick" says
+  which applies (`MyLanguages.svelte` `nudgeDesc`). Test mode: the stub
+  engine's detection stands in (`e2e_language_stage {shortcut?, heard?,
+  text?, fresh?}`, also the next `e2e_dictation`'s language; `text`: the
+  stub engine's transcript), `e2e_language_heard {heard?, text?, secs}` (a
   transcription in, without a mic), `e2e_language_slots`. Unit tests
-  (`languages::tests`, `catalog::tests`, `nudge::tests`, `input_hook`'s
-  language slots), e2e `languages.spec.js`, robot
+  (`languages::tests`, `catalog::tests`, `nudge::tests`, `text_id::tests`:
+  a sentence per language, English full of names and code, the gate,
+  `input_hook`'s language slots), e2e `languages.spec.js`, robot
   `e2e-real/languages.real.js`. **Hinglish** (2026-10-29; Wispr Flow's
   "Hindi in Latin letters", by behaviour; `languages/hinglish.rs`): with
   Hindi among My languages, the page offers "Write in Latin letters
@@ -1381,13 +1438,62 @@ to **Run again** from Home.
   `pipeline::apply_corrections` — so a mis-hearing split across two chunks is
   still caught — and a history record with the raw and corrected text) via the
   `transcribe_file` command.
-- **`dictation/sound.rs`** — start/stop chimes (volume + output-device aware); each
-  takes an optional `Played` callback, run on the chime's thread once it has
-  played (or at once when it can't; 3 s at most, `wait_played`: an output that
-  went mid-chime is never drained again, and the stop chime's mic release
-  waited for ever): how `dictation/mute.rs` goes after the start
-  chime and comes back after the stop chime. `open_output` (the configured
-  output device, else the default) is shared with `voice/tts.rs`.
+- **`dictation/sound.rs`** (+ `sound/packs.rs`) — **Yap's sounds, in packs**
+  (2026-10-31; one start/stop chime until then; Wispr Flow's "extra sounds and
+  sound packs"). **Moments** (`Cue`): a dictation starting and stopping,
+  going hands-free (push-to-talk's double-tap), cancelled (the bar's ✕, the
+  tray's Cancel — never a lone tap or a chord Yap throws away itself), an
+  error ("Couldn't paste": the paste left on the clipboard in a dictation,
+  a rewrite or a transform; and every `yap-state` "error" the pipeline says,
+  through `Shared::say_failed` — no microphone, a failed transcription or
+  rewrite, a crash, a mic unplugged), "Taking longer than usual…"
+  (`pipeline/slow.rs`; not "Loading the AI model…"), meeting notes starting
+  and stopping, and a card on the Yap bar (`bar.rs` `repick`: the first time
+  a card is really on screen; never the Voice Assistant's answer, which Yap
+  speaks, nor a card updated in place). None where Yap already speaks.
+  Settings → Dictation → **Sounds** (`settings/SoundsSettings.svelte`,
+  `core/sounds.js`): the master switch and volume (`sound_enabled`,
+  `audio_feedback_volume`, as before), the **pack** (`sound_pack`: Classic,
+  Soft, Crisp, Minimal; ▶ plays its whole set one after another, ■ stops
+  it: `sound_preview` / `sound_preview_stop`, refused while a meeting
+  records), the output device, and **a switch per moment** with its own ▶
+  (start, stop, hands-free, cancelled on; error, slow, meeting notes, a bar
+  card off; an existing config keeps only start and stop: `migrate_once`
+  v6). **The packs are made from numbers as they play** (`packs.rs`, no
+  sound files): each sound a few notes — a sine, a warm sine (2nd and 3rd
+  harmonics), FM (a bell at ratio 2, glass at 3.5, a reed at 1; its index
+  fading with the note) or a noise tick (a fixed-seed xorshift, one-pole
+  high-passed) — under a linear attack and an exponential fall to −66 dB,
+  pitches gliding exponentially. Classic's start and stop are the chime Yap
+  always played (OpenWhispr's C5→E5 / D5→A4, sample for sample); every
+  pack's start rises and its stop falls; every sound is under 300 ms and
+  peaks at 0.2 × the volume at most (unit-tested: every pack has every
+  moment, lengths, peaks, energy against Classic's, no click at either end,
+  start and stop told apart, Classic unchanged). **When they play**: the
+  settings are cached here (`sync`, at start-up and on every save). A
+  dictation's start, stop and cancel (`play`) play at once with an optional
+  `Played` callback, run on the sound's thread once it has played (or at
+  once when it's off or can't; 3 s at most, `wait_played`: an output that
+  went mid-sound is never drained again, and the stop's mic release waited
+  for ever): how `dictation/mute.rs` goes after the start sound and comes
+  back after the stop's — a cancel now plays its sound before the mic is
+  let go and the other apps come back, as a stop does
+  (`Shared::sound_then_release`). The start follows the mic's first audio,
+  never the key, as before; going hands-free before it played (a cold mic)
+  plays after it (`LOCKED_EARLY`). The other moments (`cue`) wait for a
+  sound still playing (600 ms at most), so two never overlap; a card's
+  sound never plays while a dictation records or within 1.5 s of another
+  sound (its error's). **Never into a meeting's notes**: while a meeting
+  records nothing plays but a dictation's start and stop, which always
+  have (`meeting_allows`; the rule spoken replies follow, `tts::
+  meeting_quiet`); meeting notes' own start sound plays to its end before
+  `meeting::start` opens the loopback (`meeting_started`, a quarter of a
+  second), their stop sound once the capture has closed its streams
+  (`meeting_stopped`, `meeting::capturing`). `open_output` (the configured
+  output device, else the default) is shared with `voice/tts.rs`. **Test
+  mode** opens no device: what would play is kept for the debug-only
+  `sound_e2e_heard` (`"minimal.locked"`), each sound "lasting" its length
+  (robot mode plays them). E2E: `e2e/sounds.spec.js`.
 - **`dictation/mute.rs`** — **other apps' sound while you dictate** (2026-10-17; it
   replaced the old endpoint mute, which silenced Yap's own start chime and
   any call): **"Silence other apps while you dictate"**
@@ -1506,8 +1612,8 @@ to **Run again** from Home.
   without a dictation, shown while away or for 2 days after the return,
   once per gap — `welcome_back_dismiss`), and Keep history's copy. Emits
   **`yap-stats-changed`** after each count (Home and Insights re-pull:
-  history may be off). `clear` is Reset app's (`privacy/reset.rs`: it goes
-  with the usage stats); Download your data has it. `share.rs`: Insights'
+  history may be off). `clear` is the Dictation stats kind's (`privacy/reset.rs`:
+  Delete some of your data, and Reset app); Download your data has it. `share.rs`: Insights'
   **Share** — the page draws the numbers on a canvas (`shareCard.js`, never a
   word said or an app) and hands the PNG in the call's body: Copy as Snip
   copies (`snip/copy_save.rs`, out of Win+V history), Save… asks with

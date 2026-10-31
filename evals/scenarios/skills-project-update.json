@@ -1,0 +1,71 @@
+{
+  "name": "skills-project-update",
+  "description": "/project-update alone: Yap asks which project, no model called. Then /project-update website relaunch: where it stands from the two meetings about it (the launch moved, the copy, the photos), nothing from the van meeting.",
+  "tags": ["skills", "meetings"],
+  "apps": "standard",
+  "seed": {
+    "notes": [
+      {
+        "title": "Website relaunch kick-off",
+        "folder": "Meetings",
+        "meeting": true,
+        "days_ago": 14,
+        "participants": ["Lena Fischer"],
+        "enhanced": "## Recap\nThe website relaunch started: new pages, new photos.\n\n## Action plan\n### Lena Fischer\n- [ ] Book the photographer\n\n## Decisions\n- Launch the new website in the first week of March",
+        "transcript": [
+          { "source": "you", "text": "So the website relaunch goes live in the first week of March?", "ts": 0 },
+          { "source": "them", "text": "Yes, and I'll book a photographer for the new product photos.", "ts": 15 }
+        ]
+      },
+      {
+        "title": "Website relaunch check-in",
+        "folder": "Meetings",
+        "meeting": true,
+        "days_ago": 2,
+        "participants": ["Lena Fischer"],
+        "enhanced": "## Recap\nThe photos are done; the copy is late.\n\n## Action plan\n### You\n- [ ] Ask the agency for the copy by Friday\n\n## Decisions\n- Move the website relaunch to the second week of March, because the copy is late",
+        "transcript": [
+          { "source": "them", "text": "The product photos for the website relaunch are done.", "ts": 0 },
+          { "source": "them", "text": "But the copy from the agency is late, so the first week of March won't work.", "ts": 14 },
+          { "source": "you", "text": "Then the relaunch moves to the second week of March, and I'll chase the agency for the copy by Friday.", "ts": 30 }
+        ]
+      },
+      {
+        "title": "Delivery planning",
+        "folder": "Meetings",
+        "meeting": true,
+        "days_ago": 1,
+        "participants": ["Tom Reid"],
+        "enhanced": "## Recap\nThe new van arrives on Monday.",
+        "transcript": [
+          { "source": "them", "text": "The new van arrives on Monday and Sam does the first run.", "ts": 0 }
+        ]
+      }
+    ]
+  },
+  "turns": [
+    {
+      "user": "/project-update",
+      "skill": "project-update",
+      "expect": {
+        "fast_path": true,
+        "answer_contains": ["Which project?"]
+      }
+    },
+    {
+      "user": "/project-update website relaunch",
+      "skill": "project-update",
+      "expect": {
+        "answer_contains_any": ["second week of March", "copy"],
+        "answer_not_contains": ["van", "Yap couldn't tie"],
+        "min_sources": 1,
+        "tools_not_called": ["create_note", "update_note", "edit_note", "open_app"]
+      },
+      "soft": {
+        "answer_contains": ["photo"],
+        "answer_contains_any": ["agency"],
+        "max_words": 220
+      }
+    }
+  ]
+}

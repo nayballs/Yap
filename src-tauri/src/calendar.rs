@@ -152,6 +152,11 @@ struct Connection {
     /// Google ended the access: only connecting again helps.
     #[serde(default)]
     reconnect: bool,
+    /// The domains of the addresses its meetings list as you (the folder
+    /// rules by company leave your own company out: `filing/companies.rs`).
+    /// An older Yap saving calendar.json drops them until the next sync.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    own: Vec<String>,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -749,6 +754,7 @@ async fn sync_all(app: &AppHandle) {
                     conn.synced_ts = now;
                     conn.error = None;
                     conn.reconnect = false;
+                    conn.own = fetched.own;
                     s.store.events.retain(|e| e.connection != id);
                     s.store.events.extend(fetched.events);
                     s.store.busy.retain(|b| b.connection != id);
@@ -792,6 +798,8 @@ impl From<String> for FetchError {
 struct Fetched {
     events: Vec<Event>,
     busy: Vec<Busy>,
+    /// The domains of the addresses the source lists as you.
+    own: Vec<String>,
 }
 
 impl Fetched {
@@ -802,6 +810,13 @@ impl Fetched {
         for d in drafts {
             if !seen.insert(d.key.clone()) {
                 continue;
+            }
+            for p in d.people.iter().chain(d.organizer.iter()).filter(|p| p.is_self) {
+                if let Some(domain) = filing::companies::domain_of(&p.email) {
+                    if !out.own.contains(&domain) {
+                        out.own.push(domain);
+                    }
+                }
             }
             match model::sort(d) {
                 model::Kept::Meeting(e) => out.events.push(e),
@@ -1197,6 +1212,7 @@ async fn keep_google(client: &google::Client, tokens: &google::Tokens, account: 
             synced_ts: 0,
             error: None,
             reconnect: false,
+            own: Vec::new(),
         });
         s.next_sync = now;
         save_store(&s.store);
@@ -1255,6 +1271,7 @@ pub async fn calendar_add_link(app: AppHandle, link: String, kind: Option<String
             synced_ts: now,
             error: None,
             reconnect: false,
+            own: fetched.own,
         });
         s.store.events.retain(|e| e.connection != id);
         s.store.events.extend(fetched.events);
@@ -1345,20 +1362,63 @@ fn attendees_of(e: &Event) -> Vec<(String, String)> {
     e.attendees.iter().map(|a| (a.name.clone(), a.email.clone())).collect()
 }
 
+/// Its attendees' addresses (those that have one): the folder rules by
+/// company go by their domains (`filing/companies.rs`).
+fn emails_of(e: &Event) -> Vec<String> {
+    e.attendees.iter().map(|a| a.email.clone()).filter(|m| !m.is_empty()).collect()
+}
+
+/// The attendees' addresses of the meeting with key `key`, while the
+/// calendar still keeps it (12 h back to 7 days ahead): an older meeting
+/// note's companies (`filing/companies.rs`). Never under another lock.
+pub(crate) fn attendee_emails(key: &str) -> Option<Vec<String>> {
+    let s = lock_started()?;
+    s.store.events.iter().find(|e| e.key == key).map(emails_of)
+}
+
+/// The person's own email domains, as far as Yap knows them without asking
+/// anyone: the calendars' accounts (a Google connection's label, a feed
+/// named by its owner's address), the addresses the calendars' meetings
+/// list as you, and the Yap account's. The folder rules by company never
+/// file by them (`filing/companies.rs`). Never under another lock.
+pub(crate) fn own_domains() -> Vec<String> {
+    let mut found: Vec<String> = match lock_started() {
+        Some(s) => s
+            .store
+            .connections
+            .iter()
+            .flat_map(|c| filing::companies::domain_of(&c.label).into_iter().chain(c.own.iter().cloned()))
+            .collect(),
+        None => Vec::new(),
+    };
+    found.extend(crate::auth::account_email().and_then(|e| filing::companies::domain_of(&e)));
+    let mut out = Vec::new();
+    for d in found {
+        if !out.contains(&d) {
+            out.push(d);
+        }
+    }
+    out
+}
+
 /// The note for `event`: the one made before, or a new meeting note with its
 /// title and attendees (dated to the meeting when made ahead of it).
 fn note_for(event: &Event, ahead: bool) -> Result<(u64, bool), String> {
     if let Some(id) = crate::notes::find_by_event(&event.key) {
         return Ok((id, false));
     }
-    // Its series' folder ("Always file Weekly sync in Design"), else Meetings.
-    let folder = filing::folder_for(&event.key).unwrap_or_else(|| {
+    // Its series' folder ("Always file Weekly sync in Design"), else its
+    // company's ("Meetings with example.com go in Clients"), else Meetings.
+    let emails = emails_of(event);
+    let folder = filing::folder_for_meeting(&event.key, &emails).unwrap_or_else(|| {
         crate::notes::folder_create(crate::notes::MEETINGS);
         crate::notes::MEETINGS.to_string()
     });
     let note = crate::notes::create(&event.display_title(), "", "calendar", &folder);
     let date = ahead.then_some(event.start.max(0) as u64);
     crate::notes::link_event(note.id, note_event(event), None, &attendees_of(event), date)?;
+    // Its companies, for a company rule made later (its past meetings).
+    filing::companies::remember(note.id, &emails);
     Ok((note.id, true))
 }
 
@@ -1573,12 +1633,41 @@ pub fn on_meeting_started(app: &AppHandle, note_id: u64) {
     }
     answer(&event);
     tracing::info!(note_id, by_code, "calendar: a recording started during a meeting; note tied to it");
-    // Its series' folder, when there's a rule for it.
-    filing::file_linked(note_id, &event.key);
+    // Its series' folder, else its company's, when there's a rule for it.
+    filing::file_linked(note_id, &event.key, &emails_of(&event));
     // Every window showing the note (the notepad, Notes) follows.
     crate::notes::commands::note_changed(app, note_id, "calendar");
     let _ = app.emit("yap-notes-changed", ());
     emit(app);
+}
+
+/// A meeting imported from a transcript file (`meetings/import.rs`) is the
+/// calendar's meeting at its time, while the calendar still has it (the
+/// last [`LOOK_BACK`]): it takes that meeting's name over a made-up title,
+/// its attendees and invite, and its series' folder rule — as a recording
+/// started during it would. Whether it found one.
+pub fn link_imported(app: &AppHandle, note_id: u64) -> bool {
+    if lock_started().is_none() {
+        return false;
+    }
+    let Some(note) = crate::notes::get(note_id) else { return false };
+    let (Some(start), Some(end)) = (note.transcript.iter().map(|s| s.ts).min(), note.transcript.iter().map(|s| s.ts).max()) else {
+        return false;
+    };
+    let event = model::event_during(&lock().store.events, start as i64, end as i64).cloned();
+    let Some(event) = event else { return false };
+    let made_up = crate::notes::title_open_to_ai(&note) || model::is_placeholder_title(&note.title);
+    let title = made_up.then(|| event.display_title());
+    if let Err(e) = crate::notes::link_event(note_id, note_event(&event), title, &attendees_of(&event), None) {
+        tracing::warn!("calendar: couldn't tie an imported meeting to its meeting: {e}");
+        return false;
+    }
+    tracing::info!(note_id, "calendar: an imported meeting tied to its calendar meeting");
+    // Its series' folder rule, else its attendees' company's.
+    filing::file_linked(note_id, &event.key, &emails_of(&event));
+    crate::notes::commands::note_changed(app, note_id, "calendar");
+    emit(app);
+    true
 }
 
 /// Call detection, about to ask "Teams call detected — Record notes?" (under
@@ -2710,6 +2799,8 @@ pub fn calendar_meeting_notes(query: Option<String>) -> Vec<Value> {
                 // Something to summarise ("Generate summary").
                 "hasTalk": n.transcript.iter().any(|s| !s.echo),
                 "recording": recording == Some(n.id),
+                // From a transcript file (meetings/import.rs): no audio.
+                "imported": crate::notes::is_imported(&n),
                 // Its folder, its series' name and that series' folder rule
                 // (the menu's "File this meeting in…", "Always file…").
                 "filing": filing::view_of(&n),
@@ -2963,6 +3054,7 @@ mod tests {
             synced_ts: 0,
             error: None,
             reconnect: false,
+            own: Vec::new(),
         });
         // A link still on its first fetch holds slot 2: a Google sign-in
         // finishing meanwhile gets 3, never the link's.

@@ -7,15 +7,30 @@
 // hooks: a language shortcut's dictation translated by the AI (the fake
 // one, support/fake-llm.js), as said when the AI fails, the cleanup told
 // the dictation's language; and the nudge, "You spoke French · Add it to My
-// languages?", in the main window and on the Yap bar, rate-limited.
+// languages?", in the main window and on the Yap bar, rate-limited — and for
+// a model that doesn't say which language it heard (Parakeet V3), the
+// language read from its text (languages/text_id.rs), English full of names
+// never taken for another; Parakeet V2's "only knows English"; the one-time
+// "Yap recognised French" tip.
 //
 // The worker runs "Whisper Large v3" (the stub engine stands in for it), so
 // the dictations can say which language they heard (`e2e_language_stage`,
-// `e2e_language_heard`); Parakeet V2's folder is there too, installed.
-// Nothing is pasted anywhere: dictations go to a stand-in window.
+// `e2e_language_heard`); Parakeet V2's folder is there too, installed, and
+// V3's for the tests that use it. Nothing is pasted anywhere: dictations go
+// to a stand-in window.
 import fs from 'node:fs';
 import path from 'node:path';
-import { test as base, expect, openSettings, closeSettings, settingsDialog, expectStore, setConfig, inAnotherApp } from './support/fixtures.js';
+import {
+  test as base,
+  expect,
+  openSettings,
+  closeSettings,
+  closeToasts,
+  settingsDialog,
+  expectStore,
+  setConfig,
+  inAnotherApp,
+} from './support/fixtures.js';
 import { startFakeLlm, cleanupTranscript, transformText, transformInstruction } from './support/fake-llm.js';
 
 const test = base.extend({
@@ -38,6 +53,20 @@ const test = base.extend({
 const SAID = 'hey can you send me the report by friday';
 const SPANISH = 'Hola, ¿puedes enviarme el informe el viernes?';
 const FRENCH = 'bonjour je voudrais réserver une table pour quatre personnes';
+// As Parakeet V3 writes them (fictional).
+const V3_FRENCH = "Je pense que la nouvelle version marche beaucoup mieux que l'ancienne.";
+const V3_ENGLISH = 'Ask Ingrid Johansson about the Göteborg office move and book the Hôtel de la Plage for Friday.';
+
+/** Parakeet V3 "installed" (its folder) for the length of `fn`. */
+async function withV3(yap, fn) {
+  const dir = path.join(yap.dataDir, 'models', 'parakeet-tdt-0.6b-v3-int8');
+  fs.mkdirSync(dir, { recursive: true });
+  try {
+    return await fn();
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+}
 
 const log = (yap) => fs.readFileSync(yap.logPath, 'utf8');
 
@@ -105,7 +134,9 @@ test('Settings → Dictation → My languages: picked from a search, which model
   );
   await expect(models.locator('[data-recommended="large"]')).toContainText("Whisper Large v3 understands all your languages, and it's installed.");
   await expect(group.locator('[data-setting="main-language"]')).toContainText('Parakeet V2 knows English only');
-  await expect(group.locator('[data-setting="language-nudge"]')).toContainText("Only Whisper models say which language they heard. Parakeet V2 doesn't");
+  await expect(group.locator('[data-setting="language-nudge"]')).toContainText(
+    'Parakeet V2 knows English only: after a dictation in another language, Yap says which model knows it'
+  );
   expect((await yap.invoke('get_config')).modelSize).toBe('parakeet-tdt-0.6b-v2');
   await shot(main, '03-my-languages-parakeet-v2');
   // Open Speech-to-Text: its Languages row names them, and leads back.
@@ -316,4 +347,104 @@ test('the nudge: "You spoke French", added from the main window; on the bar; at 
   await yap.invoke('e2e_language_heard', { heard: [['it', 0.98]], secs: 5 });
   await main.waitForTimeout(500);
   expect(log(yap).slice(before)).not.toContain('Language nudge: offered');
+});
+
+test('a model that doesn’t say: Parakeet V3’s French read from its text and offered, English full of names never; the one-time tip; Parakeet V2 only knows English', async ({
+  yap,
+  main,
+  shot,
+}) => {
+  await withV3(yap, async () => {
+    await setConfig(yap, main, { myLanguages: ['en'], modelSize: 'parakeet-tdt-0.6b-v3' });
+    await yap.invoke('e2e_language_stage', { shortcut: null, heard: null, fresh: true });
+    await closeToasts(main);
+    const nudge = main.getByRole('status').filter({ hasText: /You spoke|only knows English/ });
+
+    // English full of Swedish and French names: never another language.
+    let before = log(yap).length;
+    await yap.invoke('e2e_language_heard', { heard: null, text: V3_ENGLISH, secs: 5 });
+    await expect.poll(() => log(yap).slice(before)).toContain('Dictation: the language read from the text');
+    await main.waitForTimeout(600);
+    await expect(nudge).toHaveCount(0);
+    expect(log(yap).slice(before)).not.toContain('Language nudge: offered');
+
+    // French, as Parakeet V3 writes it: read from the text, offered.
+    before = log(yap).length;
+    await yap.invoke('e2e_language_heard', { heard: null, text: V3_FRENCH, secs: 4 });
+    const toast = main.getByRole('status').filter({ hasText: 'You spoke French · Add it to My languages?' });
+    await expect(toast).toBeVisible();
+    await expect(toast).toContainText('Then AI cleanup keeps your French dictations in French.');
+    await shot(main, '08-nudge-read-from-the-text');
+    await toast.getByRole('button', { name: 'Add French' }).click();
+    await expectStore(yap, 'config.json', (c) => JSON.stringify(c.myLanguages) === '["en","fr"]');
+    // The log says the language and counts, never the words.
+    expect(log(yap).slice(before)).toMatch(/Dictation: the language read from the text/);
+    expect(log(yap)).not.toContain('nouvelle version');
+    expect(log(yap)).not.toContain('Göteborg');
+
+    // French again, one of the person's two now: "Yap recognised French",
+    // once.
+    await closeToasts(main);
+    await yap.invoke('e2e_feature_tips', { on: true });
+    try {
+      await yap.invoke('e2e_language_heard', { heard: null, text: V3_FRENCH, secs: 4 });
+      const tip = main.getByRole('status').filter({ hasText: 'Yap recognised French' });
+      await expect(tip).toBeVisible();
+      await expect(tip).toContainText('French is one of your languages');
+      await shot(main, '09-recognised-tip');
+      await expectStore(yap, 'hints.json', (h) => typeof h.features?.language === 'number');
+      await closeToasts(main);
+      before = log(yap).length;
+      await yap.invoke('e2e_language_heard', { heard: null, text: V3_FRENCH, secs: 4 });
+      await main.waitForTimeout(800);
+      await expect(tip).toHaveCount(0);
+    } finally {
+      await yap.invoke('e2e_feature_tips', { on: false });
+    }
+
+    // Parakeet V2 (English only): its French said, with the model to switch
+    // to; Choose a model opens Settings at My languages.
+    await setConfig(yap, main, { myLanguages: ['en'], modelSize: 'parakeet-tdt-0.6b-v2' });
+    await yap.invoke('e2e_language_stage', { shortcut: null, heard: null, fresh: true });
+    await closeToasts(main);
+    await yap.invoke('e2e_language_heard', { heard: null, text: V3_FRENCH, secs: 4 });
+    const v2 = main.getByRole('status').filter({ hasText: 'Parakeet V2 only knows English' });
+    await expect(v2).toBeVisible();
+    await expect(v2).toContainText('You spoke French. Parakeet V3, which is installed, writes French as you say it');
+    await shot(main, '10-v2-only-knows-english');
+    await v2.getByRole('button', { name: 'Choose a model' }).click();
+    await expectStore(yap, 'config.json', (c) => JSON.stringify(c.myLanguages) === '["en","fr"]');
+    const group = settingsDialog(main).getByRole('group', { name: 'My languages' });
+    await expect(group).toBeInViewport();
+    await expect(group.locator('[data-setting="language-models"] [data-coverage]')).toContainText('Parakeet V2, your speech model, understands English only');
+    expect((await yap.invoke('get_config')).modelSize).toBe('parakeet-tdt-0.6b-v2');
+    await closeSettings(main);
+  });
+});
+
+test('through the speech engine: the stub writing French as Parakeet V3, the nudge offered', async ({ yap, main }) => {
+  const mics = await yap.invoke('list_audio_devices');
+  test.skip(mics.length === 0, 'no microphone here; recording needs one');
+  await withV3(yap, async () => {
+    await setConfig(yap, main, { myLanguages: ['en'] });
+    await yap.invoke('set_active_model', { modelSize: 'parakeet-tdt-0.6b-v3' });
+    await yap.invoke('e2e_target_window', { on: true });
+    await closeToasts(main);
+    try {
+      await yap.invoke('e2e_language_stage', { shortcut: null, heard: null, text: V3_FRENCH, fresh: true });
+      const r = await yap.invoke('e2e_dictate_audio', { seconds: 2.5 });
+      expect(r?.raw).toContain('nouvelle version');
+      await expect(main.getByRole('status').filter({ hasText: 'You spoke French · Add it to My languages?' })).toBeVisible();
+      // English, the same way: nothing.
+      await closeToasts(main);
+      await yap.invoke('e2e_language_stage', { shortcut: null, heard: null, text: V3_ENGLISH, fresh: true });
+      const before = log(yap).length;
+      await yap.invoke('e2e_dictate_audio', { seconds: 2.5 });
+      await main.waitForTimeout(600);
+      expect(log(yap).slice(before)).not.toContain('Language nudge: offered');
+    } finally {
+      await yap.invoke('e2e_language_stage', { shortcut: null, heard: null, text: null, fresh: true });
+      await yap.invoke('set_active_model', { modelSize: 'large' });
+    }
+  });
 });

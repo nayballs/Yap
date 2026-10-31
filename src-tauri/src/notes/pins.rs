@@ -135,11 +135,12 @@ pub fn pins() -> Vec<Pin> {
     with_store(|s| s.pins.clone())
 }
 
-/// Note `id` was deleted: its pin goes too (note ids come round again).
-pub fn forget(id: u64) {
+/// Notes `ids` were deleted: their pins go too (note ids come round
+/// again), in one write.
+pub fn forget_many(ids: &[u64]) {
     with_store(|s| {
         let before = s.pins.len();
-        s.pins.retain(|p| p.id != id);
+        s.pins.retain(|p| !ids.contains(&p.id));
         if s.pins.len() != before {
             save(s);
         }
@@ -238,7 +239,7 @@ mod tests {
         // Another note given id 6 pins afresh.
         assert!(set(6, 61, true));
         assert_eq!(pins()[0].created, 61);
-        forget(6);
+        forget_many(&[6]);
         assert!(pins().is_empty());
         // A note deleted: its pin goes with it; the list marks the rest.
         let n = crate::notes::create("Keep", "x", "manual", "");

@@ -695,11 +695,45 @@ pub struct Turn {
     touched: Mutex<Vec<DocRef>>,
     /// The ones this turn made (`create_document`).
     made: Mutex<Vec<u64>>,
+    /// Asked across the meetings: each passage's number and its meeting's
+    /// name ("Supplier call, Tue 27 Oct"), for a document's `[n]`
+    /// ([`name_citations`])…
+    passages: Mutex<Vec<(usize, String)>>,
+    /// …and the ones a document cites (the answer's sources).
+    cited: Mutex<Vec<usize>>,
 }
 
 impl Turn {
     pub fn new(known: &[DocRef]) -> Turn {
         Turn { known: Mutex::new(known.iter().map(|d| d.id).collect()), ..Default::default() }
+    }
+
+    /// The turn's meeting passages, by number and name (a turn asked across
+    /// the meetings, a Skill's: `turn.rs`).
+    pub fn cite_passages(&self, labels: Vec<(usize, String)>) {
+        *self.passages.lock().unwrap_or_else(|p| p.into_inner()) = labels;
+    }
+
+    /// A document's text as it's written this turn: its passage citations
+    /// noted (the answer's sources) and named ([`name_citations`]). No
+    /// passages this turn: as it is.
+    pub fn named(&self, text: &str) -> String {
+        let labels = self.passages.lock().unwrap_or_else(|p| p.into_inner()).clone();
+        if labels.is_empty() {
+            return text.to_string();
+        }
+        let mut cited = self.cited.lock().unwrap_or_else(|p| p.into_inner());
+        for n in crate::search::ask::cited_numbers(text) {
+            if labels.iter().any(|(k, _)| *k == n) && !cited.contains(&n) {
+                cited.push(n);
+            }
+        }
+        name_citations(text, &labels)
+    }
+
+    /// The passages this turn's documents cite.
+    pub fn passages_cited(&self) -> Vec<usize> {
+        self.cited.lock().unwrap_or_else(|p| p.into_inner()).clone()
     }
 
     /// A `create_document` for a document this turn already made (the same
@@ -1322,6 +1356,47 @@ pub fn link_citations(markdown: &str, sources: &[(usize, String, String)]) -> St
             .collect();
         out.push_str(&markdown[last..m.start()]);
         out.push_str(&format!("({})", links.join(", ")));
+        last = m.end();
+    }
+    out.push_str(&markdown[last..]);
+    out
+}
+
+/// **A document's `[2]` citations of meeting passages as their meetings'
+/// names** ("(Supplier call, Tue 27 Oct)"): a document written from
+/// meetings (a Skill's /tickets, /prd in Chat) has no Sources row, and a
+/// bare number means nothing once it's copied or exported. `labels`: the
+/// turn's passages (number, name). A number none of them has goes; a run of
+/// them naming one meeting twice names it once; a markdown link's own text
+/// isn't a citation. **Every passage from one meeting**: the citations go —
+/// the document is that meeting's (its title says so), and "(Bug triage,
+/// Fri 30 Oct)" after every line was noise (the on-device 4B's tickets, 31
+/// Oct 2026). Pure.
+pub fn name_citations(markdown: &str, labels: &[(usize, String)]) -> String {
+    static RUN: std::sync::LazyLock<regex::Regex> =
+        std::sync::LazyLock::new(|| regex::Regex::new(r" ?(?:\[\d{1,2}(?:\s*[,–-]\s*\d{1,2})*\])+").expect("static regex"));
+    if labels.is_empty() || !markdown.contains('[') {
+        return markdown.to_string();
+    }
+    let one_meeting = labels.iter().all(|(_, l)| *l == labels[0].1);
+    let mut out = String::with_capacity(markdown.len());
+    let mut last = 0;
+    for m in RUN.find_iter(markdown) {
+        if markdown[m.end()..].starts_with('(') {
+            continue;
+        }
+        let mut names: Vec<&str> = Vec::new();
+        for n in crate::search::ask::cited_numbers(m.as_str()) {
+            if let Some((_, name)) = labels.iter().find(|(k, _)| *k == n) {
+                if !names.contains(&name.as_str()) {
+                    names.push(name);
+                }
+            }
+        }
+        out.push_str(&markdown[last..m.start()]);
+        if !names.is_empty() && !one_meeting {
+            out.push_str(&format!(" ({})", names.join("; ")));
+        }
         last = m.end();
     }
     out.push_str(&markdown[last..]);
@@ -2472,6 +2547,29 @@ mod tests {
         assert_eq!(link_citations("Seen [3].", &sources), "Seen [3].");
         assert_eq!(link_citations("[1](https://a.example)", &sources), "[1](https://a.example)");
         assert_eq!(link_citations("Pick [1].", &[]), "Pick [1].");
+    }
+
+    #[test]
+    fn a_document_from_meetings_names_them_in_place_of_its_numbers() {
+        let labels = vec![(1, "Supplier call, Tue 27 Oct".to_string()), (2, "Budget review, Wed 28 Oct".to_string()), (3, "Supplier call, Tue 27 Oct".to_string())];
+        assert_eq!(name_citations("Send the revised quote by Friday [1].", &labels), "Send the revised quote by Friday (Supplier call, Tue 27 Oct).");
+        // A run naming one meeting twice names it once; two meetings, both.
+        assert_eq!(name_citations("- **Owner:** Priya [1, 3]", &labels), "- **Owner:** Priya (Supplier call, Tue 27 Oct)");
+        assert_eq!(name_citations("Cut the shift [2][1].", &labels), "Cut the shift (Budget review, Wed 28 Oct; Supplier call, Tue 27 Oct).");
+        // A number none of the passages has goes; a link's text stays.
+        assert_eq!(name_citations("Made up [9].", &labels), "Made up.");
+        assert_eq!(name_citations("[1](https://a.example)", &labels), "[1](https://a.example)");
+        assert_eq!(name_citations("Pick [1].", &[]), "Pick [1].");
+        // Every passage from one meeting: the document is that meeting's, its
+        // citations go.
+        let one = vec![(1, "Bug triage, Fri 30 Oct".to_string()), (2, "Bug triage, Fri 30 Oct".to_string())];
+        assert_eq!(name_citations("**Why:** About two hundred people a day hit it. [2]\n**Owner:** Ana [1, 2]", &one), "**Why:** About two hundred people a day hit it.\n**Owner:** Ana");
+        // The turn keeps what its documents cite, for the answer's sources.
+        let turn = Turn::default();
+        turn.cite_passages(labels);
+        assert_eq!(turn.named("Ask finance [2]."), "Ask finance (Budget review, Wed 28 Oct).");
+        assert_eq!(turn.passages_cited(), [2]);
+        assert_eq!(Turn::default().named("As is [1]."), "As is [1].");
     }
 
     #[test]

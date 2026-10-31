@@ -258,6 +258,9 @@ pub struct SeedMeeting {
     /// You said "maybe".
     #[serde(default)]
     pub maybe: bool,
+    /// The invite's description ("Agenda: …").
+    #[serde(default)]
+    pub invite: String,
 }
 
 fn half_hour() -> i64 {
@@ -319,6 +322,12 @@ pub struct SeedNote {
     pub participants: Vec<String>,
     #[serde(default)]
     pub transcript: Vec<SeedLine>,
+    /// The meeting was this many days before the run's clock (its lines'
+    /// `ts` are then seconds into it): a Skill's gathering reads the dates
+    /// (a stand-up since yesterday, a decision log of the last 4 weeks).
+    /// None: the lines' `ts` as they are.
+    #[serde(default)]
+    pub days_ago: Option<f64>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -357,6 +366,11 @@ pub struct Turn {
     /// document of the conversation (their lines, as the panel sends them).
     #[serde(default)]
     pub selection: Option<String>,
+    /// Run as this Skill (its command, `chat/skills.rs`), across the
+    /// meetings, as Chat's `/` menu sends it: `user` is "/prep" or "/prep
+    /// supplier call".
+    #[serde(default)]
+    pub skill: Option<String>,
     #[serde(default)]
     pub expect: Expect,
     /// Same checks, reported as warnings instead of failures.
