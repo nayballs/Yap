@@ -775,7 +775,7 @@ fn group_user_code(code: &str) -> String {
 
 /// The QR code for `text` (error correction M) as one SVG path: each run of
 /// dark modules on a row is a `M{x} {y}h{n}v1h-{n}z` rectangle.
-fn qr_for(text: &str) -> Option<Qr> {
+pub(crate) fn qr_for(text: &str) -> Option<Qr> {
     use qrcode::{Color, EcLevel, QrCode};
     use std::fmt::Write;
     let code = QrCode::with_error_correction_level(text.as_bytes(), EcLevel::M).ok()?;

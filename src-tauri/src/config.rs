@@ -954,6 +954,12 @@ pub struct YapConfig {
     /// tool; Settings → MCP). Off by default: they can only read.
     #[serde(default)]
     pub mcp_allow_writes: bool,
+    /// "Use Yap from your phone (on your home Wi-Fi)" (Settings → Phone,
+    /// `link.rs`): Yap serves HTTPS on port 51443 to paired phones on the
+    /// home network. Off by default; an older Yap drops it on its save and
+    /// it's off again.
+    #[serde(default)]
+    pub link_enabled: bool,
 
     /// Open the meeting notepad when a meeting recording starts (Settings →
     /// Meetings → Notepad; `notepad.rs`): docked to the right edge of the
@@ -1425,6 +1431,7 @@ impl Default for YapConfig {
             history_keep: String::new(),
             bridge_enabled: true,
             mcp_allow_writes: false,
+            link_enabled: false,
             meeting_open_notepad: true,
             meeting_split_screen: false,
             meeting_live_transcript: true,

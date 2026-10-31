@@ -72,7 +72,8 @@ pub const STAYS: &[Part] = &[
     // Set up on purpose, like the dictionary (Settings → Commands).
     Part { id: "samples", label: "Your writing samples", files: &["writing_samples.json"] },
     Part { id: "models", label: "Downloaded speech, AI and voice models", files: &["models/", "llm/"] },
-    Part { id: "account", label: "Your account sign-in, and your calendars", files: &["calendar.json"] },
+    // Paired phones are set up like an account sign-in (link.rs): they stay.
+    Part { id: "account", label: "Your account sign-in, your calendars and paired phones", files: &["calendar.json", "link_devices.json", "link/"] },
     Part {
         id: "bookkeeping",
         label: "Yap's own records: tips shown, your answers to its offers, network receipts, caches and the log",

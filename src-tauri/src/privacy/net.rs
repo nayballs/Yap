@@ -80,6 +80,9 @@ pub enum Feature {
     /// (its picture, or its text read on this PC: `chat/assistant/screen.rs`):
     /// its own label, so the list shows when the screen went.
     AssistantScreen,
+    /// A Voice Assistant question asked from a paired phone (Yap Link,
+    /// `link.rs`): its own label, so the list shows where it came from.
+    AssistantPhone,
     Notes,
     Meetings,
     Brief,
@@ -111,7 +114,7 @@ impl Feature {
             Feature::Dictation | Feature::DictationContext | Feature::DictationSamples => "Dictation",
             Feature::Commands | Feature::CommandsSamples => "Commands",
             Feature::Chat => "Chat",
-            Feature::Assistant | Feature::AssistantScreen => "Voice Assistant",
+            Feature::Assistant | Feature::AssistantScreen | Feature::AssistantPhone => "Voice Assistant",
             Feature::Notes => "Notes",
             Feature::Meetings => "Meetings",
             Feature::Brief => "Calendar",
@@ -129,6 +132,7 @@ impl Feature {
             Feature::Chat => "Chat",
             Feature::Assistant => "Voice Assistant",
             Feature::AssistantScreen => "Voice Assistant + the window in front",
+            Feature::AssistantPhone => "Voice Assistant from your phone",
             Feature::Notes => "Notes",
             Feature::Meetings => "Meeting notes",
             Feature::Brief => "Meeting brief",
@@ -206,6 +210,9 @@ pub enum Purpose {
     VoiceSample(&'static str),
     /// An app on this PC using the Local API (`bridge.rs`).
     LocalApi,
+    /// A paired phone connecting to Yap (Yap Link, `link.rs`): the page's
+    /// files and its conversation with Yap, inbound, from your network.
+    Phone,
 }
 
 /// What a request is, in the store's words: its kind (for the page's
@@ -265,6 +272,7 @@ impl Purpose {
             Purpose::VoiceList(s) => ("voice", format!("Voice list · {s}"), "Spoken replies"),
             Purpose::VoiceSample(s) => ("voice", format!("Voice sample · {s}"), "Settings"),
             Purpose::LocalApi => ("localapi", "Local API · apps on this PC".into(), "AI apps (MCP)"),
+            Purpose::Phone => ("phone", "Yap Link · your phone".into(), "Phone"),
         };
         Described { kind, label, feature }
     }
@@ -621,6 +629,17 @@ impl Manual {
         self.0.received = received;
         self.0.finish(Outcome::Failed(0));
     }
+}
+
+/// **A phone connected to Yap** (Yap Link, `link.rs`) from `peer` — an
+/// address on your network (or this PC's own, a test) — and was answered
+/// `status` (101 for its conversation, 200 for a page file, 403 refused),
+/// Yap sending `sent` bytes for its `received`. Inbound, so its host is the
+/// phone's address; never a path, a message or audio.
+pub fn phone(peer: std::net::IpAddr, status: u16, received: u64, sent: u64) {
+    let mut p = Pending::new(&Purpose::Phone, peer.to_string(), sent);
+    p.received = received;
+    p.finish(Outcome::Answered(status));
 }
 
 /// An app on this PC asked the Local API, and Yap answered `status` with

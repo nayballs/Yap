@@ -127,6 +127,8 @@ fn apply_config(app: &AppHandle, state: State<'_, AppState>, prev: &YapConfig, c
     // The Integrations toggle may have flipped — start/stop the local API
     // bridge to match (idempotent when unchanged).
     crate::integrations::bridge::sync(&app, cfg.bridge_enabled);
+    // …and Settings → Phone's "Use Yap from your phone" (link.rs).
+    crate::link::sync(&app, cfg.link_enabled);
     // …and the "Detect calls and offer to take notes" toggle.
     crate::calls::meeting_detect::sync(&app, cfg.meeting_detection);
     // Hiding meeting windows from screen shares may have flipped mid-meeting.

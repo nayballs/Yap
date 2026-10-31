@@ -118,6 +118,7 @@ const COPY: &[&str] = &[
     "assistantAnswerCard",
     "assistantScreen",
     "assistantScreenCloud",
+    "linkEnabled",
     "openApps",
     "webSearch",
     "webSearchNative",
