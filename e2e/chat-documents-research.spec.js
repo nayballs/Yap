@@ -1,6 +1,6 @@
 // A strong model's documents, researched as the Claude app does (31 Oct 2026;
 // src-tauri/src/chat/tools.rs `refused_after_web` / `STRONG_LOCKED`,
-// web/turn.rs `Reach`, chat/think.rs `auto_on`, ai/llm/anthropic.rs):
+// web/turn.rs `Reach`, ai/effort.rs, ai/llm/anthropic.rs):
 // - After reading the web, a strong model (a fake named like GPT-5: its
 //   rich tools) still changes a note and writes a document — each a version
 //   — while opening an app stays refused.
@@ -16,9 +16,10 @@
 //   a document, its fetches sized to its request) — but not in the first
 //   step, which makes the outline — Yap's web_search / read_page not
 //   offered; its searches and page reads are chips and sources, its
-//   citation a pill; the document written after its search; Think on by
-//   itself for the document (the button lit while it's written, off after),
-//   and not for a plain question.
+//   citation a pill; the document written after its search; every question
+//   at the effort chosen for it (adaptive thinking, its summary shown —
+//   since 31 Oct 2026 in place of Think turning on by itself for a
+//   document), and no Think button for it.
 // The models are a local fake (support/fake-llm.js, which speaks the
 // Messages API's blocks and events too); the web a local fake
 // (support/fake-web.js). Nothing goes on the internet.
@@ -285,10 +286,10 @@ test('a document’s turn may search more than three times; a plain question may
   await expect(chipsOfLast(main).filter({ hasText: '3 searches a turn' })).toHaveCount(1);
 });
 
-test('Claude searches and reads pages itself in Chat’s request, thinks first for a document, and cites what it read', async ({ yap, main, fakeLlm, shot }) => {
+test('Claude searches and reads pages itself in Chat’s request, thinks at its effort for a document, and cites what it read', async ({ yap, main, fakeLlm, shot }) => {
   const cfg = await yap.invoke('get_config');
   const claude = { enabled: true, provider: 'anthropic', baseUrl: fakeLlm.base, model: 'claude-opus-5-5', apiKey: CLAUDE_KEY, apiKeys: {}, prompt: '', disableThinking: false };
-  await setConfig(yap, main, { webSearchNative: true, llmScopes: { ...cfg.llmScopes, chat: claude } });
+  await setConfig(yap, main, { webSearchNative: true, llmScopes: { ...cfg.llmScopes, chat: claude }, chatEffort: { 'anthropic:claude-opus-5-5': 'high' } });
   try {
     const held = gate();
     const searching = gate();
@@ -306,8 +307,8 @@ test('Claude searches and reads pages itself in Chat’s request, thinks first f
     ];
     fakeLlm.scriptChat([
       {
-        // Held while the spec looks at the Think button mid-turn. The
-        // outline first: no web tools in this step's request.
+        // Held while the spec looks at the turn mid-way. The outline
+        // first: no web tools in this step's request.
         gate: held.promise,
         reasoning: 'Outline first: levels, then the gear.',
         tools: [{ name: 'create_document', args: { title: 'Tidecaller guide', summary: 'A solo Tidecaller, level by level.', sections: [{ key: 'Levels', intent: 'level by level' }] } }],
@@ -336,9 +337,10 @@ test('Claude searches and reads pages itself in Chat’s request, thinks first f
     ]);
     await freshChat(main);
     await send(main, 'Make me a detailed level-by-level Tidecaller guide for Emberfall');
-    // Think lit by Yap while the document's written.
+    // No Think button for a cloud model: its effort, on the chip, instead.
     await expect.poll(() => fakeLlm.requests.slice(before).some((r) => r.gated)).toBe(true);
-    await expect(thinkButton(main)).toHaveAttribute('aria-pressed', 'true');
+    await expect(thinkButton(main)).toHaveCount(0);
+    await expect(main.getByTestId('chip-effort')).toHaveText('High');
     await shot(main, '02-claude-thinks-for-a-document');
     held.open();
     // The outline opens before any search: the next step (its search) held.
@@ -348,7 +350,6 @@ test('Claude searches and reads pages itself in Chat’s request, thinks first f
     await expect(chipsOfLast(main).filter({ hasText: 'Searched the web' })).toHaveCount(0);
     searching.open();
     await expect(lastAnswer(main)).toContainText('Rain Bolt comes first', { timeout: 20_000 });
-    await expect(thinkButton(main)).toHaveAttribute('aria-pressed', 'false');
     // Its searches and pages: chips; its citation: a pill; the Sources row.
     const chips = chipsOfLast(main);
     await expect(chips.filter({ hasText: 'Searched the web with Anthropic: "Emberfall tidecaller levels"' })).toHaveCount(1);
@@ -404,7 +405,7 @@ test('Claude searches and reads pages itself in Chat’s request, thinks first f
     expect(one.tools).not.toContain('web_search');
     expect(one.tools).not.toContain('read_page');
     expect(one.tools).toContain('edit_document');
-    // Thought through: adaptive, high effort, its summary shown.
+    // At the effort chosen for it: adaptive, high, its summary shown.
     expect(one.think.thinking).toEqual({ type: 'adaptive', display: 'summarized' });
     expect(one.think.outputConfig).toEqual({ effort: 'high' });
     // Cached: the tools and system prompt, and the conversation.
@@ -418,15 +419,15 @@ test('Claude searches and reads pages itself in Chat’s request, thinks first f
     expect(one.system).toContain('Use web_fetch to open a page');
     await expectStore(yap, 'chats.json', (s) => s.conversations.some((c) => c.messages.some((m) => m.role === 'assistant' && m.thinking?.text?.includes('Outline first: levels, then the gear.'))));
 
-    // A plain question: no Think, the usual reach.
+    // A plain question: the same effort, the usual reach.
     const plain = fakeLlm.requests.length;
     fakeLlm.scriptChat([{ content: 'Rain Bolt.' }]);
     await send(main, 'Which skill comes first?');
     await expect(lastAnswer(main)).toHaveText('Rain Bolt.', { timeout: 20_000 });
     const q = fakeLlm.requests.slice(plain).find((r) => r.api === 'messages');
-    expect(q.think.thinking).toBeNull();
+    expect(q.think.outputConfig).toEqual({ effort: 'high' });
     expect(q.serverTools[0].maxUses).toBe(5);
   } finally {
-    await setConfig(yap, main, { llmScopes: cfg.llmScopes });
+    await setConfig(yap, main, { llmScopes: cfg.llmScopes, chatEffort: cfg.chatEffort ?? {} });
   }
 });

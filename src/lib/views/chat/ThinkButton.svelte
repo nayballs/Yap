@@ -1,9 +1,10 @@
 <script>
   // Think (src-tauri/src/chat/think.rs): the next question thought through,
-  // one question at a time — the on-device Qwen thinks before it answers, a
-  // cloud model that reasons reasons harder. Shown only for a model that
-  // can; asked again whenever Chat's model changes (its limits change with
-  // it). Kept apart from the prompt chips and Skills.
+  // one question at a time — the on-device Qwen thinks before it answers.
+  // Shown only for the model on this PC: a cloud model's thinking is its
+  // effort, in the model picker (ai/effort.rs). Asked again whenever Chat's
+  // model changes (its limits change with it). Kept apart from the prompt
+  // chips and Skills.
   import { think, refreshThink } from './chatThink.svelte.js';
 
   /** `chat`: the view's state (its model's limits say when the model changed). */
@@ -16,24 +17,15 @@
     refreshThink();
   });
 
-  const title = $derived(
-    think.auto
-      ? 'Thinking it through: a document is being written, so the model thinks before it writes (Yap turned this on for this question).'
-      : think.place === 'here'
-        ? 'Think it through: the model on this PC thinks before it answers (a few seconds more). This question only.'
-        : 'Think it through: the model reasons harder before it answers (slower, and it may use more of your plan). This question only.'
-  );
-  // Lit while Yap thinks a document through (`think.auto`), or pressed.
-  const lit = $derived(think.on || think.auto);
+  const title = 'Think it through: the model on this PC thinks before it answers (a few seconds more). This question only.';
 </script>
 
-{#if think.can || think.auto}
+{#if think.can}
   <button
     type="button"
     class="thinkbtn"
-    class:on={lit}
-    class:auto={think.auto}
-    aria-pressed={lit}
+    class:on={think.on}
+    aria-pressed={think.on}
     aria-label="Think it through"
     {title}
     onclick={() => {

@@ -428,6 +428,10 @@ pub struct Status {
     /// When it's the on-device model and it can't yet: its projector to
     /// download, or switch back on ("Read screenshots on this PC").
     pub images_local: Option<crate::snip::vision::LocalOffer>,
+    /// Its effort (`ai/effort.rs`): the levels it takes, its default, the
+    /// one chosen, fast mode — the chip says "Claude Opus 5.5 Extra", the
+    /// picker chooses. `null`: no reasoning control.
+    pub effort: Option<crate::ai::effort::Info>,
 }
 
 pub fn status(cfg: &YapConfig, scope: Scope, on_device: &OnDevice) -> Status {
@@ -452,6 +456,7 @@ pub fn status(cfg: &YapConfig, scope: Scope, on_device: &OnDevice) -> Status {
     let images_local = (images == Some(false))
         .then(|| model.as_ref().and_then(|m| crate::snip::vision::local_offer(&m.provider, &m.id)))
         .flatten();
+    let effort = model.as_ref().and_then(|m| crate::ai::effort::info(cfg, &m.provider, &m.id));
     Status {
         scope: scope.key(),
         ready,
@@ -475,6 +480,7 @@ pub fn status(cfg: &YapConfig, scope: Scope, on_device: &OnDevice) -> Status {
         images,
         images_switch,
         images_local,
+        effort,
     }
 }
 

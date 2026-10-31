@@ -10,9 +10,12 @@
 //!   web and opens pages itself, in its own turn, as in the Claude app —
 //!   not a separate sub-call that hands back a few passages. The compatible
 //!   endpoint takes function tools only (Anthropic's docs, read 31 Oct 2026).
-//! - **Thinking as asked**: adaptive thinking at an effort (Chat's Think,
-//!   `chat/think.rs`). The compatible endpoint answers `{type: "adaptive"}`
-//!   with HTTP 400 and never returns the thinking.
+//! - **Thinking at the model's effort**: adaptive thinking and
+//!   `output_config.effort`, fast mode's `speed` (`ai/effort.rs`, chosen in
+//!   Chat's model picker). The compatible endpoint ignores an effort,
+//!   answers `{type: "adaptive"}` with HTTP 400 and never returns the
+//!   thinking — so a Claude question with an effort comes here even with
+//!   no tools (the Notes view's Ask, a meeting's).
 //! - **Prompt caching**: the tools and the system prompt (the same every
 //!   step and every turn) carry a cache breakpoint, and the conversation
 //!   another (top-level `cache_control`); the compatible endpoint has none.
@@ -129,8 +132,9 @@ fn push_user(out: &mut Vec<Value>, blocks: Vec<Value>) {
 /// tools; `stream`): the system prompt with a cache breakpoint (the tools
 /// and it are the same every step), the messages turned — an earlier answer
 /// of Claude's sent back as its own blocks (`yap_anthropic`) — the tools,
-/// thinking as Chat's Think asks (`thinking`, `output_config`, its summary
-/// shown: `display`), and the conversation cached up to its end. Pure.
+/// thinking at the model's effort (`thinking`, `output_config`, `speed`,
+/// its summary shown: `display`; `ai/effort.rs`), and the conversation
+/// cached up to its end. Pure.
 pub fn body(req: &ChatRequest, server: &[Value], stream: bool) -> Value {
     let mut system: Vec<String> = Vec::new();
     let mut messages: Vec<Value> = Vec::new();
@@ -199,8 +203,8 @@ pub fn body(req: &ChatRequest, server: &[Value], stream: bool) -> Value {
             _ => {}
         }
     }
-    // Thinking as Chat's Think asks (`think::request_extra`): its summary
-    // comes back to show (adaptive thinking's default shows none).
+    // Thinking at the model's effort (`effort::fields`): its summary comes
+    // back to show (adaptive thinking's default shows none).
     if let Some(t) = req.extra.get("thinking") {
         let mut t = t.clone();
         if t["type"] == "adaptive" {
@@ -208,7 +212,7 @@ pub fn body(req: &ChatRequest, server: &[Value], stream: bool) -> Value {
         }
         b["thinking"] = t;
     }
-    for key in ["output_config", "max_tokens"] {
+    for key in ["output_config", "max_tokens", "speed"] {
         if let Some(v) = req.extra.get(key) {
             b[key] = v.clone();
         }
@@ -542,6 +546,12 @@ pub(super) async fn post(req: &ChatRequest, native: &Native, mut on: Option<OnDe
                     }
                 }
             }
+            // Fast mode refused (not on this account's plan, or the model
+            // no longer has it): the same step at standard speed.
+            if status == 400 && said(&detail).to_ascii_lowercase().contains("speed") && body.as_object_mut().and_then(|b| b.remove("speed")).is_some() {
+                tracing::info!("Chat: Anthropic refused fast mode; asking again at standard speed");
+                continue;
+            }
             return Err(call.failed(format!("HTTP {status}: {}", said(&detail))));
         };
         let limits = crate::ai::eval::limit_headers(resp.headers());
@@ -671,16 +681,41 @@ mod tests {
         assert_eq!(b["max_tokens"], MAX_TOKENS);
     }
 
+    /// Each effort level's request body (ai/effort.rs), with fast mode.
     #[tokio::test]
-    async fn thinking_as_think_asks_with_its_summary_shown() {
+    async fn thinking_at_the_chosen_effort_with_its_summary_shown() {
+        use crate::ai::effort::{set_for_test, Level};
+        let plan = || req(json!([{ "role": "user", "content": "Plan it" }]), None);
+        // Unchosen: Opus 5.5's own default, medium.
+        let b = body(&plan(), &[], true);
+        assert_eq!(b["thinking"], json!({ "type": "adaptive", "display": "summarized" }));
+        assert_eq!(b["output_config"], json!({ "effort": "medium" }));
+        assert_eq!(b["stream"], json!(true));
+        assert_eq!(b["max_tokens"], MAX_TOKENS_STREAMED);
+        assert!(b.get("speed").is_none() && b.get("temperature").is_none());
+        for level in Level::ALL {
+            set_for_test("anthropic", "claude-opus-5-5", Some(level), false);
+            let b = body(&plan(), &[], true);
+            assert_eq!(b["output_config"], json!({ "effort": level.id() }));
+            assert_eq!(b["thinking"]["type"], "adaptive");
+            let room = if level >= Level::Xhigh { 64_000 } else { MAX_TOKENS_STREAMED };
+            assert_eq!(b["max_tokens"], room, "{level:?}");
+            assert!(b.get("speed").is_none());
+        }
+        // Fast mode, on for Opus 5.5.
+        set_for_test("anthropic", "claude-opus-5-5", Some(Level::High), true);
+        assert_eq!(body(&plan(), &[], false)["speed"], "fast");
+        // Chat's Think doesn't touch a cloud model: its effort is the same.
         let ((), _) = crate::chat::think::scoped(true, async {
-            let b = body(&req(json!([{ "role": "user", "content": "Plan it" }]), None), &[], true);
-            assert_eq!(b["thinking"], json!({ "type": "adaptive", "display": "summarized" }));
-            assert_eq!(b["output_config"], json!({ "effort": "high" }));
-            assert_eq!(b["stream"], json!(true));
-            assert_eq!(b["max_tokens"], MAX_TOKENS_STREAMED);
+            assert_eq!(body(&plan(), &[], false)["output_config"], json!({ "effort": "high" }));
         })
         .await;
+        set_for_test("anthropic", "claude-opus-5-5", None, false);
+        // A Claude without effort (Haiku 4.5): none of it, as before.
+        let haiku = ChatRequest::chat("https://api.anthropic.com/v1", "k", "claude-haiku-4-5", "anthropic", 0.5, json!([{ "role": "user", "content": "x" }]), None, None);
+        let b = body(&haiku, &[], false);
+        assert!(b.get("thinking").is_none() && b.get("output_config").is_none() && b.get("speed").is_none());
+        assert!(haiku.native.is_none(), "no tools, no effort: the compatible endpoint, as before");
         // The last call, no tool to call: the tools stay, `none` chosen.
         let r = ChatRequest::chat("u", "k", "claude-opus-5-5", "anthropic", 0.5, json!([{ "role": "user", "content": "x" }]), Some(&json!([function("get_note")])), Some(json!("none")));
         assert_eq!(body(&r, &[], false)["tool_choice"], json!({ "type": "none" }));

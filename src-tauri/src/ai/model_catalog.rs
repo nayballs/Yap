@@ -113,6 +113,16 @@ pub struct CatalogModel {
     /// say; `snip::vision` has family rules for those.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub vision: Option<bool>,
+    /// The effort levels it takes, lowest first ("low" … "max"), only when
+    /// the provider says: Anthropic's `capabilities.effort`, OpenRouter's
+    /// `reasoning.supported_efforts`. `ai/effort.rs` reads them before its
+    /// own table, so a new model gets the right choices without an update.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub efforts: Vec<String>,
+    /// The effort it runs at when none is sent, when the provider says
+    /// (OpenRouter's `reasoning.default_effort`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub default_effort: Option<String>,
     /// Still callable but on its way out (Anthropic's `lifecycle`,
     /// OpenRouter's `expiration_date`).
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
@@ -967,11 +977,43 @@ pub fn parse_anthropic(pages: &[Value]) -> (usize, Vec<CatalogModel>) {
                 context: positive(&m["max_input_tokens"]),
                 deprecated: lifecycle == "deprecated",
                 vision: m["capabilities"]["image_input"]["supported"].as_bool(),
+                efforts: anthropic_efforts(&m["capabilities"]["effort"]),
                 ..Default::default()
             });
         }
     }
     (listed, fold_snapshots(out))
+}
+
+/// The effort levels Anthropic's list says a model takes
+/// (`capabilities.effort`: `{supported, low: {supported}, …, max:
+/// {supported}}`), lowest first; none when it takes none. Pure.
+fn anthropic_efforts(effort: &Value) -> Vec<String> {
+    if effort["supported"].as_bool() != Some(true) {
+        return Vec::new();
+    }
+    crate::ai::effort::Level::ALL
+        .iter()
+        .map(|l| l.id())
+        .filter(|id| effort[*id]["supported"].as_bool() == Some(true))
+        .map(str::to_string)
+        .collect()
+}
+
+/// The effort levels OpenRouter's list says a model takes
+/// (`reasoning.supported_efforts`, highest first, `null` for "any"), lowest
+/// first and only Yap's five ("minimal" and "none" left out); none when it
+/// doesn't say. Pure.
+fn openrouter_efforts(reasoning: &Value) -> Vec<String> {
+    let Some(listed) = reasoning["supported_efforts"].as_array() else {
+        return Vec::new();
+    };
+    crate::ai::effort::Level::ALL
+        .iter()
+        .map(|l| l.id())
+        .filter(|id| listed.iter().any(|e| e.as_str() == Some(id)))
+        .map(str::to_string)
+        .collect()
 }
 
 /// Gemini's native `/v1beta/models` pages: `generateContent` models only,
@@ -1065,6 +1107,8 @@ pub fn parse_openrouter(pages: &[Value]) -> (usize, Vec<CatalogModel>) {
                 }),
                 vision: (!inputs.is_empty()).then(|| inputs.iter().any(|i| i == "image")),
                 deprecated: m["expiration_date"].as_str().is_some_and(|s| !s.is_empty()),
+                efforts: openrouter_efforts(&m["reasoning"]),
+                default_effort: m["reasoning"]["default_effort"].as_str().map(str::to_string),
                 ..Default::default()
             });
         }
@@ -1855,6 +1899,40 @@ mod tests {
             (Some(false), "Tiny Chat (free)")
         );
         assert!(kept[2].deprecated);
+    }
+
+    /// Effort (ai/effort.rs): the levels a model takes, where its provider's
+    /// list says (Anthropic's capabilities, OpenRouter's reasoning object, in
+    /// the shapes their docs give, read 31 Oct 2026).
+    #[test]
+    fn the_lists_say_which_effort_levels_a_model_takes() {
+        let yes = json!({ "supported": true });
+        let no = json!({ "supported": false });
+        let anthropic = json!({"data": [
+            {"id": "claude-opus-5-5", "display_name": "Claude Opus 5.5", "capabilities": {"effort": {"supported": true, "low": yes, "medium": yes, "high": yes, "xhigh": yes, "max": yes}}},
+            {"id": "claude-opus-4-6", "display_name": "Claude Opus 4.6", "capabilities": {"effort": {"supported": true, "low": yes, "medium": yes, "high": yes, "xhigh": no, "max": yes}}},
+            {"id": "claude-haiku-4-5-20251001", "display_name": "Claude Haiku 4.5", "capabilities": {"effort": {"supported": false}}},
+            {"id": "claude-old-2", "display_name": "Claude Old"}
+        ], "has_more": false});
+        let (_, models) = parse_anthropic(&[anthropic]);
+        let efforts = |id: &str| models.iter().find(|m| m.id == id).unwrap().efforts.clone();
+        assert_eq!(efforts("claude-opus-5-5"), ["low", "medium", "high", "xhigh", "max"]);
+        assert_eq!(efforts("claude-opus-4-6"), ["low", "medium", "high", "max"]);
+        assert!(efforts("claude-haiku-4-5-20251001").is_empty());
+        assert!(efforts("claude-old-2").is_empty(), "the list didn't say");
+
+        let openrouter = json!({"data": [
+            {"id": "openai/gpt-5-mini", "name": "GPT-5 Mini", "architecture": {"input_modalities": ["text"], "output_modalities": ["text"]},
+             "reasoning": {"mandatory": true, "supported_efforts": ["high", "medium", "low", "minimal"], "default_effort": "medium"}},
+            {"id": "anthropic/claude-opus-5.5", "name": "Claude Opus 5.5", "architecture": {"input_modalities": ["text"], "output_modalities": ["text"]},
+             "reasoning": {"mandatory": true, "supported_efforts": null}},
+            {"id": "meta-llama/llama-3.3-70b-instruct", "name": "Llama", "architecture": {"input_modalities": ["text"], "output_modalities": ["text"]}}
+        ]});
+        let (_, models) = parse_openrouter(&[openrouter]);
+        assert_eq!(models[0].efforts, ["low", "medium", "high"], "lowest first, \"minimal\" left out");
+        assert_eq!(models[0].default_effort.as_deref(), Some("medium"));
+        assert!(models[1].efforts.is_empty(), "any effort: Yap's own table decides");
+        assert!(models[2].efforts.is_empty() && models[2].default_effort.is_none());
     }
 
     #[test]

@@ -129,7 +129,7 @@ pub fn handles_rich(provider: &str, model: &str) -> bool {
 ///   off after it);
 /// - a turn that writes a document researches deeper (`web::Reach::deep`:
 ///   up to 10 searches and as many page reads as the model's context
-///   holds) and thinks first (`think::auto_on`);
+///   holds), at the model's effort (`ai/effort.rs`);
 /// - a new document is outlined before anything is looked up
 ///   (`web::Turn::outline_first`), its facts come from pages it read, and
 ///   its own knowledge only advises, marked so ([`INSTRUCTIONS`],

@@ -1,7 +1,10 @@
 //! **Think it through** (2026-10-29): Chat's Think button asks one question
-//! with the model thinking before it answers. Every other call — dictation
-//! cleanup, Commands, the meeting notes, the Voice Assistant, Chat's own
-//! questions without Think — stays as it was.
+//! with the model on this PC thinking before it answers. **Only the
+//! on-device model** since 31 Oct 2026: a cloud model's thinking is its
+//! **effort**, chosen per model in Chat's model picker (`ai/effort.rs`), so
+//! the button shows for the on-device Qwen alone. Every other call —
+//! dictation cleanup, Commands, the meeting notes, the Voice Assistant,
+//! Chat's own questions without Think — stays as it was.
 //!
 //! **On this PC** (Qwen3.5, the sidecar): llamafile runs with `--reasoning
 //! off` (`local_llm::server_args`: Qwen3.5 thinking by default looped and
@@ -20,34 +23,22 @@
 //! as `reasoning_content` (streamed: its own deltas). So: [`ON_DEVICE_BUDGET`]
 //! tokens, the answer's cap raised by as much.
 //!
-//! **In the cloud**, a model that can reason reasons harder
-//! ([`request_extra`]): OpenAI's reasoning models and Groq's gpt-oss
-//! `reasoning_effort: "high"`, Gemini's thinking models the same (its
-//! OpenAI-compatible endpoint maps it to a thinking budget), OpenRouter's
-//! `reasoning: {effort: "high"}`, and Claude adaptive thinking at `high`
-//! effort (Anthropic's OpenAI-compatible endpoint takes `thinking`; it
-//! ignores `reasoning_effort`; Claude 5 thinks by default anyway) — or a
-//! budget on a Claude older than 4.6. A request that thinks waits longer
-//! ([`TIMEOUT`]).
+//! **In the cloud**, every Chat question goes at its model's effort
+//! (`effort::apply`, from `llm::ChatRequest::chat`), and the turn here
+//! hears that it did ([`reasoned`]): what the model thought shows as Think's
+//! did. A request that thinks waits longer ([`TIMEOUT`]).
 //!
 //! **What shows**: "Thinking…" while it thinks, then the thinking folded
 //! above the answer, "Thought for 6 s" (`Event::Thinking`, `ChatMessage.
-//! thinking`) — only what the model sends back: Anthropic's compatible
-//! endpoint and OpenAI's never send it, so there it's only the time.
+//! thinking`) — only what the model sends back (Claude's summary on the
+//! Messages API, Groq's and OpenRouter's `reasoning`; OpenAI and Gemini's
+//! compatible endpoint send none, and then nothing shows).
 //!
 //! The turn's state is a task-local around `chat_send`'s turn ([`scoped`]),
 //! read where a Chat request is made (`llm::ChatRequest::chat`) — never by
-//! a call outside it.
-//!
-//! **On by itself for a document** (2026-10-31, [`auto_on`]): the Claude
-//! app thinks before a long piece of writing, so a strong model's turn that
-//! writes a document (`documents::rich::strong`, `documents::writes_document`)
-//! thinks too — high effort, adaptive thinking for Claude — and the Think
-//! button shows lit for that turn (`stream::Event::Think`). Only Chat's own
-//! turns (`chat_send`, and a model evaluation's typed turns): never
-//! cleanup, Commands, the meeting notes or the Voice Assistant (no
-//! [`scoped`] turn around them), never the on-device model unless the
-//! person presses Think (it isn't a strong model).
+//! a call outside it. (Until 31 Oct 2026 a strong cloud model writing a
+//! document turned Think on by itself, at high effort; its effort covers
+//! that now.)
 
 use std::future::Future;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -83,46 +74,6 @@ pub struct Thought {
     pub ms: u64,
 }
 
-/// A Claude before adaptive thinking (4.6): it thinks to a budget. Pure.
-fn claude_with_budget(model: &str) -> bool {
-    let m = model.to_ascii_lowercase();
-    ["claude-3", "claude-opus-4-0", "claude-opus-4-1", "claude-opus-4-5", "claude-sonnet-4-0", "claude-sonnet-4-5", "claude-haiku-4"]
-        .iter()
-        .any(|p| m.starts_with(p))
-        || m == "claude-opus-4"
-        || m == "claude-sonnet-4"
-        || m.starts_with("claude-opus-4-2")
-        || m.starts_with("claude-sonnet-4-2")
-}
-
-/// OpenAI's reasoning models (o-series, GPT-5 and later; not the "chat"
-/// ones). Pure.
-fn openai_reasons(model: &str) -> bool {
-    let m = model.to_ascii_lowercase();
-    let m = m.rsplit('/').next().unwrap_or(&m);
-    let family = m.starts_with("o1") || m.starts_with("o3") || m.starts_with("o4") || m.starts_with("gpt-5") || m.starts_with("gpt-6");
-    family && !m.contains("-chat") && !m.contains("o1-mini")
-}
-
-/// Gemini's thinking models (2.5 and later). Pure.
-fn gemini_thinks(model: &str) -> bool {
-    let m = model.to_ascii_lowercase();
-    let m = m.trim_start_matches("models/");
-    ["gemini-2.5", "gemini-3"].iter().any(|p| m.starts_with(p)) && !m.contains("image") && !m.contains("tts")
-}
-
-/// A model OpenRouter lists as reasoning, or one of the families above.
-fn openrouter_reasons(model: &str) -> bool {
-    if let Some(listed) = crate::ai::model_catalog::listed_model("openrouter", model) {
-        if let Some(thinks) = listed.thinks {
-            return thinks;
-        }
-    }
-    let m = model.to_ascii_lowercase();
-    let id = m.rsplit('/').next().unwrap_or(&m);
-    m.contains("gpt-oss") || openai_reasons(id) || gemini_thinks(id) || id.starts_with("claude") || m.contains("deepseek-r1") || m.contains("qwen3")
-}
-
 /// The on-device model thinks when asked (Qwen3.5 and its family). Pure.
 pub fn on_device_thinks(model: &str) -> bool {
     let m = model.to_ascii_lowercase().replace('_', ".");
@@ -137,30 +88,19 @@ fn yaps_llamafile(provider: &str) -> bool {
 }
 
 /// **What a request adds to think it through** on `provider`'s `model`;
-/// `None`: it can't (the Think button says so). Pure, but for OpenRouter's
-/// list.
+/// `None`: it can't (no Think button) — every model but Yap's own Qwen3.5
+/// (a cloud model has its effort instead, `ai/effort.rs`). Pure.
 pub fn request_extra(provider: &str, model: &str) -> Option<Map<String, Value>> {
-    let lower = model.to_ascii_lowercase();
-    let fields = match provider {
-        p if yaps_llamafile(p) && on_device_thinks(model) => json!({
-            "chat_template_kwargs": { "enable_thinking": true },
-            "thinking_budget_tokens": ON_DEVICE_BUDGET,
-            "reasoning_budget_message": BUDGET_MESSAGE,
-        }),
-        "openai" if openai_reasons(model) => json!({ "reasoning_effort": "high" }),
-        "groq" if lower.contains("gpt-oss") => json!({ "reasoning_effort": "high" }),
-        "gemini" if gemini_thinks(model) => json!({ "reasoning_effort": "high" }),
-        "openrouter" if openrouter_reasons(model) => json!({ "reasoning": { "effort": "high" } }),
-        "anthropic" if lower.starts_with("claude") => {
-            if claude_with_budget(model) {
-                json!({ "thinking": { "type": "enabled", "budget_tokens": 4_096 }, "max_tokens": 16_000 })
-            } else {
-                json!({ "thinking": { "type": "adaptive" }, "output_config": { "effort": "high" } })
-            }
-        }
-        _ => return None,
-    };
-    fields.as_object().cloned()
+    if !(yaps_llamafile(provider) && on_device_thinks(model)) {
+        return None;
+    }
+    json!({
+        "chat_template_kwargs": { "enable_thinking": true },
+        "thinking_budget_tokens": ON_DEVICE_BUDGET,
+        "reasoning_budget_message": BUDGET_MESSAGE,
+    })
+    .as_object()
+    .cloned()
 }
 
 /// Whether `provider`'s `model` can think it through (the Think button).
@@ -175,12 +115,14 @@ struct Turn {
     text: Mutex<String>,
     first: Mutex<Option<Instant>>,
     last: Mutex<Option<Instant>>,
-    /// A request of the turn asked its model to think ([`extra_for`]): not
-    /// so when Yap answered by itself (an app opened, the passages with no
-    /// model) or the model can't think on request.
+    /// A request of the turn asked the on-device model to think
+    /// ([`extra_for`]): not so when Yap answered by itself (an app opened,
+    /// the passages with no model) or the model can't think on request.
     asked: AtomicBool,
-    /// The turn thinks it through: the person's Think, or Yap's
-    /// ([`auto_on`]).
+    /// A request of the turn went at its cloud model's effort
+    /// ([`reasoned`]): what it thought shows.
+    reasoned: AtomicBool,
+    /// The person pressed Think.
     on: AtomicBool,
 }
 
@@ -200,19 +142,25 @@ pub async fn with<F: Future>(on: bool, f: F) -> (F::Output, Option<Thought>) {
     scoped(true, f).await
 }
 
-/// **Chat's own turn** (`chat_send`): thought through when the person
-/// pressed Think (`on`), or when Yap turns it on inside it ([`auto_on`]: a
-/// strong model writing a document) — and what it thought, as [`with`].
+/// **Chat's own turn** (`chat_send`): the on-device model thinking it
+/// through when the person pressed Think (`on`), a cloud model at its
+/// effort — and what it thought: `None` when no request asked the model
+/// on this PC to think and a cloud model sent no thinking back (OpenAI,
+/// Gemini: then no "Thought" fold, nothing in it to show).
 pub async fn scoped<F: Future>(on: bool, f: F) -> (F::Output, Option<Thought>) {
     let turn = Turn::default();
     turn.on.store(on, Ordering::SeqCst);
     TURN.scope(turn, async {
         let out = f.await;
         let thought = TURN.with(|t| {
-            if !t.asked.load(Ordering::SeqCst) {
+            let asked = t.asked.load(Ordering::SeqCst);
+            if !asked && !t.reasoned.load(Ordering::SeqCst) {
                 return None;
             }
             let text = t.text.lock().unwrap_or_else(|p| p.into_inner()).trim().to_string();
+            if !asked && text.is_empty() {
+                return None;
+            }
             let first = *t.first.lock().unwrap_or_else(|p| p.into_inner());
             let last = *t.last.lock().unwrap_or_else(|p| p.into_inner());
             let ms = match (first, last) {
@@ -226,21 +174,28 @@ pub async fn scoped<F: Future>(on: bool, f: F) -> (F::Output, Option<Thought>) {
     .await
 }
 
-/// Is the turn running here thinking it through?
+/// Did the person press Think for the turn running here?
 pub fn wanted() -> bool {
     TURN.try_with(|t| t.on.load(Ordering::SeqCst)).unwrap_or(false)
 }
 
-/// **Yap turns Think on for this turn** (a strong model's document,
-/// `turn.rs`): `true` when it was off and is on now — only inside Chat's
-/// own turn ([`scoped`]); anywhere else (the Voice Assistant, cleanup, a
-/// call outside a turn) nothing changes.
-pub fn auto_on() -> bool {
-    TURN.try_with(|t| !t.on.swap(true, Ordering::SeqCst)).unwrap_or(false)
+/// **Does the turn running here show what its model thinks?** Think
+/// pressed, or a request at a cloud model's effort. A model that sends its
+/// reasoning anyway outside one (a Groq model asked by the Voice Assistant,
+/// cleanup) shows none.
+pub fn shows() -> bool {
+    TURN.try_with(|t| t.on.load(Ordering::SeqCst) || t.reasoned.load(Ordering::SeqCst)).unwrap_or(false)
 }
 
-/// A Chat request's fields to think, when its turn is thinking it through
-/// and the model can (`llm::ChatRequest::chat`).
+/// A request of the turn running here went at its cloud model's effort
+/// (`llm::ChatRequest::chat`, `effort::apply`): its thinking shows. Outside
+/// a turn, nothing.
+pub fn reasoned() {
+    let _ = TURN.try_with(|t| t.reasoned.store(true, Ordering::SeqCst));
+}
+
+/// A Chat request's fields to think, when the person pressed Think and the
+/// model on this PC can (`llm::ChatRequest::chat`).
 pub fn extra_for(provider: &str, model: &str) -> Option<Map<String, Value>> {
     if !wanted() {
         return None;
@@ -302,7 +257,7 @@ pub fn tidy(answer: &str) -> String {
 /// A message of a turn thinking it through, its answer [`tidy`]; any other
 /// as it is.
 pub fn tidy_message(mut message: Value) -> Value {
-    if wanted() {
+    if shows() {
         if let Some(c) = message["content"].as_str() {
             let t = tidy(c);
             if t != c {
@@ -313,8 +268,8 @@ pub fn tidy_message(mut message: Value) -> Value {
     message
 }
 
-/// What the Think button says for Chat's model now (`can`: it shows; the
-/// label: what thinking does on it).
+/// What the Think button says for Chat's model now (`can`: it shows — the
+/// on-device model only; `place`: where it runs).
 #[derive(Debug, Clone, Default, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ThinkInfo {
@@ -354,28 +309,21 @@ mod tests {
     }
 
     #[test]
-    fn cloud_models_that_reason_reason_harder() {
-        assert_eq!(request_extra("groq", "openai/gpt-oss-20b").unwrap()["reasoning_effort"], "high");
-        assert!(request_extra("groq", "llama-3.3-70b-versatile").is_none());
-        assert_eq!(request_extra("openai", "gpt-5.6-luna").unwrap()["reasoning_effort"], "high");
-        assert_eq!(request_extra("openai", "o4-mini").unwrap()["reasoning_effort"], "high");
-        assert!(request_extra("openai", "gpt-4o").is_none());
-        assert!(request_extra("openai", "gpt-5-chat-latest").is_none());
-        assert_eq!(request_extra("gemini", "gemini-3.6-flash").unwrap()["reasoning_effort"], "high");
-        assert!(request_extra("gemini", "gemini-2.0-flash").is_none());
-        assert_eq!(request_extra("openrouter", "openai/gpt-5-mini").unwrap()["reasoning"], json!({ "effort": "high" }));
-        assert!(request_extra("openrouter", "meta-llama/llama-3.3-70b-instruct").is_none());
-        // Claude: adaptive thinking at high effort; a budget before 4.6.
-        let c = request_extra("anthropic", "claude-haiku-5-5").unwrap();
-        assert_eq!(c["thinking"], json!({ "type": "adaptive" }));
-        assert_eq!(c["output_config"], json!({ "effort": "high" }));
-        assert!(c.get("reasoning_effort").is_none(), "Anthropic's compatible endpoint ignores it");
-        let old = request_extra("anthropic", "claude-haiku-4-5").unwrap();
-        assert_eq!(old["thinking"], json!({ "type": "enabled", "budget_tokens": 4096 }));
-        assert!(old["max_tokens"].as_u64().unwrap() > 4096);
-        // A self-hosted server: not known to think on request.
-        assert!(request_extra("custom", "qwen3.5-4b").is_none());
-        assert!(request_extra("local", "llama3").is_none());
+    fn a_cloud_model_has_no_think_its_effort_instead() {
+        // Effort replaces Think in the cloud (ai/effort.rs): no button there.
+        for (p, m) in [
+            ("groq", "openai/gpt-oss-20b"),
+            ("openai", "gpt-5.6-luna"),
+            ("gemini", "gemini-3.6-flash"),
+            ("openrouter", "openai/gpt-5-mini"),
+            ("anthropic", "claude-opus-5-5"),
+            ("anthropic", "claude-haiku-4-5"),
+            ("custom", "qwen3.5-4b"),
+            ("local", "llama3"),
+        ] {
+            assert!(!can_think(p, m), "{p} {m}");
+        }
+        assert!(can_think("ondevice", "Qwen_Qwen3.5-4B-Q4_K_M"));
     }
 
     #[tokio::test]
@@ -410,36 +358,28 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn yap_turns_think_on_only_inside_chats_own_turn() {
-        // Outside any turn (cleanup, the Voice Assistant): nothing to turn on.
-        assert!(!auto_on());
-        assert!(!wanted());
-        let ((), none) = with(false, async {
-            assert!(!auto_on(), "a turn without Think's scope stays as it is");
-            assert!(extra_for("anthropic", "claude-opus-5-5").is_none());
+    async fn a_turn_at_a_cloud_models_effort_shows_what_it_thought() {
+        // Outside any turn (cleanup, the Voice Assistant): nothing shows.
+        reasoned();
+        assert!(!shows());
+        // Chat's turn, Think not pressed: a request at an effort shows its
+        // thinking, and the turn says what it thought.
+        let (shown, thought) = scoped(false, async {
+            assert!(!shows() && !wanted());
+            assert!(extra_for("anthropic", "claude-opus-5-5").is_none(), "Think's fields: the model on this PC only");
+            reasoned();
+            heard("Levels first.");
+            shows()
         })
         .await;
+        assert!(shown);
+        assert_eq!(thought.unwrap().text, "Levels first.");
+        // At an effort, but nothing sent back (OpenAI, Gemini): no fold.
+        let ((), none) = scoped(false, async { reasoned() }).await;
         assert!(none.is_none());
-        // Chat's turn, Think not pressed: off until Yap turns it on.
-        let (asked, thought) = scoped(false, async {
-            assert!(!wanted());
-            assert!(extra_for("anthropic", "claude-opus-5-5").is_none());
-            assert!(auto_on(), "on now");
-            assert!(!auto_on(), "once");
-            assert!(wanted());
-            extra_for("anthropic", "claude-opus-5-5")
-        })
-        .await;
-        let asked = asked.expect("asked to think");
-        assert_eq!(asked["thinking"], json!({ "type": "adaptive" }));
-        assert_eq!(asked["output_config"], json!({ "effort": "high" }));
-        assert!(thought.is_some(), "it thought, and says so");
-        // Pressed: on from the start, and Yap's turning it on changes nothing.
-        let ((), _) = scoped(true, async {
-            assert!(wanted());
-            assert!(!auto_on());
-        })
-        .await;
+        // Neither: as ever.
+        let ((), none) = scoped(false, async { heard("Groq sends it anyway.") }).await;
+        assert!(none.is_none());
     }
 
     #[test]

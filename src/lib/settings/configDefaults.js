@@ -163,6 +163,10 @@ export const FIELD_DEFAULTS = {
   autoTransform: '',
   autoTransformKind: '',
   llmScopes: {},
+  // Effort per model ("anthropic:claude-opus-5-5" → "xhigh") and fast mode
+  // (ai/effort.rs): set from Chat's model picker or Language Models → Chat.
+  chatEffort: {},
+  fastMode: false,
   agentName: '',
   editHotkey: '',
   // The rewrite shortcut with nothing selected rewrites the last

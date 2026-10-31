@@ -1,8 +1,8 @@
 //! AI models: what every model is told about you, the OpenAI-compatible
 //! client and its prompts, cleanup styles, the on-device model (llamafile,
-//! GGUF headers, the graphics card), which model a call goes to, the
-//! providers' live model lists, the AI usage tracker (every call's tokens) and
-//! the model evaluations.
+//! GGUF headers, the graphics card), which model a call goes to and how
+//! hard it reasons (effort), the providers' live model lists, the AI usage
+//! tracker (every call's tokens) and the model evaluations.
 //! How it works: docs/architecture/ai-models.md.
 
 pub mod about_you;
@@ -12,6 +12,7 @@ pub mod cleanup_format;
 pub mod cleanup_strength;
 pub mod cleanup_styles;
 pub mod commands;
+pub mod effort;
 pub mod eval;
 pub mod gguf;
 pub mod gpu;
