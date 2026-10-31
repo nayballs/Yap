@@ -1,0 +1,20 @@
+{
+  "name": "Yap Link",
+  "short_name": "Yap",
+  "description": "Talk to Yap on your PC from this phone.",
+  "lang": "en-GB",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#f0ede7",
+  "theme_color": "#f0ede7",
+  "icons": [
+    {
+      "src": "icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    }
+  ]
+}

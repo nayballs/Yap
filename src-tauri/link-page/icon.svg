@@ -1,0 +1,24 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024">
+  <!-- Yap brand mark — warm-ink badge, amber yapping mouth, cream soundwaves.
+       Reskin of the original blue icon to the 2026-07 warm-light theme. -->
+  <defs>
+    <linearGradient id="badge" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#332e25"/>
+      <stop offset="1" stop-color="#1f1c16"/>
+    </linearGradient>
+    <linearGradient id="mouth" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#f0b04a"/>
+      <stop offset="1" stop-color="#c2690a"/>
+    </linearGradient>
+  </defs>
+  <rect width="1024" height="1024" rx="230" fill="url(#badge)"/>
+  <!-- Pac-Man-style yapping mouth: circle r230 at (390,505), 80° wedge opening right -->
+  <path d="M 390 505 L 566 357 A 230 230 0 1 0 566 653 Z" fill="url(#mouth)"/>
+  <circle cx="400" cy="385" r="33" fill="#1f1c16"/>
+  <!-- three soundwave arcs -->
+  <g fill="none" stroke="#f7f5f0" stroke-width="40" stroke-linecap="round">
+    <path d="M 660 390 A 160 160 0 0 1 660 620"/>
+    <path d="M 738 348 A 210 210 0 0 1 738 662"/>
+    <path d="M 816 306 A 260 260 0 0 1 816 704"/>
+  </g>
+</svg>
