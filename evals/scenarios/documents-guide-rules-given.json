@@ -1,0 +1,29 @@
+{
+  "name": "documents-guide-rules-given",
+  "description": "A complete guide (31 Oct 2026) with no web: a made-up tabletop game's rules given in the question, and a level-by-level plan asked for. The table must cover every level from 1 to 8, never \"endgame\" or \"reference only\" in their place, and name the talents asked for.",
+  "tags": [
+    "documents-guide"
+  ],
+  "apps": "standard",
+  "turns": [
+    {
+      "user": "Here are the rules of my homebrew game Lanternfall. A Warden levels from 1 to 8 and gets 2 skill points a level, for Guard, Light or Grit. Abilities unlock at fixed levels: Shield Wall (1), Lantern Flare (2), Rally (3), Bulwark Stance (4), Beacon (5), Iron Vigil (6), Sunder (7), Last Light (8). Talents come at levels 2, 4, 6 and 8, from Steadfast, Keen Eye, Warden's Oath, Hearthguard and Stormward. Make me a level-by-level plan for a Warden from 1 to 8: the abilities to use, where to put the skill points, and which talent to take.",
+      "expect": {
+        "document": {
+          "made": true,
+          "outline_first": true,
+          "filled": true,
+          "table": true,
+          "levels": [1, 8],
+          "parts": ["talent"],
+          "citations_real": true
+        },
+        "max_words": 60,
+        "no_false_claims": true
+      },
+      "soft": {
+        "max_words": 30
+      }
+    }
+  ]
+}
