@@ -56,7 +56,7 @@ test("a store Yap couldn't read is never written over, and what was added is kep
   await expect(failed).toBeVisible();
   await expect(failed).toContainText("Yap couldn't read the file (another program may be using it), so nothing was changed.");
   await main.getByPlaceholder('Untitled Note').fill('Seed potatoes');
-  await main.getByPlaceholder('Start writing…').fill('Earlies by the shed.');
+  await main.getByRole('textbox', { name: 'My thoughts' }).fill('Earlies by the shed.');
   await shot(main, '02-new-note-kept-in-memory');
   // …and a dictation.
   await yap.invoke('e2e_dictation', { text: 'water the tomatoes tonight' });

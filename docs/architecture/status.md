@@ -1322,6 +1322,24 @@ fake's comes in thirds), dictating into the page, pasting from a browser,
 a very long document's typing speed. **Not done**: typing on the page while
 Chat writes (Source takes it), pictures, column alignment from the toolbar.
 
+**Notes as pages you can format** (2026-10-31, notes.md; the Wispr
+checklist's "Rich text in notes"): the same editor in `components/richtext/`
+for Notes' My thoughts (with Preview / Source), the meeting notepad's My
+thoughts and the quick note, the note kept markdown. Unit-tested
+(`note-markdown.spec.js`: summaries with tasks and My thoughts as typed,
+read and written back exactly; a tick, a word, Enter touching only their
+lines; pasted text; where each character is written, both ways), e2e
+(`notes-rich-text.spec.js`: formatting in Notes and the notepad while a test
+meeting records saved as exact markdown, a box ticked, a typed and a
+dictated version, Preview / Source, a raw block, a dictation's paste at the
+caret; `quick-note.spec.js`: formatting, a dictation at the caret undone in
+one step, Find; the notes, notepad, history, transform and menu specs on
+the page). **Not yet tried**: the dev build by hand (how typing and the
+toolbar feel in each place, the plain box's swap to the page the first
+time), a real dictation pasted by Yap's own Ctrl+V into the page (e2e sends
+the paste event itself), a long note's typing speed. **Not done**: the
+summary's Edit box on the page, pictures.
+
 **Meeting search and Ask across meetings** (2026-10-25,
 [search.md](./search.md)): every meeting and note cut into passages and read
 by EmbeddingGemma-300M on Yap's own llamafile (downloaded on demand from
@@ -1388,8 +1406,9 @@ offer Kokoro's Japanese and Mandarin voices (no pronunciation step for them), do
 speed before choosing Kokoro (the research's first-use RTF check), wait for the whole answer
 before the first sentence, don't listen again by themselves after an answer,
 and have no echo cancellation (a mic that hears the speakers during an
-answer is a later job); the AI Notepad has no rich markdown editor (plain textarea)
-or folder "add existing note" picker; meetings tell the call's voices apart
+answer is a later job); the AI Notepad has no folder "add existing note" picker
+(its rich editor came 2026-10-31: My thoughts, the notepad's and the quick note's
+pages, below), and the summary's Edit box is still its markdown; meetings tell the call's voices apart
 only with the beta speaker engine on, and name them only from what's said
 and the invite (suggestions to confirm, a strong one as a guess; 0 wrong
 names but 34–60% found in the evaluation's fictional meetings; reading the

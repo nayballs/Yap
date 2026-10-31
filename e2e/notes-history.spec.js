@@ -13,6 +13,7 @@
 //   the result in place and selected, Undo, and both in Version history.
 // The AI is a local fake (support/fake-llm.js).
 import { test as base, expect, openView, expectStore, setConfig, closeToasts } from './support/fixtures.js';
+import { expectText, pageIn } from './support/notePage.js';
 import { startFakeLlm, transformText, transformInstruction } from './support/fake-llm.js';
 
 const test = base.extend({
@@ -120,7 +121,8 @@ test('Version history: what was there, typing and an Action, newest first; chang
   await openView(main, 'Notes');
   await folderRow(main, 'Personal').click();
   await noteRow(main, 'Launch plan').click();
-  await expect(raw(main)).toHaveValue('Ship on Friday');
+  await pageIn(raw(main));
+  await expectText(raw(main), 'Ship on Friday');
 
   // Typing: folded into one version as it's saved.
   await raw(main).click();
@@ -167,10 +169,10 @@ test('Version history: what was there, typing and an Action, newest first; chang
   // Restore: the note says it again; the toast's Undo puts it back.
   await dialog.getByRole('button', { name: 'Restore this version' }).click();
   await expect(dialog).toHaveCount(0);
-  await expect(raw(main)).toHaveValue('Ship on Friday');
+  await expectText(raw(main), 'Ship on Friday');
   await expectStore(yap, 'notes.json', (s) => noteIn(s, n.id)?.content === 'Ship on Friday');
   await toastWith(main, 'Version restored').getByRole('button', { name: 'Undo' }).click();
-  await expect(raw(main)).toHaveValue('Ship on Friday with the beta');
+  await expectText(raw(main), 'Ship on Friday with the beta');
   await expectStore(yap, `note-versions/${n.id}.json`, (f) => f.versions.slice(-2).every((v) => v.kind === 'restored'));
   await closeToasts(main);
 
@@ -209,7 +211,8 @@ test("a toast's Undo goes to its own note, whichever is open; a history whose no
   await openView(main, 'Notes');
   await folderRow(main, 'Personal').click();
   await noteRow(main, 'Draft memo').click();
-  await expect(raw(main)).toHaveValue('so um the memo');
+  await pageIn(raw(main));
+  await expectText(raw(main), 'so um the memo');
 
   // A slow model: the list is opened while the memo's Polish runs.
   fakeLlm.delay('transform', 1500);
@@ -218,7 +221,7 @@ test("a toast's Undo goes to its own note, whichever is open; a history whose no
     await menu(main).getByRole('menuitem', { name: 'Transform note' }).hover();
     await main.getByRole('menu', { name: 'Transform note' }).getByRole('menuitem', { name: 'Polish' }).click();
     await noteRow(main, 'Shopping list').click();
-    await expect(raw(main)).toHaveValue('milk and eggs');
+    await expectText(raw(main), 'milk and eggs');
     await expectStore(yap, 'notes.json', (s) => noteIn(s, memo.id)?.content === 'The memo, tidied.');
   } finally {
     fakeLlm.delay('transform', 0);
@@ -227,7 +230,7 @@ test("a toast's Undo goes to its own note, whichever is open; a history whose no
   await toastWith(main, 'Polish ✓').getByRole('button', { name: 'Undo' }).click();
   await expectStore(yap, 'notes.json', (s) => noteIn(s, memo.id)?.content === 'so um the memo');
   expect(noteIn(yap.readJson('notes.json'), list.id)?.content).toBe('milk and eggs');
-  await expect(raw(main)).toHaveValue('milk and eggs');
+  await expectText(raw(main), 'milk and eggs');
   await closeToasts(main);
 
   // The list's Version history up, and the list deleted from elsewhere: the
@@ -238,7 +241,7 @@ test("a toast's Undo goes to its own note, whichever is open; a history whose no
   await yap.invoke('note_delete', { id: list.id });
   await expect(history(main)).toHaveCount(0);
   await noteRow(main, 'Draft memo').click();
-  await expect(raw(main)).toHaveValue('so um the memo');
+  await expectText(raw(main), 'so um the memo');
   await expect(history(main)).toHaveCount(0);
 });
 
@@ -265,7 +268,8 @@ test('a transform on the selection (Shift+F10, a right-click) and on the whole n
   await openView(main, 'Notes');
   await folderRow(main, 'Personal').click();
   await noteRow(main, 'Release notes').click();
-  await expect(raw(main)).toHaveValue(original);
+  await pageIn(raw(main));
+  await expectText(raw(main), original);
 
   // The middle line selected; Shift+F10: the transforms on it, then Cut, Copy, Select all.
   const start = 'Agenda\n'.length;
@@ -285,7 +289,7 @@ test('a transform on the selection (Shift+F10, a right-click) and on the whole n
 
   // In place, its preamble off, the result selected; the AI got the selection only.
   const polished = `Agenda\n${POLISHED}\nThanks all`;
-  await expect(raw(main)).toHaveValue(polished);
+  await expectText(raw(main), polished);
   expect(asked().length).toBe(before + 1);
   expect(transformText(asked().at(-1).user)).toBe(LINE);
   expect(transformInstruction(asked().at(-1).user)).toMatch(/^Polish the text/);
@@ -298,7 +302,7 @@ test('a transform on the selection (Shift+F10, a right-click) and on the whole n
 
   // Undo: the text as it was.
   await done.getByRole('button', { name: 'Undo' }).click();
-  await expect(raw(main)).toHaveValue(original);
+  await expectText(raw(main), original);
   await expectStore(yap, 'notes.json', (s) => noteIn(s, n.id)?.content === original);
   await closeToasts(main);
 
@@ -308,7 +312,7 @@ test('a transform on the selection (Shift+F10, a right-click) and on the whole n
     el.focus();
     el.select();
   });
-  await raw(main).click({ button: 'right', position: { x: 14, y: 10 } });
+  await raw(main).click({ button: 'right', position: { x: 14, y: 22 } });
   await expect(menu(main)).toHaveAccessibleName('Selected text');
   await main.keyboard.press('Escape');
   await expect(main.getByRole('menu')).toHaveCount(0);
@@ -316,7 +320,7 @@ test('a transform on the selection (Shift+F10, a right-click) and on the whole n
     el.focus();
     el.setSelectionRange(0, 0);
   });
-  await raw(main).click({ button: 'right', position: { x: 14, y: 10 } });
+  await raw(main).click({ button: 'right', position: { x: 14, y: 22 } });
   await expect(main.getByRole('menu')).toHaveCount(0);
 
   // The whole note, from its ⋯: Transform note ▸ Shorter.
@@ -324,7 +328,7 @@ test('a transform on the selection (Shift+F10, a right-click) and on the whole n
   await main.getByRole('button', { name: 'More for this note' }).click();
   await menu(main).getByRole('menuitem', { name: 'Transform note' }).hover();
   await main.getByRole('menu', { name: 'Transform note' }).getByRole('menuitem', { name: 'Shorter' }).click();
-  await expect(raw(main)).toHaveValue(SHORT);
+  await expectText(raw(main), SHORT);
   expect(transformText(asked().at(-1).user)).toBe(original);
   await expectStore(yap, 'notes.json', (s) => noteIn(s, n.id)?.content === SHORT);
   await closeToasts(main);
@@ -344,5 +348,5 @@ test('a transform on the selection (Shift+F10, a right-click) and on the whole n
   const failed = toastWith(main, "Polish didn't work");
   await expect(failed).toBeVisible();
   await expect(failed.getByRole('button', { name: 'Open Language Models' })).toBeVisible();
-  await expect(raw(main)).toHaveValue(SHORT);
+  await expectText(raw(main), SHORT);
 });

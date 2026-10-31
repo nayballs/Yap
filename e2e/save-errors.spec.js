@@ -23,7 +23,7 @@ test('a note that couldn’t be saved says so, keeps the text, and Try again sav
 
   await yap.invoke('e2e_fail_saves', { store: 'notes', count: 1 });
   try {
-    await main.getByPlaceholder('Start writing…').fill('Plant the broad beans in March.');
+    await main.getByRole('textbox', { name: 'My thoughts' }).fill('Plant the broad beans in March.');
     const toast = toastsWith(main, "Couldn't save your note");
     await expect(toast).toBeVisible();
     await expect(toast).toContainText('The disk is full. Yap is keeping your changes and will try again with the next one.');

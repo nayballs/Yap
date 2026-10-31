@@ -86,7 +86,7 @@ const cohere = (yap) => path.join(yap.dataDir, 'models', 'cohere-int8');
 /** A new meeting note (with a line typed: never "Started by mistake?"), recorded until its test audio has played. Its id. */
 async function record(main, yap, title) {
   await newMeetingNote(main, title);
-  await main.getByPlaceholder('Start writing…').fill('Agenda: the delivery dates');
+  await main.getByRole('textbox', { name: 'My thoughts' }).fill('Agenda: the delivery dates');
   const before = logCount(yap, PLAYED);
   await main.getByRole('button', { name: 'Record' }).click();
   await expect
