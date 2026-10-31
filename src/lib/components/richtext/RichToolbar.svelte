@@ -145,7 +145,8 @@
     align-items: center;
     gap: 2px;
     min-height: 36px;
-    padding: 3px 12px;
+    /* (A note's page lines its buttons up with its words: `--tool-pad-x`.) */
+    padding: 3px var(--tool-pad-x, 12px);
     border-bottom: 1px solid var(--tool-rule);
     overflow-x: auto;
     scrollbar-width: none;

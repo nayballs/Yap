@@ -275,6 +275,8 @@
     --rich-fill: var(--yap-paper-s1);
     --rich-fill-2: var(--yap-paper-s2);
     --rich-rule: var(--yap-paper-s2-strong);
+    /* The toolbar's buttons from the page's left edge (`--rich-tools-x`). */
+    --tool-pad-x: var(--rich-tools-x, 12px);
     flex: 1 1 auto;
     display: flex;
     flex-direction: column;
@@ -290,6 +292,7 @@
     --rich-fill: var(--yap-s1);
     --rich-fill-2: var(--yap-s2);
     --rich-rule: var(--yap-border);
+    --tool-pad-x: var(--rich-tools-x, 0px);
   }
   .richfind :global(.find) {
     position: static;

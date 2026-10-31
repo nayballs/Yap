@@ -27,7 +27,7 @@
 import fs from 'node:fs';
 import { test as base, expect, openView, openSettings, closeSettings, expectStore, setConfig, pressHotkey, settingsDialog } from './support/fixtures.js';
 import { launchYap } from './support/yap.js';
-import { noteText, expectText, pageIn, selectText } from './support/notePage.js';
+import { noteText, expectText, pageIn, selectText, fillLines } from './support/notePage.js';
 import { dictationPiece, withPiece, statusLine, tabLabel, nextTab, afterClose, sendText } from '../src/lib/quicknote/quickNote.js';
 
 const NOW = Math.floor(Date.now() / 1000);
@@ -178,7 +178,8 @@ test('saved as you type as a quick note: its first words the title, in the Quick
   await shot(main, '03-the-quick-note-in-notes');
 
   // Emptied again: the note goes (a blank note is never kept).
-  await note(yap).fill('');
+  // (Select all and Delete as a person would: the page's own keys, not a selection it hears of a beat later.)
+  await fillLines(note(yap), '');
   await expectStore(yap, 'notes.json', (s) => !s.notes.some((n) => n.id === made.id));
   await expect(status(yap)).toHaveText('Saved as you type, in Notes');
   await expect(row).toHaveCount(0);
