@@ -72,6 +72,12 @@ pub struct ChatMessage {
     /// older Yap's save drops it: the pill goes, the note stays in Notes.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub documents: Vec<crate::chat::documents::DocRef>,
+    /// The pictures an answer found online and showed beside the chat
+    /// (`pictures.rs`): each one's chat-images id, caption and source, its
+    /// thumbnail pill under the answer and its tab in the panel. Only
+    /// written when there are some.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub pictures: Vec<crate::chat::pictures::ShownPicture>,
     /// The passage of a document a question was asked about (the panel's
     /// "Change this…" / "Ask about this", `documents::Selection`): its note
     /// and words, the quote above the question, and the history the model
@@ -723,6 +729,7 @@ pub fn append_message(
             tokens,
             thinking: None,
             documents: Vec::new(),
+            pictures: Vec::new(),
             quote: None,
         });
         conv.updated_ts = now_secs();
@@ -1410,6 +1417,7 @@ mod tests {
             tokens: None,
             thinking: None,
             documents: vec![],
+            pictures: vec![],
             quote: None,
         };
         let messages = vec![

@@ -7,7 +7,9 @@
   // (ChatSteps.svelte: "Searched the web 3 times, read 2 pages ▸"; growing
   // while it streams, the thread's line saying what's under way);
   // "Stopped" under a question stopped before any answer came; a web
-  // answer's Sources; and ▶ Read aloud and the model that wrote it. Its
+  // answer's Sources; the pills of the documents it wrote and the pictures
+  // it found online (PicturePills, its own chunk), each opening the panel
+  // beside the chat; and ▶ Read aloud and the model that wrote it. Its
   // right-click menu: Copy / Copy as Markdown / Read aloud, a question's
   // Copy.
   import { renderMarkdown } from '../../core/markdown.js';
@@ -30,13 +32,16 @@
    * `onsource(s)` opens a passage of the person's meetings at its line (an
    * answer asked across meetings: search/ask.rs); `ondoc(d)` opens a
    * document it made or changed in the panel beside the chat
-   * (chat/documents.rs).
+   * (chat/documents.rs); `onpicture(p)` a picture it showed (a
+   * `ShownPicture`, chat/pictures.rs) there.
    */
-  let { m, last, sources, reading, keepDays, room = 0, onview, onmenu, onread, onsource = null, ondoc = null } = $props();
+  let { m, last, sources, reading, keepDays, room = 0, onview, onmenu, onread, onsource = null, ondoc = null, onpicture = null } = $props();
 
   // The documents it made or changed: saved with it, or (while it's
   // written) as they come.
   const docs = $derived(m.role === 'assistant' ? (m.documents?.length ? m.documents : m.liveDocs || []) : []);
+  // The pictures it found online and showed beside the chat: the same.
+  const pics = $derived(m.role === 'assistant' ? (m.pictures?.length ? m.pictures : m.livePictures || []) : []);
 
   // A question whose screenshot went as its text (snip/ocr.rs): its own
   // words, and the text read from the picture, folded under them.
@@ -192,9 +197,10 @@
   <!-- Where an answer came from (SourcesRow: a few, then "+N more"). -->
   <SourcesRow {m} {onsource} />
 {/if}
-{#if docs.length}
-  <!-- The documents it made or changed: each opens beside the chat. -->
-  <div class="docpills" role="group" aria-label="Documents">
+{#if docs.length || pics.length}
+  <!-- The documents it made or changed and the pictures it showed: each
+       opens beside the chat (one row, wrapping). -->
+  <div class="docpills" role="group" aria-label={!pics.length ? 'Documents' : !docs.length ? 'Pictures' : 'Documents and pictures'}>
     {#each docs as d (d.id)}
       <button type="button" class="docpill" data-testid="chat-doc-pill" onclick={() => ondoc?.(d)} aria-label={`Open the document ${d.title || 'Untitled document'}`}>
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z" /><path d="M14 3v5h5" /><path d="M9 13h6M9 17h4" /></svg>
@@ -202,6 +208,12 @@
         <span class="docopen" aria-hidden="true">· Open</span>
       </button>
     {/each}
+    {#if pics.length}
+      <!-- Their pills, in a small chunk of their own (the main window's is full). -->
+      {#await import('./PicturePills.svelte') then { default: PicturePills }}
+        <PicturePills {pics} {onpicture} />
+      {/await}
+    {/if}
   </div>
 {/if}
 {#if m.role === 'assistant' && !m.streaming}

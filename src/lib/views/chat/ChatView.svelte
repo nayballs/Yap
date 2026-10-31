@@ -96,6 +96,12 @@
   // takes them however it comes: typed, dictated into the box, or asked out
   // loud with Chat in view (Rust keeps a copy, `yap-chat-quote`).
   //
+  // The panel is a workspace (2026-10-31, find and show): a tab per document
+  // and per picture Chat found online in this conversation (its answers'
+  // `pictures`, chat/pictures.rs; a turn's `picture` event opens it on one);
+  // a picture's tab fits it at its device pixels, zooms and pans
+  // (PictureTab.svelte).
+  //
   // This file is the view: it makes its state (chatState.svelte.js), follows
   // Rust's events while Chat is open, takes the keys, and lays out the
   // conversation list (ConversationList) beside the thread (ChatThread,
@@ -380,9 +386,9 @@
       ></div>
     {/if}
     <div class="docslot" class:cover style={cover ? undefined : `width: ${shownWidth}px`}>
-      <!-- Its own chunk, loaded the first time a document opens. -->
+      <!-- Its own chunk, loaded the first time a document or a picture opens. -->
       {#await import('./DocPanel.svelte') then { default: DocPanel }}
-        <DocPanel {doc} {cover} {narrow} onquote={chat.setQuote} />
+        <DocPanel {doc} {cover} {narrow} onquote={chat.setQuote} messages={chat.messages} />
       {/await}
     </div>
   {/if}

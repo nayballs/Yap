@@ -27,7 +27,18 @@
   // goes out as the markdown of the block it's in, the rest exactly as it
   // was (richMarkdown.js), saved as Source's typing is. While Chat writes,
   // the page is drawn as before and the toolbar waits.
+  // **A workspace** (2026-10-31, find and show): with two things or more
+  // in this conversation — its documents and the pictures Chat found online
+  // (chatDoc.svelte.js `tabs`) — a row of tabs over the panel, newest last:
+  // a click (or ← / → on the row) shows one, × (or Delete, a middle click)
+  // closes it until its pill opens it again. A picture shows in its own tab
+  // (PictureTab.svelte); the document stays as it was behind it (its view,
+  // its editor, where it was scrolled to).
   import { tick, untrack } from 'svelte';
+  import PictureTab from './PictureTab.svelte';
+  import { panelTabs, neighbour } from './panelTabs.js';
+  import { placed, shown as fadeIn } from './chatImages.js';
+  import { screenPixels } from './chatShots.svelte.js';
   import RichToolbar from '../../components/richtext/RichToolbar.svelte';
   import { renderMarkdown } from '../../core/markdown.js';
   import { highlightMarkdown } from '../../core/markdownSource.js';
@@ -42,9 +53,10 @@
    * `doc`: the panel's state; `cover`: over the conversation (expanded, or a
    * narrow window); `narrow`: no room beside it; `onquote({noteId, title,
    * text, fromLine, toLine, mode})`: a selected passage asked about ("ask")
-   * or to change ("change").
+   * or to change ("change"); `messages`: the conversation's (its documents
+   * and pictures are the row of tabs).
    */
-  let { doc, cover = false, narrow = false, onquote = null } = $props();
+  let { doc, cover = false, narrow = false, onquote = null, messages = [] } = $props();
 
   let box = $state(null);
   let bodyEl = $state(null);
@@ -55,6 +67,58 @@
   let finding = $state(false);
 
   const reduced = () => matchMedia('(prefers-reduced-motion: reduce)').matches || document.documentElement.dataset.motion === 'reduced';
+
+  // ---- the row of tabs: this conversation's documents and pictures ---------------------
+
+  // The document is behind a picture: still there (its editor, its flow),
+  // out of sight.
+  const away = $derived(doc.showing !== 'doc');
+  const tabs = $derived(panelTabs(messages, { extra: doc.extra, hidden: doc.hidden, id: doc.id, title: doc.title }));
+  let tabsEl = $state(null);
+  const TAB_THUMB = 16;
+
+  /** Close tab `key`: its neighbour shows in its place if it was showing. */
+  const closeTab = (key) => doc.closeTab(key, neighbour(tabs, key));
+
+  /** A tab's name: a document's title, a picture's caption. */
+  const tabName = (t) => (t.kind === 'picture' ? t.picture?.caption || t.picture?.alt || 'Picture' : t.title || 'Untitled document');
+
+  /** ← / → / Home / End on the row show the tab there; Delete closes the one with the focus. */
+  function tabsKey(e) {
+    const btns = [...(tabsEl?.querySelectorAll('[role="tab"]') ?? [])];
+    const i = btns.indexOf(document.activeElement);
+    if (i < 0) return;
+    let to = null;
+    if (e.key === 'ArrowRight') to = (i + 1) % btns.length;
+    else if (e.key === 'ArrowLeft') to = (i - 1 + btns.length) % btns.length;
+    else if (e.key === 'Home') to = 0;
+    else if (e.key === 'End') to = btns.length - 1;
+    else if (e.key === 'Delete') {
+      e.preventDefault();
+      const next = btns[i + 1] ?? btns[i - 1];
+      closeTab(btns[i].dataset.key);
+      tick().then(() => (tabsEl?.querySelector(`[data-key="${next?.dataset.key}"]`) ?? tabsEl?.querySelector('[aria-selected="true"]'))?.focus());
+      return;
+    } else return;
+    e.preventDefault();
+    const t = tabs.find((x) => x.key === btns[to].dataset.key);
+    if (t) doc.openTab(t);
+    btns[to].focus();
+  }
+
+  /** More tabs than the row holds: the mouse wheel moves along it. */
+  function tabsWheel(e) {
+    const row = e.currentTarget;
+    if (!e.deltaX && e.deltaY && row.scrollWidth > row.clientWidth) row.scrollLeft += e.deltaY;
+  }
+
+  // The tab showing, in view in the row.
+  $effect(() => {
+    const key = doc.active;
+    const row = tabsEl;
+    if (!key || !row) return;
+    tick().then(() => row.querySelector(`[data-key="${key}"]`)?.scrollIntoView?.({ block: 'nearest', inline: 'nearest' }));
+  });
 
   // ---- the flow: a section's text onto the page at its own pace ------------------------
 
@@ -200,10 +264,10 @@
   const sections = () => (bodyEl ? [...bodyEl.querySelectorAll('.docmd > h3')] : []);
 
   $effect(() => {
-    // Again whenever the document's text or view changes.
+    // Again whenever the document's text or view changes (or it's back from behind a picture).
     void shown;
     void doc.view;
-    if (!bodyEl) {
+    if (!bodyEl || away) {
       outline = [];
       return;
     }
@@ -217,6 +281,7 @@
 
   function onScroll() {
     pop = null;
+    if (away) return;
     if (bodyEl) doc.keepScroll(bodyEl.scrollTop, 'preview');
     markCurrent();
   }
@@ -262,9 +327,11 @@
 
   // ---- the two views and where each was scrolled to ------------------------------------
 
-  // Back where it was in this view of this document (opened again, switched).
+  // Back where it was in this view of this document (opened again, switched,
+  // back from behind a picture).
   $effect(() => {
     void doc.id;
+    if (away) return;
     const v = doc.view;
     // (Read now: the page's first scroll event would record the top.)
     const top = doc.scrollFor(v);
@@ -334,7 +401,7 @@
 
   /** The panel's keys: Ctrl+F finds; Esc puts a popover away. */
   function panelKey(e) {
-    if ((e.ctrlKey || e.metaKey) && !e.altKey && e.key.toLowerCase() === 'f' && !doc.gone) {
+    if ((e.ctrlKey || e.metaKey) && !e.altKey && e.key.toLowerCase() === 'f' && !doc.gone && !away) {
       e.preventDefault();
       e.stopPropagation();
       openFind();
@@ -488,7 +555,8 @@
     }
     if (fresh.length) washed = { at: performance.now(), idx: fresh.map((b) => [...el.children].indexOf(b)), id };
     const caret = placeCaret(el, 'Chat');
-    if (!bodyEl) return;
+    // (Behind a picture: drawn, nothing to follow on screen.)
+    if (!bodyEl || untrack(() => away)) return;
     const area = bodyEl.getBoundingClientRect();
     if (caret) {
       // Follow the writing while it's in view; scrolled away, the page stays put.
@@ -507,7 +575,50 @@
 </script>
 
 <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
-<aside class="docpanel" class:cover aria-label="Document" data-testid="chat-doc" onkeydown={panelKey}>
+<aside class="docpanel" class:cover aria-label={away ? 'Picture' : 'Document'} data-testid="chat-doc" onkeydown={panelKey}>
+  {#if tabs.length > 1}
+    <!-- This conversation's documents and pictures, newest last. -->
+    <div class="doctabs" role="tablist" aria-label="In the panel" tabindex="-1" data-testid="chat-panel-tabs" bind:this={tabsEl} onkeydown={tabsKey} onwheel={tabsWheel}>
+      {#each tabs as t (t.key)}
+        {@const on = t.key === doc.active}
+        {@const label = tabName(t)}
+        <div class="doctab" class:on class:pic={t.kind === 'picture'}>
+          <button
+            type="button"
+            role="tab"
+            class="tabbtn"
+            aria-selected={on}
+            tabindex={on ? 0 : -1}
+            data-key={t.key}
+            data-testid="chat-panel-tab"
+            title={label}
+            onclick={() => doc.openTab(t)}
+            onauxclick={(e) => e.button === 1 && closeTab(t.key)}
+          >
+            {#if t.kind === 'picture'}
+              {@const p = placed(t.picture, { maxW: TAB_THUMB, maxH: TAB_THUMB, minW: TAB_THUMB, minH: TAB_THUMB, ratio: screenPixels.ratio })}
+              <span class="shotframe tabthumb" aria-hidden="true">
+                <img src={p.src} alt="" draggable="false" decoding="async" use:fadeIn style:left={p.pic.x} style:top={p.pic.y} style:width={p.pic.w} style:height={p.pic.h} />
+              </span>
+            {:else}
+              <svg class="tabicon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z" /><path d="M14 3v5h5" /><path d="M9 13h6M9 17h4" /></svg>
+            {/if}
+            <span class="tabname">{label}</span>
+            {#if t.kind === 'doc' && t.id === doc.id && doc.busy}<span class="tabdot" title="Chat is writing it" aria-label="Chat is writing it"></span>{/if}
+          </button>
+          <button type="button" class="tabx" tabindex="-1" aria-label={`Close ${label}`} title="Close tab (Delete)" onclick={() => closeTab(t.key)}>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M7 7l10 10M17 7 7 17" /></svg>
+          </button>
+        </div>
+      {/each}
+    </div>
+  {/if}
+  {#if away && doc.picture}
+    <PictureTab {doc} {narrow} />
+  {/if}
+  {#if doc.id != null}
+  <!-- The document (behind a picture: still here, out of sight). -->
+  <div class="docpart" class:away>
   <header class="dochead">
     <svg class="docicon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z" /><path d="M14 3v5h5" /><path d="M9 13h6M9 17h4" /></svg>
     <h2 class="doctitle" title={doc.title}>{doc.title || 'Untitled document'}</h2>
@@ -579,7 +690,7 @@
     <!-- Its markdown, coloured (a copy under a clear text box, character
          for character), saved as you type and merged with Chat's writing:
          your words win. -->
-    <div class="srcscroll" bind:this={srcEl} onscroll={() => srcEl && doc.keepScroll(srcEl.scrollTop, 'source')}>
+    <div class="srcscroll" bind:this={srcEl} onscroll={() => srcEl && !away && doc.keepScroll(srcEl.scrollTop, 'source')}>
       <div class="srcwrap">
         <!-- eslint-disable-next-line svelte/no-at-html-tags — highlightMarkdown escapes every character it doesn't wrap -->
         <pre class="srcmirror" aria-hidden="true" bind:this={mirrorEl}>{@html highlightMarkdown(doc.draft)}{'\n​'}</pre>
@@ -666,6 +777,8 @@
       {/if}
     </div>
   {/if}
+  </div>
+  {/if}
 </aside>
 
 <style>
@@ -686,6 +799,150 @@
     z-index: 5;
     width: auto !important;
     border-left: none;
+  }
+  /* The document's part of the panel; behind a picture, out of sight. */
+  .docpart {
+    flex: 1 1 auto;
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+    min-height: 0;
+  }
+  .docpart.away {
+    display: none;
+  }
+  /* **The row of tabs** (two things or more): the one showing on the paper,
+     an accent line under it; the others quieter on the row's ground; × on
+     hover and on the one showing. Too many for the row: it scrolls. */
+  .doctabs {
+    flex: 0 0 auto;
+    display: flex;
+    gap: 1px;
+    min-width: 0;
+    padding: 6px 8px 0;
+    overflow-x: auto;
+    overflow-y: hidden;
+    scrollbar-width: none;
+    background: var(--yap-paper-s1);
+    border-bottom: 1px solid var(--yap-paper-s2);
+  }
+  .doctabs:focus {
+    outline: none;
+  }
+  .doctab {
+    position: relative;
+    flex: 1 1 0;
+    display: flex;
+    align-items: center;
+    min-width: 104px;
+    max-width: 200px;
+    border-radius: 7px 7px 0 0;
+    color: var(--yap-paper-muted);
+  }
+  .doctab:hover {
+    background: color-mix(in srgb, var(--yap-paper) 55%, transparent);
+    color: var(--yap-paper-ink);
+  }
+  .doctab.on {
+    background: var(--yap-paper);
+    color: var(--yap-paper-ink);
+  }
+  .doctab.on::after {
+    content: '';
+    position: absolute;
+    left: 8px;
+    right: 8px;
+    bottom: 0;
+    height: 2px;
+    border-radius: 2px 2px 0 0;
+    background: var(--yap-primary);
+  }
+  .tabbtn {
+    flex: 1 1 auto;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    min-width: 0;
+    height: 32px;
+    padding: 0 4px 0 10px;
+    border: none;
+    border-radius: inherit;
+    background: none;
+    color: inherit;
+    font: inherit;
+    font-size: 12px;
+    font-weight: 600;
+    text-align: left;
+    cursor: pointer;
+  }
+  .tabbtn:focus-visible {
+    outline: 2px solid var(--yap-focus-ring);
+    outline-offset: -2px;
+  }
+  .tabicon {
+    flex: 0 0 auto;
+    width: 14px;
+    height: 14px;
+    color: var(--yap-primary);
+  }
+  .tabthumb {
+    flex: 0 0 auto;
+    width: 16px;
+    aspect-ratio: 1;
+    border-radius: 3px;
+    overflow: hidden;
+    box-shadow: none;
+  }
+  .tabname {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .tabdot {
+    flex: 0 0 auto;
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: var(--yap-primary);
+    animation: pulse 1.1s ease-in-out infinite;
+  }
+  .tabx {
+    flex: 0 0 auto;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 20px;
+    height: 20px;
+    margin-right: 5px;
+    padding: 0;
+    border: none;
+    border-radius: 5px;
+    background: none;
+    color: var(--yap-paper-muted);
+    cursor: pointer;
+    opacity: 0;
+  }
+  .doctab:hover .tabx,
+  .doctab.on .tabx,
+  .tabx:focus-visible {
+    opacity: 1;
+  }
+  .tabx:hover {
+    background: var(--yap-paper-s2);
+    color: var(--yap-paper-ink);
+  }
+  .tabx svg {
+    width: 12px;
+    height: 12px;
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .tabdot {
+      animation: none;
+    }
+  }
+  :global(:root[data-motion='reduced']) .tabdot {
+    animation: none;
   }
   .dochead {
     display: flex;

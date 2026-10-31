@@ -133,6 +133,7 @@
         onread={() => chat.readAloud(m)}
         onsource={(s) => chat.openSource(s)}
         ondoc={(d) => chat.doc.show(d.id, { title: d.title })}
+        onpicture={(p) => chat.doc.showPicture(p)}
       />
     {/each}
     {#if chat.sending || (chat.assistantPending != null && chat.assistantPending === chat.activeId)}
