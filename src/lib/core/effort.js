@@ -1,11 +1,11 @@
 // Effort (src-tauri/src/ai/effort.rs): how hard a cloud model reasons before
-// it answers, chosen per model in Chat's model picker and Settings →
+// it answers, chosen per model in Chat's model menu (Effort ▸) and Settings →
 // Language Models → Chat. Rust says which levels a model takes (`info`:
 // `{ levels, default, chosen, fast }`, from ai_model_status / effort_info);
 // this names them as the Claude Code app does (xhigh is "Extra") and says
 // what each one does.
 
-/** The level's name in the picker and on the chip. */
+/** The level's name in the model menu and on the chip. */
 export const EFFORT_LABELS = { low: 'Low', medium: 'Medium', high: 'High', xhigh: 'Extra', max: 'Max' };
 
 const WHAT = {
@@ -16,7 +16,7 @@ const WHAT = {
   max: 'thinks the longest: slow, and it can use a lot of your plan',
 };
 
-/** The picker's and Settings' one line on what effort is. */
+/** The model menu's and Settings' one line on what effort is. */
 export const EFFORT_NOTE = 'Higher effort thinks longer: more thorough answers, but slower, and it uses more of your plan.';
 
 /** Fast mode's line (Claude Opus 5.5): it costs more, so it's off unless switched on. */

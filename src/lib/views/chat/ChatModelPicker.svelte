@@ -1,6 +1,8 @@
 <script>
-  // "Switch the Chat model": the Chat model chip's popover, a provider rail
-  // (the maintainer's pick of the three concepts, 2026-10-19). Two panes: on the
+  // "Switch the Chat model": the full picker, a provider rail (the
+  // maintainer's pick of the three concepts, 2026-10-19), opened from the
+  // chip's short menu (ChatModelMenu.svelte: "Add a provider or download a
+  // model…"), or straight from the chip with no AI set up. Two panes: on the
   // left Recent, every cloud provider Yap supports (a green dot when it has
   // a key, hollow when not), Custom when a server elsewhere is set up, and
   // On this PC; on the right that one's models, exactly as Settings lists
@@ -14,13 +16,7 @@
   // Picking changes the Chat scope only (chat_set_model) — except that the
   // on-device model is one for every feature, which the pane says when
   // cleanup uses it too.
-  //
-  // **Effort** (2026-10-31, as the Claude Code app's model menu has it):
-  // under the panes, for the model in use, the levels it takes (Low,
-  // Medium, High, Extra, Max: only its own; none for a model with no
-  // reasoning control, nor the on-device one, whose Think button is beside
-  // the mic), kept per model (`chat_set_effort`, ai/effort.rs), and Fast
-  // mode for Claude Opus 5.5 (off unless switched on: twice the price).
+  // Effort and Fast mode are the short menu's (ChatModelMenu.svelte).
   //
   // Keyboard: ↑/↓ move through the rail (it switches as it goes) or the
   // models, ←/→ (or Tab) between the two, Enter picks, typing searches,
@@ -30,10 +26,7 @@
   import { onMount, tick } from 'svelte';
   import ProviderMark from './ProviderMark.svelte';
   import LocalContext from '../../components/LocalContext.svelte';
-  import Segmented from '../../ui/Segmented.svelte';
-  import Toggle from '../../ui/Toggle.svelte';
-  import { providerIcon, modelName } from '../../core/aiModel.js';
-  import { effortNow, effortOptions, effortHint, FAST_NOTE } from '../../core/effort.js';
+  import { providerIcon } from '../../core/aiModel.js';
   import { PROVIDER_LABELS } from '../../core/providers.js';
   import { loadCatalog } from '../../stores/modelCatalog.svelte.js';
   import { forgetVisionTags } from '../../stores/visionTags.svelte.js';
@@ -367,27 +360,6 @@
   function openSettings() {
     onclose(false);
     onopensettings?.('cleanup#chat');
-  }
-
-  // ------------------------------------------------------------ effort
-
-  // The model in use's effort ('' = "Default": nothing sent), kept for it.
-  async function setEffort(level) {
-    const m = status?.ready ? status.model : null;
-    if (!m || level === effortNow(status.effort)) return;
-    try {
-      onstatus(await invoke('chat_set_effort', { provider: m.provider, model: m.id, level: level || null }));
-    } catch (e) {
-      toast({ title: "Couldn't change the effort", description: String(e), variant: 'destructive' });
-    }
-  }
-
-  async function setFast(on) {
-    try {
-      onstatus(await invoke('chat_set_fast', { on }));
-    } catch (e) {
-      toast({ title: "Couldn't change fast mode", description: String(e), variant: 'destructive' });
-    }
   }
 
   onMount(() => {
@@ -728,24 +700,6 @@
       {/if}
     </div>
   </div>
-
-  {#if status?.ready && status.model && status.effort}
-    {@const eff = status.effort}
-    {@const name = modelName(status.model)}
-    <!-- The model in use's effort, kept for it (ai/effort.rs). -->
-    <div class="effort" data-testid="chat-effort">
-      <div class="erow">
-        <span class="elabel">Effort <span class="efor">· {name}</span></span>
-        <Segmented bind:value={() => effortNow(eff), setEffort} options={effortOptions(eff)} label="Effort for {name}" />
-      </div>
-      <p class="ehint" data-testid="chat-effort-hint">{effortHint(eff)}</p>
-      {#if typeof eff.fast === 'boolean'}
-        <div class="fast" title={FAST_NOTE}>
-          <Toggle checked={eff.fast} label="Fast mode" desc={FAST_NOTE} onchange={setFast} />
-        </div>
-      {/if}
-    </div>
-  {/if}
 
   <div class="foot">
     <!-- On this PC the pane says it when it applies (the on-device model is
@@ -1346,43 +1300,6 @@
   }
 
   /* the footer */
-  /* effort: the model in use's, under the panes */
-  .effort {
-    flex: 0 0 auto;
-    display: flex;
-    flex-direction: column;
-    gap: 6px;
-    padding: 10px 14px;
-    border-top: 1px solid var(--yap-border-subtle);
-  }
-  .erow {
-    display: flex;
-    flex-wrap: wrap;
-    align-items: center;
-    justify-content: space-between;
-    gap: 6px 12px;
-  }
-  .elabel {
-    min-width: 0;
-    font-weight: 600;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-  .efor {
-    color: var(--yap-muted);
-    font-weight: 400;
-  }
-  .ehint {
-    margin: 0;
-    color: var(--yap-muted);
-    font-size: 12px;
-  }
-  .fast {
-    padding-top: 4px;
-    font-size: 12.5px;
-  }
-
   .foot {
     flex: 0 0 auto;
     display: flex;

@@ -9,7 +9,7 @@
 // the time left and what Cancel cancels.
 import fs from 'node:fs';
 import path from 'node:path';
-import { test as base, expect, openSettings, closeSettings, openView } from './support/fixtures.js';
+import { test as base, expect, openSettings, closeSettings, openView, openModelPicker } from './support/fixtures.js';
 import { startFakeLocalModels } from './support/local-llm.js';
 import { RUNS } from './support/yap.js';
 
@@ -97,10 +97,7 @@ test('Settings: a download shows its speed and time left, and Cancel leaves no h
 });
 
 test('Chat model picker: Cancel in the row, with how fast it was going', async ({ yap, main, localModels, shot }) => {
-  await openView(main, 'Chat');
-  await main.locator('.modelchip .chip').click();
-  const pop = main.getByRole('dialog', { name: 'Switch the Chat model' });
-  await expect(pop).toBeVisible();
+  const pop = await openModelPicker(main);
   await pop.getByRole('tab', { name: /^On this PC/ }).click();
   const big = pop.locator('.pane').getByRole('group', { name: 'Download' }).locator('.dlrow').filter({ hasText: 'Qwen3.5 4B' });
   localModels.hold();

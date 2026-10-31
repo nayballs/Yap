@@ -1,7 +1,15 @@
-// The Chat model picker, a provider rail (src/lib/views/chat/ChatModelPicker.svelte,
-// chatModels.svelte.js, ModelChip.svelte; src-tauri/src/ai/ai_model.rs):
-// - the chip names the model (the provider's mark, "· Groq"); the picker
-//   opens on its provider, the rail lists Recent, every cloud provider with
+// The Chat model chip's short menu and the full picker, a provider rail
+// (src/lib/views/chat/ChatModelMenu.svelte, ChatModelPicker.svelte,
+// chatModels.svelte.js, core/mainModels.js, ModelChip.svelte;
+// src-tauri/src/ai/ai_model.rs):
+// - the chip opens a short menu first, as the Claude Code app's: the main
+//   models (the newest of each family from the providers with a key, the
+//   on-device model, the one in use) with their number keys and the ✓,
+//   Effort ▸, More models ▸ (every other model, grouped, newest first) and
+//   "Add a provider or download a model…", which opens the rail; a model
+//   picked by a click, a number key or in More models;
+// - the chip names the model (the provider's mark, "· Groq"); the rail
+//   opens on its provider, lists Recent, every cloud provider with
 //   a dot (connected or not), and On this PC; the rows are the live + curated
 //   list Settings shows, with "New";
 // - a provider without a key connects right there: the key saved where
@@ -14,8 +22,9 @@
 //   while it's in use; back under Download, or gone for a GGUF of your
 //   own); the processor warning and its switch to the 1.5B; a self-hosted
 //   server's models;
-// - the keyboard: arrows through the rail and the models, Ctrl+K, typing to
-//   search, Enter, Esc.
+// - the keyboard: the menu's arrows, → into a submenu and ← out, its number
+//   keys, Enter, Esc; arrows through the rail and the models, Ctrl+K,
+//   typing to search, Enter, Esc.
 //
 // Nothing leaves the PC: the providers are the local fake
 // (support/fake-llm.js) through YAP_MODELS_STANDIN with test keys, the
@@ -24,7 +33,7 @@
 // and the bundled model empty placeholder files that never run.
 import fs from 'node:fs';
 import path from 'node:path';
-import { test as base, expect, openView, openSettings, closeSettings, expectStore, setConfig } from './support/fixtures.js';
+import { test as base, expect, openView, openSettings, closeSettings, expectStore, setConfig, openModelPicker } from './support/fixtures.js';
 import { startFakeLlm } from './support/fake-llm.js';
 import { startFakeLocalModels } from './support/local-llm.js';
 import { RUNS } from './support/yap.js';
@@ -127,15 +136,23 @@ const chip = (main) => main.locator('.modelchip .chip');
 const picker = (main) => main.getByRole('dialog', { name: 'Switch the Chat model' });
 const pane = (main) => picker(main).locator('.pane');
 const tab = (main, name) => picker(main).getByRole('tab', { name: new RegExp(`^${name}`) });
+const menu = (main) => main.getByRole('menu', { name: 'Chat model' });
+const moreMenu = (main) => main.getByRole('menu', { name: 'More models' });
+/** A model in the short menu (or a submenu), by the start of its name. */
+const menuRow = (scope, name) => scope.getByRole('menuitemradio', { name: new RegExp(`^${name}`) });
+const addProvider = (main) => menu(main).getByRole('menuitem', { name: 'Add a provider or download a model…' });
 
-async function openPicker(main) {
+/** The rail: the chip's menu → "Add a provider or download a model…". */
+const openPicker = (main) => openModelPicker(main);
+
+async function openMenu(main) {
   await openView(main, 'Chat');
   await chip(main).click();
-  await expect(picker(main)).toBeVisible();
-  return picker(main);
+  await expect(menu(main)).toBeVisible();
+  return menu(main);
 }
 
-test('the chip opens a provider rail on its provider, with the rows Settings shows', async ({ yap, main, shot }) => {
+test("the menu's last item opens the provider rail on its provider, with the rows Settings shows", async ({ yap, main, fakeLlm, shot }) => {
   await openView(main, 'Chat');
   await expect(chip(main)).toHaveText('GPT-OSS 20B Medium · Groq');
   await expect(chip(main).locator('.mark')).toHaveAttribute('data-icon', 'groq');
@@ -197,18 +214,255 @@ test('the chip opens a provider rail on its provider, with the rows Settings sho
   expect(yap.readJson('config.json').ppModel).toBe('openai/gpt-oss-20b');
 
   // Recent: the last ones used, newest first.
-  await chip(main).click();
+  await openPicker(main);
   await tab(main, 'Recent').click();
   await expect(pane(main).locator('.mrow .nm')).toHaveText(['GPT-OSS 120B', 'GPT-OSS 20B']);
   await expect(pane(main).locator('.mrow').first()).toContainText('Groq · ');
   await main.keyboard.press('Escape');
   await expect(picker(main)).toBeHidden();
 
-  // A click outside closes it too.
-  await chip(main).click();
-  await expect(picker(main)).toBeVisible();
+  // A click outside closes it too, and the menu.
+  await openPicker(main);
   await main.getByRole('button', { name: 'New chat' }).click();
   await expect(picker(main)).toBeHidden();
+  await chip(main).click();
+  await expect(menu(main)).toBeVisible();
+  await main.getByRole('button', { name: 'New chat' }).click();
+  await expect(menu(main)).toBeHidden();
+  await backToGroq(yap, main, fakeLlm);
+});
+
+test('the chip opens a short menu: the main models with their number keys, Effort, More models', async ({ yap, main, fakeLlm, shot }) => {
+  await backToGroq(yap, main, fakeLlm);
+  const m = await openMenu(main);
+  // Groq's biggest and smallest GPT-OSS, then the on-device model; the one
+  // in use ticked (its ✓ in place of its number) and focused.
+  const rows = m.getByRole('menuitemradio');
+  await expect(rows.locator('.nm')).toHaveText(['GPT-OSS 120B', 'GPT-OSS 20B', 'Qwen2.5 1.5B Instruct']);
+  await expect(rows.locator('.where')).toHaveText(['Groq', 'Groq', 'On this PC']);
+  await expect(rows.nth(1)).toHaveAttribute('aria-checked', 'true');
+  await expect(rows.nth(0)).toHaveAttribute('aria-checked', 'false');
+  await expect(rows.locator('kbd')).toHaveText(['1', '3']);
+  await expect(rows.nth(0)).toHaveAttribute('aria-keyshortcuts', '1');
+  await expect(rows.nth(1)).toBeFocused();
+  await expect(chip(main)).toHaveAttribute('aria-expanded', 'true');
+  // GPT-OSS 20B's effort (its default); no fast mode for it.
+  await expect(m.getByRole('menuitem', { name: 'Effort: Medium' })).toBeVisible();
+  await expect(m.getByRole('menuitemcheckbox')).toHaveCount(0);
+  await expect(m.getByRole('menuitem', { name: 'More models' })).toBeVisible();
+  await expect(addProvider(main)).toBeVisible();
+  // Above the chip, compact.
+  const box = await m.boundingBox();
+  const at = await chip(main).boundingBox();
+  expect(box.y + box.height).toBeLessThanOrEqual(at.y);
+  expect(box.width).toBeLessThan(360);
+  await shot(main, '10-menu-groq');
+
+  // A click picks: the Chat scope only, and the menu closes.
+  await menuRow(m, 'GPT-OSS 120B').click();
+  await expect(m).toBeHidden();
+  await expect(chip(main)).toHaveText('GPT-OSS 120B Medium · Groq');
+  await expectStore(yap, 'config.json', (c) => c.llmScopes.chat.model === 'openai/gpt-oss-120b');
+  expect(yap.readJson('config.json').ppModel).toBe('openai/gpt-oss-20b');
+
+  // A number key picks: 2 is GPT-OSS 20B.
+  await chip(main).click();
+  await expect(menuRow(m, 'GPT-OSS 120B')).toHaveAttribute('aria-checked', 'true');
+  await expect(rows.locator('kbd')).toHaveText(['2', '3']);
+  await main.keyboard.press('2');
+  await expect(m).toBeHidden();
+  await expect(chip(main)).toHaveText('GPT-OSS 20B Medium · Groq');
+  await expect(chip(main)).toBeFocused();
+  await expectStore(yap, 'config.json', (c) => c.llmScopes.chat.model === 'openai/gpt-oss-20b');
+});
+
+test("More models ▸: the rest, newest first; one picked there joins the menu while it's in use", async ({ yap, main, fakeLlm, shot }) => {
+  await backToGroq(yap, main, fakeLlm);
+  const m = await openMenu(main);
+  // The pointer on it opens the flyout beside the menu.
+  const item = m.getByRole('menuitem', { name: 'More models' });
+  await item.hover();
+  const more = moreMenu(main);
+  await expect(more).toBeVisible();
+  await expect(item).toHaveAttribute('aria-expanded', 'true');
+  const box = await m.boundingBox();
+  const fly = await more.boundingBox();
+  expect(fly.x).toBeGreaterThanOrEqual(box.x + box.width);
+  // Groq's other models, newest first (Brainy 9 came out today: New).
+  await expect(more.getByRole('group', { name: 'Groq' }).getByRole('menuitemradio').locator('.nm')).toHaveText(['Brainy 9', 'Qwen3.8 27B']);
+  await expect(menuRow(more, 'Brainy 9').locator('.new')).toHaveText('New');
+  // Short: no search.
+  await expect(more.getByRole('searchbox')).toHaveCount(0);
+  await shot(main, '11-menu-more-models');
+  await menuRow(more, 'Qwen3\\.8 27B').click();
+  await expect(m).toBeHidden();
+  await expect(more).toBeHidden();
+  await expect(chip(main)).toHaveText('Qwen3.8 27B · Groq');
+  await expectStore(yap, 'config.json', (c) => c.llmScopes.chat.model === 'qwen/qwen3.8-27b');
+
+  // In use: in the menu, last, ticked; the others keep their numbers.
+  await chip(main).click();
+  await expect(m.getByRole('menuitemradio').locator('.nm')).toHaveText(['GPT-OSS 120B', 'GPT-OSS 20B', 'Qwen2.5 1.5B Instruct', 'Qwen3.8 27B']);
+  await expect(menuRow(m, 'Qwen3\\.8 27B')).toHaveAttribute('aria-checked', 'true');
+  await expect(m.getByRole('menuitemradio').locator('kbd')).toHaveText(['1', '2', '3']);
+  // Qwen3 on Groq reasons, its default not one of the levels: "Default".
+  await expect(m.getByRole('menuitem', { name: 'Effort: Default' })).toBeVisible();
+  await main.keyboard.press('Escape');
+  await expect(m).toBeHidden();
+  await backToGroq(yap, main, fakeLlm);
+});
+
+test('the menu from the keyboard: arrows, → into a submenu and ← out, Esc', async ({ yap, main, fakeLlm }) => {
+  await backToGroq(yap, main, fakeLlm);
+  await openView(main, 'Chat');
+  await expect(chip(main)).toHaveAttribute('aria-haspopup', 'menu');
+  await chip(main).focus();
+  await main.keyboard.press('Enter');
+  const m = menu(main);
+  await expect(m).toBeVisible();
+  await expect(menuRow(m, 'GPT-OSS 20B')).toBeFocused();
+  // The amber ring, as everywhere.
+  await expect(menuRow(m, 'GPT-OSS 20B')).toHaveCSS('box-shadow', /inset/);
+  await main.keyboard.press('ArrowUp');
+  await expect(menuRow(m, 'GPT-OSS 120B')).toBeFocused();
+  // Round to the last, Home to the first.
+  await main.keyboard.press('ArrowUp');
+  await expect(addProvider(main)).toBeFocused();
+  await main.keyboard.press('Home');
+  await expect(menuRow(m, 'GPT-OSS 120B')).toBeFocused();
+  for (let i = 0; i < 3; i++) await main.keyboard.press('ArrowDown');
+  const effort = m.getByRole('menuitem', { name: 'Effort: Medium' });
+  await expect(effort).toBeFocused();
+  // → into Effort: the level in effect has the focus; ← back to its item.
+  await main.keyboard.press('ArrowRight');
+  const levels = main.getByRole('menu', { name: 'Effort' });
+  await expect(levels.getByRole('menuitemradio', { name: 'Medium' })).toBeFocused();
+  await expect(effort).toHaveAttribute('aria-expanded', 'true');
+  await main.keyboard.press('ArrowLeft');
+  await expect(levels).toBeHidden();
+  await expect(effort).toBeFocused();
+  // More models: → in, ↓, ← out.
+  await main.keyboard.press('ArrowDown');
+  const item = m.getByRole('menuitem', { name: 'More models' });
+  await expect(item).toBeFocused();
+  await main.keyboard.press('ArrowRight');
+  await expect(menuRow(moreMenu(main), 'Brainy 9')).toBeFocused();
+  await main.keyboard.press('ArrowDown');
+  await expect(menuRow(moreMenu(main), 'Qwen3\\.8 27B')).toBeFocused();
+  await main.keyboard.press('ArrowLeft');
+  await expect(moreMenu(main)).toBeHidden();
+  await expect(item).toBeFocused();
+  // Esc closes; the chip has the focus back.
+  await main.keyboard.press('Escape');
+  await expect(m).toBeHidden();
+  await expect(chip(main)).toBeFocused();
+  await expect(chip(main)).toHaveAttribute('aria-expanded', 'false');
+  // Enter on a submenu's item opens it too; Esc there goes back one level.
+  await main.keyboard.press('Enter');
+  await expect(m).toBeVisible();
+  await m.getByRole('menuitem', { name: 'More models' }).focus();
+  await main.keyboard.press('Enter');
+  await expect(menuRow(moreMenu(main), 'Brainy 9')).toBeFocused();
+  await main.keyboard.press('Escape');
+  await expect(moreMenu(main)).toBeHidden();
+  await expect(m).toBeVisible();
+  await main.keyboard.press('Escape');
+  await expect(m).toBeHidden();
+});
+
+test('every provider connected: seven at most, and More models has a search', async ({ yap, main, fakeLlm, shot }) => {
+  await backToGroq(yap, main, fakeLlm);
+  const was = (await yap.invoke('get_config')).ppApiKeys;
+  // OpenAI and Gemini have no list here (Yap's own shows); test keys only.
+  await setConfig(yap, main, { ppApiKeys: { groq: TEST_KEY, anthropic: 'sk-ant-e2e-fake-other-0000', openai: 'sk-e2e-fake-openai', gemini: 'e2e-fake-gemini-key' } });
+  try {
+    const m = await openMenu(main);
+    // Each provider's first families in turn, the model in use kept, the
+    // on-device one last: seven.
+    const rows = m.getByRole('menuitemradio');
+    await expect(rows.locator('.nm')).toHaveText([
+      'Claude Opus 5.5',
+      'Claude Sonnet 5.5',
+      'GPT-6 Astra',
+      'Gemini 4 Argon',
+      'GPT-OSS 120B',
+      'GPT-OSS 20B',
+      'Qwen2.5 1.5B Instruct',
+    ]);
+    await expect(rows.locator('.where')).toHaveText(['Anthropic', 'Anthropic', 'OpenAI', 'Gemini', 'Groq', 'Groq', 'On this PC']);
+    await expect(rows.locator('kbd')).toHaveText(['1', '2', '3', '4', '5', '7']);
+    await shot(main, '12-menu-every-provider');
+
+    // More models: long, so a search at its top, which has the focus.
+    await m.getByRole('menuitem', { name: 'More models' }).focus();
+    await main.keyboard.press('ArrowRight');
+    const more = moreMenu(main);
+    const search = more.getByRole('searchbox', { name: 'Search models' });
+    await expect(search).toBeFocused();
+    await expect(more.getByRole('group').locator('.ghead')).toHaveText(['Anthropic', 'OpenAI', 'Gemini', 'Groq']);
+    await main.keyboard.type('luna');
+    await expect(more.getByRole('group').locator('.ghead')).toHaveText(['OpenAI']);
+    await expect(more.getByRole('menuitemradio').locator('.nm')).toHaveText(['GPT-6 Luna', 'GPT-5.6 Luna']);
+    await shot(main, '13-more-models-search');
+    await main.keyboard.press('ArrowDown');
+    await expect(menuRow(more, 'GPT-6 Luna')).toBeFocused();
+    // Typing on a model searches on.
+    await main.keyboard.type('x');
+    await expect(search).toBeFocused();
+    await expect(search).toHaveValue('lunax');
+    await expect(more).toContainText('No model matches “lunax”.');
+    await main.keyboard.press('Escape');
+    await expect(more).toBeHidden();
+    await main.keyboard.press('Escape');
+    await expect(m).toBeHidden();
+  } finally {
+    await setConfig(yap, main, { ppApiKeys: was });
+    await backToGroq(yap, main, fakeLlm);
+  }
+});
+
+test('a narrow window: a submenu opens under its item instead', async ({ yap, main, fakeLlm, shot }) => {
+  await backToGroq(yap, main, fakeLlm);
+  const cdp = await main.context().newCDPSession(main);
+  try {
+    // Narrower: beside the menu where there's room (on the left if not on the right), never over it.
+    await cdp.send('Emulation.setDeviceMetricsOverride', { width: 600, height: 700, deviceScaleFactor: 1, mobile: false });
+    let m = await openMenu(main);
+    let box = await m.boundingBox();
+    await m.getByRole('menuitem', { name: 'More models' }).click();
+    const fly = await moreMenu(main).boundingBox();
+    expect(fly.x + fly.width <= box.x || fly.x >= box.x + box.width).toBe(true);
+    expect(fly.x).toBeGreaterThanOrEqual(0);
+    expect(fly.x + fly.width).toBeLessThanOrEqual(600);
+    await main.keyboard.press('Escape');
+    await main.keyboard.press('Escape');
+    await expect(m).toBeHidden();
+
+    // No room either side: under its item.
+    await cdp.send('Emulation.setDeviceMetricsOverride', { width: 440, height: 700, deviceScaleFactor: 1, mobile: false });
+    m = await openMenu(main);
+    box = await m.boundingBox();
+    expect(box.x).toBeGreaterThanOrEqual(0);
+    expect(box.x + box.width).toBeLessThanOrEqual(440);
+    await m.getByRole('menuitem', { name: 'More models' }).click();
+    // Inside the menu, under its item.
+    const more = m.getByRole('menu', { name: 'More models' });
+    await expect(more).toBeVisible();
+    await expect(menuRow(more, 'Brainy 9')).toBeFocused();
+    const at = await more.boundingBox();
+    const item = await m.getByRole('menuitem', { name: 'More models' }).boundingBox();
+    expect(at.y).toBeGreaterThanOrEqual(item.y + item.height - 1);
+    await shot(main, '14-menu-narrow');
+    // ← back to its item; the section folds away.
+    await main.keyboard.press('ArrowLeft');
+    await expect(more).toBeHidden();
+    await expect(m.getByRole('menuitem', { name: 'More models' })).toBeFocused();
+    await main.keyboard.press('Escape');
+    await expect(m).toBeHidden();
+  } finally {
+    await cdp.send('Emulation.clearDeviceMetricsOverride').catch(() => {});
+    await cdp.detach().catch(() => {});
+  }
 });
 
 test('a provider without a key connects right in the picker', async ({ yap, main, fakeLlm, shot }) => {
@@ -352,8 +606,13 @@ test('On this PC: the recommended model downloads in its row, then Chat uses it'
   await expect(chip(main)).toHaveText('Qwen3.5 4B · On this PC');
   await expectStore(yap, 'config.json', (c) => c.ppLocalModel === BIG_FILE && c.llmScopes.chat.provider === 'ondevice');
 
-  // Open again: on this PC, the 4B in use.
+  // In the menu now, On this PC (the on-device model Yap runs), ticked.
   await chip(main).click();
+  await expect(menuRow(menu(main), 'Qwen3\.5 4B')).toHaveAttribute('aria-checked', 'true');
+  await expect(menuRow(menu(main), 'Qwen3\.5 4B').locator('.where')).toHaveText('On this PC');
+  await main.keyboard.press('Escape');
+  // The rail again: on this PC, the 4B in use.
+  await openPicker(main);
   await expect(tab(main, 'On this PC')).toHaveAttribute('aria-selected', 'true');
   const inUse = pane(main).getByRole('group', { name: 'Installed' }).getByRole('button', { name: /^Qwen3\.5 4B/ });
   await expect(inUse).toHaveAttribute('aria-pressed', 'true');
@@ -459,12 +718,18 @@ test('an installed model uninstalls from its right-click menu, never the one in 
   }
 });
 
-test('the keyboard: arrows through the rail and the models, Ctrl+K, Enter, Esc', async ({ yap, main, fakeLlm }) => {
+test('the rail from the keyboard: arrows through the rail and the models, Ctrl+K, Enter, Esc', async ({ yap, main, fakeLlm }) => {
   await backToGroq(yap, main, fakeLlm);
   await openView(main, 'Chat');
   await chip(main).focus();
+  // Enter: the menu; End, Enter: its last item, the rail.
+  await main.keyboard.press('Enter');
+  await expect(menu(main)).toBeVisible();
+  await main.keyboard.press('End');
+  await expect(addProvider(main)).toBeFocused();
   await main.keyboard.press('Enter');
   await expect(picker(main)).toBeVisible();
+  await expect(menu(main)).toBeHidden();
   const row = (name) => pane(main).getByRole('button', { name: new RegExp(`^${name}`) });
   // The current model has the focus, with the amber ring.
   await expect(row('GPT-OSS 20B')).toBeFocused();
@@ -498,6 +763,9 @@ test('the keyboard: arrows through the rail and the models, Ctrl+K, Enter, Esc',
   await expect(chip(main)).toHaveText('GPT-OSS 120B Medium · Groq');
 
   // Typing on a model searches; Esc closes and the chip has the focus back.
+  await main.keyboard.press('Enter');
+  await expect(menu(main)).toBeVisible();
+  await main.keyboard.press('End');
   await main.keyboard.press('Enter');
   await expect(row('GPT-OSS 120B')).toBeFocused();
   await main.keyboard.type('bra');
@@ -580,8 +848,11 @@ test('a custom server elsewhere gets its own place on the rail', async ({ yap, m
     await expect(chip(main)).toHaveText('big-model · Custom');
     await expectStore(yap, 'config.json', (c) => c.llmScopes.chat.provider === 'custom' && c.llmScopes.chat.baseUrl === custom.baseUrl);
     expect(yap.readJson('config.json').llmScopes.chat.apiKey).toBe('custom-test-key');
-    // Picked again on the rail: it opens there.
+    // In the menu it's the model in use, with its host; the rail opens on Custom.
     await chip(main).click();
+    await expect(menuRow(menu(main), 'big-model')).toHaveAttribute('aria-checked', 'true');
+    await expect(menuRow(menu(main), 'big-model').locator('.where')).toHaveText('llm.example.invalid');
+    await addProvider(main).click();
     await expect(tab(main, 'Custom')).toHaveAttribute('aria-selected', 'true');
     await main.keyboard.press('Escape');
   } finally {

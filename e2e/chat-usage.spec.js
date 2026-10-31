@@ -214,10 +214,10 @@ test('the context ring: the chat’s share of the model’s context, its panel, 
   await main.keyboard.press('Escape');
   await pickTheme(main, yap, 'System');
 
-  // A switch in the picker to GPT-OSS 120B (128K): the same chat is 6 %.
-  const picker = main.getByRole('dialog', { name: 'Switch the Chat model' });
+  // A switch in the model menu to GPT-OSS 120B (128K): the same chat is 6 %.
+  const picker = main.getByRole('menu', { name: 'Chat model' });
   await chip(main).click();
-  await picker.locator('.pane').getByRole('button', { name: /^GPT-OSS 120B/ }).click();
+  await picker.getByRole('menuitemradio', { name: /^GPT-OSS 120B/ }).click();
   await expect(chip(main)).toHaveText('GPT-OSS 120B Medium · Groq');
   await expect(ring(main)).toHaveAttribute('data-percent', '6');
   await expect(ring(main).getByRole('button', { name: '6% of context used' })).toBeVisible();
@@ -225,7 +225,7 @@ test('the context ring: the chat’s share of the model’s context, its panel, 
   // Back on the 20B it's 90 % again; the line's New chat starts afresh: no ring.
   if (await picker.isVisible()) await main.keyboard.press('Escape');
   await chip(main).click();
-  await picker.locator('.pane').getByRole('button', { name: /^GPT-OSS 20B/ }).click();
+  await picker.getByRole('menuitemradio', { name: /^GPT-OSS 20B/ }).click();
   await expect(chip(main)).toHaveText('GPT-OSS 20B Medium · Groq');
   await expect(ring(main)).toHaveAttribute('data-percent', '90');
   if (await picker.isVisible()) await main.keyboard.press('Escape');

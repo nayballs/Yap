@@ -20,7 +20,7 @@
 // (YAP_E2E_GPU): ~5.8 GB of room beside Windows and speech recognition.
 import fs from 'node:fs';
 import path from 'node:path';
-import { test, expect, openView, openSettings, closeSettings, expectStore, setConfig } from './support/fixtures.js';
+import { test, expect, openView, openSettings, closeSettings, expectStore, setConfig, openModelPicker } from './support/fixtures.js';
 import { qwen35_4b, qwen25_1_5b, writeModel } from './support/gguf.js';
 
 const CARD = 'NVIDIA GeForce RTX 4060';
@@ -56,9 +56,7 @@ const control = (scope) => scope.getByTestId('local-context');
 const select = (scope) => control(scope).getByRole('combobox', { name: 'Context' });
 
 async function openPicker(main) {
-  await openView(main, 'Chat');
-  await chip(main).click();
-  await expect(picker(main)).toBeVisible();
+  await openModelPicker(main);
   await expect(picker(main).getByRole('tab', { name: /^On this PC/ })).toHaveAttribute('aria-selected', 'true');
   return picker(main);
 }

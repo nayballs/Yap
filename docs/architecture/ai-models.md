@@ -964,9 +964,9 @@ The language-model side: the OpenAI-compatible client and its prompts, the on-de
   servers, onDevice, context (the on-device model's, when the call goes to
   it: the chip's tooltip "Context: 8K tokens"), effort (`effort::info`:
   `{levels, default, chosen, fast}`, `null` for a model without a
-  reasoning control — the chip's "Extra", the picker's Effort)}` for the Chat view's model chip + picker and the Ask
+  reasoning control — the chip's "Extra", the model menu's Effort)}` for the Chat view's model chip, its menu and picker and the Ask
   bars' model lines; `chat_set_model {provider, model, baseUrl?, file?}` =
-  the picker's switch (Chat scope only, switched on; a keyed provider, the
+  the menu's and the picker's switch (Chat scope only, switched on; a keyed provider, the
   installed on-device model, or a self-hosted / custom server Settings has
   the address of — `servers(cfg)`: the Chat scope's, cleanup's, any other
   scope's or cleanup profile's local/custom endpoint, one per address, its
@@ -990,7 +990,7 @@ The language-model side: the OpenAI-compatible client and its prompts, the on-de
   `yap-config-saved`, which the chip re-reads on. Unit-tested.
 - **`ai/effort.rs`** — **effort, per model** (2026-10-31, as the Claude
   Code app's model menu has it: "Opus 5.5 Extra"): how hard a cloud model
-  reasons before it answers, chosen in Chat's model picker (or Settings →
+  reasons before it answers, chosen in Chat's model menu (Effort ▸; or Settings →
   Language Models → Chat), kept per model in `chat_effort`
   (`"<provider>:<model>"` → level; config-and-data.md) and sent **wherever
   that model answers a question**: Chat and the Voice Assistant (every
@@ -1043,7 +1043,7 @@ The language-model side: the OpenAI-compatible client and its prompts, the on-de
   answer (only what it sends back: Claude's summary, Groq's and
   OpenRouter's `reasoning`; OpenAI and Gemini send none). Commands
   `effort_info {provider, model}` (Settings), `chat_set_effort {provider,
-  model, level|null}` and `chat_set_fast {on}` (the picker; saved through
+  model, level|null}` and `chat_set_fast {on}` (the model menu; saved through
   `settings::change_config`, the Chat status back). The on-device model
   has none: Chat's Think button is its own (`chat/think.rs`). Unit-tested
   per provider and level (`effort::tests`, `anthropic::tests`); e2e

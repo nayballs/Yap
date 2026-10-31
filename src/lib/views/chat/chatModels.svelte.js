@@ -1,5 +1,6 @@
-// What the Chat model picker (ChatModelPicker.svelte, a provider rail)
-// lists, built from what Yap already knows:
+// What the Chat model pickers list — the short menu (ChatModelMenu.svelte,
+// its main models picked by core/mainModels.js) and the provider rail
+// (ChatModelPicker.svelte) — built from what Yap already knows:
 // - the cloud providers' models: modelCatalog.js's merge of Yap's curated
 //   list with the provider's live one, exactly the rows Settings shows
 //   (items, then "Show N more"); a provider without a key shows its curated
@@ -13,8 +14,9 @@
 //   `GET {base}/models`;
 // - "Custom": a server elsewhere that Settings has the address of;
 // - "Recent": the last three Chat models picked, kept in this webview
-//   (localStorage, a per-window convenience).
-// Pure helpers plus three small stores; the Tauri calls are the picker's.
+//   (localStorage, a per-window convenience; chatModelState.svelte.js).
+// Pure helpers plus small stores; the Tauri calls are the pickers'. Only the
+// pickers load this (their own chunks); the chip needs chatModelState.svelte.js.
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import { PP_CLOUD_MODELS } from '../../core/ppModels.js';
@@ -24,6 +26,9 @@ import { cancelDownload, downloadLine, fromEvent, isCancelled } from '../../core
 import { familyIcon, providerIcon, modelName } from '../../core/aiModel.js';
 import { contextInfo, fmtTokens } from '../../core/localContext.js';
 import { readsImages } from '../../stores/visionTags.svelte.js';
+import { local, refreshLocal, sameUrl, readRecent, recentEntry, pushRecent } from './chatModelState.svelte.js';
+
+export { local, refreshLocal, sameUrl, recentEntry, pushRecent };
 
 /** The rail's cloud providers, in its order. `short` names the rail entry. */
 export const CLOUD_PROVIDERS = [
@@ -45,11 +50,6 @@ export function fmtSize(mb) {
   return n >= 1024 ? `${(n / 1024).toFixed(1)} GB` : `${Math.max(1, Math.round(n))} MB`;
 }
 
-export function sameUrl(a, b) {
-  const t = (s) => String(s || '').trim().replace(/\/+$/, '').toLowerCase();
-  return !!a && t(a) === t(b);
-}
-
 const tag = (t, text) => ({ t, text });
 /** At most two tags a row. */
 const cap = (tags) => tags.filter(Boolean).slice(0, 2);
@@ -57,9 +57,6 @@ const cap = (tags) => tags.filter(Boolean).slice(0, 2);
 const imagesTag = (images) => images === true && tag('img', 'Reads images');
 
 // ------------------------------------------------------------ on this PC
-
-/** local_llm_status, the download under way (a curated id) and its progress. */
-export const local = $state({ status: null, downloading: '', progress: null, error: '', errorFor: '' });
 
 let progressListener = null;
 function listenProgress() {
@@ -70,14 +67,6 @@ function listenProgress() {
     }).catch(() => null);
   }
   return progressListener;
-}
-
-export async function refreshLocal() {
-  try {
-    local.status = await invoke('local_llm_status');
-  } catch {
-    /* not in Tauri */
-  }
 }
 
 // A context change (ai/local_llm.rs `restart_when_idle`): read again when the
@@ -326,7 +315,8 @@ export function cloudRows(p, status) {
   // The context the provider's live list gives ("1M context"), as info:
   // only from the list Yap already has, never a call of its own.
   const live = catalog.providers[p]?.models ?? [];
-  const ctxOf = (id) => live.find((m) => m.id === id || m.aliases?.includes(id) || m.base === id)?.context ?? null;
+  const liveOf = (id) => live.find((m) => m.id === id || m.aliases?.includes(id) || m.base === id) ?? null;
+  const ctxOf = (id) => liveOf(id)?.context ?? null;
   const descOf = (i) => {
     const info = contextInfo(ctxOf(i.value));
     return !info || /context/i.test(i.desc || '') ? i.desc : [i.desc, info].filter(Boolean).join(' · ');
@@ -346,6 +336,12 @@ export function cloudRows(p, status) {
       action: connected ? 'pick' : 'key',
       tools: i.tools !== false,
       images,
+      // For the menu's main models (core/mainModels.js): when the provider
+      // says it came out, and whether it's on its way out or gone.
+      created: liveOf(i.value)?.created ?? null,
+      deprecated: !!liveOf(i.value)?.deprecated,
+      missing: !!i.missing,
+      isNew: i.tag === 'new',
       tags: connected
         ? cap([
             i.missing && tag('gone', 'No longer offered'),
@@ -377,35 +373,6 @@ export function providerLine(p, status) {
 }
 
 // ------------------------------------------------------------- recent
-
-const RECENT_KEY = 'yapChatRecentModels';
-const sameEntry = (a, b) =>
-  a.provider === b.provider && (a.model || '') === (b.model || '') && (a.file || '') === (b.file || '') && sameUrl(a.baseUrl || '-', b.baseUrl || '-');
-
-function readRecent() {
-  try {
-    const v = JSON.parse(localStorage.getItem(RECENT_KEY) || '[]');
-    return Array.isArray(v) ? v.filter((e) => e && typeof e.provider === 'string').slice(0, 3) : [];
-  } catch {
-    return [];
-  }
-}
-
-/** The picker's rows → what Recent keeps of one. */
-export function recentEntry(row) {
-  return { provider: row.provider, model: row.model || '', file: row.file || '', baseUrl: row.baseUrl || '' };
-}
-
-/** A Chat model used (picked, or the one in use when the picker opened). */
-export function pushRecent(entry) {
-  if (!entry?.provider) return;
-  const list = [entry, ...readRecent().filter((e) => !sameEntry(e, entry))].slice(0, 3);
-  try {
-    localStorage.setItem(RECENT_KEY, JSON.stringify(list));
-  } catch {
-    /* a convenience only */
-  }
-}
 
 /** The Recent rows, as each provider lists them now (gone ones left out). */
 export function recentRows(status) {

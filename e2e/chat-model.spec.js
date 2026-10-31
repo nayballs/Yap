@@ -2,13 +2,14 @@
 // ai/ai_model.rs): it names the model the next message goes to, resolved the
 // way chat_send resolves it; says "no note tools" for a local model under
 // 4B (whose answers come from a plain search of the notes); says "No AI
-// model" when nothing is set up, and opens the picker on the provider to
-// connect; and its picker (ChatModelPicker.svelte, more in
-// chat-model-picker.spec.js) switches the Chat scope's model, which
-// Settings' always-mounted config copy adopts so its auto-save keeps it.
+// model" when nothing is set up, and opens the full picker on the provider
+// to connect; else its short menu (ChatModelMenu.svelte, more in
+// chat-model-picker.spec.js and chat-effort.spec.js) switches the Chat
+// scope's model, which Settings' always-mounted config copy adopts so its
+// auto-save keeps it.
 // Each answer shows the model that wrote it. The "Groq" here is a local fake
 // (support/fake-llm.js) behind a test key: nothing leaves the PC.
-import { test as base, expect, openView, openSettings, closeSettings, settingsDialog, expectStore, setConfig } from './support/fixtures.js';
+import { test as base, expect, openView, openSettings, closeSettings, settingsDialog, expectStore, setConfig, openModelPicker } from './support/fixtures.js';
 import { startFakeLlm } from './support/fake-llm.js';
 
 const TEST_KEY = 'e2e-fake-key';
@@ -47,6 +48,7 @@ function groqChat(fakeLlm, model) {
 const chip = (main) => main.locator('.modelchip .chip');
 const popover = (main) => main.getByRole('dialog', { name: 'Switch the Chat model' });
 const models = (main) => popover(main).locator('.pane .mrow');
+const menu = (main) => main.getByRole('menu', { name: 'Chat model' });
 
 async function send(main, text) {
   await main.getByRole('textbox', { name: 'Message' }).fill(text);
@@ -78,18 +80,28 @@ test('the chip names the chat model, switches it, and every answer keeps its own
   // Where it runs comes from the endpoint: this "Groq" is the local fake.
   await expect(chip(main)).toHaveAttribute('title', /^Runs on this PC \(127\.0\.0\.1:/);
 
-  // The picker, on Groq: its models (Yap's list: no live one in this run).
+  // The menu: Groq's main models (Yap's list: no live one in this run).
   await chip(main).click();
+  const m = menu(main);
+  await expect(m).toBeVisible();
+  await expect(m.getByRole('menuitemradio').locator('.nm')).toHaveText(['GPT-OSS 120B', 'GPT-OSS 20B']);
+  await expect(m.getByRole('menuitemradio', { name: /^GPT-OSS 20B/ })).toHaveAttribute('aria-checked', 'true');
+  await shot(main, '02-menu');
+  // The full picker, on Groq: its models.
+  await m.getByRole('menuitem', { name: 'Add a provider or download a model…' }).click();
   const pop = popover(main);
   await expect(pop).toBeVisible();
   await expect(pop.getByRole('tab', { name: /^Groq/ })).toHaveAttribute('aria-selected', 'true');
   await expect(models(main).locator('.nm')).toHaveText(['GPT-OSS 20B', 'GPT-OSS 120B', 'Qwen3.8 27B']);
   await expect(pop.getByRole('button', { name: /^GPT-OSS 20B/ })).toHaveAttribute('aria-pressed', 'true');
   await shot(main, '02-popover');
-
-  // Switch: the Chat scope only, dictation cleanup untouched.
-  await pop.getByRole('button', { name: /^GPT-OSS 120B/ }).click();
+  await main.keyboard.press('Escape');
   await expect(pop).toBeHidden();
+
+  // Switch in the menu: the Chat scope only, dictation cleanup untouched.
+  await chip(main).click();
+  await m.getByRole('menuitemradio', { name: /^GPT-OSS 120B/ }).click();
+  await expect(m).toBeHidden();
   await expect(chip(main)).toHaveText('GPT-OSS 120B Medium · Groq');
   await expectStore(yap, 'config.json', (c) => c.llmScopes.chat.model === 'openai/gpt-oss-120b');
   const saved = yap.readJson('config.json');
@@ -118,7 +130,7 @@ test('the chip names the chat model, switches it, and every answer keeps its own
 
   // Settings adopted it: Language Models → Chat shows it, and a save from
   // Settings (any setting) keeps it.
-  await chip(main).click();
+  await openModelPicker(main);
   await popover(main).getByRole('button', { name: 'Language model settings…' }).click();
   const dialog = settingsDialog(main);
   await expect(dialog).toBeVisible();
@@ -159,8 +171,12 @@ test('a small local model says it has no note tools, and answers from notes sear
   await shot(main, '05-chip-no-note-tools');
 
   await expect(chip(main)).toHaveAttribute('title', /too small for Yap's note tools/);
+  // The menu: the model in use (nothing connected but Groq), on this PC.
   await chip(main).click();
-  const pop = popover(main);
+  await expect(menu(main).getByRole('menuitemradio', { name: /^qwen2\.5-1\.5b-instruct/ })).toHaveAttribute('aria-checked', 'true');
+  await expect(menu(main).getByRole('menuitemradio', { name: /^qwen2\.5-1\.5b-instruct/ }).locator('.where')).toHaveText('On this PC');
+  await main.keyboard.press('Escape');
+  const pop = await openModelPicker(main);
   // A server on this PC: the picker opens on On this PC, the server's models
   // under it, the current one first (its list doesn't have it).
   await expect(pop.getByRole('tab', { name: /^On this PC/ })).toHaveAttribute('aria-selected', 'true');
