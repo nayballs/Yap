@@ -1,16 +1,16 @@
-// The panel's row of tabs (DocPanel's own chunk): a conversation's documents
-// and the pictures Chat found online, from its answers (chatDoc.svelte.js
-// keeps which one shows, the ones closed and the ones a turn opened before
-// its answer was kept). No Svelte state: pure.
-import { docKey, picKey } from './chatDoc.svelte.js';
+// The panel's row of tabs (DocPanel's own chunk): a conversation's documents,
+// the pictures Chat found online and the live pages it brought up, from its
+// answers (chatDoc.svelte.js keeps which one shows, the ones closed and the
+// ones a turn opened before its answer was kept). No Svelte state: pure.
+import { docKey, picKey, pageKey } from './chatDoc.svelte.js';
 
 /**
  * The panel's items in a conversation (`messages`, as the thread has them):
- * its answers' documents and pictures — saved with the answer, or (while
- * it's written) as they come (`liveDocs`, `livePictures`) — each once, in
- * the order they first came, newest last. A document keeps its latest
- * title. `[{key, kind: 'doc', id, title} | {key, kind: 'picture', id,
- * picture}]`.
+ * its answers' documents, pictures and pages — saved with the answer, or
+ * (while it's written) as they come (`liveDocs`, `livePictures`,
+ * `livePages`) — each once, in the order they first came, newest last. A
+ * document keeps its latest title. `[{key, kind: 'doc', id, title} | {key,
+ * kind: 'picture', id, picture} | {key, kind: 'page', page}]`.
  */
 export function panelItems(messages) {
   const out = [];
@@ -33,6 +33,13 @@ export function panelItems(messages) {
       if (at.has(key)) continue;
       at.set(key, out.length);
       out.push({ key, kind: 'picture', id: p.id, picture: p });
+    }
+    for (const p of m.pages?.length ? m.pages : m.livePages || []) {
+      if (!p?.url) continue;
+      const key = pageKey(p.url);
+      if (at.has(key)) continue;
+      at.set(key, out.length);
+      out.push({ key, kind: 'page', page: p });
     }
   }
   return out;

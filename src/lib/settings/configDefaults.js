@@ -215,6 +215,9 @@ export const FIELD_DEFAULTS = {
   // "Search in your browser" under an answer the free sources couldn't give
   // (web/sources.rs): the engine it opens.
   webSearchBrowser: 'duckduckgo',
+  // Settings → General → Links (shell/browsers.rs): '' = Windows' default
+  // browser, else a registered browser's key ("Brave").
+  openLinksIn: '',
   speakReplies: false,
   speakWhen: 'voice',
   talkBackHandsFree: true,

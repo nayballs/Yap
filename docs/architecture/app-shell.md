@@ -59,7 +59,16 @@ The full stack list, the app's entry and plumbing (`lib.rs`, the tray, context m
 - **External links:** `tauri-plugin-opener` (opens URLs in the default browser). Every
   link in Yap's pages goes through `shell::commands::open_external` (`lib/core/externalLinks.js`):
   web and mail links only, and a test run records the link (`e2e_opened_urls`) instead
-  of opening a browser on the PC running it. Links inside rendered markdown (chat
+  of opening a browser on the PC running it. **Which browser** (2026-11-01,
+  `shell/browsers.rs`): Settings → General → Links' "Open links in" (`open_links_in`:
+  "" = Windows' default, else a registered browser's key) — the browsers are Windows'
+  registered ones (`SOFTWARE\Clients\StartMenuInternet`, HKCU then HKLM and its 32-bit
+  view; name, program, the program's icon for the list; read only, cached 30 s), a web
+  link going to the chosen program with the address as its one argument, else (and every
+  mail link) to the opener plugin. Buttons say the browser by name (`browser_label`:
+  the chosen one's, else Windows' default's when its https ProgId's program is a
+  registered browser, else "your browser"; `stores/browserName.svelte.js`). Yap never
+  drives the person's browser. Test mode reads no registry (`YAP_E2E_BROWSERS`). Links inside rendered markdown (chat
   answers, notes: `a.md-link` from `lib/core/markdown.js`) open the same way, through one
   click handler in `main.js`, never navigating Yap's own window.
 - **No browser context menu:** `webview2-com` (the copy wry already builds on)
@@ -384,7 +393,8 @@ re-exported by the module, except `local_llm`'s, which callers name
     `open_onboarding`, `close_onboarding`; `show_settings`/`show_onboarding`
     for the tray and setup); `shell/autostart.rs` — `set_autostart`;
     `shell/logging.rs` — `log_info`/`open_logs_folder`/`frontend_log`;
-    `shell/commands.rs` — `open_external`, `is_portable`.
+    `shell/commands.rs` — `open_external`, `is_portable`; `shell/browsers.rs` —
+    `browsers_list`, `browser_label`.
   - `ai/commands.rs` — `test_post_process`, `get_groq_usage`, the base
     prompts, the on-device model's status, install, folder, start and stop.
   - `notes/commands.rs` — the notes/actions/folders CRUD

@@ -140,13 +140,42 @@ export function followHotkeyFallback(getCfg) {
       invoke('dictation_key', { pressed: e.type === 'mousedown' }).catch(() => {});
     }
   }
+  // A page beside the chat has the focus (its own webview, Rust's:
+  // chat/pages/view.rs): its function keys and Ctrl / Alt combos come here
+  // from WebView2 (`yap-page-key`, the page itself never talks to Yap), as
+  // this page's own keydown and keyup, so the shortcuts still work.
+  function onPageKey(p) {
+    if (!p || !Number.isFinite(p.vk)) return;
+    const e = new KeyboardEvent(p.down ? 'keydown' : 'keyup', {
+      bubbles: true,
+      cancelable: true,
+      repeat: !!p.repeat,
+      ctrlKey: !!p.ctrl,
+      altKey: !!p.alt,
+      shiftKey: !!p.shift,
+      metaKey: !!p.meta,
+    });
+    Object.defineProperty(e, 'keyCode', { get: () => p.vk });
+    Object.defineProperty(e, 'which', { get: () => p.vk });
+    window.dispatchEvent(e);
+  }
   $effect(() => {
     window.addEventListener('keydown', onKeyDown, true);
     window.addEventListener('keyup', onKeyUp, true);
     window.addEventListener('mousedown', onMouse, true);
     window.addEventListener('mouseup', onMouse, true);
     window.addEventListener('auxclick', onMouse, true);
+    let unPage = null;
+    let gone = false;
+    if ('__TAURI_INTERNALS__' in window) {
+      import('@tauri-apps/api/event')
+        .then(({ listen }) => listen('yap-page-key', (ev) => onPageKey(ev.payload)))
+        .then((u) => (gone ? u() : (unPage = u)))
+        .catch(() => {});
+    }
     return () => {
+      gone = true;
+      unPage?.();
       window.removeEventListener('keydown', onKeyDown, true);
       window.removeEventListener('keyup', onKeyUp, true);
       window.removeEventListener('mousedown', onMouse, true);

@@ -8,8 +8,10 @@
 //   The chips themselves are the list it opens to (ChatSteps.svelte).
 // - `elapsed(s)`: a turn's time on the line beside its step ("12s", "1m 59s").
 
-// A chip about the web (web.rs) or the safety rule (chat/tools.rs).
-const WEB_CHIP = /^(Searched the web|Couldn't search the web|Didn't search for|Didn't search the web for|Read [^"]|Couldn't read [^"]|Didn't read |Answered from )/;
+// A chip about the web (web.rs), a page beside the chat (chat/pages.rs) or
+// the safety rule (chat/tools.rs).
+const WEB_CHIP =
+  /^(Searched the web|Couldn't search the web|Didn't search for|Didn't search the web for|Read [^"]|Couldn't read [^"]|Didn't read |Answered from |Brought up |Couldn't bring up |Didn't bring up |Took a shot of |Couldn't take a shot of |Didn't take a shot of |Offered to open |Didn't offer )/;
 // The calendar's (chat/tools/calendar.rs).
 const CALENDAR_CHIP = /^(Checked your calendar|Found \d+ meetings? with|No meetings with|Free |Busy |No calendar connected|Couldn't read the (day|time) )/;
 // A document's (chat/documents.rs, and the rich tools': documents/rich.rs).
@@ -48,6 +50,9 @@ const STEPS = [
   [/^Rewrote (?:(\d+) sections|"[^"]*") in "/, 'rewrote', (m) => (m[1] ? Number(m[1]) : 1)],
   [/^[Ww]rote (?:(\d+) sections|"[^"]*") in "/, 'wrote', (m) => (m[1] ? Number(m[1]) : 1)],
   [/^(Added "[^"]*" to "|Added to "|Changed (a table in|a part of) "|Took a part out of "|Moved a part of "|Made \d+ changes in "|Restored version \d+ of ")/, 'docEdit'],
+  [/^Brought up /, 'page'],
+  [/^Took a shot of /, 'shot'],
+  [/^Offered to open /, 'offered'],
   [/^Showed ‘/, 'shown'],
   [/^Looked at a picture/, 'looked'],
   [/^Found \d+ pictures? on /, 'pictures'],
@@ -74,6 +79,9 @@ const SAY = {
   wrote: (n) => n1(n, 'wrote a section', 'wrote {n} sections'),
   rewrote: (n) => n1(n, 'rewrote a section', 'rewrote {n} sections'),
   docEdit: (n) => times(n, 'changed the document'),
+  page: (n) => n1(n, 'brought up a page', 'brought up {n} pages'),
+  shot: (n) => n1(n, 'took a shot of a page', 'took {n} shots of pages'),
+  offered: (n) => n1(n, 'offered a page for your browser', 'offered {n} pages for your browser'),
   shown: (n) => n1(n, 'showed a picture', 'showed {n} pictures'),
   looked: (n) => n1(n, 'looked at a picture', 'looked at {n} pictures'),
   pictures: (n) => times(n, 'looked for pictures'),

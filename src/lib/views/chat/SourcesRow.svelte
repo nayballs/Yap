@@ -4,11 +4,26 @@
   // window's text read on this PC opens nothing. Compact (2026-10-31): each
   // page once, the ones the answer or its document cites and the pages read
   // first, a few of them and "+N more" for the rest (sources.js).
+  // A web page's right-click menu (2026-11-01): Open in <browser> (the one
+  // Settings → General → Links chose), Show beside the chat (a Page tab:
+  // chat/pages.rs), Copy link.
   import { openExternalLink } from '../../core/externalLinks.js';
+  import { openContextMenu } from '../../ui/contextMenu.svelte.js';
+  import { useBrowserName, openInLabel } from '../../stores/browserName.svelte.js';
   import { sourceRow } from './sources.js';
 
-  /** `m`: the answer; `onsource(s)` opens a passage or a meeting. */
-  let { m, onsource = null } = $props();
+  /** `m`: the answer; `onsource(s)` opens a passage or a meeting; `onpage(p)` shows a page beside the chat. */
+  let { m, onsource = null, onpage = null } = $props();
+
+  const browser = useBrowserName();
+
+  /** A web page's menu. */
+  function pageMenu(e, s) {
+    const items = [{ label: openInLabel(browser.label), icon: 'open', onselect: () => openExternalLink(s.url) }];
+    if (onpage) items.push({ label: 'Show beside the chat', icon: 'open', onselect: () => onpage({ url: s.url, title: s.title || s.label || s.site || '', site: s.site || '' }) });
+    items.push({ label: 'Copy link', icon: 'copy', onselect: () => navigator.clipboard?.writeText(s.url).catch(() => {}) });
+    openContextMenu(e, items, { label: s.title || 'Source' });
+  }
 
   // A passage of the person's meetings and notes, or a meeting on their
   // calendar (chat/tools/calendar.rs), not a web page.
@@ -50,8 +65,9 @@
         class="srcchip"
         class:opened={s.opened}
         data-testid="chat-source"
-        title={`${s.title && s.title !== s.label ? `${s.title}\n` : ''}${s.opened ? 'Read in full · ' : ''}${s.url}`}
+        title={`${s.title && s.title !== s.label ? `${s.title}\n` : ''}${s.opened ? 'Read in full · ' : ''}${s.url}\n${openInLabel(browser.label)} · right-click for more`}
         onclick={() => openExternalLink(s.url)}
+        oncontextmenu={(e) => pageMenu(e, s)}
       >
         <span class="srcn" aria-hidden="true">{s.n}</span>
         <span class="srctitle">{s.label}</span>

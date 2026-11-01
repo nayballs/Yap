@@ -258,6 +258,10 @@ pub fn offered_tools(open_apps: bool, web: bool, extra: Extra<'_>) -> Value {
     if let (Some(all), Some(pictures)) = (tools.as_array_mut(), crate::chat::pictures::definitions(extra.pictures, !web).as_array()) {
         all.extend(pictures.iter().cloned());
     }
+    // Pages beside the chat (chat/pages.rs): for the same models.
+    if let (Some(all), Some(pages)) = (tools.as_array_mut(), crate::chat::pages::definitions(crate::chat::pages::on(extra.pictures)).as_array()) {
+        all.extend(pages.iter().cloned());
+    }
     if let (Some(all), Some(memory_tools)) = (tools.as_array_mut(), memory_definitions(extra).as_array()) {
         all.extend(memory_tools.iter().cloned());
     }
@@ -783,6 +787,22 @@ async fn tool_loop(
                         run.result
                     }
                 }
+            } else if let (Some(turn), true) = (web.as_deref_mut(), crate::chat::pages::offers(extra.pictures, name)) {
+                // A page brought up, a shot of one, a button for the
+                // person's browser (chat/pages.rs): the page hears each at once.
+                let run = crate::chat::pages::execute(turn, name, &args, extra.pictures).await;
+                if let Some(live) = live {
+                    if let Some(page) = run.page {
+                        live.sink.send(crate::chat::stream::Event::Page { page });
+                    }
+                    if let Some(offer) = run.offer {
+                        live.sink.send(crate::chat::stream::Event::Offer { offer });
+                    }
+                    if let Some(picture) = run.picture {
+                        live.sink.send(crate::chat::stream::Event::Picture { picture });
+                    }
+                }
+                run.result
             } else if extra.memory && MEMORY_TOOL_NAMES.contains(&name) {
                 if asked_to_remember(question) {
                     crate::memory::learn::tool(name, &args)

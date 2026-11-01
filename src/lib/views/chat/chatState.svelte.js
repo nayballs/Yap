@@ -54,6 +54,20 @@ export function createChatState({ onopensettings = () => null, onopennote = () =
    * pill as it comes. True when the event was the panel's alone.
    */
   function docEvent(ev, m) {
+    // A live page brought up beside the chat (chat/pages.rs): its Page tab.
+    if (ev?.kind === 'page') {
+      const p = ev.page;
+      if (!p?.url) return true;
+      doc.showPage(p);
+      if (m && !(m.livePages || []).some((x) => x.url === p.url)) m.livePages = [...(m.livePages || []), p];
+      return true;
+    }
+    // A button to open a page in the person's browser, under the answer.
+    if (ev?.kind === 'offer') {
+      const o = ev.offer;
+      if (m && o?.url && !(m.liveOffers || []).some((x) => x.url === o.url)) m.liveOffers = [...(m.liveOffers || []), o];
+      return true;
+    }
     if (ev?.kind === 'picture') {
       const p = ev.picture;
       if (!p?.id) return true;
@@ -489,9 +503,20 @@ export function createChatState({ onopensettings = () => null, onopennote = () =
    * changed ("change"): quoted over the box, which takes the focus.
    */
   function setQuote(q) {
-    if (!q?.text?.trim() || q.noteId == null) return;
+    if (!q?.text?.trim() || (q.noteId == null && !q.page)) return;
     quote = { ...q, text: q.text.trim() };
     setTimeout(() => inputEl?.focus(), 0);
+  }
+
+  /**
+   * Words selected on a page beside the chat, asked about (its menu's "Ask
+   * Yap about this", `yap-page-quote`: chat/pages/view.rs): quoted over the
+   * box as "About <the page>", asked as a selection in another app is.
+   */
+  function onPageQuote(p) {
+    if (!p?.text?.trim()) return;
+    const title = p.title || p.site || 'the page';
+    setQuote({ noteId: 0, title, text: p.text, mode: 'ask', page: { url: p.url || '', title, site: p.site || '' } });
   }
 
   function clearQuote() {
@@ -503,7 +528,8 @@ export function createChatState({ onopensettings = () => null, onopennote = () =
   // question asked out loud with Chat in view takes it as a typed or
   // dictated one does (`send`), in the conversation it's quoted in.
   function reportQuote(q, conversationId) {
-    const waiting = q
+    // (A page's words go with a typed or dictated question only.)
+    const waiting = q && !q.page
       ? { conversationId, noteId: q.noteId, title: q.title || '', text: q.text, fromLine: q.fromLine ?? null, toLine: q.toLine ?? null, mode: q.mode || '' }
       : null;
     invoke('chat_quote_set', { quote: waiting }).catch(() => {});
@@ -898,7 +924,9 @@ export function createChatState({ onopensettings = () => null, onopennote = () =
     // it: a spoken question's bubble may come and go in between (one a
     // newer question replaced), moving them.
     const turn = ++sendSeq;
-    messages = [...messages, { role: 'user', text, voice, id: null, turn, images: shots, quote: about ? { noteId: about.noteId, text: about.text } : null }];
+    // (Words from a page beside the chat: quoted as a selection, its site named.)
+    const sentQuote = about ? (about.page ? { noteId: 0, text: about.text, app: about.page.site || about.page.title || '' } : { noteId: about.noteId, text: about.text }) : null;
+    messages = [...messages, { role: 'user', text, voice, id: null, turn, images: shots, quote: sentQuote }];
     const firstAt = messages.length - 1;
     const mine = (role) => messages.findIndex((m) => m.turn === turn && m.role === role);
     const questionAt = () => {
@@ -922,6 +950,9 @@ export function createChatState({ onopensettings = () => null, onopennote = () =
     // The pictures this turn showed (`picture` events): its pills, should
     // the reply not list them.
     let shownPictures = [];
+    // The pages it brought up and the buttons it offered (chat/pages.rs): the same.
+    let shownPages = [];
+    let shownOffers = [];
     activity = null;
     activityWaiting = false;
     const onEvent = (ev) => {
@@ -937,8 +968,10 @@ export function createChatState({ onopensettings = () => null, onopennote = () =
         return;
       }
       if (ev?.kind === 'picture' && ev.picture?.id && !shownPictures.some((p) => p.id === ev.picture.id)) shownPictures = [...shownPictures, ev.picture];
-      // A document or a picture of this turn (the panel), while this chat is the one shown.
-      if (ev?.kind === 'document' || ev?.kind === 'section' || ev?.kind === 'picture' || ev?.kind === 'tool') {
+      if (ev?.kind === 'page' && ev.page?.url && !shownPages.some((p) => p.url === ev.page.url)) shownPages = [...shownPages, ev.page];
+      if (ev?.kind === 'offer' && ev.offer?.url && !shownOffers.some((o) => o.url === ev.offer.url)) shownOffers = [...shownOffers, ev.offer];
+      // A document, a picture or a page of this turn (the panel), while this chat is the one shown.
+      if (ev?.kind === 'document' || ev?.kind === 'section' || ev?.kind === 'picture' || ev?.kind === 'page' || ev?.kind === 'offer' || ev?.kind === 'tool') {
         if (mine('user') >= 0) {
           const at = mine('assistant');
           if (docEvent(ev, at >= 0 ? messages[at] : null)) return;
@@ -979,7 +1012,9 @@ export function createChatState({ onopensettings = () => null, onopennote = () =
         asText: asText && shots.length ? true : null,
         skill,
         think: thinkIt || null,
-        selection: about ? { noteId: about.noteId, text: about.text, fromLine: about.fromLine ?? null, toLine: about.toLine ?? null } : null,
+        selection: about && !about.page ? { noteId: about.noteId, text: about.text, fromLine: about.fromLine ?? null, toLine: about.toLine ?? null } : null,
+        // Words from a page beside the chat (chat/pages/view.rs `PageQuote`).
+        pageQuote: about?.page ? { text: about.text, site: about.page.site || '' } : null,
       },
       onEvent
     );
@@ -1018,6 +1053,9 @@ export function createChatState({ onopensettings = () => null, onopennote = () =
         pictures: res.pictures ?? shownPictures,
         // "Search in your browser", when Yap's free web sources couldn't give it.
         browserSearch: res.browserSearch ?? null,
+        // The pages it brought up (their tabs) and its buttons (chat/pages.rs).
+        pages: res.pages ?? shownPages,
+        offers: res.offers ?? shownOffers,
         revisedFrom: streamed != null && streamed.trim() !== '' && streamed.trim() !== String(res.reply).trim() ? fromHeight : 0,
       };
       // The question as saved: with its screenshots' text when it went as text.
@@ -1148,6 +1186,8 @@ export function createChatState({ onopensettings = () => null, onopennote = () =
     doc.flushSave();
     // The quote over the box goes with the view.
     reportQuote(null);
+    // The live pages beside the chat close (their tabs open them again).
+    doc.closePages();
   }
 
   return {
@@ -1162,6 +1202,7 @@ export function createChatState({ onopensettings = () => null, onopennote = () =
     setQuote,
     clearQuote,
     onQuote,
+    onPageQuote,
     get sending() { return sending; },
     get assistantAnswering() { return assistantAnswering; },
     set assistantPhase(v) { assistantPhase = v || 'idle'; },

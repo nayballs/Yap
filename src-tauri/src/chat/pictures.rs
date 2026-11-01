@@ -95,6 +95,9 @@ pub const LISTED: usize = 5;
 pub const MAX_LOOKS: usize = 4;
 /// Pictures a turn may show.
 pub const MAX_SHOWN: usize = 8;
+/// A page's shot's address as a candidate (`TurnPictures::add_shot`):
+/// `yap-shot:<chat-images id>`.
+pub const SHOT: &str = "yap-shot:";
 
 pub const LOOK: &str = "look_at_picture";
 pub const SHOW: &str = "show_picture";
@@ -376,6 +379,18 @@ impl TurnPictures {
         id
     }
 
+    /// **A page's shot as a candidate** (`chat/pages.rs` `snap_page`): its
+    /// chat-images id `image` (already kept and shown), its PNG (so
+    /// `look_at_picture` never downloads it), what it's of and the page.
+    /// Its address is `yap-shot:<image>` — never one to open.
+    #[allow(clippy::too_many_arguments)]
+    pub fn add_shot(&mut self, image: &str, png: Vec<u8>, w: u32, h: u32, about: &str, page: PageRef, n: usize) -> String {
+        let shot = PageImage { url: format!("{SHOT}{image}"), alt: about.to_string(), w: Some(w), h: Some(h), ..Default::default() };
+        let id = self.add(shot, page, n);
+        self.fetched.insert(id.clone(), Ok(Bytes(Arc::new(png))));
+        id
+    }
+
     /// The candidate `id` names, as models write it ([`normal_id`]).
     pub fn get(&self, id: &str) -> Option<&Candidate> {
         let id = normal_id(id);
@@ -494,8 +509,10 @@ pub async fn show(turn: &mut crate::web::Turn, args: &Value) -> Run {
         Some(said) => clip(said, CAPTION_MAX),
         None => clip(&c.about(), CAPTION_MAX),
     };
-    // Shown already this turn: the one there is.
-    if let Some(p) = turn.pictures.shown.iter().find(|p| p.image_url == c.image.url) {
+    // Shown already this turn: the one there is (a page's shot is shown as
+    // it's taken).
+    let shot = c.image.url.strip_prefix(SHOT);
+    if let Some(p) = turn.pictures.shown.iter().find(|p| shot.map_or(p.image_url == c.image.url, |id| p.id == id)) {
         let result = json!({ "success": true, "shown": true, "id": p.id, "w": p.w, "h": p.h, "displayText": "" });
         return Run { result, ..Default::default() };
     }

@@ -139,6 +139,12 @@ pub fn describe(name: &str, args: &Value, title_of: &dyn Fn(u64) -> Option<Strin
         "find_pictures" => {
             Activity::new("picture", with(text(&["url"]).map(|u| crate::web::short_url(&u)), "Looking for pictures on", "Looking for pictures"))
         }
+        // Pages beside the chat (chat/pages.rs): the page's address.
+        "show_page" => Activity::new("read", with(text(&["url"]).map(|u| crate::web::short_url(&u)), "Bringing up", "Bringing up a page")),
+        "snap_page" => {
+            Activity::new("picture", with(text(&["url"]).map(|u| crate::web::short_url(&u)), "Taking a shot of", "Taking a shot of a page"))
+        }
+        "offer_browser" => Activity::new("tool", "Adding a button to open it in your browser"),
         _ => Activity::new("tool", "Working"),
     }
 }
@@ -195,6 +201,10 @@ mod tests {
         assert_eq!(line("show_picture", Value::Null), "Showing a picture");
         assert_eq!(line("find_pictures", json!({ "url": "https://wiki.example.com/wiki/Fort_Joy" })), "Looking for pictures on wiki.example.com/wiki/Fort_Joy");
         assert_eq!(describe("show_picture", &Value::Null, &titles).mark, "picture");
+        assert_eq!(line("show_page", json!({ "url": "https://maps.example.com/fort-joy", "section": "Chests" })), "Bringing up maps.example.com/fort-joy");
+        assert_eq!(line("show_page", Value::Null), "Bringing up a page");
+        assert_eq!(line("snap_page", json!({ "url": "https://www.maps.example.com/fort-joy/" })), "Taking a shot of maps.example.com/fort-joy");
+        assert_eq!(line("offer_browser", json!({ "url": "https://maps.example.com/x", "why": "the map" })), "Adding a button to open it in your browser");
         assert_eq!(line("something_new", json!({})), "Working");
         // The kinds the page may mark.
         assert_eq!(describe("web_search", &Value::Null, &titles).mark, "search");

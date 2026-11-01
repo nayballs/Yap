@@ -11,6 +11,7 @@ pub mod compact;
 pub mod documents;
 pub mod note_chats;
 pub mod note_text;
+pub mod pages;
 pub mod pictures;
 pub mod skills;
 pub mod stream;

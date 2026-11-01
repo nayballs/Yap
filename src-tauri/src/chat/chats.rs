@@ -80,6 +80,16 @@ pub struct ChatMessage {
     /// the pictures with the sweep a day later.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub pictures: Vec<crate::chat::pictures::ShownPicture>,
+    /// The live pages an answer brought up beside the chat (`show_page`,
+    /// `chat/pages.rs`): their address, title, site and section — the
+    /// panel's Page tabs, back when the chat is opened again. Only written
+    /// when there are some; an older Yap's save drops them (the tabs go).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub pages: Vec<crate::chat::pages::ShownPage>,
+    /// The buttons an answer offered to open a page in the person's browser
+    /// (`offer_browser`): under it. Only written when there are some.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub offers: Vec<crate::chat::pages::BrowserOffer>,
     /// The passage of a document a question was asked about (the panel's
     /// "Change this…" / "Ask about this", `documents::Selection`): its note
     /// and words, the quote above the question, and the history the model
@@ -674,11 +684,50 @@ pub fn set_browser_search(id: u64, index: usize, search: Option<&crate::web::Bro
     });
 }
 
+/// Keep the pages an answer brought up and the buttons it offered with it
+/// (`chat/pages.rs`): conversation `id`'s message `index`, when it's an answer.
+pub fn set_pages(id: u64, index: usize, pages: &[crate::chat::pages::ShownPage], offers: &[crate::chat::pages::BrowserOffer]) {
+    if pages.is_empty() && offers.is_empty() {
+        return;
+    }
+    with_store(|s| {
+        let Some(m) = s.conversations.iter_mut().find(|c| c.id == id).and_then(|c| c.messages.get_mut(index)) else { return };
+        if m.role == "assistant" {
+            m.pages = pages.to_vec();
+            m.offers = offers.to_vec();
+            save_to_disk(s);
+        }
+    });
+}
+
 /// The "Search in your browser" an answer offers, as saved (the page's
 /// answer to `chat_send` carries it).
 pub fn browser_search_of(id: u64, index: usize) -> Option<crate::web::BrowserSearch> {
     with_store(|s| {
         s.conversations.iter().find(|c| c.id == id).and_then(|c| c.messages.get(index)).and_then(|m| m.browser_search.clone())
+    })
+}
+
+/// **A shot of a page the person took** (the Page tab's "Save a shot",
+/// `chat/pages/view.rs`): kept with the newest answer of conversation `id`
+/// that brought `url` up (`pages`), else its newest answer — its pills and
+/// tabs, and the chat-images sweep keeps it. Where it went (the answer's
+/// index), `None` when the conversation has no answer.
+pub fn add_shot(id: u64, url: &str, picture: crate::chat::pictures::ShownPicture) -> Option<usize> {
+    let key = crate::web::normal_url(url);
+    with_store(|s| {
+        let c = s.conversations.iter_mut().find(|c| c.id == id)?;
+        let answers = || c.messages.iter().enumerate().rev().filter(|(_, m)| m.role == "assistant");
+        let at = answers()
+            .find(|(_, m)| m.pages.iter().any(|p| crate::web::normal_url(&p.url) == key))
+            .or_else(|| answers().next())
+            .map(|(i, _)| i)?;
+        let m = c.messages.get_mut(at)?;
+        if !m.pictures.iter().any(|p| p.id == picture.id) {
+            m.pictures.push(picture);
+            save_to_disk(s);
+        }
+        Some(at)
     })
 }
 
@@ -778,6 +827,8 @@ pub fn append_message(
             thinking: None,
             documents: Vec::new(),
             pictures: Vec::new(),
+            pages: Vec::new(),
+            offers: Vec::new(),
             quote: None,
             browser_search: None,
         });
@@ -1485,6 +1536,29 @@ mod tests {
         assert_eq!(m.image_ids().collect::<Vec<_>>(), ["img_00112233445566aa"]);
     }
 
+    /// The pages an answer brought up and the buttons it offered are kept
+    /// with it (skipped when there are none, read back from an older save).
+    #[test]
+    fn an_answers_pages_and_offers_are_kept() {
+        let page = crate::chat::pages::ShownPage {
+            url: "https://maps.example.com/fort-joy".into(),
+            title: "Fort Joy map".into(),
+            site: "maps.example.com".into(),
+            section: "Chests".into(),
+        };
+        let offer = crate::chat::pages::BrowserOffer { url: page.url.clone(), why: "the interactive map".into(), site: page.site.clone() };
+        let m = ChatMessage { role: "assistant".into(), text: "It's open beside the chat.".into(), pages: vec![page.clone()], offers: vec![offer.clone()], ..Default::default() };
+        let v = serde_json::to_value(&m).unwrap();
+        assert_eq!(v["pages"][0], json!({ "url": "https://maps.example.com/fort-joy", "title": "Fort Joy map", "site": "maps.example.com", "section": "Chests" }));
+        assert_eq!(v["offers"][0]["why"], "the interactive map");
+        let plain = serde_json::to_value(ChatMessage { role: "assistant".into(), ..Default::default() }).unwrap();
+        assert!(plain.get("pages").is_none() && plain.get("offers").is_none(), "skipped when empty");
+        let back: ChatMessage = serde_json::from_value(v).unwrap();
+        assert_eq!((back.pages, back.offers), (vec![page], vec![offer]));
+        let older: ChatMessage = serde_json::from_value(json!({ "role": "assistant", "text": "x", "ts": 0 })).unwrap();
+        assert!(older.pages.is_empty() && older.offers.is_empty());
+    }
+
     #[test]
     fn a_follow_up_may_cite_the_latest_answer_that_had_sources() {
         let src = |n| Source { n, title: format!("S{n}"), url: format!("https://s{n}.example"), ..Default::default() };
@@ -1503,6 +1577,8 @@ mod tests {
             thinking: None,
             documents: vec![],
             pictures: vec![],
+            pages: vec![],
+            offers: vec![],
             quote: None,
             browser_search: None,
         };

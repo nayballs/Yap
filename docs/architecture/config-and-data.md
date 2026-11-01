@@ -298,6 +298,13 @@
   DuckDuckGo) — web_search stays off by default (the research recommended
   on for the free sources alone, but today's switch also turns on paid
   provider search for cloud chats: the maintainer's call),
+  which browser links open in (`shell/browsers.rs`, 2026-11-01, Settings →
+  General → Links): open_links_in ("" = Windows' default, the default; else a
+  registered browser's key, "Brave"; a new field: no migration) — and the
+  pages Chat brings up beside it (`chat/pages/view.rs`) keep their cookies
+  and storage in a WebView2 profile of their own (`YapPages`), inside
+  WebView2's own folder beside Yap's main webview's, never in Yap's data
+  folder (not yet in "Delete some of your data"),
   each model's effort (`ai/effort.rs`, 2026-10-31, Chat's model picker and
   Language Models → Chat): chat_effort (`"<provider>:<model>"` → "low" |
   "medium" | "high" | "xhigh" | "max"; a model missing from it runs at its

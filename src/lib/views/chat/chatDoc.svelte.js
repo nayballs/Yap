@@ -101,9 +101,11 @@ export function undoTarget(versions) {
   return versions[i] ?? null;
 }
 
-/** A tab's key: a document's, a picture's (panelTabs.js). */
+/** A tab's key: a document's, a picture's, a page's (panelTabs.js). */
 export const docKey = (id) => `doc:${id}`;
 export const picKey = (id) => `pic:${id}`;
+/** A page's: its address without its fragment or a trailing slash (one tab a page). */
+export const pageKey = (url) => `page:${String(url || '').trim().replace(/#.*$/, '').replace(/\/+$/, '')}`;
 
 /** `key` among `keys`, as documents.rs matches a section's key (case aside). */
 const hasKey = (keys, key) => keys.some((k) => k.trim().toLowerCase() === String(key).trim().toLowerCase());
@@ -114,9 +116,11 @@ const hasKey = (keys, key) => keys.some((k) => k.trim().toLowerCase() === String
  */
 export function createDocPanel({ onopennote = () => null } = {}) {
   let open = $state(false);
-  // What shows: 'doc' (the document loaded here, `id`) or 'picture'.
+  // What shows: 'doc' (the document loaded here, `id`), 'picture' or 'page'.
   let showing = $state('doc');
   let picture = $state(null);
+  // A live page beside the chat (chat/pages.rs `ShownPage`: its Page tab).
+  let page = $state(null);
   // Tabs closed (their keys), and items shown that no answer has yet (a
   // turn's, before its answer is kept).
   let hidden = $state([]);
@@ -154,7 +158,21 @@ export function createDocPanel({ onopennote = () => null } = {}) {
   const pending = $derived(pendingSections(content));
 
   // The tab showing (panelTabs.js makes the row, in the panel's chunk).
-  const active = $derived(!open ? null : showing === 'picture' ? (picture ? picKey(picture.id) : null) : id != null ? docKey(id) : null);
+  const active = $derived(
+    !open
+      ? null
+      : showing === 'picture'
+        ? picture
+          ? picKey(picture.id)
+          : null
+        : showing === 'page'
+          ? page
+            ? pageKey(page.url)
+            : null
+          : id != null
+            ? docKey(id)
+            : null
+  );
 
   /**
    * An item shown: in the row again, and kept for it (an answer may not
@@ -289,10 +307,30 @@ export function createDocPanel({ onopennote = () => null } = {}) {
     open = true;
   }
 
+  /**
+   * Show a live page beside the chat (`ShownPage`: its pill, its tab, a
+   * turn's `page` event): PageTab puts the page's own webview over the tab
+   * (chat/pages/view.rs). The document stays as it was behind it.
+   */
+  function showPage(p) {
+    if (!p?.url) return;
+    if (showing === 'doc') flushSave();
+    inRow({ key: pageKey(p.url), kind: 'page', page: p });
+    page = p;
+    showing = 'page';
+    open = true;
+  }
+
   /** A tab of the row, shown. */
   function openTab(t) {
     if (t?.kind === 'picture') showPicture(t.picture);
+    else if (t?.kind === 'page') showPage(t.page);
     else if (t?.kind === 'doc') show(t.id, { title: t.title });
+  }
+
+  /** Every live page closes (another conversation, Chat left): their tabs open them again. */
+  function closePages() {
+    invoke('page_view_close_all').catch(() => {});
   }
 
   /**
@@ -303,6 +341,8 @@ export function createDocPanel({ onopennote = () => null } = {}) {
   function closeTab(key, next = null) {
     if (!key || hidden.includes(key)) return;
     hidden = [...hidden, key];
+    // A page closes with its tab (its webview goes).
+    if (key.startsWith('page:')) invoke('page_view_close', { key }).catch(() => {});
     if (key !== active) return;
     if (next) openTab(next);
     else close();
@@ -382,6 +422,8 @@ export function createDocPanel({ onopennote = () => null } = {}) {
     close();
     showing = 'doc';
     picture = null;
+    if (page) closePages();
+    page = null;
     hidden = [];
     extra = [];
   }
@@ -501,6 +543,7 @@ export function createDocPanel({ onopennote = () => null } = {}) {
     get open() { return open; },
     get showing() { return showing; },
     get picture() { return picture; },
+    get page() { return page; },
     get extra() { return extra; },
     get hidden() { return hidden; },
     get active() { return active; },
@@ -526,6 +569,8 @@ export function createDocPanel({ onopennote = () => null } = {}) {
     get landed() { return landed; },
     show,
     showPicture,
+    showPage,
+    closePages,
     openTab,
     closeTab,
     reset,

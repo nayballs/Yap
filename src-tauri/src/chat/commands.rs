@@ -107,6 +107,11 @@ pub fn chat_rename(id: u64, title: String) -> Result<String, String> {
 /// document panel's "Change this…" / "Ask about this": `{noteId, text,
 /// fromLine?, toLine?}`, `documents::Selection`) — the model is told which
 /// blocks it is, and the question keeps its quote.
+///
+/// `pageQuote`: text selected on a page beside the chat and asked about
+/// (its Page tab's "Ask about this", `chat/pages/view.rs`: `{text, site}`)
+/// — asked as text selected in another app is (`assistant/selected.rs`),
+/// its site named.
 #[allow(clippy::too_many_arguments)]
 #[tauri::command]
 pub async fn chat_send(
@@ -122,6 +127,7 @@ pub async fn chat_send(
     skill: Option<String>,
     think: Option<bool>,
     selection: Option<crate::chat::documents::Selection>,
+    page_quote: Option<crate::chat::pages::view::PageQuote>,
 ) -> Result<serde_json::Value, String> {
     // A Skill (`/decisions`, a one-tap prompt): asked across the meetings,
     // its own passages and instructions (chat/skills.rs).
@@ -142,6 +148,10 @@ pub async fn chat_send(
     }
     let turn = send_turn(&app, conversation_id, text, scope, voice, on_stream, turn_id, image_ids, as_text);
     let send = crate::chat::skills::with(skill_turn, crate::chat::documents::with_selection(selection, turn));
+    // Text selected on a page beside the chat: what the question is about.
+    // (Boxed: the command's future is made on the main thread, whose stack
+    // a turn's whole future overflows.)
+    let send = Box::pin(crate::chat::assistant::selected::with(page_quote.and_then(|q| q.selected()), Box::pin(send)));
     // Chat's own turn: Think pressed (the model on this PC), or a cloud
     // model at its effort (`ai/effort.rs`): what it thought comes back.
     let (out, thought) = crate::chat::think::scoped(think.unwrap_or(false), send).await;
@@ -276,5 +286,8 @@ async fn send_turn(
         // "Search in your browser", when Yap's free web sources couldn't
         // answer it (web/sources.rs), as saved with the answer.
         "browserSearch": crate::chat::chats::browser_search_of(turn.conversation_id, turn.index),
+        // The pages it brought up (pages.rs): their tabs; its buttons.
+        "pages": turn.pages,
+        "offers": turn.offers,
     }))
 }

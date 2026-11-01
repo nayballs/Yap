@@ -170,6 +170,9 @@ pub struct Turn {
     /// (`sources.rs`): the answer may offer "Search in your browser"
     /// ([`Turn::browser_search`]).
     handoff: Option<super::Handoff>,
+    /// **The pages this turn brought up**, the buttons it offered and the
+    /// shots it took (`chat/pages.rs`).
+    pub pages: crate::chat::pages::TurnPages,
 }
 
 impl Turn {
@@ -201,6 +204,7 @@ impl Turn {
             documented: false,
             pictures: TurnPictures::default(),
             handoff: None,
+            pages: Default::default(),
         }
     }
 

@@ -25,6 +25,7 @@
   import { untrack } from 'svelte';
   import { openContextMenu } from '../../ui/contextMenu.svelte.js';
   import { openExternalLink } from '../../core/externalLinks.js';
+  import { useBrowserName, openInLabel } from '../../stores/browserName.svelte.js';
   import { chatImageUrl, placed, copyImage, saveImage, shown } from './chatImages.js';
   import { screenPixels } from './chatShots.svelte.js';
   import { FIT_PAD, fitScale, fitView, clampView, zoomAt, panBy, isFit, toggleScale, stepScale, wheelScale, zoomLabel, limits } from './pictureZoom.js';
@@ -36,6 +37,8 @@
   const name = $derived(pic?.caption || pic?.alt || 'Picture');
   const page = $derived(pic?.page ?? null);
   const pageName = $derived(page?.title || page?.site || '');
+  // "Open in Brave" (the browser Settings → General → Links chose).
+  const browser = useBrowserName();
 
   const reduced = () => matchMedia('(prefers-reduced-motion: reduce)').matches || document.documentElement.dataset.motion === 'reduced';
 
@@ -245,8 +248,8 @@
       { label: 'Copy image', icon: 'copy', onselect: () => copyImage(pic.id, 'Picture'), disabled: broken === pic.id },
       { label: 'Save image as…', icon: 'download', onselect: () => saveImage(pic.id, 'Picture'), disabled: broken === pic.id },
       { separator: true },
-      { label: 'Open original', icon: 'open', onselect: () => openExternalLink(pic.imageUrl), disabled: !pic.imageUrl },
-      { label: 'Open page', icon: 'open', onselect: () => openExternalLink(page.url), disabled: !page?.url },
+      { label: `Open original in ${browser.label}`, icon: 'open', onselect: () => openExternalLink(pic.imageUrl), disabled: !pic.imageUrl },
+      { label: `Open page in ${browser.label}`, icon: 'open', onselect: () => openExternalLink(page.url), disabled: !page?.url },
     ];
   }
   const moreMenu = (e) => openContextMenu(e, items(), { label: 'Picture' });
@@ -366,7 +369,7 @@
         <span class="from">From <span class="pagename" title={page?.url || pageName}>{pageName}</span></span>
         {#if page?.url}
           <span class="sep" aria-hidden="true">·</span>
-          <button type="button" class="openpage" onclick={() => openExternalLink(page.url)}>Open page</button>
+          <button type="button" class="openpage" data-testid="chat-picture-open" title={page.url} onclick={() => openExternalLink(page.url)}>{openInLabel(browser.label)}</button>
         {/if}
       </p>
     {/if}

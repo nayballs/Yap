@@ -1443,6 +1443,19 @@ other languages' notes and chats.
 
 Checked against the code on 2026-11-01. `ROADMAP.md` (private) has the plans.
 
+Pages beside the chat (2026-11-01, chat-and-assistant.md "Pages beside the
+chat"): unit-tested (the rules, the tools' refusals, the registered
+browsers' parsing) and e2e-tested on the stand-in web (`e2e/chat-pages.spec.js`:
+the page in its own webview with no Yap IPC, Save a shot, `snap_page`,
+`offer_browser`, Ask Yap about this), but not yet tried on real pages
+(an interactive map, a site that signs in), on the person's screen (the
+page's native window over Yap's at other scalings and on a second monitor,
+toasts hiding it), with the native menu, with a chosen browser opening a
+link, or with `snap_page` while Yap's window is hidden (it likely times
+out: "is Yap's window on screen?"). Not done: a popover on words selected
+in the page, the pages' profile in "Delete some of your data", and a page
+quote for a question asked out loud.
+
 - **Chat and the Voice Assistant**: Chat's eager note context stays
   keyword-only (its `search_notes`, `search_chats` and memory search by
   meaning since 2026-10-25, search.md). Answers stream from every provider,
