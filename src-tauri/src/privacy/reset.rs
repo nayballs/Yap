@@ -62,6 +62,7 @@ pub enum Kind {
     Tasks,
     Chats,
     Memory,
+    Pages,
     Suggestions,
     AiUsage,
     Receipts,
@@ -180,6 +181,16 @@ pub const KINDS: &[About] = &[
         says: "Everything in Settings → Memory: the people, projects and topics Yap remembers about you",
         files: &["memory.json", "(search-index/)", "(calendar.json)"],
         stores: &["memory", "calendar"],
+    },
+    // WebView2's own profile for them (chat/pages/view.rs), outside the
+    // data folder: cleared by WebView2 (`view::clear_data`).
+    About {
+        kind: Kind::Pages,
+        group: CHAT,
+        label: "Pages beside the chat",
+        says: "Cookies, sign-ins and site data from the web pages opened beside the chat. Your chats stay",
+        files: &[],
+        stores: &[],
     },
     About {
         kind: Kind::Suggestions,
@@ -603,8 +614,9 @@ fn dir_bytes(path: &Path) -> (usize, u64) {
     out
 }
 
-/// Each kind with how much there is of it now (counts and sizes only).
-fn measure() -> Vec<Line> {
+/// Each kind with how much there is of it now (counts and sizes only);
+/// `pages`: the pages' WebView2 profile folder, if it has one.
+fn measure(pages: Option<&Path>) -> Vec<Line> {
     let data = crate::config::data_dir();
     let notes = crate::notes::all();
     let (meetings, others): (Vec<_>, Vec<_>) = notes.iter().partition(|n| is_meeting(n));
@@ -646,6 +658,10 @@ fn measure() -> Vec<Line> {
                     let n = crate::memory::items().len();
                     (count(n, "thing", "things"), file_bytes(&data.join("memory.json")), n == 0)
                 }
+                Kind::Pages => {
+                    let (_, bytes) = pages.map(dir_bytes).unwrap_or((0, 0));
+                    (None, bytes, bytes == 0)
+                }
                 Kind::Suggestions => {
                     let n = crate::dictionary::learn::offered();
                     let bytes = file_bytes(&data.join("word_suggestions.json"));
@@ -678,7 +694,8 @@ fn measure() -> Vec<Line> {
 #[tauri::command]
 pub async fn data_reset_plan(app: AppHandle) -> Plan {
     let blocked = busy(&app);
-    tauri::async_runtime::spawn_blocking(move || Plan { goes: measure(), stays: STAYS.iter().map(|p| p.label).collect(), blocked })
+    let pages = crate::chat::pages::view::data_folder(&app).await;
+    tauri::async_runtime::spawn_blocking(move || Plan { goes: measure(pages.as_deref()), stays: STAYS.iter().map(|p| p.label).collect(), blocked })
         .await
         .unwrap_or(Plan { goes: Vec::new(), stays: Vec::new(), blocked: Some("Yap couldn't look at its data.".into()) })
 }
@@ -942,6 +959,11 @@ async fn delete(app: AppHandle, c: Choice) -> Result<Done, String> {
     }
     if let Some(why) = refused(&app, &c) {
         return Err(why);
+    }
+    // The pages' cookies and site data first: WebView2 clears them, and if
+    // it can't, nothing else has gone yet.
+    if c.has(Kind::Pages) {
+        crate::chat::pages::view::clear_data(&app).await?;
     }
     let handle = app.clone();
     let every = c == Choice::every();

@@ -20,7 +20,7 @@
 // `e2e_page_view_eval` / `e2e_page_views`. Fictional pages only.
 import fs from 'node:fs';
 import path from 'node:path';
-import { test as base, expect, expectStore, setConfig, openView, openSettings, closeSettings } from './support/fixtures.js';
+import { test as base, expect, expectStore, setConfig, openView, openSettings, closeSettings, settingsDialog } from './support/fixtures.js';
 import { startFakeLlm } from './support/fake-llm.js';
 import { startFakeWeb, FORT_JOY_URL } from './support/fake-web.js';
 import { readPng } from './support/png.js';
@@ -293,4 +293,128 @@ test('offer_browser puts a button under the answer: the person opens the page in
   // Back to Windows' default: "your browser" again.
   await setConfig(yap, main, { openLinksIn: '' });
   await expect(offer).toContainText('Open the interactive map in your browser');
+});
+
+test('the + opens a new tab: an address or words go in its address bar, Back and Forward, and its data clears', async ({ yap, main, fakeLlm, shot }) => {
+  await setConfig(yap, main, { ...chatConfig(fakeLlm), webSearchBrowser: 'duckduckgo' });
+  fakeLlm.scriptChat([{ tools: [{ name: 'show_page', args: { url: FORT_JOY_URL } }] }, { content: 'It’s beside the chat.' }]);
+  await ask(main, `Show me ${FORT_JOY_URL}`);
+  await expect.poll(async () => (await views(yap)).find((v) => v.key === KEY)?.loaded, { timeout: 20_000 }).toBe(true);
+  // A page showing: the row is there with one tab, the page's title its name, and the +.
+  const tabs = main.getByTestId('chat-panel-tab');
+  await expect(tabs).toHaveCount(1);
+  await expect(tabs.first()).toHaveText('Fort Joy - Example Wiki');
+  const address = main.getByTestId('chat-page-address');
+  await expect(address).toHaveValue(FORT_JOY_URL);
+
+  // The +: a new tab, its address bar waiting, the pages this chat read offered.
+  await main.getByTestId('chat-panel-new-tab').click();
+  await expect(tabs).toHaveCount(2);
+  await expect(tabs.last()).toHaveText('New tab');
+  await expect(main.getByTestId('chat-page-new')).toBeVisible();
+  await expect(main.getByTestId('chat-page-new').getByRole('button', { name: /Fort Joy - Example Wiki/ })).toBeVisible();
+  await expect(address).toBeFocused();
+  await expect(address).toHaveValue('');
+  // Nothing made until there's somewhere to go.
+  expect((await views(yap)).filter((v) => v.key.startsWith('page:new:'))).toEqual([]);
+  await shot(main, '04-a-new-tab');
+
+  // An address without https://: opened as one.
+  await address.fill('wiki.example.com/wiki/Fort_Joy');
+  await address.press('Enter');
+  const fresh = async () => (await views(yap)).find((v) => v.key.startsWith('page:new:'));
+  await expect.poll(async () => (await fresh())?.loaded, { timeout: 20_000 }).toBe(true);
+  const key = (await fresh()).key;
+  await expect(main.getByTestId('chat-page-new')).toHaveCount(0);
+  await expect(tabs.last()).toHaveText('Fort Joy - Example Wiki');
+  await expect(address).not.toBeFocused();
+  await expect(address).toHaveValue(FORT_JOY_URL);
+
+  // Words: a search on the person's engine, in the tab (the stand-in answers for it).
+  await address.click();
+  await expect(address).toHaveValue(FORT_JOY_URL);
+  await address.fill('fort joy chests');
+  await address.press('Enter');
+  await expect.poll(async () => (await fresh())?.url).toBe('https://duckduckgo.com/?q=fort+joy+chests');
+  await expect(address).toHaveValue('https://duckduckgo.com/?q=fort+joy+chests', { timeout: 20_000 });
+  // Back to the page, and Forward again.
+  const backBtn = main.getByTestId('chat-page').getByRole('button', { name: 'Back', exact: true });
+  const fwdBtn = main.getByTestId('chat-page').getByRole('button', { name: 'Forward', exact: true });
+  await expect(backBtn).toBeEnabled({ timeout: 20_000 });
+  await backBtn.click();
+  await expect(address).toHaveValue(FORT_JOY_URL, { timeout: 20_000 });
+  await expect(fwdBtn).toBeEnabled();
+  await fwdBtn.click();
+  await expect(address).toHaveValue('https://duckduckgo.com/?q=fort+joy+chests', { timeout: 20_000 });
+
+  // Never another scheme, never this PC: said under the bar, nothing opened.
+  await address.click();
+  await address.fill('file:///C:/Windows/win.ini');
+  await address.press('Enter');
+  await expect(main.getByTestId('chat-page-address-error')).toContainText('Only web pages open here');
+  await address.fill('192.168.1.5/admin');
+  await address.press('Enter');
+  await expect(main.getByTestId('chat-page-address-error')).toBeVisible();
+  expect((await fresh()).url).toBe('https://duckduckgo.com/?q=fort+joy+chests');
+  // Esc puts the address back.
+  await address.press('Escape');
+  await expect(main.getByTestId('chat-page-address-error')).toHaveCount(0);
+  await expect(address).toHaveValue('https://duckduckgo.com/?q=fort+joy+chests');
+
+  // Its tab shown again opens where the address bar took it.
+  await tabs.first().click();
+  await expect(address).toHaveValue(FORT_JOY_URL);
+  await tabs.last().click();
+  await expect(address).toHaveValue('https://duckduckgo.com/?q=fort+joy+chests');
+  expect((await fresh()).key).toBe(key);
+
+  // What the pages keep (their own profile) clears from Delete some of your data.
+  await backBtn.click();
+  await expect(address).toHaveValue(FORT_JOY_URL, { timeout: 20_000 });
+  const probe = (script) => yap.invoke('e2e_page_view_eval', { key, script }).then((raw) => JSON.parse(raw));
+  await probe("localStorage.setItem('yap-pages-probe','1'); 'ok'");
+  expect(await probe("localStorage.getItem('yap-pages-probe')")).toBe('1');
+  await openSettings(main, 'Privacy & data');
+  const yours = settingsDialog(main).getByRole('group', { name: 'Your data' });
+  await yours.scrollIntoViewIfNeeded();
+  await yours.getByRole('button', { name: 'Delete…', exact: true }).click();
+  const picker = main.getByRole('dialog', { name: 'Delete some of your data' });
+  await expect(picker).toContainText('Cookies, sign-ins and site data from the web pages opened beside the chat');
+  await picker.getByRole('checkbox', { name: /^Pages beside the chat/ }).check();
+  await picker.getByRole('button', { name: 'Delete…', exact: true }).click();
+  const confirm = main.getByRole('alertdialog');
+  await expect(confirm.getByRole('list', { name: 'What goes' })).toContainText('Pages beside the chat');
+  await confirm.getByRole('button', { name: 'Delete', exact: true }).click();
+  await expect(main.getByRole('status').filter({ hasText: 'Deleted from this PC' })).toContainText('Pages beside the chat');
+  await closeSettings(main);
+  // The page stays open; what it kept is gone.
+  await expect.poll(() => probe("localStorage.getItem('yap-pages-probe')"), { timeout: 10_000 }).toBe(null);
+  expect(await probe('document.title')).toBe('Fort Joy - Example Wiki');
+});
+
+test('the title bar’s browser button (Ctrl+Shift+B) opens a new tab, the same tab again, or closes the panel', async ({ yap, main, fakeLlm }) => {
+  await setConfig(yap, main, chatConfig(fakeLlm));
+  await openView(main, 'Chat');
+  await main.getByRole('button', { name: 'New chat' }).first().click();
+  await expect(main.getByTestId('chat-doc')).toHaveCount(0);
+  const btn = main.getByTestId('chat-browser-button');
+  await expect(btn).toHaveAttribute('aria-pressed', 'false');
+  // Nothing open: a new tab, its address bar waiting.
+  await btn.click();
+  await expect(main.getByTestId('chat-page-new')).toBeVisible();
+  await expect(main.getByTestId('chat-page-address')).toBeFocused();
+  await expect(btn).toHaveAttribute('aria-pressed', 'true');
+  // Again: the panel closes.
+  await btn.click();
+  await expect(main.getByTestId('chat-doc')).toHaveCount(0);
+  await expect(btn).toHaveAttribute('aria-pressed', 'false');
+  // Ctrl+Shift+B: the same tab back, not another.
+  await main.keyboard.press('Control+Shift+B');
+  await expect(main.getByTestId('chat-page-new')).toBeVisible();
+  await expect(main.getByTestId('chat-panel-tab')).toHaveCount(1);
+  await main.keyboard.press('Control+Shift+B');
+  await expect(main.getByTestId('chat-doc')).toHaveCount(0);
+  // Only while Chat shows.
+  await openView(main, 'Home');
+  await expect(btn).toHaveCount(0);
 });

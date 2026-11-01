@@ -35,11 +35,15 @@
   // (PictureTab.svelte); the document stays as it was behind it (its view,
   // its editor, where it was scrolled to). A live page Chat brought up
   // (chat/pages.rs) shows in a Page tab (PageTab.svelte): its own webview,
-  // Rust's, laid over the tab, one PageTab per page.
+  // Rust's, laid over the tab, one PageTab per page. With a page showing,
+  // the row is there even alone, with a + at its end for a new page tab
+  // (Ctrl+T in the panel), as Claude Code's browser pane has; a page tab's
+  // name is the page's title as it is now.
   import { tick, untrack } from 'svelte';
   import PictureTab from './PictureTab.svelte';
   import PageTab from './PageTab.svelte';
   import { panelTabs, neighbour } from './panelTabs.js';
+  import { tabKeyOf, pageKey as pageTabKey } from './chatDoc.svelte.js';
   import { placed, shown as fadeIn } from './chatImages.js';
   import { screenPixels } from './chatShots.svelte.js';
   import RichToolbar from '../../components/richtext/RichToolbar.svelte';
@@ -84,13 +88,33 @@
   /** Close tab `key`: its neighbour shows in its place if it was showing. */
   const closeTab = (key) => doc.closeTab(key, neighbour(tabs, key));
 
-  /** A tab's name: a document's title, a picture's caption, a page's title. */
+  /** A tab's name: a document's title, a picture's caption, a page's title (as it is now). */
   const tabName = (t) =>
     t.kind === 'picture'
       ? t.picture?.caption || t.picture?.alt || 'Picture'
       : t.kind === 'page'
-        ? t.page?.title || t.page?.site || 'Page'
+        ? doc.pageNow[t.key]?.title || t.page?.title || t.page?.site || (t.page?.url || doc.pageNow[t.key]?.went ? 'Page' : 'New tab')
         : t.title || 'Untitled document';
+
+  // The pages this conversation's answers read or showed, newest first: a
+  // new page tab offers them (PageTab's new tab, as Claude Code's offers
+  // the project's servers).
+  const recentPages = $derived.by(() => {
+    const out = [];
+    const seen = new Set();
+    for (const m of [...messages].reverse()) {
+      if (m?.role !== 'assistant') continue;
+      for (const s of [...(m.pages || []), ...(m.sources || [])]) {
+        const url = s?.url;
+        if (!url || !/^https?:\/\//i.test(url) || seen.has(url)) continue;
+        seen.add(url);
+        // (A page Chat brought up is named by its site until it loads: its tab's title then.)
+        out.push({ url, title: doc.pageNow[pageTabKey(url)]?.title || s.title || '' });
+        if (out.length >= 6) return out;
+      }
+    }
+    return out;
+  });
 
   /** ← / → / Home / End on the row show the tab there; Delete closes the one with the focus. */
   function tabsKey(e) {
@@ -410,7 +434,11 @@
 
   /** The panel's keys: Ctrl+F finds; Esc puts a popover away. */
   function panelKey(e) {
-    if ((e.ctrlKey || e.metaKey) && !e.altKey && e.key.toLowerCase() === 'f' && !doc.gone && !away) {
+    if ((e.ctrlKey || e.metaKey) && !e.altKey && !e.shiftKey && e.key.toLowerCase() === 't') {
+      e.preventDefault();
+      e.stopPropagation();
+      doc.newPage();
+    } else if ((e.ctrlKey || e.metaKey) && !e.altKey && e.key.toLowerCase() === 'f' && !doc.gone && !away) {
       e.preventDefault();
       e.stopPropagation();
       openFind();
@@ -585,8 +613,9 @@
 
 <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
 <aside class="docpanel" class:cover aria-label={doc.showing === 'page' ? 'Page' : away ? 'Picture' : 'Document'} data-testid="chat-doc" onkeydown={panelKey}>
-  {#if tabs.length > 1}
-    <!-- This conversation's documents and pictures, newest last. -->
+  {#if tabs.length > 1 || doc.showing === 'page'}
+    <!-- This conversation's documents, pictures and pages, newest last; + a new page tab. -->
+    <div class="tabrow">
     <div class="doctabs" role="tablist" aria-label="In the panel" tabindex="-1" data-testid="chat-panel-tabs" bind:this={tabsEl} onkeydown={tabsKey} onwheel={tabsWheel}>
       {#each tabs as t (t.key)}
         {@const on = t.key === doc.active}
@@ -623,13 +652,17 @@
         </div>
       {/each}
     </div>
+    <button type="button" class="tabnew" onclick={() => doc.newPage()} aria-label="New tab" title="New tab (Ctrl+T)" data-testid="chat-panel-new-tab">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14" /></svg>
+    </button>
+    </div>
   {/if}
   {#if doc.showing === 'picture' && doc.picture}
     <PictureTab {doc} {narrow} />
   {:else if doc.showing === 'page' && doc.page}
-    <!-- One per page: each its own webview, its place kept while another tab shows. -->
-    {#key doc.page.url}
-      <PageTab {doc} {narrow} {conversationId} />
+    <!-- One per page tab: each its own webview, its place kept while another tab shows. -->
+    {#key tabKeyOf(doc.page)}
+      <PageTab {doc} {narrow} {conversationId} recent={recentPages} />
     {/key}
   {/if}
   {#if doc.id != null}
@@ -830,17 +863,52 @@
   /* **The row of tabs** (two things or more): the one showing on the paper,
      an accent line under it; the others quieter on the row's ground; × on
      hover and on the one showing. Too many for the row: it scrolls. */
-  .doctabs {
+  .tabrow {
     flex: 0 0 auto;
+    display: flex;
+    align-items: center;
+    min-width: 0;
+    background: var(--yap-paper-s1);
+    border-bottom: 1px solid var(--yap-paper-s2);
+  }
+  .doctabs {
+    flex: 0 1 auto;
     display: flex;
     gap: 1px;
     min-width: 0;
-    padding: 6px 8px 0;
+    padding: 6px 2px 0 8px;
+    align-self: stretch;
     overflow-x: auto;
     overflow-y: hidden;
     scrollbar-width: none;
-    background: var(--yap-paper-s1);
-    border-bottom: 1px solid var(--yap-paper-s2);
+  }
+  /* The row's +: a new page tab. */
+  .tabnew {
+    flex: 0 0 auto;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 26px;
+    height: 26px;
+    margin: 4px 8px 0 2px;
+    padding: 0;
+    border: none;
+    border-radius: 6px;
+    background: none;
+    color: var(--yap-paper-muted);
+    cursor: pointer;
+  }
+  .tabnew:hover {
+    background: var(--yap-paper-s2);
+    color: var(--yap-paper-ink);
+  }
+  .tabnew:focus-visible {
+    outline: 2px solid var(--yap-focus-ring);
+    outline-offset: 1px;
+  }
+  .tabnew svg {
+    width: 14px;
+    height: 14px;
   }
   .doctabs:focus {
     outline: none;

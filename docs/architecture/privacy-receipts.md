@@ -324,7 +324,14 @@ a tick box per **kind** of data. "Clear everything and keep my settings"
     not notes' Ask threads, and every screenshot in `chat-images/`, the ones
     waiting in Chat's box too; the documents Chat wrote stay in Notes),
     **What Yap remembers** (`memory.json`: every item, what the passes read
-    and what waited for one, and Undo's copies).
+    and what waited for one, and Undo's copies), **Pages beside the chat**
+    (2026-11-01: the cookies, sign-ins and site data of the pages opened
+    beside the chat — their own WebView2 profile, `YapPages`, outside the
+    data folder, its size from `EBWebView\WV2Profile_yappages` in WebView2's
+    user data folder; cleared first, by WebView2's
+    `ClearBrowsingDataAll` through an open page or one made out of sight for
+    it, `chat/pages/view.rs` `clear_data`, so if it can't, nothing else has
+    gone; open pages stay open).
   - *Dictionary* — **Dictionary suggestions** (`word_suggestions.json`:
     the words offered, the answers and the words removed from the
     dictionary — so one may be offered again —; snippet_suggestions.json's

@@ -135,6 +135,8 @@ test('the dialog says how much there is of each kind; nothing goes until it is a
   await expect(tickBox(main, 'Search index')).toBeDisabled();
   // Each says what it removes.
   await expect(p).toContainText('Every chat, archived ones too, with its screenshots. Documents Chat wrote stay in Notes');
+  // The pages beside the chat keep their own cookies and sign-ins (their WebView2 profile).
+  await expect(p).toContainText('Cookies, sign-ins and site data from the web pages opened beside the chat');
   await expect(p).toContainText('Your settings, dictionary, snippets, Skills, transforms, writing samples, models, paired phones and account stay.');
   const next = p.getByRole('button', { name: 'Delete…', exact: true });
   await expect(next).toBeDisabled();

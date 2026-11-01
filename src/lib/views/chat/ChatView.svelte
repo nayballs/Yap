@@ -117,7 +117,8 @@
   import ChatThread from './ChatThread.svelte';
   import Composer from './Composer.svelte';
   import ShotViewer from './ShotViewer.svelte';
-  import { MIN_WIDTH, THREAD_MIN, LIST_STAYS } from './chatDoc.svelte.js';
+  import { MIN_WIDTH, THREAD_MIN, LIST_STAYS, tabKeyOf } from './chatDoc.svelte.js';
+  import { chatBrowser } from '../../stores/chatBrowser.svelte.js';
 
   // Opens a Settings section (ControlPanel's openSettings): the chip's
   // "Language model settings…". `onopennote({id, line, ts, field})`: a
@@ -127,6 +128,31 @@
 
   const chat = createChatState({ onopensettings: () => onopensettings, onopennote: () => onopennote });
   const doc = chat.doc;
+
+  // **The browser** (the title bar's button, Ctrl+Shift+B; as Claude Code's):
+  // the panel's page tabs — the last page shown, unless its tab was closed,
+  // else a new tab — or, with a page tab showing, the panel closed (the pages
+  // stay alive behind it).
+  function toggleBrowser() {
+    if (doc.open && doc.showing === 'page') {
+      doc.close();
+      return;
+    }
+    const last = doc.page;
+    if (last && !doc.hidden.includes(tabKeyOf(last))) doc.showPage(last);
+    else doc.newPage();
+  }
+  let browserPresses = untrack(() => chatBrowser.presses);
+  $effect(() => {
+    const n = chatBrowser.presses;
+    if (n === browserPresses) return;
+    browserPresses = n;
+    untrack(toggleBrowser);
+  });
+  $effect(() => {
+    chatBrowser.open = doc.open && doc.showing === 'page';
+  });
+  onDestroy(() => (chatBrowser.open = false));
 
   // Chat's own width: too narrow for the document beside the conversation,
   // it covers it instead.
@@ -225,6 +251,9 @@
     if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'n') {
       e.preventDefault();
       chat.newChat();
+    } else if ((e.ctrlKey || e.metaKey) && e.shiftKey && !e.altKey && e.key.toLowerCase() === 'b') {
+      e.preventDefault();
+      toggleBrowser();
     } else if (e.key === 'Escape' && chat.speakingId?.startsWith('chat:')) {
       e.preventDefault();
       chat.stopReading();

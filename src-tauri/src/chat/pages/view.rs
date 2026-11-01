@@ -100,6 +100,7 @@ pub struct ViewState {
     pub url: String,
     pub title: String,
     pub can_go_back: bool,
+    pub can_go_forward: bool,
     pub loading: bool,
     /// It didn't load: why, in a few words.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -150,6 +151,44 @@ pub fn may_navigate(uri: &str, standin: Option<&str>, offline: bool) -> bool {
         Some(base) => uri.starts_with(&format!("{base}/")),
         None => !offline && crate::web::check_url(uri).is_ok(),
     }
+}
+
+/// **What the address bar's words open** (a page's tab, or a new tab's): an
+/// address as typed — with `https://` when it has none ("bg3.wiki/wiki/
+/// Gale") —, else a search on the person's engine (`web_search_browser`,
+/// as "Search in your browser" has it). Never another scheme ("file:",
+/// "javascript:"…); whether the address may open is [`load_url`]'s (public
+/// web pages only). Pure.
+pub fn address(typed: &str, engine: &str) -> Result<String, String> {
+    let t = typed.trim();
+    if t.is_empty() {
+        return Err("Type an address, or words to search for.".into());
+    }
+    let lower = t.to_ascii_lowercase();
+    if lower.starts_with("http://") || lower.starts_with("https://") {
+        return Ok(t.to_string());
+    }
+    let spaced = t.contains(char::is_whitespace);
+    // "javascript:…", "file:…", "about:…": a scheme, not a site ("site.com:8080" is one).
+    if let Some((head, rest)) = t.split_once(':') {
+        let scheme = head.starts_with(|c: char| c.is_ascii_alphabetic()) && head.chars().all(|c| c.is_ascii_alphanumeric() || "+.-".contains(c)) && !head.contains('.');
+        let port_part: String = rest.chars().take_while(|c| !"/?#".contains(*c)).collect();
+        let port = !port_part.is_empty() && port_part.chars().all(|c| c.is_ascii_digit());
+        if scheme && !port && !spaced {
+            return Err("Only web pages open here: an address, or words to search for.".into());
+        }
+    }
+    let host = t.split(['/', '?', '#']).next().unwrap_or("");
+    let host = host.rsplit_once(':').filter(|(_, p)| !p.is_empty() && p.chars().all(|c| c.is_ascii_digit())).map_or(host, |(h, _)| h);
+    let labels: Vec<&str> = host.split('.').collect();
+    let named = labels.len() >= 2
+        && labels.iter().all(|l| !l.is_empty() && !l.starts_with('-') && l.chars().all(|c| c.is_alphanumeric() || c == '-'))
+        && labels.last().is_some_and(|tld| tld.chars().count() >= 2 && tld.chars().all(char::is_alphabetic));
+    let ip = labels.len() == 4 && labels.iter().all(|l| !l.is_empty() && l.len() <= 3 && l.chars().all(|c| c.is_ascii_digit()));
+    if !spaced && (named || ip) {
+        return Ok(format!("https://{t}"));
+    }
+    Ok(crate::web::BrowserSearch::new(engine, t).url)
 }
 
 /// The address a tab shows for `loaded` (a test run's stand-in address as
@@ -280,10 +319,47 @@ pub async fn page_view_back(app: AppHandle, key: String) -> Result<(), String> {
     imp::go(app, checked_key(&key)?, imp::Go::Back).await
 }
 
+/// The page's Forward.
+#[tauri::command]
+pub async fn page_view_forward(app: AppHandle, key: String) -> Result<(), String> {
+    imp::go(app, checked_key(&key)?, imp::Go::Forward).await
+}
+
 /// The page's Reload.
 #[tauri::command]
 pub async fn page_view_reload(app: AppHandle, key: String) -> Result<(), String> {
     imp::go(app, checked_key(&key)?, imp::Go::Reload).await
+}
+
+/// **The address bar**: what the person typed, opened in page `key` (an
+/// address, or a search on their engine: [`address`]) — the page made the
+/// first time (a new tab's), else taken there. The address it opened.
+#[tauri::command]
+pub async fn page_view_go(app: AppHandle, key: String, typed: String, bounds: Option<Bounds>) -> Result<String, String> {
+    let key = checked_key(&key)?;
+    let url = address(&typed, &crate::config::load().web_search_browser)?;
+    let (standin, offline) = web_route();
+    let load = load_url(&url, standin.as_deref(), offline)?;
+    imp::go_to(app, key, url.clone(), load, bounds).await?;
+    tracing::info!("Chat: the address bar took a page beside the chat somewhere");
+    Ok(url)
+}
+
+/// **The pages' cookies, sign-ins and site data, cleared** (Delete some of
+/// your data → Pages beside the chat): WebView2's own clearing of their
+/// profile ([`PROFILE`]), through a page that's open, else one made out of
+/// sight for it and closed after. Open pages stay open.
+pub async fn clear_data(app: &AppHandle) -> Result<(), String> {
+    imp::clear_data(app.clone()).await
+}
+
+/// **Their profile's folder** (its size, for the dialog): `WV2Profile_<name>`
+/// in WebView2's `EBWebView` folder, in its user data folder — `None` when
+/// there's none yet (never used) or Yap's window can't say.
+pub async fn data_folder(app: &AppHandle) -> Option<std::path::PathBuf> {
+    let root = imp::user_data_folder(app.clone()).await?;
+    let name = format!("WV2Profile_{}", PROFILE.to_ascii_lowercase());
+    [root.join("EBWebView").join(&name), root.join(&name)].into_iter().find(|d| d.is_dir())
 }
 
 /// **Save a shot** of the page as it is in the panel: kept like a pasted
@@ -370,11 +446,21 @@ mod imp {
 
     pub enum Go {
         Back,
+        Forward,
         Reload,
     }
 
     pub async fn show(_: AppHandle, _: String, _: String, _: String, _: String, _: Option<Bounds>) -> Result<(), String> {
         Err(NO.into())
+    }
+    pub async fn go_to(_: AppHandle, _: String, _: String, _: String, _: Option<Bounds>) -> Result<(), String> {
+        Err(NO.into())
+    }
+    pub async fn clear_data(_: AppHandle) -> Result<(), String> {
+        Ok(())
+    }
+    pub async fn user_data_folder(_: AppHandle) -> Option<std::path::PathBuf> {
+        None
     }
     pub async fn place(_: AppHandle, _: String, _: Option<Bounds>) -> Result<(), String> {
         Ok(())
@@ -416,7 +502,7 @@ mod win {
     use tauri::{AppHandle, Emitter, Manager};
     use webview2_com::Microsoft::Web::WebView2::Win32::*;
     use webview2_com::{
-        take_pwstr, AcceleratorKeyPressedEventHandler, CapturePreviewCompletedHandler, ContextMenuRequestedEventHandler, CreateCoreWebView2ControllerCompletedHandler,
+        take_pwstr, AcceleratorKeyPressedEventHandler, CapturePreviewCompletedHandler, ClearBrowsingDataCompletedHandler, ContextMenuRequestedEventHandler, CreateCoreWebView2ControllerCompletedHandler,
         CustomItemSelectedEventHandler, DocumentTitleChangedEventHandler, DownloadStartingEventHandler, ExecuteScriptCompletedHandler,
         HistoryChangedEventHandler, NavigationCompletedEventHandler, NavigationStartingEventHandler, NewWindowRequestedEventHandler,
         PermissionRequestedEventHandler, ProcessFailedEventHandler, WebResourceRequestedEventHandler,
@@ -607,6 +693,10 @@ mod win {
             if core.CanGoBack(&mut back).is_ok() {
                 state.can_go_back = back.as_bool();
             }
+            let mut forward = BOOL(0);
+            if core.CanGoForward(&mut forward).is_ok() {
+                state.can_go_forward = forward.as_bool();
+            }
         }
         let _ = app.emit_to("settings", EVENT, state);
     }
@@ -647,17 +737,23 @@ mod win {
                 })
             });
             put(host, controller.as_ref(), bounds, false);
-            if let (Some(()), Some(core)) = (changed, core) {
-                unsafe {
+            match (changed, core) {
+                (Some(()), Some(core)) => unsafe {
                     let _ = core.Navigate(&HSTRING::from(load.as_str()));
+                },
+                // Its tab shown again: told where the page is (its title, Back, Forward).
+                (None, Some(_)) => {
+                    let loading = VIEWS.with(|v| v.borrow().iter().find(|x| x.key == key).is_some_and(|x| !x.loaded));
+                    tell(app, &key, loading, None);
                 }
+                _ => {}
             }
             return Ok(());
         }
         // Room for one more: the least recently shown one goes.
         if snap.is_none() {
             let alive: Vec<(String, u64, bool)> =
-                VIEWS.with(|v| v.borrow().iter().filter(|x| x.snap.is_none() && !x.key.starts_with("snap:")).map(|x| (x.key.clone(), x.used, x.bounds.is_some())).collect());
+                VIEWS.with(|v| v.borrow().iter().filter(|x| x.snap.is_none() && !x.key.starts_with("snap:") && !x.key.starts_with("clear:")).map(|x| (x.key.clone(), x.used, x.bounds.is_some())).collect());
             if let Some(gone) = evict(&alive) {
                 tracing::info!(views = alive.len(), "Chat: the least recently shown page closed to make room");
                 close_one(app, &gone);
@@ -1159,6 +1255,7 @@ mod win {
 
     pub enum Go {
         Back,
+        Forward,
         Reload,
     }
 
@@ -1168,12 +1265,173 @@ mod win {
             unsafe {
                 match go {
                     Go::Back => core.GoBack(),
+                    Go::Forward => core.GoForward(),
                     Go::Reload => core.Reload(),
                 }
             }
             .map_err(|e| e.message())
         })
         .await?
+    }
+
+    /// **The address bar's page**: page `key` taken to `load` (its address
+    /// `url` from now on: a tab shown again asks for it), or made there the
+    /// first time (a new tab's).
+    pub async fn go_to(app: AppHandle, key: String, url: String, load: String, bounds: Option<Bounds>) -> Result<(), String> {
+        let a = app.clone();
+        main_thread(&app, move |root| {
+            let open = VIEWS.with(|v| {
+                let mut v = v.borrow_mut();
+                let view = v.iter_mut().find(|x| x.key == key)?;
+                view.url = url.clone();
+                view.load = load.clone();
+                view.section.clear();
+                view.scrolled = true;
+                if bounds.is_some() {
+                    view.bounds = bounds;
+                    view.used = tick();
+                }
+                Some(view.core.clone())
+            });
+            match open {
+                Some(Some(core)) => unsafe { core.Navigate(&HSTRING::from(load.as_str())) }.map_err(|e| e.message()),
+                // Still being made: it loads the new address when it's ready.
+                Some(None) => Ok(()),
+                None => make_or_place(&a, root, key, url, load, String::new(), bounds, None),
+            }
+        })
+        .await?
+    }
+
+    // ---- the pages' own data ---------------------------------------------------------------
+
+    static CLEARS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+    /// WebView2's user data folder (the pages' profile is a folder in it).
+    pub async fn user_data_folder(app: AppHandle) -> Option<std::path::PathBuf> {
+        main_thread(&app, |root| -> Option<std::path::PathBuf> {
+            let env = env(root).ok()?;
+            let env7: ICoreWebView2Environment7 = env.cast().ok()?;
+            let mut p = PWSTR::null();
+            unsafe { env7.UserDataFolder(&mut p) }.ok()?;
+            let s = take_pwstr(p);
+            (!s.is_empty()).then(|| std::path::PathBuf::from(s))
+        })
+        .await
+        .ok()
+        .flatten()
+    }
+
+    /// Clear everything the pages' profile keeps, through `core` (one of its
+    /// pages); `done` hears how it went.
+    fn clear_profile(core: &ICoreWebView2, done: Box<dyn FnOnce(Result<(), String>)>) -> Result<(), String> {
+        let old = |e: windows::core::Error| format!("This WebView2 can't clear the pages' data ({}): Windows Update brings a newer one.", e.message());
+        let profile = unsafe { core.cast::<ICoreWebView2_13>().and_then(|c| c.Profile()) }.map_err(old)?;
+        let profile: ICoreWebView2Profile2 = profile.cast().map_err(old)?;
+        let mut done = Some(done);
+        let handler = ClearBrowsingDataCompletedHandler::create(Box::new(move |res| {
+            if let Some(done) = done.take() {
+                done(res.map_err(|e| format!("The pages' data wasn't cleared ({}).", e.message())));
+            }
+            Ok(())
+        }));
+        unsafe { profile.ClearBrowsingDataAll(&handler) }.map_err(|e| format!("The pages' data wasn't cleared ({}).", e.message()))
+    }
+
+    pub async fn clear_data(app: AppHandle) -> Result<(), String> {
+        let (tx, rx) = tokio::sync::oneshot::channel::<Result<(), String>>();
+        let a = app.clone();
+        main_thread(&app, move |root| -> Result<(), String> {
+            let send = move |r: Result<(), String>| {
+                let _ = tx.send(r);
+            };
+            // A page that's open: its profile is theirs.
+            if let Some(core) = VIEWS.with(|v| v.borrow().iter().find_map(|x| x.core.clone())) {
+                return clear_profile(&core, Box::new(send));
+            }
+            // None: one made out of sight for it, closed after (never inside
+            // WebView2's own callback).
+            let env = env(root).map_err(|e| format!("Yap couldn't reach its webview: {e}"))?;
+            let env10: ICoreWebView2Environment10 = env.cast().map_err(|e| format!("This WebView2 can't clear the pages' data ({}).", e.message()))?;
+            let parent = parent(&a)?;
+            let host = host(parent)?;
+            let key = format!("clear:{}", CLEARS.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1);
+            VIEWS.with(|v| {
+                v.borrow_mut().push(View {
+                    key: key.clone(),
+                    url: String::new(),
+                    load: String::new(),
+                    section: String::new(),
+                    host,
+                    controller: None,
+                    core: None,
+                    bounds: None,
+                    used: tick(),
+                    loaded: false,
+                    scrolled: true,
+                    snap: None,
+                })
+            });
+            let opts = unsafe { env10.CreateCoreWebView2ControllerOptions() }.map_err(|e| e.message())?;
+            unsafe {
+                opts.SetProfileName(&HSTRING::from(PROFILE)).map_err(|e| e.message())?;
+                opts.SetIsInPrivateModeEnabled(false).map_err(|e| e.message())?;
+            }
+            let (b, k) = (a.clone(), key.clone());
+            let mut send = Some(send);
+            let handler = CreateCoreWebView2ControllerCompletedHandler::create(Box::new(move |res, controller| {
+                let Some(send) = send.take() else { return Ok(()) };
+                let core = match (res, controller) {
+                    (Ok(()), Some(c)) => {
+                        VIEWS.with(|v| {
+                            if let Some(x) = v.borrow_mut().iter_mut().find(|x| x.key == k) {
+                                x.controller = Some(c.clone());
+                            }
+                        });
+                        unsafe { c.CoreWebView2() }.map_err(|e| e.message())
+                    }
+                    (Err(e), _) => Err(e.message()),
+                    _ => Err("WebView2 didn't make the page.".to_string()),
+                };
+                let (c, kk) = (b.clone(), k.clone());
+                let finish = move |r: Result<(), String>| {
+                    later_close(&c, &kk);
+                    send(r);
+                };
+                match core {
+                    Ok(core) => {
+                        // Once: by WebView2's answer, or here if it never started.
+                        let finish = std::rc::Rc::new(RefCell::new(Some(finish)));
+                        let f = finish.clone();
+                        let started = clear_profile(
+                            &core,
+                            Box::new(move |r| {
+                                if let Some(f) = f.borrow_mut().take() {
+                                    f(r);
+                                }
+                            }),
+                        );
+                        if let Err(e) = started {
+                            if let Some(f) = finish.borrow_mut().take() {
+                                f(Err(e));
+                            }
+                        }
+                    }
+                    Err(e) => finish(Err(format!("The pages' data wasn't cleared ({e})."))),
+                }
+                Ok(())
+            }));
+            unsafe { env10.CreateCoreWebView2ControllerWithOptions(host, &opts, &handler) }.map_err(|e| {
+                close_one(&a, &key);
+                format!("The pages' data wasn't cleared ({}).", e.message())
+            })
+        })
+        .await??;
+        match tokio::time::timeout(std::time::Duration::from_secs(30), rx).await {
+            Ok(Ok(r)) => r,
+            Ok(Err(_)) => Err("The pages' data wasn't cleared: WebView2 didn't answer.".into()),
+            Err(_) => Err("Clearing the pages' data didn't finish in time.".into()),
+        }
     }
 
     /// The shot of page `key` as it is now.
@@ -1405,6 +1663,31 @@ mod tests {
     use super::*;
 
     const STANDIN: &str = "http://127.0.0.1:5555/standin";
+
+    #[test]
+    fn the_address_bar_opens_an_address_or_searches_the_persons_engine() {
+        // An address as typed, https:// added when it has none.
+        assert_eq!(address("https://wiki.example.com/wiki/Fort_Joy", "google").unwrap(), "https://wiki.example.com/wiki/Fort_Joy");
+        assert_eq!(address("  wiki.example.com/wiki/Fort_Joy ", "google").unwrap(), "https://wiki.example.com/wiki/Fort_Joy");
+        assert_eq!(address("www.example.co.uk", "google").unwrap(), "https://www.example.co.uk");
+        assert_eq!(address("example.com:8443/x", "google").unwrap(), "https://example.com:8443/x");
+        assert_eq!(address("HTTP://Example.com", "google").unwrap(), "HTTP://Example.com");
+        // Words: a search on the person's engine (DuckDuckGo when it's not one Yap knows).
+        assert_eq!(address("fort joy map", "google").unwrap(), "https://www.google.com/search?q=fort+joy+map");
+        assert_eq!(address("fort joy map", "nonsense").unwrap(), "https://duckduckgo.com/?q=fort+joy+map");
+        assert_eq!(address("3.14", "bing").unwrap(), "https://www.bing.com/search?q=3.14");
+        assert_eq!(address("e.g.", "bing").unwrap(), "https://www.bing.com/search?q=e.g.");
+        assert_eq!(address("what is: a colon", "bing").unwrap(), "https://www.bing.com/search?q=what+is%3A+a+colon");
+        // Never another scheme; nothing typed, nothing opened.
+        for bad in ["javascript:alert(1)", "file:///C:/x", "about:blank", "ms-settings:privacy", "data:text/html,x", "view-source:https://example.com"] {
+            assert!(address(bad, "google").unwrap_err().contains("Only web pages open here"), "{bad}");
+        }
+        assert!(address("   ", "google").is_err());
+        // Whether it may open is load_url's: this PC's addresses never do.
+        let local = address("192.168.1.5/admin", "google").unwrap();
+        assert_eq!(local, "https://192.168.1.5/admin");
+        assert!(load_url(&local, None, false).is_err());
+    }
 
     #[test]
     fn a_page_loads_only_from_a_public_web_address_or_a_test_runs_stand_in() {

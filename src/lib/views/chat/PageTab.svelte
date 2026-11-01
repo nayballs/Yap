@@ -9,41 +9,67 @@
   //   covers the stage (a menu, a dialog, Settings, a toast) or the tab goes
   //   — so it keeps its place (its scroll, a map's zoom) while another tab
   //   shows, and closes with its tab (chatDoc.svelte.js `closeTab`).
-  // - Header: Back, Reload, Save a shot (a picture of it, kept with the
-  //   answer: `page_view_shot`), Open in <browser> (`open_external`, the
-  //   browser Settings → General → Links chose), expand, ✕.
+  // - Its bar, after Claude Code's browser pane (2026-11-01): Back, Forward,
+  //   Reload, the address (where the page is now; type an address or words
+  //   and Enter: `page_view_go`, a search on the person's engine — Ctrl+L
+  //   in the panel, Esc puts it back; "Not secure" on a plain-http page),
+  //   then Save a shot (a picture of it, kept with the answer:
+  //   `page_view_shot`), Open in <browser> (`open_external`, the browser
+  //   Settings → General → Links chose), expand, ✕.
+  // - A new tab (the row's +, Ctrl+T: chatDoc.svelte.js `newPage`) has no
+  //   page yet: the address waits, over the pages this chat read (`recent`,
+  //   as Claude Code's offers the project's servers); its webview is made
+  //   once there's somewhere to go.
   // - Under it, where it's from, its section and "Open in Brave" in words
   //   (as a picture's "From … · Open in …"); a right-click on words
   //   selected in the page offers Ask Yap about this and Read aloud (its own
   //   menu, Rust's), and Snip to Chat.
   import { invoke } from '@tauri-apps/api/core';
   import { listen } from '@tauri-apps/api/event';
-  import { onMount, untrack } from 'svelte';
+  import { onMount, tick, untrack } from 'svelte';
   import { openExternalLink } from '../../core/externalLinks.js';
   import { toast } from '../../ui/toast.svelte.js';
   import { useBrowserName, openInLabel } from '../../stores/browserName.svelte.js';
-  import { pageKey } from './chatDoc.svelte.js';
+  import { tabKeyOf } from './chatDoc.svelte.js';
 
   /**
    * `doc`: the panel's state (its `page`); `narrow`: no room beside the chat
-   * (no expand); `conversationId`: the chat a shot is kept in.
+   * (no expand); `conversationId`: the chat a shot is kept in; `recent`: the
+   * pages this conversation read ({url, title}), for a new tab.
    */
-  let { doc, narrow = false, conversationId = null } = $props();
+  let { doc, narrow = false, conversationId = null, recent = [] } = $props();
 
-  // (DocPanel makes one of these per page: its key never changes.)
+  // (DocPanel makes one of these per page tab: its key never changes.)
   const page = untrack(() => doc.page);
-  const key = pageKey(page?.url);
+  const key = tabKeyOf(page);
   const browser = useBrowserName();
 
   // What Rust says the page is doing (`yap-page-view`).
-  let st = $state({ title: '', url: '', canGoBack: false, loading: true, error: null });
+  let st = $state({ title: '', url: '', canGoBack: false, canGoForward: false, loading: true, error: null });
   let stageEl = $state(null);
+  let addrEl = $state(null);
   let shooting = $state(false);
   let failed = $state('');
+  // Where the address bar last took this tab (a tab shown again opens there).
+  const went = untrack(() => doc.pageNow[key]?.went || '');
+  // A new tab, nowhere yet.
+  let blank = $state(!page?.url && !went);
+  // The address bar: what's typed while it has the focus, else where the page is.
+  let typing = $state(false);
+  let typed = $state('');
+  let addrError = $state('');
 
-  const title = $derived(st.title || page?.title || page?.site || 'Page');
-  const site = $derived(page?.site || '');
-  const here = $derived(st.url || page?.url || '');
+  const hostOf = (u) => {
+    try {
+      return new URL(u).hostname.replace(/^www\./, '');
+    } catch {
+      return '';
+    }
+  };
+  const here = $derived(st.url || went || page?.url || '');
+  const title = $derived(st.title || page?.title || page?.site || hostOf(here) || 'Page');
+  const site = $derived(hostOf(here) || page?.site || '');
+  const insecure = $derived(/^http:\/\//i.test(here));
 
   // ---- where the page sits: over the stage, unless something covers it -------------------
 
@@ -79,28 +105,38 @@
     invoke('page_view_place', { key, bounds: b }).catch(() => {});
   }
 
+  let alive = true;
+
+  /** The page there: placed again at once (the stage may have moved while it was made), then followed. */
+  function placed() {
+    if (!alive) return;
+    ready = true;
+    sent = '';
+    follow();
+  }
+
   onMount(() => {
-    let alive = true;
+    alive = true;
     let un = null;
     listen('yap-page-view', (e) => {
       const p = e.payload;
       if (p?.key !== key) return;
-      st = { title: p.title || '', url: p.url || '', canGoBack: !!p.canGoBack, loading: !!p.loading, error: p.error || null };
+      st = { title: p.title || '', url: p.url || '', canGoBack: !!p.canGoBack, canGoForward: !!p.canGoForward, loading: !!p.loading, error: p.error || null };
+      if (p.url || p.title) doc.pageMoved(key, { title: p.title || '', url: p.url || '' });
     }).then((u) => (alive ? (un = u) : u()));
-    // Made (or found) with its place now, then followed.
-    const first = measure();
-    sent = JSON.stringify(first);
-    invoke('page_view_show', { key, url: page.url, section: page.section || null, bounds: first })
-      .then(() => {
-        if (!alive) return;
-        ready = true;
-        // Placed again at once: the stage may have moved while it was made.
-        sent = '';
-        follow();
-      })
-      .catch((e) => {
-        if (alive) failed = String(e);
-      });
+    if (blank) {
+      // A new tab: the address bar waits.
+      tick().then(() => addrEl?.focus());
+    } else {
+      // Made (or found) with its place now, then followed.
+      const first = measure();
+      sent = JSON.stringify(first);
+      invoke('page_view_show', { key, url: went || page.url, section: went ? null : page.section || null, bounds: first })
+        .then(placed)
+        .catch((e) => {
+          if (alive) failed = String(e);
+        });
+    }
     timer = setInterval(follow, 150);
     const onResize = () => follow();
     window.addEventListener('resize', onResize);
@@ -114,15 +150,69 @@
     };
   });
 
-  // ---- the header's buttons ------------------------------------------------------------
+  // ---- the bar ----------------------------------------------------------------------
 
   function back() {
     invoke('page_view_back', { key }).catch(() => {});
   }
 
+  function forward() {
+    invoke('page_view_forward', { key }).catch(() => {});
+  }
+
   function reload() {
     failed = '';
     invoke('page_view_reload', { key }).catch(() => {});
+  }
+
+  /** `text` (typed, or a page offered on a new tab) opened here: an address, or a search on the person's engine. */
+  async function go(text) {
+    const words = String(text ?? '').trim();
+    if (!words) return;
+    addrError = '';
+    failed = '';
+    try {
+      const url = await invoke('page_view_go', { key, typed: words, bounds: measure() });
+      if (!alive) return;
+      doc.pageMoved(key, { went: url });
+      typing = false;
+      addrEl?.blur();
+      if (blank) {
+        blank = false;
+        placed();
+      }
+    } catch (e) {
+      if (alive) addrError = String(e);
+    }
+  }
+
+  function addrFocus() {
+    typing = true;
+    typed = blank ? '' : here;
+    addrError = '';
+    tick().then(() => addrEl?.select());
+  }
+
+  function addrKey(e) {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      go(typed);
+    } else if (e.key === 'Escape') {
+      e.preventDefault();
+      e.stopPropagation();
+      typed = blank ? '' : here;
+      addrError = '';
+      if (!blank) addrEl?.blur();
+    }
+  }
+
+  /** Ctrl+L in the panel: the address bar. */
+  function tabKey(e) {
+    if ((e.ctrlKey || e.metaKey) && !e.altKey && !e.shiftKey && e.key.toLowerCase() === 'l') {
+      e.preventDefault();
+      e.stopPropagation();
+      addrEl?.focus();
+    }
   }
 
   /** Save a shot: a picture of the page as it is, kept with the answer, shown in its tab. */
@@ -142,21 +232,47 @@
   const openOutside = () => openExternalLink(here);
 </script>
 
-<section class="pagetab" aria-label="Page" data-testid="chat-page">
-  <header class="pagehead">
-    <svg class="pageicon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9" /><path d="M3 12h18M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18" /></svg>
-    <h2 class="pagetitle" title={here} data-testid="chat-page-title">{title}</h2>
-    <div class="pageactions">
-      <button type="button" class="pagebtn" onclick={back} disabled={!st.canGoBack} aria-label="Back" title="Back">
+<!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
+<section class="pagetab" aria-label={blank ? 'New tab' : `Page: ${title}`} data-testid="chat-page" onkeydown={tabKey}>
+  <h2 class="sr-title" data-testid="chat-page-title">{blank ? 'New tab' : title}</h2>
+  <header class="pagebar">
+    <div class="pagenav">
+      <button type="button" class="pagebtn" onclick={back} disabled={blank || !st.canGoBack} aria-label="Back" title="Back">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 6l-6 6 6 6" /></svg>
       </button>
-      <button type="button" class="pagebtn" onclick={reload} aria-label="Reload" title="Reload">
+      <button type="button" class="pagebtn" onclick={forward} disabled={blank || !st.canGoForward} aria-label="Forward" title="Forward">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 6l6 6-6 6" /></svg>
+      </button>
+      <button type="button" class="pagebtn" onclick={reload} disabled={blank} aria-label="Reload" title="Reload">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 11a8 8 0 1 0-2.3 5.7" /><path d="M20 5v6h-6" /></svg>
       </button>
-      <button type="button" class="pagebtn" onclick={saveShot} disabled={shooting || !!failed} aria-label="Save a shot of the page" title="Save a shot (a picture of the page as it is)" data-testid="chat-page-shot">
+    </div>
+    <div class="addr" class:typing class:bad={!!addrError}>
+      {#if insecure && !typing}
+        <span class="notsecure" title="This page isn't sent over a secure connection: don't type anything private into it.">Not secure</span>
+      {/if}
+      <input
+        bind:this={addrEl}
+        class="addrinput"
+        type="text"
+        spellcheck="false"
+        autocomplete="off"
+        aria-label="Address"
+        placeholder="Search the web or type an address"
+        value={typing ? typed : blank ? '' : here}
+        oninput={(e) => (typed = e.currentTarget.value)}
+        onfocus={addrFocus}
+        onblur={() => (typing = false)}
+        onkeydown={addrKey}
+        title={blank ? '' : here}
+        data-testid="chat-page-address"
+      />
+    </div>
+    <div class="pageactions">
+      <button type="button" class="pagebtn" onclick={saveShot} disabled={blank || shooting || !!failed} aria-label="Save a shot of the page" title="Save a shot (a picture of the page as it is)" data-testid="chat-page-shot">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 8h3l2-3h6l2 3h3v11H4z" /><circle cx="12" cy="13" r="3.5" /></svg>
       </button>
-      <button type="button" class="pagebtn" onclick={openOutside} aria-label={openInLabel(browser.label)} title={`${openInLabel(browser.label)}\n${here}`}>
+      <button type="button" class="pagebtn" onclick={openOutside} disabled={blank} aria-label={openInLabel(browser.label)} title={`${openInLabel(browser.label)}\n${here}`}>
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 4h6v6M20 4l-9 9" /><path d="M18 14v5H5V6h5" /></svg>
       </button>
       {#if !narrow}
@@ -179,11 +295,33 @@
       </button>
     </div>
   </header>
+  {#if addrError}
+    <p class="addrerror" role="alert" data-testid="chat-page-address-error">{addrError}</p>
+  {/if}
 
   <!-- The page's own webview sits over this (Rust's); under it, what shows
-       until it's there, or when it couldn't open. -->
-  <div class="stage" bind:this={stageEl} role="region" aria-label={`The page: ${title}`} data-testid="chat-page-stage">
-    {#if failed}
+       until it's there, or when it couldn't open — or a new tab's start. -->
+  <div class="stage" class:blank bind:this={stageEl} role="region" aria-label={blank ? 'New tab' : `The page: ${title}`} data-testid="chat-page-stage">
+    {#if blank}
+      <div class="newtab" data-testid="chat-page-new">
+        {#if recent.length}
+          <ul class="ntlist" aria-label="Pages from this chat">
+            {#each recent as r (r.url)}
+              <li>
+                <button type="button" class="ntrow" onclick={() => go(r.url)} title={r.url}>
+                  <svg class="nticon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9" /><path d="M3 12h18M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18" /></svg>
+                  <span class="nttitle">{r.title || hostOf(r.url)}</span>
+                  <span class="ntsite">{hostOf(r.url)}</span>
+                </button>
+              </li>
+            {/each}
+          </ul>
+        {/if}
+        <p class="nthint">
+          Search the web or type an address.<br />Pages open here, apart from your own browser and its sign-ins.
+        </p>
+      </div>
+    {:else if failed}
       <div class="pagefail" data-testid="chat-page-failed">
         <p>Yap couldn't bring the page up here.</p>
         <p class="why">{failed}</p>
@@ -194,18 +332,20 @@
     {/if}
   </div>
 
-  <footer class="pageinfo">
-    <p class="pagesource" data-testid="chat-page-source">
-      <span class="from">From <span class="pagesite">{site || here}</span>{#if page?.section}<span class="sep" aria-hidden="true">·</span><span class="section">{page.section}</span>{/if}</span>
-      <span class="sep" aria-hidden="true">·</span>
-      <button type="button" class="openlink" onclick={openOutside} title={here} data-testid="chat-page-open">{openInLabel(browser.label)}</button>
-    </p>
-    {#if st.error}
-      <p class="pageerror" role="status">{st.error}</p>
-    {:else}
-      <p class="pagehint">Select words on the page and right-click to ask Yap about them or hear them read aloud.</p>
-    {/if}
-  </footer>
+  {#if !blank}
+    <footer class="pageinfo">
+      <p class="pagesource" data-testid="chat-page-source">
+        <span class="from">From <span class="pagesite">{site || here}</span>{#if page?.section && !went}<span class="sep" aria-hidden="true">·</span><span class="section">{page.section}</span>{/if}</span>
+        <span class="sep" aria-hidden="true">·</span>
+        <button type="button" class="openlink" onclick={openOutside} title={here} data-testid="chat-page-open">{openInLabel(browser.label)}</button>
+      </p>
+      {#if st.error}
+        <p class="pageerror" role="status">{st.error}</p>
+      {:else}
+        <p class="pagehint">Select words on the page and right-click to ask Yap about them or hear them read aloud.</p>
+      {/if}
+    </footer>
+  {/if}
 </section>
 
 <style>
@@ -216,29 +356,83 @@
     min-width: 0;
     min-height: 0;
   }
-  .pagehead {
+  /* The page's title for screen readers and tests: the tab's name shows it. */
+  .sr-title {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    margin: -1px;
+    padding: 0;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+    white-space: nowrap;
+    border: 0;
+  }
+  /* The bar: ← → ⟳, the address, then the page's buttons (Claude Code's browser pane's). */
+  .pagebar {
     display: flex;
     align-items: center;
-    gap: 8px;
-    padding: 12px 12px 8px 18px;
+    gap: 6px;
+    padding: 6px 10px 6px 8px;
     border-bottom: 1px solid var(--yap-paper-rule);
   }
-  .pageicon {
+  .pagenav {
     flex: 0 0 auto;
-    width: 15px;
-    height: 15px;
-    color: var(--yap-primary);
+    display: flex;
+    align-items: center;
+    gap: 0;
   }
-  .pagetitle {
+  .addr {
+    flex: 1 1 auto;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    min-width: 0;
+    height: 28px;
+    padding: 0 10px;
+    border: 1px solid var(--yap-paper-rule);
+    border-radius: 7px;
+    background: var(--yap-paper-s1);
+  }
+  .addr.typing {
+    border-color: var(--yap-primary-line);
+    background: var(--yap-paper);
+    box-shadow: 0 0 0 2px var(--yap-focus-ring);
+  }
+  .addr.bad {
+    border-color: var(--yap-paper-danger);
+  }
+  .addrinput {
     flex: 1 1 auto;
     min-width: 0;
-    margin: 0;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
+    height: 100%;
+    padding: 0;
+    border: none;
+    outline: none;
+    background: none;
+    color: var(--yap-paper-ink);
+    font: inherit;
     font-size: 12.5px;
-    font-weight: 600;
+    text-overflow: ellipsis;
+  }
+  .addrinput::placeholder {
+    color: var(--yap-paper-muted);
+  }
+  .addr:not(.typing) .addrinput {
     color: var(--yap-paper-text-2);
+  }
+  .notsecure {
+    flex: 0 0 auto;
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--yap-paper-danger);
+  }
+  .addrerror {
+    margin: 0;
+    padding: 6px 14px;
+    border-bottom: 1px solid var(--yap-paper-s2);
+    font-size: 11.5px;
+    color: var(--yap-paper-danger);
   }
   .pageactions {
     flex: 0 0 auto;
@@ -306,6 +500,84 @@
     flex: 1 1 auto;
     min-height: 0;
     background: var(--yap-paper-s1);
+  }
+  /* A new tab: the pages this chat read, centred; the hint at the foot. */
+  .stage.blank {
+    background: var(--yap-paper);
+  }
+  .newtab {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: 24px 18px 64px;
+  }
+  .ntlist {
+    width: min(100%, 420px);
+    margin: 0;
+    padding: 4px;
+    list-style: none;
+    border: 1px solid var(--yap-paper-rule);
+    border-radius: 10px;
+    background: var(--yap-paper-s1);
+  }
+  .ntrow {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    width: 100%;
+    min-width: 0;
+    padding: 9px 10px;
+    border: none;
+    border-radius: 7px;
+    background: none;
+    color: var(--yap-paper-ink);
+    font: inherit;
+    font-size: 12.5px;
+    text-align: left;
+    cursor: pointer;
+  }
+  .ntrow:hover {
+    background: var(--yap-paper-s2);
+  }
+  .ntrow:focus-visible {
+    outline: 2px solid var(--yap-focus-ring);
+    outline-offset: -2px;
+  }
+  .nticon {
+    flex: 0 0 auto;
+    width: 14px;
+    height: 14px;
+    color: var(--yap-paper-muted);
+  }
+  .nttitle {
+    flex: 1 1 auto;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .ntsite {
+    flex: 0 1 auto;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    color: var(--yap-paper-muted);
+    font-size: 11.5px;
+  }
+  .nthint {
+    position: absolute;
+    left: 18px;
+    right: 18px;
+    bottom: 18px;
+    margin: 0;
+    text-align: center;
+    font-size: 11.5px;
+    line-height: 1.5;
+    color: var(--yap-paper-muted);
   }
   .pagewait {
     position: absolute;

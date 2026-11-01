@@ -1769,11 +1769,40 @@ tokens with the schemas):
   cover Yap's own UI otherwise. So the page **keeps its place** (scroll, a
   map's zoom) while another tab shows, and **closes with its tab**
   (`page_view_close`); another conversation or leaving Chat closes them all;
-  at most four stay alive (the least recently shown goes). Header: Back,
-  Reload, **Save a shot** (`page_view_shot`: kept with the answer that
+  at most four stay alive (the least recently shown goes). **Its bar**
+  (2026-11-01, after Claude Code's browser pane, matched from how it looks
+  and behaves — its code wasn't studied: Anthropic's terms rule that out):
+  Back, **Forward** (`page_view_forward`, `ViewState::can_go_forward`),
+  Reload, **the address** (where the page is now, Rust's; click or Ctrl+L
+  in the panel to type, Esc puts it back; "Not secure" on a plain-http
+  page; Enter → `page_view_go`: [`view::address`] opens an address as typed,
+  `https://` added to one without ("wiki.example.com/x"), words as a search
+  on the person's engine — `web_search_browser`, the one "Search in your
+  browser" uses —, never another scheme ("file:", "javascript:"…: said
+  under the bar), and `load_url` still holds it to public web pages; the
+  view keeps the address as its own, so the tab shown again opens there),
+  then **Save a shot** (`page_view_shot`: kept with the answer that
   brought the page up, `chats::add_shot`, and shown as a picture tab), Open
   in <browser>, expand, ✕; under it "From <site> · <section> · Open in
-  <browser>". Scrolled to `section` once loaded (`section_script`: an id as
+  <browser>". The page's title is its tab's name (`chatDoc.svelte.js`
+  `pageNow`: each page tab's title and address as Rust says, and where the
+  address bar took it). **A new tab**: with a page showing, the row of tabs
+  is there even alone, with a **+** at its end (Ctrl+T in the panel;
+  `newPage`, keys `page:new:<n>`, `tabKeyOf`): "New tab", its address bar
+  waiting over the pages this conversation's answers read or showed (six,
+  newest first, as Claude Code's offers the project's servers), "Pages open
+  here, apart from your own browser and its sign-ins" at its foot; its
+  webview is made by `page_view_go` once there's somewhere to go. **The
+  browser button**: the title bar's globe while Chat shows (top right, as
+  Claude Code's; Ctrl+Shift+B in Chat; `stores/chatBrowser.svelte.js`,
+  ChatView's `toggleBrowser`): the last page shown again unless its tab was
+  closed, else a new tab — or, with a page tab showing, the panel closed
+  (the pages stay alive behind it); pressed while a page tab shows. **Their
+  data**: the profile keeps cookies and sign-ins like any browser; Delete
+  some of your data's **Pages beside the chat** clears it all (privacy/
+  reset.rs `Kind::Pages`: WebView2's `ClearBrowsingDataAll`, through an open
+  page or one made out of sight for it; open pages stay open; Reset app
+  too). Scrolled to `section` once loaded (`section_script`: an id as
   written or with `_` / `-`, else the first heading with its words, else
   `window.find`). **Its menu** (Rust's, `ContextMenuRequested`): Back,
   Forward, Reload, Copy, Copy link (`MENU_KEEP`), and on selected words

@@ -106,6 +106,8 @@ export const docKey = (id) => `doc:${id}`;
 export const picKey = (id) => `pic:${id}`;
 /** A page's: its address without its fragment or a trailing slash (one tab a page). */
 export const pageKey = (url) => `page:${String(url || '').trim().replace(/#.*$/, '').replace(/\/+$/, '')}`;
+/** A page tab's key: a new tab's own (`page:new:1`), else its page's. */
+export const tabKeyOf = (p) => p?.tabKey || pageKey(p?.url);
 
 /** `key` among `keys`, as documents.rs matches a section's key (case aside). */
 const hasKey = (keys, key) => keys.some((k) => k.trim().toLowerCase() === String(key).trim().toLowerCase());
@@ -121,6 +123,11 @@ export function createDocPanel({ onopennote = () => null } = {}) {
   let picture = $state(null);
   // A live page beside the chat (chat/pages.rs `ShownPage`: its Page tab).
   let page = $state(null);
+  // Each page tab as it is now (tab key → { title, url, went }): its title
+  // and address as Rust says, and where the address bar last took it (a
+  // tab shown again opens there). New tabs are counted for their keys.
+  let pageNow = $state({});
+  let newTabs = 0;
   // Tabs closed (their keys), and items shown that no answer has yet (a
   // turn's, before its answer is kept).
   let hidden = $state([]);
@@ -167,7 +174,7 @@ export function createDocPanel({ onopennote = () => null } = {}) {
           : null
         : showing === 'page'
           ? page
-            ? pageKey(page.url)
+            ? tabKeyOf(page)
             : null
           : id != null
             ? docKey(id)
@@ -313,12 +320,24 @@ export function createDocPanel({ onopennote = () => null } = {}) {
    * (chat/pages/view.rs). The document stays as it was behind it.
    */
   function showPage(p) {
-    if (!p?.url) return;
+    if (!p?.url && !p?.tabKey) return;
     if (showing === 'doc') flushSave();
-    inRow({ key: pageKey(p.url), kind: 'page', page: p });
+    inRow({ key: tabKeyOf(p), kind: 'page', page: p });
     page = p;
     showing = 'page';
     open = true;
+  }
+
+  /** The row's +: a new page tab, its address bar waiting (Claude Code's browser pane's). */
+  function newPage() {
+    newTabs += 1;
+    showPage({ url: '', title: '', tabKey: `page:new:${newTabs}` });
+  }
+
+  /** Page tab `key` as it is now (PageTab: Rust's title and address, where the address bar took it). */
+  function pageMoved(key, now) {
+    if (!key) return;
+    pageNow = { ...pageNow, [key]: { ...pageNow[key], ...now } };
   }
 
   /** A tab of the row, shown. */
@@ -342,7 +361,10 @@ export function createDocPanel({ onopennote = () => null } = {}) {
     if (!key || hidden.includes(key)) return;
     hidden = [...hidden, key];
     // A page closes with its tab (its webview goes).
-    if (key.startsWith('page:')) invoke('page_view_close', { key }).catch(() => {});
+    if (key.startsWith('page:')) {
+      invoke('page_view_close', { key }).catch(() => {});
+      if (pageNow[key]) pageNow = Object.fromEntries(Object.entries(pageNow).filter(([k]) => k !== key));
+    }
     if (key !== active) return;
     if (next) openTab(next);
     else close();
@@ -422,8 +444,9 @@ export function createDocPanel({ onopennote = () => null } = {}) {
     close();
     showing = 'doc';
     picture = null;
-    if (page) closePages();
+    if (page || Object.keys(pageNow).length) closePages();
     page = null;
+    pageNow = {};
     hidden = [];
     extra = [];
   }
@@ -544,6 +567,7 @@ export function createDocPanel({ onopennote = () => null } = {}) {
     get showing() { return showing; },
     get picture() { return picture; },
     get page() { return page; },
+    get pageNow() { return pageNow; },
     get extra() { return extra; },
     get hidden() { return hidden; },
     get active() { return active; },
@@ -570,6 +594,8 @@ export function createDocPanel({ onopennote = () => null } = {}) {
     show,
     showPicture,
     showPage,
+    newPage,
+    pageMoved,
     closePages,
     openTab,
     closeTab,

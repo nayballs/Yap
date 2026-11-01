@@ -42,6 +42,7 @@
   import ConnectCalendarDialog from '../components/ConnectCalendarDialog.svelte';
   import HomeView from './home/HomeView.svelte';
   import { chatRequest } from '../stores/chatRequest.svelte.js';
+  import { chatBrowser } from '../stores/chatBrowser.svelte.js';
   import { menuOrDialogOpen } from '../ui/contextMenu.svelte.js';
   import { noteAccountPicture } from '../core/connections.js';
   import { prefetchHome } from './home/homeData.js';
@@ -142,9 +143,14 @@
   // "File every meeting with example.com in Clients?" after a meeting filed
   // by hand (calendar/filing/companies.rs), with Undo after Yes.
   initCompanyFolders();
-  // Reset app (privacy/reset.rs): the views below are shown afresh.
+  // Reset app (privacy/reset.rs): the views below are shown afresh — not for
+  // the pages beside the chat alone (their cookies went; the pages stay open).
   let dataGeneration = $state(0);
-  listen('yap-data-reset', () => dataGeneration++);
+  listen('yap-data-reset', (e) => {
+    const kinds = e.payload?.kinds || [];
+    if (kinds.length === 1 && kinds[0] === 'pages') return;
+    dataGeneration++;
+  });
   // Upload's job (upload.svelte.js): its progress, Cancel and result, and
   // the "Transcription complete" toast, whichever view is up — the view
   // unmounts when you leave it (or Chat opens by itself).
@@ -369,6 +375,20 @@
       <span class="brandname" data-tauri-drag-region>Yap</span>
     </div>
     <div class="winbtns">
+      {#if activeView === 'chat'}
+        <!-- Chat's browser: pages beside the chat (Ctrl+Shift+B), as Claude Code's button is. -->
+        <button
+          class="winbtn browser"
+          class:open={chatBrowser.open}
+          aria-label="Browser"
+          aria-pressed={chatBrowser.open}
+          data-tip="Browser (Ctrl+Shift+B)"
+          data-testid="chat-browser-button"
+          onclick={() => chatBrowser.presses++}
+        >
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9" /><path d="M3 12h18M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18" /></svg>
+        </button>
+      {/if}
       <!-- Help (views/help/, its own chunk: the main one stays under Vite's 700 kB). -->
       {#await import('./help/HelpMenu.svelte') then { default: HelpMenu }}
         <HelpMenu
@@ -694,15 +714,22 @@
     display: flex;
     align-self: stretch;
   }
-  .winbtn.bell {
+  .winbtn.bell,
+  .winbtn.browser {
     position: relative;
     cursor: pointer;
   }
-  .winbtn.bell.open {
+  .winbtn.bell.open,
+  .winbtn.browser.open {
     background: var(--yap-raised);
     color: var(--yap-fg);
   }
-  .winbtn.bell::after {
+  .winbtn.browser svg {
+    width: 17px;
+    height: 17px;
+  }
+  .winbtn.bell::after,
+  .winbtn.browser::after {
     content: attr(data-tip);
     position: absolute;
     top: calc(100% + 2px);
@@ -719,7 +746,8 @@
     transition: opacity 120ms ease;
     z-index: 60;
   }
-  .winbtn.bell:hover:not(.open)::after {
+  .winbtn.bell:hover:not(.open)::after,
+  .winbtn.browser:hover::after {
     opacity: 1;
   }
   .belldot {
