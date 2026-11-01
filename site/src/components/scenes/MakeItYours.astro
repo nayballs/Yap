@@ -1,0 +1,346 @@
+---
+// Make it yours: six small cards, each with a little of the app's own UI
+// (the dictionary, a learned word, a snippet, names on screen, languages,
+// code said aloud). The names and words are made up.
+import { NAME } from '../../brand';
+
+const tiles = [
+  {
+    id: 'dict',
+    title: 'A dictionary of your words',
+    text: 'Each word with the ways it gets misheard. Near misses are caught too, and the list imports and exports as CSV.',
+  },
+  {
+    id: 'learn',
+    title: 'It learns from your fixes',
+    text: `Correct a word after a dictation and ${NAME} offers to add it, so the same slip doesn’t happen twice.`,
+  },
+  {
+    id: 'snip',
+    title: 'Snippets',
+    text: 'Say a short phrase and get the text you type all the time: an address, a sign-off, a link.',
+  },
+  {
+    id: 'names',
+    title: 'Names as the screen spells them',
+    text: 'The names in the window in front are spelled the way it writes them, for that dictation only.',
+  },
+  {
+    id: 'langs',
+    title: 'Your languages',
+    text: 'Tell it the languages you speak. A shortcut per language, or one that translates as you talk.',
+  },
+  {
+    id: 'code',
+    title: 'Code, said out loud',
+    text: 'In an editor or a terminal, the file names and symbols on screen are typed as they’re written.',
+  },
+];
+---
+<ul class="bento">
+  {tiles.map((t) => (
+    <li class="tile" data-reveal>
+      <div class="tile-ui" aria-hidden="true">
+        {t.id === 'dict' && (
+          <div class="dict">
+            <div class="dict-row">
+              <span class="dict-word">Siobhan</span>
+              <span class="dict-star">★</span>
+            </div>
+            <div class="dict-heard">
+              <span class="dict-h">Heard as</span>
+              <span class="chip">Shivon</span>
+              <span class="chip">Chevonne</span>
+              <span class="chip">She vaughn</span>
+            </div>
+          </div>
+        )}
+        {t.id === 'learn' && (
+          <div class="toast">
+            <p class="toast-t">Add “Kubernetes” to your dictionary?</p>
+            <p class="toast-s">You changed “cooper netties” after a dictation.</p>
+            <div class="toast-b"><span class="b-ink">Add</span><span class="b-q">Not now</span></div>
+          </div>
+        )}
+        {t.id === 'snip' && (
+          <div class="snip">
+            <span class="snip-say"><span class="wave is-live">{Array.from({ length: 6 }, () => <i></i>)}</span>“my address”</span>
+            <span class="snip-arrow"></span>
+            <span class="snip-out">12 Example Street<br />Exampletown</span>
+          </div>
+        )}
+        {t.id === 'names' && (
+          <div class="names">
+            <p class="names-from"><span>From</span> Aoife Ní Bhriain</p>
+            <p class="names-typed">Thanks <mark>Aoife</mark>, Thursday works for me</p>
+          </div>
+        )}
+        {t.id === 'langs' && (
+          <div class="langs">
+            <div class="langs-row"><span class="chip chip-amber">English</span><span class="chip">Français</span><span class="chip">Deutsch</span></div>
+            <p class="langs-toast"><span class="mini-key"></span>{NAME} recognised French</p>
+          </div>
+        )}
+        {t.id === 'code' && (
+          <div class="code">
+            <p class="code-said">“user service dot ts”</p>
+            <p class="code-typed"><code>userService.ts</code></p>
+          </div>
+        )}
+      </div>
+      <h3>{t.title}</h3>
+      <p>{t.text}</p>
+    </li>
+  ))}
+</ul>
+
+<style>
+  .bento {
+    list-style: none;
+    padding: 0;
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: clamp(14px, 2vw, 22px);
+  }
+  .tile {
+    display: grid;
+    grid-template-rows: auto auto 1fr;
+    gap: 10px;
+    padding: 14px 14px 24px;
+    border-radius: 22px;
+    background: var(--t-s2);
+    box-shadow: 0 0 0 1px var(--t-border-subtle), var(--t-shadow-sm);
+  }
+  .tile h3,
+  .tile > p {
+    padding-inline: 10px;
+  }
+  .tile h3 {
+    margin-top: 8px;
+    font-size: 1.1875rem;
+  }
+  .tile > p {
+    color: var(--t-fg-80);
+    font-size: 0.98rem;
+  }
+  .tile-ui {
+    display: grid;
+    place-items: center;
+    height: 168px;
+    padding: 16px;
+    border-radius: 14px;
+    background:
+      radial-gradient(100% 80% at 100% 0%, color-mix(in srgb, var(--t-key-bg) 12%, transparent), transparent 70%),
+      var(--t-s3);
+    border: 1px solid var(--t-border-subtle);
+    font-size: 0.875rem;
+    overflow: hidden;
+  }
+  .tile-ui p {
+    max-width: none;
+  }
+
+  /* dictionary */
+  .dict {
+    width: 100%;
+    max-width: 280px;
+    padding: 12px 14px;
+    border-radius: 12px;
+    background: var(--t-s2);
+    box-shadow: 0 0 0 1px var(--t-border), var(--t-shadow-sm);
+  }
+  .dict-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding-bottom: 8px;
+    border-bottom: 1px solid var(--t-rule);
+  }
+  .dict-word {
+    font-weight: 720;
+    font-size: 1.0625rem;
+  }
+  .dict-star {
+    color: var(--t-primary);
+  }
+  .dict-heard {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 6px;
+    padding-top: 10px;
+  }
+  .dict-h {
+    width: 100%;
+    font-size: 0.75rem;
+    font-weight: 640;
+    color: var(--t-muted);
+  }
+
+  /* a learned word */
+  .toast {
+    width: 100%;
+    max-width: 290px;
+    padding: 12px 14px;
+    border-radius: 12px;
+    background: var(--t-s2);
+    box-shadow: 0 0 0 1px var(--t-border), var(--t-shadow-menu);
+  }
+  .toast-t {
+    font-weight: 700;
+  }
+  .toast-s {
+    margin-top: 2px;
+    color: var(--t-muted);
+    font-size: 0.8125rem;
+  }
+  .toast-b {
+    display: flex;
+    gap: 6px;
+    margin-top: 10px;
+  }
+  .b-ink,
+  .b-q {
+    padding: 4px 12px;
+    border-radius: 8px;
+    font-size: 0.8125rem;
+    font-weight: 650;
+  }
+  .b-ink {
+    background: var(--t-ink);
+    color: var(--t-ink-fg);
+  }
+  .b-q {
+    border: 1px solid var(--t-border);
+    background: var(--t-s2);
+  }
+
+  /* snippet */
+  .snip {
+    display: grid;
+    justify-items: center;
+    gap: 8px;
+  }
+  .snip-say {
+    display: inline-flex;
+    align-items: center;
+    gap: 10px;
+    padding: 6px 14px;
+    border-radius: 999px;
+    background: var(--bar-surface);
+    border: 1px solid var(--bar-border);
+    box-shadow: var(--bar-shadow);
+    font-weight: 640;
+  }
+  .snip-say :global(.wave) {
+    height: 14px;
+  }
+  .snip-arrow {
+    width: 2px;
+    height: 14px;
+    background: var(--t-border-hover);
+  }
+  .snip-out {
+    padding: 8px 14px;
+    border-radius: 10px;
+    background: var(--t-s2);
+    box-shadow: 0 0 0 1px var(--t-border);
+    text-align: center;
+    line-height: 1.4;
+  }
+
+  /* names on screen */
+  .names {
+    width: 100%;
+    max-width: 290px;
+    display: grid;
+    gap: 10px;
+  }
+  .names-from {
+    padding: 8px 12px;
+    border-radius: 10px;
+    background: var(--t-s2);
+    box-shadow: 0 0 0 1px var(--t-border);
+  }
+  .names-from span {
+    color: var(--t-muted);
+    margin-right: 8px;
+  }
+  .names-typed {
+    padding: 8px 12px;
+    border-radius: 10px;
+    background: var(--t-s2);
+    box-shadow: 0 0 0 1px var(--t-primary-line), 0 0 0 4px var(--t-primary-wash);
+  }
+  .names-typed mark {
+    background: var(--t-primary-wash);
+    color: inherit;
+    border-radius: 3px;
+    padding-inline: 2px;
+  }
+
+  /* languages */
+  .langs {
+    display: grid;
+    justify-items: center;
+    gap: 14px;
+  }
+  .langs-row {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: center;
+    gap: 6px;
+  }
+  .langs-row .chip {
+    font-size: 0.8125rem;
+    padding: 4px 12px;
+  }
+  .langs-toast {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 14px;
+    border-radius: 12px;
+    background: var(--t-s2);
+    box-shadow: 0 0 0 1px var(--t-border), var(--t-shadow-menu);
+    font-weight: 650;
+  }
+  .mini-key {
+    width: 16px;
+    height: 15px;
+    border-radius: 5px;
+    border: 1px solid var(--t-key-border);
+    background: var(--t-key-bg);
+    box-shadow: 0 2px 0 var(--t-key-border);
+  }
+
+  /* code */
+  .code {
+    display: grid;
+    justify-items: center;
+    gap: 10px;
+  }
+  .code-said {
+    color: var(--t-muted);
+    font-size: 0.9375rem;
+  }
+  .code-typed code {
+    font-size: 1.05rem;
+    padding: 6px 12px;
+    border-radius: 8px;
+    background: #1b1915;
+    color: #f0b04a;
+    border-color: #3a352b;
+  }
+
+  @media (max-width: 1000px) {
+    .bento {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+  }
+  @media (max-width: 640px) {
+    .bento {
+      grid-template-columns: 1fr;
+    }
+  }
+</style>

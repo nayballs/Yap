@@ -1,42 +1,61 @@
 ---
 // The opening of a feature page: what it is in one line, the button, and the
-// page's picture beside it (a placeholder until it's captured).
+// page's picture (a live mock-up of the app, components/scenes/). `stack`
+// puts the words centred above a wide picture; `split` beside it.
 import DownloadButton from './DownloadButton.astro';
 interface Props {
   title: string;
   lede: string;
   kicker?: string;
   cta?: boolean;
+  layout?: 'split' | 'stack';
 }
-const { title, lede, kicker, cta = true } = Astro.props;
+const { title, lede, kicker, cta = true, layout = 'split' } = Astro.props;
 const hasVisual = Astro.slots.has('visual');
+const stacked = !hasVisual || layout === 'stack';
 ---
-<section class="phero">
-  <div class:list={['wrap', hasVisual ? 'split split-media' : 'phero-solo']}>
+<section class:list={['phero', stacked ? 'phero-stack' : 'phero-split']}>
+  <div class:list={['wrap', !stacked && 'split split-media']}>
     <div class="phero-copy">
-      {kicker && <p class="kicker">{kicker}</p>}
+      {kicker && <p class="eyebrow">{kicker}</p>}
       <h1>{title}</h1>
       <p class="lede">{lede}</p>
       <slot />
       {cta && <div class="btn-row phero-cta"><DownloadButton size="lg" meta primary /></div>}
     </div>
-    {hasVisual && <div class="phero-visual"><slot name="visual" /></div>}
+    {hasVisual && !stacked && <div class="phero-visual" data-reveal><slot name="visual" /></div>}
   </div>
+  {hasVisual && stacked && <div class="wrap-wide phero-wide" data-reveal><slot name="visual" /></div>}
 </section>
 
 <style>
   .phero {
-    padding-block: clamp(48px, 7vw, 96px) clamp(48px, 6vw, 88px);
+    padding-block: clamp(48px, 7vw, 104px) clamp(56px, 7vw, 104px);
   }
   .phero-copy {
     display: grid;
-    gap: 20px;
+    gap: 22px;
     justify-items: start;
   }
-  .phero-solo .phero-copy {
-    max-width: 46rem;
+  .phero-stack .phero-copy {
+    max-width: 52rem;
+    margin-inline: auto;
+    justify-items: center;
+    text-align: center;
+  }
+  .phero-stack .phero-copy :global(.dl-block) {
+    justify-items: center;
+  }
+  .phero-stack .lede {
+    margin-inline: auto;
   }
   .phero-cta {
-    margin-top: 12px;
+    margin-top: 10px;
+  }
+  .phero-split h1 {
+    font-size: clamp(2.5rem, 1.3rem + 3.8vw, 4.6rem);
+  }
+  .phero-wide {
+    margin-top: clamp(40px, 6vw, 80px);
   }
 </style>

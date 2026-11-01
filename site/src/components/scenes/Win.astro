@@ -1,0 +1,17 @@
+---
+// A Windows window: a title bar with its caption buttons, and a body.
+interface Props {
+  title: string;
+  dark?: boolean;
+  class?: string;
+}
+const { title, dark = false, class: className } = Astro.props;
+---
+<div class:list={['win', dark && 'win-dark', className]}>
+  <div class="win-top">
+    <span class="win-icon"></span>
+    <span class="win-title">{title}</span>
+    <span class="win-caps"><i></i><i></i><i></i></span>
+  </div>
+  <div class="win-body"><slot /></div>
+</div>

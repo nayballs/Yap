@@ -1,0 +1,161 @@
+---
+// Settings → Privacy & data → Network connections (site plan A11, drawn):
+// a made-up day with AI cleanup on the model on this PC and search by
+// meaning switched on. Every connection the app makes is listed by purpose,
+// with where it went: This PC, Your network or Internet.
+const rows = [
+  { label: 'AI cleanup · the model on this PC', meta: '38 requests · 41 KB sent · 36 KB received', place: 'This PC', kind: 'pc' },
+  { label: 'Search by meaning · on this PC', meta: '6 requests · 9 KB sent · 210 KB received', place: 'This PC', kind: 'pc' },
+  { label: 'Checking for updates', meta: '1 request · 2 KB sent · 3 KB received', place: 'Internet', kind: 'net', host: 'github.com' },
+];
+---
+<div class="scene scene-desk ns" role="img" aria-label="Settings, Privacy and data, Network connections, on a made-up day: 44 connections stayed on this PC (AI cleanup and search by meaning, both on the PC) and one went to the internet, a check for updates on github.com.">
+  <div class="win ns-win" aria-hidden="true">
+    <div class="ns-head">
+      <p class="ns-back">‹ Privacy &amp; data</p>
+      <p class="ns-title">Network connections</p>
+      <p class="ns-sub">Every connection made today, by purpose. What was in it is never kept.</p>
+    </div>
+    <div class="ns-tiles">
+      <div class="ns-tile"><p class="ns-n num">44</p><p>stayed on this PC today</p></div>
+      <div class="ns-tile"><p class="ns-n num">1</p><p>left this PC today</p></div>
+    </div>
+    <div class="ns-filter"><span class="is-on">All 45</span><span>Left this PC 1</span><span>On this PC 44</span></div>
+    <ul class="ns-rows">
+      {rows.map((r) => (
+        <li class="ns-row">
+          <span class:list={['ns-ic', `ns-ic-${r.kind}`]}></span>
+          <span class="ns-text">
+            <span class="ns-label">{r.label}</span>
+            <span class="ns-meta">{r.meta}{r.host && <> · <code>{r.host}</code></>}</span>
+          </span>
+          <span class:list={['chip', r.kind === 'pc' ? 'chip-green' : 'chip']}>{r.place}</span>
+        </li>
+      ))}
+    </ul>
+  </div>
+</div>
+
+<style>
+  .ns {
+    display: grid;
+    place-items: center;
+    padding: clamp(18px, 3.4vw, 44px);
+    border: 0;
+  }
+  .ns-win {
+    width: min(100%, 540px);
+    padding: 20px 20px 10px;
+    gap: 16px;
+  }
+  .ns p {
+    max-width: none;
+  }
+  .ns-back {
+    font-size: 0.78rem;
+    font-weight: 620;
+    color: var(--t-muted);
+  }
+  .ns-title {
+    margin-top: 4px;
+    font-size: 1.35rem;
+    font-weight: 720;
+    letter-spacing: -0.025em;
+  }
+  .ns-sub {
+    margin-top: 4px;
+    font-size: 0.8125rem;
+    color: var(--t-fg-80);
+  }
+  .ns-tiles {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 10px;
+  }
+  .ns-tile {
+    padding: 12px 14px;
+    border-radius: 12px;
+    background: var(--t-s3);
+    font-size: 0.8125rem;
+    color: var(--t-fg-80);
+  }
+  .ns-n {
+    font-size: 2rem;
+    line-height: 1;
+    color: var(--t-fg);
+    margin-bottom: 4px;
+  }
+  .ns-filter {
+    display: inline-flex;
+    justify-self: start;
+    gap: 2px;
+    padding: 3px;
+    border-radius: 10px;
+    background: var(--t-s3);
+    font-size: 0.75rem;
+    font-weight: 620;
+    color: var(--t-muted);
+  }
+  .ns-filter span {
+    padding: 4px 10px;
+    border-radius: 8px;
+    white-space: nowrap;
+  }
+  .ns-filter .is-on {
+    background: var(--t-s2);
+    color: var(--t-fg);
+    box-shadow: var(--t-shadow-sm);
+  }
+  .ns-rows {
+    list-style: none;
+    padding: 0;
+    display: grid;
+  }
+  .ns-row {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding-block: 12px;
+    border-top: 1px solid var(--t-rule);
+  }
+  .ns-ic {
+    flex: none;
+    width: 30px;
+    height: 30px;
+    border-radius: 9px;
+    background: var(--t-s3);
+    box-shadow: inset 0 0 0 1px var(--t-border-subtle);
+  }
+  .ns-ic-pc {
+    background:
+      linear-gradient(var(--t-fg-62), var(--t-fg-62)) 8px 9px / 14px 9px no-repeat,
+      linear-gradient(var(--t-fg-62), var(--t-fg-62)) 12px 20px / 6px 2px no-repeat,
+      var(--t-s3);
+  }
+  .ns-ic-net {
+    background:
+      radial-gradient(circle at 50% 50%, transparent 6px, var(--t-fg-62) 6.5px, var(--t-fg-62) 8px, transparent 8.5px),
+      var(--t-s3);
+  }
+  .ns-text {
+    flex: 1;
+    min-width: 0;
+    display: grid;
+    gap: 1px;
+  }
+  .ns-label {
+    font-weight: 650;
+    font-size: 0.8125rem;
+  }
+  .ns-meta {
+    font-size: 0.72rem;
+    color: var(--t-muted);
+  }
+  .ns-meta code {
+    font-size: 0.95em;
+    padding: 0 0.3em;
+  }
+  .ns-row .chip {
+    font-size: 0.7rem;
+  }
+</style>

@@ -2,7 +2,7 @@
 import Layout from '../layouts/Layout.astro';
 import PageHero from '../components/PageHero.astro';
 import LeavesTable from '../components/LeavesTable.astro';
-import Placeholder from '../components/Placeholder.astro';
+import NetworkScene from '../components/scenes/NetworkScene.astro';
 import Faq from '../components/Faq.astro';
 import Closing from '../components/Closing.astro';
 import DraftNote from '../components/DraftNote.astro';
@@ -15,6 +15,7 @@ import { faqFor } from '../data/faq';
   description={`How ${NAME} keeps your voice on your PC: what happens when you press the key, exactly what goes online and when, and how to check it yourself.`}
 >
   <PageHero
+    kicker="Privacy and data"
     title="Your voice doesn’t leave your PC"
     lede="Not “encrypted and deleted later”: transcribed on your own hardware. Here’s exactly what does go online, when, and how to check it yourself."
     cta={false}
@@ -72,7 +73,8 @@ import { faqFor } from '../data/faq';
         </div>
       </div>
       <div class="stack">
-        <Placeholder id="A11" title="Network connections" shows="Settings → Privacy & data: a day’s connections, by purpose and host." format="PNG, light and dark" ratio="tall" />
+        <NetworkScene />
+        <p class="scene-note">Drawn from Settings → Privacy &amp; data → Network connections, with a made-up day.</p>
         <DraftNote>The Wi-Fi-off clip (A6) goes here too. Verify each “keeps working” feature with the Wi-Fi off before launch (plan §4.1).</DraftNote>
       </div>
     </div>
@@ -155,7 +157,7 @@ import { faqFor } from '../data/faq';
   </section>
 
   <Faq items={faqFor('privacy')} />
-  <Closing />
+  <Closing slot="after" />
 </Layout>
 
 <style>

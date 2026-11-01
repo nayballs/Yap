@@ -9,8 +9,15 @@ import {
   LICENSE_URL,
   DOCS_URL,
   ISSUES_URL,
+  HOTKEY,
 } from '../brand';
 import Mark from './Mark.astro';
+
+const products = [
+  { href: '/dictation', title: 'Dictation', line: `Press ${HOTKEY}, talk, and tidy text lands at your cursor.`, icon: 'key' },
+  { href: '/meetings', title: 'Meetings', line: 'Notes beside the call, made on your PC. No bot joins.', icon: 'notes' },
+  { href: '/assistant', title: 'Assistant', line: 'Ask out loud from any app and hear the answer.', icon: 'voice' },
+];
 
 const columns = [
   {
@@ -46,29 +53,49 @@ const columns = [
 ];
 ---
 <footer class="ftr">
-  <div class="wrap ftr-grid">
-    <div class="ftr-about">
-      <a class="ftr-brand" href="/"><Mark size={28} /><span>{NAME}</span></a>
-      <p>Dictation, meeting notes and a voice assistant for Windows that run on your own PC. Free and open source.</p>
-      <p class="ftr-promise">This site sets no cookies and loads nothing from anyone else.</p>
-      <div class="theme" role="group" aria-label="Colour theme" data-theme-switch hidden>
-        <button type="button" data-value="system">System</button>
-        <button type="button" data-value="light">Light</button>
-        <button type="button" data-value="dark">Dark</button>
+  <div class="wrap-wide">
+    <ul class="ftr-products" aria-label="Products">
+      {products.map((p) => (
+        <li>
+          <a class="prod" href={p.href}>
+            <span class:list={['prod-icon', `prod-${p.icon}`]} aria-hidden="true">
+              {p.icon === 'key' && <span class="prod-key">{HOTKEY}</span>}
+              {p.icon === 'notes' && <span class="prod-lines"><i></i><i></i><i></i></span>}
+              {p.icon === 'voice' && <span class="prod-wave"><i></i><i></i><i></i><i></i><i></i></span>}
+            </span>
+            <span class="prod-text">
+              <span class="prod-title">{p.title}</span>
+              <span class="prod-line">{p.line}</span>
+            </span>
+          </a>
+        </li>
+      ))}
+    </ul>
+
+    <div class="ftr-grid">
+      <div class="ftr-about">
+        <a class="ftr-brand" href="/"><Mark size={28} /><span>{NAME}</span></a>
+        <p>Dictation, meeting notes and a voice assistant for Windows that run on your own PC. Free and open source.</p>
+        <p class="ftr-promise">This site sets no cookies and loads nothing from anyone else.</p>
+        <div class="theme" role="group" aria-label="Colour theme" data-theme-switch hidden>
+          <button type="button" data-value="system">System</button>
+          <button type="button" data-value="light">Light</button>
+          <button type="button" data-value="dark">Dark</button>
+        </div>
       </div>
+      {columns.map((c) => (
+        <nav aria-label={c.title}>
+          <h2>{c.title}</h2>
+          <ul>
+            {c.links.map((l) => <li><a href={l.href}>{l.label}</a></li>)}
+          </ul>
+        </nav>
+      ))}
     </div>
-    {columns.map((c) => (
-      <nav aria-label={c.title}>
-        <h2>{c.title}</h2>
-        <ul>
-          {c.links.map((l) => <li><a href={l.href}>{l.label}</a></li>)}
-        </ul>
-      </nav>
-    ))}
-  </div>
-  <div class="wrap ftr-base">
-    <p>The code is free to read, build and change under the MIT licence.</p>
-    {FORMER_NAME && RENAMED_ON && <p>{NAME} was called {FORMER_NAME} until {RENAMED_ON}.</p>}
+    <div class="ftr-base">
+      <p>The code is free to read, build and change under the MIT licence.</p>
+      {FORMER_NAME && RENAMED_ON && <p>{NAME} was called {FORMER_NAME} until {RENAMED_ON}.</p>}
+    </div>
   </div>
 </footer>
 
@@ -103,10 +130,111 @@ const columns = [
 
 <style>
   .ftr {
-    padding-block: 56px 40px;
+    padding-block: clamp(36px, 5vw, 64px) 40px;
     color: var(--t-fg-80);
     font-size: 0.9375rem;
   }
+
+  /* The three products, each a card with its own small mark. */
+  .ftr-products {
+    list-style: none;
+    padding: 0;
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 12px;
+    margin-bottom: clamp(40px, 5vw, 64px);
+  }
+  .prod {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    height: 100%;
+    padding: 14px;
+    border-radius: 18px;
+    background: var(--t-s1);
+    box-shadow: 0 0 0 1px var(--t-border-subtle), var(--t-shadow-sm);
+    color: var(--t-fg);
+    text-decoration: none;
+    transition: box-shadow 160ms var(--ease), transform 160ms var(--ease);
+  }
+  .prod:hover {
+    color: var(--t-fg);
+    box-shadow: 0 0 0 1px var(--t-border-hover), var(--t-shadow-menu);
+    transform: translateY(-1px);
+  }
+  .prod-icon {
+    flex: none;
+    display: grid;
+    place-items: center;
+    width: 72px;
+    height: 72px;
+    border-radius: 14px;
+    background: var(--t-s3);
+    border: 1px solid var(--t-border-subtle);
+  }
+  .prod-key {
+    display: grid;
+    place-items: center;
+    width: 40px;
+    height: 37px;
+    border-radius: 10px;
+    border: 1.5px solid var(--t-key-border);
+    background: var(--t-key-bg);
+    color: var(--t-key-fg);
+    font-weight: 740;
+    font-size: 0.95rem;
+    box-shadow: 0 3px 0 var(--t-key-border);
+  }
+  .prod-lines {
+    display: grid;
+    gap: 5px;
+    width: 40px;
+    padding: 8px;
+    border-radius: 6px;
+    background: var(--t-s2);
+    border: 1px solid var(--t-border);
+  }
+  .prod-lines i {
+    height: 3px;
+    border-radius: 2px;
+    background: var(--t-fg-45);
+  }
+  .prod-lines i:last-child {
+    width: 60%;
+  }
+  .prod-wave {
+    display: flex;
+    align-items: center;
+    gap: 3px;
+    height: 30px;
+    padding-inline: 10px;
+    border-radius: 999px;
+    background: var(--bar-surface);
+    border: 1px solid var(--bar-border);
+  }
+  .prod-wave i {
+    width: 3px;
+    border-radius: 2px;
+    background: var(--bar-wave);
+    height: 8px;
+  }
+  .prod-wave i:nth-child(2),
+  .prod-wave i:nth-child(4) { height: 15px; }
+  .prod-wave i:nth-child(3) { height: 20px; }
+  .prod-text {
+    display: grid;
+    gap: 2px;
+  }
+  .prod-title {
+    font-weight: 700;
+    font-size: 1.0625rem;
+    letter-spacing: -0.015em;
+  }
+  .prod-line {
+    color: var(--t-fg-80);
+    line-height: 1.4;
+  }
+
   .ftr-grid {
     display: grid;
     grid-template-columns: minmax(0, 1.6fr) repeat(3, minmax(0, 1fr));
@@ -117,13 +245,13 @@ const columns = [
     align-items: center;
     gap: 10px;
     color: var(--t-fg);
-    font-weight: 700;
+    font-weight: 720;
     font-size: 1.125rem;
     text-decoration: none;
     margin-bottom: 12px;
   }
   .ftr-about p {
-    max-width: 34ch;
+    max-width: 36ch;
   }
   .ftr-promise {
     margin-top: 12px;
@@ -131,16 +259,17 @@ const columns = [
     font-weight: 600;
   }
   .ftr h2 {
-    font-size: 0.9375rem;
+    font-size: 0.875rem;
     font-weight: 660;
     letter-spacing: 0;
-    margin-bottom: 10px;
+    color: var(--t-muted);
+    margin-bottom: 12px;
   }
-  .ftr ul {
+  .ftr ul:not(.ftr-products) {
     list-style: none;
     padding: 0;
     display: grid;
-    gap: 6px;
+    gap: 7px;
   }
   .ftr nav a {
     color: var(--t-fg-80);
@@ -151,7 +280,7 @@ const columns = [
     text-decoration: underline;
   }
   .ftr-base {
-    margin-top: 40px;
+    margin-top: 44px;
     padding-top: 20px;
     border-top: 1px solid var(--t-border);
     display: flex;
@@ -187,6 +316,11 @@ const columns = [
     background: var(--t-s2);
     border-color: var(--t-border);
     color: var(--t-fg);
+  }
+  @media (max-width: 960px) {
+    .ftr-products {
+      grid-template-columns: 1fr;
+    }
   }
   @media (max-width: 860px) {
     .ftr-grid {

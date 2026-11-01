@@ -1,11 +1,13 @@
 /* The site's own layer over the app's tokens (tokens.css, generated).
  *
- * The idea: the page is the app's window. The header and footer sit on the
- * window frame (--t-bg); the content is one paper sheet (--t-s1) inset in it,
- * as the app's content sheet is. White cards (--t-s2) are kept for the
- * product's own UI drawn on the page. Ink buttons; amber only on the keycaps
- * (every shortcut is drawn as a physical key, as in the app) and links.
- * Headlines in Figtree; EB Garamond only for numerals.
+ * The idea: the page is the app's window frame (--t-bg), and the content sits
+ * on sheets inset in it, as the app's content sheet is: paper sheets (--t-s1)
+ * for most of the page, and a few ink sheets (.sheet-ink, the app's dark
+ * scheme) that break the rhythm. White cards (--t-s2) are kept for the
+ * product's own UI drawn on the page (components/scenes/). Ink buttons; amber
+ * only on the keycaps (every shortcut is drawn as a physical key, as in the
+ * app), the waveform and links. Headlines in Figtree, set large and tight; EB
+ * Garamond only for numerals and the notepad's titles, as in the app.
  */
 
 *,
@@ -17,11 +19,33 @@
 :root {
   --font-sans: 'Figtree Variable', 'Segoe UI Variable Text', ui-sans-serif, system-ui, 'Segoe UI', sans-serif;
   --font-num: var(--t-font-display);
-  --gutter: clamp(20px, 4vw, 40px);
-  --wrap: 1120px;
-  --sheet-r: 20px;
-  --header-h: 64px;
+  --font-mono: ui-monospace, 'Cascadia Code', 'Cascadia Mono', Consolas, monospace;
+  --gutter: clamp(16px, 4vw, 48px);
+  --wrap: 1180px;
+  --wrap-wide: 1320px;
+  --header-h: 76px;
+  --sheet-gap: clamp(8px, 0.9vw, 14px);
+  --sheet-r: clamp(20px, 2.4vw, 32px);
   --ease: cubic-bezier(0.2, 0.7, 0.2, 1);
+  /* An ink sheet: the app's dark window colour on a light page, a deeper
+     well on a dark one (with an edge, so it still reads as a sheet). */
+  --ink-sheet: #161410;
+  --ink-sheet-edge: transparent;
+  --shadow-scene: 0 1px 2px rgb(60 50 30 / 0.06), 0 18px 48px -12px rgb(60 45 20 / 0.22);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme='light']) {
+    --ink-sheet: #0c0b09;
+    --ink-sheet-edge: #2c2822;
+    --shadow-scene: 0 1px 2px rgb(0 0 0 / 0.3), 0 18px 48px -12px rgb(0 0 0 / 0.6);
+  }
+}
+
+:root[data-theme='dark'] {
+  --ink-sheet: #0c0b09;
+  --ink-sheet-edge: #2c2822;
+  --shadow-scene: 0 1px 2px rgb(0 0 0 / 0.3), 0 18px 48px -12px rgb(0 0 0 / 0.6);
 }
 
 html {
@@ -41,7 +65,7 @@ body {
   background: var(--t-bg);
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
-  font-feature-settings: 'ss01' 0;
+  overflow-x: clip;
 }
 
 img,
@@ -62,17 +86,17 @@ h4 {
 }
 
 h1 {
-  font-size: clamp(2.5rem, 1.35rem + 4.2vw, 4.25rem);
-  font-weight: 660;
-  line-height: 1.02;
-  letter-spacing: -0.032em;
+  font-size: clamp(2.6rem, 1.25rem + 5.2vw, 5.6rem);
+  font-weight: 680;
+  line-height: 0.98;
+  letter-spacing: -0.045em;
 }
 
 h2 {
-  font-size: clamp(1.85rem, 1.2rem + 2.1vw, 2.75rem);
-  font-weight: 640;
-  line-height: 1.08;
-  letter-spacing: -0.026em;
+  font-size: clamp(2.05rem, 1.2rem + 3vw, 3.9rem);
+  font-weight: 660;
+  line-height: 1.02;
+  letter-spacing: -0.038em;
 }
 
 h3 {
@@ -110,7 +134,7 @@ strong {
 }
 
 code {
-  font-family: ui-monospace, 'Cascadia Code', Consolas, monospace;
+  font-family: var(--font-mono);
   font-size: 0.88em;
   background: var(--t-s3);
   border: 1px solid var(--t-border-subtle);
@@ -158,25 +182,40 @@ code {
   top: 12px;
 }
 
-/* ------------------------------------------------------------ the sheet */
+/* ------------------------------------------------------------ the sheets */
+
+.page {
+  display: grid;
+  gap: var(--sheet-gap);
+  padding-inline: var(--sheet-gap);
+}
 
 .sheet {
   display: block;
   background: var(--t-s1);
-  margin-inline: clamp(0px, 1.2vw, 16px);
   border-radius: var(--sheet-r);
   box-shadow: 0 0 0 1px var(--t-border-subtle), var(--t-shadow-sm);
   overflow: clip;
 }
 
-@media (max-width: 640px) {
-  .sheet {
-    border-radius: 14px;
-  }
+/* The app's dark scheme (tokens.css .scheme-dark) on an ink-coloured sheet. */
+.sheet-ink {
+  background: var(--ink-sheet);
+  color: var(--t-fg);
+  box-shadow: 0 0 0 1px var(--ink-sheet-edge);
+}
+
+.scheme-dark {
+  color: var(--t-fg);
 }
 
 .wrap {
   width: min(100% - 2 * var(--gutter), var(--wrap));
+  margin-inline: auto;
+}
+
+.wrap-wide {
+  width: min(100% - 2 * var(--gutter), var(--wrap-wide));
   margin-inline: auto;
 }
 
@@ -186,11 +225,15 @@ code {
 }
 
 .section {
-  padding-block: clamp(56px, 7vw, 104px);
+  padding-block: clamp(64px, 8.5vw, 128px);
 }
 
 .section-tight {
   padding-block: clamp(40px, 5vw, 64px);
+}
+
+.section + .section:not(.ruled) {
+  padding-top: 0;
 }
 
 .ruled {
@@ -199,27 +242,54 @@ code {
 
 .section-head {
   display: grid;
-  gap: 14px;
-  margin-bottom: clamp(28px, 4vw, 48px);
-  max-width: 44rem;
+  gap: 18px;
+  margin-bottom: clamp(36px, 5vw, 64px);
+  max-width: 46rem;
+}
+
+.section-head.center {
+  margin-inline: auto;
+  justify-items: center;
+  text-align: center;
 }
 
 .section-head p {
   color: var(--t-fg-80);
-  font-size: 1.125rem;
+  font-size: clamp(1.0625rem, 0.98rem + 0.4vw, 1.25rem);
+  line-height: 1.55;
+}
+
+.section-head.center p {
+  margin-inline: auto;
 }
 
 .lede {
-  font-size: clamp(1.125rem, 1rem + 0.45vw, 1.3125rem);
+  font-size: clamp(1.125rem, 1rem + 0.5vw, 1.375rem);
   line-height: 1.5;
   color: var(--t-fg-80);
-  max-width: 34em;
+  max-width: 36em;
 }
 
+/* A word or two above a title, with the amber key's colour as its mark. */
+.eyebrow,
 .kicker {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
   font-size: 0.9375rem;
-  font-weight: 560;
-  color: var(--t-muted);
+  font-weight: 620;
+  letter-spacing: -0.005em;
+  color: var(--t-fg-80);
+}
+
+.eyebrow::before {
+  content: '';
+  flex: none;
+  width: 10px;
+  height: 10px;
+  border-radius: 3px;
+  background: var(--t-key-bg);
+  box-shadow: 0 2px 0 var(--t-key-border);
 }
 
 .muted {
@@ -240,6 +310,34 @@ code {
 
 .stack > * + * {
   margin-top: 1rem;
+}
+
+/* A link that leads on: "How meetings work →" */
+.more {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45em;
+  font-weight: 640;
+  color: var(--t-fg);
+  text-decoration: none;
+}
+
+.more::after {
+  content: '';
+  width: 0.5em;
+  height: 0.5em;
+  border-top: 2px solid currentColor;
+  border-right: 2px solid currentColor;
+  transform: rotate(45deg);
+  transition: transform 160ms var(--ease);
+}
+
+.more:hover {
+  color: var(--t-link);
+}
+
+.more:hover::after {
+  transform: translateX(3px) rotate(45deg);
 }
 
 /* --------------------------------------------------------------- keycaps */
@@ -293,6 +391,7 @@ kbd {
   transition:
     background-color 150ms var(--ease),
     border-color 150ms var(--ease),
+    box-shadow 150ms var(--ease),
     transform 150ms var(--ease);
 }
 
@@ -307,6 +406,7 @@ kbd {
 .btn-primary {
   background: var(--t-ink);
   color: var(--t-ink-fg);
+  box-shadow: 0 1px 0 rgb(255 255 255 / 0.12) inset, 0 6px 16px -6px rgb(30 25 15 / 0.45);
 }
 
 .btn-primary:hover {
@@ -326,16 +426,16 @@ kbd {
 }
 
 .btn-sm {
-  min-height: 40px;
-  padding: 0.5rem 0.95rem;
-  border-radius: 10px;
+  min-height: 42px;
+  padding: 0.5rem 1rem;
+  border-radius: 11px;
   font-size: 0.9375rem;
 }
 
 .btn-lg {
-  min-height: 56px;
-  padding: 0.85rem 1.5rem;
-  border-radius: 14px;
+  min-height: 58px;
+  padding: 0.9rem 1.6rem;
+  border-radius: 15px;
   font-size: 1.0625rem;
 }
 
@@ -364,7 +464,7 @@ kbd {
   display: grid;
   grid-template-columns: minmax(0, 17rem) minmax(0, 1fr);
   gap: 6px 40px;
-  padding-block: 20px;
+  padding-block: 22px;
   border-top: 1px solid var(--t-rule);
 }
 
@@ -389,7 +489,7 @@ kbd {
 
 .grid {
   display: grid;
-  gap: clamp(20px, 3vw, 32px);
+  gap: clamp(16px, 2.4vw, 28px);
 }
 
 .grid-2 {
@@ -397,13 +497,13 @@ kbd {
 }
 
 .grid-3 {
-  grid-template-columns: repeat(auto-fit, minmax(min(100%, 18rem), 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 17rem), 1fr));
 }
 
 .split {
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(0, 1.1fr);
-  gap: clamp(32px, 5vw, 72px);
+  gap: clamp(32px, 5vw, 80px);
   align-items: start;
 }
 
@@ -414,6 +514,11 @@ kbd {
 
 .split-flip > :first-child {
   order: 2;
+}
+
+/* A headline beside a picture: a size smaller than one with the page to itself. */
+.split h2 {
+  font-size: clamp(2rem, 1.2rem + 2.3vw, 3.3rem);
 }
 
 @media (max-width: 900px) {
@@ -430,9 +535,9 @@ kbd {
 .card {
   background: var(--t-s2);
   border: 1px solid var(--t-border-subtle);
-  border-radius: 16px;
+  border-radius: 18px;
   box-shadow: var(--t-shadow-sm);
-  padding: clamp(20px, 2.5vw, 28px);
+  padding: clamp(20px, 2.5vw, 30px);
 }
 
 .col h3 {
@@ -468,6 +573,12 @@ kbd {
   color: var(--t-link);
 }
 
+.tag-green {
+  border-color: color-mix(in srgb, var(--t-success) 40%, transparent);
+  background: color-mix(in srgb, var(--t-success) 12%, transparent);
+  color: var(--t-success-text);
+}
+
 /* ------------------------------------------------------------ check lists */
 
 .ticks {
@@ -499,7 +610,7 @@ kbd {
 .table-wrap {
   overflow-x: auto;
   border: 1px solid var(--t-border-subtle);
-  border-radius: 16px;
+  border-radius: 18px;
   background: var(--t-s2);
 }
 
@@ -513,7 +624,7 @@ th,
 td {
   text-align: left;
   vertical-align: top;
-  padding: 14px 18px;
+  padding: 15px 20px;
   border-top: 1px solid var(--t-rule);
 }
 
@@ -572,14 +683,22 @@ tbody th {
 
 .shot figcaption,
 .figure-note {
-  margin-top: 12px;
+  margin-top: 14px;
   font-size: 0.875rem;
   color: var(--t-muted);
 }
 
+.figure-note.center {
+  margin-inline: auto;
+  max-width: 60ch;
+}
+
 /* --------------------------------------------------------------- draft notes */
 
+/* Notes for the maintainer, preview builds only, behind the preview strip's
+   switch (theme.js puts .show-drafts on <html> when chosen). */
 .draft {
+  display: none;
   border: 1.5px dashed var(--t-warning);
   background: color-mix(in srgb, var(--t-warning) 9%, transparent);
   border-radius: 12px;
@@ -588,22 +707,23 @@ tbody th {
   line-height: 1.5;
   color: var(--t-fg);
   max-width: 64ch;
+  text-align: left;
+}
+
+.show-drafts .draft {
+  display: block;
 }
 
 .draft strong:first-child {
   color: var(--t-warning);
 }
 
-.draft + * {
-  margin-top: 0;
-}
-
 /* ------------------------------------------------- questions and answers */
 
 .faq-grid {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(0, 2fr);
-  gap: 16px 56px;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.9fr);
+  gap: 20px 64px;
   align-items: start;
 }
 
@@ -614,20 +734,31 @@ tbody th {
 }
 
 .faq-list {
-  border-bottom: 1px solid var(--t-rule);
+  display: grid;
+  gap: 10px;
 }
 
 .faq-list details {
-  border-top: 1px solid var(--t-rule);
+  border: 1px solid var(--t-border-subtle);
+  border-radius: 16px;
+  background: var(--t-s2);
+  box-shadow: var(--t-shadow-sm);
+  transition: border-color 150ms var(--ease);
+}
+
+.faq-list details[open] {
+  border-color: var(--t-border);
 }
 
 .faq-list summary {
   position: relative;
   list-style: none;
-  padding: 18px 44px 18px 0;
-  font-weight: 620;
+  padding: 20px 56px 20px 22px;
+  font-weight: 630;
   font-size: 1.0625rem;
+  line-height: 1.4;
   cursor: pointer;
+  border-radius: 16px;
 }
 
 .faq-list summary::-webkit-details-marker {
@@ -637,20 +768,21 @@ tbody th {
 .faq-list summary::after {
   content: '';
   position: absolute;
-  right: 8px;
+  right: 22px;
   top: 50%;
-  width: 9px;
-  height: 9px;
-  margin-top: -7px;
-  border-right: 2px solid var(--t-muted);
-  border-bottom: 2px solid var(--t-muted);
-  transform: rotate(45deg);
-  transition: transform 160ms var(--ease);
+  width: 22px;
+  height: 22px;
+  margin-top: -11px;
+  border-radius: 50%;
+  background:
+    linear-gradient(var(--t-fg), var(--t-fg)) center / 10px 2px no-repeat,
+    linear-gradient(var(--t-fg), var(--t-fg)) center / 2px 10px no-repeat,
+    var(--t-s3);
+  transition: transform 200ms var(--ease);
 }
 
 .faq-list details[open] > summary::after {
-  transform: rotate(-135deg);
-  margin-top: -2px;
+  transform: rotate(45deg);
 }
 
 .faq-list summary:hover {
@@ -658,8 +790,29 @@ tbody th {
 }
 
 .faq-a {
-  padding: 0 0 20px;
+  padding: 0 22px 22px;
   color: var(--t-fg-80);
+}
+
+.faq-a p + p {
+  margin-top: 0.7em;
+}
+
+/* --------------------------------------------------------- reveal on scroll */
+
+/* Sections rise into place once as they come into view (Layout's script adds
+   .is-in). Behind .js, so without script everything is simply there. */
+.js [data-reveal] {
+  opacity: 0;
+  transform: translateY(18px);
+  transition:
+    opacity 700ms var(--ease),
+    transform 700ms var(--ease);
+}
+
+.js [data-reveal].is-in {
+  opacity: 1;
+  transform: none;
 }
 
 /* --------------------------------------------------------------- utilities */
@@ -669,7 +822,9 @@ tbody th {
 .mt-3 { margin-top: 24px; }
 .mt-4 { margin-top: 32px; }
 .mt-5 { margin-top: 48px; }
+.scene-gap { margin-bottom: clamp(32px, 4vw, 56px); }
 .center { text-align: center; }
+p.center { margin-inline: auto; }
 .center p { margin-inline: auto; }
 
 @media (prefers-reduced-motion: reduce) {
@@ -680,5 +835,9 @@ tbody th {
     animation-iteration-count: 1 !important;
     transition-duration: 0.01ms !important;
     scroll-behavior: auto !important;
+  }
+  .js [data-reveal] {
+    opacity: 1;
+    transform: none;
   }
 }

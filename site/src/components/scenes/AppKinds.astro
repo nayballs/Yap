@@ -1,0 +1,323 @@
+---
+// Works where you type: the rules the app follows in each kind of window,
+// one tab each, a window drawn for each. The people and text are made up.
+import { NAME } from '../../brand';
+import Win from './Win.astro';
+
+const kinds = [
+  {
+    id: 'code',
+    tab: 'Coding agents',
+    title: 'Prompts that keep their shape',
+    points: [
+      'Each terminal gets its own paste keys: Windows Terminal, PowerShell, VS Code’s terminal and more.',
+      'In Windows Terminal, Claude Code and Codex keep your line breaks. A shell command arrives as one line, and it’s never run for you unless you say “press enter”.',
+      'Say a file that’s on screen, “dates dot ts”, and it’s typed as <code>dates.ts</code>.',
+    ],
+  },
+  {
+    id: 'chat',
+    tab: 'Chat',
+    title: 'Casual, like a message',
+    points: [
+      'A short message loses its full stop, the way people write in chat.',
+      'Say “at Sam” in Slack or Discord and Sam is picked from the list on screen.',
+      'Say “press enter” at the end and it’s sent.',
+    ],
+  },
+  {
+    id: 'email',
+    tab: 'Email',
+    title: 'Laid out like a letter',
+    points: [
+      'More formal in email: the greeting and the sign-off get lines of their own.',
+      'A list you say out loud is laid out as a list.',
+      'Names are spelled the way the window in front writes them.',
+    ],
+  },
+  {
+    id: 'admin',
+    tab: 'Admin windows',
+    title: 'Never lost, even where it can’t type',
+    points: [
+      `Windows doesn’t let ${NAME} type into apps running as administrator, so the text goes on your clipboard and ${NAME} says so.`,
+      'Your clipboard is put back after every paste.',
+      'Nothing you dictate lands in your Win+V clipboard history.',
+    ],
+  },
+];
+---
+<div class="kinds" data-kinds>
+  <div class="kinds-tabs" data-tabs data-tabs-auto="7000">
+    <div class="tabs" role="tablist" aria-label="Kinds of app">
+      {kinds.map((k, i) => (
+        <button type="button" role="tab" id={`kind-tab-${k.id}`} aria-controls={`kind-${k.id}`} aria-selected={i === 0 ? 'true' : 'false'}>
+          {k.tab}
+        </button>
+      ))}
+    </div>
+  </div>
+
+  {kinds.map((k, i) => (
+    <div class="kind" role="tabpanel" id={`kind-${k.id}`} aria-labelledby={`kind-tab-${k.id}`} data-active={i === 0 ? '' : undefined}>
+      <div class="scene scene-desk kind-scene" aria-hidden="true">
+        {k.id === 'code' && (
+          <Win title="Windows Terminal" dark class="kw">
+            <div class="term">
+              <p class="t-dim">PS C:\projects\shop&gt; claude</p>
+              <div class="t-box">
+                <p><span class="t-p">&gt;</span> Refactor the date helpers in dates.ts.</p>
+                <p class="t-ind">Keep the public function names.</p>
+                <p class="t-ind">Add tests for leap years.<span class="caret"></span></p>
+              </div>
+              <p class="t-dim">Enter to send</p>
+            </div>
+          </Win>
+        )}
+        {k.id === 'chat' && (
+          <Win title="Team chat" class="kw">
+            <div class="kchat">
+              <div class="msg"><span class="av av-a">P</span><div><p class="who">Priya</p><p>The figures for Q3 are in the shared folder</p></div></div>
+              <div class="msg"><span class="av av-c">S</span><div><p class="who">Sam</p><p>Thanks, I’ll look before the call</p></div></div>
+              <div class="kcomposer">
+                <span class="mention">@Imogen</span> can you check the totals before the call<span class="caret"></span>
+              </div>
+            </div>
+          </Win>
+        )}
+        {k.id === 'email' && (
+          <Win title="New message" class="kw">
+            <div class="kmail">
+              <p class="kfield"><span>To</span> priya@example.com</p>
+              <p class="kfield"><span>Subject</span> The launch plan</p>
+              <div class="kbody">
+                <p>Hi Priya,</p>
+                <p>Thanks for the draft. Three things before we share it:</p>
+                <ol>
+                  <li>Move the review to Friday</li>
+                  <li>Add the pricing page</li>
+                  <li>Check the dates with Siobhan</li>
+                </ol>
+                <p>Best wishes,<br />Sam<span class="caret"></span></p>
+              </div>
+            </div>
+          </Win>
+        )}
+        {k.id === 'admin' && (
+          <div class="kadmin">
+            <Win title="Administrator: Windows PowerShell" dark class="kw kw-admin">
+              <div class="term">
+                <p class="t-dim">PS C:\WINDOWS\system32&gt; <span class="caret"></span></p>
+              </div>
+            </Win>
+            <div class="notice">
+              <span class="notice-mark"></span>
+              <div>
+                <p class="notice-t">Your dictation is on the clipboard</p>
+                <p>{NAME} can’t type into apps running as administrator, so your dictation is on the clipboard instead.</p>
+              </div>
+            </div>
+          </div>
+        )}
+      </div>
+      <div class="kind-copy">
+        <h3>{k.title}</h3>
+        <ul class="ticks">
+          {k.points.map((p) => <li set:html={p} />)}
+        </ul>
+      </div>
+    </div>
+  ))}
+</div>
+
+<script>
+  import { initTabs } from '../../lib/tabs';
+  for (const root of document.querySelectorAll<HTMLElement>('[data-kinds] [data-tabs]')) initTabs(root);
+</script>
+
+<style>
+  .kinds {
+    display: grid;
+    gap: 28px;
+  }
+  .kinds-tabs {
+    display: flex;
+    justify-content: center;
+  }
+  .kind {
+    display: grid;
+    grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr);
+    gap: clamp(24px, 5vw, 72px);
+    align-items: center;
+  }
+  html:not(.js) .kind + .kind {
+    margin-top: 32px;
+  }
+  .kind-scene {
+    display: grid;
+    place-items: center;
+    min-height: 380px;
+    padding: clamp(18px, 3vw, 40px);
+    box-shadow: 0 0 0 1px var(--t-border-subtle), var(--shadow-scene);
+  }
+  .kind-scene :global(.kw) {
+    width: min(100%, 520px);
+  }
+  .kind-copy {
+    display: grid;
+    gap: 18px;
+  }
+  .kind-copy h3 {
+    font-size: clamp(1.5rem, 1.2rem + 1.1vw, 2.1rem);
+    font-weight: 660;
+    letter-spacing: -0.03em;
+    line-height: 1.1;
+  }
+  .kind-copy .ticks {
+    gap: 14px;
+    font-size: 1.0625rem;
+    color: var(--t-fg-80);
+  }
+
+  /* terminal */
+  .term {
+    display: grid;
+    gap: 10px;
+    padding: 16px 18px 18px;
+    font-family: var(--font-mono);
+    font-size: 0.8125rem;
+    line-height: 1.6;
+  }
+  .term p {
+    max-width: none;
+  }
+  .t-dim {
+    color: #9d968a;
+  }
+  .t-box {
+    padding: 10px 12px;
+    border: 1px solid #5b5446;
+    border-radius: 8px;
+  }
+  .t-p {
+    color: #f0b04a;
+  }
+  .t-ind {
+    padding-left: 1.2em;
+  }
+
+  /* chat */
+  .kchat {
+    display: grid;
+    gap: 12px;
+    padding: 14px 16px 16px;
+  }
+  .kchat p {
+    max-width: none;
+    color: var(--t-fg-80);
+  }
+  .kchat .msg {
+    display: flex;
+    gap: 10px;
+  }
+  .who {
+    font-weight: 680;
+    font-size: 0.8125rem;
+    color: var(--t-fg) !important;
+  }
+  .kcomposer {
+    margin-top: 6px;
+    padding: 12px;
+    border: 1px solid var(--t-primary-line);
+    box-shadow: 0 0 0 3px var(--t-primary-wash);
+    border-radius: 10px;
+    color: var(--t-fg);
+  }
+  .mention {
+    padding: 1px 4px;
+    border-radius: 4px;
+    background: color-mix(in srgb, #5b7fd6 18%, transparent);
+    color: color-mix(in srgb, #3b5bb0 85%, var(--t-fg));
+    font-weight: 620;
+  }
+
+  /* email */
+  .kmail {
+    padding: 4px 18px 18px;
+  }
+  .kmail p {
+    max-width: none;
+  }
+  .kfield {
+    padding: 8px 0;
+    border-bottom: 1px solid var(--t-border-subtle);
+    color: var(--t-fg-80);
+  }
+  .kfield span {
+    display: inline-block;
+    width: 64px;
+    color: var(--t-muted);
+  }
+  .kbody {
+    display: grid;
+    gap: 8px;
+    padding-top: 12px;
+  }
+  .kbody ol {
+    padding-left: 1.3em;
+  }
+
+  /* admin */
+  .kadmin {
+    display: grid;
+    justify-items: center;
+    width: 100%;
+  }
+  .kadmin :global(.kw-admin) {
+    width: min(100%, 480px);
+  }
+  .notice {
+    display: flex;
+    gap: 12px;
+    width: min(100% - 24px, 400px);
+    margin-top: -18px;
+    margin-left: 60px;
+    padding: 14px 16px;
+    border-radius: 14px;
+    background: var(--t-s2);
+    box-shadow: 0 0 0 1px var(--t-border), var(--t-shadow-menu);
+    font-size: 0.8125rem;
+    line-height: 1.45;
+    color: var(--t-fg-80);
+    position: relative;
+  }
+  .notice p {
+    max-width: none;
+  }
+  .notice-t {
+    font-weight: 700;
+    color: var(--t-fg);
+    margin-bottom: 2px;
+  }
+  .notice-mark {
+    flex: none;
+    width: 24px;
+    height: 23px;
+    border-radius: 7px;
+    border: 1.5px solid var(--t-key-border);
+    background: var(--t-key-bg);
+    box-shadow: 0 2px 0 var(--t-key-border);
+  }
+
+  @media (max-width: 900px) {
+    .kind {
+      grid-template-columns: 1fr;
+    }
+    .kind-scene {
+      min-height: 300px;
+    }
+    .notice {
+      margin-left: 0;
+    }
+  }
+</style>

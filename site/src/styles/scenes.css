@@ -1,0 +1,386 @@
+/* The pieces the live mock-ups (components/scenes/) are built from: a
+ * Windows window, the bar's capsule and waveform, avatars, chips. Drawn in
+ * the app's own tokens, so they follow the theme, and inside an ink sheet
+ * (.scheme-dark) they're the app's dark theme. Every person, company and
+ * message in them is made up.
+ */
+
+/* A scene is a picture: a frame with the app's UI inside. */
+.scene {
+  position: relative;
+  border-radius: 22px;
+  background: var(--t-bg);
+  box-shadow: 0 0 0 1px var(--t-border-subtle);
+  overflow: hidden;
+  isolation: isolate;
+}
+
+/* A soft desk behind the windows: the window frame colour with a warm light. */
+.scene-desk {
+  background:
+    radial-gradient(120% 90% at 85% 0%, color-mix(in srgb, var(--t-key-bg) 16%, transparent), transparent 60%),
+    radial-gradient(90% 80% at 0% 100%, color-mix(in srgb, var(--t-primary) 8%, transparent), transparent 60%),
+    var(--t-bg);
+}
+
+/* --------------------------------------------------------------- windows */
+
+.win {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  background: var(--t-s2);
+  border-radius: 12px;
+  box-shadow: 0 0 0 1px var(--t-border), var(--shadow-scene);
+  overflow: hidden;
+  text-align: left;
+  font-size: 0.875rem;
+  line-height: 1.45;
+}
+
+.win-top {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  height: 36px;
+  padding-left: 12px;
+  background: var(--t-s3);
+  border-bottom: 1px solid var(--t-border-subtle);
+  font-size: 0.78rem;
+  font-weight: 620;
+  color: var(--t-fg-80);
+  flex: none;
+}
+
+.win-icon {
+  flex: none;
+  width: 14px;
+  height: 14px;
+  border-radius: 4px;
+  background: var(--t-fg-45);
+}
+
+.win-title {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+/* Windows' caption buttons: minimise, maximise, close. */
+.win-caps {
+  display: flex;
+  align-self: stretch;
+  flex: none;
+}
+
+.win-caps i {
+  position: relative;
+  width: 40px;
+}
+
+.win-caps i::before {
+  content: '';
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  translate: -50% -50%;
+}
+
+.win-caps i:nth-child(1)::before {
+  width: 10px;
+  height: 1px;
+  background: var(--t-fg-62);
+}
+
+.win-caps i:nth-child(2)::before {
+  width: 9px;
+  height: 9px;
+  border: 1px solid var(--t-fg-62);
+  border-radius: 2px;
+}
+
+.win-caps i:nth-child(3)::before,
+.win-caps i:nth-child(3)::after {
+  content: '';
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 12px;
+  height: 1px;
+  background: var(--t-fg-62);
+  translate: -50% -50%;
+  rotate: 45deg;
+}
+
+.win-caps i:nth-child(3)::after {
+  rotate: -45deg;
+}
+
+.win-body {
+  flex: 1;
+  min-height: 0;
+  position: relative;
+}
+
+/* A dark window (a terminal), in either theme. */
+.win-dark {
+  background: #1b1915;
+  color: #ebe6db;
+  box-shadow: 0 0 0 1px #3a352b, var(--shadow-scene);
+}
+
+.win-dark .win-top {
+  background: #262320;
+  border-bottom-color: #3a352b;
+  color: #b8b1a2;
+}
+
+.win-dark .win-caps i::before,
+.win-dark .win-caps i:nth-child(3)::after {
+  background: #9d968a;
+}
+
+.win-dark .win-caps i:nth-child(2)::before {
+  background: none;
+  border-color: #9d968a;
+}
+
+/* ------------------------------------------------------------ the taskbar */
+
+.taskbar {
+  display: flex;
+  justify-content: center;
+  gap: 8px;
+  padding: 8px;
+  background: color-mix(in srgb, var(--t-fg) 6%, var(--t-bg));
+  border-top: 1px solid var(--t-border-subtle);
+}
+
+.taskbar i {
+  width: 20px;
+  height: 20px;
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--t-fg) 13%, transparent);
+}
+
+.taskbar i:first-child {
+  background: color-mix(in srgb, var(--t-fg) 22%, transparent);
+}
+
+/* -------------------------------------------------------------- the bar */
+
+/* The bar at rest: a small pill above the taskbar. */
+.pill {
+  display: block;
+  width: 58px;
+  height: 14px;
+  border-radius: 999px;
+  border: 1px solid var(--bar-pill-border);
+  background: var(--bar-pill);
+}
+
+/* The bar at work: a capsule with the waveform, words or a button. */
+.capsule {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  height: 38px;
+  padding-inline: 14px;
+  border-radius: 999px;
+  background: var(--bar-surface);
+  border: 1px solid var(--bar-border);
+  box-shadow: var(--bar-shadow), 0 8px 24px -10px rgb(40 30 10 / 0.35);
+  color: var(--bar-text);
+  font-size: 0.8125rem;
+  font-weight: 640;
+  white-space: nowrap;
+}
+
+.capsule-btn {
+  padding: 4px 10px;
+  border-radius: 8px;
+  background: var(--bar-button);
+  color: var(--bar-button-text);
+  font-weight: 650;
+}
+
+.capsule-soft {
+  color: var(--bar-text-muted);
+  font-weight: 560;
+}
+
+.capsule-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--bar-recording);
+}
+
+/* The waveform: bars that move like a voice (paused unless .is-live). */
+.wave {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  height: 18px;
+}
+
+.wave i {
+  width: 3px;
+  height: 100%;
+  border-radius: 2px;
+  background: var(--bar-wave);
+  transform: scaleY(0.3);
+}
+
+.wave.is-live i {
+  animation: talk 900ms ease-in-out infinite;
+}
+
+.wave i:nth-child(2n) { animation-delay: -300ms; animation-duration: 760ms; transform: scaleY(0.55); }
+.wave i:nth-child(3n) { animation-delay: -520ms; animation-duration: 1040ms; transform: scaleY(0.8); }
+.wave i:nth-child(5n) { animation-delay: -140ms; animation-duration: 640ms; transform: scaleY(0.45); }
+.wave i:nth-child(7n) { animation-delay: -700ms; animation-duration: 880ms; }
+
+@keyframes talk {
+  0%, 100% { transform: scaleY(0.22); }
+  50% { transform: scaleY(1); }
+}
+
+/* ------------------------------------------------------------- people */
+
+.av {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 8px;
+  font-size: 0.75rem;
+  font-weight: 720;
+  color: var(--t-fg);
+  background: var(--t-raised);
+}
+
+.av-a { background: color-mix(in srgb, var(--t-success) 22%, var(--t-s2)); color: var(--t-success-text); }
+.av-b { background: var(--t-primary-wash); color: var(--t-link); }
+.av-c { background: color-mix(in srgb, #5b7fd6 20%, var(--t-s2)); color: color-mix(in srgb, #3b5bb0 80%, var(--t-fg)); }
+.av-d { background: color-mix(in srgb, #b65c8e 18%, var(--t-s2)); color: color-mix(in srgb, #8e3b69 80%, var(--t-fg)); }
+
+/* ------------------------------------------------------------- chips */
+
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 10px;
+  border-radius: 999px;
+  border: 1px solid var(--t-border);
+  background: var(--t-s2);
+  color: var(--t-fg-80);
+  font-size: 0.75rem;
+  font-weight: 620;
+  white-space: nowrap;
+}
+
+.chip-amber {
+  border-color: var(--t-primary-line);
+  background: var(--t-primary-wash);
+  color: var(--t-link);
+}
+
+.chip-green {
+  border-color: color-mix(in srgb, var(--t-success) 40%, transparent);
+  background: color-mix(in srgb, var(--t-success) 12%, transparent);
+  color: var(--t-success-text);
+}
+
+/* A grey line standing in for text. */
+.ghost {
+  display: block;
+  height: 8px;
+  border-radius: 4px;
+  background: var(--t-raised);
+}
+
+/* The caret: text being written. */
+.caret {
+  display: inline-block;
+  width: 2px;
+  height: 1.1em;
+  margin-left: 1px;
+  vertical-align: -0.2em;
+  background: var(--t-primary);
+  animation: blink 1s steps(2, start) infinite;
+}
+
+@keyframes blink {
+  to { visibility: hidden; }
+}
+
+/* Under a scene: what it is and that it's drawn. */
+.scene-note {
+  margin-top: 14px;
+  font-size: 0.8125rem;
+  color: var(--t-muted);
+  text-align: center;
+  max-width: none;
+}
+
+/* -------------------------------------------------------------- tabs */
+
+/* lib/tabs.ts: without script every panel shows; with it, the chosen one. */
+.js [role='tabpanel']:not([data-active]) {
+  display: none;
+}
+
+.tabs {
+  display: inline-flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 4px;
+  padding: 4px;
+  border-radius: 14px;
+  background: var(--t-s3);
+  border: 1px solid var(--t-border-subtle);
+}
+
+/* Without script there's nothing to switch: every panel shows. */
+html:not(.js) .tabs {
+  display: none;
+}
+
+.tabs [role='tab'] {
+  font: inherit;
+  font-size: 0.9375rem;
+  font-weight: 620;
+  padding: 8px 16px;
+  border-radius: 10px;
+  border: 1px solid transparent;
+  background: none;
+  color: var(--t-fg-80);
+  cursor: pointer;
+  transition:
+    background-color 150ms var(--ease),
+    color 150ms var(--ease);
+}
+
+.tabs [role='tab']:hover {
+  color: var(--t-fg);
+  background: color-mix(in srgb, var(--t-s2) 60%, transparent);
+}
+
+.tabs [role='tab'][aria-selected='true'] {
+  color: var(--t-fg);
+  background: var(--t-s2);
+  border-color: var(--t-border);
+  box-shadow: var(--t-shadow-sm);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .wave.is-live i,
+  .caret {
+    animation: none;
+  }
+}

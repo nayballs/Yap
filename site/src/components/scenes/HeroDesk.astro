@@ -1,0 +1,513 @@
+---
+// The home page's opening picture (site plan A1): a desk with a team chat
+// open, the bar above the taskbar, and the big amber key. It plays one
+// dictation by itself the first time it's on screen, then again whenever the
+// key is pressed (click, Enter or Space, or the real F9 while it's on
+// screen): the bar listens, the words appear as they're heard, the bar says
+// "Transcribing…", the tidy text lands in the message box, and the bar offers
+// "Use what I said", as the app does. Without script, with reduced motion
+// before a press, or between plays, it shows the result: what was said and
+// what was typed. All HTML and CSS; the people and messages are made up.
+import { HOTKEY } from '../../brand';
+import Win from './Win.astro';
+
+const said = 'um so can we move the design review to Thursday, no wait, Friday at ten, and I’ll send the deck before then';
+// A chat app drops a short message's full stop, as the app does.
+const typed = 'Can we move the design review to Friday at 10? I’ll send the deck before then';
+const channels = ['general', 'launch', 'design-review', 'random'];
+---
+<div class="hero-stage" data-desk data-state="done">
+  <div class="scene scene-desk desk" role="img" aria-label={`A team chat on a Windows desktop. Said out loud: “${said}”. Typed into the message box: “${typed}”.`}>
+    <div class="desk-win" aria-hidden="true">
+      <Win title="Team chat" class="chat-win">
+        <div class="chat">
+          <nav class="chat-side">
+            <p class="side-ws">Example Studio</p>
+            <p class="side-h">Channels</p>
+            {channels.map((c) => <p class:list={['side-ch', c === 'design-review' && 'is-on']}># {c}</p>)}
+            <p class="side-h">Direct messages</p>
+            <p class="side-ch"><span class="dot dot-on"></span>Priya</p>
+            <p class="side-ch"><span class="dot"></span>Imogen</p>
+          </nav>
+          <div class="chat-main">
+            <div class="chat-head"># design-review</div>
+            <div class="chat-msgs">
+              <div class="msg"><span class="av av-d">O</span><div><p class="msg-who">Oliver <span>09:58</span></p><p>Morning! The new onboarding screens are in the shared folder</p></div></div>
+              <div class="msg"><span class="av av-a">P</span><div><p class="msg-who">Priya <span>10:02</span></p><p>Has anyone got a slot for the design review this week?</p></div></div>
+              <div class="msg"><span class="av av-b">I</span><div><p class="msg-who">Imogen <span>10:04</span></p><p>Thursday is full for me</p></div></div>
+            </div>
+            <div class="composer">
+              <p class="composer-text" data-typed>{typed}</p>
+              <p class="composer-ph">Message #design-review</p>
+              <span class="composer-send"></span>
+            </div>
+          </div>
+        </div>
+      </Win>
+    </div>
+
+    <div class="heard" aria-hidden="true">
+      <span class="heard-label" data-heard-label>You said</span>
+      <p data-heard-text>{said}</p>
+    </div>
+
+    <div class="bar-slot" aria-hidden="true">
+      <span class="pill bar-rest"></span>
+      <span class="capsule bar-live">
+        <span class="wave is-live" data-wave>{Array.from({ length: 12 }, () => <i></i>)}</span>
+        <span class="bar-word" data-bar-word>Listening</span>
+      </span>
+      <span class="capsule bar-done">
+        <span>Cleaned up</span>
+        <span class="capsule-btn">Use what I said</span>
+      </span>
+    </div>
+    <div class="taskbar" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i></div>
+  </div>
+
+  <div class="keywrap">
+    <button class="bigkey" type="button" data-key aria-describedby="desk-cap">
+      <span class="sr-only">Press </span>{HOTKEY}<span class="sr-only"> to play a dictation</span>
+    </button>
+    <p class="desk-cap" id="desk-cap">
+      Press <kbd>{HOTKEY}</kbd> or this key to play it again. Shown with AI cleanup on; it’s off until you choose a model.
+    </p>
+  </div>
+  <p class="sr-only" aria-live="polite" data-live></p>
+</div>
+
+<script>
+  const root = document.querySelector<HTMLElement>('[data-desk]');
+  if (root) {
+    const q = <T extends HTMLElement>(s: string) => root.querySelector<T>(s)!;
+    const key = q<HTMLButtonElement>('[data-key]');
+    const heardText = q('[data-heard-text]');
+    const heardLabel = q('[data-heard-label]');
+    const barWord = q('[data-bar-word]');
+    const live = q('[data-live]');
+    const typed = q('[data-typed]');
+    const said = heardText.textContent ?? '';
+    const words = said.split(' ');
+    const reduced = matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+    let timers: number[] = [];
+    let state = 'done';
+    const later = (ms: number, fn: () => void) => timers.push(window.setTimeout(fn, ms));
+    const clear = () => {
+      timers.forEach(clearTimeout);
+      timers = [];
+    };
+    const set = (s: string) => {
+      state = s;
+      root.dataset.state = s;
+    };
+    const tap = () => {
+      key.classList.add('is-down');
+      later(170, () => key.classList.remove('is-down'));
+    };
+
+    const finish = () => {
+      // The second press: stop, transcribe, tidy, paste.
+      clear();
+      tap();
+      heardText.textContent = said;
+      set('transcribing');
+      barWord.textContent = 'Transcribing…';
+      later(reduced ? 300 : 900, () => {
+        set('pasted');
+        heardLabel.textContent = 'You said';
+        live.textContent = `Typed: ${typed.textContent}`;
+        later(3200, () => set('done'));
+      });
+    };
+
+    const start = () => {
+      clear();
+      tap();
+      set('listening');
+      heardLabel.textContent = 'Listening';
+      barWord.textContent = '';
+      live.textContent = 'Listening';
+      if (reduced) {
+        heardText.textContent = said;
+        later(900, finish);
+        return;
+      }
+      heardText.textContent = '';
+      words.forEach((w, i) => later(320 + i * 165, () => (heardText.textContent += (i ? ' ' : '') + w)));
+      later(320 + words.length * 165 + 550, finish);
+    };
+
+    const press = () => (state === 'listening' ? finish() : start());
+    key.addEventListener('click', press);
+
+    // Plays once by itself the first time it's well on screen (not with
+    // reduced motion), and the real key works while it's on screen.
+    let visible = false;
+    let played = false;
+    new IntersectionObserver(
+      ([e]) => {
+        visible = e.isIntersecting;
+        if (visible && !played && !reduced) {
+          played = true;
+          later(700, start);
+        }
+      },
+      { threshold: 0.45 },
+    ).observe(root);
+    document.addEventListener('keydown', (e) => {
+      if (e.key !== 'F9' || !visible || e.repeat) return;
+      const t = e.target as HTMLElement | null;
+      if (t && (t.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName))) return;
+      e.preventDefault();
+      press();
+    });
+  }
+</script>
+
+<style>
+  .hero-stage {
+    position: relative;
+  }
+
+  .desk {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: clamp(14px, 3vw, 40px) clamp(12px, 3.4vw, 48px) 0;
+    border-radius: 26px;
+    box-shadow: 0 0 0 1px var(--t-border-subtle), var(--shadow-scene);
+  }
+  .desk-win {
+    width: 100%;
+  }
+  .desk-win :global(.chat-win) {
+    height: clamp(300px, 34vw, 430px);
+  }
+
+  /* The chat app inside the window. */
+  .chat {
+    display: grid;
+    grid-template-columns: 190px minmax(0, 1fr);
+    height: 100%;
+  }
+  .chat-side {
+    display: grid;
+    align-content: start;
+    gap: 2px;
+    padding: 12px 10px;
+    background: var(--t-s3);
+    border-right: 1px solid var(--t-border-subtle);
+    font-size: 0.8125rem;
+  }
+  .chat-side p {
+    max-width: none;
+  }
+  .side-ws {
+    padding: 2px 8px 10px;
+    font-weight: 720;
+    font-size: 0.875rem;
+  }
+  .side-h {
+    padding: 10px 8px 4px;
+    font-size: 0.72rem;
+    font-weight: 650;
+    color: var(--t-muted);
+  }
+  .side-ch {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    padding: 4px 8px;
+    border-radius: 6px;
+    color: var(--t-fg-80);
+  }
+  .side-ch.is-on {
+    background: var(--t-raised);
+    color: var(--t-fg);
+    font-weight: 640;
+  }
+  .dot {
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    border: 1.5px solid var(--t-fg-45);
+  }
+  .dot-on {
+    border-color: var(--t-success);
+    background: var(--t-success);
+  }
+  .chat-main {
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+  }
+  .chat-head {
+    padding: 10px 16px;
+    border-bottom: 1px solid var(--t-border-subtle);
+    font-weight: 700;
+    font-size: 0.875rem;
+  }
+  .chat-msgs {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    justify-content: flex-end;
+    gap: 12px;
+    padding: 14px 16px 6px;
+    overflow: hidden;
+  }
+  .msg {
+    display: flex;
+    gap: 10px;
+  }
+  .msg p {
+    max-width: none;
+    color: var(--t-fg-80);
+  }
+  .msg-who {
+    font-weight: 680;
+    font-size: 0.8125rem;
+    color: var(--t-fg) !important;
+  }
+  .msg-who span {
+    margin-left: 6px;
+    font-weight: 500;
+    font-size: 0.72rem;
+    color: var(--t-muted);
+  }
+  .composer {
+    position: relative;
+    margin: 8px 14px 14px;
+    min-height: 64px;
+    padding: 10px 44px 10px 12px;
+    border: 1px solid var(--t-border);
+    border-radius: 10px;
+    background: var(--t-s2);
+    font-size: 0.875rem;
+  }
+  .composer-text {
+    color: var(--t-fg);
+    max-width: none;
+  }
+  .composer-ph {
+    position: absolute;
+    inset: 10px 44px auto 12px;
+    color: var(--t-muted-70);
+    opacity: 0;
+  }
+  .composer-send {
+    position: absolute;
+    right: 10px;
+    bottom: 10px;
+    width: 24px;
+    height: 24px;
+    border-radius: 7px;
+    background: var(--t-raised);
+  }
+
+  /* The live words: the bar's preview card, in the bar's own colours. */
+  .heard {
+    position: relative;
+    z-index: 2;
+    width: min(100% - 24px, 440px);
+    margin-top: -46px;
+    padding: 10px 14px 12px;
+    border-radius: 14px;
+    background: var(--bar-surface);
+    border: 1px solid var(--bar-border);
+    box-shadow: var(--bar-shadow), 0 16px 40px -14px rgb(40 30 10 / 0.35);
+    font-size: 0.875rem;
+    line-height: 1.45;
+    color: var(--bar-text-muted);
+    text-align: left;
+    min-height: 4.7em;
+  }
+  .heard p {
+    max-width: none;
+  }
+  .heard-label {
+    display: block;
+    font-size: 0.75rem;
+    font-weight: 680;
+    color: var(--bar-text);
+    margin-bottom: 2px;
+  }
+
+  /* The bar's slot keeps the capsule's height, so nothing below moves. */
+  .bar-slot {
+    display: grid;
+    place-items: center;
+    height: 54px;
+  }
+  .bar-slot > * {
+    grid-area: 1 / 1;
+    transition:
+      opacity 220ms var(--ease),
+      transform 260ms var(--ease);
+  }
+  .bar-live,
+  .bar-done {
+    opacity: 0;
+    transform: scale(0.6);
+  }
+  .bar-word:empty {
+    display: none;
+  }
+  .taskbar {
+    align-self: stretch;
+    margin-inline: calc(-1 * clamp(12px, 3.4vw, 48px));
+  }
+
+  /* States */
+  [data-state='listening'] .bar-rest,
+  [data-state='transcribing'] .bar-rest,
+  [data-state='pasted'] .bar-rest {
+    opacity: 0;
+    transform: scale(0.6);
+  }
+  [data-state='listening'] .bar-live,
+  [data-state='transcribing'] .bar-live,
+  [data-state='pasted'] .bar-done {
+    opacity: 1;
+    transform: none;
+  }
+  .bar-live .wave i {
+    animation-play-state: paused;
+  }
+  [data-state='listening'] .bar-live .wave i {
+    animation-play-state: running;
+  }
+  [data-state='transcribing'] .wave i {
+    opacity: 0.4;
+  }
+  [data-state='transcribing'] .bar-word {
+    color: var(--bar-text-muted);
+    font-weight: 560;
+  }
+  [data-state='listening'] .composer-text,
+  [data-state='transcribing'] .composer-text {
+    visibility: hidden;
+  }
+  [data-state='listening'] .composer-ph,
+  [data-state='transcribing'] .composer-ph {
+    opacity: 1;
+  }
+  [data-state='listening'] .heard-label::after {
+    content: '…';
+  }
+  [data-state='pasted'] .composer-text {
+    animation: landed 1100ms var(--ease);
+  }
+  [data-state='pasted'] .composer {
+    border-color: var(--t-primary-line);
+    box-shadow: 0 0 0 3px var(--t-primary-wash);
+  }
+  @keyframes landed {
+    from {
+      background: var(--t-primary-tint);
+    }
+    to {
+      background: transparent;
+    }
+  }
+
+  /* The key */
+  .keywrap {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 18px;
+    margin-top: 26px;
+  }
+  .bigkey {
+    flex: none;
+    width: 104px;
+    height: 98px;
+    border-radius: 22px;
+    border: 1.5px solid var(--t-key-border);
+    background:
+      linear-gradient(180deg, rgb(255 255 255 / 0.3), rgb(255 255 255 / 0) 55%),
+      var(--t-key-bg);
+    color: var(--t-key-fg);
+    font: inherit;
+    font-size: 2rem;
+    font-weight: 740;
+    letter-spacing: -0.02em;
+    cursor: pointer;
+    box-shadow:
+      0 8px 0 var(--t-key-border),
+      0 18px 34px rgb(90 55 10 / 0.24);
+    transform: translateY(0);
+    transition:
+      transform 90ms ease-out,
+      box-shadow 90ms ease-out;
+  }
+  .bigkey:hover {
+    transform: translateY(-1px);
+    box-shadow:
+      0 9px 0 var(--t-key-border),
+      0 20px 36px rgb(90 55 10 / 0.26);
+  }
+  .bigkey:active,
+  .bigkey:global(.is-down) {
+    transform: translateY(7px);
+    box-shadow:
+      0 1px 0 var(--t-key-border),
+      0 4px 10px rgb(90 55 10 / 0.2);
+  }
+  .bigkey:focus-visible {
+    outline-offset: 6px;
+  }
+  .desk-cap {
+    font-size: 0.875rem;
+    color: var(--t-muted);
+    max-width: 32ch;
+  }
+
+  /* Wide screens: the key sits on the desk's corner, like a real key in
+     front of the screen, its caption under the desk beside it. */
+  @media (min-width: 1100px) {
+    .keywrap {
+      justify-content: flex-start;
+      margin-top: 18px;
+      padding-left: 84px;
+    }
+    .bigkey {
+      position: absolute;
+      left: -44px;
+      bottom: 46px;
+    }
+    .desk-cap {
+      max-width: 52ch;
+    }
+  }
+
+  @media (max-width: 720px) {
+    .chat {
+      grid-template-columns: 1fr;
+    }
+    .chat-side {
+      display: none;
+    }
+    .desk-win :global(.chat-win) {
+      height: auto;
+    }
+    .chat-msgs {
+      min-height: 150px;
+    }
+    .heard {
+      margin-top: -30px;
+      font-size: 0.8125rem;
+    }
+    .bigkey {
+      width: 84px;
+      height: 80px;
+      border-radius: 18px;
+      font-size: 1.65rem;
+    }
+    .keywrap {
+      gap: 14px;
+    }
+  }
+</style>

@@ -1,30 +1,26 @@
 ---
 import Layout from '../layouts/Layout.astro';
 import PageHero from '../components/PageHero.astro';
-import Shot from '../components/Shot.astro';
+import HeroDesk from '../components/scenes/HeroDesk.astro';
+import TidyDiff from '../components/scenes/TidyDiff.astro';
+import MakeItYours from '../components/scenes/MakeItYours.astro';
 import Keys from '../components/Keys.astro';
 import Faq from '../components/Faq.astro';
 import Closing from '../components/Closing.astro';
 import DraftNote from '../components/DraftNote.astro';
 import { NAME, HOTKEY } from '../brand';
 import { faqFor } from '../data/faq';
-import homeShot from '../../../docs/screenshot-home.png';
 ---
 <Layout
   title="Dictation"
   description={`Dictate into any Windows app. ${NAME} turns speech into text on your PC, tidies it with AI if you want, and pastes it where your cursor is: email, chat, editors and terminals.`}
 >
   <PageHero
+    kicker="Dictation"
     title="Talk into any Windows app"
     lede={`Press ${HOTKEY}, say it the way you’d say it, and tidy text lands at your cursor: in email, chat, documents, your editor or a terminal. Speech turns into text on your own PC.`}
   >
-    <Shot
-      slot="visual"
-      src={homeShot}
-      eager
-      alt={`${NAME}’s Home screen: a greeting that says to press F9, a card about AI cleanup, today’s dictations with their times, and totals for words, time saved and the day streak. The data is made up.`}
-      caption="A screenshot from October 2026, with made-up data. To be recaptured in light and dark."
-    />
+    <HeroDesk slot="visual" />
   </PageHero>
 
   <section class="section ruled" aria-labelledby="keys-h">
@@ -94,6 +90,9 @@ import homeShot from '../../../docs/screenshot-home.png';
         </div>
       </div>
     </div>
+    <div class="wrap mt-5">
+      <TidyDiff />
+    </div>
   </section>
 
   <section class="section ruled" aria-labelledby="words-h">
@@ -102,32 +101,7 @@ import homeShot from '../../../docs/screenshot-home.png';
         <h2 id="words-h">Your names and jargon, spelled right</h2>
         <p>Teach {NAME} a word once and it stays taught.</p>
       </div>
-      <div class="grid grid-3">
-        <div class="col">
-          <h3>A dictionary</h3>
-          <p>Each word with the ways it gets misheard. Near misses are caught too. Import and export it as CSV or plain text.</p>
-        </div>
-        <div class="col">
-          <h3>It learns from your fixes</h3>
-          <p>Correct a word after a dictation and {NAME} offers to add it, so the same slip doesn’t happen twice.</p>
-        </div>
-        <div class="col">
-          <h3>Snippets</h3>
-          <p>Say a short phrase and get the text you type all the time: an address, a sign-off, a link. Type something often and {NAME} suggests it.</p>
-        </div>
-        <div class="col">
-          <h3>Names on screen</h3>
-          <p>{NAME} reads the names and terms in the window in front, for that dictation only, and spells them the way it does. You can switch it off.</p>
-        </div>
-        <div class="col">
-          <h3>Code, said aloud</h3>
-          <p>In an editor or a terminal, “user service dot ts” becomes <code>userService.ts</code> when that file is on screen.</p>
-        </div>
-        <div class="col">
-          <h3>Your languages</h3>
-          <p>Tell {NAME} the languages you speak; it picks a model that covers them and keeps cleanup in the language you used. A shortcut per language, or one that translates.</p>
-        </div>
-      </div>
+      <MakeItYours />
     </div>
   </section>
 
@@ -214,5 +188,5 @@ import homeShot from '../../../docs/screenshot-home.png';
   </section>
 
   <Faq items={faqFor('dictation')} />
-  <Closing />
+  <Closing slot="after" />
 </Layout>

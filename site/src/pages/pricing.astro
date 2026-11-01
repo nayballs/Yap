@@ -54,6 +54,7 @@ const free = [
   description={`${NAME} is free: no trial, no word limit, no meeting limit. Everything that runs on your PC stays free for good.`}
 >
   <PageHero
+    kicker="Pricing"
     title="Free. Not a trial, not a word limit."
     lede="Everything that runs on your own PC is free, for good. No account needed."
     cta={false}
@@ -120,7 +121,7 @@ const free = [
   <div class="wrap">
     <DraftNote class="mb-draft">How {NAME} is funded, and whether to show a sponsor link, are the maintainer’s to answer here and on an About page (plan §3.6, §10.4).</DraftNote>
   </div>
-  <Closing />
+  <Closing slot="after" />
 </Layout>
 
 <style>
