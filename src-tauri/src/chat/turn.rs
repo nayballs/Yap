@@ -310,6 +310,10 @@ async fn answer_turn(
     // Pictures from the web (chat/pictures.rs): looked at and shown by a
     // model that reads images, shown by any other that calls tools.
     let pictures = crate::chat::pictures::Gate::for_model(web_on && tools_supported, &provider, &model);
+    // Acting on the pages beside the chat (chat/pages/act.rs): the models
+    // proven good at it, in a typed Chat turn (never the Voice Assistant
+    // or the meetings: a click that buys asks in Chat's thread).
+    let act = pictures != crate::chat::pictures::Gate::Off && scope.is_none() && !meetings && crate::chat::pages::act::can_act(&provider, &model);
     // The calendar (chat/tools/calendar.rs): a tool while one is connected
     // (not across the meetings, whose passages are numbered on their own).
     let calendar_on = !meetings && crate::calendar::connected();
@@ -339,6 +343,7 @@ async fn answer_turn(
         doc_tools,
         strong,
         pictures,
+        act,
     };
     let schemas = if tools_supported {
         counter.count(&crate::chat::tools::offered_tools(cfg.open_apps, web_on && !claude_in_chat, extra_flags).to_string()).await
@@ -352,7 +357,7 @@ async fn answer_turn(
         + crate::snip::turn::images().iter().filter(|i| !i.as_text).map(|i| counter.picture(i.w, i.h)).sum::<u64>();
     let rate_cap = crate::chat::budget::rate_cap(&provider);
     if mode != crate::chat::budget::Mode::Messages {
-        let stable = stable_prompt(&cfg, &persona, tools_supported, doc_tools, web_lines, web_on, pictures, calendar_on, &profile, now);
+        let stable = stable_prompt(&cfg, &persona, tools_supported, doc_tools, web_lines, web_on, pictures, act, calendar_on, &profile, now);
         let fixed_now = counter.count(&stable).await + schemas;
         let guess = crate::chat::budget::budget(context_size, context_known, fixed_now, kind, tools_supported, rate_cap);
         if question_tokens > guess.history {
@@ -471,7 +476,7 @@ async fn answer_turn(
     let about = crate::ai::about_you::prompt_block(&profile, now);
     let calendar_zone = crate::chat::tools::calendar::Zone::of(profile.region.time_zone.as_deref());
     let mut system = persona.trim().to_string();
-    system.push_str(&instructions(&cfg, tools_supported, doc_tools, web_lines, web_on, pictures, calendar_on, &profile));
+    system.push_str(&instructions(&cfg, tools_supported, doc_tools, web_lines, web_on, pictures, act, calendar_on, &profile));
     // Where the line on earlier web answers goes for a model without tools
     // (it depends on the history sent, chosen below).
     let note_at = system.len();
@@ -481,9 +486,11 @@ async fn answer_turn(
     }
     // The pages open beside the chat (chat/pages.rs): "this page" is the one
     // in front, and read_open_page reads it.
+    let mut tabs_open = false;
     if pictures != crate::chat::pictures::Gate::Off {
-        let tabs = crate::chat::pages::view::open_tabs().await;
+        let tabs = crate::chat::pages::backend::tabs().await;
         if !tabs.is_empty() {
+            tabs_open = true;
             context.push(crate::chat::pages::tabs_line(&tabs));
         }
     }
@@ -497,6 +504,11 @@ async fn answer_turn(
         && tools_supported
         && web_on
         && crate::ai::ai_model::runs_here(&provider, &base_url)
+        // (A question about the page open beside the chat reads that page.)
+        && !(tabs_open && crate::chat::pages::about_open_page(&text))
+        // (Nor, for a model that may act on pages, one with a page open or a link
+        // given: what it asks is likely that page's; it can still search.)
+        && !(act && (tabs_open || !crate::web::links_in(&text).is_empty()))
         && crate::web::needs_web(&text)
     {
         first_search(&text)
@@ -828,6 +840,7 @@ async fn answer_turn(
             doc_tools,
             strong,
             pictures,
+            act,
         };
         let looped = crate::chat::tools::run_tool_loop_with(
             &system,
@@ -1115,6 +1128,7 @@ fn instructions(
     web_lines: crate::chat::tools::WebLines,
     web_on: bool,
     pictures: crate::chat::pictures::Gate,
+    act: bool,
     calendar_on: bool,
     profile: &crate::ai::about_you::Profile,
 ) -> String {
@@ -1147,7 +1161,7 @@ fn instructions(
             }
             // Pages beside the chat (chat/pages.rs): opening a page or a
             // search there, reading the one open, shots for a model that sees.
-            let pages = crate::chat::pages::instructions(pictures);
+            let pages = crate::chat::pages::instructions(pictures, act);
             if !pages.is_empty() {
                 s.push(' ');
                 s.push_str(&pages);
@@ -1213,13 +1227,14 @@ pub(crate) fn stable_prompt(
     web_lines: crate::chat::tools::WebLines,
     web_on: bool,
     pictures: crate::chat::pictures::Gate,
+    act: bool,
     calendar_on: bool,
     profile: &crate::ai::about_you::Profile,
     now: chrono::DateTime<chrono::Utc>,
 ) -> String {
     let about = crate::ai::about_you::prompt_block(profile, now);
     let mut s = persona.trim().to_string();
-    s.push_str(&instructions(cfg, tools_supported, doc_tools, web_lines, web_on, pictures, calendar_on, profile));
+    s.push_str(&instructions(cfg, tools_supported, doc_tools, web_lines, web_on, pictures, act, calendar_on, profile));
     s.push_str(&ending(tools_supported, profile, &about, &crate::memory::you_block()));
     if tools_supported {
         s.push_str("\n\n");
@@ -1275,13 +1290,14 @@ pub async fn chat_limits() -> Limits {
     let strong = tools_supported && crate::chat::documents::rich::strong(&provider, &model);
     let web_on = cfg.web_search;
     let pictures = crate::chat::pictures::Gate::for_model(web_on && tools_supported, &provider, &model);
+    let act = pictures != crate::chat::pictures::Gate::Off && crate::chat::pages::act::can_act(&provider, &model);
     let claude_in_chat = in_chat(&cfg, &provider, &model, &base_url, &key);
     let calendar_on = crate::calendar::connected();
     let counter = crate::chat::budget::Counter::for_call(&provider, &base_url);
     let (context, context_known) = crate::chat::budget::context_window(&cfg, &provider, &model, &base_url).await;
     let profile = crate::ai::about_you::profile(&cfg);
     let web_lines = crate::chat::tools::WebLines::of(strong, claude_in_chat);
-    let stable = stable_prompt(&cfg, &persona, tools_supported, doc_tools, web_lines, web_on, pictures, calendar_on, &profile, crate::ai::eval::now());
+    let stable = stable_prompt(&cfg, &persona, tools_supported, doc_tools, web_lines, web_on, pictures, act, calendar_on, &profile, crate::ai::eval::now());
     let log = crate::chat::tools::calendar::Log::default();
     let extra = crate::chat::tools::Extra {
         memory: true,
@@ -1293,6 +1309,7 @@ pub async fn chat_limits() -> Limits {
         doc_tools,
         strong,
         pictures,
+        act,
     };
     let schemas = if tools_supported { counter.count(&crate::chat::tools::offered_tools(cfg.open_apps, web_on && !claude_in_chat, extra).to_string()).await } else { 0 };
     let fixed = counter.count(&stable).await + schemas;

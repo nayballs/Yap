@@ -287,6 +287,7 @@ pub fn run() {
             chat::pages::view::page_view_reload,
             chat::pages::view::page_view_go,
             chat::pages::view::page_view_shot,
+            chat::pages::act::confirm::chat_page_confirm,
             dictation::commands::cancel_recording,
             shell::autostart::set_autostart,
             shell::commands::is_portable,

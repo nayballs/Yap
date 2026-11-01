@@ -194,6 +194,13 @@
   <!-- What its tools did, folded under it (chat/activity.rs). -->
   <ChatSteps tools={m.tools} />
 {/if}
+{#if m.role === 'assistant' && m.confirms?.length}
+  <!-- Yap asks before a click that buys, pays, books… on a page beside the
+       chat (chat/pages/act/confirm.rs): Allow once / Don't (its own chunk). -->
+  {#await import('./PageConfirm.svelte') then { default: PageConfirm }}
+    <PageConfirm confirms={m.confirms} />
+  {/await}
+{/if}
 {#if m.role === 'user' && m.stopped && last}
   <!-- Stopped before any of the answer came. -->
   <p class="stoppednote">Stopped</p>

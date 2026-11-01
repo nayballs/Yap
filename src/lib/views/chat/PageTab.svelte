@@ -20,6 +20,9 @@
   //   page yet: the address waits, over the pages this chat read (`recent`,
   //   as Claude Code's offers the project's servers); its webview is made
   //   once there's somewhere to go.
+  // - While Chat acts on the page (chat/pages/act.rs: clicks, typing), a
+  //   strip under the bar says "Yap is using this page", with Stop (the
+  //   turn's ■: chatDoc.svelte.js `acting`), until the turn ends.
   // - Under it, where it's from, its section and "Open in Brave" in words
   //   (as a picture's "From … · Open in …"); a right-click on words
   //   selected in the page offers Ask Yap about this and Read aloud (its own
@@ -298,6 +301,16 @@
   {#if addrError}
     <p class="addrerror" role="alert" data-testid="chat-page-address-error">{addrError}</p>
   {/if}
+  {#if doc.acting === key}
+    <!-- Yap is clicking or typing here (chat/pages/act.rs): said over the
+         page (the page itself is a window of its own, so not on it), with
+         Stop — the turn's ■ — until the turn ends. -->
+    <div class="acting" aria-live="polite" data-testid="chat-page-acting">
+      <span class="actdot" aria-hidden="true"></span>
+      <span class="acttext">Yap is using this page</span>
+      <button type="button" class="actstop" onclick={() => doc.stopUsing()} data-testid="chat-page-acting-stop">Stop</button>
+    </div>
+  {/if}
 
   <!-- The page's own webview sits over this (Rust's); under it, what shows
        until it's there, or when it couldn't open — or a new tab's start. -->
@@ -433,6 +446,58 @@
     border-bottom: 1px solid var(--yap-paper-s2);
     font-size: 11.5px;
     color: var(--yap-paper-danger);
+  }
+  /* "Yap is using this page": a strip between the bar and the page. */
+  .acting {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 5px 10px 5px 14px;
+    border-bottom: 1px solid var(--yap-primary-line);
+    background: var(--yap-primary-wash);
+    font-size: 12px;
+    color: var(--yap-paper-ink);
+  }
+  .actdot {
+    flex: 0 0 auto;
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    background: var(--yap-primary);
+    animation: actpulse 1.2s ease-in-out infinite;
+  }
+  @keyframes actpulse {
+    50% {
+      opacity: 0.35;
+    }
+  }
+  :global(:root[data-motion='reduced']) .actdot {
+    animation: none;
+  }
+  .acttext {
+    flex: 1 1 auto;
+    min-width: 0;
+    font-weight: 600;
+  }
+  .actstop {
+    flex: 0 0 auto;
+    height: 24px;
+    padding: 0 10px;
+    border: 1px solid var(--yap-paper-rule);
+    border-radius: 999px;
+    background: var(--yap-paper);
+    color: var(--yap-paper-ink);
+    font: inherit;
+    font-size: 12px;
+    font-weight: 600;
+    cursor: pointer;
+  }
+  .actstop:hover {
+    background: var(--yap-paper-s1);
+  }
+  .actstop:focus-visible {
+    outline: 2px solid var(--yap-focus-ring);
+    outline-offset: 1px;
   }
   .pageactions {
     flex: 0 0 auto;

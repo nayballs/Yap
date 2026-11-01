@@ -246,6 +246,10 @@ pub struct Extra<'a> {
     /// and show for a model that reads images, show for any other; none
     /// without the web).
     pub pictures: crate::chat::pictures::Gate,
+    /// It may act on the pages beside the chat (`chat/pages/act.rs`
+    /// `can_act`: the strong cloud models and the on-device ones the browse
+    /// evaluation passed; a typed Chat turn with the web on).
+    pub act: bool,
 }
 
 /// The calendar tool in a turn ([`calendar::run`]).

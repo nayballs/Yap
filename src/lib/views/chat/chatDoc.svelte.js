@@ -127,6 +127,9 @@ export function createDocPanel({ onopennote = () => null } = {}) {
   // and address as Rust says, and where the address bar last took it (a
   // tab shown again opens there). New tabs are counted for their keys.
   let pageNow = $state({});
+  // The page tab Yap is acting on now (its key), and the turn's Stop.
+  let acting = $state(null);
+  let stopActing = null;
   let newTabs = 0;
   // Tabs closed (their keys), and items shown that no answer has yet (a
   // turn's, before its answer is kept).
@@ -328,6 +331,29 @@ export function createDocPanel({ onopennote = () => null } = {}) {
     open = true;
   }
 
+  /**
+   * Yap is acting on page tab `key` (a turn's `acting` event, chat/pages/act.rs):
+   * its tab says "Yap is using this page", with Stop (`stop`: the turn's ■),
+   * until the turn ends.
+   */
+  function setActing(key, stop) {
+    acting = key || null;
+    stopActing = stop || null;
+  }
+
+  /** Stop: the turn acting on the page stops. */
+  function stopUsing() {
+    stopActing?.();
+  }
+
+  /** Page tab `key` shown (a turn's `switchTab`: the model's switch_tab). */
+  function showTab(key) {
+    if (!key) return;
+    const item = extra.find((t) => t.key === key);
+    if (item) openTab(item);
+    else if (key.startsWith('page:') && !key.startsWith('page:new:')) showPage({ url: key.slice(5) });
+  }
+
   /** The row's +: a new page tab, its address bar waiting (Claude Code's browser pane's). */
   function newPage() {
     newTabs += 1;
@@ -403,6 +429,9 @@ export function createDocPanel({ onopennote = () => null } = {}) {
 
   /** The turn is over: nothing is being written; the text as saved. */
   function turnEnded() {
+    // Yap isn't using a page any more (chat/pages/act.rs).
+    acting = null;
+    stopActing = null;
     if (!busy) return;
     busy = false;
     writing = null;
@@ -594,6 +623,10 @@ export function createDocPanel({ onopennote = () => null } = {}) {
     show,
     showPicture,
     showPage,
+    showTab,
+    setActing,
+    stopUsing,
+    get acting() { return acting; },
     newPage,
     pageMoved,
     closePages,

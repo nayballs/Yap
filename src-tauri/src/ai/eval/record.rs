@@ -333,6 +333,34 @@ pub fn doc_tools_forced() -> Option<bool> {
     *DOC_TOOLS.lock().unwrap_or_else(|p| p.into_inner())
 }
 
+/// A browse scenario's: how the person answers a click that asks first
+/// (`browse.confirm`: "allow", "first" — the first allowed, the rest not —
+/// or "deny"), and how many have been asked. Set: the model may act on
+/// pages (`eval::browse_forced`).
+static BROWSE: Mutex<Option<(String, u32)>> = Mutex::new(None);
+
+pub fn set_browse(confirm: Option<String>) {
+    *BROWSE.lock().unwrap_or_else(|p| p.into_inner()) = confirm.map(|c| (c, 0));
+}
+
+pub fn browse_forced() -> Option<bool> {
+    BROWSE.lock().unwrap_or_else(|p| p.into_inner()).as_ref().map(|_| true)
+}
+
+/// The scenario's answer to a click that asks first, recorded
+/// (`browse_confirm`): its kind and the button's words (the run's own made-up
+/// page).
+pub fn confirm_answer(label: &str, kind: &str) -> Option<bool> {
+    let allow = {
+        let mut b = BROWSE.lock().unwrap_or_else(|p| p.into_inner());
+        let (mode, asked) = b.as_mut()?;
+        *asked += 1;
+        mode == "allow" || (mode == "first" && *asked == 1)
+    };
+    write("browse_confirm", json!({ "label": label, "kind": kind, "allowed": allow }));
+    Some(allow)
+}
+
 /// The clipboard tool: recorded, answered as the real one answers.
 pub fn intercept_tool(name: &str, args: &Value) -> Option<Value> {
     if name != "copy_to_clipboard" {

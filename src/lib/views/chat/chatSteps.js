@@ -8,10 +8,10 @@
 //   The chips themselves are the list it opens to (ChatSteps.svelte).
 // - `elapsed(s)`: a turn's time on the line beside its step ("12s", "1m 59s").
 
-// A chip about the web (web.rs), a page beside the chat (chat/pages.rs) or
-// the safety rule (chat/tools.rs).
+// A chip about the web (web.rs), a page beside the chat (chat/pages.rs, and
+// acting on one: chat/pages/act.rs) or the safety rule (chat/tools.rs).
 const WEB_CHIP =
-  /^(Searched the web|Couldn't search the web|Didn't search for|Didn't search the web for|Read [^"]|Couldn't read [^"]|Didn't read |Answered from |Brought up |Couldn't bring up |Didn't bring up |Took a shot of |Couldn't take a shot of |Didn't take a shot of |Offered to open |Didn't offer )/;
+  /^(Searched the web|Couldn't search the web|Didn't search for|Didn't search the web for|Read [^"]|Couldn't read [^"]|Didn't read |Answered from |Brought up |Couldn't bring up |Didn't bring up |Took a shot of |Couldn't take a shot of |Didn't take a shot of |Offered to open |Didn't offer |Clicked |Typed in |Scrolled |Went to |Opened a search in tab |Showed tab |Couldn't (click|type|scroll|go|switch)|Didn't (click|type|press|go|act|switch))/;
 // The calendar's (chat/tools/calendar.rs).
 const CALENDAR_CHIP = /^(Checked your calendar|Found \d+ meetings? with|No meetings with|Free |Busy |No calendar connected|Couldn't read the (day|time) )/;
 // A document's (chat/documents.rs, and the rich tools': documents/rich.rs).
@@ -20,7 +20,8 @@ const DOC_CHIP =
 
 /** A chip's mark: 'guard' | 'web' | 'calendar' | 'doc' | 'tool'. */
 export const chipKind = (t) =>
-  /: not after reading the web$/.test(t)
+  // (What Yap never does on a page, and a click the person said no to, too.)
+  /: (not after reading the web|Yap never types .+|sign in yourself in the panel|you said no|no answer in time|couldn't ask you)$/.test(t)
     ? 'guard'
     : WEB_CHIP.test(t)
       ? 'web'
@@ -51,6 +52,11 @@ const STEPS = [
   [/^Rewrote (?:(\d+) sections|"[^"]*") in "/, 'rewrote', (m) => (m[1] ? Number(m[1]) : 1)],
   [/^[Ww]rote (?:(\d+) sections|"[^"]*") in "/, 'wrote', (m) => (m[1] ? Number(m[1]) : 1)],
   [/^(Added "[^"]*" to "|Added to "|Changed (a table in|a part of) "|Took a part out of "|Moved a part of "|Made \d+ changes in "|Restored version \d+ of ")/, 'docEdit'],
+  [/^Clicked /, 'clicked'],
+  [/^Typed in /, 'typed'],
+  [/^Scrolled /, 'scrolled'],
+  [/^(Went to |Opened a search in tab )/, 'went'],
+  [/^Showed tab /, 'switched'],
   [/^Brought up a search for /, 'searchOpened'],
   [/^Brought up /, 'page'],
   [/^Took a shot of /, 'shot'],
@@ -82,6 +88,11 @@ const SAY = {
   rewrote: (n) => n1(n, 'rewrote a section', 'rewrote {n} sections'),
   docEdit: (n) => times(n, 'changed the document'),
   readBeside: (n) => n1(n, 'read the page beside the chat', 'read {n} pages beside the chat'),
+  clicked: (n) => n1(n, 'clicked on the page', 'clicked {n} times on the page'),
+  typed: (n) => n1(n, 'typed on the page', 'typed in {n} fields'),
+  scrolled: () => 'scrolled the page',
+  went: (n) => n1(n, 'went to a page', 'went to {n} pages'),
+  switched: (n) => n1(n, 'switched tabs', 'switched tabs {n} times'),
   searchOpened: (n) => n1(n, 'opened a search', 'opened {n} searches'),
   page: (n) => n1(n, 'brought up a page', 'brought up {n} pages'),
   shot: (n) => n1(n, 'took a shot of a page', 'took {n} shots of pages'),

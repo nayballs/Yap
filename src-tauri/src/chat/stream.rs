@@ -116,6 +116,18 @@ pub enum Event {
     /// A button offered under the answer (`offer_browser`): open a page in
     /// the person's browser.
     Offer { offer: crate::chat::pages::BrowserOffer },
+    /// **Yap is acting on page tab `key`** (`chat/pages/act.rs`): its tab
+    /// says "Yap is using this page", with Stop, until the turn ends.
+    Acting { key: String },
+    /// **Show page tab `key`** (`switch_tab`).
+    SwitchTab { key: String },
+    /// **A question before a click** that would buy, pay, book…
+    /// (`pages/act/confirm.rs`): its card in the thread — "Yap wants to
+    /// press ‘`label`’ on `site`", Allow once / Don't — `state` "asking",
+    /// then "allowed", "refused" or "timedOut"; `does`: what the click would
+    /// do ("buy", "sign in"…). The card answers with
+    /// `chat_page_confirm(id, allow)`.
+    Confirm { id: u64, label: String, site: String, does: String, state: String },
 }
 
 /// Tool calls whose arguments the page sees as they come: a document's
@@ -146,9 +158,15 @@ pub fn doing(name: &str) -> &'static str {
         "look_at_picture" => "Looking at a picture…",
         "show_picture" => "Showing a picture…",
         "find_pictures" => "Looking for pictures…",
-        "show_page" => "Bringing up a page…",
+        "show_page" | "open_page" => "Bringing up a page…",
+        "read_open_page" => "Reading the page…",
         "snap_page" => "Taking a shot of a page…",
         "offer_browser" => "Adding a button…",
+        "click" => "Clicking on the page…",
+        "type_text" => "Typing on the page…",
+        "scroll" => "Scrolling the page…",
+        "go_to" => "Going to a page…",
+        "switch_tab" => "Switching tabs…",
         _ => "Working…",
     }
 }
