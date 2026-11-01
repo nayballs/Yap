@@ -56,6 +56,14 @@ pub async fn with<F: std::future::Future>(images: TurnImages, f: F) -> F::Output
     TURN.scope(images, f).await
 }
 
+/// **A shot Yap took of the screen by itself** (not one the person snipped
+/// or pasted): the Voice Assistant's window ("window") or Chat's
+/// `look_at_screen` ("screen"). It follows a question to a cloud model only
+/// where the screen may go (`assistant::screen::window_may_go`). Pure.
+pub fn captured(source: &str) -> bool {
+    matches!(source, "window" | "screen")
+}
+
 /// The screenshots of the turn running here (none outside one).
 pub fn images() -> Vec<ChatImage> {
     TURN.try_with(|t| t.images.clone()).unwrap_or_default()
@@ -309,7 +317,9 @@ pub async fn with_history_images(messages: &mut [Value], earlier: &[ChatMessage]
     let cap = fit.cap_for(images().len() + budget);
     let exists = |id: &str| super::images::exists(id);
     let window_ok = crate::chat::assistant::screen::window_may_go(&crate::config::load(), provider, base_url);
-    let held = |img: &ChatImage| img.source == "window" && !window_ok;
+    // Taken by Yap from the screen (the Voice Assistant's window, Chat's
+    // `look_at_screen`): never to a cloud model the screen may not go to.
+    let held = |img: &ChatImage| captured(&img.source) && !window_ok;
     let wanted: Vec<String> =
         resend_plan(earlier, budget, &exists, &held).into_iter().map(|(mi, ii)| earlier[mi].images[ii].id.clone()).collect();
     let made: Vec<(String, String, usize)> = tauri::async_runtime::spawn_blocking(move || {
@@ -361,6 +371,14 @@ mod tests {
 
     fn said(role: &str, text: &str, images: &[&str]) -> ChatMessage {
         ChatMessage { role: role.into(), text: text.into(), images: images.iter().map(|i| img(i)).collect(), ..Default::default() }
+    }
+
+    #[test]
+    fn a_screen_look_is_held_as_a_window_shot_is() {
+        // The screen's and the window's captures need the window's consent
+        // with the model each time; a snip or a picture never does.
+        assert!(captured("window") && captured("screen"));
+        assert!(!captured("snip") && !captured("paste") && !captured("web"));
     }
 
     #[test]

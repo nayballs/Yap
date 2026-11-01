@@ -84,7 +84,7 @@ fn open_app_tool(args: &Value, question: &str, previous: Option<&str>, cfg: &Yap
     let found = find(index, name, &cfg.app_nicknames, &cfg.apps_blocked);
     // A website, with pages beside the chat: never an app ("Google" opened
     // Google Chrome, 1 Nov 2026).
-    if cfg.web_search && super::plan::for_the_web(question, &name.to_lowercase(), &found) {
+    if cfg.web_search && super::plan::for_the_web(&name.to_lowercase(), &found) {
         tracing::info!("open_app refused: a website, for open_page");
         return tool_error(
             "That's a website, not an app: open it beside the chat with open_page (its home page, or search words).".to_string(),

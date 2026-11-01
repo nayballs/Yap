@@ -251,7 +251,8 @@
     if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'n') {
       e.preventDefault();
       chat.newChat();
-    } else if ((e.ctrlKey || e.metaKey) && e.shiftKey && !e.altKey && e.key.toLowerCase() === 'b') {
+    } else if ((e.ctrlKey || e.metaKey) && e.shiftKey && !e.altKey && e.key.toLowerCase() === 'b' && !e.defaultPrevented && !e.target?.closest?.('.ProseMirror')) {
+      // (Not over a document being written: the editor's own keys first.)
       e.preventDefault();
       toggleBrowser();
     } else if (e.key === 'Escape' && chat.speakingId?.startsWith('chat:')) {

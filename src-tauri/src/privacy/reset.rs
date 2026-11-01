@@ -960,10 +960,19 @@ async fn delete(app: AppHandle, c: Choice) -> Result<Done, String> {
     if let Some(why) = refused(&app, &c) {
         return Err(why);
     }
-    // The pages' cookies and site data first: WebView2 clears them, and if
-    // it can't, nothing else has gone yet.
+    // The pages' cookies and site data first: WebView2 clears them. If it
+    // can't, and they're all that was asked for, nothing has gone: said. With
+    // other kinds (Reset app) the rest still goes, the pages left out of what
+    // went.
+    let mut c = c;
     if c.has(Kind::Pages) {
-        crate::chat::pages::view::clear_data(&app).await?;
+        if let Err(e) = crate::chat::pages::view::clear_data(&app).await {
+            if c.kinds().len() == 1 {
+                return Err(e);
+            }
+            tracing::warn!("Deleting your data: the pages' data couldn't be cleared ({e}); the rest goes on");
+            c = Choice::of(c.kinds().into_iter().filter(|k| *k != Kind::Pages));
+        }
     }
     let handle = app.clone();
     let every = c == Choice::every();
