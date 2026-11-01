@@ -31,12 +31,11 @@
   import ChatConfig from './ChatConfig.svelte';
   import ModelPicker from './ModelPicker.svelte';
   import EndpointModels from './EndpointModels.svelte';
-  // CSS order (Vite bundles it in import order): the components above come
-  // before Settings' shared styles, as when Settings imported them itself —
-  // the scope tabs' own `.offnote` / `.tools` margins lose to `.set-note`'s
-  // — and this page's styles and the three below after them (its
-  // `.set-note.offnote` wins). Settings.svelte imports this page just
-  // before settings.css for the same reason. The layout is pinned by it.
+  // CSS order: this page is a chunk of its own (Settings.svelte's PAGES), so
+  // all of its styles, the components above included, come after Settings'
+  // shared styles, which the main window has already: this page's own
+  // `.offnote` margins win over `.set-note`'s, as they always have
+  // (frontend-settings.md, "CSS order").
   import './settings.css';
   import LocalModels from './LocalModels.svelte';
   import SmartRouting from './SmartRouting.svelte';

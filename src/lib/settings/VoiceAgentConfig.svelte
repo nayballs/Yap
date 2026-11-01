@@ -74,7 +74,7 @@
     </Group>
   {:else}
     <!-- Off: one line instead of a screen of greyed-out choices. -->
-    <p class="set-note offnote">Turn on Commands to pick the model that carries them out.</p>
+    <p class="set-note">Turn on Commands to pick the model that carries them out.</p>
   {/if}
 
   <Group title="Examples" id="settings-scope-examples" desc={`Say "Hey ${displayName}" and an instruction: the AI writes the result and types it where you are, instead of your words. To hear an answer instead, use the Voice Assistant.`}>
@@ -97,9 +97,6 @@
   .voiceagent {
     display: flex;
     flex-direction: column;
-  }
-  .offnote {
-    margin: -18px 0 30px;
   }
   .example {
     display: flex;

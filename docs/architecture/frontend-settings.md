@@ -65,17 +65,24 @@ windows is in `components/`, `stores/` and `core/`
 
 **CSS order is part of the look.** Vite bundles the CSS in import order,
 and a component's scoped rule (`.offnote.svelte-x`) and `settings.css`'s
-(`.settings-shell .set-note`) can tie: the later one wins. The scope tabs'
-own `.offnote` / `.tools` margins have always lost to `.set-note`'s, and
-cleanup's `.set-note.offnote` wins. So `LanguageModelsPage.svelte`
-imports its shared components, then `settings.css`, then its own parts,
-and `Settings.svelte` imports it just before `settings.css`. A change
-there can move margins: compare a page before and after. Memory
-(`MemorySection.svelte`) and Account (`AccountSection.svelte`) load in
-chunks of their own, so their CSS comes after `settings.css` (2026-10-30,
-the main window's chunk back under 700 KB): safe while their own rules
-never tie with its classes (they use only `.set-note` / `.set-link`, and
-style neither).
+(`.settings-shell .set-note`) can tie: the later one wins. **Every page is
+a chunk of its own** (2026-11-01: `Settings.svelte`'s `PAGES`, each page
+and the search's results loaded the first time it shows, all fetched once
+the window is idle; the main window's chunk keeps only the shell,
+frontend.md "One chunk per window"), and `settings.css` is the shell's, in
+the main window's CSS from the start: so every page's CSS, and every
+component's in it, comes after `settings.css`, and a page's own rule wins
+a tie with it — cleanup's `.offnote` margins over `.set-note`'s, as they
+always have. Until then the Language Models page's shared components,
+AI apps, Connectors and Skills came before `settings.css`, and three of
+them had rules that always lost the tie: the scope tabs' (Commands, Note
+formatting, Chat) own `.offnote` margins (`-18px 0 30px`) and Chat's
+`.tools` (`margin-top: 12px`), never applied. They were removed with the
+split, so the pages look exactly as before (every page's computed styles
+compared before and after, in a stub build, with everything off and with
+cleanup, the three scopes, web search and spoken replies on). A new rule
+on an element that also has a `settings.css` class (`set-note`,
+`set-link`, `page-h`, `set-more`…) now always wins over it.
 
 - **Its copy of the config, in step with config.json** (2026-10-23).
   Settings reads the config once, at mount, and auto-saves 400 ms after any

@@ -40,18 +40,27 @@
   import { initFeatureTips } from '../notices/featureTips.js';
   import { openConnectDialog } from '../stores/calendar.svelte.js';
   import ConnectCalendarDialog from '../components/ConnectCalendarDialog.svelte';
-  // Every view is in this window's one chunk (~590 KB): loading the views
-  // other than Home on demand was measured on 2026-10-22 and changed nothing
-  // you'd see — Home on screen 63 → 57 ms (inside run-to-run noise), 256 →
-  // 253 ms with the CPU 4× slower — since V8 compiles code only when it
-  // runs; the load's time goes to its ~77 IPC calls (frontend.md).
   import HomeView from './home/HomeView.svelte';
-  import NotesView from './notes/NotesView.svelte';
-  import ChatView from './chat/ChatView.svelte';
   import { chatRequest } from '../stores/chatRequest.svelte.js';
   import { menuOrDialogOpen } from '../ui/contextMenu.svelte.js';
   import { noteAccountPicture } from '../core/connections.js';
   import { prefetchHome } from './home/homeData.js';
+
+  // Home is in this window's chunk; every other view is a chunk of its own,
+  // loaded the first time it shows and fetched once the window is idle
+  // (onMount below), so switching to one never waits (frontend.md, "One
+  // chunk per window"). One arrow per view, as in App.svelte: each import()
+  // gets its own preload list.
+  const VIEWS = {
+    insights: () => import('./insights/InsightsView.svelte'),
+    chat: () => import('./chat/ChatView.svelte'),
+    notes: () => import('./notes/NotesView.svelte'),
+    meetings: () => import('./MeetingsView.svelte'),
+    tasks: () => import('./TasksView.svelte'),
+    upload: () => import('./UploadView.svelte'),
+    dictionary: () => import('./dictionary/DictionaryView.svelte'),
+    integrations: () => import('./integrations/IntegrationsView.svelte'),
+  };
 
   // Home's data first, before the ~60 calls the rest of the window makes as
   // it starts (homeData.js; App.svelte has usually asked already, while
@@ -260,10 +269,10 @@
   // (`yap-dictation-error`): one place.
   onMount(() => {
     const uns = [];
-    // Meetings loads on first use (its own chunk): fetched once the window
-    // is idle, so opening it never waits.
+    // The views' chunks (VIEWS above), fetched once the window is idle, so
+    // opening one never waits.
     const idle = window.requestIdleCallback ?? ((f) => setTimeout(f, 2000));
-    idle(() => import('./MeetingsView.svelte').catch(() => {}));
+    idle(() => Object.values(VIEWS).forEach((view) => view().catch(() => {})));
     listen('yap-error', (e) => {
       const msg = String(e.payload || 'Something went wrong');
       toast({ kind: 'alert', title: 'Yap ran into a problem', description: msg, variant: 'destructive' });
@@ -492,10 +501,9 @@
     </div>
   </nav>
 
-  <!-- Home, Chat and Notes are in this window's chunk; the other views load
-       on first use (each its own chunk; Meetings fetched when the window is
-       idle), which keeps the main window's chunk under Vite's 700 kB warning
-       (25 Oct 2026). -->
+  <!-- Home is in this window's chunk; the other views are each a chunk of
+       their own (VIEWS), fetched when the window is idle, which keeps the
+       main window's chunk under its budget (vite.config.js, 1 Nov 2026). -->
   <main class="view">
     <!-- Reset app (privacy/reset.rs): every view shown afresh, from the stores
          as they are now. -->
@@ -503,30 +511,34 @@
     {#if activeView === 'home'}
       <HomeView onopensettings={openSettings} onnavigate={(v) => (activeView = v)} onopennote={openNoteAt} />
     {:else if activeView === 'insights'}
-      {#await import('./insights/InsightsView.svelte') then { default: InsightsView }}
+      {#await VIEWS.insights() then { default: InsightsView }}
         <InsightsView focus={insightsFocus} onfocused={() => (insightsFocus = null)} />
       {/await}
     {:else if activeView === 'dictionary'}
-      {#await import('./dictionary/DictionaryView.svelte') then { default: DictionaryView }}
+      {#await VIEWS.dictionary() then { default: DictionaryView }}
         <DictionaryView />
       {/await}
     {:else if activeView === 'chat'}
-      <ChatView
-        onopensettings={openSettings}
-        onopennote={openNoteAt}
-        onopenusage={() => {
-          insightsFocus = 'ai-usage';
-          activeView = 'insights';
-        }}
-      />
+      {#await VIEWS.chat() then { default: ChatView }}
+        <ChatView
+          onopensettings={openSettings}
+          onopennote={openNoteAt}
+          onopenusage={() => {
+            insightsFocus = 'ai-usage';
+            activeView = 'insights';
+          }}
+        />
+      {/await}
     {:else if activeView === 'notes'}
-      <NotesView onopensettings={openSettings} />
+      {#await VIEWS.notes() then { default: NotesView }}
+        <NotesView onopensettings={openSettings} />
+      {/await}
     {:else if activeView === 'meetings'}
-      {#await import('./MeetingsView.svelte') then { default: MeetingsView }}
+      {#await VIEWS.meetings() then { default: MeetingsView }}
         <MeetingsView onopensettings={openSettings} onnavigate={(v) => (activeView = v)} onopennote={openNoteAt} />
       {/await}
     {:else if activeView === 'tasks'}
-      {#await import('./TasksView.svelte') then { default: TasksView }}
+      {#await VIEWS.tasks() then { default: TasksView }}
         <TasksView
           onopennote={(id, line) => {
             noteRequest.pending = { id, stop: false, line };
@@ -535,11 +547,11 @@
         />
       {/await}
     {:else if activeView === 'upload'}
-      {#await import('./UploadView.svelte') then { default: UploadView }}
+      {#await VIEWS.upload() then { default: UploadView }}
         <UploadView />
       {/await}
     {:else if activeView === 'integrations'}
-      {#await import('./integrations/IntegrationsView.svelte') then { default: IntegrationsView }}
+      {#await VIEWS.integrations() then { default: IntegrationsView }}
         <IntegrationsView onopensettings={openSettings} />
       {/await}
     {/if}

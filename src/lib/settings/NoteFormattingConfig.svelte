@@ -56,7 +56,7 @@
       <PromptStudio bind:prompt={scope.prompt} basePrompt={noteBase} defaultBody={defaultPrompt} {providerLabel} {modelLabel} />
     </Group>
   {:else}
-    <p class="set-note offnote">Turn it on to give notes and meeting summaries a model of their own.</p>
+    <p class="set-note">Turn it on to give notes and meeting summaries a model of their own.</p>
   {/if}
 </div>
 
@@ -64,8 +64,5 @@
   .nf {
     display: flex;
     flex-direction: column;
-  }
-  .offnote {
-    margin: -18px 0 30px;
   }
 </style>
