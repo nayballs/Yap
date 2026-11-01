@@ -341,10 +341,11 @@ async fn answer_turn(
     } else {
         0
     };
-    // The question as sent: its text, and the screenshots it carries.
+    // The question as sent: its text, and the screenshots it carries, each
+    // by its size where it goes (`budget::image_tokens_at`).
     let question_tokens = counter.count(&text).await
         + crate::chat::budget::MESSAGE_OVERHEAD
-        + crate::snip::turn::images().iter().filter(|i| !i.as_text).map(|i| crate::chat::budget::image_tokens(i.w, i.h)).sum::<u64>();
+        + crate::snip::turn::images().iter().filter(|i| !i.as_text).map(|i| counter.picture(i.w, i.h)).sum::<u64>();
     let rate_cap = crate::chat::budget::rate_cap(&provider);
     if mode != crate::chat::budget::Mode::Messages {
         let stable = stable_prompt(&cfg, &persona, tools_supported, doc_tools, web_lines, web_on, pictures, calendar_on, &profile, now);
