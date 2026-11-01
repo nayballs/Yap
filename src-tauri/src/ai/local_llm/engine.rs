@@ -689,6 +689,11 @@ pub fn primary_variant() -> Variant {
 /// the projector as on llamafile. Newer builds come through the [`updater`].
 pub const FLOOR: Build = Build(11_982);
 
+/// The floor's release on GitHub, as `scripts/check-pins.mjs` reads pins
+/// (the weekly check of the downloads pinned in the code; llama.cpp's floor
+/// is only "behind" 30 days past upstream, as the updater moves past it).
+pub const FLOOR_RELEASE: &str = "https://github.com/ggml-org/llama.cpp/releases/download/b11982/";
+
 /// A file on a release, as pinned or as the releases feed lists it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Asset {
@@ -739,6 +744,9 @@ pub fn asset_url(build: Build, name: &str) -> String {
     #[cfg(debug_assertions)]
     if let Some(base) = feed::stand_in_base() {
         return format!("{base}/download/{build}/{name}");
+    }
+    if build == FLOOR {
+        return format!("{FLOOR_RELEASE}{name}");
     }
     format!("https://github.com/ggml-org/llama.cpp/releases/download/{build}/{name}")
 }
@@ -1255,7 +1263,8 @@ mod tests {
                 assert_eq!(c.sha256.len(), 64);
             }
         }
-        assert_eq!(asset_url(FLOOR, "llama-b11982-bin-win-cpu-x64.zip"), "https://github.com/ggml-org/llama.cpp/releases/download/b11982/llama-b11982-bin-win-cpu-x64.zip");
+        assert_eq!(asset_url(FLOOR, "llama-b11982-bin-win-cpu-x64.zip"), format!("{FLOOR_RELEASE}llama-b11982-bin-win-cpu-x64.zip"));
+        assert!(FLOOR_RELEASE.ends_with(&format!("/{FLOOR}/")), "the pin the weekly check reads is the floor");
     }
 
     #[test]
