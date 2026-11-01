@@ -1,0 +1,198 @@
+---
+// The Voice Assistant (drawn): asked out loud from another app, the answer
+// read in a voice that runs on the PC, the bar's capsule saying it's
+// speaking and the reading card lighting each word as it's read. The words
+// move on by themselves while on screen (not with reduced motion). The
+// meeting it's about is made up.
+import Win from './Win.astro';
+
+const asked = 'What did we decide about the pricing page?';
+const answer = 'You said you’d have a draft by Thursday, and Imogen is checking the numbers with finance first.';
+const words = answer.split(' ');
+---
+<div class="scene scene-desk vs" data-voice role="img" aria-label={`The Voice Assistant over another app. Asked out loud: “${asked}” The answer is read aloud, each word lit as it’s read: “${answer}”`}>
+  <div class="vs-in" aria-hidden="true">
+    <Win title="Spreadsheet · Launch budget" class="vs-app">
+      <div class="sheet-grid">
+        {Array.from({ length: 24 }, (_, i) => <span class:list={['cell', i % 4 === 0 && 'cell-h']}></span>)}
+      </div>
+    </Win>
+
+    <div class="vs-float">
+      <p class="vs-asked"><span class="vs-you">You asked</span>{asked}</p>
+      <div class="reading">
+        <p class="reading-text" data-words>
+          {words.map((w, i) => <span class:list={['rw', i === 4 && 'is-now']}>{w} </span>)}
+        </p>
+        <div class="reading-ctl"><i class="c-prev"></i><i class="c-pause"></i><i class="c-next"></i><span class="speed">1×</span></div>
+      </div>
+      <span class="capsule speak">
+        <span class="wave is-live">{Array.from({ length: 10 }, () => <i></i>)}</span>
+        <span>Speaking</span>
+        <span class="stop"></span>
+      </span>
+    </div>
+    <div class="taskbar vs-taskbar"><i></i><i></i><i></i><i></i></div>
+  </div>
+</div>
+
+<script>
+  // The reading card's karaoke: the lit word moves along while on screen.
+  for (const root of document.querySelectorAll<HTMLElement>('[data-voice]')) {
+    if (matchMedia('(prefers-reduced-motion: reduce)').matches) continue;
+    const words = [...root.querySelectorAll<HTMLElement>('.rw')];
+    let i = 0;
+    let timer = 0;
+    const step = () => {
+      words.forEach((w, j) => w.classList.toggle('is-now', j === i));
+      words.forEach((w, j) => w.classList.toggle('is-read', j < i));
+      i = (i + 1) % (words.length + 4);
+      timer = window.setTimeout(step, i === 0 ? 1200 : 330);
+    };
+    new IntersectionObserver(([e]) => {
+      clearTimeout(timer);
+      if (e.isIntersecting) step();
+    }).observe(root);
+  }
+</script>
+
+<style>
+  .vs {
+    padding: clamp(14px, 3vw, 36px) clamp(14px, 3vw, 36px) 0;
+    box-shadow: 0 0 0 1px var(--t-border-subtle), var(--shadow-scene);
+  }
+  .vs-in {
+    position: relative;
+    display: grid;
+    min-height: 430px;
+  }
+  .vs-in :global(.vs-app) {
+    height: 300px;
+    opacity: 0.9;
+  }
+  .sheet-grid {
+    display: grid;
+    grid-template-columns: 1.4fr 1fr 1fr 1fr;
+    gap: 1px;
+    height: 100%;
+    background: var(--t-border-subtle);
+  }
+  .cell {
+    background: var(--t-s2);
+  }
+  .cell-h {
+    background: var(--t-s3);
+  }
+
+  .vs-float {
+    position: absolute;
+    left: 50%;
+    bottom: 54px;
+    translate: -50% 0;
+    display: grid;
+    justify-items: center;
+    gap: 10px;
+    width: min(100%, 460px);
+  }
+  .vs-asked {
+    justify-self: end;
+    max-width: 80%;
+    padding: 7px 12px;
+    border-radius: 12px 12px 4px 12px;
+    background: var(--t-s2);
+    box-shadow: 0 0 0 1px var(--t-border), var(--t-shadow-sm);
+    font-size: 0.8125rem;
+    font-weight: 560;
+  }
+  .vs-you {
+    display: block;
+    font-size: 0.68rem;
+    font-weight: 700;
+    color: var(--t-muted);
+  }
+  .reading {
+    width: 100%;
+    padding: 14px 16px 10px;
+    border-radius: 16px;
+    background: var(--bar-surface);
+    border: 1px solid var(--bar-border);
+    box-shadow: var(--bar-shadow), 0 20px 50px -16px rgb(40 30 10 / 0.4);
+  }
+  .reading-text {
+    font-size: 1.0625rem;
+    line-height: 1.5;
+    color: var(--bar-text-faint);
+    max-width: none;
+  }
+  .rw {
+    border-radius: 4px;
+    transition:
+      color 160ms,
+      background-color 160ms;
+  }
+  .rw:global(.is-read) {
+    color: var(--bar-text-soft);
+  }
+  .rw:global(.is-now) {
+    color: var(--bar-text);
+    background: var(--t-primary-wash);
+  }
+  .reading-ctl {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 14px;
+    margin-top: 10px;
+    padding-top: 8px;
+    border-top: 1px solid var(--bar-sep);
+  }
+  .reading-ctl i {
+    width: 22px;
+    height: 22px;
+    border-radius: 6px;
+    background: var(--bar-hover);
+  }
+  .reading-ctl .c-pause {
+    width: 26px;
+    height: 26px;
+    border-radius: 50%;
+    background:
+      linear-gradient(var(--bar-button-text), var(--bar-button-text)) 9px 7px / 2px 12px no-repeat,
+      linear-gradient(var(--bar-button-text), var(--bar-button-text)) 15px 7px / 2px 12px no-repeat,
+      var(--bar-button);
+  }
+  .speed {
+    font-size: 0.72rem;
+    font-weight: 700;
+    color: var(--bar-text-muted);
+  }
+  .speak .stop {
+    width: 18px;
+    height: 18px;
+    border-radius: 50%;
+    background:
+      linear-gradient(var(--bar-text), var(--bar-text)) center / 7px 7px no-repeat,
+      var(--bar-stop);
+  }
+  .vs-taskbar {
+    position: absolute;
+    left: calc(-1 * clamp(14px, 3vw, 36px));
+    right: calc(-1 * clamp(14px, 3vw, 36px));
+    bottom: 0;
+  }
+
+  @media (max-width: 640px) {
+    .vs-in {
+      min-height: 400px;
+    }
+    .vs-in :global(.vs-app) {
+      height: 200px;
+    }
+    .vs-float {
+      bottom: 50px;
+    }
+    .reading-text {
+      font-size: 0.9375rem;
+    }
+  }
+</style>

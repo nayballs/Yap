@@ -1,0 +1,343 @@
+---
+// Meeting notes (site plan A7, drawn): a call on one side, the notepad docked
+// beside it with the live transcript (You and the others), the Ask bar's
+// "What did I miss?", and one line of the action plan after the call. The
+// meeting and the people are made up; no call app is named.
+const lines = [
+  { who: 'Priya', av: 'av-a', text: 'Can we have the pricing page ready before the launch?' },
+  { who: 'You', av: 'av-c', text: 'Yes, I’ll have a draft by Thursday.', me: true },
+  { who: 'Imogen', av: 'av-b', text: 'I’ll check the numbers with finance first.' },
+];
+---
+<div class="scene scene-desk np" role="img" aria-label="A video call on one side of the screen and the meeting notepad docked beside it, showing the live transcript of a made-up meeting, Weekly product sync, and an item from the action plan after it: you draft the pricing page by Thursday, said at 10:14.">
+  <div class="np-in" aria-hidden="true">
+    <div class="call">
+      <div class="call-grid">
+        <span class="tile-p t1"><span class="av av-a">P</span><span class="t-name">Priya</span></span>
+        <span class="tile-p t2 is-talking"><span class="av av-b">I</span><span class="t-name">Imogen</span></span>
+        <span class="tile-p t3"><span class="av av-d">O</span><span class="t-name">Oliver</span></span>
+        <span class="tile-p t4"><span class="av av-c">S</span><span class="t-name">You</span></span>
+      </div>
+      <div class="call-bar"><i></i><i></i><i></i><i class="leave"></i></div>
+    </div>
+
+    <div class="win notepad">
+      <div class="np-top">
+        <span class="np-rec"><span class="capsule-dot"></span>12:04</span>
+        <span class="chip">Hidden from screen sharing</span>
+        <span class="win-caps"><i></i><i></i><i></i></span>
+      </div>
+      <div class="np-body">
+        <p class="np-title">Weekly product sync</p>
+        <p class="np-date">4 Nov, 10:00</p>
+        <div class="np-tabs"><span>My thoughts</span><span class="is-on">Transcript <span class="wave is-live">{Array.from({ length: 3 }, () => <i></i>)}</span></span><span>Summary</span></div>
+        <div class="np-lines">
+          {lines.map((l) => (
+            <div class:list={['line', l.me && 'line-me']}>
+              <span class="line-who">{l.who}</span>
+              <p class="bubble">{l.text}</p>
+            </div>
+          ))}
+        </div>
+        <div class="np-tray">
+          <span class="np-stop"><span class="sq"></span>Stop</span>
+          <span class="np-ask"><span class="chip chip-amber">What did I miss?</span><span class="np-ask-ph">Ask anything</span></span>
+        </div>
+      </div>
+    </div>
+
+    <div class="plan">
+      <p class="plan-h">Action plan</p>
+      <p class="plan-item"><span class="box"></span><span><strong>You:</strong> draft the pricing page <span class="plan-due">by Thursday</span></span></p>
+      <p class="plan-src">Said at 10:14 · checked against the transcript</p>
+    </div>
+  </div>
+</div>
+
+<style>
+  .np {
+    padding: clamp(14px, 3vw, 40px);
+    box-shadow: 0 0 0 1px var(--t-border-subtle), var(--shadow-scene);
+  }
+  .np-in {
+    position: relative;
+    display: grid;
+    grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr);
+    gap: 16px;
+    min-height: 470px;
+  }
+
+  /* The call: a dark window of video tiles. */
+  .call {
+    display: flex;
+    flex-direction: column;
+    border-radius: 12px;
+    background: #1d1b17;
+    box-shadow: 0 0 0 1px #3a352b, var(--shadow-scene);
+    overflow: hidden;
+  }
+  .call-grid {
+    flex: 1;
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 8px;
+    padding: 10px;
+  }
+  .tile-p {
+    position: relative;
+    display: grid;
+    place-items: center;
+    border-radius: 10px;
+    background: #2a2722;
+  }
+  .tile-p .av {
+    width: 52px;
+    height: 52px;
+    border-radius: 50%;
+    font-size: 1.1rem;
+  }
+  .tile-p.is-talking {
+    box-shadow: 0 0 0 2px #f0b04a;
+  }
+  .t-name {
+    position: absolute;
+    left: 10px;
+    bottom: 8px;
+    font-size: 0.72rem;
+    font-weight: 600;
+    color: #d9d3c6;
+  }
+  .call-bar {
+    display: flex;
+    justify-content: center;
+    gap: 10px;
+    padding: 10px;
+    background: #24211d;
+  }
+  .call-bar i {
+    width: 30px;
+    height: 30px;
+    border-radius: 50%;
+    background: #3a352b;
+  }
+  .call-bar .leave {
+    width: 44px;
+    border-radius: 999px;
+    background: #c23b32;
+  }
+
+  /* The notepad, docked beside it. */
+  .notepad {
+    background: var(--t-paper);
+    box-shadow: 0 0 0 1px var(--t-border), var(--shadow-scene);
+  }
+  .np-top {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    height: 36px;
+    padding-left: 12px;
+    border-bottom: 1px solid var(--t-border-subtle);
+  }
+  .np-top .chip {
+    font-size: 0.7rem;
+    padding: 1px 8px;
+  }
+  .np-top .win-caps {
+    margin-left: auto;
+  }
+  .np-rec {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 0.75rem;
+    font-weight: 680;
+    font-variant-numeric: tabular-nums;
+  }
+  .np-body {
+    display: flex;
+    flex-direction: column;
+    flex: 1;
+    padding: 14px 16px 12px;
+  }
+  .np-title {
+    font-family: var(--font-num);
+    font-size: 1.65rem;
+    line-height: 1.15;
+    letter-spacing: -0.03em;
+    font-weight: 500;
+    color: var(--t-paper-ink);
+    max-width: none;
+  }
+  .np-date {
+    margin-top: 2px;
+    font-size: 0.75rem;
+    color: var(--t-paper-date);
+  }
+  .np-tabs {
+    display: flex;
+    gap: 16px;
+    margin-top: 12px;
+    border-bottom: 1px solid var(--t-border-subtle);
+    font-size: 0.8125rem;
+    font-weight: 620;
+    color: var(--t-muted);
+  }
+  .np-tabs > span {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding-bottom: 7px;
+  }
+  .np-tabs .is-on {
+    color: var(--t-fg);
+    box-shadow: inset 0 -2px 0 var(--t-ink);
+  }
+  .np-tabs :global(.wave) {
+    height: 11px;
+    gap: 2px;
+  }
+  .np-tabs :global(.wave i) {
+    width: 2px;
+  }
+  .np-lines {
+    flex: 1;
+    display: grid;
+    align-content: start;
+    gap: 10px;
+    padding-top: 14px;
+  }
+  .line {
+    display: grid;
+    gap: 3px;
+    justify-items: start;
+  }
+  .line-me {
+    justify-items: end;
+  }
+  .line-who {
+    font-size: 0.72rem;
+    font-weight: 680;
+    color: #1f7a72;
+  }
+  .bubble {
+    max-width: 88%;
+    padding: 7px 11px;
+    border-radius: 12px;
+    background: var(--t-paper-s1);
+    font-size: 0.8125rem;
+    line-height: 1.45;
+  }
+  .line-me .bubble {
+    background: var(--t-paper-s2);
+  }
+  .np-tray {
+    display: flex;
+    gap: 8px;
+    margin-top: 12px;
+    padding: 6px;
+    border-radius: 999px;
+    background: var(--t-paper-s1);
+    box-shadow: inset 0 0 0 1px var(--t-border-subtle);
+  }
+  .np-stop {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 12px;
+    border-radius: 999px;
+    background: var(--t-s2);
+    box-shadow: 0 0 0 1px var(--t-border);
+    font-size: 0.78rem;
+    font-weight: 680;
+  }
+  .sq {
+    width: 9px;
+    height: 9px;
+    border-radius: 2px;
+    background: var(--bar-recording);
+  }
+  .np-ask {
+    flex: 1;
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    min-width: 0;
+    padding: 4px 6px;
+    border-radius: 999px;
+    background: var(--t-s2);
+    box-shadow: 0 0 0 1px var(--t-border);
+    overflow: hidden;
+  }
+  .np-ask-ph {
+    font-size: 0.78rem;
+    color: var(--t-muted);
+    white-space: nowrap;
+  }
+
+  /* The action plan, after the call: one line, checked. */
+  .plan {
+    position: absolute;
+    left: clamp(12px, 6%, 64px);
+    bottom: -8px;
+    width: min(340px, 70%);
+    padding: 14px 16px;
+    border-radius: 14px;
+    background: var(--t-s2);
+    box-shadow: 0 0 0 1px var(--t-border), var(--t-shadow-modal);
+    font-size: 0.8125rem;
+  }
+  .plan p {
+    max-width: none;
+  }
+  .plan-h {
+    font-size: 0.72rem;
+    font-weight: 700;
+    color: var(--t-muted);
+    margin-bottom: 6px;
+  }
+  .plan-item {
+    display: flex;
+    gap: 10px;
+    align-items: flex-start;
+    font-size: 0.9375rem;
+    line-height: 1.4;
+  }
+  .box {
+    flex: none;
+    width: 16px;
+    height: 16px;
+    margin-top: 2px;
+    border-radius: 4px;
+    border: 1.5px solid var(--t-border-hover);
+  }
+  .plan-due {
+    color: var(--t-link);
+    font-weight: 620;
+  }
+  .plan-src {
+    margin-top: 8px;
+    padding-top: 8px;
+    border-top: 1px solid var(--t-rule);
+    color: var(--t-success-text);
+    font-weight: 620;
+    font-size: 0.75rem;
+  }
+
+  @media (max-width: 760px) {
+    .np-in {
+      grid-template-columns: 1fr;
+      min-height: 0;
+      padding-bottom: 120px;
+    }
+    .call {
+      display: none;
+    }
+    .plan {
+      left: 8px;
+      right: 8px;
+      width: auto;
+      bottom: 0;
+    }
+  }
+</style>

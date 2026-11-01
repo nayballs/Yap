@@ -1,0 +1,285 @@
+---
+// Chat with a document beside it (drawn): a question about this week's
+// meetings, the answer with what it did folded under it, and the document
+// Chat is writing in the side panel, its next sections still grey lines.
+// The meetings, people and plan are made up.
+import { NAME } from '../../brand';
+import Win from './Win.astro';
+---
+<div class="scene scene-desk cs" role="img" aria-label={`${NAME}’s Chat window. Asked: turn this week’s product syncs into a launch plan. The answer cites the meetings, and the plan is being written as a document in the panel beside the chat.`}>
+  <div class="cs-in" aria-hidden="true">
+    <Win title={`${NAME} · Chat`} class="cs-win">
+      <div class="cs-grid">
+        <div class="thread">
+          <p class="q">Turn this week’s product syncs into a launch plan</p>
+          <div class="a">
+            <p class="a-steps"><span class="a-dot"></span>Searched your meetings · 3 found · 8s</p>
+            <p>Here’s a plan from Monday’s and Thursday’s syncs. One date is still open: the pricing page <span class="cite">1</span></p>
+            <span class="doc-pill"><span class="doc-ic"></span>Launch plan<span class="doc-s">Document</span></span>
+          </div>
+          <div class="composer">
+            <span class="composer-ph">Ask anything</span>
+            <span class="model">On this PC</span>
+          </div>
+        </div>
+        <div class="panel">
+          <div class="panel-top">
+            <span class="panel-name">Launch plan</span>
+            <span class="seg"><span class="is-on">Preview</span><span>Source</span></span>
+          </div>
+          <div class="doc">
+            <p class="d-h1">Launch plan</p>
+            <p class="d-p">From the product syncs on 3 and 6 November.</p>
+            <p class="d-h2">Timeline</p>
+            <ul>
+              <li>Design review moves to Friday <span class="cite">2</span></li>
+              <li>Pricing page draft by Thursday <span class="cite">1</span></li>
+            </ul>
+            <p class="d-h2">Owners</p>
+            <ul>
+              <li>You: the pricing page</li>
+              <li>Imogen: the numbers, with finance<span class="chat-caret">Chat</span></li>
+            </ul>
+            <p class="d-h2 d-todo">Risks</p>
+            <span class="ghost g1"></span>
+            <span class="ghost g2"></span>
+          </div>
+        </div>
+      </div>
+    </Win>
+  </div>
+</div>
+
+<style>
+  .cs {
+    padding: clamp(14px, 3vw, 40px);
+    box-shadow: 0 0 0 1px var(--t-border-subtle), var(--shadow-scene);
+  }
+  .cs-in :global(.cs-win) {
+    height: clamp(420px, 40vw, 500px);
+  }
+  .cs-grid {
+    display: grid;
+    grid-template-columns: minmax(0, 0.95fr) minmax(0, 1.05fr);
+    height: 100%;
+  }
+
+  .thread {
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+    padding: 18px 18px 14px;
+    min-width: 0;
+  }
+  .thread p {
+    max-width: none;
+  }
+  .q {
+    align-self: flex-end;
+    max-width: 85% !important;
+    padding: 9px 13px;
+    border-radius: 14px 14px 4px 14px;
+    background: var(--t-s3);
+    font-weight: 560;
+  }
+  .a {
+    display: grid;
+    gap: 10px;
+    justify-items: start;
+    color: var(--t-fg);
+  }
+  .a-steps {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 0.75rem;
+    font-weight: 620;
+    color: var(--t-muted);
+  }
+  .a-dot {
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    background: var(--t-success);
+  }
+  .cite {
+    display: inline-grid;
+    place-items: center;
+    min-width: 17px;
+    height: 17px;
+    padding-inline: 4px;
+    border-radius: 999px;
+    background: var(--t-primary-wash);
+    color: var(--t-link);
+    font-size: 0.65rem;
+    font-weight: 720;
+    vertical-align: 0.1em;
+  }
+  .doc-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 12px 8px 8px;
+    border-radius: 12px;
+    background: var(--t-s2);
+    box-shadow: 0 0 0 1px var(--t-border), var(--t-shadow-sm);
+    font-weight: 660;
+  }
+  .doc-ic {
+    width: 26px;
+    height: 30px;
+    border-radius: 5px;
+    background:
+      linear-gradient(var(--t-fg-45), var(--t-fg-45)) 6px 9px / 12px 2px no-repeat,
+      linear-gradient(var(--t-fg-45), var(--t-fg-45)) 6px 14px / 14px 2px no-repeat,
+      linear-gradient(var(--t-fg-45), var(--t-fg-45)) 6px 19px / 9px 2px no-repeat,
+      var(--t-s3);
+    box-shadow: inset 0 0 0 1px var(--t-border);
+  }
+  .doc-s {
+    font-size: 0.72rem;
+    font-weight: 560;
+    color: var(--t-muted);
+  }
+  .composer {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    margin-top: auto;
+    padding: 10px 10px 10px 14px;
+    border-radius: 14px;
+    border: 1px solid var(--t-border);
+    background: var(--t-s2);
+  }
+  .composer-ph {
+    color: var(--t-muted);
+  }
+  .model {
+    padding: 3px 10px;
+    border-radius: 999px;
+    background: var(--t-s3);
+    border: 1px solid var(--t-border-subtle);
+    font-size: 0.72rem;
+    font-weight: 640;
+    color: var(--t-fg-80);
+  }
+
+  /* The document beside the chat. */
+  .panel {
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+    border-left: 1px solid var(--t-border-subtle);
+    background: var(--t-paper);
+  }
+  .panel-top {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    padding: 9px 14px;
+    border-bottom: 1px solid var(--t-border-subtle);
+  }
+  .panel-name {
+    font-weight: 680;
+    font-size: 0.8125rem;
+  }
+  .seg {
+    display: inline-flex;
+    padding: 2px;
+    border-radius: 8px;
+    background: var(--t-s3);
+    font-size: 0.7rem;
+    font-weight: 620;
+    color: var(--t-muted);
+  }
+  .seg span {
+    padding: 2px 8px;
+    border-radius: 6px;
+  }
+  .seg .is-on {
+    background: var(--t-s2);
+    color: var(--t-fg);
+    box-shadow: var(--t-shadow-sm);
+  }
+  .doc {
+    display: grid;
+    align-content: start;
+    gap: 8px;
+    padding: 16px 20px;
+    color: var(--t-paper-text-2);
+  }
+  .doc p,
+  .doc li {
+    max-width: none;
+  }
+  .doc ul {
+    display: grid;
+    gap: 4px;
+    padding-left: 1.1em;
+  }
+  .d-h1 {
+    font-size: 1.35rem;
+    font-weight: 720;
+    letter-spacing: -0.025em;
+    color: var(--t-paper-ink);
+  }
+  .d-p {
+    color: var(--t-paper-muted);
+  }
+  .d-h2 {
+    margin-top: 6px;
+    font-weight: 700;
+    color: var(--t-paper-ink);
+  }
+  .d-todo {
+    color: var(--t-paper-faint);
+  }
+  .chat-caret {
+    position: relative;
+    display: inline-block;
+    width: 2px;
+    height: 1.1em;
+    margin-left: 2px;
+    vertical-align: -0.2em;
+    background: var(--t-primary);
+    color: transparent;
+    font-size: 0;
+  }
+  .chat-caret::after {
+    content: 'Chat';
+    position: absolute;
+    left: 0;
+    top: -16px;
+    padding: 1px 5px;
+    border-radius: 4px 4px 4px 0;
+    background: var(--t-primary);
+    color: #fff;
+    font-size: 0.6rem;
+    font-weight: 700;
+    line-height: 1.3;
+  }
+  .ghost.g1 {
+    width: 86%;
+  }
+  .ghost.g2 {
+    width: 58%;
+  }
+
+  @media (max-width: 760px) {
+    .cs-in :global(.cs-win) {
+      height: auto;
+    }
+    .cs-grid {
+      grid-template-columns: 1fr;
+    }
+    .thread .composer {
+      display: none;
+    }
+    .panel {
+      border-left: 0;
+      border-top: 1px solid var(--t-border-subtle);
+    }
+  }
+</style>

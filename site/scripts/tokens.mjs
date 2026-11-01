@@ -81,6 +81,13 @@ ${decl(dark, '    ')}
   color-scheme: dark;
 ${decl(dark, '  ')}
 }
+
+/* The dark scheme on part of a light page: the ink sheets (global.css
+   .sheet-ink), so the app's own UI drawn on them is the app's dark theme. */
+.scheme-dark {
+  color-scheme: dark;
+${decl(dark, '  ')}
+}
 `;
 
 fs.mkdirSync(path.dirname(out), { recursive: true });

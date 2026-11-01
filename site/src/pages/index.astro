@@ -1,18 +1,22 @@
 ---
 import Layout from '../layouts/Layout.astro';
-import HeroDemo from '../components/HeroDemo.astro';
+import HeroFlow from '../components/scenes/HeroFlow.astro';
+import Steps from '../components/scenes/Steps.astro';
+import TidyDiff from '../components/scenes/TidyDiff.astro';
+import AppKinds from '../components/scenes/AppKinds.astro';
+import MakeItYours from '../components/scenes/MakeItYours.astro';
+import NotepadScene from '../components/scenes/NotepadScene.astro';
+import VoiceScene from '../components/scenes/VoiceScene.astro';
+import ChatScene from '../components/scenes/ChatScene.astro';
+import NetworkScene from '../components/scenes/NetworkScene.astro';
 import DownloadButton from '../components/DownloadButton.astro';
 import DraftNote from '../components/DraftNote.astro';
-import Placeholder from '../components/Placeholder.astro';
 import LeavesTable from '../components/LeavesTable.astro';
-import Shot from '../components/Shot.astro';
 import Faq from '../components/Faq.astro';
 import Closing from '../components/Closing.astro';
-import Keys from '../components/Keys.astro';
-import { NAME, HOTKEY, TAGLINE, REPO_URL, RELEASES_URL, SITE_URL, DOWNLOAD_STABLE } from '../brand';
+import { NAME, TAGLINE, REPO_URL, RELEASES_URL, SITE_URL, DOWNLOAD_STABLE, LICENSE_URL } from '../brand';
 import { faqFor } from '../data/faq';
 import { stableRelease } from '../lib/release';
-import notesShot from '../../../docs/screenshot-notes.png';
 
 const rel = await stableRelease();
 const jsonLd = {
@@ -29,509 +33,510 @@ const jsonLd = {
   offers: { '@type': 'Offer', price: '0', priceCurrency: 'GBP' },
 };
 
-const pairs = [
+const facts = [
+  { n: '0', text: 'accounts or emails asked for, to download or to use it' },
+  { n: '14', text: 'speech models to choose from, on any graphics card or none' },
+  { n: '0', text: 'cookies or trackers on this site, and no telemetry in the app' },
+  { n: 'MIT', text: 'licence: the code is public to read, build and change' },
+];
+
+const ais = [
   {
-    title: 'Ums and false starts',
-    said: 'so um I was thinking we could, like, push the launch back a week',
-    typed: 'I was thinking we could push the launch back a week.',
+    tag: 'Works offline',
+    title: 'On your PC',
+    text: 'One click downloads a model sized to your graphics card. Nothing to sign up for, and nothing leaves the computer.',
+    amber: true,
   },
+  { tag: 'Your network', title: 'On your own server', text: 'Point it at Ollama, LM Studio or any OpenAI-compatible server you run.' },
   {
-    title: 'A change of mind',
-    said: 'send the contract to Priya, no actually send it to Sam, he’s got the latest version',
-    typed: 'Send the contract to Sam; he’s got the latest version.',
-  },
-  {
-    title: 'A list, said out loud',
-    said: 'for the trip we need three things, one passports, two the chargers, three the train tickets',
-    typed: 'For the trip we need three things:\n1. Passports\n2. The chargers\n3. The train tickets',
+    tag: 'Your key',
+    title: 'With a cloud provider',
+    text: `Groq, OpenAI, Anthropic, Gemini or OpenRouter, on your own key. You pay them directly; ${NAME} adds nothing.`,
   },
 ];
 ---
 <Layout
+  bare
   description={`${NAME}: free, open-source dictation and meeting notes for Windows. Speech and AI run on your PC; no account, no cloud required. A local alternative to Wispr Flow and Granola.`}
   jsonLd={jsonLd}
 >
-  <!-- Hero: the key -->
-  <section class="hero">
-    <div class="wrap hero-grid">
-      <div class="hero-copy">
-        <p class="kicker">For Windows 10 and 11. Free and open source.</p>
-        <h1>Press a key and talk. {NAME} types it.</h1>
-        <p class="lede">
-          Dictation, meeting notes and a voice assistant that run on your own PC. Speak into any app and tidy text lands
-          where your cursor is. Your voice never leaves the computer.
-        </p>
-        <div class="btn-row hero-cta">
-          <DownloadButton size="lg" meta primary />
-        </div>
-        <ul class="ticks hero-ticks">
-          <li>Speech turned into text on your PC</li>
-          <li>Dictation keeps working with the Wi-Fi off</li>
-          <li>No account, no email, no word limit</li>
-        </ul>
-        <DraftNote>
-          The plan puts “Watch the 60-second tour” (A16) beside the button; it waits for the video. Check “keeps working
-          with the Wi-Fi off” per feature before launch (plan §4.1).
-        </DraftNote>
-      </div>
-      <div class="hero-visual">
-        <HeroDemo />
-      </div>
-    </div>
-  </section>
-
-  <!-- Plain facts in place of a logo wall -->
-  <section class="facts" aria-label={`${NAME} in numbers`}>
-    <div class="wrap facts-row">
-      <p><span class="num">14</span> speech models to choose from, on any graphics card or none</p>
-      <p><span class="num">0</span> accounts or emails asked for, to download or to use it</p>
-      <p><span class="num">0</span> cookies or trackers on this site, and no telemetry in the app</p>
-      <p><span class="num">MIT</span> licence: read it, build it, change it</p>
-    </div>
-  </section>
-
-  <!-- How it works: a real sequence -->
-  <section class="section" id="how" aria-labelledby="how-h">
-    <div class="wrap">
-      <div class="section-head">
-        <h2 id="how-h">Three steps, and no account</h2>
-      </div>
-      <ol class="steps">
-        <li>
-          <div class="step-art" aria-hidden="true"><span class="step-key">{HOTKEY}</span></div>
-          <h3><span class="num step-n">1</span> Press your key</h3>
-          <p><Keys combo={HOTKEY} /> by default. Any key, combination or mouse button will do.</p>
-        </li>
-        <li>
-          <div class="step-art" aria-hidden="true">
-            <span class="step-pill">{Array.from({ length: 9 }, () => <i></i>)}</span>
-          </div>
-          <h3><span class="num step-n">2</span> Talk the way you talk</h3>
-          <p>The bar above your taskbar shows it’s listening, and the words as they’re heard.</p>
-        </li>
-        <li>
-          <div class="step-art" aria-hidden="true"><span class="step-text">Friday at 10 works for me<i></i></span></div>
-          <h3><span class="num step-n">3</span> Tidy text appears</h3>
-          <p>Right where your cursor is, in whichever app you were using. Your clipboard is put back after.</p>
-        </li>
-      </ol>
-      <p class="mt-4 muted small">Press once to start and again to stop, or hold the key while you talk. Double-tap it to keep going hands-free.</p>
-    </div>
-  </section>
-
-  <!-- Messy in, tidy out -->
-  <section class="section ruled" aria-labelledby="tidy-h">
-    <div class="wrap">
-      <div class="section-head">
-        <h2 id="tidy-h">Say it however it comes out</h2>
-        <p>
-          With AI cleanup on, {NAME} drops the ums, fixes punctuation and keeps the version you meant. If it changed too
-          much, <strong>Use what I said</strong> swaps in your exact words.
-        </p>
-      </div>
-      <div class="grid grid-3 pairs">
-        {pairs.map((p) => (
-          <figure class="pair">
-            <figcaption>{p.title}</figcaption>
-            <p class="pair-said"><span class="sr-only">You say: </span>“{p.said}”</p>
-            <p class="pair-typed"><span class="sr-only">{NAME} types: </span>{p.typed}</p>
-          </figure>
-        ))}
-      </div>
-      <p class="mt-4 muted small">
-        Cleanup is off until you choose a model: one that runs on your PC, or a provider you have a key for. Its style
-        follows the app: more formal in email, casual in chat, literal in AI prompts.
+  <!-- 1. The hero: the promise, the button, and a dictation playing -->
+  <section class="sheet hero" aria-labelledby="hero-h">
+    <div class="wrap hero-copy">
+      <p class="eyebrow">Free and open source · For Windows 10 and 11</p>
+      <h1 id="hero-h">Press a key and talk. <span class="h1-2">{NAME} types it.</span></h1>
+      <p class="lede">
+        Dictation, meeting notes and a voice assistant that run on your own PC. Speak into any app and tidy text lands
+        where your cursor is.
       </p>
+      <div class="btn-row hero-cta">
+        <DownloadButton size="lg" primary />
+        <a class="btn btn-quiet btn-lg" href="#how">See how it works</a>
+      </div>
+      <ul class="hero-ticks" aria-label="In short">
+        <li>Speech to text on your PC</li>
+        <li>Keeps working with the Wi-Fi off</li>
+        <li>No account, no word limit</li>
+      </ul>
+      <DraftNote>
+        The plan puts “Watch the 60-second tour” (A16) beside the button once the video exists. Check “keeps working
+        with the Wi-Fi off” per feature before launch (plan §4.1): true of dictation without a cloud model.
+      </DraftNote>
+    </div>
+    <div class="wrap-wide hero-scene">
+      <HeroFlow />
     </div>
   </section>
 
-  <!-- Windows depth -->
-  <section class="section ruled" aria-labelledby="where-h">
+  <!-- 2. Plain facts, in place of a logo wall -->
+  <section class="sheet sheet-ink scheme-dark facts" aria-label={`${NAME} in numbers`}>
+    <ul class="wrap-wide facts-row">
+      {facts.map((f) => (
+        <li data-reveal><span class="num facts-n">{f.n}</span><span>{f.text}</span></li>
+      ))}
+    </ul>
+  </section>
+
+  <!-- 3. How it works, and messy in, tidy out -->
+  <div class="sheet">
+    <section class="section" id="how" aria-labelledby="how-h">
+      <div class="wrap">
+        <div class="section-head center" data-reveal>
+          <p class="eyebrow">How it works</p>
+          <h2 id="how-h">Three steps. No account.</h2>
+        </div>
+        <Steps />
+      </div>
+    </section>
+
+    <section class="section" aria-labelledby="tidy-h">
+      <div class="wrap">
+        <div class="section-head center" data-reveal>
+          <p class="eyebrow">AI cleanup</p>
+          <h2 id="tidy-h">Say it however it comes out</h2>
+          <p>
+            The ums go, the punctuation’s fixed and the version you meant is kept. If it changed too much, <strong>Use
+            what I said</strong> swaps in your exact words.
+          </p>
+        </div>
+        <TidyDiff />
+        <p class="figure-note center mt-4">
+          Cleanup is off until you choose a model: one that runs on your PC, or a provider you have a key for. Its style
+          follows the app: more formal in email, casual in chat, literal in AI prompts.
+        </p>
+      </div>
+    </section>
+  </div>
+
+  <!-- 4. Private by how it's built -->
+  <section class="sheet sheet-ink scheme-dark section privacy" aria-labelledby="priv-h">
     <div class="wrap split split-media">
-      <div>
-        <div class="section-head">
+      <div class="stack priv-copy" data-reveal>
+        <p class="eyebrow">Private by how it’s built</p>
+        <h2 id="priv-h">Your voice doesn’t leave your PC. Here’s how to check.</h2>
+        <p class="lede">
+          Not “encrypted and deleted later”: turned into text on your own graphics card or processor. Settings lists
+          every connection {NAME} makes, by purpose and host, so you can see for yourself.
+        </p>
+        <ul class="ticks priv-ticks">
+          <li>No telemetry, no analytics, no account needed</li>
+          <li>The AI runs on your PC, your own server, or a provider you choose</li>
+          <li>Meetings, notes and history stay on your PC</li>
+        </ul>
+        <p><a class="more" href="/privacy">How privacy works</a></p>
+      </div>
+      <div data-reveal>
+        <NetworkScene />
+        <p class="scene-note">Drawn from Settings → Privacy &amp; data → Network connections, with a made-up day.</p>
+      </div>
+    </div>
+    <div class="wrap mt-5" data-reveal>
+      <LeavesTable short />
+    </div>
+  </section>
+
+  <!-- 5. Windows depth, and the words that are yours -->
+  <div class="sheet">
+    <section class="section" aria-labelledby="where-h">
+      <div class="wrap">
+        <div class="section-head center" data-reveal>
+          <p class="eyebrow">Made for Windows</p>
           <h2 id="where-h">It knows where it’s typing</h2>
           <p>Pasting into Windows apps has a lot of small rules. {NAME} follows them, so you don’t have to.</p>
         </div>
-        <div class="rows">
-          <div class="row">
-            <h3>Terminals</h3>
-            <p>Each terminal gets its own paste keys. Claude Code and Codex keep your line breaks; elsewhere a command arrives as one tidy line.</p>
-          </div>
-          <div class="row">
-            <h3>Chat apps</h3>
-            <p>A short message loses its full stop. Say “at Sam” in Slack or Discord and it picks Sam from the list.</p>
-          </div>
-          <div class="row">
-            <h3>Your clipboard</h3>
-            <p>Put back after every paste, and nothing you dictate lands in Win+V history.</p>
-          </div>
-          <div class="row">
-            <h3>Admin windows</h3>
-            <p>Windows blocks pasting into them, so {NAME} leaves the text on your clipboard and tells you.</p>
-          </div>
-          <div class="row">
-            <h3>Names on screen</h3>
-            <p>Names and terms are spelled the way the window in front writes them.</p>
-          </div>
-        </div>
+        <AppKinds />
       </div>
-      <figure class="term-fig">
-        <div class="term" role="img" aria-label="A coding agent in Windows Terminal with a three-line prompt that kept its line breaks">
-          <div class="term-top" aria-hidden="true"><span>Windows Terminal</span></div>
-          <div class="term-body" aria-hidden="true">
-            <p class="term-dim">PS C:\projects\shop&gt; claude</p>
-            <div class="term-box">
-              <p><span class="term-prompt">&gt;</span> Refactor the date helpers in utils/dates.ts.</p>
-              <p>&nbsp;&nbsp;Keep the public function names.</p>
-              <p>&nbsp;&nbsp;Add tests for leap years.<span class="term-caret"></span></p>
-            </div>
-            <p class="term-dim">? for shortcuts</p>
-          </div>
-        </div>
-        <figcaption class="figure-note">Three lines said in one go arrive as three lines. Drawn for this page; a real recording is to come (A4).</figcaption>
-      </figure>
-    </div>
-  </section>
+    </section>
 
-  <!-- Meetings -->
-  <section class="section ruled" aria-labelledby="meet-h">
-    <div class="wrap split split-media">
-      <div class="stack">
+    <section class="section" aria-labelledby="words-h">
+      <div class="wrap">
+        <div class="section-head center" data-reveal>
+          <p class="eyebrow">Made yours</p>
+          <h2 id="words-h">Your names and jargon, spelled right</h2>
+          <p>Teach {NAME} a word once and it stays taught.</p>
+        </div>
+        <MakeItYours />
+        <p class="center mt-4"><a class="more" href="/dictation">Everything dictation does</a></p>
+      </div>
+    </section>
+  </div>
+
+  <!-- 6. Meetings -->
+  <section class="sheet sheet-ink scheme-dark section meet" aria-labelledby="meet-h">
+    <div class="wrap">
+      <div class="section-head center" data-reveal>
+        <p class="eyebrow">Meetings</p>
         <h2 id="meet-h">Notes from every call, made on your PC</h2>
-        <p class="lede">
-          {NAME} notices a Teams, Zoom or Meet call and asks before it takes notes. No bot joins. Afterwards you get a
-          summary and an action plan whose owners and dates are checked against what was actually said.
-        </p>
-        <p><a href="/meetings">How meetings work</a></p>
-        <DraftNote>Every meetings claim waits for the “one real call, end to end” test (plan §3.2).</DraftNote>
-      </div>
-      <Shot
-        src={notesShot}
-        alt={`${NAME}’s notes window showing a fictional meeting, Weekly product sync: a summary with decisions and action items, and the transcript split into You and Them.`}
-        caption="A screenshot from October 2026, with made-up data. To be recaptured in light and dark (A7)."
-      />
-    </div>
-  </section>
-
-  <!-- Assistant -->
-  <section class="section ruled" aria-labelledby="ask-h">
-    <div class="wrap split split-flip split-media">
-      <div class="stack">
-        <h2 id="ask-h">Ask out loud. Hear the answer.</h2>
-        <p class="lede">
-          From any app, press the assistant’s shortcut and ask: about your notes, your meetings, your calendar, or the
-          web if you switch search on. The answer is spoken in a natural voice that runs on your PC, starting with its first sentence.
-        </p>
-        <p>Or select any text, in any app, and have it read to you, each word lit up as it’s read.</p>
-        <p><a href="/assistant">Chat and the assistant</a></p>
-      </div>
-      <Placeholder id="A9" title="The Voice Assistant, with sound" shows="Ask about a fictional meeting from another app, hear the answer start, interrupt it once. Captioned." format="MP4, 12–15 s" ratio="video" />
-    </div>
-  </section>
-
-  <!-- Your AI -->
-  <section class="section ruled" aria-labelledby="ai-h">
-    <div class="wrap">
-      <div class="section-head">
-        <h2 id="ai-h">Your AI, your choice</h2>
-        <p>Cleanup, Commands and Chat can use any of these. Every option is free in {NAME}.</p>
-      </div>
-      <div class="grid grid-3">
-        <div class="col card">
-          <span class="tag tag-amber">Works offline</span>
-          <h3>On your PC</h3>
-          <p>One click downloads a model sized to your graphics card. Nothing to sign up for, and nothing leaves the computer.</p>
-        </div>
-        <div class="col card">
-          <span class="tag">Your network</span>
-          <h3>On your own server</h3>
-          <p>Point it at Ollama, LM Studio or any OpenAI-compatible server you run.</p>
-        </div>
-        <div class="col card">
-          <span class="tag">Your key</span>
-          <h3>With a cloud provider</h3>
-          <p>Groq, OpenAI, Anthropic, Gemini or OpenRouter, on your own key. You pay them directly; {NAME} adds nothing.</p>
-        </div>
-      </div>
-    </div>
-  </section>
-
-  <!-- Privacy -->
-  <section class="section ruled" aria-labelledby="priv-h">
-    <div class="wrap">
-      <div class="section-head">
-        <h2 id="priv-h">Your voice doesn’t leave your PC. Here’s how to check.</h2>
         <p>
-          Not “encrypted and deleted later”: transcribed on your own hardware. Settings lists every connection
-          {NAME} makes, by purpose and host, so you can see for yourself.
+          {NAME} notices a Teams, Zoom or Meet call and asks before it takes notes. No bot joins: it hears your
+          microphone and your PC’s sound. Afterwards, a summary and an action plan whose owners and dates are checked
+          against what was said.
         </p>
       </div>
-      <LeavesTable short />
-      <p class="mt-3"><a href="/privacy#what-leaves">Everything that does and doesn’t leave your PC</a></p>
+    </div>
+    <div class="wrap-wide" data-reveal>
+      <NotepadScene />
+    </div>
+    <div class="wrap">
+      <ul class="meet-points">
+        <li data-reveal>
+          <h3>What did I miss?</h3>
+          <p>Zoned out for a minute? One tap catches you up on what was just said.</p>
+        </li>
+        <li data-reveal>
+          <h3>Ask across meetings</h3>
+          <p>Search every meeting by meaning, on your PC, and get answers that cite the moment.</p>
+        </li>
+        <li data-reveal>
+          <h3>Hidden from screen sharing</h3>
+          <p>While it records, its windows are kept out of screen shares, and your dictations out of the transcript.</p>
+        </li>
+      </ul>
+      <p class="center mt-4"><a class="more" href="/meetings">How meetings work</a></p>
+      <DraftNote class="mt-3">Every meetings claim waits for the “one real call, end to end” test (plan §3.2).</DraftNote>
     </div>
   </section>
 
-  <!-- Open source -->
-  <section class="section ruled" aria-labelledby="oss-h">
-    <div class="wrap split">
-      <div class="stack">
-        <h2 id="oss-h">Open code, public builds</h2>
-        <p class="lede">Every line of {NAME} is on GitHub under the MIT licence. The installers are built there in public, from the code you can read.</p>
-        <div class="btn-row mt-3">
-          <a class="btn btn-quiet" href={REPO_URL}>Read the code</a>
-          <a class="btn btn-quiet" href={RELEASES_URL}>Release notes</a>
+  <!-- 7. The assistant, and your choice of AI -->
+  <div class="sheet">
+    <section class="section" aria-labelledby="ask-h">
+      <div class="wrap">
+        <div class="section-head center" data-reveal>
+          <p class="eyebrow">Assistant</p>
+          <h2 id="ask-h">Ask out loud. Hear the answer.</h2>
+          <p>Ask from any app and hear the answer, or open Chat and have it write things up beside you.</p>
+        </div>
+
+        <div class="split split-media feature">
+          <div class="stack" data-reveal>
+            <h3 class="feature-h">The Voice Assistant</h3>
+            <p class="lede">
+              Press its shortcut in any app and ask: about your notes, your meetings, your calendar, or the web if you
+              switch search on. The answer is read in a natural voice that runs on your PC, from its first sentence.
+            </p>
+            <p class="muted">Or select any text, in any app, and have it read to you, each word lit up as it’s read.</p>
+          </div>
+          <div data-reveal><VoiceScene /></div>
+        </div>
+
+        <div class="feature feature-wide">
+          <div class="stack feature-copy" data-reveal>
+            <h3 class="feature-h">Chat, with a document beside it</h3>
+            <p class="lede">
+              Ask about your meetings and notes, with sources. When the answer is worth keeping, a plan, a guide, a
+              write-up, Chat writes it into a document beside the conversation, section by section.
+            </p>
+            <p><a class="more" href="/assistant">Chat and the assistant</a></p>
+          </div>
+          <div data-reveal><ChatScene /></div>
         </div>
       </div>
-      <ul class="ticks oss-list">
-        <li>Built by GitHub Actions in public, not on someone’s laptop</li>
-        <li>New releases list each file’s SHA-256 checksum and a signed build provenance you can verify</li>
-        <li>Updates are signed, and the app checks the signature before installing</li>
-        <li>Issues, fixes and the docs for every part of the app are public</li>
-      </ul>
-    </div>
-    <div class="wrap mt-3">
-      <DraftNote>Checksums and build provenance landed on 25 Oct; the current stable (v0.1.0, 4 Oct) has neither. Confirm both on the next stable before launch (plan §4.2).</DraftNote>
-    </div>
-  </section>
+    </section>
 
-  <Faq items={faqFor('home')} />
+    <section class="section ai" aria-labelledby="ai-h">
+      <div class="wrap">
+        <div class="section-head center" data-reveal>
+          <p class="eyebrow">Your AI</p>
+          <h2 id="ai-h">Your AI, your choice</h2>
+          <p>Cleanup, Commands and Chat can use any of these. Every option is free in {NAME}.</p>
+        </div>
+        <div class="grid grid-3">
+          {ais.map((a) => (
+            <div class="card ai-card" data-reveal>
+              <span class:list={['tag', a.amber && 'tag-amber']}>{a.tag}</span>
+              <h3>{a.title}</h3>
+              <p>{a.text}</p>
+            </div>
+          ))}
+        </div>
+      </div>
+    </section>
+  </div>
+
+  <!-- 8. Open source, and questions -->
+  <div class="sheet">
+    <section class="section" aria-labelledby="oss-h">
+      <div class="wrap split split-media">
+        <div class="stack" data-reveal>
+          <p class="eyebrow">Open source</p>
+          <h2 id="oss-h">Open code, public builds</h2>
+          <p class="lede">
+            Every line of {NAME} is on GitHub under the MIT licence. The installers are built there in public, from the
+            code you can read.
+          </p>
+          <div class="btn-row mt-3">
+            <a class="btn btn-quiet" href={REPO_URL}>Read the code</a>
+            <a class="btn btn-quiet" href={RELEASES_URL}>Release notes</a>
+          </div>
+        </div>
+        <div class="rel" data-reveal>
+          <div class="rel-head">
+            <span class="rel-mark" aria-hidden="true"></span>
+            <div>
+              <p class="rel-title">{rel?.version ? `Version ${rel.version}` : 'The latest release'}</p>
+              <p class="rel-sub">{rel?.date ? `Published ${rel.date}` : 'Built from a tagged commit'}</p>
+            </div>
+            <span class="tag tag-green">MIT</span>
+          </div>
+          <ul class="ticks rel-list">
+            <li>Built by GitHub Actions in public, not on someone’s laptop</li>
+            <li>New releases list each file’s SHA-256 checksum and a signed build provenance you can verify</li>
+            <li>Updates are signed, and the app checks the signature before installing</li>
+            <li>Issues, fixes and the docs for every part of the app are public</li>
+          </ul>
+          {rel?.sha256 && <p class="rel-sha"><span>SHA-256</span><code>{rel.sha256}</code></p>}
+          <p class="rel-foot"><a href={LICENSE_URL}>Read the licence</a></p>
+        </div>
+      </div>
+      <div class="wrap mt-3">
+        <DraftNote>Checksums and build provenance landed on 25 Oct; the current stable (v0.1.0, 4 Oct) has neither. Confirm both on the next stable before launch (plan §4.2).</DraftNote>
+      </div>
+    </section>
+
+    <Faq items={faqFor('home')} title="Questions, answered" />
+  </div>
+
   <Closing />
 </Layout>
 
 <style>
+  /* 1. Hero: centred words and the button, the dictation playing under them. */
   .hero {
-    padding-block: clamp(40px, 6vw, 88px) clamp(48px, 6vw, 96px);
-  }
-  .hero-grid {
-    display: grid;
-    grid-template-columns: minmax(0, 1fr) minmax(0, 1.05fr);
-    gap: clamp(40px, 6vw, 88px);
-    align-items: start;
+    padding-block: clamp(32px, 4vw, 56px) clamp(28px, 4vw, 56px);
   }
   .hero-copy {
     display: grid;
-    gap: 22px;
-    justify-items: start;
-    padding-top: clamp(0px, 3vw, 40px);
+    justify-items: center;
+    gap: 20px;
+    text-align: center;
+  }
+  .hero-copy h1 {
+    font-size: clamp(2.7rem, 1.2rem + 5vw, 5.2rem);
+    max-width: 14ch;
+  }
+  .h1-2 {
+    display: block;
+  }
+  .hero-copy .lede {
+    margin-inline: auto;
+    max-width: 37em;
   }
   .hero-cta {
-    margin-top: 8px;
+    justify-content: center;
+    margin-top: 4px;
   }
   .hero-ticks {
+    list-style: none;
+    padding: 0;
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: center;
+    gap: 6px 22px;
     font-size: 0.9375rem;
     color: var(--t-fg-80);
-    gap: 6px;
   }
-  @media (max-width: 1000px) {
-    .hero-grid {
-      grid-template-columns: 1fr;
-    }
+  .hero-ticks li {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .hero-ticks li::before {
+    content: '';
+    width: 0.85em;
+    height: 0.5em;
+    margin-top: -0.25em;
+    border-left: 2px solid var(--t-success);
+    border-bottom: 2px solid var(--t-success);
+    transform: rotate(-45deg);
+  }
+  .hero-scene {
+    margin-top: clamp(28px, 3.4vw, 44px);
   }
 
+  /* 2. Facts */
   .facts {
-    border-block: 1px solid var(--t-rule);
-    background: var(--t-raised-soft);
+    padding-block: clamp(32px, 4vw, 52px);
   }
   .facts-row {
+    list-style: none;
+    padding: 0;
     display: grid;
     grid-template-columns: repeat(4, minmax(0, 1fr));
   }
-  .facts p {
-    padding: 26px 24px 26px 0;
-    font-size: 0.9375rem;
+  .facts-row li {
+    display: grid;
+    gap: 10px;
+    align-content: start;
+    padding: 8px clamp(14px, 2.4vw, 32px);
     color: var(--t-fg-80);
+    font-size: 0.98rem;
     line-height: 1.45;
   }
-  .facts p + p {
-    padding-left: 24px;
-    border-left: 1px solid var(--t-rule);
+  .facts-row li + li {
+    border-left: 1px solid var(--t-border);
   }
-  .facts .num {
-    display: block;
-    font-size: 2.5rem;
-    line-height: 1;
-    margin-bottom: 8px;
+  .facts-n {
+    font-size: clamp(2.6rem, 2rem + 2vw, 3.8rem);
+    line-height: 0.9;
     color: var(--t-fg);
   }
   @media (max-width: 860px) {
     .facts-row {
       grid-template-columns: repeat(2, minmax(0, 1fr));
+      row-gap: 24px;
     }
-    .facts p:nth-child(3) {
-      padding-left: 0;
+    .facts-row li:nth-child(3) {
       border-left: 0;
-    }
-    .facts p:nth-child(n + 3) {
-      border-top: 1px solid var(--t-rule);
     }
   }
 
-  .steps {
+  /* 4. Privacy */
+  .priv-copy .lede {
+    margin-top: 1.2rem;
+  }
+  .priv-ticks {
+    margin-top: 1.4rem;
+    color: var(--t-fg-80);
+  }
+  .privacy :global(.table-wrap) {
+    background: var(--t-s1);
+  }
+
+  /* 6. Meetings */
+  .meet-points {
     list-style: none;
     padding: 0;
     display: grid;
     grid-template-columns: repeat(3, minmax(0, 1fr));
-    gap: clamp(20px, 3vw, 36px);
+    gap: clamp(20px, 3vw, 40px);
+    margin-top: clamp(40px, 5vw, 64px);
+  }
+  .meet-points li {
+    display: grid;
+    gap: 8px;
+    align-content: start;
+    padding-top: 18px;
+    border-top: 1px solid var(--t-border);
+  }
+  .meet-points p {
+    color: var(--t-fg-80);
   }
   @media (max-width: 860px) {
-    .steps {
+    .meet-points {
       grid-template-columns: 1fr;
     }
   }
-  .steps li {
+
+  /* 7. Assistant */
+  .feature {
+    margin-top: clamp(40px, 6vw, 88px);
+  }
+  .feature-wide {
+    display: grid;
+    gap: clamp(28px, 4vw, 48px);
+  }
+  .feature-copy {
+    max-width: 40rem;
+    margin-inline: auto;
+    text-align: center;
+  }
+  .feature-copy .lede {
+    margin-inline: auto;
+  }
+  .feature-h {
+    font-size: clamp(1.6rem, 1.2rem + 1.4vw, 2.4rem);
+    font-weight: 660;
+    letter-spacing: -0.03em;
+    line-height: 1.08;
+  }
+  .ai-card {
     display: grid;
     gap: 10px;
     align-content: start;
   }
-  .steps p {
+  .ai-card .tag {
+    justify-self: start;
+    margin-bottom: 6px;
+  }
+  .ai-card h3 {
+    font-size: 1.375rem;
+    letter-spacing: -0.02em;
+  }
+  .ai-card p {
     color: var(--t-fg-80);
   }
-  .step-n {
-    font-size: 1.35em;
-    margin-right: 6px;
-    color: var(--t-link);
-  }
-  .step-art {
+
+  /* 8. Open source */
+  .rel {
     display: grid;
-    place-items: center;
-    height: 132px;
-    margin-bottom: 8px;
-    border-radius: 16px;
-    background: var(--t-bg);
-    border: 1px solid var(--t-border-subtle);
+    gap: 18px;
+    padding: clamp(20px, 3vw, 32px);
+    border-radius: 22px;
+    background: var(--t-s2);
+    box-shadow: 0 0 0 1px var(--t-border-subtle), var(--shadow-scene);
   }
-  .step-key {
-    display: grid;
-    place-items: center;
-    width: 64px;
-    height: 60px;
-    border-radius: 14px;
-    border: 1.5px solid var(--t-key-border);
-    background: var(--t-key-bg);
-    color: var(--t-key-fg);
-    font-weight: 720;
-    font-size: 1.3rem;
-    box-shadow: 0 5px 0 var(--t-key-border);
-  }
-  .step-pill {
+  .rel-head {
     display: flex;
     align-items: center;
-    gap: 3px;
-    height: 38px;
-    padding-inline: 18px;
-    border-radius: 999px;
-    background: var(--bar-surface);
-    border: 1px solid var(--bar-border);
-    box-shadow: var(--bar-shadow);
+    gap: 14px;
+    padding-bottom: 16px;
+    border-bottom: 1px solid var(--t-rule);
   }
-  .step-pill i {
-    width: 3px;
-    border-radius: 2px;
-    background: var(--bar-wave);
-    height: 8px;
+  .rel-head .tag {
+    margin-left: auto;
   }
-  .step-pill i:nth-child(2),
-  .step-pill i:nth-child(8) { height: 14px; }
-  .step-pill i:nth-child(3),
-  .step-pill i:nth-child(6) { height: 20px; }
-  .step-pill i:nth-child(4) { height: 12px; }
-  .step-pill i:nth-child(5) { height: 18px; }
-  .step-pill i:nth-child(7) { height: 10px; }
-  .step-text {
-    padding: 10px 14px;
-    border-radius: 10px;
-    border: 1px solid var(--t-border);
-    background: var(--t-s2);
-    font-size: 0.9375rem;
-  }
-  .step-text i {
-    display: inline-block;
-    width: 2px;
-    height: 1.1em;
-    margin-left: 2px;
-    vertical-align: -0.2em;
-    background: var(--t-fg);
-  }
-
-  .pair {
-    margin: 0;
-    display: grid;
-    gap: 10px;
-    align-content: start;
-  }
-  .pair figcaption {
-    font-weight: 640;
-  }
-  .pair-said {
-    padding: 12px 14px;
+  .rel-mark {
+    flex: none;
+    width: 44px;
+    height: 41px;
     border-radius: 12px;
-    background: var(--bar-surface);
-    border: 1px dashed var(--t-border-hover);
+    border: 1.5px solid var(--t-key-border);
+    background: var(--t-key-bg);
+    box-shadow: 0 3px 0 var(--t-key-border);
+  }
+  .rel-title {
+    font-weight: 700;
+    font-size: 1.125rem;
+  }
+  .rel-sub {
     color: var(--t-muted);
     font-size: 0.9375rem;
   }
-  .pair-typed {
-    padding: 12px 14px;
-    border-radius: 12px;
-    background: var(--t-s2);
-    border: 1px solid var(--t-border);
-    box-shadow: var(--t-shadow-sm);
-    white-space: pre-line;
+  .rel-list {
+    gap: 12px;
+    color: var(--t-fg-80);
   }
-
-  .term-fig {
-    margin: 0;
-  }
-  .term {
-    border-radius: 12px;
-    overflow: hidden;
-    background: #1c1a16;
-    color: #eae6dc;
-    border: 1px solid #3a352b;
-    box-shadow: var(--t-shadow-menu);
-    font-family: ui-monospace, 'Cascadia Code', 'Cascadia Mono', Consolas, monospace;
-    font-size: 0.875rem;
-    line-height: 1.6;
-  }
-  .term-top {
-    padding: 8px 14px;
-    background: #2b2722;
-    color: #b8b1a2;
-    font-family: var(--font-sans);
-    font-size: 0.8125rem;
-    font-weight: 600;
-  }
-  .term-body {
-    padding: 16px 18px 18px;
+  .rel-sha {
     display: grid;
-    gap: 10px;
+    gap: 4px;
+    font-size: 0.8125rem;
+    color: var(--t-muted);
   }
-  .term-body p {
-    max-width: none;
+  .rel-sha code {
+    font-size: 0.75rem;
+    overflow-wrap: anywhere;
   }
-  .term-dim {
-    color: #9d968a;
-  }
-  .term-box {
-    padding: 10px 12px;
-    border: 1px solid #5b5446;
-    border-radius: 8px;
-  }
-  .term-prompt {
-    color: #f0b04a;
-  }
-  .term-caret {
-    display: inline-block;
-    width: 0.55em;
-    height: 1.1em;
-    margin-left: 2px;
-    vertical-align: -0.2em;
-    background: #eae6dc;
-  }
-
-  .oss-list {
-    font-size: 1.0625rem;
-    gap: 14px;
+  .rel-foot {
+    font-size: 0.9375rem;
   }
 </style>

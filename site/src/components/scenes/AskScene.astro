@@ -1,0 +1,140 @@
+---
+// Ask across meetings (drawn): a question, an answer, and the moments it
+// came from, each opening its meeting at that line. Made-up meetings.
+const moments = [
+  { meeting: 'Weekly product sync', when: '3 Nov · 10:14', who: 'You', line: 'Yes, I’ll have a draft by Thursday.' },
+  { meeting: 'Launch check-in', when: '6 Nov · 16:02', who: 'Imogen', line: 'Finance signed off the numbers this morning.' },
+];
+---
+<div class="scene scene-desk ask" role="img" aria-label="Ask across meetings: asked when the pricing page is due, the answer says Thursday, citing two moments from two made-up meetings, each with its time and who said it.">
+  <div class="ask-card" aria-hidden="true">
+    <p class="ask-q"><span class="ask-ic"></span>When is the pricing page due?</p>
+    <p class="ask-a">
+      Thursday. You said you’d have a draft by then <span class="cite">1</span>, and finance has since signed off the
+      numbers <span class="cite">2</span>.
+    </p>
+    <ol class="ask-moments">
+      {moments.map((m, i) => (
+        <li>
+          <span class="cite">{i + 1}</span>
+          <span class="m-text">
+            <span class="m-meta">{m.meeting} · {m.when}</span>
+            <span class="m-line"><strong>{m.who}:</strong> {m.line}</span>
+          </span>
+          <span class="m-play"></span>
+        </li>
+      ))}
+    </ol>
+  </div>
+</div>
+
+<style>
+  .ask {
+    display: grid;
+    place-items: center;
+    padding: clamp(18px, 3.4vw, 44px);
+    box-shadow: 0 0 0 1px var(--t-border-subtle), var(--shadow-scene);
+  }
+  .ask-card {
+    display: grid;
+    gap: 14px;
+    width: min(100%, 500px);
+    padding: 18px;
+    border-radius: 16px;
+    background: var(--t-s2);
+    box-shadow: 0 0 0 1px var(--t-border), var(--shadow-scene);
+    font-size: 0.9375rem;
+  }
+  .ask-card p {
+    max-width: none;
+  }
+  .ask-q {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 12px;
+    border-radius: 12px;
+    border: 1px solid var(--t-border);
+    font-weight: 600;
+  }
+  .ask-ic {
+    flex: none;
+    width: 16px;
+    height: 16px;
+    border-radius: 50%;
+    border: 2px solid var(--t-fg-62);
+    position: relative;
+  }
+  .ask-ic::after {
+    content: '';
+    position: absolute;
+    right: -5px;
+    bottom: -4px;
+    width: 6px;
+    height: 2px;
+    background: var(--t-fg-62);
+    rotate: 45deg;
+  }
+  .ask-a {
+    line-height: 1.55;
+  }
+  .cite {
+    display: inline-grid;
+    place-items: center;
+    min-width: 18px;
+    height: 18px;
+    padding-inline: 4px;
+    border-radius: 999px;
+    background: var(--t-primary-wash);
+    color: var(--t-link);
+    font-size: 0.68rem;
+    font-weight: 720;
+    vertical-align: 0.1em;
+  }
+  .ask-moments {
+    list-style: none;
+    padding: 0;
+    display: grid;
+    gap: 8px;
+  }
+  .ask-moments li {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 12px;
+    border-radius: 12px;
+    background: var(--t-s3);
+  }
+  .m-text {
+    flex: 1;
+    min-width: 0;
+    display: grid;
+    gap: 1px;
+  }
+  .m-meta {
+    font-size: 0.75rem;
+    font-weight: 640;
+    color: var(--t-muted);
+  }
+  .m-line {
+    font-size: 0.875rem;
+  }
+  .m-play {
+    flex: none;
+    width: 26px;
+    height: 26px;
+    border-radius: 50%;
+    background: var(--t-s2);
+    box-shadow: inset 0 0 0 1px var(--t-border);
+    position: relative;
+  }
+  .m-play::after {
+    content: '';
+    position: absolute;
+    left: 10px;
+    top: 8px;
+    border-left: 8px solid var(--t-fg-80);
+    border-top: 5px solid transparent;
+    border-bottom: 5px solid transparent;
+  }
+</style>

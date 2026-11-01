@@ -1,0 +1,246 @@
+---
+// Messy in, tidy out: one box that starts as the words you said, marks what
+// AI cleanup takes out, then shows what was typed, with the app's own
+// "AI edited · N changes" and "Paste what I said" (Home's word diff). Four
+// examples on tabs that move on by themselves while on screen. The diff is
+// worked out at build time (lib/diff.ts); without script, or with reduced
+// motion, each box shows what was typed. The words are made up.
+import { wordDiff, changeCount } from '../../lib/diff';
+
+const examples = [
+  {
+    id: 'ums',
+    tab: 'Ums and restarts',
+    where: 'Team chat',
+    said: 'so um I was thinking we could, like, push the launch back a week',
+    // A chat app drops a short message's full stop, as the app does.
+    typed: 'I was thinking we could push the launch back a week',
+  },
+  {
+    id: 'mind',
+    tab: 'A change of mind',
+    where: 'Email',
+    said: 'send the contract to Priya, no actually send it to Sam, he’s got the latest version',
+    typed: 'Send the contract to Sam; he’s got the latest version.',
+  },
+  {
+    id: 'list',
+    tab: 'A list',
+    where: 'Notes',
+    said: 'for the trip we need three things, one passports, two the chargers, three the train tickets',
+    typed: 'For the trip we need three things:\n1. Passports\n2. The chargers\n3. The train tickets',
+  },
+  {
+    id: 'email',
+    tab: 'An email',
+    where: 'Email',
+    said: 'hi Imogen thanks for sending the slides over I’ll go through them tonight and get back to you tomorrow cheers Sam',
+    typed: 'Hi Imogen,\n\nThanks for sending the slides over. I’ll go through them tonight and get back to you tomorrow.\n\nCheers,\nSam',
+  },
+].map((e) => {
+  const diff = wordDiff(e.said, e.typed);
+  return { ...e, diff, changes: changeCount(diff) };
+});
+---
+<div class="tidy" data-tidy>
+  <div class="tidy-tabs-row" data-tabs data-tabs-auto="6400">
+    <div class="tabs" role="tablist" aria-label="Examples">
+      {examples.map((e, i) => (
+        <button type="button" role="tab" id={`tidy-tab-${e.id}`} aria-controls={`tidy-${e.id}`} aria-selected={i === 0 ? 'true' : 'false'}>
+          {e.tab}
+        </button>
+      ))}
+    </div>
+  </div>
+
+  <div class="tidy-panels">
+    {examples.map((e, i) => (
+      <div class="tidy-card" role="tabpanel" id={`tidy-${e.id}`} aria-labelledby={`tidy-tab-${e.id}`} data-active={i === 0 ? '' : undefined} data-phase="clean">
+        <div class="tidy-head">
+          <span class="tidy-label"><span class="lbl-said">You said</span><span class="lbl-typed">Typed in {e.where}</span></span>
+          <span class="tidy-where">{e.where}</span>
+        </div>
+        <p class="sr-only">You said: “{e.said}”. {`Typed: ${e.typed.replace(/\n+/g, ' ')}`}</p>
+        <p class="tidy-text" aria-hidden="true">
+          {e.diff.map((t) =>
+            t.text === '\n' ? (
+              <br class:list={[t.k === 'ins' && 'ins']} />
+            ) : (
+              <span class:list={['w', t.k === 'del' && 'del', t.k === 'ins' && 'ins']}>{t.text} </span>
+            ),
+          )}
+        </p>
+        <div class="tidy-foot" aria-hidden="true">
+          <span class="chip chip-amber">AI edited · {e.changes} {e.changes === 1 ? 'change' : 'changes'}</span>
+          <span class="tidy-said-btn">Paste what I said</span>
+        </div>
+      </div>
+    ))}
+  </div>
+</div>
+
+<script>
+  import { initTabs } from '../../lib/tabs';
+
+  for (const root of document.querySelectorAll<HTMLElement>('[data-tidy]')) {
+    const tabsRoot = root.querySelector<HTMLElement>('[data-tabs]');
+    if (!tabsRoot) continue;
+    const reduced = matchMedia('(prefers-reduced-motion: reduce)').matches;
+    let timers: number[] = [];
+    // Each time a box comes up: the words as said, what goes marked, then typed.
+    tabsRoot.addEventListener('tabchange', (ev) => {
+      const panel = (ev as CustomEvent).detail.panel as HTMLElement | null;
+      if (!panel || reduced) return;
+      timers.forEach(clearTimeout);
+      timers = [];
+      panel.dataset.phase = 'raw';
+      timers.push(window.setTimeout(() => (panel.dataset.phase = 'marked'), 1100));
+      timers.push(window.setTimeout(() => (panel.dataset.phase = 'clean'), 2500));
+    });
+    initTabs(tabsRoot);
+  }
+</script>
+
+<style>
+  .tidy {
+    display: grid;
+    justify-items: center;
+    gap: 28px;
+  }
+  .tidy-tabs-row {
+    display: flex;
+    justify-content: center;
+    max-width: 100%;
+  }
+  .tidy-panels {
+    display: grid;
+    gap: 16px;
+    width: min(100%, 820px);
+  }
+  .tidy-card {
+    display: grid;
+    gap: 18px;
+    padding: clamp(20px, 3vw, 32px);
+    border-radius: 22px;
+    background: var(--t-s2);
+    box-shadow: 0 0 0 1px var(--t-border-subtle), var(--shadow-scene);
+    min-height: 290px;
+    align-content: start;
+  }
+  .tidy-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+  }
+  .tidy-label {
+    font-size: 0.875rem;
+    font-weight: 680;
+    color: var(--t-muted);
+  }
+  .tidy-where {
+    font-size: 0.8125rem;
+    font-weight: 600;
+    color: var(--t-muted);
+    padding: 2px 10px;
+    border-radius: 999px;
+    background: var(--t-s3);
+    border: 1px solid var(--t-border-subtle);
+  }
+  .lbl-said {
+    display: none;
+  }
+  [data-phase='raw'] .lbl-said,
+  [data-phase='marked'] .lbl-said {
+    display: inline;
+  }
+  [data-phase='raw'] .lbl-typed,
+  [data-phase='marked'] .lbl-typed {
+    display: none;
+  }
+
+  .tidy-text {
+    font-size: clamp(1.25rem, 1.05rem + 0.9vw, 1.75rem);
+    line-height: 1.45;
+    letter-spacing: -0.015em;
+    font-weight: 520;
+    max-width: none;
+    color: var(--t-fg);
+  }
+  .w {
+    border-radius: 4px;
+    transition:
+      color 300ms var(--ease),
+      background-color 300ms var(--ease);
+  }
+
+  /* Said: everything you said, nothing added yet. */
+  [data-phase='raw'] .ins,
+  [data-phase='marked'] .ins {
+    display: none;
+  }
+  [data-phase='raw'] .tidy-text {
+    color: var(--t-fg-80);
+  }
+  /* Marked: what cleanup takes out, struck through. */
+  [data-phase='marked'] .del {
+    color: var(--t-muted);
+    text-decoration: line-through;
+    text-decoration-color: var(--t-primary);
+    text-decoration-thickness: 2px;
+    background: var(--t-primary-wash);
+  }
+  /* Typed: the tidy text, what was added lit up for a moment. */
+  [data-phase='clean'] .del {
+    display: none;
+  }
+  [data-phase='clean'] .ins {
+    animation: ins-in 1600ms var(--ease);
+  }
+  @keyframes ins-in {
+    from {
+      background: var(--t-primary-tint);
+    }
+    to {
+      background: transparent;
+    }
+  }
+
+  .tidy-foot {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    margin-top: auto;
+    padding-top: 16px;
+    border-top: 1px solid var(--t-rule);
+    transition: opacity 300ms var(--ease);
+  }
+  [data-phase='raw'] .tidy-foot,
+  [data-phase='marked'] .tidy-foot {
+    opacity: 0;
+  }
+  .tidy-foot .chip {
+    font-size: 0.8125rem;
+    padding: 4px 12px;
+  }
+  .tidy-said-btn {
+    font-size: 0.875rem;
+    font-weight: 640;
+    padding: 6px 12px;
+    border-radius: 9px;
+    border: 1px solid var(--t-border);
+    background: var(--t-s2);
+    color: var(--t-fg);
+  }
+
+  @media (max-width: 640px) {
+    .tabs {
+      justify-content: flex-start;
+    }
+    .tidy-card {
+      min-height: 320px;
+    }
+  }
+</style>

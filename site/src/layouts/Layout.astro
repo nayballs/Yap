@@ -4,6 +4,7 @@ import '@fontsource-variable/eb-garamond';
 import figtreeLatin from '@fontsource-variable/figtree/files/figtree-latin-wght-normal.woff2?url';
 import '../styles/tokens.css';
 import '../styles/global.css';
+import '../styles/scenes.css';
 
 import { NAME, SITE_URL, INDEXABLE, SHOW_DRAFT_NOTES } from '../brand';
 import Header from '../components/Header.astro';
@@ -18,9 +19,15 @@ interface Props {
   jsonLd?: Record<string, unknown>;
   /** The slim download bar at the foot of the screen on phones. */
   stickyCta?: boolean;
+  /**
+   * The page lays out its own sheets (paper and ink, global.css). Otherwise
+   * the default slot goes on one paper sheet, and the "after" slot (the
+   * closing) follows it as a sheet of its own.
+   */
+  bare?: boolean;
 }
 
-const { title, description, jsonLd, stickyCta = true } = Astro.props;
+const { title, description, jsonLd, stickyCta = true, bare = false } = Astro.props;
 const fullTitle = title ? `${title} – ${NAME}` : `${NAME}: dictation and meeting notes that run on your PC`;
 const canonical = new URL(Astro.url.pathname, SITE_URL).href;
 ---
@@ -50,13 +57,19 @@ const canonical = new URL(Astro.url.pathname, SITE_URL).href;
   <body>
     <a class="skip" href="#main">Skip to content</a>
     {SHOW_DRAFT_NOTES && (
-      <p class="preview-strip">
-        Draft preview, not public and not indexed. The name <strong>{NAME}</strong> and the domain are placeholders; dashed notes are for the maintainer.
-      </p>
+      <div class="preview-strip">
+        <p>
+          Draft preview, not public and not indexed. The name <strong>{NAME}</strong> and the domain are placeholders.
+        </p>
+        <button type="button" class="drafts-toggle" data-drafts-toggle aria-pressed="false" hidden>
+          Show draft notes
+        </button>
+      </div>
     )}
     <Header />
-    <main id="main" class="sheet">
-      <slot />
+    <main id="main" class="page">
+      {bare ? <slot /> : <div class="sheet"><slot /></div>}
+      <slot name="after" />
     </main>
     <Footer />
     {stickyCta && (
@@ -127,18 +140,80 @@ const canonical = new URL(Astro.url.pathname, SITE_URL).href;
       }).observe(first);
     }
   }
+
+  // Sections rise into place once, as they come into view (global.css).
+  const reveals = document.querySelectorAll<HTMLElement>('[data-reveal]');
+  if ('IntersectionObserver' in window) {
+    const io = new IntersectionObserver(
+      (entries) => {
+        for (const e of entries) {
+          if (e.isIntersecting) {
+            e.target.classList.add('is-in');
+            io.unobserve(e.target);
+          }
+        }
+      },
+      { rootMargin: '0px 0px -8% 0px', threshold: 0.08 },
+    );
+    reveals.forEach((el) => io.observe(el));
+  } else {
+    reveals.forEach((el) => el.classList.add('is-in'));
+  }
+
+  // Preview builds: the draft notes' switch (kept on this device).
+  const toggle = document.querySelector<HTMLButtonElement>('[data-drafts-toggle]');
+  if (toggle) {
+    const root = document.documentElement;
+    const count = document.querySelectorAll('.draft').length;
+    const show = () => {
+      const on = root.classList.contains('show-drafts');
+      toggle.setAttribute('aria-pressed', String(on));
+      toggle.textContent = on ? 'Hide draft notes' : `Show draft notes (${count})`;
+    };
+    toggle.hidden = count === 0;
+    toggle.addEventListener('click', () => {
+      root.classList.toggle('show-drafts');
+      try {
+        if (root.classList.contains('show-drafts')) localStorage.setItem('draft-notes', 'shown');
+        else localStorage.removeItem('draft-notes');
+      } catch {
+        /* storage blocked: the choice lasts this page */
+      }
+      show();
+    });
+    show();
+  }
 </script>
 
 <style>
   .preview-strip {
-    margin: 0;
-    max-width: none;
-    padding: 7px 16px;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: center;
+    gap: 4px 14px;
+    padding: 6px 16px;
     text-align: center;
     font-size: 0.8125rem;
     color: var(--t-fg-80);
-    background: color-mix(in srgb, var(--t-warning) 12%, var(--t-bg));
-    border-bottom: 1px dashed var(--t-warning);
+    background: color-mix(in srgb, var(--t-warning) 10%, var(--t-bg));
+    border-bottom: 1px dashed color-mix(in srgb, var(--t-warning) 60%, transparent);
+  }
+  .preview-strip p {
+    max-width: none;
+  }
+  .drafts-toggle {
+    font: inherit;
+    font-weight: 640;
+    padding: 2px 10px;
+    border-radius: 999px;
+    border: 1px solid color-mix(in srgb, var(--t-warning) 55%, transparent);
+    background: var(--t-s2);
+    color: var(--t-fg);
+    cursor: pointer;
+  }
+  .drafts-toggle[aria-pressed='true'] {
+    background: color-mix(in srgb, var(--t-warning) 18%, var(--t-s2));
   }
   .mbar {
     position: fixed;

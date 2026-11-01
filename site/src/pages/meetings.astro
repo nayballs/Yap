@@ -1,33 +1,27 @@
 ---
 import Layout from '../layouts/Layout.astro';
 import PageHero from '../components/PageHero.astro';
-import Shot from '../components/Shot.astro';
-import Placeholder from '../components/Placeholder.astro';
+import NotepadScene from '../components/scenes/NotepadScene.astro';
+import AskScene from '../components/scenes/AskScene.astro';
 import Keys from '../components/Keys.astro';
 import Faq from '../components/Faq.astro';
 import Closing from '../components/Closing.astro';
 import DraftNote from '../components/DraftNote.astro';
 import { NAME } from '../brand';
 import { faqFor } from '../data/faq';
-import notesShot from '../../../docs/screenshot-notes.png';
 ---
 <Layout
   title="Meeting notes"
   description={`Meeting notes made on your PC. ${NAME} notices your Teams, Zoom or Meet call, asks before it records, and writes notes and an action plan. No bot joins; the audio stays on your PC.`}
 >
   <PageHero
+    layout="stack"
+    kicker="Meetings"
     title="Meeting notes, made on your PC"
     lede={`${NAME} notices your Teams, Zoom or Meet call, asks before it takes notes, and keeps a notepad beside the call. No bot joins, and the audio stays on your computer.`}
   >
     <DraftNote>Every claim on this page waits for the “one real call, end to end” test (plan §3.2, §4.3).</DraftNote>
-    <Placeholder
-      slot="visual"
-      id="A8"
-      title="A call noticed"
-      shows={`The bar’s “Take notes?” card over a made-up call window.`}
-      format="PNG, light and dark"
-      ratio="wide"
-    />
+    <NotepadScene slot="visual" />
   </PageHero>
 
   <section class="section ruled" aria-labelledby="when-h">
@@ -59,11 +53,7 @@ import notesShot from '../../../docs/screenshot-notes.png';
         <p class="lede">Ask across all your meetings and get answers that cite the moment: click one and the transcript opens at that line.</p>
         <p>Search finds the words, and with search by meaning switched on (a one-time download), what was meant. It all runs on your PC. Play any line back, fix a word the transcript got wrong, or transcribe the whole meeting again.</p>
       </div>
-      <Shot
-        src={notesShot}
-        alt={`${NAME}’s notes window with a fictional meeting, Weekly product sync: the summary’s discussion points, decisions and action items, and the You and Them transcript below.`}
-        caption="A screenshot from October 2026, with made-up data. The notepad beside a call (A7) and the checked action plan (A12) are still to capture."
-      />
+      <div data-reveal><AskScene /></div>
     </div>
   </section>
 
@@ -140,7 +130,7 @@ import notesShot from '../../../docs/screenshot-notes.png';
   </section>
 
   <Faq items={faqFor('meetings')} />
-  <Closing title="Take notes at your next call" />
+  <Closing slot="after" title="Take notes at your next call" />
 </Layout>
 
 <style>

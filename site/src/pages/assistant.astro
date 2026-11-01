@@ -1,7 +1,8 @@
 ---
 import Layout from '../layouts/Layout.astro';
 import PageHero from '../components/PageHero.astro';
-import Placeholder from '../components/Placeholder.astro';
+import VoiceScene from '../components/scenes/VoiceScene.astro';
+import ChatScene from '../components/scenes/ChatScene.astro';
 import Keys from '../components/Keys.astro';
 import Faq from '../components/Faq.astro';
 import Closing from '../components/Closing.astro';
@@ -14,17 +15,11 @@ import { faqFor } from '../data/faq';
   description={`Ask ${NAME} out loud from any app and hear the answer, in a voice that runs on your PC. Chat with your notes and meetings, keep documents beside the chat, and have any text read aloud.`}
 >
   <PageHero
+    kicker="Assistant"
     title="Ask out loud. Hear the answer."
     lede={`From any app, press the assistant’s shortcut and ask. ${NAME} answers in a natural voice that runs on your PC, starting from the first sentence, and the conversation is there in Chat when you want to read it.`}
   >
-    <Placeholder
-      slot="visual"
-      id="A9"
-      title="The Voice Assistant, with sound"
-      shows="Ask about a fictional meeting from another app, hear the answer start, stop it once. Captioned."
-      format="MP4, 12–15 s"
-      ratio="video"
-    />
+    <VoiceScene slot="visual" />
   </PageHero>
 
   <section class="section ruled" aria-labelledby="va-h">
@@ -60,6 +55,7 @@ import { faqFor } from '../data/faq';
         <h2 id="chat-h">Chat, with your notes and meetings to hand</h2>
         <p>Type or dictate your questions. Answers stream in as they’re written, with their sources when they looked something up.</p>
       </div>
+      <div class="scene-gap" data-reveal><ChatScene /></div>
       <div class="grid grid-3">
         <div class="col">
           <span class="tag tag-amber">New</span>
@@ -187,5 +183,5 @@ import { faqFor } from '../data/faq';
   </section>
 
   <Faq items={faqFor('assistant')} />
-  <Closing />
+  <Closing slot="after" />
 </Layout>

@@ -55,18 +55,37 @@ its own `_headers`).
 
 - `src/brand.ts`: the name, domain, links and switches.
 - `src/layouts/Layout.astro`: head (meta, CSP via Astro's `security.csp`, the theme script),
-  header, the paper sheet, footer, and the script that adapts the download buttons to the
-  visitor's device (Windows, another computer, a phone).
-- `src/components/`: `HeroDemo` (the pressable keycap demo), `DownloadButton`, `Faq`,
-  `LeavesTable` ("what leaves your PC"), `Placeholder` (a visual not captured yet, with its
-  id from the plan's asset list), `DraftNote` (preview only), and the small parts.
+  header, the sheets, footer, and the scripts that adapt the download buttons to the
+  visitor's device (Windows, another computer, a phone), raise sections into view as they
+  scroll in, and switch the draft notes on and off (preview builds).
+- The look: the page is the app's window frame with the content on **sheets** inset in it,
+  paper ones and a few ink ones (`.sheet`, `.sheet-ink` in `src/styles/global.css`). An ink
+  sheet carries `.scheme-dark`, so everything drawn on it is the app's own dark theme
+  (`scripts/tokens.mjs` writes that scope too). Headlines are Figtree, large and tight; EB
+  Garamond only for numerals and the notepad's titles, as in the app.
+- `src/components/scenes/`: the **live mock-ups** of the app, all HTML and CSS in the app's
+  tokens, every person and message made up: `HeroDesk` (a dictation playing on a desk, the
+  big amber key; it plays once on view, then on a click or the real F9), `Steps` (how it
+  works: the picture stays put while the steps scroll), `TidyDiff` (said → marked → typed,
+  with the app's word diff; `src/lib/diff.ts` works it out at build time), `AppKinds` (the
+  rules per kind of window), `MakeItYours`, `NotepadScene`, `AskScene`, `ChatScene` (Chat
+  with a document beside it), `VoiceScene` (the Voice Assistant's reading card) and
+  `NetworkScene` (Settings → Network connections). Their shared atoms (a Windows window, the
+  bar's capsule and waveform, chips, tabs) are in `src/styles/scenes.css`; `src/lib/tabs.ts`
+  runs the tabs. Without script each scene shows its finished state; with reduced motion
+  nothing plays by itself.
+- `src/components/`: `DownloadButton`, `Faq`, `LeavesTable` ("what leaves your PC"),
+  `Placeholder` (a visual not captured yet, with its id from the plan's asset list),
+  `DraftNote` (preview only, behind the preview strip's switch), `PageHero`, `Closing`, and
+  the small parts.
 - `src/data/`: the FAQ (one list, each page shows its own) and the "what leaves your PC"
   rows. Every claim should be true of the app today; check `docs/architecture/` before
   changing one.
 - `src/pages/`: one file per page, plus `robots.txt`, `sitemap.xml` and `favicon.svg`
   generated from `brand.ts`.
-- `public/theme.js`: puts the saved theme on the page before it paints.
+- `public/theme.js`: puts the saved theme, `js` and the draft-notes choice on the page
+  before it paints.
 
 Fonts are Figtree and EB Garamond from Fontsource (both SIL Open Font License 1.1, their
-licence files in `node_modules/@fontsource-variable/*/LICENSE`), bundled into the build. The
-app screenshots are the README's, imported from `../docs/`.
+licence files in `node_modules/@fontsource-variable/*/LICENSE`), bundled into the build.
+`Shot` takes a real screenshot when there is one (optimised at build); none is used today.

@@ -1,0 +1,528 @@
+---
+// The home page's opening picture (site plan A1), in one line: the big amber
+// key, the bar listening, and the message box the tidy text lands in. It
+// plays one dictation by itself the first time it's on screen, then again
+// whenever the key is pressed (click, Enter or Space, or the real F9 while
+// it's on screen): the bar listens and shows the words as they're heard, says
+// "Transcribing…", the tidy text lands, and the bar offers "Use what I said",
+// as the app does. At rest (without script, with reduced motion before a
+// press, between plays) it shows what was said and what was typed. All HTML
+// and CSS; the people and messages are made up.
+import { HOTKEY } from '../../brand';
+import Win from './Win.astro';
+
+const said = 'um so can we move the design review to Thursday, no wait, Friday at ten, and I’ll send the deck before then';
+// A chat app drops a short message's full stop, as the app does.
+const typed = 'Can we move the design review to Friday at 10? I’ll send the deck before then';
+---
+<div class="flow" data-flow data-state="done">
+  <div class="flow-row" role="img" aria-label={`Press ${HOTKEY} and say: “${said}”. The bar above the taskbar listens, and this lands in a team chat’s message box: “${typed}”.`}>
+    <div class="f-step f-key" aria-hidden="true">
+      <span class="bigkey-face" data-keyface>{HOTKEY}</span>
+      <p class="f-cap"><span class="f-n num">1</span>Press your key</p>
+    </div>
+
+    <span class="f-link f-link-1" aria-hidden="true"><i></i></span>
+
+    <div class="f-step f-bar" aria-hidden="true">
+      <div class="f-capsule-slot">
+        <span class="capsule f-rest"><span class="f-quote">“{said}”</span></span>
+        <span class="capsule f-live">
+          <span class="wave is-live">{Array.from({ length: 12 }, () => <i></i>)}</span>
+          <span class="f-words"><span data-words></span></span>
+        </span>
+        <span class="capsule f-done"><span>Cleaned up</span><span class="capsule-btn">Use what I said</span></span>
+      </div>
+      <p class="f-cap"><span class="f-n num">2</span>Talk the way you talk</p>
+    </div>
+
+    <span class="f-link f-link-2" aria-hidden="true"><i></i></span>
+
+    <div class="f-step f-out" aria-hidden="true">
+      <Win title="Team chat · #design-review" class="f-win">
+        <div class="f-chat">
+          <div class="f-msg"><span class="av av-a">P</span><p><b>Priya</b> Has anyone got a slot for the design review this week?</p></div>
+          <div class="f-composer">
+            <p class="f-typed" data-typed>{typed}</p>
+            <p class="f-ph">Message #design-review</p>
+          </div>
+        </div>
+      </Win>
+      <p class="f-cap"><span class="f-n num">3</span>Tidy text lands at your cursor</p>
+    </div>
+  </div>
+
+  <div class="f-foot">
+    <button class="f-play" type="button" data-key>
+      <kbd>{HOTKEY}</kbd><span data-play-label>Play it again</span>
+    </button>
+    <p class="f-note">Shown with AI cleanup on; it’s off until you choose a model.</p>
+  </div>
+  <p class="sr-only" aria-live="polite" data-live></p>
+</div>
+
+<script>
+  const root = document.querySelector<HTMLElement>('[data-flow]');
+  if (root) {
+    const q = <T extends HTMLElement>(s: string) => root.querySelector<T>(s)!;
+    const key = q<HTMLButtonElement>('[data-key]');
+    const face = q('[data-keyface]');
+    const wordsEl = q('[data-words]');
+    const live = q('[data-live]');
+    const typed = q('[data-typed]');
+    const playLabel = q('[data-play-label]');
+    const said = (q('.f-quote').textContent ?? '').replace(/[“”]/g, '');
+    const words = said.split(' ');
+    const reduced = matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+    let timers: number[] = [];
+    let state = 'done';
+    const later = (ms: number, fn: () => void) => timers.push(window.setTimeout(fn, ms));
+    const clear = () => {
+      timers.forEach(clearTimeout);
+      timers = [];
+    };
+    const set = (s: string) => {
+      state = s;
+      root.dataset.state = s;
+      playLabel.textContent = s === 'listening' ? 'Stop' : 'Play it again';
+    };
+    const tap = () => {
+      face.classList.add('is-down');
+      later(180, () => face.classList.remove('is-down'));
+    };
+
+    const finish = () => {
+      // The second press: stop, transcribe, tidy, paste.
+      clear();
+      tap();
+      set('transcribing');
+      wordsEl.textContent = 'Transcribing…';
+      later(reduced ? 300 : 900, () => {
+        set('pasted');
+        live.textContent = `Typed: ${typed.textContent}`;
+        later(3600, () => set('done'));
+      });
+    };
+
+    const start = () => {
+      clear();
+      tap();
+      set('listening');
+      live.textContent = 'Listening';
+      if (reduced) {
+        wordsEl.textContent = said;
+        later(900, finish);
+        return;
+      }
+      wordsEl.textContent = '';
+      words.forEach((w, i) => later(320 + i * 165, () => (wordsEl.textContent += (i ? ' ' : '') + w)));
+      later(320 + words.length * 165 + 550, finish);
+    };
+
+    const press = () => (state === 'listening' ? finish() : start());
+    key.addEventListener('click', press);
+    face.addEventListener('click', press);
+
+    // Plays once by itself the first time it's well on screen (not with
+    // reduced motion), and the real key works while it's on screen.
+    let visible = false;
+    let played = false;
+    new IntersectionObserver(
+      ([e]) => {
+        visible = e.isIntersecting;
+        if (visible && !played && !reduced) {
+          played = true;
+          later(900, start);
+        }
+      },
+      { threshold: 0.4 },
+    ).observe(root);
+    document.addEventListener('keydown', (e) => {
+      if (e.key !== 'F9' || !visible || e.repeat) return;
+      const t = e.target as HTMLElement | null;
+      if (t && (t.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName))) return;
+      e.preventDefault();
+      press();
+    });
+  }
+</script>
+
+<style>
+  .flow {
+    display: grid;
+    gap: 22px;
+    justify-items: center;
+  }
+  .flow-row {
+    display: grid;
+    grid-template-columns: auto minmax(28px, 1fr) minmax(0, 360px) minmax(28px, 1fr) minmax(0, 440px);
+    align-items: center;
+    width: 100%;
+    padding: clamp(20px, 3vw, 36px) clamp(18px, 3.2vw, 44px);
+    border-radius: 26px;
+    background:
+      radial-gradient(70% 120% at 0% 50%, color-mix(in srgb, var(--t-key-bg) 18%, transparent), transparent 60%),
+      radial-gradient(60% 120% at 100% 50%, color-mix(in srgb, var(--t-primary) 7%, transparent), transparent 60%),
+      var(--t-bg);
+    box-shadow: 0 0 0 1px var(--t-border-subtle), var(--shadow-scene);
+  }
+  /* Wide: the pictures on one row, their captions lined up on the next. */
+  .flow-row {
+    grid-template-rows: auto auto;
+    row-gap: 18px;
+  }
+  .f-step {
+    display: contents;
+  }
+  .f-step > * {
+    grid-row: 1;
+    justify-self: center;
+    min-width: 0;
+  }
+  .f-step > .f-cap {
+    grid-row: 2;
+  }
+  .f-key > * {
+    grid-column: 1;
+  }
+  .f-link-1 {
+    grid-column: 2;
+    grid-row: 1;
+  }
+  .f-bar > * {
+    grid-column: 3;
+  }
+  .f-link-2 {
+    grid-column: 4;
+    grid-row: 1;
+  }
+  .f-out > * {
+    grid-column: 5;
+  }
+  .f-bar > .f-capsule-slot,
+  .f-out > :global(.f-win) {
+    justify-self: stretch;
+  }
+  .f-cap {
+    display: inline-flex;
+    align-items: baseline;
+    gap: 8px;
+    font-size: 0.875rem;
+    font-weight: 620;
+    color: var(--t-fg-80);
+    white-space: nowrap;
+  }
+  .f-n {
+    font-size: 1.25rem;
+    color: var(--t-link);
+  }
+
+  /* 1: the key */
+  .bigkey-face {
+    display: grid;
+    place-items: center;
+    width: 104px;
+    height: 98px;
+    border-radius: 22px;
+    border: 1.5px solid var(--t-key-border);
+    background:
+      linear-gradient(180deg, rgb(255 255 255 / 0.3), rgb(255 255 255 / 0) 55%),
+      var(--t-key-bg);
+    color: var(--t-key-fg);
+    font-size: 2rem;
+    font-weight: 740;
+    letter-spacing: -0.02em;
+    box-shadow:
+      0 8px 0 var(--t-key-border),
+      0 18px 34px rgb(90 55 10 / 0.24);
+    cursor: pointer;
+    transition:
+      transform 90ms ease-out,
+      box-shadow 90ms ease-out;
+  }
+  .bigkey-face:global(.is-down) {
+    transform: translateY(7px);
+    box-shadow:
+      0 1px 0 var(--t-key-border),
+      0 4px 10px rgb(90 55 10 / 0.2);
+  }
+
+  /* The links between the steps: a dotted line that lights up in turn. */
+  .f-link {
+    position: relative;
+    height: 2px;
+    margin-inline: 10px;
+    background: repeating-linear-gradient(90deg, var(--t-border-hover) 0 4px, transparent 4px 9px);
+  }
+  .f-link i {
+    position: absolute;
+    left: 0;
+    top: 50%;
+    width: 8px;
+    height: 8px;
+    margin-top: -4px;
+    border-radius: 50%;
+    background: var(--t-primary);
+    opacity: 0;
+  }
+  [data-state='listening'] .f-link-1 i {
+    animation: travel 1.6s var(--ease) infinite;
+  }
+  [data-state='transcribing'] .f-link-2 i,
+  [data-state='pasted'] .f-link-2 i {
+    animation: travel 1s var(--ease) 1;
+  }
+  @keyframes travel {
+    0% {
+      left: 0;
+      opacity: 0;
+    }
+    15%,
+    85% {
+      opacity: 1;
+    }
+    100% {
+      left: calc(100% - 8px);
+      opacity: 0;
+    }
+  }
+
+  /* 2: the bar */
+  .f-capsule-slot {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    place-items: center;
+    width: 100%;
+    height: 52px;
+  }
+  .f-capsule-slot > * {
+    grid-area: 1 / 1;
+    max-width: 100%;
+    transition:
+      opacity 220ms var(--ease),
+      transform 260ms var(--ease);
+  }
+  .f-capsule-slot .capsule {
+    height: 46px;
+    padding-inline: 18px;
+    font-size: 0.875rem;
+  }
+  .f-quote {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    color: var(--bar-text-muted);
+    font-weight: 540;
+    font-style: italic;
+    min-width: 0;
+  }
+  .f-rest {
+    max-width: 100%;
+    overflow: hidden;
+  }
+  .f-words {
+    position: relative;
+    display: block;
+    width: 210px;
+    overflow: hidden;
+    direction: rtl;
+    text-align: left;
+    -webkit-mask-image: linear-gradient(90deg, transparent, #000 22%);
+    mask-image: linear-gradient(90deg, transparent, #000 22%);
+  }
+  .f-words span {
+    direction: ltr;
+    unicode-bidi: plaintext;
+    white-space: nowrap;
+    color: var(--bar-text-muted);
+    font-weight: 560;
+  }
+  .f-live,
+  .f-done {
+    opacity: 0;
+    transform: scale(0.7);
+  }
+  .f-live .wave i {
+    animation-play-state: paused;
+  }
+  [data-state='listening'] .f-live .wave i {
+    animation-play-state: running;
+  }
+  [data-state='transcribing'] .f-live .wave i {
+    opacity: 0.4;
+  }
+  [data-state='listening'] .f-rest,
+  [data-state='transcribing'] .f-rest,
+  [data-state='pasted'] .f-rest {
+    opacity: 0;
+    transform: scale(0.7);
+  }
+  [data-state='listening'] .f-live,
+  [data-state='transcribing'] .f-live,
+  [data-state='pasted'] .f-done {
+    opacity: 1;
+    transform: none;
+  }
+
+  /* 3: the message box */
+  .f-out :global(.f-win) {
+    width: 100%;
+  }
+  .f-chat {
+    display: grid;
+    gap: 10px;
+    padding: 12px 12px 12px;
+  }
+  .f-msg {
+    display: flex;
+    gap: 9px;
+    font-size: 0.8125rem;
+  }
+  .f-msg p {
+    color: var(--t-fg-80);
+    max-width: none;
+  }
+  .f-msg b {
+    display: block;
+    color: var(--t-fg);
+    font-weight: 680;
+  }
+  .f-composer {
+    position: relative;
+    min-height: 62px;
+    padding: 9px 11px;
+    border: 1px solid var(--t-border);
+    border-radius: 10px;
+    font-size: 0.875rem;
+    transition:
+      border-color 200ms var(--ease),
+      box-shadow 200ms var(--ease);
+  }
+  .f-typed {
+    max-width: none;
+  }
+  .f-ph {
+    position: absolute;
+    inset: 9px 11px auto;
+    color: var(--t-muted-70);
+    opacity: 0;
+  }
+  [data-state='listening'] .f-typed,
+  [data-state='transcribing'] .f-typed {
+    visibility: hidden;
+  }
+  [data-state='listening'] .f-ph,
+  [data-state='transcribing'] .f-ph {
+    opacity: 1;
+  }
+  [data-state='pasted'] .f-composer {
+    border-color: var(--t-primary-line);
+    box-shadow: 0 0 0 3px var(--t-primary-wash);
+  }
+  [data-state='pasted'] .f-typed {
+    animation: landed 1200ms var(--ease);
+  }
+  @keyframes landed {
+    from {
+      background: var(--t-primary-tint);
+    }
+    to {
+      background: transparent;
+    }
+  }
+
+  /* Under it: play again, and the honest line about cleanup. */
+  .f-foot {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: center;
+    gap: 8px 16px;
+  }
+  .f-play {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 12px 6px 7px;
+    border-radius: 10px;
+    border: 1px solid var(--t-border);
+    background: var(--t-s2);
+    color: var(--t-fg);
+    font: inherit;
+    font-size: 0.875rem;
+    font-weight: 640;
+    cursor: pointer;
+  }
+  .f-play:hover {
+    border-color: var(--t-border-hover);
+  }
+  .f-note {
+    font-size: 0.875rem;
+    color: var(--t-muted);
+    text-align: center;
+  }
+
+  /* Narrower screens: the three steps in a column. */
+  @media (max-width: 980px) {
+    .flow-row {
+      grid-template-columns: minmax(0, 1fr);
+      justify-items: center;
+      gap: 0;
+      max-width: 520px;
+    }
+    .f-link {
+      width: 2px;
+      height: 34px;
+      margin: 10px 0;
+      background: repeating-linear-gradient(180deg, var(--t-border-hover) 0 4px, transparent 4px 9px);
+    }
+    .f-link i {
+      left: 50%;
+      top: 0;
+      margin: 0 0 0 -4px;
+    }
+    @keyframes travel {
+      0% {
+        top: 0;
+        opacity: 0;
+      }
+      15%,
+      85% {
+        opacity: 1;
+      }
+      100% {
+        top: calc(100% - 8px);
+        opacity: 0;
+      }
+    }
+    .flow-row {
+      grid-template-rows: none;
+      row-gap: 0;
+    }
+    .f-step {
+      display: grid;
+      justify-items: center;
+      width: 100%;
+      gap: 12px;
+    }
+    .f-step > *,
+    .f-step > .f-cap,
+    .f-link-1,
+    .f-link-2 {
+      grid-row: auto;
+      grid-column: auto;
+    }
+    .f-out {
+      width: 100%;
+    }
+    .bigkey-face {
+      width: 84px;
+      height: 80px;
+      border-radius: 18px;
+      font-size: 1.65rem;
+    }
+    .f-words {
+      width: min(52vw, 210px);
+    }
+  }
+</style>

@@ -1,0 +1,354 @@
+---
+// How it works, in three steps. The steps scroll by on one side while a
+// picture stays put on the other and changes with the step you're reading
+// (on a phone it stays at the top). Without script the first picture shows.
+import { HOTKEY } from '../../brand';
+import Win from './Win.astro';
+
+const steps = [
+  {
+    title: 'Press your key',
+    text: `${HOTKEY} by default, or any key, combination or mouse button. Press it to start and again to stop, hold it while you talk, or double-tap it to keep going hands-free.`,
+  },
+  {
+    title: 'Talk the way you talk',
+    text: 'Ums, restarts and changes of mind are fine. The bar above your taskbar shows a waveform and the words as they’re heard, so you know it’s keeping up.',
+  },
+  {
+    title: 'Tidy text appears',
+    text: 'Right where your cursor is, in whichever app you were using: email, chat, a document or a terminal. Your clipboard is put back afterwards.',
+  },
+];
+const fkeys = ['F7', 'F8', HOTKEY, 'F10', 'F11'];
+---
+<div class="steps" data-steps data-step="1">
+  <div class="stage" aria-hidden="true">
+    <div class="scene scene-desk stage-in">
+      <!-- 1: the key -->
+      <div class="vis vis-1">
+        <div class="krow">
+          {fkeys.map((k) => <span class:list={['k', k === HOTKEY && 'k-on']}>{k}</span>)}
+        </div>
+        <div class="modes">
+          <span class="chip">Press, talk, press</span>
+          <span class="chip">Hold to talk</span>
+          <span class="chip">Double-tap: hands-free</span>
+        </div>
+      </div>
+      <!-- 2: the bar listening -->
+      <div class="vis vis-2">
+        <div class="live-card">
+          <span class="live-label">Listening…</span>
+          <p>so I was thinking we could, um, push the launch back a week<span class="caret"></span></p>
+        </div>
+        <span class="capsule capsule-lg"><span class="wave is-live">{Array.from({ length: 16 }, () => <i></i>)}</span></span>
+        <div class="taskbar mini-taskbar"><i></i><i></i><i></i><i></i></div>
+      </div>
+      <!-- 3: the text where the cursor was -->
+      <div class="vis vis-3">
+        <Win title="Re: Launch date" class="w-mail">
+          <div class="mail">
+            <p class="mail-to"><span>To</span> priya@example.com</p>
+            <p>Hi Priya,</p>
+            <p class="landed">I was thinking we could push the launch back a week.</p>
+          </div>
+        </Win>
+        <Win title="Windows Terminal" dark class="w-term">
+          <p class="term"><span class="term-p">&gt;</span> push the launch back a week</p>
+        </Win>
+        <span class="capsule capsule-done"><span>Cleaned up</span><span class="capsule-btn">Use what I said</span></span>
+      </div>
+    </div>
+  </div>
+
+  <ol class="step-list">
+    {steps.map((s, i) => (
+      <li class="step" data-step-n={i + 1}>
+        <span class="step-n num" aria-hidden="true">{i + 1}</span>
+        <h3>{s.title}</h3>
+        <p>{s.text}</p>
+      </li>
+    ))}
+  </ol>
+</div>
+
+<script>
+  // The step in the middle of the screen is the one the picture shows.
+  for (const root of document.querySelectorAll<HTMLElement>('[data-steps]')) {
+    const items = [...root.querySelectorAll<HTMLElement>('[data-step-n]')];
+    const io = new IntersectionObserver(
+      (entries) => {
+        for (const e of entries) {
+          if (e.isIntersecting) {
+            const n = e.target.getAttribute('data-step-n') ?? '1';
+            root.dataset.step = n;
+            items.forEach((it) => it.classList.toggle('is-on', it === e.target));
+          }
+        }
+      },
+      { rootMargin: '-52% 0px -42% 0px' },
+    );
+    items.forEach((it) => io.observe(it));
+    items[0]?.classList.add('is-on');
+  }
+</script>
+
+<style>
+  .steps {
+    display: grid;
+    grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.1fr);
+    gap: clamp(32px, 6vw, 96px);
+    align-items: start;
+  }
+
+  /* The picture: sticky in the middle of the screen. */
+  .stage {
+    order: 2;
+    position: sticky;
+    top: calc(50vh - 220px + var(--header-h) / 2);
+  }
+  .stage-in {
+    position: relative;
+    height: 440px;
+    box-shadow: 0 0 0 1px var(--t-border-subtle), var(--shadow-scene);
+  }
+  .vis {
+    position: absolute;
+    inset: 0;
+    display: grid;
+    place-items: center;
+    align-content: center;
+    gap: 22px;
+    padding: 28px;
+    opacity: 0;
+    transform: translateY(12px) scale(0.98);
+    transition:
+      opacity 420ms var(--ease),
+      transform 520ms var(--ease);
+    pointer-events: none;
+  }
+  [data-step='1'] .vis-1,
+  [data-step='2'] .vis-2,
+  [data-step='3'] .vis-3 {
+    opacity: 1;
+    transform: none;
+  }
+
+  /* 1: a row of function keys, the dictation key pressed. */
+  .krow {
+    display: flex;
+    gap: 10px;
+  }
+  .k {
+    display: grid;
+    place-items: center;
+    width: 64px;
+    height: 60px;
+    border-radius: 14px;
+    border: 1px solid var(--t-border);
+    background: var(--t-s2);
+    color: var(--t-fg-62);
+    font-weight: 640;
+    font-size: 1rem;
+    box-shadow: 0 4px 0 var(--t-border);
+  }
+  .k-on {
+    width: 84px;
+    height: 78px;
+    border-radius: 18px;
+    border: 1.5px solid var(--t-key-border);
+    background:
+      linear-gradient(180deg, rgb(255 255 255 / 0.3), rgb(255 255 255 / 0) 55%),
+      var(--t-key-bg);
+    color: var(--t-key-fg);
+    font-weight: 740;
+    font-size: 1.5rem;
+    box-shadow:
+      0 7px 0 var(--t-key-border),
+      0 18px 36px rgb(232 160 50 / 0.3);
+    animation: keypress 2.6s var(--ease) infinite;
+  }
+  @keyframes keypress {
+    0%, 70%, 100% {
+      transform: translateY(0);
+      box-shadow: 0 7px 0 var(--t-key-border), 0 18px 36px rgb(232 160 50 / 0.3);
+    }
+    76%, 84% {
+      transform: translateY(6px);
+      box-shadow: 0 1px 0 var(--t-key-border), 0 6px 14px rgb(232 160 50 / 0.2);
+    }
+  }
+  .modes {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: center;
+    gap: 8px;
+    margin-top: 10px;
+  }
+  .modes .chip {
+    font-size: 0.8125rem;
+    padding: 5px 12px;
+  }
+
+  /* 2: the bar, listening. */
+  .live-card {
+    width: min(100%, 380px);
+    padding: 12px 16px 14px;
+    border-radius: 14px;
+    background: var(--bar-surface);
+    border: 1px solid var(--bar-border);
+    box-shadow: var(--bar-shadow), 0 16px 40px -14px rgb(40 30 10 / 0.3);
+    color: var(--bar-text-muted);
+    font-size: 0.9375rem;
+    line-height: 1.45;
+  }
+  .live-label {
+    display: block;
+    font-size: 0.75rem;
+    font-weight: 680;
+    color: var(--bar-text);
+    margin-bottom: 2px;
+  }
+  .capsule-lg {
+    height: 48px;
+    padding-inline: 22px;
+  }
+  .capsule-lg :global(.wave) {
+    height: 24px;
+  }
+  .mini-taskbar {
+    position: absolute;
+    left: 0;
+    right: 0;
+    bottom: 0;
+  }
+  .vis-2 {
+    padding-bottom: 60px;
+  }
+
+  /* 3: the words in the app you were in. */
+  .vis-3 {
+    gap: 14px;
+  }
+  .vis-3 :global(.w-mail) {
+    width: min(100%, 400px);
+  }
+  .vis-3 :global(.w-term) {
+    width: min(100%, 340px);
+    margin-left: 80px;
+    margin-top: -36px;
+  }
+  .mail {
+    display: grid;
+    gap: 8px;
+    padding: 12px 16px 16px;
+  }
+  .mail p {
+    max-width: none;
+  }
+  .mail-to {
+    padding-bottom: 8px;
+    border-bottom: 1px solid var(--t-border-subtle);
+    color: var(--t-fg-80);
+  }
+  .mail-to span {
+    color: var(--t-muted);
+    margin-right: 8px;
+  }
+  .landed {
+    border-radius: 4px;
+    background: var(--t-primary-wash);
+    box-shadow: 0 0 0 3px var(--t-primary-wash);
+  }
+  .term {
+    padding: 12px 14px 14px;
+    font-family: var(--font-mono);
+    font-size: 0.8125rem;
+    max-width: none;
+  }
+  .term-p {
+    color: #f0b04a;
+  }
+
+  /* The steps: tall enough that each has the middle of the screen a while. */
+  .step-list {
+    order: 1;
+    list-style: none;
+    padding: 0;
+  }
+  .step {
+    display: grid;
+    align-content: center;
+    gap: 14px;
+    min-height: 62vh;
+    padding-block: 24px;
+    transition: opacity 300ms var(--ease);
+  }
+  :global(.js) .step:not(:global(.is-on)) {
+    opacity: 0.38;
+  }
+  .step-n {
+    font-size: 3.6rem;
+    line-height: 1;
+    color: var(--t-link);
+  }
+  .step h3 {
+    font-size: clamp(1.6rem, 1.2rem + 1.4vw, 2.4rem);
+    font-weight: 660;
+    letter-spacing: -0.03em;
+    line-height: 1.08;
+  }
+  .step p {
+    font-size: 1.125rem;
+    color: var(--t-fg-80);
+    max-width: 30em;
+  }
+
+  /* Phones: the picture stays at the top while the steps go by under it. */
+  @media (max-width: 900px) {
+    .steps {
+      grid-template-columns: 1fr;
+      gap: 0;
+    }
+    .stage {
+      order: 0;
+      top: 78px;
+      z-index: 2;
+      padding-bottom: 12px;
+      background: linear-gradient(var(--t-s1) 88%, transparent);
+    }
+    .stage-in {
+      height: 290px;
+    }
+    .vis {
+      padding: 16px;
+      gap: 14px;
+    }
+    .k {
+      width: 46px;
+      height: 44px;
+      border-radius: 11px;
+      font-size: 0.8125rem;
+    }
+    .k-on {
+      width: 64px;
+      height: 60px;
+      font-size: 1.2rem;
+    }
+    .krow {
+      gap: 7px;
+    }
+    .vis-3 :global(.w-term) {
+      margin-left: 40px;
+    }
+    .step {
+      min-height: 46vh;
+    }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .k-on {
+      animation: none;
+    }
+  }
+</style>

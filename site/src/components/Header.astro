@@ -16,7 +16,7 @@ const links = [
 ];
 const current = (href: string) => (here === href ? 'page' : undefined);
 ---
-<header class="hdr">
+<header class="hdr" data-hdr>
   <div class="hdr-in">
     <a class="brand" href="/" aria-current={current('/')}>
       <Mark size={30} />
@@ -29,7 +29,10 @@ const current = (href: string) => (here === href ? 'page' : undefined);
 
     <nav class="links" aria-label="More">
       {links.map((l) => <a href={l.href} aria-current={current(l.href)}>{l.label}</a>)}
-      <a href={REPO_URL}>GitHub</a>
+      <a href={REPO_URL} class="gh">
+        <svg viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path fill="currentColor" d="M8 .2a8 8 0 0 0-2.53 15.6c.4.07.55-.17.55-.38v-1.35c-2.23.48-2.7-1.07-2.7-1.07-.36-.92-.89-1.17-.89-1.17-.73-.5.06-.49.06-.49.8.06 1.23.83 1.23.83.72 1.22 1.88.87 2.33.66.07-.52.28-.87.5-1.07-1.78-.2-3.65-.89-3.65-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82a7.6 7.6 0 0 1 4 0c1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.28.82 2.15 0 3.07-1.87 3.75-3.66 3.95.29.25.54.73.54 1.48v2.2c0 .21.15.46.55.38A8 8 0 0 0 8 .2Z"/></svg>
+        GitHub
+      </a>
     </nav>
 
     <div class="hdr-cta">
@@ -54,38 +57,59 @@ const current = (href: string) => (here === href ? 'page' : undefined);
   </div>
 </header>
 
+<script>
+  // A soft shadow under the floating header once the page has scrolled.
+  const hdr = document.querySelector<HTMLElement>('[data-hdr]');
+  if (hdr) {
+    const update = () => hdr.classList.toggle('is-scrolled', window.scrollY > 8);
+    addEventListener('scroll', update, { passive: true });
+    update();
+  }
+</script>
+
 <style>
   .hdr {
     position: sticky;
     top: 0;
     z-index: 50;
-    background: var(--t-bg);
+    padding: 10px var(--sheet-gap) 10px;
+    pointer-events: none;
   }
   .hdr-in {
+    position: relative;
     display: flex;
     align-items: center;
-    gap: 20px;
-    height: var(--header-h);
-    padding-inline: clamp(16px, 2.4vw, 32px);
-    max-width: 1400px;
+    gap: 18px;
+    height: 58px;
+    max-width: var(--wrap-wide);
     margin-inline: auto;
+    padding-inline: 12px 8px;
+    border-radius: 18px;
+    background: var(--t-s1);
+    box-shadow: 0 0 0 1px var(--t-border-subtle), var(--t-shadow-sm);
+    transition: box-shadow 200ms var(--ease);
+    pointer-events: auto;
+  }
+  .is-scrolled .hdr-in {
+    box-shadow: 0 0 0 1px var(--t-border), 0 10px 30px -12px rgb(50 40 20 / 0.25);
   }
   .brand {
     display: inline-flex;
     align-items: center;
     gap: 10px;
+    padding: 6px 4px;
     color: var(--t-fg);
     text-decoration: none;
-    font-weight: 700;
+    font-weight: 720;
     font-size: 1.1875rem;
-    letter-spacing: -0.02em;
-    margin-right: 8px;
+    letter-spacing: -0.025em;
+    border-radius: 10px;
   }
   .brand:hover {
     color: var(--t-fg);
   }
 
-  /* The product switch: the app's pill tabs (an amber edge on the one you're on). */
+  /* The product switch: the app's pill tabs. */
   .products {
     display: flex;
     gap: 2px;
@@ -108,33 +132,41 @@ const current = (href: string) => (here === href ? 'page' : undefined);
     background: var(--t-s2);
   }
   .products a[aria-current='page'] {
-    color: var(--t-link);
-    background: var(--t-primary-wash);
-    border-color: var(--t-primary-line);
+    color: var(--t-fg);
+    background: var(--t-s2);
+    border-color: var(--t-border);
+    box-shadow: var(--t-shadow-sm);
   }
 
   .links {
     display: flex;
-    gap: 22px;
+    align-items: center;
+    gap: 4px;
     margin-left: auto;
   }
   .links a {
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    padding: 8px 11px;
+    border-radius: 9px;
     color: var(--t-fg-80);
     font-size: 0.9375rem;
-    font-weight: 560;
+    font-weight: 580;
     text-decoration: none;
   }
   .links a:hover,
   .links a[aria-current='page'] {
     color: var(--t-fg);
-    text-decoration: underline;
-    text-decoration-color: var(--t-primary-line);
-    text-underline-offset: 0.35em;
+    background: var(--t-s3);
+  }
+  .gh svg {
+    width: 16px;
+    height: 16px;
   }
 
   .menu {
     display: none;
-    position: static;
   }
   .menu summary {
     list-style: none;
@@ -142,7 +174,7 @@ const current = (href: string) => (here === href ? 'page' : undefined);
     place-items: center;
     width: 44px;
     height: 44px;
-    border-radius: 10px;
+    border-radius: 12px;
     border: 1px solid var(--t-border);
     background: var(--t-s2);
     color: var(--t-fg);
@@ -159,30 +191,32 @@ const current = (href: string) => (here === href ? 'page' : undefined);
     position: absolute;
     left: 0;
     right: 0;
-    top: var(--header-h);
-    padding: 8px 16px 20px;
-    background: var(--t-bg);
-    border-bottom: 1px solid var(--t-border);
-    box-shadow: var(--t-shadow-menu);
+    top: calc(100% + 8px);
+    padding: 6px 16px 14px;
+    border-radius: 18px;
+    background: var(--t-s1);
+    box-shadow: 0 0 0 1px var(--t-border), var(--t-shadow-menu);
   }
   .menu-panel ul {
     list-style: none;
     padding: 0;
     display: grid;
   }
+  .menu-panel li + li a {
+    border-top: 1px solid var(--t-rule);
+  }
   .menu-panel a {
     display: block;
-    padding: 12px 4px;
-    border-bottom: 1px solid var(--t-rule);
+    padding: 13px 4px;
     color: var(--t-fg);
-    font-weight: 600;
+    font-weight: 620;
     text-decoration: none;
   }
   .menu-panel a[aria-current='page'] {
     color: var(--t-link);
   }
 
-  @media (max-width: 980px) {
+  @media (max-width: 1060px) {
     .links {
       display: none;
     }
@@ -190,7 +224,7 @@ const current = (href: string) => (here === href ? 'page' : undefined);
       margin-left: auto;
     }
   }
-  @media (max-width: 760px) {
+  @media (max-width: 780px) {
     .products {
       display: none;
     }
@@ -198,10 +232,12 @@ const current = (href: string) => (here === href ? 'page' : undefined);
       display: block;
     }
     .hdr-in {
-      gap: 10px;
+      gap: 8px;
+      height: 56px;
+      padding-inline: 8px 6px;
     }
   }
-  @media (max-width: 380px) {
+  @media (max-width: 400px) {
     .brand-name {
       display: none;
     }
