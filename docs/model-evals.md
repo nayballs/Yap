@@ -3501,3 +3501,42 @@ unwritten, edits refused or missed, a document where a note was asked for). Quic
 the everyday tasks, but not the default's equal; no change to the downloads list or the ≥ 4B
 rule. Worth a look again against Qwen3.5-2B for small PCs.
 
+
+## The local shortlist (1 Nov 2026)
+
+Eight newer small and mid-size models against the default Qwen3.5-4B, all on llama.cpp
+b12032 CUDA 13 (`--ngl 999 --tools on --locale en-GB`, temperature 0.5), RTX 5070 Ti, each run
+three times (the 35B-A3B twice): the 4B's own three Chat-tools runs scored 44, 40 and 41, so
+2–3 points between single runs is noise — the table has the means.
+
+| Model | File | Everyday /7 | Chat tools /48 | Mean turn (everyday · tools) | VRAM | Notes |
+|---|---|---|---|---|---|---|
+| **Qwen3.5-4B (default)** | 3.0 GB | 5.0 | 41.7 | 0.85 · 2.0 s | 4.3 GB | clean |
+| Qwen3.5-9B | 6.2 GB | 6.3 | 41.0 | 1.0 · 1.8 s | 6.8 GB | clean; one made-up fact |
+| Qwen3.6-35B-A3B (`--n-cpu-moe 27`) | 22.3 GB | 6.0 | 43.5 | 5.0–5.7 · 7.5–11 s | 8.5 GB + ~13 GB RAM | clean; slow to read the prompt (330–450 tokens/s; 1,071 with `-ub 2048 -b 2048`) |
+| Granite 4.2 8B | 5.4 GB | 6.0 | 41.7 | 1.7 · 4.7 s | 6.3 GB | its thinking shown in up to 2 answers a run, one raw `<tool_call>` |
+| Spark-X2.6-4B | 3.5 GB | 5.3 | 40.0 | 0.85 · 2.5 s | 3.4 GB | clean; no MTP; English and Chinese only |
+| LFM3-1.7B | 1.1 GB | 2.7 | 36.0 | 1.15 · 1.3 s | 1.2 GB | its reasoning shown in up to 5 answers a run (Liquid's own sampling too) |
+| Nanbeige4.2-3B | 2.7 GB | 6.7 | 35.7 | 4.5 · 4.4 s | 3.8 GB | a stray `</think>` in 7–13 answers a run |
+| Ling-3.0-tiny | 4.9 GB | 4.7 | 32.7 | 0.8 · 2.3 s | 4.8 GB | wrong dates; broken tool arguments |
+| MiniCPM5-2B | 1.6 GB | 4.7 | 32.3 | 0.5 · 1.5 s | 1.7 GB | clean |
+| Qwen2.5-1.5B, no tools (processor tier) | 1.1 GB | 1.0 | 21.0 | 0.15 · 0.3 s | 1.2 GB | reference |
+
+On the processor alone (`--ngl 0`, everyday only): Qwen2.5-1.5B without tools 1/7 at 0.7 s a
+turn; MiniCPM5-2B with tools 5/7 at 9.8 s; Ling-3.0-tiny 5/7 at 22.3 s; Nanbeige4.2-3B 6.5
+tokens/s (stopped) — the tools' definitions are what make a turn slow there.
+
+**No default changes.** A 16 GB card: the 4B stays; Qwen3.5-9B is the one real alternative
+(the same tool score, a better everyday one, as fast, 2.5 GB more) once memory, cleanup and
+languages are run on it. The 35B-A3B gains 2 of 48 for 4–11 s a turn, a 22 GB download and
+~13 GB of RAM: at most an opt-in for 32 GB PCs. An 8 GB card: the 4B (Spark-X2.6-4B is clean
+and smaller but no better). The processor: Qwen2.5-1.5B and the ≥ 4B tool rule stay;
+MiniCPM5-2B with tools is the one to follow up as an opt-in (cleanup and languages first, a
+laptop processor's timing).
+
+What the runs found in Yap: a local model that half-thinks shows its `</think>` or reasoning in
+Chat, because the answer's thinking is only stripped with "Disable thinking output" on (off by
+default); `documents-restore` can't pass on the on-device model (its tool is the strong models'),
+so "48 run" is 47 possible; `apps-not-installed` misses "doesn't appear to be installed"; the
+date checks miss a narrow no-break space. Findings in full: the private repo's
+`docs/model-evals-2026-11-01-shortlist.md`.
