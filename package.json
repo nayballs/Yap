@@ -17,6 +17,8 @@
     "hooks:install": "node scripts/install-hooks.mjs",
     "privacy:scan": "node scripts/privacy-guard.mjs --scan-tree",
     "test:privacy": "node --test scripts/privacy-guard.test.mjs",
+    "pins:check": "node scripts/check-pins.mjs",
+    "test:pins": "node --test scripts/check-pins.test.mjs",
     "test:launcher": "node --test scripts/dev-launcher.test.mjs"
   },
   "dependencies": {

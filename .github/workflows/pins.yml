@@ -1,0 +1,34 @@
+# Weekly: the downloads Yap pins at a version in its code (scripts/check-pins.mjs)
+# against each project's latest release. One issue stays open while anything
+# is behind, updated each week, and closes once everything is current.
+# (Crates, npm packages and Actions: .github/dependabot.yml.)
+name: "Pinned downloads"
+
+on:
+  schedule:
+    - cron: "0 6 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  pins:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: The check's own tests
+        run: node --test scripts/check-pins.test.mjs
+
+      - name: Check the pins, keep the issue current
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: node scripts/check-pins.mjs --issue

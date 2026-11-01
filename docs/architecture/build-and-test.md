@@ -128,6 +128,28 @@ failures.)
 `.github/workflows/e2e.yml` runs the **end-to-end UI suite** on the same triggers
 (plus `workflow_dispatch`), separately so `ci.yml` stays quick — see below.
 
+## Keeping what Yap is built from current (2026-11-01)
+
+- **Crates, npm packages and GitHub Actions**: Dependabot (`.github/dependabot.yml`), a PR
+  a week per ecosystem with the minor and patch bumps grouped (TipTap's packages and the
+  fonts each in one), tested by CI and the E2E workflow like any PR. Left alone on purpose:
+  `tauri-plugin-single-instance` / `tauri-plugin-deep-link` past 2.4.x (2.5 needs tauri
+  2.12), `ort` (pinned to the ONNX Runtime transcribe-rs links), `transcribe-rs` (vendored),
+  and `windows` / `webview2-com` past their minor (they move with tauri / wry).
+- **The downloads Yap pins in its own code** (GitHub release assets: the speaker engine,
+  sherpa-onnx, eSpeak NG, the on-device engine's floor): `scripts/check-pins.mjs` reads
+  every `github.com/<owner>/<repo>/releases/download/<version>/` URL in `src-tauri/src`,
+  asks GitHub for each project's latest release and reports which are behind
+  (`npm run pins:check`; its tests `npm run test:pins`). A project that releases several
+  times a day (`FLOOR_DAYS`: llama.cpp) is only behind once its pin is 30 days older than
+  its latest — the app moves past that floor by itself. `.github/workflows/pins.yml` runs it
+  every Monday with `--issue`: one issue, "Pinned downloads behind upstream", kept current
+  while anything is behind and closed once nothing is. Hugging Face models pinned to a
+  commit aren't checked (a repo's README edit would look like a new version). A pin is
+  updated by hand — the new URL and the SHA-256 the release publishes — and checked on a
+  real PC before it ships. First run (1 Nov 2026): NeMo-Speech.cpp v0.2.0 → v0.3.0 and
+  sherpa-onnx v1.13.8 → v2.0.1 behind (the speaker engine).
+
 ## The privacy guard (`scripts/privacy-guard.mjs`)
 The repo is public, so nothing personal or secret may land in it (2026-10-22).
 **Before a push** (`.githooks/pre-push`, which `npm run hooks:install`, once per
