@@ -192,10 +192,14 @@ pub const CURATED_MODELS: &[CuratedLlm] = &[
     CuratedLlm {
         id: "qwen3.5-9b",
         display: "Qwen3.5 9B",
-        blurb: "A bigger Qwen, a little slower. Wants a 12 GB graphics card",
+        blurb: "Better than the 4B at everyday questions, just as quick. Wants a 12 GB graphics card",
         // The file the evaluations ran: 204/210 at 1.2 s a Chat turn on an
         // RTX 5070 Ti (the 4B: 206/210, 1.1 s), but 4 false memories from an
-        // import; not better than the 4B, which stays recommended (27 Oct 2026).
+        // import (27 Oct 2026). The local shortlist (1 Nov 2026, llama.cpp
+        // b12032 CUDA, three runs each): everyday 6.3/7 (the 4B 5.0), Chat's
+        // tools 41.0/48 (41.7), 1.0 s a turn, 6.8 GB on the card, no thinking
+        // shown — the one real alternative to the 4B, which stays
+        // recommended until memory, cleanup and languages are run on it.
         filename: "Qwen_Qwen3.5-9B-Q4_K_M.gguf",
         url: "https://huggingface.co/bartowski/Qwen_Qwen3.5-9B-GGUF/resolve/main/Qwen_Qwen3.5-9B-Q4_K_M.gguf",
         sha256: "d784ce9eda1a5a7b51e8f705a9e6310844bf4f173654d115823c775fdea56d43",

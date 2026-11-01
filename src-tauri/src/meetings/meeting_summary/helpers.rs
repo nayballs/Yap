@@ -505,7 +505,7 @@ pub(crate) async fn chat_beside_dictation_live(
     };
     let beside = crate::chat::stream::AnyDictation(app.clone());
     let live = crate::chat::stream::Live { sink, beside: ep.is_local().then_some(&beside as &dyn crate::chat::stream::Dictations) };
-    let message = crate::privacy::net::within(crate::privacy::net::Feature::Meetings, crate::chat::stream::call(live, &req, false, opts.disable_thinking)).await?;
+    let message = crate::privacy::net::within(crate::privacy::net::Feature::Meetings, crate::chat::stream::call(live, &req, false)).await?;
     crate::ai::llm::answer_text(&message, opts.disable_thinking)
 }
 

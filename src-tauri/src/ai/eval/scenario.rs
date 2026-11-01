@@ -1233,8 +1233,11 @@ impl Observed {
     }
 }
 
+/// A reply or an expected phrase as the checks compare them: lowercase,
+/// curly quotes straight, and a no-break or narrow no-break space a plain
+/// one ("19\u{202F}November", LFM3's dates: 1 Nov 2026).
 fn lower(s: &str) -> String {
-    s.to_lowercase().replace(['\u{2019}', '\u{2018}'], "'")
+    s.to_lowercase().replace(['\u{2019}', '\u{2018}'], "'").replace(['\u{00A0}', '\u{202F}', '\u{2009}'], " ")
 }
 
 fn clip(s: &str, n: usize) -> String {

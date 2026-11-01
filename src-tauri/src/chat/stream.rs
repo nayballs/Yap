@@ -309,7 +309,6 @@ pub fn without_thinking(raw: &str) -> String {
 pub struct Step<'a> {
     sink: &'a dyn Sink,
     tools_offered: bool,
-    disable_thinking: bool,
     raw: String,
     /// What this step showed last (`None`: nothing).
     shown: Option<String>,
@@ -331,11 +330,10 @@ pub struct Step<'a> {
 }
 
 impl<'a> Step<'a> {
-    pub fn new(sink: &'a dyn Sink, tools_offered: bool, disable_thinking: bool) -> Step<'a> {
+    pub fn new(sink: &'a dyn Sink, tools_offered: bool) -> Step<'a> {
         Step {
             sink,
             tools_offered,
-            disable_thinking,
             raw: String::new(),
             shown: None,
             released: false,
@@ -375,11 +373,11 @@ impl<'a> Step<'a> {
         self.sink.send(Event::Section { note_id, key, text });
     }
 
-    /// The text as shown: reasoning out (when the scope says so — and a
-    /// thinking budget's end tag, always), gpt-oss's "【1】" citations as
-    /// Yap's "[1]".
+    /// The text as shown: reasoning out, always (a model that half-thinks
+    /// never shows it in the answer: `think::answer_without_inline`), and
+    /// gpt-oss's "【1】" citations as Yap's "[1]".
     fn visible(&self) -> String {
-        let t = if self.disable_thinking { without_thinking(&self.raw) } else { crate::chat::think::tidy(&self.raw) };
+        let t = without_thinking(&self.raw);
         crate::web::bracket_citations(t.trim())
     }
 
@@ -572,8 +570,8 @@ pub struct Live<'a> {
 }
 
 /// **One model call, streamed** to `live`: its deltas through a [`Step`]
-/// (`tools_offered`: hold the opening text; `disable_thinking`: hide
-/// reasoning), the whole message back as `llm::post_chat_request` returns
+/// (`tools_offered`: hold the opening text; reasoning never shown in the
+/// answer), the whole message back as `llm::post_chat_request` returns
 /// it. A model on this PC steps aside for a dictation: the stream is dropped
 /// (llama.cpp stops generating), the page told it's waiting, and the call
 /// goes again once the dictation is done — unless that dictation was a
@@ -581,8 +579,8 @@ pub struct Live<'a> {
 /// again, a question dictated into Chat and sent): saving it supersedes this
 /// turn ([`Stoppable::answers`]), and `chat_turn` drops this call, waiting
 /// or asking again, as ■ would.
-pub async fn call(live: Live<'_>, req: &crate::ai::llm::ChatRequest, tools_offered: bool, disable_thinking: bool) -> Result<Value, String> {
-    let mut step = Step::new(live.sink, tools_offered, disable_thinking);
+pub async fn call(live: Live<'_>, req: &crate::ai::llm::ChatRequest, tools_offered: bool) -> Result<Value, String> {
+    let mut step = Step::new(live.sink, tools_offered);
     let Some(beside) = live.beside else {
         let out = {
             let mut on = |d: Delta<'_>| step.on(d);
@@ -1315,7 +1313,7 @@ mod tests {
         // should it slip in, never.
         let log = Log::default();
         crate::chat::think::with(true, async {
-            let mut s = Step::new(&log, false, false);
+            let mut s = Step::new(&log, false);
             s.on(Delta::Reasoning("First, "));
             s.on(Delta::Reasoning("the ball."));
             s.on(Delta::Content("</think>\n\nThe ball costs 5 cents."));
@@ -1334,7 +1332,7 @@ mod tests {
         // its reasoning anyway (Groq's gpt-oss does) shows none of it — only
         // the answer.
         let plain = Log::default();
-        let mut s = Step::new(&plain, false, false);
+        let mut s = Step::new(&plain, false);
         s.on(Delta::Reasoning("The user wants the weather."));
         s.on(Delta::Content("It's sunny."));
         s.end(true);
@@ -1369,7 +1367,7 @@ mod tests {
             let question = json!([{ "role": "user", "content": "How much is the ball?" }]);
             let req = crate::ai::llm::ChatRequest::chat(&base, "", "openai/gpt-oss-20b", "groq", 0.5, question, None, None);
             assert_eq!(req.extra["reasoning_effort"], "high", "the effort chosen for it");
-            call(Live { sink: &log, beside: None }, &req, false, false).await
+            call(Live { sink: &log, beside: None }, &req, false).await
         })
         .await;
         crate::ai::effort::set_for_test("groq", "openai/gpt-oss-20b", None, false);
@@ -1554,7 +1552,7 @@ mod tests {
     fn a_step_shows_the_answer_and_never_a_line_before_a_tool_call() {
         // A preamble, then a call: nothing shown but the chip.
         let log = Log::default();
-        let mut s = Step::new(&log, true, false);
+        let mut s = Step::new(&log, true);
         for piece in ["I'll ", "search your notes", " for that."] {
             s.on(Delta::Content(piece));
         }
@@ -1568,7 +1566,7 @@ mod tests {
 
         // An answer: shown once it's a sentence and more, then whole at the end.
         let log = Log::default();
-        let mut s = Step::new(&log, true, false);
+        let mut s = Step::new(&log, true);
         for piece in ["The budget", " is £15,000.", " Sam checks", " the quotes."] {
             s.on(Delta::Content(piece));
         }
@@ -1579,7 +1577,7 @@ mod tests {
 
         // Shown, then a call after all: taken back.
         let log = Log::default();
-        let mut s = Step::new(&log, true, false);
+        let mut s = Step::new(&log, true);
         s.on(Delta::Content("Here is a start. And more"));
         s.on(Delta::ToolCall("web_search"));
         assert_eq!(log.texts(), ["Here is a start. And more", ""]);
@@ -1587,14 +1585,14 @@ mod tests {
         // A short answer with no tools offered: shown at once; gpt-oss's
         // citations as Yap's.
         let log = Log::default();
-        let mut s = Step::new(&log, false, false);
+        let mut s = Step::new(&log, false);
         s.on(Delta::Content("Yes【1】"));
         s.end(true);
         assert_eq!(log.texts(), ["Yes [1]"]);
 
         // A whole answer under the release length still shows at the end.
         let log = Log::default();
-        let mut s = Step::new(&log, true, false);
+        let mut s = Step::new(&log, true);
         s.on(Delta::Content("Friday."));
         assert!(log.texts().is_empty());
         s.end(true);
@@ -1604,7 +1602,7 @@ mod tests {
     #[test]
     fn a_restarted_step_replaces_what_it_showed() {
         let log = Log::default();
-        let mut s = Step::new(&log, false, false);
+        let mut s = Step::new(&log, false);
         s.on(Delta::Content("First try"));
         s.on(Delta::Restart);
         s.on(Delta::Content("Second"));
@@ -1612,7 +1610,7 @@ mod tests {
         assert_eq!(log.texts(), ["First try", "Second"]);
         // A redo that turns into a tool call takes the old text back.
         let log = Log::default();
-        let mut s = Step::new(&log, false, false);
+        let mut s = Step::new(&log, false);
         s.on(Delta::Content("Old answer"));
         s.on(Delta::Restart);
         s.on(Delta::ToolCall("web_search"));
@@ -1648,7 +1646,7 @@ mod tests {
             json!({ "choices": [{ "delta": { "tool_calls": [{ "index": 0, "function": { "arguments": " fen origin.\"}" } }] }, "finish_reason": "tool_calls" }] }),
         ];
         let log = Log::default();
-        let mut step = Step::new(&log, true, false);
+        let mut step = Step::new(&log, true);
         let mut wire = Assembler::default();
         for c in chunks {
             for piece in wire.push(&c.to_string()).unwrap() {
@@ -1710,7 +1708,7 @@ mod tests {
             r#"{"type":"message_stop"}"#,
         ];
         let log = Log::default();
-        let mut step = Step::new(&log, true, false);
+        let mut step = Step::new(&log, true);
         let mut wire = crate::ai::llm::anthropic::Stream::default();
         {
             let mut on = |d: Delta<'_>| step.on(d);
@@ -1743,7 +1741,7 @@ mod tests {
     fn a_search_that_must_come_first_tells_its_call_but_never_writing_an_answer() {
         let log = Log::default();
         let quiet = ChipsOnly(&log);
-        let mut s = Step::new(&quiet, true, false);
+        let mut s = Step::new(&quiet, true);
         s.on(Delta::Content("I can't look up the weather. But here is more"));
         s.on(Delta::ToolCall("web_search"));
         assert_eq!(log.steps(), ["Searching the web"]);

@@ -245,6 +245,22 @@ pub fn reasoning_of(message: &Value) -> &str {
     message["reasoning_content"].as_str().or_else(|| message["reasoning"].as_str()).unwrap_or("")
 }
 
+/// **A Chat answer without the model's inline thinking** (2026-11-01): a
+/// model on this PC that half-thinks writes its reasoning, then a stray
+/// `</think>` (the server dropped the opener) — LFM3, Nanbeige and
+/// sometimes Granite did in the shortlist's evals, shown to the person
+/// because only "Disable thinking output" stripped it. Never in the answer
+/// now; with that setting off (`disable`: false) it's the turn's thinking,
+/// folded above the answer as Think's is. The answer.
+pub fn answer_without_inline(answer: &str, disable: bool) -> String {
+    let (answer, inline) = crate::ai::llm::split_thinking(answer);
+    if !disable && !inline.is_empty() {
+        heard(&inline);
+        reasoned();
+    }
+    answer
+}
+
 /// An answer without the end of a thinking budget, should one slip into it
 /// ("</think>" before the answer). Pure.
 pub fn tidy(answer: &str) -> String {

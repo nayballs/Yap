@@ -1955,6 +1955,12 @@ async fn run_all(args: &Args, run_dir: &Path, keys: &HashMap<String, String>, sc
             for rep in 0..args.repeat {
                 let row = if web_on(s) && args.no_web {
                     skip_row(&m.label, s, "a web scenario (--no-web)")
+                } else if s.tags.iter().any(|t| t == "documents-rich")
+                    && crate::chat::documents::rich::ToolSet::for_model(&m.provider, &m.model) != crate::chat::documents::rich::ToolSet::Rich
+                {
+                    // The rich document tools are the strong models' (or
+                    // `--doc-tools rich`): it can't pass without them.
+                    skip_row(&m.label, s, "the rich document tools (a strong model's; --doc-tools rich)")
                 } else if args.max_total_tokens.is_some_and(|cap| used >= cap) {
                     skip_row(&m.label, s, "token cap reached (--max-total-tokens)")
                 } else {

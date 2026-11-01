@@ -285,12 +285,12 @@ pub fn offered_tools(open_apps: bool, web: bool, extra: Extra<'_>) -> Value {
 /// (`stream::call`: a step's opening text held until it's an answer, a
 /// tool call shown as its chip; a model on this PC steps aside for a
 /// dictation), else as a whole answer.
-async fn ask(live: Option<crate::chat::stream::Live<'_>>, req: &crate::ai::llm::ChatRequest, tools_offered: bool, disable_thinking: bool) -> Result<Value, String> {
+async fn ask(live: Option<crate::chat::stream::Live<'_>>, req: &crate::ai::llm::ChatRequest, tools_offered: bool) -> Result<Value, String> {
     // Recorded as Chat's in the network receipts (net.rs), unless the turn
     // is already someone else's (the Voice Assistant's).
     let step = async move {
         match live {
-            Some(live) => crate::chat::stream::call(live, req, tools_offered, disable_thinking).await,
+            Some(live) => crate::chat::stream::call(live, req, tools_offered).await,
             None => crate::ai::llm::post_whole(req).await,
         }
     };
@@ -517,7 +517,7 @@ async fn tool_loop(
         if native_chat {
             req.native = Some(native(web.as_deref()));
         }
-        let answer = ask(step_live, &req, true, disable_thinking).await;
+        let answer = ask(step_live, &req, true).await;
         // A server that won't be made to search (it refuses `tool_choice`,
         // answers in words, or calls another tool): Yap searches for the
         // model, with the question as the query, and the model goes on.
@@ -595,11 +595,7 @@ async fn tool_loop(
         let tool_calls = msg["tool_calls"].as_array().cloned().unwrap_or_default();
         if tool_calls.is_empty() {
             let content = msg["content"].as_str().unwrap_or("").trim().to_string();
-            let content = if disable_thinking {
-                crate::ai::llm::strip_thinking(&content)
-            } else {
-                content
-            };
+            let content = crate::chat::think::answer_without_inline(&content, disable_thinking);
             if content.is_empty() {
                 return Err("The model returned an empty answer".to_string());
             }
@@ -976,9 +972,9 @@ async fn tool_loop(
     if native_chat {
         req.native = Some(native(web.as_deref()));
     }
-    let msg = ask(live, &req, false, disable_thinking).await?;
+    let msg = ask(live, &req, false).await?;
     let content = msg["content"].as_str().unwrap_or("").trim().to_string();
-    let content = if disable_thinking { crate::ai::llm::strip_thinking(&content) } else { content };
+    let content = crate::chat::think::answer_without_inline(&content, disable_thinking);
     if content.is_empty() {
         return Err("The model didn't manage an answer this time. Try asking again.".to_string());
     }

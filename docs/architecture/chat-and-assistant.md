@@ -1073,7 +1073,16 @@ The AI Chat surface (conversations, the tool-calling loop and its note tools) an
   capped at 300 it answered in 1.1 s; at 1,500 a logic puzzle took ~1,350
   tokens, 5.3 s, MTP drafting throughout); `reasoning_budget_message` is the
   line it gets when the budget runs out (without it the answer began
-  "</think>"; `think::tidy` drops one anyway). `reasoning_effort` changes
+  "</think>"; `think::tidy` drops one anyway). **Thinking inside the
+  answer** (2026-11-01, `think::answer_without_inline`): a model on this PC
+  that half-thinks with its reasoning off writes the reasoning, then a stray
+  `</think>` (the server dropped the opener — LFM3, Nanbeige and sometimes
+  Granite in the local shortlist's evaluations, shown to the person because
+  only "Disable thinking output" stripped it). Never in the answer now, as it
+  streams (`stream::Step::visible`) or once it's in (the tool loop, a small
+  model's answer, `llm::answer_text`: the notepad's and Notes' Ask); with
+  that setting off, it's the turn's thinking, folded above the answer as
+  Think's is. Cleanup, rewrites and transforms keep the setting's say. `reasoning_effort` changes
   nothing there and `reasoning_budget_tokens` didn't cap it. So: 1,500
   tokens (`ON_DEVICE_BUDGET`), the answer's cap raised by as much, only for
   Qwen3.5 (`on_device_thinks`; not the 1.5B, nor Qwen3's 2507 instruct). **In

@@ -719,13 +719,14 @@ pub(crate) async fn chat_with(
 }
 
 /// A message's answer as [`chat`] gives it: unwrapped (`strip_wrapping`)
-/// and, when asked, without reasoning blocks.
+/// and without reasoning blocks, always (`think::answer_without_inline`:
+/// inside a Chat turn with the setting off, they're its folded thinking).
 pub(crate) fn answer_text(message: &Value, disable_thinking: bool) -> Result<String, String> {
     let content = message["content"]
         .as_str()
         .ok_or_else(|| "response missing choices[0].message.content".to_string())?;
     let out = strip_wrapping(content.trim());
-    Ok(if disable_thinking { strip_thinking(&out) } else { out })
+    Ok(crate::chat::think::answer_without_inline(&out, disable_thinking))
 }
 
 /// One embedded note-chat turn (OpenWhispr `useEmbeddedChat`): system = the
@@ -759,7 +760,7 @@ pub async fn note_chat(
     // A model on this PC may take a while on a processor (`chat_timeout`).
     let req = ChatRequest::chat(base_url, api_key, model, provider, 0.5, Value::Array(messages), None, None);
     let message = match live {
-        Some(live) => crate::chat::stream::call(live, &req, false, disable_thinking).await?,
+        Some(live) => crate::chat::stream::call(live, &req, false).await?,
         None => post(&req, None).await?,
     };
     let out = strip_wrapping(
@@ -768,11 +769,7 @@ pub async fn note_chat(
             .ok_or_else(|| "response missing choices[0].message.content".to_string())?
             .trim(),
     );
-    let out = if disable_thinking {
-        strip_thinking(&out)
-    } else {
-        out
-    };
+    let out = crate::chat::think::answer_without_inline(&out, disable_thinking);
     if out.trim().is_empty() {
         return Err("The model returned an empty answer".to_string());
     }
@@ -1951,29 +1948,43 @@ async fn post_chat_request(
 /// closer with no opener (some servers strip the opener), all case-insensitively.
 /// Non-reasoning models emit none of these, so this is a no-op for them.
 pub(crate) fn strip_thinking(s: &str) -> String {
+    split_thinking(s).0
+}
+
+/// [`strip_thinking`]'s answer, and the reasoning it took out (the blocks'
+/// text, without their tags). Pure.
+pub(crate) fn split_thinking(s: &str) -> (String, String) {
     let mut result = s.to_string();
+    let mut thought: Vec<String> = Vec::new();
     for (open, close) in [("<think>", "</think>"), ("<thinking>", "</thinking>")] {
         loop {
+            // (ASCII lowercase keeps every byte where it was.)
             let lower = result.to_ascii_lowercase();
             match (lower.find(open), lower.find(close)) {
                 (Some(start), _) => {
                     if let Some(end_rel) = lower[start..].find(close) {
                         let end = start + end_rel + close.len();
+                        thought.push(result[start + open.len()..start + end_rel].to_string());
                         result.replace_range(start..end, "");
                     } else {
-                        result.truncate(start); // opener, no closer → drop the rest
+                        // opener, no closer → drop the rest
+                        thought.push(result[start + open.len()..].to_string());
+                        result.truncate(start);
                         break;
                     }
                 }
                 (None, Some(end_rel)) => {
-                    result.replace_range(0..end_rel + close.len(), ""); // closer, no opener
+                    // closer, no opener
+                    thought.push(result[..end_rel].to_string());
+                    result.replace_range(0..end_rel + close.len(), "");
                     break;
                 }
                 (None, None) => break,
             }
         }
     }
-    result.trim().to_string()
+    let thought: Vec<&str> = thought.iter().map(|t| t.trim()).filter(|t| !t.is_empty()).collect();
+    (result.trim().to_string(), thought.join("\n\n"))
 }
 
 /// Strip surrounding markdown code fences and matching quotes that a model
@@ -2411,6 +2422,18 @@ mod tests {
         assert_eq!(strip_thinking("<THINKING>x</THINKING>Done"), "Done");
         // no tags → unchanged (just trimmed)
         assert_eq!(strip_thinking("  just clean  "), "just clean");
+    }
+
+    #[test]
+    fn a_half_thinking_models_reasoning_is_split_from_its_answer() {
+        // Nanbeige4.2-3B in the shortlist's evals (1 Nov 2026): the opener
+        // dropped by the server, the reasoning, a stray closer, the answer.
+        assert_eq!(
+            split_thinking("It's open on the right.\n</think>\n\nYour packing list is saved."),
+            ("Your packing list is saved.".to_string(), "It's open on the right.".to_string())
+        );
+        assert_eq!(split_thinking("<think>a</think>B<think>c</think>"), ("B".to_string(), "a\n\nc".to_string()));
+        assert_eq!(split_thinking("Plain answer."), ("Plain answer.".to_string(), String::new()));
     }
 
     #[test]

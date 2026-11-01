@@ -118,6 +118,29 @@ test.describe('Gemma 2 9B on this PC', () => {
     expect(next).toHaveLength(1);
     expect(next[0].messages.filter((m) => m.role !== 'system').map((m) => m.role)).toEqual(['user', 'assistant', 'user', 'assistant', 'user']);
   });
+
+  // A model that half-thinks (the shortlist's evals, 1 Nov 2026: LFM3,
+  // Nanbeige, Granite): its reasoning, a stray </think> (the server dropped
+  // the opener), then the answer. Never shown in the answer; with "Disable
+  // thinking output" off, folded above it as Think's thinking is.
+  test("a model's leaked thinking never shows in the answer: it's folded above it", async ({ main, fake, shot }) => {
+    fake.reply('other', () => 'The user wants one thing to try next. Keep it short.\n</think>\n\nOpen the laptop and clean the fan itself.');
+    try {
+      await openView(main, 'Chat');
+      await main.getByRole('button', { name: 'New chat' }).click();
+      await send(main, 'What if the vents are already clean?');
+      await expect(lastAnswer(main)).toContainText('Open the laptop and clean the fan itself.');
+      await expect(lastAnswer(main)).not.toContainText('</think>');
+      await expect(lastAnswer(main).locator('.ctext, .md, p').first()).not.toContainText('Keep it short');
+      const thought = main.getByTestId('chat-thought').last();
+      await expect(thought).toContainText(/Thought/);
+      await thought.locator('summary').click();
+      await expect(thought).toContainText('Keep it short');
+      await shot(main, '02-leaked-thinking-folded');
+    } finally {
+      fake.reply('other', () => 'Weak air flow is usually dust in the intake: clean the vents with short bursts of air.');
+    }
+  });
 });
 
 test("another model on this PC whose chat format has no place for tools gets none once it's loaded", async ({ fake }) => {
