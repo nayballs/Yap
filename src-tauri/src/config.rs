@@ -980,6 +980,11 @@ pub struct YapConfig {
     /// in config.json, never logged.
     #[serde(default)]
     pub web_search_keys: std::collections::HashMap<String, String>,
+    /// "Open links in" (Settings → General → Links, `shell/browsers.rs`):
+    /// the registered browser's key every link button opens in ("Brave"),
+    /// or "" for Windows' default browser (the default).
+    #[serde(default)]
+    pub open_links_in: String,
     /// The speech engine (`tts::ENGINES`): "kokoro" (the default: Kokoro's
     /// natural voices once downloaded, Windows voices until then) or
     /// "windows" (Windows' own voices, chosen).
@@ -1538,6 +1543,7 @@ impl Default for YapConfig {
             web_search_native: true,
             web_search_service: default_web_search_service(),
             web_search_keys: std::collections::HashMap::new(),
+            open_links_in: String::new(),
             tts_engine: default_tts_engine(),
             tts_voice: default_tts_voice(),
             tts_windows_voice: String::new(),

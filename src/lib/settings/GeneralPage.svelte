@@ -1,8 +1,9 @@
 <script>
   // Settings → General (2026-10-22 review: the hotkey, audio and meetings
   // went to Dictation and Meetings): language and region, what the AI knows
-  // about you, startup and updates, Appearance (the theme, the reading text,
-  // Motion), the Yap bar (bar.rs) and tips.
+  // about you, startup and updates, Links (which browser opens them:
+  // OpenLinksIn.svelte), Appearance (the theme, the reading text, Motion),
+  // the Yap bar (bar.rs) and tips.
   //
   //   cfg:            Settings' config $state (auto-save does the saving).
   //   barHiddenUntil: ms the bar is hidden until ("Hide the bar for 1 hour"
@@ -64,6 +65,11 @@
     />
   </Row>
 </Group>
+
+<!-- Which browser Yap's links open in (shell/browsers.rs): its own chunk. -->
+{#await import('./OpenLinksIn.svelte') then { default: OpenLinksIn }}
+  <OpenLinksIn {cfg} />
+{/await}
 
 <!-- The theme, the reading font and size, and Motion, for every window
      (AppearanceSettings.svelte, lib/core/appearance.js). -->

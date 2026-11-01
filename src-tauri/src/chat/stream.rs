@@ -109,6 +109,13 @@ pub enum Event {
     /// `chat/pictures.rs`), the moment it lands: the panel opens on it, as
     /// for a document.
     Picture { picture: crate::chat::pictures::ShownPicture },
+    /// A live page brought up beside the chat (`show_page`,
+    /// `chat/pages.rs`), the moment it's asked for: the panel opens a Page
+    /// tab on it.
+    Page { page: crate::chat::pages::ShownPage },
+    /// A button offered under the answer (`offer_browser`): open a page in
+    /// the person's browser.
+    Offer { offer: crate::chat::pages::BrowserOffer },
 }
 
 /// Tool calls whose arguments the page sees as they come: a document's
@@ -139,6 +146,9 @@ pub fn doing(name: &str) -> &'static str {
         "look_at_picture" => "Looking at a picture…",
         "show_picture" => "Showing a picture…",
         "find_pictures" => "Looking for pictures…",
+        "show_page" => "Bringing up a page…",
+        "snap_page" => "Taking a shot of a page…",
+        "offer_browser" => "Adding a button…",
         _ => "Working…",
     }
 }

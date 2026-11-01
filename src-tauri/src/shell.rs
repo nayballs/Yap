@@ -4,6 +4,7 @@
 
 pub mod autostart;
 pub mod bench;
+pub mod browsers;
 pub mod com;
 pub mod commands;
 pub mod download;

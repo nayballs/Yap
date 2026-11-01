@@ -33,9 +33,12 @@
   // a click (or ← / → on the row) shows one, × (or Delete, a middle click)
   // closes it until its pill opens it again. A picture shows in its own tab
   // (PictureTab.svelte); the document stays as it was behind it (its view,
-  // its editor, where it was scrolled to).
+  // its editor, where it was scrolled to). A live page Chat brought up
+  // (chat/pages.rs) shows in a Page tab (PageTab.svelte): its own webview,
+  // Rust's, laid over the tab, one PageTab per page.
   import { tick, untrack } from 'svelte';
   import PictureTab from './PictureTab.svelte';
+  import PageTab from './PageTab.svelte';
   import { panelTabs, neighbour } from './panelTabs.js';
   import { placed, shown as fadeIn } from './chatImages.js';
   import { screenPixels } from './chatShots.svelte.js';
@@ -54,9 +57,10 @@
    * narrow window); `narrow`: no room beside it; `onquote({noteId, title,
    * text, fromLine, toLine, mode})`: a selected passage asked about ("ask")
    * or to change ("change"); `messages`: the conversation's (its documents
-   * and pictures are the row of tabs).
+   * and pictures are the row of tabs); `conversationId`: the chat a page's
+   * shot is kept in.
    */
-  let { doc, cover = false, narrow = false, onquote = null, messages = [] } = $props();
+  let { doc, cover = false, narrow = false, onquote = null, messages = [], conversationId = null } = $props();
 
   let box = $state(null);
   let bodyEl = $state(null);
@@ -80,8 +84,13 @@
   /** Close tab `key`: its neighbour shows in its place if it was showing. */
   const closeTab = (key) => doc.closeTab(key, neighbour(tabs, key));
 
-  /** A tab's name: a document's title, a picture's caption. */
-  const tabName = (t) => (t.kind === 'picture' ? t.picture?.caption || t.picture?.alt || 'Picture' : t.title || 'Untitled document');
+  /** A tab's name: a document's title, a picture's caption, a page's title. */
+  const tabName = (t) =>
+    t.kind === 'picture'
+      ? t.picture?.caption || t.picture?.alt || 'Picture'
+      : t.kind === 'page'
+        ? t.page?.title || t.page?.site || 'Page'
+        : t.title || 'Untitled document';
 
   /** ← / → / Home / End on the row show the tab there; Delete closes the one with the focus. */
   function tabsKey(e) {
@@ -575,7 +584,7 @@
 </script>
 
 <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
-<aside class="docpanel" class:cover aria-label={away ? 'Picture' : 'Document'} data-testid="chat-doc" onkeydown={panelKey}>
+<aside class="docpanel" class:cover aria-label={doc.showing === 'page' ? 'Page' : away ? 'Picture' : 'Document'} data-testid="chat-doc" onkeydown={panelKey}>
   {#if tabs.length > 1}
     <!-- This conversation's documents and pictures, newest last. -->
     <div class="doctabs" role="tablist" aria-label="In the panel" tabindex="-1" data-testid="chat-panel-tabs" bind:this={tabsEl} onkeydown={tabsKey} onwheel={tabsWheel}>
@@ -600,6 +609,8 @@
               <span class="shotframe tabthumb" aria-hidden="true">
                 <img src={p.src} alt="" draggable="false" decoding="async" use:fadeIn style:left={p.pic.x} style:top={p.pic.y} style:width={p.pic.w} style:height={p.pic.h} />
               </span>
+            {:else if t.kind === 'page'}
+              <svg class="tabicon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9" /><path d="M3 12h18M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18" /></svg>
             {:else}
               <svg class="tabicon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z" /><path d="M14 3v5h5" /><path d="M9 13h6M9 17h4" /></svg>
             {/if}
@@ -613,8 +624,13 @@
       {/each}
     </div>
   {/if}
-  {#if away && doc.picture}
+  {#if doc.showing === 'picture' && doc.picture}
     <PictureTab {doc} {narrow} />
+  {:else if doc.showing === 'page' && doc.page}
+    <!-- One per page: each its own webview, its place kept while another tab shows. -->
+    {#key doc.page.url}
+      <PageTab {doc} {narrow} {conversationId} />
+    {/key}
   {/if}
   {#if doc.id != null}
   <!-- The document (behind a picture: still here, out of sight). -->

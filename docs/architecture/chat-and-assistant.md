@@ -154,7 +154,9 @@ The AI Chat surface (conversations, the tool-calling loop and its note tools) an
   caption, alt, imageUrl, page {title, site, url}, n}`, 2026-10-31): the
   pictures it showed beside the chat (`set_pictures`), only written when
   there are some; an older Yap's save drops them (the pills go, the files
-  with the sweep a day later). `chat_send(images)` checks the model reads
+  with the sweep a day later). **Its pages and buttons** (`pages`, `offers`,
+  `chat/pages.rs`, 2026-11-01: `set_pages`; a Page tab's shot kept with the
+  answer that brought the page up, `add_shot`), the same way. `chat_send(images)` checks the model reads
   them (`snip::vision`) and runs the turn with them (`snip::turn`): each
   model call's question becomes a content array (the image parts, then the
   text; the text first for OpenRouter), the newest 3 earlier screenshots in
@@ -768,6 +770,15 @@ The AI Chat surface (conversations, the tool-calling loop and its note tools) an
   `chat-documents-rich.spec.js`; evaluations `--documents --tag
   documents-edits --doc-tools rich|simple`
   ([model-evals.md](../model-evals.md#the-rich-document-tools-31-oct-2026)).
+- **`chat/pages.rs`** (+ `pages/view.rs`) — **pages beside the chat**
+  (2026-11-01, the plan's Milestone 2): `show_page`, `snap_page`,
+  `offer_browser` (`ShownPage {url, title, site, section}`,
+  `BrowserOffer {url, why, site}`; `TurnPages` on the turn's `web::Turn`;
+  `ChatMessage.pages` / `offers`, `chats::set_pages`; `{kind: "page"}` /
+  `{kind: "offer"}`), and the Page tab's own WebView2 — its own profile, no
+  Yap IPC, public http(s) only — with its commands (`page_view_show` /
+  `place` / `close` / `close_all` / `back` / `reload` / `shot`). See "Pages
+  beside the chat" under The Chat view.
 - **`chat/pictures.rs`** — **find and show pictures** (2026-10-31,
   yap-private `docs/look-and-show-plan.md` Milestone 1; the contract with
   the frontend: `ShownPicture`, `{kind: "picture"}`, `ChatMessage.pictures`).
@@ -1691,7 +1702,86 @@ as `show_picture` lands, on `chat_send`'s channel or the Voice Assistant's
 event does, and the answer's bubble gets its pill as it comes
 (`livePictures`); the saved answer takes `chat_send`'s `pictures` (else the
 turn's events). Tested in `e2e/chat-picture-panel.spec.js` (the live event faked
-on `yap-assistant-stream`).
+on `yap-assistant-stream`). A picture's "Open page" / "Open original" say
+the browser now (2026-11-01): "Open in Brave", "Open page in your browser"
+(`stores/browserName.svelte.js`, below).
+
+**Pages beside the chat** (2026-11-01, the plan's Milestone 2;
+`chat/pages.rs`, `chat/pages/view.rs`). Three tools for every tool-using
+model with the web on (`pages::on`: the same models as the picture tools;
+Yap does the work, so no judgment is needed), one short general line in the
+system prompt (`pages::INSTRUCTIONS`: live pages for interactive things, a
+shot to keep, the person's browser when they'd do better there; ≤ 400
+tokens with the schemas):
+- **`show_page { url, section? }`**: a live page in a **Page tab**
+  (`stream::Event::Page {page: ShownPage}` opens it mid-turn; the answer
+  keeps it, `ChatMessage.pages`, so its tab comes back with the
+  conversation; a pill under the answer, `PagePills.svelte`). The model
+  never sees it ("you don't see it": its result); nothing of the page goes
+  to the model, so it isn't web content.
+- **`snap_page { url }`**: the page's shot (`CapturePreview`, a PNG): the
+  panel's page as it is when it's that page and loaded, else the page loaded
+  for it in a host under Yap's own page (out of sight, 1280 × 800 at 100 %,
+  `SETTLE` 1.2 s after it loads, 20 s to load), kept like a pasted picture
+  and shown as one (`ShownPicture`, its page the source, `imageUrl` empty:
+  no original to open; a picture tab, a pill). It's a candidate of the turn
+  (`TurnPictures::add_shot`, `yap-shot:<id>`): a model that reads images can
+  `look_at_picture` it at once (no download), and `show_picture` of it
+  returns the one shown. A shot is web content (the safety rule).
+- **`offer_browser { url, why }`**: a button under the answer ("Open the
+  interactive map in Brave", `BrowserOffers.svelte`; `Event::Offer`,
+  `ChatMessage.offers`). The model never opens a browser: the person clicks
+  (`open_external`).
+- **Which pages**: only a page from this turn's results or the person's
+  messages (`web::Turn::allowed`, `read_page`'s rule), public http(s) only
+  (`web::check_url`); four pages, three shots and two buttons a turn. None is
+  an action tool (`tools::ACTION_TOOLS`): nothing leaves Yap but an address a
+  search or the person gave.
+- **The Page tab** (`PageTab.svelte`, in DocPanel's chunk; one per page,
+  `{#key}`): the page is **its own WebView2**, Rust's (`pages/view.rs`), not
+  Tauri's — Tauri puts its IPC (`__TAURI_INTERNALS__`, the invoke key) into
+  every webview it makes, so the page's is made with WebView2's own API
+  (webview2-com) on Yap's environment (the main webview's
+  `ICoreWebView2_2::Environment`) with **its own profile** (`YapPages`:
+  none of Yap's cookies, storage or cache; sign-ins there stay there), **no
+  Tauri IPC at all** (no init script, no `ipc://` handler, web messages and
+  host objects off; WebView2's own `chrome.webview.postMessage` is there but
+  goes nowhere), **only public http(s)** (every navigation and frame
+  checked, else cancelled; requests to `127.0.0.1` / `localhost` / `[::1]`
+  refused with a 403), **new windows to the person's browser** (only a
+  click), **downloads off**, **every permission denied**, DevTools only in a
+  debug build. It's a child window of the main window ("the host") laid over
+  the tab's stage: the page measures the stage every 150 ms (and on resize)
+  and sends its place in physical pixels (`page_view_place`), or `null` when
+  something of Yap's covers it (a 3 × 3 grid of `elementFromPoint`: a menu,
+  a dialog, Settings, a toast) or it's out of sight — the native window would
+  cover Yap's own UI otherwise. So the page **keeps its place** (scroll, a
+  map's zoom) while another tab shows, and **closes with its tab**
+  (`page_view_close`); another conversation or leaving Chat closes them all;
+  at most four stay alive (the least recently shown goes). Header: Back,
+  Reload, **Save a shot** (`page_view_shot`: kept with the answer that
+  brought the page up, `chats::add_shot`, and shown as a picture tab), Open
+  in <browser>, expand, ✕; under it "From <site> · <section> · Open in
+  <browser>". Scrolled to `section` once loaded (`section_script`: an id as
+  written or with `_` / `-`, else the first heading with its words, else
+  `window.find`). **Its menu** (Rust's, `ContextMenuRequested`): Back,
+  Forward, Reload, Copy, Copy link (`MENU_KEEP`), and on selected words
+  **Ask Yap about this** (`yap-page-quote` → the quote over Chat's box,
+  "About <the page>:", sent as `chat_send`'s `pageQuote` and asked as a
+  selection in another app is, `assistant/selected.rs`, the site named) and
+  **Read aloud** (`read_aloud::start`); **Snip to Chat** always. **Yap's
+  shortcuts while the page has the focus**: WebView2 runs ahead of the
+  keyboard hook there as in Yap's own windows, so the controller's
+  `AcceleratorKeyPressed` (function keys, Ctrl / Alt combos) sends each key
+  and its modifiers to the main window (`yap-page-key`), whose hotkey
+  fallback takes it as its own keydown / keyup (`settings/hotkeyFallback.svelte.js`). Not done:
+  a popover on the selection like the document's (it would need the page to
+  talk to Yap), and a quote taken by a question asked out loud (only typed
+  or dictated ones carry it).
+- Test mode loads a page from the web's stand-in (`<standin>/host/path`),
+  never the internet, shows no native menu, and has `e2e_page_view_eval` /
+  `e2e_page_views` / `e2e_page_view_ask` for the suite
+  (`e2e/chat-pages.spec.js`).
 
 **After Claude Code's markdown file view** (2026-10-31; measured from the
 Claude desktop app's file panel and its document page, `.epitaxy-*`, none

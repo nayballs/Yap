@@ -166,6 +166,9 @@ pub struct Turn {
     /// read's, a search's — `p1`, `p2`… for `look_at_picture` and
     /// `show_picture` — and the ones shown.
     pub pictures: TurnPictures,
+    /// **The pages this turn brought up**, the buttons it offered and the
+    /// shots it took (`chat/pages.rs`).
+    pub pages: crate::chat::pages::TurnPages,
 }
 
 impl Turn {
@@ -196,6 +199,7 @@ impl Turn {
             outline_first: false,
             documented: false,
             pictures: TurnPictures::default(),
+            pages: Default::default(),
         }
     }
 

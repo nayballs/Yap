@@ -212,6 +212,9 @@ export const FIELD_DEFAULTS = {
   webSearchNative: true,
   webSearchService: 'exa',
   webSearchKeys: {},
+  // Settings → General → Links (shell/browsers.rs): '' = Windows' default
+  // browser, else a registered browser's key ("Brave").
+  openLinksIn: '',
   speakReplies: false,
   speakWhen: 'voice',
   talkBackHandsFree: true,

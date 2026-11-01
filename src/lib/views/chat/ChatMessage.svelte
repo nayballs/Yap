@@ -33,15 +33,20 @@
    * answer asked across meetings: search/ask.rs); `ondoc(d)` opens a
    * document it made or changed in the panel beside the chat
    * (chat/documents.rs); `onpicture(p)` a picture it showed (a
-   * `ShownPicture`, chat/pictures.rs) there.
+   * `ShownPicture`, chat/pictures.rs) there; `onpage(p)` a live page it
+   * brought up (a `ShownPage`, chat/pages.rs).
    */
-  let { m, last, sources, reading, keepDays, room = 0, onview, onmenu, onread, onsource = null, ondoc = null, onpicture = null } = $props();
+  let { m, last, sources, reading, keepDays, room = 0, onview, onmenu, onread, onsource = null, ondoc = null, onpicture = null, onpage = null } = $props();
 
   // The documents it made or changed: saved with it, or (while it's
   // written) as they come.
   const docs = $derived(m.role === 'assistant' ? (m.documents?.length ? m.documents : m.liveDocs || []) : []);
   // The pictures it found online and showed beside the chat: the same.
   const pics = $derived(m.role === 'assistant' ? (m.pictures?.length ? m.pictures : m.livePictures || []) : []);
+  // The live pages it brought up, and the buttons it offered for the
+  // person's browser (chat/pages.rs): the same.
+  const pages = $derived(m.role === 'assistant' ? (m.pages?.length ? m.pages : m.livePages || []) : []);
+  const offers = $derived(m.role === 'assistant' ? (m.offers?.length ? m.offers : m.liveOffers || []) : []);
 
   // A question whose screenshot went as its text (snip/ocr.rs): its own
   // words, and the text read from the picture, folded under them.
@@ -195,12 +200,18 @@
 {/if}
 {#if m.role === 'assistant' && m.sources?.length}
   <!-- Where an answer came from (SourcesRow: a few, then "+N more"). -->
-  <SourcesRow {m} {onsource} />
+  <SourcesRow {m} {onsource} {onpage} />
 {/if}
-{#if docs.length || pics.length}
-  <!-- The documents it made or changed and the pictures it showed: each
-       opens beside the chat (one row, wrapping). -->
-  <div class="docpills" role="group" aria-label={!pics.length ? 'Documents' : !docs.length ? 'Pictures' : 'Documents and pictures'}>
+{#if offers.length}
+  <!-- Its buttons for the person's browser (a small chunk of their own). -->
+  {#await import('./BrowserOffers.svelte') then { default: BrowserOffers }}
+    <BrowserOffers {offers} />
+  {/await}
+{/if}
+{#if docs.length || pics.length || pages.length}
+  <!-- The documents it made or changed, the pictures it showed and the
+       pages it brought up: each opens beside the chat (one row, wrapping). -->
+  <div class="docpills" role="group" aria-label={pages.length ? 'Beside the chat' : !pics.length ? 'Documents' : !docs.length ? 'Pictures' : 'Documents and pictures'}>
     {#each docs as d (d.id)}
       <button type="button" class="docpill" data-testid="chat-doc-pill" onclick={() => ondoc?.(d)} aria-label={`Open the document ${d.title || 'Untitled document'}`}>
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z" /><path d="M14 3v5h5" /><path d="M9 13h6M9 17h4" /></svg>
@@ -212,6 +223,11 @@
       <!-- Their pills, in a small chunk of their own (the main window's is full). -->
       {#await import('./PicturePills.svelte') then { default: PicturePills }}
         <PicturePills {pics} {onpicture} />
+      {/await}
+    {/if}
+    {#if pages.length}
+      {#await import('./PagePills.svelte') then { default: PagePills }}
+        <PagePills {pages} {onpage} />
       {/await}
     {/if}
   </div>

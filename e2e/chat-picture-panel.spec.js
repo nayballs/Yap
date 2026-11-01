@@ -11,7 +11,7 @@
 // - A picture tab: fitted to the panel at its device pixels (Rust's
 //   thumbnail, snip/thumbs.rs), zoomed with + / −, the wheel (around the
 //   pointer), a double-click (fit ↔ 1:1) and the keys + / − / 0; dragged
-//   about when zoomed; its caption and "From <page> · Open page" (the
+//   about when zoomed; its caption and "From <page> · Open in <browser>" (the
 //   browser, open_external); ⋯ Copy image / Save image as… (the chat
 //   screenshots' own) / Open original; expand and back; light and dark.
 // - The live `{kind: "picture"}` event opens the panel on its picture mid-
@@ -202,7 +202,7 @@ test('pictures under an answer open beside the chat: tabs, zoom and pan, the sou
   await expect(picture(main)).toBeVisible();
   await expect(picture(main).locator('.pictitle')).toHaveText(MAP.caption);
   await expect(main.getByTestId('chat-picture-caption')).toHaveText(MAP.caption);
-  await expect(main.getByTestId('chat-picture-source')).toHaveText(/From Fort Joy - Example Wiki\s*·\s*Open page/);
+  await expect(main.getByTestId('chat-picture-source')).toHaveText(/From Fort Joy - Example Wiki\s*·\s*Open in your browser/);
   await expect(tabs(main)).toHaveText([DOC.title, MAP.caption, BEACH.caption]);
   await expect(tabs(main).nth(1)).toHaveAttribute('aria-selected', 'true');
 
@@ -279,15 +279,15 @@ test('pictures under an answer open beside the chat: tabs, zoom and pan, the sou
   await main.keyboard.press('-');
   await expect(zoom(main)).toHaveText('Fit');
 
-  // Open page: the person's browser (a test run keeps the link instead).
-  await main.getByTestId('chat-picture-source').getByRole('button', { name: 'Open page' }).click();
+  // Open in your browser: the person's browser (a test run keeps the link instead).
+  await main.getByTestId('chat-picture-source').getByRole('button', { name: 'Open in your browser' }).click();
   await expect.poll(() => yap.invoke('e2e_opened_urls')).toContain(PAGE.url);
 
   // ⋯: Copy image (the chat screenshots' own copy), Save image as…, Open original.
   const file = path.join(yap.dataDir, 'chat-images', `${MAP_ID}.png`);
   await picture(main).getByRole('button', { name: 'More for the picture' }).click();
   await expect(main.getByRole('menuitem', { name: 'Save image as…' })).toBeVisible();
-  await expect(main.getByRole('menuitem', { name: 'Open original' })).toBeVisible();
+  await expect(main.getByRole('menuitem', { name: 'Open original in your browser' })).toBeVisible();
   await main.getByRole('menuitem', { name: 'Copy image' }).click();
   await expect.poll(() => yap.invoke('e2e_snip_clipboard')).toBe(fs.readFileSync(file).toString('base64'));
   await expect(main.getByRole('status').filter({ hasText: 'Picture copied' })).toBeVisible();
@@ -299,7 +299,7 @@ test('pictures under an answer open beside the chat: tabs, zoom and pan, the sou
   await expect.poll(() => fs.existsSync(saved)).toBe(true);
   expect(fs.readFileSync(saved).equals(fs.readFileSync(file))).toBe(true);
   await stage(main).click({ button: 'right' });
-  await main.getByRole('menuitem', { name: 'Open original' }).click();
+  await main.getByRole('menuitem', { name: 'Open original in your browser' }).click();
   await expect.poll(() => yap.invoke('e2e_opened_urls')).toContain(MAP.imageUrl);
 
   // Zoomed in, then the document's tab: its page as ever. Back: the zoom kept.
@@ -399,12 +399,12 @@ test('a picture shown mid-turn opens the panel on it (the live picture event)', 
   // One thing in the panel: no row of tabs.
   await expect(tabs(main)).toHaveCount(0);
   await shot(main, '04-shown-mid-turn');
-  // A picture from an image search names no page (Tavily's): no Open page.
+  // A picture from an image search names no page (Tavily's): no Open in your browser.
   const bare = { ...MAP, id: MAP_ID, caption: 'The fort from above', page: { title: 'images.example.com', site: 'images.example.com', url: '' }, n: 0 };
   await yap.invoke('plugin:event|emit', { event: 'yap-assistant-stream', payload: { conversationId: 42, userMessageId: turn, event: { kind: 'picture', picture: bare } } });
   await expect(picture(main).locator('.pictitle')).toHaveText(bare.caption);
   await expect(main.getByTestId('chat-picture-source')).toHaveText('From images.example.com');
-  await expect(main.getByTestId('chat-picture-source').getByRole('button', { name: 'Open page' })).toHaveCount(0);
+  await expect(main.getByTestId('chat-picture-source').getByRole('button', { name: 'Open in your browser' })).toHaveCount(0);
   await expect(tabs(main)).toHaveText([live.caption, bare.caption]);
   await tabs(main).first().click();
   await expect(picture(main).locator('.pictitle')).toHaveText(live.caption);

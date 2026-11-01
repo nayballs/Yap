@@ -174,7 +174,7 @@ test('asked in Chat: the picture opens in the panel beside the answer, its pill 
   const picture = main.getByTestId('chat-picture');
   await expect(picture).toBeVisible({ timeout: 20_000 });
   await expect(main.getByTestId('chat-picture-caption')).toHaveText(CAPTION);
-  await expect(main.getByTestId('chat-picture-source')).toHaveText(/From Fort Joy - Example Wiki\s*·\s*Open page/);
+  await expect(main.getByTestId('chat-picture-source')).toHaveText(/From Fort Joy - Example Wiki\s*·\s*Open in your browser/);
   // The stored picture itself, drawn from Yap's own store.
   await expect
     .poll(() => main.getByTestId('chat-picture-img').evaluate((img) => img.complete && img.naturalWidth > 0), { timeout: 10_000 })

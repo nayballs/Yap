@@ -276,6 +276,15 @@ pub fn run() {
             dictation::commands::set_active_model,
             dictation::commands::delete_model,
             shell::commands::open_external,
+            shell::browsers::browsers_list,
+            shell::browsers::browser_label,
+            chat::pages::view::page_view_show,
+            chat::pages::view::page_view_place,
+            chat::pages::view::page_view_close,
+            chat::pages::view::page_view_close_all,
+            chat::pages::view::page_view_back,
+            chat::pages::view::page_view_reload,
+            chat::pages::view::page_view_shot,
             dictation::commands::cancel_recording,
             shell::autostart::set_autostart,
             shell::commands::is_portable,
@@ -795,6 +804,12 @@ pub fn run() {
             #[cfg(debug_assertions)]
             shell::commands::e2e_opened_urls,
             #[cfg(debug_assertions)]
+            chat::pages::view::e2e_page_view_eval,
+            #[cfg(debug_assertions)]
+            chat::pages::view::e2e_page_views,
+            #[cfg(debug_assertions)]
+            chat::pages::view::e2e_page_view_ask,
+            #[cfg(debug_assertions)]
             voice::tts::tts_e2e_spoken,
             #[cfg(debug_assertions)]
             dictation::sound::sound_e2e_heard,
@@ -1212,6 +1227,8 @@ pub fn run() {
                 }
             });
             snip::init(&handle);
+            // Pages beside the chat (chat/pages/view.rs): the model's shots.
+            chat::pages::view::init(&handle);
 
             // A saved transform's shortcut (transforms.rs): its slot, run on
             // its own thread.

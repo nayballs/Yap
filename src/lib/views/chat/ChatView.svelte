@@ -273,6 +273,8 @@
       // The quote over the box, taken by a question asked out loud (or
       // given back: no answer came).
       listen('yap-chat-quote', (e) => chat.onQuote(e.payload)),
+      // Words selected on a page beside the chat, asked about (its menu).
+      listen('yap-page-quote', (e) => chat.onPageQuote(e.payload)),
       // A question asked with the assistant shortcut, live (and its card's
       // "Open in Chat").
       listen('yap-assistant-turn', (e) => chat.followAssistant(e.payload)),
@@ -388,7 +390,7 @@
     <div class="docslot" class:cover style={cover ? undefined : `width: ${shownWidth}px`}>
       <!-- Its own chunk, loaded the first time a document or a picture opens. -->
       {#await import('./DocPanel.svelte') then { default: DocPanel }}
-        <DocPanel {doc} {cover} {narrow} onquote={chat.setQuote} messages={chat.messages} />
+        <DocPanel {doc} {cover} {narrow} onquote={chat.setQuote} messages={chat.messages} conversationId={chat.activeId} />
       {/await}
     </div>
   {/if}

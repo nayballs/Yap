@@ -26,6 +26,7 @@ export const SETTINGS_INDEX = [
   { page: 'general', section: 'Appearance', label: 'Reading font', desc: 'For chats, notes and meeting notes', keywords: 'font typeface serif sans dyslexic opendyslexic appearance', anchor: 'reading-font' },
   { page: 'general', section: 'Appearance', label: 'Text size', desc: 'For chats, notes and meeting notes', keywords: 'font size larger smaller zoom appearance', anchor: 'text-size' },
   { page: 'general', section: 'Appearance', label: 'Motion', desc: 'Reduce sliding, fading and pulsing', keywords: 'animation reduced motion accessibility appearance', anchor: 'motion' },
+  { page: 'general', section: 'Links', label: 'Open links in', desc: "Windows' default browser, or one you pick", keywords: 'browser links brave chrome firefox edge opera default open web pages', anchor: 'open-links-in' },
   { page: 'general', section: 'Yap bar', label: 'Show the Yap bar', desc: 'A small pill above the taskbar', keywords: 'bar pill overlay taskbar flow bar', anchor: 'bar' },
   { page: 'general', section: 'Yap bar', label: 'Hide in fullscreen apps', desc: 'Games and presentations stay clear', keywords: 'bar games fullscreen presentation video', anchor: 'bar-fullscreen', toggle: 'barHideFullscreen' },
   { page: 'general', section: 'Yap bar', label: 'Quick note button', desc: 'A button on the bar for the quick note', keywords: 'bar quick note scratchpad button jot', anchor: 'bar-quick-note', toggle: 'barQuickNote' },

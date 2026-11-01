@@ -14,14 +14,22 @@ fn is_web_or_mail_link(url: &str) -> bool {
     ["https://", "http://", "mailto:"].iter().any(|p| lower.starts_with(p))
 }
 
-/// Open a web or mail link in the default browser. Every external link in
-/// Yap's pages comes through here (`lib/core/externalLinks.js`: settings links,
-/// links in chat answers and notes, release notes, Share by email). A test
+/// Open a web or mail link in the person's browser: the one Settings →
+/// General → Links chose, else Windows' default (`shell/browsers.rs`). Every
+/// external link in Yap's pages comes through here
+/// (`lib/core/externalLinks.js`: settings links, links in chat answers and
+/// notes, release notes, Share by email, Chat's "Open in …" buttons). A test
 /// run never opens one: it keeps it for the suite (`e2e_opened_urls`), so a
 /// test can't pop a browser up on the PC running it.
 #[tauri::command]
 pub fn open_external(app: AppHandle, url: String) -> Result<(), String> {
-    if !is_web_or_mail_link(&url) {
+    open_link(&app, &url)
+}
+
+/// [`open_external`] from Rust (a page beside the chat asking for a new
+/// window, `chat/pages/view.rs`): the same checks, the same browser.
+pub fn open_link(app: &AppHandle, url: &str) -> Result<(), String> {
+    if !is_web_or_mail_link(url) {
         return Err("Yap only opens web and email links.".to_string());
     }
     let url = url.trim();
@@ -32,10 +40,7 @@ pub fn open_external(app: AppHandle, url: String) -> Result<(), String> {
         }
         return Ok(());
     }
-    use tauri_plugin_opener::OpenerExt;
-    app.opener()
-        .open_url(url, None::<&str>)
-        .map_err(|e| format!("Couldn't open your browser: {e}"))
+    crate::shell::browsers::open(app, url)
 }
 
 /// Test mode only: the links the pages asked to open (see `open_external`).

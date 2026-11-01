@@ -88,6 +88,15 @@ Chat's and the Voice Assistant's two ways of reaching outside Yap: looking thing
   `"pictures"`. **`fetch_picture`** (show / look): the same guards, `image/*`
   only (never SVG), ≤ 10 MB (`Content-Length` refused before a byte, a
   stream stopped past it), `Purpose::WebPicture` ("A picture from the web").
+  **Pages beside the chat** (2026-11-01, `chat/pages.rs`): `show_page`,
+  `snap_page` and `offer_browser` take a page by the same rule as
+  `read_page` (`Turn::allowed`, `check_url`), their state on the turn
+  (`Turn::pages`, `TurnPages`); the page itself loads in its own WebView2
+  (`chat/pages/view.rs`: its own profile, no Yap IPC, every navigation
+  checked by `check_url`, loopback refused), from the stand-in in a test run
+  (`pages::view::load_url`); its requests are the page's own (a browser's),
+  not Yap's, so they aren't in the network receipts. Every link button opens
+  in the browser Settings → General → Links chose (`shell/browsers.rs`).
   **`Turn`**: only
   links the person gave (their messages, `links_in`), a search this turn
   returned (`allowed`) or an earlier answer's sources (an earlier search

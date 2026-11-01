@@ -140,6 +140,10 @@ pub(crate) struct ChatTurn {
     pub documents: Vec<crate::chat::documents::DocRef>,
     /// The pictures it showed beside the chat (`chat/pictures.rs`): their pills.
     pub pictures: Vec<crate::chat::pictures::ShownPicture>,
+    /// The pages it brought up beside the chat (`chat/pages.rs`): their tabs.
+    pub pages: Vec<crate::chat::pages::ShownPage>,
+    /// The buttons it offered for the person's browser (`chat/pages.rs`).
+    pub offers: Vec<crate::chat::pages::BrowserOffer>,
 }
 
 impl ChatTurn {
@@ -421,6 +425,8 @@ async fn answer_turn(
                 tokens: None,
                 documents: Vec::new(),
                 pictures: Vec::new(),
+                pages: Vec::new(),
+                offers: Vec::new(),
             });
         }
     }
@@ -755,7 +761,7 @@ async fn answer_turn(
         beside: beside.as_ref().map(|b| b as &dyn crate::chat::stream::Dictations),
     });
 
-    let (reply, tools_used, sources, looked, pages, stopped, shown_pictures) = if tools_supported {
+    let (reply, tools_used, sources, looked, pages, stopped, shown_pictures, (shown_pages, offers)) = if tools_supported {
         let notify = |id: u64| {
             use tauri::Emitter;
             if let Some(app) = app {
@@ -861,8 +867,10 @@ async fn answer_turn(
         }
         sources.extend(crate::chat::tools::calendar::sources_for(&reply, &calendar_log.all()));
         sources.sort_by_key(|s| s.n);
+        // The pages it brought up and the buttons it offered (chat/pages.rs).
+        let beside = web.as_ref().map(|w| (w.pages.shown.clone(), w.pages.offers.clone())).unwrap_or_default();
         let pages = web.map(|w| w.texts).unwrap_or_default();
-        (reply, tools_used, sources, looked, pages, stopped, shown)
+        (reply, tools_used, sources, looked, pages, stopped, shown, beside)
     } else {
         // Small/local models: plain chat + eager RAG (their fallback), or
         // Yap's fixed web pipeline when the question needs the web.
@@ -914,7 +922,7 @@ async fn answer_turn(
         if let Some(chip) = calendar_chip {
             chips.insert(0, chip);
         }
-        (reply, chips, sources, looked, pages, stopped, Vec::new())
+        (reply, chips, sources, looked, pages, stopped, Vec::new(), Default::default())
     };
     // Stopped before any of the answer showed: nothing to save.
     if stopped && reply.trim().is_empty() {
@@ -1035,6 +1043,9 @@ async fn answer_turn(
     crate::chat::chats::set_documents(conv.id, index, &documents);
     // The pictures it showed beside the chat: its pills, and the panel's tabs.
     crate::chat::chats::set_pictures(conv.id, index, &shown_pictures);
+    // The pages it brought up (their tabs come back with the chat) and the
+    // buttons it offered.
+    crate::chat::chats::set_pages(conv.id, index, &shown_pages, &offers);
     // Read for lasting facts once the chat goes quiet ("Learn from my chats").
     crate::memory::learn::after_turn(conv.id);
     // Filling the room? The older messages summarised in the background
@@ -1050,7 +1061,21 @@ async fn answer_turn(
     };
     let look = crate::chat::compact::Look { kind, room: next_room(budget.history), context: context_size, ring, replay };
     crate::chat::compact::after_answer(app, conv.id, ep, look).await;
-    Ok(ChatTurn { conversation_id: conv.id, user_index, index, reply, tools_used, model: Some(answered_by), sources, stopped, tokens, documents, pictures: shown_pictures })
+    Ok(ChatTurn {
+        conversation_id: conv.id,
+        user_index,
+        index,
+        reply,
+        tools_used,
+        model: Some(answered_by),
+        sources,
+        stopped,
+        tokens,
+        documents,
+        pictures: shown_pictures,
+        pages: shown_pages,
+        offers,
+    })
 }
 
 /// The history's room for the next question: the budget less a typical
@@ -1103,6 +1128,13 @@ fn instructions(
             if !lines.is_empty() {
                 s.push(' ');
                 s.push_str(&lines);
+            }
+            // Pages beside the chat (chat/pages.rs): live pages, shots, and
+            // buttons for the person's browser.
+            let pages = crate::chat::pages::instructions(crate::chat::pages::on(pictures));
+            if !pages.is_empty() {
+                s.push(' ');
+                s.push_str(pages);
             }
         }
         s.push(' ');
@@ -1532,7 +1564,21 @@ async fn passages_turn(
         None => crate::search::ask::chip(&found),
     }];
     let index = crate::chat::chats::append_message(conv.id, "assistant", &reply, &tools_used, None, false, &sources, false, None)?;
-    Ok(ChatTurn { conversation_id: conv.id, user_index, index, reply, tools_used, model: None, sources, stopped: false, tokens: None, documents: Vec::new(), pictures: Vec::new() })
+    Ok(ChatTurn {
+        conversation_id: conv.id,
+        user_index,
+        index,
+        reply,
+        tools_used,
+        model: None,
+        sources,
+        stopped: false,
+        tokens: None,
+        documents: Vec::new(),
+        pictures: Vec::new(),
+        pages: Vec::new(),
+        offers: Vec::new(),
+    })
 }
 
 /// A Skill with nothing to run on (`skills::ask_first`: /project-update
@@ -1570,6 +1616,8 @@ fn skill_asks_turn(
         tokens: None,
         documents: Vec::new(),
         pictures: Vec::new(),
+        pages: Vec::new(),
+        offers: Vec::new(),
     })
 }
 
@@ -1609,5 +1657,7 @@ async fn app_turn(
         tokens: None,
         documents: Vec::new(),
         pictures: Vec::new(),
+        pages: Vec::new(),
+        offers: Vec::new(),
     })
 }
