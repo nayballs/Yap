@@ -3065,6 +3065,14 @@ as fetched pages (≤ 8,000 tokens each) ride along every later step: Haiku **�
 level table's rows, the italic line under it, whether it read pages (`read_page`, or "Read …"
 chips for Claude's own fetches), and the second turn's change after its search.
 
+**First Claude runs (1 Nov 2026, the stand-in and no-web pair, with the maintainer's OK):**
+Haiku 5.5 `--repeat 2`: **3/4** (`20261101-012149`): one turn-2 answer 62 words against the 60
+cap, nothing wrong in it; Opus 5.5 once: **2/2** (`20261101-012346`, 65 s and 25 s a turn, one
+call over 20 s). Tokens as counted (the cache reads apart): Haiku ~22k for the four, Opus ~10k
+for the two. Fast mode's `speed: "fast"` isn't checked yet: the harness has no switch for it
+(try Opus with Fast mode on in Chat and read the request in AI usage). The live guides
+(`guide-public-game`) weren't run.
+
 **The outline first, facts from pages read** (31 Oct 2026, the evening; chat-and-assistant.md,
 "Strong models' documents"): the same Opus 5.5 guide in Yap took 2 min 47 s, its panel open
 after 1 min 52 s (6 searches and 1 page read before `create_document`), with about ten
