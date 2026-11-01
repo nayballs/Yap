@@ -79,9 +79,20 @@ async function gh(url, init = {}) {
   return r.status === 204 ? null : r.json();
 }
 
+/** A project's newest release in its pin's own form: `/releases/latest` for most; for one whose
+ *  builds are pre-releases beside a separately versioned release (llama.cpp's bNNNNN, "latest"
+ *  being its v0.8.0), the newest non-draft release tagged like the pin. */
+async function newest(pin) {
+  if (!/^b\d+$/i.test(pin.tag)) return gh(`/repos/${pin.repo}/releases/latest`);
+  const list = await gh(`/repos/${pin.repo}/releases?per_page=30`);
+  const like = list.filter((r) => !r.draft && /^b\d+$/i.test(r.tag_name)).sort((a, b) => compareVersions(b.tag_name, a.tag_name));
+  if (!like.length) throw new Error('no build releases');
+  return like[0];
+}
+
 async function check(pin) {
   try {
-    const latest = await gh(`/repos/${pin.repo}/releases/latest`);
+    const latest = await newest(pin);
     const pinned = await gh(`/repos/${pin.repo}/releases/tags/${encodeURIComponent(pin.tag)}`).catch(() => null);
     return { ...pin, latest: latest.tag_name, latestAt: latest.published_at, pinnedAt: pinned?.published_at ?? null, behind: behind(pin, latest.tag_name, pinned?.published_at, latest.published_at) };
   } catch (e) {
