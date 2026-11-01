@@ -144,10 +144,14 @@ fn open_app_tool(args: &Value, question: &str, previous: Option<&str>, cfg: &Yap
         ),
         Found::Nothing(close) => {
             let names: Vec<&str> = close.iter().map(|a| a.name.as_str()).collect();
+            // With pages beside the chat, a name that's no app may be a site
+            // ("open Emberwiki": Claude Haiku 5.5 asked "is it a website?"
+            // rather than looking, 1 Nov 2026).
+            let web = if cfg.web_search { "It may be a website: web_search for it now and open_page the result, without asking. " } else { "" };
             let hint = if names.is_empty() {
-                "Call list_apps to see the apps installed, or tell the user.".to_string()
+                format!("{web}Else call list_apps to see the apps installed, or tell the user.")
             } else {
-                format!("Close names: {}. If one is what the user meant, call open_app with it; otherwise tell the user.", names.join(", "))
+                format!("Close names: {}. If one is what the user meant, call open_app with it. {web}Otherwise tell the user.", names.join(", "))
             };
             tool_error(
                 format!("No app called \"{name}\" is installed on this PC. {hint}"),

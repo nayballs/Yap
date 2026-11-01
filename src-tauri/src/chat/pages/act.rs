@@ -164,7 +164,7 @@ pub const INSTRUCTIONS: &str = "To act on the page beside the chat: read_open_pa
 /// with `act`): as the page tools' own, but a search engine's page only
 /// when the person wants one — Yap can't read it, so it's no way to find
 /// something on a site.
-pub const PAGES_LINE: &str = "open_page opens a page beside the chat when the user asks to open or show something on the web, or a live page beats words (a map): an address from the results or the user, or a site's home page the user named (search words only when the user wants a search engine's page). Websites open here, never with open_app. read_open_page reads the page open beside the chat (\"this page\").";
+pub const PAGES_LINE: &str = "open_page opens a page beside the chat when the user asks to open or show something on the web, or a live page beats words (a map): an address from the results, a page read or the user, or a site's home page the user named (search words only when the user wants a search engine's page). To find a page or a product: web_search, then open_page the best result. Websites open here, never with open_app. read_open_page reads the page open beside the chat (\"this page\"): its text and links (a link the user asks for comes from there).";
 
 /// **A link on a page read this turn** (`read_open_page { elements: true
 /// }`): its address as the page has it and its words — `go_to` opens that
@@ -183,6 +183,17 @@ pub fn remember_links(links: &mut Vec<Link>, snap: &rules::Snapshot) {
         let key = crate::web::normal_url(&e.href);
         if !links.iter().any(|l| crate::web::normal_url(&l.url) == key) {
             links.push(Link { url: e.href.clone(), label: rules::name_of(e) });
+        }
+    }
+}
+
+/// The links of a page read without its elements (`read_open_page`'s
+/// `links`), added to the turn's as [`remember_links`] does. Pure.
+pub fn remember_page_links(links: &mut Vec<Link>, read: &[(String, String)]) {
+    for (url, label) in read {
+        let key = crate::web::normal_url(url);
+        if crate::web::check_url(url).is_ok() && !links.iter().any(|l| crate::web::normal_url(&l.url) == key) {
+            links.push(Link { url: url.clone(), label: label.clone() });
         }
     }
 }
@@ -709,9 +720,32 @@ mod tests {
         execute(t, name, &args, Some(Live { sink: log, beside: None })).await
     }
 
+    /// A page tool as a model that doesn't act runs it.
+    async fn plain(t: &mut Turn, name: &str, args: Value) -> Value {
+        crate::chat::pages::execute_with(t, name, &args, crate::chat::pictures::Gate::Show, false, |_| async { Err(String::new()) }).await.result
+    }
+
     /// The page in front read with its elements (refs exist only then).
     async fn read(t: &mut Turn) -> Value {
         crate::chat::pages::execute_with(t, crate::chat::pages::READ, &json!({ "elements": true }), crate::chat::pictures::Gate::Show, true, |_| async { Err(String::new()) }).await.result
+    }
+
+    #[tokio::test]
+    async fn a_plain_read_gives_the_pages_links_and_open_page_may_open_one() {
+        // Every model's read (no elements): the page's links, for "send me the link to that one".
+        crate::chat::pages::sim::install(Some(rail()));
+        crate::chat::pages::backend::opened("https://rail.example.com/", "").await;
+        let mut t = turn("What's on this page?");
+        let r = plain(&mut t, crate::chat::pages::READ, json!({})).await;
+        let links = r["data"]["links"].as_array().cloned().unwrap_or_default();
+        assert!(links.iter().any(|l| l["url"] == "https://rail.example.com/signin"), "{r}");
+        assert!(r["note"].as_str().unwrap().contains("Asked for a link: write its url from links in your answer"), "{r}");
+        // A link from the page read: open_page opens it (it's in neither the results nor the user's words).
+        let r = plain(&mut t, crate::chat::pages::OPEN, json!({ "url": "https://rail.example.com/signin" })).await;
+        assert_eq!(r["success"], true, "{r}");
+        // An address no page read listed: still refused.
+        let r = plain(&mut t, crate::chat::pages::OPEN, json!({ "url": "https://elsewhere.example.org/x" })).await;
+        assert_eq!(r["success"], false, "{r}");
     }
 
     #[tokio::test]

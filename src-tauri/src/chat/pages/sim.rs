@@ -214,10 +214,16 @@ impl Browser {
         Ok(())
     }
 
-    /// A page's words (`read_open_page` without elements).
+    /// A page's words and links (`read_open_page` without elements).
     pub fn text(&self, key: &str) -> Result<PageText, String> {
-        let s = self.read(key, 24_000, 0)?;
-        Ok(PageText { title: s.title, headings: s.headings, text: s.text })
+        let s = self.read(key, 24_000, 200)?;
+        let links = s
+            .elements
+            .iter()
+            .filter(|e| e.role == "link" && !e.href.is_empty())
+            .map(|e| super::view::PageLink { text: super::act::rules::name_of(e), href: e.href.clone() })
+            .collect();
+        Ok(PageText { title: s.title, headings: s.headings, text: s.text, links })
     }
 
     /// **A page with its elements**, as the element script reads one: its

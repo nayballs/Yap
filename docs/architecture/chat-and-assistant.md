@@ -939,7 +939,11 @@ The AI Chat surface (conversations, the tool-calling loop and its note tools) an
   OPENROUTER PROCESSING`; a bare JSON line) and `Assembler` (content
   deltas; a tool call as a header — index, id, name — then argument
   fragments, or whole and without an `index` as Gemini's OpenAI-compatible
-  endpoint sends it, or arguments as an object; usage from `usage` or
+  endpoint sends it, or arguments as an object; a call's `extra_content`
+  kept and sent back with it — Gemini 3's thought signature, without which
+  its next step is refused ("Function call is missing a thought_signature":
+  every Gemini 3 tool loop failed until 1 Nov 2026, found by the everyday
+  scorecard, model-evals.md); usage from `usage` or
   Groq's `x_groq.usage`; llama.cpp's `timings`; the message rebuilt as a
   non-streamed one, every tool call's arguments **checked as JSON** — not
   JSON is a rejected call, `llm::TOOL_CALL_REJECTED`, which the loop asks
@@ -1822,7 +1826,11 @@ from `view::open_tabs`):
   read-only script through `view::run_script`: the title, the `main` /
   `article` element's headings and text, else the page's) — its text cut at
   `READ_MAX` (5,000 characters, `more` when there's more), its headings,
-  the tabs open; a source of the turn (`Turn::read_open`: numbered,
+  **its links** (the main part's, once each, their words and address, at
+  most `LINKS_MAX` = 40, never a search engine's: for "send me the link to
+  that one" — Haiku couldn't give a listing's address from its text alone,
+  1 Nov 2026 — and `open_page` may open one: `act::remember_page_links`,
+  `checked`), the tabs open; a source of the turn (`Turn::read_open`: numbered,
   opened, cited as [n]) and **web content** (the safety rule). **Never a
   search engine's results page** (`search_page`: their terms forbid
   automated reading, web-and-apps.md; any of an engine's countries and hosts

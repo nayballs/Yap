@@ -1,0 +1,80 @@
+{
+  "name": "everyday-game-question",
+  "description": "Everyday tasks: a question about a made-up game, so no model knows it: looked up, answered from the wiki (by boat, from the Saltmarsh Docks), and cited. Stand-in web.",
+  "tags": [
+    "everyday",
+    "web"
+  ],
+  "web": {
+    "mode": "standin",
+    "results": [],
+    "pages": {
+      "https://emberwiki.example/": "<!doctype html><html><head><title>Emberwiki - the Emberfall wiki</title></head><body><header><form action='search' role='search'><input type='search' name='q' aria-label='Search Emberwiki'> <button>Search</button></form></header><main><h1>Welcome to Emberwiki</h1><p>The fan wiki for Emberfall, with 2,410 articles.</p><h2>Popular</h2><ul><li><a href='wiki/Fort_Joy'>Fort Joy</a></li><li><a href='wiki/Saltmarsh_Docks'>Saltmarsh Docks</a></li></ul></main></body></html>",
+      "https://emberwiki.example/wiki/Fort_Joy": "<!doctype html><html><head><title>Fort Joy - Emberwiki</title></head><body><main><article><h1>Fort Joy</h1><p>Fort Joy is the island prison where Emberfall begins: you wake on the beach below the keep.</p><h2>Getting out</h2><p>The only way off the island is by boat from the <a href='Saltmarsh_Docks'>Saltmarsh Docks</a>, south of the keep.</p></article></main></body></html>",
+      "https://emberwiki.example/wiki/Saltmarsh_Docks": "<!doctype html><html><head><title>Saltmarsh Docks - Emberwiki</title></head><body><main><article><h1>Saltmarsh Docks</h1><p>The harbour south of Fort Joy. The harbourmaster, Edda Vane, sells the boat ticket to the mainland for 120 gold, only after nightfall.</p></article></main></body></html>"
+    },
+    "searches": [
+      {
+        "when": [
+          "fort joy"
+        ],
+        "results": [
+          {
+            "title": "Fort Joy - Emberwiki",
+            "url": "https://emberwiki.example/wiki/Fort_Joy",
+            "published": "2026-09-14",
+            "text": "Fort Joy is the island prison where Emberfall begins. Getting out: by boat from the Saltmarsh Docks."
+          },
+          {
+            "title": "Saltmarsh Docks - Emberwiki",
+            "url": "https://emberwiki.example/wiki/Saltmarsh_Docks",
+            "published": "2026-09-14",
+            "text": "The harbour south of Fort Joy, where the harbourmaster sells the boat ticket."
+          }
+        ]
+      },
+      {
+        "when": [
+          "emberfall"
+        ],
+        "results": [
+          {
+            "title": "Fort Joy - Emberwiki",
+            "url": "https://emberwiki.example/wiki/Fort_Joy",
+            "published": "2026-09-14",
+            "text": "Fort Joy is the island prison where Emberfall begins. Getting out: by boat from the Saltmarsh Docks."
+          },
+          {
+            "title": "Saltmarsh Docks - Emberwiki",
+            "url": "https://emberwiki.example/wiki/Saltmarsh_Docks",
+            "published": "2026-09-14",
+            "text": "The harbour south of Fort Joy, where the harbourmaster sells the boat ticket."
+          }
+        ]
+      }
+    ]
+  },
+  "browse": {
+    "tabs": [],
+    "yap_rule": true
+  },
+  "turns": [
+    {
+      "user": "In Emberfall, how do I get off Fort Joy?",
+      "expect": {
+        "answer_contains": [
+          "boat"
+        ],
+        "answer_contains_any": [
+          "Saltmarsh"
+        ],
+        "min_sources": 1,
+        "no_false_claims": true
+      },
+      "soft": {
+        "max_words": 120,
+        "no_post_fixes": true
+      }
+    }
+  ]
+}

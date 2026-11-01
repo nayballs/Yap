@@ -1174,11 +1174,11 @@ async fn run_scenario(
             }
             browser.log = Default::default();
             crate::chat::pages::sim::install(Some(browser));
-            record::set_browse(Some(b.confirm.clone().unwrap_or_else(|| "deny".to_string())));
+            record::set_browse(Some(b.confirm.clone().unwrap_or_else(|| "deny".to_string())), !b.yap_rule);
         }
         None => {
             crate::chat::pages::sim::install(None);
-            record::set_browse(None);
+            record::set_browse(None, false);
         }
     }
     record::set_config(Some(settings_for(m, s, &apps, &web)));
@@ -1433,7 +1433,7 @@ async fn run_scenario(
             record::write("browse_log", log);
         }
         crate::chat::pages::sim::install(None);
-        record::set_browse(None);
+        record::set_browse(None, false);
     }
     let all = Observed::merge(&seen);
     // A turn's error was reported with that turn.

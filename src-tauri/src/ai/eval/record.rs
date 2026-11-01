@@ -335,16 +335,17 @@ pub fn doc_tools_forced() -> Option<bool> {
 
 /// A browse scenario's: how the person answers a click that asks first
 /// (`browse.confirm`: "allow", "first" — the first allowed, the rest not —
-/// or "deny"), and how many have been asked. Set: the model may act on
-/// pages (`eval::browse_forced`).
-static BROWSE: Mutex<Option<(String, u32)>> = Mutex::new(None);
+/// or "deny"), how many have been asked, and whether the model may act on
+/// pages whatever Yap's rule says (`eval::browse_forced`; not an everyday
+/// scenario's, `browse.yap_rule`).
+static BROWSE: Mutex<Option<(String, u32, bool)>> = Mutex::new(None);
 
-pub fn set_browse(confirm: Option<String>) {
-    *BROWSE.lock().unwrap_or_else(|p| p.into_inner()) = confirm.map(|c| (c, 0));
+pub fn set_browse(confirm: Option<String>, forced: bool) {
+    *BROWSE.lock().unwrap_or_else(|p| p.into_inner()) = confirm.map(|c| (c, 0, forced));
 }
 
 pub fn browse_forced() -> Option<bool> {
-    BROWSE.lock().unwrap_or_else(|p| p.into_inner()).as_ref().map(|_| true)
+    BROWSE.lock().unwrap_or_else(|p| p.into_inner()).as_ref().and_then(|(_, _, forced)| forced.then_some(true))
 }
 
 /// The scenario's answer to a click that asks first, recorded
@@ -353,7 +354,7 @@ pub fn browse_forced() -> Option<bool> {
 pub fn confirm_answer(label: &str, kind: &str) -> Option<bool> {
     let allow = {
         let mut b = BROWSE.lock().unwrap_or_else(|p| p.into_inner());
-        let (mode, asked) = b.as_mut()?;
+        let (mode, asked, _) = b.as_mut()?;
         *asked += 1;
         mode == "allow" || (mode == "first" && *asked == 1)
     };

@@ -514,7 +514,7 @@ pub async fn run_script(key: &str, script: String) -> Result<String, String> {
 /// What a page says, for the model (`read_open_page`): its title, its
 /// headings, its main text (the `main` / `article` element's, else the
 /// whole page's), whitespace folded. Read only.
-pub const PAGE_TEXT_SCRIPT: &str = r#"(function(){var t=function(s){return (s||'').replace(/\s+/g,' ').trim();};var m=document.querySelector('main,article,[role=main]')||document.body;if(!m)return {title:document.title,headings:[],text:''};var hs=[].slice.call(m.querySelectorAll('h1,h2,h3')).slice(0,40).map(function(h){return t(h.innerText);}).filter(Boolean);return {title:t(document.title),headings:hs,text:t(m.innerText).slice(0,24000)};})()"#;
+pub const PAGE_TEXT_SCRIPT: &str = r#"(function(){var t=function(s){return (s||'').replace(/\s+/g,' ').trim();};var m=document.querySelector('main,article,[role=main]')||document.body;if(!m)return {title:document.title,headings:[],text:'',links:[]};var hs=[].slice.call(m.querySelectorAll('h1,h2,h3')).slice(0,40).map(function(h){return t(h.innerText);}).filter(Boolean);var seen={};var ls=[].slice.call(m.querySelectorAll('a[href]')).map(function(a){return {text:t(a.innerText||a.getAttribute('aria-label')||a.title).slice(0,100),href:a.href};}).filter(function(l){if(!/^https?:/i.test(l.href)||!l.text||seen[l.href])return false;seen[l.href]=1;return true;}).slice(0,120);return {title:t(document.title),headings:hs,text:t(m.innerText).slice(0,24000),links:ls};})()"#;
 
 /// A page's words, read by [`PAGE_TEXT_SCRIPT`].
 #[derive(Debug, Clone, Default, Deserialize)]
@@ -525,6 +525,19 @@ pub struct PageText {
     pub headings: Vec<String>,
     #[serde(default)]
     pub text: String,
+    /// Its main part's links, once each: their words and address (the
+    /// page's own, a test run's stand-in's not yet turned back).
+    #[serde(default)]
+    pub links: Vec<PageLink>,
+}
+
+/// A link on a page read ([`PageText`]).
+#[derive(Debug, Clone, Default, Deserialize, PartialEq, Eq)]
+pub struct PageLink {
+    #[serde(default)]
+    pub text: String,
+    #[serde(default)]
+    pub href: String,
 }
 
 /// **Read page `key`**: its title, headings and main text.

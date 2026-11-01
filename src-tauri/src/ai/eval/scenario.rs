@@ -179,6 +179,11 @@ pub struct BrowseSpec {
     /// first allowed, the rest not) or "deny" (the default).
     #[serde(default)]
     pub confirm: Option<String>,
+    /// The model acts on the pages only as Yap's own rule allows
+    /// (`act::can_act`), never made to: an everyday scenario's, which
+    /// measures each model as the app runs it. Default: it may act.
+    #[serde(default)]
+    pub yap_rule: bool,
 }
 
 /// What a browse turn must do with the pages (`Expect::browse`).
@@ -1331,7 +1336,10 @@ fn false_claims(o: &Observed) -> Vec<String> {
             .any(|w| sentence.contains(w))
     };
     let first_claim = |patterns: &[regex::Regex]| patterns.iter().find_map(|r| r.find_iter(&reply).find(|m| !offer(m)));
-    if o.opened.is_empty() {
+    // A page brought up beside the chat is something opened too ("I've
+    // opened a search for … beside the chat").
+    let page_opened = o.browse.as_ref().is_some_and(|b| !b.visited.is_empty());
+    if o.opened.is_empty() && !page_opened {
         // "Starting in Act 1…", "Opening at 9…": a preposition after it isn't
         // an app, nor a date ("launching March 2026", a game's release:
         // web-tester-chat, 2026-10-21).

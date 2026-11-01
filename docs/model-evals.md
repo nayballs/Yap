@@ -443,6 +443,34 @@ it **qualifies** for `act::LOCAL_ALLOWLIST` — every safety task and at least 8
 `cargo test eval::` checks each scenario's right path through the real tools passes and the
 unsafe one fails (`the_browse_scenarios_pages_work_and_their_checks_tell_right_from_wrong`).
 
+### Everyday tasks (`--tag everyday`)
+
+```bash
+npm run eval -- --tag everyday --model anthropic:claude-haiku-5-5 --model gemini:gemini-3.8-flash --model groq:qwen/qwen3.8-27b --keys-from-yap --locale en-GB
+npm run eval -- --tag everyday --model local:%APPDATA%/yap/llm/Qwen_Qwen3.5-4B-Q4_K_M.gguf --ngl 999 --locale en-GB
+```
+
+The **scorecard** for what Chat is for: a general assistant that looks things up, shows them
+beside the chat and explains them, on any provider and on this PC. Its tasks
+(`evals/scenarios/everyday-*.json`) run on made-up sites in the stand-in browser (a shop,
+Shopwell; a game wiki, Emberwiki: no model knows them, nothing goes on the internet), and
+each model gets **the tools Yap gives it** (`browse.yap_rule`: acting on pages only as
+`act::can_act` allows, never forced as `--browse` does), so a score is what the app would do.
+
+| Scenario | The task | Passes when |
+|---|---|---|
+| `everyday-shop-find-and-show` | "Find me an HDMI audio extractor with a 3.5mm stereo output on Shopwell, bring it up and send me the link" | the right listing opened beside the chat (not a search engine's page), its link in the answer |
+| `everyday-shop-link-from-page` | the shop's results page open: "which has stereo? send me the link" | read, the right listing's address exactly (the page's links) |
+| `everyday-open-unknown-site` | "Open Emberwiki for me" (a site Yap doesn't know by name) | its address found and opened, never a search engine's page |
+| `everyday-game-question` | "In Emberfall, how do I get off Fort Joy?" | looked up, answered from the wiki (by boat, the Saltmarsh Docks), cited |
+| `everyday-page-in-front` | a product page open: "will this work with my PS5, and does it do stereo?" | read, both answered from the page |
+| `everyday-follow-up-link` | "What extractors does Shopwell have?", then "what's the link to the one with stereo?" | the second answer gives that listing's address |
+| `everyday-explain-short` | "What's HDMI ARC, in a sentence or two?" | a short answer, no document, no page |
+
+Free plans can't run it whole: Groq's 8,000 tokens a minute (GPT-OSS 120B's Chat prompt with
+its tools is over it: refused before sending) and its daily cap, Gemini's free tier's minute
+limit and its "high demand" 503s. Read a failure's reason before reading it as the model's.
+
 ### Screenshot questions (`--vision`)
 
 ```bash
@@ -3375,3 +3403,24 @@ $0.01): **≈ $0.03–0.05 a repeat, ≈ $0.15 for `--repeat 3`**. **Claude Opus
 reads $0.20, writes ~$5): **≈ $1–1.50 a repeat, ≈ $2–3 for `--repeat 2`**. No web search fees
 (the stand-in web). Worth reading in them: the "Acting on pages" table (30/30 is the bar), and
 whether each buy was asked through Yap's card rather than in the chat.
+
+## Everyday tasks (1 Nov 2026)
+
+The scorecard above, built after a day of one-off browser fixes ("are we chasing our tails?")
+to measure Chat on general tasks across providers. Three cloud rounds and the model on this
+PC; Haiku cost a few pence a round, the rest free plans.
+
+| Model | Round 1 | After the fixes | Notes |
+|---|---|---|---|
+| Claude Haiku 5.5 | 6/7 | **7/7** | missed "open Emberwiki" (asked whether it was a website) until `open_app`'s nothing-found result put "it may be a website: web_search for it now" first |
+| Qwen3.5-4B (on this PC, `--ngl 999`) | — | **5/7** | guessed emberwiki.com (a named site's home page, `named_site`: right for real brands, wrong for a made-up one); opened the listing but left its link out |
+| Qwen 3.8 27B (Groq, free plan) | 4/7 | passed every task it could run | the rest refused by Groq's minute and daily limits; once it put the link on the clipboard for "send me the link" (the scenario now asks "what's the link") |
+| Gemini 3.8 Flash (free tier) | 1/7 | the tool loop works | **a Yap bug**: every Gemini 3 tool call's thought signature was dropped (`stream::Assembler`), so its next step was refused (HTTP 400 "Function call is missing a thought_signature"): Chat with tools never worked on Gemini 3. Fixed (`extra_content` kept); then its free tier's limits stopped the runs |
+| Gemini 2.5 Flash | 0/7 | — | retired for new users (HTTP 404) |
+| GPT-OSS 120B (Groq, free plan) | 1/7 | — | Chat's prompt with its tools is over the plan's 8,000 tokens a minute: refused before sending, as the app does |
+
+The fixes it drove, general to every provider: `read_open_page` gives a page's links (and
+`open_page` may open one), the page tools' line says "to find a page or a product:
+web_search, then open_page the best result" for every model, a missing app points at the web,
+Gemini's signatures kept, and the eval's honesty check counts a page opened beside the chat as
+opened.

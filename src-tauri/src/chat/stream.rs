@@ -921,6 +921,11 @@ struct PartialCall {
     arguments: String,
     /// A server that sends the arguments as an object.
     object: Option<Value>,
+    /// What the provider attached to the call to have it back with the
+    /// conversation (`extra_content`: Gemini 3's thought signature, without
+    /// which its next step is refused — "Function call is missing a
+    /// thought_signature", 1 Nov 2026).
+    extra: Option<Value>,
     announced: bool,
 }
 
@@ -1092,6 +1097,9 @@ impl Assembler {
                         call.name = name.to_string();
                     }
                 }
+                if let Some(extra) = tc.get("extra_content").filter(|v| v.is_object()) {
+                    call.extra = Some(extra.clone());
+                }
                 let more = match &tc["function"]["arguments"] {
                     Value::String(s) => {
                         call.arguments.push_str(s);
@@ -1188,7 +1196,11 @@ impl Assembler {
                 }
             };
             let id = if c.id.is_empty() { format!("call_{}", i + 1) } else { c.id.clone() };
-            calls.push(json!({ "id": id, "type": "function", "function": { "name": c.name, "arguments": arguments } }));
+            let mut call = json!({ "id": id, "type": "function", "function": { "name": c.name, "arguments": arguments } });
+            if let Some(extra) = &c.extra {
+                call["extra_content"] = extra.clone();
+            }
+            calls.push(call);
         }
         let mut msg = json!({ "role": "assistant" });
         msg["content"] = if self.content.is_empty() && !calls.is_empty() { Value::Null } else { json!(self.content) };
@@ -1437,6 +1449,21 @@ mod tests {
         let mut g = Assembler::default();
         g.push(&json!({ "choices": [{ "index": 0, "delta": {}, "finish_reason": "stop" }], "x_groq": { "usage": { "total_tokens": 42 } } }).to_string()).unwrap();
         assert_eq!(g.response(&g.message().unwrap())["usage"]["total_tokens"], 42);
+    }
+
+    #[test]
+    fn a_gemini_tool_calls_thought_signature_goes_back_with_it() {
+        // Gemini 3 (OpenAI-compatible): the call carries extra_content.google.thought_signature,
+        // which must come back with the conversation or its next step is refused.
+        let mut a = Assembler::default();
+        a.push(&chunk(json!({ "tool_calls": [{ "index": 0, "id": "fc_1", "type": "function", "function": { "name": "web_search", "arguments": "{\"query\":\"emberwiki\"}" }, "extra_content": { "google": { "thought_signature": "sig-abc" } } }] })))
+            .unwrap();
+        let msg = a.message().unwrap();
+        assert_eq!(msg["tool_calls"][0]["extra_content"]["google"]["thought_signature"], "sig-abc");
+        // Every other provider's calls stay as they were.
+        let mut b = Assembler::default();
+        b.push(&chunk(json!({ "tool_calls": [{ "index": 0, "id": "c", "type": "function", "function": { "name": "list_folders", "arguments": "{}" } }] }))).unwrap();
+        assert!(b.message().unwrap()["tool_calls"][0].get("extra_content").is_none());
     }
 
     #[test]

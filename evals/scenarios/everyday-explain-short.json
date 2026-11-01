@@ -1,0 +1,25 @@
+{
+  "name": "everyday-explain-short",
+  "description": "Everyday tasks: a quick explanation (\"what's HDMI ARC?\") is a short answer in the chat: no document, no page opened.",
+  "tags": [
+    "everyday"
+  ],
+  "turns": [
+    {
+      "user": "What's HDMI ARC, in a sentence or two?",
+      "expect": {
+        "tools_not_called": [
+          "create_document",
+          "open_page"
+        ],
+        "answer_contains_any": [
+          "audio",
+          "sound"
+        ]
+      },
+      "soft": {
+        "max_words": 80
+      }
+    }
+  ]
+}

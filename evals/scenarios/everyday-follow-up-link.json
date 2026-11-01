@@ -1,0 +1,92 @@
+{
+  "name": "everyday-follow-up-link",
+  "description": "Everyday tasks: two turns. \"What HDMI audio extractors does Shopwell have?\", then \"send me the link to the one with stereo output\": the second answer gives that listing's address (from the first turn's results, or found again). Made-up shop, stand-in web.",
+  "tags": [
+    "everyday",
+    "web"
+  ],
+  "web": {
+    "mode": "standin",
+    "results": [],
+    "pages": {
+      "https://shopwell.example/": "<!doctype html><html><head><title>Shopwell - electronics and home</title></head><body><header><form action='s' role='search'><input type='search' name='k' aria-label='Search Shopwell'> <button>Search</button></form></header><main><h1>Shopwell</h1><p>Electronics, home and garden, delivered across the UK.</p><ul><li><a href='c/audio'>Audio</a></li><li><a href='c/kitchen'>Kitchen</a></li></ul></main></body></html>",
+      "https://shopwell.example/s?k=hdmi audio extractor": "<!doctype html><html><head><title>Shopwell: hdmi audio extractor</title></head><body><main><h1>Results for \"hdmi audio extractor\"</h1><ul><li><a href='/p/hx-10'>Audiolink HX-10 HDMI Audio Extractor, 4K, optical out</a> - £14.50 - optical (Toslink) output only</li><li><a href='/p/hx-35'>Audiolink HX-35 HDMI Audio Extractor, 4K 60Hz, 3.5mm stereo and optical out</a> - £21.99 - 3.5mm stereo and optical outputs</li><li><a href='/p/sw-2'>Brightcable SW-2 HDMI Switch, 2 in 1 out</a> - £12.00 - no audio output</li></ul></main></body></html>",
+      "https://shopwell.example/s": "<!doctype html><html><head><title>Shopwell: hdmi audio extractor</title></head><body><main><h1>Results for \"hdmi audio extractor\"</h1><ul><li><a href='/p/hx-10'>Audiolink HX-10 HDMI Audio Extractor, 4K, optical out</a> - £14.50 - optical (Toslink) output only</li><li><a href='/p/hx-35'>Audiolink HX-35 HDMI Audio Extractor, 4K 60Hz, 3.5mm stereo and optical out</a> - £21.99 - 3.5mm stereo and optical outputs</li><li><a href='/p/sw-2'>Brightcable SW-2 HDMI Switch, 2 in 1 out</a> - £12.00 - no audio output</li></ul></main></body></html>",
+      "https://shopwell.example/p/hx-35": "<!doctype html><html><head><title>Audiolink HX-35 HDMI Audio Extractor - Shopwell</title></head><body><main><h1>Audiolink HX-35 HDMI Audio Extractor, 4K 60Hz</h1><p class='price'>£21.99</p><p>Rated 4.2 out of 5 (487 ratings). In stock, free delivery.</p><h2>About this item</h2><ul><li>Takes the sound out of an HDMI signal: 3.5mm stereo output for speakers or headphones, and optical (Toslink) for a soundbar.</li><li>4K 60Hz and HDR pass-through: works with PS5, Xbox Series X, Switch, Fire TV and PC.</li><li>Powered over USB (cable included).</li></ul><form action='/basket' method='post'><button>Add to basket</button></form></main></body></html>",
+      "https://shopwell.example/p/hx-10": "<!doctype html><html><head><title>Audiolink HX-10 HDMI Audio Extractor - Shopwell</title></head><body><main><h1>Audiolink HX-10 HDMI Audio Extractor, 4K</h1><p class='price'>£14.50</p><h2>About this item</h2><ul><li>Optical (Toslink) audio output only: no 3.5mm jack.</li><li>4K 30Hz pass-through.</li></ul><form action='/basket' method='post'><button>Add to basket</button></form></main></body></html>"
+    },
+    "searches": [
+      {
+        "when": [
+          "extractor"
+        ],
+        "results": [
+          {
+            "title": "Audiolink HX-10 HDMI Audio Extractor, 4K, optical - Shopwell",
+            "url": "https://shopwell.example/p/hx-10",
+            "published": "2026-09-20",
+            "text": "HDMI audio extractor with an optical output only. £14.50."
+          },
+          {
+            "title": "Audiolink HX-35 HDMI Audio Extractor, 4K 60Hz, 3.5mm stereo - Shopwell",
+            "url": "https://shopwell.example/p/hx-35",
+            "published": "2026-10-02",
+            "text": "HDMI audio extractor with 3.5mm stereo and optical outputs, 4K 60Hz pass-through. £21.99."
+          }
+        ]
+      },
+      {
+        "when": [
+          "shopwell"
+        ],
+        "results": [
+          {
+            "title": "Audiolink HX-10 HDMI Audio Extractor, 4K, optical - Shopwell",
+            "url": "https://shopwell.example/p/hx-10",
+            "published": "2026-09-20",
+            "text": "HDMI audio extractor with an optical output only. £14.50."
+          },
+          {
+            "title": "Audiolink HX-35 HDMI Audio Extractor, 4K 60Hz, 3.5mm stereo - Shopwell",
+            "url": "https://shopwell.example/p/hx-35",
+            "published": "2026-10-02",
+            "text": "HDMI audio extractor with 3.5mm stereo and optical outputs, 4K 60Hz pass-through. £21.99."
+          }
+        ]
+      }
+    ]
+  },
+  "browse": {
+    "tabs": [],
+    "yap_rule": true
+  },
+  "turns": [
+    {
+      "user": "What HDMI audio extractors does Shopwell have?",
+      "expect": {
+        "answer_contains_any": [
+          "HX-35",
+          "HX 35"
+        ],
+        "no_false_claims": true
+      },
+      "soft": {
+        "max_words": 150
+      }
+    },
+    {
+      "user": "What's the link to the one with the stereo output?",
+      "expect": {
+        "answer_contains": [
+          "shopwell.example/p/hx-35"
+        ],
+        "answer_not_contains": [
+          "shopwell.example/p/hx-10"
+        ]
+      },
+      "soft": {
+        "max_words": 60
+      }
+    }
+  ]
+}
