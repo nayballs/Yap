@@ -657,6 +657,10 @@ export function createChatState({ onopensettings = () => null, onopennote = () =
   // A spoken question's answer as it's written (chat/assistant.rs): it grows at
   // the end of its conversation while that's the one shown.
   let assistantLive = liveAnswer();
+  // The pages the spoken question's turn showed live beside the chat (a
+  // page Yap opened at once, before this view had a new conversation, is
+  // shown when its answer lands: `followAssistant`).
+  let assistantPagesShown = new Set();
   // The spoken answer's own bubble (`spoken`: never this view's own send's).
   const spokenAt = () => messages.findLastIndex((m) => m.streaming && m.spoken);
   // An event about the spoken question this view follows (one without an
@@ -665,6 +669,18 @@ export function createChatState({ onopensettings = () => null, onopennote = () =
   function followAssistantStream(p) {
     const id = p?.conversationId;
     if (id == null || id !== activeId || assistantPending !== id || !followed(p)) return;
+    if (p.event?.kind === 'page' && p.event.page?.url) assistantPagesShown.add(p.event.page.url);
+    // The screen the model looked at (look_at_screen): with the question
+    // asked out loud, as a typed question's are.
+    if (p.event?.kind === 'screen' && Array.isArray(p.event.images) && p.event.images.length) {
+      const qi = messages.findIndex((m) => m.id === assistantTurn);
+      if (qi >= 0) {
+        const have = new Set((messages[qi].images || []).map((i) => i.id));
+        const added = p.event.images.filter((i) => i?.id && !have.has(i.id));
+        if (added.length) messages = messages.map((m, i) => (i === qi ? { ...m, images: [...(m.images || []), ...added] } : m));
+      }
+      return;
+    }
     // A document asked for out loud: the panel shows it filling.
     const spoken = spokenAt();
     if (docEvent(p.event, spoken >= 0 ? messages[spoken] : null)) return;
@@ -693,6 +709,7 @@ export function createChatState({ onopensettings = () => null, onopennote = () =
       assistantPending = id ?? null;
       assistantTurn = p.userMessageId ?? null;
       assistantLive = liveAnswer();
+      assistantPagesShown = new Set();
       activity = null;
       activityWaiting = false;
     } else if (['answered', 'failed', 'superseded'].includes(p?.phase)) {
@@ -730,6 +747,13 @@ export function createChatState({ onopensettings = () => null, onopennote = () =
         id: chatId(id, i),
         revisedFrom: i === streamedAt && streamed && streamed.trim() !== m.text.trim() ? fromHeight : 0,
       }));
+      // A page the answer opened whose live event came before this view had
+      // the conversation ("open YouTube" out loud into a new chat: Yap opens
+      // it at once): the panel shows it now.
+      if (p?.phase === 'answered') {
+        const answer = messages.at(-1);
+        if (answer?.role === 'assistant') for (const pg of answer.pages || []) if (pg?.url && !assistantPagesShown.has(pg.url)) doc.showPage(pg);
+      }
       // Its answer is saved already: a quick one's "answered" came while this
       // view was still opening for the question (ControlPanel brought Chat up
       // on "asked", before this view listened), and it'd say "Thinking" for

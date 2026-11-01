@@ -1097,9 +1097,13 @@ async fn answer(app: AppHandle, asker: Asker, since: u64, question: String, abou
     // Yap opens an app (no model).
     let mut ask = question.clone();
     let mut window_picture: Option<(String, String)> = None;
+    // With Yap's own window in front the window in front is Yap, which a
+    // capture leaves out: a model that calls tools looks itself
+    // (`look_at_screen`: every monitor and the page beside the chat).
+    let chat_looks = focused && endpoint.as_ref().is_some_and(|(_, _, model, provider, _, _)| crate::chat::tools::supports_tools(provider, model));
     let mut took_window = false;
     if let (Some(generation), false, Some((base_url, api_key, model, provider, _persona, _thinking))) =
-        (asker.shortcut(), shots_wait || quote.is_some() || about_selection, &endpoint)
+        (asker.shortcut(), shots_wait || quote.is_some() || about_selection || chat_looks, &endpoint)
     {
         let ep = screen::Endpoint { base_url, api_key, model, provider };
         let look_app = app.clone();

@@ -510,6 +510,47 @@ test('look_at_screen: a model that reads images sees every monitor, Yap left out
   );
 });
 
+test('asked out loud with Chat in view: Yap opens the page itself and the model looks at the screen and the page; from another app, neither', async ({ yap, main, fakeLlm }) => {
+  await setConfig(yap, main, { ...chatConfig(fakeLlm), assistantScreen: true, llmScopes: { chat: { enabled: true, provider: 'custom', baseUrl: fakeLlm.base, model: 'fake-vision-chat' } } });
+  await yap.invoke('e2e_snip', { monitors: [{ x: 0, y: 0, width: 1280, height: 720, scale: 1, hdr: false, whiteNits: 80 }], windows: [], start: false });
+  await openView(main, 'Chat');
+  const closePanel = main.getByTestId('chat-page').getByRole('button', { name: 'Close the panel' });
+  if (await closePanel.count()) await closePanel.click();
+  await main.getByRole('button', { name: 'New chat' }).first().click();
+  const from = fakeLlm.requests.length;
+  // "Show me <address>", asked out loud with Chat in front: Yap opens it beside the chat, no model.
+  await yap.invoke('e2e_assistant_ask', { text: `Show me ${FORT_JOY_URL}`, listenMs: 0 });
+  await expect(main.getByText('wiki.example.com is open beside the chat.')).toBeVisible({ timeout: 20_000 });
+  await expect(main.getByTestId('chat-page-address')).toHaveValue(FORT_JOY_URL, { timeout: 20_000 });
+  expect(chatCalls(fakeLlm, from)).toEqual([]);
+  await expect.poll(async () => (await views(yap)).find((v) => v.key === KEY)?.loaded, { timeout: 20_000 }).toBe(true);
+  // "Have a look": the model looks itself (Yap's window is the one in front, so no window look first).
+  fakeLlm.scriptChat([{ tools: [{ name: 'look_at_screen', args: {} }] }, { content: 'That is the wiki article open beside the chat.' }]);
+  await yap.invoke('e2e_assistant_ask', { text: "Can you have a look at what I'm looking at?", listenMs: 0 });
+  await expect(main.getByText('That is the wiki article open beside the chat.')).toBeVisible({ timeout: 40_000 });
+  const calls = chatCalls(fakeLlm, from);
+  expect(calls[0].tools).toContain('look_at_screen');
+  expect(calls[0].tools).toContain('open_page');
+  expect(toolResult(calls[1])).toMatchObject({ success: true, displayText: 'Looked at your screen and the page beside the chat' });
+  expect(fakeLlm.requests.slice(from).some((r) => r.kind === 'screenQuestion')).toBe(false);
+  // Its pictures show with the question asked out loud.
+  await expect(main.getByRole('group', { name: 'Screenshots' }).last().getByRole('button', { name: /^Screenshot,/ })).toHaveCount(2);
+  // From another app: no page opened by Yap, and neither the page tools nor the screen look for the model.
+  await yap.invoke('e2e_focus', { focused: false });
+  try {
+    const away = fakeLlm.requests.length;
+    fakeLlm.scriptChat([{ content: 'You can open YouTube in your browser.' }]);
+    await yap.invoke('e2e_assistant_ask', { text: 'Open YouTube', listenMs: 0 });
+    await expect.poll(() => chatCalls(fakeLlm, away).length, { timeout: 20_000 }).toBeGreaterThanOrEqual(1);
+    const tools = chatCalls(fakeLlm, away)[0].tools;
+    expect(tools).not.toContain('open_page');
+    expect(tools).not.toContain('look_at_screen');
+  } finally {
+    await yap.invoke('e2e_focus', { focused: true });
+  }
+  if (await closePanel.count()) await closePanel.click();
+});
+
 test('look_at_screen sees the page open beside the chat too, as its own picture (the monitors grey Yap out)', async ({ yap, main, fakeLlm }) => {
   await setConfig(yap, main, { ...chatConfig(fakeLlm), assistantScreen: true, llmScopes: { chat: { enabled: true, provider: 'custom', baseUrl: fakeLlm.base, model: 'fake-vision-chat' } } });
   await yap.invoke('e2e_snip', { monitors: [{ x: 0, y: 0, width: 1280, height: 720, scale: 1, hdr: false, whiteNits: 80 }], windows: [], start: false });

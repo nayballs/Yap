@@ -252,6 +252,12 @@ async fn answer_turn(
         return skill_asks_turn(conversation_id, &text, by_voice, asked, stop, &said, &s.skill.command);
     }
     let meetings = scope == Some("meetings") || skill.is_some();
+    // Chat itself, or the Voice Assistant asked with Chat in view: the page
+    // beside the chat is right there, so pages, the screen look and Yap's
+    // own opening of a page are theirs (the maintainer asked out loud with
+    // Chat open — "open Amazon", "have a look" — and got neither, 1 Nov
+    // 2026). Never a phone's question, nor one asked from another app.
+    let chat_in_view = scope.is_none() || (scope == Some("assistant") && crate::chat::assistant::asked_in_chat());
     let cfg = config::load();
     // Text selected in another app that this question is about
     // (`assistant/selected.rs`): the selection is what it's about — never
@@ -263,10 +269,10 @@ async fn answer_turn(
         }
         // A site asked for by name, or a search asked for, with pages beside
         // the chat (the web on): Yap opens it there itself, no model — only
-        // in Chat itself (never the Voice Assistant, a phone, the meetings or
-        // a Skill: there's no panel to see it in, or the question is theirs),
-        // and never over a screenshot the question carries (it's about that).
-        if cfg.web_search && scope.is_none() && skill.is_none() && crate::snip::turn::images().is_empty() {
+        // with Chat in view (never a phone, the meetings or a Skill: there's
+        // no panel to see it in, or the question is theirs), and never over a
+        // screenshot the question carries (it's about that).
+        if cfg.web_search && chat_in_view && skill.is_none() && crate::snip::turn::images().is_empty() {
             // A search only where no search service would answer it (no key,
             // no provider search): with one, the model searches and answers.
             let keyless = resolve_chat_endpoint(&cfg).is_ok_and(|(base, key, model, provider, _, _)| {
@@ -325,12 +331,14 @@ async fn answer_turn(
     let web_on = cfg.web_search && !meetings;
     // Pictures from the web (chat/pictures.rs): looked at and shown by a
     // model that reads images, shown by any other that calls tools.
-    // (Not for the Voice Assistant or a phone: no panel there to see them in.)
-    let pictures = crate::chat::pictures::Gate::for_model(web_on && tools_supported && scope != Some("assistant"), &provider, &model);
+    // (Not for the Voice Assistant away from Chat, nor a phone: no panel
+    // there to see them in.)
+    let pictures = crate::chat::pictures::Gate::for_model(web_on && tools_supported && (scope != Some("assistant") || chat_in_view), &provider, &model);
     // The screen (chat/see_screen.rs): with tools and the switch on, web or
-    // not — in Chat itself only (a phone's question never captures the PC;
-    // the Voice Assistant has its own look at the window in front).
-    let screen = if scope.is_none() { crate::chat::see_screen::gate(&cfg, tools_supported, &provider, &model) } else { crate::chat::pictures::Gate::Off };
+    // not — with Chat in view (a phone's question never captures the PC;
+    // the Voice Assistant from another app has its own look at the window
+    // in front).
+    let screen = if chat_in_view { crate::chat::see_screen::gate(&cfg, tools_supported, &provider, &model) } else { crate::chat::pictures::Gate::Off };
     // Acting on the pages beside the chat (chat/pages/act.rs): the models
     // proven good at it, in a typed Chat turn (never the Voice Assistant
     // or the meetings: a click that buys asks in Chat's thread).

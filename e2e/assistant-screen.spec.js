@@ -60,7 +60,12 @@ const MONITORS = [{ x: 0, y: 0, width: 1280, height: 720, scale: 1, hdr: true, w
 const WINDOW = { x: 40, y: 40, w: 200, h: 100 };
 const GREY = [0xc0, 0xc0, 0xc0];
 
-const ask = (yap, text) => yap.invoke('e2e_assistant_ask', { text, listenMs: 50 });
+// Asked from another app (the window in front is that app's): with Yap's
+// own window in front, Chat's model looks itself (chat-pages.spec.js).
+const ask = async (yap, text) => {
+  await yap.invoke('e2e_focus', { focused: false });
+  return yap.invoke('e2e_assistant_ask', { text, listenMs: 50 });
+};
 /** The fake monitors and the window in front, for the next look (never the real screen). */
 const windowInFront = (yap) => yap.invoke('e2e_snip', { monitors: MONITORS, windows: [WINDOW], start: false });
 const capsule = (yap) => yap.overlay.locator('.capsule');
@@ -72,6 +77,10 @@ const userOf = (r) => r.user ?? '';
 test.beforeEach(async ({ yap }) => {
   await yap.invoke('assistant_stop');
   await yap.invoke('tts_stop');
+});
+
+test.afterEach(async ({ yap }) => {
+  await yap.invoke('e2e_focus', { focused: true });
 });
 
 test('a question about the screen, on a model on this PC: the window in front goes with it', async ({ yap, main, fakeLlm }) => {
@@ -102,8 +111,9 @@ test('a question about the screen, on a model on this PC: the window in front go
   await expect
     .poll(async () => (await yap.invoke('connections_summary')).groups.map((g) => g.label), { timeout: 10_000 })
     .toContain('Voice Assistant + the window in front · Custom endpoint');
-  // In Chat: the question with its thumbnail.
+  // In Chat (asked from another app: its conversation opened from the list): the question with its thumbnail.
   await main.getByRole('navigation', { name: 'Main' }).getByRole('button', { name: 'Chat', exact: true }).click();
+  await main.locator('.conv').first().click(); // the latest conversation (a follow-up joins the last one)
   const bubble = main.locator('.cbubble.user', { hasText: "What's this error?" }).last();
   await expect(bubble.locator('.shots img')).toBeVisible();
 });
@@ -185,8 +195,9 @@ test("a model that can't read images gets the window's text, named in the answer
     );
     const q = questionNamed(yap, 'What does this error mean?');
     expect(q.images[0]).toMatchObject({ source: 'window', asText: true });
-    // In Chat: the source chip, which opens nothing.
+    // In Chat (its conversation opened from the list): the source chip, which opens nothing.
     await main.getByRole('navigation', { name: 'Main' }).getByRole('button', { name: 'Chat', exact: true }).click();
+    await main.locator('.conv').first().click(); // the latest conversation (a follow-up joins the last one)
     await expect(main.getByTestId('chat-screen-source').last()).toContainText("The window's text, read on this PC");
     await shot(main, '02-the-windows-text-as-a-source');
   } finally {

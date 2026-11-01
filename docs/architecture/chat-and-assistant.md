@@ -1743,9 +1743,17 @@ too" (`assistant_screen_cloud`): until then it's refused, the model says it
 couldn't look, and the alert asks once ("Let Yap's AI see your screen?",
 `assistant::screen::ask_once`). Never during a meeting or a call. What's on
 screen is web content for the safety rule (`screen_seen` in the tool loop:
-no apps, clipboard or memory after it this turn). Chat itself only: never the
-Voice Assistant (its own look at the window in front) or a phone's question
-(the `scope` gate in `turn.rs`). A screen shot in an earlier message is held
+no apps, clipboard or memory after it this turn). With Chat in view only:
+Chat itself, or the Voice Assistant asked with Chat in view
+(`assistant::asked_in_chat`: Yap's window in front, or beside the app in
+front showing Chat) — there, with Yap's own window in front, the
+assistant's own look at the window in front is skipped for a model that
+calls tools (it would only find Yap, which a capture leaves out) and the
+model looks itself; its pictures show with the spoken question
+(`followAssistantStream`). Never a phone's question, nor the Voice
+Assistant asked from another app (its own look at the window in front):
+`chat_in_view` in `turn.rs` (the maintainer asked out loud with Chat open,
+"have a look", and Haiku said it couldn't see — 1 Nov 2026). A screen shot in an earlier message is held
 back from a cloud model as a window shot is (`snip::turn::captured`: "window"
 or "screen", sent again only while `window_may_go`). The prompt line: "use it
 whenever they ask you to look at, see, check or screenshot something… Never
@@ -1794,8 +1802,12 @@ from `view::open_tabs`):
   (keyless: `web::backend` is `Keyless`) — it's something the free sources
   don't cover (travel, prices, the news: a model could only say so); with a
   key or the provider's own search, "search for …" is the model's to answer.
-  On the person's engine. Chat itself only (never the Voice Assistant, a
-  phone, the meetings, a Skill, or a question carrying a screenshot). The
+  On the person's engine. With Chat in view only — typed, or asked out loud
+  with Chat in view (`chat_in_view`); never a phone, the Voice Assistant
+  from another app, the meetings, a Skill, or a question carrying a
+  screenshot. The page tools likewise (the Voice Assistant from another app
+  and a phone get none); acting on a page stays Chat's typed questions'
+  (`act` only with no scope: its card isn't wired to the spoken answer yet). The
   answer is one line ("The search for “…” is open beside the chat, on
   Google."), the page kept with it (`page_turn`, `Event::Page`). `open_app`
   refuses a website (`apps::plan::for_the_web`: the request's phrase asks
