@@ -1,16 +1,20 @@
 // Pages beside the chat (src-tauri/src/chat/pages.rs, chat/pages/view.rs;
 // the look-and-show plan's Milestone 2):
-// - `show_page` brings the page up in a Page tab: its own WebView2 (its own
+// - `open_page` brings the page up in a Page tab: its own WebView2 (its own
 //   profile), laid over the tab by Rust — no Yap IPC in it at all
 //   (`window.__TAURI_INTERNALS__` absent, Yap's IPC unreachable); Back /
 //   Reload / Save a shot / Open in your browser; the answer keeps it (its
-//   pill, `pages` in chats.json); its tab closes it.
+//   pill, `pages` in chats.json); its tab closes it. A search opens on the
+//   person's engine; a site they named, at its home page.
+// - `read_open_page` reads the page open beside the chat; every question
+//   says which tabs are open.
 // - "Ask Yap about this" on words selected there: quoted over Chat's box,
 //   asked as a selection.
-// - `snap_page` takes a shot of the page (loaded out of sight) and shows it
-//   as a picture: a picture tab and a pill, kept like a pasted picture.
-// - `offer_browser` puts a button under the answer: a click opens the page
-//   in the person's browser (`open_external`, kept by a test run).
+// - `snap_page` (a model that reads images) takes a shot of the page (loaded
+//   out of sight) and shows it as a picture: a picture tab and a pill, kept
+//   like a pasted picture.
+// - No model gets `offer_browser` any more: the tab's Open in … follows
+//   Settings → General → Links.
 //
 // Nothing leaves the PC: the model is the scripted fake AI
 // (support/fake-llm.js), the web a local fake (support/fake-web.js, through
@@ -86,6 +90,12 @@ async function inPage(yap, script) {
 /** The pages alive now. */
 const views = (yap) => yap.invoke('e2e_page_views');
 
+/** Sent in the conversation open now (with the panel open the chat list may step aside). */
+async function say(main, text) {
+  await main.getByRole('textbox', { name: 'Message' }).fill(text);
+  await main.getByRole('button', { name: 'Send' }).click();
+}
+
 async function ask(main, text) {
   await openView(main, 'Chat');
   // A new chat: the last test's tabs and pages are its own.
@@ -95,20 +105,23 @@ async function ask(main, text) {
   await main.getByRole('button', { name: 'Send' }).click();
 }
 
-test('show_page brings the live page up beside the chat: its own webview, no Yap IPC, Open in your browser', async ({ yap, main, fakeLlm, shot }) => {
+test('open_page brings the live page up beside the chat: its own webview, no Yap IPC, Open in your browser', async ({ yap, main, fakeLlm, shot }) => {
   await setConfig(yap, main, chatConfig(fakeLlm));
   const from = fakeLlm.requests.length;
   fakeLlm.scriptChat([
-    { tools: [{ name: 'show_page', args: { url: FORT_JOY_URL, section: 'Map' } }] },
+    { tools: [{ name: 'open_page', args: { url: FORT_JOY_URL, section: 'Map' } }] },
     { content: 'It’s open beside the chat: the map is under Map.' },
   ]);
   await ask(main, `Bring up the treasure map page ${FORT_JOY_URL}`);
 
-  // Every tool-using model with the web gets the page tools, told how in one line.
+  // Every tool-using model with the web gets the page tools, told how in one
+  // line: no shot for one that can't see, no offer_browser for any.
   await expect.poll(() => chatCalls(fakeLlm, from).length).toBeGreaterThanOrEqual(2);
   const calls = chatCalls(fakeLlm, from);
-  expect(calls[0].tools).toEqual(expect.arrayContaining(['show_page', 'snap_page', 'offer_browser']));
-  expect(calls[0].system).toContain('show_page brings a live page up beside the chat');
+  expect(calls[0].tools).toEqual(expect.arrayContaining(['open_page', 'read_open_page']));
+  expect(calls[0].tools).not.toContain('snap_page');
+  expect(calls[0].tools).not.toContain('offer_browser');
+  expect(calls[0].system).toContain('open_page opens a page beside the chat');
   expect(toolResult(calls[1])).toMatchObject({ success: true, shown: true, displayText: 'Brought up wiki.example.com/wiki/Fort_Joy beside the chat' });
 
   // The Page tab, the page in it (the stand-in's), its title from the page.
@@ -188,7 +201,7 @@ test('show_page brings the live page up beside the chat: its own webview, no Yap
 
 test('words selected on the page: Ask Yap about this quotes them over the box, asked as a selection', async ({ yap, main, fakeLlm }) => {
   await setConfig(yap, main, chatConfig(fakeLlm));
-  fakeLlm.scriptChat([{ tools: [{ name: 'show_page', args: { url: FORT_JOY_URL } }] }, { content: 'It’s beside the chat.' }]);
+  fakeLlm.scriptChat([{ tools: [{ name: 'open_page', args: { url: FORT_JOY_URL } }] }, { content: 'It’s beside the chat.' }]);
   await ask(main, `Show me ${FORT_JOY_URL}`);
   await expect.poll(async () => (await views(yap)).find((v) => v.key === KEY)?.loaded, { timeout: 20_000 }).toBe(true);
   await expect(main.getByText('It’s beside the chat.')).toBeVisible();
@@ -219,8 +232,9 @@ test('words selected on the page: Ask Yap about this quotes them over the box, a
   await expect(main.getByTestId('chat-quote-sent').last()).toContainText('Every treasure chest marked');
 });
 
-test('snap_page takes a shot of the page and shows it as a picture tab', async ({ yap, main, fakeLlm, shot }) => {
-  await setConfig(yap, main, chatConfig(fakeLlm));
+test('snap_page takes a shot of the page and shows it as a picture tab (a model that reads images)', async ({ yap, main, fakeLlm, shot }) => {
+  // ("vision" in the fake's id: a model that reads images, the only kind offered snap_page.)
+  await setConfig(yap, main, { ...chatConfig(fakeLlm), llmScopes: { chat: { enabled: true, provider: 'custom', baseUrl: fakeLlm.base, model: 'fake-vision-chat' } } });
   const from = fakeLlm.requests.length;
   fakeLlm.scriptChat([{ tools: [{ name: 'snap_page', args: { url: FORT_JOY_URL } }] }, { content: 'Here’s a shot of the page, beside the chat.' }]);
   await ask(main, `Get me a screenshot of ${FORT_JOY_URL}`);
@@ -231,8 +245,8 @@ test('snap_page takes a shot of the page and shows it as a picture tab', async (
   await expect(main.getByText('Here’s a shot of the page')).toBeVisible();
   const result = toolResult(chatCalls(fakeLlm, from)[1]);
   expect(result).toMatchObject({ success: true, shown: true, picture: 'p1', w: 1280, h: 800, displayText: 'Took a shot of wiki.example.com/wiki/Fort_Joy' });
-  // A model that can't see is told not to describe it.
-  expect(result.note).toContain("You can't see it");
+  // It can look at it.
+  expect(result.note).toContain('look_at_picture p1');
   // Its pill; the page it was of, its source line; stored like a pasted picture.
   await expect(main.getByTestId('chat-picture-pill')).toHaveCount(1);
   await expect(main.getByTestId('chat-picture-source')).toContainText('From wiki.example.com');
@@ -246,38 +260,54 @@ test('snap_page takes a shot of the page and shows it as a picture tab', async (
   await expect.poll(async () => (await views(yap)).filter((v) => v.key.startsWith('snap:')).length).toBe(0);
 });
 
-test('offer_browser puts a button under the answer: the person opens the page in their browser', async ({ yap, main, fakeLlm }) => {
-  await setConfig(yap, main, chatConfig(fakeLlm));
-  const from = fakeLlm.requests.length;
-  fakeLlm.scriptChat([
-    {
-      tools: [
-        { name: 'offer_browser', args: { url: FORT_JOY_URL, why: 'the interactive map' } },
-        // Not a link from the person or a search: refused, no button.
-        { name: 'offer_browser', args: { url: 'https://evil.example/?notes=secret', why: 'a prize' } },
-      ],
-    },
-    { content: 'The interactive map works best in your browser.' },
-  ]);
-  const before = (await yap.invoke('e2e_opened_urls')).length;
-  // (Worded so the model isn't made to search first: a model on this PC
-  // — the fake's address is — is, for a question that needs the web.)
-  await ask(main, `Give me a button for the map page ${FORT_JOY_URL}`);
-  await expect(main.getByText('works best in your browser')).toBeVisible({ timeout: 20_000 });
-  const offer = main.getByTestId('chat-offer');
-  await expect(offer).toHaveCount(1);
-  await expect(offer).toContainText('Open the interactive map in your browser');
-  // Never opened by the model: nothing until the person clicks.
-  expect((await yap.invoke('e2e_opened_urls')).length).toBe(before);
-  const refused = chatCalls(fakeLlm, from)[1].messages.filter((m) => m.role === 'tool').map((m) => JSON.parse(m.content));
-  expect(refused[1]).toMatchObject({ success: false, displayText: "Didn't offer evil.example/?notes=secret: not a link from you or the search" });
-  await offer.click();
-  await expect.poll(() => yap.invoke('e2e_opened_urls')).toContain(FORT_JOY_URL);
-  await expectStore(yap, 'chats.json', (s) => s.conversations.some((c) => c.messages.at(-1)?.offers?.[0]?.why === 'the interactive map'));
-  await expect(main.getByText('Offered a page for your browser')).toBeVisible();
+test('open_page opens a search or a site the person named; read_open_page reads the page in front; Open in … follows Links', async ({ yap, main, fakeLlm }) => {
+  await setConfig(yap, main, { ...chatConfig(fakeLlm), webSearchBrowser: 'duckduckgo' });
+  // Words: a search on the person's engine, beside the chat (Yap never reads it).
+  let from = fakeLlm.requests.length;
+  fakeLlm.scriptChat([{ tools: [{ name: 'open_page', args: { search: 'train times Kellbrook to Port Ellis' } }] }, { content: 'The search is open beside the chat.' }]);
+  await ask(main, 'Can you open up a search for train times from Kellbrook to Port Ellis?');
+  await expect(main.getByText('The search is open beside the chat.')).toBeVisible({ timeout: 20_000 });
+  expect(toolResult(chatCalls(fakeLlm, from)[1])).toMatchObject({ success: true, shown: true, displayText: 'Brought up a search for "train times Kellbrook to Port Ellis" beside the chat' });
+  await expect(main.getByTestId('chat-page-address')).toHaveValue('https://duckduckgo.com/?q=train+times+Kellbrook+to+Port+Ellis', { timeout: 20_000 });
+  // The next question says what's open; reading a search engine's results is refused.
+  from = fakeLlm.requests.length;
+  fakeLlm.scriptChat([{ tools: [{ name: 'read_open_page', args: {} }] }, { content: 'Pick a result and I can help.' }]);
+  await main.getByRole('textbox', { name: 'Message' }).fill('What does it say?');
+  await main.getByRole('button', { name: 'Send' }).click();
+  await expect(main.getByText('Pick a result and I can help.')).toBeVisible({ timeout: 20_000 });
+  let calls = chatCalls(fakeLlm, from);
+  expect(JSON.stringify(calls[0].messages)).toContain('Open beside the chat: tab 1');
+  expect(JSON.stringify(calls[0].messages)).toContain('search results, in front');
+  expect(toolResult(calls[1])).toMatchObject({ success: false, displayText: expect.stringMatching(/^Didn't read duckduckgo\.com\/\?q=train\+times.*: a search engine's results$/) });
 
-  // Settings → General → Links: the browsers this PC has registered; one
-  // picked, every "Open in …" names it (and open_external opens in it).
+  // A page: read as the person sees it, cited, its text the model's.
+  from = fakeLlm.requests.length;
+  fakeLlm.scriptChat([{ tools: [{ name: 'open_page', args: { url: FORT_JOY_URL } }] }, { content: 'It’s open.' }]);
+  await say(main, `Open ${FORT_JOY_URL}`);
+  await expect.poll(async () => (await views(yap)).find((v) => v.key === KEY)?.loaded, { timeout: 20_000 }).toBe(true);
+  from = fakeLlm.requests.length;
+  fakeLlm.scriptChat([{ tools: [{ name: 'read_open_page', args: {} }] }, { content: 'It marks every treasure chest [1].' }]);
+  await main.getByRole('textbox', { name: 'Message' }).fill('What is this page about?');
+  await main.getByRole('button', { name: 'Send' }).click();
+  await expect(main.getByText('It marks every treasure chest')).toBeVisible({ timeout: 20_000 });
+  calls = chatCalls(fakeLlm, from);
+  const read = toolResult(calls[1]);
+  expect(read).toMatchObject({ success: true, displayText: 'Read wiki.example.com/wiki/Fort_Joy beside the chat' });
+  // (The search is tab 1, this page tab 2, in front.)
+  expect(read.data).toMatchObject({ tab: 2, title: 'Fort Joy - Example Wiki', url: FORT_JOY_URL, n: 1 });
+  expect(read.data.text).toContain('Every treasure chest marked');
+  await expect(main.getByText('Read the page beside the chat')).toBeVisible();
+
+  // A site the person named: its home page, though no search found it.
+  from = fakeLlm.requests.length;
+  fakeLlm.scriptChat([{ tools: [{ name: 'open_page', args: { url: 'https://www.exampletube.com/' } }] }, { content: 'ExampleTube is open.' }]);
+  await say(main, 'Open ExampleTube for me');
+  await expect(main.getByText('ExampleTube is open.')).toBeVisible({ timeout: 20_000 });
+  expect(toolResult(chatCalls(fakeLlm, from)[1])).toMatchObject({ success: true, displayText: 'Brought up exampletube.com beside the chat' });
+
+  // No model gets offer_browser; Settings → General → Links: the browsers this
+  // PC has registered, one picked, and the tab's Open in … names it.
+  expect(calls[0].tools).not.toContain('offer_browser');
   await openSettings(main, 'General');
   const pick = main.getByRole('combobox', { name: 'Open links in' });
   await expect(pick.locator('option')).toHaveText(['Default browser', 'Brave', 'Firefox']);
@@ -285,19 +315,18 @@ test('offer_browser puts a button under the answer: the person opens the page in
   await expect.poll(async () => (await yap.invoke('get_config')).openLinksIn).toBe('Brave');
   await closeSettings(main);
   expect(await yap.invoke('browser_label')).toBe('Brave');
-  await expect(offer).toContainText('Open the interactive map in Brave');
-  const times = async () => (await yap.invoke('e2e_opened_urls')).filter((u) => u === FORT_JOY_URL).length;
-  const was = await times();
-  await offer.click();
-  await expect.poll(times).toBe(was + 1);
+  await expect(main.getByTestId('chat-page-open')).toHaveText('Open in Brave');
+  const before = (await yap.invoke('e2e_opened_urls')).length;
+  await main.getByTestId('chat-page-open').click();
+  await expect.poll(async () => (await yap.invoke('e2e_opened_urls')).length).toBe(before + 1);
   // Back to Windows' default: "your browser" again.
   await setConfig(yap, main, { openLinksIn: '' });
-  await expect(offer).toContainText('Open the interactive map in your browser');
+  await expect(main.getByTestId('chat-page-open')).toHaveText('Open in your browser');
 });
 
 test('the + opens a new tab: an address or words go in its address bar, Back and Forward, and its data clears', async ({ yap, main, fakeLlm, shot }) => {
   await setConfig(yap, main, { ...chatConfig(fakeLlm), webSearchBrowser: 'duckduckgo' });
-  fakeLlm.scriptChat([{ tools: [{ name: 'show_page', args: { url: FORT_JOY_URL } }] }, { content: 'It’s beside the chat.' }]);
+  fakeLlm.scriptChat([{ tools: [{ name: 'open_page', args: { url: FORT_JOY_URL } }] }, { content: 'It’s beside the chat.' }]);
   await ask(main, `Show me ${FORT_JOY_URL}`);
   await expect.poll(async () => (await views(yap)).find((v) => v.key === KEY)?.loaded, { timeout: 20_000 }).toBe(true);
   // A page showing: the row is there with one tab, the page's title its name, and the +.

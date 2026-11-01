@@ -1718,19 +1718,42 @@ the browser now (2026-11-01): "Open in Brave", "Open page in your browser"
 (`stores/browserName.svelte.js`, below).
 
 **Pages beside the chat** (2026-11-01, the plan's Milestone 2;
-`chat/pages.rs`, `chat/pages/view.rs`). Three tools for every tool-using
-model with the web on (`pages::on`: the same models as the picture tools;
-Yap does the work, so no judgment is needed), one short general line in the
-system prompt (`pages::INSTRUCTIONS`: live pages for interactive things, a
-shot to keep, the person's browser when they'd do better there; ≤ 400
-tokens with the schemas):
-- **`show_page { url, section? }`**: a live page in a **Page tab**
-  (`stream::Event::Page {page: ShownPage}` opens it mid-turn; the answer
-  keeps it, `ChatMessage.pages`, so its tab comes back with the
-  conversation; a pill under the answer, `PagePills.svelte`). The model
-  never sees it ("you don't see it": its result); nothing of the page goes
-  to the model, so it isn't web content.
-- **`snap_page { url }`**: the page's shot (`CapturePreview`, a PNG): the
+`chat/pages.rs`, `chat/pages/view.rs`; reshaped the same day after the
+maintainer's first real try — "open Google" opened the Chrome app, a site
+named but not searched for was refused, a search wasn't offered beside the
+chat). Tools for every tool-using model with the web on (`pages::on`: the
+same models as the picture tools; Yap does the work, so no judgment is
+needed), one short general line in the system prompt (`pages::instructions`:
+open a page or a search here when the user asks to open, show or search for
+something; websites never with `open_app`; read the page open beside the
+chat for "this page"; ≤ 400 tokens with the schemas), and every question
+says which tabs are open (`pages::tabs_line`: "Open beside the chat: tab 1
+"…" (…), in front; tab 2 … search results. read_open_page reads one.",
+from `view::open_tabs`):
+- **`open_page { url? | search?, section? }`** (`show_page`, its earlier
+  name, is the same): a live page in a **Page tab** (`stream::Event::Page
+  {page: ShownPage}` opens it mid-turn; the answer keeps it,
+  `ChatMessage.pages`, so its tab comes back with the conversation; a pill
+  under the answer, `PagePills.svelte`) — a page from this turn's results or
+  the person's messages, **the home page of a site the person named**
+  (`named_site`: "open ExampleTube" → `https://www.exampletube.com/`; the
+  site itself or `www.`, no path, query or other subdomain, its name a word
+  of the question), or **search words** on the person's engine
+  (`web_search_browser`, the address bar's; titled "Search: …"). Nothing of
+  the page goes to the model by opening it.
+- **`read_open_page { tab? }`**: the page in front beside the chat (or tab
+  n, `view::pick_tab`), read in place (`view::PAGE_TEXT_SCRIPT`, Yap's own
+  read-only script through `view::run_script`: the title, the `main` /
+  `article` element's headings and text, else the page's) — its text cut at
+  `READ_MAX` (5,000 characters, `more` when there's more), its headings,
+  the tabs open; a source of the turn (`Turn::read_open`: numbered,
+  opened, cited as [n]) and **web content** (the safety rule). **Never a
+  search engine's results page** (`search_page`: their terms forbid
+  automated reading, web-and-apps.md) — refused, the person reads it; a shot
+  of one too.
+- **`snap_page { url? }`** — **only for a model that reads images**
+  (`Gate::Look`; one that can't was only told not to describe it): the page
+  in front when there's no url; the page's shot (`CapturePreview`, a PNG): the
   panel's page as it is when it's that page and loaded, else the page loaded
   for it in a host under Yap's own page (out of sight, 1280 × 800 at 100 %,
   `SETTLE` 1.2 s after it loads, 20 s to load), kept like a pasted picture
@@ -1739,15 +1762,15 @@ tokens with the schemas):
   (`TurnPictures::add_shot`, `yap-shot:<id>`): a model that reads images can
   `look_at_picture` it at once (no download), and `show_picture` of it
   returns the one shown. A shot is web content (the safety rule).
-- **`offer_browser { url, why }`**: a button under the answer ("Open the
-  interactive map in Brave", `BrowserOffers.svelte`; `Event::Offer`,
-  `ChatMessage.offers`). The model never opens a browser: the person clicks
-  (`open_external`).
-- **Which pages**: only a page from this turn's results or the person's
-  messages (`web::Turn::allowed`, `read_page`'s rule), public http(s) only
-  (`web::check_url`); four pages, three shots and two buttons a turn. None is
-  an action tool (`tools::ACTION_TOOLS`): nothing leaves Yap but an address a
-  search or the person gave.
+- **`offer_browser { url, why }`** is **no longer offered** (1 Nov 2026:
+  the Page tab has Open in <browser>, and one tool fewer helps a small
+  model): an older answer's buttons still show (`BrowserOffers.svelte`,
+  `ChatMessage.offers`), and the code stays for them.
+- **Which pages**: as above, public http(s) only (`web::check_url`); four
+  pages and three shots a turn. None is an action tool
+  (`tools::ACTION_TOOLS`): nothing leaves Yap but an address a search or the
+  person gave, a site they named, or the words of a search they asked for
+  (to their own engine, as a web search sends its words to its service).
 - **The Page tab** (`PageTab.svelte`, in DocPanel's chunk; one per page,
   `{#key}`): the page is **its own WebView2**, Rust's (`pages/view.rs`), not
   Tauri's — Tauri puts its IPC (`__TAURI_INTERNALS__`, the invoke key) into

@@ -139,8 +139,13 @@ pub fn describe(name: &str, args: &Value, title_of: &dyn Fn(u64) -> Option<Strin
         "find_pictures" => {
             Activity::new("picture", with(text(&["url"]).map(|u| crate::web::short_url(&u)), "Looking for pictures on", "Looking for pictures"))
         }
-        // Pages beside the chat (chat/pages.rs): the page's address.
-        "show_page" => Activity::new("read", with(text(&["url"]).map(|u| crate::web::short_url(&u)), "Bringing up", "Bringing up a page")),
+        // Pages beside the chat (chat/pages.rs): the page's address, or the
+        // search's words (show_page: open_page's earlier name).
+        "open_page" | "show_page" => match text(&["search"]) {
+            Some(words) => Activity::new("search", format!("Opening a search for {}", quoted(&words))),
+            None => Activity::new("read", with(text(&["url"]).map(|u| crate::web::short_url(&u)), "Bringing up", "Bringing up a page")),
+        },
+        "read_open_page" => Activity::new("read", "Reading the page beside the chat"),
         "snap_page" => {
             Activity::new("picture", with(text(&["url"]).map(|u| crate::web::short_url(&u)), "Taking a shot of", "Taking a shot of a page"))
         }
@@ -203,6 +208,8 @@ mod tests {
         assert_eq!(describe("show_picture", &Value::Null, &titles).mark, "picture");
         assert_eq!(line("show_page", json!({ "url": "https://maps.example.com/fort-joy", "section": "Chests" })), "Bringing up maps.example.com/fort-joy");
         assert_eq!(line("show_page", Value::Null), "Bringing up a page");
+        assert_eq!(line("open_page", json!({ "search": "train times" })), "Opening a search for ‘train times’");
+        assert_eq!(line("read_open_page", json!({})), "Reading the page beside the chat");
         assert_eq!(line("snap_page", json!({ "url": "https://www.maps.example.com/fort-joy/" })), "Taking a shot of maps.example.com/fort-joy");
         assert_eq!(line("offer_browser", json!({ "url": "https://maps.example.com/x", "why": "the map" })), "Adding a button to open it in your browser");
         assert_eq!(line("something_new", json!({})), "Working");

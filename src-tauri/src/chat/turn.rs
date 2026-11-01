@@ -479,6 +479,14 @@ async fn answer_turn(
     if in_message {
         context.push(crate::ai::about_you::clock_line(&profile, now));
     }
+    // The pages open beside the chat (chat/pages.rs): "this page" is the one
+    // in front, and read_open_page reads it.
+    if pictures != crate::chat::pictures::Gate::Off {
+        let tabs = crate::chat::pages::view::open_tabs().await;
+        if !tabs.is_empty() {
+            context.push(crate::chat::pages::tabs_line(&tabs));
+        }
+    }
     // A model on this PC asked something that needs the web: its first step
     // must be a search (left to decide, Qwen3.5-4B answered "the best RPG
     // games coming out in 2026" from memory, a tester's chat, 2026-10-21).
@@ -1137,12 +1145,12 @@ fn instructions(
                 s.push(' ');
                 s.push_str(&lines);
             }
-            // Pages beside the chat (chat/pages.rs): live pages, shots, and
-            // buttons for the person's browser.
-            let pages = crate::chat::pages::instructions(crate::chat::pages::on(pictures));
+            // Pages beside the chat (chat/pages.rs): opening a page or a
+            // search there, reading the one open, shots for a model that sees.
+            let pages = crate::chat::pages::instructions(pictures);
             if !pages.is_empty() {
                 s.push(' ');
-                s.push_str(pages);
+                s.push_str(&pages);
             }
         }
         s.push(' ');

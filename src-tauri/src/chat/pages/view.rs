@@ -353,6 +353,67 @@ pub async fn clear_data(app: &AppHandle) -> Result<(), String> {
     imp::clear_data(app.clone()).await
 }
 
+/// **A page tab, as the model is told it**: its number (1, 2… in the order
+/// the tabs opened), title and address, and whether it's the one in front.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
+pub struct OpenTab {
+    pub tab: usize,
+    /// Its tab's key (never sent to the model: its address is).
+    #[serde(skip)]
+    pub key: String,
+    pub title: String,
+    pub url: String,
+    pub front: bool,
+}
+
+/// **The page tabs open beside the chat** now (none before Yap's window is
+/// up): the one in front is the one on screen, else the one shown last.
+pub async fn open_tabs() -> Vec<OpenTab> {
+    let Some(app) = APP.get().cloned() else { return Vec::new() };
+    imp::tabs(app).await.unwrap_or_default()
+}
+
+/// The tab the model means: `tab` (its number), else the one in front.
+/// Pure.
+pub fn pick_tab(tabs: &[OpenTab], tab: Option<usize>) -> Result<&OpenTab, String> {
+    if tabs.is_empty() {
+        return Err("No page is open beside the chat.".into());
+    }
+    match tab {
+        Some(n) => tabs.iter().find(|t| t.tab == n).ok_or_else(|| format!("There's no tab {n} beside the chat: {} open.", tabs.len())),
+        None => Ok(tabs.iter().find(|t| t.front).unwrap_or(&tabs[tabs.len() - 1])),
+    }
+}
+
+/// **Run `script` in page `key`** (Yap's own script, never one a page or a
+/// model wrote): its result as JSON.
+pub async fn run_script(key: &str, script: String) -> Result<String, String> {
+    let app = APP.get().cloned().ok_or("Yap's window isn't ready.")?;
+    imp::eval(app, key.to_string(), script).await
+}
+
+/// What a page says, for the model (`read_open_page`): its title, its
+/// headings, its main text (the `main` / `article` element's, else the
+/// whole page's), whitespace folded. Read only.
+pub const PAGE_TEXT_SCRIPT: &str = r#"(function(){var t=function(s){return (s||'').replace(/\s+/g,' ').trim();};var m=document.querySelector('main,article,[role=main]')||document.body;if(!m)return {title:document.title,headings:[],text:''};var hs=[].slice.call(m.querySelectorAll('h1,h2,h3')).slice(0,40).map(function(h){return t(h.innerText);}).filter(Boolean);return {title:t(document.title),headings:hs,text:t(m.innerText).slice(0,24000)};})()"#;
+
+/// A page's words, read by [`PAGE_TEXT_SCRIPT`].
+#[derive(Debug, Clone, Default, Deserialize)]
+pub struct PageText {
+    #[serde(default)]
+    pub title: String,
+    #[serde(default)]
+    pub headings: Vec<String>,
+    #[serde(default)]
+    pub text: String,
+}
+
+/// **Read page `key`**: its title, headings and main text.
+pub async fn page_text(key: &str) -> Result<PageText, String> {
+    let raw = run_script(key, PAGE_TEXT_SCRIPT.to_string()).await?;
+    serde_json::from_str(&raw).map_err(|_| "The page couldn't be read.".to_string())
+}
+
 /// **Their profile's folder** (its size, for the dialog): `WV2Profile_<name>`
 /// in WebView2's `EBWebView` folder, in its user data folder — `None` when
 /// there's none yet (never used) or Yap's window can't say.
@@ -477,9 +538,11 @@ mod imp {
     pub async fn snap(_: AppHandle, _: String, _: String) -> Result<Vec<u8>, String> {
         Err(NO.into())
     }
-    #[cfg(debug_assertions)]
     pub async fn eval(_: AppHandle, _: String, _: String) -> Result<String, String> {
         Err(NO.into())
+    }
+    pub async fn tabs(_: AppHandle) -> Result<Vec<super::OpenTab>, String> {
+        Ok(Vec::new())
     }
     #[cfg(debug_assertions)]
     pub async fn list(_: AppHandle) -> Result<serde_json::Value, String> {
@@ -1620,7 +1683,47 @@ mod win {
         main_thread(&app, move |_| quote(&a, &key, &text)).await
     }
 
-    #[cfg(debug_assertions)]
+    /// The page tabs alive now (not a shot's or a clearing's page), in the
+    /// order they opened; the one on screen in front, else the one shown last.
+    pub async fn tabs(app: AppHandle) -> Result<Vec<super::OpenTab>, String> {
+        main_thread(&app, |_| {
+            let (standin, _) = super::web_route();
+            let alive: Vec<(String, String, Option<ICoreWebView2>, bool, u64)> = VIEWS.with(|v| {
+                v.borrow()
+                    .iter()
+                    .filter(|x| x.snap.is_none() && !x.key.starts_with("snap:") && !x.key.starts_with("clear:"))
+                    .map(|x| (x.key.clone(), x.url.clone(), x.core.clone(), x.bounds.is_some(), x.used))
+                    .collect()
+            });
+            let shown = alive.iter().any(|(_, _, _, on, _)| *on);
+            let last = alive.iter().map(|(_, _, _, _, used)| *used).max().unwrap_or(0);
+            alive
+                .into_iter()
+                .enumerate()
+                .map(|(i, (key, url, core, on, used))| {
+                    let (mut now, mut title) = (url, String::new());
+                    if let Some(core) = core {
+                        unsafe {
+                            let mut s = PWSTR::null();
+                            if core.Source(&mut s).is_ok() {
+                                let src = take_pwstr(s);
+                                if !src.is_empty() && src != "about:blank" {
+                                    now = shown_url(&src, standin.as_deref());
+                                }
+                            }
+                            let mut t = PWSTR::null();
+                            if core.DocumentTitle(&mut t).is_ok() {
+                                title = take_pwstr(t);
+                            }
+                        }
+                    }
+                    super::OpenTab { tab: i + 1, key, title, url: now, front: if shown { on } else { used == last } }
+                })
+                .collect()
+        })
+        .await
+    }
+
     pub async fn eval(app: AppHandle, key: String, script: String) -> Result<String, String> {
         let (tx, rx) = tokio::sync::oneshot::channel::<Result<String, String>>();
         main_thread(&app, move |_| {

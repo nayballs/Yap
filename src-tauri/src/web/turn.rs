@@ -230,6 +230,21 @@ impl Turn {
         self.seen = true;
     }
 
+    /// The person's question (the page tools' site they named).
+    pub fn question(&self) -> &str {
+        &self.question
+    }
+
+    /// **The page open beside the chat, read** (`read_open_page`): a page the
+    /// turn read — its number, marked opened, its text for the checks on the
+    /// answer — and web content (the safety rule).
+    pub fn read_open(&mut self, title: &str, url: &str, text: &str) -> usize {
+        self.reads += 1;
+        self.seen = true;
+        self.texts.push(text.chars().take(24_000).collect());
+        self.opened(title, url)
+    }
+
     /// **A page's pictures** as candidates (`chat/pictures.rs`): each with
     /// the page and its number; what a result lists of them (the best five
     /// for the question), `None` when it had none.

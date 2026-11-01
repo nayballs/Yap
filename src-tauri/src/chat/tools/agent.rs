@@ -259,7 +259,7 @@ pub fn offered_tools(open_apps: bool, web: bool, extra: Extra<'_>) -> Value {
         all.extend(pictures.iter().cloned());
     }
     // Pages beside the chat (chat/pages.rs): for the same models.
-    if let (Some(all), Some(pages)) = (tools.as_array_mut(), crate::chat::pages::definitions(crate::chat::pages::on(extra.pictures)).as_array()) {
+    if let (Some(all), Some(pages)) = (tools.as_array_mut(), crate::chat::pages::definitions(extra.pictures).as_array()) {
         all.extend(pages.iter().cloned());
     }
     if let (Some(all), Some(memory_tools)) = (tools.as_array_mut(), memory_definitions(extra).as_array()) {
