@@ -130,22 +130,25 @@ export function visionRefused(e) {
   return s.includes("couldn't read the screenshot") || s.includes("can't read images");
 }
 
-/** "Copy image": onto the clipboard, out of Win+V history (snip/copy_save.rs). */
-export async function copyImage(id) {
+/**
+ * "Copy image": onto the clipboard, out of Win+V history (snip/copy_save.rs).
+ * `what`: what it's called ("Screenshot", or "Picture": one Chat found online).
+ */
+export async function copyImage(id, what = 'Screenshot') {
   try {
     await invoke('chat_image_copy', { id });
-    toast({ title: 'Screenshot copied', variant: 'success' });
+    toast({ title: `${what} copied`, variant: 'success' });
   } catch (e) {
-    toast({ title: "Couldn't copy the screenshot", description: String(e), variant: 'destructive' });
+    toast({ title: `Couldn't copy the ${what.toLowerCase()}`, description: String(e), variant: 'destructive' });
   }
 }
 
 /** "Save image as…": Windows' Save dialog, in the folder used last. */
-export async function saveImage(id) {
+export async function saveImage(id, what = 'Screenshot') {
   try {
-    if (await invoke('chat_image_save', { id })) toast({ title: 'Screenshot saved', variant: 'success' });
+    if (await invoke('chat_image_save', { id })) toast({ title: `${what} saved`, variant: 'success' });
   } catch (e) {
-    toast({ title: "Couldn't save the screenshot", description: String(e), variant: 'destructive' });
+    toast({ title: `Couldn't save the ${what.toLowerCase()}`, description: String(e), variant: 'destructive' });
   }
 }
 

@@ -25,6 +25,14 @@
 //   itself a version, so it can be undone too).
 // - Copy (the whole document as Markdown) and Export as Markdown (the Notes
 //   view's `note_export`): `docTools.js`, in the panel's own chunk.
+// - **A workspace** (2026-10-31, find and show): the panel holds every
+//   document and picture of the open conversation as tabs — its answers'
+//   `documents` and `pictures`, each once, newest last, and any a turn
+//   opened before its answer was kept (`extra`): the row is panelTabs.js's,
+//   in the panel's chunk. One shows at a time (`showing`: the document
+//   loaded here, or `picture`, a chat-images picture Chat found online:
+//   DocPanel's picture tab). A tab closed (`closeTab`) leaves the row until
+//   its pill opens it again; another conversation starts it afresh (`reset`).
 // - **Stream-in** (2026-10-31): each section on its way to the page is
 //   `live` (key → its text as it came); the panel lets it flow in at its
 //   own pace (DocPanel, docStream.js), so it reads line by line instead of
@@ -93,6 +101,10 @@ export function undoTarget(versions) {
   return versions[i] ?? null;
 }
 
+/** A tab's key: a document's, a picture's (panelTabs.js). */
+export const docKey = (id) => `doc:${id}`;
+export const picKey = (id) => `pic:${id}`;
+
 /** `key` among `keys`, as documents.rs matches a section's key (case aside). */
 const hasKey = (keys, key) => keys.some((k) => k.trim().toLowerCase() === String(key).trim().toLowerCase());
 
@@ -102,6 +114,13 @@ const hasKey = (keys, key) => keys.some((k) => k.trim().toLowerCase() === String
  */
 export function createDocPanel({ onopennote = () => null } = {}) {
   let open = $state(false);
+  // What shows: 'doc' (the document loaded here, `id`) or 'picture'.
+  let showing = $state('doc');
+  let picture = $state(null);
+  // Tabs closed (their keys), and items shown that no answer has yet (a
+  // turn's, before its answer is kept).
+  let hidden = $state([]);
+  let extra = $state([]);
   let id = $state(null);
   let title = $state('');
   let content = $state('');
@@ -133,6 +152,18 @@ export function createDocPanel({ onopennote = () => null } = {}) {
   let landed = $state(0);
 
   const pending = $derived(pendingSections(content));
+
+  // The tab showing (panelTabs.js makes the row, in the panel's chunk).
+  const active = $derived(!open ? null : showing === 'picture' ? (picture ? picKey(picture.id) : null) : id != null ? docKey(id) : null);
+
+  /**
+   * An item shown: in the row again, and kept for it (an answer may not
+   * have it yet: a turn's, before its answer is kept).
+   */
+  function inRow(item) {
+    if (hidden.includes(item.key)) hidden = hidden.filter((k) => k !== item.key);
+    if (!extra.some((t) => t.key === item.key)) extra = [...extra, item];
+  }
 
   /** Nothing on its way to the page any more (another document, the panel closed). */
   function stopFlow() {
@@ -224,9 +255,11 @@ export function createDocPanel({ onopennote = () => null } = {}) {
     }
   }
 
-  /** Show note `noteId` in the panel (the pill, a turn's document). */
+  /** Show note `noteId` in the panel (the pill, a turn's document, its tab). */
   function show(noteId, opts = {}) {
     if (noteId == null) return;
+    showing = 'doc';
+    inRow({ key: docKey(noteId), kind: 'doc', id: noteId, title: opts.title ?? '' });
     if (id !== noteId) {
       flushSave();
       id = noteId;
@@ -241,6 +274,38 @@ export function createDocPanel({ onopennote = () => null } = {}) {
     }
     open = true;
     load();
+  }
+
+  /**
+   * Show a picture Chat found (`ShownPicture`: its pill, its tab, a turn's
+   * `picture` event). The document stays as it was behind it.
+   */
+  function showPicture(p) {
+    if (!p?.id) return;
+    if (showing === 'doc') flushSave();
+    inRow({ key: picKey(p.id), kind: 'picture', id: p.id, picture: p });
+    picture = p;
+    showing = 'picture';
+    open = true;
+  }
+
+  /** A tab of the row, shown. */
+  function openTab(t) {
+    if (t?.kind === 'picture') showPicture(t.picture);
+    else if (t?.kind === 'doc') show(t.id, { title: t.title });
+  }
+
+  /**
+   * A tab closed: out of the row until its pill opens it again. The one
+   * showing gives way to `next` (its neighbour, panelTabs.js); the last
+   * one closes the panel.
+   */
+  function closeTab(key, next = null) {
+    if (!key || hidden.includes(key)) return;
+    hidden = [...hidden, key];
+    if (key !== active) return;
+    if (next) openTab(next);
+    else close();
   }
 
   /** A turn made or changed a document of this chat (`document` event): the panel shows it. */
@@ -310,6 +375,15 @@ export function createDocPanel({ onopennote = () => null } = {}) {
     expanded = false;
     view = 'preview';
     stopFlow();
+  }
+
+  /** Another conversation: the panel closes, and its row starts afresh. */
+  function reset() {
+    close();
+    showing = 'doc';
+    picture = null;
+    hidden = [];
+    extra = [];
   }
 
   /** Preview (the page) or Source (the markdown, editable). */
@@ -425,6 +499,11 @@ export function createDocPanel({ onopennote = () => null } = {}) {
 
   return {
     get open() { return open; },
+    get showing() { return showing; },
+    get picture() { return picture; },
+    get extra() { return extra; },
+    get hidden() { return hidden; },
+    get active() { return active; },
     get id() { return id; },
     get title() { return title; },
     get content() { return content; },
@@ -446,6 +525,10 @@ export function createDocPanel({ onopennote = () => null } = {}) {
     get width() { return width; },
     get landed() { return landed; },
     show,
+    showPicture,
+    openTab,
+    closeTab,
+    reset,
     fromTurn,
     onSection,
     onTool,

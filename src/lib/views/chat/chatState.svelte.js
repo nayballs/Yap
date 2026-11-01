@@ -42,16 +42,25 @@ export function createChatState({ onopensettings = () => null, onopennote = () =
   let conversations = $state([]);
   let activeId = $state(null);
   let messages = $state([]); // { role, text, tools?, model?, voice?, id }
-  // The document beside the conversation (chat/documents.rs, chatDoc.svelte.js).
+  // The panel beside the conversation (chat/documents.rs, chatDoc.svelte.js):
+  // a tab per document and picture of this conversation.
   const doc = createDocPanel({ onopennote });
 
   /**
    * A turn's document events (`document`: made or changed, the panel shows
-   * it; `section`: one being written) and its tool calls, for the panel;
-   * `m`: the answer's bubble, which gets the document's pill as it comes.
-   * True when the event was the panel's alone.
+   * it; `section`: one being written), a picture it showed (`picture`, the
+   * panel shows it: chat/pictures.rs) and its tool calls, for the panel;
+   * `m`: the answer's bubble, which gets the document's or the picture's
+   * pill as it comes. True when the event was the panel's alone.
    */
   function docEvent(ev, m) {
+    if (ev?.kind === 'picture') {
+      const p = ev.picture;
+      if (!p?.id) return true;
+      doc.showPicture(p);
+      if (m && !(m.livePictures || []).some((x) => x.id === p.id)) m.livePictures = [...(m.livePictures || []), p];
+      return true;
+    }
     if (ev?.kind === 'document') {
       doc.fromTurn(ev);
       if (m) {
@@ -443,8 +452,9 @@ export function createChatState({ onopensettings = () => null, onopennote = () =
     try {
       const conv = await invoke('chat_get', { id });
       stopReading();
-      // Another conversation: its documents are its own (their pills reopen them).
-      doc.close();
+      // Another conversation: its documents and pictures are its own (their
+      // pills reopen the panel, its tabs with it).
+      doc.reset();
       quote = null;
       activeId = id;
       scope = conv.scope || null;
@@ -527,7 +537,7 @@ export function createChatState({ onopensettings = () => null, onopennote = () =
   // message goes with it.
   function newChat(opts) {
     stopReading();
-    doc.close();
+    doc.reset();
     quote = null;
     activeId = null;
     messages = [];
@@ -678,6 +688,8 @@ export function createChatState({ onopensettings = () => null, onopennote = () =
       const conv = await invoke('chat_get', { id });
       if (!alive) return;
       if (activeId !== id) {
+        // Another conversation: the panel's documents and pictures were the last one's.
+        if (activeId != null) doc.reset();
         activeId = id;
         scope = conv.scope || null;
       }
@@ -707,9 +719,12 @@ export function createChatState({ onopensettings = () => null, onopennote = () =
       refreshList();
       scrollThread();
       contextStamp += 1;
-      // The bar's Open in Chat on an answer that made a document: it opens too.
-      const made = p?.phase === 'open' ? messages.at(-1)?.documents?.at(-1) : null;
+      // The bar's Open in Chat on an answer that made a document (or showed
+      // a picture): it opens too.
+      const last = p?.phase === 'open' ? messages.at(-1) : null;
+      const made = last?.documents?.at(-1);
       if (made) doc.show(made.id, { title: made.title });
+      else if (last?.pictures?.length) doc.showPicture(last.pictures.at(-1));
     } catch {
       /* deleted meanwhile */
     }
@@ -904,6 +919,9 @@ export function createChatState({ onopensettings = () => null, onopennote = () =
     // or tool call and grows in place.
     let live = liveAnswer();
     let made = false;
+    // The pictures this turn showed (`picture` events): its pills, should
+    // the reply not list them.
+    let shownPictures = [];
     activity = null;
     activityWaiting = false;
     const onEvent = (ev) => {
@@ -918,8 +936,9 @@ export function createChatState({ onopensettings = () => null, onopennote = () =
         }
         return;
       }
-      // A document of this turn (the panel), while this chat is the one shown.
-      if (ev?.kind === 'document' || ev?.kind === 'section' || ev?.kind === 'tool') {
+      if (ev?.kind === 'picture' && ev.picture?.id && !shownPictures.some((p) => p.id === ev.picture.id)) shownPictures = [...shownPictures, ev.picture];
+      // A document or a picture of this turn (the panel), while this chat is the one shown.
+      if (ev?.kind === 'document' || ev?.kind === 'section' || ev?.kind === 'picture' || ev?.kind === 'tool') {
         if (mine('user') >= 0) {
           const at = mine('assistant');
           if (docEvent(ev, at >= 0 ? messages[at] : null)) return;
@@ -995,6 +1014,8 @@ export function createChatState({ onopensettings = () => null, onopennote = () =
         thinking: res.thinking ?? null,
         // The documents it made or changed (chat/documents.rs): their pills.
         documents: res.documents || [],
+        // The pictures it showed beside the chat (chat/pictures.rs): their pills.
+        pictures: res.pictures ?? shownPictures,
         revisedFrom: streamed != null && streamed.trim() !== '' && streamed.trim() !== String(res.reply).trim() ? fromHeight : 0,
       };
       // The question as saved: with its screenshots' text when it went as text.

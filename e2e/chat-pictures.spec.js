@@ -19,7 +19,7 @@
 // the receipts through YAP_E2E_NET_ALIASES. Fictional pages only.
 import fs from 'node:fs';
 import path from 'node:path';
-import { test as base, expect, expectStore, setConfig } from './support/fixtures.js';
+import { test as base, expect, expectStore, setConfig, openView } from './support/fixtures.js';
 import { startFakeLlm } from './support/fake-llm.js';
 import { startFakeWeb, FORT_JOY_URL, FORT_JOY_MAP } from './support/fake-web.js';
 import { readPng } from './support/png.js';
@@ -154,6 +154,36 @@ test('a page’s picture is shown: downloaded, stored, sent to the page, kept wi
   await expectStore(yap, 'connections.json', (s) =>
     s.entries.some((e) => e.label === 'A picture from the web' && e.host === 'wiki.example.com')
   );
+});
+
+// The whole way, in the Chat view as the person uses it (the panel's own
+// spec, chat-picture-panel.spec.js, seeds its pictures): the question typed
+// and sent, the page read, the picture shown, and the panel opening on it
+// mid-turn, with the thumbnail pill under the answer.
+test('asked in Chat: the picture opens in the panel beside the answer, its pill under it', async ({ yap, main, fakeLlm, shot }) => {
+  await setConfig(yap, main, { webSearch: true, llmScopes: { chat: { enabled: true, provider: 'custom', baseUrl: fakeLlm.base, model: 'fake-chat' } } });
+  fakeLlm.scriptChat([
+    { tools: [{ name: 'read_page', args: { url: FORT_JOY_URL } }] },
+    { tools: [{ name: 'show_picture', args: { picture: 'p1', caption: CAPTION } }] },
+    { content: 'It’s open beside the chat [1].' },
+  ]);
+  await openView(main, 'Chat');
+  await main.getByRole('textbox', { name: 'Message' }).fill(QUESTION);
+  await main.getByRole('button', { name: 'Send' }).click();
+
+  const picture = main.getByTestId('chat-picture');
+  await expect(picture).toBeVisible({ timeout: 20_000 });
+  await expect(main.getByTestId('chat-picture-caption')).toHaveText(CAPTION);
+  await expect(main.getByTestId('chat-picture-source')).toHaveText(/From Fort Joy - Example Wiki\s*·\s*Open page/);
+  // The stored picture itself, drawn from Yap's own store.
+  await expect
+    .poll(() => main.getByTestId('chat-picture-img').evaluate((img) => img.complete && img.naturalWidth > 0), { timeout: 10_000 })
+    .toBe(true);
+  // The answer, with its pill.
+  await expect(main.getByText('It’s open beside the chat')).toBeVisible();
+  await expect(main.getByTestId('chat-picture-pill')).toHaveCount(1);
+  await expect(main.getByTestId('chat-picture-pill')).toContainText(CAPTION);
+  await shot(main, 'asked-in-chat');
 });
 
 test('a model that reads images looks before it shows: the next step carries the picture', async ({ yap, main, fakeLlm }) => {

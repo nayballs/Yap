@@ -1639,6 +1639,60 @@ while Chat changes it by block (`edit_document`, `restore_document`: the
 `tool` event; a pulsing dot, still under reduced motion), else "2 sections
 not written yet" for a document Chat stopped short of finishing.
 
+**The panel is a workspace** (2026-10-31, find and show; the plan's
+Milestone 1, `yap-private/docs/look-and-show-plan.md`): it holds every
+document and every picture Chat found online in the open conversation.
+**Tabs** (`panelTabs.js`, in the panel's chunk): the conversation's answers'
+`documents` and `pictures` (`ChatMessage.pictures`, a `ShownPicture` each:
+`chat/pictures.rs`), each once, in the order they first came (newest
+last), plus any a turn opened before its answer was kept (`chatDoc`'s
+`extra`); a row over the panel only with two things or more (one document
+looks as it always did). A click (or ← / → / Home / End on the row) shows
+one; **×** (shown on hover and on the tab showing; Delete, a middle click)
+closes it until its pill opens it again — the one showing gives way to the
+next tab, else the one before, and the last closes the panel; a document
+being written has a pulsing dot on its tab. **The document stays as it was
+behind a picture**: its part of the panel is hidden, not unmounted (its
+view, its editor and its undo history, find, the flow of a section still
+coming in), its scroll put back from the per-view scroll it keeps. **Opened
+again**: another conversation closes the panel and starts the row afresh
+(`reset`: also when a spoken question lands in another conversation); its
+pills are under its answers, and the first one clicked brings the panel
+back with every tab. Expand, the split and ✕ work as before for both kinds.
+**A picture tab** (`PictureTab.svelte`, `pictureZoom.js`): the picture fits
+the panel at its device pixels, the way Chat's screenshots are placed
+(`chatImages.js` `placed`: Rust's thumbnail at exactly that size,
+`?w=&h=`, asked for once the panel's size has settled for 200 ms, the
+whole picture standing in while the split is dragged), 12 px of room round
+it, never enlarged; **zoom**: the wheel around the pointer, − / + in the
+header with the scale between them ("Fit", else against 1:1: "250%";
+clicked, it toggles), a double-click toggling the fit and 1:1 (one image
+pixel per device pixel; a picture that fits at 1:1 already goes to 2×), the
+keys + / − / 0 while the tab has the focus; from the fit to 8×; **pan**: a
+drag once it's bigger than the stage (and the arrow keys on the stage),
+never past its edge (a picture smaller than the stage one way is centred
+that way); its corner always on a whole device pixel; each picture's zoom
+kept while Yap runs (switching tabs and back). Buttons, keys and a
+double-click glide (200 ms; at once under reduced motion); the wheel and a
+drag follow at once. Under it, **its caption** and **"From <page title> ·
+Open page"** (the browser, `open_external`; a picture from an image search
+names no page — Tavily's — so no Open page: "From images.example.com").
+**⋯** (and a right-click on the picture): Copy image and Save image as…
+(the chat screenshots' own, `snip/copy_save.rs`: "Picture copied"), Open
+original (where the picture itself came from, `imageUrl`), Open page. A
+picture whose file is gone says "This picture is no longer on this PC".
+**In the thread**: an answer's pictures are pills beside its document's (a
+48 px thumbnail at its device pixels in the screenshot frame, the caption,
+the site · Open; one row, wrapping: `PicturePills.svelte`, a small chunk of
+its own loaded for an answer that has some); a click opens the panel on
+that picture. **Live**: a turn's `{kind: "picture", picture}` event (sent
+as `show_picture` lands, on `chat_send`'s channel or the Voice Assistant's
+`yap-assistant-stream`) opens the panel on it mid-turn, as a `document`
+event does, and the answer's bubble gets its pill as it comes
+(`livePictures`); the saved answer takes `chat_send`'s `pictures` (else the
+turn's events). Tested in `e2e/chat-picture-panel.spec.js` (the live event faked
+on `yap-assistant-stream`).
+
 **After Claude Code's markdown file view** (2026-10-31; measured from the
 Claude desktop app's file panel and its document page, `.epitaxy-*`, none
 of its code or CSS). **Two views**: **Preview**, the page (editable once
