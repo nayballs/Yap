@@ -5,8 +5,10 @@
 //! ```text
 //! models/diarization/
 //!   nemotron-3-diarization/        Nemotron-3-Diarization.q8_0.gguf, NOTICE.txt
-//!   nemo-speech-0.2.0-cpu/         the C API DLLs + their ggml and MSVC
-//!                                  runtime, licenses/, NOTICE.txt
+//!   nemo-speech-0.3.0-cpu/         the C API DLLs + their ggml, llama.cpp
+//!                                  and MSVC runtime, licenses/, NOTICE.txt
+//!   nemo-speech-0.2.0-cpu/         the runtime before (run while 0.3.0
+//!                                  downloads; kept for an older Yap)
 //!   eres2net-voxceleb-en/          the voice-matching model (voiceprint.rs),
 //!                                  NOTICE.txt
 //! ```
@@ -111,7 +113,46 @@ pub static NEMOTRON_WEIGHTS: Package = Package {
              version 1.1: https://openmdw.ai/license/1-1/\n",
 };
 
+/// NeMo-Speech.cpp 0.3.0 (30 Oct 2026): long recordings without endpointing
+/// no longer collapse to one speaker after ~10 minutes (NVIDIA's AMI
+/// ES2002a: word speaker accuracy 59.2% → 99.7%), a faster offline front end.
+/// The diarization C ABI is unchanged from 0.2.0 (`diar.h` byte for byte);
+/// its C API now loads the speech-LLM library, which needs llama.cpp's DLLs
+/// (kept by [`runtime_entry`]).
 pub static NEMO_RUNTIME: Package = Package {
+    id: "nemo-speech-0.3.0-cpu",
+    folder: "nemo-speech-0.3.0-cpu",
+    artifacts: &[Artifact {
+        url: "https://github.com/NVIDIA/NeMo-Speech.cpp/releases/download/v0.3.0/nemo-speech-0.3.0-windows-x86_64-cpu.zip",
+        sha256: "4ed9740e361e4653f56c3dce7d1e81883a1c8b831c1bd7d01567fff1130b5b05",
+        size: 8_694_509,
+        unpack: Unpack::NemoRuntimeZip,
+    }],
+    required: &[
+        "nemo_speech_asr_c.dll",
+        "nemo_speech_asr.dll",
+        "nemo_speech_speechlm.dll",
+        "llama.dll",
+        "llama-common.dll",
+        "ggml.dll",
+        "ggml-base.dll",
+        "ggml-cpu.dll",
+    ],
+    notice: "NeMo-Speech.cpp 0.3.0 (Windows x86_64 CPU build)\n\
+             Copyright (c) 2026 NVIDIA Corporation & Affiliates.\n\
+             Licensed under the Apache License, Version 2.0; it bundles ggml\n\
+             and llama.cpp (MIT) and the Microsoft Visual C++ runtime. The\n\
+             licence and the third-party notices that came with it are in\n\
+             licenses/.\n\
+             Downloaded from https://github.com/NVIDIA/NeMo-Speech.cpp/releases/tag/v0.3.0\n",
+};
+
+/// The runtime Yap installed before 0.3.0: a model whose runtime is still
+/// this one runs on it while its successor downloads in the background
+/// ([`runtime_dir`], `diarize::spawn_runtime_upgrade`), and it stays on disk
+/// for an older Yap sharing the data folder (the installed nightly and the
+/// dev build), which looks for this folder.
+pub static NEMO_RUNTIME_0_2_0: Package = Package {
     id: "nemo-speech-0.2.0-cpu",
     folder: "nemo-speech-0.2.0-cpu",
     artifacts: &[Artifact {
@@ -187,16 +228,16 @@ pub static SHERPA_WEIGHTS: Package = Package {
 };
 
 pub static SHERPA_RUNTIME: Package = Package {
-    id: "sherpa-onnx-1.13.8",
-    folder: "sherpa-onnx-1.13.8",
+    id: "sherpa-onnx-2.0.1",
+    folder: "sherpa-onnx-2.0.1",
     artifacts: &[Artifact {
-        url: "https://github.com/k2-fsa/sherpa-onnx/releases/download/v1.13.8/sherpa-onnx-v1.13.8-win-x64-shared-MD-Release-no-tts.tar.bz2",
-        sha256: "876e6b89b8cf84a3a1b375a397507f2cfe9c227c2a945411a11a668475fcb5d3",
-        size: 19_164_933,
+        url: "https://github.com/k2-fsa/sherpa-onnx/releases/download/v2.0.1/sherpa-onnx-v2.0.1-win-x64-shared-MD-Release-no-tts.tar.bz2",
+        sha256: "11fd6a50b97eed38b54fb16d8219f49b16aa7f6a8e43a042316469ef47652e82",
+        size: 20_962_760,
         unpack: Unpack::NotYet,
     }],
     required: &["sherpa-onnx-c-api.dll", "onnxruntime.dll"],
-    notice: "sherpa-onnx 1.13.8, Apache-2.0; ONNX Runtime 1.28.2, MIT.\n",
+    notice: "sherpa-onnx 2.0.1, Apache-2.0; ONNX Runtime, MIT.\n",
 };
 
 pub static MODELS: &[Model] = &[
@@ -213,7 +254,7 @@ pub static MODELS: &[Model] = &[
         license: "OpenMDW-1.1",
         license_url: "https://openmdw.ai/license/1-1/",
         source_url: "https://huggingface.co/nvidia/Nemotron-3-Diarization",
-        runtime_name: "NeMo-Speech.cpp 0.2.0",
+        runtime_name: "NeMo-Speech.cpp 0.3.0",
         runtime_license: "Apache-2.0",
         runtime_license_url: "https://github.com/NVIDIA/NeMo-Speech.cpp",
         weights: &NEMOTRON_WEIGHTS,
@@ -235,7 +276,7 @@ pub static MODELS: &[Model] = &[
         license: "MIT + Apache-2.0",
         license_url: "https://github.com/k2-fsa/sherpa-onnx",
         source_url: "https://github.com/k2-fsa/sherpa-onnx",
-        runtime_name: "sherpa-onnx 1.13.8",
+        runtime_name: "sherpa-onnx 2.0.1",
         runtime_license: "Apache-2.0",
         runtime_license_url: "https://github.com/k2-fsa/sherpa-onnx",
         weights: &SHERPA_WEIGHTS,
@@ -327,9 +368,36 @@ pub fn installed(root: &Path, pkg: &Package) -> bool {
     })
 }
 
-/// A model and its runtime are both there.
+/// A model's runtime's earlier versions, newest first: one still on disk
+/// runs the model until its own arrives.
+fn previous_runtimes(runtime: &Package) -> &'static [&'static Package] {
+    static NEMO_EARLIER: [&Package; 1] = [&NEMO_RUNTIME_0_2_0];
+    if std::ptr::eq(runtime, &NEMO_RUNTIME) {
+        &NEMO_EARLIER
+    } else {
+        &[]
+    }
+}
+
+/// **The runtime folder a model runs on**: its own, else an earlier one
+/// still installed (its own downloading in the background). `None`:
+/// neither is there.
+pub fn runtime_dir(root: &Path, model: &Model) -> Option<PathBuf> {
+    if installed(root, model.runtime) {
+        return Some(root.join(model.runtime.folder));
+    }
+    previous_runtimes(model.runtime).iter().find(|p| installed(root, p)).map(|p| root.join(p.folder))
+}
+
+/// The model is installed but runs on an earlier runtime: its own is
+/// fetched in the background (`diarize::spawn_runtime_upgrade`).
+pub fn needs_runtime_upgrade(root: &Path, model: &Model) -> bool {
+    model.available && installed(root, model.weights) && !installed(root, model.runtime) && runtime_dir(root, model).is_some()
+}
+
+/// A model and a runtime for it are both there.
 pub fn model_installed(root: &Path, model: &Model) -> bool {
-    model.available && installed(root, model.weights) && installed(root, model.runtime)
+    model.available && installed(root, model.weights) && runtime_dir(root, model).is_some()
 }
 
 /// The voice-matching model's file, if it's installed (`voiceprint.rs`).
@@ -350,9 +418,14 @@ pub struct EngineFiles {
 /// The engine files of an installed model (`id`, else the default).
 pub fn engine_files(id: &str) -> Option<EngineFiles> {
     let model = find(id).or_else(|| find(DEFAULT_MODEL))?;
-    let root = root();
-    model_installed(&root, model).then(|| EngineFiles {
-        runtime_dir: root.join(model.runtime.folder),
+    engine_files_in(&root(), model)
+}
+
+/// [`engine_files`] under `root`.
+fn engine_files_in(root: &Path, model: &Model) -> Option<EngineFiles> {
+    let runtime_dir = runtime_dir(root, model)?;
+    model_installed(root, model).then(|| EngineFiles {
+        runtime_dir,
         model_path: root.join(model.weights.folder).join(model.weights_file),
         preset: model.preset,
         name: model.name,
@@ -395,10 +468,12 @@ pub fn list(root: &Path) -> Vec<ModelInfo> {
         .iter()
         .map(|m| {
             let mut download_bytes = 0;
-            for pkg in [m.weights, m.runtime] {
-                if !installed(root, pkg) {
-                    download_bytes += size(pkg);
-                }
+            if !installed(root, m.weights) {
+                download_bytes += size(m.weights);
+            }
+            // (An earlier runtime still runs it: its own comes by itself.)
+            if runtime_dir(root, m).is_none() {
+                download_bytes += size(m.runtime);
             }
             let extras_bytes: u64 = m.extras.iter().filter(|p| !installed(root, p)).map(|p| size(p)).sum();
             download_bytes += extras_bytes;
@@ -438,7 +513,9 @@ pub fn runtime_entry(name: &str) -> Option<String> {
     if rest.iter().any(|p| p.is_empty() || *p == "." || *p == ".." || p.contains(['\\', ':'])) {
         return None;
     }
-    const SKIP: &[&str] = &["llama.dll", "nemo_speech_nmt.dll", "nemo_speech_nmt_c.dll", "nemo_speech_tts.dll"];
+    // (llama.cpp's DLLs stay since 0.3.0: its C API loads the speech-LLM
+    // library, which links them.)
+    const SKIP: &[&str] = &["nemo_speech_nmt.dll", "nemo_speech_nmt_c.dll", "nemo_speech_tts.dll"];
     match rest {
         ["bin", file] => {
             let lower = file.to_ascii_lowercase();
@@ -518,11 +595,34 @@ pub async fn install(root: &Path, id: &str, ticket: &crate::shell::download::Tic
     if !model.available {
         return Err(format!("{} isn't available yet", model.name));
     }
-    let todo: Vec<(&'static str, &Package)> = [("runtime", model.runtime), ("model", model.weights)]
+    let todo: Vec<(&'static str, &'static Package)> = [("runtime", model.runtime), ("model", model.weights)]
         .into_iter()
         .chain(model.extras.iter().map(|p| ("voices", *p)))
         .filter(|(_, pkg)| !installed(root, pkg))
         .collect();
+    install_packages(root, id, todo, ticket, on_progress).await
+}
+
+/// **Model `id`'s runtime alone**: a newer one for a model that runs on an
+/// earlier ([`needs_runtime_upgrade`]), the background upgrade's. Nothing
+/// to do when it's there.
+pub async fn install_runtime(root: &Path, id: &str, ticket: &crate::shell::download::Ticket, on_progress: &(dyn Fn(Progress) + Send + Sync)) -> Result<(), String> {
+    let model = find(id).ok_or_else(|| format!("No diarization model '{id}'"))?;
+    if installed(root, model.runtime) {
+        return Ok(());
+    }
+    install_packages(root, id, vec![("runtime", model.runtime)], ticket, on_progress).await
+}
+
+/// Download, check and unpack `todo`'s packages (each into place whole, or
+/// not at all), reporting progress as model `id`'s.
+async fn install_packages(
+    root: &Path,
+    id: &str,
+    todo: Vec<(&'static str, &'static Package)>,
+    ticket: &crate::shell::download::Ticket,
+    on_progress: &(dyn Fn(Progress) + Send + Sync),
+) -> Result<(), String> {
     let total: u64 = todo.iter().flat_map(|(_, pkg)| sources(pkg)).map(|s| s.size).sum();
     let overall = crate::shell::download::Overall::new(total);
     std::fs::create_dir_all(root).map_err(|e| format!("create {}: {e}", root.display()))?;
@@ -679,6 +779,9 @@ pub fn delete(root: &Path, id: &str) -> Result<(), String> {
         .any(|m| m.id != id && std::ptr::eq(m.runtime, model.runtime) && installed(root, m.weights));
     if !shared {
         remove(model.runtime)?;
+        for earlier in previous_runtimes(model.runtime) {
+            remove(earlier)?;
+        }
     }
     tracing::info!(model = id, "Diarization: model deleted");
     Ok(())
@@ -722,12 +825,46 @@ mod tests {
     }
 
     #[test]
+    fn a_model_on_the_earlier_runtime_runs_on_it_until_its_own_arrives() {
+        let root = std::env::temp_dir().join(format!("yap-diar-upgrade-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let model = find(DEFAULT_MODEL).unwrap();
+        let lay = |pkg: &Package| {
+            let dir = root.join(pkg.folder);
+            std::fs::create_dir_all(&dir).unwrap();
+            for f in pkg.required {
+                std::fs::write(dir.join(f), b"stand-in").unwrap();
+            }
+            dir
+        };
+        // The weights, at their pinned size; no runtime yet.
+        let weights = root.join(model.weights.folder);
+        std::fs::create_dir_all(&weights).unwrap();
+        std::fs::File::create(weights.join(model.weights_file)).unwrap().set_len(model.weights.artifacts[0].size).unwrap();
+        assert!(runtime_dir(&root, model).is_none() && !model_installed(&root, model) && !needs_runtime_upgrade(&root, model));
+        // NeMo-Speech.cpp 0.2.0 from before: it runs the model, and its own is due.
+        let earlier = lay(&NEMO_RUNTIME_0_2_0);
+        assert_eq!(runtime_dir(&root, model), Some(earlier.clone()));
+        assert!(model_installed(&root, model) && needs_runtime_upgrade(&root, model));
+        assert_eq!(engine_files_in(&root, model).unwrap().runtime_dir, earlier);
+        // 0.3.0 arrives: it runs the model; 0.2.0 stays for an older Yap.
+        let own = lay(&NEMO_RUNTIME);
+        assert_eq!(runtime_dir(&root, model), Some(own));
+        assert!(!needs_runtime_upgrade(&root, model) && earlier.is_dir());
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
     fn runtime_zip_keeps_the_dlls_and_licences() {
-        let top = "nemo-speech-0.2.0-windows-x86_64-cpu";
+        let top = "nemo-speech-0.3.0-windows-x86_64-cpu";
         let e = |rest: &str| runtime_entry(&format!("{top}/{rest}"));
         assert_eq!(e("bin/nemo_speech_asr_c.dll").as_deref(), Some("nemo_speech_asr_c.dll"));
         assert_eq!(e("bin/ggml-cpu.dll").as_deref(), Some("ggml-cpu.dll"));
         assert_eq!(e("bin/msvcp140_2.dll").as_deref(), Some("msvcp140_2.dll"));
+        // 0.3.0's C API loads the speech-LLM library, which links llama.cpp.
+        for kept in ["nemo_speech_speechlm.dll", "llama.dll", "llama-common.dll"] {
+            assert_eq!(e(&format!("bin/{kept}")).as_deref(), Some(kept));
+        }
         assert_eq!(e("share/licenses/nemo-speech/LICENSE").as_deref(), Some("licenses/LICENSE"));
         assert_eq!(
             e("share/licenses/nemo-speech/third_party/ggml/LICENSE").as_deref(),
@@ -735,7 +872,6 @@ mod tests {
         );
         for skipped in [
             "bin/nemo-speech.exe",
-            "bin/llama.dll",
             "bin/nemo_speech_tts.dll",
             "bin/nemo_speech_nmt_c.dll",
             "lib/nemo_speech_asr_c.lib",
@@ -781,7 +917,7 @@ mod tests {
         assert!(!row.installed);
         assert_eq!(row.download_bytes, 107_012_128 + 26_485_263, "the runtime is there: the model (and voice matching) to fetch");
         assert_eq!(row.extras_bytes, 26_485_263);
-        assert_eq!(row.size_bytes, 107_012_128 + 5_528_418 + 26_485_263);
+        assert_eq!(row.size_bytes, 107_012_128 + 8_694_509 + 26_485_263);
 
         // Installed without voice matching (a model from before it): still
         // installed; the extra is what's left to fetch.

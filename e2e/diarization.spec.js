@@ -65,7 +65,7 @@ test('Speech-to-Text lists the speaker models, the switch off until one is insta
   await expect(group).toContainText('Beta');
   // Where the files come from, and their licences.
   await expect(group).toContainText('OpenMDW-1.1');
-  await expect(group).toContainText('NeMo-Speech.cpp 0.2.0');
+  await expect(group).toContainText('NeMo-Speech.cpp 0.3.0');
   await expect(group).toContainText('Apache-2.0');
 
   const s = await status(yap);
@@ -114,12 +114,12 @@ test('switching it on without a model offers the download, which installs it and
   // On disk: the model, the runtime's DLLs and licences (not its CLI, LLM
   // library or headers), and a NOTICE in each folder.
   expect(fs.statSync(folder(yap, 'nemotron-3-diarization', MODEL_FILE)).size).toBe(models.modelBytes);
-  for (const dll of RUNTIME_DLLS) expect(fs.existsSync(folder(yap, 'nemo-speech-0.2.0-cpu', dll))).toBe(true);
-  expect(fs.readFileSync(folder(yap, 'nemo-speech-0.2.0-cpu', 'licenses', 'LICENSE'), 'utf8')).toContain('Apache');
-  expect(fs.existsSync(folder(yap, 'nemo-speech-0.2.0-cpu', 'nemo-speech.exe'))).toBe(false);
-  expect(fs.existsSync(folder(yap, 'nemo-speech-0.2.0-cpu', 'llama.dll'))).toBe(false);
+  for (const dll of RUNTIME_DLLS) expect(fs.existsSync(folder(yap, 'nemo-speech-0.3.0-cpu', dll))).toBe(true);
+  expect(fs.readFileSync(folder(yap, 'nemo-speech-0.3.0-cpu', 'licenses', 'LICENSE'), 'utf8')).toContain('Apache');
+  expect(fs.existsSync(folder(yap, 'nemo-speech-0.3.0-cpu', 'nemo-speech.exe'))).toBe(false);
+  expect(fs.existsSync(folder(yap, 'nemo-speech-0.3.0-cpu', 'nemo_speech_tts.dll'))).toBe(false);
   expect(fs.readFileSync(folder(yap, 'nemotron-3-diarization', 'NOTICE.txt'), 'utf8')).toContain('OpenMDW');
-  expect(fs.readFileSync(folder(yap, 'nemo-speech-0.2.0-cpu', 'NOTICE.txt'), 'utf8')).toContain('Apache');
+  expect(fs.readFileSync(folder(yap, 'nemo-speech-0.3.0-cpu', 'NOTICE.txt'), 'utf8')).toContain('Apache');
   // Voice matching came with it (speakers/voiceprint.rs: ERes2Net, Apache-2.0).
   expect(fs.statSync(folder(yap, 'eres2net-voxceleb-en', VOICES_FILE)).size).toBe(models.voicesBytes);
   expect(fs.readFileSync(folder(yap, 'eres2net-voxceleb-en', 'NOTICE.txt'), 'utf8')).toContain('Apache');
@@ -209,7 +209,7 @@ test('deleting the model takes the files away and turns the switch off', async (
   await expect.poll(() => config(yap).meetingDiarization).toBe(false);
   // The model and, as nothing else uses it, the runtime.
   expect(fs.existsSync(folder(yap, 'nemotron-3-diarization'))).toBe(false);
-  expect(fs.existsSync(folder(yap, 'nemo-speech-0.2.0-cpu'))).toBe(false);
+  expect(fs.existsSync(folder(yap, 'nemo-speech-0.3.0-cpu'))).toBe(false);
   await shot(main, '07-deleted');
   await closeSettings(main);
 });

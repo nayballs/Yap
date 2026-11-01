@@ -918,6 +918,39 @@ fn test_mode() -> bool {
     }
 }
 
+/// **A newer speaker runtime, fetched by itself**: a model that runs on an
+/// earlier one (`registry::needs_runtime_upgrade`: NeMo-Speech.cpp 0.2.0
+/// once Yap moved to 0.3.0) gets its own in the background, a minute and a
+/// half after launch — never during a meeting or another speaker download
+/// (it waits for them), its progress shown as a download's. Until it's in
+/// place the earlier runtime runs the model, and a failure leaves it so
+/// (tried again next launch).
+pub fn spawn_runtime_upgrade(app: AppHandle) {
+    tauri::async_runtime::spawn(async move {
+        tokio::time::sleep(Duration::from_secs(90)).await;
+        let root = registry::root();
+        for model in registry::MODELS.iter().filter(|m| registry::needs_runtime_upgrade(&root, m)) {
+            while RUNNING.load(Ordering::SeqCst) > 0 || DOWNLOADING.lock().unwrap_or_else(|p| p.into_inner()).is_some() {
+                tokio::time::sleep(Duration::from_secs(300)).await;
+            }
+            let Some(ticket) = crate::shell::download::Ticket::begin(&registry::cancel_id(model.id)) else { continue };
+            tracing::info!(model = model.id, runtime = model.runtime.id, "Diarization: fetching the newer speaker runtime in the background");
+            let progress_app = app.clone();
+            let on_progress = move |p: registry::Progress| {
+                *DOWNLOADING.lock().unwrap_or_else(|p| p.into_inner()) = Some(p.clone());
+                let _ = progress_app.emit("diarization-download-progress", &p);
+            };
+            let result = registry::install_runtime(&root, model.id, &ticket, &on_progress).await;
+            *DOWNLOADING.lock().unwrap_or_else(|p| p.into_inner()) = None;
+            match result {
+                Ok(()) => tracing::info!(runtime = model.runtime.id, "Diarization: the newer speaker runtime is in place"),
+                Err(e) => tracing::warn!(runtime = model.runtime.id, "Diarization: the newer speaker runtime didn't install ({e}); the earlier one runs on"),
+            }
+            let _ = app.emit("diarization-changed", ());
+        }
+    });
+}
+
 /// Download model `id` (and its runtime): `diarization-download-progress`
 /// while it goes, `diarization-changed` at the end, either way.
 #[tauri::command]

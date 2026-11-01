@@ -3480,3 +3480,24 @@ only Yap's runtime could serve): everyday 5/7, generation 271 tokens/s (MTP, 77 
 kept), prompt 5,402 tokens/s, load 2.0 s, warm-up 0.47 s; `--cleanup` back to back 133 ms
 median (p90 156), after a Chat turn 138, after a long Chat turn 449; the model all on the card
 (34/34 layers, `CUDA0`).
+
+## Spark-X2.6-1.7B (1 Nov 2026)
+
+A new small model (SparkLLM, Apache 2.0; its "state of the art" claims only as images; the
+card says 1.7B, its weights ~2B), `Spark-X2.6-1.7B-Q4_K_M.gguf` (1.77 GB, SHA-256 checked) on
+llama.cpp b11985 CUDA (its `spark2_5` architecture needs b10828+: llamafile couldn't load it),
+against the default Qwen3.5-4B on the same engine, RTX 5070 Ti. Yap's ≥ 4B rule doesn't give
+a 1.7B model tools, so a first run without them scored 1/7 (it never called one): `--tools on`.
+
+| | Spark-X2.6-1.7B | Qwen3.5-4B |
+|---|---|---|
+| Everyday scorecard | 5/7 | 5/7 |
+| Chat's tools (`--only notes-,apps-,calendar-,documents-,knowledge-,honesty-,memory-use --no-web`, 48 run) | 32/48 (67%) | 42/48 (88%) |
+| First words (median) | 0.23–0.36 s | 0.47–0.73 s |
+
+Where it falls short: facts ("a cup is 15 tablespoons"), the calendar (free at 3 over a
+dentist, the wrong meeting, no lookup for a spoken "what's next"), and documents (sections left
+unwritten, edits refused or missed, a document where a note was asked for). Quick and good at
+the everyday tasks, but not the default's equal; no change to the downloads list or the ≥ 4B
+rule. Worth a look again against Qwen3.5-2B for small PCs.
+

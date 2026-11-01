@@ -9,8 +9,8 @@ Telling the call side's voices apart (the beta speaker engine, a child process) 
 - **`speakers/diarize.rs`** (+ `speakers/diarize/`) — **telling the voices on the call side
   apart** (beta, off by default; the spike: yap-private
   `docs/diarization-spike.md`). Engine: **Nemotron-3-Diarization** (q8_0 GGUF,
-  107 MB, OpenMDW-1.1) on **NeMo-Speech.cpp 0.2.0** (CPU build, 5.5 MB zip,
-  Apache-2.0), streaming with the **30 s preset** (`v3-offline`) on 4 OpenMP
+  107 MB, OpenMDW-1.1) on **NeMo-Speech.cpp 0.3.0** (CPU build, 8.7 MB zip,
+  Apache-2.0; 0.2.0 until 1 Nov 2026 — below), streaming with the **30 s preset** (`v3-offline`) on 4 OpenMP
   threads: ~2.4% of real time, labels ~10 s (≤ 21 s) behind the audio, final
   at the stop, no audio kept. **`yap.exe diarize --runtime <dir> --model
   <gguf> [--preset] [--every-ms] [--no-dither] [--seed]`** (main.rs →
@@ -57,9 +57,11 @@ Telling the call side's voices apart (the beta speaker engine, a child process) 
   `speakers::labels` (registered at setup) puts them on the "Them" lines;
   the final handler runs before `finish` returns. **Models** (`registry.rs`): Nemotron-3 (Recommended, the
   default; HF `nvidia/Nemotron-3-Diarization` pinned to commit `f667ed73…`)
-  + its runtime package (NVIDIA's v0.2.0 release zip: `bin/*.dll` minus the
-  CLI/llama/nmt/tts, `share/licenses/` → `licenses/`), and the sherpa-onnx
-  fallback (pyannote seg-3.0 + ERes2Net + sherpa 1.13.8, pinned) listed as
+  + its runtime package (NVIDIA's v0.3.0 release zip: `bin/*.dll` minus the
+  nmt/tts DLLs, `share/licenses/` → `licenses/`; since 0.3.0 llama.cpp's
+  `llama.dll` / `llama-common.dll` stay — its C API loads the speech-LLM
+  library, `nemo_speech_speechlm.dll`, which links them), and the sherpa-onnx
+  fallback (pyannote seg-3.0 + ERes2Net + sherpa 2.0.1, pinned) listed as
   **"For phone-only calls — coming later"** (`available: false`, no engine).
   Install = download (resume; Cancel, `download_cancel {id:
   "diarization:<id>"}`, through the shared helper `shell/download.rs`,
@@ -564,9 +566,9 @@ synthetic speech — not one real call has been measured; voices that sound
 alike merge (three similar women came out as two, 33% error), and that is
 the failure that hurts most, because one "Speaker 2" then holds two people
 (name suggestions abstain on such a voice, but its lines are mixed); 5–6
-people climb to 8–10%; phone-only calls are ~50% wrong; and the runtime is
-NeMo-Speech.cpp 0.2.0, whose asserts abort the child (Yap restarts it, ≤
-2). The Settings hint now says so plainly ("measured on test meetings, not
+people climb to 8–10%; phone-only calls are ~50% wrong; and the runtime
+(NeMo-Speech.cpp 0.2.0 then) had asserts that abort the child (Yap restarts
+it, ≤ 2). The Settings hint now says so plainly ("measured on test meetings, not
 yet on real calls; voices that sound alike can come out as one"). What
 would take it out of beta: one real multi-person call measured (the
 `diarization-real.spec.js` path with a recording of it, or the maintainer's
@@ -672,3 +674,34 @@ processor alone, a 5 s chunk halves the wait to ~3–5 s for about twice the
 CPU (still under a tenth of 4 threads), the error unchanged: the cheaper
 step, no download; it wants a longer meeting measured (memory, an hour)
 before it's the default.
+
+## NeMo-Speech.cpp 0.3.0 (2026-11-01)
+
+The weekly pins check (build-and-test.md, "Keeping what Yap is built from current") flagged
+the runtime: 0.2.0 → **0.3.0** (30 Oct 2026). For Yap it brings the fix for long recordings
+without endpointing collapsing to one speaker after ~10 minutes (NVIDIA's AMI ES2002a: word
+speaker accuracy 59.2% → 99.7%) and a faster offline front end. The diarization C ABI
+(`nemo_speech/diar.h`) is byte for byte the same; `asr.h` only gained two error codes (Yap
+treats any non-zero status as an error) and a speech-LLM config Yap doesn't use. **The catch**:
+0.3.0's `nemo_speech_asr_c.dll` imports `nemo_speech_speechlm.dll`, which links llama.cpp
+(`llama.dll`, `llama-common.dll`) — 0.2.0's unpacking left `llama.dll` out, so a pin bump
+alone would have failed to load on every PC. `registry::runtime_entry` keeps them now and the
+package requires them.
+
+**An install on 0.2.0** (`registry::NEMO_RUNTIME_0_2_0`) keeps running on it
+(`registry::runtime_dir`: the model's own runtime, else an earlier one still there — so a
+meeting's speakers never stop) while `diarize::spawn_runtime_upgrade` fetches 0.3.0 in the
+background (`registry::install_runtime`: the runtime alone, 90 s after launch, never during a
+meeting or another speaker download, its progress as a download's; a failure leaves 0.2.0 and
+tries again next launch). The 0.2.0 folder stays on disk for an older Yap sharing the data
+folder (the installed nightly looks for it); deleting the model removes both. sherpa-onnx's
+pin moved to 2.0.1 too (listed, not installable yet: no engine runs it).
+
+Measured the same day with `cargo test --test diarize_child -- --ignored` (the spike's ten
+meetings, 30 s preset, processor; `YAP_DIARIZATION_RUNTIME` = each runtime as Yap unpacks it):
+**the same error on every file** (s2_clean 2.7%, s3_clean 1.5%, s4_clean 15.9%, s4_hard 2.3%,
+s3_noisy 0.7%, s3_dialin 0.4%, s4_dialin 8.0%, s2_phone 48.0%, s3_phone 50.9%, long30_opus 0.3%),
+a little faster (6-minute meetings ~7.1–7.6 s of compute against 7.4–9.0 s; RTF 0.019–0.021
+against 0.021–0.025) and quicker to load (~6 ms against ~30 ms). 0.3.0 unpacked without
+`llama.dll` fails to start at once (the catch above, confirmed).
+

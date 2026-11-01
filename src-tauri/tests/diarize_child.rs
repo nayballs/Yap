@@ -7,7 +7,7 @@
 //! Needs the model and runtime on disk, so it's ignored by default:
 //!
 //! ```text
-//! YAP_DIARIZATION_MODELS=<folder with nemotron-3-diarization/ and nemo-speech-0.2.0-cpu/>
+//! YAP_DIARIZATION_MODELS=<folder with nemotron-3-diarization/ and nemo-speech-0.3.0-cpu/>
 //! YAP_DIARIZATION_AUDIO=<folder of <name>.wav + <name>.rttm>
 //! YAP_DIARIZATION_FILES=s2_clean,s3_clean   (optional; the default set below)
 //! cargo test --test diarize_child -- --ignored --nocapture
@@ -168,7 +168,7 @@ struct Run {
 /// frames).
 fn diarize(models: &Path, wav: &Path) -> Run {
     let audio = read_wav(wav);
-    let runtime = std::env::var_os("YAP_DIARIZATION_RUNTIME").map(PathBuf::from).unwrap_or_else(|| models.join("nemo-speech-0.2.0-cpu"));
+    let runtime = std::env::var_os("YAP_DIARIZATION_RUNTIME").map(PathBuf::from).unwrap_or_else(|| models.join("nemo-speech-0.3.0-cpu"));
     let preset = std::env::var("YAP_DIARIZATION_PRESET").unwrap_or_else(|_| "v3-offline".to_string());
     let preset = if preset == "default" { String::new() } else { preset };
     let gpu = std::env::var("YAP_DIARIZATION_GPU").unwrap_or_else(|_| "-1".to_string());

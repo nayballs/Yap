@@ -1063,6 +1063,9 @@ pub fn run() {
             // llama.cpp's own builds kept up to date: a look once a day, a
             // newer build tried with the person's model before it's used.
             ai::local_llm::engine::updater::spawn(handle.clone());
+            // The speaker engine's newer runtime, when a model runs on an
+            // earlier one (NeMo-Speech.cpp 0.2.0 → 0.3.0), in the background.
+            speakers::diarize::spawn_runtime_upgrade(handle.clone());
 
             // Local API bridge (Integrations): loopback server for CLIs/agents.
             integrations::bridge::sync(&handle, cfg.bridge_enabled);

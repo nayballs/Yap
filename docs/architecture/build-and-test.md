@@ -148,7 +148,8 @@ failures.)
   commit aren't checked (a repo's README edit would look like a new version). A pin is
   updated by hand — the new URL and the SHA-256 the release publishes — and checked on a
   real PC before it ships. First run (1 Nov 2026): NeMo-Speech.cpp v0.2.0 → v0.3.0 and
-  sherpa-onnx v1.13.8 → v2.0.1 behind (the speaker engine).
+  sherpa-onnx v1.13.8 → v2.0.1 behind (the speaker engine) — both moved the same day
+  (speakers.md, "NeMo-Speech.cpp 0.3.0").
 
 ## The privacy guard (`scripts/privacy-guard.mjs`)
 The repo is public, so nothing personal or secret may land in it (2026-10-22).

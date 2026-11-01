@@ -151,7 +151,8 @@ export function frameError(ref, hyp, collar = 0.25) {
 }
 
 /** The DLLs Yap needs from the runtime (registry.rs `required`). */
-export const RUNTIME_DLLS = ['nemo_speech_asr_c.dll', 'nemo_speech_asr.dll', 'ggml.dll', 'ggml-base.dll', 'ggml-cpu.dll'];
+// (0.3.0's C API loads the speech-LLM library, which links llama.cpp.)
+export const RUNTIME_DLLS = ['nemo_speech_asr_c.dll', 'nemo_speech_asr.dll', 'nemo_speech_speechlm.dll', 'llama.dll', 'llama-common.dll', 'ggml.dll', 'ggml-base.dll', 'ggml-cpu.dll'];
 export const MODEL_FILE = 'Nemotron-3-Diarization.q8_0.gguf';
 export const VOICES_FILE = '3dspeaker_speech_eres2net_sv_en_voxceleb_16k.onnx';
 
@@ -161,11 +162,11 @@ export const VOICES_FILE = '3dspeaker_speech_eres2net_sv_en_voxceleb_16k.onnx';
  */
 export async function startFakeSpeakerModels(dir) {
   fs.mkdirSync(dir, { recursive: true });
-  const top = 'nemo-speech-0.2.0-windows-x86_64-cpu';
+  const top = 'nemo-speech-0.3.0-windows-x86_64-cpu';
   const zipFiles = {};
   for (const dll of RUNTIME_DLLS) zipFiles[`${top}/bin/${dll}`] = `fake ${dll}`;
   zipFiles[`${top}/bin/nemo-speech.exe`] = 'the CLI, which Yap leaves out';
-  zipFiles[`${top}/bin/llama.dll`] = 'not needed for diarization';
+  zipFiles[`${top}/bin/nemo_speech_tts.dll`] = 'not needed for diarization';
   zipFiles[`${top}/share/licenses/nemo-speech/LICENSE`] = 'Apache License 2.0 (stand-in)';
   zipFiles[`${top}/share/licenses/nemo-speech/NOTICE`] = 'NeMo-Speech.cpp (stand-in)';
   zipFiles[`${top}/include/nemo_speech/diar.h`] = '// headers stay out';
@@ -198,7 +199,7 @@ export async function startFakeSpeakerModels(dir) {
   const sourcesFile = path.join(dir, 'diarization-sources.json');
   const local = {
     'nemotron-3-diarization': [{ url: `${base}/model.gguf`, sha256: sha256(model), size: model.length }],
-    'nemo-speech-0.2.0-cpu': [{ url: `${base}/runtime.zip`, sha256: sha256(runtime), size: runtime.length }],
+    'nemo-speech-0.3.0-cpu': [{ url: `${base}/runtime.zip`, sha256: sha256(runtime), size: runtime.length }],
     'eres2net-voxceleb-en': [{ url: `${base}/voices.onnx`, sha256: sha256(voices), size: voices.length }],
   };
   const write = (sources) => fs.writeFileSync(sourcesFile, JSON.stringify(sources, null, 2));

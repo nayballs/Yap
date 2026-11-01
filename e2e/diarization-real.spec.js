@@ -9,7 +9,7 @@
 //
 // Skipped unless the model and runtime are on disk (it never downloads them):
 //   YAP_E2E_DIARIZATION_MODELS  a folder laid out like <data>/models/diarization
-//                               (nemotron-3-diarization/, nemo-speech-0.2.0-cpu/)
+//                               (nemotron-3-diarization/, nemo-speech-0.3.0-cpu/)
 //   YAP_E2E_DIARIZATION_AUDIO   a folder of <name>.wav + <name>.rttm (the
 //                               diarization spike's audio/conv; a <name>.json
 //                               of its utterances' words scores the lines)
