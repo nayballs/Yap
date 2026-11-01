@@ -258,8 +258,9 @@ pub fn offered_tools(open_apps: bool, web: bool, extra: Extra<'_>) -> Value {
     if let (Some(all), Some(pictures)) = (tools.as_array_mut(), crate::chat::pictures::definitions(extra.pictures, !web).as_array()) {
         all.extend(pictures.iter().cloned());
     }
-    // Pages beside the chat (chat/pages.rs): for the same models.
-    if let (Some(all), Some(pages)) = (tools.as_array_mut(), crate::chat::pages::definitions(extra.pictures).as_array()) {
+    // Pages beside the chat (chat/pages.rs): for the same models; acting on
+    // them (chat/pages/act.rs) for the ones that may.
+    if let (Some(all), Some(pages)) = (tools.as_array_mut(), crate::chat::pages::definitions(extra.pictures, extra.act).as_array()) {
         all.extend(pages.iter().cloned());
     }
     // The screen (chat/see_screen.rs): not tied to the web.
@@ -822,10 +823,14 @@ async fn tool_loop(
                     tracing::info!(provider, "Chat: no room left in the model's context for the screen");
                     tool_error(crate::chat::budget::NO_ROOM_TO_LOOK.to_string(), Value::Null, "Didn't look at your screen: no room left in the model's context".to_string())
                 }
+            } else if let (Some(turn), true) = (web.as_deref_mut(), crate::chat::pages::offers_act(extra.pictures, extra.act, name)) {
+                // An action on a page beside the chat (chat/pages/act.rs):
+                // its rules in Rust, a click that buys or pays asked first.
+                crate::chat::pages::act::execute(turn, name, &args, live).await
             } else if let (Some(turn), true) = (web.as_deref_mut(), crate::chat::pages::offers(extra.pictures, name)) {
                 // A page brought up, a shot of one, a button for the
                 // person's browser (chat/pages.rs): the page hears each at once.
-                let run = crate::chat::pages::execute(turn, name, &args, extra.pictures).await;
+                let run = crate::chat::pages::execute(turn, name, &args, extra.pictures, extra.act).await;
                 if let Some(live) = live {
                     if let Some(page) = run.page {
                         live.sink.send(crate::chat::stream::Event::Page { page });

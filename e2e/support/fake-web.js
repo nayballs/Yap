@@ -19,6 +19,9 @@
 // - Pictures (chat/pictures.rs): wiki.example.com/wiki/Fort_Joy, a made-up
 //   game wiki's page with a captioned map, concept art and a logo, and the
 //   pictures themselves (PNGs: `FORT_JOY_MAP` 320 × 240, the art 400 × 225).
+// - Acting on pages (chat/pages/act.rs): rail.example.com, a made-up rail
+//   site — a journey form, its results by the stations asked for, a payment
+//   page with card fields, a sign-in page.
 //
 // `requests` keeps every request: `{ service, method, host, path, query,
 // headers, body }`.
@@ -100,6 +103,43 @@ const PAGES = {
     <img src="/images/fort_joy_concept.png" width="1200" height="675" alt="Concept art of the keep">
     </article></body></html>`,
 };
+
+// A made-up rail site for acting on pages (chat/pages/act.rs,
+// chat-browse.spec.js): a journey form, its results (by the stations asked
+// for), a payment page with card fields, a sign-in page. Relative links and
+// actions only, so a page loaded from the stand-in stays on it.
+export const RAIL_URL = 'https://rail.example.com/';
+export const RAIL_RESULTS_URL = 'https://rail.example.com/results?from=Kellbrook&to=Port+Ellis&when=Today';
+export const RAIL_SIGNIN_URL = 'https://rail.example.com/signin';
+PAGES['rail.example.com/'] = `<!doctype html><html><head><title>Example Rail</title></head><body><main><h1>Find a train</h1>
+  <form action="results" method="get">
+    <label for="from">From</label> <input id="from" name="from">
+    <label for="to">To</label> <input id="to" name="to">
+    <label for="when">When</label> <select id="when" name="when"><option>Today</option><option>Tomorrow</option></select>
+    <button type="submit">Find trains</button>
+  </form></main></body></html>`;
+PAGES['rail.example.com/buy'] = `<!doctype html><html><head><title>Buy tickets - Example Rail</title></head><body><main><h1>Buy tickets</h1><p>09:42 Kellbrook to Port Ellis, £21.05.</p>
+  <form action="paid" method="post">
+    <label>Card number <input name="cardnumber" autocomplete="cc-number"></label>
+    <label>Security code <input name="cvc" autocomplete="cc-csc"></label>
+    <button type="submit">Pay £21.05</button>
+  </form></main></body></html>`;
+PAGES['rail.example.com/paid'] = `<!doctype html><html><head><title>Payment taken</title></head><body><main><p>Payment taken.</p></main></body></html>`;
+PAGES['rail.example.com/signin'] = `<!doctype html><html><head><title>Sign in - Example Rail</title></head><body><main><h1>Sign in</h1>
+  <form action="session" method="post">
+    <label>Email <input type="email" name="email" autocomplete="username"></label>
+    <label>Password <input type="password" name="password" autocomplete="current-password"></label>
+    <button type="submit">Sign in</button>
+  </form></main></body></html>`;
+
+/** The rail site's results for the stations asked for (`from`, `to`). */
+function railResults(q) {
+  const right = /^kellbrook$/i.test((q.get('from') || '').trim()) && /^port ellis$/i.test((q.get('to') || '').trim());
+  if (!right) return `<!doctype html><html><head><title>No trains found - Example Rail</title></head><body><main><p>No trains found for that journey.</p></main></body></html>`;
+  return `<!doctype html><html><head><title>Kellbrook to Port Ellis - Example Rail</title></head><body><main><h1>Kellbrook to Port Ellis</h1>
+    <p>09:42 from platform 2, arrives 10:31. <a href="buy?train=0942">Buy tickets</a></p>
+    <p>10:12 from platform 1, arrives 11:05. <a href="buy?train=1012">Buy tickets</a></p></main></body></html>`;
+}
 
 // The pictures, by `host/path`: `[content type, bytes]`.
 const FILES = {
@@ -316,6 +356,11 @@ export async function startFakeWeb() {
         if (file) {
           res.writeHead(200, { 'content-type': file[0], 'content-length': file[1].length });
           res.end(file[1]);
+          return;
+        }
+        if (host === 'rail.example.com' && pathname === '/results') {
+          res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' });
+          res.end(railResults(url.searchParams));
           return;
         }
         const page = PAGES[`${host}${pathname}`];

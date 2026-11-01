@@ -68,6 +68,12 @@ pub fn app() -> Option<AppHandle> {
     APP.get().cloned()
 }
 
+/// Yap's window is there to hold pages (not in a model evaluation or a unit
+/// test).
+pub fn ready() -> bool {
+    APP.get().is_some()
+}
+
 /// The event a page's state goes out on (to the main window).
 pub const EVENT: &str = "yap-page-view";
 /// The event "Ask Yap about this" goes out on.
@@ -419,6 +425,63 @@ pub async fn page_text(key: &str) -> Result<PageText, String> {
     serde_json::from_str(&raw).map_err(|_| "The page couldn't be read.".to_string())
 }
 
+/// An address a page reports, as the page's own (a test run's stand-in
+/// address turned back: `shown_url`).
+pub fn shown(url: &str) -> String {
+    let (standin, _) = web_route();
+    shown_url(url, standin.as_deref())
+}
+
+/// **Where page `key`'s navigations are** (the page tools' actions wait on
+/// them, `pages/backend.rs`): how many have started, and whether the
+/// latest has loaded. `None`: no such page.
+pub async fn nav_state(key: &str) -> Option<(u64, bool)> {
+    let app = APP.get().cloned()?;
+    imp::nav_state(app, key.to_string()).await.ok().flatten()
+}
+
+/// **Take page `key` to `url`** for the model (`go_to`, an address the page
+/// tools checked), as a link would: the tab keeps its own address, so its
+/// tab shown again stays where the page went.
+pub async fn navigate(key: &str, url: &str) -> Result<(), String> {
+    let app = APP.get().cloned().ok_or("Yap's window isn't ready.")?;
+    let (standin, offline) = web_route();
+    let load = load_url(url, standin.as_deref(), offline)?;
+    imp::navigate(app, key.to_string(), load).await
+}
+
+/// **A page tab's key**, as the Chat view makes it (`chatDoc.svelte.js`
+/// `pageKey`): "page:" and the address without its fragment or a trailing
+/// slash. Pure.
+pub fn key_of(url: &str) -> String {
+    let u = url.trim();
+    let u = u.split('#').next().unwrap_or(u).trim_end_matches('/');
+    format!("page:{u}")
+}
+
+/// **A page `open_page` brought up, made at once** (out of sight, its tab's
+/// key): the Chat view shows only the last of several a step brings up, so
+/// each one's page is there — in the order they were asked for — for
+/// `read_open_page` and the actions to find by its tab number. Its tab shown
+/// later finds it made, and places it. Nothing without Yap's window.
+pub async fn open_hidden(url: &str, section: &str) {
+    let Some(app) = APP.get().cloned() else { return };
+    let (standin, offline) = web_route();
+    let Ok(load) = load_url(url, standin.as_deref(), offline) else { return };
+    let section: String = section.chars().take(crate::chat::pages::SECTION_MAX).collect();
+    if let Err(e) = imp::show(app, key_of(url), url.to_string(), load, section, None).await {
+        tracing::debug!("A page brought up wasn't made out of sight: {e}");
+    }
+}
+
+/// **Page `key` in front** (`switch_tab`): it takes the place of the page on
+/// screen (the Chat view then shows its tab), or, with none on screen, is
+/// the one in front from now on.
+pub async fn bring_front(key: &str) -> Result<(), String> {
+    let app = APP.get().cloned().ok_or("Yap's window isn't ready.")?;
+    imp::bring_front(app, key.to_string()).await
+}
+
 /// **Their profile's folder** (its size, for the dialog): `WV2Profile_<name>`
 /// in WebView2's `EBWebView` folder, in its user data folder — `None` when
 /// there's none yet (never used) or Yap's window can't say.
@@ -549,6 +612,15 @@ mod imp {
     pub async fn tabs(_: AppHandle) -> Result<Vec<super::OpenTab>, String> {
         Ok(Vec::new())
     }
+    pub async fn nav_state(_: AppHandle, _: String) -> Result<Option<(u64, bool)>, String> {
+        Ok(None)
+    }
+    pub async fn navigate(_: AppHandle, _: String, _: String) -> Result<(), String> {
+        Err(NO.into())
+    }
+    pub async fn bring_front(_: AppHandle, _: String) -> Result<(), String> {
+        Err(NO.into())
+    }
     #[cfg(debug_assertions)]
     pub async fn list(_: AppHandle) -> Result<serde_json::Value, String> {
         Ok(serde_json::json!([]))
@@ -609,6 +681,10 @@ mod win {
         scrolled: bool,
         /// A shot's page, out of sight: the shot to take once it has loaded.
         snap: Option<Done<Vec<u8>>>,
+        /// Navigations started, and how many of them had ended (loaded or not)
+        /// when the latest ended: the page tools wait on them after an action.
+        navs: u64,
+        done: u64,
     }
 
     thread_local! {
@@ -845,6 +921,8 @@ mod win {
                 loaded: false,
                 scrolled: false,
                 snap,
+                navs: 0,
+                done: 0,
             })
         });
         put(host, None, bounds, is_snap);
@@ -983,6 +1061,12 @@ mod win {
                         tracing::info!("Chat: a page's navigation was refused (not a public web page)");
                         return Ok(());
                     }
+                    VIEWS.with(|v| {
+                        if let Some(x) = v.borrow_mut().iter_mut().find(|x| x.key == k) {
+                            x.navs += 1;
+                            x.loaded = false;
+                        }
+                    });
                     tell(&a, &k, true, None);
                     Ok(())
                 })),
@@ -1187,6 +1271,7 @@ mod win {
             let mut v = v.borrow_mut();
             let Some(x) = v.iter_mut().find(|x| x.key == key) else { return (None, String::new(), false) };
             x.loaded = ok;
+            x.done = x.navs;
             let section = if ok && !x.scrolled && !x.section.is_empty() {
                 x.scrolled = true;
                 x.section.clone()
@@ -1381,6 +1466,56 @@ mod win {
         .await?
     }
 
+    /// Page `key`'s navigations: started, and whether the latest has ended.
+    pub async fn nav_state(app: AppHandle, key: String) -> Result<Option<(u64, bool)>, String> {
+        main_thread(&app, move |_| VIEWS.with(|v| v.borrow().iter().find(|x| x.key == key).map(|x| (x.navs, x.navs > 0 && x.done >= x.navs)))).await
+    }
+
+    /// The model's `go_to`: page `key` to `load`, as a link takes it (its own
+    /// address kept: its tab shown again doesn't go back).
+    pub async fn navigate(app: AppHandle, key: String, load: String) -> Result<(), String> {
+        main_thread(&app, move |_| {
+            let Some((_, _, Some(core))) = handles(&key) else { return Err("That page isn't open.".to_string()) };
+            unsafe { core.Navigate(&HSTRING::from(load.as_str())) }.map_err(|e| e.message())
+        })
+        .await?
+    }
+
+    /// The model's `switch_tab`: page `key` takes the place of the one on
+    /// screen (out of sight now); with none on screen, it's the one in front
+    /// from now on (shown last).
+    pub async fn bring_front(app: AppHandle, key: String) -> Result<(), String> {
+        main_thread(&app, move |_| {
+            if handles(&key).is_none() {
+                return Err("That page isn't open.".to_string());
+            }
+            let on_screen = VIEWS.with(|v| v.borrow().iter().find(|x| x.bounds.is_some() && x.key != key && x.snap.is_none() && !x.key.starts_with("snap:")).map(|x| (x.key.clone(), x.host, x.controller.clone(), x.bounds)));
+            let moved = on_screen.as_ref().and_then(|(_, _, _, b)| *b);
+            if let Some((old, host, controller, _)) = on_screen {
+                VIEWS.with(|v| {
+                    if let Some(x) = v.borrow_mut().iter_mut().find(|x| x.key == old) {
+                        x.bounds = None;
+                    }
+                });
+                put(host, controller.as_ref(), None, false);
+            }
+            let target = VIEWS.with(|v| {
+                let mut v = v.borrow_mut();
+                let x = v.iter_mut().find(|x| x.key == key)?;
+                x.used = tick();
+                if moved.is_some() {
+                    x.bounds = moved;
+                }
+                Some((x.host, x.controller.clone(), x.bounds))
+            });
+            if let (Some((host, controller, bounds)), Some(_)) = (target, moved) {
+                put(host, controller.as_ref(), bounds, false);
+            }
+            Ok(())
+        })
+        .await?
+    }
+
     // ---- the pages' own data ---------------------------------------------------------------
 
     static CLEARS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
@@ -1448,6 +1583,8 @@ mod win {
                     loaded: false,
                     scrolled: true,
                     snap: None,
+                    navs: 0,
+                    done: 0,
                 })
             });
             let opts = unsafe { env10.CreateCoreWebView2ControllerOptions() }.map_err(|e| e.message())?;

@@ -250,6 +250,10 @@ pub struct Extra<'a> {
     /// reads images, the screen's text for any other; none without tools or
     /// with "see the window in front" off. Not tied to the web.
     pub screen: crate::chat::pictures::Gate,
+    /// It may act on the pages beside the chat (`chat/pages/act.rs`
+    /// `can_act`: the strong cloud models and the on-device ones the browse
+    /// evaluation passed; a typed Chat turn with the web on).
+    pub act: bool,
 }
 
 /// The calendar tool in a turn ([`calendar::run`]).

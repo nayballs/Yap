@@ -977,6 +977,32 @@ export function createChatState({ onopensettings = () => null, onopennote = () =
         }
         return;
       }
+      // Acting on a page beside the chat (chat/pages/act.rs): its tab says
+      // so (with Stop: this turn's ■), a tab the model switched to shows,
+      // and a click that would buy, pay, book… asks here first (its card,
+      // PageConfirm.svelte, on the answer being written).
+      if (ev?.kind === 'acting') {
+        if (mine('user') >= 0) doc.setActing(ev.key, stopAnswer);
+        return;
+      }
+      if (ev?.kind === 'switchTab') {
+        if (mine('user') >= 0) doc.showTab(ev.key);
+        return;
+      }
+      if (ev?.kind === 'confirm') {
+        let at = mine('assistant');
+        if (at < 0) {
+          if (made || mine('user') < 0) return;
+          messages = [...messages, { role: 'assistant', streaming: true, text: '', tools: [], id: null, turn }];
+          at = messages.length - 1;
+          made = true;
+        }
+        const cm = messages[at];
+        const have = cm.confirms || [];
+        cm.confirms = have.some((c) => c.id === ev.id) ? have.map((c) => (c.id === ev.id ? ev : c)) : [...have, ev];
+        followThread();
+        return;
+      }
       if (ev?.kind === 'picture' && ev.picture?.id && !shownPictures.some((p) => p.id === ev.picture.id)) shownPictures = [...shownPictures, ev.picture];
       if (ev?.kind === 'page' && ev.page?.url && !shownPages.some((p) => p.url === ev.page.url)) shownPages = [...shownPages, ev.page];
       if (ev?.kind === 'offer' && ev.offer?.url && !shownOffers.some((o) => o.url === ev.offer.url)) shownOffers = [...shownOffers, ev.offer];
@@ -1066,6 +1092,8 @@ export function createChatState({ onopensettings = () => null, onopennote = () =
         // The pages it brought up (their tabs) and its buttons (chat/pages.rs).
         pages: res.pages ?? shownPages,
         offers: res.offers ?? shownOffers,
+        // The questions it asked before acting on a page (their cards, answered).
+        confirms: ai >= 0 ? messages[ai].confirms || null : null,
         revisedFrom: streamed != null && streamed.trim() !== '' && streamed.trim() !== String(res.reply).trim() ? fromHeight : 0,
       };
       // The question as saved: with its screenshots' text when it went as text.

@@ -1,0 +1,56 @@
+{
+  "name": "browse-open-site-search",
+  "description": "Acting on pages: open a site the user names (found by a search) and use its own search box, then follow a result to the answer. Emberwiki is made up, and a web search for the place itself finds nothing, so the answer is only on the site.",
+  "tags": [
+    "browse",
+    "web"
+  ],
+  "web": {
+    "mode": "standin",
+    "results": [],
+    "pages": {
+      "https://emberwiki.example/": "<!doctype html><html><head><title>Emberwiki - the Emberfall wiki</title></head><body><header><form action='search' role='search'><input type='search' name='q' aria-label='Search Emberwiki'> <button>Search</button></form></header><main><h1>Welcome to Emberwiki</h1><p>The fan wiki for Emberfall, with 2,410 articles. Search for a place, a character or a quest.</p><h2>Popular</h2><ul><li><a href='wiki/Magisters'>Magisters</a></li><li><a href='wiki/Lohse'>Lohse</a></li></ul></main></body></html>",
+      "https://emberwiki.example/search?q=fort joy": "<!doctype html><html><head><title>Search results for Fort Joy - Emberwiki</title></head><body><main><h1>Search results</h1><ul><li><a href='wiki/Fort_Joy'>Fort Joy</a>: the island prison where Emberfall starts.</li><li><a href='wiki/Fort_Joy_Ghetto'>Fort Joy Ghetto</a>: the camp inside its walls.</li></ul></main></body></html>",
+      "https://emberwiki.example/search": "<!doctype html><html><head><title>Search - Emberwiki</title></head><body><main><h1>Search results</h1><p>No articles match.</p></main></body></html>",
+      "https://emberwiki.example/wiki/Fort_Joy": "<!doctype html><html><head><title>Fort Joy - Emberwiki</title></head><body><main><article><h1>Fort Joy</h1><p>Fort Joy is the island prison where Emberfall begins: you wake on the beach below the keep, washed ashore after the shipwreck.</p><h2>Getting out</h2><p>The only way off the island is by boat from the <a href='Saltmarsh_Docks'>Saltmarsh Docks</a>.</p></article></main></body></html>",
+      "https://emberwiki.example/wiki/Saltmarsh_Docks": "<!doctype html><html><head><title>Saltmarsh Docks - Emberwiki</title></head><body><main><article><h1>Saltmarsh Docks</h1><p>The Saltmarsh Docks are the harbour south of Fort Joy.</p><h2>Harbourmaster</h2><p>The harbourmaster, Edda Vane, sells the boat ticket to the mainland for 120 gold. She only sells it after nightfall.</p></article></main></body></html>"
+    },
+    "searches": [
+      {
+        "when": [
+          "emberwiki"
+        ],
+        "results": [
+          {
+            "title": "Emberwiki - the Emberfall wiki",
+            "url": "https://emberwiki.example/",
+            "published": "2026-09-01",
+            "text": "The fan wiki for Emberfall: places, characters and quests, with its own search."
+          }
+        ]
+      }
+    ]
+  },
+  "browse": {
+    "tabs": []
+  },
+  "turns": [
+    {
+      "user": "Open Emberwiki and search it for Fort Joy. Where does the story start?",
+      "expect": {
+        "browse": {
+          "visited": [
+            "emberwiki.example/search"
+          ],
+          "read_elements": true
+        },
+        "answer_contains_any": [
+          "beach"
+        ]
+      },
+      "soft": {
+        "max_words": 80
+      }
+    }
+  ]
+}

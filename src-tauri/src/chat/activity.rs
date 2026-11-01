@@ -47,8 +47,9 @@ const WHAT_MAX: usize = 90;
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct Activity {
     /// What kind of step: "think", "answer", "search" (the web), "read" (a
-    /// page), "picture" (a picture from the web looked at or shown), "notes",
-    /// "doc", "calendar", "memory", "apps", "chats", "tool".
+    /// page), "picture" (a picture from the web looked at or shown), "page"
+    /// (acting on the page beside the chat), "notes", "doc", "calendar",
+    /// "memory", "apps", "chats", "tool".
     pub mark: &'static str,
     /// The line: "Searching the web · tidecaller build", "Reading
     /// emberfall.example/wiki/Talents", "Writing ‘Gear’".
@@ -147,6 +148,16 @@ pub fn describe(name: &str, args: &Value, title_of: &dyn Fn(u64) -> Option<Strin
         },
         "read_open_page" => Activity::new("read", "Reading the page beside the chat"),
         "look_at_screen" => Activity::new("picture", "Looking at your screen"),
+        // Acting on the page beside the chat (chat/pages/act.rs): what, by
+        // ref (the button's words come with its result, as the chip).
+        "click" => Activity::new("page", "Clicking on the page beside the chat"),
+        "type_text" => Activity::new("page", "Typing on the page beside the chat"),
+        "scroll" => Activity::new("page", "Scrolling the page beside the chat"),
+        "go_to" => match text(&["search"]) {
+            Some(words) => Activity::new("search", format!("Opening a search for {}", quoted(&words))),
+            None => Activity::new("page", with(text(&["url"]).map(|u| crate::web::short_url(&u)), "Going to", "Going to a page")),
+        },
+        "switch_tab" => Activity::new("page", "Switching tabs beside the chat"),
         "snap_page" => {
             Activity::new("picture", with(text(&["url"]).map(|u| crate::web::short_url(&u)), "Taking a shot of", "Taking a shot of a page"))
         }
@@ -214,6 +225,13 @@ mod tests {
         assert_eq!(line("look_at_screen", json!({})), "Looking at your screen");
         assert_eq!(line("snap_page", json!({ "url": "https://www.maps.example.com/fort-joy/" })), "Taking a shot of maps.example.com/fort-joy");
         assert_eq!(line("offer_browser", json!({ "url": "https://maps.example.com/x", "why": "the map" })), "Adding a button to open it in your browser");
+        assert_eq!(line("click", json!({ "ref": 4 })), "Clicking on the page beside the chat");
+        assert_eq!(line("type_text", json!({ "ref": 2, "text": "Kellbrook" })), "Typing on the page beside the chat");
+        assert_eq!(line("scroll", json!({ "to": "down" })), "Scrolling the page beside the chat");
+        assert_eq!(line("go_to", json!({ "url": "https://rail.example.com/timetables" })), "Going to rail.example.com/timetables");
+        assert_eq!(line("go_to", json!({ "search": "trains to Port Ellis" })), "Opening a search for ‘trains to Port Ellis’");
+        assert_eq!(line("switch_tab", json!({ "tab": 2 })), "Switching tabs beside the chat");
+        assert_eq!(describe("click", &Value::Null, &titles).mark, "page");
         assert_eq!(line("something_new", json!({})), "Working");
         // The kinds the page may mark.
         assert_eq!(describe("web_search", &Value::Null, &titles).mark, "search");

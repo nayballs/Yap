@@ -162,6 +162,34 @@ pub fn doc_tools_forced() -> Option<bool> {
     None
 }
 
+/// A browse scenario (`browse` in its file, `--browse`): Chat's model may
+/// act on the pages beside the chat (`chat/pages/act.rs` `can_act`),
+/// whatever Yap's rule says — the evaluation decides which models may.
+/// `None` outside a run, or a scenario without it.
+pub fn browse_forced() -> Option<bool> {
+    #[cfg(debug_assertions)]
+    {
+        if active() {
+            return record::browse_forced();
+        }
+    }
+    None
+}
+
+/// **The person's answer to a click that asks first** in a browse scenario
+/// (`browse.confirm`: "allow" or "deny"), recorded; `None` outside a run (the
+/// card in Chat's thread asks).
+pub fn confirm_answer(label: &str, kind: &str) -> Option<bool> {
+    #[cfg(debug_assertions)]
+    {
+        if active() {
+            return record::confirm_answer(label, kind);
+        }
+    }
+    let _ = (label, kind);
+    None
+}
+
 /// 0: no local model in this run (or not known), 1: on the processor, 2: on
 /// the graphics card (`--ngl`).
 #[cfg(debug_assertions)]
