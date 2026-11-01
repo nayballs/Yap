@@ -201,10 +201,10 @@ test('open_page brings the live page up beside the chat: its own webview, no Yap
 
 test('words selected on the page: Ask Yap about this quotes them over the box, asked as a selection', async ({ yap, main, fakeLlm }) => {
   await setConfig(yap, main, chatConfig(fakeLlm));
-  fakeLlm.scriptChat([{ tools: [{ name: 'open_page', args: { url: FORT_JOY_URL } }] }, { content: 'It’s beside the chat.' }]);
+  // (An address asked for: Yap opens it itself, no model.)
   await ask(main, `Show me ${FORT_JOY_URL}`);
   await expect.poll(async () => (await views(yap)).find((v) => v.key === KEY)?.loaded, { timeout: 20_000 }).toBe(true);
-  await expect(main.getByText('It’s beside the chat.')).toBeVisible();
+  await expect(main.getByText('wiki.example.com is open beside the chat.')).toBeVisible();
 
   // Select the map's caption in the page, then its menu's Ask Yap about this
   // (a test run never shows the native menu: the debug command does what it does).
@@ -265,7 +265,8 @@ test('open_page opens a search or a site the person named; read_open_page reads 
   // Words: a search on the person's engine, beside the chat (Yap never reads it).
   let from = fakeLlm.requests.length;
   fakeLlm.scriptChat([{ tools: [{ name: 'open_page', args: { search: 'train times Kellbrook to Port Ellis' } }] }, { content: 'The search is open beside the chat.' }]);
-  await ask(main, 'Can you open up a search for train times from Kellbrook to Port Ellis?');
+  // (Worded so Yap leaves it to the model: "search for …" it would open itself.)
+  await ask(main, 'I need the train times from Kellbrook to Port Ellis up beside the chat');
   await expect(main.getByText('The search is open beside the chat.')).toBeVisible({ timeout: 20_000 });
   expect(toolResult(chatCalls(fakeLlm, from)[1])).toMatchObject({ success: true, shown: true, displayText: 'Brought up a search for "train times Kellbrook to Port Ellis" beside the chat' });
   await expect(main.getByTestId('chat-page-address')).toHaveValue('https://duckduckgo.com/?q=train+times+Kellbrook+to+Port+Ellis', { timeout: 20_000 });
@@ -282,8 +283,9 @@ test('open_page opens a search or a site the person named; read_open_page reads 
 
   // A page: read as the person sees it, cited, its text the model's.
   from = fakeLlm.requests.length;
-  fakeLlm.scriptChat([{ tools: [{ name: 'open_page', args: { url: FORT_JOY_URL } }] }, { content: 'It’s open.' }]);
+  // (An address asked for: Yap opens it itself.)
   await say(main, `Open ${FORT_JOY_URL}`);
+  await expect(main.getByText('wiki.example.com is open beside the chat.')).toBeVisible({ timeout: 20_000 });
   await expect.poll(async () => (await views(yap)).find((v) => v.key === KEY)?.loaded, { timeout: 20_000 }).toBe(true);
   from = fakeLlm.requests.length;
   fakeLlm.scriptChat([{ tools: [{ name: 'read_open_page', args: {} }] }, { content: 'It marks every treasure chest [1].' }]);
@@ -326,7 +328,7 @@ test('open_page opens a search or a site the person named; read_open_page reads 
 
 test('the + opens a new tab: an address or words go in its address bar, Back and Forward, and its data clears', async ({ yap, main, fakeLlm, shot }) => {
   await setConfig(yap, main, { ...chatConfig(fakeLlm), webSearchBrowser: 'duckduckgo' });
-  fakeLlm.scriptChat([{ tools: [{ name: 'open_page', args: { url: FORT_JOY_URL } }] }, { content: 'It’s beside the chat.' }]);
+  // (An address asked for: Yap opens it itself, no model.)
   await ask(main, `Show me ${FORT_JOY_URL}`);
   await expect.poll(async () => (await views(yap)).find((v) => v.key === KEY)?.loaded, { timeout: 20_000 }).toBe(true);
   // A page showing: the row is there with one tab, the page's title its name, and the +.
@@ -446,4 +448,23 @@ test('the title bar’s browser button (Ctrl+Shift+B) opens a new tab, the same 
   // Only while Chat shows.
   await openView(main, 'Home');
   await expect(btn).toHaveCount(0);
+});
+
+test('"Open YouTube" and "search for train tickets…" open beside the chat by Yap itself, no model', async ({ yap, main, fakeLlm }) => {
+  await setConfig(yap, main, { ...chatConfig(fakeLlm), webSearchBrowser: 'duckduckgo' });
+  const from = fakeLlm.requests.length;
+  // A site asked for by name: its home page, at once.
+  await ask(main, 'Can you open up YouTube for me?');
+  await expect(main.getByText('YouTube is open beside the chat.')).toBeVisible({ timeout: 20_000 });
+  await expect(main.getByTestId('chat-page-address')).toHaveValue('https://www.youtube.com/', { timeout: 20_000 });
+  await expect(main.getByText('Brought up a page')).toBeVisible();
+  // A search asked for that the free sources don't cover (travel): the search itself, on the person's engine.
+  await say(main, 'Search for train tickets from Kellbrook to Port Ellis.');
+  await expect(main.getByText('The search for “train tickets from Kellbrook to Port Ellis” is open beside the chat, on DuckDuckGo.')).toBeVisible({ timeout: 20_000 });
+  await expect(main.getByTestId('chat-page-address')).toHaveValue('https://duckduckgo.com/?q=train+tickets+from+Kellbrook+to+Port+Ellis', { timeout: 20_000 });
+  // No model was asked for either; both are kept with their answers.
+  expect(chatCalls(fakeLlm, from)).toEqual([]);
+  await expectStore(yap, 'chats.json', (s) =>
+    s.conversations.some((c) => c.messages.some((m) => m.pages?.[0]?.url === 'https://www.youtube.com/') && c.messages.some((m) => m.pages?.[0]?.title === 'Search: train tickets from Kellbrook to Port Ellis'))
+  );
 });
