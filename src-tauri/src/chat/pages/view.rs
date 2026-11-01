@@ -631,6 +631,15 @@ pub async fn page_view_shot(app: AppHandle, key: String, url: String, title: Opt
     Ok(picture)
 }
 
+/// **A key that types a character** (a letter, a digit, space, the
+/// punctuation keys, the number pad's): WebView2 never hands one to Yap as an
+/// accelerator, so with a page beside the chat in focus a shortcut on one is
+/// watched for instead (`imp::watch_keys`). Function keys, Esc and the like
+/// come as accelerators. Pure.
+pub fn types_a_character(vk: u32) -> bool {
+    matches!(vk, 0x20 | 0x30..=0x39 | 0x41..=0x5A | 0x60..=0x6F | 0xBA..=0xC0 | 0xDB..=0xDF | 0xE2)
+}
+
 /// **The model's `snap_page`**: the page's shot as a PNG — as it is in the
 /// panel when it's open there, else loaded out of sight for it.
 pub async fn snap(url: String) -> Result<Vec<u8>, String> {
@@ -755,12 +764,13 @@ mod win {
     //! pages live in a thread-local list.
 
     use std::cell::{Cell, RefCell};
+    use std::sync::atomic::{AtomicBool, Ordering};
 
     use tauri::{AppHandle, Emitter, Manager};
     use webview2_com::Microsoft::Web::WebView2::Win32::*;
     use webview2_com::{
         take_pwstr, AcceleratorKeyPressedEventHandler, CapturePreviewCompletedHandler, ClearBrowsingDataCompletedHandler, ContextMenuRequestedEventHandler, CreateCoreWebView2ControllerCompletedHandler,
-        CustomItemSelectedEventHandler, DocumentTitleChangedEventHandler, DownloadStartingEventHandler, ExecuteScriptCompletedHandler,
+        CustomItemSelectedEventHandler, DocumentTitleChangedEventHandler, DownloadStartingEventHandler, ExecuteScriptCompletedHandler, FocusChangedEventHandler,
         HistoryChangedEventHandler, NavigationCompletedEventHandler, NavigationStartingEventHandler, NewWindowRequestedEventHandler,
         PermissionRequestedEventHandler, ProcessFailedEventHandler, ScriptDialogOpeningEventHandler, WebResourceRequestedEventHandler,
     };
@@ -769,9 +779,10 @@ mod win {
     use windows::Win32::Graphics::Gdi::{GetStockObject, HBRUSH, WHITE_BRUSH};
     use windows::Win32::System::Com::StructuredStorage::CreateStreamOnHGlobal;
     use windows::Win32::System::Com::{IStream, STREAM_SEEK_SET};
-    use windows::Win32::UI::Input::KeyboardAndMouse::{GetKeyState, VIRTUAL_KEY, VK_CONTROL, VK_LWIN, VK_MENU, VK_RWIN, VK_SHIFT};
+    use windows::Win32::System::Threading::GetCurrentProcessId;
+    use windows::Win32::UI::Input::KeyboardAndMouse::{GetAsyncKeyState, GetKeyState, VIRTUAL_KEY, VK_CONTROL, VK_LWIN, VK_MENU, VK_RWIN, VK_SHIFT};
     use windows::Win32::UI::WindowsAndMessaging::{
-        CreateWindowExW, DefWindowProcW, DestroyWindow, GetWindowLongPtrW, RegisterClassExW, SetWindowPos, ShowWindow, GWLP_HINSTANCE,
+        CreateWindowExW, DefWindowProcW, DestroyWindow, GetForegroundWindow, GetWindowLongPtrW, GetWindowThreadProcessId, RegisterClassExW, SetWindowPos, ShowWindow, GWLP_HINSTANCE,
         HWND_BOTTOM, HWND_TOP, SWP_NOACTIVATE, SWP_SHOWWINDOW, SW_HIDE, WINDOW_EX_STYLE, WNDCLASSEXW, WS_CHILD, WS_CLIPCHILDREN,
         WS_CLIPSIBLINGS,
     };
@@ -782,6 +793,72 @@ mod win {
     };
 
     type Done<T> = tokio::sync::oneshot::Sender<Result<T, String>>;
+
+    /// A page beside the chat has the keyboard focus.
+    static PAGE_FOCUSED: AtomicBool = AtomicBool::new(false);
+    /// [`watch_keys`] is running.
+    static WATCHING: AtomicBool = AtomicBool::new(false);
+
+    /// Yap is the app in front (its main window; the page's own windows are
+    /// WebView2's, inside it).
+    fn yap_in_front() -> bool {
+        let mut pid = 0u32;
+        unsafe { GetWindowThreadProcessId(GetForegroundWindow(), Some(&mut pid)) };
+        pid != 0 && pid == unsafe { GetCurrentProcessId() }
+    }
+
+    /// **The shortcuts on keys that type, while a page has the focus**:
+    /// every 15 ms, the bound ones among them (`input_hook::bound_keys`,
+    /// never any other key) going down or up are sent to the main window's
+    /// page as the accelerators are (`yap-page-key`) — only while Yap is in
+    /// front (elsewhere the hook hears them) and Ctrl and Alt are up (those
+    /// combos come as accelerators). A key it saw go down is followed until
+    /// it's up, focus or not. Ends when the page has lost the focus.
+    fn watch_keys(app: AppHandle) {
+        let mut down: Vec<u32> = Vec::new();
+        loop {
+            let held = |vk: u32| unsafe { GetAsyncKeyState(vk as i32) } < 0;
+            let focused = PAGE_FOCUSED.load(Ordering::SeqCst);
+            let live = focused && yap_in_front();
+            if !focused && down.is_empty() {
+                WATCHING.store(false, Ordering::SeqCst);
+                // Focus came back as it stopped: carry on.
+                if PAGE_FOCUSED.load(Ordering::SeqCst) && !WATCHING.swap(true, Ordering::SeqCst) {
+                    continue;
+                }
+                return;
+            }
+            let (ctrl, alt) = (held(u32::from(VK_CONTROL.0)), held(u32::from(VK_MENU.0)));
+            let keys: Vec<u32> = crate::dictation::input_hook::bound_keys().into_iter().filter(|&vk| super::types_a_character(vk)).collect();
+            for vk in keys {
+                let now = held(vk);
+                let was = down.contains(&vk);
+                let send = |is_down: bool| {
+                    let _ = app.emit_to(
+                        "settings",
+                        "yap-page-key",
+                        serde_json::json!({
+                            "vk": vk,
+                            "down": is_down,
+                            "repeat": false,
+                            "ctrl": ctrl,
+                            "alt": alt,
+                            "shift": held(u32::from(VK_SHIFT.0)),
+                            "meta": held(u32::from(VK_LWIN.0)) || held(u32::from(VK_RWIN.0)),
+                        }),
+                    );
+                };
+                if now && !was && live && !ctrl && !alt {
+                    send(true);
+                    down.push(vk);
+                } else if !now && was {
+                    send(false);
+                    down.retain(|&k| k != vk);
+                }
+            }
+            std::thread::sleep(std::time::Duration::from_millis(if live || !down.is_empty() { 15 } else { 60 }));
+        }
+    }
 
     /// One page: its host window, its controller once made, where it should
     /// be, and anything waiting for it to load.
@@ -1429,8 +1506,31 @@ mod win {
             // ahead of the keyboard hook (as in Yap's own windows), so its
             // function keys and Ctrl / Alt combos go to the main window's
             // page, which takes them as its own keys (settings/
-            // hotkeyFallback.svelte.js). Only the key and its modifiers.
+            // hotkeyFallback.svelte.js). Only the key and its modifiers. A
+            // shortcut on a key that types (a "9") never comes as one: while
+            // the page has the focus, Yap watches those keys itself
+            // (`watch_keys`: the maintainer's Voice Assistant key did nothing
+            // after a click on the page until they clicked away, 1 Nov 2026).
             if !snap {
+                let a = app.clone();
+                controller.add_GotFocus(
+                    &FocusChangedEventHandler::create(Box::new(move |_, _| {
+                        PAGE_FOCUSED.store(true, Ordering::SeqCst);
+                        if !WATCHING.swap(true, Ordering::SeqCst) {
+                            let a = a.clone();
+                            std::thread::spawn(move || watch_keys(a));
+                        }
+                        Ok(())
+                    })),
+                    &mut token,
+                )?;
+                controller.add_LostFocus(
+                    &FocusChangedEventHandler::create(Box::new(move |_, _| {
+                        PAGE_FOCUSED.store(false, Ordering::SeqCst);
+                        Ok(())
+                    })),
+                    &mut token,
+                )?;
                 let a = app.clone();
                 controller.add_AcceleratorKeyPressed(
                     &AcceleratorKeyPressedEventHandler::create(Box::new(move |_, args| {
@@ -2141,6 +2241,18 @@ mod tests {
     use super::*;
 
     const STANDIN: &str = "http://127.0.0.1:5555/standin";
+
+    #[test]
+    fn a_shortcut_on_a_key_that_types_is_watched_for_while_a_page_has_the_focus() {
+        // "9", "A", space, ";" and the number pad's 5 type: WebView2 never hands them over.
+        for vk in [0x39, 0x41, 0x20, 0xBA, 0x65] {
+            assert!(types_a_character(vk), "{vk:#x}");
+        }
+        // F9, F24, Esc, an arrow and the modifiers come as accelerators (or aren't keys of their own).
+        for vk in [0x78, 0x87, 0x1B, 0x25, 0x10, 0x11, 0x12, 0x5B] {
+            assert!(!types_a_character(vk), "{vk:#x}");
+        }
+    }
 
     #[test]
     fn the_address_bar_opens_an_address_or_searches_the_persons_engine() {

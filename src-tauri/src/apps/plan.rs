@@ -279,7 +279,23 @@ pub fn search_asked(text: &str) -> Option<(String, bool)> {
     let m = c.get(2)?;
     // As typed ("Port Ellis"), where lower case kept every letter's place.
     let words = if said.len() == lower.len() { said[m.start()..m.end()].trim() } else { m.as_str().trim() }.to_string();
-    (words.chars().filter(|ch| ch.is_alphanumeric()).count() >= 3).then_some((words, c.get(1).is_some()))
+    (words.chars().filter(|ch| ch.is_alphanumeric()).count() >= 3 && search_words(&words)).then_some((words, c.get(1).is_some()))
+}
+
+/// **Words a search box would take** ([`search_asked`]): at most ten, none
+/// leaning on the conversation ("the thing I need", "them", "you know") —
+/// those are the model's, which knows what they mean (a spoken "Can you
+/// Google, doesn't have to be from Amazon, just the exact thing I need to
+/// buy and send them in chat" was searched word for word, 1 Nov 2026).
+/// Pure.
+fn search_words(words: &str) -> bool {
+    const LEANS: &[&str] = &[
+        "i", "i'm", "i've", "i'd", "me", "my", "mine", "you", "your", "we", "us", "our", "it", "its", "it's", "that", "this", "these", "those", "them",
+        "they", "he", "she", "him", "her", "one", "ones", "thing", "things", "stuff", "same",
+    ];
+    let lower = words.to_lowercase().replace(['\u{2019}', '\u{2018}'], "'");
+    let said: Vec<&str> = lower.split(|c: char| !(c.is_alphanumeric() || c == '\'')).filter(|w| !w.is_empty()).collect();
+    !said.is_empty() && said.len() <= 10 && !said.iter().any(|w| LEANS.contains(w))
 }
 
 /// [`plan_with`] for Chat and the Voice Assistant: off the async runtime
@@ -688,6 +704,11 @@ mod tests {
         // "Search the web for …" asks for the research, not the page.
         assert_eq!(search_asked("search the web for budget laptops"), Some(("budget laptops".into(), false)));
         assert_eq!(search_asked("What's the weather?"), None);
+        // Only words a search box would take: a sentence leaning on the conversation is the model's.
+        assert_eq!(search_asked("Can you Google doesn't have to be from Amazon just like you know the exact thing I need to buy and just send them in chat"), None);
+        assert_eq!(search_asked("google that one again"), None);
+        assert_eq!(search_asked("search for the cheapest flights from Kellbrook to Port Ellis next weekend in the morning please"), None);
+        assert_eq!(search_asked("google HDMI audio extractor 4K"), Some(("HDMI audio extractor 4K".into(), true)));
         assert_eq!(search_asked("search"), None);
     }
 

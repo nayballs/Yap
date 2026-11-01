@@ -375,6 +375,25 @@ pub const ROBOT_MARK: usize = 0x5941_5052;
 pub const UNHEARD_MARK: usize = 0x5941_5055;
 
 /// Whether the hook has `vk` down (pure bookkeeping, any thread).
+/// **The keyboard keys bound now** (every shortcut, its more keys, the
+/// language and transform slots): each one's main key, once. For a page
+/// beside the chat, whose plain keys never reach the hook
+/// (`chat/pages/view.rs`).
+pub fn bound_keys() -> Vec<u32> {
+    let mut keys: Vec<u32> = FIXED
+        .iter()
+        .chain(MORE_BINDINGS.iter().flatten())
+        .chain(LANGUAGE_BINDINGS.iter())
+        .chain(TRANSFORM_BINDINGS.iter())
+        .filter(|b| b.key_type.load(Ordering::Relaxed) == 1)
+        .map(|b| b.key_code.load(Ordering::Relaxed))
+        .filter(|&vk| vk != 0)
+        .collect();
+    keys.sort_unstable();
+    keys.dedup();
+    keys
+}
+
 pub fn is_held(vk: u32) -> bool {
     vk < 256 && HELD[(vk / 64) as usize].load(Ordering::Relaxed) & (1u64 << (vk % 64)) != 0
 }

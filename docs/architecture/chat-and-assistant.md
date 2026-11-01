@@ -1798,7 +1798,11 @@ from `view::open_tabs`):
   or a search asked for (`apps::search_asked`: "search for …", "google …",
   "open a search for …") when the person asked for the search page itself
   ("google …", "open a search for …"; never "search the web for …", which
-  asks for research), or — only with no search service for this chat
+  asks for research) — only words a search box would take (`search_words`:
+  ten at most, none leaning on the conversation — "the thing I need",
+  "them", "you know" — which are the model's: a spoken "Can you Google…
+  the exact thing I need to buy and send them in chat" was searched word
+  for word, 1 Nov 2026), or — only with no search service for this chat
   (keyless: `web::backend` is `Keyless`) — it's something the free sources
   don't cover (travel, prices, the news: a model could only say so); with a
   key or the provider's own search, "search for …" is the model's to answer.
@@ -1935,7 +1939,16 @@ from `view::open_tabs`):
   keyboard hook there as in Yap's own windows, so the controller's
   `AcceleratorKeyPressed` (function keys, Ctrl / Alt combos) sends each key
   and its modifiers to the main window (`yap-page-key`), whose hotkey
-  fallback takes it as its own keydown / keyup (`settings/hotkeyFallback.svelte.js`). Not done:
+  fallback takes it as its own keydown / keyup (`settings/hotkeyFallback.svelte.js`).
+  A shortcut on a key that types (a "9", a letter: `view::types_a_character`)
+  never comes as an accelerator, so while the page has the focus
+  (`GotFocus` / `LostFocus`) Yap watches the bound ones itself
+  (`imp::watch_keys`: `input_hook::bound_keys`, every 15 ms, only while Yap
+  is the app in front and Ctrl and Alt are up) and sends their down and up
+  the same way — never any other key (the maintainer's Voice Assistant key,
+  a "9", did nothing after a click on the page until they clicked away,
+  1 Nov 2026). The page still gets the key too (a "9" typed in its search
+  box): WebView2 can't hold back a key that types. Not done:
   a popover on the selection like the document's (it would need the page to
   talk to Yap), and a quote taken by a question asked out loud (only typed
   or dictated ones carry it).
