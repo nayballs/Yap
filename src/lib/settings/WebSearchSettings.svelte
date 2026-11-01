@@ -11,8 +11,16 @@
   //   provider charges for its search is listed;
   // - each service's key kept in cfg.webSearchKeys like the AI keys
   //   (masked; "Get a free key" opens the service's dashboard);
-  // - "Wikipedia and reference wikis": always included — what Yap uses
-  //   with no key, and when the service has no results;
+  // - "Free sources, no key needed" (web/sources.rs, 2026-11-01): always
+  //   included — Wikipedia and game wikis, the weather (Open-Meteo), places
+  //   (OpenStreetMap), Stack Exchange, GitHub and arXiv, picked by the kind
+  //   of question — what Yap uses with no key, and when a service has no
+  //   results; with their credits;
+  // - "What works with what": no key / the AI's own search / an Exa or
+  //   Tavily key, said plainly;
+  // - "Search in your browser with" (cfg.webSearchBrowser, DuckDuckGo by
+  //   default): the engine the button under an answer the free sources
+  //   couldn't give opens;
   // - where the search words go, said plainly.
   //
   //   cfg:  Settings' config $state. Auto-save does the saving.
@@ -24,6 +32,7 @@
   import Row from '../ui/Row.svelte';
   import Toggle from '../ui/Toggle.svelte';
   import Segmented from '../ui/Segmented.svelte';
+  import Select from '../ui/Select.svelte';
   import Input from '../ui/Input.svelte';
   import { createExternalLinkHandler } from '../core/externalLinks.js';
   import { maskKey } from '../core/providers.js';
@@ -78,6 +87,25 @@
     },
   ];
 
+  // Yap's free sources (web/sources.rs): what each answers, and its credit
+  // (CC BY 4.0, ODbL, arXiv's acknowledgement).
+  const FREE = [
+    { name: 'Wikipedia and game wikis', what: 'facts, people, places, a game’s guides' },
+    { name: 'Open-Meteo', what: 'the weather and forecasts, in your units' },
+    { name: 'OpenStreetMap', what: 'where a place is, an address' },
+    { name: 'Stack Exchange and GitHub', what: 'programming questions, errors, libraries and tools' },
+    { name: 'arXiv', what: 'research papers' },
+  ];
+  const ENGINES = [
+    { value: 'duckduckgo', label: 'DuckDuckGo' },
+    { value: 'google', label: 'Google' },
+    { value: 'bing', label: 'Bing' },
+    { value: 'brave', label: 'Brave Search' },
+    { value: 'ecosia', label: 'Ecosia' },
+    { value: 'startpage', label: 'Startpage' },
+  ];
+  const FREE_NAMES = 'Wikipedia, Open-Meteo, OpenStreetMap, Stack Exchange, GitHub and arXiv';
+
   const native = $derived(cfg.webSearchNative !== false);
   const service = $derived(INFO[cfg.webSearchService] ? cfg.webSearchService : 'exa');
   const mode = $derived(native ? 'native' : service);
@@ -105,15 +133,15 @@
 
   const own = $derived(
     key
-      ? `${info.name} (${info.host}), and to Wikipedia or a reference wiki when ${info.name} has no results`
-      : `Wikipedia and reference wikis, as no ${info.name} API key is set`
+      ? `${info.name} (${info.host}), and to Yap’s free sources when ${info.name} has no results`
+      : `Yap’s free sources (${FREE_NAMES}: only the one that fits the question), as no ${info.name} API key is set`
   );
   const where = $derived(
     native
       ? `With a cloud model, your search words go to that model’s provider, which runs the search on its own servers. With a local or self-hosted model, or when a provider’s search is unavailable, they go to ${own}.`
       : key
         ? `Searches are sent to ${own}.`
-        : `No ${info.name} API key is set, so searches are sent to Wikipedia and reference wikis.`
+        : `No ${info.name} API key is set, so searches are sent to Yap’s free sources (${FREE_NAMES}: only the one that fits the question).`
   );
 </script>
 
@@ -227,18 +255,63 @@
     </Row>
 
     <Row>
-      <div class="always" class:off={!cfg.webSearch}>
+      <div class="always" class:off={!cfg.webSearch} data-testid="web-free-sources">
         <span class="tick" aria-hidden="true">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="m5 12.5 4.5 4.5L19 7.5" /></svg>
         </span>
         <span class="atext">
-          <span class="alabel">Wikipedia and reference wikis</span>
+          <span class="alabel">Free sources, no key needed</span>
           <span class="adesc">
-            Always available, no API key needed: Wikipedia in your language, and a game's own wiki. Used when no API
-            key is set, or when {info.name} has no results.
+            Always available: Yap picks the one that fits the question. Used when no API key is set and the AI has no
+            search of its own, or when {info.name} has no results.
+          </span>
+          <ul class="free">
+            {#each FREE as s (s.name)}
+              <li><strong>{s.name}</strong>: {s.what}</li>
+            {/each}
+          </ul>
+          <span class="adesc">
+            They don’t cover prices, shopping, the news, reviews or timetables: for those, Yap says so and offers
+            “Search in your browser”.
+          </span>
+          <span class="credits">
+            Weather data by Open-Meteo.com (CC BY 4.0) · Map data © OpenStreetMap contributors · Thank you to arXiv for
+            use of its open access interoperability.
           </span>
         </span>
       </div>
+    </Row>
+
+    <Row>
+      <details class="set-more" class:off={!cfg.webSearch} data-testid="web-what-works">
+        <summary>What works with what</summary>
+        <div class="more-body">
+          <dl class="works">
+            <div class="cost">
+              <dt>No key</dt>
+              <dd>
+                The free sources above. For anything else (prices, the news, reviews…) the answer offers “Search in your
+                browser”; Yap never reads that page.
+              </dd>
+            </div>
+            <div class="cost">
+              <dt>The AI’s own search</dt>
+              <dd>
+                A cloud chat model (Groq, Google Gemini, Anthropic, OpenAI, OpenRouter) searches the whole web with its
+                provider’s search, on the key Chat already uses, billed to your account. Models on this PC don’t have it.
+              </dd>
+            </div>
+            <div class="cost">
+              <dt>An Exa or Tavily key</dt>
+              <dd>Every model, including the ones on this PC, searches the whole web. Both have free monthly searches.</dd>
+            </div>
+          </dl>
+        </div>
+      </details>
+    </Row>
+
+    <Row setting="web-search-browser" label="Search in your browser with" desc="The search engine the button under such an answer opens, in your own browser">
+      <Select bind:value={cfg.webSearchBrowser} options={ENGINES} ariaLabel="Search in your browser with" disabled={!cfg.webSearch} />
     </Row>
 
     <Row>
@@ -468,6 +541,29 @@
     display: flex;
     flex-direction: column;
     gap: 2px;
+  }
+  .free {
+    margin: 4px 0;
+    padding-left: 18px;
+    font-size: 12.5px;
+    line-height: 1.6;
+    color: var(--yap-fg-80);
+  }
+  .free strong {
+    font-weight: 600;
+    color: var(--yap-fg);
+  }
+  .credits {
+    margin-top: 4px;
+    font-size: 11.5px;
+    line-height: 1.5;
+    color: var(--yap-muted);
+  }
+  .works {
+    margin-top: 2px;
+  }
+  .works .cost {
+    grid-template-columns: 150px 1fr;
   }
   .adesc,
   .privacy {

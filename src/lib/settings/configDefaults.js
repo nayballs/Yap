@@ -212,6 +212,9 @@ export const FIELD_DEFAULTS = {
   webSearchNative: true,
   webSearchService: 'exa',
   webSearchKeys: {},
+  // "Search in your browser" under an answer the free sources couldn't give
+  // (web/sources.rs): the engine it opens.
+  webSearchBrowser: 'duckduckgo',
   speakReplies: false,
   speakWhen: 'voice',
   talkBackHandsFree: true,

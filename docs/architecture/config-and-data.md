@@ -290,7 +290,14 @@
   apps_blocked (app ids, "Don't open this one") + app_nicknames
   (`AppNickname {say, app, name}`), the web (`web.rs`): web_search (false) +
   web_search_native (true: cloud models use their provider's own search) +
-  web_search_service ("exa" | "tavily") + web_search_keys (service → key),
+  web_search_service ("exa" | "tavily") + web_search_keys (service → key) +
+  web_search_browser ("duckduckgo", the default, | "google" | "bing" |
+  "brave" | "ecosia" | "startpage": the engine an answer's "Search in your
+  browser" opens, `web/sources.rs`, 2026-11-01; a new field, no
+  `migrate_once` step; an older Yap drops it on save and the button opens
+  DuckDuckGo) — web_search stays off by default (the research recommended
+  on for the free sources alone, but today's switch also turns on paid
+  provider search for cloud chats: the maintainer's call),
   each model's effort (`ai/effort.rs`, 2026-10-31, Chat's model picker and
   Language Models → Chat): chat_effort (`"<provider>:<model>"` → "low" |
   "medium" | "high" | "xhigh" | "max"; a model missing from it runs at its
@@ -658,7 +665,10 @@
   its next save, so it shows in the list again). An answer may keep
   `tokens` (`{prompt, answer, perSecond?}`, 2026-10-25: its last model
   call's counts, for Chat's context ring); an older Yap's save drops it,
-  and the ring estimates instead. An answer thought through (Chat's Think,
+  and the ring estimates instead. An answer Yap's free web sources couldn't
+  give may keep `browserSearch` (`{query, url, engine}`, 2026-11-01,
+  `web/sources.rs`: the "Search in your browser" button); an older Yap's
+  save drops it, and the button with it. An answer thought through (Chat's Think,
   2026-10-29, `chat/think.rs`) keeps `thinking` (`{text?, ms}`: the model's
   thinking when it sent it, and how long); a source may be `screen: true`
   (the window's text the Voice Assistant read on this PC); a question's

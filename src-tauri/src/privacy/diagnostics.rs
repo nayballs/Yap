@@ -125,6 +125,7 @@ const COPY: &[&str] = &[
     "webSearch",
     "webSearchNative",
     "webSearchService",
+    "webSearchBrowser",
     "ttsEngine",
     "ttsVoice",
     "ttsWindowsVoice",

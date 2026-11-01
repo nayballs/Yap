@@ -223,6 +223,10 @@ pub enum Purpose {
     WebSearch(&'static str),
     /// The keyless lookup: Wikipedia and the games' wikis.
     WikiSearch,
+    /// One of the free sources a keyless search picks by the kind of
+    /// question (`web/sources.rs`): the weather, a place, Stack Exchange,
+    /// GitHub, arXiv.
+    FreeSource(FreeSource),
     /// A cloud model's own search (`web/native.rs`): the provider's name.
     ProviderSearch(&'static str),
     /// Chat reading a web page (`read_page`).
@@ -252,6 +256,35 @@ pub enum Purpose {
     /// A paired phone connecting to Yap (Yap Link, `link.rs`): the page's
     /// files and its conversation with Yap, inbound, from your network.
     Phone,
+}
+
+/// The free sources a keyless web search asks (`web/sources.rs`), each its
+/// own purpose in the receipts.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FreeSource {
+    /// Open-Meteo's forecast and geocoder.
+    Weather,
+    /// OpenStreetMap's Nominatim.
+    Places,
+    /// The Stack Exchange API (Stack Overflow).
+    StackExchange,
+    /// GitHub's search API.
+    GitHub,
+    /// The arXiv API.
+    Arxiv,
+}
+
+impl FreeSource {
+    /// Its label in Network connections.
+    pub fn label(self) -> &'static str {
+        match self {
+            FreeSource::Weather => "Web search · Weather (Open-Meteo)",
+            FreeSource::Places => "Web search · Places (OpenStreetMap)",
+            FreeSource::StackExchange => "Web search · Stack Exchange",
+            FreeSource::GitHub => "Web search · GitHub",
+            FreeSource::Arxiv => "Web search · arXiv",
+        }
+    }
 }
 
 /// What a request is, in the store's words: its kind (for the page's
@@ -292,6 +325,7 @@ impl Purpose {
             Purpose::Embeddings => ("ai", "Search by meaning · on-device model".into(), "Search"),
             Purpose::WebSearch(s) => ("web", format!("Web search · {s}"), f("Chat")),
             Purpose::WikiSearch => ("web", "Web search · Wikipedia and wikis".into(), f("Chat")),
+            Purpose::FreeSource(s) => ("web", s.label().into(), f("Chat")),
             Purpose::ProviderSearch(p) => ("web", format!("Web search · {p}"), f("Chat")),
             Purpose::WebPage => ("web", "Reading a web page".into(), f("Chat")),
             Purpose::WebPicture => ("web", "A picture from the web".into(), f("Chat")),
@@ -1146,6 +1180,11 @@ mod tests {
         let d = Purpose::Ai("groq".into()).describe(Some(Feature::AssistantScreen));
         assert_eq!((d.label.as_str(), d.feature), ("Voice Assistant + the window in front · Groq", "Voice Assistant"));
         assert_eq!(Purpose::WebSearch("Exa").describe(Some(Feature::AssistantScreen)).feature, "Voice Assistant");
+        // The free sources a keyless search picks: each named.
+        let d = Purpose::FreeSource(FreeSource::Weather).describe(Some(Feature::Chat));
+        assert_eq!((d.kind, d.label.as_str(), d.feature), ("web", "Web search · Weather (Open-Meteo)", "Chat"));
+        assert_eq!(Purpose::FreeSource(FreeSource::Places).describe(None).label, "Web search · Places (OpenStreetMap)");
+        assert_eq!(Purpose::FreeSource(FreeSource::Arxiv).describe(Some(Feature::Assistant)).feature, "Voice Assistant");
         assert_eq!(Purpose::Download(Download::SpeechModel).describe(None).label, "Speech model download");
         assert_eq!(Purpose::ModelList("OpenRouter".into()).describe(None).label, "Model list · OpenRouter");
     }

@@ -166,6 +166,10 @@ pub struct Turn {
     /// read's, a search's — `p1`, `p2`… for `look_at_picture` and
     /// `show_picture` — and the ones shown.
     pub pictures: TurnPictures,
+    /// Yap's free sources couldn't answer a search of this turn
+    /// (`sources.rs`): the answer may offer "Search in your browser"
+    /// ([`Turn::browser_search`]).
+    handoff: Option<super::Handoff>,
 }
 
 impl Turn {
@@ -196,7 +200,19 @@ impl Turn {
             outline_first: false,
             documented: false,
             pictures: TurnPictures::default(),
+            handoff: None,
         }
+    }
+
+    /// **"Search in your browser" under the answer** (`sources::Handoff`):
+    /// when a search of this turn wasn't one Yap's free sources cover (or
+    /// may not be: a game's price), or they found nothing and the turn read
+    /// nothing else from the web; `engine`: the person's (Settings → Voice
+    /// Assistant → Web search, `web_search_browser`).
+    pub fn browser_search(&self, engine: &str) -> Option<super::BrowserSearch> {
+        let h = self.handoff.as_ref()?;
+        let found_elsewhere = h.why == super::sources::Why::NothingFound && !self.sources.is_empty();
+        (!found_elsewhere).then(|| super::BrowserSearch::new(engine, &h.query))
     }
 
     /// Where its requests go (a picture's download too: `chat/pictures.rs`).
@@ -572,6 +588,15 @@ impl Turn {
                 }
                 if results.is_empty() {
                     data["hint"] = json!("Nothing found. Try other words once, or tell the user the web didn't answer it.");
+                }
+                // Yap's free sources couldn't answer it (no search service):
+                // say so plainly, and the answer offers the browser.
+                if let Some(h) = &found.handoff {
+                    data["hint"] = json!(h.line());
+                    let weaker = self.handoff.as_ref().is_none_or(|o| o.why == super::sources::Why::NothingFound);
+                    if h.offers() && weaker {
+                        self.handoff = Some(h.clone());
+                    }
                 }
                 let text: Vec<&str> =
                     found.hits.iter().flat_map(|h| [h.title.as_str(), h.text.as_str()]).chain(found.summary.as_deref()).collect();

@@ -87,6 +87,13 @@ pub struct ChatMessage {
     /// it: the question stays, without its quote.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub quote: Option<crate::chat::documents::Quote>,
+    /// **"Search in your browser"** under an answer Yap's free web sources
+    /// couldn't give (no search service for the turn: `web/sources.rs`): the
+    /// search and its address on the person's engine, which the button opens
+    /// in their own browser (`open_external`). An older Yap's save drops it:
+    /// the button goes, the answer stays.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub browser_search: Option<crate::web::BrowserSearch>,
 }
 
 impl ChatMessage {
@@ -654,6 +661,27 @@ pub fn set_pictures(id: u64, index: usize, pictures: &[crate::chat::pictures::Sh
     });
 }
 
+/// Keep "Search in your browser" with an answer (conversation `id`'s message
+/// `index`), when it offers one.
+pub fn set_browser_search(id: u64, index: usize, search: Option<&crate::web::BrowserSearch>) {
+    let Some(search) = search else { return };
+    with_store(|s| {
+        let Some(m) = s.conversations.iter_mut().find(|c| c.id == id).and_then(|c| c.messages.get_mut(index)) else { return };
+        if m.role == "assistant" {
+            m.browser_search = Some(search.clone());
+            save_to_disk(s);
+        }
+    });
+}
+
+/// The "Search in your browser" an answer offers, as saved (the page's
+/// answer to `chat_send` carries it).
+pub fn browser_search_of(id: u64, index: usize) -> Option<crate::web::BrowserSearch> {
+    with_store(|s| {
+        s.conversations.iter().find(|c| c.id == id).and_then(|c| c.messages.get(index)).and_then(|m| m.browser_search.clone())
+    })
+}
+
 /// Keep the passage a question was asked about with it (`documents::Quote`):
 /// conversation `id`'s message `index`, when it's a question.
 pub fn set_quote(id: u64, index: usize, quote: crate::chat::documents::Quote) {
@@ -751,6 +779,7 @@ pub fn append_message(
             documents: Vec::new(),
             pictures: Vec::new(),
             quote: None,
+            browser_search: None,
         });
         conv.updated_ts = now_secs();
         // Asked again in an archived chat: it's back in the list.
@@ -1444,6 +1473,13 @@ mod tests {
         assert_eq!(back.pictures, vec![picture]);
         let older: ChatMessage = serde_json::from_value(json!({ "role": "assistant", "text": "x", "ts": 0 })).unwrap();
         assert!(older.pictures.is_empty());
+        // "Search in your browser": kept with the answer, camelCase, skipped
+        // when there's none.
+        let offered = ChatMessage { role: "assistant".into(), browser_search: Some(crate::web::BrowserSearch::new("duckduckgo", "Grok price UK")), ..Default::default() };
+        let v = serde_json::to_value(&offered).unwrap();
+        assert_eq!(v["browserSearch"], json!({ "query": "Grok price UK", "url": "https://duckduckgo.com/?q=Grok+price+UK", "engine": "DuckDuckGo" }));
+        assert!(plain.get("browserSearch").is_none());
+        assert!(older.browser_search.is_none());
         let q = ChatMessage { role: "user".into(), images: vec![ChatImage { id: "img_aaaaaaaaaaaaaaaa".into(), ..Default::default() }], ..Default::default() };
         assert_eq!(q.image_ids().collect::<Vec<_>>(), ["img_aaaaaaaaaaaaaaaa"]);
         assert_eq!(m.image_ids().collect::<Vec<_>>(), ["img_00112233445566aa"]);
@@ -1468,6 +1504,7 @@ mod tests {
             documents: vec![],
             pictures: vec![],
             quote: None,
+            browser_search: None,
         };
         let messages = vec![
             msg("user", vec![]),

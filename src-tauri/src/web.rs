@@ -16,15 +16,19 @@
 //!   plus `numResults: 5` (Yap's result budget, a product decision);
 //! - or **Tavily** (`POST https://api.tavily.com/search`, `Authorization:
 //!   Bearer`, `{query, max_results: 5}`: basic depth, one credit);
-//! - and, with no key — or when the service fails — the **keyless lookup**:
-//!   a game's own MediaWiki wiki through its `api.php` (`GAME_WIKIS`:
-//!   bg3.wiki, warcraft.wiki.gg, minecraft.wiki…; any `*.wiki.gg` wiki named
-//!   in the question too; never Fandom, whose terms forbid automated
-//!   requests: `wiki::allows_automated`), else Wikipedia in the
-//!   person's language (the Action API: search, then the article's text).
-//!   Polite: a descriptive User-Agent with a contact address, one request at
-//!   a time per host with a short gap, ≤ 3 requests per lookup, answers
-//!   cached for 10 minutes. Never a scrape of Google, Bing or DuckDuckGo.
+//! - and, with no key — or when the service fails — **Yap's free sources,
+//!   picked by the kind of question** ([`sources`], 2026-11-01): the weather
+//!   from Open-Meteo, a place from OpenStreetMap, programming from Stack
+//!   Exchange and GitHub, papers from arXiv, and everything else from the
+//!   keyless lookup: a game's own MediaWiki wiki through its `api.php`
+//!   (`GAME_WIKIS`: bg3.wiki, minecraft.wiki…; never Fandom, whose terms
+//!   forbid automated requests: `wiki::allows_automated`), else Wikipedia in
+//!   the person's language (the Action API: search, then the article's
+//!   text). What none of them covers (prices, the news, reviews,
+//!   timetables…) isn't guessed: the answer offers "Search in your browser"
+//!   ([`BrowserSearch`]). Polite: a descriptive User-Agent with a contact
+//!   address, each host at its own pace, answers cached. Never a scrape of
+//!   a search engine (Google, Bing, DuckDuckGo, Brave…, nor via SearXNG).
 //!
 //! **The AI's own search** (the default for cloud models,
 //! `config.web_search_native`): with a Groq, Gemini, Claude, OpenAI or
@@ -63,9 +67,10 @@
 //! a test run's search or page read fails with a clear error.
 //!
 //! Here: the settings, the results and the services, and [`search`]. Its
-//! parts: `wiki` (the keyless lookup), `page` (reading a page), `turn` (one
-//! turn's tools and sources), `grounding` (the fixed pipeline and what an
-//! answer may say about searching) and [`native`] (the AI's own search).
+//! parts: [`sources`] (the free sources by kind of question), `wiki` (the
+//! keyless wiki lookup), `page` (reading a page), `turn` (one turn's tools
+//! and sources), `grounding` (the fixed pipeline and what an answer may say
+//! about searching) and [`native`] (the AI's own search).
 
 use std::collections::HashMap;
 use crate::privacy::net::Recorded as _;
@@ -79,6 +84,7 @@ use serde_json::{json, Value};
 mod grounding;
 pub mod native;
 mod page;
+pub mod sources;
 mod turn;
 mod wiki;
 
@@ -90,10 +96,12 @@ pub use grounding::{
 #[cfg(debug_assertions)]
 pub use page::clear_caches;
 pub use page::{check_url, fetch_picture, is_junk, page_images, PageImage, MAX_PICTURE_BYTES};
+pub use sources::{BrowserSearch, Handoff};
 pub use turn::{bracket_citations, citations, normal_url, short_url, Reach, Turn};
 pub use wiki::keywords;
 
-use wiki::{game_for, keyless, wiki_lookup};
+use sources::free_search;
+use wiki::{game_for, wiki_lookup};
 
 /// The tools this module runs.
 pub const TOOL_NAMES: &[&str] = &["web_search", "read_page"];
@@ -366,6 +374,9 @@ pub struct Found {
     /// Tavily's image search, Exa's results' own pictures, the wiki
     /// article's images.
     pub images: Vec<FoundImage>,
+    /// Yap's free sources couldn't answer it ([`sources`]): what the model
+    /// is told, and the search "Search in your browser" offers.
+    pub handoff: Option<Handoff>,
 }
 
 /// A picture a search came with: the picture, and the page it's on when
@@ -626,6 +637,12 @@ pub fn search_chip(query: &str, found: &Found, s: &Settings) -> String {
         };
         return format!("Searched the web with {}: \"{q}\"{more}", p.name());
     }
+    // Nothing searched (the free sources don't cover it), or no place for
+    // the weather: said as it is.
+    if let Some(why) = found.handoff.as_ref().and_then(Handoff::chip) {
+        let then = found.note.as_deref().map(|n| format!(" · {}", short(n))).unwrap_or_default();
+        return format!("Didn't search the web for \"{q}\": {why}{then}");
+    }
     let keyed = matches!(own_backend(s), Backend::Service(_)) && found.note.is_none();
     let via = if keyed { String::new() } else { format!(" ({})", found.from) };
     match (found.hits.len(), &found.note) {
@@ -733,6 +750,7 @@ pub async fn search(s: &Settings, ep: &Endpoints, query: &str, context: &str) ->
                 summary: n.summary,
                 read: n.read,
                 images: Vec::new(),
+                handoff: None,
             },
             other => {
                 // Unsupported model, refused, rate-limited, unreachable or
@@ -765,11 +783,12 @@ pub async fn search(s: &Settings, ep: &Endpoints, query: &str, context: &str) ->
 }
 
 /// Yap's own search: the keyed service (with the game's wiki first, and the
-/// keyless lookup when it fails or finds nothing), else the keyless lookup.
+/// free sources when it fails or finds nothing), else the free sources by
+/// kind of question ([`sources`]).
 async fn own_search(s: &Settings, ep: &Endpoints, query: &str, context: &str) -> Result<Found, String> {
     let query = query.to_string();
     Ok(match own_backend(s) {
-        Backend::Keyless | Backend::Native(_) => keyless(s, ep, &query, context).await?,
+        Backend::Keyless | Backend::Native(_) => free_search(s, ep, &query, context).await?,
         Backend::Service(service) => match service_search(ep, service, &s.key, &query, s.country.as_deref()).await {
             Ok((mut hits, mut images)) => {
                 // A game question: its wiki's best article leads (its
@@ -789,11 +808,13 @@ async fn own_search(s: &Settings, ep: &Endpoints, query: &str, context: &str) ->
                     }
                 }
                 if hits.is_empty() {
-                    // Nothing on the web for it: Wikipedia (or the game's
-                    // wiki) may still know, and the chip says where it's from.
-                    match keyless(s, ep, &query, context).await {
+                    // Nothing on the web for it: a free source (Wikipedia, the
+                    // game's wiki…) may still know, and the chip says where
+                    // it's from. (No browser offered: the person has a search.)
+                    match free_search(s, ep, &query, context).await {
                         Ok(mut f) if !f.hits.is_empty() => {
                             f.note = Some(format!("{} found nothing.", service.name()));
+                            f.handoff = None;
                             f
                         }
                         _ => Found { hits, from: service.name().into(), images, ..Default::default() },
@@ -803,8 +824,8 @@ async fn own_search(s: &Settings, ep: &Endpoints, query: &str, context: &str) ->
                 }
             }
             Err(e) => {
-                tracing::info!("Web search: {} failed, trying the keyless lookup", service.name());
-                match keyless(s, ep, &query, context).await {
+                tracing::info!("Web search: {} failed, trying the free sources", service.name());
+                match free_search(s, ep, &query, context).await {
                     Ok(mut f) => {
                         f.note = Some(e);
                         f

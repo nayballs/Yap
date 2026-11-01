@@ -19,7 +19,8 @@ Chat's and the Voice Assistant's two ways of reaching outside Yap: looking thing
   key, like `pp_api_keys`, never logged); with no key — or when the service
   fails (its error kept as `note`, said in the chip: 401/403 wrong key, Exa
   402 / Tavily 432 out of free searches, 433, 429, offline), or when it
-  found nothing ("Exa found nothing." as the note) — the **keyless
+  found nothing ("Exa found nothing." as the note) — **Yap's free sources
+  by kind of question** (below), whose catch-all is the **keyless
   lookup**: the game's own MediaWiki (`GAME_WIKIS`: bg3.wiki, warcraft.wiki.gg,
   minecraft.wiki, terraria.wiki.gg, stardewvalleywiki.com, zeldawiki.wiki,
   uesp.net, the RuneScape wikis…; any `*.wiki.gg` named in the question) —
@@ -43,7 +44,97 @@ Chat's and the Voice Assistant's two ways of reaching outside Yap: looking thing
   A keyed game question gets the wiki's best article first too. Descriptive
   User-Agent (`USER_AGENT`, contact URL), one request at a time per host
   250 ms apart, ≤ 5 results, ~700 chars each, 10-minute cache. Never a
-  key-less scrape of Google/Bing/DuckDuckGo. **`read_page`**: `check_url`
+  key-less scrape of a search engine's result pages (Google, Bing,
+  DuckDuckGo, Brave, Mojeek, Startpage, nor any of them through SearXNG:
+  their `robots.txt` and terms forbid it, checked 31 Oct 2026).
+  **Free sources by kind of question** (`web/sources.rs`, 2026-11-01; design:
+  yap-private `docs/web-search-without-keys-2026-10.md` §3.1 and §4): with no
+  key, or when the service fails, `own_search` calls `sources::free_search`,
+  which reads the kind of question (`sources/route.rs`, `route`, pure: a
+  cheap rule on **the model's own query first** — its choice of what to
+  search — and on the person's question only when the query says nothing,
+  or for the game it names; in the person's languages where Yap has them —
+  Wikipedia's language and English; the weather, prices, the news and
+  "where is" also in French, German, Spanish, Italian, Portuguese and Dutch,
+  as `command_screen.rs` has its rules; precedence: weather > a game Yap
+  knows a wiki for > code > programming > papers > a place; a programming
+  word that's also an ordinary one — "rust", "go", "python" — only beside a
+  word that says so) and asks that kind's sources (`sources_for`), their
+  results together as the usual numbered `Hit`s (≤ 5, each page once):
+  **the weather** → Open-Meteo (`sources/weather.rs`: its own geocoder for
+  the place `place_in` reads from the words — "weather in Glenbrackie
+  today" → "Glenbrackie", weather and time words off both ends, never the
+  middle: "Stoke on Trent" —, a place in the person's country first, else
+  the biggest, a "Paris, Texas" hint; then the forecast, now and seven
+  days, in the person's units: °F, mph and inches in the US, mph in the UK,
+  °C, km/h and mm elsewhere, a question naming the other unit gets it;
+  Open-Meteo's "mp/h" written "mph"; its source the place's page on
+  open-meteo.com; "Weather data by Open-Meteo.com (CC BY 4.0)." in the
+  result; no place named → the model asks which, no search, no button;
+  **free for non-commercial use only**: apps "without subscriptions or ads"
+  — a paid Yap tier would need Open-Meteo's commercial plan; < 10,000 calls
+  a day, 600 a minute); **where a place is** → OpenStreetMap's Nominatim
+  then Wikipedia (`sources/places.rs`: `place_terms` without "where is",
+  "the address of"…; its usage policy: at most one request a second — Yap
+  1.1 s —, a real User-Agent, results cached a day, no autocomplete, no
+  bulk, "Map data © OpenStreetMap contributors (ODbL)." in each result,
+  `NOMINATIM` the one address to switch at its request); **programming** →
+  the Stack Exchange API (`sources/stack.rs`: Stack Overflow's questions by
+  relevance with at least one answer, then their answers — the accepted
+  one, else the best scored —, the question short and the answer longer,
+  code kept as text; keyless 300 requests a day per IP, its `backoff`
+  honoured, every answer gzipped) then GitHub's issues (`sources/github.rs`:
+  an error, a panic, a crash, "E0499" → `search/issues … is:issue`, else
+  `search/repositories` with the words that say what and a named language
+  as `language:`, the longest two words alone when nothing matched;
+  unauthenticated 10 a minute, a 403/429's `x-ratelimit-reset` honoured;
+  code search needs a login, so never), Wikipedia only when both found
+  nothing; **code** (a library, a crate, a repository, an open-source
+  alternative) → GitHub's repositories; **papers** → the arXiv API then
+  Wikipedia (`sources/arxiv.rs`: its words as `all:` terms joined with AND,
+  three by relevance, the Atom feed read with dom_query; one request every
+  three seconds — Yap 3.1 s —, never implying arXiv's endorsement; its
+  "Thank you to arXiv for use of its open access interoperability." in
+  Settings); **a game, facts, anything else** → the keyless lookup above.
+  **What none of them covers** — prices and shopping (`asks_about_prices`
+  and the other languages' words), the news, reviews and rankings
+  ("best … 2026"), timetables and opening hours, local businesses ("near
+  me"), recipes — is **never searched or guessed**: the result has no
+  results and the model is told (`Handoff::line`) to say in one sentence
+  that Yap can't search the whole web here, without figures from memory,
+  and not to search again; a covered kind that also asks one of those (a
+  game item's cost: in-game gold, or the real price) still asks its source,
+  with the same offer. **News** stays with the provider's search or a
+  search key: the research names no concrete set of publishers' feeds whose
+  terms clearly allow an app's use (only an undated archived BBC page), so
+  none are read; Wikidata isn't added either (the keyless lookup stays as
+  it was). **"Search in your browser"** (`BrowserSearch {query, url,
+  engine}`): offered when a search wasn't covered, or found nothing and the
+  turn read nothing else from the web (`Turn::browser_search`; a small
+  model's fixed pipeline, `Handoff::small_line`, the same) — kept with the
+  answer (`chats::ChatMessage::browser_search`), a button under it that
+  opens the search in the person's own browser (`open_external`) on
+  Settings' engine (`web_search_browser`: DuckDuckGo by default — the
+  research's recommendation —, Google, Bing, Brave Search, Ecosia,
+  Startpage); Yap never reads that page. Chips: `Searched the web: "q"
+  (Open-Meteo)`, `(Stack Overflow, GitHub)`, `(OpenStreetMap, Wikipedia)`,
+  `Didn't search the web for "q": Yap's free sources don't cover prices`,
+  `…: no place to look up`. **Polite** (`sources/polite.rs`): each host's
+  pace (`Pacer`, pure: a gap, a budget a minute; a turn more than 8 s off
+  skips the source for that search), a host that says wait (`Retry-After`,
+  a 429 / 503, a rate limit's 403, Stack Exchange's `backoff`) left alone
+  until then (≤ 1 h), answers cached per address for as long as the source
+  allows (Open-Meteo's forecast 15 min, a place a day, the others an hour;
+  ≤ 300 kept; `clear_caches` empties them for the evaluations), Yap's
+  User-Agent, `Accept-Encoding: gzip` (unzipped here, ≤ 4 MB), every
+  request through `Endpoints::route` (test runs: the stand-in web) and its
+  own receipt (`Purpose::FreeSource`: privacy-receipts.md). **The six games
+  dropped from Fandom** (Elden Ring, Cyberpunk 2077, The Witcher, Fallout,
+  Genshin Impact, Valheim) got no wiki: none was found whose terms or API
+  policy allow automated use (wiki.gg's terms — indie.io's, revised 1 Apr
+  2026 — say "You may not use manual or automated means (e.g., crawling,
+  scraping, spidering) to access the Services"; the Independent Fallout
+  Wiki, fallout.wiki, publishes no API or bot policy). **`read_page`**: `check_url`
   (http(s), ports 80/443, no user:pass, not `localhost`/`.local`/… or a
   local IP — `is_public`: loopback, private, link-local, CGNAT, ULA,
   mapped/NAT64/6to4 carrying one, documentation, reserved), the host

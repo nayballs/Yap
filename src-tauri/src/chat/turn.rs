@@ -755,6 +755,9 @@ async fn answer_turn(
         beside: beside.as_ref().map(|b| b as &dyn crate::chat::stream::Dictations),
     });
 
+    // "Search in your browser" under the answer: Yap's free web sources
+    // couldn't give it (no search service for the turn, web/sources.rs).
+    let browser: Option<crate::web::BrowserSearch>;
     let (reply, tools_used, sources, looked, pages, stopped, shown_pictures) = if tools_supported {
         let notify = |id: u64| {
             use tauri::Emitter;
@@ -861,6 +864,7 @@ async fn answer_turn(
         }
         sources.extend(crate::chat::tools::calendar::sources_for(&reply, &calendar_log.all()));
         sources.sort_by_key(|s| s.n);
+        browser = web.as_ref().and_then(|w| w.browser_search(&cfg.web_search_browser));
         let pages = web.map(|w| w.texts).unwrap_or_default();
         (reply, tools_used, sources, looked, pages, stopped, shown)
     } else {
@@ -870,7 +874,7 @@ async fn answer_turn(
         // The web pipeline's own prompt ends as this one does: About you,
         // then memory's "You".
         let about_and_memory = if memory_you.is_empty() { about.clone() } else { format!("{about}\n\n{memory_you}") };
-        let SmallAnswer { reply, chips, sources, looked, pages, stopped } = small_model_answer(
+        let SmallAnswer { reply, chips, sources, looked, pages, stopped, handoff } = small_model_answer(
             &cfg,
             &persona,
             &system,
@@ -886,6 +890,7 @@ async fn answer_turn(
         )
         .await
         .map_err(plain)?;
+        browser = handoff.filter(crate::web::Handoff::offers).map(|h| crate::web::BrowserSearch::new(&cfg.web_search_browser, &h.query));
         // "Opening Baldur's Gate 3." from a model that can't open anything:
         // said as it is instead (apps.rs).
         let corrected = if crate::apps::claims_unasked(&reply, &text) {
@@ -1035,6 +1040,8 @@ async fn answer_turn(
     crate::chat::chats::set_documents(conv.id, index, &documents);
     // The pictures it showed beside the chat: its pills, and the panel's tabs.
     crate::chat::chats::set_pictures(conv.id, index, &shown_pictures);
+    // "Search in your browser", when the free sources couldn't answer.
+    crate::chat::chats::set_browser_search(conv.id, index, browser.as_ref());
     // Read for lasting facts once the chat goes quiet ("Learn from my chats").
     crate::memory::learn::after_turn(conv.id);
     // Filling the room? The older messages summarised in the background
@@ -1300,6 +1307,7 @@ async fn small_model_answer(
     let mut pages = Vec::new();
     let mut system = system.to_string();
     let mut history = history.to_vec();
+    let mut handoff = None;
     let looked = web_on && crate::web::needs_web(text);
     if looked {
         let settings = crate::web::Settings::for_chat(cfg, provider, model, base_url, api_key);
@@ -1352,10 +1360,17 @@ async fn small_model_answer(
                     n => format!("Answered from {n} web pages"),
                 });
                 sources = found_sources;
+                // A free source had a go at something it may not cover (a
+                // game's price): the browser offered too.
+                handoff = found.handoff.take();
             }
             Ok(found) => {
                 chips.push(crate::web::search_chip(&query, &found, &settings));
-                system.push_str(&format!("\n\n{}", crate::web::no_search_line(Some("the search found nothing for it"))));
+                // Yap's free sources couldn't answer it: said plainly, with
+                // "Search in your browser" under the answer.
+                let line = found.handoff.as_ref().map_or_else(|| crate::web::no_search_line(Some("the search found nothing for it")), crate::web::Handoff::small_line);
+                system.push_str(&format!("\n\n{line}"));
+                handoff = found.handoff;
             }
             Err(e) => {
                 tracing::info!("Chat: the web search for a small model failed");
@@ -1380,7 +1395,7 @@ async fn small_model_answer(
         Err(crate::chat::stream::Halt::Superseded) => return Err(superseded()),
         Err(crate::chat::stream::Halt::Stopped) => (watch.map(|w| w.seen().text).unwrap_or_default(), true),
     };
-    Ok(SmallAnswer { reply, chips, sources, looked, pages, stopped })
+    Ok(SmallAnswer { reply, chips, sources, looked, pages, stopped, handoff })
 }
 
 /// A turn a newer question in its conversation replaced (`chat_turn`): no
@@ -1400,6 +1415,8 @@ struct SmallAnswer {
     pages: Vec<String>,
     /// Stopped while it was written (`reply` = what showed).
     stopped: bool,
+    /// Yap's free web sources couldn't answer it: "Search in your browser".
+    handoff: Option<crate::web::Handoff>,
 }
 
 /// The fixed web pipeline's second search for a price where the person is

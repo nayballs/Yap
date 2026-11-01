@@ -542,7 +542,15 @@ style neither).
   charges for its search"** behind a disclosure (Groq, Gemini, Anthropic,
   OpenAI, OpenRouter, as published 18 Oct 2026) and "Yap's search" (Exa /
   Tavily); the service's key masked in `webSearchKeys` with "Get a free key";
-  Wikipedia and reference wikis, always; where the search words go, a link to
+  **Free sources, no key needed** (always, 2026-11-01, `web/sources.rs`:
+  Wikipedia and game wikis, Open-Meteo, OpenStreetMap, Stack Exchange and
+  GitHub, arXiv — what each answers, what none covers, their credits: CC BY
+  4.0, © OpenStreetMap contributors, arXiv's thanks); **What works with
+  what** behind a disclosure (No key / The AI's own search / An Exa or
+  Tavily key); **Search in your browser with** (`webSearchBrowser`, a
+  Select: DuckDuckGo, the default, Google, Bing, Brave Search, Ecosia,
+  Startpage; `[data-setting=web-search-browser]`); where the search words go
+  (Yap's free sources, only the one that fits the question), a link to
   Privacy & data, and the safety rule). **Spoken replies in Chat**: Speak
   replies (`speakReplies`; switching it on without Kokoro offers it,
   `KokoroOffer.svelte`), How much to read aloud (`spokenLength`, a Select:

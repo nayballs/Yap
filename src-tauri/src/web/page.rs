@@ -136,6 +136,7 @@ pub fn clear_caches() {
     SEARCHES.lock().unwrap_or_else(|p| p.into_inner()).clear();
     PAGES.lock().unwrap_or_else(|p| p.into_inner()).clear();
     native::forget_unavailable();
+    super::sources::clear_caches();
 }
 
 /// What a fetch brought back.

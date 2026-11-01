@@ -39,6 +39,12 @@
 // - The Voice Assistant: a web answer said short — one or two sentences, no
 //   [n] — then "The details and sources are in Chat.", its card showing the
 //   short answer and the sources' count.
+// - Yap's free sources with no search key (web/sources.rs): the weather from
+//   Open-Meteo (its geocoder, then its forecast), a programming question
+//   from Stack Overflow and GitHub; a price or the news isn't searched at
+//   all, the answer says so and "Search in your browser" opens the search in
+//   the person's browser (open_external) on the engine chosen in Settings,
+//   kept with the answer.
 //
 // Test mode never goes on the internet: the services, the wikis and the
 // pages are a local fake (support/fake-web.js) through the debug-only
@@ -56,7 +62,7 @@ import {
   setConfig,
 } from './support/fixtures.js';
 import { startFakeLlm, GROUNDING_REDIRECT } from './support/fake-llm.js';
-import { startFakeWeb, GALE_URL, GUIDE_URL, TIPS_URL, RPG_URL } from './support/fake-web.js';
+import { startFakeWeb, GALE_URL, GUIDE_URL, TIPS_URL, RPG_URL, WEATHER_PAGE, SO_URL, GH_ISSUE_URL } from './support/fake-web.js';
 
 const EXA_KEY = 'fake-exa-key-for-tests';
 
@@ -131,8 +137,19 @@ test('Settings: web search is off until turned on, the AI’s own search recomme
   const modes = group.getByRole('radiogroup', { name: 'Search with' });
   const own = modes.getByRole('radio', { name: /The AI's own search/ });
   await expect(toggle).toHaveAttribute('aria-pressed', 'false');
-  await expect(group).toContainText('Wikipedia and reference wikis');
-  await expect(group).toContainText('Always available, no API key needed');
+  // Yap's free sources (web/sources.rs): what works with no key, credited.
+  const free = group.getByTestId('web-free-sources');
+  await expect(free).toContainText('Free sources, no key needed');
+  await expect(free.locator('li')).toHaveText([
+    /Wikipedia and game wikis/,
+    /Open-Meteo: the weather/,
+    /OpenStreetMap: where a place is/,
+    /Stack Exchange and GitHub: programming/,
+    /arXiv: research papers/,
+  ]);
+  await expect(free).toContainText('They don’t cover prices, shopping, the news, reviews or timetables');
+  await expect(free).toContainText('Weather data by Open-Meteo.com (CC BY 4.0)');
+  await expect(free).toContainText('Thank you to arXiv for use of its open access interoperability.');
   // The AI's own search is the default (and recommended) for cloud models.
   await expect(own).toHaveAttribute('aria-checked', 'true');
   await expect(own).toContainText('Recommended');
@@ -157,14 +174,30 @@ test('Settings: web search is off until turned on, the AI’s own search recomme
   await expect(group.getByRole('tab', { name: 'Exa (Recommended)' })).toHaveAttribute('aria-selected', 'true');
   await expect(group).toContainText("With a cloud model, your search words go to that model’s provider");
   await expect(group.getByRole('button', { name: 'Privacy & data' })).toBeVisible();
-  await expect(group).toContainText('they go to Wikipedia and reference wikis, as no Exa API key is set');
+  await expect(group).toContainText(
+    'they go to Yap’s free sources (Wikipedia, Open-Meteo, OpenStreetMap, Stack Exchange, GitHub and arXiv: only the one that fits the question), as no Exa API key is set'
+  );
   await expectStore(yap, 'config.json', (c) => c.webSearch === true && c.webSearchNative === true);
   await costs.scrollIntoViewIfNeeded();
   await shot(main, '02-settings-web-search-ai-own-search');
+  // What works with no key, with the AI's own search, with a key.
+  const works = group.getByTestId('web-what-works');
+  await works.getByText('What works with what').click();
+  await expect(works.locator('dt')).toHaveText(['No key', 'The AI’s own search', 'An Exa or Tavily key']);
+  await expect(works).toContainText('the answer offers “Search in your browser”');
+  // "Search in your browser" opens DuckDuckGo unless another engine is picked.
+  const engine = group.getByRole('combobox', { name: 'Search in your browser with' });
+  await expect(engine).toHaveValue('duckduckgo');
+  await engine.selectOption('startpage');
+  await expectStore(yap, 'config.json', (c) => c.webSearchBrowser === 'startpage');
+  await works.scrollIntoViewIfNeeded();
+  await shot(main, '02b-settings-web-search-free-sources');
+  await engine.selectOption('duckduckgo');
+  await expectStore(yap, 'config.json', (c) => c.webSearchBrowser === 'duckduckgo');
 
   // Yap's search key: typed, then shown masked.
   await group.getByPlaceholder('Paste your Exa API key').fill(EXA_KEY);
-  await expect(group).toContainText('they go to Exa (exa.ai), and to Wikipedia');
+  await expect(group).toContainText('they go to Exa (exa.ai), and to Yap’s free sources');
   await expectStore(yap, 'config.json', (c) => c.webSearchKeys?.exa === EXA_KEY);
   await closeSettings(main);
   await openSettings(main, 'Voice Assistant');
@@ -884,4 +917,135 @@ test('the Voice Assistant never says what a model on this PC wrote before the se
   expect(steps[1].messages.at(-2).content).toBeNull();
   await yap.invoke('tts_stop');
   await setConfig(yap, main, { speakReplies: false, spokenLength: '1m' });
+});
+
+test('with no search key, the weather and a programming question come from Yap’s free sources', async ({
+  yap,
+  main,
+  fakeLlm,
+  fakeWeb,
+  shot,
+}) => {
+  // A model on this PC (no search of its own) and no Exa or Tavily key.
+  await setConfig(yap, main, { webSearch: true, webSearchKeys: {}, llmScopes: chatScope(fakeLlm) });
+  const from = fakeLlm.requests.length;
+  const webFrom = fakeWeb.requests.length;
+  fakeLlm.scriptChat([
+    { tools: [{ name: 'web_search', args: { query: 'weather Glenbrackie today' } }] },
+    { content: 'It’s partly cloudy in Glenbrackie today, with rain likely tomorrow [1].' },
+  ]);
+  await freshChat(main);
+  await send(main, 'What’s the weather like in Glenbrackie today?');
+  await expect(lastAnswer(main)).toContainText('partly cloudy in Glenbrackie today');
+  await expect(chipsOfLast(main)).toHaveText(['Searched the web: "weather Glenbrackie today" (Open-Meteo)']);
+  await expect(sourcesOfLast(main).getByRole('button')).toHaveText([/1\s*Weather in Glenbrackie, Scotland, United Kingdom\s*open-meteo\.com/]);
+  await expect(lastAnswer(main).locator('a.md-cite')).toHaveAttribute('href', WEATHER_PAGE);
+  await expect(thread(main).getByTestId('chat-browser-search')).toHaveCount(0);
+  // Open-Meteo's geocoder, then its forecast: nothing else asked.
+  const asked = fakeWeb.requests.slice(webFrom);
+  expect(asked.map((r) => r.host)).toEqual(['geocoding-api.open-meteo.com', 'api.open-meteo.com']);
+  expect(asked[0].query).toMatchObject({ name: 'Glenbrackie', count: '5', format: 'json' });
+  expect(asked[1].query).toMatchObject({ latitude: '56.49', longitude: '-3.19', forecast_days: '7', timezone: 'auto' });
+  expect(asked[0].headers['user-agent']).toMatch(/^Yap\/\S+ \(https:\/\/github\.com\/nayballs\/Yap/);
+  // The model got the forecast as a numbered result, credited.
+  const steps = fakeLlm.requests.slice(from).filter((r) => r.tools.length);
+  const result = JSON.parse(steps[1].messages.at(-1).content);
+  expect(result.data.from).toBe('Open-Meteo');
+  expect(result.data.results[0].n).toBe(1);
+  expect(result.data.results[0].text).toContain('Today (Sun 1 Nov): partly cloudy');
+  expect(result.data.results[0].text).toContain('Weather data by Open-Meteo.com (CC BY 4.0).');
+  expect(result.data.hint).toBeUndefined();
+  await shot(main, '18-free-sources-weather');
+
+  // Programming: Stack Overflow's question with its accepted answer, then
+  // GitHub's issue for the error.
+  const before = fakeWeb.requests.length;
+  const stepsBefore = fakeLlm.requests.length;
+  fakeLlm.scriptChat([
+    { tools: [{ name: 'web_search', args: { query: 'rust cannot borrow as mutable more than once E0499' } }] },
+    { content: 'End the first mutable borrow before the next one: give it its own scope [1]. An issue says the same [2].' },
+  ]);
+  await send(main, 'How do I fix “cannot borrow as mutable more than once” in Rust?');
+  await expect(lastAnswer(main)).toContainText('give it its own scope');
+  await expect(chipsOfLast(main)).toHaveText(['Searched the web: "rust cannot borrow as mutable more than once E0499" (Stack Overflow, GitHub)']);
+  await expect(sourcesOfLast(main).getByRole('button')).toHaveText([
+    /1\s*Cannot borrow 'x' as mutable more than once\s*stackoverflow\.com/,
+    /2\s*E0499 when pushing in a loop · example-org\/borrowkit #77\s*github\.com/,
+  ]);
+  await expect(lastAnswer(main).locator('a.md-cite')).toHaveText(['1', '2']);
+  await expect(lastAnswer(main).locator('a.md-cite').first()).toHaveAttribute('href', SO_URL);
+  await expect(lastAnswer(main).locator('a.md-cite').last()).toHaveAttribute('href', GH_ISSUE_URL);
+  const tech = fakeWeb.requests.slice(before);
+  expect(tech.map((r) => `${r.host}${r.path}`)).toEqual([
+    'api.stackexchange.com/2.3/search/advanced',
+    'api.stackexchange.com/2.3/questions/901/answers',
+    'api.github.com/search/issues',
+  ]);
+  expect(tech[0].query).toMatchObject({ site: 'stackoverflow', sort: 'relevance', filter: 'withbody' });
+  expect(tech[2].headers.accept).toBe('application/vnd.github+json');
+  const techResult = JSON.parse(fakeLlm.requests.slice(stepsBefore).filter((r) => r.tools.length)[1].messages.at(-1).content);
+  expect(techResult.data.results[0].text).toContain('Accepted answer (score 30): Take the mutable borrow in its own scope');
+  await shot(main, '19-free-sources-programming');
+});
+
+test('a price with no search service: said plainly, and “Search in your browser” opens the person’s browser', async ({
+  yap,
+  main,
+  fakeLlm,
+  fakeWeb,
+  shot,
+}) => {
+  await setConfig(yap, main, { webSearch: true, webSearchKeys: {}, webSearchBrowser: 'duckduckgo', llmScopes: chatScope(fakeLlm) });
+  const from = fakeLlm.requests.length;
+  const webFrom = fakeWeb.requests.length;
+  fakeLlm.scriptChat([
+    { tools: [{ name: 'web_search', args: { query: 'Driftwood Pro subscription price' } }] },
+    { content: 'I can’t search the whole web for prices in this chat, so I won’t guess one. Search in your browser below to see it.' },
+  ]);
+  await freshChat(main);
+  await send(main, 'How much is a Driftwood Pro subscription?');
+  await expect(lastAnswer(main)).toContainText('I can’t search the whole web for prices in this chat');
+  // (A price search may be aimed at the person's country: "… UK".)
+  await expect(chipsOfLast(main)).toHaveText([/Didn't search the web for "Driftwood Pro subscription price[^"]*": Yap's free sources don't cover prices/]);
+  // Folded under the answer as what it is: not a step that failed.
+  await expect(thread(main).getByTestId('chat-steps').last().locator('summary')).toHaveText("Didn't search the web");
+  // Nothing was asked of anyone, and the model was told why, plainly.
+  expect(fakeWeb.requests.slice(webFrom)).toEqual([]);
+  const steps = fakeLlm.requests.slice(from).filter((r) => r.tools.length);
+  const result = JSON.parse(steps[1].messages.at(-1).content);
+  expect(result.data.results).toEqual([]);
+  expect(result.data.hint).toContain("don't cover prices");
+  expect(result.data.hint).toContain('without guessing');
+  expect(result.data.hint).toContain('"Search in your browser"');
+  // The button under the answer, and the line saying how Yap could search itself.
+  const offer = thread(main).getByTestId('chat-browser-search');
+  await expect(offer).toHaveCount(1);
+  await expect(offer).toContainText('Want Yap to search the web itself? Use your AI provider’s search, or add a free Exa key.');
+  await shot(main, '20-free-sources-search-in-your-browser');
+  await offer.getByRole('button', { name: 'Search in your browser' }).click();
+  await expect
+    .poll(async () => (await opened(yap)).filter((u) => u.startsWith('https://duckduckgo.com/?q=Driftwood+Pro+subscription+price')).length)
+    .toBe(1);
+  // Kept with the answer, and back when the conversation is reopened.
+  await expectStore(yap, 'chats.json', (s) => {
+    const answer = s.conversations.find((c) => c.title === 'How much is a Driftwood Pro subscription?')?.messages[1];
+    return answer?.browserSearch?.url?.startsWith('https://duckduckgo.com/?q=Driftwood') && answer.browserSearch.engine === 'DuckDuckGo';
+  });
+  await main.getByRole('button', { name: 'New chat' }).click();
+  await main.locator('.conv').filter({ hasText: 'How much is a Driftwood Pro subscription?' }).click();
+  await expect(thread(main).getByTestId('chat-browser-search')).toHaveCount(1);
+
+  // The news, with another engine chosen: the same, on that engine.
+  await setConfig(yap, main, { webSearchBrowser: 'ecosia' });
+  fakeLlm.scriptChat([
+    { tools: [{ name: 'web_search', args: { query: 'Port Ellis news today' } }] },
+    { content: 'I can’t search the news in this chat.' },
+  ]);
+  await send(main, 'What’s in the news in Port Ellis today?');
+  await expect(lastAnswer(main)).toHaveText('I can’t search the news in this chat.');
+  await expect(chipsOfLast(main)).toHaveText(['Didn\'t search the web for "Port Ellis news today": Yap\'s free sources don\'t cover the news']);
+  await thread(main).getByTestId('chat-browser-search').last().getByRole('button', { name: 'Search in your browser' }).click();
+  await expect.poll(() => opened(yap)).toContain('https://www.ecosia.org/search?q=Port+Ellis+news+today');
+  expect(fakeWeb.requests.slice(webFrom)).toEqual([]);
+  await setConfig(yap, main, { webSearchBrowser: 'duckduckgo' });
 });
