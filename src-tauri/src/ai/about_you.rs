@@ -818,6 +818,14 @@ fn how_to_answer(p: &Profile) -> String {
             " Prices: in {money} when you have them in {theirs}; never change a price's currency sign — a price in another currency stays as it is, labelled, like \"{example}\"."
         ));
     }
+    // Places: theirs unless they say otherwise. Asked for "train tickets
+    // from Inverness to Perth" with the UK in this block and the town in
+    // memory, Qwen3.5-4B asked which country they're in (1 Nov 2026).
+    if let Some(c) = p.region.country.as_deref().and_then(country).map(in_sentence) {
+        out.push_str(&format!(
+            " Places they mention are in or near {c} unless they say otherwise: don't ask which country. With no place given (\"near me\", a journey, the weather), start from where they live if you know it."
+        ));
+    }
     if !p.name.is_empty() {
         out.push_str(&format!(" Their name is {}.", p.name));
     }
@@ -1330,7 +1338,7 @@ mod tests {
         Utc.with_ymd_and_hms(2026, 10, 21, 20, 40, 0).unwrap()
     }
 
-    const UK_BLOCK: &str = "About the user: they're in the United Kingdom (British English). Give times in UK time and metric units, but miles for distances and speeds. Temperatures in °C: convert one a source gives in °F (68°F is 20°C). Prices: in £ (GBP) when you have them in £; never change a price's currency sign — a price in another currency stays as it is, labelled, like \"$15 a month (US price)\".";
+    const UK_BLOCK: &str = "About the user: they're in the United Kingdom (British English). Give times in UK time and metric units, but miles for distances and speeds. Temperatures in °C: convert one a source gives in °F (68°F is 20°C). Prices: in £ (GBP) when you have them in £; never change a price's currency sign — a price in another currency stays as it is, labelled, like \"$15 a month (US price)\". Places they mention are in or near the United Kingdom unless they say otherwise: don't ask which country. With no place given (\"near me\", a journey, the weather), start from where they live if you know it.";
 
     #[test]
     fn a_uk_pc_reads_as_the_uk() {
@@ -1343,7 +1351,7 @@ mod tests {
         let p = Profile { region: r, name: "Imogen".into(), about: "I'm a teacher in Bristol and I run at weekends".into() };
         assert_eq!(
             prompt_block(&p, at()),
-            "About the user: they're in the United Kingdom (British English); it's Wednesday 21 October 2026, 21:40 UK time (UTC+01:00). Give times in UK time and metric units, but miles for distances and speeds. Temperatures in °C: convert one a source gives in °F (68°F is 20°C). Prices: in £ (GBP) when you have them in £; never change a price's currency sign — a price in another currency stays as it is, labelled, like \"$15 a month (US price)\". Their name is Imogen. They told Yap: \"I'm a teacher in Bristol and I run at weekends\""
+            "About the user: they're in the United Kingdom (British English); it's Wednesday 21 October 2026, 21:40 UK time (UTC+01:00). Give times in UK time and metric units, but miles for distances and speeds. Temperatures in °C: convert one a source gives in °F (68°F is 20°C). Prices: in £ (GBP) when you have them in £; never change a price's currency sign — a price in another currency stays as it is, labelled, like \"$15 a month (US price)\". Places they mention are in or near the United Kingdom unless they say otherwise: don't ask which country. With no place given (\"near me\", a journey, the weather), start from where they live if you know it. Their name is Imogen. They told Yap: \"I'm a teacher in Bristol and I run at weekends\""
         );
     }
 
@@ -1439,6 +1447,8 @@ mod tests {
         let p = Profile { region: r, ..Default::default() };
         let line = prompt_block(&p, at());
         assert!(line.starts_with("About the user: they're in France (French); it's "), "{line}");
+        // Places are theirs, whatever the country.
+        assert!(line.contains("Places they mention are in or near France unless they say otherwise"), "{line}");
         assert!(
             line.contains("Give metric units. Temperatures in °C: convert one a source gives in °F (68°F is 20°C). Prices: in € (EUR) when you have them in €; never change"),
             "{line}"

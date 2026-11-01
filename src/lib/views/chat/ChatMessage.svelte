@@ -218,7 +218,7 @@
 {#if m.role === 'assistant' && m.browserSearch?.url && !m.streaming}
   <!-- Yap's free web sources couldn't give it: "Search in your browser" (its own small chunk). -->
   {#await import('./SearchInBrowser.svelte') then { default: SearchInBrowser }}
-    <SearchInBrowser search={m.browserSearch} model={m.model} />
+    <SearchInBrowser search={m.browserSearch} model={m.model} {onpage} />
   {/await}
 {/if}
 {#if docs.length || pics.length || pages.length}

@@ -72,6 +72,14 @@ pub fn plan_with(text: &str, cfg: &YapConfig, apps: &[App], model_can_tool: bool
         return recall.last.as_ref().map(current);
     }
     let found = find(apps, &request.phrase, &cfg.app_nicknames, &cfg.apps_blocked);
+    // A website, with pages opening beside the chat (the web on): not an app
+    // whose name it only starts ("Google" isn't Google Chrome) — Yap opens a
+    // site it knows itself (`site_asked`, Chat's turn), else the model's
+    // `open_page`. An app named exactly still opens, unless the words ask for
+    // the web ("…in the browser").
+    if cfg.web_search && for_the_web(text, &request.phrase, &found) {
+        return None;
+    }
     let named_one = !matches!(found, Found::Nothing(_));
     if !named_one && (request.play || !request.plain || not_an_app(&request.phrase)) {
         return None;
@@ -86,6 +94,128 @@ pub fn plan_with(text: &str, cfg: &YapConfig, apps: &[App], model_can_tool: bool
         Found::Nothing(_) if model_can_tool => None,
         Found::Nothing(close) => Some(Plan::NotFound(request.phrase, close)),
     }
+}
+
+/// Websites people ask to open by name, and their home pages (an app named
+/// the same, exactly, still opens: "open Spotify" with Spotify installed).
+const SITES: &[(&str, &str, &str)] = &[
+    ("google", "Google", "https://www.google.com/"),
+    ("google search", "Google", "https://www.google.com/"),
+    ("youtube", "YouTube", "https://www.youtube.com/"),
+    ("gmail", "Gmail", "https://mail.google.com/"),
+    ("google maps", "Google Maps", "https://www.google.com/maps"),
+    ("maps", "Google Maps", "https://www.google.com/maps"),
+    ("google docs", "Google Docs", "https://docs.google.com/"),
+    ("google drive", "Google Drive", "https://drive.google.com/"),
+    ("wikipedia", "Wikipedia", "https://www.wikipedia.org/"),
+    ("reddit", "Reddit", "https://www.reddit.com/"),
+    ("amazon", "Amazon", "https://www.amazon.com/"),
+    ("ebay", "eBay", "https://www.ebay.com/"),
+    ("facebook", "Facebook", "https://www.facebook.com/"),
+    ("instagram", "Instagram", "https://www.instagram.com/"),
+    ("twitter", "X", "https://x.com/"),
+    ("linkedin", "LinkedIn", "https://www.linkedin.com/"),
+    ("bbc", "BBC", "https://www.bbc.co.uk/"),
+    ("bbc news", "BBC News", "https://www.bbc.co.uk/news"),
+    ("netflix", "Netflix", "https://www.netflix.com/"),
+    ("spotify", "Spotify", "https://open.spotify.com/"),
+    ("github", "GitHub", "https://github.com/"),
+    ("stack overflow", "Stack Overflow", "https://stackoverflow.com/"),
+    ("duckduckgo", "DuckDuckGo", "https://duckduckgo.com/"),
+    ("bing", "Bing", "https://www.bing.com/"),
+];
+/// Words that ask for the web, wherever they are.
+const WEB_CUES: &[&str] = &[
+    "website", "web site", "web page", "webpage", "in the browser", "in a browser", "in the chat", "beside the chat",
+    "in the panel", "in a tab", "in the tab", "new tab", ".com", ".co.uk", ".org", ".net", "www.",
+];
+
+/// **An open request for the web** ([`plan_with`]): the words ask for it, or
+/// the phrase is a website people open by name and no app has exactly that
+/// name. Pure.
+pub(super) fn for_the_web(text: &str, phrase: &str, found: &Found) -> bool {
+    let lower = text.to_lowercase();
+    if WEB_CUES.iter().any(|c| lower.contains(c)) {
+        return true;
+    }
+    let p = phrase.trim().trim_start_matches("the ").trim();
+    let exact = match found {
+        Found::One(app) | Found::Blocked(app) => app.name.to_lowercase() == p,
+        Found::Several(apps) => apps.iter().any(|a| a.name.to_lowercase() == p),
+        Found::Nothing(_) => false,
+    };
+    !exact && SITES.iter().any(|(name, _, _)| *name == p)
+}
+
+/// The phrase without the words around a site ("the YouTube website",
+/// "google in the browser for me"). Pure.
+fn site_phrase(phrase: &str) -> String {
+    let mut p = phrase.trim().to_string();
+    for tail in [
+        " for me", " please", " now", " beside the chat", " in the chat", " in the browser", " in a browser", " in the panel", " in a tab",
+        " in the tab", " in a new tab", " homepage", " home page", " website", " web site", " site", " page",
+    ] {
+        if let Some(rest) = p.strip_suffix(tail) {
+            p = rest.trim_end().to_string();
+        }
+    }
+    p.trim_start_matches("up ").trim_start_matches("the ").trim().to_string()
+}
+
+/// **A site asked for by name, or an address** ("open YouTube", "open up
+/// google for me", "go to bbc.co.uk"): its name and home page — Yap opens
+/// it beside the chat itself (Chat's turn: Qwen3.5-4B, given open_page,
+/// opened Google Chrome with open_app or only said it had, 1 Nov 2026).
+/// `None`: not an open request, or a site Yap doesn't know (the model's).
+/// Pure.
+pub fn site_asked(text: &str) -> Option<(String, String)> {
+    let request = open_request(text).or_else(|| {
+        // "go to …", "take me to …", "show me …" ask for a place too.
+        let lower = text.trim().to_lowercase();
+        let rest = ["go to ", "take me to ", "show me ", "bring up ", "pull up "].iter().find_map(|v| lower.find(v).map(|i| lower[i + v.len()..].to_string()))?;
+        open_request(&format!("open {rest}"))
+    })?;
+    let phrase = site_phrase(&request.phrase);
+    if let Some((_, name, url)) = SITES.iter().find(|(n, _, _)| *n == phrase) {
+        return Some((name.to_string(), url.to_string()));
+    }
+    // An address: a site's name with its ending ("bbc.co.uk", "example.com/news"),
+    // as typed (a path's letters keep their case: "/wiki/Fort_Joy").
+    if !phrase.contains(' ') && phrase.contains('.') {
+        let typed = text
+            .split_whitespace()
+            .map(|w| w.trim_matches(|c: char| matches!(c, '.' | ',' | '!' | '?' | '"' | '\'' | '(' | ')')))
+            .find(|w| w.to_lowercase() == phrase)
+            .unwrap_or(&phrase)
+            .to_string();
+        if let Ok(url) = crate::chat::pages::view::address(&typed, "duckduckgo") {
+            if !crate::chat::pages::search_page(&url) && crate::web::check_url(&url).is_ok() {
+                return Some((crate::web::site_of(&url), url));
+            }
+        }
+    }
+    None
+}
+
+/// **A search asked for** ("search for train tickets from Kellbrook to Port
+/// Ellis", "google flights to Lisbon", "open a search for …"): its words,
+/// and whether the person asked for the search page itself ("google …",
+/// "open a search for …") rather than an answer ("search for …", which a
+/// model answers when the free sources cover it). Pure.
+pub fn search_asked(text: &str) -> Option<(String, bool)> {
+    static ASK: std::sync::LazyLock<regex::Regex> = std::sync::LazyLock::new(|| {
+        regex::Regex::new(
+            r"^(?:(?:hey|hi|ok|okay) yap,? )?(?:(?:can|could|would|will) you (?:please )?|please )?(?:(open (?:up )?(?:a |the )?(?:google |web )?search (?:for|on)|search (?:google|the web|online) for|google|do a (?:google |web )?search for)|search (?:for|up)|look up|search) (.{3,200}?)(?: (?:on google|online|on the web|for me|please|beside the chat|in the browser))?[.!?]*$",
+        )
+        .expect("static regex")
+    });
+    let said = text.trim();
+    let lower = said.to_lowercase();
+    let c = ASK.captures(&lower)?;
+    let m = c.get(2)?;
+    // As typed ("Port Ellis"), where lower case kept every letter's place.
+    let words = if said.len() == lower.len() { said[m.start()..m.end()].trim() } else { m.as_str().trim() }.to_string();
+    (words.chars().filter(|ch| ch.is_alphanumeric()).count() >= 3).then_some((words, c.get(1).is_some()))
 }
 
 /// [`plan_with`] for Chat and the Voice Assistant: off the async runtime
@@ -444,6 +574,50 @@ mod tests {
         assert!(plan("open xylophone pro", &cfg, &apps, true).is_none());
         // "Microsoft To Do" has a joining word, and is still an app.
         assert!(matches!(plan("open microsoft to do", &cfg, &apps, false), Some(Plan::Open(a)) if a.name == "Microsoft To Do"));
+    }
+
+    #[test]
+    fn a_website_opens_beside_the_chat_not_an_app_that_only_starts_with_its_name() {
+        let apps = pc();
+        let web = YapConfig { web_search: true, ..YapConfig::default() };
+        // With pages beside the chat: "Google" is the website (the model's open_page), not Google Chrome.
+        assert!(plan("can you open up google for me", &web, &apps, true).is_none());
+        assert!(plan("open youtube", &web, &apps, true).is_none());
+        // Words that ask for the web, even with an app of that name.
+        assert!(plan("open spotify in the browser", &web, &apps, true).is_none());
+        assert!(plan("open the spotify website", &web, &apps, true).is_none());
+        // An app named exactly, or one asked for by its own name, still opens at once.
+        assert!(matches!(plan("open spotify", &web, &apps, true), Some(Plan::Open(a)) if a.name == "Spotify"));
+        assert!(matches!(plan("open chrome", &web, &apps, true), Some(Plan::Open(a)) if a.name == "Google Chrome"));
+        assert!(matches!(plan("open google chrome", &web, &apps, true), Some(Plan::Open(a)) if a.name == "Google Chrome"));
+        // Yap opens a site it knows itself, so a model without tools doesn't matter.
+        assert!(plan("open google", &web, &apps, false).is_none());
+        // No pages beside the chat (the web off): the app, as before.
+        let off = YapConfig::default();
+        assert!(matches!(plan("open google", &off, &apps, true), Some(Plan::Open(a)) if a.name == "Google Chrome"));
+    }
+
+    #[test]
+    fn a_site_asked_for_by_name_or_address_and_a_search_asked_for() {
+        let site = |t: &str| site_asked(t).map(|(n, u)| format!("{n} {u}"));
+        assert_eq!(site("Can you open up Google for me?").as_deref(), Some("Google https://www.google.com/"));
+        assert_eq!(site("Open Youtube.").as_deref(), Some("YouTube https://www.youtube.com/"));
+        assert_eq!(site("open the BBC website").as_deref(), Some("BBC https://www.bbc.co.uk/"));
+        assert_eq!(site("go to example.com/news").as_deref(), Some("example.com https://example.com/news"));
+        // An address keeps its case.
+        assert_eq!(site("Show me https://wiki.example.com/wiki/Fort_Joy").as_deref(), Some("wiki.example.com https://wiki.example.com/wiki/Fort_Joy"));
+        assert_eq!(site("open google in the browser").as_deref(), Some("Google https://www.google.com/"));
+        // Not a site Yap knows, an app, or not an open request at all: someone else's.
+        for t in ["open spotifyx", "open teams", "what's on youtube today?", "open my notes", "open 192.168.1.1"] {
+            assert_eq!(site(t), None, "{t}");
+        }
+        // Searches: the words, and whether the page itself was asked for.
+        assert_eq!(search_asked("Search for train tickets from Kellbrook to Port Ellis."), Some(("train tickets from Kellbrook to Port Ellis".into(), false)));
+        assert_eq!(search_asked("Can you open up a search for train times to Port Ellis?"), Some(("train times to Port Ellis".into(), true)));
+        assert_eq!(search_asked("google flights to Lisbon"), Some(("flights to Lisbon".into(), true)));
+        assert_eq!(search_asked("look up the weather in Kellbrook"), Some(("the weather in Kellbrook".into(), false)));
+        assert_eq!(search_asked("What's the weather?"), None);
+        assert_eq!(search_asked("search"), None);
     }
 
     #[test]

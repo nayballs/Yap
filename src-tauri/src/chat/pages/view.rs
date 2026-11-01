@@ -16,8 +16,8 @@
 //! - **only public http(s)**: every navigation, a frame's too, is checked
 //!   as a page read is (`web::check_url`) and cancelled otherwise; requests
 //!   to this PC's loopback addresses are refused (`WebResourceRequested`);
-//! - **new windows go to the person's browser** (`open_external`'s, only
-//!   when the person clicked), **downloads are off**, every permission a
+//! - **a new window opens in its own tab** (only when the person clicked;
+//!   a mail link in their mail app), **downloads are off**, every permission a
 //!   page asks for (the mic, the camera, location, notifications…) is
 //!   denied; DevTools only in a debug build.
 //!
@@ -1004,7 +1004,7 @@ mod win {
 
     /// **The page's rules**: no web messages or host objects (nothing of
     /// Yap's reachable), no DevTools in a release build, no autofill; its
-    /// navigations checked, new windows to the person's browser, downloads
+    /// navigations checked, a new window in its own tab, downloads
     /// off, permissions denied, loopback refused; its state told; its menu.
     fn set_up(
         app: &AppHandle,
@@ -1083,20 +1083,30 @@ mod win {
                 })),
                 &mut token,
             )?;
-            // A new window: none here; a link the person clicked opens in
-            // their browser.
-            let a = app.clone();
+            // A new window: none — a link the person clicked opens in this
+            // tab (sent to their browser instead, a page that falls back to
+            // opening it in place — Google's sponsored results — opened it
+            // twice, 1 Nov 2026); a mail link in their mail app. One they
+            // didn't click (a pop-up): nothing.
+            let (a, si) = (app.clone(), standin.clone());
             core.add_NewWindowRequested(
-                &NewWindowRequestedEventHandler::create(Box::new(move |_, args| {
+                &NewWindowRequestedEventHandler::create(Box::new(move |sender, args| {
                     let Some(args) = args else { return Ok(()) };
                     args.SetHandled(true)?;
                     let mut by_person = BOOL(0);
                     let _ = args.IsUserInitiated(&mut by_person);
+                    if !by_person.as_bool() {
+                        return Ok(());
+                    }
                     let mut uri = PWSTR::null();
                     args.Uri(&mut uri)?;
                     let uri = take_pwstr(uri);
-                    if by_person.as_bool() && crate::web::check_url(&uri).is_ok() {
-                        tracing::info!("Chat: a page's new window went to the user's browser");
+                    if may_navigate(&uri, si.as_deref(), offline) {
+                        if let Some(core) = sender {
+                            let _ = core.Navigate(&HSTRING::from(uri.as_str()));
+                        }
+                        tracing::info!("Chat: a page's new window opened in its own tab");
+                    } else if uri.to_ascii_lowercase().starts_with("mailto:") {
                         let _ = crate::shell::commands::open_link(&a, &uri);
                     }
                     Ok(())

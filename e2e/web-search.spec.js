@@ -42,8 +42,8 @@
 // - Yap's free sources with no search key (web/sources.rs): the weather from
 //   Open-Meteo (its geocoder, then its forecast), a programming question
 //   from Stack Overflow and GitHub; a price or the news isn't searched at
-//   all, the answer says so and "Search in your browser" opens the search in
-//   the person's browser (open_external) on the engine chosen in Settings,
+//   all, the answer says so and "Search beside the chat" opens the search in the panel (or
+//   the person's browser: open_external) on the engine chosen in Settings,
 //   kept with the answer.
 //
 // Test mode never goes on the internet: the services, the wikis and the
@@ -184,9 +184,9 @@ test('Settings: web search is off until turned on, the AI’s own search recomme
   const works = group.getByTestId('web-what-works');
   await works.getByText('What works with what').click();
   await expect(works.locator('dt')).toHaveText(['No key', 'The AI’s own search', 'An Exa or Tavily key']);
-  await expect(works).toContainText('the answer offers “Search in your browser”');
-  // "Search in your browser" opens DuckDuckGo unless another engine is picked.
-  const engine = group.getByRole('combobox', { name: 'Search in your browser with' });
+  await expect(works).toContainText('the answer offers “Search beside the chat”, or in your own browser');
+  // A search you open (beside the chat, the address bar, your browser) uses DuckDuckGo unless another engine is picked.
+  const engine = group.getByRole('combobox', { name: 'Search engine' });
   await expect(engine).toHaveValue('duckduckgo');
   await engine.selectOption('startpage');
   await expectStore(yap, 'config.json', (c) => c.webSearchBrowser === 'startpage');
@@ -988,7 +988,7 @@ test('with no search key, the weather and a programming question come from Yap�
   await shot(main, '19-free-sources-programming');
 });
 
-test('a price with no search service: said plainly, and “Search in your browser” opens the person’s browser', async ({
+test('a price with no search service: said plainly; “Search beside the chat” opens the search there, or in the person’s browser', async ({
   yap,
   main,
   fakeLlm,
@@ -1016,17 +1016,24 @@ test('a price with no search service: said plainly, and “Search in your browse
   expect(result.data.results).toEqual([]);
   expect(result.data.hint).toContain("don't cover prices");
   expect(result.data.hint).toContain('without guessing');
-  expect(result.data.hint).toContain('"Search in your browser"');
+  expect(result.data.hint).toContain('"Search beside the chat"');
   // The button under the answer, and the line saying how Yap could search itself.
   const offer = thread(main).getByTestId('chat-browser-search');
   await expect(offer).toHaveCount(1);
   // (A self-hosted model has no provider search of its own: only a key.)
   await expect(offer).toContainText('Want Yap to search the web itself? Add a free Exa or Tavily key.');
   await shot(main, '20-free-sources-search-in-your-browser');
-  await offer.getByRole('button', { name: 'Search in your browser' }).click();
+  // Search beside the chat: the search in the panel's page tab, on the person's engine.
+  await offer.getByTestId('chat-browser-search-beside').click();
+  await expect(main.getByTestId('chat-page-address')).toHaveValue(/^https:\/\/duckduckgo\.com\/\?q=Driftwood\+Pro\+subscription\+price/, { timeout: 20_000 });
+  // Or in the person's own browser.
+  await expect(offer.getByTestId('chat-browser-search-outside')).toHaveText('Open in your browser');
+  await offer.getByTestId('chat-browser-search-outside').click();
   await expect
     .poll(async () => (await opened(yap)).filter((u) => u.startsWith('https://duckduckgo.com/?q=Driftwood+Pro+subscription+price')).length)
     .toBe(1);
+  await main.getByTestId('chat-page').getByRole('button', { name: 'Close the panel' }).click();
+  const quiet = fakeWeb.requests.length;
   // Kept with the answer, and back when the conversation is reopened.
   await expectStore(yap, 'chats.json', (s) => {
     const answer = s.conversations.find((c) => c.title === 'How much is a Driftwood Pro subscription?')?.messages[1];
@@ -1045,8 +1052,8 @@ test('a price with no search service: said plainly, and “Search in your browse
   await send(main, 'What’s in the news in Port Ellis today?');
   await expect(lastAnswer(main)).toHaveText('I can’t search the news in this chat.');
   await expect(chipsOfLast(main)).toHaveText(['Didn\'t search the web for "Port Ellis news today": Yap\'s free sources don\'t cover the news']);
-  await thread(main).getByTestId('chat-browser-search').last().getByRole('button', { name: 'Search in your browser' }).click();
+  await thread(main).getByTestId('chat-browser-search').last().getByTestId('chat-browser-search-outside').click();
   await expect.poll(() => opened(yap)).toContain('https://www.ecosia.org/search?q=Port+Ellis+news+today');
-  expect(fakeWeb.requests.slice(webFrom)).toEqual([]);
+  expect(fakeWeb.requests.slice(quiet)).toEqual([]);
   await setConfig(yap, main, { webSearchBrowser: 'duckduckgo' });
 });

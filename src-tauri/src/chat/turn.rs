@@ -261,6 +261,13 @@ async fn answer_turn(
         if let Some(plan) = crate::apps::plan_for(&text, &cfg, conversation_id).await {
             return app_turn(conversation_id, &text, by_voice, asked, plan, stop).await;
         }
+        // A site asked for by name, or a search asked for, with pages beside
+        // the chat (the web on): Yap opens it there itself, no model.
+        if cfg.web_search {
+            if let Some(opened) = asked_page(&text, &cfg.web_search_browser) {
+                return page_turn(conversation_id, &text, by_voice, asked, opened, watcher, stop);
+            }
+        }
     }
     let endpoint = match crate::ai::ai_model::wake_on_device(&cfg).await {
         Ok(_) => resolve_chat_endpoint(&cfg),
@@ -1668,6 +1675,85 @@ fn skill_asks_turn(
 /// question, the app opened (or why not) as the answer, with its chip. No
 /// model, so none is named. Like any newer question, it replaces an answer
 /// still coming in its conversation (`stop`, [`chat_turn`]).
+/// A page Yap opens beside the chat by itself: the page, the answer's line
+/// and its chip.
+#[derive(Debug, Clone, PartialEq)]
+pub struct AskedPage {
+    pub page: crate::chat::pages::ShownPage,
+    pub reply: String,
+    pub chip: String,
+}
+
+/// **What Yap opens beside the chat itself** for `text`, before any model
+/// (as it opens an app: Qwen3.5-4B, given `open_page`, opened Google Chrome
+/// with `open_app` or only said it had, 1 Nov 2026): a site asked for by
+/// name or address ("open YouTube", `apps::site_asked`), or a search asked
+/// for (`apps::search_asked`) when the person asked for the search page
+/// itself ("google …", "open a search for …") or Yap's free sources don't
+/// cover it (travel, prices, the news…: a model could only say so) — on
+/// the person's `engine`. `None`: the model's. Pure.
+pub fn asked_page(text: &str, engine: &str) -> Option<AskedPage> {
+    if let Some((name, url)) = crate::apps::site_asked(text) {
+        let shown = crate::web::short_url(&url);
+        return Some(AskedPage {
+            page: crate::chat::pages::ShownPage { site: crate::web::site_of(&url), url, title: name.clone(), section: String::new() },
+            reply: format!("{name} is open beside the chat."),
+            chip: format!("Brought up {shown} beside the chat"),
+        });
+    }
+    let (words, page_itself) = crate::apps::search_asked(text)?;
+    let r = crate::web::sources::route(&words, text, &[]);
+    let uncovered = matches!(r.kind, crate::web::sources::Kind::NotCovered(_)) || r.offer.is_some();
+    if !page_itself && !uncovered {
+        return None;
+    }
+    let search = crate::web::BrowserSearch::new(engine, &words);
+    Some(AskedPage {
+        page: crate::chat::pages::ShownPage { site: crate::web::site_of(&search.url), url: search.url.clone(), title: format!("Search: {}", search.query), section: String::new() },
+        reply: format!("The search for \u{201C}{}\u{201D} is open beside the chat, on {}.", search.query, search.engine),
+        chip: format!("Brought up a search for \"{}\" beside the chat", search.query),
+    })
+}
+
+/// **The turn Yap answers by opening a page** ([`asked_page`]): the page
+/// beside the chat at once (`Event::Page`), kept with the answer.
+fn page_turn(
+    conversation_id: Option<u64>,
+    text: &str,
+    by_voice: bool,
+    asked: impl FnOnce(u64, usize) + Send,
+    opened: AskedPage,
+    watcher: Option<&dyn crate::chat::stream::Sink>,
+    stop: &crate::chat::stream::Stoppable,
+) -> Result<ChatTurn, String> {
+    let conv = turn_conversation(conversation_id, text);
+    let user_index = crate::chat::chats::append(conv.id, "user", text, &[], None, by_voice)?;
+    stop.answers(conv.id);
+    asked(conv.id, user_index);
+    if let Some(w) = watcher {
+        w.send(crate::chat::stream::Event::Page { page: opened.page.clone() });
+    }
+    let tools_used = vec![opened.chip];
+    let index = crate::chat::chats::append(conv.id, "assistant", &opened.reply, &tools_used, None, false)?;
+    crate::chat::chats::set_pages(conv.id, index, std::slice::from_ref(&opened.page), &[]);
+    tracing::info!("Chat: a page opened beside the chat by Yap itself, no model");
+    Ok(ChatTurn {
+        conversation_id: conv.id,
+        user_index,
+        index,
+        reply: opened.reply,
+        tools_used,
+        model: None,
+        sources: Vec::new(),
+        stopped: false,
+        tokens: None,
+        documents: Vec::new(),
+        pictures: Vec::new(),
+        pages: vec![opened.page],
+        offers: Vec::new(),
+    })
+}
+
 async fn app_turn(
     conversation_id: Option<u64>,
     text: &str,
@@ -1703,4 +1789,29 @@ async fn app_turn(
         pages: Vec::new(),
         offers: Vec::new(),
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_site_or_a_search_asked_for_opens_beside_the_chat_with_no_model() {
+        let a = asked_page("Open Youtube.", "google").unwrap();
+        assert_eq!(a.page.url, "https://www.youtube.com/");
+        assert_eq!(a.page.title, "YouTube");
+        assert_eq!(a.reply, "YouTube is open beside the chat.");
+        assert_eq!(a.chip, "Brought up youtube.com beside the chat");
+        // Travel isn't the free sources': the search itself, on the person's engine.
+        let s = asked_page("Search for train tickets from Kellbrook to Port Ellis.", "google").unwrap();
+        assert_eq!(s.page.url, "https://www.google.com/search?q=train+tickets+from+Kellbrook+to+Port+Ellis");
+        assert_eq!(s.page.title, "Search: train tickets from Kellbrook to Port Ellis");
+        assert_eq!(s.chip, "Brought up a search for \"train tickets from Kellbrook to Port Ellis\" beside the chat");
+        assert!(s.reply.ends_with("is open beside the chat, on Google."), "{}", s.reply);
+        // What the free sources cover is the model's to answer, unless the page itself was asked for.
+        assert!(asked_page("search for rust error E0499", "google").is_none());
+        assert!(asked_page("google rust error E0499", "google").is_some());
+        assert!(asked_page("How are you?", "google").is_none());
+        assert!(asked_page("open teams", "google").is_none());
+    }
 }

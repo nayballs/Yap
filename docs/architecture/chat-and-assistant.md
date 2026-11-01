@@ -1741,6 +1741,19 @@ from `view::open_tabs`):
   of the question), or **search words** on the person's engine
   (`web_search_browser`, the address bar's; titled "Search: …"). Nothing of
   the page goes to the model by opening it.
+- **Yap opens it itself, no model** (`turn::asked_page`, before any model
+  as the app fast path is; 1 Nov 2026: given `open_page`, Qwen3.5-4B opened
+  Google Chrome with `open_app` for "open Google", and for "open YouTube"
+  only said "It's opened on the right"): a site asked for by name or
+  address (`apps::site_asked`: "open YouTube", "go to example.com/news";
+  `SITES`' home pages — a name Yap doesn't know is the model's), or a search
+  asked for (`apps::search_asked`: "search for …", "google …", "open a
+  search for …") when the person asked for the search page itself, or it's
+  something the free sources don't cover (travel, prices, the news: a model
+  could only say so) — on the person's engine. The answer is one line ("The
+  search for “…” is open beside the chat, on Google."), the page kept with
+  it (`page_turn`, `Event::Page`). `open_app` refuses a website
+  (`apps::plan::for_the_web`).
 - **`read_open_page { tab? }`**: the page in front beside the chat (or tab
   n, `view::pick_tab`), read in place (`view::PAGE_TEXT_SCRIPT`, Yap's own
   read-only script through `view::run_script`: the title, the `main` /
@@ -1782,8 +1795,10 @@ from `view::open_tabs`):
   host objects off; WebView2's own `chrome.webview.postMessage` is there but
   goes nowhere), **only public http(s)** (every navigation and frame
   checked, else cancelled; requests to `127.0.0.1` / `localhost` / `[::1]`
-  refused with a 403), **new windows to the person's browser** (only a
-  click), **downloads off**, **every permission denied**, DevTools only in a
+  refused with a 403), **a new window in its own tab** (only a click; it
+  went to the person's browser until 1 Nov 2026, and a page that then opens
+  it in place too — Google's sponsored results — opened it twice; a mail
+  link to their mail app), **downloads off**, **every permission denied**, DevTools only in a
   debug build. It's a child window of the main window ("the host") laid over
   the tab's stage: the page measures the stage every 150 ms (and on resize)
   and sends its place in physical pixels (`page_view_place`), or `null` when

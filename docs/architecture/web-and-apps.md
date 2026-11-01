@@ -105,7 +105,9 @@ Chat's and the Voice Assistant's two ways of reaching outside Yap: looking thing
   Settings); **a game, facts, anything else** → the keyless lookup above.
   **What none of them covers** — prices and shopping (`asks_about_prices`
   and the other languages' words), the news, reviews and rankings
-  ("best … 2026"), timetables and opening hours, local businesses ("near
+  ("best … 2026"), timetables and opening hours, travel — tickets, fares,
+  "trains from … to …" (`TRAVEL`, 1 Nov 2026: a tester's "train tickets from
+  … to Perth" got a wiki's wrestling pages) —, local businesses ("near
   me"), recipes — is **never searched or guessed**: the result has no
   results and the model is told (`Handoff::line`) to say in one sentence
   that Yap can't search the whole web here, adding nothing from memory —
@@ -117,7 +119,9 @@ Chat's and the Voice Assistant's two ways of reaching outside Yap: looking thing
   search key: the research names no concrete set of publishers' feeds whose
   terms clearly allow an app's use (only an undated archived BBC page), so
   none are read; Wikidata isn't added either (the keyless lookup stays as
-  it was). **"Search in your browser"** (`BrowserSearch {query, url,
+  it was). **"Search beside the chat"** (1 Nov 2026; the person's own
+  browser beside it, "Open in Brave": `SearchInBrowser.svelte`) — the search
+  in the panel's page tab, on the person's engine — (`BrowserSearch {query, url,
   engine}`): offered when a search wasn't covered, or found nothing and the
   turn read nothing else from the web (`Turn::browser_search`; a small
   model's fixed pipeline, `Handoff::small_line`, the same) — kept with the
@@ -564,7 +568,13 @@ Chat's and the Voice Assistant's two ways of reaching outside Yap: looking thing
   whole message is "[greeting/please/can you/try to/yes…] open|launch|
   start|play|run|fire up|boot up|load up… <app> [please/for me/now/
   again]", one sentence; `plain` = no joining words "and/about/for/to…";
-  `play` — a phrase naming no app is the model's, "play the next song")
+  `play` — a phrase naming no app is the model's, "play the next song";
+  **a website** — with the web on and a model that calls tools,
+  `for_the_web`: a site people open by name, "open Google" (`WEBSITES`),
+  that no app has exactly as its name, or words asking for the web, "…in
+  the browser", "website", ".com" (`WEB_CUES`) — is the model's too, which
+  opens it beside the chat with `open_page`, 1 Nov 2026: "open Google" had
+  opened Google Chrome; "open Chrome", "open Spotify" still open the app)
   → one app → opened, "Opening Microsoft Teams." + chip `Opened Microsoft
   Teams` (no model call: works with no AI and the 1.5B local model);
   several → "I found 2 apps for “teams”: … Which one?"; switched off →

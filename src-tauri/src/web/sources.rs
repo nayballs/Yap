@@ -143,7 +143,7 @@ impl Handoff {
     /// covered: the one sentence and nothing from memory — a small model
     /// otherwise adds "it hasn't been released yet" and shops to try.
     pub fn line(&self) -> String {
-        const BUTTON: &str = "Yap shows a \"Search in your browser\" button under your answer.";
+        const BUTTON: &str = "Yap shows a \"Search beside the chat\" button under your answer.";
         match self.why {
             Why::NotCovered(what) => format!(
                 "Nothing was searched: this chat has no web search service, and Yap's free sources ({FREE}) don't cover {}. Say so plainly in one short sentence, without guessing, and don't search for it again. {NOTHING_REMEMBERED} {BUTTON}",
@@ -166,10 +166,10 @@ impl Handoff {
         match self.why {
             Why::NeedsPlace => "Yap couldn't look up the weather: no place was named. Ask the user which town or city they mean. Never claim you searched, browsed or found anything online.".to_string(),
             Why::NotCovered(what) | Why::MayNotCover(what) => format!(
-                "Yap can't search the whole web in this chat (there's no search service, and its free sources don't cover {}). Tell the user that in one short sentence, without guessing: Yap shows a \"Search in your browser\" button under your answer. {NOTHING_REMEMBERED} Never claim you searched, browsed or found anything online.",
+                "Yap can't search the whole web in this chat (there's no search service, and its free sources don't cover {}). Tell the user that in one short sentence, without guessing: Yap shows a \"Search beside the chat\" button under your answer. {NOTHING_REMEMBERED} Never claim you searched, browsed or found anything online.",
                 what.what()
             ),
-            Why::NothingFound => "Yap's free web sources found nothing for this question, and there's no search service in this chat. Tell the user that in one short sentence, without guessing: Yap shows a \"Search in your browser\" button under your answer. Never claim you searched, browsed or found anything online.".to_string(),
+            Why::NothingFound => "Yap's free web sources found nothing for this question, and there's no search service in this chat. Tell the user that in one short sentence, without guessing: Yap shows a \"Search beside the chat\" button under your answer. Never claim you searched, browsed or found anything online.".to_string(),
         }
     }
 
@@ -423,7 +423,7 @@ mod tests {
         assert_eq!(r["displayText"], "Didn't search the web for \"Driftwood Pro subscription price\": Yap's free sources don't cover prices");
         assert_eq!(r["data"]["results"], json!([]));
         let hint = r["data"]["hint"].as_str().unwrap();
-        assert!(hint.starts_with("Nothing was searched") && hint.contains("\"Search in your browser\""), "{hint}");
+        assert!(hint.starts_with("Nothing was searched") && hint.contains("\"Search beside the chat\""), "{hint}");
         assert!(s.asked.lock().unwrap().is_empty(), "nothing asked of anyone");
         assert!(!turn.seen(), "no web content: actions stay allowed");
         let b = turn.browser_search("startpage").unwrap();
@@ -499,7 +499,7 @@ mod tests {
         assert!(prices.offers());
         assert!(prices.line().starts_with("Nothing was searched: this chat has no web search service"), "{}", prices.line());
         assert!(prices.line().contains("don't cover prices") && prices.line().contains("without guessing"));
-        assert!(prices.line().contains("\"Search in your browser\""));
+        assert!(prices.line().contains("\"Search beside the chat\""));
         // Nothing from memory: a small model added "it hasn't been released yet".
         for line in [prices.line(), prices.small_line()] {
             assert!(line.contains("whether or when it came out") && line.contains("no shops or sites"), "{line}");
