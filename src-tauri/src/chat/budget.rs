@@ -93,22 +93,108 @@ pub const MESSAGE_OVERHEAD: u64 = 6;
 /// A picture of unknown size (an older Yap kept no width and height).
 pub const IMAGE_TOKENS: u64 = 1_000;
 
-/// **What a picture costs**, by its size: Anthropic's published rule, the
-/// pixels over 750, after the picture is brought within a 1,568-pixel long
-/// edge and 1.15 megapixels, and at least 85 (a small tile's cost at
-/// OpenAI). A full-HD screenshot ≈ 1,530; a snip of an error message (400 ×
-/// 200) ≈ 110. Until 31 Oct 2026 every picture counted 1,000, so three small
-/// snips didn't fit beside Chat's own prompt on Groq's free plan (8,000
-/// tokens a minute). Pure.
-pub fn image_tokens(w: u32, h: u32) -> u64 {
-    if w == 0 || h == 0 {
-        return IMAGE_TOKENS;
-    }
-    let (w, h) = (f64::from(w), f64::from(h));
-    let edge = (1_568.0 / w.max(h)).min(1.0);
-    let area = (1_150_000.0 / (w * h * edge * edge)).sqrt().min(1.0);
+/// The pixels over 750 once the picture is brought within `edge` pixels on
+/// its long side and `pixels` in all, at least 85 (a small tile's cost at
+/// OpenAI): Anthropic's published rule. Pure.
+fn per_750(w: f64, h: f64, edge: f64, pixels: f64) -> u64 {
+    let edge = (edge / w.max(h)).min(1.0);
+    let area = (pixels / (w * h * edge * edge)).sqrt().min(1.0);
     let scale = edge * area;
     ((w * scale * h * scale / 750.0).ceil() as u64).max(85)
+}
+
+/// Squares of `side` pixels a picture takes (a vision model's patches). Pure.
+fn squares(w: f64, h: f64, side: f64) -> u64 {
+    ((w / side).ceil() * (h / side).ceil()) as u64
+}
+
+/// OpenAI at high detail: brought within 2,048 pixels, then 768 on its short
+/// side, 85 and 170 a 512-pixel tile. Pure.
+fn openai_tiles(w: f64, h: f64) -> u64 {
+    let s = (2_048.0 / w.max(h)).min(1.0);
+    let (w, h) = (w * s, h * s);
+    let s = (768.0 / w.min(h)).min(1.0);
+    85 + 170 * squares(w * s, h * s, 512.0)
+}
+
+/// Gemini 2's: a picture within 384 pixels both ways 258; a bigger one in
+/// tiles of two-thirds of its short side (256 to 768 pixels), 258 each. Pure.
+fn gemini_tiles(w: f64, h: f64) -> u64 {
+    if w <= 384.0 && h <= 384.0 {
+        return 258;
+    }
+    let unit = (w.min(h) / 1.5).floor().clamp(256.0, 768.0);
+    258 * squares(w, h, unit)
+}
+
+/// **What a picture costs where it goes** (2026-11-01), by the size of the
+/// copy `provider` gets (`snip::images::long_edge`: 1,024 pixels for a model
+/// on this PC — `here` —, Claude 2,576, Gemini 3,072, 2,048 elsewhere) and
+/// what that provider counts, never under it, so a long chat with pictures
+/// never overflows the model's context. From 31 Oct 2026 every picture
+/// counted by Claude's older rule (within 1,568 pixels and 1.15 megapixels:
+/// a full-HD screenshot ≈ 1,530, a 400 × 200 snip ≈ 110), and until then
+/// 1,000, so three small snips didn't fit beside Chat's own prompt on Groq's
+/// free plan (8,000 tokens a minute).
+///
+/// - **Claude**: its high-resolution models (Opus 4.7 and later, Sonnet 5
+///   and later) take up to 2,576 pixels and 3.75 megapixels, the pixels over
+///   750 (up to ~5,000; Anthropic says ~4,784): a full-HD screenshot ≈ 2,770.
+/// - **OpenAI**: its tiles at high detail or its 32-pixel patches (at most
+///   1,536), whichever is more.
+/// - **Gemini**: Gemini 2's tiles, at least 1,120 (Gemini 3's for a picture).
+/// - **Groq**: its vision models are Qwen's, a token a 32-pixel square (+2).
+/// - **A model on this PC**: the pixels over 750 of its 1,024-pixel copy
+///   (Qwen's 28- and 32-pixel squares come to fewer).
+/// - **Anything else** (OpenRouter, a server elsewhere): Claude's
+///   high-resolution rule, the most a model behind it is known to count.
+///
+/// An unknown size counts as a full-HD screenshot there, at least
+/// [`IMAGE_TOKENS`]. Pure.
+pub fn image_tokens_at(provider: &str, here: bool, w: u32, h: u32) -> u64 {
+    if w == 0 || h == 0 {
+        return image_tokens_at(provider, here, 1_920, 1_080).max(IMAGE_TOKENS);
+    }
+    let (w, h) = crate::snip::images::fit(w, h, crate::snip::images::long_edge(provider, here));
+    let (w, h) = (f64::from(w), f64::from(h));
+    if here {
+        return per_750(w, h, f64::INFINITY, f64::INFINITY);
+    }
+    match provider {
+        "openai" => openai_tiles(w, h).max(squares(w, h, 32.0).min(1_536)),
+        "gemini" => gemini_tiles(w, h).max(1_120),
+        "groq" => (squares(w, h, 32.0) + 2).max(85),
+        _ => per_750(w, h, 2_576.0, 3_750_000.0),
+    }
+}
+
+/// A content part's picture size, read from its data URL's PNG header (the
+/// copies Yap sends are PNGs, `snip::images::fit_png`). Pure.
+fn part_size(part: &Value) -> Option<(u32, u32)> {
+    use base64::Engine;
+    let url = part["image_url"]["url"].as_str()?;
+    let (head, data) = url.split_once(',')?;
+    if !head.starts_with("data:image/png") || !head.ends_with(";base64") {
+        return None;
+    }
+    // 44 characters are 33 bytes: the signature and the IHDR chunk's size.
+    let bytes = base64::engine::general_purpose::STANDARD.decode(data.get(..44)?).ok()?;
+    crate::snip::images::png_size(&bytes)
+}
+
+/// What one picture part of a request costs at `provider` (its size from
+/// the picture itself; one that can't be read as a full-HD screenshot).
+/// Pure.
+pub fn part_tokens(part: &Value, provider: &str, here: bool) -> u64 {
+    let (w, h) = part_size(part).unwrap_or((0, 0));
+    image_tokens_at(provider, here, w, h)
+}
+
+/// What the pictures in one OpenAI message cost at `provider`: a question's
+/// screenshots, earlier ones sent again, the pictures the model looked at
+/// (`chat/pictures.rs`). Pure.
+pub fn images_in(m: &Value, provider: &str, here: bool) -> u64 {
+    m["content"].as_array().into_iter().flatten().filter(|p| p["type"] == "image_url").map(|p| part_tokens(p, provider, here)).sum()
 }
 /// How many earlier screenshots go again whole.
 const IMAGES_AGAIN: usize = 3;
@@ -223,6 +309,9 @@ pub struct Counter {
     /// The server's root (`http://127.0.0.1:8080`), when it may be asked.
     root: Option<String>,
     provider: String,
+    /// The model runs on this PC: its pictures are 1,024-pixel copies, and
+    /// earlier screenshots don't go again (`snip::turn::history_budget`).
+    here: bool,
 }
 
 impl Counter {
@@ -232,15 +321,27 @@ impl Counter {
         Counter::default()
     }
 
+    /// Estimates only, for a call to `provider` (`here`: on this PC).
+    #[cfg(test)]
+    pub fn estimate_for(provider: &str, here: bool) -> Counter {
+        Counter { root: None, provider: provider.to_string(), here }
+    }
+
     /// The counter for a call to `provider` at `base_url`: the on-device
     /// model, or a self-hosted server on this PC, counts long texts itself
     /// (once it's loaded); anything else is estimated.
     pub fn for_call(provider: &str, base_url: &str) -> Counter {
-        let here = matches!(provider, crate::ai::local_llm::PROVIDER_ONDEVICE | "local" | "custom")
-            && crate::ai::ai_model::runs_here(provider, base_url)
+        let here = crate::ai::ai_model::runs_here(provider, base_url);
+        let asks = matches!(provider, crate::ai::local_llm::PROVIDER_ONDEVICE | "local" | "custom")
+            && here
             && !crate::ai::local_llm::on_demand::is_standby(base_url);
-        let root = here.then(|| server_root(base_url).to_string()).filter(|r| !r.is_empty() && !refused(r));
-        Counter { root, provider: provider.to_string() }
+        let root = asks.then(|| server_root(base_url).to_string()).filter(|r| !r.is_empty() && !refused(r));
+        Counter { root, provider: provider.to_string(), here }
+    }
+
+    /// A picture of `w` × `h` as this call sends it ([`image_tokens_at`]).
+    pub fn picture(&self, w: u32, h: u32) -> u64 {
+        image_tokens_at(&self.provider, self.here, w, h)
     }
 
     /// `text`'s tokens.
@@ -273,11 +374,12 @@ impl Counter {
     }
 
     /// The tokens of messages as a request carries them (OpenAI messages:
-    /// their text, a tool call's arguments, and each message's overhead).
+    /// their text, a tool call's arguments, their pictures, and each
+    /// message's overhead).
     pub async fn count_messages(&self, messages: &[Value]) -> u64 {
         let mut n = 0;
         for m in messages {
-            n += self.count(&message_text(m)).await + MESSAGE_OVERHEAD;
+            n += self.count(&message_text(m)).await + images_in(m, &self.provider, self.here) + MESSAGE_OVERHEAD;
         }
         n
     }
@@ -338,7 +440,8 @@ pub fn message_text(m: &Value) -> String {
 /// What each message of a conversation costs as a turn sends it: its
 /// text, an earlier web answer's replayed search (`replay`,
 /// `chats::history_messages`), and the screenshots sent again (the newest
-/// three whole, the rest a line).
+/// three whole, each by its size where it goes — none to a model on this
+/// PC —, the rest a line).
 pub async fn message_costs(counter: &Counter, messages: &[ChatMessage], replay: bool) -> Vec<u64> {
     let mut costs = Vec::with_capacity(messages.len());
     for i in 0..messages.len() {
@@ -350,11 +453,11 @@ pub async fn message_costs(counter: &Counter, messages: &[ChatMessage], replay: 
         costs.push(counter.count_messages(&sent).await);
     }
     // Screenshots: the newest few sent again whole.
-    let mut whole = IMAGES_AGAIN;
+    let mut whole = if counter.here { 0 } else { IMAGES_AGAIN };
     for (i, m) in messages.iter().enumerate().rev() {
         for img in &m.images {
             if whole > 0 {
-                costs[i] += image_tokens(img.w, img.h);
+                costs[i] += counter.picture(img.w, img.h);
                 whole -= 1;
             } else {
                 costs[i] += 20;
@@ -846,10 +949,33 @@ fn at<'a>(v: &'a mut Value, path: &[Seg]) -> Option<&'a mut Value> {
 }
 
 /// The tokens `messages` (OpenAI messages) and the offered `tools` take,
-/// estimated: what a tool step sends. Pure.
-pub fn request_tokens(messages: &[Value], tools: &Value) -> u64 {
-    messages.iter().map(|m| estimate(&message_text(m)) + MESSAGE_OVERHEAD).sum::<u64>() + if tools.is_null() { 0 } else { estimate(&tools.to_string()) }
+/// estimated: what a tool step sends to `provider` (`here`: on this PC) —
+/// the pictures it carries too, each by its size there ([`images_in`]: a
+/// question's screenshots, earlier ones sent again, the pictures the model
+/// looked at; until 1 Nov 2026 none counted, so a tool's result could be
+/// fitted into room a picture already took). Pure.
+pub fn request_tokens(messages: &[Value], tools: &Value, provider: &str, here: bool) -> u64 {
+    messages.iter().map(|m| estimate(&message_text(m)) + images_in(m, provider, here) + MESSAGE_OVERHEAD).sum::<u64>()
+        + if tools.is_null() { 0 } else { estimate(&tools.to_string()) }
 }
+
+/// A PNG's data URL that's only its header (a picture's size, nothing
+/// drawn): what [`part_size`] reads. Tests only.
+#[cfg(test)]
+pub fn png_url_for_test(w: u32, h: u32) -> String {
+    use base64::Engine;
+    let mut b = b"\x89PNG\r\n\x1a\n\0\0\0\x0dIHDR".to_vec();
+    b.extend(w.to_be_bytes());
+    b.extend(h.to_be_bytes());
+    // Depth, colour type, compression, filter, interlace; the chunk's CRC.
+    b.extend([8, 6, 0, 0, 0, 0, 0, 0, 0]);
+    b.extend([0; 12]);
+    format!("data:image/png;base64,{}", base64::engine::general_purpose::STANDARD.encode(&b))
+}
+
+/// What a tool says when the picture it would look at doesn't fit in what
+/// the request has left (`agent.rs`: a picture is never cut).
+pub const NO_ROOM_TO_LOOK: &str = "There's no room left in the model's context for another picture this turn. Show one by what it's about, or answer with what you have and say you couldn't look.";
 
 #[cfg(test)]
 mod tests {
@@ -1129,16 +1255,92 @@ mod tests {
 
     #[test]
     fn a_picture_costs_by_its_size() {
-        // A tiny snip: the least; a snip of an error message; a full-HD
-        // screenshot (brought within the long edge and the megapixels); a
-        // 4K one costs no more than that; no size known: as before.
-        assert_eq!(image_tokens(64, 48), 85);
-        assert_eq!(image_tokens(400, 200), 107);
-        let hd = image_tokens(1_920, 1_080);
+        // Anthropic's rule within Claude's older limits (1,568 pixels, 1.15
+        // MP): a tiny snip the least; a snip of an error message; a full-HD
+        // screenshot brought within the long edge and the megapixels; a 4K
+        // one costs no more than that.
+        let older = |w: u32, h: u32| per_750(f64::from(w), f64::from(h), 1_568.0, 1_150_000.0);
+        assert_eq!(older(64, 48), 85);
+        assert_eq!(older(400, 200), 107);
+        let hd = older(1_920, 1_080);
         assert!((1_500..=1_540).contains(&hd), "{hd}");
-        assert_eq!(image_tokens(3_840, 2_160), hd);
-        assert!(image_tokens(1_080, 1_920) <= 1_540);
-        assert_eq!(image_tokens(0, 0), IMAGE_TOKENS);
+        assert_eq!(older(3_840, 2_160), hd);
+        assert!(older(1_080, 1_920) <= 1_540);
+    }
+
+    #[test]
+    fn a_picture_costs_what_its_provider_counts() {
+        // Claude's high-resolution models: a full-HD screenshot whole (the
+        // older rule brought it down to 1.15 MP, ~1,530), a 4K one within
+        // its 2,576-pixel copy and 3.75 MP.
+        assert_eq!(image_tokens_at("anthropic", false, 1_920, 1_080), 2_765);
+        assert!(per_750(1_920.0, 1_080.0, 1_568.0, 1_150_000.0) < 1_540);
+        let uhd = image_tokens_at("anthropic", false, 3_840, 2_160);
+        assert!((4_700..=5_000).contains(&uhd), "{uhd}");
+        // OpenAI: its tiles or its patches, whichever is more.
+        assert_eq!(image_tokens_at("openai", false, 1_920, 1_080), 1_536);
+        assert_eq!(image_tokens_at("openai", false, 400, 200), 255);
+        // Gemini: Gemini 2's tiles, at least Gemini 3's 1,120; its 3,072-pixel
+        // copy of a 4K screenshot in 12 tiles.
+        assert_eq!(image_tokens_at("gemini", false, 1_920, 1_080), 1_548);
+        assert_eq!(image_tokens_at("gemini", false, 400, 200), 1_120);
+        assert_eq!(image_tokens_at("gemini", false, 3_840, 2_160), 12 * 258);
+        // Groq's Qwen: a token a 32-pixel square.
+        assert_eq!(image_tokens_at("groq", false, 1_920, 1_080), 60 * 34 + 2);
+        assert_eq!(image_tokens_at("groq", false, 400, 200), 13 * 7 + 2);
+        // A model on this PC: its 1,024-pixel copy.
+        assert_eq!(image_tokens_at("ondevice", true, 1_920, 1_080), 787);
+        assert_eq!(image_tokens_at("custom", true, 400, 200), 107);
+        // OpenRouter, a server elsewhere: Claude's rule, on a 2,048 copy.
+        assert_eq!(image_tokens_at("openrouter", false, 1_920, 1_080), 2_765);
+        assert_eq!(image_tokens_at("custom", false, 4_096, 2_304), image_tokens_at("anthropic", false, 2_048, 1_152));
+        // A tiny snip anywhere: the least.
+        assert_eq!(image_tokens_at("anthropic", false, 64, 48), 85);
+        // No size known: as a full-HD screenshot there, at least 1,000.
+        assert_eq!(image_tokens_at("anthropic", false, 0, 0), 2_765);
+        assert_eq!(image_tokens_at("ondevice", true, 0, 0), IMAGE_TOKENS);
+    }
+
+    #[test]
+    fn a_requests_pictures_count_by_their_size_where_they_go() {
+        let text = |t: &str| serde_json::json!({ "type": "text", "text": t });
+        let question = serde_json::json!({ "role": "user", "content": [
+            crate::snip::turn::part(&png_url_for_test(1_920, 1_080), "anthropic"),
+            text("What's wrong here?"),
+        ] });
+        let plain = serde_json::json!({ "role": "user", "content": "What's wrong here?" });
+        let picture = request_tokens(std::slice::from_ref(&question), &Value::Null, "anthropic", false)
+            - request_tokens(std::slice::from_ref(&plain), &Value::Null, "anthropic", false);
+        assert_eq!(picture, 2_765);
+        // The same copy to Groq's Qwen, and on this PC (a 1,024 copy).
+        assert_eq!(images_in(&question, "groq", false), 60 * 34 + 2);
+        assert_eq!(images_in(&question, "ondevice", true), 787);
+        // A picture Yap made, read from its own header.
+        let rgba = vec![200u8; 64 * 48 * 4];
+        let png = crate::snip::images::encode_png(&rgba, 64, 48, true).unwrap();
+        use base64::Engine;
+        let url = format!("data:image/png;base64,{}", base64::engine::general_purpose::STANDARD.encode(&png));
+        assert_eq!(part_size(&crate::snip::turn::part(&url, "openai")), Some((64, 48)));
+        // One whose size can't be read: a full-HD screenshot there.
+        let elsewhere = crate::snip::turn::part("https://pictures.example.com/map.jpg", "anthropic");
+        assert_eq!(part_tokens(&elsewhere, "anthropic", false), 2_765);
+        // A message without pictures: nothing.
+        assert_eq!(images_in(&plain, "anthropic", false), 0);
+    }
+
+    #[tokio::test]
+    async fn earlier_screenshots_cost_their_size_where_they_go() {
+        let hd = || crate::chat::chats::ChatImage { id: "img_0".into(), w: 1_920, h: 1_080, ..Default::default() };
+        let m = |images: usize| ChatMessage { role: "user".into(), text: "hi".into(), images: (0..images).map(|_| hd()).collect(), ..Default::default() };
+        let base = estimate("hi") + MESSAGE_OVERHEAD;
+        // To Claude: the newest three whole, by Claude's count.
+        let costs = message_costs(&Counter::estimate_for("anthropic", false), &[m(2), m(2)], false).await;
+        assert_eq!(costs, vec![base + 2_765 + 20, base + 2 * 2_765]);
+        // To a model on this PC none goes again (`snip::turn::history_budget`):
+        // each a line.
+        let costs = message_costs(&Counter::estimate_for("ondevice", true), &[m(2), m(2)], false).await;
+        assert_eq!(costs, vec![base + 40, base + 40]);
+        assert_eq!(Counter::estimate_for("groq", false).picture(1_920, 1_080), 60 * 34 + 2);
     }
 
     #[test]

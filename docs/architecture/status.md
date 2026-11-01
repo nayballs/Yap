@@ -55,6 +55,60 @@ tables, method and how anyone can run it and send theirs:
 
 ## What works
 
+**Find and show pictures** (2026-10-31 – 11-01, [chat-and-assistant.md](./chat-and-assistant.md),
+`chat/pictures.rs`): Chat finds a picture on the web and shows it beside the
+chat. A page read and a search list each page's pictures by id (`p1`, `p2`…;
+icons, logos and the site's furniture left out); `show_picture` downloads one
+through the page read's guards (images only, 10 MB at most, "A picture from the
+web" in the network receipts) and keeps it like a pasted picture; the panel
+beside the chat is a workspace — a tab per document and picture, a picture tab
+with zoom and pan, Copy / Save image / Open page — and an answer's pictures
+are pills under it. A model that reads images may `look_at_picture` first (the
+picture goes in the next request, fitted to the provider; since 1 Nov it counts
+in the turn's room by its size there, and one that no longer fits isn't looked
+at); any other model that calls tools picks from Yap's ranked list. Unit-tested
+(the pictures a page keeps, ranking, the gate, `show_picture`'s refusals, the
+loop end to end, the room), e2e-tested (`chat-pictures.spec.js`: the stored
+picture, `chats.json`, the receipts, the event, the look's picture part;
+`chat-picture-panel.spec.js`: tabs, zoom and pan, the source, Copy / Save,
+dark, the live event) and evaluated on a stand-in web (`--tag pictures`):
+Claude Haiku 5.5 4/4; the on-device Qwen3.5-4B 3/6 with its projector or
+without — it found the map every time, but with no map there it showed another
+picture anyway ([model-evals.md](../model-evals.md#find-and-show-pictures-31-oct-2026)).
+**Fandom is out of the automated lookups** (1 Nov, the maintainer's call,
+[web-and-apps.md](./web-and-apps.md)): its Terms of Use forbid automated
+access, so `wiki::allows_automated` keeps it out of the keyless wiki lookup and
+the pictures (six game wikis left `GAME_WIKIS`); unit-tested (Fandom never
+asked). **Not yet tried**: pictures from a real search in daily use, Opus, a
+strong Claude's `find_pictures` (unit tests only).
+
+**Files from Explorer** (2026-10-31, `shell/file_drop.rs`): a file dragged onto
+Upload, Chat or Import a transcript got the stop cursor in every build (wry
+registers its drop target before WebView2 makes its input windows). Yap now
+registers its own drop target on every window of the main webview once they
+exist and sends the same `tauri://drag-*` events. Found and proved with real
+OLE drags onto isolated copies (refused without it, taken with it);
+`upload.spec.js` checks the drop target reaches WebView2's windows.
+
+**Yap Link, home preview** (2026-10-31, [link.md](./link.md), off by default):
+ask Yap's AI from a paired phone on the home Wi-Fi and hear the answer there —
+Yap's own HTTPS on port 51443 to home-network peers only, pairing by QR with a
+4-digit code on both screens, the question asked as the Voice Assistant asks,
+the answer as one stream (a jitter buffer, Clearer sound in a headset).
+**The phone is Ask Yap only**: dictating from the phone (to this PC or to the
+phone) was built and taken out the same day after the maintainer tried it
+(7bbec66e). Unit-tested (`cargo test link::`), e2e-tested (`e2e/link.spec.js`:
+a headless browser with a fake mic pairs, asks and hears the answer over Yap's
+own HTTPS) and the page on its own (`npm run test:link`, Chromium and Firefox);
+tried on a real phone by the maintainer.
+
+**Yap - Dev's launcher** (2026-10-31, [build-and-test.md](./build-and-test.md),
+`scripts/dev-launcher.mjs`): `dev.bat` shows an animated screen instead of a
+wall of log lines — the stages (updating, Vite, compiling with cargo's own
+progress, running), a build bar that never looks stuck, errors in red with a
+hint, L for the raw log, a log file; `YAP_DEV_PLAIN=1` for the old output.
+Developer tooling only: the app is unchanged.
+
 **Chat apps and code editors** (2026-10-29, [pasting.md](./pasting.md),
 [dictionary.md](./dictionary.md)): **stacked messages** ("new message"
 said as a sentence of its own in a chat app, and the dictation sent anyway:
@@ -1387,75 +1441,68 @@ other languages' notes and chats.
 
 ## Not yet done
 
-Not yet done: the AI Chat surface's eager note context stays keyword-only
-(its `search_notes`, `search_chats` and memory search by meaning since
-2026-10-25, search.md; its answers stream since 2026-10-22 —
-unit- and e2e-tested against stand-ins, measured on the on-device
-Qwen3.5-4B and Groq, not yet through a real Anthropic, Gemini, OpenAI or
-OpenRouter stream, whose shapes are taken from their docs), no calendar
-tools; memory isn't synced between PCs and doesn't learn with a model too
-small to call tools; ElevenLabs as the reply voice isn't yet tried with a real key; spoken replies read Kokoro's
-Japanese and Mandarin voices' text as English, don't check a slow PC's
+Checked against the code on 2026-11-01. `ROADMAP.md` (private) has the plans.
 
-OpenRouter stream, whose shapes are taken from their docs), no conversation
-search/archive (Chat's `search_chats` searches past chats by keyword for the
-model, not for the person); memory isn't synced between PCs, matches
-questions by keyword (no embeddings), and doesn't learn with a model too
-small to call tools; ElevenLabs as the reply voice isn't yet tried with a real key; spoken replies don't
-offer Kokoro's Japanese and Mandarin voices (no pronunciation step for them), don't check a slow PC's
-speed before choosing Kokoro (the research's first-use RTF check), wait for the whole answer
-before the first sentence, don't listen again by themselves after an answer,
-and have no echo cancellation (a mic that hears the speakers during an
-answer is a later job); the AI Notepad has no folder "add existing note" picker
-(its rich editor came 2026-10-31: My thoughts, the notepad's and the quick note's
-pages, below), and the summary's Edit box is still its markdown; meetings tell the call's voices apart
-only with the beta speaker engine on, and name them only from what's said
-and the invite (suggestions to confirm, a strong one as a guess; 0 wrong
-names but 34–60% found in the evaluation's fictional meetings; reading the
-call app's window is built behind a flag but untried in a real call; voices
-of two recordings of one meeting are matched by voiceprint only when sure,
-and similar voices merged by the engine are offered a Split, not fixed —
-both measured on the spike's synthetic meetings only, never on a real
-call; tasks are attributed
-from attendees, the speaker map and names said)
-and remove speaker echo only from chunks that are entirely the call (see
-[`docs/meetings.md`](../meetings.md) "Limits"), and a real call (live
-WASAPI loopback + a real LLM's action plan, a headset plugged in mid-call, a
-hotkey dictation mid-call, the mic unplugged mid-call) still wants one
-hands-on pass; the microphones' order and the unplug handling have only
-met made-up devices in tests (a real headset's plug, unplug and Bluetooth
-wake-up are the maintainer's to try), and so have the mic tips and the
-lid (the tips' thresholds are set on synthetic speech; a laptop's built-in
-mic is told apart by its jack subtype or name, so a plain "Microphone
-(Realtek Audio)" inside a lid isn't caught); a reset can't reach a second
-Yap running on the same data folder (it keeps its own copy in memory: quit
-it first); the refine after
-a meeting judges models by the leaderboard's figures and the meeting's
-language by Settings or Windows (not measured, not detected), and lowers
-only its calling thread's priority; meeting audio can't be exported
-(Find speakers runs the speaker engine again over it, 2026-10-25: e2e- and
-real-engine-tested on test meetings, not yet on a real one); a fixed line can't be split
-or deleted, an edited summary has no "back to Yap's" (only Replace), and a
-task's "Said at" is the line sharing most of its words (a guess: none when
-no line shares enough);
-the calendar has no one-click Outlook (Microsoft Graph: it needs a Microsoft
-Entra app registration, [`docs/calendar.md`](../calendar.md) says what it
-would take), and no join codes for Webex, Slack or GoTo calls; the pre-meeting
-brief (2026-10-22: unit-, e2e- and model-evaluated, not yet seen before a
-real meeting) checks the AI's lines word by word, so a mix-up of two things
-its notes both say can pass (no "In short" from a small on-device model for
-that reason);
-a true streaming model for the partial pass (spike-gated
-Stage 2 — see `ROADMAP.md` Phase 1);
-a rich snippet through Paste last transcript (its plain text only) or
-in a dictation pasted in steps (stacked messages, a picked mention);
-snippets with several spoken phrases; the clipboard-read check in Notepad,
-Electron, VS Code and real slow apps (Outlook, Word, a remote desktop), and
-a page in Edge that ignores the paste (Edge reads the clipboard anyway); a JetBrains IDE's or Visual Studio's terminal, and a browser's
-(vscode.dev, Codespaces), still count as the editor;
-Skills don't run from the Voice Assistant, and a meeting's past chat
-can't be renamed from the Notes view (the notepad's Past chats only);
-Authenticode signing (blocked on SignPath approval); audio-history export;
-numbers from a real laptop (the smaller-PC numbers are an emulation on the
-test desktop; a hybrid laptop's DirectML on its card is untried), and
-non-Windows (Linux/macOS) polish. See `ROADMAP.md`.
+- **Chat and the Voice Assistant**: Chat's eager note context stays
+  keyword-only (its `search_notes`, `search_chats` and memory search by
+  meaning since 2026-10-25, search.md). Answers stream from every provider,
+  but Gemini's, OpenAI's and OpenRouter's streams haven't met a real request
+  (their shapes are taken from their docs; the on-device model's, Groq's and
+  Claude's have). Skills don't run from the Voice Assistant. A meeting's past
+  chat can't be renamed from the Notes view (the notepad's Past chats only).
+  The on-device Qwen3.5-4B shows another picture when the one asked for
+  isn't there (Find and show's evaluation, 3/6, above).
+- **Memory** isn't synced between PCs.
+- **Spoken replies**: ElevenLabs isn't yet tried with a real key; Kokoro's
+  Japanese and Mandarin voices aren't offered (no pronunciation step for
+  them); a slow PC's speed isn't checked before Kokoro is chosen (the
+  research's first-use real-time-factor check); Yap doesn't listen again by
+  itself after an answer, and has no echo cancellation (a mic that hears the
+  speakers during an answer is a later job).
+- **Notes**: no "add existing note" picker for a folder; the summary's Edit
+  box is still its markdown (My thoughts, the notepad's and the quick note's
+  are pages you can format since 2026-10-31); a task's "Said at" is the line
+  sharing most of its words (a guess: none when no line shares enough).
+- **Meetings and speakers**: the call's voices are told apart only with the
+  beta speaker engine on, and named only from what's said and the invite
+  (suggestions to confirm, a strong one as a guess; 0 wrong names but 34–60%
+  found in the evaluation's fictional meetings). Reading the call app's
+  window is built behind a flag but untried in a real call. Two recordings
+  of one meeting have their voices matched by voiceprint only when sure, and
+  similar voices the engine merged are offered a Split, not fixed — both
+  measured on the spike's synthetic meetings only. Speaker echo is removed
+  only from chunks that are entirely the call ([`docs/meetings.md`](../meetings.md)
+  "Limits"). A real call (live WASAPI loopback and a real model's action
+  plan, a headset plugged in mid-call, a dictation mid-call, the mic
+  unplugged mid-call) still wants one hands-on pass, and Find speakers hasn't
+  run on a real meeting (test meetings, real engine). The refine after a
+  meeting judges models by the leaderboard's figures and takes the meeting's
+  language from Settings or Windows (not measured, not detected), and lowers
+  only its calling thread's priority.
+- **Microphones**: their order and the unplug handling, the mic tips and the
+  lid have only met made-up devices in tests (a real headset's plug, unplug
+  and Bluetooth wake-up are the maintainer's to try; the tips' thresholds are
+  set on synthetic speech; a laptop's built-in mic is told apart by its jack
+  subtype or name, so a plain "Microphone (Realtek Audio)" inside a lid
+  isn't caught).
+- **Calendar**: no one-click Outlook (Microsoft Graph needs a Microsoft Entra
+  app registration; [`docs/calendar.md`](../calendar.md) says what it would
+  take) and no join codes for Webex, Slack or GoTo calls. The pre-meeting
+  brief (unit-, e2e- and model-evaluated, not yet seen before a real
+  meeting) checks the AI's lines word by word, so a mix-up of two things its
+  notes both say can pass (no "In short" from a small on-device model for
+  that reason).
+- **Dictation and pasting**: a true streaming model for the partial pass
+  (spike-gated); a rich snippet through Paste last transcript (its plain text
+  only) or in a dictation pasted in steps (stacked messages, a picked
+  mention); snippets with several spoken phrases; the clipboard-read check in
+  Notepad, Electron, VS Code and real slow apps (Outlook, Word, a remote
+  desktop), and a page in Edge that ignores the paste (Edge reads the
+  clipboard anyway); a JetBrains IDE's terminal still counts as the editor
+  (Visual Studio's and a browser's are told apart).
+- **Your data**: a reset can't reach a second Yap running on the same data
+  folder (it keeps its own copy in memory: quit it first).
+- **Release and platforms**: Authenticode signing (blocked on SignPath
+  approval); numbers from a real laptop (the smaller-PC numbers are an
+  emulation on the test desktop; a hybrid laptop's DirectML on its card is
+  untried); Linux and macOS.

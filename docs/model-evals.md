@@ -3228,13 +3228,34 @@ map, every chest marked X,' with no map on it, so I didn't put it up" (`20261101
 With the pictures drawn as scenes: **4/4** (`20261101-010025`), the map shown after one look,
 nothing shown on the page without one; ~2.9k tokens for the four (the cache reads apart).
 The tally now counts Claude's tokens too (`record.rs`: the Messages API's `input_tokens` /
-`output_tokens`). Not run yet: the on-device model (free) and Opus.
+`output_tokens`).
+
+**The on-device Qwen3.5-4B (1 Nov 2026, Q4_K_M on the graphics card, `--ngl 999`, `--repeat
+3`): 3/6, with its projector or without.** It finds the map every time and never shows the
+wrong picture when the right one is there; with none there it says so ("there's no treasure
+map available yet") **and shows something else anyway**, against the rule.
+
+| Run | Tools | Map there | No map | |
+|---|---|---|---|---|
+| Show only (no projector; `20261101-013820`) | `show_picture` | 3/3 | 0/3 | showed the other area's map once, the concept art twice |
+| With its projector (`20261101-013929`) | `look_at_picture` + `show_picture` | 3/3 | 0/3 | looked once in six turns (the other area's map: showed nothing, but wrote "shown above" and missed the wording check); else the night screenshot, the concept art |
+
+Each turn ~18k tokens (web_search, read_page, then a picture call), 1.3–3.1 s. The 4B
+picks from Yap's ranked list in both: with the projector it almost never looks before it
+shows. For the projector run the eval's `local:` provider had to read the model as one that
+reads images, and it has no switch for that: the run used a hard link to the same GGUF named
+`Qwen_Qwen3.5-4B-VL-Q4_K_M.gguf` (the family rule's "vl", `snip::vision`) with
+`--llamafile-arg=--mmproj --llamafile-arg=<llm/vision/mmproj-Qwen_Qwen3.5-4B-f16.gguf>`.
+The app gives the on-device model `look_at_picture` while its projector is loaded
+(`Gate::for_model`). Not run yet: Opus.
 `cargo test eval::` parses the scenarios (`the_repos_scenarios_parse`) and checks the stand-in
 pictures (`a_stand_in_picture_looks_like_what_it_says_and_carries_its_title`). The cheapest first:
 
 ```bash
 # show only (the on-device 4B without its projector; free, this PC)
 npm run eval -- --tag pictures --model local:<Qwen_Qwen3.5-4B-Q4_K_M.gguf> --ngl 999 --repeat 3
+# look and show on this PC (free): a link to the GGUF named …-VL-…, and its projector
+yap.exe eval --tag pictures --model local:<Qwen_Qwen3.5-4B-VL-Q4_K_M.gguf> --ngl 999 --repeat 3 --llamafile-arg=--mmproj --llamafile-arg=<mmproj-Qwen_Qwen3.5-4B-f16.gguf>
 # look and show (paid: the maintainer's OK)
 npm run eval -- --tag pictures --model anthropic:claude-haiku-5-5 --keys-from-yap --repeat 2
 npm run eval -- --tag pictures --model anthropic:claude-opus-5-5 --keys-from-yap
