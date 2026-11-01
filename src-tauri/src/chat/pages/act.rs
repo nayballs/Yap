@@ -341,6 +341,9 @@ async fn click(turn: &mut crate::web::Turn, args: &Value, live: Option<crate::ch
     if let Some(r) = on_search_page(&t, "click") {
         return r;
     }
+    // Yap acts on the page from here: its dialogs dismissed (one waiting
+    // would stall Yap's script), but not while the person decides.
+    let mut _busy = backend::busy(&t.key).await;
     let (d, el) = match element(&t, ref_of(&args["ref"]), "click").await {
         Ok(x) => x,
         Err(e) => return e,
@@ -351,14 +354,15 @@ async fn click(turn: &mut crate::web::Turn, args: &Value, live: Option<crate::ch
         return failed(format!("‘{label}’ is disabled on the page: it can't be clicked now."), format!("Couldn't click ‘{label}’: it's disabled"));
     }
     acting(live, &t.key);
-    let _busy = backend::busy(&t.key).await;
     let mut asked = false;
     if let Some(kind) = rules::click_needs_ok(&d, &el) {
         asked = true;
+        drop(_busy.take());
         let answer = confirm::ask(live, confirm::Ask { act: "press", label: &label, site: &site, does: kind, text: "", key: &t.key }).await;
         if let Some(r) = refusal(answer, &format!("pressing ‘{label}’"), &format!("click ‘{label}’")) {
             return r;
         }
+        _busy = backend::busy(&t.key).await;
     }
     let was = before(&t).await;
     let mark = backend::mark(&t.key).await;
@@ -412,6 +416,7 @@ async fn type_into(turn: &mut crate::web::Turn, args: &Value, live: Option<crate
     if let Some(r) = on_search_page(&t, "type") {
         return r;
     }
+    let mut _busy = backend::busy(&t.key).await;
     let (d, el) = match element(&t, ref_of(&args["ref"]), "type").await {
         Ok(x) => x,
         Err(e) => return e,
@@ -438,7 +443,6 @@ async fn type_into(turn: &mut crate::web::Turn, args: &Value, live: Option<crate
         );
     }
     acting(live, &t.key);
-    let _busy = backend::busy(&t.key).await;
     let was = before(&t).await;
     let mut asked = false;
     // Words from nowhere the person can see (not in what they said, nor on
@@ -450,6 +454,7 @@ async fn type_into(turn: &mut crate::web::Turn, args: &Value, live: Option<crate
         if !rules::unknown_words(&text, &known).is_empty() {
             asked = true;
             let shown = rules::clip(&text, 120);
+            drop(_busy.take());
             let answer = confirm::ask(live, confirm::Ask { act: "type", label: &label, site: &site, does: "type", text: &shown, key: &t.key }).await;
             if let Some(r) = refusal(answer, &format!("typing ‘{shown}’ into ‘{label}’ (those words aren't in what they said nor on the page)"), &format!("type in ‘{label}’")) {
                 return r;
@@ -464,12 +469,16 @@ async fn type_into(turn: &mut crate::web::Turn, args: &Value, live: Option<crate
                 Some(b) => ("press", format!("pressing ‘{b}’"), b.clone()),
                 None => ("enter", format!("pressing Enter in ‘{label}’"), label.clone()),
             };
+            drop(_busy.take());
             let answer = confirm::ask(live, confirm::Ask { act, label: &shown, site: &site, does: kind, text: "", key: &t.key }).await;
             let chip = if button.is_some() { format!("press ‘{shown}’") } else { format!("press Enter in ‘{shown}’") };
             if let Some(r) = refusal(answer, &what, &chip) {
                 return r;
             }
         }
+    }
+    if _busy.is_none() {
+        _busy = backend::busy(&t.key).await;
     }
     let mark = backend::mark(&t.key).await;
     let done = match backend::act(&t.key, "type", &json!({ "ref": el.r, "role": el.role, "name": el.name, "text": text, "submit": submit })).await {
@@ -591,7 +600,6 @@ async fn go(turn: &mut crate::web::Turn, args: &Value, live: Option<crate::chat:
         Err(e) => return e,
     };
     acting(live, &t.key);
-    let _busy = backend::busy(&t.key).await;
     // A link that would buy, pay, unsubscribe, confirm… asks first, as its
     // click would (its words, its address); an address from the results or
     // the person, by its address.
@@ -608,6 +616,7 @@ async fn go(turn: &mut crate::web::Turn, args: &Value, live: Option<crate::chat:
             }
         }
     }
+    let _busy = backend::busy(&t.key).await;
     let was = before(&t).await;
     let mark = backend::mark(&t.key).await;
     if let Err(e) = backend::navigate(&t.key, &url).await {

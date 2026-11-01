@@ -11,7 +11,7 @@
 // A chip about the web (web.rs), a page beside the chat (chat/pages.rs, and
 // acting on one: chat/pages/act.rs) or the safety rule (chat/tools.rs).
 const WEB_CHIP =
-  /^(Searched the web|Couldn't search the web|Didn't search for|Didn't search the web for|Read [^"]|Couldn't read [^"]|Didn't read |Answered from |Brought up |Couldn't bring up |Didn't bring up |Took a shot of |Couldn't take a shot of |Didn't take a shot of |Offered to open |Didn't offer |Clicked |Typed in |Scrolled |Went to |Opened a search in tab |Showed tab |Couldn't (click|type|scroll|go|switch)|Didn't (click|type|press|go|act|switch))/;
+  /^(Searched the web|Couldn't search the web|Didn't search for|Didn't search the web for|Read [^"]|Couldn't read [^"]|Didn't read |Answered from |Brought up |Couldn't bring up |Didn't bring up |Took a shot of |Couldn't take a shot of |Didn't take a shot of |Offered to open |Didn't offer |Clicked |Typed in |Scrolled |Went to |Opened a search in tab |Showed tab |Couldn't (click|type|scroll|go|switch)|Didn't (click|type|press|go|open|act|switch))/;
 // The calendar's (chat/tools/calendar.rs).
 const CALENDAR_CHIP = /^(Checked your calendar|Found \d+ meetings? with|No meetings with|Free |Busy |No calendar connected|Couldn't read the (day|time) )/;
 // A document's (chat/documents.rs, and the rich tools': documents/rich.rs).
