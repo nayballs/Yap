@@ -83,7 +83,13 @@ person sees what their choices send where. It never says "nothing leaves".
   (`place_of_url`).
 - **Every call site** (2026-10-24): `ai/llm.rs` (the one chat call), `web.rs`
   (Exa/Tavily: "Web search · Exa"; the keyless lookup: "Web search ·
-  Wikipedia and wikis"; `read_page`: "Reading a web page"; a picture Chat
+  Wikipedia and wikis"; the free sources a keyless search picks by kind of
+  question, `web/sources.rs`, 2026-11-01, each its own purpose,
+  `Purpose::FreeSource(FreeSource)`: "Web search · Weather (Open-Meteo)",
+  "Web search · Places (OpenStreetMap)", "Web search · Stack Exchange",
+  "Web search · GitHub", "Web search · arXiv"; "Search in your browser"
+  makes no request of Yap's own — the person's browser opens the search;
+  `read_page`: "Reading a web page"; a picture Chat
   looks at or shows, `fetch_picture`: "A picture from the web"), `web/native.rs`
   ("Web search · Groq" / "· Google" …), `ai/model_catalog.rs` ("Model list ·
   OpenRouter", a server's own "Model list · your server"), `auth.rs`

@@ -980,6 +980,12 @@ pub struct YapConfig {
     /// in config.json, never logged.
     #[serde(default)]
     pub web_search_keys: std::collections::HashMap<String, String>,
+    /// The engine "Search in your browser" opens (`web::sources::ENGINES`:
+    /// "duckduckgo" — the default — "google", "bing", "brave", "ecosia",
+    /// "startpage"), offered under an answer Yap's free sources couldn't
+    /// give (no search service for the turn).
+    #[serde(default = "default_web_search_browser")]
+    pub web_search_browser: String,
     /// The speech engine (`tts::ENGINES`): "kokoro" (the default: Kokoro's
     /// natural voices once downloaded, Windows voices until then) or
     /// "windows" (Windows' own voices, chosen).
@@ -1377,6 +1383,9 @@ fn default_chat_image_days() -> u32 {
 fn default_web_search_service() -> String {
     "exa".into()
 }
+fn default_web_search_browser() -> String {
+    "duckduckgo".into()
+}
 fn default_speak_when() -> String {
     "voice".into()
 }
@@ -1538,6 +1547,7 @@ impl Default for YapConfig {
             web_search_native: true,
             web_search_service: default_web_search_service(),
             web_search_keys: std::collections::HashMap::new(),
+            web_search_browser: default_web_search_browser(),
             tts_engine: default_tts_engine(),
             tts_voice: default_tts_voice(),
             tts_windows_voice: String::new(),

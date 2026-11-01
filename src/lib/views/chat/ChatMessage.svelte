@@ -197,6 +197,12 @@
   <!-- Where an answer came from (SourcesRow: a few, then "+N more"). -->
   <SourcesRow {m} {onsource} />
 {/if}
+{#if m.role === 'assistant' && m.browserSearch?.url && !m.streaming}
+  <!-- Yap's free web sources couldn't give it: "Search in your browser" (its own small chunk). -->
+  {#await import('./SearchInBrowser.svelte') then { default: SearchInBrowser }}
+    <SearchInBrowser search={m.browserSearch} />
+  {/await}
+{/if}
 {#if docs.length || pics.length}
   <!-- The documents it made or changed and the pictures it showed: each
        opens beside the chat (one row, wrapping). -->

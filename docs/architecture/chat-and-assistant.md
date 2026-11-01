@@ -154,7 +154,16 @@ The AI Chat surface (conversations, the tool-calling loop and its note tools) an
   caption, alt, imageUrl, page {title, site, url}, n}`, 2026-10-31): the
   pictures it showed beside the chat (`set_pictures`), only written when
   there are some; an older Yap's save drops them (the pills go, the files
-  with the sweep a day later). `chat_send(images)` checks the model reads
+  with the sweep a day later). **"Search in your browser"**
+  (`ChatMessage.browser_search` = `web::BrowserSearch {query, url,
+  engine}`, 2026-11-01, [web-and-apps.md](./web-and-apps.md)): an answer
+  Yap's free web sources couldn't give (no search service for the turn) —
+  `web::Turn::browser_search` or a small model's `SmallAnswer.handoff`,
+  kept by `set_browser_search` (`chat_send`'s reply `browserSearch`, read
+  back with `browser_search_of`); the page's `SearchInBrowser.svelte` under
+  the Sources row (its own chunk) opens it with `open_external`, with a
+  line and a link to Settings → Voice Assistant → Web search.
+  `chat_send(images)` checks the model reads
   them (`snip::vision`) and runs the turn with them (`snip::turn`): each
   model call's question becomes a content array (the image parts, then the
   text; the text first for OpenRouter), the newest 3 earlier screenshots in

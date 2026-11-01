@@ -273,5 +273,8 @@ async fn send_turn(
         "documents": turn.documents,
         // The pictures it showed beside the chat (pictures.rs): their pills.
         "pictures": turn.pictures,
+        // "Search in your browser", when Yap's free web sources couldn't
+        // answer it (web/sources.rs), as saved with the answer.
+        "browserSearch": crate::chat::chats::browser_search_of(turn.conversation_id, turn.index),
     }))
 }

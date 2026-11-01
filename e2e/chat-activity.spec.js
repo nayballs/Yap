@@ -18,7 +18,7 @@
 import { test as base, expect, openView, setConfig, inAnotherApp, mainOnScreen } from './support/fixtures.js';
 import { startFakeLlm } from './support/fake-llm.js';
 import { startFakeWeb, GALE_URL } from './support/fake-web.js';
-import { stepsSummary, elapsed } from '../src/lib/views/chat/chatSteps.js';
+import { stepsSummary, elapsed, chipKind } from '../src/lib/views/chat/chatSteps.js';
 import { liveAnswer, applyEvent } from '../src/lib/core/streaming.js';
 
 const EXA_KEY = 'fake-exa-key-for-tests';
@@ -116,6 +116,10 @@ test("an answer's chips fold into one line, in the order they came", () => {
   expect(stepsSummary(['Searched your meetings by meaning · 3 passages', 'Ran /todos · 2 open tasks', 'Something new'])).toBe(
     'Searched your meetings, ran a skill, used a tool'
   );
+  // Yap's free web sources don't cover it (web/sources.rs): not searched by
+  // design, never "didn't go through"; its mark is the web's.
+  expect(stepsSummary(['Didn\'t search the web for "Grok price": Yap\'s free sources don\'t cover prices'])).toBe("Didn't search the web");
+  expect(chipKind('Didn\'t search the web for "Grok price": Yap\'s free sources don\'t cover prices')).toBe('web');
   expect(stepsSummary([])).toBe('');
 });
 

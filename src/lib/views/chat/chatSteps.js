@@ -9,7 +9,7 @@
 // - `elapsed(s)`: a turn's time on the line beside its step ("12s", "1m 59s").
 
 // A chip about the web (web.rs) or the safety rule (chat/tools.rs).
-const WEB_CHIP = /^(Searched the web|Couldn't search the web|Didn't search for|Read [^"]|Couldn't read [^"]|Didn't read |Answered from )/;
+const WEB_CHIP = /^(Searched the web|Couldn't search the web|Didn't search for|Didn't search the web for|Read [^"]|Couldn't read [^"]|Didn't read |Answered from )/;
 // The calendar's (chat/tools/calendar.rs).
 const CALENDAR_CHIP = /^(Checked your calendar|Found \d+ meetings? with|No meetings with|Free |Busy |No calendar connected|Couldn't read the (day|time) )/;
 // A document's (chat/documents.rs, and the rich tools': documents/rich.rs).
@@ -35,6 +35,9 @@ const times = (n, what) => (n === 1 ? what : `${what} ${n} times`);
 // The first that matches wins; a step that didn't go through ("Couldn't…",
 // "Didn't…", the safety rule) is counted apart.
 const STEPS = [
+  // Yap's free web sources don't cover it (web/sources.rs): nothing was
+  // searched, by design — not a step that failed.
+  [/^Didn't search the web for "/, 'notSearched'],
   [/^(Couldn't|Didn't) |: not after reading the web$/, 'failed'],
   [/^Searched the web/, 'web'],
   [/^Answered from (\d+) web pages?/, 'pages', (m) => Number(m[1])],
@@ -63,6 +66,7 @@ const STEPS = [
 
 const SAY = {
   web: (n) => times(n, 'searched the web'),
+  notSearched: () => "didn't search the web",
   pages: (n) => n1(n, 'read a page', 'read {n} pages'),
   readDoc: (n) => times(n, 'read the document'),
   readNote: (n) => n1(n, 'read a note', 'read {n} notes'),

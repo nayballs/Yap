@@ -1016,6 +1016,8 @@ export function createChatState({ onopensettings = () => null, onopennote = () =
         documents: res.documents || [],
         // The pictures it showed beside the chat (chat/pictures.rs): their pills.
         pictures: res.pictures ?? shownPictures,
+        // "Search in your browser", when Yap's free web sources couldn't give it.
+        browserSearch: res.browserSearch ?? null,
         revisedFrom: streamed != null && streamed.trim() !== '' && streamed.trim() !== String(res.reply).trim() ? fromHeight : 0,
       };
       // The question as saved: with its screenshots' text when it went as text.
