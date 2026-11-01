@@ -219,7 +219,6 @@ pub fn named_site(question: &str, url: &str) -> bool {
     let host = host.strip_prefix("www.").unwrap_or(&host);
     let labels: Vec<&str> = host.split('.').collect();
     // The name before its ending: "youtube.com", "bbc.co.uk", "example.com.au".
-    const SECOND: &[&str] = &["co", "com", "org", "net", "ac", "gov", "edu", "ne", "or", "go"];
     let name = match labels.as_slice() {
         [name, _] => *name,
         [name, second, tld] if SECOND.contains(second) && tld.len() == 2 => *name,
@@ -228,9 +227,21 @@ pub fn named_site(question: &str, url: &str) -> bool {
     if name.len() < 2 {
         return false;
     }
+    // The name said as a word, or as two or three words run together
+    // ("stack overflow" → stackoverflow.com) — never inside another word.
     let said = question.to_lowercase();
-    said.split(|c: char| !c.is_alphanumeric()).any(|w| w == name) || (name.len() >= 5 && said.replace([' ', '-'], "").contains(name))
+    let words: Vec<&str> = said.split(|c: char| !c.is_alphanumeric()).filter(|w| !w.is_empty()).collect();
+    (1..=3).any(|n| words.windows(n).any(|w| w.concat() == name))
 }
+
+/// A country's second level under its two-letter ending ("co.uk", "com.au").
+const SECOND: &[&str] = &["co", "com", "org", "net", "ac", "gov", "edu", "ne", "or", "go"];
+
+/// The search engines by name: any of their countries' sites ("google.de",
+/// "cn.bing.com", "html.duckduckgo.com", "uk.search.yahoo.com").
+const ENGINE_NAMES: &[&str] = &[
+    "google", "bing", "duckduckgo", "yahoo", "yandex", "baidu", "naver", "ecosia", "startpage", "brave", "qwant", "kagi", "mojeek", "seznam", "sogou",
+];
 
 /// **A question about the page open beside the chat** ("what does this page
 /// say", "fill in the form", "switch to the wiki tab"): with a tab open, a
@@ -252,11 +263,20 @@ pub fn about_open_page(question: &str) -> bool {
 pub fn search_page(url: &str) -> bool {
     let Ok(u) = reqwest::Url::parse(url.trim()) else { return false };
     let host = u.host_str().unwrap_or("").to_ascii_lowercase();
-    let host = host.strip_prefix("www.").unwrap_or(&host).to_string();
-    let engine = crate::web::ENGINES.iter().any(|(_, _, base)| {
-        reqwest::Url::parse(base).ok().and_then(|b| b.host_str().map(|h| h.trim_start_matches("www.").to_string())).is_some_and(|h| h == host)
+    let labels: Vec<&str> = host.split('.').collect();
+    // An engine's name followed only by its ending: "google.com", "google.co.uk",
+    // never "google.example.com".
+    let engine = labels.iter().enumerate().any(|(i, l)| {
+        ENGINE_NAMES.contains(l)
+            && match &labels[i + 1..] {
+                [_] => true,
+                [second, tld] => SECOND.contains(second) && tld.len() == 2,
+                _ => false,
+            }
     });
-    engine && (u.path().contains("search") || u.path() == "/" && u.query().is_some_and(|q| q.contains("q=")))
+    let path = u.path();
+    let asked = u.query_pairs().any(|(k, v)| matches!(k.as_ref(), "q" | "p" | "wd" | "word" | "text" | "query") && !v.trim().is_empty());
+    engine && (path.contains("search") || (matches!(path, "/" | "/s" | "/html" | "/html/" | "/web") && asked))
 }
 
 /// The person's search engine ("Search in your browser"'s).
@@ -275,17 +295,18 @@ fn engine() -> String {
 /// one's number, title and address, the one in front marked, a search
 /// engine's results marked as the user's to read. Pure.
 ///
-/// "Open beside the chat: tab 1 "Fort Joy - Example Wiki" (https://wiki
-/// .example.com/wiki/Fort_Joy), in front; tab 2 "Search: train times"
-/// (https://duckduckgo.com/?q=train+times), search results. read_open_page
-/// reads one."
+/// "Open beside the chat: tab 1 "Main Page - Example Wiki" (https://wiki
+/// .example.com/wiki/Main_Page), in front; tab 2 "Search: train times"
+/// (https://duckduckgo.com/), search results. read_open_page reads one."
 pub fn tabs_line(tabs: &[view::OpenTab]) -> String {
     let each: Vec<String> = tabs
         .iter()
         .take(8)
         .map(|t| {
             let title = clip(if t.title.trim().is_empty() { "untitled" } else { &t.title }, 80);
-            let mut s = format!("tab {} \"{}\" ({})", t.tab, title.replace('"', "'"), clip(&t.url, 160));
+            // The address without its query or fragment (a search's words,
+            // a token): the title says what it is.
+            let mut s = format!("tab {} \"{}\" ({})", t.tab, title.replace('"', "'"), clip(&bare_url(&t.url), 160));
             if search_page(&t.url) {
                 s.push_str(", search results");
             }
@@ -296,6 +317,18 @@ pub fn tabs_line(tabs: &[view::OpenTab]) -> String {
         })
         .collect();
     format!("Open beside the chat: {}. read_open_page reads one.", each.join("; "))
+}
+
+/// An address without its query or fragment. Pure.
+fn bare_url(url: &str) -> String {
+    match reqwest::Url::parse(url.trim()) {
+        Ok(mut u) => {
+            u.set_query(None);
+            u.set_fragment(None);
+            u.to_string()
+        }
+        Err(_) => url.split(['?', '#']).next().unwrap_or("").to_string(),
+    }
 }
 
 /// **One turn's pages**: the ones brought up, the buttons offered, the shots
@@ -758,6 +791,9 @@ mod tests {
         }
         assert!(named_site("open the Examplecast site", "https://www.examplecast.co.uk"));
         assert!(!named_site("open the news", "https://www.examplecast.co.uk"));
+        // Words run together count; a name inside another word doesn't.
+        assert!(named_site("open stack overflow", "https://stackoverflow.com/"));
+        assert!(!named_site("open the examplecasting guide", "https://www.examplecast.co.uk"));
         // Words: a search on the person's engine, open beside the chat (never read by Yap).
         let mut t = turn("Search for train times from Kellbrook to Port Ellis");
         let r = run(&mut t, OPEN, json!({ "search": "train times Kellbrook to Port Ellis" })).await;
@@ -770,6 +806,13 @@ mod tests {
         assert!(search_page(&page.url));
         assert!(search_page("https://www.google.com/search?q=x") && search_page("https://www.bing.com/search?q=x"));
         assert!(!search_page("https://maps.example.com/fort-joy") && !search_page("https://www.google.com/maps"));
+        // Every engine's countries and hosts, never a look-alike.
+        for u in ["https://www.google.de/search?q=x", "https://www.google.co.uk/search?q=x", "https://cn.bing.com/search?q=x", "https://html.duckduckgo.com/html/?q=x", "https://uk.search.yahoo.com/search?p=x", "https://www.baidu.com/s?wd=x", "https://yandex.ru/search/?text=x", "https://search.naver.com/search.naver?query=x"] {
+            assert!(search_page(u), "{u}");
+        }
+        for u in ["https://google.example.com/search?q=x", "https://www.google.com/", "https://duckduckgo.com/"] {
+            assert!(!search_page(u), "{u}");
+        }
         // Reading or a shot of the page in front: none open (no window in a unit test).
         let r = run(&mut t, READ, json!({})).await;
         assert_eq!(r.result["success"], false);
@@ -877,10 +920,11 @@ mod tests {
     #[test]
     fn the_tabs_open_are_told_with_the_one_in_front() {
         let tab = |n: usize, title: &str, url: &str, front: bool| view::OpenTab { tab: n, key: format!("page:{url}"), title: title.into(), url: url.into(), front };
-        let line = tabs_line(&[tab(1, "Fort Joy - Example Wiki", MAP, true), tab(2, "", "https://duckduckgo.com/?q=train+times", false)]);
+        let line = tabs_line(&[tab(1, "Fort Joy - Example Wiki", MAP, true), tab(2, "", "https://duckduckgo.com/?q=train+times#x", false)]);
+        // An address without its query or fragment.
         assert_eq!(
             line,
-            format!("Open beside the chat: tab 1 \"Fort Joy - Example Wiki\" ({MAP}), in front; tab 2 \"untitled\" (https://duckduckgo.com/?q=train+times), search results. read_open_page reads one.")
+            format!("Open beside the chat: tab 1 \"Fort Joy - Example Wiki\" ({MAP}), in front; tab 2 \"untitled\" (https://duckduckgo.com/), search results. read_open_page reads one.")
         );
         // The model's tab, else the one in front.
         let tabs = [tab(1, "A", MAP, false), tab(2, "B", "https://wiki.example.com/b", true)];

@@ -1726,8 +1726,12 @@ model that calls tools while "Let Yap's AI see your screen when you ask about
 it" is on (`assistant_screen`, the Voice Assistant's switch, now worded for
 both; `see_screen::gate`, not tied to the web): every monitor (or the one
 asked for) captured at once the way a snip is, every Yap window left out for
-the moment of the capture (the page beside the chat is `snap_page`'s); each
-monitor kept as a chat screenshot (source "screen") and **shown with the
+the moment of the capture — **and the page open beside the chat** as its own
+picture (`page_beside`: the tab in front, `view::snap`, never a search
+engine's results; its text too for a model that can't see), since the
+monitors' shots grey Yap's window out (the maintainer's first try with Haiku:
+two monitors, Yap greyed, "I can't see the page"; the model's text for each
+monitor says so); each monitor and the page kept as a chat screenshot (source "screen") and **shown with the
 question that asked, in the screenshot frame** (`Event::Screen`,
 `chats::add_question_images`: the person sees exactly what was looked at, and
 it's kept and swept as Chat's screenshots are); for a model that reads
@@ -1739,9 +1743,15 @@ too" (`assistant_screen_cloud`): until then it's refused, the model says it
 couldn't look, and the alert asks once ("Let Yap's AI see your screen?",
 `assistant::screen::ask_once`). Never during a meeting or a call. What's on
 screen is web content for the safety rule (`screen_seen` in the tool loop:
-no apps, clipboard or memory after it this turn). The prompt line: "Never
-say you can't see: look." Chip "Looked at your screen (2 monitors)", the live
-line "Looking at your screen".
+no apps, clipboard or memory after it this turn). Chat itself only: never the
+Voice Assistant (its own look at the window in front) or a phone's question
+(the `scope` gate in `turn.rs`). A screen shot in an earlier message is held
+back from a cloud model as a window shot is (`snip::turn::captured`: "window"
+or "screen", sent again only while `window_may_go`). The prompt line: "use it
+whenever they ask you to look at, see, check or screenshot something… Never
+say you can't see it, and never ask them to snip it: look." Chip "Looked at
+your screen (2 monitors) and the page beside the chat", the live line
+"Looking at your screen".
 
 **Pages beside the chat** (2026-11-01, the plan's Milestone 2;
 `chat/pages.rs`, `chat/pages/view.rs`; reshaped the same day after the
@@ -1771,15 +1781,24 @@ from `view::open_tabs`):
   as the app fast path is; 1 Nov 2026: given `open_page`, Qwen3.5-4B opened
   Google Chrome with `open_app` for "open Google", and for "open YouTube"
   only said "It's opened on the right"): a site asked for by name or
-  address (`apps::site_asked`: "open YouTube", "go to example.com/news";
-  `SITES`' home pages — a name Yap doesn't know is the model's), or a search
-  asked for (`apps::search_asked`: "search for …", "google …", "open a
-  search for …") when the person asked for the search page itself, or it's
-  something the free sources don't cover (travel, prices, the news: a model
-  could only say so) — on the person's engine. The answer is one line ("The
-  search for “…” is open beside the chat, on Google."), the page kept with
-  it (`page_turn`, `Event::Page`). `open_app` refuses a website
-  (`apps::plan::for_the_web`).
+  address (`apps::site_asked`: "open YouTube", "go to example.com/news" —
+  "go to / show me / take me to" only as the request itself, never inside a
+  sentence; `SITES`' home pages, a shop's store in About you's country —
+  `LOCAL_STORES`: Amazon and eBay; a name Yap doesn't know is the model's),
+  or a search asked for (`apps::search_asked`: "search for …", "google …",
+  "open a search for …") when the person asked for the search page itself
+  ("google …", "open a search for …"; never "search the web for …", which
+  asks for research), or — only with no search service for this chat
+  (keyless: `web::backend` is `Keyless`) — it's something the free sources
+  don't cover (travel, prices, the news: a model could only say so); with a
+  key or the provider's own search, "search for …" is the model's to answer.
+  On the person's engine. Chat itself only (never the Voice Assistant, a
+  phone, the meetings, a Skill, or a question carrying a screenshot). The
+  answer is one line ("The search for “…” is open beside the chat, on
+  Google."), the page kept with it (`page_turn`, `Event::Page`). `open_app`
+  refuses a website (`apps::plan::for_the_web`: the request's phrase asks
+  for the web or names a site, and no app has exactly that name). English
+  only so far: in another language the model opens it (`open_page`).
 - **`read_open_page { tab? }`**: the page in front beside the chat (or tab
   n, `view::pick_tab`), read in place (`view::PAGE_TEXT_SCRIPT`, Yap's own
   read-only script through `view::run_script`: the title, the `main` /
@@ -1788,8 +1807,11 @@ from `view::open_tabs`):
   the tabs open; a source of the turn (`Turn::read_open`: numbered,
   opened, cited as [n]) and **web content** (the safety rule). **Never a
   search engine's results page** (`search_page`: their terms forbid
-  automated reading, web-and-apps.md) — refused, the person reads it; a shot
-  of one too.
+  automated reading, web-and-apps.md; any of an engine's countries and hosts
+  — google.de, cn.bing.com, html.duckduckgo.com, search.yahoo.com, Baidu,
+  Yandex, Naver… — never a look-alike such as google.example.com) — refused,
+  the person reads it; a shot of one too. The tabs line gives each address
+  without its query or fragment (a search's words, a token).
 - **`snap_page { url? }`** — **only for a model that reads images**
   (`Gate::Look`; one that can't was only told not to describe it): the page
   in front when there's no url; the page's shot (`CapturePreview`, a PNG): the
@@ -1886,7 +1908,8 @@ from `view::open_tabs`):
   some of your data's **Pages beside the chat** clears it all (privacy/
   reset.rs `Kind::Pages`: WebView2's `ClearBrowsingDataAll`, through an open
   page or one made out of sight for it; open pages stay open; Reset app
-  too). Scrolled to `section` once loaded (`section_script`: an id as
+  too; if WebView2 can't clear it, Reset app still clears the rest and leaves
+  Pages out of what went, while Pages alone is refused with nothing gone). Scrolled to `section` once loaded (`section_script`: an id as
   written or with `_` / `-`, else the first heading with its words, else
   `window.find`). **Its menu** (Rust's, `ContextMenuRequested`): Back,
   Forward, Reload, Copy, Copy link (`MENU_KEEP`), and on selected words

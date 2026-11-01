@@ -77,7 +77,7 @@ pub fn plan_with(text: &str, cfg: &YapConfig, apps: &[App], model_can_tool: bool
     // site it knows itself (`site_asked`, Chat's turn), else the model's
     // `open_page`. An app named exactly still opens, unless the words ask for
     // the web ("…in the browser").
-    if cfg.web_search && for_the_web(text, &request.phrase, &found) {
+    if cfg.web_search && for_the_web(&request.phrase, &found) {
         return None;
     }
     let named_one = !matches!(found, Found::Nothing(_));
@@ -97,7 +97,8 @@ pub fn plan_with(text: &str, cfg: &YapConfig, apps: &[App], model_can_tool: bool
 }
 
 /// Websites people ask to open by name, and their home pages (an app named
-/// the same, exactly, still opens: "open Spotify" with Spotify installed).
+/// the same, exactly, still opens: "open Spotify" with Spotify installed);
+/// a shop with a store per country opens the person's ([`LOCAL_STORES`]).
 const SITES: &[(&str, &str, &str)] = &[
     ("google", "Google", "https://www.google.com/"),
     ("google search", "Google", "https://www.google.com/"),
@@ -124,27 +125,86 @@ const SITES: &[(&str, &str, &str)] = &[
     ("duckduckgo", "DuckDuckGo", "https://duckduckgo.com/"),
     ("bing", "Bing", "https://www.bing.com/"),
 ];
-/// Words that ask for the web, wherever they are.
+/// The shops with a store per country: the person's country (About you's
+/// Region) → its store; elsewhere the `.com` in [`SITES`].
+const LOCAL_STORES: &[(&str, &[(&str, &str)])] = &[
+    (
+        "amazon",
+        &[
+            ("GB", "https://www.amazon.co.uk/"),
+            ("IE", "https://www.amazon.ie/"),
+            ("DE", "https://www.amazon.de/"),
+            ("AT", "https://www.amazon.de/"),
+            ("CH", "https://www.amazon.de/"),
+            ("FR", "https://www.amazon.fr/"),
+            ("IT", "https://www.amazon.it/"),
+            ("ES", "https://www.amazon.es/"),
+            ("NL", "https://www.amazon.nl/"),
+            ("BE", "https://www.amazon.com.be/"),
+            ("SE", "https://www.amazon.se/"),
+            ("PL", "https://www.amazon.pl/"),
+            ("TR", "https://www.amazon.com.tr/"),
+            ("CA", "https://www.amazon.ca/"),
+            ("MX", "https://www.amazon.com.mx/"),
+            ("BR", "https://www.amazon.com.br/"),
+            ("AU", "https://www.amazon.com.au/"),
+            ("JP", "https://www.amazon.co.jp/"),
+            ("IN", "https://www.amazon.in/"),
+            ("SG", "https://www.amazon.sg/"),
+            ("AE", "https://www.amazon.ae/"),
+            ("SA", "https://www.amazon.sa/"),
+            ("EG", "https://www.amazon.eg/"),
+        ],
+    ),
+    (
+        "ebay",
+        &[
+            ("GB", "https://www.ebay.co.uk/"),
+            ("IE", "https://www.ebay.ie/"),
+            ("DE", "https://www.ebay.de/"),
+            ("AT", "https://www.ebay.at/"),
+            ("CH", "https://www.ebay.ch/"),
+            ("FR", "https://www.ebay.fr/"),
+            ("IT", "https://www.ebay.it/"),
+            ("ES", "https://www.ebay.es/"),
+            ("NL", "https://www.ebay.nl/"),
+            ("BE", "https://www.befr.ebay.be/"),
+            ("PL", "https://www.ebay.pl/"),
+            ("CA", "https://www.ebay.ca/"),
+            ("AU", "https://www.ebay.com.au/"),
+        ],
+    ),
+];
+
+/// A site's home page for someone in `country` (an ISO code, or empty):
+/// their own store for a shop that has one. Pure.
+fn home_page(name: &str, url: &'static str, country: &str) -> &'static str {
+    LOCAL_STORES
+        .iter()
+        .find(|(shop, _)| name.starts_with(shop))
+        .and_then(|(_, stores)| stores.iter().find(|(c, _)| c.eq_ignore_ascii_case(country.trim())))
+        .map_or(url, |(_, store)| store)
+}
+
+/// Words in an open request's phrase that ask for the web.
 const WEB_CUES: &[&str] = &[
     "website", "web site", "web page", "webpage", "in the browser", "in a browser", "in the chat", "beside the chat",
     "in the panel", "in a tab", "in the tab", "new tab", ".com", ".co.uk", ".org", ".net", "www.",
 ];
 
-/// **An open request for the web** ([`plan_with`]): the words ask for it, or
-/// the phrase is a website people open by name and no app has exactly that
-/// name. Pure.
-pub(super) fn for_the_web(text: &str, phrase: &str, found: &Found) -> bool {
-    let lower = text.to_lowercase();
-    if WEB_CUES.iter().any(|c| lower.contains(c)) {
-        return true;
-    }
-    let p = phrase.trim().trim_start_matches("the ").trim();
+/// **An open request for the web** ([`plan_with`]): no app has exactly the
+/// name asked for, and the phrase asks for the web ("the YouTube website",
+/// "example.com") or is a website people open by name. Only the phrase:
+/// "open Teams, the link's on our website" is Teams. Pure.
+pub(super) fn for_the_web(phrase: &str, found: &Found) -> bool {
+    let p = phrase.trim().to_lowercase();
+    let p = p.trim_start_matches("the ").trim();
     let exact = match found {
         Found::One(app) | Found::Blocked(app) => app.name.to_lowercase() == p,
         Found::Several(apps) => apps.iter().any(|a| a.name.to_lowercase() == p),
         Found::Nothing(_) => false,
     };
-    !exact && SITES.iter().any(|(name, _, _)| *name == p)
+    !exact && (WEB_CUES.iter().any(|c| p.contains(c)) || SITES.iter().any(|(name, _, _)| *name == p))
 }
 
 /// The phrase without the words around a site ("the YouTube website",
@@ -163,24 +223,28 @@ fn site_phrase(phrase: &str) -> String {
 }
 
 /// **A site asked for by name, or an address** ("open YouTube", "open up
-/// google for me", "go to bbc.co.uk"): its name and home page — Yap opens
-/// it beside the chat itself (Chat's turn: Qwen3.5-4B, given open_page,
-/// opened Google Chrome with open_app or only said it had, 1 Nov 2026).
-/// `None`: not an open request, or a site Yap doesn't know (the model's).
-/// Pure.
-pub fn site_asked(text: &str) -> Option<(String, String)> {
+/// google for me", "go to bbc.co.uk"): its name and home page (a shop's
+/// store in the person's `country`, an ISO code) — Yap opens it beside the
+/// chat itself (Chat's turn: Qwen3.5-4B, given open_page, opened Google
+/// Chrome with open_app or only said it had, 1 Nov 2026). `None`: not an
+/// open request, or a site Yap doesn't know (the model's). Pure.
+pub fn site_asked(text: &str, country: &str) -> Option<(String, String)> {
     let request = open_request(text).or_else(|| {
-        // "go to …", "take me to …", "show me …" ask for a place too.
+        // "go to …", "take me to …", "show me …" ask for a place too — as
+        // the request, never inside a sentence ("I want you to show me how…").
+        static PLACE: std::sync::LazyLock<regex::Regex> = std::sync::LazyLock::new(|| {
+            regex::Regex::new(r"^(?:(?:hey|hi|ok|okay) yap,? )?(?:(?:can|could|would|will) you (?:please )?|please )?(?:go to|take me to|show me|bring up|pull up) (.+)$").expect("static regex")
+        });
         let lower = text.trim().to_lowercase();
-        let rest = ["go to ", "take me to ", "show me ", "bring up ", "pull up "].iter().find_map(|v| lower.find(v).map(|i| lower[i + v.len()..].to_string()))?;
+        let rest = PLACE.captures(&lower)?.get(1)?.as_str().to_string();
         open_request(&format!("open {rest}"))
     })?;
     let phrase = site_phrase(&request.phrase);
-    if let Some((_, name, url)) = SITES.iter().find(|(n, _, _)| *n == phrase) {
-        return Some((name.to_string(), url.to_string()));
+    if let Some((n, name, url)) = SITES.iter().find(|(n, _, _)| *n == phrase) {
+        return Some((name.to_string(), home_page(n, url, country).to_string()));
     }
     // An address: a site's name with its ending ("bbc.co.uk", "example.com/news"),
-    // as typed (a path's letters keep their case: "/wiki/Fort_Joy").
+    // as typed (a path's letters keep their case: "/wiki/Main_Page").
     if !phrase.contains(' ') && phrase.contains('.') {
         let typed = text
             .split_whitespace()
@@ -205,7 +269,7 @@ pub fn site_asked(text: &str) -> Option<(String, String)> {
 pub fn search_asked(text: &str) -> Option<(String, bool)> {
     static ASK: std::sync::LazyLock<regex::Regex> = std::sync::LazyLock::new(|| {
         regex::Regex::new(
-            r"^(?:(?:hey|hi|ok|okay) yap,? )?(?:(?:can|could|would|will) you (?:please )?|please )?(?:(open (?:up )?(?:a |the )?(?:google |web )?search (?:for|on)|search (?:google|the web|online) for|google|do a (?:google |web )?search for)|search (?:for|up)|look up|search) (.{3,200}?)(?: (?:on google|online|on the web|for me|please|beside the chat|in the browser))?[.!?]*$",
+            r"^(?:(?:hey|hi|ok|okay) yap,? )?(?:(?:can|could|would|will) you (?:please )?|please )?(?:(open (?:up )?(?:a |the )?(?:google |web )?search (?:for|on)|search google for|google|do a (?:google |web )?search for)|search (?:the web |online )?(?:for|up)|look up|search) (.{3,200}?)(?: (?:on google|online|on the web|for me|please|beside the chat|in the browser))?[.!?]*$",
         )
         .expect("static regex")
     });
@@ -599,7 +663,7 @@ mod tests {
 
     #[test]
     fn a_site_asked_for_by_name_or_address_and_a_search_asked_for() {
-        let site = |t: &str| site_asked(t).map(|(n, u)| format!("{n} {u}"));
+        let site = |t: &str| site_asked(t, "").map(|(n, u)| format!("{n} {u}"));
         assert_eq!(site("Can you open up Google for me?").as_deref(), Some("Google https://www.google.com/"));
         assert_eq!(site("Open Youtube.").as_deref(), Some("YouTube https://www.youtube.com/"));
         assert_eq!(site("open the BBC website").as_deref(), Some("BBC https://www.bbc.co.uk/"));
@@ -608,14 +672,21 @@ mod tests {
         assert_eq!(site("Show me https://wiki.example.com/wiki/Fort_Joy").as_deref(), Some("wiki.example.com https://wiki.example.com/wiki/Fort_Joy"));
         assert_eq!(site("open google in the browser").as_deref(), Some("Google https://www.google.com/"));
         // Not a site Yap knows, an app, or not an open request at all: someone else's.
-        for t in ["open spotifyx", "open teams", "what's on youtube today?", "open my notes", "open 192.168.1.1"] {
+        for t in ["open spotifyx", "open teams", "what's on youtube today?", "open my notes", "open 192.168.1.1", "I'd like you to show me how to use github"] {
             assert_eq!(site(t), None, "{t}");
         }
+        // A shop opens the person's own store; elsewhere its .com.
+        assert_eq!(site_asked("open amazon", "DE").map(|(_, u)| u).as_deref(), Some("https://www.amazon.de/"));
+        assert_eq!(site_asked("open ebay", "gb").map(|(_, u)| u).as_deref(), Some("https://www.ebay.co.uk/"));
+        assert_eq!(site_asked("open amazon", "KE").map(|(_, u)| u).as_deref(), Some("https://www.amazon.com/"));
+        assert_eq!(site_asked("open youtube", "DE").map(|(_, u)| u).as_deref(), Some("https://www.youtube.com/"));
         // Searches: the words, and whether the page itself was asked for.
         assert_eq!(search_asked("Search for train tickets from Kellbrook to Port Ellis."), Some(("train tickets from Kellbrook to Port Ellis".into(), false)));
         assert_eq!(search_asked("Can you open up a search for train times to Port Ellis?"), Some(("train times to Port Ellis".into(), true)));
         assert_eq!(search_asked("google flights to Lisbon"), Some(("flights to Lisbon".into(), true)));
         assert_eq!(search_asked("look up the weather in Kellbrook"), Some(("the weather in Kellbrook".into(), false)));
+        // "Search the web for …" asks for the research, not the page.
+        assert_eq!(search_asked("search the web for budget laptops"), Some(("budget laptops".into(), false)));
         assert_eq!(search_asked("What's the weather?"), None);
         assert_eq!(search_asked("search"), None);
     }

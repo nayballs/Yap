@@ -262,9 +262,18 @@ async fn answer_turn(
             return app_turn(conversation_id, &text, by_voice, asked, plan, stop).await;
         }
         // A site asked for by name, or a search asked for, with pages beside
-        // the chat (the web on): Yap opens it there itself, no model.
-        if cfg.web_search {
-            if let Some(opened) = asked_page(&text, &cfg.web_search_browser) {
+        // the chat (the web on): Yap opens it there itself, no model — only
+        // in Chat itself (never the Voice Assistant, a phone, the meetings or
+        // a Skill: there's no panel to see it in, or the question is theirs),
+        // and never over a screenshot the question carries (it's about that).
+        if cfg.web_search && scope.is_none() && skill.is_none() && crate::snip::turn::images().is_empty() {
+            // A search only where no search service would answer it (no key,
+            // no provider search): with one, the model searches and answers.
+            let keyless = resolve_chat_endpoint(&cfg).is_ok_and(|(base, key, model, provider, _, _)| {
+                crate::web::backend(&crate::web::Settings::for_chat(&cfg, &provider, &model, &base, &key)) == crate::web::Backend::Keyless
+            });
+            let country = crate::ai::about_you::profile(&cfg).region.country.unwrap_or_default();
+            if let Some(opened) = asked_page(&text, &cfg.web_search_browser, &country, keyless) {
                 return page_turn(conversation_id, &text, by_voice, asked, opened, watcher, stop);
             }
         }
@@ -316,9 +325,12 @@ async fn answer_turn(
     let web_on = cfg.web_search && !meetings;
     // Pictures from the web (chat/pictures.rs): looked at and shown by a
     // model that reads images, shown by any other that calls tools.
-    let pictures = crate::chat::pictures::Gate::for_model(web_on && tools_supported, &provider, &model);
-    // The screen (chat/see_screen.rs): with tools and the switch on, web or not.
-    let screen = crate::chat::see_screen::gate(&cfg, tools_supported, &provider, &model);
+    // (Not for the Voice Assistant or a phone: no panel there to see them in.)
+    let pictures = crate::chat::pictures::Gate::for_model(web_on && tools_supported && scope != Some("assistant"), &provider, &model);
+    // The screen (chat/see_screen.rs): with tools and the switch on, web or
+    // not — in Chat itself only (a phone's question never captures the PC;
+    // the Voice Assistant has its own look at the window in front).
+    let screen = if scope.is_none() { crate::chat::see_screen::gate(&cfg, tools_supported, &provider, &model) } else { crate::chat::pictures::Gate::Off };
     // Acting on the pages beside the chat (chat/pages/act.rs): the models
     // proven good at it, in a typed Chat turn (never the Voice Assistant
     // or the meetings: a click that buys asks in Chat's thread).
@@ -1701,11 +1713,14 @@ pub struct AskedPage {
 /// with `open_app` or only said it had, 1 Nov 2026): a site asked for by
 /// name or address ("open YouTube", `apps::site_asked`), or a search asked
 /// for (`apps::search_asked`) when the person asked for the search page
-/// itself ("google …", "open a search for …") or Yap's free sources don't
-/// cover it (travel, prices, the news…: a model could only say so) — on
-/// the person's `engine`. `None`: the model's. Pure.
-pub fn asked_page(text: &str, engine: &str) -> Option<AskedPage> {
-    if let Some((name, url)) = crate::apps::site_asked(text) {
+/// itself ("google …", "open a search for …"), or — `keyless`: no search
+/// service answers this chat (no key, no provider search) — Yap's free
+/// sources don't cover it (travel, prices, the news…: a model could only
+/// say so). With a service, "search for …" is the model's to search and
+/// answer. On the person's `engine`, a shop in their `country` (an ISO
+/// code). `None`: the model's. Pure.
+pub fn asked_page(text: &str, engine: &str, country: &str, keyless: bool) -> Option<AskedPage> {
+    if let Some((name, url)) = crate::apps::site_asked(text, country) {
         let shown = crate::web::short_url(&url);
         return Some(AskedPage {
             page: crate::chat::pages::ShownPage { site: crate::web::site_of(&url), url, title: name.clone(), section: String::new() },
@@ -1716,7 +1731,7 @@ pub fn asked_page(text: &str, engine: &str) -> Option<AskedPage> {
     let (words, page_itself) = crate::apps::search_asked(text)?;
     let r = crate::web::sources::route(&words, text, &[]);
     let uncovered = matches!(r.kind, crate::web::sources::Kind::NotCovered(_)) || r.offer.is_some();
-    if !page_itself && !uncovered {
+    if !page_itself && !(keyless && uncovered) {
         return None;
     }
     let search = crate::web::BrowserSearch::new(engine, &words);
@@ -1809,21 +1824,26 @@ mod tests {
 
     #[test]
     fn a_site_or_a_search_asked_for_opens_beside_the_chat_with_no_model() {
-        let a = asked_page("Open Youtube.", "google").unwrap();
+        let a = asked_page("Open Youtube.", "google", "", true).unwrap();
         assert_eq!(a.page.url, "https://www.youtube.com/");
         assert_eq!(a.page.title, "YouTube");
         assert_eq!(a.reply, "YouTube is open beside the chat.");
         assert_eq!(a.chip, "Brought up youtube.com beside the chat");
         // Travel isn't the free sources': the search itself, on the person's engine.
-        let s = asked_page("Search for train tickets from Kellbrook to Port Ellis.", "google").unwrap();
+        let s = asked_page("Search for train tickets from Kellbrook to Port Ellis.", "google", "", true).unwrap();
         assert_eq!(s.page.url, "https://www.google.com/search?q=train+tickets+from+Kellbrook+to+Port+Ellis");
         assert_eq!(s.page.title, "Search: train tickets from Kellbrook to Port Ellis");
         assert_eq!(s.chip, "Brought up a search for \"train tickets from Kellbrook to Port Ellis\" beside the chat");
         assert!(s.reply.ends_with("is open beside the chat, on Google."), "{}", s.reply);
         // What the free sources cover is the model's to answer, unless the page itself was asked for.
-        assert!(asked_page("search for rust error E0499", "google").is_none());
-        assert!(asked_page("google rust error E0499", "google").is_some());
-        assert!(asked_page("How are you?", "google").is_none());
-        assert!(asked_page("open teams", "google").is_none());
+        assert!(asked_page("search for rust error E0499", "google", "", true).is_none());
+        assert!(asked_page("google rust error E0499", "google", "", true).is_some());
+        assert!(asked_page("How are you?", "google", "", true).is_none());
+        assert!(asked_page("open teams", "google", "", true).is_none());
+        // With a search service (a key, or the provider's own search), "search for …" is the model's.
+        assert!(asked_page("Search for train tickets from Kellbrook to Port Ellis.", "google", "", false).is_none());
+        assert!(asked_page("google flights to Port Ellis", "google", "", false).is_some());
+        // "Search the web for …" asks for research, never the page.
+        assert!(asked_page("search the web for the best budget laptops in 2026", "google", "", false).is_none());
     }
 }

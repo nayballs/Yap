@@ -96,7 +96,7 @@ pub use grounding::{
 #[cfg(debug_assertions)]
 pub use page::clear_caches;
 pub use page::{check_url, fetch_picture, is_junk, is_local_name, is_public, page_images, PageImage, MAX_PICTURE_BYTES};
-pub use sources::{BrowserSearch, Handoff, ENGINES};
+pub use sources::{BrowserSearch, Handoff};
 pub use turn::{bracket_citations, citations, links_in, normal_url, short_url, Reach, Turn};
 pub use wiki::keywords;
 

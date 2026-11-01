@@ -496,7 +496,7 @@ test('look_at_screen: a model that reads images sees every monitor, Yap left out
   await expect(main.getByText('Those are the speakers on your other monitor')).toBeVisible({ timeout: 20_000 });
   const calls = chatCalls(fakeLlm, from);
   expect(calls[0].tools).toContain('look_at_screen');
-  expect(calls[0].system).toContain("Never say you can't see: look.");
+  expect(calls[0].system).toContain("Never say you can't see it, and never ask them to snip it: look.");
   // Its result, then the two monitors as the user's message.
   expect(toolResult(calls[1])).toMatchObject({ success: true, data: { monitors: 2 }, displayText: 'Looked at your screen (2 monitors)' });
   const parts = calls[1].messages.at(-1).content;
@@ -508,4 +508,30 @@ test('look_at_screen: a model that reads images sees every monitor, Yap left out
   await expectStore(yap, 'chats.json', (s) =>
     s.conversations.some((c) => c.messages.some((m) => m.role === 'user' && m.text.startsWith('Here are the speakers') && m.images?.filter((i) => i.source === 'screen').length === 2))
   );
+});
+
+test('look_at_screen sees the page open beside the chat too, as its own picture (the monitors grey Yap out)', async ({ yap, main, fakeLlm }) => {
+  await setConfig(yap, main, { ...chatConfig(fakeLlm), assistantScreen: true, llmScopes: { chat: { enabled: true, provider: 'custom', baseUrl: fakeLlm.base, model: 'fake-vision-chat' } } });
+  await yap.invoke('e2e_snip', { monitors: [{ x: 0, y: 0, width: 1280, height: 720, scale: 1, hdr: false, whiteNits: 80 }], windows: [], start: false });
+  // A page open beside the chat.
+  fakeLlm.scriptChat([{ tools: [{ name: 'open_page', args: { url: FORT_JOY_URL } }] }, { content: 'It’s open beside the chat.' }]);
+  await ask(main, `Bring up the wiki page ${FORT_JOY_URL}`);
+  await expect(main.getByTestId('chat-page-address')).toHaveValue(FORT_JOY_URL, { timeout: 40_000 });
+  await expect.poll(async () => (await views(yap)).find((v) => v.key === KEY)?.loaded, { timeout: 20_000 }).toBe(true);
+  // "Have a look": the monitor, and the page as it is in the panel.
+  const from = fakeLlm.requests.length;
+  fakeLlm.scriptChat([{ tools: [{ name: 'look_at_screen', args: {} }] }, { content: 'That page is the wiki article you have open.' }]);
+  await say(main, 'Have a look at this');
+  await expect(main.getByText('That page is the wiki article you have open.')).toBeVisible({ timeout: 40_000 });
+  const calls = chatCalls(fakeLlm, from);
+  expect(toolResult(calls[1])).toMatchObject({ success: true, data: { monitors: 1 }, displayText: 'Looked at your screen and the page beside the chat' });
+  const parts = calls[1].messages.at(-1).content;
+  expect(parts.filter((p) => p.type === 'image_url')).toHaveLength(2);
+  const texts = parts.filter((p) => p.type === 'text').map((p) => p.text).join(' ');
+  expect(texts).toContain("Yap's own window greyed out: the page beside the chat comes as its own picture");
+  expect(texts).toContain('The page open beside the chat (wiki.example.com), as it is now.');
+  // Both shown with the question, in the screenshot frame.
+  await expect(main.getByRole('group', { name: 'Screenshots' }).last().getByRole('button', { name: /^Screenshot,/ })).toHaveCount(2);
+  const closePanel = main.getByTestId('chat-page').getByRole('button', { name: 'Close the panel' });
+  if (await closePanel.count()) await closePanel.click();
 });

@@ -225,7 +225,9 @@ static TIMETABLES: LazyLock<Regex> = LazyLock::new(|| {
 /// site answers, never a wiki (a tester's "train tickets from … to Perth"
 /// got wrestling pages, 1 Nov 2026).
 static TRAVEL: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"\b((train|rail|railway|bus|coach|ferry|plane|air|flight) (tickets?|fares?|journeys?|routes?|connections?|times?)|tickets? (from|to|between)|fares? (from|to|between)|(flights?|trains?|buses|coaches|ferries) (from|to|between))\b")
+    // A journey's times only for the ways people travel by timetable: "air
+    // time" (a show's) and "flight time" (a drone's) aren't travel.
+    Regex::new(r"\b((train|rail|railway|bus|coach|ferry|plane|flight) (tickets?|fares?)|(train|rail|railway|bus|coach|ferry) (journeys?|routes?|connections?|times?|timetables?)|(flight|plane) (times?|journeys?|routes?|connections?) (from|to|between)|air ?fares?|tickets? (from|between)|fares? (from|to|between)|(flights?|trains?|buses|coaches|ferries) (from|to|between))\b")
         .expect("static regex")
 });
 static LOCAL: LazyLock<Regex> = LazyLock::new(|| {
@@ -368,6 +370,10 @@ mod tests {
         for q in ["train tickets from Kellbrook to Port Ellis", "Can you search for train tickets from Kellbrook to Port Ellis?", "flights to Port Ellis", "cheapest fares from Kellbrook", "buses between Kellbrook and Glenbrackie"] {
             assert!(matches!(not(q), Kind::NotCovered(NotCovered::Timetables | NotCovered::Prices)), "{q}");
         }
+        for q in ["what's the air time of the new episode?", "flight time of a paper plane"] {
+            assert!(!TRAVEL.is_match(&q.to_lowercase()), "{q}");
+        }
+        assert!(TRAVEL.is_match("flight times from kellbrook to port ellis"));
         assert_eq!(not("What are the opening hours of Glenbrackie library?"), Kind::NotCovered(NotCovered::Timetables));
         assert_eq!(not("pizza near me"), Kind::NotCovered(NotCovered::Local));
         assert_eq!(not("restaurants in Kellbrook"), Kind::NotCovered(NotCovered::Local));
