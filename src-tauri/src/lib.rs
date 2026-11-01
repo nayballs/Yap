@@ -279,6 +279,7 @@ pub fn run() {
             shell::browsers::browsers_list,
             shell::browsers::browser_label,
             chat::pages::view::page_view_show,
+            chat::pages::view::page_view_dialog,
             chat::pages::view::page_view_place,
             chat::pages::view::page_view_close,
             chat::pages::view::page_view_close_all,

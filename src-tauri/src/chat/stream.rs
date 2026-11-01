@@ -125,13 +125,15 @@ pub enum Event {
     Acting { key: String },
     /// **Show page tab `key`** (`switch_tab`).
     SwitchTab { key: String },
-    /// **A question before a click** that would buy, pay, book…
-    /// (`pages/act/confirm.rs`): its card in the thread — "Yap wants to
+    /// **A question before an action** that would buy, pay, book… (or
+    /// type words from nowhere the person can see: `pages/act/confirm.rs`):
+    /// its card in the thread and in its page tab's strip — "Yap wants to
     /// press ‘`label`’ on `site`", Allow once / Don't — `state` "asking",
-    /// then "allowed", "refused" or "timedOut"; `does`: what the click would
-    /// do ("buy", "sign in"…). The card answers with
-    /// `chat_page_confirm(id, allow)`.
-    Confirm { id: u64, label: String, site: String, does: String, state: String },
+    /// then "allowed", "refused" or "timedOut"; `does`: what it would do
+    /// ("buy", "sign in"…), `act`: press, enter, open or type. The card
+    /// answers with `chat_page_confirm(id, allow)`. Flat on the wire:
+    /// `{kind: "confirm", id, label, …}`.
+    Confirm(crate::chat::pages::act::confirm::Card),
 }
 
 /// Tool calls whose arguments the page sees as they come: a document's
@@ -192,6 +194,9 @@ pub struct Seen {
     pub web: bool,
     /// When the answer's first words showed, after the watch began.
     pub first_words: Option<Duration>,
+    /// The questions asked before acting on a page, each as it is now (the
+    /// answer keeps them: `chats::set_confirms`).
+    pub confirms: Vec<crate::chat::pages::act::confirm::Card>,
 }
 
 impl<'a> Watch<'a> {
@@ -220,6 +225,10 @@ impl Sink for Watch<'_> {
                     s.sources = sources.clone();
                     s.web = *web;
                 }
+                Event::Confirm(card) => match s.confirms.iter_mut().find(|c| c.id == card.id) {
+                    Some(c) => *c = card.clone(),
+                    None => s.confirms.push(card.clone()),
+                },
                 _ => {}
             }
         }

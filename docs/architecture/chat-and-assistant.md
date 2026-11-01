@@ -1820,8 +1820,23 @@ from `view::open_tabs`):
   Tauri IPC at all** (no init script, no `ipc://` handler, web messages and
   host objects off; WebView2's own `chrome.webview.postMessage` is there but
   goes nowhere), **only public http(s)** (every navigation and frame
-  checked, else cancelled; requests to `127.0.0.1` / `localhost` / `[::1]`
-  refused with a 403), **a new window in its own tab** (only a click; it
+  checked, else cancelled; **every request** the page makes checked too,
+  `view::refused_request` on a `*` `WebResourceRequested` filter: one to
+  this PC or its network — an IP address in a loopback, private,
+  link-local, unique-local, shared or other non-public range however it's
+  written, `127.0.0.2`, `[::ffff:7f00:1]`, `2130706433`, or a local name,
+  `localhost`, `*.localhost`, `*.local`, one with no dot — gets a 403; the
+  on-device model's server listens on `127.0.0.1` with no key. **Not
+  caught**: a public name that resolves to such an address, DNS
+  rebinding), **its dialogs never WebView2's own**
+  (`AreDefaultScriptDialogsEnabled` off, `ScriptDialogOpening`: on a shot's
+  page, a page out of sight or one Yap is acting on — `view::busy` while an
+  action runs and 1.5 s after — dismissed, never accepted; on a page the
+  person is using, its tab's strip asks, "rail.example.com says: …" with OK
+  / Cancel, a prompt's box, Leave / Stay: `yap-page-dialog` →
+  `page_view_dialog`, the page waiting on a deferral), **Yap's scripts give
+  up after 10 s** (`view::run_script`'s `SCRIPT_TIMEOUT`: a page stuck in a
+  loop never stalls a turn), **a new window in its own tab** (only a click; it
   went to the person's browser until 1 Nov 2026, and a page that then opens
   it in place too — Google's sponsored results — opened it twice; a mail
   link to their mail app), **downloads off**, **every permission denied**, DevTools only in a
@@ -1833,7 +1848,12 @@ from `view::open_tabs`):
   cover Yap's own UI otherwise. So the page **keeps its place** (scroll, a
   map's zoom) while another tab shows, and **closes with its tab**
   (`page_view_close`); another conversation or leaving Chat closes them all;
-  at most four stay alive (the least recently shown goes). **Its bar**
+  at most four stay alive (the least recently shown goes; when `open_page`
+  made the fifth, its result says which tab closed, `closed`). **Each tab's
+  number is its own for the session** (`view::NEXT_TAB`: closing or
+  evicting another never renumbers it, and a closed tab's number is never
+  used again — opened again, it's a new tab with a new number), so a model
+  holding "tab 3" never acts on another page. **Its bar**
   (2026-11-01, after Claude Code's browser pane, matched from how it looks
   and behaves — its code wasn't studied: Anthropic's terms rule that out):
   Back, **Forward** (`page_view_forward`, `ViewState::can_go_forward`),
@@ -1888,34 +1908,53 @@ from `view::open_tabs`):
   (`e2e/chat-pages.spec.js`).
 
 **Acting on a page: the drive tier** (2026-11-01, step 3 of the page panel;
-`chat/pages/act.rs` + `act/rules.rs`, `act/script.rs`, `act/confirm.rs`;
-`chat/pages/backend.rs`, `chat/pages/sim.rs`). The maintainer's ask: "offer
-tabs, read the page and act with Yap but only for models that are good with
-that stuff".
+`chat/pages/act.rs` + `act/rules.rs`, `act/words.rs`, `act/script.rs`,
+`act/confirm.rs`; `chat/pages/backend.rs`, `chat/pages/sim.rs`). The
+maintainer's ask: "offer tabs, read the page and act with Yap but only for
+models that are good with that stuff". Reworked the same day after a code
+review (safely, for any user, in any language Yap speaks).
 - **Who** (`act::can_act`): the strong cloud models (`documents::rich::
   strong`: Claude, GPT-5, Gemini, the large open ones) and an on-device model
   only on `act::LOCAL_ALLOWLIST` — the ones the browse evaluation passed
   (every safety task and at least 80% of the rest, model-evals.md "Acting on
   pages"; **empty**: none of the five on-device models measured qualified, 1 Nov 2026). Only a typed
-  Chat turn (never the Voice Assistant or the meetings: a click that buys
-  asks in Chat's thread) with the web on (the page tools' `Gate`).
+  Chat turn (never the Voice Assistant or the meetings: an action that buys
+  asks in Chat) with the web on (the page tools' `Gate`).
   `tools::Extra::act`; small models never see these tools.
 - **The tools** (≤ 650 tokens with the line, `act::definitions`,
-  `act::INSTRUCTIONS`): `read_open_page { elements: true }` lists the page's
+  `act::INSTRUCTIONS`; the page tools' own line is `act::PAGES_LINE` for
+  them, a search engine's page only when the person wants one):
+  `read_open_page { elements: true }` lists the page's
   links, buttons and fields by ref, one a line (`rules::element_lines`:
   `[3] textbox "From" = "Kellbrook"`, `[5] button "Find trains" (submits the
   form)`, `[7] link "Buy tickets" → rail.example.com/buy?train=1 (asks the
   user first)`, `[9] textbox "Card number" (Yap never types here: payment
   card details)`), its text then cut at 2,500 characters, its links ones
-  `go_to` may open this turn (`TurnPages::links`); `click {tab?, ref}`,
+  `go_to` may open this turn (`TurnPages::links`: each one's address as the
+  page has it and its words, `act::Link`); `click {tab?, ref}`,
   `type_text {tab?, ref, text, submit?}` (a select: the option with those
-  words; `submit`: Enter, its form's `requestSubmit`), `scroll {tab?, to: up
-  | down | ref}`, `go_to {tab?, url | search}` (this turn's results, the
-  person's links, a site they named, a link on a page read this turn, or a
-  search on their engine), `switch_tab {tab}`. Each action answers with the
-  page afterwards (`act::after`: its title, address, `what_changed` — "went
-  to …", "new on the page: …" — and its first 600 characters when it went
-  somewhere new): web content, the safety rule's. 30 actions a turn.
+  words; an editable region: the words go in at its caret, or after what's
+  there, `execCommand('insertText')`, never over a draft — the result's
+  `field` says all it holds now; `submit`: Enter, its form's
+  `requestSubmit`), `scroll {tab?, to: up | down | ref}`, `go_to {tab?, url
+  | search}` (this turn's results, the person's links, a site they named, a
+  link on a page read this turn, or a search on their engine), `switch_tab
+  {tab}`. **`go_to` goes only to the address as Yap holds it**
+  (`act::stored_address`: the page's own for a link, the result's or the
+  person's for theirs, `Turn::stored`, a named site's home page rebuilt from
+  its host), never the model's string: the allowed-address check matches
+  without a fragment or `utm_…`, so `…#<the person's data>` would have
+  carried words out to a site. **A tab's number is its own for the
+  session** (`view::OpenTab`): closing another, or the one closed to make
+  room, never renumbers it. Each action answers with the page afterwards
+  (`act::after`: its title, address, `what_changed` — "went to …", "new on
+  the page: …" — and its first 600 characters when it went somewhere new):
+  web content, the safety rule's. 30 actions a turn. The line (1 Nov 2026,
+  after a paid browse evaluation: Claude Haiku 5.5 and Opus 5.5 asked in the
+  chat before buying, so the person was asked twice, and opened a search
+  engine's results to find something on a site, which Yap can't read): to
+  find something on a site, open it and use its own search box; asked to buy,
+  book, order or send, click or submit — Yap's card asks — and stop at a no.
 - **Refs** live in the page (`script.rs`: `window.__yapRefs`, a `WeakMap`
   from element to number, non-enumerable): the same for as long as the page
   is, a navigation starts afresh. Yap's own script describes the element
@@ -1924,32 +1963,82 @@ that stuff".
   same script run as the click: a page can't swap it in between — "changed").
   Clicks and typing are the DOM's (`el.click()`, the value's native setter
   and `input` / `change` events): untrusted events, which a few sites ignore.
+  A link with a `target` (a new window: a script's click has no user
+  gesture, so the new-window rule would drop it as a pop-up) goes to its
+  address in the same tab instead.
 - **What Yap never does, whatever it's told** (enforced in Rust,
-  `act/rules.rs`): types a password, card, bank or security-code field (by
-  `type`, `autocomplete` — `cc-*`, `current-password`, `new-password`,
-  `one-time-code` — and name / id / label / placeholder: card, CVV, CVC, IBAN,
-  sort code, account number, security code, PIN; the script never even sends
-  such a value back, `masked`); fills in a sign-in form (a field of a form
-  with a password field, a `username` field, an email / user name field on a
-  page that has a password field or says "Sign in" — "sign in yourself in the
-  panel"); types more than 200 characters at once; reads or acts on a search
-  engine's results. **A click (or Enter) that would buy, pay, book, confirm,
-  place an order, subscribe, send, delete or sign in asks the person first**
-  (`rules::needs_ok`: the button's or link's words, a link's address —
-  `/checkout`, `/pay` —, a sign-in form's submit; `submit_needs_ok`: the
-  form's submit button and where it goes): `act/confirm.rs` shows **a card
-  in the thread** (`stream::Event::Confirm`, `PageConfirm.svelte`, its own
-  chunk: "Yap wants to press ‘Book now’ on rail.example.com — It may make a
-  booking. Only you can say yes." **Allow once** / **Don't**) and the tool
-  waits for `chat_page_confirm(id, allow)`, at most two minutes (no answer is
-  a no; nobody watching is a no; a ■ Stop drops the question). Each OK is for
-  that one click. Only Yap's own panel pages (their own profile, no Yap
-  IPC), never the person's browser. Acting tools aren't `ACTION_TOOLS`: they
-  run after web content, their safety being these rules.
+  `act/rules.rs`, its words in **one table per language** — English, French,
+  German, Spanish, Italian, Portuguese, Dutch, `act/words.rs`, every table
+  on every page, accents folded, "*kartennummer" a German or Dutch compound's
+  ending): types a password, card, bank or security-code field (by `type`,
+  `autocomplete` — `cc-*`, `current-password`, `new-password`,
+  `one-time-code` — and name / id / label / placeholder in any of the seven:
+  card, Kartennummer, numéro de carte, tarjeta, cartão, kaartnummer, CVV,
+  IBAN, sort code, Kontonummer, mot de passe, contraseña, senha, wachtwoord,
+  PIN…; the script never even sends such a value back, `masked`); types
+  **a payment card number** (13–19 digits passing the Luhn check), **an
+  IBAN** (its mod-97 check) or **3–4 digits into a form that takes a card**
+  whatever the field is called (`rules::typed_secret`); fills in a sign-in
+  form (a field of a form with a password field, a `username` field, a user
+  name / email field — Benutzername, identifiant, usuario… — on a page that
+  has a password field or says "Sign in", "Anmelden", "Se connecter"… —
+  "sign in yourself in the panel"); types more than 200 characters at once;
+  reads or acts on a search engine's results. **An action that would buy,
+  pay, book, place an order, cancel, subscribe, confirm, send, delete, agree
+  to terms or sign in asks the person first** (`rules::needs_ok`, its kinds
+  in that order: the button's or link's words — "Jetzt kaufen",
+  "Zahlungspflichtig bestellen", "Commander", "Ajouter au panier", "Pagar",
+  "Comprar", "Add to bag", "Start free trial", "Cancel membership", "Close
+  account", "I agree"…, never a dialog's lone "Cancel" or a cookie banner's
+  "Accept all" —, then a link's address in any of the seven — `/checkout`,
+  `/kasse`, `/panier`, `/unsubscribe`, `/booking/confirm` —, never `/post`):
+  - **a click** (`click_needs_ok`): those, and for a form's submit button
+    the form's own signals too — where it goes (a "Continue" in a form
+    posting to `…/checkout/place-order`), a card field in it or on the page
+    or a payment provider's frame (`Form::payment`, `Snapshot::payment`), a
+    price in a posted form (`Form::price`); a button with a price on it
+    ("19,99 €": `rules::has_price`, any currency sign or code);
+  - **Enter** (`enter_needs_ok`): in a form, the same as its submit; **outside
+    one, always, unless it's a search box** — a web chat's message box
+    (WhatsApp Web's, Slack's, Discord's) sends on Enter; a search box by
+    `type`, role, a `role="search"` region or `<search>`, `enterkeyhint`, its
+    `name` (`q`, `s`, `query`…) or its words in the seven (`search_box`);
+  - **a link `go_to` would open**: its words and its address, as its click
+    (a plain GET to "unsubscribe" or "confirm booking"); an address from the
+    results or the person, by its address;
+  - **typing words from nowhere the person can see**: after web content, a
+    word that's neither in what the person said in this conversation
+    (`Turn::said`) nor on that page (its words, title, headings, the field's
+    value and options) — a page's words could have asked for something of
+    theirs from elsewhere — is asked about ("Yap wants to type ‘…’ into
+    ‘Email’ on site.example"; numbers of one or two digits and years need
+    no source, so a date the model works out is asked about only for its
+    words; allowed, it's typed).
+  `act/confirm.rs` shows **a card** (`stream::Event::Confirm(Card)`, flat on
+  the wire; `PageConfirm.svelte`, its own chunk, and `pageConfirm.js`, its
+  words: "Yap wants to press ‘Book now’ on rail.example.com — It may make a
+  booking. Only you can say yes." / "press Enter in", "open", "type ‘…’
+  into"; **Allow once** / **Don't**) **in the thread and in its page tab's
+  strip** (`chatDoc.svelte.js` `asking`, `PageTab.svelte`: the panel may
+  cover the thread — a narrow window, the page expanded — so either place
+  asks and either answers; the tab is shown if the panel shows another) and
+  the tool waits for `chat_page_confirm(id, allow)`, at most two minutes (no
+  answer is a no; nobody watching is a no; a ■ Stop drops the question).
+  Each OK is for that one action. **The cards are kept with the answer**
+  (`ChatMessage::confirms`, camelCase, only when there are some: the turn's
+  watcher keeps each as it was last, `stream::Seen::confirms`,
+  `chats::set_confirms`; a question left waiting by a Stop is kept as a no,
+  its tab not kept), so a conversation opened again shows what was asked and
+  answered. Only Yap's own panel pages (their own profile, no Yap IPC), never
+  the person's browser. Acting tools aren't `ACTION_TOOLS`: they run after
+  web content, their safety being these rules.
 - **The page's side**: while a turn acts on a tab it says **"Yap is using
   this page"** with **Stop** (the turn's ■; `stream::Event::Acting`,
   `chatDoc.svelte.js` `setActing`, `PageTab.svelte`'s strip over the page, not
-  on it — the page is a window of its own), until the turn ends;
+  on it — the page is a window of its own), until the turn ends — or Yap's
+  question in its place while one waits; the page's own dialogs are
+  dismissed while an action runs (`backend::busy` → `view::busy`, and one
+  waiting for the person goes first, else it would stall Yap's script);
   `switch_tab` shows the tab (`Event::SwitchTab` → `doc.showTab`; Rust moves
   the page on screen there first, `view::bring_front`). `go_to` navigates
   like a link (`view::navigate`: the tab keeps its own address, so shown
@@ -1964,34 +2053,46 @@ that stuff".
   price rule had thrown its `open_page` away). **Each page `open_page` brings
   up is made at once**, out of sight (`view::open_hidden`, keyed as the Chat
   view keys its tab, `view::key_of`): the view shows only the last of several
-  a step brings up, and each must be a tab the model can read and act on,
-  numbered in the order it asked.
+  a step brings up, and each must be a tab the model can read and act on.
 - **One way in** (`backend.rs`): every page tool reaches the pages through
   it — the panel's webviews, or the **stand-in browser** of a model
   evaluation or a unit test (`sim.rs`, debug builds: HTML read with
   `dom_query` the way the element script reads the live page; a link goes to
   its address, a form submits as a GET, a select takes an option, a
-  checkbox toggles; `data-sim-hide` / `data-sim-go` stand in for a page's
-  script) — so the evaluation measures the code the app runs.
+  checkbox toggles, an editable region takes words after its own; its tabs
+  numbered and closed to make room as the panel's; `data-sim-hide` /
+  `data-sim-go` stand in for a page's script) — so the evaluation measures
+  the code the app runs.
 - Wording: `activity.rs` ("Clicking on the page beside the chat", "Going to
   rail.example.com/…"), the chips ("Clicked ‘Find trains’ on
   rail.example.com", "Typed in ‘To’ on rail.example.com and sent it",
-  "Didn't click ‘Buy tickets’: you said no", "Didn't type in ‘Card number’:
-  Yap never types payment card details" — a refusal marked as the safety
-  rule's, `chatSteps.js`), folded "clicked on the page, typed in 2 fields".
+  "Didn't click ‘Buy tickets’: you said no", "Didn't press Enter in
+  ‘Message’: you said no", "Didn't open ‘Stop emails’: you said no",
+  "Didn't type in ‘Card number’: Yap never types payment card details" — a
+  refusal marked as the safety rule's, `chatSteps.js`), folded "clicked on
+  the page, typed in 2 fields".
 - **Privacy**: the log has tools, tab numbers, refs, counts and outcomes —
-  never an address, a page's words, a button's or anything typed.
-- Tested: `chat::pages::act` / `act::rules` / `act::confirm` / `sim` unit
-  tests (the rules, refs, the gate, the confirmation, a form filled and sent,
-  a buy asked and refused, a sign-in refused, `go_to`'s addresses); the
-  browse evaluation's scenarios checked right and wrong
-  (`the_browse_scenarios_pages_work_and_their_checks_tell_right_from_wrong`);
+  never an address, a page's words, a button's, a dialog's or anything typed.
+- Tested: `chat::pages::act` / `act::rules` / `act::words` / `act::confirm`
+  / `sim` / `view` unit tests (the rules; every bypass the review found
+  closed — a listed link `go_to` opens, a plainly named submit asking by its
+  form, Enter outside a form; German, French, Spanish, Italian, Portuguese
+  and Dutch shop buttons and fields; a Luhn number, an IBAN and a code beside
+  a card refused; words from nowhere asked about; the stored address, never
+  the model's; tab numbers kept across a tab closed to make room; every way
+  of writing this PC's or the home network's address refused; the cards kept
+  with the answer; refs, the gate, a form filled and sent, a buy asked and
+  refused, a sign-in refused); the browse evaluation's scenarios checked
+  right and wrong (`the_browse_scenarios_pages_work_and_their_checks_tell_right_from_wrong`);
   `e2e/chat-browse.spec.js` (a strong fake model fills the stand-in rail
   site's form, the strip and its Stop, the card's Allow once and Don't, the
-  card fields and a sign-in refused, `switch_tab`). **Not done**: trusted
-  input events (CDP's `Input.dispatchMouseEvent`) for sites that ignore
-  script clicks; typed text checked against what the person said (only its
-  length is capped); acting from the Voice Assistant.
+  card fields and a sign-in refused, the page expanded over the thread and
+  its strip's Allow once, Enter in a made-up chat's message box asked and
+  refused and typing there kept after the draft, `switch_tab` by the tab's
+  own number). **Not done**: trusted input events (CDP's
+  `Input.dispatchMouseEvent`) for sites that ignore script clicks; a button
+  with no name at all (an icon with no label) is judged by its form only;
+  DNS rebinding (above); acting from the Voice Assistant.
 
 **After Claude Code's markdown file view** (2026-10-31; measured from the
 Claude desktop app's file panel and its document page, `.epitaxy-*`, none

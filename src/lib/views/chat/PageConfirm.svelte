@@ -1,28 +1,22 @@
 <script>
-  // **Yap asks before a click on a page** (chat/pages/act/confirm.rs): a
-  // click (or Enter) that would buy, pay, book, confirm, order, subscribe,
-  // send, delete or sign in waits for the person — "Yap wants to press
-  // ‘Book now’ on rail.example.com", Allow once / Don't. No answer in two
-  // minutes is a no; each OK is for that one click. Its own small chunk.
+  // **Yap asks before acting on a page** (chat/pages/act/confirm.rs): a
+  // click (or Enter, or a link go_to would open) that would buy, pay, book,
+  // confirm, order, cancel, subscribe, send, delete or sign in — or typing
+  // words that aren't in what the person said nor on the page — waits for
+  // the person: "Yap wants to press ‘Book now’ on rail.example.com", Allow
+  // once / Don't. The same question shows in its page tab's strip
+  // (PageTab.svelte: the panel may cover the thread); either answers it. No
+  // answer in two minutes is a no; each OK is for that one action. The
+  // answer keeps its cards (ChatMessage.confirms), answered. Its own small
+  // chunk.
   import { invoke } from '@tauri-apps/api/core';
+  import { questionParts, whyOf, doneWords } from './pageConfirm.js';
 
-  /** `confirms`: the turn's questions (`confirm` events: id, label, site, does, state). */
+  /** `confirms`: the turn's questions (`confirm` events: id, label, site, does, state, act, text). */
   let { confirms = [] } = $props();
 
   // Answered here, before Rust's next event says so.
   let answered = $state({});
-
-  const WHY = {
-    buy: 'It may buy something.',
-    pay: 'It may take a payment.',
-    book: 'It may make a booking.',
-    'place an order': 'It may place an order.',
-    confirm: 'It may confirm something for you.',
-    subscribe: 'It may sign you up for something.',
-    send: 'It may send something.',
-    delete: 'It may delete something.',
-    'sign in': 'It signs in to the site.',
-  };
 
   const stateOf = (c) => (c.state === 'asking' && answered[c.id]) || c.state;
 
@@ -38,18 +32,19 @@
 
 {#each confirms as c (c.id)}
   {@const st = stateOf(c)}
+  {@const q = questionParts(c)}
   <div class="pconfirm" class:asking={st === 'asking'} role="group" aria-label="Yap asks before acting on the page" data-testid="chat-page-confirm" data-state={st}>
     <svg class="picon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3l8 3v6c0 4.5-3.4 8.2-8 9-4.6-.8-8-4.5-8-9V6z" /><path d="M12 8v5M12 16.5v.01" /></svg>
     <div class="pbody">
-      <p class="pq">Yap wants to press <strong>‘{c.label}’</strong>{#if c.site}{' '}on <span class="psite">{c.site}</span>{/if}</p>
+      <p class="pq">{q.lead} <strong>‘{q.quoted}’</strong>{q.then}{#if c.site}{' '}on <span class="psite">{c.site}</span>{/if}</p>
       {#if st === 'asking'}
-        <p class="pwhy">{WHY[c.does] || 'It may do something on the site for you.'} Only you can say yes.</p>
+        <p class="pwhy">{whyOf(c)} Only you can say yes.</p>
         <div class="pbtns">
           <button type="button" class="pallow" onclick={() => answer(c, true)}>Allow once</button>
           <button type="button" class="pdeny" onclick={() => answer(c, false)}>Don't</button>
         </div>
       {:else}
-        <p class="pdone" aria-live="polite">{st === 'allowed' ? 'Allowed once.' : st === 'timedOut' ? 'No answer in time, so Yap didn’t press it.' : 'Yap didn’t press it.'}</p>
+        <p class="pdone" aria-live="polite">{doneWords(c, st)}</p>
       {/if}
     </div>
   </div>

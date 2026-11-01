@@ -104,6 +104,13 @@ pub struct ChatMessage {
     /// the button goes, the answer stays.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub browser_search: Option<crate::web::BrowserSearch>,
+    /// **The questions an answer asked before acting on a page**
+    /// (`chat/pages/act/confirm.rs`: "Yap wants to press ‘Book now’ on
+    /// rail.example.com"), each as it was answered — its cards come back
+    /// with the conversation, answered. Only written when there are some; an
+    /// older Yap's save drops them (the answer stays).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub confirms: Vec<crate::chat::pages::act::confirm::Card>,
 }
 
 impl ChatMessage {
@@ -718,6 +725,23 @@ pub fn set_pages(id: u64, index: usize, pages: &[crate::chat::pages::ShownPage],
     });
 }
 
+/// Keep the questions an answer asked before acting on a page with it
+/// (`chat/pages/act/confirm.rs`, as the turn's watcher saw them last):
+/// conversation `id`'s message `index`, when it's an answer. A question
+/// still waiting when the turn ended is kept as a no; its tab isn't kept.
+pub fn set_confirms(id: u64, index: usize, confirms: &[crate::chat::pages::act::confirm::Card]) {
+    if confirms.is_empty() {
+        return;
+    }
+    with_store(|s| {
+        let Some(m) = s.conversations.iter_mut().find(|c| c.id == id).and_then(|c| c.messages.get_mut(index)) else { return };
+        if m.role == "assistant" {
+            m.confirms = confirms.iter().cloned().map(crate::chat::pages::act::confirm::Card::kept).collect();
+            save_to_disk(s);
+        }
+    });
+}
+
 /// The "Search in your browser" an answer offers, as saved (the page's
 /// answer to `chat_send` carries it).
 pub fn browser_search_of(id: u64, index: usize) -> Option<crate::web::BrowserSearch> {
@@ -849,6 +873,7 @@ pub fn append_message(
             offers: Vec::new(),
             quote: None,
             browser_search: None,
+            confirms: Vec::new(),
         });
         conv.updated_ts = now_secs();
         // Asked again in an archived chat: it's back in the list.
@@ -1599,6 +1624,7 @@ mod tests {
             offers: vec![],
             quote: None,
             browser_search: None,
+            confirms: vec![],
         };
         let messages = vec![
             msg("user", vec![]),

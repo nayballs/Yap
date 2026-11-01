@@ -122,8 +122,13 @@ pub struct Turn {
     endpoints: Endpoints,
     /// The person's question (spots a game the model's query leaves out).
     question: String,
-    /// Addresses from the person's own messages.
+    /// Addresses from the person's own messages (and earlier answers'
+    /// sources), as they were written: [`Turn::stored`] gives them back.
     linked: Vec<String>,
+    /// What the person said in this conversation (this question and their
+    /// earlier messages): typed text from anywhere else needs their OK
+    /// (`chat/pages/act.rs`).
+    said: String,
     pub sources: Vec<Source>,
     searches: usize,
     reads: usize,
@@ -179,13 +184,16 @@ impl Turn {
     /// `earlier`: the person's earlier messages in the conversation (their
     /// links count as theirs).
     pub fn new(settings: Settings, endpoints: Endpoints, question: &str, earlier: &[&str]) -> Turn {
-        let linked = std::iter::once(question).chain(earlier.iter().copied()).flat_map(links_in).map(|u| normal_url(&u)).collect();
+        let linked = std::iter::once(question).chain(earlier.iter().copied()).flat_map(links_in).collect();
+        let said = std::iter::once(question).chain(earlier.iter().copied()).collect::<Vec<_>>().join("
+");
         let prices = asks_about_prices(question) && settings.local.as_ref().is_some_and(|l| l.tells_apart);
         Turn {
             settings,
             endpoints,
             question: question.to_string(),
             linked,
+            said,
             sources: Vec::new(),
             searches: 0,
             reads: 0,
@@ -452,7 +460,7 @@ impl Turn {
     /// to the model with their addresses, `chats::history_messages`): "tell
     /// me more about the first one".
     pub fn with_earlier_sources<'a>(mut self, urls: impl IntoIterator<Item = &'a str>) -> Turn {
-        self.linked.extend(urls.into_iter().map(normal_url));
+        self.linked.extend(urls.into_iter().map(str::to_string));
         self
     }
 
@@ -520,7 +528,23 @@ impl Turn {
     /// result of a search in this turn (or a page already read).
     pub fn allowed(&self, url: &str) -> bool {
         let key = normal_url(url);
-        self.linked.contains(&key) || self.sources.iter().any(|s| normal_url(&s.url) == key)
+        self.linked.iter().any(|l| normal_url(l) == key) || self.sources.iter().any(|s| normal_url(&s.url) == key)
+    }
+
+    /// **The address as the turn has it** for `url`, an address it may open
+    /// ([`Turn::allowed`]): the person's link as they wrote it, or the
+    /// result's own — never the model's copy, which [`normal_url`] matches
+    /// with a fragment or `utm_…` added (words carried out to a site).
+    /// `None`: not one of them. Pure.
+    pub fn stored(&self, url: &str) -> Option<String> {
+        let key = normal_url(url);
+        self.linked.iter().find(|l| normal_url(l) == key).cloned().or_else(|| self.sources.iter().find(|s| normal_url(&s.url) == key).map(|s| s.url.clone()))
+    }
+
+    /// What the person said in this conversation: this question and their
+    /// earlier messages.
+    pub fn said(&self) -> &str {
+        &self.said
     }
 
     /// Run `web_search` or `read_page`: a tools.rs-shaped result

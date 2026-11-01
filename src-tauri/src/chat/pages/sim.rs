@@ -46,6 +46,11 @@ pub struct Log {
 
 struct Tab {
     key: String,
+    /// Its number for the model: its own, never used again (as the panel's).
+    id: usize,
+    /// When it was last opened or put in front (the least recent goes to
+    /// make room, as the panel's).
+    used: u64,
     url: String,
     html: String,
     /// What's been typed (by ref).
@@ -64,6 +69,11 @@ pub struct Browser {
     pages: Vec<(String, String)>,
     tabs: Vec<Tab>,
     front: usize,
+    next_id: usize,
+    tick: u64,
+    /// The tab the last [`Browser::open`] closed to make room (its number
+    /// and title).
+    closed: Option<(usize, String)>,
     pub log: Log,
 }
 
@@ -99,7 +109,7 @@ const CANDIDATE: &str = "a[href], button, input, select, textarea, summary, [rol
 impl Browser {
     /// A browser over `pages` (address → HTML, or plain text), no tab open.
     pub fn new(pages: &BTreeMap<String, String>) -> Browser {
-        Browser { pages: pages.iter().map(|(u, h)| (u.clone(), h.clone())).collect(), tabs: Vec::new(), front: 0, log: Log::default() }
+        Browser { pages: pages.iter().map(|(u, h)| (u.clone(), h.clone())).collect(), tabs: Vec::new(), front: 0, next_id: 1, tick: 0, closed: None, log: Log::default() }
     }
 
     /// The HTML for `url`: the page whose address has its query's pairs (all
@@ -124,27 +134,52 @@ impl Browser {
         }
     }
 
+    fn tick(&mut self) -> u64 {
+        self.tick += 1;
+        self.tick
+    }
+
     /// **Open `url` in a tab** (`open_page`): its tab in front — the one it
-    /// has, or a new one. Its key.
+    /// has, or a new one (with a number of its own); at most
+    /// `view::MAX_VIEWS` stay open, the least recently used other than the
+    /// one in front closing to make room ([`Browser::take_closed`]), as the
+    /// panel's do. Its key.
     pub fn open(&mut self, url: &str) -> String {
         let key = super::view::key_of(url);
+        self.closed = None;
+        let now = self.tick();
         if let Some(i) = self.tabs.iter().position(|t| t.key == key) {
             self.front = i;
+            self.tabs[i].used = now;
             return key;
+        }
+        let alive: Vec<(String, u64, bool)> = self.tabs.iter().enumerate().map(|(i, t)| (t.key.clone(), t.used, i == self.front)).collect();
+        if let Some(gone) = super::view::evict(&alive) {
+            if let Some(i) = self.tabs.iter().position(|t| t.key == gone) {
+                let t = self.tabs.remove(i);
+                self.closed = Some((t.id, title_of(&t.html)));
+            }
         }
         let html = self.page_for(url);
         self.log.visited.push(url.to_string());
-        self.tabs.push(Tab { key: key.clone(), url: url.to_string(), html, values: HashMap::new(), checked: HashMap::new(), hidden: HashSet::new(), scroll: 0, seen: false });
+        let id = self.next_id;
+        self.next_id += 1;
+        self.tabs.push(Tab { key: key.clone(), id, used: now, url: url.to_string(), html, values: HashMap::new(), checked: HashMap::new(), hidden: HashSet::new(), scroll: 0, seen: false });
         self.front = self.tabs.len() - 1;
         key
     }
 
-    /// The tabs, as `view::open_tabs` tells them.
+    /// The tab the last [`Browser::open`] closed to make room, once.
+    pub fn take_closed(&mut self) -> Option<(usize, String)> {
+        self.closed.take()
+    }
+
+    /// The tabs, as `view::open_tabs` tells them: each with its own number.
     pub fn tabs(&self) -> Vec<OpenTab> {
         self.tabs
             .iter()
             .enumerate()
-            .map(|(i, t)| OpenTab { tab: i + 1, key: t.key.clone(), title: title_of(&t.html), url: t.url.clone(), front: i == self.front })
+            .map(|(i, t)| OpenTab { tab: t.id, key: t.key.clone(), title: title_of(&t.html), url: t.url.clone(), front: i == self.front })
             .collect()
     }
 
@@ -160,6 +195,7 @@ impl Browser {
     pub fn front(&mut self, key: &str) -> Result<(), String> {
         let i = self.tabs.iter().position(|t| t.key == key).ok_or("That page isn't open.")?;
         self.front = i;
+        self.tabs[i].used = self.tick();
         Ok(())
     }
 
@@ -219,6 +255,7 @@ impl Browser {
             elements,
             forms: page.forms_info(),
             password: page.password(),
+            payment: page.payment(),
             more,
             scroll: Scroll { y: tab.scroll, h: 800, max: 2400 },
         })
@@ -232,7 +269,7 @@ impl Browser {
         // (No read has numbered this page's elements yet: no ref is one.)
         let el = r.checked_sub(1).filter(|_| tab.seen).and_then(|i| page.candidates.get(i as usize)).filter(|n| page.visible(n)).map(|n| page.describe(n, r));
         let form = el.as_ref().filter(|e| e.form >= 0).and_then(|e| page.forms_info().into_iter().find(|f| f.form == e.form));
-        Ok(Described { el, form, password: page.password(), title: title_of(&tab.html), headings: page.headings(), url: tab.url.clone() })
+        Ok(Described { el, form, password: page.password(), payment: page.payment(), title: title_of(&tab.html), headings: page.headings(), url: tab.url.clone() })
     }
 
     /// **An action** (`script.rs`'s, the same answers): `click`, `type`
@@ -303,6 +340,15 @@ impl Browser {
                         Some(t) => t,
                         None => return Ok(json!({ "r": "no-option" })),
                     }
+                } else if el.editable {
+                    // An editable region: the words go in at its end (a
+                    // draft there stays), as the element script's insertText.
+                    let had = el.value.clone();
+                    if had.is_empty() {
+                        text.clone()
+                    } else {
+                        format!("{had}{}{text}", if had.ends_with(' ') { "" } else { " " })
+                    }
                 } else if rules::takes_text(&el) {
                     text.clone()
                 } else {
@@ -326,11 +372,21 @@ impl Browser {
                     }
                 }
                 let shown = if rules::sensitive(&el).is_some() { String::new() } else { value };
-                Ok(json!({ "r": "ok", "value": shown }))
+                Ok(json!({ "r": "ok", "value": shown, "inserted": el.editable }))
             }
             other => Err(format!("Unknown action {other}")),
         }
     }
+}
+
+/// A frame from a payment provider (its card fields live there, out of the
+/// page's reach): Stripe, Adyen, Braintree, PayPal, Checkout.com, Mollie,
+/// Square, Klarna, Worldpay. Pure.
+pub fn payment_frame(src: &str) -> bool {
+    let host = reqwest::Url::parse(src.trim()).ok().and_then(|u| u.host_str().map(str::to_ascii_lowercase)).unwrap_or_default();
+    ["stripe.com", "adyen.com", "braintreegateway.com", "paypal.com", "checkout.com", "mollie.com", "squareup.com", "klarna.com", "worldpay.com"]
+        .iter()
+        .any(|p| host == *p || host.ends_with(&format!(".{p}")))
 }
 
 /// `href` made absolute against `base`. Pure.
@@ -509,6 +565,8 @@ impl<'a> Page<'a> {
             disabled: node.has_attr("disabled") || attr("aria-disabled") == "true",
             form,
             submit: (tag == "button" && matches!(attr("type").to_ascii_lowercase().as_str(), "" | "submit") && form >= 0) || (tag == "input" && matches!(kind.as_str(), "submit" | "image")),
+            search: Self::in_search(node),
+            editable: node.attr("contenteditable").is_some_and(|v| !v.eq_ignore_ascii_case("false")),
             ..Default::default()
         };
         e.masked = rules::sensitive(&e).is_some();
@@ -519,11 +577,50 @@ impl<'a> Page<'a> {
             e.options = options.iter().take(20).map(|(t, _)| t.clone()).collect();
             let chosen = dom_query::Selection::from(*node).select("option[selected]").nodes().first().map(Self::text_of);
             e.value = self.tab.values.get(&r).cloned().or(chosen).or_else(|| options.first().map(|(t, _)| t.clone())).unwrap_or_default();
-        } else if !e.masked && (tag == "textarea" || (tag == "input" && !matches!(kind.as_str(), "submit" | "button" | "reset" | "image"))) {
-            let default = if tag == "textarea" { Self::text_of(node) } else { attr("value") };
+        } else if !e.masked && (tag == "textarea" || e.editable || (tag == "input" && !matches!(kind.as_str(), "submit" | "button" | "reset" | "image"))) {
+            let default = if tag == "textarea" || e.editable { Self::text_of(node) } else { attr("value") };
             e.value = self.tab.values.get(&r).cloned().unwrap_or(default).chars().take(200).collect();
         }
         e
+    }
+
+    /// The page marks `node` a search box: `enterkeyhint` / `inputmode`
+    /// "search", or in a `role="search"` region or a `<search>` element.
+    fn in_search(node: &dom_query::NodeRef) -> bool {
+        let says = |k: &str| node.attr(k).is_some_and(|v| v.eq_ignore_ascii_case("search"));
+        says("enterkeyhint")
+            || says("inputmode")
+            || node.ancestors_it(None).any(|a| a.attr("role").is_some_and(|r| r.eq_ignore_ascii_case("search")) || a.node_name().is_some_and(|n| n.eq_ignore_ascii_case("search")))
+    }
+
+    /// A payment card field in `scope`'s candidates (by `autocomplete` or
+    /// its words: `rules::sensitive`), or a payment provider's frame.
+    fn takes_card(&self, form: Option<i64>) -> bool {
+        let card = self.candidates.iter().enumerate().any(|(i, c)| {
+            (form.is_none() || form == Some(self.form_of(c))) && rules::sensitive(&self.describe_plain(c, i as u32 + 1)) == Some("payment card details")
+        });
+        card || (form.is_none() && self.doc.select("iframe[src]").nodes().iter().any(|f| f.attr("src").is_some_and(|s| payment_frame(&s))))
+    }
+
+    /// An element described without its value (for the payment check).
+    fn describe_plain(&self, node: &dom_query::NodeRef, r: u32) -> Element {
+        let attr = |k: &str| node.attr(k).map(|v| v.to_string()).unwrap_or_default();
+        Element {
+            r,
+            kind: attr("type").to_ascii_lowercase(),
+            autocomplete: attr("autocomplete"),
+            field: attr("name"),
+            id: attr("id"),
+            name: self.name_of(node),
+            label: self.label_of(node),
+            placeholder: attr("placeholder"),
+            ..Default::default()
+        }
+    }
+
+    /// A payment card field (or a payment provider's frame) anywhere on the page.
+    fn payment(&self) -> bool {
+        self.takes_card(None)
     }
 
     fn forms_info(&self) -> Vec<Form> {
@@ -548,6 +645,8 @@ impl<'a> Page<'a> {
                     action,
                     method: f.attr("method").map(|m| m.to_ascii_lowercase()).unwrap_or_else(|| "get".into()),
                     submit: button.map(|b| self.name_of(&b)).unwrap_or_default(),
+                    payment: self.takes_card(Some(i as i64)) || sel.select("iframe[src]").nodes().iter().any(|x| x.attr("src").is_some_and(|s| payment_frame(&s))),
+                    price: rules::has_price(&Self::text_of(f)),
                 }
             })
             .collect()

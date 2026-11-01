@@ -979,8 +979,9 @@ export function createChatState({ onopensettings = () => null, onopennote = () =
       }
       // Acting on a page beside the chat (chat/pages/act.rs): its tab says
       // so (with Stop: this turn's ■), a tab the model switched to shows,
-      // and a click that would buy, pay, book… asks here first (its card,
-      // PageConfirm.svelte, on the answer being written).
+      // and an action that would buy, pay, book… asks here first (its card,
+      // PageConfirm.svelte, on the answer being written) and in its page
+      // tab's strip (the panel may cover the thread: chatDoc's `asking`).
       if (ev?.kind === 'acting') {
         if (mine('user') >= 0) doc.setActing(ev.key, stopAnswer);
         return;
@@ -990,6 +991,7 @@ export function createChatState({ onopensettings = () => null, onopennote = () =
         return;
       }
       if (ev?.kind === 'confirm') {
+        if (mine('user') >= 0) doc.setAsking(ev);
         let at = mine('assistant');
         if (at < 0) {
           if (made || mine('user') < 0) return;

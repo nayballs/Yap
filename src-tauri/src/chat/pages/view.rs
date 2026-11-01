@@ -14,8 +14,18 @@
 //!   profile of its own ([`PROFILE`]): none of Yap's cookies, storage or
 //!   cache; the person's sign-ins there stay there;
 //! - **only public http(s)**: every navigation, a frame's too, is checked
-//!   as a page read is (`web::check_url`) and cancelled otherwise; requests
-//!   to this PC's loopback addresses are refused (`WebResourceRequested`);
+//!   as a page read is (`web::check_url`) and cancelled otherwise; every
+//!   request a page makes is checked too ([`refused_request`],
+//!   `WebResourceRequested` on all of them): one to an address on this PC or
+//!   its network (loopback, private, link-local, unique-local… however it's
+//!   written, `localhost`, `.local`, `.localhost`) gets a 403. A public name
+//!   that resolves to such an address (DNS rebinding) isn't caught;
+//! - **its dialogs are never WebView2's own** (`ScriptDialogOpening`): on a
+//!   page Yap loads for itself (a shot's), a page out of sight or one Yap is
+//!   acting on ([`busy`]) they're dismissed; on one the person is using, its
+//!   tab's strip asks (`yap-page-dialog`, `page_view_dialog`);
+//! - **Yap's scripts give up after [`SCRIPT_TIMEOUT`]** (a page stuck in a
+//!   loop never stalls a turn);
 //! - **a new window opens in its own tab** (only when the person clicked;
 //!   a mail link in their mail app), **downloads are off**, every permission a
 //!   page asks for (the mic, the camera, location, notifications…) is
@@ -91,6 +101,23 @@ const LOAD_TIMEOUT: Duration = Duration::from_secs(20);
 const SETTLE: Duration = Duration::from_millis(1200);
 /// …and how long the shot itself may take.
 const SHOT_TIMEOUT: Duration = Duration::from_secs(10);
+/// How long one of Yap's scripts in a page may take (a page stuck in a loop).
+pub const SCRIPT_TIMEOUT: Duration = Duration::from_secs(10);
+/// A dialog a click opens comes a moment after it: still Yap's to dismiss.
+const DIALOG_GRACE: Duration = Duration::from_millis(1500);
+/// The event a page's dialog goes out on (its tab's strip asks).
+pub const DIALOG_EVENT: &str = "yap-page-dialog";
+
+/// **Tab numbers**: each page tab's own for the session — never another's,
+/// never used again once it closes (a tab closed to make room and opened
+/// again is a new tab), so a model holding "tab 3" never acts on another
+/// page.
+static NEXT_TAB: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(1);
+
+/// The next tab number ([`NEXT_TAB`]).
+fn next_tab() -> usize {
+    NEXT_TAB.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+}
 
 /// Where a page sits over Yap's main window: physical pixels, from the top
 /// left of its client area (where Yap's own page starts).
@@ -162,6 +189,70 @@ pub fn may_navigate(uri: &str, standin: Option<&str>, offline: bool) -> bool {
         Some(base) => uri.starts_with(&format!("{base}/")),
         None => !offline && crate::web::check_url(uri).is_ok(),
     }
+}
+
+/// **A request a page may not make** (any: a picture's, a script's, a
+/// `fetch`): one to this PC or its network — a host that's an IP address in
+/// a loopback, private, link-local, unique-local, shared or other
+/// non-public range (`web::is_public`: an IPv4-mapped IPv6 address and the
+/// odd ways of writing one too, as a URL parser reads them: `127.0.0.2`,
+/// `[::ffff:7f00:1]`, `2130706433`), or a local name (`localhost`,
+/// `*.localhost`, `*.local`, one with no dot…). A test run's stand-in is the
+/// page itself. A public name that resolves to such an address (DNS
+/// rebinding) isn't caught here. Pure.
+pub fn refused_request(uri: &str, standin: Option<&str>) -> bool {
+    if standin.is_some_and(|base| uri.starts_with(&format!("{base}/"))) {
+        return false;
+    }
+    let Ok(u) = reqwest::Url::parse(uri.trim()) else { return false };
+    if !matches!(u.scheme(), "http" | "https" | "ws" | "wss" | "ftp") {
+        return false;
+    }
+    match u.host() {
+        Some(url::Host::Ipv4(ip)) => !crate::web::is_public(std::net::IpAddr::V4(ip)),
+        Some(url::Host::Ipv6(ip)) => !crate::web::is_public(std::net::IpAddr::V6(ip)),
+        Some(url::Host::Domain(d)) => crate::web::is_local_name(d),
+        None => false,
+    }
+}
+
+/// Pages Yap is acting on now: how many actions, and until when after the
+/// last one ended ([`DIALOG_GRACE`]).
+static ACTING: std::sync::Mutex<Option<std::collections::HashMap<String, Acting>>> = std::sync::Mutex::new(None);
+
+/// A page Yap acts on: actions under way, and until when after the last.
+type Acting = (u32, Option<std::time::Instant>);
+
+/// **Yap is acting on page `key`** while this lives (and a moment after):
+/// its dialogs are dismissed ([`acting_on`]).
+pub struct Busy(String);
+
+impl Drop for Busy {
+    fn drop(&mut self) {
+        let mut acting = ACTING.lock().unwrap_or_else(|p| p.into_inner());
+        if let Some(e) = acting.get_or_insert_with(Default::default).get_mut(&self.0) {
+            e.0 = e.0.saturating_sub(1);
+            e.1 = Some(std::time::Instant::now() + DIALOG_GRACE);
+        }
+    }
+}
+
+/// **Yap starts acting on page `key`** (an action of the drive tier): a
+/// dialog waiting there for the person goes (it would stall Yap's script),
+/// and its dialogs are dismissed until the [`Busy`] goes.
+pub async fn busy(key: &str) -> Busy {
+    ACTING.lock().unwrap_or_else(|p| p.into_inner()).get_or_insert_with(Default::default).entry(key.to_string()).or_insert((0, None)).0 += 1;
+    if let Some(app) = APP.get().cloned() {
+        imp::dismiss_dialog(app, key.to_string()).await;
+    }
+    Busy(key.to_string())
+}
+
+/// Whether Yap is acting on page `key` now, or just was. Pure but for the
+/// clock.
+pub fn acting_on(key: &str) -> bool {
+    let acting = ACTING.lock().unwrap_or_else(|p| p.into_inner());
+    acting.as_ref().and_then(|m| m.get(key)).is_some_and(|(n, until)| *n > 0 || until.is_some_and(|u| std::time::Instant::now() < u))
 }
 
 /// **What the address bar's words open** (a page's tab, or a new tab's): an
@@ -302,7 +393,16 @@ pub async fn page_view_show(app: AppHandle, key: String, url: String, section: O
     let (standin, offline) = web_route();
     let load = load_url(&url, standin.as_deref(), offline)?;
     let section = section.map(|s| s.chars().take(crate::chat::pages::SECTION_MAX).collect::<String>()).unwrap_or_default();
-    imp::show(app, key, url, load, section, bounds).await
+    imp::show(app, key, url, load, section, bounds).await.map(|_| ())
+}
+
+/// **A page's dialog answered** in its tab's strip (`alert`, `confirm`,
+/// `prompt`, "Leave this page?"): OK (`accept`, with a prompt's `text`) or
+/// Cancel.
+#[tauri::command]
+pub async fn page_view_dialog(app: AppHandle, key: String, accept: bool, text: Option<String>) -> Result<(), String> {
+    let text = text.map(|t| t.chars().take(2000).collect::<String>());
+    imp::answer_dialog(app, checked_key(&key)?, accept, text).await
 }
 
 /// **Move a page** over its stage, or keep it out of sight (`None`: its tab
@@ -364,8 +464,9 @@ pub async fn clear_data(app: &AppHandle) -> Result<(), String> {
     imp::clear_data(app.clone()).await
 }
 
-/// **A page tab, as the model is told it**: its number (1, 2… in the order
-/// the tabs opened), title and address, and whether it's the one in front.
+/// **A page tab, as the model is told it**: its number (its own for the
+/// session, [`NEXT_TAB`]: closing or evicting another never renumbers it),
+/// title and address, and whether it's the one in front.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
 pub struct OpenTab {
     pub tab: usize,
@@ -397,10 +498,17 @@ pub fn pick_tab(tabs: &[OpenTab], tab: Option<usize>) -> Result<&OpenTab, String
 }
 
 /// **Run `script` in page `key`** (Yap's own script, never one a page or a
-/// model wrote): its result as JSON.
+/// model wrote): its result as JSON — or an error after [`SCRIPT_TIMEOUT`]
+/// (a page stuck in a loop, or waiting on a dialog).
 pub async fn run_script(key: &str, script: String) -> Result<String, String> {
     let app = APP.get().cloned().ok_or("Yap's window isn't ready.")?;
-    imp::eval(app, key.to_string(), script).await
+    match tokio::time::timeout(SCRIPT_TIMEOUT, imp::eval(app, key.to_string(), script)).await {
+        Ok(r) => r,
+        Err(_) => {
+            tracing::info!("Chat: a page beside the chat didn't answer Yap's script in time");
+            Err("The page didn't answer in time (it may be busy, or waiting on something): try again, or read it again.".into())
+        }
+    }
 }
 
 /// What a page says, for the model (`read_open_page`): its title, its
@@ -463,14 +571,19 @@ pub fn key_of(url: &str) -> String {
 /// key): the Chat view shows only the last of several a step brings up, so
 /// each one's page is there — in the order they were asked for — for
 /// `read_open_page` and the actions to find by its tab number. Its tab shown
-/// later finds it made, and places it. Nothing without Yap's window.
-pub async fn open_hidden(url: &str, section: &str) {
-    let Some(app) = APP.get().cloned() else { return };
+/// later finds it made, and places it. Nothing without Yap's window. The
+/// tab closed to make room for it (its number and title), if one was.
+pub async fn open_hidden(url: &str, section: &str) -> Option<(usize, String)> {
+    let app = APP.get().cloned()?;
     let (standin, offline) = web_route();
-    let Ok(load) = load_url(url, standin.as_deref(), offline) else { return };
+    let load = load_url(url, standin.as_deref(), offline).ok()?;
     let section: String = section.chars().take(crate::chat::pages::SECTION_MAX).collect();
-    if let Err(e) = imp::show(app, key_of(url), url.to_string(), load, section, None).await {
-        tracing::debug!("A page brought up wasn't made out of sight: {e}");
+    match imp::show(app, key_of(url), url.to_string(), load, section, None).await {
+        Ok(closed) => closed,
+        Err(e) => {
+            tracing::debug!("A page brought up wasn't made out of sight: {e}");
+            None
+        }
     }
 }
 
@@ -579,9 +692,13 @@ mod imp {
         Reload,
     }
 
-    pub async fn show(_: AppHandle, _: String, _: String, _: String, _: String, _: Option<Bounds>) -> Result<(), String> {
+    pub async fn show(_: AppHandle, _: String, _: String, _: String, _: String, _: Option<Bounds>) -> Result<Option<(usize, String)>, String> {
         Err(NO.into())
     }
+    pub async fn answer_dialog(_: AppHandle, _: String, _: bool, _: Option<String>) -> Result<(), String> {
+        Ok(())
+    }
+    pub async fn dismiss_dialog(_: AppHandle, _: String) {}
     pub async fn go_to(_: AppHandle, _: String, _: String, _: String, _: Option<Bounds>) -> Result<(), String> {
         Err(NO.into())
     }
@@ -645,7 +762,7 @@ mod win {
         take_pwstr, AcceleratorKeyPressedEventHandler, CapturePreviewCompletedHandler, ClearBrowsingDataCompletedHandler, ContextMenuRequestedEventHandler, CreateCoreWebView2ControllerCompletedHandler,
         CustomItemSelectedEventHandler, DocumentTitleChangedEventHandler, DownloadStartingEventHandler, ExecuteScriptCompletedHandler,
         HistoryChangedEventHandler, NavigationCompletedEventHandler, NavigationStartingEventHandler, NewWindowRequestedEventHandler,
-        PermissionRequestedEventHandler, ProcessFailedEventHandler, WebResourceRequestedEventHandler,
+        PermissionRequestedEventHandler, ProcessFailedEventHandler, ScriptDialogOpeningEventHandler, WebResourceRequestedEventHandler,
     };
     use windows::core::{w, Interface, BOOL, HSTRING, PWSTR};
     use windows::Win32::Foundation::{HGLOBAL, HINSTANCE, HWND, LPARAM, LRESULT, RECT, WPARAM};
@@ -659,7 +776,10 @@ mod win {
         WS_CLIPSIBLINGS,
     };
 
-    use super::{error_words, evict, may_navigate, menu_keep, section_script, shown_url, Bounds, ViewState, EVENT, LOAD_TIMEOUT, PROFILE, QUOTE_EVENT, SETTLE, SHOT_TIMEOUT, SNAP_H, SNAP_W};
+    use super::{
+        error_words, evict, may_navigate, menu_keep, next_tab, refused_request, section_script, shown_url, Bounds, ViewState, DIALOG_EVENT, EVENT, LOAD_TIMEOUT, PROFILE, QUOTE_EVENT, SETTLE,
+        SHOT_TIMEOUT, SNAP_H, SNAP_W,
+    };
 
     type Done<T> = tokio::sync::oneshot::Sender<Result<T, String>>;
 
@@ -667,6 +787,9 @@ mod win {
     /// be, and anything waiting for it to load.
     struct View {
         key: String,
+        /// Its tab number for the model (`super::NEXT_TAB`; 0: a shot's or
+        /// a clearing's page, never a tab).
+        id: usize,
         /// The address as the search or the person gave it.
         url: String,
         /// The address it loads from (a test run's stand-in's).
@@ -694,6 +817,45 @@ mod win {
         static CLASS: Cell<bool> = const { Cell::new(false) };
         static TICK: Cell<u64> = const { Cell::new(0) };
         static SNAPS: Cell<u64> = const { Cell::new(0) };
+        /// A page's dialog waiting for the person (its tab's strip asks):
+        /// the page's key, the dialog and its deferral.
+        static DIALOGS: RefCell<Vec<(String, ICoreWebView2ScriptDialogOpeningEventArgs, ICoreWebView2Deferral)>> = const { RefCell::new(Vec::new()) };
+    }
+
+    /// Page `key`'s waiting dialog answered (OK with a prompt's `text`, or
+    /// Cancel: `accept` false), and its strip told it's gone. (On the main
+    /// thread.)
+    fn finish_dialog(app: &AppHandle, key: &str, accept: bool, text: Option<&str>) {
+        let waiting = DIALOGS.with(|d| {
+            let mut d = d.borrow_mut();
+            let i = d.iter().position(|x| x.0 == key)?;
+            Some(d.remove(i))
+        });
+        let Some((_, args, deferral)) = waiting else { return };
+        unsafe {
+            if accept {
+                if let Some(t) = text {
+                    let _ = args.SetResultText(&HSTRING::from(t));
+                }
+                let _ = args.Accept();
+            }
+            let _ = deferral.Complete();
+        }
+        let _ = app.emit_to("settings", DIALOG_EVENT, serde_json::json!({ "key": key, "gone": true }));
+    }
+
+    pub async fn answer_dialog(app: AppHandle, key: String, accept: bool, text: Option<String>) -> Result<(), String> {
+        let a = app.clone();
+        main_thread(&app, move |_| {
+            tracing::info!(accept, "Chat: the user answered a page's dialog");
+            finish_dialog(&a, &key, accept, text.as_deref());
+        })
+        .await
+    }
+
+    pub async fn dismiss_dialog(app: AppHandle, key: String) {
+        let a = app.clone();
+        let _ = main_thread(&app, move |_| finish_dialog(&a, &key, false, None)).await;
     }
 
     fn tick() -> u64 {
@@ -847,13 +1009,14 @@ mod win {
 
     // ---- show, place, close --------------------------------------------------------------
 
-    pub async fn show(app: AppHandle, key: String, url: String, load: String, section: String, bounds: Option<Bounds>) -> Result<(), String> {
+    pub async fn show(app: AppHandle, key: String, url: String, load: String, section: String, bounds: Option<Bounds>) -> Result<Option<(usize, String)>, String> {
         let a = app.clone();
         main_thread(&app, move |root| make_or_place(&a, root, key, url, load, section, bounds, None)).await?
     }
 
     /// Show page `key` (made the first time); a shot's page (`snap`) is made
-    /// out of sight and its shot taken once it has loaded.
+    /// out of sight and its shot taken once it has loaded. The tab closed to
+    /// make room for it (its number and title), if one was.
     #[allow(clippy::too_many_arguments)]
     fn make_or_place(
         app: &AppHandle,
@@ -864,7 +1027,7 @@ mod win {
         section: String,
         bounds: Option<Bounds>,
         snap: Option<Done<Vec<u8>>>,
-    ) -> Result<(), String> {
+    ) -> Result<Option<(usize, String)>, String> {
         if let Some((host, controller, core)) = handles(&key) {
             let changed = VIEWS.with(|v| {
                 let mut v = v.borrow_mut();
@@ -892,14 +1055,27 @@ mod win {
                 }
                 _ => {}
             }
-            return Ok(());
+            return Ok(None);
         }
         // Room for one more: the least recently shown one goes.
+        let mut closed = None;
         if snap.is_none() {
             let alive: Vec<(String, u64, bool)> =
                 VIEWS.with(|v| v.borrow().iter().filter(|x| x.snap.is_none() && !x.key.starts_with("snap:") && !x.key.starts_with("clear:")).map(|x| (x.key.clone(), x.used, x.bounds.is_some())).collect());
             if let Some(gone) = evict(&alive) {
                 tracing::info!(views = alive.len(), "Chat: the least recently shown page closed to make room");
+                closed = VIEWS.with(|v| {
+                    v.borrow().iter().find(|x| x.key == gone).map(|x| {
+                        let mut title = String::new();
+                        if let Some(core) = &x.core {
+                            let mut t = PWSTR::null();
+                            if unsafe { core.DocumentTitle(&mut t) }.is_ok() {
+                                title = take_pwstr(t);
+                            }
+                        }
+                        (x.id, title)
+                    })
+                });
                 close_one(app, &gone);
             }
         }
@@ -907,9 +1083,11 @@ mod win {
         let parent = parent(app)?;
         let host = host(parent)?;
         let is_snap = snap.is_some();
+        let id = if is_snap { 0 } else { next_tab() };
         VIEWS.with(|v| {
             v.borrow_mut().push(View {
                 key: key.clone(),
+                id,
                 url,
                 load,
                 section,
@@ -949,7 +1127,7 @@ mod win {
             return Err(format!("Yap couldn't open the page ({}). Its WebView2 may be too old: Windows Update brings a new one.", e.message()));
         }
         tracing::info!(snap = is_snap, views = VIEWS.with(|v| v.borrow().len()), "Chat: a page beside the chat is opening");
-        Ok(())
+        Ok(closed)
     }
 
     /// A page that couldn't be made: said, and gone.
@@ -1143,11 +1321,12 @@ mod win {
                 })),
                 &mut token,
             )?;
-            // This PC's loopback addresses: refused (Yap's own helpers listen
-            // there). A test run's stand-in is the page itself.
-            for filter in [w!("*://127.0.0.1*"), w!("*://localhost*"), w!("*://[::1]*"), w!("*.localhost*")] {
-                core.AddWebResourceRequestedFilter(filter, COREWEBVIEW2_WEB_RESOURCE_CONTEXT_ALL)?;
-            }
+            // Every request: one to this PC or its network refused (Yap's
+            // own helpers listen on this PC; the on-device model's server
+            // has no key) — an IP address in a non-public range however it's
+            // written, or a local name (`super::refused_request`). A test
+            // run's stand-in is the page itself.
+            core.AddWebResourceRequestedFilter(w!("*"), COREWEBVIEW2_WEB_RESOURCE_CONTEXT_ALL)?;
             let (e, si) = (env.clone(), standin.clone());
             core.add_WebResourceRequested(
                 &WebResourceRequestedEventHandler::create(Box::new(move |_, args| {
@@ -1155,11 +1334,53 @@ mod win {
                     let mut uri = PWSTR::null();
                     args.Request()?.Uri(&mut uri)?;
                     let uri = take_pwstr(uri);
-                    if si.as_deref().is_some_and(|base| uri.starts_with(&format!("{base}/"))) {
+                    if !refused_request(&uri, si.as_deref()) {
                         return Ok(());
                     }
+                    tracing::debug!("A page's request to this PC or its network was refused");
                     let refused = e.CreateWebResourceResponse(None::<&IStream>, 403, w!("Forbidden"), w!(""))?;
                     args.SetResponse(&refused)?;
+                    Ok(())
+                })),
+                &mut token,
+            )?;
+            // Its dialogs (alert, confirm, prompt, "Leave this page?"): never
+            // WebView2's own — a native dialog over Yap from a page out of
+            // sight, or a page waiting on one while Yap's script waits on the
+            // page. Dismissed (never accepted) on a shot's page, a page out of
+            // sight, or one Yap is acting on (`super::acting_on`); on a page
+            // the person is using, its tab's strip asks (`DIALOG_EVENT`, the
+            // answer `page_view_dialog`), the page waiting meanwhile.
+            settings.SetAreDefaultScriptDialogsEnabled(false)?;
+            let (a, k) = (app.clone(), key.to_string());
+            core.add_ScriptDialogOpening(
+                &ScriptDialogOpeningEventHandler::create(Box::new(move |_, args| {
+                    let Some(args) = args else { return Ok(()) };
+                    let on_screen = VIEWS.with(|v| v.borrow().iter().any(|x| x.key == k && x.bounds.is_some()));
+                    if snap || !on_screen || super::acting_on(&k) {
+                        tracing::info!(snap, on_screen, "Chat: a page's dialog was dismissed");
+                        return Ok(());
+                    }
+                    let mut kind = COREWEBVIEW2_SCRIPT_DIALOG_KIND(0);
+                    args.Kind(&mut kind)?;
+                    let kind = match kind {
+                        COREWEBVIEW2_SCRIPT_DIALOG_KIND_CONFIRM => "confirm",
+                        COREWEBVIEW2_SCRIPT_DIALOG_KIND_PROMPT => "prompt",
+                        COREWEBVIEW2_SCRIPT_DIALOG_KIND_BEFOREUNLOAD => "leave",
+                        _ => "alert",
+                    };
+                    let mut m = PWSTR::null();
+                    args.Message(&mut m)?;
+                    let message: String = take_pwstr(m).chars().take(600).collect();
+                    let mut dt = PWSTR::null();
+                    args.DefaultText(&mut dt)?;
+                    let default: String = take_pwstr(dt).chars().take(300).collect();
+                    // One at a time: an older one still waiting goes first.
+                    finish_dialog(&a, &k, false, None);
+                    let deferral = args.GetDeferral()?;
+                    DIALOGS.with(|d| d.borrow_mut().push((k.clone(), args.clone(), deferral)));
+                    tracing::info!(kind, "Chat: a page's dialog is asked in its tab");
+                    let _ = a.emit_to("settings", DIALOG_EVENT, serde_json::json!({ "key": k, "kind": kind, "message": message, "default": default }));
                     Ok(())
                 })),
                 &mut token,
@@ -1383,7 +1604,8 @@ mod win {
 
     /// Close page `key`: its controller and its host.
     fn close_one(app: &AppHandle, key: &str) {
-        let _ = app;
+        // A dialog it had waiting: answered Cancel (never left hanging).
+        finish_dialog(app, key, false, None);
         let gone = VIEWS.with(|v| {
             let mut v = v.borrow_mut();
             let i = v.iter().position(|x| x.key == key)?;
@@ -1460,7 +1682,7 @@ mod win {
                 Some(Some(core)) => unsafe { core.Navigate(&HSTRING::from(load.as_str())) }.map_err(|e| e.message()),
                 // Still being made: it loads the new address when it's ready.
                 Some(None) => Ok(()),
-                None => make_or_place(&a, root, key, url, load, String::new(), bounds, None),
+                None => make_or_place(&a, root, key, url, load, String::new(), bounds, None).map(|_| ()),
             }
         })
         .await?
@@ -1572,6 +1794,7 @@ mod win {
             VIEWS.with(|v| {
                 v.borrow_mut().push(View {
                     key: key.clone(),
+                    id: 0,
                     url: String::new(),
                     load: String::new(),
                     section: String::new(),
@@ -1836,23 +2059,23 @@ mod win {
     }
 
     /// The page tabs alive now (not a shot's or a clearing's page), in the
-    /// order they opened; the one on screen in front, else the one shown last.
+    /// order they opened, each with its own number; the one on screen in
+    /// front, else the one shown last.
     pub async fn tabs(app: AppHandle) -> Result<Vec<super::OpenTab>, String> {
         main_thread(&app, |_| {
             let (standin, _) = super::web_route();
-            let alive: Vec<(String, String, Option<ICoreWebView2>, bool, u64)> = VIEWS.with(|v| {
+            let alive: Vec<(usize, String, String, Option<ICoreWebView2>, bool, u64)> = VIEWS.with(|v| {
                 v.borrow()
                     .iter()
                     .filter(|x| x.snap.is_none() && !x.key.starts_with("snap:") && !x.key.starts_with("clear:"))
-                    .map(|x| (x.key.clone(), x.url.clone(), x.core.clone(), x.bounds.is_some(), x.used))
+                    .map(|x| (x.id, x.key.clone(), x.url.clone(), x.core.clone(), x.bounds.is_some(), x.used))
                     .collect()
             });
-            let shown = alive.iter().any(|(_, _, _, on, _)| *on);
-            let last = alive.iter().map(|(_, _, _, _, used)| *used).max().unwrap_or(0);
+            let shown = alive.iter().any(|(_, _, _, _, on, _)| *on);
+            let last = alive.iter().map(|(_, _, _, _, _, used)| *used).max().unwrap_or(0);
             alive
                 .into_iter()
-                .enumerate()
-                .map(|(i, (key, url, core, on, used))| {
+                .map(|(id, key, url, core, on, used)| {
                     let (mut now, mut title) = (url, String::new());
                     if let Some(core) = core {
                         unsafe {
@@ -1869,7 +2092,7 @@ mod win {
                             }
                         }
                     }
-                    super::OpenTab { tab: i + 1, key, title, url: now, front: if shown { on } else { used == last } }
+                    super::OpenTab { tab: id, key, title, url: now, front: if shown { on } else { used == last } }
                 })
                 .collect()
         })
@@ -1904,7 +2127,7 @@ mod win {
             serde_json::Value::Array(VIEWS.with(|v| {
                 v.borrow()
                     .iter()
-                    .map(|x| serde_json::json!({ "key": x.key, "url": x.url, "load": x.load, "onScreen": x.bounds.is_some(), "loaded": x.loaded, "made": x.controller.is_some() }))
+                    .map(|x| serde_json::json!({ "key": x.key, "tab": x.id, "url": x.url, "load": x.load, "onScreen": x.bounds.is_some(), "loaded": x.loaded, "made": x.controller.is_some() }))
                     .collect()
             }))
         })
@@ -2004,6 +2227,57 @@ mod tests {
         assert!(menu_keep(&[("", true), ("saveImageAs", false), ("", true)]).is_empty());
         assert_eq!(error_words(13), "The page couldn't be found.");
         assert_eq!(error_words(99), "The page didn't load.");
+    }
+
+    #[test]
+    fn a_pages_requests_to_this_pc_or_its_network_are_refused() {
+        // This PC however it's written, the home network, link-local, unique-local.
+        for bad in [
+            "http://127.0.0.1:8080/v1/chat/completions",
+            "http://127.0.0.2/",
+            "http://[::1]/",
+            "http://[::ffff:7f00:1]/",
+            "http://[::ffff:127.0.0.1]:51437/",
+            "http://2130706433/",
+            "http://0x7f.0.0.1/",
+            "http://0.0.0.0:3000/",
+            "http://192.168.1.1/admin",
+            "https://10.0.0.5/",
+            "http://172.20.1.1/",
+            "http://169.254.169.254/latest/meta-data",
+            "http://[fe80::1]/",
+            "http://[fd12:3456::1]/",
+            "http://100.64.0.1/",
+            "ws://localhost:9222/devtools",
+            "http://localhost/",
+            "http://yap.localhost/",
+            "http://printer.local/",
+            "http://router/",
+        ] {
+            assert!(refused_request(bad, None), "{bad}");
+        }
+        // Public pages, their pictures and scripts; addresses that aren't requests to a host.
+        for ok in ["https://wiki.example.com/wiki/Fort_Joy", "https://cdn.example.net/a.js", "https://93.184.216.34/", "https://[2606:4700::1111]/", "data:image/png;base64,iVBOR", "blob:https://wiki.example.com/1234", "about:blank"] {
+            assert!(!refused_request(ok, None), "{ok}");
+        }
+        // A test run's stand-in is the page itself.
+        assert!(!refused_request(&format!("{STANDIN}/wiki.example.com/x"), Some(STANDIN)));
+        assert!(refused_request("http://127.0.0.1:5555/other", Some(STANDIN)));
+    }
+
+    #[tokio::test]
+    async fn yap_acting_on_a_page_holds_while_it_acts_and_a_moment_after() {
+        let key = "page:https://dialogs.example/acting";
+        assert!(!acting_on(key));
+        let busy = busy(key).await;
+        assert!(acting_on(key) && !acting_on("page:https://dialogs.example/other"));
+        drop(busy);
+        assert!(acting_on(key), "a dialog a click opens comes a moment later");
+        ACTING.lock().unwrap().as_mut().unwrap().get_mut(key).unwrap().1 = Some(std::time::Instant::now());
+        assert!(!acting_on(key));
+        // Tab numbers are never used twice.
+        let (a, b) = (next_tab(), next_tab());
+        assert!(b > a);
     }
 
     #[test]

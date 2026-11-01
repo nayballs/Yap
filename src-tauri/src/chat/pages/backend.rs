@@ -52,15 +52,38 @@ pub async fn tabs_soon(opened: bool) -> Vec<OpenTab> {
 /// **A page brought up by `open_page`**, made now: the stand-in browser
 /// opens it; the panel's is made out of sight (`view::open_hidden`) — the
 /// Chat view shows only the last page a step brought up, and each must be a
-/// tab the model can read and act on, numbered in the order it asked.
-pub async fn opened(url: &str, section: &str) {
+/// tab the model can read and act on. The tab closed to make room for it
+/// (at most `view::MAX_VIEWS` stay open), said for the model.
+pub async fn opened(url: &str, section: &str) -> Option<String> {
     #[cfg(any(test, debug_assertions))]
     {
-        if super::sim::with(|b| b.open(url)).is_some() {
-            return;
+        if let Some(closed) = super::sim::with(|b| {
+            b.open(url);
+            b.take_closed()
+        }) {
+            return closed.map(|(n, title)| closed_words(n, &title));
         }
     }
-    view::open_hidden(url, section).await;
+    view::open_hidden(url, section).await.map(|(n, title)| closed_words(n, &title))
+}
+
+/// "Tab 3 ("…") closed to make room…", for the model. Pure.
+fn closed_words(n: usize, title: &str) -> String {
+    let title = super::act::rules::clip(title, 60).replace('"', "'");
+    let named = if title.is_empty() { String::new() } else { format!(" (\"{title}\")") };
+    format!("Tab {n}{named} closed to make room: at most {} pages stay open beside the chat. Its number is gone; open_page brings it back as a new tab.", view::MAX_VIEWS)
+}
+
+/// **Yap acts on page `key`** while this lives: the page's dialogs are
+/// dismissed (`view::busy`). Nothing for the stand-in browser.
+pub async fn busy(key: &str) -> Option<view::Busy> {
+    #[cfg(any(test, debug_assertions))]
+    {
+        if super::sim::with(|_| ()).is_some() {
+            return None;
+        }
+    }
+    Some(view::busy(key).await)
 }
 
 /// **A page's words** (`read_open_page`).

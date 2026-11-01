@@ -9,7 +9,11 @@
 //   press ‘Buy tickets’ on rail.example.com" — Don't refuses it, Allow once
 //   lets it through — and the payment page's card fields are never typed;
 // - a sign-in form is the person's: its password and email refused;
-// - switch_tab shows the tab beside the chat.
+// - with the page covering the thread (expanded), the page tab's strip asks
+//   the card's question too, with Allow once / Don't, in step with the card;
+// - Enter in a chat page's message box (an editable region outside any
+//   form) asks first, and typing there goes in after the draft;
+// - switch_tab shows the tab beside the chat (by its own number).
 // A model that isn't strong ("fake-chat") gets none of it (chat-pages.spec.js).
 //
 // Nothing leaves the PC: the model is the scripted fake AI
@@ -19,7 +23,7 @@
 // `e2e_page_view_eval` / `e2e_page_views`. Fictional sites only.
 import { test as base, expect, setConfig, openView } from './support/fixtures.js';
 import { startFakeLlm } from './support/fake-llm.js';
-import { startFakeWeb, RAIL_URL, RAIL_RESULTS_URL, RAIL_SIGNIN_URL, FORT_JOY_URL } from './support/fake-web.js';
+import { startFakeWeb, RAIL_URL, RAIL_RESULTS_URL, RAIL_SIGNIN_URL, FORT_JOY_URL, CHAT_URL } from './support/fake-web.js';
 
 const test = base.extend({
   fakeLlm: [
@@ -61,6 +65,9 @@ const keyOf = (url) => `page:${url.replace(/#.*$/, '').replace(/\/+$/, '')}`;
 const views = (yap) => yap.invoke('e2e_page_views');
 /** A script run in page `url`'s own webview: its JSON result. */
 const inPage = async (yap, url, script) => JSON.parse(await yap.invoke('e2e_page_view_eval', { key: keyOf(url), script }));
+
+/** The chat page's message box, its words as one line (an editable region may hold non-breaking spaces). */
+const BOX_TEXT = String.raw`document.getElementById('box').innerText.replace(/\s+/g, ' ').trim()`;
 
 /** The ref of the element named `name` in the turn's latest read (its element lines). */
 function refIn(request, name) {
@@ -236,17 +243,95 @@ test('a sign-in form is the person’s: its password and email are refused', asy
   expect(await inPage(yap, RAIL_SIGNIN_URL, "document.querySelector('[name=email]').value")).toBe('');
 });
 
-test('switch_tab shows the tab beside the chat', async ({ yap, main, fakeLlm }) => {
+test('with the page covering the thread, its strip asks the card’s question too: Allow once there lets it through', async ({ yap, main, fakeLlm, shot }) => {
   await setConfig(yap, main, chatConfig(fakeLlm));
   const from = fakeLlm.requests.length;
   fakeLlm.scriptChat([
+    { tools: [{ name: 'open_page', args: { url: RAIL_RESULTS_URL } }] },
+    { tools: [{ name: 'read_open_page', args: { elements: true } }] },
+    { tools: [{ name: 'click', args: (r) => ({ ref: refIn(r, 'Buy tickets') }) }] },
+    { content: 'The payment page is open: enter your card details yourself.' },
+  ]);
+  await ask(main, `Buy me a ticket for the 09:42 here: ${RAIL_RESULTS_URL}`);
+  const card = main.getByTestId('chat-page-confirm');
+  await expect(card).toHaveAttribute('data-state', 'asking', { timeout: 30_000 });
+  // The page expanded over the thread: the thread's card can't be seen, the strip asks.
+  await main.getByRole('button', { name: 'Expand to full width' }).click();
+  const strip = main.getByTestId('chat-page-ask');
+  await expect(strip).toBeVisible();
+  await expect(strip).toContainText('Yap wants to press ‘Buy tickets’ on rail.example.com');
+  await expect(strip).toContainText('It may buy something.');
+  await expect(main.getByTestId('chat-page-acting')).toHaveCount(0);
+  await shot(main, '03-the-strip-asks');
+  await main.getByTestId('chat-page-ask-allow').click();
+  await expect(strip).toHaveCount(0);
+  await expect.poll(async () => inPage(yap, RAIL_RESULTS_URL, 'location.pathname'), { timeout: 20_000 }).toMatch(/\/buy$/);
+  // Back beside the chat: the thread's card says it was allowed (Rust's answer, in step).
+  await main.getByRole('button', { name: 'Back beside the chat' }).click();
+  await expect(main.getByText('enter your card details yourself')).toBeVisible({ timeout: 20_000 });
+  await expect(card).toHaveAttribute('data-state', 'allowed');
+  expect(lastResult(chatCalls(fakeLlm, from)[3])).toMatchObject({ success: true, displayText: 'Clicked ‘Buy tickets’ on rail.example.com (you allowed it)' });
+});
+
+test('Enter in a chat page’s message box asks first; typing there keeps the draft', async ({ yap, main, fakeLlm }) => {
+  await setConfig(yap, main, chatConfig(fakeLlm));
+  let from = fakeLlm.requests.length;
+  fakeLlm.scriptChat([
+    { tools: [{ name: 'open_page', args: { url: CHAT_URL } }] },
+    { tools: [{ name: 'read_open_page', args: { elements: true } }] },
+    { tools: [{ name: 'type_text', args: (r) => ({ ref: refIn(r, 'Message #general'), text: 'see you at 6', submit: true }) }] },
+    { content: 'I didn’t send it: you said no.' },
+  ]);
+  await ask(main, `Tell #general see you at 6, on ${CHAT_URL}`);
+  // The message box is no form: Enter there would send, so Yap asks (in the thread and the strip).
+  await expect.poll(() => chatCalls(fakeLlm, from).length, { timeout: 30_000 }).toBeGreaterThanOrEqual(3);
+  expect(lastResult(chatCalls(fakeLlm, from)[2]).data.elements).toMatch(/\[\d+\] textbox "Message #general" = "Hello"/);
+  const card = main.getByTestId('chat-page-confirm');
+  await expect(card).toHaveAttribute('data-state', 'asking', { timeout: 20_000 });
+  await expect(card).toContainText('Yap wants to press Enter in ‘Message #general’ on chat.example.com');
+  await expect(card).toContainText('It may send something.');
+  await expect(main.getByTestId('chat-page-ask')).toContainText('Yap wants to press Enter in ‘Message #general’');
+  await card.getByRole('button', { name: "Don't" }).click();
+  await expect(main.getByText('I didn’t send it: you said no.')).toBeVisible({ timeout: 20_000 });
+  // The strip let it go with the card; nothing typed, nothing sent.
+  await expect(main.getByTestId('chat-page-ask')).toHaveCount(0);
+  expect(lastResult(chatCalls(fakeLlm, from)[3])).toMatchObject({ success: false, displayText: "Didn't press Enter in ‘Message #general’: you said no", data: { asked: true, allowed: false } });
+  expect(await inPage(yap, CHAT_URL, "document.querySelectorAll('#sent li').length")).toBe(0);
+  expect(await inPage(yap, CHAT_URL, BOX_TEXT)).toBe('Hello');
+
+  // Typed without Enter: in after the draft, never over it; the result says what the box holds.
+  from = fakeLlm.requests.length;
+  fakeLlm.scriptChat([
+    { tools: [{ name: 'read_open_page', args: { elements: true } }] },
+    { tools: [{ name: 'type_text', args: (r) => ({ ref: refIn(r, 'Message #general'), text: 'see you at 6' }) }] },
+    { content: 'It’s in the box, not sent.' },
+  ]);
+  await say(main, 'Just type see you at 6 in the box then, don’t send it');
+  await expect(main.getByText('It’s in the box, not sent.')).toBeVisible({ timeout: 30_000 });
+  const typed = lastResult(chatCalls(fakeLlm, from)[2]);
+  expect(typed).toMatchObject({ success: true, data: { field: 'Hello see you at 6' } });
+  expect(typed.note).toMatch(/^The words went in at the cursor/);
+  expect(await inPage(yap, CHAT_URL, BOX_TEXT)).toBe('Hello see you at 6');
+  expect(await inPage(yap, CHAT_URL, "document.querySelectorAll('#sent li').length")).toBe(0);
+});
+
+test('switch_tab shows the tab beside the chat', async ({ yap, main, fakeLlm }) => {
+  await setConfig(yap, main, chatConfig(fakeLlm));
+  const from = fakeLlm.requests.length;
+  // (Tab numbers are each tab's own for the session: the read lists them.)
+  const wikiTab = (r) => lastResult(r).data.tabs.find((t) => t.url.includes('Fort_Joy')).tab;
+  fakeLlm.scriptChat([
     { tools: [{ name: 'open_page', args: { url: FORT_JOY_URL } }, { name: 'open_page', args: { url: RAIL_URL } }] },
-    { tools: [{ name: 'switch_tab', args: { tab: 1 } }] },
+    { tools: [{ name: 'read_open_page', args: {} }] },
+    { tools: [{ name: 'switch_tab', args: (r) => ({ tab: wikiTab(r) }) }] },
     { content: 'The wiki is in front.' },
   ]);
   await ask(main, `Open ${FORT_JOY_URL} and ${RAIL_URL}, then show me the wiki`);
   await expect(main.getByText('The wiki is in front.')).toBeVisible({ timeout: 30_000 });
-  expect(lastResult(chatCalls(fakeLlm, from)[2])).toMatchObject({ success: true, displayText: 'Showed tab 1 beside the chat', data: { tab: 1 } });
+  const calls = chatCalls(fakeLlm, from);
+  const n = wikiTab(calls[2]);
+  expect(n).toBe((await views(yap)).find((v) => v.key === keyOf(FORT_JOY_URL)).tab);
+  expect(lastResult(calls[3])).toMatchObject({ success: true, displayText: `Showed tab ${n} beside the chat`, data: { tab: n } });
   await expect(main.getByTestId('chat-page-title')).toHaveText('Fort Joy - Example Wiki', { timeout: 20_000 });
   await expect.poll(async () => (await views(yap)).find((v) => v.key === keyOf(FORT_JOY_URL))?.onScreen, { timeout: 20_000 }).toBe(true);
   await expect.poll(async () => (await views(yap)).find((v) => v.key === keyOf(RAIL_URL))?.onScreen).toBe(false);

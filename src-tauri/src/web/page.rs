@@ -21,7 +21,7 @@ use super::{network_error, site_of, tidy, Endpoints, CACHE_FOR, MAX_REDIRECTS, P
 use super::SEARCHES;
 
 /// Host names that are this PC or its network, whatever they resolve to.
-fn is_local_name(host: &str) -> bool {
+pub fn is_local_name(host: &str) -> bool {
     let h = host.trim_end_matches('.').to_ascii_lowercase();
     h == "localhost"
         || !h.contains('.')

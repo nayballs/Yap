@@ -1091,6 +1091,7 @@ async fn answer_turn(
     // The pages it brought up (their tabs come back with the chat) and the
     // buttons it offered.
     crate::chat::chats::set_pages(conv.id, index, &shown_pages, &offers);
+    crate::chat::chats::set_confirms(conv.id, index, &watch.as_ref().map(|w| w.seen().confirms).unwrap_or_default());
     // Read for lasting facts once the chat goes quiet ("Learn from my chats").
     crate::memory::learn::after_turn(conv.id);
     // Filling the room? The older messages summarised in the background

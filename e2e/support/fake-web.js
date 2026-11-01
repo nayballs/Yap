@@ -132,6 +132,25 @@ PAGES['rail.example.com/signin'] = `<!doctype html><html><head><title>Sign in - 
     <button type="submit">Sign in</button>
   </form></main></body></html>`;
 
+// A made-up team chat (chat-browse.spec.js): its message box is an editable
+// region outside any form, holding a draft, that sends on Enter (the page's
+// own script, as a web chat's does); a search box in a search region.
+export const CHAT_URL = 'https://chat.example.com/general';
+PAGES['chat.example.com/general'] = `<!doctype html><html><head><title>#general - Example Chat</title></head><body><main><h1>#general</h1>
+  <ul id="sent"></ul>
+  <div id="box" role="textbox" contenteditable="true" aria-label="Message #general">Hello</div>
+  <div role="search"><input id="find" aria-label="Find in chat"></div>
+  <script>
+    document.getElementById('box').addEventListener('keydown', function (e) {
+      if (e.key !== 'Enter') return;
+      e.preventDefault();
+      var li = document.createElement('li');
+      li.textContent = this.innerText;
+      document.getElementById('sent').appendChild(li);
+      this.textContent = '';
+    });
+  </script></main></body></html>`;
+
 /** The rail site's results for the stations asked for (`from`, `to`). */
 function railResults(q) {
   const right = /^kellbrook$/i.test((q.get('from') || '').trim()) && /^port ellis$/i.test((q.get('to') || '').trim());

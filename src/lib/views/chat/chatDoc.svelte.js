@@ -130,6 +130,10 @@ export function createDocPanel({ onopennote = () => null } = {}) {
   // The page tab Yap is acting on now (its key), and the turn's Stop.
   let acting = $state(null);
   let stopActing = null;
+  // Yap's question waiting before an action on a page (a `confirm` card,
+  // chat/pages/act/confirm.rs): its page tab's strip asks it too, since the
+  // panel may cover the thread (a narrow window, the page expanded).
+  let asking = $state(null);
   let newTabs = 0;
   // Tabs closed (their keys), and items shown that no answer has yet (a
   // turn's, before its answer is kept).
@@ -346,6 +350,29 @@ export function createDocPanel({ onopennote = () => null } = {}) {
     stopActing?.();
   }
 
+  /**
+   * A question card as it is now (a turn's `confirm` event): waiting, its
+   * page tab's strip asks it — the tab shown, should the panel be showing
+   * another; answered (here, in the thread, or not in time), the strip lets
+   * it go.
+   */
+  function setAsking(card) {
+    if (card?.state === 'asking') {
+      asking = card;
+      if (open && card.key && !(showing === 'page' && tabKeyOf(page) === card.key)) showTab(card.key);
+    } else if (asking && card?.id === asking.id) {
+      asking = null;
+    }
+  }
+
+  /** The strip's Allow once / Don't: the waiting question answered (the thread's card follows Rust's answer). */
+  function answerAsking(allow) {
+    const c = asking;
+    if (!c) return;
+    asking = null;
+    invoke('chat_page_confirm', { id: c.id, allow: !!allow }).catch(() => {});
+  }
+
   /** Page tab `key` shown (a turn's `switchTab`: the model's switch_tab). */
   function showTab(key) {
     if (!key) return;
@@ -432,6 +459,7 @@ export function createDocPanel({ onopennote = () => null } = {}) {
     // Yap isn't using a page any more (chat/pages/act.rs).
     acting = null;
     stopActing = null;
+    asking = null;
     if (!busy) return;
     busy = false;
     writing = null;
@@ -478,6 +506,7 @@ export function createDocPanel({ onopennote = () => null } = {}) {
     pageNow = {};
     hidden = [];
     extra = [];
+    asking = null;
   }
 
   /** Preview (the page) or Source (the markdown, editable). */
@@ -627,6 +656,9 @@ export function createDocPanel({ onopennote = () => null } = {}) {
     setActing,
     stopUsing,
     get acting() { return acting; },
+    setAsking,
+    answerAsking,
+    get asking() { return asking; },
     newPage,
     pageMoved,
     closePages,

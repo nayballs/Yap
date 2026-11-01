@@ -7,7 +7,11 @@
 //! Enforced here, in Rust, whatever the model was told: a page or a model
 //! that words things cleverly can't talk its way past them.
 
+use std::collections::HashSet;
+
 use serde::{Deserialize, Serialize};
+
+use super::words;
 
 /// **One link, button or field** on a page beside the chat, as the element
 /// script describes it. `r` is its ref: the number the model acts on, the
@@ -46,10 +50,18 @@ pub struct Element {
     pub submit: bool,
     /// Its value was left out (a sensitive field).
     pub masked: bool,
+    /// The page marks it as a search box whatever its words (in a
+    /// `role="search"` region or a `<search>` element, `enterkeyhint` or
+    /// `inputmode` "search").
+    pub search: bool,
+    /// An editable region (`contenteditable`): typing goes in at its caret.
+    pub editable: bool,
 }
 
 /// A form on the page: whether it has a password field (a sign-in form),
-/// where it goes, and its submit button's words.
+/// where it goes, its submit button's words — and whether it takes a
+/// payment (a card field in it, by `autocomplete` or its words, or a payment
+/// provider's frame) or shows a price.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(default)]
 pub struct Form {
@@ -58,6 +70,8 @@ pub struct Form {
     pub action: String,
     pub method: String,
     pub submit: String,
+    pub payment: bool,
+    pub price: bool,
 }
 
 /// Where the page is scrolled to (CSS pixels): its top, the window's height
@@ -82,14 +96,16 @@ pub struct Snapshot {
     pub forms: Vec<Form>,
     /// A password field anywhere on the page.
     pub password: bool,
+    /// A payment card field (or a payment provider's frame) anywhere on it.
+    pub payment: bool,
     /// More elements than [`MAX_ELEMENTS`] were there.
     pub more: bool,
     pub scroll: Scroll,
 }
 
 /// One element looked up by its ref just before an action, with what the
-/// rules need around it: its form, whether the page has a password field,
-/// the page's title and headings (a sign-in page says so).
+/// rules need around it: its form, whether the page has a password field or
+/// a payment field, the page's title and headings (a sign-in page says so).
 #[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(default)]
 pub struct Described {
@@ -97,6 +113,7 @@ pub struct Described {
     pub el: Option<Element>,
     pub form: Option<Form>,
     pub password: bool,
+    pub payment: bool,
     pub title: String,
     pub headings: Vec<String>,
     pub url: String,
@@ -108,37 +125,32 @@ pub const MAX_ELEMENTS: usize = 150;
 /// station, a date, a search; never a note's worth of the person's words.
 pub const MAX_TYPED: usize = 200;
 
-/// `s` as lower-case words: split at anything not a letter or a digit, and
-/// at a lower-to-upper change ("cardNumber" → card, number). Pure.
+/// `s` as lower-case words, accents folded ("Réserver" → reserver): split at
+/// anything not a letter or a digit, and at a lower-to-upper change
+/// ("cardNumber" → card, number). Pure.
 pub fn words(s: &str) -> Vec<String> {
     let mut out: Vec<String> = Vec::new();
     let mut cur = String::new();
     let mut prev_lower = false;
+    let push = |cur: &mut String, out: &mut Vec<String>| out.push(words::fold(&std::mem::take(cur).to_lowercase()));
     for c in s.chars() {
         if c.is_alphanumeric() {
             if c.is_uppercase() && prev_lower && !cur.is_empty() {
-                out.push(std::mem::take(&mut cur).to_lowercase());
+                push(&mut cur, &mut out);
             }
             prev_lower = c.is_lowercase() || c.is_ascii_digit();
             cur.push(c);
         } else {
             if !cur.is_empty() {
-                out.push(std::mem::take(&mut cur).to_lowercase());
+                push(&mut cur, &mut out);
             }
             prev_lower = false;
         }
     }
     if !cur.is_empty() {
-        out.push(cur.to_lowercase());
+        push(&mut cur, &mut out);
     }
     out
-}
-
-/// Whether `ws` holds `pair` side by side ("sort", "code"), or the two run
-/// together as one word ("sortcode"). Pure.
-fn has_pair(ws: &[String], pair: (&str, &str)) -> bool {
-    let joined = format!("{}{}", pair.0, pair.1);
-    ws.contains(&joined) || ws.windows(2).any(|p| p[0] == pair.0 && p[1] == pair.1)
 }
 
 /// The words an element is known by for the rules: its name, label,
@@ -151,7 +163,8 @@ fn known_by(e: &Element) -> Vec<String> {
 /// the chip — a password, payment card details, bank details, a security
 /// code. By its input type, its `autocomplete` (`cc-*`, `current-password`,
 /// `new-password`, `one-time-code`), and its name, id, label or placeholder
-/// (card, CVV, CVC, IBAN, sort code, account number, security code, PIN).
+/// in any of Yap's languages (`words.rs`: card, Kartennummer, numéro de
+/// carte, CVV, IBAN, sort code, Kontonummer, mot de passe, contraseña, PIN…).
 /// `None`: Yap may type there (if it's a field at all). Pure.
 pub fn sensitive(e: &Element) -> Option<&'static str> {
     let kind = e.kind.trim().to_ascii_lowercase();
@@ -167,29 +180,26 @@ pub fn sensitive(e: &Element) -> Option<&'static str> {
         return Some("a security code");
     }
     let ws = known_by(e);
-    let any = |list: &[&str]| ws.iter().any(|w| list.contains(&w.as_str()));
-    if any(&["password", "passwd", "passcode", "passphrase"]) {
+    let by = |pick: words::Pick| words::in_any(&ws, pick);
+    if by(|l| l.password) {
         return Some("a password");
     }
-    if any(&["card", "cardnumber", "ccnumber", "ccnum", "creditcard", "debitcard", "cvv", "cvv2", "cvc", "cvc2", "csc", "cardholder"])
-        || has_pair(&ws, ("card", "number"))
-        || has_pair(&ws, ("expiry", "date"))
-    {
+    if by(|l| l.card) {
         return Some("payment card details");
     }
-    if any(&["iban", "bic", "swift", "routing"]) || has_pair(&ws, ("sort", "code")) || has_pair(&ws, ("account", "number")) || has_pair(&ws, ("account", "no")) {
+    if by(|l| l.bank) {
         return Some("bank details");
     }
-    if any(&["pin", "otp", "2fa", "totp"]) || has_pair(&ws, ("security", "code")) || has_pair(&ws, ("verification", "code")) {
+    if by(|l| l.code_field) {
         return Some("a security code");
     }
     None
 }
 
-/// Words that make a page a sign-in page (its title or a heading).
+/// Words that make a page a sign-in page (its title or a heading), in any
+/// of Yap's languages.
 fn says_sign_in(text: &str) -> bool {
-    let ws = words(text);
-    has_pair(&ws, ("sign", "in")) || has_pair(&ws, ("log", "in")) || ws.iter().any(|w| w == "login" || w == "logon")
+    words::in_any(&words(text), |l| l.sign_in_page)
 }
 
 /// **A sign-in field**: a field of a form with a password field, a
@@ -204,12 +214,7 @@ pub fn sign_in_field(d: &Described, e: &Element) -> bool {
     if auto.split_whitespace().any(|a| a == "username") {
         return true;
     }
-    let ws = known_by(e);
-    let userish = e.kind.eq_ignore_ascii_case("email")
-        || auto.split_whitespace().any(|a| a == "email")
-        || ws.iter().any(|w| matches!(w.as_str(), "username" | "user" | "login" | "email" | "userid"))
-        || has_pair(&ws, ("user", "name"))
-        || has_pair(&ws, ("e", "mail"));
+    let userish = e.kind.eq_ignore_ascii_case("email") || auto.split_whitespace().any(|a| a == "email") || words::in_any(&known_by(e), |l| l.user);
     userish && (d.password || says_sign_in(&d.title) || d.headings.iter().any(|h| says_sign_in(h)))
 }
 
@@ -223,78 +228,246 @@ pub fn takes_text(e: &Element) -> bool {
     matches!(e.role.as_str(), "textbox" | "searchbox" | "combobox" | "spinbutton" | "listbox")
 }
 
+/// **A search box**: Enter there searches, so it needs no asking — the page
+/// says so (`type="search"`, `role="searchbox"`, a search region,
+/// `enterkeyhint`), its `name` is a search's (`q`, `s`, `query`…), or its
+/// words are a search's in any of Yap's languages ("Search", "Suche",
+/// "Rechercher", "Buscar", "Cerca", "Pesquisar", "Zoeken"). Pure.
+pub fn search_box(e: &Element) -> bool {
+    if e.search || e.role == "searchbox" || e.kind.eq_ignore_ascii_case("search") {
+        return true;
+    }
+    if matches!(e.field.to_ascii_lowercase().as_str(), "q" | "s" | "query" | "search_query" | "keyword" | "keywords") {
+        return true;
+    }
+    words::in_any(&known_by(e), |l| l.search)
+}
+
+/// **A price in `s`**: a currency sign or code next to a number ("£42.10",
+/// "19,99 €", "USD 30", "kr 99"). Language-independent. Pure.
+pub fn has_price(s: &str) -> bool {
+    const SIGNS: &[char] = &['£', '€', '$', '¥', '₹', '₩', '₽', '₺', '₪', '¢', '₱', '₫', '฿'];
+    const CODES: &[&str] = &["usd", "eur", "gbp", "chf", "jpy", "cad", "aud", "sek", "nok", "dkk", "pln", "brl", "mxn", "kr", "zl", "r$"];
+    let chars: Vec<char> = s.chars().collect();
+    let digit_near = |i: usize, step: isize| -> bool {
+        // A digit within two places (a space, a non-breaking space between).
+        let mut j = i as isize + step;
+        for _ in 0..2 {
+            if j < 0 || j as usize >= chars.len() {
+                return false;
+            }
+            let c = chars[j as usize];
+            if c.is_ascii_digit() {
+                return true;
+            }
+            if !c.is_whitespace() {
+                return false;
+            }
+            j += step;
+        }
+        false
+    };
+    if chars.iter().enumerate().any(|(i, c)| SIGNS.contains(c) && (digit_near(i, 1) || digit_near(i, -1))) {
+        return true;
+    }
+    // A currency code as its own word beside a number.
+    let lower = s.to_lowercase();
+    let tokens: Vec<&str> = lower.split(|c: char| c.is_whitespace()).filter(|t| !t.is_empty()).collect();
+    let numeric = |t: &str| t.chars().next().is_some_and(|c| c.is_ascii_digit()) && t.chars().all(|c| c.is_ascii_digit() || ",.-".contains(c));
+    tokens.windows(2).any(|w| (CODES.contains(&w[0]) && numeric(w[1])) || (numeric(w[0]) && CODES.contains(&w[1].trim_end_matches(['.', ',', ')']))))
+}
+
+/// The kinds of click that ask first, in the order they're told apart (a
+/// "Confirm booking" books), each with its words in every language.
+const KINDS: &[(&str, words::Pick)] = &[
+    ("sign in", |l| l.sign_in),
+    ("buy", |l| l.buy),
+    ("pay", |l| l.pay),
+    ("book", |l| l.book),
+    ("place an order", |l| l.order),
+    ("cancel", |l| l.cancel),
+    ("subscribe", |l| l.subscribe),
+    ("confirm", |l| l.confirm),
+    ("send", |l| l.send),
+    ("delete", |l| l.delete),
+    ("agree", |l| l.agree),
+];
+
+/// The kinds an address's path is read for (a GET link that does something:
+/// "…/checkout", "…/unsubscribe?t=…", "…/booking/confirm"): never "send"
+/// nor "agree" ("/post/123" is a blog's), and only single words.
+const PATH_KINDS: &[&str] = &["sign in", "buy", "pay", "book", "place an order", "cancel", "subscribe", "confirm", "delete"];
+
 /// **What a click would do that asks the person first**: a click (or a
-/// submit) that would buy, pay, book, confirm, place an order, subscribe,
-/// send, delete or sign in — by the button's or link's words, and a link's
-/// address (…/checkout, …/pay). The kind, for the log and the evaluation;
-/// `None`: it goes ahead. Pure.
+/// submit) that would buy, pay, book, place an order, cancel, subscribe,
+/// confirm, send, delete, agree to terms or sign in — by the button's or
+/// link's words in any of Yap's languages ("Buy now", "Jetzt kaufen",
+/// "Commander", "Pagar"…), then a link's (or a form's) address
+/// (…/checkout, …/kasse, …/unsubscribe). The kind, for the card, the log
+/// and the evaluation; `None`: it goes ahead. Pure.
 pub fn needs_ok(label: &str, href: &str) -> Option<&'static str> {
     let ws = words(label);
-    let any = |list: &[&str]| ws.iter().any(|w| list.contains(&w.as_str()));
-    if has_pair(&ws, ("sign", "in")) || has_pair(&ws, ("log", "in")) || has_pair(&ws, ("log", "on")) || any(&["login", "logon", "signin"]) {
-        return Some("sign in");
-    }
-    if any(&["buy", "purchase", "checkout", "basket", "cart"]) || has_pair(&ws, ("check", "out")) {
-        return Some("buy");
-    }
-    if any(&["pay", "payment", "paynow", "donate", "transfer", "withdraw", "deposit", "bid"]) {
-        return Some("pay");
-    }
-    if any(&["book", "booking", "reserve", "reservation"]) {
-        return Some("book");
-    }
-    if any(&["order", "checkout"]) {
-        return Some("place an order");
-    }
-    if any(&["confirm", "confirmation"]) {
-        return Some("confirm");
-    }
-    if any(&["subscribe", "unsubscribe", "subscription", "register", "signup", "enrol", "enroll"]) || has_pair(&ws, ("sign", "up")) {
-        return Some("subscribe");
-    }
-    if any(&["send", "submit", "post", "publish", "reply", "share"]) {
-        return Some("send");
-    }
-    if any(&["delete", "remove", "erase", "discard"]) {
-        return Some("delete");
+    if let Some((kind, _)) = KINDS.iter().find(|(_, pick)| words::in_any(&ws, *pick)) {
+        return Some(kind);
     }
     // A link's address says what it does (a "Continue" to /checkout).
     let path = reqwest::Url::parse(href.trim()).map(|u| u.path().to_string()).unwrap_or_default();
     let pw = words(&path);
-    let pany = |list: &[&str]| pw.iter().any(|w| list.contains(&w.as_str()));
-    if pany(&["checkout", "buy", "purchase", "basket", "cart"]) {
-        return Some("buy");
+    if pw.is_empty() {
+        return None;
     }
-    if pany(&["pay", "payment", "payments"]) {
+    KINDS
+        .iter()
+        .filter(|(kind, _)| PATH_KINDS.contains(kind))
+        .find(|(_, pick)| words::LANGS.iter().any(|l| pick(l).iter().filter(|e| !e.contains(' ')).any(|e| words::holds(&pw, e))))
+        .map(|(kind, _)| *kind)
+}
+
+/// What a form's own signals say about submitting it, whatever its words:
+/// a payment form (a card field in it, or one on the page) pays, a posted
+/// form that shows a price buys. Pure.
+fn form_signals(d: &Described, f: &Form) -> Option<&'static str> {
+    if f.payment || d.payment {
         return Some("pay");
     }
-    if pany(&["booking", "book"]) {
-        return Some("book");
-    }
-    if pany(&["login", "signin", "logon"]) {
-        return Some("sign in");
+    if f.price && f.method.eq_ignore_ascii_case("post") {
+        return Some("buy");
     }
     None
 }
 
-/// What clicking `e` would do that asks first ([`needs_ok`]): its words, and
-/// a link's address; a form's submit button in a sign-in form signs in.
-/// Pure.
+/// What clicking `e` would do that asks first ([`needs_ok`]): its words and
+/// a link's address; for a form's submit button, also where the form goes,
+/// whether it takes a payment or shows a price (a "Continue" in a form
+/// posting to …/place-order asks, as Enter in it does); a button with a
+/// price on it pays; a sign-in form's submit signs in. Pure.
 pub fn click_needs_ok(d: &Described, e: &Element) -> Option<&'static str> {
-    if e.submit && d.form.as_ref().is_some_and(|f| f.password) {
-        return Some("sign in");
+    if e.submit {
+        if let Some(f) = d.form.as_ref() {
+            if f.password {
+                return Some("sign in");
+            }
+            if let Some(kind) = needs_ok(&e.name, &f.action).or_else(|| form_signals(d, f)) {
+                return Some(kind);
+            }
+        }
     }
-    needs_ok(&e.name, &e.href).or_else(|| (e.name.trim().is_empty()).then(|| needs_ok(&e.label, "")).flatten())
+    if let Some(kind) = needs_ok(&e.name, &e.href).or_else(|| (e.name.trim().is_empty()).then(|| needs_ok(&e.label, "")).flatten()) {
+        return Some(kind);
+    }
+    (e.role == "button" && has_price(&e.name)).then_some("pay")
 }
 
 /// What submitting `e`'s form (Enter in it) would do that asks first: its
-/// submit button's words and where the form goes. Pure.
+/// submit button's words, where the form goes, whether it takes a payment
+/// or shows a price. Pure.
 pub fn submit_needs_ok(d: &Described) -> Option<&'static str> {
     let f = d.form.as_ref()?;
     if f.password {
         return Some("sign in");
     }
-    needs_ok(&f.submit, &f.action)
+    needs_ok(&f.submit, &f.action).or_else(|| form_signals(d, f)).or_else(|| has_price(&f.submit).then_some("pay"))
+}
+
+/// **What Enter in `e` would do that asks first**: in a form, what
+/// submitting it would ([`submit_needs_ok`]); outside one, it may send — a
+/// chat's message box (a web mail's, WhatsApp's, Slack's) sends on Enter —
+/// unless it's a search box ([`search_box`]). Pure.
+pub fn enter_needs_ok(d: &Described, e: &Element) -> Option<&'static str> {
+    if d.form.is_some() {
+        return submit_needs_ok(d);
+    }
+    (!search_box(e)).then_some("send")
+}
+
+/// **Typed text Yap refuses whatever the field is called**: a payment card
+/// number (13–19 digits that pass the Luhn check, spaces and dashes aside),
+/// an IBAN (its mod-97 check), or a 3–4 digit code typed into a form that
+/// takes a card (a security code beside the card field). Why, for the
+/// model and the chip. Pure.
+pub fn typed_secret(text: &str, d: &Described) -> Option<&'static str> {
+    let compact: String = text.chars().filter(|c| !c.is_whitespace() && *c != '-' && *c != '.').collect();
+    // A card number anywhere in it (a run of digits, spaces and dashes).
+    let mut run = String::new();
+    let mut runs = Vec::new();
+    for c in text.chars().chain(std::iter::once('x')) {
+        if c.is_ascii_digit() {
+            run.push(c);
+        } else if !(c == ' ' || c == '-') && !run.is_empty() {
+            runs.push(std::mem::take(&mut run));
+        }
+    }
+    if runs.iter().any(|r| (13..=19).contains(&r.len()) && luhn(r)) {
+        return Some("payment card details");
+    }
+    if iban(&compact) {
+        return Some("bank details");
+    }
+    let card_form = d.form.as_ref().is_some_and(|f| f.payment);
+    if card_form && (3..=4).contains(&compact.len()) && compact.chars().all(|c| c.is_ascii_digit()) {
+        return Some("payment card details");
+    }
+    None
+}
+
+/// The Luhn check of a run of digits. Pure.
+fn luhn(digits: &str) -> bool {
+    let mut sum = 0u32;
+    for (i, c) in digits.chars().rev().enumerate() {
+        let Some(mut d) = c.to_digit(10) else { return false };
+        if i % 2 == 1 {
+            d *= 2;
+            if d > 9 {
+                d -= 9;
+            }
+        }
+        sum += d;
+    }
+    sum.is_multiple_of(10)
+}
+
+/// An IBAN (two letters, two check digits, 11–30 letters and digits, its
+/// mod-97 check), spaces already out. Pure.
+fn iban(s: &str) -> bool {
+    let s = s.to_ascii_uppercase();
+    let b = s.as_bytes();
+    if !(15..=34).contains(&b.len()) || !b[0].is_ascii_alphabetic() || !b[1].is_ascii_alphabetic() || !b[2].is_ascii_digit() || !b[3].is_ascii_digit() {
+        return false;
+    }
+    if !b.iter().all(u8::is_ascii_alphanumeric) {
+        return false;
+    }
+    let moved = format!("{}{}", &s[4..], &s[..4]);
+    let mut rem: u64 = 0;
+    for c in moved.chars() {
+        let v = if c.is_ascii_digit() { c as u64 - '0' as u64 } else { c as u64 - 'A' as u64 + 10 };
+        rem = if v >= 10 { (rem * 100 + v) % 97 } else { (rem * 10 + v) % 97 };
+    }
+    rem == 1
+}
+
+/// **The words of `text` that come from nowhere the person can see**: not
+/// in what they said in this conversation, nor on the page (`known`: those
+/// words, `words`'). A number of one or two digits (a day, an hour, a
+/// count) and a year (1900–2099) need no source: a date the model works out
+/// is fine. Empty: every word is accounted for. Pure.
+pub fn unknown_words(text: &str, known: &HashSet<String>) -> Vec<String> {
+    let mut out: Vec<String> = Vec::new();
+    for w in words(text) {
+        let digits = w.chars().all(|c| c.is_ascii_digit());
+        let small = digits && w.len() <= 2;
+        let year = digits && w.len() == 4 && matches!(&w[..2], "19" | "20");
+        if small || year || known.contains(&w) || out.contains(&w) {
+            continue;
+        }
+        out.push(w);
+    }
+    out
+}
+
+/// The words of `texts`, for [`unknown_words`]. Pure.
+pub fn known_words<'a>(texts: impl IntoIterator<Item = &'a str>) -> HashSet<String> {
+    texts.into_iter().flat_map(words).collect()
 }
 
 /// An element's name as the model and the chip see it: its accessible name,
@@ -331,6 +504,7 @@ pub fn element_lines(snap: &Snapshot) -> String {
             el: Some(e.clone()),
             form: (e.form >= 0).then(|| snap.forms.iter().find(|f| f.form == e.form).cloned()).flatten(),
             password: snap.password,
+            payment: snap.payment,
             title: snap.title.clone(),
             headings: snap.headings.clone(),
             url: snap.url.clone(),
@@ -549,5 +723,165 @@ mod tests {
         assert!(takes_text(&field("text", "x")) && !takes_text(&field("checkbox", "x")));
         assert!(!takes_text(&Element { role: "button".into(), ..Default::default() }));
         assert_eq!(name_of(&Element { placeholder: "  Search  the wiki ".into(), ..Default::default() }), "Search the wiki");
+    }
+
+    #[test]
+    fn shop_buttons_ask_first_in_every_language_yap_speaks() {
+        for (label, kind) in [
+            // German, French, Spanish, Italian, Portuguese, Dutch shops.
+            ("Jetzt kaufen", "buy"),
+            ("In den Warenkorb", "buy"),
+            ("Zur Kasse", "buy"),
+            ("Zahlungspflichtig bestellen", "pay"),
+            ("Jetzt bestellen", "place an order"),
+            ("Bestätigen", "confirm"),
+            ("Kündigen", "cancel"),
+            ("Löschen", "delete"),
+            ("Anmelden", "sign in"),
+            ("Commander", "place an order"),
+            ("Ajouter au panier", "buy"),
+            ("Payer maintenant", "pay"),
+            ("Réserver", "book"),
+            ("Se connecter", "sign in"),
+            ("S'abonner", "subscribe"),
+            ("Envoyer", "send"),
+            ("Supprimer", "delete"),
+            ("Comprar", "buy"),
+            ("Pagar", "pay"),
+            ("Realizar pedido", "place an order"),
+            ("Iniciar sesión", "sign in"),
+            ("Darse de baja", "cancel"),
+            ("Acquista ora", "buy"),
+            ("Aggiungi al carrello", "buy"),
+            ("Prenota", "book"),
+            ("Finalizar compra", "buy"),
+            ("Adicionar ao carrinho", "buy"),
+            ("Afrekenen", "buy"),
+            ("In winkelwagen", "buy"),
+            ("Nu betalen", "pay"),
+            ("Ik ga akkoord", "agree"),
+            // The English gaps.
+            ("Add to bag", "buy"),
+            ("Start free trial", "subscribe"),
+            ("Cancel membership", "cancel"),
+            ("Close account", "delete"),
+            ("I agree", "agree"),
+        ] {
+            assert_eq!(needs_ok(label, ""), Some(kind), "{label}");
+        }
+        // Moving about, searching, a dialog's Cancel, a cookie banner's buttons: no.
+        for label in ["Cancel", "Accept all", "Weiter", "Suche", "Rechercher", "Continuer", "Siguiente", "Avanti", "Próximo", "Volgende", "Alle akzeptieren", "Tout refuser"] {
+            assert_eq!(needs_ok(label, "https://shop.example.de/produkt/42"), None, "{label}");
+        }
+        // An address in another language says so too.
+        assert_eq!(needs_ok("Weiter", "https://shop.example.de/kasse/adresse"), Some("buy"));
+        assert_eq!(needs_ok("Continuer", "https://boutique.example.fr/panier"), Some("buy"));
+        assert_eq!(needs_ok("Unsubscribe me", ""), Some("subscribe"));
+        assert_eq!(needs_ok("Click here", "https://news.example/newsletter/unsubscribe?t=abc"), Some("subscribe"));
+        assert_eq!(needs_ok("Read more", "https://news.example/post/123"), None, "a blog's /post is no send");
+    }
+
+    #[test]
+    fn a_plainly_named_submit_asks_by_its_form_and_enter_outside_a_form_asks() {
+        // "Continue" in a form posting to …/place-order: asked, as Enter in the form is.
+        let order = Form { form: 0, action: "https://shop.example.com/checkout/place-order".into(), method: "post".into(), submit: "Continue".into(), ..Default::default() };
+        let d = Described { form: Some(order), ..Default::default() };
+        let go = Element { role: "button".into(), name: "Continue".into(), submit: true, form: 0, ..Default::default() };
+        assert_eq!(click_needs_ok(&d, &go), Some("buy"));
+        assert_eq!(submit_needs_ok(&d), Some("buy"));
+        // A form that takes a card, whatever its button says.
+        let pay = Described { form: Some(Form { form: 0, payment: true, submit: "Weiter".into(), ..Default::default() }), ..Default::default() };
+        assert_eq!(click_needs_ok(&pay, &Element { name: "Weiter".into(), ..go.clone() }), Some("pay"));
+        // A posted form that shows a price buys; a button with a price on it pays.
+        let priced = Described { form: Some(Form { form: 0, price: true, method: "post".into(), submit: "Weiter".into(), ..Default::default() }), ..Default::default() };
+        assert_eq!(submit_needs_ok(&priced), Some("buy"));
+        let button = Element { role: "button".into(), name: "19,99 €".into(), form: -1, ..Default::default() };
+        assert_eq!(click_needs_ok(&Described::default(), &button), Some("pay"));
+        // …but a search form's button, a GET form with prices (a filter), goes ahead.
+        let search = Described { form: Some(Form { form: 0, price: true, method: "get".into(), submit: "Find trains".into(), action: "https://rail.example.com/results".into(), ..Default::default() }), ..Default::default() };
+        assert_eq!(click_needs_ok(&search, &Element { name: "Find trains".into(), ..go.clone() }), None);
+        // Enter in a field outside any form: a chat's message box sends — asked;
+        // a search box (by type, role, region, name or words) doesn't.
+        let none = Described::default();
+        let message = Element { role: "textbox".into(), name: "Type a message".into(), editable: true, form: -1, ..Default::default() };
+        assert_eq!(enter_needs_ok(&none, &message), Some("send"));
+        for search in [
+            Element { kind: "search".into(), ..message.clone() },
+            Element { role: "searchbox".into(), ..message.clone() },
+            Element { search: true, ..message.clone() },
+            Element { name: String::new(), field: "q".into(), ..message.clone() },
+            Element { name: "Suche".into(), ..message.clone() },
+            Element { name: "Rechercher sur le site".into(), ..message.clone() },
+        ] {
+            assert_eq!(enter_needs_ok(&none, &search), None, "{search:?}");
+        }
+        // In a form: the form's own rules.
+        assert_eq!(enter_needs_ok(&d, &message), Some("buy"));
+    }
+
+    #[test]
+    fn a_card_number_an_iban_or_a_code_beside_a_card_is_refused_whatever_the_field() {
+        let any = Described::default();
+        assert_eq!(typed_secret("4111 1111 1111 1111", &any), Some("payment card details"));
+        assert_eq!(typed_secret("my card is 4000-0566-5566-5556 thanks", &any), Some("payment card details"));
+        assert_eq!(typed_secret("4111 1111 1111 1112", &any), None, "not a Luhn number");
+        assert_eq!(typed_secret("GB82 WEST 1234 5698 7654 32", &any), Some("bank details"));
+        assert_eq!(typed_secret("DE89370400440532013000", &any), Some("bank details"));
+        // A phone number, a train, a date: fine.
+        for ok in ["07700 900123", "0942", "2026-11-02", "Port Ellis"] {
+            assert_eq!(typed_secret(ok, &any), None, "{ok}");
+        }
+        // Three or four digits into a form that takes a card: its security code.
+        let card_form = Described { form: Some(Form { form: 0, payment: true, ..Default::default() }), ..Default::default() };
+        assert_eq!(typed_secret("123", &card_form), Some("payment card details"));
+        assert_eq!(typed_secret("123", &any), None);
+    }
+
+    #[test]
+    fn card_password_and_bank_fields_are_known_in_every_language() {
+        for (name, why) in [
+            ("Kartennummer", "payment card details"),
+            ("Kreditkartennummer", "payment card details"),
+            ("Numéro de carte", "payment card details"),
+            ("Número de tarjeta", "payment card details"),
+            ("Numero della carta", "payment card details"),
+            ("Número do cartão", "payment card details"),
+            ("Kaartnummer", "payment card details"),
+            ("Passwort", "a password"),
+            ("Mot de passe", "a password"),
+            ("Contraseña", "a password"),
+            ("Senha", "a password"),
+            ("Wachtwoord", "a password"),
+            ("Kontonummer", "bank details"),
+            ("Numéro de compte", "bank details"),
+            ("Rekeningnummer", "bank details"),
+            ("Sicherheitscode", "a security code"),
+            ("Código de seguridad", "a security code"),
+        ] {
+            assert_eq!(sensitive(&field("text", name)), Some(why), "{name}");
+        }
+        // Their sign-in pages and user fields too.
+        let page = Described { title: "Anmelden - Beispielbahn".into(), ..Default::default() };
+        assert!(sign_in_field(&page, &field("text", "Benutzername")));
+        assert!(sign_in_field(&Described { headings: vec!["Iniciar sesión".into()], ..Default::default() }, &field("text", "Usuario")));
+        assert!(!sign_in_field(&Described { title: "Fahrplan".into(), ..Default::default() }, &field("text", "Benutzername")));
+        // A search for a keyword isn't a password.
+        assert_eq!(sensitive(&field("text", "Palabra clave")), None);
+    }
+
+    #[test]
+    fn prices_and_words_from_nowhere_are_spotted() {
+        for p in ["Pay £42.10", "19,99 €", "€ 5", "USD 30", "30 USD", "kr 99", "$1"] {
+            assert!(has_price(p), "{p}");
+        }
+        for p in ["Find trains", "Page 2", "£", "Top 10", "€uro"] {
+            assert!(!has_price(p), "{p}");
+        }
+        let known = known_words(["Find the next train from Kellbrook to Port Ellis", "Kellbrook to Port Ellis: trains today"]);
+        assert!(unknown_words("Kellbrook", &known).is_empty());
+        assert!(unknown_words("port ellis", &known).is_empty());
+        assert!(unknown_words("2026-11-02 09:42", &known).is_empty(), "a date and a time need no source");
+        assert_eq!(unknown_words("sam@example.com", &known), ["sam", "example", "com"]);
+        assert_eq!(unknown_words("Réserver Kellbrook", &known), ["reserver"]);
     }
 }

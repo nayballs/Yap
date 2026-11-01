@@ -277,7 +277,8 @@ test('open_page opens a search or a site the person named; read_open_page reads 
   await main.getByRole('button', { name: 'Send' }).click();
   await expect(main.getByText('Pick a result and I can help.')).toBeVisible({ timeout: 20_000 });
   let calls = chatCalls(fakeLlm, from);
-  expect(JSON.stringify(calls[0].messages)).toContain('Open beside the chat: tab 1');
+  // (Each tab's number is its own for the session: the earlier tests' tabs had theirs.)
+  expect(JSON.stringify(calls[0].messages)).toMatch(/Open beside the chat: tab \d+ /);
   expect(JSON.stringify(calls[0].messages)).toContain('search results, in front');
   expect(toolResult(calls[1])).toMatchObject({ success: false, displayText: expect.stringMatching(/^Didn't read duckduckgo\.com\/\?q=train\+times.*: a search engine's results$/) });
 
@@ -295,8 +296,12 @@ test('open_page opens a search or a site the person named; read_open_page reads 
   calls = chatCalls(fakeLlm, from);
   const read = toolResult(calls[1]);
   expect(read).toMatchObject({ success: true, displayText: 'Read wiki.example.com/wiki/Fort_Joy beside the chat' });
-  // (The search is tab 1, this page tab 2, in front.)
-  expect(read.data).toMatchObject({ tab: 2, title: 'Fort Joy - Example Wiki', url: FORT_JOY_URL, n: 1 });
+  // (The search is one tab, this page the next, in front: each with its own number.)
+  const pageTab = (await views(yap)).find((v) => v.key === KEY).tab;
+  expect(read.data).toMatchObject({ tab: pageTab, title: 'Fort Joy - Example Wiki', url: FORT_JOY_URL, n: 1 });
+  const [searchTab, thisTab] = read.data.tabs.map((t) => t.tab);
+  expect(thisTab).toBe(pageTab);
+  expect(searchTab).toBeLessThan(pageTab);
   expect(read.data.text).toContain('Every treasure chest marked');
   await expect(main.getByText('Read the page beside the chat')).toBeVisible();
 

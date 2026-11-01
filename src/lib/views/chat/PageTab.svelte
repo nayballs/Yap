@@ -22,7 +22,15 @@
   //   once there's somewhere to go.
   // - While Chat acts on the page (chat/pages/act.rs: clicks, typing), a
   //   strip under the bar says "Yap is using this page", with Stop (the
-  //   turn's ■: chatDoc.svelte.js `acting`), until the turn ends.
+  //   turn's ■: chatDoc.svelte.js `acting`), until the turn ends. When Yap
+  //   asks before an action here ("Yap wants to press ‘Book now’…", the
+  //   thread's card: chatDoc's `asking`), the strip asks it too, with Allow
+  //   once / Don't — the panel may cover the thread (a narrow window, the
+  //   page expanded) — and either place answers it.
+  // - The page's own dialogs (alert, confirm, prompt, "Leave this page?")
+  //   are never WebView2's: Rust dismisses them while Yap acts (view.rs),
+  //   and here, while the person uses the page, a strip asks them
+  //   (`yap-page-dialog` → `page_view_dialog`).
   // - Under it, where it's from, its section and "Open in Brave" in words
   //   (as a picture's "From … · Open in …"); a right-click on words
   //   selected in the page offers Ask Yap about this and Read aloud (its own
@@ -34,6 +42,7 @@
   import { toast } from '../../ui/toast.svelte.js';
   import { useBrowserName, openInLabel } from '../../stores/browserName.svelte.js';
   import { tabKeyOf } from './chatDoc.svelte.js';
+  import { questionParts, whyOf } from './pageConfirm.js';
 
   /**
    * `doc`: the panel's state (its `page`); `narrow`: no room beside the chat
@@ -61,6 +70,12 @@
   let typing = $state(false);
   let typed = $state('');
   let addrError = $state('');
+  // The page's dialog waiting for the person ({kind, message, default}), and a prompt's answer.
+  let dialog = $state(null);
+  let dialogText = $state('');
+  // Yap's question about this page, while it waits (the thread's card too).
+  const ask = $derived(doc.asking?.key === key ? doc.asking : null);
+  const askQ = $derived(ask ? questionParts(ask) : null);
 
   const hostOf = (u) => {
     try {
@@ -127,6 +142,17 @@
       st = { title: p.title || '', url: p.url || '', canGoBack: !!p.canGoBack, canGoForward: !!p.canGoForward, loading: !!p.loading, error: p.error || null };
       if (p.url || p.title) doc.pageMoved(key, { title: p.title || '', url: p.url || '' });
     }).then((u) => (alive ? (un = u) : u()));
+    let unDialog = null;
+    listen('yap-page-dialog', (e) => {
+      const p = e.payload;
+      if (p?.key !== key) return;
+      if (p.gone) {
+        dialog = null;
+        return;
+      }
+      dialog = { kind: p.kind || 'alert', message: p.message || '', default: p.default || '' };
+      dialogText = dialog.default;
+    }).then((u) => (alive ? (unDialog = u) : u()));
     if (blank) {
       // A new tab: the address bar waits.
       tick().then(() => addrEl?.focus());
@@ -148,10 +174,19 @@
       clearInterval(timer);
       window.removeEventListener('resize', onResize);
       un?.();
+      unDialog?.();
       // Out of sight, its place kept (its tab closed closes it: chatDoc.svelte.js).
       invoke('page_view_place', { key, bounds: null }).catch(() => {});
     };
   });
+
+  /** The page's dialog answered: OK (with a prompt's words) or Cancel. */
+  function answerDialog(accept) {
+    const d = dialog;
+    if (!d) return;
+    dialog = null;
+    invoke('page_view_dialog', { key, accept: !!accept, text: d.kind === 'prompt' && accept ? dialogText : null }).catch(() => {});
+  }
 
   // ---- the bar ----------------------------------------------------------------------
 
@@ -301,7 +336,20 @@
   {#if addrError}
     <p class="addrerror" role="alert" data-testid="chat-page-address-error">{addrError}</p>
   {/if}
-  {#if doc.acting === key}
+  {#if ask}
+    <!-- Yap asks before an action here (chat/pages/act/confirm.rs): the
+         thread's card, said here too — the thread may be covered. -->
+    <div class="asking" role="group" aria-label="Yap asks before acting on the page" data-testid="chat-page-ask">
+      <div class="asktext">
+        <p class="askq">{askQ.lead} <strong>‘{askQ.quoted}’</strong>{askQ.then}{#if ask.site}{' '}on {ask.site}{/if}</p>
+        <p class="askwhy">{whyOf(ask)} Only you can say yes.</p>
+      </div>
+      <div class="askbtns">
+        <button type="button" class="askallow" onclick={() => doc.answerAsking(true)} data-testid="chat-page-ask-allow">Allow once</button>
+        <button type="button" class="askdeny" onclick={() => doc.answerAsking(false)} data-testid="chat-page-ask-deny">Don't</button>
+      </div>
+    </div>
+  {:else if doc.acting === key}
     <!-- Yap is clicking or typing here (chat/pages/act.rs): said over the
          page (the page itself is a window of its own, so not on it), with
          Stop — the turn's ■ — until the turn ends. -->
@@ -309,6 +357,22 @@
       <span class="actdot" aria-hidden="true"></span>
       <span class="acttext">Yap is using this page</span>
       <button type="button" class="actstop" onclick={() => doc.stopUsing()} data-testid="chat-page-acting-stop">Stop</button>
+    </div>
+  {/if}
+  {#if dialog}
+    <!-- The page's own dialog (alert, confirm, prompt, "Leave this page?"),
+         asked here instead of WebView2's: the page waits for the answer. -->
+    <div class="pdialog" role="alertdialog" aria-label="The page asks" data-testid="chat-page-dialog">
+      <p class="pdmsg"><span class="pdsite">{site || 'The page'} says</span>{#if dialog.kind === 'leave'} Leave this page? What you changed may not be saved.{:else if dialog.message}: {dialog.message}{/if}</p>
+      {#if dialog.kind === 'prompt'}
+        <input class="pdinput" bind:value={dialogText} aria-label="Your answer to the page" onkeydown={(e) => e.key === 'Enter' && answerDialog(true)} />
+      {/if}
+      <div class="askbtns">
+        <button type="button" class="askallow" onclick={() => answerDialog(true)} data-testid="chat-page-dialog-ok">{dialog.kind === 'leave' ? 'Leave' : 'OK'}</button>
+        {#if dialog.kind !== 'alert'}
+          <button type="button" class="askdeny" onclick={() => answerDialog(false)} data-testid="chat-page-dialog-cancel">{dialog.kind === 'leave' ? 'Stay' : 'Cancel'}</button>
+        {/if}
+      </div>
     </div>
   {/if}
 
@@ -446,6 +510,92 @@
     border-bottom: 1px solid var(--yap-paper-s2);
     font-size: 11.5px;
     color: var(--yap-paper-danger);
+  }
+  /* Yap's question, and the page's own dialog: a strip between the bar and the page. */
+  .asking,
+  .pdialog {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px 12px;
+    padding: 8px 10px 8px 14px;
+    border-bottom: 1px solid var(--yap-primary-line);
+    background: var(--yap-primary-wash);
+    font-size: 12.5px;
+    color: var(--yap-paper-ink);
+  }
+  .pdialog {
+    border-bottom-color: var(--yap-paper-rule);
+    background: var(--yap-paper-s1);
+  }
+  .asktext {
+    flex: 1 1 220px;
+    min-width: 0;
+  }
+  .askq,
+  .askwhy,
+  .pdmsg {
+    margin: 0;
+    overflow-wrap: anywhere;
+  }
+  .pdmsg {
+    flex: 1 1 220px;
+    min-width: 0;
+  }
+  .askq strong {
+    font-weight: 650;
+  }
+  .askwhy {
+    margin-top: 2px;
+    font-size: 11.5px;
+    color: var(--yap-paper-muted);
+  }
+  .pdsite {
+    font-weight: 600;
+  }
+  .pdinput {
+    flex: 1 1 160px;
+    min-width: 0;
+    height: 26px;
+    padding: 0 8px;
+    border: 1px solid var(--yap-paper-rule);
+    border-radius: 6px;
+    background: var(--yap-paper);
+    color: var(--yap-paper-ink);
+    font: inherit;
+  }
+  .askbtns {
+    display: flex;
+    flex: 0 0 auto;
+    gap: 6px;
+  }
+  .askbtns button {
+    height: 26px;
+    padding: 0 11px;
+    border: 1px solid var(--yap-paper-rule);
+    border-radius: 999px;
+    background: var(--yap-paper);
+    color: var(--yap-paper-ink);
+    font: inherit;
+    font-size: 12px;
+    font-weight: 600;
+    cursor: pointer;
+  }
+  .askbtns .askallow {
+    border-color: var(--yap-primary-line);
+    background: var(--yap-primary);
+    color: var(--yap-primary-fg);
+  }
+  .askbtns button:hover {
+    background: var(--yap-paper-s2);
+  }
+  .askbtns .askallow:hover {
+    background: var(--yap-primary-hover);
+  }
+  .askbtns button:focus-visible,
+  .pdinput:focus-visible {
+    outline: 2px solid var(--yap-focus-ring);
+    outline-offset: 1px;
   }
   /* "Yap is using this page": a strip between the bar and the page. */
   .acting {
