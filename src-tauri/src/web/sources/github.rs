@@ -48,15 +48,15 @@ pub fn search_for(query: &str) -> Search {
 }
 
 /// What GitHub's search gets: the words that say what, without "a Rust
-/// crate for", "open-source alternative to", "github repo"… — and the
-/// language a repository search names, as GitHub's own `language:`
-/// qualifier. Pure.
+/// crate for", "open-source", "github repo"… — "an alternative to Notion"
+/// as "Notion alternative" (how such projects describe themselves; searched
+/// by stars, [`search_url`]) — and the language a repository search names,
+/// as GitHub's own `language:` qualifier. Pure.
 pub fn terms(query: &str, search: Search) -> String {
     const FILLER: &[&str] = &[
         "a", "an", "the", "for", "to", "that", "which", "is", "are", "there", "any", "good", "best", "find", "me", "show",
-        "github", "repo", "repos", "repository", "repositories", "open-source", "open", "source", "alternative",
-        "alternatives", "library", "libraries", "crate", "crates", "package", "packages", "module", "modules",
-        "framework", "frameworks", "project", "projects", "tool", "tools", "app", "apps", "code", "of", "in", "on",
+        "github", "repo", "repos", "repository", "repositories", "open-source", "open", "source", "library",
+        "libraries", "crate", "crates", "package", "packages", "module", "modules", "framework", "frameworks", "project", "projects", "tool", "tools", "app", "apps", "code", "of", "in", "on",
         "with", "how", "do", "i", "can", "what", "please", "issue", "issues", "gem", "gems", "plugin", "plugins",
         "npm", "written",
     ];
@@ -66,13 +66,18 @@ pub fn terms(query: &str, search: Search) -> String {
         ("php", "php"), ("c#", "c#"), ("c++", "c++"), ("haskell", "haskell"), ("lua", "lua"), ("dart", "dart"),
     ];
     let mut language = None;
+    let mut alternative = false;
     let mut words: Vec<String> = Vec::new();
     for w in query.split_whitespace() {
         let n = normal(w);
-        let n = n.trim_matches(|c: char| matches!(c, ',' | ';' | '(' | ')'));
+        let n = n.trim_matches(|c: char| matches!(c, ',' | ';' | '(' | ')' | '?' | '!'));
         if search == Search::Repositories {
             if let Some((_, l)) = LANGUAGES.iter().find(|(name, _)| *name == n) {
                 language.get_or_insert(*l);
+                continue;
+            }
+            if matches!(n, "alternative" | "alternatives") {
+                alternative = true;
                 continue;
             }
             if FILLER.contains(&n) {
@@ -81,7 +86,11 @@ pub fn terms(query: &str, search: Search) -> String {
         }
         words.push(w.trim_matches(|c: char| matches!(c, '?' | '!' | ',' | ';' | '"')).to_string());
     }
-    let mut q = words.into_iter().filter(|w| !w.is_empty()).take(8).collect::<Vec<_>>().join(" ");
+    let mut words: Vec<String> = words.into_iter().filter(|w| !w.is_empty()).take(8).collect();
+    if alternative && !words.is_empty() {
+        words.push(ALTERNATIVE.to_string());
+    }
+    let mut q = words.join(" ");
     if let Some(l) = language {
         q = format!("{q} language:{l}").trim().to_string();
     }
@@ -91,14 +100,25 @@ pub fn terms(query: &str, search: Search) -> String {
     }
 }
 
-/// The search's request (best match first, three results). Pure.
+/// The word [`terms`] ends an "alternative to …" search with.
+const ALTERNATIVE: &str = "alternative";
+
+/// The search's request: three results, best match first — but an
+/// "alternative to …" by stars: by best match, "Notion alternative" puts an
+/// awesome-list and an archived project above the ones people use, while by
+/// stars a specific search ("parsing PDFs language:rust") picks up
+/// unrelated popular projects. Pure.
 pub fn search_url(search: Search, q: &str) -> Url {
     let path = match search {
         Search::Repositories => "repositories",
         Search::Issues => "issues",
     };
     let mut url = Url::parse(&format!("{API}/search/{path}")).expect("static address");
-    url.query_pairs_mut().append_pair("q", q).append_pair("per_page", RESULTS);
+    url.query_pairs_mut().append_pair("q", q);
+    if search == Search::Repositories && q.split_whitespace().any(|w| w == ALTERNATIVE) {
+        url.query_pairs_mut().append_pair("sort", "stars");
+    }
+    url.query_pairs_mut().append_pair("per_page", RESULTS);
     url
 }
 
@@ -208,7 +228,14 @@ mod tests {
         assert_eq!(search_for("a Rust crate for parsing PDFs"), Search::Repositories);
         assert_eq!(search_for("tauri build error webview2 not found"), Search::Issues);
         assert_eq!(terms("a Rust crate for parsing PDFs", Search::Repositories), "parsing PDFs language:rust");
-        assert_eq!(terms("open-source alternative to Photoshop", Search::Repositories), "Photoshop");
+        // An alternative: how such projects say it, by stars.
+        assert_eq!(terms("open-source alternative to Photoshop", Search::Repositories), "Photoshop alternative");
+        assert_eq!(terms("Is there an open source alternative to Notion?", Search::Repositories), "Notion alternative");
+        assert_eq!(terms("open source Notion alternatives in Rust", Search::Repositories), "Notion alternative language:rust");
+        assert_eq!(
+            search_url(Search::Repositories, "Notion alternative").to_string(),
+            "https://api.github.com/search/repositories?q=Notion+alternative&sort=stars&per_page=3"
+        );
         assert_eq!(terms("github repo for whisper.cpp", Search::Repositories), "whisper.cpp");
         assert_eq!(terms("tauri build error webview2 not found", Search::Issues), "tauri build error webview2 not found is:issue");
         assert_eq!(

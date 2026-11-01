@@ -105,6 +105,9 @@ pub fn sources_for(kind: Kind) -> (&'static [Source], &'static [Source]) {
 
 /// The free sources, said plainly (the model's lines).
 const FREE: &str = "Wikipedia and game wikis, the weather (Open-Meteo), maps (OpenStreetMap), Stack Exchange, GitHub and arXiv";
+/// What a model must leave out when the free sources don't cover a
+/// question: what it remembers is out of date.
+const NOTHING_REMEMBERED: &str = "Add nothing about it from memory: no prices or other figures, nothing about whether or when it came out or is available, and no shops or sites to try (the button is for that). What you remember may be out of date.";
 
 /// **Why Yap's free sources couldn't answer** a search (no search service
 /// for the turn): what the model is told, and whether the answer offers a
@@ -136,12 +139,14 @@ impl Handoff {
         !matches!(self.why, Why::NeedsPlace)
     }
 
-    /// What a model that calls tools is told, in the search's result.
+    /// What a model that calls tools is told, in the search's result. Not
+    /// covered: the one sentence and nothing from memory — a small model
+    /// otherwise adds "it hasn't been released yet" and shops to try.
     pub fn line(&self) -> String {
         const BUTTON: &str = "Yap shows a \"Search in your browser\" button under your answer.";
         match self.why {
             Why::NotCovered(what) => format!(
-                "Nothing was searched: this chat has no web search service, and Yap's free sources ({FREE}) don't cover {}. Say so plainly in one short sentence, without guessing or giving figures from memory, and don't search for it again. {BUTTON}",
+                "Nothing was searched: this chat has no web search service, and Yap's free sources ({FREE}) don't cover {}. Say so plainly in one short sentence, without guessing, and don't search for it again. {NOTHING_REMEMBERED} {BUTTON}",
                 what.what()
             ),
             Why::MayNotCover(what) => format!(
@@ -161,7 +166,7 @@ impl Handoff {
         match self.why {
             Why::NeedsPlace => "Yap couldn't look up the weather: no place was named. Ask the user which town or city they mean. Never claim you searched, browsed or found anything online.".to_string(),
             Why::NotCovered(what) | Why::MayNotCover(what) => format!(
-                "Yap can't search the whole web in this chat (there's no search service, and its free sources don't cover {}). Tell the user that in one short sentence, without guessing or giving figures from memory: Yap shows a \"Search in your browser\" button under your answer. Never claim you searched, browsed or found anything online.",
+                "Yap can't search the whole web in this chat (there's no search service, and its free sources don't cover {}). Tell the user that in one short sentence, without guessing: Yap shows a \"Search in your browser\" button under your answer. {NOTHING_REMEMBERED} Never claim you searched, browsed or found anything online.",
                 what.what()
             ),
             Why::NothingFound => "Yap's free web sources found nothing for this question, and there's no search service in this chat. Tell the user that in one short sentence, without guessing: Yap shows a \"Search in your browser\" button under your answer. Never claim you searched, browsed or found anything online.".to_string(),
@@ -495,6 +500,10 @@ mod tests {
         assert!(prices.line().starts_with("Nothing was searched: this chat has no web search service"), "{}", prices.line());
         assert!(prices.line().contains("don't cover prices") && prices.line().contains("without guessing"));
         assert!(prices.line().contains("\"Search in your browser\""));
+        // Nothing from memory: a small model added "it hasn't been released yet".
+        for line in [prices.line(), prices.small_line()] {
+            assert!(line.contains("whether or when it came out") && line.contains("no shops or sites"), "{line}");
+        }
         assert_eq!(prices.chip().as_deref(), Some("Yap's free sources don't cover prices"));
         assert!(h(Why::NothingFound).line().starts_with("Nothing found"));
         assert_eq!(h(Why::NothingFound).chip(), None);

@@ -5,13 +5,21 @@
   // found). The button opens the search, on the engine chosen in Settings →
   // Voice Assistant → Web search, in the person's own browser
   // (`open_external`): they do the searching, and Yap never reads the
-  // results. One line under it says how Yap could search the web itself.
+  // results. One line under it says how Yap could search the web itself:
+  // a cloud model has its provider's search too; a model on this PC or the
+  // person's own server only a key.
   //
   //   search: the answer's `browserSearch` ({ query, url, engine }).
+  //   model:  the answer's model ({ provider, … }), if known.
   import { emit } from '@tauri-apps/api/event';
   import { openExternalLink } from '../../core/externalLinks.js';
+  import { isKeyed } from '../../core/providers.js';
 
-  let { search } = $props();
+  let { search, model = null } = $props();
+
+  const how = $derived(
+    isKeyed(model?.provider) ? 'Use your AI provider’s search, or add a free Exa key.' : 'Add a free Exa or Tavily key.'
+  );
 
   function settings() {
     emit('yap-open-settings', 'voice#web-search').catch(() => {});
@@ -32,7 +40,7 @@
     Search in your browser
   </button>
   <p class="bsnote">
-    Want Yap to search the web itself? Use your AI provider’s search, or add a free Exa key.
+    Want Yap to search the web itself? {how}
     <button type="button" class="bslink" onclick={settings}>Web search settings</button>
   </p>
 </div>

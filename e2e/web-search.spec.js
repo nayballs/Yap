@@ -1020,7 +1020,8 @@ test('a price with no search service: said plainly, and “Search in your browse
   // The button under the answer, and the line saying how Yap could search itself.
   const offer = thread(main).getByTestId('chat-browser-search');
   await expect(offer).toHaveCount(1);
-  await expect(offer).toContainText('Want Yap to search the web itself? Use your AI provider’s search, or add a free Exa key.');
+  // (A self-hosted model has no provider search of its own: only a key.)
+  await expect(offer).toContainText('Want Yap to search the web itself? Add a free Exa or Tavily key.');
   await shot(main, '20-free-sources-search-in-your-browser');
   await offer.getByRole('button', { name: 'Search in your browser' }).click();
   await expect

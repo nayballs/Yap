@@ -75,7 +75,11 @@ Chat's and the Voice Assistant's two ways of reaching outside Yap: looking thing
   — a paid Yap tier would need Open-Meteo's commercial plan; < 10,000 calls
   a day, 600 a minute); **where a place is** → OpenStreetMap's Nominatim
   then Wikipedia (`sources/places.rs`: `place_terms` without "where is",
-  "the address of"…; its usage policy: at most one request a second — Yap
+  "the address of"… from both ends, and the words never in a name —
+  "location", "located", "address"… — from the middle too (Nominatim finds
+  nothing for "Eden Project location Cornwall UK"; "on" stays: "Stoke on
+  Trent"), nothing found → once more with the name alone (`place_head`:
+  "Eden Project"); its usage policy: at most one request a second — Yap
   1.1 s —, a real User-Agent, results cached a day, no autocomplete, no
   bulk, "Map data © OpenStreetMap contributors (ODbL)." in each result,
   `NOMINATIM` the one address to switch at its request); **programming** →
@@ -86,7 +90,10 @@ Chat's and the Voice Assistant's two ways of reaching outside Yap: looking thing
   honoured, every answer gzipped) then GitHub's issues (`sources/github.rs`:
   an error, a panic, a crash, "E0499" → `search/issues … is:issue`, else
   `search/repositories` with the words that say what and a named language
-  as `language:`, the longest two words alone when nothing matched;
+  as `language:`, the longest two words alone when nothing matched; "an
+  alternative to Notion" as "Notion alternative" by stars — AppFlowy, not
+  an awesome-list or an archived project — and every other search by best
+  match, as stars put unrelated popular projects above a specific one;
   unauthenticated 10 a minute, a 403/429's `x-ratelimit-reset` honoured;
   code search needs a login, so never), Wikipedia only when both found
   nothing; **code** (a library, a crate, a repository, an open-source
@@ -101,8 +108,10 @@ Chat's and the Voice Assistant's two ways of reaching outside Yap: looking thing
   ("best … 2026"), timetables and opening hours, local businesses ("near
   me"), recipes — is **never searched or guessed**: the result has no
   results and the model is told (`Handoff::line`) to say in one sentence
-  that Yap can't search the whole web here, without figures from memory,
-  and not to search again; a covered kind that also asks one of those (a
+  that Yap can't search the whole web here, adding nothing from memory —
+  no figures, nothing about whether or when it came out, no shops to try
+  (`NOTHING_REMEMBERED`: the on-device 4B said a card out for two years
+  "hasn't been released yet") — and not to search again; a covered kind that also asks one of those (a
   game item's cost: in-game gold, or the real price) still asks its source,
   with the same offer. **News** stays with the provider's search or a
   search key: the research names no concrete set of publishers' feeds whose

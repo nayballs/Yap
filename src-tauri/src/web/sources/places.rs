@@ -30,40 +30,87 @@ const RULES: Rules = Rules { gap: Duration::from_millis(1_100), per_minute: None
 /// The attribution its policy asks for (ODbL).
 pub const CREDIT: &str = "Map data © OpenStreetMap contributors (ODbL).";
 
-/// What to look up: the place, without "where is", "the address of",
-/// "located"… (in the person's languages, English always), from both ends.
-/// Pure.
-pub fn place_terms(query: &str, langs: &[String]) -> String {
-    const EN: &[&str] = &[
-        "where", "where's", "wheres", "is", "are", "the", "a", "an", "address", "location", "coordinates", "postcode",
-        "post", "code", "zip", "of", "for", "located", "situated", "which", "country", "county", "state", "region",
-        "province", "city", "town", "continent", "in", "exactly", "find", "map", "on", "show", "me", "please", "what",
-        "what's", "can", "you", "tell", "it", "its",
-    ];
-    const OTHER: &[(&str, &[&str])] = &[
-        ("fr", &["où", "ou", "est", "se", "trouve", "situe", "sont", "adresse", "de", "du", "des", "la", "le", "les"]),
-        ("de", &["wo", "ist", "liegt", "sind", "befindet", "sich", "adresse", "von", "der", "die", "das"]),
-        ("es", &["dónde", "donde", "está", "esta", "queda", "se", "encuentra", "están", "dirección", "de", "el", "la"]),
-        ("it", &["dove", "si", "trova", "è", "dov'è", "sono", "indirizzo", "di", "del", "della", "il", "la"]),
-        ("pt", &["onde", "fica", "está", "é", "ficam", "endereço", "de", "do", "da", "o", "a"]),
-        ("nl", &["waar", "is", "ligt", "zijn", "bevindt", "zich", "adres", "van", "de", "het"]),
-    ];
-    let mut stops: Vec<&str> = EN.to_vec();
-    for (code, list) in OTHER {
-        if langs.iter().any(|l| l.to_ascii_lowercase().starts_with(code)) {
-            stops.extend_from_slice(list);
+/// The words around a place in a question (in the person's languages,
+/// English always): taken off both ends ("where is", "the address of"…),
+/// and the ones never in a place's name ("location", "located"…) wherever
+/// they are: "Eden Project location Cornwall UK" finds nothing on Nominatim.
+struct Around {
+    ends: Vec<&'static str>,
+    never: Vec<&'static str>,
+}
+
+impl Around {
+    fn for_langs(langs: &[String]) -> Around {
+        const EN: &[&str] = &[
+            "is", "are", "the", "a", "an", "post", "code", "zip", "of", "for", "which", "country", "county", "state",
+            "region", "province", "city", "town", "continent", "in", "find", "map", "on", "show", "me", "what", "what's",
+            "can", "you", "tell", "it", "its",
+        ];
+        const EN_NEVER: &[&str] = &[
+            "where", "where's", "wheres", "address", "location", "coordinates", "postcode", "located", "situated",
+            "exactly", "please",
+        ];
+        const OTHER: &[(&str, &[&str], &[&str])] = &[
+            ("fr", &["où", "ou", "est", "se", "sont", "de", "du", "des", "la", "le", "les"], &["trouve", "situe", "adresse"]),
+            ("de", &["wo", "ist", "sind", "sich", "von", "der", "die", "das"], &["liegt", "befindet", "adresse"]),
+            ("es", &["dónde", "donde", "está", "esta", "queda", "se", "están", "de", "el", "la"], &["encuentra", "dirección"]),
+            ("it", &["dove", "si", "è", "dov'è", "sono", "di", "del", "della", "il", "la"], &["trova", "indirizzo"]),
+            ("pt", &["onde", "está", "é", "ficam", "de", "do", "da", "o", "a"], &["fica", "endereço"]),
+            ("nl", &["waar", "is", "zijn", "zich", "van", "de", "het"], &["ligt", "bevindt", "adres"]),
+        ];
+        let mut around = Around { ends: EN.to_vec(), never: EN_NEVER.to_vec() };
+        for (code, ends, never) in OTHER {
+            if langs.iter().any(|l| l.to_ascii_lowercase().starts_with(code)) {
+                around.ends.extend_from_slice(ends);
+                around.never.extend_from_slice(never);
+            }
         }
+        around
     }
-    let cleaned = query.replace(['?', '!', '"', '“', '”', '¿', '¡'], " ");
-    let mut words: Vec<&str> = cleaned.split_whitespace().collect();
-    let stop = |w: &str| stops.iter().any(|s| *s == normal(w).trim_matches(',').to_string().as_str());
-    while words.first().is_some_and(|w| stop(w)) {
-        words.remove(0);
+
+    fn is(list: &[&str], w: &str) -> bool {
+        let w = normal(w);
+        let w = w.trim_matches(',');
+        list.contains(&w)
     }
-    while words.last().is_some_and(|w| stop(w)) {
-        words.pop();
+
+    /// `words` without the words around a place at either end.
+    fn trim(&self, mut words: Vec<String>) -> String {
+        let around = |w: &String| Self::is(&self.ends, w) || Self::is(&self.never, w);
+        while words.first().is_some_and(around) {
+            words.remove(0);
+        }
+        while words.last().is_some_and(around) {
+            words.pop();
+        }
+        words.join(" ").trim_matches(',').to_string()
     }
-    words.join(" ").trim_matches(',').to_string()
+}
+
+fn words_of(query: &str) -> Vec<String> {
+    query.replace(['?', '!', '"', '“', '”', '¿', '¡'], " ").split_whitespace().map(str::to_string).collect()
+}
+
+/// What to look up: the place, without "where is", "the address of",
+/// "located"… — from both ends, and the words never in a name from the
+/// middle too ("on" stays: "Stoke on Trent"). Pure.
+pub fn place_terms(query: &str, langs: &[String]) -> String {
+    let around = Around::for_langs(langs);
+    around.trim(words_of(query).into_iter().filter(|w| !Around::is(&around.never, w)).collect())
+}
+
+/// The place before the first word never in a name ("Eden Project" from
+/// "Eden Project location Cornwall UK"): the second try when the whole
+/// finds nothing. Pure.
+pub fn place_head(query: &str, langs: &[String]) -> String {
+    let around = Around::for_langs(langs);
+    let words = words_of(query);
+    let start = words.iter().position(|w| !Around::is(&around.ends, w) && !Around::is(&around.never, w)).unwrap_or(words.len());
+    around.trim(words[start..].iter().take_while(|w| !Around::is(&around.never, w)).cloned().collect())
+}
+
+fn letters(s: &str) -> usize {
+    s.chars().filter(|c| c.is_alphabetic()).count()
 }
 
 /// Nominatim's request: two places, in the person's language. Pure.
@@ -112,19 +159,31 @@ pub fn parse(v: &Value) -> Vec<Hit> {
 }
 
 /// **A place for a search**: what to look up, from the model's query (else
-/// the person's question), asked of Nominatim.
+/// the person's question), asked of Nominatim; nothing found → once more
+/// with only the place's name ([`place_head`]).
 pub(super) async fn look_up(s: &Settings, ep: &Endpoints, query: &str, context: &str, langs: &[String]) -> Result<Out, String> {
+    let mut from = query;
     let mut place = place_terms(query, langs);
-    if place.chars().filter(|c| c.is_alphabetic()).count() < 2 {
+    if letters(&place) < 2 {
+        from = context;
         place = place_terms(context, langs);
     }
-    if place.chars().filter(|c| c.is_alphabetic()).count() < 2 {
+    if letters(&place) < 2 {
         return Ok(Out::default());
     }
-    let Some(url) = search_url(&place, &s.lang) else { return Ok(Out::default()) };
+    let mut hits = ask(s, ep, &place).await?;
+    let head = place_head(from, langs);
+    if hits.is_empty() && head != place && letters(&head) >= 2 {
+        hits = ask(s, ep, &head).await?;
+    }
+    Ok(Out { hits, from: "OpenStreetMap".into(), ..Default::default() })
+}
+
+async fn ask(s: &Settings, ep: &Endpoints, place: &str) -> Result<Vec<Hit>, String> {
+    let Some(url) = search_url(place, &s.lang) else { return Ok(Vec::new()) };
     let body = polite::get(ep, &url, Ask { purpose: FreeSource::Places, rules: RULES, accept: "application/json", headers: &[] }).await?;
     let v: Value = serde_json::from_str(&body).map_err(|_| "OpenStreetMap sent an answer Yap couldn't read.".to_string())?;
-    Ok(Out { hits: parse(&v), from: "OpenStreetMap".into(), ..Default::default() })
+    Ok(parse(&v))
 }
 
 #[cfg(test)]
@@ -139,8 +198,14 @@ mod tests {
         assert_eq!(place_terms("address of Kellbrook Town Hall", &en), "Kellbrook Town Hall");
         assert_eq!(place_terms("Glenbrackie Castle location", &en), "Glenbrackie Castle");
         assert_eq!(place_terms("Which country is Port Ellis in?", &en), "Port Ellis");
-        // The middle is kept ("Stoke on Trent").
+        // The middle is kept ("Stoke on Trent")…
         assert_eq!(place_terms("where is Stoke on Trent", &en), "Stoke on Trent");
+        // …but not a word never in a name (Nominatim finds nothing with it).
+        assert_eq!(place_terms("Glenbrackie Castle location Fellshire UK", &en), "Glenbrackie Castle Fellshire UK");
+        assert_eq!(place_terms("Where is Port Ellis located exactly?", &en), "Port Ellis");
+        // The second try: the place's name alone.
+        assert_eq!(place_head("Glenbrackie Castle location Fellshire UK", &en), "Glenbrackie Castle");
+        assert_eq!(place_head("Where is Glenbrackie Castle?", &en), "Glenbrackie Castle");
         let fr = vec!["fr".to_string(), "en".to_string()];
         assert_eq!(place_terms("Où se trouve Port Ellis ?", &fr), "Port Ellis");
         let url = search_url("Glenbrackie Castle", "en").unwrap().to_string();
