@@ -72,6 +72,13 @@ pub fn plan_with(text: &str, cfg: &YapConfig, apps: &[App], model_can_tool: bool
         return recall.last.as_ref().map(current);
     }
     let found = find(apps, &request.phrase, &cfg.app_nicknames, &cfg.apps_blocked);
+    // A website, with pages opening beside the chat (the web on, a model
+    // that calls tools): the model's `open_page`, not an app whose name it
+    // only starts ("Google" isn't Google Chrome). An app named exactly still
+    // opens, unless the words ask for the web ("…in the browser").
+    if cfg.web_search && model_can_tool && for_the_web(text, &request.phrase, &found) {
+        return None;
+    }
     let named_one = !matches!(found, Found::Nothing(_));
     if !named_one && (request.play || !request.plain || not_an_app(&request.phrase)) {
         return None;
@@ -86,6 +93,36 @@ pub fn plan_with(text: &str, cfg: &YapConfig, apps: &[App], model_can_tool: bool
         Found::Nothing(_) if model_can_tool => None,
         Found::Nothing(close) => Some(Plan::NotFound(request.phrase, close)),
     }
+}
+
+/// Websites people ask to open by name (an app named the same, exactly,
+/// still opens: "open Spotify" with Spotify installed).
+const WEBSITES: &[&str] = &[
+    "google", "google search", "youtube", "gmail", "google maps", "maps", "google docs", "google drive", "wikipedia", "reddit",
+    "amazon", "ebay", "facebook", "instagram", "twitter", "linkedin", "bbc", "bbc news", "the news", "netflix", "spotify",
+    "github", "stack overflow", "duckduckgo", "bing",
+];
+/// Words that ask for the web, wherever they are.
+const WEB_CUES: &[&str] = &[
+    "website", "web site", "web page", "webpage", "in the browser", "in a browser", "in the chat", "beside the chat",
+    "in the panel", "in a tab", "in the tab", "new tab", ".com", ".co.uk", ".org", ".net", "www.",
+];
+
+/// **An open request for the web** ([`plan_with`]): the words ask for it, or
+/// the phrase is a website people open by name and no app has exactly that
+/// name. Pure.
+pub(super) fn for_the_web(text: &str, phrase: &str, found: &Found) -> bool {
+    let lower = text.to_lowercase();
+    if WEB_CUES.iter().any(|c| lower.contains(c)) {
+        return true;
+    }
+    let p = phrase.trim().trim_start_matches("the ").trim();
+    let exact = match found {
+        Found::One(app) | Found::Blocked(app) => app.name.to_lowercase() == p,
+        Found::Several(apps) => apps.iter().any(|a| a.name.to_lowercase() == p),
+        Found::Nothing(_) => false,
+    };
+    !exact && WEBSITES.contains(&p)
 }
 
 /// [`plan_with`] for Chat and the Voice Assistant: off the async runtime
@@ -444,6 +481,26 @@ mod tests {
         assert!(plan("open xylophone pro", &cfg, &apps, true).is_none());
         // "Microsoft To Do" has a joining word, and is still an app.
         assert!(matches!(plan("open microsoft to do", &cfg, &apps, false), Some(Plan::Open(a)) if a.name == "Microsoft To Do"));
+    }
+
+    #[test]
+    fn a_website_opens_beside_the_chat_not_an_app_that_only_starts_with_its_name() {
+        let apps = pc();
+        let web = YapConfig { web_search: true, ..YapConfig::default() };
+        // With pages beside the chat: "Google" is the website (the model's open_page), not Google Chrome.
+        assert!(plan("can you open up google for me", &web, &apps, true).is_none());
+        assert!(plan("open youtube", &web, &apps, true).is_none());
+        // Words that ask for the web, even with an app of that name.
+        assert!(plan("open spotify in the browser", &web, &apps, true).is_none());
+        assert!(plan("open the spotify website", &web, &apps, true).is_none());
+        // An app named exactly, or one asked for by its own name, still opens at once.
+        assert!(matches!(plan("open spotify", &web, &apps, true), Some(Plan::Open(a)) if a.name == "Spotify"));
+        assert!(matches!(plan("open chrome", &web, &apps, true), Some(Plan::Open(a)) if a.name == "Google Chrome"));
+        assert!(matches!(plan("open google chrome", &web, &apps, true), Some(Plan::Open(a)) if a.name == "Google Chrome"));
+        // No pages beside the chat (the web off, or a model without tools): the app, as before.
+        let off = YapConfig::default();
+        assert!(matches!(plan("open google", &off, &apps, true), Some(Plan::Open(a)) if a.name == "Google Chrome"));
+        assert!(matches!(plan("open google", &web, &apps, false), Some(Plan::Open(a)) if a.name == "Google Chrome"));
     }
 
     #[test]

@@ -56,7 +56,7 @@ impl NotCovered {
             NotCovered::Prices => "prices",
             NotCovered::News => "the news",
             NotCovered::Reviews => "reviews and rankings",
-            NotCovered::Timetables => "timetables and opening hours",
+            NotCovered::Timetables => "travel tickets, timetables and opening hours",
             NotCovered::Local => "local businesses",
             NotCovered::Recipes => "recipes",
         }
@@ -220,6 +220,14 @@ static TIMETABLES: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r"\b(timetables?|train times|bus times|departures?|arrivals?|next (train|bus|tram|ferry|flight)|opening (hours|times)|open (now|today|tomorrow|on (sunday|monday|tuesday|wednesday|thursday|friday|saturday))|what time does .{1,40} (open|close|leave|depart|arrive|start|kick off))\b")
         .expect("static regex")
 });
+/// Travel: tickets, fares and journeys ("train tickets from Kellbrook to
+/// Port Ellis", "flights to Lisbon") — what a timetable's site or a booking
+/// site answers, never a wiki (a tester's "train tickets from … to Perth"
+/// got wrestling pages, 1 Nov 2026).
+static TRAVEL: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"\b((train|rail|railway|bus|coach|ferry|plane|air|flight) (tickets?|fares?|journeys?|routes?|connections?|times?)|tickets? (from|to|between)|fares? (from|to|between)|(flights?|trains?|buses|coaches|ferries) (from|to|between))\b")
+        .expect("static regex")
+});
 static LOCAL: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r"\bnear me\b|\bnearby\b|\baround here\b|\b(nearest|closest) [a-z]+\b|\b(restaurants?|cafes?|pubs?|bars?|shops?|stores?|supermarkets?|pharmac(y|ies)|chemists?|dentists?|garages?|hotels?|takeaways?) (in|near|around)\b")
         .expect("static regex")
@@ -274,7 +282,7 @@ fn signals(text: &str, langs: &[String]) -> Signals {
         Some(NotCovered::Prices)
     } else if any(2) {
         Some(NotCovered::News)
-    } else if TIMETABLES.is_match(&lower) {
+    } else if TIMETABLES.is_match(&lower) || TRAVEL.is_match(&lower) {
         Some(NotCovered::Timetables)
     } else if LOCAL.is_match(&lower) {
         Some(NotCovered::Local)
@@ -356,6 +364,10 @@ mod tests {
         assert_eq!(not("best indie games of 2026"), Kind::NotCovered(NotCovered::Reviews));
         assert_eq!(not("Emberfall Deluxe reviews"), Kind::NotCovered(NotCovered::Reviews));
         assert_eq!(not("next train from Port Ellis to Kellbrook"), Kind::NotCovered(NotCovered::Timetables));
+        // Travel: tickets, fares, journeys (never a wiki's guess).
+        for q in ["train tickets from Kellbrook to Port Ellis", "Can you search for train tickets from Kellbrook to Port Ellis?", "flights to Port Ellis", "cheapest fares from Kellbrook", "buses between Kellbrook and Glenbrackie"] {
+            assert!(matches!(not(q), Kind::NotCovered(NotCovered::Timetables | NotCovered::Prices)), "{q}");
+        }
         assert_eq!(not("What are the opening hours of Glenbrackie library?"), Kind::NotCovered(NotCovered::Timetables));
         assert_eq!(not("pizza near me"), Kind::NotCovered(NotCovered::Local));
         assert_eq!(not("restaurants in Kellbrook"), Kind::NotCovered(NotCovered::Local));

@@ -18,7 +18,7 @@
   //   results; with their credits;
   // - "What works with what": no key / the AI's own search / an Exa or
   //   Tavily key, said plainly;
-  // - "Search in your browser with" (cfg.webSearchBrowser, DuckDuckGo by
+  // - "Search engine" (cfg.webSearchBrowser, DuckDuckGo by
   //   default): the engine the button under an answer the free sources
   //   couldn't give opens;
   // - where the search words go, said plainly.
@@ -272,7 +272,7 @@
           </ul>
           <span class="adesc">
             They don’t cover prices, shopping, the news, reviews or timetables: for those, Yap says so and offers
-            “Search in your browser”.
+            “Search beside the chat”.
           </span>
           <span class="credits">
             Weather data by Open-Meteo.com (CC BY 4.0) · Map data © OpenStreetMap contributors · Thank you to arXiv for
@@ -290,8 +290,8 @@
             <div class="cost">
               <dt>No key</dt>
               <dd>
-                The free sources above. For anything else (prices, the news, reviews…) the answer offers “Search in your
-                browser”; Yap never reads that page.
+                The free sources above. For anything else (prices, the news, reviews, travel…) the answer offers “Search
+                beside the chat”, or in your own browser; Yap never reads that page.
               </dd>
             </div>
             <div class="cost">
@@ -310,8 +310,8 @@
       </details>
     </Row>
 
-    <Row setting="web-search-browser" label="Search in your browser with" desc="The search engine the button under such an answer opens, in your own browser">
-      <Select bind:value={cfg.webSearchBrowser} options={ENGINES} ariaLabel="Search in your browser with" disabled={!cfg.webSearch} />
+    <Row setting="web-search-browser" label="Search engine" desc="What a search you open uses: beside the chat, in its address bar, or in your own browser">
+      <Select bind:value={cfg.webSearchBrowser} options={ENGINES} ariaLabel="Search engine" disabled={!cfg.webSearch} />
     </Row>
 
     <Row>

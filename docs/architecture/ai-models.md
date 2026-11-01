@@ -43,8 +43,13 @@ The language-model side: the OpenAI-compatible client and its prompts, the on-de
   distances and speeds. Temperatures in °C: convert one a source gives in °F
   (68°F is 20°C). Prices: in £ (GBP) when you have them in £; never
   change a price's currency sign — a price in another currency stays as it
-  is, labelled, like "$15 a month (US price)". Their name is Imogen. They
-  told Yap: "…"" (the example is "£15 a month (UK price)" for a US user,
+  is, labelled, like "$15 a month (US price)". Places they mention are in
+  or near the United Kingdom unless they say otherwise: don't ask which
+  country. With no place given ("near me", a journey, the weather), start
+  from where they live if you know it. Their name is Imogen. They told Yap:
+  "…"" (the places sentence, 1 Nov 2026, for any country the region names:
+  with the UK here and the town in memory's "You", Qwen3.5-4B still asked
+  which country "Inverness to Perth" was in; the example is "£15 a month (UK price)" for a US user,
   and no real plan's price: with "$8 a month" as the example and "Give
   prices in £", Qwen3.5-4B wrote x.ai's "$8/month" as "£8/month" 2 times in
   3 — the model evaluations, model-evals.md). **Temperatures** have their
