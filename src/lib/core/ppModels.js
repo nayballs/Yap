@@ -91,6 +91,16 @@ export const PP_CLOUD_MODELS = {
       'gemini-3.7-flash',
     ],
   },
+  // Sign in with ChatGPT: the models the person's plan offers, from their
+  // account (ai/chatgpt.rs), in its order; nothing curated to go stale.
+  chatgpt: {
+    keyUrl: 'https://chatgpt.com/settings/usage',
+    accountList: true,
+    models: [],
+    // Picked on a switch until the account's list is in (OpenAI's own
+    // example model for the flow).
+    fallback: 'gpt-6.1-sol',
+  },
   openrouter: {
     keyUrl: 'https://openrouter.ai/settings/keys',
     models: [

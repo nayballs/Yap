@@ -750,6 +750,14 @@
   app); safe to delete.
 - Updates: `%APPDATA%/yap/updates.json` — which update was announced (and when),
   the last check time, and the restart marker (`updates.rs`).
+- Sign in with ChatGPT: `%APPDATA%/yap/chatgpt.json` (2026-11-01,
+  `ai/chatgpt.rs`) — this PC's host id (`urn:uuid:…`), the registration
+  OpenAI issued Yap (`clientId`), the account's opaque id, email and name,
+  the scopes granted, whether it's signed in and whether "You're using your
+  ChatGPT plan" was seen. Nothing secret: the tokens are in Windows
+  Credential Manager (`yap-chatgpt[-2…6]`), removed by Sign out and by the
+  uninstaller's "Delete the application data". It stays through Delete some
+  of your data and Reset app, like the account sign-in.
 - Calendar: `%APPDATA%/yap/calendar.json` — connected calendars (name, kind,
   last sync, error), meetings from 12 h ago to 7 days ahead, answered reminders,
   the nudge, and meetings' pre-meeting briefs (`briefs`, by event key, until

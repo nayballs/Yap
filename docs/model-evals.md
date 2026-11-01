@@ -28,7 +28,7 @@ builds and runs out of the checkout: `YAP_EVAL_TARGET_DIR=<builds>/evals`, `--ou
 
 | Option | |
 |---|---|
-| `--model <spec>` | Repeat to compare. `groq:<model>`, `openai:<model>`, `anthropic:<model>`, `openrouter:<model>`, `gemini:<model>`, `custom:<base_url>,<model>`, `local:<gguf>` (below). |
+| `--model <spec>` | Repeat to compare. `groq:<model>`, `openai:<model>`, `anthropic:<model>`, `openrouter:<model>`, `gemini:<model>`, `chatgpt:<model slug>` (the maintainer's own Sign in with ChatGPT, from Credential Manager: sign in once in the dev build first; it counts towards that ChatGPT plan), `custom:<base_url>,<model>`, `local:<gguf>` (below). |
 | `--keys-from-yap` | Use the API keys saved in `%APPDATA%\yap\config.json` (read straight from the file, **read-only**; never through `config::load`, which may save): the AI providers' and web search's (`webSearchKeys`: Exa, Tavily). Else `GROQ_API_KEY`, `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `OPENROUTER_API_KEY`, `GEMINI_API_KEY`, `YAP_EVAL_CUSTOM_KEY`, `EXA_API_KEY`, `TAVILY_API_KEY`. |
 | `--only a,b` / `--tag t` | Scenarios whose name contains `a` or `b` / that carry tag `t`. With `--raw`, `--only` picks requests by name. |
 | `--tools on\|off` | Treat the model as able (or not) to call tools, whatever `tools::supports_tools` says (its ≥ 4B rule for local models). Default: Yap's rule. |

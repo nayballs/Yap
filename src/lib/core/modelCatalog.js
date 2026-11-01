@@ -90,6 +90,14 @@ export function mergeModels(provider, entry, { current = '', now = Date.now() / 
   const models = entry?.ok ? (entry.models ?? []) : [];
   if (models.length === 0) return curatedOnly();
 
+  // The account's own list, in its order (the ChatGPT plan): as it comes.
+  if (PP_CLOUD_MODELS[provider]?.accountList) {
+    const items = models.map((m) => row(null, m));
+    if (current && !models.some((m) => liveMatches(m, current))) items.push(row(null, { id: current }, { missing: true }));
+    const gone = items.find((i) => i.missing);
+    return { ...state, live: true, items, more: [], missing: gone ? { value: gone.value, label: gone.label } : null };
+  }
+
   const used = new Set();
   const items = [];
   for (const c of curated) {
@@ -149,7 +157,7 @@ export function mergeModels(provider, entry, { current = '', now = Date.now() / 
  * first one it shows that the provider still offers.
  */
 export function defaultFrom(merged, provider) {
-  return merged.items.find((i) => !i.missing)?.value ?? PP_CLOUD_MODELS[provider]?.models[0]?.value ?? '';
+  return merged.items.find((i) => !i.missing)?.value ?? PP_CLOUD_MODELS[provider]?.models[0]?.value ?? PP_CLOUD_MODELS[provider]?.fallback ?? '';
 }
 
 /** Does `provider` offer `id` (curated or live, not gone)? */

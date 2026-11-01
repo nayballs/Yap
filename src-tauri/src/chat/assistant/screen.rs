@@ -435,8 +435,7 @@ pub enum Allowed {
 /// providers always do (whatever their address says); any other server
 /// unless it's on this PC. Pure.
 pub fn leaves_pc(provider: &str, base_url: &str) -> bool {
-    const CLOUD: [&str; 5] = ["groq", "openai", "anthropic", "gemini", "openrouter"];
-    CLOUD.contains(&provider) || !crate::ai::ai_model::runs_here(provider, base_url)
+    crate::ai::ai_model::KEYED_PROVIDERS.contains(&provider) || !crate::ai::ai_model::runs_here(provider, base_url)
 }
 
 /// The settings' rule. Pure.

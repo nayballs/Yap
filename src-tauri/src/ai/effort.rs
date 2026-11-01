@@ -240,6 +240,7 @@ fn listed(provider: &str, model: &str) -> Option<(Vec<Level>, Option<Level>, Opt
 /// Effort item). The provider's list first, where it says; then the
 /// table.
 pub fn caps(provider: &str, model: &str) -> Option<Caps> {
+    let provider = crate::ai::chatgpt::as_openai(provider);
     let list = matches!(provider, "anthropic" | "openrouter").then(|| listed(provider, model)).flatten();
     let from_list = list.as_ref().filter(|(l, _, _)| !l.is_empty());
     let (levels, default): (Vec<Level>, Option<Level>) = match provider {
@@ -292,6 +293,8 @@ pub fn fields(provider: &str, model: &str, level: Level, fast: bool, tools: bool
             }
             v
         }
+        // The ChatGPT plan's Responses API reasons with tools (responses.rs).
+        "chatgpt" => json!({ "reasoning_effort": level.id() }),
         "openai" if tools && openai_tools_without_reasoning(model) => json!({ "reasoning_effort": "none" }),
         "openai" | "groq" | "gemini" => json!({ "reasoning_effort": level.id() }),
         "openrouter" => json!({ "reasoning": { "effort": level.id() } }),

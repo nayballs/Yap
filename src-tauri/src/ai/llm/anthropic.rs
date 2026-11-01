@@ -349,8 +349,6 @@ pub fn message_of(v: &Value) -> Value {
     m
 }
 
-/// `text` with its citation marks as the turn numbers them (`numbers[i]`:
-/// cite `i`'s number; one it doesn't have goes). Pure.
 /// **Claude's search markup taken out** of text it wrote: `<cite
 /// index="…">words</cite>` (the form its web search's results take, which
 /// it sometimes copies into a tool call's text) becomes the words. Only
@@ -373,6 +371,8 @@ pub fn strip_cites_in(v: &Value) -> Value {
     }
 }
 
+/// `text` with its citation marks as the turn numbers them (`numbers[i]`:
+/// cite `i`'s number; one it doesn't have goes). Pure.
 pub fn number_marks(text: &str, numbers: &[usize]) -> String {
     static MARK: std::sync::LazyLock<regex::Regex> =
         std::sync::LazyLock::new(|| regex::Regex::new("\u{E000}(\\d+)\u{E001}").expect("static regex"));

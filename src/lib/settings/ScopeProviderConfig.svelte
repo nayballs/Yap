@@ -8,6 +8,7 @@
   import PillTabs from '../ui/PillTabs.svelte';
   import ModelPicker from './ModelPicker.svelte';
   import EndpointModels from './EndpointModels.svelte';
+  import ChatGptSignIn from './ChatGptSignIn.svelte';
   import Input from '../ui/Input.svelte';
   import Toggle from '../ui/Toggle.svelte';
   import Row from '../ui/Row.svelte';
@@ -151,6 +152,11 @@
           </Row>
           <EndpointModels id="scope-custom-models-{scopeKey}" provider="custom" scope={scopeKey} baseUrl={scope.baseUrl} model={scope.model} />
         </div>
+      {:else if cloudProvider === 'chatgpt'}
+        <!-- Sign in with ChatGPT: the person's plan, never a key. -->
+        <ChatGptSignIn {disabled} />
+        <h4 class="selhead">Model</h4>
+        <ModelPicker provider="chatgpt" bind:value={scope.model} {disabled} images={scopeKey === 'chat'} />
       {:else}
         <div class="keyhead">
           <h4>API key</h4>

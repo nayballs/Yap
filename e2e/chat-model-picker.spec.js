@@ -194,6 +194,7 @@ test('the chip opens a provider rail on its provider, with the rows Settings sho
     'Gemini, not set up',
     'Claude, not set up',
     'OpenAI, not set up',
+    'ChatGPT, not signed in',
     'OpenRouter, not set up',
     'On this PC, ready',
   ]);

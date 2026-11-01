@@ -160,7 +160,7 @@ pub fn image_tokens_at(provider: &str, here: bool, w: u32, h: u32) -> u64 {
     if here {
         return per_750(w, h, f64::INFINITY, f64::INFINITY);
     }
-    match provider {
+    match crate::ai::chatgpt::as_openai(provider) {
         "openai" => openai_tiles(w, h).max(squares(w, h, 32.0).min(1_536)),
         "gemini" => gemini_tiles(w, h).max(1_120),
         "groq" => (squares(w, h, 32.0) + 2).max(85),
@@ -472,7 +472,7 @@ pub async fn message_costs(counter: &Counter, messages: &[ChatMessage], replay: 
 /// A provider's context when nothing says (its list didn't have the model,
 /// a server didn't say): the pages call it approximate. Pure.
 pub fn default_context(provider: &str) -> u64 {
-    match provider {
+    match crate::ai::chatgpt::as_openai(provider) {
         "groq" => 131_072,
         "anthropic" => 200_000,
         "gemini" => 1_048_576,

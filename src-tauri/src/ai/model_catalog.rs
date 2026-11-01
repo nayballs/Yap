@@ -66,7 +66,7 @@ use url::Url;
 use crate::config::YapConfig;
 
 /// The cloud providers with a list to ask for (every keyed provider).
-pub const PROVIDERS: [&str; 5] = crate::ai::ai_model::KEYED_PROVIDERS;
+pub const PROVIDERS: [&str; 6] = crate::ai::ai_model::KEYED_PROVIDERS;
 
 /// A good list is used and not asked for again for a day.
 pub const FRESH_FOR: u64 = 24 * 60 * 60;
@@ -459,6 +459,7 @@ fn label(provider: &str) -> &str {
         "groq" => "Groq",
         "anthropic" => "Anthropic",
         "openai" => "OpenAI",
+        "chatgpt" => "ChatGPT",
         "gemini" => "Gemini",
         "openrouter" => "OpenRouter",
         "local" | "custom" => "the server",
@@ -539,6 +540,12 @@ async fn fetch(
             let url = ep.route(&real("https://api.openai.com/v1/models"))?;
             let v = get_json(&client, url, &[], Some(key), who).await?;
             Ok(parse_openai(&v))
+        }
+        // Sign in with ChatGPT: the account's own list, in its order, with
+        // the sign-in's token (the key store holds only a marker).
+        "chatgpt" => {
+            let list = crate::ai::chatgpt::models().await?;
+            Ok((list.len(), list.into_iter().map(|(id, name)| CatalogModel { id, name, ..Default::default() }).collect()))
         }
         "anthropic" => {
             let mut pages = Vec::new();
@@ -1250,7 +1257,9 @@ fn broadcast(app: &AppHandle) {
 /// Check `provider`'s list now (when `force`, or when it's due) with `key`.
 /// One check per provider at a time; the result is stored and broadcast.
 async fn refresh(app: Option<AppHandle>, provider: &str, key: String, force: bool) {
-    let Some(ep) = Endpoints::current() else {
+    // (The ChatGPT plan's list goes where its sign-in does: a test run's
+    // own fake, `chatgpt::oauth::api_base`.)
+    let Some(ep) = Endpoints::current().or_else(|| (provider == crate::ai::chatgpt::PROVIDER).then_some(Endpoints { standin: None })) else {
         return; // a test run without a stand-in: never online
     };
     let now = now_secs();

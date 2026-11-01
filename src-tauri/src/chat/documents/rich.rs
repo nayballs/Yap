@@ -78,6 +78,7 @@ impl ToolSet {
 const RICH_FAMILIES: &[&str] = &[
     "claude",
     "gpt-5",
+    "gpt-6",
     "gpt-4.1",
     "gemini-2.5",
     "gemini-3",

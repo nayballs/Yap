@@ -40,8 +40,10 @@ pub(crate) fn resolve_chat_endpoint(
             "No AI model configured — set one in Settings → Language Models → Chat".to_string(),
         );
     }
-    const KEYED_PROVIDERS: [&str; 5] = ["groq", "anthropic", "openai", "gemini", "openrouter"];
-    if api_key.is_empty() && KEYED_PROVIDERS.contains(&provider.as_str()) {
+    if api_key.is_empty() && provider == crate::ai::chatgpt::PROVIDER {
+        return Err("Yap isn't signed in to ChatGPT — sign in in Settings → Language Models → ChatGPT".to_string());
+    }
+    if api_key.is_empty() && crate::ai::ai_model::KEYED_PROVIDERS.contains(&provider.as_str()) {
         return Err(format!(
             "No {provider} API key — add one in Settings → Language Models"
         ));

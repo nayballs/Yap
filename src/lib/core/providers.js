@@ -20,7 +20,15 @@ import { PROVIDER_ICONS } from './providerIcons.js';
  * The cloud providers with an API key in the shared store, in Settings'
  * order (Rust's `ai_model::KEYED_PROVIDERS`).
  */
-export const KEYED_PROVIDERS = ['groq', 'anthropic', 'openai', 'gemini', 'openrouter'];
+export const KEYED_PROVIDERS = ['groq', 'anthropic', 'openai', 'gemini', 'openrouter', 'chatgpt'];
+
+/**
+ * Sign in with ChatGPT (ai/chatgpt.rs): a keyed provider whose key store
+ * holds this marker while signed in with the plan's permission — never a
+ * key the person pastes. Its calls use the sign-in's token.
+ */
+export const CHATGPT = 'chatgpt';
+export const CHATGPT_PLAN_KEY = 'chatgpt-plan';
 export const isKeyed = (p) => KEYED_PROVIDERS.includes(p);
 
 /** The Cloud providers tabs: the keyed providers and a custom endpoint. */
@@ -31,6 +39,7 @@ export const BASE_URLS = {
   groq: 'https://api.groq.com/openai/v1',
   anthropic: 'https://api.anthropic.com/v1',
   openai: 'https://api.openai.com/v1',
+  chatgpt: 'https://api.openai.com/v1',
   gemini: 'https://generativelanguage.googleapis.com/v1beta/openai/',
   openrouter: 'https://openrouter.ai/api/v1',
   local: 'http://localhost:11434/v1',
@@ -46,6 +55,7 @@ export const PP_PROVIDERS = [
   { value: 'groq', label: 'Groq', baseUrl: BASE_URLS.groq },
   { value: 'anthropic', label: 'Anthropic (Claude)', baseUrl: BASE_URLS.anthropic },
   { value: 'openai', label: 'OpenAI', baseUrl: BASE_URLS.openai },
+  { value: 'chatgpt', label: 'ChatGPT (your plan)', baseUrl: BASE_URLS.chatgpt },
   { value: 'gemini', label: 'Google Gemini', baseUrl: BASE_URLS.gemini },
   { value: 'openrouter', label: 'OpenRouter', baseUrl: BASE_URLS.openrouter },
   { value: 'local', label: 'My own server (Ollama · LM Studio)', baseUrl: BASE_URLS.local },
@@ -58,7 +68,7 @@ export const PP_PROVIDERS = [
  * state is the provider id (`modeOf`).
  */
 export const PROVIDER_MODES = [
-  { value: 'cloud', label: 'Cloud providers', desc: 'Groq, OpenAI, Anthropic, Gemini or OpenRouter, on your own API key', kind: 'cloud' },
+  { value: 'cloud', label: 'Cloud providers', desc: 'Groq, OpenAI, Anthropic, Gemini or OpenRouter on your own API key, or your ChatGPT plan', kind: 'cloud' },
   { value: 'ondevice', label: 'Local', desc: 'A model on this PC. Nothing leaves it', kind: 'local' },
   { value: 'selfhosted', label: 'Self-hosted', desc: 'Your own server, like Ollama or LM Studio', kind: 'server' },
 ];
@@ -73,6 +83,7 @@ export const CLOUD_TABS = [
   { value: 'groq', label: 'Groq', icon: PROVIDER_ICONS.groq },
   { value: 'anthropic', label: 'Anthropic', icon: PROVIDER_ICONS.anthropic, mono: true },
   { value: 'openai', label: 'OpenAI', icon: PROVIDER_ICONS.openai, mono: true },
+  { value: 'chatgpt', label: 'ChatGPT', icon: PROVIDER_ICONS.openai, mono: true },
   { value: 'gemini', label: 'Gemini', icon: PROVIDER_ICONS.gemini },
   { value: 'openrouter', label: 'OpenRouter' },
   { value: 'custom', label: 'Custom' },
@@ -83,6 +94,7 @@ export const MODEL_HINTS = {
   groq: 'e.g. openai/gpt-oss-20b',
   anthropic: 'e.g. claude-haiku-4-5',
   openai: 'e.g. gpt-5-mini',
+  chatgpt: 'a model your ChatGPT plan offers',
   gemini: 'e.g. gemini-3.5-flash',
   openrouter: 'e.g. meta-llama/llama-3.1-8b-instruct',
   local: 'your Ollama / LM Studio model name (e.g. llama3.1)',
@@ -101,6 +113,7 @@ export const PROVIDER_LABELS = {
   groq: 'Groq',
   anthropic: 'Anthropic',
   openai: 'OpenAI',
+  chatgpt: 'ChatGPT',
   gemini: 'Gemini',
   openrouter: 'OpenRouter',
   ondevice: 'On this PC',
@@ -113,6 +126,7 @@ export const SCOPE_PROVIDER_LABELS = {
   groq: 'Groq',
   anthropic: 'Anthropic',
   openai: 'OpenAI',
+  chatgpt: 'ChatGPT',
   gemini: 'Gemini',
   openrouter: 'OpenRouter',
   ondevice: 'Local',
@@ -125,6 +139,7 @@ export const CLEANUP_PROVIDER_LABELS = {
   groq: 'Groq',
   anthropic: 'Anthropic',
   openai: 'OpenAI',
+  chatgpt: 'ChatGPT (your plan)',
   gemini: 'Google Gemini',
   openrouter: 'OpenRouter',
   custom: 'Custom endpoint',
@@ -137,6 +152,7 @@ export const PROVIDER_DESTINATIONS = {
   groq: 'Groq',
   anthropic: 'Anthropic',
   openai: 'OpenAI',
+  chatgpt: 'OpenAI, on your ChatGPT plan',
   gemini: 'Google Gemini',
   openrouter: 'OpenRouter',
   custom: 'your custom endpoint',

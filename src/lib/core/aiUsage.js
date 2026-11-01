@@ -91,6 +91,8 @@ export function modelRow(m) {
 /** What a model's tokens cost, as a row says it. */
 export function costLine(m) {
   if (m.here) return 'free, on your PC';
+  // Sign in with ChatGPT: it counts towards the plan, not dollars.
+  if (m.provider === 'chatgpt') return 'on your ChatGPT plan';
   if (m.costMicros == null) return 'no price known';
   return aboutCost(m.costMicros);
 }

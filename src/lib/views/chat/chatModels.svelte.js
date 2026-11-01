@@ -35,6 +35,8 @@ export const CLOUD_PROVIDERS = [
   { id: 'gemini', name: 'Google Gemini', short: 'Gemini' },
   { id: 'anthropic', name: 'Anthropic', short: 'Claude' },
   { id: 'openai', name: 'OpenAI', short: 'OpenAI' },
+  // Sign in with ChatGPT: the person's plan, not a key (ai/chatgpt.rs).
+  { id: 'chatgpt', name: 'ChatGPT', short: 'ChatGPT' },
   { id: 'openrouter', name: 'OpenRouter', short: 'OpenRouter' },
 ];
 
@@ -410,8 +412,9 @@ export function setMoreOpen(p, open) {
 /** The pane's status line for a cloud provider. */
 export function providerLine(p, status) {
   const short = cloudInfo(p)?.short || p;
-  if (!status?.keyed?.includes(p)) return { text: 'Not set up' };
+  if (!status?.keyed?.includes(p)) return { text: p === 'chatgpt' ? 'Not signed in' : 'Not set up' };
   const entry = catalog.providers[p];
+  if (p === 'chatgpt' && !entry?.checking) return { text: 'Using ChatGPT plan' };
   if (entry?.checking) return { text: `Checking ${short}'s models…` };
   if (modelsFor(p).live) return { text: `Connected · checked ${ago(entry.fetchedAt)}` };
   if (entry?.error) return { text: `Couldn't check: ${entry.error}. Showing Yap's list.`, warn: true };

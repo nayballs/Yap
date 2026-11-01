@@ -34,7 +34,9 @@ use crate::config::YapConfig;
 use crate::ai::local_llm::PROVIDER_ONDEVICE;
 
 /// Cloud providers that need a key (and share one key across every scope).
-pub const KEYED_PROVIDERS: [&str; 5] = ["groq", "anthropic", "openai", "gemini", "openrouter"];
+/// "chatgpt" (Sign in with ChatGPT, `ai/chatgpt.rs`) holds a marker while
+/// signed in, never a key the person pastes.
+pub const KEYED_PROVIDERS: [&str; 6] = ["groq", "anthropic", "openai", "gemini", "openrouter", crate::ai::chatgpt::PROVIDER];
 
 const NOT_INSTALLED: &str =
     "Yap's on-device model isn't installed. Install it in Settings → Language Models → Dictation Cleanup → Local.";
@@ -72,6 +74,7 @@ pub fn standard_base_url(provider: &str) -> Option<&'static str> {
         "groq" => "https://api.groq.com/openai/v1",
         "anthropic" => "https://api.anthropic.com/v1",
         "openai" => "https://api.openai.com/v1",
+        "chatgpt" => crate::ai::chatgpt::BASE_URL,
         "gemini" => "https://generativelanguage.googleapis.com/v1beta/openai/",
         "openrouter" => "https://openrouter.ai/api/v1",
         _ => return None,
@@ -296,6 +299,10 @@ pub fn set_provider_key(cfg: &mut YapConfig, provider: &str, key: &str) -> Resul
         return Err(format!("{provider} doesn't take an API key"));
     }
     let key = key.trim();
+    // The ChatGPT plan's marker only, set by its sign-in.
+    if provider == crate::ai::chatgpt::PROVIDER && key != crate::ai::chatgpt::PLAN_KEY {
+        return Err("Sign in with ChatGPT instead: it doesn't take an API key".to_string());
+    }
     if key.is_empty() {
         return Err("Paste the API key first".to_string());
     }
@@ -315,6 +322,21 @@ pub fn set_provider_key(cfg: &mut YapConfig, provider: &str, key: &str) -> Resul
         }
     }
     Ok(())
+}
+
+/// Forget a keyed provider's key everywhere [`set_provider_key`] puts it
+/// (signing out of ChatGPT). Pure.
+pub fn clear_provider_key(cfg: &mut YapConfig, provider: &str) {
+    cfg.pp_api_keys.remove(provider);
+    if cfg.pp_provider == provider {
+        cfg.pp_api_key.clear();
+    }
+    if let Some(s) = cfg.llm_scopes.get_mut("chat") {
+        if s.provider == provider {
+            s.api_key.clear();
+        }
+        s.api_keys.remove(provider);
+    }
 }
 
 /// A self-hosted or custom OpenAI-compatible server Settings has an address
@@ -474,8 +496,10 @@ pub fn status(cfg: &YapConfig, scope: Scope, on_device: &OnDevice) -> Status {
         from_scope: own_scope(cfg, scope).is_some(),
         provider: configured_provider(cfg, scope).to_string(),
         keyed: keyed_providers(cfg),
+        // (The ChatGPT plan's marker isn't a key to show.)
         masked_keys: keyed_providers(cfg)
             .into_iter()
+            .filter(|p| *p != crate::ai::chatgpt::PROVIDER)
             .map(|p| (p, mask_key(&chat_key(cfg, p))))
             .collect(),
         servers: servers(cfg),

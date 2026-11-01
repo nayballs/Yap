@@ -6,6 +6,7 @@
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import { mergeModels, defaultFrom, offers, labelFor } from '../core/modelCatalog.js';
+import { PP_CLOUD_MODELS } from '../core/ppModels.js';
 
 /** `providers`: provider → `{ ok, models, error, fetchedAt, checkedAt, checking }`, keyed providers only. */
 export const catalog = $state({ providers: {}, now: 0, loaded: false });
@@ -55,7 +56,11 @@ export function defaultModel(provider) {
 
 /** Does `provider` offer `id` right now (or, without a live list, does Yap's list have it)? */
 export function providerOffers(provider, id) {
-  return offers(modelsFor(provider, id), id);
+  const merged = modelsFor(provider, id);
+  // The ChatGPT plan's list is the account's: until it's in, an OpenAI
+  // model id is taken as offered (a switch never blanks the saved one).
+  if (PP_CLOUD_MODELS[provider]?.accountList && !merged.live) return /^(gpt-|o\d)/i.test(id || '');
+  return offers(merged, id);
 }
 
 /** A model's name: curated label, the provider's own name, else the id. */

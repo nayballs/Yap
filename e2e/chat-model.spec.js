@@ -125,7 +125,7 @@ test('the chip names the chat model, switches it, and every answer keeps its own
   const dialog = settingsDialog(main);
   await expect(dialog).toBeVisible();
   await expect(dialog.getByRole('heading', { name: 'Language Models' })).toBeVisible();
-  await expect(dialog.getByRole('tab', { name: 'Chat' })).toHaveAttribute('aria-selected', 'true');
+  await expect(dialog.getByRole('tab', { name: 'Chat & Voice Assistant' })).toHaveAttribute('aria-selected', 'true');
   await expect(dialog.locator('.srow.sel')).toContainText('GPT-OSS 120B');
   await shot(main, '04-settings-chat-scope');
 
@@ -212,7 +212,7 @@ test('with no AI model set up the chip says so, and the picker opens on the prov
   const dialog = settingsDialog(main);
   await expect(dialog).toBeVisible();
   await expect(dialog.getByRole('heading', { name: 'Language Models' })).toBeVisible();
-  await expect(dialog.getByRole('tab', { name: 'Chat' })).toHaveAttribute('aria-selected', 'true');
+  await expect(dialog.getByRole('tab', { name: 'Chat & Voice Assistant' })).toHaveAttribute('aria-selected', 'true');
   await expect(popover(main)).toHaveCount(0);
   await closeSettings(main);
 });

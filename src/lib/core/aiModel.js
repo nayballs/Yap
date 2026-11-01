@@ -96,6 +96,7 @@ export function familyIcon(...texts) {
 /** A cloud provider's mark (Anthropic's is Claude's, as the picker's rail shows it). */
 export function providerIcon(provider) {
   if (provider === 'anthropic') return 'claude';
+  if (provider === 'chatgpt') return 'openai';
   return PROVIDER_ICONS[provider] ? provider : null;
 }
 

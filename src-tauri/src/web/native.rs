@@ -303,6 +303,11 @@ pub struct NativeSearch {
     /// Yap's function tools ([`NativeSearch::server_tools`]) — no sub-call,
     /// and Yap's `web_search` / `read_page` aren't offered.
     pub in_chat: bool,
+    /// **On the person's ChatGPT plan** (Sign in with ChatGPT): OpenAI's
+    /// search through the plan's Responses API — streamed and stateless as
+    /// the flow asks, with the sign-in's access token at call time (`key`
+    /// is only the key store's marker).
+    pub plan: bool,
     base_url: String,
     key: String,
     /// The person's country (ISO "GB") and time zone (IANA), from About you:
@@ -326,6 +331,7 @@ impl NativeSearch {
             deep: false,
             deep_fetches: None,
             in_chat: false,
+            plan: false,
             base_url: base_url.trim().trim_end_matches('/').to_string(),
             key: key.to_string(),
             country: None,
@@ -357,6 +363,16 @@ impl NativeSearch {
     /// For a chat on `provider`'s `model` at `base_url`: its own search, if
     /// Yap uses one there.
     pub fn for_chat(provider: &str, model: &str, base_url: &str, key: &str) -> Option<NativeSearch> {
+        // The ChatGPT plan: OpenAI's own search, on the plan.
+        if provider == crate::ai::chatgpt::PROVIDER {
+            if key.trim().is_empty() {
+                return None;
+            }
+            let model = search_model(Provider::OpenAi, model)?;
+            let mut ns = NativeSearch::new(Provider::OpenAi, &model, &crate::ai::chatgpt::oauth::api_base(), key.trim());
+            ns.plan = true;
+            return Some(ns);
+        }
         let p = Provider::parse(provider)?;
         if base_url.trim().is_empty() || key.trim().is_empty() {
             return None;
@@ -499,6 +515,9 @@ impl NativeSearch {
                 // pages opened); every other stays quick.
                 if reasons(&self.model) {
                     b["reasoning"] = json!({ "effort": if self.deep { "medium" } else { "low" } });
+                }
+                if self.plan {
+                    b["stream"] = json!(true);
                 }
                 b
             }
@@ -1212,7 +1231,7 @@ const UNAVAILABLE_FOR: Duration = Duration::from_secs(30 * 60);
 static UNAVAILABLE: LazyLock<Mutex<HashMap<String, (Instant, String)>>> = LazyLock::new(|| Mutex::new(HashMap::new()));
 
 fn unavailable_key(ns: &NativeSearch) -> String {
-    format!("{}|{}|{}", ns.provider.id(), ns.model, ns.base_url)
+    format!("{}|{}|{}", if ns.plan { crate::ai::chatgpt::PROVIDER } else { ns.provider.id() }, ns.model, ns.base_url)
 }
 
 /// A failure that will fail again the same way (not a rate limit or an
@@ -1252,6 +1271,9 @@ pub async fn search(ns: &NativeSearch, query: &str, question: &str) -> Result<Na
     // Anthropic's web fetch beside its search, when the model takes it; a
     // model that turns it down is asked again without it (once).
     let mut fetch = p == Provider::Anthropic && fetches(&ns.model);
+    // On the ChatGPT plan: the sign-in's token, not the key store's marker.
+    let key = if ns.plan { crate::ai::chatgpt::access_token().await? } else { ns.key.clone() };
+    let counted_as = if ns.plan { crate::ai::chatgpt::PROVIDER } else { p.id() };
     loop {
         let body = ns.body_with(query, question, &today, fetch);
         // A model evaluation paces the call and logs it; otherwise a no-op.
@@ -1259,9 +1281,9 @@ pub async fn search(ns: &NativeSearch, query: &str, question: &str) -> Result<Na
         call.send(&body);
         let mut req = client.post(&url).json(&body);
         req = match p {
-            Provider::Gemini => req.header("x-goog-api-key", &ns.key),
-            Provider::Anthropic => req.header("x-api-key", &ns.key).header("anthropic-version", "2023-06-01"),
-            Provider::Groq | Provider::OpenAi | Provider::OpenRouter => req.bearer_auth(&ns.key),
+            Provider::Gemini => req.header("x-goog-api-key", &key),
+            Provider::Anthropic => req.header("x-api-key", &key).header("anthropic-version", "2023-06-01"),
+            Provider::Groq | Provider::OpenAi | Provider::OpenRouter => req.bearer_auth(&key),
         };
         // (The pages Anthropic's fetch opens are opened on its side: this
         // one request is what leaves the PC, in the receipts as the search.)
@@ -1293,16 +1315,44 @@ pub async fn search(ns: &NativeSearch, query: &str, question: &str) -> Result<Na
             }
             return Err(call.failed(why));
         }
-        let v: Value = serde_json::from_str(&text).map_err(|_| call.failed(format!("{} sent an answer Yap couldn't read.", p.search_name())))?;
+        // The plan's answer is a stream: its `response.completed` is the answer.
+        let v: Value = if ns.plan {
+            completed_of(&text).map_err(|e| call.failed(e))?
+        } else {
+            serde_json::from_str(&text).map_err(|_| call.failed(format!("{} sent an answer Yap couldn't read.", p.search_name())))?
+        };
         call.answered(&limits, &v);
         // Its tokens (usage.rs), counted under the turn's feature but never as
         // the conversation's context (a sub-call of its own).
-        let counted = crate::ai::usage::Call { provider: p.id(), model: &ns.model, base_url: &ns.base_url, turn: false, feature: None };
+        let counted = crate::ai::usage::Call { provider: counted_as, model: &ns.model, base_url: &ns.base_url, turn: false, feature: None };
         crate::ai::usage::record_response(&counted, &v, remaining_req, limit_req);
         let found = parse(p, &v, query).map_err(|e| call.failed(e))?;
         tracing::info!(provider = p.id(), results = found.hits.len(), read = found.read, deep = ns.deep, "Web search: the provider's own search answered");
         return Ok(found);
     }
+}
+
+/// **The plan's streamed search answered**: the response in its
+/// `response.completed` event (a usage limit or a failure said). Pure.
+pub fn completed_of(sse: &str) -> Result<Value, String> {
+    let mut parser = crate::chat::stream::SseParser::default();
+    let mut events = parser.feed(sse.as_bytes());
+    events.extend(parser.finish());
+    for data in events {
+        let Ok(e) = serde_json::from_str::<Value>(&data) else { continue };
+        match e["type"].as_str().unwrap_or("") {
+            "response.completed" => return Ok(e["response"].clone()),
+            "response.failed" | "error" => {
+                let err = if e["response"]["error"].is_object() { &e["response"]["error"] } else { &e };
+                return Err(match crate::ai::llm::responses::plan_error(0, err) {
+                    crate::ai::llm::responses::Refusal::Say(s) => s,
+                    _ => "ChatGPT's search couldn't finish.".to_string(),
+                });
+            }
+            _ => {}
+        }
+    }
+    Err("ChatGPT's search didn't finish its answer.".into())
 }
 
 /// An HTTP 400 that turns down the web fetch tool (a model that doesn't

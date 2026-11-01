@@ -252,6 +252,9 @@ pub enum Purpose {
     Account,
     /// The signed-in account's picture, which the page loads.
     AccountPicture,
+    /// Sign in with ChatGPT (`ai/chatgpt.rs`): OpenAI's sign-in, its keys
+    /// and token refreshes (the calls on the plan are `Ai("chatgpt")`).
+    ChatGptSignIn,
     /// "Google" | "iCal link".
     Calendar(&'static str),
     /// Spoken replies from a cloud voice service: its name.
@@ -310,6 +313,7 @@ pub fn provider_name(id: &str) -> &'static str {
     match id {
         "groq" => "Groq",
         "openai" => "OpenAI",
+        "chatgpt" => "ChatGPT plan",
         "anthropic" => "Anthropic",
         "gemini" => "Gemini",
         "openrouter" => "OpenRouter",
@@ -353,6 +357,7 @@ impl Purpose {
             Purpose::UpdateDownload => ("update", "Update download".into(), "Updates"),
             Purpose::Account => ("account", "Account".into(), "Account"),
             Purpose::AccountPicture => ("account", "Account picture".into(), "Account"),
+            Purpose::ChatGptSignIn => ("account", "Sign in with ChatGPT".into(), "AI models"),
             Purpose::Calendar(k) => ("calendar", format!("Calendar sync · {k}"), "Calendar"),
             Purpose::Voice(s) => ("voice", format!("Voice · {s}"), "Spoken replies"),
             Purpose::VoiceList(s) => ("voice", format!("Voice list · {s}"), "Spoken replies"),

@@ -825,6 +825,12 @@ async fn prepare(spec: &str, args: &Args, keys: &HashMap<String, String>, run_di
                 return Err(format!("no {kind} key: set {}_API_KEY or pass --keys-from-yap", kind.to_uppercase()));
             }
         }
+        // Sign in with ChatGPT: the maintainer's own sign-in (Credential
+        // Manager, `ai/chatgpt.rs`), never a key; `chatgpt:<model slug>`.
+        "chatgpt" => {
+            m.base_url = crate::ai::chatgpt::BASE_URL.to_string();
+            m.key = crate::ai::chatgpt::PLAN_KEY.to_string();
+        }
         "custom" => {
             let (url, model) = rest.rsplit_once(',').ok_or("custom:<base_url>,<model>")?;
             m.base_url = url.trim().trim_end_matches('/').to_string();

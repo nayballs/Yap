@@ -328,9 +328,7 @@ impl Shared {
         // Cloud providers reject keyless requests with a confusing 401 (e.g.
         // "Invalid Anthropic API Key" while the user is looking at the Groq
         // cleanup tab) — fail fast with a message that names the provider.
-        const KEYED_PROVIDERS: [&str; 5] =
-            ["groq", "anthropic", "openai", "gemini", "openrouter"];
-        if api_key.is_empty() && KEYED_PROVIDERS.contains(&provider.as_str()) {
+        if api_key.is_empty() && crate::ai::ai_model::KEYED_PROVIDERS.contains(&provider.as_str()) {
             tracing::warn!(provider = %provider, "Rewrite skipped: no API key for provider");
             report_rewrite(last.is_some(), "", "failed", Some("no API key".into()));
             let _ = self.app.emit(

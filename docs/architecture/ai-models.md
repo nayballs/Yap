@@ -135,6 +135,13 @@ The language-model side: the OpenAI-compatible client and its prompts, the on-de
   `web_fetch` drops the fetch and asks again. A step with server tools may
   take 150 s. Unit-tested on the documented shapes (`anthropic::tests`);
   e2e through support/fake-llm.js's Messages API emulation.
+- **`ai/chatgpt.rs`** (+ `chatgpt/`: `oauth`, `jwt`, `vault`) — **Sign in with
+  ChatGPT** (2026-11-01): Yap's AI on the person's own ChatGPT plan instead of
+  an API key, through OpenAI's flow for open-source apps that run on the
+  person's PC. See [Sign in with ChatGPT](#sign-in-with-chatgpt-2026-11-01).
+- **`ai/llm/responses.rs`** — **the ChatGPT plan on OpenAI's Responses API**
+  (2026-11-01): every call on the provider "chatgpt", whatever the feature,
+  from `post_chat_request`. See [Sign in with ChatGPT](#sign-in-with-chatgpt-2026-11-01).
 - **`ai/llm.rs`** — the AI cleanup client (OpenAI-compatible). Frames the transcript as
   data (delimiters + one-shot) so small models *clean* it instead of *answering* it.
   **The dictation's two messages for a hybrid model** (`cleanup_messages`,
@@ -1432,6 +1439,137 @@ The language-model side: the OpenAI-compatible client and its prompts, the on-de
   `ai/llm.rs` (`eval::Call`, `eval::adjust_body`), `chat/tools.rs`, `config.rs`,
   `notes.rs` are no-ops outside a run. See
   [`docs/model-evals.md`](../model-evals.md).
+
+## Sign in with ChatGPT (2026-11-01)
+
+The person's ChatGPT plan pays for Yap's AI, instead of an API key. It's a provider of its own, **"chatgpt"** ("ChatGPT" on the Cloud providers tabs and in Chat's model picker). The API-key providers, OpenAI's among them, don't change.
+
+OpenAI's flow for open-source apps that run locally is self-serve: no partner key, no review. A paid or hosted Yap would need OpenAI's say first.
+
+### Signing in
+
+`chatgpt_sign_in` starts it, from Settings → Language Models (any scope, or Dictation Cleanup) → Cloud providers → ChatGPT, or from Chat's picker.
+
+- **OAuth 2 with PKCE (S256)** in the system browser (`oauth.rs`).
+- **The loopback listener** takes the code at `http://127.0.0.1:1455/auth/callback`:
+  - any free port when 1455 is taken (only the port may change), never `localhost`;
+  - one `state`, which must match;
+  - a GET from loopback with the right `Host`.
+- **The first time, Yap registers itself** with the account: `client_id=dynamic_agent_client`, `agent_name_hint=Yap`, and this PC's `ext_agent_host_id` (`urn:uuid:` and a v4 UUID, made once).
+- **The issued `oaiapp_…` id is kept** in `chatgpt.json` *before* the code is used, so a failed exchange never registers Yap twice. Every later sign-in uses it, with the account's email as `login_hint`.
+- **Scopes:** `openid profile email offline_access resource.invoke chatgpt.tokens.use.direct`, with `resource` set to `https://api.openai.com/v1`.
+- **Endpoints** come from the issuer's discovery document, each checked to be on the issuer.
+
+### The ID token
+
+`jwt.rs` checks it with `ring`, which is already in the tree through rustls:
+
+- RS256 against the issuer's published keys, fetched again once for an unknown `kid`;
+- the issuer;
+- the audience: the issued client id (a list naming others needs `azp`);
+- the expiry, with 5 s of skew;
+- this attempt's nonce;
+- a subject.
+
+A later sign-in must be the same account (`sub`). Another account forgets the registration and tells the person to click again, which makes a new one.
+
+Without `chatgpt.tokens.use.direct` in the granted scopes, the person is signed in but Yap can't use the plan. The card says so and offers **Turn on plan usage** (sign in again with `prompt=consent`) or an API key on the OpenAI tab.
+
+### The key store holds a marker
+
+While signed in with the plan, the key store holds `PLAN_KEY` ("chatgpt-plan") for the provider. So every "has this provider a key?" check works as for the others: the scopes, Commands, the meeting notes, the picker's connected dot.
+
+`set_provider_key` refuses anything else for this provider. The marker is never a credential: the calls use the sign-in's token.
+
+### Tokens
+
+`vault.rs` keeps them in Windows Credential Manager as one JSON value: the refresh token, the access token and its expiry, the issued client id and the account's `sub`.
+
+- **Where:** `yap-chatgpt`, split over `yap-chatgpt-2…6` when one credential can't hold it, with Local persistence.
+  - A portable Yap's names carry a hash of its data folder.
+  - A model evaluation uses the real names, as it uses the maintainer's keys.
+- **Never** in config.json, chatgpt.json, the logs or the webview.
+- **Lifetimes:** the access token lasts an hour. The refresh token lasts 30 days and **rotates on every refresh**.
+- **One refresh at a time:** `access_token()` refreshes one at a time in this process and **across Yaps** (the dev build beside the installed app, an evaluation), through a lock file in the temp folder (`UpgradeLock::take_named`).
+  - Each refresh reads the newest tokens back first, so a spent refresh token is never used twice (OpenAI would answer `refresh_token_reused`).
+- **After a refresh:** the new tokens are kept first, then the refreshed ID token is checked. One for another account signs Yap out.
+- **A dead grant** (`invalid_grant`, `refresh_token_expired`, …) signs Yap out, and Settings says so.
+- **A 401 on a call** refreshes once (`refreshed_token`) and asks again.
+
+### Signing out
+
+`chatgpt_sign_out` revokes the refresh token at the discovery document's `revocation_endpoint`, trying twice on a 5xx or a network error.
+
+- The tokens are removed here either way, and the marker cleared.
+- If OpenAI didn't confirm the revocation, Yap says so, with where to disconnect Yap in ChatGPT's settings.
+- The registration and the host id stay.
+
+### The calls
+
+`responses.rs` sends `POST https://api.openai.com/v1/responses` with the access token.
+
+**Every request:**
+- `store: false` and `stream: true`. A caller that doesn't watch still gets a stream, read to its end.
+- The whole history in `input`.
+- The first system prompt as `instructions`. A later note in Yap's voice goes as a developer message, since system items are refused.
+- None of the fields the flow refuses: `temperature`, `max_output_tokens`, `top_p`, `previous_response_id`, `metadata`, `user`, and so on. An evaluation's overrides of these are stripped too.
+
+**Tools and a turn's steps:**
+- Yap's tools go in one `yap` namespace, the only way the flow takes function tools.
+- A call comes back as a `function_call` with that namespace; its result goes back as `function_call_output`.
+- Each step replays the response's output items (`yap_responses`, beside the OpenAI-shaped message, as Claude's `yap_anthropic` is): reasoning with its `encrypted_content`, the calls, the text. They go back without `id` or `status`, since nothing is stored to refer to.
+
+**Request options:**
+- A named `tool_choice` becomes `required`.
+- `response_format` becomes `text.format`.
+- Effort (`reasoning_effort`) becomes `reasoning: {effort, summary: "auto"}`, and the summary streams as thinking.
+- Screenshots go as `input_image`.
+
+**Answers:**
+- Only `response.completed` counts as an answer.
+- A broken stream is asked again once (`Delta::Restart`).
+- `response.incomplete` keeps what it wrote, if anything.
+
+**The plan's errors** (`plan_error`, after OpenAI's "Errors and recovery"):
+
+| Error | What Yap does |
+|---|---|
+| The usage limit (`…_usage_limit_exceeded`, also mid-stream as `response.failed`) | Says it, with "Manage usage" and chatgpt.com/settings/usage; never retried |
+| Not eligible | Says it, with the API key as the way out |
+| `…_unavailable`, admission's 503 | Retried twice after a pause |
+| An unsupported field (`error.param`) | Drops it and asks again, up to three times |
+| A plain 429 | Waited out like any provider's |
+
+Usage (from `response.completed`) goes to the AI usage tracker as "chatgpt", with no price: it's the plan.
+
+### The plan's models are OpenAI's
+
+`chatgpt::as_openai` makes effort, images, context sizes and the strong models (`documents::rich`) read "chatgpt" as "openai". GPT-6 counts as a strong model since 2026-11-01.
+
+- **The model list is the account's own:** `GET /v1/models` → `models[]` with `visibility: "list"`, in the server's order (`model_catalog.rs`). The picker shows it as it comes (`ppModels.js` `accountList`).
+- **Its web search is OpenAI's own, on the plan** (`web/native.rs` `NativeSearch::plan`): the same sub-call, streamed and stateless, read from `response.completed`.
+
+### On screen, in OpenAI's words
+
+Following its UI rules (`ChatGptSignIn.svelte`, `stores/chatgpt.svelte.js`, `ModelChip.svelte`, `ChatModelPicker.svelte`):
+
+- **Continue with ChatGPT** to sign in.
+- **Connected · Using ChatGPT plan**, with the account and **Manage usage**.
+- The one-time **"You're using your ChatGPT plan"** notice, with **Got it** (`chatgpt.json` `noticeSeen`).
+- Chat's model chip says "Using ChatGPT plan", with a Manage usage link beside it.
+
+### Receipts
+
+- The sign-in, its keys and its refreshes: "Sign in with ChatGPT" (`Purpose::ChatGptSignIn`).
+- The calls: "ChatGPT plan" (`Purpose::Ai("chatgpt")`).
+- The model list: a model list.
+
+### Tests
+
+- The flow's pure parts are tested in each module.
+- `e2e/chatgpt.spec.js` runs against a local fake of OpenAI's sign-in and Responses API (`e2e/support/fake-chatgpt.js`): PKCE, a signed ID token, rotating refresh tokens, a namespaced tool step whose reasoning must come back whole, the usage limit, revocation.
+- Debug builds point at the fake with `YAP_CHATGPT_ISSUER` and `YAP_CHATGPT_API`.
+- Evaluations run on the real plan with `chatgpt:<model slug>` once the maintainer has signed in.
 
 ## Model evaluations (`npm run eval`)
 How real models do on Yap's own Chat code, with every request and response

@@ -9,6 +9,11 @@
   import { listen } from '@tauri-apps/api/event';
   import { onMount, tick, untrack } from 'svelte';
   import { fmtCount, fmtDay, splitLine, featureLabel, modelRow, costLine, speedLine, tokensWord } from '../../core/aiUsage.js';
+  import { createExternalLinkHandler } from '../../core/externalLinks.js';
+
+  // Sign in with ChatGPT's usage is the plan's: "Manage usage" by the
+  // summary (OpenAI's UI rules).
+  const USAGE_URL = 'https://chatgpt.com/settings/usage';
 
   /**
    * `focus`: 'ai-usage' brings the card into view once it and the stats
@@ -131,6 +136,12 @@
           </div>
         </div>
       </div>
+      {#if shown.models.some((m) => m.provider === 'chatgpt')}
+        <p class="note">
+          Your ChatGPT plan's own limits apply to its use.
+          <a class="usage" href={USAGE_URL} onclick={createExternalLinkHandler(USAGE_URL)}>Manage usage</a>
+        </p>
+      {/if}
       {#if shown.unreported > 0}
         <p class="note">{shown.unreported} {shown.unreported === 1 ? 'call' : 'calls'} didn’t say {shown.unreported === 1 ? 'its' : 'their'} tokens: counted as calls only.</p>
       {/if}
@@ -339,5 +350,9 @@
     .cols {
       grid-template-columns: 1fr;
     }
+  }
+  .usage {
+    color: var(--yap-link);
+    font-weight: 600;
   }
 </style>

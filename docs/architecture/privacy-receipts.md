@@ -95,7 +95,10 @@ person sees what their choices send where. It never says "nothing leaves".
   OpenRouter", a server's own "Model list · your server"), `auth.rs`
   ("Account", every call — a signed-out Yap still makes none on its own),
   `calendar.rs` ("Calendar sync · iCal link"), `calendar/google.rs` ("Calendar
-  sync · Google": tokens, events, revoke), `voice/tts/elevenlabs.rs` ("Voice ·
+  sync · Google": tokens, events, revoke), `ai/chatgpt/oauth.rs` ("Sign in
+  with ChatGPT", 2026-11-01: discovery, keys, tokens, refreshes, revoke; its
+  calls on the plan are "AI model · ChatGPT plan", `Purpose::Ai("chatgpt")`,
+  and its model list "Model list · ChatGPT"), `voice/tts/elevenlabs.rs` ("Voice ·
   ElevenLabs", "Voice list · ElevenLabs", "Voice sample · ElevenLabs"),
   `dictation/stt.rs` ("Speech model download"), `ai/local_llm.rs` ("On-device AI ·
   starting up" — the `/health` polls —, "· warming up", "On-device AI

@@ -265,7 +265,11 @@ pub const STAYS: &[Part] = &[
     Part { id: "samples", label: "Your writing samples", files: &["writing_samples.json"] },
     Part { id: "models", label: "Downloaded speech, AI and voice models", files: &["models/", "llm/"] },
     // Paired phones are set up like an account sign-in (link.rs): they stay.
-    Part { id: "account", label: "Your account sign-in, your calendars and paired phones", files: &["calendar.json", "link_devices.json", "link/"] },
+    Part {
+        id: "account",
+        label: "Your account sign-in, your ChatGPT sign-in, your calendars and paired phones",
+        files: &["calendar.json", "chatgpt.json", "link_devices.json", "link/"],
+    },
     Part {
         id: "bookkeeping",
         label: "Yap's own records: tips shown, your answers to its offers, and caches",

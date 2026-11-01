@@ -120,6 +120,8 @@ dom_smoothie = "0.17"
 dom_query = "0.27"
 futures-util = "0.3"
 sha2 = "0.10"
+# Sign in with ChatGPT's ID-token signature (RS256; already in the tree through rustls).
+ring = "0.17"
 flate2 = "1"
 tar = "0.4"
 # The speaker-diarization runtime (diarize.rs) comes as NVIDIA's zip. Only

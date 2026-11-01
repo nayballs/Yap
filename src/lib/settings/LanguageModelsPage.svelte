@@ -31,6 +31,7 @@
   import ChatConfig from './ChatConfig.svelte';
   import ModelPicker from './ModelPicker.svelte';
   import EndpointModels from './EndpointModels.svelte';
+  import ChatGptSignIn from './ChatGptSignIn.svelte';
   // CSS order: this page is a chunk of its own (Settings.svelte's PAGES), so
   // all of its styles, the components above included, come after Settings'
   // shared styles, which the main window has already: this page's own
@@ -244,10 +245,15 @@
       <div class="set-banner" role="status" data-testid="cleanup-key-banner">
         <span class="dot" aria-hidden="true"></span>
         <span class="text">
-          Add your {CLEANUP_PROVIDER_LABELS[cfg.ppProvider] || cfg.ppProvider} API key
-          <span>Cleanup is on, but without a key Yap types your words as they are.</span>
+          {#if cfg.ppProvider === 'chatgpt'}
+            Sign in with ChatGPT
+            <span>Cleanup is on, but until you sign in Yap types your words as they are.</span>
+          {:else}
+            Add your {CLEANUP_PROVIDER_LABELS[cfg.ppProvider] || cfg.ppProvider} API key
+            <span>Cleanup is on, but without a key Yap types your words as they are.</span>
+          {/if}
         </span>
-        <Button size="sm" onclick={focusKey}>Add key</Button>
+        {#if cfg.ppProvider !== 'chatgpt'}<Button size="sm" onclick={focusKey}>Add key</Button>{/if}
       </div>
     {/if}
     {#if lm.mode === 'cloud'}
@@ -279,6 +285,11 @@
             </Row>
             <EndpointModels id="pp-custom-models" provider="custom" scope="cleanup" baseUrl={cfg.ppBaseUrl} model={cfg.ppModel} />
           </div>
+        {:else if lm.cloudProvider === 'chatgpt'}
+          <!-- Sign in with ChatGPT: the person's plan, never a key. -->
+          <ChatGptSignIn disabled={!cfg.postProcessEnabled} />
+          <h4 class="selhead">Model</h4>
+          <ModelPicker provider="chatgpt" bind:value={cfg.ppModel} />
         {:else}
           <div class="keyhead">
             <h4>API key</h4>

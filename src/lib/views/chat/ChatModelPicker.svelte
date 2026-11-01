@@ -45,6 +45,7 @@
   import { loadCatalog } from '../../stores/modelCatalog.svelte.js';
   import { forgetVisionTags } from '../../stores/visionTags.svelte.js';
   import { openExternalLink } from '../../core/externalLinks.js';
+  import { chatgpt, loadChatgpt, signInChatgpt, cancelChatgpt } from '../../stores/chatgpt.svelte.js';
   import { toast } from '../../ui/toast.svelte.js';
   import { openContextMenu, menuKey, menuOpenFor } from '../../ui/contextMenu.svelte.js';
   import { uninstallItems } from '../../core/localModels.js';
@@ -124,7 +125,8 @@
     { id: 'recent', label: 'Recent', glyph: 'recent' },
     ...CLOUD_PROVIDERS.map((p) => {
       const ready = !!status?.keyed?.includes(p.id);
-      return { id: p.id, label: p.short, icon: providerIcon(p.id), ready, state: ready ? 'connected' : 'not set up', sepBefore: p.id === 'groq' };
+      const off = p.id === 'chatgpt' ? 'not signed in' : 'not set up';
+      return { id: p.id, label: p.short, icon: providerIcon(p.id), ready, state: ready ? 'connected' : off, sepBefore: p.id === 'groq' };
     }),
     ...(remote.length ? [{ id: 'custom', label: 'Custom', glyph: 'server', ready: true, state: 'set up' }] : []),
     { id: 'pc', label: 'On this PC', glyph: 'pc', ready: pcReady, state: pcReady ? 'ready' : 'nothing installed yet', sepBefore: true },
@@ -406,6 +408,7 @@
   onMount(() => {
     place();
     for (const s of servers) loadServer(s);
+    loadChatgpt();
     followLocalChanges();
     window.addEventListener('resize', place);
     tick().then(() => {
@@ -524,6 +527,27 @@
 
 {#snippet connect(p, replacing)}
   {@const info = cloudInfo(p)}
+  {#if p === 'chatgpt'}
+    <!-- Sign in with ChatGPT: the person's plan, never a key (OpenAI's words). -->
+    <div class="connect">
+      <div>
+        <div class="ctitle">Use your ChatGPT plan</div>
+        <div class="cdesc">
+          {chatgpt.waiting
+            ? 'Finish signing in in your browser.'
+            : 'Sign in with the ChatGPT account you already pay for. Requests go from this PC to OpenAI and count towards your plan.'}
+        </div>
+      </div>
+      <div class="crow">
+        {#if chatgpt.waiting}
+          <button class="btn" type="button" onclick={cancelChatgpt}>Cancel</button>
+        {:else}
+          <button class="btn ink" type="button" onclick={() => signInChatgpt(chatgpt.signedIn && !chatgpt.plan)}>Continue with ChatGPT</button>
+        {/if}
+      </div>
+      {#if chatgpt.failed || chatgpt.error}<p class="cerr" role="alert">{chatgpt.failed || chatgpt.error}</p>{/if}
+    </div>
+  {:else}
   <form class="connect" onsubmit={(e) => (e.preventDefault(), saveKey(p))}>
     <div>
       <div class="ctitle">{replacing ? `Replace the ${info.short} key` : `Connect ${info.short}`}</div>
@@ -551,6 +575,7 @@
     {#if keyError}<p class="cerr" role="alert">{keyError}</p>{/if}
     <p class="cnote">Stored only on this PC, like the keys in Settings.</p>
   </form>
+  {/if}
 {/snippet}
 
 <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->

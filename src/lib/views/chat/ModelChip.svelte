@@ -28,6 +28,11 @@
   import { isKeyed } from '../../core/providers.js';
   import { menuOrDialogOpen } from '../../ui/contextMenu.svelte.js';
   import { effortLabel, effortNow } from '../../core/effort.js';
+  import { createExternalLinkHandler } from '../../core/externalLinks.js';
+
+  // Chat on the person's ChatGPT plan (Sign in with ChatGPT): "Using
+  // ChatGPT plan" by the model, and "Manage usage" (OpenAI's UI rules).
+  const USAGE_URL = 'https://chatgpt.com/settings/usage';
 
   // `quiet`: no pill, just the words (under the Chat composer, as Claude
   // Code shows its model).
@@ -146,7 +151,7 @@
         <span class="cname">{modelName(model)}</span>
         {#if effort}<span class="ceffort" data-testid="chip-effort">{effort}</span>{/if}
         {#if fast}<span class="ceffort">· Fast</span>{/if}
-        <span class="cprov">· {providerName(model)}</span>
+        <span class="cprov">· {model.provider === 'chatgpt' ? 'Using ChatGPT plan' : providerName(model)}</span>
         {#if !status.tools}<span class="cnotools">· no note tools</span>{/if}
         {#if gone}<span class="cnotools">· no longer offered</span>{/if}
       {:else}
@@ -155,6 +160,9 @@
       {/if}
       <svg class="chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 15 6-6 6 6" /></svg>
     </button>
+    {#if model?.provider === 'chatgpt'}
+      <a class="usage" href={USAGE_URL} onclick={createExternalLinkHandler(USAGE_URL)}>Manage usage</a>
+    {/if}
   {/if}
 
   {#if open && status}
@@ -177,6 +185,24 @@
     position: relative;
     min-width: 0;
     display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .usage {
+    flex: none;
+    font-size: 11.5px;
+    font-weight: 600;
+    color: var(--yap-link);
+    text-decoration: none;
+    white-space: nowrap;
+  }
+  .usage:hover {
+    text-decoration: underline;
+  }
+  .usage:focus-visible {
+    outline: none;
+    border-radius: 3px;
+    box-shadow: var(--yap-focus);
   }
   .chip {
     display: inline-flex;

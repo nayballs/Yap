@@ -450,7 +450,7 @@ pub fn supports_tools(provider: &str, model: &str) -> bool {
         return forced; // a model evaluation's --tools on|off
     }
     match provider {
-        "groq" | "anthropic" | "openai" | "gemini" | "openrouter" => {
+        "groq" | "anthropic" | "openai" | "gemini" | "openrouter" | "chatgpt" => {
             crate::ai::model_catalog::tools_for(provider, model) != Some(false)
         }
         "custom" => true,

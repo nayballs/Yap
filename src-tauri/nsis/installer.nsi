@@ -1039,6 +1039,18 @@ Section Uninstall
         ${EndIf}
         IntOp $1 $1 + 1
       ${LoopWhile} $1 <= 8
+      ; --- YAP DATA --- Sign in with ChatGPT's refresh token
+      ; (ai/chatgpt/vault.rs): yap-chatgpt, then yap-chatgpt-2 … -6 when one
+      ; credential couldn't hold it (vault::PARTS). It goes with chatgpt.json.
+      System::Call 'advapi32::CredDeleteW(w "yap-chatgpt.com.yap.dictation", i 1, i 0) i .r0'
+      ${If} $0 <> 0
+        DetailPrint "Removed Yap's ChatGPT sign-in from Windows Credential Manager"
+      ${EndIf}
+      StrCpy $1 2
+      ${Do}
+        System::Call 'advapi32::CredDeleteW(w "yap-chatgpt-$1.com.yap.dictation", i 1, i 0) i .r0'
+        IntOp $1 $1 + 1
+      ${LoopWhile} $1 <= 4
     ${EndIf}
   ${EndIf}
 

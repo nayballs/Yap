@@ -329,8 +329,7 @@ pub fn resolve_endpoint(cfg: &YapConfig) -> Result<Endpoint, String> {
                 .to_string(),
         );
     }
-    const KEYED_PROVIDERS: [&str; 5] = ["groq", "anthropic", "openai", "gemini", "openrouter"];
-    if ep.api_key.is_empty() && KEYED_PROVIDERS.contains(&ep.provider.as_str()) {
+    if ep.api_key.is_empty() && crate::ai::ai_model::KEYED_PROVIDERS.contains(&ep.provider.as_str()) {
         return Err(format!(
             "No {} API key — add one in Settings → Language Models",
             ep.provider

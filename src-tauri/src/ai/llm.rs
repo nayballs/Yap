@@ -18,6 +18,7 @@ use serde_json::{json, Value};
 /// Claude on Anthropic's Messages API, for a strong Claude's Chat steps
 /// (its server tools, thinking and prompt caching).
 pub(crate) mod anthropic;
+pub(crate) mod responses;
 
 /// HTTP timeout for the cleanup request. Cleanup adds latency on top of STT, so
 /// this is generous; on timeout the caller keeps the raw transcript.
@@ -1497,6 +1498,7 @@ fn rate_limited_error(provider: &str, wait: Option<Duration>) -> String {
     let who = match provider {
         "groq" => "Groq",
         "openai" => "OpenAI",
+        "chatgpt" => "ChatGPT",
         "anthropic" => "Anthropic",
         "openrouter" => "OpenRouter",
         "gemini" => "Gemini",
@@ -1634,6 +1636,12 @@ async fn post_chat_request(
     extra: serde_json::Map<String, Value>,
     mut on: Option<OnDelta<'_>>,
 ) -> Result<Value, String> {
+    // The person's ChatGPT plan (Sign in with ChatGPT): OpenAI's Responses
+    // API with the sign-in's token, whatever the feature (responses.rs).
+    if provider == crate::ai::chatgpt::PROVIDER {
+        let _ = (base_url, api_key, temperature, max_tokens);
+        return Box::pin(responses::post(model, &messages, tools, &extra, timeout, rate_limit_patience, on)).await;
+    }
     // Yap's on-device model not loaded (yet, or freed while idle; the call
     // has its stand-by address, or the one it had before it was freed): it
     // loads now — or is already loading, since the dictation started — and

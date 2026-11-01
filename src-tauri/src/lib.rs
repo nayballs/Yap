@@ -453,6 +453,12 @@ pub fn run() {
             ai::ai_model::ai_model_status,
             ai::ai_model::chat_set_model,
             ai::ai_model::chat_provider_key,
+            ai::chatgpt::chatgpt_status,
+            ai::chatgpt::chatgpt_sign_in,
+            ai::chatgpt::chatgpt_cancel_sign_in,
+            ai::chatgpt::chatgpt_sign_out,
+            ai::chatgpt::chatgpt_notice_seen,
+            ai::chatgpt::chatgpt_e2e_opened,
             ai::effort::effort_info,
             ai::effort::chat_set_effort,
             ai::effort::chat_set_fast,
@@ -931,6 +937,7 @@ pub fn run() {
             // Every AI call's tokens, kept 90 days in ai_usage.json
             // (usage/store.rs): written by its own thread.
             ai::usage::store::init(&handle);
+            ai::chatgpt::init(&handle);
             // Spoken replies (tts.rs): its state goes to every window.
             voice::tts::init(&handle);
             // Yap's sounds: the pack, the volume and each moment's switch (sound.rs).
