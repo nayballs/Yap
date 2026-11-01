@@ -47,7 +47,8 @@ const WHAT_MAX: usize = 90;
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct Activity {
     /// What kind of step: "think", "answer", "search" (the web), "read" (a
-    /// page), "notes", "doc", "calendar", "memory", "apps", "chats", "tool".
+    /// page), "picture" (a picture from the web looked at or shown), "notes",
+    /// "doc", "calendar", "memory", "apps", "chats", "tool".
     pub mark: &'static str,
     /// The line: "Searching the web · tidecaller build", "Reading
     /// emberfall.example/wiki/Talents", "Writing ‘Gear’".
@@ -131,6 +132,13 @@ pub fn describe(name: &str, args: &Value, title_of: &dyn Fn(u64) -> Option<Strin
         "edit_document" => Activity::new("doc", with(titled(&["note_id", "id"]), "Changing", "Changing the document")),
         "document_history" => Activity::new("doc", "Looking at the document's versions"),
         "restore_document" => Activity::new("doc", "Restoring an earlier version"),
+        // Pictures from the web (chat/pictures.rs): the caption the model
+        // gave, quoted.
+        "look_at_picture" => Activity::new("picture", "Looking at a picture"),
+        "show_picture" => Activity::new("picture", with(text(&["caption"]).map(|c| quoted(&c)), "Showing", "Showing a picture")),
+        "find_pictures" => {
+            Activity::new("picture", with(text(&["url"]).map(|u| crate::web::short_url(&u)), "Looking for pictures on", "Looking for pictures"))
+        }
         _ => Activity::new("tool", "Working"),
     }
 }
@@ -182,6 +190,11 @@ mod tests {
         assert_eq!(line("check_calendar", json!({ "when": "tomorrow" })), "Checking your calendar");
         assert_eq!(line("open_app", json!({ "name": "Paint" })), "Opening Paint");
         assert_eq!(line("search_chats", json!({ "query": "tent" })), "Searching your chats · tent");
+        assert_eq!(line("look_at_picture", json!({ "picture": "p2" })), "Looking at a picture");
+        assert_eq!(line("show_picture", json!({ "picture": "p2", "caption": "Fort Joy treasure map" })), "Showing ‘Fort Joy treasure map’");
+        assert_eq!(line("show_picture", Value::Null), "Showing a picture");
+        assert_eq!(line("find_pictures", json!({ "url": "https://wiki.example.com/wiki/Fort_Joy" })), "Looking for pictures on wiki.example.com/wiki/Fort_Joy");
+        assert_eq!(describe("show_picture", &Value::Null, &titles).mark, "picture");
         assert_eq!(line("something_new", json!({})), "Working");
         // The kinds the page may mark.
         assert_eq!(describe("web_search", &Value::Null, &titles).mark, "search");

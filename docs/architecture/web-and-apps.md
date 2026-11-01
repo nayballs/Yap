@@ -12,7 +12,8 @@ Chat's and the Voice Assistant's two ways of reaching outside Yap: looking thing
   recommended `{query, type: "auto", contents: {highlights: true}}` +
   `numResults: 5`, + `userLocation`: the person's country, ISO "GB", from
   About you — `ai/about_you.rs`, `Settings.country`; 2026-10-21) or **Tavily** (`POST https://api.tavily.com/search`,
-  Bearer, `{query, max_results: 5}`, + `country`: Tavily's lower-case name,
+  Bearer, `{query, max_results: 5, include_images: true,
+  include_image_descriptions: true}`, + `country`: Tavily's lower-case name,
   "united kingdom", when it lists the person's — `about_you::tavily_country`),
   the search cache keyed by the country too; keys in `web_search_keys` (service →
   key, like `pp_api_keys`, never logged); with no key — or when the service
@@ -20,8 +21,19 @@ Chat's and the Voice Assistant's two ways of reaching outside Yap: looking thing
   402 / Tavily 432 out of free searches, 433, 429, offline), or when it
   found nothing ("Exa found nothing." as the note) — the **keyless
   lookup**: the game's own MediaWiki (`GAME_WIKIS`: bg3.wiki, warcraft.wiki.gg,
-  minecraft.wiki, Fandom wikis…; any `*.wiki.gg` / `*.fandom.com` named in
-  the question) else Wikipedia in the person's language (`wiki_language`:
+  minecraft.wiki, terraria.wiki.gg, stardewvalleywiki.com, zeldawiki.wiki,
+  uesp.net, the RuneScape wikis…; any `*.wiki.gg` named in the question) —
+  **never Fandom** (2026-11-01, the maintainer's call: `wiki::allows_automated`,
+  the one rule for the text lookup, `api_for_host`, the host spotting and an
+  article's pictures; Fandom's Terms of Use: "not use any robot, spider,
+  scraper or other automated means to access the Services for any purpose
+  without our express written permission", and it answers scripted fetches
+  HTTP 402, checked 1 Nov 2026 — Elden Ring, Cyberpunk 2077, The Witcher,
+  Fallout, Genshin Impact and Valheim left `GAME_WIKIS` and fall back as any
+  game without a wiki does: Wikipedia, else the provider's search or the
+  person's search key; no other wiki added in their place until its own
+  terms are checked; a page the model reads from search results through
+  `read_page` is unchanged) — else Wikipedia in the person's language (`wiki_language`:
   the speech language, else About you's — Windows' unless changed —, else English; English again when it
   finds nothing), through `api.php` (`generator=search` + `inprop=url`, then
   TextExtracts on Wikipedia, `action=parse` HTML elsewhere → `fragment_text`
@@ -39,7 +51,44 @@ Chat's and the Voice Assistant's two ways of reaching outside Yap: looking thing
   pinned to them (`resolve_to_addrs`, no proxy, no cookies), redirects
   followed by hand (≤ 5, each checked), 10 s, 3 MB, HTML/plain text only;
   `page_text` = dom_smoothie (readability.js port, `TextMode::Formatted`),
-  `page_part` ≈ 3,000 tokens a read with `next_offset`. **`Turn`**: only
+  `page_part` ≈ 3,000 tokens a read with `next_offset` (one guarded GET,
+  `fetch` with a `Want`: its Accept, receipt purpose, byte cap and allowed
+  types). **Pages keep their pictures** (2026-10-31, `chat/pictures.rs`
+  shows them; chat-and-assistant.md): `page_images` (on the whole page,
+  dom_query, a page read and cached with it as `Page.images`): each
+  `<img>`'s address — its lazy one (`data-src`, `data-lazy-src`,
+  `data-original`) when `src` is a `data:` placeholder, the widest `srcset`
+  candidate (a `<picture>`'s `<source>` too; `best_srcset` parses as the
+  HTML standard does, commas in an address kept) — made absolute (the
+  page's `<base href>` too), its alt text (else `title`), its figure's
+  caption (`<figcaption>`, MediaWiki's `.thumbcaption` / `.gallerytext`,
+  WordPress's `.wp-caption-text`), the nearest heading above it (h1–h6 in
+  document order), its size (the srcset's width, the height in proportion;
+  else `width` / `height`); never page furniture (`is_junk`: not http(s),
+  an SVG or icon file, a tracker's host, a word like icon, logo, avatar,
+  sprite, emoji, badge, placeholder, pixel, spacer, ad, share or 1x1 in its
+  path, class, id or alt text; a known side under 100 px, or under 120 ×
+  120) nor the site's `nav`, `footer`, a header outside the article,
+  `[role=navigation]`; public addresses only; each once; ≤ 60. `read_page`'s
+  first part lists the best five as `"pictures"`. **Searches' pictures**:
+  Tavily is asked `include_images` + `include_image_descriptions`
+  (`tavily_images`: `[{url, description}]` or plain addresses, no page);
+  Exa's answer is read for each result's own `image` (`exa_images`, the
+  result's page and title; nothing more is asked); a wiki lookup's article
+  read first gets one more polite request (never Fandom, as above;
+  Wikipedia / Commons — Wikimedia's API policy allows it with a
+  descriptive User-Agent —, `*.wiki.gg` and the independent `GAME_WIKIS`
+  are asked) — `wiki_images_url`
+  (`generator=images&prop=imageinfo&iiprop=url|size|mime&iiurlwidth=1600`):
+  each file's full-size link and size, a 1,600-px rendering for an SVG or
+  a file over 10 MB (`parse_wiki_images`; the article's own HTML gives the
+  alt text, caption and heading, matched by the file's name in the
+  thumbnail's address, those first in the article's order). `Found.images`
+  (`FoundImage {image, page}`) → the turn's candidates, the result's
+  `"pictures"`. **`fetch_picture`** (show / look): the same guards, `image/*`
+  only (never SVG), ≤ 10 MB (`Content-Length` refused before a byte, a
+  stream stopped past it), `Purpose::WebPicture` ("A picture from the web").
+  **`Turn`**: only
   links the person gave (their messages, `links_in`), a search this turn
   returned (`allowed`) or an earlier answer's sources (an earlier search
   found them; `with_earlier_sources`: "tell me more about the first one"); ≤ 3 searches and ≤ 3 reads a turn (a call past the

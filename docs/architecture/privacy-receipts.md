@@ -83,7 +83,8 @@ person sees what their choices send where. It never says "nothing leaves".
   (`place_of_url`).
 - **Every call site** (2026-10-24): `ai/llm.rs` (the one chat call), `web.rs`
   (Exa/Tavily: "Web search · Exa"; the keyless lookup: "Web search ·
-  Wikipedia and wikis"; `read_page`: "Reading a web page"), `web/native.rs`
+  Wikipedia and wikis"; `read_page`: "Reading a web page"; a picture Chat
+  looks at or shows, `fetch_picture`: "A picture from the web"), `web/native.rs`
   ("Web search · Groq" / "· Google" …), `ai/model_catalog.rs` ("Model list ·
   OpenRouter", a server's own "Model list · your server"), `auth.rs`
   ("Account", every call — a signed-out Yap still makes none on its own),

@@ -251,8 +251,10 @@ test('a chat answer cites its web sources: pills, a Sources row, kept with the a
   expect(exa.headers['user-agent']).toMatch(/^Yap\/\S+ \(https:\/\/github\.com\/nayballs\/Yap/);
   // A game question: its wiki (bg3.wiki's api.php) was asked too, and leads.
   const wiki = fakeWeb.requests.slice(webFrom).filter((r) => r.service === 'standin' && r.host === 'bg3.wiki');
-  expect(wiki.map((r) => r.query.action)).toEqual(['query', 'parse']);
+  // The search, the article, then the article's pictures (chat/pictures.rs).
+  expect(wiki.map((r) => r.query.action)).toEqual(['query', 'parse', 'query']);
   expect(wiki[0].query.gsrsearch).toBe('Gale');
+  expect(wiki[2].query).toMatchObject({ generator: 'images', pageids: '118', prop: 'imageinfo' });
 
   // The model got numbered results, framed as information, not instructions.
   const second = fakeLlm.requests.slice(from).filter((r) => r.tools.length)[1];

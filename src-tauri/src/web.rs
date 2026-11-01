@@ -17,9 +17,10 @@
 //! - or **Tavily** (`POST https://api.tavily.com/search`, `Authorization:
 //!   Bearer`, `{query, max_results: 5}`: basic depth, one credit);
 //! - and, with no key — or when the service fails — the **keyless lookup**:
-//!   a game's own MediaWiki wiki through its `api.php` ([`GAME_WIKIS`]:
-//!   bg3.wiki, warcraft.wiki.gg, Fandom wikis…; any `*.wiki.gg` or
-//!   `*.fandom.com` wiki named in the question too), else Wikipedia in the
+//!   a game's own MediaWiki wiki through its `api.php` (`GAME_WIKIS`:
+//!   bg3.wiki, warcraft.wiki.gg, minecraft.wiki…; any `*.wiki.gg` wiki named
+//!   in the question too; never Fandom, whose terms forbid automated
+//!   requests: `wiki::allows_automated`), else Wikipedia in the
 //!   person's language (the Action API: search, then the article's text).
 //!   Polite: a descriptive User-Agent with a contact address, one request at
 //!   a time per host with a short gap, ≤ 3 requests per lookup, answers
@@ -88,9 +89,10 @@ pub use grounding::{
 };
 #[cfg(debug_assertions)]
 pub use page::clear_caches;
+pub use page::{check_url, fetch_picture, is_junk, page_images, PageImage, MAX_PICTURE_BYTES};
 pub use turn::{bracket_citations, citations, normal_url, short_url, Reach, Turn};
+pub use wiki::keywords;
 
-use page::check_url;
 use wiki::{game_for, keyless, wiki_lookup};
 
 /// The tools this module runs.
@@ -360,6 +362,18 @@ pub struct Found {
     /// The pages the provider's search opened itself (Anthropic's web
     /// fetch): the chip says so.
     pub read: usize,
+    /// Pictures the search came with (`chat/pictures.rs` candidates):
+    /// Tavily's image search, Exa's results' own pictures, the wiki
+    /// article's images.
+    pub images: Vec<FoundImage>,
+}
+
+/// A picture a search came with: the picture, and the page it's on when
+/// the service says (a result's address; Tavily's image search names none).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FoundImage {
+    pub image: PageImage,
+    pub page: Option<String>,
 }
 
 /// A search backend: the chat provider's own search ([`native`]), Yap's
@@ -466,13 +480,66 @@ pub fn parse_exa(v: &Value) -> Vec<Hit> {
         .collect()
 }
 
+/// **Exa's results' own pictures** (a result's `image`, when Exa has one for
+/// the page — "the URL of an image associated with the search result",
+/// exa.ai/docs/reference/search): each a picture of its result's page, with
+/// the page's title as what it's about. Nothing is asked for them: Yap
+/// takes what the answer carries. Pure.
+pub fn exa_images(v: &Value) -> Vec<FoundImage> {
+    v["results"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(|r| {
+            let page = r["url"].as_str()?.trim().to_string();
+            let url = r["image"].as_str()?.trim().to_string();
+            check_url(&page).ok()?;
+            let image = picture_at(&url, r["title"].as_str().unwrap_or(""), None, None)?;
+            Some(FoundImage { image, page: Some(page) })
+        })
+        .collect()
+}
+
+/// **Tavily's image search** (`include_images` + `include_image_descriptions`:
+/// `images: [{url, description}]`, or plain addresses without the
+/// descriptions): pictures, with no page named. Pure.
+pub fn tavily_images(v: &Value) -> Vec<FoundImage> {
+    v["images"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(|i| {
+            let (url, about) = match i {
+                Value::String(u) => (u.as_str(), ""),
+                o => (o["url"].as_str()?, o["description"].as_str().unwrap_or("")),
+            };
+            Some(FoundImage { image: picture_at(url.trim(), about, None, None)?, page: None })
+        })
+        .collect()
+}
+
+/// A picture at `url` about `alt` (its size when known), unless the
+/// address isn't one Yap may open or it's page furniture
+/// ([`page::is_junk`]). Pure.
+pub(crate) fn picture_at(url: &str, alt: &str, w: Option<u32>, h: Option<u32>) -> Option<PageImage> {
+    check_url(url).ok()?;
+    let alt = tidy(alt, 200);
+    if is_junk(url, &alt, "", w, h) {
+        return None;
+    }
+    Some(PageImage { url: url.to_string(), alt, w, h, ..Default::default() })
+}
+
 /// Tavily's search request (docs.tavily.com/documentation/api-reference/
 /// endpoint/search): the query and Yap's result budget; `search_depth`
-/// stays "basic" (one credit), no answer, no raw content; `country` (its
-/// lower-case English name, "Boost search results from a specific country",
-/// general topic only — the default) when it has one for the person's. Pure.
+/// stays "basic" (one credit), no answer, no raw content; its image search
+/// with each image's description (`include_images`,
+/// `include_image_descriptions`: the pictures Chat may show,
+/// `chat/pictures.rs`); `country` (its lower-case English name, "Boost
+/// search results from a specific country", general topic only — the
+/// default) when it has one for the person's. Pure.
 pub fn tavily_body(query: &str, country: Option<&str>) -> Value {
-    let mut body = json!({ "query": query, "max_results": MAX_RESULTS });
+    let mut body = json!({ "query": query, "max_results": MAX_RESULTS, "include_images": true, "include_image_descriptions": true });
     if let Some(name) = country.and_then(crate::ai::about_you::tavily_country) {
         body["country"] = json!(name);
     }
@@ -596,7 +663,7 @@ static API: LazyLock<reqwest::Client> = LazyLock::new(|| {
         .unwrap_or_default()
 });
 
-async fn service_search(ep: &Endpoints, service: Service, key: &str, query: &str, country: Option<&str>) -> Result<Vec<Hit>, String> {
+async fn service_search(ep: &Endpoints, service: Service, key: &str, query: &str, country: Option<&str>) -> Result<(Vec<Hit>, Vec<FoundImage>), String> {
     let base = ep.service_base(service)?;
     let (url, req) = match service {
         Service::Exa => {
@@ -618,8 +685,8 @@ async fn service_search(ep: &Endpoints, service: Service, key: &str, query: &str
     }
     let v: Value = serde_json::from_str(&body).map_err(|_| format!("{} sent an answer Yap couldn't read.", service.name()))?;
     Ok(match service {
-        Service::Exa => parse_exa(&v),
-        Service::Tavily => parse_tavily(&v),
+        Service::Exa => (parse_exa(&v), exa_images(&v)),
+        Service::Tavily => (parse_tavily(&v), tavily_images(&v)),
     })
 }
 
@@ -665,6 +732,7 @@ pub async fn search(s: &Settings, ep: &Endpoints, query: &str, context: &str) ->
                 native: Some(ns.provider),
                 summary: n.summary,
                 read: n.read,
+                images: Vec::new(),
             },
             other => {
                 // Unsupported model, refused, rate-limited, unreachable or
@@ -703,12 +771,18 @@ async fn own_search(s: &Settings, ep: &Endpoints, query: &str, context: &str) ->
     Ok(match own_backend(s) {
         Backend::Keyless | Backend::Native(_) => keyless(s, ep, &query, context).await?,
         Backend::Service(service) => match service_search(ep, service, &s.key, &query, s.country.as_deref()).await {
-            Ok(mut hits) => {
-                // A game question: its wiki's best article leads.
+            Ok((mut hits, mut images)) => {
+                // A game question: its wiki's best article leads (its
+                // pictures first too).
                 if let Some(g) = game_for(&query).or_else(|| game_for(context)) {
                     if let Ok(extra) = wiki_lookup(ep, g.api, &query, Some(g)).await {
-                        if let Some(top) = extra.into_iter().next() {
+                        if let Some(top) = extra.hits.into_iter().next() {
                             hits.retain(|h| normal_url(&h.url) != normal_url(&top.url));
+                            let key = normal_url(&top.url);
+                            let mut first: Vec<FoundImage> =
+                                extra.images.into_iter().filter(|i| i.page.as_deref().is_some_and(|p| normal_url(p) == key)).collect();
+                            first.append(&mut images);
+                            images = first;
                             hits.insert(0, top);
                             hits.truncate(MAX_RESULTS);
                         }
@@ -722,10 +796,10 @@ async fn own_search(s: &Settings, ep: &Endpoints, query: &str, context: &str) ->
                             f.note = Some(format!("{} found nothing.", service.name()));
                             f
                         }
-                        _ => Found { hits, from: service.name().into(), ..Default::default() },
+                        _ => Found { hits, from: service.name().into(), images, ..Default::default() },
                     }
                 } else {
-                    Found { hits, from: service.name().into(), ..Default::default() }
+                    Found { hits, from: service.name().into(), images, ..Default::default() }
                 }
             }
             Err(e) => {
@@ -824,19 +898,55 @@ mod tests {
 
     #[test]
     fn tavily_requests_and_results_map_as_its_docs_say() {
-        assert_eq!(tavily_body("latest rust release", None), json!({ "query": "latest rust release", "max_results": 5 }));
+        // Its image search too, each image described (the pictures Chat may show).
+        let images = |mut v: Value| {
+            v["include_images"] = json!(true);
+            v["include_image_descriptions"] = json!(true);
+            v
+        };
+        assert_eq!(tavily_body("latest rust release", None), images(json!({ "query": "latest rust release", "max_results": 5 })));
         // The user's country, as Tavily names it; one it doesn't list, left out.
         assert_eq!(
             tavily_body("spotify premium price", Some("GB")),
-            json!({ "query": "spotify premium price", "max_results": 5, "country": "united kingdom" })
+            images(json!({ "query": "spotify premium price", "max_results": 5, "country": "united kingdom" }))
         );
-        assert_eq!(tavily_body("q", Some("HK")), json!({ "query": "q", "max_results": 5 }));
+        assert_eq!(tavily_body("q", Some("HK")), images(json!({ "query": "q", "max_results": 5 })));
         let hits = parse_tavily(&serde_json::from_str(TAVILY).unwrap());
         assert_eq!(hits.len(), 2);
         assert_eq!(hits[0].title, "Announcing Rust 1.99.0");
         assert!(hits[0].text.contains("1.99.0"));
         // Only an ISO date counts.
         assert_eq!(hits[1].published, None);
+    }
+
+    /// The pictures a search comes with: Tavily's image search (described,
+    /// or plain addresses), Exa's results' own; never a logo, a local
+    /// address or an SVG.
+    #[test]
+    fn a_searchs_pictures_come_with_it() {
+        let tavily = json!({
+            "results": [],
+            "images": [
+                { "url": "https://maps.example/fort-joy-treasure.jpg", "description": "A map of Fort Joy with treasure chests marked." },
+                { "url": "https://brand.example/logo.png", "description": "The studio's logo." },
+                "https://shots.example/fort-joy-gate.png",
+                { "url": "http://10.0.0.4/x.jpg", "description": "local" },
+                { "url": "https://maps.example/route.svg", "description": "A route" }
+            ]
+        });
+        let found = tavily_images(&tavily);
+        assert_eq!(found.iter().map(|f| f.image.url.as_str()).collect::<Vec<_>>(), ["https://maps.example/fort-joy-treasure.jpg", "https://shots.example/fort-joy-gate.png"]);
+        assert_eq!(found[0].image.alt, "A map of Fort Joy with treasure chests marked.");
+        assert!(found.iter().all(|f| f.page.is_none()), "Tavily names no page");
+        let exa = json!({ "results": [
+            { "title": "Fort Joy guide", "url": "https://guides.example/fort-joy", "image": "https://guides.example/og/fort-joy.jpg", "favicon": "https://guides.example/favicon.ico" },
+            { "title": "No picture", "url": "https://guides.example/other" }
+        ] });
+        let found = exa_images(&exa);
+        assert_eq!(found.len(), 1);
+        assert_eq!(found[0].image.url, "https://guides.example/og/fort-joy.jpg");
+        assert_eq!(found[0].image.alt, "Fort Joy guide");
+        assert_eq!(found[0].page.as_deref(), Some("https://guides.example/fort-joy"));
     }
 
     #[test]

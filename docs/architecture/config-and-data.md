@@ -611,7 +611,10 @@
   never sent. Never leaves the PC except inside the Chat request you send;
   never logged. Pictures pasted or dropped into Chat are stored here too (as
   PNGs, `snip/attach.rs`); a question whose screenshot went as its text
-  (Windows' OCR, `snip/ocr.rs`) keeps it marked `asText`. A snip copied or
+  (Windows' OCR, `snip/ocr.rs`) keeps it marked `asText`. A picture Chat
+  showed from the web (`chat/pictures.rs`, 2026-10-31) is stored here the
+  same way, its answer's `pictures` in `chats.json` (id, size, caption, its
+  address and page), kept and deleted like a screenshot. A snip copied or
   saved from the overlay keeps nothing here; a save goes where the Save
   dialog says, in the folder used last (`snip_save_dir`). Beside them,
   `chat-images/thumbs/<id>-<w>x<h>.png` (2026-10-31, `snip/thumbs.rs`): each

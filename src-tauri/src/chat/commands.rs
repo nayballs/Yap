@@ -271,5 +271,7 @@ async fn send_turn(
         "tokens": turn.tokens,
         // The documents it made or changed (documents.rs): their pills.
         "documents": turn.documents,
+        // The pictures it showed beside the chat (pictures.rs): their pills.
+        "pictures": turn.pictures,
     }))
 }

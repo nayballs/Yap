@@ -223,6 +223,11 @@ pub fn offered_tools(open_apps: bool, web: bool, extra: Extra<'_>) -> Value {
             all.extend(web_tools.iter().cloned());
         }
     }
+    // Pictures from the web (chat/pictures.rs): `find_pictures` where Yap's
+    // `read_page` isn't offered (a Claude searching in Chat's own request).
+    if let (Some(all), Some(pictures)) = (tools.as_array_mut(), crate::chat::pictures::definitions(extra.pictures, !web).as_array()) {
+        all.extend(pictures.iter().cloned());
+    }
     if let (Some(all), Some(memory_tools)) = (tools.as_array_mut(), memory_definitions(extra).as_array()) {
         all.extend(memory_tools.iter().cloned());
     }
@@ -605,6 +610,9 @@ async fn tool_loop(
         // unless the step makes the outline too.
         let hold_web = web.as_deref().is_some_and(crate::web::Turn::outline_pending)
             && !tool_calls.iter().any(|c| c["function"]["name"] == "create_document");
+        // The pictures this step looked at (`look_at_picture`): one user
+        // message after its tool results carries them (chat/pictures.rs).
+        let mut looks: Vec<crate::chat::pictures::Look> = Vec::new();
         for call in &tool_calls {
             let id = call["id"].as_str().unwrap_or("");
             let name = call["function"]["name"].as_str().unwrap_or("");
@@ -711,7 +719,7 @@ async fn tool_loop(
                 crate::chat::activity::tell(live.sink, crate::chat::activity::of_call(name, &args));
             }
             let web_seen = web.as_deref().is_some_and(crate::web::Turn::seen);
-            let mut result = if hold_web && crate::web::TOOL_NAMES.contains(&name) {
+            let mut result = if hold_web && (crate::web::TOOL_NAMES.contains(&name) || name == crate::chat::pictures::FIND) {
                 tracing::info!(tool = %name, "Chat: a new document's outline comes before any search; refused");
                 crate::ai::eval::post_fix("outline_first");
                 crate::chat::documents::outline_first_refusal()
@@ -725,6 +733,15 @@ async fn tool_loop(
                 r // a section rewritten only in this chat's own documents
             } else if let (Some(turn), true) = (web.as_deref_mut(), crate::web::TOOL_NAMES.contains(&name)) {
                 turn.execute(name, &args).await
+            } else if let (Some(turn), true) = (web.as_deref_mut(), extra.pictures.offers(name, claude_web)) {
+                // A picture from the web looked at or shown (chat/pictures.rs):
+                // a shown one goes to the page at once (the panel opens on it).
+                let run = crate::chat::pictures::execute(turn, name, &args, provider, base_url).await;
+                if let (Some(picture), Some(live)) = (run.shown, live) {
+                    live.sink.send(crate::chat::stream::Event::Picture { picture });
+                }
+                looks.extend(run.look);
+                run.result
             } else if extra.memory && MEMORY_TOOL_NAMES.contains(&name) {
                 if asked_to_remember(question) {
                     crate::memory::learn::tool(name, &args)
@@ -805,6 +822,12 @@ async fn tool_loop(
                 "tool_call_id": id,
                 "content": content,
             }));
+        }
+        // The pictures it looked at, after every tool result (each provider
+        // wants those first): the next step sees them.
+        if let Some(m) = crate::chat::pictures::look_message(&looks, provider) {
+            tracing::info!(pictures = looks.len(), "Chat: the next step carries the pictures the model looked at");
+            messages.push(m);
         }
         // A new document's first step is done (its outline made, or the
         // refusal told): the web is the turn's from the next step.
@@ -2067,5 +2090,140 @@ mod tests {
         // Refused again (Groq's, mid-stream): answered without tools.
         assert_eq!(told(2), ANSWER_NOW_NOTE);
         assert!(requests[2].1.get("tools").is_none());
+    }
+
+    /// A stand-in for a chat model and the web's pages and pictures
+    /// (`YAP_WEB_STANDIN`'s way): the model's replies scripted, every chat
+    /// request kept.
+    fn fake_model_and_web(steps: Vec<Value>, files: Vec<(&'static str, &'static str, Vec<u8>)>) -> FakeServer {
+        let server = tiny_http::Server::http("127.0.0.1:0").expect("a local port");
+        let port = server.server_addr().to_ip().expect("ip").port();
+        let requests = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+        let kept = requests.clone();
+        std::thread::spawn(move || {
+            let mut steps = steps.into_iter();
+            for mut req in server.incoming_requests() {
+                let mut body = String::new();
+                let _ = req.as_reader().read_to_string(&mut body);
+                let url = req.url().to_string();
+                let header = |v: &str| tiny_http::Header::from_bytes("content-type", v).unwrap();
+                if url.ends_with("/chat/completions") {
+                    kept.lock().unwrap().push((url.clone(), serde_json::from_str(&body).unwrap_or(Value::Null)));
+                    let message = steps.next().unwrap_or(json!({ "role": "assistant", "content": "OK" }));
+                    let reply = json!({ "choices": [{ "index": 0, "message": message }], "usage": { "total_tokens": 0 } });
+                    let _ = req.respond(tiny_http::Response::from_string(reply.to_string()).with_header(header("application/json")));
+                    continue;
+                }
+                match files.iter().find(|(path, _, _)| url == format!("/standin/{path}")) {
+                    Some((_, kind, bytes)) => {
+                        let _ = req.respond(tiny_http::Response::from_data(bytes.clone()).with_header(header(kind)));
+                    }
+                    None => {
+                        let _ = req.respond(tiny_http::Response::from_string("not found").with_status_code(404));
+                    }
+                }
+            }
+        });
+        FakeServer { base: format!("http://127.0.0.1:{port}"), requests }
+    }
+
+    /// **Find, look, show** (chat/pictures.rs): a page the person linked
+    /// is read and lists its pictures; a model that reads images looks at
+    /// one — the next step carries it, after the tool results — then shows
+    /// it: the page hears it at once, the turn keeps it.
+    #[tokio::test]
+    async fn a_picture_is_found_on_a_page_looked_at_and_shown() {
+        const PAGE: &str = r#"<html><head><title>Fort Joy - Example Wiki</title></head><body><article><h1>Fort Joy</h1>
+            <p>Fort Joy is the island prison where the story starts. Its treasure is spread across the beach, the ghetto and the cellars under the keep.</p>
+            <h2>Map</h2><figure><img src="/images/fort_joy_map.png" width="1600" height="1200" alt="Fort Joy map"><figcaption>Every treasure chest marked</figcaption></figure>
+            <h2>Art</h2><img src="/images/concept.png" width="1200" height="675" alt="Concept art of the keep">
+            <img src="/static/logo.png" alt="Example Wiki" width="200" height="60"></article></body></html>"#;
+        let rgba: Vec<u8> = (0..64 * 48).flat_map(|i: u32| [(i % 251) as u8, 120, 40, 255]).collect();
+        let png = crate::snip::images::encode_png(&rgba, 64, 48, true).unwrap();
+        let fake = fake_model_and_web(
+            vec![
+                calls(&[("read_page", json!({ "url": "https://wiki.example.com/wiki/Fort_Joy" }))]),
+                calls(&[("look_at_picture", json!({ "picture": "p1" }))]),
+                calls(&[("show_picture", json!({ "picture": "p1", "caption": "Fort Joy, every treasure chest marked" }))]),
+                json!({ "role": "assistant", "content": "It's open beside the chat [1]." }),
+            ],
+            vec![
+                ("wiki.example.com/wiki/Fort_Joy", "text/html; charset=utf-8", PAGE.as_bytes().to_vec()),
+                ("wiki.example.com/images/fort_joy_map.png", "image/png", png),
+            ],
+        );
+        let settings =
+            crate::web::Settings { service: crate::web::Service::Exa, key: String::new(), lang: "en".into(), native: None, country: None, local: None, units: None };
+        let endpoints = crate::web::Endpoints { exa: String::new(), tavily: String::new(), standin: Some(format!("{}/standin", fake.base)), offline: false };
+        let question = "Show me the treasure map from https://wiki.example.com/wiki/Fort_Joy";
+        let mut turn = crate::web::Turn::new(settings, endpoints, question, &[]);
+        let seen = Seen::default();
+        let extra = Extra { pictures: crate::chat::pictures::Gate::Look, ..Default::default() };
+        let (reply, chips) = tool_loop(
+            "You are helpful.",
+            &[],
+            question,
+            &[],
+            &format!("{}/v1", fake.base),
+            "",
+            "fake-vision-chat",
+            "custom",
+            false,
+            false,
+            &|_| {},
+            Some(&mut turn),
+            FirstStep::Model,
+            extra,
+            Some(crate::chat::stream::Live { sink: &seen, beside: None }),
+        )
+        .await
+        .expect("an answer");
+        assert_eq!(reply, "It's open beside the chat [1].");
+        assert_eq!(
+            chips,
+            [
+                "Read wiki.example.com/wiki/Fort_Joy",
+                "Looked at a picture from wiki.example.com",
+                "Showed ‘Fort Joy, every treasure chest marked’ from wiki.example.com",
+            ]
+        );
+        let requests = fake.requests.lock().unwrap().clone();
+        assert_eq!(requests.len(), 4);
+        // Every step offers both picture tools.
+        let offered = tool_names(&requests[0].1["tools"]);
+        assert!(offered.iter().any(|n| n == "look_at_picture") && offered.iter().any(|n| n == "show_picture"), "{offered:?}");
+        assert!(!offered.iter().any(|n| n == "find_pictures"), "Yap's read_page lists them");
+        // The page read listed its pictures (not its logo), the map first.
+        let read: Value = serde_json::from_str(requests[1].1["messages"].as_array().unwrap().last().unwrap()["content"].as_str().unwrap()).unwrap();
+        assert_eq!(read["data"]["pictures"], json!([
+            { "picture": "p1", "about": "Fort Joy map · Every treasure chest marked", "size": "1600×1200" },
+            { "picture": "p2", "about": "Concept art of the keep", "size": "1200×675" },
+        ]));
+        // The step after the look: its tool result, then the picture as the user's.
+        let messages = requests[2].1["messages"].as_array().unwrap().clone();
+        let n = messages.len();
+        assert_eq!(messages[n - 2]["role"], "tool");
+        assert_eq!(messages[n - 1]["role"], "user");
+        assert_eq!(messages[n - 1]["content"][0]["type"], "image_url");
+        assert!(messages[n - 1]["content"][0]["image_url"]["url"].as_str().unwrap().starts_with("data:image/png;base64,"));
+        assert!(crate::snip::turn::text_of(&messages[n - 1]["content"]).unwrap().contains("Picture p1"));
+        // The page heard the picture the moment it was shown.
+        let shown: Vec<crate::chat::pictures::ShownPicture> = seen
+            .events()
+            .into_iter()
+            .filter_map(|e| match e {
+                crate::chat::stream::Event::Picture { picture } => Some(picture),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(shown.len(), 1);
+        assert_eq!((shown[0].w, shown[0].h, shown[0].n), (64, 48, 1));
+        assert_eq!(shown[0].image_url, "https://wiki.example.com/images/fort_joy_map.png");
+        assert_eq!(shown[0].page.title, "Fort Joy - Example Wiki");
+        assert_eq!(turn.pictures.shown, shown);
+        let event = serde_json::to_value(crate::chat::stream::Event::Picture { picture: shown[0].clone() }).unwrap();
+        assert_eq!(event["kind"], "picture");
+        assert_eq!(event["picture"]["imageUrl"], "https://wiki.example.com/images/fort_joy_map.png");
+        crate::snip::images::delete(&[shown[0].id.clone()]);
     }
 }

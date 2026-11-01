@@ -738,7 +738,11 @@ doesn't show it (a screenshot never goes there).
   launch and daily, and at once when the setting changes) deletes files past
   it, an image no conversation refers to (a snip never sent) after a day,
   and leftover temp files — and the thumbnails of every image gone
-  (`thumbs::sweep_in`; `images::delete` takes an image's with it).
+  (`thumbs::sweep_in`; `images::delete` takes an image's with it). **A
+  picture Chat showed from the web** (`chat/pictures.rs`, 2026-10-31) is
+  stored the same way (`attach::keep`, source "web") and referred to by its
+  answer's `pictures` (`chats::image_ids` counts those too), so it's kept,
+  swept and deleted with its chat like a screenshot.
 - **Settings → Privacy & data → Chat screenshots** (2026-10-25) says where
   they are — Yap's own folder, never Pictures (a snip goes elsewhere only
   when it's saved: Shift, Save image) — with **Open folder**

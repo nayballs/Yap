@@ -515,7 +515,7 @@ mod tests {
             "search the web for cheap flights to Lisbon",
             "what's the latest news about the Mars mission",
             "google the opening hours of the Louvre",
-            "How do I beat Malenia in Elden Ring",
+            "How do I beat the Wall of Flesh in Terraria",
             "what's the price of a Steam Deck right now",
         ] {
             assert!(needs_web(yes), "{yes}");

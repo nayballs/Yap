@@ -227,6 +227,9 @@ pub enum Purpose {
     ProviderSearch(&'static str),
     /// Chat reading a web page (`read_page`).
     WebPage,
+    /// Chat downloading a picture from the web to look at or show beside
+    /// the chat (`chat/pictures.rs`).
+    WebPicture,
     /// A provider's (or a server's) list of models: its name in words.
     ModelList(String),
     Download(Download),
@@ -291,6 +294,7 @@ impl Purpose {
             Purpose::WikiSearch => ("web", "Web search · Wikipedia and wikis".into(), f("Chat")),
             Purpose::ProviderSearch(p) => ("web", format!("Web search · {p}"), f("Chat")),
             Purpose::WebPage => ("web", "Reading a web page".into(), f("Chat")),
+            Purpose::WebPicture => ("web", "A picture from the web".into(), f("Chat")),
             Purpose::ModelList(who) => ("models", format!("Model list · {who}"), "Settings"),
             Purpose::Download(d) => match d {
                 Download::SpeechModel => ("download", "Speech model download".into(), "Speech-to-Text"),

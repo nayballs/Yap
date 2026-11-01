@@ -1,0 +1,51 @@
+{
+  "name": "pictures-map-one-right",
+  "description": "Find and show (chat/pictures.rs): \"get me a map of all the treasures\" in a made-up game, so no model knows the answer. The wiki page has five pictures: concept art, a map of another area, the treasure map, a night screenshot and an armour set. The treasure map is p3 (the third on the page). Its alt text says only \"Fort Joy\" (the caption says what it is), while the wrong area's map says \"map\". It must show that one and nothing else. The stand-in pictures carry their words written on them, so a model that looks can tell them apart. Stand-in web.",
+  "tags": [
+    "pictures",
+    "web"
+  ],
+  "web": {
+    "mode": "standin",
+    "results": [
+      {
+        "title": "Fort Joy - Emberfall Wiki",
+        "url": "https://emberfall.example/wiki/Fort_Joy",
+        "published": "2026-09-14",
+        "text": "Fort Joy is the island prison where Emberfall starts. Treasure is hidden in the beach caves, the ghetto and the cellars under the keep. The page has a treasure map of the whole fort, area maps and a gallery."
+      }
+    ],
+    "pages": {
+      "https://emberfall.example/wiki/Fort_Joy": "<!doctype html><html><head><title>Fort Joy - Emberfall Wiki</title></head><body><header><img src=\"/static/emberfall-logo.png\" alt=\"Emberfall Wiki\" width=\"220\" height=\"60\"></header><article><h1>Fort Joy</h1><p>Fort Joy is the island prison where Emberfall starts. You wake on the beach below the keep. Treasure is hidden in the beach caves, the ghetto and the cellars under the keep; most chests need a lockpick or a shovel.</p><h2>Art</h2><img src=\"/images/fort_joy_concept.png\" width=\"1600\" height=\"900\" alt=\"Fort Joy concept art\"><h2>Nearby areas</h2><figure><img src=\"/images/saltmarsh_docks_map.png\" width=\"1600\" height=\"1200\" alt=\"Saltmarsh Docks map\"><figcaption>The Saltmarsh Docks, the area after Fort Joy</figcaption></figure><h2>Treasure</h2><figure><img src=\"/images/fort_joy_chests.png\" width=\"1600\" height=\"1200\" alt=\"Fort Joy\"><figcaption>Every treasure chest and hidden stash in Fort Joy, marked</figcaption></figure><h2>Gallery</h2><img src=\"/images/fort_joy_night.png\" width=\"1600\" height=\"900\" alt=\"Fort Joy at night\"><h2>Loot</h2><img src=\"/images/magister_armour.png\" width=\"1200\" height=\"1200\" alt=\"Magister armour set\"></article></body></html>",
+      "https://emberfall.example/images/fort_joy_concept.png": "picture 800x450: Concept art - Fort Joy keep at dusk",
+      "https://emberfall.example/images/saltmarsh_docks_map.png": "picture 800x600: Map of the Saltmarsh Docks",
+      "https://emberfall.example/images/fort_joy_chests.png": "picture 800x600: Fort Joy treasure map - every chest marked X",
+      "https://emberfall.example/images/fort_joy_night.png": "picture 800x450: Screenshot - Fort Joy at night",
+      "https://emberfall.example/images/magister_armour.png": "picture 600x600: Magister armour set"
+    }
+  },
+  "apps": "standard",
+  "turns": [
+    {
+      "user": "Emberfall: get me a map of all the treasures in Fort Joy and bring it up for me.",
+      "expect": {
+        "tools_called": [
+          {
+            "name": "show_picture",
+            "args": {
+              "picture": "p3"
+            }
+          }
+        ],
+        "pictures_shown": [
+          "p3"
+        ],
+        "no_false_claims": true
+      },
+      "soft": {
+        "max_words": 80,
+        "no_post_fixes": true
+      }
+    }
+  ]
+}

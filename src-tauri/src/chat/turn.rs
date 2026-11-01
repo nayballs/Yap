@@ -138,6 +138,8 @@ pub(crate) struct ChatTurn {
     pub tokens: Option<crate::chat::chats::MessageTokens>,
     /// The documents it made or changed (`documents.rs`): its pills.
     pub documents: Vec<crate::chat::documents::DocRef>,
+    /// The pictures it showed beside the chat (`chat/pictures.rs`): their pills.
+    pub pictures: Vec<crate::chat::pictures::ShownPicture>,
 }
 
 impl ChatTurn {
@@ -301,6 +303,9 @@ async fn answer_turn(
     // "Look things up on the web" (web.rs). Not for the Meetings view's Ask
     // bar: that's about the meetings.
     let web_on = cfg.web_search && !meetings;
+    // Pictures from the web (chat/pictures.rs): looked at and shown by a
+    // model that reads images, shown by any other that calls tools.
+    let pictures = crate::chat::pictures::Gate::for_model(web_on && tools_supported, &provider, &model);
     // The calendar (chat/tools/calendar.rs): a tool while one is connected
     // (not across the meetings, whose passages are numbered on their own).
     let calendar_on = !meetings && crate::calendar::connected();
@@ -329,6 +334,7 @@ async fn answer_turn(
         docs: None,
         doc_tools,
         strong,
+        pictures,
     };
     let schemas = if tools_supported {
         counter.count(&crate::chat::tools::offered_tools(cfg.open_apps, web_on && !claude_in_chat, extra_flags).to_string()).await
@@ -341,7 +347,7 @@ async fn answer_turn(
         + crate::snip::turn::images().iter().filter(|i| !i.as_text).map(|i| crate::chat::budget::image_tokens(i.w, i.h)).sum::<u64>();
     let rate_cap = crate::chat::budget::rate_cap(&provider);
     if mode != crate::chat::budget::Mode::Messages {
-        let stable = stable_prompt(&cfg, &persona, tools_supported, doc_tools, web_lines, web_on, calendar_on, &profile, now);
+        let stable = stable_prompt(&cfg, &persona, tools_supported, doc_tools, web_lines, web_on, pictures, calendar_on, &profile, now);
         let fixed_now = counter.count(&stable).await + schemas;
         let guess = crate::chat::budget::budget(context_size, context_known, fixed_now, kind, tools_supported, rate_cap);
         if question_tokens > guess.history {
@@ -414,6 +420,7 @@ async fn answer_turn(
                 stopped: false,
                 tokens: None,
                 documents: Vec::new(),
+                pictures: Vec::new(),
             });
         }
     }
@@ -457,7 +464,7 @@ async fn answer_turn(
     let about = crate::ai::about_you::prompt_block(&profile, now);
     let calendar_zone = crate::chat::tools::calendar::Zone::of(profile.region.time_zone.as_deref());
     let mut system = persona.trim().to_string();
-    system.push_str(&instructions(&cfg, tools_supported, doc_tools, web_lines, web_on, calendar_on, &profile));
+    system.push_str(&instructions(&cfg, tools_supported, doc_tools, web_lines, web_on, pictures, calendar_on, &profile));
     // Where the line on earlier web answers goes for a model without tools
     // (it depends on the history sent, chosen below).
     let note_at = system.len();
@@ -748,7 +755,7 @@ async fn answer_turn(
         beside: beside.as_ref().map(|b| b as &dyn crate::chat::stream::Dictations),
     });
 
-    let (reply, tools_used, sources, looked, pages, stopped) = if tools_supported {
+    let (reply, tools_used, sources, looked, pages, stopped, shown_pictures) = if tools_supported {
         let notify = |id: u64| {
             use tauri::Emitter;
             if let Some(app) = app {
@@ -802,6 +809,7 @@ async fn answer_turn(
             docs: Some(&doc_turn),
             doc_tools,
             strong,
+            pictures,
         };
         let looped = crate::chat::tools::run_tool_loop_with(
             &system,
@@ -841,10 +849,20 @@ async fn answer_turn(
         let reply = crate::chat::tools::calendar::cite_mentions(&reply, &calendar_log.all());
         let looked = web.as_ref().is_some_and(crate::web::Turn::looked);
         let mut sources = web.as_ref().map(|w| w.sources_for(&reply)).unwrap_or_default();
+        // The pictures it showed (chat/pictures.rs): each one's page is a
+        // source of the answer too, so its number means something.
+        let shown = web.as_ref().map(|w| w.pictures.shown.clone()).unwrap_or_default();
+        if let Some(w) = web.as_ref() {
+            for p in shown.iter().filter(|p| p.n > 0) {
+                if !sources.iter().any(|s| s.n == p.n) {
+                    sources.extend(w.sources.iter().find(|s| s.n == p.n).cloned());
+                }
+            }
+        }
         sources.extend(crate::chat::tools::calendar::sources_for(&reply, &calendar_log.all()));
         sources.sort_by_key(|s| s.n);
         let pages = web.map(|w| w.texts).unwrap_or_default();
-        (reply, tools_used, sources, looked, pages, stopped)
+        (reply, tools_used, sources, looked, pages, stopped, shown)
     } else {
         // Small/local models: plain chat + eager RAG (their fallback), or
         // Yap's fixed web pipeline when the question needs the web.
@@ -896,7 +914,7 @@ async fn answer_turn(
         if let Some(chip) = calendar_chip {
             chips.insert(0, chip);
         }
-        (reply, chips, sources, looked, pages, stopped)
+        (reply, chips, sources, looked, pages, stopped, Vec::new())
     };
     // Stopped before any of the answer showed: nothing to save.
     if stopped && reply.trim().is_empty() {
@@ -1015,6 +1033,8 @@ async fn answer_turn(
     // The documents it made or changed: its pills, and this chat's from now on.
     let documents = doc_turn.touched();
     crate::chat::chats::set_documents(conv.id, index, &documents);
+    // The pictures it showed beside the chat: its pills, and the panel's tabs.
+    crate::chat::chats::set_pictures(conv.id, index, &shown_pictures);
     // Read for lasting facts once the chat goes quiet ("Learn from my chats").
     crate::memory::learn::after_turn(conv.id);
     // Filling the room? The older messages summarised in the background
@@ -1030,7 +1050,7 @@ async fn answer_turn(
     };
     let look = crate::chat::compact::Look { kind, room: next_room(budget.history), context: context_size, ring, replay };
     crate::chat::compact::after_answer(app, conv.id, ep, look).await;
-    Ok(ChatTurn { conversation_id: conv.id, user_index, index, reply, tools_used, model: Some(answered_by), sources, stopped, tokens, documents })
+    Ok(ChatTurn { conversation_id: conv.id, user_index, index, reply, tools_used, model: Some(answered_by), sources, stopped, tokens, documents, pictures: shown_pictures })
 }
 
 /// The history's room for the next question: the budget less a typical
@@ -1053,6 +1073,7 @@ fn instructions(
     doc_tools: crate::chat::documents::ToolSet,
     web_lines: crate::chat::tools::WebLines,
     web_on: bool,
+    pictures: crate::chat::pictures::Gate,
     calendar_on: bool,
     profile: &crate::ai::about_you::Profile,
 ) -> String {
@@ -1075,6 +1096,13 @@ fn instructions(
             if let Some(local) = crate::ai::about_you::LocalPrices::for_region(&profile.region) {
                 s.push(' ');
                 s.push_str(&crate::web::price_note(&local));
+            }
+            // Pictures from the web (chat/pictures.rs): finding the right one,
+            // looking before showing when the model can.
+            let lines = crate::chat::pictures::instructions(pictures, web_lines == crate::chat::tools::WebLines::Claude);
+            if !lines.is_empty() {
+                s.push(' ');
+                s.push_str(&lines);
             }
         }
         s.push(' ');
@@ -1136,13 +1164,14 @@ pub(crate) fn stable_prompt(
     doc_tools: crate::chat::documents::ToolSet,
     web_lines: crate::chat::tools::WebLines,
     web_on: bool,
+    pictures: crate::chat::pictures::Gate,
     calendar_on: bool,
     profile: &crate::ai::about_you::Profile,
     now: chrono::DateTime<chrono::Utc>,
 ) -> String {
     let about = crate::ai::about_you::prompt_block(profile, now);
     let mut s = persona.trim().to_string();
-    s.push_str(&instructions(cfg, tools_supported, doc_tools, web_lines, web_on, calendar_on, profile));
+    s.push_str(&instructions(cfg, tools_supported, doc_tools, web_lines, web_on, pictures, calendar_on, profile));
     s.push_str(&ending(tools_supported, profile, &about, &crate::memory::you_block()));
     if tools_supported {
         s.push_str("\n\n");
@@ -1197,13 +1226,14 @@ pub async fn chat_limits() -> Limits {
     let doc_tools = crate::chat::documents::ToolSet::for_model(&provider, &model);
     let strong = tools_supported && crate::chat::documents::rich::strong(&provider, &model);
     let web_on = cfg.web_search;
+    let pictures = crate::chat::pictures::Gate::for_model(web_on && tools_supported, &provider, &model);
     let claude_in_chat = in_chat(&cfg, &provider, &model, &base_url, &key);
     let calendar_on = crate::calendar::connected();
     let counter = crate::chat::budget::Counter::for_call(&provider, &base_url);
     let (context, context_known) = crate::chat::budget::context_window(&cfg, &provider, &model, &base_url).await;
     let profile = crate::ai::about_you::profile(&cfg);
     let web_lines = crate::chat::tools::WebLines::of(strong, claude_in_chat);
-    let stable = stable_prompt(&cfg, &persona, tools_supported, doc_tools, web_lines, web_on, calendar_on, &profile, crate::ai::eval::now());
+    let stable = stable_prompt(&cfg, &persona, tools_supported, doc_tools, web_lines, web_on, pictures, calendar_on, &profile, crate::ai::eval::now());
     let log = crate::chat::tools::calendar::Log::default();
     let extra = crate::chat::tools::Extra {
         memory: true,
@@ -1214,6 +1244,7 @@ pub async fn chat_limits() -> Limits {
         docs: None,
         doc_tools,
         strong,
+        pictures,
     };
     let schemas = if tools_supported { counter.count(&crate::chat::tools::offered_tools(cfg.open_apps, web_on && !claude_in_chat, extra).to_string()).await } else { 0 };
     let fixed = counter.count(&stable).await + schemas;
@@ -1501,7 +1532,7 @@ async fn passages_turn(
         None => crate::search::ask::chip(&found),
     }];
     let index = crate::chat::chats::append_message(conv.id, "assistant", &reply, &tools_used, None, false, &sources, false, None)?;
-    Ok(ChatTurn { conversation_id: conv.id, user_index, index, reply, tools_used, model: None, sources, stopped: false, tokens: None, documents: Vec::new() })
+    Ok(ChatTurn { conversation_id: conv.id, user_index, index, reply, tools_used, model: None, sources, stopped: false, tokens: None, documents: Vec::new(), pictures: Vec::new() })
 }
 
 /// A Skill with nothing to run on (`skills::ask_first`: /project-update
@@ -1538,6 +1569,7 @@ fn skill_asks_turn(
         stopped: false,
         tokens: None,
         documents: Vec::new(),
+        pictures: Vec::new(),
     })
 }
 
@@ -1576,5 +1608,6 @@ async fn app_turn(
         stopped: false,
         tokens: None,
         documents: Vec::new(),
+        pictures: Vec::new(),
     })
 }

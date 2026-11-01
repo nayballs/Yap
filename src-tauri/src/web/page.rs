@@ -122,6 +122,9 @@ pub struct Page {
     pub url: String,
     pub site: String,
     pub text: String,
+    /// Its pictures ([`page_images`]), for `read_page`'s `pictures`.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub images: Vec<PageImage>,
 }
 
 static PAGES: LazyLock<Mutex<HashMap<String, (Instant, Page)>>> = LazyLock::new(|| Mutex::new(HashMap::new()));
@@ -135,14 +138,30 @@ pub fn clear_caches() {
     native::forget_unavailable();
 }
 
-/// What a page fetch brought back.
+/// What a fetch brought back.
 struct Fetched {
     url: Url,
-    body: String,
-    html: bool,
+    body: Vec<u8>,
+    /// Its `Content-Type`, lowercased ("text/html; charset=utf-8"; "" when
+    /// it said none).
+    kind: String,
 }
 
-async fn fetch(ep: &Endpoints, start: Url) -> Result<Fetched, String> {
+/// What a fetch asks for and takes: its `Accept`, its receipt's purpose,
+/// the most it reads, and whether the answer's type will do.
+struct Want<'a> {
+    accept: &'static str,
+    purpose: crate::privacy::net::Purpose,
+    max_bytes: usize,
+    /// More than `max_bytes`: an error (a picture), not the start of it (a page).
+    whole: bool,
+    kind_ok: &'a (dyn Fn(&str) -> Result<(), String> + Sync),
+}
+
+/// **A guarded GET**: `start` and every redirect checked ([`check_url`]),
+/// the host resolved and every address checked, the connection pinned to
+/// them, no proxy, no cookies; through `privacy/net.rs` (its receipt).
+async fn fetch(ep: &Endpoints, start: Url, want: &Want<'_>) -> Result<Fetched, String> {
     let mut url = start;
     for _hop in 0..=MAX_REDIRECTS {
         let url_now = check_url(url.as_str())?;
@@ -167,8 +186,8 @@ async fn fetch(ep: &Endpoints, start: Url) -> Result<Fetched, String> {
         let client = builder.build().map_err(|e| format!("couldn't set up the request: {e}"))?;
         let resp = client
             .get(target)
-            .header(reqwest::header::ACCEPT, "text/html,application/xhtml+xml,text/plain;q=0.9")
-            .send_for(crate::privacy::net::Purpose::WebPage)
+            .header(reqwest::header::ACCEPT, want.accept)
+            .send_for(want.purpose.clone())
             .await
             .map_err(|e| network_error(&host, &e))?;
         let status = resp.status();
@@ -188,23 +207,28 @@ async fn fetch(ep: &Endpoints, start: Url) -> Result<Fetched, String> {
             .headers()
             .get(reqwest::header::CONTENT_TYPE)
             .and_then(|v| v.to_str().ok())
-            .unwrap_or("text/html")
+            .unwrap_or("")
             .to_ascii_lowercase();
-        let html = kind.contains("html");
-        if !html && !kind.starts_with("text/plain") {
-            let shown = kind.split(';').next().unwrap_or("").trim().to_string();
-            return Err(format!("That's not a web page Yap can read ({shown})."));
+        (want.kind_ok)(&kind)?;
+        let too_big = || format!("It's bigger than {} MB, more than Yap downloads.", want.max_bytes / (1024 * 1024));
+        if want.whole && resp.content_length().is_some_and(|n| n > want.max_bytes as u64) {
+            return Err(too_big());
         }
         let mut body: Vec<u8> = Vec::new();
         let mut resp = resp;
         while let Some(chunk) = resp.chunk().await.map_err(|e| network_error(&host, &e))? {
-            let room = PAGE_BYTES.saturating_sub(body.len());
+            if want.whole && body.len() + chunk.len() > want.max_bytes {
+                return Err(too_big());
+            }
+            let room = want.max_bytes.saturating_sub(body.len());
             body.extend_from_slice(&chunk[..chunk.len().min(room)]);
-            if body.len() >= PAGE_BYTES {
+            // A page: its first `max_bytes`. A picture: whole, or refused
+            // (the next chunk past the cap says so).
+            if !want.whole && body.len() >= want.max_bytes {
                 break;
             }
         }
-        return Ok(Fetched { url: url_now, body: String::from_utf8_lossy(&body).into_owned(), html });
+        return Ok(Fetched { url: url_now, body, kind });
     }
     Err("The page redirected too many times.".into())
 }
@@ -259,20 +283,283 @@ pub async fn read_page(ep: &Endpoints, url: &str) -> Result<Page, String> {
             return Ok(page.clone());
         }
     }
-    let fetched = fetch(ep, checked).await?;
+    let want = Want {
+        accept: "text/html,application/xhtml+xml,text/plain;q=0.9",
+        purpose: crate::privacy::net::Purpose::WebPage,
+        max_bytes: PAGE_BYTES,
+        whole: false,
+        kind_ok: &page_kind,
+    };
+    let fetched = fetch(ep, checked, &want).await?;
     let final_url = fetched.url.to_string();
-    let (title, text) = if fetched.html {
-        page_text(&fetched.body, &final_url)
+    let body = String::from_utf8_lossy(&fetched.body).into_owned();
+    let (title, text, images) = if fetched.kind.starts_with("text/plain") {
+        (String::new(), tidy_lines(&body), Vec::new())
     } else {
-        (String::new(), tidy_lines(&fetched.body))
+        let (title, text) = page_text(&body, &final_url);
+        (title, text, page_images(&body, &final_url))
     };
     if text.trim().is_empty() {
         return Err("The page has no text Yap can read (it may need JavaScript).".into());
     }
     let site = site_of(&final_url);
-    let page = Page { title: if title.is_empty() { site.clone() } else { tidy(&title, 120) }, url: final_url, site, text };
+    let page = Page { title: if title.is_empty() { site.clone() } else { tidy(&title, 120) }, url: final_url, site, text, images };
     PAGES.lock().unwrap_or_else(|p| p.into_inner()).insert(key, (Instant::now(), page.clone()));
     Ok(page)
+}
+
+/// A page's answer: HTML or plain text (an answer with no type counts as
+/// HTML). Pure.
+fn page_kind(kind: &str) -> Result<(), String> {
+    if kind.is_empty() || kind.contains("html") || kind.starts_with("text/plain") {
+        return Ok(());
+    }
+    let shown = kind.split(';').next().unwrap_or("").trim().to_string();
+    Err(format!("That's not a web page Yap can read ({shown})."))
+}
+
+// ---- pictures ---------------------------------------------------------------------------
+
+/// The most a picture from the web may be.
+pub const MAX_PICTURE_BYTES: usize = 10 * 1024 * 1024;
+
+/// A picture's answer: an image type — never SVG (a drawing's code, which
+/// Windows has no decoder for) nor anything that isn't a picture. Pure.
+pub fn picture_kind(kind: &str) -> Result<(), String> {
+    let t = kind.split(';').next().unwrap_or("").trim();
+    if t == "image/svg+xml" {
+        return Err("That picture is an SVG drawing, which Yap can't show.".into());
+    }
+    if !t.starts_with("image/") {
+        let shown = if t.is_empty() { "no type" } else { t };
+        return Err(format!("That address isn't a picture ({shown})."));
+    }
+    Ok(())
+}
+
+/// **A picture from the web, downloaded** (`chat/pictures.rs`): the guards
+/// of a page read — public http(s) addresses only, every redirect checked,
+/// the connection pinned to the checked addresses — through
+/// `privacy/net.rs` as "A picture from the web"; image types only, at most
+/// [`MAX_PICTURE_BYTES`] (its announced length refused before any byte is
+/// read). Where it ended up, and its bytes.
+pub async fn fetch_picture(ep: &Endpoints, url: &str) -> Result<(String, Vec<u8>), String> {
+    let checked = check_url(url)?;
+    let want = Want {
+        accept: "image/avif,image/webp,image/png,image/jpeg,image/gif,image/*;q=0.8",
+        purpose: crate::privacy::net::Purpose::WebPicture,
+        max_bytes: MAX_PICTURE_BYTES,
+        whole: true,
+        kind_ok: &picture_kind,
+    };
+    let fetched = fetch(ep, checked, &want).await?;
+    if fetched.body.is_empty() {
+        return Err("The picture came back empty.".into());
+    }
+    Ok((fetched.url.to_string(), fetched.body))
+}
+
+/// **A picture on a page** (`read_page`'s `pictures`, `chat/pictures.rs`):
+/// its absolute address, its alt text, the caption of the figure it's in,
+/// the nearest heading above it, and its size where the page says
+/// (`width` / `height`, or the widest `srcset` candidate).
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
+pub struct PageImage {
+    pub url: String,
+    pub alt: String,
+    pub caption: String,
+    pub heading: String,
+    pub w: Option<u32>,
+    pub h: Option<u32>,
+}
+
+/// The most pictures kept from one page.
+const PAGE_IMAGES: usize = 60;
+
+/// Words in a picture's file path, class, id or alt text that make it page
+/// furniture: an icon, a logo, an avatar, a sprite, an ad, a tracker.
+const JUNK_WORDS: &[&str] = &[
+    "icon", "icons", "favicon", "logo", "logos", "logotype", "wordmark", "avatar", "avatars", "gravatar", "sprite",
+    "sprites", "emoji", "emojis", "emoticon", "smiley", "badge", "badges", "spinner", "loader", "loading",
+    "placeholder", "pixel", "spacer", "blank", "transparent", "tracking", "tracker", "btn", "button", "ad", "ads",
+    "advert", "advertisement", "sponsor", "social", "share", "rating", "1x1",
+];
+
+/// Hosts that serve trackers, never pictures.
+const TRACKER_HOSTS: &[&str] = &[
+    "doubleclick.net", "google-analytics.com", "googletagmanager.com", "googlesyndication.com", "facebook.com",
+    "scorecardresearch.com", "quantserve.com", "bat.bing.com", "analytics.", "pixel.", "stats.wp.com",
+];
+
+/// **Page furniture, not a picture**: not http(s), an SVG or icon file, a
+/// tracker's host, a word like "logo" or "icon" in its file's path, class,
+/// id or alt text, or anything tiny (a known side under 100 px, or under
+/// 120 × 120 in all). Pure.
+pub fn is_junk(url: &str, alt: &str, marks: &str, w: Option<u32>, h: Option<u32>) -> bool {
+    let Ok(u) = Url::parse(url) else { return true };
+    if !matches!(u.scheme(), "http" | "https") {
+        return true;
+    }
+    let host = u.host_str().unwrap_or("").to_ascii_lowercase();
+    if TRACKER_HOSTS.iter().any(|t| host.contains(t)) {
+        return true;
+    }
+    let path = u.path().to_ascii_lowercase();
+    if [".svg", ".svgz", ".ico", ".cur"].iter().any(|e| path.ends_with(e)) {
+        return true;
+    }
+    let junk = |s: &str| s.split(|c: char| !c.is_alphanumeric()).any(|w| JUNK_WORDS.contains(&w.to_lowercase().as_str()));
+    if junk(&path) || junk(alt) || junk(marks) {
+        return true;
+    }
+    match (w, h) {
+        (Some(w), Some(h)) => w < 100 || h < 100 || u64::from(w) * u64::from(h) < 120 * 120,
+        (Some(s), None) | (None, Some(s)) => s < 100,
+        (None, None) => false,
+    }
+}
+
+/// A size attribute ("640", "640px"; never "100%"). Pure.
+fn size_attr(v: Option<&str>) -> Option<u32> {
+    let v = v?.trim().trim_end_matches("px").trim();
+    v.parse::<f32>().ok().filter(|n| n.is_finite() && *n >= 1.0).map(|n| n.round() as u32)
+}
+
+/// A `srcset`'s best candidate: the widest (`1600w`), else the densest
+/// (`2x`), else the last; its width when it says one. Pure.
+pub fn best_srcset(srcset: &str) -> Option<(String, Option<u32>)> {
+    let mut best: Option<(String, f64, Option<u32>)> = None;
+    // The HTML standard's way: a URL runs to whitespace (a comma ending it
+    // ends the candidate), its descriptor to the next comma — so an address
+    // with commas in it ("…/w_300,h_200/a.jpg") stays whole.
+    let mut rest = srcset;
+    loop {
+        rest = rest.trim_start_matches(|c: char| c.is_whitespace() || c == ',');
+        if rest.is_empty() {
+            break;
+        }
+        let end = rest.find(char::is_whitespace).unwrap_or(rest.len());
+        let (raw, after) = rest.split_at(end);
+        let (url, desc, next) = if raw.ends_with(',') {
+            (raw.trim_end_matches(','), "", after)
+        } else {
+            let stop = after.find(',').unwrap_or(after.len());
+            (raw, after[..stop].trim(), &after[stop..])
+        };
+        rest = next;
+        if url.is_empty() || url.starts_with("data:") {
+            continue;
+        }
+        let (score, width) = match desc.strip_suffix('w').and_then(|n| n.parse::<u32>().ok()) {
+            Some(w) => (f64::from(w), Some(w)),
+            // A density ranks below any width ("2x" < "300w").
+            None => (desc.strip_suffix('x').and_then(|n| n.parse::<f64>().ok()).unwrap_or(1.0) * 1.0e-3, None),
+        };
+        if best.as_ref().is_none_or(|(_, s, _)| score >= *s) {
+            best = Some((url.to_string(), score, width));
+        }
+    }
+    best.map(|(u, _, w)| (u, w))
+}
+
+/// The caption of the figure an image is in: a `<figure>`'s `<figcaption>`,
+/// a MediaWiki thumbnail's `.thumbcaption`, a gallery's `.gallerytext`, a
+/// WordPress `.wp-caption-text`; "" when it's in none.
+fn caption_of(img: &dom_query::NodeRef) -> String {
+    for a in img.ancestors_it(Some(6)) {
+        let name = a.node_name().map(|n| n.to_ascii_lowercase()).unwrap_or_default();
+        let inner = if name == "figure" {
+            "figcaption"
+        } else if a.has_class("thumb") || a.has_class("thumbinner") {
+            ".thumbcaption"
+        } else if a.has_class("gallerybox") {
+            ".gallerytext"
+        } else if a.has_class("wp-caption") {
+            ".wp-caption-text"
+        } else {
+            continue;
+        };
+        let text = dom_query::Selection::from(a).select(inner).text();
+        if !text.trim().is_empty() {
+            return tidy(&text, 200);
+        }
+    }
+    String::new()
+}
+
+/// **A page's pictures**, in its order: each `<img>`'s address — its lazy
+/// one (`data-src`…) when `src` is a placeholder, the widest `srcset`
+/// candidate (a `<picture>`'s sources too) when there is one — made
+/// absolute against `base` (or the page's `<base href>`), with its alt text,
+/// its figure's caption, the nearest heading above it and its size; page
+/// furniture left out ([`is_junk`]), and the site's navigation, header and
+/// footer. Each address once, public ones only, at most 60. Pure.
+pub fn page_images(html: &str, base: &str) -> Vec<PageImage> {
+    let Ok(page_url) = Url::parse(base) else { return Vec::new() };
+    let doc = dom_query::Document::from(html);
+    let base_url = doc.select("base[href]").attr("href").and_then(|h| page_url.join(h.trim()).ok()).unwrap_or(page_url);
+    doc.select("script, style, noscript, template, nav, footer, form, [role=navigation], [role=contentinfo], [aria-hidden=true]")
+        .remove();
+    // A site's header (its logo, its menu); an article's own stays.
+    for header in doc.select("header").nodes() {
+        let in_article = header
+            .ancestors_it(None)
+            .any(|a| a.node_name().is_some_and(|n| n.eq_ignore_ascii_case("article") || n.eq_ignore_ascii_case("main")));
+        if !in_article {
+            header.remove_from_parent();
+        }
+    }
+    let mut out: Vec<PageImage> = Vec::new();
+    let mut seen: Vec<String> = Vec::new();
+    let mut heading = String::new();
+    for node in doc.root().descendants_it() {
+        if !node.is_element() || out.len() >= PAGE_IMAGES {
+            continue;
+        }
+        let name = node.node_name().map(|n| n.to_ascii_lowercase()).unwrap_or_default();
+        if matches!(name.as_str(), "h1" | "h2" | "h3" | "h4" | "h5" | "h6") {
+            heading = tidy(&node.text(), 100);
+            continue;
+        }
+        if name != "img" {
+            continue;
+        }
+        let attr = |k: &str| node.attr(k).map(|v| v.trim().to_string()).filter(|v| !v.is_empty());
+        let src = attr("src").filter(|s| !s.starts_with("data:") && !s.starts_with("about:"));
+        let lazy = attr("data-src").or_else(|| attr("data-lazy-src")).or_else(|| attr("data-original")).or_else(|| attr("data-image-src"));
+        // A `<picture>`'s own sources, for the `<img>` in it.
+        let picture_set = node
+            .parent()
+            .filter(|p| p.node_name().is_some_and(|n| n.eq_ignore_ascii_case("picture")))
+            .and_then(|p| dom_query::Selection::from(p).select("source[srcset]").attr("srcset").map(|s| s.to_string()));
+        let set = attr("srcset").or_else(|| attr("data-srcset")).or(picture_set).and_then(|s| best_srcset(&s));
+        let (w_attr, h_attr) = (size_attr(attr("width").as_deref()), size_attr(attr("height").as_deref()));
+        let (raw, set_w) = match (set, lazy.or(src)) {
+            (Some((u, w)), _) => (u, w),
+            (None, Some(u)) => (u, None),
+            (None, None) => continue,
+        };
+        let Ok(abs) = base_url.join(&raw) else { continue };
+        let url = abs.to_string();
+        // Its size: the srcset's width (the height in proportion), else the attributes'.
+        let (w, h) = match (set_w, w_attr, h_attr) {
+            (Some(sw), Some(aw), Some(ah)) => (Some(sw), Some((u64::from(ah) * u64::from(sw) / u64::from(aw)) as u32)),
+            (Some(sw), _, ah) => (Some(sw), ah),
+            (None, aw, ah) => (aw, ah),
+        };
+        let alt = tidy(attr("alt").or_else(|| attr("title")).as_deref().unwrap_or(""), 200);
+        let marks = format!("{} {}", attr("class").unwrap_or_default(), attr("id").unwrap_or_default());
+        if check_url(&url).is_err() || is_junk(&url, &alt, &marks, w, h) {
+            continue;
+        }
+        let key = normal_url(&url);
+        if seen.contains(&key) {
+            continue;
+        }
+        seen.push(key);
+        out.push(PageImage { caption: caption_of(&node), heading: heading.clone(), url, alt, w, h });
+    }
+    out
 }
 
 #[cfg(test)]
@@ -362,5 +649,93 @@ mod tests {
         assert!(title.contains("Ranni"), "{title}");
         assert!(text.contains("Ranni's Rise in the Three Sisters"), "{text}");
         assert!(!text.contains("alert(1)"));
+    }
+
+    /// A made-up wiki page with what real pages carry: a site logo and menu,
+    /// an article figure with its caption, a lazy-loaded picture, a srcset, a
+    /// MediaWiki thumbnail, an icon, a tracking pixel, an avatar, a `data:`
+    /// placeholder, an SVG and a picture on a local address.
+    const PICTURE_PAGE: &str = r#"<!doctype html><html><head><title>Fort Joy - Example Wiki</title><base href="/wiki/"></head><body>
+      <header><a href="/"><img src="/static/site-logo.png" alt="Example Wiki" width="200" height="60"></a></header>
+      <nav><img src="/static/menu-banner.jpg" alt="Menu" width="300" height="200"></nav>
+      <article>
+        <h1>Fort Joy</h1>
+        <p>Fort Joy is the first area of the game.</p>
+        <img src="/images/fire.png" class="skill-icon" alt="Fire" width="24" height="24">
+        <h2>Map</h2>
+        <figure>
+          <img src="maps/fort_joy_small.jpg" srcset="maps/fort_joy_800.jpg 800w, maps/fort_joy_1600.jpg 1600w" width="400" height="300" alt="Fort Joy map">
+          <figcaption>Fort Joy with every treasure chest marked</figcaption>
+        </figure>
+        <h3>Concept art</h3>
+        <img src="data:image/gif;base64,R0lGODlhAQABAAAAACw=" data-src="https://cdn.example.com/art/fort-joy-concept.webp" alt="" width="1200" height="675">
+        <div class="thumb tright"><div class="thumbinner"><img src="https://wiki.example.com/images/thumb/a/ab/Ghetto.png/300px-Ghetto.png" width="300" height="225"><div class="thumbcaption">The ghetto, south of the gate</div></div></div>
+        <img src="https://wiki.example.com/images/diagram.svg" alt="Layout" width="800" height="600">
+        <img src="https://pixel.tracker.example/p.gif?id=1" width="1" height="1" alt="">
+        <img src="https://forum.example/avatars/u42.jpg" alt="Commenter" width="64" height="64">
+        <img src="http://192.168.1.20/cam.jpg" alt="Camera" width="640" height="480">
+        <img src="maps/fort_joy_small.jpg" alt="Fort Joy map again">
+      </article>
+      <footer><img src="/static/footer-art.png" alt="Footer" width="900" height="300"></footer>
+    </body></html>"#;
+
+    #[test]
+    fn a_page_keeps_its_pictures_and_drops_the_furniture() {
+        let found = page_images(PICTURE_PAGE, "https://wiki.example.com/wiki/Fort_Joy");
+        let urls: Vec<&str> = found.iter().map(|p| p.url.as_str()).collect();
+        assert_eq!(
+            urls,
+            [
+                // The figure: its srcset's widest, relative to <base href>.
+                "https://wiki.example.com/wiki/maps/fort_joy_1600.jpg",
+                // Lazy: data-src, not the data: placeholder.
+                "https://cdn.example.com/art/fort-joy-concept.webp",
+                "https://wiki.example.com/images/thumb/a/ab/Ghetto.png/300px-Ghetto.png",
+                // The small copy is the figure's own `src`, a different address.
+                "https://wiki.example.com/wiki/maps/fort_joy_small.jpg",
+            ],
+            "{found:#?}"
+        );
+        let map = &found[0];
+        assert_eq!(map.alt, "Fort Joy map");
+        assert_eq!(map.caption, "Fort Joy with every treasure chest marked");
+        assert_eq!(map.heading, "Map");
+        // The srcset's width, the height in proportion to the attributes'.
+        assert_eq!((map.w, map.h), (Some(1600), Some(1200)));
+        let art = &found[1];
+        assert_eq!((art.alt.as_str(), art.heading.as_str(), art.w, art.h), ("", "Concept art", Some(1200), Some(675)));
+        assert_eq!(found[2].caption, "The ghetto, south of the gate");
+        // No logo, menu, icon, tracker, avatar, SVG, local address or footer.
+        for no in ["site-logo", "menu-banner", "fire.png", "diagram.svg", "tracker", "avatars", "192.168", "footer-art"] {
+            assert!(!urls.iter().any(|u| u.contains(no)), "{no}: {urls:?}");
+        }
+    }
+
+    #[test]
+    fn furniture_and_tiny_pictures_are_told_apart_from_real_ones() {
+        assert!(is_junk("https://a.example/images/logo.png", "", "", None, None));
+        assert!(is_junk("https://a.example/img/x.png", "Company logo", "", None, None));
+        assert!(is_junk("https://a.example/img/x.png", "", "avatar rounded", None, None));
+        assert!(is_junk("https://a.example/sprites/ui.png", "", "", Some(512), Some(512)));
+        assert!(is_junk("https://a.example/1x1.gif", "", "", None, None));
+        assert!(is_junk("https://stats.wp.com/b.gif", "", "", None, None));
+        assert!(is_junk("https://a.example/favicon.ico", "", "", None, None));
+        assert!(is_junk("https://a.example/map.png", "Map", "", Some(90), Some(400)));
+        assert!(is_junk("https://a.example/map.png", "Map", "", Some(110), Some(110)));
+        assert!(is_junk("data:image/png;base64,AAAA", "", "", None, None));
+        // Real pictures, whatever their words: "silicon" has "icon" in it.
+        assert!(!is_junk("https://a.example/maps/treasure.jpg", "Treasure map", "", Some(1600), Some(1200)));
+        assert!(!is_junk("https://a.example/silicon-wafer.jpg", "A silicon wafer", "", None, None));
+        assert!(!is_junk("https://a.example/uploads/kitchen.jpg", "", "", None, Some(400)));
+        // srcset: the widest; a density below any width; commas in addresses.
+        assert_eq!(best_srcset("a.jpg 1x, b.jpg 2x"), Some(("b.jpg".into(), None)));
+        assert_eq!(best_srcset("s.jpg 300w, l.jpg 1200w, m.jpg 600w"), Some(("l.jpg".into(), Some(1200))));
+        assert_eq!(best_srcset("https://cdn.example/w_300,h_200/a.jpg 300w,https://cdn.example/w_900,h_600/a.jpg 900w"), Some(("https://cdn.example/w_900,h_600/a.jpg".into(), Some(900))));
+        assert_eq!(best_srcset("data:image/png;base64,AAA 1x"), None);
+        // Image types only, never an SVG drawing.
+        assert!(picture_kind("image/png").is_ok() && picture_kind("image/jpeg; charset=binary").is_ok());
+        assert!(picture_kind("image/svg+xml").unwrap_err().contains("SVG"));
+        assert!(picture_kind("text/html; charset=utf-8").unwrap_err().contains("isn't a picture (text/html)"));
+        assert!(picture_kind("").unwrap_err().contains("no type"));
     }
 }

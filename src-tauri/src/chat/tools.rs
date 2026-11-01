@@ -242,6 +242,10 @@ pub struct Extra<'a> {
     /// [`STRONG_LOCKED`] waits for the next message, and a document it
     /// writes deepens the turn's research (`web::Turn::go_deep`).
     pub strong: bool,
+    /// The picture tools this model gets (`chat/pictures.rs` `Gate`: look
+    /// and show for a model that reads images, show for any other; none
+    /// without the web).
+    pub pictures: crate::chat::pictures::Gate,
 }
 
 /// The calendar tool in a turn ([`calendar::run`]).

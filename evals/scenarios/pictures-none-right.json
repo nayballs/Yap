@@ -1,0 +1,42 @@
+{
+  "name": "pictures-none-right",
+  "description": "Find and show (chat/pictures.rs): the same question as pictures-map-one-right, but the page has no treasure map: concept art, a map of another area, a night screenshot, an armour set and a character portrait. It must show nothing and say it couldn't find the map, never a wrong picture passed off as the one asked for. The stand-in pictures carry their words written on them. Stand-in web.",
+  "tags": [
+    "pictures",
+    "web"
+  ],
+  "web": {
+    "mode": "standin",
+    "results": [
+      {
+        "title": "Fort Joy - Emberfall Wiki",
+        "url": "https://emberfall.example/wiki/Fort_Joy",
+        "published": "2026-09-14",
+        "text": "Fort Joy is the island prison where Emberfall starts. Treasure is hidden in the beach caves, the ghetto and the cellars under the keep. The page has concept art, area maps and a gallery."
+      }
+    ],
+    "pages": {
+      "https://emberfall.example/wiki/Fort_Joy": "<!doctype html><html><head><title>Fort Joy - Emberfall Wiki</title></head><body><article><h1>Fort Joy</h1><p>Fort Joy is the island prison where Emberfall starts. You wake on the beach below the keep. Treasure is hidden in the beach caves, the ghetto and the cellars under the keep; most chests need a lockpick or a shovel. The wiki has no treasure map of Fort Joy yet.</p><h2>Art</h2><img src=\"/images/fort_joy_concept.png\" width=\"1600\" height=\"900\" alt=\"Fort Joy concept art\"><h2>Nearby areas</h2><figure><img src=\"/images/saltmarsh_docks_map.png\" width=\"1600\" height=\"1200\" alt=\"Saltmarsh Docks map\"><figcaption>The Saltmarsh Docks, the area after Fort Joy</figcaption></figure><h2>Gallery</h2><img src=\"/images/fort_joy_night.png\" width=\"1600\" height=\"900\" alt=\"Fort Joy at night\"><h2>Loot</h2><img src=\"/images/magister_armour.png\" width=\"1200\" height=\"1200\" alt=\"Magister armour set\"><h2>People</h2><img src=\"/images/warden_portrait.png\" width=\"900\" height=\"1200\" alt=\"Warden Aldric, the keep's jailer\"></article></body></html>",
+      "https://emberfall.example/images/fort_joy_concept.png": "picture 800x450: Concept art - Fort Joy keep at dusk",
+      "https://emberfall.example/images/saltmarsh_docks_map.png": "picture 800x600: Map of the Saltmarsh Docks",
+      "https://emberfall.example/images/fort_joy_night.png": "picture 800x450: Screenshot - Fort Joy at night",
+      "https://emberfall.example/images/magister_armour.png": "picture 600x600: Magister armour set",
+      "https://emberfall.example/images/warden_portrait.png": "picture 450x600: Warden Aldric portrait"
+    }
+  },
+  "apps": "standard",
+  "turns": [
+    {
+      "user": "Emberfall: get me a map of all the treasures in Fort Joy and bring it up for me.",
+      "expect": {
+        "pictures_shown": [],
+        "answer_matches": "(couldn'?t|could not|didn'?t|did not|can'?t|cannot|wasn'?t able to|unable to)\\s+(find|locate|get)|no\\s+(treasure\\s+)?map|none of (the|these|its) (pictures|images)",
+        "no_false_claims": true
+      },
+      "soft": {
+        "max_words": 90,
+        "no_post_fixes": true
+      }
+    }
+  ]
+}

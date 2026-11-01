@@ -72,6 +72,14 @@ pub struct ChatMessage {
     /// older Yap's save drops it: the pill goes, the note stays in Notes.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub documents: Vec<crate::chat::documents::DocRef>,
+    /// The pictures an answer showed beside the chat (`show_picture`,
+    /// `chat/pictures.rs`): each kept in `<data>/chat-images/` like a
+    /// screenshot, with its caption, where it came from and the page it was
+    /// on — the thumbnail pills under it, and the panel's tabs. Only written
+    /// when there are some. An older Yap's save drops it: the pills go, and
+    /// the pictures with the sweep a day later.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub pictures: Vec<crate::chat::pictures::ShownPicture>,
     /// The passage of a document a question was asked about (the panel's
     /// "Change this…" / "Ask about this", `documents::Selection`): its note
     /// and words, the quote above the question, and the history the model
@@ -149,16 +157,19 @@ pub struct ChatImage {
     pub as_text: bool,
 }
 
-/// Every image id a conversation refers to (the screenshots sweep keeps
+/// Every image id a conversation refers to — a question's screenshots and
+/// the pictures an answer showed (`pictures`) — (the screenshots sweep keeps
 /// these for their time; anything else goes after a day).
 pub fn image_ids() -> std::collections::HashSet<String> {
-    with_store(|s| {
-        s.conversations
-            .iter()
-            .flat_map(|c| c.messages.iter())
-            .flat_map(|m| m.images.iter().map(|i| i.id.clone()))
-            .collect()
-    })
+    with_store(|s| s.conversations.iter().flat_map(|c| c.messages.iter()).flat_map(ChatMessage::image_ids).collect())
+}
+
+impl ChatMessage {
+    /// The chat-images ids this message refers to: its screenshots and the
+    /// pictures it showed.
+    pub fn image_ids(&self) -> impl Iterator<Item = String> + '_ {
+        self.images.iter().map(|i| i.id.clone()).chain(self.pictures.iter().map(|p| p.id.clone()))
+    }
 }
 
 /// One source of an answer: its number in the answer's citations, the
@@ -628,6 +639,21 @@ pub fn set_documents(id: u64, index: usize, docs: &[crate::chat::documents::DocR
     });
 }
 
+/// Keep the pictures an answer showed with it (`chat/pictures.rs`):
+/// conversation `id`'s message `index`, when it's an answer.
+pub fn set_pictures(id: u64, index: usize, pictures: &[crate::chat::pictures::ShownPicture]) {
+    if pictures.is_empty() {
+        return;
+    }
+    with_store(|s| {
+        let Some(m) = s.conversations.iter_mut().find(|c| c.id == id).and_then(|c| c.messages.get_mut(index)) else { return };
+        if m.role == "assistant" {
+            m.pictures = pictures.to_vec();
+            save_to_disk(s);
+        }
+    });
+}
+
 /// Keep the passage a question was asked about with it (`documents::Quote`):
 /// conversation `id`'s message `index`, when it's a question.
 pub fn set_quote(id: u64, index: usize, quote: crate::chat::documents::Quote) {
@@ -723,6 +749,7 @@ pub fn append_message(
             tokens,
             thinking: None,
             documents: Vec::new(),
+            pictures: Vec::new(),
             quote: None,
         });
         conv.updated_ts = now_secs();
@@ -778,7 +805,7 @@ pub fn delete_many(ids: &[u64]) -> usize {
             .conversations
             .iter()
             .filter(|c| ids.contains(&c.id))
-            .flat_map(|c| c.messages.iter().flat_map(|m| m.images.iter().map(|i| i.id.clone())))
+            .flat_map(|c| c.messages.iter().flat_map(ChatMessage::image_ids))
             .collect();
         let before = s.conversations.len();
         s.conversations.retain(|c| !ids.contains(&c.id));
@@ -1393,6 +1420,35 @@ mod tests {
         assert_eq!(strip_unsourced_citations("No markers here.", &[]), "No markers here.");
     }
 
+    /// The pictures an answer showed are kept with it (skipped when there
+    /// are none, read back when an older save has none), and their files
+    /// count as the conversation's: the sweep keeps them for their time,
+    /// deleting the chat deletes them.
+    #[test]
+    fn an_answers_pictures_are_kept_and_count_as_its_images() {
+        let picture = crate::chat::pictures::ShownPicture {
+            id: "img_00112233445566aa".into(),
+            w: 1600,
+            h: 1200,
+            caption: "Fort Joy treasure map".into(),
+            image_url: "https://wiki.example.com/images/map.png".into(),
+            n: 2,
+            ..Default::default()
+        };
+        let m = ChatMessage { role: "assistant".into(), text: "It's open beside the chat.".into(), pictures: vec![picture.clone()], ..Default::default() };
+        let v = serde_json::to_value(&m).unwrap();
+        assert_eq!(v["pictures"][0]["imageUrl"], "https://wiki.example.com/images/map.png");
+        let plain = serde_json::to_value(ChatMessage { role: "assistant".into(), ..Default::default() }).unwrap();
+        assert!(plain.get("pictures").is_none(), "skipped when empty");
+        let back: ChatMessage = serde_json::from_value(v).unwrap();
+        assert_eq!(back.pictures, vec![picture]);
+        let older: ChatMessage = serde_json::from_value(json!({ "role": "assistant", "text": "x", "ts": 0 })).unwrap();
+        assert!(older.pictures.is_empty());
+        let q = ChatMessage { role: "user".into(), images: vec![ChatImage { id: "img_aaaaaaaaaaaaaaaa".into(), ..Default::default() }], ..Default::default() };
+        assert_eq!(q.image_ids().collect::<Vec<_>>(), ["img_aaaaaaaaaaaaaaaa"]);
+        assert_eq!(m.image_ids().collect::<Vec<_>>(), ["img_00112233445566aa"]);
+    }
+
     #[test]
     fn a_follow_up_may_cite_the_latest_answer_that_had_sources() {
         let src = |n| Source { n, title: format!("S{n}"), url: format!("https://s{n}.example"), ..Default::default() };
@@ -1410,6 +1466,7 @@ mod tests {
             tokens: None,
             thinking: None,
             documents: vec![],
+            pictures: vec![],
             quote: None,
         };
         let messages = vec![

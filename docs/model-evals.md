@@ -707,7 +707,8 @@ isn't logged.
     "native": true,                           // the AI's own search (default: on, except standin / key: false)
     "results": [{ "title": "…", "url": "https://tips.example/x", "text": "…", "published": "2026-09-30" }],
     "searches": [{ "when": ["indie"], "results": [ … ] }],    // stand-in: other answers for searches holding one of `when`
-    "pages": { "https://tips.example/x": "<html>…</html>" }   // stand-in pages read_page gets
+    "pages": { "https://tips.example/x": "<html>…</html>",    // stand-in pages read_page gets
+               "https://tips.example/map.png": "picture 800x600: TREASURE MAP" }   // a PNG of that size, its words drawn on it
   },
   "voice": false,                             // every turn asked by voice (Voice Assistant)
   "tools": "on",                              // optional: force tools on/off for this scenario
@@ -787,6 +788,7 @@ field is an error, so a typo can't silently skip a check):
 | `memory` | `[{ "has", "section", "exists", "count" }]`: memory afterwards has an item whose name, summary or facts hold `has` (in `section`), or none does (`exists: false`), or exactly `count` do. |
 | `memory_changes_max`, `memory_changes_min` | Memory changed at most / at least this many times in the turn (a learning pass, a tell, an import, the chat's remember/forget; each change is logged as `memory_changed`). |
 | `document` | Documents beside the chat (`--documents`, `--guides`): `{made, outline_first, filled, min_sections, changed, table, summary, contains, in_order, levels, parts, own_marked, citations_real, after_web}` — see the two sections above. |
+| `pictures_shown` | The pictures shown beside the chat (`show_picture`, `chat/pictures.rs`), exactly: the ids of the turn's `show_picture` calls that showed one (`["p3"]`; `[]`: none). |
 | `memory_allowed` | **Precision**: every text memory gained in the turn (a new item's name and "about", each fact added, a changed name or "about") holds one of these (case-insensitive); anything else is a **false memory**, named in the failure. `[]`: nothing may be gained. |
 
 Each turn that touches memory also gets a **memory score** in `turn_end` (`memory_score`: the
@@ -3194,3 +3196,43 @@ else). Read only, on this PC; no paid model.
   Command's does.
 
 Run folders: `E:\yap-builds\instruct\eval-runs\` (this PC; not kept).
+
+## Find and show pictures (31 Oct 2026)
+
+Chat finds a picture online and shows it beside the chat (`chat/pictures.rs`,
+chat-and-assistant.md): a page read lists its pictures by id, a model that reads images may
+`look_at_picture` first, every tool-using model can `show_picture`. Two scenarios on a
+stand-in web, a made-up game ("Emberfall") so no model knows the answer, tag `pictures`:
+
+- **`pictures-map-one-right`**: "Emberfall: get me a map of all the treasures in Fort Joy
+  and bring it up for me." The wiki page has five pictures: concept art, a map of another
+  area ("Saltmarsh Docks map"), the treasure map (p3: its alt text only "Fort Joy", its
+  caption "Every treasure chest and hidden stash in Fort Joy, marked"), a night screenshot
+  and an armour set. It must show p3 and nothing else (`pictures_shown: ["p3"]`).
+- **`pictures-none-right`**: the same question, a page with no treasure map (concept art,
+  the other area's map, the screenshot, the armour, a portrait). It must show nothing and
+  say it couldn't find the map (`pictures_shown: []`, `answer_matches`).
+
+**Stand-in pictures** (`ai/eval/standin.rs` `stand_in_picture`): a `pages` value
+`"picture 800x600: WORDS"` is served as a PNG of that size with its words drawn on it in
+large letters, so a model that looks tells the pictures apart by what they show, as it
+would real ones; a model that can't look goes by Yap's ranked list (alt text, caption,
+heading). `pictures_shown` (the checks table) compares the ids of the `show_picture` calls
+that showed one.
+
+**Not run yet.** No offline model gets the look path (the on-device model needs its
+projector loaded), and the cloud ones are paid: run them only with the maintainer's OK.
+`cargo test eval::` parses them (`the_repos_scenarios_parse`) and checks the stand-in
+pictures (`a_stand_in_picture_has_its_size_and_its_words_on_it`). The cheapest first:
+
+```bash
+# show only (the on-device 4B without its projector; free, this PC)
+npm run eval -- --tag pictures --model local:<Qwen_Qwen3.5-4B-Q4_K_M.gguf> --ngl 999 --repeat 3
+# look and show (paid: the maintainer's OK)
+npm run eval -- --tag pictures --model anthropic:claude-haiku-5-5 --keys-from-yap --repeat 2
+npm run eval -- --tag pictures --model anthropic:claude-opus-5-5 --keys-from-yap
+```
+
+A strong Claude with "The AI's own search" on searches in Chat's own request: the stand-in
+scenarios run Yap's own search (`native` off for a stand-in web), so `read_page` lists the
+pictures; `find_pictures` (its own web_fetch lists none) is covered by unit tests only.

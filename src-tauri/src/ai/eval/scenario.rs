@@ -521,6 +521,10 @@ pub struct Expect {
     /// Documents beside the chat (`chat/documents.rs`): whether the turn
     /// made one, and how (`--documents`).
     pub document: Option<DocExpect>,
+    /// **The pictures shown beside the chat** (`show_picture`,
+    /// `chat/pictures.rs`), exactly: the ids of this turn's `show_picture`
+    /// calls that showed one ("p3"; `[]`: none shown).
+    pub pictures_shown: Option<Vec<String>>,
 }
 
 /// What a turn did with documents (`Expect::document`).
@@ -1485,6 +1489,23 @@ pub fn check(e: &Expect, o: &Observed) -> Vec<String> {
                 "expected a call to {want}; calls made: {}",
                 if made.is_empty() { "none".to_string() } else { made.join(", ") }
             ));
+        }
+    }
+    if let Some(want) = &e.pictures_shown {
+        let ids = |v: &mut Vec<String>| {
+            v.sort();
+            v.dedup();
+        };
+        let mut got: Vec<String> = calls
+            .iter()
+            .filter(|c| c.name == crate::chat::pictures::SHOW && c.success)
+            .map(|c| crate::chat::pictures::normal_id(c.args["picture"].as_str().unwrap_or("")))
+            .collect();
+        let mut want: Vec<String> = want.iter().map(|w| crate::chat::pictures::normal_id(w)).collect();
+        ids(&mut got);
+        ids(&mut want);
+        if got != want {
+            fails.push(format!("pictures shown: [{}], expected [{}]", got.join(", "), want.join(", ")));
         }
     }
     for n in &e.tools_not_called {

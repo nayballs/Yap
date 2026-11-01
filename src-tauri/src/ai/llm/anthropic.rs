@@ -647,6 +647,32 @@ mod tests {
         json!({ "type": "function", "function": { "name": name, "description": "d", "parameters": { "type": "object", "properties": {} } } })
     }
 
+    /// A picture the model asked to look at (`chat/pictures.rs`): the loop
+    /// sends it as a user message after the step's tool results; on the
+    /// Messages API it's one user turn — the tool result first, then the
+    /// picture, then Yap's line.
+    #[test]
+    fn a_picture_looked_at_follows_the_tool_result_in_one_user_turn() {
+        let look = crate::chat::pictures::Look {
+            part: crate::snip::turn::part("data:image/png;base64,UElD", "anthropic"),
+            text: "(From Yap, not the user.) Picture p1 as you asked to look at it.".into(),
+        };
+        let messages = json!([
+            { "role": "system", "content": "You are Yap's Chat." },
+            { "role": "user", "content": "Show me the Fort Joy map" },
+            { "role": "assistant", "content": null, "tool_calls": [{ "id": "c1", "type": "function", "function": { "name": "look_at_picture", "arguments": "{\"picture\":\"p1\"}" } }] },
+            { "role": "tool", "tool_call_id": "c1", "content": "{\"success\":true}" },
+            crate::chat::pictures::look_message(&[look], "anthropic").unwrap()
+        ]);
+        let b = body(&req(messages, Some(json!([function("look_at_picture"), function("show_picture")]))), &[], false);
+        let m = b["messages"].as_array().unwrap();
+        assert_eq!(m.len(), 3, "{m:?}");
+        let turn = m[2]["content"].as_array().unwrap();
+        assert_eq!(turn[0]["type"], "tool_result");
+        assert_eq!(turn[1], json!({ "type": "image", "source": { "type": "base64", "media_type": "image/png", "data": "UElD" } }));
+        assert!(turn[2]["text"].as_str().unwrap().starts_with("(From Yap, not the user.) Picture p1"));
+    }
+
     #[test]
     fn the_loops_messages_become_the_messages_apis() {
         let messages = json!([

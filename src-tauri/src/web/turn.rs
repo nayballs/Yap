@@ -9,13 +9,14 @@ use reqwest::Url;
 use serde_json::{json, Value};
 
 use crate::chat::chats::Source;
+use crate::chat::pictures::{PageRef, TurnPictures};
 
 use super::grounding::{asks_about_prices, local_query, local_retry_query};
 use super::native;
 use super::page::{check_url, page_part, read_page};
 use super::{
-    search, search_chip, short, source_site, tidy, Endpoints, Settings, DATA_NOT_INSTRUCTIONS, DEEP_READS, DEEP_SEARCHES,
-    MAX_READS, MAX_RESULTS, MAX_SEARCHES, PAGE_TOKENS,
+    search, search_chip, short, site_of, source_site, tidy, Endpoints, Settings, DATA_NOT_INSTRUCTIONS, DEEP_READS,
+    DEEP_SEARCHES, MAX_READS, MAX_RESULTS, MAX_SEARCHES, PAGE_TOKENS,
 };
 
 /// **How far a turn may look**: its searches and page reads.
@@ -161,6 +162,10 @@ pub struct Turn {
     /// A document cited this turn's pages ([`Turn::cited_in`]): the answer
     /// keeps every source, the cited and opened ones marked.
     documented: bool,
+    /// **The pictures this turn came across** (`chat/pictures.rs`): a page
+    /// read's, a search's — `p1`, `p2`… for `look_at_picture` and
+    /// `show_picture` — and the ones shown.
+    pub pictures: TurnPictures,
 }
 
 impl Turn {
@@ -190,7 +195,27 @@ impl Turn {
             deep_reach: None,
             outline_first: false,
             documented: false,
+            pictures: TurnPictures::default(),
         }
+    }
+
+    /// Where its requests go (a picture's download too: `chat/pictures.rs`).
+    pub fn endpoints(&self) -> &Endpoints {
+        &self.endpoints
+    }
+
+    /// Web content is in the turn (a picture from the web looked at): the
+    /// safety rule applies.
+    pub fn mark_seen(&mut self) {
+        self.seen = true;
+    }
+
+    /// **A page's pictures** as candidates (`chat/pictures.rs`): each with
+    /// the page and its number; what a result lists of them (the best five
+    /// for the question), `None` when it had none.
+    fn picture_list(&mut self, images: &[super::PageImage], page: &PageRef, n: usize) -> Option<Value> {
+        let ids: Vec<String> = images.iter().map(|i| self.pictures.add(i.clone(), page.clone(), n)).collect();
+        (!ids.is_empty()).then(|| self.pictures.listed(&ids, &self.question))
     }
 
     /// A strong model's turn (`documents::rich::strong`): once it writes a
@@ -557,6 +582,28 @@ impl Turn {
                 for (key, note) in unit_notes {
                     data[key] = json!(note);
                 }
+                // The pictures it came with (Tavily's image search, Exa's
+                // results' own, the wiki article's): candidates, each with
+                // the result it's on (an image search's: no page).
+                let mut ids = Vec::new();
+                for img in &found.images {
+                    let hit = img.page.as_deref().and_then(|p| found.hits.iter().find(|h| normal_url(&h.url) == normal_url(p)));
+                    let (page, n) = match (hit, img.page.as_deref()) {
+                        (Some(h), _) => {
+                            let n = self.number(&h.title, &h.url);
+                            (PageRef { title: h.title.clone(), site: source_site(&h.title, &h.url), url: h.url.clone() }, n)
+                        }
+                        (None, Some(p)) => (PageRef { title: site_of(p), site: site_of(p), url: p.to_string() }, 0),
+                        (None, None) => {
+                            let site = site_of(&img.image.url);
+                            (PageRef { title: site.clone(), site, url: String::new() }, 0)
+                        }
+                    };
+                    ids.push(self.pictures.add(img.image.clone(), page, n));
+                }
+                if !ids.is_empty() {
+                    data["pictures"] = self.pictures.listed(&ids, &self.question);
+                }
                 self.texts.push(text);
                 ok(data, display)
             }
@@ -616,7 +663,61 @@ impl Turn {
                 for (key, note) in unit_notes {
                     data[key] = json!(note);
                 }
+                // Its pictures, the best five for the question (with the
+                // page's first part only: the same page's).
+                if offset == 0 {
+                    let at = PageRef { title: page.title.clone(), site: page.site.clone(), url: page.url.clone() };
+                    if let Some(list) = self.picture_list(&page.images, &at, n) {
+                        data["pictures"] = list;
+                    }
+                }
                 ok(data, format!("Read {}", short_url(&page.url)))
+            }
+        }
+    }
+
+    /// **`find_pictures`** (a Claude searching in Chat's own request, whose
+    /// `web_fetch` gives no pictures): the pictures on a page from this
+    /// turn's results or the user's message, read by Yap's own reader (the
+    /// page cache's when it's there) — the best five as candidates. Up to
+    /// the turn's page reads, counted apart.
+    pub async fn find_pictures(&mut self, args: &Value) -> Value {
+        let url = args["url"].as_str().unwrap_or("").trim().to_string();
+        let shown = short_url(&url);
+        if url.is_empty() {
+            return failed("url is required: a page from this turn's results or the user's message.".into(), "Couldn't look for pictures: no address".into());
+        }
+        if let Err(e) = check_url(&url) {
+            return failed(e.clone(), format!("Didn't look for pictures on {shown}: {}", short(&e)));
+        }
+        if !self.allowed(&url) {
+            return failed(
+                "find_pictures only opens a page from this turn's results or one the user linked. Search for it first.".into(),
+                format!("Didn't look for pictures on {shown}: not a link from you or the search"),
+            );
+        }
+        let most = self.reach.reads;
+        if self.pictures.finds >= most {
+            return failed(format!("You've looked for pictures on {most} pages in this turn: use what you found."), format!("Didn't look for pictures on {shown}: {most} pages a turn"));
+        }
+        self.pictures.finds += 1;
+        match read_page(&self.endpoints, &url).await {
+            Err(e) => failed(e.clone(), format!("Couldn't look for pictures on {shown}: {}", short(&e))),
+            Ok(page) => {
+                let n = self.number(&page.title, &url);
+                let at = PageRef { title: page.title.clone(), site: page.site.clone(), url: page.url.clone() };
+                let list = self.picture_list(&page.images, &at, n).unwrap_or_else(|| json!([]));
+                let count = list.as_array().map_or(0, Vec::len);
+                let display = match count {
+                    0 => format!("No pictures on {}", short_url(&page.url)),
+                    1 => format!("Found 1 picture on {}", short_url(&page.url)),
+                    c => format!("Found {c} pictures on {}", short_url(&page.url)),
+                };
+                let mut data = json!({ "n": n, "title": page.title, "url": page.url, "pictures": list, "note": DATA_NOT_INSTRUCTIONS });
+                if count == 0 {
+                    data["hint"] = json!("This page has no pictures Yap can show: try another page, or tell the user.");
+                }
+                ok(data, display)
             }
         }
     }
@@ -1007,6 +1108,39 @@ mod tests {
         assert_eq!(turn.sources.iter().map(|s| s.url.as_str()).collect::<Vec<_>>(), ["https://emberfall.example/wiki/Tidecaller", "https://emberfall.example/wiki/Gear_locations"]);
         assert!(turn.seen() && turn.looked());
         assert_eq!(turn.texts, ["Coral Staff: Saltmarsh Docks"]);
+    }
+
+    /// A search's pictures are the turn's candidates, each with the result
+    /// it's on and that result's number; `find_pictures` opens only a page
+    /// the turn may read.
+    #[tokio::test]
+    async fn a_searchs_pictures_become_the_turns_candidates() {
+        let f = fake(
+            (500, Value::Null),
+            json!({ "results": [
+                { "title": "Fort Joy treasure guide", "url": "https://guides.example/fort-joy", "highlights": ["Every chest in Fort Joy."], "image": "https://guides.example/og/fort-joy-map.jpg" },
+                { "title": "Fort Joy", "url": "https://wiki.example.com/wiki/Fort_Joy", "highlights": ["The first area."], "image": "https://wiki.example.com/static/logo.png" }
+            ] }),
+        );
+        let mut turn = Turn::new(settings("exa-key"), endpoints_of(&f), "Get me a map of the treasures in Fort Joy", &[]);
+        let r = turn.execute("web_search", &json!({ "query": "Fort Joy treasure map" })).await;
+        assert_eq!(r["data"]["pictures"], json!([{ "picture": "p1", "about": "Fort Joy treasure guide", "size": null }]), "{r}");
+        let c = turn.pictures.get("p1").unwrap();
+        assert_eq!((c.n, c.page.url.as_str(), c.page.site.as_str()), (1, "https://guides.example/fort-joy", "guides.example"));
+        // The same search again: the same ids.
+        let again = turn.execute("web_search", &json!({ "query": "Fort Joy treasure map" })).await;
+        assert_eq!(again["data"]["pictures"][0]["picture"], "p1");
+        assert_eq!(turn.pictures.ids(), ["p1"]);
+        // find_pictures: never a page the turn may not read, and never a local one.
+        let r = turn.find_pictures(&json!({ "url": "https://evil.example/x" })).await;
+        assert_eq!(r["displayText"], "Didn't look for pictures on evil.example/x: not a link from you or the search");
+        let r = turn.find_pictures(&json!({ "url": "http://127.0.0.1/x" })).await;
+        assert_eq!(r["success"], false);
+        // No search results at all: no "pictures".
+        let none = fake((500, Value::Null), json!({ "results": [] }));
+        let mut turn = Turn::new(settings("exa-key"), endpoints_of(&none), "a map of Fort Joy", &[]);
+        let r = turn.execute("web_search", &json!({ "query": "zzz" })).await;
+        assert!(r["data"].get("pictures").is_none(), "{r}");
     }
 
     #[test]

@@ -105,6 +105,10 @@ pub enum Event {
     /// …", "Reading …", "Writing ‘Gear’", "Thinking" — the page's line, with
     /// the turn's time beside it.
     Step { step: crate::chat::activity::Activity },
+    /// A picture from the web shown beside the chat (`show_picture`,
+    /// `chat/pictures.rs`), the moment it lands: the panel opens on it, as
+    /// for a document.
+    Picture { picture: crate::chat::pictures::ShownPicture },
 }
 
 /// Tool calls whose arguments the page sees as they come: a document's
@@ -132,6 +136,9 @@ pub fn doing(name: &str) -> &'static str {
         "search_chats" => "Searching your chats…",
         "create_document" => "Starting a document…",
         "write_section" | "rewrite_section" => "Writing the document…",
+        "look_at_picture" => "Looking at a picture…",
+        "show_picture" => "Showing a picture…",
+        "find_pictures" => "Looking for pictures…",
         _ => "Working…",
     }
 }
