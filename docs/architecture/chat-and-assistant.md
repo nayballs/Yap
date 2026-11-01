@@ -813,7 +813,9 @@ The AI Chat surface (conversations, the tool-calling loop and its note tools) an
   the Messages API path folds it into the user turn after the
   `tool_result` blocks (`llm/anthropic.rs` `push_user`), an OpenAI-
   compatible one sends a `user` message after the `tool` ones; the
-  provider's own usage counts its tokens (AI usage); a look makes the turn
+  provider's own usage counts its tokens (AI usage), and the turn's room
+  counts it by its size there (`budget::image_tokens_at`: one that no
+  longer fits isn't looked at, "Long chats" below); a look makes the turn
   `seen` (web content: the safety rule); ≤ 4 a turn. A model that turns the
   picture down falls back as a turned-down screenshot does
   (`snip::turn::without_images`). **`find_pictures {url}`**: a page's
@@ -2483,10 +2485,22 @@ a technical error.
    a self-hosted one) is counted by its own `/tokenize`, cached; a server
    without it isn't asked again. An earlier web answer's replayed search
    counts (`chats::history_message`), and the newest three screenshots sent
-   again, each by its size (`image_tokens`, since 2026-10-31: Anthropic's
-   pixels ÷ 750 within a 1,568-pixel edge and 1.15 MP, at least 85 — a
-   full-HD screenshot ≈ 1,530, a 400 × 200 snip ≈ 110; 1,000 each before,
-   and an unknown size still). A question too long only for the key's plan
+   again (none to a model on this PC, which gets none again: a line each).
+   **A picture costs its size where it goes** (`image_tokens_at`, since
+   2026-11-01; `Counter::picture`): the copy that provider gets
+   (`snip::images::long_edge`: 1,024 px on this PC, Claude 2,576, Gemini
+   3,072, 2,048 elsewhere) by that provider's own count, never under it —
+   Claude's high-resolution models the pixels ÷ 750 within 2,576 px and
+   3.75 MP (a full-HD screenshot ≈ 2,770, a 4K one ≈ 5,000); OpenAI its
+   high-detail tiles or its 32-px patches (≤ 1,536), whichever is more;
+   Gemini 2's 258-token tiles, at least 1,120 (Gemini 3's); Groq's Qwen a
+   token a 32-px square (≈ 2,040 for full HD); a model on this PC the pixels
+   ÷ 750 of its copy (≈ 790); OpenRouter and a server elsewhere Claude's
+   rule. An unknown size counts as a full-HD screenshot there, at least
+   1,000. (31 Oct: Claude's older rule for every provider, within 1,568 px
+   and 1.15 MP, ≈ 1,530 for full HD — a third of what Claude's 2,576-px
+   copies now cost; 1,000 each before that.) The question's own screenshots
+   count the same way. A question too long only for the key's plan
    (Groq's free 8,000 tokens a minute) says so: "That's too long for
    Qwen3.8 27B on your Groq plan (8,000 tokens a minute)." (`too_much_a_minute`),
    not the model's context.
@@ -2504,7 +2518,18 @@ a technical error.
    (`budget::fit_result`, `agent.rs` `Room`): its longest texts shortened
    and marked "… [cut to fit the model's context]", then its longest lists
    halved, with a note for the model; no room at all — "no room left …
-   answer with what you have". The existing bounds stay (`get_note` 2,000
+   answer with what you have". **What the request has left counts its
+   pictures** (`budget::request_tokens` → `images_in`, since 2026-11-01;
+   each image part's size read from its PNG header, `part_size`): the
+   question's screenshots, earlier ones sent again and the pictures the
+   model looked at (`look_at_picture`), plus the ones this step looked at
+   that go after its results; until then none counted, so a page read could
+   be fitted into room a picture already took. **A picture looked at must
+   fit** (`Room::takes_picture`): it can't be cut as a text is, so one that
+   doesn't fit with 300 tokens to spare (`LOOK_SPARE`: its result, the next
+   call) isn't looked at — `NO_ROOM_TO_LOOK` for the model ("…show one by
+   what it's about, or answer with what you have…"), the chip "Didn't look
+   at a picture: no room left in the model's context", nothing attached. The existing bounds stay (`get_note` 2,000
    tokens, `read_note` pages of 3,000, `search_in_note` ~4k characters,
    `read_page` parts): this is the last line for a small context.
 7. **A provider's "too long"** (`llm::says_too_long`, every provider's own

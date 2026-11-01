@@ -177,33 +177,63 @@ async fn search_for_the_model(
             "function": { "name": "web_search", "arguments": args.to_string() },
         }],
     }));
-    let content = room.fit(&result, messages);
+    let content = room.fit(&result, messages, &[]);
     messages.push(json!({ "role": "tool", "tool_call_id": YAP_SEARCH_ID, "content": content }));
 }
 
 /// What a turn's request may still take (`chat/budget.rs`): a tool's result
 /// is trimmed to it, so one turn's page reads and notes can't overflow the
-/// model's context.
+/// model's context — beside the pictures the request carries, each by its
+/// size where it goes (`budget::images_in`).
 #[derive(Clone, Copy)]
 struct Room<'a> {
     /// The whole request's limit (`Budget::request`); `None`: no limit.
     limit: Option<u64>,
     /// The tools the steps offer (they're sent every step).
     tools: &'a Value,
+    /// Where the steps go: what a picture costs there.
+    provider: &'a str,
+    /// The model runs on this PC.
+    here: bool,
 }
 
+/// What a picture a step looked at must leave after it: its tool result and
+/// the next step's call.
+const LOOK_SPARE: u64 = 300;
+
 impl Room<'_> {
+    /// What the request has left beside `messages` and the pictures this
+    /// step looked at, still to go after its results (`pending`).
+    fn left(&self, messages: &[Value], pending: &[crate::chat::pictures::Look]) -> Option<u64> {
+        let used = crate::chat::budget::request_tokens(messages, self.tools, self.provider, self.here) + pending.iter().map(|l| self.look_tokens(l)).sum::<u64>();
+        self.limit.map(|limit| limit.saturating_sub(used))
+    }
+
+    /// What a picture looked at adds: the picture, Yap's line with it and
+    /// its message.
+    fn look_tokens(&self, look: &crate::chat::pictures::Look) -> u64 {
+        crate::chat::budget::part_tokens(&look.part, self.provider, self.here) + crate::chat::budget::estimate(&look.text) + crate::chat::budget::MESSAGE_OVERHEAD
+    }
+
     /// `result` as the next tool message carries it: within what's left
-    /// beside `messages` (`budget::fit_result`).
-    fn fit(&self, result: &Value, messages: &[Value]) -> String {
-        let Some(limit) = self.limit else { return result.to_string() };
-        let left = limit.saturating_sub(crate::chat::budget::request_tokens(messages, self.tools) + crate::chat::budget::MESSAGE_OVERHEAD);
+    /// beside `messages` and the step's `pending` pictures
+    /// (`budget::fit_result`).
+    fn fit(&self, result: &Value, messages: &[Value], pending: &[crate::chat::pictures::Look]) -> String {
+        let Some(left) = self.left(messages, pending) else { return result.to_string() };
+        let left = left.saturating_sub(crate::chat::budget::MESSAGE_OVERHEAD);
         let fitted = crate::chat::budget::fit_result(result, left);
         if fitted.len() < result.to_string().len() {
             tracing::info!(left, "Chat: a tool's result was shortened to fit the model's context");
             crate::ai::eval::post_fix("tool_result_cut");
         }
         fitted
+    }
+
+    /// Whether the picture `look` still fits beside `messages` and the
+    /// step's `pending` pictures, with [`LOOK_SPARE`] after it. A picture
+    /// can't be cut as a text is: one that doesn't fit isn't looked at.
+    fn takes_picture(&self, messages: &[Value], pending: &[crate::chat::pictures::Look], look: &crate::chat::pictures::Look) -> bool {
+        self.left(messages, pending).is_none_or(|left| self.look_tokens(look) + LOOK_SPARE <= left)
     }
 }
 
@@ -397,7 +427,7 @@ async fn tool_loop(
     let native = |web: Option<&crate::web::Turn>| crate::ai::llm::anthropic::Native {
         server_tools: web.and_then(crate::web::Turn::server_tools).unwrap_or_default(),
     };
-    let room = Room { limit: extra.room, tools: &tools };
+    let room = Room { limit: extra.room, tools: &tools, provider, here: crate::ai::ai_model::runs_here(provider, base_url) };
     let mut tools_used: Vec<String> = Vec::new();
     // The answer just before the question: a "yes" to its offer to open an
     // app is the person asking (`apps::consented`).
@@ -740,8 +770,19 @@ async fn tool_loop(
                 if let (Some(picture), Some(live)) = (run.shown, live) {
                     live.sink.send(crate::chat::stream::Event::Picture { picture });
                 }
-                looks.extend(run.look);
-                run.result
+                // A picture looked at goes with every later step: only
+                // while it fits in what the request has left (budget.rs).
+                match run.look {
+                    Some(look) if !room.takes_picture(&messages, &looks, &look) => {
+                        tracing::info!(provider, "Chat: no room left in the model's context for the picture; not looked at");
+                        crate::ai::eval::post_fix("look_no_room");
+                        tool_error(crate::chat::budget::NO_ROOM_TO_LOOK.to_string(), Value::Null, "Didn't look at a picture: no room left in the model's context".to_string())
+                    }
+                    look => {
+                        looks.extend(look);
+                        run.result
+                    }
+                }
             } else if extra.memory && MEMORY_TOOL_NAMES.contains(&name) {
                 if asked_to_remember(question) {
                     crate::memory::learn::tool(name, &args)
@@ -816,7 +857,7 @@ async fn tool_loop(
             report(live, &tools_used, web.as_deref(), extra.calendar.map(|c| c.log));
             // Within what the request has left (a long page read on an 8K
             // model, several notes): never past the model's context.
-            let content = room.fit(&result, &messages);
+            let content = room.fit(&result, &messages, &looks);
             messages.push(json!({
                 "role": "tool",
                 "tool_call_id": id,
@@ -2225,5 +2266,100 @@ mod tests {
         assert_eq!(event["kind"], "picture");
         assert_eq!(event["picture"]["imageUrl"], "https://wiki.example.com/images/fort_joy_map.png");
         crate::snip::images::delete(&[shown[0].id.clone()]);
+    }
+
+    /// **A picture counts in the request** (budget.rs): the pictures a
+    /// request carries and the ones a step looked at (still to go after its
+    /// results) take their size where they go; a tool's result is fitted
+    /// beside them, and a picture that no longer fits isn't looked at.
+    #[test]
+    fn a_picture_looked_at_must_fit_beside_the_request() {
+        use crate::chat::budget::{estimate, png_url_for_test, request_tokens, MESSAGE_OVERHEAD};
+        let tools = Value::Null;
+        // A 1,000 × 750 picture on this PC: 1,000 tokens.
+        let look = crate::chat::pictures::Look {
+            part: crate::snip::turn::part(&png_url_for_test(1_000, 750), "custom"),
+            text: "(From Yap, not the user.) Picture p1 as you asked to look at it.".into(),
+        };
+        let messages = vec![json!({ "role": "system", "content": "You are helpful." }), json!({ "role": "user", "content": "Show me the map." })];
+        let used = request_tokens(&messages, &tools, "custom", true);
+        let room = |limit: u64| Room { limit: Some(limit), tools: &tools, provider: "custom", here: true };
+        let cost = room(0).look_tokens(&look);
+        assert_eq!(cost, 1_000 + estimate(&look.text) + MESSAGE_OVERHEAD);
+        // Room for it and what comes after it: looked at; else not.
+        assert!(room(used + cost + LOOK_SPARE).takes_picture(&messages, &[], &look));
+        assert!(!room(used + cost + LOOK_SPARE - 1).takes_picture(&messages, &[], &look));
+        // One already looked at this step counts: a second doesn't fit where one did.
+        let two = used + cost + LOOK_SPARE + 500;
+        assert!(room(two).takes_picture(&messages, &[], &look));
+        assert!(!room(two).takes_picture(&messages, std::slice::from_ref(&look), &look));
+        // No limit: always.
+        assert!(Room { limit: None, tools: &tools, provider: "custom", here: true }.takes_picture(&messages, &[look.clone(), look.clone()], &look));
+        // A page read after a look is fitted beside the picture still to go.
+        let page = json!({ "success": true, "data": { "text": "Tram 28 runs through Alfama. ".repeat(400) } });
+        let alone = room(used + 2_500).fit(&page, &messages, &[]);
+        let beside = room(used + 2_500).fit(&page, &messages, std::slice::from_ref(&look));
+        assert!(estimate(&beside) + cost <= 2_500 && estimate(&alone) > estimate(&beside), "{} {}", estimate(&alone), estimate(&beside));
+        // Once it's in the request, it's counted there.
+        let mut sent = messages.clone();
+        sent.push(crate::chat::pictures::look_message(std::slice::from_ref(&look), "custom").unwrap());
+        assert_eq!(request_tokens(&sent, &tools, "custom", true), used + cost);
+    }
+
+    /// The tool loop with a request that has room for a page read but not
+    /// for the picture after it: the look is refused, the next step carries
+    /// no picture and the model is told why.
+    #[tokio::test]
+    async fn a_picture_with_no_room_left_isnt_looked_at() {
+        const PAGE: &str = r#"<html><head><title>Fort Joy - Example Wiki</title></head><body><article><h1>Fort Joy</h1>
+            <p>Fort Joy is the island prison where the story starts. Its treasure is spread across the beach and the cellars under the keep.</p>
+            <figure><img src="/images/fort_joy_map.png" width="1000" height="750" alt="Fort Joy map"><figcaption>Every treasure chest marked</figcaption></figure>
+            </article></body></html>"#;
+        let rgba = vec![180u8; 1_000 * 750 * 4];
+        let png = crate::snip::images::encode_png(&rgba, 1_000, 750, true).unwrap();
+        let question = "Show me the treasure map from https://wiki.example.com/wiki/Fort_Joy";
+        let run = |steps: Vec<Value>, room: Option<u64>| {
+            let png = png.clone();
+            async move {
+                let fake = fake_model_and_web(
+                    steps,
+                    vec![
+                        ("wiki.example.com/wiki/Fort_Joy", "text/html; charset=utf-8", PAGE.as_bytes().to_vec()),
+                        ("wiki.example.com/images/fort_joy_map.png", "image/png", png),
+                    ],
+                );
+                let settings =
+                    crate::web::Settings { service: crate::web::Service::Exa, key: String::new(), lang: "en".into(), native: None, country: None, local: None, units: None };
+                let endpoints = crate::web::Endpoints { exa: String::new(), tavily: String::new(), standin: Some(format!("{}/standin", fake.base)), offline: false };
+                let mut turn = crate::web::Turn::new(settings, endpoints, question, &[]);
+                let extra = Extra { pictures: crate::chat::pictures::Gate::Look, room, ..Default::default() };
+                let base_url = format!("{}/v1", fake.base);
+                let out = tool_loop("You are helpful.", &[], question, &[], &base_url, "", "fake-vision-chat", "custom", false, false, &|_| {}, Some(&mut turn), FirstStep::Model, extra, None).await;
+                let requests = fake.requests.lock().unwrap().clone();
+                (out, requests)
+            }
+        };
+        let read = calls(&[("read_page", json!({ "url": "https://wiki.example.com/wiki/Fort_Joy" }))]);
+        // What the request carries once the page is read (no limit).
+        let (_, requests) = run(vec![read.clone(), json!({ "role": "assistant", "content": "OK" })], None).await;
+        let after_read = crate::chat::budget::request_tokens(requests[1].1["messages"].as_array().unwrap(), &requests[1].1["tools"], "custom", true);
+        // Room for that and a little more: the page read whole, the picture
+        // (1,000 tokens) refused.
+        let (out, requests) = run(
+            vec![read, calls(&[("look_at_picture", json!({ "picture": "p1" }))]), json!({ "role": "assistant", "content": "I couldn't look at it." })],
+            Some(after_read + 600),
+        )
+        .await;
+        let (reply, chips) = out.expect("an answer");
+        assert_eq!(reply, "I couldn't look at it.");
+        assert_eq!(chips, ["Read wiki.example.com/wiki/Fort_Joy", "Didn't look at a picture: no room left in the model's context"]);
+        assert_eq!(requests.len(), 3);
+        let read_result = requests[1].1["messages"].as_array().unwrap().last().unwrap()["content"].as_str().unwrap().to_string();
+        assert!(!read_result.contains("cut to fit"), "the page read fitted whole");
+        let last = requests[2].1["messages"].as_array().unwrap().last().unwrap().clone();
+        assert_eq!(last["role"], "tool");
+        let told: Value = serde_json::from_str(last["content"].as_str().unwrap()).unwrap();
+        assert_eq!(told["error"], crate::chat::budget::NO_ROOM_TO_LOOK);
+        assert!(!crate::snip::turn::has_images(&requests[2].1), "no picture went");
     }
 }
