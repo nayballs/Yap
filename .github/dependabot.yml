@@ -1,0 +1,63 @@
+# Weekly update PRs for what Yap is built from; CI and the E2E workflow test
+# each one. The downloads Yap pins in its own code (the on-device engine, the
+# speaker engine, eSpeak NG…) are watched by .github/workflows/pins.yml.
+version: 2
+updates:
+  - package-ecosystem: cargo
+    directory: /src-tauri
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 5
+    groups:
+      # Minor and patch bumps in one PR a week.
+      rust-minor:
+        update-types: [minor, patch]
+    ignore:
+      # Held on 2.4.x: 2.5+ needs tauri 2.12 (Cargo.toml).
+      - dependency-name: tauri-plugin-single-instance
+        update-types: [version-update:semver-minor, version-update:semver-major]
+      - dependency-name: tauri-plugin-deep-link
+        update-types: [version-update:semver-minor, version-update:semver-major]
+      # Pinned to the exact ONNX Runtime transcribe-rs links (one ort-sys).
+      - dependency-name: ort
+      # Vendored with Yap's DirectML fixes (vendor/transcribe-rs/YAP.md).
+      - dependency-name: transcribe-rs
+      # Move in step with the windows crate tauri / wry use.
+      - dependency-name: windows
+        update-types: [version-update:semver-minor, version-update:semver-major]
+      - dependency-name: webview2-com
+        update-types: [version-update:semver-minor, version-update:semver-major]
+
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 5
+    groups:
+      tiptap:
+        patterns: ["@tiptap/*"]
+      fonts:
+        patterns: ["@fontsource/*", "@fontsource-variable/*"]
+      npm-minor:
+        update-types: [minor, patch]
+
+  - package-ecosystem: npm
+    directory: /cloud
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 3
+    groups:
+      cloud-minor:
+        update-types: [minor, patch]
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    groups:
+      actions:
+        patterns: ["*"]

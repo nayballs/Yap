@@ -398,7 +398,9 @@ Accounts in debug builds: `cd cloud && npm run dev` (wrangler dev on :8787; see 
 --release -- -D warnings` (debug-only code is dead in release: gate it with
 `#[cfg(debug_assertions)]`). ⚠ Zero-warnings ratchet on
 the **latest stable** toolchain — keep local Rust current (`rustup update`).
-`.github/workflows/e2e.yml` runs the e2e suite on the same triggers.
+`.github/workflows/e2e.yml` runs the e2e suite on the same triggers. Dependabot opens weekly
+update PRs; `pins.yml` keeps an issue open while a download pinned in the code is behind
+upstream (`npm run pins:check`; build-and-test.md "Keeping what Yap is built from current").
 
 **Tests:**
 - **Say in bold whether the maintainer can use the PC** whenever a big run starts or ends: **Hands off the keyboard (about N min)** for robot tests, which take the keyboard and focus; **You can use the PC** for the UI suite, builds and agent batches, adding that it may feel slower. Repeat it when it changes, and say plainly when it's all clear.
