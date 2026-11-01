@@ -40,7 +40,10 @@
     display: inline-flex;
     align-items: center;
     gap: 9px;
-    max-width: 300px;
+    /* Never wider than the thread: with the chat list and the panel both
+       open its column is 300 px, and a pill as wide made it scroll sideways. */
+    box-sizing: border-box;
+    max-width: min(300px, 100%);
     height: 58px;
     padding: 4px 12px 4px 4px;
     border: 1px solid var(--yap-border-subtle);
