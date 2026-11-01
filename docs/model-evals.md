@@ -76,7 +76,8 @@ old on the releases feed), `b12345` (that build), or a folder holding a `llama-s
 (its build from `--version`, NVIDIA's runtime beside it). A llama.cpp build not on disk is
 downloaded into `<models-dir>/engine/` (each file checked against GitHub's SHA-256) and run
 from there. `--engine-variant cuda13|cuda12|vulkan|cpu` picks the build (default: what Yap
-installs first here: Vulkan on a card, the processor's without one). So a model that needs
+installs first here: CUDA on an NVIDIA card, Vulkan on another, the processor's without one —
+a run is in test mode, whose card is the suite's NVIDIA stand-in, so name it on another PC). So a model that needs
 a newer llama.cpp than llamafile's b10441 (Spark-X2.6's `spark2_5`: b10828+) can be
 evaluated with `--engine latest`. `--server-arg` is `--llamafile-arg`'s other name.
 `--llamafile-arg` adds arguments after those, and a later flag wins: `--llamafile-arg=--cache-ram
@@ -3461,10 +3462,21 @@ Yap reads — `offloaded 34/34 layers`, the buffer sizes, `n_ctx` — unchanged)
 very first request after a driver install compiled its shaders (4.4 s once; 0.4 s from then
 on, the driver keeps them).
 
-The maintainer's call (1 Nov): ~100 tokens/s for the 4B is fine, so the Vulkan build — 37 MB
-against CUDA's ~165 MB zip + ~420 MB runtime — is what Yap installs and keeps on this card;
-CUDA is fetched only where Vulkan falls under 100 tokens/s, and kept only when 25 % faster
-(`trial::choose`). The trial itself (`engine/trial.rs`, the ignored `real_trial_of_a_build`
-on a scratch data folder): Vulkan started in 2.1 s, answered, made the tool call, read the
-picture with the projector, 159 tokens/s, 11.6 s in all; CUDA (only Yap's runtime on the
-PATH) 193 tokens/s with MTP, 7.1 s.
+The maintainer's call (1 Nov): on an NVIDIA card **CUDA is the build to use** — a dictation's
+cleanup matters most, and CUDA's 132 ms beats Vulkan's 200 and llamafile's 156 — so Yap
+measures CUDA and Vulkan and keeps CUDA when it's at least as fast (`trial::choose`), a first
+install on NVIDIA gets the CUDA floor (~590 MB with NVIDIA's runtime), and Vulkan is for AMD
+and Intel cards and the fallback when CUDA won't start. (An earlier rule the same day kept
+Vulkan at 100 tokens/s and fetched CUDA only below it; superseded.) The trial itself
+(`engine/trial.rs`, the ignored `real_trial_of_a_build` on a scratch data folder): Vulkan
+started in 2.1 s, answered, made the tool call, read the picture with the projector, 159
+tokens/s, 11.6 s in all; CUDA (only Yap's runtime on the PATH) 193 tokens/s with MTP, 7.1 s —
+CUDA kept.
+
+After the change, the CUDA build as Yap downloads it (`--engine b11982 --engine-variant
+cuda13`: the zip and NVIDIA's runtime through `engine::install`, the runtime in
+`cudart-738f8c251ac2/` put first on the server's PATH, the CUDA Toolkit taken off the PATH so
+only Yap's runtime could serve): everyday 5/7, generation 271 tokens/s (MTP, 77 % of drafts
+kept), prompt 5,402 tokens/s, load 2.0 s, warm-up 0.47 s; `--cleanup` back to back 133 ms
+median (p90 156), after a Chat turn 138, after a long Chat turn 449; the model all on the card
+(34/34 layers, `CUDA0`).

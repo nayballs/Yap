@@ -249,7 +249,9 @@ pub fn curated_by_id(id: &str) -> Option<&'static CuratedLlm> {
 /// **Ensure an engine is on disk**: when there's none (no llama.cpp build,
 /// no llamafile), the **floor** llama.cpp build for this PC
 /// ([`super::engine::FLOOR`], its files pinned and SHA-256 checked,
-/// unpacked into `llm/engine/<build>-<variant>/`, the marker written). An
+/// unpacked into `llm/engine/<build>-<variant>/`, the marker written, the
+/// build unproven until its first start — one that fails falls back
+/// through the floor's other builds, `engine::updater::rescue`). An
 /// engine already there stays: llamafile moves to llama.cpp, and a build to
 /// a newer one, through the engine's updater ([`super::engine::updater`]).
 /// `model`: the curated id the install is for (its progress names it);
@@ -258,7 +260,9 @@ pub(crate) async fn ensure_runtime(model: &str, app: Option<&AppHandle>, ticket:
     tokio::fs::create_dir_all(llm_dir())
         .await
         .map_err(|e| format!("failed to create llm dir: {}", e))?;
-    if super::engine::active().is_some() {
+    // An engine here, one being set up after the first didn't start, or
+    // none of them runs here (a start says so plainly): nothing to download.
+    if super::engine_installed() {
         return Ok(());
     }
     let edir = super::engine::engine_dir();
@@ -267,7 +271,12 @@ pub(crate) async fn ensure_runtime(model: &str, app: Option<&AppHandle>, ticket:
     if super::engine::active().is_some() {
         return Ok(()); // the other Yap just did
     }
-    let variant = super::engine::primary_variant();
+    // The floor's first build for this PC not refused here (CUDA on an
+    // NVIDIA card, Vulkan on another, the processor's without one).
+    let order = super::engine::floor_order(&super::engine::candidates(&super::engine::hardware()));
+    let Some(variant) = super::engine::next_floor(&super::engine::read_marker(&edir), &order) else {
+        return Ok(());
+    };
     let (zip, cudart) = super::engine::floor_assets(variant);
     // A test run downloads its stand-ins (`YAP_LLM_SOURCES`: "engine",
     // "cudart"), never the real thing.
@@ -279,9 +288,11 @@ pub(crate) async fn ensure_runtime(model: &str, app: Option<&AppHandle>, ticket:
     let cudart = cudart.map(|c| stand_in("cudart", c));
     let report = |p: crate::shell::download::Progress| emit_progress(app, "runtime", model, p);
     let installed = super::engine::install(&edir, super::engine::FLOOR, variant, &zip, cudart.as_ref(), &report, ticket).await?;
+    // Unproven until it has started once: a first start that fails, with
+    // nothing to go back to, falls back to the floor's next build.
     super::engine::update_marker(&edir, |m| {
         m.current = Some(installed.clone());
-        m.unproven = false;
+        m.unproven = true;
     })
     .map_err(|e| format!("Couldn't write the engine's marker: {e}"))?;
     tracing::info!(build = %installed.build, variant = installed.variant.id(), "On-device engine: the floor build is installed");

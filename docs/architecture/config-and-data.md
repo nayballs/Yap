@@ -440,11 +440,16 @@
   paused, checked_at, latest, updated_at, event, pick}` — the build that
   runs (`{build, variant, sha256, cudart?, device?}`), the one before
   (kept for Go back), switched-to-not-yet-started, a build to try again
-  after a failed first start, builds never taken again (`b11990-cuda13`),
-  failed sessions per build, MTP failures per build and model, **"Keep the
+  after a failed first start, builds never taken again (`b11990-cuda13`; the
+  floor's own, `b11982-cuda13`, when a fresh install's floor didn't start or
+  its trial failed — so the fallback never downloads one again at the next
+  launch; Try again, or a new graphics driver, forgets those), failed
+  sessions per build, MTP failures per build and model, **"Keep the
   engine up to date" off** (`paused`: here, not config.json, so an older
   Yap's save never drops it), the last look and the newest build it could
-  take, the last update, what happened last (Settings' line), and CUDA or
+  take, the last update, what happened last (Settings' line: an update, a
+  refusal, a way back, the floor's fallback — `fallback {variant, tried}` —
+  or none running here — `noEngine {tried, print}`), and CUDA or
   Vulkan as measured on this card and driver. Kept: the current build, the
   one before and a retry; any other build's folder, and a CUDA runtime none
   of them uses, goes at launch and after an update (`engine::tidy`; one

@@ -120,16 +120,23 @@ pub fn forget_failure() {
 /// notice policy keeps it to one in ten minutes too ("aiModelFailed").
 /// Still loading after [`LOAD_WAIT`]: nothing said (it's on its way).
 pub fn say_failed_once(app: &AppHandle) {
-    if recent_failure().is_none() || FAILURE_SAID.swap(true, Ordering::SeqCst) {
+    let Some(why) = recent_failure() else { return };
+    if FAILURE_SAID.swap(true, Ordering::SeqCst) {
         return;
     }
+    // None of the engine's builds runs on this PC: said plainly.
+    let body = if why == super::engine::NO_ENGINE {
+        "None of the on-device engine's builds would start on this PC, so your words went in as you said them. Settings → Language Models has Try again.".to_string()
+    } else {
+        "Your words went in as you said them. Settings → Language Models has the model.".to_string()
+    };
     crate::notices::alert::show_soon(
         app,
         crate::notices::alert::Alert {
             kind: "aiModelFailed",
             icon: "settings",
             title: "The on-device AI model didn't start".to_string(),
-            body: "Your words went in as you said them. Settings → Language Models has the model.".to_string(),
+            body,
             action: Some(crate::notices::alert::Action { id: crate::notices::alert::OPEN_AI_SETTINGS, label: "Open settings" }),
             timeout_ms: 10_000,
         },

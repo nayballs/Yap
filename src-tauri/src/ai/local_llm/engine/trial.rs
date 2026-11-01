@@ -35,14 +35,11 @@ use crate::privacy::net::Recorded as _;
 pub const MIN_SPEED: f64 = 0.85;
 
 /// Generation the maintainer called fine for the 4B on an RTX 5070 Ti
-/// (2026-11-01: "about 100 tok/s is fine", where CUDA gives ~175): a Vulkan
-/// build this fast is kept over CUDA ([`choose`]), and a move from CUDA to
-/// Vulkan passes at it even when relatively slower ([`verdict`]).
+/// (2026-11-01, "about 100 tok/s is fine"): when the CUDA build won't
+/// start or pass here, a move from CUDA (llamafile's, or a CUDA build's) to
+/// the Vulkan build passes at it even when relatively slower ([`verdict`]):
+/// Vulkan is the fallback.
 pub const GOOD_ENOUGH_TPS: f64 = 100.0;
-
-/// Below [`GOOD_ENOUGH_TPS`], CUDA is taken over Vulkan only when it's at
-/// least this much faster: worth its ~590 MB download.
-pub const CUDA_WORTH: f64 = 1.25;
 /// Generation tokens a speed run asks for.
 const SPEED_TOKENS: u32 = 128;
 /// How long a build may take to load (a first run under an antivirus).
@@ -64,6 +61,10 @@ pub struct Trial {
     pub load_ms: u64,
     /// It gave way to the person (not a verdict on the build).
     pub aborted: bool,
+    /// It didn't start, and its log blames the model ([`super::log_blames_model`]):
+    /// not a verdict on the build either.
+    #[serde(default)]
+    pub model_failed: bool,
 }
 
 /// A trial's outcome for the new build.
@@ -106,23 +107,25 @@ pub fn verdict(current: Option<&Trial>, new: &Trial, to_vulkan: bool) -> Verdict
 }
 
 /// **Which of one build's variants that passed** (with their generation
-/// speeds): Vulkan when it's [`GOOD_ENOUGH_TPS`] or CUDA isn't
-/// [`CUDA_WORTH`] faster, else CUDA; any other set, the fastest. Pure.
+/// speeds): CUDA when it's at least as fast as Vulkan (on an NVIDIA card it
+/// is: 269 against 150 tokens/s for the 4B on an RTX 5070 Ti, and a
+/// dictation's cleanup 132 against 200 ms); any other set, the fastest.
+/// Pure.
 pub fn choose(passed: &[(Variant, f64)]) -> Option<Variant> {
     let vulkan = passed.iter().find(|(v, _)| *v == Variant::Vulkan).map(|(_, t)| *t);
     let cuda = passed.iter().filter(|(v, _)| v.cuda()).max_by(|a, b| a.1.total_cmp(&b.1)).copied();
     match (vulkan, cuda) {
-        (Some(vk), Some((c, ct))) => Some(if vk >= GOOD_ENOUGH_TPS || ct < vk * CUDA_WORTH { Variant::Vulkan } else { c }),
+        (Some(vk), Some((c, ct))) => Some(if ct >= vk { c } else { Variant::Vulkan }),
         _ => passed.iter().max_by(|a, b| a.1.total_cmp(&b.1)).map(|(v, _)| *v),
     }
 }
 
-/// After trying `tried` (in order), is the next variant worth fetching and
-/// trying? Only after Vulkan, when it didn't pass or isn't
-/// [`GOOD_ENOUGH_TPS`]: CUDA's download is for a card where Vulkan falls
-/// short. Pure.
-pub fn another_needed(last: Variant, passed: bool, tps: Option<f64>) -> bool {
-    last == Variant::Vulkan && (!passed || tps.is_none_or(|t| t < GOOD_ENOUGH_TPS))
+/// A build the floor falls back to, with nothing running to compare it
+/// with (`updater::rescue`): it started and answered. Its tools and the
+/// projector are the model's, not the engine's, with no other to compare.
+/// Pure.
+pub fn rescue_ok(t: &Trial) -> bool {
+    t.started && t.answered && !t.aborted
 }
 
 /// A tool-call answer: the tool named, its arguments JSON with a city.
@@ -257,6 +260,7 @@ async fn run_inner(engine: &Engine, model: &Path, ctx: u32, vision_on: bool, log
     let plan = crate::ai::local_llm::plan_for(&cfg, model, ctx, engine.runtime());
     let mut t = Trial::default();
     let Some((server, load_ms)) = start(engine, model, ctx, plan, None, log, abort).await? else {
+        t.model_failed = super::log_blames_model(&std::fs::read_to_string(log).unwrap_or_default());
         return Ok(t);
     };
     t.started = true;
@@ -345,14 +349,17 @@ async fn run_inner(engine: &Engine, model: &Path, ctx: u32, vision_on: bool, log
 /// Test mode (debug builds): a scripted trial, nothing run —
 /// `YAP_E2E_ENGINE_TRIAL` = `{"b11980": {"tps": 180}, "b11990": {"fail":
 /// "start"}, "current": {"tps": 170}}` ("start" | "answer" | "tool" |
-/// "vision"); any other build passes at 100 tokens/s.
+/// "vision" | "model"), keyed by build ("b11980") or, for the floor's
+/// fallback, by build and variant ("b11982-cuda12"); any other passes at
+/// 100 tokens/s.
 #[cfg(debug_assertions)]
 pub fn scripted(key: &str) -> Trial {
     let spec: serde_json::Value = std::env::var("YAP_E2E_ENGINE_TRIAL").ok().and_then(|s| serde_json::from_str(&s).ok()).unwrap_or_default();
     let s = &spec[key];
-    let pass = Trial { started: true, answered: true, tool: Some(true), tps: Some(s["tps"].as_f64().unwrap_or(100.0)), vision: None, load_ms: 10, aborted: false };
+    let pass = Trial { started: true, answered: true, tool: Some(true), tps: Some(s["tps"].as_f64().unwrap_or(100.0)), vision: None, load_ms: 10, aborted: false, model_failed: false };
     match s["fail"].as_str() {
         Some("start") => Trial::default(),
+        Some("model") => Trial { model_failed: true, ..Trial::default() },
         Some("answer") => Trial { answered: false, tool: None, tps: None, ..pass },
         Some("tool") => Trial { tool: Some(false), ..pass },
         Some("vision") => Trial { vision: Some(false), ..pass },
@@ -365,7 +372,7 @@ mod tests {
     use super::*;
 
     fn ok(tps: f64) -> Trial {
-        Trial { started: true, answered: true, tool: Some(true), tps: Some(tps), vision: None, load_ms: 1, aborted: false }
+        Trial { started: true, answered: true, tool: Some(true), tps: Some(tps), vision: None, load_ms: 1, aborted: false, model_failed: false }
     }
 
     #[test]
@@ -393,25 +400,27 @@ mod tests {
     }
 
     #[test]
-    fn vulkan_is_kept_when_it_is_good_enough_and_cuda_only_when_clearly_worth_it() {
-        // Moving from CUDA (llamafile) to the Vulkan build: ~100 tokens/s is fine.
-        let cuda = ok(172.0);
-        assert!(matches!(verdict(Some(&cuda), &ok(130.0), true), Verdict::Pass { .. }), "76% but over 100 tokens/s");
-        assert!(matches!(verdict(Some(&cuda), &ok(130.0), false), Verdict::Fail { why: Why::Slower, .. }), "the same move inside a build family: relative");
-        assert!(matches!(verdict(Some(&cuda), &ok(90.0), true), Verdict::Fail { why: Why::Slower, .. }), "under 100 and much slower");
-        assert!(matches!(verdict(Some(&ok(100.0)), &ok(90.0), true), Verdict::Pass { .. }), "under 100 but within the relative bar");
-        // Which variant: Vulkan at 100+; under it, CUDA only when 25 % faster.
-        assert_eq!(choose(&[(Variant::Vulkan, 152.0), (Variant::Cuda13, 176.0)]), Some(Variant::Vulkan));
-        assert_eq!(choose(&[(Variant::Vulkan, 60.0), (Variant::Cuda13, 90.0)]), Some(Variant::Cuda13));
-        assert_eq!(choose(&[(Variant::Vulkan, 80.0), (Variant::Cuda13, 90.0)]), Some(Variant::Vulkan), "CUDA not worth its download");
+    fn cuda_is_kept_when_at_least_as_fast_and_vulkan_is_the_fallback() {
+        // CUDA against Vulkan on an NVIDIA card: CUDA when it's at least as fast.
+        assert_eq!(choose(&[(Variant::Cuda13, 269.0), (Variant::Vulkan, 150.0)]), Some(Variant::Cuda13), "the RTX 5070 Ti's numbers");
+        assert_eq!(choose(&[(Variant::Cuda13, 150.0), (Variant::Vulkan, 150.0)]), Some(Variant::Cuda13), "as fast: CUDA");
+        assert_eq!(choose(&[(Variant::Cuda12, 90.0), (Variant::Vulkan, 120.0)]), Some(Variant::Vulkan), "an odd card where Vulkan is faster");
+        assert_eq!(choose(&[(Variant::Vulkan, 152.0)]), Some(Variant::Vulkan), "CUDA didn't pass: Vulkan");
         assert_eq!(choose(&[(Variant::Cuda12, 40.0)]), Some(Variant::Cuda12));
         assert_eq!(choose(&[(Variant::Cpu, 25.0)]), Some(Variant::Cpu));
         assert_eq!(choose(&[]), None);
-        // CUDA is fetched only after a Vulkan that falls short.
-        assert!(!another_needed(Variant::Vulkan, true, Some(152.0)));
-        assert!(another_needed(Variant::Vulkan, true, Some(70.0)));
-        assert!(another_needed(Variant::Vulkan, false, None));
-        assert!(!another_needed(Variant::Cuda13, false, None), "nothing after CUDA");
+        // When CUDA won't pass, a move from CUDA to Vulkan passes at ~100 tokens/s.
+        let cuda = ok(225.0);
+        assert!(matches!(verdict(Some(&cuda), &ok(150.0), true), Verdict::Pass { .. }), "67% but over 100 tokens/s");
+        assert!(matches!(verdict(Some(&cuda), &ok(150.0), false), Verdict::Fail { why: Why::Slower, .. }), "the same move inside a build family: relative");
+        assert!(matches!(verdict(Some(&cuda), &ok(90.0), true), Verdict::Fail { why: Why::Slower, .. }), "under 100 and much slower");
+        assert!(matches!(verdict(Some(&ok(100.0)), &ok(90.0), true), Verdict::Pass { .. }), "under 100 but within the relative bar");
+        // The floor's fallback: started and answered is enough (no engine to compare with).
+        assert!(rescue_ok(&ok(20.0)));
+        assert!(rescue_ok(&Trial { tool: Some(false), ..ok(20.0) }), "tools are the model's");
+        assert!(!rescue_ok(&Trial::default()));
+        assert!(!rescue_ok(&Trial { answered: false, ..ok(20.0) }));
+        assert!(!rescue_ok(&Trial { aborted: true, ..ok(20.0) }));
     }
 
     /// The real thing: a trial of a llama.cpp build on this PC

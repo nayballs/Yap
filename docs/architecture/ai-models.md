@@ -742,25 +742,60 @@ The language-model side: the OpenAI-compatible client and its prompts, the on-de
   config.json (an older Yap's save would drop a new field), and llamafile's
   files never touched. **Which build for a PC** (`candidates`, `Hardware` from
   `gpu::this_pc` + `nvidia-smi --query-gpu=compute_cap,driver_version`):
-  **Vulkan first** on any card with memory of its own (3 GiB+; the universal
-  build, 37 MB); on an NVIDIA card CUDA after it (`cuda_flavour`: CUDA 13 from a
-  Turing card and driver 580, or driver 590+ with the card unknown; else CUDA
-  12 from driver 528; ~165 MB + NVIDIA's ~420 MB runtime) — fetched and tried
-  **only when Vulkan falls short** (under `trial::GOOD_ENOUGH_TPS` = 100
-  tokens/s, `another_needed`) and kept only when **25 % faster**
-  (`trial::choose`, `CUDA_WORTH`; 2026-11-01, the maintainer: ~100 tokens/s for
-  the 4B is fine, so CUDA must clearly be worth its download); the processor's
-  build without a card or with integrated graphics. The choice is kept per card
+  on an **NVIDIA card CUDA** (`cuda_flavour`: CUDA 13 from a Turing card and
+  driver 580, or driver 590+ with the card unknown; else CUDA 12 from driver
+  528; ~165 MB + NVIDIA's ~420 MB runtime, its size said in Settings while it
+  downloads) **and Vulkan, both measured, CUDA kept when it's at least as
+  fast** (`trial::choose`; 2026-11-01, the maintainer: on the RTX 5070 Ti CUDA
+  generates 269 tokens/s to Vulkan's 150 and cleans up a dictation in 132 ms to
+  Vulkan's 200 — llamafile's was 156 — and dictation comes first); **Vulkan**
+  on any other card with memory of its own (3 GiB+; 37 MB), and the fallback
+  when CUDA won't start or pass (a move from CUDA to Vulkan passes the trial at
+  `trial::GOOD_ENOUGH_TPS`, 100 tokens/s); the processor's build without a
+  card or with integrated graphics. The choice is kept per card
   and driver (`Pick`, `stt_speed::pc_print`; a new driver tries again,
   `to_try`). A Vulkan build that sees integrated graphics beside the card is
   pinned to the card (`--list-devices`, `parse_devices`, `device_for`: by
   DXGI's name — llama.cpp would split the model across both). **The floor**
   (`FLOOR` = **b11982**, 29 Oct 2026, every variant's files pinned with GitHub's
   SHA-256, `floor_assets`): what a first install downloads
-  (`models::ensure_runtime`: no engine at all → the floor for this PC, its
-  progress the "runtime" stage, "Downloading the llama.cpp engine") and what
+  (`models::ensure_runtime`: no engine at all → the floor's first build for this
+  PC not refused here, CUDA on NVIDIA, its progress the "runtime" stage,
+  "Downloading the llama.cpp engine"; unproven until its first start) and what
   Yap runs offline; verified on the RTX 5070 Ti with Qwen3.5-4B (model-evals.md
-  "llama.cpp's own builds"). **The feed** (`feed.rs`, `Purpose::EngineCheck`):
+  "llama.cpp's own builds"). **A fresh install's floor that won't start** (the
+  gap closed 2026-11-01: an old driver, an odd card), with nothing to go back
+  to — no build before it, no llamafile: its first start fails twice
+  (`start_with` → `engine_way_back`, never held to once a session), so it's
+  **refused** at once (`first_start_failed`; unless its log blames the model —
+  `log_blames_model`: "error loading model", "unknown model architecture" — then
+  nothing is refused) and **the floor's next build is set up**
+  (`updater::after_failed_start` → `rescue`; the start says "…setting up another
+  build of it. Try again in a minute.", `RESCUING_NOW`): in `floor_order` —
+  **CUDA → Vulkan → the processor's on NVIDIA, Vulkan → the processor's
+  elsewhere** — each downloaded and checked like any build, tried out of sight
+  with the person's model under the start lock (passing = it starts and answers,
+  `trial::rescue_ok`: with nothing to compare against, its tools and projector
+  are the model's), kept (current, unproven, this card's pick; Settings: "CUDA
+  didn't start here, so the engine runs on Vulkan", `Event::Fallback`) or
+  refused (`engine.json`, so it's never downloaded again at the next launch)
+  and the next tried. A download that fails stops it, refusing nothing (tried
+  again at the next failed start or launch: `rescue_if_due`). **None runs**
+  (`none_runs`: every one of the floor's builds for this PC refused, nothing
+  current, no llamafile): said plainly — every start says `NO_ENGINE` ("The
+  on-device engine won't start on this PC: Yap tried every build of llama.cpp
+  it has for it. Settings → Language Models has Try again."), so do Load now,
+  Chat's "didn't start" and the dictation's one notice (`on_demand::
+  say_failed_once`), and Settings' engine line ("Engine: none runs on this PC",
+  "None of the engine's builds started on this PC (CUDA, Vulkan and the
+  processor's build tried). Updating the graphics driver may help; then Try
+  again.", `Event::NoEngine` with the adapters' print); the model still counts
+  as installed (`engine_installed`), so nothing offers a download again. **Try
+  again** (Check now's place then; `retry_floor`) forgets the floor's refusals
+  and goes through them again; a new graphics driver does at launch
+  (`new_driver_retry`). A build that started here before and fails later isn't
+  refused this way (a passing fault — a game on the card — mustn't move a PC to
+  the processor for good). **The feed** (`feed.rs`, `Purpose::EngineCheck`):
   GitHub's releases API, 50 a page newest first until past the cooling-off;
   `b<N>` tags only (llama.cpp tags `v0.8.0` too), never drafts, every asset with
   its `sha256:` digest and uploaded whole, plain names (`parse_page`); a
@@ -805,12 +840,13 @@ The language-model side: the OpenAI-compatible client and its prompts, the on-de
   fails** (`local_llm::start_with` → `engine_way_back`, unit-tested): the build
   before (or llamafile) goes back in and starts, the failure counted, the new
   one kept as `retry` and put back at the next launch (`retry_at_launch`,
-  `tidy_at_launch`) until `REFUSE_AFTER` (3) sessions; nowhere to go back to,
-  or the one before won't start either: the new one stays, uncounted. **At
-  launch** (`tidy_at_launch`): the retry, and folders no build kept needs
-  (`tidy`). **Settings** (Language Models → the on-device models,
-  `LocalEngine.svelte`): "Engine: llama.cpp b11982 (Vulkan) · up to date" (or
-  "checking…", "downloading b11990 · 40%", "b11990 is ready to try · waiting
+  `tidy_at_launch`) until `REFUSE_AFTER` (3) sessions; the one before won't
+  start either: the new one stays, uncounted; nowhere to go back to: the floor's
+  fallback above. **At launch** (`tidy_at_launch`, then `rescue_if_due`): the
+  retry, a new driver's retry, folders no build kept needs (`tidy`), and a
+  fallback cut short carried on. **Settings** (Language Models → the on-device models,
+  `LocalEngine.svelte`): "Engine: llama.cpp b11982 (CUDA) · up to date" (or
+  "checking…", "downloading b11990 (590 MB) · 40%", "b11990 is ready to try · waiting
   until the model isn't in use", "trying b11990 with your model…"), **Check
   now**, "Keep the engine up to date" (on), what happened last (`event_line`:
   "Updated to b11980 · faster on your card", "b11990 didn't start here: staying
@@ -826,9 +862,14 @@ The language-model side: the OpenAI-compatible client and its prompts, the on-de
   (nothing runs), the background look only with `YAP_E2E_ENGINE_CHECK_MS`; the
   floor's stand-ins in `YAP_LLM_SOURCES` ("engine", "cudart"). Unit-tested: build
   tags and order, the variants and their files, CUDA's flavour, the cooling-off,
-  digests, the unpacking, device pinning, the verdict and the choice, the
-  decisions, switch / roll-back / put-back / go-back / retry, Settings' words;
-  e2e `local-engine.spec.js`.
+  digests, the unpacking, device pinning, the verdict and the choice (CUDA when
+  at least as fast), the decisions, switch / roll-back / put-back / go-back /
+  retry, the floor's fallback order and refusals (`first_start_failed`,
+  `next_floor`, `none_runs`, `new_driver_retry`, a log that blames the model,
+  never once a session), Settings' words; e2e `local-engine.spec.js` (Check
+  now, Go back, a refused build) and `local-engine-floor.spec.js` (a fresh
+  install's CUDA build that won't start → Vulkan's trial fails → the
+  processor's runs; then none runs, said plainly, and Try again).
 - **`ai/local_llm/on_demand.rs`** — **the on-device model loaded when it's
   needed, its memory freed when it's idle** (2026-10-25; before, it started
   at launch whenever cleanup was routed to it: ~10 GB in use as soon as Yap

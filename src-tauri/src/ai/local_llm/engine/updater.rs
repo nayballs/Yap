@@ -11,9 +11,9 @@
 //!    move from llamafile waits for nothing ([`take_due`]);
 //! 3. **downloaded** in the background (`shell/download.rs`: resume, the
 //!    disk checked first), each file checked against GitHub's SHA-256 — a
-//!    variant at a time, Vulkan first; on an NVIDIA card CUDA only when
-//!    Vulkan falls short there ([`trial::another_needed`]), the first time
-//!    and after a new driver ([`to_try`]);
+//!    variant at a time; on an NVIDIA card CUDA (with NVIDIA's runtime,
+//!    ~590 MB) and Vulkan both, the first time and after a new driver
+//!    ([`to_try`]), then only the one kept;
 //! 4. **tried** ([`trial`]) at an idle moment — no dictation, no request
 //!    to the model under way, no meeting recording or being summarised,
 //!    the model not loaded or unused for 5 minutes — the engine running now
@@ -21,13 +21,23 @@
 //!    restart locks (nothing else starts the model meanwhile; one that's
 //!    asked for makes the trial give way and wait for the next idle
 //!    moment);
-//! 5. **switched to** when it passes ([`decide`]: Vulkan when it's good
-//!    enough, CUDA when clearly faster, `trial::choose`; the build before
-//!    kept for going back, the new one unproven until the sidecar starts on
-//!    it — a failed first start rolls back, `local_llm::start_with`), else
-//!    **refused** (never tried again) and Settings says why. A model that
-//!    was loaded is loaded again, then moved to the new engine once nothing
-//!    uses it.
+//! 5. **switched to** when it passes ([`decide`]: CUDA when it's at least
+//!    as fast as Vulkan, `trial::choose`; the build before kept for going
+//!    back, the new one unproven until the sidecar starts on it — a failed
+//!    first start rolls back, `local_llm::start_with`), else **refused**
+//!    (never tried again) and Settings says why. A model that was loaded is
+//!    loaded again, then moved to the new engine once nothing uses it.
+//!
+//! **The floor's fallback** ([`rescue`]): a build that never started here
+//! with nothing to go back to — a fresh install's floor, no llamafile — is
+//! refused (`local_llm::start_with`), and the floor's next build for this
+//! PC is downloaded, checked, tried out of sight and kept if it starts and
+//! answers (`engine::floor_order`: CUDA → Vulkan → the processor's on
+//! NVIDIA, Vulkan → the processor's elsewhere); each one that fails is
+//! refused in `engine.json`, so it isn't downloaded again at every launch.
+//! When none starts, Settings and every start say so plainly
+//! (`engine::NO_ENGINE`), with Try again ([`retry_floor`]); a new graphics
+//! driver tries them again by itself (`engine::new_driver_retry`).
 //!
 //! One update at a time across Yaps (`engine/engine-update.lock`). A test
 //! run reads its stand-in feed (`YAP_E2E_ENGINE_FEED`) only when asked
@@ -92,8 +102,8 @@ fn verdict_on(current: &Trial, current_cuda: bool, i: &Installed, t: &Trial) -> 
 }
 
 /// **What the trials come to**: of the variants that passed against the
-/// current engine, the one `trial::choose` keeps (Vulkan when it's good
-/// enough, CUDA when clearly faster) — kept as this card and driver's pick
+/// current engine, the one `trial::choose` keeps (CUDA when it's at least
+/// as fast as Vulkan, else Vulkan) — kept as this card and driver's pick
 /// (`print`) when the PC has a choice (`choice`) — else the build refused
 /// for every variant tried, with the first's reason. Pure.
 pub fn decide(current: &Trial, current_cuda: bool, tried: &[(Installed, Trial)], choice: bool, print: &str, now: u64) -> Option<Decision> {
@@ -143,6 +153,18 @@ pub fn candidate() -> Option<Build> {
 
 pub fn last_error() -> Option<String> {
     LAST_ERROR.lock().ok().and_then(|g| g.clone())
+}
+
+/// The download under way's size in MB (0: none), for Settings' line.
+static DOWNLOAD_MB: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+pub fn download_mb() -> Option<u64> {
+    let mb = DOWNLOAD_MB.load(Ordering::SeqCst);
+    (mb > 0 && phase().0 == "downloading").then_some(mb)
+}
+
+fn set_download_mb(bytes: u64) {
+    DOWNLOAD_MB.store(bytes.div_ceil(1_048_576), Ordering::SeqCst);
 }
 
 /// Settings follows along (`yap-local-engine`, the engine's status).
@@ -212,6 +234,11 @@ pub fn spawn(app: AppHandle) {
 /// it on `yap-local-engine`.
 pub fn check_now(app: &AppHandle) {
     let _ = APP.set(app.clone());
+    // None of the floor's builds started here: Check now is Try again.
+    if super::none_runs_here() {
+        retry_floor();
+        return;
+    }
     let app = app.clone();
     tauri::async_runtime::spawn(async move {
         match look(&app, true).await {
@@ -287,20 +314,21 @@ async fn look_inner(app: &AppHandle, asked: bool) -> Result<&'static str, String
     }
     tracing::info!(build = %release.build, from = %active.label(), variants = need.len(), "On-device engine: a newer build to try");
 
-    // A variant at a time: downloaded (under the lock), then tried at an
-    // idle moment (the lock let go meanwhile: another Yap's launch tidy
-    // isn't held up for an evening); CUDA only after a Vulkan that falls
-    // short.
+    // A variant at a time — on an NVIDIA card CUDA and Vulkan both, the
+    // first time and after a new driver — downloaded (under the lock), then
+    // tried at an idle moment (the lock let go meanwhile: another Yap's
+    // launch tidy isn't held up for an evening).
     let current_cuda = active.runtime().cuda() && hw.vendor == Some(NVIDIA);
     let variants: Vec<Variant> = need.iter().copied().filter(|v| !m.is_refused(&format!("{}-{}", release.build, v.id()))).collect();
     let mut cur_trial: Option<Trial> = None;
     let mut tried: Vec<(Installed, Trial)> = Vec::new();
     let mut failed: Option<String> = None;
-    for (n, v) in variants.iter().enumerate() {
+    for v in &variants {
         let Some((zip, rt)) = feed::pick_assets(&release, *v) else { continue };
         let installed = {
             let _lock = UpgradeLock::take_named(&edir, LOCK).ok_or("another Yap is updating the engine")?;
             let ticket = crate::shell::download::Ticket::begin(CANCEL_ID).ok_or("The engine is already downloading")?;
+            set_download_mb(zip.size + rt.as_ref().map(|r| r.size).unwrap_or(0));
             set_phase("downloading", 0);
             let report = |p: crate::shell::download::Progress| set_phase("downloading", p.percent());
             install(&edir, release.build, *v, &zip, rt.as_ref(), &report, &ticket).await
@@ -325,14 +353,8 @@ async fn look_inner(app: &AppHandle, asked: bool) -> Result<&'static str, String
             tracing::info!("On-device engine: the trial gave way to the model being used; trying again at the next idle moment");
             tokio::time::sleep(Duration::from_secs(30)).await;
         };
-        let passed = matches!(verdict_on(&cur, current_cuda, &installed, &t), Verdict::Pass { .. });
-        let tps = t.tps;
         cur_trial = Some(cur);
         tried.push((installed, t));
-        if !(n + 1 < variants.len() && trial::another_needed(*v, passed, tps)) {
-            break;
-        }
-        tracing::info!(build = %release.build, tps = ?tps.map(|v| v.round()), "On-device engine: Vulkan falls short here; trying CUDA");
     }
     let Some(cur) = cur_trial else {
         return Err(failed.unwrap_or_else(|| "nothing to download for this PC".into()));
@@ -460,6 +482,192 @@ async fn trial_round(app: &AppHandle, current: &Engine, cur: Option<&Trial>, new
     (!cur.aborted && !t.aborted).then_some((cur, t))
 }
 
+// ---- the floor's fallback ----------------------------------------------------------------
+
+/// The floor's fallback under way ([`rescue`]).
+static RESCUING: AtomicBool = AtomicBool::new(false);
+
+/// Is another of the floor's builds being set up (a start meanwhile says
+/// so, and the model counts as installed)?
+pub fn rescuing() -> bool {
+    RESCUING.load(Ordering::SeqCst)
+}
+
+/// What a start says while the fallback sets another build up.
+pub const RESCUING_NOW: &str = "The on-device engine didn't start on this PC, so Yap is setting up another build of it. Try again in a minute.";
+
+/// **After a start that failed** (`local_llm::start_locked`): the plain
+/// word when none of the engine's builds runs here (noted for Settings),
+/// else — nothing current any more, no llamafile: a build that never
+/// started was refused (`engine::first_start_failed`) — the floor's next
+/// build set up in the background. `None`: nothing to add.
+pub fn after_failed_start() -> Option<String> {
+    let llm = llm_dir();
+    if super::active_in(&llm).is_some() || super::llamafile_in(&llm).is_some() {
+        return None;
+    }
+    if super::none_runs_here() {
+        note_none_runs();
+        return Some(super::NO_ENGINE.to_string());
+    }
+    if !engine_dir_in(&llm).join(super::MARKER).is_file() {
+        return None;
+    }
+    spawn_rescue();
+    Some(RESCUING_NOW.to_string())
+}
+
+/// At launch: Yap closed while the fallback was setting a build up, or a
+/// new driver forgot the refusals (`engine::new_driver_retry`): it carries
+/// on.
+pub fn rescue_if_due() {
+    let llm = llm_dir();
+    let due = super::active_in(&llm).is_none()
+        && super::llamafile_in(&llm).is_none()
+        && engine_dir_in(&llm).join(super::MARKER).is_file()
+        && !super::none_runs_here();
+    if due {
+        tracing::info!("On-device engine: nothing runs yet; setting up one of the floor's builds");
+        spawn_rescue();
+    }
+}
+
+/// **Try again** (Settings, when none of the floor's builds started): their
+/// refusals forgotten, the fallback from the first again.
+pub fn retry_floor() {
+    let edir = engine_dir_in(&llm_dir());
+    if super::update_marker(&edir, super::forget_floor_refusals).is_ok() {
+        tracing::info!("On-device engine: trying the floor's builds again");
+        spawn_rescue();
+        changed();
+    }
+}
+
+fn spawn_rescue() {
+    if RESCUING.swap(true, Ordering::SeqCst) {
+        return;
+    }
+    changed();
+    tauri::async_runtime::spawn(async {
+        let what = rescue().await;
+        RESCUING.store(false, Ordering::SeqCst);
+        set_phase("", 0);
+        changed();
+        if let Some(app) = APP.get() {
+            let _ = app.emit("yap-local-llm-changed", serde_json::json!({}));
+        }
+        tracing::info!(what, "On-device engine: the floor's fallback");
+    });
+}
+
+/// "None of the engine's builds started on this PC", for Settings.
+fn note_none_runs() {
+    let edir = engine_dir_in(&llm_dir());
+    let order = super::floor_order(&candidates(&hardware()));
+    let print = crate::dictation::stt_speed::pc_print();
+    let _ = update_marker(&edir, |m| {
+        if !matches!(m.event, Some(super::Event::NoEngine { .. })) {
+            tracing::warn!(tried = order.len(), "On-device engine: none of its builds started on this PC");
+            m.event = Some(super::Event::NoEngine { build: super::FLOOR, tried: order.clone(), print: print.clone(), at: now_secs() });
+        }
+    });
+    changed();
+}
+
+/// **The floor's fallback**: the floor's next build for this PC not refused
+/// ([`super::next_floor`]) downloaded and checked (the stand-ins in a test
+/// run), tried out of sight with the person's model — under the start lock,
+/// so nothing else starts meanwhile — and kept when it starts and answers
+/// (`trial::rescue_ok`: current, unproven until the sidecar starts on it;
+/// this card's pick), else refused and the next one tried. A log that blames
+/// the model stops it, refusing nothing; a download that fails stops it too
+/// (tried again at the next failed start or launch).
+async fn rescue() -> &'static str {
+    let llm = llm_dir();
+    let edir = engine_dir_in(&llm);
+    let Some(_lock) = UpgradeLock::take_named(&edir, LOCK) else { return "another Yap is setting the engine up" };
+    let cfg = crate::config::load();
+    let model = crate::ai::local_llm::active_model_path(&cfg);
+    if !model.is_file() {
+        return "no model to try it with";
+    }
+    let ctx = crate::ai::local_llm::context::context_for(&cfg);
+    let order = super::floor_order(&candidates(&hardware()));
+    let print = crate::dictation::stt_speed::pc_print();
+    loop {
+        if CLOSING.load(Ordering::SeqCst) {
+            return "Yap is closing";
+        }
+        let m = read_marker(&edir);
+        if m.current.is_some() || super::llamafile_in(&llm).is_some() {
+            return "an engine runs";
+        }
+        let Some(v) = super::next_floor(&m, &order) else {
+            note_none_runs();
+            return "none runs";
+        };
+        let (zip, cudart) = super::floor_assets(v);
+        let stand_in = |key: &str, a: super::Asset| {
+            let (url, sha256) = crate::ai::local_llm::models::source(key, "", &a.sha256);
+            super::Asset { sha256, url: (!url.is_empty()).then_some(url), ..a }
+        };
+        let (zip, cudart) = (stand_in("engine", zip), cudart.map(|c| stand_in("cudart", c)));
+        let Some(ticket) = crate::shell::download::Ticket::begin(CANCEL_ID) else { return "already downloading" };
+        if let Ok(mut g) = CANDIDATE.lock() {
+            *g = Some(super::FLOOR);
+        }
+        set_download_mb(zip.size + cudart.as_ref().map(|c| c.size).unwrap_or(0));
+        set_phase("downloading", 0);
+        let report = |p: crate::shell::download::Progress| set_phase("downloading", p.percent());
+        let installed = match install(&edir, super::FLOOR, v, &zip, cudart.as_ref(), &report, &ticket).await {
+            Ok(i) => i,
+            Err(e) => {
+                tracing::warn!(variant = v.id(), "On-device engine: the floor's {} build didn't download: {e}", v.id());
+                return "the download failed";
+            }
+        };
+        drop(ticket);
+        set_phase("trying", 0);
+        let t = {
+            let _one = STARTING.lock().await;
+            let subject = Subject { model: model.clone(), ctx, vision_on: false, log: edir.join(TRIAL_LOG) };
+            try_one(&Engine::llama_cpp(&edir, &installed), &installed.key(), &subject, &|| CLOSING.load(Ordering::SeqCst)).await
+        };
+        tracing::info!(variant = v.id(), started = t.started, answered = t.answered, tps = ?t.tps.map(|x| x.round()), model_failed = t.model_failed, "On-device engine: the floor's fallback, a trial");
+        if t.aborted {
+            return "Yap is closing";
+        }
+        if t.model_failed {
+            tracing::warn!("On-device engine: the model itself doesn't load; no build is refused for it");
+            return "the model doesn't load";
+        }
+        if trial::rescue_ok(&t) {
+            let tried: Vec<Variant> = order.iter().copied().take_while(|x| *x != v).filter(|x| m.is_refused(&super::floor_key(*x))).collect();
+            let saved = update_marker(&edir, |m| {
+                m.current = Some(installed.clone());
+                m.unproven = true;
+                m.event = Some(super::Event::Fallback { build: super::FLOOR, variant: v, tried: tried.clone(), at: now_secs() });
+                m.pick = Some(Pick {
+                    print: print.clone(),
+                    variant: v,
+                    speeds: t.tps.map(|s| [(v.id().to_string(), s)].into_iter().collect()).unwrap_or_default(),
+                    build: super::FLOOR,
+                    at: now_secs(),
+                });
+            });
+            if let Ok(m) = saved {
+                tidy(&edir, &m);
+            }
+            crate::ai::local_llm::on_demand::forget_failure();
+            tracing::info!(variant = v.id(), "On-device engine: the floor's {} build runs here", v.id());
+            return "switched";
+        }
+        let _ = update_marker(&edir, |m| m.refuse(&installed.key()));
+        let _ = std::fs::remove_dir_all(installed.dir(&edir));
+        tracing::warn!(variant = v.id(), "On-device engine: the floor's {} build didn't start here either; refused", v.id());
+    }
+}
+
 /// **Going back by hand** (Settings): the build before (or llamafile), the
 /// one left refused; a running model moves once nothing uses it.
 pub fn go_back(app: &AppHandle) -> Result<(), String> {
@@ -519,7 +727,7 @@ mod tests {
     }
 
     fn ok(tps: f64) -> Trial {
-        Trial { started: true, answered: true, tool: Some(true), tps: Some(tps), vision: None, load_ms: 1, aborted: false }
+        Trial { started: true, answered: true, tool: Some(true), tps: Some(tps), vision: None, load_ms: 1, aborted: false, model_failed: false }
     }
 
     #[test]
@@ -537,40 +745,39 @@ mod tests {
     }
 
     #[test]
-    fn vulkan_is_taken_when_good_enough_cuda_when_clearly_faster_else_the_build_is_refused() {
-        // From llamafile on CUDA (172 tokens/s): Vulkan at 152 is fine, CUDA never fetched.
-        let lf = ok(172.0);
-        let tried = vec![(inst(11_982, Variant::Vulkan), ok(152.0))];
+    fn on_nvidia_cuda_is_kept_when_at_least_as_fast_vulkan_is_the_fallback_else_the_build_is_refused() {
+        // From llamafile on CUDA (225 tokens/s): CUDA 269 and Vulkan 150 both measured, CUDA kept.
+        let lf = ok(225.0);
+        let tried = vec![(inst(11_982, Variant::Cuda13), ok(269.0)), (inst(11_982, Variant::Vulkan), ok(150.0))];
         match decide(&lf, true, &tried, true, "card", 5).unwrap() {
             Decision::Switch { to, ratio, pick } => {
-                assert_eq!(to.variant, Variant::Vulkan);
-                assert!((ratio.unwrap() - 152.0 / 172.0).abs() < 1e-9);
+                assert_eq!(to.variant, Variant::Cuda13);
+                assert!((ratio.unwrap() - 269.0 / 225.0).abs() < 1e-9);
                 let pick = pick.unwrap();
-                assert_eq!((pick.variant, pick.print.as_str(), pick.speeds.len()), (Variant::Vulkan, "card", 1));
+                assert_eq!((pick.variant, pick.print.as_str(), pick.speeds.len()), (Variant::Cuda13, "card", 2));
             }
             d => panic!("{d:?}"),
         }
-        // Vulkan short of 100 tokens/s and CUDA well ahead: CUDA.
-        let tried = vec![(inst(11_982, Variant::Vulkan), ok(60.0)), (inst(11_982, Variant::Cuda13), ok(95.0))];
-        assert!(matches!(decide(&ok(90.0), true, &tried, true, "card", 5), Some(Decision::Switch { to, .. }) if to.variant == Variant::Cuda13));
-        // Vulkan doesn't start, CUDA passes: CUDA.
-        let tried = vec![(inst(11_982, Variant::Vulkan), Trial::default()), (inst(11_982, Variant::Cuda13), ok(176.0))];
-        assert!(matches!(decide(&lf, true, &tried, true, "card", 5), Some(Decision::Switch { to, .. }) if to.variant == Variant::Cuda13));
+        // CUDA doesn't start: Vulkan, the fallback, passes at 100+ tokens/s
+        // although slower than llamafile's CUDA.
+        let tried = vec![(inst(11_982, Variant::Cuda13), Trial::default()), (inst(11_982, Variant::Vulkan), ok(150.0))];
+        assert!(matches!(decide(&lf, true, &tried, true, "card", 5), Some(Decision::Switch { to, pick: Some(_), .. }) if to.variant == Variant::Vulkan));
         // No choice on this PC (an AMD card): no pick kept.
         let tried = vec![(inst(11_990, Variant::Vulkan), ok(80.0))];
         assert!(matches!(decide(&ok(78.0), false, &tried, false, "card", 5), Some(Decision::Switch { pick: None, .. })));
         // A build-to-build regression on the same variant: refused.
-        let tried = vec![(inst(11_990, Variant::Vulkan), ok(110.0))];
-        match decide(&ok(152.0), false, &tried, true, "card", 5).unwrap() {
+        let tried = vec![(inst(11_990, Variant::Cuda13), ok(200.0))];
+        match decide(&ok(269.0), true, &tried, true, "card", 5).unwrap() {
             Decision::Refuse { build, why, keys, .. } => {
                 assert_eq!((build, why), (Build(11_990), Why::Slower));
-                assert_eq!(keys, vec!["b11990-vulkan".to_string()]);
+                assert_eq!(keys, vec!["b11990-cuda13".to_string()]);
             }
             d => panic!("{d:?}"),
         }
         // Both fail: refused for both, the first's reason.
-        let tried = vec![(inst(11_990, Variant::Vulkan), Trial::default()), (inst(11_990, Variant::Cuda13), Trial { tool: Some(false), ..ok(170.0) })];
+        let tried = vec![(inst(11_990, Variant::Cuda13), Trial::default()), (inst(11_990, Variant::Vulkan), Trial { tool: Some(false), ..ok(170.0) })];
         assert!(matches!(decide(&lf, true, &tried, true, "card", 5), Some(Decision::Refuse { why: Why::DidntStart, ref keys, .. }) if keys.len() == 2));
         assert_eq!(decide(&lf, true, &[], true, "card", 5), None);
     }
 }
+

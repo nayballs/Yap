@@ -22,19 +22,24 @@
 //! nightly beside a dev build) still runs it, and it's this Yap's way back
 //! when no llama.cpp build will run here.
 //!
-//! **Which build for this PC** ([`candidates`]): Vulkan for any graphics
-//! card with memory of its own — the simpler, universal build — and on an
-//! NVIDIA card CUDA too (CUDA 13 from a Turing card and driver 580 on, else
-//! CUDA 12), fetched and tried only when Vulkan isn't good enough there
-//! (under [`trial::GOOD_ENOUGH_TPS`]) and kept only when clearly faster
-//! ([`trial::choose`]); the processor's build (its CPU code picked at run
-//! time: AVX2, AVX-512…) without a card. What's chosen is kept per card and
-//! driver ([`Pick`], like `dictation/stt_speed.rs`).
+//! **Which build for this PC** ([`candidates`]): on an NVIDIA card **CUDA**
+//! (CUDA 13 from a Turing card and driver 580 on, else CUDA 12; its zip and
+//! NVIDIA's runtime, ~590 MB) and Vulkan, both measured and CUDA kept when
+//! it's at least as fast ([`trial::choose`]: on the RTX 5070 Ti 269 against
+//! 150 tokens/s, a dictation's cleanup 132 against 200 ms); Vulkan for any
+//! other card with memory of its own, and the fallback when CUDA won't
+//! start; the processor's build (its CPU code picked at run time: AVX2,
+//! AVX-512…) without a card. What's chosen is kept per card and driver
+//! ([`Pick`], like `dictation/stt_speed.rs`).
 //!
 //! **The floor** ([`FLOOR`]): a build pinned here, verified on a PC
 //! (b11982 on an RTX 5070 Ti, 29 Oct 2026), is what a first install
-//! downloads and what Yap runs offline; newer ones come through the
-//! updater.
+//! downloads (CUDA on NVIDIA) and what Yap runs offline; newer ones come
+//! through the updater. **A fresh install's floor that won't start**, with
+//! nothing to go back to: refused, and the floor's other builds tried in
+//! turn ([`floor_order`]: CUDA → Vulkan → the processor's on NVIDIA, Vulkan
+//! → the processor's elsewhere; `updater::rescue`), each failure kept in
+//! the marker; none runs: said plainly ([`NO_ENGINE`]).
 
 pub mod feed;
 pub mod trial;
@@ -275,6 +280,14 @@ pub enum Event {
     /// The person went back (Settings).
     #[serde(rename_all = "camelCase")]
     BackByHand { from: Build, to: Option<Build>, at: u64 },
+    /// The floor's builds in `tried` didn't start here: `variant` runs
+    /// instead ([`floor_order`]).
+    #[serde(rename_all = "camelCase")]
+    Fallback { build: Build, variant: Variant, tried: Vec<Variant>, at: u64 },
+    /// None of the floor's builds (`tried`) started on this PC, with these
+    /// graphics adapters and drivers (`print`: a new driver tries again).
+    #[serde(rename_all = "camelCase")]
+    NoEngine { build: Build, tried: Vec<Variant>, print: String, at: u64 },
 }
 
 /// CUDA or Vulkan on this card, measured once per card and driver.
@@ -589,12 +602,12 @@ pub struct Hardware {
     pub cuda: CudaInfo,
 }
 
-/// The builds worth trying on a PC, in the order they're tried. Pure:
-/// - an NVIDIA card: **Vulkan first** — the simpler, universal build, a
-///   37 MB download — then CUDA ([`cuda_flavour`]: its zip and NVIDIA's
-///   runtime, ~590 MB), fetched only when Vulkan isn't good enough there
-///   (`trial::another_needed`; 2026-11-01, the maintainer: ~100 tokens/s for
-///   the 4B is fine, so CUDA must be clearly worth its download);
+/// The builds worth trying on a PC, best first. Pure:
+/// - an NVIDIA card: **CUDA** ([`cuda_flavour`]: its zip and NVIDIA's
+///   runtime, ~590 MB), then Vulkan — both measured, CUDA kept when it's at
+///   least as fast (`trial::choose`; 2026-11-01, the maintainer: on the RTX
+///   5070 Ti CUDA generates 269 tokens/s to Vulkan's 150 and cleans up a
+///   dictation in 132 ms to Vulkan's 200 — dictation comes first);
 /// - any other card with memory of its own: Vulkan;
 /// - none, or a small one (integrated graphics): the processor.
 pub fn candidates(hw: &Hardware) -> Vec<Variant> {
@@ -602,16 +615,82 @@ pub fn candidates(hw: &Hardware) -> Vec<Variant> {
     if !card {
         return vec![Variant::Cpu];
     }
-    let mut v = vec![Variant::Vulkan];
+    let mut v = Vec::new();
     if hw.vendor == Some(super::NVIDIA) {
         v.extend(cuda_flavour(hw.cuda));
+    }
+    v.push(Variant::Vulkan);
+    v
+}
+
+/// **The floor's builds a PC falls back through** when one won't start,
+/// in order: its candidates, then the processor's — every PC runs that
+/// (CUDA → Vulkan → processor on NVIDIA, Vulkan → processor elsewhere).
+/// Pure.
+pub fn floor_order(candidates: &[Variant]) -> Vec<Variant> {
+    let mut v = candidates.to_vec();
+    if !v.contains(&Variant::Cpu) {
+        v.push(Variant::Cpu);
     }
     v
 }
 
-/// Which of `candidates` to download and try now, in order: the one picked
-/// for this card and driver (`pick`), else all of them (one only: that
-/// one; the updater stops early when the first is good enough). Pure.
+/// The floor's build of `variant`, by key ("b11982-cuda13").
+pub fn floor_key(variant: Variant) -> String {
+    format!("{FLOOR}-{}", variant.id())
+}
+
+/// The next of the floor's builds to try here: the first in `order` not
+/// refused. Pure.
+pub fn next_floor(m: &Marker, order: &[Variant]) -> Option<Variant> {
+    order.iter().copied().find(|v| !m.is_refused(&floor_key(*v)))
+}
+
+/// **None of the engine's builds runs on this PC**: nothing current, no
+/// llamafile, and every one of the floor's builds in `order` refused (it
+/// didn't start or answer here). Pure.
+pub fn none_runs(m: &Marker, order: &[Variant], llamafile: bool) -> bool {
+    !llamafile && m.current.is_none() && !order.is_empty() && order.iter().all(|v| m.is_refused(&floor_key(*v)))
+}
+
+/// [`none_runs`] for this PC's `llm/`.
+pub fn none_runs_here() -> bool {
+    let llm = super::llm_dir();
+    let edir = engine_dir_in(&llm);
+    if !edir.join(MARKER).is_file() {
+        return false;
+    }
+    none_runs(&read_marker(&edir), &floor_order(&candidates(&hardware())), llamafile_in(&llm).is_some())
+}
+
+/// What a start says when none of the engine's builds runs here: Settings'
+/// Load now, Chat's "didn't start", the dictation's one notice.
+pub const NO_ENGINE: &str = "The on-device engine won't start on this PC: Yap tried every build of llama.cpp it has for it. Settings → Language Models has Try again.";
+
+/// A failed start's log that blames the model, not the engine (a GGUF this
+/// llama.cpp can't load): no build is refused for it. Pure.
+pub fn log_blames_model(log: &str) -> bool {
+    let l = log.to_ascii_lowercase();
+    l.contains("error loading model") || l.contains("unknown model architecture")
+}
+
+/// **A build that never started here, with nothing to go back to** (no
+/// build before it, no llamafile — a fresh install's floor): refused, and
+/// the marker left with nothing current, so the floor's next build is tried
+/// (`updater::rescue`). Only a build not yet proven. Pure.
+pub fn first_start_failed(m: &mut Marker) -> Option<Installed> {
+    if !m.unproven {
+        return None;
+    }
+    let failed = m.current.take()?;
+    m.refuse(&failed.key());
+    m.unproven = false;
+    m.retry = None;
+    Some(failed)
+}
+
+/// Which of `candidates` to download and try now: the one picked for this
+/// card and driver (`pick`), else all of them (one only: that one). Pure.
 pub fn to_try(candidates: &[Variant], pick: Option<&Pick>, print: &str) -> Vec<Variant> {
     if let Some(p) = pick.filter(|p| p.print == print && candidates.contains(&p.variant)) {
         return vec![p.variant];
@@ -1035,6 +1114,30 @@ pub fn retry_at_launch(m: &mut Marker) -> bool {
     true
 }
 
+/// Try the floor's builds again (Settings' Try again, or a new graphics
+/// driver after none of them started): their refusals and the "none
+/// started" line go. Pure.
+pub fn forget_floor_refusals(m: &mut Marker) {
+    let prefix = format!("{FLOOR}-");
+    m.refused.retain(|r| !r.starts_with(&prefix));
+    m.failures.retain(|k, _| !k.starts_with(&prefix));
+    if matches!(m.event, Some(Event::NoEngine { .. })) {
+        m.event = None;
+    }
+}
+
+/// At launch, after none of the floor's builds started: a new graphics
+/// driver (or card) since (`print`) tries them again. Pure.
+pub fn new_driver_retry(m: &mut Marker, print: &str) -> bool {
+    match &m.event {
+        Some(Event::NoEngine { print: then, .. }) if then != print => {
+            forget_floor_refusals(m);
+            true
+        }
+        _ => false,
+    }
+}
+
 /// What going back by hand goes back to: the build before, else llamafile
 /// (when it's on disk), else nothing. Pure.
 pub fn back_target(m: &Marker, llamafile: Option<Version>) -> Option<String> {
@@ -1096,9 +1199,13 @@ pub fn tidy_at_launch() {
         return;
     }
     let Some(_lock) = super::runtime::UpgradeLock::take_named(&edir, LOCK) else { return };
+    let print = crate::dictation::stt_speed::pc_print();
     let m = update_marker(&edir, |m| {
         if retry_at_launch(m) {
             tracing::info!("On-device engine: trying the build that didn't start last time again");
+        }
+        if new_driver_retry(m, &print) {
+            tracing::info!("On-device engine: a new graphics driver since none of its builds started; trying them again");
         }
     });
     if let Ok(m) = m {
@@ -1146,7 +1253,37 @@ pub fn event_line(e: &Event) -> String {
         }
         Event::WentBack { from, to, .. } => format!("{from} didn't start: back on {}", staying_name(*to)),
         Event::BackByHand { from, to, .. } => format!("Went back to {} · {from} won't be installed again", staying_name(*to)),
+        Event::Fallback { variant, tried, .. } => {
+            let on = match variant {
+                Variant::Cpu => "the processor: answers will be slower".to_string(),
+                v => v.label().to_string(),
+            };
+            if tried.is_empty() {
+                format!("The engine runs on {on} here")
+            } else {
+                format!("{} didn't start here, so the engine runs on {on}", names(tried))
+            }
+        }
+        Event::NoEngine { tried, .. } => format!(
+            "None of the engine's builds started on this PC ({} tried). Updating the graphics driver may help; then Try again.",
+            names(tried)
+        ),
     }
+}
+
+/// "CUDA, Vulkan and the processor's build". Pure.
+fn names(tried: &[Variant]) -> String {
+    let words: Vec<&str> = tried.iter().map(|v| if *v == Variant::Cpu { "the processor's build" } else { v.label() }).collect();
+    match words.as_slice() {
+        [] => "No build".to_string(),
+        [one] => capitalise(one),
+        [rest @ .., last] => capitalise(&format!("{} and {last}", rest.join(", "))),
+    }
+}
+
+fn capitalise(s: &str) -> String {
+    let mut c = s.chars();
+    c.next().map(|f| f.to_uppercase().collect::<String>() + c.as_str()).unwrap_or_default()
 }
 
 /// Settings' engine line and its controls (`local_llm_status().engine`).
@@ -1174,7 +1311,13 @@ pub fn status() -> serde_json::Value {
         "auto": !m.paused,
         "phase": phase.0,
         "percent": phase.1,
+        // A download's size (CUDA's ~590 MB with NVIDIA's runtime).
+        "downloadMb": updater::download_mb(),
         "candidate": updater::candidate().map(|b| b.to_string()),
+        // None of its builds runs here (said plainly, with Try again), or
+        // another of the floor's builds is being set up after one didn't start.
+        "failed": active.is_none() && none_runs_here(),
+        "rescuing": updater::rescuing(),
         "line": m.event.as_ref().map(event_line),
         "backTo": back_target(&m, llamafile),
         "error": updater::last_error(),
@@ -1222,12 +1365,12 @@ mod tests {
     #[test]
     fn the_build_for_a_pc_cuda_on_nvidia_vulkan_on_other_cards_else_the_processor() {
         let nv = |cc: Option<(u32, u32)>, d: Option<f32>| Hardware { vendor: Some(0x10DE), vram_mib: 16_303, cuda: CudaInfo { compute: cc, driver: d } };
-        // Vulkan first everywhere (the simpler build); CUDA after it on NVIDIA.
-        assert_eq!(candidates(&nv(Some((12, 0)), Some(617.14))), vec![Variant::Vulkan, Variant::Cuda13]);
-        assert_eq!(candidates(&nv(Some((6, 1)), Some(580.97))), vec![Variant::Vulkan, Variant::Cuda12], "a Pascal card: CUDA 13 dropped it");
-        assert_eq!(candidates(&nv(Some((8, 6)), Some(560.0))), vec![Variant::Vulkan, Variant::Cuda12], "a driver too old for CUDA 13");
-        assert_eq!(candidates(&nv(None, Some(595.0))), vec![Variant::Vulkan, Variant::Cuda13], "590+ dropped the older cards");
-        assert_eq!(candidates(&nv(None, None)), vec![Variant::Vulkan, Variant::Cuda12], "nvidia-smi missing: the widest CUDA");
+        // On NVIDIA, CUDA first, then Vulkan.
+        assert_eq!(candidates(&nv(Some((12, 0)), Some(617.14))), vec![Variant::Cuda13, Variant::Vulkan]);
+        assert_eq!(candidates(&nv(Some((6, 1)), Some(580.97))), vec![Variant::Cuda12, Variant::Vulkan], "a Pascal card: CUDA 13 dropped it");
+        assert_eq!(candidates(&nv(Some((8, 6)), Some(560.0))), vec![Variant::Cuda12, Variant::Vulkan], "a driver too old for CUDA 13");
+        assert_eq!(candidates(&nv(None, Some(595.0))), vec![Variant::Cuda13, Variant::Vulkan], "590+ dropped the older cards");
+        assert_eq!(candidates(&nv(None, None)), vec![Variant::Cuda12, Variant::Vulkan], "nvidia-smi missing: the widest CUDA");
         assert_eq!(candidates(&nv(Some((7, 5)), Some(470.0))), vec![Variant::Vulkan], "no CUDA on so old a driver");
         let amd = Hardware { vendor: Some(0x1002), vram_mib: 8_192, cuda: CudaInfo::default() };
         assert_eq!(candidates(&amd), vec![Variant::Vulkan]);
@@ -1242,12 +1385,67 @@ mod tests {
 
     #[test]
     fn cuda_and_vulkan_are_measured_once_per_card_and_driver() {
-        let both = [Variant::Vulkan, Variant::Cuda13];
+        let both = [Variant::Cuda13, Variant::Vulkan];
         assert_eq!(to_try(&both, None, "card 1"), both.to_vec(), "never measured: both");
         let pick = Pick { print: "card 1".into(), variant: Variant::Vulkan, speeds: BTreeMap::new(), build: FLOOR, at: 1 };
         assert_eq!(to_try(&both, Some(&pick), "card 1"), vec![Variant::Vulkan]);
         assert_eq!(to_try(&both, Some(&pick), "card 1, new driver"), both.to_vec(), "a new driver: again");
         assert_eq!(to_try(&[Variant::Cpu], Some(&pick), "card 1"), vec![Variant::Cpu], "the pick isn't a candidate any more");
+    }
+
+    #[test]
+    fn a_fresh_install_falls_back_through_the_floors_builds_and_says_plainly_when_none_runs() {
+        let nv = Hardware { vendor: Some(0x10DE), vram_mib: 16_303, cuda: CudaInfo { compute: Some((12, 0)), driver: Some(617.14) } };
+        let amd = Hardware { vendor: Some(0x1002), vram_mib: 8_192, cuda: CudaInfo::default() };
+        // The order: CUDA → Vulkan → the processor's on NVIDIA; Vulkan → the processor's elsewhere.
+        let order = floor_order(&candidates(&nv));
+        assert_eq!(order, vec![Variant::Cuda13, Variant::Vulkan, Variant::Cpu]);
+        assert_eq!(floor_order(&candidates(&amd)), vec![Variant::Vulkan, Variant::Cpu]);
+        assert_eq!(floor_order(&candidates(&Hardware::default())), vec![Variant::Cpu]);
+        assert_eq!(floor_key(Variant::Cuda13), "b11982-cuda13");
+        // A fresh install's floor (CUDA) that never started: refused, nothing current.
+        let mut m = Marker { current: Some(inst(FLOOR.0, Variant::Cuda13)), unproven: true, ..Default::default() };
+        assert_eq!(next_floor(&m, &order), Some(Variant::Cuda13));
+        assert_eq!(first_start_failed(&mut m).map(|i| i.variant), Some(Variant::Cuda13));
+        assert!(m.current.is_none() && !m.unproven && m.is_refused("b11982-cuda13"));
+        assert_eq!(next_floor(&m, &order), Some(Variant::Vulkan), "the next one, never CUDA again");
+        assert!(!none_runs(&m, &order, false));
+        // A proven build isn't refused by a failed start (a transient fault).
+        let mut proven = Marker { current: Some(inst(FLOOR.0, Variant::Vulkan)), ..Default::default() };
+        assert_eq!(first_start_failed(&mut proven), None);
+        assert!(proven.current.is_some() && proven.refused.is_empty());
+        // Vulkan and the processor's refused too: none runs — unless llamafile's here.
+        m.refuse("b11982-vulkan");
+        assert_eq!(next_floor(&m, &order), Some(Variant::Cpu));
+        m.refuse("b11982-cpu");
+        assert_eq!(next_floor(&m, &order), None);
+        assert!(none_runs(&m, &order, false));
+        assert!(!none_runs(&m, &order, true), "llamafile still runs");
+        assert!(!none_runs(&Marker::default(), &order, false), "a PC that never had an engine");
+        // A newer build's refusal is the updater's, not the floor's.
+        let mut newer = Marker::default();
+        newer.refuse("b12000-cuda13");
+        assert_eq!(next_floor(&newer, &order), Some(Variant::Cuda13));
+        // Said plainly; Try again, or a new driver, forgets the floor's refusals only.
+        m.event = Some(Event::NoEngine { build: FLOOR, tried: order.clone(), print: "card, driver 1".into(), at: 1 });
+        assert_eq!(
+            event_line(m.event.as_ref().unwrap()),
+            "None of the engine's builds started on this PC (CUDA, Vulkan and the processor's build tried). Updating the graphics driver may help; then Try again."
+        );
+        m.refuse("b12000-vulkan");
+        assert!(!new_driver_retry(&mut m.clone(), "card, driver 1"), "the same driver: nothing");
+        assert!(new_driver_retry(&mut m, "card, driver 2"));
+        assert_eq!(m.refused, vec!["b12000-vulkan".to_string()]);
+        assert!(m.event.is_none());
+        assert_eq!(next_floor(&m, &order), Some(Variant::Cuda13));
+        // The log that blames the model, not the engine.
+        assert!(log_blames_model("llama_model_load: error loading model: unknown model architecture: 'spark2_5'"));
+        assert!(!log_blames_model("ggml_cuda_init: failed to initialize CUDA: no CUDA-capable device is detected"));
+        // The fallback's line.
+        let fell = |variant, tried: Vec<Variant>| event_line(&Event::Fallback { build: FLOOR, variant, tried, at: 1 });
+        assert_eq!(fell(Variant::Vulkan, vec![Variant::Cuda13]), "CUDA didn't start here, so the engine runs on Vulkan");
+        assert_eq!(fell(Variant::Cpu, vec![Variant::Cuda13, Variant::Vulkan]), "CUDA and Vulkan didn't start here, so the engine runs on the processor: answers will be slower");
+        assert_eq!(fell(Variant::Cuda13, vec![]), "The engine runs on CUDA here", "Try again's first build passed");
     }
 
     #[test]

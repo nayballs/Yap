@@ -5,7 +5,11 @@
   // a look once a day, a build taken once it's 3 days old and tried with the
   // person's own model, at most one a week by itself); what happened last
   // ("Updated to b11980 · faster on your card", "b11990 didn't start here:
-  // staying on b11960"); and Go back to the build before. The state is
+  // staying on b11960"); and Go back to the build before. After a fresh
+  // install's build didn't start: "setting up another build for this PC",
+  // then the build that runs ("CUDA didn't start here, so the engine runs on
+  // Vulkan"), or — none of them started — "none runs on this PC" with Try
+  // again. A download names its size (CUDA's ~590 MB). The state is
   // Rust's (`local_llm_status().engineState`, then `yap-local-engine` as a
   // check moves along), kept in the engine's own marker, never config.json.
   import { invoke } from '@tauri-apps/api/core';
@@ -44,21 +48,26 @@
   });
 
   const s = $derived(eng || initial || {});
-  const working = $derived(!!s.phase);
+  const working = $derived(!!s.phase || !!s.rescuing);
+  // "Engine: …": the build, or — after the first build didn't start — what
+  // Yap is doing about it, or that none runs here (said plainly).
+  const name = $derived(s.label || (s.rescuing ? 'setting up another build for this PC' : s.failed ? 'none runs on this PC' : ''));
 
   // What it's doing now, in place of "up to date".
   const status = $derived.by(() => {
     const c = s.candidate;
+    const size = s.downloadMb ? ` (${s.downloadMb >= 1024 ? `${(s.downloadMb / 1024).toFixed(1)} GB` : `${s.downloadMb} MB`})` : '';
     switch (s.phase) {
       case 'checking':
         return 'checking for a newer build…';
       case 'downloading':
-        return `downloading ${c || 'a newer build'}${s.percent ? ` · ${s.percent}%` : ''}`;
+        return `downloading ${c || 'a newer build'}${size}${s.percent ? ` · ${s.percent}%` : ''}`;
       case 'waiting':
         return `${c || 'a newer build'} is ready to try · waiting until the model isn't in use`;
       case 'trying':
         return `trying ${c || 'a newer build'} with your model…`;
     }
+    if (!s.label) return '';
     if (s.kind === 'llamafile') return s.auto ? "moves to llama.cpp's own builds once one has been tried here" : '';
     if (s.upToDate) return 'up to date';
     if (s.latest && s.build && s.latest !== s.build) return `${s.latest} is available`;
@@ -96,13 +105,13 @@
   }
 </script>
 
-{#if s.label}
+{#if name}
   <div class="lb-load lb-engine" data-testid="local-engine" data-setting="local-engine">
     <div class="lb-state">
-      <span class="lb-statetext" role="status" data-testid="local-engine-line">
-        Engine: {s.label}{#if s.variant && s.kind === 'llamacpp'}<span class="lb-variant">{` (${s.variant})`}</span>{/if}{#if status}<span class="lb-engstatus">{` · ${status}`}</span>{/if}
+      <span class="lb-statetext" class:lb-enginefailed={s.failed && !s.label} role="status" data-testid="local-engine-line">
+        Engine: {name}{#if s.variant && s.kind === 'llamacpp'}<span class="lb-variant">{` (${s.variant})`}</span>{/if}{#if status}<span class="lb-engstatus">{` · ${status}`}</span>{/if}
       </span>
-      <button class="lb-later" onclick={checkNow} disabled={working || busy}>Check now</button>
+      <button class="lb-later" onclick={checkNow} disabled={working || busy}>{s.failed && !s.label ? 'Try again' : 'Check now'}</button>
     </div>
     {#if s.line}
       <span class="lb-engineevent" data-testid="local-engine-event">{s.line}</span>
@@ -156,7 +165,8 @@
     color: var(--yap-muted);
     line-height: 1.45;
   }
-  .lb-engineerr {
+  .lb-engineerr,
+  .lb-enginefailed {
     color: var(--yap-danger);
   }
   .lb-later {

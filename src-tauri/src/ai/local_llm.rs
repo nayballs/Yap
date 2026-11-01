@@ -810,9 +810,13 @@ pub fn model_path() -> PathBuf {
     llm_dir().join(MODEL_FILENAME)
 }
 
-/// An engine is on disk: a llama.cpp build, or llamafile ([`engine::active`]).
+/// An engine is on disk: a llama.cpp build, or llamafile ([`engine::active`])
+/// — or one is being set up after the first didn't start
+/// (`engine::updater::rescuing`), or none runs here: then the model still
+/// counts as installed, so a start is tried and says so plainly
+/// (`engine::NO_ENGINE`) instead of offering a download again.
 pub fn engine_installed() -> bool {
-    engine::active().is_some()
+    engine::active().is_some() || engine::updater::rescuing() || engine::none_runs_here()
 }
 
 /// Both an engine and the active model are present on disk.
@@ -1111,7 +1115,15 @@ async fn start_locked() -> Result<String, String> {
     if let Some(url) = e2e_stand_in() {
         return e2e_stand_in_start(&url, gen).await;
     }
-    start_with(&llm_dir(), &WENT_BACK, &|| CLOSING.load(Ordering::SeqCst), |a| spawn_and_wait(a, gen)).await
+    let r = start_with(&llm_dir(), &WENT_BACK, &|| CLOSING.load(Ordering::SeqCst), |a| spawn_and_wait(a, gen)).await;
+    if r.is_err() && !CLOSING.load(Ordering::SeqCst) && STOP_GEN.load(Ordering::SeqCst) == gen {
+        // A build that never started was refused with nothing to go back
+        // to: the floor's next one is set up, or none runs here (said plainly).
+        if let Some(why) = engine::updater::after_failed_start() {
+            return Err(why);
+        }
+    }
+    r
 }
 
 /// **A start, and what it does when the sidecar won't come up** (`spawn`:
@@ -1174,11 +1186,20 @@ where
         Err(again) if !again.why.counts() || closing() => return Err(again.why.to_string()),
         Err(_) => {}
     }
-    if !unproven || went_back.swap(true, Ordering::SeqCst) {
+    if !unproven {
         return Err(first.why.to_string());
     }
     if on_engine {
+        // Once a session back to the build before; a build with nothing to
+        // go back to is refused whenever it fails (the floor's next is tried).
+        let nowhere = engine::read_marker(&engine::engine_dir_in(dir)).previous.is_none() && engine::llamafile_in(dir).is_none();
+        if !nowhere && went_back.swap(true, Ordering::SeqCst) {
+            return Err(first.why.to_string());
+        }
         return engine_way_back(dir, &first.why, closing, &mut spawn).await;
+    }
+    if went_back.swap(true, Ordering::SeqCst) {
+        return Err(first.why.to_string());
     }
     let sha =read_marker_at(&dir.join(RUNTIME_MARKER)).map(|m| m.sha256).unwrap_or_default();
     let tries = count_failure(dir, &sha);
@@ -1228,6 +1249,24 @@ where
 {
     let edir = engine::engine_dir_in(dir);
     let mut m = engine::read_marker(&edir);
+    // Nothing to go back to (no build before it, no llamafile: a fresh
+    // install's floor): refused — unless its log blames the model — and the
+    // floor's next build is set up (`engine::updater::after_failed_start`).
+    if m.previous.is_none() && engine::llamafile_in(dir).is_none() {
+        let log = std::fs::read_to_string(edir.join(engine::SERVER_LOG)).unwrap_or_default();
+        if engine::log_blames_model(&log) {
+            tracing::warn!("The on-device engine didn't start, and its log blames the model: no build is refused for it");
+            return Err(first.to_string());
+        }
+        if let Some(failed) = engine::first_start_failed(&mut m) {
+            if let Err(e) = engine::write_marker(&edir, &m) {
+                tracing::warn!("Couldn't refuse the llama.cpp build that didn't start: {e}");
+            } else {
+                tracing::warn!(build = %failed.build, variant = failed.variant.id(), "The llama.cpp build never started here ({first}), with nothing to go back to: refused; the next of the floor's builds is tried");
+            }
+        }
+        return Err(first.to_string());
+    }
     let event = m.event.clone();
     let Some(failed) = engine::roll_back(&mut m, engine::now_secs()) else { return Err(first.to_string()) };
     let put_back = |failed: engine::Installed| {
@@ -1475,7 +1514,14 @@ async fn spawn_and_wait(attempt: Attempt, gen: u64) -> Result<Started, Failed> {
         return Err(fail(Failure::Stopped));
     }
     let Some(server) = active.filter(|e| e.present()) else {
-        return Err(fail(Failure::Missing("the on-device engine isn't installed".to_string())));
+        let why = if engine::updater::rescuing() {
+            engine::updater::RESCUING_NOW
+        } else if engine::none_runs_here() {
+            engine::NO_ENGINE
+        } else {
+            "the on-device engine isn't installed"
+        };
+        return Err(fail(Failure::Missing(why.to_string())));
     };
     if !model.is_file() {
         return Err(fail(Failure::Missing(format!("cleanup model not installed: {}", model.display()))));
@@ -2102,13 +2148,31 @@ mod tests {
         assert!(out.is_ok());
         assert!(engine::read_marker(&engine::engine_dir_in(&llm3)).current.is_none());
         assert!(matches!(engine::active_in(&llm3), Some(engine::Engine::Llamafile { .. })));
-        // Nowhere to go back to: it stays, uncounted.
+        // Nowhere to go back to (a fresh install's floor, no llamafile): it's
+        // refused at once and nothing is current, so the floor's next build
+        // is tried (`updater::after_failed_start`).
         let llm4 = engine_switched("engine-alone", None, false);
         let (out, tried) = start_scripted(&llm4, &AtomicBool::new(false), false, vec![down(Failure::Exited, false), down(Failure::Exited, false)]).await;
         assert!(out.is_err() && tried.len() == 2);
         let m = engine::read_marker(&engine::engine_dir_in(&llm4));
+        assert!(m.current.is_none() && !m.unproven && m.retry.is_none());
+        assert!(m.is_refused("b11980-cpu"));
+        // …the second build of the session too (the fallback's next one
+        // didn't start either): never held to once a session.
+        let llm7 = engine_switched("engine-alone-again", None, false);
+        let (out, _) = start_scripted(&llm7, &AtomicBool::new(true), false, vec![down(Failure::Exited, false), down(Failure::Exited, false)]).await;
+        assert!(out.is_err());
+        assert!(engine::read_marker(&engine::engine_dir_in(&llm7)).is_refused("b11980-cpu"));
+        let _ = std::fs::remove_dir_all(&llm7);
+        // …unless its log blames the model: then no build is refused for it.
+        let llm6 = engine_switched("engine-model", None, false);
+        std::fs::write(engine::engine_dir_in(&llm6).join(engine::SERVER_LOG), "llama_model_load: error loading model: unknown model architecture: 'spark2_5'\n").unwrap();
+        let (out, _) = start_scripted(&llm6, &AtomicBool::new(false), false, vec![down(Failure::Exited, false), down(Failure::Exited, false)]).await;
+        assert!(out.is_err());
+        let m = engine::read_marker(&engine::engine_dir_in(&llm6));
         assert_eq!(m.current.as_ref().map(|c| c.build), Some(engine::Build(11_980)));
-        assert!(m.unproven && m.failures.is_empty());
+        assert!(m.unproven && m.refused.is_empty());
+        let _ = std::fs::remove_dir_all(&llm6);
         // The one before down too: the new one back in, uncounted.
         let llm5 = engine_switched("engine-neither", Some(11_960), false);
         let (out, _) = start_scripted(&llm5, &AtomicBool::new(false), false, vec![down(Failure::Exited, false), down(Failure::Exited, false), down(Failure::Exited, false)]).await;

@@ -1051,6 +1051,9 @@ pub fn run() {
                     // A llama.cpp build kept to try again goes back in;
                     // old builds' folders go.
                     let _ = tauri::async_runtime::spawn_blocking(ai::local_llm::engine::tidy_at_launch).await;
+                    // Nothing runs yet after a build that didn't start (Yap
+                    // closed mid-fallback, or a new driver): the floor's next.
+                    ai::local_llm::engine::updater::rescue_if_due();
                     ai::local_llm::autostart_if_configured(&cfg2).await;
                 });
             }
