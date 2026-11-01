@@ -183,6 +183,8 @@ test('asked in Chat: the picture opens in the panel beside the answer, its pill 
   await expect(main.getByText('It’s open beside the chat')).toBeVisible();
   await expect(main.getByTestId('chat-picture-pill')).toHaveCount(1);
   await expect(main.getByTestId('chat-picture-pill')).toContainText(CAPTION);
+  // Its steps, folded under it, say what it did (chatSteps.js).
+  await expect(main.getByText('Read a page, showed a picture')).toBeVisible();
   await shot(main, 'asked-in-chat');
 });
 
