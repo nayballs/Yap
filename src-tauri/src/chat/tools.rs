@@ -174,6 +174,14 @@ pub const CLAUDE_WEB_TOOL_INSTRUCTIONS: &[&str] = &[
     "Your web_search and web_fetch are Anthropic's own, run on Anthropic's servers, not Yap's: say so if asked. Write plain text into notes and documents, never your search's <cite> markup.",
 ];
 
+/// [`STRONG_WEB_TOOL_INSTRUCTIONS`] for a cloud model on its provider's own
+/// search (`web::Turn::own_search`): `web_search` runs on the provider's
+/// search, which reads the pages itself; no `read_page`.
+pub const OWN_WEB_TOOL_INSTRUCTIONS: &[&str] = &[
+    "Use web_search for news, prices, release dates, game guides (where to find someone, how to beat a boss), how-tos and facts you aren't sure of; never for the user's notes or meetings (search_notes).",
+    "web_search runs on your provider's own search, which reads the pages for you: its answer and sources are what you have, and Yap doesn't open pages for you. For a number, level, requirement or location, search again with exact words until a result states it.",
+];
+
 /// Which web lines a model's prompt gets.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum WebLines {
@@ -183,15 +191,20 @@ pub enum WebLines {
     Strong,
     /// [`CLAUDE_WEB_TOOL_INSTRUCTIONS`]: a strong Claude on its own.
     Claude,
+    /// [`OWN_WEB_TOOL_INSTRUCTIONS`]: a cloud model on its provider's own
+    /// search (`strong`: notes and documents still change after the web).
+    Own { strong: bool },
 }
 
 impl WebLines {
     /// `strong` (`documents::rich::strong`); `in_chat`: Claude searches in
-    /// Chat's own request. Pure.
-    pub fn of(strong: bool, in_chat: bool) -> WebLines {
-        match (strong, in_chat) {
-            (true, true) => WebLines::Claude,
-            (true, false) => WebLines::Strong,
+    /// Chat's own request; `own`: a cloud model searches with its
+    /// provider's own search. Pure.
+    pub fn of(strong: bool, in_chat: bool, own: bool) -> WebLines {
+        match (strong, in_chat, own) {
+            (true, true, _) => WebLines::Claude,
+            (_, false, true) => WebLines::Own { strong },
+            (true, false, false) => WebLines::Strong,
             _ => WebLines::Usual,
         }
     }
@@ -200,11 +213,16 @@ impl WebLines {
 /// The web's lines for a model ([`WebLines`]). Pure.
 pub fn web_tool_instructions(lines: WebLines) -> String {
     match lines {
-        WebLines::Usual => WEB_TOOL_INSTRUCTIONS,
-        WebLines::Strong => STRONG_WEB_TOOL_INSTRUCTIONS,
-        WebLines::Claude => CLAUDE_WEB_TOOL_INSTRUCTIONS,
+        WebLines::Usual => WEB_TOOL_INSTRUCTIONS.join(" "),
+        WebLines::Strong => STRONG_WEB_TOOL_INSTRUCTIONS.join(" "),
+        WebLines::Claude => CLAUDE_WEB_TOOL_INSTRUCTIONS.join(" "),
+        // Its own search's lines, then citing and the safety rule as a
+        // model of its kind has them.
+        WebLines::Own { strong } => {
+            let rest = if strong { STRONG_WEB_TOOL_INSTRUCTIONS } else { WEB_TOOL_INSTRUCTIONS };
+            OWN_WEB_TOOL_INSTRUCTIONS.iter().chain(&rest[2..]).copied().collect::<Vec<_>>().join(" ")
+        }
     }
-    .join(" ")
 }
 
 /// Added while Yap has memory (`memory.rs`): remembering and forgetting
@@ -255,6 +273,10 @@ pub struct Extra<'a> {
     /// `can_act`: the strong cloud models and the on-device ones the browse
     /// evaluation passed; a typed Chat turn with the web on).
     pub act: bool,
+    /// A cloud model searching with its provider's own search
+    /// (`web::Turn::own_search`): `web_search` only, never Yap's
+    /// `read_page`; `find_pictures` for its pictures, as a Claude's.
+    pub own_search: bool,
 }
 
 /// The calendar tool in a turn ([`calendar::run`]).
@@ -719,8 +741,23 @@ mod tests {
             assert!(!lines.contains("fill in from your own knowledge") && !lines.contains("fill it in from your own knowledge"), "{lines}");
         }
         assert!(claude.contains("writing and changing notes and documents goes on as usual"));
-        assert_eq!(WebLines::of(true, true), WebLines::Claude);
-        assert_eq!(WebLines::of(false, true), WebLines::Usual);
+        assert_eq!(WebLines::of(true, true, false), WebLines::Claude);
+        assert_eq!(WebLines::of(false, true, false), WebLines::Usual);
+        // A cloud model on its provider's own search: its search reads the pages, no read_page.
+        assert_eq!(WebLines::of(true, false, true), WebLines::Own { strong: true });
+        let own = web_tool_instructions(WebLines::Own { strong: true });
+        assert!(own.contains("runs on your provider's own search") && !own.contains("read_page"), "{own}");
+        assert!(own.contains("writing and changing notes and documents goes on as usual"), "{own}");
+        assert!(!web_tool_instructions(WebLines::Own { strong: false }).contains("read_page"));
+    }
+
+    #[test]
+    fn a_cloud_model_on_its_own_search_gets_no_page_reader() {
+        let names = |v: Value| v.as_array().unwrap().iter().map(|t| t["function"]["name"].as_str().unwrap_or("").to_string()).collect::<Vec<_>>();
+        let yaps = names(offered_tools(false, true, Extra::default()));
+        assert!(yaps.contains(&"web_search".to_string()) && yaps.contains(&"read_page".to_string()));
+        let own = names(offered_tools(false, true, Extra { own_search: true, ..Default::default() }));
+        assert!(own.contains(&"web_search".to_string()) && !own.contains(&"read_page".to_string()), "{own:?}");
     }
 
     /// The web tools' instructions and schemas, on top of a tool step's

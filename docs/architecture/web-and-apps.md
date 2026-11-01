@@ -401,7 +401,15 @@ Chat's and the Voice Assistant's two ways of reaching outside Yap: looking thing
   local models Yap's"; `web_search_native`, on by default): a cloud chat
   model (`Settings::for_chat(cfg, provider, model, base_url, key)` →
   `NativeSearch::for_chat`) keeps the ONE tool loop and calls Yap's own
-  `web_search`; running it is a short **sub-call** to the same provider,
+  `web_search` — **and nothing else of Yap's web** since 1 Nov 2026: its
+  search reads the pages, so `read_page` isn't offered beside it
+  (`web::Turn::own_search`, `Extra::own_search`; "own tools only", the
+  maintainer: a cloud model on its provider's tools, Exa and the free
+  sources for the models on this PC), its lines say so
+  (`OWN_WEB_TOOL_INSTRUCTIONS`: search again with exact words for a number
+  or a location), a document's research asks for searches, not page reads
+  (`documents::Reader::Search`), and its pictures come through
+  `find_pictures`, as a Claude's; running it is a short **sub-call** to the same provider,
   on the chat's endpoint and key, with nothing but its search tool
   (`NativeSearch::body`, pure; aimed at the person's country —
   `in_region`: its prompt ends "The user is in the United Kingdom: prefer

@@ -319,6 +319,15 @@ impl Turn {
     /// and web fetch, deeper once the turn writes a document — none while a
     /// new document's outline is still to come ([`Turn::outline_first`]).
     /// `None`: Yap's `web_search` and `read_page` are the turn's.
+/// **A cloud model searching with its provider's own search** through
+    /// Yap's `web_search` (a sub-call to the provider: `web::native`), not a
+    /// Claude in Chat's own request: its search reads the pages, and Yap's
+    /// `read_page` isn't offered — a cloud model on its own tools only (the
+    /// maintainer, 1 Nov 2026).
+    pub fn own_search(&self) -> bool {
+        self.settings.native.as_ref().is_some_and(|n| !n.in_chat)
+    }
+
     pub fn server_tools(&self) -> Option<Vec<Value>> {
         let n = self.settings.native.as_ref().filter(|n| n.in_chat)?;
         Some(if self.outline_first { Vec::new() } else { n.server_tools() })

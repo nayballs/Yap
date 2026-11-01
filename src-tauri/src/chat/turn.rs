@@ -324,7 +324,11 @@ async fn answer_turn(
     // tools in place of Yap's `web_search` and `read_page` — with "The AI's
     // own search" on and Yap able to use it for this model.
     let claude_in_chat = in_chat(&cfg, &provider, &model, &base_url, &api_key);
-    let web_lines = crate::chat::tools::WebLines::of(strong, claude_in_chat);
+    // Any other cloud model with "The AI's own search" on searches with its
+    // provider's own search, which reads the pages: Yap's `read_page`
+    // isn't offered (own tools only, the maintainer, 1 Nov 2026).
+    let own_search = cfg.web_search && !claude_in_chat && crate::web::Settings::for_chat(&cfg, &provider, &model, &base_url, &api_key).native.is_some();
+    let web_lines = crate::chat::tools::WebLines::of(strong, claude_in_chat, own_search);
     let in_message = tools_supported;
     // "Look things up on the web" (web.rs). Not for the Meetings view's Ask
     // bar: that's about the meetings.
@@ -374,6 +378,7 @@ async fn answer_turn(
         pictures,
         screen,
         act,
+        own_search,
     };
     let schemas = if tools_supported {
         counter.count(&crate::chat::tools::offered_tools(cfg.open_apps, web_on && !claude_in_chat, extra_flags).to_string()).await
@@ -727,7 +732,13 @@ async fn answer_turn(
         crate::web::Reach::deep(Some(request))
     };
     if writes_doc && web_on {
-        let reader = if claude_in_chat { crate::chat::documents::Reader::WebFetch } else { crate::chat::documents::Reader::ReadPage };
+        let reader = if claude_in_chat {
+            crate::chat::documents::Reader::WebFetch
+        } else if own_search {
+            crate::chat::documents::Reader::Search
+        } else {
+            crate::chat::documents::Reader::ReadPage
+        };
         context.push(crate::chat::documents::research_note(deep_reach, reader, outline_first));
     }
     if spoken && !(tools_supported && web_on) {
@@ -877,6 +888,7 @@ async fn answer_turn(
             pictures,
             screen,
             act,
+            own_search,
         };
         let looped = crate::chat::tools::run_tool_loop_with(
             &system,
@@ -1330,11 +1342,12 @@ pub async fn chat_limits() -> Limits {
     let screen = crate::chat::see_screen::gate(&cfg, tools_supported, &provider, &model);
     let act = pictures != crate::chat::pictures::Gate::Off && crate::chat::pages::act::can_act(&provider, &model);
     let claude_in_chat = in_chat(&cfg, &provider, &model, &base_url, &key);
+    let own_search = cfg.web_search && !claude_in_chat && crate::web::Settings::for_chat(&cfg, &provider, &model, &base_url, &key).native.is_some();
     let calendar_on = crate::calendar::connected();
     let counter = crate::chat::budget::Counter::for_call(&provider, &base_url);
     let (context, context_known) = crate::chat::budget::context_window(&cfg, &provider, &model, &base_url).await;
     let profile = crate::ai::about_you::profile(&cfg);
-    let web_lines = crate::chat::tools::WebLines::of(strong, claude_in_chat);
+    let web_lines = crate::chat::tools::WebLines::of(strong, claude_in_chat, own_search);
     let stable = stable_prompt(&cfg, &persona, tools_supported, doc_tools, web_lines, web_on, pictures, act, calendar_on, &profile, crate::ai::eval::now());
     let log = crate::chat::tools::calendar::Log::default();
     let extra = crate::chat::tools::Extra {
@@ -1349,6 +1362,7 @@ pub async fn chat_limits() -> Limits {
         pictures,
         screen,
         act,
+        own_search,
     };
     let schemas = if tools_supported { counter.count(&crate::chat::tools::offered_tools(cfg.open_apps, web_on && !claude_in_chat, extra).to_string()).await } else { 0 };
     let fixed = counter.count(&stable).await + schemas;

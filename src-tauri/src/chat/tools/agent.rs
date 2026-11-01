@@ -249,13 +249,15 @@ pub fn offered_tools(open_apps: bool, web: bool, extra: Extra<'_>) -> Value {
         }
     }
     if web {
+        // (A cloud model on its provider's own search: `web_search` alone.)
         if let (Some(all), Some(web_tools)) = (tools.as_array_mut(), web_definitions().as_array()) {
-            all.extend(web_tools.iter().cloned());
+            all.extend(web_tools.iter().filter(|t| !(extra.own_search && t["function"]["name"] == "read_page")).cloned());
         }
     }
     // Pictures from the web (chat/pictures.rs): `find_pictures` where Yap's
-    // `read_page` isn't offered (a Claude searching in Chat's own request).
-    if let (Some(all), Some(pictures)) = (tools.as_array_mut(), crate::chat::pictures::definitions(extra.pictures, !web).as_array()) {
+    // `read_page` isn't offered (a Claude searching in Chat's own request,
+    // a cloud model on its provider's own search).
+    if let (Some(all), Some(pictures)) = (tools.as_array_mut(), crate::chat::pictures::definitions(extra.pictures, !web || extra.own_search).as_array()) {
         all.extend(pictures.iter().cloned());
     }
     // Pages beside the chat (chat/pages.rs): for the same models; acting on
@@ -430,6 +432,9 @@ async fn tool_loop(
     // (Anthropic's server tools, `web::Turn::server_tools`): Yap's
     // `web_search` and `read_page` aren't offered beside them.
     let claude_web = web.as_deref().is_some_and(|t| t.server_tools().is_some());
+    // A cloud model on its provider's own search: no `read_page` beside it.
+    let own_search = web.as_deref().is_some_and(crate::web::Turn::own_search);
+    let extra = Extra { own_search: extra.own_search || own_search, ..extra };
     let tools = offered_tools(open_apps, web.is_some() && !claude_web, extra);
     // Its steps go to Anthropic's Messages API (llm/anthropic.rs).
     let native_chat = crate::ai::llm::anthropic::speaks_messages(provider, model);
@@ -775,7 +780,7 @@ async fn tool_loop(
                 r // a section rewritten only in this chat's own documents
             } else if let (Some(turn), true) = (web.as_deref_mut(), crate::web::TOOL_NAMES.contains(&name)) {
                 turn.execute(name, &args).await
-            } else if let (Some(turn), true) = (web.as_deref_mut(), extra.pictures.offers(name, claude_web)) {
+            } else if let (Some(turn), true) = (web.as_deref_mut(), extra.pictures.offers(name, claude_web || extra.own_search)) {
                 // A picture from the web looked at or shown (chat/pictures.rs):
                 // a shown one goes to the page at once (the panel opens on it).
                 let run = crate::chat::pictures::execute(turn, name, &args, provider, base_url).await;

@@ -1221,6 +1221,9 @@ pub fn makes_new_document(question: &str, docs: &[DocRef], selected: bool) -> bo
 pub enum Reader {
     ReadPage,
     WebFetch,
+    /// A cloud model on its provider's own search: no page reader, its
+    /// search reads them (`web::Turn::own_search`).
+    Search,
 }
 
 impl Reader {
@@ -1228,6 +1231,7 @@ impl Reader {
         match self {
             Reader::ReadPage => "read_page",
             Reader::WebFetch => "web_fetch",
+            Reader::Search => "web_search",
         }
     }
 }
@@ -1253,6 +1257,12 @@ pub fn research_note(reach: crate::web::Reach, reader: Reader, new_doc: bool) ->
     } else {
         ("This is a document to write: research it properly first", "Then write it complete, every part and level asked for.")
     };
+    if reader == Reader::Search {
+        return format!(
+            "{first} — up to {} searches this turn. Your search reads the pages for you: search again, with exact words, until a result states each requirement, level, number and location, and cite it. Use only sources about exactly this (the same build or subject, game and version): a guide for another build or an older version isn't a source for this one. {then}",
+            reach.searches
+        );
+    }
     format!(
         "{first} — up to {} searches and {} page reads this turn. A search result's snippet isn't a source: {read} the pages that requirements, levels, numbers and locations come from, and cite the pages you read. Use only pages about exactly this (the same build or subject, game and version): a guide for another build or an older version isn't a source for this one. {then}",
         reach.searches, reach.reads
