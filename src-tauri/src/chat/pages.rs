@@ -394,7 +394,7 @@ pub fn checked(turn: &crate::web::Turn, name: &str, args: &Value, doing: &str) -
             format!("Didn't {doing} {shown}: not a link from you or the search"),
         ));
     }
-    Ok(url)
+    Ok(turn.stored(&url).unwrap_or(url))
 }
 
 /// A page's title and site: the turn's source for it (a search result, a

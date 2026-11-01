@@ -945,6 +945,10 @@ mod tests {
         run(&mut t, GO, json!({ "url": "https://rail.example.com/signin#leak=Kellbrook" }), &log).await;
         confirm::answer_in_test(None);
         assert_eq!(crate::chat::pages::sim::with(|b| b.log.visited.last().cloned()).unwrap().unwrap(), "https://rail.example.com/signin");
+        // open_page too: the person's own address, never the model's copy.
+        let carried = json!({ "url": "https://rail.example.com/timetables?from=Kellbrook&utm_term=sam#sam" });
+        let opened = crate::chat::pages::execute_with(&mut t, crate::chat::pages::OPEN, &carried, crate::chat::pictures::Gate::Show, true, |_| async { Err(String::new()) }).await;
+        assert_eq!(opened.page.map(|p| p.url).as_deref(), Some("https://rail.example.com/timetables?from=Kellbrook"));
         // A named site: its home page, rebuilt from its host; never with anything carried after it.
         let mut t = turn("Open Emberwiki");
         let r = run(&mut t, GO, json!({ "url": "https://emberwiki.example/" }), &log).await;

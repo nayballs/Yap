@@ -1771,7 +1771,9 @@ from `view::open_tabs`):
   {page: ShownPage}` opens it mid-turn; the answer keeps it,
   `ChatMessage.pages`, so its tab comes back with the conversation; a pill
   under the answer, `PagePills.svelte`) — a page from this turn's results or
-  the person's messages, **the home page of a site the person named**
+  the person's messages (opened at the address the turn holds for it,
+  `Turn::stored`, never the model's copy with a fragment or `utm_…` added),
+  **the home page of a site the person named**
   (`named_site`: "open ExampleTube" → `https://www.exampletube.com/`; the
   site itself or `www.`, no path, query or other subdomain, its name a word
   of the question), or **search words** on the person's engine
