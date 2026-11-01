@@ -105,8 +105,8 @@
   <Row setting="assistant-screen">
     <Toggle
       bind:checked={cfg.assistantScreen}
-      label="Let the Voice Assistant see the window in front when you ask about it"
-      desc="Ask “What's this error?” or “Summarise this page” and Yap takes a screenshot of the window you were in, never its own windows"
+      label="Let Yap’s AI see your screen when you ask about it"
+      desc="Ask “What's this error?” out loud, or “Have a look at this” in Chat, and Yap takes a screenshot of the window you were in or your monitors, never its own windows"
       hint="Only when the question is about your screen. The screenshot shows with the question in Chat and is kept as Chat's screenshots are. A model that can't read pictures gets the window's text, read on this PC."
     />
   </Row>

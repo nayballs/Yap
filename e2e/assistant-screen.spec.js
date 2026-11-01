@@ -218,9 +218,9 @@ test('a cloud model: never without asking — the model says it can\'t see, the 
     await expect.poll(() => fakeLlm.requests.slice(before).some((r) => userOf(r).includes('Summarise this page.')), { timeout: 10_000 }).toBe(true);
     const asked = fakeLlm.requests.slice(before).find((r) => userOf(r).includes('Summarise this page.'));
     expect(asked.images ?? []).toHaveLength(0);
-    expect(userOf(asked)).toContain("haven't let the Voice Assistant send their screen to Groq");
+    expect(userOf(asked)).toContain("haven't let Yap send their screen to Groq");
     // Asked once, on the bar (Yap's window isn't in front).
-    const card = yap.overlay.getByRole('status').filter({ hasText: 'Let the Voice Assistant see the window in front?' });
+    const card = yap.overlay.getByRole('status').filter({ hasText: "Let Yap's AI see your screen?" });
     await expect(card).toBeVisible({ timeout: 10_000 });
     await expect(card).toContainText('Groq');
     await shot(yap.overlay, '03-ask-once-for-the-cloud');
@@ -253,7 +253,7 @@ test('a cloud model: never without asking — the model says it can\'t see, the 
 
 test('Settings → Voice Assistant: the window in front, on by default, the cloud off; off means never', async ({ yap, main, fakeLlm, shot }) => {
   const dialog = await openSettings(main, 'Voice Assistant');
-  const see = dialog.getByRole('button', { name: 'Let the Voice Assistant see the window in front when you ask about it' });
+  const see = dialog.getByRole('button', { name: 'Let Yap’s AI see your screen when you ask about it' });
   const cloud = dialog.getByRole('button', { name: 'With cloud models too' });
   await expect(see).toHaveAttribute('aria-pressed', 'true');
   await expect(cloud).toHaveAttribute('aria-pressed', 'false');

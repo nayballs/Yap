@@ -116,6 +116,10 @@ pub enum Event {
     /// A button offered under the answer (`offer_browser`): open a page in
     /// the person's browser.
     Offer { offer: crate::chat::pages::BrowserOffer },
+    /// The screen as the model looked at it (`look_at_screen`,
+    /// `chat/see_screen.rs`): shown with the question, in the screenshot
+    /// frame, the moment it's taken.
+    Screen { images: Vec<crate::chat::chats::ChatImage> },
 }
 
 /// Tool calls whose arguments the page sees as they come: a document's

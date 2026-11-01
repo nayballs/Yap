@@ -317,6 +317,8 @@ async fn answer_turn(
     // Pictures from the web (chat/pictures.rs): looked at and shown by a
     // model that reads images, shown by any other that calls tools.
     let pictures = crate::chat::pictures::Gate::for_model(web_on && tools_supported, &provider, &model);
+    // The screen (chat/see_screen.rs): with tools and the switch on, web or not.
+    let screen = crate::chat::see_screen::gate(&cfg, tools_supported, &provider, &model);
     // The calendar (chat/tools/calendar.rs): a tool while one is connected
     // (not across the meetings, whose passages are numbered on their own).
     let calendar_on = !meetings && crate::calendar::connected();
@@ -346,6 +348,7 @@ async fn answer_turn(
         doc_tools,
         strong,
         pictures,
+        screen,
     };
     let schemas = if tools_supported {
         counter.count(&crate::chat::tools::offered_tools(cfg.open_apps, web_on && !claude_in_chat, extra_flags).to_string()).await
@@ -479,6 +482,11 @@ async fn answer_turn(
     let calendar_zone = crate::chat::tools::calendar::Zone::of(profile.region.time_zone.as_deref());
     let mut system = persona.trim().to_string();
     system.push_str(&instructions(&cfg, tools_supported, doc_tools, web_lines, web_on, pictures, calendar_on, &profile));
+    let screen_line = crate::chat::see_screen::instructions(screen);
+    if !screen_line.is_empty() {
+        system.push(' ');
+        system.push_str(screen_line);
+    }
     // Where the line on earlier web answers goes for a model without tools
     // (it depends on the history sent, chosen below).
     let note_at = system.len();
@@ -835,6 +843,7 @@ async fn answer_turn(
             doc_tools,
             strong,
             pictures,
+            screen,
         };
         let looped = crate::chat::tools::run_tool_loop_with(
             &system,
@@ -1282,6 +1291,7 @@ pub async fn chat_limits() -> Limits {
     let strong = tools_supported && crate::chat::documents::rich::strong(&provider, &model);
     let web_on = cfg.web_search;
     let pictures = crate::chat::pictures::Gate::for_model(web_on && tools_supported, &provider, &model);
+    let screen = crate::chat::see_screen::gate(&cfg, tools_supported, &provider, &model);
     let claude_in_chat = in_chat(&cfg, &provider, &model, &base_url, &key);
     let calendar_on = crate::calendar::connected();
     let counter = crate::chat::budget::Counter::for_call(&provider, &base_url);
@@ -1300,6 +1310,7 @@ pub async fn chat_limits() -> Limits {
         doc_tools,
         strong,
         pictures,
+        screen,
     };
     let schemas = if tools_supported { counter.count(&crate::chat::tools::offered_tools(cfg.open_apps, web_on && !claude_in_chat, extra).to_string()).await } else { 0 };
     let fixed = counter.count(&stable).await + schemas;

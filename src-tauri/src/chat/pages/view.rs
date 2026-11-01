@@ -63,6 +63,11 @@ pub fn init(app: &AppHandle) {
     let _ = APP.set(app.clone());
 }
 
+/// The app, for a tool that runs without one (`look_at_screen`).
+pub fn app() -> Option<AppHandle> {
+    APP.get().cloned()
+}
+
 /// The event a page's state goes out on (to the main window).
 pub const EVENT: &str = "yap-page-view";
 /// The event "Ask Yap about this" goes out on.

@@ -427,7 +427,7 @@ pub enum Allowed {
     Yes,
     /// It's a cloud model and "…with cloud models too" is off.
     NotToTheCloud,
-    /// "Let the Voice Assistant see the window in front" is off.
+    /// "Let Yap's AI see your screen" is off.
     Off,
 }
 
@@ -471,7 +471,7 @@ pub fn allow_cloud() {
 
 /// The first question about the screen that met a cloud model: asked once,
 /// with **Allow**. Yap answered without the window meanwhile.
-fn ask_once(app: &AppHandle, provider: &str) {
+pub(crate) fn ask_once(app: &AppHandle, provider: &str) {
     let first = match crate::config::update(|c| c.assistant_screen_asked = true) {
         Ok(c) => !c.assistant_screen_cloud,
         Err(_) => false,
@@ -485,9 +485,9 @@ fn ask_once(app: &AppHandle, provider: &str) {
         crate::notices::alert::Alert {
             kind: KIND,
             icon: "assistant",
-            title: "Let the Voice Assistant see the window in front?".into(),
+            title: "Let Yap's AI see your screen?".into(),
             body: format!(
-                "You asked about your screen, and Chat's model runs on {who}, so a screenshot of the window would go there. Yap answered without it. It only ever takes the window when you ask about it."
+                "You asked about your screen, and Chat's model runs on {who}, so a screenshot would go there. Yap answered without it. It only ever looks when you ask about something on your screen."
             ),
             action: Some(crate::notices::alert::Action { id: crate::notices::alert::ALLOW_SCREEN_CLOUD, label: "Allow" }),
             timeout_ms: 20_000,
@@ -499,7 +499,7 @@ fn ask_once(app: &AppHandle, provider: &str) {
 pub const KIND: &str = "assistantScreen";
 
 /// Was the ask already shown (`assistant_screen_asked`)?
-fn asked_before(cfg: &crate::config::YapConfig) -> bool {
+pub(crate) fn asked_before(cfg: &crate::config::YapConfig) -> bool {
     cfg.assistant_screen_asked
 }
 
@@ -514,7 +514,7 @@ pub const TEXT_NOTE: &str = "The text after the question was read by Yap from th
 /// The window wasn't sent: the model says so, rather than guess.
 pub fn not_sent_note(provider: &str) -> String {
     format!(
-        "The user asked about something on their screen, but Yap didn't send a screenshot: they haven't let the Voice Assistant send their screen to {}. Say in one short sentence that you can't see their screen, and that Settings → Voice Assistant can allow it.",
+        "The user asked about something on their screen, but Yap didn't send a screenshot: they haven't let Yap send their screen to {}. Say in one short sentence that you can't see their screen, and that Settings → Voice Assistant can allow it.",
         crate::privacy::net::provider_name(provider)
     )
 }

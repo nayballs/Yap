@@ -246,6 +246,10 @@ pub struct Extra<'a> {
     /// and show for a model that reads images, show for any other; none
     /// without the web).
     pub pictures: crate::chat::pictures::Gate,
+    /// `look_at_screen` (`chat/see_screen.rs`): the pictures for a model that
+    /// reads images, the screen's text for any other; none without tools or
+    /// with "see the window in front" off. Not tied to the web.
+    pub screen: crate::chat::pictures::Gate,
 }
 
 /// The calendar tool in a turn ([`calendar::run`]).

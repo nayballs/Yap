@@ -967,6 +967,16 @@ export function createChatState({ onopensettings = () => null, onopennote = () =
         }
         return;
       }
+      // The screen the model looked at (look_at_screen): with the question, as its screenshots are.
+      if (ev?.kind === 'screen' && Array.isArray(ev.images) && ev.images.length) {
+        const qi = mine('user');
+        if (qi >= 0) {
+          const have = new Set((messages[qi].images || []).map((i) => i.id));
+          const added = ev.images.filter((i) => i?.id && !have.has(i.id));
+          if (added.length) messages = messages.map((m, i) => (i === qi ? { ...m, images: [...(m.images || []), ...added] } : m));
+        }
+        return;
+      }
       if (ev?.kind === 'picture' && ev.picture?.id && !shownPictures.some((p) => p.id === ev.picture.id)) shownPictures = [...shownPictures, ev.picture];
       if (ev?.kind === 'page' && ev.page?.url && !shownPages.some((p) => p.url === ev.page.url)) shownPages = [...shownPages, ev.page];
       if (ev?.kind === 'offer' && ev.offer?.url && !shownOffers.some((o) => o.url === ev.offer.url)) shownOffers = [...shownOffers, ev.offer];

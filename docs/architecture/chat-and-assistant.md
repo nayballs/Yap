@@ -1717,6 +1717,32 @@ on `yap-assistant-stream`). A picture's "Open page" / "Open original" say
 the browser now (2026-11-01): "Open in Brave", "Open page in your browser"
 (`stores/browserName.svelte.js`, below).
 
+**Chat looks at the screen** (2026-11-01, `chat/see_screen.rs`): asked
+"here are the speakers, can you have a look?" with the page open in another
+window, Claude Haiku 5.5 said "I can't see your screen, but you can snip any
+window to Chat" — the maintainer: "we're limiting what Haiku can do, find for
+me, and explain things for me". **`look_at_screen { monitor? }`**, for every
+model that calls tools while "Let Yap's AI see your screen when you ask about
+it" is on (`assistant_screen`, the Voice Assistant's switch, now worded for
+both; `see_screen::gate`, not tied to the web): every monitor (or the one
+asked for) captured at once the way a snip is, every Yap window left out for
+the moment of the capture (the page beside the chat is `snap_page`'s); each
+monitor kept as a chat screenshot (source "screen") and **shown with the
+question that asked, in the screenshot frame** (`Event::Screen`,
+`chats::add_question_images`: the person sees exactly what was looked at, and
+it's kept and swept as Chat's screenshots are); for a model that reads
+images, each fitted to its provider and carried by its next step (a
+`pictures::Look`, within the room the request has left: `budget.rs`); for any
+other, the screen's text read on this PC (`snip/ocr.rs`, ≤ 6,000 characters,
+the shots marked "Sent as text"). A cloud model only with "…with cloud models
+too" (`assistant_screen_cloud`): until then it's refused, the model says it
+couldn't look, and the alert asks once ("Let Yap's AI see your screen?",
+`assistant::screen::ask_once`). Never during a meeting or a call. What's on
+screen is web content for the safety rule (`screen_seen` in the tool loop:
+no apps, clipboard or memory after it this turn). The prompt line: "Never
+say you can't see: look." Chip "Looked at your screen (2 monitors)", the live
+line "Looking at your screen".
+
 **Pages beside the chat** (2026-11-01, the plan's Milestone 2;
 `chat/pages.rs`, `chat/pages/view.rs`; reshaped the same day after the
 maintainer's first real try — "open Google" opened the Chrome app, a site

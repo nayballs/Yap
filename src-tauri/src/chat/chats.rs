@@ -174,6 +174,24 @@ pub struct ChatImage {
     pub as_text: bool,
 }
 
+/// **The screen the model looked at** (`look_at_screen`), kept with the
+/// question that asked (conversation `id`'s last one): shown and kept as its
+/// screenshots are.
+pub fn add_question_images(id: u64, images: &[ChatImage]) {
+    if images.is_empty() {
+        return;
+    }
+    with_store(|s| {
+        let Some(m) = s.conversations.iter_mut().find(|c| c.id == id).and_then(|c| c.messages.iter_mut().rev().find(|m| m.role == "user")) else { return };
+        for image in images {
+            if !m.images.iter().any(|i| i.id == image.id) {
+                m.images.push(image.clone());
+            }
+        }
+        save_to_disk(s);
+    });
+}
+
 /// Every image id a conversation refers to — a question's screenshots and
 /// the pictures an answer showed (`pictures`) — (the screenshots sweep keeps
 /// these for their time; anything else goes after a day).

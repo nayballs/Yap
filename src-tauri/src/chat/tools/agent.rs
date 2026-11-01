@@ -262,6 +262,10 @@ pub fn offered_tools(open_apps: bool, web: bool, extra: Extra<'_>) -> Value {
     if let (Some(all), Some(pages)) = (tools.as_array_mut(), crate::chat::pages::definitions(extra.pictures).as_array()) {
         all.extend(pages.iter().cloned());
     }
+    // The screen (chat/see_screen.rs): not tied to the web.
+    if let (Some(all), Some(screen)) = (tools.as_array_mut(), crate::chat::see_screen::definitions(extra.screen).as_array()) {
+        all.extend(screen.iter().cloned());
+    }
     if let (Some(all), Some(memory_tools)) = (tools.as_array_mut(), memory_definitions(extra).as_array()) {
         all.extend(memory_tools.iter().cloned());
     }
@@ -433,6 +437,9 @@ async fn tool_loop(
     };
     let room = Room { limit: extra.room, tools: &tools, provider, here: crate::ai::ai_model::runs_here(provider, base_url) };
     let mut tools_used: Vec<String> = Vec::new();
+    // Something from the screen came in (`look_at_screen`): web content for
+    // the safety rule, as a page read is.
+    let mut screen_seen = false;
     // The answer just before the question: a "yes" to its offer to open an
     // app is the person asking (`apps::consented`).
     let previous: Option<String> = history
@@ -752,7 +759,7 @@ async fn tool_loop(
             if let Some(live) = live {
                 crate::chat::activity::tell(live.sink, crate::chat::activity::of_call(name, &args));
             }
-            let web_seen = web.as_deref().is_some_and(crate::web::Turn::seen);
+            let web_seen = web.as_deref().is_some_and(crate::web::Turn::seen) || screen_seen;
             let mut result = if hold_web && (crate::web::TOOL_NAMES.contains(&name) || name == crate::chat::pictures::FIND) {
                 tracing::info!(tool = %name, "Chat: a new document's outline comes before any search; refused");
                 crate::ai::eval::post_fix("outline_first");
@@ -786,6 +793,34 @@ async fn tool_loop(
                         looks.extend(look);
                         run.result
                     }
+                }
+            } else if crate::chat::see_screen::offers(extra.screen, name) {
+                // The screen as it is now (chat/see_screen.rs): its pictures
+                // go with the next step while they fit, its text in the result.
+                let run = crate::chat::see_screen::execute(&args, extra.screen, provider, base_url).await;
+                screen_seen |= run.seen;
+                // Shown with the question, as it was taken.
+                if !run.images.is_empty() {
+                    if let Some(conv) = extra.conversation {
+                        crate::chat::chats::add_question_images(conv, &run.images);
+                    }
+                    if let Some(live) = live {
+                        live.sink.send(crate::chat::stream::Event::Screen { images: run.images.clone() });
+                    }
+                }
+                let mut fits = true;
+                for look in run.looks {
+                    if room.takes_picture(&messages, &looks, &look) {
+                        looks.push(look);
+                    } else {
+                        fits = false;
+                    }
+                }
+                if fits {
+                    run.result
+                } else {
+                    tracing::info!(provider, "Chat: no room left in the model's context for the screen");
+                    tool_error(crate::chat::budget::NO_ROOM_TO_LOOK.to_string(), Value::Null, "Didn't look at your screen: no room left in the model's context".to_string())
                 }
             } else if let (Some(turn), true) = (web.as_deref_mut(), crate::chat::pages::offers(extra.pictures, name)) {
                 // A page brought up, a shot of one, a button for the

@@ -159,6 +159,7 @@ async fn fixed_of(cfg: &crate::config::YapConfig, target: &crate::ai::ai_model::
         doc_tools,
         strong,
         pictures,
+        screen: crate::chat::see_screen::gate(cfg, target.tools, &target.provider, &target.model),
     };
     let schemas = if target.tools { counter.count(&crate::chat::tools::offered_tools(cfg.open_apps, cfg.web_search && !in_chat, extra).to_string()).await } else { 0 };
     counter.count(&stable).await + schemas

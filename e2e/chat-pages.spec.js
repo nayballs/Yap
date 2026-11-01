@@ -468,3 +468,39 @@ test('"Open YouTube" and "search for train tickets…" open beside the chat by Y
     s.conversations.some((c) => c.messages.some((m) => m.pages?.[0]?.url === 'https://www.youtube.com/') && c.messages.some((m) => m.pages?.[0]?.title === 'Search: train tickets from Kellbrook to Port Ellis'))
   );
 });
+
+test('look_at_screen: a model that reads images sees every monitor, Yap left out; it is never told it cannot see', async ({ yap, main, fakeLlm }) => {
+  // ("vision" in the fake's id: a model that reads images. The web off: the screen isn't the web's.)
+  await setConfig(yap, main, { webSearch: false, assistantScreen: true, memoryLearnChats: false, llmScopes: { chat: { enabled: true, provider: 'custom', baseUrl: fakeLlm.base, model: 'fake-vision-chat' } } });
+  // Two fake monitors (a test run never captures the real screen).
+  await yap.invoke('e2e_snip', {
+    monitors: [
+      { x: 0, y: 0, width: 1280, height: 720, scale: 1, hdr: false, whiteNits: 80 },
+      { x: 1280, y: 0, width: 1280, height: 720, scale: 1, hdr: false, whiteNits: 80 },
+    ],
+    windows: [],
+    start: false,
+  });
+  // (A page left open by the last test: the panel closed, so the chat list shows.)
+  await openView(main, 'Chat');
+  const closePanel = main.getByTestId('chat-page').getByRole('button', { name: 'Close the panel' });
+  if (await closePanel.count()) await closePanel.click();
+  const from = fakeLlm.requests.length;
+  fakeLlm.scriptChat([{ tools: [{ name: 'look_at_screen', args: {} }] }, { content: 'Those are the speakers on your other monitor: a 3.5mm input.' }]);
+  await ask(main, 'Here are the speakers, can you have a look?');
+  await expect(main.getByText('Those are the speakers on your other monitor')).toBeVisible({ timeout: 20_000 });
+  const calls = chatCalls(fakeLlm, from);
+  expect(calls[0].tools).toContain('look_at_screen');
+  expect(calls[0].system).toContain("Never say you can't see: look.");
+  // Its result, then the two monitors as the user's message.
+  expect(toolResult(calls[1])).toMatchObject({ success: true, data: { monitors: 2 }, displayText: 'Looked at your screen (2 monitors)' });
+  const parts = calls[1].messages.at(-1).content;
+  expect(parts.filter((p) => p.type === 'image_url')).toHaveLength(2);
+  expect(parts.find((p) => p.type === 'text').text).toContain('Monitor 1 of 2 as it is now');
+  await expect(main.getByText('Looked at your screen', { exact: true })).toBeVisible();
+  // What was looked at shows with the question, in the screenshot frame, and is kept with it.
+  await expect(main.getByRole('group', { name: 'Screenshots' }).last().getByRole('button', { name: /^Screenshot,/ })).toHaveCount(2);
+  await expectStore(yap, 'chats.json', (s) =>
+    s.conversations.some((c) => c.messages.some((m) => m.role === 'user' && m.text.startsWith('Here are the speakers') && m.images?.filter((i) => i.source === 'screen').length === 2))
+  );
+});

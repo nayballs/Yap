@@ -160,7 +160,7 @@ pub fn rule(kind: &str) -> Rule {
         // The Voice Assistant has no AI model, or its model failed: right
         // after its own question.
         "assistantNoModel" | "assistantFailed" => alert,
-        // "Let the Voice Assistant see the window in front?" (a question
+        // "Let Yap's AI see your screen?" (a question
         // about the screen met a cloud model; asked once): right after it.
         "assistantScreen" => alert,
         // "Let Commands read the window in front?" (a Command that replies
