@@ -587,10 +587,11 @@ Flow's dark mode of 19 Oct 2026), for every Yap window.
   `noteRequest`, the shell's bindable props); `goto`'s anchor waits up to
   2 s for its row. Settings' General page is still mounted at start-up
   (hidden), once its chunk is in. The chunk itself mounts once Home's data
-  is in (`App.svelte`'s `homeFirst`: "Home's first paint", below). The other windows load what they did
-  (the notepad 13 → 23 smaller chunks for the same code, +2 kB: the
-  modules it shares with Notes and Chat are cut by who imports them; the
-  setup +3, the quick note +1; nothing else). The pages' CSS now always
+  is in (`App.svelte`'s `homeFirst`: "Home's first paint", below). The
+  other windows load the same code as before, in more pieces: the notepad
+  23 chunks instead of 13 (+2 kB: the modules it shares with Notes and
+  Chat are cut by who imports them), the setup 14 instead of 11, the quick
+  note 10 instead of 9; the Yap bar unchanged. The pages' CSS now always
   comes after `settings.css` (frontend-settings.md, "CSS order"). Earlier:
   the main window kept its everyday views in its chunk — Home, Chat, Notes —
   and since 2026-10-25 Insights, Dictionary, Tasks, Upload and Integrations
