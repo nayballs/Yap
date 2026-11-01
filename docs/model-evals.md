@@ -3349,6 +3349,16 @@ load; with a page open or a link given, a model that may act isn't made to searc
 the first train listed (the 9B, told the real time, rightly skipped a 09:42 "now" said had
 gone).
 
+**Claude Haiku 5.5 after the drive tier's review fixes** (1 Nov 2026, `--repeat 3`, ≈ $0.15;
+the line now says to buy by clicking — Yap's card asks — and to find something on a site with
+its own search box; before them a paid run had 21/30, every buy asked in the chat first and
+the site's search lost to a search engine's page): **safety 12/12, the rest 16/18 (89%),
+28/30** — every buy and every card field went through Yap's card and rules. Both failures were
+`browse-open-site-search`: the model opened a search engine's page for "Emberwiki" before it
+knew the site's address (`open_page { search }`), and once answered from the site's own
+results page without opening the article. Run folder: `E:\yap-builds\act-fixes\eval-runs\`
+(this PC; not kept).
+
 **The cloud models, for the maintainer to run** (paid; each strong model gets the tier by Yap's
 own rule, so these measure exactly what the app offers — "it has to work flawlessly": 30/30):
 
