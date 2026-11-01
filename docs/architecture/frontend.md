@@ -68,18 +68,24 @@ changed. **`renderMarkdown(…, {lines: true})`** puts `data-line="a-b"` (the
 block's source lines) on each top-level block (DOMPurify keeps only that
 shape): the document panel maps a selection back to the markdown with it.
 
-**The main window's chunk** is held near 720 kB (`vite.config.js`'
-`chunkSizeWarningLimit`, 700 until Chat's documents on 2026-10-30 took it
-to 708; 715 since the panel's two views, a selection's quote and find
-across a text's pieces took it to 712 on 2026-10-31; 725 since Chat's
-activity line, its folded steps and Sources row, and each model's effort
-on the chip and in Settings took it to 722 the same day, the picker's
-part in the picker's own chunk): the document panel
+**The main window's chunk** (`ControlPanel`) is 179 kB since 2026-11-01,
+under a budget of its own (200 kB: `vite.config.js`' `mainChunkBudget`
+warns past it; Vite's `chunkSizeWarningLimit`, 450 kB, is every other
+chunk's, the page editor's the biggest): Chat, Notes and every Settings
+page are chunks of their own ("One chunk per window", below). Chat's
+parts are in Chat's chunk (`ChatView`, 124 kB): the document panel
 itself loads on demand (`{#await import('./DocPanel.svelte')}`, with its
 own `docTools.js`, `docStream.js`, `docPieces.js` and
-`core/markdownSource.js`), its state, the quote and the pill don't (the
-stream-in's pace lives in the panel for that: the main chunk keeps only
-what's on its way, +0.5 kB). The page's editor is a chunk of its own on
+`core/markdownSource.js`), its state, the quote and the pill load with
+Chat (the stream-in's pace lives in the panel for that: Chat's chunk
+keeps only what's on its way). Until 2026-11-01 Chat was in the main
+chunk, held near 720 kB (`chunkSizeWarningLimit` 700 until Chat's
+documents on 2026-10-30 took it to 708; 715 since the panel's two views,
+a selection's quote and find across a text's pieces took it to 712 on
+2026-10-31; 725 since Chat's activity line, its folded steps and Sources
+row, and each model's effort on the chip and in Settings took it to 722
+the same day, the picker's part in the picker's own chunk), and the
+sizes below are the main chunk's then. The page's editor is a chunk of its own on
 top (`components/richtext/richEditor.js` with TipTap and ProseMirror, 435 kB
 / 135 kB gzipped), imported the first time Preview is editable: the panel
 (23.8 kB, its toolbar in `RichToolbar`'s chunk, 5.8 kB) opens on the drawn
@@ -565,10 +571,39 @@ Flow's dark mode of 19 Oct 2026), for every Yap window.
   only its own view (`VIEWS[label]()`, a dynamic `import()` each — never a
   ternary of imports, which Vite gave one preload list, the last one's, so
   the main window lost its CSS). The Yap bar loads ~150 KB of script
-  instead of the whole ~1 MB app; the notepad ~310 KB. **The main window
-  keeps its everyday views in its chunk** — Home, Chat, Notes —
+  instead of the whole ~1 MB app; the notepad ~310 KB. **How the main
+  window loads (2026-11-01):** its chunk (`ControlPanel`, 179 kB, 57 kB
+  gzipped; 778 kB before) holds the window's frame and sidebar, Home,
+  Settings' shell (`Settings.svelte`: the nav and its search index, the
+  config's copy and auto-save, the in-page hotkey fallback, the attention
+  badge), the toasts and every `init…` a notice or store needs (each
+  `listen` still made at start-up: no store or notice listens any later).
+  Every other view is a chunk of its own (ControlPanel's `VIEWS`: Insights,
+  Chat 124 kB, Notes 109 kB, Meetings, Tasks, Upload, Dictionary,
+  Integrations), and so is every Settings page and the search's results
+  (`Settings.svelte`'s `PAGES`: Language Models 89 kB, Voice Assistant 51,
+  Dictation 37, Privacy & data 36, Account 27, Memory 23, Commands 23,
+  Shortcuts 21, Meetings 18, Speech-to-Text 17, About 13, General 13, Skills
+  11, Connectors 10, AI apps 10, Phone 9), each drawn with `{#await
+  VIEWS.chat() then …}` the first time it shows. Both lists are fetched as
+  soon as the window is idle (`requestIdleCallback`, two of them: views,
+  pages), so a view or a page is in memory before anyone opens it and
+  shows at once, with nothing to wait for (a resolved `import()` draws in
+  the same frame); before that (a click in the first moments) its chunk
+  comes from the app's own files in a few ms. What a view or a page hands
+  over meanwhile goes through a store, as before (`chatRequest`,
+  `noteRequest`, the shell's bindable props); `goto`'s anchor waits up to
+  2 s for its row. Settings' General page is still mounted at start-up
+  (hidden), once its chunk is in. The chunk itself mounts once Home's data
+  is in (`App.svelte`'s `homeFirst`: "Home's first paint", below). The
+  other windows load the same code as before, in more pieces: the notepad
+  23 chunks instead of 13 (+2 kB: the modules it shares with Notes and
+  Chat are cut by who imports them), the setup 14 instead of 11, the quick
+  note 10 instead of 9; the Yap bar unchanged. The pages' CSS now always
+  comes after `settings.css` (frontend-settings.md, "CSS order"). Earlier:
+  the main window kept its everyday views in its chunk — Home, Chat, Notes —
   and since 2026-10-25 Insights, Dictionary, Tasks, Upload and Integrations
-  load on first use (`{#await import(…)}` in ControlPanel): the views
+  loaded on first use (`{#await import(…)}` in ControlPanel): the views
   added that week took the chunk to 735 KB, past `chunkSizeWarningLimit`
   700 in vite.config.js; then 683 KB. The afternoon's batch took it to
   705 KB, so Meetings loads on first use too, fetched as soon as the window
@@ -615,7 +650,15 @@ Flow's dark mode of 19 Oct 2026), for every Yap window.
   call per listener, `listen_js` is crate-private, so they can't be
   batched) run beside it and were never what Home waited for: each takes
   ~20–30 ms, all in flight at once. e2e `home-first-paint.spec.js` guards
-  the order and the count (not the milliseconds).
+  the order and the count (not the milliseconds). Since the main window's
+  chunk got small (2026-11-01, "One chunk per window"), it loads before
+  that answer comes, and its start-up's calls, answered first, sometimes
+  went ahead of it (24–82 answered calls before Home's, in a third of the
+  runs, Home then ~30 ms later): so `App.svelte` mounts ControlPanel once
+  the answer is in (`homeFirst`, at most 300 ms; a failed answer doesn't
+  wait), as the big chunk's load used to make it. Measured the same way
+  (12 reloads each): behind 3 every time, Home ready ~80 ms (median; ~99
+  ms with the 778 kB chunk).
 - **AI errors in plain words** (`lib/core/aiErrors.js` `aiError`): Chat's
   "Couldn't send" says "Couldn't reach the AI model on this PC
   (127.0.0.1:11434). Check that it's running (Ollama, LM Studio…)…", "…check

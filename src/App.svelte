@@ -11,8 +11,13 @@
   // Notes, Settings — to draw a pill, and neither does the notepad.
   const label = getCurrentWindow().label;
   // The main window: Home's data asked for now, while its view's code loads
-  // (homeData.js), so Home can draw as soon as it mounts.
-  if (label === 'settings') prefetchHome().catch(() => {});
+  // (homeData.js), so Home can draw as soon as it mounts. The view mounts
+  // once that answer is in (or after 300 ms at most), so its own start-up —
+  // ~60 calls, 50 of them listeners — never goes ahead of Home's: since
+  // 2026-11-01 its chunk is small enough to load before the answer comes
+  // (frontend.md, "One chunk per window"), where it used to take longer.
+  const homeFirst =
+    label === 'settings' ? Promise.race([prefetchHome().catch(() => {}), new Promise((done) => setTimeout(done, 300))]) : null;
   // One arrow per view, never a ternary of imports: Vite gives each import()
   // its own preload list (the view's CSS chunk included), and a ternary of
   // them got one list — the last one's — so the main window lost its CSS.
@@ -24,7 +29,7 @@
     'quick-note': () => import('./lib/quicknote/QuickNote.svelte'),
     overlay: () => import('./lib/bar/Overlay.svelte'),
   };
-  const view = (VIEWS[label] ?? VIEWS.overlay)();
+  const view = homeFirst ? Promise.all([VIEWS.settings(), homeFirst]).then(([v]) => v) : (VIEWS[label] ?? VIEWS.overlay)();
 
   // Settings → General → Appearance (the theme, the reading font and size,
   // Motion) and the bar's colours in every window, following each save live

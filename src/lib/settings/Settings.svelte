@@ -9,12 +9,7 @@
   import { loadCatalog } from '../stores/modelCatalog.svelte.js';
   import { attention, attentionCount, followAttention } from '../stores/attention.svelte.js';
   import { refreshLocalLlm, listenLocalProgress, followLocalLlm } from './localLlm.svelte.js';
-  import ConnectorsSection from './ConnectorsSection.svelte';
-  import McpSection from './McpSection.svelte';
-  import SkillsPage from './SkillsPage.svelte';
   import { account, displayName, initAccount, initials } from '../stores/account.svelte.js';
-  // Last before settings.css: the CSS order (LanguageModelsPage.svelte says why).
-  import LanguageModelsPage from './LanguageModelsPage.svelte';
   import './settings.css';
   import { NAV_GROUPS, resolveTarget } from './nav.js';
   import { searchSettings, groupResults, countByPage } from './settingsIndex.js';
@@ -23,16 +18,6 @@
   import { followDictionary } from './dictionarySync.svelte.js';
   import { followOutsideChanges } from './adoptions.svelte.js';
   import { config, syncConfig, readConfig, setPristine, persist } from './configSync.svelte.js';
-  import SearchResults from './SearchResults.svelte';
-  import GeneralPage from './GeneralPage.svelte';
-  import DictationPage from './DictationPage.svelte';
-  import ShortcutsPage from './ShortcutsPage.svelte';
-  import MeetingsPage from './MeetingsPage.svelte';
-  import PrivacyPage from './PrivacyPage.svelte';
-  import AboutPage from './AboutPage.svelte';
-  import CommandsPage from './CommandsPage.svelte';
-  import VoicePage from './VoicePage.svelte';
-  import SpeechPage from './SpeechPage.svelte';
   import { SCOPE_TABS, ensureScopes } from './scopes.js';
   import { migrateRoutesToProfiles } from './profiles.js';
   import {
@@ -44,6 +29,32 @@
     listenUsage,
   } from './languageModels.svelte.js';
   import { noteAccountPicture } from '../core/connections.js';
+
+  // Every page (and the search's results) is a chunk of its own, loaded the
+  // first time it shows and all fetched once the window is idle (onMount
+  // below), so opening one never waits: the main window's chunk keeps only
+  // this shell (frontend.md, "One chunk per window"). One arrow per page, as
+  // in App.svelte: each import() gets its own preload list. Their CSS comes
+  // after settings.css (frontend-settings.md, "CSS order").
+  const PAGES = {
+    search: () => import('./SearchResults.svelte'),
+    general: () => import('./GeneralPage.svelte'),
+    dictation: () => import('./DictationPage.svelte'),
+    shortcuts: () => import('./ShortcutsPage.svelte'),
+    meetings: () => import('./MeetingsPage.svelte'),
+    commands: () => import('./CommandsPage.svelte'),
+    voice: () => import('./VoicePage.svelte'),
+    memory: () => import('./MemorySection.svelte'),
+    skills: () => import('./SkillsPage.svelte'),
+    models: () => import('./SpeechPage.svelte'),
+    cleanup: () => import('./LanguageModelsPage.svelte'),
+    connectors: () => import('./ConnectorsSection.svelte'),
+    mcp: () => import('./McpSection.svelte'),
+    phone: () => import('./PhonePage.svelte'),
+    privacy: () => import('./PrivacyPage.svelte'),
+    about: () => import('./AboutPage.svelte'),
+    account: () => import('./AccountSection.svelte'),
+  };
 
   // Embedded mode: rendered inside the ControlPanel's Settings modal
   // (OpenWhispr SettingsModal-style) instead of filling the window. The parent
@@ -271,6 +282,9 @@
   // OpenWhispr's compact mode). ----
   let rail = $state(false);
   onMount(() => {
+    // The pages' chunks (PAGES above), fetched once the window is idle.
+    const idle = window.requestIdleCallback ?? ((f) => setTimeout(f, 2000));
+    idle(() => Object.values(PAGES).forEach((page) => page().catch(() => {})));
     const mq = window.matchMedia?.('(max-width: 960px)');
     if (!mq) return;
     rail = mq.matches;
@@ -565,68 +579,92 @@
               <kbd>Esc</kbd>
             </div>
           {/if}
-          <!-- Which page is shown: each is its own component (settings/*Page.svelte);
-               the few that are a section and a heading are here. -->
+          <!-- Which page is shown: each is its own component (settings/*Page.svelte)
+               in a chunk of its own (PAGES); the few that are a section and a
+               heading are here. -->
           {#if searching}
-            <SearchResults {query} groups={resultGroups} bind:selected {cfg} onopen={openResult} />
+            {#await PAGES.search() then { default: SearchResults }}
+              <SearchResults {query} groups={resultGroups} bind:selected {cfg} onopen={openResult} />
+            {/await}
           {:else if section === 'general'}
-            <GeneralPage {cfg} {barHiddenUntil} {goto} />
+            {#await PAGES.general() then { default: GeneralPage }}
+              <GeneralPage {cfg} {barHiddenUntil} {goto} />
+            {/await}
           {:else if section === 'dictation'}
-            <DictationPage {cfg} {outputs} {onshowview} {goto} />
+            {#await PAGES.dictation() then { default: DictationPage }}
+              <DictationPage {cfg} {outputs} {onshowview} {goto} />
+            {/await}
           {:else if section === 'shortcuts'}
-            <ShortcutsPage {cfg} {goto} {open} bind:sideButtons />
+            {#await PAGES.shortcuts() then { default: ShortcutsPage }}
+              <ShortcutsPage {cfg} {goto} {open} bind:sideButtons />
+            {/await}
           {:else if section === 'meetings'}
-            <MeetingsPage {cfg} {goto} bind:apps={meetingApps} />
+            {#await PAGES.meetings() then { default: MeetingsPage }}
+              <MeetingsPage {cfg} {goto} bind:apps={meetingApps} />
+            {/await}
           {:else if section === 'commands'}
-            <CommandsPage {cfg} {goto} />
+            {#await PAGES.commands() then { default: CommandsPage }}
+              <CommandsPage {cfg} {goto} />
+            {/await}
           {:else if section === 'voice'}
-            <VoicePage {cfg} {goto} bind:offerKokoro />
+            {#await PAGES.voice() then { default: VoicePage }}
+              <VoicePage {cfg} {goto} bind:offerKokoro />
+            {/await}
           {:else if section === 'memory'}
             <div class="page-h">
               <h1>Memory</h1>
               <p>What Yap remembers about you, so its AI answers you better. See, change or clear any of it.</p>
             </div>
-            <!-- Memory and Account: the two biggest pages, each in its own
-                 chunk (as the Help menu is), so the main window's stays
-                 under Vite's 700 kB. Neither uses settings.css's classes
-                 in a way its order decides (frontend-settings.md). -->
-            {#await import('./MemorySection.svelte') then { default: MemorySection }}
+            {#await PAGES.memory() then { default: MemorySection }}
               <MemorySection {cfg} {goto} />
             {/await}
           {:else if section === 'skills'}
-            <SkillsPage />
+            {#await PAGES.skills() then { default: SkillsPage }}
+              <SkillsPage />
+            {/await}
           {:else if section === 'models'}
-            <SpeechPage {cfg} {langInfo} {goto} />
+            {#await PAGES.models() then { default: SpeechPage }}
+              <SpeechPage {cfg} {langInfo} {goto} />
+            {/await}
           {:else if section === 'cleanup'}
-            <LanguageModelsPage {cfg} {goto} />
+            {#await PAGES.cleanup() then { default: LanguageModelsPage }}
+              <LanguageModelsPage {cfg} {goto} />
+            {/await}
           {:else if section === 'connectors'}
             <div class="page-h">
               <h1>Connectors</h1>
               <p>A calendar gives you a reminder before each meeting, and notes with its name and who's in it. Yap reads it straight from this PC.</p>
             </div>
-            <ConnectorsSection {goto} />
+            {#await PAGES.connectors() then { default: ConnectorsSection }}
+              <ConnectorsSection {goto} />
+            {/await}
           {:else if section === 'mcp'}
             <div class="page-h">
               <h1>AI apps (MCP)</h1>
               <p>Let your AI apps read your meeting transcripts and notes, through Yap on this PC. Never your dictations.</p>
             </div>
-            <McpSection {cfg} {goto} />
+            {#await PAGES.mcp() then { default: McpSection }}
+              <McpSection {cfg} {goto} />
+            {/await}
           {:else if section === 'phone'}
-            <!-- Its own chunk, as Memory and Account are. -->
-            {#await import('./PhonePage.svelte') then { default: PhonePage }}
+            {#await PAGES.phone() then { default: PhonePage }}
               <PhonePage {cfg} />
             {/await}
           {:else if section === 'privacy'}
-            <PrivacyPage {cfg} {goto} bind:connections={privacyConnections} />
+            {#await PAGES.privacy() then { default: PrivacyPage }}
+              <PrivacyPage {cfg} {goto} bind:connections={privacyConnections} />
+            {/await}
           {:else if section === 'about'}
-            <AboutPage {cfg} version={APP_VERSION} {goto} />
+            {#await PAGES.about() then { default: AboutPage }}
+              <AboutPage {cfg} version={APP_VERSION} {goto} />
+            {/await}
           {:else if section === 'account'}
             <div class="page-h">
               <h1>Account</h1>
               <p>Optional. Yap works fully offline without one; sign in only for the extras that need it.</p>
             </div>
             <div data-setting="account">
-              {#await import('./AccountSection.svelte') then { default: AccountSection }}
+              {#await PAGES.account() then { default: AccountSection }}
                 <AccountSection />
               {/await}
             </div>

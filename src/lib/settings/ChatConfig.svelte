@@ -86,7 +86,7 @@
   {#if enabled}
     <Group title="Model" id="settings-scope-model" bare>
       <ScopeProviderConfig {scope} {cfg} scopeKey="chat" />
-      <p class="set-note tools">
+      <p class="set-note">
         Note tools need a bigger model: cloud models and local ones of 4B or more look up and change your notes;
         smaller ones answer from a plain search of them. Switch models from the chip under the chat box too.
       </p>
@@ -108,7 +108,7 @@
       <PromptStudio bind:prompt={scope.prompt} defaultBody={defaultPrompt} {providerLabel} {modelLabel} />
     </Group>
   {:else}
-    <p class="set-note offnote">Turn it on to give Chat a model of its own.</p>
+    <p class="set-note">Turn it on to give Chat a model of its own.</p>
   {/if}
 </div>
 
@@ -116,11 +116,5 @@
   .scope {
     display: flex;
     flex-direction: column;
-  }
-  .offnote {
-    margin: -18px 0 30px;
-  }
-  .tools {
-    margin-top: 12px;
   }
 </style>
