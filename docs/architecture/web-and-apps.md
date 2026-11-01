@@ -483,7 +483,14 @@ Chat's and the Voice Assistant's two ways of reaching outside Yap: looking thing
   `error_code` said plainly: `Couldn't read …: the page didn't open`), its
   pages numbered as sources (local addresses never), its answer's
   citations — a search result's `url`, a fetched page's `document_title` —
-  the `[n]` pills. A model evaluation records them as the `web_search` /
+  the `[n]` pills. Its search's `<cite index="…">` markup, which Claude
+  sometimes copies into a tool call's text, never reaches a note, a document
+  or an answer (`anthropic::strip_cites`, over its text and every tool
+  call's input: Claude Haiku 5.5 wrote it into a build's sections, 1 Nov
+  2026), and its web lines say the search and fetch are Anthropic's, run on
+  Anthropic's servers, not Yap's (it had told the maintainer they were
+  Yap's). A page Anthropic's fetcher is turned away from (game wikis often
+  are) shows as a chip that didn't go through. A model evaluation records them as the `web_search` /
   `read_page` calls they stand for. **Not for OpenAI or Gemini**: OpenAI's
   web search is the Responses API's (Chat runs on Chat Completions; moving
   Chat there is a new client, not a flag); Gemini combines Google Search

@@ -294,7 +294,7 @@ pub fn message_of(v: &Value) -> Value {
                 }
             }
             "text" if last_result.is_none_or(|l| k > l) => {
-                text.push_str(b["text"].as_str().unwrap_or(""));
+                text.push_str(&strip_cites(b["text"].as_str().unwrap_or("")));
                 let mut marks: Vec<usize> = Vec::new();
                 for c in b["citations"].as_array().into_iter().flatten() {
                     // A search result's own address; a fetched page's by its title.
@@ -324,10 +324,13 @@ pub fn message_of(v: &Value) -> Value {
                 }
             }
             "thinking" => thinking.push_str(b["thinking"].as_str().unwrap_or("")),
+            // (Its search's <cite> markup copied into a note or a document's
+            // text: never written — Claude Haiku 5.5 put
+            // `<cite index="41-6">…</cite>` in a build's sections, 1 Nov 2026.)
             "tool_use" => calls.push(json!({
                 "id": b["id"],
                 "type": "function",
-                "function": { "name": b["name"], "arguments": b["input"].to_string() },
+                "function": { "name": b["name"], "arguments": strip_cites_in(&b["input"]).to_string() },
             })),
             _ => {}
         }
@@ -348,6 +351,28 @@ pub fn message_of(v: &Value) -> Value {
 
 /// `text` with its citation marks as the turn numbers them (`numbers[i]`:
 /// cite `i`'s number; one it doesn't have goes). Pure.
+/// **Claude's search markup taken out** of text it wrote: `<cite
+/// index="…">words</cite>` (the form its web search's results take, which
+/// it sometimes copies into a tool call's text) becomes the words. Only
+/// that form: a `<cite>` without an `index` is someone's own text. Pure.
+pub fn strip_cites(text: &str) -> String {
+    static OPEN: std::sync::LazyLock<regex::Regex> = std::sync::LazyLock::new(|| regex::Regex::new(r#"<cite\s+index\s*=\s*"[^"]*"\s*>"#).expect("static regex"));
+    if !OPEN.is_match(text) {
+        return text.to_string();
+    }
+    OPEN.replace_all(text, "").replace("</cite>", "")
+}
+
+/// [`strip_cites`] over every string in a tool call's input. Pure.
+pub fn strip_cites_in(v: &Value) -> Value {
+    match v {
+        Value::String(s) => Value::String(strip_cites(s)),
+        Value::Array(a) => Value::Array(a.iter().map(strip_cites_in).collect()),
+        Value::Object(o) => Value::Object(o.iter().map(|(k, x)| (k.clone(), strip_cites_in(x))).collect()),
+        other => other.clone(),
+    }
+}
+
 pub fn number_marks(text: &str, numbers: &[usize]) -> String {
     static MARK: std::sync::LazyLock<regex::Regex> =
         std::sync::LazyLock::new(|| regex::Regex::new("\u{E000}(\\d+)\u{E001}").expect("static regex"));
@@ -638,6 +663,19 @@ pub(super) async fn post(req: &ChatRequest, native: &Native, mut on: Option<OnDe
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn its_searchs_cite_markup_never_reaches_a_note_or_an_answer() {
+        let section = r#"Each keeps their own points, because <cite index="41-6">civil abilities are not shared</cite>. <cite index="41-28,41-29">Persuasion</cite> goes on the leader."#;
+        assert_eq!(strip_cites(section), "Each keeps their own points, because civil abilities are not shared. Persuasion goes on the leader.");
+        // Every string in a tool call's input; anything else as it was.
+        let input = json!({ "note_id": 19, "markdown": section, "ops": [{ "text": "<cite index=\"3-1\">a</cite>" }] });
+        let out = strip_cites_in(&input);
+        assert_eq!(out["note_id"], 19);
+        assert!(!out.to_string().contains("cite"), "{out}");
+        // Someone's own <cite> (no index) stays.
+        assert_eq!(strip_cites("<cite>The Hobbit</cite>"), "<cite>The Hobbit</cite>");
+    }
 
     fn req(messages: Value, tools: Option<Value>) -> ChatRequest {
         ChatRequest::chat("https://api.anthropic.com/v1", "k", "claude-opus-5-5", "anthropic", 0.5, messages, tools.as_ref(), None)
