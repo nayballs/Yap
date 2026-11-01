@@ -578,8 +578,13 @@ impl CallLog {
     pub fn answered(&self, limits: &Value, body: &Value) {
         let ms = self.ms();
         let usage = &body["usage"];
-        let total = usage["total_tokens"].as_u64().unwrap_or(0);
-        let cached = usage["prompt_tokens_details"]["cached_tokens"].as_u64().unwrap_or(0);
+        // OpenAI's fields, else Anthropic's Messages API's (input / output,
+        // its cache read): a Claude run counted 0 tokens before 1 Nov 2026.
+        let field = |openai: &str, anthropic: &str| usage[openai].as_u64().or_else(|| usage[anthropic].as_u64()).unwrap_or(0);
+        let prompt = field("prompt_tokens", "input_tokens");
+        let completion = field("completion_tokens", "output_tokens");
+        let total = usage["total_tokens"].as_u64().unwrap_or(prompt + completion);
+        let cached = usage["prompt_tokens_details"]["cached_tokens"].as_u64().or_else(|| usage["cache_read_input_tokens"].as_u64()).unwrap_or(0);
         let now = Instant::now();
         if let Some(r) = rec().as_mut() {
             let t = &mut r.turn;
@@ -588,8 +593,8 @@ impl CallLog {
             if ms > 20_000 {
                 t.calls_over_20s += 1;
             }
-            t.prompt_tokens += usage["prompt_tokens"].as_u64().unwrap_or(0);
-            t.completion_tokens += usage["completion_tokens"].as_u64().unwrap_or(0);
+            t.prompt_tokens += prompt;
+            t.completion_tokens += completion;
             t.total_tokens += total;
             t.cached_tokens += cached;
             t.reasoning_tokens += usage["completion_tokens_details"]["reasoning_tokens"].as_u64().unwrap_or(0);

@@ -3214,16 +3214,23 @@ stand-in web, a made-up game ("Emberfall") so no model knows the answer, tag `pi
   say it couldn't find the map (`pictures_shown: []`, `answer_matches`).
 
 **Stand-in pictures** (`ai/eval/standin.rs` `stand_in_picture`): a `pages` value
-`"picture 800x600: WORDS"` is served as a PNG of that size with its words drawn on it in
-large letters, so a model that looks tells the pictures apart by what they show, as it
-would real ones; a model that can't look goes by Yap's ranked list (alt text, caption,
-heading). `pictures_shown` (the checks table) compares the ids of the `show_picture` calls
-that showed one.
+`"picture 800x600: WORDS"` is served as a PNG of that size that **looks like what its words
+say**, its words on a title strip across the top (as a wiki's map carries its title): a map
+(sea, an island, a path, buildings; red X marks and a "TREASURE" legend when it says
+treasure or X), a night screenshot, concept art at dusk, an armour set, a portrait; else the
+words alone. A model that looks judges them as it would real ones; a model that can't goes
+by Yap's ranked list (alt text, caption, heading). `pictures_shown` (the checks table)
+compares the ids of the `show_picture` calls that showed one.
 
-**Not run yet.** No offline model gets the look path (the on-device model needs its
-projector loaded), and the cloud ones are paid: run them only with the maintainer's OK.
-`cargo test eval::` parses them (`the_repos_scenarios_parse`) and checks the stand-in
-pictures (`a_stand_in_picture_has_its_size_and_its_words_on_it`). The cheapest first:
+**First run (1 Nov 2026, Haiku 5.5, `--repeat 2`): 2/4, then 4/4.** With word-only cards,
+Haiku looked at p3 and refused it, rightly: "only a title card that says 'Fort Joy treasure
+map, every chest marked X,' with no map on it, so I didn't put it up" (`20261101-005209`).
+With the pictures drawn as scenes: **4/4** (`20261101-010025`), the map shown after one look,
+nothing shown on the page without one; ~2.9k tokens for the four (the cache reads apart).
+The tally now counts Claude's tokens too (`record.rs`: the Messages API's `input_tokens` /
+`output_tokens`). Not run yet: the on-device model (free) and Opus.
+`cargo test eval::` parses the scenarios (`the_repos_scenarios_parse`) and checks the stand-in
+pictures (`a_stand_in_picture_looks_like_what_it_says_and_carries_its_title`). The cheapest first:
 
 ```bash
 # show only (the on-device 4B without its projector; free, this PC)
