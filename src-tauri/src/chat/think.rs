@@ -6,10 +6,11 @@
 //! dictation cleanup, Commands, the meeting notes, the Voice Assistant,
 //! Chat's own questions without Think — stays as it was.
 //!
-//! **On this PC** (Qwen3.5, the sidecar): llamafile runs with `--reasoning
-//! off` (`local_llm::server_args`: Qwen3.5 thinking by default looped and
-//! slowed every cleanup), and **one request can still think, without a
-//! restart** — measured on llamafile 0.10.6 with Qwen3.5-4B (Q4_K_M, MTP on,
+//! **On this PC** (Qwen3.5, the sidecar): llama.cpp's server (or llamafile)
+//! runs with `--reasoning off` (`local_llm::server_args`: Qwen3.5 thinking
+//! by default looped and slowed every cleanup), and **one request can still
+//! think, without a restart** — measured on llamafile 0.10.6, and the same
+//! fields cap it on llama.cpp b11982 (2026-11-01), with Qwen3.5-4B (Q4_K_M, MTP on,
 //! `--reasoning off`): `chat_template_kwargs: {"enable_thinking": true}`
 //! turns it on for that request alone (the next one, without it, answers at
 //! once as before); `thinking_budget_tokens` caps it — without a cap the 4B

@@ -13,6 +13,28 @@ pub fn orphaned(exe_name: &str) -> Vec<u32> {
         .collect()
 }
 
+/// [`orphaned`], only the ones whose executable is inside `dir` (or a
+/// folder in it): Yap's own llama.cpp servers (`llm/engine/<build>/`), never
+/// a `llama-server.exe` someone runs from elsewhere. One whose path can't
+/// be read is left alone.
+#[cfg(windows)]
+pub fn orphaned_under(dir: &std::path::Path, exe_name: &str) -> Vec<u32> {
+    imp::snapshot()
+        .into_iter()
+        .filter(|p| p.exe.eq_ignore_ascii_case(exe_name) && !is_running_yap(p.parent))
+        .filter(|p| imp::live_image_path(p.pid).is_some_and(|full| is_under(dir, &full)))
+        .map(|p| p.pid)
+        .collect()
+}
+
+/// Is the file `full` inside `dir` (case-insensitive, either slash)? Pure.
+pub fn is_under(dir: &std::path::Path, full: &str) -> bool {
+    let norm = |s: &str| s.replace('/', "\\").trim_end_matches('\\').to_ascii_lowercase();
+    let dir = norm(&dir.to_string_lossy());
+    let full = norm(full);
+    !dir.is_empty() && full.len() > dir.len() && full.starts_with(&dir) && full[dir.len()..].starts_with('\\')
+}
+
 /// Live `exe_name` processes in `dir` started by another running Yap (a dev
 /// build beside the installed app, sharing the data folder): its sidecar,
 /// which a runtime swap waits for. One whose folder can't be read counts.
@@ -28,6 +50,18 @@ pub fn sidecars_of_other_yaps(dir: &std::path::Path, exe_name: &str) -> usize {
                 full.rsplit_once(['\\', '/']).is_none_or(|(folder, _)| folder.to_ascii_lowercase() == dir)
             })
         })
+        .count()
+}
+
+/// [`sidecars_of_other_yaps`] for a server anywhere inside `dir` (Yap's
+/// llama.cpp builds, each in a folder of its own under `llm/engine/`).
+#[cfg(windows)]
+pub fn sidecars_of_other_yaps_under(dir: &std::path::Path, exe_name: &str) -> usize {
+    let me = std::process::id();
+    imp::snapshot()
+        .into_iter()
+        .filter(|p| p.exe.eq_ignore_ascii_case(exe_name) && p.parent != me && is_running_yap(p.parent))
+        .filter(|p| imp::live_image_path(p.pid).is_none_or(|full| is_under(dir, &full)))
         .count()
 }
 
@@ -310,6 +344,18 @@ mod imp {
 mod tests {
     use super::*;
     use windows::Win32::Foundation::{CloseHandle, HANDLE};
+
+    #[test]
+    fn only_a_server_inside_yaps_engine_folder_is_yaps() {
+        let dir = std::path::Path::new(r"C:\Users\x\AppData\Roaming\yap\llm\engine");
+        assert!(is_under(dir, r"C:\Users\x\AppData\Roaming\yap\llm\engine\b11982-cuda13\llama-server.exe"));
+        assert!(is_under(dir, "c:/users/x/appdata/roaming/yap/llm/engine/b11982-cpu/llama-server.exe"));
+        assert!(!is_under(dir, r"E:\Tools\llama\llama-server.exe"), "someone's own");
+        assert!(!is_under(dir, r"C:\Users\x\AppData\Roaming\yap\llm\engine-old\llama-server.exe"), "a folder that only starts the same");
+        assert!(!is_under(dir, r"C:\Users\x\AppData\Roaming\yap\llm\engine"));
+        assert!(!is_under(std::path::Path::new(""), r"C:\llama-server.exe"));
+        assert!(orphaned_under(std::path::Path::new(r"C:\no\such\folder"), "llama-server.exe").is_empty());
+    }
 
     #[test]
     fn sees_this_process_and_its_parent() {

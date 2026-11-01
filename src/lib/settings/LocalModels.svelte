@@ -1,6 +1,6 @@
 <script>
   // Settings → Language Models → Dictation cleanup → Local: the on-device
-  // model browser (ai/local_llm.rs, Mozilla llamafile): Recommended for this
+  // model browser (ai/local_llm.rs, llama.cpp's server): Recommended for this
   // PC, the bigger model offered once, the slow-on-this-PC line, the Context
   // control (LocalContext.svelte), the curated models by family with
   // Download / Use / Uninstall…, and your own GGUFs with Use / Uninstall…
@@ -19,7 +19,11 @@
   // "Read screenshots on this PC" (ai/local_llm/vision.rs, 2026-10-28): for
   // a model with a projector Yap offers (the 4B), its download, then the
   // switch, where it runs and Remove (stores/localVision.svelte.js).
+  //
+  // The engine (LocalEngine.svelte, ai/local_llm/engine.rs, 2026-11-01):
+  // its build, Check now, "Keep the engine up to date", Go back.
   import Select from '../ui/Select.svelte';
+  import LocalEngine from './LocalEngine.svelte';
   import Toggle from '../ui/Toggle.svelte';
   import PillTabs from '../ui/PillTabs.svelte';
   import LocalContext from '../components/LocalContext.svelte';
@@ -88,7 +92,7 @@
   const llm = $derived(localLlm.status);
   // What each install stage actually downloads, so the progress bar names it.
   const LOCAL_STAGE_LABELS = {
-    runtime: 'llamafile engine (local AI server)',
+    runtime: 'llama.cpp engine (local AI server)',
     model: 'model',
   };
 
@@ -193,7 +197,7 @@
 <div class="localbrowser">
   <div class="lb-head">
     <span class="lb-title">On-device models</span>
-    <span class="lb-sub">Downloaded once, then they run on this PC (Mozilla llamafile): no key, nothing sent.</span>
+    <span class="lb-sub">Downloaded once, then they run on this PC (llama.cpp): no key, nothing sent.</span>
   </div>
   {#if llm.slowOnThisPc}
     {@const small = (llm.curated || []).find((c) => c.isDefault)}
@@ -255,6 +259,8 @@
         <Select bind:value={cfg.localModelIdleMins} options={IDLE_OPTIONS} ariaLabel="Free its memory after it's unused for" />
       </div>
     </div>
+    <!-- The engine that runs it: llama.cpp's own builds, kept up to date. -->
+    <LocalEngine initial={llm.engineState} />
     {#if vision}
       <!-- Snip to Chat on this PC: the model's projector, an optional download. -->
       <div class="lb-load lb-vision" data-testid="local-vision" data-setting="local-vision">

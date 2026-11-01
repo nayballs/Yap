@@ -466,9 +466,15 @@ The language-model side: the OpenAI-compatible client and its prompts, the on-de
   (counts and lengths at `debug`). Reset app keeps them, Download your data
   has them. Unit-tested; e2e `writing-samples.spec.js`; the model
   evaluations' `--samples`.
-- **`ai/local_llm.rs`** — the on-device AI cleanup sidecar: runs **Mozilla llamafile**
-  (llama.cpp, single-file OpenAI-compatible server) as a hidden child process on a
-  free localhost port, serving **Qwen2.5-1.5B-Instruct** (Q4_K_M GGUF) when no
+- **`ai/local_llm.rs`** — the on-device AI cleanup sidecar: runs **llama.cpp's own
+  server** (`llama-server.exe` from one of llama.cpp's official builds, kept up to
+  date: `ai/local_llm/engine.rs` below; on an install from before 1 Nov 2026,
+  **Mozilla llamafile** until it has moved — `engine::active`: the engine marker's
+  build when its server is on disk, else `llm/llamafile.exe`) as a hidden child
+  process on a free localhost port (`Engine::command`: a llama.cpp build in its own
+  folder, NVIDIA's runtime first on its PATH, its card pinned with `--device` where
+  a Vulkan build sees integrated graphics too), serving
+  **Qwen2.5-1.5B-Instruct** (Q4_K_M GGUF) when no
   other is picked (`pp_local_model` empty = `MODEL_FILENAME`) — or a curated
   one (`CURATED_MODELS`, Q4_K_M GGUFs, SHA-pinned: since 2026-10-27
   **Qwen3.5 0.8B / 2B / 4B / 9B**, **Gemma 4 12B** and **Granite 4.1 8B**
@@ -487,7 +493,13 @@ The language-model side: the OpenAI-compatible client and its prompts, the on-de
   `config.local_llm_upgrade_dismissed`), never downloaded by itself. The
   curated entry's `default` = the bundled file, `needs_gpu` = only recommended
   with a card. **One server set-up** for the sidecar and the evaluations
-  (`server_args`): `-ngl 999 -c <context>`, **`--reasoning off`** (no thinking for
+  (`server_args`, on either engine: llama.cpp's server and llamafile's — llama.cpp
+  b10441 underneath — take the same arguments but for how each is told to serve,
+  `Runtime::flavour_args`: llamafile's `--server`, llama.cpp's `--no-webui
+  --offline`; every flag checked against b11982's `--help` and run, 2026-11-01;
+  `Plan.runtime` is a `Runtime` — `Llamafile(version)` | `LlamaCpp(build, variant)`
+  — and MTP and the q8_0 KV cache need it on CUDA, `Runtime::cuda`):
+  `-ngl 999 -c <context>`, **`--reasoning off`** (no thinking for
   any model: Qwen3.5 loops and times out with it on; Chat's **Think** turns it on for one
   request, without a restart: `chat_template_kwargs` and a 1,500-token
   `thinking_budget_tokens`, chat-and-assistant.md `chat/think.rs`), **`--cache-ram 0`**
@@ -528,7 +540,11 @@ The language-model side: the OpenAI-compatible client and its prompts, the on-de
   leaves them out).
   **Qwen3.5-9B** was
   measured again for 16 GB cards and isn't offered: no better than the 4B
-  (model-evals.md "Qwen3.5-9B against the 4B"). **The runtime** (2026-10-22): **llamafile 0.10.6**
+  (model-evals.md "Qwen3.5-9B against the 4B"). **llamafile, the runtime before
+  llama.cpp's own builds** (what follows is its own machinery, kept for installs
+  that haven't moved yet and as their way back; once a llama.cpp build is active
+  the llamafile upgrade below never runs, and llamafile's files are never touched:
+  an older Yap sharing the folder still runs them). **The runtime** (2026-10-22): **llamafile 0.10.6**
   (`RUNTIME_VERSION`, mozilla-ai's release, SHA-256 `d579f61d…` = GitHub's
   digest; over 0.10.3: CUDA graphs, a ~430 MiB smaller compute buffer, the
   June tool-call grammar fixes, checkpoints at every user message, the
@@ -626,9 +642,11 @@ The language-model side: the OpenAI-compatible client and its prompts, the on-de
   notepad helper while it waits out a dictation (`chat_beside_dictation`):
   a context restart or a runtime swap never cuts one off between requests.
   **MTP** (`plan_for` → `Plan { runtime, mtp }`, `server_args` adds
-  `--spec-type draft-mtp`): on 0.10.6 or newer, on an **NVIDIA** card
-  (`mtp_allowed`: measured on CUDA only; AMD and Intel run llama.cpp's
-  Vulkan backend, unmeasured), for a model with the prediction layer
+  `--spec-type draft-mtp`): on llamafile 0.10.6 or newer or a llama.cpp
+  CUDA build, on an **NVIDIA** card (`mtp_allowed`: measured on CUDA only; a
+  Vulkan build — AMD, Intel, or an NVIDIA card on it — unmeasured, so never;
+  a llama.cpp build's failures are kept in the engine's marker as
+  `"b11982-cuda13/<GGUF file>"`, llamafile's in its own), for a model with the prediction layer
   (Qwen3.5), all on the card with room for it at that context (`mtp_fits`:
   `gguf::estimate` with MTP ≤ `card_room`), `config.local_mtp` on
   (default; no switch in Settings), and not failed here: a start with MTP
@@ -705,6 +723,112 @@ The language-model side: the OpenAI-compatible client and its prompts, the on-de
   Gemma 2 9B's says `supports_tools: false`, `supports_system_role: false`
   (its system prompt is folded into the first question); Qwen's and
   Llama 3.1's take tools.
+- **`ai/local_llm/engine.rs`** (+ `engine/`: `feed`, `trial`, `updater`) —
+  **llama.cpp's own builds, kept up to date** (2026-11-01, the maintainer's ask:
+  "detect newer engine builds, install them, prove they work, roll back on
+  trouble", after Jan's Auto Update Engine and LM Studio's runtime packs). The
+  sidecar ran llamafile pinned at build time: it moved only with a Yap release,
+  and llamafile lags llama.cpp by months (0.10.6, 15 Sep, = llama.cpp b10441;
+  llama.cpp b11960 on 28 Oct) while new models need new builds (Spark-X2.6's
+  `spark2_5` needs b10828+). Now: **ggml-org/llama.cpp's official Windows
+  releases** — `llama-b<N>-bin-win-<variant>-x64.zip` (the server, its DLLs —
+  ggml's backends, the CPU code for every instruction set picked at run time —
+  and licences; the other tools left out, `unpacked_name`; streamed, folders
+  flattened, two files of one name refused, `enclosed_name` never out of the
+  folder) unpacked into `llm/engine/<build>-<variant>/` through a `.unpacking`
+  folder, NVIDIA's `cudart-llama-bin-win-cuda-<v>-x64.zip` once for every build
+  that uses it (`cudart-<sha12>/`, put first on the server's PATH). **The
+  marker** `llm/engine/engine.json` (`Marker`, config-and-data.md): never
+  config.json (an older Yap's save would drop a new field), and llamafile's
+  files never touched. **Which build for a PC** (`candidates`, `Hardware` from
+  `gpu::this_pc` + `nvidia-smi --query-gpu=compute_cap,driver_version`):
+  **Vulkan first** on any card with memory of its own (3 GiB+; the universal
+  build, 37 MB); on an NVIDIA card CUDA after it (`cuda_flavour`: CUDA 13 from a
+  Turing card and driver 580, or driver 590+ with the card unknown; else CUDA
+  12 from driver 528; ~165 MB + NVIDIA's ~420 MB runtime) — fetched and tried
+  **only when Vulkan falls short** (under `trial::GOOD_ENOUGH_TPS` = 100
+  tokens/s, `another_needed`) and kept only when **25 % faster**
+  (`trial::choose`, `CUDA_WORTH`; 2026-11-01, the maintainer: ~100 tokens/s for
+  the 4B is fine, so CUDA must clearly be worth its download); the processor's
+  build without a card or with integrated graphics. The choice is kept per card
+  and driver (`Pick`, `stt_speed::pc_print`; a new driver tries again,
+  `to_try`). A Vulkan build that sees integrated graphics beside the card is
+  pinned to the card (`--list-devices`, `parse_devices`, `device_for`: by
+  DXGI's name — llama.cpp would split the model across both). **The floor**
+  (`FLOOR` = **b11982**, 29 Oct 2026, every variant's files pinned with GitHub's
+  SHA-256, `floor_assets`): what a first install downloads
+  (`models::ensure_runtime`: no engine at all → the floor for this PC, its
+  progress the "runtime" stage, "Downloading the llama.cpp engine") and what
+  Yap runs offline; verified on the RTX 5070 Ti with Qwen3.5-4B (model-evals.md
+  "llama.cpp's own builds"). **The feed** (`feed.rs`, `Purpose::EngineCheck`):
+  GitHub's releases API, 50 a page newest first until past the cooling-off;
+  `b<N>` tags only (llama.cpp tags `v0.8.0` too), never drafts, every asset with
+  its `sha256:` digest and uploaded whole, plain names (`parse_page`); a
+  variant's files by name, CUDA by major version with its own runtime's minor
+  (`pick_assets`); **only a build 3 days old** (`COOLING_OFF`, `eligible`), not
+  refused here. Files come from `github.com/ggml-org/llama.cpp/releases/download/
+  <tag>/<name>`, built from the tag and the name, never an address from the feed
+  (`asset_url`), through `shell/download.rs` (resume, the disk checked, Cancel
+  `llm-engine`; `Download::OnDeviceEngine`), each checked against its digest
+  (`models::verify_into`) before it's unpacked: nothing unverified runs. **The
+  updater** (`updater.rs`, from setup, `spawn`): from 2 min after launch, every
+  30 min it sees whether a look is due — once a day (`CHECK_EVERY`), only while
+  the on-device model is in use, not on a metered connection, not with "Keep
+  the engine up to date" off (`Marker::paused`) — and takes a newer build
+  (`take_due`) by itself at most **once a week** (`UPDATE_EVERY`; from llamafile
+  at once; **Check now** at once). A variant at a time (the lock `engine/
+  engine-update.lock`, `UpgradeLock::take_named`, held for the download, let
+  go meanwhile): downloaded, then **tried** at an idle moment (`trial_idle`: no
+  dictation, request, meeting or summary, nobody waiting to start the model —
+  `wants_start`, a counter in `local_llm::start` — the model not loaded or
+  unused 5 min, `IDLE_BEFORE_TRIAL`; under the restart and start locks,
+  `runtime::idle_with_locks`; a loaded idle model is stopped for it and loaded
+  again after). **The trial** (`trial.rs`, `Purpose::EngineTrial`): the engine
+  running now, then the new build, each started as the sidecar would start it
+  (the person's own model and context, `server_args` and `plan_for`; log
+  `engine/trial.log`) and asked, with made-up words only: an answer, a valid
+  tool call when its chat format takes tools (`/props`, `valid_tool_call`), its
+  generation speed (llama.cpp's `timings.predicted_per_second`, the better of
+  two 128-token runs), and with "Read screenshots on this PC" on, its projector
+  (`vision::for_trial`) loading and a made-up 64-px picture answered. It gives
+  way at once when the person needs the model (`abort`: the request dropped,
+  the server ended) and is tried again at the next idle moment. **The verdict**
+  (`verdict`, pure): it must start, answer, call the tool and read the picture
+  wherever the current one does, and generate at `MIN_SPEED` (85 %) of the
+  current engine's speed or better — relative to the engine running, so a real
+  regression is caught, with room for run-to-run noise; a move from CUDA to
+  the Vulkan build passes at `GOOD_ENOUGH_TPS` too. **The switch** (`decide`,
+  `switch_to`): the build before kept (Go back), the new one `unproven` until
+  the sidecar starts on it; a running model moves once nothing uses it
+  (`restart_when_idle`). Fails: **refused** (`Marker::refused`, never taken
+  again; its folder goes) and Settings says why. **A first real start that
+  fails** (`local_llm::start_with` → `engine_way_back`, unit-tested): the build
+  before (or llamafile) goes back in and starts, the failure counted, the new
+  one kept as `retry` and put back at the next launch (`retry_at_launch`,
+  `tidy_at_launch`) until `REFUSE_AFTER` (3) sessions; nowhere to go back to,
+  or the one before won't start either: the new one stays, uncounted. **At
+  launch** (`tidy_at_launch`): the retry, and folders no build kept needs
+  (`tidy`). **Settings** (Language Models → the on-device models,
+  `LocalEngine.svelte`): "Engine: llama.cpp b11982 (Vulkan) · up to date" (or
+  "checking…", "downloading b11990 · 40%", "b11990 is ready to try · waiting
+  until the model isn't in use", "trying b11990 with your model…"), **Check
+  now**, "Keep the engine up to date" (on), what happened last (`event_line`:
+  "Updated to b11980 · faster on your card", "b11990 didn't start here: staying
+  on b11960", "b11990 was slower here (72% of the speed): staying on b11960",
+  "Went back to b11960 · b11980 won't be installed again"), **Go back to
+  b11960** (or to llamafile; the build left refused) — `local_llm_status().engine
+  State`, then `yap-local-engine` as a check moves along; commands
+  `local_engine_status`, `local_engine_check`, `local_engine_set_auto {on}`,
+  `local_engine_go_back`. Orphan sweep: a `llama-server.exe` is Yap's only inside
+  `llm/engine/` (`procs::orphaned_under`); another Yap's server there counts for
+  `other_yaps_sidecar`. Test mode: the stand-in feed `YAP_E2E_ENGINE_FEED` (its
+  files at `/download/<tag>/<name>`), scripted trials `YAP_E2E_ENGINE_TRIAL`
+  (nothing runs), the background look only with `YAP_E2E_ENGINE_CHECK_MS`; the
+  floor's stand-ins in `YAP_LLM_SOURCES` ("engine", "cudart"). Unit-tested: build
+  tags and order, the variants and their files, CUDA's flavour, the cooling-off,
+  digests, the unpacking, device pinning, the verdict and the choice, the
+  decisions, switch / roll-back / put-back / go-back / retry, Settings' words;
+  e2e `local-engine.spec.js`.
 - **`ai/local_llm/on_demand.rs`** — **the on-device model loaded when it's
   needed, its memory freed when it's idle** (2026-10-25; before, it started
   at launch whenever cleanup was routed to it: ~10 GB in use as soon as Yap

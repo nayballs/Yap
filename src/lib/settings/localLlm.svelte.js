@@ -1,4 +1,4 @@
-// Settings' on-device model (ai/local_llm.rs, the llamafile sidecar): its
+// Settings' on-device model (ai/local_llm.rs, the llama.cpp sidecar): its
 // status as Language Models and the scope link rows show it, the curated
 // model downloading and its progress, and what Settings does with it
 // (download, use, the bigger model offered once). A store, not the
@@ -23,7 +23,7 @@ export const localLlm = $state({
     // A start under way (on first use, at launch, Load now).
     loading: false,
     model: 'Qwen2.5 1.5B Instruct',
-    engine: 'Mozilla llamafile (llama.cpp)',
+    engine: 'llama.cpp',
   },
   installing: false,
   progress: { stage: '', percent: 0, downloaded_mb: 0, total_mb: 0 },
@@ -148,7 +148,7 @@ export function openLlmFolder() {
 }
 
 /**
- * Download a curated model (pulls the llamafile runtime too if missing),
+ * Download a curated model (pulls the llama.cpp engine too if missing),
  * then make it the active model and (re)start the sidecar.
  */
 export async function downloadCurated(m) {

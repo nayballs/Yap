@@ -100,7 +100,7 @@ export function followLocalChanges() {
 const withMax = (desc, max) => [max ? `Up to ${fmtTokens(max)}` : '', desc].filter(Boolean).join(' · ');
 
 /**
- * Download a curated on-device model (and the llamafile engine if it's
+ * Download a curated on-device model (and the llama.cpp engine if it's
  * missing) with Settings' own install path. Only one at a time; it carries
  * on when the picker closes. True when it's on this PC.
  */

@@ -193,21 +193,19 @@ impl Drop for Server {
     }
 }
 
-pub async fn start(runtime: &Path, gguf: &Path, ngl: u32, run_dir: &Path) -> Result<Server, String> {
+pub async fn start(runtime: &crate::ai::local_llm::engine::Engine, gguf: &Path, ngl: u32, run_dir: &Path) -> Result<Server, String> {
     let port = std::net::TcpListener::bind("127.0.0.1:0").and_then(|l| l.local_addr()).map(|a| a.port()).map_err(|e| e.to_string())?;
-    let mut args = crate::search::embedder::server_args(gguf, port, std::thread::available_parallelism().map(|n| n.get() / 2).unwrap_or(2).max(2));
+    let mut args = crate::search::embedder::server_args(gguf, port, std::thread::available_parallelism().map(|n| n.get() / 2).unwrap_or(2).max(2), runtime.runtime());
     if let Some(i) = args.iter().position(|a| a == "-ngl") {
         args[i + 1] = ngl.to_string();
     }
-    let log = run_dir.join("llamafile-embedder.log");
+    let log = run_dir.join("server-embedder.log");
     let file = std::fs::File::create(&log).map_err(|e| e.to_string())?;
-    let mut cmd = std::process::Command::new(runtime);
-    cmd.args(&args).current_dir(run_dir).stdin(std::process::Stdio::null()).stdout(file.try_clone().map_err(|e| e.to_string())?).stderr(file);
-    #[cfg(windows)]
-    {
-        use std::os::windows::process::CommandExt;
-        cmd.creation_flags(0x0800_0000);
+    let mut cmd = runtime.command();
+    if runtime.runtime().is_llamafile() {
+        cmd.current_dir(run_dir);
     }
+    cmd.args(&args).stdin(std::process::Stdio::null()).stdout(file.try_clone().map_err(|e| e.to_string())?).stderr(file);
     let t0 = Instant::now();
     let mut child = cmd.spawn().map_err(|e| format!("couldn't start the embedding server: {e}"))?;
     crate::shell::procs::end_with_yap(&child);

@@ -548,10 +548,11 @@ async fn cleanup_once(text: &str, base_url: &str, key: &str, model: &str, provid
     Ok(t0.elapsed().as_millis() as u64)
 }
 
-/// The on-device model `gguf` on llamafile `runtime` in scenario `sc`, as
-/// Yap's sidecar runs it (`local_llm::server_args`; on the processor `-ngl
-/// 0`, and `-t`/`-tb` the scenario's threads).
-async fn time_local_cleanup(runtime: &Path, gguf: &Path, sc: &Scenario, work: &Path) -> CleanupRun {
+/// The on-device model `gguf` on the engine `runtime` (Yap's llama.cpp
+/// build or llamafile) in scenario `sc`, as Yap's sidecar runs it
+/// (`local_llm::server_args`; on the processor `-ngl 0`, and `-t`/`-tb` the
+/// scenario's threads).
+async fn time_local_cleanup(runtime: &crate::ai::local_llm::engine::Engine, gguf: &Path, sc: &Scenario, work: &Path) -> CleanupRun {
     let id = crate::ai::local_llm::model_id(gguf);
     let mut run = CleanupRun::new(&id, "local", &sc.id);
     let port = match std::net::TcpListener::bind("127.0.0.1:0").and_then(|l| l.local_addr()) {
@@ -561,36 +562,32 @@ async fn time_local_cleanup(runtime: &Path, gguf: &Path, sc: &Scenario, work: &P
             return run;
         }
     };
-    let version = crate::ai::local_llm::runtime::runtime_version_in(runtime.parent().unwrap_or(Path::new(".")))
-        .or_else(|| crate::ai::local_llm::runtime::Version::parse(crate::ai::local_llm::RUNTIME_VERSION))
-        .unwrap_or(crate::ai::local_llm::runtime::Version(0, 10, 6));
+    let rt = runtime.runtime();
     let ctx = crate::ai::local_llm::context::DEFAULT_CONTEXT;
     let on_gpu = sc.device == Device::Gpu;
     let plan = if on_gpu {
-        crate::ai::local_llm::plan_for(&crate::config::YapConfig::default(), gguf, ctx, version)
+        crate::ai::local_llm::plan_for(&crate::config::YapConfig::default(), gguf, ctx, rt)
     } else {
-        crate::ai::local_llm::Plan { runtime: version, mtp: false, kv_q8: false, per_slot: version.is_current() }
+        crate::ai::local_llm::Plan { runtime: rt, mtp: false, kv_q8: false, per_slot: rt.is_current() }
     };
     let mut args = crate::ai::local_llm::server_args(gguf, port, if on_gpu { 999 } else { 0 }, ctx, plan);
     if let Some(n) = sc.threads {
         args.extend(["-t".into(), n.to_string(), "-tb".into(), n.to_string()]);
     }
-    let log = work.join(format!("llamafile-{id}-{}.log", sc.id));
+    let log = work.join(format!("server-{id}-{}.log", sc.id));
     let Ok(file) = std::fs::File::create(&log) else {
         run.error = Some("couldn't write the server's log".into());
         return run;
     };
-    let mut cmd = std::process::Command::new(runtime);
-    cmd.args(&args).current_dir(work).stdin(std::process::Stdio::null());
+    let mut cmd = runtime.command();
+    if rt.is_llamafile() {
+        cmd.current_dir(work);
+    }
+    cmd.args(&args).stdin(std::process::Stdio::null());
     if let Ok(f) = file.try_clone() {
         cmd.stdout(f);
     }
     cmd.stderr(file);
-    #[cfg(windows)]
-    {
-        use std::os::windows::process::CommandExt;
-        cmd.creation_flags(0x0800_0000); // CREATE_NO_WINDOW
-    }
     // The server inherits the scenario's processor limit.
     let started = Instant::now();
     let spawned = {
@@ -600,7 +597,7 @@ async fn time_local_cleanup(runtime: &Path, gguf: &Path, sc: &Scenario, work: &P
     let mut child = match spawned {
         Ok(c) => c,
         Err(e) => {
-            run.error = Some(format!("couldn't start llamafile: {e}"));
+            run.error = Some(format!("couldn't start {}: {e}", runtime.label()));
             return run;
         }
     };
@@ -610,7 +607,7 @@ async fn time_local_cleanup(runtime: &Path, gguf: &Path, sc: &Scenario, work: &P
     let mut up = false;
     while started.elapsed() < Duration::from_secs(300) {
         if let Ok(Some(status)) = child.try_wait() {
-            run.error = Some(format!("llamafile exited during startup ({status})"));
+            run.error = Some(format!("{} exited during startup ({status})", runtime.label()));
             break;
         }
         if client.get(format!("http://127.0.0.1:{port}/health")).send_for(crate::privacy::net::Purpose::OnDeviceCheck).await.is_ok_and(|r| r.status().is_success()) {
@@ -911,21 +908,22 @@ async fn run(o: &Options, data: &Path, work: &Path, cfg: Option<&crate::config::
 
     let mut cleanup = Vec::new();
     if o.cleanup {
-        let runtime = data.join("llm").join(crate::ai::local_llm::RUNTIME_FILENAME);
+        // The engine this data folder's Yap runs (a llama.cpp build, else llamafile).
+        let runtime = crate::ai::local_llm::engine::active_in(&data.join("llm"));
         let ggufs = local_models(data, o);
-        if o.llms.is_none() && (!runtime.is_file() || ggufs.is_empty()) {
+        if o.llms.is_none() && (runtime.is_none() || ggufs.is_empty()) {
             println!("No on-device AI model installed: local cleanup is skipped.");
         }
-        for gguf in ggufs.iter().filter(|_| runtime.is_file()) {
+        for (gguf, runtime) in ggufs.iter().filter_map(|g| runtime.as_ref().map(|r| (g, r))) {
             // (The integrated GPU and software rendering are speech-only:
-            // llamafile picks its own GPU.)
+            // the engine picks its own GPU.)
             for sc in scenarios.iter().filter(|s| s.adapter.is_none()) {
                 let name = crate::ai::local_llm::model_id(gguf);
                 print!("  cleanup · {name} · {} … ", sc.label);
                 use std::io::Write;
                 let _ = std::io::stdout().flush();
                 let before = tokio::task::block_in_place(|| wait_quiet(o.patience));
-                let mut r = time_local_cleanup(&runtime, gguf, sc, work).await;
+                let mut r = time_local_cleanup(runtime, gguf, sc, work).await;
                 r.load_before = before;
                 r.load_after = tokio::task::block_in_place(|| stt_speed::cpu_load(Duration::from_secs(1)));
                 println!("{}", r.skipped.clone().or(r.error.clone()).unwrap_or_else(|| format!("median {} ms", ms(r.median_ms))));

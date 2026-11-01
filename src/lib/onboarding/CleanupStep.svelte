@@ -122,7 +122,7 @@
           Qwen2.5 1.5B stays quick without a graphics card. Bigger models are slow on a processor.
         {/if}
       </p>
-      <p class="fine">All of these run fully offline via llamafile. Prefer your own?
+      <p class="fine">All of these run fully offline via llama.cpp. Prefer your own?
         Drop any GGUF into the models folder later (Settings → Language Models).</p>
     {:else}
       <div class="cloud-form">

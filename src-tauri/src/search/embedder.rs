@@ -1,8 +1,9 @@
 //! **The embedding model**: EmbeddingGemma-300M (Q8_0 GGUF, 334 MB, 768
-//! dimensions, 100+ languages), run by Yap's own llamafile runtime as a
-//! second, small server in `--embedding` mode — the on-device chat model's
-//! engine, so nothing new to ship: on the graphics card where there is one
-//! (CUDA on NVIDIA, Vulkan elsewhere; ~390 MiB), else the processor.
+//! dimensions, 100+ languages), run by the on-device chat model's engine
+//! (a llama.cpp build, `ai/local_llm/engine.rs`, or llamafile on an older
+//! install) as a second, small server in `--embedding` mode, so nothing new
+//! to ship: on the graphics card where there is one (~390 MiB), else the
+//! processor.
 //!
 //! **Why this, measured** (`yap-private/docs/local-ai-research.md` #7, the
 //! model evaluations' `--bench embed`): over paraphrased questions recall@1
@@ -18,14 +19,14 @@
 //! [`Purpose::Embeddings`](crate::privacy::net::Purpose)). It starts when the
 //! index or a question needs it and stops after [`IDLE`] unused, runs below
 //! normal priority on half the processor's threads, and dies with Yap
-//! (`procs::end_with_yap`; the orphan sweep finds it as a `llamafile.exe`).
+//! (`procs::end_with_yap`; the orphan sweep finds it as the engine's server).
 //!
-//! **Install** ([`install`]): the runtime if it isn't there (the on-device
+//! **Install** ([`install`]): the engine if it isn't there (the on-device
 //! model's own download, `local_llm::models::ensure_runtime`), then the GGUF
 //! into `<data>/models/search/` — size and SHA-256 checked, a partial
 //! download resumed, the Gemma Terms' notice beside it. A test run downloads
 //! only stand-ins from 127.0.0.1 (`YAP_LLM_SOURCES`, key `embeddinggemma`)
-//! and talks to a stand-in server (`YAP_E2E_EMBED_URL`), never llamafile.
+//! and talks to a stand-in server (`YAP_E2E_EMBED_URL`), never the engine.
 
 use std::path::{Path, PathBuf};
 use std::process::Child;
@@ -225,9 +226,10 @@ pub fn model_installed() -> bool {
     std::fs::metadata(model_path()).is_ok_and(|m| m.len() == source().size)
 }
 
-/// The engine (llamafile) is on disk.
+/// The on-device model's engine is on disk (a llama.cpp build, or
+/// llamafile on an older install).
 pub fn runtime_installed() -> bool {
-    crate::ai::local_llm::runtime_path().is_file()
+    crate::ai::local_llm::engine_installed()
 }
 
 /// Both are there (or a model evaluation brought its own server, [`use_server`]).
@@ -262,7 +264,7 @@ pub fn download_bytes() -> u64 {
         n += source().size;
     }
     if !runtime_installed() {
-        n += crate::ai::local_llm::runtime::RUNTIME_BYTES;
+        n += crate::ai::local_llm::engine::floor_bytes_here();
     }
     n
 }
@@ -405,21 +407,25 @@ pub fn runs_on() -> Option<&'static str> {
 /// The server's arguments: the sidecar's runtime in embedding mode, the
 /// context and batches for passages of a few hundred tokens, all layers on
 /// the card that fit (`ngl` 999; none on a PC without one), half the
-/// processor's threads, and the model's own (its pooling). Pure.
-pub fn server_args(gguf: &Path, port: u16, threads: usize) -> Vec<String> {
-    server_args_for(model(), gguf, port, threads)
+/// processor's threads, and the model's own (its pooling); how the engine
+/// is told to serve first (`Runtime::flavour_args`: llamafile's
+/// `--server`, llama.cpp's `--no-webui --offline`). Pure.
+pub fn server_args(gguf: &Path, port: u16, threads: usize, runtime: crate::ai::local_llm::Runtime) -> Vec<String> {
+    server_args_for(model(), gguf, port, threads, runtime)
 }
 
 /// [`server_args`] for `m`. Pure.
-pub fn server_args_for(m: &Model, gguf: &Path, port: u16, threads: usize) -> Vec<String> {
+pub fn server_args_for(m: &Model, gguf: &Path, port: u16, threads: usize, runtime: crate::ai::local_llm::Runtime) -> Vec<String> {
     let t = threads.to_string();
-    let mut args: Vec<String> = [
-        "--server", "--host", "127.0.0.1", "--port", &port.to_string(), "-m", &gguf.to_string_lossy(), "--embedding", "-c", "4096", "-b",
-        "2048", "-ub", "2048", "-ngl", "999", "-t", &t, "-tb", &t, "-lv", "4",
-    ]
-    .iter()
-    .map(|s| s.to_string())
-    .collect();
+    let mut args: Vec<String> = runtime.flavour_args().iter().map(|s| s.to_string()).collect();
+    args.extend(
+        [
+            "--host", "127.0.0.1", "--port", &port.to_string(), "-m", &gguf.to_string_lossy(), "--embedding", "-c", "4096", "-b", "2048",
+            "-ub", "2048", "-ngl", "999", "-t", &t, "-tb", &t, "-lv", "4",
+        ]
+        .iter()
+        .map(|s| s.to_string()),
+    );
     args.extend(m.server_args.iter().map(|s| s.to_string()));
     args
 }
@@ -495,7 +501,9 @@ fn alive() -> Option<String> {
 }
 
 async fn start() -> Result<String, String> {
-    let exe = crate::ai::local_llm::runtime_path();
+    // The on-device model's engine (a llama.cpp build in its own folder —
+    // `Engine::command` — or llamafile, run from the search folder).
+    let engine = crate::ai::local_llm::engine::active().ok_or("the on-device engine isn't installed")?;
     let model = model_path();
     let port = std::net::TcpListener::bind("127.0.0.1:0")
         .and_then(|l| l.local_addr())
@@ -503,9 +511,11 @@ async fn start() -> Result<String, String> {
         .map_err(|e| format!("no free port: {e}"))?;
     let log_path = dir().join("embedder.log");
     let log = std::fs::File::create(&log_path).map_err(|e| format!("Couldn't write the search model's log: {e}"))?;
-    let mut cmd = std::process::Command::new(&exe);
-    cmd.args(server_args(&model, port, threads()))
-        .current_dir(dir())
+    let mut cmd = engine.command();
+    if engine.runtime().is_llamafile() {
+        cmd.current_dir(dir());
+    }
+    cmd.args(server_args(&model, port, threads(), engine.runtime()))
         .stdin(std::process::Stdio::null())
         .stdout(log.try_clone().map_err(|e| e.to_string())?)
         .stderr(log);
@@ -756,9 +766,13 @@ mod tests {
 
     #[test]
     fn the_server_reads_passages_on_the_card_below_the_dictation() {
-        let args = server_args(Path::new("m.gguf"), 5001, 4);
+        let cpp = crate::ai::local_llm::Runtime::LlamaCpp(crate::ai::local_llm::engine::FLOOR, crate::ai::local_llm::engine::Variant::Vulkan);
+        let args = server_args(Path::new("m.gguf"), 5001, 4, cpp);
         let after = |flag: &str| args.iter().position(|a| a == flag).map(|i| args[i + 1].as_str());
-        assert!(args.iter().any(|a| a == "--embedding") && args.iter().any(|a| a == "--server"));
+        assert!(args.iter().any(|a| a == "--embedding") && args.iter().any(|a| a == "--no-webui"));
+        assert!(!args.iter().any(|a| a == "--server"), "llama.cpp's server refuses llamafile's flag");
+        let lf = server_args(Path::new("m.gguf"), 5001, 4, crate::ai::local_llm::Runtime::Llamafile(crate::ai::local_llm::runtime::Version(0, 10, 6)));
+        assert_eq!(lf[0], "--server");
         assert_eq!(after("--host"), Some("127.0.0.1"), "this PC only");
         assert_eq!(after("--port"), Some("5001"));
         assert_eq!(after("-ngl"), Some("999"));
@@ -766,7 +780,7 @@ mod tests {
         assert_eq!(after("-ub"), Some("2048"), "a whole passage in one batch");
         assert!(threads() >= 2);
         // A model's own arguments come last: Qwen3-Embedding pools its last token.
-        let qwen = server_args_for(&QWEN3_EMBEDDING_0_6B, Path::new("q.gguf"), 5001, 4);
+        let qwen = server_args_for(&QWEN3_EMBEDDING_0_6B, Path::new("q.gguf"), 5001, 4, cpp);
         assert_eq!(&qwen[qwen.len() - 2..], ["--pooling", "last"]);
     }
 
@@ -802,8 +816,9 @@ mod tests {
         let rt = tokio::runtime::Runtime::new().unwrap();
         rt.block_on(async {
             let port = std::net::TcpListener::bind("127.0.0.1:0").unwrap().local_addr().unwrap().port();
+            let runtime = crate::ai::local_llm::Runtime::Llamafile(crate::ai::local_llm::runtime::Version(0, 10, 6));
             let mut child = std::process::Command::new(exe)
-                .args(server_args(Path::new(&model), port, threads()))
+                .args(server_args(Path::new(&model), port, threads(), runtime))
                 .stdout(std::process::Stdio::null())
                 .stderr(std::process::Stdio::null())
                 .spawn()

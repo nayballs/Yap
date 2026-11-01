@@ -166,6 +166,16 @@ pub fn for_start(cfg: &crate::config::YapConfig, model: &Path, ctx: u32, plan: s
     if !WANTED.load(Ordering::SeqCst) {
         return None;
     }
+    load_for(cfg, model, ctx, plan, ngl)
+}
+
+/// The projector a new engine's trial loads (`engine/trial.rs`): where a
+/// start would put it, whether or not a screenshot asked for it now.
+pub fn for_trial(cfg: &crate::config::YapConfig, model: &Path, ctx: u32, plan: super::Plan) -> Option<Load> {
+    load_for(cfg, model, ctx, plan, 999)
+}
+
+fn load_for(cfg: &crate::config::YapConfig, model: &Path, ctx: u32, plan: super::Plan, ngl: u32) -> Option<Load> {
     let path = usable(cfg, model)?;
     let bytes = std::fs::metadata(&path).map(|m| m.len()).unwrap_or(0);
     let vram = crate::ai::gpu::this_pc().map(|g| g.vram_mib);
@@ -291,7 +301,7 @@ pub fn status(cfg: &crate::config::YapConfig) -> serde_json::Value {
     let display = CURATED_MODELS.iter().find(|m| m.id == p.model).map(|m| m.display).unwrap_or(p.model);
     // Where it would go now: the model as it would start, and the card's room.
     let ctx = super::context::context_for(cfg);
-    let runtime = super::runtime::runtime_version().unwrap_or_else(|| super::runtime::Version::parse(super::RUNTIME_VERSION).expect("a version"));
+    let runtime = super::engine::active_runtime();
     let plan = super::plan_for(cfg, &model, ctx, runtime);
     let vram = crate::ai::gpu::this_pc().map(|g| g.vram_mib);
     let model_mib = crate::ai::gguf::model_file(&model)

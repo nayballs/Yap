@@ -6,11 +6,8 @@ use std::path::Path;
 
 use tauri::{AppHandle, Emitter};
 
-use super::runtime::{next_is_whole, read_marker_at, write_marker_at, Marker, UpgradeLock};
-use super::{
-    llm_dir, model_path, ondevice_selected, runtime_path, MODEL_DISPLAY, MODEL_FILENAME, MODEL_SHA256, MODEL_URL, RUNTIME_MARKER,
-    RUNTIME_NEXT, RUNTIME_SHA256, RUNTIME_URL, RUNTIME_VERSION,
-};
+use super::runtime::UpgradeLock;
+use super::{llm_dir, model_path, ondevice_selected, MODEL_DISPLAY, MODEL_FILENAME, MODEL_SHA256, MODEL_URL};
 
 /// Progress event payload for the on-device install (`local-llm-download-progress`).
 #[derive(serde::Serialize, Clone)]
@@ -249,45 +246,45 @@ pub fn curated_by_id(id: &str) -> Option<&'static CuratedLlm> {
     CURATED_MODELS.iter().find(|m| m.id == id)
 }
 
-/// Ensure the llamafile runtime is on disk (SHA-verified download if missing),
-/// with its marker ([`RUNTIME_MARKER`]). An older one already there stays
-/// until the background upgrade replaces it ([`spawn_runtime_upgrade`]).
+/// **Ensure an engine is on disk**: when there's none (no llama.cpp build,
+/// no llamafile), the **floor** llama.cpp build for this PC
+/// ([`super::engine::FLOOR`], its files pinned and SHA-256 checked,
+/// unpacked into `llm/engine/<build>-<variant>/`, the marker written). An
+/// engine already there stays: llamafile moves to llama.cpp, and a build to
+/// a newer one, through the engine's updater ([`super::engine::updater`]).
 /// `model`: the curated id the install is for (its progress names it);
 /// `ticket`: what cancels it.
 pub(crate) async fn ensure_runtime(model: &str, app: Option<&AppHandle>, ticket: &crate::shell::download::Ticket) -> Result<(), String> {
     tokio::fs::create_dir_all(llm_dir())
         .await
         .map_err(|e| format!("failed to create llm dir: {}", e))?;
-
-    if !runtime_path().is_file() {
-        let dir = llm_dir();
-        let _lock = UpgradeLock::take(&dir)
-            .ok_or_else(|| "Another Yap is setting up the on-device model's engine. Try again in a minute.".to_string())?;
-        if runtime_path().is_file() {
-            return Ok(()); // the other Yap just did
-        }
-        let (url, sha) = source("runtime", RUNTIME_URL, RUNTIME_SHA256);
-        // Beside it first (or kept from an upgrade), then the marker, then
-        // into place: never a runtime on disk its marker doesn't describe.
-        let next = dir.join(RUNTIME_NEXT);
-        if !(next.is_file() && next_is_whole(&next, &sha).await) {
-            download_for(&url, &next, &sha, "runtime", model, app, ticket).await?;
-        }
-        let learnt = read_marker_at(&dir.join(RUNTIME_MARKER)).unwrap_or_default();
-        let marker = Marker { version: RUNTIME_VERSION.to_string(), sha256: sha, unproven: false, ..Default::default() }.learnt_from(&learnt);
-        write_marker_at(&dir.join(RUNTIME_MARKER), &marker).map_err(|e| format!("Couldn't write the engine's marker: {e}"))?;
-        std::fs::rename(&next, runtime_path()).map_err(|e| format!("Couldn't put the engine in place: {e}"))?;
-        // On Unix the runtime needs the executable bit (Windows infers from .exe).
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            if let Ok(meta) = std::fs::metadata(runtime_path()) {
-                let mut perms = meta.permissions();
-                perms.set_mode(0o755);
-                let _ = std::fs::set_permissions(runtime_path(), perms);
-            }
-        }
+    if super::engine::active().is_some() {
+        return Ok(());
     }
+    let edir = super::engine::engine_dir();
+    let _lock = UpgradeLock::take_named(&edir, super::engine::LOCK)
+        .ok_or_else(|| "Another Yap is setting up the on-device model's engine. Try again in a minute.".to_string())?;
+    if super::engine::active().is_some() {
+        return Ok(()); // the other Yap just did
+    }
+    let variant = super::engine::primary_variant();
+    let (zip, cudart) = super::engine::floor_assets(variant);
+    // A test run downloads its stand-ins (`YAP_LLM_SOURCES`: "engine",
+    // "cudart"), never the real thing.
+    let stand_in = |key: &str, a: super::engine::Asset| {
+        let (url, sha256) = source(key, "", &a.sha256);
+        super::engine::Asset { sha256, url: (!url.is_empty()).then_some(url), ..a }
+    };
+    let zip = stand_in("engine", zip);
+    let cudart = cudart.map(|c| stand_in("cudart", c));
+    let report = |p: crate::shell::download::Progress| emit_progress(app, "runtime", model, p);
+    let installed = super::engine::install(&edir, super::engine::FLOOR, variant, &zip, cudart.as_ref(), &report, ticket).await?;
+    super::engine::update_marker(&edir, |m| {
+        m.current = Some(installed.clone());
+        m.unproven = false;
+    })
+    .map_err(|e| format!("Couldn't write the engine's marker: {e}"))?;
+    tracing::info!(build = %installed.build, variant = installed.variant.id(), "On-device engine: the floor build is installed");
     Ok(())
 }
 
@@ -339,6 +336,27 @@ pub(crate) async fn download_verified(
     download_for(url, dest, expected_sha, stage, "", app, &crate::shell::download::Ticket::unlisted()).await
 }
 
+/// An install's progress for Settings and the Chat picker
+/// (`local-llm-download-progress`): `stage` "runtime" (the engine) or
+/// "model", naming the curated model `model`.
+fn emit_progress(app: Option<&AppHandle>, stage: &'static str, model: &str, p: crate::shell::download::Progress) {
+    if let Some(app) = app {
+        let _ = app.emit(
+            "local-llm-download-progress",
+            DownloadProgress {
+                stage,
+                model: model.to_string(),
+                percent: p.percent(),
+                downloaded_mb: p.downloaded as f64 / 1_048_576.0,
+                total_mb: p.total as f64 / 1_048_576.0,
+                bytes_per_sec: p.bytes_per_sec,
+                eta_secs: p.eta_secs,
+                cancel_id: cancel_id(model),
+            },
+        );
+    }
+}
+
 /// A verified download, its progress naming the curated model `model`,
 /// through the shared helper (`shell/download.rs`): it resumes a partial
 /// file an earlier try left, gives up on a server or connection silent for
@@ -355,28 +373,13 @@ pub(super) async fn download_for(
     app: Option<&AppHandle>,
     ticket: &crate::shell::download::Ticket,
 ) -> Result<(), String> {
-    if crate::shell::e2e::active() && !allowed_in_test_run(url) {
+    // (A model evaluation runs in test mode too, and does download.)
+    if crate::shell::e2e::active() && !crate::ai::eval::active() && !allowed_in_test_run(url) {
         return Err("Test runs never download models from the internet".to_string());
     }
     let partial = dest.with_extension("partial");
     tracing::info!(url, dest = %dest.display(), stage, "Downloading on-device cleanup asset");
-    let report = |p: crate::shell::download::Progress| {
-        if let Some(app) = app {
-            let _ = app.emit(
-                "local-llm-download-progress",
-                DownloadProgress {
-                    stage,
-                    model: model.to_string(),
-                    percent: p.percent(),
-                    downloaded_mb: p.downloaded as f64 / 1_048_576.0,
-                    total_mb: p.total as f64 / 1_048_576.0,
-                    bytes_per_sec: p.bytes_per_sec,
-                    eta_secs: p.eta_secs,
-                    cancel_id: cancel_id(model),
-                },
-            );
-        }
-    };
+    let report = |p: crate::shell::download::Progress| emit_progress(app, stage, model, p);
     crate::shell::download::fetch(
         crate::shell::download::Fetch { url, partial: &partial, size: None, what: crate::privacy::net::Download::OnDeviceAi, ticket },
         &report,
@@ -462,7 +465,7 @@ mod tests {
     fn a_test_run_downloads_only_from_its_own_servers() {
         assert!(allowed_in_test_run("http://127.0.0.1:5123/llm/qwen3.5-4b.gguf"));
         assert!(!allowed_in_test_run(MODEL_URL));
-        assert!(!allowed_in_test_run(RUNTIME_URL));
+        assert!(!allowed_in_test_run(crate::ai::local_llm::RUNTIME_URL));
         assert!(!allowed_in_test_run("http://localhost:5123/llm/x.gguf"));
         assert!(!allowed_in_test_run("not a web address"));
         // Without stand-ins: the pinned source.

@@ -63,10 +63,15 @@ Running:
   --locale <tag|json>      the user's region, as Windows would say it (About you, about_you.rs):
                            \"en-GB\" (currency and units from its region), or JSON {locale, country,
                            currency, symbol, metric, timeZone}; default none (no region in prompts)
-Local models (Yap's llamafile, like local_llm.rs, on a free port, stopped after):
+Local models (Yap's engine, like local_llm.rs, on a free port, stopped after):
   --ngl <n>                GPU layers (default 0: CPU only)   --ctx <n> (default 8192, as Yap)
-  --llamafile <path>       the runtime (default: the installed one, else downloaded)
-  --llamafile-arg <arg>    extra server argument (repeatable)
+  --engine <spec>          installed (default: what the installed Yap runs, else the floor) |
+                           llamafile | floor | latest (the newest llama.cpp build 3 days old) |
+                           b12345 | a folder with llama-server.exe (llama.cpp builds not on disk
+                           are downloaded into <models-dir>/engine, SHA-256 checked)
+  --engine-variant <v>     cuda13 | cuda12 | vulkan | cpu (default: what Yap installs here)
+  --llamafile <path>       that llamafile
+  --llamafile-arg <arg>    extra server argument (repeatable; also --server-arg)
   --mtp on|off             MTP speculative decoding (default: as Yap's sidecar decides on this PC;
                            never with --ngl 0)
   --no-warm-up             skip the warm-up request Yap's sidecar sends once the model is loaded
@@ -199,6 +204,9 @@ struct Args {
     ctx: u32,
     llamafile: Option<PathBuf>,
     llamafile_args: Vec<String>,
+    /// `--engine`, `--engine-variant` (`local::Choice`).
+    engine: Option<String>,
+    engine_variant: Option<String>,
     mtp: Option<bool>,
     no_warm_up: bool,
     models_dir: Option<PathBuf>,
@@ -250,6 +258,14 @@ struct Args {
     set: Vec<(String, Value)>,
 }
 
+impl Args {
+    /// The engine a local model is served with (`--engine`,
+    /// `--engine-variant`, `--llamafile`).
+    fn engine_choice(&self) -> local::Choice<'_> {
+        local::Choice { llamafile: self.llamafile.as_deref(), engine: self.engine.as_deref(), variant: self.engine_variant.as_deref() }
+    }
+}
+
 fn parse(argv: Vec<String>) -> Result<Args, String> {
     let mut a = Args { ngl: 0, ctx: 8192, repeat: 1, cleanup_rounds: 3, bench_rounds: 3, embed_ngl: 999, ..Default::default() };
     let mut it = argv.into_iter();
@@ -292,7 +308,9 @@ fn parse(argv: Vec<String>) -> Result<Args, String> {
             "--ngl" => a.ngl = num(value()?, &flag)? as u32,
             "--ctx" => a.ctx = num(value()?, &flag)? as u32,
             "--llamafile" => a.llamafile = Some(PathBuf::from(value()?)),
-            "--llamafile-arg" => a.llamafile_args.push(value()?),
+            "--llamafile-arg" | "--server-arg" => a.llamafile_args.push(value()?),
+            "--engine" => a.engine = Some(value()?),
+            "--engine-variant" => a.engine_variant = Some(value()?),
             "--mtp" => {
                 a.mtp = match value()?.as_str() {
                     "on" | "true" | "yes" => Some(true),
@@ -813,13 +831,13 @@ async fn prepare(spec: &str, args: &Args, keys: &HashMap<String, String>, run_di
             m.model = model.trim().to_string();
         }
         "local" => {
-            let runtime = local::runtime(args.llamafile.as_deref(), models_dir).await?;
+            let runtime = local::runtime(&args.engine_choice(), models_dir).await?;
             let gguf = local::model(rest, models_dir).await?;
             let plan = local::plan(&runtime, &gguf, args.ngl, args.ctx, args.mtp).await;
             println!(
-                "Starting llamafile {} ({}) with {} (ngl {}, ctx {}, MTP {}) …",
-                plan.runtime,
-                runtime.display(),
+                "Starting {} ({}) with {} (ngl {}, ctx {}, MTP {}) …",
+                runtime.label(),
+                runtime.exe().display(),
                 gguf.display(),
                 args.ngl,
                 args.ctx,
@@ -1589,7 +1607,7 @@ async fn run_all(args: &Args, run_dir: &Path, keys: &HashMap<String, String>, sc
         "args": {
             "models": args.models, "tools": args.tools, "tokens_per_minute": args.tokens_per_minute,
             "max_total_tokens": args.max_total_tokens, "timeout_s": args.timeout, "ngl": args.ngl, "ctx": args.ctx,
-            "llamafile_args": args.llamafile_args, "mtp": args.mtp, "no_warm_up": args.no_warm_up, "repeat": args.repeat, "no_web": args.no_web,
+            "llamafile_args": args.llamafile_args, "engine": args.engine, "engine_variant": args.engine_variant, "mtp": args.mtp, "no_warm_up": args.no_warm_up, "repeat": args.repeat, "no_web": args.no_web,
         },
     });
     let mut failed = false;
@@ -1845,7 +1863,7 @@ async fn run_all(args: &Args, run_dir: &Path, keys: &HashMap<String, String>, sc
         record::set_config(Some(crate::config::YapConfig { search_by_meaning: true, ..Default::default() }));
         let setup = async {
             let ids = super::search::seed(c)?;
-            let runtime = local::runtime(args.llamafile.as_deref(), &models_dir).await?;
+            let runtime = local::runtime(&args.engine_choice(), &models_dir).await?;
             let gguf = super::search::model(args.embed.as_deref(), &models_dir).await?;
             println!("  embedding server: {} (ngl {}) …", gguf.display(), args.embed_ngl);
             let server = super::search::start(&runtime, &gguf, args.embed_ngl, run_dir).await?;
@@ -1881,7 +1899,7 @@ async fn run_all(args: &Args, run_dir: &Path, keys: &HashMap<String, String>, sc
         record::set_config(Some(crate::config::YapConfig { search_by_meaning: true, ..Default::default() }));
         let setup = async {
             let ids = super::library::seed(l)?;
-            let runtime = local::runtime(args.llamafile.as_deref(), &models_dir).await?;
+            let runtime = local::runtime(&args.engine_choice(), &models_dir).await?;
             let gguf = super::search::model(args.embed.as_deref(), &models_dir).await?;
             println!("  embedding server: {} (ngl {}) …", gguf.display(), args.embed_ngl);
             let server = super::search::start(&runtime, &gguf, args.embed_ngl, run_dir).await?;
@@ -2182,7 +2200,7 @@ async fn run_all(args: &Args, run_dir: &Path, keys: &HashMap<String, String>, sc
             info["server_log"] = json!(server.log);
             info["log_facts"] = server.log_facts();
             server.stop();
-            println!("  llamafile stopped");
+            println!("  the local server stopped");
         }
         record::write("model_end", info.clone());
         models_info.push(info);

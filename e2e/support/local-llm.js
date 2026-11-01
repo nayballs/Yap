@@ -1,22 +1,40 @@
 // Stand-ins for Yap's on-device model downloads (src-tauri/src/ai/local_llm.rs):
-// a fake GGUF per curated id and a fake llamafile engine, served from
-// 127.0.0.1 in pieces, slowly enough to see the progress; `hold()` stops a
-// download half-way until `release()` (a screenshot of the bar). Yap is
-// pointed at them with the debug-only YAP_LLM_SOURCES file (url + SHA-256 per
-// id; "runtime" for the engine), so a test run never downloads a real model
-// (and a test run refuses any address but 127.0.0.1 anyway). Nothing here
-// ever runs: the engine is random bytes.
+// a fake GGUF per curated id, a fake llama.cpp engine zip (the floor build a
+// first install gets, ai/local_llm/engine.rs: a `llama-server.exe` and a DLL
+// that are a few bytes of text) and NVIDIA's runtime zip, and a fake
+// llamafile (the older engine's upgrade), served from 127.0.0.1 in pieces,
+// slowly enough to see the progress; `hold()` stops a download half-way until
+// `release()` (a screenshot of the bar). Yap is pointed at them with the
+// debug-only YAP_LLM_SOURCES file (url + SHA-256 per id; "engine" and "cudart"
+// for the llama.cpp engine, "runtime" for llamafile), so a test run never
+// downloads a real model (and a test run refuses any address but 127.0.0.1
+// anyway). Nothing here ever runs.
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import http from 'node:http';
 import path from 'node:path';
+import { makeZip } from './diarization.js';
 
 const sha256 = (buf) => crypto.createHash('sha256').update(buf).digest('hex');
+
+/** A stand-in llama.cpp build's zip, laid out like llama.cpp's (never run). */
+export function engineZip(note = 'a stand-in llama.cpp server (never run)') {
+  return makeZip({
+    'llama-server.exe': note,
+    'ggml.dll': 'a stand-in DLL',
+    'llama-cli.exe': 'a tool Yap leaves out',
+    'LICENSE-stand-in': 'MIT (stand-in)',
+  });
+}
 
 /** Serve fake on-device models for `ids` and write the sources file into `dir`. */
 export async function startFakeLocalModels(dir, ids = ['qwen3.5-4b', 'qwen2.5-1.5b', 'qwen3.5-2b']) {
   fs.mkdirSync(dir, { recursive: true });
-  const bodies = { '/llm/runtime': crypto.randomBytes(64 * 1024) };
+  const bodies = {
+    '/llm/runtime': crypto.randomBytes(64 * 1024),
+    '/llm/engine.zip': engineZip(),
+    '/llm/cudart.zip': makeZip({ 'cudart64_12.dll': 'a stand-in CUDA runtime' }),
+  };
   // An id's file on the server ("vision:qwen3.5-4b", a projector: no colon in the path).
   const at = (id) => `/llm/${id.replace(/[^a-z0-9.-]/gi, '-')}.gguf`;
   for (const id of ids) bodies[at(id)] = crypto.randomBytes(4 * 1024 * 1024);
@@ -43,7 +61,11 @@ export async function startFakeLocalModels(dir, ids = ['qwen3.5-4b', 'qwen2.5-1.
   });
   await new Promise((r) => server.listen(0, '127.0.0.1', r));
   const base = `http://127.0.0.1:${server.address().port}`;
-  const sources = { runtime: { url: `${base}/llm/runtime`, sha256: sha256(bodies['/llm/runtime']) } };
+  const sources = {
+    runtime: { url: `${base}/llm/runtime`, sha256: sha256(bodies['/llm/runtime']) },
+    engine: { url: `${base}/llm/engine.zip`, sha256: sha256(bodies['/llm/engine.zip']) },
+    cudart: { url: `${base}/llm/cudart.zip`, sha256: sha256(bodies['/llm/cudart.zip']) },
+  };
   for (const id of ids) sources[id] = { url: `${base}${at(id)}`, sha256: sha256(bodies[at(id)]) };
   const sourcesFile = path.join(dir, 'llm-sources.json');
   fs.writeFileSync(sourcesFile, JSON.stringify(sources, null, 2));

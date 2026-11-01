@@ -284,17 +284,14 @@ async fn clean_up(yap: &Path, cases: &[Case], outcomes: &mut [Outcome], spec: Op
     let cfg = crate::config::peek(yap).unwrap_or_default();
     let spec = spec.map(str::to_string).unwrap_or_else(|| cfg.pp_local_model.clone());
     let models_dir = scratch.join("models");
-    let runtime = crate::ai::eval::local::runtime(None, &models_dir).await?;
+    // What the installed Yap runs (its llama.cpp build, or llamafile).
+    let runtime = crate::ai::eval::local::runtime(&Default::default(), &models_dir).await?;
     let gguf = crate::ai::eval::local::model(&spec, &models_dir).await?;
     // As Yap's sidecar would run it here (MTP and the cache as it decides),
     // from the person's settings as read — never `config::load`, which may
     // save a migration.
-    let version = local_llm::runtime::probe_version(&runtime)
-        .await
-        .or_else(|| local_llm::runtime::Version::parse(local_llm::RUNTIME_VERSION))
-        .ok_or("the llamafile runtime's version")?;
-    let yap_plan = local_llm::plan_for(&cfg, &gguf, CLEANUP_CTX, version);
-    let plan = local_llm::Plan { runtime: version, mtp: yap_plan.mtp, kv_q8: yap_plan.kv_q8, per_slot: false };
+    let yap_plan = local_llm::plan_for(&cfg, &gguf, CLEANUP_CTX, runtime.runtime());
+    let plan = local_llm::Plan { runtime: runtime.runtime(), mtp: yap_plan.mtp, kv_q8: yap_plan.kv_q8, per_slot: false };
     let server = crate::ai::eval::local::start(&runtime, &gguf, 999, CLEANUP_CTX, plan, &[], scratch, false).await?;
     let model = local_llm::model_id(&gguf);
     let spelling = crate::dictation::languages::cleanup_spelling(&cfg);

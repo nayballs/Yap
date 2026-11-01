@@ -1,22 +1,25 @@
-//! On-device AI cleanup sidecar (llamafile).
+//! On-device AI cleanup sidecar (llama.cpp's server).
 //!
 //! Embedding llama.cpp in-process is a NO-GO: `whisper-rs-sys` (via transcribe-rs)
 //! and `llama-cpp-2` each statically vendor a different, ABI-incompatible ggml, so
-//! linking both yields duplicate-symbol failures (see the spike). Instead we run a
-//! **llamafile** as a child process — a single-file, GPU-capable, OpenAI-compatible
-//! server. Yap's existing cleanup client (`llm.rs`) just POSTs to its localhost
-//! URL, so the whole cleanup stack (guardrails, presets, routing) is reused with
-//! ZERO changes. Fully local, no cloud.
+//! linking both yields duplicate-symbol failures (see the spike). Instead we run
+//! llama.cpp's OpenAI-compatible server as a child process: one of **llama.cpp's
+//! own builds** (`llama-server.exe`, kept up to date: [`engine`]), or on an older
+//! install **Mozilla's llamafile** until it has moved. Yap's existing cleanup client
+//! (`llm.rs`) just POSTs to its localhost URL, so the whole cleanup stack
+//! (guardrails, presets, routing) is reused with ZERO changes. Fully local, no cloud.
 //!
 //! This module owns the process lifecycle: spawn (hidden), wait for `/health`,
-//! expose the base URL, and kill on stop/exit. Beside it: [`runtime`] (the
-//! llamafile on disk and its background upgrade), [`context`] (the context
-//! length, and a restart when it changes), [`models`] (the curated
-//! models and their downloads), [`uninstall`] (a model deleted from
-//! `llm/`, never the one in use) and [`vision`] (its projector: the model
-//! reading screenshots, loaded only while it's needed).
+//! expose the base URL, and kill on stop/exit. Beside it: [`engine`] (llama.cpp's
+//! builds on disk, the floor a first install gets, the daily update with its
+//! trial and roll-back), [`runtime`] (llamafile on disk and its background
+//! upgrade), [`context`] (the context length, and a restart when it changes),
+//! [`models`] (the curated models and their downloads), [`uninstall`] (a model
+//! deleted from `llm/`, never the one in use) and [`vision`] (its projector: the
+//! model reading screenshots, loaded only while it's needed).
 
 pub mod context;
+pub mod engine;
 pub mod models;
 pub mod on_demand;
 pub mod runtime;
@@ -36,11 +39,13 @@ use context::{
     card_room, context_for, context_setting, context_view, needs_restart, restart_pending, restart_when_idle, runs_on_card,
     ContextView,
 };
+pub use engine::Runtime;
 use models::CURATED_MODELS;
 use runtime::{
-    count_failure, prove, read_marker_at, refused_in, roll_back, runtime_version, runtime_version_in, swap_in, uncount_failure,
-    update_marker, Version,
+    count_failure, prove, read_marker_at, refused_in, roll_back, runtime_version_in, swap_in, uncount_failure, update_marker,
 };
+#[cfg(debug_assertions)]
+use runtime::Version;
 
 /// Provider id (in `YapConfig::pp_provider`) that selects the managed sidecar.
 pub const PROVIDER_ONDEVICE: &str = "ondevice";
@@ -55,7 +60,9 @@ pub const MODEL_FILENAME: &str = "qwen2.5-1.5b-instruct-q4_k_m.gguf";
 /// Human-readable names surfaced in the Settings UI (via `local_llm_status`) so
 /// the user is told exactly what gets downloaded and what runs on their machine.
 pub const MODEL_DISPLAY: &str = "Qwen2.5 1.5B Instruct";
-pub const ENGINE_DISPLAY: &str = "Mozilla llamafile (llama.cpp)";
+/// The engine's name before one is installed ([`engine::Engine::label`]
+/// names the one that is).
+pub const ENGINE_DISPLAY: &str = "llama.cpp";
 
 /// Download source + pinned SHA-256 for the GGUF cleanup model (HuggingFace).
 pub(crate) const MODEL_URL: &str =
@@ -150,11 +157,12 @@ pub const CTX_CHECKPOINTS: u32 = 4;
 /// with it (every message a checkpoint).
 pub const CHECKPOINT_MIN_STEP_PER_SLOT: u32 = 0;
 
-/// How a server runs a model beyond its context: the runtime's version (the
-/// arguments it understands) and whether MTP drafting is on.
+/// How a server runs a model beyond its context: the runtime (llamafile's
+/// version or a llama.cpp build: the arguments it understands) and whether
+/// MTP drafting is on.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Plan {
-    pub runtime: Version,
+    pub runtime: Runtime,
     pub mtp: bool,
     /// A q8_0 KV cache ([`kv_q8_helps`]): only where it makes a long
     /// context fit on the card.
@@ -176,9 +184,14 @@ impl Plan {
     }
 }
 
-/// The llamafile server's arguments, for Yap's sidecar and for the model
+/// The server's arguments, for Yap's sidecar and for the model
 /// evaluations (`eval/local.rs`), so both run a model the same way.
 /// `ngl`: layers on the GPU (999 = all that fit; 0 = the processor).
+/// llama.cpp's own server and llamafile's (llama.cpp b10441 underneath)
+/// take the same arguments but for how each is told to serve
+/// ([`Runtime::flavour_args`]: llamafile's `--server`; llama.cpp's
+/// `--no-webui --offline`); checked against b11982's `--help` and run with
+/// each (2026-11-01).
 ///
 /// - `--reasoning off`: no thinking, whatever the model. Qwen3.5 thinks by
 ///   default and, so, loops and times out on Chat (and slows every dictation's
@@ -197,7 +210,7 @@ pub fn server_args(model: &Path, port: u16, ngl: u32, ctx: u32, plan: Plan) -> V
     // Per-slot caches: the whole context for each slot (llama.cpp gives a
     // slot `-c` / `-np` without a unified cache).
     let total = if per_slot { ctx.saturating_mul(crate::ai::gguf::PER_SLOT_SLOTS as u32) } else { ctx };
-    let mut args = base_args(model, port, ngl, total);
+    let mut args = base_args(model, port, ngl, total, plan.runtime);
     if per_slot {
         args.extend([
             "-np".to_string(),
@@ -218,11 +231,11 @@ pub fn server_args(model: &Path, port: u16, ngl: u32, ctx: u32, plan: Plan) -> V
     args
 }
 
-fn base_args(model: &Path, port: u16, ngl: u32, ctx: u32) -> Vec<String> {
-    vec![
-        // `--server` = OpenAI-compatible HTTP API only (no browser UI, no
-        // --nobrowser flag needed — and that flag is invalid in llamafile 0.10.3).
-        "--server".into(),
+fn base_args(model: &Path, port: u16, ngl: u32, ctx: u32, runtime: Runtime) -> Vec<String> {
+    // How it's told to serve first (llamafile's `--server`: OpenAI-compatible
+    // HTTP API only — its `--nobrowser` is invalid in 0.10.3).
+    let mut args: Vec<String> = runtime.flavour_args().iter().map(|a| a.to_string()).collect();
+    args.extend([
         "--host".into(),
         "127.0.0.1".into(),
         "--port".into(),
@@ -241,7 +254,8 @@ fn base_args(model: &Path, port: u16, ngl: u32, ctx: u32) -> Vec<String> {
         CTX_CHECKPOINTS.to_string(),
         "-lv".into(),
         "4".into(),
-    ]
+    ]);
+    args
 }
 
 /// Where a model's layers went, read from the server's log.
@@ -763,7 +777,7 @@ async fn e2e_stand_in_start(url: &str, gen: u64) -> Result<String, String> {
         hear_template_tools(&client, port, &model_id(&model)).await;
     }
     if let Ok(mut s) = SERVING.lock() {
-        let plan = Plan { runtime: Version(0, 10, 6), mtp: false, kv_q8: false, per_slot: false };
+        let plan = Plan { runtime: Runtime::Llamafile(Version(0, 10, 6)), mtp: false, kv_q8: false, per_slot: false };
         // Its projector as a real start would load it (asked for, usable).
         let vision = vision::for_start(&cfg, &model, context_for(&cfg), plan, 999).map(|v| v.on_card);
         *s = Some(Serving {
@@ -791,19 +805,19 @@ pub fn llm_dir() -> PathBuf {
     crate::config::data_dir().join("llm")
 }
 
-/// Path to the llamafile runtime executable.
-pub fn runtime_path() -> PathBuf {
-    llm_dir().join(RUNTIME_FILENAME)
-}
-
 /// Path to the cleanup GGUF model.
 pub fn model_path() -> PathBuf {
     llm_dir().join(MODEL_FILENAME)
 }
 
-/// Both the runtime and the active model are present on disk.
+/// An engine is on disk: a llama.cpp build, or llamafile ([`engine::active`]).
+pub fn engine_installed() -> bool {
+    engine::active().is_some()
+}
+
+/// Both an engine and the active model are present on disk.
 pub fn is_installed(cfg: &crate::config::YapConfig) -> bool {
-    runtime_path().is_file() && active_model_path(cfg).is_file()
+    engine_installed() && active_model_path(cfg).is_file()
 }
 
 /// The model the sidecar should load: the user's custom GGUF (`pp_local_model`,
@@ -978,12 +992,40 @@ pub async fn start() -> Result<String, String> {
     if let Some(url) = base_url() {
         return Ok(url);
     }
-    // One start at a time: a second caller waits, then finds it up.
-    let _one = STARTING.lock().await;
+    // One start at a time: a second caller waits, then finds it up. An
+    // engine trial holding the lock sees the wait and gives way.
+    let _one = {
+        let _waiting = WantsStart::begin();
+        STARTING.lock().await
+    };
     if let Some(url) = base_url() {
         return Ok(url);
     }
     start_locked().await
+}
+
+/// Starts waiting for the start lock ([`start`]): an engine trial
+/// (`engine/updater.rs`) gives way to them at once.
+static WANTS_START: AtomicU32 = AtomicU32::new(0);
+
+struct WantsStart;
+
+impl WantsStart {
+    fn begin() -> WantsStart {
+        WANTS_START.fetch_add(1, Ordering::SeqCst);
+        WantsStart
+    }
+}
+
+impl Drop for WantsStart {
+    fn drop(&mut self) {
+        WANTS_START.fetch_sub(1, Ordering::SeqCst);
+    }
+}
+
+/// Is someone waiting to start the model?
+pub(crate) fn wants_start() -> bool {
+    WANTS_START.load(Ordering::SeqCst) > 0
 }
 
 /// One way back per session from a runtime that won't start ([`start_locked`]).
@@ -1035,8 +1077,8 @@ impl std::fmt::Display for Failure {
         match self {
             Failure::Stopped => write!(f, "the on-device model was stopped while it started"),
             Failure::Missing(why) | Failure::Launch(why) => write!(f, "{why}"),
-            Failure::Exited => write!(f, "llamafile exited during startup"),
-            Failure::Timeout => write!(f, "llamafile did not become ready in time"),
+            Failure::Exited => write!(f, "the on-device engine exited during startup"),
+            Failure::Timeout => write!(f, "the on-device engine did not become ready in time"),
         }
     }
 }
@@ -1090,6 +1132,11 @@ async fn start_locked() -> Result<String, String> {
 ///   either, the fault isn't the runtime's: the new one goes back in and
 ///   the failure isn't counted.
 ///
+/// On a llama.cpp build switched to and not yet started once
+/// ([`engine::Marker::unproven`]) the same, by the engine's marker: the build
+/// before it (or llamafile) goes back in and starts, the new one tried again
+/// at the next launch until it's refused ([`engine_way_back`]).
+///
 /// Up: a new runtime is proven (the previous one deleted); one that runs
 /// MTP with its model partly on the processor starts again without it,
 /// and MTP stays off for that model on that runtime.
@@ -1103,9 +1150,14 @@ where
     F: FnMut(Attempt) -> Fut,
     Fut: std::future::Future<Output = Result<Started, Failed>>,
 {
-    let unproven = read_marker_at(&dir.join(RUNTIME_MARKER)).is_some_and(|m| m.unproven);
+    let on_engine = engine::llama_cpp_active_in(dir);
+    let unproven = if on_engine {
+        engine::read_marker(&engine::engine_dir_in(dir)).unproven
+    } else {
+        read_marker_at(&dir.join(RUNTIME_MARKER)).is_some_and(|m| m.unproven)
+    };
     let first = match spawn(Attempt::FIRST).await {
-        Ok(s) => return up(dir, unproven, s, &mut spawn).await,
+        Ok(s) => return up(dir, unproven, on_engine, s, &mut spawn).await,
         Err(f) => f,
     };
     if !first.why.counts() || closing() {
@@ -1117,7 +1169,7 @@ where
             if first.mtp {
                 note_mtp_failed(dir, &first.key);
             }
-            return up(dir, unproven, s, &mut spawn).await;
+            return up(dir, unproven, on_engine, s, &mut spawn).await;
         }
         Err(again) if !again.why.counts() || closing() => return Err(again.why.to_string()),
         Err(_) => {}
@@ -1125,7 +1177,10 @@ where
     if !unproven || went_back.swap(true, Ordering::SeqCst) {
         return Err(first.why.to_string());
     }
-    let sha = read_marker_at(&dir.join(RUNTIME_MARKER)).map(|m| m.sha256).unwrap_or_default();
+    if on_engine {
+        return engine_way_back(dir, &first.why, closing, &mut spawn).await;
+    }
+    let sha =read_marker_at(&dir.join(RUNTIME_MARKER)).map(|m| m.sha256).unwrap_or_default();
     let tries = count_failure(dir, &sha);
     tracing::warn!(tries, "The new llamafile runtime didn't start ({}); going back to the previous one", first.why);
     let failed = match roll_back(dir) {
@@ -1161,13 +1216,67 @@ where
     }
 }
 
-/// The sidecar is up ([`start_with`]).
-async fn up<F, Fut>(dir: &Path, unproven: bool, s: Started, spawn: &mut F) -> Result<String, String>
+/// A llama.cpp build switched to wouldn't start (twice): the build before
+/// it (or llamafile) goes back in and starts, the failure counted and the
+/// new one kept to try again at the next launch ([`engine::roll_back`]).
+/// When the one before won't start either, or there's none, the new one
+/// goes back in uncounted ([`engine::put_back`]).
+async fn engine_way_back<F, Fut>(dir: &Path, first: &Failure, closing: &(dyn Fn() -> bool + Sync), spawn: &mut F) -> Result<String, String>
 where
     F: FnMut(Attempt) -> Fut,
     Fut: std::future::Future<Output = Result<Started, Failed>>,
 {
-    if unproven {
+    let edir = engine::engine_dir_in(dir);
+    let mut m = engine::read_marker(&edir);
+    let event = m.event.clone();
+    let Some(failed) = engine::roll_back(&mut m, engine::now_secs()) else { return Err(first.to_string()) };
+    let put_back = |failed: engine::Installed| {
+        let mut m = engine::read_marker(&edir);
+        engine::put_back(&mut m, failed, event.clone());
+        if let Err(e) = engine::write_marker(&edir, &m) {
+            tracing::warn!("Couldn't put the new llama.cpp build back: {e}");
+        }
+    };
+    if let Err(e) = engine::write_marker(&edir, &m) {
+        tracing::warn!("Couldn't go back from the new llama.cpp build: {e}");
+        return Err(first.to_string());
+    }
+    // Nothing to go back to (no build before, no llamafile): it stays.
+    if engine::active_in(dir).is_none() {
+        put_back(failed);
+        return Err(first.to_string());
+    }
+    let to = m.current.as_ref().map(|c| c.build.to_string()).unwrap_or_else(|| "llamafile".into());
+    tracing::warn!(build = %failed.build, to, "The new llama.cpp build didn't start ({first}); going back");
+    match spawn(Attempt::AGAIN).await {
+        Ok(s) => {
+            tracing::warn!(build = %failed.build, refused = m.is_refused(&failed.key()), "The engine before runs again");
+            Ok(s.url)
+        }
+        // Stopped meanwhile: the one before stays, the failure counted.
+        Err(again) if !again.why.counts() || closing() => Err(first.to_string()),
+        Err(again) => {
+            tracing::warn!("The engine before didn't start either ({}); keeping the new build", again.why);
+            put_back(failed);
+            Err(first.to_string())
+        }
+    }
+}
+
+/// The sidecar is up ([`start_with`]).
+async fn up<F, Fut>(dir: &Path, unproven: bool, on_engine: bool, s: Started, spawn: &mut F) -> Result<String, String>
+where
+    F: FnMut(Attempt) -> Fut,
+    Fut: std::future::Future<Output = Result<Started, Failed>>,
+{
+    if unproven && on_engine {
+        let edir = engine::engine_dir_in(dir);
+        if let Ok(m) = engine::update_marker(&edir, |m| {
+            engine::prove(m);
+        }) {
+            tracing::info!(build = %m.current.as_ref().map(|c| c.build.to_string()).unwrap_or_default(), "The new llama.cpp build started");
+        }
+    } else if unproven {
         prove(dir);
         tracing::info!(version = %runtime_version_in(dir).map(|v| v.to_string()).unwrap_or_default(), "The new llamafile runtime started; the previous one is deleted");
     }
@@ -1181,11 +1290,19 @@ where
     Ok(s.url)
 }
 
-/// "<runtime>/<GGUF file>": what MTP failing is remembered by
-/// ([`Marker::mtp_failed`]) — a newer runtime gets to try it again.
-pub fn mtp_key(runtime: Version, model: &Path) -> String {
+/// "<runtime>/<GGUF file>" ("0.10.6/…" on llamafile, "b11982-cuda13/…" on
+/// a llama.cpp build): what MTP failing is remembered by
+/// ([`Marker::mtp_failed`], llamafile's marker; [`engine::Marker::mtp_failed`]
+/// for a build) — a newer runtime gets to try it again.
+pub fn mtp_key(runtime: Runtime, model: &Path) -> String {
     let file = model.file_name().map(|f| f.to_string_lossy().into_owned()).unwrap_or_default();
     format!("{runtime}/{file}")
+}
+
+/// A key [`mtp_key`] made for a llama.cpp build ("b…"), kept in the
+/// engine's marker (llamafile's is left as an older Yap knows it).
+fn engine_key(key: &str) -> bool {
+    key.starts_with('b')
 }
 
 /// MTP failed this session ([`note_mtp_failed`]; also when the marker
@@ -1203,7 +1320,16 @@ fn note_mtp_failed(dir: &Path, key: &str) {
             g.push(key.to_string());
         }
     }
-    if dir.join(RUNTIME_MARKER).is_file() {
+    if engine_key(key) {
+        let edir = engine::engine_dir_in(dir);
+        if edir.join(engine::MARKER).is_file() {
+            let _ = engine::update_marker(&edir, |m| {
+                if !m.mtp_failed.iter().any(|k| k == key) {
+                    m.mtp_failed.push(key.to_string());
+                }
+            });
+        }
+    } else if dir.join(RUNTIME_MARKER).is_file() {
         let _ = update_marker(dir, |m| {
             if !m.mtp_failed.iter().any(|k| k == key) {
                 m.mtp_failed.push(key.to_string());
@@ -1215,20 +1341,25 @@ fn note_mtp_failed(dir: &Path, key: &str) {
 
 /// Did MTP fail with `key` on this PC (this session, or the marker says)?
 fn mtp_failed_here(dir: &Path, key: &str) -> bool {
-    MTP_FAILED.lock().is_ok_and(|g| g.iter().any(|k| k == key))
-        || read_marker_at(&dir.join(RUNTIME_MARKER)).is_some_and(|m| m.mtp_failed.iter().any(|k| k == key))
+    if MTP_FAILED.lock().is_ok_and(|g| g.iter().any(|k| k == key)) {
+        return true;
+    }
+    if engine_key(key) {
+        return engine::read_marker(&engine::engine_dir_in(dir)).mtp_failed.iter().any(|k| k == key);
+    }
+    read_marker_at(&dir.join(RUNTIME_MARKER)).is_some_and(|m| m.mtp_failed.iter().any(|k| k == key))
 }
 
 /// NVIDIA's PCI vendor id: the cards MTP was measured on (CUDA).
 pub const NVIDIA: u32 = 0x10DE;
 
 /// May the sidecar draft with MTP, before the memory sums ([`mtp_fits`])?
-/// llamafile 0.10.6 or newer, the setting on, an **NVIDIA** card (MTP was
-/// measured on CUDA only; AMD and Intel cards run llama.cpp's Vulkan
-/// backend, where nobody has measured it), and it hasn't failed with this
-/// model here. Pure.
-pub fn mtp_allowed(runtime: Version, setting: bool, vendor: Option<u32>, failed_here: bool) -> bool {
-    runtime.is_current() && setting && vendor == Some(NVIDIA) && !failed_here
+/// llamafile 0.10.6 or newer (or a llama.cpp build), the setting on, an
+/// **NVIDIA** card on CUDA (MTP was measured on CUDA only; a Vulkan build —
+/// AMD and Intel cards, or an NVIDIA card on the Vulkan build — nobody has
+/// measured), and it hasn't failed with this model here. Pure.
+pub fn mtp_allowed(runtime: Runtime, setting: bool, vendor: Option<u32>, failed_here: bool) -> bool {
+    runtime.is_current() && runtime.cuda() && setting && vendor == Some(NVIDIA) && !failed_here
 }
 
 /// How the sidecar runs `model` at `ctx` on `runtime` ([`Plan`]): **MTP
@@ -1241,11 +1372,11 @@ pub fn mtp_allowed(runtime: Version, setting: bool, vendor: Option<u32>, failed_
 /// on an RTX 5070 Ti (docs/model-evals.md "Local AI, phase 1"): the 4B's
 /// generation ~165 → ~255 tokens/s, greedy outputs unchanged, ~+0.85 GB on
 /// the card.
-pub fn plan_for(cfg: &crate::config::YapConfig, model: &Path, ctx: u32, runtime: Version) -> Plan {
+pub fn plan_for(cfg: &crate::config::YapConfig, model: &Path, ctx: u32, runtime: Runtime) -> Plan {
     let gpu = crate::ai::gpu::this_pc();
     let vendor = gpu.as_ref().map(|g| g.vendor);
     let vram = gpu.map(|g| g.vram_mib);
-    let kv_q8 = runtime.is_current() && vendor == Some(NVIDIA) && kv_q8_rescues(model, ctx, vram);
+    let kv_q8 = runtime.is_current() && runtime.cuda() && vendor == Some(NVIDIA) && kv_q8_rescues(model, ctx, vram);
     let failed = mtp_failed_here(&llm_dir(), &mtp_key(runtime, model));
     let mtp = mtp_allowed(runtime, cfg.local_mtp, vendor, failed) && mtp_fits(model, ctx, vram, kv_q8);
     let per_slot = per_slot_caches(runtime, runs_on_card(None, vram));
@@ -1265,8 +1396,8 @@ pub fn plan_for(cfg: &crate::config::YapConfig, model: &Path, ctx: u32, runtime:
 /// → 1.17 s; docs/model-evals.md "The processor tier"). It costs the KV
 /// once more (the 1.5B: +224 MiB of memory at 8K) and leaves two slots
 /// instead of four; on a graphics card the shared cache was never the slow
-/// part. llamafile 0.10.6 or newer (the flags). Pure.
-pub fn per_slot_caches(runtime: Version, on_card: bool) -> bool {
+/// part. llamafile 0.10.6 or newer, or a llama.cpp build (the flags). Pure.
+pub fn per_slot_caches(runtime: Runtime, on_card: bool) -> bool {
     runtime.is_current() && !on_card
 }
 
@@ -1321,14 +1452,17 @@ pub fn mtp_fits(model: &Path, ctx: u32, vram_mib: Option<u64>, kv_q8: bool) -> b
 /// [`Failure::Stopped`]. A sidecar already running (MTP's restart off the
 /// processor) is stopped first.
 async fn spawn_and_wait(attempt: Attempt, gen: u64) -> Result<Started, Failed> {
-    let exe = runtime_path();
+    // The engine the marker names now (a way back may have changed it
+    // since the last try): a llama.cpp build, else llamafile.
+    let active = engine::active();
     // Load whichever GGUF the user picked (custom models live in the same dir);
     // falls back to the bundled default if the selection is gone.
     let cfg = crate::config::load();
     let model = active_model_path(&cfg);
     // The context set in the pickers, within what the model was trained for.
     let ctx = context_for(&cfg);
-    let mut plan = plan_for(&cfg, &model, ctx, runtime_version().unwrap_or(Version(0, 10, 3)));
+    let runtime = active.as_ref().map(|e| e.runtime()).unwrap_or_else(engine::active_runtime);
+    let mut plan = plan_for(&cfg, &model, ctx, runtime);
     plan.mtp &= attempt.mtp;
     // Its projector, when a screenshot asked for it (`vision::ensure`).
     let projector = vision::for_start(&cfg, &model, ctx, plan, 999);
@@ -1340,9 +1474,9 @@ async fn spawn_and_wait(attempt: Attempt, gen: u64) -> Result<Started, Failed> {
     if stopped() {
         return Err(fail(Failure::Stopped));
     }
-    if !exe.is_file() {
-        return Err(fail(Failure::Missing(format!("llamafile runtime not installed: {}", exe.display()))));
-    }
+    let Some(server) = active.filter(|e| e.present()) else {
+        return Err(fail(Failure::Missing("the on-device engine isn't installed".to_string())));
+    };
     if !model.is_file() {
         return Err(fail(Failure::Missing(format!("cleanup model not installed: {}", model.display()))));
     }
@@ -1353,13 +1487,16 @@ async fn spawn_and_wait(attempt: Attempt, gen: u64) -> Result<Started, Failed> {
     // Capture the server's output to a log so startup failures are diagnosable
     // (an invalid `--nobrowser` flag silently killing it is exactly how we'd
     // otherwise be blind). Best-effort — falls back to null if the file won't open.
-    let log = std::fs::File::create(llm_dir().join("llamafile.log")).ok();
+    let log_path = server.log_path(&llm_dir());
+    let log = std::fs::File::create(&log_path).ok();
     let to_stdio = |f: Option<std::fs::File>| {
         f.map(std::process::Stdio::from)
             .unwrap_or_else(std::process::Stdio::null)
     };
 
-    let mut cmd = std::process::Command::new(&exe);
+    // Hidden; a llama.cpp build in its own folder, NVIDIA's runtime on its
+    // PATH, its card pinned where it has one (`Engine::command`).
+    let mut cmd = server.command();
     // All layers on the GPU (999; llama.cpp fits what it can, the rest stays
     // on the processor, `placement`), thinking off, the caches capped; the
     // projector after them, on the card only where it fits beside the model.
@@ -1371,15 +1508,10 @@ async fn spawn_and_wait(attempt: Attempt, gen: u64) -> Result<Started, Failed> {
         .stdin(std::process::Stdio::null())
         .stdout(to_stdio(log.as_ref().and_then(|f| f.try_clone().ok())))
         .stderr(to_stdio(log.and_then(|f| f.try_clone().ok())));
-    #[cfg(windows)]
-    {
-        use std::os::windows::process::CommandExt;
-        cmd.creation_flags(0x0800_0000); // CREATE_NO_WINDOW — no console popup
-    }
 
     let child = cmd
         .spawn()
-        .map_err(|e| fail(Failure::Launch(format!("failed to launch llamafile: {}", e))))?;
+        .map_err(|e| fail(Failure::Launch(format!("failed to launch the on-device engine: {}", e))))?;
     // The model never keeps running after Yap: a crash or End task ends it too.
     crate::shell::procs::end_with_yap(&child);
     *CHILD.lock().unwrap_or_else(|p| p.into_inner()) = Some(child);
@@ -1425,7 +1557,7 @@ async fn spawn_and_wait(attempt: Attempt, gen: u64) -> Result<Started, Failed> {
                 let mut placement = None;
                 let mut facts = LogFacts::default();
                 for _ in 0..10 {
-                    let log = std::fs::read_to_string(llm_dir().join("llamafile.log")).unwrap_or_default();
+                    let log = std::fs::read_to_string(&log_path).unwrap_or_default();
                     placement = placement_after_load(&log);
                     facts = log_facts(&log);
                     if placement.is_some() {
@@ -1556,9 +1688,15 @@ pub async fn ensure_started() -> Result<String, String> {
 /// pre-install hook), so `stop()` never fires and the sidecar survives.
 /// Called at startup before we spawn a fresh one. Only sidecars whose parent
 /// Yap is gone count: a dev build must not kill the installed app's live one.
+/// A llama.cpp server counts only when it runs from Yap's own engine folder
+/// (`llm/engine/…`): someone's own `llama-server.exe` elsewhere is left
+/// alone.
 #[cfg(windows)]
 pub fn kill_orphans() {
-    for pid in crate::shell::procs::orphaned(RUNTIME_FILENAME) {
+    let ours = crate::shell::procs::orphaned(RUNTIME_FILENAME)
+        .into_iter()
+        .chain(crate::shell::procs::orphaned_under(&engine::engine_dir(), engine::SERVER_EXE));
+    for pid in ours {
         if crate::shell::procs::kill(pid) {
             tracing::info!("Killed orphaned cleanup sidecar (pid {})", pid);
         }
@@ -1713,12 +1851,32 @@ mod tests {
         assert!(!slow_on_this_pc("Qwen_Qwen3.5-4B-Q4_K_M.gguf", 2873, None));
     }
 
-    pub(super) const NEW: Version = Version(0, 10, 6);
-    pub(super) const OLD: Version = Version(0, 10, 3);
+    pub(super) const NEW: runtime::Version = runtime::Version(0, 10, 6);
+    pub(super) const OLD: runtime::Version = runtime::Version(0, 10, 3);
+    const NEW_RT: Runtime = Runtime::Llamafile(NEW);
+    const OLD_RT: Runtime = Runtime::Llamafile(OLD);
+    const CPP: Runtime = Runtime::LlamaCpp(engine::FLOOR, engine::Variant::Cuda13);
+
+    #[test]
+    fn llama_cpps_server_takes_the_same_arguments_but_how_it_serves() {
+        let plan = |runtime| Plan { runtime, mtp: true, kv_q8: false, per_slot: false };
+        let lf = server_args(Path::new("m.gguf"), 5000, 999, DEFAULT_CONTEXT, plan(NEW_RT));
+        let cpp = server_args(Path::new("m.gguf"), 5000, 999, DEFAULT_CONTEXT, plan(CPP));
+        assert_eq!(lf[0], "--server");
+        assert_eq!(&cpp[..2], ["--no-webui", "--offline"]);
+        assert!(!cpp.iter().any(|a| a == "--server"), "llama-server refuses llamafile's flag");
+        assert_eq!(lf[1..], cpp[2..], "every other argument the same, MTP too");
+        // MTP and the q8_0 cache: CUDA builds only (measured there); a Vulkan build never.
+        let vulkan = Runtime::LlamaCpp(engine::FLOOR, engine::Variant::Vulkan);
+        assert!(mtp_allowed(CPP, true, Some(NVIDIA), false));
+        assert!(!mtp_allowed(vulkan, true, Some(NVIDIA), false), "an NVIDIA card on the Vulkan build");
+        assert_eq!(mtp_key(CPP, Path::new("x/Qwen_Qwen3.5-4B-Q4_K_M.gguf")), "b11982-cuda13/Qwen_Qwen3.5-4B-Q4_K_M.gguf");
+        assert!(per_slot_caches(Runtime::LlamaCpp(engine::FLOOR, engine::Variant::Cpu), false));
+    }
 
     #[test]
     fn the_server_runs_without_thinking_and_with_its_caches_capped() {
-        let args = server_args(Path::new("m.gguf"), 5000, 999, DEFAULT_CONTEXT, Plan { runtime: NEW, mtp: false, kv_q8: false, per_slot: false });
+        let args = server_args(Path::new("m.gguf"), 5000, 999, DEFAULT_CONTEXT, Plan { runtime: NEW_RT, mtp: false, kv_q8: false, per_slot: false });
         let after = |flag: &str| args.iter().position(|a| a == flag).map(|i| args[i + 1].as_str());
         assert_eq!(after("--reasoning"), Some("off"));
         assert_eq!(after("--cache-ram"), Some("0"));
@@ -1731,9 +1889,9 @@ mod tests {
         assert!(!args.iter().any(|a| a == "--spec-type"), "no MTP unless the plan says");
         // MTP drafting: on the runtime it's measured on, never on 0.10.3
         // (whatever the plan says), whose other arguments are the same.
-        let mtp = server_args(Path::new("m.gguf"), 5000, 999, DEFAULT_CONTEXT, Plan { runtime: NEW, mtp: true, kv_q8: false, per_slot: false });
+        let mtp = server_args(Path::new("m.gguf"), 5000, 999, DEFAULT_CONTEXT, Plan { runtime: NEW_RT, mtp: true, kv_q8: false, per_slot: false });
         assert_eq!(&mtp[mtp.len() - 2..], ["--spec-type", "draft-mtp"]);
-        let old = server_args(Path::new("m.gguf"), 5000, 999, DEFAULT_CONTEXT, Plan { runtime: OLD, mtp: true, kv_q8: false, per_slot: false });
+        let old = server_args(Path::new("m.gguf"), 5000, 999, DEFAULT_CONTEXT, Plan { runtime: OLD_RT, mtp: true, kv_q8: false, per_slot: false });
         assert_eq!(old, args);
     }
 
@@ -1900,16 +2058,80 @@ mod tests {
         }
     }
 
+    /// An `llm/` with llama.cpp `new` switched to from `old` (`None`:
+    /// llamafile, when `llamafile`), neither started yet.
+    fn engine_switched(name: &str, old: Option<u32>, llamafile: bool) -> PathBuf {
+        let llm = scratch(name);
+        let edir = engine::engine_dir_in(&llm);
+        let inst = |b: u32| engine::Installed { build: engine::Build(b), variant: engine::Variant::Cpu, sha256: String::new(), cudart: None, device: None };
+        for b in [Some(11_980), old].into_iter().flatten() {
+            std::fs::create_dir_all(inst(b).dir(&edir)).unwrap();
+            std::fs::write(inst(b).dir(&edir).join(engine::SERVER_EXE), "srv").unwrap();
+        }
+        if llamafile {
+            std::fs::write(llm.join(RUNTIME_FILENAME), "lf").unwrap();
+        }
+        let mut m = engine::Marker { current: old.map(inst), ..Default::default() };
+        engine::switch_to(&mut m, inst(11_980), Some(1.0), 1);
+        engine::write_marker(&edir, &m).unwrap();
+        llm
+    }
+
+    /// A llama.cpp build switched to that won't start: the build before
+    /// (or llamafile) goes back in and starts; with nowhere to go back to,
+    /// or the one before down too, the new one stays, uncounted.
+    #[tokio::test]
+    async fn a_new_llama_cpp_build_that_wont_start_gives_way_to_the_one_before() {
+        let llm = engine_switched("engine-back", Some(11_960), false);
+        let edir = engine::engine_dir_in(&llm);
+        let (out, tried) = start_scripted(&llm, &AtomicBool::new(false), false, vec![down(Failure::Exited, false), down(Failure::Exited, false), up_ok(false, false)]).await;
+        assert!(out.is_ok() && tried.len() == 3);
+        let m = engine::read_marker(&edir);
+        assert_eq!(m.current.as_ref().map(|c| c.build), Some(engine::Build(11_960)));
+        assert_eq!(m.retry.as_ref().map(|c| c.build), Some(engine::Build(11_980)), "tried again at the next launch");
+        assert_eq!(m.failures.get("b11980-cpu"), Some(&1));
+        assert!(read(&edir, "engine.json").contains("wentBack"));
+        // Started once: proven, nothing more to do.
+        let llm2 = engine_switched("engine-up", Some(11_960), false);
+        let (out, _) = start_scripted(&llm2, &AtomicBool::new(false), false, vec![up_ok(false, false)]).await;
+        assert!(out.is_ok());
+        assert!(!engine::read_marker(&engine::engine_dir_in(&llm2)).unproven);
+        // Moved from llamafile: back to llamafile.
+        let llm3 = engine_switched("engine-lf", None, true);
+        let (out, _) = start_scripted(&llm3, &AtomicBool::new(false), false, vec![down(Failure::Timeout, false), down(Failure::Timeout, false), up_ok(false, false)]).await;
+        assert!(out.is_ok());
+        assert!(engine::read_marker(&engine::engine_dir_in(&llm3)).current.is_none());
+        assert!(matches!(engine::active_in(&llm3), Some(engine::Engine::Llamafile { .. })));
+        // Nowhere to go back to: it stays, uncounted.
+        let llm4 = engine_switched("engine-alone", None, false);
+        let (out, tried) = start_scripted(&llm4, &AtomicBool::new(false), false, vec![down(Failure::Exited, false), down(Failure::Exited, false)]).await;
+        assert!(out.is_err() && tried.len() == 2);
+        let m = engine::read_marker(&engine::engine_dir_in(&llm4));
+        assert_eq!(m.current.as_ref().map(|c| c.build), Some(engine::Build(11_980)));
+        assert!(m.unproven && m.failures.is_empty());
+        // The one before down too: the new one back in, uncounted.
+        let llm5 = engine_switched("engine-neither", Some(11_960), false);
+        let (out, _) = start_scripted(&llm5, &AtomicBool::new(false), false, vec![down(Failure::Exited, false), down(Failure::Exited, false), down(Failure::Exited, false)]).await;
+        assert!(out.is_err());
+        let m = engine::read_marker(&engine::engine_dir_in(&llm5));
+        assert_eq!(m.current.as_ref().map(|c| c.build), Some(engine::Build(11_980)));
+        assert_eq!(m.previous.as_ref().map(|c| c.build), Some(engine::Build(11_960)));
+        assert!(m.unproven && m.failures.is_empty() && m.retry.is_none());
+        for d in [llm, llm2, llm3, llm4, llm5] {
+            let _ = std::fs::remove_dir_all(&d);
+        }
+    }
+
     #[test]
     fn mtp_on_nvidia_cards_only_and_never_where_it_failed() {
-        assert!(mtp_allowed(NEW, true, Some(NVIDIA), false));
-        assert!(!mtp_allowed(NEW, true, Some(0x1002), false), "AMD: Vulkan, not measured");
-        assert!(!mtp_allowed(NEW, true, Some(0x8086), false), "Intel");
-        assert!(!mtp_allowed(NEW, true, None, false), "no card");
-        assert!(!mtp_allowed(OLD, true, Some(NVIDIA), false));
-        assert!(!mtp_allowed(NEW, false, Some(NVIDIA), false), "turned off");
-        assert!(!mtp_allowed(NEW, true, Some(NVIDIA), true), "failed with it here");
-        assert_eq!(mtp_key(NEW, Path::new("C:/x/llm/Qwen_Qwen3.5-4B-Q4_K_M.gguf")), "0.10.6/Qwen_Qwen3.5-4B-Q4_K_M.gguf");
+        assert!(mtp_allowed(NEW_RT, true, Some(NVIDIA), false));
+        assert!(!mtp_allowed(NEW_RT, true, Some(0x1002), false), "AMD: Vulkan, not measured");
+        assert!(!mtp_allowed(NEW_RT, true, Some(0x8086), false), "Intel");
+        assert!(!mtp_allowed(NEW_RT, true, None, false), "no card");
+        assert!(!mtp_allowed(OLD_RT, true, Some(NVIDIA), false));
+        assert!(!mtp_allowed(NEW_RT, false, Some(NVIDIA), false), "turned off");
+        assert!(!mtp_allowed(NEW_RT, true, Some(NVIDIA), true), "failed with it here");
+        assert_eq!(mtp_key(NEW_RT, Path::new("C:/x/llm/Qwen_Qwen3.5-4B-Q4_K_M.gguf")), "0.10.6/Qwen_Qwen3.5-4B-Q4_K_M.gguf");
         let dir = scratch("mtp-failed");
         write_marker(&dir, &Marker { version: "0.10.6".into(), mtp_failed: vec!["0.10.6/a.gguf".into()], ..Default::default() }).unwrap();
         assert!(mtp_failed_here(&dir, "0.10.6/a.gguf"));
@@ -1938,8 +2160,8 @@ mod tests {
         // The plan: only on 0.10.6, only with the setting on.
         let cfg = crate::config::YapConfig::default();
         assert!(cfg.local_mtp, "on by default");
-        assert!(!plan_for(&cfg, &qwen35, 8_192, OLD).server().mtp);
-        assert!(!plan_for(&crate::config::YapConfig { local_mtp: false, ..cfg.clone() }, &qwen35, 8_192, NEW).mtp);
+        assert!(!plan_for(&cfg, &qwen35, 8_192, OLD_RT).server().mtp);
+        assert!(!plan_for(&crate::config::YapConfig { local_mtp: false, ..cfg.clone() }, &qwen35, 8_192, NEW_RT).mtp);
         let _ = std::fs::remove_dir_all(&dir);
     }
 
@@ -1961,12 +2183,12 @@ mod tests {
         assert!(!kv_q8_rescues(&qwen35, 8_192, Some(4_096)), "a short context never");
         assert!(!kv_q8_rescues(&qwen35, 262_144, None));
         // The arguments: both K and V (a matching pair), on the card only.
-        let q8 = Plan { runtime: NEW, mtp: false, kv_q8: true, per_slot: false };
+        let q8 = Plan { runtime: NEW_RT, mtp: false, kv_q8: true, per_slot: false };
         let args = server_args(Path::new("m.gguf"), 5000, 999, 262_144, q8);
         assert_eq!(&args[args.len() - 4..], ["-ctk", "q8_0", "-ctv", "q8_0"]);
         assert!(!server_args(Path::new("m.gguf"), 5000, 0, 262_144, q8).iter().any(|a| a == "-ctk"), "never on the processor");
-        assert!(!server_args(Path::new("m.gguf"), 5000, 999, 262_144, Plan { runtime: OLD, ..q8 }).iter().any(|a| a == "-ctk"));
-        assert!(q8.server().kv_q8 && !Plan { runtime: OLD, ..q8 }.server().kv_q8);
+        assert!(!server_args(Path::new("m.gguf"), 5000, 999, 262_144, Plan { runtime: OLD_RT, ..q8 }).iter().any(|a| a == "-ctk"));
+        assert!(q8.server().kv_q8 && !Plan { runtime: OLD_RT, ..q8 }.server().kv_q8);
         let _ = std::fs::remove_dir_all(&dir);
     }
 
@@ -1982,11 +2204,11 @@ mod tests {
     #[test]
     fn on_the_processor_each_of_two_slots_has_a_cache_of_its_own() {
         // The decision: the processor, the runtime that has the flags.
-        assert!(per_slot_caches(NEW, false));
-        assert!(!per_slot_caches(NEW, true), "a graphics card keeps the shared cache");
-        assert!(!per_slot_caches(OLD, false));
+        assert!(per_slot_caches(NEW_RT, false));
+        assert!(!per_slot_caches(NEW_RT, true), "a graphics card keeps the shared cache");
+        assert!(!per_slot_caches(OLD_RT, false));
         // The arguments: two slots, no unified cache, the whole context each.
-        let p = Plan { runtime: NEW, mtp: false, kv_q8: false, per_slot: true };
+        let p = Plan { runtime: NEW_RT, mtp: false, kv_q8: false, per_slot: true };
         let args = server_args(Path::new("m.gguf"), 5000, 0, 8_192, p);
         let after = |flag: &str| args.iter().position(|a| a == flag).map(|i| args[i + 1].as_str());
         assert_eq!(after("-c"), Some("16384"));
@@ -1997,7 +2219,7 @@ mod tests {
         assert_eq!(after("--checkpoint-min-step"), Some("0"));
         let card = server_args(Path::new("m.gguf"), 5000, 999, 8_192, Plan { per_slot: false, ..p });
         assert!(!card.iter().any(|a| a == "--checkpoint-min-step"), "a graphics card keeps llama.cpp's default");
-        assert_eq!(server_args(Path::new("m.gguf"), 5000, 0, 8_192, Plan { runtime: OLD, ..p }), base_args(Path::new("m.gguf"), 5000, 0, 8_192));
+        assert_eq!(server_args(Path::new("m.gguf"), 5000, 0, 8_192, Plan { runtime: OLD_RT, ..p }), base_args(Path::new("m.gguf"), 5000, 0, 8_192, OLD_RT));
         // What a slot gets is the context the server reports: no restart loop
         // over "16384 isn't 8192".
         let log = "0.00.419.239 I llama_context: n_ctx                 = 16384\n0.00.419.239 I llama_context: n_ctx_seq             = 8192\n0.00.419.242 I llama_context: n_ctx_seq (8192) < n_ctx_train (32768) -- the full capacity of the model will not be utilized\n";

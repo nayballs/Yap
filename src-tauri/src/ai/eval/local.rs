@@ -1,12 +1,12 @@
-//! Local models for a run: Yap's own llamafile runtime serving a GGUF on a
-//! free localhost port, started for the run and stopped after (`Drop`).
+//! Local models for a run: Yap's own engine — one of llama.cpp's builds, or
+//! llamafile — serving a GGUF on a free localhost port, started for the run
+//! and stopped after (`Drop`).
 //!
 //! Files come from the installed Yap's `%APPDATA%\yap\llm\` when they're
 //! there, **read-only** (run in place, nothing written next to them: the
-//! server's log and working folder are the run's), else they're downloaded
-//! as `local_llm.rs` does (SHA-256 verified) into the models folder
-//! (`--models-dir`, by default a folder like `<builds>/eval-models`: next to the
-//! runs).
+//! server's log is the run's), else they're downloaded as `local_llm.rs`
+//! does (SHA-256 verified) into the models folder (`--models-dir`, by
+//! default a folder like `<builds>/eval-models`: next to the runs).
 
 use std::path::{Path, PathBuf};
 use std::process::Child;
@@ -14,18 +14,132 @@ use std::time::{Duration, Instant};
 
 use serde_json::{json, Value};
 
+use crate::ai::local_llm::engine::{self, Build, Engine, Variant};
+
 /// The installed app's model folder (never the run's data dir).
 pub fn installed_llm_dir() -> Option<PathBuf> {
     dirs::data_dir().map(|d| d.join("yap").join("llm"))
 }
 
-/// The llamafile runtime: `--llamafile`, else the installed one (read-only)
-/// when it's the version Yap pins now (its marker says so), else the pinned
-/// one downloaded into `models_dir` (verified, with its marker).
-pub async fn runtime(explicit: Option<&Path>, models_dir: &Path) -> Result<PathBuf, String> {
-    if let Some(p) = explicit {
-        return if p.is_file() { Ok(p.to_path_buf()) } else { Err(format!("no llamafile at {}", p.display())) };
+/// Which engine a run serves its local model with (`--engine`,
+/// `--engine-variant`, `--llamafile`).
+#[derive(Debug, Clone, Copy, Default)]
+pub struct Choice<'a> {
+    /// `--llamafile <path>`: that llamafile.
+    pub llamafile: Option<&'a Path>,
+    /// `--engine`: "installed" (the default: what the installed Yap runs) |
+    /// "llamafile" | "floor" | "latest" (the newest 3 days old) |
+    /// "b12345" | a folder with `llama-server.exe` in it.
+    pub engine: Option<&'a str>,
+    /// `--engine-variant cuda13|cuda12|vulkan|cpu` (default: what Yap
+    /// installs first on this PC).
+    pub variant: Option<&'a str>,
+}
+
+/// **The run's engine** ([`Choice`]). A llama.cpp build not on disk is
+/// downloaded into `models_dir/engine/` (each file checked against
+/// GitHub's SHA-256) and run from there; the installed app's are run in
+/// place, read-only.
+pub async fn runtime(choice: &Choice<'_>, models_dir: &Path) -> Result<Engine, String> {
+    if let Some(p) = choice.llamafile {
+        if !p.is_file() {
+            return Err(format!("no llamafile at {}", p.display()));
+        }
+        let version = crate::ai::local_llm::runtime::probe_version(p)
+            .await
+            .or_else(|| crate::ai::local_llm::runtime::Version::parse(crate::ai::local_llm::RUNTIME_VERSION))
+            .ok_or("llamafile's version")?;
+        return Ok(Engine::Llamafile { exe: p.to_path_buf(), version });
     }
+    let variant = match choice.variant {
+        Some(v) => Variant::from_id(v).ok_or_else(|| format!("--engine-variant cuda13|cuda12|vulkan|cpu, not {v}"))?,
+        None => engine::primary_variant(),
+    };
+    let spec = choice.engine.unwrap_or("installed").trim();
+    match spec {
+        "installed" => {
+            // What the installed Yap runs: its llama.cpp build, else its
+            // llamafile when it's the pinned one, else the floor.
+            if let Some(e) = installed_llm_dir().and_then(|d| engine::active_in(&d)) {
+                match &e {
+                    Engine::LlamaCpp { .. } => return Ok(e),
+                    Engine::Llamafile { version, .. } if Some(*version) == crate::ai::local_llm::runtime::Version::parse(crate::ai::local_llm::RUNTIME_VERSION) => return Ok(e),
+                    _ => {}
+                }
+            }
+            download_build(engine::FLOOR, variant, models_dir).await
+        }
+        "llamafile" => Ok(Engine::Llamafile { exe: llamafile(models_dir).await?, version: crate::ai::local_llm::runtime::Version::parse(crate::ai::local_llm::RUNTIME_VERSION).ok_or("a version")? }),
+        "floor" => download_build(engine::FLOOR, variant, models_dir).await,
+        "latest" => {
+            let release = engine::feed::newest(&[variant], &|_| false).await?.ok_or("no build 3 days old on the feed for this variant")?;
+            download_build(release.build, variant, models_dir).await
+        }
+        _ => {
+            if let Some(b) = Build::parse(spec) {
+                return download_build(b, variant, models_dir).await;
+            }
+            folder_engine(Path::new(spec)).await
+        }
+    }
+}
+
+/// A build in `models_dir/engine/` (downloaded and checked when it isn't there).
+async fn download_build(build: Build, variant: Variant, models_dir: &Path) -> Result<Engine, String> {
+    let edir = models_dir.join("engine");
+    let (zip, cudart) = if build == engine::FLOOR {
+        engine::floor_assets(variant)
+    } else {
+        let release = engine::feed::release(build).await?;
+        engine::feed::pick_assets(&release, variant).ok_or_else(|| format!("{build} has no {} build for Windows", variant.id()))?
+    };
+    println!("The engine: llama.cpp {build} ({}) in {} …", variant.id(), edir.display());
+    let installed = engine::install(&edir, build, variant, &zip, cudart.as_ref(), &|_| {}, &crate::shell::download::Ticket::unlisted()).await?;
+    Ok(Engine::llama_cpp(&edir, &installed))
+}
+
+/// A folder holding a llama.cpp build (`llama-server.exe` and its DLLs):
+/// its build from `--version`, CUDA, Vulkan or the processor by its
+/// backends, NVIDIA's runtime in the folder or a `cudart…` folder beside it.
+async fn folder_engine(dir: &Path) -> Result<Engine, String> {
+    if !dir.join(engine::SERVER_EXE).is_file() {
+        return Err(format!("--engine: no {} in {} (give installed, llamafile, floor, latest, a build like b11982, or a folder)", engine::SERVER_EXE, dir.display()));
+    }
+    let has = |d: &Path, prefix: &str| {
+        std::fs::read_dir(d).map(|rd| rd.filter_map(|e| e.ok()).any(|e| e.file_name().to_string_lossy().to_ascii_lowercase().starts_with(prefix))).unwrap_or(false)
+    };
+    let variant = if has(dir, "ggml-cuda") {
+        Variant::Cuda13
+    } else if has(dir, "ggml-vulkan") {
+        Variant::Vulkan
+    } else {
+        Variant::Cpu
+    };
+    let exe = dir.join(engine::SERVER_EXE);
+    let out = tokio::task::spawn_blocking(move || std::process::Command::new(exe).arg("--version").output()).await.map_err(|e| e.to_string())?.map_err(|e| e.to_string())?;
+    let text = format!("{}{}", String::from_utf8_lossy(&out.stdout), String::from_utf8_lossy(&out.stderr));
+    let build = text
+        .split("(build ")
+        .nth(1)
+        .and_then(|r| r.split(|c: char| !c.is_ascii_digit()).next())
+        .and_then(|n| n.parse().ok())
+        .map(Build)
+        .ok_or("llama-server didn't say its build")?;
+    let cudart = if variant.cuda() && !has(dir, "cudart64_") {
+        dir.parent().and_then(|p| std::fs::read_dir(p).ok()).and_then(|rd| {
+            rd.filter_map(|e| e.ok()).map(|e| e.path()).find(|p| p.is_dir() && p.file_name().is_some_and(|n| n.to_string_lossy().starts_with("cudart")) && has(p, "cudart64_"))
+        })
+    } else {
+        None
+    };
+    let installed = engine::Installed { build, variant, sha256: String::new(), cudart: None, device: None };
+    Ok(Engine::LlamaCpp { dir: dir.to_path_buf(), installed, cudart })
+}
+
+/// The llamafile runtime: the installed one (read-only) when it's the
+/// version Yap pins (its marker says so), else the pinned one downloaded
+/// into `models_dir` (verified, with its marker).
+async fn llamafile(models_dir: &Path) -> Result<PathBuf, String> {
     let pinned = crate::ai::local_llm::runtime::Version::parse(crate::ai::local_llm::RUNTIME_VERSION);
     let current = |dir: &Path| crate::ai::local_llm::runtime::runtime_version_in(dir).filter(|v| Some(*v) == pinned).is_some();
     if let Some(dir) = installed_llm_dir().filter(|d| current(d)) {
@@ -125,7 +239,7 @@ pub async fn projector(model: &Path, models_dir: &Path) -> Result<Option<PathBuf
     Ok(Some(dest))
 }
 
-/// A running llamafile server.
+/// A running server (llama.cpp's or llamafile's).
 pub struct Server {
     child: Option<Child>,
     pub pid: u32,
@@ -139,29 +253,27 @@ pub struct Server {
     pub warm_up: Option<crate::ai::local_llm::WarmUp>,
 }
 
-/// How a run's server runs the model (`local_llm::Plan`): the runtime's
-/// version (`--version`, else the one Yap pins), and MTP as Yap's sidecar
-/// would decide on this PC — `mtp` overrides; never on the processor
-/// (`ngl` 0).
-pub async fn plan(runtime: &Path, model: &Path, ngl: u32, ctx: u32, mtp: Option<bool>) -> crate::ai::local_llm::Plan {
-    let version = crate::ai::local_llm::runtime::probe_version(runtime)
-        .await
-        .or_else(|| crate::ai::local_llm::runtime::Version::parse(crate::ai::local_llm::RUNTIME_VERSION))
-        .expect("a version");
-    let yap = crate::ai::local_llm::plan_for(&crate::config::load(), model, ctx, version);
-    let on = ngl > 0 && mtp.unwrap_or(yap.mtp);
-    crate::ai::local_llm::Plan { runtime: version, mtp: on, kv_q8: ngl > 0 && yap.kv_q8, per_slot: ngl == 0 && version.is_current() }
+/// How a run's server runs the model (`local_llm::Plan`): the engine's
+/// runtime, and MTP as Yap's sidecar would decide on this PC — `mtp`
+/// overrides (still only on CUDA, where it's measured); never on the
+/// processor (`ngl` 0).
+pub async fn plan(runtime: &Engine, model: &Path, ngl: u32, ctx: u32, mtp: Option<bool>) -> crate::ai::local_llm::Plan {
+    let rt = runtime.runtime();
+    let yap = crate::ai::local_llm::plan_for(&crate::config::load(), model, ctx, rt);
+    let on = ngl > 0 && rt.cuda() && mtp.unwrap_or(yap.mtp);
+    crate::ai::local_llm::Plan { runtime: rt, mtp: on, kv_q8: ngl > 0 && yap.kv_q8, per_slot: ngl == 0 && rt.is_current() }
 }
 
 /// Start `runtime` serving `model` with `local_llm::server_args` — as Yap's
 /// sidecar runs (thinking off, the caches capped, `-lv 4`, MTP as `plan`
-/// says) — but with `ngl` GPU layers (0 = CPU only), the run's folder as its
-/// working dir and log, and `extra` arguments after Yap's (a later flag wins:
+/// says) — but with `ngl` GPU layers (0 = CPU only), the log in the run's
+/// folder (llamafile's working folder too; a llama.cpp build runs in its own,
+/// `Engine::command`), and `extra` arguments after Yap's (a later flag wins:
 /// `--reasoning auto`, `--cache-ram 8192` measure the old way). Waits for
 /// `/health`, then warms the model up as the sidecar does (`warm`).
 #[allow(clippy::too_many_arguments)]
 pub async fn start(
-    runtime: &Path,
+    runtime: &Engine,
     model: &Path,
     ngl: u32,
     ctx: u32,
@@ -175,23 +287,17 @@ pub async fn start(
         .map(|a| a.port())
         .map_err(|e| format!("no free port: {e}"))?;
     let stem = model.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default();
-    let log = workdir.join(format!("llamafile-{stem}.log"));
+    let log = workdir.join(format!("server-{stem}.log"));
     let file = std::fs::File::create(&log).map_err(|e| e.to_string())?;
     let mut args = crate::ai::local_llm::server_args(model, port, ngl, ctx, plan);
     args.extend(extra.iter().cloned());
-    let mut cmd = std::process::Command::new(runtime);
-    cmd.args(&args)
-        .current_dir(workdir)
-        .stdin(std::process::Stdio::null())
-        .stdout(file.try_clone().map_err(|e| e.to_string())?)
-        .stderr(file);
-    #[cfg(windows)]
-    {
-        use std::os::windows::process::CommandExt;
-        cmd.creation_flags(0x0800_0000); // CREATE_NO_WINDOW
+    let mut cmd = runtime.command();
+    if runtime.runtime().is_llamafile() {
+        cmd.current_dir(workdir);
     }
+    cmd.args(&args).stdin(std::process::Stdio::null()).stdout(file.try_clone().map_err(|e| e.to_string())?).stderr(file);
     let started = Instant::now();
-    let mut child = cmd.spawn().map_err(|e| format!("couldn't start llamafile: {e}"))?;
+    let mut child = cmd.spawn().map_err(|e| format!("couldn't start {}: {e}", runtime.label()))?;
     // Ended with this process however it ends (a run stopped mid-way, End task).
     crate::shell::procs::end_with_yap(&child);
     let pid = child.id();
@@ -200,7 +306,7 @@ pub async fn start(
     let health = format!("http://127.0.0.1:{port}/health");
     for _ in 0..600 {
         if let Ok(Some(status)) = child.try_wait() {
-            return Err(format!("llamafile exited during startup ({status}); see {}", log.display()));
+            return Err(format!("{} exited during startup ({status}); see {}", runtime.label(), log.display()));
         }
         if client.get(&health).send().await.is_ok_and(|r| r.status().is_success()) {
             let load_ms = started.elapsed().as_millis() as u64;
@@ -211,7 +317,7 @@ pub async fn start(
     }
     let _ = child.kill();
     let _ = child.wait();
-    Err(format!("llamafile wasn't ready after 5 minutes; see {}", log.display()))
+    Err(format!("{} wasn't ready after 5 minutes; see {}", runtime.label(), log.display()))
 }
 
 impl Server {

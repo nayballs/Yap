@@ -384,7 +384,7 @@ fn first_look() -> Option<Duration> {
 
 /// A meeting recording or being summarised (its digests and action plan
 /// go to the on-device model one call after another).
-fn meeting_busy() -> bool {
+pub(super) fn meeting_busy() -> bool {
     crate::meetings::meeting::is_recording() || crate::meetings::meeting_end::summary_running()
 }
 
@@ -409,14 +409,26 @@ const UPGRADE_LOCK: &str = "llamafile-upgrade.lock";
 impl UpgradeLock {
     /// `None`: another running Yap holds it (or the folder can't be written).
     pub fn take(dir: &Path) -> Option<UpgradeLock> {
-        Self::take_unless(dir, |pid| pid != std::process::id() && running_yap(pid))
+        Self::take_named(dir, UPGRADE_LOCK)
+    }
+
+    /// The same, for another lock file in `dir` (the llama.cpp engine's,
+    /// `engine/engine-update.lock`).
+    pub fn take_named(dir: &Path, name: &str) -> Option<UpgradeLock> {
+        let _ = std::fs::create_dir_all(dir);
+        Self::take_unless_named(dir, name, |pid| pid != std::process::id() && running_yap(pid))
     }
 
     /// [`take`](Self::take), `held(pid)` saying whether the pid in an
     /// existing lock still holds it (the unit tests' stand-in).
+    #[cfg(test)]
     fn take_unless(dir: &Path, held: impl Fn(u32) -> bool) -> Option<UpgradeLock> {
+        Self::take_unless_named(dir, UPGRADE_LOCK, held)
+    }
+
+    fn take_unless_named(dir: &Path, name: &str, held: impl Fn(u32) -> bool) -> Option<UpgradeLock> {
         use std::io::Write;
-        let path = dir.join(UPGRADE_LOCK);
+        let path = dir.join(name);
         for _ in 0..2 {
             match std::fs::OpenOptions::new().write(true).create_new(true).open(&path) {
                 Ok(mut f) => {
@@ -458,6 +470,7 @@ fn running_yap(_pid: u32) -> bool {
 #[cfg(windows)]
 pub(super) fn other_yaps_sidecar() -> bool {
     crate::shell::procs::sidecars_of_other_yaps(&llm_dir(), RUNTIME_FILENAME) > 0
+        || crate::shell::procs::sidecars_of_other_yaps_under(&super::engine::engine_dir(), super::engine::SERVER_EXE) > 0
 }
 #[cfg(not(windows))]
 pub(super) fn other_yaps_sidecar() -> bool {
@@ -538,7 +551,7 @@ pub async fn tidy_runtime() {
 /// held up — and the start lock, looking again once it's had to wait for
 /// that one: a request that began meanwhile (a Chat turn, a dictation) sends
 /// it back to waiting. Returns both locks, held.
-async fn idle_with_locks(
+pub(super) async fn idle_with_locks(
     restarting: &'static tokio::sync::Mutex<()>,
     starting: &'static tokio::sync::Mutex<()>,
     idle: impl Fn() -> bool,
@@ -566,6 +579,12 @@ pub async fn upgrade_runtime(app: &AppHandle) -> UpgradeStep {
     let (url, sha) = source("runtime", RUNTIME_URL, RUNTIME_SHA256);
     // This session went back from it: the next launch tries it again.
     if WENT_BACK.load(Ordering::SeqCst) {
+        return UpgradeStep::Done;
+    }
+    // Yap runs one of llama.cpp's own builds: llamafile is only the way
+    // back here (and an older Yap's engine, which upgrades itself), never
+    // worth 368 MB.
+    if super::engine::llama_cpp_active_in(&dir) {
         return UpgradeStep::Done;
     }
     let marker = read_marker_at(&dir.join(RUNTIME_MARKER));

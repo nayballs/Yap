@@ -146,7 +146,7 @@ test('Settings: the search model downloads, and every meeting and note is read',
   fakeModels.release();
   await expect(toggle).toHaveAttribute('aria-pressed', 'true', { timeout: 20_000 });
   await expect(row).toContainText('EmbeddingGemma 300M · 4.0 MB');
-  expect(fakeModels.requests).toEqual(expect.arrayContaining(['/llm/runtime', '/llm/embeddinggemma.gguf']));
+  expect(fakeModels.requests).toEqual(expect.arrayContaining(['/llm/engine.zip', '/llm/embeddinggemma.gguf']));
 
   // Read in the background: every passage of the three notes.
   await expect.poll(async () => (await status(yap)).phase, { timeout: 20_000 }).toBe('ready');
@@ -312,7 +312,7 @@ test('Rebuild reads everything again, Delete takes the model and the index, and 
   expect(fs.existsSync(path.join(yap.dataDir, 'search-index'))).toBe(false);
   expect(fs.existsSync(path.join(yap.dataDir, 'models', 'search', 'embeddinggemma-300M-Q8_0.gguf'))).toBe(false);
   // The engine stays: the on-device model may use it.
-  expect(fs.existsSync(path.join(yap.dataDir, 'llm', 'llamafile.exe'))).toBe(true);
+  expect(fs.existsSync(path.join(yap.dataDir, 'llm', 'engine', 'engine.json'))).toBe(true);
   await shot(main, '09-settings-deleted');
   await closeSettings(main);
 });

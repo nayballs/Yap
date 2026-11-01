@@ -148,7 +148,12 @@ pub fn local_llm_status() -> serde_json::Value {
         "loading": !running && (crate::ai::local_llm::on_demand::loading() || crate::ai::local_llm::starting()),
         "modelFile": crate::ai::local_llm::MODEL_FILENAME,
         "model": crate::ai::local_llm::active_model_display(&cfg),
-        "engine": crate::ai::local_llm::ENGINE_DISPLAY,
+        // The engine that runs the model ("llama.cpp b11982", "llamafile
+        // 0.10.6"), and its line in Settings: the build, up to date or not,
+        // what happened last, Check now's progress, the way back
+        // (local_llm/engine.rs `status`).
+        "engine": crate::ai::local_llm::engine::active().map(|e| e.label()).unwrap_or_else(|| crate::ai::local_llm::ENGINE_DISPLAY.to_string()),
+        "engineState": crate::ai::local_llm::engine::status(),
         // The llamafile on disk, the one Yap pins, the background upgrade
         // ("downloading" | "waiting" | ""), and the running server's MTP.
         "runtime": {
@@ -185,6 +190,40 @@ pub fn local_llm_status() -> serde_json::Value {
         // (local_llm/vision.rs); null for a model without one.
         "vision": crate::ai::local_llm::vision::status(&cfg),
     })
+}
+
+/// The on-device engine's line in Settings (`local_llm/engine.rs`
+/// `status`): the build, up to date or not, what happened last, a check's
+/// progress, the way back. Also sent as `yap-local-engine` when it changes.
+#[tauri::command]
+pub fn local_engine_status() -> serde_json::Value {
+    crate::ai::local_llm::engine::status()
+}
+
+/// **Check now**: the releases read at once, a newer build (3 days old or
+/// more) downloaded, tried with the person's model and switched to, in the
+/// background (`yap-local-engine` follows it). Returns the status as it
+/// starts.
+#[tauri::command]
+pub fn local_engine_check(app: AppHandle) -> serde_json::Value {
+    crate::ai::local_llm::engine::updater::check_now(&app);
+    crate::ai::local_llm::engine::status()
+}
+
+/// "Keep the engine up to date" on or off (kept in the engine's own
+/// marker, never config.json).
+#[tauri::command]
+pub fn local_engine_set_auto(on: bool) -> Result<serde_json::Value, String> {
+    crate::ai::local_llm::engine::updater::set_auto(on)?;
+    Ok(crate::ai::local_llm::engine::status())
+}
+
+/// Go back to the build before (or llamafile); the build left isn't
+/// installed again. A running model moves once nothing uses it.
+#[tauri::command]
+pub fn local_engine_go_back(app: AppHandle) -> Result<serde_json::Value, String> {
+    crate::ai::local_llm::engine::updater::go_back(&app)?;
+    Ok(crate::ai::local_llm::engine::status())
 }
 
 /// "Read screenshots on this PC": download the active on-device model's

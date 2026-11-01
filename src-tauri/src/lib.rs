@@ -304,6 +304,10 @@ pub fn run() {
             ai::commands::local_llm_start,
             ai::commands::local_llm_stop,
             ai::commands::local_llm_install,
+            ai::commands::local_engine_status,
+            ai::commands::local_engine_check,
+            ai::commands::local_engine_set_auto,
+            ai::commands::local_engine_go_back,
             shell::download::download_cancel,
             ai::commands::local_llm_uninstall,
             ai::commands::local_vision_install,
@@ -1044,12 +1048,18 @@ pub fn run() {
                     // A runtime cut off mid-swap (or taken by an antivirus)
                     // comes back first; leftovers go.
                     ai::local_llm::runtime::tidy_runtime().await;
+                    // A llama.cpp build kept to try again goes back in;
+                    // old builds' folders go.
+                    let _ = tauri::async_runtime::spawn_blocking(ai::local_llm::engine::tidy_at_launch).await;
                     ai::local_llm::autostart_if_configured(&cfg2).await;
                 });
             }
             // An older llamafile runtime (installs before 22 Oct 2026) is
             // replaced in the background, never under a dictation.
             ai::local_llm::runtime::spawn_runtime_upgrade(handle.clone());
+            // llama.cpp's own builds kept up to date: a look once a day, a
+            // newer build tried with the person's model before it's used.
+            ai::local_llm::engine::updater::spawn(handle.clone());
 
             // Local API bridge (Integrations): loopback server for CLIs/agents.
             integrations::bridge::sync(&handle, cfg.bridge_enabled);

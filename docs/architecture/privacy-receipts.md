@@ -99,7 +99,15 @@ person sees what their choices send where. It never says "nothing leaves".
   ElevenLabs", "Voice list · ElevenLabs", "Voice sample · ElevenLabs"),
   `dictation/stt.rs` ("Speech model download"), `ai/local_llm.rs` ("On-device AI ·
   starting up" — the `/health` polls —, "· warming up", "On-device AI
-  download"), `speakers/diarize/registry.rs` (its `download` now takes what it is:
+  download"), `ai/local_llm/engine/` (2026-11-01: "On-device AI · engine
+  update check", `Purpose::EngineCheck`, kind "update" — the daily read of
+  llama.cpp's releases on api.github.com, ~3.5 MB a page, one or two pages;
+  "On-device AI engine download (llama.cpp)", `Download::OnDeviceEngine` —
+  a build's zip and NVIDIA's runtime from github.com's release downloads;
+  "On-device AI · trying a new engine", `Purpose::EngineTrial` — a new build
+  tried with the person's model out of sight, on this PC; none of them
+  carries anything the person wrote: the trial's prompts are fixed, made-up
+  words), `speakers/diarize/registry.rs` (its `download` now takes what it is:
   "Speaker model download", or Kokoro's "Voice download (Kokoro)" from
   `voice/tts/registry.rs`, or meeting search's "Meeting search model
   download"), `search/embedder.rs` ("Meeting search · on-device model",

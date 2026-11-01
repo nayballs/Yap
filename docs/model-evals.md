@@ -60,12 +60,25 @@ builds and runs out of the checkout: `YAP_EVAL_TARGET_DIR=<builds>/evals`, `--ou
 
 ### Local models
 
-`--model local:<spec>` starts **Yap's own llamafile runtime** with the sidecar's own
+`--model local:<spec>` starts **Yap's own engine** — one of llama.cpp's builds
+(`ai/local_llm/engine.rs`) or llamafile — with the sidecar's own
 arguments (`local_llm::server_args`: `-c 8192`, `--reasoning off`, `--cache-ram 0`,
 `--ctx-checkpoints 4`, `-lv 4`, and `--spec-type draft-mtp` where the sidecar would draft with
-MTP: llamafile ≥ 0.10.6, a Qwen3.5 GGUF, `--ngl` > 0 and room on this PC's card; `--mtp
-on|off` decides instead) on a free localhost port for the run, warms it up as the sidecar does
+MTP: a CUDA build or llamafile ≥ 0.10.6, a Qwen3.5 GGUF, `--ngl` > 0 and room on this PC's card; `--mtp
+on|off` decides instead, still only on CUDA) on a free localhost port for the run, warms it up as the sidecar does
 (`local_llm::warm_up`; `--no-warm-up`), and stops it after.
+
+**Which engine** (`--engine`, 2026-11-01): `installed` (the default: what the installed
+Yap runs — its llama.cpp build in `%APPDATA%\yap\llm\engine\`, read-only, or its llamafile
+when it's the pinned one — else the floor), `llamafile` (the old runtime, as before),
+`floor` (the build Yap pins, b11982), `latest` (the newest llama.cpp build at least 3 days
+old on the releases feed), `b12345` (that build), or a folder holding a `llama-server.exe`
+(its build from `--version`, NVIDIA's runtime beside it). A llama.cpp build not on disk is
+downloaded into `<models-dir>/engine/` (each file checked against GitHub's SHA-256) and run
+from there. `--engine-variant cuda13|cuda12|vulkan|cpu` picks the build (default: what Yap
+installs first here: Vulkan on a card, the processor's without one). So a model that needs
+a newer llama.cpp than llamafile's b10441 (Spark-X2.6's `spark2_5`: b10828+) can be
+evaluated with `--engine latest`. `--server-arg` is `--llamafile-arg`'s other name.
 `--llamafile-arg` adds arguments after those, and a later flag wins: `--llamafile-arg=--cache-ram
 --llamafile-arg=8192` measures llama.cpp's old prompt cache, `--reasoning auto` its thinking.
 `<spec>`:
@@ -74,9 +87,9 @@ on|off` decides instead) on a free localhost port for the run, warms it up as th
 - a curated id from `local_llm::models::CURATED_MODELS` (`qwen2.5-3b`, `qwen2.5-7b`, `llama-3.2-3b`, …);
 - a path to any `.gguf`, or `https://…gguf#sha256=<hex>` (the Hugging Face LFS oid).
 
-The runtime and models are taken from the installed app's `%APPDATA%\yap\llm\` when they're
-there (the runtime only when its marker, `llamafile.json`, says it's the version Yap pins),
-**read-only** (run in place; the server's log and working folder are the run's), else
+The models (and `--engine llamafile`'s runtime) are taken from the installed app's `%APPDATA%\yap\llm\` when they're
+there (llamafile only when its marker, `llamafile.json`, says it's the version Yap pins),
+**read-only** (run in place; the server's log is the run's), else
 downloaded and SHA-256-verified with `local_llm::models::download_verified` into `--models-dir`
 (default `<out>/../eval-models`). `--ngl <n>` puts layers on the GPU (default **0: CPU only**,
 what a normal PC without a big GPU gets); `--ctx`, `--llamafile <path>` and repeatable
@@ -3424,3 +3437,34 @@ The fixes it drove, general to every provider: `read_open_page` gives a page's l
 web_search, then open_page the best result" for every model, a missing app points at the web,
 Gemini's signatures kept, and the eval's honesty check counts a page opened beside the chat as
 opened.
+
+## llama.cpp's own builds (1 Nov 2026)
+
+The sidecar moved from llamafile 0.10.6 (llama.cpp b10441) to llama.cpp's official Windows
+builds, kept up to date (`ai/local_llm/engine.rs`). The floor, **b11982** (29 Oct), checked on
+the RTX 5070 Ti with the installed Qwen3.5-4B (read in place), `--ngl 999 --locale en-GB`,
+`--engine b11982 --engine-variant vulkan`, a folder of b11982's CUDA 13.4 build with its runtime
+beside it, and `--engine llamafile`, one after the other:
+
+| Engine | Everyday (`--tag everyday`) | Generation (tokens/s) | Prompt (tokens/s) | Load | Cleanup, back to back (median / p90) | After a long Chat turn |
+|---|---|---|---|---|---|---|
+| llamafile 0.10.6, CUDA + MTP | 5/7 | 225 | 3,774 | 3.1 s | 156 / 182 ms | 609 ms |
+| b11982 CUDA 13.4 + MTP | 5/7 | 269 | 5,378 | 2.0 s | 132 / 157 ms | 439 ms |
+| b11982 Vulkan (no MTP) | 5/7 | 150 | 5,023 | 2.0 s | 200 / 236 ms | 527 ms |
+
+The same two scenarios fail on all three (`everyday-open-unknown-site` opens emberwiki.com,
+`everyday-shop-find-and-show` names the product without its link): the model's, not the
+engine's. Every flag of `server_args` is in b11982's `--help` and does the same (the log lines
+Yap reads — `offloaded 34/34 layers`, the buffer sizes, `n_ctx` — unchanged); llamafile's
+`--server` is the one it refuses, so llama.cpp gets `--no-webui --offline` instead. Think's
+`chat_template_kwargs` + `thinking_budget_tokens` cap the thinking as on llamafile. Vulkan's
+very first request after a driver install compiled its shaders (4.4 s once; 0.4 s from then
+on, the driver keeps them).
+
+The maintainer's call (1 Nov): ~100 tokens/s for the 4B is fine, so the Vulkan build — 37 MB
+against CUDA's ~165 MB zip + ~420 MB runtime — is what Yap installs and keeps on this card;
+CUDA is fetched only where Vulkan falls under 100 tokens/s, and kept only when 25 % faster
+(`trial::choose`). The trial itself (`engine/trial.rs`, the ignored `real_trial_of_a_build`
+on a scratch data folder): Vulkan started in 2.1 s, answered, made the tool call, read the
+picture with the projector, 159 tokens/s, 11.6 s in all; CUDA (only Yap's runtime on the
+PATH) 193 tokens/s with MTP, 7.1 s.

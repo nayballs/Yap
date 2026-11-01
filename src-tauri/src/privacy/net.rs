@@ -200,6 +200,9 @@ pub(crate) fn current_feature() -> Option<Feature> {
 pub enum Download {
     SpeechModel,
     OnDeviceAi,
+    /// A llama.cpp build for the on-device model (`ai/local_llm/engine.rs`),
+    /// from llama.cpp's GitHub releases.
+    OnDeviceEngine,
     SpeakerModel,
     Voice,
     /// Search by meaning's embedding model (`search/embedder.rs`).
@@ -216,6 +219,12 @@ pub enum Purpose {
     OnDeviceCheck,
     /// Its first, warm-up answer.
     OnDeviceWarmUp,
+    /// The on-device engine's daily look at llama.cpp's releases on GitHub
+    /// (`ai/local_llm/engine/feed.rs`).
+    EngineCheck,
+    /// A new engine tried out of sight with the person's model before Yap
+    /// switches to it (`ai/local_llm/engine/trial.rs`), on this PC.
+    EngineTrial,
     /// Search by meaning's embedding model on this PC (`search/embedder.rs`):
     /// its start and the passages and questions it reads.
     Embeddings,
@@ -322,6 +331,8 @@ impl Purpose {
             ),
             Purpose::OnDeviceCheck => ("ai", "On-device AI · starting up".into(), "AI models"),
             Purpose::OnDeviceWarmUp => ("ai", "On-device AI · warming up".into(), "AI models"),
+            Purpose::EngineCheck => ("update", "On-device AI · engine update check".into(), "AI models"),
+            Purpose::EngineTrial => ("ai", "On-device AI · trying a new engine".into(), "AI models"),
             Purpose::Embeddings => ("ai", "Search by meaning · on-device model".into(), "Search"),
             Purpose::WebSearch(s) => ("web", format!("Web search · {s}"), f("Chat")),
             Purpose::WikiSearch => ("web", "Web search · Wikipedia and wikis".into(), f("Chat")),
@@ -333,6 +344,7 @@ impl Purpose {
             Purpose::Download(d) => match d {
                 Download::SpeechModel => ("download", "Speech model download".into(), "Speech-to-Text"),
                 Download::OnDeviceAi => ("download", "On-device AI download".into(), "AI models"),
+                Download::OnDeviceEngine => ("download", "On-device AI engine download (llama.cpp)".into(), "AI models"),
                 Download::SpeakerModel => ("download", "Speaker model download".into(), "Meetings"),
                 Download::Voice => ("download", "Voice download (Kokoro)".into(), "Spoken replies"),
                 Download::SearchModel => ("download", "Search model download".into(), "Search"),

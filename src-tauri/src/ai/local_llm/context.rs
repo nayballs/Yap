@@ -10,12 +10,12 @@ use std::time::Duration;
 use tauri::{AppHandle, Emitter};
 
 use super::models::CURATED_MODELS;
-use super::runtime::{runtime_version, Version};
+use super::engine::active_runtime;
 #[cfg(debug_assertions)]
 use super::{E2E_BUSY, E2E_RESTARTS, E2E_SERVING};
 use super::{
     active_model_path, placement, plan_for, requests_in_flight, serving_context, serving_facts, shown_running, start, stop,
-    Placement, PlannedRestart, PROVIDER_ONDEVICE, RUNTIME_VERSION,
+    Placement, PlannedRestart, PROVIDER_ONDEVICE,
 };
 
 /// The context the sidecar serves when none is set (`local_context` 0; one
@@ -351,7 +351,7 @@ pub fn context_view(cfg: &crate::config::YapConfig) -> ContextView {
     let on_card = runs_on_card(placement, vram);
     let room = on_card.then(|| card_room(vram)).flatten();
     // The runtime on disk (its buffers differ), or the one an install gets.
-    let runtime = runtime_version().unwrap_or_else(|| Version::parse(RUNTIME_VERSION).expect("a version"));
+    let runtime = active_runtime();
     let options = context_choices(max, tokens)
         .into_iter()
         .map(|c| {

@@ -426,6 +426,34 @@
   a model. A download cut off (a dropped connection, Yap closed) leaves
   its `.partial` to resume next time; Cancel deletes it (and the
   `.installing` folder). Safe to delete.
+- **The on-device model's engine** (llama.cpp's own builds, 2026-11-01,
+  `ai/local_llm/engine.rs`): `%APPDATA%/yap/llm/engine/` — a folder per
+  build and variant (`b11982-vulkan/`, `b11982-cuda13/`, `b11982-cpu/`:
+  `llama-server.exe`, its DLLs and licences, unpacked from llama.cpp's
+  zip; the other tools left out), NVIDIA's CUDA runtime once for every
+  build that uses it (`cudart-<sha12>/`), `downloads/` (a zip's
+  `.partial` while it downloads; the zip goes once unpacked), `server.log`
+  (the sidecar's log on a llama.cpp build), `trial.log` /
+  `trial-vision.log` (the last trial), `engine-update.lock` (one update at
+  a time across Yaps, the owner's pid) and **`engine.json`**, the marker:
+  `{current, previous, unproven, retry, refused, failures, mtp_failed,
+  paused, checked_at, latest, updated_at, event, pick}` — the build that
+  runs (`{build, variant, sha256, cudart?, device?}`), the one before
+  (kept for Go back), switched-to-not-yet-started, a build to try again
+  after a failed first start, builds never taken again (`b11990-cuda13`),
+  failed sessions per build, MTP failures per build and model, **"Keep the
+  engine up to date" off** (`paused`: here, not config.json, so an older
+  Yap's save never drops it), the last look and the newest build it could
+  take, the last update, what happened last (Settings' line), and CUDA or
+  Vulkan as measured on this card and driver. Kept: the current build, the
+  one before and a retry; any other build's folder, and a CUDA runtime none
+  of them uses, goes at launch and after an update (`engine::tidy`; one
+  another Yap still runs from stays until the next tidy). **llamafile's
+  files are never touched** (`llm/llamafile.exe`, `llamafile.json`,
+  `llamafile.log`): the installed nightly beside a dev build may still run
+  it, and it's this Yap's way back when no llama.cpp build runs here. An
+  older Yap ignores `engine/`. Safe to delete (the floor comes back with
+  the next install).
 - **The on-device model's projector** ("Read screenshots on this PC",
   2026-10-28, `ai/local_llm/vision.rs`): `%APPDATA%/yap/llm/vision/` —
   `mmproj-Qwen_Qwen3.5-4B-f16.gguf` (641 MiB, bartowski's, SHA-256
@@ -461,7 +489,8 @@
   Use; size + SHA-256 verified; ~318 MiB; named in one place,
   `search::embedder::MODEL`) with a `NOTICE.txt`, and the embedding
   server's `embedder.log`; it runs on the on-device model's engine
-  (`llm/llamafile.exe`, downloaded with it when it isn't there). The index
+  (a llama.cpp build in `llm/engine/`, or `llm/llamafile.exe` on an older
+  install; the floor build downloaded with it when there's none). The index
   in `%APPDATA%/yap/search-index/vectors.bin` — each passage's vector of
   every note, meeting, chat (archived too) and memory item (int8 + a scale,
   by a hash of its words; **no text**), appended as they change, compacted
