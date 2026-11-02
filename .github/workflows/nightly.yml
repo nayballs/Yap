@@ -52,12 +52,12 @@ jobs:
           git config --system core.longpaths true
 
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           fetch-depth: 0 # the release notes walk the commits since the last nightly
 
       - name: Setup Node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v7
         with:
           node-version: 20
 
@@ -148,7 +148,7 @@ jobs:
       # builds (and minisign-signs) the artifacts and does NOT create its own
       # release. We publish the rolling `nightly` release ourselves below.
       - name: Build + sign (Tauri, nightly config)
-        uses: tauri-apps/tauri-action@v0
+        uses: tauri-apps/tauri-action@v1
         id: tauri
         env:
           # Updater (minisign) signing — required so latest.json's signature is
