@@ -172,7 +172,8 @@ the author/committer headers, for:
   fake (a test word, a run like `abcdef` or `aaaaaa`, too few distinct
   characters) — printed cut short;
 - **email addresses** except documentation domains (`example.com/.org/.net`,
-  `*.example.*`, `.test`…), GitHub's noreply, Google Calendar ids and the
+  `*.example.*`, `.test`…), GitHub's noreply, Dependabot's sign-off
+  (`support@github.com`), Google Calendar ids and the
   product's own (`no-reply@mail.contextmirror.com`, `contextmirror@proton.me`);
 - **UK phone numbers** except Ofcom's drama ranges (07700 900xxx, 020 7946 0xxx…).
 

@@ -38,11 +38,13 @@
   // The width a question's screenshots may take: a bubble's (78 % of the
   // thread). Settled a moment after a resize, so a window being dragged
   // wider doesn't ask Rust for a thumbnail at every pixel (they're drawn at
-  // exactly their device pixels: chatImages.js `sentPlaced`).
-  let msgsWidth = $state(0);
+  // exactly their device pixels: chatImages.js `sentPlaced`). The thread's
+  // content box, not its clientWidth: Svelte reads clientWidth when the
+  // border box resizes, which a scrollbar appearing never does.
+  let msgsBox = $state(null);
   let room = $state(0);
   $effect(() => {
-    const next = msgsWidth > 0 ? Math.floor((msgsWidth - 4) * 0.78) : 0;
+    const next = msgsBox?.width > 0 ? Math.floor(msgsBox.width * 0.78) : 0;
     if (!untrack(() => room) || !next) {
       room = next;
       return;
@@ -109,7 +111,7 @@
       Asking across your meetings and notes
     </p>
   {/if}
-  <div class="msgs" bind:this={chat.threadEl} bind:clientWidth={msgsWidth}>
+  <div class="msgs" bind:this={chat.threadEl} bind:contentRect={msgsBox}>
     {#each chat.messages as m, i (i)}
       {#if chat.summary && i === chat.summary.upto}
         <!-- A long chat's older messages, summarised (chat/compact.rs): the

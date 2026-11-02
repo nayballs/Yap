@@ -117,11 +117,13 @@ export function looksFake(body) {
 }
 
 // Email addresses: allowed are documentation domains (RFC 2606/6761), GitHub's
-// noreply, Google Calendar ids, and the addresses the product itself uses.
+// noreply and Dependabot's sign-off, Google Calendar ids, and the addresses the
+// product itself uses.
 const EMAIL = /[A-Za-z0-9._%+-]+@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)*\.[A-Za-z]{2,}(?![A-Za-z0-9-])/g;
 const EMAIL_EXACT = new Set([
   'noreply@anthropic.com',
   'noreply@github.com',
+  'support@github.com', // "Signed-off-by: dependabot[bot] <…>" on every Dependabot commit
   'git@github.com',
   'contextmirror@proton.me',
   'no-reply@mail.contextmirror.com',

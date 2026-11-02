@@ -135,8 +135,17 @@ function placement(img) {
   });
 }
 
-/** Drawn at its own pixels: the box on screen is the picture's size in device pixels. */
+/**
+ * Drawn at its own pixels: the box on screen is the picture's size in device
+ * pixels — once the thread's width has settled (a resize or a scrollbar asks
+ * for a new thumbnail a moment later, ChatThread.svelte).
+ */
 async function expectOneToOne(img) {
+  const oneToOne = (at) => Math.abs(at.w * at.dpr - at.nw) < 0.6 && Math.abs(at.h * at.dpr - at.nh) < 0.6;
+  await expect
+    .poll(async () => (await img.evaluate((el) => el.complete && el.naturalWidth > 0)) && oneToOne(await placement(img)), { message: 'drawn at its own pixels' })
+    .toBe(true)
+    .catch(() => {}); // the checks below say how far off it is
   await loaded(img);
   const at = await placement(img);
   expect(Math.abs(at.w * at.dpr - at.nw), `${at.w} CSS px × ${at.dpr} vs ${at.nw} px`).toBeLessThan(0.6);
@@ -337,6 +346,32 @@ export function shotTests(scale) {
       const [a, b] = [await frames.nth(0).boundingBox(), await frames.nth(1).boundingBox()];
       if (a.x + a.width <= b.x + 0.5) expect(Math.abs(a.y + a.height - (b.y + b.height)), 'lined up at the foot').toBeLessThan(1);
       await named(main, testInfo, `sent-${theme}-${pct}`);
+    }
+  });
+
+  test(`at ${pct} %: a narrow thread that scrolls — a question's picture still at its own pixels, the scrollbar's width left out`, async ({ yap, main, fakeLlm }, testInfo) => {
+    await atScale(main);
+    await setConfig(yap, main, { theme: 'light' });
+    await freshChat(main);
+    // Narrower than a picture's 480 px at a bubble's 78 %, and short enough
+    // that a second question, with a screen, makes it scroll.
+    const narrow = await main.addStyleTag({ content: '.msgs { max-width: 560px; max-height: 300px; }' });
+    try {
+      const msgs = main.locator('.msgs');
+      const scrolls = () => msgs.evaluate((el) => el.scrollHeight > el.clientHeight);
+      await drop(main, yap, 'small.png', SMALL, 1);
+      await ask(main, fakeLlm, 'This snip, narrow');
+      expect(await scrolls(), 'the first question fits: no scrollbar yet').toBe(false);
+      await drop(main, yap, 'screen.png', SOURCE, 1);
+      const one = await ask(main, fakeLlm, 'This screen, narrow');
+      await expect.poll(scrolls, { message: 'the thread scrolls' }).toBe(true);
+      const screen = await expectOneToOne(one.locator('.shots img'));
+      expect(screen.src).toContain('?w=');
+      const room = await msgs.evaluate((el) => (el.clientWidth - 4) * 0.78);
+      expect(screen.w).toBeLessThanOrEqual(room + 0.5);
+      await named(main, testInfo, `sent-narrow-${pct}`);
+    } finally {
+      await narrow.evaluate((el) => el.remove());
     }
   });
 

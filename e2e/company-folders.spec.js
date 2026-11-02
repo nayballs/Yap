@@ -138,6 +138,10 @@ async function fileByHand(yap, main, uid, title, folder) {
   await row.getByRole('button', { name: `More for ${title}` }).click();
   await menu(main).getByRole('menuitem', { name: 'File this meeting in' }).hover();
   await main.getByRole('menu', { name: 'File this meeting in' }).getByRole('menuitemradio', { name: folder }).click();
+  // The pointer off where the menu was: in a small window "Filed in …" comes
+  // up under it, and a toast under the pointer holds the offer back
+  // (ui/noticePolicy.js).
+  await main.mouse.move(1, 1);
   await expectStore(yap, 'notes.json', (s) => s.notes.find((n) => n.id === id)?.folder === folder);
   return id;
 }

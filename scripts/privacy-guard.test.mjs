@@ -189,7 +189,11 @@ test('allowed emails do not block; a real-looking one does', () => {
     at('dev', 'yap.test'),
     'icon' + '@2x.png',
   ];
-  commit('a.md', allowed.join('\n') + '\n', `feat: a\n\nCo-Authored-By: Claude <${at('noreply', 'anthropic.com')}>`);
+  commit(
+    'a.md',
+    allowed.join('\n') + '\n',
+    `feat: a\n\nCo-Authored-By: Claude <${at('noreply', 'anthropic.com')}>\nSigned-off-by: dependabot[bot] <${at('support', 'github.com')}>`,
+  );
   let r = prePush();
   assert.equal(r.code, 0, r.out);
   commit('b.md', `Write to ${at('jo.bloggs', 'gmail.com')}\n`, 'docs: b');

@@ -1752,7 +1752,10 @@ async fn post_chat_request(
                     attempt += 1;
                     continue;
                 }
-                tracing::warn!("Rate-limited by {}: {}", provider, detail.chars().take(300).collect::<String>());
+                // The provider's words name the account (Groq's and OpenAI's
+                // organization), so only at debug.
+                tracing::warn!("Rate-limited by {}", provider);
+                tracing::debug!("{}'s rate limit: {}", provider, detail.chars().take(300).collect::<String>());
                 return Err(call.failed(rate_limited_error(provider, hinted)));
             }
             let lower = detail.to_ascii_lowercase();

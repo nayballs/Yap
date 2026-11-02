@@ -1151,6 +1151,16 @@ mod tests {
     }
 
     #[test]
+    fn a_providers_account_id_is_masked() {
+        // Groq's and OpenAI's rate-limit errors name the organization.
+        let s = Scrub::new(Vec::new());
+        let groq = s.line("Rate limit reached for model `openai/gpt-oss-20b` in organization `org_01fake0organization0id0x` service tier `on_demand`");
+        assert!(groq.contains("in organization `<redacted>` service tier `on_demand`"), "{groq}");
+        let openai = s.line("Rate limit reached for gpt-5-mini in organization org-FAKEorg0123456789abcdef on tokens per min");
+        assert!(openai.contains("in organization <redacted> on tokens per min"), "{openai}");
+    }
+
+    #[test]
     fn any_windows_user_folder_is_masked() {
         let s = Scrub::new(Vec::new());
         assert_eq!(s.line("model at C:\\Users\\Someone Else\\models"), "model at C:\\Users\\<user>\\models");
