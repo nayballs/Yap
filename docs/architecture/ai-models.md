@@ -1442,13 +1442,15 @@ The language-model side: the OpenAI-compatible client and its prompts, the on-de
 
 ## Sign in with ChatGPT (2026-11-01)
 
-The person's ChatGPT plan pays for Yap's AI, instead of an API key. It's a provider of its own, **"chatgpt"** ("ChatGPT" on the Cloud providers tabs and in Chat's model picker). The API-key providers, OpenAI's among them, don't change.
+The person's ChatGPT plan pays for Yap's AI, instead of an API key. It's a provider of its own, **"chatgpt"**. The API-key providers, OpenAI's among them, don't change.
+
+**One "ChatGPT" entry on screen** (2026-11-02): Settings' Cloud providers tabs and Chat's model picker show OpenAI's two ways as one entry, "ChatGPT" with OpenAI's mark, where they had an OpenAI and a ChatGPT one. The plan comes first, an OpenAI API key second ("Use an API key instead"); both connected, a "Your plan | API key" switch. It's a UI merge only: `chatgpt` and `openai` stay two providers everywhere underneath (config, Rust, `KEYED_PROVIDERS`, usage, effort, the voices on the OpenAI key), with no migration. See frontend-settings.md (`ChatGptProvider.svelte`) and chat-and-assistant.md (the picker).
 
 OpenAI's flow for open-source apps that run locally is self-serve: no partner key, no review. A paid or hosted Yap would need OpenAI's say first.
 
 ### Signing in
 
-`chatgpt_sign_in` starts it, from Settings → Language Models (any scope, or Dictation Cleanup) → Cloud providers → ChatGPT, or from Chat's picker.
+`chatgpt_sign_in` starts it, from Settings → Language Models (any scope, or Dictation Cleanup) → Cloud providers → ChatGPT, or from the ChatGPT entry in Chat's picker (its connect card, or "Use your ChatGPT plan instead…" under the OpenAI key's models).
 
 - **OAuth 2 with PKCE (S256)** in the system browser (`oauth.rs`).
 - **The loopback listener** takes the code at `http://127.0.0.1:1455/auth/callback`:
@@ -1478,7 +1480,7 @@ OpenAI's flow for open-source apps that run locally is self-serve: no partner ke
 
 A later sign-in must be the same account (`sub`). Another account forgets the registration and tells the person to click again, which makes a new one.
 
-Without `chatgpt.tokens.use.direct` in the granted scopes, the person is signed in but Yap can't use the plan. The card says so and offers **Turn on plan usage** (sign in again with `prompt=consent`) or an API key on the OpenAI tab.
+Without `chatgpt.tokens.use.direct` in the granted scopes, the person is signed in but Yap can't use the plan. The card says so and offers **Turn on plan usage** (sign in again with `prompt=consent`) or an OpenAI API key instead, on the same ChatGPT tab.
 
 ### The key store holds a marker
 
@@ -1556,12 +1558,12 @@ Usage (from `response.completed`) goes to the AI usage tracker as "chatgpt", wit
 
 ### On screen, in OpenAI's words
 
-Following its UI rules (`ChatGptSignIn.svelte`, `stores/chatgpt.svelte.js`, `ModelChip.svelte`, `ChatModelPicker.svelte`):
+Following its UI rules (`ChatGptSignIn.svelte` inside `ChatGptProvider.svelte`, `stores/chatgpt.svelte.js`, `ModelChip.svelte`, `ChatModelPicker.svelte`):
 
 - **Continue with ChatGPT** to sign in.
 - **Connected · Using ChatGPT plan**, with the account and **Manage usage**.
 - The one-time **"You're using your ChatGPT plan"** notice, with **Got it** (`chatgpt.json` `noticeSeen`).
-- Chat's model chip says "Using ChatGPT plan", with a Manage usage link beside it.
+- Chat's model chip says "Using ChatGPT plan", with a Manage usage link beside it. On an OpenAI API key it says "OpenAI API key" instead, since the one entry holds both.
 
 ### Receipts
 
@@ -1572,7 +1574,7 @@ Following its UI rules (`ChatGptSignIn.svelte`, `stores/chatgpt.svelte.js`, `Mod
 ### Tests
 
 - The flow's pure parts are tested in each module.
-- `e2e/chatgpt.spec.js` runs against a local fake of OpenAI's sign-in and Responses API (`e2e/support/fake-chatgpt.js`): PKCE, a signed ID token, rotating refresh tokens, a namespaced tool step whose reasoning must come back whole, the usage limit, revocation.
+- `e2e/chatgpt.spec.js` runs against a local fake of OpenAI's sign-in and Responses API (`e2e/support/fake-chatgpt.js`): PKCE, a signed ID token, rotating refresh tokens, a namespaced tool step whose reasoning must come back whole, the usage limit, revocation; and the one ChatGPT entry's states with the plan (the plan only, both with "Your plan | API key", in the picker and Settings; a key only and nothing connected in Settings). `e2e/chat-model-picker.spec.js` has the picker's nothing-connected and key-only states.
 - Debug builds point at the fake with `YAP_CHATGPT_ISSUER` and `YAP_CHATGPT_API`.
 - Evaluations run on the real plan with `chatgpt:<model slug>` once the maintainer has signed in.
 

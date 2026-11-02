@@ -22,7 +22,13 @@
 //   own); the processor warning and its switch to the 1.5B; a self-hosted
 //   server's models;
 // - the keyboard: arrows through the rail and the models, Ctrl+K, typing to
-//   search, Enter, Esc.
+//   search, Enter, Esc;
+// - ChatGPT, one entry for OpenAI's two ways (2026-11-02): nothing connected,
+//   a connect card (Continue with ChatGPT, "Use an API key instead" opening
+//   the key field, no model list); an OpenAI model found by search leads to
+//   that field; a key saved, OpenAI's Latest and More models with "Use your
+//   ChatGPT plan instead…"; picked, the chip says "OpenAI API key", Recent
+//   and search say which way (the plan's states: chatgpt.spec.js).
 //
 // Nothing leaves the PC: the providers are the local fake
 // (support/fake-llm.js) through YAP_MODELS_STANDIN with test keys, the
@@ -80,6 +86,11 @@ const ANTHROPIC_LIST = [
   claudeModel('claude-sonnet-4-5-20250929', 'Claude Sonnet 4.5', '2025-09-29T00:00:00Z'),
 ];
 const CLAUDE_LATEST = ['Claude Opus 5.5', 'Claude Fable 5.1', 'Claude Sonnet 5.5', 'Claude Haiku 5.5'];
+const OPENAI_KEY = 'sk-proj-e2e-fake-0000004321';
+/** As OpenAI's /v1/models lists one: Yap's own nine, nothing new. */
+const OPENAI_LIST = ['gpt-5.6-luna', 'gpt-5-mini', 'gpt-5.6-terra', 'gpt-5.6-sol', 'gpt-6-luna', 'gpt-6.1-sol', 'gpt-6-astra', 'gpt-5.5', 'gpt-5.4-mini'].map(
+  (id) => ({ id, object: 'model', created: 1760000000, owned_by: 'openai' })
+);
 const CLAUDE_OLDER = [
   'Claude Opus 4.8',
   'Claude Opus 4.7',
@@ -104,6 +115,7 @@ const test = base.extend({
       const fake = await startFakeLlm();
       fake.listModels('groq', GROQ_LIST);
       fake.listModels('anthropic', ANTHROPIC_LIST);
+      fake.listModels('openai', OPENAI_LIST);
       await use(fake);
       await fake.close();
     },
@@ -193,8 +205,8 @@ test('the chip opens a provider rail on its provider, with the rows Settings sho
     'Groq, connected',
     'Gemini, not set up',
     'Claude, not set up',
-    'OpenAI, not set up',
-    'ChatGPT, not signed in',
+    // OpenAI's two ways (the ChatGPT plan, an API key): one entry.
+    'ChatGPT, not set up',
     'OpenRouter, not set up',
     'On this PC, ready',
   ]);
@@ -775,6 +787,92 @@ test('a custom server elsewhere gets its own place on the rail', async ({ yap, m
     const { noteFormatting: _drop, ...rest } = (await yap.invoke('get_config')).llmScopes;
     const was = cfg.llmScopes.noteFormatting;
     await setConfig(yap, main, { llmScopes: was ? { ...rest, noteFormatting: was } : rest });
+    await backToGroq(yap, main, fakeLlm);
+  }
+});
+
+test('ChatGPT: one entry for the plan and an OpenAI key — nothing connected, then a key', async ({ yap, main, fakeLlm, shot }) => {
+  await backToGroq(yap, main, fakeLlm);
+  const box = () => picker(main).getByLabel('OpenAI API key');
+  try {
+    const pop = await openPicker(main);
+    await tab(main, 'ChatGPT').click();
+    await expect(tab(main, 'ChatGPT')).toHaveText('ChatGPT, not set up');
+    await expect(tab(main, 'ChatGPT').locator('.mark')).toHaveAttribute('data-icon', 'openai');
+    const head = pop.locator('.phead');
+    await expect(head.locator('.ptitle')).toHaveText('ChatGPT');
+    await expect(head).toContainText('Not set up');
+
+    // Nothing connected: the plan first, the key quieter under it; no models.
+    const card = pop.getByTestId('gpt-connect');
+    await expect(card).toContainText('Use your ChatGPT plan');
+    await expect(card).toContainText('no cost per message');
+    await expect(card.getByRole('button', { name: 'Continue with ChatGPT' })).toBeVisible();
+    const toggle = card.getByRole('button', { name: 'Use an API key instead' });
+    await expect(toggle).toHaveAttribute('aria-expanded', 'false');
+    await expect(box()).toHaveCount(0);
+    await expect(pane(main).locator('.mrow')).toHaveCount(0);
+    await expect(pane(main).getByTestId('gpt-ways')).toHaveCount(0);
+    await shot(main, '14-picker-chatgpt-nothing-connected');
+    await toggle.click();
+    await expect(toggle).toHaveAttribute('aria-expanded', 'true');
+    await expect(box()).toBeFocused();
+    await shot(main, '15-picker-chatgpt-key-field');
+    await toggle.click();
+    await expect(box()).toHaveCount(0);
+
+    // Search finds OpenAI's models by "chatgpt" too, saying which way pays;
+    // one (greyed: no key) leads to the ChatGPT entry, its key field open.
+    const search = pop.getByRole('searchbox', { name: 'Search models and providers' });
+    await search.fill('chatgpt astra');
+    await expect(pane(main).getByRole('group').locator('.gh')).toHaveText(['OpenAI API key']);
+    await expect(pane(main).locator('.mrow.locked .tag.key')).toHaveText('Add key');
+    await pane(main).locator('.mrow.locked').first().click();
+    await expect(tab(main, 'ChatGPT')).toHaveAttribute('aria-selected', 'true');
+    await expect(toggle).toHaveAttribute('aria-expanded', 'true');
+    await expect(box()).toBeFocused();
+
+    // Get a key ↗: OpenAI's key page. Saved: a key only, OpenAI's models.
+    await card.getByRole('button', { name: 'Get a key ↗' }).click();
+    await expect.poll(() => yap.invoke('e2e_opened_urls')).toContain('https://platform.openai.com/api-keys');
+    await box().fill(OPENAI_KEY);
+    await card.getByRole('button', { name: 'Save key' }).click();
+    await expectStore(yap, 'config.json', (c) => c.ppApiKeys?.openai === OPENAI_KEY);
+    await expect(card).toBeHidden();
+    await expect(tab(main, 'ChatGPT')).toHaveText('ChatGPT, connected');
+    await expect(tab(main, 'ChatGPT').locator('.st')).not.toHaveClass(/off/);
+    await expect(head).toContainText('Connected · checked just now');
+    await expect(head.locator('.keymask')).toHaveText('sk-…4321');
+    await expect(latest(main).locator('.nm')).toHaveText(['GPT-6 Astra', 'GPT-6 Luna']);
+    await expect(moreButton(main)).toHaveText('More models (7)');
+    await expect(pane(main).getByTestId('gpt-ways')).toHaveCount(0);
+    // The other way, under the models.
+    await expect(pane(main).getByRole('button', { name: 'Use your ChatGPT plan instead…' })).toBeVisible();
+    expect(await pop.innerHTML()).not.toContain(OPENAI_KEY);
+    await shot(main, '16-picker-chatgpt-key-only');
+
+    // Picked: provider "openai" as ever; the chip says the key pays.
+    await latest(main).getByRole('button', { name: /^GPT-6 Astra/ }).click();
+    await expect(pop).toBeHidden();
+    await expect(chip(main)).toContainText('GPT-6 Astra');
+    await expect(chip(main)).toContainText('· OpenAI API key');
+    await expect(main.locator('.modelchip').getByRole('link', { name: 'Manage usage' })).toHaveCount(0);
+    await expectStore(yap, 'config.json', (c) => c.llmScopes.chat.provider === 'openai' && c.llmScopes.chat.model === 'gpt-6-astra');
+    expect(yap.readJson('config.json').llmScopes.chat.apiKey).toBe(OPENAI_KEY);
+
+    // Opened again: on ChatGPT; Recent says which way.
+    await chip(main).click();
+    await expect(tab(main, 'ChatGPT')).toHaveAttribute('aria-selected', 'true');
+    await expect(latest(main).getByRole('button', { name: /^GPT-6 Astra/ })).toHaveAttribute('aria-pressed', 'true');
+    await tab(main, 'Recent').click();
+    await expect(pane(main).locator('.mrow').first()).toContainText('GPT-6 Astra');
+    await expect(pane(main).locator('.mrow').first()).toContainText('OpenAI API key · ');
+    await main.keyboard.press('Escape');
+    await expect(picker(main)).toBeHidden();
+  } finally {
+    if (await picker(main).isVisible()) await main.keyboard.press('Escape');
+    const { openai: _drop, ...keys } = (await yap.invoke('get_config')).ppApiKeys || {};
+    await setConfig(yap, main, { ppApiKeys: keys });
     await backToGroq(yap, main, fakeLlm);
   }
 });

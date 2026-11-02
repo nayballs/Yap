@@ -31,8 +31,11 @@
   import { createExternalLinkHandler } from '../../core/externalLinks.js';
 
   // Chat on the person's ChatGPT plan (Sign in with ChatGPT): "Using
-  // ChatGPT plan" by the model, and "Manage usage" (OpenAI's UI rules).
+  // ChatGPT plan" by the model, and "Manage usage" (OpenAI's UI rules). On an
+  // OpenAI API key, "OpenAI API key": the picker's one ChatGPT entry has
+  // both ways, so the chip says which pays (2026-11-02).
   const USAGE_URL = 'https://chatgpt.com/settings/usage';
+  const PAYS = { chatgpt: 'Using ChatGPT plan', openai: 'OpenAI API key' };
 
   // `quiet`: no pill, just the words (under the Chat composer, as Claude
   // Code shows its model).
@@ -59,12 +62,13 @@
   // Its effort ("Extra"), and fast mode.
   const effort = $derived(model ? effortLabel(effortNow(status?.effort)) : '');
   const fast = $derived(!!model && status?.effort?.fast === true);
+  const prov = $derived(model ? PAYS[model.provider] || providerName(model) : '');
   const chipLabel = $derived(
     !status
       ? ''
       : !model
         ? 'No AI model. Set one up'
-        : `Chat model: ${modelName(model)}, ${providerName(model)}.${effort ? ` Effort: ${effort}.` : ''}${fast ? ' Fast mode.' : ''}${status.tools ? '' : ` ${noToolsLine}`}${gone ? ` ${GONE}` : ''} Change model`
+        : `Chat model: ${modelName(model)}, ${prov}.${effort ? ` Effort: ${effort}.` : ''}${fast ? ' Fast mode.' : ''}${status.tools ? '' : ` ${noToolsLine}`}${gone ? ` ${GONE}` : ''} Change model`
   );
 
   export async function refresh() {
@@ -151,7 +155,7 @@
         <span class="cname">{modelName(model)}</span>
         {#if effort}<span class="ceffort" data-testid="chip-effort">{effort}</span>{/if}
         {#if fast}<span class="ceffort">· Fast</span>{/if}
-        <span class="cprov">· {model.provider === 'chatgpt' ? 'Using ChatGPT plan' : providerName(model)}</span>
+        <span class="cprov">· {prov}</span>
         {#if !status.tools}<span class="cnotools">· no note tools</span>{/if}
         {#if gone}<span class="cnotools">· no longer offered</span>{/if}
       {:else}

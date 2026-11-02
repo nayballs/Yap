@@ -6,7 +6,9 @@
 //   newest first (core/latestModels.js; More open or closed as the person
 //   left it while Yap runs, else open when the model in use is in it, which
 //   stays on show under it when it's closed by hand); a provider without a
-//   key shows its curated models greyed with "Add key";
+//   key shows its curated models greyed with "Add key"; OpenAI's two ways,
+//   the ChatGPT plan and an API key, are one rail entry, "ChatGPT" (GPT_TAB,
+//   2026-11-02), each way's rows saying which pays;
 // - "On this PC": Yap's on-device models (local_llm_status: the curated set
 //   with "Recommended for this PC" from the graphics card check, GGUFs of
 //   the person's own in <data>/llm/), downloaded right here through
@@ -28,20 +30,48 @@ import { familyIcon, providerIcon, modelName } from '../../core/aiModel.js';
 import { contextInfo, fmtTokens } from '../../core/localContext.js';
 import { readsImages } from '../../stores/visionTags.svelte.js';
 import { latestModels } from '../../core/latestModels.js';
+import { CHATGPT, GPT_TAB } from '../../core/providers.js';
 
-/** The rail's cloud providers, in its order. `short` names the rail entry. */
+/**
+ * The cloud providers, in the rail's order. `short` names the rail entry;
+ * `tab` is the entry when it isn't the provider's own (OpenAI's two ways
+ * share "ChatGPT"), `way` what a row from it says pays (Recent, search).
+ */
 export const CLOUD_PROVIDERS = [
   { id: 'groq', name: 'Groq', short: 'Groq' },
   { id: 'gemini', name: 'Google Gemini', short: 'Gemini' },
   { id: 'anthropic', name: 'Anthropic', short: 'Claude' },
-  { id: 'openai', name: 'OpenAI', short: 'OpenAI' },
-  // Sign in with ChatGPT: the person's plan, not a key (ai/chatgpt.rs).
-  { id: 'chatgpt', name: 'ChatGPT', short: 'ChatGPT' },
+  // OpenAI's models, two ways, one entry (2026-11-02): Sign in with ChatGPT,
+  // the person's plan, first (ai/chatgpt.rs); then an OpenAI API key.
+  { id: 'chatgpt', name: 'ChatGPT', short: 'ChatGPT', tab: GPT_TAB, way: 'ChatGPT plan', words: 'chatgpt openai gpt plan' },
+  { id: 'openai', name: 'OpenAI', short: 'OpenAI', tab: GPT_TAB, way: 'OpenAI API key', words: 'chatgpt openai gpt api key' },
   { id: 'openrouter', name: 'OpenRouter', short: 'OpenRouter' },
 ];
 
 export const cloudInfo = (p) => CLOUD_PROVIDERS.find((c) => c.id === p) ?? null;
 export const isCloud = (p) => !!cloudInfo(p);
+/** The rail entry a cloud provider's models are under. */
+export const tabOf = (p) => cloudInfo(p)?.tab ?? p;
+
+/** The rail's cloud entries: each provider's own, OpenAI's two as one "ChatGPT". */
+export const CLOUD_RAIL = CLOUD_PROVIDERS.reduce((tabs, p) => {
+  const id = tabOf(p.id);
+  const had = tabs.find((t) => t.id === id);
+  if (had) had.providers.push(p.id);
+  else tabs.push({ id, label: p.short, providers: [p.id] });
+  return tabs;
+}, []);
+
+/**
+ * The ChatGPT entry: which ways are connected, and the way its pane shows —
+ * the only one connected, else (both) `way` as the person left the switch.
+ */
+export function gptState(status, way) {
+  const planOn = !!status?.keyed?.includes(CHATGPT);
+  const keyOn = !!status?.keyed?.includes('openai');
+  const shown = planOn && keyOn ? way : planOn ? CHATGPT : keyOn ? 'openai' : null;
+  return { planOn, keyOn, shown };
+}
 /** Where the provider hands out API keys. */
 export const keyUrl = (p) => PP_CLOUD_MODELS[p]?.keyUrl || '';
 
@@ -334,7 +364,7 @@ export function cloudRows(p, status) {
   const connected = !!status?.keyed?.includes(p);
   const cur = connected && status?.ready && status.model?.provider === p ? status.model.id : '';
   const merged = modelsFor(p, cur);
-  const short = cloudInfo(p)?.short || p;
+  const where = cloudInfo(p)?.way || cloudInfo(p)?.short || p;
   // The context the provider's live list gives ("1M context"), as info:
   // only from the list Yap already has, never a call of its own.
   const live = catalog.providers[p]?.models ?? [];
@@ -353,7 +383,7 @@ export function cloudRows(p, status) {
       model: i.value,
       name: i.label,
       desc: descOf(i, lm),
-      where: short,
+      where,
       icon: familyIcon(i.label, i.value) ?? providerIcon(p),
       current: !!cur && i.value === cur,
       action: connected ? 'pick' : 'key',
@@ -371,7 +401,7 @@ export function cloudRows(p, status) {
             imagesTag(images),
             i.tools === false && tag('warn', 'no note tools'),
           ])
-        : [tag('key', 'Add key'), imagesTag(images)].filter(Boolean),
+        : [tag('key', p === CHATGPT ? 'Sign in' : 'Add key'), imagesTag(images)].filter(Boolean),
     };
   };
   const rows = merged.items.map(row);
@@ -486,8 +516,9 @@ export function searchGroups(q, status) {
   };
   const groups = [];
   for (const p of CLOUD_PROVIDERS) {
-    const hits = allCloudRows(p.id, status).filter((r) => match(r, `${p.name} ${p.short}`));
-    if (hits.length) groups.push({ id: p.id, label: p.short, icon: providerIcon(p.id), rows: hits });
+    // OpenAI's two ways: "openai", "gpt" or "chatgpt" find both, each its own group.
+    const hits = allCloudRows(p.id, status).filter((r) => match(r, `${p.name} ${p.short} ${p.words || ''}`));
+    if (hits.length) groups.push({ id: p.id, label: p.way || p.short, icon: providerIcon(p.id), rows: hits });
   }
   const { installed, available } = localRows(status);
   const servers = status?.servers || [];

@@ -31,7 +31,7 @@
   import ChatConfig from './ChatConfig.svelte';
   import ModelPicker from './ModelPicker.svelte';
   import EndpointModels from './EndpointModels.svelte';
-  import ChatGptSignIn from './ChatGptSignIn.svelte';
+  import ChatGptProvider from './ChatGptProvider.svelte';
   // CSS order: this page is a chunk of its own (Settings.svelte's PAGES), so
   // all of its styles, the components above included, come after Settings'
   // shared styles, which the main window has already: this page's own
@@ -50,10 +50,16 @@
     CLOUD_TABS,
     MODEL_HINTS,
     CLEANUP_PROVIDER_LABELS,
+    CHATGPT_PLAN_KEY,
+    GPT_TAB,
+    cloudTabOf,
+    gptWay,
     maskKey,
+    sharedKey,
     stashCleanupKey,
     cleanupNeedsKey,
   } from '../core/providers.js';
+  import { chatgpt } from '../stores/chatgpt.svelte.js';
   import { SCOPE_TABS, SCOPE_SUBTITLE, SCOPE_DEFAULTS } from './scopes.js';
   import { PP_PRESETS, PP_DEFAULT_BODY } from './cleanupPresets.js';
   import { lm, refreshUsage } from './languageModels.svelte.js';
@@ -147,6 +153,13 @@
       cfg.ppModel = defaultModel(p);
     }
     lm.keyEditing = false;
+  }
+  // The ChatGPT tab (ChatGptProvider.svelte): the plan or an OpenAI key, one
+  // tab; clicked, the plan when it's signed in, else a saved key, else the plan.
+  function onCloudTab(v) {
+    if (v !== GPT_TAB) return onCloudProviderChange(v);
+    const planOn = chatgpt.loaded ? chatgpt.plan : sharedKey(cfg, 'chatgpt') === CHATGPT_PLAN_KEY;
+    onCloudProviderChange(gptWay(planOn, !!sharedKey(cfg, 'openai')));
   }
   // The "Select Model" rows are ModelPicker's: the provider's registry merged
   // with its live list, all carrying the provider's brand icon (OpenWhispr
@@ -258,7 +271,7 @@
     {/if}
     {#if lm.mode === 'cloud'}
       <div class="cloudcfg">
-        <PillTabs bind:value={lm.cloudProvider} options={CLOUD_TABS} onchange={onCloudProviderChange} />
+        <PillTabs value={cloudTabOf(lm.cloudProvider)} options={CLOUD_TABS} onchange={onCloudTab} />
 
         {#if lm.cloudProvider === 'custom'}
           <div class="panelcard">
@@ -285,11 +298,20 @@
             </Row>
             <EndpointModels id="pp-custom-models" provider="custom" scope="cleanup" baseUrl={cfg.ppBaseUrl} model={cfg.ppModel} />
           </div>
-        {:else if lm.cloudProvider === 'chatgpt'}
-          <!-- Sign in with ChatGPT: the person's plan, never a key. -->
-          <ChatGptSignIn disabled={!cfg.postProcessEnabled} />
-          <h4 class="selhead">Model</h4>
-          <ModelPicker provider="chatgpt" bind:value={cfg.ppModel} />
+        {:else if cloudTabOf(lm.cloudProvider) === GPT_TAB}
+          <!-- ChatGPT: the person's plan first, or an OpenAI API key. -->
+          <ChatGptProvider
+            provider={lm.cloudProvider}
+            onprovider={onCloudProviderChange}
+            bind:apiKey={cfg.ppApiKey}
+            onkeyinput={stashApiKey}
+            openaiKey={sharedKey(cfg, 'openai')}
+            planKey={sharedKey(cfg, 'chatgpt')}
+            bind:model={cfg.ppModel}
+            bind:keyEditing={lm.keyEditing}
+            bind:keyBox
+            disabled={!cfg.postProcessEnabled}
+          />
         {:else}
           <div class="keyhead">
             <h4>API key</h4>

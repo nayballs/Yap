@@ -40,7 +40,7 @@ store.
 | `settings/SideButtons.svelte` | The "Set up your mouse's side buttons" dialog (Shortcuts → Mouse) |
 | `settings/languages.svelte.js` | My languages' helpers: the language list read once (`loadLanguageCatalog`, `catalog`, `languageName`), `myLanguages(cfg)` (an old config's one language too), the language shortcuts (`languageShortcuts`, `shortcutName`, `newLanguageShortcut`, `MAX_LANGUAGE_SHORTCUTS`) |
 | `settings/MyLanguages.svelte` | Dictation → My languages: the search, the model coverage and recommendation, the main shortcut's language, the language shortcuts, the nudge's switch |
-| `lib/core/providers.js` | The providers in one place: ids, `BASE_URLS`, `KEYED_PROVIDERS`, `PP_PROVIDERS`, `PROVIDER_MODES`, `CLOUD_TABS`, `MODEL_HINTS`, `maskKey`, the four name sets each surface uses today (`PROVIDER_LABELS` short, `SCOPE_PROVIDER_LABELS` the scope tabs', `CLEANUP_PROVIDER_LABELS` cleanup's, `PROVIDER_DESTINATIONS` where the words go), and the key store's rules (`sharedKey`, `stashCleanupKey`, `creditCleanupKey`, `liftScopeKeys`, `adoptProviderKey`, `cleanupNeedsKey`) |
+| `lib/core/providers.js` | The providers in one place: ids, `BASE_URLS`, `KEYED_PROVIDERS`, `PP_PROVIDERS`, `PROVIDER_MODES`, `CLOUD_TABS` (one ChatGPT tab for `chatgpt` and `openai`: `GPT_TAB`, `cloudTabOf`, `GPT_WAYS`, `gptWay`), `MODEL_HINTS`, `maskKey`, the four name sets each surface uses today (`PROVIDER_LABELS` short, `SCOPE_PROVIDER_LABELS` the scope tabs', `CLEANUP_PROVIDER_LABELS` cleanup's, `PROVIDER_DESTINATIONS` where the words go), and the key store's rules (`sharedKey`, `stashCleanupKey`, `creditCleanupKey`, `liftScopeKeys`, `adoptProviderKey`, `cleanupNeedsKey`) |
 | `lib/stores/attention.svelte.js` | The red count's items (`attentionItems`) kept live by `followAttention` |
 | `settings/localLlm.svelte.js` | Settings' on-device model: its status, the download and its progress, switching (a curated model or one of your own, `activateOwn`), the upgrade offer, the family tab, the warm-up poll (`followLocalLlm`); Uninstall is `lib/core/localModels.js`'s, shared with the Chat model picker |
 | `settings/languageModels.svelte.js` | Language Models' state that outlives the page (`lm`: the tab, cleanup's mode and cloud tab, the key field open, the Chat tab's remount count, Prompt Studio's guardrails, Smart routing's recent apps, the day's Groq usage), `providerUi`, `loadRecentApps`, `refreshUsage` |
@@ -57,8 +57,9 @@ Since 2026-10-24 `Settings.svelte` and every part only Settings uses sit in
 `OpenAppsSettings`, `KokoroOffer` (+ `kokoro.svelte.js`), `AgentNameField`,
 the speech models' `ModelManager`, `ModelRow`, `SpeakerModels`,
 `SpeakersToggle` (+ `diarization.svelte.js`), and the Language Models tabs'
-`ScopeProviderConfig`, `ChatConfig`, `NoteFormattingConfig`,
-`VoiceAgentConfig`, `PromptStudio`, `ModelPicker`, `EndpointModels`,
+`ScopeProviderConfig`, `ChatGptProvider` (+ `ChatGptSignIn`), `ChatConfig`,
+`NoteFormattingConfig`, `VoiceAgentConfig`, `PromptStudio`, `ModelPicker`,
+`EndpointModels`,
 `RegionSpelling` and `cleanupStyles.js`. What Settings shares with other
 windows is in `components/`, `stores/` and `core/`
 ([frontend.md](./frontend.md#the-folder-layout-2026-10-24)).
@@ -632,7 +633,8 @@ on an element that also has a `settings.css` class (`set-note`,
   model…") instead of a screen of greyed choices. On: where it runs (Cloud
   providers / Local / Self-hosted — the same names on every tab;
   `ppMode`/`cloudProvider` are UI-only and resolve to `ppProvider`), the key
-  banner when one is missing, the provider pills, the masked API key with "Get
+  banner when one is missing, the provider pills (Groq, Anthropic, **ChatGPT**,
+  Gemini, OpenRouter, Custom), the masked API key with "Get
   your API key", the model list (`ModelPicker.svelte`, the curated list merged
   with the provider's live one, `modelCatalog.js`), a self-hosted or custom
   endpoint's fields (`EndpointModels.svelte` suggests its server's models),
@@ -645,6 +647,27 @@ on an element that also has a `settings.css` class (`set-note`,
   cleanup uses it. Switch that to another model first", `inUseNote`), Yap's confirm with the file's size, `lib/core/localModels.js` →
   `local_llm_uninstall`: ai-models.md `ai/local_llm/uninstall.rs`), "Hide
   the model's thinking" for reasoning models.
+  **The ChatGPT tab** (2026-11-02, `ChatGptProvider.svelte`, shared by
+  cleanup and every scope's `ScopeProviderConfig`): one tab for OpenAI's two
+  ways where there were two (OpenAI, ChatGPT), as in Chat's picker. UI only:
+  the scope is on `chatgpt` or `openai` as before (`cloudTabOf` maps both to
+  the tab, `GPT_TAB`); clicking the tab picks the plan when it's signed in,
+  else a saved OpenAI key, else the plan (`gptWay`). The plan comes first
+  (`ChatGptSignIn.svelte`: Continue with ChatGPT, "Connected · Using ChatGPT
+  plan", Manage usage, the one-time notice, OpenAI's words), the key second
+  and quieter. Nothing connected: the plan's card and **Use an API key
+  instead** (`aria-expanded`), which puts the scope on `openai` and opens the
+  key field ("OpenAI API key", "Get your API key", "Pays per message on your
+  OpenAI account"), no model list. The plan only: its card, the account's
+  models, **Use an OpenAI API key instead…** at the bottom. A key only: the
+  key masked, OpenAI's models, **Use your ChatGPT plan instead…** (the scope
+  on the plan, signing in). Both: a Segmented **Your plan | API key** ("Connect
+  ChatGPT with") on top, the scope's way selected; switching moves the scope.
+  Signed in while the scope waits on an OpenAI key it hasn't got (Continue
+  with ChatGPT puts it on the plan first anyway): on the plan. The cleanup
+  banner's Add key for `openai` lands on the tab with the key field open
+  (`bind:keyBox`). Nav aliases and the search index had no OpenAI-tab links;
+  the search's cleanup and Chat model entries know "chatgpt plan".
   **Spelling** (`#settings-cleanup-spelling`, `RegionSpelling.svelte`: "Write
   in my region's spelling" → `regionSpelling`, greyed while cleanup is off).
   With cleanup on: **Styles by app** (`#settings-cleanup-styles`,

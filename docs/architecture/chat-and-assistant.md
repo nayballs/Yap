@@ -2384,7 +2384,8 @@ and its Undo, Preview / Source, find, copy, light and dark).
   to — the provider's mark (`ProviderMark.svelte`), "GPT-OSS 20B Medium ·
   Groq" (a cloud model's **effort** after its name, as the Claude Code app
   shows "Opus 5.5 Extra": the one chosen, else its default; "· Fast" with
-  fast mode; `core/effort.js`) / "Qwen3.5 4B · On this PC", "· no note tools" for a local model under 4B,
+  fast mode; `core/effort.js`; OpenAI's models say which way pays: "· Using
+  ChatGPT plan" with Manage usage beside it, or "· OpenAI API key") / "Qwen3.5 4B · On this PC", "· no note tools" for a local model under 4B,
   where it runs in its tooltip (and, on the on-device model, "Context: 8K
   tokens": `ai_model_status.context`), "No AI model" when nothing is set up;
   bottom right of the same row, **the context ring** ([below](#the-context-ring-2026-10-25)). The
@@ -2398,10 +2399,34 @@ and its Undo, Preview / Source, find, copy, light and dark).
   not, older ones included whether More models is open or not (Latest
   first), and this PC's; a **rail** (`tablist`): Recent (the last 3 Chat models
   used, this webview's localStorage `yapChatRecentModels`), Groq / Gemini /
-  Claude (Anthropic) / OpenAI / OpenRouter with their marks and a dot
+  Claude (Anthropic) / **ChatGPT** / OpenRouter with their marks and a dot
   (green = a key, hollow = not set up), Custom when a server elsewhere is
   set up, and **On this PC**; it opens on the current model's provider (or
-  the one the scope is set to). The **pane**: the provider's mark on a
+  the one the scope is set to). **ChatGPT** (2026-11-02; `CLOUD_RAIL`,
+  `tabOf`, `gptState` in `chatModels.svelte.js`) is OpenAI's two ways in one
+  entry, OpenAI's mark, where the rail had OpenAI and ChatGPT: **your ChatGPT
+  plan** first (Sign in with ChatGPT, provider `chatgpt`, no cost per
+  message), an **OpenAI API key** second (`openai`); its dot is green when
+  either is connected. Nothing connected: a connect card — "Use your ChatGPT
+  plan", **Continue with ChatGPT** (the plan's permission asked again after a
+  decline), then, quieter, **Use an API key instead** (`aria-expanded`)
+  opening the key field (Save key, Get a key ↗) in the same card — and no
+  model list. One way: its models (the plan's, the account's list as it
+  comes; the key's, OpenAI's Latest and More models) and the other way at
+  the bottom: **Use an OpenAI API key instead…** (the key's form, with
+  Cancel) or **Use your ChatGPT plan instead…** (signs in; "Finish signing in
+  in your browser." with Cancel meanwhile). Both: a Segmented **Your plan |
+  API key** ("Connect ChatGPT with") on top, the list below swapping; it
+  starts on the way the model in use (or the scope) goes, else the plan, and
+  a way connected while the picker is open (a key saved, a sign-in finished)
+  is shown at once. The header follows the way shown ("Using ChatGPT plan",
+  or the key's "Connected · checked …" with the key masked and Change key).
+  A model picked from the plan's list sets `chatgpt`, from the key's
+  `openai`, exactly as the two entries did; nothing under it changed
+  (config, Rust, usage, effort). Each row says which way pays in Recent and
+  search ("ChatGPT plan · …", "OpenAI API key · …"); search finds both by
+  "openai", "gpt" or "chatgpt", a group each; a greyed OpenAI model (no key)
+  opens the entry with the key field open. The **pane**: the provider's mark on a
   tile, its name, a status line from the live lists ("Connected · checked
   2 h ago", "Couldn't check: …", "Not set up"), the key masked + Change
   key; the rows are the models Settings lists (`modelCatalog.js`'s merge

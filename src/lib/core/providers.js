@@ -68,7 +68,7 @@ export const PP_PROVIDERS = [
  * state is the provider id (`modeOf`).
  */
 export const PROVIDER_MODES = [
-  { value: 'cloud', label: 'Cloud providers', desc: 'Groq, OpenAI, Anthropic, Gemini or OpenRouter on your own API key, or your ChatGPT plan', kind: 'cloud' },
+  { value: 'cloud', label: 'Cloud providers', desc: 'Your ChatGPT plan, or Groq, OpenAI, Anthropic, Gemini or OpenRouter on your own API key', kind: 'cloud' },
   { value: 'ondevice', label: 'Local', desc: 'A model on this PC. Nothing leaves it', kind: 'local' },
   { value: 'selfhosted', label: 'Self-hosted', desc: 'Your own server, like Ollama or LM Studio', kind: 'server' },
 ];
@@ -78,12 +78,35 @@ export function modeOf(provider) {
   return provider === 'ondevice' ? 'ondevice' : provider === 'local' ? 'selfhosted' : 'cloud';
 }
 
+/**
+ * OpenAI's models, two ways (2026-11-02: one "ChatGPT" entry instead of the
+ * OpenAI and ChatGPT tabs, in Settings and Chat's model picker alike): the
+ * person's ChatGPT plan first (Sign in with ChatGPT, provider "chatgpt"),
+ * then an OpenAI API key ("openai"). UI only: both ids stay what config.json,
+ * Rust, usage and effort know; a scope is always on exactly one of them.
+ */
+export const GPT_TAB = 'gpt';
+export const GPT_PROVIDERS = [CHATGPT, 'openai'];
+/** The Cloud providers tab a saved provider id shows under. */
+export const cloudTabOf = (p) => (GPT_PROVIDERS.includes(p) ? GPT_TAB : p);
+/** The ChatGPT entry's two-way switch, when both are connected. */
+export const GPT_WAYS = [
+  { value: CHATGPT, label: 'Your plan' },
+  { value: 'openai', label: 'API key' },
+];
+/**
+ * The way a scope moving onto the ChatGPT tab takes: the plan when it's
+ * signed in, else an OpenAI key already saved, else the plan (Continue with
+ * ChatGPT first: no cost per message).
+ */
+export const gptWay = (planOn, keyOn) => (planOn || !keyOn ? CHATGPT : 'openai');
+
 /** The Cloud providers mode's tabs, with their marks. */
 export const CLOUD_TABS = [
   { value: 'groq', label: 'Groq', icon: PROVIDER_ICONS.groq },
   { value: 'anthropic', label: 'Anthropic', icon: PROVIDER_ICONS.anthropic, mono: true },
-  { value: 'openai', label: 'OpenAI', icon: PROVIDER_ICONS.openai, mono: true },
-  { value: 'chatgpt', label: 'ChatGPT', icon: PROVIDER_ICONS.openai, mono: true },
+  // The plan or an OpenAI key, inside (ChatGptProvider.svelte).
+  { value: GPT_TAB, label: 'ChatGPT', icon: PROVIDER_ICONS.openai, mono: true },
   { value: 'gemini', label: 'Gemini', icon: PROVIDER_ICONS.gemini },
   { value: 'openrouter', label: 'OpenRouter' },
   { value: 'custom', label: 'Custom' },

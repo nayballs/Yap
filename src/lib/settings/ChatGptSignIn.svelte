@@ -1,13 +1,17 @@
 <script>
-  // Sign in with ChatGPT (ai/chatgpt.rs): the ChatGPT tab's account card in
-  // Settings → Language Models, in place of an API key — every scope's and
-  // Dictation Cleanup's. In OpenAI's words (its UI rules for apps that use
+  // Sign in with ChatGPT (ai/chatgpt.rs): the plan's account card on
+  // Settings → Language Models' ChatGPT tab (ChatGptProvider.svelte, the
+  // first of its two ways; an OpenAI API key is the other) — every scope's
+  // and Dictation Cleanup's. In OpenAI's words (its UI rules for apps that use
   // a person's plan): "Continue with ChatGPT"; once in, "Connected",
   // "Using ChatGPT plan" and "Manage usage"; the one-time "You're using your
   // ChatGPT plan" notice with Got it. Signed in without the plan's
   // permission: turn it on (asked again), or use an API key instead. Sign
   // out revokes it at OpenAI; one OpenAI didn't confirm says where to
   // disconnect Yap in ChatGPT's settings.
+  //
+  //   onstart: Continue with ChatGPT (or Turn on plan usage) was clicked,
+  //            before the browser opens (the tab puts the scope on the plan).
   import { onMount } from 'svelte';
   import Button from '../ui/Button.svelte';
   import ProviderMark from '../views/chat/ProviderMark.svelte';
@@ -21,8 +25,13 @@
     chatgptNoticeSeen,
   } from '../stores/chatgpt.svelte.js';
 
-  let { disabled = false } = $props();
+  let { disabled = false, onstart = null } = $props();
   let busy = $state(false);
+
+  function start(reconsent) {
+    onstart?.();
+    signInChatgpt(reconsent);
+  }
 
   onMount(loadChatgpt);
 
@@ -58,10 +67,10 @@
     <div class="state">
       <div class="words">
         Signed in as <strong>{who}</strong>, but Yap isn't allowed to use your ChatGPT plan.
-        <span class="who">Turn it on, or use an OpenAI API key on the OpenAI tab instead.</span>
+        <span class="who">Turn it on, or use an OpenAI API key instead.</span>
       </div>
       <div class="btns">
-        <Button size="sm" disabled={chatgpt.waiting || disabled} onclick={() => signInChatgpt(true)}>Turn on plan usage</Button>
+        <Button size="sm" disabled={chatgpt.waiting || disabled} onclick={() => start(true)}>Turn on plan usage</Button>
         <Button variant="ghost" size="sm" disabled={busy || disabled} onclick={signOut}>Sign out</Button>
       </div>
     </div>
@@ -75,11 +84,11 @@
     </div>
   {:else}
     <p class="lead">
-      Use the ChatGPT plan you already pay for, instead of an API key. Requests go from this PC straight to OpenAI and
+      Use the ChatGPT plan you already pay for: no cost per message. Requests go from this PC straight to OpenAI and
       count towards your plan's usage.
     </p>
     <div>
-      <Button disabled={disabled || !chatgpt.loaded} onclick={() => signInChatgpt(false)}>
+      <Button disabled={disabled || !chatgpt.loaded} onclick={() => start(false)}>
         <ProviderMark icon="openai" size={15} />
         Continue with ChatGPT
       </Button>
@@ -146,6 +155,11 @@
     outline: none;
     border-radius: 3px;
     box-shadow: var(--yap-focus);
+  }
+  /* OpenAI's mark on Continue with ChatGPT: the button's ink text colour
+     (the mark's own --yap-fg was dark on the dark button). */
+  .gpt :global(.btn .pmark) {
+    color: inherit;
   }
   .lead {
     margin: 0;

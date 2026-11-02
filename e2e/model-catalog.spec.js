@@ -202,7 +202,7 @@ test('a saved model the provider no longer offers says so, and stays selectable'
   await expect(pop).toBeHidden();
 
   // Settings → Chat: the same line, the row kept and selected.
-  const dialog = await languageModels(main, 'Chat');
+  const dialog = await languageModels(main, 'Chat & Voice Assistant');
   const groq = picker(dialog, 'groq');
   await groq.scrollIntoViewIfNeeded();
   await expect(groq.getByRole('alert')).toHaveText('Groq no longer offers GPT-OSS 120B. Pick another model.');

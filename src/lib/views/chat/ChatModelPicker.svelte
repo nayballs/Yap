@@ -21,6 +21,14 @@
   // on-device model is one for every feature, which the pane says when
   // cleanup uses it too.
   //
+  // OpenAI's two ways are one entry, "ChatGPT" (2026-11-02): your ChatGPT
+  // plan first (Sign in with ChatGPT, provider `chatgpt`), an OpenAI API key
+  // second (`openai`). Nothing connected: a connect card (Continue with
+  // ChatGPT; "Use an API key instead" opens the key field). One: its models,
+  // and a link to the other at the bottom. Both: "Your plan | API key" on
+  // top, starting on the way the model in use goes. A model picked from the
+  // plan's list is `chatgpt`, from the key's `openai`, as before.
+  //
   // **Effort** (2026-10-31, as the Claude Code app's model menu has it):
   // under the panes, for the model in use, the levels it takes (Low,
   // Medium, High, Extra, Max: only its own; none for a model with no
@@ -34,14 +42,14 @@
   // Esc closes and gives the focus back to the chip. The window's in-page
   // hotkey fallbacks listen in the capture phase, before any of this.
   import { invoke } from '@tauri-apps/api/core';
-  import { onMount, tick } from 'svelte';
+  import { onMount, tick, untrack } from 'svelte';
   import ProviderMark from './ProviderMark.svelte';
   import LocalContext from '../../components/LocalContext.svelte';
   import Segmented from '../../ui/Segmented.svelte';
   import Toggle from '../../ui/Toggle.svelte';
   import { providerIcon, modelName } from '../../core/aiModel.js';
   import { effortNow, effortOptions, effortHint, FAST_NOTE } from '../../core/effort.js';
-  import { PROVIDER_LABELS } from '../../core/providers.js';
+  import { PROVIDER_LABELS, CHATGPT, GPT_TAB, GPT_WAYS } from '../../core/providers.js';
   import { loadCatalog } from '../../stores/modelCatalog.svelte.js';
   import { forgetVisionTags } from '../../stores/visionTags.svelte.js';
   import { openExternalLink } from '../../core/externalLinks.js';
@@ -50,9 +58,11 @@
   import { openContextMenu, menuKey, menuOpenFor } from '../../ui/contextMenu.svelte.js';
   import { uninstallItems } from '../../core/localModels.js';
   import {
-    CLOUD_PROVIDERS,
+    CLOUD_RAIL,
     cloudInfo,
     isCloud,
+    tabOf,
+    gptState,
     keyUrl,
     fmtSize,
     local,
@@ -87,7 +97,7 @@
   function startTab() {
     const m = status?.ready ? status.model : null;
     const p = m?.provider || status?.provider || '';
-    if (isCloud(p)) return p;
+    if (isCloud(p)) return tabOf(p);
     if (p === 'ondevice') return 'pc';
     if (p === 'local' || p === 'custom') {
       const s = (status?.servers || []).find((x) => x.provider === p && (!m || x.host === status.host));
@@ -96,7 +106,17 @@
     return 'groq';
   }
 
+  // The ChatGPT entry's way when both are connected: the one the model in
+  // use (or the scope) goes through, else the plan.
+  function startWay() {
+    const m = status?.ready ? status.model : null;
+    return (m?.provider || status?.provider) === 'openai' ? 'openai' : CHATGPT;
+  }
+
   let sel = $state(startTab());
+  let gptWay = $state(startWay());
+  // Its OpenAI key field opened ("Use an API key instead", "…an OpenAI API key instead…").
+  let gptKeyOpen = $state(false);
   let q = $state('');
   let busy = $state('');
   let navKey = $state('');
@@ -123,10 +143,10 @@
   // `ready` draws the dot (green, or hollow); `state` says it in words.
   const tabs = $derived([
     { id: 'recent', label: 'Recent', glyph: 'recent' },
-    ...CLOUD_PROVIDERS.map((p) => {
-      const ready = !!status?.keyed?.includes(p.id);
-      const off = p.id === 'chatgpt' ? 'not signed in' : 'not set up';
-      return { id: p.id, label: p.short, icon: providerIcon(p.id), ready, state: ready ? 'connected' : off, sepBefore: p.id === 'groq' };
+    // ChatGPT's dot: green when either way (the plan, an OpenAI key) is connected.
+    ...CLOUD_RAIL.map((t) => {
+      const ready = t.providers.some((p) => status?.keyed?.includes(p));
+      return { id: t.id, label: t.label, icon: providerIcon(t.providers[0]), ready, state: ready ? 'connected' : 'not set up', sepBefore: t.id === 'groq' };
     }),
     ...(remote.length ? [{ id: 'custom', label: 'Custom', glyph: 'server', ready: true, state: 'set up' }] : []),
     { id: 'pc', label: 'On this PC', glyph: 'pc', ready: pcReady, state: pcReady ? 'ready' : 'nothing installed yet', sepBefore: true },
@@ -137,10 +157,16 @@
     if (sel === 'recent') return { kind: 'recent', rows: recentRows(status) };
     if (sel === 'pc') return { kind: 'pc', ...localRows(status), servers: servers.filter((s) => s.onThisPc) };
     if (sel === 'custom') return { kind: 'custom', servers: remote };
+    if (sel === GPT_TAB) {
+      const g = gptState(status, gptWay);
+      return { kind: 'gpt', ...g, list: g.shown ? { provider: g.shown, ...cloudRows(g.shown, status) } : null };
+    }
     return { kind: 'cloud', provider: sel, ...cloudRows(sel, status) };
   });
-  // The selected provider's More models: open or not.
-  const moreOpen = $derived(view.kind === 'cloud' && view.older.length > 0 && moreIsOpen(view.provider, view.older));
+  // The cloud models on show: a provider's, or the ChatGPT entry's way's.
+  const list = $derived(view.kind === 'cloud' ? view : view.kind === 'gpt' ? view.list : null);
+  // Their More models: open or not.
+  const moreOpen = $derived(!!list && list.older.length > 0 && moreIsOpen(list.provider, list.older));
   const firstPick = $derived(
     view.kind === 'search' ? view.groups.flatMap((g) => g.rows).find((r) => r.action === 'pick') : null
   );
@@ -200,9 +226,35 @@
     q = '';
     sel = id;
     changingKey = '';
+    gptKeyOpen = false;
     keyError = '';
     keyDraft = '';
     if (focus) tick().then(() => focusTab(id));
+  }
+
+  // A way connected while the picker is open (a key saved here, a sign-in
+  // finished in the browser): the ChatGPT entry shows that one.
+  let wasOn = untrack(() => gptState(status, CHATGPT));
+  $effect(() => {
+    const now = gptState(status, CHATGPT);
+    if (now.planOn && !wasOn.planOn) gptWay = CHATGPT;
+    else if (now.keyOn && !wasOn.keyOn) gptWay = 'openai';
+    wasOn = now;
+  });
+
+  /** The ChatGPT entry's OpenAI key field, opened (focused) or closed. */
+  async function openGptKey(open = true) {
+    gptKeyOpen = open;
+    keyError = '';
+    if (open) {
+      await tick();
+      keyEl?.focus();
+    }
+  }
+
+  /** Continue with ChatGPT (the plan's permission asked again after a decline). */
+  function signInPlan() {
+    signInChatgpt(chatgpt.signedIn && !chatgpt.plan);
   }
 
   function onRailKey(e) {
@@ -285,7 +337,9 @@
   async function activate(row) {
     if (busy || !row) return;
     if (row.action === 'key') {
-      selectTab(row.provider);
+      selectTab(tabOf(row.provider));
+      // An OpenAI model: the ChatGPT entry, its key field open.
+      if (row.provider === 'openai') gptKeyOpen = true;
       await tick();
       keyEl?.focus();
       return;
@@ -368,6 +422,7 @@
       window.dispatchEvent(new CustomEvent('yap-provider-key-saved', { detail: { provider: p, key } }));
       keyDraft = '';
       changingKey = '';
+      gptKeyOpen = false;
       onstatus(s);
       loadCatalog();
       await tick();
@@ -512,7 +567,7 @@
   {/if}
 {/snippet}
 
-{#snippet head(icon, glyph, title, lines, extra)}
+{#snippet head(icon, glyph, title, lines, extra, arg)}
   <div class="phead">
     <ProviderMark {icon} {glyph} size={30} tile />
     <div class="ptext">
@@ -521,60 +576,165 @@
         <div class="psub" class:warn={l.warn}>{l.text}</div>
       {/each}
     </div>
-    {#if extra}{@render extra()}{/if}
+    {#if extra}{@render extra(arg)}{/if}
   </div>
+{/snippet}
+
+{#snippet keyFields(p, oncancel)}
+  {@const info = cloudInfo(p)}
+  <div class="crow">
+    <input
+      bind:this={keyEl}
+      bind:value={keyDraft}
+      type="password"
+      autocomplete="off"
+      spellcheck="false"
+      placeholder="{info.name} API key"
+      aria-label="{info.name} API key"
+      aria-invalid={!!keyError}
+    />
+    <button class="btn ink" type="submit" disabled={!keyDraft.trim() || keySaving}>{keySaving ? 'Saving…' : 'Save key'}</button>
+    <button class="btn" type="button" onclick={() => openExternalLink(keyUrl(p))}>Get a key ↗</button>
+    {#if oncancel}<button class="btn" type="button" onclick={oncancel}>Cancel</button>{/if}
+  </div>
+  {#if keyError}<p class="cerr" role="alert">{keyError}</p>{/if}
+  <p class="cnote">Stored only on this PC, like the keys in Settings.</p>
 {/snippet}
 
 {#snippet connect(p, replacing)}
   {@const info = cloudInfo(p)}
-  {#if p === 'chatgpt'}
-    <!-- Sign in with ChatGPT: the person's plan, never a key (OpenAI's words). -->
-    <div class="connect">
-      <div>
-        <div class="ctitle">Use your ChatGPT plan</div>
-        <div class="cdesc">
-          {chatgpt.waiting
-            ? 'Finish signing in in your browser.'
-            : 'Sign in with the ChatGPT account you already pay for. Requests go from this PC to OpenAI and count towards your plan.'}
-        </div>
-      </div>
-      <div class="crow">
-        {#if chatgpt.waiting}
-          <button class="btn" type="button" onclick={cancelChatgpt}>Cancel</button>
-        {:else}
-          <button class="btn ink" type="button" onclick={() => signInChatgpt(chatgpt.signedIn && !chatgpt.plan)}>Continue with ChatGPT</button>
-        {/if}
-      </div>
-      {#if chatgpt.failed || chatgpt.error}<p class="cerr" role="alert">{chatgpt.failed || chatgpt.error}</p>{/if}
-    </div>
-  {:else}
   <form class="connect" onsubmit={(e) => (e.preventDefault(), saveKey(p))}>
     <div>
-      <div class="ctitle">{replacing ? `Replace the ${info.short} key` : `Connect ${info.short}`}</div>
+      <div class="ctitle">{replacing ? `Replace the ${info.short} key` : p === 'openai' ? 'Use an OpenAI API key' : `Connect ${info.short}`}</div>
       <div class="cdesc">
         {replacing
           ? `Paste a new ${info.name} API key. Yap checks its models with it straight away.`
-          : `Paste an ${info.name} API key. Yap fetches the current models straight away.`}
+          : p === 'openai'
+            ? 'Pay per message on your OpenAI account. Yap fetches the current models straight away.'
+            : `Paste an ${info.name} API key. Yap fetches the current models straight away.`}
+      </div>
+    </div>
+    {@render keyFields(p, replacing ? () => (changingKey = '') : p === 'openai' ? () => openGptKey(false) : null)}
+  </form>
+{/snippet}
+
+<!-- The ChatGPT entry with nothing connected: the plan first (OpenAI's
+     words: "Continue with ChatGPT"), an OpenAI API key quieter under it. -->
+{#snippet gptConnect()}
+  <div class="connect" data-testid="gpt-connect">
+    <div>
+      <div class="ctitle">Use your ChatGPT plan</div>
+      <div class="cdesc">
+        {chatgpt.waiting
+          ? 'Finish signing in in your browser.'
+          : 'Sign in with the ChatGPT account you already pay for: no cost per message. Requests go from this PC to OpenAI and count towards your plan.'}
       </div>
     </div>
     <div class="crow">
-      <input
-        bind:this={keyEl}
-        bind:value={keyDraft}
-        type="password"
-        autocomplete="off"
-        spellcheck="false"
-        placeholder="{info.name} API key"
-        aria-label="{info.name} API key"
-        aria-invalid={!!keyError}
-      />
-      <button class="btn ink" type="submit" disabled={!keyDraft.trim() || keySaving}>{keySaving ? 'Saving…' : 'Save key'}</button>
-      <button class="btn" type="button" onclick={() => openExternalLink(keyUrl(p))}>Get a key ↗</button>
-      {#if replacing}<button class="btn" type="button" onclick={() => (changingKey = '')}>Cancel</button>{/if}
+      {#if chatgpt.waiting}
+        <button class="btn" type="button" onclick={cancelChatgpt}>Cancel</button>
+      {:else}
+        <button class="btn ink" type="button" onclick={signInPlan}><ProviderMark icon="openai" size={14} />Continue with ChatGPT</button>
+      {/if}
     </div>
-    {#if keyError}<p class="cerr" role="alert">{keyError}</p>{/if}
-    <p class="cnote">Stored only on this PC, like the keys in Settings.</p>
-  </form>
+    {#if chatgpt.failed || chatgpt.error}<p class="cerr" role="alert">{chatgpt.failed || chatgpt.error}</p>{/if}
+    <div class="orkey">
+      <button
+        class="keytoggle"
+        type="button"
+        aria-expanded={gptKeyOpen}
+        aria-controls={gptKeyOpen ? 'chat-model-gpt-key' : undefined}
+        onclick={() => openGptKey(!gptKeyOpen)}
+      >
+        <span class="chev" class:open={gptKeyOpen} aria-hidden="true">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 6 6 6-6 6" /></svg>
+        </span>
+        Use an API key instead
+      </button>
+      {#if gptKeyOpen}
+        <form class="keyform" id="chat-model-gpt-key" onsubmit={(e) => (e.preventDefault(), saveKey('openai'))}>
+          <div class="cdesc">An OpenAI API key: you pay per message on your OpenAI account.</div>
+          {@render keyFields('openai', null)}
+        </form>
+      {/if}
+    </div>
+  </div>
+{/snippet}
+
+<!-- The ChatGPT entry's other way, under its models (one way connected). -->
+{#snippet gptOther(view)}
+  {#if view.shown === CHATGPT}
+    {#if gptKeyOpen}
+      {@render connect('openai', false)}
+    {:else}
+      <button class="waylink" data-nav="gpt-other" onfocus={() => (navKey = 'gpt-other')} onclick={() => openGptKey(true)}>Use an OpenAI API key instead…</button>
+    {/if}
+  {:else if chatgpt.waiting}
+    <p class="waywait" role="status">
+      Finish signing in in your browser.
+      <button class="linkbtn" type="button" onclick={cancelChatgpt}>Cancel</button>
+    </p>
+  {:else}
+    <button class="waylink" data-nav="gpt-other" onfocus={() => (navKey = 'gpt-other')} onclick={signInPlan}>Use your ChatGPT plan instead…</button>
+  {/if}
+  {#if view.shown === 'openai' && (chatgpt.failed || chatgpt.error)}<p class="cerr wayerr" role="alert">{chatgpt.failed || chatgpt.error}</p>{/if}
+{/snippet}
+
+<!-- A cloud provider's models: Latest (the newest of each family), then
+     More models (N), the older ones in place below it. -->
+{#snippet models(list)}
+  {@const info = cloudInfo(list.provider)}
+  {#if list.missing && [...list.latest, ...list.older].some((r) => r.current && r.model === list.missing.value)}
+    <p class="note warn" role="alert">{PROVIDER_LABELS[list.provider]} no longer offers {list.missing.label}. Pick another model.</p>
+  {/if}
+  {#if list.split}
+    <!-- The newest of each family (core/latestModels.js). -->
+    <div class="group" role="group" aria-label="Latest">
+      <div class="gh">Latest</div>
+      {#each list.latest as r (r.key)}{@render row(r)}{/each}
+    </div>
+  {:else}
+    {#each list.latest as r (r.key)}{@render row(r)}{/each}
+  {/if}
+  {#if list.older.length > 0}
+    <!-- The older ones, in place below: open or closed as left while
+         Yap runs, else open when the model in use is one of them. -->
+    <button
+      class="morerow"
+      data-nav="more:{list.provider}"
+      aria-expanded={moreOpen}
+      aria-controls={moreOpen ? `chat-model-more-${list.provider}` : undefined}
+      onfocus={() => (navKey = `more:${list.provider}`)}
+      onclick={() => setMoreOpen(list.provider, !moreOpen)}
+    >
+      <!-- The chevron where a row has its mark, the words where its name is. -->
+      <span class="chk" aria-hidden="true"></span>
+      <span class="chev" class:open={moreOpen} aria-hidden="true">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 6 6 6-6 6" /></svg>
+      </span>
+      <span class="txt"><span class="mlabel">More models <span class="count">({list.older.length})</span></span></span>
+    </button>
+    {#if moreOpen}
+      <div class="group" role="group" id="chat-model-more-{list.provider}" aria-label="More {info.short} models">
+        {#each list.older as r (r.key)}{@render row(r)}{/each}
+      </div>
+    {:else}
+      <!-- Closed by hand: the model in use still on show, under it
+           (never moved above it: More models stays put). -->
+      {#each list.older.filter((r) => r.current) as r (r.key)}{@render row(r)}{/each}
+    {/if}
+  {/if}
+{/snippet}
+
+<!-- A connected provider's key, masked, with Change key (the pane's head). -->
+{#snippet keySide(p)}
+  {#if status?.keyed?.includes(p) && status?.maskedKeys?.[p]}
+    <div class="keyside">
+      <span class="keymask" title="The API key Yap uses">{status.maskedKeys[p]}</span>
+      {#if changingKey !== p}
+        <button class="linkbtn" onclick={() => ((changingKey = p), tick().then(() => keyEl?.focus()))}>Change key</button>
+      {/if}
+    </div>
   {/if}
 {/snippet}
 
@@ -666,61 +826,32 @@
         {/each}
       {:else if view.kind === 'cloud'}
         {@const info = cloudInfo(view.provider)}
-        {@const line = providerLine(view.provider, status)}
-        {#snippet keyExtra()}
-          {#if view.connected && status?.maskedKeys?.[view.provider]}
-            <div class="keyside">
-              <span class="keymask" title="The API key Yap uses">{status.maskedKeys[view.provider]}</span>
-              {#if changingKey !== view.provider}
-                <button class="linkbtn" onclick={() => ((changingKey = view.provider), tick().then(() => keyEl?.focus()))}>Change key</button>
-              {/if}
-            </div>
-          {/if}
-        {/snippet}
-        {@render head(providerIcon(view.provider), 'spark', info.name, [line], keyExtra)}
+        {@render head(providerIcon(view.provider), 'spark', info.name, [providerLine(view.provider, status)], keySide, view.provider)}
         {#if !view.connected}
           {@render connect(view.provider, false)}
         {:else if changingKey === view.provider}
           {@render connect(view.provider, true)}
         {/if}
-        {#if view.missing && [...view.latest, ...view.older].some((r) => r.current && r.model === view.missing.value)}
-          <p class="note warn" role="alert">{PROVIDER_LABELS[view.provider]} no longer offers {view.missing.label}. Pick another model.</p>
-        {/if}
-        {#if view.split}
-          <!-- The newest of each family (core/latestModels.js). -->
-          <div class="group" role="group" aria-label="Latest">
-            <div class="gh">Latest</div>
-            {#each view.latest as r (r.key)}{@render row(r)}{/each}
+        {@render models(view)}
+      {:else if view.kind === 'gpt'}
+        <!-- ChatGPT: the plan or an OpenAI API key (gptState). -->
+        {@const w = view.shown}
+        {@render head('openai', 'spark', 'ChatGPT', [w ? providerLine(w, status) : { text: 'Not set up' }], w === 'openai' ? keySide : null, 'openai')}
+        {#if view.planOn && view.keyOn}
+          <!-- Both connected: which list shows (the model picked says which pays). -->
+          <div class="ways" data-testid="gpt-ways">
+            <Segmented bind:value={() => w, (v) => ((gptWay = v), (changingKey = ''))} options={GPT_WAYS} label="Connect ChatGPT with" />
           </div>
-        {:else}
-          {#each view.latest as r (r.key)}{@render row(r)}{/each}
         {/if}
-        {#if view.older.length > 0}
-          <!-- The older ones, in place below: open or closed as left while
-               Yap runs, else open when the model in use is one of them. -->
-          <button
-            class="morerow"
-            data-nav="more:{view.provider}"
-            aria-expanded={moreOpen}
-            aria-controls={moreOpen ? `chat-model-more-${view.provider}` : undefined}
-            onfocus={() => (navKey = `more:${view.provider}`)}
-            onclick={() => setMoreOpen(view.provider, !moreOpen)}
-          >
-            <!-- The chevron where a row has its mark, the words where its name is. -->
-            <span class="chk" aria-hidden="true"></span>
-            <span class="chev" class:open={moreOpen} aria-hidden="true">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 6 6 6-6 6" /></svg>
-            </span>
-            <span class="txt"><span class="mlabel">More models <span class="count">({view.older.length})</span></span></span>
-          </button>
-          {#if moreOpen}
-            <div class="group" role="group" id="chat-model-more-{view.provider}" aria-label="More {info.short} models">
-              {#each view.older as r (r.key)}{@render row(r)}{/each}
-            </div>
-          {:else}
-            <!-- Closed by hand: the model in use still on show, under it
-                 (never moved above it: More models stays put). -->
-            {#each view.older.filter((r) => r.current) as r (r.key)}{@render row(r)}{/each}
+        {#if !w}
+          {@render gptConnect()}
+        {:else}
+          {#if w === 'openai' && changingKey === 'openai'}
+            {@render connect('openai', true)}
+          {/if}
+          {@render models(view.list)}
+          {#if !(view.planOn && view.keyOn)}
+            {@render gptOther(view)}
           {/if}
         {/if}
       {:else if view.kind === 'custom'}
@@ -1387,6 +1518,83 @@
     font-size: 12px;
   }
 
+  /* ChatGPT: the switch between its two ways, the key way under the plan's
+     button (quieter), and the other way's link under its models. */
+  .ways {
+    display: flex;
+    padding: 0 10px 6px;
+  }
+  .orkey {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    padding-top: 10px;
+    border-top: 1px solid var(--yap-border-subtle);
+  }
+  .keytoggle {
+    display: inline-flex;
+    align-items: center;
+    gap: 2px;
+    align-self: flex-start;
+    margin-left: -4px;
+    padding: 2px 6px 2px 2px;
+    border: 0;
+    border-radius: 6px;
+    background: none;
+    color: var(--yap-muted);
+    font: inherit;
+    font-size: 12.5px;
+    font-weight: 500;
+    cursor: pointer;
+  }
+  .keytoggle:hover {
+    color: var(--yap-fg);
+  }
+  .keytoggle .chev {
+    width: 16px;
+    height: 16px;
+  }
+  .keytoggle .chev svg {
+    width: 13px;
+    height: 13px;
+  }
+  .keyform {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+  .btn.ink :global(.pmark) {
+    color: inherit;
+  }
+  .waylink {
+    align-self: flex-start;
+    margin: 6px 0 0;
+    padding: 6px 10px;
+    border: 0;
+    border-radius: 9px;
+    background: none;
+    color: var(--yap-primary);
+    font: inherit;
+    font-size: 12.5px;
+    font-weight: 500;
+    cursor: pointer;
+  }
+  .waylink:hover {
+    background: var(--yap-s3);
+    text-decoration: underline;
+  }
+  .waywait {
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
+    margin: 6px 10px 0;
+    color: var(--yap-muted);
+    font-size: 12px;
+  }
+  .wayerr {
+    margin: 2px 10px 0;
+  }
+
   /* buttons */
   .btn {
     display: inline-flex;
@@ -1496,6 +1704,8 @@
   .btn:focus-visible,
   .linkbtn:focus-visible,
   .footlink:focus-visible,
+  .keytoggle:focus-visible,
+  .waylink:focus-visible,
   .prog:focus-visible {
     outline: 2px solid var(--yap-primary);
     outline-offset: 1px;

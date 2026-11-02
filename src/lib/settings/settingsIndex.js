@@ -192,7 +192,7 @@ export const SETTINGS_INDEX = [
   { page: 'models', section: 'Performance', label: 'Unload model when idle', desc: 'Free memory when not dictating', keywords: 'memory ram idle unload performance', anchor: 'unload' },
 
   // ---- Language Models ----
-  { page: 'cleanup', scope: 'cleanup', section: 'Dictation cleanup', label: 'AI cleanup', desc: 'Remove filler words, fix grammar and punctuation', keywords: 'ai cleanup text cleanup grammar filler polish groq openai anthropic gemini api key model local on-device', anchor: 'cleanup-enable', toggle: 'postProcessEnabled' },
+  { page: 'cleanup', scope: 'cleanup', section: 'Dictation cleanup', label: 'AI cleanup', desc: 'Remove filler words, fix grammar and punctuation', keywords: 'ai cleanup text cleanup grammar filler polish groq openai chatgpt plan anthropic gemini api key model local on-device', anchor: 'cleanup-enable', toggle: 'postProcessEnabled' },
   { page: 'cleanup', scope: 'cleanup', section: 'Dictation cleanup', label: 'Strength', desc: 'None, Light, Medium or High: how much cleanup changes', keywords: 'strength level how much light medium high none rephrase tighten concise shorter clearer filler punctuation words lists formatting', anchor: 'cleanup-strength' },
   { page: 'cleanup', scope: 'cleanup', section: 'Dictation cleanup', label: 'Smart routing', desc: 'A cleanup style per app, with cleanup on', keywords: 'profiles app rules routing per app', anchor: 'cleanup-enable' },
   { page: 'cleanup', scope: 'cleanup', section: 'Dictation cleanup', label: "Write in my region's spelling", desc: 'British, American or Canadian spelling', keywords: 'spelling british american english colour color', anchor: 'cleanup-spelling' },
@@ -204,7 +204,7 @@ export const SETTINGS_INDEX = [
   { page: 'cleanup', scope: 'cleanup', section: 'Dictation cleanup', label: 'Prompt Studio', desc: 'View, customise and test the cleanup prompt, with cleanup on', keywords: 'prompt system prompt presets custom email notes slack code', anchor: 'prompt-studio', fallback: 'cleanup-enable' },
   { page: 'cleanup', scope: 'voiceAgent', section: 'Commands', label: 'Commands model', desc: 'The model that carries out Commands', keywords: 'commands agent model prompt', anchor: 'scope-model' },
   { page: 'cleanup', scope: 'noteFormatting', section: 'Note Formatting', label: 'Note formatting model', desc: 'Meeting summaries and note actions', keywords: 'notes meeting summary action plan model', anchor: 'scope-model' },
-  { page: 'cleanup', scope: 'chat', section: 'Chat & Voice Assistant', label: 'Chat model', desc: 'The model that answers in Chat and out loud', keywords: 'chat assistant model answers', anchor: 'scope-model' },
+  { page: 'cleanup', scope: 'chat', section: 'Chat & Voice Assistant', label: 'Chat model', desc: 'The model that answers in Chat and out loud', keywords: 'chat assistant model answers chatgpt plan openai gpt api key claude gemini groq', anchor: 'scope-model' },
   { page: 'cleanup', scope: 'chat', section: 'Chat & Voice Assistant', label: 'Effort', desc: 'How hard the Chat model thinks before it answers', keywords: 'effort thinking think reasoning reason extra max low medium high', anchor: 'scope-effort', fallback: 'scope-model' },
 
   // ---- Connectors ----

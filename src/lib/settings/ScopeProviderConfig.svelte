@@ -8,7 +8,7 @@
   import PillTabs from '../ui/PillTabs.svelte';
   import ModelPicker from './ModelPicker.svelte';
   import EndpointModels from './EndpointModels.svelte';
-  import ChatGptSignIn from './ChatGptSignIn.svelte';
+  import ChatGptProvider from './ChatGptProvider.svelte';
   import Input from '../ui/Input.svelte';
   import Toggle from '../ui/Toggle.svelte';
   import Row from '../ui/Row.svelte';
@@ -20,11 +20,16 @@
     CLOUD_PROVIDER_IDS as CLOUD_IDS,
     BASE_URLS,
     MODEL_HINTS,
+    CHATGPT_PLAN_KEY,
+    GPT_TAB,
+    cloudTabOf,
+    gptWay,
     isKeyed,
     modeOf,
     maskKey,
     sharedKey as storeKey,
   } from '../core/providers.js';
+  import { chatgpt } from '../stores/chatgpt.svelte.js';
   import { createExternalLinkHandler } from '../core/externalLinks.js';
   import { untrack } from 'svelte';
 
@@ -103,6 +108,14 @@
     }
   }
 
+  // The ChatGPT tab (ChatGptProvider.svelte): the plan or an OpenAI key, one
+  // tab; clicked, the plan when it's signed in, else a saved key, else the plan.
+  function onCloudTab(v) {
+    if (v !== GPT_TAB) return onCloudProviderChange(v);
+    const planOn = chatgpt.loaded ? chatgpt.plan : sharedKey('chatgpt') === CHATGPT_PLAN_KEY;
+    onCloudProviderChange(gptWay(planOn, !!sharedKey('openai')));
+  }
+
   const maskedKey = $derived(maskKey(scope.apiKey));
   // Show the "Disable thinking output" toggle only for reasoning models (or a
   // custom/self-hosted endpoint where the model is unknown).
@@ -131,7 +144,7 @@
 
   {#if mode === 'cloud'}
     <div class="cloudcfg">
-      <PillTabs value={cloudProvider} options={CLOUD_TABS} onchange={onCloudProviderChange} />
+      <PillTabs value={cloudTabOf(cloudProvider)} options={CLOUD_TABS} onchange={onCloudTab} />
 
       {#if cloudProvider === 'custom'}
         <div class="panelcard">
@@ -152,11 +165,20 @@
           </Row>
           <EndpointModels id="scope-custom-models-{scopeKey}" provider="custom" scope={scopeKey} baseUrl={scope.baseUrl} model={scope.model} />
         </div>
-      {:else if cloudProvider === 'chatgpt'}
-        <!-- Sign in with ChatGPT: the person's plan, never a key. -->
-        <ChatGptSignIn {disabled} />
-        <h4 class="selhead">Model</h4>
-        <ModelPicker provider="chatgpt" bind:value={scope.model} {disabled} images={scopeKey === 'chat'} />
+      {:else if cloudTabOf(cloudProvider) === GPT_TAB}
+        <!-- ChatGPT: the person's plan first, or an OpenAI API key. -->
+        <ChatGptProvider
+          provider={cloudProvider}
+          onprovider={onCloudProviderChange}
+          bind:apiKey={scope.apiKey}
+          onkeyinput={stashApiKey}
+          openaiKey={sharedKey('openai')}
+          planKey={sharedKey('chatgpt')}
+          bind:model={scope.model}
+          bind:keyEditing
+          {disabled}
+          images={scopeKey === 'chat'}
+        />
       {:else}
         <div class="keyhead">
           <h4>API key</h4>
