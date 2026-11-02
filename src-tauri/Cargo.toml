@@ -50,7 +50,7 @@ once_cell = "1"
 # 0.14 and once_cell already in the tree (with ahash, its hasher; 0.18
 # measured the same and pulls a fourth hashbrown); lingua was +145 MB for the
 # same languages.
-whatlang = "0.16"
+whatlang = "0.18"
 
 # Audio capture + sound cue
 cpal = "0.15"
