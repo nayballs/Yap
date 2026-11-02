@@ -34,6 +34,9 @@ const test = base.extend({
     { scope: 'worker' },
   ],
 });
+// The notice comes as Yap starts: on a slow PC it's up before the test, so
+// the reset mustn't close it (support/fixtures.js `keepToasts`).
+test.use({ keepToasts: true });
 
 const raw = (yap, file) => fs.readFileSync(path.join(yap.dataDir, file), 'utf8');
 const toastsWith = (main, title) => main.getByRole('status').filter({ hasText: title });

@@ -19,6 +19,10 @@ export { expect };
 export const test = base.extend({
   // { name, config, env } for launchYap. Specs override it with test.extend.
   yapOptions: [{ name: 'app' }, { scope: 'worker', option: true }],
+  // The toasts up when a test starts are closed first (`resetUi`); a spec
+  // whose first test checks a notice Yap shows as it starts keeps them
+  // (`test.use({ keepToasts: true })`: on a slow PC it's up before the reset).
+  keepToasts: [false, { option: true }],
 
   yap: [
     async ({ yapOptions }, use, workerInfo) => {
@@ -32,7 +36,7 @@ export const test = base.extend({
     { scope: 'worker', timeout: 90_000 },
   ],
 
-  main: async ({ yap }, use, testInfo) => {
+  main: async ({ yap, keepToasts }, use, testInfo) => {
     const context = yap.browser.contexts()[0];
     const tracing = await context.tracing
       .start({ title: testInfo.title, screenshots: true, snapshots: true })
@@ -44,7 +48,7 @@ export const test = base.extend({
     // while it's on screen (notices/notice.rs; a test that wants them in another
     // app calls `inAnotherApp`).
     await yap.invoke('e2e_notice_reset').catch(() => {});
-    await resetUi(yap.main);
+    await resetUi(yap.main, { keepToasts });
 
     await use(yap.main);
 
@@ -212,14 +216,14 @@ export function importDialog(main) {
 }
 
 /** Back to a known state between tests: no dialog or toasts, Settings closed, Home showing. */
-export async function resetUi(main) {
+export async function resetUi(main, { keepToasts = false } = {}) {
   for (const dialog of [connectDialog(main), importDialog(main)]) {
     if (await dialog.isVisible()) {
       await dialog.getByRole('button', { name: 'Close', exact: true }).click();
       await expect(dialog).toBeHidden();
     }
   }
-  await closeToasts(main);
+  if (!keepToasts) await closeToasts(main);
   await closeSettings(main);
   await openView(main, 'Home');
 }
