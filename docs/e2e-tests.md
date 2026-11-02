@@ -147,9 +147,10 @@ each run):
 
 `.github/workflows/e2e.yml` runs the suite on every push and PR to `main`, and
 on demand (`gh workflow run e2e.yml --repo nayballs/Yap`). It builds the test
-app and runs the suite in two shards side by side (`--shard=n/2`, by spec file),
-each uploading its `test-results/app` as **`e2e-results-1`** / **`e2e-results-2`**
-on every run, pass or fail (one runner outgrew the 30-minute limit on 24 Oct 2026).
+app and runs the suite in three shards side by side (`--shard=n/3`, by spec file),
+each uploading its `test-results/app` as **`e2e-results-1`** … **`e2e-results-3`**
+on every run, pass or fail (one runner outgrew the 30-minute limit on 24 Oct 2026,
+one of two the 40-minute one on 2 Nov).
 The runner has no audio devices, so the run also proves Yap starts and works
 without a microphone (the stub dictation test is skipped there), and its
 screen is 1024×768, so CI screenshots are a little smaller than local ones.

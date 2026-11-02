@@ -6,9 +6,10 @@
 #   gh run download <run-id> --repo nayballs/Yap --name e2e-results-1
 # Separate from ci.yml so that quick lint gate stays quick. The runner has no
 # audio devices, so this also proves Yap starts and works without a mic.
-# Two shards side by side (by spec file: each file's worker-scoped Yap stays
+# Three shards side by side (by spec file: each file's worker-scoped Yap stays
 # whole): the whole suite on one runner outgrew the 30-minute limit and was
-# cancelled mid-run (24 Oct 2026, ~26 min of tests after a 4-minute build).
+# cancelled mid-run (24 Oct 2026, ~26 min of tests after a 4-minute build),
+# and one of two outgrew the 40-minute one (2 Nov 2026, 34.5 min of tests).
 name: "E2E"
 
 on:
@@ -25,13 +26,13 @@ concurrency:
 
 jobs:
   e2e:
-    name: e2e (${{ matrix.shard }}/2)
+    name: e2e (${{ matrix.shard }}/3)
     runs-on: windows-latest
     timeout-minutes: 40
     strategy:
       fail-fast: false
       matrix:
-        shard: [1, 2]
+        shard: [1, 2, 3]
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -78,7 +79,7 @@ jobs:
           Set-ItemProperty -Path $key -Name 'yap.exe' -Value '--remote-debugging-port=0'
 
       - name: Run the e2e suite (this shard)
-        run: npx playwright test -c e2e --shard=${{ matrix.shard }}/2
+        run: npx playwright test -c e2e --shard=${{ matrix.shard }}/3
 
       - name: Upload screenshots, report and app logs
         if: always()
