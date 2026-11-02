@@ -75,7 +75,7 @@ toml_edit = "0.25"
 chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
 
 # Yap accounts (auth.rs): base64/url decode the browser handoff code.
-base64 = "0.22"
+base64 = "0.23"
 url = "2"
 # Sign in with your phone (auth.rs): the QR code, made locally. The encoder
 # alone (no image/SVG renderers, no dependencies); the Account page draws it.
