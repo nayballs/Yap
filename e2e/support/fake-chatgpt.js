@@ -7,7 +7,10 @@
 //   an issued client id back; the PKCE verifier against the challenge, the
 //   redirect address, the resource; an RS256 ID token signed with a key it
 //   publishes (its nonce, the issued client as audience); refresh tokens
-//   that rotate (a reused one is refused); revocation;
+//   that rotate (a reused one is refused); revocation; with
+//   `refuseNewRegistrationCodes(true)`, a new registration's code refused
+//   with `invalid_grant`, as OpenAI did on the first real sign-in (2 Nov
+//   2026), while a sign-in with the issued id goes through;
 // - inference: a bearer token it issued; `store: false` and `stream: true`
 //   on every request, none of the fields the flow refuses, Yap's tools in
 //   one `yap` namespace; answers as server-sent events ending in
@@ -31,7 +34,8 @@ export async function startFakeChatGpt({ email = 'sam@example.com', name = 'Sam 
   const jwk = { ...publicKey.export({ format: 'jwk' }), kid: 'e2e-key', use: 'sig', alg: 'RS256' };
   const issued = 'oaiapp_e2e_yap';
   const sub = 'user-e2e-1';
-  const codes = new Map(); // code → { challenge, redirectUri, nonce }
+  const codes = new Map(); // code → { challenge, redirectUri, nonce, fresh }
+  let refuseNew = false;
   const access = new Set();
   const refresh = new Set();
   const spent = new Set();
@@ -68,6 +72,7 @@ export async function startFakeChatGpt({ email = 'sam@example.com', name = 'Sam 
     if (p.grant_type === 'authorization_code') {
       const grant = codes.get(p.code);
       codes.delete(p.code);
+      if (grant?.fresh && refuseNew) return json(res, 400, { error: 'invalid_grant' });
       const challenge = p.code_verifier ? b64url(crypto.createHash('sha256').update(p.code_verifier).digest()) : '';
       if (!grant || grant.challenge !== challenge || grant.redirectUri !== p.redirect_uri) return json(res, 400, { error: 'invalid_grant' });
       return tokens(res, grant.nonce);
@@ -175,7 +180,7 @@ export async function startFakeChatGpt({ email = 'sam@example.com', name = 'Sam 
     const q = new URL(authUrl).searchParams;
     registrations.push(Object.fromEntries(q));
     const code = `e2e-code-${crypto.randomBytes(6).toString('hex')}`;
-    codes.set(code, { challenge: q.get('code_challenge'), redirectUri: q.get('redirect_uri'), nonce: q.get('nonce') });
+    codes.set(code, { challenge: q.get('code_challenge'), redirectUri: q.get('redirect_uri'), nonce: q.get('nonce'), fresh: q.get('client_id') === 'dynamic_agent_client' });
     const back = new URL(q.get('redirect_uri'));
     back.searchParams.set('code', code);
     back.searchParams.set('state', q.get('state'));
@@ -198,6 +203,9 @@ export async function startFakeChatGpt({ email = 'sam@example.com', name = 'Sam 
     issued,
     approve,
     deny,
+    refuseNewRegistrationCodes: (on) => {
+      refuseNew = on;
+    },
     registrations,
     revoked,
     responses,

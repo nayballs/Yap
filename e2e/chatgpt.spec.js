@@ -83,8 +83,12 @@ test('Continue with ChatGPT: declined, then signed in on the plan, its models li
   await expect(card).toContainText("You didn't allow Yap to use ChatGPT.");
 
   // Allowed: a new registration, PKCE, the loopback listener at /auth/callback.
+  // OpenAI refuses that first code (`invalid_grant`, as on the first real
+  // sign-in, 2 Nov 2026): Yap authorizes again once, with its issued id.
+  gpt.refuseNewRegistrationCodes(true);
   await card.getByRole('button', { name: 'Continue with ChatGPT' }).click();
   const authUrl = (await opened(yap)).at(-1);
+  const tabs = (await opened(yap)).length;
   expect(authUrl.startsWith(`${gpt.base}/api/accounts/authorize`)).toBe(true);
   const q = new URL(authUrl).searchParams;
   expect(q.get('client_id')).toBe('dynamic_agent_client');
@@ -94,7 +98,16 @@ test('Continue with ChatGPT: declined, then signed in on the plan, its models li
   expect(q.get('resource')).toBe('https://api.openai.com/v1');
   expect(q.get('code_challenge_method')).toBe('S256');
   expect(q.get('redirect_uri')).toMatch(/^http:\/\/127\.0\.0\.1:\d+\/auth\/callback$/);
-  const back = await fetch(gpt.approve(authUrl));
+  const refused = await fetch(gpt.approve(authUrl));
+  expect(await refused.text()).toContain('One more step');
+  await expect.poll(async () => (await opened(yap)).length).toBe(tabs + 1);
+  const retry = new URL((await opened(yap)).at(-1)).searchParams;
+  expect(retry.get('client_id')).toBe(gpt.issued);
+  expect(retry.get('agent_name_hint')).toBeNull();
+  expect(retry.get('ext_agent_host_id')).toBe(q.get('ext_agent_host_id'));
+  await expect(card).toContainText('Finish signing in in your browser');
+  const back = await fetch(gpt.approve((await opened(yap)).at(-1)));
+  gpt.refuseNewRegistrationCodes(false);
   expect(back.status).toBe(200);
   expect(await back.text()).toContain('ChatGPT connected');
 

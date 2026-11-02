@@ -171,9 +171,20 @@ pub async fn check_id_token(d: &Discovery, token: &str, client_id: &str, nonce: 
 pub enum Handback {
     /// A code to exchange (with the issued client id on a new
     /// registration), and where to tell the browser how it went.
-    Code { code: String, client_id: Option<String>, reply: mpsc::Sender<Result<String, String>> },
+    Code { code: String, client_id: Option<String>, reply: mpsc::Sender<Done> },
     /// The person said no (or OpenAI refused): its error code.
     Denied(String),
+}
+
+/// How a code handed back went, for the browser's page.
+pub enum Done {
+    /// Signed in: the account's label.
+    Connected(String),
+    /// Not connected: why.
+    Failed(String),
+    /// The code was refused and Yap is opening the sign-in again with its
+    /// issued client id (OpenAI's own retry after `invalid_grant`).
+    Again,
 }
 
 /// A sign-in in flight. Dropping it stops the listener.
@@ -304,8 +315,9 @@ fn handle(request: tiny_http::Request, host: &str, state: &str, tx: &mpsc::Sende
         return true;
     }
     let html = match done_rx.recv_timeout(Duration::from_secs(45)) {
-        Ok(Ok(account)) => page(true, &format!("Yap can now use the ChatGPT plan of {account}. You can close this tab.")),
-        Ok(Err(e)) => page(false, &e),
+        Ok(Done::Connected(account)) => page(true, &format!("Yap can now use the ChatGPT plan of {account}. You can close this tab.")),
+        Ok(Done::Failed(e)) => page(false, &e),
+        Ok(Done::Again) => page_titled("One more step", "ChatGPT is opening again in a new tab to finish connecting Yap. You can close this tab."),
         Err(_) => page(true, "Yap is finishing the connection. You can close this tab."),
     };
     reply(request, 200, Some(html));
@@ -343,7 +355,10 @@ pub fn valid_client_id(id: &str) -> bool {
 
 /// The little page the browser shows after the consent screen.
 fn page(ok: bool, message: &str) -> String {
-    let title = if ok { "ChatGPT connected" } else { "Not connected" };
+    page_titled(if ok { "ChatGPT connected" } else { "Not connected" }, message)
+}
+
+fn page_titled(title: &str, message: &str) -> String {
     let esc = |s: &str| s.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;").replace('"', "&quot;");
     format!(
         "<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\"><title>Yap · {title}</title>\
@@ -624,7 +639,7 @@ mod tests {
             match s.handback.recv_timeout(Duration::from_secs(5)).expect("the callback reached Yap") {
                 Handback::Code { code, client_id, reply } => {
                     assert_eq!((code.as_str(), client_id.as_deref()), (format!("c{round}").as_str(), Some("oaiapp_x")));
-                    reply.send(Ok("sam@example.com".into())).unwrap();
+                    reply.send(Done::Connected("sam@example.com".into())).unwrap();
                 }
                 Handback::Denied(e) => assert_eq!(e, "access_denied"),
             }

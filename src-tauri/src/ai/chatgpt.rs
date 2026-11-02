@@ -266,7 +266,7 @@ pub async fn chatgpt_sign_in(app: AppHandle, reconsent: Option<bool>) -> Result<
     }
     tracing::info!("chatgpt: sign-in started");
     emit();
-    tauri::async_runtime::spawn(async move { finish(d, sign_in, attempt, a.client_id).await });
+    tauri::async_runtime::spawn(async move { finish(app, d, sign_in, attempt, a.client_id, reconsent.unwrap_or(false)).await });
     Ok(())
 }
 
@@ -280,32 +280,58 @@ pub fn chatgpt_cancel_sign_in() {
     emit();
 }
 
-async fn finish(d: oauth::Discovery, sign_in: oauth::SignIn, attempt: u64, saved_client: Option<String>) {
+async fn finish(app: AppHandle, d: oauth::Discovery, mut sign_in: oauth::SignIn, attempt: u64, mut saved_client: Option<String>, reconsent: bool) {
     let current = move || state(|s| s.attempt == attempt);
-    let waited = tauri::async_runtime::spawn_blocking(move || {
-        let deadline = std::time::Instant::now() + oauth::SIGN_IN_TTL;
-        loop {
-            match sign_in.handback.recv_timeout(Duration::from_millis(500)) {
-                Ok(h) => return (Some(h), sign_in),
-                Err(std::sync::mpsc::RecvTimeoutError::Timeout) if current() && std::time::Instant::now() < deadline => {}
-                Err(_) => return (None, sign_in),
+    // A refused code is authorized again once, with Yap's issued client id.
+    let mut retried = false;
+    let outcome = loop {
+        let waited = tauri::async_runtime::spawn_blocking(move || {
+            let deadline = std::time::Instant::now() + oauth::SIGN_IN_TTL;
+            loop {
+                match sign_in.handback.recv_timeout(Duration::from_millis(500)) {
+                    Ok(h) => return (Some(h), sign_in),
+                    Err(std::sync::mpsc::RecvTimeoutError::Timeout) if current() && std::time::Instant::now() < deadline => {}
+                    Err(_) => return (None, sign_in),
+                }
             }
+        })
+        .await;
+        let Ok((handback, waited)) = waited else { return };
+        match handback {
+            Some(oauth::Handback::Code { code, client_id, reply }) => {
+                let tried = Attempt { verifier: waited.verifier.clone(), nonce: waited.nonce.clone(), redirect_uri: waited.redirect_uri.clone() };
+                match connect(&d, &tried, &code, client_id, saved_client.clone()).await {
+                    Ok(label) => {
+                        let _ = reply.send(oauth::Done::Connected(label));
+                        break Ok(());
+                    }
+                    Err(NotConnected::CodeRefused) if !retried && current() => {
+                        retried = true;
+                        tracing::info!("chatgpt: the code was refused, authorizing again with Yap's registration");
+                        let _ = reply.send(oauth::Done::Again);
+                        // This listener first, so the next can have its port.
+                        drop(waited);
+                        match again(&app, &d, reconsent) {
+                            Ok(next) => {
+                                saved_client = account().client_id;
+                                sign_in = next;
+                            }
+                            Err(e) => break Err(e),
+                        }
+                    }
+                    Err(e) => {
+                        let message = e.message();
+                        let _ = reply.send(oauth::Done::Failed(message.clone()));
+                        break Err(message);
+                    }
+                }
+            }
+            Some(oauth::Handback::Denied(code)) => {
+                tracing::info!(code = %code, "chatgpt: sign-in declined");
+                break Err(if code == "access_denied" { "You didn't allow Yap to use ChatGPT.".to_string() } else { format!("ChatGPT's sign-in said no ({code}).") });
+            }
+            None => break Ok(()),
         }
-    })
-    .await;
-    let Ok((handback, sign_in)) = waited else { return };
-    let outcome = match handback {
-        Some(oauth::Handback::Code { code, client_id, reply }) => {
-            let attempt = Attempt { verifier: sign_in.verifier.clone(), nonce: sign_in.nonce.clone(), redirect_uri: sign_in.redirect_uri.clone() };
-            let result = connect(&d, &attempt, &code, client_id, saved_client).await;
-            let _ = reply.send(result.clone());
-            result.map(|_| ())
-        }
-        Some(oauth::Handback::Denied(code)) => {
-            tracing::info!(code = %code, "chatgpt: sign-in declined");
-            Err(if code == "access_denied" { "You didn't allow Yap to use ChatGPT.".to_string() } else { format!("ChatGPT's sign-in said no ({code}).") })
-        }
-        None => Ok(()),
     };
     state(|s| {
         if s.attempt == attempt {
@@ -316,6 +342,18 @@ async fn finish(d: oauth::Discovery, sign_in: oauth::SignIn, attempt: u64, saved
     emit();
 }
 
+/// **The sign-in again after a refused code** (2 Nov 2026): OpenAI's
+/// "If code exchange returns `invalid_grant`, discard that code and start a
+/// fresh authorization with the issued client ID", as its DevKit does once —
+/// the first sign-in's code was refused on the first real try, and Yap said
+/// "Your ChatGPT sign-in has ended". The browser opened on the new attempt.
+fn again(app: &AppHandle, d: &oauth::Discovery, reconsent: bool) -> Result<oauth::SignIn, String> {
+    let a = account();
+    let next = oauth::begin(d, &oauth::Ask { client_id: a.client_id.as_deref(), host_id: &a.host_id, login_hint: a.email.as_deref(), reconsent })?;
+    open_link(app, &next.url)?;
+    Ok(next)
+}
+
 /// What one attempt sent that its code exchange and checks need.
 struct Attempt {
     verifier: String,
@@ -323,9 +361,39 @@ struct Attempt {
     redirect_uri: String,
 }
 
+/// Why a code handed back didn't sign in.
+enum NotConnected {
+    /// The token endpoint refused the code (`invalid_grant`): authorized
+    /// again ([`again`]), never "your sign-in has ended".
+    CodeRefused,
+    /// Anything else, said as it is.
+    Say(String),
+}
+
+impl NotConnected {
+    fn message(self) -> String {
+        match self {
+            NotConnected::CodeRefused => "ChatGPT didn't accept this sign-in. Click Continue with ChatGPT to try again.".into(),
+            NotConnected::Say(m) => m,
+        }
+    }
+}
+
+impl From<String> for NotConnected {
+    fn from(m: String) -> Self {
+        NotConnected::Say(m)
+    }
+}
+
+impl From<&str> for NotConnected {
+    fn from(m: &str) -> Self {
+        NotConnected::Say(m.to_string())
+    }
+}
+
 /// The code exchanged and checked: the account signed in. Its label (the
 /// email) for the browser's page.
-async fn connect(d: &oauth::Discovery, sign_in: &Attempt, code: &str, issued: Option<String>, saved: Option<String>) -> Result<String, String> {
+async fn connect(d: &oauth::Discovery, sign_in: &Attempt, code: &str, issued: Option<String>, saved: Option<String>) -> Result<String, NotConnected> {
     let client = match (issued, saved) {
         (Some(i), Some(s)) if i != s => return Err("ChatGPT answered for a different registration of Yap. Try signing in again.".into()),
         (Some(i), _) => i,
@@ -335,7 +403,11 @@ async fn connect(d: &oauth::Discovery, sign_in: &Attempt, code: &str, issued: Op
     // Kept before the code is used: a failed exchange never registers Yap
     // a second time.
     with_account(|a| a.client_id = Some(client.clone()));
-    let t = oauth::exchange(d, &client, code, &sign_in.verifier, &sign_in.redirect_uri).await.map_err(|f| f.message())?;
+    let t = match oauth::exchange(d, &client, code, &sign_in.verifier, &sign_in.redirect_uri).await {
+        Ok(t) => t,
+        Err(oauth::Failure::Ended) => return Err(NotConnected::CodeRefused),
+        Err(f) => return Err(f.message().into()),
+    };
     let id_token = t.id_token.as_deref().ok_or("ChatGPT didn't say who signed in. Try again.")?;
     let who = oauth::check_id_token(d, id_token, &client, Some(&sign_in.nonce)).await?;
     // Another account than the one this registration is for: start afresh

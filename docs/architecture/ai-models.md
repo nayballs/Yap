@@ -1457,6 +1457,11 @@ OpenAI's flow for open-source apps that run locally is self-serve: no partner ke
   - a GET from loopback with the right `Host`.
 - **The first time, Yap registers itself** with the account: `client_id=dynamic_agent_client`, `agent_name_hint=Yap`, and this PC's `ext_agent_host_id` (`urn:uuid:` and a v4 UUID, made once).
 - **The issued `oaiapp_…` id is kept** in `chatgpt.json` *before* the code is used, so a failed exchange never registers Yap twice. Every later sign-in uses it, with the account's email as `login_hint`.
+- **A refused code is authorized again, once** (2 Nov 2026). OpenAI refused the first real sign-in's code with `invalid_grant`, and Yap said "Your ChatGPT sign-in has ended". OpenAI's sign-in guide says: "discard that code and start a fresh authorization with the issued client ID". Its DevKit does that once, and so does Yap (`chatgpt.rs` `again`):
+  - the browser's tab says "One more step";
+  - a new tab opens on the consent page with the issued id;
+  - a second refusal says "ChatGPT didn't accept this sign-in. Click Continue with ChatGPT to try again."
+  - "Your sign-in has ended" is only for a refresh that's refused.
 - **Scopes:** `openid profile email offline_access resource.invoke chatgpt.tokens.use.direct`, with `resource` set to `https://api.openai.com/v1`.
 - **Endpoints** come from the issuer's discovery document, each checked to be on the issuer.
 
