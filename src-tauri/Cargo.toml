@@ -200,7 +200,7 @@ webview2-com = "0.38"
 # `yap.exe diarize` (diarize.rs) loads NeMo-Speech.cpp's C API DLLs from the
 # data folder with LoadLibraryExW(…DLL_LOAD_DIR | DEFAULT_DIRS), so their own
 # ggml and MSVC runtime come from that folder. Already in the tree.
-libloading = "0.8"
+libloading = "0.9"
 
 [features]
 # Default has NO transcribe-rs so plain `cargo check` compiles the stub (fast).
