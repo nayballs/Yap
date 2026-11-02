@@ -23,6 +23,14 @@
   let busy = $state(false);
   let error = $state('');
 
+  /** The newest status kept (Rust numbers each, `rev`): Check now answers
+   * with one made before its look, and the look's events can come first. */
+  function take(next) {
+    if (!next) return;
+    if (eng?.rev != null && next.rev != null && next.rev < eng.rev) return;
+    eng = next;
+  }
+
   $effect(() => {
     if (initial && !eng) eng = initial;
   });
@@ -30,16 +38,14 @@
   onMount(() => {
     let off = null;
     let alive = true;
-    listen('yap-local-engine', (e) => {
-      if (e.payload) eng = e.payload;
-    })
+    listen('yap-local-engine', (e) => take(e.payload))
       .then((u) => {
         if (alive) off = u;
         else u();
       })
       .catch(() => {});
     invoke('local_engine_status')
-      .then((s) => (eng = s))
+      .then(take)
       .catch(() => {});
     return () => {
       alive = false;
@@ -78,7 +84,7 @@
     error = '';
     busy = true;
     try {
-      eng = await invoke('local_engine_check');
+      take(await invoke('local_engine_check'));
     } catch (e) {
       error = `${e}`;
     } finally {
@@ -89,7 +95,7 @@
   async function setAuto(on) {
     error = '';
     try {
-      eng = await invoke('local_engine_set_auto', { on });
+      take(await invoke('local_engine_set_auto', { on }));
     } catch (e) {
       error = `${e}`;
     }
@@ -98,7 +104,7 @@
   async function goBack() {
     error = '';
     try {
-      eng = await invoke('local_engine_go_back');
+      take(await invoke('local_engine_go_back'));
     } catch (e) {
       error = `${e}`;
     }

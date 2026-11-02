@@ -1286,8 +1286,14 @@ fn capitalise(s: &str) -> String {
     c.next().map(|f| f.to_uppercase().collect::<String>() + c.as_str()).unwrap_or_default()
 }
 
+/// Each [`status`] numbered as it's made: Check now answers with one made
+/// before its look runs, and the look's own `yap-local-engine` events can
+/// reach the page first, so Settings keeps whichever is newest (`rev`).
+static STATUS_REV: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+
 /// Settings' engine line and its controls (`local_llm_status().engine`).
 pub fn status() -> serde_json::Value {
+    let rev = STATUS_REV.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
     let llm = super::llm_dir();
     let edir = engine_dir_in(&llm);
     let m = read_marker(&edir);
@@ -1321,6 +1327,7 @@ pub fn status() -> serde_json::Value {
         "line": m.event.as_ref().map(event_line),
         "backTo": back_target(&m, llamafile),
         "error": updater::last_error(),
+        "rev": rev,
     })
 }
 
