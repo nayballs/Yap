@@ -8,13 +8,15 @@ with the WebSocket at `/ws`.
 
 Plain HTML, CSS and JavaScript modules: no build step, no framework, nothing
 fetched from anywhere but the PC (no CDN; Yap's two fonts come from the PC
-too). **It's Yap's Chat on a phone** (2026-11-03): Chat's thread, Chat's
-composer with Talk as the Yap bar's pill, Chat's model chip and **Chat's own
-picker** — the desktop's code itself, served beside the page ("Chat's own
-modules", below) — in Yap's tokens (`src/app.css`), fonts and mark, on a
-phone's terms ("The look", below). About 310 KB as served (36 KB of it the
-fonts, 54 KB Chat's picker modules, 22 KB the logos), 124 KB gzipped (175 KB
-and 80 KB before the Chat redesign).
+too). **It's Yap's Chat on a phone, in the Claude app's layout**
+(2026-11-03): ☰ and a drawer of Chat's conversations, the thread, a composer
+card with the pictures, +, Chat's model chip with its effort, the mic and
+Send — **Chat's own picker** the desktop's code itself, served beside the
+page ("Chat's own modules", below) — in Yap's tokens (`src/app.css`), fonts
+and mark, on a phone's terms ("The look", below). About 356 KB as served
+(36 KB of it the fonts, 54 KB Chat's picker modules, 22 KB the logos), 140
+KB gzipped (317 KB and 127 KB before the Claude-app layout; 175 KB and 80 KB
+before the Chat redesign).
 
 **The protocol** (v1: the hello, pairing, the JSON messages and the binary
 audio frames) is written down in
@@ -26,12 +28,14 @@ choice.
 
 | File | What it is | Served as |
 |---|---|---|
-| `index.html` | The page: the header (Yap, the connection, ⋯), pairing, the thread and Chat's activity line, the composer (the text box, Send, Talk, ✕ / ■, Stop, the waveform and time while Yap listens), the model chip under it, the settings sheet (Hands-free and its wait, Clearer sound in a headset, the microphone picker, Sound details) and the model sheet. | `text/html` |
+| `index.html` | The page: the header (☰, "Yap · <PC>" with the connection's dot and the chat's title, the spinner, ⋯), pairing, the thread and Chat's activity line, the composer card (Chat's line for pictures its model can't read, the pictures, the text box, then +, the model chip, the mic, Send / ■, ✕ / ■, the waveform and time while Yap listens), the drawer, the settings sheet (Hands-free and its wait, Clearer sound in a headset, the microphone picker, Sound details) and the model sheet. | `text/html` |
 | `link.css` | The look ("The look", below): Yap's warm light and dark `--yap-*` tokens (values copied from `src/app.css`, following `prefers-color-scheme`; `e2e-link/tokens.spec.js` holds them to it), its fonts, mobile first, 48 px targets, reduced motion respected. | `text/css` |
 | `markdown.js` | An answer's markdown as Chat shows it (its spoken-answer subset: paragraphs and line breaks, headings, lists, bold, italic, struck, code, quotes, rules), built as DOM nodes, never HTML; links as their words, `[1]` citations left out, a mark still being written shown without its stars. | `text/javascript` |
 | `fonts/figtree.woff2`, `fonts/eb-garamond.woff2` | Yap's UI font and its display serif, cut down from the desktop's own (below). | `font/woff2` |
 | `link.js` | Everything the page does: the connection (hello, pairing, reconnects with backoff, keep-alive pings), typed questions and ▶ Read aloud, the composer and the keyboard, the mic (opened a timed step at a time), Talk (tap or hold), hands-free, the spoken answer (resampled frame after frame, posted to the player worklet), Clearer sound, barge-in, the conversation (kept in this tab's sessionStorage across a reload), the step and its time, the model chip, the settings sheet, Sound details, the screen wake lock. Exposes a read-only `window.__yapLink.snapshot()` for the tests. | `text/javascript` |
-| `picker.js` | Chat's model picker as a sheet ("Chat's picker", below): the rail with the logos, the panes, More models, the effort; its rows built by `core/chatPicker.js`; a PC from before gets its plain list. | `text/javascript` |
+| `picker.js` | Chat's model picker as a sheet ("Chat's picker", below): the rail with the logos, the panes, More models, the effort; its rows built by `core/chatPicker.js`; a PC from before gets its plain list. The chip's words and its effort (`chipWords`, `chipEffort`). | `text/javascript` |
+| `drawer.js` | The drawer of chats ("The drawer", below): Recents from the PC (`chats`), the search, the one this phone is in marked, + New chat. | `text/javascript` |
+| `photos.js` | A question's pictures ("Pictures", below): a photo made smaller (2,048 px, a JPEG of at most 3 MB, upright, on white) and sent in `0x03` frames. | `text/javascript` |
 | `core/*.js` | **Not in this folder**: Chat's own picker modules from `src/lib/core/` (`chatPicker`, `modelCatalog`, `latestModels`, `ppModels`, `localContext`, `modelIcons`, `providerIds`, `effort`), served as they are (`build.rs` `LINK_SHARED`). | `text/javascript` |
 | `providers/*.svg` | **Not in this folder**: the provider and model-family logos from `src/assets/providers/` the picker and the chip show (Yap's own assets; `build.rs` `LINK_SHARED`). | `image/svg+xml` |
 | `dsp.js` | The sound maths, with nothing of the page in it: the streaming resampler (windowed sinc, a polyphase table where the rates allow: the mic's rate down to 16 kHz, Yap's 24 kHz voice up to the phone's rate), the answer's ring and jitter buffer (`Playout`), Int16, the frame level, hands-free's energy voice detector and its waits, the times as Chat says them. Runs in the page, both worklets and Node's tests. | `text/javascript` |
@@ -55,41 +59,68 @@ plays). That's for a native app (phone-remote design §4.5, §6.2).
 
 ## The look (2026-11-03)
 
-**It's Yap's Chat** (the morning's pass, after the night's restyle kept the
-voice remote's layout): the conversation fills the screen, the composer sits
-at the bottom with Talk in it, the model chip under it, the settings in a
-sheet. Where a phone needs its own way, the phone wins.
+**It's Yap's Chat in the Claude app's layout** (the day's third pass: the
+maintainer wanted "screenshots … into the chat window on the phone" and the
+model picker with its effort "in the chat window", not the header): the
+header with ☰ and ⋯, the conversation filling the screen, a composer card
+at the bottom, a drawer of chats. Yap's look throughout; where a phone needs
+its own way, the phone wins.
 
-- **Chat's thread** (`views/chat/ChatThread.svelte`, `ChatMessage.svelte`).
-  Your question in Chat's amber-washed bubble on the right, with Chat's 🎙
-  ("Asked by voice") when it was said; the answer in Chat's card on the left
-  with its markdown (`markdown.js`) and, while it streams, Chat's amber caret;
-  under a finished answer, **▶ Read aloud**. While an answer is being said,
-  the bar's three bars and "Speaking…" under it, a status only: **one Stop
-  at a time** — the composer's for a spoken answer (where the thumb is), or,
-  when ▶ on an answer started it, that ▶ turned into Stop in place (the
-  composer's Stop stays away then). The step Yap is on as Chat's
-  activity line (three amber dots, the step, the time) under the thread.
-  Nothing asked yet: the Voice Assistant's ✦, "Ask Yap anything" in Yap's
-  display serif, how to ask, and "Keep this page open…".
-- **Chat's composer** (`Composer.svelte`'s input bar) at a phone's size: a
-  card with the text box ("Ask Yap anything"), and on the right, under the
-  thumb, **Talk: the Yap bar's pill** in ink (mic and word). With words in
-  the box, Send (Chat's ink arrow) comes in and Talk steps back to a round
-  mic beside it. While Yap works the question out, ■ (Chat's stop) beside
-  Talk; while it speaks, **■ Stop** with the bar's speaking bars (the one
-  Stop, unless ▶ on an answer is what's playing). **While it
-  listens the composer is the Yap bar's capsule**, the Voice Assistant's
-  variant (`bar/DictationCapsule.svelte`): an amber edge, ✕ on the left, the
-  ✦ and the bar's live waveform (thin amber bars, newest on the right, at
-  least 7 % tall, `--yap-live`), the time, and Talk saying **Send** (or
-  "Release to send" while held, "Wait…" while the mic opens, with "Opening
-  the microphone…" where the waveform goes).
-- **The model chip under the composer**, as in Chat (`ModelChip.svelte`): the
-  provider's mark (the on-device model's family's), the model, "· where it
-  runs", a chevron; it opens Chat's picker ("Chat's picker", below).
-- **The settings are a sheet** from ⋯ in the header: Hands-free and its wait,
-  Clearer sound in a headset, the microphone, Sound details, Done.
+- **The header**: ☰ on the left (the drawer; hidden for a PC from before
+  it), the title in the middle — "Yap · <PC name>" with the connection's dot
+  (green connected, amber connecting, grey unpaired), the chat's title under
+  it, or how the connection is ("Reconnecting to Office PC…") —, a small
+  amber spinner while Yap works the question out, and ⋯ on the right: the
+  settings sheet (Hands-free and its wait, Clearer sound in a headset, the
+  microphone, Sound details, Done). No rule under it, as the Claude app.
+- **The thread**: your question in a bubble on the right (Chat's amber
+  wash, a small tail at the bottom right, 🎙 "Asked by voice" when it was
+  said; its pictures above it — their thumbnails while this page has them,
+  else "2 pictures"); **the answer as plain text** the width of the screen,
+  with its markdown (`markdown.js`) and, while it streams, Chat's amber
+  caret; under a finished answer **Copy** and **▶ Read aloud** as quiet
+  icons (Copy says ✓ for a moment). While an answer is being said, the bar's
+  three bars and "Speaking…" under it, a status only: **one Stop at a time**
+  — the composer's for a spoken answer (where the thumb is), or, when ▶ on
+  an answer started it, that ▶ turned into ■ in place (the composer's stays
+  away then). The step Yap is on as Chat's activity line (three amber dots,
+  the step, the time) under the thread. Nothing asked yet: the Voice
+  Assistant's ✦, "Ask Yap anything" in Yap's display serif, how to ask, and
+  "Keep this page open…". A conversation opened with more messages than the
+  PC sends: "Earlier messages are in Chat on your PC." at its top.
+- **The composer card** (Yap's paper, a hairline, a soft shadow, 26 px
+  corners): **the pictures** inside it, above the text — 88 px thumbnails,
+  each with ✕ on its corner (a 44 px target), a shimmer while one is made
+  ready; **the text box** ("Ask Yap, or hold to talk"); then a row — **+**
+  (a small menu above it: Take photo, Choose photos), **the model chip with
+  its effort** (the provider's mark, the model, "· Extra" — or "· where it
+  runs" without an effort —, a chevron; a narrow card drops "Claude", where
+  it runs and then the chevron, in `em` so it follows the text size: "Opus
+  5.5 · Extra", as the Claude app's chip; it opens Chat's picker), a gap,
+  **the mic** (round; Talk: a tap talks hands-free, a hold while held — a
+  spoken *question*, never dictation) and **Send ↑** in Yap's amber (the
+  Claude app's orange; dim while there's nothing to send), which is **■**
+  while Yap works the question out (cancel) or says an answer (Stop) — unless
+  there are words to send instead. **While it listens the card is the Yap
+  bar's capsule**, the Voice Assistant's variant (`bar/DictationCapsule.svelte`):
+  an amber edge, ✕ on the left, the ✦ and the bar's live waveform (thin amber
+  bars, newest on the right, at least 7 % tall, `--yap-live`), the time, and
+  the mic turned into the bar's ink pill saying **Done** (or "Release to
+  send" while held, "Wait…" while the mic opens, with "Opening the
+  microphone…" where the waveform goes). The round buttons are 44 px and
+  grow with large text to 56 px at most (`--round`), so the row still fits
+  at Android's largest text (200 %).
+- **Chat's line for pictures its model can't read** (`Composer.svelte`'s
+  vision line), in the card above the pictures: "Qwen3.5 4B can't read
+  images." (or "couldn't read the picture", after the PC's `cant_read`), then
+  **Use <the model that can>** (the PC's `imagesSwitch`: `set_model`, then
+  the question goes), **Send its text instead** (read on the PC by Windows'
+  OCR), Choose another model… (Chat's picker) and Send without the pictures.
+- **The drawer** (`drawer.js`), from the left over a scrim, on Yap's paper:
+  "Yap" in its display serif and ✕, a search box ("Search chats": every word,
+  any case, without accents), **Recents** (each a chat bubble and its title,
+  the one this phone is in marked), and at the foot the PC's name (a
+  computer mark) and **+ New chat**. Esc, ✕ or a tap on the scrim closes it.
 - **Tokens.** `link.css` copies `src/app.css`'s `--yap-*` values: `:root` for
   light, `:root[data-yap-theme='dark']` for Yap's warm dark, here following
   the phone's `prefers-color-scheme`. It can't import them (no build step, a
@@ -129,12 +160,14 @@ sheet. Where a phone needs its own way, the phone wins.
   with the phone's font size (`<meta name="text-scale">` for Chrome, Dynamic
   Type's body size on iPhones). The text box and the select at 16 px or more,
   so the phone doesn't zoom in on them. Nothing needs hover. On its side
-  (landscape, up to 560 px tall): a slimmer header and empty state, the same
-  column. Reduced motion: nothing pulses, blinks or slides.
+  (landscape, up to 560 px tall): **two columns**, #17's idea kept — the
+  conversation on the left, the composer card on the right at the bottom,
+  under the thumb — and a slimmer header and empty state. Reduced motion:
+  nothing pulses, blinks, spins or slides (the spinner a still ring).
 
 ## Chat's picker (2026-11-03)
 
-The model chip opens **Chat's own model picker**
+The model chip in the composer card opens **Chat's own model picker**
 (`views/chat/ChatModelPicker.svelte`) as a sheet from the bottom, with the
 same structure and words: the **provider rail with its logos** across the
 top (the picker's narrow layout: Recent, Groq, Gemini, Claude, ChatGPT,
@@ -172,6 +205,49 @@ checks); the chip shows the pick at once, the PC's next `ready` has the last
 word. Recent is the phone's own (`localStorage` `yap.link.recent`, the last
 three). A PC from before the picker (no `ready.picker`) gets its plain list.
 
+## The drawer and the phone's own conversation (2026-11-03)
+
+☰ opens the drawer and asks the PC for Chat's conversations (`chats`: Chat's
+list — not archived, not a meeting's Ask thread — newest first). Tapping
+one opens it (`open_chat {id}`): its latest messages come back (`thread`:
+the questions with 🎙 when said and how many pictures they carried, the
+answers with their ids, so ▶ reads them), its title shows under the
+header's, and **this phone's questions go there** (`chat: <id>` on `ask`
+and `start`). **+ New chat** empties the thread (`new_chat`) and the next
+question starts a conversation (`chat: "new"`); the PC says which it made
+(`chat {id, title}`), and the questions after it go there. A phone that
+never picked one sends no `chat`, and the PC asks it as the Voice Assistant
+chooses — and says where it went (`chat`), which the page keeps from then
+on. Whatever Yap was doing stops first (as Talk does). The conversation is
+kept in `localStorage` (`yap.link.chat`: its id or `"new"`); once the page is
+up it asks the PC for it again (`open_chat`), so a reload shows what was
+written meanwhile, and one deleted or archived on the PC says so and starts
+afresh. A rename in Chat on the PC (`title`) shows in the header and the
+drawer. A PC from before the drawer (no `"chats"` in `ready.can`): no ☰,
+and nothing about a conversation is sent.
+
+## Pictures (2026-11-03)
+
+**+** in the composer card opens a small menu: **Take photo** (`<input
+type=file accept=image/* capture=environment>`: the camera) and **Choose
+photos** (the phone's pictures, several at once). Each picture is made
+ready on the phone (`photos.js`): read with `createImageBitmap(file,
+{imageOrientation: 'from-image'})` (upright as the phone shows it), drawn on
+white at 2,048 px on its longest side at most, and saved as a JPEG (quality
+0.85; smaller tries until it's under 3 MB). It shows as a thumbnail inside
+the card with ✕; four at most ("A question can carry 4 pictures at most"),
+as Chat takes them. The pictures go with the next question, typed or spoken:
+for each, `picture {n, size}` then its bytes in `0x03` frames of 32,000
+bytes, in order, then `ask {…, pictures: N}` (or, for a spoken one, just
+before `stop {pictures: N}`); the question's bubble shows them. Chat's model
+known not to read images (`ready.picker.status.images` false) or the PC's
+`cant_read`: **Chat's line** in the card ("The look", above) — the question
+and its pictures back in the composer, then Use <the model that can>
+(`set_model`, then the question), **Send its text instead** (`asText`: read on
+the PC by Windows' OCR), Choose another model…, Send without the pictures.
+Nothing of a picture is stored on the phone: the thumbnails live as long as
+the page. A PC from before pictures (no `"pictures"` in `ready.can`): no +.
+
 ## Typing (2026-11-03)
 
 A question typed in the composer goes to Yap's AI on the PC (`ask {text}`)
@@ -180,7 +256,7 @@ answers a typed question, **not spoken**: the answer's ▶ Read aloud has Yap
 say it (`read_aloud {id}`, the whole answer, on the phone). Enter sends,
 Shift+Enter makes a new line; the box grows to five lines, then scrolls. The
 question shows in the thread at once (without 🎙), Chat's activity line while
-Yap works it out, ■ beside Talk to stop it. Typed while Yap speaks: its voice
+Yap works it out, ■ in Send's place to stop it. Typed while Yap speaks: its voice
 stops first (`interrupt`); while it works on a question: that one's
 cancelled (`cancel`). A PC from before typed questions (no `"ask"` in
 `ready.can`): "Yap on your PC needs an update to answer typed questions.
@@ -207,8 +283,8 @@ a reload keeps it; closing the tab doesn't.
   ms at 16 kHz; the last one padded with silence), `seq` counting from 0 for
   each question, then `stop` after the last frame. At most 6,000 frames (2
   minutes): then it stops by itself.
-- **Talk.** A tap starts, the next tap sends; held for 350 ms or more, letting
-  go sends. Cancel (✕) while listening sends `cancel` (no `stop`). Hands-free (the
+- **Talk** (the mic). A tap starts, the next tap (or Done) sends; held for
+  350 ms or more, letting go sends. Cancel (✕) while listening sends `cancel` (no `stop`). Hands-free (the
   settings sheet, ⋯): the wait chosen under it — **"Wait before sending": Short (1 s) · Normal (1.5 s,
   the default) · Long (2.5 s)**, remembered (`yap.link.wait`) — of quiet after
   speech sends `stop`; nothing said for 10 s sends `cancel`. Speech starts 12
@@ -365,7 +441,24 @@ npm run test:link
   order with its logos (the PC's own files, loaded) and dots, opening on the
   model in use, Latest and More models in place, a switch as `set_model`,
   the PC's word after, Recent, a provider without a key, ChatGPT's two
-  ways, the effort and Fast mode, a PC from before. `shared.spec.js` (no
+  ways, the effort and Fast mode, a PC from before. `chats.spec.js`: the
+  drawer — ☰, Recents from the PC with the PC's name and + New chat, the
+  search (every word, any case), Esc; a chat opened (`open_chat`, its
+  messages with 🎙 and a picture counted, its title under the header's, ▶ on
+  an old answer by its id, the next `ask` and `start` with its `chat`, marked
+  in the drawer); + New chat (`new_chat`, `chat: "new"`, the PC's `chat`
+  then the next question there, a rename's `title`); a reload asking again,
+  one gone on the PC; no `chat` from a phone that never picked one; a PC from
+  before (no ☰). `pictures.spec.js`: + → Choose photos (thumbnails with ✕,
+  a 3,000 × 2,000 photo made 2,048 × 1,365, under 3 MB), a typed question
+  with two (`picture` and its pieces whole and in order, then `ask` with
+  `pictures: 2`, JPEGs of the right size, the bubble's thumbnails), a spoken
+  one (the pieces after the audio, before `stop {pictures: 1}`), four at
+  most, Chat's line when its model can't read images (Send doesn't send past
+  it; "Send its text instead" as `asText`; Use <model> as `set_model` then
+  the question), the PC's `cant_read` (the question and its picture back in
+  the composer; Send without them), a PC from before (no +).
+  `shared.spec.js` (no
   browser): the desktop modules served at `core/` import only each other,
   nothing of the app, and the logos the picker draws are served. `sound.spec.js`: the
   stream starting at ~250 ms, a short answer, a late frame (one underrun, never
@@ -382,20 +475,23 @@ npm run test:link
   and Sound details' step all along; `link-page.spec.js` also has a tap whose
   release the page handles late, and one whose press a slow AudioContext keeps
   busy. `screens.spec.js` leaves named screenshots at 360 × 780 and
-  390 × 844, light and dark (pairing, empty, typing with the keyboard up,
-  answering, listening, the model sheet, the settings sheet; landscape, large
-  text), in `test-results/link/screenshots/`, and checks every control is 44
+  390 × 844, light and dark (pairing, empty with the chip's effort, the
+  drawer, a chat opened from it, typing with the keyboard up, answering with
+  ■, listening, two pictures in the composer, the model sheet, the settings
+  sheet; landscape's two columns, large text at 130 and 200 %), in
+  `test-results/link/screenshots/`, and checks every control is 44
   px or more, Yap's two fonts and the logos load from the page's own origin
   (nothing asked of anywhere else), and at 360 × 780, 390 × 844, 430 × 932 and
   on its side (844 × 390) nothing scrolls sideways and the composer and Talk
-  are on the first screen, Talk low and on the right, under the thumb.
+  are on the first screen, Talk low and on the right, under the thumb; at
+  200 % text the row still fits, the model's name with room.
   `tokens.spec.js` (no browser): link.css's `--yap-*` values are app.css's,
   light and dark; the `theme-color` metas and the manifest are the page's
   background in each; `icon.svg` is Yap's mark. Nothing on the network, no Yap
   build, no window on screen.
 - **In Firefox too** (the `firefox` project, when Playwright's own Firefox is
   installed: `npx playwright install firefox`; `YAP_LINK_FIREFOX=0` leaves it
-  out): `link-page`, `sound`, `mic-open`, `typing` and `picker`, with Firefox's fake mic
+  out): `link-page`, `sound`, `mic-open`, `typing`, `picker`, `chats` and `pictures`, with Firefox's fake mic
   (`media.navigator.streams.fake`, `media.navigator.permission.disabled`, its
   tone at 440 Hz) and its output muted (`media.volume_scale`). Hands-free needs
   Chromium's recorded speech, and the screenshots are Chromium's.

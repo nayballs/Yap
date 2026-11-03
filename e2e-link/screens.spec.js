@@ -1,13 +1,34 @@
 // The page's states as named screenshots, light and dark, at a small and a
 // middling phone, in test-results/link/screenshots/ (to look at, not
-// compared): pairing, empty, typing with the keyboard up, answering,
-// listening, the model sheet, the settings sheet. Also checks nothing
+// compared): pairing, empty, the drawer, a chat opened from it, typing with
+// the keyboard up, answering (■), listening, two pictures in the composer,
+// the model sheet, the settings sheet. Also checks nothing
 // overflows sideways, every control is a thumb's size (44 px or more), Yap's
 // fonts and logos come from the page's own origin, and the composer and
 // Talk are on the first screen, low enough for a thumb, upright and on its
 // side.
 import { test, expect } from '@playwright/test';
-import { servePage, seedDevice, mockPc, open, ready, ask, type, openSettings, downFrame, voice } from './support/harness.js';
+import {
+  servePage,
+  seedDevice,
+  mockPc,
+  open,
+  ready,
+  ask,
+  type,
+  openSettings,
+  downFrame,
+  voice,
+  pickerData,
+  photo,
+  choosePhotos,
+} from './support/harness.js';
+
+/** Chat on Claude Opus 5.5 at Extra effort: the chip says "Claude Opus 5.5 · Extra". */
+const OPUS = {
+  picker: pickerData({ model: 'opus', effort: { levels: ['low', 'medium', 'high', 'xhigh', 'max'], default: 'medium', chosen: 'xhigh', fast: false } }),
+  model: { id: 'anthropic|claude-opus-5-5', label: 'Claude Opus 5.5 · Anthropic', onThisPc: false },
+};
 
 const DIR = 'test-results/link/screenshots';
 /** A named screenshot, once what just changed has settled (transitions run 150 ms). */
@@ -56,13 +77,28 @@ for (const scheme of ['light', 'dark']) {
       test(`chat (${at})`, async ({ page }) => {
         await servePage(page);
         await seedDevice(page);
-        const pc = await mockPc(page);
+        const pc = await mockPc(page, OPUS);
         await open(page);
         await ready(page, pc);
         await page.evaluate(() => document.fonts.ready);
+        await expect(page.getByTestId('model-chip')).toContainText('Claude Opus 5.5');
+        await expect(page.getByTestId('model-chip')).toContainText('Extra');
         await shot(page, `empty-${at}`);
         expect(await noSideways(page)).toBe(true);
         expect(await tooSmall(page)).toEqual([]);
+
+        // The drawer: Chat's conversations on the PC; one opened.
+        await page.getByTestId('menu').click();
+        await expect(page.getByTestId('recent')).toHaveCount(5);
+        await shot(page, `drawer-${at}`);
+        expect(await tooSmall(page)).toEqual([]);
+        await page.getByTestId('recent').filter({ hasText: 'Trip packing list' }).click();
+        await expect(page.getByTestId('turn')).toHaveCount(2);
+        await shot(page, `thread-${at}`);
+        // Back to a new chat for the rest.
+        await page.getByTestId('menu').click();
+        await page.getByTestId('new-chat').click();
+        await expect(page.getByTestId('turn')).toHaveCount(0);
 
         // A typed question and its answer, then one asked out loud.
         await type(page, pc, "What's on my calendar this afternoon?");
@@ -116,6 +152,17 @@ for (const scheme of ['light', 'dark']) {
         await shot(page, `listening-${at}`);
         expect(await tooSmall(page)).toEqual([]);
         await page.getByTestId('cancel').click();
+
+        // Two pictures in the composer card, a question typed under them.
+        await choosePhotos(page, [await photo(page, { w: 1600, h: 1200, name: 'hill.png' }), await photo(page, { w: 1200, h: 1600, hue: 20, name: 'dusk.png' })]);
+        await expect(page.getByTestId('shot')).toHaveCount(2);
+        await page.getByTestId('input').fill('Which of these is the better walk for Sunday?');
+        await page.getByTestId('input').blur();
+        await shot(page, `pictures-${at}`);
+        expect(await tooSmall(page)).toEqual([]);
+        expect(await noSideways(page)).toBe(true);
+        for (let i = 0; i < 2; i++) await page.getByTestId('shot-remove').first().click();
+        await page.getByTestId('input').fill('');
 
         // Chat's picker.
         await page.getByTestId('model-chip').click();
@@ -216,18 +263,29 @@ test('reconnecting, and the step on a narrow phone', async ({ page }) => {
   await shot(page, `reconnecting-narrow`);
 });
 
-test('large text: the composer and the chip still fit', async ({ page }) => {
-  await servePage(page);
-  await seedDevice(page);
-  const pc = await mockPc(page);
-  await open(page);
-  await ready(page, pc);
-  await page.evaluate(() => (document.documentElement.style.fontSize = '130%'));
-  await type(page, pc, 'What time does the library close?');
-  pc.send({ type: 'answer', text: 'The library closes at **6 pm** today.', final: true, id: 'chat:4:1' });
-  pc.send({ type: 'state', phase: 'idle' });
-  expect(await noSideways(page)).toBe(true);
-  const talk = await page.getByTestId('talk').boundingBox();
-  expect(talk.y + talk.height).toBeLessThanOrEqual(844);
-  await shot(page, `large-text-390x844`);
-});
+// The phone's text made larger, to Android's largest (200 %): the
+// composer's row still fits — the chip's name first, the round buttons a
+// thumb's size — and nothing scrolls sideways.
+for (const size of [130, 200]) {
+  test(`large text (${size} %): the composer and the chip still fit`, async ({ page }) => {
+    await servePage(page);
+    await seedDevice(page);
+    const pc = await mockPc(page);
+    await open(page);
+    await ready(page, pc);
+    await page.evaluate((s) => (document.documentElement.style.fontSize = `${s}%`), size);
+    await type(page, pc, 'What time does the library close?');
+    pc.send({ type: 'answer', text: 'The library closes at **6 pm** today.', final: true, id: 'chat:4:1' });
+    pc.send({ type: 'state', phase: 'idle' });
+    expect(await noSideways(page)).toBe(true);
+    const talk = await page.getByTestId('talk').boundingBox();
+    expect(talk.y + talk.height).toBeLessThanOrEqual(844);
+    expect(talk.x + talk.width).toBeLessThanOrEqual(390);
+    const send = await page.getByTestId('send').boundingBox();
+    expect(send.x + send.width).toBeLessThanOrEqual(390 - 8);
+    // The model's name keeps some room.
+    const name = await page.locator('#model-label').boundingBox();
+    expect(name.width).toBeGreaterThan(30);
+    await shot(page, size === 130 ? 'large-text-390x844' : `large-text-${size}-390x844`);
+  });
+}

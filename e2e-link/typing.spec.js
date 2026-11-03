@@ -28,15 +28,16 @@ test('a typed question: sent as ask, answered in the thread, and nothing spoken'
   await open(page);
   await ready(page, pc);
   const input = page.getByTestId('input');
-  await expect(input).toHaveAttribute('placeholder', 'Ask Yap anything');
-  // Words in the box: Send shows, Talk steps back to a round mic beside it.
-  await expect(page.getByTestId('send')).toBeHidden();
+  await expect(input).toHaveAttribute('placeholder', 'Ask Yap, or hold to talk');
+  // Send is there, dim, until there are words to send; the mic beside it.
+  await expect(page.getByTestId('send')).toBeDisabled();
   await input.fill(QUESTION);
-  await expect(page.getByTestId('send')).toBeVisible();
+  await expect(page.getByTestId('send')).toBeEnabled();
   await expect(page.getByTestId('talk')).toBeVisible();
   await input.press('Enter');
   await expect.poll(() => pc.of('ask')).toEqual([{ type: 'ask', text: QUESTION }]);
-  // The box empties; the question is in the thread at once, typed (no 🎙).
+  // The box empties; the question is in the thread at once, typed (no 🎙);
+  // Send turns into ■ while Yap works it out.
   await expect(input).toHaveValue('');
   await expect(page.getByTestId('send')).toBeHidden();
   await expect(page.getByTestId('heard').last()).toHaveText(QUESTION);
@@ -166,10 +167,10 @@ test('one Stop while Yap speaks: the composer’s for a spoken answer, ▶’s o
   pc.send({ type: 'speak_start', rate: 24000 });
   for (let i = 0; i < 30; i++) pc.sendBinary(downFrame(i, voice(24000, 100)));
   await expect(page.getByTestId('stop')).toBeVisible();
-  // Under it only the status: the bars and "Speaking…", no Stop of its own.
+  // Under it only the status: the bars and "Speaking…", no Stop (nor ▶) of its own.
   const spoken = page.getByTestId('turn').last();
   await expect(spoken.locator('.speaking')).toHaveText('Speaking…');
-  await expect(spoken.getByRole('button')).toHaveCount(0);
+  await expect(spoken.getByRole('button', { name: /Stop|Read aloud/ })).toHaveCount(0);
   // The earlier answer keeps its ▶; one Stop on the page, the composer's.
   await expect(page.getByTestId('turn').first().getByTestId('read-aloud')).toHaveText('Read aloud');
   await expect(page.getByRole('button', { name: 'Stop' })).toHaveCount(1);

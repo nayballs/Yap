@@ -14,8 +14,12 @@
 //   length) — never this PC's speakers — and the conversation kept in Chat.
 // - A typed question (the composer's `ask`): the fake model's answer in the
 //   same conversation, typed (not "by voice"), nothing said; ▶ Read aloud
-//   then says it on the phone. Chat's picker over the wire: the rail, Latest,
-//   a switch that switches Chat's model on this PC.
+//   then says it on the phone. ☰'s drawer with that conversation marked;
+//   + New chat and a question in a conversation of its own; a picture from
+//   the phone that GPT-OSS can't read, sent as its text (test mode's OCR)
+//   and kept with the question; the first conversation opened again. Chat's
+//   picker over the wire: the rail, Latest, a switch that switches Chat's
+//   model on this PC.
 // - Remove cuts the phone off at once; a replayed pairing link, a wrong
 //   secret and another site's page are refused.
 //
@@ -34,6 +38,26 @@ const TEST_KEY = 'e2e-fake-key';
 const ANSWER = 'Boil it for six minutes, then cool it in cold water.';
 const TYPED = 'How long should the bread dough rest?';
 const TYPED_ANSWER = 'Rest the dough for about an hour, until it has doubled.';
+const NEW_Q = 'What time does the station café open?';
+const NEW_ANSWER = 'The station café opens at 7 am on weekdays.';
+const SIGN_Q = 'What does this sign say?';
+const SIGN_TEXT = 'Platform 4: the 10:42 to the coast is delayed.';
+const SIGN_ANSWER = 'It says the 10:42 to the coast, from platform 4, is delayed.';
+
+/** A made-up photo drawn in the phone's page, as a file to choose. */
+async function photo(page) {
+  const bytes = await page.evaluate(async () => {
+    const c = new OffscreenCanvas(1600, 1200);
+    const g = c.getContext('2d');
+    g.fillStyle = '#2c5d8f';
+    g.fillRect(0, 0, 1600, 1200);
+    g.fillStyle = '#ffffff';
+    g.fillRect(200, 400, 1200, 400);
+    const blob = await c.convertToBlob({ type: 'image/png' });
+    return [...new Uint8Array(await blob.arrayBuffer())];
+  });
+  return { name: 'sign.png', mimeType: 'image/png', buffer: Buffer.from(bytes) };
+}
 
 const test = base.extend({
   fakeLlm: [
@@ -234,6 +258,65 @@ test('a phone pairs with the code both screens show, asks out loud and hears the
     .toContain('Rest the dough');
   await expect.poll(async () => (await snapshot(page)).reading, { timeout: 30_000 }).toBe('');
   await expect.poll(async () => (await snapshot(page)).phase, { timeout: 30_000 }).toBe('idle');
+
+  // The phone keeps the conversation its first question went to (`chat`),
+  // and ☰ lists Chat's conversations on this PC with that one marked.
+  const first = (await snapshot(page)).chat;
+  expect(first).toEqual(expect.any(Number));
+  await page.getByTestId('menu').click();
+  await expect(page.getByTestId('drawer')).toBeVisible();
+  await expect(page.getByTestId('drawer').locator('[aria-current="true"]')).toContainText('STT stub: received');
+  await shot(page, '04d-phone-drawer');
+  // + New chat: the next question starts a conversation of its own.
+  await page.getByTestId('new-chat').click();
+  await expect(page.getByTestId('turn')).toHaveCount(0);
+  fakeLlm.scriptChat([{ plain: true, content: NEW_ANSWER }]);
+  await page.getByTestId('input').fill(NEW_Q);
+  await page.getByTestId('input').press('Enter');
+  await expect(page.getByText(NEW_ANSWER)).toBeVisible({ timeout: 20_000 });
+  await expect.poll(async () => (await snapshot(page)).chat, { timeout: 10_000 }).not.toBe('new');
+  const second = (await snapshot(page)).chat;
+  expect(second).not.toBe(first);
+  await expect.poll(async () => (await snapshot(page)).phase, { timeout: 15_000 }).toBe('idle');
+
+  // A picture from the phone: Chat's model here (GPT-OSS) can't read
+  // images, so the composer says so, as Chat's does; "Send its text
+  // instead" reads it on this PC (test mode's stand-in for Windows' OCR).
+  await yap.invoke('e2e_snip_ocr', { text: SIGN_TEXT });
+  const sign = await photo(page);
+  await page.getByTestId('plus').click();
+  const chooser = page.waitForEvent('filechooser');
+  await page.getByTestId('choose-photos').click();
+  await (await chooser).setFiles(sign);
+  await expect(page.getByTestId('shot')).toHaveCount(1);
+  await page.getByTestId('input').fill(SIGN_Q);
+  await expect(page.getByTestId('vision')).toContainText("can't read images");
+  await shot(page, '04e-phone-picture');
+  fakeLlm.scriptChat([{ plain: true, content: SIGN_ANSWER }]);
+  await page.getByTestId('vision-as-text').click();
+  await expect(page.getByText(SIGN_ANSWER)).toBeVisible({ timeout: 20_000 });
+  await expect.poll(async () => (await snapshot(page)).phase, { timeout: 15_000 }).toBe('idle');
+  await yap.invoke('e2e_snip_ocr', { text: null });
+  await expectStore(yap, 'chats.json', (store) => {
+    const conv = store.conversations.find((c) => c.id === second);
+    expect(conv, 'the new chat').toBeTruthy();
+    // Only its own questions: not the first conversation's.
+    expect(conv.messages.some((m) => m.text === TYPED)).toBe(false);
+    expect(conv.messages.some((m) => m.text === NEW_Q)).toBe(true);
+    // The picture kept as Chat keeps a pasted one, its text sent instead.
+    const q = conv.messages.find((m) => m.role === 'user' && m.text.startsWith(SIGN_Q));
+    expect(q.text).toContain(SIGN_TEXT);
+    expect(q.images).toHaveLength(1);
+    expect(q.images[0]).toMatchObject({ w: 1600, h: 1200, asText: true });
+    return true;
+  });
+
+  // Back to the first conversation from the drawer: its messages, from this PC.
+  await page.getByTestId('menu').click();
+  await page.getByTestId('recent').filter({ hasText: 'STT stub: received' }).click();
+  await expect(page.getByTestId('heard').filter({ hasText: TYPED })).toHaveCount(1, { timeout: 10_000 });
+  await expect(page.getByText(TYPED_ANSWER)).toBeVisible();
+  expect((await snapshot(page)).chat).toBe(first);
 
   // Chat's picker over the wire: the rail with Groq connected; a switch
   // switches Chat's model on this PC.

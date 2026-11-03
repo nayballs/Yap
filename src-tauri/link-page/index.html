@@ -1,10 +1,11 @@
 <!doctype html>
 <!-- Yap Link: the phone's page. Served by Yap on the PC (README.md). No
-     service worker on purpose: see link.js. It's Yap's Chat on a phone
-     (link.css: Yap's tokens, Figtree and EB Garamond from this PC, the
-     mark): the conversation fills the screen, the composer at the bottom
-     carries the text box, Send and Talk (the Yap bar's pill), the model chip
-     sits under it as in Chat, and the settings are a sheet. -->
+     service worker on purpose: see link.js. Yap's Chat in the Claude
+     app's layout (link.css: Yap's tokens, Figtree and EB Garamond from this
+     PC, the mark): ☰ for the drawer of chats, the title in the middle, ⋯
+     for the settings; the conversation fills the screen; the composer card
+     at the bottom carries the pictures, the text box, +, the model chip with
+     its effort, the mic and Send. -->
 <html lang="en-GB">
   <head>
     <meta charset="utf-8" />
@@ -29,14 +30,23 @@
   </head>
   <body data-phase="offline">
     <div id="app" class="app">
+      <!-- ☰ (the chats), the title with the connection's dot, a spinner
+           while Yap works, ⋯ (the settings). -->
       <header class="top">
-        <img class="mark" src="icon.svg" alt="" width="30" height="30" />
-        <div class="who">
-          <span class="name">Yap</span>
-          <span id="conn" class="conn" data-testid="conn" data-state="wait" role="status">Connecting to Yap…</span>
+        <button id="menu-btn" class="iconbtn" type="button" aria-haspopup="dialog" aria-label="Chats" data-testid="menu" hidden>
+          <svg class="lines" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M4 7h16M4 12h11M4 17h16" /></svg>
+        </button>
+        <div class="title">
+          <span class="title-line">
+            <span id="dot" class="dot" data-state="wait" aria-hidden="true"></span>
+            <span id="title-name" class="title-name" data-testid="title">Yap</span>
+          </span>
+          <span id="title-sub" class="title-sub" data-testid="title-sub"></span>
+          <span id="conn" class="vh" data-testid="conn" role="status">Connecting to Yap…</span>
         </div>
+        <span id="busy" class="spinner" data-testid="busy" aria-hidden="true" hidden></span>
         <button id="settings-btn" class="iconbtn" type="button" aria-haspopup="dialog" aria-label="Settings" data-testid="settings" hidden>
-          <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><circle cx="5.5" cy="12" r="1.7" /><circle cx="12" cy="12" r="1.7" /><circle cx="18.5" cy="12" r="1.7" /></svg>
+          <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><circle cx="12" cy="5.5" r="1.7" /><circle cx="12" cy="12" r="1.7" /><circle cx="12" cy="18.5" r="1.7" /></svg>
         </button>
       </header>
 
@@ -63,16 +73,17 @@
           </div>
         </section>
 
-        <!-- Chat: the conversation fills the screen; the composer and the
-             model chip under it, at the bottom, within a thumb's reach. -->
+        <!-- Chat: the conversation fills the screen; the composer card at
+             the bottom, within a thumb's reach. -->
         <section id="chat" class="chat" aria-label="Ask Yap" hidden>
           <div id="thread" class="thread" data-testid="thread">
             <div id="empty" class="empty">
               <svg class="empty-spark" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M12 2.5c.5 3.9 1.6 6.4 3.1 7.9 1.5 1.5 4 2.6 6.4 3.1-2.4.5-4.9 1.6-6.4 3.1-1.5 1.5-2.6 4-3.1 6.9-.5-2.9-1.6-5.4-3.1-6.9-1.5-1.5-4-2.6-6.9-3.1 2.9-.5 5.4-1.6 6.9-3.1 1.5-1.5 2.6-4 3.1-7.9z" /></svg>
               <h1 class="empty-title">Ask Yap anything</h1>
-              <p class="empty-sub">Type a question, or tap <strong>Talk</strong> and speak. Hold Talk while you speak, if you like.</p>
+              <p class="empty-sub">Type a question, or tap the <strong>mic</strong> and speak. Hold it while you speak, if you like.</p>
               <p id="keep-open" class="keep-open">Keep this page open. Your headset works as the mic and speaker.</p>
             </div>
+            <p id="older" class="older" data-testid="older" hidden>Earlier messages are in Chat on your PC.</p>
             <ol id="convo" class="convo" aria-label="Conversation" aria-live="polite" data-testid="convo"></ol>
             <!-- What Yap is doing, as Chat's activity line: three amber dots, the step, its time. -->
             <p id="step" class="activity" data-testid="step" hidden>
@@ -87,59 +98,114 @@
             <!-- Where Yap is, for a screen reader (the composer shows it). -->
             <p id="phase" class="vh" role="status" data-testid="phase"></p>
 
-            <!-- Chat's composer: the text box and Send; Talk, the Yap bar's
-                 pill. While Yap listens it is the bar's capsule: ✕, the
-                 waveform, the time, Send. -->
+            <!-- The composer card: the pictures, the text box, then +, the
+                 model chip, the mic and Send (■ while Yap answers). While
+                 Yap listens it is the Yap bar's capsule: ✕, the waveform,
+                 the time, Done. -->
             <form id="composer" class="composer" data-state="idle" data-testid="composer" autocomplete="off">
-              <button id="cancel-btn" class="cbtn cancel" type="button" data-testid="cancel" aria-label="Cancel" hidden>
-                <svg class="x" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M6.5 6.5l11 11M17.5 6.5l-11 11" /></svg>
-                <svg class="sq" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><rect x="7" y="7" width="10" height="10" rx="2" /></svg>
-              </button>
+              <!-- Chat's line when its model can't read the pictures: another model, or their text instead. -->
+              <div id="vision" class="vision" data-testid="vision" role="status" hidden>
+                <p id="vision-text" class="vision-text"></p>
+                <div class="vision-acts">
+                  <button id="vision-switch" class="vbtn primary" type="button" data-testid="vision-switch" hidden></button>
+                  <button id="vision-text-btn" class="vbtn" type="button" data-testid="vision-as-text">Send its text instead</button>
+                  <button id="vision-pick" class="vbtn" type="button" data-testid="vision-pick">Choose another model…</button>
+                  <button id="vision-without" class="vlink" type="button" data-testid="vision-without">Send without the pictures</button>
+                </div>
+              </div>
+              <ul id="shots" class="shots" aria-label="Pictures to send" data-testid="shots" hidden></ul>
               <div class="field">
-                <textarea id="input" rows="1" placeholder="Ask Yap anything" aria-label="Ask Yap anything" enterkeyhint="send" data-testid="input"></textarea>
+                <textarea id="input" rows="1" placeholder="Ask Yap, or hold to talk" aria-label="Ask Yap" enterkeyhint="send" data-testid="input"></textarea>
               </div>
-              <div class="live" aria-hidden="true">
-                <svg class="spark" viewBox="0 0 24 24" focusable="false"><path d="M12 2.5c.5 3.9 1.6 6.4 3.1 7.9 1.5 1.5 4 2.6 6.4 3.1-2.4.5-4.9 1.6-6.4 3.1-1.5 1.5-2.6 4-3.1 6.9-.5-2.9-1.6-5.4-3.1-6.9-1.5-1.5-4-2.6-6.9-3.1 2.9-.5 5.4-1.6 6.9-3.1 1.5-1.5 2.6-4 3.1-7.9z" /></svg>
-                <span id="live-label" class="live-label"></span>
-                <!-- The mic's sound while Yap listens: the Yap bar's waveform, newest on the right. -->
-                <div id="meter" class="meter" data-testid="meter" data-on="false"></div>
-                <span id="talk-time" class="talk-time" data-testid="talk-time"></span>
-              </div>
-              <div class="acts">
-                <button id="stop-btn" class="stop-pill" type="button" data-testid="stop" hidden>
-                  <span class="speakbars" aria-hidden="true"><i></i><i></i><i></i></span>
-                  <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><rect x="6" y="6" width="12" height="12" rx="2" /></svg>
-                  Stop
+              <div class="row">
+                <button id="cancel-btn" class="cbtn cancel" type="button" data-testid="cancel" aria-label="Cancel" hidden>
+                  <svg class="x" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M6.5 6.5l11 11M17.5 6.5l-11 11" /></svg>
+                  <svg class="sq" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><rect x="7" y="7" width="10" height="10" rx="2" /></svg>
                 </button>
-                <button id="send-btn" class="send" type="submit" aria-label="Send" data-testid="send" hidden>
-                  <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M12 19V5M5.5 11.5L12 5l6.5 6.5" /></svg>
+                <div class="plus" id="plus-wrap" hidden>
+                  <button id="plus-btn" class="rbtn" type="button" aria-haspopup="menu" aria-expanded="false" aria-label="Add a picture" data-testid="plus">
+                    <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M12 5v14M5 12h14" /></svg>
+                  </button>
+                  <div id="plus-menu" class="plus-menu" role="menu" data-testid="plus-menu" hidden>
+                    <button id="take-photo" class="menuitem" type="button" role="menuitem" data-testid="take-photo">
+                      <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M4 8.5A1.5 1.5 0 0 1 5.5 7h2l1.5-2h6l1.5 2h2A1.5 1.5 0 0 1 20 8.5v9a1.5 1.5 0 0 1-1.5 1.5h-13A1.5 1.5 0 0 1 4 17.5z" /><circle cx="12" cy="12.5" r="3.5" /></svg>
+                      Take photo
+                    </button>
+                    <button id="choose-photos" class="menuitem" type="button" role="menuitem" data-testid="choose-photos">
+                      <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><rect x="4" y="5" width="16" height="14" rx="2" /><circle cx="9" cy="10" r="1.6" /><path d="M5 17l4.5-4.5 3 3L15 13l4 4" /></svg>
+                      Choose photos
+                    </button>
+                  </div>
+                  <input id="camera" type="file" accept="image/*" capture="environment" data-testid="camera" hidden />
+                  <input id="photos" type="file" accept="image/*" multiple data-testid="photos" hidden />
+                </div>
+                <!-- Chat's model chip with its effort: Chat's picker. -->
+                <button id="model" class="chip" type="button" aria-haspopup="dialog" data-testid="model-chip" hidden>
+                  <span id="model-mark" class="pmark" aria-hidden="true"></span>
+                  <span class="chip-text">
+                    <span id="model-label" class="chip-label"></span>
+                    <span id="model-where" class="chip-where" hidden></span>
+                  </span>
+                  <svg class="chev" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M7 10l5 5 5-5" /></svg>
                 </button>
+                <div class="live" aria-hidden="true">
+                  <svg class="spark" viewBox="0 0 24 24" focusable="false"><path d="M12 2.5c.5 3.9 1.6 6.4 3.1 7.9 1.5 1.5 4 2.6 6.4 3.1-2.4.5-4.9 1.6-6.4 3.1-1.5 1.5-2.6 4-3.1 6.9-.5-2.9-1.6-5.4-3.1-6.9-1.5-1.5-4-2.6-6.9-3.1 2.9-.5 5.4-1.6 6.9-3.1 1.5-1.5 2.6-4 3.1-7.9z" /></svg>
+                  <span id="live-label" class="live-label"></span>
+                  <!-- The mic's sound while Yap listens: the Yap bar's waveform, newest on the right. -->
+                  <div id="meter" class="meter" data-testid="meter" data-on="false"></div>
+                  <span id="talk-time" class="talk-time" data-testid="talk-time"></span>
+                </div>
+                <span class="spacer"></span>
+                <!-- The mic: a tap talks hands-free (tap again, or Done, to
+                     send), a hold talks while held. A spoken question to
+                     Yap's AI, never dictation. -->
                 <button id="talk-btn" class="talk" type="button" aria-pressed="false" data-testid="talk">
                   <svg class="mic-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
                     <rect x="9" y="3" width="6" height="11" rx="3" />
-                    <path d="M5.5 11a6.5 6.5 0 0 0 13 0M12 17.5V21M8.5 21h7" />
+                    <path d="M5.5 11a6.5 6.5 0 0 0 13 0M12 17.5V21" />
                   </svg>
-                  <svg class="send-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M12 19V5M5.5 11.5L12 5l6.5 6.5" /></svg>
+                  <svg class="done-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M12 19V5M5.5 11.5L12 5l6.5 6.5" /></svg>
                   <span id="talk-label" class="talk-label">Talk</span>
+                </button>
+                <button id="send-btn" class="send" type="submit" aria-label="Send" data-testid="send" disabled>
+                  <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M12 19V5M5.5 11.5L12 5l6.5 6.5" /></svg>
+                </button>
+                <button id="stop-btn" class="send stop" type="button" aria-label="Stop" data-testid="stop" hidden>
+                  <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><rect x="7" y="7" width="10" height="10" rx="2" /></svg>
                 </button>
               </div>
             </form>
-
-            <!-- Chat's model chip, under the composer as in Chat: Chat's picker. -->
-            <div class="foot">
-              <button id="model" class="chip" type="button" aria-haspopup="dialog" data-testid="model-chip" hidden>
-                <span id="model-mark" class="pmark" aria-hidden="true"></span>
-                <span class="chip-text">
-                  <span id="model-label" class="chip-label"></span>
-                  <span id="model-where" class="chip-where" hidden></span>
-                </span>
-                <svg class="chev" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M7 14l5-5 5 5" /></svg>
-              </button>
-            </div>
           </div>
         </section>
       </main>
     </div>
+
+    <!-- The chats: Chat's conversations on the PC (drawer.js). -->
+    <dialog id="drawer" class="drawer" aria-labelledby="drawer-title" data-testid="drawer">
+      <div class="drawer-head">
+        <h2 id="drawer-title" class="wordmark">Yap</h2>
+        <button id="drawer-close" class="iconbtn" type="button" aria-label="Close">
+          <svg class="lines" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M6.5 6.5l11 11M17.5 6.5l-11 11" /></svg>
+        </button>
+      </div>
+      <label class="search">
+        <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><circle cx="11" cy="11" r="6.5" /><path d="M16 16l4 4" /></svg>
+        <input id="drawer-search" type="search" placeholder="Search chats" aria-label="Search chats" enterkeyhint="search" data-testid="drawer-search" />
+      </label>
+      <h3 class="recents-h">Recents</h3>
+      <ul id="recents" class="recents" aria-labelledby="drawer-title" data-testid="recents"></ul>
+      <p id="recents-empty" class="recents-empty" data-testid="recents-empty" hidden></p>
+      <div class="drawer-foot">
+        <span class="drawer-pc">
+          <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><rect x="3" y="4" width="18" height="12" rx="2" /><path d="M8 20h8M12 16v4" /></svg>
+          <span id="drawer-pc" data-testid="drawer-pc"></span>
+        </span>
+        <button id="new-chat" class="newchat" type="button" data-testid="new-chat">
+          <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M12 5v14M5 12h14" /></svg>
+          New chat
+        </button>
+      </div>
+    </dialog>
 
     <!-- The settings: talking hands-free, the headset's sound, the mic, Sound details. -->
     <dialog id="settings" class="sheet" aria-labelledby="settings-title" data-testid="settings-sheet">
@@ -205,7 +271,7 @@
     </dialog>
 
     <!-- Chat's model picker, as a sheet: the provider rail with its logos,
-         each provider's Latest and More models (picker.js). -->
+         each provider's Latest and More models, the effort (picker.js). -->
     <dialog id="models" class="sheet picker" aria-label="Switch the Chat model" data-testid="models"></dialog>
   </body>
 </html>

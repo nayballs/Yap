@@ -135,9 +135,11 @@ fn picker_from(
 ) -> serde_json::Value {
     let mut status = serde_json::to_value(status).unwrap_or_default();
     if let Some(s) = status.as_object_mut() {
-        // Keys stay on the PC, masked or not; the picker's switch offers
-        // ("Read screenshots on this PC", another model) are the PC's.
-        for k in ["maskedKeys", "imagesSwitch", "imagesLocal"] {
+        // Keys stay on the PC, masked or not; "Read screenshots on this PC"
+        // (a download) is the PC's. The model to switch to for pictures
+        // (`imagesSwitch`: a provider and a model) stays: the phone's
+        // composer offers it beside "Send its text instead", as Chat's does.
+        for k in ["maskedKeys", "imagesLocal"] {
             s.remove(k);
         }
     }
@@ -311,6 +313,9 @@ mod tests {
         let text = p.to_string();
         assert!(!text.contains("gsk-secret"), "no key, not even masked: {text}");
         assert!(p["status"].get("maskedKeys").is_none());
+        assert!(p["status"].get("imagesLocal").is_none(), "a download is the PC's");
+        // Whether Chat's model reads pictures, for the phone's composer.
+        assert!(p["status"].get("images").is_some() && p["status"].get("imagesSwitch").is_some());
         assert_eq!(p["status"]["model"]["id"], "openai/gpt-oss-20b");
         assert_eq!(p["status"]["keyed"], serde_json::json!(["groq"]));
         // The provider's live list, for the merge with Yap's curated one.

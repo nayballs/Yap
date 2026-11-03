@@ -10,10 +10,17 @@
 //!
 //! **v1's additions** (2026-11-03), backward compatible both ways: `ask`,
 //! `read_aloud`, `set_model` by a picker row, `set_effort`, `set_fast`;
-//! `ready.can` ([`CAN`]) and `ready.picker`, `answer.id`. `hello.v` stays 1;
-//! a first page ignores the new fields; a page offers the new things only
-//! when `can` says so; a type this PC doesn't know is said plainly
-//! ([`UNKNOWN`]).
+//! `ready.can` ([`CAN`]) and `ready.picker`, `answer.id`. Then the phone's
+//! own conversation and its pictures (the Claude-app layout, the same day):
+//! `chats` → [`Out::Chats`], `open_chat` → [`Out::Thread`], `new_chat`, a
+//! question's `chat` (which conversation it goes to, [`chat_ref`]) and
+//! [`Out::Chat`] (the one it went to), [`Out::Title`] (a conversation
+//! renamed); `picture` and its `0x03` frames ([`PICTURE`]: a question's
+//! pictures, [`MAX_PICTURES`] of at most [`MAX_PICTURE_BYTES`] each),
+//! `pictures` and `asText` on `ask` / `stop`, [`Out::CantRead`]. `hello.v`
+//! stays 1; a first page ignores the new fields; a page offers the new
+//! things only when `can` says so; a type this PC doesn't know is said
+//! plainly ([`UNKNOWN`]).
 
 use serde::{Deserialize, Serialize};
 
@@ -29,6 +36,16 @@ pub const DOWN_RATE: u32 = 24_000;
 /// A binary frame's kind.
 pub const UP: u8 = 0x01;
 pub const DOWN: u8 = 0x02;
+/// A piece of a picture the phone sends with a question (after its
+/// `picture` message): bytes 1–4 the piece's number (u32 LE, from 0 for
+/// each picture), the rest the picture's bytes.
+pub const PICTURE: u8 = 0x03;
+
+/// The most pictures a question carries (Chat's own, `snip::images::MAX_PER_REQUEST`).
+pub const MAX_PICTURES: u32 = 4;
+/// The biggest picture a phone may send: the page makes a photo smaller
+/// first (2,048 px on its longest side, a JPEG), so this is room to spare.
+pub const MAX_PICTURE_BYTES: u64 = 3 * 1024 * 1024;
 
 /// The longest a text frame may be (a hello, a model's id): anything
 /// longer isn't the phone's page.
@@ -67,13 +84,24 @@ pub enum In {
         #[serde(default)]
         pair: Option<PairToken>,
     },
-    /// A question starts; up frames follow.
+    /// A question starts; up frames follow. `chat`: the conversation it
+    /// goes to ([`chat_ref`]: an id, or `"new"`; none: as the Voice
+    /// Assistant chooses).
     Start {
         #[serde(default)]
         mode: String,
+        #[serde(default)]
+        chat: Option<serde_json::Value>,
     },
-    /// The question ended: transcribe and answer.
-    Stop,
+    /// The question ended: transcribe and answer — with the `pictures` sent
+    /// just before it (`picture` and its frames), their text instead of
+    /// them when `asText`.
+    Stop {
+        #[serde(default)]
+        pictures: u32,
+        #[serde(default, rename = "asText")]
+        as_text: bool,
+    },
     /// Drop the question.
     Cancel,
     /// Stop speaking and abandon the answer.
@@ -84,6 +112,15 @@ pub enum In {
     Ask {
         #[serde(default)]
         text: String,
+        /// The conversation it goes to ([`chat_ref`]).
+        #[serde(default)]
+        chat: Option<serde_json::Value>,
+        /// How many pictures sent just before it go with it.
+        #[serde(default)]
+        pictures: u32,
+        /// Their text instead (read on the PC: "Send its text instead").
+        #[serde(default, rename = "asText")]
+        as_text: bool,
     },
     /// Say answer `id` (one this phone was given, `answer.id`) on the phone,
     /// in Yap's voice: the whole of it.
@@ -115,13 +152,75 @@ pub enum In {
     },
     /// Fast mode (Claude Opus 5.5), as the picker sets it.
     SetFast { on: bool },
+    /// Chat's conversations, for the phone's drawer ([`Out::Chats`]).
+    Chats,
+    /// This phone's questions go to conversation `id` from now on: its
+    /// messages come back ([`Out::Thread`]).
+    OpenChat { id: u64 },
+    /// A new chat: the next question starts a conversation.
+    NewChat,
+    /// Picture `n` (from 0) of the next question: `size` bytes, in
+    /// [`PICTURE`] frames that follow.
+    Picture { n: u32, size: u64 },
     Ping,
+}
+
+/// **Which conversation a phone's question goes to**: one it chose (an
+/// id), a new one, or the Voice Assistant's choice.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum ChatRef {
+    /// As the Voice Assistant chooses (a page from before, or a phone that
+    /// never picked one).
+    #[default]
+    Choose,
+    New,
+    Id(u64),
+}
+
+/// A question's `chat`: a conversation's id, or `"new"`; anything else
+/// says nothing. Pure.
+pub fn chat_ref(v: Option<&serde_json::Value>) -> Option<ChatRef> {
+    match v? {
+        serde_json::Value::Number(n) => n.as_u64().filter(|id| *id > 0).map(ChatRef::Id),
+        serde_json::Value::String(s) if s == "new" => Some(ChatRef::New),
+        _ => None,
+    }
 }
 
 /// What this PC answers beyond the first pages' v1 (`ready.can`): a page
 /// offers typing, ▶ on an answer, Chat's picker and the effort only when
 /// its PC says so, and says plainly when it doesn't.
-pub const CAN: &[&str] = &["ask", "read_aloud", "picker", "effort"];
+pub const CAN: &[&str] = &["ask", "read_aloud", "picker", "effort", "chats", "pictures"];
+
+/// A conversation in the phone's drawer.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct ChatItem {
+    pub id: u64,
+    pub title: String,
+    /// Last updated (unix seconds).
+    pub ts: u64,
+}
+
+/// A message of a conversation the phone opened (its words only).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct ThreadMessage {
+    /// "user" | "assistant"
+    pub role: &'static str,
+    pub text: String,
+    /// An answer's id in Chat (`chat:<conversation>:<index>`), for ▶.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub id: Option<String>,
+    /// A question asked out loud.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub voice: bool,
+    /// How many pictures a question carried (they stay on the PC).
+    #[serde(skip_serializing_if = "is_zero")]
+    pub pictures: usize,
+}
+
+fn is_zero(n: &usize) -> bool {
+    *n == 0
+}
 
 /// One model Chat can use, as the phone lists it.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -182,6 +281,20 @@ pub enum Out {
     SpeakStart { rate: u32 },
     SpeakEnd,
     Error { message: String },
+    /// Chat's conversations, newest first (`chats`).
+    Chats { items: Vec<ChatItem> },
+    /// A conversation's latest messages (`open_chat`), `more` when older
+    /// ones were left out; `id` none: a new chat (`new_chat`, or one gone).
+    Thread { id: Option<u64>, title: String, messages: Vec<ThreadMessage>, more: bool },
+    /// This phone's question went to conversation `id` (a new chat's, or the
+    /// one the Voice Assistant chose): its questions go there from now on.
+    Chat { id: u64, title: String },
+    /// Conversation `id` was renamed (in Chat on the PC).
+    Title { id: u64, title: String },
+    /// Chat's model can't read the question's pictures (or its server just
+    /// turned them down): the page offers Chat's own ways on — another
+    /// model, their text instead.
+    CantRead { message: String },
     Pong,
 }
 
@@ -193,7 +306,23 @@ impl Out {
 }
 
 /// Every message type a phone may send ([`In`]).
-const KNOWN: &[&str] = &["hello", "start", "stop", "cancel", "interrupt", "ask", "read_aloud", "set_model", "set_effort", "set_fast", "ping"];
+const KNOWN: &[&str] = &[
+    "hello",
+    "start",
+    "stop",
+    "cancel",
+    "interrupt",
+    "ask",
+    "read_aloud",
+    "set_model",
+    "set_effort",
+    "set_fast",
+    "chats",
+    "open_chat",
+    "new_chat",
+    "picture",
+    "ping",
+];
 
 /// A message this PC can't read.
 const UNREADABLE: &str = "Yap didn't understand that message";
@@ -256,6 +385,15 @@ pub fn decode(bytes: &[u8]) -> Result<Frame, &'static str> {
     Ok(Frame { kind, seq, samples })
 }
 
+/// A picture's piece ([`PICTURE`]): its number and bytes. `None`: not a
+/// picture's frame (too short, another kind, too long).
+pub fn picture_piece(bytes: &[u8]) -> Option<(u32, &[u8])> {
+    if bytes.len() < 5 || bytes.len() > MAX_FRAME || bytes[0] != PICTURE {
+        return None;
+    }
+    Some((u32::from_le_bytes([bytes[1], bytes[2], bytes[3], bytes[4]]), &bytes[5..]))
+}
+
 /// Int16 samples as f32 in -1..1 (the speech engine's).
 pub fn to_f32(samples: &[i16]) -> impl Iterator<Item = f32> + '_ {
     samples.iter().map(|&s| f32::from(s) / 32_768.0)
@@ -304,8 +442,8 @@ mod tests {
         );
         let again = parse(r#"{"type":"hello","v":1,"name":"Pixel","nonce":"n","device":{"id":"d1","secret":"s"}}"#).unwrap();
         assert!(matches!(again, In::Hello { device: Some(DeviceCreds { ref id, .. }), pair: None, .. } if id == "d1"));
-        assert_eq!(parse(r#"{"type":"start","mode":"ask"}"#).unwrap(), In::Start { mode: "ask".into() });
-        assert_eq!(parse(r#"{"type":"stop"}"#).unwrap(), In::Stop);
+        assert_eq!(parse(r#"{"type":"start","mode":"ask"}"#).unwrap(), In::Start { mode: "ask".into(), chat: None });
+        assert_eq!(parse(r#"{"type":"stop"}"#).unwrap(), In::Stop { pictures: 0, as_text: false });
         assert_eq!(parse(r#"{"type":"cancel"}"#).unwrap(), In::Cancel);
         assert_eq!(parse(r#"{"type":"interrupt"}"#).unwrap(), In::Interrupt);
         assert_eq!(
@@ -321,7 +459,10 @@ mod tests {
     #[test]
     fn typing_reading_aloud_and_the_picker_are_v1_additions() {
         // A typed question, and ▶ on an answer.
-        assert_eq!(parse(r#"{"type":"ask","text":"When is the bin day?"}"#).unwrap(), In::Ask { text: "When is the bin day?".into() });
+        assert_eq!(
+            parse(r#"{"type":"ask","text":"When is the bin day?"}"#).unwrap(),
+            In::Ask { text: "When is the bin day?".into(), chat: None, pictures: 0, as_text: false }
+        );
         assert_eq!(parse(r#"{"type":"read_aloud","id":"chat:3:5"}"#).unwrap(), In::ReadAloud { id: "chat:3:5".into() });
         // A row of Chat's picker: its provider, model, server or file.
         assert_eq!(
@@ -382,5 +523,72 @@ mod tests {
         assert_eq!(j(Out::SpeakEnd), serde_json::json!({"type":"speak_end"}));
         assert_eq!(j(Out::Error { message: "Oops.".into() }), serde_json::json!({"type":"error","message":"Oops."}));
         assert_eq!(j(Out::Pong), serde_json::json!({"type":"pong"}));
+    }
+
+    #[test]
+    fn the_phones_own_conversation_and_pictures_are_v1_additions() {
+        // The drawer, a chat opened, a new chat.
+        assert_eq!(parse(r#"{"type":"chats"}"#).unwrap(), In::Chats);
+        assert_eq!(parse(r#"{"type":"open_chat","id":12}"#).unwrap(), In::OpenChat { id: 12 });
+        assert_eq!(parse(r#"{"type":"new_chat"}"#).unwrap(), In::NewChat);
+        assert_eq!(parse(r#"{"type":"open_chat"}"#).unwrap_err(), "Yap didn't understand that message", "no id");
+        assert_eq!(parse(r#"{"type":"open_chat","id":"twelve"}"#).unwrap_err(), "Yap didn't understand that message");
+        // A question's conversation, and its pictures.
+        let ask = parse(r#"{"type":"ask","text":"What's this plant?","chat":12,"pictures":2,"asText":true}"#).unwrap();
+        let In::Ask { chat, pictures, as_text, .. } = ask else { panic!("{ask:?}") };
+        assert_eq!((chat_ref(chat.as_ref()), pictures, as_text), (Some(ChatRef::Id(12)), 2, true));
+        let start = parse(r#"{"type":"start","mode":"ask","chat":"new"}"#).unwrap();
+        let In::Start { chat, .. } = start else { panic!("{start:?}") };
+        assert_eq!(chat_ref(chat.as_ref()), Some(ChatRef::New));
+        assert_eq!(parse(r#"{"type":"stop","pictures":1}"#).unwrap(), In::Stop { pictures: 1, as_text: false });
+        assert_eq!(parse(r#"{"type":"picture","n":0,"size":204800}"#).unwrap(), In::Picture { n: 0, size: 204_800 });
+        // `chat` says nothing unless it's an id or "new".
+        for v in [serde_json::json!(0), serde_json::json!(-3), serde_json::json!("12"), serde_json::json!(null), serde_json::json!({"id": 1})] {
+            assert_eq!(chat_ref(Some(&v)), None, "{v}");
+        }
+        assert_eq!(chat_ref(None), None);
+        assert!(CAN.contains(&"chats") && CAN.contains(&"pictures"));
+        for t in ["chats", "open_chat", "new_chat", "picture"] {
+            assert!(KNOWN.contains(&t), "{t}");
+        }
+        // A picture's pieces: kind 0x03, its number, its bytes (any length).
+        let mut frame = vec![PICTURE, 2, 0, 0, 0];
+        frame.extend_from_slice(b"\xff\xd8jpeg");
+        assert_eq!(picture_piece(&frame), Some((2, &b"\xff\xd8jpeg"[..])));
+        assert_eq!(picture_piece(&[PICTURE, 0, 0, 0, 0]), Some((0, &[][..])));
+        assert_eq!(picture_piece(&[UP, 0, 0, 0, 0, 1]), None, "an audio frame");
+        assert_eq!(picture_piece(&[PICTURE, 0, 0]), None, "no number");
+        assert_eq!(picture_piece(&vec![PICTURE; MAX_FRAME + 1]), None, "too long");
+        // An audio frame's kind is still only up or down.
+        assert!(decode(&[PICTURE, 0, 0, 0, 0, 1, 2]).is_err());
+        // What the PC says.
+        let j = |o: Out| serde_json::from_str::<serde_json::Value>(&o.json()).unwrap();
+        assert_eq!(
+            j(Out::Chats { items: vec![ChatItem { id: 3, title: "Trip packing list".into(), ts: 1_700_000_000 }] }),
+            serde_json::json!({"type":"chats","items":[{"id":3,"title":"Trip packing list","ts":1_700_000_000u64}]})
+        );
+        let thread = Out::Thread {
+            id: Some(3),
+            title: "Trip packing list".into(),
+            messages: vec![
+                ThreadMessage { role: "user", text: "What to pack?".into(), id: None, voice: true, pictures: 2 },
+                ThreadMessage { role: "assistant", text: "A coat.".into(), id: Some("chat:3:1".into()), voice: false, pictures: 0 },
+            ],
+            more: false,
+        };
+        assert_eq!(
+            j(thread),
+            serde_json::json!({"type":"thread","id":3,"title":"Trip packing list","more":false,"messages":[
+                {"role":"user","text":"What to pack?","voice":true,"pictures":2},
+                {"role":"assistant","text":"A coat.","id":"chat:3:1"}
+            ]})
+        );
+        assert_eq!(
+            j(Out::Thread { id: None, title: String::new(), messages: vec![], more: false }),
+            serde_json::json!({"type":"thread","id":null,"title":"","messages":[],"more":false})
+        );
+        assert_eq!(j(Out::Chat { id: 9, title: "Bread".into() }), serde_json::json!({"type":"chat","id":9,"title":"Bread"}));
+        assert_eq!(j(Out::Title { id: 9, title: "Sourdough".into() }), serde_json::json!({"type":"title","id":9,"title":"Sourdough"}));
+        assert_eq!(j(Out::CantRead { message: "No.".into() }), serde_json::json!({"type":"cant_read","message":"No."}));
     }
 }

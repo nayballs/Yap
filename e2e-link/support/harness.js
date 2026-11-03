@@ -33,8 +33,46 @@ export const MODELS = [
   { id: 'anthropic|claude-haiku-5-5', label: 'Claude Haiku 5.5 · Anthropic', onThisPc: false },
 ];
 
-/** What a PC that answers typed questions and has Chat's picker says it can (`ready.can`). */
-export const CAN = ['ask', 'read_aloud', 'picker', 'effort'];
+/**
+ * What a PC that answers typed questions, has Chat's picker, keeps the
+ * phone's own conversation and takes its pictures says it can (`ready.can`).
+ */
+export const CAN = ['ask', 'read_aloud', 'picker', 'effort', 'chats', 'pictures'];
+/** A PC from the morning of 3 Nov: typing and the picker, no drawer, no pictures. */
+export const CAN_BEFORE_CHATS = ['ask', 'read_aloud', 'picker', 'effort'];
+
+/** Chat's conversations on the PC, as `chats` lists them (fictional, newest first). */
+export const RECENTS = [
+  { id: 41, title: 'Trip packing list', ts: 1_793_700_000 },
+  { id: 38, title: 'Sourdough starter schedule', ts: 1_793_600_000 },
+  { id: 35, title: 'Bike gear ratios', ts: 1_793_500_000 },
+  { id: 30, title: 'Allotment watering rota', ts: 1_793_400_000 },
+  { id: 22, title: 'Birthday card wording', ts: 1_793_300_000 },
+];
+
+/** A conversation's messages as `open_chat` returns them (fictional). */
+export const THREADS = {
+  41: {
+    title: 'Trip packing list',
+    messages: [
+      { role: 'user', text: 'What should I pack for three days of hiking in the rain?' },
+      {
+        role: 'assistant',
+        text: 'Pack **layers** you can add and take off:\n\n- A waterproof jacket and overtrousers\n- Two merino base layers\n- Spare socks in a dry bag\n\nA small towel and a head torch help too.',
+        id: 'chat:41:1',
+      },
+      { role: 'user', text: 'Is this rucksack big enough?', voice: true, pictures: 1 },
+      { role: 'assistant', text: 'A 35-litre pack is plenty for three days if you hut-hop.', id: 'chat:41:3' },
+    ],
+  },
+  38: {
+    title: 'Sourdough starter schedule',
+    messages: [
+      { role: 'user', text: 'How often do I feed a starter kept in the fridge?' },
+      { role: 'assistant', text: 'Once a week: discard half, then feed it equal weights of flour and water.', id: 'chat:38:1' },
+    ],
+  },
+};
 
 /**
  * Chat's picker as the PC sends it (`ready.picker`, link/models.rs): Chat on
@@ -230,6 +268,13 @@ export async function mockPc(page, opts = {}) {
     // A PC from before typed questions and Chat's picker (`old`): v1's `ready` only.
     can: opts.old ? null : opts.can || CAN,
     picker: opts.old ? null : opts.picker || pickerData(),
+    // The drawer's conversations and their messages: `chats`, `open_chat`
+    // and `new_chat` answered as the PC does (`autoChats` false: by the test).
+    recents: [...(opts.recents || RECENTS)],
+    threads: { ...(opts.threads || THREADS) },
+    autoChats: opts.autoChats !== false,
+    // Pictures as they came: `{n, size, bytes}` (a `picture` and its 0x03 frames).
+    pictures: [],
   };
   pc.ready = (conn = pc.last()) =>
     pc.sendTo(conn, {
@@ -261,6 +306,28 @@ export async function mockPc(page, opts = {}) {
           if (pc.onHello) pc.onHello(msg, conn, pc);
           else if (pc.autoReady && msg.device && msg.device.id === DEVICE.id) pc.ready(conn);
         } else if (msg.type === 'ping' && pc.autoPong) pc.sendTo(conn, { type: 'pong' });
+        else if (msg.type === 'picture') pc.pictures.push({ n: msg.n, size: msg.size, bytes: Buffer.alloc(0), pieces: 0 });
+        else if (pc.autoChats && msg.type === 'chats') pc.sendTo(conn, { type: 'chats', items: pc.recents });
+        else if (pc.autoChats && msg.type === 'open_chat') {
+          const t = pc.threads[msg.id];
+          if (t) pc.sendTo(conn, { type: 'thread', id: msg.id, title: t.title, messages: t.messages, more: false });
+          else {
+            pc.sendTo(conn, { type: 'error', message: "That chat isn't in Chat on your PC any more. Your next question starts a new one." });
+            pc.sendTo(conn, { type: 'thread', id: null, title: '', messages: [], more: false });
+          }
+        } else if (pc.autoChats && msg.type === 'new_chat') {
+          pc.sendTo(conn, { type: 'thread', id: null, title: '', messages: [], more: false });
+        }
+      } else if (Buffer.from(m)[0] === 0x03) {
+        // A piece of the picture announced last.
+        const b = Buffer.from(m);
+        const p = pc.pictures[pc.pictures.length - 1];
+        if (p) {
+          expect(b.readUInt32LE(1)).toBe(p.pieces);
+          p.pieces++;
+          p.bytes = Buffer.concat([p.bytes, b.subarray(5)]);
+        }
+        pc.log.push({ picture: b.length });
       } else {
         const f = parseFrame(m);
         conn.frames.push(f);
@@ -282,6 +349,72 @@ export function parseFrame(buf) {
   const samples = new Int16Array(n);
   for (let i = 0; i < n; i++) samples[i] = b.readInt16LE(5 + i * 2);
   return { kind: b[0], seq: b.readUInt32LE(1), bytes: b.length, samples };
+}
+
+/**
+ * A made-up photo, drawn in the page (a sky, a sun, hills; `hue` sets its
+ * colours), as a file to choose: `{name, mimeType, buffer}`.
+ */
+export async function photo(page, { w = 1200, h = 900, hue = 200, name = 'photo.png' } = {}) {
+  const bytes = await page.evaluate(
+    async ([w, h, hue]) => {
+      const c = new OffscreenCanvas(w, h);
+      const g = c.getContext('2d');
+      const sky = g.createLinearGradient(0, 0, 0, h);
+      sky.addColorStop(0, `hsl(${hue} 70% 72%)`);
+      sky.addColorStop(1, `hsl(${hue + 30} 60% 90%)`);
+      g.fillStyle = sky;
+      g.fillRect(0, 0, w, h);
+      g.fillStyle = 'hsl(45 95% 62%)';
+      g.beginPath();
+      g.arc(w * 0.72, h * 0.3, Math.min(w, h) * 0.11, 0, Math.PI * 2);
+      g.fill();
+      g.fillStyle = `hsl(${hue - 80} 35% 45%)`;
+      g.beginPath();
+      g.moveTo(0, h * 0.7);
+      g.quadraticCurveTo(w * 0.3, h * 0.45, w * 0.6, h * 0.68);
+      g.quadraticCurveTo(w * 0.85, h * 0.85, w, h * 0.6);
+      g.lineTo(w, h);
+      g.lineTo(0, h);
+      g.fill();
+      g.fillStyle = `hsl(${hue - 90} 40% 30%)`;
+      g.beginPath();
+      g.moveTo(0, h * 0.86);
+      g.quadraticCurveTo(w * 0.5, h * 0.7, w, h * 0.9);
+      g.lineTo(w, h);
+      g.lineTo(0, h);
+      g.fill();
+      const blob = await c.convertToBlob({ type: 'image/png' });
+      return [...new Uint8Array(await blob.arrayBuffer())];
+    },
+    [w, h, hue],
+  );
+  return { name, mimeType: 'image/png', buffer: Buffer.from(bytes) };
+}
+
+/** A JPEG's size from its frame header, or null when it isn't one. */
+export function jpegSize(buf) {
+  if (buf[0] !== 0xff || buf[1] !== 0xd8) return null;
+  let i = 2;
+  while (i + 9 < buf.length) {
+    if (buf[i] !== 0xff) return null;
+    const marker = buf[i + 1];
+    const len = buf.readUInt16BE(i + 2);
+    if (marker >= 0xc0 && marker <= 0xcf && ![0xc4, 0xc8, 0xcc].includes(marker)) {
+      return { h: buf.readUInt16BE(i + 5), w: buf.readUInt16BE(i + 7) };
+    }
+    i += 2 + len;
+  }
+  return null;
+}
+
+/** Pictures chosen with + → Choose photos. */
+export async function choosePhotos(page, files) {
+  await page.getByTestId('plus').click();
+  await expect(page.getByTestId('plus-menu')).toBeVisible();
+  const chooser = page.waitForEvent('filechooser');
+  await page.getByTestId('choose-photos').click();
+  await (await chooser).setFiles(files);
 }
 
 /** A down frame of Yap's voice: kind 0x02, seq, Int16 LE samples. */
