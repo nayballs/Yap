@@ -212,8 +212,11 @@ windows-native-keyring-store = "1"
 webview2-com = "0.39"
 # `yap.exe diarize` (diarize.rs) loads NeMo-Speech.cpp's C API DLLs from the
 # data folder with LoadLibraryExW(…DLL_LOAD_DIR | DEFAULT_DIRS), so their own
-# ggml and MSVC runtime come from that folder. Already in the tree.
-libloading = "0.8"
+# ggml and MSVC runtime come from that folder. 0.9 (Nov 2026): the same
+# LoadLibraryExW / GetProcAddress calls, the path as its `AsFilename` (an
+# interior NUL now an error, never cut short); a stub build compiles it, only
+# the real runtime loading proves it (e2e/diarization-real.spec.js).
+libloading = "0.9"
 
 [features]
 # Default has NO transcribe-rs so plain `cargo check` compiles the stub (fast).
