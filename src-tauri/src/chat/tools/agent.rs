@@ -1,20 +1,36 @@
 //! The agent loop: the model asked, its tool calls run (the note tools
 //! here, the web's and the apps' through their modules), and asked
 //! again, ≤ `MAX_TOOL_STEPS`; a rejected call asked once more; a search
-//! that must come first; every step streamed to whoever watches. Its
-//! parts: `offer` (the tools every step offers) and `room` (the budget a
-//! result and a picture must fit).
+//! that must come first; every step streamed to whoever watches.
+//!
+//! Here: how a turn's loop starts and goes ([`tool_loop`]: the first
+//! messages, the tools, then step after step), what its steps share
+//! ([`Loop`]) and its rules' notes and limits. Its parts, in the order a
+//! step meets them: `offer` (the tools every step offers), `step` (one
+//! model call and its special cases, and the last call without tools),
+//! `calls` (a step's calls in order), `args` (the fixes before a call),
+//! `gate` (the guards before it runs: a new document's outline, the safety
+//! rule, a model evaluation's intercept), `dispatch` (where it runs: one
+//! source per kind of tool), `fold` (its result back into the turn, and
+//! what follows a step) and `room` (the budget a result and a picture
+//! must fit).
 
+mod args;
+mod calls;
+mod dispatch;
+mod fold;
+mod gate;
 mod offer;
 mod room;
+mod step;
 
 use serde_json::{json, Value};
 
-use super::memory::{asked_to_remember, search_chats, MEMORY_TOOL_NAMES};
-use super::notes::{changed_note, execute};
-use super::{refused_after_web, tool_error, tool_result, Extra, MAX_TOOL_STEPS};
 pub use offer::offered_tools;
 use room::Room;
+use step::Step;
+
+use super::{Extra, MAX_TOOL_STEPS};
 
 /// How many times a turn asks again after the provider rejected the
 /// model's tool call, before it answers without tools.
@@ -31,17 +47,6 @@ fn rejected_call_note(why: &str) -> String {
 /// Said before the last call when tools won't do (rejected again, or out
 /// of steps): an answer now, from what the conversation has.
 const ANSWER_NOW_NOTE: &str = "(A note from Yap, not the user.) Don't call any tool now: answer the user from what you have, and say plainly if something couldn't be done.";
-
-/// A tool call's arguments: OpenAI sends a JSON string; some servers send
-/// the object itself.
-fn call_arguments(call: &Value) -> Value {
-    match &call["function"]["arguments"] {
-        Value::String(s) if s.trim().is_empty() => json!({}),
-        Value::String(s) => serde_json::from_str(s).unwrap_or(Value::Null),
-        obj @ Value::Object(_) => obj.clone(),
-        _ => Value::Null,
-    }
-}
 
 /// How a turn's first step goes.
 #[derive(Debug, Clone, PartialEq)]
@@ -229,6 +234,90 @@ fn report(live: Option<crate::chat::stream::Live<'_>>, tools_used: &[String], we
     }
 }
 
+/// **A turn's tool loop under way** ([`tool_loop`]): what the turn gave it,
+/// what every step shares — the tools (the same on every step), the room
+/// the request has, the messages so far and the chips — and what the steps
+/// leave for the next (a search still to make, a nudge already given).
+struct Loop<'a> {
+    /// The person's own message this turn (the app and memory tools act on
+    /// it, a forced search's query is for it).
+    question: &'a str,
+    base_url: &'a str,
+    api_key: &'a str,
+    model: &'a str,
+    provider: &'a str,
+    disable_thinking: bool,
+    /// The app tools are offered (`apps.rs`).
+    open_apps: bool,
+    /// Hears of every note a tool created or changed, as it happens.
+    on_change: &'a (dyn Fn(u64) + Send + Sync),
+    /// The turn's web side while web search is on (`web.rs`).
+    web: Option<&'a mut crate::web::Turn>,
+    /// What else the turn offers (memory, the calendar, documents,
+    /// pictures, the screen…); `own_search` as the turn's web says.
+    extra: Extra<'a>,
+    /// Whoever watches the stream.
+    live: Option<crate::chat::stream::Live<'a>>,
+    /// The tools every step offers ([`offered_tools`]).
+    tools: &'a Value,
+    /// What the request may still take ([`Room`]).
+    room: Room<'a>,
+    /// A strong Claude's own web tools in Chat's request (`web::Turn::
+    /// server_tools`): Yap's `web_search` and `read_page` aren't offered.
+    claude_web: bool,
+    /// Its steps go to Anthropic's Messages API (llm/anthropic.rs).
+    native_chat: bool,
+    /// The answer just before the question: a "yes" to its offer to open
+    /// an app is the person asking (`apps::consented`).
+    previous: Option<String>,
+    /// What was said before this question (the messages, earlier searches'
+    /// queries and results): what a forced search's query mustn't carry
+    /// over (`web::fresh_query`).
+    earlier: &'a [&'a str],
+    /// The person's own earlier messages: a word of theirs the model put in
+    /// for a misheard one stays ("kelp" → "Kellbrook", `web::fresh_query`).
+    own: &'a [&'a str],
+    /// What a notes search that finds nothing leads to ([`EmptyNotes`]).
+    empty_notes: EmptyNotes,
+    /// The messages so far: the system prompt, the history, the question,
+    /// then each step's calls and results.
+    messages: Vec<Value>,
+    /// The tools' displayTexts (the UI shows them as activity chips).
+    tools_used: Vec<String>,
+    /// Something from the screen came in (`look_at_screen`): web content for
+    /// the safety rule, as a page read is — and so is a question that carries
+    /// a page's words (`Extra::web_question`), from the start.
+    screen_seen: bool,
+    /// The next step must search ([`FirstStep::MustSearch`]).
+    must_search: bool,
+    /// A notes search that found nothing has led to the web (once a turn).
+    led_to_web: bool,
+    /// Times the provider rejected the model's tool call.
+    rejected: u32,
+    /// Times the model was asked to finish a document it made (documents.rs).
+    finish_nudges: usize,
+    /// A new document's first step answered in words: asked once to outline
+    /// it (`web::Turn::outline_first`).
+    outline_nudged: bool,
+}
+
+impl Loop<'_> {
+    /// Yap's own search for the model, with the turn's web
+    /// ([`search_for_the_model`]), and the chips and sources so far to the
+    /// page. (No web this turn: nothing.)
+    async fn search_for(&mut self, query: &str) {
+        if let Some(turn) = self.web.as_deref_mut() {
+            search_for_the_model(turn, query, &mut self.messages, &mut self.tools_used, self.room, self.live).await;
+            report(self.live, &self.tools_used, Some(turn), self.extra.calendar.map(|c| c.log));
+        }
+    }
+
+    /// The chips and sources so far, to whoever watches ([`report`]).
+    fn report(&self) {
+        report(self.live, &self.tools_used, self.web.as_deref(), self.extra.calendar.map(|c| c.log));
+    }
+}
+
 /// The agent loop (their `useChatStreaming` re-invoke loop, every step
 /// streamed when someone watches — `live`):
 /// send messages + tools; while the model calls tools, execute them locally,
@@ -239,7 +328,7 @@ fn report(live: Option<crate::chat::stream::Live<'_>>, tools_used: &[String], we
 /// too (`apps.rs`), acting on `question`, the person's own message. `web`:
 /// the turn's web side while web search is on (`web.rs`): its tools are
 /// offered, its sources collected, and once web content is in the turn the
-/// action tools are refused ([`refused_after_web`]). `history`: the earlier
+/// action tools are refused ([`super::refused_after_web`]). `history`: the earlier
 /// messages as OpenAI messages (`chats::history_messages`: an earlier web
 /// answer's search replayed as its tool call). `context`: what Yap adds to
 /// the question for this turn (the time, notes found, …), sent in the
@@ -300,6 +389,10 @@ pub async fn run_tool_loop(
     tool_loop(system, history, question, context, base_url, api_key, model, provider, disable_thinking, open_apps, on_change, web, first, Extra::default(), None).await
 }
 
+/// The loop itself ([`run_tool_loop_with`]): the first messages and the
+/// tools, a search Yap makes first, then a step at a time ([`Loop::step`],
+/// [`Loop::run_calls`]) until the model answers in words, and the last call
+/// without tools when it doesn't ([`Loop::answer_now`]).
 #[allow(clippy::too_many_arguments)]
 async fn tool_loop(
     system: &str,
@@ -319,22 +412,13 @@ async fn tool_loop(
     live: Option<crate::chat::stream::Live<'_>>,
 ) -> Result<(String, Vec<String>), String> {
     let must_search_first = first == FirstStep::MustSearch && web.is_some();
+    let here = crate::ai::ai_model::runs_here(provider, base_url);
     // A model on this PC gets Yap's second search for local prices; a cloud
     // model is told to make it.
     if let Some(turn) = web.as_deref_mut() {
-        turn.set_yap_retries(crate::ai::ai_model::runs_here(provider, base_url));
+        turn.set_yap_retries(here);
     }
-    let mut context = context.to_vec();
-    if must_search_first {
-        context.push(MUST_SEARCH_NOTE.to_string());
-    }
-    let mut messages: Vec<Value> = vec![json!({ "role": "system", "content": system })];
-    messages.extend(history.iter().cloned());
-    messages.extend(crate::chat::chats::question_messages(&context, question));
-    // The turn's screenshots go with the question (Snip to Chat; nothing
-    // without any).
-    crate::snip::turn::attach(&mut messages);
-
+    let messages = opening_messages(system, history, question, context, must_search_first);
     // A strong Claude searches and reads pages in Chat's own request
     // (Anthropic's server tools, `web::Turn::server_tools`): Yap's
     // `web_search` and `read_page` aren't offered beside them.
@@ -343,47 +427,92 @@ async fn tool_loop(
     let own_search = web.as_deref().is_some_and(crate::web::Turn::own_search);
     let extra = Extra { own_search: extra.own_search || own_search, ..extra };
     let tools = offered_tools(open_apps, web.is_some() && !claude_web, extra);
-    // Its steps go to Anthropic's Messages API (llm/anthropic.rs).
-    let native_chat = crate::ai::llm::anthropic::speaks_messages(provider, model);
-    let native = |web: Option<&crate::web::Turn>| crate::ai::llm::anthropic::Native {
-        server_tools: web.and_then(crate::web::Turn::server_tools).unwrap_or_default(),
-    };
-    let room = Room { limit: extra.room, tools: &tools, provider, here: crate::ai::ai_model::runs_here(provider, base_url) };
-    let mut tools_used: Vec<String> = Vec::new();
-    // Something from the screen came in (`look_at_screen`): web content for
-    // the safety rule, as a page read is — and so is a question that carries
-    // a page's words (`Extra::web_question`), from the start.
-    let mut screen_seen = extra.web_question;
+    // A question that carries a page's words (`Extra::web_question`) is web
+    // content from the start.
     if extra.web_question {
         if let Some(turn) = web.as_deref_mut() {
             turn.mark_seen();
         }
     }
-    // The answer just before the question: a "yes" to its offer to open an
-    // app is the person asking (`apps::consented`).
-    let previous: Option<String> = history
-        .last()
-        .filter(|m| m["role"] == "assistant")
-        .and_then(|m| crate::snip::turn::text_of(&m["content"]));
-
-    // Yap searches first: the results go to the model as its own call's.
-    if let (FirstStep::YapSearches(query), Some(turn)) = (&first, web.as_deref_mut()) {
-        search_for_the_model(turn, query, &mut messages, &mut tools_used, room, live).await;
-        report(live, &tools_used, Some(turn), extra.calendar.map(|c| c.log));
-    }
-    let mut must_search = must_search_first;
     // A notes search that finds nothing, for a question that isn't about the
     // person's notes, leads to the web (once a turn).
-    let empty_notes = if web.is_some() && !crate::web::about_own_stuff(question) {
-        empty_notes_rule(crate::ai::ai_model::runs_here(provider, base_url))
-    } else {
-        EmptyNotes::Nothing
+    let empty_notes = if web.is_some() && !crate::web::about_own_stuff(question) { empty_notes_rule(here) } else { EmptyNotes::Nothing };
+    let earlier = earlier_texts(history);
+    let earlier: Vec<&str> = earlier.iter().map(String::as_str).collect();
+    let own = own_messages(history);
+    let own: Vec<&str> = own.iter().map(String::as_str).collect();
+    let mut turn = Loop {
+        question,
+        base_url,
+        api_key,
+        model,
+        provider,
+        disable_thinking,
+        open_apps,
+        on_change,
+        web,
+        extra,
+        live,
+        tools: &tools,
+        room: Room { limit: extra.room, tools: &tools, provider, here },
+        claude_web,
+        native_chat: crate::ai::llm::anthropic::speaks_messages(provider, model),
+        previous: previous_answer(history),
+        earlier: &earlier,
+        own: &own,
+        empty_notes,
+        messages,
+        tools_used: Vec::new(),
+        screen_seen: extra.web_question,
+        must_search: must_search_first,
+        led_to_web: false,
+        rejected: 0,
+        finish_nudges: 0,
+        outline_nudged: false,
     };
-    let mut led_to_web = false;
-    // What was said before this question (the messages, earlier searches'
-    // queries and results): what a forced search's query mustn't carry over
-    // (`web::fresh_query`).
-    let earlier: Vec<String> = history
+    // Yap searches first: the results go to the model as its own call's.
+    if let FirstStep::YapSearches(query) = &first {
+        turn.search_for(query).await;
+    }
+    for _step in 0..MAX_TOOL_STEPS {
+        match turn.step().await? {
+            Step::Again => continue,
+            Step::Answer(content) => return Ok((content, turn.tools_used)),
+            Step::Calls { msg, calls, forced } => turn.run_calls(msg, &calls, forced).await,
+            Step::GiveUp => break,
+        }
+    }
+    // Out of steps, or the tool calls kept being rejected.
+    turn.answer_now().await
+}
+
+/// The loop's first messages: the system prompt, the history, then the
+/// question with what Yap adds to it this turn (`context`, and
+/// [`MUST_SEARCH_NOTE`] when the first step must search) and the turn's
+/// screenshots (Snip to Chat; nothing without any).
+fn opening_messages(system: &str, history: &[Value], question: &str, context: &[String], must_search_first: bool) -> Vec<Value> {
+    let mut context = context.to_vec();
+    if must_search_first {
+        context.push(MUST_SEARCH_NOTE.to_string());
+    }
+    let mut messages: Vec<Value> = vec![json!({ "role": "system", "content": system })];
+    messages.extend(history.iter().cloned());
+    messages.extend(crate::chat::chats::question_messages(&context, question));
+    crate::snip::turn::attach(&mut messages);
+    messages
+}
+
+/// The answer just before the question (`history`'s last message, when
+/// it's the model's): its text.
+fn previous_answer(history: &[Value]) -> Option<String> {
+    history.last().filter(|m| m["role"] == "assistant").and_then(|m| crate::snip::turn::text_of(&m["content"]))
+}
+
+/// Everything said before this question: each message's text (a question
+/// with screenshots has parts: its text counts) and each earlier call's
+/// arguments (searches' queries).
+fn earlier_texts(history: &[Value]) -> Vec<String> {
+    history
         .iter()
         .flat_map(|m| {
             // (A question with screenshots has parts: its text counts.)
@@ -391,511 +520,17 @@ async fn tool_loop(
             texts.extend(m["tool_calls"].as_array().into_iter().flatten().filter_map(|c| c["function"]["arguments"].as_str().map(str::to_string)));
             texts
         })
-        .collect();
-    let earlier: Vec<&str> = earlier.iter().map(String::as_str).collect();
-    // The person's own earlier messages: a word of theirs the model put in
-    // for a misheard one stays ("kelp" → "Kellbrook", `web::fresh_query`).
-    let own: Vec<String> = history.iter().filter(|m| m["role"] == "user").filter_map(|m| crate::snip::turn::text_of(&m["content"])).collect();
-    let own: Vec<&str> = own.iter().map(String::as_str).collect();
+        .collect()
+}
 
-    let mut rejected = 0u32;
-    // Times the model was asked to finish a document it made (documents.rs).
-    let mut finish_nudges = 0usize;
-    // A new document's first step answered in words: asked once to outline
-    // it (`web::Turn::outline_first`).
-    let mut outline_nudged = false;
-    for _step in 0..MAX_TOOL_STEPS {
-        let forced = must_search;
-        let mut req = crate::ai::llm::ChatRequest::chat(
-            base_url,
-            api_key,
-            model,
-            provider,
-            0.5,
-            Value::Array(messages.clone()),
-            Some(&tools),
-            must_search.then(must_search_choice),
-        );
-        // The step made to search is a call, never the answer: its words
-        // aren't shown or said, and it's cut short if it writes on
-        // ([`MUST_SEARCH_TOKENS`]).
-        let chips_only = live.map(|l| crate::chat::stream::ChipsOnly(l.sink));
-        let step_live = match (live, &chips_only) {
-            (Some(l), Some(quiet)) if forced => Some(crate::chat::stream::Live { sink: quiet, beside: l.beside }),
-            _ => live,
-        };
-        if forced {
-            req.max_tokens = Some(MUST_SEARCH_TOKENS);
-        }
-        if native_chat {
-            req.native = Some(native(web.as_deref()));
-        }
-        let answer = ask(step_live, &req, true).await;
-        // A server that won't be made to search (it refuses `tool_choice`,
-        // answers in words, or calls another tool): Yap searches for the
-        // model, with the question as the query, and the model goes on.
-        // (What it wrote instead was never shown.)
-        if must_search {
-            must_search = false;
-            let searched = answer.as_ref().is_ok_and(|m| {
-                m["tool_calls"].as_array().is_some_and(|c| c.iter().any(|call| call["function"]["name"] == "web_search"))
-            });
-            if !searched {
-                tracing::info!(provider, "Chat: the model wasn't made to search; Yap searches for it");
-                if let Some(turn) = web.as_deref_mut() {
-                    search_for_the_model(turn, &crate::web::search_query(question), &mut messages, &mut tools_used, room, live).await;
-                    report(live, &tools_used, Some(turn), extra.calendar.map(|c| c.log));
-                }
-                continue;
-            }
-        }
-        let msg = match answer {
-            Ok(msg) => msg,
-            // The provider refused the model's own tool call (a missing
-            // argument, a tool it doesn't have, a call written as text):
-            // tell it once and ask again, then answer without tools — never
-            // an error for the person.
-            Err(e) => {
-                // A model Yap didn't know couldn't read images (switched to
-                // after a question with a screenshot) turned the earlier
-                // ones down: a "no" from now on, as for a question's own
-                // (`snip::vision::refused`), and asked again with each said
-                // in a line instead. A question with screenshots of its own
-                // is chat::commands' to say.
-                if crate::snip::vision::is_image_refusal(&e)
-                    && crate::snip::turn::images().is_empty()
-                    && crate::snip::turn::without_images(&mut messages)
-                {
-                    tracing::info!(provider, "Chat: the model refused the earlier screenshots; asking again without them");
-                    crate::snip::vision::refused(provider, model);
-                    if let Some(live) = live {
-                        live.sink.send(crate::chat::stream::Event::Text { text: String::new() });
-                    }
-                    continue;
-                }
-                let Some(why) = crate::ai::llm::rejected_tool_call(&e) else {
-                    return Err(e);
-                };
-                // A step refused mid-stream may have shown some text: it
-                // wasn't the answer.
-                if let Some(live) = live {
-                    live.sink.send(crate::chat::stream::Event::Text { text: String::new() });
-                }
-                if rejected < REJECTED_CALL_RETRIES {
-                    rejected += 1;
-                    tracing::info!(provider, "Chat: the provider rejected the model's tool call; asking again");
-                    messages.push(json!({ "role": "user", "content": rejected_call_note(why) }));
-                    continue;
-                }
-                tracing::info!(provider, "Chat: the model's tool call was rejected again; answering without tools");
-                break;
-            }
-        };
-
-        // What Claude's own web tools did in this reply (llm/anthropic.rs):
-        // chips, the turn's sources, its citations numbered — before any of
-        // its tool calls run, so the safety rule sees the web first.
-        let mut msg = msg;
-        if let Some(w) = msg.as_object_mut().and_then(|o| o.remove("yap_web")) {
-            let (chips, numbers) = web.as_deref_mut().map(|t| t.took_server(&w)).unwrap_or_default();
-            tracing::info!(chips = chips.len(), cited = numbers.len(), "Chat: Claude searched the web itself");
-            tools_used.extend(chips);
-            report(live, &tools_used, web.as_deref(), extra.calendar.map(|c| c.log));
-            if let Some(text) = msg["content"].as_str() {
-                msg["content"] = json!(crate::ai::llm::anthropic::number_marks(text, &numbers));
-            }
-        }
-        let tool_calls = msg["tool_calls"].as_array().cloned().unwrap_or_default();
-        if tool_calls.is_empty() {
-            let content = msg["content"].as_str().unwrap_or("").trim().to_string();
-            let content = crate::chat::think::answer_without_inline(&content, disable_thinking);
-            if content.is_empty() {
-                return Err("The model returned an empty answer".to_string());
-            }
-            // A new document's first step, its web tools held back for the
-            // outline, answered in words ("I'll look this up first…"):
-            // asked once to make the outline; the web stays held for that
-            // one step more.
-            if web.as_deref().is_some_and(crate::web::Turn::outline_pending) {
-                if !outline_nudged {
-                    outline_nudged = true;
-                    tracing::info!(provider, "Chat: a new document's first step made no outline; the model is asked to make it");
-                    crate::ai::eval::post_fix("outline_first");
-                    if let Some(live) = live {
-                        live.sink.send(crate::chat::stream::Event::Text { text: String::new() });
-                    }
-                    messages.push(json!({ "role": "assistant", "content": content }));
-                    messages.push(json!({ "role": "user", "content": crate::chat::documents::OUTLINE_NOTE }));
-                    continue;
-                }
-                if let Some(turn) = web.as_deref_mut() {
-                    turn.outline_settled();
-                }
-            }
-            // A document this turn made still has sections to write
-            // (documents.rs): the model finishes it before it answers.
-            if let Some((_, title, left)) = extra.docs.and_then(crate::chat::documents::Turn::unfinished) {
-                if finish_nudges < crate::chat::documents::FINISH_NUDGES {
-                    finish_nudges += 1;
-                    tracing::info!(left = left.len(), "Chat: the document isn't finished; the model is asked to write the rest");
-                    crate::ai::eval::post_fix("finish_document");
-                    // What it wrote wasn't the answer yet.
-                    if let Some(live) = live {
-                        live.sink.send(crate::chat::stream::Event::Text { text: String::new() });
-                    }
-                    messages.push(json!({ "role": "assistant", "content": content }));
-                    messages.push(json!({ "role": "user", "content": crate::chat::documents::finish_note(&title, &left) }));
-                    continue;
-                }
-            }
-            return Ok((content, tools_used));
-        }
-
-        // Append the assistant turn (with its tool_calls), execute each call,
-        // and feed the results back. A forced step's words go without it:
-        // nobody saw them, and "I don't have access to real-time weather
-        // data" would steer the answer from the search.
-        if forced {
-            msg["content"] = Value::Null;
-        }
-        messages.push(msg.clone());
-        // This step only searched the notes, and found nothing.
-        let mut notes_found_nothing = true;
-        // **A new document's outline before any search** (`web::Turn::
-        // outline_first`): this step's searches and page reads are refused,
-        // unless the step makes the outline too.
-        let hold_web = web.as_deref().is_some_and(crate::web::Turn::outline_pending)
-            && !tool_calls.iter().any(|c| c["function"]["name"] == "create_document");
-        // The pictures this step looked at (`look_at_picture`): one user
-        // message after its tool results carries them (chat/pictures.rs).
-        let mut looks: Vec<crate::chat::pictures::Look> = Vec::new();
-        for call in &tool_calls {
-            let id = call["id"].as_str().unwrap_or("");
-            let name = call["function"]["name"].as_str().unwrap_or("");
-            let mut args = call_arguments(call);
-            if name == "web_search" {
-                let asked = args["query"].as_str().unwrap_or("").to_string();
-                let mut q = asked.clone();
-                // The forced first search: for this question, not words
-                // carried over from earlier ones.
-                if forced {
-                    let fresh = crate::web::fresh_query(&q, question, &earlier, &own);
-                    if fresh != q {
-                        tracing::info!(words_before = q.split_whitespace().count(), words_after = fresh.split_whitespace().count(), "Chat: earlier words left out of the forced search");
-                        crate::ai::eval::post_fix("fresh_query");
-                        q = fresh;
-                    }
-                }
-                // A price question: the search names the person's country
-                // ("… UK"), every search of the turn.
-                if let Some(local) = web.as_deref().and_then(|t| t.local_query(&q)) {
-                    tracing::info!("Chat: the search names the user's country (a price question)");
-                    crate::ai::eval::post_fix("local_query");
-                    q = local;
-                }
-                if q != asked {
-                    args["query"] = json!(q);
-                    // The call as it ran, in the conversation too.
-                    if let Some(c) = messages
-                        .last_mut()
-                        .and_then(|m| m["tool_calls"].as_array_mut())
-                        .and_then(|calls| calls.iter_mut().find(|c| c["id"].as_str() == Some(id)))
-                    {
-                        c["function"]["arguments"] = json!(args.to_string());
-                    }
-                }
-            }
-            // A document's "[1]" citations: links to the pages themselves
-            // (a note has no Sources row), before it runs, so the model's
-            // picture of the document is what was written. The pages it
-            // cites (by number, or a link) are marked so first: the answer's
-            // Sources row shows them first.
-            if crate::chat::documents::TOOL_NAMES.contains(&name) {
-                if let Some(turn) = web.as_deref_mut() {
-                    let ops = args["ops"].as_array().into_iter().flatten().filter_map(|op| op["markdown"].as_str());
-                    for text in ["summary", "markdown", "content", "text", "body"].iter().filter_map(|f| args[*f].as_str()).chain(ops) {
-                        turn.cited_in(text);
-                    }
-                }
-                if let Some(turn) = web.as_deref().filter(|t| !t.sources.is_empty()) {
-                    let sources: Vec<(usize, String, String)> = turn
-                        .sources
-                        .iter()
-                        .map(|s| (s.n, if s.site.trim().is_empty() { s.title.clone() } else { s.site.clone() }, s.url.clone()))
-                        .collect();
-                    for field in ["summary", "markdown", "content", "text", "body"] {
-                        if let Some(text) = args[field].as_str() {
-                            let linked = crate::chat::documents::link_citations(text, &sources);
-                            if linked != text {
-                                args[field] = json!(linked);
-                            }
-                        }
-                    }
-                    // edit_document's: each op's markdown.
-                    if let Some(ops) = args["ops"].as_array_mut() {
-                        for op in ops {
-                            if let Some(text) = op["markdown"].as_str() {
-                                let linked = crate::chat::documents::link_citations(text, &sources);
-                                if linked != text {
-                                    op["markdown"] = json!(linked);
-                                }
-                            }
-                        }
-                    }
-                }
-                // Asked across the meetings (a Skill's /tickets, /prd): its
-                // passages' "[2]" as their meetings' names, noted for the
-                // answer's sources (`documents::name_citations`).
-                if let Some(d) = extra.docs {
-                    for field in ["summary", "markdown", "content", "text", "body"] {
-                        if let Some(text) = args[field].as_str() {
-                            let named = d.named(text);
-                            if named != text {
-                                args[field] = json!(named);
-                            }
-                        }
-                    }
-                    if let Some(ops) = args["ops"].as_array_mut() {
-                        for op in ops {
-                            if let Some(text) = op["markdown"].as_str() {
-                                let named = d.named(text);
-                                if named != text {
-                                    op["markdown"] = json!(named);
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-            let ran_with = args.clone();
-            // The page's line: what this call does, with what ("Searching the
-            // web · …" — a provider's native search or Exa's alike —,
-            // "Reading …", "Writing ‘Gear’").
-            if let Some(live) = live {
-                crate::chat::activity::tell(live.sink, crate::chat::activity::of_call(name, &args));
-            }
-            let web_seen = web.as_deref().is_some_and(crate::web::Turn::seen) || screen_seen;
-            let mut result = if hold_web && (crate::web::TOOL_NAMES.contains(&name) || name == crate::chat::pictures::FIND) {
-                tracing::info!(tool = %name, "Chat: a new document's outline comes before any search; refused");
-                crate::ai::eval::post_fix("outline_first");
-                crate::chat::documents::outline_first_refusal()
-            } else if let Some(refusal) = refused_after_web(name, web_seen, extra.strong) {
-                refusal
-            } else if let Some(r) = crate::ai::eval::intercept_tool(name, &args) {
-                r // a model evaluation records what would leave Yap (the clipboard)
-            } else if let Some(r) = extra.docs.and_then(|d| d.made_already(name, &args)) {
-                r // this turn's document, asked for again: the one there is
-            } else if let Some(r) = extra.docs.and_then(|d| d.refuses(name, &args)) {
-                r // a section rewritten only in this chat's own documents
-            } else if let (Some(turn), true) = (web.as_deref_mut(), crate::web::TOOL_NAMES.contains(&name)) {
-                turn.execute(name, &args).await
-            } else if let (Some(turn), true) = (web.as_deref_mut(), extra.pictures.offers(name, claude_web || extra.own_search)) {
-                // A picture from the web looked at or shown (chat/pictures.rs):
-                // a shown one goes to the page at once (the panel opens on it).
-                let run = crate::chat::pictures::execute(turn, name, &args, provider, base_url).await;
-                if let (Some(picture), Some(live)) = (run.shown, live) {
-                    live.sink.send(crate::chat::stream::Event::Picture { picture });
-                }
-                // A picture looked at goes with every later step: only
-                // while it fits in what the request has left (budget.rs).
-                match run.look {
-                    Some(look) if !room.takes_picture(&messages, &looks, &look) => {
-                        tracing::info!(provider, "Chat: no room left in the model's context for the picture; not looked at");
-                        crate::ai::eval::post_fix("look_no_room");
-                        tool_error(crate::chat::budget::NO_ROOM_TO_LOOK.to_string(), Value::Null, "Didn't look at a picture: no room left in the model's context".to_string())
-                    }
-                    look => {
-                        looks.extend(look);
-                        run.result
-                    }
-                }
-            } else if crate::chat::see_screen::offers(extra.screen, name) {
-                // The screen as it is now (chat/see_screen.rs): its pictures
-                // go with the next step while they fit, its text in the result.
-                let run = crate::chat::see_screen::execute(&args, extra.screen, provider, base_url).await;
-                screen_seen |= run.seen;
-                // Shown with the question, as it was taken.
-                if !run.images.is_empty() {
-                    if let Some(conv) = extra.conversation {
-                        crate::chat::chats::add_question_images(conv, &run.images);
-                    }
-                    if let Some(live) = live {
-                        live.sink.send(crate::chat::stream::Event::Screen { images: run.images.clone() });
-                    }
-                }
-                let mut fits = true;
-                for look in run.looks {
-                    if room.takes_picture(&messages, &looks, &look) {
-                        looks.push(look);
-                    } else {
-                        fits = false;
-                    }
-                }
-                if fits {
-                    run.result
-                } else {
-                    tracing::info!(provider, "Chat: no room left in the model's context for the screen");
-                    tool_error(crate::chat::budget::NO_ROOM_TO_LOOK.to_string(), Value::Null, "Didn't look at your screen: no room left in the model's context".to_string())
-                }
-            } else if let (Some(turn), true) = (web.as_deref_mut(), crate::chat::pages::offers_act(extra.pictures, extra.act, name)) {
-                // An action on a page beside the chat (chat/pages/act.rs):
-                // its rules in Rust, a click that buys or pays asked first.
-                crate::chat::pages::act::execute(turn, name, &args, live).await
-            } else if let (Some(turn), true) = (web.as_deref_mut(), crate::chat::pages::offers(extra.pictures, name)) {
-                // A page brought up, a shot of one, a button for the
-                // person's browser (chat/pages.rs): the page hears each at once.
-                let run = crate::chat::pages::execute(turn, name, &args, extra.pictures, extra.act).await;
-                if let Some(live) = live {
-                    if let Some(page) = run.page {
-                        live.sink.send(crate::chat::stream::Event::Page { page });
-                    }
-                    if let Some(offer) = run.offer {
-                        live.sink.send(crate::chat::stream::Event::Offer { offer });
-                    }
-                    if let Some(picture) = run.picture {
-                        live.sink.send(crate::chat::stream::Event::Picture { picture });
-                    }
-                }
-                run.result
-            } else if extra.memory && MEMORY_TOOL_NAMES.contains(&name) {
-                if asked_to_remember(question) {
-                    crate::memory::learn::tool(name, &args)
-                } else {
-                    tool_error(
-                        format!("{name} only runs when the user's own message asks to remember or forget something. Don't call it again this turn."),
-                        Value::Null,
-                        "Didn't change Yap's memory: not asked to".to_string(),
-                    )
-                }
-            } else if extra.search_chats && name == "search_chats" {
-                search_chats(&args, extra.conversation).await
-            } else if name == "search_notes" {
-                // Ask across meetings' search: passages, by meaning too.
-                super::notes::search_notes_tool(&args).await
-            } else if let (Some(cal), true) = (extra.calendar, name == super::calendar::NAME) {
-                // Its meetings numbered with the turn's web sources (one
-                // numbering for the answer's citations).
-                let mut counter = cal.log.len();
-                let mut next = || match web.as_deref_mut() {
-                    Some(t) => t.reserve_number(),
-                    None => {
-                        counter += 1;
-                        counter
-                    }
-                };
-                super::calendar::run(&args, cal.log, cal.zone, cal.now, &mut next)
-            } else if open_apps && crate::apps::TOOL_NAMES.contains(&name) {
-                // Off the async runtime: the index, the launch.
-                let (name, question, previous) = (name.to_string(), question.to_string(), previous.clone());
-                tauri::async_runtime::spawn_blocking(move || {
-                    crate::apps::execute_tool(&name, &args, &question, previous.as_deref())
-                })
-                    .await
-                    .unwrap_or_else(|e| tool_result(false, Value::Null, format!("The app tool failed: {e}")))
-            } else {
-                execute(name, &args)
-            };
-            let empty = name == "search_notes" && result["data"].as_array().is_some_and(Vec::is_empty);
-            notes_found_nothing &= empty;
-            let looked = web.as_deref().is_some_and(crate::web::Turn::looked);
-            if empty && empty_notes != EmptyNotes::Nothing && !looked {
-                result["hint"] = json!(NOTHING_IN_NOTES_HINT);
-            }
-            tracing::info!(tool = %name, success = %result["success"], "Chat tool call");
-            crate::ai::eval::tool_called(name, &ran_with, &result);
-            // What the model has now seen of a document (documents.rs): the
-            // next question hears what the person changed since.
-            crate::chat::documents::after_call(name, &ran_with, &result);
-            if let Some(id) = changed_note(name, &result) {
-                on_change(id);
-                // A document of this chat made or changed: the panel shows
-                // it at once, and the answer keeps it (its pill).
-                if let Some(doc) = extra.docs.and_then(|d| d.noticed(name, id)) {
-                    if let Some(live) = live {
-                        live.sink.send(crate::chat::stream::Event::Document { note_id: doc.id, title: doc.title });
-                    }
-                    // A strong model writing a document researches deeper
-                    // from now on (a question Yap didn't see as one: the
-                    // turn already looks further when it did, `turn.rs`).
-                    if let (true, Some(turn)) = (extra.strong, web.as_deref_mut()) {
-                        turn.go_deep();
-                    }
-                }
-            }
-            // (A call with nothing to say — this turn's document asked for
-            // again — has no chip.)
-            if let Some(d) = result["displayText"].as_str().filter(|d| !d.is_empty()) {
-                // A document's sections, one chip ("Wrote 4 sections in …").
-                crate::chat::documents::push_chip(&mut tools_used, d.to_string());
-            }
-            report(live, &tools_used, web.as_deref(), extra.calendar.map(|c| c.log));
-            // Within what the request has left (a long page read on an 8K
-            // model, several notes): never past the model's context.
-            let content = room.fit(&result, &messages, &looks);
-            messages.push(json!({
-                "role": "tool",
-                "tool_call_id": id,
-                "content": content,
-            }));
-        }
-        // The pictures it looked at, after every tool result (each provider
-        // wants those first): the next step sees them.
-        if let Some(m) = crate::chat::pictures::look_message(&looks, provider) {
-            tracing::info!(pictures = looks.len(), "Chat: the next step carries the pictures the model looked at");
-            messages.push(m);
-        }
-        // A new document's first step is done (its outline made, or the
-        // refusal told): the web is the turn's from the next step.
-        if let Some(turn) = web.as_deref_mut() {
-            turn.outline_settled();
-        }
-        // A price question whose results only had another country's prices:
-        // a model on this PC gets Yap's search for the local price straight
-        // away ("… UK £"; a cloud model is told to search again).
-        if let Some(turn) = web.as_deref_mut() {
-            if let Some(q) = turn.take_local_retry() {
-                tracing::info!(provider, "Chat: no local prices in the results; Yap searches again for them");
-                search_for_the_model(turn, &q, &mut messages, &mut tools_used, room, live).await;
-                report(live, &tools_used, Some(turn), extra.calendar.map(|c| c.log));
-            }
-        }
-        // Nothing in the notes for a question the web may answer: a model on
-        // this PC gets Yap's search for it straight away (the question as
-        // the query), as when it must search first.
-        if notes_found_nothing && empty_notes == EmptyNotes::HintAndSearch && !led_to_web {
-            if let Some(turn) = web.as_deref_mut().filter(|t| !t.looked()) {
-                led_to_web = true;
-                tracing::info!(provider, "Chat: nothing in the notes; Yap searches the web for the model");
-                search_for_the_model(turn, &crate::web::search_query(question), &mut messages, &mut tools_used, room, live).await;
-                report(live, &tools_used, Some(turn), extra.calendar.map(|c| c.log));
-            }
-        }
-    }
-
-    // Out of steps, or the tool calls kept being rejected: one final call
-    // WITHOUT tools to force a plain answer.
-    messages.push(json!({ "role": "user", "content": ANSWER_NOW_NOTE }));
-    // (Claude on the Messages API keeps its tools, told to call none: its
-    // earlier calls in the messages need them defined.)
-    let mut req = if native_chat {
-        crate::ai::llm::ChatRequest::chat(base_url, api_key, model, provider, 0.5, Value::Array(messages), Some(&tools), Some(json!("none")))
-    } else {
-        crate::ai::llm::ChatRequest::chat(base_url, api_key, model, provider, 0.5, Value::Array(messages), None, None)
-    };
-    if native_chat {
-        req.native = Some(native(web.as_deref()));
-    }
-    let msg = ask(live, &req, false).await?;
-    let content = msg["content"].as_str().unwrap_or("").trim().to_string();
-    let content = crate::chat::think::answer_without_inline(&content, disable_thinking);
-    if content.is_empty() {
-        return Err("The model didn't manage an answer this time. Try asking again.".to_string());
-    }
-    Ok((content, tools_used))
+/// The person's own earlier messages, as they wrote them.
+fn own_messages(history: &[Value]) -> Vec<String> {
+    history.iter().filter(|m| m["role"] == "user").filter_map(|m| crate::snip::turn::text_of(&m["content"])).collect()
 }
 
 #[cfg(test)]
 mod tests {
+    use super::args::call_arguments;
     use super::room::LOOK_SPARE;
     use super::*;
     use crate::chat::tools::tests::{call, plan_note, tool_names};
