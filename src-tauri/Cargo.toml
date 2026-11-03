@@ -60,7 +60,7 @@ whatlang = "0.18"
 
 # Audio capture + sound cue
 cpal = "0.15"
-rodio = "0.19"
+rodio = "0.22"
 
 # Clipboard for text injection
 arboard = "3"
