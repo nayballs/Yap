@@ -361,52 +361,61 @@ function cliReceived(log) {
  * The stand-in CLI in a classic console window (conhost, whatever this
  * PC's default terminal is), titled `title` (with the nonce: "✳ <nonce>"
  * is Claude Code's idle title). `close()` closes it and ends what it ran.
+ *
+ * Started by the helper (`yaprobot console`), not Node's `spawn`: conhost
+ * takes any standard handles it's given for a pseudoconsole's pipes, and
+ * the NUL ones `stdio: 'ignore'` gives a child read as closed at once, so
+ * the console ended before (or just after) the program started — no
+ * window, the program never ran (every run from 2026-10-30; now and then
+ * before). The helper starts it with none (yaprobot.cs `ConsoleHost`), and
+ * stays its parent until it ends, so it's in the run's process tree.
  */
 export async function startConsoleCli({ nonce, cwd, title = `✳ ${nonce}` }) {
-  // Now and then (3 of about a dozen launches on 2026-10-25, each the first
-  // console window after another test's windows) conhost starts nothing
-  // at all: no window, the program never runs. So once more.
-  try {
-    return await launchConsoleCli({ nonce, cwd, title, timeout: 20_000 });
-  } catch (e) {
-    if (!/never showed up.*didn't start/.test(e.message)) throw e;
-    console.warn(`robot: ${e.message}; launching the console window again`);
-    return launchConsoleCli({ nonce, cwd, title, timeout: 40_000 });
-  }
-}
-
-async function launchConsoleCli({ nonce, cwd, title, timeout }) {
+  compileHelper();
   fs.mkdirSync(cwd, { recursive: true });
   const log = path.join(cwd, 'received.jsonl');
   fs.writeFileSync(log, '');
   const script = fileURLToPath(new URL('./fake-cli.mjs', import.meta.url));
   const before = new Set(findWindows(nonce).map((w) => w.hwnd));
-  const child = spawn(path.join(process.env.WINDIR || 'C:\\Windows', 'System32', 'conhost.exe'), [process.execPath, script, log, title], {
-    cwd,
-    stdio: 'ignore',
-    detached: true,
-    windowsHide: false,
+  const host = spawn(HELPER, ['console', cwd, process.execPath, script, log, title], {
+    stdio: ['ignore', 'pipe', 'inherit'],
+    windowsHide: true,
   });
-  child.unref();
+  // What the helper says: {pid} (conhost's), then {exited} when it ends.
+  const said = {};
+  readline.createInterface({ input: host.stdout }).on('line', (line) => {
+    try {
+      Object.assign(said, JSON.parse(line));
+    } catch {
+      /* not a line of the helper's */
+    }
+  });
   const cleanup = async (hwnd) => {
     if (hwnd && findWindows(nonce).some((w) => w.hwnd === hwnd)) helper('close', hwnd, nonce);
     await sleep(300);
     for (const pid of processesWith(log, ['node.exe'])) killTree(pid);
-    killTree(child.pid);
+    if (said.pid) killTree(said.pid);
+    killTree(host.pid);
   };
   let win;
   try {
     win = await waitForWindow(nonce, (w) => !before.has(w.hwnd) && w.cls === 'ConsoleWindowClass' && w.title === title, {
       what: 'console window',
-      timeout,
     });
     await cliReady(log);
   } catch (e) {
     // What did come up (the run's own windows only): a delegated terminal?
     const seen = findWindows(nonce).filter((w) => !before.has(w.hwnd)).map((w) => `${w.cls} "${w.title}"`);
     const ready = fs.existsSync(log) && fs.readFileSync(log, 'utf8').includes('"ready"');
+    const conhost = said.error
+      ? `the helper couldn't start conhost (${said.error})`
+      : said.exited !== undefined
+        ? `conhost ended (exit code ${said.exited})`
+        : said.pid
+          ? 'conhost still running'
+          : 'conhost never started';
     await cleanup(win?.hwnd);
-    throw new Error(`${e.message}; new windows: ${seen.join(', ') || 'none'}; the program ${ready ? 'started' : "didn't start"}`);
+    throw new Error(`${e.message}; new windows: ${seen.join(', ') || 'none'}; ${conhost}; the program ${ready ? 'started' : "didn't start"}`);
   }
   return {
     hwnd: win.hwnd,
