@@ -325,8 +325,12 @@ test('open_page opens a search or a site the person named; read_open_page reads 
   await expect(main.getByText('Pick a result and I can help.')).toBeVisible({ timeout: 20_000 });
   let calls = chatCalls(fakeLlm, from);
   // (Each tab's number is its own for the session: the earlier tests' tabs had theirs.)
-  expect(JSON.stringify(calls[0].messages)).toMatch(/Open beside the chat: tab \d+ /);
-  expect(JSON.stringify(calls[0].messages)).toContain('search results, in front');
+  // Each tab's site only, never its title or address: the page writes those.
+  const tabsLine = JSON.stringify(calls[0].messages).match(/Open beside the chat: .*? read_open_page reads one\./)?.[0] ?? '';
+  expect(tabsLine).toMatch(/tab \d+ \(duckduckgo\.com\), search results, in front[.;]/);
+  expect(tabsLine).not.toContain('Search:');
+  expect(tabsLine).not.toContain('train');
+  expect(tabsLine).not.toContain('https://');
   expect(toolResult(calls[1])).toMatchObject({ success: false, displayText: expect.stringMatching(/^Didn't read duckduckgo\.com\/\?q=train\+times.*: a search engine's results$/) });
 
   // A page: read as the person sees it, cited, its text the model's.
