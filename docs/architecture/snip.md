@@ -583,7 +583,7 @@ images (switched to after a question with one): each is a line
 that turns them down on a follow-up (a question without screenshots of
 its own) is learned to be a "no" there and then (`vision::refused`), and
 the step is asked again with each said in that line
-(`turn::without_images`, `chat/tools/agent.rs`, 2026-10-30): until then
+(`turn::without_images`, `chat/tools/agent/step.rs`, 2026-10-30): until then
 every follow-up to it failed, and the refusal was never learned.
 
 ## The on-device model reads screenshots (phase 3, 2026-10-28)

@@ -265,6 +265,37 @@ The AI Chat surface (conversations, the tool-calling loop and its note tools) an
   model; the summariser's prompt (`prompt`), its input (`request`, `line`,
   `parts`) and what's kept (`tidy`); `yap-chat-summary {conversationId,
   upto}`. [Below](#long-chats-sized-to-the-model-2026-10-25).
+- **`chat/turn.rs`** (+ `turn/`: fast, gates, history, prompt, run, small,
+  finish; split into its steps 2026-11-03, nothing else changed) — **one
+  chat turn** (`chat_turn`: `chat_send`, the Voice Assistant, the model
+  evaluations). `answer_turn` is its steps in order, over what they share
+  (`Asked`: the question, where it was asked, the settings, who answers,
+  what the model may do, About you and the clock; `Opened`: the question
+  saved; `Answer`: the answer before Yap's checks): **`fast.rs`** — the
+  turns Yap answers itself, no model (an app opened, a page opened beside
+  the chat, a Skill's question with nothing to run on, the passages when
+  nothing can answer across the meetings); **`gates.rs`** —
+  `Gates::for_turn`, what this model may do in this turn (tools, the
+  documents' set, strong, Claude's own search or the provider's, the web's
+  lines, the web, pictures, the screen, acting on pages, the calendar) from
+  the settings, the model and where it was asked; `Gates::schemas` counts
+  the tools' schemas (`chat_limits` has the same gates, as a typed Chat
+  question); **`history.rs`** — the question measured before it's saved
+  (`Sizing::measure`, "too long" said plainly) and the history fitted to
+  what's left (`fit`: every message, a summary and those after it, or the
+  latest that fit; the notes on earlier answers), `next_room`;
+  **`prompt.rs`** — the system prompt and the question's context
+  (`build`, in their order: the instructions and the clock, the pages
+  open, the meetings' passages, the library — the eager RAG, the calendar,
+  the chat's documents, memory, past chats —, the prompt's end, how to
+  answer, a document's research), `Prompt::add` (with the question for a
+  tool model, at the system prompt's end for one without), `first_step`,
+  `stable_prompt`; **`run.rs`** — a model that calls tools: the turn's web
+  side, its `Extra`, the tool loop, Stop, the answer's sources, pictures
+  and pages; **`small.rs`** — one that can't: plain chat or Yap's fixed web
+  pipeline; **`finish.rs`** — every answer's checks (below), then saving
+  it. A new kind of tool gets its gate in `Gates`, its tools in `Extra`
+  and its line in `prompt.rs`.
 - **`chat/tools.rs`** — the AI Chat tool-calling agent loop: six tools ported
   near-verbatim from OpenWhispr's `services/tools/*` (`search_notes`,
   `get_note`, `create_note`, `update_note`, `list_folders`,
@@ -398,6 +429,28 @@ The AI Chat surface (conversations, the tool-calling loop and its note tools) an
   (open_app, copy_to_clipboard, remember, forget): its note and document
   changes go through after the web (see "Strong models' documents" below;
   `a_strong_model_edits_after_the_web_and_never_acts_outside_its_notes`).
+- **`chat/tools/agent.rs`** (+ `agent/`; split into its steps 2026-11-03,
+  nothing else changed) — **the loop itself** (`tool_loop`): the first
+  messages and the tools, a search Yap makes first, then step after step
+  over what they share (`Loop`: the messages, the tools — the same every
+  step —, the room the request has, the chips, what a step leaves for the
+  next), and a last call without tools. Its parts, in the order a step
+  meets them: **`offer.rs`** (`offered_tools`, every step's list),
+  **`step.rs`** (one model call and its special cases: the search that
+  must come first and Yap's search for it, a call the provider rejected,
+  earlier screenshots turned down, Claude's own web tools, the outline and
+  finish nudges; `answer_now`), **`calls.rs`** (a step's calls in order),
+  **`args.rs`** (the fixes before a call: a search's query, a document's
+  citations), **`gate.rs`** (the guards before it runs, in order: a new
+  document's outline, the safety rule, an evaluation's intercept, the
+  documents' own rules), **`dispatch.rs`** (where it runs: `Source::of`,
+  pure, the first source that takes the name — the web, pictures, the
+  screen, acting on pages, pages, memory, past chats, the notes search, the
+  calendar, apps, else the note tools — and one match runs it),
+  **`fold.rs`** (its result back: the hint, the log, the note it changed,
+  its chip, the next tool message; then what follows the step) and
+  **`room.rs`** (the budget each result and picture must fit). A new kind
+  of tool is a `Source`, its guard in `gate.rs`, its schemas in `offer.rs`.
 - **`chat/tools/calendar.rs`** — **calendar tools in Chat** (2026-10-25):
   "what's on tomorrow?", "when's my next meeting with Sam?", "am I free at
   3 on Friday?" answered from the calendar Yap already keeps
@@ -518,7 +571,7 @@ The AI Chat surface (conversations, the tool-calling loop and its note tools) an
   refused after the web. **Its sources, linked**: after a search, a
   document's `[1]` citations (in the summary or a section) become links to
   the pages themselves, `([site](address))` — a note has no Sources row
-  under it — before the call runs (`link_citations`, `agent.rs`); an
+  under it — before the call runs (`link_citations`, `agent/args.rs`); an
   unknown number stays as written. **Live**: a `write_section`'s or a
   `rewrite_section`'s arguments stream to the page
   (`stream::LIVE_ARGS`; the `Assembler`'s `Piece::Args` → `Delta::ToolArgs`
@@ -636,7 +689,7 @@ The AI Chat surface (conversations, the tool-calling loop and its note tools) an
   **A question dictated into Chat's box is a Chat question** (30 Oct
   2026): what the model is told changes only when the answer is read
   aloud — the Voice Assistant's, or one dictated into Chat with spoken
-  replies on (`turn.rs` `spoken`: the "asked out loud" lines, the small
+  replies on (`turn/prompt.rs` `spoken`: the "asked out loud" lines, the small
   model's web prompt, `grounded_prompt`); the question's `voice` flag alone
   changes nothing.
   Logs: ids, counts, lengths. Unit-tested (placeholders, the tools,
@@ -818,9 +871,9 @@ The AI Chat surface (conversations, the tool-calling loop and its note tools) an
   a byte is read, a stream past it stopped); stored like a pasted picture
   (`snip::attach::keep`, source "web": Windows' decoders, a PNG in
   `chat-images/`); `Event::Picture` to the page at once (the panel opens on
-  it, `agent.rs`), kept in `TurnPictures::shown` → the answer's `pictures`
+  it, `agent/dispatch.rs`), kept in `TurnPictures::shown` → the answer's `pictures`
   (`chats::set_pictures`, `chat_send`'s reply `pictures`), each one's page
-  added to the answer's sources so `n` means something (`turn.rs`); result
+  added to the answer's sources so `n` means something (`turn/run.rs`); result
   `{success, shown: true, id, w, h, displayText: "Showed ‘caption’ from
   site"}`; the same picture again: the one there is, no second copy; ≤ 8 a
   turn. **`look_at_picture {picture}`** (`look`): the picture decoded,
@@ -894,12 +947,12 @@ The AI Chat surface (conversations, the tool-calling loop and its note tools) an
   words shown, "Writing the answer"; Claude's own `web_search` /
   `web_fetch` on the Messages API — the `server_tool_use` block, then its
   input whole at `content_block_stop`, `llm::Delta::ServerInput`, the query
-  or address); the tool loop (`tools/agent.rs`: each call as it runs, with
+  or address); the tool loop (`tools/agent/calls.rs`: each call as it runs, with
   its arguments as they ran — a search's query after Yap's fixes, so a
   provider's native search sub-call, `web/native.rs`, and Exa / Tavily
   alike name the query searched for; Yap's own searches for the model,
-  `search_for_the_model`); `turn.rs` (a small model's web pipeline's
-  search; Ask across meetings' "Searching your meetings" / "Running
+  `search_for_the_model`); `turn/small.rs` (a small model's web pipeline's
+  search) and `turn/prompt.rs` (Ask across meetings' "Searching your meetings" / "Running
   /todos"). A search that must come first (`ChipsOnly`) never says
   "Writing the answer". **On the page** (`ActivityLine.svelte` at the
   thread's foot while the turn runs: the latest step, "Thinking" until one
@@ -2761,7 +2814,7 @@ copyable. Yap's, in `chat/skills.rs`:
   chat. Every turn asked across the meetings tells `documents::Turn` its
   passages (`cite_passages`, `ask::labels`): a document's `[2]` becomes
   "(Supplier call, Tue 27 Oct)" as it's written (`documents::name_citations`
-  in the tool loop, `agent.rs`; a number none of them has goes; every
+  in the tool loop, `agent/args.rs`; a number none of them has goes; every
   passage from one meeting — /tickets on the latest — the citations go,
   the document being that meeting's: "(Bug triage, Fri 30 Oct)" after every
   line was noise), the passages it cites are the answer's sources, and an
@@ -3134,7 +3187,7 @@ a technical error.
    full): …", `compact::block`). Logged: counts and tokens only.
 6. **Mid-turn**: each tool result (a page read, a note, search passages,
    Yap's own search for the model) is trimmed to what the request has left
-   (`budget::fit_result`, `agent.rs` `Room`): its longest texts shortened
+   (`budget::fit_result`, `agent/room.rs` `Room`): its longest texts shortened
    and marked "… [cut to fit the model's context]", then its longest lists
    halved, with a note for the model; no room at all — "no room left …
    answer with what you have". **What the request has left counts its
