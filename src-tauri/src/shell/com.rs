@@ -37,6 +37,31 @@ pub fn keep_mta() {
     }
 }
 
+/// How often [`wait_within`] looks.
+const LOOK_EVERY: std::time::Duration = std::time::Duration::from_millis(5);
+
+/// **A WinRT operation waited for, at most `limit`** (2026-11-03): `done()`
+/// — the operation's `Status()` past `Started` (`media_pause::answer!`) — is
+/// looked at every few milliseconds, then `results()` (its `GetResults()`)
+/// taken; `None`: not done by then (it carries on by itself, its answer
+/// dropped). `.get()` waited for ever: a media session that never answered
+/// (a hung browser tab, a busy music app) held the other apps' sound and the
+/// next dictation's start (`media_pause.rs`). (Its completion handler and
+/// `IntoFuture` aren't in the `windows` crate's build Yap has.)
+pub(crate) fn wait_within<T>(limit: std::time::Duration, mut done: impl FnMut() -> bool, results: impl FnOnce() -> T) -> Option<T> {
+    let deadline = std::time::Instant::now() + limit;
+    loop {
+        if done() {
+            return Some(results());
+        }
+        let left = deadline.saturating_duration_since(std::time::Instant::now());
+        if left.is_zero() {
+            return None;
+        }
+        std::thread::sleep(left.min(LOOK_EVERY));
+    }
+}
+
 /// A test run keeps it before the first test: the C runtime calls the
 /// `.CRT$XCU` initialisers before `main`. (No test can come first and build
 /// a notification on an apartment another test then takes down.)
@@ -49,6 +74,33 @@ static KEEP_MTA_IN_TESTS: extern "C" fn() = {
     }
     keep
 };
+
+#[cfg(test)]
+mod wait_tests {
+    use super::wait_within;
+    use std::time::{Duration, Instant};
+
+    /// An operation done already answers at once; one that never is lets
+    /// go at the limit (`.get()` waited for ever); one done from another
+    /// thread is seen soon after.
+    #[test]
+    fn a_wait_ends_at_its_limit() {
+        assert_eq!(wait_within(Duration::from_millis(50), || true, || 7), Some(7));
+        let started = Instant::now();
+        assert_eq!(wait_within(Duration::from_millis(150), || false, || 7), None);
+        let took = started.elapsed();
+        assert!(took >= Duration::from_millis(150) && took < Duration::from_secs(2), "{took:?}");
+        let done = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let later = std::sync::Arc::clone(&done);
+        std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_millis(40));
+            later.store(true, std::sync::atomic::Ordering::SeqCst);
+        });
+        let started = Instant::now();
+        assert_eq!(wait_within(Duration::from_secs(5), || done.load(std::sync::atomic::Ordering::SeqCst), || true), Some(true));
+        assert!(started.elapsed() < Duration::from_secs(2), "seen when it answered");
+    }
+}
 
 #[cfg(all(test, windows))]
 mod tests {

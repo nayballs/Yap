@@ -101,16 +101,36 @@ struct State {
     /// The default output's rate when Yap quieted things.
     rate_at_start: Option<u32>,
     paused: Vec<Paused>,
+    /// The token of the last stop whose restore ran (`after_stop_chime_mic`,
+    /// or Yap quitting): media paused after it, still being paused when it
+    /// ran, is played again by its own pause ([`late_pause_plays_now`]).
+    restored: u64,
 }
 
-static STATE: Mutex<State> =
-    Mutex::new(State { gen: 0, recording: false, plan: Plan { quiet: false, pause: false }, rate_at_start: None, paused: Vec::new() });
+static STATE: Mutex<State> = Mutex::new(State {
+    gen: 0,
+    recording: false,
+    plan: Plan { quiet: false, pause: false },
+    rate_at_start: None,
+    paused: Vec::new(),
+    restored: 0,
+});
 
 /// The dictation's state: never held across COM (the pipeline's start and
 /// stop take it, and mustn't wait on it). Turning down and bringing back
-/// happen under `other_apps::ledger`, one at a time, taken first.
+/// happen under `other_apps::ledger`, one at a time, taken first. Media is
+/// paused and played with neither held (WinRT's waits, bounded in
+/// `media_pause.rs`, never hold up the ledger: Yap's voice, the next
+/// dictation's sound).
 fn state() -> std::sync::MutexGuard<'static, State> {
     STATE.lock().unwrap_or_else(|p| p.into_inner())
+}
+
+/// Media paused while its dictation's stop already brought the rest back
+/// (a quick tap): nobody is left to play it again but the pause itself.
+/// Pure.
+fn late_pause_plays_now(s: &State) -> bool {
+    !s.recording && s.restored == s.gen
 }
 
 /// A dictation starts (`start_recording`): its token, for
@@ -134,46 +154,60 @@ pub fn takes_over() -> bool {
 /// The start chime has played (or there is none): quiet and pause the
 /// other apps for dictation `token`, if it's still the one recording.
 pub fn after_start_chime(token: u64) {
-    let mut ledger = other_apps::ledger();
-    let plan = {
-        let s = state();
-        if s.gen != token || !s.recording {
-            return; // over before its chime was
+    let who = {
+        let mut ledger = other_apps::ledger();
+        let plan = {
+            let s = state();
+            if s.gen != token || !s.recording {
+                return; // over before its chime was
+            }
+            s.plan
+        };
+        let who = crate::shell::realtest::other_apps();
+        if !plan.any() {
+            return;
         }
-        s.plan
+        if who == OtherApps::Nobody {
+            tracing::info!("other apps: left alone in a test run");
+            return;
+        }
+        let first = !ledger.holds(Holder::Dictation);
+        let rate = other_apps::default_output_rate();
+        if plan.quiet {
+            other_apps::lower(&mut ledger, Holder::Dictation);
+        }
+        if first {
+            state().rate_at_start = rate;
+        }
+        if !plan.pause {
+            return;
+        }
+        who
     };
-    let who = crate::shell::realtest::other_apps();
-    if !plan.any() {
-        return;
-    }
-    if who == OtherApps::Nobody {
-        tracing::info!("other apps: left alone in a test run");
-        return;
-    }
-    let first = !ledger.holds(Holder::Dictation);
-    let rate = other_apps::default_output_rate();
-    if plan.quiet {
-        other_apps::lower(&mut ledger, Holder::Dictation);
-    }
-    let paused = if plan.pause {
-        let calls = other_apps::calls_now();
-        let keep = media_pause::Keep {
-            call_names: calls.names.clone(),
-            browsers: calls.meeting || !calls.live_browsers.is_empty(),
-        };
-        let robot: Option<&dyn Fn(&str) -> bool> = match who {
-            OtherApps::TestsOwn => Some(&crate::shell::realtest::media_permits),
-            _ => None,
-        };
-        media_pause::pause(&keep, robot)
-    } else {
-        Vec::new()
+    // The media, with no lock held (its waits are WinRT's).
+    let calls = other_apps::calls_now();
+    let keep = media_pause::Keep {
+        call_names: calls.names.clone(),
+        browsers: calls.meeting || !calls.live_browsers.is_empty(),
     };
-    let mut s = state();
-    if first {
-        s.rate_at_start = rate;
+    let robot: Option<&dyn Fn(&str) -> bool> = match who {
+        OtherApps::TestsOwn => Some(&crate::shell::realtest::media_permits),
+        _ => None,
+    };
+    let paused = media_pause::pause(&keep, robot);
+    let late = {
+        let mut s = state();
+        s.paused.extend(paused);
+        if late_pause_plays_now(&s) {
+            std::mem::take(&mut s.paused)
+        } else {
+            Vec::new()
+        }
+    };
+    if !late.is_empty() {
+        tracing::info!(n = late.len(), "other apps: the dictation was over by the time its media paused; playing it again");
+        media_pause::resume(late);
     }
-    s.paused.extend(paused);
 }
 
 /// The dictation ended (stopped or cancelled): its token, for
@@ -201,8 +235,13 @@ pub fn after_stop_chime_mic(token: u64, closed_bluetooth: bool) {
     let rate_at_start = {
         // Once a quieting that's under way has finished (it's in the ledger).
         let ledger = other_apps::ledger();
-        let s = state();
+        let mut s = state();
         if !ledger.holds(Holder::Dictation) && s.paused.is_empty() {
+            // Nothing to bring back: media still being paused plays again
+            // by itself once it is (`after_start_chime`).
+            if s.gen == token {
+                s.restored = token;
+            }
             return;
         }
         s.rate_at_start
@@ -217,30 +256,39 @@ pub fn after_stop_chime_mic(token: u64, closed_bluetooth: bool) {
         }
         std::thread::sleep(std::time::Duration::from_millis(CODEC_SETTLE_MS));
     }
-    let mut ledger = other_apps::ledger();
     let paused = {
-        let mut s = state();
-        if s.gen != token {
-            return; // a new dictation keeps them down
-        }
-        s.rate_at_start = None;
-        std::mem::take(&mut s.paused)
+        let mut ledger = other_apps::ledger();
+        let paused = {
+            let mut s = state();
+            if s.gen != token {
+                return; // a new dictation keeps them down
+            }
+            s.rate_at_start = None;
+            s.restored = token;
+            std::mem::take(&mut s.paused)
+        };
+        other_apps::release(&mut ledger, Holder::Dictation);
+        paused
     };
-    other_apps::release(&mut ledger, Holder::Dictation);
+    // The media after the ledger is let go (WinRT's waits).
     media_pause::resume(paused);
 }
 
 /// Yap is quitting (`shutdown_cleanup`): everything back now, no waiting —
 /// a dictation's and Yap's voice's alike (`other_apps::restore_all`).
 pub fn restore_all() {
-    let mut ledger = other_apps::ledger();
     let paused = {
-        let mut s = state();
-        s.gen += 1;
-        s.recording = false;
-        std::mem::take(&mut s.paused)
+        let mut ledger = other_apps::ledger();
+        let paused = {
+            let mut s = state();
+            s.gen += 1;
+            s.recording = false;
+            s.restored = s.gen;
+            std::mem::take(&mut s.paused)
+        };
+        other_apps::restore_all(&mut ledger);
+        paused
     };
-    other_apps::restore_all(&mut ledger);
     media_pause::resume(paused);
 }
 
@@ -254,10 +302,12 @@ pub fn recover() {
 #[cfg(debug_assertions)]
 pub fn robot_view() -> serde_json::Value {
     let (sessions, held) = other_apps::robot_view(&crate::shell::realtest::audio_permits);
+    // Asked before the state is taken: never held across WinRT.
+    let media = media_list();
     let s = state();
     serde_json::json!({
         "sessions": sessions,
-        "media": media_list(),
+        "media": media,
         "quieted": held,
         "paused": s.paused.iter().map(|p| p.app.clone()).collect::<Vec<_>>(),
         "recording": s.recording,
@@ -316,5 +366,22 @@ mod tests {
         end();
         assert!(!state().recording);
         assert!(!takes_over());
+    }
+
+    /// Media is paused with no lock held now, so a stop can come while it's
+    /// being paused: what's paused after the stop's restore ran plays again
+    /// at once; while recording, or before that restore, it waits for it;
+    /// a new dictation keeps it for its own end.
+    #[test]
+    fn media_paused_after_its_dictation_ended_plays_again_by_itself() {
+        let s = |recording: bool, gen: u64, restored: u64| State { gen, recording, restored, ..State::default() };
+        // Still recording: the stop brings it back.
+        assert!(!late_pause_plays_now(&s(true, 3, 0)));
+        // Stopped, its stop chime still playing: the restore takes it.
+        assert!(!late_pause_plays_now(&s(false, 4, 2)));
+        // Stopped and restored already (a tap): played again by the pause.
+        assert!(late_pause_plays_now(&s(false, 4, 4)));
+        // A new dictation since: kept down for its end.
+        assert!(!late_pause_plays_now(&s(true, 5, 4)));
     }
 }

@@ -1695,8 +1695,13 @@ to **Run again** from Home.
   speaks), only if it's still at Yap's level; a dictation that ended before
   its chime finished quiets nothing, one that starts before the last
   restore keeps everything down and brings it all back at its end (a
-  generation token; COM/WinRT work serialized on the ledger's lock, never
-  under the state lock the pipeline takes). `takes_over()`: a dictation
+  generation token; the audio sessions' COM work serialized on the ledger's
+  lock, never under the state lock the pipeline takes). **Media is paused
+  and played with no lock held** (2026-11-03: the ledger was held across
+  WinRT's unbounded waits, so a hung media session held Yap's voice and the
+  next dictation's sound behind it); media still being paused when its
+  dictation's stop already brought the rest back (a quick tap) is played
+  again by the pause itself (`restored`, `late_pause_plays_now`). `takes_over()`: a dictation
   recording with "Silence other apps" on — Yap's voice letting go then
   hands its sessions to it at their 30 % instead of bringing them up under
   it (`voice/duck.rs`). Bluetooth: if the
@@ -1751,8 +1756,18 @@ to **Run again** from Home.
   (never the play/pause toggle), kept; afterwards explicit `TryPlayAsync`
   only for those still **Paused**. Never a call app's session (its app id
   against the call apps' exes and package names), no browser's while a
-  meeting records or is live in one (`pause_verdict`, pure). Debug-only
-  `list` for the robot.
+  meeting records or is live in one (`pause_verdict`, pure). **Every wait
+  bounded** (2026-11-03; `.get()` waited for ever): each asynchronous call —
+  the manager, a title, a pause, a play — at most `ANSWER_WITHIN` (500 ms),
+  a whole start or end at most `PASS_WITHIN` (1.5 s), through
+  `shell::com::wait_within` (the operation's `Status()` looked at every
+  5 ms: the `windows` crate's build has neither its completion handler nor
+  `IntoFuture`). A session that doesn't answer is skipped and logged with
+  its app id and the wait, never its title; the dictation goes on. The
+  sessions are reached through the `Session` trait (`WinSession`), so the
+  unit tests run the passes over stand-ins that answer late or never.
+  Debug-only `list` for the robot (bounded the same way, asked before
+  `mute.rs`'s state is taken).
 - **`dictation/history.rs`** — local-only transcription history (`history.json`): each
   dictation's timestamp, raw + final text, its words as said when AI
   cleanup changed them (`said`: corrections, voice command and snippets,
