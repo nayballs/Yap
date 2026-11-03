@@ -14,8 +14,9 @@
 //   silence of the right length) — never this PC's speakers — and the
 //   conversation kept in Chat.
 // - Talk's words in the box (hands-free off, the default): Done puts the
-//   stub's transcript in the phone's text box, nothing in Chat; Send asks
-//   it as a typed question, answered and not said.
+//   stub's transcript in the phone's text box, nothing in Chat; fixed by
+//   hand, Send asks it as the spoken question it was (`ask {speak}`): by
+//   voice in Chat, the spoken answer's note to the model, said on the phone.
 // - A typed question (the composer's `ask`): the fake model's answer in the
 //   same conversation, typed (not "by voice"), nothing said; ▶ Read aloud
 //   then says it on the phone. ☰'s drawer with that conversation marked;
@@ -26,6 +27,13 @@
 //   model on this PC.
 // - Remove cuts the phone off at once; a replayed pairing link, a wrong
 //   secret and another site's page are refused.
+// - A phone's tabs (3 Nov: Firefox restored a phone's tabs, each with an old
+//   `#pair=` code, and their refusals locked the phone out): restored tabs
+//   with old codes connect on the device; the code scanned again on a paired
+//   phone is spent and Settings says it's paired already; a new phone's tabs
+//   with old codes are refused, five lock its address out ("Try again in 10
+//   minutes."), yet the paired phone still connects, the live code still
+//   pairs, and the refused tabs come back with the new device.
 //
 // The server listens on a free port in a test run (YAP_E2E_LINK_PORT=0;
 // `link_status` says which); the phone connects to 127.0.0.1 (a loopback
@@ -226,8 +234,10 @@ test('a phone pairs with the code both screens show, asks out loud and hears the
   await page.waitForTimeout(700);
   // (Hands-free may have ended it by itself on the tone's quiet: then it's sent already.)
   if ((await snapshot(page)).local === 'listening') await talk.click();
-  // The stub's transcript heard, the answer shown on the phone.
-  await expect(page.getByText(/STT stub: received/)).toBeVisible({ timeout: 20_000 });
+  // The stub's transcript heard, the answer shown on the phone. (In the
+  // question's bubble: the chat's title under the header says it too, once
+  // the PC's `chat` comes.)
+  await expect(page.getByTestId('heard').filter({ hasText: /STT stub: received/ })).toBeVisible({ timeout: 20_000 });
   await expect(page.getByText(ANSWER)).toBeVisible({ timeout: 20_000 });
   // Yap's voice came down to the phone (at 24 kHz) and played.
   await expect.poll(async () => (await snapshot(page)).player.rate, { timeout: 20_000 }).toBe(24_000);
@@ -268,19 +278,33 @@ test('a phone pairs with the code both screens show, asks out loud and hears the
   expect((await snapshot(page)).turns).toHaveLength(turns);
   await page.waitForTimeout(500);
   expect(messages(yap.readJson('chats.json'))).toBe(said);
+  // Checked and fixed by hand, then Send: asked as the spoken question it
+  // was — the Voice Assistant's spoken answer, said on the phone.
+  await box.press('End');
+  await box.pressSequentially(' please');
   const words = await box.inputValue();
   fakeLlm.scriptChat([{ plain: true, content: WORDS_ANSWER }]);
+  const asked = fakeLlm.requests.length;
   await page.getByTestId('send').click();
   await expect(box).toHaveValue('');
+  await expect(page.getByRole('img', { name: 'Asked by voice' }).last()).toBeVisible();
   await expect(page.getByText(WORDS_ANSWER)).toBeVisible({ timeout: 20_000 });
-  await expect.poll(async () => (await snapshot(page)).phase, { timeout: 15_000 }).toBe('idle');
-  await page.waitForTimeout(1000);
-  expect(await yap.invoke('tts_e2e_spoken')).toEqual([]);
+  await expect
+    .poll(async () => (await yap.invoke('tts_e2e_spoken')).map((s) => s.text).join(' '), { timeout: 20_000 })
+    .toContain('came through clearly');
+  await expect.poll(async () => (await snapshot(page)).player.rate, { timeout: 20_000 }).toBe(24_000);
+  await expect.poll(async () => (await snapshot(page)).phase, { timeout: 30_000 }).toBe('idle');
+  // The model was told it was asked out loud (the spoken answer's note, in
+  // the question's context block).
+  const SPOKEN_NOTE = 'This question was asked out loud';
+  const prompt = fakeLlm.requests.slice(asked).find((r) => JSON.stringify(r.messages).includes(words.trim()));
+  expect(prompt, 'the question went to the model').toBeTruthy();
+  expect(JSON.stringify(prompt.messages)).toContain(SPOKEN_NOTE);
   await expectStore(yap, 'chats.json', (store) => {
-    // Asked as typed (not "by voice"): the words as the box sent them.
-    const q = store.conversations.flatMap((c) => c.messages).find((m) => m.role === 'user' && !m.voice && m.text.includes('STT stub: received'));
-    expect(q, 'the words, asked as typed').toBeTruthy();
-    expect(q.text.trim()).toBe(words.trim());
+    // Asked by voice: the words as the box sent them.
+    const q = store.conversations.flatMap((c) => c.messages).find((m) => m.role === 'user' && m.text.trim() === words.trim());
+    expect(q, 'the words, asked').toBeTruthy();
+    expect(q.voice).toBe(true);
     expect(messages(store)).toBe(said + 2);
     return true;
   });
@@ -289,6 +313,7 @@ test('a phone pairs with the code both screens show, asks out loud and hears the
   // Chat answers a typed one, and not said — not on the phone, not here.
   await yap.invoke('tts_e2e_spoken', { clear: true });
   fakeLlm.scriptChat([{ plain: true, content: TYPED_ANSWER }]);
+  const typedAt = fakeLlm.requests.length;
   await page.getByTestId('input').fill(TYPED);
   await page.getByTestId('input').press('Enter');
   await expect(page.getByText(TYPED_ANSWER)).toBeVisible({ timeout: 20_000 });
@@ -297,6 +322,10 @@ test('a phone pairs with the code both screens show, asks out loud and hears the
   await page.waitForTimeout(1000);
   expect(await yap.invoke('tts_e2e_spoken')).toEqual([]);
   expect((await snapshot(page)).player.active).toBe(false);
+  // Typed: no spoken answer's note for the model.
+  const typedPrompt = fakeLlm.requests.slice(typedAt).find((r) => JSON.stringify(r.messages.at(-1)).includes(TYPED));
+  expect(typedPrompt, 'the typed question went to the model').toBeTruthy();
+  expect(JSON.stringify(typedPrompt.messages.at(-1))).not.toContain(SPOKEN_NOTE);
   await expectStore(yap, 'chats.json', (store) => {
     const conv = store.conversations.find((c) => c.messages.some((m) => m.text === TYPED));
     expect(conv, 'the typed question is in Chat').toBeTruthy();
@@ -453,5 +482,90 @@ test('a used pairing link, a wrong secret, a denied phone and another site are r
   // Nothing was paired by any of it.
   expect((await status(yap)).phones).toHaveLength(0);
   await page.context().close();
+  await closeSettings(main);
+});
+
+test("a phone's tabs: old codes never lock it out, the code scanned again is spent, a fresh code still pairs", async ({ yap, main, phone }) => {
+  test.setTimeout(150_000);
+  const BAD_LINK = "This pairing link isn't Yap's latest. Pair again in Settings → Phone on your PC.";
+  const dialog = await openSettings(main, 'Phone');
+  const { port } = await status(yap);
+  const at = (hash) => `https://127.0.0.1:${port}/${hash}`;
+  const connected = (p) => expect.poll(async () => (await snapshot(p)).ready, { timeout: 15_000 }).toBe(true);
+  const devicesKept = () => (yap.readJson('link_devices.json')?.devices ?? []).length;
+  async function allow() {
+    const ask = main.getByRole('alertdialog');
+    await expect(ask).toContainText(/Allow ‘.+’ to use Yap\?/);
+    await ask.getByRole('button', { name: 'Allow' }).click();
+    await expect(ask).toBeHidden();
+  }
+
+  // (The last spec's code may still be up: Done closes it.)
+  if (!(await dialog.getByRole('button', { name: 'Pair a phone' }).isVisible())) {
+    await dialog.getByRole('button', { name: 'Done', exact: true }).click();
+  }
+  // A phone pairs from the QR.
+  const first = await pairingLink(yap, dialog);
+  const a1 = await phonePage(phone);
+  await a1.goto(first.local);
+  await allow();
+  await connected(a1);
+  await expect.poll(devicesKept).toBe(1);
+
+  // Its tabs restored at once, each with an old code in its address — the
+  // one it paired with (used now), and older ones (made up): each connects
+  // on the device it has; nothing asks on the PC, nothing new is paired.
+  const hashes = [new URL(first.local).hash, '#pair=OldCodeFromThisMorning', '#pair=StaleCodeFromYesterday'];
+  const restored = [];
+  for (let i = 0; i < hashes.length; i++) restored.push(await a1.context().newPage());
+  await Promise.all(restored.map((p, i) => p.goto(at(hashes[i]))));
+  await Promise.all(restored.map(connected));
+  for (const p of restored) expect(await p.evaluate(() => location.hash)).toBe('');
+  await expect(main.getByRole('alertdialog')).toHaveCount(0);
+  await expect.poll(devicesKept).toBe(1);
+
+  // The code scanned again on the paired phone: connected, the code spent,
+  // and Settings says it's paired already (no code left waiting there).
+  const again = await pairingLink(yap, dialog);
+  const rescan = await a1.context().newPage();
+  await rescan.goto(again.local);
+  await connected(rescan);
+  await expect(main.getByText(/is already paired/)).toBeVisible();
+  await expect(dialog.getByRole('button', { name: 'Pair a phone' })).toBeVisible();
+  await expect(main.getByRole('alertdialog')).toHaveCount(0);
+  await expect.poll(devicesKept).toBe(1);
+
+  // A code made now; then a new phone's tabs (no device) with old codes:
+  // refused, a guess each; five, and its address waits, told for how long.
+  const live = await pairingLink(yap, dialog);
+  const b = await phonePage(phone);
+  const others = [b];
+  for (let i = 0; i < 4; i++) others.push(await b.context().newPage());
+  await Promise.all(others.map((p, i) => p.goto(at(`#pair=AnOlderPairingCode${i}`))));
+  for (const p of others) await expect(p.getByTestId('pair-why')).toHaveText(BAD_LINK);
+  const sixth = await b.context().newPage();
+  await sixth.goto(at('#pair=OneMoreOldPairingCode'));
+  await expect(sixth.getByTestId('pair-why')).toHaveText('Too many tries from this phone. Try again in 10 minutes.');
+  // ...yet the paired phone, on the same address, still connects,
+  await a1.reload();
+  await connected(a1);
+  // and the live code still pairs the new one.
+  const ctxB = b.context();
+  for (const p of others.slice(0, 4)) await p.close();
+  const fresh = await ctxB.newPage();
+  await fresh.goto(live.local);
+  await expect(fresh.getByTestId('pair-code')).toHaveText(/^\d{4}$/);
+  await allow();
+  await connected(fresh);
+  await expect.poll(devicesKept).toBe(2);
+  // Its tabs refused before come back with the new device by themselves.
+  await connected(others[4]);
+  await connected(sixth);
+
+  // Tidy up: no phones left paired.
+  for (const p of (await status(yap)).phones) await yap.invoke('link_remove', { id: p.id });
+  await expect.poll(() => devicesKept()).toBe(0);
+  await a1.context().close();
+  await ctxB.close();
   await closeSettings(main);
 });

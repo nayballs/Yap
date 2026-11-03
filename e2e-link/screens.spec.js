@@ -3,7 +3,9 @@
 // compared): pairing, empty, the drawer, a chat opened from it, typing with
 // the keyboard up, listening, transcribing, Talk's words in the box,
 // answering (■), two pictures in the composer, the model sheet, the
-// settings sheet. Also checks nothing
+// settings sheet; Talk's words sent from the box and answered out loud (the
+// 🎙, ■); a tab restored with an old code, connecting; "Too many tries"
+// with its wait. Also checks nothing
 // overflows sideways, every control is a thumb's size (44 px or more), Yap's
 // fonts and logos come from the page's own origin, and the composer and
 // Talk are on the first screen, low enough for a thumb, upright and on its
@@ -210,6 +212,66 @@ for (const scheme of ['light', 'dark']) {
         await page.getByText('Sound details').click();
         await page.getByTestId('sound').scrollIntoViewIfNeeded();
         await shot(page, `settings-sound-${at}`);
+      });
+
+      test(`Talk's words sent from the box, answered out loud (${at})`, async ({ page }) => {
+        await servePage(page);
+        await seedDevice(page);
+        const pc = await mockPc(page, OPUS);
+        await open(page);
+        await ready(page, pc);
+        await page.evaluate(() => document.fonts.ready);
+        // A typed question first: its bubble without 🎙, answered on screen.
+        await type(page, pc, 'Is the bike shop open on Sundays?');
+        pc.send({ type: 'heard', text: 'Is the bike shop open on Sundays?' });
+        pc.send({ type: 'answer', text: 'Yes, from 10 am to 4 pm.', final: true, id: 'chat:9:1' });
+        pc.send({ type: 'state', phase: 'idle' });
+        await expect(page.getByTestId('read-aloud')).toBeVisible();
+        // Then Talk's words, fixed in the box and sent: the 🎙, said on the phone.
+        await ask(page, pc, 300);
+        pc.send({ type: 'state', phase: 'transcribing' });
+        pc.send({ type: 'words', text: 'Book a service for the blue bike' });
+        pc.send({ type: 'state', phase: 'idle' });
+        await expect(page.getByTestId('input')).toHaveValue('Book a service for the blue bike');
+        await page.getByTestId('input').press('End');
+        await page.getByTestId('input').pressSequentially(' next Saturday');
+        await page.getByTestId('send').click();
+        await expect.poll(() => pc.of('ask').at(-1)?.speak).toBe(true);
+        pc.send({ type: 'heard', text: 'Book a service for the blue bike next Saturday' });
+        pc.send({ type: 'state', phase: 'thinking' });
+        pc.send({ type: 'answer', text: "They have a slot at 9 on Saturday. Shall I put it in your calendar?", final: false });
+        pc.send({ type: 'state', phase: 'speaking' });
+        pc.send({ type: 'speak_start', rate: 24000 });
+        for (let i = 0; i < 40; i++) pc.sendBinary(downFrame(i, voice(24000, 100)));
+        await expect(page.getByTestId('stop')).toBeVisible();
+        await expect(page.getByRole('img', { name: 'Asked by voice' })).toHaveCount(1);
+        await expect(page.getByTestId('turn').last().locator('.speaking')).toHaveText('Speaking…');
+        await page.getByTestId('input').blur();
+        await shot(page, `said-${at}`);
+        expect(await tooSmall(page)).toEqual([]);
+        expect(await noSideways(page)).toBe(true);
+        await page.getByTestId('stop').click();
+      });
+
+      test(`a phone's tab with an old code: connecting, then "Too many tries" with its wait (${at})`, async ({ page }) => {
+        await servePage(page);
+        await seedDevice(page);
+        // A tab restored with an old code: the chat, connecting, never the pairing screen.
+        let answer = null;
+        const pc = await mockPc(page, { onHello: (hello, conn) => (answer = conn) });
+        await open(page, '#pair=tok-from-this-morning');
+        await expect.poll(() => !!answer).toBe(true);
+        await expect(page.getByTestId('pair-code')).toBeHidden();
+        await expect(page.getByTestId('talk')).toBeVisible();
+        await shot(page, `restored-connecting-${at}`);
+        // Refused by a PC whose address waits: said with when to try again.
+        pc.sendTo(answer, { type: 'denied', reason: 'Too many tries from this phone. Try again in 4 minutes.' });
+        answer.ws.close();
+        await expect(page.getByTestId('pair-why')).toHaveText('Too many tries from this phone. Try again in 4 minutes.');
+        await expect(page.getByRole('button', { name: 'Try again' })).toBeVisible();
+        await shot(page, `too-many-${at}`);
+        expect(await tooSmall(page)).toEqual([]);
+        expect(await noSideways(page)).toBe(true);
       });
     });
   }

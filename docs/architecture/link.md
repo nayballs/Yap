@@ -29,11 +29,30 @@ Then **Talk's words go in the box first** (the maintainer: Done "just sends
 the message", with nothing "to see what u said"; the Claude and ChatGPT
 apps' way instead): with hands-free off — the default — Talk (a tap then
 Done, or a hold then release) puts its words in the composer's text box, at
-the caret and after whatever was typed, to check, fix and send yourself;
-Send asks them as a typed question (answered on screen, ▶ to hear it).
+the caret and after whatever was typed, to check, fix and send yourself.
 **Hands-free** still sends at once and Yap answers out loud. The PC only
 transcribes them (`start {mode: "words"}` → `words`): nothing reaches Chat
 until Send.
+
+That evening **Send answers Talk's words out loud** (the maintainer: "When
+I hit send, I don't hear a voice"; till then Send asked them as a typed
+question, answered on screen): when any of the box's words came from Talk
+— since the box was last empty or sent; fixing them by hand doesn't change
+that — Send asks them as the spoken question they were (`ask {speak:
+true}`): the bubble's 🎙, the Voice Assistant's spoken answer, marked by
+voice in Chat, said on the phone with ■, barge-in by Talk and Clearer
+sound, exactly as a spoken question's. A question only typed is still
+answered on screen, ▶ to hear it.
+
+And **pairing survives a phone's tabs** (the same evening: Firefox on
+Android restored a phone's tabs after it was closed, each with an old
+`#pair=` code in its address; each sent that code *instead of* the device
+it had, was refused, and the refusals — strikes — locked the phone out for
+10 minutes, a fresh QR code included): a hello carries the device **and**
+any code the tab has, and the PC counts the device first; the code leaves
+the address once the PC answers; only guesses are strikes; a new pairing
+link forgives them; a paired phone and the live code are never turned away
+for them; "Too many tries" says when to try again. Details: Pairing, below.
 
 The long-term design (yap-private `docs/phone-remote-design.md`: a PWA on
 Yap's website, WebRTC, away from home through a relay) keeps this protocol's
@@ -91,8 +110,14 @@ Chat's three amber dots (no waveform, ✕ still cancels), then the text box
 is back with the words in it — at the caret, after whatever was typed (one
 space between; talking never wipes the box, a selection stays), the caret
 after them, the box grown to show them, Send lit. Nothing is asked and no
-bubble shows until **Send**, which asks them as a typed question (`ask`:
-answered on screen, ▶ to hear it); the pictures in the card wait for it.
+bubble shows until **Send**, which asks them as the spoken question they
+were (`ask {speak: true}`: the bubble's 🎙, the answer said on the phone
+with ■, as a spoken question's) — whenever any of the box's words came from
+Talk since it was last empty or sent, however they were fixed; a question
+only typed is answered on screen, ▶ to hear it. The pictures in the card
+wait for Send. (A PC from before `"speak"` in `ready.can` reads the field
+as nothing and answers on screen; the bubble shows no 🎙 then, as Chat
+keeps it typed.)
 Nothing heard keeps the box as it was: "Yap didn't hear anything. Try
 again, or type it." **Hands-free** (the settings sheet: "On: sends when
 you stop talking, and Yap answers out loud. Off: your words go in the box
@@ -129,13 +154,18 @@ Details: the README's "The look" and "Chat's picker".
 v1 with **additions** (2026-11-03, marked ⁺ below): typed questions, ▶ on an
 answer, Chat's picker and the effort; then the phone's own conversation
 (the drawer) and its pictures; then Talk's words for the phone's box
-(`start {mode: "words"}` → `words`). They're backward compatible both ways:
+(`start {mode: "words"}` → `words`), and asked out loud once sent (`ask
+{speak: true}`); and a hello with both `device` and `pair`. They're
+backward compatible both ways:
 `hello.v` stays 1; a first page ignores the new fields of `ready` and
 `answer`; a new page offers typing, ▶ and the picker only when `ready.can`
 says the PC answers them (a PC from before them: "Yap on your PC needs an
 update to answer typed questions…", and the plain model list; one without
 `"words"`: Talk sends the question at Done, as before — a PC from before
-takes any `start` as a question, `mode` unread); a message a PC
+takes any `start` as a question, `mode` unread; one without `"speak"` reads
+`ask`'s `speak` as nothing and answers on screen, no error; any PC judges a
+hello's device before its `pair`, so a page sending both connects to one
+from before too); a message a PC
 doesn't know is answered `error` "Yap on your PC doesn't know how to do that
 yet. Update Yap on the PC, then try again." (`wire::UNKNOWN`; a PC from before
 says "Yap didn't understand that message").
@@ -152,13 +182,13 @@ is at most 32,005 bytes (a second of audio); a text frame at most 16 KiB.
 
 | Message | Meaning |
 |---|---|
-| `hello {v:1, name, nonce, device?:{id, secret}, pair?:{token}}` | The first message. `device` on a later visit, `pair` from the QR. |
+| `hello {v:1, name, nonce, device?:{id, secret}, pair?:{token}}` | The first message. `device` on a later visit, `pair` from the QR — ⁺ both when the page has both (a tab restored with an old `#pair=` in its address, the code scanned again on a paired phone): the device counts first (Pairing, below). |
 | `start {mode:"ask", chat?⁺}` | A question starts; up frames follow, 20–40 ms each (the page sends exactly 320 samples, `seq` from 0 for each question). `chat`: the conversation it goes to (below). |
 | `start {mode:"words"⁺, chat?}` | The same, for **the words alone** (`wire::Talk::Words`): recorded as a question is, then on `stop` (or the 2-minute cap) only transcribed — the same `PhoneEar` and dictionary — and answered `words`, then `state idle`. No `heard`, no thinking, no Voice Assistant, nothing written to Chat; empty: `error` "Yap didn't hear anything. Try again, or type it." + idle; a transcription that failed: its `error` + idle. The page sends it with hands-free off where `ready.can` has `"words"`. |
 | `stop {pictures?⁺, asText?⁺}` | The question ended (after its last frame): transcribe and answer, with the `pictures` sent just before it (their text instead when `asText`). For `"words"`: transcribe only (no pictures go; any announced are dropped). |
 | `cancel` | Drop the question (listening, or being worked on) — or the words being transcribed. |
 | `interrupt` | Stop speaking and abandon the answer. |
-| `ask {text, chat?, pictures?, asText?}` ⁺ | A typed question (4,000 characters at most): `heard`, thinking, the answer as for a spoken one, in the same conversation, **not spoken**. `chat`, `pictures`, `asText` as for `start` / `stop`. |
+| `ask {text, chat?, pictures?, asText?, speak?}` ⁺ | A question from the composer (4,000 characters at most): `heard`, thinking, the answer as for a spoken one, in the same conversation. Typed: **not spoken**. ⁺ `speak: true` (the page sends it when any of the box's words came from Talk, since it was last empty or sent): asked as the spoken question it was — by voice in Chat, the Voice Assistant's spoken answer, said on the phone as a `stop`'s is (`speak_start` …). `chat`, `pictures`, `asText` as for `start` / `stop`. |
 | `picture {n, size}` ⁺ | Picture `n` (from 0) of the next question: `size` bytes (3 MB at most), in `0x03` frames that follow. Four at most a question. |
 | `chats` ⁺ | Chat's conversations, for the drawer (`chats`). |
 | `open_chat {id}` ⁺ | This phone's questions go to conversation `id` from now on; its messages come back (`thread`). |
@@ -176,8 +206,8 @@ is at most 32,005 bytes (a second of audio); a text frame at most 16 KiB.
 |---|---|
 | `pair_wait {code}` | The pairing waits for a yes on the PC, which shows the same code. |
 | `paired {device:{id, secret}}` | Paired: the phone keeps these for its next visits. |
-| `denied {reason}` | Refused, in words the phone can show; the socket closes. |
-| `ready {pc, model:{id,label,onThisPc}, models:[{id,label,onThisPc}], can⁺, picker⁺}` | Connected: this PC's name, Chat's model (or `null`: none set up) and the others; `can`: what it answers beyond v1 (`["ask", "read_aloud", "picker", "effort", "chats", "pictures", "words"]`); `picker`: what Chat's picker shows (`{status, catalog, local, images}`, `link/models.rs`; never a key; `status.images` and `status.imagesSwitch` say whether Chat's model reads pictures and which would). Sent again whenever Chat's model changes (here, in Chat, or from a phone: `yap-chat-model-changed`) and after every `set_model`, which the page takes as the truth. |
+| `denied {reason}` | Refused, in words the phone can show ("Too many tries from this phone. Try again in 4 minutes."); the socket closes. |
+| `ready {pc, model:{id,label,onThisPc}, models:[{id,label,onThisPc}], can⁺, picker⁺}` | Connected: this PC's name, Chat's model (or `null`: none set up) and the others; `can`: what it answers beyond v1 (`["ask", "read_aloud", "picker", "effort", "chats", "pictures", "words", "speak"]`); `picker`: what Chat's picker shows (`{status, catalog, local, images}`, `link/models.rs`; never a key; `status.images` and `status.imagesSwitch` say whether Chat's model reads pictures and which would). Sent again whenever Chat's model changes (here, in Chat, or from a phone: `yap-chat-model-changed`) and after every `set_model`, which the page takes as the truth. |
 | `chats {items:[{id, title, ts}]}` ⁺ | Chat's conversations, newest first (`link/chats.rs`). |
 | `thread {id, title, messages:[{role, text, id?, voice?, pictures?}], more}` ⁺ | A conversation's latest messages (words only; an answer's `id` for ▶; `pictures`: how many a question carried), `more` when older ones were left out; `id: null` for a new chat (or one that's gone, after an `error`). |
 | `chat {id, title}` ⁺ | This phone's question went to conversation `id` (the one chosen for it, or a new chat's): its questions go there from now on. |
@@ -213,7 +243,11 @@ a question is: `cancel`, `interrupt`, a new `start`, an `ask` or a
 drops them too, as an old question's news).
 An `ask` abandons whatever was under way too (answered `state idle` first when
 there was something), then `heard`, `state thinking`, the answer and `state
-idle` — no voice. A `read_aloud` always answers `state idle` first (the
+idle` — no voice; with `speak`, the answer's voice as after a `stop`
+(`state speaking`, `speak_start`, down frames, `speak_end`, `state idle`),
+and `interrupt` or a `start` abandons it the same way. The page readies its
+sound on Send's tap (a phone wants a gesture for it), as for ▶. A
+`read_aloud` always answers `state idle` first (the
 page's cue that the old news has ended), then the voice (`state speaking`,
 `speak_start`, down frames, `speak_end`, `state idle`), or `error` ("That
 answer isn't in Chat on your PC any more…") for an id it didn't give this
@@ -282,6 +316,54 @@ isn't a Skill or an app to open.
    with **Remove**: gone from the store, and a phone connected now is cut off
    at once (`denied`, the socket closed).
 
+**A phone's tabs** (2026-11-03). Every QR scan opens a tab, and a phone's
+browser keeps them: Firefox on Android restored a phone's tabs with the
+address each was opened at — `#pair=` and all, from before the page took it
+out with `history.replaceState` — and each then sent its old code *instead
+of* the device it had (the page's old rule: "a code scanned again pairs
+afresh"). Every one was refused, every refusal was a strike, and five
+strikes in 10 minutes locked the phone's address out — the paired phone and
+a fresh QR code too ("Too many tries…" came before anything else was
+looked at). Re-scanning also paired the same phone afresh each time, so
+Settings filled with copies of it. Now:
+
+- **The page sends the device and the code** when a tab has both
+  (`link.js` `connect`), the device read afresh from `localStorage` for
+  every hello (another tab may have paired since). **The PC judges the
+  device first** (`pairing::judge`): known, it's connected whatever the
+  code — and when the code is the **live invitation's** (scanned again on a
+  phone paired already) that's used up, `Verdict::Known { invited }`, and
+  Settings → Phone is told (`yap-link-already-paired`: the code closes,
+  "“Android · Firefox” is already paired"), so nothing waits on it; not
+  known, the code pairs as before (a phone removed, or new). A PC from
+  before already judged the device first.
+- **The code leaves the address** once the PC answers — `paired`, `denied`
+  or now `ready` — so a reload or a restored tab never brings it again.
+- **A refused tab comes back** when another tab pairs the phone (the
+  `storage` event: at once if it's in front, else when it's next shown).
+- **A code opened in a tab that's already open** (the link pasted into its
+  address bar: only the fragment changes, so the page isn't loaded again)
+  is said at once (`hashchange`).
+- **Only guesses are strikes** (`Refusal::strikes`): a wrong secret or an
+  unknown phone ("removed"), a code that isn't the live invitation's ("bad
+  link"). The real code used already or run out ("used", "expired") came
+  from the QR on the PC's screen; an old page ("wrong version") or a hello
+  with nothing in it ("not paired") guessed nothing.
+- **A struck-out address waits only for hellos that are refused anyway**
+  (`session.rs` `hello_verdict`: the minute's cap, then the hello judged,
+  then the wait): a paired phone's hello and the live code's go on — a
+  256-bit secret and a 128-bit one-time code can't be guessed, and the
+  minute's cap (20 hellos) still bounds how fast anything is tried.
+- **A new pairing link forgives every address's strikes** (`link_pair_start`
+  → `Limiter::forgive`): the person at the PC is pairing on purpose.
+- **"Too many tries" says when**: "Too many tries from this phone. Try again
+  in 4 minutes." (`pairing::too_many`: until the strike that counts is 10
+  minutes old, or the minute's first hello a minute old; whole minutes,
+  rounded up).
+- **The log says which refusal** (info): `kind` = removed, not paired, used,
+  expired, bad link, wrong version or too many, and whether it was a strike
+  — never an id, a secret, a code or an address.
+
 ## Security
 
 - **Home network only.** A peer that isn't on a private (10/8, 172.16/12,
@@ -315,8 +397,12 @@ isn't a Skill or an app to open.
   `https://<its Host>` (any web page may open a WebSocket anywhere), and the
   `Host` must be an address, `localhost`, a `.local` name or this PC's name (a
   rebound domain is refused).
-- **Hellos per address**: at most 10 a minute; 5 refused in 10 minutes and that
-  address waits out the 10 (`pairing::Limiter`). A hello must come within 10 s.
+- **Hellos per address**: at most 20 a minute (each judged); 5 guesses
+  refused in 10 minutes (a wrong secret, a code that isn't Yap's) and that
+  address's refused hellos wait until the first of them is 10 minutes old,
+  told how long (`pairing::Limiter`; a paired phone's hello and the live
+  code's never wait, and a new pairing link forgives: Pairing, above). A
+  hello must come within 10 s.
 - **What a phone can do**: ask the Voice Assistant, out loud or typed (its
   tools follow their own rules: opening apps on this PC, notes, the web),
   with pictures it sends (kept in `chat-images/` as Chat keeps a pasted one,
@@ -474,8 +560,14 @@ on the PC while the answer comes stops the voice, as it stops the PC's.
 
 - **Unit** (`cargo test link::`): the binary framing and the JSON messages both
   ways (`wire.rs`); the hello and auth rules — a bad token, an expired one, a
-  replay, a wrong secret, no nonce, another version (`pairing.rs`); the code;
-  tokens; names; the limiter; the device store (hash only, Remove, the oldest
+  replay, a wrong secret, no nonce, another version; a paired phone with an
+  old code too (known), with the live one (known, the code spent), a phone
+  unknown with the live code (pairs) (`pairing.rs`); which refusals are
+  strikes, their words and kinds; "Try again in 4 minutes."; the code;
+  tokens; names; the limiter (the minute's cap and its wait, the strikes'
+  wait, a new link forgiving them) and the 3 Nov log replayed (restored tabs
+  never lock their paired phone out, the live code pairs a struck-out
+  address); the device store (hash only, Remove, the oldest
   forgotten); a non-private peer, the QR's address (`lan.rs`); the
   certificate's names and that it loads into rustls (`cert.rs`); request
   parsing, the Origin and Host rules, RFC 6455's accept key (`server.rs`); the
@@ -496,7 +588,9 @@ on the PC while the answer comes stops the voice, as it stops the PC's.
   `imagesSwitch` and without `imagesLocal` (`models.rs`); Talk's words —
   `start {mode:"words"}` (`Talk::of`: exactly "words", else a question),
   `words` written, `"words"` in `can` (`wire.rs`) — and what the box gets:
-  the words trimmed, or why there are none (`session.rs` `words_out`).
+  the words trimmed, or why there are none (`session.rs` `words_out`);
+  `ask {speak}` read (only a true one), `"speak"` last in `can`, a hello
+  with both `device` and `pair` (`wire.rs`).
 - **E2E** `e2e/link.spec.js`: a test run listens on a free port of 127.0.0.1
   (`YAP_E2E_LINK_PORT=0`, the port in `link_status`); a headless Chromium
   (Playwright's, else Edge) with a fake microphone opens the real page over
@@ -505,8 +599,9 @@ on the PC while the answer comes stops the voice, as it stops the PC's.
   with hands-free on, the stub's transcript `heard`, the fake model's answer,
   the voice down at 24 kHz (test mode's stand-in voice), the conversation in
   `chats.json`, the receipts; Talk with hands-free off: the stub's transcript
-  in the phone's box, nothing in Chat, then Send asking it as typed and not
-  said; a typed question in the same conversation, not "by voice", with
+  in the phone's box, nothing in Chat, then fixed by hand and Send asking
+  it out loud (by voice in `chats.json`, the spoken answer's note to the
+  model, the answer said on the phone); a typed question in the same conversation, not "by voice", with
   nothing said, then ▶ saying it; ☰'s drawer listing that conversation,
   marked; + New chat and a question going to a conversation of its own; a
   picture from the phone (GPT-OSS can't read it: the composer's line, then
@@ -514,7 +609,13 @@ on the PC while the answer comes stops the voice, as it stops the PC's.
   question in `chats.json` (`asText`); the first
   conversation opened again from the drawer; Chat's picker over the wire
   switching Chat's model; Remove cutting the phone off; a replayed link, a
-  wrong secret, Deny and another site's page refused.
+  wrong secret, Deny and another site's page refused; a phone's tabs — three
+  restored with old codes (the one it paired with among them) connecting on
+  its device, the code scanned again on it spent and Settings saying it's
+  paired already, a new phone's five tabs with old codes refused and a
+  sixth told "Try again in 10 minutes.", the paired phone still connecting
+  from that address, the live code still pairing the new one, and its
+  refused tabs coming back with its device.
 - The page on its own: `npm run test:link` (`e2e-link/`, the PC mocked): the
   sound maths in Node (the resampler both ways, the jitter buffer, the voice
   detector), then the page in a headless Chromium — among the rest, the answer's
@@ -540,10 +641,19 @@ on the PC while the answer comes stops the voice, as it stops the PC's.
   `cant_read`, a PC from before), Talk's words in the box (`words.spec.js`:
   `start {mode: "words"}`, Done's ✓, "Transcribing…" with ✕, the words in
   the box at the caret and after what was typed, a hold and its release,
-  Send asking them as typed and nothing spoken, nothing heard keeping the
-  box, ✕ while transcribing and the late words dropped, the pictures
-  waiting for Send, the PC's own 2 minutes, the mic gone, hands-free and a
-  PC from before still sending, at 200 % text and on its side), the shared modules staying pure
+  Send asking them out loud — `speak`, the 🎙, the voice, ■ and Talk over
+  it — while a question only typed (or the box emptied first) stays typed,
+  nothing heard keeping the box, ✕ while transcribing and the late words
+  dropped, the pictures waiting for Send and Chat's line keeping them said,
+  a PC from before `"speak"` answering on screen with no error, the PC's
+  own 2 minutes, the mic gone, hands-free and a PC from before still
+  sending, at 200 % text and on its side), a phone's tabs
+  (`pairing.spec.js`, against a PC that judges hellos as Yap's does: a saved
+  device with an old `#pair=` connecting and the code leaving the address,
+  six tabs restored at once never locked out, a fresh code pairing after
+  old tabs were refused and those tabs coming back, a tab with a removed
+  device taking the new one at its next hello, a code opened in a tab
+  already open, "Too many tries" with its wait and no hammering), the shared modules staying pure
   (`shared.spec.js`), the look (Yap's fonts and the logos from the page's
   own origin; at 360, 390 and 430 px wide, on its side and at 130 and 200 %
   text, nothing sideways and Talk in the thumb's reach; `tokens.spec.js`:

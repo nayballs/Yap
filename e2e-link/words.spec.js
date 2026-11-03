@@ -2,11 +2,13 @@
 // with hands-free off, Talk — a tap then Done, or a hold then release —
 // sends `start {mode: "words"}` and `stop`; the PC's `words` go in the
 // composer's text box, at the caret, after anything typed, to check and
-// fix; Send asks them as a typed question (`ask`), answered on screen and
-// not spoken. Nothing heard keeps the box; ✕ while it transcribes drops the
-// words; the pictures wait in the composer for Send. Hands-free on — and a
-// PC from before, without "words" in `ready.can` — still send at once.
-// Yap on the PC mocked; the mic the looped 440 Hz tone.
+// fix; Send asks them as the spoken question they were (`ask {speak:
+// true}`: the bubble's 🎙, the answer said on the phone, ■, barge-in) —
+// while a question only typed stays typed, answered on screen. Nothing
+// heard keeps the box; ✕ while it transcribes drops the words; the pictures
+// wait in the composer for Send. Hands-free on — and a PC from before,
+// without "words" in `ready.can` — still send at once. Yap on the PC
+// mocked; the mic the looped 440 Hz tone.
 import { test, expect } from '@playwright/test';
 import {
   servePage,
@@ -24,6 +26,7 @@ import {
   downFrame,
   voice,
   CAN_BEFORE_WORDS,
+  CAN_BEFORE_SPEAK,
 } from './support/harness.js';
 
 const NO_WORDS = "Yap didn't hear anything. Try again, or type it.";
@@ -44,7 +47,24 @@ function words(pc, text) {
 const box = (page) =>
   page.getByTestId('input').evaluate((t) => ({ value: t.value, start: t.selectionStart, end: t.selectionEnd }));
 
-test('Talk, then Done: the words go in the box, nothing is asked; Send asks them as typed', async ({ page }) => {
+/** The PC's answer said out loud: heard, thinking, the answer, then its voice (`ms` of it). */
+function spokenAnswer(pc, { heard, answer, id, ms = 600 }) {
+  pc.send({ type: 'heard', text: heard });
+  pc.send({ type: 'state', phase: 'thinking' });
+  pc.send({ type: 'answer', text: answer, final: true, id });
+  pc.send({ type: 'state', phase: 'speaking' });
+  pc.send({ type: 'speak_start', rate: 24000 });
+  for (let i = 0; i < ms / 100; i++) pc.sendBinary(downFrame(i, voice(24000, 100)));
+}
+
+/** Talk's words in the box: a tap, a moment of the mic, Done, then the PC's `words`. */
+async function talkWords(page, pc, text) {
+  await ask(page, pc, 300);
+  words(pc, text);
+  await expect.poll(() => page.getByTestId('input').inputValue()).toContain(text);
+}
+
+test('Talk, then Done: the words go in the box, nothing is asked; Send asks them out loud', async ({ page }) => {
   const pc = await mockPc(page);
   await open(page);
   await ready(page, pc);
@@ -86,28 +106,167 @@ test('Talk, then Done: the words go in the box, nothing is asked; Send asks them
   expect(pc.of('ask')).toHaveLength(0);
   expect((await snapshot(page)).transcribing).toBe(false);
 
-  // Fixed by hand, then sent: an `ask`, the bubble typed (no 🎙).
+  expect((await snapshot(page)).said).toBe(true);
+
+  // Fixed by hand, then sent: an `ask` that says they were said, the
+  // bubble's 🎙 as a spoken question's.
   await page.getByTestId('input').click();
   await page.keyboard.press('End');
   await page.keyboard.type(' and on Friday');
   await page.getByTestId('send').click();
-  await expect.poll(() => pc.of('ask')).toEqual([{ type: 'ask', text: 'Remind me to water the beans tonight and on Friday' }]);
+  await expect
+    .poll(() => pc.of('ask'))
+    .toEqual([{ type: 'ask', text: 'Remind me to water the beans tonight and on Friday', speak: true }]);
   await expect(page.getByTestId('input')).toHaveValue('');
   await expect(page.getByTestId('heard')).toHaveText('Remind me to water the beans tonight and on Friday');
-  await expect(page.getByRole('img', { name: 'Asked by voice' })).toHaveCount(0);
-  // Answered on screen, not read out: ▶ for that.
-  pc.send({ type: 'heard', text: 'Remind me to water the beans tonight and on Friday' });
-  pc.send({ type: 'state', phase: 'thinking' });
-  pc.send({ type: 'answer', text: "I'll remind you tonight at 8 and on Friday.", final: true, id: 'chat:5:1' });
-  pc.send({ type: 'state', phase: 'idle' });
+  await expect(page.getByRole('img', { name: 'Asked by voice' })).toHaveCount(1);
+  expect((await snapshot(page)).said).toBe(false);
+  // Answered out loud, on the phone, as a spoken question is: the answer
+  // in the thread, its voice playing, ■ in the composer meanwhile.
+  spokenAnswer(pc, {
+    heard: 'Remind me to water the beans tonight and on Friday',
+    answer: "I'll remind you tonight at 8 and on Friday.",
+    id: 'chat:5:1',
+  });
   await expect(page.getByTestId('answer')).toHaveText("I'll remind you tonight at 8 and on Friday.");
-  await expect(page.getByTestId('read-aloud')).toHaveText('Read aloud');
+  await expect.poll(async () => (await snapshot(page)).player.played, { timeout: 4000 }).toBeGreaterThan(0.2);
+  await expect(page.getByTestId('stop')).toBeVisible();
+  await expect(page.getByTestId('phase')).toHaveText('Speaking');
+  pc.send({ type: 'speak_end' });
+  pc.send({ type: 'state', phase: 'idle' });
+  await expect.poll(async () => (await snapshot(page)).player.active, { timeout: 4000 }).toBe(false);
+  await expect(page.getByTestId('phase')).toHaveText('Ready');
   const snap = await snapshot(page);
-  expect(snap.player.active).toBe(false);
-  expect(snap.turns).toEqual([{ q: 'Remind me to water the beans tonight and on Friday', typed: true, final: true, answerId: 'chat:5:1' }]);
+  expect(snap.turns).toEqual([{ q: 'Remind me to water the beans tonight and on Friday', typed: false, final: true, answerId: 'chat:5:1' }]);
   // One start, one stop: the words' only; the question went as `ask`.
   expect(pc.of('start')).toHaveLength(1);
   expect(pc.of('stop')).toHaveLength(1);
+});
+
+test('only typed: asked as typed, answered on screen; emptied, the box is typed again', async ({ page }) => {
+  const pc = await mockPc(page);
+  await open(page);
+  await ready(page, pc);
+  const input = page.getByTestId('input');
+  // Typed, nothing said: no `speak`, no 🎙, answered on screen.
+  await input.fill('What time does the market open?');
+  await page.getByTestId('send').click();
+  await expect.poll(() => pc.of('ask').at(-1)).toEqual({ type: 'ask', text: 'What time does the market open?' });
+  await expect(page.getByRole('img', { name: 'Asked by voice' })).toHaveCount(0);
+  pc.send({ type: 'heard', text: 'What time does the market open?' });
+  pc.send({ type: 'answer', text: 'At 8 am on Saturdays.', final: true, id: 'chat:5:1' });
+  pc.send({ type: 'state', phase: 'idle' });
+  await expect(page.getByTestId('read-aloud')).toHaveText('Read aloud');
+  expect((await snapshot(page)).player.active).toBe(false);
+
+  // Said, then sent: the next one typed is typed again.
+  await talkWords(page, pc, 'Book the dentist for next week');
+  await page.getByTestId('send').click();
+  await expect.poll(() => pc.of('ask').at(-1)).toEqual({ type: 'ask', text: 'Book the dentist for next week', speak: true });
+  pc.send({ type: 'heard', text: 'Book the dentist for next week' });
+  pc.send({ type: 'answer', text: 'Which day suits you?', final: true, id: 'chat:5:3' });
+  pc.send({ type: 'state', phase: 'idle' });
+  await input.fill('Tuesday morning');
+  await input.press('Enter');
+  await expect.poll(() => pc.of('ask').at(-1)).toEqual({ type: 'ask', text: 'Tuesday morning' });
+
+  // Said, then wiped by hand and typed afresh: typed.
+  pc.send({ type: 'answer', text: 'Booked for Tuesday at 9.', final: true, id: 'chat:5:5' });
+  pc.send({ type: 'state', phase: 'idle' });
+  await talkWords(page, pc, 'Something I said by mistake');
+  await input.fill('');
+  expect((await snapshot(page)).said).toBe(false);
+  await input.fill('Never mind, thanks');
+  await input.press('Enter');
+  await expect.poll(() => pc.of('ask').at(-1)).toEqual({ type: 'ask', text: 'Never mind, thanks' });
+
+  // Typed first, then Talk's words after it: said (some of it came from Talk).
+  pc.send({ type: 'answer', text: 'No problem.', final: true, id: 'chat:5:7' });
+  pc.send({ type: 'state', phase: 'idle' });
+  await input.fill('Add to the list:');
+  await talkWords(page, pc, 'bin bags and light bulbs');
+  await input.press('Enter');
+  await expect.poll(() => pc.of('ask').at(-1)).toEqual({ type: 'ask', text: 'Add to the list: bin bags and light bulbs', speak: true });
+  const turns = (await snapshot(page)).turns.map((t) => [t.q, t.typed]);
+  expect(turns).toEqual([
+    ['What time does the market open?', true],
+    ['Book the dentist for next week', false],
+    ['Tuesday morning', true],
+    ['Never mind, thanks', true],
+    ['Add to the list: bin bags and light bulbs', false],
+  ]);
+});
+
+test("the said question's answer: ■ stops it, and Talk over it stops it and listens", async ({ page }) => {
+  const pc = await mockPc(page);
+  await open(page);
+  await ready(page, pc);
+  await talkWords(page, pc, 'Read me the forecast for tomorrow');
+  await page.getByTestId('send').click();
+  await expect.poll(() => pc.of('ask').at(-1)?.speak).toBe(true);
+  spokenAnswer(pc, { heard: 'Read me the forecast for tomorrow', answer: 'Dry and bright, 14 degrees.', id: 'chat:7:1', ms: 3000 });
+  await expect.poll(async () => (await snapshot(page)).player.played, { timeout: 4000 }).toBeGreaterThan(0.2);
+  // ■: the voice stops at once, the PC is told.
+  await page.getByTestId('stop').click();
+  await expect.poll(() => pc.of('interrupt').length).toBe(1);
+  await expect.poll(async () => (await snapshot(page)).player.active).toBe(false);
+  pc.send({ type: 'state', phase: 'idle' });
+
+  // Again, then Talk over the answer: it stops, and Yap listens (for the box).
+  await talkWords(page, pc, 'And the day after?');
+  await page.getByTestId('send').click();
+  await expect.poll(() => pc.of('ask').at(-1)).toEqual({ type: 'ask', text: 'And the day after?', speak: true });
+  spokenAnswer(pc, { heard: 'And the day after?', answer: 'Showers in the afternoon.', id: 'chat:7:3', ms: 3000 });
+  await expect.poll(async () => (await snapshot(page)).player.played, { timeout: 4000 }).toBeGreaterThan(0.2);
+  const starts = pc.of('start').length;
+  await page.getByTestId('talk').click();
+  await expect.poll(() => pc.of('interrupt').length).toBe(2);
+  await expect.poll(() => pc.of('start').length).toBe(starts + 1);
+  expect(pc.of('start').at(-1)).toEqual({ type: 'start', mode: 'words' });
+  // The interrupt went before the start.
+  const types = pc.types();
+  expect(types.lastIndexOf('interrupt')).toBeLessThan(types.lastIndexOf('start'));
+  await expect.poll(async () => (await snapshot(page)).player.active).toBe(false);
+});
+
+test('a said question with pictures: they go with Send, and Chat\'s line puts it back still said', async ({ page }) => {
+  const pc = await mockPc(page, {
+    picker: pickerData({ model: 'opus' }),
+    model: { id: 'anthropic|claude-opus-5-5', label: 'Claude Opus 5.5 · Anthropic', onThisPc: false },
+  });
+  await open(page);
+  await ready(page, pc);
+  await choosePhotos(page, [await photo(page, { w: 800, h: 600 })]);
+  await talkWords(page, pc, 'Which bird is this?');
+  await page.getByTestId('send').click();
+  await expect.poll(() => pc.of('ask')).toEqual([{ type: 'ask', text: 'Which bird is this?', pictures: 1, speak: true }]);
+  expect(pc.pictures).toHaveLength(1);
+  // The PC's model turned them down after all: back in the box with them, still said.
+  pc.send({ type: 'cant_read', message: "Claude Opus 5.5 can't read images." });
+  await expect(page.getByTestId('input')).toHaveValue('Which bird is this?');
+  await expect(page.getByTestId('shot')).toHaveCount(1);
+  expect((await snapshot(page)).said).toBe(true);
+  await page.getByTestId('vision-as-text').click();
+  await expect.poll(() => pc.of('ask').at(-1)).toEqual({ type: 'ask', text: 'Which bird is this?', pictures: 1, asText: true, speak: true });
+});
+
+test('a PC from before "speak": Send says so harmlessly, and it answers on screen with no error', async ({ page }) => {
+  const pc = await mockPc(page, { can: CAN_BEFORE_SPEAK });
+  await open(page);
+  await ready(page, pc);
+  await talkWords(page, pc, 'How long do I boil an egg?');
+  await page.getByTestId('send').click();
+  // The field goes (the PC reads it as nothing); the bubble is typed, as the PC keeps it.
+  await expect.poll(() => pc.of('ask')).toEqual([{ type: 'ask', text: 'How long do I boil an egg?', speak: true }]);
+  await expect(page.getByRole('img', { name: 'Asked by voice' })).toHaveCount(0);
+  pc.send({ type: 'heard', text: 'How long do I boil an egg?' });
+  pc.send({ type: 'state', phase: 'thinking' });
+  pc.send({ type: 'answer', text: 'Six minutes for a soft yolk.', final: true, id: 'chat:2:1' });
+  pc.send({ type: 'state', phase: 'idle' });
+  await expect(page.getByTestId('answer')).toHaveText('Six minutes for a soft yolk.');
+  await expect(page.getByTestId('read-aloud')).toHaveText('Read aloud');
+  await expect(page.getByTestId('error')).toBeHidden();
+  expect((await snapshot(page)).player.active).toBe(false);
 });
 
 test('what was typed first stays: the words after it, one space between, or at the caret', async ({ page }) => {
@@ -251,9 +410,9 @@ test('the pictures wait in the composer at Done, and go with Send', async ({ pag
   words(pc, 'Which bird is this?');
   await expect(page.getByTestId('input')).toHaveValue('Which bird is this?');
   await expect(page.getByTestId('shot')).toHaveCount(1);
-  // Send: the picture, then the question with it.
+  // Send: the picture, then the question with it (said: Talk's words).
   await page.getByTestId('send').click();
-  await expect.poll(() => pc.of('ask')).toEqual([{ type: 'ask', text: 'Which bird is this?', pictures: 1 }]);
+  await expect.poll(() => pc.of('ask')).toEqual([{ type: 'ask', text: 'Which bird is this?', pictures: 1, speak: true }]);
   expect(pc.pictures).toHaveLength(1);
   expect(pc.pictures[0].bytes.length).toBe(pc.pictures[0].size);
   await expect(page.getByTestId('shot')).toHaveCount(0);

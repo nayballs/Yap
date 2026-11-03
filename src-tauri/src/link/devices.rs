@@ -192,7 +192,7 @@ mod tests {
         // Its hello is known; a wrong secret isn't.
         let now = std::time::Instant::now();
         let ok = Hello { v: 1, nonce: "n", device: Some((&id, &secret)), token: None };
-        assert_eq!(judge(&ok, None, &secret_hash, now), Verdict::Known(id.clone()));
+        assert_eq!(judge(&ok, None, &secret_hash, now), Verdict::Known { id: id.clone(), invited: false });
         let bad = Hello { v: 1, nonce: "n", device: Some((&id, "nope")), token: None };
         assert!(matches!(judge(&bad, None, &secret_hash, now), Verdict::Denied(_)));
         // Seen again with a new name.
@@ -202,7 +202,7 @@ mod tests {
         assert!(remove(&id));
         assert!(!remove(&id));
         assert!(list().is_empty());
-        assert!(matches!(judge(&ok, None, &secret_hash, now), Verdict::Denied(crate::link::pairing::REMOVED)));
+        assert!(matches!(judge(&ok, None, &secret_hash, now), Verdict::Denied(crate::link::pairing::Refusal::Removed)));
     }
 
     #[test]

@@ -74,6 +74,9 @@ pub const CHANGED: &str = "yap-link-changed";
 pub const PAIR: &str = "yap-link-pair";
 /// That question went (answered, or the phone gave up).
 pub const PAIR_DONE: &str = "yap-link-pair-done";
+/// A phone paired already brought Settings' code (`{name}`): the code has
+/// done its job (it's used up), and Settings → Phone says so.
+pub const ALREADY_PAIRED: &str = "yap-link-already-paired";
 
 /// A phone asking to pair, waiting for the person.
 struct Ask {
@@ -487,7 +490,10 @@ pub fn link_pair_start(address: Option<String>) -> Result<PairView, String> {
     let invite = Invite::new()?;
     let url = pair_url(ip, port, &invite.token);
     *hub.invite() = Some(invite);
-    tracing::info!("Yap Link: a pairing link made");
+    // The person at the PC is pairing on purpose: earlier refusals (a
+    // phone's tabs with old codes, say) don't stand in the new code's way.
+    let forgiven = hub.limiter().forgive();
+    tracing::info!(forgiven, "Yap Link: a pairing link made");
     Ok(PairView { qr: crate::auth::qr_for(&url), url, address: ip.to_string(), expires_ms: pairing::INVITE_FOR.as_millis() as u64 })
 }
 

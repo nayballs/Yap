@@ -48,6 +48,15 @@
         toast({ title: `“${added.name}” is paired`, description: 'Ask away: press Talk on your phone.', variant: 'success' });
       }
     }).then((u) => uns.push(u));
+    // A phone paired already brought the code (scanned again, or a tab that
+    // still had it): the code is used up, so it isn't left waiting here.
+    listen('yap-link-already-paired', (e) => {
+      if (!pair) return;
+      pair = null;
+      const name = String(e.payload?.name || 'This phone');
+      toast({ title: `“${name}” is already paired`, description: "It's connected: ask away from your phone.", variant: 'success' });
+      load();
+    }).then((u) => uns.push(u));
     const tick = setInterval(() => (now = Date.now()), 1000);
     return () => {
       clearInterval(tick);
