@@ -26,8 +26,12 @@ updates:
       # Move in step with the windows crate tauri / wry use.
       - dependency-name: windows
         update-types: [version-update:semver-minor, version-update:semver-major]
+      - dependency-name: windows-core
+        update-types: [version-update:semver-minor, version-update:semver-major]
       - dependency-name: webview2-com
         update-types: [version-update:semver-minor, version-update:semver-major]
+      # Held on 0.37.0: 0.37.1 activates focus:false windows on show (Cargo.toml).
+      - dependency-name: tao
 
   - package-ecosystem: npm
     directory: /

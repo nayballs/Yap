@@ -15,6 +15,14 @@ tauri-build = { version = "2", features = [] }
 
 [dependencies]
 tauri = { version = "2", features = ["tray-icon"] }
+# tao, tauri's window layer, held on exactly 0.37.0 (not used directly): from
+# 0.37.1 (tao #1342) on Windows every show() of a window built with
+# `focus: false` activates it, where it used to show it with
+# SW_SHOWNOACTIVATE. The Yap bar and the meeting notepad (and the main window
+# in test runs) would take the focus from the app a dictation pastes into or
+# the call in front (e2e bar.spec.js, notepad.spec.js). It moves once Yap
+# shows those windows without activating them itself.
+tao = "=0.37.0"
 # `deep-link` forwards a com.contextmirror.yap:// sign-in link that launched a
 # second process into the running instance (auth.rs). Held on 2.4.x with
 # deep-link below. 2.5+ needed tauri 2.12, which Yap is on since Nov 2026, but
