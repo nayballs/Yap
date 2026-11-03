@@ -397,7 +397,9 @@ shell waiting for it.
   usual…" sooner, the stub's transcription slowed: `dictation/slow.rs`),
   `e2e_dictation_cap { limitMs, warnMs }` (the 15-minute limit shortened:
   `dictation/cap.rs`), `e2e_crash_next_dictation` (the
-  next dictation panics in its paste step: `pipeline::Busy`), `e2e_fail_saves
+  next dictation panics in its paste step: `pipeline::Busy`),
+  `e2e_crash_next_job { job }` (the next action plan or brief's summary
+  panics: `RunEnds`, `BriefEnds`), `e2e_fail_saves
   { store, count }` (a store's next saves fail as a full disk would:
   `shell/saving.rs`), `e2e_fail_reads { store, count }` and
   `YAP_E2E_FAIL_READS` (a store's reads fail as another program holding its

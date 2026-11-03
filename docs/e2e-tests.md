@@ -83,7 +83,9 @@ points the suite at an exe directly), so it never competes with a running
   running as administrator (a test run reads no other process), and
   `e2e_crash_next_dictation` makes the next dictation panic in its paste
   step (a bug's crash, on purpose: `pipeline::Busy` must let dictation
-  go), and `e2e_fail_saves { store, count }` makes a store's next `count`
+  go), `e2e_crash_next_job { job }` the next action plan ("summary") or
+  brief's summary ("brief") panic (their guards must end the job:
+  `meeting_end::RunEnds`, `calendar::BriefEnds`), and `e2e_fail_saves { store, count }` makes a store's next `count`
   saves fail as a full disk would (`shell/saving.rs`; store ids: "notes",
   "history", "chats", "memory", "calendar"…; 0 clears), and
   `e2e_fail_reads { store, count }` makes its file's next reads fail as
@@ -279,9 +281,10 @@ results Yap sent back (`chat-tools.spec.js`). A request with `stream: true`
 gets **server-sent events** the way llama.cpp and the cloud providers send
 them (content in pieces, each tool call as a header then argument
 fragments, a finish reason, the usage, `[DONE]`); a step's `stream: {
-gapMs, chunks, failAfter, hangAfter }` (or `streamPace(kind, …)`) paces
-it, fails it mid-way or holds it open until Yap hangs up (the record's
-`aborted`), and `setStreaming(false)` answers whole anyway
+gapMs, chunks, failAfter, hangAfter, dropAfter }` (or `streamPace(kind, …)`) paces
+it, fails it mid-way, holds it open until Yap hangs up (the record's
+`aborted`) or drops the connection mid-body (`dropped`: a stream cut off,
+`voice-assistant.spec.js`), and `setStreaming(false)` answers whole anyway
 (`chat-streaming.spec.js`).
 
 ## Adding a test
