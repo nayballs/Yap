@@ -33,6 +33,20 @@ The phone's page itself (`src-tauri/link-page/`: plain HTML, CSS and JS
 modules, no build step) has its own notes in its
 [README.md](../../src-tauri/link-page/README.md) and tests in `e2e-link/`.
 
+**It looks like Yap** (2026-11-03), wherever that makes sense on a phone:
+it follows Yap's tokens — `link.css` copies `src/app.css`'s `--yap-*` values,
+light and the warm dark, following the phone's `prefers-color-scheme`, and
+`e2e-link/tokens.spec.js` holds the copy to app.css, so a colour changed there
+names the line to change here — with Figtree and EB Garamond served from the
+PC (`link-page/fonts/`, cut down from the desktop's own files: 36 KB; never
+Google Fonts, the phone may have no internet), the mark, Yap's buttons,
+switches and focus ring, Chat's answers (its markdown, `markdown.js`, built as
+nodes, never HTML) and the Yap bar's waveform and Voice Assistant marks. Where
+a phone needs its own way it has it: Talk low on the first screen, 48 px
+targets, safe areas, text that grows with the phone's font size, no hover-only
+affordances, a landscape layout, reduced motion. Details: the README's "The
+look".
+
 ## The protocol (v1)
 
 **WebSocket** at `wss://<pc>:51443/ws`. **Text frames** are JSON
@@ -311,5 +325,9 @@ on the PC while the answer comes stops the voice, as it stops the PC's.
   the mic, talking over Yap with it off and on), opening the mic's time limits
   (a permission nobody answers, answered late, blocked; a module that never
   loads; the sound never starting; Cancel at any step; `mic-open.spec.js`), the
-  hands-free wait, Sound details — and the same specs (bar hands-free and the
-  screenshots) in Playwright's own Firefox when it's installed.
+  hands-free wait, Sound details, the answer's markdown (a model's HTML shown
+  as text), the look (Yap's fonts from the page's own origin; at 360, 390 and
+  430 px wide and on its side, nothing sideways and Talk in the thumb's reach;
+  `tokens.spec.js`: link.css's colours are app.css's) — and the same specs
+  (bar hands-free and the screenshots) in Playwright's own Firefox when it's
+  installed.

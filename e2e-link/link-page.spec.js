@@ -339,6 +339,53 @@ test.describe('talking', () => {
     await expect(page.getByTestId('turn')).toHaveCount(1);
   });
 
+  test("the answer's markdown as Chat shows it: built as nodes, never HTML", async ({ page }) => {
+    const pc = await mockPc(page);
+    await open(page);
+    await ready(page, pc);
+    await ask(page, pc);
+    pc.send({ type: 'state', phase: 'thinking' });
+    pc.send({ type: 'heard', text: 'What do I need for the harbour walk?' });
+    const answer = page.getByTestId('answer').last();
+    // Half-written: a mark still open shows without its stars; Chat's caret while it streams.
+    pc.send({ type: 'answer', text: 'Pack **water', final: false });
+    await expect(answer).toHaveText('Pack water');
+    await expect(answer).toHaveClass(/streaming/);
+    pc.send({
+      type: 'answer',
+      text: [
+        '## The walk',
+        'Pack **water** and *a map* [1], and see `tides.example` [2, 3].',
+        '',
+        '- Boots',
+        '- A coat',
+        '  - with a hood',
+        '',
+        '1. Leave at 9',
+        '2. Back by noon',
+        '',
+        'See [the harbour page](https://harbour.example/walks) <img src=x onerror="window.__xss=1"> <b>not bold</b>',
+      ].join('\n'),
+      final: true,
+    });
+    await expect(answer).toHaveClass(/final/);
+    await expect(answer).not.toHaveClass(/streaming/);
+    await expect(answer.locator('h3')).toHaveText('The walk');
+    await expect(answer.locator('p').first()).toHaveText('Pack water and a map, and see tides.example.');
+    await expect(answer.locator('strong')).toHaveText('water');
+    await expect(answer.locator('em')).toHaveText('a map');
+    await expect(answer.locator('code')).toHaveText('tides.example');
+    await expect(answer.locator(':scope > ul > li')).toHaveCount(2);
+    await expect(answer.locator('ul ul > li')).toHaveText('with a hood');
+    await expect(answer.locator('ol > li')).toHaveText(['Leave at 9', 'Back by noon']);
+    // A link shows as its words; a model's HTML as text, never as elements.
+    await expect(answer.locator('p').last()).toHaveText(
+      'See the harbour page <img src=x onerror="window.__xss=1"> <b>not bold</b>',
+    );
+    expect(await answer.locator('a, img, b, script').count()).toBe(0);
+    expect(await page.evaluate(() => window.__xss)).toBeUndefined();
+  });
+
   test("errors in plain words, and the next question starts clean", async ({ page }) => {
     const pc = await mockPc(page);
     await open(page);

@@ -6,8 +6,11 @@ files in `yap.exe` and serves them over HTTPS on the home Wi-Fi (port 51443, a
 self-signed certificate the phone accepts once), with the WebSocket at `/ws`.
 
 Plain HTML, CSS and JavaScript modules: no build step, no framework, nothing
-fetched from anywhere but the PC (no CDN, no web fonts; system fonts). About
-110 KB as served, 35 KB gzipped.
+fetched from anywhere but the PC (no CDN; Yap's two fonts come from the PC
+too). It looks like Yap: **it follows Yap's tokens** (`src/app.css`), its
+fonts, its mark, its buttons and switches, Chat's answers and the Yap bar's
+waveform, on a phone's terms ("The look", below). About 175 KB as served (36
+KB of it the fonts), 80 KB gzipped.
 
 **The protocol** (v1: the hello, pairing, the JSON messages and the binary
 audio frames) is written down in
@@ -20,16 +23,18 @@ choice.
 | File | What it is | Served as |
 |---|---|---|
 | `index.html` | The page: the header (Yap, the connection, the model chip), pairing, the conversation, Talk, Stop / Cancel, Hands-free and its wait, Clearer sound in a headset, the microphone picker, Sound details, the model sheet. | `text/html` |
-| `link.css` | The look: Yap's warm light and dark `--yap-*` tokens (values copied from `src/app.css`, following `prefers-color-scheme`), mobile first, 48 px targets, reduced motion respected. | `text/css` |
+| `link.css` | The look ("The look", below): Yap's warm light and dark `--yap-*` tokens (values copied from `src/app.css`, following `prefers-color-scheme`; `e2e-link/tokens.spec.js` holds them to it), its fonts, mobile first, 48 px targets, reduced motion respected. | `text/css` |
+| `markdown.js` | An answer's markdown as Chat shows it (its spoken-answer subset: paragraphs and line breaks, headings, lists, bold, italic, struck, code, quotes, rules), built as DOM nodes, never HTML; links as their words, `[1]` citations left out, a mark still being written shown without its stars. | `text/javascript` |
+| `fonts/figtree.woff2`, `fonts/eb-garamond.woff2` | Yap's UI font and its display serif, cut down from the desktop's own (below). | `font/woff2` |
 | `link.js` | Everything the page does: the connection (hello, pairing, reconnects with backoff, keep-alive pings), the mic (opened a timed step at a time), Talk (tap or hold), hands-free, the spoken answer (resampled frame after frame, posted to the player worklet), Clearer sound, barge-in, the conversation, the step and its time, the model chip, Sound details, the screen wake lock. Exposes a read-only `window.__yapLink.snapshot()` for the tests. | `text/javascript` |
 | `dsp.js` | The sound maths, with nothing of the page in it: the streaming resampler (windowed sinc, a polyphase table where the rates allow: the mic's rate down to 16 kHz, Yap's 24 kHz voice up to the phone's rate), the answer's ring and jitter buffer (`Playout`), Int16, the frame level, hands-free's energy voice detector and its waits, the times as Chat says them. Runs in the page, both worklets and Node's tests. | `text/javascript` |
 | `mic-worklet.js` | The mic's AudioWorklet: the mic at the phone's own rate, mixed to mono, resampled to 16 kHz Int16 (imports `dsp.js`), cut into 20 ms frames. | `text/javascript` |
 | `player-worklet.js` | The answer's AudioWorklet: Yap's voice, already at the phone's rate, played as one stream from `dsp.js`'s `Playout` (the jitter buffer, its fades, underruns counted); reports to the page every ~50 ms. | `text/javascript` |
-| `manifest.webmanifest` | Add to Home screen: name, colours, the icon. | `application/manifest+json` |
-| `icon.svg` | The Yap mark (a copy of `src/assets/yap-logo.svg`). | `image/svg+xml` |
+| `manifest.webmanifest` | Add to Home screen: name, the page's background as its colours (light, and dark in `user_preferences.color_scheme_dark` where the browser reads it), the icon. | `application/manifest+json` |
+| `icon.svg` | The Yap mark (a copy of `src/assets/yap-logo.svg`; `tokens.spec.js` checks it's the same). | `image/svg+xml` |
 | `README.md` | This file (not served). | — |
 
-The four `.js` files are ES modules: the PC must serve them as
+The five `.js` files are ES modules: the PC must serve them as
 `text/javascript`, or the browser refuses them (module scripts and worklets
 check the type).
 
@@ -40,6 +45,64 @@ which is fine: without the PC there's nothing to talk to.
 **The headset's button** isn't used: a page can't own it while the mic is open
 (the headset is in call mode, and Media Session only fires for media that
 plays). That's for a native app (phone-remote design §4.5, §6.2).
+
+## The look (2026-11-03)
+
+The page is Yap's, wherever that makes sense on a phone; where a phone needs
+its own way, the phone wins.
+
+- **Tokens.** `link.css` copies `src/app.css`'s `--yap-*` values: `:root` for
+  light, `:root[data-yap-theme='dark']` for Yap's warm dark, here following
+  the phone's `prefers-color-scheme`. It can't import them (no build step, a
+  page served on its own), so `e2e-link/tokens.spec.js` compares every
+  `--yap-*` link.css sets with app.css's, in both themes: **change a colour in
+  app.css and that test says which line here to change.** Only the font
+  stacks (phone fallbacks added) and a few of the page's own (`--talk-*`,
+  `--gutter`, `--top-h`, `--peek`) aren't app.css's. The page sits on Chat's
+  content sheet (`--yap-s1`), which is also the address bar's colour (the
+  `theme-color` metas) and the manifest's, light and dark.
+- **Fonts.** Figtree for everything, EB Garamond (Yap's display serif, as
+  Settings' and Insights' titles) for the pairing title, the empty
+  conversation's line and the model sheet's title. **Served from the PC,
+  never Google Fonts**: the phone may have no internet. Cut down from the
+  desktop's own files (`@fontsource-variable/figtree` 5.2.10 and
+  `/eb-garamond` 5.2.7, their `latin` `wght-normal` subsets), with fontTools
+  (`varLib.instancer`, then `subset`, keeping every name-table entry so the
+  OFL copyright and licence stay in each file; neither font has a Reserved
+  Font Name): Figtree's weight axis held to 400–700 (16.5 KB), EB Garamond
+  fixed at weight 550 and Latin-1 plus quotes, dashes and the ellipsis (19.8
+  KB). Both preloaded. A character a font lacks (→, ✓, a Polish ł in an
+  answer) falls back to the phone's own font, as on the desktop.
+- **Components.** Buttons as `ui/Button.svelte`'s (filled ones ink: dark on
+  light, cream on dark; secondary ones a card with a hairline), at 48 px with
+  the radius grown with them; switches as `ui/Toggle.svelte`'s (on is ink, not
+  amber) on the right of their row, as Settings has them; the wait as
+  `ui/Segmented.svelte`; the microphone as `ui/Select.svelte`; the options a
+  card of Settings rows with hairlines; Yap's focus ring (`--yap-focus`: a gap
+  in the surface's colour, then amber) on every control.
+- **Chat's look.** Your question in Chat's amber-washed bubble on the right,
+  the answer in Chat's card on the left with its markdown (`markdown.js`)
+  and, while it streams, Chat's amber caret; the step Yap is on as Chat's
+  activity line (three amber dots, the step, the time). The model chip as
+  Chat's (a pill, "On this PC"), with a chevron.
+- **The Yap bar.** While Yap listens: the bar's waveform over Talk (thin amber
+  bars, the newest on the right, at least 7 % tall, `--yap-live`), the Voice
+  Assistant's ✦ beside "Listening", and Talk takes the capsule's amber edge
+  with a soft halo. While it speaks: the bar's three bars beside "Speaking".
+- **The phone's own way.** Talk is a big ink circle low on the first screen
+  (the conversation takes what's left above it, so Talk sits where a thumb
+  reaches and never moves; the screen is the small viewport's height, which
+  doesn't change as the address bar comes and goes), with the top of the
+  options showing under it to say there's more. Every target 48 px or more.
+  Safe areas (`env(safe-area-inset-*)`, `viewport-fit=cover`). Text in `rem`,
+  so it grows with the phone's font size (`<meta name="text-scale">` for
+  Chrome, Dynamic Type's body size on iPhones); with big text the header lets
+  the model chip go under the PC's name rather than cut both. The select at
+  16 px or more, so the phone doesn't zoom in on it. Nothing needs hover (the
+  chip has its chevron; hover styles only where there's a pointer). The model
+  list is a sheet from the bottom. On its side (landscape, up to 560 px tall):
+  the conversation on the left, Talk on the right. Reduced motion: nothing
+  pulses, blinks or slides.
 
 ## What it does where the protocol leaves a choice
 
@@ -75,8 +138,10 @@ plays). That's for a native app (phone-remote design §4.5, §6.2).
   `answer`, `speak_*` and down frames are dropped, until a `state` of `idle` or
   `listening` arrives (or 1.5 s pass).
 - **`answer.text`** is taken as the whole answer so far (each one replaces the
-  last), not a piece to add; `final: true` marks it done. Markdown's marks and
-  `[1]`-style citations are left out of what's shown.
+  last), not a piece to add; `final: true` marks it done. It's shown as Chat
+  shows an answer (`markdown.js`: its markdown as nodes, Chat's caret until
+  it's final); `[1]`-style citations are left out, and links show as their
+  words.
 - **`state`.** idle → "Ready", listening → "Listening", transcribing and
   thinking → "Working it out", speaking → "Speaking". A `state idle` while the
   phone is listening (after the PC's own `listening`) ends the question on the
@@ -190,7 +255,10 @@ npm run test:link
   faked from WAV files the setup writes (`--use-file-for-fake-audio-capture`):
   pairing, a later visit, denied, reconnecting, pings, the wake lock, Talk's
   frames (kind, size, `seq`, and the rate, from a 440 Hz tone's pitch), hold to
-  talk, what's shown while Yap works, the answer as one stream played to the
+  talk, what's shown while Yap works, the answer's markdown (bold, lists one
+  inside another, code, a heading; citations gone, a half-written mark without
+  its stars, a link as its words, a model's HTML as text and never run), the
+  answer as one stream played to the
   end, Stop (silent, a fade), barge-in, Cancel, the model chip (On this PC said
   once), the mic picker, hands-free and its wait choice. `sound.spec.js`: the
   stream starting at ~250 ms, a short answer, a late frame (one underrun, never
@@ -207,8 +275,15 @@ npm run test:link
   and Sound details' step all along; `link-page.spec.js` also has a tap whose
   release the page handles late, and one whose press a slow AudioContext keeps
   busy. `screens.spec.js` leaves named screenshots,
-  light and dark, in `test-results/link/screenshots/`. Nothing on the network,
-  no Yap build, no window on screen.
+  light and dark, in `test-results/link/screenshots/`, and checks every
+  control is 48 px or more, Yap's two fonts load from the page's own origin
+  (nothing asked of anywhere else), and at 360 × 780, 390 × 844, 430 × 932 and
+  on its side (844 × 390) nothing scrolls sideways and Talk is on the first
+  screen, its middle in the lower half of a phone held upright.
+  `tokens.spec.js` (no browser): link.css's `--yap-*` values are app.css's,
+  light and dark; the `theme-color` metas and the manifest are the page's
+  background in each; `icon.svg` is Yap's mark. Nothing on the network, no Yap
+  build, no window on screen.
 - **In Firefox too** (the `firefox` project, when Playwright's own Firefox is
   installed: `npx playwright install firefox`; `YAP_LINK_FIREFOX=0` leaves it
   out): `link-page`, `sound` and `mic-open`, with Firefox's fake mic

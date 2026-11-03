@@ -1,17 +1,23 @@
 <!doctype html>
 <!-- Yap Link: the phone's page. Served by Yap on the PC (README.md). No
-     service worker on purpose: see link.js. -->
+     service worker on purpose: see link.js. Its look is Yap's own (link.css:
+     the tokens, Figtree and EB Garamond from this PC, the mark). -->
 <html lang="en-GB">
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <!-- Text follows the phone's font size (link.css sizes text in rem). -->
+    <meta name="text-scale" content="scale" />
     <meta name="color-scheme" content="light dark" />
-    <meta name="theme-color" content="#f0ede7" media="(prefers-color-scheme: light)" />
-    <meta name="theme-color" content="#161410" media="(prefers-color-scheme: dark)" />
+    <!-- The page's own background (Yap's content sheet, --yap-s1), light and dark. -->
+    <meta name="theme-color" content="#faf9f6" media="(prefers-color-scheme: light)" />
+    <meta name="theme-color" content="#1c1a16" media="(prefers-color-scheme: dark)" />
     <meta name="referrer" content="no-referrer" />
     <title>Yap Link</title>
     <link rel="manifest" href="manifest.webmanifest" />
     <link rel="icon" href="icon.svg" type="image/svg+xml" />
+    <link rel="preload" href="fonts/figtree.woff2" as="font" type="font/woff2" crossorigin />
+    <link rel="preload" href="fonts/eb-garamond.woff2" as="font" type="font/woff2" crossorigin />
     <link rel="stylesheet" href="link.css" />
     <script type="module" src="link.js"></script>
   </head>
@@ -23,8 +29,11 @@
         <span id="conn" class="conn" data-testid="conn" data-state="wait" role="status">Connecting to Yap…</span>
       </div>
       <button id="model" class="chip" type="button" aria-haspopup="dialog" data-testid="model-chip" hidden>
-        <span id="model-label" class="chip-label"></span>
-        <span id="model-where" class="chip-where" hidden></span>
+        <span class="chip-text">
+          <span id="model-label" class="chip-label"></span>
+          <span id="model-where" class="chip-where" hidden></span>
+        </span>
+        <svg class="chev" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M7 10l5 5 5-5" /></svg>
       </button>
     </header>
 
@@ -44,55 +53,67 @@
             In Yap on your PC, open <strong>Settings → Phone → Pair a phone</strong>, then scan the code with this
             phone's camera.
           </p>
-          <button id="retry" class="secondary-btn" type="button" hidden>Try again</button>
+          <button id="retry" class="btn secondary-btn" type="button" hidden>Try again</button>
         </div>
       </section>
 
-      <!-- Talking. -->
+      <!-- Talking: the first screen is the conversation over Talk, low
+           enough for a thumb; the options are under it. -->
       <section id="talk" class="talk" aria-label="Ask Yap" hidden>
-        <div class="convo-box">
-          <p id="empty" class="empty">Ask Yap anything: tap Talk, or hold it while you speak.</p>
-          <ol id="convo" class="convo" aria-label="Conversation" aria-live="polite" data-testid="convo"></ol>
-        </div>
-
-        <div class="now">
-          <p id="phase" class="phase" role="status" data-testid="phase"></p>
-          <p id="step" class="step" data-testid="step" hidden>
-            <span class="dots" aria-hidden="true"><i></i><i></i><i></i></span>
-            <span id="step-line" class="step-line"></span><span id="step-time" class="step-time"></span>
-          </p>
-          <p id="note" class="note" data-testid="note" role="status" hidden></p>
-          <p id="error" class="error" data-testid="error" role="alert" hidden></p>
-        </div>
-
-        <div class="controls">
-          <div id="meter" class="meter" data-testid="meter" data-on="false" aria-hidden="true"></div>
-          <button id="talk-btn" class="talk-btn" type="button" aria-pressed="false" aria-describedby="keep-open" data-testid="talk">
-            <svg class="mic-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
-              <rect x="9" y="3" width="6" height="11" rx="3" />
-              <path d="M5.5 11a6.5 6.5 0 0 0 13 0M12 17.5V21M8.5 21h7" />
-            </svg>
-            <span id="talk-label" class="talk-label">Talk</span>
-            <span id="talk-time" class="talk-time" data-testid="talk-time" aria-hidden="true"></span>
-          </button>
-          <div class="secondary">
-            <button id="stop-btn" class="secondary-btn stop" type="button" data-testid="stop" hidden>
-              <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><rect x="6" y="6" width="12" height="12" rx="2" /></svg>
-              Stop
-            </button>
-            <button id="cancel-btn" class="secondary-btn" type="button" data-testid="cancel" hidden>Cancel</button>
+        <div class="stage">
+          <div class="convo-box">
+            <p id="empty" class="empty">
+              <svg class="spark" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M12 2.5c.5 3.9 1.6 6.4 3.1 7.9 1.5 1.5 4 2.6 6.4 3.1-2.4.5-4.9 1.6-6.4 3.1-1.5 1.5-2.6 4-3.1 6.9-.5-2.9-1.6-5.4-3.1-6.9-1.5-1.5-4-2.6-6.9-3.1 2.9-.5 5.4-1.6 6.9-3.1 1.5-1.5 2.6-4 3.1-7.9z" /></svg>
+              Ask Yap anything: tap Talk, or hold it while you speak.
+            </p>
+            <ol id="convo" class="convo" aria-label="Conversation" aria-live="polite" data-testid="convo"></ol>
           </div>
-          <p id="keep-open" class="keep-open">Keep this page open. Your headset works as the mic and speaker.</p>
+
+          <div class="now">
+            <div class="phase-row">
+              <!-- The Voice Assistant's marks, as the Yap bar shows them: ✦ while it listens, three bars while it speaks. -->
+              <svg class="pmark listen" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M12 2.5c.5 3.9 1.6 6.4 3.1 7.9 1.5 1.5 4 2.6 6.4 3.1-2.4.5-4.9 1.6-6.4 3.1-1.5 1.5-2.6 4-3.1 6.9-.5-2.9-1.6-5.4-3.1-6.9-1.5-1.5-4-2.6-6.9-3.1 2.9-.5 5.4-1.6 6.9-3.1 1.5-1.5 2.6-4 3.1-7.9z" /></svg>
+              <span class="pmark speakbars" aria-hidden="true"><i></i><i></i><i></i></span>
+              <p id="phase" class="phase" role="status" data-testid="phase"></p>
+            </div>
+            <p id="step" class="step" data-testid="step" hidden>
+              <span class="dots" aria-hidden="true"><i></i><i></i><i></i></span>
+              <span id="step-line" class="step-line"></span><span id="step-time" class="step-time"></span>
+            </p>
+            <p id="note" class="note" data-testid="note" role="status" hidden></p>
+            <p id="error" class="error" data-testid="error" role="alert" hidden></p>
+          </div>
+
+          <div class="controls">
+            <!-- The mic's sound while Yap listens: the Yap bar's waveform, newest on the right. -->
+            <div id="meter" class="meter" data-testid="meter" data-on="false" aria-hidden="true"></div>
+            <button id="talk-btn" class="talk-btn" type="button" aria-pressed="false" aria-describedby="keep-open" data-testid="talk">
+              <svg class="mic-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                <rect x="9" y="3" width="6" height="11" rx="3" />
+                <path d="M5.5 11a6.5 6.5 0 0 0 13 0M12 17.5V21M8.5 21h7" />
+              </svg>
+              <span id="talk-label" class="talk-label">Talk</span>
+              <span id="talk-time" class="talk-time" data-testid="talk-time" aria-hidden="true"></span>
+            </button>
+            <div class="secondary">
+              <button id="stop-btn" class="btn primary-btn stop" type="button" data-testid="stop" hidden>
+                <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><rect x="6" y="6" width="12" height="12" rx="2" /></svg>
+                Stop
+              </button>
+              <button id="cancel-btn" class="btn secondary-btn" type="button" data-testid="cancel" hidden>Cancel</button>
+            </div>
+            <p id="keep-open" class="keep-open">Keep this page open. Your headset works as the mic and speaker.</p>
+          </div>
         </div>
 
         <div class="options">
           <label class="switch">
-            <input id="handsfree" type="checkbox" role="switch" data-testid="handsfree" aria-describedby="handsfree-hint" />
-            <span class="track" aria-hidden="true"></span>
             <span class="switch-text">
               <span class="switch-label">Hands-free</span>
               <span id="handsfree-hint" class="hint">Sends when you stop talking</span>
             </span>
+            <input id="handsfree" type="checkbox" role="switch" data-testid="handsfree" aria-describedby="handsfree-hint" />
+            <span class="track" aria-hidden="true"></span>
           </label>
           <fieldset id="wait" class="wait" data-testid="wait" hidden>
             <legend class="field-label">Wait before sending</legend>
@@ -103,12 +124,12 @@
             </div>
           </fieldset>
           <label class="switch">
-            <input id="clearer" type="checkbox" role="switch" data-testid="clearer" aria-describedby="clearer-hint" />
-            <span class="track" aria-hidden="true"></span>
             <span class="switch-text">
               <span class="switch-label">Clearer sound in a headset</span>
               <span id="clearer-hint" class="hint">A headset's call mode can crackle, so this closes the mic while Yap talks and the headset uses its music mode. You can't talk over Yap by voice; Stop still works.</span>
             </span>
+            <input id="clearer" type="checkbox" role="switch" data-testid="clearer" aria-describedby="clearer-hint" />
+            <span class="track" aria-hidden="true"></span>
           </label>
           <div class="field">
             <label for="mic" class="field-label">Microphone</label>
@@ -147,7 +168,7 @@
     <dialog id="models" class="sheet" aria-labelledby="models-title" data-testid="models">
       <h2 id="models-title">Model for your questions</h2>
       <ul id="models-list" class="models-list"></ul>
-      <button id="models-close" class="secondary-btn" type="button">Close</button>
+      <button id="models-close" class="btn secondary-btn" type="button">Close</button>
     </dialog>
   </body>
 </html>
