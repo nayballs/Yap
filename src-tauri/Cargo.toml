@@ -116,12 +116,14 @@ reqwest = { version = "0.12", features = ["stream", "json"] }
 # size hint kept. The http-body 1 reqwest itself builds on: no new copy.
 http-body = "1"
 # Chat's `read_page` (web.rs): a web page's readable text, on this PC — a
-# close port of Mozilla's readability.js (MIT). 0.17 builds on the same
-# dom_query (0.27, html5ever 0.38) tauri-utils and wry already pull in, so
-# there's no second HTML parser in the tree.
-dom_smoothie = "0.17"
+# close port of Mozilla's readability.js (MIT). 0.18 builds on the same
+# dom_query (0.28, html5ever 0.39) tauri-utils 2.10 (tauri 2.12) already pulls
+# in, so there's no second HTML parser in the tree: dom_query and dom_smoothie
+# move when tauri-utils' dom_query does (0.29 / dom_smoothie 0.19 would be a
+# second copy).
+dom_smoothie = "0.18"
 # …and the HTML a wiki's `action=parse` returns, as text (the same copy).
-dom_query = "0.27"
+dom_query = "0.28"
 futures-util = "0.3"
 sha2 = "0.10"
 # Sign in with ChatGPT's ID-token signature (RS256; already in the tree through rustls).
