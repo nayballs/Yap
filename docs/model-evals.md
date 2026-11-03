@@ -3552,3 +3552,16 @@ default); `documents-restore` can't pass on the on-device model (its tool is the
 so "48 run" is 47 possible; `apps-not-installed` misses "doesn't appear to be installed"; the
 date checks miss a narrow no-break space. Findings in full: the private repo's
 `docs/model-evals-2026-11-01-shortlist.md`.
+
+## Which model is answering (3 Nov 2026)
+
+Asked from the phone with Claude Haiku 5.5 picked, the Voice Assistant said "I'm Yap, not
+Claude" and "I can't tell you which model Yap runs on": nothing in the prompt said which model
+it was. Since then every prompt that answers a question names it after the persona
+(`ai_model::answering_line`, ai-models.md). `chat-which-model` (asked out loud: a greeting,
+"Which AI model are you actually running on?", "you're Claude Code") on the on-device
+Qwen3.5-4B (`--ngl 99`, `--repeat 2`): 2 of 2 passed — the greeting never names the model, it
+names its model when asked ("I'm running Qwen Qwen3.5 4B Q4 K M.", "I am Yap, running on …"),
+never "I can't tell". The name is the GGUF's here because a run sends a local model as a
+server on localhost (`local:`); the app's on-device model is "Qwen3.5 4B". Not yet run on a
+cloud model.

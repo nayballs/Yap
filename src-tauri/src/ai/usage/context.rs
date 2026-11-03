@@ -139,6 +139,8 @@ async fn fixed_of(cfg: &crate::config::YapConfig, target: &crate::ai::ai_model::
         .map(|s| s.prompt.clone())
         .filter(|p| !p.trim().is_empty())
         .unwrap_or_else(|| "You are a helpful assistant. Answer concisely.".to_string());
+    // With the line naming the model, as a turn's (`turn::Endpoint`).
+    let persona = crate::ai::ai_model::persona_with_answering(&persona, &target.chat_model());
     let calendar_on = crate::calendar::connected();
     let profile = crate::ai::about_you::profile(cfg);
     let doc_tools = crate::chat::documents::ToolSet::for_model(&target.provider, &target.model);

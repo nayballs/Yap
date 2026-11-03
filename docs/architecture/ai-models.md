@@ -1223,7 +1223,37 @@ The language-model side: the OpenAI-compatible client and its prompts, the on-de
   `note_ask`): a chat on the on-device model starts the sidecar
   (`local_llm::ensure_started`) or says it isn't installed, never a silent
   fallback to the endpoint underneath. A config save emits
-  `yap-config-saved`, which the chip re-reads on. Unit-tested.
+  `yap-config-saved`, which the chip re-reads on. **Which model is
+  answering** (2026-11-03): `answering_line(ChatModel)` is the one line
+  every prompt that answers the person's own questions carries, built from
+  who answers that call (`who_answers`: `describe`'s, as the chip names it
+  — the on-device model not installed is named by the endpoint underneath)
+  — "You are Yap's assistant, running on {model}{where}. Asked who or what
+  you are, or which model you are, say so plainly; never deny being
+  {model} or say you can't tell. Don't bring it up unless asked." (~50
+  tokens). `{model}` is `budget::model_label` (the on-device model's own
+  name, else made from the id: the name the "too long" line and
+  `other_models_note` use); `{where}` by provider: " from Anthropic",
+  " from OpenAI", " from OpenAI, on the user's ChatGPT plan", " from
+  Google" (Gemini), ", served by Groq", ", through OpenRouter", ", on this
+  PC" (the on-device model, or a server on localhost), ", on the user's
+  self-hosted server", ", on the user's own server" (custom). After the
+  persona (`persona_with_answering`): a Chat turn's (`turn::Endpoint` —
+  Chat, the Voice Assistant on this PC and from the phone, the Meetings
+  view's Ask, Skills across the meetings, a small model's web pipeline,
+  Chat's limits and context ring) and the Notes view's Ask
+  (`note_prompt`); at the end of the system message
+  (`messages_with_answering`, the immutable start untouched) for the
+  notepad's typed Ask (`meeting_catch_up` with a question, its thread
+  sized with it) and a Skill on one meeting (`meeting_skill`), on the
+  meeting's model. It names the model writing the answer the person
+  reads: a provider's own web search is a sub-call whose results go back
+  to that model. Not dictation cleanup, Commands, transforms, "What did I
+  miss?" or the one-tap helpers (they never talk about themselves).
+  Unit-tested per provider kind and on each prompt; e2e `about-you`,
+  `notepad`, `skills`; the model evaluations' `chat-which-model` (asked
+  out loud: a greeting never names the model, "which model are you?"
+  names one and never "I can't tell").
 - **`ai/effort.rs`** — **effort, per model** (2026-10-31, as the Claude
   Code app's model menu has it: "Opus 5.5 Extra"): how hard a cloud model
   reasons before it answers, chosen in Chat's model picker (or Settings →

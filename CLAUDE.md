@@ -173,7 +173,7 @@ One folder per area (an area's `<area>.rs` lists its modules); a big module's pa
 - `ai/gguf.rs` — read-only GGUF headers and memory estimates per context length.
 - `ai/gpu.rs` — the graphics card (DXGI), for the recommended on-device model; every adapter, small ones, the card DirectML runs speech on.
 - `ai/hardware.rs` — picks by hardware (card / processor / small): where speech runs before it's timed, private or cloud cleanup with both times said (onboarding).
-- `ai/ai_model.rs` — which model a scope's next call goes to; the Chat picker's switch.
+- `ai/ai_model.rs` — which model a scope's next call goes to; the Chat picker's switch; the one line telling every prompt that answers questions which model it is, said when asked (`answering_line`).
 - `ai/effort.rs` — effort per model (as Claude Code's "Opus 5.5 Extra"): the levels each cloud model takes (one table, the provider's list first), chosen in Chat's picker or Settings, kept per model (`chat_effort`), sent its provider's way (Claude: adaptive thinking on the Messages API; `reasoning_effort`; OpenRouter's `reasoning`) wherever it answers a question (Chat, the Voice Assistant, the Ask bars); Fast mode for Claude Opus 5.5 (off: twice the price).
 - `ai/model_catalog.rs` — providers' live model lists (and self-hosted servers'), cached a day; which read images and which effort levels they take, where they say.
 - `ai/usage.rs` (+ `usage/`) — the AI usage tracker: every AI call's tokens (one place, `llm::post_chat_request`), per day, model and feature in `ai_usage.json` (90 days, counts only; `store.rs`), Groq's meter (`groq.rs`, `groq_usage.json` as before), cost estimates (`prices.rs`), Chat's context ring (`context.rs`).

@@ -187,6 +187,69 @@ pub fn describe(provider: &str, model: &str, base_url: &str, on_device_name: &st
     }
 }
 
+/// Who answers a call to this endpoint, as the chip names it
+/// ([`describe`]'s, with the on-device model's name from `cfg`).
+pub fn who_answers(cfg: &YapConfig, provider: &str, model: &str, base_url: &str) -> ChatModel {
+    describe(provider, model, base_url, &crate::ai::local_llm::active_model_display(cfg)).chat_model()
+}
+
+/// **Which model is answering, said when asked** (2026-11-03): the one line
+/// every prompt that answers the person's own questions carries — Chat, the
+/// Voice Assistant (on this PC and from a paired phone), the Notes view's,
+/// the notepad's and the Meetings view's Ask, and Skills — naming the model
+/// writing the answer they read as Yap names it (`budget::model_label`, the
+/// name the "too long" line and `chats::other_models_note` use) and where it
+/// runs (the picker's providers). Told nothing, Claude Haiku 5.5 on the
+/// Voice Assistant, greeted as Claude, said "I'm Yap, not Claude… I can't
+/// tell you which model Yap runs on" (the maintainer's phone, 3 Nov 2026).
+/// Yap keeps its name; the model says plainly what it is, and only when
+/// asked. In the system prompt, after the persona: the same every turn on
+/// one model (its cache). Never for cleanup, Commands or transforms, which
+/// don't talk about themselves. Pure but for the provider's list.
+pub fn answering_line(m: &ChatModel) -> String {
+    let named = !m.id.trim().is_empty() || !m.name.trim().is_empty();
+    let name = if named { crate::chat::budget::model_label(&m.provider, &m.id, &m.name) } else { "an AI model".to_string() };
+    let place = match m.provider.as_str() {
+        "anthropic" => " from Anthropic",
+        "openai" => " from OpenAI",
+        crate::ai::chatgpt::PROVIDER => " from OpenAI, on the user's ChatGPT plan",
+        "gemini" => " from Google",
+        "groq" => ", served by Groq",
+        "openrouter" => ", through OpenRouter",
+        // The on-device model, or a server on localhost: "On this PC".
+        _ if m.on_this_pc => ", on this PC",
+        "local" => ", on the user's self-hosted server",
+        _ => ", on the user's own server",
+    };
+    let it = if named { name.as_str() } else { "it" };
+    format!(
+        "You are Yap's assistant, running on {name}{place}. Asked who or what you are, or which model you are, say so plainly; never deny being {it} or say you can't tell. Don't bring it up unless asked."
+    )
+}
+
+/// A persona (the Chat scope's prompt) with [`answering_line`] after it:
+/// Chat's and the Ask bars' system prompts start with it.
+pub fn persona_with_answering(persona: &str, m: &ChatModel) -> String {
+    let persona = persona.trim();
+    let line = answering_line(m);
+    if persona.is_empty() {
+        line
+    } else {
+        format!("{persona} {line}")
+    }
+}
+
+/// A request's messages with [`answering_line`] at the end of its system
+/// message (the notepad's Ask and a Skill on one meeting: their immutable
+/// prompts start it, untouched). Unchanged without a system message.
+pub fn messages_with_answering(mut messages: serde_json::Value, m: &ChatModel) -> serde_json::Value {
+    if let Some(system) = messages.as_array_mut().and_then(|all| all.iter_mut().find(|x| x["role"] == "system")) {
+        let text = system["content"].as_str().unwrap_or("").trim_end().to_string();
+        system["content"] = serde_json::json!(format!("{text}\n\n{}", answering_line(m)));
+    }
+    messages
+}
+
 /// The scope's own setting, when it's on (else the call inherits the global
 /// cleanup endpoint).
 fn own_scope(cfg: &YapConfig, scope: Scope) -> Option<&crate::config::LlmScope> {
@@ -1005,5 +1068,74 @@ mod tests {
         c.llm_scopes
             .insert("chat".into(), chat_scope("ondevice", "", "", ""));
         assert_eq!(status(&c, Scope::Chat, &NONE).provider, "ondevice");
+    }
+
+    /// Who answers, as a turn names it: [`describe`]'s, on `name` for the
+    /// on-device model.
+    fn by(provider: &str, model: &str, base_url: &str, name: &str) -> ChatModel {
+        describe(provider, model, base_url, name).chat_model()
+    }
+
+    /// The model and where it runs, as the line says them.
+    fn runs_on(line: &str) -> &str {
+        let rest = line.strip_prefix("You are Yap's assistant, running on ").expect(line);
+        &rest[..rest.find(". Asked").expect(line)]
+    }
+
+    #[test]
+    fn the_answering_line_names_the_model_and_where_it_runs() {
+        // The maintainer's phone, 3 Nov 2026: Claude Haiku 5.5 picked in Chat.
+        let haiku = by("anthropic", "claude-haiku-5-5", "https://api.anthropic.com/v1", "");
+        assert_eq!(
+            answering_line(&haiku),
+            "You are Yap's assistant, running on Claude Haiku 5.5 from Anthropic. Asked who or what you are, or which model you are, say so plainly; never deny being Claude Haiku 5.5 or say you can't tell. Don't bring it up unless asked."
+        );
+        // Every cloud provider, as the picker has them.
+        for (provider, model, base, said) in [
+            ("openai", "gpt-5.5", "https://api.openai.com/v1", "GPT-5.5 from OpenAI"),
+            ("gemini", "gemini-3.6-flash", "https://generativelanguage.googleapis.com/v1beta/openai/", "Gemini 3.6 Flash from Google"),
+            ("groq", "openai/gpt-oss-20b", "https://api.groq.com/openai/v1", "GPT-OSS 20B, served by Groq"),
+            ("openrouter", "anthropic/claude-haiku-5-5", "https://openrouter.ai/api/v1", "Claude Haiku 5.5, through OpenRouter"),
+        ] {
+            assert_eq!(runs_on(&answering_line(&by(provider, model, base, ""))), said, "{provider}");
+        }
+        // The ChatGPT plan (Sign in with ChatGPT): "Using ChatGPT plan".
+        let plan = by(crate::ai::chatgpt::PROVIDER, "gpt-5.5", crate::ai::chatgpt::BASE_URL, "");
+        assert_eq!(runs_on(&answering_line(&plan)), "GPT-5.5 from OpenAI, on the user's ChatGPT plan");
+        // The on-device model, by its own name.
+        let here = by(PROVIDER_ONDEVICE, "Qwen_Qwen3.5-4B-Q4_K_M", "http://127.0.0.1:51539/v1", "Qwen3.5 4B");
+        let line = answering_line(&here);
+        assert_eq!(runs_on(&line), "Qwen3.5 4B, on this PC");
+        assert!(line.contains("never deny being Qwen3.5 4B"));
+        // A self-hosted or custom server: on this PC when it's on localhost,
+        // else the user's own.
+        assert_eq!(runs_on(&answering_line(&by("local", "llama-3.1-8b", "http://localhost:11434/v1", ""))), "Llama 3.1 8B, on this PC");
+        assert_eq!(runs_on(&answering_line(&by("local", "llama-3.1-8b", "http://gpu-box.example.com:11434/v1", ""))), "Llama 3.1 8B, on the user's self-hosted server");
+        assert_eq!(runs_on(&answering_line(&by("custom", "mistral-small-3", "https://llm.example.com/v1", ""))), "Mistral Small 3, on the user's own server");
+        // The on-device model not installed: named by the endpoint underneath.
+        assert_eq!(runs_on(&answering_line(&by(PROVIDER_ONDEVICE, "openai/gpt-oss-20b", "https://api.groq.com/openai/v1", "Qwen3.5 4B"))), "GPT-OSS 20B, served by Groq");
+        // No model id: never "running on the model".
+        let none = ChatModel { provider: "custom".into(), id: String::new(), name: String::new(), on_this_pc: false };
+        assert!(answering_line(&none).starts_with("You are Yap's assistant, running on an AI model, on the user's own server."));
+        assert!(answering_line(&none).contains("never deny being it"));
+    }
+
+    #[test]
+    fn the_answering_line_follows_the_persona_or_ends_the_system_message() {
+        let haiku = by("anthropic", "claude-haiku-5-5", "https://api.anthropic.com/v1", "");
+        let line = answering_line(&haiku);
+        assert_eq!(persona_with_answering("  You are a helpful voice assistant. ", &haiku), format!("You are a helpful voice assistant. {line}"));
+        assert_eq!(persona_with_answering("", &haiku), line);
+        let asked = serde_json::json!([
+            { "role": "system", "content": "You answer questions about a meeting.\n" },
+            { "role": "user", "content": "Who owns the budget?" },
+        ]);
+        let m = messages_with_answering(asked, &haiku);
+        // Its immutable start kept (the fake AI knows a call by it), the
+        // question untouched.
+        assert_eq!(m[0]["content"], format!("You answer questions about a meeting.\n\n{line}"));
+        assert_eq!(m[1]["content"], "Who owns the budget?");
+        let no_system = serde_json::json!([{ "role": "user", "content": "Hi" }]);
+        assert_eq!(messages_with_answering(no_system.clone(), &haiku), no_system);
     }
 }
