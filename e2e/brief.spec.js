@@ -356,6 +356,28 @@ test('Settings → Meetings: "Prepare a brief before meetings", on by default, a
   await closeSettings(main);
 });
 
+// A bug in a brief's summary (its task panics) leaves the plain brief with a
+// line saying so, and the next is written (calendar.rs `BriefEnds`). Until
+// 2026-11-03 it stayed "Writing a short summary…" for ever, and no brief was
+// made again (the job slot stayed taken).
+test('a brief whose summary crashes keeps the plain brief, and the next one is written', async ({ yap, calFeed, fakeLlm }) => {
+  await connected(yap, calFeed);
+  const key = (await status(yap)).events.find((e) => e.title === TITLE).key;
+  const kept = () => yap.readJson('calendar.json')?.briefs?.[key];
+  const calls = briefCalls(fakeLlm).length;
+  await yap.invoke('e2e_crash_next_job', { job: 'brief' });
+  await yap.invoke('calendar_brief', { key, refresh: true });
+  await expect.poll(() => kept()?.note, { timeout: 15_000 }).toBe('Yap hit an error writing a summary, so this is the plain brief.');
+  expect(kept().writing).toBe(false);
+  expect(kept().ai).toBe(false);
+  expect(briefCalls(fakeLlm).length).toBe(calls);
+  // The job is free again: made anew, its summary written.
+  await yap.invoke('calendar_brief', { key, refresh: true });
+  await expect.poll(() => kept()?.ai, { timeout: 30_000 }).toBe(true);
+  expect(kept().writing).toBe(false);
+  expect(briefCalls(fakeLlm).length).toBe(calls + 1);
+});
+
 // Last: it clears the seeded notes and memory.
 test('Reset app while a brief is being written: what it wrote from the old notes and memory is never kept', async ({
   yap,

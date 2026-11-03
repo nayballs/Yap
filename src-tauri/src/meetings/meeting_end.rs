@@ -348,6 +348,53 @@ fn publish(app: &AppHandle, summary: Summary) {
     let _ = app.emit(EVENT_SUMMARY, summary);
 }
 
+/// What a crashed action plan says under "The summary didn't come through"
+/// (with its Retry).
+pub const CRASHED: &str = "Yap hit an error while writing it. Try again.";
+
+/// **An action-plan run, ended however its task ends** (2026-11-03, as the
+/// pipeline's `Busy` lets go of `processing`): dropped before
+/// [`RunEnds::finished`] — a panic in the task (a bug) unwinding past it —
+/// the job is "error" with [`CRASHED`], and every window offers Retry.
+/// Before, it stayed "running" for ever: "Step 2 of 3" with no end, Retry
+/// refused ("one is being written already"), and the on-device model's
+/// runtime never upgraded under it (`summary_running`). A run a discard or
+/// a resume retired meanwhile is left as it is. `app` is `None` in tests.
+struct RunEnds {
+    app: Option<AppHandle>,
+    note_id: u64,
+    run: u64,
+    finished: bool,
+}
+
+impl RunEnds {
+    /// The task got to its end: its own result is published (not here).
+    fn finished(mut self) {
+        self.finished = true;
+    }
+}
+
+impl Drop for RunEnds {
+    fn drop(&mut self) {
+        if self.finished {
+            return;
+        }
+        tracing::error!(note_id = self.note_id, "The meeting action plan crashed; the job ends as an error");
+        let failed = Summary { note_id: self.note_id, run: self.run, state: "error", step: STEPS, steps: STEPS, error: Some(CRASHED.into()) };
+        let ours = {
+            let mut all = jobs();
+            let ours = all.get(&self.note_id).is_some_and(|j| j.run == self.run);
+            if ours {
+                all.insert(self.note_id, failed.clone());
+            }
+            ours
+        };
+        if let (true, Some(app)) = (ours, &self.app) {
+            let _ = app.emit(EVENT_SUMMARY, failed);
+        }
+    }
+}
+
 /// Write note `note_id`'s action plan in the background (the built-in Action
 /// Plan action, as "End meeting & summarise" always did), unless one is being
 /// written already. Returns whether this started one. A summary the person
@@ -388,7 +435,13 @@ fn start_summary_with(app: &AppHandle, note_id: u64, replace: bool) -> bool {
                 );
             }
         };
+        let run_ends = RunEnds { app: Some(app.clone()), note_id, run, finished: false };
+        #[cfg(debug_assertions)]
+        if crate::shell::e2e::crash_next(crate::shell::e2e::Crash::Summary) {
+            panic!("e2e: the action plan crashes (e2e_crash_next_job)");
+        }
         let result = write_action_plan(&app, note_id, replace, step).await;
+        run_ends.finished();
         let (state, error) = match result {
             Ok(()) => ("done", None),
             Err(e) if e == NOTHING => ("nothing", Some(e)),
@@ -580,6 +633,35 @@ pub async fn meeting_delete(app: AppHandle, note_id: u64) -> Result<(), String> 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// An action plan whose task panics (a bug in it) ends as an error with
+    /// Retry, not "running" for ever: `summary_running` lets go (the
+    /// on-device runtime's upgrade waits on it), and a Retry can start. A
+    /// run retired meanwhile (a resume, a discard) is left as it is.
+    #[tokio::test]
+    async fn a_crashed_action_plan_ends_as_an_error() {
+        let id = 525_252;
+        jobs().insert(id, Summary { note_id: id, run: 9, state: "running", step: 2, steps: STEPS, error: None });
+        let task = tokio::spawn(async move {
+            let ends = RunEnds { app: None, note_id: id, run: 9, finished: false };
+            if id > 0 {
+                panic!("a bug in the action plan");
+            }
+            ends.finished();
+        });
+        assert!(task.await.is_err(), "it panicked");
+        let job = jobs().get(&id).cloned().unwrap();
+        assert_eq!((job.state, job.error.as_deref()), ("error", Some(CRASHED)));
+        assert!(!summary_running_for(id), "nothing waits on it any more");
+
+        // Finished: its own result stands. Retired meanwhile: untouched.
+        jobs().insert(id, Summary { note_id: id, run: 10, state: "done", step: STEPS, steps: STEPS, error: None });
+        RunEnds { app: None, note_id: id, run: 10, finished: false }.finished();
+        assert_eq!(jobs().get(&id).unwrap().state, "done");
+        drop(RunEnds { app: None, note_id: id, run: 8, finished: false });
+        assert_eq!(jobs().get(&id).unwrap().state, "done");
+        forget(id);
+    }
 
     /// A meeting deleted however (the local API's delete, the Notes view's)
     /// while its summary is written: its job goes with it, so a new note

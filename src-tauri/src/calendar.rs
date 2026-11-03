@@ -2582,7 +2582,13 @@ async fn write_brief(
 ) {
     let key = facts.meeting.key.clone();
     let started = std::time::Instant::now();
+    let ends = BriefEnds { app: Some(app.clone()), key: key.clone(), epoch, finished: false };
+    #[cfg(debug_assertions)]
+    if crate::shell::e2e::crash_next(crate::shell::e2e::Crash::Brief) {
+        panic!("e2e: the brief's summary crashes (e2e_crash_next_job)");
+    }
     let result = brief::write(Some(&app), &facts, &ep).await;
+    ends.finished();
     let now = now_secs();
     let b = match result {
         Ok((checked, _)) => {
@@ -2618,10 +2624,80 @@ async fn write_brief(
         tracing::info!("calendar: a brief written before Reset app wasn't kept");
         wake();
     }
-    // The next waiting, until one starts a summary of its own (it goes on
-    // from there): one that needs none, or can't be made any more, starts
-    // nothing, and those after it waited for ever, "writing" (a waiting
-    // brief is busy to `prepare_brief`, so the scheduler never retried it).
+    start_waiting(app).await;
+}
+
+/// What a brief whose summary crashed says (as one the AI couldn't write).
+const BRIEF_CRASHED: &str = "Yap hit an error writing a summary, so this is the plain brief.";
+
+/// **A brief's summary, ended however its task ends** (2026-11-03, as the
+/// pipeline's `Busy` lets go of `processing`): dropped before
+/// [`BriefEnds::finished`] — a panic in the task (a bug) unwinding past it
+/// — the brief kept is the plain one ([`BRIEF_CRASHED`], tried again after
+/// [`BRIEF_RETRY`]), the job slot is free and the briefs waiting their turn
+/// go on. Before, it stayed `writing` for ever ("Writing a short summary…"),
+/// with every brief after it: `brief_job` held, the scheduler never made
+/// another. `app` is `None` in tests (nothing saved or shown).
+struct BriefEnds {
+    app: Option<AppHandle>,
+    key: String,
+    epoch: u64,
+    finished: bool,
+}
+
+impl BriefEnds {
+    /// The summary came back (written or not): `write_brief` goes on.
+    fn finished(mut self) {
+        self.finished = true;
+    }
+}
+
+impl Drop for BriefEnds {
+    fn drop(&mut self) {
+        if self.finished {
+            return;
+        }
+        tracing::error!("calendar: a brief's summary crashed; the plain brief stays");
+        let (kept, on_bar) = {
+            let mut s = lock();
+            if s.brief_job.as_deref() == Some(self.key.as_str()) {
+                s.brief_job = None;
+            }
+            if s.briefs_epoch != self.epoch {
+                (None, false)
+            } else {
+                s.brief_retry.insert(self.key.clone(), now_secs() + BRIEF_RETRY);
+                let kept = s.store.briefs.get_mut(&self.key).filter(|b| b.writing).map(|b| {
+                    b.writing = false;
+                    b.note = BRIEF_CRASHED.to_string();
+                    b.clone()
+                });
+                if kept.is_some() && s.started {
+                    save_store(&s.store);
+                }
+                let on_bar = s.card.as_ref().is_some_and(|c| c.event.key == self.key && c.surface == Surface::Bar);
+                (kept, on_bar)
+            }
+        };
+        let Some(app) = self.app.clone() else { return };
+        if let Some(b) = kept {
+            let _ = app.emit(EVENT_BRIEF, &b);
+            emit(&app);
+            if on_bar {
+                let value = serde_json::to_value(&b).ok();
+                crate::bar::update_card(&app, BAR_CARD, |c| c.brief = value);
+            }
+        }
+        // The next waiting goes on (a task of its own: this one is ending).
+        tauri::async_runtime::spawn(start_waiting(app));
+    }
+}
+
+/// The next brief waiting, until one starts a summary of its own (it goes
+/// on from there): one that needs none, or can't be made any more, starts
+/// nothing, and those after it waited for ever, "writing" (a waiting brief
+/// is busy to `prepare_brief`, so the scheduler never retried it).
+async fn start_waiting(app: AppHandle) {
     loop {
         let next = {
             let mut s = lock();
@@ -3135,5 +3211,48 @@ mod tests {
             service: String::new(),
         });
         assert_eq!(invite_context(&note).unwrap(), "From the calendar invite \"Design review\":\nAgenda: the Q4 plan\n");
+    }
+
+    /// A brief's summary whose task panics (a bug in it) leaves the plain
+    /// brief, not "Writing a short summary…" for ever, and the job slot free
+    /// for the next (until 2026-11-03 no brief was made again).
+    #[tokio::test]
+    async fn a_crashed_brief_summary_leaves_the_plain_brief() {
+        let key = "unit:crashed-brief".to_string();
+        let epoch = {
+            let mut s = lock();
+            s.brief_job = Some(key.clone());
+            let b = brief::Brief {
+                key: key.clone(),
+                title: "Weekly sync".into(),
+                start: 0,
+                first: false,
+                ai: false,
+                writing: true,
+                note: String::new(),
+                parts: vec![],
+                sources: vec![],
+                words: 0,
+                made_ts: 0,
+                fingerprint: "f".into(),
+            };
+            s.store.briefs.insert(key.clone(), b);
+            s.briefs_epoch
+        };
+        let k = key.clone();
+        let task = tokio::spawn(async move {
+            let ends = BriefEnds { app: None, key: k, epoch, finished: false };
+            if epoch < u64::MAX {
+                panic!("a bug in the brief's summary");
+            }
+            ends.finished();
+        });
+        assert!(task.await.is_err(), "it panicked");
+        let mut s = lock();
+        assert_ne!(s.brief_job.as_deref(), Some(key.as_str()), "the slot is free");
+        let b = s.store.briefs.remove(&key).unwrap();
+        assert!(!b.writing);
+        assert_eq!(b.note, BRIEF_CRASHED);
+        assert!(s.brief_retry.remove(&key).is_some(), "tried again later");
     }
 }

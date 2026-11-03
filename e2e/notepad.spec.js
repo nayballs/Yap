@@ -1068,6 +1068,26 @@ test('Stop writes the summary in steps; a failure says so above the bar and Retr
   await shot(pad, '29-summary-done');
 });
 
+// A bug in the action plan (its task panics) ends the job as an error with
+// Retry, as a failed model call does (meeting_end.rs `RunEnds`). Until
+// 2026-11-03 it stayed "Step 1 of 3" for ever, and Retry was refused.
+test('an action plan that crashes says so above the bar, and Retry writes it', async ({ yap }) => {
+  const pad = yap.notepad;
+  await startMeeting(yap, 'Supplier call');
+  await say(yap, ...BUDGET_TALK.slice(0, 2));
+  await yap.invoke('e2e_crash_next_job', { job: 'summary' });
+  await stopButton(pad).click();
+  const failed = pad.getByRole('alert');
+  await expect(failed).toContainText("The summary didn't come through", { timeout: 20_000 });
+  await expect(failed).toContainText('Yap hit an error while writing it. Try again.');
+  await failed.getByRole('button', { name: 'Retry' }).click();
+  const summary = pad.getByRole('region', { name: 'Summary' });
+  await expect(summary.locator('.rendered').getByRole('heading', { name: 'Action plan' })).toBeVisible({
+    timeout: 15_000,
+  });
+  await expect(failed).toHaveCount(0);
+});
+
 // A summary as a model may write it (markdown.js = markdown-it + DOMPurify
 // since 2026-10-21): tasks with a list inside one, a numbered list with
 // blank lines between its items, a quote, a table with code in a cell,
