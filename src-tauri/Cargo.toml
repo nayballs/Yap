@@ -49,11 +49,14 @@ regex = "1"
 once_cell = "1"
 # The language a dictation's text is in, for models that don't say which they
 # heard (languages/text_id.rs: "You spoke French" with Parakeet V3). Trigram
-# profiles, pure Rust, MIT, no network; ~0.3 MB. 0.16 builds on the hashbrown
-# 0.14 and once_cell already in the tree (with ahash, its hasher; 0.18
-# measured the same and pulls a fourth hashbrown); lingua was +145 MB for the
-# same languages.
-whatlang = "0.16"
+# profiles, pure Rust, MIT, no network; ~0.3 MB; lingua was +145 MB for the
+# same languages. 0.18 (Nov 2026): Welsh added (never a candidate here: Yap
+# always asks with an allowlist of the catalog's languages, so the others'
+# scores and picks are what 0.16 gave), once_cell swapped for std's LazyLock,
+# edition 2024; its hashbrown 0.15 (foldhash) takes the place of 0.16's 0.14
+# (ahash), which nothing else in the Windows build used once tauri 2.12 came
+# in (a Linux-only crate keeps 0.14 in Cargo.lock): still three hashbrowns.
+whatlang = "0.18"
 
 # Audio capture + sound cue
 cpal = "0.15"
