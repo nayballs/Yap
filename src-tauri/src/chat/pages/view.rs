@@ -16,10 +16,13 @@
 //! - **only public http(s)**: every navigation, a frame's too, is checked
 //!   as a page read is (`web::check_url`) and cancelled otherwise; every
 //!   request a page makes is checked too ([`refused_request`],
-//!   `WebResourceRequested` on all of them): one to an address on this PC or
-//!   its network (loopback, private, link-local, unique-local… however it's
-//!   written, `localhost`, `.local`, `.localhost`) gets a 403. A public name
-//!   that resolves to such an address (DNS rebinding) isn't caught;
+//!   `WebResourceRequested` on all of them, its shared and service workers'
+//!   too): one to an address on this PC or its network (loopback, private,
+//!   link-local, unique-local… however it's written, `localhost`, `.local`,
+//!   `.localhost`) gets a 403. **Not caught**: a public name that resolves
+//!   to such an address (DNS rebinding), and a WebSocket (WebView2 never
+//!   shows Yap one's request) — so Yap's own helpers on this PC can't rely
+//!   on this alone;
 //! - **its dialogs are never WebView2's own** (`ScriptDialogOpening`): on a
 //!   page Yap loads for itself (a shot's), a page out of sight or one Yap is
 //!   acting on ([`busy`]) they're dismissed; on one the person is using, its
@@ -157,10 +160,11 @@ pub struct PageQuote {
 
 impl PageQuote {
     /// As text selected in another app (`assistant/selected.rs`): the words
-    /// and the site. `None`: nothing selected.
+    /// and the site — web content (`Selected::web`: a selection can hold
+    /// words the person never saw). `None`: nothing selected.
     pub fn selected(self) -> Option<Selected> {
         let text = self.text.trim();
-        (!text.is_empty()).then(|| Selected { text: text.to_string(), app: self.site.trim().to_string() })
+        (!text.is_empty()).then(|| Selected { text: text.to_string(), app: self.site.trim().to_string(), web: true })
     }
 }
 
@@ -1415,8 +1419,15 @@ mod win {
             // own helpers listen on this PC; the on-device model's server
             // has no key) — an IP address in a non-public range however it's
             // written, or a local name (`super::refused_request`). A test
-            // run's stand-in is the page itself.
-            core.AddWebResourceRequestedFilter(w!("*"), COREWEBVIEW2_WEB_RESOURCE_CONTEXT_ALL)?;
+            // run's stand-in is the page itself. Its workers' too: WebView2
+            // hands Yap a shared or service worker's requests only for a
+            // filter that asks for them (`ICoreWebView2_22`; before, a page's
+            // service worker reached this PC unchecked, 2 Nov 2026). A
+            // runtime without it: the page's own (and its dedicated workers').
+            match core.cast::<ICoreWebView2_22>() {
+                Ok(c22) => c22.AddWebResourceRequestedFilterWithRequestSourceKinds(w!("*"), COREWEBVIEW2_WEB_RESOURCE_CONTEXT_ALL, COREWEBVIEW2_WEB_RESOURCE_REQUEST_SOURCE_KINDS_ALL)?,
+                Err(_) => core.AddWebResourceRequestedFilter(w!("*"), COREWEBVIEW2_WEB_RESOURCE_CONTEXT_ALL)?,
+            }
             let (e, si) = (env.clone(), standin.clone());
             core.add_WebResourceRequested(
                 &WebResourceRequestedEventHandler::create(Box::new(move |_, args| {
@@ -2408,7 +2419,7 @@ mod tests {
     #[test]
     fn words_selected_on_a_page_are_asked_as_a_selection() {
         let q = PageQuote { text: "  Chests behind the waterfall \n".into(), site: "wiki.example.com".into() };
-        assert_eq!(q.selected(), Some(Selected { text: "Chests behind the waterfall".into(), app: "wiki.example.com".into() }));
+        assert_eq!(q.selected(), Some(Selected { text: "Chests behind the waterfall".into(), app: "wiki.example.com".into(), web: true }));
         assert_eq!(PageQuote { text: " ".into(), site: "x".into() }.selected(), None);
     }
 }

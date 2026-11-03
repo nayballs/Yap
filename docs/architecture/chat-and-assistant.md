@@ -1878,14 +1878,18 @@ from `view::open_tabs`):
   host objects off; WebView2's own `chrome.webview.postMessage` is there but
   goes nowhere), **only public http(s)** (every navigation and frame
   checked, else cancelled; **every request** the page makes checked too,
-  `view::refused_request` on a `*` `WebResourceRequested` filter: one to
+  `view::refused_request` on a `*` `WebResourceRequested` filter — its
+  shared and service workers' too (2 Nov 2026: WebView2 hands those over
+  only to a filter that asks for them, `ICoreWebView2_22`'s source kinds;
+  before, a page's service worker reached this PC unchecked): one to
   this PC or its network — an IP address in a loopback, private,
   link-local, unique-local, shared or other non-public range however it's
   written, `127.0.0.2`, `[::ffff:7f00:1]`, `2130706433`, or a local name,
   `localhost`, `*.localhost`, `*.local`, one with no dot — gets a 403; the
   on-device model's server listens on `127.0.0.1` with no key. **Not
   caught**: a public name that resolves to such an address, DNS
-  rebinding), **its dialogs never WebView2's own**
+  rebinding, and a WebSocket — WebView2 never shows Yap one's request;
+  both checked in a test run, 2 Nov 2026), **its dialogs never WebView2's own**
   (`AreDefaultScriptDialogsEnabled` off, `ScriptDialogOpening`: on a shot's
   page, a page out of sight or one Yap is acting on — `view::busy` while an
   action runs and 1.5 s after — dismissed, never accepted; on a page the
@@ -1950,7 +1954,10 @@ from `view::open_tabs`):
   Forward, Reload, Copy, Copy link (`MENU_KEEP`), and on selected words
   **Ask Yap about this** (`yap-page-quote` → the quote over Chat's box,
   "About <the page>:", sent as `chat_send`'s `pageQuote` and asked as a
-  selection in another app is, `assistant/selected.rs`, the site named) and
+  selection in another app is, `assistant/selected.rs`, the site named —
+  **web content from the turn's start** (2 Nov 2026, `Selected::web`: the
+  safety rule's, and typed words asked about, as after a page read; a
+  selection can hold text the person never saw) and
   **Read aloud** (`read_aloud::start`); **Snip to Chat** always. **Yap's
   shortcuts while the page has the focus**: WebView2 runs ahead of the
   keyboard hook there as in Yap's own windows, so the controller's
@@ -2036,14 +2043,17 @@ review (safely, for any user, in any language Yap speaks).
 - **What Yap never does, whatever it's told** (enforced in Rust,
   `act/rules.rs`, its words in **one table per language** — English, French,
   German, Spanish, Italian, Portuguese, Dutch, `act/words.rs`, every table
-  on every page, accents folded, "*kartennummer" a German or Dutch compound's
-  ending): types a password, card, bank or security-code field (by `type`,
+  on every page, accents folded, soft hyphens (`&shy;`) and zero-width
+  characters never splitting a word (2 Nov 2026), "*kartennummer" a
+  German or Dutch compound's ending): types a password, card, bank or
+  security-code field (by `type`,
   `autocomplete` — `cc-*`, `current-password`, `new-password`,
   `one-time-code` — and name / id / label / placeholder in any of the seven:
   card, Kartennummer, numéro de carte, tarjeta, cartão, kaartnummer, CVV,
   IBAN, sort code, Kontonummer, mot de passe, contraseña, senha, wachtwoord,
   PIN…; the script never even sends such a value back, `masked`); types
-  **a payment card number** (13–19 digits passing the Luhn check), **an
+  **a payment card number** (13–19 digits passing the Luhn check, grouped
+  by spaces, dashes, dots, slashes or underscores), **an
   IBAN** (its mod-97 check) or **3–4 digits into a form that takes a card**
   whatever the field is called (`rules::typed_secret`); fills in a sign-in
   form (a field of a form with a password field, a `username` field, a user
@@ -2064,7 +2074,10 @@ review (safely, for any user, in any language Yap speaks).
     posting to `…/checkout/place-order`), a card field in it or on the page
     or a payment provider's frame (`Form::payment`, `Snapshot::payment`), a
     price in a posted form (`Form::price`); a button with a price on it
-    ("19,99 €": `rules::has_price`, any currency sign or code);
+    ("19,99 €": `rules::has_price`, any currency sign or code); **any
+    button on a page that takes a card** (a card field or a payment
+    provider's frame, `Described::payment`: a script's "Continue" there
+    may pay, 2 Nov 2026);
   - **Enter** (`enter_needs_ok`): in a form, the same as its submit; **outside
     one, always, unless it's a search box** — a web chat's message box
     (WhatsApp Web's, Slack's, Discord's) sends on Enter; a search box by

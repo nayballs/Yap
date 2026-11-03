@@ -8,8 +8,12 @@
 //   person's engine; a site they named, at its home page.
 // - `read_open_page` reads the page open beside the chat; every question
 //   says which tabs are open.
+// - The page never reaches this PC: its own requests, a worker's, a shared
+//   worker's or a service worker's to an address that isn't the page's are
+//   refused.
 // - "Ask Yap about this" on words selected there: quoted over Chat's box,
-//   asked as a selection.
+//   asked as a selection — and web content, so a question about them never
+//   makes Yap act (the safety rule).
 // - `snap_page` (a model that reads images) takes a shot of the page (loaded
 //   out of sight) and shows it as a picture: a picture tab and a pill, kept
 //   like a pasted picture.
@@ -197,6 +201,49 @@ test('open_page brings the live page up beside the chat: its own webview, no Yap
   // Its tab closed: the page goes.
   await main.getByRole('button', { name: /^Close Fort Joy - Example Wiki|^Close wiki\.example\.com/ }).click();
   await expect.poll(async () => (await views(yap)).some((v) => v.key === KEY)).toBe(false);
+});
+
+test('a page beside the chat never reaches this PC: not itself, nor a worker of its own, a shared one or a service worker', async ({ yap, main, fakeLlm, fakeWeb }) => {
+  await setConfig(yap, main, chatConfig(fakeLlm));
+  await ask(main, `Show me ${FORT_JOY_URL}`);
+  await expect.poll(async () => (await views(yap)).find((v) => v.key === KEY)?.loaded, { timeout: 20_000 }).toBe(true);
+  // Each one asks for an address on this PC that isn't the page's (the fake
+  // web's `/probe/…`: refused), then one of the page's own (`…/probe-ok/…`:
+  // allowed, so it's known to have run).
+  const run = Date.now();
+  const started = await inPage(
+    yap,
+    `(function(){var base=location.href.split('/wiki.example.com/')[0],origin=location.origin;
+      function job(who){return "fetch('"+origin+"/probe/"+who+"',{mode:'no-cors'}).catch(function(){}).then(function(){return fetch('"+base+"/wiki.example.com/probe-ok/"+who+"',{mode:'no-cors'});}).catch(function(){});";}
+      function blob(who){return URL.createObjectURL(new Blob([job(who)],{type:'text/javascript'}));}
+      (0,eval)(job('page'));
+      new Worker(blob('worker'));
+      new SharedWorker(blob('shared'));
+      navigator.serviceWorker.register(base+'/wiki.example.com/probe-sw.js?run=${run}',{scope:base+'/wiki.example.com/'});
+      return 'started';})()`
+  );
+  expect(started).toBe('started');
+  const reached = () => fakeWeb.requests.filter((r) => r.service === 'standin' && r.path.startsWith('/probe-ok/')).map((r) => r.path.slice('/probe-ok/'.length));
+  await expect.poll(reached, { timeout: 20_000 }).toEqual(expect.arrayContaining(['page', 'worker', 'shared', 'service']));
+  // Refused, every one: the service and shared workers' too (WebView2 hands
+  // Yap their requests only when its filter asks for them).
+  expect(fakeWeb.requests.filter((r) => r.service === 'probe').map((r) => r.path)).toEqual([]);
+});
+
+test('words selected on a page are web content: a question about them never makes Yap act', async ({ yap, main, fakeLlm }) => {
+  await setConfig(yap, main, chatConfig(fakeLlm));
+  await ask(main, `Show me ${FORT_JOY_URL}`);
+  await expect.poll(async () => (await views(yap)).find((v) => v.key === KEY)?.loaded, { timeout: 20_000 }).toBe(true);
+  await inPage(yap, "(function(){var r=document.createRange();r.selectNodeContents(document.querySelector('figcaption'));var s=getSelection();s.removeAllRanges();s.addRange(r);return s.toString();})()");
+  expect(await yap.invoke('e2e_page_view_ask', { key: KEY })).toBe('Every treasure chest marked');
+  await expect(main.getByTestId('chat-quote')).toBeVisible();
+  // The page's words could carry instructions the person never saw (hidden
+  // text inside what they selected): the turn is a web one from its start.
+  const from = fakeLlm.requests.length;
+  fakeLlm.scriptChat([{ tools: [{ name: 'copy_to_clipboard', args: { text: 'Every treasure chest marked' } }] }, { content: 'You can copy it from the page yourself.' }]);
+  await say(main, 'Copy this to my clipboard');
+  await expect(main.getByText('You can copy it from the page yourself.')).toBeVisible();
+  expect(toolResult(chatCalls(fakeLlm, from)[1])).toMatchObject({ success: false, displayText: "Didn't copy to the clipboard: not after reading the web" });
 });
 
 test('words selected on the page: Ask Yap about this quotes them over the box, asked as a selection', async ({ yap, main, fakeLlm }) => {

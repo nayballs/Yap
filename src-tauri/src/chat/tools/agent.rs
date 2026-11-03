@@ -444,8 +444,14 @@ async fn tool_loop(
     let room = Room { limit: extra.room, tools: &tools, provider, here: crate::ai::ai_model::runs_here(provider, base_url) };
     let mut tools_used: Vec<String> = Vec::new();
     // Something from the screen came in (`look_at_screen`): web content for
-    // the safety rule, as a page read is.
-    let mut screen_seen = false;
+    // the safety rule, as a page read is — and so is a question that carries
+    // a page's words (`Extra::web_question`), from the start.
+    let mut screen_seen = extra.web_question;
+    if extra.web_question {
+        if let Some(turn) = web.as_deref_mut() {
+            turn.mark_seen();
+        }
+    }
     // The answer just before the question: a "yes" to its offer to open an
     // app is the person asking (`apps::consented`).
     let previous: Option<String> = history
@@ -1189,6 +1195,60 @@ mod tests {
         // Exa got its recommended request, with the key.
         let (_, exa_body) = requests.iter().find(|(u, _)| u.starts_with("/exa/search")).expect("Exa asked");
         assert_eq!(exa_body, &crate::web::exa_body("calculator tips", None));
+    }
+
+    /// Words selected on a page beside the chat ("Ask Yap about this") are
+    /// the page's — a selection can hold text the person never saw — so the
+    /// turn is a web one from its start, though it searched and read nothing.
+    #[tokio::test]
+    async fn a_question_about_words_selected_on_a_page_can_never_make_the_chat_act() {
+        let fake = fake_server(
+            vec![
+                calls(&[
+                    ("copy_to_clipboard", json!({ "text": "Every treasure chest marked" })),
+                    ("open_app", json!({ "name": "Calculator" })),
+                    ("create_note", json!({ "title": "Chests", "content": "x" })),
+                ]),
+                json!({ "role": "assistant", "content": "Those are the chests on the map." }),
+            ],
+            json!({}),
+        );
+        let settings = crate::web::Settings { service: crate::web::Service::Exa, key: String::new(), lang: "en".into(), native: None, country: None, local: None, units: None };
+        let endpoints = crate::web::Endpoints { exa: String::new(), tavily: String::new(), standin: None, offline: true };
+        let question = "What does this mean?";
+        let mut turn = crate::web::Turn::new(settings, endpoints, question, &[]);
+        let extra = Extra { web_question: true, ..Default::default() };
+        let (reply, chips) = tool_loop(
+            "You are helpful.",
+            &[],
+            question,
+            &[],
+            &format!("{}/v1", fake.base),
+            "",
+            "fake-chat",
+            "custom",
+            false,
+            true,
+            &|_| {},
+            Some(&mut turn),
+            FirstStep::Model,
+            extra,
+            None,
+        )
+        .await
+        .expect("an answer");
+        assert_eq!(reply, "Those are the chests on the map.");
+        assert_eq!(
+            chips,
+            [
+                "Didn't copy to the clipboard: not after reading the web",
+                "Didn't open an app: not after reading the web",
+                "Didn't create a note: not after reading the web",
+            ]
+        );
+        // The page actions' typed-words check holds from the start too.
+        assert!(turn.seen());
+        assert!(crate::notes::all().is_empty(), "no note created");
     }
 
     /// A strong model (Claude, GPT-5…) keeps writing after the web, as in

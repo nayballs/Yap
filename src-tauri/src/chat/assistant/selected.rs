@@ -31,6 +31,11 @@ pub struct Selected {
     /// The app's process name ("notepad.exe"; "Yap" for one of Yap's own
     /// windows; "" when unknown).
     pub app: String,
+    /// Selected on a page beside the chat ("Ask Yap about this",
+    /// `pages/view.rs`): the page's words, so the turn is a web one from its
+    /// start (the safety rule, `tools::Extra::web_question`) — a selection
+    /// can hold text the person never saw.
+    pub web: bool,
 }
 
 tokio::task_local! {
@@ -118,7 +123,7 @@ mod tests {
     use super::*;
 
     fn sel(text: &str, app: &str) -> Selected {
-        Selected { text: text.into(), app: app.into() }
+        Selected { text: text.into(), app: app.into(), web: false }
     }
 
     #[test]
