@@ -3563,5 +3563,10 @@ it was. Since then every prompt that answers a question names it after the perso
 Qwen3.5-4B (`--ngl 99`, `--repeat 2`): 2 of 2 passed — the greeting never names the model, it
 names its model when asked ("I'm running Qwen Qwen3.5 4B Q4 K M.", "I am Yap, running on …"),
 never "I can't tell". The name is the GGUF's here because a run sends a local model as a
-server on localhost (`local:`); the app's on-device model is "Qwen3.5 4B". Not yet run on a
-cloud model.
+server on localhost (`local:`); the app's on-device model is "Qwen3.5 4B".
+
+On Claude Haiku 5.5 (`--keys-from-yap`, `--repeat 2`, commit `bf0a3b71`): 2 of 2 passed. The
+greeting never names the model; asked, "I'm Claude Haiku 5.5, made by Anthropic."; told it's
+Claude Code, "I'm Yap's assistant, and I'm running on Claude Haiku 5.5, made by Anthropic.
+Claude Code is a different product, so I'm not that." The one soft warning: its answer to the
+plain question leaves out Yap's name, which the line allows.
