@@ -1,6 +1,7 @@
 //! The ChatGPT sign-in's secret: its refresh token (each refresh replaces
-//! it), never in config.json, chatgpt.json, the logs or the webview. The
-//! access token lives in memory only (an hour).
+//! it) with the access token and its expiry (an hour), as one JSON value
+//! (`chatgpt.rs` `Creds`: other Yaps use the same tokens), never in
+//! config.json, chatgpt.json, the logs or the webview.
 //!
 //! Windows Credential Manager, as the calendars' secrets
 //! (`calendar/vault.rs`): generic credentials named
