@@ -116,6 +116,29 @@ two channels don't cross. Both channels sign with the **same** minisign key
 (`TAURI_SIGNING_PRIVATE_KEY`) — the pubkey in `tauri.conf.json` must match it or
 installed copies reject updates. See `docs/SIGNING.md` for Authenticode plans.
 
+**The signature names its version** (2026-11-03, Tauri 2.12): the CLI's `tauri build`
+writes `version:<app version>` into the signature's trusted comment (which the
+signature covers), and `tauri-plugin-updater` 2.14 refuses an update whose latest.json
+`version` isn't that one (`SignedVersionMismatch`; a signature without the field, as
+every one before 2.12, is still taken: `requireSignedVersion` stays off). So latest.json's
+`version` must be the version the build was signed with: tauri-action's own for stable,
+`NIGHTLY_VERSION` (patched into the config before the build) for nightly. An installed
+Yap from before the bump (plugin 2.10) doesn't read the field, so the first nightly after
+it is taken as before; the check itself first runs on the nightly after that. Also from
+2.14: `Update::install` checks the bytes' signature again before running the installer,
+and minisign signatures with a non-canonical Ed25519 `S` are refused (`minisign-verify`
+0.3; the CLI never makes those). The e2e feed (`e2e/support/update-feed.js`) signs with
+`--app-version`, as a real build does.
+
+**tauri-action v1** (2026-11-03, from v0): the inputs and outputs both workflows use
+(`args`, `updaterJsonPreferNsis`, `tagName` with `__VERSION__`, `releaseName`,
+`releaseBody`, `releaseDraft`, `prerelease`, `releaseCommitish`; `releaseId`,
+`appVersion`) are unchanged. What differs for Yap: a re-run of release.yml for the same
+version rewrites the draft's title and body (polish the notes after the last run), and
+fails if that version's release was already published instead of adding files to it;
+latest.json's download URLs are GitHub's `/releases/download/<tag>/<file>` (what v0 gave
+for Yap's draft too). Nightly's build-only step is the same.
+
 ### Checksums and build provenance (2026-10-25)
 For people who download an installer by hand (the updater keeps checking minisign
 signatures, untouched by this):
