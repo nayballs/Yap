@@ -310,7 +310,7 @@ One folder per area (an area's `<area>.rs` lists its modules); a big module's pa
 - `shell/portable.rs` — portable mode (a `portable` marker → `<exe>/Data`).
 - `shell/guide.rs` / `shell/help.rs` — getting started (`onboarding.json`: the setup's calendar step, the typing test's numbers, the "Set up meeting notes" checklist); the Help menu's shortcut sheet, from the input hook's own list.
 - Commands: each module's own, else its area's `commands.rs` (dictation, notes, chat, ai, meetings) (app-shell.md).
-- `shell/window.rs` / `settings.rs` / `autostart.rs` / `logging.rs` / `commands.rs` — the main window and onboarding (DWM-cloaked first show); config saved and applied; launch at sign-in; the log; links, portable.
+- `shell/window.rs` / `settings.rs` / `autostart.rs` / `logging.rs` / `commands.rs` — the main window and onboarding (DWM-cloaked first show; every window shown without activating, `show_quietly`); config saved and applied; launch at sign-in; the log; links, portable.
 - `config.rs` — `YapConfig`, load/save (one at a time; `update` in one step; an unreadable file set aside, the person told), migrations, dictionary helpers (config-and-data.md).
 - `shell/saving.rs` — every JSON store's writes: a failed one keeps the data in memory, retried with the next save, said once ("Couldn't save your note: the disk is full." as a command's error with Try again, else one notice); and its reads: a file it couldn't read (held by another program…) is never written over, read again later and merged with what was added (`Saver::read`/`load`/`loaded`, `merge_json`) (config-and-data.md).
 - `shell/e2e.rs` / `shell/realtest.rs` — test mode, and robot mode's real pastes into the test's own windows.
@@ -349,6 +349,7 @@ One folder per area (an area's `<area>.rs` lists its modules); a big module's pa
 - When one of Yap's own WebView2 windows has focus the global hook never fires: every window with focusable UI needs the **in-page hotkey fallback** (`dictation/input_hook.rs`).
 - WebView2 keeps `document.visibilityState === 'visible'` while a window is hidden: window visibility comes from Rust (`updates.rs`).
 - Never swap the hidden windows' **DWM cloak** for "park off-screen, show+hide" (`shell/window.rs`).
+- Never call a window's `.show()`: tao's activates it (the bar, the notepad took the focus) — `shell::window::show_quietly` (`app-shell.md`).
 - Never `window.confirm/alert/prompt` in a Yap window — use `ui/ConfirmDialog.svelte` (`frontend.md`).
 - The bar window is transparent: no `backdrop-filter`, no big shadows (`yap-bar.md`).
 - A **signed-out Yap never contacts the account service** on its own (`auth.rs`).

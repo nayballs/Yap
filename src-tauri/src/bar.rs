@@ -16,7 +16,8 @@
 //!   again — Electron's `setIgnoreMouseEvents(true, { forward: true })`, done
 //!   natively (Wispr's bar does exactly this: WS_EX_TRANSPARENT cleared only
 //!   while the pointer rests on the pill). It never takes focus: `focusable:
-//!   false` (WS_EX_NOACTIVATE), a click answers `WM_MOUSEACTIVATE` with
+//!   false` (WS_EX_NOACTIVATE), shown without activating
+//!   (`shell::window::show_quietly`), a click answers `WM_MOUSEACTIVATE` with
 //!   MA_NOACTIVATE, and should Windows activate it anyway the focus goes
 //!   straight back to the app you were in — so 🎤 dictates into that app.
 //! - **Follows you.** It sits bottom-centre on the work area of the monitor
@@ -671,14 +672,15 @@ fn on_main(app: &AppHandle, f: impl FnOnce(&AppHandle) + Send + 'static) {
     let _ = app.run_on_main_thread(move || f(&handle));
 }
 
-/// Show or hide the window. Showing never activates it (`focus: false`:
-/// tao shows it with SW_SHOWNOACTIVATE) and puts it on top of the
-/// always-on-top band.
+/// Show or hide the window. Showing never activates it
+/// (`shell::window::show_quietly`: `focusable: false` alone doesn't stop
+/// tao's show from activating it) and puts it on top of the always-on-top
+/// band.
 fn set_shown(app: &AppHandle, shown: bool) {
     on_main(app, move |app| {
         let Some(w) = window(app) else { return };
         if shown {
-            let _ = w.show();
+            crate::shell::window::show_quietly(&w);
             overlay::force_topmost(&w);
         } else {
             let _ = w.hide();

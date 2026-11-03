@@ -28,7 +28,8 @@ pub fn brought_forward_within(ms: u64) -> bool {
 ///
 /// The `set_focus` is load-bearing here and in `show_onboarding`: both windows
 /// are created unfocused (`"focus": false`) so launching Yap never pulls the
-/// foreground onto a hidden window, which makes their first `show()` inactive.
+/// foreground onto a hidden window, and shown without activating
+/// ([`show_quietly`]), so the focus comes from `set_focus` alone.
 pub fn show_settings(app: &AppHandle) -> Result<(), String> {
     let w = app
         .get_webview_window("settings")
@@ -39,9 +40,8 @@ pub fn show_settings(app: &AppHandle) -> Result<(), String> {
         let _ = w.unminimize();
     }
     fit_to_screen(&w);
-    let _ = w.show();
+    show_quietly(&w);
     focus(&w);
-    behind_in_test_runs(&w);
     // Files dragged in from Explorer (shell/file_drop.rs): not left to the
     // Focused event either, for the same reason.
     crate::shell::file_drop::watch(&w);
@@ -94,12 +94,171 @@ pub(crate) fn fit_rect(window: (i32, i32, u32, u32), area: (i32, i32, u32, u32))
     (fitted != window).then_some(fitted)
 }
 
-/// A test run's window, just shown: at the bottom of the z-order, behind the
-/// apps of whoever works beside the suite (it still draws there: the suite
-/// turns WebView2's occlusion tracking off, `e2e/support/yap.js`). Nothing
-/// outside test runs, nor in robot mode, whose real windows are its point.
-/// (25 Oct 2026: the main window kept popping up mid-screen during runs.)
-pub fn behind_in_test_runs(w: &tauri::WebviewWindow) {
+/// How long [`show_quietly`] off the main thread waits for the show.
+const SHOW_WAIT: std::time::Duration = std::time::Duration::from_secs(2);
+
+/// **Show `w` without activating it**: the app in front keeps the foreground
+/// and the keyboard — the call beside the meeting notepad, the app a
+/// dictation pastes into under the Yap bar, whoever works beside a test run.
+/// Every show of Yap's own windows goes through here; one that should take
+/// the focus calls `set_focus` after it (`focus`, never in test runs).
+///
+/// Tauri's `show()` alone activates: since tao 0.37.1 (tao #1342) a window
+/// built with `focus: false` is spared only on a show during its creation,
+/// and every later `show()` is `ShowWindow(SW_SHOW)`, which activates even a
+/// `WS_EX_NOACTIVATE` window (the bar). Neither tao nor Tauri has a show that
+/// doesn't (tao #1358, open in Nov 2026, would spare unfocusable windows
+/// only). So it's tao's own `show()` — its record of the window then says
+/// visible, which its `set_focus` and `hide` go by — with a CBT hook on the
+/// window's thread refusing that window's activation (`HCBT_ACTIVATE`) for
+/// the length of the call: shown, on top of its band, never active, no
+/// `WM_ACTIVATE`. A raw `SW_SHOWNA` would leave tao thinking it hidden, so
+/// the next `hide()` would do nothing. In a test run it then goes behind
+/// everything in the same step ([`behind_in_test_runs`]), the Yap bar
+/// (always on top) excepted.
+///
+/// Runs on the main thread, where the window lives: at once when called
+/// there, else waiting for it (up to [`SHOW_WAIT`]), as Tauri's window
+/// getters do — so never with a lock held.
+pub fn show_quietly(w: &tauri::WebviewWindow) {
+    let (tx, rx) = std::sync::mpsc::channel();
+    let win = w.clone();
+    let queued = w.run_on_main_thread(move || {
+        #[cfg(windows)]
+        match win.hwnd() {
+            Ok(hwnd) => quiet::refusing_activation(hwnd.0 as isize, || {
+                let _ = win.show();
+            }),
+            Err(_) => {
+                let _ = win.show();
+            }
+        }
+        #[cfg(not(windows))]
+        let _ = win.show();
+        if win.label() != crate::bar::overlay::LABEL {
+            behind_in_test_runs(&win);
+        }
+        let _ = tx.send(());
+    });
+    match queued {
+        Ok(()) => {
+            if rx.recv_timeout(SHOW_WAIT).is_err() {
+                tracing::warn!(label = w.label(), "a window's show is still waiting for the main thread");
+            }
+        }
+        Err(e) => tracing::warn!(label = w.label(), "couldn't show a window: {e}"),
+    }
+}
+
+/// Activations refused while a window shows ([`show_quietly`]).
+#[cfg(windows)]
+mod quiet {
+    use std::cell::Cell;
+
+    use windows::Win32::Foundation::{LPARAM, LRESULT, WPARAM};
+    use windows::Win32::System::Threading::GetCurrentThreadId;
+    use windows::Win32::UI::WindowsAndMessaging::{
+        CallNextHookEx, SetWindowsHookExW, UnhookWindowsHookEx, HCBT_ACTIVATE, HHOOK, WH_CBT,
+    };
+
+    thread_local! {
+        /// The window this thread's hook keeps from activating (0: none).
+        static REFUSED: Cell<isize> = const { Cell::new(0) };
+    }
+
+    /// Windows asks before activating any window of this thread: 1 refuses.
+    unsafe extern "system" fn cbt(code: i32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
+        if code == HCBT_ACTIVATE as i32 && wparam.0 as isize == REFUSED.with(Cell::get) {
+            return LRESULT(1);
+        }
+        unsafe { CallNextHookEx(None, code, wparam, lparam) }
+    }
+
+    /// Unhooks and forgets the window however `f` ends.
+    struct Hooked {
+        hook: Option<HHOOK>,
+        before: isize,
+    }
+
+    impl Drop for Hooked {
+        fn drop(&mut self) {
+            REFUSED.with(|r| r.set(self.before));
+            if let Some(hook) = self.hook {
+                let _ = unsafe { UnhookWindowsHookEx(hook) };
+            }
+        }
+    }
+
+    /// Run `f` with every activation of `hwnd` refused. On the window's own
+    /// thread: a CBT hook sees only its own thread's windows (no DLL, nothing
+    /// in other processes).
+    pub fn refusing_activation(hwnd: isize, f: impl FnOnce()) {
+        let hook = unsafe { SetWindowsHookExW(WH_CBT, Some(cbt), None, GetCurrentThreadId()) };
+        if let Err(e) = &hook {
+            tracing::warn!("couldn't keep a window from activating as it shows: {e}");
+        }
+        let _hooked = Hooked { hook: hook.ok(), before: REFUSED.with(|r| r.replace(hwnd)) };
+        f();
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use windows::core::w;
+        use windows::Win32::Foundation::HWND;
+        use windows::Win32::UI::Input::KeyboardAndMouse::{GetActiveWindow, SetActiveWindow};
+        use windows::Win32::UI::WindowsAndMessaging::{
+            CreateWindowExW, DestroyWindow, IsWindowVisible, ShowWindow, SW_SHOW, WS_EX_TOOLWINDOW, WS_POPUP,
+        };
+
+        fn popup() -> HWND {
+            unsafe {
+                CreateWindowExW(WS_EX_TOOLWINDOW, w!("STATIC"), w!("yap test"), WS_POPUP, 0, 0, 40, 40, None, None, None, None)
+            }
+            .expect("a test window")
+        }
+
+        #[test]
+        fn a_window_shown_with_its_activation_refused_shows_and_stays_inactive() {
+            // This thread's windows: the one the person is in, and the one
+            // that comes up beside it.
+            let front = popup();
+            let shown = popup();
+            unsafe {
+                let _ = ShowWindow(front, SW_SHOW);
+                let _ = SetActiveWindow(front);
+            }
+            let front_active = unsafe { GetActiveWindow() } == front;
+            super::refusing_activation(shown.0 as isize, || unsafe {
+                let _ = ShowWindow(shown, SW_SHOW);
+            });
+            assert!(unsafe { IsWindowVisible(shown) }.as_bool());
+            assert_ne!(unsafe { GetActiveWindow() }, shown);
+            if front_active {
+                assert_eq!(unsafe { GetActiveWindow() }, front);
+            }
+            // Gone with the call: the same show activates it now.
+            unsafe {
+                let _ = ShowWindow(shown, windows::Win32::UI::WindowsAndMessaging::SW_HIDE);
+                let _ = ShowWindow(shown, SW_SHOW);
+            }
+            if front_active {
+                assert_eq!(unsafe { GetActiveWindow() }, shown);
+            }
+            unsafe {
+                let _ = DestroyWindow(shown);
+                let _ = DestroyWindow(front);
+            }
+        }
+    }
+}
+
+/// A test run's window, just shown ([`show_quietly`]): at the bottom of the
+/// z-order, behind the apps of whoever works beside the suite (it still draws
+/// there: the suite turns WebView2's occlusion tracking off,
+/// `e2e/support/yap.js`). Nothing outside test runs, nor in robot mode, whose
+/// real windows are its point. (25 Oct 2026: the main window kept popping up
+/// mid-screen during runs.)
+fn behind_in_test_runs(w: &tauri::WebviewWindow) {
     if !crate::shell::e2e::active() || crate::shell::realtest::on() {
         return;
     }
@@ -273,9 +432,8 @@ pub fn show_onboarding(app: &AppHandle) -> Result<(), String> {
     // stays: it gives fresh event listeners and a fresh wizard every open.
     // (720 px tall: on a laptop at 150 % its buttons were under the taskbar.)
     fit_to_screen(&w);
-    let _ = w.show();
+    show_quietly(&w);
     focus(&w);
-    behind_in_test_runs(&w);
     // Tips and notices wait while the first-run setup is on screen (the
     // bar's first-use pointers too: it's told).
     crate::notices::notice::on_onboarding(true);
@@ -347,7 +505,9 @@ mod dwm {
 /// One-shot show+hide of a still-hidden webview window so WebView2 finishes
 /// initializing while VISIBLE (see the call site in `setup`), without anything
 /// reaching the screen: the window is DWM-cloaked (composed, never drawn) with
-/// its open/close animations disabled for the round-trip.
+/// its open/close animations disabled for the round-trip. Shown without
+/// activating ([`show_quietly`]): a cloaked window can still take the
+/// foreground, which would leave the person typing into nothing as Yap starts.
 ///
 /// The previous version parked the window at (-32000,-32000) and moved it back
 /// straight after, which flashed a blank "Welcome to Yap" window on every
@@ -364,7 +524,7 @@ pub(crate) fn init_hidden_webview(window: &tauri::WebviewWindow) {
     let Ok(hwnd) = window.hwnd() else { return };
     dwm::set_flag(hwnd.0, dwm::DWMWA_CLOAK, true);
     dwm::set_flag(hwnd.0, dwm::DWMWA_TRANSITIONS_FORCEDISABLED, true);
-    let _ = window.show();
+    show_quietly(window);
     let _ = window.hide();
     // Let DWM process the hide (one composition pass) while the window is
     // still cloaked, then restore normal behaviour for real opens.
@@ -376,6 +536,31 @@ pub(crate) fn init_hidden_webview(window: &tauri::WebviewWindow) {
 #[cfg(test)]
 mod tests {
     use super::{fit_rect, uncovered_share};
+
+    /// Tauri's `show()` activates the window (tao 0.37.1+): every show of
+    /// Yap's windows goes through `show_quietly`, which calls it with the
+    /// activation refused, so this file is the only one that may.
+    #[test]
+    fn every_window_shows_without_activating() {
+        fn visit(dir: &std::path::Path, out: &mut Vec<String>) {
+            for entry in std::fs::read_dir(dir).unwrap().flatten() {
+                let path = entry.path();
+                if path.is_dir() {
+                    visit(&path, out);
+                } else if path.extension().is_some_and(|e| e == "rs") && !path.ends_with("shell/window.rs") {
+                    let text = std::fs::read_to_string(&path).unwrap();
+                    for (i, line) in text.lines().enumerate() {
+                        if !line.trim_start().starts_with("//") && line.contains(".show()") {
+                            out.push(format!("{}:{}: {}", path.display(), i + 1, line.trim()));
+                        }
+                    }
+                }
+            }
+        }
+        let mut found = Vec::new();
+        visit(&std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src"), &mut found);
+        assert!(found.is_empty(), "windows shown with tao's activating show (use `shell::window::show_quietly`):\n{}", found.join("\n"));
+    }
 
     #[test]
     fn how_much_of_a_window_the_ones_above_it_leave_in_view() {

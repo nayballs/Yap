@@ -180,7 +180,7 @@ pub fn run() {
         builder.plugin(tauri_plugin_single_instance::init(|app, _argv, _cwd| {
             use tauri::Manager;
             if let Some(settings) = app.get_webview_window("settings") {
-                let _ = settings.show();
+                shell::window::show_quietly(&settings);
                 let _ = settings.unminimize();
                 let _ = settings.set_focus();
             }
@@ -1096,8 +1096,7 @@ pub fn run() {
             // App Preview — with literally nothing on screen.
             #[cfg(debug_assertions)]
             if let Some(settings) = app.get_webview_window("settings") {
-                let _ = settings.show();
-                shell::window::behind_in_test_runs(&settings);
+                shell::window::show_quietly(&settings);
             }
             // Release builds: a launch by the person brings the main window
             // up (`launch_shows_window`); sign-in and "Start hidden" stay in

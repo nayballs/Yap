@@ -609,8 +609,9 @@ The meeting recorder and its audio kept on disk, rolling digests and the action 
   hints.json); e2e `coach-marks.spec.js`.
 - **`meetings/notepad.rs`** — the **meeting notepad** window (label `notepad`, static in
   tauri.conf.json, created hidden + unfocused so `calls/capture.rs` always finds it
-  and opening it never takes the foreground — tao keeps the don't-focus marker,
-  so every `show()` is `SW_SHOWNOACTIVATE`; close = hide, the recording goes
+  and opening it never takes the foreground — every show is
+  `shell::window::show_quietly`'s, never activated (app-shell.md "Window config"),
+  and only `open` (a click in Yap) then `set_focus`es it; close = hide, the recording goes
   on; denylisted from the window-state plugin; gets the DWM-cloak init).
   `on_meeting_started` (from `meeting_end`) switches it to the recording note
   (`yap-notepad-note`) and, with `meeting_open_notepad` (default on), docks it

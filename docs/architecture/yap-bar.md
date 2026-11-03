@@ -63,6 +63,8 @@ The always-there pill above the taskbar: the `overlay` window's Rust side (regio
   mouseleave, so Rust is the authority on hover) — Electron's
   `setIgnoreMouseEvents(true, {forward:true})` done natively, as Wispr's
   traced bar does. **Never focused**: `focusable: false` (WS_EX_NOACTIVATE),
+  shown without activating (`shell::window::show_quietly`: tao's `show()`
+  activates even a WS_EX_NOACTIVATE window, app-shell.md "Window config"),
   a window subclass that answers `WM_MOUSEACTIVATE` with MA_NOACTIVATE and
   keeps TOOLWINDOW/NOACTIVATE/LAYERED through tao's style rewrites
   (`WM_STYLECHANGING`), and if Windows activates it anyway (`WM_ACTIVATE`)
