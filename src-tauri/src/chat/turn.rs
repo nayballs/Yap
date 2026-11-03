@@ -4,18 +4,29 @@
 //! every answer. The Chat view (`chat_send`), the Voice Assistant and the
 //! model evaluations all ask through [`chat_turn`].
 //!
-//! Its parts: `fast` (the turns Yap answers itself, no model: an app, a
-//! page, a Skill's question, the passages) and `gates` (what this model
-//! may do in this turn: tools, the web and whose search, pictures, the
-//! screen, pages, the calendar).
+//! Here: the turn's steps in their order ([`answer_turn`]), what they share
+//! ([`Asked`], [`Opened`], [`Answer`]), the Chat model's endpoint and its
+//! limits (and, inline for now, the tool loop, a small model's answer, the
+//! checks and saving). Its parts: `fast` (the turns Yap answers itself, no
+//! model: an app, a page, a Skill's question, the passages), `gates` (what
+//! this model may do in this turn: tools, the web and whose search,
+//! pictures, the screen, pages, the calendar), `history` (the question
+//! measured against the model, and the history fitted to what's left) and
+//! `prompt` (the system prompt and the question's context: the eager RAG,
+//! the meetings' passages, memory, About you, how to answer).
 
 mod fast;
 mod gates;
+mod history;
+mod prompt;
 
 use tauri::AppHandle;
 
 use crate::config::{self, YapConfig};
 use crate::notes::commands::note_changed;
+
+pub(crate) use history::next_room;
+pub(crate) use prompt::stable_prompt;
 
 /// Resolve the **Chat** scope's endpoint + persona (falling back to the global
 /// cleanup endpoint when the scope is off) and fail fast on keyless cloud
@@ -86,65 +97,6 @@ pub(crate) fn in_chat(cfg: &YapConfig, provider: &str, model: &str, base_url: &s
     cfg.web_search
         && crate::ai::llm::anthropic::speaks_messages(provider, model)
         && crate::web::Settings::for_chat(cfg, provider, model, base_url, api_key).native.is_some()
-}
-
-/// What the notes the eager RAG found ([`rag_context`]) come under, in the
-/// question's context (`chats::with_context`): OpenWhispr's framing line.
-/// (Telling the model the notes "may not be what it's about" didn't keep
-/// Qwen3.5-4B from answering a follow-up about a note that only shared
-/// "time" with it — 0 of 6, `notes-long-chat`, 2026-10-22; the stricter
-/// match, `tools::rag_notes`, did.)
-const RAG_LEAD: &str = "Below are notes from the user's library that may be relevant. Reference them naturally if they help answer the question.";
-
-/// Eager keyword-RAG (OpenWhispr `buildRAGContext`, keyword edition per the
-/// ROADMAP's escalating plan): top-5 notes by the shared keyword scorer —
-/// `strict`, only those that really match the question (`tools::rag_notes`:
-/// for a question's context, since 22 Oct 2026, where a loose match pulled
-/// follow-ups off the conversation); else the loose search, as before, in
-/// the system prompt of a model without tools (Qwen2.5-1.5B answered less
-/// well from one note than from five) — formatted exactly like theirs —
-/// `<note id="N" title="T">\n{first 500 chars}\n</note>` joined by blank
-/// lines.
-fn rag_context(query: &str, strict: bool) -> String {
-    const RAG_NOTE_LIMIT: usize = 5;
-    const RAG_NOTE_SNIPPET_LENGTH: usize = 500;
-
-    let notes = if strict {
-        crate::chat::tools::rag_notes(query, RAG_NOTE_LIMIT)
-    } else {
-        crate::chat::tools::search_notes(query, RAG_NOTE_LIMIT)
-    };
-    notes
-        .into_iter()
-        .map(|(_, n)| {
-            // Snippet from raw content (their choice); fall back to enhanced /
-            // transcript for notes that are transcript-only.
-            let source = if !n.content.trim().is_empty() {
-                n.content.clone()
-            } else if !n.enhanced_content.trim().is_empty() {
-                n.enhanced_content.clone()
-            } else {
-                // Who said each line (a name the speaker map has, else
-                // You / Them): "who fixed the form?" answers from it
-                // (Qwen3.5-4B named the wrong person from the bare lines,
-                // `evals/search/library.json`, 2026-10-25).
-                n.transcript
-                    .iter()
-                    .filter(|s| s.is_talk() && !s.text.trim().is_empty())
-                    .map(|s| format!("{}: {}", crate::speakers::prompt_label(&n.speakers, s), s.text.trim()))
-                    .collect::<Vec<_>>()
-                    .join("\n")
-            };
-            let snippet: String = source.chars().take(RAG_NOTE_SNIPPET_LENGTH).collect();
-            let title = if n.title.trim().is_empty() {
-                "Untitled".to_string()
-            } else {
-                n.title.clone()
-            };
-            format!("<note id=\"{}\" title=\"{}\">\n{}\n</note>", n.id, title, snippet)
-        })
-        .collect::<Vec<_>>()
-        .join("\n\n")
 }
 
 /// One chat turn, answered: what [`chat_turn`] returns.
@@ -243,7 +195,83 @@ pub(crate) async fn chat_turn(
     crate::ai::usage::tallied(crate::notes::versions::in_turn(turn)).await
 }
 
-/// [`chat_turn`], its last model call kept by `usage::tallied`.
+/// **The question being answered** and what's settled about its turn
+/// before the model is asked: where it was asked, the settings, who
+/// answers and what that model may do. Every step of [`answer_turn`]
+/// reads it.
+struct Asked<'a> {
+    /// The windows told of note changes (`None` in a model evaluation).
+    app: Option<&'a AppHandle>,
+    cfg: YapConfig,
+    /// The question, trimmed.
+    text: String,
+    /// `None`: Chat; "meetings": the Meetings view's Ask bar (or a
+    /// conversation asked there); "assistant": the Voice Assistant.
+    scope: Option<&'a str>,
+    by_voice: bool,
+    /// A Skill being run (chat/skills.rs).
+    skill: Option<crate::chat::skills::SkillTurn>,
+    /// Asked across the meetings: the Meetings view's Ask bar, or a Skill.
+    meetings: bool,
+    /// Text selected in another app that this question is about
+    /// (`assistant/selected.rs`).
+    about_selection: Option<crate::chat::assistant::selected::Selected>,
+    ep: Endpoint,
+    /// Who answers, as the chip named it, kept with the answer.
+    answered_by: crate::chat::chats::ChatModel,
+    /// What this model may do in this turn (gates.rs).
+    gates: gates::Gates,
+    /// About you (about_you.rs): where the person is, their money and
+    /// units, name and note; and the clock.
+    profile: crate::ai::about_you::Profile,
+    now: chrono::DateTime<chrono::Utc>,
+    /// Whoever watches the stream (the Chat view's channel, the Voice
+    /// Assistant, an evaluation's clock).
+    watcher: Option<&'a dyn crate::chat::stream::Sink>,
+    /// The page's ■, or the turn's own: a newer question ends it too.
+    stop: &'a crate::chat::stream::Stoppable,
+}
+
+/// The question saved ([`open`]): its conversation as it was before it,
+/// the question's index there, and a passage selected in the document
+/// panel that it's about ("Change this…", documents.rs).
+struct Opened {
+    conv: crate::chat::chats::Conversation,
+    user_index: usize,
+    selection: Option<crate::chat::documents::Selection>,
+}
+
+/// **The answer as the model gave it** (`run.rs`, `small.rs`), before
+/// Yap's checks (`finish.rs`): its text and chips, the web's sources and
+/// the text of its pages, whether a search ran, and what it showed beside
+/// the chat.
+struct Answer {
+    reply: String,
+    tools_used: Vec<String>,
+    sources: Vec<crate::chat::chats::Source>,
+    /// A search ran this turn.
+    looked: bool,
+    /// The web text it was given (an answer's prices are checked against it).
+    pages: Vec<String>,
+    /// Stopped while it was written (`reply` = what showed).
+    stopped: bool,
+    /// The pictures it showed beside the chat (`chat/pictures.rs`).
+    pictures: Vec<crate::chat::pictures::ShownPicture>,
+    /// The pages it brought up beside the chat, and the buttons it offered
+    /// for the person's browser (`chat/pages.rs`).
+    shown_pages: Vec<crate::chat::pages::ShownPage>,
+    offers: Vec<crate::chat::pages::BrowserOffer>,
+    /// "Search in your browser" under the answer: Yap's free web sources
+    /// couldn't give it (no search service for the turn, web/sources.rs).
+    browser: Option<crate::web::BrowserSearch>,
+}
+
+/// [`chat_turn`], its last model call kept by `usage::tallied`: the turns
+/// Yap answers itself first (`fast.rs`), then — a model to ask — what it
+/// may do (`gates.rs`), the question measured and saved, the prompt
+/// (`prompt.rs`) and the history fitted to the model (`history.rs`), the
+/// answer by the tool loop or a small model's way (`run.rs`, `small.rs`),
+/// checked and saved (`finish.rs`).
 #[allow(clippy::too_many_arguments)]
 async fn answer_turn(
     app: Option<&AppHandle>,
@@ -334,512 +362,75 @@ async fn answer_turn(
     crate::chat::compact::turn_started();
     // What this model may do in this turn (gates.rs).
     let gates = gates::Gates::for_turn(&cfg, &ep, scope, meetings, chat_in_view);
-    let gates::Gates { tools: tools_supported, doc_tools, strong, claude_in_chat, own_search, web_lines, web_on, pictures, screen, act, calendar: calendar_on } = gates;
-    let Endpoint { base_url, api_key, model, provider, persona, disable_thinking } = ep;
-    let in_message = tools_supported;
-    let calendar_log = crate::chat::tools::calendar::Log::default();
     // About you (about_you.rs): where the person is, their money and units,
     // name and note — last in the system prompt, below; their clock in the
     // question's context (it changes every minute).
     let profile = crate::ai::about_you::profile(&cfg);
     let now = crate::ai::eval::now();
+    let t = Asked { app, cfg, text, scope, by_voice, skill, meetings, about_selection, ep, answered_by, gates, profile, now, watcher, stop };
 
-    // **Sized to the model** (budget.rs): its context, measured parts, and
-    // the question alone within what's left — a paste too long for the
-    // model is never sent (nor saved): it's said plainly.
-    let kind = crate::chat::budget::Kind::of_scope(scope);
-    let mode = crate::chat::budget::mode();
-    let counter = crate::chat::budget::Counter::for_call(&provider, &base_url);
-    let (context_size, context_known) = crate::chat::budget::context_window(&cfg, &provider, &model, &base_url).await;
-    let label = crate::chat::budget::model_label(&provider, &model, &crate::ai::local_llm::active_model_display(&cfg));
-    let plain = |e: String| crate::chat::budget::plain_error(e, &label, context_size, &provider);
-    let schemas = gates.schemas(&cfg, &counter, conversation_id).await;
-    // The question as sent: its text, and the screenshots it carries, each
-    // by its size where it goes (`budget::image_tokens_at`).
-    let question_tokens = counter.count(&text).await
-        + crate::chat::budget::MESSAGE_OVERHEAD
-        + crate::snip::turn::images().iter().filter(|i| !i.as_text).map(|i| counter.picture(i.w, i.h)).sum::<u64>();
-    let rate_cap = crate::chat::budget::rate_cap(&provider);
-    if mode != crate::chat::budget::Mode::Messages {
-        let stable = gates.stable_prompt(&cfg, &persona, &profile, now);
-        let fixed_now = counter.count(&stable).await + schemas;
-        let guess = crate::chat::budget::budget(context_size, context_known, fixed_now, kind, tools_supported, rate_cap);
-        if question_tokens > guess.history {
-            tracing::info!(question_tokens, room = guess.history, context = context_size, "Chat: the question is too long for the model; not sent");
-            // The plan's tokens a minute, not the model's context, when
-            // that's what's short (it read "too long for … (128K context)").
-            let roomy = crate::chat::budget::budget(context_size, context_known, fixed_now, kind, tools_supported, None);
-            if let Some(tpm) = crate::chat::budget::rate_limit(&provider).filter(|_| question_tokens <= roomy.history) {
-                return Err(crate::chat::budget::too_much_a_minute(&label, &provider, tpm));
-            }
-            return Err(crate::chat::budget::too_long(&label, context_size));
-        }
+    // **Sized to the model** (history.rs): a question too long for it is
+    // never sent (nor saved): it's said plainly.
+    let sizing = history::Sizing::measure(&t, conversation_id).await?;
+    let opened = open(&t, conversation_id, asked)?;
+    if let Some(turn) = remembered(&t, &opened).await? {
+        return Ok(turn);
     }
-    // Conversation bookkeeping (create on first message, OpenWhispr-style).
-    let conv = turn_conversation(conversation_id, &text);
-    // (A Skill run in a chat that's about something else leaves it so.)
-    if meetings && conv.scope.is_empty() && (skill.is_none() || conv.messages.is_empty()) {
-        crate::chat::chats::set_scope(conv.id, "meetings");
-    }
-    // The model answers this one: Yap's own question about apps has lapsed.
-    crate::apps::moved_on(Some(conv.id));
-    // The question, with the screenshots it carries (Snip to Chat, the
-    // turn's `snip::turn`): kept with it in chats.json as ids.
-    let user_index = crate::chat::chats::append_question(conv.id, &text, by_voice, &crate::snip::turn::images())?;
-    // A passage selected in the document panel ("Change this…", documents.rs):
-    // kept with the question, its quote above it.
-    let selection = crate::chat::documents::selection();
-    if let Some(quote) = selection.as_ref().and_then(crate::chat::documents::Selection::quote) {
-        crate::chat::chats::set_quote(conv.id, user_index, quote);
-    } else if let Some(quote) = about_selection.as_ref().and_then(crate::chat::assistant::selected::quote) {
-        // …or text selected in another app: its start and the app.
-        crate::chat::chats::set_quote(conv.id, user_index, quote);
-    }
-    // This turn answers the conversation now: one still answering there
-    // ends, with nothing saved.
-    stop.answers(conv.id);
-    asked(conv.id, user_index);
-
-    // **Two parts, for the model's cache** (2026-10-22): the system prompt
-    // holds what stays the same from turn to turn — the persona, the
-    // instructions, About you without its clock — and everything that
-    // changes with the question (the time, the notes the eager RAG found,
-    // the meetings, earlier web answers, how to answer out loud) goes in
-    // the question's own message (`chats::with_context`). A hybrid local
-    // model (Qwen3.5) re-uses its cache only up to a checkpoint, so a
-    // system prompt that changed every turn made every Chat request read
-    // the whole conversation again (docs/model-evals.md); cloud providers'
-    // prefix caches like a stable start too. That's for a model that calls
-    // tools (Qwen3.5-4B, the cloud models); one that can't (Qwen2.5-1.5B,
-    // dense: it re-reads only from the first change anyway) keeps it all in
-    // the system prompt — with the notes next to the question it gave half
-    // answers (4 of 10 turns, `notes-follow-ups`, 2026-10-22). OpenWhispr
-    // runs BOTH eager RAG and the notes tools: the model gets relevant notes
-    // up front AND can search for more.
-    // "Remember that…" / "Forget that…" to a model without tools: Yap's
-    // own memory pass makes the change (memory/learn.rs), and says so. A
-    // model with tools does it with `remember` / `forget`.
-    if !tools_supported {
-        if let Some(done) = crate::memory::learn::spoken(&text).await {
-            let (reply, chips) = done?;
-            let index = crate::chat::chats::append(conv.id, "assistant", &reply, &chips, Some(answered_by.clone()), false)?;
-            return Ok(ChatTurn {
-                conversation_id: conv.id,
-                user_index,
-                index,
-                reply,
-                tools_used: chips,
-                model: Some(answered_by),
-                sources: Vec::new(),
-                stopped: false,
-                tokens: None,
-                documents: Vec::new(),
-                pictures: Vec::new(),
-                pages: Vec::new(),
-                offers: Vec::new(),
-            });
-        }
-    }
-    // The documents of this chat (documents.rs): which there are, and what
-    // the person changed since the model last saw them, for a model that
-    // can change them; the ones this turn makes or changes, for its pills.
-    let chat_docs = crate::chat::documents::of_conversation(&conv.messages);
-    let doc_turn = crate::chat::documents::Turn::new(&chat_docs);
-    // **A strong model writing a document** (2026-10-31, as the Claude app
-    // writes one): it may research deeper — how far is sized to the
-    // model's request (`web::Reach::deep`), said in the context with the
-    // web on; how hard it thinks is its effort, as on every question
-    // (`ai/effort.rs`). Claude Opus 5.5, held to 3 searches, wrote a
-    // level-by-level guide of "Level 1", "Endgame" and "Reference only"
-    // rows. **A new one is
-    // outlined first** (`web::Turn::outline_first`): nothing looked up
-    // before `create_document`, so the panel opens at once.
-    let writes_doc = strong && !meetings && crate::chat::documents::writes_document(&text, &chat_docs, selection.is_some());
-    let outline_first = writes_doc && web_on && crate::chat::documents::makes_new_document(&text, &chat_docs, selection.is_some());
-    // Memory (memory.rs): the "You" part in the system prompt with About
-    // you (stable from turn to turn), what this question is about with it.
-    let memory_you = crate::memory::you_block();
-    // By its words, and by meaning when that's on (search/library.rs).
-    let memory_here = crate::search::library::memory_block(&text).await;
-    // "Search and reference past chats": a tool for a model with tools; for
-    // one without, the chats a question points back to ("what did we say
-    // about Lisbon?"), a couple of lines each.
-    let past_chats = if cfg.memory_search_chats && !tools_supported && crate::chat::chats::refers_to_past(&text) {
-        crate::search::library::past_chats_block(&text, conv.id).await
-    } else {
-        None
-    };
-    // Which earlier answers came from a search: a tool-calling model with
-    // the web gets each one's search replayed as the call it was
-    // (`chats::history_messages`); any other model, a line in the
-    // question's context (`chats::web_history_note`). Never a note in an
-    // answer's text: a model copies it into answers that searched nothing.
-    // (Not for a Claude searching in Chat's request: a replayed call to Yap's
-    // `web_search` would share its name with Anthropic's.)
-    let (replay, history_note) = web_history_mode(tools_supported && web_on && !claude_in_chat);
-    let about = crate::ai::about_you::prompt_block(&profile, now);
-    let calendar_zone = crate::chat::tools::calendar::Zone::of(profile.region.time_zone.as_deref());
-    let mut system = persona.trim().to_string();
-    system.push_str(&instructions(&cfg, tools_supported, doc_tools, web_lines, web_on, pictures, act, calendar_on, &profile));
-    let screen_line = crate::chat::see_screen::instructions(screen);
-    if !screen_line.is_empty() {
-        system.push(' ');
-        system.push_str(screen_line);
-    }
-    // Where the line on earlier web answers goes for a model without tools
-    // (it depends on the history sent, chosen below).
-    let note_at = system.len();
-    let mut context: Vec<String> = Vec::new();
-    if in_message {
-        context.push(crate::ai::about_you::clock_line(&profile, now));
-    }
-    // The pages open beside the chat (chat/pages.rs): "this page" is the one
-    // in front, and read_open_page reads it.
-    let mut tabs_open = false;
-    if pictures != crate::chat::pictures::Gate::Off {
-        let tabs = crate::chat::pages::backend::tabs().await;
-        if !tabs.is_empty() {
-            tabs_open = true;
-            context.push(crate::chat::pages::tabs_line(&tabs));
-        }
-    }
-    // A model on this PC asked something that needs the web: its first step
-    // must be a search (left to decide, Qwen3.5-4B answered "the best RPG
-    // games coming out in 2026" from memory, a tester's chat, 2026-10-21).
-    // Cloud models decide for themselves. (Never before a new document's
-    // outline: that comes first.)
-    let first = if !outline_first
-        && about_selection.is_none()
-        && tools_supported
-        && web_on
-        && crate::ai::ai_model::runs_here(&provider, &base_url)
-        // (A question about the page open beside the chat reads that page.)
-        && !(tabs_open && crate::chat::pages::about_open_page(&text))
-        // (Nor, for a model that may act on pages, one with a page open or a link
-        // given: what it asks is likely that page's; it can still search.)
-        && !(act && (tabs_open || !crate::web::links_in(&text).is_empty()))
-        && crate::web::needs_web(&text)
-    {
-        first_search(&text)
-    } else {
-        crate::chat::tools::FirstStep::Model
-    };
-    // Asked across the meetings (the Meetings view's Ask bar, a conversation
-    // started there): the passages that match, found on this PC — by
-    // meaning and keywords, within the dates the question names — numbered
-    // for the model to cite, each a source that opens its meeting at the
-    // line (search/ask.rs).
-    let mut passages: Vec<crate::chat::chats::Source> = Vec::new();
-    let mut search_chip = None;
-    let mut asked_across = None;
-    if meetings {
-        // The page's line: "Searching your meetings" (or "Running /todos").
-        if let Some(w) = watcher {
-            crate::chat::activity::tell(w, crate::chat::activity::searching_meetings(skill.as_ref().map(|s| s.skill.command.as_str())));
-        }
-        // A Skill reads its own passages (the open tasks, a week of
-        // meetings…) and adds its instructions (chat/skills.rs).
-        let found = match &skill {
-            Some(s) => Box::pin(crate::chat::skills::find(s)).await,
-            None => Box::pin(crate::search::ask::find(&text, crate::search::ask::ASK_PASSAGES)).await,
-        };
-        passages = crate::search::ask::sources(&found);
-        let chip = match &skill {
-            Some(s) => crate::chat::skills::chip(s, &found),
-            None => crate::search::ask::chip(&found),
-        };
-        if let Some(w) = watcher {
-            w.send(crate::chat::stream::Event::Chips { chips: vec![chip.clone()], sources: passages.clone(), web: false });
-        }
-        search_chip = Some(chip);
-        system.push_str("\n\n");
-        system.push_str(&crate::search::ask::instructions(in_message));
-        if let Some(s) = &skill {
-            system.push_str("\n\n");
-            system.push_str(&crate::chat::skills::system_block(s));
-        }
-        let block = crate::search::ask::context(&found);
-        // A document written from them names its passages' meetings in
-        // place of "[2]" (documents.rs `name_citations`).
-        doc_turn.cite_passages(crate::search::ask::labels(&found));
-        asked_across = Some(found);
-        if in_message {
-            context.push(block);
-        } else {
-            system.push_str("\n\n");
-            system.push_str(&block);
-        }
-        // A Skill that makes something to keep (/tickets, /prd): a document,
-        // for a model that can write one — its line pointing at the panel,
-        // or at Chat for the Voice Assistant asked from another app.
-        let in_view = scope != Some("assistant") || crate::chat::assistant::asked_in_chat();
-        if let Some(note) = skill.as_ref().filter(|_| tools_supported).and_then(|s| crate::chat::skills::document_note(s, in_view)) {
-            context.push(note);
-        }
-    }
-    let rag = if meetings { String::new() } else { rag_context(&text, in_message) };
-    if !rag.is_empty() {
-        if in_message {
-            context.push(format!("{RAG_LEAD}\n\n{rag}"));
-        } else {
-            system.push_str(&format!("\n\n{RAG_LEAD}\n\n{rag}"));
-        }
-    }
-    // A model without tools asked about the calendar: Yap looks it up for it
-    // (not beside the fixed web pipeline, whose prompt is its own).
-    let mut small_calendar: Vec<crate::chat::tools::calendar::Cited> = Vec::new();
-    let (calendar_block, calendar_chip) = (calendar_on && !tools_supported && !(web_on && crate::web::needs_web(&text)))
-        .then(|| crate::chat::tools::calendar::block(&text, calendar_zone, now.timestamp(), &mut small_calendar))
-        .flatten()
-        .unzip();
-    // Asked about the calendar with none connected: say so, not guess.
-    let calendar_missing = (!calendar_on && !meetings && crate::chat::tools::calendar::asks_about_calendar(&text))
-        .then(|| crate::chat::tools::calendar::NOT_CONNECTED_NOTE.to_string());
-    // This chat's documents, for a model that changes them (documents.rs).
-    if tools_supported {
-        if let Some(block) = crate::chat::documents::context(&chat_docs, doc_tools) {
-            context.push(block);
-        }
-    }
-    for block in memory_here.into_iter().chain(past_chats).chain(calendar_block).chain(calendar_missing) {
-        if in_message {
-            context.push(block);
-        } else {
-            system.push_str("\n\n");
-            system.push_str(&block);
-        }
-    }
-    // How the person wants answers, again last in the context, where a
-    // small tool model heeds it (a model without tools has it at the end
-    // of its system prompt, in memory's "You" block).
-    if in_message {
-        if let Some(note) = crate::memory::answer_note() {
-            context.push(note);
-        }
-    }
-    // Where an older stretch's summary goes (`compact.rs`), when the history
-    // needs one: before the prompt's end, which small models heed most.
-    let summary_at = system.len();
-    // Last in the system prompt, where small models heed it: what the
-    // context block is and About you without its clock — or, the context
-    // staying in the system prompt, the whole block with it.
-    system.push_str(&ending(in_message, &profile, &about, &memory_you));
-    // What came with the question from the screen (the Voice Assistant's
-    // look at the window in front, `assistant/screen.rs`): what the picture
-    // or its text is, or why there's none.
-    if let Some(note) = crate::snip::turn::note() {
-        if in_message {
-            context.push(note);
-        } else {
-            system.push_str("\n\n");
-            system.push_str(&note);
-        }
-    }
-    // **Answered out loud**: the Voice Assistant's question, or one dictated
-    // into Chat with spoken replies on. A question only dictated into Chat
-    // is a Chat question, answered as a typed one (30 Oct 2026): its answer
-    // is read, not heard.
-    let spoken = by_voice && (scope == Some("assistant") || cfg.speak_replies);
-    // A tool model with the web starts with the answer; one read aloud
-    // whole answers short (a web answer is said short anyway,
-    // `assistant::spoken_answer`). Last in the context, just before the
-    // question, where small models heed it.
-    if spoken && tools_supported && web_on {
-        context.push("This question was asked out loud: start your answer with the answer itself, in one or two short sentences, then any details.".to_string());
-    }
-    // The Voice Assistant: a document only when one is asked for, then a
-    // sentence saying where it is — "it's in Chat", or, asked with Chat in
-    // front, "it's open on the right" (`assistant::asked_in_chat`). The
-    // rule itself stays in the system prompt, the same for every turn (the
-    // model's cache). (A Skill said aloud answers as its instructions say,
-    // its document's line its own: `skills::document_note`.)
-    if scope == Some("assistant") && tools_supported && skill.is_none() {
-        context.push(crate::chat::documents::spoken_note(crate::chat::assistant::asked_in_chat()).to_string());
-    }
-    // The model is told what this question means for documents
-    // (documents.rs `steer`): an option picked → a new document; a change
-    // to the open one → that document reworked; something to keep → a
-    // document now. The system prompt's rule alone, the 4B answered a guide
-    // and a trip plan in the chat, a changed build in the chat with an
-    // offer, and "Let's do option A" by copying the options; Claude Haiku
-    // 5.5 explained a build in the chat and offered to write it. A cloud
-    // model's line is one short sentence (`brief`); in the context, never
-    // the system prompt, so its prompt cache stays whole.
-    // **A passage selected in the panel** ("Change this…", "Ask about
-    // this"): which document and blocks, and that a change goes there only
-    // — in place of `steer`'s line (the selection says where). A model
-    // without tools hears what was selected.
-    let selected = selection.as_ref().and_then(|s| crate::chat::documents::selection_note(s, tools_supported.then_some(doc_tools)));
-    // **Text selected in another app** (`assistant/selected.rs`): what was
-    // selected and where, as much as the model's context has room for.
-    let selected = selected.or_else(|| {
-        about_selection
-            .as_ref()
-            .map(|s| crate::chat::assistant::selected::context_note(s, crate::chat::assistant::selected::room(context_size)))
-    });
-    if let Some(note) = &selected {
-        if in_message {
-            context.push(note.clone());
-        } else {
-            system.push_str("\n\n");
-            system.push_str(note);
-        }
-    }
-    if tools_supported && !meetings && selected.is_none() {
-        let brief = !crate::ai::ai_model::runs_here(&provider, &base_url);
-        if let Some(note) = crate::chat::documents::steer(&text, &chat_docs, brief, doc_tools) {
-            context.push(note);
-        }
-    }
-    // A strong model writing a document (`writes_doc`, above): how far it
-    // may look, and to read the pages its facts come from (and a new one's
-    // outline first). A strong Claude's own web fetch puts up to
-    // `FETCH_TOKENS` of a page in the request (Yap can't trim it): its reads
-    // are sized by that. How hard it thinks is its effort, as on every
-    // question (`ai/effort.rs`).
-    let request = crate::chat::budget::budget(context_size, context_known, 0, kind, true, crate::chat::budget::request_cap(&provider, &model)).request;
-    let deep_reach = if claude_in_chat {
-        crate::web::Reach::deep_paged(Some(request), crate::web::native::FETCH_TOKENS as usize)
-    } else {
-        crate::web::Reach::deep(Some(request))
-    };
-    if writes_doc && web_on {
-        let reader = if claude_in_chat {
-            crate::chat::documents::Reader::WebFetch
-        } else if own_search {
-            crate::chat::documents::Reader::Search
-        } else {
-            crate::chat::documents::Reader::ReadPage
-        };
-        context.push(crate::chat::documents::research_note(deep_reach, reader, outline_first));
-    }
-    // Not a Skill's: its answer is Chat's run, whole in the chat, and the
-    // voice says as much of it as "How much to read aloud" says
-    // (`assistant::spoken_answer`, "The rest is in Chat.").
-    if spoken && !(tools_supported && web_on) && skill.is_none() {
-        if in_message {
-            context.push(crate::chat::assistant::SPOKEN_ANSWER_NOTE.to_string());
-        } else {
-            system.push_str("\n\n");
-            system.push_str(crate::chat::assistant::SPOKEN_ANSWER_NOTE);
-        }
-    }
-
-    // **The history, sized to the model** (budget.rs): the parts measured
-    // — the system prompt, the context block, the tools' schemas — and the
-    // history in what's left of the budget: every message when they fit;
-    // else the summary of the older ones (compact.rs) and those after it;
-    // else the latest that fit (and a summary written after the answer).
-    let fixed = counter.count(&system).await
-        + crate::chat::chats::context_block(&context).map(|b| crate::chat::budget::estimate(&b)).unwrap_or(0)
-        + schemas
-        + crate::chat::budget::MESSAGE_OVERHEAD;
-    // Sized within the model's cheaper rate too (`request_cap`): a long
-    // chat's summary takes over before a request would cost more.
-    let budget = crate::chat::budget::budget(context_size, context_known, fixed, kind, tools_supported, crate::chat::budget::request_cap(&provider, &model));
-    let room = budget.history.saturating_sub(question_tokens);
-    let summary = conv.usable_summary().filter(|_| mode == crate::chat::budget::Mode::Summary);
-    let plan = match mode {
-        crate::chat::budget::Mode::Messages => {
-            let (keep, step) = if scope == Some("assistant") { crate::chat::chats::ASSISTANT_HISTORY } else { crate::chat::chats::CHAT_HISTORY };
-            let start = crate::chat::chats::history_start(conv.messages.len(), keep, step);
-            crate::chat::budget::Plan { start, summary: false, left_out: start, tokens: 0 }
-        }
-        _ => {
-            let costs = crate::chat::budget::message_costs(&counter, &conv.messages, replay).await;
-            let summary_cost = match summary {
-                Some(s) => Some((s.upto, counter.count(&crate::chat::compact::block(&s.text)).await)),
-                None => None,
-            };
-            crate::chat::budget::plan(&costs, summary_cost, room, kind.step())
-        }
-    };
-    let earlier = &conv.messages[plan.start..];
-    tracing::info!(
-        messages = conv.messages.len(),
-        sent = earlier.len(),
-        summary = plan.summary,
-        left_out = plan.left_out,
-        history_tokens = plan.tokens,
-        room,
-        fixed,
-        context = context_size,
-        "Chat: the history, sized to the model"
-    );
-    // (Later in the prompt first: the earlier offset stays right.)
-    if let (true, Some(s)) = (plan.summary, summary) {
-        system.insert_str(summary_at, &format!("\n\n{}", crate::chat::compact::block(&s.text)));
-    }
-    if history_note && !replay {
-        if let Some(note) = crate::chat::chats::web_history_note(earlier) {
-            if in_message {
-                // After the clock, as before.
-                context.insert(1.min(context.len()), note);
-            } else {
-                system.insert_str(note_at, &format!("\n\n{note}"));
-            }
-        }
-    }
-    // Answers another model wrote (a switch in the picker): said so, so
-    // this one never claims them (`chats::other_models_note`) — those
-    // summarised or left out too.
-    if let Some(note) = crate::chat::chats::other_models_note(&conv.messages, &answered_by, plan.summary) {
-        if in_message {
-            context.insert(1.min(context.len()), note);
-        } else {
-            system.insert_str(note_at, &format!("\n\n{note}"));
-        }
-    }
-    let history: Vec<(String, String)> = earlier.iter().map(|m| (m.role.clone(), m.sent_text())).collect();
+    // The system prompt and the question's context (prompt.rs), then the
+    // history in what's left (history.rs).
+    let mut built = prompt::build(&t, &sizing, &opened).await;
+    let fitted = history::fit(&t, &sizing, &opened.conv, &mut built).await;
 
     // Streamed to whoever watches: what was shown is kept (a Stop keeps
     // it), and a model on this PC steps aside for a new dictation.
-    let watch = watcher.map(crate::chat::stream::Watch::new);
-    let beside = app
-        .filter(|_| crate::ai::ai_model::runs_here(&provider, &base_url))
+    let watch = t.watcher.map(crate::chat::stream::Watch::new);
+    let beside = t
+        .app
+        .filter(|_| crate::ai::ai_model::runs_here(&t.ep.provider, &t.ep.base_url))
         .map(|a| crate::chat::stream::NewDictations(a.clone()));
     let live = watch.as_ref().map(|w| crate::chat::stream::Live {
         sink: w,
         beside: beside.as_ref().map(|b| b as &dyn crate::chat::stream::Dictations),
     });
-
-    // "Search in your browser" under the answer: Yap's free web sources
-    // couldn't give it (no search service for the turn, web/sources.rs).
-    let browser: Option<crate::web::BrowserSearch>;
-    let (reply, tools_used, sources, looked, pages, stopped, shown_pictures, (shown_pages, offers)) = if tools_supported {
+    let answer = if t.gates.tools {
+        let (t, conv, built, fitted, sizing, watch) = (&t, &opened.conv, &built, &fitted, &sizing, watch.as_ref());
+        let (cfg, g, ep) = (&t.cfg, t.gates, &t.ep);
         let notify = |id: u64| {
             use tauri::Emitter;
-            if let Some(app) = app {
+            if let Some(app) = t.app {
                 note_changed(app, id, "chat");
                 let _ = app.emit("yap-notes-changed", ());
             }
         };
+        let calendar_log = crate::chat::tools::calendar::Log::default();
+        let earlier = &conv.messages[fitted.start..];
+        let history = &fitted.history;
         // The turn's web side: the person's links (this message and their
         // earlier ones), the sources found, the safety rule's flag.
-        let mut web = web_on.then(|| {
+        let mut web = g.web_on.then(|| {
             let earlier: Vec<&str> = history.iter().filter(|(r, _)| r == "user").map(|(_, t)| t.as_str()).collect();
-            let mut settings = crate::web::Settings::for_chat(&cfg, &provider, &model, &base_url, &api_key);
-            if let (true, Some(n)) = (claude_in_chat, settings.native.as_mut()) {
+            let mut settings = crate::web::Settings::for_chat(cfg, &ep.provider, &ep.model, &ep.base_url, &ep.api_key);
+            if let (true, Some(n)) = (g.claude_in_chat, settings.native.as_mut()) {
                 n.in_chat = true;
             }
-            let mut turn = crate::web::Turn::new(settings, crate::web::Endpoints::current(), &text, &earlier)
+            let mut turn = crate::web::Turn::new(settings, crate::web::Endpoints::current(), &t.text, &earlier)
                 .with_earlier_sources(conv.messages.iter().flat_map(|m| m.sources.iter().map(|s| s.url.as_str())));
             // A strong model looks further once it writes a document: now,
             // for a question that asks for one, else at its first document
             // call (`agent.rs`).
-            if strong {
-                turn = turn.may_go_deep(deep_reach);
-                if writes_doc {
+            if g.strong {
+                turn = turn.may_go_deep(built.deep_reach);
+                if built.writes_doc {
                     turn.go_deep();
                 }
                 // A new document: the outline before anything's looked up.
-                if outline_first {
+                if built.outline_first {
                     turn = turn.outline_first();
                 }
             }
             turn
         });
-        let mut messages: Vec<serde_json::Value> = if replay {
+        let mut messages: Vec<serde_json::Value> = if built.replay {
             crate::chat::chats::history_messages(earlier)
         } else {
             history
@@ -849,52 +440,52 @@ async fn answer_turn(
         };
         // Earlier screenshots: the newest few sent again, the rest a line
         // (snip/turn.rs).
-        crate::snip::turn::with_history_images(&mut messages, earlier, &provider, &model, &base_url).await;
+        crate::snip::turn::with_history_images(&mut messages, earlier, &ep.provider, &ep.model, &ep.base_url).await;
         let extra = crate::chat::tools::Extra {
             memory: true,
             search_chats: cfg.memory_search_chats,
             conversation: Some(conv.id),
-            calendar: calendar_on.then_some(crate::chat::tools::CalendarTurn { log: &calendar_log, zone: calendar_zone, now: now.timestamp() }),
+            calendar: g.calendar.then_some(crate::chat::tools::CalendarTurn { log: &calendar_log, zone: built.calendar_zone, now: t.now.timestamp() }),
             // Each tool result within what the request has left.
-            room: (mode != crate::chat::budget::Mode::Messages).then_some(budget.request),
-            docs: Some(&doc_turn),
-            doc_tools,
-            strong,
-            pictures,
-            screen,
-            act,
-            own_search,
+            room: (sizing.mode != crate::chat::budget::Mode::Messages).then_some(fitted.budget.request),
+            docs: Some(&built.doc_turn),
+            doc_tools: g.doc_tools,
+            strong: g.strong,
+            pictures: g.pictures,
+            screen: g.screen,
+            act: g.act,
+            own_search: g.own_search,
             // Words selected on a page beside the chat: the page's.
-            web_question: about_selection.as_ref().is_some_and(|s| s.web),
+            web_question: t.about_selection.as_ref().is_some_and(|s| s.web),
         };
         let looped = crate::chat::tools::run_tool_loop_with(
-            &system,
+            &built.prompt.system,
             &messages,
-            &text,
-            &context,
-            &base_url,
-            &api_key,
-            &model,
-            &provider,
-            disable_thinking,
+            &t.text,
+            &built.prompt.context,
+            &ep.base_url,
+            &ep.api_key,
+            &ep.model,
+            &ep.provider,
+            ep.disable_thinking,
             cfg.open_apps,
             &notify,
             web.as_mut(),
-            first,
+            built.first.clone(),
             extra,
             live,
         );
         // Stopped: what was shown so far is the answer (a step's text that
         // came before a tool call was never shown). Superseded: no answer.
-        let (reply, tools_used, stopped) = match crate::chat::stream::unless_stopped(looped, Some(stop)).await {
+        let (reply, tools_used, stopped) = match crate::chat::stream::unless_stopped(looped, Some(t.stop)).await {
             Ok(done) => {
                 // "Too long for the model" said plainly, never the provider's JSON.
-                let (reply, tools_used) = done.map_err(plain)?;
+                let (reply, tools_used) = done.map_err(|e| sizing.plain(e, &ep.provider))?;
                 (reply, tools_used, false)
             }
             Err(crate::chat::stream::Halt::Superseded) => return Err(superseded()),
             Err(crate::chat::stream::Halt::Stopped) => {
-                let seen = watch.as_ref().map(|w| w.seen()).unwrap_or_default();
+                let seen = watch.map(|w| w.seen()).unwrap_or_default();
                 tracing::info!(shown = seen.text.len(), "Chat: the answer was stopped");
                 (seen.text, seen.chips, true)
             }
@@ -917,39 +508,46 @@ async fn answer_turn(
         }
         sources.extend(crate::chat::tools::calendar::sources_for(&reply, &calendar_log.all()));
         sources.sort_by_key(|s| s.n);
-        browser = web.as_ref().and_then(|w| w.browser_search(&cfg.web_search_browser));
+        // "Search in your browser" under the answer: Yap's free web sources
+        // couldn't give it (no search service for the turn, web/sources.rs).
+        let browser = web.as_ref().and_then(|w| w.browser_search(&cfg.web_search_browser));
         // The pages it brought up and the buttons it offered (chat/pages.rs).
-        let beside = web.as_ref().map(|w| (w.pages.shown.clone(), w.pages.offers.clone())).unwrap_or_default();
+        let (shown_pages, offers) = web.as_ref().map(|w| (w.pages.shown.clone(), w.pages.offers.clone())).unwrap_or_default();
         let pages = web.map(|w| w.texts).unwrap_or_default();
-        (reply, tools_used, sources, looked, pages, stopped, shown, beside)
+        Answer { reply, tools_used, sources, looked, pages, stopped, pictures: shown, shown_pages, offers, browser }
     } else {
+        // Small/local models: plain chat + eager RAG, or Yap's fixed web
+        // pipeline when the question needs the web (small.rs).
+        let (t, built, fitted, sizing, watch) = (&t, &built, &fitted, &sizing, watch.as_ref());
+        let (cfg, ep) = (&t.cfg, &t.ep);
         // Small/local models: plain chat + eager RAG (their fallback), or
         // Yap's fixed web pipeline when the question needs the web.
-        let endpoint = (base_url.as_str(), api_key.as_str(), model.as_str(), provider.as_str(), disable_thinking);
+        let endpoint = (ep.base_url.as_str(), ep.api_key.as_str(), ep.model.as_str(), ep.provider.as_str(), ep.disable_thinking);
         // The web pipeline's own prompt ends as this one does: About you,
         // then memory's "You".
+        let (about, memory_you) = (&built.about, &built.memory_you);
         let about_and_memory = if memory_you.is_empty() { about.clone() } else { format!("{about}\n\n{memory_you}") };
         let SmallAnswer { reply, chips, sources, looked, pages, stopped, handoff } = small_model_answer(
-            &cfg,
-            &persona,
-            &system,
+            cfg,
+            &ep.persona,
+            &built.prompt.system,
             &about_and_memory,
-            &history,
-            &text,
+            &fitted.history,
+            &t.text,
             endpoint,
-            web_on,
-            spoken,
+            t.gates.web_on,
+            built.spoken,
             live,
-            Some(stop),
-            watch.as_ref(),
+            Some(t.stop),
+            watch,
         )
         .await
-        .map_err(plain)?;
-        browser = handoff.filter(crate::web::Handoff::offers).map(|h| crate::web::BrowserSearch::new(&cfg.web_search_browser, &h.query));
+        .map_err(|e| sizing.plain(e, &ep.provider))?;
+        let browser = handoff.filter(crate::web::Handoff::offers).map(|h| crate::web::BrowserSearch::new(&cfg.web_search_browser, &h.query));
         // "Opening Baldur's Gate 3." from a model that can't open anything:
         // said as it is instead (apps.rs).
-        let corrected = if crate::apps::claims_unasked(&reply, &text) {
-            let (question, said, open_apps) = (text.clone(), reply.clone(), cfg.open_apps);
+        let corrected = if crate::apps::claims_unasked(&reply, &t.text) {
+            let (question, said, open_apps) = (t.text.clone(), reply.clone(), cfg.open_apps);
             tauri::async_runtime::spawn_blocking(move || {
                 crate::apps::correct_claim(&said, &question, &crate::apps::apps(false), open_apps)
             })
@@ -962,311 +560,270 @@ async fn answer_turn(
         // The calendar Yap looked up for it: the meetings it names, cited.
         let mut sources = sources;
         let reply = corrected.unwrap_or(reply);
-        let reply = if small_calendar.is_empty() {
+        let reply = if built.small_calendar.is_empty() {
             reply
         } else {
-            let reply = crate::chat::tools::calendar::cite_mentions(&reply, &small_calendar);
-            sources.extend(crate::chat::tools::calendar::sources_for(&reply, &small_calendar));
+            let reply = crate::chat::tools::calendar::cite_mentions(&reply, &built.small_calendar);
+            sources.extend(crate::chat::tools::calendar::sources_for(&reply, &built.small_calendar));
             sources.sort_by_key(|s| s.n);
             reply
         };
         let mut chips = chips;
-        if let Some(chip) = calendar_chip {
+        if let Some(chip) = built.calendar_chip.clone() {
             chips.insert(0, chip);
         }
-        (reply, chips, sources, looked, pages, stopped, Vec::new(), Default::default())
-    };
-    // Stopped before any of the answer showed: nothing to save.
-    if stopped && reply.trim().is_empty() {
-        return Err(crate::chat::stream::STOPPED.to_string());
-    }
-    // Every model's answer, checked before it's shown: no sources list or
-    // "Yap searched…" note of its own, no search claimed that didn't
-    // happen, no "[1]" with nothing (or another question's pages) behind it
-    // — asked across the meetings, a number that's none of this turn's
-    // passages.
-    // A Skill's answer as it's shown (/open-questions: Yap's "Q4: " off).
-    let reply = match &skill {
-        Some(s) => crate::chat::skills::tidy_answer(&s.skill, &reply),
-        None => reply,
-    };
-    let (mut reply, fixed) = if meetings {
-        let (r, mut f) = crate::chat::chats::checked_answer(&reply, &text, looked, &[], &passages);
-        let only_these: Vec<usize> = passages.iter().map(|s| s.n).collect();
-        let stripped = crate::chat::chats::strip_unsourced_citations(&r, &only_these);
-        if stripped != r && !f.contains(&"stripped_citations") {
-            f.push("stripped_citations");
+        Answer {
+            reply,
+            tools_used: chips,
+            sources,
+            looked,
+            pages,
+            stopped,
+            pictures: Vec::new(),
+            shown_pages: Vec::new(),
+            offers: Vec::new(),
+            browser,
         }
-        (stripped, f)
-    } else {
-        crate::chat::chats::checked_answer(&reply, &text, looked, &conv.messages, &sources)
     };
-    for f in fixed {
-        tracing::info!(fix = f, "Chat: Yap fixed the model's answer");
-        crate::ai::eval::post_fix(f);
-    }
-    // Asked across the meetings: the passages it cites are its sources (none
-    // cited: the first few, to check it against), and an answer that cites
-    // none of them says so.
-    let (sources, tools_used) = if meetings {
-        // A statement plainly from one passage that the model left uncited
-        // ("Passage 2", or only the meeting's name): Yap cites it.
-        if let Some(found) = &asked_across {
-            let (cited, added) = crate::search::ask::cite_missing(&reply, &found.passages);
-            if added > 0 {
-                tracing::info!(added, "Chat: Yap put in citations the answer left out");
-                crate::ai::eval::post_fix("cited_by_yap");
-                reply = cited;
+    // Every model's answer, checked before it's shown, then saved.
+    let answer = {
+        let (t, conv, built) = (&t, &opened.conv, &built);
+        let Answer { reply, tools_used, sources, looked, pages, stopped, pictures, shown_pages, offers, browser } = answer;
+        // Stopped before any of the answer showed: nothing to save.
+        if stopped && reply.trim().is_empty() {
+            return Err(crate::chat::stream::STOPPED.to_string());
+        }
+        let text = &t.text;
+        let passages = &built.across.passages;
+        // A Skill's answer as it's shown (/open-questions: Yap's "Q4: " off).
+        let reply = match &t.skill {
+            Some(s) => crate::chat::skills::tidy_answer(&s.skill, &reply),
+            None => reply,
+        };
+        let (mut reply, fixed) = if t.meetings {
+            let (r, mut f) = crate::chat::chats::checked_answer(&reply, text, looked, &[], passages);
+            let only_these: Vec<usize> = passages.iter().map(|s| s.n).collect();
+            let stripped = crate::chat::chats::strip_unsourced_citations(&r, &only_these);
+            if stripped != r && !f.contains(&"stripped_citations") {
+                f.push("stripped_citations");
+            }
+            (stripped, f)
+        } else {
+            crate::chat::chats::checked_answer(&reply, text, looked, &conv.messages, &sources)
+        };
+        for f in fixed {
+            tracing::info!(fix = f, "Chat: Yap fixed the model's answer");
+            crate::ai::eval::post_fix(f);
+        }
+        // Asked across the meetings: the passages it cites are its sources (none
+        // cited: the first few, to check it against), and an answer that cites
+        // none of them says so.
+        let (sources, tools_used) = if t.meetings {
+            // A statement plainly from one passage that the model left uncited
+            // ("Passage 2", or only the meeting's name): Yap cites it.
+            if let Some(found) = &built.across.found {
+                let (cited, added) = crate::search::ask::cite_missing(&reply, &found.passages);
+                if added > 0 {
+                    tracing::info!(added, "Chat: Yap put in citations the answer left out");
+                    crate::ai::eval::post_fix("cited_by_yap");
+                    reply = cited;
+                }
+            }
+            // A document written this turn (a Skill's /tickets, /prd): the
+            // answer is a line saying where it is, and the passages the
+            // document cites are its sources.
+            let in_docs = built.doc_turn.passages_cited();
+            let wrote_doc = !built.doc_turn.touched().is_empty();
+            if !wrote_doc && crate::search::ask::needs_uncited_note(&reply, passages.len()) {
+                tracing::info!("Chat: the answer cited none of the passages; Yap says so under it");
+                crate::ai::eval::post_fix("uncited_answer");
+                reply = format!("{}\n\n{}", reply.trim_end(), crate::search::ask::UNCITED_NOTE);
+            }
+            let mut chips: Vec<String> = built.across.chip.clone().into_iter().collect();
+            chips.extend(tools_used);
+            let shown = if in_docs.is_empty() {
+                crate::search::ask::shown(&reply, passages)
+            } else {
+                let cited = crate::search::ask::cited_numbers(&reply);
+                passages.iter().filter(|s| cited.contains(&s.n) || in_docs.contains(&s.n)).cloned().collect()
+            };
+            (shown, chips)
+        } else {
+            (sources, tools_used)
+        };
+        let region = &t.profile.region;
+        // A price question that searched: no offer to look for prices where the
+        // person is — Yap looked (and, finding only another country's, looked
+        // again).
+        if looked && crate::web::asks_about_prices(text) {
+            if let Some(stripped) = crate::ai::about_you::LocalPrices::for_region(region).and_then(|local| crate::ai::about_you::strip_price_offer(&reply, &local)) {
+                tracing::info!("Chat: Yap took out the answer's offer to look for local prices");
+                crate::ai::eval::post_fix("price_offer");
+                reply = stripped;
             }
         }
-        // A document written this turn (a Skill's /tickets, /prd): the
-        // answer is a line saying where it is, and the passages the
-        // document cites are its sources.
-        let in_docs = doc_turn.passages_cited();
-        let wrote_doc = !doc_turn.touched().is_empty();
-        if !wrote_doc && crate::search::ask::needs_uncited_note(&reply, passages.len()) {
-            tracing::info!("Chat: the answer cited none of the passages; Yap says so under it");
-            crate::ai::eval::post_fix("uncited_answer");
-            reply = format!("{}\n\n{}", reply.trim_end(), crate::search::ask::UNCITED_NOTE);
+        // A price the web gave only in another money ("$8"), written in theirs
+        // ("£8"): its page's sign back, and a note saying so.
+        let mut restored_note = None;
+        if let Some(local) = crate::ai::about_you::LocalPrices::for_region(region).filter(|_| !pages.is_empty()) {
+            if let Some((fixed, restored)) = crate::ai::about_you::restore_price_signs(&reply, &pages, &local) {
+                tracing::info!(prices = restored.len(), "Chat: Yap gave prices back the currency their pages gave them");
+                crate::ai::eval::post_fix("price_sign");
+                reply = fixed;
+                restored_note = Some(crate::ai::about_you::restored_price_note(&restored, &local));
+            }
         }
-        let mut chips: Vec<String> = search_chip.into_iter().collect();
-        chips.extend(tools_used);
-        let shown = if in_docs.is_empty() {
-            crate::search::ask::shown(&reply, &passages)
-        } else {
-            let cited = crate::search::ask::cited_numbers(&reply);
-            passages.iter().filter(|s| cited.contains(&s.n) || in_docs.contains(&s.n)).cloned().collect()
+        // Prices in $ without saying whose, for someone who pays in £ (About
+        // you): Yap says so under the answer (one note at most).
+        if let Some(note) = crate::ai::about_you::foreign_price_note(&reply, region) {
+            tracing::info!("Chat: Yap noted the answer's prices are in dollars");
+            crate::ai::eval::post_fix("foreign_price_note");
+            reply = format!("{}\n\n{note}", reply.trim_end());
+        } else if let Some(note) = restored_note {
+            reply = format!("{}\n\n{note}", reply.trim_end());
+        }
+        // A source of the turn's own (the window's text, read on this PC):
+        // named after the answer's.
+        let sources = crate::snip::turn::with_source(sources);
+        Answer { reply, tools_used, sources, looked, pages, stopped, pictures, shown_pages, offers, browser }
+    };
+    {
+        let (t, opened, built, fitted, sizing, watch) = (&t, &opened, &built, &fitted, &sizing, watch.as_ref());
+        let conv_id = opened.conv.id;
+        let Answer { reply, tools_used, sources, stopped, pictures, shown_pages, offers, browser, .. } = answer;
+        // The last model call's tokens: the conversation's context use (a
+        // stopped answer's call never finished, so it has none to say).
+        let tokens = if stopped { None } else { crate::ai::usage::last_call().as_ref().and_then(crate::chat::chats::MessageTokens::of) };
+        let index = crate::chat::chats::append_message(conv_id, "assistant", &reply, &tools_used, Some(t.answered_by.clone()), false, &sources, stopped, tokens)?;
+        // The documents it made or changed: its pills, and this chat's from now on.
+        let documents = built.doc_turn.touched();
+        crate::chat::chats::set_documents(conv_id, index, &documents);
+        // The pictures it showed beside the chat: its pills, and the panel's tabs.
+        crate::chat::chats::set_pictures(conv_id, index, &pictures);
+        // "Search in your browser", when the free sources couldn't answer.
+        crate::chat::chats::set_browser_search(conv_id, index, browser.as_ref());
+        // The pages it brought up (their tabs come back with the chat) and the
+        // buttons it offered.
+        crate::chat::chats::set_pages(conv_id, index, &shown_pages, &offers);
+        crate::chat::chats::set_confirms(conv_id, index, &watch.map(|w| w.seen().confirms).unwrap_or_default());
+        // Read for lasting facts once the chat goes quiet ("Learn from my chats").
+        crate::memory::learn::after_turn(conv_id);
+        // Filling the room? The older messages summarised in the background
+        // (compact.rs), so the next question never waits for it.
+        let ring = tokens.map(|n| (n.prompt + n.answer) as f64 / sizing.context_size.max(1) as f64);
+        let ep = crate::chat::compact::Endpoint {
+            base_url: t.ep.base_url.clone(),
+            api_key: t.ep.api_key.clone(),
+            model: t.ep.model.clone(),
+            provider: t.ep.provider.clone(),
+            disable_thinking: t.ep.disable_thinking,
+            by: Some(t.answered_by.clone()),
         };
-        (shown, chips)
-    } else {
-        (sources, tools_used)
+        let look = crate::chat::compact::Look { kind: sizing.kind, room: next_room(fitted.budget.history), context: sizing.context_size, ring, replay: built.replay };
+        crate::chat::compact::after_answer(t.app, conv_id, ep, look).await;
+        Ok(ChatTurn {
+            conversation_id: conv_id,
+            user_index: opened.user_index,
+            index,
+            reply,
+            tools_used,
+            model: Some(t.answered_by.clone()),
+            sources,
+            stopped,
+            tokens,
+            documents,
+            pictures,
+            pages: shown_pages,
+            offers,
+        })
+    }
+}
+
+/// **The question saved** in its conversation (`conversation_id`'s, or a
+/// new one on the first message, OpenWhispr-style), with the screenshots
+/// it carries and the quote it's about; from then on this turn is the one
+/// answering there, and `asked` hears where (before the model is called).
+fn open(t: &Asked<'_>, conversation_id: Option<u64>, asked: impl FnOnce(u64, usize)) -> Result<Opened, String> {
+    // Conversation bookkeeping (create on first message, OpenWhispr-style).
+    let conv = turn_conversation(conversation_id, &t.text);
+    // (A Skill run in a chat that's about something else leaves it so.)
+    if t.meetings && conv.scope.is_empty() && (t.skill.is_none() || conv.messages.is_empty()) {
+        crate::chat::chats::set_scope(conv.id, "meetings");
+    }
+    // The model answers this one: Yap's own question about apps has lapsed.
+    crate::apps::moved_on(Some(conv.id));
+    // The question, with the screenshots it carries (Snip to Chat, the
+    // turn's `snip::turn`): kept with it in chats.json as ids.
+    let user_index = crate::chat::chats::append_question(conv.id, &t.text, t.by_voice, &crate::snip::turn::images())?;
+    // A passage selected in the document panel ("Change this…", documents.rs):
+    // kept with the question, its quote above it.
+    let selection = crate::chat::documents::selection();
+    if let Some(quote) = selection.as_ref().and_then(crate::chat::documents::Selection::quote) {
+        crate::chat::chats::set_quote(conv.id, user_index, quote);
+    } else if let Some(quote) = t.about_selection.as_ref().and_then(crate::chat::assistant::selected::quote) {
+        // …or text selected in another app: its start and the app.
+        crate::chat::chats::set_quote(conv.id, user_index, quote);
+    }
+    // This turn answers the conversation now: one still answering there
+    // ends, with nothing saved.
+    t.stop.answers(conv.id);
+    asked(conv.id, user_index);
+    Ok(Opened { conv, user_index, selection })
+}
+
+/// **"Remember that…" / "Forget that…" to a model without tools**: Yap's
+/// own memory pass makes the change (memory/learn.rs), and says so — the
+/// turn's answer, saved. A model with tools does it with `remember` /
+/// `forget`. `None`: not one of those.
+async fn remembered(t: &Asked<'_>, opened: &Opened) -> Result<Option<ChatTurn>, String> {
+    if t.gates.tools {
+        return Ok(None);
+    }
+    let Some(done) = crate::memory::learn::spoken(&t.text).await else {
+        return Ok(None);
     };
-    // A price question that searched: no offer to look for prices where the
-    // person is — Yap looked (and, finding only another country's, looked
-    // again).
-    if looked && crate::web::asks_about_prices(&text) {
-        if let Some(stripped) = crate::ai::about_you::LocalPrices::for_region(&profile.region)
-            .and_then(|local| crate::ai::about_you::strip_price_offer(&reply, &local))
-        {
-            tracing::info!("Chat: Yap took out the answer's offer to look for local prices");
-            crate::ai::eval::post_fix("price_offer");
-            reply = stripped;
-        }
-    }
-    // A price the web gave only in another money ("$8"), written in theirs
-    // ("£8"): its page's sign back, and a note saying so.
-    let mut restored_note = None;
-    if let Some(local) = crate::ai::about_you::LocalPrices::for_region(&profile.region).filter(|_| !pages.is_empty()) {
-        if let Some((fixed, restored)) = crate::ai::about_you::restore_price_signs(&reply, &pages, &local) {
-            tracing::info!(prices = restored.len(), "Chat: Yap gave prices back the currency their pages gave them");
-            crate::ai::eval::post_fix("price_sign");
-            reply = fixed;
-            restored_note = Some(crate::ai::about_you::restored_price_note(&restored, &local));
-        }
-    }
-    // Prices in $ without saying whose, for someone who pays in £ (About
-    // you): Yap says so under the answer (one note at most).
-    if let Some(note) = crate::ai::about_you::foreign_price_note(&reply, &profile.region) {
-        tracing::info!("Chat: Yap noted the answer's prices are in dollars");
-        crate::ai::eval::post_fix("foreign_price_note");
-        reply = format!("{}\n\n{note}", reply.trim_end());
-    } else if let Some(note) = restored_note {
-        reply = format!("{}\n\n{note}", reply.trim_end());
-    }
-    // A source of the turn's own (the window's text, read on this PC):
-    // named after the answer's.
-    let sources = crate::snip::turn::with_source(sources);
-    // The last model call's tokens: the conversation's context use (a
-    // stopped answer's call never finished, so it has none to say).
-    let tokens = if stopped { None } else { crate::ai::usage::last_call().as_ref().and_then(crate::chat::chats::MessageTokens::of) };
-    let index = crate::chat::chats::append_message(
-        conv.id,
-        "assistant",
-        &reply,
-        &tools_used,
-        Some(answered_by.clone()),
-        false,
-        &sources,
-        stopped,
-        tokens,
-    )?;
-    // The documents it made or changed: its pills, and this chat's from now on.
-    let documents = doc_turn.touched();
-    crate::chat::chats::set_documents(conv.id, index, &documents);
-    // The pictures it showed beside the chat: its pills, and the panel's tabs.
-    crate::chat::chats::set_pictures(conv.id, index, &shown_pictures);
-    // "Search in your browser", when the free sources couldn't answer.
-    crate::chat::chats::set_browser_search(conv.id, index, browser.as_ref());
-    // The pages it brought up (their tabs come back with the chat) and the
-    // buttons it offered.
-    crate::chat::chats::set_pages(conv.id, index, &shown_pages, &offers);
-    crate::chat::chats::set_confirms(conv.id, index, &watch.as_ref().map(|w| w.seen().confirms).unwrap_or_default());
-    // Read for lasting facts once the chat goes quiet ("Learn from my chats").
-    crate::memory::learn::after_turn(conv.id);
-    // Filling the room? The older messages summarised in the background
-    // (compact.rs), so the next question never waits for it.
-    let ring = tokens.map(|t| (t.prompt + t.answer) as f64 / context_size.max(1) as f64);
-    let ep = crate::chat::compact::Endpoint {
-        base_url: base_url.clone(),
-        api_key: api_key.clone(),
-        model: model.clone(),
-        provider: provider.clone(),
-        disable_thinking,
-        by: Some(answered_by.clone()),
-    };
-    let look = crate::chat::compact::Look { kind, room: next_room(budget.history), context: context_size, ring, replay };
-    crate::chat::compact::after_answer(app, conv.id, ep, look).await;
-    Ok(ChatTurn {
-        conversation_id: conv.id,
-        user_index,
+    let (reply, chips) = done?;
+    let index = crate::chat::chats::append(opened.conv.id, "assistant", &reply, &chips, Some(t.answered_by.clone()), false)?;
+    Ok(Some(ChatTurn {
+        conversation_id: opened.conv.id,
+        user_index: opened.user_index,
         index,
         reply,
-        tools_used,
-        model: Some(answered_by),
-        sources,
-        stopped,
-        tokens,
-        documents,
-        pictures: shown_pictures,
-        pages: shown_pages,
-        offers,
-    })
+        tools_used: chips,
+        model: Some(t.answered_by.clone()),
+        sources: Vec::new(),
+        stopped: false,
+        tokens: None,
+        documents: Vec::new(),
+        pictures: Vec::new(),
+        pages: Vec::new(),
+        offers: Vec::new(),
+    }))
 }
 
-/// The history's room for the next question: the budget less a typical
-/// question's (a tenth of it, 100 to 1,000 tokens). Pure.
-pub(crate) fn next_room(history: u64) -> u64 {
-    history.saturating_sub((history / 10).clamp(100, 1_000))
+/// A turn a newer question in its conversation replaced (`chat_turn`): no
+/// answer saved, the question kept; [`crate::chat::stream::SUPERSEDED`].
+fn superseded() -> String {
+    tracing::info!("Chat: a newer question in the conversation replaced this turn; no answer saved");
+    crate::chat::stream::SUPERSEDED.to_string()
 }
 
-/// What follows the persona in Chat's system prompt: the tools' instructions
-/// for a model that calls them (the web's, the apps', memory's, past
-/// chats', the calendar's as the turn offers them), else the plain notes
-/// for one that can't act. The same from turn to turn. A strong model gets
-/// the web's lines that let it keep writing after the web, and a Claude
-/// searching in Chat's own request its own tools' (`web_lines`,
-/// `tools::web_tool_instructions`).
-#[allow(clippy::too_many_arguments)]
-fn instructions(
-    cfg: &YapConfig,
-    tools_supported: bool,
-    doc_tools: crate::chat::documents::ToolSet,
-    web_lines: crate::chat::tools::WebLines,
-    web_on: bool,
-    pictures: crate::chat::pictures::Gate,
-    act: bool,
-    calendar_on: bool,
-    profile: &crate::ai::about_you::Profile,
-) -> String {
-    let mut s = String::new();
-    if tools_supported {
-        s.push_str("\n\nYou have access to tools. ");
-        // (The documents' line is the set's: documents.rs `ToolSet`.)
-        s.push_str(&crate::chat::tools::tool_instructions(doc_tools));
-        if cfg.open_apps {
-            s.push(' ');
-            s.push_str(&crate::chat::tools::APP_TOOL_INSTRUCTIONS.join(" "));
-        }
-        if web_on {
-            s.push(' ');
-            s.push_str(&crate::chat::tools::web_tool_instructions(web_lines));
-            s.push(' ');
-            s.push_str(&crate::web::time_note(profile.region.time_zone_label.as_deref()));
-            // Outside the US: prices from where they are, or one plain line
-            // saying there are none.
-            if let Some(local) = crate::ai::about_you::LocalPrices::for_region(&profile.region) {
-                s.push(' ');
-                s.push_str(&crate::web::price_note(&local));
-            }
-            // Pictures from the web (chat/pictures.rs): finding the right one,
-            // looking before showing when the model can.
-            let lines = crate::chat::pictures::instructions(pictures, web_lines == crate::chat::tools::WebLines::Claude);
-            if !lines.is_empty() {
-                s.push(' ');
-                s.push_str(&lines);
-            }
-            // Pages beside the chat (chat/pages.rs): opening a page or a
-            // search there, reading the one open, shots for a model that sees.
-            let pages = crate::chat::pages::instructions(pictures, act);
-            if !pages.is_empty() {
-                s.push(' ');
-                s.push_str(&pages);
-            }
-        }
-        s.push(' ');
-        s.push_str(&crate::chat::tools::MEMORY_TOOL_INSTRUCTIONS.join(" "));
-        if cfg.memory_search_chats {
-            s.push(' ');
-            s.push_str(&crate::chat::tools::CHATS_TOOL_INSTRUCTIONS.join(" "));
-        }
-        if calendar_on {
-            s.push(' ');
-            s.push_str(&crate::chat::tools::calendar::CALENDAR_TOOL_INSTRUCTIONS.join(" "));
-        }
-    } else {
-        // No tools: it can't do anything on the PC, so it mustn't say so.
-        s.push_str("\n\n");
-        s.push_str(crate::apps::NO_TOOLS_NOTE);
-        if cfg.open_apps {
-            s.push(' ');
-            s.push_str(crate::apps::NO_TOOLS_OPEN);
+/// The conversation a turn goes to: `conversation_id`'s, or a new one named
+/// after the first message (first 50 chars, OpenWhispr's rule) — its own
+/// words: a screenshot's text sent with it (`snip::ocr`) isn't the title.
+fn turn_conversation(conversation_id: Option<u64>, text: &str) -> crate::chat::chats::Conversation {
+    match conversation_id.and_then(crate::chat::chats::get) {
+        Some(c) => c,
+        None => {
+            let text = crate::snip::ocr::question_of(text);
+            let title: String = if text.chars().count() > 50 {
+                format!("{}...", text.chars().take(50).collect::<String>())
+            } else {
+                text.to_string()
+            };
+            crate::chat::chats::create(&title)
         }
     }
-    s
-}
-
-/// The end of Chat's system prompt, where small models heed it: what the
-/// context block is and About you without its clock (a model that calls
-/// tools) — or, its context staying in the system prompt, the whole About
-/// you block (`about`) — then memory's "You".
-fn ending(in_message: bool, profile: &crate::ai::about_you::Profile, about: &str, memory_you: &str) -> String {
-    let mut s = String::new();
-    if in_message {
-        s.push_str("\n\n");
-        s.push_str(crate::chat::chats::CONTEXT_NOTE);
-        let profile_block = crate::ai::about_you::profile_block(profile);
-        if !profile_block.is_empty() {
-            s.push_str("\n\n");
-            s.push_str(&profile_block);
-        }
-    } else {
-        s.push_str("\n\n");
-        s.push_str(about);
-    }
-    if !memory_you.is_empty() {
-        s.push_str("\n\n");
-        s.push_str(memory_you);
-    }
-    s
-}
-
-/// The part of a Chat request that's there whatever the question: the
-/// persona, the instructions, the prompt's end, and (a model that calls
-/// tools) the clock in the question's context. What a question must fit
-/// beside (`chat_turn`'s check before it's sent, Chat's limits and ring).
-#[allow(clippy::too_many_arguments)]
-pub(crate) fn stable_prompt(
-    cfg: &YapConfig,
-    persona: &str,
-    tools_supported: bool,
-    doc_tools: crate::chat::documents::ToolSet,
-    web_lines: crate::chat::tools::WebLines,
-    web_on: bool,
-    pictures: crate::chat::pictures::Gate,
-    act: bool,
-    calendar_on: bool,
-    profile: &crate::ai::about_you::Profile,
-    now: chrono::DateTime<chrono::Utc>,
-) -> String {
-    let about = crate::ai::about_you::prompt_block(profile, now);
-    let mut s = persona.trim().to_string();
-    s.push_str(&instructions(cfg, tools_supported, doc_tools, web_lines, web_on, pictures, act, calendar_on, profile));
-    s.push_str(&ending(tools_supported, profile, &about, &crate::memory::you_block()));
-    if tools_supported {
-        s.push_str("\n\n");
-        s.push_str(&crate::ai::about_you::clock_line(profile, now));
-    }
-    s
 }
 
 /// What Chat's next question may be, for the model it goes to now: the
@@ -1462,13 +1019,6 @@ async fn small_model_answer(
     Ok(SmallAnswer { reply, chips, sources, looked, pages, stopped, handoff })
 }
 
-/// A turn a newer question in its conversation replaced (`chat_turn`): no
-/// answer saved, the question kept; [`crate::chat::stream::SUPERSEDED`].
-fn superseded() -> String {
-    tracing::info!("Chat: a newer question in the conversation replaced this turn; no answer saved");
-    crate::chat::stream::SUPERSEDED.to_string()
-}
-
 /// A small model's answer ([`small_model_answer`]): the text, its chips and
 /// sources, whether a search ran, and the web text it was given.
 struct SmallAnswer {
@@ -1527,55 +1077,4 @@ async fn local_prices_again(
     }
     found.hits = hits;
     Some(if theirs { format!("The first sources give {p} prices (in {s}): answer with those, as the sources give them.") } else { none })
-}
-
-/// How earlier web answers reach the model: `(replay, note)` — their
-/// searches replayed as tool calls (a tool-calling model with the web on),
-/// else the system prompt's line. A model evaluation may pick another way
-/// (`YAP_EVAL_WEB_HISTORY` = replay | note | none) to compare them.
-fn web_history_mode(tool_model_with_web: bool) -> (bool, bool) {
-    if crate::ai::eval::active() {
-        match std::env::var("YAP_EVAL_WEB_HISTORY").as_deref() {
-            Ok("note") => return (false, true),
-            Ok("none") => return (false, false),
-            Ok("replay") => return (tool_model_with_web, true),
-            _ => {}
-        }
-    }
-    (tool_model_with_web, true)
-}
-
-/// The first step for a model on this PC when the question needs the web:
-/// it must search (`tools::FirstStep::MustSearch`: its own query, written
-/// with the conversation in mind — "Arsenal match tonight 21 October 2026"
-/// where the question as a query found nothing useful; Yap searches for it
-/// when the server won't make it). A model evaluation may compare
-/// (`YAP_EVAL_FIRST` = must | yap | model).
-fn first_search(question: &str) -> crate::chat::tools::FirstStep {
-    if crate::ai::eval::active() {
-        match std::env::var("YAP_EVAL_FIRST").as_deref() {
-            Ok("yap") => return crate::chat::tools::FirstStep::YapSearches(crate::web::search_query(question)),
-            Ok("model") => return crate::chat::tools::FirstStep::Model,
-            _ => {}
-        }
-    }
-    crate::chat::tools::FirstStep::MustSearch
-}
-
-/// The conversation a turn goes to: `conversation_id`'s, or a new one named
-/// after the first message (first 50 chars, OpenWhispr's rule) — its own
-/// words: a screenshot's text sent with it (`snip::ocr`) isn't the title.
-fn turn_conversation(conversation_id: Option<u64>, text: &str) -> crate::chat::chats::Conversation {
-    match conversation_id.and_then(crate::chat::chats::get) {
-        Some(c) => c,
-        None => {
-            let text = crate::snip::ocr::question_of(text);
-            let title: String = if text.chars().count() > 50 {
-                format!("{}...", text.chars().take(50).collect::<String>())
-            } else {
-                text.to_string()
-            };
-            crate::chat::chats::create(&title)
-        }
-    }
 }
