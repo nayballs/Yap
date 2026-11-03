@@ -1,7 +1,9 @@
 //! "Export memory": a .zip of Markdown files, one per section (You.md —
 //! Profile and Preferences —, People.md, Projects.md, Topics.md), written
 //! by hand (stored with Deflate, CRC-32 from flate2) so no zip crate is
-//! needed. Pure but for the file write.
+//! needed; `import.rs` reads it back. And "Copy for Claude" ([`plain`]):
+//! the same memory as plain text for another assistant's import. Pure but
+//! for the file write.
 
 use std::io::Write;
 
@@ -26,6 +28,8 @@ fn origin_words(i: &Item) -> String {
         "meeting" => format!("from a meeting{title}"),
         "voice" => "you asked Yap to remember it".to_string(),
         "tell" => "you told Yap".to_string(),
+        // A file import names where from ("Claude"); a pasted one doesn't.
+        "import" if !i.source.title.is_empty() && i.source.title != "Imported" => format!("imported from {}", i.source.title),
         "import" => "imported".to_string(),
         _ => "added by you".to_string(),
     }
@@ -80,6 +84,46 @@ pub fn files(items: &[Item], about: &[(&str, String)]) -> Vec<(String, String)> 
         ("Projects.md".to_string(), section_markdown("Projects", "", &[Section::Projects], items)),
         ("Topics.md".to_string(), section_markdown("Topics", "", &[Section::Topics], items)),
     ]
+}
+
+/// **"Copy for Claude"**: memory as plain text for another assistant's
+/// memory import (the Claude app's "Start import" box, ChatGPT's): a
+/// heading a section — About you, Preferences, Profile, People, Projects,
+/// Topics — and a line a fact under it, a person's, project's or topic's
+/// lines each naming it ("- Rochelle: Lives in York"; who or what it is
+/// first, "- Rochelle: Sister"). Empty sections left out; "" when there's
+/// nothing at all. `about`: About you's (label, value), the empty ones left
+/// out. Pure.
+pub fn plain(items: &[Item], about: &[(&str, String)]) -> String {
+    let mut parts: Vec<String> = Vec::new();
+    let mut part = |heading: &str, lines: Vec<String>| {
+        if !lines.is_empty() {
+            parts.push(format!("{heading}\n{}", lines.iter().map(|l| format!("- {l}\n")).collect::<String>()));
+        }
+    };
+    let flat = |s: &str| s.split_whitespace().collect::<Vec<_>>().join(" ");
+    part("About you", about.iter().filter(|(_, v)| !v.trim().is_empty()).map(|(k, v)| format!("{k}: {}", flat(v))).collect());
+    for section in [Section::Preferences, Section::Profile, Section::People, Section::Projects, Section::Topics] {
+        let mut list: Vec<&Item> = items.iter().filter(|i| i.section == section).collect();
+        list.sort_by_key(|a| a.title.to_lowercase());
+        let mut lines = Vec::new();
+        for i in list {
+            if section.is_you() {
+                lines.extend(i.details.iter().map(|d| flat(d)));
+                continue;
+            }
+            let name = flat(&i.title);
+            if !i.summary.trim().is_empty() {
+                lines.push(format!("{name}: {}", flat(&i.summary)));
+            }
+            lines.extend(i.details.iter().map(|d| format!("{name}: {}", flat(d))));
+            if i.summary.trim().is_empty() && i.details.is_empty() {
+                lines.push(name);
+            }
+        }
+        part(section.label(), lines);
+    }
+    parts.join("\n")
 }
 
 /// MS-DOS time and date of now (local), as zip headers want them.
@@ -156,6 +200,40 @@ pub fn zip(files: &[(String, String)]) -> std::io::Result<Vec<u8>> {
 mod tests {
     use super::super::ops::{Item, Origin, Section};
     use super::*;
+
+    #[test]
+    fn copy_for_claude_is_a_line_a_fact() {
+        let item = |id, section, title: &str, summary: &str, details: &[&str]| Item {
+            id,
+            section,
+            title: title.into(),
+            summary: summary.into(),
+            details: details.iter().map(|d| d.to_string()).collect(),
+            source: Origin::new("import", None, "Claude"),
+            created_ts: 1,
+            updated_ts: 1,
+            dictation: true,
+        };
+        let items = vec![
+            item(1, Section::Profile, "Profile", "", &["Works as a garden designer", "Lives in Harrogate"]),
+            item(2, Section::People, "Sam Reed", "Brother-in-law", &["Lives in Leeds", "Birthday 14 March"]),
+            item(3, Section::People, "Priya Shah", "", &["Runs the design team"]),
+            item(4, Section::Topics, "Chess", "", &[]),
+            item(5, Section::Preferences, "Preferences", "", &["Prefers short answers"]),
+        ];
+        let about = [("Name", "Declan".to_string()), ("Region", "United Kingdom".to_string()), ("Note", String::new())];
+        assert_eq!(
+            plain(&items, &about),
+            "About you\n- Name: Declan\n- Region: United Kingdom\n\n\
+             Preferences\n- Prefers short answers\n\n\
+             Profile\n- Works as a garden designer\n- Lives in Harrogate\n\n\
+             People\n- Priya Shah: Runs the design team\n- Sam Reed: Brother-in-law\n- Sam Reed: Lives in Leeds\n- Sam Reed: Birthday 14 March\n\n\
+             Topics\n- Chess\n"
+        );
+        assert_eq!(plain(&[], &[("Name", String::new())]), "");
+        // Imported from Claude: the export says so.
+        assert!(files(&items, &[])[1].1.contains("imported from Claude"));
+    }
 
     #[test]
     fn an_export_is_one_markdown_file_per_section() {

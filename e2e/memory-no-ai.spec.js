@@ -11,6 +11,9 @@ test('no AI model: memory says so, links to Language Models, and hand edits stil
   const card = dialog.getByRole('note').filter({ hasText: 'Yap needs an AI model for memory' });
   await expect(card).toBeVisible();
   await expect(dialog.getByRole('button', { name: 'Suggest changes' })).toBeDisabled();
+  // A file import is Yap's own reading: no model needed (memory-file.spec.js).
+  await expect(card).toContainText('importing a file, work without one');
+  await expect(dialog.getByRole('button', { name: 'Import a file…' })).toBeEnabled();
   await shot(main, '01-no-ai');
 
   // A hand edit doesn't need a model.

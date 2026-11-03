@@ -592,7 +592,10 @@ on an element that also has a `settings.css` class (`set-note`,
   rows to their rows in General), **People / Projects / Topics** (a card of
   objects each: a row per item opening to edit, "Add a person"), **Tell Yap
   what to change** (the box, Suggest changes, the diff), **Import, export and
-  clear**, the privacy line. With no AI model, a note at the top.
+  clear** (a pasted import, **Import a file…** — Claude's memory export or
+  Yap's own, picked or dropped, its review with what didn't fit —, Export,
+  **Copy for Claude**, Clear all), the privacy line. With no AI model, a note
+  at the top.
 - **Speech-to-Text** (`models`, `ModelManager.svelte`): **Your model** first —
   a card with its name, size, languages and "In use", or "Not downloaded" +
   Download (never "Active" for a model that isn't on this PC), and Change

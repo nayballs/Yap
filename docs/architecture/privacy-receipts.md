@@ -75,7 +75,10 @@ person sees what their choices send where. It never says "nothing leaves".
   need the screen?" yes/no carries only the words, "Commands · …"),
   "Notes · …" (Enhance, a note's Ask), "Meeting notes · …"
   (meetings/meeting_summary.rs), "Meeting brief · …" (calendar/brief.rs, around the
-  meeting helpers), "Memory · …" (memory/learn.rs); unscoped: "AI model · …".
+  meeting helpers), "Memory · …" (memory/learn.rs: learning, Tell, a pasted
+  import; a file import — Claude's memory export, Yap's own,
+  `memory/import.rs` — and Copy for Claude make no request at all, so they
+  have no receipt); unscoped: "AI model · …".
   The AI usage tracker (`ai/usage.rs`, 2026-10-25) counts each call's
   tokens under the same scope (`net::current_feature`), with finer ones of
   its own where it needs them (a transform, a translation, speaker

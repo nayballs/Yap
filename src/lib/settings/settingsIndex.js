@@ -173,7 +173,9 @@ export const SETTINGS_INDEX = [
   { page: 'memory', section: 'Topics', label: 'Topics', desc: 'Games, hobbies and things you come back to', keywords: 'memory topics interests hobbies games', anchor: 'memory-topics' },
   { page: 'memory', section: 'Tell Yap what to change', label: 'Tell Yap what to change', desc: 'Changes in your words, checked before they are kept', keywords: 'memory edit forget correct remember update', anchor: 'memory-tell' },
   { page: 'memory', section: 'Import, export and clear', label: 'Import memory from other AI providers', desc: 'What ChatGPT, Claude or Gemini remembers', keywords: 'memory import chatgpt claude gemini bring in', anchor: 'memory-import' },
+  { page: 'memory', section: 'Import, export and clear', label: 'Import a file', desc: "Claude's memory export, or Yap's own: read on this PC", keywords: 'memory import file zip folder markdown claude export backup restore move another pc', anchor: 'memory-import-file' },
   { page: 'memory', section: 'Import, export and clear', label: 'Export memory', desc: 'A .zip of Markdown, a file per section', keywords: 'memory export download backup markdown zip', anchor: 'memory-export' },
+  { page: 'memory', section: 'Import, export and clear', label: 'Copy for Claude', desc: 'Your memory as text for Claude or ChatGPT', keywords: 'memory copy clipboard claude chatgpt text paste share import', anchor: 'memory-copy-claude' },
   { page: 'memory', section: 'Import, export and clear', label: 'Clear all memory', desc: 'Forget everything Yap remembers', keywords: 'memory clear delete forget erase reset wipe', anchor: 'memory-clear' },
 
   // Skills (SkillsPage.svelte, chat/skills.rs)

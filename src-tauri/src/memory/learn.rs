@@ -7,6 +7,8 @@
 //!   ([`learn_from_meeting`], "Learn from meetings");
 //! - **"Tell Yap what to change"** and **imports** ([`propose`]): changes
 //!   shown as a diff, applied when the person says so ([`apply_proposal`]);
+//!   a file import's changes, which Yap read itself (`import.rs`), are kept
+//!   the same way ([`propose_file`]) — no model;
 //! - **"remember" / "forget"** from a chat or the Voice Assistant ([`tool`]
 //!   for a model with tools, [`spoken`] for one without).
 //!
@@ -696,15 +698,42 @@ pub struct Proposal {
     pub id: u64,
     pub kind: &'static str,
     pub changes: Vec<Done>,
+    /// A file import: where it came from ("Claude", "a Yap export", "a file").
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub from: Option<String>,
+    /// A file import: what was left out and why, for the review ("3 facts
+    /// didn't fit…"), counts only.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub notes: Vec<String>,
 }
 
 struct Pending {
     changes: Vec<Change>,
-    kind: Kind,
     sensitive_ok: bool,
-    /// What the person wrote: every change must come from it (`Rules::grounding`).
-    grounding: String,
+    origin: Origin,
+    max_changes: usize,
+    /// What the person wrote: every change must come from it
+    /// (`Rules::grounding`). `None`: a file Yap read itself (`import.rs`):
+    /// nothing in it a model could have made up.
+    grounding: Option<String>,
 }
+
+impl Pending {
+    /// The rules its changes are previewed and applied under, now.
+    fn rules(&self) -> Rules {
+        Rules {
+            sensitive_ok: self.sensitive_ok,
+            origin: self.origin.clone(),
+            now: super::now_secs(),
+            max_changes: self.max_changes,
+            grounding: self.grounding.clone(),
+        }
+    }
+}
+
+/// The most changes a file import makes (a whole export: memory's sections
+/// stay bounded whatever it holds).
+const FILE_MAX_CHANGES: usize = 400;
 
 static PROPOSALS: Mutex<Option<HashMap<u64, Pending>>> = Mutex::new(None);
 static PROPOSAL_SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
@@ -721,17 +750,17 @@ fn origin_of(kind: Kind) -> Origin {
     }
 }
 
-/// What `changes` would do to memory now, without changing it.
-fn preview(changes: &[Change], kind: Kind, sensitive_ok: bool, grounding: &str) -> (Vec<Item>, Vec<Done>) {
+/// A Tell's or a pasted import's proposal, before it's kept.
+fn pending_of(changes: Vec<Change>, kind: Kind, sensitive_ok: bool, grounding: &str) -> Pending {
+    Pending { changes, sensitive_ok, origin: origin_of(kind), max_changes: max_changes(kind), grounding: Some(grounding.to_string()) }
+}
+
+/// What `changes` would do to memory now under `rules`, without changing it.
+fn preview(changes: &[Change], rules: &Rules) -> (Vec<Item>, ops::Outcome) {
     let mut items = super::items();
     let mut next = items.iter().map(|i| i.id).max().unwrap_or(0) + 1_000_000;
-    let out = ops::apply(
-        &mut items,
-        &mut next,
-        changes,
-        &Rules { sensitive_ok, origin: origin_of(kind), now: super::now_secs(), max_changes: max_changes(kind), grounding: Some(grounding.to_string()) },
-    );
-    (items, out.done)
+    let out = ops::apply(&mut items, &mut next, changes, rules);
+    (items, out)
 }
 
 fn max_changes(kind: Kind) -> usize {
@@ -799,7 +828,7 @@ pub async fn propose(text: &str, kind: Kind) -> Result<Proposal, String> {
     let mut changes: Vec<Change> = Vec::new();
     for chunk in &chunks {
         // Each part sees memory with the earlier parts' changes.
-        let (now, _) = preview(&changes, kind, sensitive_ok, text);
+        let (now, _) = preview(&changes, &pending_of(Vec::new(), kind, sensitive_ok, text).rules());
         let user = prompt::pass_input(&prompt::listing(&now, 900), heading, chunk);
         let reply = ask(&ep, &system, &user, max_changes(kind), false).await?;
         changes.extend(ops::parse_changes(&reply));
@@ -844,18 +873,37 @@ async fn propose_small(text: &str, kind: Kind, sensitive_ok: bool, cfg: &crate::
 /// Keep `changes` as a proposal for the person to confirm, and say what
 /// they would do (the diff).
 fn keep_proposal(changes: Vec<Change>, kind: Kind, sensitive_ok: bool, text: &str) -> Proposal {
-    let (_, done) = preview(&changes, kind, sensitive_ok, text);
+    let pending = pending_of(changes, kind, sensitive_ok, text);
+    let (_, out) = preview(&pending.changes, &pending.rules());
+    keep(pending, if kind == Kind::Tell { "tell" } else { "import" }, out.done, None, Vec::new())
+}
+
+/// Keep `pending` until the person applies it (only the latest few are
+/// kept), and say what it would do.
+fn keep(pending: Pending, kind: &'static str, done: Vec<Done>, from: Option<String>, notes: Vec<String>) -> Proposal {
     let id = PROPOSAL_SEQ.fetch_add(1, std::sync::atomic::Ordering::SeqCst) + 1;
     proposals(|p| {
-        p.insert(id, Pending { changes, kind, sensitive_ok, grounding: text.to_string() });
-        // Only the latest few are kept.
+        p.insert(id, pending);
         if p.len() > 5 {
             if let Some(oldest) = p.keys().min().copied() {
                 p.remove(&oldest);
             }
         }
     });
-    Proposal { id, kind: if kind == Kind::Tell { "tell" } else { "import" }, changes: done }
+    Proposal { id, kind, changes: done, from, notes }
+}
+
+/// **A file import's proposal** (`import.rs`: Claude's memory export, Yap's
+/// own): the changes Yap read from the file itself, reviewed like an import
+/// ("import": the same review), their source the import "from" ("Claude").
+/// No grounding (no model wrote them) and room for a whole export; secrets
+/// never, sensitive topics as the setting says. `notes`: what the reading
+/// left out, with what the preview left out and why after them.
+pub fn propose_file(changes: Vec<Change>, from: &str, sensitive_ok: bool, mut notes: Vec<String>) -> Proposal {
+    let pending = Pending { changes, sensitive_ok, origin: Origin::new("import", None, from), max_changes: FILE_MAX_CHANGES, grounding: None };
+    let (_, out) = preview(&pending.changes, &pending.rules());
+    notes.extend(super::import::left_out(&out.dropped, sensitive_ok));
+    keep(pending, "import", out.done, Some(from.to_string()), notes)
 }
 
 /// A model asked to "forget everything about my old job at Acme" removed
@@ -914,16 +962,7 @@ pub fn apply_proposal(id: u64, include: Option<&[usize]>) -> Result<Applied, Str
         .filter(|(i, _)| include.is_none_or(|inc| inc.contains(i)))
         .map(|(_, c)| c.clone())
         .collect();
-    Ok(super::change(
-        &changes,
-        &Rules {
-            sensitive_ok: p.sensitive_ok,
-            origin: origin_of(p.kind),
-            now: super::now_secs(),
-            max_changes: max_changes(p.kind),
-            grounding: Some(p.grounding),
-        },
-    ))
+    Ok(super::change(&changes, &p.rules()))
 }
 
 // ---- remember / forget in a chat ------------------------------------------------------------------

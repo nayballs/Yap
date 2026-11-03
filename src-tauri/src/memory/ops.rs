@@ -533,6 +533,15 @@ pub struct Rules {
     pub grounding: Option<String>,
 }
 
+impl Rules {
+    /// A file Yap read itself (`import.rs`: Claude's memory export, Yap's
+    /// own): its facts are its bullets, one each, never split at "; " or
+    /// " | " as a model's are.
+    pub fn as_written(&self) -> bool {
+        self.origin.kind == "import" && self.grounding.is_none()
+    }
+}
+
 /// The words of `text` for grounding: lowercased letters and digits, ≥ 3
 /// characters.
 fn ground_words(text: &str) -> Vec<String> {
@@ -584,6 +593,10 @@ pub struct Done {
     pub facts_removed: Vec<String>,
     /// The item's facts before the change (an update's diff, a removal's).
     pub facts_before: Vec<String>,
+    /// New facts left out because the item's facts were full (a file
+    /// import's review shows them).
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub facts_left_out: Vec<String>,
     /// For the person, in a few words.
     pub say: String,
 }
@@ -658,10 +671,16 @@ fn kept(s: &str, name: &str, sensitive_ok: bool) -> Result<(), String> {
     Ok(())
 }
 
+/// A new fact left out because the item's facts were full
+/// ([`Section::max_facts`], the newest kept): `Outcome::dropped`'s reason.
+pub const DIDNT_FIT: &str = "a fact that didn't fit";
+
 /// Add `facts` to `item` (deduplicated, newest kept within the cap).
-/// Returns the facts actually added. `rules`: a pass (not the person) never
+/// Returns the facts actually added, the item's older facts the cap pushed
+/// out (a diff shows them going) and the new ones that didn't fit
+/// themselves (never "added": [`DIDNT_FIT`]). `rules`: a pass (not the person) never
 /// keeps another person's private life or health, whatever the setting.
-fn add_facts(item: &mut Item, facts: &[String], rules: &Rules, dropped: &mut Vec<String>) -> Vec<String> {
+fn add_facts(item: &mut Item, facts: &[String], rules: &Rules, dropped: &mut Vec<String>) -> Added {
     let sensitive_ok = rules.sensitive_ok;
     let someone_else = item.section == Section::People && !rules.origin.by_the_person();
     let mut added = Vec::new();
@@ -703,11 +722,30 @@ fn add_facts(item: &mut Item, facts: &[String], rules: &Rules, dropped: &mut Vec
         added.push(f);
     }
     let max = item.section.max_facts();
+    let (mut pushed_out, mut didnt_fit) = (Vec::new(), Vec::new());
     if item.details.len() > max {
         let extra = item.details.len() - max;
-        item.details.drain(..extra);
+        for gone in item.details.drain(..extra).collect::<Vec<_>>() {
+            match added.iter().position(|a| *a == gone) {
+                Some(at) => {
+                    didnt_fit.push(added.remove(at));
+                    dropped.push(DIDNT_FIT.into());
+                }
+                None => pushed_out.push(gone),
+            }
+        }
     }
-    added
+    Added { added, pushed_out, didnt_fit }
+}
+
+/// What [`add_facts`] did to an item's facts.
+struct Added {
+    /// New facts kept.
+    added: Vec<String>,
+    /// Older facts the cap pushed out to make room for them.
+    pushed_out: Vec<String>,
+    /// New facts the cap left out themselves (the oldest of a long list).
+    didnt_fit: Vec<String>,
 }
 
 /// Take out the facts `remove` names (as written, or the same fact a little
@@ -791,6 +829,7 @@ pub fn apply(items: &mut Vec<Item>, next_id: &mut u64, changes: &[Change], rules
                         facts_added: Vec::new(),
                         facts_removed: removed.clone(),
                         facts_before: before,
+                        facts_left_out: Vec::new(),
                         say: if say.is_empty() { lower_first(&removed[0]) } else { say },
                     });
                     continue;
@@ -807,6 +846,7 @@ pub fn apply(items: &mut Vec<Item>, next_id: &mut u64, changes: &[Change], rules
                     facts_added: Vec::new(),
                     facts_removed: it.details.clone(),
                     facts_before: it.details.clone(),
+                    facts_left_out: Vec::new(),
                     say: if say.is_empty() { say_for("removed", it.section, &it.title, &it.summary, &it.details) } else { say },
                 });
             }
@@ -825,7 +865,13 @@ pub fn apply(items: &mut Vec<Item>, next_id: &mut u64, changes: &[Change], rules
                 // Facts written as one ("Nurse | Lives in Norwich"), and for
                 // Profile and Preferences an "about", are facts each: the 4B
                 // put "Nurse at St James's in Norwich" there (2026-10-22).
-                let split = |f: &String| f.split(" | ").flat_map(|p| p.split("; ")).map(str::to_string).collect::<Vec<_>>();
+                // A file's bullets are facts as written (`Rules::as_written`).
+                let split = |f: &String| {
+                    if rules.as_written() {
+                        return vec![f.clone()];
+                    }
+                    f.split(" | ").flat_map(|p| p.split("; ")).map(str::to_string).collect::<Vec<_>>()
+                };
                 let mut facts: Vec<String> = c.facts.iter().flat_map(split).collect();
                 let about_text = c.about.clone().filter(|a| !a.trim().is_empty());
                 if section.is_you() {
@@ -913,8 +959,9 @@ pub fn apply(items: &mut Vec<Item>, next_id: &mut u64, changes: &[Change], rules
                                 item.summary = a;
                             }
                         }
-                        let removed = remove_facts(item, &c.remove_facts);
-                        let added = add_facts(item, &facts, rules, &mut out.dropped);
+                        let mut removed = remove_facts(item, &c.remove_facts);
+                        let Added { added, pushed_out, didnt_fit } = add_facts(item, &facts, rules, &mut out.dropped);
+                        removed.extend(pushed_out);
                         let changed = item.summary != before_summary || item.title != before_title || !added.is_empty() || !removed.is_empty();
                         if !changed {
                             continue;
@@ -942,6 +989,7 @@ pub fn apply(items: &mut Vec<Item>, next_id: &mut u64, changes: &[Change], rules
                             facts_added: added,
                             facts_removed: removed,
                             facts_before: before_facts,
+                            facts_left_out: didnt_fit,
                             say,
                         });
                     }
@@ -986,7 +1034,7 @@ pub fn apply(items: &mut Vec<Item>, next_id: &mut u64, changes: &[Change], rules
                             updated_ts: rules.now,
                             dictation: true,
                         };
-                        let added = add_facts(&mut item, &facts, rules, &mut out.dropped);
+                        let Added { added, didnt_fit, .. } = add_facts(&mut item, &facts, rules, &mut out.dropped);
                         if section.is_you() && added.is_empty() {
                             *next_id -= 1;
                             continue;
@@ -1003,6 +1051,7 @@ pub fn apply(items: &mut Vec<Item>, next_id: &mut u64, changes: &[Change], rules
                             facts_added: added,
                             facts_removed: Vec::new(),
                             facts_before: Vec::new(),
+                            facts_left_out: didnt_fit,
                             say,
                         });
                         items.push(item);
@@ -1183,6 +1232,28 @@ mod tests {
         let batch: Vec<Change> = (0..9).map(|i| add(Section::Projects, &format!("Project {i}"), "", &[])).collect();
         let o = apply(&mut items, &mut next, &batch, &rules("chat"));
         assert_eq!(o.done.len(), 5);
+    }
+
+    #[test]
+    fn a_full_item_shows_what_its_new_facts_push_out() {
+        let mut items = Vec::new();
+        let mut next = 0;
+        let old: Vec<String> = (1..=8).map(|i| format!("Old fact {i}")).collect();
+        let refs: Vec<&str> = old.iter().map(String::as_str).collect();
+        apply(&mut items, &mut next, &[add(Section::People, "Sam Reed", "Brother-in-law", &refs)], &rules("manual"));
+        let o = apply(&mut items, &mut next, &[add(Section::People, "Sam Reed", "", &["Lives in Leeds", "Climbs on Sundays"])], &rules("import"));
+        assert_eq!(o.done[0].facts_added, ["Lives in Leeds", "Climbs on Sundays"]);
+        assert_eq!(o.done[0].facts_removed, ["Old fact 1", "Old fact 2"], "the diff shows what makes room");
+        // More new facts than fit: the newest kept, the others never "added".
+        let ten = [
+            "Plays online", "Likes the Sicilian", "Rated about 1500", "Plays on Sundays", "Reads chess books",
+            "Follows the world championship", "Has a wooden set", "Studies endgames", "Joined a club", "Teaches a niece",
+        ];
+        let o = apply(&mut items, &mut next, &[add(Section::Topics, "Chess", "", &ten)], &rules("import"));
+        assert_eq!(o.done[0].facts_added.len(), 8);
+        assert_eq!(o.done[0].facts_added[0], "Rated about 1500");
+        assert_eq!(o.done[0].facts_left_out, ["Plays online", "Likes the Sicilian"]);
+        assert_eq!(o.dropped.iter().filter(|d| *d == DIDNT_FIT).count(), 2);
     }
 
     #[test]

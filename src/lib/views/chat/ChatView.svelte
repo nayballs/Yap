@@ -119,6 +119,7 @@
   import ShotViewer from './ShotViewer.svelte';
   import { MIN_WIDTH, THREAD_MIN, LIST_STAYS, tabKeyOf } from './chatDoc.svelte.js';
   import { chatBrowser } from '../../stores/chatBrowser.svelte.js';
+  import { memoryTakesDrops } from '../../stores/memory.svelte.js';
 
   // Opens a Settings section (ControlPanel's openSettings): the chip's
   // "Language model settings…". `onopennote({id, line, ts, field})`: a
@@ -331,6 +332,11 @@
       // files' paths) go in the box like a snip (snip/attach.rs).
       getCurrentWebview().onDragDropEvent((event) => {
         const t = event.payload.type;
+        // Settings → Memory over Chat takes it as a memory import.
+        if (memoryTakesDrops()) {
+          chat.dragging = false;
+          return;
+        }
         if (t === 'enter' || t === 'over') chat.dragging = true;
         else if (t === 'leave') chat.dragging = false;
         else if (t === 'drop') chat.dropFiles(event.payload.paths || []);

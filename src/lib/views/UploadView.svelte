@@ -17,6 +17,7 @@
   // imported as a meeting note instead (meetings/import.rs): its button
   // under the drop zone, and transcript files dropped here go to its dialog.
   import { transcriptImport, openTranscriptImport, isTranscriptFile } from '../stores/transcriptImport.svelte.js';
+  import { memoryTakesDrops } from '../stores/memory.svelte.js';
 
   // Matches dictation/media.rs (Symphonia features): no opus/webm yet.
   const SUPPORTED_EXTENSIONS = ['mp3', 'wav', 'm4a', 'aac', 'flac', 'ogg', 'oga'];
@@ -67,8 +68,9 @@
     // resolves still lets go of it.
     const dragDrop = getCurrentWebview().onDragDropEvent((event) => {
       const t = event.payload.type;
-      // The import dialog takes its own drops.
-      if (transcriptImport.open) {
+      // The import dialog takes its own drops, and Settings → Memory over
+      // Upload a memory import.
+      if (transcriptImport.open || memoryTakesDrops()) {
         isDragOver = false;
         return;
       }

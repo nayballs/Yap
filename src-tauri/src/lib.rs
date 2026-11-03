@@ -678,8 +678,15 @@ pub fn run() {
             memory::memory_import,
             memory::memory_apply,
             memory::memory_export,
+            memory::memory_import_file_pick,
+            memory::memory_import_file_add,
+            memory::memory_copy_for_claude,
             #[cfg(debug_assertions)]
             memory::e2e_memory_learn,
+            #[cfg(debug_assertions)]
+            memory::import::e2e_memory_file,
+            #[cfg(debug_assertions)]
+            memory::e2e_memory_clipboard,
             #[cfg(debug_assertions)]
             shell::e2e::e2e_meeting_feed,
             #[cfg(debug_assertions)]

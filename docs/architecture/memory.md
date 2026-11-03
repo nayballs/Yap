@@ -29,8 +29,12 @@ is [ai-models.md](./ai-models.md); the dictionary passes it feeds are
   Commands: `memory_list` (items + `ai {ready, why}`), `memory_save_item`,
   `memory_delete_item`, `memory_set_dictation`, `memory_clear`, `memory_undo`,
   `memory_import_prompt`, `memory_tell`, `memory_import`, `memory_apply`,
-  `memory_export`; debug-only `e2e_memory_learn {conversationId}` (a quiet
-  chat's pass, now, toast included).
+  `memory_export`, `memory_import_file_pick {folder?}` / `memory_import_file_add
+  {path}` (a file import: the dialog, or a drop — below), `memory_copy_for_claude`;
+  debug-only `e2e_memory_learn {conversationId}` (a quiet chat's pass, now,
+  toast included), `e2e_memory_file {path}` (what the next "Import a file…"
+  reads, in the dialog's place) and `e2e_memory_clipboard` (what the last
+  Copy for Claude would have copied: a test run never touches the clipboard).
 - **`memory/ops.rs`** — items and changes, pure. Five sections: **Profile**
   and **Preferences** ("You": one item each, facts only) and **People**,
   **Projects**, **Topics** (one item per thing: a name, "about" — who or what it
@@ -44,11 +48,15 @@ is [ai-models.md](./ai-models.md); the dictionary passes it feeds are
   keeps the rules whatever it wrote: bounded (names ≤ 60 characters, "about" ≤
   100, a fact ≤ 140; ≤ 8 facts an item, 16 for You, the newest kept; ≤ 60
   people, 30 projects, 30 topics — a full section drops what was updated
-  longest ago, never something the person wrote); **one item per thing** (an
+  longest ago, never something the person wrote; a change's `Done` shows the
+  older facts its new ones push out among `factsRemoved`, and new ones that
+  didn't fit themselves as `factsLeftOut`, reason `DIDNT_FIT`); **one item
+  per thing** (an
   add for someone Yap has — the same name, or for people the same first name
   — updates them; "Sarah" becomes "Sarah Jenkins"; a fact said again isn't
   added twice, a fuller one replaces it); "The user …" taken off facts;
-  "about" and "A | B" facts on Profile/Preferences become facts; a nameless
+  "about" and "A | B" / "A; B" facts on Profile/Preferences become facts
+  (a file Yap read itself keeps a bullet whole: `Rules::as_written`); a nameless
   add to people/projects/topics goes to Profile; Profile and Preferences are
   never removed whole by a pass (only their facts); no secrets, and while
   sensitive topics are off none of those (below); a pass never keeps another
@@ -148,7 +156,9 @@ is [ai-models.md](./ai-models.md); the dictionary passes it feeds are
   for "Tell Yap what to change" and imports — an import cut in parts an 8k
   model can read, each seeing the earlier parts' changes): the model's
   changes previewed on a copy (`Proposal {id, kind, changes: [Done]}` — the
-  diff) and kept until `apply_proposal(id, include?)`. A Tell's removal of
+  diff) and kept until `apply_proposal(id, include?)`; a file import's too
+  (`propose_file`: Yap's own changes, no model, `from` and `notes` beside
+  them — `memory/import.rs` below). A Tell's removal of
   the whole Profile becomes taking out the facts that share a word with what
   was asked, and for a "forget …" an update that only takes Profile or
   Preferences facts out keeps the ones sharing a word with it — "Forget
@@ -269,7 +279,67 @@ is [ai-models.md](./ai-models.md); the dictionary passes it feeds are
   region and note first, under "About you"; then Profile, Preferences),
   `People.md`, `Projects.md`, `Topics.md` in a .zip written by hand (Deflate,
   flate2's CRC-32, UTF-8 names), each item with its facts and "Updated 5 Oct
-  2026 · from a chat (“Trip plans”)".
+  2026 · from a chat (“Trip plans”)" ("imported from Claude"). And **Copy for
+  Claude** (`plain`): the same memory as plain text for another assistant's
+  memory import — a heading a section (About you, Preferences, Profile,
+  People, Projects, Topics) and a line a fact, each of a person's, project's
+  or topic's lines naming it ("- Sam Reed: Brother-in-law", "- Sam Reed:
+  Lives in Leeds"); `memory_copy_for_claude` puts it on the clipboard out of
+  Win+V history and cloud sync, as "Copy last transcript" does
+  (`text_injector::copy_privately`).
+- **`memory/import.rs`** — **Import a file** (2026-11-03): Claude's memory
+  export or Yap's own, read and mapped by Yap itself — **no AI model, so
+  nothing leaves the PC**. Claude's (the Claude app's Settings → Your Claude
+  → Memory → Export memory) is a .zip of Markdown: `claude-memory-<date>/`
+  with `preferences.md`, `profile.md`, `people/<slug>.md`, `topics/`,
+  `areas/`, and a Claude Project's own `projects/<Project name>/topics/`;
+  each file YAML front matter (`name`, `description`) then its facts as `- `
+  lines. The folder unzipped and one `.md` file are read too, and so is Yap's
+  own export (`You.md` … `Topics.md`, About you's part left out: it's set in
+  About you — the review says so). **Reading** (`read`, `read_zip`):
+  bounded — a .zip ≤ 64 MB, ≤ 2,000 entries, a file ≤ 1 MB, ≤ 16 MB inflated,
+  read with a limit whatever a header claims; only Markdown (macOS's
+  `__MACOSX/` and dotfiles ignored, other files counted); an entry named to
+  land outside the archive (`../`, absolute, a drive: zip slip) refuses the
+  whole archive; a folder's links never followed; the export's own folder
+  taken off (`strip_root`: a shared first folder that isn't one of Claude's).
+  **Parsing** (`parse_claude`), tolerant: a BOM, CRLF, no front matter (the
+  first `#` heading is the name), other keys, quoted or `>` values, `*` /
+  `+` / numbered / checkbox bullets, bold, a nested bullet joined to its
+  parent ("Kids: Ava, Leo"), a bullet going on over an indented line; any
+  other line is counted as one Yap couldn't place (by kind, never its words).
+  **The mapping** (`mapped`): `preferences.md` → Preferences, `profile.md` →
+  Profile (their facts into the one item; the file's description, a summary
+  of them, left out); `people/` → People (the name as the description writes
+  it, accents and all, else the slug in capitals: "sam-reed" → "Sam Reed";
+  "about": the description); `topics/` → Topics; `areas/` → Projects; **a
+  Claude Project's topics → Topics whose "about" names the project** ("…
+  (Claude Project “Kitchen refit”)", or "From the Claude Project …" with the
+  description as facts when both don't fit) — a Topic, not one Project,
+  because a Claude Project holds several topic files, each with its own
+  description, and one item keeps 8 facts; its `people/` are People; a file
+  in a folder Yap doesn't know is a Topic named after the folder, one at the
+  top a Topic named after the file. One bullet is one fact as written (`fit`
+  cuts only one longer than 140 characters, where a sentence, a semicolon, a
+  dash or a comma ends, else between words: nothing lost to a cut); an
+  "about" over 100 keeps its first sentences, the rest as facts.
+  **Merged with what Yap has** (`changes`): the same person, project or
+  topic (by name, whatever the case and accents — `fold`; a person's first
+  name as `ops::same_thing` has it, only for an item no other thing in the
+  files matches by its whole name) gets only the facts it doesn't have, an
+  "about" only when it had none, and a fuller name ("Sam" → "Sam Reed");
+  a full item is offered only the facts the file puts after the last one it
+  already has (`worth_adding`), so the same file again changes nothing;
+  About you's repeats left out (`ops::drop_about_you`). Then the **same review
+  as an import**: `learn::propose_file` keeps the changes as a proposal
+  (origin `import` titled "Claude", "a Yap export" or "a file"; no grounding
+  — no model wrote them; up to 400 changes), its `notes` saying what was left
+  out and why, counts only ("Yap keeps the last 8 facts of each person,
+  project and topic…: 3 facts didn't fit, struck out below", sensitive
+  topics while they're off, secrets, lines Yap couldn't place, files that
+  aren't memory, About you) — `memory_apply` keeps it as one batch (one
+  Undo); nothing is written before. Logs: counts only (files, things, facts,
+  changes, where from), never a name, a fact or a path.
 
 ## What a question gets
 
@@ -366,8 +436,21 @@ search (`settingsIndex.js`, anchors `memory-search-chats` … `memory-clear`):
   memory changes for that."
 - **Import, export and clear**: **Import** (step 1: the prompt to copy, step 2:
   paste the answer → Turn into memory → each change with a checkbox → Save N),
-  **Export** (the save dialog → the .zip), **Clear all** (asked first, Undo on
-  the toast).
+  **Import a file** ("Claude's memory export (the .zip, its folder or a .md
+  file) or Yap's own. Read on this PC: nothing is sent anywhere": **Import a
+  file…** and **Folder…** open Windows' dialog from Rust, as the
+  Dictionary's Import… does, so the page never names a path; a file or
+  folder dropped while the page is on screen is one too — Chat and Upload
+  under Settings leave that drop alone, `memoryTakesDrops` — and works with
+  no AI model) → "From Claude's memory export: untick anything Yap shouldn't
+  keep", what was left out and why above the diff, a fact that didn't fit
+  struck out on its item → Save N (one batch, Undo on the toast), or
+  "Nothing new in …: Yap already has all of it"; **Export** (the save dialog
+  → the .zip), **Copy for Claude** (memory as plain text on the clipboard,
+  kept out of its history: "Copied — paste it into Claude's “Start import”
+  (Settings → Memory) or ChatGPT's memory import"), **Clear all** (asked
+  first, Undo on the toast). An item imported from a file says where from
+  ("Imported from Claude").
 - The privacy line: kept on this PC; sent with questions to the AI model you
   use (a cloud provider sees it, a model on this PC keeps it here); never sent
   to Yap — and a link to Privacy & data, whose "What leaves this PC" lists
@@ -387,9 +470,26 @@ search (`settingsIndex.js`, anchors `memory-search-chats` … `memory-clear`):
   events, secrets, sensitive topics), the people Yap finds itself and the
   relationship words a person needs, every check of a model's answer, the
   profile fallback, "Forget …" without a model, import lines, the prompt's
-  size.
+  size; **a file import** (`memory::import`, fictional fixtures): every
+  section of a made-up Claude export (a .zip built in the test, a Claude
+  Project folder with a space), the folder unzipped and one file, a BOM,
+  CRLF, no front matter, other keys and bullets, nested and continued
+  bullets, long facts cut where sentences end, names from slugs and
+  descriptions (accents), merging into what Yap has (new facts only, a
+  fuller name, two Sams), a long list's last eight and the same file again
+  as nothing, an unknown folder, zip slip refused, a huge file left out,
+  Yap's own export coming back as it was, the review's notes; the whole
+  proposal → apply → one Undo; Copy for Claude's text. **The maintainer's
+  real export** is checked read-only by an ignored test that prints counts
+  only: `YAP_MEMORY_IMPORT_CHECK=<path> cargo test --lib memory::import --
+  --ignored --nocapture`.
 - e2e (`e2e/memory.spec.js`, `memory-no-ai.spec.js`,
-  `memory-small-model.spec.js`): the switches, hand edits (a secret refused,
+  `memory-small-model.spec.js`, `memory-file.spec.js` — a made-up Claude
+  export built in the test, with no AI model: picked, reviewed with what Yap
+  has, what didn't fit struck out, saved, in Settings "Imported from
+  Claude", one Undo, the same file again as nothing; the folder dropped over
+  Chat; Yap's own export back as it was; Copy for Claude's text from the
+  pretend clipboard): the switches, hand edits (a secret refused,
   dictation switch, delete + Undo), Tell's diff + Apply + Undo against the
   fake model, an import reviewed change by change, export, Clear all, a
   learned chat's toast with Undo and Manage, About you's rows under You (set
