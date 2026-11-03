@@ -4,7 +4,7 @@
 // Short names come from ppModels.js's registry (else the provider's own name
 // from its live list, modelCatalog.svelte.js), icons from providerIcons.js.
 import { invoke } from '@tauri-apps/api/core';
-import { PROVIDER_ICONS } from './providerIcons.js';
+import { familyIcon, providerIcon } from './modelIcons.js';
 import { modelsFor, modelLabel } from '../stores/modelCatalog.svelte.js';
 import { PROVIDER_LABELS, KEYED_PROVIDERS as CLOUD_ORDER } from './providers.js';
 
@@ -69,36 +69,9 @@ export function whereItRuns(m, host = '') {
   return host ? `Runs on ${host}` : 'Runs on your own server';
 }
 
-/** A model family's mark, by its name or id (the most specific first). */
-const FAMILY_ICONS = [
-  [/gpt[-_ ]?oss/i, 'openai-oss'],
-  [/qwen|qwq/i, 'qwen'],
-  [/gemma/i, 'gemma'],
-  [/gemini/i, 'gemini'],
-  [/llama/i, 'llama'],
-  [/mistral|mixtral|magistral|ministral|devstral|codestral/i, 'mistral'],
-  [/claude/i, 'claude'],
-  [/grok/i, 'xai'],
-  [/\bgpt|openai/i, 'openai'],
-];
-
-/**
- * The icon id of a model's family from its name or id ("GPT-OSS 20B" →
- * "openai-oss", "Gemma 4 31B" → "gemma", "Qwen3.5 4B" → "qwen"), or null:
- * the picker's rows show the model's own mark, the rail and the chip the
- * provider's.
- */
-export function familyIcon(...texts) {
-  const hay = texts.filter(Boolean).join(' ');
-  return FAMILY_ICONS.find(([re]) => re.test(hay))?.[1] ?? null;
-}
-
-/** A cloud provider's mark (Anthropic's is Claude's, as the picker's rail shows it). */
-export function providerIcon(provider) {
-  if (provider === 'anthropic') return 'claude';
-  if (provider === 'chatgpt') return 'openai';
-  return PROVIDER_ICONS[provider] ? provider : null;
-}
+// A model family's mark and a provider's (modelIcons.js, pure: Yap Link's
+// phone page shares it).
+export { familyIcon, providerIcon };
 
 /**
  * The chip's icon id: the provider's mark, else (the on-device model, a

@@ -15,19 +15,13 @@
 //   Gemini is "Google Gemini" where the words go): the sets are below, side
 //   by side, so making them one is a change here.
 import { PROVIDER_ICONS } from './providerIcons.js';
+import { KEYED_PROVIDERS, CHATGPT, GPT_TAB, GPT_PROVIDERS, GPT_WAYS, PROVIDER_LABELS } from './providerIds.js';
 
-/**
- * The cloud providers with an API key in the shared store, in Settings'
- * order (Rust's `ai_model::KEYED_PROVIDERS`).
- */
-export const KEYED_PROVIDERS = ['groq', 'anthropic', 'openai', 'gemini', 'openrouter', 'chatgpt'];
+// The keyed providers, ChatGPT's id, OpenAI's two ways and the short names
+// live in providerIds.js (pure: Yap Link's phone page loads it as it is);
+// this is where the app imports them from.
+export { KEYED_PROVIDERS, CHATGPT, GPT_TAB, GPT_PROVIDERS, GPT_WAYS, PROVIDER_LABELS };
 
-/**
- * Sign in with ChatGPT (ai/chatgpt.rs): a keyed provider whose key store
- * holds this marker while signed in with the plan's permission — never a
- * key the person pastes. Its calls use the sign-in's token.
- */
-export const CHATGPT = 'chatgpt';
 export const CHATGPT_PLAN_KEY = 'chatgpt-plan';
 export const isKeyed = (p) => KEYED_PROVIDERS.includes(p);
 
@@ -78,22 +72,8 @@ export function modeOf(provider) {
   return provider === 'ondevice' ? 'ondevice' : provider === 'local' ? 'selfhosted' : 'cloud';
 }
 
-/**
- * OpenAI's models, two ways (2026-11-02: one "ChatGPT" entry instead of the
- * OpenAI and ChatGPT tabs, in Settings and Chat's model picker alike): the
- * person's ChatGPT plan first (Sign in with ChatGPT, provider "chatgpt"),
- * then an OpenAI API key ("openai"). UI only: both ids stay what config.json,
- * Rust, usage and effort know; a scope is always on exactly one of them.
- */
-export const GPT_TAB = 'gpt';
-export const GPT_PROVIDERS = [CHATGPT, 'openai'];
-/** The Cloud providers tab a saved provider id shows under. */
+/** The Cloud providers tab a saved provider id shows under (OpenAI's two ways: GPT_TAB). */
 export const cloudTabOf = (p) => (GPT_PROVIDERS.includes(p) ? GPT_TAB : p);
-/** The ChatGPT entry's two-way switch, when both are connected. */
-export const GPT_WAYS = [
-  { value: CHATGPT, label: 'Your plan' },
-  { value: 'openai', label: 'API key' },
-];
 /**
  * The way a scope moving onto the ChatGPT tab takes: the plan when it's
  * signed in, else an OpenAI key already saved, else the plan (Continue with
@@ -130,19 +110,6 @@ export function maskKey(key) {
 }
 
 // ---- Names ----
-
-/** Short names: the Chat model's chip and picker (aiModel.js), Settings' link rows. */
-export const PROVIDER_LABELS = {
-  groq: 'Groq',
-  anthropic: 'Anthropic',
-  openai: 'OpenAI',
-  chatgpt: 'ChatGPT',
-  gemini: 'Gemini',
-  openrouter: 'OpenRouter',
-  ondevice: 'On this PC',
-  local: 'Self-hosted',
-  custom: 'Custom',
-};
 
 /** The Commands, Note Formatting and Chat tabs' Prompt Studio ("Test with …"). */
 export const SCOPE_PROVIDER_LABELS = {
