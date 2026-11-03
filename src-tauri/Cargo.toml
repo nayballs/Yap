@@ -128,7 +128,7 @@ dom_smoothie = "0.18"
 # …and the HTML a wiki's `action=parse` returns, as text (the same copy).
 dom_query = "0.28"
 futures-util = "0.3"
-sha2 = "0.10"
+sha2 = "0.11"
 # Sign in with ChatGPT's ID-token signature (RS256; already in the tree through rustls).
 ring = "0.17"
 flate2 = "1"
