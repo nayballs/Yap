@@ -59,7 +59,7 @@ once_cell = "1"
 whatlang = "0.18"
 
 # Audio capture + sound cue
-cpal = "0.15"
+cpal = "0.17"
 rodio = "0.19"
 
 # Clipboard for text injection
