@@ -45,12 +45,12 @@ jobs:
           git config --system core.longpaths true
 
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           fetch-depth: 0 # the release notes walk the commits since the last tag
 
       - name: Setup Node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v7
         with:
           node-version: 20
 
@@ -99,7 +99,7 @@ jobs:
           } >> "$GITHUB_OUTPUT"
 
       - name: Build + release (Tauri)
-        uses: tauri-apps/tauri-action@v0
+        uses: tauri-apps/tauri-action@v1
         id: tauri
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -136,7 +136,10 @@ jobs:
           updaterJsonPreferNsis: true
           # The draft targets the commit that was built. Run from a pushed
           # `v*` tag, or dispatch from main: publishing the draft creates the
-          # tag then.
+          # tag then. tauri-action v1: a re-run for the same version rewrites
+          # the draft's title and body from these inputs (polish the notes
+          # after the last run), and fails if that version's release is no
+          # longer a draft instead of adding files to a published one.
           tagName: v__VERSION__
           releaseCommitish: ${{ github.sha }}
           releaseName: "Yap v__VERSION__"

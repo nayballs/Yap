@@ -27,7 +27,10 @@ export async function startUpdateFeed(dir, { version, notes }) {
   const file = `Yap_${version}_x64-setup.exe`;
   const payload = path.join(dir, file);
   fs.writeFileSync(payload, crypto.randomBytes(256 * 1024));
-  tauri(['signer', 'sign', '--private-key-path', key, '--password', '', payload]);
+  // Bound to the version the feed announces, as `tauri build` binds a real
+  // build's (Tauri 2.12): the updater (2.14) refuses a latest.json whose
+  // version isn't the signed one.
+  tauri(['signer', 'sign', '--private-key-path', key, '--password', '', '--app-version', version, payload]);
 
   const requests = [];
   const server = http.createServer((req, res) => {

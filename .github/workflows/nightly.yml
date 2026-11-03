@@ -52,12 +52,12 @@ jobs:
           git config --system core.longpaths true
 
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           fetch-depth: 0 # the release notes walk the commits since the last nightly
 
       - name: Setup Node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v7
         with:
           node-version: 20
 
@@ -144,11 +144,13 @@ jobs:
           EOF
           node patch-nightly-version.cjs
 
-      # Build-only mode: NOT setting tagName/releaseName means tauri-action just
-      # builds (and minisign-signs) the artifacts and does NOT create its own
-      # release. We publish the rolling `nightly` release ourselves below.
+      # Build-only mode: NOT setting tagName/releaseName/releaseId means
+      # tauri-action just builds (and minisign-signs) the artifacts and does NOT
+      # create its own release (v1 too: no GITHUB_TOKEN needed, no workflow
+      # artifacts unless uploadWorkflowArtifacts). We publish the rolling
+      # `nightly` release ourselves below.
       - name: Build + sign (Tauri, nightly config)
-        uses: tauri-apps/tauri-action@v0
+        uses: tauri-apps/tauri-action@v1
         id: tauri
         env:
           # Updater (minisign) signing — required so latest.json's signature is
@@ -189,6 +191,11 @@ jobs:
 
       # Rename the built installer + its .sig to CONSTANT names so the download
       # URL is stable across every nightly, then build latest.json from the .sig.
+      # Since the Tauri CLI 2.12 `tauri build` binds the signature to the app
+      # version (`version:` in its trusted comment), and tauri-plugin-updater
+      # 2.14 refuses an update whose latest.json `version` differs from the
+      # signed one: latest.json's version must stay NIGHTLY_VERSION, the
+      # version patched in before the build.
       - name: Stage nightly artifacts
         shell: bash
         run: |
