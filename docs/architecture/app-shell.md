@@ -142,8 +142,8 @@ CLAUDE.md's module index is — `dictation/`, `pasting/`, `dictionary/`, `ai/`,
 `config.rs`, `auth.rs` and `updates.rs` stand alone; `main.rs` and `lib.rs`
 are at the root. An area is `<area>.rs` (its `//!` summary and module list)
 beside `<area>/`. A big module's parts are its children (`dictation/pipeline/`,
-`ai/local_llm/`, `web/`, `apps/`, `voice/tts/`, `chat/tools/`,
-`meetings/meeting_summary/`): private, with what other modules use
+`ai/local_llm/`, `web/`, `apps/`, `voice/tts/`, `chat/tools/` and its
+`agent/`, `chat/turn/`, `meetings/meeting_summary/`): private, with what other modules use
 re-exported by the module, except `local_llm`'s, which callers name
 (`local_llm::models::install`, `local_llm::context::context_view`).
 

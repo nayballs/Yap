@@ -208,7 +208,7 @@ Chat's and the Voice Assistant's two ways of reaching outside Yap: looking thing
   cap is answered "you've searched 3 times", the tool still offered) —
   **how far a turn looks is its `Reach`** (2026-10-31): a strong model's
   turn that writes a document (`Turn::may_go_deep`, `go_deep`: from
-  `turn.rs` when the question asks for one, or from the loop at its first
+  `turn/run.rs` when the question asks for one, or from the loop at its first
   document tool call) gets `Reach::deep` — 10 searches (`DEEP_SEARCHES`)
   and 3 to 10 page reads, as many `PAGE_TOKENS` parts as two-fifths of the
   model's request holds (`DEEP_READS`; a strong Claude's own web fetch at
