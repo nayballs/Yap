@@ -35,10 +35,15 @@ export const MODELS = [
 
 /**
  * What a PC that answers typed questions, has Chat's picker, keeps the
- * phone's own conversation, takes its pictures and gives Talk's words back
- * for the box says it can (`ready.can`).
+ * phone's own conversation, takes its pictures, gives Talk's words back for
+ * the box and answers them out loud once sent says it can (`ready.can`).
  */
-export const CAN = ['ask', 'read_aloud', 'picker', 'effort', 'chats', 'pictures', 'words'];
+export const CAN = ['ask', 'read_aloud', 'picker', 'effort', 'chats', 'pictures', 'words', 'speak'];
+/**
+ * A PC from the evening of 3 Nov, before Talk's words were answered out
+ * loud: it reads `ask`'s `speak` as nothing and answers on screen.
+ */
+export const CAN_BEFORE_SPEAK = ['ask', 'read_aloud', 'picker', 'effort', 'chats', 'pictures', 'words'];
 /**
  * A PC from the afternoon of 3 Nov, before words in the box: Talk's Done
  * sends the question and Yap answers out loud — as hands-free does on a PC

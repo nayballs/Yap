@@ -259,7 +259,9 @@ the page. A PC from before pictures (no `"pictures"` in `ready.can`): no +.
 A question typed in the composer goes to Yap's AI on the PC (`ask {text}`)
 and is answered in the same conversation the spoken ones use, as Chat
 answers a typed question, **not spoken**: the answer's ▶ Read aloud has Yap
-say it (`read_aloud {id}`, the whole answer, on the phone). Enter sends,
+say it (`read_aloud {id}`, the whole answer, on the phone). (Talk's words
+sent from the box are answered out loud: "Talk's words in the box",
+below.) Enter sends,
 Shift+Enter makes a new line; the box grows to five lines, then scrolls. The
 question shows in the thread at once (without 🎙), Chat's activity line while
 Yap works it out, ■ in Send's place to stop it. Typed while Yap speaks: its voice
@@ -285,8 +287,19 @@ after whatever was typed, one space between** (none before a full stop or
 a closing bracket) — talking never wipes the box: a selection stays, the
 words after it. The caret is the box's own, kept while it's out of focus;
 the caret after them, the box grown to show them, Send ↑ lit. **Send asks
-them as a typed question** (`ask`: answered on screen, not read out; ▶ to
-hear it), with the pictures still in the card (Done sends none). Nothing
+them out loud** (that evening; the maintainer: "When I hit send, I don't
+hear a voice"): when any of the box's words came from Talk — since the box
+was last empty or sent; fixing them by hand doesn't change that (`S.said`)
+— the `ask` says `speak: true` and the PC asks it as the spoken question it
+was: the bubble's 🎙, the Voice Assistant's spoken answer, said on the phone
+with ■ in Send's place, Talk over it to stop it and listen, Clearer sound
+letting the mic go. The page readies its sound within Send's tap (as ▶
+does). Emptied by hand, the box is typed again; a question only typed is
+answered on screen, ▶ to hear it. A PC from before `"speak"` in
+`ready.can` reads the field as nothing and answers on screen (the bubble
+without 🎙, as that PC keeps it), no error. The pictures still in the card
+go with Send (Done sends none); Chat's line putting the question back keeps
+it said. Nothing
 heard — the PC's `error`, an empty `words`, or its `state idle` after
 `transcribing` with neither — keeps the box: "Yap didn't hear anything. Try
 again, or type it." The mic gone mid-talk: "What it heard is in the box."
@@ -301,16 +314,29 @@ when you stop talking").
 
 ## What it does where the protocol leaves a choice
 
-- **Pairing.** `#pair=<token>` in the address: hello with `pair: {token}` (and
-  no `device`, so a code scanned again pairs afresh), the 4-digit code from
-  `pair_wait` shown big, `paired`'s device kept in `localStorage`
-  (`yap.link.device`), the fragment cleared. Later visits say hello with the
-  device. No device and no code: how to pair, and no connection is tried.
+- **Pairing.** `#pair=<token>` in the address: hello with `pair: {token}`
+  **and the device, when the phone has one** (since 3 Nov; till then the
+  code went instead of it, so a tab restored with an old code was refused
+  however well paired the phone was — and those refusals locked it out).
+  The PC counts the device first: known, it's `ready` (a live code is spent,
+  and Settings says the phone is paired already); not known, the code pairs.
+  The device is read afresh from `localStorage` (`yap.link.device`, shared
+  by every tab) for each hello. Until the PC says which, a tab with a device
+  shows the chat connecting, not the pairing screen. The 4-digit code from
+  `pair_wait` shown big, `paired`'s device kept, the fragment cleared — and
+  cleared at `ready` and `denied` too, so a reload or a restored tab never
+  brings the code again. A code opened in a tab that's already open (the
+  link pasted into its address bar: only the fragment changes, no reload) is
+  said at once (`hashchange`). Later visits say hello with the device. No
+  device and no code: how to pair, and no connection is tried.
 - **`denied`.** How to pair, said plainly ("This phone isn't paired with Yap on
   your PC any more." / "Yap on your PC didn't allow this phone."; the `reason`
-  is shown instead when it reads as a sentence, with a space in it). No
-  reconnecting; the device is kept, with a Try again button. A refused pairing
-  code is dropped.
+  is shown instead when it reads as a sentence, with a space in it: "Too
+  many tries from this phone. Try again in 4 minutes."). No reconnecting;
+  the device is kept, with a Try again button. A refused pairing code is
+  dropped. **Another tab pairs the phone** (`storage`): a refused tab comes
+  back with that device, once — at once if it's in front, else when it's
+  next shown.
 - **The hello's `name`** is "Android · Chrome", "iPhone · Safari" and so on;
   `nonce` is 16 random bytes, base64url.
 - **Up frames.** `start {mode: "words"}` (hands-free off, a PC with
@@ -497,16 +523,30 @@ npm run test:link
   the composer; Send without them), a PC from before (no +). `words.spec.js`:
   Talk's words in the box — `start {mode: "words"}`, no bubble, Done's ✓,
   "Transcribing…" (no waveform, no Done, ✕), the words in the box with the
-  caret after them and Send lit, then fixed by hand and sent as `ask` (no
-  🎙, nothing spoken); after what was typed (one space, none doubled), at a
+  caret after them and Send lit, then fixed by hand and sent as `ask
+  {speak: true}` (the 🎙, the answer's voice played, ■ meanwhile); only
+  typed, or the box emptied first, `ask` with no `speak` (no 🎙, answered on
+  screen), typed first then Talk's words after it said; ■ and Talk over the
+  said question's answer; after what was typed (one space, none doubled), at a
   caret in the middle, before a full stop, never over a selection; a hold
   and its release; nothing heard three ways, the box kept; ✕ while
-  transcribing and the late words dropped; the pictures waiting for Send;
-  the PC's own 2 minutes; the mic gone; hands-free on and a PC from before
+  transcribing and the late words dropped; the pictures waiting for Send
+  (and Chat's line putting the question back still said); a PC from before
+  `"speak"` (on screen, no error); the PC's own 2 minutes; the mic gone;
+  hands-free on and a PC from before
   still sending (the switch's hint each way); at 200 % text and on its side
   (the box grown to show them all). The specs about a spoken answer talk to
   a PC whose Done sends (`CAN_BEFORE_WORDS`, as hands-free does: the fake
   mic's steady tone isn't speech for hands-free to end on).
+  `pairing.spec.js` — a phone's tabs, against a PC that judges hellos as
+  Yap's does (the device first, a strike for each guess, five lock the
+  address out): a saved device with an old `#pair=` sends both, connects,
+  and the code leaves the address; six tabs restored at once with old codes
+  all connect, nothing refused; a fresh code pairs after old tabs were
+  refused, and those tabs come back with the new device; a tab with a
+  removed device sends the new one at its next hello; a code opened in a tab
+  already open (`hashchange`); "Too many tries" with its wait, no
+  hammering, Try again with the device.
   `shared.spec.js` (no
   browser): the desktop modules served at `core/` import only each other,
   nothing of the app, and the logos the picker draws are served. `sound.spec.js`: the
@@ -528,7 +568,9 @@ npm run test:link
   drawer, a chat opened from it, typing with the keyboard up, listening,
   transcribing, Talk's words in the box, answering with ■ (hands-free),
   two pictures in the composer, the model sheet, the settings
-  sheet; landscape's two columns, large text at 130 and 200 %), in
+  sheet; Talk's words sent from the box and said, a tab restored with an
+  old code connecting, "Too many tries" with its wait; landscape's two
+  columns, large text at 130 and 200 %), in
   `test-results/link/screenshots/`, and checks every control is 44
   px or more, Yap's two fonts and the logos load from the page's own origin
   (nothing asked of anywhere else), and at 360 × 780, 390 × 844, 430 × 932 and

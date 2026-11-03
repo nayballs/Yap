@@ -37,8 +37,16 @@
 //! same `PhoneEar` with the dictionary — and sent back as `words`, then
 //! idle ([`finish_question`], `words`). No `heard`, no thinking, nothing
 //! written to Chat; `cancel`, `interrupt` or a new `start` drop it as they
-//! drop a question. The page puts the words in its box; Send asks them as
-//! a typed question (`ask`).
+//! drop a question. The page puts the words in its box; Send asks them
+//! (`ask`) as the spoken question they were (`speak`, that evening: by
+//! voice, the Voice Assistant's spoken answer, said on the phone) when any
+//! of the box's words came from Talk, else as a typed one.
+//!
+//! **The hello** carries the phone's device, the QR's token, or both (a tab
+//! restored with an old `#pair=`, the code scanned again): the device counts
+//! first (`pairing::judge`). Only a hello that's refused waits out its
+//! address's strikes, and only a guess is one ([`hello_verdict`]); the
+//! refusal's kind is logged.
 //!
 //! Logs: phases, lengths and timings; never a question, an answer or audio.
 
@@ -229,12 +237,16 @@ impl crate::chat::assistant::Phone for Turn {
     }
 }
 
-/// What a question carries besides its words: its pictures' bytes, and
-/// whether their text goes instead.
+/// What a question carries besides its words: its pictures' bytes, whether
+/// their text goes instead, and (from the composer) whether its words were
+/// said.
 #[derive(Default)]
 struct Carries {
     pictures: Vec<Vec<u8>>,
     as_text: bool,
+    /// Talk's words, checked in the phone's box and sent (`ask {speak}`):
+    /// asked as said, and answered out loud.
+    said: bool,
 }
 
 impl Turn {
@@ -334,10 +346,17 @@ where
     };
     let name = pairing::clean_name(&name);
     let device_id = match hello_verdict(&hub, peer, v, &nonce, device.as_ref(), pair.as_ref().map(|p| p.token.as_str())) {
-        Verdict::Known(id) => Some(id),
+        Verdict::Known { id, invited } => {
+            if invited {
+                // The code on the PC's screen brought by a phone paired
+                // already: Settings' code has done its job (said there).
+                let _ = hub.app.emit(crate::link::ALREADY_PAIRED, serde_json::json!({ "name": name }));
+            }
+            Some(id)
+        }
         Verdict::Pair { code } => pair_phone(&hub, &tx, &mut incoming, &mut stop, &name, &code).await,
-        Verdict::Denied(reason) => {
-            say(&tx, Out::Denied { reason: reason.into() });
+        Verdict::Denied(refusal) => {
+            say(&tx, Out::Denied { reason: refusal.words() });
             None
         }
     };
@@ -409,27 +428,56 @@ where
     crate::privacy::net::phone(peer.ip(), 101, received, sent.load(Ordering::Relaxed));
 }
 
-/// The hello, judged (and rate-limited per address).
+/// **The hello, judged** (and rate-limited per address): first the minute's
+/// cap (`Limiter::admit`), then the hello itself (`pairing::judge`: the
+/// device first, then the QR's token); a refused one waits when its address
+/// has guessed too often (`struck_out`, said with when to try again), and
+/// counts as a strike only when it was a guess (`Refusal::strikes`). A
+/// paired phone's hello, and the live code's, are never turned away for an
+/// address's strikes: they aren't guesses (a 256-bit secret, a 128-bit
+/// token), and its other tabs' stale codes mustn't lock the phone out.
+/// Logs the refusal's kind, never the hello's ids, secrets or address.
 fn hello_verdict(hub: &Hub, peer: SocketAddr, v: u32, nonce: &str, device: Option<&DeviceCreds>, token: Option<&str>) -> Verdict {
     let now = Instant::now();
-    if !hub.limiter().allow(peer.ip(), now) {
-        tracing::info!("Yap Link: too many hellos from one address");
-        return Verdict::Denied(pairing::TOO_MANY);
+    let ip = peer.ip();
+    if let Err(wait) = hub.limiter().admit(ip, now) {
+        tracing::info!(kind = "too many", "Yap Link: a hello was refused (too many from one address this minute)");
+        return Verdict::Denied(pairing::Refusal::TooMany(wait));
     }
     let hello = pairing::Hello { v, nonce, device: device.map(|d| (d.id.as_str(), d.secret.as_str())), token };
     let verdict = {
         let mut invite = hub.invite();
         pairing::judge(&hello, invite.as_mut(), &devices::secret_hash, now)
     };
-    match &verdict {
-        Verdict::Denied(_) => {
-            hub.limiter().strike(peer.ip(), now);
-            tracing::info!("Yap Link: a hello was refused");
+    match verdict {
+        Verdict::Denied(refusal) => {
+            let mut limiter = hub.limiter();
+            if let Some(wait) = limiter.struck_out(ip, now) {
+                drop(limiter);
+                tracing::info!(kind = "too many", was = refusal.kind(), "Yap Link: a hello was refused (its address waits)");
+                return Verdict::Denied(pairing::Refusal::TooMany(wait));
+            }
+            let strike = refusal.strikes();
+            if strike {
+                limiter.strike(ip, now);
+            }
+            drop(limiter);
+            tracing::info!(kind = refusal.kind(), strike, "Yap Link: a hello was refused");
+            Verdict::Denied(refusal)
         }
-        Verdict::Pair { .. } => tracing::info!("Yap Link: a phone asks to pair"),
-        Verdict::Known(_) => {}
+        Verdict::Pair { code } => {
+            tracing::info!(with_device = device.is_some(), "Yap Link: a phone asks to pair");
+            Verdict::Pair { code }
+        }
+        Verdict::Known { id, invited } => {
+            if invited {
+                tracing::info!("Yap Link: a paired phone brought the pairing code again (it's used up)");
+            } else if token.is_some() {
+                tracing::info!("Yap Link: a paired phone brought an old pairing code (its device counted)");
+            }
+            Verdict::Known { id, invited }
+        }
     }
-    verdict
 }
 
 /// **A phone asking to pair**: `pair_wait` with its code, the question on
@@ -546,7 +594,7 @@ fn on_message(hub: &Arc<Hub>, tx: &Tx, session: u64, latest: &Arc<AtomicU64>, as
                 finish_question(hub, session, latest, asking, Carries::default());
             } else if asking.recording {
                 match asking.pictures.take(pictures) {
-                    Ok(pictures) => finish_question(hub, session, latest, asking, Carries { pictures, as_text }),
+                    Ok(pictures) => finish_question(hub, session, latest, asking, Carries { pictures, as_text, said: true }),
                     Err(why) => {
                         // Its pictures didn't come whole: nothing goes, said why.
                         abandon(latest, asking);
@@ -562,12 +610,12 @@ fn on_message(hub: &Arc<Hub>, tx: &Tx, session: u64, latest: &Arc<AtomicU64>, as
             abandon(latest, asking);
             say(tx, Out::State { phase: Phase::Idle });
         }
-        In::Ask { text, chat, pictures, as_text } => {
+        In::Ask { text, chat, pictures, as_text, speak } => {
             if let Some(c) = wire::chat_ref(chat.as_ref()) {
                 asking.set_chat(c);
             }
             match asking.pictures.take(pictures) {
-                Ok(pictures) => ask_typed(hub, tx, session, latest, asking, &text, Carries { pictures, as_text }),
+                Ok(pictures) => ask_typed(hub, tx, session, latest, asking, &text, Carries { pictures, as_text, said: speak }),
                 Err(why) => {
                     if abandon(latest, asking) {
                         say(tx, Out::State { phase: Phase::Idle });
@@ -658,10 +706,13 @@ fn settled(hub: &Arc<Hub>, tx: &Tx, set: Result<(), String>) {
     }
 }
 
-/// **A typed question** (`ask`): whatever was under way is abandoned (said
-/// as `state idle`, so the page knows the old question's news has ended),
-/// then it's asked as a spoken one is once it's transcribed — `heard`,
-/// thinking, the Voice Assistant's path — but not said.
+/// **A question from the composer** (`ask`): whatever was under way is
+/// abandoned (said as `state idle`, so the page knows the old question's
+/// news has ended), then it's asked as a spoken one is once it's
+/// transcribed — `heard`, thinking, the Voice Assistant's path — typed and
+/// not said; or, with `speak` (`Carries::said`: Talk's words, checked in the
+/// box), as the spoken question it was: by voice, its answer said on the
+/// phone.
 fn ask_typed(hub: &Arc<Hub>, tx: &Tx, session: u64, latest: &Arc<AtomicU64>, asking: &mut Asking, text: &str, carries: Carries) {
     if abandon(latest, asking) {
         say(tx, Out::State { phase: Phase::Idle });
@@ -682,9 +733,14 @@ fn ask_typed(hub: &Arc<Hub>, tx: &Tx, session: u64, latest: &Arc<AtomicU64>, ask
     }
     let id = latest.fetch_add(1, Ordering::SeqCst) + 1;
     let pictures = carries.pictures.len();
-    let turn = Turn::new(id, session, Arc::clone(latest), asking, false, carries);
+    let said = carries.said;
+    let turn = Turn::new(id, session, Arc::clone(latest), asking, said, carries);
     asking.turn = Some(Arc::clone(&turn));
-    tracing::info!(chars = question.chars().count(), pictures, "Yap Link: a typed question from the phone");
+    if said {
+        tracing::info!(chars = question.chars().count(), pictures, "Yap Link: a spoken question from the phone's box (Talk's words, checked)");
+    } else {
+        tracing::info!(chars = question.chars().count(), pictures, "Yap Link: a typed question from the phone");
+    }
     let app = hub.app.clone();
     tauri::async_runtime::spawn(async move { answer(app, turn, question).await });
 }

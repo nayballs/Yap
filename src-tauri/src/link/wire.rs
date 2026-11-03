@@ -25,7 +25,14 @@
 //! "words"}` ([`Talk::Words`]) is recorded as a question is, but on `stop`
 //! only transcribed — [`Out::Words`], then `state idle`; nothing asked,
 //! nothing written to Chat (`"words"` in [`CAN`]; a page from before sends
-//! `"ask"`, and a PC from before takes any `start` as a question).
+//! `"ask"`, and a PC from before takes any `start` as a question). Then
+//! **Talk's words answered out loud** (the same evening): `ask {…, speak:
+//! true}` when any of the box's words came from Talk — asked as a spoken
+//! question is (the Voice Assistant's spoken answer, marked by voice, said
+//! on the phone), not as a typed one (`"speak"` in [`CAN`]; a PC from before
+//! reads the field as nothing and answers on screen, and a page from before
+//! never sends it). And a **hello with both** `device` and `pair`: the
+//! device is judged first (`pairing::judge`).
 
 use serde::{Deserialize, Serialize};
 
@@ -76,7 +83,9 @@ pub struct PairToken {
 #[derive(Debug, Clone, PartialEq, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum In {
-    /// The first message: `device` on a later visit, `pair` from the QR.
+    /// The first message: `device` on a later visit, `pair` from the QR —
+    /// both when the page has both (a tab restored with an old `#pair=`, the
+    /// QR scanned again on a paired phone): the device counts first.
     Hello {
         #[serde(default)]
         v: u32,
@@ -112,9 +121,10 @@ pub enum In {
     Cancel,
     /// Stop speaking and abandon the answer.
     Interrupt,
-    /// **A typed question** (2026-11-03, the page's composer): answered as
-    /// a spoken one is after it's transcribed, in the same conversation,
-    /// but not spoken (the answer's ▶ asks for that: [`In::ReadAloud`]).
+    /// **A question from the composer** (2026-11-03): answered as a spoken
+    /// one is after it's transcribed, in the same conversation — typed, not
+    /// spoken (the answer's ▶ asks for that: [`In::ReadAloud`]); with
+    /// `speak`, as a spoken question (Talk's words, checked in the box).
     Ask {
         #[serde(default)]
         text: String,
@@ -127,6 +137,12 @@ pub enum In {
         /// Their text instead (read on the PC: "Send its text instead").
         #[serde(default, rename = "asText")]
         as_text: bool,
+        /// **Said, then checked** (`"speak"` in [`CAN`]): some of its words
+        /// came from Talk (since the box was last empty or sent), so it's
+        /// asked as a spoken question — the Voice Assistant's spoken answer,
+        /// marked by voice in Chat, said on the phone.
+        #[serde(default)]
+        speak: bool,
     },
     /// Say answer `id` (one this phone was given, `answer.id`) on the phone,
     /// in Yap's voice: the whole of it.
@@ -217,8 +233,9 @@ impl Talk {
 /// What this PC answers beyond the first pages' v1 (`ready.can`): a page
 /// offers typing, ▶ on an answer, Chat's picker and the effort only when
 /// its PC says so, and says plainly when it doesn't; `"words"`: Talk's
-/// words can go in the phone's box to check first ([`Talk::Words`]).
-pub const CAN: &[&str] = &["ask", "read_aloud", "picker", "effort", "chats", "pictures", "words"];
+/// words can go in the phone's box to check first ([`Talk::Words`]);
+/// `"speak"`: an `ask` with `speak` is answered out loud ([`In::Ask`]).
+pub const CAN: &[&str] = &["ask", "read_aloud", "picker", "effort", "chats", "pictures", "words", "speak"];
 
 /// A conversation in the phone's drawer.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -492,7 +509,7 @@ mod tests {
         // A typed question, and ▶ on an answer.
         assert_eq!(
             parse(r#"{"type":"ask","text":"When is the bin day?"}"#).unwrap(),
-            In::Ask { text: "When is the bin day?".into(), chat: None, pictures: 0, as_text: false }
+            In::Ask { text: "When is the bin day?".into(), chat: None, pictures: 0, as_text: false, speak: false }
         );
         assert_eq!(parse(r#"{"type":"read_aloud","id":"chat:3:5"}"#).unwrap(), In::ReadAloud { id: "chat:3:5".into() });
         // A row of Chat's picker: its provider, model, server or file.
@@ -641,5 +658,36 @@ mod tests {
         // Said in `ready.can`, after what was there before.
         assert!(CAN.contains(&"words"));
         assert_eq!(&CAN[..6], &["ask", "read_aloud", "picker", "effort", "chats", "pictures"]);
+    }
+
+    #[test]
+    fn talks_words_sent_from_the_box_are_asked_out_loud_a_v1_addition() {
+        // Some of the box's words came from Talk: asked as a spoken question.
+        let ask = parse(r#"{"type":"ask","text":"Water the beans tonight","chat":12,"pictures":1,"speak":true}"#).unwrap();
+        assert_eq!(
+            ask,
+            In::Ask { text: "Water the beans tonight".into(), chat: Some(serde_json::json!(12)), pictures: 1, as_text: false, speak: true }
+        );
+        // A page from before never sends it: typed.
+        let In::Ask { speak, .. } = parse(r#"{"type":"ask","text":"Hi"}"#).unwrap() else { panic!() };
+        assert!(!speak);
+        // Only a true `speak` is one.
+        assert!(parse(r#"{"type":"ask","text":"Hi","speak":"yes"}"#).is_err());
+        assert!(matches!(parse(r#"{"type":"ask","text":"Hi","speak":false}"#).unwrap(), In::Ask { speak: false, .. }));
+        // Said in `ready.can`, after what was there before.
+        assert_eq!(CAN.last(), Some(&"speak"));
+        assert_eq!(&CAN[..7], &["ask", "read_aloud", "picker", "effort", "chats", "pictures", "words"]);
+        // A hello with both the phone's device and the QR's token.
+        let both = parse(r#"{"type":"hello","v":1,"name":"Pixel","nonce":"n","device":{"id":"d1","secret":"s"},"pair":{"token":"t0k"}}"#).unwrap();
+        assert_eq!(
+            both,
+            In::Hello {
+                v: 1,
+                name: "Pixel".into(),
+                nonce: "n".into(),
+                device: Some(DeviceCreds { id: "d1".into(), secret: "s".into() }),
+                pair: Some(PairToken { token: "t0k".into() })
+            }
+        );
     }
 }

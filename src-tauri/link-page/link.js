@@ -18,12 +18,16 @@
 // Talk puts its words in the text box to check first (the Claude and
 // ChatGPT apps' way: talk, see what you said, fix it, send it yourself):
 // `start {mode: "words"}`, then the PC's `words` go in at the caret, after
-// whatever was typed. Hands-free (or a PC from before, without "words" in
-// `ready.can`) sends the question at once and Yap answers out loud.
+// whatever was typed; Send asks them as said (`ask {speak: true}`: answered
+// out loud, as a spoken question is) when any of the box's words came from
+// Talk since it was last empty or sent. Hands-free (or a PC from before,
+// without "words" in `ready.can`) sends the question at once and Yap
+// answers out loud.
 //
 // What it does: pairing (the QR's #pair=<token>, the 4-digit code, the device
-// kept in localStorage), typed questions (`ask`: answered in the same
-// conversation, not spoken; ▶ under an answer has it read, `read_aloud`),
+// kept in localStorage; a hello carries the device and any code this tab
+// has, the device counted first), typed questions (`ask`: answered in the
+// same conversation, not spoken; ▶ under an answer has it read, `read_aloud`),
 // Talk (tap or hold; hands-free ends by itself after the wait chosen — 1 s,
 // 1.5 s or 2.5 s — of quiet), the mic resampled to 16 kHz Int16 in an
 // AudioWorklet (mic-worklet.js, dsp.js), the spoken answer as one stream
@@ -173,6 +177,18 @@ function loadChat() {
   return (typeof v === 'number' && v > 0) || v === 'new' ? v : null;
 }
 
+/**
+ * The paired device this phone keeps (shared by every tab of the page), or
+ * null. Read afresh for every hello: another tab may have paired since.
+ */
+function loadDevice() {
+  const d = load(KEY.device);
+  return d && typeof d.id === 'string' && d.id && typeof d.secret === 'string' && d.secret ? { id: d.id, secret: d.secret } : null;
+}
+
+/** The QR's token in this address (`#pair=<token>`), or ''. */
+const pairInAddress = () => new URLSearchParams(location.hash.slice(1)).get('pair') || '';
+
 // ------------------------------------------------------------------- state
 
 /** One of WAITS' names: what's stored, or Normal. */
@@ -180,8 +196,6 @@ function waitChoice(w) {
   return typeof w === 'string' && Object.prototype.hasOwnProperty.call(WAITS, w) ? w : 'normal';
 }
 
-const fragment = new URLSearchParams(location.hash.slice(1));
-const storedDevice = load(KEY.device);
 const keptThread = loadThread();
 
 const S = {
@@ -190,9 +204,15 @@ const S = {
   denied: false,
   deniedWhy: '',
   pc: load(KEY.pc) || '',
-  pairToken: fragment.get('pair') || '',
+  // The QR's token, while this tab has one: it goes with the device (a tab
+  // restored with an old `#pair=` keeps its address), and the PC counts the
+  // device first.
+  pairToken: pairInAddress(),
   pairCode: '',
-  device: storedDevice && storedDevice.id && storedDevice.secret ? storedDevice : null,
+  device: loadDevice(),
+  // Refused, then another tab paired the phone: this one tries again with
+  // that device once it's in front.
+  comeBack: false,
   retries: 0,
   retryTimer: 0,
   pingTimer: 0,
@@ -248,6 +268,9 @@ const S = {
   speakingTurn: 0,
   // Words in the composer.
   typed: false,
+  // Some of them came from Talk (since the box was last empty or sent; an
+  // edit doesn't change it): Send asks them as said, answered out loud.
+  said: false,
   error: '',
   note: '',
   handsFree: load(KEY.handsFree) === true,
@@ -496,6 +519,9 @@ function connect() {
       /* gone */
     }
   }
+  // The device as every tab keeps it now: another tab may have paired this
+  // phone since this one loaded (its old device would be refused).
+  S.device = loadDevice() || S.device;
   if (!S.device && !S.pairToken) {
     render();
     return;
@@ -507,9 +533,13 @@ function connect() {
   ws.onopen = () => {
     if (S.ws !== ws) return;
     const hello = { type: 'hello', v: 1, name: deviceName(), nonce: nonce() };
-    // A code scanned again pairs afresh, in place of the device kept here.
+    // Both when this tab has both: the PC counts the device first, so a tab
+    // restored with an old code in its address still connects; the code
+    // pairs only a phone the PC doesn't know (a new one, or one removed).
+    // (Until 3 Nov the code went instead of the device: restored tabs were
+    // refused, and their refusals locked the phone out.)
+    if (S.device) hello.device = { id: S.device.id, secret: S.device.secret };
     if (S.pairToken) hello.pair = { token: S.pairToken };
-    else if (S.device) hello.device = { id: S.device.id, secret: S.device.secret };
     ws.send(JSON.stringify(hello));
     startPings(ws);
   };
@@ -633,6 +663,12 @@ function onText(text) {
     case 'ready':
       S.ready = true;
       S.retries = 0;
+      // Connected: a code this tab had is spent (its device counted, or it
+      // just paired). Out of the address, so a reload or a restored tab
+      // never brings it again.
+      S.pairToken = '';
+      S.pairCode = '';
+      clearFragment();
       if (typeof m.pc === 'string' && m.pc) {
         S.pc = m.pc;
         save(KEY.pc, S.pc);
@@ -869,6 +905,8 @@ function onCantRead(message) {
   if (text && !el.input.value.trim()) {
     el.input.value = text;
     S.typed = true;
+    // Talk's words back where they were: still said, when they go again.
+    S.said = !!(p && p.said);
     fitInput();
   }
   S.step = '';
@@ -878,7 +916,8 @@ function onCantRead(message) {
 
 /**
  * **Talk's words, back from the PC** (`words`): into the text box, to check
- * and send. Nothing was asked: Send asks them as a typed question.
+ * and send. Nothing was asked: Send asks them as the spoken question they
+ * were (`speak`), answered out loud.
  */
 function onWords(text) {
   S.transcribing = false;
@@ -918,6 +957,8 @@ function putWords(words) {
   // No space before what closes a sentence or a bracket.
   const trail = after && !/^[\s.,;:!?)\]}]/.test(after) ? ' ' : '';
   box.value = before + lead + words + trail + after;
+  // Said: Send asks the box's words as a spoken question, answered out loud.
+  S.said = true;
   const caret = (before + lead + words).length;
   try {
     box.setSelectionRange(caret, caret);
@@ -1856,7 +1897,8 @@ function finishStop() {
       t.pictures = pics.length;
       t.pics = pics.map((p) => p.url);
     }
-    S.pending = { text: '', pics };
+    // (Back in the box if Chat's model can't read them: still said.)
+    S.pending = { text: '', pics, said: true };
     S.attached = [];
     S.cantRead = '';
     renderShots();
@@ -2179,7 +2221,10 @@ function connLine() {
 }
 
 function render() {
-  const pairing = S.denied || (!S.device && !S.ready) || (!!S.pairToken && !S.ready);
+  // Pairing: no device, or a code being checked. A tab with a device and a
+  // code is connecting as any tab is, until the PC says which (`ready`, or
+  // the code's `pair_wait` when it doesn't know the device).
+  const pairing = S.denied || (!S.device && !S.ready) || (!!S.pairToken && !S.ready && (!S.device || !!S.pairCode));
   el.pair.hidden = !pairing;
   el.chat.hidden = pairing;
   el.settingsBtn.hidden = pairing;
@@ -2422,10 +2467,13 @@ function fitInput() {
 }
 
 /**
- * **A typed question**: answered by Yap's AI on the PC in the same
- * conversation as the spoken ones (`ask`), and not spoken — ▶ under the
- * answer has it read. Whatever Yap was doing is let go first (as Talk
- * does): its voice stopped, or the question it was working on cancelled.
+ * **The composer's question** (`ask`): answered by Yap's AI on the PC in
+ * the same conversation as the spoken ones. Typed, it's answered on screen
+ * — ▶ under the answer has it read; with Talk's words in it (`S.said`), as
+ * the spoken question it was (`speak`): the bubble's 🎙, the answer said on
+ * the phone with its ■, as a spoken question's is. Whatever Yap was doing
+ * is let go first (as Talk does): its voice stopped, or the question it
+ * was working on cancelled.
  */
 function sendTyped(how = {}) {
   const text = el.input.value.trim();
@@ -2469,23 +2517,39 @@ function sendTyped(how = {}) {
     msg.pictures = pics.length;
     if (how.asText) msg.asText = true;
   }
+  // Talk's words (some of them, checked and maybe fixed here): asked as the
+  // spoken question they were, and answered out loud as one is. A PC from
+  // before `"speak"` reads it as nothing and answers on screen.
+  const said = S.said;
+  if (said) msg.speak = true;
+  const aloud = said && can('speak');
   if ((pics.length && !sendPictures(pics, send, sendBinary)) || !send(msg)) {
     S.error = `Lost the connection to ${pcName()}. Ask again once it's back.`;
     render();
     return;
   }
-  const t = currentTurn(true, true);
+  const t = currentTurn(true, !aloud);
   t.q = text;
   t.pictures = pics.length;
   t.pics = pics.map((p) => p.url);
-  S.pending = { text, pics };
+  S.pending = { text, pics, said };
   if (how.without) for (const p of S.attached) URL.revokeObjectURL(p.url);
   S.attached = [];
   S.cantRead = '';
   renderShots();
   el.input.value = '';
   S.typed = false;
+  S.said = false;
   fitInput();
+  if (aloud) {
+    // The answer is said here: the sound starts within this tap (a phone
+    // wants a gesture for it), and the mic goes as after a spoken question
+    // (Clearer sound: the headset can switch to its music link meanwhile).
+    const ctx = audioContext();
+    if (ctx.state !== 'running') ctx.resume().catch(() => {});
+    player.prepare();
+    afterQuestionSent();
+  }
   S.phase = 'thinking';
   S.step = '';
   S.workSince = performance.now();
@@ -2816,6 +2880,8 @@ el.settings.addEventListener('click', (e) => {
 // The composer: Enter sends, Shift+Enter makes a new line; the box grows.
 el.input.addEventListener('input', () => {
   fitInput();
+  // Emptied: what's written next is typed, until Talk adds to it.
+  if (el.input.value === '') S.said = false;
   const typed = el.input.value.trim() !== '';
   if (typed !== S.typed) {
     S.typed = typed;
@@ -2851,10 +2917,57 @@ document.addEventListener('visibilitychange', () => {
   keepAwake();
   // Back from the lock screen: the sound may have been suspended.
   if (mic.ctx && mic.ctx.state !== 'running') mic.ctx.resume().catch(() => {});
-  if (!S.ws) reconnectNow();
+  // Refused, and another tab paired the phone meanwhile: back with its device.
+  if (S.comeBack) comeBack();
+  else if (!S.ws) reconnectNow();
   else ping();
 });
 window.addEventListener('online', reconnectNow);
+
+// Another tab of this page paired the phone (or paired it again): a tab
+// refused for the device it had comes back with the new one — once, on
+// purpose; now if it's in front, else when it's next shown (a phone's
+// background tabs needn't all say hello at once). A tab connected,
+// connecting or showing a code carries on.
+window.addEventListener('storage', (e) => {
+  if (e.key !== KEY.device && e.key !== null) return;
+  const d = loadDevice();
+  if (!d || (S.device && d.id === S.device.id && d.secret === S.device.secret)) return;
+  S.device = d;
+  if (S.denied && !S.ws) {
+    S.comeBack = true;
+    if (document.visibilityState === 'visible') comeBack();
+  }
+});
+
+/** A refused tab tries again with the device another tab paired. */
+function comeBack() {
+  if (!S.comeBack) return;
+  S.comeBack = false;
+  if (!S.denied || S.ws) return;
+  S.denied = false;
+  S.deniedWhy = '';
+  S.retries = 0;
+  connect();
+}
+
+// A code opened in this very tab (the link pasted into its address bar, or
+// the QR opened where the page already was): only its address's fragment
+// changes, so the page isn't loaded again. A hello with it now (and the
+// device: the PC counts that first).
+window.addEventListener('hashchange', () => {
+  const token = pairInAddress();
+  if (!token || token === S.pairToken) return;
+  S.pairToken = token;
+  S.pairCode = '';
+  S.denied = false;
+  S.deniedWhy = '';
+  S.retries = 0;
+  // A connection open now ends as a dropped one does (anything under way
+  // goes with it), then the hello goes again.
+  if (S.ws) dropped(S.ws);
+  else connect();
+});
 
 // ------------------------------------------------------------- the tests'
 
@@ -2888,6 +3001,10 @@ window.__yapLink = {
       contextRate: mic.ctx ? mic.ctx.sampleRate : 0,
       contextState: mic.ctx ? mic.ctx.state : '',
       micOpen: !!mic.stream,
+      // Some of the box's words came from Talk (Send asks them out loud).
+      said: S.said,
+      // The QR's token this tab still has (a stale one goes with the device).
+      pairing: !!S.pairToken,
       // The conversation on the PC this phone is in, and its pictures waiting.
       chat: S.chat,
       title: S.title,

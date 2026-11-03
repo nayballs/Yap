@@ -130,7 +130,9 @@
 //! question **typed** on the phone (2026-11-03, [`Phone::by_voice`] false)
 //! goes the same way minus the audio: in the same conversation, answered as
 //! Chat answers a typed question (no `SPOKEN_ANSWER_NOTE`, not marked "by
-//! voice"), and not said — ▶ on the phone asks for that.
+//! voice"), and not said — ▶ on the phone asks for that. Talk's words
+//! checked in the phone's box and sent (`ask {speak}`, that evening) are a
+//! spoken question again: by voice, the note, said on the phone.
 //!
 //! Events: `yap-assistant {phase, conversationId, messageId, about?}` (the bar's
 //! capsule), `yap-assistant-turn {phase: asked | answered | failed |
@@ -672,9 +674,10 @@ pub trait Phone: Send + Sync {
         let _ = message_id;
         self.answer(text, true);
     }
-    /// Asked out loud (then its answer is said, on the phone); `false`: typed
-    /// on the phone (2026-11-03) — answered as Chat answers a typed
-    /// question, not said (the phone's ▶ asks for that).
+    /// Asked out loud (then its answer is said, on the phone) — Talk's words
+    /// sent from the phone's box too (`ask {speak}`); `false`: typed on the
+    /// phone (2026-11-03) — answered as Chat answers a typed question, not
+    /// said (the phone's ▶ asks for that).
     fn by_voice(&self) -> bool {
         true
     }
