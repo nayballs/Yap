@@ -58,9 +58,15 @@ once_cell = "1"
 # in (a Linux-only crate keeps 0.14 in Cargo.lock): still three hashbrowns.
 whatlang = "0.18"
 
-# Audio capture + sound cue
-cpal = "0.15"
-rodio = "0.19"
+# Audio capture (the mic, a meeting's loopback) + playback (Yap's sounds,
+# spoken replies). rodio builds on one cpal minor (0.22 on 0.17): they move
+# together, one cpal in the tree. cpal 0.17's `name()` is Windows' bare
+# "Microphone", so Yap names devices itself (dictation/mics.rs
+# `device_name`) and finds a mic by its endpoint id (`input_device`).
+# rodio's playback only: Yap plays the PCM it makes, never a file, so none
+# of its decoders, its microphone or its dither.
+cpal = "0.17"
+rodio = { version = "0.22", default-features = false, features = ["playback"] }
 
 # Clipboard for text injection
 arboard = "3"

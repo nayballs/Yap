@@ -62,12 +62,12 @@ Reading answers aloud: Kokoro and Windows' voices on this PC, ElevenLabs on the 
   (`Speaker`, unit-tested on a simulated clock): one utterance at a time on
   a worker thread — "speaking" at once, the output opened on the worker
   (rodio on `config.output_device`), each sentence made while the one before
-  plays; `stop()` empties the sink and drops the queue at once; a new
+  plays; `stop()` empties the player and drops the queue at once; a new
   utterance replaces the old; it checks before every sentence and while one
   plays that no dictation records (`pipeline::dictation_state`), refuses to
   start over one, and refuses while a meeting records (the loopback would
   put Yap in "Them"; `meeting::start` stops it). Each sentence is
-  `stream`ed into the sink piece by piece (each piece checked: stopped, or
+  `stream`ed into the player piece by piece (each piece checked: stopped, or
   a dictation started → the stream ends). **A streamed answer's job**
   (`Job.feed`, `speak_streamed` → a `Feed`; the Voice Assistant,
   2026-10-22): it starts with no sentences and is "speaking" at once; the
@@ -101,7 +101,7 @@ Reading answers aloud: Kokoro and Windows' voices on this PC, ElevenLabs on the 
   (`Synth::marks`), else from its audio (`marks::from_audio`), mapped back
   from the said words to the shown ones (`marks::align`). `position()`,
   `pause()`, `resume()` (the playback held where it is: rodio's
-  `Sink::pause`). **A cloud voice failing**
+  `Player::pause`). **A cloud voice failing**
   (`Job.fallback`: `Fallback {local, notify}`): the rest of that answer —
   the failed sentence included — goes to the local voice, if there's one,
   else the answer stops there; the failing engine is never asked again for

@@ -1221,7 +1221,11 @@ to **Run again** from Home.
   **Which microphone, and a device going** (2026-10-25, `dictation/mics.rs`):
   `open` tries `mics::candidates(order, Windows' list, away)` in turn — the
   person's order (`config.mic_order`), then Windows' default; one that won't
-  open gives way to the next; none at all → "No microphone found". The
+  open gives way to the next; none at all → "No microphone found". Each is
+  found among cpal's devices by its **endpoint id** (`mics::input_device`,
+  else by its name; the meeting's mic and the mic quiz too), and a device
+  is named by Windows' FriendlyName (`mics::device_name`: from cpal 0.17
+  its own `name()` is the bare "Microphone", the same for most mics). The
   running stream knows its endpoint (`Running.endpoint`). Windows' list
   changing (`mics::on_change` → `Cmd::Devices`) and cpal's error callback
   (every error stops a WASAPI stream: `DeviceNotAvailable` when it's
@@ -1682,7 +1686,11 @@ to **Run again** from Home.
   `meeting::start` opens the loopback (`meeting_started`, a quarter of a
   second), their stop sound once the capture has closed its streams
   (`meeting_stopped`, `meeting::capturing`). `open_output` (the configured
-  output device, else the default) is shared with `voice/tts.rs`. **Test
+  output device, found by its name as `mics::device_name` gives it, else
+  the default) is shared with `voice/tts.rs`: rodio on the device's own
+  format and Windows' default period (`open_device`; rodio 0.22's builder
+  asks for 50 ms, which would start, pause and stop every sound that much
+  later). **Test
   mode** opens no device: what would play is kept for the debug-only
   `sound_e2e_heard` (`"minimal.locked"`), each sound "lasting" its length
   (robot mode plays them). E2E: `e2e/sounds.spec.js`.

@@ -19,14 +19,15 @@ pub fn installed_models() -> Vec<String> {
         .collect()
 }
 
-/// List available microphone input device names (cpal's). Settings and the
-/// first-run setup use `mics::list_mics` (endpoint ids, Windows' default).
+/// List available microphone input device names (Windows' FriendlyNames,
+/// `mics::device_name`). Settings and the first-run setup use
+/// `mics::list_mics` (endpoint ids, Windows' default).
 #[tauri::command]
 pub fn list_audio_devices() -> Vec<String> {
-    use cpal::traits::{DeviceTrait, HostTrait};
+    use cpal::traits::HostTrait;
     let host = cpal::default_host();
     host.input_devices()
-        .map(|devs| devs.filter_map(|d| d.name().ok()).collect())
+        .map(|devs| devs.filter_map(|d| crate::dictation::mics::device_name(&d)).collect())
         .unwrap_or_default()
 }
 
@@ -41,13 +42,14 @@ pub fn set_mic_test(state: State<'_, AppState>, on: bool) {
     }
 }
 
-/// List available audio output device names (for the chime).
+/// List available audio output device names (for the chime and the voice:
+/// `config.output_device` keeps one, `sound::open_output` finds it).
 #[tauri::command]
 pub fn list_output_devices() -> Vec<String> {
-    use cpal::traits::{DeviceTrait, HostTrait};
+    use cpal::traits::HostTrait;
     let host = cpal::default_host();
     host.output_devices()
-        .map(|devs| devs.filter_map(|d| d.name().ok()).collect())
+        .map(|devs| devs.filter_map(|d| crate::dictation::mics::device_name(&d)).collect())
         .unwrap_or_default()
 }
 

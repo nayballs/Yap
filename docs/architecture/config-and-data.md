@@ -117,7 +117,7 @@
   sound_cancelled off for a config from before them, so an existing install
   keeps exactly the sounds it had; an older Yap drops the new fields when it
   saves, and their defaults come back. output_device (the sounds' and
-  spoken replies' speakers), quiet_other_apps ("Silence other apps while you
+  spoken replies' speakers, by Windows' name for it: `mics::device_name`), quiet_other_apps ("Silence other apps while you
   dictate", off; reads old configs' `muteWhileRecording`) + pause_media
   ("Pause music and videos while you dictate", off; both `dictation/mute.rs`),
   keep_mic_ready ("Keep the microphone ready", off: the mic opens when you
@@ -259,7 +259,7 @@
   "windows"), tts_voice (Kokoro's, "af_bella"), tts_windows_voice ("" =
   Windows' default), tts_rate (1.0, 0.5–2.0), tts_volume (0.5: Yap's own
   gain on the voice, squared — `tts::gain`, half = −12 dB, 10 % = −40 dB —
-  under the Windows mixer, live mid-sentence via the rodio sink's volume;
+  under the Windows mixer, live mid-sentence via the rodio player's volume;
   `tts_volume_set {volume, save?}` → `yap-voice-volume`), duck_other_apps
   (true: "Turn other apps down while Yap speaks", `voice/duck.rs` — other
   apps' sessions to 30 % of their level while Yap's voice plays on this PC;

@@ -75,7 +75,7 @@ pub struct Endpoint {
 /// Where a stream opens.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Target {
-    /// This endpoint (opened by its name: cpal's).
+    /// This endpoint (opened by its endpoint id: [`input_device`]).
     Mic(Endpoint),
     /// Windows' default input, whichever it is — when Windows' list
     /// couldn't be read (as Yap always did).
@@ -441,6 +441,43 @@ fn read_windows() -> Option<Vec<Endpoint>> {
     None
 }
 
+// ---- cpal's devices, as Yap names and finds them --------------------------------------------
+
+/// A cpal device's name as Yap shows, keeps and matches it: Windows'
+/// FriendlyName ("Microphone (Contoso USB Mic)", "Speakers (Contoso
+/// Audio)"), the name cpal's `name()` gave until 0.17. From 0.17 `name()` is
+/// the endpoint's bare description ("Microphone", "Speakers"), the same for
+/// most devices, so Yap never asks it: the sounds' and the voice's output
+/// device (`config.output_device`), Settings' lists and the logs' names are
+/// all this one.
+pub(crate) fn device_name(device: &cpal::Device) -> Option<String> {
+    #[cfg(windows)]
+    {
+        win::friendly_name(device)
+    }
+    #[cfg(not(windows))]
+    {
+        use cpal::traits::DeviceTrait;
+        device.description().ok().map(|d| d.name().to_string())
+    }
+}
+
+/// The cpal input device that is `ep`: by its endpoint id (the one Windows'
+/// list and `config.mic_order` keep), else — no device has it — by its
+/// name, as Yap opened microphones before cpal 0.17. `Ok(None)`: no such
+/// device now.
+pub(crate) fn input_device(host: &cpal::Host, ep: &Endpoint) -> Result<Option<cpal::Device>, String> {
+    use cpal::traits::HostTrait;
+    let mut devices: Vec<cpal::Device> =
+        host.input_devices().map_err(|e| format!("Failed to enumerate input devices: {e}"))?.collect();
+    #[cfg(windows)]
+    let by_id = devices.iter().position(|d| !ep.id.is_empty() && win::endpoint_id(d).as_deref() == Some(ep.id.as_str()));
+    #[cfg(not(windows))]
+    let by_id = None;
+    let at = by_id.or_else(|| devices.iter().position(|d| device_name(d).as_deref() == Some(ep.name.as_str())));
+    Ok(at.map(|i| devices.swap_remove(i)))
+}
+
 /// Core Audio's facts about capture endpoints (Windows).
 #[cfg(windows)]
 pub(crate) mod win {
@@ -455,7 +492,8 @@ pub(crate) mod win {
     };
     use windows::Win32::System::Variant::{VT_LPWSTR, VT_UI4};
 
-    /// PKEY_Device_FriendlyName: "Microphone (Contoso USB Mic)", the name cpal gives.
+    /// PKEY_Device_FriendlyName: "Microphone (Contoso USB Mic)", the name Yap
+    /// knows a device by ([`super::device_name`]).
     const FRIENDLY_NAME: PROPERTYKEY = PROPERTYKEY {
         fmtid: GUID::from_u128(0xa45c254e_df1c_4efd_8020_67d146a850e0),
         pid: 14,
@@ -528,6 +566,36 @@ pub(crate) mod win {
                 None
             }
         }
+    }
+
+    /// The Core Audio endpoint behind a cpal device (cpal hands it out from
+    /// 0.17). WASAPI is the only host Yap builds cpal with, so the pattern
+    /// always matches.
+    #[allow(irrefutable_let_patterns)]
+    fn endpoint(device: &cpal::Device) -> Option<&IMMDevice> {
+        let cpal::platform::DeviceInner::Wasapi(d) = device.as_inner() else {
+            return None;
+        };
+        Some(d.immdevice())
+    }
+
+    /// A cpal device's PKEY_Device_FriendlyName ([`super::device_name`]).
+    pub(crate) fn friendly_name(device: &cpal::Device) -> Option<String> {
+        let device = endpoint(device)?;
+        // SAFETY: a COM call on this thread (cpal's enumeration set COM up
+        // here); the PROPVARIANT is read, then cleared once.
+        unsafe {
+            let store = device.OpenPropertyStore(STGM_READ).ok()?;
+            let mut v = store.GetValue(&FRIENDLY_NAME).ok()?;
+            let name = text(&v);
+            let _ = PropVariantClear(&mut v);
+            name
+        }
+    }
+
+    /// A cpal device's endpoint id: the one [`capture_endpoints`] gives.
+    pub(crate) fn endpoint_id(device: &cpal::Device) -> Option<String> {
+        id_of(endpoint(device)?)
     }
 
     fn id_of(device: &IMMDevice) -> Option<String> {
@@ -900,6 +968,22 @@ mod tests {
         assert!(!is_built_in("USB", ARRAY, "Microphone Array (Fabrikam Webcam)"));
         assert!(!is_built_in("BTHENUM", "", "Headset (Contoso Buds)"));
         assert!(!is_built_in("ROOT", "", "Microphone Array (Contoso Streaming)"));
+    }
+
+    /// cpal's devices are Windows' endpoints by Yap's ids and names: each
+    /// active capture endpoint is found by `input_device` (by its endpoint
+    /// id) and named as Windows' list names it (cpal 0.17's own `name()` is
+    /// the bare "Microphone"). Reads this PC's list; opens nothing.
+    #[cfg(windows)]
+    #[test]
+    fn cpal_finds_each_microphone_by_its_endpoint_id_with_its_windows_name() {
+        let host = cpal::default_host();
+        for f in win::capture_endpoints().unwrap_or_default() {
+            let ep = Endpoint { id: f.id.clone(), name: f.name.clone(), ..Default::default() };
+            let device = input_device(&host, &ep).unwrap().expect("cpal lists every active capture endpoint");
+            assert_eq!(win::endpoint_id(&device).as_deref(), Some(f.id.as_str()));
+            assert_eq!(device_name(&device), Some(f.name.clone()));
+        }
     }
 
     #[test]

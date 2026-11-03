@@ -157,6 +157,16 @@ later.
   2026; held on 0.37.0 for a day), so Yap shows its windows without activating them
   itself: `shell::window::show_quietly` (app-shell.md, "Window config"), and a unit test
   fails on any other `.show()`.
+- **cpal and rodio** move together: each rodio builds on one cpal minor
+  (0.22 on 0.17, since 3 Nov 2026), and the tree keeps one cpal. From 0.17
+  cpal's `name()` is Windows' bare description ("Microphone", "Speakers"),
+  so Yap names devices itself (`mics::device_name`: the FriendlyName, as
+  before) and finds a microphone by its endpoint id (`mics::input_device`);
+  rodio 0.22's 50 ms output buffer is set back to the device's own period
+  (`sound::open_device`). Its streams' threads really run at time-critical
+  priority from cpal 0.16 (0.15 passed a thread id as the handle). A stub
+  build never opens a device: the robot tests (`mic`, `audio`, `stt`,
+  `meeting-audio`, `read-aloud`, `other-apps`) are what prove a move.
 - **The Tauri pair**: the `tauri` crate and `@tauri-apps/api` / `@tauri-apps/cli` share a
   major.minor (2.12 since 3 Nov 2026), as do each `tauri-plugin-*` crate and its
   `@tauri-apps/plugin-*` package (dialog: 2.8). The CLI refuses a `tauri build` whose

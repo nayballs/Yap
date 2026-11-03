@@ -8,7 +8,7 @@ use std::time::{Duration, Instant};
 
 use super::Pcm;
 
-/// Where the audio goes: rodio's sink, or a simulated clock in test mode.
+/// Where the audio goes: rodio's player, or a simulated clock in test mode.
 pub trait Playback: Send + Sync {
     fn append(&self, pcm: Pcm);
     /// Append audio of a read-aloud's sentence (`tag`): the playback then
@@ -80,14 +80,14 @@ impl<S: Iterator<Item = f32>> Iterator for Tagged<S> {
     }
 }
 
-impl<S: rodio::Source<Item = f32>> rodio::Source for Tagged<S> {
-    fn current_frame_len(&self) -> Option<usize> {
-        self.inner.current_frame_len()
+impl<S: rodio::Source> rodio::Source for Tagged<S> {
+    fn current_span_len(&self) -> Option<usize> {
+        self.inner.current_span_len()
     }
-    fn channels(&self) -> u16 {
+    fn channels(&self) -> rodio::ChannelCount {
         self.inner.channels()
     }
-    fn sample_rate(&self) -> u32 {
+    fn sample_rate(&self) -> rodio::SampleRate {
         self.inner.sample_rate()
     }
     fn total_duration(&self) -> Option<Duration> {
@@ -95,8 +95,16 @@ impl<S: rodio::Source<Item = f32>> rodio::Source for Tagged<S> {
     }
 }
 
+/// `pcm` as rodio plays it. `None` for audio without channels or a rate:
+/// nothing to play (rodio 0.19's buffer panicked on it).
+fn buffer(pcm: Pcm) -> Option<rodio::buffer::SamplesBuffer> {
+    let channels = std::num::NonZero::new(pcm.channels)?;
+    let rate = std::num::NonZero::new(pcm.sample_rate)?;
+    Some(rodio::buffer::SamplesBuffer::new(channels, rate, pcm.samples))
+}
+
 /// A playback, plus whatever must stay alive (on the worker's thread) for it
-/// to play: rodio's output stream.
+/// to play: rodio's output (its device sink).
 pub struct Opened {
     pub play: Arc<dyn Playback>,
     pub keep: Option<Box<dyn std::any::Any>>,
@@ -111,8 +119,8 @@ pub type Opener = Box<dyn FnOnce() -> Result<Opened, String> + Send>;
 
 /// The volume the voice plays at (0.0–1.0, `config.tts_volume`), as f32 bits.
 static VOLUME: AtomicU32 = AtomicU32::new(0x3F00_0000); // 0.5
-/// The sink playing now, to change its volume while it speaks.
-static LIVE_SINK: Mutex<Option<std::sync::Weak<rodio::Sink>>> = Mutex::new(None);
+/// The player playing now, to change its volume while it speaks.
+static LIVE_PLAYER: Mutex<Option<std::sync::Weak<rodio::Player>>> = Mutex::new(None);
 
 /// A volume setting as the gain the samples get: squared, so the low end is
 /// really quiet — half is a quarter of the voice's full loudness (−12 dB),
@@ -133,14 +141,14 @@ pub fn volume() -> f32 {
 pub fn set_volume(volume: f32) {
     let v = if volume.is_finite() { volume.clamp(0.0, 1.0) } else { 0.5 };
     VOLUME.store(v.to_bits(), Ordering::Relaxed);
-    let sink = LIVE_SINK.lock().unwrap_or_else(|p| p.into_inner()).as_ref().and_then(std::sync::Weak::upgrade);
-    if let Some(sink) = sink {
-        sink.set_volume(gain(v));
+    let player = LIVE_PLAYER.lock().unwrap_or_else(|p| p.into_inner()).as_ref().and_then(std::sync::Weak::upgrade);
+    if let Some(player) = player {
+        player.set_volume(gain(v));
     }
 }
 
 struct RodioPlayback {
-    sink: Arc<rodio::Sink>,
+    player: Arc<rodio::Player>,
     /// [`pack_position`] of the tagged sample the output took last.
     pos: Arc<AtomicU64>,
     /// The other apps turned down while this plays ("Turn other apps down
@@ -152,14 +160,16 @@ struct RodioPlayback {
 
 impl Playback for RodioPlayback {
     fn append(&self, pcm: Pcm) {
+        let Some(audio) = buffer(pcm) else { return };
         self.duck.hold();
-        self.sink.append(rodio::buffer::SamplesBuffer::new(pcm.channels, pcm.sample_rate, pcm.samples));
+        self.player.append(audio);
     }
     fn append_tagged(&self, pcm: Pcm, tag: Tag) {
-        self.duck.hold();
         let ns_per_sample = 1e9 / (f64::from(pcm.sample_rate.max(1)) * f64::from(pcm.channels.max(1)));
-        self.sink.append(Tagged {
-            inner: rodio::buffer::SamplesBuffer::new(pcm.channels, pcm.sample_rate, pcm.samples),
+        let Some(audio) = buffer(pcm) else { return };
+        self.duck.hold();
+        self.player.append(Tagged {
+            inner: audio,
             pos: Arc::clone(&self.pos),
             sentence: tag.sentence,
             base_ns: tag.offset.as_nanos() as f64,
@@ -168,24 +178,24 @@ impl Playback for RodioPlayback {
         });
     }
     fn stop(&self) {
-        self.sink.stop();
+        self.player.stop();
         self.duck.let_go();
     }
     fn done(&self) -> bool {
-        self.sink.empty()
+        self.player.empty()
     }
     fn pause(&self) {
-        self.sink.pause();
+        self.player.pause();
         self.duck.let_go();
     }
     fn resume(&self) {
-        self.sink.play();
-        if !self.sink.empty() {
+        self.player.play();
+        if !self.player.empty() {
             self.duck.hold();
         }
     }
     fn paused(&self) -> bool {
-        self.sink.is_paused()
+        self.player.is_paused()
     }
     fn position(&self) -> Option<(usize, Duration)> {
         unpack_position(self.pos.load(Ordering::Relaxed))
@@ -196,14 +206,13 @@ impl Playback for RodioPlayback {
 /// as the chimes use it.
 pub(super) fn rodio_opener(device: Option<String>) -> Opener {
     Box::new(move || {
-        let (stream, handle) =
-            crate::dictation::sound::open_output(device.as_deref()).ok_or("No sound output device to speak on")?;
-        let sink = Arc::new(rodio::Sink::try_new(&handle).map_err(|e| format!("Couldn't play the voice: {e}"))?);
-        sink.set_volume(gain(volume()));
-        *LIVE_SINK.lock().unwrap_or_else(|p| p.into_inner()) = Some(Arc::downgrade(&sink));
+        let out = crate::dictation::sound::open_output(device.as_deref()).ok_or("No sound output device to speak on")?;
+        let player = Arc::new(rodio::Player::connect_new(out.mixer()));
+        player.set_volume(gain(volume()));
+        *LIVE_PLAYER.lock().unwrap_or_else(|p| p.into_inner()) = Some(Arc::downgrade(&player));
         Ok(Opened {
-            play: Arc::new(RodioPlayback { sink, pos: Arc::new(AtomicU64::new(0)), duck: crate::voice::duck::Duck::new() }),
-            keep: Some(Box::new(stream)),
+            play: Arc::new(RodioPlayback { player, pos: Arc::new(AtomicU64::new(0)), duck: crate::voice::duck::Duck::new() }),
+            keep: Some(Box::new(out)),
         })
     })
 }
@@ -311,6 +320,57 @@ pub(super) fn sim_opener() -> Opener {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A sentence reaches rodio as it was made (every sample, its channels
+    /// and rate), and its tag moves the position on as the output takes it:
+    /// half its samples taken, half its length in.
+    #[test]
+    fn a_tagged_sentence_plays_as_made_and_says_how_far_it_has_got() {
+        use rodio::Source;
+        let samples: Vec<f32> = (0..48_000).map(|i| (i as f32 / 48_000.0) - 0.5).collect();
+        let pcm = || Pcm { sample_rate: 24_000, channels: 2, samples: samples.clone() };
+        let pos = Arc::new(AtomicU64::new(0));
+        let mut tagged = Tagged {
+            inner: buffer(pcm()).unwrap(),
+            pos: Arc::clone(&pos),
+            sentence: 3,
+            base_ns: Duration::from_millis(250).as_nanos() as f64,
+            ns_per_sample: 1e9 / (24_000.0 * 2.0),
+            taken: 0,
+        };
+        assert_eq!((tagged.channels().get(), tagged.sample_rate().get()), (2, 24_000));
+        assert_eq!(tagged.total_duration(), Some(Duration::from_secs(1)));
+        let first: Vec<f32> = tagged.by_ref().take(24_000).collect();
+        let (sentence, at) = unpack_position(pos.load(Ordering::Relaxed)).unwrap();
+        assert_eq!(sentence, 3);
+        assert!(at.abs_diff(Duration::from_millis(750)) < Duration::from_micros(50), "{at:?}");
+        let rest: Vec<f32> = tagged.collect();
+        assert_eq!([first, rest].concat(), samples);
+        // Audio without channels or a rate is nothing to play.
+        assert!(buffer(Pcm { sample_rate: 0, ..pcm() }).is_none());
+        assert!(buffer(Pcm { channels: 0, ..pcm() }).is_none());
+    }
+
+    /// The volume, a pause and a stop reach what the output takes: half
+    /// volume is a quarter of each sample, paused gives silence, stopped
+    /// ends the queue.
+    #[test]
+    fn the_volume_a_pause_and_a_stop_reach_the_output() {
+        let (player, mut output) = rodio::Player::new();
+        player.set_volume(gain(0.5));
+        player.append(buffer(Pcm { sample_rate: 24_000, channels: 1, samples: vec![0.8; 24_000] }).unwrap());
+        // rodio applies its controls every 5 ms of audio: past the first.
+        let heard: Vec<f32> = output.by_ref().take(2_400).collect();
+        assert!(heard[240..].iter().all(|s| (s - 0.2).abs() < 1e-6), "a quarter of 0.8");
+        player.pause();
+        let held: Vec<f32> = output.by_ref().take(2_400).collect();
+        assert!(held[240..].iter().all(|s| *s == 0.0), "paused: silence");
+        assert!(!player.empty() && player.is_paused());
+        player.play();
+        player.stop();
+        let _: Vec<f32> = output.by_ref().take(2_400).collect();
+        assert!(player.empty(), "stopped: nothing left");
+    }
 
     #[test]
     fn the_volume_curve_is_quiet_at_the_low_end() {
