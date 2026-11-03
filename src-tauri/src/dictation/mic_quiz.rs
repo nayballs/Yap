@@ -212,9 +212,9 @@ impl Ear {
 /// Open `ep` for listening (shared mode, downmixed to 16 kHz mono).
 #[cfg(windows)]
 fn open(ear: &mut Ear) {
-    use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
+    use cpal::traits::{DeviceTrait, StreamTrait};
     let host = cpal::default_host();
-    let Some(device) = host.input_devices().ok().and_then(|mut d| d.find(|d| d.name().is_ok_and(|n| n == ear.ep.name))) else {
+    let Some(device) = crate::dictation::mics::input_device(&host, &ear.ep).ok().flatten() else {
         ear.failed = true;
         return;
     };
@@ -222,11 +222,11 @@ fn open(ear: &mut Ear) {
         ear.failed = true;
         return;
     };
-    let (rate, channels) = (cfg.sample_rate().0, cfg.channels() as usize);
+    let (rate, channels) = (cfg.sample_rate(), cfg.channels() as usize);
     ear.rate = rate;
     let (samples, peak) = (Arc::clone(&ear.samples), Arc::clone(&ear.peak));
     let stream = device.build_input_stream(
-        &cpal::StreamConfig { channels: channels as u16, sample_rate: cpal::SampleRate(rate), buffer_size: cpal::BufferSize::Default },
+        &cpal::StreamConfig { channels: channels as u16, sample_rate: rate, buffer_size: cpal::BufferSize::Default },
         move |data: &[f32], _: &cpal::InputCallbackInfo| {
             let mono: Vec<f32> = if channels > 1 {
                 data.chunks_exact(channels).map(|f| f.iter().sum::<f32>() / channels as f32).collect()

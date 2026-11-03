@@ -972,7 +972,7 @@ mod default_output {
 /// Elsewhere: the default output's name, from cpal.
 #[cfg(not(windows))]
 mod default_output {
-    use cpal::traits::{DeviceTrait, HostTrait};
+    use cpal::traits::HostTrait;
 
     pub struct DefaultOutput;
 
@@ -982,7 +982,7 @@ mod default_output {
         }
 
         pub fn id(&self) -> Option<String> {
-            cpal::default_host().default_output_device()?.name().ok()
+            crate::dictation::mics::device_name(&cpal::default_host().default_output_device()?)
         }
     }
 }
@@ -1057,10 +1057,7 @@ fn build_capture_stream(
         None => host
             .default_output_device()
             .ok_or("No default output device for loopback capture")?,
-        Some(Target::Mic(ep)) => host
-            .input_devices()
-            .map_err(|e| format!("Failed to enumerate input devices: {e}"))?
-            .find(|d| d.name().map(|n| n == ep.name).unwrap_or(false))
+        Some(Target::Mic(ep)) => crate::dictation::mics::input_device(&host, ep)?
             .ok_or_else(|| format!("Input device not found: {}", ep.name))?,
         Some(Target::Default) => host
             .default_input_device()
@@ -1077,16 +1074,16 @@ fn build_capture_stream(
             .default_input_config()
             .map_err(|e| format!("Failed to get input config: {e}"))?
     };
-    let native_rate = default_config.sample_rate().0;
+    let native_rate = default_config.sample_rate();
     let channels = default_config.channels();
-    let name = device.name().unwrap_or_else(|_| "unknown".into());
+    let name = crate::dictation::mics::device_name(&device).unwrap_or_else(|| "unknown".into());
     // The device's name at debug only: a headset's can carry its owner's.
     tracing::info!(native_rate, channels, loopback, "Meeting capture stream");
     tracing::debug!(device = %name, loopback, "Meeting capture stream's device");
 
     let stream_config = cpal::StreamConfig {
         channels,
-        sample_rate: cpal::SampleRate(native_rate),
+        sample_rate: native_rate,
         buffer_size: cpal::BufferSize::Default,
     };
     let needs_resample = native_rate != TARGET_SAMPLE_RATE;
@@ -1162,7 +1159,7 @@ fn open_mic(buf: &AudioBuf, overflow: &Arc<AtomicBool>, stopped: &Arc<AtomicBool
 fn default_output_name() -> String {
     cpal::default_host()
         .default_output_device()
-        .and_then(|d| d.name().ok())
+        .and_then(|d| crate::dictation::mics::device_name(&d))
         .unwrap_or_else(|| "unknown".to_string())
 }
 

@@ -239,28 +239,31 @@ fn play_here(pack: Pack, cue: Cue, peak: f32, volume: f32, device: Option<&str>,
 /// Plays `samples` on the output device and waits until they have played
 /// (`limit` at most, or until `stop` says so).
 fn output(samples: Vec<f32>, device: Option<&str>, limit: Duration, stop: &dyn Fn() -> bool) {
-    use rodio::buffer::SamplesBuffer;
-    use rodio::Sink;
-    if let Some((_stream, handle)) = open_output(device) {
-        if let Ok(sink) = Sink::try_new(&handle) {
-            sink.append(SamplesBuffer::new(1, SAMPLE_RATE, samples));
-            wait_played_or(&sink, limit, stop);
-        }
+    if let Some(out) = open_output(device) {
+        let player = rodio::Player::connect_new(out.mixer());
+        player.append(mono(samples));
+        wait_played_or(&player, limit, stop);
     }
 }
 
-/// Open an output stream on the named device, falling back to the system
-/// default when no name is given or the device can't be found. Uses rodio's
-/// re-exported cpal so the device type matches `OutputStream::try_from_device`.
-pub(crate) fn open_output(device: Option<&str>) -> Option<(rodio::OutputStream, rodio::OutputStreamHandle)> {
-    use rodio::cpal::traits::{DeviceTrait, HostTrait};
+/// A sound's samples as rodio plays them: mono, at the packs' rate.
+fn mono(samples: Vec<f32>) -> rodio::buffer::SamplesBuffer {
+    const RATE: rodio::SampleRate = rodio::SampleRate::new(SAMPLE_RATE).unwrap();
+    rodio::buffer::SamplesBuffer::new(rodio::nz!(1), RATE, samples)
+}
+
+/// Open an output on the named device (`config.output_device`: its name as
+/// `mics::device_name` gives it), falling back to the system default when
+/// no name is given or the device can't be found or opened.
+pub(crate) fn open_output(device: Option<&str>) -> Option<rodio::MixerDeviceSink> {
+    use cpal::traits::HostTrait;
 
     if let Some(name) = device {
-        let host = rodio::cpal::default_host();
+        let host = cpal::default_host();
         if let Ok(mut devs) = host.output_devices() {
-            if let Some(dev) = devs.find(|d| d.name().map(|n| n == name).unwrap_or(false)) {
-                if let Ok(pair) = rodio::OutputStream::try_from_device(&dev) {
-                    return Some(pair);
+            if let Some(dev) = devs.find(|d| crate::dictation::mics::device_name(d).as_deref() == Some(name)) {
+                if let Some(out) = open_device(dev) {
+                    return Some(out);
                 }
                 // Its name at debug only: a headset's can carry its owner's.
                 tracing::warn!("Failed to open the sounds' output device; using default");
@@ -268,31 +271,49 @@ pub(crate) fn open_output(device: Option<&str>) -> Option<(rodio::OutputStream, 
             }
         }
     }
-    rodio::OutputStream::try_default().ok()
+    // Windows' default, else the first other output that opens.
+    let host = cpal::default_host();
+    let default = host.default_output_device()?;
+    open_device(default).or_else(|| host.output_devices().ok()?.find_map(open_device))
+}
+
+/// rodio on `device` as rodio 0.19 opened it: its default format, else
+/// another it supports, with the device's own period (Windows' default
+/// buffer: rodio 0.22's builder asks for 50 ms, which would start, pause
+/// and stop every sound and sentence that much later), and quiet when it
+/// closes (0.22 says so on stderr by default).
+fn open_device(device: cpal::Device) -> Option<rodio::MixerDeviceSink> {
+    let mut out = rodio::DeviceSinkBuilder::from_device(device)
+        .ok()?
+        .with_buffer_size(cpal::BufferSize::Default)
+        .open_sink_or_fallback()
+        .ok()?;
+    out.log_on_drop(false);
+    Some(out)
 }
 
 /// The longest a sound is waited for: it lasts under a third of a second,
 /// so past this its output has stopped taking audio.
 const PLAY_LIMIT: Duration = Duration::from_secs(3);
 
-/// Wait until `sink` has played what it holds, or `limit` at most. An
+/// Wait until `player` has played what it holds, or `limit` at most. An
 /// output device that goes while a sound plays (headphones unplugged, a
 /// Bluetooth headset switched off with its mic, mid-dictation) stops its
-/// stream, and nothing drains the sink again: rodio's `sleep_until_end`
+/// stream, and nothing drains the player again: rodio's `sleep_until_end`
 /// waited for ever then, and what runs after the stop sound — the
 /// dictation's mic let go, the other apps' sound back — never did.
 #[cfg(test)]
-fn wait_played(sink: &rodio::Sink, limit: Duration) {
-    wait_played_or(sink, limit, &|| false)
+fn wait_played(player: &rodio::Player, limit: Duration) {
+    wait_played_or(player, limit, &|| false)
 }
 
-/// [`wait_played`], cut short (and the sink emptied) once `stop` says so: a
-/// preview replaced.
-fn wait_played_or(sink: &rodio::Sink, limit: Duration, stop: &dyn Fn() -> bool) {
+/// [`wait_played`], cut short (and the player emptied) once `stop` says
+/// so: a preview replaced.
+fn wait_played_or(player: &rodio::Player, limit: Duration, stop: &dyn Fn() -> bool) {
     let started = Instant::now();
-    while !sink.empty() {
+    while !player.empty() {
         if stop() {
-            sink.stop();
+            player.stop();
             return;
         }
         if started.elapsed() >= limit {
@@ -420,43 +441,55 @@ pub fn sound_e2e_heard(clear: Option<bool>) -> Result<Vec<Heard>, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use rodio::buffer::SamplesBuffer;
 
     /// The sound's output stopped taking audio (its device unplugged while
-    /// it played): nothing drains the sink again. `sleep_until_end` waited
-    /// for ever, so the stop sound's `played` — the mic let go, the other
-    /// apps' sound back — never ran. Now the wait gives up.
+    /// it played): nothing drains the player again. `sleep_until_end`
+    /// waited for ever, so the stop sound's `played` — the mic let go, the
+    /// other apps' sound back — never ran. Now the wait gives up.
     #[test]
     fn a_sound_whose_output_stopped_is_waited_for_a_moment_only() {
-        // A sink nothing plays from: its output gone.
-        let (sink, _stopped_output) = rodio::Sink::new_idle();
-        sink.append(SamplesBuffer::new(1, SAMPLE_RATE, packs::CLASSIC.render(Cue::Stop, MAX_GAIN)));
+        // A player nothing plays from: its output gone.
+        let (player, _stopped_output) = rodio::Player::new();
+        player.append(mono(packs::CLASSIC.render(Cue::Stop, MAX_GAIN)));
         let (tx, rx) = std::sync::mpsc::channel();
         thread::spawn(move || {
-            wait_played(&sink, Duration::from_millis(300));
+            wait_played(&player, Duration::from_millis(300));
             let _ = tx.send(());
         });
         assert!(rx.recv_timeout(Duration::from_secs(5)).is_ok(), "the wait gave up");
 
         // An output that plays it: done as soon as it has.
-        let (sink, mut output) = rodio::Sink::new_idle();
-        sink.append(SamplesBuffer::new(1, SAMPLE_RATE, packs::CLASSIC.render(Cue::Start, MAX_GAIN)));
-        let player = thread::spawn(move || while output.next().is_some() {});
+        let (player, mut output) = rodio::Player::new();
+        player.append(mono(packs::CLASSIC.render(Cue::Start, MAX_GAIN)));
+        let drain = thread::spawn(move || while output.next().is_some() {});
         let started = Instant::now();
-        wait_played(&sink, Duration::from_secs(10));
+        wait_played(&player, Duration::from_secs(10));
         assert!(started.elapsed() < Duration::from_secs(5), "played, not timed out");
-        drop(sink);
-        let _ = player.join();
+        drop(player);
+        let _ = drain.join();
     }
 
     /// A preview replaced (another ▶, or ■) stops at once.
     #[test]
     fn a_preview_replaced_stops_at_once() {
-        let (sink, _idle) = rodio::Sink::new_idle();
-        sink.append(SamplesBuffer::new(1, SAMPLE_RATE, packs::SOFT.render(Cue::Notice, MAX_GAIN)));
+        let (player, _idle) = rodio::Player::new();
+        player.append(mono(packs::SOFT.render(Cue::Notice, MAX_GAIN)));
         let started = Instant::now();
-        wait_played_or(&sink, Duration::from_secs(10), &|| true);
+        wait_played_or(&player, Duration::from_secs(10), &|| true);
         assert!(started.elapsed() < Duration::from_secs(1));
+    }
+
+    /// A sound reaches rodio as it was made: every sample, mono, at the
+    /// packs' rate, so it lasts what its pack says.
+    #[test]
+    fn a_sound_plays_every_sample_mono_at_the_packs_rate() {
+        use rodio::Source;
+        let samples = packs::CLASSIC.render(Cue::Start, MAX_GAIN);
+        let buffer = mono(samples.clone());
+        assert_eq!((buffer.channels().get(), buffer.sample_rate().get()), (1, SAMPLE_RATE));
+        let length = buffer.total_duration().unwrap();
+        assert!(length.abs_diff(packs::CLASSIC.length(Cue::Start)) < Duration::from_millis(2), "{length:?}");
+        assert_eq!(buffer.collect::<Vec<f32>>(), samples);
     }
 
     /// New installs: start, stop, hands-free and cancelled on, the rest

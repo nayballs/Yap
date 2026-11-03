@@ -793,28 +793,24 @@ impl Owner {
         let started = Instant::now();
         let host = cpal::default_host();
         let device = match target {
-            Target::Mic(ep) => host
-                .input_devices()
-                .map_err(|e| format!("Failed to enumerate input devices: {}", e))?
-                .find(|d| d.name().map(|n| n == ep.name).unwrap_or(false))
-                .ok_or_else(|| {
-                    // The error goes to the log at warn: the name stays out.
-                    tracing::debug!(device = %ep.name, "Microphone: no input device by that name");
-                    "Input device not found".to_string()
-                })?,
+            Target::Mic(ep) => mics::input_device(&host, ep)?.ok_or_else(|| {
+                // The error goes to the log at warn: the name stays out.
+                tracing::debug!(device = %ep.name, "Microphone: no input device with that endpoint");
+                "Input device not found".to_string()
+            })?,
             Target::Default => host
                 .default_input_device()
                 .ok_or_else(|| "No default input device available".to_string())?,
         };
-        let dev_name = device.name().unwrap_or_else(|_| "unknown".into());
+        let dev_name = mics::device_name(&device).unwrap_or_else(|| "unknown".into());
         let default_config = device
             .default_input_config()
             .map_err(|e| format!("Failed to get default input config: {}", e))?;
-        let native_rate = default_config.sample_rate().0;
+        let native_rate = default_config.sample_rate();
         let channels = default_config.channels();
         let stream_config = cpal::StreamConfig {
             channels,
-            sample_rate: cpal::SampleRate(native_rate),
+            sample_rate: native_rate,
             buffer_size: cpal::BufferSize::Default,
         };
         let needs_resample = native_rate != TARGET_SAMPLE_RATE;
@@ -1021,8 +1017,8 @@ mod fake {
 
 #[cfg(windows)]
 mod platform {
-    /// Is the input named `name` (cpal's name, opened as Windows' default
-    /// without a list) a Bluetooth headset's?
+    /// Is the input named `name` (its FriendlyName, `mics::device_name`;
+    /// opened as Windows' default without a list) a Bluetooth headset's?
     pub(crate) fn bluetooth(name: &str) -> bool {
         let all = crate::dictation::mics::win::capture_endpoints().unwrap_or_default();
         let found = all.iter().find(|f| f.default).or_else(|| all.iter().find(|f| f.name == name));
@@ -1153,14 +1149,14 @@ mod tests {
         let host = cpal::default_host();
         let names: Vec<String> = host
             .input_devices()
-            .map(|d| d.filter_map(|d| d.name().ok()).collect())
+            .map(|d| d.filter_map(|d| mics::device_name(&d)).collect())
             .unwrap_or_default();
         for name in names {
             let mut rows = Vec::new();
             for _ in 0..5 {
-                let device = host.input_devices().unwrap().find(|d| d.name().ok().as_deref() == Some(&name)).unwrap();
+                let device = host.input_devices().unwrap().find(|d| mics::device_name(d).as_deref() == Some(&name)).unwrap();
                 let cfg = device.default_input_config().unwrap();
-                let (rate, ch) = (cfg.sample_rate().0, cfg.channels());
+                let (rate, ch) = (cfg.sample_rate(), cfg.channels());
                 let asked = Instant::now();
                 let first = Arc::new(Mutex::new(None::<(u64, u64)>));
                 let sound = Arc::new(Mutex::new(None::<u64>));
@@ -1168,7 +1164,7 @@ mod tests {
                 let frame_ms = 1_000.0 / rate as f64;
                 let stream = device
                     .build_input_stream(
-                        &cpal::StreamConfig { channels: ch, sample_rate: cpal::SampleRate(rate), buffer_size: cpal::BufferSize::Default },
+                        &cpal::StreamConfig { channels: ch, sample_rate: rate, buffer_size: cpal::BufferSize::Default },
                         move |data: &[f32], _: &cpal::InputCallbackInfo| {
                             let ms = asked.elapsed().as_millis() as u64;
                             let mut f = f2.lock().unwrap();
