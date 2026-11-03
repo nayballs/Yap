@@ -763,7 +763,9 @@ validated live 2026-07-10), transcription history + stats, cleanup presets,
 2026-10-17: per app after the start chime, never calls, back to exactly
 their level after the stop chime; the rules unit-tested, the volume drop and
 restore and the pause and resume checked by the robot on an Edge page it
-opened), **sounds in packs** (`dictation/sound.rs`, 2026-10-31: Classic, Soft,
+opened; since 2026-11-03 every media wait bounded and no lock held across
+them, unit-tested over stand-in sessions that answer late or never — not
+yet seen against a really hung session), **sounds in packs** (`dictation/sound.rs`, 2026-10-31: Classic, Soft,
 Crisp and Minimal for a dictation's start, stop, hands-free and cancel, an
 error, "Taking longer than usual", meeting notes' start and stop and a bar
 card; every pack's lengths, levels and start/stop contours unit-tested,
