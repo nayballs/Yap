@@ -192,6 +192,9 @@ test("Chat: the model is told about the user, and Exa searches the user's countr
   expect(steps[0].toolChoice).toBe('required');
   expect(steps[1].tools).toEqual(steps[0].tools);
   const system = steps[0].system;
+  // Which model answers, after the persona: said when asked, never denied
+  // (ai_model::answering_line; a custom server on this PC here).
+  expect(system).toContain("You are Yap's assistant, running on Fake Chat, on this PC. Asked who or what you are, or which model you are, say so plainly;");
   // The block, last in the prompt — without the clock, so the prompt stays
   // the same from turn to turn (a local model re-uses its cache)…
   const block = system.slice(system.lastIndexOf('About the user: '));

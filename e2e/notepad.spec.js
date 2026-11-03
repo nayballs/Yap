@@ -579,6 +579,11 @@ test('"What did I miss?" and Ask anything, in a sheet over the meeting', async (
   await expect(sheet.locator('.mq').last()).toHaveText('Who owns the budget?');
   await expect(sheet).toContainText('Alice owns the budget');
   expect(fakeLlm.requests.filter((r) => r.kind === 'meetingAsk')).toHaveLength(1);
+  // A question of the person's own is told which model answers it
+  // (ai_model::answering_line); "What did I miss?" isn't asked anything.
+  const [meetingAsk] = fakeLlm.requests.filter((r) => r.kind === 'meetingAsk');
+  expect(meetingAsk.system).toContain("You are Yap's assistant, running on Fake Notes, on this PC.");
+  expect(catchUp.system).not.toContain("You are Yap's assistant");
   await shot(pad, '13-ask-follow-up');
 
   // New chat clears the thread; Escape puts the sheet away.

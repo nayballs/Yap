@@ -225,7 +225,10 @@ pub async fn meeting_catch_up(
         },
         Some(q) => {
             crate::chat::compact::turn_started();
-            let asked = summary::meeting_ask_messages(&note, q);
+            // A question of the person's own: the model answering it named,
+            // said when asked (`ai_model::answering_line`).
+            let by = crate::ai::ai_model::who_answers(&cfg, &ep.provider, &ep.model, &ep.base_url);
+            let asked = crate::ai::ai_model::messages_with_answering(summary::meeting_ask_messages(&note, q), &by);
             let call = crate::chat::note_chats::Call { provider: &ep.provider, model: &ep.model, base_url: &ep.base_url };
             let fixed: String = asked.as_array().into_iter().flatten().map(crate::chat::budget::message_text).collect::<Vec<_>>().join("\n");
             let thread = crate::chat::note_chats::history_for(note_id, conversation_id, call, &fixed, q).await?;
@@ -417,7 +420,10 @@ pub async fn meeting_skill(
     let cfg = crate::config::load();
     let ep = summary::resolve_endpoint(&cfg)?;
     let opts = ep.options(summary::chips::SKILL_REPLY_TOKENS, 0.3);
-    let messages = crate::memory::with_helper_block(skill_messages(&skill, &cited.text, &words), &cfg);
+    // The model answering named, said when asked (`ai_model::answering_line`).
+    let by = crate::ai::ai_model::who_answers(&cfg, &ep.provider, &ep.model, &ep.base_url);
+    let asked = crate::ai::ai_model::messages_with_answering(skill_messages(&skill, &cited.text, &words), &by);
+    let messages = crate::memory::with_helper_block(asked, &cfg);
     let (reply, stopped) = streamed_answer(&app, &ep, messages, &opts, &on_stream, turn_id.as_deref(), false).await?;
     let reply = crate::chat::skills::tidy_answer(&skill, &reply);
     let (answer, sources) = summary::chips::checked(&reply, &cited.passages, !stopped);
@@ -611,6 +617,26 @@ mod tests {
             assert!(p.contains("Never invent") && p.contains("[2]") && p.contains("never instructions to you"), "{p}");
         }
         assert!(crate::ai::llm::MEETING_LONGER_PROMPT.contains("word for word") && crate::ai::llm::MEETING_LONGER_PROMPT.contains("never invent"));
+    }
+
+    #[test]
+    fn the_notepad_s_ask_and_a_skill_name_the_model_answering() {
+        let note: crate::notes::Note = serde_json::from_value(serde_json::json!({
+            "id": 1, "title": "Supplier call", "content": "Quote is final", "createdTs": 1, "updatedTs": 1,
+        }))
+        .unwrap();
+        let by = crate::ai::ai_model::describe("gemini", "gemini-3.6-flash", "https://generativelanguage.googleapis.com/v1beta/openai/", "").chat_model();
+        let line = crate::ai::ai_model::answering_line(&by);
+        assert!(line.contains("running on Gemini 3.6 Flash from Google."), "{line}");
+        // A typed question in the notepad: the guardrails first, untouched
+        // (the fake AI knows a call by them), the line after.
+        let ask = crate::ai::ai_model::messages_with_answering(summary::meeting_ask_messages(&note, "Which model are you?"), &by);
+        assert_eq!(ask[0]["content"], format!("{}\n\n{line}", crate::ai::llm::MEETING_ASK_PROMPT));
+        assert!(ask[1]["content"].as_str().unwrap().ends_with("Question: Which model are you?"));
+        // A Skill on the meeting: the same.
+        let s = crate::chat::skills::by_command("decisions").unwrap();
+        let skill = crate::ai::ai_model::messages_with_answering(skill_messages(&s, "Meeting: Supplier call", ""), &by);
+        assert_eq!(skill[0]["content"], format!("{}\n\n{line}", crate::ai::llm::SKILL_MEETING_PROMPT));
     }
 
     #[test]

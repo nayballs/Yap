@@ -243,8 +243,8 @@ pub fn after_thread_turn(app: &AppHandle, note: u64, thread: u64, notepad: bool)
         let on_device = crate::ai::local_llm::active_model_display(&cfg);
         let (ep, fixed) = if notepad {
             let Ok(e) = crate::meetings::meeting_summary::resolve_endpoint(&cfg) else { return };
-            let fixed = crate::meetings::meeting_summary::meeting_ask_messages(&n, "").to_string();
             let by = crate::ai::ai_model::describe(&e.provider, &e.model, &e.base_url, &on_device).chat_model();
+            let fixed = crate::ai::ai_model::messages_with_answering(crate::meetings::meeting_summary::meeting_ask_messages(&n, ""), &by).to_string();
             (Endpoint { base_url: e.base_url, api_key: e.api_key, model: e.model, provider: e.provider, disable_thinking: e.disable_thinking, by: Some(by) }, fixed)
         } else {
             let Ok((base_url, api_key, model, provider, persona, disable_thinking)) = crate::chat::turn::resolve_chat_endpoint(&cfg) else { return };

@@ -203,6 +203,25 @@ mod tests {
         assert!(md.contains("_You dictated here (left out of the notes)._"));
         assert!(!md.contains("**You:** \n"), "no empty line for a marker");
     }
+
+    #[test]
+    fn the_notes_ask_bar_names_the_model_answering() {
+        let note: crate::notes::Note = serde_json::from_value(serde_json::json!({
+            "id": 7, "title": "Allotment plans", "content": "Leeks by the shed", "createdTs": 1, "updatedTs": 1,
+        }))
+        .unwrap();
+        let cfg = crate::config::YapConfig::default();
+        let now = chrono::Utc::now();
+        let (system, _) = note_prompt(&note, &cfg, "You are a helpful voice assistant.", "anthropic", "claude-haiku-5-5", "https://api.anthropic.com/v1", "Which model are you?", now);
+        assert!(
+            system.starts_with("You are a helpful voice assistant. You are Yap's assistant, running on Claude Haiku 5.5 from Anthropic."),
+            "{system}"
+        );
+        assert!(system.contains("<note>\nLeeks by the shed\n</note>"));
+        // A server on this PC, as its own.
+        let (system, _) = note_prompt(&note, &cfg, "You are helpful.", "local", "llama-3.1-8b", "http://localhost:11434/v1", "Hi", now);
+        assert!(system.starts_with("You are helpful. You are Yap's assistant, running on Llama 3.1 8B, on this PC."), "{system}");
+    }
 }
 
 /// Folder names (seeded with Personal + Meetings, OpenWhispr-style).
@@ -548,9 +567,11 @@ pub(crate) fn note_prompt(
     // clock in the system prompt too, as `chat_turn` does.
     let profile = crate::ai::about_you::profile(cfg);
     let in_message = crate::chat::tools::supports_tools(provider, model);
+    // The persona with the line naming the model answering (`ai_model::answering_line`).
+    let by = crate::ai::ai_model::who_answers(cfg, provider, model, base_url);
     let mut system = format!(
         "{}\n\nThe user is asking about the following note. Ground your answers in it; if the answer isn't in the note, say so briefly.\n\n<note>\n{}\n</note>",
-        persona.trim(),
+        crate::ai::ai_model::persona_with_answering(persona, &by),
         context.trim(),
     );
     let asked = if in_message {

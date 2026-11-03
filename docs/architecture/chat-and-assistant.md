@@ -96,7 +96,21 @@ The AI Chat surface (conversations, the tool-calling loop and its note tools) an
   "Assistant: Created a … build", "the build I created". The summariser
   names the model of each answer once a chat has switched (`compact::line`,
   `models_switched`), and its prompt keeps the name.
-  Never a note in the answers' text (a model copies it, above). **Every**
+  Never a note in the answers' text (a model copies it, above).
+  **Which model is answering** (2026-11-03, `ai_model::answering_line`,
+  [ai-models.md](./ai-models.md)): the persona is followed by one line
+  naming the model writing the answer and where it runs, as Yap names
+  them — "You are Yap's assistant, running on Claude Haiku 5.5 from
+  Anthropic. Asked who or what you are, or which model you are, say so
+  plainly; never deny being Claude Haiku 5.5 or say you can't tell. Don't
+  bring it up unless asked." Told nothing, Claude Haiku 5.5 on the Voice
+  Assistant, greeted as Claude from the phone, said "I'm Yap, not Claude…
+  I can't tell you which model Yap runs on". In a turn it's `Endpoint`'s
+  persona (`turn.rs`), so every prompt a turn writes has it — Chat, the
+  Voice Assistant on this PC and from the phone, the Meetings view's Ask,
+  Skills across the meetings, a small model's web pipeline — and what a
+  question is measured beside (`stable_prompt`, Chat's limits and ring).
+  **Every**
   system prompt ends with the **About you
   block** (ai-models.md: where the person is and their English, prices in
   their currency — or a foreign price said as such —, times, units, their

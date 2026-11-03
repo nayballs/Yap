@@ -75,7 +75,10 @@ pub(crate) fn resolve_chat_endpoint(
 }
 
 /// The Chat scope's endpoint and persona ([`resolve_chat_endpoint`]), as a
-/// turn uses them.
+/// turn uses them: the persona with the line naming the model that answers
+/// (`ai_model::answering_line`), so every prompt a turn writes — the tool
+/// loop's, a small model's and its web pipeline's — and what it's measured
+/// by start with it.
 struct Endpoint {
     base_url: String,
     api_key: String,
@@ -89,6 +92,8 @@ impl Endpoint {
     /// [`resolve_chat_endpoint`]'s, named.
     fn resolve(cfg: &YapConfig) -> Result<Endpoint, String> {
         let (base_url, api_key, model, provider, persona, disable_thinking) = resolve_chat_endpoint(cfg)?;
+        let by = crate::ai::ai_model::who_answers(cfg, &provider, &model, &base_url);
+        let persona = crate::ai::ai_model::persona_with_answering(&persona, &by);
         Ok(Endpoint { base_url, api_key, model, provider, persona, disable_thinking })
     }
 }
@@ -555,5 +560,52 @@ pub async fn chat_limits() -> Limits {
         label,
         more,
         provider: crate::privacy::net::provider_name(&ep.provider).to_string(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn chat_on(provider: &str, base_url: &str, model: &str) -> YapConfig {
+        let mut cfg = YapConfig::default();
+        cfg.llm_scopes.insert(
+            "chat".into(),
+            crate::config::LlmScope {
+                enabled: true,
+                provider: provider.into(),
+                base_url: base_url.into(),
+                model: model.into(),
+                api_key: "test-key-not-real".into(),
+                prompt: "You are a helpful voice assistant.".into(),
+                ..Default::default()
+            },
+        );
+        cfg
+    }
+
+    #[test]
+    fn every_prompt_a_turn_writes_names_the_model_answering_it() {
+        // The maintainer's phone (the Voice Assistant), 3 Nov 2026: Claude
+        // Haiku 5.5 picked, and the answer "I'm Yap, not Claude".
+        let cfg = chat_on("anthropic", "https://api.anthropic.com/v1", "claude-haiku-5-5");
+        let ep = Endpoint::resolve(&cfg).unwrap();
+        let start = "You are a helpful voice assistant. You are Yap's assistant, running on Claude Haiku 5.5 from Anthropic. Asked who or what you are, or which model you are, say so plainly;";
+        assert!(ep.persona.starts_with(start), "{}", ep.persona);
+        // Chat, the Voice Assistant (from another app, or the phone) and the
+        // Meetings view's Ask: the system prompt starts with it, and so does
+        // what a question is measured beside.
+        let profile = crate::ai::about_you::Profile::default();
+        let now = chrono::Utc::now();
+        for (scope, meetings, in_view) in [(None, false, true), (Some("assistant"), false, false), (Some("meetings"), true, false)] {
+            let gates = gates::Gates::for_turn(&cfg, &ep, scope, meetings, in_view);
+            assert!(gates.stable_prompt(&cfg, &ep.persona, &profile, now).starts_with(start), "{scope:?}");
+        }
+        // A small model's web pipeline writes its own prompt from the persona.
+        assert!(crate::web::grounded_prompt(&ep.persona, "<passage n=\"1\">…</passage>", "Tuesday 3 November 2026", true).starts_with(start));
+        // Another model picked: the line follows it, once.
+        let ep = Endpoint::resolve(&chat_on("groq", "https://api.groq.com/openai/v1", "openai/gpt-oss-20b")).unwrap();
+        assert!(ep.persona.contains("running on GPT-OSS 20B, served by Groq."), "{}", ep.persona);
+        assert_eq!(ep.persona.matches("You are Yap's assistant").count(), 1);
     }
 }

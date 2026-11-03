@@ -221,6 +221,8 @@ test('"/" lists the core six where they run; one off the menu typed in full runs
   await expect(answer.getByRole('heading', { name: 'Open questions' })).toBeVisible();
   await expect(answer.locator('a.md-passage').first()).toBeVisible();
   const run = fakeLlm.requests.filter((r) => r.kind === 'skill').at(-1);
+  // On the meeting's model, told which it is (ai_model::answering_line).
+  expect(run.system).toContain("You are Yap's assistant, running on Fake Notes, on this PC.");
   expect(run.user).toContain('<passage n="1"');
   expect(run.user).toContain('Can the supplier even deliver before the launch?');
   // The questions asked, in order, for the model to go through (skills::meeting_aid).
