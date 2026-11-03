@@ -1,11 +1,17 @@
 <!doctype html>
 <!-- Yap Link: the phone's page. Served by Yap on the PC (README.md). No
-     service worker on purpose: see link.js. Its look is Yap's own (link.css:
-     the tokens, Figtree and EB Garamond from this PC, the mark). -->
+     service worker on purpose: see link.js. It's Yap's Chat on a phone
+     (link.css: Yap's tokens, Figtree and EB Garamond from this PC, the
+     mark): the conversation fills the screen, the composer at the bottom
+     carries the text box, Send and Talk (the Yap bar's pill), the model chip
+     sits under it as in Chat, and the settings are a sheet. -->
 <html lang="en-GB">
   <head>
     <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <!-- The composer rides above the on-screen keyboard: Chrome resizes the
+         page for it (interactive-widget), elsewhere link.js follows the
+         visual viewport. -->
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content" />
     <!-- Text follows the phone's font size (link.css sizes text in rem). -->
     <meta name="text-scale" content="scale" />
     <meta name="color-scheme" content="light dark" />
@@ -22,153 +28,184 @@
     <script type="module" src="link.js"></script>
   </head>
   <body data-phase="offline">
-    <header class="top">
-      <img class="mark" src="icon.svg" alt="" width="32" height="32" />
-      <div class="who">
-        <span class="name">Yap</span>
-        <span id="conn" class="conn" data-testid="conn" data-state="wait" role="status">Connecting to Yap…</span>
-      </div>
-      <button id="model" class="chip" type="button" aria-haspopup="dialog" data-testid="model-chip" hidden>
-        <span class="chip-text">
-          <span id="model-label" class="chip-label"></span>
-          <span id="model-where" class="chip-where" hidden></span>
-        </span>
-        <svg class="chev" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M7 10l5 5 5-5" /></svg>
-      </button>
-    </header>
-
-    <main>
-      <!-- Pairing: the code to check on the PC, or how to pair. -->
-      <section id="pair" class="pair" aria-labelledby="pair-title" hidden>
-        <h1 id="pair-title">Pair this phone with Yap</h1>
-        <p id="pair-wait" class="pair-wait" hidden>Connecting to Yap on your PC…</p>
-        <div id="pair-code-box" class="pair-code-box" data-testid="pair-code-box" hidden>
-          <p class="pair-say">Check this code on your PC:</p>
-          <p id="pair-code" class="code" data-testid="pair-code"></p>
-          <p class="pair-say">then press <strong>Allow</strong>.</p>
+    <div id="app" class="app">
+      <header class="top">
+        <img class="mark" src="icon.svg" alt="" width="30" height="30" />
+        <div class="who">
+          <span class="name">Yap</span>
+          <span id="conn" class="conn" data-testid="conn" data-state="wait" role="status">Connecting to Yap…</span>
         </div>
-        <div id="pair-how" class="pair-how" data-testid="pair-how" hidden>
-          <p id="pair-why" class="pair-why" data-testid="pair-why" hidden></p>
-          <p>
-            In Yap on your PC, open <strong>Settings → Phone → Pair a phone</strong>, then scan the code with this
-            phone's camera.
-          </p>
-          <button id="retry" class="btn secondary-btn" type="button" hidden>Try again</button>
-        </div>
-      </section>
+        <button id="settings-btn" class="iconbtn" type="button" aria-haspopup="dialog" aria-label="Settings" data-testid="settings" hidden>
+          <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><circle cx="5.5" cy="12" r="1.7" /><circle cx="12" cy="12" r="1.7" /><circle cx="18.5" cy="12" r="1.7" /></svg>
+        </button>
+      </header>
 
-      <!-- Talking: the first screen is the conversation over Talk, low
-           enough for a thumb; the options are under it. -->
-      <section id="talk" class="talk" aria-label="Ask Yap" hidden>
-        <div class="stage">
-          <div class="convo-box">
-            <p id="empty" class="empty">
-              <svg class="spark" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M12 2.5c.5 3.9 1.6 6.4 3.1 7.9 1.5 1.5 4 2.6 6.4 3.1-2.4.5-4.9 1.6-6.4 3.1-1.5 1.5-2.6 4-3.1 6.9-.5-2.9-1.6-5.4-3.1-6.9-1.5-1.5-4-2.6-6.9-3.1 2.9-.5 5.4-1.6 6.9-3.1 1.5-1.5 2.6-4 3.1-7.9z" /></svg>
-              Ask Yap anything: tap Talk, or hold it while you speak.
-            </p>
-            <ol id="convo" class="convo" aria-label="Conversation" aria-live="polite" data-testid="convo"></ol>
-          </div>
-
-          <div class="now">
-            <div class="phase-row">
-              <!-- The Voice Assistant's marks, as the Yap bar shows them: ✦ while it listens, three bars while it speaks. -->
-              <svg class="pmark listen" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M12 2.5c.5 3.9 1.6 6.4 3.1 7.9 1.5 1.5 4 2.6 6.4 3.1-2.4.5-4.9 1.6-6.4 3.1-1.5 1.5-2.6 4-3.1 6.9-.5-2.9-1.6-5.4-3.1-6.9-1.5-1.5-4-2.6-6.9-3.1 2.9-.5 5.4-1.6 6.9-3.1 1.5-1.5 2.6-4 3.1-7.9z" /></svg>
-              <span class="pmark speakbars" aria-hidden="true"><i></i><i></i><i></i></span>
-              <p id="phase" class="phase" role="status" data-testid="phase"></p>
+      <main>
+        <!-- Pairing: the code to check on the PC, or how to pair. -->
+        <section id="pair" class="pair" aria-labelledby="pair-title" hidden>
+          <div class="pair-card">
+            <img class="pair-mark" src="icon.svg" alt="" width="44" height="44" />
+            <h1 id="pair-title">Pair this phone with Yap</h1>
+            <p id="pair-wait" class="pair-wait" hidden>Connecting to Yap on your PC…</p>
+            <div id="pair-code-box" class="pair-code-box" data-testid="pair-code-box" hidden>
+              <p class="pair-say">Check this code on your PC:</p>
+              <p id="pair-code" class="code" data-testid="pair-code"></p>
+              <p class="pair-say">then press <strong>Allow</strong>.</p>
             </div>
-            <p id="step" class="step" data-testid="step" hidden>
+            <div id="pair-how" class="pair-how" data-testid="pair-how" hidden>
+              <p id="pair-why" class="pair-why" data-testid="pair-why" role="alert" hidden></p>
+              <p>
+                In Yap on your PC, open <strong>Settings → Phone → Pair a phone</strong>, then scan the code with this
+                phone's camera.
+              </p>
+              <button id="retry" class="btn secondary-btn" type="button" hidden>Try again</button>
+            </div>
+          </div>
+        </section>
+
+        <!-- Chat: the conversation fills the screen; the composer and the
+             model chip under it, at the bottom, within a thumb's reach. -->
+        <section id="chat" class="chat" aria-label="Ask Yap" hidden>
+          <div id="thread" class="thread" data-testid="thread">
+            <div id="empty" class="empty">
+              <svg class="empty-spark" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M12 2.5c.5 3.9 1.6 6.4 3.1 7.9 1.5 1.5 4 2.6 6.4 3.1-2.4.5-4.9 1.6-6.4 3.1-1.5 1.5-2.6 4-3.1 6.9-.5-2.9-1.6-5.4-3.1-6.9-1.5-1.5-4-2.6-6.9-3.1 2.9-.5 5.4-1.6 6.9-3.1 1.5-1.5 2.6-4 3.1-7.9z" /></svg>
+              <h1 class="empty-title">Ask Yap anything</h1>
+              <p class="empty-sub">Type a question, or tap <strong>Talk</strong> and speak. Hold Talk while you speak, if you like.</p>
+              <p id="keep-open" class="keep-open">Keep this page open. Your headset works as the mic and speaker.</p>
+            </div>
+            <ol id="convo" class="convo" aria-label="Conversation" aria-live="polite" data-testid="convo"></ol>
+            <!-- What Yap is doing, as Chat's activity line: three amber dots, the step, its time. -->
+            <p id="step" class="activity" data-testid="step" hidden>
               <span class="dots" aria-hidden="true"><i></i><i></i><i></i></span>
               <span id="step-line" class="step-line"></span><span id="step-time" class="step-time"></span>
             </p>
+          </div>
+
+          <div class="dock">
             <p id="note" class="note" data-testid="note" role="status" hidden></p>
             <p id="error" class="error" data-testid="error" role="alert" hidden></p>
-          </div>
+            <!-- Where Yap is, for a screen reader (the composer shows it). -->
+            <p id="phase" class="vh" role="status" data-testid="phase"></p>
 
-          <div class="controls">
-            <!-- The mic's sound while Yap listens: the Yap bar's waveform, newest on the right. -->
-            <div id="meter" class="meter" data-testid="meter" data-on="false" aria-hidden="true"></div>
-            <button id="talk-btn" class="talk-btn" type="button" aria-pressed="false" aria-describedby="keep-open" data-testid="talk">
-              <svg class="mic-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
-                <rect x="9" y="3" width="6" height="11" rx="3" />
-                <path d="M5.5 11a6.5 6.5 0 0 0 13 0M12 17.5V21M8.5 21h7" />
-              </svg>
-              <span id="talk-label" class="talk-label">Talk</span>
-              <span id="talk-time" class="talk-time" data-testid="talk-time" aria-hidden="true"></span>
-            </button>
-            <div class="secondary">
-              <button id="stop-btn" class="btn primary-btn stop" type="button" data-testid="stop" hidden>
-                <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><rect x="6" y="6" width="12" height="12" rx="2" /></svg>
-                Stop
+            <!-- Chat's composer: the text box and Send; Talk, the Yap bar's
+                 pill. While Yap listens it is the bar's capsule: ✕, the
+                 waveform, the time, Send. -->
+            <form id="composer" class="composer" data-state="idle" data-testid="composer" autocomplete="off">
+              <button id="cancel-btn" class="cbtn cancel" type="button" data-testid="cancel" aria-label="Cancel" hidden>
+                <svg class="x" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M6.5 6.5l11 11M17.5 6.5l-11 11" /></svg>
+                <svg class="sq" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><rect x="7" y="7" width="10" height="10" rx="2" /></svg>
               </button>
-              <button id="cancel-btn" class="btn secondary-btn" type="button" data-testid="cancel" hidden>Cancel</button>
+              <div class="field">
+                <textarea id="input" rows="1" placeholder="Ask Yap anything" aria-label="Ask Yap anything" enterkeyhint="send" data-testid="input"></textarea>
+              </div>
+              <div class="live" aria-hidden="true">
+                <svg class="spark" viewBox="0 0 24 24" focusable="false"><path d="M12 2.5c.5 3.9 1.6 6.4 3.1 7.9 1.5 1.5 4 2.6 6.4 3.1-2.4.5-4.9 1.6-6.4 3.1-1.5 1.5-2.6 4-3.1 6.9-.5-2.9-1.6-5.4-3.1-6.9-1.5-1.5-4-2.6-6.9-3.1 2.9-.5 5.4-1.6 6.9-3.1 1.5-1.5 2.6-4 3.1-7.9z" /></svg>
+                <span id="live-label" class="live-label"></span>
+                <!-- The mic's sound while Yap listens: the Yap bar's waveform, newest on the right. -->
+                <div id="meter" class="meter" data-testid="meter" data-on="false"></div>
+                <span id="talk-time" class="talk-time" data-testid="talk-time"></span>
+              </div>
+              <div class="acts">
+                <button id="stop-btn" class="stop-pill" type="button" data-testid="stop" hidden>
+                  <span class="speakbars" aria-hidden="true"><i></i><i></i><i></i></span>
+                  <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><rect x="6" y="6" width="12" height="12" rx="2" /></svg>
+                  Stop
+                </button>
+                <button id="send-btn" class="send" type="submit" aria-label="Send" data-testid="send" hidden>
+                  <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M12 19V5M5.5 11.5L12 5l6.5 6.5" /></svg>
+                </button>
+                <button id="talk-btn" class="talk" type="button" aria-pressed="false" data-testid="talk">
+                  <svg class="mic-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                    <rect x="9" y="3" width="6" height="11" rx="3" />
+                    <path d="M5.5 11a6.5 6.5 0 0 0 13 0M12 17.5V21M8.5 21h7" />
+                  </svg>
+                  <svg class="send-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M12 19V5M5.5 11.5L12 5l6.5 6.5" /></svg>
+                  <span id="talk-label" class="talk-label">Talk</span>
+                </button>
+              </div>
+            </form>
+
+            <!-- Chat's model chip, under the composer as in Chat: Chat's picker. -->
+            <div class="foot">
+              <button id="model" class="chip" type="button" aria-haspopup="dialog" data-testid="model-chip" hidden>
+                <span id="model-mark" class="pmark" aria-hidden="true"></span>
+                <span class="chip-text">
+                  <span id="model-label" class="chip-label"></span>
+                  <span id="model-where" class="chip-where" hidden></span>
+                </span>
+                <svg class="chev" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M7 14l5-5 5 5" /></svg>
+              </button>
             </div>
-            <p id="keep-open" class="keep-open">Keep this page open. Your headset works as the mic and speaker.</p>
           </div>
-        </div>
+        </section>
+      </main>
+    </div>
 
-        <div class="options">
-          <label class="switch">
-            <span class="switch-text">
-              <span class="switch-label">Hands-free</span>
-              <span id="handsfree-hint" class="hint">Sends when you stop talking</span>
-            </span>
-            <input id="handsfree" type="checkbox" role="switch" data-testid="handsfree" aria-describedby="handsfree-hint" />
-            <span class="track" aria-hidden="true"></span>
-          </label>
-          <fieldset id="wait" class="wait" data-testid="wait" hidden>
-            <legend class="field-label">Wait before sending</legend>
-            <div class="seg">
-              <label><input type="radio" name="wait" value="short" data-testid="wait-short" /><span>Short <small>1 s</small></span></label>
-              <label><input type="radio" name="wait" value="normal" data-testid="wait-normal" checked /><span>Normal <small>1.5 s</small></span></label>
-              <label><input type="radio" name="wait" value="long" data-testid="wait-long" /><span>Long <small>2.5 s</small></span></label>
-            </div>
-          </fieldset>
-          <label class="switch">
-            <span class="switch-text">
-              <span class="switch-label">Clearer sound in a headset</span>
-              <span id="clearer-hint" class="hint">A headset's call mode can crackle, so this closes the mic while Yap talks and the headset uses its music mode. You can't talk over Yap by voice; Stop still works.</span>
-            </span>
-            <input id="clearer" type="checkbox" role="switch" data-testid="clearer" aria-describedby="clearer-hint" />
-            <span class="track" aria-hidden="true"></span>
-          </label>
-          <div class="field">
-            <label for="mic" class="field-label">Microphone</label>
-            <select id="mic" data-testid="mic" aria-describedby="mic-hint">
-              <option value="">Phone's default microphone</option>
-            </select>
-            <span id="mic-hint" class="hint">Names show once you’ve allowed the microphone.</span>
+    <!-- The settings: talking hands-free, the headset's sound, the mic, Sound details. -->
+    <dialog id="settings" class="sheet" aria-labelledby="settings-title" data-testid="settings-sheet">
+      <div class="grab" aria-hidden="true"></div>
+      <h2 id="settings-title">Settings</h2>
+      <div class="options">
+        <label class="switch">
+          <span class="switch-text">
+            <span class="switch-label">Hands-free</span>
+            <span id="handsfree-hint" class="hint">Sends when you stop talking</span>
+          </span>
+          <input id="handsfree" type="checkbox" role="switch" data-testid="handsfree" aria-describedby="handsfree-hint" />
+          <span class="track" aria-hidden="true"></span>
+        </label>
+        <fieldset id="wait" class="wait" data-testid="wait" hidden>
+          <legend class="field-label">Wait before sending</legend>
+          <div class="seg">
+            <label><input type="radio" name="wait" value="short" data-testid="wait-short" /><span>Short <small>1 s</small></span></label>
+            <label><input type="radio" name="wait" value="normal" data-testid="wait-normal" checked /><span>Normal <small>1.5 s</small></span></label>
+            <label><input type="radio" name="wait" value="long" data-testid="wait-long" /><span>Long <small>2.5 s</small></span></label>
           </div>
+        </fieldset>
+        <label class="switch">
+          <span class="switch-text">
+            <span class="switch-label">Clearer sound in a headset</span>
+            <span id="clearer-hint" class="hint">A headset's call mode can crackle, so this closes the mic while Yap talks and the headset uses its music mode. You can't talk over Yap by voice; Stop still works.</span>
+          </span>
+          <input id="clearer" type="checkbox" role="switch" data-testid="clearer" aria-describedby="clearer-hint" />
+          <span class="track" aria-hidden="true"></span>
+        </label>
+        <div class="field-row">
+          <label for="mic" class="field-label">Microphone</label>
+          <select id="mic" data-testid="mic" aria-describedby="mic-hint">
+            <option value="">Phone's default microphone</option>
+          </select>
+          <span id="mic-hint" class="hint">Names show once you’ve allowed the microphone.</span>
         </div>
+      </div>
 
-        <!-- After a crackly answer: did the page's sound run dry, or was it the headset? -->
-        <details id="sound" class="sound" data-testid="sound">
-          <summary>Sound details</summary>
-          <dl>
-            <dt>Sample rate</dt>
-            <dd id="sound-rate" data-testid="sound-rate"></dd>
-            <dt>Latency</dt>
-            <dd id="sound-latency" data-testid="sound-latency"></dd>
-            <dt>Last answer</dt>
-            <dd id="sound-start" data-testid="sound-start"></dd>
-            <dt>Gaps in it</dt>
-            <dd id="sound-gaps" data-testid="sound-gaps"></dd>
-            <dt>Microphone while it played</dt>
-            <dd id="sound-mic" data-testid="sound-mic"></dd>
-            <dt>Microphone now</dt>
-            <dd id="sound-mic-now" data-testid="sound-mic-now"></dd>
-            <dt>Opening the microphone</dt>
-            <dd id="sound-mic-step" data-testid="sound-mic-step"></dd>
-            <dt>Browser</dt>
-            <dd id="sound-browser" data-testid="sound-browser"></dd>
-          </dl>
-        </details>
-      </section>
-    </main>
-
-    <dialog id="models" class="sheet" aria-labelledby="models-title" data-testid="models">
-      <h2 id="models-title">Model for your questions</h2>
-      <ul id="models-list" class="models-list"></ul>
-      <button id="models-close" class="btn secondary-btn" type="button">Close</button>
+      <!-- After a crackly answer: did the page's sound run dry, or was it the headset? -->
+      <details id="sound" class="sound" data-testid="sound">
+        <summary>Sound details</summary>
+        <dl>
+          <dt>Sample rate</dt>
+          <dd id="sound-rate" data-testid="sound-rate"></dd>
+          <dt>Latency</dt>
+          <dd id="sound-latency" data-testid="sound-latency"></dd>
+          <dt>Last answer</dt>
+          <dd id="sound-start" data-testid="sound-start"></dd>
+          <dt>Gaps in it</dt>
+          <dd id="sound-gaps" data-testid="sound-gaps"></dd>
+          <dt>Microphone while it played</dt>
+          <dd id="sound-mic" data-testid="sound-mic"></dd>
+          <dt>Microphone now</dt>
+          <dd id="sound-mic-now" data-testid="sound-mic-now"></dd>
+          <dt>Opening the microphone</dt>
+          <dd id="sound-mic-step" data-testid="sound-mic-step"></dd>
+          <dt>Browser</dt>
+          <dd id="sound-browser" data-testid="sound-browser"></dd>
+        </dl>
+      </details>
+      <button id="settings-close" class="btn secondary-btn sheet-close" type="button">Done</button>
     </dialog>
+
+    <!-- Chat's model picker, as a sheet: the provider rail with its logos,
+         each provider's Latest and More models (picker.js). -->
+    <dialog id="models" class="sheet picker" aria-label="Switch the Chat model" data-testid="models"></dialog>
   </body>
 </html>

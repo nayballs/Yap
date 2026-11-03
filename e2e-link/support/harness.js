@@ -9,6 +9,19 @@ import { expect } from '@playwright/test';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 export const PAGE_DIR = path.resolve(here, '../../src-tauri/link-page');
+const TAURI_DIR = path.resolve(here, '../../src-tauri');
+
+/**
+ * The desktop's own files the PC serves beside the page, as build.rs embeds
+ * them (`LINK_SHARED`: Chat's picker code at core/, the logos at
+ * providers/): read from build.rs itself, so a module the page imports that
+ * isn't embedded fails here as it would on a phone.
+ */
+export const SHARED = Object.fromEntries(
+  [...fs.readFileSync(path.join(TAURI_DIR, 'build.rs'), 'utf8').matchAll(/\("((?:core|providers)\/[^"]+)",\s*"([^"]+)"\)/g)].map(
+    ([, served, src]) => [served, path.resolve(TAURI_DIR, src)],
+  ),
+);
 export const ORIGIN = 'https://yap-pc.test:51443';
 export const WS_URL = 'wss://yap-pc.test:51443/ws';
 
@@ -16,9 +29,105 @@ export const WS_URL = 'wss://yap-pc.test:51443/ws';
 export const PC = 'Office PC';
 export const DEVICE = { id: 'dev-test-1', secret: 'test-secret-1' };
 export const MODELS = [
-  { id: 'local:qwen3.5-4b', label: 'Qwen3.5 4B', onThisPc: true },
-  { id: 'anthropic:claude-haiku', label: 'Claude Haiku', onThisPc: false },
+  { id: 'ondevice|', label: 'Qwen3.5 4B', onThisPc: true },
+  { id: 'anthropic|claude-haiku-5-5', label: 'Claude Haiku 5.5 · Anthropic', onThisPc: false },
 ];
+
+/** What a PC that answers typed questions and has Chat's picker says it can (`ready.can`). */
+export const CAN = ['ask', 'read_aloud', 'picker', 'effort'];
+
+/**
+ * Chat's picker as the PC sends it (`ready.picker`, link/models.rs): Chat on
+ * the on-device Qwen, keys for Groq (with a live list) and Anthropic
+ * (Yap's curated list), the Claude models reading images. Fictional.
+ */
+export function pickerData({ model = 'ondevice', effort = null } = {}) {
+  const now = Math.floor(Date.now() / 1000);
+  const models = {
+    ondevice: { provider: 'ondevice', id: 'qwen3.5-4b-q4_k_m', name: 'Qwen3.5 4B', onThisPc: true },
+    opus: { provider: 'anthropic', id: 'claude-opus-5-5' },
+    'opus-4-8': { provider: 'anthropic', id: 'claude-opus-4-8' },
+  };
+  return {
+    status: {
+      scope: 'chat',
+      ready: true,
+      error: null,
+      model: models[model],
+      host: model === 'ondevice' ? '127.0.0.1:8080' : 'api.anthropic.com',
+      tools: true,
+      fromScope: true,
+      provider: models[model].provider,
+      keyed: ['groq', 'anthropic'],
+      servers: [],
+      onDevice: { name: 'Qwen3.5 4B', tools: true },
+      context: null,
+      images: model === 'ondevice' ? false : true,
+      effort,
+    },
+    catalog: {
+      groq: {
+        provider: 'groq',
+        ok: true,
+        fetchedAt: now - 120,
+        checkedAt: now - 120,
+        error: null,
+        checking: false,
+        models: [
+          { id: 'openai/gpt-oss-20b', name: 'GPT-OSS 20B', context: 131072 },
+          { id: 'openai/gpt-oss-120b', name: 'GPT-OSS 120B', context: 131072 },
+          { id: 'qwen/qwen3.8-27b', name: 'Qwen3.8 27B', context: 131072 },
+        ],
+      },
+    },
+    local: {
+      installed: true,
+      running: true,
+      activeFile: 'Qwen3.5-4B-Q4_K_M.gguf',
+      modelFile: 'Qwen2.5-1.5B-Instruct-Q4_K_M.gguf',
+      gpu: { name: 'Example Graphics 8 GB' },
+      gpuCapable: true,
+      placement: { kind: 'gpu', gpuLayers: 33, layers: 33 },
+      slowOnThisPc: false,
+      sharedOnDevice: false,
+      own: [],
+      curated: [
+        {
+          id: 'qwen3.5-4b',
+          display: 'Qwen3.5 4B',
+          blurb: 'Balanced: quick answers that call tools well',
+          filename: 'Qwen3.5-4B-Q4_K_M.gguf',
+          sizeMb: 2740,
+          recommended: true,
+          isDefault: false,
+          tools: true,
+          family: 'qwen',
+          installed: true,
+          maxContext: 262144,
+          readsImages: false,
+        },
+        {
+          id: 'gemma-4-12b',
+          display: 'Gemma 4 12B',
+          blurb: 'Larger and slower; reads images',
+          filename: 'gemma-4-12b-it-Q4_K_M.gguf',
+          sizeMb: 7300,
+          recommended: false,
+          isDefault: false,
+          tools: true,
+          family: 'gemma',
+          installed: false,
+          maxContext: 131072,
+          readsImages: false,
+        },
+      ],
+    },
+    images: {
+      groq: ['qwen/qwen3.8-27b'],
+      anthropic: ['claude-opus-5-5', 'claude-sonnet-5-5', 'claude-haiku-5-5', 'claude-fable-5-1', 'claude-opus-4-8'],
+    },
+  };
+}
 
 const TYPES = {
   '.html': 'text/html; charset=utf-8',
@@ -73,8 +182,8 @@ export async function servePage(page) {
       return route.abort();
     }
     const rel = url.pathname === '/' ? 'index.html' : decodeURIComponent(url.pathname.slice(1));
-    const file = path.join(PAGE_DIR, rel);
-    if (!file.startsWith(PAGE_DIR) || !fs.existsSync(file) || rel.endsWith('.md')) {
+    const file = SHARED[rel] || path.join(PAGE_DIR, rel);
+    if ((!SHARED[rel] && !file.startsWith(PAGE_DIR)) || !fs.existsSync(file) || rel.endsWith('.md')) {
       served.push({ missing: rel });
       return route.fulfill({ status: 404, body: 'Not found' });
     }
@@ -118,9 +227,19 @@ export async function mockPc(page, opts = {}) {
     onHello: opts.onHello || null,
     models: opts.models || MODELS,
     model: opts.model || MODELS[0],
+    // A PC from before typed questions and Chat's picker (`old`): v1's `ready` only.
+    can: opts.old ? null : opts.can || CAN,
+    picker: opts.old ? null : opts.picker || pickerData(),
   };
   pc.ready = (conn = pc.last()) =>
-    pc.sendTo(conn, { type: 'ready', pc: PC, model: pc.model, models: pc.models });
+    pc.sendTo(conn, {
+      type: 'ready',
+      pc: PC,
+      model: pc.model,
+      models: pc.models,
+      ...(pc.can ? { can: pc.can } : {}),
+      ...(pc.picker ? { picker: pc.picker } : {}),
+    });
   pc.last = () => pc.conns[pc.conns.length - 1];
   pc.sendTo = (conn, msg) => conn.ws.send(JSON.stringify(msg));
   pc.send = (msg) => pc.sendTo(pc.last(), msg);
@@ -214,4 +333,23 @@ export function pitch(samples, rate) {
   let crossings = 0;
   for (let i = 1; i < samples.length; i++) if ((samples[i - 1] < 0) !== (samples[i] < 0)) crossings++;
   return crossings / 2 / (samples.length / rate);
+}
+
+/** The settings sheet (⋯): Hands-free and its wait, Clearer sound, the mic, Sound details. */
+export async function openSettings(page) {
+  await page.getByTestId('settings').click();
+  await expect(page.getByTestId('settings-sheet')).toBeVisible();
+}
+
+export async function closeSettings(page) {
+  await page.getByTestId('settings-sheet').getByRole('button', { name: 'Done' }).click();
+  await expect(page.getByTestId('settings-sheet')).toBeHidden();
+}
+
+/** A question typed in the composer and sent with Enter. */
+export async function type(page, pc, text) {
+  const asks = pc.of('ask').length;
+  await page.getByTestId('input').fill(text);
+  await page.getByTestId('input').press('Enter');
+  await expect.poll(() => pc.of('ask').length).toBe(asks + 1);
 }

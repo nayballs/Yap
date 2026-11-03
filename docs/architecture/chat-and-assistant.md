@@ -1358,6 +1358,19 @@ The AI Chat surface (conversations, the tool-calling loop and its note tools) an
   card, the window in front, the screenshots in Chat's box, a quoted passage.
   The phone's own turn says whether it's still current (an interrupt) and
   names its `Stoppable`.
+  **Typed on the phone** (2026-11-03, the page's composer, `ask`): the same
+  path minus the audio — `link/session.rs` sends `heard` and thinking, then
+  `ask_from_phone` with a turn whose `Phone::by_voice` is false. So the
+  question goes to the conversation a spoken one would (`choose_conversation`),
+  `chat_turn` gets `by_voice` false (Chat's typed question: no
+  `SPOKEN_ANSWER_NOTE`, the message not marked "by voice"), and the answer
+  isn't said (`Asker::voiced`: a phone's only when asked out loud; Chat's
+  own typed questions follow "When to speak", the phone's are never said by
+  themselves). The checked answer goes with its id (`Phone::checked`:
+  `answer.id`), and **▶ under it on the phone** (`read_aloud`) has Yap say
+  the whole of it on the phone through the same `Phone::voice` (only an
+  answer that phone was given, read from `chats.json`). Never dictation:
+  nothing is typed into an app on the PC.
 - **`chat/assistant/screen.rs`** — **the Voice Assistant sees the window in
   front** (2026-10-29): a spoken question about the screen ("what's this
   error?", "summarise this page", "what does this chart say?") takes a
@@ -2510,7 +2523,10 @@ and its Undo, Preview / Source, find, copy, light and dark).
   bottom right of the same row, **the context ring** ([below](#the-context-ring-2026-10-25)). The
   chip opens **the Chat model picker** (`ChatModelPicker.svelte`, its own
   chunk loaded the first time it opens since 2026-10-25, data in
-  `chatModels.svelte.js`; the maintainer's "Concept A, provider rail",
+  `chatModels.svelte.js` — its rows, rail, groups and words built by
+  `core/chatPicker.js` since 2026-11-03, pure, from a `ctx` the store fills,
+  so Yap Link's phone page builds the very same picker from the PC's
+  `ready.picker`, link.md; the maintainer's "Concept A, provider rail",
   2026-10-19): a popover above the composer (`data-model-picker-above`;
   560 px, its rail a strip across the top below 520) — **search** across
   the top ("Search models and providers", Ctrl+K, typing anywhere searches,

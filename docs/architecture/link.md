@@ -9,6 +9,14 @@ with its chosen effort, the short spoken answer, the conversation choice, the
 answer kept in Chat. Off by default: **Settings → Phone → "Use Yap from your
 phone (on your home Wi-Fi)"** (`link_enabled`).
 
+Since 2026-11-03 the page is **Yap's Chat on a phone**: a question can be
+**typed** too (`ask`: the same conversation, answered as Chat answers a typed
+question, not spoken; ▶ under an answer has Yap say it, `read_aloud`), and
+the model chip opens **Chat's own picker** (the provider rail with its logos,
+Latest and More models, the effort), built by the desktop picker's own code.
+It's still Ask Yap only: the phone never types into apps on the PC (phone
+dictation was built and removed on purpose, `7bbec66e`).
+
 The long-term design (yap-private `docs/phone-remote-design.md`: a PWA on
 Yap's website, WebRTC, away from home through a relay) keeps this protocol's
 messages: moving there is a change of transport only.
@@ -22,32 +30,53 @@ messages: moving there is a change of transport only.
 | `link/cert.rs` | The self-signed certificate (rcgen, ECDSA P-256, on ring), kept in `<data>/link/`. |
 | `link/pairing.rs` | The QR's one-time token, the 4-digit code, who may say hello (`judge`, pure), hellos per address (`Limiter`). |
 | `link/devices.rs` | Paired phones in `link_devices.json` (a hash of each phone's secret only). |
-| `link/session.rs` | One phone's conversation: the hello, pairing, its questions one at a time, interrupt. |
+| `link/session.rs` | One phone's conversation: the hello, pairing, its questions one at a time (spoken or typed), ▶ on an answer, interrupt. |
 | `link/voice.rs` | Yap's voice for the phone: the speaker's output sent down the socket, never this PC's speakers. |
-| `link/models.rs` | Chat's model and the others it can use, listed for the phone and switched from it as the picker does. |
+| `link/models.rs` | Chat's model and the others it can use (`ready.models`, the first pages'), what Chat's picker shows (`picker`: the very data the desktop picker reads — `ai_model::status` without keys, `model_catalog::snapshot`, `local_llm_status`'s models, "Reads images"), and a switch, an effort or Fast mode from the phone, set as the picker sets them (`ai_model::chat_set_model`, `effort::chat_set_effort`). |
 | `link/lan.rs` | This PC's addresses (IP Helper), which peers may connect, Windows' Public networks (Network List Manager). |
 | `link/wire.rs` | The protocol (below), pure. |
-| `link/page.rs` | The page's files, embedded at build time from `src-tauri/link-page/` (`build.rs` lists them; its README.md left out), their content types and the Content-Security-Policy. |
+| `link/page.rs` | The page's files, embedded at build time from `src-tauri/link-page/` (`build.rs` lists them; its README.md left out) and the desktop's own Chat picker modules and logos beside them (`build.rs` `LINK_SHARED`: `core/`, `providers/`), their content types and the Content-Security-Policy. |
 
 The phone's page itself (`src-tauri/link-page/`: plain HTML, CSS and JS
 modules, no build step) has its own notes in its
 [README.md](../../src-tauri/link-page/README.md) and tests in `e2e-link/`.
 
-**It looks like Yap** (2026-11-03), wherever that makes sense on a phone:
-it follows Yap's tokens — `link.css` copies `src/app.css`'s `--yap-*` values,
-light and the warm dark, following the phone's `prefers-color-scheme`, and
-`e2e-link/tokens.spec.js` holds the copy to app.css, so a colour changed there
-names the line to change here — with Figtree and EB Garamond served from the
-PC (`link-page/fonts/`, cut down from the desktop's own files: 36 KB; never
-Google Fonts, the phone may have no internet), the mark, Yap's buttons,
-switches and focus ring, Chat's answers (its markdown, `markdown.js`, built as
-nodes, never HTML) and the Yap bar's waveform and Voice Assistant marks. Where
-a phone needs its own way it has it: Talk low on the first screen, 48 px
-targets, safe areas, text that grows with the phone's font size, no hover-only
-affordances, a landscape layout, reduced motion. Details: the README's "The
-look".
+**It's Yap's Chat** (2026-11-03; the morning's second pass after the
+night's restyle): the conversation fills the screen — your question in
+Chat's amber-washed bubble (🎙 when it was said), the answer in Chat's card
+with its markdown (`markdown.js`, built as nodes, never HTML), Chat's
+activity line while it works, ▶ Read aloud under an answer —, and **Chat's
+composer** at the bottom: the text box (Enter sends, Shift+Enter a new line,
+it grows to five lines), Send, and **Talk, the Yap bar's pill**, one big
+target under the thumb, which turns into the bar's capsule while Yap listens
+(✕, the ✦ and the bar's live waveform, the time, Send) and has ■ Stop beside
+it while Yap speaks. The model chip sits under the composer as in Chat; the
+settings (Hands-free and its wait, Clearer sound, the microphone, Sound
+details) are a sheet from ⋯. It follows Yap's tokens — `link.css` copies
+`src/app.css`'s `--yap-*` values, light and the warm dark, following the
+phone's `prefers-color-scheme`, and `e2e-link/tokens.spec.js` holds the copy
+to app.css — with Figtree and EB Garamond served from the PC
+(`link-page/fonts/`, 36 KB; never Google Fonts). Where a phone needs its own
+way it has it: 44–48 px targets, safe areas, the composer riding above the
+on-screen keyboard (`interactive-widget=resizes-content`, else the visual
+viewport), text that grows with the phone's font size, no hover-only
+affordances, landscape, reduced motion. **Chat's picker** is the desktop's
+code itself: `src/lib/core/chatPicker.js` (and the pure modules it imports)
+builds the rows on both, served to the phone as they are with the provider
+logos (`build.rs` `LINK_SHARED`, `e2e-link/shared.spec.js` keeps them pure).
+Details: the README's "The look" and "Chat's picker".
 
 ## The protocol (v1)
+
+v1 with **additions** (2026-11-03, marked ⁺ below): typed questions, ▶ on an
+answer, Chat's picker and the effort. They're backward compatible both ways:
+`hello.v` stays 1; a first page ignores the new fields of `ready` and
+`answer`; a new page offers typing, ▶ and the picker only when `ready.can`
+says the PC answers them (a PC from before them: "Yap on your PC needs an
+update to answer typed questions…", and the plain model list); a message a PC
+doesn't know is answered `error` "Yap on your PC doesn't know how to do that
+yet. Update Yap on the PC, then try again." (`wire::UNKNOWN`; a PC from before
+says "Yap didn't understand that message").
 
 **WebSocket** at `wss://<pc>:51443/ws`. **Text frames** are JSON
 `{ "type": … }`. **Binary frames** are audio: byte 0 the kind — `0x01` **up**
@@ -64,7 +93,12 @@ A frame is at most a second of audio (32,005 bytes); a text frame at most 16 KiB
 | `stop` | The question ended (after its last frame): transcribe and answer. |
 | `cancel` | Drop the question (listening, or being worked on). |
 | `interrupt` | Stop speaking and abandon the answer. |
+| `ask {text}` ⁺ | A typed question (4,000 characters at most): `heard`, thinking, the answer as for a spoken one, in the same conversation, **not spoken**. |
+| `read_aloud {id}` ⁺ | Say answer `id` (`answer.id`, one this phone was given while Yap runs) on the phone, whole, in Yap's voice. |
 | `set_model {id}` | Switch Chat's model (one of `ready.models`). |
+| `set_model {provider, model, baseUrl?, file?}` ⁺ | Switch Chat's model to a row of Chat's picker, as the desktop picker does (`chat_set_model`'s own checks: a provider with a key, a server Settings knows, an on-device model on this PC). |
+| `set_effort {level}` ⁺ | The effort Chat's model answers at (`null`: its default). |
+| `set_fast {on}` ⁺ | Fast mode (Claude Opus 5.5). |
 | `ping` | Every 15 s; answered at once, mid-answer too. |
 
 **PC → phone**
@@ -74,11 +108,11 @@ A frame is at most a second of audio (32,005 bytes); a text frame at most 16 KiB
 | `pair_wait {code}` | The pairing waits for a yes on the PC, which shows the same code. |
 | `paired {device:{id, secret}}` | Paired: the phone keeps these for its next visits. |
 | `denied {reason}` | Refused, in words the phone can show; the socket closes. |
-| `ready {pc, model:{id,label,onThisPc}, models:[{id,label,onThisPc}]}` | Connected: this PC's name, Chat's model (or `null`: none set up) and the others. Sent again whenever Chat's model changes (here, in Chat, or from a phone: `yap-chat-model-changed`) and after every `set_model`, which the page takes as the truth. |
+| `ready {pc, model:{id,label,onThisPc}, models:[{id,label,onThisPc}], can⁺, picker⁺}` | Connected: this PC's name, Chat's model (or `null`: none set up) and the others; `can`: what it answers beyond v1 (`["ask", "read_aloud", "picker", "effort"]`); `picker`: what Chat's picker shows (`{status, catalog, local, images}`, `link/models.rs`; never a key). Sent again whenever Chat's model changes (here, in Chat, or from a phone: `yap-chat-model-changed`) and after every `set_model`, which the page takes as the truth. |
 | `state {phase}` | `"idle"` \| `"listening"` \| `"transcribing"` \| `"thinking"` \| `"speaking"`. |
-| `heard {text}` | The question, transcribed and corrected. |
+| `heard {text}` | The question, transcribed and corrected (a typed one, as it came). |
 | `step {label}` | What the answer is doing, in Chat's activity line's words (`chat/activity.rs`: "Searching the web · …"). |
-| `answer {text, final}` | **The whole answer so far** (each replaces the last; `""` = words taken back before a tool call); `final:true` with the checked answer. |
+| `answer {text, final, id⁺}` | **The whole answer so far** (each replaces the last; `""` = words taken back before a tool call); `final:true` with the checked answer and its `id` in Chat (`chat:<conversation>:<index>`, for ▶). |
 | `speak_start {rate}`, down frames, `speak_end` | Yap's voice (24 kHz). |
 | `error {message}` | In plain words. |
 | `pong` | |
@@ -98,6 +132,15 @@ late `heard`, `step`, `answer`, `error` and audio never go out (frames already
 queued are dropped by the writer). Yap never says `idle` while the phone is
 listening unless it ended the question itself. A question is at most 2 minutes
 (then it's asked as it is). An unpaired or bad hello gets `denied` and a close.
+An `ask` abandons whatever was under way too (answered `state idle` first when
+there was something), then `heard`, `state thinking`, the answer and `state
+idle` — no voice. A `read_aloud` always answers `state idle` first (the
+page's cue that the old news has ended), then the voice (`state speaking`,
+`speak_start`, down frames, `speak_end`, `state idle`), or `error` ("That
+answer isn't in Chat on your PC any more…") for an id it didn't give this
+phone or one gone from Chat. The page sends `cancel` or `interrupt` itself
+before an `ask` or a `read_aloud` while Yap works or speaks, as before a
+`start`.
 
 ## Pairing
 
@@ -163,9 +206,17 @@ listening unless it ended the question itself. A question is at most 2 minutes
   rebound domain is refused).
 - **Hellos per address**: at most 10 a minute; 5 refused in 10 minutes and that
   address waits out the 10 (`pairing::Limiter`). A hello must come within 10 s.
-- **What a phone can do**: ask the Voice Assistant (its tools follow their own
-  rules: opening apps on this PC, notes, the web), and switch Chat's model. It
-  can't type into the PC, start meeting notes or read anything else.
+- **What a phone can do**: ask the Voice Assistant, out loud or typed (its
+  tools follow their own rules: opening apps on this PC, notes, the web),
+  have one of the answers it was given read out (▶: only those, by their id,
+  never anything else in Chat), and switch Chat's model, its effort and Fast
+  mode as Chat's picker does. It can't type into the PC (no dictation), add a
+  key, download a model, start meeting notes or read anything else. The
+  picker's data never carries a key, not even masked.
+- **Chat's picker code on the page** is the desktop's own (`src/lib/core/`,
+  pure modules: no Tauri, no Svelte, no imports beyond each other), served as
+  static files from this PC with the logos; the page builds its rows as DOM
+  nodes, never HTML.
 
 ## The voice loop
 
@@ -305,9 +356,14 @@ on the PC while the answer comes stops the voice, as it stops the PC's.
   forgotten); a non-private peer, the QR's address (`lan.rs`); the
   certificate's names and that it loads into rustls (`cert.rs`); request
   parsing, the Origin and Host rules, RFC 6455's accept key (`server.rs`); the
-  page's files and policy (`page.rs`); the phone's voice frames, its end,
-  interrupt and taken-back words (`voice.rs`); the model list and wire ids,
-  the on-device model named once (`models.rs`).
+  page's files and policy, Chat's picker modules and logos beside them
+  (`page.rs`); the phone's voice frames, its end, interrupt and taken-back
+  words (`voice.rs`); the model list and wire ids, the on-device model named
+  once, the picker's data (what Chat's picker reads, no key) (`models.rs`);
+  `ask`, `read_aloud`, the picker's `set_model`, `set_effort`, `set_fast` and
+  a newer page's unknown message (`wire.rs`); the answers a phone may have
+  read (`link.rs` `Given`), an answer's id (`session.rs`); a typed question
+  answered as typed and not said (`chat/assistant.rs`).
 - **E2E** `e2e/link.spec.js`: a test run listens on a free port of 127.0.0.1
   (`YAP_E2E_LINK_PORT=0`, the port in `link_status`); a headless Chromium
   (Playwright's, else Edge) with a fake microphone opens the real page over
@@ -315,8 +371,10 @@ on the PC while the answer comes stops the voice, as it stops the PC's.
   and its QR, the pairing question with the code both screens show, Allow, Talk,
   the stub's transcript `heard`, the fake model's answer, the voice down at 24
   kHz (test mode's stand-in voice), the conversation in `chats.json`, the
-  receipts, Remove cutting the phone off; a replayed link, a wrong secret, Deny
-  and another site's page refused.
+  receipts; a typed question in the same conversation, not "by voice", with
+  nothing said, then ▶ saying it; Chat's picker over the wire switching
+  Chat's model; Remove cutting the phone off; a replayed link, a wrong
+  secret, Deny and another site's page refused.
 - The page on its own: `npm run test:link` (`e2e-link/`, the PC mocked): the
   sound maths in Node (the resampler both ways, the jitter buffer, the voice
   detector), then the page in a headless Chromium — among the rest, the answer's
@@ -326,8 +384,15 @@ on the PC while the answer comes stops the voice, as it stops the PC's.
   (a permission nobody answers, answered late, blocked; a module that never
   loads; the sound never starting; Cancel at any step; `mic-open.spec.js`), the
   hands-free wait, Sound details, the answer's markdown (a model's HTML shown
-  as text), the look (Yap's fonts from the page's own origin; at 360, 390 and
-  430 px wide and on its side, nothing sideways and Talk in the thumb's reach;
-  `tokens.spec.js`: link.css's colours are app.css's) — and the same specs
-  (bar hands-free and the screenshots) in Playwright's own Firefox when it's
-  installed.
+  as text), typed questions (`typing.spec.js`: `ask` over the wire, the
+  answer in the thread with nothing spoken, ▶ and its ■, Enter and
+  Shift+Enter, the box growing, typing over Yap, a PC from before, the
+  keyboard up both ways, a reload keeping the thread), Chat's picker
+  (`picker.spec.js`: the rail and its logos, Latest, More models in place, a
+  switch, a provider without a key, ChatGPT's two ways, the effort and Fast
+  mode, a PC from before), the shared modules staying pure
+  (`shared.spec.js`), the look (Yap's fonts and the logos from the page's
+  own origin; at 360, 390 and 430 px wide and on its side, nothing sideways
+  and Talk in the thumb's reach; `tokens.spec.js`: link.css's colours are
+  app.css's) — and the same specs (bar hands-free and the screenshots) in
+  Playwright's own Firefox when it's installed.

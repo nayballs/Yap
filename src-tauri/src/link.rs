@@ -7,6 +7,14 @@
 //! Chat). Off by default: Settings → Phone → "Use Yap from your phone (on
 //! your home Wi-Fi)" (`link_enabled`).
 //!
+//! Since 2026-11-03 the page is Yap's Chat on a phone: a question can be
+//! typed too (`ask`, answered in the same conversation and not spoken; ▶
+//! under an answer has it said, `read_aloud`, only an answer that phone was
+//! given: [`Given`]), and the model chip opens Chat's own picker (its rows
+//! built by `src/lib/core/chatPicker.js`, served beside the page;
+//! `models.rs` `picker` sends what the desktop picker reads). Never
+//! dictation: the phone types nothing into the PC's apps.
+//!
 //! The parts:
 //! - `server.rs` — HTTPS on TCP 51443, home-network peers only, the page's
 //!   files (`page.rs`, embedded) and `/ws`;
@@ -81,7 +89,35 @@ pub struct Hub {
     limiter: Mutex<Limiter>,
     asks: Mutex<HashMap<u64, Ask>>,
     live: Mutex<HashMap<u64, Live>>,
+    /// The answers each paired phone was given: ▶ on the phone reads one of
+    /// these, never anything else in Chat.
+    answers: Mutex<Given>,
     ids: AtomicU64,
+}
+
+/// The answers kept per phone for ▶.
+const KEEP_ANSWERS: usize = 50;
+
+/// **The answers each paired phone was given** (their ids in Chat, newest
+/// last, [`KEEP_ANSWERS`] at most a phone, while Yap runs). Pure.
+#[derive(Default)]
+pub struct Given(HashMap<String, std::collections::VecDeque<String>>);
+
+impl Given {
+    /// Phone `device` was given answer `id`.
+    pub fn gave(&mut self, device: &str, id: &str) {
+        let list = self.0.entry(device.to_string()).or_default();
+        list.retain(|x| x != id);
+        list.push_back(id.to_string());
+        while list.len() > KEEP_ANSWERS {
+            list.pop_front();
+        }
+    }
+
+    /// Was phone `device` given answer `id`?
+    pub fn has(&self, device: &str, id: &str) -> bool {
+        self.0.get(device).is_some_and(|l| l.iter().any(|x| x == id))
+    }
 }
 
 fn locked<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
@@ -157,10 +193,22 @@ impl Hub {
         locked(&self.live).values().map(|l| l.device.clone()).collect()
     }
 
-    /// `ready`: this PC, Chat's model and the others.
+    /// `ready`: this PC, Chat's model and the others, what it answers beyond
+    /// v1, and what Chat's picker shows.
     pub fn ready(&self) -> Out {
-        let (model, models) = models::listed(&crate::config::load());
-        Out::Ready { pc: lan::pc_name(), model, models }
+        let cfg = crate::config::load();
+        let (model, models) = models::listed(&cfg);
+        Out::Ready { pc: lan::pc_name(), model, models, can: wire::CAN.to_vec(), picker: Some(models::picker(&cfg)) }
+    }
+
+    /// Phone `device` was given answer `id` (▶ may read it).
+    pub fn gave(&self, device: &str, id: &str) {
+        locked(&self.answers).gave(device, id);
+    }
+
+    /// Was phone `device` given answer `id`?
+    pub fn was_given(&self, device: &str, id: &str) -> bool {
+        locked(&self.answers).has(device, id)
     }
 
     /// Chat's model changed (here, in Chat, from a phone): every phone hears.
@@ -263,6 +311,7 @@ fn start(app: &AppHandle) {
         limiter: Mutex::new(Limiter::default()),
         asks: Mutex::new(HashMap::new()),
         live: Mutex::new(HashMap::new()),
+        answers: Mutex::new(Given::default()),
         ids: AtomicU64::new(0),
     });
     let (stop, stopped) = tokio::sync::watch::channel(false);
@@ -453,6 +502,26 @@ pub fn link_remove(app: AppHandle, id: String) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_phone_reads_aloud_only_the_answers_it_was_given() {
+        let mut given = Given::default();
+        given.gave("p-one", "chat:3:1");
+        given.gave("p-one", "chat:3:3");
+        assert!(given.has("p-one", "chat:3:1") && given.has("p-one", "chat:3:3"));
+        // Another phone's, and anything else in Chat: no.
+        assert!(!given.has("p-two", "chat:3:1"));
+        assert!(!given.has("p-one", "chat:4:1"));
+        // The newest kept, the oldest forgotten; a repeat moves to the end.
+        for i in 0..KEEP_ANSWERS {
+            given.gave("p-one", &format!("chat:9:{i}"));
+        }
+        assert!(!given.has("p-one", "chat:3:1"));
+        given.gave("p-one", "chat:9:0");
+        given.gave("p-one", "chat:10:1");
+        assert!(given.has("p-one", "chat:9:0"), "given again: kept");
+        assert!(!given.has("p-one", "chat:9:1"));
+    }
 
     #[test]
     fn the_pairing_link_carries_the_address_port_and_token() {

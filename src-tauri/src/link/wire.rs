@@ -7,6 +7,13 @@
 //! the rest samples. The same messages as the long-term design's data
 //! channels (yap-private `phone-remote-design.md` §3.4), so moving to WebRTC
 //! later changes the transport only. Pure.
+//!
+//! **v1's additions** (2026-11-03), backward compatible both ways: `ask`,
+//! `read_aloud`, `set_model` by a picker row, `set_effort`, `set_fast`;
+//! `ready.can` ([`CAN`]) and `ready.picker`, `answer.id`. `hello.v` stays 1;
+//! a first page ignores the new fields; a page offers the new things only
+//! when `can` says so; a type this PC doesn't know is said plainly
+//! ([`UNKNOWN`]).
 
 use serde::{Deserialize, Serialize};
 
@@ -71,10 +78,50 @@ pub enum In {
     Cancel,
     /// Stop speaking and abandon the answer.
     Interrupt,
-    /// Switch Chat's model (one of `ready.models`).
-    SetModel { id: String },
+    /// **A typed question** (2026-11-03, the page's composer): answered as
+    /// a spoken one is after it's transcribed, in the same conversation,
+    /// but not spoken (the answer's ▶ asks for that: [`In::ReadAloud`]).
+    Ask {
+        #[serde(default)]
+        text: String,
+    },
+    /// Say answer `id` (one this phone was given, `answer.id`) on the phone,
+    /// in Yap's voice: the whole of it.
+    ReadAloud {
+        #[serde(default)]
+        id: String,
+    },
+    /// Switch Chat's model: one of `ready.models` by its `id` (the first
+    /// pages), or a row of the picker (`ready.picker`) as Chat's own picker
+    /// picks it — `provider`, `model`, a server's `baseUrl`, an on-device
+    /// model's `file`.
+    SetModel {
+        #[serde(default)]
+        id: String,
+        #[serde(default)]
+        provider: String,
+        #[serde(default)]
+        model: String,
+        #[serde(default, rename = "baseUrl")]
+        base_url: Option<String>,
+        #[serde(default)]
+        file: Option<String>,
+    },
+    /// The effort Chat's model answers at (`null`: its default), as the
+    /// picker sets it (`ai/effort.rs`).
+    SetEffort {
+        #[serde(default)]
+        level: Option<String>,
+    },
+    /// Fast mode (Claude Opus 5.5), as the picker sets it.
+    SetFast { on: bool },
     Ping,
 }
+
+/// What this PC answers beyond the first pages' v1 (`ready.can`): a page
+/// offers typing, ▶ on an answer, Chat's picker and the effort only when
+/// its PC says so, and says plainly when it doesn't.
+pub const CAN: &[&str] = &["ask", "read_aloud", "picker", "effort"];
 
 /// One model Chat can use, as the phone lists it.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -106,18 +153,30 @@ pub enum Out {
     Paired { device: DeviceCreds },
     /// Refused (the socket closes after it).
     Denied { reason: String },
-    /// Connected: this PC's name, and Chat's model and the others it can use.
-    Ready { pc: String, model: Option<Model>, models: Vec<Model> },
+    /// Connected: this PC's name, and Chat's model and the others it can use;
+    /// what it answers beyond v1 ([`CAN`]), and what Chat's picker shows
+    /// (`link/models.rs` `picker`; `None` for a hello's test double).
+    Ready {
+        pc: String,
+        model: Option<Model>,
+        models: Vec<Model>,
+        can: Vec<&'static str>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        picker: Option<serde_json::Value>,
+    },
     State { phase: Phase },
-    /// The question, transcribed and corrected.
+    /// The question, transcribed and corrected (a typed one: as it came).
     Heard { text: String },
     /// What the answer is doing, in Chat's own words ("Searching the web · …").
     Step { label: String },
-    /// The answer so far; `final` once it's been checked.
+    /// The answer so far; `final` once it's been checked, with its `id` in
+    /// Chat (`chat:<conversation>:<index>`) for ▶ ([`In::ReadAloud`]).
     Answer {
         text: String,
         #[serde(rename = "final")]
         done: bool,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        id: Option<String>,
     },
     /// Yap's voice starts: down frames at `rate`, then `speak_end`.
     SpeakStart { rate: u32 },
@@ -133,13 +192,27 @@ impl Out {
     }
 }
 
+/// Every message type a phone may send ([`In`]).
+const KNOWN: &[&str] = &["hello", "start", "stop", "cancel", "interrupt", "ask", "read_aloud", "set_model", "set_effort", "set_fast", "ping"];
+
+/// A message this PC can't read.
+const UNREADABLE: &str = "Yap didn't understand that message";
+/// A message from a newer page than this PC (a type it doesn't know).
+pub const UNKNOWN: &str = "Yap on your PC doesn't know how to do that yet. Update Yap on the PC, then try again.";
+
 /// A text frame from the phone. `Err`: not one of [`In`] (said to the phone
-/// as an error; a bad hello is a `denied`).
+/// as an error; a bad hello is a `denied`) — a type this PC doesn't know
+/// (a newer page's) said plainly as that ([`UNKNOWN`]).
 pub fn parse(text: &str) -> Result<In, String> {
     if text.len() > MAX_TEXT {
         return Err("That message is too long".into());
     }
-    serde_json::from_str(text).map_err(|_| "Yap didn't understand that message".to_string())
+    let v: serde_json::Value = serde_json::from_str(text).map_err(|_| UNREADABLE.to_string())?;
+    let kind = v.get("type").and_then(|t| t.as_str()).map(str::to_string);
+    serde_json::from_value(v).map_err(|_| match kind {
+        Some(t) if !KNOWN.contains(&t.as_str()) => UNKNOWN.to_string(),
+        _ => UNREADABLE.to_string(),
+    })
 }
 
 /// **An audio frame**: its kind, `seq` and samples.
@@ -235,11 +308,48 @@ mod tests {
         assert_eq!(parse(r#"{"type":"stop"}"#).unwrap(), In::Stop);
         assert_eq!(parse(r#"{"type":"cancel"}"#).unwrap(), In::Cancel);
         assert_eq!(parse(r#"{"type":"interrupt"}"#).unwrap(), In::Interrupt);
-        assert_eq!(parse(r#"{"type":"set_model","id":"groq|x"}"#).unwrap(), In::SetModel { id: "groq|x".into() });
+        assert_eq!(
+            parse(r#"{"type":"set_model","id":"groq|x"}"#).unwrap(),
+            In::SetModel { id: "groq|x".into(), provider: String::new(), model: String::new(), base_url: None, file: None }
+        );
         assert_eq!(parse(r#"{"type":"ping"}"#).unwrap(), In::Ping);
         assert!(parse(r#"{"type":"format_disk"}"#).is_err());
         assert!(parse("not json").is_err());
         assert!(parse(&format!(r#"{{"type":"ping","x":"{}"}}"#, "a".repeat(MAX_TEXT))).is_err(), "too long");
+    }
+
+    #[test]
+    fn typing_reading_aloud_and_the_picker_are_v1_additions() {
+        // A typed question, and ▶ on an answer.
+        assert_eq!(parse(r#"{"type":"ask","text":"When is the bin day?"}"#).unwrap(), In::Ask { text: "When is the bin day?".into() });
+        assert_eq!(parse(r#"{"type":"read_aloud","id":"chat:3:5"}"#).unwrap(), In::ReadAloud { id: "chat:3:5".into() });
+        // A row of Chat's picker: its provider, model, server or file.
+        assert_eq!(
+            parse(r#"{"type":"set_model","provider":"local","model":"llama3","baseUrl":"http://localhost:11434/v1"}"#).unwrap(),
+            In::SetModel {
+                id: String::new(),
+                provider: "local".into(),
+                model: "llama3".into(),
+                base_url: Some("http://localhost:11434/v1".into()),
+                file: None
+            }
+        );
+        assert_eq!(
+            parse(r#"{"type":"set_model","provider":"ondevice","model":"","file":"Qwen3.5-4B.gguf"}"#).unwrap(),
+            In::SetModel { id: String::new(), provider: "ondevice".into(), model: String::new(), base_url: None, file: Some("Qwen3.5-4B.gguf".into()) }
+        );
+        assert_eq!(parse(r#"{"type":"set_effort","level":"high"}"#).unwrap(), In::SetEffort { level: Some("high".into()) });
+        assert_eq!(parse(r#"{"type":"set_effort","level":null}"#).unwrap(), In::SetEffort { level: None });
+        assert_eq!(parse(r#"{"type":"set_fast","on":true}"#).unwrap(), In::SetFast { on: true });
+        // A message a newer page sends that this PC doesn't know: said plainly.
+        assert_eq!(parse(r#"{"type":"draw_a_picture","what":"a cat"}"#).unwrap_err(), UNKNOWN);
+        // A known one that's malformed is just not understood.
+        assert_eq!(parse(r#"{"type":"set_fast"}"#).unwrap_err(), "Yap didn't understand that message");
+        // What a v1 page reads: `can` says what this PC answers.
+        assert!(CAN.contains(&"ask") && CAN.contains(&"read_aloud") && CAN.contains(&"picker"));
+        for t in ["ask", "read_aloud", "set_model", "set_effort", "set_fast"] {
+            assert!(KNOWN.contains(&t), "{t}");
+        }
     }
 
     #[test]
@@ -253,13 +363,21 @@ mod tests {
         assert_eq!(j(Out::Denied { reason: "No".into() }), serde_json::json!({"type":"denied","reason":"No"}));
         let m = Model { id: "ondevice|".into(), label: "Qwen".into(), on_this_pc: true };
         assert_eq!(
-            j(Out::Ready { pc: "DESK".into(), model: Some(m.clone()), models: vec![m] }),
-            serde_json::json!({"type":"ready","pc":"DESK","model":{"id":"ondevice|","label":"Qwen","onThisPc":true},"models":[{"id":"ondevice|","label":"Qwen","onThisPc":true}]})
+            j(Out::Ready { pc: "DESK".into(), model: Some(m.clone()), models: vec![m.clone()], can: vec!["ask"], picker: None }),
+            serde_json::json!({"type":"ready","pc":"DESK","model":{"id":"ondevice|","label":"Qwen","onThisPc":true},"models":[{"id":"ondevice|","label":"Qwen","onThisPc":true}],"can":["ask"]})
+        );
+        assert_eq!(
+            j(Out::Ready { pc: "DESK".into(), model: None, models: vec![], can: vec![], picker: Some(serde_json::json!({"status":{}})) })["picker"],
+            serde_json::json!({"status":{}})
         );
         assert_eq!(j(Out::State { phase: Phase::Transcribing }), serde_json::json!({"type":"state","phase":"transcribing"}));
         assert_eq!(j(Out::Heard { text: "hi".into() }), serde_json::json!({"type":"heard","text":"hi"}));
         assert_eq!(j(Out::Step { label: "Thinking".into() }), serde_json::json!({"type":"step","label":"Thinking"}));
-        assert_eq!(j(Out::Answer { text: "Yes.".into(), done: true }), serde_json::json!({"type":"answer","text":"Yes.","final":true}));
+        assert_eq!(j(Out::Answer { text: "Yes.".into(), done: false, id: None }), serde_json::json!({"type":"answer","text":"Yes.","final":false}));
+        assert_eq!(
+            j(Out::Answer { text: "Yes.".into(), done: true, id: Some("chat:3:5".into()) }),
+            serde_json::json!({"type":"answer","text":"Yes.","final":true,"id":"chat:3:5"})
+        );
         assert_eq!(j(Out::SpeakStart { rate: DOWN_RATE }), serde_json::json!({"type":"speak_start","rate":24000}));
         assert_eq!(j(Out::SpeakEnd), serde_json::json!({"type":"speak_end"}));
         assert_eq!(j(Out::Error { message: "Oops.".into() }), serde_json::json!({"type":"error","message":"Oops."}));

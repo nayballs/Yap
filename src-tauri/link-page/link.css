@@ -1,7 +1,9 @@
-/* Yap Link, the phone's page, in Yap's own look: its tokens, its two
-   fonts, its buttons, switches and focus ring, Chat's answers and the Yap
-   bar's waveform, on a phone's terms (thumb-sized targets, Talk low on the
-   screen, safe areas, text that grows with the phone's font size).
+/* Yap Link, the phone's page: Yap's Chat on a phone. Its tokens, its two
+   fonts, its buttons, switches and focus ring; Chat's thread, composer,
+   activity line, model chip and picker; the Yap bar's pill and waveform for
+   Talk — on a phone's terms (thumb-sized targets, the composer at the
+   bottom and above the keyboard, safe areas, text that grows with the
+   phone's font size).
 
    The page is served on its own (no build step, nothing fetched from
    anywhere but the PC), so it can't import src/app.css: the values below
@@ -99,15 +101,7 @@
   --yap-dur: 150ms;
 
   /* ---- the page's own (not in app.css) ---- */
-  /* Talk's live edge on the ink circle: the bar's dark-scheme amber on
-     light's near-black ink, the deeper amber on dark's cream ink. */
-  --talk-live: #f0b04a;
-  --talk-shadow: 0 10px 28px rgba(55, 45, 25, 0.22), 0 2px 6px rgba(55, 45, 25, 0.12);
   --gutter: 16px;
-  /* The header's height, and how much of the options shows under Talk on
-     the first screen (a sign there's more below). */
-  --top-h: 4rem;
-  --peek: 3.25rem;
 }
 
 /* Dark: src/app.css `:root[data-yap-theme='dark']` (Yap's warm dark), here
@@ -156,9 +150,6 @@
     --yap-focus-ring: #f0b04a;
 
     --yap-live: #f0b04a;
-
-    --talk-live: #c2690a;
-    --talk-shadow: 0 10px 28px rgba(0, 0, 0, 0.4), 0 0 0 1px rgba(255, 255, 255, 0.04);
   }
 }
 
@@ -189,10 +180,6 @@ html {
 
 body {
   margin: 0;
-  min-height: 100vh;
-  min-height: 100dvh;
-  display: flex;
-  flex-direction: column;
   /* Chat's content sheet. */
   background: var(--yap-s1);
   color: var(--yap-fg);
@@ -202,12 +189,12 @@ body {
   font-weight: 400;
   -webkit-font-smoothing: antialiased;
   -webkit-tap-highlight-color: transparent;
-  padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
 }
 
 button,
 select,
-input {
+input,
+textarea {
   font: inherit;
   color: inherit;
 }
@@ -288,28 +275,71 @@ input {
     0 0 0 4px var(--yap-focus-ring);
 }
 
+/* ---------------------------------------------------------------- frame */
+
+/* The page is one column the size of what the phone shows: the header, the
+   conversation, and the composer at the bottom. `--app-h` / `--app-top`
+   follow the visual viewport (link.js), so the composer rides above the
+   on-screen keyboard where the browser doesn't resize the page for it
+   (Chrome does: `interactive-widget=resizes-content`). */
+html,
+body {
+  height: 100%;
+}
+body {
+  overflow: hidden;
+  overscroll-behavior: none;
+}
+.app {
+  position: fixed;
+  left: 0;
+  right: 0;
+  top: var(--app-top, 0px);
+  height: 100vh;
+  height: var(--app-h, 100dvh);
+  display: flex;
+  flex-direction: column;
+  padding-left: env(safe-area-inset-left);
+  padding-right: env(safe-area-inset-right);
+}
+
+/* Visually hidden, read out. */
+.vh {
+  position: absolute !important;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+  border: 0;
+}
+
 /* ------------------------------------------------------------- header */
 
+/* Yap and the connection on the left, ⋯ (the settings) on the right. */
 .top {
+  flex: 0 0 auto;
   display: flex;
-  flex-wrap: wrap;
   align-items: center;
-  gap: 8px 9px;
-  padding: 10px var(--gutter);
-  min-height: var(--top-h);
+  gap: 10px;
+  width: 100%;
+  margin: 0 auto;
+  padding: calc(6px + env(safe-area-inset-top)) calc(var(--gutter) - 6px) 6px var(--gutter);
+  min-height: 3.5rem;
+  border-bottom: 1px solid var(--yap-rule);
 }
 .mark {
   flex: 0 0 auto;
-  width: 32px;
-  height: 32px;
+  width: 30px;
+  height: 30px;
 }
-/* The PC's name gets what the model leaves; with big text the model goes
-   under it rather than both being cut short. */
 .who {
   display: flex;
   flex-direction: column;
   min-width: 0;
-  flex: 1 1 7.5rem;
+  flex: 1 1 auto;
 }
 .name {
   font-weight: 650;
@@ -318,7 +348,7 @@ input {
   letter-spacing: -0.005em;
 }
 .conn {
-  font-size: 0.84375rem;
+  font-size: 0.8125rem;
   color: var(--yap-muted);
   white-space: nowrap;
   overflow: hidden;
@@ -341,69 +371,34 @@ input {
   background: var(--yap-muted);
 }
 
-/* The model: Chat's model chip (views/chat/ModelChip.svelte), a pill with
-   the name and where it runs; the chevron says it opens. */
-.chip {
+/* A quiet round button (⋯): 48 px to tap, no box until pressed. */
+.iconbtn {
   flex: 0 0 auto;
-  min-width: 0;
-  max-width: 52%;
-  min-height: 3rem;
-  margin-left: auto;
-  display: inline-flex;
-  align-items: center;
-  gap: 2px;
-  padding: 4px 6px 4px 12px;
-  border: 1px solid var(--yap-border-subtle);
+  width: 3rem;
+  height: 3rem;
+  display: grid;
+  place-items: center;
+  border: 0;
   border-radius: var(--yap-r-full);
-  background: var(--yap-s2);
-  box-shadow: var(--yap-shadow-sm);
+  background: transparent;
+  color: var(--yap-muted);
   cursor: pointer;
-  text-align: right;
   touch-action: manipulation;
-  transition:
-    border-color var(--yap-dur),
-    background var(--yap-dur);
 }
-.chip:active {
+.iconbtn svg {
+  width: 1.375rem;
+  height: 1.375rem;
+  fill: currentColor;
+}
+.iconbtn:active {
   background: var(--yap-s3);
-  border-color: var(--yap-border-hover);
+  color: var(--yap-fg);
 }
 @media (hover: hover) {
-  .chip:hover {
+  .iconbtn:hover {
     background: var(--yap-s3);
-    border-color: var(--yap-border-hover);
+    color: var(--yap-fg);
   }
-}
-.chip-text {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-end;
-  min-width: 0;
-}
-.chip-label {
-  max-width: 100%;
-  font-size: 0.875rem;
-  font-weight: 600;
-  line-height: 1.25;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-.chip-where {
-  font-size: 0.75rem;
-  line-height: 1.25;
-  font-weight: 560;
-  color: var(--yap-muted);
-}
-.chev {
-  flex: 0 0 auto;
-  width: 15px;
-  height: 15px;
-  fill: none;
-  stroke: var(--yap-muted);
-  stroke-width: 2;
-  stroke-linecap: round;
-  stroke-linejoin: round;
 }
 
 main {
@@ -415,17 +410,33 @@ main {
 
 /* ------------------------------------------------------------ pairing */
 
-/* A card on the sheet; the title in Yap's display serif, as Settings'
-   titles; the code as the PC's own prompt shows it (LinkPairPrompt.svelte),
-   bigger. */
+/* Chat's empty state, with a card: the mark, the title in Yap's display
+   serif (as Settings' titles), the code as the PC's own prompt shows it
+   (LinkPairPrompt.svelte), bigger. */
 .pair {
+  flex: 1 1 auto;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  padding: 16px var(--gutter) calc(16px + env(safe-area-inset-bottom));
+}
+.pair-card {
   --ring-gap: var(--yap-s2);
-  margin: 8px var(--gutter) var(--gutter);
-  padding: 24px 20px 22px;
+  width: 100%;
+  max-width: 520px;
+  margin: 0 auto;
+  padding: 26px 22px 22px;
   background: var(--yap-s2);
   border: 1px solid var(--yap-border-subtle);
-  border-radius: 16px;
+  border-radius: 20px;
   box-shadow: var(--yap-shadow-sm);
+}
+.pair-mark {
+  display: block;
+  width: 44px;
+  height: 44px;
+  margin-bottom: 14px;
 }
 .pair h1 {
   margin: 0 0 14px;
@@ -471,74 +482,85 @@ main {
   margin-top: 6px;
 }
 
-/* ------------------------------------------------------------ talking */
+/* --------------------------------------------------------------- chat */
 
-.talk {
+.chat {
   flex: 1 1 auto;
   display: flex;
   flex-direction: column;
   min-height: 0;
+  width: 100%;
+  margin: 0 auto;
 }
 
-/* The first screen: the conversation takes what's left, so Talk sits low,
-   where a thumb reaches, and stays put (the small viewport's height, which
-   doesn't move as the address bar comes and goes). */
-.stage {
-  display: flex;
-  flex-direction: column;
-  min-height: calc(100vh - var(--top-h) - var(--peek));
-  min-height: calc(
-    100svh - var(--top-h) - var(--peek) - env(safe-area-inset-top) - env(safe-area-inset-bottom)
-  );
-}
-
-.convo-box {
-  flex: 1 1 0;
-  min-height: 7rem;
-  display: flex;
-  flex-direction: column;
-  position: relative;
-}
-/* Nothing asked yet: the Voice Assistant's ✦ and a line in Yap's serif. */
-.empty {
-  flex: 1 1 auto;
-  margin: 0;
-  padding: 12px calc(var(--gutter) + 8px);
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 12px;
-  text-align: center;
-  text-wrap: balance;
-  font-family: var(--yap-font-display);
-  font-size: 1.5rem;
-  font-weight: 550;
-  line-height: 1.3;
-  color: var(--yap-fg-80);
-}
-.empty .spark {
-  width: 28px;
-  height: 28px;
-  fill: var(--yap-live);
-}
-
-/* Chat's thread: your question in an amber-washed bubble on the right,
-   Yap's answer in a card on the left (views/chat/ChatMessage.svelte). It
-   scrolls inside, its top edge fading. */
-.convo {
-  list-style: none;
-  margin: 0;
-  padding: 14px var(--gutter) 10px;
+/* Chat's thread (views/chat/ChatThread.svelte): it fills what the composer
+   leaves and scrolls inside, its edges fading; the latest words in view. */
+.thread {
   flex: 1 1 0;
   min-height: 0;
   overflow-y: auto;
   overscroll-behavior: contain;
   display: flex;
   flex-direction: column;
-  gap: 16px;
-  -webkit-mask-image: linear-gradient(to bottom, transparent 0, #000 14px);
-  mask-image: linear-gradient(to bottom, transparent 0, #000 14px);
+  gap: 14px;
+  padding: 16px var(--gutter) 12px;
+  -webkit-mask-image: linear-gradient(to bottom, transparent 0, #000 12px, #000 calc(100% - 10px), transparent 100%);
+  mask-image: linear-gradient(to bottom, transparent 0, #000 12px, #000 calc(100% - 10px), transparent 100%);
+}
+
+/* Nothing asked yet: the Voice Assistant's ✦, a line in Yap's serif, and
+   how to ask. */
+.empty {
+  flex: 1 0 auto;
+  margin: auto 0;
+  padding: 12px 8px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  text-align: center;
+  text-wrap: balance;
+}
+.empty-spark {
+  width: 30px;
+  height: 30px;
+  fill: var(--yap-live);
+}
+.empty-title {
+  margin: 0;
+  font-family: var(--yap-font-display);
+  font-size: 1.875rem;
+  font-weight: 550;
+  line-height: 1.15;
+  color: var(--yap-fg);
+}
+.empty-sub {
+  margin: 0;
+  max-width: 24em;
+  font-size: 1rem;
+  color: var(--yap-fg-80);
+}
+.empty-sub strong {
+  font-weight: 650;
+}
+.keep-open {
+  margin: 4px 0 0;
+  max-width: 26em;
+  font-size: 0.875rem;
+  color: var(--yap-muted);
+}
+
+/* Your question in Chat's amber-washed bubble on the right (🎙 when it was
+   said), Yap's answer in Chat's card on the left with its markdown; under a
+   finished answer, ▶ Read aloud (views/chat/ChatMessage.svelte). */
+.convo {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
 }
 .convo:empty {
   display: none;
@@ -558,22 +580,35 @@ main {
 .q {
   align-self: flex-end;
   max-width: 86%;
-  padding: 9px 14px;
-  border-radius: 16px;
+  padding: 9px 15px;
+  border-radius: 18px;
   background: var(--yap-primary-wash);
   white-space: pre-wrap;
 }
+.viavoice {
+  display: inline-block;
+  width: 0.875rem;
+  height: 0.875rem;
+  margin-right: 6px;
+  vertical-align: -0.08em;
+  fill: none;
+  stroke: var(--yap-primary);
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
 .a {
   align-self: flex-start;
-  max-width: 94%;
-  padding: 10px 14px;
-  border-radius: 16px;
+  max-width: 100%;
+  padding: 10px 15px;
+  border-radius: 18px;
   background: var(--yap-s2);
   border: 1px solid var(--yap-border-subtle);
   color: var(--yap-fg);
 }
 .a.cancelled {
   background: transparent;
+  border-style: dashed;
   color: var(--yap-muted);
   font-style: italic;
 }
@@ -684,60 +719,76 @@ main {
   }
 }
 
-/* What's happening now, between the conversation and Talk. */
-.now {
-  padding: 8px var(--gutter) 0;
-  min-height: 4.75rem;
-}
-.now p {
-  margin: 0 0 6px;
-}
-.phase-row {
+/* Under an answer: ▶ Read aloud (■ while it's read), "Speaking…". */
+.msgfoot {
+  align-self: flex-start;
   display: flex;
   align-items: center;
-  justify-content: center;
-  gap: 9px;
-  min-height: 1.9rem;
+  gap: 10px;
+  margin: -2px 0 0 2px;
 }
-.phase {
-  margin: 0 !important;
-  font-size: 1.375rem;
-  font-weight: 650;
-  line-height: 1.3;
-  letter-spacing: -0.005em;
-  text-align: center;
+.readbtn {
+  flex: 0 0 auto;
+  min-width: 2.75rem;
+  height: 2.75rem;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 0 14px 0 12px;
+  border: 1px solid var(--yap-border-subtle);
+  border-radius: var(--yap-r-full);
+  background: var(--yap-s1);
+  color: var(--yap-muted);
+  font-size: 0.875rem;
+  font-weight: 600;
+  cursor: pointer;
+  touch-action: manipulation;
 }
-body[data-phase='listening'] .phase {
+.readbtn svg {
+  width: 0.75rem;
+  height: 0.75rem;
+  fill: currentColor;
+}
+.readbtn:active {
+  color: var(--yap-fg);
+  border-color: var(--yap-border-hover);
+}
+@media (hover: hover) {
+  .readbtn:hover {
+    color: var(--yap-fg);
+    border-color: var(--yap-border-hover);
+  }
+}
+.readbtn.on {
+  color: var(--yap-primary);
+  border-color: color-mix(in srgb, var(--yap-primary) 45%, var(--yap-border-subtle));
+  background: var(--yap-primary-wash);
+}
+.speaking {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 0.8125rem;
+  font-weight: 600;
   color: var(--yap-primary);
 }
-.pmark {
-  display: none;
-  flex: 0 0 auto;
+.readhint {
+  font-size: 0.8125rem;
+  color: var(--yap-muted);
 }
-/* ✦ while it listens (the bar's .spark.listen) */
-.pmark.listen {
-  width: 20px;
-  height: 20px;
-  fill: var(--yap-live);
-  animation: pulse 1.2s ease-in-out infinite;
-}
-body[data-phase='listening'] .pmark.listen {
-  display: block;
-}
-/* three bars while it speaks (the bar's .speakbars) */
+
+/* The Voice Assistant's speaking marks, as the Yap bar's: three bars. */
 .speakbars {
-  align-items: center;
-  gap: 3px;
-  height: 18px;
-}
-body[data-phase='speaking'] .speakbars {
   display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  height: 0.875rem;
 }
 .speakbars i {
   display: block;
-  width: 3px;
+  width: 2.5px;
   height: 100%;
-  border-radius: 1.5px;
+  border-radius: 1px;
   background: var(--yap-live);
   animation: speak 0.9s ease-in-out infinite;
 }
@@ -756,27 +807,18 @@ body[data-phase='speaking'] .speakbars {
     transform: scaleY(1);
   }
 }
-@keyframes pulse {
-  0%,
-  100% {
-    transform: scale(1);
-    opacity: 1;
-  }
-  50% {
-    transform: scale(0.82);
-    opacity: 0.7;
-  }
-}
 
-/* The step Yap's on: Chat's activity line (views/chat/ActivityLine.svelte). */
-.step {
+/* What Yap is doing: Chat's activity line (views/chat/ActivityLine.svelte). */
+.activity {
+  align-self: flex-start;
   display: flex;
-  justify-content: center;
   align-items: center;
   gap: 8px;
+  max-width: 100%;
+  min-width: 0;
+  margin: 0 0 0 4px;
   font-size: 0.9375rem;
   color: var(--yap-muted);
-  min-width: 0;
 }
 .step-line {
   min-width: 0;
@@ -817,23 +859,37 @@ body[data-phase='speaking'] .speakbars {
     opacity: 1;
   }
 }
+
+/* ---------------------------------------------------------- the dock */
+
+/* The bottom: a note or an error, the composer, the model chip. */
+.dock {
+  flex: 0 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 4px var(--gutter) calc(4px + env(safe-area-inset-bottom));
+}
 .note {
+  margin: 0;
+  padding: 0 6px;
   text-align: center;
-  font-size: 0.9375rem;
+  font-size: 0.875rem;
   color: var(--yap-muted);
 }
 /* An error: a card with a danger edge, the words in the text's colour (as
    Yap's danger buttons: the red at 40 %). */
 .error {
+  margin: 0;
   display: flex;
   gap: 10px;
   align-items: flex-start;
   padding: 10px 14px;
-  border-radius: var(--yap-r-lg);
+  border-radius: var(--yap-r-xl);
   border: 1px solid color-mix(in srgb, var(--yap-danger) 45%, transparent);
   background: color-mix(in srgb, var(--yap-danger) 7%, var(--yap-s2));
   color: var(--yap-fg);
-  font-size: 0.96875rem;
+  font-size: 0.9375rem;
   line-height: 1.45;
 }
 .error::before {
@@ -851,30 +907,339 @@ body[data-phase='speaking'] .speakbars {
   text-align: center;
 }
 
-/* Talk, the waveform over it, Stop / Cancel under it. */
-.controls {
+/* Chat's composer (views/chat/Composer.svelte .inputbar) at a phone's
+   size: a card with the text box, Send, and Talk — the Yap bar's pill —
+   on the right, under the thumb. */
+.composer {
+  --ring-gap: var(--yap-s2);
+  position: relative;
   display: flex;
-  flex-direction: column;
+  align-items: flex-end;
+  gap: 6px;
+  min-height: calc(3rem + 14px);
+  padding: 6px;
+  border: 1px solid var(--yap-border-subtle);
+  border-radius: calc(1.5rem + 7px);
+  background: var(--yap-s2);
+  box-shadow: var(--yap-shadow-sm);
+  transition:
+    border-color var(--yap-dur),
+    box-shadow var(--yap-dur);
+}
+.composer:focus-within {
+  border-color: var(--yap-border-hover);
+}
+.field {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
   align-items: center;
-  gap: 12px;
-  padding: 6px var(--gutter) 12px;
+  min-height: 3rem;
+  padding: 0 4px 0 12px;
+}
+.field textarea {
+  display: block;
+  width: 100%;
+  margin: 0;
+  padding: 0.6875rem 0;
+  border: 0;
+  outline: none;
+  resize: none;
+  background: transparent;
+  color: var(--yap-fg);
+  /* 16 px or more, so a phone doesn't zoom in on it. */
+  font-size: max(16px, 1.0625rem);
+  line-height: 1.4;
+  /* Five lines, then it scrolls (link.js grows it to fit). */
+  max-height: calc(1.4em * 5 + 1.375rem);
+  overflow-y: auto;
+}
+.field textarea::placeholder {
+  color: var(--yap-muted-55);
+}
+/* Empty, the placeholder keeps to one line (cut short when Stop takes the room). */
+.field textarea:placeholder-shown {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.field textarea:focus-visible {
+  box-shadow: none;
+}
+.composer:has(textarea:focus-visible) {
+  border-color: var(--yap-border-hover);
 }
 
+/* The right-hand buttons, bottom-aligned with the box's last line. */
+.acts {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+/* Talk: the Yap bar's pill (bar/Overlay.svelte, DictationCapsule.svelte) in
+   Yap's ink, mic and word. One big target. With words in the box it
+   steps back to a round mic beside Send. */
+.talk {
+  position: relative;
+  height: 3rem;
+  min-width: 3rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 0 1.25rem 0 1rem;
+  border: 0;
+  border-radius: var(--yap-r-full);
+  background: var(--yap-ink);
+  color: var(--yap-ink-fg);
+  box-shadow: var(--yap-shadow-sm);
+  font-size: 1.0625rem;
+  font-weight: 650;
+  line-height: 1;
+  white-space: nowrap;
+  cursor: pointer;
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;
+  transition:
+    background var(--yap-dur),
+    color var(--yap-dur),
+    transform var(--yap-dur);
+}
+.talk:active {
+  transform: scale(0.97);
+}
+@media (hover: hover) {
+  .talk:hover:not(:disabled) {
+    background: var(--yap-ink-hover);
+  }
+}
+.talk:disabled {
+  opacity: 0.45;
+  cursor: default;
+  box-shadow: none;
+}
+.mic-icon,
+.send-icon {
+  flex: 0 0 auto;
+  width: 1.375rem;
+  height: 1.375rem;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.9;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.mic-icon rect {
+  fill: currentColor;
+  stroke: none;
+}
+.send-icon {
+  display: none;
+  stroke-width: 2.3;
+}
+/* (While Yap speaks, Stop takes the room: Talk is the round mic too.) */
+.composer[data-typed='true'][data-state='idle'] .talk,
+.composer[data-typed='true'][data-state='working'] .talk,
+.composer[data-state='speaking'] .talk,
+.composer[data-typed='true'][data-state='idle'] .talk:hover,
+.composer[data-typed='true'][data-state='working'] .talk:hover,
+.composer[data-state='speaking'] .talk:hover {
+  width: 3rem;
+  padding: 0;
+  background: var(--yap-s3);
+  color: var(--yap-fg);
+  box-shadow: none;
+}
+.composer[data-typed='true'][data-state='idle'] .talk-label,
+.composer[data-typed='true'][data-state='working'] .talk-label,
+.composer[data-state='speaking'] .talk-label {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+}
+
+/* Send: Chat's ink arrow, round. */
+.send {
+  flex: 0 0 auto;
+  width: 3rem;
+  height: 3rem;
+  display: grid;
+  place-items: center;
+  border: 0;
+  border-radius: var(--yap-r-full);
+  background: var(--yap-ink);
+  color: var(--yap-ink-fg);
+  box-shadow: var(--yap-shadow-sm);
+  cursor: pointer;
+  touch-action: manipulation;
+}
+.send svg {
+  width: 1.375rem;
+  height: 1.375rem;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2.3;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.send:active {
+  transform: scale(0.96);
+}
+
+/* Stop while Yap speaks: the bar's speaking bars, then ■ Stop. */
+.stop-pill {
+  height: 3rem;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 1rem 0 0.875rem;
+  border: 1px solid var(--yap-border);
+  border-radius: var(--yap-r-full);
+  background: var(--yap-s1);
+  color: var(--yap-fg);
+  font-size: 1rem;
+  font-weight: 650;
+  cursor: pointer;
+  touch-action: manipulation;
+}
+.stop-pill svg {
+  width: 0.875rem;
+  height: 0.875rem;
+  fill: currentColor;
+}
+.stop-pill:active {
+  background: var(--yap-s3);
+}
+
+/* ✕ while Yap listens (on the left, as the bar's capsule has it); ■ while it
+   works the question out (Chat's stop, beside Talk). */
+.cbtn {
+  flex: 0 0 auto;
+  width: 3rem;
+  height: 3rem;
+  display: grid;
+  place-items: center;
+  border: 0;
+  border-radius: var(--yap-r-full);
+  background: var(--yap-s3);
+  color: var(--yap-fg-80);
+  cursor: pointer;
+  touch-action: manipulation;
+}
+.cbtn svg {
+  width: 1.25rem;
+  height: 1.25rem;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2.2;
+  stroke-linecap: round;
+}
+.cbtn .sq {
+  display: none;
+  fill: currentColor;
+  stroke: none;
+}
+.composer[data-state='working'] .cbtn {
+  order: 3;
+}
+.composer[data-state='working'] .cbtn .x {
+  display: none;
+}
+.composer[data-state='working'] .cbtn .sq {
+  display: block;
+}
+.composer[data-state='working'] .acts {
+  order: 4;
+}
+
+/* Listening: the composer is the Yap bar's capsule, the Voice Assistant's
+   variant (an amber edge, ✦) with the bar's waveform and the time; Talk
+   says Send. */
+.live {
+  display: none;
+  flex: 1 1 auto;
+  min-width: 0;
+  align-items: center;
+  gap: 10px;
+  min-height: 3rem;
+  padding: 0 4px 0 6px;
+}
+.composer[data-state='listening'],
+.composer[data-state='opening'] {
+  border-color: var(--yap-live);
+  box-shadow:
+    inset 0 0 0 1px var(--yap-live),
+    0 0 0 4px var(--yap-primary-wash);
+}
+.composer[data-state='listening'] .field,
+.composer[data-state='opening'] .field {
+  display: none;
+}
+.composer[data-state='listening'] .live,
+.composer[data-state='opening'] .live {
+  display: flex;
+}
+.composer[data-state='listening'] .talk .mic-icon,
+.composer[data-state='opening'] .talk .mic-icon {
+  display: none;
+}
+.composer[data-state='listening'] .talk .send-icon {
+  display: block;
+}
+.composer[data-state='opening'] .talk {
+  background: var(--yap-s3);
+  color: var(--yap-fg);
+}
+.spark {
+  flex: 0 0 auto;
+  width: 1.125rem;
+  height: 1.125rem;
+  fill: var(--yap-live);
+  animation: pulse 1.2s ease-in-out infinite;
+}
+@keyframes pulse {
+  0%,
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.55;
+    transform: scale(0.86);
+  }
+}
+.live-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 0.9375rem;
+  color: var(--yap-fg-80);
+}
+.live-label:empty {
+  display: none;
+}
 /* The Yap bar's waveform (bar/DictationCapsule.svelte .wave): thin amber
    bars, the newest on the right, older ones scrolling left; at least 7 %
-   tall. Its place is kept while it's hidden, so Talk never moves. */
+   tall. */
 .meter {
+  flex: 1 1 auto;
+  min-width: 0;
   display: flex;
   align-items: center;
   justify-content: flex-end;
   gap: 2px;
-  height: 40px;
-  width: min(100%, 298px);
+  height: 1.75rem;
   overflow: hidden;
-  visibility: hidden;
 }
-.meter[data-on='true'] {
-  visibility: visible;
+.meter[data-on='false'] {
+  display: none;
 }
 .meter i {
   flex: 0 0 3px;
@@ -885,131 +1250,195 @@ body[data-phase='speaking'] .speakbars {
   transform-origin: center;
   transition: transform 60ms linear;
 }
-
-/* Talk: Yap's filled (ink) button as a big circle. Listening, it takes the
-   Voice Assistant's amber edge (the bar's capsule) with a soft halo. */
-.talk-btn {
-  --size: clamp(148px, min(46vw, 25svh), 196px);
-  position: relative;
-  width: var(--size);
-  height: var(--size);
-  border-radius: 50%;
-  border: 0;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 4px;
-  background: var(--yap-ink);
-  color: var(--yap-ink-fg);
-  box-shadow: var(--talk-shadow);
-  cursor: pointer;
-  touch-action: none;
-  user-select: none;
-  -webkit-user-select: none;
-  -webkit-touch-callout: none;
-  transition:
-    background var(--yap-dur),
-    transform var(--yap-dur),
-    box-shadow var(--yap-dur);
-}
-.talk-btn:active {
-  transform: scale(0.97);
-}
-.talk-btn:disabled {
-  opacity: 0.45;
-  cursor: default;
-  box-shadow: none;
-}
-.talk-btn:focus-visible {
-  box-shadow:
-    0 0 0 3px var(--yap-s1),
-    0 0 0 6px var(--yap-focus-ring),
-    var(--talk-shadow);
-}
-.talk-btn[aria-pressed='true'] {
-  box-shadow:
-    0 0 0 4px var(--yap-live),
-    0 0 0 14px var(--yap-primary-wash),
-    var(--talk-shadow);
-  animation: halo 1.6s ease-in-out infinite;
-}
-.talk-btn[aria-pressed='true'] .mic-icon {
-  color: var(--talk-live);
-}
-@keyframes halo {
-  0%,
-  100% {
-    box-shadow:
-      0 0 0 4px var(--yap-live),
-      0 0 0 10px var(--yap-primary-wash),
-      var(--talk-shadow);
-  }
-  50% {
-    box-shadow:
-      0 0 0 4px var(--yap-live),
-      0 0 0 18px var(--yap-primary-wash),
-      var(--talk-shadow);
-  }
-}
-.mic-icon {
-  width: 40px;
-  height: 40px;
-  color: inherit;
-  fill: none;
-  stroke: currentColor;
-  stroke-width: 1.8;
-  stroke-linecap: round;
-}
-.mic-icon rect {
-  fill: currentColor;
-  stroke: none;
-}
-.talk-label {
-  font-size: 1.375rem;
-  font-weight: 700;
-  line-height: 1.1;
-  text-align: center;
-  padding: 0 14px;
-}
 .talk-time {
-  font-size: 1rem;
-  font-weight: 560;
+  flex: 0 0 auto;
+  font-size: 0.9375rem;
+  font-weight: 600;
   font-variant-numeric: tabular-nums;
-  min-height: 1.2em;
-  opacity: 0.8;
+  color: var(--yap-fg-80);
+}
+.talk-time:empty {
+  display: none;
 }
 
-.secondary {
+/* Under the composer, as in Chat: the model chip. */
+.foot {
   display: flex;
-  gap: 12px;
-  min-height: 3rem;
+  align-items: center;
+  min-height: 2.75rem;
 }
-.secondary .stop {
-  min-width: 10rem;
+
+/* Chat's model chip (views/chat/ModelChip.svelte): the provider's mark, the
+   model and where it runs, a chevron; it opens Chat's picker. */
+.chip {
+  min-width: 0;
+  max-width: 100%;
+  min-height: 2.75rem;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 10px 0 8px;
+  border: 0;
+  border-radius: var(--yap-r-full);
+  background: transparent;
+  color: var(--yap-fg-80);
+  cursor: pointer;
+  text-align: left;
+  touch-action: manipulation;
+  transition: background var(--yap-dur);
 }
-.keep-open {
-  margin: 0;
-  max-width: 30em;
-  text-align: center;
-  text-wrap: balance;
-  font-size: 0.875rem;
+.chip:active {
+  background: var(--yap-s3);
+}
+@media (hover: hover) {
+  .chip:hover {
+    background: var(--yap-s3);
+  }
+}
+.chip-text {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  min-width: 0;
+}
+.chip-label {
+  min-width: 0;
+  font-size: 0.9375rem;
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.chip-where {
+  flex: 0 0 auto;
+  font-size: 0.8125rem;
+  font-weight: 560;
   color: var(--yap-muted);
 }
+.chip-where::before {
+  content: '· ';
+}
+.chev {
+  flex: 0 0 auto;
+  width: 15px;
+  height: 15px;
+  fill: none;
+  stroke: var(--yap-muted);
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
 
-/* ------------------------------------------------------------ options */
+/* A provider's or a model family's mark (views/chat/ProviderMark.svelte):
+   the logo as it is, a monochrome one as a mask in the text's colour (so
+   it shows on dark too), Claude's in its own colour; else Yap's glyph. */
+.pmark {
+  --s: 18px;
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: var(--s);
+  height: var(--s);
+  color: var(--yap-fg);
+  overflow: hidden;
+}
+.pmark img,
+.pmark svg,
+.pmark .mask {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+.pmark img {
+  object-fit: contain;
+}
+.pmark svg {
+  fill: none;
+  stroke: var(--yap-muted);
+  stroke-width: 1.8;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.pmark .mask {
+  background-color: currentColor;
+  -webkit-mask-repeat: no-repeat;
+  mask-repeat: no-repeat;
+  -webkit-mask-position: center;
+  mask-position: center;
+  -webkit-mask-size: contain;
+  mask-size: contain;
+}
+.pmark.tile {
+  box-sizing: border-box;
+  padding: calc(var(--s) * 0.16);
+  border: 1px solid var(--yap-border-subtle);
+  border-radius: calc(var(--s) * 0.29);
+  background: var(--yap-s1);
+}
+
+/* ------------------------------------------------------------ sheets */
+
+/* A sheet from the bottom (thumb's reach), Yap's menu card. */
+.sheet {
+  --ring-gap: var(--yap-s2);
+  width: 100%;
+  max-width: 560px;
+  max-height: 88vh;
+  max-height: 88dvh;
+  margin: auto auto 0;
+  padding: 8px var(--gutter) calc(14px + env(safe-area-inset-bottom));
+  border: 0;
+  border-radius: 22px 22px 0 0;
+  background: var(--yap-s2);
+  color: var(--yap-fg);
+  box-shadow: var(--yap-shadow-modal);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+.sheet[open] {
+  animation: rise 220ms cubic-bezier(0.2, 0.7, 0.2, 1);
+}
+@keyframes rise {
+  from {
+    transform: translateY(24px);
+    opacity: 0.4;
+  }
+}
+.sheet::backdrop {
+  background: var(--yap-scrim);
+}
+.grab {
+  width: 40px;
+  height: 4px;
+  margin: 0 auto 12px;
+  border-radius: 2px;
+  background: var(--yap-border);
+}
+.sheet h2 {
+  margin: 0 4px 12px;
+  font-family: var(--yap-font-display);
+  font-size: 1.5rem;
+  font-weight: 550;
+  line-height: 1.2;
+}
+.sheet-close {
+  width: 100%;
+  margin-top: 4px;
+}
+
+/* ------------------------------------------------------------ settings */
 
 /* Hands-free, Clearer sound and the microphone: a card of Yap's Settings
    rows (src/lib/ui/Row.svelte, Toggle.svelte): the words on the left, the
    control on the right, hairlines between. */
 .options {
-  --ring-gap: var(--yap-s2);
-  margin: 4px var(--gutter) 16px;
+  --ring-gap: var(--yap-s1);
+  margin: 0 0 10px;
   padding: 2px 16px;
-  background: var(--yap-s2);
+  background: var(--yap-s1);
   border: 1px solid var(--yap-border-subtle);
   border-radius: 16px;
-  box-shadow: var(--yap-shadow-sm);
   display: flex;
   flex-direction: column;
 }
@@ -1099,12 +1528,12 @@ body[data-phase='speaking'] .speakbars {
 }
 .switch input:focus-visible + .track {
   box-shadow:
-    0 0 0 2px var(--yap-s2),
+    0 0 0 2px var(--ring-gap),
     0 0 0 4px var(--yap-focus-ring);
 }
 
-/* Hands-free's wait before sending: Yap's segmented control
-   (Segmented.svelte), one tap. */
+/* Hands-free's wait before sending, the ChatGPT entry's two ways and the
+   effort: Yap's segmented control (Segmented.svelte), one tap. */
 .wait {
   margin: 0;
   padding: 0 0 14px;
@@ -1147,6 +1576,7 @@ body[data-phase='speaking'] .speakbars {
   font-weight: 560;
   font-size: 0.96875rem;
   line-height: 1.2;
+  text-align: center;
   color: var(--yap-muted);
   transition:
     background var(--yap-dur),
@@ -1176,7 +1606,7 @@ body[data-phase='speaking'] .speakbars {
     0 0 0 4px var(--yap-focus-ring);
 }
 
-.field {
+.field-row {
   display: flex;
   flex-direction: column;
   gap: 8px;
@@ -1209,13 +1639,13 @@ select {
 }
 select:focus-visible {
   box-shadow:
-    0 0 0 2px var(--yap-s2),
+    0 0 0 2px var(--ring-gap),
     0 0 0 4px var(--yap-focus-ring);
 }
 
-/* Sound details: a disclosure at the foot (Chat's folded steps). */
+/* Sound details: a disclosure under them (Chat's folded steps). */
 .sound {
-  margin: 0 var(--gutter) 24px;
+  margin: 0 0 10px;
   color: var(--yap-muted);
   font-size: 0.90625rem;
 }
@@ -1250,7 +1680,7 @@ select:focus-visible {
 .sound dl {
   margin: 0;
   padding: 12px 16px;
-  background: var(--yap-s2);
+  background: var(--yap-s1);
   border: 1px solid var(--yap-border-subtle);
   border-radius: var(--yap-r-xl);
   display: grid;
@@ -1267,155 +1697,375 @@ select:focus-visible {
   overflow-wrap: anywhere;
 }
 
-/* --------------------------------------------------------- the models */
+/* ---------------------------------------------------- Chat's picker */
 
-/* A sheet from the bottom (thumb's reach), Yap's menu card: the title in
-   the display serif, a row per model, the chosen one washed amber. */
-.sheet {
-  --ring-gap: var(--yap-s2);
-  width: 100%;
-  max-width: 520px;
-  max-height: 85vh;
-  margin: auto auto 0;
-  padding: 20px var(--gutter) calc(16px + env(safe-area-inset-bottom));
-  border: 0;
-  border-radius: 20px 20px 0 0;
-  background: var(--yap-s2);
-  color: var(--yap-fg);
-  box-shadow: var(--yap-shadow-modal);
+/* Chat's model picker (views/chat/ChatModelPicker.svelte) as a sheet: the
+   provider rail across the top with its logos (the picker's narrow
+   layout), the chosen provider's models under it, the effort, the foot. */
+.picker {
+  padding: 8px 0 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
 }
-.sheet::backdrop {
-  background: var(--yap-scrim);
+.picker:not([open]) {
+  display: none;
 }
-.sheet h2 {
-  margin: 0 4px 12px;
-  font-family: var(--yap-font-display);
-  font-size: 1.5rem;
-  font-weight: 550;
-  line-height: 1.2;
+.picker h2 {
+  margin: 0 var(--gutter) 10px;
 }
-.models-list {
-  list-style: none;
-  margin: 0 0 12px;
-  padding: 0;
-  max-height: 60vh;
-  overflow-y: auto;
-}
-.model-item {
-  width: 100%;
-  min-height: 3.5rem;
+.rail {
+  flex: 0 0 auto;
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  gap: 6px;
+  padding: 2px var(--gutter) 10px;
+  overflow-x: auto;
+  scrollbar-width: none;
+  border-bottom: 1px solid var(--yap-rule);
+}
+.rail::-webkit-scrollbar {
+  display: none;
+}
+.rail .sep {
+  flex: 0 0 1px;
+  align-self: stretch;
+  margin: 8px 2px;
+  background: var(--yap-rule);
+}
+.tab {
+  flex: 0 0 auto;
+  min-height: 2.75rem;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 14px 0 11px;
+  border: 1px solid var(--yap-border-subtle);
+  border-radius: var(--yap-r-full);
+  background: var(--yap-s1);
+  color: var(--yap-fg-80);
+  font-size: 0.9375rem;
+  font-weight: 600;
+  white-space: nowrap;
+  cursor: pointer;
+  touch-action: manipulation;
+}
+.tab[aria-selected='true'] {
+  background: var(--yap-s3);
+  border-color: var(--yap-border-hover);
+  color: var(--yap-fg);
+  box-shadow: var(--yap-shadow-sm);
+}
+/* Connected: a green dot; not set up: a hollow one. */
+.tab .st {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--yap-success-text);
+}
+.tab .st.off {
+  background: transparent;
+  box-shadow: inset 0 0 0 1.5px var(--yap-muted-55);
+}
+.pane {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 10px var(--gutter) 12px;
+}
+.phead {
+  display: flex;
+  align-items: center;
   gap: 12px;
-  padding: 8px 12px;
+  padding: 2px 4px 10px;
+}
+.ptext {
+  min-width: 0;
+}
+.ptitle {
+  font-weight: 650;
+  font-size: 1.0625rem;
+  line-height: 1.3;
+}
+.psub {
+  font-size: 0.875rem;
+  color: var(--yap-muted);
+  line-height: 1.4;
+}
+.psub.warn,
+.pnote.warn {
+  color: var(--yap-warning);
+}
+.pnote {
+  margin: 0 4px 10px;
+  font-size: 0.875rem;
+  color: var(--yap-muted);
+}
+.gh {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 6px 4px;
+  font-size: 0.8125rem;
+  font-weight: 650;
+  letter-spacing: 0.01em;
+  color: var(--yap-muted);
+}
+.gh .meta {
+  margin-left: auto;
+  font-weight: 500;
+}
+/* A model: ✓ where it's the one in use, its mark, its name and what it's
+   for, its tags. The one in use washed amber, as in Chat's picker. */
+.mrow {
+  width: 100%;
+  min-height: 3.5rem;
+  display: grid;
+  grid-template-columns: 1.125rem 1.25rem minmax(0, 1fr);
+  align-items: start;
+  gap: 10px;
+  padding: 9px 10px;
   border: 0;
   border-radius: var(--yap-r-lg);
   background: transparent;
+  color: var(--yap-fg);
   text-align: left;
   cursor: pointer;
   touch-action: manipulation;
 }
-.model-item:active {
+.mrow:active {
   background: var(--yap-s3);
 }
 @media (hover: hover) {
-  .model-item:hover {
+  .mrow:hover {
     background: var(--yap-s3);
   }
 }
-.model-item[aria-current='true'] {
+.mrow.on {
   background: var(--yap-primary-wash);
 }
-.model-item[aria-current='true'] .mname::after {
-  content: ' ✓';
+.mrow.locked {
+  cursor: default;
+  opacity: 0.62;
+}
+.mrow.locked:active {
+  background: transparent;
+}
+.chk {
+  width: 1.125rem;
+  height: 1.125rem;
   color: var(--yap-link);
 }
-.mname {
-  font-weight: 600;
-  min-width: 0;
-  overflow-wrap: anywhere;
+/* The ✓ and the mark beside the name's line. */
+.mrow > .chk,
+.mrow > .pmark {
+  margin-top: 0.1rem;
 }
-.mwhere {
-  flex: 0 0 auto;
-  font-size: 0.84375rem;
+.chk svg {
+  width: 100%;
+  height: 100%;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2.4;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.txt {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+.nm {
+  font-weight: 600;
+  font-size: 1rem;
+  line-height: 1.3;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.ds {
+  font-size: 0.8125rem;
+  line-height: 1.35;
+  color: var(--yap-muted);
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 4px;
+}
+.tag {
+  padding: 2px 8px;
+  border-radius: var(--yap-r-full);
+  background: var(--yap-s3);
+  color: var(--yap-muted);
+  font-size: 0.75rem;
+  font-weight: 600;
+  white-space: nowrap;
+}
+.tag.use,
+.tag.new {
+  background: var(--yap-primary-wash);
+  color: var(--yap-link);
+}
+.tag.rec {
+  color: var(--yap-success-text);
+}
+.tag.warn {
+  color: var(--yap-warning);
+}
+.tag.gone {
+  color: var(--yap-danger);
+}
+.morerow {
+  width: 100%;
+  min-height: 3rem;
+  display: grid;
+  grid-template-columns: 1.125rem 1.25rem minmax(0, 1fr);
+  align-items: center;
+  gap: 10px;
+  padding: 6px 10px;
+  border: 0;
+  border-radius: var(--yap-r-lg);
+  background: transparent;
+  color: var(--yap-fg-80);
+  font-weight: 600;
+  text-align: left;
+  cursor: pointer;
+  touch-action: manipulation;
+}
+.morerow:active {
+  background: var(--yap-s3);
+}
+.morerow .ch {
+  width: 1rem;
+  height: 1rem;
+  fill: none;
+  stroke: var(--yap-muted);
+  stroke-width: 2.2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  transition: transform var(--yap-dur);
+}
+.morerow[aria-expanded='true'] .ch {
+  transform: rotate(90deg);
+}
+.morerow .mlabel {
+  min-width: 0;
+}
+.morerow .count {
+  color: var(--yap-muted);
+  font-weight: 500;
+}
+/* A provider without a key: how to connect it, on the PC. */
+.connect {
+  margin: 0 0 8px;
+  padding: 14px 16px;
+  border: 1px solid var(--yap-border-subtle);
+  border-radius: var(--yap-r-xl);
+  background: var(--yap-s1);
+}
+.ctitle {
+  font-weight: 650;
+}
+.cdesc {
+  margin-top: 2px;
+  font-size: 0.875rem;
   color: var(--yap-muted);
 }
-.sheet .btn {
+.ways {
+  margin: 0 0 6px;
+}
+.pk-empty {
+  margin: 14px 6px;
+  color: var(--yap-muted);
+  font-size: 0.9375rem;
+}
+/* The model in use's effort (as the Claude Code app's menu has it). */
+.effort {
+  flex: 0 0 auto;
+  padding: 10px var(--gutter) 4px;
+  border-top: 1px solid var(--yap-rule);
+}
+.effort .elabel {
+  display: block;
+  margin: 0 0 8px;
+  font-weight: 600;
+}
+.effort .efor {
+  color: var(--yap-muted);
+  font-weight: 500;
+}
+.effort .ehint {
+  margin: 6px 2px 4px;
+  font-size: 0.8125rem;
+  color: var(--yap-muted);
+}
+.effort .switch {
+  border-top: 1px solid var(--yap-rule);
+}
+.pk-foot {
+  flex: 0 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px var(--gutter) calc(12px + env(safe-area-inset-bottom));
+  border-top: 1px solid var(--yap-rule);
+  font-size: 0.8125rem;
+  color: var(--yap-muted);
+}
+.pk-foot .btn {
   width: 100%;
 }
 
 /* ------------------------------------------------------------ layouts */
 
-/* Wider screens (a tablet, the PC's browser): a column in the middle. */
+/* Wider screens (a tablet, the PC's browser, a phone on its side): a column
+   in the middle, as Chat's thread is. */
 @media (min-width: 640px) {
-  body {
-    align-items: center;
-  }
   .top,
-  main {
-    width: 100%;
-    max-width: 560px;
+  .chat {
+    max-width: 760px;
   }
 }
 
-/* A phone on its side: the conversation on the left, Talk on the right
-   (in the thumb's reach), the options under them. */
+/* A phone on its side (up to 560 px tall): a slimmer header and empty
+   state, so the conversation keeps the room. */
 @media (orientation: landscape) and (max-height: 560px) {
-  :root {
-    --peek: 0px;
+  .top {
+    min-height: 2.75rem;
+    padding-top: calc(2px + env(safe-area-inset-top));
+    padding-bottom: 2px;
   }
-  body {
-    align-items: stretch;
+  .mark {
+    width: 24px;
+    height: 24px;
   }
-  .top,
-  main {
-    max-width: none;
+  .who {
+    flex-direction: row;
+    align-items: baseline;
+    gap: 10px;
   }
-  .stage {
-    display: grid;
-    grid-template-columns: minmax(0, 1fr) minmax(260px, 38%);
-    grid-template-rows: auto auto 1fr auto;
-    grid-template-areas:
-      'convo now'
-      'convo meter'
-      'convo talk'
-      'hint  secondary';
-    column-gap: 8px;
+  .empty {
+    gap: 6px;
   }
-  .convo-box {
-    grid-area: convo;
-    min-height: 0;
-  }
-  .now {
-    grid-area: now;
-    min-height: 0;
-    padding-top: 0;
-  }
-  .controls {
-    display: contents;
-  }
-  .meter {
-    grid-area: meter;
-    justify-self: center;
-    height: 28px;
-  }
-  .talk-btn {
-    grid-area: talk;
-    justify-self: center;
-    align-self: center;
-    --size: clamp(120px, 34svh, 168px);
-  }
-  .secondary {
-    grid-area: secondary;
-    justify-self: center;
-    padding-bottom: 10px;
-  }
+  .empty-spark,
   .keep-open {
-    grid-area: hint;
-    align-self: center;
-    justify-self: center;
-    padding: 0 var(--gutter) 10px;
+    display: none;
+  }
+  .empty-title {
+    font-size: 1.5rem;
+  }
+  .thread {
+    padding-top: 10px;
+  }
+  .foot {
+    min-height: 2.5rem;
   }
 }
 
@@ -1434,11 +2084,12 @@ select:focus-visible {
   .speakbars i {
     transform: scaleY(0.7);
   }
-  .talk-btn:active,
+  .talk:active,
+  .send:active,
   .btn:active {
     transform: none;
   }
-  .convo {
+  .thread {
     scroll-behavior: auto;
   }
 }

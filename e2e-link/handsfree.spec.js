@@ -4,7 +4,7 @@
 // support/audio.js's SPEECH_WAV once: quiet, 1.2 s of a voice-like sound,
 // then quiet.
 import { test, expect } from '@playwright/test';
-import { servePage, seedDevice, mockPc, open, ready, snapshot } from './support/harness.js';
+import { servePage, seedDevice, mockPc, open, ready, snapshot, openSettings, closeSettings } from './support/harness.js';
 import { SPEECH_AT } from './support/audio.js';
 
 test.beforeEach(async ({ page }) => {
@@ -27,6 +27,8 @@ test('hands-free: the end of speech sends stop by itself, about 1.5 s after it (
   const pc = await mockPc(page);
   await open(page);
   await ready(page, pc);
+  // Hands-free and its wait are in the settings sheet (⋯).
+  await openSettings(page);
   const sw = page.getByTestId('handsfree');
   await expect(sw).not.toBeChecked();
   // The wait choice shows with hands-free on.
@@ -36,6 +38,7 @@ test('hands-free: the end of speech sends stop by itself, about 1.5 s after it (
   expect(await page.evaluate(() => localStorage.getItem('yap.link.handsFree'))).toBe('true');
   await expect(page.getByTestId('wait')).toBeVisible();
   await expect(page.getByRole('radio', { name: 'Normal 1.5 s' })).toBeChecked();
+  await closeSettings(page);
 
   const seconds = await askHandsFree(page, pc);
   // Stopped by the page, not by a tap: after the speech ended, not long after.
@@ -61,6 +64,7 @@ for (const [name, label, wait] of [
     const pc = await mockPc(page);
     await open(page);
     await ready(page, pc);
+    await openSettings(page);
     await page.getByText('Hands-free').click();
     await page.getByRole('radio', { name: label }).check();
     await expect(page.getByRole('radio', { name: label })).toBeChecked();
@@ -70,7 +74,9 @@ for (const [name, label, wait] of [
     // Remembered: the page opened again has it, and uses it.
     await open(page);
     await ready(page, pc);
+    await openSettings(page);
     await expect(page.getByRole('radio', { name: label })).toBeChecked();
+    await closeSettings(page);
     expect((await snapshot(page)).waitMs).toBe(wait * 1000);
     const seconds = await askHandsFree(page, pc);
     expect(seconds).toBeGreaterThan(SPEECH_AT.to + wait - 0.2);
