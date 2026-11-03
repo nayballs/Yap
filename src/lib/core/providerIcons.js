@@ -40,12 +40,11 @@ export const PROVIDER_ICONS = {
   whisper: openai,
 };
 
-// Logos drawn in solid black that must be inverted on the dark theme.
-export const MONOCHROME_PROVIDERS = new Set(['openai', 'openai-oss', 'whisper', 'anthropic', 'xai', 'openrouter']);
-
-// Logos drawn in `currentColor` that carry a brand colour of their own:
-// ProviderMark.svelte fills them with it.
-export const ICON_TINTS = { claude: '#d97757' };
+// Which marks are monochrome (drawn in black, inverted on the dark theme) or
+// tinted (drawn in `currentColor`, filled with a brand colour), and which
+// mark a provider or model family gets, live in modelIcons.js (pure: Yap
+// Link's phone page loads it, and these same files, as they are).
+export { MONOCHROME_PROVIDERS, ICON_TINTS } from './modelIcons.js';
 
 // STT engine family (models.js `engine`) → provider icon id. Engines without a
 // truthful brand icon (Cohere, SenseVoice, GigaAM, Moonshine) fall back to a
