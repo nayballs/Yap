@@ -1,9 +1,26 @@
 // The answer's sound on the phone: one stream from a jitter buffer
 // (player-worklet.js, dsp.js `Playout`), "Clearer sound in a headset" (on by
 // default: the mic closed while Yap talks) and Sound details. Yap on the PC
-// mocked; the mic the looped 440 Hz tone.
+// mocked, its Done sending the question to answer out loud (as hands-free
+// does; `CAN_BEFORE_WORDS`); the mic the looped 440 Hz tone.
 import { test, expect } from '@playwright/test';
-import { servePage, seedDevice, mockPc, open, ready, ask, snapshot, downFrame, voice, openSettings, closeSettings } from './support/harness.js';
+import {
+  servePage,
+  seedDevice,
+  mockPc as mockAnyPc,
+  open,
+  ready,
+  ask,
+  snapshot,
+  downFrame,
+  voice,
+  openSettings,
+  closeSettings,
+  CAN_BEFORE_WORDS,
+} from './support/harness.js';
+
+/** A PC whose Done sends the spoken question, and says its answer. */
+const mockPc = (page, opts = {}) => mockAnyPc(page, { can: CAN_BEFORE_WORDS, ...opts });
 
 const player = async (page) => (await snapshot(page)).player;
 

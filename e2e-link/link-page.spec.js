@@ -1,6 +1,9 @@
 // Yap Link's phone page against a mocked PC: pairing, Talk and its frames,
 // what's shown while Yap works, the spoken answer, Stop and barge-in, the
-// model chip, denied, reconnects, pings and the wake lock.
+// model chip, denied, reconnects, pings and the wake lock. (Talk's words in
+// the box, the default with hands-free off: words.spec.js. The spoken
+// answer's tests here talk to a PC whose Done sends the question —
+// `CAN_BEFORE_WORDS`, as hands-free does today.)
 import { test, expect } from '@playwright/test';
 import {
   servePage,
@@ -18,7 +21,11 @@ import {
   DEVICE,
   MODELS,
   openSettings,
+  CAN_BEFORE_WORDS,
 } from './support/harness.js';
+
+/** A PC whose Done sends the question (and answers out loud). */
+const asks = { can: CAN_BEFORE_WORDS };
 import { TONE_HZ } from './support/audio.js';
 
 test.describe('pairing', () => {
@@ -215,13 +222,14 @@ test.describe('talking', () => {
     await expect(page.getByTestId('talk-time')).toHaveText(/^0:0[1-9]$/);
     await page.getByTestId('talk').click();
     await expect.poll(() => pc.of('stop').length).toBe(1);
-    await expect(page.getByTestId('phase')).toHaveText('Working it out');
+    // Hands-free off: its words come back for the box.
+    await expect(page.getByTestId('phase')).toHaveText('Transcribing…');
 
     // start first, every frame between start and stop, stop last.
     const order = pc.log.map((e) => (e.text ? e.text.type : 'frame')).filter((t) => t !== 'ping');
     const first = order.indexOf('start');
     const last = order.lastIndexOf('frame');
-    expect(pc.of('start')[0]).toEqual({ type: 'start', mode: 'ask' });
+    expect(pc.of('start')[0]).toEqual({ type: 'start', mode: 'words' });
     expect(order.indexOf('frame')).toBeGreaterThan(first);
     expect(order.indexOf('stop')).toBeGreaterThan(last);
 
@@ -241,8 +249,8 @@ test.describe('talking', () => {
     expect([44100, 48000]).toContain(snap.contextRate);
   });
 
-  test('hold to talk: release sends', async ({ page }) => {
-    const pc = await mockPc(page);
+  test('hold to talk: release sends (a question: hands-free, or a PC from before words)', async ({ page }) => {
+    const pc = await mockPc(page, asks);
     await open(page);
     await ready(page, pc);
     const box = await page.getByTestId('talk').boundingBox();
@@ -314,7 +322,7 @@ test.describe('talking', () => {
   });
 
   test('what was heard, the step with its time, and the answer as it streams', async ({ page }) => {
-    const pc = await mockPc(page);
+    const pc = await mockPc(page, asks);
     await open(page);
     await ready(page, pc);
     await ask(page, pc);
@@ -341,7 +349,7 @@ test.describe('talking', () => {
   });
 
   test("the answer's markdown as Chat shows it: built as nodes, never HTML", async ({ page }) => {
-    const pc = await mockPc(page);
+    const pc = await mockPc(page, asks);
     await open(page);
     await ready(page, pc);
     await ask(page, pc);
@@ -401,7 +409,7 @@ test.describe('talking', () => {
   });
 
   test("the answer spoken: one stream at the phone's own rate, played out to the end", async ({ page }) => {
-    const pc = await mockPc(page);
+    const pc = await mockPc(page, asks);
     await open(page);
     await ready(page, pc);
     await ask(page, pc);
@@ -433,7 +441,7 @@ test.describe('talking', () => {
   });
 
   test('Stop: interrupt sent, the answer silent at once (a fade, not a cut), its late frames dropped', async ({ page }) => {
-    const pc = await mockPc(page);
+    const pc = await mockPc(page, asks);
     await open(page);
     await ready(page, pc);
     await ask(page, pc);
@@ -469,7 +477,7 @@ test.describe('talking', () => {
   });
 
   test('Talk while it speaks: interrupt, then a new question (barge-in)', async ({ page }) => {
-    const pc = await mockPc(page);
+    const pc = await mockPc(page, asks);
     await open(page);
     await ready(page, pc);
     await ask(page, pc);

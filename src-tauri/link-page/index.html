@@ -151,20 +151,25 @@
                 <div class="live" aria-hidden="true">
                   <svg class="spark" viewBox="0 0 24 24" focusable="false"><path d="M12 2.5c.5 3.9 1.6 6.4 3.1 7.9 1.5 1.5 4 2.6 6.4 3.1-2.4.5-4.9 1.6-6.4 3.1-1.5 1.5-2.6 4-3.1 6.9-.5-2.9-1.6-5.4-3.1-6.9-1.5-1.5-4-2.6-6.9-3.1 2.9-.5 5.4-1.6 6.9-3.1 1.5-1.5 2.6-4 3.1-7.9z" /></svg>
                   <span id="live-label" class="live-label"></span>
+                  <!-- Transcribing (words for the box): Chat's three amber dots. -->
+                  <span class="dots live-dots"><i></i><i></i><i></i></span>
                   <!-- The mic's sound while Yap listens: the Yap bar's waveform, newest on the right. -->
                   <div id="meter" class="meter" data-testid="meter" data-on="false"></div>
                   <span id="talk-time" class="talk-time" data-testid="talk-time"></span>
                 </div>
                 <span class="spacer"></span>
-                <!-- The mic: a tap talks hands-free (tap again, or Done, to
-                     send), a hold talks while held. A spoken question to
-                     Yap's AI, never dictation. -->
+                <!-- The mic: a tap talks (tap again, or Done, to finish), a
+                     hold talks while held. Its words go in the text box to
+                     check and send (hands-free: sent, and answered out
+                     loud). A question to Yap's AI, never dictation into the
+                     PC's apps. -->
                 <button id="talk-btn" class="talk" type="button" aria-pressed="false" data-testid="talk">
                   <svg class="mic-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
                     <rect x="9" y="3" width="6" height="11" rx="3" />
                     <path d="M5.5 11a6.5 6.5 0 0 0 13 0M12 17.5V21" />
                   </svg>
                   <svg class="done-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M12 19V5M5.5 11.5L12 5l6.5 6.5" /></svg>
+                  <svg class="check-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M5 12.5l4.5 4.5L19 7.5" /></svg>
                   <span id="talk-label" class="talk-label">Talk</span>
                 </button>
                 <button id="send-btn" class="send" type="submit" aria-label="Send" data-testid="send" disabled>
@@ -215,7 +220,7 @@
         <label class="switch">
           <span class="switch-text">
             <span class="switch-label">Hands-free</span>
-            <span id="handsfree-hint" class="hint">Sends when you stop talking</span>
+            <span id="handsfree-hint" class="hint">On: sends when you stop talking, and Yap answers out loud. Off: your words go in the box to check first.</span>
           </span>
           <input id="handsfree" type="checkbox" role="switch" data-testid="handsfree" aria-describedby="handsfree-hint" />
           <span class="track" aria-hidden="true"></span>

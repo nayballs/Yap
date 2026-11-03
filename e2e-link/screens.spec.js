@@ -1,8 +1,9 @@
 // The page's states as named screenshots, light and dark, at a small and a
 // middling phone, in test-results/link/screenshots/ (to look at, not
 // compared): pairing, empty, the drawer, a chat opened from it, typing with
-// the keyboard up, answering (■), listening, two pictures in the composer,
-// the model sheet, the settings sheet. Also checks nothing
+// the keyboard up, listening, transcribing, Talk's words in the box,
+// answering (■), two pictures in the composer, the model sheet, the
+// settings sheet. Also checks nothing
 // overflows sideways, every control is a thumb's size (44 px or more), Yap's
 // fonts and logos come from the page's own origin, and the composer and
 // Talk are on the first screen, low enough for a thumb, upright and on its
@@ -22,6 +23,7 @@ import {
   pickerData,
   photo,
   choosePhotos,
+  CAN_BEFORE_WORDS,
 } from './support/harness.js';
 
 /** Chat on Claude Opus 5.5 at Extra effort: the chip says "Claude Opus 5.5 · Extra". */
@@ -129,7 +131,36 @@ for (const scheme of ['light', 'dark']) {
         await page.getByTestId('input').fill('');
         await page.setViewportSize({ width: w, height: h });
 
-        // Asked out loud, answered and spoken.
+        // Talk (hands-free off): listening, the composer as the Yap bar's
+        // capsule with Done's ✓; then transcribing; then the words in the
+        // box after what was typed first, to check and send.
+        await page.getByTestId('input').fill('Draft a note to the allotment group');
+        await page.getByTestId('talk').click();
+        await expect(page.getByTestId('talk-time')).toHaveText('0:01', { timeout: 4000 });
+        await shot(page, `listening-${at}`);
+        expect(await tooSmall(page)).toEqual([]);
+        await page.getByTestId('talk').click();
+        await expect(page.getByTestId('composer')).toHaveAttribute('data-state', 'transcribing');
+        await shot(page, `transcribing-${at}`);
+        expect(await tooSmall(page)).toEqual([]);
+        expect(await noSideways(page)).toBe(true);
+        pc.send({ type: 'state', phase: 'transcribing' });
+        pc.send({ type: 'words', text: 'saying the water butts are full and the shed key is under the blue pot' });
+        pc.send({ type: 'state', phase: 'idle' });
+        await expect(page.getByTestId('input')).toHaveValue(
+          'Draft a note to the allotment group saying the water butts are full and the shed key is under the blue pot',
+        );
+        // All of it in view: the box grew for it.
+        expect(await page.getByTestId('input').evaluate((t) => t.scrollHeight <= t.clientHeight + 1)).toBe(true);
+        await shot(page, `words-${at}`);
+        expect(await tooSmall(page)).toEqual([]);
+        expect(await noSideways(page)).toBe(true);
+        await page.getByTestId('input').fill('');
+
+        // Hands-free on: asked out loud, answered and spoken.
+        await openSettings(page);
+        await page.getByText('Hands-free').click();
+        await page.getByTestId('settings-sheet').getByRole('button', { name: 'Done' }).click();
         await ask(page, pc, 300);
         pc.send({ type: 'state', phase: 'transcribing' });
         pc.send({ type: 'heard', text: 'Remind me what the print shop needs.' });
@@ -145,13 +176,6 @@ for (const scheme of ['light', 'dark']) {
         await shot(page, `answering-${at}`);
         expect(await tooSmall(page)).toEqual([]);
         await page.getByTestId('stop').click();
-
-        // Listening: the composer as the Yap bar's capsule.
-        await page.getByTestId('talk').click();
-        await expect(page.getByTestId('talk-time')).toHaveText('0:01', { timeout: 4000 });
-        await shot(page, `listening-${at}`);
-        expect(await tooSmall(page)).toEqual([]);
-        await page.getByTestId('cancel').click();
 
         // Two pictures in the composer card, a question typed under them.
         await choosePhotos(page, [await photo(page, { w: 1600, h: 1200, name: 'hill.png' }), await photo(page, { w: 1200, h: 1600, hue: 20, name: 'dusk.png' })]);
@@ -177,16 +201,15 @@ for (const scheme of ['light', 'dark']) {
         await page.keyboard.press('Escape');
         await expect(page.getByTestId('models')).toBeHidden();
 
-        // The settings sheet, Sound details open.
+        // The settings sheet (hands-free on, from above), Sound details open.
         await openSettings(page);
-        await page.getByText('Hands-free').click();
+        await expect(page.getByTestId('handsfree')).toBeChecked();
         await page.waitForTimeout(250);
         await shot(page, `settings-${at}`);
         expect(await tooSmall(page)).toEqual([]);
         await page.getByText('Sound details').click();
         await page.getByTestId('sound').scrollIntoViewIfNeeded();
         await shot(page, `settings-sound-${at}`);
-        await page.getByText('Hands-free').click();
       });
     });
   }
@@ -250,7 +273,8 @@ test('reconnecting, and the step on a narrow phone', async ({ page }) => {
   await page.setViewportSize({ width: 320, height: 640 });
   await servePage(page);
   await seedDevice(page);
-  const pc = await mockPc(page);
+  // A question sent at Done (as hands-free sends it), so Yap works on it.
+  const pc = await mockPc(page, { can: CAN_BEFORE_WORDS });
   await open(page);
   await ready(page, pc);
   await ask(page, pc, 200);

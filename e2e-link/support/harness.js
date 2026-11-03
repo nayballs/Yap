@@ -35,9 +35,18 @@ export const MODELS = [
 
 /**
  * What a PC that answers typed questions, has Chat's picker, keeps the
- * phone's own conversation and takes its pictures says it can (`ready.can`).
+ * phone's own conversation, takes its pictures and gives Talk's words back
+ * for the box says it can (`ready.can`).
  */
-export const CAN = ['ask', 'read_aloud', 'picker', 'effort', 'chats', 'pictures'];
+export const CAN = ['ask', 'read_aloud', 'picker', 'effort', 'chats', 'pictures', 'words'];
+/**
+ * A PC from the afternoon of 3 Nov, before words in the box: Talk's Done
+ * sends the question and Yap answers out loud — as hands-free does on a PC
+ * today. The specs about a spoken question's answer and its voice use it,
+ * so a tap of Done asks (the fake mic's steady tone isn't speech for
+ * hands-free to end on; handsfree.spec.js has recorded speech).
+ */
+export const CAN_BEFORE_WORDS = ['ask', 'read_aloud', 'picker', 'effort', 'chats', 'pictures'];
 /** A PC from the morning of 3 Nov: typing and the picker, no drawer, no pictures. */
 export const CAN_BEFORE_CHATS = ['ask', 'read_aloud', 'picker', 'effort'];
 

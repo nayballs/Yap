@@ -25,6 +25,16 @@ opened there, or a new chat); a question carries **pictures** taken or
 chosen on the phone, sent as Chat sends a typed question's screenshots; the
 model chip with its effort sits in the composer.
 
+Then **Talk's words go in the box first** (the maintainer: Done "just sends
+the message", with nothing "to see what u said"; the Claude and ChatGPT
+apps' way instead): with hands-free off — the default — Talk (a tap then
+Done, or a hold then release) puts its words in the composer's text box, at
+the caret and after whatever was typed, to check, fix and send yourself;
+Send asks them as a typed question (answered on screen, ▶ to hear it).
+**Hands-free** still sends at once and Yap answers out loud. The PC only
+transcribes them (`start {mode: "words"}` → `words`): nothing reaches Chat
+until Send.
+
 The long-term design (yap-private `docs/phone-remote-design.md`: a PWA on
 Yap's website, WebRTC, away from home through a relay) keeps this protocol's
 messages: moving there is a change of transport only.
@@ -38,7 +48,7 @@ messages: moving there is a change of transport only.
 | `link/cert.rs` | The self-signed certificate (rcgen, ECDSA P-256, on ring), kept in `<data>/link/`. |
 | `link/pairing.rs` | The QR's one-time token, the 4-digit code, who may say hello (`judge`, pure), hellos per address (`Limiter`). |
 | `link/devices.rs` | Paired phones in `link_devices.json` (a hash of each phone's secret only). |
-| `link/session.rs` | One phone's conversation: the hello, pairing, its questions one at a time (spoken or typed), ▶ on an answer, interrupt. |
+| `link/session.rs` | One phone's conversation: the hello, pairing, its questions one at a time (spoken or typed), Talk's words for the phone's box (transcribed only), ▶ on an answer, interrupt. |
 | `link/voice.rs` | Yap's voice for the phone: the speaker's output sent down the socket, never this PC's speakers. |
 | `link/models.rs` | Chat's model and the others it can use (`ready.models`, the first pages'), what Chat's picker shows (`picker`: the very data the desktop picker reads — `ai_model::status` without keys, `model_catalog::snapshot`, `local_llm_status`'s models, "Reads images"), and a switch, an effort or Fast mode from the phone, set as the picker sets them (`ai_model::chat_set_model`, `effort::chat_set_effort`). |
 | `link/chats.rs` | Chat's conversations for the phone's drawer (`recents`: Chat's list, not archived, not a meeting's Ask thread, newest first, 200 at most) and a conversation opened (`thread`: its last 40 messages' words, 6,000 characters each at most, an answer's id for ▶, a question's screenshot text left out), pure. |
@@ -69,11 +79,26 @@ Enter sends, Shift+Enter a new line, it grows to five lines), then a row —
 **+** (Take photo, Choose photos), **the model chip with its effort**
 ("Claude Opus 5.5 · Extra", or where it runs when there's no effort; a
 narrow card drops "Claude" and the chevron: "Opus 5.5 · Extra"), a gap,
-**the mic** (Talk: a tap talks hands-free, a hold while held — a spoken
-*question*, never dictation) and **Send ↑** (Yap's amber, dim with nothing
-to send), which is **■** while Yap works the question out or says an
-answer. While Yap listens the card is the bar's capsule: ✕, the ✦ and the
-bar's live waveform, the time, and the mic turned into **Done**. **One Stop
+**the mic** (Talk: a tap, then Done; or a hold while held — a *question*
+to Yap's AI, never dictation into the PC's apps) and **Send ↑** (Yap's
+amber, dim with nothing to send), which is **■** while Yap works the
+question out or says an answer. While Yap listens the card is the bar's
+capsule: ✕, the ✦ and the bar's live waveform, the time, and the mic
+turned into **Done** (a ✓ when its words go in the box, ↑ when it sends).
+**Talk's words in the box** (hands-free off, the default; the Claude and
+ChatGPT apps' way): at Done the capsule says **"Transcribing…"** with
+Chat's three amber dots (no waveform, ✕ still cancels), then the text box
+is back with the words in it — at the caret, after whatever was typed (one
+space between; talking never wipes the box, a selection stays), the caret
+after them, the box grown to show them, Send lit. Nothing is asked and no
+bubble shows until **Send**, which asks them as a typed question (`ask`:
+answered on screen, ▶ to hear it); the pictures in the card wait for it.
+Nothing heard keeps the box as it was: "Yap didn't hear anything. Try
+again, or type it." **Hands-free** (the settings sheet: "On: sends when
+you stop talking, and Yap answers out loud. Off: your words go in the box
+to check first.") sends at Done or its wait of quiet, the question's bubble
+from the start, the answer spoken — as a PC from before words (no
+`"words"` in `ready.can`) always does. **One Stop
 at a time**: under the answer being said only the bar's bars and
 "Speaking…"; when ▶ on an answer started it, that ▶ is the Stop, in place,
 and the composer has none. **The drawer** slides in from the left over a
@@ -103,11 +128,14 @@ Details: the README's "The look" and "Chat's picker".
 
 v1 with **additions** (2026-11-03, marked ⁺ below): typed questions, ▶ on an
 answer, Chat's picker and the effort; then the phone's own conversation
-(the drawer) and its pictures. They're backward compatible both ways:
+(the drawer) and its pictures; then Talk's words for the phone's box
+(`start {mode: "words"}` → `words`). They're backward compatible both ways:
 `hello.v` stays 1; a first page ignores the new fields of `ready` and
 `answer`; a new page offers typing, ▶ and the picker only when `ready.can`
 says the PC answers them (a PC from before them: "Yap on your PC needs an
-update to answer typed questions…", and the plain model list); a message a PC
+update to answer typed questions…", and the plain model list; one without
+`"words"`: Talk sends the question at Done, as before — a PC from before
+takes any `start` as a question, `mode` unread); a message a PC
 doesn't know is answered `error` "Yap on your PC doesn't know how to do that
 yet. Update Yap on the PC, then try again." (`wire::UNKNOWN`; a PC from before
 says "Yap didn't understand that message").
@@ -126,8 +154,9 @@ is at most 32,005 bytes (a second of audio); a text frame at most 16 KiB.
 |---|---|
 | `hello {v:1, name, nonce, device?:{id, secret}, pair?:{token}}` | The first message. `device` on a later visit, `pair` from the QR. |
 | `start {mode:"ask", chat?⁺}` | A question starts; up frames follow, 20–40 ms each (the page sends exactly 320 samples, `seq` from 0 for each question). `chat`: the conversation it goes to (below). |
-| `stop {pictures?⁺, asText?⁺}` | The question ended (after its last frame): transcribe and answer, with the `pictures` sent just before it (their text instead when `asText`). |
-| `cancel` | Drop the question (listening, or being worked on). |
+| `start {mode:"words"⁺, chat?}` | The same, for **the words alone** (`wire::Talk::Words`): recorded as a question is, then on `stop` (or the 2-minute cap) only transcribed — the same `PhoneEar` and dictionary — and answered `words`, then `state idle`. No `heard`, no thinking, no Voice Assistant, nothing written to Chat; empty: `error` "Yap didn't hear anything. Try again, or type it." + idle; a transcription that failed: its `error` + idle. The page sends it with hands-free off where `ready.can` has `"words"`. |
+| `stop {pictures?⁺, asText?⁺}` | The question ended (after its last frame): transcribe and answer, with the `pictures` sent just before it (their text instead when `asText`). For `"words"`: transcribe only (no pictures go; any announced are dropped). |
+| `cancel` | Drop the question (listening, or being worked on) — or the words being transcribed. |
 | `interrupt` | Stop speaking and abandon the answer. |
 | `ask {text, chat?, pictures?, asText?}` ⁺ | A typed question (4,000 characters at most): `heard`, thinking, the answer as for a spoken one, in the same conversation, **not spoken**. `chat`, `pictures`, `asText` as for `start` / `stop`. |
 | `picture {n, size}` ⁺ | Picture `n` (from 0) of the next question: `size` bytes (3 MB at most), in `0x03` frames that follow. Four at most a question. |
@@ -148,7 +177,7 @@ is at most 32,005 bytes (a second of audio); a text frame at most 16 KiB.
 | `pair_wait {code}` | The pairing waits for a yes on the PC, which shows the same code. |
 | `paired {device:{id, secret}}` | Paired: the phone keeps these for its next visits. |
 | `denied {reason}` | Refused, in words the phone can show; the socket closes. |
-| `ready {pc, model:{id,label,onThisPc}, models:[{id,label,onThisPc}], can⁺, picker⁺}` | Connected: this PC's name, Chat's model (or `null`: none set up) and the others; `can`: what it answers beyond v1 (`["ask", "read_aloud", "picker", "effort", "chats", "pictures"]`); `picker`: what Chat's picker shows (`{status, catalog, local, images}`, `link/models.rs`; never a key; `status.images` and `status.imagesSwitch` say whether Chat's model reads pictures and which would). Sent again whenever Chat's model changes (here, in Chat, or from a phone: `yap-chat-model-changed`) and after every `set_model`, which the page takes as the truth. |
+| `ready {pc, model:{id,label,onThisPc}, models:[{id,label,onThisPc}], can⁺, picker⁺}` | Connected: this PC's name, Chat's model (or `null`: none set up) and the others; `can`: what it answers beyond v1 (`["ask", "read_aloud", "picker", "effort", "chats", "pictures", "words"]`); `picker`: what Chat's picker shows (`{status, catalog, local, images}`, `link/models.rs`; never a key; `status.images` and `status.imagesSwitch` say whether Chat's model reads pictures and which would). Sent again whenever Chat's model changes (here, in Chat, or from a phone: `yap-chat-model-changed`) and after every `set_model`, which the page takes as the truth. |
 | `chats {items:[{id, title, ts}]}` ⁺ | Chat's conversations, newest first (`link/chats.rs`). |
 | `thread {id, title, messages:[{role, text, id?, voice?, pictures?}], more}` ⁺ | A conversation's latest messages (words only; an answer's `id` for ▶; `pictures`: how many a question carried), `more` when older ones were left out; `id: null` for a new chat (or one that's gone, after an `error`). |
 | `chat {id, title}` ⁺ | This phone's question went to conversation `id` (the one chosen for it, or a new chat's): its questions go there from now on. |
@@ -156,6 +185,7 @@ is at most 32,005 bytes (a second of audio); a text frame at most 16 KiB.
 | `cant_read {message}` ⁺ | Chat's model can't read the question's pictures, or its server turned them down (`snip::vision`'s words). The page puts the question back in the composer with them and shows Chat's line. |
 | `state {phase}` | `"idle"` \| `"listening"` \| `"transcribing"` \| `"thinking"` \| `"speaking"`. |
 | `heard {text}` | The question, transcribed and corrected (a typed one, as it came). |
+| `words {text}` ⁺ | Talk's words for the phone's box (`start {mode:"words"}`), transcribed and corrected, trimmed: nothing was asked. Then `state idle`. |
 | `step {label}` | What the answer is doing, in Chat's activity line's words (`chat/activity.rs`: "Searching the web · …"). |
 | `answer {text, final, id⁺}` | **The whole answer so far** (each replaces the last; `""` = words taken back before a tool call); `final:true` with the checked answer and its `id` in Chat (`chat:<conversation>:<index>`, for ▶). |
 | `speak_start {rate}`, down frames, `speak_end` | Yap's voice (24 kHz). |
@@ -176,7 +206,11 @@ question's late news until it sees idle or listening); an abandoned question's
 late `heard`, `step`, `answer`, `error` and audio never go out (frames already
 queued are dropped by the writer). Yap never says `idle` while the phone is
 listening unless it ended the question itself. A question is at most 2 minutes
-(then it's asked as it is). An unpaired or bad hello gets `denied` and a close.
+(then it's asked as it is; Talk's words, transcribed as they are). An
+unpaired or bad hello gets `denied` and a close. Talk's words are a turn as
+a question is: `cancel`, `interrupt`, a new `start`, an `ask` or a
+`read_aloud` drops them, and their late `words` never go out (the page
+drops them too, as an old question's news).
 An `ask` abandons whatever was under way too (answered `state idle` first when
 there was something), then `heard`, `state thinking`, the answer and `state
 idle` — no voice. A `read_aloud` always answers `state idle` first (the
@@ -308,8 +342,9 @@ isn't a Skill or an app to open.
 **transcribing**: the warm engine, lent as a dictation's is and never a second
 copy (`pipeline::PhoneEar` → `Shared::phone_question`: `lease_engine`, My
 languages, the Whisper prompt), then the correction dictionary (exact, then
-near-misses) — no AI cleanup, as the Voice Assistant's question → `heard` →
-**thinking**: `assistant::ask_from_phone`, the phone a new origin of the Voice
+near-misses) — no AI cleanup, as the Voice Assistant's question (for
+`start {mode:"words"}` it stops here: `words`, then idle — `session::words`)
+→ `heard` → **thinking**: `assistant::ask_from_phone`, the phone a new origin of the Voice
 Assistant's own `answer` (`Asker::Phone`): the conversation choice (the
 phone's own when it named one, `phone_conversation`), its pictures (Chat's
 `question_images`), the "no AI
@@ -384,7 +419,8 @@ handled (Firefox's new AudioContext can keep the press busy 0.1–0.4 s), so a
 busy page doesn't turn a tap into a too-short hold. (31 Oct: a phone on Firefox once sat on "Opening the
 microphone… / Wait…" with nothing said.)
 
-**Hands-free** ends a question after the person's chosen wait — **Short (1 s) ·
+**Hands-free** (off by default; off, Talk's words go in the box to check
+first) sends a question, answered out loud, after the person's chosen wait — **Short (1 s) ·
 Normal (1.5 s, the default) · Long (2.5 s)** — of quiet (`dsp.js`
 `EnergyVad`): speech starts 12 dB over the room's noise (and over −45 dB), then
 carries on while the level stays 6 dB over the noise and over −52 dB
@@ -457,15 +493,20 @@ on the PC while the answer comes stops the voice, as it stops the PC's.
   out: `chats.rs`); pictures whole, in order, the caps, one cut short or out
   of turn (`pictures.rs`); the phone's conversation chosen and a gone one
   falling back to a new chat (`chat/assistant.rs`); the picker's data with
-  `imagesSwitch` and without `imagesLocal` (`models.rs`).
+  `imagesSwitch` and without `imagesLocal` (`models.rs`); Talk's words —
+  `start {mode:"words"}` (`Talk::of`: exactly "words", else a question),
+  `words` written, `"words"` in `can` (`wire.rs`) — and what the box gets:
+  the words trimmed, or why there are none (`session.rs` `words_out`).
 - **E2E** `e2e/link.spec.js`: a test run listens on a free port of 127.0.0.1
   (`YAP_E2E_LINK_PORT=0`, the port in `link_status`); a headless Chromium
   (Playwright's, else Edge) with a fake microphone opens the real page over
   Yap's own HTTPS (`ignoreHTTPSErrors`, as a phone's Proceed): Settings → Phone
-  and its QR, the pairing question with the code both screens show, Allow, Talk,
-  the stub's transcript `heard`, the fake model's answer, the voice down at 24
-  kHz (test mode's stand-in voice), the conversation in `chats.json`, the
-  receipts; a typed question in the same conversation, not "by voice", with
+  and its QR, the pairing question with the code both screens show, Allow, Talk
+  with hands-free on, the stub's transcript `heard`, the fake model's answer,
+  the voice down at 24 kHz (test mode's stand-in voice), the conversation in
+  `chats.json`, the receipts; Talk with hands-free off: the stub's transcript
+  in the phone's box, nothing in Chat, then Send asking it as typed and not
+  said; a typed question in the same conversation, not "by voice", with
   nothing said, then ▶ saying it; ☰'s drawer listing that conversation,
   marked; + New chat and a question going to a conversation of its own; a
   picture from the phone (GPT-OSS can't read it: the composer's line, then
@@ -496,7 +537,13 @@ on the PC while the answer comes stops the voice, as it stops the PC's.
   before), pictures (`pictures.spec.js`: + → Choose photos, thumbnails with
   ✕, made smaller to 2,048 px JPEGs, sent in pieces before `ask` or `stop`,
   four at most, Chat's line with the switch and their text instead, the PC's
-  `cant_read`, a PC from before), the shared modules staying pure
+  `cant_read`, a PC from before), Talk's words in the box (`words.spec.js`:
+  `start {mode: "words"}`, Done's ✓, "Transcribing…" with ✕, the words in
+  the box at the caret and after what was typed, a hold and its release,
+  Send asking them as typed and nothing spoken, nothing heard keeping the
+  box, ✕ while transcribing and the late words dropped, the pictures
+  waiting for Send, the PC's own 2 minutes, the mic gone, hands-free and a
+  PC from before still sending, at 200 % text and on its side), the shared modules staying pure
   (`shared.spec.js`), the look (Yap's fonts and the logos from the page's
   own origin; at 360, 390 and 430 px wide, on its side and at 130 and 200 %
   text, nothing sideways and Talk in the thumb's reach; `tokens.spec.js`:

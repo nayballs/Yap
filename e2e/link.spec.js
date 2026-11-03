@@ -8,10 +8,14 @@
 //   Copy, the one-time warning said), the paired phones with Remove.
 // - Pairing: the QR's link opened on the phone, "Allow ‘…’ to use Yap?" in
 //   the main window with the code the phone shows too, Allow.
-// - A question: Talk on the phone (the fake mic's audio up), the stub's
-//   transcript heard, the fake model's answer streamed to the phone, Yap's
-//   voice as audio down (test mode's stand-in voice: silence of the right
-//   length) — never this PC's speakers — and the conversation kept in Chat.
+// - A question: Talk on the phone with hands-free on (the fake mic's audio
+//   up), the stub's transcript heard, the fake model's answer streamed to
+//   the phone, Yap's voice as audio down (test mode's stand-in voice:
+//   silence of the right length) — never this PC's speakers — and the
+//   conversation kept in Chat.
+// - Talk's words in the box (hands-free off, the default): Done puts the
+//   stub's transcript in the phone's text box, nothing in Chat; Send asks
+//   it as a typed question, answered and not said.
 // - A typed question (the composer's `ask`): the fake model's answer in the
 //   same conversation, typed (not "by voice"), nothing said; ▶ Read aloud
 //   then says it on the phone. ☰'s drawer with that conversation marked;
@@ -43,6 +47,20 @@ const NEW_ANSWER = 'The station café opens at 7 am on weekdays.';
 const SIGN_Q = 'What does this sign say?';
 const SIGN_TEXT = 'Platform 4: the 10:42 to the coast is delayed.';
 const SIGN_ANSWER = 'It says the 10:42 to the coast, from platform 4, is delayed.';
+const WORDS_ANSWER = 'That came through clearly: a short test from the phone.';
+
+/** Every message in Chat on this PC (chats.json). */
+const messages = (store) => store.conversations.reduce((n, c) => n + c.messages.length, 0);
+
+/** The phone's hands-free switch (⋯ → Hands-free), turned to `on`. */
+async function handsFree(page, on) {
+  await page.getByTestId('settings').click();
+  const sw = page.getByTestId('handsfree');
+  if ((await sw.isChecked()) !== on) await page.getByTestId('settings-sheet').getByText('Hands-free').click();
+  await expect(sw).toBeChecked({ checked: on });
+  await page.getByTestId('settings-sheet').getByRole('button', { name: 'Done' }).click();
+  await expect(page.getByTestId('settings-sheet')).toBeHidden();
+}
 
 /** A made-up photo drawn in the phone's page, as a file to choose. */
 async function photo(page) {
@@ -198,13 +216,16 @@ test('a phone pairs with the code both screens show, asks out loud and hears the
   // Chat's model is the phone's to see.
   expect((await snapshot(page)).model?.id).toBe('groq|openai/gpt-oss-20b');
 
-  // A question: Talk, a second of the fake mic, Talk again to send.
+  // A question out loud, answered out loud: hands-free on, Talk, a second
+  // of the fake mic, Talk again (Done) to send.
+  await handsFree(page, true);
   fakeLlm.scriptChat([{ plain: true, content: ANSWER }]);
   const talk = page.getByTestId('talk');
   await talk.click();
   await expect.poll(async () => (await snapshot(page)).frames, { timeout: 10_000 }).toBeGreaterThan(20);
   await page.waitForTimeout(700);
-  await talk.click();
+  // (Hands-free may have ended it by itself on the tone's quiet: then it's sent already.)
+  if ((await snapshot(page)).local === 'listening') await talk.click();
   // The stub's transcript heard, the answer shown on the phone.
   await expect(page.getByText(/STT stub: received/)).toBeVisible({ timeout: 20_000 });
   await expect(page.getByText(ANSWER)).toBeVisible({ timeout: 20_000 });
@@ -228,6 +249,41 @@ test('a phone pairs with the code both screens show, asks out loud and hears the
   await expect
     .poll(async () => (await yap.invoke('connections_summary')).groups.some((g) => g.label === 'Yap Link · your phone'), { timeout: 15_000 })
     .toBe(true);
+
+  // Talk's words in the box (hands-free off, the default): Done puts the
+  // stub's transcript in the phone's text box to check — nothing asked,
+  // nothing in Chat — and Send asks it as a typed question, not said.
+  await handsFree(page, false);
+  const said = messages(yap.readJson('chats.json'));
+  const turns = (await snapshot(page)).turns.length;
+  await yap.invoke('tts_e2e_spoken', { clear: true });
+  await talk.click();
+  await expect.poll(async () => (await snapshot(page)).frames, { timeout: 10_000 }).toBeGreaterThan(20);
+  await page.waitForTimeout(700);
+  await talk.click();
+  const box = page.getByTestId('input');
+  await expect(box).toHaveValue(/STT stub: received/, { timeout: 20_000 });
+  await expect(page.getByTestId('send')).toBeEnabled();
+  await shot(page, '04a-phone-words-in-the-box');
+  expect((await snapshot(page)).turns).toHaveLength(turns);
+  await page.waitForTimeout(500);
+  expect(messages(yap.readJson('chats.json'))).toBe(said);
+  const words = await box.inputValue();
+  fakeLlm.scriptChat([{ plain: true, content: WORDS_ANSWER }]);
+  await page.getByTestId('send').click();
+  await expect(box).toHaveValue('');
+  await expect(page.getByText(WORDS_ANSWER)).toBeVisible({ timeout: 20_000 });
+  await expect.poll(async () => (await snapshot(page)).phase, { timeout: 15_000 }).toBe('idle');
+  await page.waitForTimeout(1000);
+  expect(await yap.invoke('tts_e2e_spoken')).toEqual([]);
+  await expectStore(yap, 'chats.json', (store) => {
+    // Asked as typed (not "by voice"): the words as the box sent them.
+    const q = store.conversations.flatMap((c) => c.messages).find((m) => m.role === 'user' && !m.voice && m.text.includes('STT stub: received'));
+    expect(q, 'the words, asked as typed').toBeTruthy();
+    expect(q.text.trim()).toBe(words.trim());
+    expect(messages(store)).toBe(said + 2);
+    return true;
+  });
 
   // A typed question (the composer): answered in the same conversation, as
   // Chat answers a typed one, and not said — not on the phone, not here.
