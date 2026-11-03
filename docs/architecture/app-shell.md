@@ -451,12 +451,29 @@ re-exported by the module, except `local_llm`'s, which callers name
 - settings + onboarding + notepad + quick-note are **created unfocused** (`focus: false`): otherwise wry
   `MoveFocus`es each new webview and the hidden windows grab the foreground at launch,
   so typing (and a dictation's paste, which never targets Yap's own windows) can land
-  in an invisible window. A
-  side effect is that their first `show()` doesn't activate, so every open path must
-  `show()` + `set_focus()` (`window::show_settings`/`show_onboarding` do).
+  in an invisible window.
+- **Every window is shown without activating** (`window::show_quietly`, 2026-11-03):
+  the app in front keeps the foreground — the call beside the notepad, the app under
+  the bar, whoever works beside a test run. Tauri's `show()` alone activates: since tao
+  0.37.1 ([tao #1342](https://github.com/tauri-apps/tao/pull/1342)) `focus: false`
+  spares only a show during the window's creation, and every later `show()` is
+  `ShowWindow(SW_SHOW)`, which activates even a `WS_EX_NOACTIVATE` window; neither tao
+  nor Tauri has a show that doesn't ([tao #1358](https://github.com/tauri-apps/tao/pull/1358),
+  open, would spare unfocusable windows only). So `show_quietly` calls tao's `show()` —
+  its record of the window then says visible, which its `set_focus` and `hide` go by (a
+  raw `SW_SHOWNA` would leave tao thinking it hidden, and the next `hide()` would do
+  nothing) — on the main thread with a thread-local CBT hook refusing that window's
+  activation (`HCBT_ACTIVATE` → 1) for the length of the call: shown on top of its band,
+  never active, no `WM_ACTIVATE`. DWM cloaking doesn't stop activation (a cloaked window
+  can be the foreground), so the cloaked init's show goes through it too. Off the main
+  thread it waits for the show, as Tauri's getters do. In a test run the window goes
+  behind everything in the same step (`behind_in_test_runs`; the bar excepted, always on
+  top). An open path that should take the focus calls `set_focus()` after it, never in
+  test runs (`window::show_settings` / `show_onboarding`, `notepad::open`,
+  `quick_note::open`). A unit test fails on any `.show()` outside `shell/window.rs`.
 - **overlay** (the Yap bar, `bar.rs`): 520×560 logical, never resized,
   transparent, always-on-top, `skipTaskbar`, `focus: false` + **`focusable:
-  false`** (WS_EX_NOACTIVATE); `overlay::win::install` subclasses it at setup
+  false`** (WS_EX_NOACTIVATE), shown by `show_quietly`; `overlay::win::install` subclasses it at setup
   (tool window, MA_NOACTIVATE, style enforcement) and it's click-through
   except over the pill/cards. Shown while the bar is on (hidden for an hour,
   over fullscreen apps, or off: only while dictating).

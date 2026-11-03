@@ -6,9 +6,9 @@
 //! - **One window**, `notepad` in tauri.conf.json, created hidden and
 //!   unfocused at startup like onboarding: it opens instantly, `capture.rs`
 //!   always finds it by label, and opening it never takes the foreground
-//!   (tao keeps the "don't focus" marker of a window created unfocused, so
-//!   every `show()` is `SW_SHOWNOACTIVATE`; only a click on "Notepad" in Yap
-//!   focuses it). Closing hides it; the recording carries on.
+//!   (every show is `shell::window::show_quietly`'s, never activated; only
+//!   a click on "Notepad" in Yap focuses it). Closing hides it; the
+//!   recording carries on.
 //! - **When**: a meeting recording starts from anywhere (`meeting_end`
 //!   follows the recorder's `yap-meeting-state`) and "Open the notepad when a
 //!   meeting starts" is on (`meeting_open_notepad`, default on). It shows the
@@ -259,8 +259,8 @@ pub fn open(app: &AppHandle, note_id: u64) {
     show(&w, true);
 }
 
-/// `focus`: also bring it to the front (never in test runs: tao's fallback
-/// presses Alt in whichever app has focus).
+/// Shown without activating; `focus`: then brought to the front (never in
+/// test runs: tao's fallback presses Alt in whichever app has focus).
 fn show(w: &tauri::WebviewWindow, focus: bool) {
     if w.is_minimized().unwrap_or(false) {
         if focus {
@@ -269,7 +269,7 @@ fn show(w: &tauri::WebviewWindow, focus: bool) {
             platform::restore_quietly(w);
         }
     }
-    let _ = w.show();
+    crate::shell::window::show_quietly(w);
     let _ = w.emit(EVENT_VISIBLE, true);
     if focus {
         crate::shell::window::brought_forward();
@@ -277,7 +277,6 @@ fn show(w: &tauri::WebviewWindow, focus: bool) {
     if focus && !crate::shell::e2e::active() {
         let _ = w.set_focus();
     }
-    crate::shell::window::behind_in_test_runs(w);
 }
 
 /// A meeting note was discarded: if the notepad showed it, it goes away.
@@ -340,7 +339,7 @@ pub async fn show_preview(app: &AppHandle) -> Result<bool, String> {
     if current() {
         let _ = w.set_position(tauri::PhysicalPosition::new(frame.x, frame.y));
         let _ = w.set_size(tauri::PhysicalSize::new(frame.w.max(1) as u32, frame.h.max(1) as u32));
-        let _ = w.show();
+        crate::shell::window::show_quietly(&w);
     }
     // The pointer left (or the split happened) while it was coming up.
     if !current() {

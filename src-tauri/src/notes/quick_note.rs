@@ -484,14 +484,13 @@ pub fn open(app: &AppHandle, fresh: bool) {
     if w.is_minimized().unwrap_or(false) {
         let _ = w.unminimize();
     }
-    let _ = w.show();
+    crate::shell::window::show_quietly(&w);
     SHOWN.store(true, Ordering::SeqCst);
     let _ = app.emit(EVENT_VISIBLE, true);
     crate::shell::window::brought_forward();
     if !crate::shell::e2e::active() {
         let _ = w.set_focus();
     }
-    crate::shell::window::behind_in_test_runs(&w);
 }
 
 /// Put the window away (Esc, ✕, the shortcut while it's in front). The
