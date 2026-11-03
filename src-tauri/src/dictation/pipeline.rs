@@ -262,6 +262,10 @@ static TEST_TARGET: AtomicIsize = AtomicIsize::new(0);
 #[cfg(debug_assertions)]
 const TEST_STAND_IN: isize = 0x7E57_0001;
 
+/// The stand-in's app, as a selection in it names it (it has no process).
+#[cfg(any(test, debug_assertions))]
+pub(crate) const TEST_STAND_IN_APP: &str = "e2e-stand-in.exe";
+
 #[cfg(debug_assertions)]
 pub(crate) fn set_test_target(on: bool) {
     TEST_TARGET.store(if on { TEST_STAND_IN } else { 0 }, Ordering::SeqCst);

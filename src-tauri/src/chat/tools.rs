@@ -47,7 +47,10 @@
 //! **The web** (Yap's own; `web.rs`): `web_search` and `read_page`,
 //! offered while "Look things up on the web" is on. Read-only, numbered
 //! sources the answer cites as `[1]`. **The safety rule**
-//! ([`refused_after_web`]): once web content is in a turn, the action tools
+//! ([`refused_after_web`]): once web content is in a turn (a search's
+//! results; a page read, acted on, switched to or named as it closed; the
+//! screen; text selected in another app or on a page and asked about —
+//! never text selected in Yap's own windows), the action tools
 //! ([`ACTION_TOOLS`]: `open_app`, `create_note`, `update_note`,
 //! `edit_note`, `copy_to_clipboard`) are refused for the rest of that turn —
 //! still offered, so every step of a turn offers the same tools (a step that
@@ -277,10 +280,12 @@ pub struct Extra<'a> {
     /// (`web::Turn::own_search`): `web_search` only, never Yap's
     /// `read_page`; `find_pictures` for its pictures, as a Claude's.
     pub own_search: bool,
-    /// The question carries a web page's words (text selected on a page
-    /// beside the chat, `assistant::selected::Selected::web`): web content
-    /// from the turn's start — the safety rule ([`refused_after_web`]) and
-    /// the page actions' typed-words check, as after a page read.
+    /// The question carries words the person may never have seen: text
+    /// selected in another app or on a page beside the chat
+    /// (`assistant::selected::Selected::web`; never one of Yap's own
+    /// windows'). Web content from the turn's start — the safety rule
+    /// ([`refused_after_web`]) and the page actions' typed-words check, as
+    /// after a page read.
     pub web_question: bool,
 }
 

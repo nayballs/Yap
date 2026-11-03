@@ -257,7 +257,8 @@ impl Shared {
     /// (`assistant::ask_about`) — spoken when spoken replies are on, the
     /// bar's card, kept in Chat with the selection as its quote. Nothing is
     /// pasted: the selection, and the clipboard edit mode's Ctrl+C put back,
-    /// stay as they were.
+    /// stay as they were. Another app's text: web content for that turn
+    /// (`Selected::in_app`, the safety rule).
     fn answer_about_selection(self: &Arc<Self>, instruction: String, selection: String) {
         let question = self
             .config
@@ -271,13 +272,9 @@ impl Shared {
         let app = crate::pasting::text_injector::app_name_for(target).unwrap_or_default();
         // A test run's stand-in window has no process: it says so.
         #[cfg(debug_assertions)]
-        let app = if target.is_some() && target == super::test_target() { "e2e-stand-in.exe".to_string() } else { app };
+        let app = if target.is_some() && target == super::test_target() { super::TEST_STAND_IN_APP.to_string() } else { app };
         report_rewrite(false, "", "answered", None);
-        crate::chat::assistant::ask_about(
-            &self.app,
-            question.trim().to_string(),
-            crate::chat::assistant::selected::Selected { text: selection, app, web: false },
-        );
+        crate::chat::assistant::ask_about(&self.app, question.trim().to_string(), crate::chat::assistant::selected::Selected::in_app(selection, app));
         let _ = self.app.emit("yap-state", "idle");
     }
 
