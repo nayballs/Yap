@@ -632,6 +632,12 @@ pub(crate) mod tests {
         assert_eq!(a, key("m1", "title: x | text: y"));
         assert_ne!(a, key("m2", "title: x | text: y"));
         assert_ne!(a, key("m1", "title: x | text: z"));
+        // Pinned: the index's vectors stay found under the keys they were
+        // saved with, whatever sha2 Yap builds on (Python's hashlib gives it).
+        assert_eq!(
+            key("embeddinggemma-300m", "title: none | text: hello"),
+            [148, 136, 208, 59, 212, 249, 25, 208, 83, 180, 204, 41, 68, 197, 146, 145]
+        );
     }
 
     fn chat(title: &str, messages: &[(&str, &str)]) -> crate::chat::chats::Conversation {

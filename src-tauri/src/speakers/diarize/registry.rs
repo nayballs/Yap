@@ -754,7 +754,7 @@ pub fn sha256(path: &Path) -> std::io::Result<String> {
         }
         hasher.update(&buf[..n]);
     }
-    Ok(format!("{:x}", hasher.finalize()))
+    Ok(hasher.finalize().iter().map(|b| format!("{b:02x}")).collect())
 }
 
 /// Delete model `id`, and its runtime when no other installed model uses it.
@@ -790,6 +790,11 @@ pub fn delete(root: &Path, id: &str) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_package_hashes_to_sha256s_published_vectors() {
+        crate::ai::local_llm::models::assert_sha256_vectors("diarize", sha256);
+    }
 
     #[test]
     fn the_registry_is_pinned() {
