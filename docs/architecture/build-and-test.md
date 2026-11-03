@@ -149,12 +149,14 @@ later.
   2.12, which Yap is on since 3 Nov 2026; 2.5.5 lets the single-instance lock go in
   `cleanup_before_exit`, which the updater's exit hook calls, so that move waits for a
   check on an installed nightly), `ort` (pinned to the ONNX Runtime transcribe-rs links),
-  `transcribe-rs` (vendored), `windows` / `windows-core` / `webview2-com` past their
-  minor (they move with tauri / wry: one copy of each, the versions wry builds on), and
-  `tao` on exactly 0.37.0 (named in Cargo.toml only to hold it): from 0.37.1 every
-  `show()` of a window built with `focus: false` activates it on Windows, so the Yap bar
-  and the meeting notepad took the focus (`bar.spec.js`, `notepad.spec.js` caught it,
-  3 Nov 2026); it moves once Yap shows those windows without activating them itself.
+  `transcribe-rs` (vendored), and `windows` / `windows-core` / `webview2-com` past their
+  minor (they move with tauri / wry: one copy of each, the versions wry builds on).
+  `tao` (tauri's window layer) moves with tauri again: from 0.37.1 (tao #1342) every
+  `show()` of a window built with `focus: false` activates it on Windows, and the bar and
+  the meeting notepad took the focus (`bar.spec.js`, `notepad.spec.js` caught it, 3 Nov
+  2026; held on 0.37.0 for a day), so Yap shows its windows without activating them
+  itself: `shell::window::show_quietly` (app-shell.md, "Window config"), and a unit test
+  fails on any other `.show()`.
 - **The Tauri pair**: the `tauri` crate and `@tauri-apps/api` / `@tauri-apps/cli` share a
   major.minor (2.12 since 3 Nov 2026), as do each `tauri-plugin-*` crate and its
   `@tauri-apps/plugin-*` package (dialog: 2.8). The CLI refuses a `tauri build` whose
