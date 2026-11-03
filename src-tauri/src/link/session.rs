@@ -20,6 +20,17 @@
 //! **Chat's picker** sets the model as the desktop's does (`set_model` with
 //! a row's provider and model, `set_effort`, `set_fast`: `models.rs`).
 //!
+//! **Its own conversation** (the Claude-app layout, 2026-11-03): the drawer
+//! lists Chat's conversations (`chats`, `link/chats.rs`), `open_chat` puts
+//! the phone in one (its messages back, their answers ones ▶ may read) and
+//! `new_chat` starts afresh; a question's `chat` says the same. Once a phone
+//! has said which, its questions stay in the conversation they went to
+//! (`chat {id}`); a phone that never said (a page from before) is asked as
+//! the Voice Assistant chooses. **Its pictures** come before the question
+//! that takes them (`picture` and its frames, `link/pictures.rs`), are kept
+//! as Chat keeps a pasted picture (`snip::attach::keep`) and go with it as a
+//! typed question's screenshots do (`assistant::answer`).
+//!
 //! Logs: phases, lengths and timings; never a question, an answer or audio.
 
 use std::net::SocketAddr;
@@ -33,8 +44,9 @@ use tokio_tungstenite::tungstenite::protocol::{Role, WebSocketConfig};
 use tokio_tungstenite::tungstenite::Message;
 
 use crate::link::pairing::{self, Verdict};
+use crate::link::pictures::Pictures;
 use crate::link::voice::{self, say, Tx, Wire};
-use crate::link::wire::{self, DeviceCreds, In, Out, Phase};
+use crate::link::wire::{self, ChatRef, DeviceCreds, In, Out, Phase};
 use crate::link::{devices, Hub, Live};
 use crate::voice::tts::Playback as _;
 
@@ -53,6 +65,8 @@ const MAX_TYPED: usize = 4_000;
 const TOO_LONG: &str = "That question is too long for Yap to take from the phone. Shorten it, then send it again.";
 /// ▶ on an answer this phone wasn't given, or one gone from Chat.
 const NOT_HERE: &str = "That answer isn't in Chat on your PC any more, so Yap can't read it out.";
+/// A conversation the phone opened that's gone (deleted, archived).
+const CHAT_GONE: &str = "That chat isn't in Chat on your PC any more. Your next question starts a new one.";
 
 /// **One question's turn**, shared by the session, its task and the Voice
 /// Assistant's path (`assistant::Phone`).
@@ -66,6 +80,15 @@ pub struct Turn {
     device: String,
     /// Asked out loud (`false`: typed, not said unless ▶ asks).
     by_voice: bool,
+    /// The conversation it goes to, as the phone said, and the phone's own
+    /// (the one its questions go to from now on).
+    chat: ChatRef,
+    own: Arc<Mutex<ChatRef>>,
+    /// Its pictures: their bytes as they came, then their ids once kept.
+    raw: Mutex<Vec<Vec<u8>>>,
+    pictures: Mutex<Vec<String>>,
+    /// Their text instead ("Send its text instead").
+    as_text: bool,
     /// The answer's id, once its voice started ("chat:<conversation>:<index>").
     message_id: Mutex<Option<String>>,
     playback: Mutex<Option<Arc<voice::PhonePlayback>>>,
@@ -77,7 +100,7 @@ pub struct Turn {
 }
 
 impl Turn {
-    fn new(id: u64, session: u64, latest: Arc<AtomicU64>, asking: &Asking, by_voice: bool) -> Arc<Turn> {
+    fn new(id: u64, session: u64, latest: Arc<AtomicU64>, asking: &Asking, by_voice: bool, carries: Carries) -> Arc<Turn> {
         Arc::new(Turn {
             id,
             session,
@@ -86,6 +109,11 @@ impl Turn {
             hub: Arc::clone(&asking.hub),
             device: asking.device.clone(),
             by_voice,
+            chat: *asking.chat.lock().unwrap_or_else(|p| p.into_inner()),
+            own: Arc::clone(&asking.chat),
+            raw: Mutex::new(carries.pictures),
+            pictures: Mutex::new(Vec::new()),
+            as_text: carries.as_text,
             message_id: Mutex::new(None),
             playback: Mutex::new(None),
             speaking: Arc::new(AtomicBool::new(false)),
@@ -162,6 +190,40 @@ impl crate::chat::assistant::Phone for Turn {
     fn failed(&self, message: &str) {
         self.tell(Out::Error { message: message.to_string() });
     }
+
+    fn chat(&self) -> ChatRef {
+        self.chat
+    }
+
+    fn asked(&self, conversation: u64) {
+        // A phone that keeps its own conversation stays in this one; one
+        // that never said is asked as the Voice Assistant chooses next time
+        // too (a page from before).
+        {
+            let mut own = self.own.lock().unwrap_or_else(|p| p.into_inner());
+            if *own != ChatRef::Choose {
+                *own = ChatRef::Id(conversation);
+            }
+        }
+        let title = crate::chat::chats::get(conversation).map(|c| crate::link::chats::title(&c)).unwrap_or_default();
+        self.tell(Out::Chat { id: conversation, title });
+    }
+
+    fn pictures(&self) -> (Vec<String>, bool) {
+        (self.pictures.lock().unwrap_or_else(|p| p.into_inner()).clone(), self.as_text)
+    }
+
+    fn cant_read(&self, message: &str) {
+        self.tell(Out::CantRead { message: message.to_string() });
+    }
+}
+
+/// What a question carries besides its words: its pictures' bytes, and
+/// whether their text goes instead.
+#[derive(Default)]
+struct Carries {
+    pictures: Vec<Vec<u8>>,
+    as_text: bool,
 }
 
 impl Turn {
@@ -184,6 +246,18 @@ struct Asking {
     audio: Vec<f32>,
     turn: Option<Arc<Turn>>,
     started: Option<Instant>,
+    /// The conversation this phone's questions go to.
+    chat: Arc<Mutex<ChatRef>>,
+    /// The pictures the next question takes, as they come.
+    pictures: Pictures,
+}
+
+impl Asking {
+    /// The phone said which conversation (an `open_chat`, a `new_chat`, a
+    /// question's `chat`).
+    fn set_chat(&self, chat: ChatRef) {
+        *self.chat.lock().unwrap_or_else(|p| p.into_inner()) = chat;
+    }
 }
 
 /// **Run the conversation** on a socket that has just been upgraded (`part`:
@@ -276,6 +350,8 @@ where
         audio: Vec::new(),
         turn: None,
         started: None,
+        chat: Arc::new(Mutex::new(ChatRef::Choose)),
+        pictures: Pictures::default(),
     };
     loop {
         let next = tokio::select! {
@@ -426,9 +502,15 @@ fn on_message(hub: &Arc<Hub>, tx: &Tx, session: u64, latest: &Arc<AtomicU64>, as
     match m {
         In::Ping => say(tx, Out::Pong),
         In::Hello { .. } => say(tx, Out::Error { message: "Already connected.".into() }),
-        In::Start { .. } => {
+        In::Start { chat, .. } => {
             // A start while it speaks (or thinks) is an interrupt, then a start.
             abandon(latest, asking);
+            if let Some(c) = wire::chat_ref(chat.as_ref()) {
+                asking.set_chat(c);
+            }
+            // Pictures come just before the question's end (`stop`): any
+            // from before are stale.
+            asking.pictures = Pictures::default();
             if crate::chat::assistant::is_off() {
                 say(tx, Out::Error { message: MEETING.into() });
                 say(tx, Out::State { phase: Phase::Idle });
@@ -440,9 +522,17 @@ fn on_message(hub: &Arc<Hub>, tx: &Tx, session: u64, latest: &Arc<AtomicU64>, as
             asking.started = Some(Instant::now());
             say(tx, Out::State { phase: Phase::Listening });
         }
-        In::Stop => {
+        In::Stop { pictures, as_text } => {
             if asking.recording {
-                finish_question(hub, session, latest, asking);
+                match asking.pictures.take(pictures) {
+                    Ok(pictures) => finish_question(hub, session, latest, asking, Carries { pictures, as_text }),
+                    Err(why) => {
+                        // Its pictures didn't come whole: nothing goes, said why.
+                        abandon(latest, asking);
+                        say(tx, Out::Error { message: why.into() });
+                        say(tx, Out::State { phase: Phase::Idle });
+                    }
+                }
             }
         }
         // Idle at once, whatever there was to drop: the page waits for it
@@ -451,7 +541,36 @@ fn on_message(hub: &Arc<Hub>, tx: &Tx, session: u64, latest: &Arc<AtomicU64>, as
             abandon(latest, asking);
             say(tx, Out::State { phase: Phase::Idle });
         }
-        In::Ask { text } => ask_typed(hub, tx, session, latest, asking, &text),
+        In::Ask { text, chat, pictures, as_text } => {
+            if let Some(c) = wire::chat_ref(chat.as_ref()) {
+                asking.set_chat(c);
+            }
+            match asking.pictures.take(pictures) {
+                Ok(pictures) => ask_typed(hub, tx, session, latest, asking, &text, Carries { pictures, as_text }),
+                Err(why) => {
+                    if abandon(latest, asking) {
+                        say(tx, Out::State { phase: Phase::Idle });
+                    }
+                    say(tx, Out::Error { message: why.into() });
+                }
+            }
+        }
+        In::Picture { n, size } => {
+            // Refused (too big, too many, out of turn): the question that
+            // would take it says why (`Pictures::take`).
+            if let Err(why) = asking.pictures.announce(n, size) {
+                tracing::info!(n, size, "Yap Link: a picture from the phone refused ({why})");
+            }
+        }
+        In::Chats => {
+            let items = crate::chat::chats::with_all(crate::link::chats::recents);
+            say(tx, Out::Chats { items });
+        }
+        In::OpenChat { id } => open_chat(hub, tx, asking, id),
+        In::NewChat => {
+            asking.set_chat(ChatRef::New);
+            say(tx, Out::Thread { id: None, title: String::new(), messages: Vec::new(), more: false });
+        }
         In::ReadAloud { id } => read_aloud(hub, tx, session, latest, asking, &id),
         In::SetModel { id, provider, model, base_url, file } => {
             // A row of Chat's picker (`ready.picker`), as the desktop picker
@@ -480,6 +599,29 @@ fn on_message(hub: &Arc<Hub>, tx: &Tx, session: u64, latest: &Arc<AtomicU64>, as
     }
 }
 
+/// **`open_chat`**: the phone's questions go to conversation `id` from now
+/// on, and its latest messages go back (their answers ones ▶ may read). One
+/// gone from Chat (deleted, archived, a meeting's thread): said, and the
+/// next question starts a new one.
+fn open_chat(hub: &Arc<Hub>, tx: &Tx, asking: &mut Asking, id: u64) {
+    let conv = crate::chat::chats::get(id).filter(crate::link::chats::usable);
+    let Some(conv) = conv else {
+        asking.set_chat(ChatRef::New);
+        say(tx, Out::Error { message: CHAT_GONE.into() });
+        say(tx, Out::Thread { id: None, title: String::new(), messages: Vec::new(), more: false });
+        return;
+    };
+    asking.set_chat(ChatRef::Id(id));
+    let (title, messages, more) = crate::link::chats::thread(&conv);
+    for m in &messages {
+        if let Some(answer) = &m.id {
+            hub.gave(&asking.device, answer);
+        }
+    }
+    tracing::info!(messages = messages.len(), more, "Yap Link: the phone opened a chat");
+    say(tx, Out::Thread { id: Some(id), title, messages, more });
+}
+
 /// The effort or fast mode set from the phone: the chips on the PC read
 /// again, and every phone hears (`yap-chat-model-changed` with no scope, so
 /// Settings has nothing to adopt); refused, why, and the PC's own word.
@@ -499,7 +641,7 @@ fn settled(hub: &Arc<Hub>, tx: &Tx, set: Result<(), String>) {
 /// as `state idle`, so the page knows the old question's news has ended),
 /// then it's asked as a spoken one is once it's transcribed — `heard`,
 /// thinking, the Voice Assistant's path — but not said.
-fn ask_typed(hub: &Arc<Hub>, tx: &Tx, session: u64, latest: &Arc<AtomicU64>, asking: &mut Asking, text: &str) {
+fn ask_typed(hub: &Arc<Hub>, tx: &Tx, session: u64, latest: &Arc<AtomicU64>, asking: &mut Asking, text: &str, carries: Carries) {
     if abandon(latest, asking) {
         say(tx, Out::State { phase: Phase::Idle });
     }
@@ -518,9 +660,10 @@ fn ask_typed(hub: &Arc<Hub>, tx: &Tx, session: u64, latest: &Arc<AtomicU64>, ask
         return;
     }
     let id = latest.fetch_add(1, Ordering::SeqCst) + 1;
-    let turn = Turn::new(id, session, Arc::clone(latest), asking, false);
+    let pictures = carries.pictures.len();
+    let turn = Turn::new(id, session, Arc::clone(latest), asking, false, carries);
     asking.turn = Some(Arc::clone(&turn));
-    tracing::info!(chars = question.chars().count(), "Yap Link: a typed question from the phone");
+    tracing::info!(chars = question.chars().count(), pictures, "Yap Link: a typed question from the phone");
     let app = hub.app.clone();
     tauri::async_runtime::spawn(async move { answer(app, turn, question).await });
 }
@@ -541,7 +684,7 @@ fn read_aloud(hub: &Arc<Hub>, tx: &Tx, session: u64, latest: &Arc<AtomicU64>, as
         return;
     };
     let turn_id = latest.fetch_add(1, Ordering::SeqCst) + 1;
-    let turn = Turn::new(turn_id, session, Arc::clone(latest), asking, true);
+    let turn = Turn::new(turn_id, session, Arc::clone(latest), asking, true, Carries::default());
     // Its answer is in: the voice's end says idle.
     turn.answered.store(true, Ordering::SeqCst);
     asking.turn = Some(Arc::clone(&turn));
@@ -579,6 +722,13 @@ fn parse_message_id(id: &str) -> Option<(u64, usize)> {
 }
 
 fn on_audio(hub: &Arc<Hub>, session: u64, latest: &Arc<AtomicU64>, asking: &mut Asking, bytes: &[u8]) {
+    // A piece of a picture for the next question.
+    if let Some((seq, piece)) = wire::picture_piece(bytes) {
+        if let Err(why) = asking.pictures.piece(seq, piece) {
+            tracing::info!(seq, "Yap Link: a picture's piece out of turn ({why})");
+        }
+        return;
+    }
     if !asking.recording {
         return;
     }
@@ -591,19 +741,20 @@ fn on_audio(hub: &Arc<Hub>, session: u64, latest: &Arc<AtomicU64>, asking: &mut 
     // Two minutes: it's asked as it is.
     if asking.audio.len() >= MAX_SAMPLES {
         tracing::info!("Yap Link: a question reached 2 minutes; asked as it is");
-        finish_question(hub, session, latest, asking);
+        finish_question(hub, session, latest, asking, Carries::default());
     }
 }
 
 /// The question's audio is in: transcribe it and ask.
-fn finish_question(hub: &Arc<Hub>, session: u64, latest: &Arc<AtomicU64>, asking: &mut Asking) {
+fn finish_question(hub: &Arc<Hub>, session: u64, latest: &Arc<AtomicU64>, asking: &mut Asking, carries: Carries) {
     asking.recording = false;
     let audio = std::mem::take(&mut asking.audio);
     let id = latest.load(Ordering::SeqCst);
-    let turn = Turn::new(id, session, Arc::clone(latest), asking, true);
+    let pictures = carries.pictures.len();
+    let turn = Turn::new(id, session, Arc::clone(latest), asking, true, carries);
     asking.turn = Some(Arc::clone(&turn));
     let held = asking.started.take().map(|s| s.elapsed().as_millis() as u64).unwrap_or(0);
-    tracing::info!(samples = audio.len(), held_ms = held, "Yap Link: a question from the phone");
+    tracing::info!(samples = audio.len(), held_ms = held, pictures, "Yap Link: a question from the phone");
     let app = hub.app.clone();
     tauri::async_runtime::spawn(async move { ask(app, turn, audio).await });
 }
@@ -652,6 +803,23 @@ async fn answer(app: tauri::AppHandle, turn: Arc<Turn>, question: String) {
         return;
     }
     turn.tell(Out::State { phase: Phase::Thinking });
+    // Its pictures, kept as Chat keeps a pasted one (decoded, stored again
+    // as PNGs: nothing that isn't a picture is kept).
+    let raw = std::mem::take(&mut *turn.raw.lock().unwrap_or_else(|p| p.into_inner()));
+    if !raw.is_empty() {
+        match keep_pictures(raw).await {
+            Ok(ids) => *turn.pictures.lock().unwrap_or_else(|p| p.into_inner()) = ids,
+            Err(e) => {
+                tracing::info!("Yap Link: a picture from the phone wasn't kept ({e})");
+                turn.tell(Out::Error { message: format!("Yap couldn't read one of the pictures on your PC: {e}.") });
+                turn.tell(Out::State { phase: Phase::Idle });
+                return;
+            }
+        }
+        if !turn.current() {
+            return;
+        }
+    }
     let started = Instant::now();
     crate::chat::assistant::ask_from_phone(app, question, Arc::clone(&turn) as Arc<dyn Phone>).await;
     tracing::info!(
@@ -664,6 +832,18 @@ async fn answer(app: tauri::AppHandle, turn: Arc<Turn>, question: String) {
     if !turn.voiced.load(Ordering::SeqCst) {
         turn.tell(Out::State { phase: Phase::Idle });
     }
+}
+
+/// A question's pictures kept for Chat (`snip::attach::keep`, as a pasted
+/// picture is): their ids, or why one couldn't be.
+async fn keep_pictures(raw: Vec<Vec<u8>>) -> Result<Vec<String>, String> {
+    let kept = tauri::async_runtime::spawn_blocking(move || {
+        raw.iter().map(|bytes| crate::snip::attach::keep(bytes, "phone").map(|image| image.id)).collect::<Result<Vec<_>, _>>()
+    })
+    .await
+    .map_err(|e| e.to_string())??;
+    tracing::info!(pictures = kept.len(), "Yap Link: the phone's pictures kept");
+    Ok(kept)
 }
 
 #[cfg(test)]

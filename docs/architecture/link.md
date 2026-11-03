@@ -17,6 +17,14 @@ Latest and More models, the effort), built by the desktop picker's own code.
 It's still Ask Yap only: the phone never types into apps on the PC (phone
 dictation was built and removed on purpose, `7bbec66e`).
 
+Later that day the page took **the Claude app's layout** (the maintainer:
+"screenshots go into the chat window on the phone", the model picker and
+its effort "in the chat window", not the header): ☰ opens a drawer of
+Chat's conversations and the phone keeps **its own conversation** (one
+opened there, or a new chat); a question carries **pictures** taken or
+chosen on the phone, sent as Chat sends a typed question's screenshots; the
+model chip with its effort sits in the composer.
+
 The long-term design (yap-private `docs/phone-remote-design.md`: a PWA on
 Yap's website, WebRTC, away from home through a relay) keeps this protocol's
 messages: moving there is a change of transport only.
@@ -33,6 +41,8 @@ messages: moving there is a change of transport only.
 | `link/session.rs` | One phone's conversation: the hello, pairing, its questions one at a time (spoken or typed), ▶ on an answer, interrupt. |
 | `link/voice.rs` | Yap's voice for the phone: the speaker's output sent down the socket, never this PC's speakers. |
 | `link/models.rs` | Chat's model and the others it can use (`ready.models`, the first pages'), what Chat's picker shows (`picker`: the very data the desktop picker reads — `ai_model::status` without keys, `model_catalog::snapshot`, `local_llm_status`'s models, "Reads images"), and a switch, an effort or Fast mode from the phone, set as the picker sets them (`ai_model::chat_set_model`, `effort::chat_set_effort`). |
+| `link/chats.rs` | Chat's conversations for the phone's drawer (`recents`: Chat's list, not archived, not a meeting's Ask thread, newest first, 200 at most) and a conversation opened (`thread`: its last 40 messages' words, 6,000 characters each at most, an answer's id for ▶, a question's screenshot text left out), pure. |
+| `link/pictures.rs` | A question's pictures as they come (`picture` and its `0x03` frames): in order, whole, 4 at most, 3 MB each; the question takes them all or none, and says why. Pure. |
 | `link/lan.rs` | This PC's addresses (IP Helper), which peers may connect, Windows' Public networks (Network List Manager). |
 | `link/wire.rs` | The protocol (below), pure. |
 | `link/page.rs` | The page's files, embedded at build time from `src-tauri/link-page/` (`build.rs` lists them; its README.md left out) and the desktop's own Chat picker modules and logos beside them (`build.rs` `LINK_SHARED`: `core/`, `providers/`), their content types and the Content-Security-Policy. |
@@ -41,28 +51,49 @@ The phone's page itself (`src-tauri/link-page/`: plain HTML, CSS and JS
 modules, no build step) has its own notes in its
 [README.md](../../src-tauri/link-page/README.md) and tests in `e2e-link/`.
 
-**It's Yap's Chat** (2026-11-03; the morning's second pass after the
-night's restyle): the conversation fills the screen — your question in
-Chat's amber-washed bubble (🎙 when it was said), the answer in Chat's card
-with its markdown (`markdown.js`, built as nodes, never HTML), Chat's
-activity line while it works, ▶ Read aloud under an answer —, and **Chat's
-composer** at the bottom: the text box (Enter sends, Shift+Enter a new line,
-it grows to five lines), Send, and **Talk, the Yap bar's pill**, one big
-target under the thumb, which turns into the bar's capsule while Yap listens
-(✕, the ✦ and the bar's live waveform, the time, Send) and has ■ Stop beside
-it while Yap speaks — the one Stop: under the answer being said only the
-bar's bars and "Speaking…"; when ▶ on an answer started it, that ▶ is the
-Stop, in place, and the composer has none. The model chip sits under the composer as in Chat; the
-settings (Hands-free and its wait, Clearer sound, the microphone, Sound
-details) are a sheet from ⋯. It follows Yap's tokens — `link.css` copies
+**It's Yap's Chat in the Claude app's layout** (2026-11-03, the day's third
+pass). **The header**: ☰ on the left opens the drawer, the title in the
+middle — "Yap · <PC name>" with the connection's dot (green, amber while
+connecting, grey unpaired), the chat's title under it (or how the
+connection is) —, a small amber spinner while Yap works the question out,
+and ⋯ on the right for the settings sheet (Hands-free and its wait, Clearer
+sound, the microphone, Sound details). **The thread** fills the screen:
+your question in a bubble on the right (Chat's amber wash, 🎙 when it was
+said, its pictures above it — their thumbnails while the page has them,
+else "2 pictures"), the answer as plain text the width of the screen with
+its markdown (`markdown.js`, built as nodes, never HTML), Chat's activity
+line while it works, and under a finished answer **Copy** and **▶ Read
+aloud** as quiet icons. **The composer card** at the bottom: the pictures
+as thumbnails inside it with ✕, the text box ("Ask Yap, or hold to talk";
+Enter sends, Shift+Enter a new line, it grows to five lines), then a row —
+**+** (Take photo, Choose photos), **the model chip with its effort**
+("Claude Opus 5.5 · Extra", or where it runs when there's no effort; a
+narrow card drops "Claude" and the chevron: "Opus 5.5 · Extra"), a gap,
+**the mic** (Talk: a tap talks hands-free, a hold while held — a spoken
+*question*, never dictation) and **Send ↑** (Yap's amber, dim with nothing
+to send), which is **■** while Yap works the question out or says an
+answer. While Yap listens the card is the bar's capsule: ✕, the ✦ and the
+bar's live waveform, the time, and the mic turned into **Done**. **One Stop
+at a time**: under the answer being said only the bar's bars and
+"Speaking…"; when ▶ on an answer started it, that ▶ is the Stop, in place,
+and the composer has none. **The drawer** slides in from the left over a
+scrim: "Yap" in EB Garamond, a search box filtering the titles, **Recents**
+(Chat's conversations on the PC, newest first, the one this phone is in
+marked), and at the foot the PC's name and **+ New chat**. When Chat's model
+can't read the pictures the card shows **Chat's own line**: "Qwen3.5 4B
+can't read images." with Use <the model that can>, **Send its text
+instead**, Choose another model…, and Send without the pictures. It follows Yap's tokens — `link.css` copies
 `src/app.css`'s `--yap-*` values, light and the warm dark, following the
 phone's `prefers-color-scheme`, and `e2e-link/tokens.spec.js` holds the copy
 to app.css — with Figtree and EB Garamond served from the PC
 (`link-page/fonts/`, 36 KB; never Google Fonts). Where a phone needs its own
 way it has it: 44–48 px targets, safe areas, the composer riding above the
 on-screen keyboard (`interactive-widget=resizes-content`, else the visual
-viewport), text that grows with the phone's font size, no hover-only
-affordances, landscape, reduced motion. **Chat's picker** is the desktop's
+viewport), text that grows with the phone's font size (to Android's
+largest, 200 %: the round buttons stop at 56 px, the chip's name first),
+no hover-only affordances, reduced motion, and **on its side two columns**
+(#17's idea kept: the conversation on the left, the composer card on the
+right at the bottom, under the thumb). **Chat's picker** is the desktop's
 code itself: `src/lib/core/chatPicker.js` (and the pure modules it imports)
 builds the rows on both, served to the phone as they are with the provider
 logos (`build.rs` `LINK_SHARED`, `e2e-link/shared.spec.js` keeps them pure).
@@ -71,7 +102,8 @@ Details: the README's "The look" and "Chat's picker".
 ## The protocol (v1)
 
 v1 with **additions** (2026-11-03, marked ⁺ below): typed questions, ▶ on an
-answer, Chat's picker and the effort. They're backward compatible both ways:
+answer, Chat's picker and the effort; then the phone's own conversation
+(the drawer) and its pictures. They're backward compatible both ways:
 `hello.v` stays 1; a first page ignores the new fields of `ready` and
 `answer`; a new page offers typing, ▶ and the picker only when `ready.can`
 says the PC answers them (a PC from before them: "Yap on your PC needs an
@@ -81,21 +113,27 @@ yet. Update Yap on the PC, then try again." (`wire::UNKNOWN`; a PC from before
 says "Yap didn't understand that message").
 
 **WebSocket** at `wss://<pc>:51443/ws`. **Text frames** are JSON
-`{ "type": … }`. **Binary frames** are audio: byte 0 the kind — `0x01` **up**
-(the phone's mic, 16 kHz mono Int16 LE) or `0x02` **down** (Yap's voice, mono
-Int16 LE at `speak_start`'s rate) — bytes 1–4 `seq` (u32 LE), the rest samples.
-A frame is at most a second of audio (32,005 bytes); a text frame at most 16 KiB.
+`{ "type": … }`. **Binary frames**: byte 0 the kind — `0x01` **up** (the
+phone's mic, 16 kHz mono Int16 LE) or `0x02` **down** (Yap's voice, mono
+Int16 LE at `speak_start`'s rate) — bytes 1–4 `seq` (u32 LE), the rest samples;
+or ⁺ `0x03` **a picture's piece** — bytes 1–4 the piece's number (u32 LE, from
+0 for each picture), the rest the picture's bytes (32,000 at most). A frame
+is at most 32,005 bytes (a second of audio); a text frame at most 16 KiB.
 
 **Phone → PC**
 
 | Message | Meaning |
 |---|---|
 | `hello {v:1, name, nonce, device?:{id, secret}, pair?:{token}}` | The first message. `device` on a later visit, `pair` from the QR. |
-| `start {mode:"ask"}` | A question starts; up frames follow, 20–40 ms each (the page sends exactly 320 samples, `seq` from 0 for each question). |
-| `stop` | The question ended (after its last frame): transcribe and answer. |
+| `start {mode:"ask", chat?⁺}` | A question starts; up frames follow, 20–40 ms each (the page sends exactly 320 samples, `seq` from 0 for each question). `chat`: the conversation it goes to (below). |
+| `stop {pictures?⁺, asText?⁺}` | The question ended (after its last frame): transcribe and answer, with the `pictures` sent just before it (their text instead when `asText`). |
 | `cancel` | Drop the question (listening, or being worked on). |
 | `interrupt` | Stop speaking and abandon the answer. |
-| `ask {text}` ⁺ | A typed question (4,000 characters at most): `heard`, thinking, the answer as for a spoken one, in the same conversation, **not spoken**. |
+| `ask {text, chat?, pictures?, asText?}` ⁺ | A typed question (4,000 characters at most): `heard`, thinking, the answer as for a spoken one, in the same conversation, **not spoken**. `chat`, `pictures`, `asText` as for `start` / `stop`. |
+| `picture {n, size}` ⁺ | Picture `n` (from 0) of the next question: `size` bytes (3 MB at most), in `0x03` frames that follow. Four at most a question. |
+| `chats` ⁺ | Chat's conversations, for the drawer (`chats`). |
+| `open_chat {id}` ⁺ | This phone's questions go to conversation `id` from now on; its messages come back (`thread`). |
+| `new_chat` ⁺ | The next question starts a conversation (`thread` with `id: null`). |
 | `read_aloud {id}` ⁺ | Say answer `id` (`answer.id`, one this phone was given while Yap runs) on the phone, whole, in Yap's voice. |
 | `set_model {id}` | Switch Chat's model (one of `ready.models`). |
 | `set_model {provider, model, baseUrl?, file?}` ⁺ | Switch Chat's model to a row of Chat's picker, as the desktop picker does (`chat_set_model`'s own checks: a provider with a key, a server Settings knows, an on-device model on this PC). |
@@ -110,7 +148,12 @@ A frame is at most a second of audio (32,005 bytes); a text frame at most 16 KiB
 | `pair_wait {code}` | The pairing waits for a yes on the PC, which shows the same code. |
 | `paired {device:{id, secret}}` | Paired: the phone keeps these for its next visits. |
 | `denied {reason}` | Refused, in words the phone can show; the socket closes. |
-| `ready {pc, model:{id,label,onThisPc}, models:[{id,label,onThisPc}], can⁺, picker⁺}` | Connected: this PC's name, Chat's model (or `null`: none set up) and the others; `can`: what it answers beyond v1 (`["ask", "read_aloud", "picker", "effort"]`); `picker`: what Chat's picker shows (`{status, catalog, local, images}`, `link/models.rs`; never a key). Sent again whenever Chat's model changes (here, in Chat, or from a phone: `yap-chat-model-changed`) and after every `set_model`, which the page takes as the truth. |
+| `ready {pc, model:{id,label,onThisPc}, models:[{id,label,onThisPc}], can⁺, picker⁺}` | Connected: this PC's name, Chat's model (or `null`: none set up) and the others; `can`: what it answers beyond v1 (`["ask", "read_aloud", "picker", "effort", "chats", "pictures"]`); `picker`: what Chat's picker shows (`{status, catalog, local, images}`, `link/models.rs`; never a key; `status.images` and `status.imagesSwitch` say whether Chat's model reads pictures and which would). Sent again whenever Chat's model changes (here, in Chat, or from a phone: `yap-chat-model-changed`) and after every `set_model`, which the page takes as the truth. |
+| `chats {items:[{id, title, ts}]}` ⁺ | Chat's conversations, newest first (`link/chats.rs`). |
+| `thread {id, title, messages:[{role, text, id?, voice?, pictures?}], more}` ⁺ | A conversation's latest messages (words only; an answer's `id` for ▶; `pictures`: how many a question carried), `more` when older ones were left out; `id: null` for a new chat (or one that's gone, after an `error`). |
+| `chat {id, title}` ⁺ | This phone's question went to conversation `id` (the one chosen for it, or a new chat's): its questions go there from now on. |
+| `title {id, title}` ⁺ | Conversation `id` was renamed in Chat (every phone hears it). Chat's titles are a conversation's first words; a rename is the only change. |
+| `cant_read {message}` ⁺ | Chat's model can't read the question's pictures, or its server turned them down (`snip::vision`'s words). The page puts the question back in the composer with them and shows Chat's line. |
 | `state {phase}` | `"idle"` \| `"listening"` \| `"transcribing"` \| `"thinking"` \| `"speaking"`. |
 | `heard {text}` | The question, transcribed and corrected (a typed one, as it came). |
 | `step {label}` | What the answer is doing, in Chat's activity line's words (`chat/activity.rs`: "Searching the web · …"). |
@@ -143,6 +186,38 @@ answer isn't in Chat on your PC any more…") for an id it didn't give this
 phone or one gone from Chat. The page sends `cancel` or `interrupt` itself
 before an `ask` or a `read_aloud` while Yap works or speaks, as before a
 `start`.
+
+**The phone's conversation** (`chat` on `ask` / `start`: a conversation's
+id, or `"new"`; `assistant::phone_conversation`, pure): the one it names
+while it's still in Chat's list (not deleted, not archived, not a meeting's
+Ask thread); a new one for `"new"` — or when the one it names is gone, never
+another; and with no `chat` (a page from before, or a phone that never
+picked one) the Voice Assistant's own choice (`choose_conversation`: the
+one open in Chat, else the latest within a few minutes). `open_chat` and
+`new_chat` set it for the questions after them too. The PC says where each
+question went (`chat {id}`); a phone that has named one stays in it, one
+that never did is asked as the Voice Assistant chooses each time. The page
+keeps it in `localStorage` (`yap.link.chat`) and asks for its messages once
+it's up (`open_chat`), so a reload shows what was written meanwhile. Opening
+a conversation makes its answers ones ▶ may read on that phone.
+
+**Pictures** go just before the question that takes them: for each, `picture
+{n, size}` then its bytes in `0x03` frames, in order; then `ask` (or `stop`)
+with `pictures: N`. The PC keeps the caps (4, 3 MB each, every piece in turn,
+`link/pictures.rs`) — anything amiss and the question doesn't go: `error`
+says why ("A picture didn't reach your PC whole…"). Each picture is then read
+on the PC as Chat reads a pasted one (`snip::attach::keep`: decoded by
+Windows' codecs, stored again as a PNG in `chat-images/`, so nothing that
+isn't a picture is kept) and the question is asked the way
+Chat's typed question with screenshots is — the same function,
+`chat::commands::question_images`: a model known not to read images gets
+`cant_read` (nothing asked); else the on-device model loads its projector, the
+copies for the provider go with every call of the turn, and a server that
+turns them down makes that model a "no" (`snip::vision::refused`) and gets
+`cant_read`; with `asText` their text, read on this PC by Windows' OCR, goes
+after the question instead (`snip::ocr`). The question keeps its pictures in
+Chat, as a typed question's screenshots are kept. A question with pictures
+isn't a Skill or an app to open.
 
 ## Pairing
 
@@ -210,11 +285,18 @@ before an `ask` or a `read_aloud` while Yap works or speaks, as before a
   address waits out the 10 (`pairing::Limiter`). A hello must come within 10 s.
 - **What a phone can do**: ask the Voice Assistant, out loud or typed (its
   tools follow their own rules: opening apps on this PC, notes, the web),
-  have one of the answers it was given read out (▶: only those, by their id,
-  never anything else in Chat), and switch Chat's model, its effort and Fast
-  mode as Chat's picker does. It can't type into the PC (no dictation), add a
-  key, download a model, start meeting notes or read anything else. The
-  picker's data never carries a key, not even masked.
+  with pictures it sends (kept in `chat-images/` as Chat keeps a pasted one,
+  only once they've been read as pictures, at most 4 of 3 MB a question);
+  list Chat's conversations and open one (their titles, and a conversation's
+  last 40 messages' words — never a meeting's Ask thread, an archived chat,
+  a screenshot or a file); have one of the answers it was given or opened
+  read out (▶: only those, by their id); and switch Chat's model, its effort
+  and Fast mode as Chat's picker does. It can't type into the PC (no
+  dictation), add a key, download a model, start meeting notes, delete or
+  rename a chat, or read anything else. The picker's data never carries a
+  key, not even masked. (A paired phone is trusted with Chat as the person
+  at the PC is: pairing takes a yes on the PC with the code both screens
+  show, and Settings → Phone removes a phone at once.)
 - **Chat's picker code on the page** is the desktop's own (`src/lib/core/`,
   pure modules: no Tauri, no Svelte, no imports beyond each other), served as
   static files from this PC with the logos; the page builds its rows as DOM
@@ -228,13 +310,16 @@ copy (`pipeline::PhoneEar` → `Shared::phone_question`: `lease_engine`, My
 languages, the Whisper prompt), then the correction dictionary (exact, then
 near-misses) — no AI cleanup, as the Voice Assistant's question → `heard` →
 **thinking**: `assistant::ask_from_phone`, the phone a new origin of the Voice
-Assistant's own `answer` (`Asker::Phone`): the conversation choice, the "no AI
+Assistant's own `answer` (`Asker::Phone`): the conversation choice (the
+phone's own when it named one, `phone_conversation`), its pictures (Chat's
+`question_images`), the "no AI
 model" and "couldn't answer" words (as `error`), `chat_turn` with scope
 "assistant" and `SPOKEN_ANSWER_NOTE`, the turn's `stream::Stoppable`
 (`link-<session>-<turn>`), the Chat view following live (`yap-assistant-turn`,
 `yap-assistant-stream`), the network receipts' "Voice Assistant from your
 phone". Not the PC's own things: the window in front, the screenshots in Chat's
-box, a quoted passage, the bar's capsule and card.
+box (the phone's own pictures go instead), a quoted passage, the bar's
+capsule and card.
 
 **Speaking**: the same `Streamed` sink speaks from the answer's first whole
 sentence and the rest once it's checked, as much as "How much to read aloud"
@@ -365,7 +450,14 @@ on the PC while the answer comes stops the voice, as it stops the PC's.
   `ask`, `read_aloud`, the picker's `set_model`, `set_effort`, `set_fast` and
   a newer page's unknown message (`wire.rs`); the answers a phone may have
   read (`link.rs` `Given`), an answer's id (`session.rs`); a typed question
-  answered as typed and not said (`chat/assistant.rs`).
+  answered as typed and not said (`chat/assistant.rs`); the drawer's messages
+  both ways, a question's `chat`, `picture` and its frames (`wire.rs`);
+  Recents (newest first, archived and meeting threads left out, bounded) and
+  a thread (its latest words, capped, answer ids, a screenshot's text left
+  out: `chats.rs`); pictures whole, in order, the caps, one cut short or out
+  of turn (`pictures.rs`); the phone's conversation chosen and a gone one
+  falling back to a new chat (`chat/assistant.rs`); the picker's data with
+  `imagesSwitch` and without `imagesLocal` (`models.rs`).
 - **E2E** `e2e/link.spec.js`: a test run listens on a free port of 127.0.0.1
   (`YAP_E2E_LINK_PORT=0`, the port in `link_status`); a headless Chromium
   (Playwright's, else Edge) with a fake microphone opens the real page over
@@ -374,9 +466,14 @@ on the PC while the answer comes stops the voice, as it stops the PC's.
   the stub's transcript `heard`, the fake model's answer, the voice down at 24
   kHz (test mode's stand-in voice), the conversation in `chats.json`, the
   receipts; a typed question in the same conversation, not "by voice", with
-  nothing said, then ▶ saying it; Chat's picker over the wire switching
-  Chat's model; Remove cutting the phone off; a replayed link, a wrong
-  secret, Deny and another site's page refused.
+  nothing said, then ▶ saying it; ☰'s drawer listing that conversation,
+  marked; + New chat and a question going to a conversation of its own; a
+  picture from the phone (GPT-OSS can't read it: the composer's line, then
+  "Send its text instead" with test mode's OCR stand-in), kept with the
+  question in `chats.json` (`asText`); the first
+  conversation opened again from the drawer; Chat's picker over the wire
+  switching Chat's model; Remove cutting the phone off; a replayed link, a
+  wrong secret, Deny and another site's page refused.
 - The page on its own: `npm run test:link` (`e2e-link/`, the PC mocked): the
   sound maths in Node (the resampler both ways, the jitter buffer, the voice
   detector), then the page in a headless Chromium — among the rest, the answer's
@@ -392,9 +489,16 @@ on the PC while the answer comes stops the voice, as it stops the PC's.
   keyboard up both ways, a reload keeping the thread), Chat's picker
   (`picker.spec.js`: the rail and its logos, Latest, More models in place, a
   switch, a provider without a key, ChatGPT's two ways, the effort and Fast
-  mode, a PC from before), the shared modules staying pure
+  mode, a PC from before), the drawer and the phone's conversation
+  (`chats.spec.js`: ☰, Recents, the search, a chat opened — its messages,
+  its title, ▶ on an old answer, the next questions' `chat` —, + New chat
+  and the PC's `chat`, a rename, a reload asking again, one gone, a PC from
+  before), pictures (`pictures.spec.js`: + → Choose photos, thumbnails with
+  ✕, made smaller to 2,048 px JPEGs, sent in pieces before `ask` or `stop`,
+  four at most, Chat's line with the switch and their text instead, the PC's
+  `cant_read`, a PC from before), the shared modules staying pure
   (`shared.spec.js`), the look (Yap's fonts and the logos from the page's
-  own origin; at 360, 390 and 430 px wide and on its side, nothing sideways
-  and Talk in the thumb's reach; `tokens.spec.js`: link.css's colours are
-  app.css's) — and the same specs (bar hands-free and the screenshots) in
-  Playwright's own Firefox when it's installed.
+  own origin; at 360, 390 and 430 px wide, on its side and at 130 and 200 %
+  text, nothing sideways and Talk in the thumb's reach; `tokens.spec.js`:
+  link.css's colours are app.css's) — and the same specs (bar hands-free and
+  the screenshots) in Playwright's own Firefox when it's installed.

@@ -683,6 +683,42 @@ pub trait Phone: Send + Sync {
     fn voice(&self, message_id: &str) -> Result<std::sync::Arc<crate::voice::tts::Feed>, String>;
     /// It went no further: why, in plain words.
     fn failed(&self, message: &str);
+    /// The conversation it goes to, as the phone said (2026-11-03: the
+    /// phone keeps its own, [`phone_conversation`]).
+    fn chat(&self) -> crate::link::wire::ChatRef {
+        crate::link::wire::ChatRef::Choose
+    }
+    /// It went to conversation `conversation` (a new chat's, or the one
+    /// chosen for it).
+    fn asked(&self, conversation: u64) {
+        let _ = conversation;
+    }
+    /// The pictures it carries (kept as Chat keeps a pasted picture: their
+    /// ids), and whether their text goes instead ("Send its text instead").
+    fn pictures(&self) -> (Vec<String>, bool) {
+        (Vec::new(), false)
+    }
+    /// Chat's model can't read its pictures (or its server turned them
+    /// down): why, for the phone to offer Chat's ways on.
+    fn cant_read(&self, message: &str) {
+        self.failed(message);
+    }
+}
+
+/// **The conversation a phone's question goes to** (Yap Link, 2026-11-03,
+/// the phone's own conversation): the one it's in while that's still one it
+/// may continue (`usable`: in Chat's list, not archived or deleted); a new
+/// one when it asked for a new chat — or when its conversation went; and,
+/// when it never said, the Voice Assistant's own choice (`otherwise`,
+/// [`choose_conversation`]). Pure.
+pub fn phone_conversation(wanted: crate::link::wire::ChatRef, usable: bool, otherwise: Choice) -> Choice {
+    use crate::link::wire::ChatRef;
+    match wanted {
+        ChatRef::Choose => otherwise,
+        ChatRef::New => Choice::New,
+        ChatRef::Id(id) if usable => Choice::Continue(id),
+        ChatRef::Id(_) => Choice::New,
+    }
 }
 
 /// Who asked a question.
@@ -747,6 +783,14 @@ impl Asker {
         match self {
             Asker::Shortcut(_) => crate::notices::alert::show_soon(app, alert),
             Asker::Phone(p) => p.failed(&format!("{}. {}", alert.title.trim_end_matches('.'), alert.body)),
+        }
+    }
+
+    /// A phone's pictures, and whether their text goes instead.
+    fn pictures(&self) -> (Vec<String>, bool) {
+        match self {
+            Asker::Shortcut(_) => (Vec::new(), false),
+            Asker::Phone(p) => p.pictures(),
         }
     }
 }
@@ -1055,16 +1099,30 @@ async fn answer(app: AppHandle, asker: Asker, since: u64, question: String, abou
     let about_selection = about.is_some();
     let viewing = view();
     let open_exists = matches!(viewing, Viewing::Conversation(id) if crate::chat::chats::get(id).is_some());
-    let choice = choose_conversation(viewing, open_exists, crate::chat::chats::latest(), now_secs());
+    let chosen = choose_conversation(viewing, open_exists, crate::chat::chats::latest(), now_secs());
+    // A phone keeps its own conversation (Yap Link's drawer, 2026-11-03).
+    let choice = match &asker {
+        Asker::Phone(p) => {
+            let wanted = p.chat();
+            let usable = matches!(wanted, crate::link::wire::ChatRef::Id(id)
+                if crate::chat::chats::get(id).is_some_and(|c| crate::link::chats::usable(&c)));
+            phone_conversation(wanted, usable, chosen)
+        }
+        Asker::Shortcut(_) => chosen,
+    };
+    // A phone's pictures (Yap Link): they go with the question as a typed
+    // question's screenshots do (below).
+    let (pictures, pictures_as_text) = asker.pictures();
+    let with_pictures = !pictures.is_empty();
     // A Skill said — "slash prep", "run my standup skill", "prep me for my
     // next meeting" — or the answer to Yap's question for one (skill.rs):
     // run as Chat runs it, the question itself what it's about. Never a
-    // question about a selection.
+    // question about a selection, nor one with pictures.
     let continued = match choice {
         Choice::Continue(id) => Some(id),
         Choice::New => None,
     };
-    let said = if about_selection { None } else { skill::said(&question, &cfg, continued) };
+    let said = if about_selection || with_pictures { None } else { skill::said(&question, &cfg, continued) };
     // Screenshots waiting in Chat's box (snip/waiting.rs): the question goes
     // with them, to the conversation they wait in. (Not one about a
     // selection or a Skill: that's what it's about.)
@@ -1074,7 +1132,7 @@ async fn answer(app: AppHandle, asker: Asker, since: u64, question: String, abou
     // "Open Teams" needs no model, nor a "yes" to Yap's "Did you mean …?":
     // Yap opens it and says so (apps.rs). Never a question about a selection
     // or a Skill.
-    let opens_an_app = !about_selection && said.is_none() && crate::apps::plan_for(&question, &cfg, conversation_id).await.is_some();
+    let opens_an_app = !about_selection && !with_pictures && said.is_none() && crate::apps::plan_for(&question, &cfg, conversation_id).await.is_some();
     let endpoint = if opens_an_app {
         None
     } else {
@@ -1129,6 +1187,34 @@ async fn answer(app: AppHandle, asker: Asker, since: u64, question: String, abou
             }
         }
     }
+    let mut ask = question.clone();
+    // A phone's pictures, as a typed question's screenshots go
+    // (`commands::question_images`, Chat's own way): a model known not to
+    // read images gets none — the phone offers Chat's ways on (another
+    // model, their text instead, `Phone::cant_read`) — else their copies
+    // for this provider go with every call of the turn; or their text, read
+    // on this PC, goes in their place.
+    if with_pictures {
+        match crate::chat::commands::question_images(&app, &pictures, pictures_as_text, question.clone()).await {
+            Ok(q) => {
+                tracing::info!(pictures = q.images.images.len(), as_text = pictures_as_text, "Voice Assistant: a phone's question with pictures");
+                shots = q.images;
+                target = q.target;
+                ask = q.text;
+            }
+            Err(e) => {
+                tracing::info!("Voice Assistant: the phone's pictures couldn't go ({e})");
+                if let Asker::Phone(p) = &asker {
+                    if e.starts_with(crate::snip::vision::CANT_READ) || e.starts_with(crate::snip::vision::COULDNT_READ) {
+                        p.cant_read(&e);
+                    } else {
+                        p.failed(&e);
+                    }
+                }
+                return;
+            }
+        }
+    }
     // The person is in Yap's main window: Chat comes up there with the
     // question. In front, or beside the app in front showing Chat: the
     // answer is in view there (a document's line points at the panel).
@@ -1147,7 +1233,6 @@ async fn answer(app: AppHandle, asker: Asker, since: u64, question: String, abou
     // a quoted passage or a selection (they're what it's about), nor when
     // Yap opens an app (no model), nor for a Skill (its passages are what
     // it reads).
-    let mut ask = question.clone();
     let mut window_picture: Option<(String, String)> = None;
     // With Yap's own window in front the window in front is Yap, which a
     // capture leaves out: a model that calls tools looks itself
@@ -1178,6 +1263,11 @@ async fn answer(app: AppHandle, asker: Asker, since: u64, question: String, abou
     let ran = said.as_ref().map(|t| t.skill.clone());
     let asked_app = app.clone();
     let asked_text = question.clone();
+    // A phone learns which conversation its question went to.
+    let asked_phone = match &asker {
+        Asker::Phone(p) => Some(std::sync::Arc::clone(p)),
+        Asker::Shortcut(_) => None,
+    };
     // The answer as it's written: the Chat view follows it, the voice
     // starts at its first sentence.
     // A phone's answer is said when it was asked out loud (into a headset),
@@ -1194,6 +1284,11 @@ async fn answer(app: AppHandle, asker: Asker, since: u64, question: String, abou
     let asked = |conv: u64, index: usize| {
         if pc {
             lock().conversation = Some(conv);
+        }
+        if let Some(p) = &asked_phone {
+            if p.current() {
+                p.asked(conv);
+            }
         }
         {
             let mut st = streamed.lock();
@@ -1309,6 +1404,24 @@ async fn answer(app: AppHandle, asker: Asker, since: u64, question: String, abou
             // typed question's is).
             if let Some(q) = quote {
                 crate::chat::documents::put_back_quote(&app, q);
+            }
+            // A phone's pictures turned down by the model's server: that
+            // model is a "no" from now on, and the phone offers Chat's ways
+            // on (as Chat's own line does for a typed question).
+            if let (Asker::Phone(p), true) = (&asker, with_pictures) {
+                if let Some((provider, model)) = target.as_ref().filter(|_| crate::snip::vision::is_image_refusal(&e)) {
+                    tracing::info!(provider, "Voice Assistant: the model refused the phone's pictures");
+                    crate::snip::vision::refused(provider, model);
+                    let conv = streamed.lock().conversation.or(conversation_id);
+                    let _ = app.emit(
+                        TURN,
+                        serde_json::json!({ "phase": "failed", "conversationId": conv, "userMessageId": question_id, "error": e }),
+                    );
+                    if p.current() {
+                        p.cant_read(&format!("{} ({model})", crate::snip::vision::COULDNT_READ));
+                    }
+                    return;
+                }
             }
             // Its screenshots back in the box, to ask again (as a typed
             // question's are); a server that turned the image down: that
@@ -1849,6 +1962,24 @@ mod tests {
         let shortcut = Asker::Shortcut(1);
         assert!(shortcut.by_voice());
         assert!(shortcut.voiced(true) && !shortcut.voiced(false));
+        // Neither carries pictures unless a phone sends some.
+        assert_eq!(shortcut.pictures(), (Vec::new(), false));
+        assert_eq!(typed.pictures(), (Vec::new(), false));
+    }
+
+    #[test]
+    fn a_phone_keeps_its_own_conversation_and_falls_back_cleanly() {
+        use crate::link::wire::ChatRef;
+        let chosen = Choice::Continue(9);
+        // A phone that never said: the Voice Assistant's own choice.
+        assert_eq!(phone_conversation(ChatRef::Choose, false, chosen), Choice::Continue(9));
+        assert_eq!(phone_conversation(ChatRef::Choose, false, Choice::New), Choice::New);
+        // Its own conversation, whatever Chat shows on the PC.
+        assert_eq!(phone_conversation(ChatRef::Id(4), true, chosen), Choice::Continue(4));
+        // A new chat asked for.
+        assert_eq!(phone_conversation(ChatRef::New, false, chosen), Choice::New);
+        // Its conversation deleted or archived on the PC: a new one, never another.
+        assert_eq!(phone_conversation(ChatRef::Id(4), false, chosen), Choice::New);
     }
 
     #[test]

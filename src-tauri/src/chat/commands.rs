@@ -59,10 +59,12 @@ pub fn chat_archive(ids: Vec<u64>, archived: Option<bool>) -> Result<usize, Stri
 
 /// Rename a conversation (the Chat sidebar's Rename, in place): the title as
 /// stored (one line, trimmed, ≤ 80 characters). Its place in the list stays.
+/// A connected phone hears it (Yap Link's drawer and header).
 #[tauri::command]
 pub fn chat_rename(id: u64, title: String) -> Result<String, String> {
     let title = crate::chat::chats::rename(id, &title)?;
     crate::chat::chats::saved()?;
+    crate::link::titled(id, &title);
     Ok(title)
 }
 
@@ -176,6 +178,52 @@ pub async fn chat_send(
     out
 }
 
+/// A question's screenshots, ready to go with its turn ([`question_images`]).
+pub(crate) struct QuestionImages {
+    pub images: crate::snip::turn::TurnImages,
+    /// The model they go to, while it isn't known to read them (a refusal
+    /// makes it a "no"); none when their text goes instead.
+    pub target: Option<(String, String)>,
+    /// The question: with their text after it when that goes instead.
+    pub text: String,
+}
+
+/// **A question's screenshots (or pictures) as Chat sends them**: Chat's
+/// typed question's ([`chat_send`]) and a phone's pictures (Yap Link,
+/// `assistant::answer`) — one way for both. The model must be able to read
+/// them (`CANT_READ`, else the on-device model's projector loaded first:
+/// `COULDNT_READ` when it can't), and their copies for it are made (usually
+/// already, while the question was typed); or, `as_text`, their text read on
+/// this PC goes after the question and no picture goes ("Send its text
+/// instead", `snip::ocr`).
+pub(crate) async fn question_images(app: &AppHandle, ids: &[String], as_text: bool, text: String) -> Result<QuestionImages, String> {
+    if ids.is_empty() {
+        return Ok(QuestionImages { images: crate::snip::turn::TurnImages::default(), target: None, text });
+    }
+    if as_text {
+        // Their text instead: read here, after the question; no pictures go.
+        let (question, saved) = crate::snip::ocr::question_with_text(ids, &text).await?;
+        return Ok(QuestionImages { images: crate::snip::turn::TurnImages { images: saved, ..Default::default() }, target: None, text: question });
+    }
+    let cfg = config::load();
+    let (base_url, _key, model, provider, _persona, _thinking) = resolve_chat_endpoint(&cfg)?;
+    if crate::snip::vision::reads_images(&provider, &model) == Some(false) {
+        return Err(format!("{} ({model})", crate::snip::vision::CANT_READ));
+    }
+    // The on-device model loads its projector first: started with it, or
+    // restarted with it once no dictation or answer uses the model
+    // (local_llm/vision.rs). It doesn't: the page's line, as for a refusal.
+    if provider == crate::ai::local_llm::PROVIDER_ONDEVICE {
+        if let Err(e) = crate::ai::local_llm::vision::ensure(app).await {
+            tracing::info!("Chat: the on-device model can't read the screenshot now ({e})");
+            return Err(format!("{} ({model})", crate::snip::vision::COULDNT_READ));
+        }
+    }
+    let prepared = crate::snip::turn::prepare(ids, &provider, &base_url).await?;
+    tracing::info!(images = prepared.images.len(), "Chat: a question with screenshots");
+    Ok(QuestionImages { images: prepared, target: Some((provider, model)), text })
+}
+
 /// [`chat_send`]'s turn.
 #[allow(clippy::too_many_arguments)]
 async fn send_turn(
@@ -192,35 +240,7 @@ async fn send_turn(
     let by_voice = voice.unwrap_or(false);
     let stop = crate::chat::stream::Stoppable::new(turn_id.as_deref());
     let watched = on_stream.0.is_some();
-    // Screenshots: the model must be able to read them, and their copies
-    // for it are made (usually already, while the question was typed).
-    let mut text = text;
-    let (turn_images, target) = if image_ids.is_empty() {
-        (crate::snip::turn::TurnImages::default(), None)
-    } else if as_text.unwrap_or(false) {
-        // Their text instead: read here, after the question; no pictures go.
-        let (question, saved) = crate::snip::ocr::question_with_text(&image_ids, &text).await?;
-        text = question;
-        (crate::snip::turn::TurnImages { images: saved, ..Default::default() }, None)
-    } else {
-        let cfg = config::load();
-        let (base_url, _key, model, provider, _persona, _thinking) = resolve_chat_endpoint(&cfg)?;
-        if crate::snip::vision::reads_images(&provider, &model) == Some(false) {
-            return Err(format!("{} ({model})", crate::snip::vision::CANT_READ));
-        }
-        // The on-device model loads its projector first: started with it, or
-        // restarted with it once no dictation or answer uses the model
-        // (local_llm/vision.rs). It doesn't: the page's line, as for a refusal.
-        if provider == crate::ai::local_llm::PROVIDER_ONDEVICE {
-            if let Err(e) = crate::ai::local_llm::vision::ensure(app).await {
-                tracing::info!("Chat: the on-device model can't read the screenshot now ({e})");
-                return Err(format!("{} ({model})", crate::snip::vision::COULDNT_READ));
-            }
-        }
-        let prepared = crate::snip::turn::prepare(&image_ids, &provider, &base_url).await?;
-        tracing::info!(images = prepared.images.len(), "Chat: a question with screenshots");
-        (prepared, Some((provider, model)))
-    };
+    let QuestionImages { images: turn_images, target, text } = question_images(app, &image_ids, as_text.unwrap_or(false), text).await?;
     let turned = crate::snip::turn::with(
         turn_images,
         chat_turn(

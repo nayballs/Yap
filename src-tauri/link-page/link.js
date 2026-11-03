@@ -4,10 +4,15 @@
 // at /ws; the protocol is docs/architecture/link.md's (v1), and this page
 // keeps to it exactly.
 //
-// It's Yap's Chat on a phone (2026-11-03): the conversation fills the screen,
-// the composer at the bottom has the text box, Send and Talk (the Yap bar's
-// pill), Chat's model chip under it opens Chat's own picker (picker.js), and
-// the settings are a sheet.
+// It's Yap's Chat on a phone, in the Claude app's layout (2026-11-03): ☰
+// opens the drawer of chats (drawer.js: Chat's conversations on the PC, a
+// search, + New chat), the title in the middle with the connection's dot,
+// ⋯ the settings sheet; the conversation fills the screen (the answer as
+// plain text, your question in a bubble, Copy and ▶ under an answer); the
+// composer card at the bottom carries the pictures (photos.js), the text
+// box, +, Chat's model chip with its effort (Chat's own picker, picker.js),
+// the mic (Talk: a spoken question, never dictation) and Send (■ while Yap
+// answers). The phone keeps its own conversation (`yap.link.chat`).
 //
 // What it does: pairing (the QR's #pair=<token>, the 4-digit code, the device
 // kept in localStorage), typed questions (`ask`: answered in the same
@@ -47,7 +52,11 @@ import {
   toDb,
 } from './dsp.js';
 import { renderAnswer } from './markdown.js';
-import { createPicker, markEl, modelMark, chipWords } from './picker.js';
+import { createPicker, markEl, modelMark, chipWords, chipEffort } from './picker.js';
+import { createDrawer } from './drawer.js';
+import { labelFor } from './core/modelCatalog.js';
+import { PROVIDER_LABELS } from './core/providerIds.js';
+import { MAX_PICTURES, prepare as preparePicture, sendPictures } from './photos.js';
 
 const KIND_UP = 0x01;
 const KIND_DOWN = 0x02;
@@ -75,6 +84,8 @@ const KEY = {
   clearer: 'yap.link.clearer',
   // The conversation, for this tab only (sessionStorage): a reload keeps it.
   thread: 'yap.link.thread',
+  // The conversation this phone is in on the PC: its id, or "new".
+  chat: 'yap.link.chat',
 };
 
 /** A PC from before typed questions: said plainly, before anything's sent. */
@@ -114,20 +125,30 @@ function loadThread() {
         cancelled: !!t.cancelled,
         typed: !!t.typed,
         answerId: String(t.answerId || ''),
+        pictures: Math.max(0, Number(t.pictures) || 0),
+        pics: [],
       }))
-      .filter((t) => t.q || t.a);
-    return { turns: turns.slice(-KEEP_TURNS), id: Math.max(0, ...turns.map((t) => t.id)) };
+      .filter((t) => t.q || t.a || t.pictures);
+    return { turns: turns.slice(-KEEP_TURNS), id: Math.max(0, ...turns.map((t) => t.id)), more: !!v.more };
   } catch {
-    return { turns: [], id: 0 };
+    return { turns: [], id: 0, more: false };
   }
 }
 function saveThread() {
   try {
-    const turns = S.turns.filter((t) => t.final && (t.q || t.a));
-    sessionStorage.setItem(KEY.thread, JSON.stringify({ turns }));
+    const turns = S.turns
+      .filter((t) => t.final && (t.q || t.a || t.pictures))
+      .map(({ pics, ...t }) => t); // (the pictures' thumbnails live as long as the page)
+    sessionStorage.setItem(KEY.thread, JSON.stringify({ turns, more: S.more }));
   } catch {
     /* a convenience only */
   }
+}
+
+/** The conversation this phone is in on the PC: an id, "new", or none (never said). */
+function loadChat() {
+  const v = load(KEY.chat);
+  return (typeof v === 'number' && v > 0) || v === 'new' ? v : null;
 }
 
 // ------------------------------------------------------------------- state
@@ -170,6 +191,24 @@ const S = {
   step: '',
   turns: keptThread.turns,
   turnId: keptThread.id,
+  // Older messages of the conversation left on the PC (`thread.more`).
+  more: keptThread.more,
+  // The conversation on the PC this phone is in (an id, "new", or none: the
+  // Voice Assistant chooses), and its title.
+  chat: loadChat(),
+  title: '',
+  // Asked the PC for the conversation's messages once this page is up.
+  synced: false,
+  // The pictures in the composer: {buf, url, w, h, bytes} (photos.js).
+  attached: [],
+  // Pictures still being made ready (a moment each).
+  preparing: 0,
+  // The question last sent, until its answer comes: back in the composer
+  // when Chat's model can't read its pictures.
+  pending: null,
+  // Chat's line for pictures its model can't read (`cant_read`, or known
+  // from the picker's status).
+  cantRead: '',
   model: null,
   models: [],
   // What the PC answers beyond v1 (`ready.can`): "ask", "read_aloud", "picker", "effort".
@@ -206,6 +245,26 @@ const ignoringOld = () => S.ignoreOldAt > 0 && performance.now() - S.ignoreOldAt
 const $ = (id) => document.getElementById(id);
 const el = {
   conn: $('conn'),
+  dot: $('dot'),
+  titleName: $('title-name'),
+  titleSub: $('title-sub'),
+  busy: $('busy'),
+  menuBtn: $('menu-btn'),
+  older: $('older'),
+  vision: $('vision'),
+  visionText: $('vision-text'),
+  visionSwitch: $('vision-switch'),
+  visionAsText: $('vision-text-btn'),
+  visionPick: $('vision-pick'),
+  visionWithout: $('vision-without'),
+  shots: $('shots'),
+  plusWrap: $('plus-wrap'),
+  plusBtn: $('plus-btn'),
+  plusMenu: $('plus-menu'),
+  takePhoto: $('take-photo'),
+  choosePhotos: $('choose-photos'),
+  camera: $('camera'),
+  photos: $('photos'),
   pair: $('pair'),
   pairCodeBox: $('pair-code-box'),
   pairCode: $('pair-code'),
@@ -263,8 +322,27 @@ const picker = createPicker({
   send,
   onPicked: (m) => {
     S.model = { ...(S.model || {}), id: '', label: m.label, onThisPc: m.onThisPc, picked: m };
+    // Another model: whether it reads the pictures is the PC's to say next.
+    S.cantRead = '';
     render();
   },
+  // The effort changed: the chip says it at once.
+  onChanged: () => render(),
+});
+
+// The drawer of chats (drawer.js).
+const drawer = createDrawer({
+  dialog: $('drawer'),
+  list: $('recents'),
+  empty: $('recents-empty'),
+  search: $('drawer-search'),
+  pc: $('drawer-pc'),
+  newChat: $('new-chat'),
+  closeBtn: $('drawer-close'),
+  send,
+  onOpen: (item) => openChat(item.id, item.title),
+  onNew: () => newChat(),
+  current: () => (typeof S.chat === 'number' ? S.chat : null),
 });
 
 // The Yap bar's waveform: thin bars, the newest on the right (link.css .meter).
@@ -359,6 +437,18 @@ function send(msg) {
   if (!ws || ws.readyState !== WebSocket.OPEN) return false;
   ws.send(JSON.stringify(msg));
   return true;
+}
+
+function sendBinary(buf) {
+  const ws = S.ws;
+  if (!ws || ws.readyState !== WebSocket.OPEN) return false;
+  ws.send(buf);
+  return true;
+}
+
+/** A question's `chat`: the conversation it goes to, when this phone has said (a PC that keeps one). */
+function chatField() {
+  return can('chats') && S.chat != null ? { chat: S.chat } : {};
 }
 
 // -------------------------------------------------------------- connection
@@ -475,7 +565,8 @@ function onText(text) {
     return;
   }
   if (!m || typeof m.type !== 'string') return;
-  if (ignoringOld() && ['heard', 'step', 'answer', 'speak_start', 'speak_end'].includes(m.type)) return;
+  // (A cancelled question's late news, where it went and its pictures' fate included.)
+  if (ignoringOld() && ['heard', 'step', 'answer', 'speak_start', 'speak_end', 'chat', 'cant_read'].includes(m.type)) return;
   switch (m.type) {
     case 'pair_wait':
       S.pairCode = String(m.code ?? '');
@@ -516,9 +607,40 @@ function onText(text) {
       S.can = Array.isArray(m.can) ? m.can.map(String) : [];
       S.picker = m.picker && typeof m.picker === 'object' ? m.picker : null;
       picker.update(m);
+      drawer.setPc(S.pc);
       if (S.error.startsWith('Lost the connection')) S.error = '';
       if (S.error === OLD_PC_TYPING && can('ask')) S.error = '';
+      // Once a page is up: the conversation it was in, as the PC has it now
+      // (answers written while it was away, a chat deleted meanwhile).
+      if (!S.synced && can('chats')) {
+        S.synced = true;
+        if (typeof S.chat === 'number') send({ type: 'open_chat', id: S.chat });
+      }
       renderConvo();
+      break;
+    case 'chats':
+      drawer.update(m.items);
+      return;
+    case 'thread':
+      onThread(m);
+      break;
+    case 'chat':
+      // This phone's question went to conversation `id`: its own from now on.
+      if (typeof m.id === 'number' && m.id > 0) {
+        S.chat = m.id;
+        save(KEY.chat, S.chat);
+        S.title = String(m.title || '');
+        drawer.titled(m.id, S.title || 'New chat');
+      }
+      break;
+    case 'title':
+      if (typeof m.id === 'number') {
+        if (m.id === S.chat) S.title = String(m.title || '');
+        drawer.titled(m.id, String(m.title || 'New chat'));
+      }
+      break;
+    case 'cant_read':
+      onCantRead(String(m.message || ''));
       break;
     case 'state':
       onState(String(m.phase || 'idle'));
@@ -539,6 +661,7 @@ function onText(text) {
         // Its id in Chat: ▶ under it asks the PC to read it.
         if (typeof m.id === 'string') t.answerId = m.id;
         S.step = '';
+        S.pending = null;
         saveThread();
       }
       renderConvo();
@@ -629,7 +752,7 @@ function clearFragment() {
 function currentTurn(create, typed = false) {
   let t = S.turns[S.turns.length - 1];
   if ((!t || t.final) && create) {
-    t = { id: ++S.turnId, q: '', a: '', final: false, cancelled: false, typed, answerId: '' };
+    t = { id: ++S.turnId, q: '', a: '', final: false, cancelled: false, typed, answerId: '', pictures: 0, pics: [] };
     S.turns.push(t);
     if (S.turns.length > KEEP_TURNS) S.turns.shift();
   }
@@ -637,6 +760,116 @@ function currentTurn(create, typed = false) {
 }
 
 const can = (what) => S.can.includes(what);
+
+/** The PC's messages of a conversation (`thread`) as the page's turns. Pure. */
+function turnsOf(messages) {
+  const turns = [];
+  for (const m of Array.isArray(messages) ? messages : []) {
+    if (!m || typeof m.text !== 'string') continue;
+    const blank = { id: ++S.turnId, q: '', a: '', final: true, cancelled: false, typed: true, answerId: '', pictures: 0, pics: [] };
+    if (m.role === 'user') {
+      turns.push({ ...blank, q: m.text, typed: !m.voice, pictures: Math.max(0, Number(m.pictures) || 0) });
+    } else if (m.role === 'assistant') {
+      let t = turns[turns.length - 1];
+      if (!t || t.a) turns.push((t = blank));
+      t.a = m.text;
+      t.answerId = typeof m.id === 'string' ? m.id : '';
+    }
+  }
+  return turns.slice(-KEEP_TURNS);
+}
+
+/**
+ * **A conversation from the PC** (`thread`: one opened in the drawer, a new
+ * chat, or the one this page was in, as the PC has it now): the thread
+ * shows its messages, and this phone's questions go there.
+ */
+function onThread(m) {
+  const id = typeof m.id === 'number' && m.id > 0 ? m.id : null;
+  S.chat = id ?? 'new';
+  save(KEY.chat, S.chat);
+  S.title = id ? String(m.title || '') : '';
+  // Its pictures' thumbnails, while this page lives, where the same question's still there.
+  const kept = new Map(S.turns.filter((t) => t.pics.length).map((t) => [`${t.q}|${t.answerId}`, t.pics]));
+  S.turns = turnsOf(m.messages);
+  for (const t of S.turns) t.pics = kept.get(`${t.q}|${t.answerId}`) || [];
+  S.more = !!m.more;
+  S.pending = null;
+  threadPinned = true;
+  saveThread();
+  renderConvo();
+}
+
+/** Chat's model can't read the question's pictures: the question back in the composer with them, and Chat's line. */
+function onCantRead(message) {
+  S.cantRead = message || "This model can't read images";
+  const p = S.pending;
+  S.pending = null;
+  // The question goes back where it was asked, its bubble from the thread.
+  const t = currentTurn(false);
+  const text = p ? p.text || (t && t.q) || '' : (t && t.q) || '';
+  if (t && !t.a) {
+    S.turns.pop();
+    saveThread();
+  }
+  if (p && p.pics.length) S.attached = p.pics;
+  if (text && !el.input.value.trim()) {
+    el.input.value = text;
+    S.typed = true;
+    fitInput();
+  }
+  S.step = '';
+  renderShots();
+  renderConvo();
+}
+
+/** Whatever Yap is doing on this phone stops (the drawer's another chat, a new chat). */
+function letGo() {
+  if (S.local !== 'idle') cancelTalk();
+  const now = phaseNow();
+  if (now === 'speaking') interrupt();
+  else if (now === 'working') {
+    send({ type: 'cancel' });
+    markCancelled();
+    S.ignoreOldAt = performance.now();
+    S.phase = 'idle';
+    S.step = '';
+    S.workSince = 0;
+  }
+}
+
+/** The drawer's chat: this phone's questions go there, its messages shown. */
+function openChat(id, title) {
+  letGo();
+  S.chat = id;
+  save(KEY.chat, id);
+  S.title = title || '';
+  S.turns = [];
+  S.more = false;
+  S.error = '';
+  S.cantRead = '';
+  saveThread();
+  send({ type: 'open_chat', id });
+  renderConvo();
+  render();
+}
+
+/** + New chat: the next question starts a conversation on the PC. */
+function newChat() {
+  letGo();
+  S.chat = 'new';
+  save(KEY.chat, 'new');
+  S.title = '';
+  S.turns = [];
+  S.more = false;
+  S.error = '';
+  S.note = '';
+  S.cantRead = '';
+  saveThread();
+  if (can('chats')) send({ type: 'new_chat' });
+  renderConvo();
+  render();
+}
 
 const NS = 'http://www.w3.org/2000/svg';
 /** A small inline icon (never HTML). */
@@ -655,8 +888,56 @@ function icon(cls, paths, filled = false) {
   return s;
 }
 const MIC = ['M12 3a3 3 0 0 0-3 3v5a3 3 0 0 0 6 0V6a3 3 0 0 0-3-3z', 'M5.5 11a6.5 6.5 0 0 0 13 0', 'M12 17.5V21'];
-const PLAY = ['M7 4.9v14.2a1.2 1.2 0 0 0 1.8 1l11.6-7.1a1.2 1.2 0 0 0 0-2L8.8 3.9A1.2 1.2 0 0 0 7 4.9z'];
 const SQUARE = ['M7.5 5h9A2.5 2.5 0 0 1 19 7.5v9a2.5 2.5 0 0 1-2.5 2.5h-9A2.5 2.5 0 0 1 5 16.5v-9A2.5 2.5 0 0 1 7.5 5z'];
+// The Claude app's two under an answer: copy, and the speaker (▶ Read aloud).
+const COPY = ['M9 9.5A1.5 1.5 0 0 1 10.5 8h8A1.5 1.5 0 0 1 20 9.5v9a1.5 1.5 0 0 1-1.5 1.5h-8A1.5 1.5 0 0 1 9 18.5z', 'M15 8V5.5A1.5 1.5 0 0 0 13.5 4h-8A1.5 1.5 0 0 0 4 5.5v9A1.5 1.5 0 0 0 5.5 16H9'];
+const COPIED = ['M5 12.5l4.5 4.5L19 7.5'];
+const SPEAKER = ['M4 9.5h3.5L12 5.5v13l-4.5-4H4z', 'M15.5 9a4 4 0 0 1 0 6', 'M18 6.5a7.5 7.5 0 0 1 0 11'];
+const PHOTO = ['M4 6.5A1.5 1.5 0 0 1 5.5 5h13A1.5 1.5 0 0 1 20 6.5v11a1.5 1.5 0 0 1-1.5 1.5h-13A1.5 1.5 0 0 1 4 17.5z', 'M5 17l4.5-4.5 3 3L15 13l4 4'];
+
+/** An answer's words on the clipboard (the Copy under it). */
+async function copyAnswer(t, b) {
+  const text = t.a.trim();
+  let done = false;
+  try {
+    await navigator.clipboard.writeText(text);
+    done = true;
+  } catch {
+    // Without the async clipboard: the old way, from a hidden box.
+    const box = document.createElement('textarea');
+    box.value = text;
+    box.setAttribute('readonly', '');
+    box.style.cssText = 'position:fixed;opacity:0;top:0;left:0';
+    document.body.appendChild(box);
+    box.select();
+    try {
+      done = document.execCommand('copy');
+    } catch {
+      done = false;
+    }
+    box.remove();
+  }
+  if (!done) {
+    S.note = "Couldn't copy it here. Press and hold the answer to select it.";
+    render();
+    return;
+  }
+  b.replaceChildren(icon('', COPIED), vh('Copied'));
+  b.classList.add('done');
+  setTimeout(() => {
+    if (!b.isConnected) return;
+    b.replaceChildren(icon('', COPY), vh('Copy'));
+    b.classList.remove('done');
+  }, 1600);
+}
+
+/** Words for a screen reader only. */
+function vh(text) {
+  const s = document.createElement('span');
+  s.className = 'vh';
+  s.textContent = text;
+  return s;
+}
 
 /** Is turn `t`'s answer being said now? */
 const speakingNow = (t) => S.speakingTurn === t.id && phaseNow() === 'speaking';
@@ -669,10 +950,11 @@ const speakingNow = (t) => S.speakingTurn === t.id && phaseNow() === 'speaking';
 const readingInThread = () => !!S.reading && S.turns.some((t) => t.answerId === S.reading);
 
 /**
- * Chat's thread: your question in its amber-washed bubble (🎙 when it was
- * said), the answer in Chat's card with its markdown (markdown.js: built as
- * nodes, never HTML), and under a finished one ▶ Read aloud, as Chat's
- * messages have it. While an answer is said, the bar's three bars and
+ * The thread, as the Claude app has it: your question in a bubble on the
+ * right (Chat's amber wash, 🎙 when it was said, its pictures above it), the
+ * answer as plain text the width of the screen with its markdown
+ * (markdown.js: built as nodes, never HTML), and under a finished one Copy
+ * and ▶ Read aloud. While an answer is said, the bar's three bars and
  * "Speaking…" under it, a status only; ▶ that started it turns into Stop in
  * place. One Stop at a time (the composer's for a spoken answer).
  */
@@ -683,18 +965,40 @@ function renderConvo() {
     li.className = 'turn';
     li.dataset.testid = 'turn';
     li.dataset.turn = String(t.id);
-    const q = document.createElement('p');
-    q.className = 'q';
-    q.dataset.testid = 'heard';
-    if (!t.typed) {
-      const mic = icon('viavoice', MIC);
-      mic.setAttribute('aria-hidden', 'false');
-      mic.setAttribute('role', 'img');
-      mic.setAttribute('aria-label', 'Asked by voice');
-      q.appendChild(mic);
+    // Its pictures: their thumbnails while this page has them, else how many.
+    if (t.pics.length) {
+      const row = document.createElement('div');
+      row.className = 'qpics';
+      row.dataset.testid = 'turn-pictures';
+      for (const url of t.pics) {
+        const img = new Image();
+        img.alt = 'Picture';
+        img.decoding = 'async';
+        img.src = url;
+        row.appendChild(img);
+      }
+      li.appendChild(row);
+    } else if (t.pictures > 0) {
+      const chip = document.createElement('p');
+      chip.className = 'qpics-n';
+      chip.dataset.testid = 'turn-pictures';
+      chip.append(icon('', PHOTO), document.createTextNode(t.pictures === 1 ? '1 picture' : `${t.pictures} pictures`));
+      li.appendChild(chip);
     }
-    q.appendChild(document.createTextNode(t.q || '…'));
-    li.appendChild(q);
+    if (t.q || !t.pictures) {
+      const q = document.createElement('p');
+      q.className = 'q';
+      q.dataset.testid = 'heard';
+      if (!t.typed) {
+        const mic = icon('viavoice', MIC);
+        mic.setAttribute('aria-hidden', 'false');
+        mic.setAttribute('role', 'img');
+        mic.setAttribute('aria-label', 'Asked by voice');
+        q.appendChild(mic);
+      }
+      q.appendChild(document.createTextNode(t.q || '…'));
+      li.appendChild(q);
+    }
     if (t.a || t.cancelled) {
       const a = document.createElement('div');
       const cancelled = t.cancelled && !t.a;
@@ -705,19 +1009,28 @@ function renderConvo() {
       li.appendChild(a);
     }
     const speaking = speakingNow(t);
-    const readable = t.final && t.a && t.answerId && can('read_aloud');
+    const done = t.final && !!t.a.trim();
+    const readable = done && t.answerId && can('read_aloud');
     // Said because its ▶ was tapped: Stop there, in place.
     const readHere = speaking && !!S.reading && t.answerId === S.reading;
-    if (readable || speaking) {
+    if (done || speaking) {
       const foot = document.createElement('div');
       foot.className = 'msgfoot';
+      if (done) {
+        const c = document.createElement('button');
+        c.type = 'button';
+        c.className = 'footbtn';
+        c.dataset.testid = 'copy';
+        c.append(icon('', COPY), vh('Copy'));
+        c.addEventListener('click', () => copyAnswer(t, c));
+        foot.appendChild(c);
+      }
       if (readHere || (readable && !speaking)) {
         const b = document.createElement('button');
         b.type = 'button';
-        b.className = 'readbtn' + (readHere ? ' on' : '');
+        b.className = 'footbtn' + (readHere ? ' on' : '');
         b.dataset.testid = 'read-aloud';
-        b.appendChild(icon('', readHere ? SQUARE : PLAY, true));
-        b.appendChild(document.createTextNode(readHere ? 'Stop' : 'Read aloud'));
+        b.append(readHere ? icon('', SQUARE, true) : icon('', SPEAKER), vh(readHere ? 'Stop' : 'Read aloud'));
         b.addEventListener('click', () => (readHere ? interrupt() : readAloud(t)));
         foot.appendChild(b);
       }
@@ -738,6 +1051,7 @@ function renderConvo() {
   }
   el.convo.replaceChildren(frag);
   el.empty.hidden = S.turns.length > 0;
+  el.older.hidden = !(S.more && S.turns.length > 0);
   if (threadPinned) toEnd();
 }
 
@@ -1343,7 +1657,7 @@ async function beginTalk() {
   S.workSince = 0;
   vad = new EnergyVad({ frameMs: FRAME_MS, endMs: WAITS[S.wait] });
   resetMeter();
-  send({ type: 'start', mode: 'ask' });
+  send({ type: 'start', mode: 'ask', ...chatField() });
   mic.node.port.postMessage({ cmd: 'start' });
   S.local = 'listening';
   currentTurn(true);
@@ -1381,7 +1695,24 @@ function stopTalk() {
 function finishStop() {
   clearTimeout(S.stopTimer);
   if (S.local !== 'stopping') return;
-  send({ type: 'stop' });
+  // The pictures in the composer go with the spoken question too, sent just
+  // before its end.
+  const pics = S.attached.slice();
+  const extra = {};
+  if (pics.length && can('pictures') && sendPictures(pics, send, sendBinary)) {
+    extra.pictures = pics.length;
+    const t = currentTurn(false);
+    if (t && !t.final) {
+      t.pictures = pics.length;
+      t.pics = pics.map((p) => p.url);
+    }
+    S.pending = { text: '', pics };
+    S.attached = [];
+    S.cantRead = '';
+    renderShots();
+    renderConvo();
+  }
+  send({ type: 'stop', ...extra });
   S.local = 'idle';
   if (S.phase === 'idle' || S.phase === 'listening') S.phase = 'transcribing';
   S.workSince = performance.now();
@@ -1697,12 +2028,24 @@ function render() {
   el.pair.hidden = !pairing;
   el.chat.hidden = pairing;
   el.settingsBtn.hidden = pairing;
+  // ☰: the drawer of chats, where the PC keeps them.
+  el.menuBtn.hidden = pairing || !can('chats');
   if (pairing) {
     if (el.settings.open) closeSettings();
     if (picker.isOpen) picker.close();
+    if (drawer.isOpen) drawer.close();
   }
-  el.conn.textContent = connLine();
-  el.conn.dataset.state = S.ready ? 'on' : S.denied || (!S.device && !S.pairToken) ? 'off' : 'wait';
+  const conn = connLine();
+  const state = S.ready ? 'on' : S.denied || (!S.device && !S.pairToken) ? 'off' : 'wait';
+  el.conn.textContent = conn;
+  el.conn.dataset.state = state;
+  // The title: Yap and this PC, with the connection's dot; under it the
+  // chat's title, or how the connection is while it isn't.
+  el.dot.dataset.state = state;
+  el.titleName.textContent = S.pc ? `Yap · ${S.pc}` : 'Yap';
+  const sub = !S.ready ? (pairing ? '' : conn) : typeof S.chat === 'number' ? S.title : '';
+  el.titleSub.textContent = sub;
+  el.titleSub.hidden = !sub;
 
   if (pairing) {
     const showCode = !!S.pairCode && !S.denied;
@@ -1717,16 +2060,26 @@ function render() {
     el.retry.hidden = !(S.denied && S.device);
   }
 
-  // The model chip, under the composer as in Chat: the model's mark, its
-  // name and where it runs; a PC from before the picker, its label.
+  // The model chip in the composer, as the Claude app has it: the model's
+  // mark and name, then its effort ("Claude Opus 5.5 · Extra") or, without
+  // one, where it runs; a PC from before the picker, its label.
   if (S.model && S.ready) {
     el.modelBtn.hidden = false;
     const picked = S.model.picked;
     const words = chipWords(S.model, S.picker);
+    const effort = picked ? '' : chipEffort(S.picker);
     const where = picked ? picked.where : words.where;
-    el.modelLabel.textContent = picked ? picked.label : words.name;
-    el.modelWhere.textContent = where;
-    el.modelWhere.hidden = !where;
+    // "Claude" stays for a screen reader; a narrow card drops it (the mark
+    // says it), as the Claude app's chip says "Opus 5.5".
+    const name = picked ? picked.label : words.name;
+    const fam = /^Claude\s/.test(name) ? 'Claude ' : '';
+    const famEl = document.createElement('span');
+    famEl.className = 'chip-fam';
+    famEl.textContent = fam;
+    el.modelLabel.replaceChildren(...(fam ? [famEl] : []), name.slice(fam.length));
+    el.modelWhere.textContent = effort || where;
+    el.modelWhere.hidden = !(effort || where);
+    el.modelWhere.dataset.effort = String(!!effort);
     const mark = picked ? { icon: picked.icon, glyph: picked.glyph } : modelMark(S.model, S.picker);
     const markKey = `${mark.icon}|${mark.glyph}`;
     if (el.modelMark.dataset.key !== markKey) {
@@ -1736,12 +2089,17 @@ function render() {
       el.modelMark.replaceWith(fresh);
       el.modelMark = fresh;
     }
-    el.modelBtn.setAttribute('aria-label', `Model: ${el.modelLabel.textContent}${where ? `, ${where}` : ''}. Change model`);
+    el.modelBtn.setAttribute(
+      'aria-label',
+      `Model: ${el.modelLabel.textContent}${where ? `, ${where}` : ''}${effort ? `, ${effort} effort` : ''}. Change model`,
+    );
   } else el.modelBtn.hidden = true;
 
   const now = phaseNow();
   document.body.dataset.phase = now;
   el.phase.textContent = PHASE_WORDS[now];
+  // A small spinner in the header while Yap works the question out.
+  el.busy.hidden = now !== 'working';
 
   // The step Yap is on, as Chat's activity line shows it, until the answer's in.
   const turn = currentTurn(false);
@@ -1758,12 +2116,14 @@ function render() {
   el.note.hidden = !S.note;
   el.note.textContent = S.note;
 
-  // The composer: the text box and Send; Talk; while Yap listens, the Yap
-  // bar's capsule (✕, the waveform, the time, Send).
+  // The composer card: the pictures, the text box, then +, the chip, the
+  // mic and Send (■ while Yap answers); while Yap listens, the Yap bar's
+  // capsule (✕, the waveform, the time, Done).
   const listening = now === 'listening';
   const capsule = listening || now === 'opening';
   el.composer.dataset.state = now === 'offline' ? 'idle' : now;
   el.composer.dataset.typed = String(S.typed);
+  el.composer.dataset.pictures = String(S.attached.length > 0 || S.preparing > 0);
   el.liveLabel.textContent = now === 'opening' ? PHASE_WORDS.opening : '';
   el.talkBtn.disabled = !S.ready && S.local === 'idle';
   el.talkBtn.setAttribute('aria-pressed', String(capsule));
@@ -1775,20 +2135,45 @@ function render() {
       : listening
         ? S.holdRelease
           ? 'Release to send'
-          : 'Send'
+          : 'Done'
         : S.local === 'stopping'
           ? 'Sending…'
           : 'Talk';
   el.talkTime.textContent = listening ? clock(S.frames * (FRAME_SAMPLES / LINK_RATE)) : '';
   el.meter.dataset.on = String(listening);
-  el.sendBtn.hidden = capsule || !S.typed;
-  // One Stop at a time: the composer's, unless ▶ on an answer in the thread
-  // is what's playing (then its own Stop, in place).
-  el.stopBtn.hidden = now !== 'speaking' || readingInThread();
-  // ✕ while it listens; ■ while it works the question out (none while
-  // there are words to send instead).
-  el.cancelBtn.hidden = !(capsule || (now === 'working' && !S.typed));
+  // + for a picture, where the PC takes them.
+  el.plusWrap.hidden = capsule || !S.ready || !can('pictures');
+  if (el.plusWrap.hidden) closePlusMenu();
+  // One button where Send is: ↑ to send; ■ while Yap works the question out
+  // (cancel) or says an answer (Stop) — unless there are words to send
+  // instead, or ▶ on an answer in the thread is what's playing (then its own
+  // Stop, in place): one Stop at a time.
+  const stopSpeaking = now === 'speaking' && !readingInThread() && !S.typed;
+  const stopWorking = now === 'working' && !S.typed;
+  el.stopBtn.hidden = capsule || !stopSpeaking;
+  el.sendBtn.hidden = capsule || stopSpeaking || stopWorking;
+  el.sendBtn.disabled = !S.typed || S.preparing > 0;
+  // ✕ while it listens (on the left, as the bar's capsule has it); ■ while
+  // it works the question out.
+  el.cancelBtn.hidden = !(capsule || stopWorking);
   el.cancelBtn.setAttribute('aria-label', capsule ? 'Cancel' : 'Stop the answer');
+  // Chat's line for pictures its model can't read.
+  const line = capsule ? '' : visionLine();
+  el.vision.hidden = !line;
+  if (line) {
+    const name = el.modelLabel.textContent || 'This model';
+    el.visionText.textContent = /can't read images/i.test(line) && !/couldn't/i.test(line) ? `${name} can't read images.` : `${name} couldn't read the picture.`;
+    const sw = visionSwitch();
+    el.visionSwitch.hidden = !sw;
+    if (sw) {
+      // As Chat names it: "Use Qwen3.8 27B on Groq".
+      const named = sw.name || labelFor(sw.provider, sw.model, S.picker.catalog?.[sw.provider]) || sw.model;
+      const on = PROVIDER_LABELS[sw.provider];
+      el.visionSwitch.textContent = `Use ${named}${on && on !== named ? ` on ${on}` : ''}`;
+    }
+    el.visionPick.textContent = sw ? 'Choose another model…' : 'Choose a model…';
+    for (const b of [el.visionSwitch, el.visionAsText, el.visionWithout]) b.disabled = !S.typed;
+  }
   el.handsFree.checked = S.handsFree;
   el.wait.hidden = !S.handsFree;
   for (const r of el.wait.querySelectorAll('input[name=wait]')) r.checked = r.value === S.wait;
@@ -1875,9 +2260,16 @@ function fitInput() {
  * answer has it read. Whatever Yap was doing is let go first (as Talk
  * does): its voice stopped, or the question it was working on cancelled.
  */
-function sendTyped() {
+function sendTyped(how = {}) {
   const text = el.input.value.trim();
   if (!text) return;
+  const pics = how.without ? [] : S.attached.slice();
+  // Pictures Chat's model can't read: its line says what can be done (the
+  // send goes from one of its buttons).
+  if (pics.length && !how.asText && !how.anyway && visionLine()) {
+    render();
+    return;
+  }
   S.note = '';
   if (!S.ready) {
     S.error = `Not connected to ${pcName()} yet.`;
@@ -1904,13 +2296,25 @@ function sendTyped() {
     markCancelled();
     S.ignoreOldAt = performance.now();
   }
-  if (!send({ type: 'ask', text })) {
+  const msg = { type: 'ask', text, ...chatField() };
+  if (pics.length) {
+    msg.pictures = pics.length;
+    if (how.asText) msg.asText = true;
+  }
+  if ((pics.length && !sendPictures(pics, send, sendBinary)) || !send(msg)) {
     S.error = `Lost the connection to ${pcName()}. Ask again once it's back.`;
     render();
     return;
   }
   const t = currentTurn(true, true);
   t.q = text;
+  t.pictures = pics.length;
+  t.pics = pics.map((p) => p.url);
+  S.pending = { text, pics };
+  if (how.without) for (const p of S.attached) URL.revokeObjectURL(p.url);
+  S.attached = [];
+  S.cantRead = '';
+  renderShots();
   el.input.value = '';
   S.typed = false;
   fitInput();
@@ -1949,6 +2353,104 @@ function readAloud(t) {
   player.prepare();
   renderConvo();
   render();
+}
+
+// ------------------------------------------------------------- pictures
+
+/**
+ * Photos taken or chosen (+): each made smaller here (photos.js) and shown
+ * as a thumbnail inside the composer card, with ✕; four at most, as Chat
+ * takes them.
+ */
+async function addPictures(files) {
+  const list = [...(files || [])].filter((f) => f && (!f.type || f.type.startsWith('image/')));
+  if (!list.length) return;
+  const room = MAX_PICTURES - S.attached.length - S.preparing;
+  if (room <= 0) {
+    S.note = `A question can carry ${MAX_PICTURES} pictures at most.`;
+    render();
+    return;
+  }
+  const take = list.slice(0, room);
+  S.note = list.length > room ? `A question can carry ${MAX_PICTURES} pictures at most: the first ${room === 1 ? 'one was' : `${room} were`} added.` : '';
+  S.preparing += take.length;
+  S.cantRead = '';
+  render();
+  for (const file of take) {
+    try {
+      const p = await preparePicture(file);
+      S.attached.push({ ...p, id: `p${++pictureIds}` });
+    } catch {
+      S.note = "That picture couldn't be read on this phone. Try another one.";
+    } finally {
+      S.preparing--;
+    }
+    renderShots();
+    render();
+  }
+}
+let pictureIds = 0;
+
+/** The thumbnails in the composer card, each with ✕. */
+function renderShots() {
+  const frag = document.createDocumentFragment();
+  for (const p of S.attached) {
+    const li = document.createElement('li');
+    li.className = 'shot';
+    li.dataset.testid = 'shot';
+    const img = new Image();
+    img.alt = '';
+    img.decoding = 'async';
+    img.src = p.url;
+    const x = document.createElement('button');
+    x.type = 'button';
+    x.className = 'shot-x';
+    x.dataset.testid = 'shot-remove';
+    x.setAttribute('aria-label', 'Remove the picture');
+    x.appendChild(icon('', ['M7 7l10 10M17 7L7 17']));
+    x.addEventListener('click', () => {
+      S.attached = S.attached.filter((a) => a !== p);
+      URL.revokeObjectURL(p.url);
+      if (!S.attached.length) S.cantRead = '';
+      renderShots();
+      render();
+    });
+    li.append(img, x);
+    frag.appendChild(li);
+  }
+  for (let i = 0; i < S.preparing; i++) {
+    const li = document.createElement('li');
+    li.className = 'shot loading';
+    li.setAttribute('aria-label', 'Getting the picture ready');
+    frag.appendChild(li);
+  }
+  el.shots.replaceChildren(frag);
+  el.shots.hidden = !S.attached.length && !S.preparing;
+}
+
+/**
+ * Chat's line for pictures its model can't read (as the desktop's
+ * composer has it): the reason, or '' when there's none — known from the
+ * picker's status (`images` false), or said by the PC (`cant_read`).
+ */
+function visionLine() {
+  if (!S.attached.length) return '';
+  if (S.cantRead) return S.cantRead;
+  const st = S.picker && S.picker.status;
+  if (st && st.ready && st.images === false) return "This model can't read images";
+  return '';
+}
+
+/** The model the PC offers instead, one that reads images (`imagesSwitch`). */
+function visionSwitch() {
+  const st = S.picker && S.picker.status;
+  const sw = st && st.imagesSwitch;
+  return sw && sw.provider && sw.model ? sw : null;
+}
+
+function closePlusMenu() {
+  el.plusMenu.hidden = true;
+  el.plusBtn.setAttribute('aria-expanded', 'false');
 }
 
 function openSettings() {
@@ -2089,6 +2591,51 @@ el.mic.addEventListener('change', () => {
   if (S.local === 'idle') closeMic();
 });
 el.modelBtn.addEventListener('click', () => picker.open());
+el.menuBtn.addEventListener('click', () => drawer.open());
+// +: Take photo (the camera) or Choose photos (the phone's pictures).
+el.plusBtn.addEventListener('click', () => {
+  const open = el.plusMenu.hidden;
+  el.plusMenu.hidden = !open;
+  el.plusBtn.setAttribute('aria-expanded', String(open));
+  if (open) el.takePhoto.focus({ preventScroll: true });
+});
+el.takePhoto.addEventListener('click', () => {
+  closePlusMenu();
+  el.camera.click();
+});
+el.choosePhotos.addEventListener('click', () => {
+  closePlusMenu();
+  el.photos.click();
+});
+for (const input of [el.camera, el.photos]) {
+  input.addEventListener('change', () => {
+    const files = [...(input.files || [])];
+    input.value = '';
+    addPictures(files);
+  });
+}
+document.addEventListener('click', (e) => {
+  if (!el.plusMenu.hidden && !el.plusWrap.contains(e.target)) closePlusMenu();
+});
+el.plusMenu.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape') {
+    closePlusMenu();
+    el.plusBtn.focus();
+  }
+});
+// Chat's line for pictures its model can't read: another model (then the
+// question goes), their text instead, choose a model, or without them.
+el.visionSwitch.addEventListener('click', () => {
+  const sw = visionSwitch();
+  if (!sw) return;
+  send({ type: 'set_model', provider: sw.provider, model: sw.model, baseUrl: null, file: null });
+  S.cantRead = '';
+  // (The PC switches first: the socket keeps the order.)
+  sendTyped({ anyway: true });
+});
+el.visionAsText.addEventListener('click', () => sendTyped({ asText: true }));
+el.visionPick.addEventListener('click', () => picker.open());
+el.visionWithout.addEventListener('click', () => sendTyped({ without: true }));
 el.settingsBtn.addEventListener('click', openSettings);
 el.settingsClose.addEventListener('click', closeSettings);
 el.settings.addEventListener('click', (e) => {
@@ -2155,7 +2702,7 @@ window.__yapLink = {
       model: S.model,
       can: [...S.can],
       // The conversation: each question (typed or said) and its answer's id.
-      turns: S.turns.map((t) => ({ q: t.q, typed: !!t.typed, final: !!t.final, answerId: t.answerId || '' })),
+      turns: S.turns.map((t) => ({ q: t.q, typed: !!t.typed, final: !!t.final, answerId: t.answerId || '', ...(t.pictures ? { pictures: t.pictures } : {}) })),
       reading: S.reading,
       speakingTurn: S.speakingTurn,
       frames: S.frames,
@@ -2168,6 +2715,11 @@ window.__yapLink = {
       contextRate: mic.ctx ? mic.ctx.sampleRate : 0,
       contextState: mic.ctx ? mic.ctx.state : '',
       micOpen: !!mic.stream,
+      // The conversation on the PC this phone is in, and its pictures waiting.
+      chat: S.chat,
+      title: S.title,
+      attached: S.attached.map((p) => ({ w: p.w, h: p.h, bytes: p.bytes })),
+      cantRead: S.cantRead,
       // Opening the mic: the step it's on (or ended on), its state and time.
       micStep: mic.run
         ? { name: mic.run.name, state: mic.run.state, ms: mic.run.ms, total: mic.run.total, waiting: mic.run.waiting }

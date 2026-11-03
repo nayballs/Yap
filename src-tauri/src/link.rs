@@ -15,6 +15,11 @@
 //! `models.rs` `picker` sends what the desktop picker reads). Never
 //! dictation: the phone types nothing into the PC's apps.
 //!
+//! Later that day, in the Claude app's layout: the phone keeps **its own
+//! conversation** (a drawer of Chat's conversations, `chats.rs`; one opened,
+//! or a new chat) and a question carries **pictures** taken or chosen on the
+//! phone (`pictures.rs`), sent as Chat sends a typed question's screenshots.
+//!
 //! The parts:
 //! - `server.rs` — HTTPS on TCP 51443, home-network peers only, the page's
 //!   files (`page.rs`, embedded) and `/ws`;
@@ -26,6 +31,8 @@
 //! - `session.rs` — one phone's conversation, its questions one at a time;
 //! - `voice.rs` — Yap's voice rendered for the phone, never this PC's speakers;
 //! - `models.rs` — Chat's model, listed for and switched from the phone;
+//! - `chats.rs` — Chat's conversations for the phone's drawer, a thread opened;
+//! - `pictures.rs` — a question's pictures as they come from the phone;
 //! - `lan.rs` — this PC's addresses, which peers may connect, Public networks;
 //! - `wire.rs` — the protocol (v1, shared with `src-tauri/link-page/`).
 //!
@@ -35,11 +42,13 @@
 //! this: it only answers phones on the home network.
 
 pub mod cert;
+pub mod chats;
 pub mod devices;
 pub mod lan;
 pub mod models;
 pub mod page;
 pub mod pairing;
+pub mod pictures;
 pub mod server;
 pub mod session;
 pub mod voice;
@@ -345,6 +354,16 @@ pub fn stop() {
 
 fn hub() -> Option<Arc<Hub>> {
     locked(&RUNNING).as_ref().map(|r| Arc::clone(&r.hub))
+}
+
+/// Conversation `id` was renamed in Chat: every connected phone hears
+/// (its drawer, and its header when it's in that one).
+pub fn titled(id: u64, title: &str) {
+    let Some(h) = hub() else { return };
+    let out = Out::Title { id, title: title.to_string() };
+    for l in locked(&h.live).values() {
+        say(&l.tx, out.clone());
+    }
 }
 
 // ---- commands ---------------------------------------------------------------------------

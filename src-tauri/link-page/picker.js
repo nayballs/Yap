@@ -40,7 +40,7 @@ import {
 import { ICON_FILES, MONOCHROME_PROVIDERS, ICON_TINTS, familyIcon, providerIcon } from './core/modelIcons.js';
 import { labelFor } from './core/modelCatalog.js';
 import { CHATGPT, GPT_TAB, GPT_WAYS, PROVIDER_LABELS } from './core/providerIds.js';
-import { effortNow, effortOptions, effortHint, FAST_NOTE } from './core/effort.js';
+import { effortNow, effortOptions, effortHint, effortLabel, FAST_NOTE } from './core/effort.js';
 
 /** The marks the PC serves (src-tauri/build.rs LINK_SHARED). */
 const SERVED = new Set(['openai', 'openai-oss', 'claude', 'gemini', 'gemma', 'groq', 'llama', 'mistral', 'openrouter', 'qwen', 'xai']);
@@ -142,6 +142,16 @@ export function chipWords(model, picker) {
   return { name: label, where: model?.onThisPc ? 'On this PC' : '' };
 }
 
+/**
+ * The chip's effort, as the Claude app's chip says it ("Extra" for xhigh):
+ * the level Chat's model answers at, '' when it has none to choose.
+ */
+export function chipEffort(picker) {
+  const s = picker?.status;
+  const eff = s?.ready && s.model ? s.effort : null;
+  return eff ? effortLabel(effortNow(eff)) : '';
+}
+
 // ----------------------------------------------------------------- recent
 
 function readRecent() {
@@ -169,7 +179,7 @@ function pushRecent(entry) {
  * The sheet. `send(msg)` goes to the PC; `onPicked(model)` tells the page
  * (the chip shows the pick at once; the PC's next `ready` has the last word).
  */
-export function createPicker({ dialog, send, onPicked }) {
+export function createPicker({ dialog, send, onPicked, onChanged }) {
   let ready = null; // the last `ready`
   let sel = 'groq';
   let gptWay = CHATGPT;
@@ -498,6 +508,7 @@ export function createPicker({ dialog, send, onPicked }) {
       i.addEventListener('change', () => {
         eff.chosen = o.value || null;
         send({ type: 'set_effort', level: o.value || null });
+        if (onChanged) onChanged();
         build();
       });
       l.append(i, h('span', null, o.label));
