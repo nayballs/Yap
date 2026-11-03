@@ -674,7 +674,7 @@ fn compute_sha256(path: &Path) -> std::io::Result<String> {
         }
         hasher.update(&buffer[..n]);
     }
-    Ok(format!("{:x}", hasher.finalize()))
+    Ok(hasher.finalize().iter().map(|b| format!("{b:02x}")).collect())
 }
 
 // ── STT Engine Trait ────────────────────────────────────────────────
@@ -1489,6 +1489,11 @@ pub fn fix_directml_stub() {}
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_model_file_hashes_to_sha256s_published_vectors() {
+        crate::ai::local_llm::models::assert_sha256_vectors("stt", compute_sha256);
+    }
 
     #[test]
     fn registry_has_expected_models() {

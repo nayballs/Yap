@@ -262,6 +262,11 @@ mod tests {
         let h = Sha256::digest(b"abc:xyz");
         let n = u32::from_be_bytes([h[0], h[1], h[2], h[3]]) % 10_000;
         assert_eq!(code("abc", "xyz"), format!("{n:04}"));
+        // Pinned, so a phone's page and a paired phone's stored hash keep
+        // matching whatever sha2 Yap builds on (Python's hashlib gives these).
+        assert_eq!(code("abc", "xyz"), "1075");
+        assert_eq!(sha256_hex("abc"), "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad");
+        assert_eq!(sha256_hex(""), "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855");
     }
 
     #[test]

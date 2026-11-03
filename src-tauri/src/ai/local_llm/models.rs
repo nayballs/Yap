@@ -440,12 +440,37 @@ pub(super) fn compute_sha256(path: &Path) -> std::io::Result<String> {
         }
         hasher.update(&buf[..n]);
     }
-    Ok(format!("{:x}", hasher.finalize()))
+    Ok(hasher.finalize().iter().map(|b| format!("{b:02x}")).collect())
+}
+
+/// SHA-256's published vectors (FIPS 180-2: "abc", the empty message and a
+/// million "a"s, which crosses the 64 KiB read buffer) through a file
+/// hasher: what every download is checked against comes out the same
+/// whatever sha2 Yap builds on. `tag` names the hasher in a failure.
+#[cfg(test)]
+pub(crate) fn assert_sha256_vectors(tag: &str, hash: impl Fn(&Path) -> std::io::Result<String>) {
+    let dir = std::env::temp_dir().join(format!("yap-sha256-{tag}-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    for (name, body, want) in [
+        ("abc", b"abc".to_vec(), "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"),
+        ("empty", Vec::new(), "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"),
+        ("million", vec![b'a'; 1_000_000], "cdc76e5c9914fb9281a1c7e284d73e67f1809a48a497200e046d39ccc7112cd0"),
+    ] {
+        let path = dir.join(name);
+        std::fs::write(&path, &body).unwrap();
+        assert_eq!(hash(&path).unwrap(), want, "{tag}: {name}");
+    }
+    let _ = std::fs::remove_dir_all(&dir);
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_file_hashes_to_sha256s_published_vectors() {
+        assert_sha256_vectors("models", compute_sha256);
+    }
 
     #[test]
     fn the_four_b_is_recommended_where_the_card_can_run_it() {
