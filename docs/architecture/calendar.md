@@ -275,7 +275,13 @@ Connecting Google Calendar or an iCal link, sync, parsing, the reminder card, pr
   notes and memory outside the lock) returns the kept brief when its
   fingerprint matches, else stores Yap's part at once (`writing` while a
   summary is due) and spawns `write_brief` (one at a time,
-  `brief_job`/`brief_waiting`; a failure waits `BRIEF_RETRY`). Deleting meetings,
+  `brief_job`/`brief_waiting`; a failure waits `BRIEF_RETRY`). **It ends
+  however its task ends** (`BriefEnds`, 2026-11-03): a panic in it (a bug)
+  leaves the plain brief with `BRIEF_CRASHED`'s line, `writing` off, the job
+  slot free, `BRIEF_RETRY` set, and the briefs waiting go on
+  (`start_waiting`). Before, it stayed "Writing a short summary…" for ever
+  and no brief was made again (`brief_job` held, the scheduler skipped its
+  turns). Test mode's `e2e_crash_next_job("brief")`. Deleting meetings,
   notes or memory (`privacy/reset.rs`, Reset app too; `forget_briefs`) moves `briefs_epoch` on: a brief made or written from
   the notes and memory before it is never kept (`store_brief` refuses it;
   made again from what's left). `BriefAi::of`

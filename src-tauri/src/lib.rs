@@ -719,6 +719,8 @@ pub fn run() {
             #[cfg(debug_assertions)]
             shell::e2e::e2e_crash_next_dictation,
             #[cfg(debug_assertions)]
+            shell::e2e::e2e_crash_next_job,
+            #[cfg(debug_assertions)]
             shell::e2e::e2e_fail_saves,
             #[cfg(debug_assertions)]
             shell::e2e::e2e_fail_reads,

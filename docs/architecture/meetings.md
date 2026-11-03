@@ -472,7 +472,16 @@ The meeting recorder and its audio kept on disk, rolling digests and the action 
   "Step 2 of 3"; `meeting_summary_status`; `meeting_summarise(noteId,
   replace)` runs it again — Generate summary, Retry, Update, the Notes view's
   Action plan; `kept`: the person edited the summary and nobody said
-  `replace`, so no model call and nothing written: `notes/note_edits.rs`). Commands
+  `replace`, so no model call and nothing written: `notes/note_edits.rs`).
+  **A run ends however its task ends** (`RunEnds`, 2026-11-03, as the
+  pipeline's `Busy`): a panic in it (a bug) unwinding past the guard
+  publishes `error` with `CRASHED` ("Yap hit an error while writing it. Try
+  again."), so the notepad says "The summary didn't come through" with its
+  Retry and the Notes view its error line. Before, the job stayed `running`
+  for ever: "Step 1 of 3" with no end, Retry refused, and
+  `summary_running` held the on-device runtime's upgrade. A run retired
+  meanwhile (a resume, a discard) is left alone. Test mode's
+  `e2e_crash_next_job("summary")` makes the next run panic. Commands
   `meeting_end(origin)`, `meeting_pause`, `meeting_summarise`,
   `meeting_summary_status`, `meeting_discard`, `meeting_delete`; Rust callers
   use `end()` / `pause()`, and Yap's own stops `end_automatically()` (the

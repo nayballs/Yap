@@ -608,6 +608,48 @@ pub fn e2e_crash_next_dictation() -> Result<(), String> {
     Ok(())
 }
 
+/// A background job a test run can make crash once ([`e2e_crash_next_job`]).
+#[cfg(debug_assertions)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Crash {
+    /// A meeting's action plan (`meeting_end.rs`).
+    Summary,
+    /// A pre-meeting brief's summary (`calendar.rs`).
+    Brief,
+}
+
+#[cfg(debug_assertions)]
+static CRASH_NEXT: std::sync::Mutex<Vec<Crash>> = std::sync::Mutex::new(Vec::new());
+
+/// Whether this run of `job` crashes (once, when a test asked). Never in
+/// release builds.
+#[cfg(debug_assertions)]
+pub fn crash_next(job: Crash) -> bool {
+    let mut next = CRASH_NEXT.lock().unwrap_or_else(|p| p.into_inner());
+    let at = next.iter().position(|j| *j == job);
+    at.map(|i| next.remove(i)).is_some()
+}
+
+/// Test mode only: the next run of `job` — "summary" (a meeting's action
+/// plan) or "brief" (a pre-meeting brief's summary) — panics, as a bug in
+/// it would: the job must still end, as an error with Try again or the
+/// plain brief, never "running" for ever.
+#[cfg(debug_assertions)]
+#[tauri::command]
+pub fn e2e_crash_next_job(job: String) -> Result<(), String> {
+    if !active() {
+        return Err("Only in e2e test mode".to_string());
+    }
+    let job = match job.as_str() {
+        "summary" => Crash::Summary,
+        "brief" => Crash::Brief,
+        other => return Err(format!("No such job: {other}")),
+    };
+    tracing::info!(?job, "e2e: the next run of a job crashes on purpose");
+    CRASH_NEXT.lock().unwrap_or_else(|p| p.into_inner()).push(job);
+    Ok(())
+}
+
 /// How long each chunk of an Upload waits once transcribed, in ms
 /// ([`e2e_upload_pace`]; 0 = not at all).
 #[cfg(debug_assertions)]
