@@ -294,10 +294,9 @@ pub fn e2e_target_window(on: bool) -> Result<(), String> {
 /// and double-tap work there too.
 #[tauri::command]
 pub fn assistant_key(state: State<'_, AppState>, pressed: bool) {
-    if let Ok(guard) = state.pipeline.lock() {
-        if let Some(p) = guard.as_ref() {
-            p.on_assistant_key(pressed, None);
-        }
+    // Off the slot's lock, as every key is (`pipeline::running`).
+    if let Some(p) = crate::dictation::pipeline::out_of(&state.pipeline) {
+        p.on_assistant_key(pressed, None);
     }
 }
 
@@ -307,20 +306,16 @@ pub fn assistant_key(state: State<'_, AppState>, pressed: bool) {
 /// otherwise: push-to-talk's hold and double-tap work there too.
 #[tauri::command]
 pub fn ask_selection_key(state: State<'_, AppState>, pressed: bool, selection: Option<String>) {
-    if let Ok(guard) = state.pipeline.lock() {
-        if let Some(p) = guard.as_ref() {
-            p.on_ask_key_in_page(pressed, selection);
-        }
+    if let Some(p) = crate::dictation::pipeline::out_of(&state.pipeline) {
+        p.on_ask_key_in_page(pressed, selection);
     }
 }
 
 /// Toggle recording on/off (the bar's Dictate, a view's mic button).
 #[tauri::command]
 pub fn toggle_recording(state: State<'_, AppState>) {
-    if let Ok(guard) = state.pipeline.lock() {
-        if let Some(p) = guard.as_ref() {
-            p.toggle();
-        }
+    if let Some(p) = crate::dictation::pipeline::out_of(&state.pipeline) {
+        p.toggle();
     }
 }
 
@@ -329,10 +324,8 @@ pub fn toggle_recording(state: State<'_, AppState>) {
 /// recording.
 #[tauri::command]
 pub fn chat_dictate(state: State<'_, AppState>) {
-    if let Ok(guard) = state.pipeline.lock() {
-        if let Some(p) = guard.as_ref() {
-            p.toggle_for_chat();
-        }
+    if let Some(p) = crate::dictation::pipeline::out_of(&state.pipeline) {
+        p.toggle_for_chat();
     }
 }
 
@@ -366,10 +359,8 @@ pub async fn e2e_chat_dictation(state: State<'_, AppState>, text: String) -> Res
 /// push-to-talk's hold, tap and double-tap work there too.
 #[tauri::command]
 pub fn dictation_key(state: State<'_, AppState>, pressed: bool) {
-    if let Ok(guard) = state.pipeline.lock() {
-        if let Some(p) = guard.as_ref() {
-            p.on_key(pressed, None);
-        }
+    if let Some(p) = crate::dictation::pipeline::out_of(&state.pipeline) {
+        p.on_key(pressed, None);
     }
 }
 

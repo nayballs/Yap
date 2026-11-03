@@ -1439,9 +1439,8 @@ fn act(app: &AppHandle, action: &str) -> Result<(), String> {
         // click have activated the bar), so the dictation pastes there.
         "dictate" => {
             give_focus_back();
-            let state = app.state::<crate::AppState>();
-            let guard = state.pipeline.lock().map_err(|_| "pipeline unavailable")?;
-            guard.as_ref().ok_or("pipeline not started")?.toggle();
+            // Off the slot's lock (`pipeline::running`), as every key is.
+            crate::dictation::pipeline::running(app).ok_or("pipeline not started")?.toggle();
         }
         // ◉: what the meeting shortcut does — take notes on the call Yap
         // noticed, else in a new meeting note; while one records, stop it
@@ -1455,32 +1454,24 @@ fn act(app: &AppHandle, action: &str) -> Result<(), String> {
         // goes back to that window whatever has the focus now).
         "dictation-stop" => {
             give_focus_back();
-            let state = app.state::<crate::AppState>();
-            let guard = state.pipeline.lock().map_err(|_| "pipeline unavailable")?;
-            guard.as_ref().ok_or("pipeline not started")?.stop();
+            crate::dictation::pipeline::running(app).ok_or("pipeline not started")?.stop();
         }
         // Its ✕: cancel, the audio kept a moment for Undo.
         "dictation-cancel" => {
             give_focus_back();
-            let state = app.state::<crate::AppState>();
-            let guard = state.pipeline.lock().map_err(|_| "pipeline unavailable")?;
-            guard.as_ref().ok_or("pipeline not started")?.cancel();
+            crate::dictation::pipeline::running(app).ok_or("pipeline not started")?.cancel();
         }
         // "Dictation cancelled · Undo": transcribe and paste it after all,
         // into the window it was for.
         "dictation-undo" => {
             give_focus_back();
-            let state = app.state::<crate::AppState>();
-            let guard = state.pipeline.lock().map_err(|_| "pipeline unavailable")?;
-            guard.as_ref().ok_or("pipeline not started")?.undo()?;
+            crate::dictation::pipeline::running(app).ok_or("pipeline not started")?.undo()?;
         }
         // "Taking longer than usual… · Skip cleanup" (dictation/slow.rs): the
         // AI cleanup gives way, the words as transcribed are pasted now.
         "skip-cleanup" => {
             give_focus_back();
-            let state = app.state::<crate::AppState>();
-            let guard = state.pipeline.lock().map_err(|_| "pipeline unavailable")?;
-            guard.as_ref().ok_or("pipeline not started")?.skip_cleanup();
+            crate::dictation::pipeline::running(app).ok_or("pipeline not started")?.skip_cleanup();
         }
         // "Cleaned up · Use what I said": swap the paste for the words as
         // said (as_said.rs), in the window the dictation went into.

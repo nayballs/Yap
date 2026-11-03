@@ -99,15 +99,30 @@ pub(crate) fn dictation_ended() {
     DICTATION.fetch_and(!1, Ordering::SeqCst);
 }
 
+/// **The running pipeline, out of its slot** (`AppState::pipeline`): a
+/// clone of its handle (one `Arc`), the slot's lock let go at once, so
+/// nothing runs under it — a key press's start, edit mode's selection read
+/// (UI Automation, then Ctrl+C and the clipboard's round trip), a stop.
+/// Until 2026-11-03 the key listeners held the lock across all that, and
+/// every window command that takes it (the bar's buttons, Settings' and
+/// Home's reads) waited: the UI froze ~2 s while edit mode read a
+/// selection. A lock a panic poisoned still gives the pipeline (before, a
+/// press was dropped for good).
+pub(crate) fn running(app: &AppHandle) -> Option<Pipeline> {
+    use tauri::Manager;
+    out_of(&app.try_state::<crate::AppState>()?.pipeline)
+}
+
+/// What's in `slot`, cloned out with its lock let go at once. Generic for
+/// its test.
+pub(crate) fn out_of<P: Clone>(slot: &Mutex<Option<P>>) -> Option<P> {
+    slot.lock().unwrap_or_else(|p| p.into_inner()).clone()
+}
+
 /// The running pipeline, if there is one, for the input hook's news.
 fn with_pipeline(app: &AppHandle, f: impl FnOnce(&Pipeline)) {
-    use tauri::Manager;
-    let Some(state) = app.try_state::<crate::AppState>() else { return };
-    let guard = state.pipeline.lock();
-    if let Ok(guard) = guard {
-        if let Some(p) = guard.as_ref() {
-            f(p);
-        }
+    if let Some(p) = running(app) {
+        f(&p);
     }
 }
 
@@ -698,7 +713,8 @@ impl Shared {
 // ---- A transcription's `processing` flag ---------------------------------------
 
 /// The running pipeline: the shared state, with the mic (`mic.rs`) and the
-/// warm speech engine in it.
+/// warm speech engine in it. A clone is the same pipeline ([`running`]).
+#[derive(Clone)]
 pub struct Pipeline {
     shared: Arc<Shared>,
 }
@@ -1212,6 +1228,38 @@ pub(crate) fn resample_linear(input: &[f32], from_rate: u32, to_rate: u32) -> Ve
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A key press runs with the pipeline's slot let go: another thread (a
+    /// window's command on the main thread) takes the lock at once while
+    /// the press is still going — edit mode's selection read with its
+    /// Ctrl+C held it ~2 s before 2026-11-03 — and a lock a panic poisoned
+    /// still hands the pipeline over (a press was dropped for good).
+    #[test]
+    fn a_key_press_never_runs_under_the_pipelines_lock() {
+        let slot = Arc::new(Mutex::new(Some(Arc::new(7u8))));
+        let p = out_of(&slot).expect("the pipeline");
+        // The "press", still running: the lock is free meanwhile.
+        let other = Arc::clone(&slot);
+        let took = std::thread::spawn(move || {
+            let at = Instant::now();
+            let got = other.lock().map(|g| g.is_some()).unwrap_or(false);
+            (got, at.elapsed())
+        })
+        .join()
+        .unwrap();
+        assert!(took.0 && took.1 < Duration::from_millis(100), "{:?}", took.1);
+        assert_eq!(*p, 7);
+        // A panic under the lock poisons it: the next press still gets it.
+        let poisoner = Arc::clone(&slot);
+        let _ = std::thread::spawn(move || {
+            let _g = poisoner.lock().unwrap();
+            panic!("a bug while it held the lock");
+        })
+        .join();
+        assert!(slot.is_poisoned());
+        assert_eq!(out_of(&slot).map(|p| *p), Some(7));
+        assert_eq!(out_of(&Mutex::new(None::<u8>)), None);
+    }
 
     #[test]
     fn which_dictations_are_questions_for_the_chat() {

@@ -60,7 +60,7 @@ pub mod text_id;
 use std::sync::Mutex;
 
 use serde::{Deserialize, Serialize};
-use tauri::{AppHandle, Listener, Manager};
+use tauri::{AppHandle, Listener};
 
 use crate::config::YapConfig;
 use crate::dictation::stt::{Heard, Said, Spoken};
@@ -648,9 +648,8 @@ pub fn init(app: &AppHandle) {
             return;
         };
         let at = v["at"].as_u64();
-        let state = handle.state::<crate::AppState>();
-        let Ok(guard) = state.pipeline.lock() else { return };
-        if let Some(p) = guard.as_ref() {
+        // Off the slot's lock, as every key is (`pipeline::running`).
+        if let Some(p) = crate::dictation::pipeline::running(&handle) {
             p.on_language_key(&id, pressed, at);
         }
     });
@@ -723,10 +722,8 @@ pub fn configure_language_hotkey(id: String, spec: String) {
 /// Yap webview has the focus).
 #[tauri::command]
 pub fn language_key(state: tauri::State<'_, crate::AppState>, id: String, pressed: bool) {
-    if let Ok(guard) = state.pipeline.lock() {
-        if let Some(p) = guard.as_ref() {
-            p.on_language_key(&id, pressed, None);
-        }
+    if let Some(p) = crate::dictation::pipeline::out_of(&state.pipeline) {
+        p.on_language_key(&id, pressed, None);
     }
 }
 

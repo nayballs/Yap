@@ -190,7 +190,17 @@ to **Run again** from Home.
   press (`yap-dictation-locked` → a lock on the overlay), a lone tap is thrown away
   (never a junk dictation) and earns a coaching hint (`dictation/coaching.rs`), as does a
   hold of a minute or more. Key events and the tap timer act under one lock
-  (`gesture`), timed by the input hook's own timestamps; a recording started or
+  (`gesture`), timed by the input hook's own timestamps. **No key press runs
+  under the pipeline's slot lock** (`AppState::pipeline`, 2026-11-03): the
+  key listeners (`lib.rs`, the language shortcuts'), Yap's windows' in-page
+  keys (`dictation_key`, `assistant_key`, `ask_selection_key`,
+  `language_key`), `toggle_recording`, `chat_dictate` and the bar's buttons
+  take the pipeline out first (`pipeline::running` / `out_of`: a clone of
+  its `Arc`, the lock let go at once, a poisoned one recovered). Before, the
+  listeners held it across the whole press — edit mode's selection read, UI
+  Automation then Ctrl+C and the clipboard's round trip — and every window
+  command that takes it waited: the UI froze ~2 s; and a lock a panic had
+  poisoned dropped every press after it. A recording started or
   stopped elsewhere (the bar's Dictate, the tray's Cancel) is followed, and one
   started by Dictate stops on the next press. `run_stt` (async) transcribes, then
   `deliver` (also robot mode's way in, `shell/realtest.rs`; the target is captured by
