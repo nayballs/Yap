@@ -1370,6 +1370,12 @@ The AI Chat surface (conversations, the tool-calling loop and its note tools) an
   `current`), what the model is told (`context_note`), the quote kept with
   the question (`quote`), "Select some text first" (`nothing_selected`,
   kind `askNoSelection`).
+- **`chat/assistant/skill.rs`** — **Skills by voice** ([below](#skills-by-voice-2026-11-03)):
+  a Skill said — its slash name, its name with "skill", or (one in the `/`
+  menus) a request in its own words — runs as Chat runs it (`matched`,
+  pure, against the Skills there are; `said`, `turn`); Yap's question when
+  it has nothing to run on is answered by voice (`wait_for_answer`,
+  `answer_words`).
 
 ## Questions about selected text (2026-10-31)
 
@@ -2868,6 +2874,95 @@ copyable. Yap's, in `chat/skills.rs`:
   its own Skills: the six kept, their switches on); prompts measured with
   `yap.exe eval --chips` and the `skills` scenarios (`--tag skills`, a
   turn's `skill`) ([model-evals.md](../model-evals.md#more-skills-31-oct-2026)).
+- **Said to the Voice Assistant**: [below](#skills-by-voice-2026-11-03).
+
+## Skills by voice (2026-11-03)
+
+`chat/assistant/skill.rs`: a Skill said to the Voice Assistant runs as Chat
+runs a typed one — the same passages (`skills::find`), instructions,
+`ask_first` and citations, in the conversation the answer lands in. Until
+now the Voice Assistant took "slash prep" as an ordinary question.
+
+- **What says one** (`matched`, pure; against the Skills there are —
+  `skills::listed`, Yap's and the person's own, their commands, names and
+  descriptions —, never a phrase list per Skill), tried in this order:
+  1. **its slash name** (every Skill): "slash" (or "/" as written) at the
+     start, then its command in up to six words ("slash follow up email",
+     "slash one to one with Priya" → `one-to-one`, the words "Priya");
+  2. **its name with "skill"** (every Skill: one off the `/` menu runs when
+     named whole, as a typed command does): "run my standup skill", "use
+     the skill called decision log", "lance la skill point hebdo",
+     "starte meinen Standup-Skill", "voer mijn standup skill uit" — with a
+     verb that runs it, or nothing else said ("Standup skill.");
+  3. **a request in its own words** (only the Skills in the `/` menus,
+     `shown`): its one-tap prompt and question, its description and its
+     first clause, and their starts up to a "for", "to"… of three words or
+     more ("Draft a follow-up email" of "…to the attendees"); its name after
+     a verb that runs it ("do my stand-up"); its name alone, or followed by
+     what it's about when the name is two words or more or ends in "me"
+     ("prepare me for the supplier call", "follow-up email for the supplier
+     call"). Word for word in order, the little words aside (`follows`:
+     "prep" for "prepare" — four letters, three fewer —, "decided" for
+     "decide", "stand up" and "to do's" for "stand-up" and "to-dos"); a
+     phrasing of two words or fewer is the whole request, a longer one may
+     be followed by up to 8 words, never by another request ("…and then
+     email them to Sam"). The most words taken wins; two Skills alike are
+     neither, unless one is the person's copy of the other (`basedOn`:
+     theirs).
+  The rest of what was said is the Skill's words ("for the supplier call" →
+  "the supplier call"). **In doubt, an ordinary question**: "what are the
+  risks of the launch?", "how do I write a stand-up update?", "what does the
+  standup skill do?", "write my stand-up for today", "what did we decide
+  about dinner?", "prep dinner for six", "slash the price by ten percent".
+- **Languages**: the framing — "slash" ("barre oblique", "Schrägstrich",
+  "barra"…), "skill" ("compétence", "habilidad"…), the verbs that run one,
+  "can you", "please", the little words, the separable "aus" / "uit" — in
+  the person's own languages (My languages; English always; none of theirs
+  known: all), the seven `assistant/screen.rs` and
+  `dictation/command_screen.rs` know: Spanish "barra" is no English
+  "slash". Yap's Skills are worded in English, so in another language
+  they're said by their slash name or with "skill"; the person's own match
+  in the language they wrote them ("Prépare-moi le point hebdo de
+  l'équipe"). Speech is read as written: hyphens and apostrophes inside a
+  word, an elision ("l'équipe") and a clitic or "-Skill" after a hyphen
+  ("prépare-moi", "Standup-Skill") words of their own (`tokens`).
+- **The run** (`assistant::answer`): `skills::with` around Chat's own
+  turn, the spoken question saved as asked; not an app to open (Yap's
+  "run …" is apps.rs's verb too: `chat_turn` skips `apps::plan_for` for a
+  Skill), the window in front, the screenshots in Chat's box or a quoted
+  passage. A Skill that runs on one meeting (/followup-email, one of the
+  person's) reads the meeting its words name, else the latest (`turn`:
+  gather "latest", as /summary-for across the meetings) — there's no meeting
+  open to run it on. Off during meetings, as the assistant is.
+- **The answer** is Chat's whole run: no "one or two short sentences"
+  (`SPOKEN_ANSWER_NOTE`) nor the documents' spoken line (`spoken_note`) for
+  a Skill — its instructions say how it's laid out —, and the voice says as
+  much as "How much to read aloud" says (`spoken_answer`: about a minute by
+  default, then "The rest is in Chat."), no `[n]` said. **/tickets and
+  /prd** write their document, and the line says where it is
+  (`skills::document_note(turn, in_view)`): "It's open on the right." with
+  Chat in view (`asked_in_chat`), else "It's in Chat." (a phone too).
+- **Nothing to run on** (`skills::ask_first(turn, aloud)`): asked out loud,
+  a question to answer by voice — "I can't see your calendar. Which meeting
+  should I prepare you for?", "There's no one-to-one coming up on your
+  calendar. Who's it with?", an `asks`' first sentence ("Which project?") —
+  never "name it after the command". The assistant then waits
+  (`wait_for_answer`, 2 minutes, that conversation): the next spoken
+  question there, when it's short (≤ 10 words), no question of its own
+  ("…?") and not "never mind" / "cancel" (`answer_words`, in the person's
+  languages, an "it's" or "for" before it left out), runs the Skill on it
+  ("The supplier call." → /prep on the supplier call). Any question takes
+  the wait, answer or not.
+- **Logs**: how it was said, a built-in's command, counts — never the words.
+- **Tests**: unit (`assistant/skill.rs`: each way it's said, near-misses,
+  the person's own Skills, a copy, twins, seven languages and the person's
+  only, the answer said, one-meeting Skills, the wait; `skills.rs`: the asks
+  out loud, the document's line), e2e `voice-skills.spec.js` (with the fake
+  model: "Prep me for my next meeting" with no calendar asked out loud and
+  answered — /prep's passages, citations, read aloud without them —,
+  "slash tickets, the supplier call" from another app — its document, "It's
+  in Chat." —, "run my tickets skill…" with Chat in front — the panel, "It's
+  open on the right." —, and questions that only mention a Skill's words).
 
 ## The context ring (2026-10-25)
 

@@ -249,8 +249,10 @@ async fn answer_turn(
     // A Skill (chat/skills.rs) is asked across the meetings, wherever it's run.
     let skill = crate::chat::skills::current();
     // One with nothing to run on (/project-update and no project named,
-    // /prep and nothing coming up): Yap asks for it itself, no model.
-    if let Some((s, said)) = skill.as_ref().and_then(|s| crate::chat::skills::ask_first(s).map(|a| (s, a))) {
+    // /prep and nothing coming up): Yap asks for it itself, no model — out
+    // loud for the Voice Assistant, its answer said (assistant/skill.rs).
+    let aloud = scope == Some("assistant");
+    if let Some((s, said)) = skill.as_ref().and_then(|s| crate::chat::skills::ask_first(s, aloud).map(|a| (s, a))) {
         return skill_asks_turn(conversation_id, &text, by_voice, asked, stop, &said, &s.skill.command);
     }
     let meetings = scope == Some("meetings") || skill.is_some();
@@ -265,7 +267,8 @@ async fn answer_turn(
     // (`assistant/selected.rs`): the selection is what it's about — never
     // an app to open, nor a search forced first.
     let about_selection = crate::chat::assistant::selected::current();
-    if about_selection.is_none() {
+    // (A Skill said aloud — "run my standup skill" — is never an app to open.)
+    if about_selection.is_none() && skill.is_none() {
         if let Some(plan) = crate::apps::plan_for(&text, &cfg, conversation_id).await {
             return app_turn(conversation_id, &text, by_voice, asked, plan, stop).await;
         }
@@ -604,8 +607,10 @@ async fn answer_turn(
             system.push_str(&block);
         }
         // A Skill that makes something to keep (/tickets, /prd): a document,
-        // for a model that can write one.
-        if let Some(note) = skill.as_ref().filter(|_| tools_supported).and_then(crate::chat::skills::document_note) {
+        // for a model that can write one — its line pointing at the panel,
+        // or at Chat for the Voice Assistant asked from another app.
+        let in_view = scope != Some("assistant") || crate::chat::assistant::asked_in_chat();
+        if let Some(note) = skill.as_ref().filter(|_| tools_supported).and_then(|s| crate::chat::skills::document_note(s, in_view)) {
             context.push(note);
         }
     }
@@ -683,8 +688,9 @@ async fn answer_turn(
     // sentence saying where it is — "it's in Chat", or, asked with Chat in
     // front, "it's open on the right" (`assistant::asked_in_chat`). The
     // rule itself stays in the system prompt, the same for every turn (the
-    // model's cache).
-    if scope == Some("assistant") && tools_supported {
+    // model's cache). (A Skill said aloud answers as its instructions say,
+    // its document's line its own: `skills::document_note`.)
+    if scope == Some("assistant") && tools_supported && skill.is_none() {
         context.push(crate::chat::documents::spoken_note(crate::chat::assistant::asked_in_chat()).to_string());
     }
     // The model is told what this question means for documents
@@ -744,7 +750,10 @@ async fn answer_turn(
         };
         context.push(crate::chat::documents::research_note(deep_reach, reader, outline_first));
     }
-    if spoken && !(tools_supported && web_on) {
+    // Not a Skill's: its answer is Chat's run, whole in the chat, and the
+    // voice says as much of it as "How much to read aloud" says
+    // (`assistant::spoken_answer`, "The rest is in Chat.").
+    if spoken && !(tools_supported && web_on) && skill.is_none() {
         if in_message {
             context.push(crate::chat::assistant::SPOKEN_ANSWER_NOTE.to_string());
         } else {

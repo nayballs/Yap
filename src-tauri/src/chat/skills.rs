@@ -31,6 +31,12 @@
 //!   when its whole command is typed (`/tickets`), as [`by_command`] finds
 //!   every Skill. An install from before the core six keeps the six that
 //!   were built in then ([`keep_the_first_six`], `config::migrate_once` v7).
+//! - **Said to the Voice Assistant** (2026-11-03, `assistant/skill.rs`): its
+//!   slash name, its name with "skill", or one of its own phrasings run it
+//!   as Chat does, its words the rest of what was said; Yap's question when
+//!   it has nothing to run on is asked out loud ([`ask_first`]'s `aloud`)
+//!   and answered by voice; a document's line says where it is
+//!   ([`document_note`]).
 //!
 //! **Not the Actions engine** (`notes.rs` `Action`): an action rewrites the
 //! note's summary (`note_enhance` → `write_summary`, under the note
@@ -190,6 +196,11 @@ const PERSON_ASKS: &str = "Who's it with? Add their name after the command, like
 const PREP_NOTHING_COMING: &str = "There's no meeting coming up on your calendar to prepare for. Name one after the command, like /prep supplier call.";
 /// …or no calendar connected.
 const PREP_NO_CALENDAR: &str = "Yap can't see your calendar, so name the meeting after the command, like /prep supplier call. (Connect your calendar in Settings → Connectors, and /prep finds the next one itself.)";
+/// The same three, asked out loud (the Voice Assistant, `assistant/skill.rs`):
+/// the answer is said, not typed after a command.
+const PERSON_ASKS_ALOUD: &str = "There's no one-to-one coming up on your calendar. Who's it with?";
+const PREP_NOTHING_COMING_ALOUD: &str = "There's no meeting coming up on your calendar. Which one should I prepare you for?";
+const PREP_NO_CALENDAR_ALOUD: &str = "I can't see your calendar. Which meeting should I prepare you for?";
 
 /// **The core six**: the built-ins in the `/` menus and the one-tap prompts
 /// from the start (the maintainer, 31 Oct 2026: fifteen was too many to
@@ -666,12 +677,15 @@ pub fn query_of(turn: &SkillTurn) -> String {
 /// adds to the question's context, for a model with tools: the document
 /// now (`chat/documents.rs`), its passages cited in it (Yap puts their
 /// meetings' names in their place: `documents::name_citations`), one short
-/// line in the chat. `None`: it answers in the chat.
-pub fn document_note(turn: &SkillTurn) -> Option<String> {
+/// line in the chat — "It's open on the right." with Chat in view (`in_view`),
+/// else "It's in Chat." (the Voice Assistant asked from another app). `None`:
+/// it answers in the chat.
+pub fn document_note(turn: &SkillTurn, in_view: bool) -> Option<String> {
     let how = turn.skill.document.trim();
+    let line = if in_view { "It's open on the right." } else { "It's in Chat." };
     (!how.is_empty()).then(|| {
         format!(
-            "Write this as a document now, not in the chat: create_document (a title saying what it is and which meeting it's from, a one-line summary, {how}), then write_section for each, in order, as the Skill's instructions say. Cite the passages in it as [1] after each point: Yap puts the meeting's name in its place. Then answer in one short sentence: \"It's open on the right.\""
+            "Write this as a document now, not in the chat: create_document (a title saying what it is and which meeting it's from, a one-line summary, {how}), then write_section for each, in order, as the Skill's instructions say. Cite the passages in it as [1] after each point: Yap puts the meeting's name in its place. Then answer in one short sentence: \"{line}\""
         )
     })
 }
@@ -768,27 +782,54 @@ fn questions_aid(note: &Note) -> Option<String> {
 /// to run on: /project-update with no project named (its `asks`), /prep
 /// with nothing named and nothing coming up on the calendar, /one-to-one
 /// with nobody named and no one-to-one coming up. `None`: run it.
-pub fn ask_first(turn: &SkillTurn) -> Option<String> {
+///
+/// `aloud`: asked out loud (the Voice Assistant): the question alone — the
+/// `asks`' first sentence, which is its question ("Which project?") — and
+/// the person says the answer, which runs the Skill on it
+/// (`assistant/skill.rs`), never a command to type.
+pub fn ask_first(turn: &SkillTurn, aloud: bool) -> Option<String> {
     if !turn.words.trim().is_empty() {
         return None;
     }
     if !turn.skill.asks.is_empty() {
-        return Some(turn.skill.asks.clone());
+        return Some(if aloud { first_sentence(&turn.skill.asks) } else { turn.skill.asks.clone() });
     }
     if !matches!(turn.skill.gather.as_str(), "prep" | "person") {
         return None;
     }
-    asks_for(&turn.skill.gather, &crate::calendar::agenda(), crate::ai::eval::now().timestamp())
+    asks_for(&turn.skill.gather, &crate::calendar::agenda(), crate::ai::eval::now().timestamp(), aloud)
+}
+
+/// A text's first sentence ("Which project? Add its name…" → "Which
+/// project?"). Pure.
+fn first_sentence(text: &str) -> String {
+    let t = text.trim();
+    match t.find(['?', '.', '!']) {
+        Some(i) => t[..=i].to_string(),
+        None => t.to_string(),
+    }
 }
 
 /// [`ask_first`]'s calendar half: what a "prep" or "person" run with no
-/// words asks, given the calendar. Pure.
-fn asks_for(gather: &str, agenda: &Agenda, now: i64) -> Option<String> {
-    match gather {
-        "prep" if next_event(agenda, now, "").is_none() => Some(if agenda.connected { PREP_NOTHING_COMING } else { PREP_NO_CALENDAR }.to_string()),
-        "person" if next_one_to_one(agenda, now).is_none() => Some(PERSON_ASKS.to_string()),
-        _ => None,
-    }
+/// words asks, given the calendar (`aloud`: out loud). Pure.
+fn asks_for(gather: &str, agenda: &Agenda, now: i64, aloud: bool) -> Option<String> {
+    let said = match gather {
+        "prep" if next_event(agenda, now, "").is_none() => match (agenda.connected, aloud) {
+            (true, false) => PREP_NOTHING_COMING,
+            (true, true) => PREP_NOTHING_COMING_ALOUD,
+            (false, false) => PREP_NO_CALENDAR,
+            (false, true) => PREP_NO_CALENDAR_ALOUD,
+        },
+        "person" if next_one_to_one(agenda, now).is_none() => {
+            if aloud {
+                PERSON_ASKS_ALOUD
+            } else {
+                PERSON_ASKS
+            }
+        }
+        _ => return None,
+    };
+    Some(said.to_string())
 }
 
 /// Most passages a Skill's gathering hands the model (a week of meetings,
@@ -2093,9 +2134,17 @@ mod tests {
         assert_eq!(titles(&f).first(), Some(&"Design sync"));
         // Nothing named and nothing coming up: Yap asks, no model called.
         let now = thursday().timestamp();
-        assert_eq!(asks_for("prep", &Agenda::default(), now).as_deref(), Some(PREP_NO_CALENDAR));
-        assert_eq!(asks_for("prep", &Agenda { connected: true, ..Default::default() }, now).as_deref(), Some(PREP_NOTHING_COMING));
-        assert_eq!(asks_for("prep", &calendar(), now), None);
+        assert_eq!(asks_for("prep", &Agenda::default(), now, false).as_deref(), Some(PREP_NO_CALENDAR));
+        assert_eq!(asks_for("prep", &Agenda { connected: true, ..Default::default() }, now, false).as_deref(), Some(PREP_NOTHING_COMING));
+        assert_eq!(asks_for("prep", &calendar(), now, false), None);
+        // Out loud (the Voice Assistant): a question to answer by voice, no
+        // command to type.
+        assert_eq!(asks_for("prep", &Agenda::default(), now, true).as_deref(), Some(PREP_NO_CALENDAR_ALOUD));
+        assert_eq!(asks_for("prep", &Agenda { connected: true, ..Default::default() }, now, true).as_deref(), Some(PREP_NOTHING_COMING_ALOUD));
+        assert_eq!(asks_for("prep", &calendar(), now, true), None);
+        for said in [PREP_NO_CALENDAR_ALOUD, PREP_NOTHING_COMING_ALOUD, PERSON_ASKS_ALOUD] {
+            assert!(said.ends_with('?') && !said.contains('/'), "{said}");
+        }
     }
 
     #[test]
@@ -2118,8 +2167,9 @@ mod tests {
         assert!(f.about.as_deref().unwrap().ends_with("Yap has no earlier meetings with Jo."));
         // Nobody named and no one-to-one coming up: Yap asks who.
         let only_team = Agenda { events: calendar().events.into_iter().filter(|e| e.attendees.len() > 1).collect(), ..calendar() };
-        assert_eq!(asks_for("person", &only_team, thursday().timestamp()).as_deref(), Some(PERSON_ASKS));
-        assert_eq!(asks_for("person", &calendar(), thursday().timestamp()), None);
+        assert_eq!(asks_for("person", &only_team, thursday().timestamp(), false).as_deref(), Some(PERSON_ASKS));
+        assert_eq!(asks_for("person", &only_team, thursday().timestamp(), true).as_deref(), Some(PERSON_ASKS_ALOUD));
+        assert_eq!(asks_for("person", &calendar(), thursday().timestamp(), false), None);
     }
 
     #[test]
@@ -2263,16 +2313,25 @@ mod tests {
     #[test]
     fn a_skill_with_nothing_to_run_on_asks_and_a_document_skill_says_how() {
         let update = SkillTurn { skill: by_command("project-update").unwrap(), words: String::new() };
-        assert!(ask_first(&update).unwrap().starts_with("Which project?"));
-        assert_eq!(ask_first(&SkillTurn { words: "website relaunch".into(), ..update }), None);
-        assert_eq!(ask_first(&turn_for("decision-log", "/decision-log").unwrap()), None);
+        assert!(ask_first(&update, false).unwrap().starts_with("Which project? Add its name after the command"));
+        // Out loud: its question alone.
+        assert_eq!(ask_first(&update, true).as_deref(), Some("Which project?"));
+        assert_eq!(ask_first(&SkillTurn { words: "website relaunch".into(), ..update }, true), None);
+        assert_eq!(ask_first(&turn_for("decision-log", "/decision-log").unwrap(), false), None);
+        // Every built-in's `asks` begins with its question.
+        for s in builtins().iter().filter(|s| !s.asks.is_empty()) {
+            assert!(first_sentence(&s.asks).ends_with('?'), "/{}", s.command);
+        }
         // /tickets and /prd, run in Chat: a document, citing the passages.
-        let note = document_note(&turn_for("prd", "/prd").unwrap()).unwrap();
+        let note = document_note(&turn_for("prd", "/prd").unwrap(), true).unwrap();
         assert!(note.starts_with("Write this as a document now, not in the chat: create_document"));
         assert!(note.contains("the sections Problem, Goals, Requirements, Out of scope and Open questions"));
         assert!(note.contains("Cite the passages in it as [1]"));
-        assert!(document_note(&turn_for("tickets", "/tickets").unwrap()).unwrap().contains("one section, \"Tickets\", each ticket a \"### \" heading in it"));
-        assert_eq!(document_note(&turn_for("decisions", "/decisions").unwrap()), None);
+        assert!(note.ends_with("\"It's open on the right.\""));
+        // Asked out loud from another app: the line says where it is.
+        assert!(document_note(&turn_for("prd", "/prd").unwrap(), false).unwrap().ends_with("\"It's in Chat.\""));
+        assert!(document_note(&turn_for("tickets", "/tickets").unwrap(), true).unwrap().contains("one section, \"Tickets\", each ticket a \"### \" heading in it"));
+        assert_eq!(document_note(&turn_for("decisions", "/decisions").unwrap(), true), None);
         // A copy of one is the person's: no document, nothing asked first.
         let mut copy = by_command("prd").unwrap();
         copy.command = "my-prd".into();
@@ -2296,7 +2355,7 @@ mod tests {
             if s.runs_on.across() {
                 let turn = SkillTurn { skill: s.clone(), words: String::new() };
                 let Gathered::Found(f) = gather(&turn, &notes, &TaskStore::default(), &calendar(), &thursday()) else { continue };
-                let added = format!("{}\n{}\n{}", system_block(&turn), ask::context(&f), document_note(&turn).unwrap_or_default());
+                let added = format!("{}\n{}\n{}", system_block(&turn), ask::context(&f), document_note(&turn, true).unwrap_or_default());
                 assert!(estimate_tokens(&added) < 3_000, "/{} across: {}", s.command, estimate_tokens(&added));
                 assert!(f.passages.len() <= GATHER_PASSAGES * 2, "/{}", s.command);
             }

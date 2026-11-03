@@ -107,6 +107,17 @@
 //! quoted passage or an app to open: the selection is what it's about.
 //! Nothing is typed into the app.
 //!
+//! **Skills by voice** (2026-11-03, [`skill`]): a Skill said — its slash
+//! name ("slash follow-up email"), its name with "skill" ("run my standup
+//! skill"), or a request in its own words ("prep me for my next meeting") —
+//! runs as Chat runs it (`skills::with`): its passages, its instructions,
+//! the citations in the conversation, a document for /tickets and /prd
+//! ("It's open on the right." with Chat in view, else "It's in Chat."). The
+//! answer is Chat's whole, and the voice says as much as "How much to read
+//! aloud" says. With nothing to run on, Yap asks out loud and the next
+//! spoken question in that conversation is the answer. Not the window in
+//! front, the screenshots in Chat's box, a quoted passage or an app to open.
+//!
 //! **Asked from a phone** (Yap Link, `link.rs`, 2026-10-31): a question a
 //! paired phone heard goes the same way ([`ask_from_phone`]) — the same
 //! conversation choice, Chat's model and the short spoken answer, kept in
@@ -127,6 +138,7 @@
 
 pub mod screen;
 pub mod selected;
+pub mod skill;
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Mutex, MutexGuard};
@@ -1011,19 +1023,25 @@ async fn answer(app: AppHandle, asker: Asker, since: u64, question: String, abou
     let viewing = view();
     let open_exists = matches!(viewing, Viewing::Conversation(id) if crate::chat::chats::get(id).is_some());
     let choice = choose_conversation(viewing, open_exists, crate::chat::chats::latest(), now_secs());
-    // Screenshots waiting in Chat's box (snip/waiting.rs): the question goes
-    // with them, to the conversation they wait in. (Not one about a
-    // selection: that's what it's about.)
-    let waiting = crate::snip::waiting::now();
-    let shots_wait = pc && !about_selection && !waiting.images.is_empty();
-    let conversation_id = match choice {
-        _ if shots_wait => waiting.conversation_id,
+    // A Skill said — "slash prep", "run my standup skill", "prep me for my
+    // next meeting" — or the answer to Yap's question for one (skill.rs):
+    // run as Chat runs it, the question itself what it's about. Never a
+    // question about a selection.
+    let continued = match choice {
         Choice::Continue(id) => Some(id),
         Choice::New => None,
     };
+    let said = if about_selection { None } else { skill::said(&question, &cfg, continued) };
+    // Screenshots waiting in Chat's box (snip/waiting.rs): the question goes
+    // with them, to the conversation they wait in. (Not one about a
+    // selection or a Skill: that's what it's about.)
+    let waiting = crate::snip::waiting::now();
+    let shots_wait = pc && !about_selection && said.is_none() && !waiting.images.is_empty();
+    let conversation_id = if shots_wait { waiting.conversation_id } else { continued };
     // "Open Teams" needs no model, nor a "yes" to Yap's "Did you mean …?":
-    // Yap opens it and says so (apps.rs). Never a question about a selection.
-    let opens_an_app = !about_selection && crate::apps::plan_for(&question, &cfg, conversation_id).await.is_some();
+    // Yap opens it and says so (apps.rs). Never a question about a selection
+    // or a Skill.
+    let opens_an_app = !about_selection && said.is_none() && crate::apps::plan_for(&question, &cfg, conversation_id).await.is_some();
     let endpoint = if opens_an_app {
         None
     } else {
@@ -1089,12 +1107,13 @@ async fn answer(app: AppHandle, asker: Asker, since: u64, question: String, abou
     // goes with a question asked with Chat in view, to the conversation it's
     // quoted in, as a typed or dictated question takes it
     // (`documents::quote_goes`); the box's quote goes.
-    let quote = if opens_an_app || !pc || about_selection { None } else { crate::chat::documents::take_waiting_quote(&app, in_chat, conversation_id) };
+    let quote = if opens_an_app || !pc || about_selection || said.is_some() { None } else { crate::chat::documents::take_waiting_quote(&app, in_chat, conversation_id) };
     // A question about the screen (screen.rs): the window in front goes
     // with it — its picture, or its text read on this PC — or a line tells
     // the model why it can't see it. Not beside screenshots already waiting,
     // a quoted passage or a selection (they're what it's about), nor when
-    // Yap opens an app (no model).
+    // Yap opens an app (no model), nor for a Skill (its passages are what
+    // it reads).
     let mut ask = question.clone();
     let mut window_picture: Option<(String, String)> = None;
     // With Yap's own window in front the window in front is Yap, which a
@@ -1103,7 +1122,7 @@ async fn answer(app: AppHandle, asker: Asker, since: u64, question: String, abou
     let chat_looks = focused && endpoint.as_ref().is_some_and(|(_, _, model, provider, _, _)| crate::chat::tools::supports_tools(provider, model));
     let mut took_window = false;
     if let (Some(generation), false, Some((base_url, api_key, model, provider, _persona, _thinking))) =
-        (asker.shortcut(), shots_wait || quote.is_some() || about_selection || chat_looks, &endpoint)
+        (asker.shortcut(), shots_wait || quote.is_some() || about_selection || chat_looks || said.is_some(), &endpoint)
     {
         let ep = screen::Endpoint { base_url, api_key, model, provider };
         let look_app = app.clone();
@@ -1119,7 +1138,11 @@ async fn answer(app: AppHandle, asker: Asker, since: u64, question: String, abou
             shots = look.images;
         }
     }
-    tracing::info!(phone = !pc, ?viewing, ?choice, ?seen, shots = shots.images.len(), window = took_window, quoted = quote.is_some(), selection = about_selection, "Voice Assistant: asking Chat");
+    tracing::info!(phone = !pc, ?viewing, ?choice, ?seen, shots = shots.images.len(), window = took_window, quoted = quote.is_some(), selection = about_selection, skill = said.is_some(), "Voice Assistant: asking Chat");
+    // A Skill with nothing to run on (`skills::ask_first`): Yap asks out loud,
+    // and waits for the answer by voice (below).
+    let asks = said.as_ref().and_then(|t| crate::chat::skills::ask_first(t, true));
+    let ran = said.as_ref().map(|t| t.skill.clone());
     let asked_app = app.clone();
     let asked_text = question.clone();
     // The answer as it's written: the Chat view follows it, the voice
@@ -1172,6 +1195,9 @@ async fn answer(app: AppHandle, asker: Asker, since: u64, question: String, abou
             Some(&stoppable),
         ),
     );
+    // The Skill said: Chat's own turn runs it (its passages, instructions and
+    // citations, `skills::current`).
+    let turn = crate::chat::skills::with(said, turn);
     // The quoted passage it's about: the model is told its blocks, and the
     // question keeps its quote (documents.rs).
     let turn = crate::chat::documents::with_selection(quote.as_ref().map(crate::chat::documents::WaitingQuote::selection), turn);
@@ -1288,6 +1314,13 @@ async fn answer(app: AppHandle, asker: Asker, since: u64, question: String, abou
             return;
         }
     };
+    // Yap asked what the Skill runs on: the next spoken question in this
+    // conversation may be the answer (skill.rs).
+    if let (Some(skill), Some(asked)) = (&ran, &asks) {
+        if turn.reply == *asked {
+            skill::wait_for_answer(turn.conversation_id, skill);
+        }
+    }
     let message_id = turn.message_id();
     let _ = app.emit(
         TURN,

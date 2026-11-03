@@ -213,8 +213,22 @@ prompts measured on the on-device Qwen3.5-4B (`yap.exe eval --chips` and the
 [model-evals.md](../model-evals.md#meeting-chips-and-skills-29-oct-2026),
 [More Skills](../model-evals.md#more-skills-31-oct-2026)). Not
 tried yet: a real meeting (what's worth saying, live), a cloud model on
-these prompts (no paid calls tonight), a Skill's answer read aloud by the
-Voice Assistant (it doesn't run Skills).
+these prompts (no paid calls tonight).
+
+**Skills by voice** (2026-11-03, [chat-and-assistant.md](./chat-and-assistant.md#skills-by-voice-2026-11-03)):
+a Skill said to the Voice Assistant — its slash name ("slash follow-up
+email"), its name with "skill" ("run my standup skill"), or a request in its
+own words for one in the `/` menus ("prep me for my next meeting") — runs as
+Chat runs it, in the person's languages' framing; Yap's question when it has
+nothing to run on is asked out loud and answered by voice; /tickets and /prd
+write their document and say where it is. Unit-tested (the matching: hits,
+near-misses, the person's own Skills, seven languages, the answer said),
+e2e-tested with the fake model (`voice-skills.spec.js`: a spoken /prep asked
+which meeting and answered, a spoken /tickets from another app and with Chat
+in front, questions that only mention a Skill's words). Not tried yet: real
+speech (what the speech model writes for "slash", a Skill's name), a real
+model's Skill answer heard whole, a Yap Skill said in another language by its
+English phrasing (by design only its slash name or "skill" then).
 
 **Home's and Insights' stats, kept apart from history** (2026-10-29,
 [dictation.md](./dictation.md), [frontend.md](./frontend.md#views)):
@@ -1461,7 +1475,7 @@ quote for a question asked out loud.
   meaning since 2026-10-25, search.md). Answers stream from every provider,
   but Gemini's, OpenAI's and OpenRouter's streams haven't met a real request
   (their shapes are taken from their docs; the on-device model's, Groq's and
-  Claude's have). Skills don't run from the Voice Assistant. A meeting's past
+  Claude's have). A meeting's past
   chat can't be renamed from the Notes view (the notepad's Past chats only).
   The on-device Qwen3.5-4B shows another picture when the one asked for
   isn't there (Find and show's evaluation, 3/6, above).

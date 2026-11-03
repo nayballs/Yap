@@ -3246,6 +3246,18 @@ What the runs showed, and what changed:
 
 Run folders: `E:\yap-builds\skills\eval-runs\` (this PC; not kept).
 
+## Skills by voice (3 Nov 2026)
+
+Two scenarios for a Skill said to the Voice Assistant
+([chat-and-assistant.md](./architecture/chat-and-assistant.md#skills-by-voice-2026-11-03)),
+`voice: true` (scope "assistant"): `skills-voice-standup` ("Write my stand-up update.": Chat's
+whole run, cited, not the one or two sentences an ordinary spoken answer is asked for) and
+`skills-voice-tickets` (/tickets from another app: the document, and the line "It's in Chat."
+rather than "It's open on the right."). Which Skill a question says is Yap's own rule
+(`assistant/skill.rs`, unit-tested), so the scenarios hand the turn its Skill as the matcher
+would. **Not run yet** (no paid calls): run them on the on-device model with
+`--only skills-voice` before changing a Skill's prompt for the voice.
+
 ## Replies from the window in front (31 Oct 2026)
 
 A Command that drafts from the email or chat in front (`dictation/command_screen.rs`;
