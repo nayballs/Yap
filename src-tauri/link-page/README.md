@@ -12,8 +12,9 @@ too). **It's Yap's Chat on a phone** (2026-11-03): Chat's thread, Chat's
 composer with Talk as the Yap bar's pill, Chat's model chip and **Chat's own
 picker** — the desktop's code itself, served beside the page ("Chat's own
 modules", below) — in Yap's tokens (`src/app.css`), fonts and mark, on a
-phone's terms ("The look", below). About 290 KB as served (36 KB of it the
-fonts, 50 KB Chat's picker modules, 25 KB the logos), about 110 KB gzipped.
+phone's terms ("The look", below). About 310 KB as served (36 KB of it the
+fonts, 54 KB Chat's picker modules, 22 KB the logos), 124 KB gzipped (175 KB
+and 80 KB before the Chat redesign).
 
 **The protocol** (v1: the hello, pairing, the JSON messages and the binary
 audio frames) is written down in
