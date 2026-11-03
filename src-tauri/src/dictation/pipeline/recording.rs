@@ -344,7 +344,7 @@ impl Shared {
             // below, and nothing's read.)
             if !self.processing.load(Ordering::SeqCst) {
                 let found = match page {
-                    Some(text) => Some(text).filter(|t| !t.trim().is_empty()).map(|text| crate::chat::assistant::selected::Selected { text, app: "Yap".into(), web: false }),
+                    Some(text) => selected_in_yap(text),
                     None => self.read_ask_selection(),
                 };
                 let Some(found) = found else {
@@ -371,7 +371,8 @@ impl Shared {
     /// keeping every clipboard format and putting them back, never in a
     /// terminal). `None`: nothing selected, or one of Yap's own windows in
     /// front (its page sends its own). A test run: the stand-in window's
-    /// staged selection only.
+    /// staged selection only. Either way another app's: web content
+    /// ([`selected_in_app`]).
     pub(super) fn read_ask_selection(&self) -> Option<crate::chat::assistant::selected::Selected> {
         let hwnd = crate::pasting::text_injector::current_foreground();
         #[cfg(debug_assertions)]
@@ -379,16 +380,12 @@ impl Shared {
         let hwnd = hwnd?;
         #[cfg(debug_assertions)]
         if let Some(staged) = test_selection(hwnd) {
-            return staged
-                .filter(|(t, _)| !t.trim().is_empty())
-                .map(|(text, _)| crate::chat::assistant::selected::Selected { text, app: "e2e-stand-in.exe".into(), web: false });
+            return selected_in_app(staged.map(|(text, _)| text), || super::TEST_STAND_IN_APP.into());
         }
         let terminal = crate::pasting::app_kind::of_window(Some(hwnd)).is_terminal();
         let got = crate::pasting::selection::read_selected(Some(hwnd), !terminal);
         tracing::info!(via = got.via, terminal, "Ask about the selection: read the selection");
-        let text = got.text.filter(|t| !t.trim().is_empty())?;
-        let app = crate::pasting::text_injector::app_name_for(Some(hwnd)).unwrap_or_default();
-        Some(crate::chat::assistant::selected::Selected { text, app, web: false })
+        selected_in_app(got.text, || crate::pasting::text_injector::app_name_for(Some(hwnd)).unwrap_or_default())
     }
 
     /// After a spoken "snip" landed in Chat ([`super::listen_after_snip`]):
@@ -1291,5 +1288,45 @@ impl crate::dictation::mic::Sink for Shared {
         if let Err(e) = spawned {
             tracing::warn!("Microphone: no thread to end the dictation on ({e})");
         }
+    }
+}
+
+/// **A selection read in another app** (Ask about the selection's shortcut;
+/// `app` its process name, a test run's stand-in window's
+/// [`super::TEST_STAND_IN_APP`]): web content, as a page's words are — an
+/// email or a web page can hold text the person never saw
+/// (`Selected::in_app`). `None`: nothing selected. Pure but for `app`, asked
+/// only for a selection.
+fn selected_in_app(text: Option<String>, app: impl FnOnce() -> String) -> Option<crate::chat::assistant::selected::Selected> {
+    let text = text.filter(|t| !t.trim().is_empty())?;
+    Some(crate::chat::assistant::selected::Selected::in_app(text, app()))
+}
+
+/// **What one of Yap's own windows has selected** (its in-page fallback):
+/// the person's own notes and documents, not web content
+/// (`Selected::in_yap`). `None`: nothing selected. Pure.
+fn selected_in_yap(text: String) -> Option<crate::chat::assistant::selected::Selected> {
+    Some(text).filter(|t| !t.trim().is_empty()).map(crate::chat::assistant::selected::Selected::in_yap)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Text selected in another app — an email, a page in the browser, the
+    /// test run's stand-in window — is web content for the turn about it;
+    /// text selected in one of Yap's own windows is the person's own.
+    #[test]
+    fn a_selection_from_another_app_is_web_content_and_one_in_yap_is_not() {
+        let mail = selected_in_app(Some("Hi Sam, can we move the review?".into()), || "OUTLOOK.EXE".into()).unwrap();
+        assert_eq!((mail.app.as_str(), mail.web), ("OUTLOOK.EXE", true));
+        let staged = selected_in_app(Some("error[E0425]".into()), || super::super::TEST_STAND_IN_APP.into()).unwrap();
+        assert_eq!((staged.app.as_str(), staged.web), ("e2e-stand-in.exe", true));
+        let own = selected_in_yap("My notes from Tuesday".into()).unwrap();
+        assert_eq!((own.app.as_str(), own.web), ("Yap", false));
+        // Nothing selected: nothing to ask about (and no app looked up).
+        assert!(selected_in_app(Some("  \n".into()), || unreachable!("no app for nothing selected")).is_none());
+        assert!(selected_in_app(None, || unreachable!("no app for nothing selected")).is_none());
+        assert!(selected_in_yap(" ".into()).is_none());
     }
 }

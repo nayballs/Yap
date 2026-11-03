@@ -418,7 +418,13 @@ The AI Chat surface (conversations, the tool-calling loop and its note tools) an
   search | none compares). **The safety rule**
   (`refused_after_web`, `ACTION_TOOLS` = open_app, create_note,
   update_note, edit_note, copy_to_clipboard): once web content is in a turn
-  (`Turn::seen`), a call to one is refused with a reason for the model (chip
+  (`Turn::seen`, or the loop's `screen_seen`: a search's results; a page
+  read — `read_page`, `read_open_page`, an action's page after,
+  `switch_tab`'s tab, the tab `open_page` closed to make room, named —; a
+  page's shot; the screen looked at; **text selected in another app or on a
+  page beside the chat** and asked about, from the turn's start —
+  `Selected::web`, `Extra::web_question` — never text selected in Yap's own
+  windows), a call to one is refused with a reason for the model (chip
   `Didn't open an app: not after reading the web`) — they stay offered:
   **every step of a turn offers the same tools and system prompt**
   (2026-10-22; taking them away changed the prompt's start, and a local
@@ -1435,8 +1441,9 @@ The AI Chat surface (conversations, the tool-calling loop and its note tools) an
   `says_yes`.
 - **`chat/assistant/selected.rs`** — a question about text selected in
   another app ([below](#questions-about-selected-text-2026-10-31)): the
-  `Selected { text, app }` a turn is about (a task-local, `with` /
-  `current`), what the model is told (`context_note`), the quote kept with
+  `Selected { text, app, web }` a turn is about (a task-local, `with` /
+  `current`; `in_app`: another app's, web content — `in_yap`: Yap's own
+  windows', not), what the model is told (`context_note`), the quote kept with
   the question (`quote`), "Select some text first" (`nothing_selected`,
   kind `askNoSelection`).
 - **`chat/assistant/skill.rs`** — **Skills by voice** ([below](#skills-by-voice-2026-11-03)):
@@ -1494,10 +1501,22 @@ history the model reads later as "(About this text the user selected in
 notepad: "…")", `ChatMessage::sent_text`, so a follow-up still knows what
 "this" was). Chat's model and effort (`ai/effort.rs`), web search when it's
 on. **Never typed into the app**: nothing is pasted, the selection stays
-selected and the clipboard as it was. **Network receipts**:
+selected and the clipboard as it was. **Web content** (3 Nov 2026): text
+selected in another app is web content for the turn about it, as a page's
+words are (`Selected::in_app`, `web`; the rewrite shortcut's question, Ask
+about the selection's shortcut and its test run's stand-in alike) — an
+email or a page in the browser can hold text the person never saw, hidden
+in what they selected — so that turn never opens an app, copies to the
+clipboard or changes memory, a model that isn't strong changes no note
+(`refused_after_web`), and page actions' typed-words check holds; it still
+answers about the text. Text selected in one of Yap's own windows (their
+in-page fallback, `Selected::in_yap`, "Yap") is the person's own notes and
+documents: not web content. **Network receipts**:
 `Feature::AssistantSelection`, "Voice Assistant + the selected text · Groq".
 Logs: lengths and how it was decided, never the text. Unit tests
-(`selected::tests`, `ask_or_edit::tests`, `input_hook`'s Ask shortcut);
+(`selected::tests`, `ask_or_edit::tests`, `input_hook`'s Ask shortcut,
+`pipeline::recording::tests`, the loop's
+`a_question_about_words_selected_in_another_app_can_never_make_the_chat_act`);
 e2e `ask-selection.spec.js`; robot `e2e-real/ask-selection.real.js`
 (passing, 31 Oct: a real Edge box and web page).
 
@@ -1860,8 +1879,12 @@ open a page or a search here when the user asks to open, show or search for
 something; websites never with `open_app`; read the page open beside the
 chat for "this page"; ≤ 400 tokens with the schemas), and every question
 says which tabs are open (`pages::tabs_line`: "Open beside the chat: tab 1
-"…" (…), in front; tab 2 … search results. read_open_page reads one.",
-from `view::open_tabs`):
+(wiki.example.com), in front; tab 2 (duckduckgo.com), search results.
+read_open_page reads one.", from `view::open_tabs`) — **each tab's number
+and site only** (3 Nov 2026): never its title or path, which the page
+writes and which went with every question while the tab stayed open, in
+turns the safety rule treats as clean; the model reads a tab
+(`read_open_page`, web content) to learn what's on it:
 - **`open_page { url? | search?, section? }`** (`show_page`, its earlier
   name, is the same): a live page in a **Page tab** (`stream::Event::Page
   {page: ShownPage}` opens it mid-turn; the answer keeps it,
@@ -1920,8 +1943,8 @@ from `view::open_tabs`):
   automated reading, web-and-apps.md; any of an engine's countries and hosts
   — google.de, cn.bing.com, html.duckduckgo.com, search.yahoo.com, Baidu,
   Yandex, Naver… — never a look-alike such as google.example.com) — refused,
-  the person reads it; a shot of one too. The tabs line gives each address
-  without its query or fragment (a search's words, a token).
+  the person reads it; a shot of one too. The tabs line gives each tab's
+  site only: its title and address come with a read (`tabs`).
 - **`snap_page { url? }`** — **only for a model that reads images**
   (`Gate::Look`; one that can't was only told not to describe it): the page
   in front when there's no url; the page's shot (`CapturePreview`, a PNG): the
@@ -2036,7 +2059,8 @@ from `view::open_tabs`):
   selection in another app is, `assistant/selected.rs`, the site named —
   **web content from the turn's start** (2 Nov 2026, `Selected::web`: the
   safety rule's, and typed words asked about, as after a page read; a
-  selection can hold text the person never saw) and
+  selection can hold text the person never saw — as one in another app is
+  since 3 Nov) and
   **Read aloud** (`read_aloud::start`); **Snip to Chat** always. **Yap's
   shortcuts while the page has the focus**: WebView2 runs ahead of the
   keyboard hook there as in Yap's own windows, so the controller's
@@ -2102,7 +2126,10 @@ review (safely, for any user, in any language Yap speaks).
   room, never renumbers it. Each action answers with the page afterwards
   (`act::after`: its title, address, `what_changed` — "went to …", "new on
   the page: …" — and its first 600 characters when it went somewhere new):
-  web content, the safety rule's. 30 actions a turn. The line (1 Nov 2026,
+  web content, the safety rule's. So is `switch_tab`'s answer (the tab's
+  title and address), and `open_page`'s note naming the tab it closed to
+  make room (`act::closed_note`; any model's) — both the page's words (3 Nov
+  2026). 30 actions a turn. The line (1 Nov 2026,
   after a paid browse evaluation: Claude Haiku 5.5 and Opus 5.5 asked in the
   chat before buying, so the person was asked twice, and opened a search
   engine's results to find something on a site, which Yap can't read): to

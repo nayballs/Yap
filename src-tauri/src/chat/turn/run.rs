@@ -87,7 +87,8 @@ pub(super) async fn with_tools(
         screen: g.screen,
         act: g.act,
         own_search: g.own_search,
-        // Words selected on a page beside the chat: the page's.
+        // Words selected in another app or on a page beside the chat (never
+        // one of Yap's own windows): web content.
         web_question: t.about_selection.as_ref().is_some_and(|s| s.web),
     };
     let looped = crate::chat::tools::run_tool_loop_with(

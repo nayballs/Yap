@@ -16,6 +16,9 @@
 //! is told what was selected and where ([`context_note`]). Chat's model and
 //! effort, web search when it's on; no window looked at, no screenshots or
 //! document passage taken, no app opened: the selection is what it's about.
+//! Text selected in another app, or on a page beside the chat, is **web
+//! content** for the turn (the safety rule, [`Selected::web`]); text selected
+//! in Yap's own windows isn't.
 //!
 //! The text is never logged above `debug` (lengths only).
 
@@ -31,11 +34,36 @@ pub struct Selected {
     /// The app's process name ("notepad.exe"; "Yap" for one of Yap's own
     /// windows; "" when unknown).
     pub app: String,
-    /// Selected on a page beside the chat ("Ask Yap about this",
-    /// `pages/view.rs`): the page's words, so the turn is a web one from its
-    /// start (the safety rule, `tools::Extra::web_question`) — a selection
-    /// can hold text the person never saw.
+    /// **Web content**: selected in another app ([`Selected::in_app`]: an
+    /// email, a web page in the browser, a document someone sent) or on a
+    /// page beside the chat ("Ask Yap about this", `pages/view.rs`), so the
+    /// turn is a web one from its start (the safety rule, `tools::Extra::
+    /// web_question`) — a selection can hold text the person never saw
+    /// (hidden in what they selected). Only a selection in one of Yap's own
+    /// windows ([`Selected::in_yap`]: the person's own notes and documents)
+    /// isn't.
     pub web: bool,
+}
+
+/// The app a selection in one of Yap's own windows names.
+pub const YAP: &str = "Yap";
+
+impl Selected {
+    /// **Selected in another app** (`app`, its process name): Ask about the
+    /// selection's shortcut, the rewrite shortcut's question — web content
+    /// (3 Nov 2026), as a page's words are: that turn never opens an app,
+    /// copies to the clipboard or changes memory, and a small model changes
+    /// no note (`tools::refused_after_web`); it still answers about the text.
+    pub fn in_app(text: String, app: String) -> Self {
+        Self { text, app, web: true }
+    }
+
+    /// **Selected in one of Yap's own windows** (their in-page fallback, with
+    /// what the page has selected): the person's own notes and documents,
+    /// not web content.
+    pub fn in_yap(text: String) -> Self {
+        Self { text, app: YAP.into(), web: false }
+    }
 }
 
 tokio::task_local! {
@@ -171,6 +199,15 @@ mod tests {
         // An answer never carries one.
         let a = crate::chat::chats::ChatMessage { role: "assistant".into(), text: "It's a painting.".into(), ..m.clone() };
         assert_eq!(a.sent_text(), "It's a painting.");
+    }
+
+    #[test]
+    fn another_apps_selection_is_web_content_and_yaps_own_is_not() {
+        let mail = Selected::in_app("Hi Sam".into(), "OUTLOOK.EXE".into());
+        assert_eq!(mail, Selected { text: "Hi Sam".into(), app: "OUTLOOK.EXE".into(), web: true });
+        // An app Yap couldn't name is still another app.
+        assert!(Selected::in_app("Hi".into(), String::new()).web);
+        assert_eq!(Selected::in_yap("My notes".into()), Selected { text: "My notes".into(), app: "Yap".into(), web: false });
     }
 
     #[test]
