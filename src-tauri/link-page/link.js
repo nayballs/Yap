@@ -662,10 +662,19 @@ const SQUARE = ['M7.5 5h9A2.5 2.5 0 0 1 19 7.5v9a2.5 2.5 0 0 1-2.5 2.5h-9A2.5 2.
 const speakingNow = (t) => S.speakingTurn === t.id && phaseNow() === 'speaking';
 
 /**
+ * The answer ▶ Read aloud is saying, when it's one in the thread: its ▶ is
+ * the one Stop then (in place, where the thumb just was), and the
+ * composer's Stop stays away. Otherwise the composer's Stop is the one.
+ */
+const readingInThread = () => !!S.reading && S.turns.some((t) => t.answerId === S.reading);
+
+/**
  * Chat's thread: your question in its amber-washed bubble (🎙 when it was
  * said), the answer in Chat's card with its markdown (markdown.js: built as
- * nodes, never HTML), and under a finished one ▶ Read aloud (■ while it's
- * read), as Chat's messages have it.
+ * nodes, never HTML), and under a finished one ▶ Read aloud, as Chat's
+ * messages have it. While an answer is said, the bar's three bars and
+ * "Speaking…" under it, a status only; ▶ that started it turns into Stop in
+ * place. One Stop at a time (the composer's for a spoken answer).
  */
 function renderConvo() {
   const frag = document.createDocumentFragment();
@@ -697,17 +706,21 @@ function renderConvo() {
     }
     const speaking = speakingNow(t);
     const readable = t.final && t.a && t.answerId && can('read_aloud');
+    // Said because its ▶ was tapped: Stop there, in place.
+    const readHere = speaking && !!S.reading && t.answerId === S.reading;
     if (readable || speaking) {
       const foot = document.createElement('div');
       foot.className = 'msgfoot';
-      const b = document.createElement('button');
-      b.type = 'button';
-      b.className = 'readbtn' + (speaking ? ' on' : '');
-      b.dataset.testid = 'read-aloud';
-      b.appendChild(icon('', speaking ? SQUARE : PLAY, true));
-      b.appendChild(document.createTextNode(speaking ? 'Stop' : 'Read aloud'));
-      b.addEventListener('click', () => (speaking ? interrupt() : readAloud(t)));
-      foot.appendChild(b);
+      if (readHere || (readable && !speaking)) {
+        const b = document.createElement('button');
+        b.type = 'button';
+        b.className = 'readbtn' + (readHere ? ' on' : '');
+        b.dataset.testid = 'read-aloud';
+        b.appendChild(icon('', readHere ? SQUARE : PLAY, true));
+        b.appendChild(document.createTextNode(readHere ? 'Stop' : 'Read aloud'));
+        b.addEventListener('click', () => (readHere ? interrupt() : readAloud(t)));
+        foot.appendChild(b);
+      }
       if (speaking) {
         const s = document.createElement('span');
         s.className = 'speaking';
@@ -1769,7 +1782,9 @@ function render() {
   el.talkTime.textContent = listening ? clock(S.frames * (FRAME_SAMPLES / LINK_RATE)) : '';
   el.meter.dataset.on = String(listening);
   el.sendBtn.hidden = capsule || !S.typed;
-  el.stopBtn.hidden = now !== 'speaking';
+  // One Stop at a time: the composer's, unless ▶ on an answer in the thread
+  // is what's playing (then its own Stop, in place).
+  el.stopBtn.hidden = now !== 'speaking' || readingInThread();
   // ✕ while it listens; ■ while it works the question out (none while
   // there are words to send instead).
   el.cancelBtn.hidden = !(capsule || (now === 'working' && !S.typed));

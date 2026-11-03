@@ -122,10 +122,11 @@ test('▶ Read aloud: read_aloud with the answer’s id, Yap’s voice on the ph
   pc.send({ type: 'speak_start', rate: 24000 });
   for (let i = 0; i < 30; i++) pc.sendBinary(downFrame(i, voice(24000, 100)));
   await expect.poll(async () => (await snapshot(page)).player.state).toBe('playing');
-  // That answer says so: ■ Stop and "Speaking…"; Stop in the composer too.
+  // ▶ turned into Stop in place, "Speaking…" beside it: the one Stop (none in the composer).
   await expect(page.getByTestId('read-aloud')).toHaveText('Stop');
   await expect(page.getByText('Speaking…')).toBeVisible();
-  await expect(page.getByTestId('stop')).toBeVisible();
+  await expect(page.getByTestId('stop')).toBeHidden();
+  await expect(page.getByRole('button', { name: 'Stop' })).toHaveCount(1);
   expect((await snapshot(page)).reading).toBe('chat:7:1');
   // ■ under it: the voice stops at once, the PC told.
   await page.getByTestId('read-aloud').click();
@@ -147,6 +148,48 @@ test('▶ Read aloud: read_aloud with the answer’s id, Yap’s voice on the ph
   await expect(page.getByTestId('read-aloud')).toHaveText('Read aloud');
   // Still no mic for any of it.
   expect(pc.of('start')).toHaveLength(0);
+});
+
+test('one Stop while Yap speaks: the composer’s for a spoken answer, ▶’s own for an answer read aloud', async ({ page }) => {
+  const pc = await mockPc(page);
+  await open(page);
+  await ready(page, pc);
+  await type(page, pc, QUESTION);
+  answer(pc, 'It opens at 8 am on Sundays.', 'chat:7:1');
+  await expect(page.getByTestId('read-aloud')).toHaveText('Read aloud');
+  // A spoken question, its answer said.
+  await ask(page, pc, 300);
+  pc.send({ type: 'heard', text: 'And when does it close?' });
+  pc.send({ type: 'state', phase: 'thinking' });
+  pc.send({ type: 'answer', text: 'At 1 pm.', final: true, id: 'chat:7:3' });
+  pc.send({ type: 'state', phase: 'speaking' });
+  pc.send({ type: 'speak_start', rate: 24000 });
+  for (let i = 0; i < 30; i++) pc.sendBinary(downFrame(i, voice(24000, 100)));
+  await expect(page.getByTestId('stop')).toBeVisible();
+  // Under it only the status: the bars and "Speaking…", no Stop of its own.
+  const spoken = page.getByTestId('turn').last();
+  await expect(spoken.locator('.speaking')).toHaveText('Speaking…');
+  await expect(spoken.getByRole('button')).toHaveCount(0);
+  // The earlier answer keeps its ▶; one Stop on the page, the composer's.
+  await expect(page.getByTestId('turn').first().getByTestId('read-aloud')).toHaveText('Read aloud');
+  await expect(page.getByRole('button', { name: 'Stop' })).toHaveCount(1);
+  // ▶ on the earlier answer: that one plays, its ▶ the Stop now.
+  await page.getByTestId('turn').first().getByTestId('read-aloud').click();
+  await expect.poll(() => pc.of('read_aloud')).toEqual([{ type: 'read_aloud', id: 'chat:7:1' }]);
+  pc.send({ type: 'state', phase: 'idle' });
+  pc.send({ type: 'state', phase: 'speaking' });
+  pc.send({ type: 'speak_start', rate: 24000 });
+  for (let i = 0; i < 30; i++) pc.sendBinary(downFrame(i, voice(24000, 100)));
+  await expect(page.getByTestId('turn').first().getByTestId('read-aloud')).toHaveText('Stop');
+  await expect(page.getByTestId('turn').first().locator('.speaking')).toHaveText('Speaking…');
+  await expect(page.getByTestId('stop')).toBeHidden();
+  await expect(page.getByRole('button', { name: 'Stop' })).toHaveCount(1);
+  // The spoken one's ▶ is back.
+  await expect(page.getByTestId('turn').last().getByTestId('read-aloud')).toHaveText('Read aloud');
+  // Its Stop: the PC told (▶ over the spoken answer needed none: read_aloud abandons what plays).
+  await page.getByTestId('turn').first().getByTestId('read-aloud').click();
+  await expect.poll(() => pc.of('interrupt').length).toBe(1);
+  await expect(page.getByRole('button', { name: 'Stop' })).toHaveCount(0);
 });
 
 test('typing while Yap speaks: its voice stops (interrupt), then the typed question goes', async ({ page }) => {

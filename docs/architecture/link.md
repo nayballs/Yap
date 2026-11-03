@@ -50,7 +50,9 @@ composer** at the bottom: the text box (Enter sends, Shift+Enter a new line,
 it grows to five lines), Send, and **Talk, the Yap bar's pill**, one big
 target under the thumb, which turns into the bar's capsule while Yap listens
 (✕, the ✦ and the bar's live waveform, the time, Send) and has ■ Stop beside
-it while Yap speaks. The model chip sits under the composer as in Chat; the
+it while Yap speaks — the one Stop: under the answer being said only the
+bar's bars and "Speaking…"; when ▶ on an answer started it, that ▶ is the
+Stop, in place, and the composer has none. The model chip sits under the composer as in Chat; the
 settings (Hands-free and its wait, Clearer sound, the microphone, Sound
 details) are a sheet from ⋯. It follows Yap's tokens — `link.css` copies
 `src/app.css`'s `--yap-*` values, light and the warm dark, following the
