@@ -5,9 +5,12 @@
 //! model evaluations all ask through [`chat_turn`].
 //!
 //! Its parts: `fast` (the turns Yap answers itself, no model: an app, a
-//! page, a Skill's question, the passages).
+//! page, a Skill's question, the passages) and `gates` (what this model
+//! may do in this turn: tools, the web and whose search, pictures, the
+//! screen, pages, the calendar).
 
 mod fast;
+mod gates;
 
 use tauri::AppHandle;
 
@@ -54,6 +57,25 @@ pub(crate) fn resolve_chat_endpoint(
         ));
     }
     Ok((base_url, api_key, model, provider, persona, disable_thinking))
+}
+
+/// The Chat scope's endpoint and persona ([`resolve_chat_endpoint`]), as a
+/// turn uses them.
+struct Endpoint {
+    base_url: String,
+    api_key: String,
+    model: String,
+    provider: String,
+    persona: String,
+    disable_thinking: bool,
+}
+
+impl Endpoint {
+    /// [`resolve_chat_endpoint`]'s, named.
+    fn resolve(cfg: &YapConfig) -> Result<Endpoint, String> {
+        let (base_url, api_key, model, provider, persona, disable_thinking) = resolve_chat_endpoint(cfg)?;
+        Ok(Endpoint { base_url, api_key, model, provider, persona, disable_thinking })
+    }
 }
 
 /// **Does Claude search in Chat's own request?** (llm/anthropic.rs, web/
@@ -284,10 +306,10 @@ async fn answer_turn(
         }
     }
     let endpoint = match crate::ai::ai_model::wake_on_device(&cfg).await {
-        Ok(_) => resolve_chat_endpoint(&cfg),
+        Ok(_) => Endpoint::resolve(&cfg),
         Err(e) => Err(e),
     };
-    let (base_url, api_key, model, provider, persona, disable_thinking) = match endpoint {
+    let ep = match endpoint {
         Ok(e) => e,
         // Asked across the meetings with no model to answer: the passages
         // that match, themselves.
@@ -298,57 +320,23 @@ async fn answer_turn(
     // The on-device model is busy for the whole turn — between its tool
     // steps too, while a web search or a page read runs — so a context
     // restart or a runtime swap never cuts the answer off.
-    let _sidecar = crate::ai::local_llm::hold(&base_url);
+    let _sidecar = crate::ai::local_llm::hold(&ep.base_url);
     // Who answers, as the chip named it, kept with the answer.
     let answered_by = crate::ai::ai_model::describe(
-        &provider,
-        &model,
-        &base_url,
+        &ep.provider,
+        &ep.model,
+        &ep.base_url,
         &crate::ai::local_llm::active_model_display(&cfg),
     )
     .chat_model();
 
     // A summary being written on this PC steps aside for the question.
     crate::chat::compact::turn_started();
-    let tools_supported = crate::chat::tools::supports_tools(&provider, &model);
-    // Which documents' tools (documents.rs): the rich set for the models that
-    // handle it, the simple one for the rest.
-    let doc_tools = crate::chat::documents::ToolSet::for_model(&provider, &model);
-    // A strong model (documents/rich.rs `strong`: Claude, GPT-5, Gemini…):
-    // its notes and documents still change after the web, and a document
-    // it writes is researched deeper and thought through first.
-    let strong = tools_supported && crate::chat::documents::rich::strong(&provider, &model);
-    // A strong Claude searches and reads pages itself, in Chat's own
-    // request (llm/anthropic.rs, web/native.rs `in_chat`): Anthropic's web
-    // tools in place of Yap's `web_search` and `read_page` — with "The AI's
-    // own search" on and Yap able to use it for this model.
-    let claude_in_chat = in_chat(&cfg, &provider, &model, &base_url, &api_key);
-    // Any other cloud model with "The AI's own search" on searches with its
-    // provider's own search, which reads the pages: Yap's `read_page`
-    // isn't offered (own tools only, the maintainer, 1 Nov 2026).
-    let own_search = cfg.web_search && !claude_in_chat && crate::web::Settings::for_chat(&cfg, &provider, &model, &base_url, &api_key).native.is_some();
-    let web_lines = crate::chat::tools::WebLines::of(strong, claude_in_chat, own_search);
+    // What this model may do in this turn (gates.rs).
+    let gates = gates::Gates::for_turn(&cfg, &ep, scope, meetings, chat_in_view);
+    let gates::Gates { tools: tools_supported, doc_tools, strong, claude_in_chat, own_search, web_lines, web_on, pictures, screen, act, calendar: calendar_on } = gates;
+    let Endpoint { base_url, api_key, model, provider, persona, disable_thinking } = ep;
     let in_message = tools_supported;
-    // "Look things up on the web" (web.rs). Not for the Meetings view's Ask
-    // bar: that's about the meetings.
-    let web_on = cfg.web_search && !meetings;
-    // Pictures from the web (chat/pictures.rs): looked at and shown by a
-    // model that reads images, shown by any other that calls tools.
-    // (Not for the Voice Assistant away from Chat, nor a phone: no panel
-    // there to see them in.)
-    let pictures = crate::chat::pictures::Gate::for_model(web_on && tools_supported && (scope != Some("assistant") || chat_in_view), &provider, &model);
-    // The screen (chat/see_screen.rs): with tools and the switch on, web or
-    // not — with Chat in view (a phone's question never captures the PC;
-    // the Voice Assistant from another app has its own look at the window
-    // in front).
-    let screen = if chat_in_view { crate::chat::see_screen::gate(&cfg, tools_supported, &provider, &model) } else { crate::chat::pictures::Gate::Off };
-    // Acting on the pages beside the chat (chat/pages/act.rs): the models
-    // proven good at it, in a typed Chat turn (never the Voice Assistant
-    // or the meetings: a click that buys asks in Chat's thread).
-    let act = pictures != crate::chat::pictures::Gate::Off && scope.is_none() && !meetings && crate::chat::pages::act::can_act(&provider, &model);
-    // The calendar (chat/tools/calendar.rs): a tool while one is connected
-    // (not across the meetings, whose passages are numbered on their own).
-    let calendar_on = !meetings && crate::calendar::connected();
     let calendar_log = crate::chat::tools::calendar::Log::default();
     // About you (about_you.rs): where the person is, their money and units,
     // name and note — last in the system prompt, below; their clock in the
@@ -365,26 +353,7 @@ async fn answer_turn(
     let (context_size, context_known) = crate::chat::budget::context_window(&cfg, &provider, &model, &base_url).await;
     let label = crate::chat::budget::model_label(&provider, &model, &crate::ai::local_llm::active_model_display(&cfg));
     let plain = |e: String| crate::chat::budget::plain_error(e, &label, context_size, &provider);
-    let extra_flags = crate::chat::tools::Extra {
-        memory: true,
-        search_chats: cfg.memory_search_chats,
-        conversation: conversation_id,
-        calendar: calendar_on.then_some(crate::chat::tools::CalendarTurn { log: &calendar_log, zone: crate::chat::tools::calendar::Zone::of(None), now: 0 }),
-        room: None,
-        docs: None,
-        doc_tools,
-        strong,
-        pictures,
-        screen,
-        act,
-        own_search,
-        web_question: false,
-    };
-    let schemas = if tools_supported {
-        counter.count(&crate::chat::tools::offered_tools(cfg.open_apps, web_on && !claude_in_chat, extra_flags).to_string()).await
-    } else {
-        0
-    };
+    let schemas = gates.schemas(&cfg, &counter, conversation_id).await;
     // The question as sent: its text, and the screenshots it carries, each
     // by its size where it goes (`budget::image_tokens_at`).
     let question_tokens = counter.count(&text).await
@@ -392,7 +361,7 @@ async fn answer_turn(
         + crate::snip::turn::images().iter().filter(|i| !i.as_text).map(|i| counter.picture(i.w, i.h)).sum::<u64>();
     let rate_cap = crate::chat::budget::rate_cap(&provider);
     if mode != crate::chat::budget::Mode::Messages {
-        let stable = stable_prompt(&cfg, &persona, tools_supported, doc_tools, web_lines, web_on, pictures, act, calendar_on, &profile, now);
+        let stable = gates.stable_prompt(&cfg, &persona, &profile, now);
         let fixed_now = counter.count(&stable).await + schemas;
         let guess = crate::chat::budget::budget(context_size, context_known, fixed_now, kind, tools_supported, rate_cap);
         if question_tokens > guess.history {
@@ -1339,45 +1308,20 @@ pub(crate) fn more_room(view: &crate::ai::local_llm::context::ContextView) -> Op
 #[tauri::command]
 pub async fn chat_limits() -> Limits {
     let cfg = config::load();
-    let Ok((base_url, key, model, provider, persona, _thinking)) = resolve_chat_endpoint(&cfg) else {
+    let Ok(ep) = Endpoint::resolve(&cfg) else {
         return Limits::default();
     };
-    let tools_supported = crate::chat::tools::supports_tools(&provider, &model);
-    let doc_tools = crate::chat::documents::ToolSet::for_model(&provider, &model);
-    let strong = tools_supported && crate::chat::documents::rich::strong(&provider, &model);
-    let web_on = cfg.web_search;
-    let pictures = crate::chat::pictures::Gate::for_model(web_on && tools_supported, &provider, &model);
-    let screen = crate::chat::see_screen::gate(&cfg, tools_supported, &provider, &model);
-    let act = pictures != crate::chat::pictures::Gate::Off && crate::chat::pages::act::can_act(&provider, &model);
-    let claude_in_chat = in_chat(&cfg, &provider, &model, &base_url, &key);
-    let own_search = cfg.web_search && !claude_in_chat && crate::web::Settings::for_chat(&cfg, &provider, &model, &base_url, &key).native.is_some();
-    let calendar_on = crate::calendar::connected();
-    let counter = crate::chat::budget::Counter::for_call(&provider, &base_url);
-    let (context, context_known) = crate::chat::budget::context_window(&cfg, &provider, &model, &base_url).await;
+    // As a question typed in Chat has them.
+    let gates = gates::Gates::for_turn(&cfg, &ep, None, false, true);
+    let counter = crate::chat::budget::Counter::for_call(&ep.provider, &ep.base_url);
+    let (context, context_known) = crate::chat::budget::context_window(&cfg, &ep.provider, &ep.model, &ep.base_url).await;
     let profile = crate::ai::about_you::profile(&cfg);
-    let web_lines = crate::chat::tools::WebLines::of(strong, claude_in_chat, own_search);
-    let stable = stable_prompt(&cfg, &persona, tools_supported, doc_tools, web_lines, web_on, pictures, act, calendar_on, &profile, crate::ai::eval::now());
-    let log = crate::chat::tools::calendar::Log::default();
-    let extra = crate::chat::tools::Extra {
-        memory: true,
-        search_chats: cfg.memory_search_chats,
-        conversation: None,
-        calendar: calendar_on.then_some(crate::chat::tools::CalendarTurn { log: &log, zone: crate::chat::tools::calendar::Zone::of(None), now: 0 }),
-        room: None,
-        docs: None,
-        doc_tools,
-        strong,
-        pictures,
-        screen,
-        act,
-        own_search,
-        web_question: false,
-    };
-    let schemas = if tools_supported { counter.count(&crate::chat::tools::offered_tools(cfg.open_apps, web_on && !claude_in_chat, extra).to_string()).await } else { 0 };
+    let stable = gates.stable_prompt(&cfg, &ep.persona, &profile, crate::ai::eval::now());
+    let schemas = gates.schemas(&cfg, &counter, None).await;
     let fixed = counter.count(&stable).await + schemas;
-    let budget = crate::chat::budget::budget(context, context_known, fixed, crate::chat::budget::Kind::Chat, tools_supported, crate::chat::budget::rate_cap(&provider));
-    let label = crate::chat::budget::model_label(&provider, &model, &crate::ai::local_llm::active_model_display(&cfg));
-    let more = (provider == crate::ai::local_llm::PROVIDER_ONDEVICE).then(|| more_room(&crate::ai::local_llm::context::context_view(&cfg))).flatten();
+    let budget = crate::chat::budget::budget(context, context_known, fixed, crate::chat::budget::Kind::Chat, gates.tools, crate::chat::budget::rate_cap(&ep.provider));
+    let label = crate::chat::budget::model_label(&ep.provider, &ep.model, &crate::ai::local_llm::active_model_display(&cfg));
+    let more = (ep.provider == crate::ai::local_llm::PROVIDER_ONDEVICE).then(|| more_room(&crate::ai::local_llm::context::context_view(&cfg))).flatten();
     Limits {
         question_max: budget.history,
         context,
@@ -1385,7 +1329,7 @@ pub async fn chat_limits() -> Limits {
         too_long: crate::chat::budget::too_long(&label, context),
         label,
         more,
-        provider: crate::privacy::net::provider_name(&provider).to_string(),
+        provider: crate::privacy::net::provider_name(&ep.provider).to_string(),
     }
 }
 
