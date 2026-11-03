@@ -26,8 +26,11 @@
 //!   become dictation vocabulary — the Whisper prompt, and for ONNX models a
 //!   careful near-miss pass that never swallows an ordinary word.
 //! - **Settings → Memory** (`MemorySection.svelte`): the switches, the
-//!   sections, editing, "Tell Yap what to change", import, export (a .zip of
-//!   Markdown), clear all.
+//!   sections, editing, "Tell Yap what to change", import (pasted from
+//!   another assistant through the Chat model, or a file — Claude's memory
+//!   export, Yap's own — read on this PC with no model: `memory/import.rs`),
+//!   export (a .zip of Markdown), "Copy for Claude" (plain text for another
+//!   assistant's import), clear all.
 //!
 //! Kept here and sent only with questions to the AI model the person uses
 //! (a cloud provider sees it, a model on this PC keeps it here); never sent
@@ -35,6 +38,7 @@
 
 pub mod export;
 pub mod guard;
+pub mod import;
 pub mod learn;
 pub mod ops;
 pub mod prompt;
@@ -42,7 +46,6 @@ pub mod small;
 pub mod vocab;
 
 use std::collections::{BTreeMap, VecDeque};
-#[cfg(not(test))]
 use std::path::PathBuf;
 use std::sync::{Mutex, OnceLock};
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -838,6 +841,98 @@ pub fn memory_export(path: String) -> Result<(), String> {
     std::fs::write(&path, bytes).map_err(|e| format!("Couldn't save the export: {e}"))
 }
 
+// ---- a file import, Copy for Claude ------------------------------------------------------------
+
+/// "Import a file…": Windows' open dialog (`folder`: a folder), the file
+/// read and mapped on this PC with no AI model (`import.rs`), its changes
+/// a proposal for the import's review (`memory_apply`). `None`: cancelled.
+#[tauri::command]
+pub async fn memory_import_file_pick(app: AppHandle, window: tauri::WebviewWindow, folder: Option<bool>) -> Result<Option<learn::Proposal>, String> {
+    let Some(path) = import::pick(&app, window, folder.unwrap_or(false)).await? else {
+        return Ok(None);
+    };
+    import_file(path).await.map(Some)
+}
+
+/// A file or folder dropped on Settings → Memory (Tauri's drop gives its
+/// path): the same as "Import a file…".
+#[tauri::command]
+pub async fn memory_import_file_add(path: String) -> Result<learn::Proposal, String> {
+    import_file(PathBuf::from(path)).await
+}
+
+/// Read `path` (`import::read`, off the main thread), map it, merge it
+/// with what Yap has, and keep it as a proposal. Logs counts only.
+async fn import_file(path: PathBuf) -> Result<learn::Proposal, String> {
+    let read = tauri::async_runtime::spawn_blocking(move || import::read(&path)).await.map_err(|e| e.to_string())??;
+    let m = import::mapped(&read.docs);
+    let cfg = crate::config::load();
+    let about = crate::ai::about_you::profile(&cfg);
+    let now = items();
+    let changes = ops::drop_about_you(import::changes(&m.things, &now), &now, &about.name, &about.about);
+    let fact_count: usize = m.things.iter().map(|t| t.facts.len()).sum();
+    tracing::info!(
+        files = m.files,
+        skipped = read.skipped,
+        things = m.things.len(),
+        fact_count,
+        unplaced = m.unplaced.values().sum::<usize>(),
+        changes = changes.len(),
+        from = m.from,
+        "Memory: read a file to import"
+    );
+    if m.files == 0 {
+        return Err("Yap found no memory in that: Claude's export is a .zip of Markdown files (.md).".into());
+    }
+    let notes = import::read_notes(&read, &m);
+    Ok(learn::propose_file(changes, m.from, cfg.memory_sensitive, notes))
+}
+
+/// What a test run's "Copy for Claude" would have put on the clipboard.
+static TEST_CLIPBOARD: Mutex<Option<String>> = Mutex::new(None);
+
+/// "Copy for Claude": memory as plain text (`export::plain`: About you,
+/// Preferences, Profile, People, Projects, Topics, a line a fact) on the
+/// clipboard for the Claude app's "Start import" (or ChatGPT's), kept out
+/// of Win+V history and cloud sync as "Copy last transcript" is. How many
+/// lines went. A test run never touches the real clipboard.
+#[tauri::command]
+pub async fn memory_copy_for_claude() -> Result<usize, String> {
+    let p = crate::ai::about_you::profile(&crate::config::load());
+    let about = [("Name", p.name), ("Region", p.region.country_name.unwrap_or_default()), ("Note", p.about)];
+    let text = export::plain(&items(), &about);
+    if text.is_empty() {
+        return Err("There's nothing in memory to copy yet.".into());
+    }
+    let lines = text.lines().filter(|l| l.starts_with("- ")).count();
+    tauri::async_runtime::spawn_blocking(move || {
+        if crate::shell::e2e::active() && !crate::shell::realtest::on() {
+            *TEST_CLIPBOARD.lock().unwrap_or_else(|p| p.into_inner()) = Some(text);
+            return Ok(());
+        }
+        if crate::pasting::text_injector::copy_privately(&text) {
+            Ok(())
+        } else {
+            Err("Windows didn't let Yap use the clipboard. Try again in a moment.".to_string())
+        }
+    })
+    .await
+    .map_err(|e| e.to_string())??;
+    tracing::info!(lines, "Memory: copied for another assistant");
+    Ok(lines)
+}
+
+/// Test mode: what the last "Copy for Claude" would have put on the
+/// clipboard (taken).
+#[cfg(debug_assertions)]
+#[tauri::command]
+pub fn e2e_memory_clipboard() -> Result<Option<String>, String> {
+    if !crate::shell::e2e::active() {
+        return Err("test mode only".into());
+    }
+    Ok(TEST_CLIPBOARD.lock().unwrap_or_else(|p| p.into_inner()).take())
+}
+
 /// Debug-only (the e2e suite): run the learning pass over a conversation
 /// now, as a quiet chat would, toast included.
 #[cfg(debug_assertions)]
@@ -919,6 +1014,48 @@ mod tests {
         assert!(items().is_empty());
         undo(cleared).unwrap();
         assert_eq!(items().len(), 1);
+    }
+
+    #[test]
+    fn a_file_import_is_reviewed_then_kept_in_one_batch() {
+        let (sam, _) = save_item(ItemInput {
+            id: None,
+            section: Section::People,
+            title: "Sam".into(),
+            summary: String::new(),
+            details: vec!["Birthday 14 March".into()],
+            dictation: true,
+        })
+        .unwrap();
+        let thing = |section, title: &str, about: &str, facts: &[&str]| import::Thing {
+            section,
+            title: title.into(),
+            about: about.into(),
+            facts: facts.iter().map(|f| f.to_string()).collect(),
+        };
+        let things = vec![
+            thing(Section::People, "Sam Reed", "Brother-in-law", &["Birthday 14 March", "Lives in Leeds"]),
+            thing(Section::Topics, "Chess", "", &["Plays online"]),
+        ];
+        let p = learn::propose_file(import::changes(&things, &items()), "Claude", false, vec![]);
+        assert_eq!((p.kind, p.from.as_deref()), ("import", Some("Claude")));
+        assert_eq!(p.changes.len(), 2);
+        assert_eq!(p.changes[0].facts_added, ["Lives in Leeds"]);
+        // Nothing is kept before the person says so.
+        assert_eq!(items().len(), 1);
+        let applied = learn::apply_proposal(p.id, None).unwrap();
+        assert!(applied.batch > 0);
+        let now = items();
+        assert_eq!(now.len(), 2);
+        let s = now.iter().find(|i| i.id == sam.id).unwrap();
+        assert_eq!((s.title.as_str(), s.summary.as_str()), ("Sam Reed", "Brother-in-law"));
+        assert_eq!(s.details, ["Birthday 14 March", "Lives in Leeds"]);
+        assert_eq!(s.source, Origin::new("import", None, "Claude"));
+        // One batch: one Undo takes all of it back.
+        undo(applied.batch).unwrap();
+        let back = items();
+        assert_eq!(back.len(), 1);
+        assert_eq!((back[0].title.as_str(), back[0].details.clone()), ("Sam", vec!["Birthday 14 March".to_string()]));
     }
 
     #[test]

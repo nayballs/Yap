@@ -19,6 +19,13 @@
   // - Import (a prompt to copy into ChatGPT / Claude / Gemini, its answer
   //   pasted back, the changes reviewed one by one) and Export (a .zip of
   //   Markdown, one file per section, through the save dialog).
+  // - "Import a file…" (memory/import.rs, 2026-11-03): Claude's memory
+  //   export (.zip, its folder, a .md file) or Yap's own, picked in Windows'
+  //   dialog (opened in Rust) or dropped on the page; read on this PC with
+  //   no AI model, then the same review (what didn't fit, and why, said
+  //   above it), applied as one batch with Undo.
+  // - "Copy for Claude": memory as plain text on the clipboard (out of
+  //   Win+V history) for Claude's or ChatGPT's memory import.
   // - "Clear all memory" (asked first), and the privacy line.
   //   cfg:  Settings' config $state.
   //   goto: Settings' link to another page ("general#about-name").
@@ -34,11 +41,40 @@
   import { toast } from '../ui/toast.svelte.js';
   import { showSaveError } from '../notices/saveErrors.js';
   import { askConfirm } from '../ui/contextMenu.svelte.js';
-  import { memory, loadMemory, changedToast } from '../stores/memory.svelte.js';
+  import { getCurrentWebview } from '@tauri-apps/api/webview';
+  import { memory, loadMemory, changedToast, setMemoryDropZone, memoryTakesDrops } from '../stores/memory.svelte.js';
 
   let { cfg, goto = (where) => window.dispatchEvent(new CustomEvent('yap-settings-goto', { detail: where })) } = $props();
 
   onMount(loadMemory);
+
+  // A file dropped while this page is on screen is a file import (Chat and
+  // Upload, under Settings, leave it: memoryTakesDrops).
+  let dropZone = $state(null);
+  let dragging = $state(false);
+  $effect(() => {
+    setMemoryDropZone(dropZone);
+    return () => setMemoryDropZone(null);
+  });
+  onMount(() => {
+    const drop = getCurrentWebview().onDragDropEvent((event) => {
+      const t = event.payload.type;
+      if (!memoryTakesDrops()) {
+        dragging = false;
+        return;
+      }
+      if (t === 'enter' || t === 'over') dragging = true;
+      else if (t === 'leave') dragging = false;
+      else if (t === 'drop') {
+        dragging = false;
+        const path = (event.payload.paths || [])[0];
+        if (path) importFile(() => invoke('memory_import_file_add', { path }));
+      }
+    });
+    return () => {
+      drop.then((u) => u && u()).catch(() => {});
+    };
+  });
 
   // ---- the sections ---------------------------------------------------------------------------
   const YOU = [
@@ -113,7 +149,8 @@
       case 'tell':
         return 'You told Yap';
       case 'import':
-        return 'Imported';
+        // A file import names where from ("Claude", "a Yap export").
+        return i.source?.title && i.source.title !== 'Imported' ? `Imported from ${i.source.title}` : 'Imported';
       default:
         return 'Added by you';
     }
@@ -278,6 +315,51 @@
     importIncluded = importIncluded.includes(i) ? importIncluded.filter((x) => x !== i) : [...importIncluded, i];
   }
 
+  // ---- a file import (no AI model: memory/import.rs) -----------------------------------------------
+  let fileBusy = $state(false);
+  let fileProposal = $state(null);
+  let fileIncluded = $state([]);
+
+  /** Where a file import came from, as the review's heading says it. */
+  const fromWords = (from) => (from === 'Claude' ? 'Claude’s memory export' : from === 'a Yap export' ? 'a Yap memory export' : 'the file');
+
+  /** Run a file import (`read`: the pick or the drop), then show its review. */
+  async function importFile(read) {
+    if (fileBusy) return;
+    fileBusy = true;
+    try {
+      const p = await read();
+      if (!p) return; // the dialog was cancelled
+      fileProposal = p;
+      fileIncluded = p.changes.map((c) => c.change);
+    } catch (err) {
+      toast({ title: "Yap couldn't import that", description: String(err), variant: 'destructive' });
+    } finally {
+      fileBusy = false;
+    }
+  }
+
+  const pickFile = (folder) => importFile(() => invoke('memory_import_file_pick', { folder }));
+
+  function toggleFile(i) {
+    fileIncluded = fileIncluded.includes(i) ? fileIncluded.filter((x) => x !== i) : [...fileIncluded, i];
+  }
+
+  // ---- Copy for Claude -----------------------------------------------------------------------------
+  async function copyForClaude() {
+    try {
+      await invoke('memory_copy_for_claude');
+      toast({
+        title: 'Copied',
+        description: 'Paste it into Claude’s “Start import” (Settings → Memory) or ChatGPT’s memory import. It’s kept out of your clipboard history.',
+        variant: 'success',
+        duration: 4_000,
+      });
+    } catch (err) {
+      toast({ title: "Couldn't copy memory", description: String(err), variant: 'destructive' });
+    }
+  }
+
   // ---- export, clear ------------------------------------------------------------------------------
   async function exportMemory() {
     try {
@@ -318,7 +400,7 @@
   const total = $derived(memory.items.length);
 </script>
 
-{#snippet diff(changes, pick = null)}
+{#snippet diff(changes, pick = null, toggle = toggleIncluded)}
   <ul class="diff" aria-label="Proposed changes">
     {#each changes as c (c.change + ':' + c.id)}
       <li class="change {c.kind}">
@@ -326,7 +408,7 @@
           <input
             type="checkbox"
             checked={pick.includes(c.change)}
-            onchange={() => toggleIncluded(c.change)}
+            onchange={() => toggle(c.change)}
             aria-label={`Keep ${c.title}`}
           />
         {/if}
@@ -343,6 +425,7 @@
             {/if}
             {#each c.factsRemoved as f}<del>{f}</del>{/each}
             {#each c.factsAdded as f}<ins>{f}</ins>{/each}
+            {#each c.factsLeftOut ?? [] as f}<s class="left-out" title={`Didn’t fit: Yap keeps the last ${['profile', 'preferences'].includes(c.section) ? 16 : 8} facts`}>{f}</s>{/each}
           {/if}
         </span>
       </li>
@@ -400,7 +483,7 @@
     <div class="notice" role="note">
       <span class="text">
         Yap needs an AI model for memory
-        <span>Learning from your chats, “Tell Yap what to change” and imports use your Chat model. What you add yourself works without one.</span>
+        <span>Learning from your chats, “Tell Yap what to change” and pasted imports use your Chat model. What you add yourself, and importing a file, work without one.</span>
       </span>
       <Button variant="secondary" size="sm" onclick={() => goto('cleanup#chat')}>Language Models</Button>
     </div>
@@ -563,7 +646,7 @@
   </Group>
 
   <Group title="Import, export and clear" id="settings-memory-data">
-    <Row label="Import memory from other AI providers" desc="Bring in what ChatGPT, Claude or Gemini remembers about you" setting="memory-import">
+    <Row label="Import memory from other AI providers" desc="Paste what ChatGPT, Claude or Gemini remembers about you: your AI model turns it into memory" setting="memory-import">
       <Button variant="secondary" size="sm" onclick={openImport}>{importOpen ? 'Close' : 'Import'}</Button>
     </Row>
     {#if importOpen}
@@ -605,8 +688,62 @@
         </div>
       </Row>
     {/if}
+    <div class="dropzone" class:over={dragging} bind:this={dropZone}>
+      <Row
+        label="Import a file"
+        desc="Claude’s memory export (the .zip, its folder or a .md file) or Yap’s own. Read on this PC: nothing is sent anywhere. You can drop it here too."
+        setting="memory-import-file"
+      >
+        <div class="btns">
+          <Button variant="ghost" size="sm" disabled={fileBusy} onclick={() => pickFile(true)}>Folder…</Button>
+          <Button variant="secondary" size="sm" disabled={fileBusy} onclick={() => pickFile(false)}>{fileBusy ? 'Reading…' : 'Import a file…'}</Button>
+        </div>
+      </Row>
+      {#if dragging}
+        <p class="drop-hint" aria-hidden="true">Drop Claude’s memory export or Yap’s to import it</p>
+      {/if}
+    </div>
+    {#if fileProposal}
+      <Row>
+        <div class="import" role="region" aria-label="Import a file: review">
+          <p class="step">
+            {#if fileProposal.changes.length}
+              From {fromWords(fileProposal.from)}: untick anything Yap shouldn’t keep.
+            {:else}
+              Nothing new in {fromWords(fileProposal.from)}: Yap already has all of it.
+            {/if}
+          </p>
+          {#if fileProposal.notes?.length}
+            <ul class="notes" aria-label="Left out">
+              {#each fileProposal.notes as n}<li>{n}</li>{/each}
+            </ul>
+          {/if}
+          {#if fileProposal.changes.length}
+            {@render diff(fileProposal.changes, fileIncluded, toggleFile)}
+          {/if}
+          <div class="actions">
+            <span class="grow"></span>
+            <Button variant="secondary" size="sm" onclick={() => (fileProposal = null)}>{fileProposal.changes.length ? 'Discard' : 'Close'}</Button>
+            {#if fileProposal.changes.length}
+              <Button
+                size="sm"
+                disabled={applying || !fileIncluded.length}
+                onclick={() => apply(fileProposal, fileIncluded, () => (fileProposal = null))}>Save {fileIncluded.length}</Button
+              >
+            {/if}
+          </div>
+        </div>
+      </Row>
+    {/if}
     <Row label="Export memory" desc="A .zip with a Markdown file for each section" setting="memory-export">
       <Button variant="secondary" size="sm" onclick={exportMemory}>Export</Button>
+    </Row>
+    <Row
+      label="Copy for Claude"
+      desc="Your memory as plain text, a line a fact, to paste into Claude’s or ChatGPT’s memory import"
+      setting="memory-copy-claude"
+    >
+      <Button variant="secondary" size="sm" disabled={!total && !aboutRows.some((a) => a.set)} onclick={copyForClaude}>Copy for Claude</Button>
     </Row>
     <Row label="Clear all memory" desc={total ? `${total} ${total === 1 ? 'thing' : 'things'} Yap remembers` : 'Memory is empty'} setting="memory-clear">
       <Button variant="danger" size="sm" disabled={!total} onclick={clearAll}>Clear all</Button>
@@ -902,6 +1039,45 @@
   .gone {
     color: var(--yap-danger);
     font-size: 12px;
+  }
+  /* A fact that didn't fit (the item keeps its last 8): there, but not kept. */
+  .left-out {
+    border-radius: var(--yap-r-sm);
+    padding: 0 5px;
+    color: var(--yap-muted);
+    text-decoration-color: var(--yap-fg-62);
+    background: var(--yap-raised-soft);
+  }
+
+  /* ---- a file import ---- */
+  .btns {
+    display: inline-flex;
+    gap: 6px;
+  }
+  .dropzone {
+    border-radius: var(--yap-r-lg);
+    transition:
+      background var(--yap-dur) ease,
+      box-shadow var(--yap-dur) ease;
+  }
+  .dropzone.over {
+    background: var(--yap-raised-soft);
+    box-shadow: inset 0 0 0 1px var(--yap-border);
+  }
+  .drop-hint {
+    margin: 0 0 10px;
+    font-size: 12.5px;
+    color: var(--yap-fg-80);
+  }
+  .notes {
+    margin: 0;
+    padding: 8px 12px 8px 28px;
+    border-radius: var(--yap-r);
+    background: var(--yap-s2);
+    border: 1px solid var(--yap-border-subtle);
+    font-size: 12.5px;
+    line-height: 1.5;
+    color: var(--yap-fg-80);
   }
 
   /* ---- importing ---- */

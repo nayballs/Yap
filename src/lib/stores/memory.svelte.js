@@ -36,6 +36,21 @@ export async function loadMemory() {
   }
 }
 
+// Settings → Memory's "Import a file" row: while it's on screen, a file
+// dropped on the main window is a memory import, and Chat and Upload (under
+// Settings) leave the drop alone.
+let dropZone = null;
+
+/** The element a file import is dropped on (null: none on the page). */
+export function setMemoryDropZone(el) {
+  dropZone = el;
+}
+
+/** Is Settings → Memory on screen, taking dropped files as an import? */
+export function memoryTakesDrops() {
+  return !!dropZone && dropZone.isConnected && dropZone.getClientRects().length > 0;
+}
+
 /** Undo a batch of changes ("Undo" on a toast). */
 export async function undoMemory(batch) {
   try {
