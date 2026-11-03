@@ -9,8 +9,11 @@
 //! (`llm.rs`) just POSTs to its localhost URL, so the whole cleanup stack
 //! (guardrails, presets, routing) is reused with ZERO changes. Fully local, no cloud.
 //!
-//! This module owns the process lifecycle: spawn (hidden), wait for `/health`,
-//! expose the base URL, and kill on stop/exit. Beside it: [`engine`] (llama.cpp's
+//! This module owns the process lifecycle: spawn (hidden, with a key of its
+//! own: [`key`]), wait for `/health`, expose the base URL, and kill on
+//! stop/exit. The server listens on 127.0.0.1 and refuses any request
+//! without its key, which every Yap caller sends ([`key::authorize`]).
+//! Beside it: [`engine`] (llama.cpp's
 //! builds on disk, the floor a first install gets, the daily update with its
 //! trial and roll-back), [`runtime`] (llamafile on disk and its background
 //! upgrade), [`context`] (the context length, and a restart when it changes),
@@ -20,6 +23,7 @@
 
 pub mod context;
 pub mod engine;
+pub mod key;
 pub mod models;
 pub mod on_demand;
 pub mod runtime;
@@ -205,6 +209,12 @@ impl Plan {
 ///   a request adds ~25 lines and never its text.
 /// - `--spec-type draft-mtp` when `plan` says MTP (only on the runtime it's
 ///   measured on, 0.10.6; every other argument works on 0.10.3 and 0.10.6).
+/// - `--alias <model id>`: the model's name where the server lists it
+///   ([`model_id`]), never its path, which holds the Windows user name
+///   (llamafile 0.10.6 lists it at `/v1/models` without the key).
+///
+/// No key here: it goes in the server's environment ([`key::Key::give`]),
+/// never on its command line.
 pub fn server_args(model: &Path, port: u16, ngl: u32, ctx: u32, plan: Plan) -> Vec<String> {
     let per_slot = plan.server().per_slot;
     // Per-slot caches: the whole context for each slot (llama.cpp gives a
@@ -254,6 +264,8 @@ fn base_args(model: &Path, port: u16, ngl: u32, ctx: u32, runtime: Runtime) -> V
         CTX_CHECKPOINTS.to_string(),
         "-lv".into(),
         "4".into(),
+        "--alias".into(),
+        model_id(model),
     ]);
     args
 }
@@ -370,6 +382,9 @@ pub fn log_facts(log: &str) -> LogFacts {
 
 static CHILD: Mutex<Option<Child>> = Mutex::new(None);
 static PORT: AtomicU16 = AtomicU16::new(0);
+/// The running sidecar's key ([`key`]): made for its launch, forgotten when
+/// it stops ([`stop_inner`]).
+static SIDECAR_KEY: Mutex<Option<key::Issued>> = Mutex::new(None);
 /// The ports the sidecar served on this session (kept after a stop or a
 /// restart): a call that resolved its address before the model was freed
 /// or restarted goes to the model as it is now, never to whatever listens
@@ -584,8 +599,8 @@ pub fn template_takes_tools(model: &str) -> Option<bool> {
 /// and keep the answer under `model` ([`template_takes_tools`]).
 async fn hear_template_tools(client: &reqwest::Client, port: u16, model: &str) {
     let asked = async {
-        let resp = client
-            .get(format!("http://127.0.0.1:{port}/props"))
+        let url = format!("http://127.0.0.1:{port}/props");
+        let resp = key::authorize(client.get(&url), &url)
             .send_for(crate::privacy::net::Purpose::OnDeviceCheck)
             .await
             .ok()?;
@@ -771,6 +786,8 @@ async fn e2e_stand_in_start(url: &str, gen: u64) -> Result<String, String> {
         return Err(Failure::Stopped.to_string());
     }
     let port = url::Url::parse(url).ok().and_then(|u| u.port()).ok_or("the stand-in's address has no port")?;
+    // A key, as a real start has: the suite's fake takes the header.
+    *SIDECAR_KEY.lock().unwrap_or_else(|p| p.into_inner()) = Some(key::issue(port)?);
     let cfg = crate::config::load();
     let model = active_model_path(&cfg);
     if let Ok(client) = reqwest::Client::builder().timeout(Duration::from_secs(3)).build() {
@@ -1529,6 +1546,9 @@ async fn spawn_and_wait(attempt: Attempt, gen: u64) -> Result<Started, Failed> {
     stop_inner();
 
     let port = find_free_port().ok_or_else(|| fail(Failure::Missing("no free localhost port".to_string())))?;
+    // Its key for this launch: nothing on this PC (a web page included)
+    // gets an answer without it.
+    let issued = key::issue(port).map_err(|e| fail(Failure::Missing(e)))?;
 
     // Capture the server's output to a log so startup failures are diagnosable
     // (an invalid `--nobrowser` flag silently killing it is exactly how we'd
@@ -1554,6 +1574,8 @@ async fn spawn_and_wait(attempt: Attempt, gen: u64) -> Result<Started, Failed> {
         .stdin(std::process::Stdio::null())
         .stdout(to_stdio(log.as_ref().and_then(|f| f.try_clone().ok())))
         .stderr(to_stdio(log.and_then(|f| f.try_clone().ok())));
+    // The key in its environment, never on its command line.
+    issued.give(&mut cmd);
 
     let child = cmd
         .spawn()
@@ -1561,6 +1583,7 @@ async fn spawn_and_wait(attempt: Attempt, gen: u64) -> Result<Started, Failed> {
     // The model never keeps running after Yap: a crash or End task ends it too.
     crate::shell::procs::end_with_yap(&child);
     *CHILD.lock().unwrap_or_else(|p| p.into_inner()) = Some(child);
+    *SIDECAR_KEY.lock().unwrap_or_else(|p| p.into_inner()) = Some(issued);
     PORT.store(port, Ordering::SeqCst);
     READY.store(false, Ordering::SeqCst);
     // A stop between the look above and the child being kept missed it.
@@ -1614,6 +1637,10 @@ async fn spawn_and_wait(attempt: Attempt, gen: u64) -> Result<Started, Failed> {
                 // What its chat format takes: one with no place for tools
                 // gets none of Chat's (`tools::supports_tools`).
                 hear_template_tools(&client, port, &model_id(&model)).await;
+                // It took its key: a request without it is refused.
+                if !key::refuses_without(&client, port, crate::privacy::net::Purpose::OnDeviceCheck).await {
+                    tracing::warn!(runtime = %plan.runtime, "The on-device engine answered without its key: anything on this PC can use it");
+                }
                 if stopped() {
                     return Err(fail(Failure::Stopped));
                 }
@@ -1698,7 +1725,8 @@ pub async fn warm_up(url: &str, model: &str) -> WarmUp {
         Ok(c) => c,
         Err(e) => return WarmUp { error: Some(e.to_string()), ..Default::default() },
     };
-    let send = client.post(format!("{}/chat/completions", url.trim_end_matches('/'))).json(&body).send_for(crate::privacy::net::Purpose::OnDeviceWarmUp);
+    let req = client.post(format!("{}/chat/completions", url.trim_end_matches('/'))).json(&body);
+    let send = key::authorize(req, url).send_for(crate::privacy::net::Purpose::OnDeviceWarmUp);
     let gave_way = async {
         while STARTED.load(Ordering::SeqCst) == started {
             tokio::time::sleep(Duration::from_millis(20)).await;
@@ -1781,6 +1809,9 @@ fn stop_inner() {
         let _ = child.wait();
         tracing::info!("On-device cleanup sidecar stopped");
     }
+    drop(guard);
+    // Its key goes with it.
+    SIDECAR_KEY.lock().unwrap_or_else(|p| p.into_inner()).take();
 }
 
 /// Whether any config path can route cleanup to the on-device sidecar: the

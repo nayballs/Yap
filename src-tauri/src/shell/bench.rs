@@ -588,6 +588,16 @@ async fn time_local_cleanup(runtime: &crate::ai::local_llm::engine::Engine, gguf
         cmd.stdout(f);
     }
     cmd.stderr(file);
+    // A key of its own, as Yap's sidecar has (`local_llm::key`): the
+    // cleanups below carry it; forgotten when this returns.
+    let key = match crate::ai::local_llm::key::issue(port) {
+        Ok(k) => k,
+        Err(e) => {
+            run.error = Some(e);
+            return run;
+        }
+    };
+    key.give(&mut cmd);
     // The server inherits the scenario's processor limit.
     let started = Instant::now();
     let spawned = {
@@ -643,6 +653,7 @@ async fn time_local_cleanup(runtime: &crate::ai::local_llm::engine::Engine, gguf
     }
     let _ = child.kill();
     let _ = child.wait();
+    drop(key);
     run
 }
 

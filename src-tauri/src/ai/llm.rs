@@ -1756,8 +1756,12 @@ async fn post_chat_request(
             call.send(&body);
             let mut req = client.post(&endpoint).json(&body);
             // Local servers (Ollama / LM Studio) need no key; only send one if set.
+            // Yap's own servers on this PC (the on-device model, a trial's,
+            // an evaluation's) take the key they were started with.
             if !api_key.is_empty() {
                 req = req.bearer_auth(api_key);
+            } else {
+                req = crate::ai::local_llm::key::authorize(req, base_url);
             }
             let resp = req
                 .send_for(crate::privacy::net::Purpose::Ai(provider.to_string()))

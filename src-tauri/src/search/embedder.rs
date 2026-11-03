@@ -16,7 +16,11 @@
 //!
 //! **Never in the cloud**: the server listens on 127.0.0.1, its requests go
 //! through the network receipts as "on this PC" (`privacy/net.rs`,
-//! [`Purpose::Embeddings`](crate::privacy::net::Purpose)). It starts when the
+//! [`Purpose::Embeddings`](crate::privacy::net::Purpose)). **Only for Yap**:
+//! each launch has a key of its own, in its environment, which Yap's
+//! requests carry (`local_llm::key`); anything else on this PC — a web page
+//! reaching 127.0.0.1 — gets a 401 for all but `/health`, and its model is
+//! listed by name (`--alias`), never by its path. It starts when the
 //! index or a question needs it and stops after [`IDLE`] unused, runs below
 //! normal priority on half the processor's threads, and dies with Yap
 //! (`procs::end_with_yap`; the orphan sweep finds it as the engine's server).
@@ -376,6 +380,8 @@ pub fn delete_model() -> Result<(), String> {
 struct Running {
     child: Child,
     url: String,
+    /// Its key, forgotten when it stops (`local_llm::key`).
+    _key: crate::ai::local_llm::key::Issued,
 }
 
 static RUNNING: Mutex<Option<Running>> = Mutex::new(None);
@@ -409,7 +415,9 @@ pub fn runs_on() -> Option<&'static str> {
 /// the card that fit (`ngl` 999; none on a PC without one), half the
 /// processor's threads, and the model's own (its pooling); how the engine
 /// is told to serve first (`Runtime::flavour_args`: llamafile's
-/// `--server`, llama.cpp's `--no-webui --offline`). Pure.
+/// `--server`, llama.cpp's `--no-webui --offline`); the model listed by its
+/// tag (`--alias`), never its path. No key: that goes in its environment
+/// (`local_llm::key`). Pure.
 pub fn server_args(gguf: &Path, port: u16, threads: usize, runtime: crate::ai::local_llm::Runtime) -> Vec<String> {
     server_args_for(model(), gguf, port, threads, runtime)
 }
@@ -421,7 +429,7 @@ pub fn server_args_for(m: &Model, gguf: &Path, port: u16, threads: usize, runtim
     args.extend(
         [
             "--host", "127.0.0.1", "--port", &port.to_string(), "-m", &gguf.to_string_lossy(), "--embedding", "-c", "4096", "-b", "2048",
-            "-ub", "2048", "-ngl", "999", "-t", &t, "-tb", &t, "-lv", "4",
+            "-ub", "2048", "-ngl", "999", "-t", &t, "-tb", &t, "-lv", "4", "--alias", m.tag,
         ]
         .iter()
         .map(|s| s.to_string()),
@@ -511,6 +519,8 @@ async fn start() -> Result<String, String> {
         .map_err(|e| format!("no free port: {e}"))?;
     let log_path = dir().join("embedder.log");
     let log = std::fs::File::create(&log_path).map_err(|e| format!("Couldn't write the search model's log: {e}"))?;
+    // Its key for this launch, in its environment.
+    let key = crate::ai::local_llm::key::issue(port)?;
     let mut cmd = engine.command();
     if engine.runtime().is_llamafile() {
         cmd.current_dir(dir());
@@ -519,6 +529,7 @@ async fn start() -> Result<String, String> {
         .stdin(std::process::Stdio::null())
         .stdout(log.try_clone().map_err(|e| e.to_string())?)
         .stderr(log);
+    key.give(&mut cmd);
     #[cfg(windows)]
     {
         use std::os::windows::process::CommandExt;
@@ -530,7 +541,7 @@ async fn start() -> Result<String, String> {
     let child = cmd.spawn().map_err(|e| format!("couldn't start the search model: {e}"))?;
     crate::shell::procs::end_with_yap(&child);
     let url = format!("http://127.0.0.1:{port}/v1");
-    *RUNNING.lock().unwrap_or_else(|p| p.into_inner()) = Some(Running { child, url: url.clone() });
+    *RUNNING.lock().unwrap_or_else(|p| p.into_inner()) = Some(Running { child, url: url.clone(), _key: key });
     LAST_USE.store(now_ms(), Ordering::SeqCst);
     watch_idle();
     let client = reqwest::Client::builder().timeout(Duration::from_secs(3)).build().map_err(|e| e.to_string())?;
@@ -544,6 +555,9 @@ async fn start() -> Result<String, String> {
             return Err("the search model's server exited while loading".to_string());
         }
         if client.get(&health).send_for(crate::privacy::net::Purpose::Embeddings).await.is_ok_and(|r| r.status().is_success()) {
+            if !crate::ai::local_llm::key::refuses_without(&client, port, crate::privacy::net::Purpose::Embeddings).await {
+                tracing::warn!("Meeting search: the search model's server answered without its key");
+            }
             let text = std::fs::read_to_string(&log_path).unwrap_or_default();
             let on = crate::ai::local_llm::placement_after_load(&text).map(|p| p.kind()).unwrap_or("cpu");
             if let Ok(mut g) = ON.lock() {
@@ -627,9 +641,9 @@ pub async fn embed(texts: &[String]) -> Result<Vec<Vec<f32>>, String> {
         .build()
         .map_err(|e| e.to_string())?;
     let body = serde_json::json!({ "model": model().tag, "input": texts });
-    let res = client
-        .post(format!("{url}/embeddings"))
-        .json(&body)
+    // Its key (`local_llm::key`): the stand-ins of a test run have none.
+    let req = client.post(format!("{url}/embeddings")).json(&body);
+    let res = crate::ai::local_llm::key::authorize(req, &url)
         .send_for(crate::privacy::net::Purpose::Embeddings)
         .await
         .map_err(|e| format!("the search model didn't answer: {e}"))?;
@@ -778,6 +792,8 @@ mod tests {
         assert_eq!(after("-ngl"), Some("999"));
         assert_eq!(after("-t"), Some("4"));
         assert_eq!(after("-ub"), Some("2048"), "a whole passage in one batch");
+        assert_eq!(after("--alias"), Some(model().tag), "listed by its name, never its path");
+        assert!(!args.iter().any(|a| a.starts_with("--api-key")), "its key goes in its environment");
         assert!(threads() >= 2);
         // A model's own arguments come last: Qwen3-Embedding pools its last token.
         let qwen = server_args_for(&QWEN3_EMBEDDING_0_6B, Path::new("q.gguf"), 5001, 4, cpp);
@@ -817,12 +833,13 @@ mod tests {
         rt.block_on(async {
             let port = std::net::TcpListener::bind("127.0.0.1:0").unwrap().local_addr().unwrap().port();
             let runtime = crate::ai::local_llm::Runtime::Llamafile(crate::ai::local_llm::runtime::Version(0, 10, 6));
-            let mut child = std::process::Command::new(exe)
-                .args(server_args(Path::new(&model), port, threads(), runtime))
+            let key = crate::ai::local_llm::key::issue(port).unwrap();
+            let mut cmd = std::process::Command::new(exe);
+            cmd.args(server_args(Path::new(&model), port, threads(), runtime))
                 .stdout(std::process::Stdio::null())
-                .stderr(std::process::Stdio::null())
-                .spawn()
-                .unwrap();
+                .stderr(std::process::Stdio::null());
+            key.give(&mut cmd);
+            let mut child = cmd.spawn().unwrap();
             let client = reqwest::Client::new();
             let mut up = false;
             for _ in 0..240 {
@@ -839,8 +856,9 @@ mod tests {
                 query("when does the beta ship"),
             ];
             let t0 = Instant::now();
-            let res: serde_json::Value = client
-                .post(format!("http://127.0.0.1:{port}/v1/embeddings"))
+            let res: serde_json::Value = key
+                .key()
+                .on(client.post(format!("http://127.0.0.1:{port}/v1/embeddings")))
                 .json(&json!({ "model": MODEL.tag, "input": texts }))
                 .send_for(crate::privacy::net::Purpose::Embeddings)
                 .await

@@ -77,6 +77,9 @@ fn post(client: &reqwest::Client, ep: &Endpoint<'_>, path: &str, body: &Value) -
     let mut req = client.post(format!("{}/{}", ep.base_url.trim_end_matches('/'), path)).json(body);
     if !ep.key.is_empty() {
         req = req.bearer_auth(ep.key);
+    } else {
+        // The run's own server on this PC: its key (`local_llm::key`).
+        req = crate::ai::local_llm::key::authorize(req, ep.base_url);
     }
     req
 }

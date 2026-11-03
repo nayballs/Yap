@@ -3,9 +3,12 @@
 //! same way, one after the other, so the two are compared on the same PC
 //! at the same moment. Each is started as the sidecar would start it
 //! (`local_llm::server_args`, the model's context, MTP and KV cache as the
-//! sidecar's plan says) on a free port, its log in `engine/trial.log`, and
-//! asked, with made-up words only:
-//! - to answer ("Reply with the single word: ready");
+//! sidecar's plan says) on a free port with a key of its own
+//! (`local_llm::key`), its log in `engine/trial.log`, and asked, with
+//! made-up words only:
+//! - to answer ("Reply with the single word: ready") — and to refuse a
+//!   request without its key (a build that stopped reading it counts as not
+//!   answering);
 //! - to call a tool, when its chat format takes tools (`/props`);
 //! - for ~128 tokens, twice: its generation speed (llama.cpp's own
 //!   `timings.predicted_per_second`, the better of the two);
@@ -152,10 +155,12 @@ fn tiny_png() -> String {
     format!("data:image/png;base64,{}", base64::engine::general_purpose::STANDARD.encode(bytes))
 }
 
-/// The server a trial runs, ended when dropped.
+/// The server a trial runs, ended when dropped (its key forgotten after it:
+/// `local_llm::key`).
 struct Server {
     child: std::process::Child,
     port: u16,
+    _key: crate::ai::local_llm::key::Issued,
 }
 
 impl Drop for Server {
@@ -199,12 +204,15 @@ async fn start(
         return Ok(None);
     };
     let Ok(file) = std::fs::File::create(log) else { return Ok(None) };
+    // A key of its own, as the sidecar has: out of sight isn't out of reach.
+    let Ok(key) = crate::ai::local_llm::key::issue(port) else { return Ok(None) };
     let mut args = crate::ai::local_llm::server_args(model, port, 999, ctx, plan);
     if let Some(p) = projector {
         args.extend(crate::ai::local_llm::vision::args(p));
     }
     let mut cmd = engine.command();
     cmd.args(args).stdin(std::process::Stdio::null());
+    key.give(&mut cmd);
     if let Ok(f) = file.try_clone() {
         cmd.stdout(f);
     }
@@ -212,7 +220,7 @@ async fn start(
     let t0 = Instant::now();
     let Ok(child) = cmd.spawn() else { return Ok(None) };
     crate::shell::procs::end_with_yap(&child);
-    let mut server = Server { child, port };
+    let mut server = Server { child, port, _key: key };
     let client = reqwest::Client::builder().timeout(Duration::from_secs(3)).build().map_err(|_| Aborted)?;
     let health = format!("http://127.0.0.1:{port}/health");
     while t0.elapsed() < LOAD_WAIT {
@@ -233,9 +241,8 @@ async fn start(
 
 /// One chat request to the trial's server; its JSON answer.
 async fn ask(client: &reqwest::Client, port: u16, body: serde_json::Value) -> Option<serde_json::Value> {
-    let resp = client
-        .post(format!("http://127.0.0.1:{port}/v1/chat/completions"))
-        .json(&body)
+    let url = format!("http://127.0.0.1:{port}/v1/chat/completions");
+    let resp = crate::ai::local_llm::key::authorize(client.post(&url).json(&body), &url)
         .send_for(crate::privacy::net::Purpose::EngineTrial)
         .await
         .ok()?;
@@ -279,6 +286,12 @@ async fn run_inner(engine: &Engine, model: &Path, ctx: u32, vision_on: bool, log
         .as_ref()
         .and_then(|a| a["choices"][0]["message"]["content"].as_str())
         .is_some_and(|c| !c.trim().is_empty());
+    // …and only to Yap: a build that answers without its key (one that
+    // stopped reading it) counts as not answering, so it's never switched to.
+    if t.answered && !or_abort(crate::ai::local_llm::key::refuses_without(&client, port, crate::privacy::net::Purpose::EngineTrial), abort).await? {
+        tracing::warn!(engine = %engine.label(), "The engine on trial answered without its key: not switched to");
+        t.answered = false;
+    }
     if !t.answered {
         return Ok(t);
     }
@@ -286,7 +299,8 @@ async fn run_inner(engine: &Engine, model: &Path, ctx: u32, vision_on: bool, log
     // A tool call, when its chat format takes tools.
     let props: Option<serde_json::Value> = or_abort(
         async {
-            let r = client.get(format!("http://127.0.0.1:{port}/props")).send_for(crate::privacy::net::Purpose::EngineTrial).await.ok()?;
+            let url = format!("http://127.0.0.1:{port}/props");
+            let r = crate::ai::local_llm::key::authorize(client.get(&url), &url).send_for(crate::privacy::net::Purpose::EngineTrial).await.ok()?;
             r.json().await.ok()
         },
         abort,

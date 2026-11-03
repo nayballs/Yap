@@ -1901,11 +1901,15 @@ from `view::open_tabs`):
   this PC or its network — an IP address in a loopback, private,
   link-local, unique-local, shared or other non-public range however it's
   written, `127.0.0.2`, `[::ffff:7f00:1]`, `2130706433`, or a local name,
-  `localhost`, `*.localhost`, `*.local`, one with no dot — gets a 403; the
-  on-device model's server listens on `127.0.0.1` with no key. **Not
+  `localhost`, `*.localhost`, `*.local`, one with no dot — gets a 403. **Not
   caught**: a public name that resolves to such an address, DNS
   rebinding, and a WebSocket — WebView2 never shows Yap one's request;
-  both checked in a test run, 2 Nov 2026), **its dialogs never WebView2's own**
+  both checked in a test run, 2 Nov 2026 — so Yap's own helpers on this PC
+  never rely on the filter: the on-device model's and the search model's
+  llama.cpp servers on `127.0.0.1` take a key per launch and answer a 401
+  without it to all but `/health` (2026-11-03, ai-models.md
+  `ai/local_llm/key.rs`), the Local API its token, Yap Link its pairing),
+  **its dialogs never WebView2's own**
   (`AreDefaultScriptDialogsEnabled` off, `ScriptDialogOpening`: on a shot's
   page, a page out of sight or one Yap is acting on — `view::busy` while an
   action runs and 1.5 s after — dismissed, never accepted; on a page the

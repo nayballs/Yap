@@ -519,7 +519,10 @@ The language-model side: the OpenAI-compatible client and its prompts, the on-de
   copy back of the saved prompt — and a 4B server peaked at 6.7 GB on the
   processor; Qwen3.5-4B's peak is now 3.85 GB there, 3.7 GB on the card),
   `--ctx-checkpoints 4` (Qwen3.5's recurrent-state checkpoints, ~50 MB each),
-  `-lv 4` (the log names the layers that went to the GPU), MTP as the
+  `-lv 4` (the log names the layers that went to the GPU), `--alias <model
+  id>` (2026-11-03: where the server lists its model it names it, never
+  its path; its key is in its environment, never an argument —
+  `local_llm/key.rs` below), MTP as the
   `Plan` says (below), and **a q8_0 KV cache only where it helps**
   (`-ctk q8_0 -ctv q8_0`, `Plan.kv_q8`, `kv_q8_helps`, 2026-10-25): on an
   NVIDIA card, llamafile 0.10.6+, a context of 32K or more
@@ -715,7 +718,8 @@ The language-model side: the OpenAI-compatible client and its prompts, the on-de
   progress events naming the curated `model`, which the Chat model picker
   draws in that model's row; a test run downloads only from 127.0.0.1 — the
   debug-only `YAP_LLM_SOURCES` stand-ins, `{"runtime"|"<curated id>": {url,
-  sha256}}` — and refuses anything else), process lifecycle (spawn/health-wait/kill + orphan cleanup at
+  sha256}}` — and refuses anything else), process lifecycle (spawn with its
+  key/health-wait/kill + orphan cleanup at
   startup — only sidecars whose parent Yap is gone, via `shell/procs.rs`, so a dev build
   never kills the installed app's; and **the model never outlives Yap**:
   `procs::end_with_yap` puts the sidecar — like the speaker engine
@@ -734,6 +738,54 @@ The language-model side: the OpenAI-compatible client and its prompts, the on-de
   Gemma 2 9B's says `supports_tools: false`, `supports_system_role: false`
   (its system prompt is folded into the first question); Qwen's and
   Llama 3.1's take tools.
+- **`ai/local_llm/key.rs`** — **a key for every llama.cpp server Yap starts**
+  (2026-11-03, the 2 Nov security review's finding 3): the sidecar, the
+  search model's embedder (search.md), an engine trial, a model
+  evaluation's and `yap.exe bench`'s. They listen on 127.0.0.1, which
+  anything on this PC reaches — a web page too: the page beside the chat
+  refuses requests to this PC, but WebView2 never shows Yap a WebSocket,
+  and a public name can resolve to 127.0.0.1 (DNS rebinding;
+  chat-and-assistant.md). llama.cpp's CORS is no guard: it echoes any
+  page's `Origin` with credentials allowed and answers every preflight
+  (`--cors-origins` defaults to `*`). So:
+  - **a key per launch** (`issue(port)` → `Issued`, forgotten when it drops
+    with the server): 32 bytes from the operating system's random numbers
+    (`getrandom`), 64 hex characters; never in a file, config.json, a log,
+    the network receipts or the frontend (llama.cpp's own log shows its last
+    four characters only: `api_keys: ****1a2b`);
+  - **handed over in the environment**, `LLAMA_API_KEY` (`Key::give`;
+    llama.cpp's `--api-key`, "(env: LLAMA_API_KEY)" in b11985's `--help`;
+    llamafile 0.10.6 reads it too), never `--api-key` on the command line
+    (every program on the PC can list it) nor an `--api-key-file` on disk; an
+    inherited `LLAMA_ARG_API_KEY_FILE` is taken off;
+  - **sent by every Yap caller** as `Authorization: Bearer` (`authorize`, by
+    the request's address: a port Yap holds a key for on `http://127.0.0.1`,
+    so a server of the person's own or the cloud never sees it): `llm.rs`'s
+    one chat call (when the endpoint has no key of its own), the warm-up,
+    `/props` (`hear_template_tools`), Chat's `/tokenize` (`chat/budget.rs`),
+    the embeddings, the trial's requests, the evaluations' (`eval/serving.rs`
+    too) and the bench's. The e2e suite's stand-in sidecar gets a key too
+    (its fake takes any header);
+  - **what stays open**: `/health` and `/v1/health` (the readiness checks
+    need nothing else); everything else is a 401 without the key or with a
+    wrong one, whatever the `Host` header says (b11985: `/props`, `/slots`,
+    `/models`, `/tokenize`, chat, embeddings). llamafile 0.10.6 also lists
+    its model at `/v1/models` without the key, so every server starts with
+    `--alias` (the model id, or the search model's tag): its name, never its
+    path, which holds the Windows user name;
+  - **checked at each start** (`refuses_without`: `GET /props` without the
+    key must be a 401): the sidecar and the embedder say so in the log when
+    it isn't; the trial refuses that build.
+
+  Tried against copies of the maintainer's llama.cpp b11985 (CUDA 13) and
+  llamafile 0.10.6 with Qwen2.5-1.5B (`key::tests::real_server_refuses_requests_without_its_key`,
+  `#[ignore]`d: the sidecar's and the embedder's set-ups, a 401 for every
+  keyed path, `/health` open, the warm-up, a cleanup and the embedder's
+  vectors through Yap's own code), and the b11985 copy through a real
+  engine trial (`trial::tests::real_trial_of_a_build`: it refused a request
+  without its key, answered, called the tool). Not tried: llamafile 0.10.3
+  (an unmarked runtime, upgraded in the background; a server that ignored
+  its key would still answer Yap, and the start's check would say so).
 - **`ai/local_llm/engine.rs`** (+ `engine/`: `feed`, `trial`, `updater`) —
   **llama.cpp's own builds, kept up to date** (2026-11-01, the maintainer's ask:
   "detect newer engine builds, install them, prove they work, roll back on
@@ -831,8 +883,11 @@ The language-model side: the OpenAI-compatible client and its prompts, the on-de
   `runtime::idle_with_locks`; a loaded idle model is stopped for it and loaded
   again after). **The trial** (`trial.rs`, `Purpose::EngineTrial`): the engine
   running now, then the new build, each started as the sidecar would start it
-  (the person's own model and context, `server_args` and `plan_for`; log
-  `engine/trial.log`) and asked, with made-up words only: an answer, a valid
+  (the person's own model and context, `server_args` and `plan_for`, a key of
+  its own: `local_llm/key.rs`; log `engine/trial.log`) and asked, with
+  made-up words only: an answer — and a request without its key refused
+  (`key::refuses_without`; a build that answers anyway counts as not
+  answering, so one that stopped reading its key is never switched to) —, a valid
   tool call when its chat format takes tools (`/props`, `valid_tool_call`), its
   generation speed (llama.cpp's `timings.predicted_per_second`, the better of
   two 128-token runs), and with "Read screenshots on this PC" on, its projector
