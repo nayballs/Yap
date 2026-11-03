@@ -124,7 +124,7 @@ http-body = "1"
 # in, so there's no second HTML parser in the tree: dom_query and dom_smoothie
 # move when tauri-utils' dom_query does (0.29 / dom_smoothie 0.19 would be a
 # second copy).
-dom_smoothie = "0.18"
+dom_smoothie = "0.19"
 # …and the HTML a wiki's `action=parse` returns, as text (the same copy).
 dom_query = "0.28"
 futures-util = "0.3"
