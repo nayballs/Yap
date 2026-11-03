@@ -183,7 +183,7 @@ function loadChat() {
  */
 function loadDevice() {
   const d = load(KEY.device);
-  return d && typeof d.id === 'string' && d.id && typeof d.secret === 'string' && d.secret ? { id: d.id, secret: d.secret } : null;
+  return d && typeof d.id === 'string' && d.id && typeof d.secret === 'string' && d.secret ? d : null;
 }
 
 /** The QR's token in this address (`#pair=<token>`), or ''. */
