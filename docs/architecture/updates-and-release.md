@@ -79,8 +79,17 @@ rolling release's body records as `<!-- built-from: <sha> -->`). **Currently uns
 application data** checkbox (`; --- YAP DATA ---` in `src-tauri/nsis/installer.nsi`)
 removes Yap's real data (`%APPDATA%\yap`, `~\.yap`) **and the saved sign-in**
 (`CredDeleteW` on the `yap-account.com.yap.dictation` credential) **and the
-calendars' tokens/links** (`yap-calendar-1…8.com.yap.dictation`); never on `/UPDATE`
+calendars' tokens/links** (`yap-calendar-1…8.com.yap.dictation`) **and Sign in
+with ChatGPT's token** (`yap-chatgpt`, `yap-chatgpt-2…6`: `vault::PARTS`, a test
+holds the loop to it); never on `/UPDATE`
 runs (the updater always passes it), and unticked keeps both — a reinstall stays signed in.
+The template is Tauri's own with Yap's sections marked; **when Tauri moves, merge
+the bundler's new `installer.nsi`** (its header says how). Tauri 2.12's
+`utils.nsh` closes a running Yap through Windows' Restart Manager by the exe's
+path (`CheckIfAppIsRunning "$INSTDIR\yap.exe"`), so only what runs from this
+install is closed — a dev build or a portable copy is left alone — and the
+template must include `Win\RestartManager.nsh` (the nightly's NSIS step failed
+without it, 2026-11-03).
 The bundle's **publisher** is "Yap" (2026-10-22: Yap is its own publisher, no person's name). Tauri's
 installer keeps the install folder under `Software\<publisher>\Yap`, so an install
 made under the old publisher has none there: `ReadPreviousInstallDir`

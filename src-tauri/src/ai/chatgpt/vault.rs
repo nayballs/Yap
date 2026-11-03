@@ -209,5 +209,11 @@ mod tests {
             return;
         }
         assert_eq!((0..PARTS).map(user).collect::<Vec<_>>(), ["yap-chatgpt", "yap-chatgpt-2", "yap-chatgpt-3", "yap-chatgpt-4", "yap-chatgpt-5", "yap-chatgpt-6"]);
+        // …and the uninstaller's "Delete app data" loop goes as far (it
+        // stopped at -4 until 2026-11-03, leaving -5 and -6 behind).
+        let nsi = include_str!("../../../nsis/installer.nsi");
+        let at = nsi.find("yap-chatgpt-$1.com.yap.dictation").expect("the uninstaller's ChatGPT loop");
+        let bound = nsi[at..].lines().find_map(|l| l.trim().strip_prefix("${LoopWhile} $1 <= ")).expect("its bound");
+        assert_eq!(bound.trim().parse::<usize>(), Ok(PARTS));
     }
 }
