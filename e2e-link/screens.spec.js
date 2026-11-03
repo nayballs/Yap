@@ -103,6 +103,9 @@ for (const scheme of ['light', 'dark']) {
         pc.send({ type: 'speak_start', rate: 24000 });
         for (let i = 0; i < 40; i++) pc.sendBinary(downFrame(i, voice(24000, 100)));
         await expect(page.getByTestId('stop')).toBeVisible();
+        // One Stop, the composer's; under the answer only "Speaking…".
+        await expect(page.getByRole('button', { name: 'Stop' })).toHaveCount(1);
+        await expect(page.getByTestId('turn').last().locator('.speaking')).toHaveText('Speaking…');
         await shot(page, `answering-${at}`);
         expect(await tooSmall(page)).toEqual([]);
         await page.getByTestId('stop').click();

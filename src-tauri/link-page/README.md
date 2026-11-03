@@ -64,8 +64,11 @@ sheet. Where a phone needs its own way, the phone wins.
   Your question in Chat's amber-washed bubble on the right, with Chat's 🎙
   ("Asked by voice") when it was said; the answer in Chat's card on the left
   with its markdown (`markdown.js`) and, while it streams, Chat's amber caret;
-  under a finished answer, **▶ Read aloud** (■ Stop, with the bar's three
-  bars and "Speaking…", while it's being said). The step Yap is on as Chat's
+  under a finished answer, **▶ Read aloud**. While an answer is being said,
+  the bar's three bars and "Speaking…" under it, a status only: **one Stop
+  at a time** — the composer's for a spoken answer (where the thumb is), or,
+  when ▶ on an answer started it, that ▶ turned into Stop in place (the
+  composer's Stop stays away then). The step Yap is on as Chat's
   activity line (three amber dots, the step, the time) under the thread.
   Nothing asked yet: the Voice Assistant's ✦, "Ask Yap anything" in Yap's
   display serif, how to ask, and "Keep this page open…".
@@ -74,7 +77,8 @@ sheet. Where a phone needs its own way, the phone wins.
   thumb, **Talk: the Yap bar's pill** in ink (mic and word). With words in
   the box, Send (Chat's ink arrow) comes in and Talk steps back to a round
   mic beside it. While Yap works the question out, ■ (Chat's stop) beside
-  Talk; while it speaks, **■ Stop** with the bar's speaking bars. **While it
+  Talk; while it speaks, **■ Stop** with the bar's speaking bars (the one
+  Stop, unless ▶ on an answer is what's playing). **While it
   listens the composer is the Yap bar's capsule**, the Voice Assistant's
   variant (`bar/DictationCapsule.svelte`): an amber edge, ✕ on the left, the
   ✦ and the bar's live waveform (thin amber bars, newest on the right, at
@@ -306,8 +310,10 @@ a reload keeps it; closing the tab doesn't.
   its voice and sends `interrupt`, while it works it sends `cancel` (as Talk
   does), and drops the old question's late news until the PC's `state idle`.
   ▶ shows under an answer once its `answer.id` came (and the PC says
-  `read_aloud` in `can`); the turn being said shows ■ and "Speaking…" until
-  the voice has played out, Stop is pressed or the PC is idle.
+  `read_aloud` in `can`); the turn being said shows "Speaking…" (its ▶ as
+  Stop when ▶ started it, else no button: the composer's Stop) until the
+  voice has played out, Stop is pressed or the PC is idle. One Stop on the
+  page at a time.
 - **Keep-alive.** A `ping` every 15 s. Anything from the PC counts as alive;
   nothing for 8 s after a ping and the connection is dropped and made again.
   Reconnects back off from 0.5 s to 15 s (with jitter), saying "Reconnecting to
