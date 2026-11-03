@@ -415,7 +415,7 @@ pub(super) async fn post(
             match refusal {
                 Refusal::Reauth if !reauthed => {
                     reauthed = true;
-                    token = crate::ai::chatgpt::refreshed_token().await.map_err(|e| call.failed(e))?;
+                    token = crate::ai::chatgpt::refreshed_token(&token).await.map_err(|e| call.failed(e))?;
                     continue;
                 }
                 Refusal::Reauth => return Err(call.failed("ChatGPT didn't accept Yap's sign-in. Sign in again in Settings → Language Models.".into())),

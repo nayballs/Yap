@@ -1501,7 +1501,7 @@ While signed in with the plan, the key store holds `PLAN_KEY` ("chatgpt-plan") f
   - Each refresh reads the newest tokens back first, so a spent refresh token is never used twice (OpenAI would answer `refresh_token_reused`).
 - **After a refresh:** the new tokens are kept first, then the refreshed ID token is checked. One for another account signs Yap out.
 - **A dead grant** (`invalid_grant`, `refresh_token_expired`, …) signs Yap out, and Settings says so.
-- **A 401 on a call** refreshes once (`refreshed_token`) and asks again.
+- **A 401 on a call** refreshes once (`refreshed_token`) and asks again. The token it sets aside is only the one OpenAI refused, under the same lock across Yaps (2 Nov 2026): one another Yap had just refreshed is used as it is, never written back over with the spent refresh token (`set_aside`).
 
 ### Signing out
 
