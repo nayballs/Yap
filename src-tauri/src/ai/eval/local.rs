@@ -251,6 +251,9 @@ pub struct Server {
     /// The warm-up Yap's sidecar sends once loaded (`local_llm::warm_up`),
     /// unless the run said `--no-warm-up`.
     pub warm_up: Option<crate::ai::local_llm::WarmUp>,
+    /// Its key, as the sidecar has one (`local_llm::key`): the run's
+    /// requests carry it; forgotten when the server stops.
+    key: Option<crate::ai::local_llm::key::Issued>,
 }
 
 /// How a run's server runs the model (`local_llm::Plan`): the engine's
@@ -296,6 +299,8 @@ pub async fn start(
         cmd.current_dir(workdir);
     }
     cmd.args(&args).stdin(std::process::Stdio::null()).stdout(file.try_clone().map_err(|e| e.to_string())?).stderr(file);
+    let key = crate::ai::local_llm::key::issue(port)?;
+    key.give(&mut cmd);
     let started = Instant::now();
     let mut child = cmd.spawn().map_err(|e| format!("couldn't start {}: {e}", runtime.label()))?;
     // Ended with this process however it ends (a run stopped mid-way, End task).
@@ -311,7 +316,7 @@ pub async fn start(
         if client.get(&health).send().await.is_ok_and(|r| r.status().is_success()) {
             let load_ms = started.elapsed().as_millis() as u64;
             let warm_up = if warm { Some(crate::ai::local_llm::warm_up(&base_url, &stem).await) } else { None };
-            return Ok(Server { child: Some(child), pid, base_url, log, load_ms, args, plan, warm_up });
+            return Ok(Server { child: Some(child), pid, base_url, log, load_ms, args, plan, warm_up, key: Some(key) });
         }
         tokio::time::sleep(Duration::from_millis(500)).await;
     }
@@ -390,6 +395,7 @@ impl Server {
             let _ = c.kill();
             let _ = c.wait();
         }
+        self.key.take();
     }
 }
 

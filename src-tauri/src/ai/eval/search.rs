@@ -178,11 +178,13 @@ fn mrr(ranks: &[Option<usize>]) -> f64 {
     (s / ranks.len() as f64 * 1000.0).round() / 1000.0
 }
 
-/// The run's embedding server: Yap's engine in embedding mode on `gguf`.
+/// The run's embedding server: Yap's engine in embedding mode on `gguf`,
+/// with a key of its own (`local_llm::key`, forgotten after it stops).
 pub struct Server {
     child: std::process::Child,
     pub load_ms: u64,
     pub log: PathBuf,
+    _key: crate::ai::local_llm::key::Issued,
 }
 
 impl Drop for Server {
@@ -206,6 +208,8 @@ pub async fn start(runtime: &crate::ai::local_llm::engine::Engine, gguf: &Path, 
         cmd.current_dir(run_dir);
     }
     cmd.args(&args).stdin(std::process::Stdio::null()).stdout(file.try_clone().map_err(|e| e.to_string())?).stderr(file);
+    let key = crate::ai::local_llm::key::issue(port)?;
+    key.give(&mut cmd);
     let t0 = Instant::now();
     let mut child = cmd.spawn().map_err(|e| format!("couldn't start the embedding server: {e}"))?;
     crate::shell::procs::end_with_yap(&child);
@@ -217,7 +221,7 @@ pub async fn start(runtime: &crate::ai::local_llm::engine::Engine, gguf: &Path, 
         if client.get(format!("http://127.0.0.1:{port}/health")).send().await.is_ok_and(|r| r.status().is_success()) {
             let url = format!("http://127.0.0.1:{port}/v1");
             crate::search::embedder::use_server(Some(url.clone()));
-            return Ok(Server { child, load_ms: t0.elapsed().as_millis() as u64, log });
+            return Ok(Server { child, load_ms: t0.elapsed().as_millis() as u64, log, _key: key });
         }
         tokio::time::sleep(Duration::from_millis(500)).await;
     }

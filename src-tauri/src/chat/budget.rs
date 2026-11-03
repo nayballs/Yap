@@ -407,9 +407,9 @@ fn server_root(base_url: &str) -> &str {
 async fn tokenize(root: &str, provider: &str, text: &str) -> Option<u64> {
     use crate::privacy::net::Recorded;
     let client = reqwest::Client::builder().timeout(TOKENIZE_TIMEOUT).build().ok()?;
-    let resp = client
-        .post(format!("{root}/tokenize"))
-        .json(&serde_json::json!({ "content": text }))
+    // The on-device model's key when it's Yap's own server (`local_llm::key`).
+    let req = client.post(format!("{root}/tokenize")).json(&serde_json::json!({ "content": text }));
+    let resp = crate::ai::local_llm::key::authorize(req, root)
         .send_for(crate::privacy::net::Purpose::Ai(provider.to_string()))
         .await
         .ok()?;

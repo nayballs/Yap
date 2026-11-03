@@ -21,8 +21,12 @@
 //!   link-local, unique-local… however it's written, `localhost`, `.local`,
 //!   `.localhost`) gets a 403. **Not caught**: a public name that resolves
 //!   to such an address (DNS rebinding), and a WebSocket (WebView2 never
-//!   shows Yap one's request) — so Yap's own helpers on this PC can't rely
-//!   on this alone;
+//!   shows Yap one's request) — so Yap's own helpers on this PC never rely
+//!   on this alone: each needs a secret a page can't know (the on-device
+//!   model's and the search model's llama.cpp servers a key per launch,
+//!   `ai/local_llm/key.rs`, a 401 for all but `/health` without it; the
+//!   Local API its token; Yap Link its pairing; the sign-in listeners
+//!   their one-time state);
 //! - **its dialogs are never WebView2's own** (`ScriptDialogOpening`): on a
 //!   page Yap loads for itself (a shot's), a page out of sight or one Yap is
 //!   acting on ([`busy`]) they're dismissed; on one the person is using, its
@@ -1416,8 +1420,8 @@ mod win {
                 &mut token,
             )?;
             // Every request: one to this PC or its network refused (Yap's
-            // own helpers listen on this PC; the on-device model's server
-            // has no key) — an IP address in a non-public range however it's
+            // own helpers listen on this PC, each behind a key of its own:
+            // `local_llm/key.rs`) — an IP address in a non-public range however it's
             // written, or a local name (`super::refused_request`). A test
             // run's stand-in is the page itself. Its workers' too: WebView2
             // hands Yap a shared or service worker's requests only for a

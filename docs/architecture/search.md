@@ -74,7 +74,8 @@ Hugging Face repo pinned to a commit, size and SHA-256 checked. It runs on
 **Yap's own llamafile 0.10.6** — the
 on-device chat model's engine — as a second, small server in
 `--embedding` mode (`server_args`: 127.0.0.1, a port of its own, `-c 4096
--b 2048 -ub 2048 -ngl 999`, half the processor's threads), so nothing new
+-b 2048 -ub 2048 -ngl 999`, half the processor's threads, `--alias` the
+model's tag), so nothing new
 ships: CUDA on NVIDIA, Vulkan elsewhere (~390 MiB on the card), the
 processor without one. Below-normal priority, started when the index or a
 question needs it (`ensure`), stopped after 2 minutes unused (`IDLE`),
@@ -109,6 +110,19 @@ and the index; the runtime stays (the on-device model may use it).
 through `privacy/net.rs` as `Purpose::Embeddings` ("Search by meaning ·
 on-device model", on this PC). Retrieval is always local; a cloud Chat
 model sees only the passages chosen for its question.
+
+**Only for Yap** (2026-11-03, the 2 Nov security review's finding 3): every
+launch has a key of its own (`local_llm::key::issue`, held in `Running`,
+forgotten when it stops), handed over in its environment (`LLAMA_API_KEY`,
+never on its command line) and sent by `embed` (`key::authorize`, by the
+server's address; a test run's stand-in, `YAP_E2E_EMBED_URL`, has none).
+Anything else on this PC — a web page that reaches 127.0.0.1 through a
+WebSocket or a name that resolves here — gets a 401 for all but `/health`;
+llamafile 0.10.6's open `/v1/models` names the model by its tag
+(`--alias`), never its path. A start whose server answers without its key
+(`key::refuses_without`) is said in the log. A model evaluation's own
+server (`eval/search.rs`, `use_server`) gets a key the same way. Details:
+ai-models.md, `ai/local_llm/key.rs`.
 
 **A question's vector** (`embedder::query_vector(q, wait)`): `None` (the
 words alone answer) with search by meaning off, the model not here, the
