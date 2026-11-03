@@ -834,6 +834,52 @@ test("the model fails: the assistant says why, and the question waits in Chat", 
   }
 });
 
+// A stream cut off (here the connection dropped; on 31 Oct a Claude answer
+// was cut at the call's timeout and lost as "request failed: error decoding
+// response body"): before any of the answer came, it's asked again, streamed,
+// and answered; part-way, what was said stays said and the card says plainly
+// it was cut off (ai/llm.rs `CUT_OFF`), never asked again under it.
+test('an answer cut off before it began is asked again; cut off part-way, the assistant says so plainly', async ({
+  yap,
+  fakeLlm,
+}) => {
+  await inAnotherApp(yap);
+  const chatCalls = () => fakeLlm.requests.filter((r) => r.kind === 'other');
+  const before = chatCalls().length;
+  fakeLlm.scriptChat([
+    { content: 'Never heard at all.', stream: { dropAfter: 1 } },
+    { content: 'The planning call is at three.' },
+  ]);
+  const answerTo = (q) =>
+    yap
+      .readJson('chats.json')
+      ?.conversations.find((c) => c.messages.some((m) => m.text === q))
+      ?.messages.at(-1);
+  await ask(yap, 'when is the planning call');
+  await expect.poll(() => answerTo('when is the planning call')?.text, { timeout: 15_000 }).toBe('The planning call is at three.');
+  expect(chatCalls().slice(before).map((r) => [r.stream, !!r.dropped])).toEqual([
+    [true, true],
+    [true, false],
+  ]);
+
+  fakeLlm.scriptChat([
+    {
+      content: 'Your day starts with the design review. Then lunch with the team at one. Then the planning call at three.',
+      stream: { gapMs: 150, dropAfter: 6 },
+    },
+  ]);
+  const mid = chatCalls().length;
+  await ask(yap, 'what is on my day today');
+  const card = yap.overlay.getByRole('status').filter({ hasText: "The Voice Assistant couldn't answer" });
+  await expect(card).toBeVisible({ timeout: 15_000 });
+  await expect(card).toContainText('The answer was cut off before it finished. Try again.');
+  await expect(card).not.toContainText('decoding');
+  expect(chatCalls().length - mid).toBe(1);
+  // No answer kept: the question waits in Chat.
+  expect(answerTo('what is on my day today')?.role).toBe('user');
+  await card.getByRole('button', { name: 'Close' }).click();
+});
+
 test('Settings → Voice Assistant: spoken replies, the engine, the voice and its preview', async ({ yap, main, shot }) => {
   await setConfig(yap, main, {
     speakReplies: false,

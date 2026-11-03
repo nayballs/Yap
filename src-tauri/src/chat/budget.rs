@@ -621,6 +621,11 @@ pub fn plain_error(err: String, label: &str, context: u64, provider: &str) -> St
         let limit: u64 = err[at + crate::ai::llm::TOO_MUCH_A_MINUTE.len()..].trim().parse().unwrap_or(0);
         return too_much_a_minute(label, provider, limit);
     }
+    // An answer's body that stopped coming, however a path put it (the HTTP
+    // library says "error decoding response body" for every such failure).
+    if err.to_ascii_lowercase().contains("error decoding response body") {
+        return crate::ai::llm::CUT_OFF.to_string();
+    }
     err
 }
 
@@ -1187,6 +1192,12 @@ mod tests {
         let err = format!("{}8000", crate::ai::llm::TOO_MUCH_A_MINUTE);
         assert_eq!(plain_error(err, "GPT-OSS 20B", 131_072, "groq"), "That's too long for GPT-OSS 20B on your Groq plan (8,000 tokens a minute).");
         assert_eq!(plain_error("HTTP 401: nope".into(), "x", 1, "groq"), "HTTP 401: nope");
+        // A body that stopped coming, said plainly (31 Oct's Voice Assistant
+        // answer showed the HTTP library's words).
+        assert_eq!(
+            plain_error("request failed: error decoding response body".into(), "Claude Haiku 5.5", 200_000, "anthropic"),
+            crate::ai::llm::CUT_OFF
+        );
         // A chat format that refused the conversation (Gemma 2, llama.cpp).
         let refused = r#"HTTP 400: {"error":{"code":400,"message":"Unable to generate parser for this template. Automatic parser generation failed: \n------------\nWhile executing CallExpression at line 1, column 226 in source:\n...op.index0 % 2 == 0) %}{{ raise_exception('Conversation roles must alternate user/assistant/user/assistant/...') }}"}}"#;
         assert_eq!(

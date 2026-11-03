@@ -19,7 +19,7 @@ import {
 } from './support/fixtures.js';
 import { COPILOT_KEY, isCopilotKey, hotkeyParts, formatHotkeySpec, fillHotkey } from '../src/lib/core/hotkeys.js';
 import { appLabel } from '../src/lib/core/appNames.js';
-import { aiError } from '../src/lib/core/aiErrors.js';
+import { aiError, CUT_OFF } from '../src/lib/core/aiErrors.js';
 
 /** A local port nothing listens on: the "AI server that isn't running". */
 function closedPort() {
@@ -82,6 +82,10 @@ test('the Copilot key, aiErrors and app names on their own', () => {
   expect(aiError('HTTP 404: {"error":{"message":"The model `x` does not exist"}}').settings).toBe(true);
   expect(aiError('HTTP 503: upstream busy').text).toMatch(/problem on its side/);
   expect(aiError('No groq API key — add one in Settings → Language Models')).toMatchObject({ settings: true, known: true });
+  // An answer that stopped coming: said plainly, never the HTTP library's words.
+  for (const raw of ['request failed: error decoding response body', 'The answer was cut off before it finished. Try again.']) {
+    expect(aiError(raw)).toEqual({ text: CUT_OFF, settings: false, known: true });
+  }
   // Anything else stays as it was, in the copyable error box.
   expect(aiError('something odd')).toEqual({ text: 'something odd', settings: false, known: false });
 

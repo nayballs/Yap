@@ -511,14 +511,15 @@ pub(super) async fn post(req: &ChatRequest, native: &Native, mut on: Option<OnDe
     crate::ai::eval::adjust_body(&mut body);
     let timeout = if native.server_tools.is_empty() { req.timeout } else { req.timeout.max(SERVER_TOOLS_TIMEOUT) };
     let timeout = if crate::snip::turn::has_images(&json!({ "messages": req.messages })) { timeout.max(super::IMAGE_TIMEOUT) } else { timeout };
-    let client = reqwest::Client::builder()
-        .timeout(crate::ai::eval::timeout(timeout))
-        .build()
-        .map_err(|e| format!("failed to build HTTP client: {e}"))?;
+    // Streamed: cut only when it goes quiet that long (`llm::chat_client`).
+    let client = super::chat_client(timeout, streaming)?;
     let counted = crate::ai::usage::Call { provider: &req.provider, model: &req.model, base_url: &req.base_url, turn: true, feature: None };
     // Claude's blocks so far, across a paused server-tool loop.
     let mut before: Vec<Value> = Vec::new();
-    for pause in 0..=PAUSES {
+    // A stream cut off before any of the answer came was asked again.
+    let mut cut_asked_again = false;
+    let mut pause = 0;
+    while pause <= PAUSES {
         let call = crate::ai::eval::Call::start(&req.provider, &endpoint, &body).await;
         let mut waited = Duration::ZERO;
         let mut attempt = 0u32;
@@ -590,28 +591,58 @@ pub(super) async fn post(req: &ChatRequest, native: &Native, mut on: Option<OnDe
             let mut s = Stream::default();
             let mut sse = crate::chat::stream::SseParser::default();
             let mut resp = resp;
-            loop {
-                let bytes = match resp.chunk().await {
-                    Ok(Some(b)) => b,
-                    Ok(None) => break,
-                    Err(e) => return Err(call.failed(format!("request failed: {e}"))),
-                };
-                for data in sse.feed(&bytes) {
+            // Some of the answer itself reached `on` (not its thinking).
+            let mut heard = false;
+            let mut cut = None;
+            {
+                let mut hear = |d: Delta<'_>| {
+                    heard |= !matches!(d, Delta::Reasoning(_) | Delta::Content(""));
                     if let Some(on) = on.as_deref_mut() {
-                        s.push(&data, on);
+                        on(d);
+                    }
+                };
+                loop {
+                    let bytes = match resp.chunk().await {
+                        Ok(Some(b)) => b,
+                        Ok(None) => break,
+                        Err(e) => {
+                            cut = Some(super::cut_why(&e));
+                            break;
+                        }
+                    };
+                    for data in sse.feed(&bytes) {
+                        s.push(&data, &mut hear);
+                    }
+                    if s.done {
+                        break;
                     }
                 }
-                if s.done {
-                    break;
-                }
-            }
-            for data in sse.finish() {
-                if let Some(on) = on.as_deref_mut() {
-                    s.push(&data, on);
+                if cut.is_none() {
+                    for data in sse.finish() {
+                        s.push(&data, &mut hear);
+                    }
                 }
             }
             if let Some(e) = s.error.take() {
                 return Err(call.failed(format!("Anthropic sent an error mid-way: {e}")));
+            }
+            // Cut off (it went quiet past the timeout, the connection
+            // dropped, or it ended without its end): asked again once when
+            // none of the answer came yet; else said plainly, never the HTTP
+            // library's "error decoding response body" (31 Oct). Until then
+            // a stream that just ended part-way was taken as the whole answer.
+            let cut = cut.or_else(|| (!s.done).then(|| "it ended before the answer did".to_string()));
+            if let Some(why) = cut {
+                if !heard && !cut_asked_again {
+                    tracing::info!("Chat: Claude's stream was cut off before any of the answer came ({why}); asking again");
+                    cut_asked_again = true;
+                    if let Some(on) = on.as_deref_mut() {
+                        on(Delta::Restart);
+                    }
+                    continue;
+                }
+                tracing::info!(part_way = heard, "Chat: Claude's stream was cut off ({why})");
+                return Err(call.failed(super::CUT_OFF.to_string()));
             }
             s.whole()
         } else {
@@ -627,6 +658,7 @@ pub(super) async fn post(req: &ChatRequest, native: &Native, mut on: Option<OnDe
             if let Some(msgs) = body["messages"].as_array_mut() {
                 msgs.push(json!({ "role": "assistant", "content": blocks }));
             }
+            pause += 1;
             continue;
         }
         before.extend(blocks);
@@ -901,5 +933,46 @@ mod tests {
         assert!(speaks_messages("anthropic", "claude-opus-5-5"));
         assert!(!speaks_messages("openrouter", "anthropic/claude-opus-5-5"), "OpenRouter has its own API");
         assert!(!speaks_messages("ondevice", "Qwen_Qwen3.5-4B-Q4_K_M"));
+    }
+
+    /// Claude's stream cut off (against a stand-in on this PC): before any
+    /// of the answer came, asked again and answered; ended part-way without
+    /// its `message_stop`, said plainly — until 2026-11-03 that half was
+    /// taken for the whole answer, and a failed read said "request failed:
+    /// error decoding response body".
+    #[tokio::test]
+    async fn a_cut_off_claude_stream_is_asked_again_or_said_plainly() {
+        use crate::ai::llm::cut_tests::{ask, provider, req, Plan};
+        let ev = |kind: &str, data: Value| format!("event: {kind}\ndata: {data}\n\n");
+        let opening = || {
+            vec![
+                ev("message_start", json!({ "type": "message_start", "message": { "id": "m", "type": "message", "role": "assistant", "content": [], "usage": { "input_tokens": 5, "output_tokens": 0 } } })),
+                ev("content_block_start", json!({ "type": "content_block_start", "index": 0, "content_block": { "type": "text", "text": "" } })),
+            ]
+        };
+        let text = |t: &str| ev("content_block_delta", json!({ "type": "content_block_delta", "index": 0, "delta": { "type": "text_delta", "text": t } }));
+        let mut whole = opening();
+        whole.push(text("The review is at two."));
+        whole.push(ev("content_block_stop", json!({ "type": "content_block_stop", "index": 0 })));
+        whole.push(ev("message_delta", json!({ "type": "message_delta", "delta": { "stop_reason": "end_turn" }, "usage": { "output_tokens": 6 } })));
+        whole.push(ev("message_stop", json!({ "type": "message_stop" })));
+        let claude = |base: &str| ChatRequest { native: Some(Native { server_tools: vec![] }), provider: "anthropic".into(), ..req(base, 300) };
+
+        let (base, asked) = provider(vec![
+            Plan { chunks: opening(), gap_ms: 0, hang: true },
+            Plan { chunks: whole.clone(), gap_ms: 0, hang: false },
+        ])
+        .await;
+        let (out, restarts) = ask(&claude(&base)).await;
+        assert_eq!(out.unwrap()["content"], "The review is at two.");
+        assert_eq!((asked.load(std::sync::atomic::Ordering::SeqCst), restarts), (2, 1));
+
+        // Some of it came, then the stream just ended.
+        let mut half = opening();
+        half.push(text("The review is "));
+        let (base, asked) = provider(vec![Plan { chunks: half, gap_ms: 0, hang: false }, Plan { chunks: whole, gap_ms: 0, hang: false }]).await;
+        let (out, _) = ask(&claude(&base)).await;
+        assert_eq!(out.unwrap_err(), crate::ai::llm::CUT_OFF);
+        assert_eq!(asked.load(std::sync::atomic::Ordering::SeqCst), 1);
     }
 }

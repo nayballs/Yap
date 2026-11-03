@@ -4,6 +4,8 @@
 // {…}"); the raw text stays in the log. Pure, shared (Chat's "Couldn't send").
 
 const LOCAL_HOST = /^(127\.0\.0\.1|localhost|\[::1\])(:\d+)?$/i;
+/** An answer cut off part-way (ai/llm.rs `CUT_OFF`, word for word). */
+export const CUT_OFF = 'The answer was cut off before it finished. Try again.';
 const UNREACHABLE =
   /error sending request|connection refused|dns error|failed to lookup|timed out|tcp connect|connect error|network is unreachable/;
 
@@ -41,6 +43,11 @@ export function aiError(err) {
   }
   if (/\bhttp 5\d\d\b/.test(lower)) {
     return said('The AI provider had a problem on its side. Try again in a moment.', false);
+  }
+  // An answer that stopped coming part-way: Rust says it so already
+  // (ai/llm.rs `CUT_OFF`); the HTTP library's own words never show.
+  if (/answer was cut off|error decoding response body|the connection dropped/.test(lower)) {
+    return said(CUT_OFF, false);
   }
   // Yap's own words already ("No groq API key — add one in Settings → …").
   if (/api key|settings → language models/.test(lower)) return said(raw, true);

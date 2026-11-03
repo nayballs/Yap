@@ -39,8 +39,10 @@
 // paces it: `gapMs` between chunks, `chunks` (the content's own pieces),
 // `failAfter: n` (an error event after n chunks, then the end: a provider
 // failing mid-stream), `hangAfter: n` (nothing more after n chunks until
-// Yap closes the connection: a stop). The request record keeps `stream`,
-// `streamOptions`, and `aborted` when Yap hung up mid-stream.
+// Yap closes the connection: a stop), `dropAfter: n` (the connection
+// dropped after n chunks: a stream cut off). The request record keeps
+// `stream`, `streamOptions`, `aborted` when Yap hung up mid-stream and
+// `dropped`.
 // `setStreaming(false)` answers whole even when asked to stream (a server
 // that ignores `stream`).
 //
@@ -345,6 +347,14 @@ async function streamOut(res, record, model, message, finish, pace = {}, counts 
     if (pace.hangAfter != null && i === pace.hangAfter) {
       record.hung = true;
       return; // open until the client goes
+    }
+    if (pace.dropAfter != null && i === pace.dropAfter) {
+      record.dropped = true;
+      // What was written goes out first; then the connection is gone
+      // mid-body, and Yap's read of it fails.
+      await sleep(100);
+      res.destroy();
+      return;
     }
     res.write(out[i]);
     if (pace.gapMs) await sleep(pace.gapMs);
@@ -1058,7 +1068,7 @@ export async function startFakeLlm() {
     delay: (kind, ms) => delays.set(kind, ms),
     scriptChat: (steps) => chatScript.push(...steps),
     reply: (kind, fn) => replies.set(kind, fn),
-    /** Pace a kind's streamed answers: `{ gapMs, chunks, failAfter, hangAfter }` (null: as they come). */
+    /** Pace a kind's streamed answers: `{ gapMs, chunks, failAfter, hangAfter, dropAfter }` (null: as they come). */
     streamPace: (kind, pace) => (pace ? paces.set(kind, pace) : paces.delete(kind)),
     /** Answer whole even when asked to stream (`false`), or stream again. */
     setStreaming: (on) => (streaming = on),
