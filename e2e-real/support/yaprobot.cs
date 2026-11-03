@@ -85,6 +85,12 @@
 //                                 say. Prints {"listening":true} when ready,
 //                                 then what each read got: whether there was
 //                                 text and its length — never the text
+//   yaprobot console <cwd> <program> [args…]   the program in a classic
+//                                 console window of its own (conhost, never
+//                                 the PC's default terminal), started with
+//                                 no standard handles (see ConsoleHost).
+//                                 Prints {"pid":<conhost's>}, waits for the
+//                                 console to end, then prints {"exited":<code>}
 //   yaprobot idle | watch … | watchtest   the hands-off guard: how long the
 //                                 PC has been idle, and the input watcher
 //                                 that ends a run on the person's own input
@@ -238,6 +244,7 @@ static class Program {
                 case "keystate": Print(KeyState()); return 0;
                 case "modkey": Print(ModKey(new IntPtr(long.Parse(args[1])), args[2], args[3], args[4])); return 0;
                 case "clipreader": return ClipReader.Run(int.Parse(args[1]), int.Parse(args[2]));
+                case "console": return ConsoleHost.Run(args[1], args, 2);
                 case "idle": Print(Watcher.Idle()); return 0;
                 case "watch": return Watcher.Run(uint.Parse(args[1]), args[2], args[3]);
                 case "watchtest": return Watcher.SelfTest(args.Length > 1 ? int.Parse(args[1]) : 0);
@@ -825,6 +832,90 @@ static class Program {
             } catch (Exception) { }
         }
         return Obj("ok", !Native.IsWindow(h));
+    }
+}
+
+/// `yaprobot console <cwd> <program> [args…]`: the program in a classic
+/// console window (support/targets.js `startConsoleCli`).
+///
+/// conhost.exe given a command line hosts it in a window of its own and
+/// never hands it to the PC's default terminal (microsoft/terminal,
+/// src/server/IoDispatchers.cpp `_shouldAttemptHandoff`: "explicitly tried
+/// to use it to launch a child process"); a console program started with
+/// CREATE_NEW_CONSOLE would go to Windows Terminal on Windows 11.
+///
+/// How it's started matters: conhost takes any valid standard handles it's
+/// given for a pseudoconsole's pipes (src/host/exe/exemain.cpp passes
+/// GetStdHandle's to ConsoleArguments, whose InConptyMode() is true for
+/// either), and a NUL handle — what Node's `stdio: 'ignore'` gives every
+/// child — reads 0 bytes at once, which conhost takes for the pipe closing
+/// (src/host/VtInputThread.cpp → VtIo::SendCloseEvent): the console ends
+/// before the program starts, or just after. So it's started here with
+/// none: STARTF_USESTDHANDLES with null handles, nothing inherited. (It's
+/// a GUI program: DETACHED_PROCESS and CREATE_NEW_CONSOLE mean nothing to
+/// it.)
+///
+/// Prints {"pid":<conhost's>} once it's started, then waits for it to end —
+/// so the console stays in the run's process tree, where the hands-off
+/// guard's stop finds it — and prints {"exited":<code>}.
+static class ConsoleHost {
+    [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
+    struct STARTUPINFO {
+        public int cb; public string lpReserved; public string lpDesktop; public string lpTitle;
+        public int dwX, dwY, dwXSize, dwYSize, dwXCountChars, dwYCountChars, dwFillAttribute, dwFlags;
+        public short wShowWindow, cbReserved2; public IntPtr lpReserved2, hStdInput, hStdOutput, hStdError;
+    }
+    [StructLayout(LayoutKind.Sequential)]
+    struct PROCESS_INFORMATION { public IntPtr hProcess, hThread; public int dwProcessId, dwThreadId; }
+    [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+    static extern bool CreateProcessW(string app, StringBuilder cmd, IntPtr procAttrs, IntPtr threadAttrs, bool inherit,
+        uint flags, IntPtr env, string cwd, ref STARTUPINFO si, out PROCESS_INFORMATION pi);
+    [DllImport("kernel32.dll")] static extern uint WaitForSingleObject(IntPtr h, uint ms);
+    [DllImport("kernel32.dll")] static extern bool GetExitCodeProcess(IntPtr h, out uint code);
+
+    const int STARTF_USESHOWWINDOW = 0x1, STARTF_USESTDHANDLES = 0x100;
+    const short SW_SHOWNORMAL = 1;
+
+    public static int Run(string cwd, string[] args, int from) {
+        if (args.Length <= from) throw new ArgumentException("no program");
+        string conhost = System.IO.Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.System), "conhost.exe");
+        // "--": everything after it is the program's command line, never
+        // conhost's own options.
+        var cmd = new StringBuilder(Quote(conhost)).Append(" --");
+        for (int i = from; i < args.Length; i++) cmd.Append(' ').Append(Quote(args[i]));
+        var si = new STARTUPINFO();
+        si.cb = Marshal.SizeOf(typeof(STARTUPINFO));
+        si.dwFlags = STARTF_USESTDHANDLES | STARTF_USESHOWWINDOW;
+        si.wShowWindow = SW_SHOWNORMAL;
+        // (hStdInput, hStdOutput, hStdError: null — no handles at all.)
+        PROCESS_INFORMATION pi;
+        if (!CreateProcessW(conhost, cmd, IntPtr.Zero, IntPtr.Zero, false, 0, IntPtr.Zero, cwd, ref si, out pi))
+            throw new System.ComponentModel.Win32Exception(Marshal.GetLastWin32Error());
+        Native.CloseHandle(pi.hThread);
+        Console.Out.WriteLine("{\"pid\":" + pi.dwProcessId + "}");
+        Console.Out.Flush();
+        WaitForSingleObject(pi.hProcess, 0xFFFFFFFF);
+        uint code;
+        GetExitCodeProcess(pi.hProcess, out code);
+        Native.CloseHandle(pi.hProcess);
+        Console.Out.WriteLine("{\"exited\":" + code + "}");
+        Console.Out.Flush();
+        return 0;
+    }
+
+    /// One argument as the C runtime (and CommandLineToArgvW) reads it back.
+    static string Quote(string a) {
+        if (a.Length > 0 && a.IndexOfAny(new[] { ' ', '\t', '"' }) < 0) return a;
+        var sb = new StringBuilder("\"");
+        int slashes = 0;
+        foreach (char c in a) {
+            if (c == '\\') { slashes++; continue; }
+            sb.Append('\\', c == '"' ? slashes * 2 + 1 : slashes);
+            slashes = 0;
+            sb.Append(c);
+        }
+        sb.Append('\\', slashes * 2).Append('"');
+        return sb.ToString();
     }
 }
 

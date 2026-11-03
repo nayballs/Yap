@@ -572,7 +572,17 @@ your own terminal's process, which is why they're known by title and closed
 one by one (confirming its "close all tabs?" for that window only). Each Edge
 window gets a throwaway profile (none of your tabs, sign-ins or extensions).
 mintty is a process of the harness's own (`--nodaemon`, closing never asks),
-ended with what it ran when the test ends.
+ended with what it ran when the test ends. The classic console window is
+`conhost.exe` running the stand-in CLI, started by the helper (`yaprobot
+console`, `startConsoleCli`): conhost given a command line always hosts it
+in a window of its own, never the PC's default terminal (a console program
+started with `CREATE_NEW_CONSOLE` goes to Windows Terminal on Windows 11),
+and it's started with **no standard handles** — conhost takes any it's
+given for a pseudoconsole's pipes, and the NUL ones Node's `stdio:
+'ignore'` gives a child read as closed at once, which ended the console
+before or just after the CLI started (no window, the program never ran:
+every run from 2026-10-30 until the helper took over on 2026-11-03). The
+helper stays its parent until it ends, so a stop takes it with the run.
 Notepad is skipped while Notepad is open: Windows 11 would open the test
 file as a tab in your window. The clipboard is snapshotted when a robot
 starts (in Yap's memory, never printed) and put back when it stops; the
