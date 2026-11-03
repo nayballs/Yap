@@ -79,8 +79,9 @@ test('a chat opened from the drawer: its messages, its title, and the next quest
   // Typed and spoken questions go to it.
   await type(page, pc, 'And for five days?');
   expect(pc.of('ask').at(-1)).toEqual({ type: 'ask', text: 'And for five days?', chat: 41 });
+  // (Talk's words for the box too: the PC hears which conversation.)
   await ask(page, pc, 200);
-  expect(pc.of('start').at(-1)).toEqual({ type: 'start', mode: 'ask', chat: 41 });
+  expect(pc.of('start').at(-1)).toEqual({ type: 'start', mode: 'words', chat: 41 });
   // The drawer marks it.
   await page.getByTestId('menu').click();
   await expect(drawer(page).locator('[aria-current="true"]')).toHaveText('Trip packing list');

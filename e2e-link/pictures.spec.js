@@ -19,6 +19,7 @@ import {
   jpegSize,
   choosePhotos,
   CAN_BEFORE_CHATS,
+  CAN_BEFORE_WORDS,
 } from './support/harness.js';
 
 test.beforeEach(async ({ page }) => {
@@ -84,8 +85,9 @@ test('a typed question with pictures: each sent in pieces, then ask with how man
   expect((await snapshot(page)).turns.at(-1)).toMatchObject({ pictures: 2, typed: true });
 });
 
-test('a spoken question takes the pictures too: sent before stop', async ({ page }) => {
-  const pc = await mockPc(page, reads());
+test('a spoken question sent at Done (hands-free, a PC from before words) takes the pictures too: sent before stop', async ({ page }) => {
+  // (Talk's words for the box leave them in the composer for Send: words.spec.js.)
+  const pc = await mockPc(page, { ...reads(), can: CAN_BEFORE_WORDS });
   await open(page);
   await ready(page, pc);
   await choosePhotos(page, [await photo(page, { w: 900, h: 900 })]);

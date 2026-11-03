@@ -1188,7 +1188,8 @@ main {
   cursor: default;
 }
 .mic-icon,
-.done-icon {
+.done-icon,
+.check-icon {
   flex: 0 0 auto;
   width: 1.375rem;
   height: 1.375rem;
@@ -1201,7 +1202,8 @@ main {
 .mic-icon rect {
   fill: none;
 }
-.done-icon {
+.done-icon,
+.check-icon {
   display: none;
   stroke-width: 2.3;
 }
@@ -1241,6 +1243,14 @@ main {
   display: none;
 }
 .composer[data-state='listening'] .done-icon {
+  display: block;
+}
+/* Words for the box (hands-free off): Done is a ✓, as the Claude and
+   ChatGPT apps finish dictation with — nothing is sent yet. */
+.composer[data-talk='words'][data-state='listening'] .done-icon {
+  display: none;
+}
+.composer[data-talk='words'][data-state='listening'] .check-icon {
   display: block;
 }
 
@@ -1361,6 +1371,28 @@ main {
 .composer[data-state='listening'] .live,
 .composer[data-state='opening'] .live {
   display: flex;
+}
+/* Transcribing (words for the box): the capsule stays a moment — ✕, the ✦,
+   "Transcribing…" and Chat's three amber dots, no waveform, no Done — then
+   the text box comes back with the words in it. */
+.composer[data-state='transcribing'] {
+  border-color: var(--yap-live);
+  box-shadow: inset 0 0 0 1px var(--yap-live);
+}
+.composer[data-state='transcribing'] .field,
+.composer[data-state='transcribing'] .chip,
+.composer[data-state='transcribing'] .spacer,
+.composer[data-state='transcribing'] .talk {
+  display: none;
+}
+.composer[data-state='transcribing'] .live {
+  display: flex;
+}
+.live-dots {
+  display: none;
+}
+.composer[data-state='transcribing'] .live-dots {
+  display: inline-flex;
 }
 .spark {
   flex: 0 0 auto;

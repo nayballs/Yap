@@ -11,8 +11,15 @@
 // plain text, your question in a bubble, Copy and ▶ under an answer); the
 // composer card at the bottom carries the pictures (photos.js), the text
 // box, +, Chat's model chip with its effort (Chat's own picker, picker.js),
-// the mic (Talk: a spoken question, never dictation) and Send (■ while Yap
-// answers). The phone keeps its own conversation (`yap.link.chat`).
+// the mic (Talk: a spoken question, never dictation into the PC's apps) and
+// Send (■ while Yap answers). The phone keeps its own conversation
+// (`yap.link.chat`).
+//
+// Talk puts its words in the text box to check first (the Claude and
+// ChatGPT apps' way: talk, see what you said, fix it, send it yourself):
+// `start {mode: "words"}`, then the PC's `words` go in at the caret, after
+// whatever was typed. Hands-free (or a PC from before, without "words" in
+// `ready.can`) sends the question at once and Yap answers out loud.
 //
 // What it does: pairing (the QR's #pair=<token>, the 4-digit code, the device
 // kept in localStorage), typed questions (`ask`: answered in the same
@@ -90,6 +97,21 @@ const KEY = {
 
 /** A PC from before typed questions: said plainly, before anything's sent. */
 const OLD_PC_TYPING = 'Yap on your PC needs an update to answer typed questions. Update Yap there; talking works as before.';
+
+/** Talk's words for the box, when none came back. */
+const NO_WORDS = "Yap didn't hear anything. Try again, or type it.";
+/** The mic gone mid-talk, its words on their way to the box. */
+const MIC_GONE_WORDS = 'The microphone went away (was the headset switched off?). What it heard is in the box.';
+/** A note that the words are in the box goes when none came. */
+const forgetBoxNote = () => {
+  if (/is in the box\.$/.test(S.note)) S.note = '';
+};
+
+/** Hands-free's hint: what it changes, where the PC can put Talk's words in the box (else it always sends). */
+const HANDS_FREE_HINT = {
+  words: 'On: sends when you stop talking, and Yap answers out loud. Off: your words go in the box to check first.',
+  sends: 'Sends when you stop talking',
+};
 
 // ------------------------------------------------------------------ storage
 
@@ -184,6 +206,12 @@ const S = {
   // or 1.5 s on (on the home Wi-Fi they'd have come by then).
   ignoreOldAt: 0,
   holdRelease: false,
+  // What the question being asked is for: 'ask' (sent at Done, answered out
+  // loud: hands-free, or a PC from before) or 'words' (its words back for
+  // the box, to check and send); and waiting for those words: false, 'sent'
+  // (Done said), 'pc' (the PC is transcribing them).
+  talk: 'ask',
+  transcribing: false,
   seq: 0,
   frames: 0,
   qStarted: 0,
@@ -296,6 +324,7 @@ const el = {
   settings: $('settings'),
   settingsClose: $('settings-close'),
   handsFree: $('handsfree'),
+  handsFreeHint: $('handsfree-hint'),
   wait: $('wait'),
   clearer: $('clearer'),
   sound: $('sound'),
@@ -509,25 +538,30 @@ function dropped(ws) {
   clearTimeout(S.pongTimer);
   const wasReady = S.ready;
   S.ready = false;
-  // A question can't carry on across a reconnect.
-  if (S.local !== 'idle' || S.phase !== 'idle' || player.active) {
+  // A question can't carry on across a reconnect (nor words on their way
+  // to the box: what's typed there stays).
+  if (S.local !== 'idle' || S.phase !== 'idle' || player.active || S.transcribing) {
     const listening = S.local !== 'idle';
+    const words = S.transcribing || (listening && S.talk === 'words');
     endLocalQuestion();
     player.stopAll();
+    S.transcribing = false;
     S.phase = 'idle';
     S.step = '';
     S.reading = '';
     S.speakingTurn = 0;
     // A question that never got heard goes; one with words stays, ended.
     const t = currentTurn(false);
-    if (t && !t.q && !t.a) S.turns.pop();
+    if (t && !t.final && !t.q && !t.a) S.turns.pop();
     else if (t) t.final = true;
     saveThread();
     renderConvo();
     if (wasReady) {
-      S.error = listening
-        ? `Lost the connection to ${pcName()} while listening. Ask again once it's back.`
-        : `Lost the connection to ${pcName()}.`;
+      S.error = words
+        ? `Lost the connection to ${pcName()} before your words came back. Try again once it's back.`
+        : listening
+          ? `Lost the connection to ${pcName()} while listening. Ask again once it's back.`
+          : `Lost the connection to ${pcName()}.`;
     }
   }
   if (!S.denied) {
@@ -565,8 +599,9 @@ function onText(text) {
     return;
   }
   if (!m || typeof m.type !== 'string') return;
-  // (A cancelled question's late news, where it went and its pictures' fate included.)
-  if (ignoringOld() && ['heard', 'step', 'answer', 'speak_start', 'speak_end', 'chat', 'cant_read'].includes(m.type)) return;
+  // (A cancelled question's late news, where it went and its pictures' fate
+  // included; and words cancelled on their way to the box.)
+  if (ignoringOld() && ['heard', 'step', 'answer', 'speak_start', 'speak_end', 'chat', 'cant_read', 'words'].includes(m.type)) return;
   switch (m.type) {
     case 'pair_wait':
       S.pairCode = String(m.code ?? '');
@@ -649,6 +684,9 @@ function onText(text) {
       currentTurn(true).q = String(m.text ?? '');
       renderConvo();
       break;
+    case 'words':
+      onWords(String(m.text ?? ''));
+      break;
     case 'step':
       S.step = String(m.label ?? '');
       if (!S.workSince) S.workSince = performance.now();
@@ -685,6 +723,12 @@ function onText(text) {
       S.error = String(m.message || 'Something went wrong on the PC.');
       S.step = '';
       if (S.local !== 'idle') endLocalQuestion();
+      // Words that didn't come (nothing heard, or the PC couldn't make them
+      // out): the box keeps what it has.
+      if (S.transcribing) {
+        S.transcribing = false;
+        forgetBoxNote();
+      }
       // ▶ that couldn't be read.
       if (S.reading && !player.active) doneSpeaking();
       else {
@@ -718,11 +762,20 @@ function onState(phase) {
     if (S.local === 'listening') S.pcListening = true;
   } else if (phase === 'transcribing' || phase === 'thinking') {
     if (!S.workSince) S.workSince = performance.now();
+    // Talk's words: the PC has them.
+    if (phase === 'transcribing' && S.transcribing) S.transcribing = 'pc';
   } else if (phase === 'speaking') {
     S.step = '';
   } else if (phase === 'idle') {
     S.step = '';
     S.workSince = 0;
+    // The PC done with Talk's words without sending any (nor saying why).
+    // (An idle from before it took them — a cancel's — isn't that.)
+    if (S.transcribing === 'pc') {
+      S.transcribing = false;
+      if (!S.error) S.error = NO_WORDS;
+      forgetBoxNote();
+    }
     if (player.accepting) player.end(); // no speak_end: what's queued still plays
     else if (!S.reading && S.speakingTurn) doneSpeaking();
     // The PC ended the question itself (its own limit, say).
@@ -823,11 +876,78 @@ function onCantRead(message) {
   renderConvo();
 }
 
+/**
+ * **Talk's words, back from the PC** (`words`): into the text box, to check
+ * and send. Nothing was asked: Send asks them as a typed question.
+ */
+function onWords(text) {
+  S.transcribing = false;
+  // The PC ended it itself (its 2 minutes): this page stops listening too,
+  // and the mic goes as after a Done.
+  if (S.local !== 'idle') {
+    endLocalQuestion();
+    afterQuestionSent();
+  }
+  // Its `state idle` follows; not "working" meanwhile.
+  if (S.phase === 'transcribing') S.phase = 'idle';
+  S.workSince = 0;
+  const words = text.trim();
+  if (!words) {
+    if (!S.error) S.error = NO_WORDS;
+    forgetBoxNote();
+    return;
+  }
+  putWords(words);
+}
+
+/**
+ * The words in the box **at the caret — after what's typed, one space
+ * between** — never over it: talking never wipes the box (a selection
+ * stays, the words after it). The caret after them, Send lit. The caret is
+ * the box's own, kept while it's out of focus (a box Yap filled has it at
+ * its end).
+ */
+function putWords(words) {
+  const box = el.input;
+  const v = box.value;
+  let at = typeof box.selectionEnd === 'number' ? box.selectionEnd : v.length;
+  if (!(at >= 0 && at <= v.length)) at = v.length;
+  const before = v.slice(0, at);
+  const after = v.slice(at);
+  const lead = before && !/\s$/.test(before) ? ' ' : '';
+  // No space before what closes a sentence or a bracket.
+  const trail = after && !/^[\s.,;:!?)\]}]/.test(after) ? ' ' : '';
+  box.value = before + lead + words + trail + after;
+  const caret = (before + lead + words).length;
+  try {
+    box.setSelectionRange(caret, caret);
+  } catch {
+    /* a box that can't say: the words are in all the same */
+  }
+  S.typed = box.value.trim() !== '';
+  // The box back (it was the capsule till now), then grown to fit them.
+  render();
+  fitInput();
+  if (caret === box.value.length) box.scrollTop = box.scrollHeight;
+}
+
+/** Talk's words on their way to the box, dropped (✕, Talk again, a typed question, another chat). */
+function dropWords() {
+  if (!S.transcribing) return false;
+  send({ type: 'cancel' });
+  S.transcribing = false;
+  S.ignoreOldAt = performance.now();
+  S.phase = 'idle';
+  S.workSince = 0;
+  return true;
+}
+
 /** Whatever Yap is doing on this phone stops (the drawer's another chat, a new chat). */
 function letGo() {
   if (S.local !== 'idle') cancelTalk();
   const now = phaseNow();
   if (now === 'speaking') interrupt();
+  else if (now === 'transcribing') dropWords();
   else if (now === 'working') {
     send({ type: 'cancel' });
     markCancelled();
@@ -1377,7 +1497,11 @@ async function doOpenMic(run) {
       const listening = S.local === 'listening';
       if (listening) stopTalk();
       closeMic();
-      S.note = listening ? 'The microphone went away (was the headset switched off?). What it heard was sent.' : '';
+      S.note = !listening
+        ? ''
+        : S.talk === 'words'
+          ? MIC_GONE_WORDS
+          : 'The microphone went away (was the headset switched off?). What it heard was sent.';
       render();
     };
   }
@@ -1581,7 +1705,10 @@ function onMicMessage(e) {
       }
       if (S.frames >= MAX_FRAMES) {
         stopTalk();
-        S.note = "Sent at 2 minutes: that's the longest a question can be.";
+        S.note =
+          S.talk === 'words'
+            ? "Stopped at 2 minutes: that's the longest Yap listens. What it heard is in the box."
+            : "Sent at 2 minutes: that's the longest a question can be.";
         render();
       }
     }
@@ -1605,6 +1732,13 @@ function resetMeter() {
 
 const busyListening = () => S.local === 'listening' || S.local === 'opening';
 
+/**
+ * Does Talk put its words in the box (to check, then send) rather than
+ * send them? Yes unless hands-free is on, where the PC can (`words` in
+ * `ready.can`; a PC from before always takes the question).
+ */
+const wordsMode = () => can('words') && !S.handsFree;
+
 async function beginTalk() {
   S.error = '';
   S.note = '';
@@ -1616,8 +1750,11 @@ async function beginTalk() {
   if (S.local !== 'idle') return;
   keepAwake();
   const now = phaseNow();
+  // What this one's for, chosen now (hands-free switched meanwhile changes the next).
+  S.talk = wordsMode() ? 'words' : 'ask';
   // Barge-in: the answer stops at once, then Yap listens.
   if (now === 'speaking') interrupt();
+  else if (now === 'transcribing') dropWords();
   else if (now === 'working') {
     send({ type: 'cancel' });
     markCancelled();
@@ -1657,10 +1794,12 @@ async function beginTalk() {
   S.workSince = 0;
   vad = new EnergyVad({ frameMs: FRAME_MS, endMs: WAITS[S.wait] });
   resetMeter();
-  send({ type: 'start', mode: 'ask', ...chatField() });
+  send({ type: 'start', mode: S.talk, ...chatField() });
   mic.node.port.postMessage({ cmd: 'start' });
   S.local = 'listening';
-  currentTurn(true);
+  // A question's bubble once it's asked: words for the box have none (the
+  // question they become is typed, from Send).
+  if (S.talk === 'ask') currentTurn(true);
   renderConvo();
   syncTicker();
   render();
@@ -1695,6 +1834,17 @@ function stopTalk() {
 function finishStop() {
   clearTimeout(S.stopTimer);
   if (S.local !== 'stopping') return;
+  if (S.talk === 'words') {
+    // Its words come back for the box (`words`): nothing asked, the
+    // pictures still in the composer for the question Send makes.
+    send({ type: 'stop' });
+    S.local = 'idle';
+    S.transcribing = 'sent';
+    afterQuestionSent();
+    syncTicker();
+    render();
+    return;
+  }
   // The pictures in the composer go with the spoken question too, sent just
   // before its end.
   const pics = S.attached.slice();
@@ -1738,6 +1888,9 @@ function cancelTalk() {
     const t = currentTurn(false);
     if (t && !t.q && !t.a && !t.final) S.turns.pop();
     S.phase = 'idle';
+  } else if (S.transcribing) {
+    // Words on their way to the box: dropped, the box as it was.
+    dropWords();
   } else if (phaseNow() === 'working') {
     send({ type: 'cancel' });
     markCancelled();
@@ -1996,12 +2149,13 @@ const player = {
 
 // ------------------------------------------------------------ what it shows
 
-/** offline | opening | listening | working | speaking | idle */
+/** offline | opening | listening | transcribing (Talk's words, for the box) | working | speaking | idle */
 function phaseNow() {
   if (S.local === 'opening') return 'opening';
   if (S.local === 'listening') return 'listening';
-  if (S.local === 'stopping') return 'working';
+  if (S.local === 'stopping') return S.talk === 'words' ? 'transcribing' : 'working';
   if (!S.ready) return 'offline';
+  if (S.transcribing) return 'transcribing';
   if (player.active || S.phase === 'speaking') return 'speaking';
   if (S.phase === 'listening' || S.phase === 'transcribing' || S.phase === 'thinking') return 'working';
   return 'idle';
@@ -2011,6 +2165,7 @@ const PHASE_WORDS = {
   offline: '',
   opening: 'Opening the microphone…',
   listening: 'Listening',
+  transcribing: 'Transcribing…',
   working: 'Working it out',
   speaking: 'Speaking',
   idle: 'Ready',
@@ -2118,15 +2273,19 @@ function render() {
 
   // The composer card: the pictures, the text box, then +, the chip, the
   // mic and Send (■ while Yap answers); while Yap listens, the Yap bar's
-  // capsule (✕, the waveform, the time, Done).
+  // capsule (✕, the waveform, the time, Done), and while Talk's words are
+  // transcribed for the box, the capsule with "Transcribing…" (✕ still
+  // cancels).
   const listening = now === 'listening';
-  const capsule = listening || now === 'opening';
+  const capsule = listening || now === 'opening' || now === 'transcribing';
+  const words = S.talk === 'words' && capsule;
   el.composer.dataset.state = now === 'offline' ? 'idle' : now;
+  el.composer.dataset.talk = words ? 'words' : 'ask';
   el.composer.dataset.typed = String(S.typed);
   el.composer.dataset.pictures = String(S.attached.length > 0 || S.preparing > 0);
-  el.liveLabel.textContent = now === 'opening' ? PHASE_WORDS.opening : '';
-  el.talkBtn.disabled = !S.ready && S.local === 'idle';
-  el.talkBtn.setAttribute('aria-pressed', String(capsule));
+  el.liveLabel.textContent = now === 'opening' || now === 'transcribing' ? PHASE_WORDS[now] : '';
+  el.talkBtn.disabled = (!S.ready && S.local === 'idle') || now === 'transcribing';
+  el.talkBtn.setAttribute('aria-pressed', String(listening || now === 'opening'));
   el.talkLabel.textContent =
     now === 'opening'
       ? waitingPermission()
@@ -2134,10 +2293,14 @@ function render() {
         : 'Wait…'
       : listening
         ? S.holdRelease
-          ? 'Release to send'
+          ? words
+            ? 'Release when done'
+            : 'Release to send'
           : 'Done'
         : S.local === 'stopping'
-          ? 'Sending…'
+          ? words
+            ? 'Transcribing…'
+            : 'Sending…'
           : 'Talk';
   el.talkTime.textContent = listening ? clock(S.frames * (FRAME_SAMPLES / LINK_RATE)) : '';
   el.meter.dataset.on = String(listening);
@@ -2175,6 +2338,10 @@ function render() {
     for (const b of [el.visionSwitch, el.visionAsText, el.visionWithout]) b.disabled = !S.typed;
   }
   el.handsFree.checked = S.handsFree;
+  // What hands-free changes: where the PC can put Talk's words in the box.
+  // (Not known yet: as a PC today has it.)
+  const known = S.ready || S.can.length > 0;
+  el.handsFreeHint.textContent = !known || can('words') ? HANDS_FREE_HINT.words : HANDS_FREE_HINT.sends;
   el.wait.hidden = !S.handsFree;
   for (const r of el.wait.querySelectorAll('input[name=wait]')) r.checked = r.value === S.wait;
   el.clearer.checked = S.clearer;
@@ -2287,6 +2454,7 @@ function sendTyped(how = {}) {
     return;
   }
   if (S.local !== 'idle') return; // listening: the capsule's Send is the way
+  if (S.transcribing) return; // Talk's words on their way here: they come first
   S.error = '';
   keepAwake();
   const now = phaseNow();
@@ -2339,6 +2507,8 @@ function readAloud(t) {
   const now = phaseNow();
   if (S.local !== 'idle') cancelTalk();
   else if (now === 'working') markCancelled();
+  // (Words on their way to the box: the PC drops them for this, as it drops a question.)
+  else if (now === 'transcribing') S.transcribing = false;
   player.stopAll();
   // The PC answers with `state idle` (the old news ends there), then the voice.
   S.ignoreOldAt = performance.now();
@@ -2697,6 +2867,9 @@ window.__yapLink = {
       local: S.local,
       phase: S.phase,
       now: phaseNow(),
+      // Talk's words: for the box ('words') or a question ('ask'), and on their way back.
+      talk: S.talk,
+      transcribing: !!S.transcribing,
       ready: S.ready,
       pc: S.pc,
       model: S.model,

@@ -2,9 +2,14 @@
 // on the PC, the answer comes in the same thread and isn't spoken; ▶ under
 // it has it read (`read_aloud`). Enter sends, Shift+Enter makes a new line,
 // the box grows; the composer rides above the on-screen keyboard; a PC from
-// before typed questions says so plainly. Yap on the PC mocked.
+// before typed questions says so plainly. Yap on the PC mocked (a spoken
+// question beside them on a PC whose Done sends it, as hands-free does:
+// `asks`; Talk's words for the box are words.spec.js's).
 import { test, expect } from '@playwright/test';
-import { servePage, seedDevice, mockPc, open, ready, ask, type, snapshot, downFrame, voice } from './support/harness.js';
+import { servePage, seedDevice, mockPc, open, ready, ask, type, snapshot, downFrame, voice, CAN_BEFORE_WORDS } from './support/harness.js';
+
+/** A PC whose Done sends the spoken question, and says its answer. */
+const asks = { can: CAN_BEFORE_WORDS };
 
 const QUESTION = 'When does the bakery on Elm Street open on Sundays?';
 
@@ -24,7 +29,7 @@ function answer(pc, text, id = 'chat:7:1') {
 }
 
 test('a typed question: sent as ask, answered in the thread, and nothing spoken', async ({ page }) => {
-  const pc = await mockPc(page);
+  const pc = await mockPc(page, asks);
   await open(page);
   await ready(page, pc);
   const input = page.getByTestId('input');
@@ -152,7 +157,7 @@ test('▶ Read aloud: read_aloud with the answer’s id, Yap’s voice on the ph
 });
 
 test('one Stop while Yap speaks: the composer’s for a spoken answer, ▶’s own for an answer read aloud', async ({ page }) => {
-  const pc = await mockPc(page);
+  const pc = await mockPc(page, asks);
   await open(page);
   await ready(page, pc);
   await type(page, pc, QUESTION);
@@ -194,7 +199,7 @@ test('one Stop while Yap speaks: the composer’s for a spoken answer, ▶’s o
 });
 
 test('typing while Yap speaks: its voice stops (interrupt), then the typed question goes', async ({ page }) => {
-  const pc = await mockPc(page);
+  const pc = await mockPc(page, asks);
   await open(page);
   await ready(page, pc);
   await ask(page, pc, 300);

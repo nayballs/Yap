@@ -31,6 +31,15 @@
 //! as Chat keeps a pasted picture (`snip::attach::keep`) and go with it as a
 //! typed question's screenshots do (`assistant::answer`).
 //!
+//! **Words for the phone's box** (`start {mode: "words"}`, the same day:
+//! the Claude and ChatGPT apps' way, talk, check, send): recorded as a
+//! question is, then on `stop` (or at 2 minutes) only transcribed — the
+//! same `PhoneEar` with the dictionary — and sent back as `words`, then
+//! idle ([`finish_question`], `words`). No `heard`, no thinking, nothing
+//! written to Chat; `cancel`, `interrupt` or a new `start` drop it as they
+//! drop a question. The page puts the words in its box; Send asks them as
+//! a typed question (`ask`).
+//!
 //! Logs: phases, lengths and timings; never a question, an answer or audio.
 
 use std::net::SocketAddr;
@@ -46,7 +55,7 @@ use tokio_tungstenite::tungstenite::Message;
 use crate::link::pairing::{self, Verdict};
 use crate::link::pictures::Pictures;
 use crate::link::voice::{self, say, Tx, Wire};
-use crate::link::wire::{self, ChatRef, DeviceCreds, In, Out, Phase};
+use crate::link::wire::{self, ChatRef, DeviceCreds, In, Out, Phase, Talk};
 use crate::link::{devices, Hub, Live};
 use crate::voice::tts::Playback as _;
 
@@ -57,6 +66,8 @@ pub const MAX_SAMPLES: usize = wire::UP_RATE as usize * 120;
 
 /// Words the phone shows.
 const NOTHING_HEARD: &str = "Yap didn't catch a question. Try again.";
+/// Talk's words for the phone's box, when there were none.
+const NO_WORDS: &str = "Yap didn't hear anything. Try again, or type it.";
 const MEETING: &str = "The Voice Assistant is off during meetings. While a meeting records or a call is on, Yap doesn't listen or talk.";
 const NO_SPEECH: &str = "Yap's speech model isn't ready on the PC.";
 
@@ -243,6 +254,9 @@ struct Asking {
     /// The connected phone's device id.
     device: String,
     recording: bool,
+    /// What the question being recorded is for: answering, or its words
+    /// for the phone's box (`start`'s `mode`).
+    talk: Talk,
     audio: Vec<f32>,
     turn: Option<Arc<Turn>>,
     started: Option<Instant>,
@@ -347,6 +361,7 @@ where
         tx: tx.clone(),
         device: device_id.clone(),
         recording: false,
+        talk: Talk::Ask,
         audio: Vec::new(),
         turn: None,
         started: None,
@@ -502,9 +517,10 @@ fn on_message(hub: &Arc<Hub>, tx: &Tx, session: u64, latest: &Arc<AtomicU64>, as
     match m {
         In::Ping => say(tx, Out::Pong),
         In::Hello { .. } => say(tx, Out::Error { message: "Already connected.".into() }),
-        In::Start { chat, .. } => {
+        In::Start { mode, chat } => {
             // A start while it speaks (or thinks) is an interrupt, then a start.
             abandon(latest, asking);
+            asking.talk = Talk::of(&mode);
             if let Some(c) = wire::chat_ref(chat.as_ref()) {
                 asking.set_chat(c);
             }
@@ -523,7 +539,12 @@ fn on_message(hub: &Arc<Hub>, tx: &Tx, session: u64, latest: &Arc<AtomicU64>, as
             say(tx, Out::State { phase: Phase::Listening });
         }
         In::Stop { pictures, as_text } => {
-            if asking.recording {
+            if asking.recording && asking.talk == Talk::Words {
+                // Words for the phone's box: its pictures stay there, for
+                // the question it sends (none come with this).
+                asking.pictures = Pictures::default();
+                finish_question(hub, session, latest, asking, Carries::default());
+            } else if asking.recording {
                 match asking.pictures.take(pictures) {
                     Ok(pictures) => finish_question(hub, session, latest, asking, Carries { pictures, as_text }),
                     Err(why) => {
@@ -745,33 +766,76 @@ fn on_audio(hub: &Arc<Hub>, session: u64, latest: &Arc<AtomicU64>, asking: &mut 
     }
 }
 
-/// The question's audio is in: transcribe it and ask.
+/// The question's audio is in: transcribe it and ask — or, for words for
+/// the phone's box, only transcribe it.
 fn finish_question(hub: &Arc<Hub>, session: u64, latest: &Arc<AtomicU64>, asking: &mut Asking, carries: Carries) {
     asking.recording = false;
     let audio = std::mem::take(&mut asking.audio);
     let id = latest.load(Ordering::SeqCst);
     let pictures = carries.pictures.len();
+    // A turn either way: `cancel`, `interrupt` and a new `start` drop it as
+    // they drop a question (its late news never reaches the phone).
     let turn = Turn::new(id, session, Arc::clone(latest), asking, true, carries);
     asking.turn = Some(Arc::clone(&turn));
     let held = asking.started.take().map(|s| s.elapsed().as_millis() as u64).unwrap_or(0);
-    tracing::info!(samples = audio.len(), held_ms = held, pictures, "Yap Link: a question from the phone");
     let app = hub.app.clone();
+    if asking.talk == Talk::Words {
+        tracing::info!(samples = audio.len(), held_ms = held, "Yap Link: words from the phone, for its box");
+        tauri::async_runtime::spawn(async move { words(app, turn, audio).await });
+        return;
+    }
+    tracing::info!(samples = audio.len(), held_ms = held, pictures, "Yap Link: a question from the phone");
     tauri::async_runtime::spawn(async move { ask(app, turn, audio).await });
+}
+
+/// The phone's audio through the warm engine and the dictionary (`PhoneEar`).
+async fn transcribe(app: &tauri::AppHandle, audio: Vec<f32>) -> Result<String, String> {
+    let ear = {
+        let state = app.state::<crate::AppState>();
+        let guard = state.pipeline.lock().unwrap_or_else(|p| p.into_inner());
+        guard.as_ref().map(|p| p.phone_ear())
+    };
+    match ear {
+        Some(ear) => ear.question(audio).await,
+        None => Err(NO_SPEECH.to_string()),
+    }
+}
+
+/// **Words for the phone's box**: transcribed, said back (`words`, or why
+/// not), then idle. Nothing asked, nothing written to Chat.
+async fn words(app: tauri::AppHandle, turn: Arc<Turn>, audio: Vec<f32>) {
+    use crate::chat::assistant::Phone;
+    turn.tell(Out::State { phase: Phase::Transcribing });
+    let heard = transcribe(&app, audio).await;
+    if !turn.current() {
+        return;
+    }
+    if let Err(e) = &heard {
+        tracing::warn!("Yap Link: the phone's words weren't transcribed ({e})");
+    }
+    let out = words_out(heard);
+    if let Out::Words { text } = &out {
+        tracing::info!(chars = text.chars().count(), "Yap Link: the phone's words, back to its box");
+    }
+    turn.tell(out);
+    turn.tell(Out::State { phase: Phase::Idle });
+}
+
+/// What the phone's box gets for its transcription: the words, trimmed, or
+/// why there are none. Pure.
+fn words_out(heard: Result<String, String>) -> Out {
+    match heard {
+        Ok(text) if !text.trim().is_empty() => Out::Words { text: text.trim().to_string() },
+        Ok(_) => Out::Error { message: NO_WORDS.into() },
+        Err(e) => Out::Error { message: format!("Yap couldn't make out what you said. {e}") },
+    }
 }
 
 /// One question: transcribed, heard, answered (the Voice Assistant's path).
 async fn ask(app: tauri::AppHandle, turn: Arc<Turn>, audio: Vec<f32>) {
     use crate::chat::assistant::Phone;
     turn.tell(Out::State { phase: Phase::Transcribing });
-    let ear = {
-        let state = app.state::<crate::AppState>();
-        let guard = state.pipeline.lock().unwrap_or_else(|p| p.into_inner());
-        guard.as_ref().map(|p| p.phone_ear())
-    };
-    let heard = match ear {
-        Some(ear) => ear.question(audio).await,
-        None => Err(NO_SPEECH.to_string()),
-    };
+    let heard = transcribe(&app, audio).await;
     if !turn.current() {
         return;
     }
@@ -858,5 +922,23 @@ mod tests {
         assert_eq!(parse_message_id("chat:x:5"), None);
         assert_eq!(parse_message_id("chat:12:-1"), None);
         assert_eq!(parse_message_id(""), None);
+    }
+
+    #[test]
+    fn the_phones_words_go_back_to_its_box_trimmed_or_say_why_not() {
+        let j = |o: Out| serde_json::from_str::<serde_json::Value>(&o.json()).unwrap();
+        assert_eq!(
+            j(words_out(Ok("  Book the hall for Saturday afternoon \n".into()))),
+            serde_json::json!({"type":"words","text":"Book the hall for Saturday afternoon"})
+        );
+        // Nothing heard: the box keeps what it has, and the phone says so.
+        for nothing in ["", "   \n"] {
+            assert_eq!(j(words_out(Ok(nothing.into()))), serde_json::json!({"type":"error","message":NO_WORDS}));
+        }
+        // A transcription that failed: why, in the PC's words.
+        assert_eq!(
+            j(words_out(Err("No speech model was ready: still loading".into()))),
+            serde_json::json!({"type":"error","message":"Yap couldn't make out what you said. No speech model was ready: still loading"})
+        );
     }
 }

@@ -20,7 +20,12 @@
 //! `pictures` and `asText` on `ask` / `stop`, [`Out::CantRead`]. `hello.v`
 //! stays 1; a first page ignores the new fields; a page offers the new
 //! things only when `can` says so; a type this PC doesn't know is said
-//! plainly ([`UNKNOWN`]).
+//! plainly ([`UNKNOWN`]). Then **words for the phone's box** (the same day,
+//! the Claude and ChatGPT apps' way: talk, check, send): `start {mode:
+//! "words"}` ([`Talk::Words`]) is recorded as a question is, but on `stop`
+//! only transcribed — [`Out::Words`], then `state idle`; nothing asked,
+//! nothing written to Chat (`"words"` in [`CAN`]; a page from before sends
+//! `"ask"`, and a PC from before takes any `start` as a question).
 
 use serde::{Deserialize, Serialize};
 
@@ -84,9 +89,10 @@ pub enum In {
         #[serde(default)]
         pair: Option<PairToken>,
     },
-    /// A question starts; up frames follow. `chat`: the conversation it
-    /// goes to ([`chat_ref`]: an id, or `"new"`; none: as the Voice
-    /// Assistant chooses).
+    /// A question starts; up frames follow. `mode`: `"ask"`, or `"words"`
+    /// for its words alone ([`Talk::of`]). `chat`: the conversation it goes
+    /// to ([`chat_ref`]: an id, or `"new"`; none: as the Voice Assistant
+    /// chooses).
     Start {
         #[serde(default)]
         mode: String,
@@ -187,10 +193,32 @@ pub fn chat_ref(v: Option<&serde_json::Value>) -> Option<ChatRef> {
     }
 }
 
+/// **What a `start` is for**: a question to answer (`"ask"`, and anything
+/// else: a page from before sends `"ask"`), or its words alone for the
+/// phone's text box (`"words"`: transcribed, never asked).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum Talk {
+    #[default]
+    Ask,
+    Words,
+}
+
+impl Talk {
+    /// A `start`'s `mode`. Pure.
+    pub fn of(mode: &str) -> Talk {
+        if mode == "words" {
+            Talk::Words
+        } else {
+            Talk::Ask
+        }
+    }
+}
+
 /// What this PC answers beyond the first pages' v1 (`ready.can`): a page
 /// offers typing, ▶ on an answer, Chat's picker and the effort only when
-/// its PC says so, and says plainly when it doesn't.
-pub const CAN: &[&str] = &["ask", "read_aloud", "picker", "effort", "chats", "pictures"];
+/// its PC says so, and says plainly when it doesn't; `"words"`: Talk's
+/// words can go in the phone's box to check first ([`Talk::Words`]).
+pub const CAN: &[&str] = &["ask", "read_aloud", "picker", "effort", "chats", "pictures", "words"];
 
 /// A conversation in the phone's drawer.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -295,6 +323,9 @@ pub enum Out {
     /// turned them down): the page offers Chat's own ways on — another
     /// model, their text instead.
     CantRead { message: String },
+    /// What the phone said, transcribed and corrected, for its text box (a
+    /// `start {mode: "words"}`): nothing was asked.
+    Words { text: String },
     Pong,
 }
 
@@ -590,5 +621,25 @@ mod tests {
         assert_eq!(j(Out::Chat { id: 9, title: "Bread".into() }), serde_json::json!({"type":"chat","id":9,"title":"Bread"}));
         assert_eq!(j(Out::Title { id: 9, title: "Sourdough".into() }), serde_json::json!({"type":"title","id":9,"title":"Sourdough"}));
         assert_eq!(j(Out::CantRead { message: "No.".into() }), serde_json::json!({"type":"cant_read","message":"No."}));
+    }
+
+    #[test]
+    fn words_for_the_phones_box_are_a_v1_addition() {
+        // Talk's words for the phone's text box: a start that's only transcribed.
+        let start = parse(r#"{"type":"start","mode":"words","chat":12}"#).unwrap();
+        let In::Start { mode, chat } = start else { panic!("{start:?}") };
+        assert_eq!((Talk::of(&mode), chat_ref(chat.as_ref())), (Talk::Words, Some(ChatRef::Id(12))));
+        assert_eq!(parse(r#"{"type":"start","mode":"words"}"#).unwrap(), In::Start { mode: "words".into(), chat: None });
+        // A question, as a page from before asks (or one that says nothing).
+        assert_eq!(Talk::of("ask"), Talk::Ask);
+        assert_eq!(Talk::of(""), Talk::Ask);
+        assert_eq!(Talk::of("Words"), Talk::Ask, "exactly \"words\"");
+        assert_eq!(Talk::default(), Talk::Ask);
+        // Its answer: the words, nothing else.
+        let j = serde_json::from_str::<serde_json::Value>(&Out::Words { text: "Remind me to water the beans".into() }.json()).unwrap();
+        assert_eq!(j, serde_json::json!({"type":"words","text":"Remind me to water the beans"}));
+        // Said in `ready.can`, after what was there before.
+        assert!(CAN.contains(&"words"));
+        assert_eq!(&CAN[..6], &["ask", "read_aloud", "picker", "effort", "chats", "pictures"]);
     }
 }
