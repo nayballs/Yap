@@ -287,6 +287,38 @@ test('with no AI model, Ask across meetings shows the passages themselves', asyn
   await expect(sidebar(main).getByRole('button', { name: 'Notes', exact: true })).toHaveAttribute('aria-current', 'page');
 });
 
+test('with no AI model, a Skill run in a chat about something else shows its passages and leaves the chat as it was', async ({
+  yap,
+  main,
+  fakeLlm,
+}) => {
+  await installed(yap);
+  // A chat about something else, with a model to answer it.
+  await setConfig(yap, main, { llmScopes: { chat: { enabled: true, provider: 'custom', baseUrl: fakeLlm.base, model: 'fake-chat' } } });
+  fakeLlm.scriptChat([{ content: 'Biscuit suits a ginger cat.' }]);
+  await openView(main, 'Chat');
+  await main.getByRole('button', { name: 'New chat' }).click();
+  const message = main.getByRole('textbox', { name: 'Message' });
+  await message.fill('What should I name my cat?');
+  await main.getByRole('button', { name: 'Send' }).click();
+  const thread = main.locator('.msgs');
+  await expect(thread).toContainText('Biscuit suits a ginger cat.');
+
+  // Then no model, and a Skill in that chat: its passages, by Yap itself.
+  await setConfig(yap, main, { llmScopes: {}, ppProvider: 'groq', ppApiKey: '', ppApiKeys: {} });
+  await message.fill('/decisions');
+  await message.press('Enter');
+  await expect(main.locator('.cbubble.user').last()).toContainText('/decisions');
+  await expect(main.locator('.cbubble.assistant').last()).toContainText(/launch moves to March third/i);
+  // The chat stays a chat: its next question isn't asked across the meetings
+  // (until 2026-11-03 the passages set its scope to "meetings").
+  const convs = await yap.invoke('chats_list');
+  const conv = await yap.invoke('chat_get', { id: convs[0].id });
+  expect(conv.messages.some((m) => m.text.includes('Biscuit'))).toBe(true);
+  expect(conv.scope ?? '').toBe('');
+  await expect(main.getByTestId('chat-across-meetings')).toHaveCount(0);
+});
+
 test('Rebuild reads everything again, Delete takes the model and the index, and it all stayed on this PC', async ({ yap, main, fakeEmbed, shot }) => {
   await installed(yap);
   const before = fakeEmbed.requests.length;

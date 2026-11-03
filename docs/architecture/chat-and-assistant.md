@@ -2852,7 +2852,8 @@ copyable. Yap's, in `chat/skills.rs`:
   is, so `chat_turn`'s signature and its other callers stay as they were);
   `chat_turn` reads `skills::current()`: the turn is asked across the
   meetings whatever the conversation's scope (a new chat keeps that scope;
-  one about something else stays so), no web or calendar tools, and its
+  one about something else stays so — with no model too, where Yap shows
+  the passages itself, `turn/fast.rs` `passages_turn`), no web or calendar tools, and its
   passages come from `skills::find`: **`tasks`** (/todos: every open task
   that's the person's — "You", or one they added — then the ones nobody
   took on, newest meeting first, each a passage that opens the moment it

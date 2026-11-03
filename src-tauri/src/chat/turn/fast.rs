@@ -203,14 +203,16 @@ pub(super) async fn passages_turn(
 ) -> Result<ChatTurn, String> {
     tracing::info!(reason = %why.chars().take(80).collect::<String>(), "Chat: no model to answer across the meetings; showing the passages");
     let conv = turn_conversation(conversation_id, text);
-    if conv.scope.is_empty() {
+    // A Skill: its own passages (chat/skills.rs) — and, as with a model
+    // (`turn::open`), one run in a chat that's about something else leaves
+    // it so (it set the chat's scope to "meetings" until 2026-11-03).
+    let skill = crate::chat::skills::current();
+    if conv.scope.is_empty() && (skill.is_none() || conv.messages.is_empty()) {
         crate::chat::chats::set_scope(conv.id, "meetings");
     }
     let user_index = crate::chat::chats::append(conv.id, "user", text, &[], None, by_voice)?;
     stop.answers(conv.id);
     asked(conv.id, user_index);
-    // A Skill: its own passages (chat/skills.rs).
-    let skill = crate::chat::skills::current();
     let found = match &skill {
         Some(s) => crate::chat::skills::find(s).await,
         None => crate::search::ask::find(text, crate::search::ask::ASK_PASSAGES).await,
