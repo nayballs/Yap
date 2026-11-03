@@ -232,7 +232,11 @@ The language-model side: the OpenAI-compatible client and its prompts, the on-de
   **2 minutes for a server on this PC** (`LOCAL_CHAT_TIMEOUT`, a loopback
   address: Yap's sidecar, Ollama, LM Studio) — Qwen3.5-4B on a processor
   takes ~25 s a turn, its slowest calls ~50 s; the Chat view says "Still
-  working (12 s): the model runs on this PC…" after 8 s. Dictation cleanup and
+  working (12 s): the model runs on this PC…" after 8 s. A **streamed**
+  call's timeout is how long it may go quiet, not its length
+  (`chat_client`, 2026-11-03: reqwest's `read_timeout`, at most
+  `STREAM_LIMIT` in all; a stream cut off is asked again or said plainly,
+  `CUT_OFF`: chat-and-assistant.md, Streaming). Dictation cleanup and
   edit mode keep 20 s and never wait (the raw text is the fallback). A
   rejected tool call's error starts `TOOL_CALL_REJECTED`
   (`tool_call_rejection`: Groq's `tool_use_failed`, llama.cpp's "Failed to

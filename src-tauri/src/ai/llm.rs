@@ -1082,7 +1082,8 @@ pub(crate) enum Delta<'a> {
     /// opens): the step the page shows (`chat/activity.rs`).
     ServerInput { name: &'a str, input: &'a Value },
     /// Start over: what came so far is void (the stream broke, and the call
-    /// goes again without streaming).
+    /// goes again without streaming; or it was cut off before any of the
+    /// answer came, and goes again).
     Restart,
 }
 
@@ -1281,25 +1282,69 @@ enum ReadFail {
     /// The model's own tool call was refused mid-stream (Groq's
     /// `tool_use_failed`), or its arguments weren't JSON: asked again.
     Rejected(String),
-    /// The stream broke: asked again without streaming.
+    /// The stream broke (the provider said so mid-way, or it ended early):
+    /// asked again without streaming.
     Broken(String),
-    /// A failure a whole answer would have had too (the timeout).
-    Failed(String),
+    /// The connection went quiet past the call's timeout, or dropped,
+    /// mid-way (31 Oct: "error decoding response body", a Voice Assistant
+    /// answer lost). `heard`: some of the answer — its text or a tool call,
+    /// not its thinking — already reached the watcher (shown, or spoken).
+    Cut { heard: bool, why: String },
+}
+
+/// Why a stream's read failed, for the log: reqwest names every such
+/// failure "error decoding response body", whatever it was. Pure.
+fn cut_why(e: &reqwest::Error) -> String {
+    if e.is_timeout() {
+        "it went quiet for too long".into()
+    } else {
+        "the connection dropped".into()
+    }
+}
+
+/// What an answer cut off part-way says, plainly — as Chat's
+/// `src/lib/core/aiErrors.js` says any such failure that reaches it.
+pub(crate) const CUT_OFF: &str = "The answer was cut off before it finished. Try again.";
+
+/// The longest a streamed answer may run in all ([`chat_client`]).
+pub(crate) const STREAM_LIMIT: Duration = Duration::from_secs(600);
+
+/// **A Chat call's HTTP client.** Streamed: the call's `timeout` is how
+/// long the answer may go quiet — waiting for it to start, or between two
+/// of its pieces — and the whole runs at most [`STREAM_LIMIT`]: a long
+/// answer still coming is never cut at `timeout` (a Claude answer after
+/// three searches was, 20 s into it, on 31 Oct). Whole: `timeout` in all.
+pub(crate) fn chat_client(timeout: Duration, streaming: bool) -> Result<reqwest::Client, String> {
+    let timeout = crate::ai::eval::timeout(timeout);
+    let builder = reqwest::Client::builder();
+    let builder = if streaming { builder.read_timeout(timeout).timeout(STREAM_LIMIT.max(timeout)) } else { builder.timeout(timeout) };
+    builder.build().map_err(|e| format!("failed to build HTTP client: {e}"))
 }
 
 /// Read a streamed answer to its end, `on` hearing it as it comes.
 async fn read_stream(mut resp: reqwest::Response, on: OnDelta<'_>) -> Result<crate::chat::stream::Assembler, ReadFail> {
     let mut sse = crate::chat::stream::SseParser::default();
     let mut asm = crate::chat::stream::Assembler::default();
-    let mut handle = |data: String, asm: &mut crate::chat::stream::Assembler| -> Result<(), ReadFail> {
+    // Some of the answer itself reached `on` (not its thinking).
+    let mut heard = false;
+    let mut handle = |data: String, asm: &mut crate::chat::stream::Assembler, heard: &mut bool| -> Result<(), ReadFail> {
         match asm.push(&data) {
             Ok(pieces) => {
                 for p in pieces {
                     match p {
-                        crate::chat::stream::Piece::Content(s) => on(Delta::Content(&s)),
-                        crate::chat::stream::Piece::Call(name) => on(Delta::ToolCall(&name)),
                         crate::chat::stream::Piece::Reasoning(s) => on(Delta::Reasoning(&s)),
-                        crate::chat::stream::Piece::Args { name, so_far } => on(Delta::ToolArgs { name: &name, so_far: &so_far }),
+                        crate::chat::stream::Piece::Content(s) => {
+                            *heard |= !s.is_empty();
+                            on(Delta::Content(&s));
+                        }
+                        crate::chat::stream::Piece::Call(name) => {
+                            *heard = true;
+                            on(Delta::ToolCall(&name));
+                        }
+                        crate::chat::stream::Piece::Args { name, so_far } => {
+                            *heard = true;
+                            on(Delta::ToolArgs { name: &name, so_far: &so_far });
+                        }
                     }
                 }
                 Ok(())
@@ -1319,18 +1364,17 @@ async fn read_stream(mut resp: reqwest::Response, on: OnDelta<'_>) -> Result<cra
         let bytes = match resp.chunk().await {
             Ok(Some(b)) => b,
             Ok(None) => break,
-            Err(e) if e.is_timeout() => return Err(ReadFail::Failed(format!("request failed: {e}"))),
-            Err(e) => return Err(ReadFail::Broken(format!("the connection dropped: {e}"))),
+            Err(e) => return Err(ReadFail::Cut { heard, why: cut_why(&e) }),
         };
         for data in sse.feed(&bytes) {
-            handle(data, &mut asm)?;
+            handle(data, &mut asm, &mut heard)?;
         }
         if asm.finished() {
             break;
         }
     }
     for data in sse.finish() {
-        handle(data, &mut asm)?;
+        handle(data, &mut asm, &mut heard)?;
     }
     if !asm.complete() {
         return Err(ReadFail::Broken(format!("it ended early, after {} chunks", asm.chunks())));
@@ -1429,7 +1473,7 @@ pub(crate) fn error_kind(error: &str) -> String {
         "no answer"
     } else if lower.starts_with("the answer left out") {
         "the answer lost the dictation"
-    } else if lower.starts_with("the provider sent an error") || lower.starts_with("it ended early") {
+    } else if lower.starts_with("the provider sent an error") || lower.starts_with("it ended early") || e.starts_with(CUT_OFF) {
         "the stream broke off"
     } else {
         "other"
@@ -1692,10 +1736,9 @@ async fn post_chat_request(
     // A request carrying screenshots uploads them too: more time (Snip to
     // Chat; a cloud Chat call's 20 s covered the upload as well).
     let timeout = if crate::snip::turn::has_images(&body) { timeout.max(IMAGE_TIMEOUT) } else { timeout };
-    let client = reqwest::Client::builder()
-        .timeout(crate::ai::eval::timeout(timeout))
-        .build()
-        .map_err(|e| format!("failed to build HTTP client: {}", e))?;
+    let client = chat_client(timeout, streaming)?;
+    // A stream cut off before any of the answer came was asked again.
+    let mut cut_asked_again = false;
 
     // A model evaluation (`eval.rs`, debug builds) paces its calls and logs
     // every request and response; otherwise a no-op.
@@ -1888,7 +1931,20 @@ async fn post_chat_request(
                     return Ok(message);
                 }
                 Err(ReadFail::Rejected(why)) => return Err(call.failed(format!("{TOOL_CALL_REJECTED}{why}"))),
-                Err(ReadFail::Failed(e)) => return Err(call.failed(e)),
+                // Cut off before any of the answer came (nothing shown or
+                // spoken): asked again, streamed, once.
+                Err(ReadFail::Cut { heard: false, why }) if !cut_asked_again => {
+                    tracing::info!(provider, "A streamed answer was cut off before any of it came ({why}); asking again");
+                    cut_asked_again = true;
+                    on(Delta::Restart);
+                    continue;
+                }
+                // Some of it shown or spoken already, or cut off again: said
+                // plainly (never the HTTP library's "error decoding response body").
+                Err(ReadFail::Cut { heard, why }) => {
+                    tracing::info!(provider, part_way = heard, "A streamed answer was cut off ({why})");
+                    return Err(call.failed(CUT_OFF.to_string()));
+                }
                 Err(ReadFail::Broken(why)) => {
                     // Asked again whole; an endpoint whose streams keep
                     // breaking isn't streamed again this session.
@@ -2487,5 +2543,174 @@ mod tests {
         let full = format!("{BASE_PROMPT}\n\nKeep it casual.");
         assert_eq!(build_system_prompt(&full), full);
         assert_eq!(build_system_prompt(BASE_PROMPT), BASE_PROMPT);
+    }
+}
+
+/// Streams cut off part-way (31 Oct: a Voice Assistant answer lost as
+/// "request failed: error decoding response body", the call's 20 s timeout
+/// cutting a Claude answer still being written), against a stand-in
+/// provider on this PC.
+#[cfg(test)]
+pub(crate) mod cut_tests {
+    use super::*;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::Arc;
+
+    /// One connection's answer: its chunks, `gap_ms` apart, then the end —
+    /// or, `hang`, nothing more until Yap hangs up.
+    pub(crate) struct Plan {
+        pub chunks: Vec<String>,
+        pub gap_ms: u64,
+        pub hang: bool,
+    }
+
+    fn sse(delta: Value, finish: Option<&str>) -> String {
+        format!("data: {}\n\n", json!({ "choices": [{ "index": 0, "delta": delta, "finish_reason": finish }] }))
+    }
+
+    fn start() -> String {
+        sse(json!({ "role": "assistant", "content": "" }), None)
+    }
+
+    fn text(s: &str) -> String {
+        sse(json!({ "content": s }), None)
+    }
+
+    fn whole(words: &[&str]) -> Vec<String> {
+        let mut out = vec![start()];
+        out.extend(words.iter().map(|w| text(w)));
+        out.push(sse(json!({}), Some("stop")));
+        out.push("data: [DONE]\n\n".into());
+        out
+    }
+
+    /// The stand-in: connection n gets `plans[n]`. Its address, and how many
+    /// requests came.
+    pub(crate) async fn provider(plans: Vec<Plan>) -> (String, Arc<AtomicUsize>) {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let base = format!("http://127.0.0.1:{}/v1", listener.local_addr().unwrap().port());
+        let asked = Arc::new(AtomicUsize::new(0));
+        let count = Arc::clone(&asked);
+        tokio::spawn(async move {
+            for plan in plans {
+                let Ok((mut sock, _)) = listener.accept().await else { return };
+                count.fetch_add(1, Ordering::SeqCst);
+                tokio::spawn(async move {
+                    // The request: its head, then its body by its length.
+                    let (mut got, mut buf) = (Vec::new(), [0u8; 4096]);
+                    loop {
+                        let n = sock.read(&mut buf).await.unwrap_or(0);
+                        if n == 0 {
+                            return;
+                        }
+                        got.extend_from_slice(&buf[..n]);
+                        let head = String::from_utf8_lossy(&got).to_string();
+                        if let Some(end) = head.find("\r\n\r\n") {
+                            let len = head[..end]
+                                .lines()
+                                .find_map(|l| l.to_ascii_lowercase().strip_prefix("content-length:").and_then(|v| v.trim().parse::<usize>().ok()))
+                                .unwrap_or(0);
+                            if got.len() >= end + 4 + len {
+                                break;
+                            }
+                        }
+                    }
+                    let _ = sock.write_all(b"HTTP/1.1 200 OK\r\ncontent-type: text/event-stream\r\nconnection: close\r\n\r\n").await;
+                    for c in plan.chunks {
+                        if sock.write_all(c.as_bytes()).await.is_err() {
+                            return;
+                        }
+                        let _ = sock.flush().await;
+                        tokio::time::sleep(Duration::from_millis(plan.gap_ms)).await;
+                    }
+                    if plan.hang {
+                        tokio::time::sleep(Duration::from_secs(30)).await;
+                    }
+                });
+            }
+        });
+        (base, asked)
+    }
+
+    pub(crate) fn req(base: &str, timeout_ms: u64) -> ChatRequest {
+        ChatRequest {
+            base_url: base.into(),
+            api_key: String::new(),
+            model: "stand-in".into(),
+            provider: "custom".into(),
+            temperature: 0.0,
+            messages: json!([{ "role": "user", "content": "What's on today?" }]),
+            tools: None,
+            max_tokens: None,
+            timeout: Duration::from_millis(timeout_ms),
+            rate_limit_patience: Duration::ZERO,
+            extra: Default::default(),
+            native: None,
+        }
+    }
+
+    /// The call streamed: its result, and how often the watcher was told to
+    /// start over.
+    pub(crate) async fn ask(req: &ChatRequest) -> (Result<Value, String>, usize) {
+        let mut restarts = 0;
+        let mut on = |d: Delta<'_>| {
+            if matches!(d, Delta::Restart) {
+                restarts += 1;
+            }
+        };
+        let out = post_chat_streamed(req, &mut on).await;
+        (out, restarts)
+    }
+
+    /// An answer still coming past the call's timeout isn't cut: only a
+    /// stream that goes quiet that long is.
+    #[tokio::test]
+    async fn an_answer_still_coming_is_never_cut_at_the_timeout() {
+        let words = ["Your ", "next ", "meeting ", "is ", "the ", "design ", "review."];
+        let (base, asked) = provider(vec![Plan { chunks: whole(&words), gap_ms: 120, hang: false }]).await;
+        let (out, restarts) = ask(&req(&base, 300)).await;
+        assert_eq!(out.unwrap()["content"], "Your next meeting is the design review.");
+        assert_eq!((asked.load(Ordering::SeqCst), restarts), (1, 0));
+    }
+
+    /// Cut off before any of the answer came (nothing shown or spoken yet):
+    /// asked again once, and answered.
+    #[tokio::test]
+    async fn a_stream_cut_before_the_answer_began_is_asked_again() {
+        let (base, asked) = provider(vec![
+            Plan { chunks: vec![start()], gap_ms: 0, hang: true },
+            Plan { chunks: whole(&["The design ", "review is at two."]), gap_ms: 0, hang: false },
+        ])
+        .await;
+        let (out, restarts) = ask(&req(&base, 300)).await;
+        assert_eq!(out.unwrap()["content"], "The design review is at two.");
+        assert_eq!((asked.load(Ordering::SeqCst), restarts), (2, 1));
+    }
+
+    /// Cut off mid-answer (some of it shown or spoken): said plainly, never
+    /// the HTTP library's "error decoding response body", and not asked
+    /// again under what was already said.
+    #[tokio::test]
+    async fn a_stream_cut_mid_answer_says_so_plainly() {
+        let (base, asked) = provider(vec![
+            Plan { chunks: vec![start(), text("Your next meeting is ")], gap_ms: 0, hang: true },
+            Plan { chunks: whole(&["Never asked for."]), gap_ms: 0, hang: false },
+        ])
+        .await;
+        let (out, _) = ask(&req(&base, 300)).await;
+        assert_eq!(out.unwrap_err(), CUT_OFF);
+        assert_eq!(asked.load(Ordering::SeqCst), 1);
+        assert_eq!(error_kind(CUT_OFF), "the stream broke off");
+    }
+
+    /// Cut off twice before the answer began: said plainly too.
+    #[tokio::test]
+    async fn a_stream_cut_twice_says_so_plainly() {
+        let hung = || Plan { chunks: vec![start()], gap_ms: 0, hang: true };
+        let (base, asked) = provider(vec![hung(), hung()]).await;
+        let (out, _) = ask(&req(&base, 250)).await;
+        assert_eq!(out.unwrap_err(), CUT_OFF);
+        assert_eq!(asked.load(Ordering::SeqCst), 2);
     }
 }

@@ -956,11 +956,27 @@ The AI Chat surface (conversations, the tool-calling loop and its note tools) an
   this session; one that refuses `stream` itself ("stream"/"streaming" as
   a word in a 400/422 — not "upstream") is asked whole and never streamed
   to again this session; one that answers whole anyway (a JSON body) is
-  read whole; **a stream that breaks** (the connection drops, an `error`
-  object mid-stream — OpenRouter's, llama.cpp's —, no finish reason or
-  `[DONE]`) is asked again whole at once (the page is told to drop what
-  came, `Delta::Restart`), and an endpoint whose streams broke twice isn't
-  streamed again this session. Groq's `tool_use_failed` mid-stream is a
+  read whole; **a stream that breaks** (an `error` object mid-stream —
+  OpenRouter's, llama.cpp's —, no finish reason or `[DONE]`) is asked again
+  whole at once (the page is told to drop what came, `Delta::Restart`), and
+  an endpoint whose streams broke twice isn't streamed again this session.
+  **A stream cut off** (`ReadFail::Cut`, 2026-11-03: its read failed — it
+  went quiet past the call's timeout, or the connection dropped — which the
+  HTTP library calls "error decoding response body", whatever it was):
+  before any of the answer itself came (its text or a tool call; its
+  thinking doesn't count), nothing was shown or spoken, so it's asked again,
+  streamed, once (`Delta::Restart`); part-way, or cut again, the call fails
+  with `llm::CUT_OFF` — "The answer was cut off before it finished. Try
+  again." — never asked again under what was shown or said
+  (`chat::budget::plain_error` turns any raw "error decoding response body"
+  into the same words; `src/lib/core/aiErrors.js` too). Claude's Messages
+  API stream (`anthropic.rs`) the same, and one that ends without its
+  `message_stop` is cut, no longer taken for the whole answer. **A streamed
+  call's timeout is how long it may go quiet** (`llm::chat_client`: the
+  wait for it to start, or between two of its pieces; `STREAM_LIMIT`, 10
+  min, in all): on 31 Oct a Voice Assistant answer on Claude, after three
+  searches, was cut at the cloud's 20 s while still being written, and lost
+  as "request failed: error decoding response body". Groq's `tool_use_failed` mid-stream is a
   rejected tool call, as its HTTP 400 is. **A step** (`Step`): with tools
   offered, a step's opening text is **held until it's an answer** —
   `releases`: a sentence's end (`. ! ? :` + space, or a line break)
