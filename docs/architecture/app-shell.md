@@ -84,7 +84,8 @@ The full stack list, the app's entry and plumbing (`lib.rs`, the tray, context m
   plus in-app email codes and "Sign in with your phone" (a locally drawn QR code, RFC 8628
   device authorization); the session token lives in Windows Credential Manager
   (`keyring-core` + `windows-native-keyring-store`). Deep-link/single-instance are held on 2.4.x
-  (2.5+ needs tauri 2.12).
+  until checked on an installed nightly (2.5+ needed tauri 2.12, which Yap is on since
+  3 Nov 2026; build-and-test.md, "Keeping what Yap is built from current").
 - **MCP (AI apps):** [`rmcp`](https://crates.io/crates/rmcp), the official Rust MCP SDK
   (server + stdio, no macros): `yap.exe mcp` lets Claude, ChatGPT desktop, Gemini CLI,
   Cursor… read meetings and notes through the local API (`integrations/mcp.rs`); `toml_edit` adds Yap to

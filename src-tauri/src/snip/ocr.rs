@@ -184,7 +184,7 @@ fn recognize(rgba: &[u8], w: u32, h: u32) -> Result<Vec<String>, String> {
     writer.WriteBytes(&bgra).map_err(err)?;
     let buffer = writer.DetachBuffer().map_err(err)?;
     let bitmap = SoftwareBitmap::CreateCopyFromBuffer(&buffer, BitmapPixelFormat::Bgra8, sw as i32, sh as i32).map_err(err)?;
-    let result = engine.RecognizeAsync(&bitmap).and_then(|op| op.get()).map_err(err)?;
+    let result = engine.RecognizeAsync(&bitmap).and_then(|op| op.join()).map_err(err)?;
     let lines = result.Lines().map_err(err)?;
     let mut out = Vec::new();
     for i in 0..lines.Size().map_err(err)? {

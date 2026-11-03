@@ -46,8 +46,9 @@ const LOOK_EVERY: std::time::Duration = std::time::Duration::from_millis(5);
 /// taken; `None`: not done by then (it carries on by itself, its answer
 /// dropped). `.get()` waited for ever: a media session that never answered
 /// (a hung browser tab, a busy music app) held the other apps' sound and the
-/// next dictation's start (`media_pause.rs`). (Its completion handler and
-/// `IntoFuture` aren't in the `windows` crate's build Yap has.)
+/// next dictation's start (`media_pause.rs`). (`windows-future` 0.3, with
+/// tauri 2.12, has a completion callback, `when`, and `IntoFuture`; not used
+/// here yet.)
 pub(crate) fn wait_within<T>(limit: std::time::Duration, mut done: impl FnMut() -> bool, results: impl FnOnce() -> T) -> Option<T> {
     let deadline = std::time::Instant::now() + limit;
     loop {

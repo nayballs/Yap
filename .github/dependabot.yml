@@ -14,7 +14,7 @@ updates:
       rust-minor:
         update-types: [minor, patch]
     ignore:
-      # Held on 2.4.x: 2.5+ needs tauri 2.12 (Cargo.toml).
+      # Held on 2.4.x until checked on an installed nightly (Cargo.toml).
       - dependency-name: tauri-plugin-single-instance
         update-types: [version-update:semver-minor, version-update:semver-major]
       - dependency-name: tauri-plugin-deep-link

@@ -426,11 +426,11 @@ mod win {
 
     impl Synth for Windows {
         fn synthesize(&mut self, text: &str) -> Result<Pcm, String> {
-            let stream = self.synth.SynthesizeTextToStreamAsync(&HSTRING::from(text)).and_then(|op| op.get()).map_err(err)?;
+            let stream = self.synth.SynthesizeTextToStreamAsync(&HSTRING::from(text)).and_then(|op| op.join()).map_err(err)?;
             self.cues = word_cues(&stream, text);
             let size = u32::try_from(stream.Size().map_err(err)?).map_err(|_| "Windows speech: too much audio".to_string())?;
             let reader = DataReader::CreateDataReader(&stream.GetInputStreamAt(0).map_err(err)?).map_err(err)?;
-            reader.LoadAsync(size).and_then(|op| op.get()).map_err(err)?;
+            reader.LoadAsync(size).and_then(|op| op.join()).map_err(err)?;
             let mut bytes = vec![0u8; size as usize];
             reader.ReadBytes(&mut bytes).map_err(err)?;
             let _ = stream.Close();
