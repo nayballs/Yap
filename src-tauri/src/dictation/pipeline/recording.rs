@@ -344,7 +344,7 @@ impl Shared {
             // below, and nothing's read.)
             if !self.processing.load(Ordering::SeqCst) {
                 let found = match page {
-                    Some(text) => Some(text).filter(|t| !t.trim().is_empty()).map(|text| crate::chat::assistant::selected::Selected { text, app: "Yap".into() }),
+                    Some(text) => Some(text).filter(|t| !t.trim().is_empty()).map(|text| crate::chat::assistant::selected::Selected { text, app: "Yap".into(), web: false }),
                     None => self.read_ask_selection(),
                 };
                 let Some(found) = found else {
@@ -381,14 +381,14 @@ impl Shared {
         if let Some(staged) = test_selection(hwnd) {
             return staged
                 .filter(|(t, _)| !t.trim().is_empty())
-                .map(|(text, _)| crate::chat::assistant::selected::Selected { text, app: "e2e-stand-in.exe".into() });
+                .map(|(text, _)| crate::chat::assistant::selected::Selected { text, app: "e2e-stand-in.exe".into(), web: false });
         }
         let terminal = crate::pasting::app_kind::of_window(Some(hwnd)).is_terminal();
         let got = crate::pasting::selection::read_selected(Some(hwnd), !terminal);
         tracing::info!(via = got.via, terminal, "Ask about the selection: read the selection");
         let text = got.text.filter(|t| !t.trim().is_empty())?;
         let app = crate::pasting::text_injector::app_name_for(Some(hwnd)).unwrap_or_default();
-        Some(crate::chat::assistant::selected::Selected { text, app })
+        Some(crate::chat::assistant::selected::Selected { text, app, web: false })
     }
 
     /// After a spoken "snip" landed in Chat ([`super::listen_after_snip`]):

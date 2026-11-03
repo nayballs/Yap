@@ -127,13 +127,19 @@ pub const MAX_TYPED: usize = 200;
 
 /// `s` as lower-case words, accents folded ("Réserver" → reserver): split at
 /// anything not a letter or a digit, and at a lower-to-upper change
-/// ("cardNumber" → card, number). Pure.
+/// ("cardNumber" → card, number) — never at a character that isn't drawn
+/// (a soft hyphen in "Kreditkarten\u{AD}nummer", a zero-width space: a page
+/// sets them for line breaks, and split there a card field or a "Kaufen"
+/// would be missed). Pure.
 pub fn words(s: &str) -> Vec<String> {
     let mut out: Vec<String> = Vec::new();
     let mut cur = String::new();
     let mut prev_lower = false;
     let push = |cur: &mut String, out: &mut Vec<String>| out.push(words::fold(&std::mem::take(cur).to_lowercase()));
     for c in s.chars() {
+        if unseen(c) {
+            continue;
+        }
         if c.is_alphanumeric() {
             if c.is_uppercase() && prev_lower && !cur.is_empty() {
                 push(&mut cur, &mut out);
@@ -151,6 +157,13 @@ pub fn words(s: &str) -> Vec<String> {
         push(&mut cur, &mut out);
     }
     out
+}
+
+/// A character a page's text holds but never draws: the soft hyphen, the
+/// zero-width space and joiners, the word joiner, the byte-order mark, the
+/// direction marks. Pure.
+fn unseen(c: char) -> bool {
+    matches!(c, '\u{AD}' | '\u{180E}' | '\u{200B}'..='\u{200F}' | '\u{202A}'..='\u{202E}' | '\u{2060}'..='\u{2064}' | '\u{2066}'..='\u{2069}' | '\u{FEFF}')
 }
 
 /// The words an element is known by for the rules: its name, label,
@@ -340,7 +353,9 @@ fn form_signals(d: &Described, f: &Form) -> Option<&'static str> {
 /// a link's address; for a form's submit button, also where the form goes,
 /// whether it takes a payment or shows a price (a "Continue" in a form
 /// posting to …/place-order asks, as Enter in it does); a button with a
-/// price on it pays; a sign-in form's submit signs in. Pure.
+/// price on it pays, and so may any button on a page that takes a card (a
+/// card field or a payment provider's frame: a script's "Continue" there
+/// needs no form); a sign-in form's submit signs in. Pure.
 pub fn click_needs_ok(d: &Described, e: &Element) -> Option<&'static str> {
     if e.submit {
         if let Some(f) = d.form.as_ref() {
@@ -355,7 +370,7 @@ pub fn click_needs_ok(d: &Described, e: &Element) -> Option<&'static str> {
     if let Some(kind) = needs_ok(&e.name, &e.href).or_else(|| (e.name.trim().is_empty()).then(|| needs_ok(&e.label, "")).flatten()) {
         return Some(kind);
     }
-    (e.role == "button" && has_price(&e.name)).then_some("pay")
+    (e.role == "button" && (has_price(&e.name) || d.payment)).then_some("pay")
 }
 
 /// What submitting `e`'s form (Enter in it) would do that asks first: its
@@ -381,19 +396,20 @@ pub fn enter_needs_ok(d: &Described, e: &Element) -> Option<&'static str> {
 }
 
 /// **Typed text Yap refuses whatever the field is called**: a payment card
-/// number (13–19 digits that pass the Luhn check, spaces and dashes aside),
-/// an IBAN (its mod-97 check), or a 3–4 digit code typed into a form that
-/// takes a card (a security code beside the card field). Why, for the
-/// model and the chip. Pure.
+/// number (13–19 digits that pass the Luhn check, however they're grouped:
+/// spaces, dashes, dots, slashes, underscores), an IBAN (its mod-97 check),
+/// or a 3–4 digit code typed into a form that takes a card (a security code
+/// beside the card field). Why, for the model and the chip. Pure.
 pub fn typed_secret(text: &str, d: &Described) -> Option<&'static str> {
     let compact: String = text.chars().filter(|c| !c.is_whitespace() && *c != '-' && *c != '.').collect();
-    // A card number anywhere in it (a run of digits, spaces and dashes).
+    // A card number anywhere in it (a run of digits and what groups them).
+    let grouping = |c: char| c.is_whitespace() || unseen(c) || matches!(c, '-' | '.' | '/' | '_' | '\u{2010}'..='\u{2015}');
     let mut run = String::new();
     let mut runs = Vec::new();
     for c in text.chars().chain(std::iter::once('x')) {
         if c.is_ascii_digit() {
             run.push(c);
-        } else if !(c == ' ' || c == '-') && !run.is_empty() {
+        } else if !grouping(c) && !run.is_empty() {
             runs.push(std::mem::take(&mut run));
         }
     }
@@ -835,6 +851,42 @@ mod tests {
         let card_form = Described { form: Some(Form { form: 0, payment: true, ..Default::default() }), ..Default::default() };
         assert_eq!(typed_secret("123", &card_form), Some("payment card details"));
         assert_eq!(typed_secret("123", &any), None);
+    }
+
+    #[test]
+    fn a_card_number_grouped_any_way_is_still_a_card_number() {
+        let any = Described::default();
+        for grouped in ["4111.1111.1111.1111", "4111/1111/1111/1111", "4111_1111_1111_1111", "4111\u{a0}1111\u{a0}1111\u{a0}1111", "4111\u{2013}1111\u{2013}1111\u{2013}1111", "4111\u{200B}1111\u{200B}1111\u{200B}1111"] {
+            assert_eq!(typed_secret(grouped, &any), Some("payment card details"), "{grouped:?}");
+        }
+        // Still fine: a phone number, dates, a version.
+        for ok in ["07700.900.123", "02/11/2026", "v1.2.3"] {
+            assert_eq!(typed_secret(ok, &any), None, "{ok}");
+        }
+    }
+
+    #[test]
+    fn a_soft_hyphen_or_a_zero_width_space_never_splits_a_word() {
+        // Pages break long words with them ("Kreditkarten&shy;nummer").
+        assert_eq!(words("Kredit\u{AD}karten\u{AD}nummer"), ["kreditkartennummer"]);
+        assert_eq!(sensitive(&field("text", "Kredit\u{AD}karten\u{AD}nummer")), Some("payment card details"));
+        assert_eq!(sensitive(&field("text", "Pass\u{200B}wort")), Some("a password"));
+        assert_eq!(sensitive(&field("text", "Wacht\u{2060}woord")), Some("a password"));
+        assert_eq!(needs_ok("Jetzt kau\u{AD}fen", ""), Some("buy"));
+        assert_eq!(needs_ok("Be\u{AD}stel\u{AD}len", ""), Some("place an order"));
+        assert_eq!(needs_ok("Zur Kas\u{200B}se", ""), Some("buy"));
+    }
+
+    #[test]
+    fn any_button_on_a_page_that_takes_a_card_asks_first() {
+        // A script's "Continue" beside a payment provider's frame: no form to tell by.
+        let card_page = Described { payment: true, ..Default::default() };
+        let go_on = Element { role: "button".into(), name: "Continue".into(), form: -1, ..Default::default() };
+        assert_eq!(click_needs_ok(&card_page, &go_on), Some("pay"));
+        assert_eq!(click_needs_ok(&Described::default(), &go_on), None, "elsewhere it goes ahead");
+        // A link there still goes by its words and its address.
+        let help = Element { role: "link".into(), name: "Help".into(), href: "https://shop.example.com/help".into(), form: -1, ..Default::default() };
+        assert_eq!(click_needs_ok(&card_page, &help), None);
     }
 
     #[test]

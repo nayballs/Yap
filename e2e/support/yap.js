@@ -79,6 +79,28 @@ function rmrf(dir) {
   }
 }
 
+/**
+ * Copy the build into a run folder, waiting out a lock. A restart copies
+ * into the folder the last instance just quit from, and Windows keeps a
+ * deleted exe "delete pending" until the last handle on it (the exited
+ * process's image, an antivirus scan) closes: a copy then gets EPERM (CI,
+ * quick-note.spec.js's restart, 2026-11-03). Retried as rimraf does, for up
+ * to 20 s; the same build already there is left as it is.
+ */
+async function copyExe(src, dest) {
+  const same = (a, b) => a.size === b.size && Math.trunc(a.mtimeMs) === Math.trunc(b.mtimeMs);
+  for (let waited = 0; ; waited += 250) {
+    try {
+      if (fs.existsSync(dest) && same(fs.statSync(src), fs.statSync(dest))) return;
+      fs.copyFileSync(src, dest);
+      return;
+    } catch (e) {
+      if (!['EPERM', 'EBUSY', 'EACCES'].includes(e.code) || waited >= 20_000) throw e;
+      await sleep(250);
+    }
+  }
+}
+
 /** `rmrf` without blocking the runner while it retries a locked file. */
 async function rmrfAsync(dir) {
   try {
@@ -129,7 +151,7 @@ export async function launchYap({ name, config = {}, env = {}, data = {}, runsDi
   const appDir = path.join(runDir, 'app');
   const dataDir = path.join(appDir, 'Data');
   fs.mkdirSync(dataDir, { recursive: true });
-  fs.copyFileSync(exe, path.join(appDir, 'yap.exe'));
+  await copyExe(exe, path.join(appDir, 'yap.exe'));
   fs.writeFileSync(path.join(appDir, 'portable'), 'Yap Portable Mode');
   if (!restart) {
     fs.writeFileSync(

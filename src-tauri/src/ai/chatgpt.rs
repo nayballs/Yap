@@ -571,19 +571,33 @@ pub async fn access_token() -> Result<String, String> {
     }
 }
 
-/// **A fresh access token after OpenAI refused the one Yap had** (a 401):
-/// the one held here and the one kept for other Yaps set aside, then
-/// [`access_token`] refreshes.
-pub async fn refreshed_token() -> Result<String, String> {
+/// **A fresh access token after OpenAI refused `refused`** (a 401): that
+/// token set aside, here and where other Yaps find it, then
+/// [`access_token`] refreshes. Under the lock across Yaps (2 Nov 2026):
+/// read and written back outside it, the kept tokens could overwrite what
+/// another Yap had just refreshed with a spent refresh token, and the next
+/// refresh would end the sign-in (`refresh_token_reused`).
+pub async fn refreshed_token(refused: &str) -> Result<String, String> {
     {
         let _one = REFRESHING.lock().await;
-        state(|s| s.access = None);
-        if let Some(mut c) = load_creds() {
-            c.expires = 0;
+        state(|s| {
+            if s.access.as_ref().is_some_and(|(a, _)| a == refused) {
+                s.access = None;
+            }
+        });
+        let _across = across_yaps().await?;
+        if let Some(c) = load_creds().and_then(|c| set_aside(c, refused)) {
             let _ = save_creds(&c);
         }
     }
     access_token().await
+}
+
+/// The kept tokens with `refused` marked spent (the next call refreshes) —
+/// `None` when they hold another access token already (another Yap
+/// refreshed: they're used as they are). Pure.
+fn set_aside(kept: Creds, refused: &str) -> Option<Creds> {
+    (kept.access == refused).then_some(Creds { expires: 0, ..kept })
 }
 
 /// The cross-process refresh lock (a lock file beside the temp folder's
@@ -605,4 +619,19 @@ async fn across_yaps() -> Result<crate::ai::local_llm::runtime::UpgradeLock, Str
 pub async fn models() -> Result<Vec<(String, String)>, String> {
     let token = access_token().await?;
     oauth::models(&token).await
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_refused_token_is_set_aside_but_one_another_yap_refreshed_is_kept() {
+        let kept = Creds { client: "oaiapp_example".into(), sub: "user-123".into(), refresh: "r2".into(), access: "a2".into(), expires: 4_000 };
+        // The token OpenAI refused: spent, the refresh token as it is.
+        let spent = set_aside(kept.clone(), "a2").expect("set aside");
+        assert_eq!((spent.access.as_str(), spent.refresh.as_str(), spent.expires), ("a2", "r2", 0));
+        // Another Yap refreshed since this one's call went out: its tokens stay.
+        assert!(set_aside(kept, "a1").is_none());
+    }
 }

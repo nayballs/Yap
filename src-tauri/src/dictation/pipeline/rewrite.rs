@@ -276,7 +276,7 @@ impl Shared {
         crate::chat::assistant::ask_about(
             &self.app,
             question.trim().to_string(),
-            crate::chat::assistant::selected::Selected { text: selection, app },
+            crate::chat::assistant::selected::Selected { text: selection, app, web: false },
         );
         let _ = self.app.emit("yap-state", "idle");
     }

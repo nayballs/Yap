@@ -381,6 +381,7 @@ async fn answer_turn(
         screen,
         act,
         own_search,
+        web_question: false,
     };
     let schemas = if tools_supported {
         counter.count(&crate::chat::tools::offered_tools(cfg.open_apps, web_on && !claude_in_chat, extra_flags).to_string()).await
@@ -891,6 +892,8 @@ async fn answer_turn(
             screen,
             act,
             own_search,
+            // Words selected on a page beside the chat: the page's.
+            web_question: about_selection.as_ref().is_some_and(|s| s.web),
         };
         let looped = crate::chat::tools::run_tool_loop_with(
             &system,
@@ -1365,6 +1368,7 @@ pub async fn chat_limits() -> Limits {
         screen,
         act,
         own_search,
+        web_question: false,
     };
     let schemas = if tools_supported { counter.count(&crate::chat::tools::offered_tools(cfg.open_apps, web_on && !claude_in_chat, extra).to_string()).await } else { 0 };
     let fixed = counter.count(&stable).await + schemas;
