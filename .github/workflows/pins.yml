@@ -23,7 +23,7 @@ jobs:
       - name: Setup Node
         uses: actions/setup-node@v7
         with:
-          node-version: 20
+          node-version: 24
 
       - name: The check's own tests
         run: node --test scripts/check-pins.test.mjs

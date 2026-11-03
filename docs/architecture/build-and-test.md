@@ -128,6 +128,18 @@ failures.)
 `.github/workflows/e2e.yml` runs the **end-to-end UI suite** on the same triggers
 (plus `workflow_dispatch`), separately so `ci.yml` stays quick — see below.
 
+**Node 24** in every workflow (ci, e2e, nightly, release, pins; since 3 Nov 2026, was
+20, out of support since April 2026), the PC's own major; setup-node takes the newest
+24.x. The actions themselves run on Node 24 (checkout, setup-node, upload-artifact v7,
+tauri-action v1, rust-cache v2), except `humbletim/install-vulkan-sdk@v1.2` in nightly
+and release, whose SDK cache step is `actions/cache@v4` on Node 20 (its latest release:
+the one deprecation warning left). **jsdom stays on 26** (the Node-side specs:
+`markdown`, `doc-stream`, `doc-markdown`, `note-markdown`): jsdom 30 needs
+`^22.22.2 || ^24.15.0 || >=26` (its undici uses Node's zstd), and on an older 24
+(24.11) Playwright's loader can't load it (`ERR_VM_MODULE_LINK_FAILURE`, "module is not
+linked", from its `require()` of an ES module): move it once the PC's Node is 24.15 or
+later.
+
 ## Keeping what Yap is built from current (2026-11-01)
 
 - **Crates, npm packages and GitHub Actions**: Dependabot (`.github/dependabot.yml`), a PR
