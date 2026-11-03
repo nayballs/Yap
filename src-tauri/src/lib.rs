@@ -1119,26 +1119,20 @@ pub fn run() {
             // key moved (`dictation::gesture::now_ms`, stamped in the hook): events are
             // handled one after another, and push-to-talk's tap / double-tap
             // timing mustn't stretch while the last one is still starting.
+            // The pipeline is taken out of its slot first (`pipeline::running`):
+            // nothing waits on a key press — edit mode's Ctrl+C — under its lock.
             let press_handle = handle.clone();
             handle.listen("dictation-key-pressed", move |event| {
                 let at = event.payload().parse::<u64>().ok();
-                let state = press_handle.state::<AppState>();
-                let pipeline = state.pipeline.lock();
-                if let Ok(guard) = pipeline {
-                    if let Some(p) = guard.as_ref() {
-                        p.on_key(true, at);
-                    }
+                if let Some(p) = dictation::pipeline::running(&press_handle) {
+                    p.on_key(true, at);
                 }
             });
             let release_handle = handle.clone();
             handle.listen("dictation-key-released", move |event| {
                 let at = event.payload().parse::<u64>().ok();
-                let state = release_handle.state::<AppState>();
-                let pipeline = state.pipeline.lock();
-                if let Ok(guard) = pipeline {
-                    if let Some(p) = guard.as_ref() {
-                        p.on_key(false, at);
-                    }
+                if let Some(p) = dictation::pipeline::running(&release_handle) {
+                    p.on_key(false, at);
                 }
             });
 
@@ -1146,23 +1140,15 @@ pub fn run() {
             let edit_press_handle = handle.clone();
             handle.listen("edit-key-pressed", move |event| {
                 let at = event.payload().parse::<u64>().ok();
-                let state = edit_press_handle.state::<AppState>();
-                let pipeline = state.pipeline.lock();
-                if let Ok(guard) = pipeline {
-                    if let Some(p) = guard.as_ref() {
-                        p.on_edit_key(true, at);
-                    }
+                if let Some(p) = dictation::pipeline::running(&edit_press_handle) {
+                    p.on_edit_key(true, at);
                 }
             });
             let edit_release_handle = handle.clone();
             handle.listen("edit-key-released", move |event| {
                 let at = event.payload().parse::<u64>().ok();
-                let state = edit_release_handle.state::<AppState>();
-                let pipeline = state.pipeline.lock();
-                if let Ok(guard) = pipeline {
-                    if let Some(p) = guard.as_ref() {
-                        p.on_edit_key(false, at);
-                    }
+                if let Some(p) = dictation::pipeline::running(&edit_release_handle) {
+                    p.on_edit_key(false, at);
                 }
             });
 
@@ -1171,23 +1157,15 @@ pub fn run() {
             let assistant_press_handle = handle.clone();
             handle.listen("assistant-key-pressed", move |event| {
                 let at = event.payload().parse::<u64>().ok();
-                let state = assistant_press_handle.state::<AppState>();
-                let pipeline = state.pipeline.lock();
-                if let Ok(guard) = pipeline {
-                    if let Some(p) = guard.as_ref() {
-                        p.on_assistant_key(true, at);
-                    }
+                if let Some(p) = dictation::pipeline::running(&assistant_press_handle) {
+                    p.on_assistant_key(true, at);
                 }
             });
             let assistant_release_handle = handle.clone();
             handle.listen("assistant-key-released", move |event| {
                 let at = event.payload().parse::<u64>().ok();
-                let state = assistant_release_handle.state::<AppState>();
-                let pipeline = state.pipeline.lock();
-                if let Ok(guard) = pipeline {
-                    if let Some(p) = guard.as_ref() {
-                        p.on_assistant_key(false, at);
-                    }
+                if let Some(p) = dictation::pipeline::running(&assistant_release_handle) {
+                    p.on_assistant_key(false, at);
                 }
             });
 
@@ -1234,23 +1212,15 @@ pub fn run() {
             let ask_press_handle = handle.clone();
             handle.listen("ask-key-pressed", move |event| {
                 let at = event.payload().parse::<u64>().ok();
-                let state = ask_press_handle.state::<AppState>();
-                let pipeline = state.pipeline.lock();
-                if let Ok(guard) = pipeline {
-                    if let Some(p) = guard.as_ref() {
-                        p.on_ask_key(true, at);
-                    }
+                if let Some(p) = dictation::pipeline::running(&ask_press_handle) {
+                    p.on_ask_key(true, at);
                 }
             });
             let ask_release_handle = handle.clone();
             handle.listen("ask-key-released", move |event| {
                 let at = event.payload().parse::<u64>().ok();
-                let state = ask_release_handle.state::<AppState>();
-                let pipeline = state.pipeline.lock();
-                if let Ok(guard) = pipeline {
-                    if let Some(p) = guard.as_ref() {
-                        p.on_ask_key(false, at);
-                    }
+                if let Some(p) = dictation::pipeline::running(&ask_release_handle) {
+                    p.on_ask_key(false, at);
                 }
             });
             snip::init(&handle);
