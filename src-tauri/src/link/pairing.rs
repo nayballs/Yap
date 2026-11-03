@@ -264,7 +264,7 @@ mod tests {
         assert_eq!(code("abc", "xyz"), format!("{n:04}"));
         // Pinned, so a phone's page and a paired phone's stored hash keep
         // matching whatever sha2 Yap builds on (Python's hashlib gives these).
-        assert_eq!(code("abc", "xyz"), "1075");
+        assert_eq!(n, 1075);
         assert_eq!(sha256_hex("abc"), "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad");
         assert_eq!(sha256_hex(""), "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855");
     }
