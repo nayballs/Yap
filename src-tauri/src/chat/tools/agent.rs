@@ -1,13 +1,20 @@
 //! The agent loop: the model asked, its tool calls run (the note tools
 //! here, the web's and the apps' through their modules), and asked
 //! again, ≤ `MAX_TOOL_STEPS`; a rejected call asked once more; a search
-//! that must come first; every step streamed to whoever watches.
+//! that must come first; every step streamed to whoever watches. Its
+//! parts: `offer` (the tools every step offers) and `room` (the budget a
+//! result and a picture must fit).
+
+mod offer;
+mod room;
 
 use serde_json::{json, Value};
 
-use super::memory::{asked_to_remember, memory_definitions, search_chats, MEMORY_TOOL_NAMES};
+use super::memory::{asked_to_remember, search_chats, MEMORY_TOOL_NAMES};
 use super::notes::{changed_note, execute};
-use super::{app_definitions, refused_after_web, tool_error, tool_result, web_definitions, Extra, MAX_TOOL_STEPS};
+use super::{refused_after_web, tool_error, tool_result, Extra, MAX_TOOL_STEPS};
+pub use offer::offered_tools;
+use room::Room;
 
 /// How many times a turn asks again after the provider rejected the
 /// model's tool call, before it answers without tools.
@@ -179,106 +186,6 @@ async fn search_for_the_model(
     }));
     let content = room.fit(&result, messages, &[]);
     messages.push(json!({ "role": "tool", "tool_call_id": YAP_SEARCH_ID, "content": content }));
-}
-
-/// What a turn's request may still take (`chat/budget.rs`): a tool's result
-/// is trimmed to it, so one turn's page reads and notes can't overflow the
-/// model's context — beside the pictures the request carries, each by its
-/// size where it goes (`budget::images_in`).
-#[derive(Clone, Copy)]
-struct Room<'a> {
-    /// The whole request's limit (`Budget::request`); `None`: no limit.
-    limit: Option<u64>,
-    /// The tools the steps offer (they're sent every step).
-    tools: &'a Value,
-    /// Where the steps go: what a picture costs there.
-    provider: &'a str,
-    /// The model runs on this PC.
-    here: bool,
-}
-
-/// What a picture a step looked at must leave after it: its tool result and
-/// the next step's call.
-const LOOK_SPARE: u64 = 300;
-
-impl Room<'_> {
-    /// What the request has left beside `messages` and the pictures this
-    /// step looked at, still to go after its results (`pending`).
-    fn left(&self, messages: &[Value], pending: &[crate::chat::pictures::Look]) -> Option<u64> {
-        let used = crate::chat::budget::request_tokens(messages, self.tools, self.provider, self.here) + pending.iter().map(|l| self.look_tokens(l)).sum::<u64>();
-        self.limit.map(|limit| limit.saturating_sub(used))
-    }
-
-    /// What a picture looked at adds: the picture, Yap's line with it and
-    /// its message.
-    fn look_tokens(&self, look: &crate::chat::pictures::Look) -> u64 {
-        crate::chat::budget::part_tokens(&look.part, self.provider, self.here) + crate::chat::budget::estimate(&look.text) + crate::chat::budget::MESSAGE_OVERHEAD
-    }
-
-    /// `result` as the next tool message carries it: within what's left
-    /// beside `messages` and the step's `pending` pictures
-    /// (`budget::fit_result`).
-    fn fit(&self, result: &Value, messages: &[Value], pending: &[crate::chat::pictures::Look]) -> String {
-        let Some(left) = self.left(messages, pending) else { return result.to_string() };
-        let left = left.saturating_sub(crate::chat::budget::MESSAGE_OVERHEAD);
-        let fitted = crate::chat::budget::fit_result(result, left);
-        if fitted.len() < result.to_string().len() {
-            tracing::info!(left, "Chat: a tool's result was shortened to fit the model's context");
-            crate::ai::eval::post_fix("tool_result_cut");
-        }
-        fitted
-    }
-
-    /// Whether the picture `look` still fits beside `messages` and the
-    /// step's `pending` pictures, with [`LOOK_SPARE`] after it. A picture
-    /// can't be cut as a text is: one that doesn't fit isn't looked at.
-    fn takes_picture(&self, messages: &[Value], pending: &[crate::chat::pictures::Look], look: &crate::chat::pictures::Look) -> bool {
-        self.left(messages, pending).is_none_or(|left| self.look_tokens(look) + LOOK_SPARE <= left)
-    }
-}
-
-/// The tools a turn's steps offer (every step the same): the note tools,
-/// and the apps', the web's, memory's and the calendar's when the turn has
-/// them. Also what Chat's budget measures (`turn.rs`).
-pub fn offered_tools(open_apps: bool, web: bool, extra: Extra<'_>) -> Value {
-    // The note tools, with the documents' set this model gets.
-    let mut tools = super::notes::definitions_for(extra.doc_tools);
-    if open_apps {
-        if let (Some(all), Some(apps)) = (tools.as_array_mut(), app_definitions().as_array()) {
-            all.extend(apps.iter().cloned());
-        }
-    }
-    if web {
-        // (A cloud model on its provider's own search: `web_search` alone.)
-        if let (Some(all), Some(web_tools)) = (tools.as_array_mut(), web_definitions().as_array()) {
-            all.extend(web_tools.iter().filter(|t| !(extra.own_search && t["function"]["name"] == "read_page")).cloned());
-        }
-    }
-    // Pictures from the web (chat/pictures.rs): `find_pictures` where Yap's
-    // `read_page` isn't offered (a Claude searching in Chat's own request,
-    // a cloud model on its provider's own search).
-    if let (Some(all), Some(pictures)) = (tools.as_array_mut(), crate::chat::pictures::definitions(extra.pictures, !web || extra.own_search).as_array()) {
-        all.extend(pictures.iter().cloned());
-    }
-    // Pages beside the chat (chat/pages.rs): for the same models; acting on
-    // them (chat/pages/act.rs) for the ones that may.
-    if let (Some(all), Some(pages)) = (tools.as_array_mut(), crate::chat::pages::definitions(extra.pictures, extra.act).as_array()) {
-        all.extend(pages.iter().cloned());
-    }
-    // The screen (chat/see_screen.rs): not tied to the web.
-    if let (Some(all), Some(screen)) = (tools.as_array_mut(), crate::chat::see_screen::definitions(extra.screen).as_array()) {
-        all.extend(screen.iter().cloned());
-    }
-    if let (Some(all), Some(memory_tools)) = (tools.as_array_mut(), memory_definitions(extra).as_array()) {
-        all.extend(memory_tools.iter().cloned());
-    }
-    // The calendar (a calendar is connected): read-only, like the notes.
-    if extra.calendar.is_some() {
-        if let (Some(all), Some(cal)) = (tools.as_array_mut(), super::calendar::definitions().as_array()) {
-            all.extend(cal.iter().cloned());
-        }
-    }
-    tools
 }
 
 /// One model call of the loop: streamed to `live` when someone watches
@@ -989,6 +896,7 @@ async fn tool_loop(
 
 #[cfg(test)]
 mod tests {
+    use super::room::LOOK_SPARE;
     use super::*;
     use crate::chat::tools::tests::{call, plan_note, tool_names};
 

@@ -37,7 +37,7 @@ impl Reach {
     /// [`MAX_READS`] to [`DEEP_READS`] — Claude Haiku 5.5, held to 80K
     /// tokens a request at its cheaper rate, gets all ten; an 8K model,
     /// were it strong, three. What the reads bring is still fitted to
-    /// what's left of the request, result by result (`agent::Room::fit`).
+    /// what's left of the request, result by result (`agent/room.rs` `Room::fit`).
     /// Pure.
     pub fn deep(request: Option<u64>) -> Reach {
         Reach::deep_paged(request, PAGE_TOKENS)
