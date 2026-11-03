@@ -277,6 +277,11 @@ pub struct Extra<'a> {
     /// (`web::Turn::own_search`): `web_search` only, never Yap's
     /// `read_page`; `find_pictures` for its pictures, as a Claude's.
     pub own_search: bool,
+    /// The question carries a web page's words (text selected on a page
+    /// beside the chat, `assistant::selected::Selected::web`): web content
+    /// from the turn's start — the safety rule ([`refused_after_web`]) and
+    /// the page actions' typed-words check, as after a page read.
+    pub web_question: bool,
 }
 
 /// The calendar tool in a turn ([`calendar::run`]).

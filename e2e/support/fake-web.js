@@ -22,6 +22,10 @@
 // - Acting on pages (chat/pages/act.rs): rail.example.com, a made-up rail
 //   site — a journey form, its results by the stations asked for, a payment
 //   page with card fields, a sign-in page.
+// - `/probe/…` (outside the stand-in): an address on this PC that a page
+//   beside the chat must never reach, its own or its workers' (recorded as
+//   service "probe"); `wiki.example.com/probe-sw.js`, a service worker that
+//   tries it.
 //
 // `requests` keeps every request: `{ service, method, host, path, query,
 // headers, body }`.
@@ -160,10 +164,22 @@ function railResults(q) {
     <p>10:12 from platform 1, arrives 11:05. <a href="buy?train=1012">Buy tickets</a></p></main></body></html>`;
 }
 
-// The pictures, by `host/path`: `[content type, bytes]`.
+// A service worker for the page beside the chat (chat-pages.spec.js): once
+// installed it asks for an address on this PC that isn't the page's
+// (`/probe/service`: Yap refuses it), then one of the page's own
+// (`…/probe-ok/service`: allowed, so the test knows it ran).
+const PROBE_SW = `self.addEventListener('install', function (e) {
+  var base = self.location.href.split('/wiki.example.com/')[0];
+  e.waitUntil(fetch(self.location.origin + '/probe/service', { mode: 'no-cors' }).catch(function () {})
+    .then(function () { return fetch(base + '/wiki.example.com/probe-ok/service', { mode: 'no-cors' }); }).catch(function () {}));
+  self.skipWaiting();
+});`;
+
+// The pictures (and the service worker), by `host/path`: `[content type, bytes]`.
 const FILES = {
   'wiki.example.com/images/fort_joy_map.png': ['image/png', writePng(320, 240, [40, 120, 200])],
   'wiki.example.com/images/fort_joy_concept.png': ['image/png', writePng(400, 225, [200, 120, 40])],
+  'wiki.example.com/probe-sw.js': ['application/javascript', Buffer.from(PROBE_SW)],
 };
 
 // RPGs coming out in 2026 (made up: no model knows them).
@@ -389,6 +405,13 @@ export async function startFakeWeb() {
           return;
         }
         res.writeHead(404, { 'content-type': 'text/plain' }).end('not found');
+        return;
+      }
+      // An address on this PC that isn't a page's (chat-pages.spec.js): a
+      // page beside the chat must never reach it.
+      if (first === 'probe') {
+        requests.push({ service: 'probe', method: req.method, path: url.pathname });
+        res.writeHead(200, { 'content-type': 'text/plain', 'access-control-allow-origin': '*' }).end('reached');
         return;
       }
       res.writeHead(404).end();
