@@ -4,7 +4,7 @@
 // PC mocked; the mic the looped 440 Hz tone, held back here where a test
 // needs a permission nobody answers.
 import { test, expect } from '@playwright/test';
-import { servePage, seedDevice, mockPc, open, ready, snapshot } from './support/harness.js';
+import { servePage, seedDevice, mockPc, open, ready, snapshot, openSettings, closeSettings } from './support/harness.js';
 
 const PERMISSION_WAIT =
   'Waiting for the microphone permission. Tap the icon left of the address bar → Microphone → Allow, then tap Talk again.';
@@ -58,7 +58,10 @@ test('a permission nobody answers: after ~6 s how to allow it, with Cancel; Canc
   const pc = await mockPc(page);
   await open(page);
   await ready(page, pc);
+  // Sound details open (the settings sheet, ⋯), then back to Talk.
+  await openSettings(page);
   await page.getByText('Sound details').click();
+  await closeSettings(page);
   await tapTalk(page);
   await expect(page.getByTestId('phase')).toHaveText('Opening the microphone…');
   await expect(page.getByTestId('talk')).toContainText('Wait…');
@@ -173,7 +176,10 @@ test('a worklet module that never loads: the setup message, one module at a time
   const pc = await mockPc(page);
   await open(page);
   await ready(page, pc);
+  // Sound details open (the settings sheet, ⋯), then back to Talk.
+  await openSettings(page);
   await page.getByText('Sound details').click();
+  await closeSettings(page);
   await tapTalk(page);
   await expect(page.getByTestId('sound-mic-step')).toHaveText(/^Loading the recorder… /);
   await expect(page.getByTestId('error')).toHaveText(SETUP, { timeout: 8000 });
@@ -230,7 +236,10 @@ test("the phone's sound never starts: said after a few seconds, and the mic let 
   const pc = await mockPc(page);
   await open(page);
   await ready(page, pc);
+  // Sound details open (the settings sheet, ⋯), then back to Talk.
+  await openSettings(page);
   await page.getByText('Sound details').click();
+  await closeSettings(page);
   await tapTalk(page);
   await expect(page.getByTestId('sound-mic-step')).toHaveText(/^Starting the phone's sound… /);
   await expect(page.getByTestId('error')).toHaveText(NO_SOUND, { timeout: 6000 });

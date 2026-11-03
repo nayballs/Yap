@@ -63,7 +63,7 @@ if (withFirefox()) {
   projects.push({
     name: 'firefox',
     // Hands-free needs the recorded speech, and the screenshots are Chromium's.
-    testMatch: /(link-page|sound|mic-open)\.spec\.js/,
+    testMatch: /(link-page|sound|mic-open|typing|picker)\.spec\.js/,
     use: {
       browserName: 'firefox',
       // Firefox has no microphone permission to grant here: its prefs let

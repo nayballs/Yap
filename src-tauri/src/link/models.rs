@@ -98,6 +98,112 @@ fn listed_with(cfg: &YapConfig, on_device: &OnDevice) -> (Option<Model>, Vec<Mod
     (current, models)
 }
 
+/// **What Chat's picker shows** (2026-11-03), for the phone's own copy of
+/// it (`link-page/picker.js` over `src/lib/core/chatPicker.js`, the very
+/// code the desktop picker builds its rows with): the same data that
+/// picker reads, from the same Rust —
+/// - `status`: `ai_model::status` for Chat (the model in use, the providers
+///   with a key, the servers Settings knows, the effort), never a key, not
+///   even masked;
+/// - `catalog`: each keyed provider's live list (`model_catalog::snapshot`);
+/// - `local`: the on-device models (`local_llm_status`'s, the parts the
+///   picker reads; no download URLs);
+/// - `images`: per provider, the listed models that read images
+///   (`snip::vision::reads_images`, what Chat sends a screenshot by).
+///
+/// Pure but for the stores it reads.
+pub fn picker(cfg: &YapConfig) -> serde_json::Value {
+    let on_device = OnDevice::here(cfg);
+    let status = ai_model::status(cfg, Scope::Chat, &on_device);
+    let catalog = crate::ai::model_catalog::snapshot(cfg).providers;
+    let local = crate::ai::commands::local_llm_status();
+    picker_from(&status, &catalog, &local, &|p, m| crate::snip::vision::reads_images(p, m))
+}
+
+/// The local status's fields the picker reads (`chatPicker.js` `localRows`,
+/// `whereLocal`, `slowWarning`).
+const LOCAL_FIELDS: &[&str] = &["installed", "running", "activeFile", "modelFile", "own", "sharedOnDevice", "inUseNote", "gpu", "gpuCapable", "placement", "slowOnThisPc"];
+/// A curated on-device model's fields it reads.
+const CURATED_FIELDS: &[&str] = &["id", "display", "blurb", "filename", "sizeMb", "recommended", "isDefault", "tools", "family", "installed", "maxContext", "readsImages"];
+
+/// [`picker`], from what it reads. Pure.
+fn picker_from(
+    status: &ai_model::Status,
+    catalog: &std::collections::BTreeMap<String, crate::ai::model_catalog::ListView>,
+    local: &serde_json::Value,
+    reads_images: &dyn Fn(&str, &str) -> Option<bool>,
+) -> serde_json::Value {
+    let mut status = serde_json::to_value(status).unwrap_or_default();
+    if let Some(s) = status.as_object_mut() {
+        // Keys stay on the PC, masked or not; the picker's switch offers
+        // ("Read screenshots on this PC", another model) are the PC's.
+        for k in ["maskedKeys", "imagesSwitch", "imagesLocal"] {
+            s.remove(k);
+        }
+    }
+    let mut images = serde_json::Map::new();
+    for (p, list) in catalog {
+        let ids: Vec<&str> = list.models.iter().map(|m| m.id.as_str()).filter(|id| reads_images(p, id) == Some(true)).collect();
+        images.insert(p.clone(), serde_json::json!(ids));
+    }
+    if let (Some(p), Some(id)) = (status.pointer("/model/provider").and_then(|v| v.as_str()), status.pointer("/model/id").and_then(|v| v.as_str())) {
+        if reads_images(p, id) == Some(true) {
+            let list = images.entry(p.to_string()).or_insert_with(|| serde_json::json!([]));
+            if let Some(a) = list.as_array_mut() {
+                if !a.iter().any(|x| x == id) {
+                    a.push(serde_json::json!(id));
+                }
+            }
+        }
+    }
+    let mut kept = serde_json::Map::new();
+    for f in LOCAL_FIELDS {
+        if let Some(v) = local.get(*f) {
+            kept.insert((*f).to_string(), v.clone());
+        }
+    }
+    let curated: Vec<serde_json::Value> = local
+        .get("curated")
+        .and_then(|c| c.as_array())
+        .map(|list| {
+            list.iter()
+                .map(|m| serde_json::Value::Object(CURATED_FIELDS.iter().filter_map(|f| m.get(*f).map(|v| ((*f).to_string(), v.clone()))).collect()))
+                .collect()
+        })
+        .unwrap_or_default();
+    kept.insert("curated".into(), serde_json::json!(curated));
+    serde_json::json!({ "status": status, "catalog": catalog, "local": kept, "images": images })
+}
+
+/// The longest model id the phone may name.
+const MAX_ID: usize = 300;
+
+/// **Switch Chat to a row of the picker**, exactly as the desktop picker
+/// does (`ai_model::chat_set_model`, its own checks: a provider with a key,
+/// a server Settings has the address of, an on-device model on this PC).
+/// `Err`: in plain words.
+pub fn set_row(app: &tauri::AppHandle, provider: &str, model: &str, base_url: Option<&str>, file: Option<&str>) -> Result<(), String> {
+    let sane = |s: &str| s.len() <= MAX_ID && !s.chars().any(char::is_control);
+    if provider.is_empty() || !sane(provider) || !sane(model) || !base_url.is_none_or(sane) || !file.is_none_or(sane) {
+        return Err("That model isn't one Yap can use now. Pick another.".into());
+    }
+    ai_model::chat_set_model(app.clone(), provider.to_string(), model.to_string(), base_url.map(str::to_string), file.map(str::to_string)).map(|_| ())
+}
+
+/// **The effort Chat's model answers at** (`None`: its default), as the
+/// picker sets it (`effort::chat_set_effort`), for the model in use.
+pub fn set_effort(app: &tauri::AppHandle, level: Option<&str>) -> Result<(), String> {
+    let cfg = crate::config::load();
+    let status = ai_model::status(&cfg, Scope::Chat, &OnDevice::here(&cfg));
+    let m = status.model.ok_or("Pick a model for Chat first.")?;
+    crate::ai::effort::chat_set_effort(app.clone(), m.provider, m.id, level.map(str::to_string)).map(|_| ())
+}
+
+/// Fast mode (Claude Opus 5.5), as the picker sets it.
+pub fn set_fast(app: &tauri::AppHandle, on: bool) -> Result<(), String> {
+    crate::ai::effort::chat_set_fast(app.clone(), on).map(|_| ())
+}
+
 /// **Switch Chat to `id`** (one [`listed`] has), as the picker does: saved,
 /// and every chip and Settings follow (`yap-chat-model-changed`). `Err`: in
 /// plain words.
@@ -160,6 +266,62 @@ mod tests {
         assert!(list.iter().any(|m| m.id == "ondevice|" && m.on_this_pc && m.label == "Qwen3.5 4B"), "{list:?}");
         assert!(list.iter().all(|m| !m.label.contains("On this PC")), "{list:?}");
         assert!(current.unwrap().label.ends_with("· Groq"));
+    }
+
+    #[test]
+    fn the_picker_gets_what_chats_picker_reads_and_never_a_key() {
+        let mut cfg = YapConfig::default();
+        cfg.pp_api_keys.insert("groq".into(), "gsk-secret-test-key".into());
+        cfg.llm_scopes.insert(
+            "chat".into(),
+            crate::config::LlmScope {
+                enabled: true,
+                provider: "groq".into(),
+                base_url: "https://api.groq.com/openai/v1".into(),
+                model: "openai/gpt-oss-20b".into(),
+                api_key: "gsk-secret-test-key".into(),
+                ..Default::default()
+            },
+        );
+        let none = OnDevice { installed: false, name: String::new(), id: String::new(), context: 0 };
+        let status = ai_model::status(&cfg, Scope::Chat, &none);
+        let model = |id: &str, name: &str| crate::ai::model_catalog::CatalogModel { id: id.into(), name: name.into(), ..Default::default() };
+        let mut catalog = std::collections::BTreeMap::new();
+        catalog.insert(
+            "groq".to_string(),
+            crate::ai::model_catalog::ListView {
+                provider: "groq".into(),
+                ok: true,
+                fetched_at: 1,
+                checked_at: 1,
+                error: None,
+                checking: false,
+                models: vec![model("openai/gpt-oss-20b", "GPT-OSS 20B"), model("meta-llama/llama-4-scout", "Llama 4 Scout")],
+                contexts: Vec::new(),
+            },
+        );
+        let local = serde_json::json!({
+            "installed": true,
+            "activeFile": "Qwen3.5-4B.gguf",
+            "engineState": {"build": "b1"},
+            "curated": [{"id": "qwen", "display": "Qwen3.5 4B", "filename": "Qwen3.5-4B.gguf", "installed": true, "url": "https://example.com/q.gguf"}],
+            "own": [],
+        });
+        let p = picker_from(&status, &catalog, &local, &|_, m| Some(m.contains("scout")));
+        let text = p.to_string();
+        assert!(!text.contains("gsk-secret"), "no key, not even masked: {text}");
+        assert!(p["status"].get("maskedKeys").is_none());
+        assert_eq!(p["status"]["model"]["id"], "openai/gpt-oss-20b");
+        assert_eq!(p["status"]["keyed"], serde_json::json!(["groq"]));
+        // The provider's live list, for the merge with Yap's curated one.
+        assert_eq!(p["catalog"]["groq"]["models"][1]["name"], "Llama 4 Scout");
+        // "Reads images", as Chat decides it.
+        assert_eq!(p["images"]["groq"], serde_json::json!(["meta-llama/llama-4-scout"]));
+        // The on-device models, without what the picker doesn't read.
+        assert_eq!(p["local"]["curated"][0]["display"], "Qwen3.5 4B");
+        assert!(p["local"]["curated"][0].get("url").is_none());
+        assert!(p["local"].get("engineState").is_none());
+        assert_eq!(p["local"]["activeFile"], "Qwen3.5-4B.gguf");
     }
 
     #[test]

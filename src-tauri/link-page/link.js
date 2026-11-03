@@ -4,16 +4,24 @@
 // at /ws; the protocol is docs/architecture/link.md's (v1), and this page
 // keeps to it exactly.
 //
+// It's Yap's Chat on a phone (2026-11-03): the conversation fills the screen,
+// the composer at the bottom has the text box, Send and Talk (the Yap bar's
+// pill), Chat's model chip under it opens Chat's own picker (picker.js), and
+// the settings are a sheet.
+//
 // What it does: pairing (the QR's #pair=<token>, the 4-digit code, the device
-// kept in localStorage), Talk (tap or hold; hands-free ends by itself after
-// the wait chosen — 1 s, 1.5 s or 2.5 s — of quiet), the mic resampled to
-// 16 kHz Int16 in an AudioWorklet (mic-worklet.js, dsp.js), the spoken answer
-// as one stream (resampled here frame after frame, played from a jitter
-// buffer in player-worklet.js), "Clearer sound in a headset" (on by default:
-// the mic closed while Yap talks), opening the mic a timed step at a time
-// (never a silent "Wait…"), Stop and barge-in, the conversation, the step Yap
-// is on and its time, the model chip, Sound details, reconnects with backoff,
-// keep-alive pings and a screen wake lock.
+// kept in localStorage), typed questions (`ask`: answered in the same
+// conversation, not spoken; ▶ under an answer has it read, `read_aloud`),
+// Talk (tap or hold; hands-free ends by itself after the wait chosen — 1 s,
+// 1.5 s or 2.5 s — of quiet), the mic resampled to 16 kHz Int16 in an
+// AudioWorklet (mic-worklet.js, dsp.js), the spoken answer as one stream
+// (resampled here frame after frame, played from a jitter buffer in
+// player-worklet.js), "Clearer sound in a headset" (on by default: the mic
+// closed while Yap talks), opening the mic a timed step at a time (never a
+// silent "Wait…"), Stop and barge-in, the conversation, the step Yap is on
+// and its time, the model chip and Chat's picker, Sound details, the
+// on-screen keyboard (the composer rides above it), reconnects with
+// backoff, keep-alive pings and a screen wake lock.
 //
 // No service worker: on an origin whose certificate Chrome only accepted
 // after a warning, registration fails ("An SSL certificate error occurred
@@ -39,6 +47,7 @@ import {
   toDb,
 } from './dsp.js';
 import { renderAnswer } from './markdown.js';
+import { createPicker, markEl, modelMark, chipWords } from './picker.js';
 
 const KIND_UP = 0x01;
 const KIND_DOWN = 0x02;
@@ -54,7 +63,8 @@ const PERMISSION_MS = 6000; // getUserMedia: then how to allow the mic is said (
 const RESUME_MS = 3000; // the phone's sound starting, once Talk is let go
 const PING_MS = 15000;
 const PONG_WAIT_MS = 8000;
-const KEEP_TURNS = 6;
+const KEEP_TURNS = 40;
+const MAX_TYPED = 4000; // the PC's limit for a typed question (link/session.rs)
 
 const KEY = {
   device: 'yap.link.device',
@@ -63,7 +73,12 @@ const KEY = {
   handsFree: 'yap.link.handsFree',
   wait: 'yap.link.wait',
   clearer: 'yap.link.clearer',
+  // The conversation, for this tab only (sessionStorage): a reload keeps it.
+  thread: 'yap.link.thread',
 };
+
+/** A PC from before typed questions: said plainly, before anything's sent. */
+const OLD_PC_TYPING = 'Yap on your PC needs an update to answer typed questions. Update Yap there; talking works as before.';
 
 // ------------------------------------------------------------------ storage
 
@@ -84,6 +99,37 @@ function save(key, value) {
   }
 }
 
+/** The conversation kept in this tab (a reload keeps it; closing the tab doesn't). */
+function loadThread() {
+  try {
+    const v = JSON.parse(sessionStorage.getItem(KEY.thread) || 'null');
+    if (!v || !Array.isArray(v.turns)) return { turns: [], id: 0 };
+    const turns = v.turns
+      .filter((t) => t && typeof t.id === 'number')
+      .map((t) => ({
+        id: t.id,
+        q: String(t.q || ''),
+        a: String(t.a || ''),
+        final: true,
+        cancelled: !!t.cancelled,
+        typed: !!t.typed,
+        answerId: String(t.answerId || ''),
+      }))
+      .filter((t) => t.q || t.a);
+    return { turns: turns.slice(-KEEP_TURNS), id: Math.max(0, ...turns.map((t) => t.id)) };
+  } catch {
+    return { turns: [], id: 0 };
+  }
+}
+function saveThread() {
+  try {
+    const turns = S.turns.filter((t) => t.final && (t.q || t.a));
+    sessionStorage.setItem(KEY.thread, JSON.stringify({ turns }));
+  } catch {
+    /* a convenience only */
+  }
+}
+
 // ------------------------------------------------------------------- state
 
 /** One of WAITS' names: what's stored, or Normal. */
@@ -93,6 +139,7 @@ function waitChoice(w) {
 
 const fragment = new URLSearchParams(location.hash.slice(1));
 const storedDevice = load(KEY.device);
+const keptThread = loadThread();
 
 const S = {
   ws: null,
@@ -121,10 +168,19 @@ const S = {
   qStarted: 0,
   workSince: 0,
   step: '',
-  turns: [],
-  turnId: 0,
+  turns: keptThread.turns,
+  turnId: keptThread.id,
   model: null,
   models: [],
+  // What the PC answers beyond v1 (`ready.can`): "ask", "read_aloud", "picker", "effort".
+  can: [],
+  // What Chat's picker shows (`ready.picker`), when the PC sends it.
+  picker: null,
+  // ▶ asked for this answer (its id), and the turn whose answer is being said.
+  reading: '',
+  speakingTurn: 0,
+  // Words in the composer.
+  typed: false,
   error: '',
   note: '',
   handsFree: load(KEY.handsFree) === true,
@@ -157,7 +213,8 @@ const el = {
   pairWhy: $('pair-why'),
   pairWait: $('pair-wait'),
   retry: $('retry'),
-  talk: $('talk'),
+  chat: $('chat'),
+  thread: $('thread'),
   convo: $('convo'),
   empty: $('empty'),
   phase: $('phase'),
@@ -166,12 +223,19 @@ const el = {
   stepTime: $('step-time'),
   note: $('note'),
   error: $('error'),
+  composer: $('composer'),
+  input: $('input'),
+  sendBtn: $('send-btn'),
+  liveLabel: $('live-label'),
   meter: $('meter'),
   talkBtn: $('talk-btn'),
   talkLabel: $('talk-label'),
   talkTime: $('talk-time'),
   stopBtn: $('stop-btn'),
   cancelBtn: $('cancel-btn'),
+  settingsBtn: $('settings-btn'),
+  settings: $('settings'),
+  settingsClose: $('settings-close'),
   handsFree: $('handsfree'),
   wait: $('wait'),
   clearer: $('clearer'),
@@ -187,11 +251,21 @@ const el = {
   mic: $('mic'),
   micHint: $('mic-hint'),
   modelBtn: $('model'),
+  modelMark: $('model-mark'),
   modelLabel: $('model-label'),
   modelWhere: $('model-where'),
   models: $('models'),
-  modelsList: $('models-list'),
 };
+
+// Chat's model picker (picker.js); the chip shows a pick at once.
+const picker = createPicker({
+  dialog: el.models,
+  send,
+  onPicked: (m) => {
+    S.model = { ...(S.model || {}), id: '', label: m.label, onThisPc: m.onThisPc, picked: m };
+    render();
+  },
+});
 
 // The Yap bar's waveform: thin bars, the newest on the right (link.css .meter).
 const BARS = 60;
@@ -352,10 +426,13 @@ function dropped(ws) {
     player.stopAll();
     S.phase = 'idle';
     S.step = '';
+    S.reading = '';
+    S.speakingTurn = 0;
     // A question that never got heard goes; one with words stays, ended.
     const t = currentTurn(false);
     if (t && !t.q && !t.a) S.turns.pop();
     else if (t) t.final = true;
+    saveThread();
     renderConvo();
     if (wasReady) {
       S.error = listening
@@ -434,9 +511,14 @@ function onText(text) {
         S.pc = m.pc;
         save(KEY.pc, S.pc);
       }
-      if (m.model) S.model = m.model;
+      S.model = m.model || null;
       if (Array.isArray(m.models)) S.models = m.models;
+      S.can = Array.isArray(m.can) ? m.can.map(String) : [];
+      S.picker = m.picker && typeof m.picker === 'object' ? m.picker : null;
+      picker.update(m);
       if (S.error.startsWith('Lost the connection')) S.error = '';
+      if (S.error === OLD_PC_TYPING && can('ask')) S.error = '';
+      renderConvo();
       break;
     case 'state':
       onState(String(m.phase || 'idle'));
@@ -454,16 +536,25 @@ function onText(text) {
       t.a = String(m.text ?? '');
       if (m.final) {
         t.final = true;
+        // Its id in Chat: ▶ under it asks the PC to read it.
+        if (typeof m.id === 'string') t.answerId = m.id;
         S.step = '';
+        saveThread();
       }
       renderConvo();
       break;
     }
-    case 'speak_start':
+    case 'speak_start': {
       player.begin(Number(m.rate) || DOWN_RATE);
       // Clearer sound: the headset's call link let go, for its music one.
       if (S.clearer && S.local === 'idle') closeMic();
+      // Whose answer it is: the one ▶ asked for, else the latest question's.
+      const read = S.reading && S.turns.find((t) => t.answerId === S.reading);
+      const latest = currentTurn(false);
+      S.speakingTurn = read ? read.id : latest ? latest.id : 0;
+      renderConvo();
       break;
+    }
     case 'speak_end':
       player.end();
       break;
@@ -471,6 +562,18 @@ function onText(text) {
       S.error = String(m.message || 'Something went wrong on the PC.');
       S.step = '';
       if (S.local !== 'idle') endLocalQuestion();
+      // ▶ that couldn't be read.
+      if (S.reading && !player.active) doneSpeaking();
+      else {
+        // The question went no further: it stays in the thread, ended, so
+        // the next one has its own bubble.
+        const t = currentTurn(false);
+        if (t && !t.final && t.q && S.local === 'idle') {
+          t.final = true;
+          saveThread();
+          renderConvo();
+        }
+      }
       break;
     case 'pong':
       break;
@@ -498,6 +601,7 @@ function onState(phase) {
     S.step = '';
     S.workSince = 0;
     if (player.accepting) player.end(); // no speak_end: what's queued still plays
+    else if (!S.reading && S.speakingTurn) doneSpeaking();
     // The PC ended the question itself (its own limit, say).
     if (S.local === 'listening' && S.pcListening) endLocalQuestion();
     if (was !== 'idle') armMicClose();
@@ -522,29 +626,67 @@ function clearFragment() {
 
 // ---------------------------------------------------------------- the turns
 
-function currentTurn(create) {
+function currentTurn(create, typed = false) {
   let t = S.turns[S.turns.length - 1];
   if ((!t || t.final) && create) {
-    t = { id: ++S.turnId, q: '', a: '', final: false };
+    t = { id: ++S.turnId, q: '', a: '', final: false, cancelled: false, typed, answerId: '' };
     S.turns.push(t);
     if (S.turns.length > KEEP_TURNS) S.turns.shift();
   }
   return t;
 }
 
+const can = (what) => S.can.includes(what);
+
+const NS = 'http://www.w3.org/2000/svg';
+/** A small inline icon (never HTML). */
+function icon(cls, paths, filled = false) {
+  const s = document.createElementNS(NS, 'svg');
+  s.setAttribute('viewBox', '0 0 24 24');
+  s.setAttribute('aria-hidden', 'true');
+  s.setAttribute('focusable', 'false');
+  if (cls) s.setAttribute('class', cls);
+  for (const d of paths) {
+    const p = document.createElementNS(NS, 'path');
+    p.setAttribute('d', d);
+    if (filled) p.setAttribute('fill', 'currentColor');
+    s.appendChild(p);
+  }
+  return s;
+}
+const MIC = ['M12 3a3 3 0 0 0-3 3v5a3 3 0 0 0 6 0V6a3 3 0 0 0-3-3z', 'M5.5 11a6.5 6.5 0 0 0 13 0', 'M12 17.5V21'];
+const PLAY = ['M7 4.9v14.2a1.2 1.2 0 0 0 1.8 1l11.6-7.1a1.2 1.2 0 0 0 0-2L8.8 3.9A1.2 1.2 0 0 0 7 4.9z'];
+const SQUARE = ['M7.5 5h9A2.5 2.5 0 0 1 19 7.5v9a2.5 2.5 0 0 1-2.5 2.5h-9A2.5 2.5 0 0 1 5 16.5v-9A2.5 2.5 0 0 1 7.5 5z'];
+
+/** Is turn `t`'s answer being said now? */
+const speakingNow = (t) => S.speakingTurn === t.id && phaseNow() === 'speaking';
+
+/**
+ * Chat's thread: your question in its amber-washed bubble (🎙 when it was
+ * said), the answer in Chat's card with its markdown (markdown.js: built as
+ * nodes, never HTML), and under a finished one ▶ Read aloud (■ while it's
+ * read), as Chat's messages have it.
+ */
 function renderConvo() {
   const frag = document.createDocumentFragment();
   for (const t of S.turns) {
     const li = document.createElement('li');
     li.className = 'turn';
     li.dataset.testid = 'turn';
+    li.dataset.turn = String(t.id);
     const q = document.createElement('p');
     q.className = 'q';
     q.dataset.testid = 'heard';
-    q.textContent = t.q || '…';
+    if (!t.typed) {
+      const mic = icon('viavoice', MIC);
+      mic.setAttribute('aria-hidden', 'false');
+      mic.setAttribute('role', 'img');
+      mic.setAttribute('aria-label', 'Asked by voice');
+      q.appendChild(mic);
+    }
+    q.appendChild(document.createTextNode(t.q || '…'));
     li.appendChild(q);
     if (t.a || t.cancelled) {
-      // The answer as Chat shows it (markdown.js: built as nodes, never HTML).
       const a = document.createElement('div');
       const cancelled = t.cancelled && !t.a;
       a.className = 'a' + (t.final ? ' final' : ' streaming') + (cancelled ? ' cancelled' : '');
@@ -553,29 +695,83 @@ function renderConvo() {
       else a.appendChild(renderAnswer(t.a.trim()));
       li.appendChild(a);
     }
+    const speaking = speakingNow(t);
+    const readable = t.final && t.a && t.answerId && can('read_aloud');
+    if (readable || speaking) {
+      const foot = document.createElement('div');
+      foot.className = 'msgfoot';
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.className = 'readbtn' + (speaking ? ' on' : '');
+      b.dataset.testid = 'read-aloud';
+      b.appendChild(icon('', speaking ? SQUARE : PLAY, true));
+      b.appendChild(document.createTextNode(speaking ? 'Stop' : 'Read aloud'));
+      b.addEventListener('click', () => (speaking ? interrupt() : readAloud(t)));
+      foot.appendChild(b);
+      if (speaking) {
+        const s = document.createElement('span');
+        s.className = 'speaking';
+        s.setAttribute('role', 'status');
+        const bars = document.createElement('span');
+        bars.className = 'speakbars';
+        bars.setAttribute('aria-hidden', 'true');
+        bars.append(document.createElement('i'), document.createElement('i'), document.createElement('i'));
+        s.append(bars, document.createTextNode('Speaking…'));
+        foot.appendChild(s);
+      }
+      li.appendChild(foot);
+    }
     frag.appendChild(li);
   }
   el.convo.replaceChildren(frag);
   el.empty.hidden = S.turns.length > 0;
-  el.convo.scrollTop = el.convo.scrollHeight;
+  if (threadPinned) toEnd();
 }
 
-// The conversation takes the room Talk leaves it (link.css .stage), so it
-// shrinks when an error or a step shows under it: the latest words stay in
-// view, unless the person has scrolled up to read.
-let convoPinned = true;
-el.convo.addEventListener(
+// The thread takes the room the composer leaves it, so it shrinks when the
+// keyboard comes up, an error or a note shows, or the box grows: the latest
+// words stay in view, unless the person has scrolled up to read.
+let threadPinned = true;
+function toEnd() {
+  el.thread.scrollTop = el.thread.scrollHeight;
+}
+el.thread.addEventListener(
   'scroll',
   () => {
-    convoPinned = el.convo.scrollHeight - el.convo.scrollTop - el.convo.clientHeight < 24;
+    threadPinned = el.thread.scrollHeight - el.thread.scrollTop - el.thread.clientHeight < 32;
   },
   { passive: true },
 );
 if (typeof ResizeObserver === 'function') {
-  new ResizeObserver(() => {
-    if (convoPinned) el.convo.scrollTop = el.convo.scrollHeight;
-  }).observe(el.convo);
+  const keep = new ResizeObserver(() => {
+    if (threadPinned) toEnd();
+  });
+  keep.observe(el.thread);
+  keep.observe(el.convo);
 }
+
+/**
+ * The on-screen keyboard: where the browser doesn't resize the page for it
+ * (iPhones; Chrome does, `interactive-widget=resizes-content`), the page is
+ * fitted to the visual viewport, so the composer rides above the keyboard
+ * and the thread's end stays in view.
+ */
+function fitViewport() {
+  const vv = window.visualViewport;
+  const zoomed = vv && Math.abs((vv.scale || 1) - 1) > 0.01;
+  const height = vv && !zoomed ? vv.height : window.innerHeight;
+  const top = vv && !zoomed ? vv.offsetTop : 0;
+  const root = document.documentElement.style;
+  root.setProperty('--app-h', `${Math.round(height)}px`);
+  root.setProperty('--app-top', `${Math.round(top)}px`);
+  if (threadPinned) toEnd();
+}
+if (window.visualViewport) {
+  window.visualViewport.addEventListener('resize', fitViewport);
+  window.visualViewport.addEventListener('scroll', fitViewport);
+}
+window.addEventListener('resize', fitViewport);
+fitViewport();
 
 // --------------------------------------------------------------- the mic
 
@@ -1217,6 +1413,7 @@ function markCancelled() {
   if (t && !t.final) {
     t.final = true;
     t.cancelled = true;
+    saveThread();
   }
   renderConvo();
 }
@@ -1229,9 +1426,21 @@ function interrupt() {
   S.phase = 'idle';
   S.step = '';
   const t = currentTurn(false);
-  if (t) t.final = true;
+  if (t && !t.final) {
+    t.final = true;
+    saveThread();
+  }
   armMicClose();
+  doneSpeaking();
   render();
+}
+
+/** No answer is being said any more: its ■ goes back to ▶. */
+function doneSpeaking() {
+  if (!S.reading && !S.speakingTurn) return;
+  S.reading = '';
+  S.speakingTurn = 0;
+  renderConvo();
 }
 
 /** This page stops listening, without telling the PC. */
@@ -1430,6 +1639,7 @@ const player = {
     this.accepting = false;
     this.ending = false;
     afterAnswer();
+    doneSpeaking();
     render();
   },
   /** Silent at once (a 5 ms fade in the worklet); what's left is dropped. */
@@ -1472,7 +1682,12 @@ function connLine() {
 function render() {
   const pairing = S.denied || (!S.device && !S.ready) || (!!S.pairToken && !S.ready);
   el.pair.hidden = !pairing;
-  el.talk.hidden = pairing;
+  el.chat.hidden = pairing;
+  el.settingsBtn.hidden = pairing;
+  if (pairing) {
+    if (el.settings.open) closeSettings();
+    if (picker.isOpen) picker.close();
+  }
   el.conn.textContent = connLine();
   el.conn.dataset.state = S.ready ? 'on' : S.denied || (!S.device && !S.pairToken) ? 'off' : 'wait';
 
@@ -1489,16 +1704,26 @@ function render() {
     el.retry.hidden = !(S.denied && S.device);
   }
 
-  // The model chip.
+  // The model chip, under the composer as in Chat: the model's mark, its
+  // name and where it runs; a PC from before the picker, its label.
   if (S.model && S.ready) {
     el.modelBtn.hidden = false;
-    el.modelLabel.textContent = S.model.label || S.model.id || 'Model';
-    el.modelWhere.textContent = S.model.onThisPc ? 'On this PC' : '';
-    el.modelWhere.hidden = !S.model.onThisPc;
-    el.modelBtn.setAttribute(
-      'aria-label',
-      `Model: ${S.model.label || S.model.id}${S.model.onThisPc ? ', on this PC' : ''}. Change model`,
-    );
+    const picked = S.model.picked;
+    const words = chipWords(S.model, S.picker);
+    const where = picked ? picked.where : words.where;
+    el.modelLabel.textContent = picked ? picked.label : words.name;
+    el.modelWhere.textContent = where;
+    el.modelWhere.hidden = !where;
+    const mark = picked ? { icon: picked.icon, glyph: picked.glyph } : modelMark(S.model, S.picker);
+    const markKey = `${mark.icon}|${mark.glyph}`;
+    if (el.modelMark.dataset.key !== markKey) {
+      const fresh = markEl(mark.icon, mark.glyph, 18);
+      fresh.id = 'model-mark';
+      fresh.dataset.key = markKey;
+      el.modelMark.replaceWith(fresh);
+      el.modelMark = fresh;
+    }
+    el.modelBtn.setAttribute('aria-label', `Model: ${el.modelLabel.textContent}${where ? `, ${where}` : ''}. Change model`);
   } else el.modelBtn.hidden = true;
 
   const now = phaseNow();
@@ -1520,10 +1745,15 @@ function render() {
   el.note.hidden = !S.note;
   el.note.textContent = S.note;
 
-  // Talk.
+  // The composer: the text box and Send; Talk; while Yap listens, the Yap
+  // bar's capsule (✕, the waveform, the time, Send).
   const listening = now === 'listening';
+  const capsule = listening || now === 'opening';
+  el.composer.dataset.state = now === 'offline' ? 'idle' : now;
+  el.composer.dataset.typed = String(S.typed);
+  el.liveLabel.textContent = now === 'opening' ? PHASE_WORDS.opening : '';
   el.talkBtn.disabled = !S.ready && S.local === 'idle';
-  el.talkBtn.setAttribute('aria-pressed', String(listening || now === 'opening'));
+  el.talkBtn.setAttribute('aria-pressed', String(capsule));
   el.talkLabel.textContent =
     now === 'opening'
       ? waitingPermission()
@@ -1538,8 +1768,12 @@ function render() {
           : 'Talk';
   el.talkTime.textContent = listening ? clock(S.frames * (FRAME_SAMPLES / LINK_RATE)) : '';
   el.meter.dataset.on = String(listening);
+  el.sendBtn.hidden = capsule || !S.typed;
   el.stopBtn.hidden = now !== 'speaking';
-  el.cancelBtn.hidden = !(listening || now === 'opening' || now === 'working');
+  // ✕ while it listens; ■ while it works the question out (none while
+  // there are words to send instead).
+  el.cancelBtn.hidden = !(capsule || (now === 'working' && !S.typed));
+  el.cancelBtn.setAttribute('aria-label', capsule ? 'Cancel' : 'Stop the answer');
   el.handsFree.checked = S.handsFree;
   el.wait.hidden = !S.handsFree;
   for (const r of el.wait.querySelectorAll('input[name=wait]')) r.checked = r.value === S.wait;
@@ -1611,45 +1845,108 @@ function syncTicker() {
   }
 }
 
-// --------------------------------------------------------- the model list
+// ------------------------------------------------------- typing, ▶, sheets
 
-function openModels() {
-  const frag = document.createDocumentFragment();
-  for (const m of S.models) {
-    const li = document.createElement('li');
-    const b = document.createElement('button');
-    b.type = 'button';
-    b.className = 'model-item';
-    b.dataset.id = m.id;
-    const current = S.model && S.model.id === m.id;
-    if (current) b.setAttribute('aria-current', 'true');
-    const name = document.createElement('span');
-    name.className = 'mname';
-    name.textContent = m.label || m.id;
-    const where = document.createElement('span');
-    where.className = 'mwhere';
-    where.textContent = m.onThisPc ? 'On this PC' : 'Cloud';
-    b.append(name, where);
-    b.addEventListener('click', () => pickModel(m));
-    li.appendChild(b);
-    frag.appendChild(li);
-  }
-  el.modelsList.replaceChildren(frag);
-  if (typeof el.models.showModal === 'function') el.models.showModal();
-  else el.models.setAttribute('open', '');
+/** The box grows with what's typed, up to five lines (then it scrolls). */
+function fitInput() {
+  const t = el.input;
+  t.style.height = 'auto';
+  t.style.height = `${t.scrollHeight}px`;
 }
 
-function pickModel(m) {
-  if (!S.model || S.model.id !== m.id) {
-    if (send({ type: 'set_model', id: m.id })) S.model = m; // a later `ready` has the last word
+/**
+ * **A typed question**: answered by Yap's AI on the PC in the same
+ * conversation as the spoken ones (`ask`), and not spoken — ▶ under the
+ * answer has it read. Whatever Yap was doing is let go first (as Talk
+ * does): its voice stopped, or the question it was working on cancelled.
+ */
+function sendTyped() {
+  const text = el.input.value.trim();
+  if (!text) return;
+  S.note = '';
+  if (!S.ready) {
+    S.error = `Not connected to ${pcName()} yet.`;
+    render();
+    return;
   }
-  closeModels();
+  if (!can('ask')) {
+    S.error = OLD_PC_TYPING;
+    render();
+    return;
+  }
+  if (text.length > MAX_TYPED) {
+    S.error = 'That question is too long to send from the phone. Shorten it, then send it again.';
+    render();
+    return;
+  }
+  if (S.local !== 'idle') return; // listening: the capsule's Send is the way
+  S.error = '';
+  keepAwake();
+  const now = phaseNow();
+  if (now === 'speaking') interrupt();
+  else if (now === 'working') {
+    send({ type: 'cancel' });
+    markCancelled();
+    S.ignoreOldAt = performance.now();
+  }
+  if (!send({ type: 'ask', text })) {
+    S.error = `Lost the connection to ${pcName()}. Ask again once it's back.`;
+    render();
+    return;
+  }
+  const t = currentTurn(true, true);
+  t.q = text;
+  el.input.value = '';
+  S.typed = false;
+  fitInput();
+  S.phase = 'thinking';
+  S.step = '';
+  S.workSince = performance.now();
+  threadPinned = true;
+  renderConvo();
+  syncTicker();
   render();
 }
 
-function closeModels() {
-  if (typeof el.models.close === 'function') el.models.close();
-  else el.models.removeAttribute('open');
+/**
+ * **▶ Read aloud** on an answer: the PC says the whole of it on the phone,
+ * in Yap's voice (`read_aloud`). Whatever was going on stops first.
+ */
+function readAloud(t) {
+  if (!S.ready || !t.answerId) return;
+  keepAwake();
+  S.error = '';
+  S.note = '';
+  const now = phaseNow();
+  if (S.local !== 'idle') cancelTalk();
+  else if (now === 'working') markCancelled();
+  player.stopAll();
+  // The PC answers with `state idle` (the old news ends there), then the voice.
+  S.ignoreOldAt = performance.now();
+  if (!send({ type: 'read_aloud', id: t.answerId })) return;
+  S.reading = t.answerId;
+  S.speakingTurn = t.id;
+  S.phase = 'idle';
+  S.step = '';
+  // The sound starts within this tap (a phone wants a gesture for it).
+  const ctx = audioContext();
+  if (ctx.state !== 'running') ctx.resume().catch(() => {});
+  player.prepare();
+  renderConvo();
+  render();
+}
+
+function openSettings() {
+  listMics();
+  if (typeof el.settings.showModal === 'function') {
+    if (!el.settings.open) el.settings.showModal();
+  } else el.settings.setAttribute('open', '');
+  renderSound();
+}
+
+function closeSettings() {
+  if (typeof el.settings.close === 'function' && el.settings.open) el.settings.close();
+  else el.settings.removeAttribute('open');
 }
 
 // ---------------------------------------------------------- the wake lock
@@ -1776,12 +2073,38 @@ el.mic.addEventListener('change', () => {
   // The next question opens the one picked.
   if (S.local === 'idle') closeMic();
 });
-el.modelBtn.addEventListener('click', openModels);
-el.models.addEventListener('click', (e) => {
+el.modelBtn.addEventListener('click', () => picker.open());
+el.settingsBtn.addEventListener('click', openSettings);
+el.settingsClose.addEventListener('click', closeSettings);
+el.settings.addEventListener('click', (e) => {
   // A tap outside the sheet closes it.
-  if (e.target === el.models) closeModels();
+  if (e.target === el.settings) closeSettings();
 });
-$('models-close').addEventListener('click', closeModels);
+
+// The composer: Enter sends, Shift+Enter makes a new line; the box grows.
+el.input.addEventListener('input', () => {
+  fitInput();
+  const typed = el.input.value.trim() !== '';
+  if (typed !== S.typed) {
+    S.typed = typed;
+    render();
+  }
+});
+el.input.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter' && !e.shiftKey && !e.isComposing && e.keyCode !== 229) {
+    e.preventDefault();
+    sendTyped();
+  }
+});
+el.composer.addEventListener('submit', (e) => {
+  e.preventDefault();
+  sendTyped();
+});
+// The keyboard coming up: the thread's end stays in view.
+el.input.addEventListener('focus', () => {
+  threadPinned = true;
+  setTimeout(toEnd, 300);
+});
 
 if (navigator.mediaDevices && navigator.mediaDevices.addEventListener) {
   navigator.mediaDevices.addEventListener('devicechange', () => {
@@ -1815,6 +2138,11 @@ window.__yapLink = {
       ready: S.ready,
       pc: S.pc,
       model: S.model,
+      can: [...S.can],
+      // The conversation: each question (typed or said) and its answer's id.
+      turns: S.turns.map((t) => ({ q: t.q, typed: !!t.typed, final: !!t.final, answerId: t.answerId || '' })),
+      reading: S.reading,
+      speakingTurn: S.speakingTurn,
       frames: S.frames,
       retries: S.retries,
       handsFree: S.handsFree,

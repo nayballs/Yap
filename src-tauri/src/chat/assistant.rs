@@ -126,7 +126,11 @@
 //! capsule's generation), the answer's text and steps sent to it, and its
 //! voice on the phone ([`Phone::voice`]), never this PC's speakers. Not the
 //! window in front, the screenshots waiting in Chat's box, a quoted passage
-//! or the bar's card: those are the PC's. Off during meetings, as here.
+//! or the bar's card: those are the PC's. Off during meetings, as here. A
+//! question **typed** on the phone (2026-11-03, [`Phone::by_voice`] false)
+//! goes the same way minus the audio: in the same conversation, answered as
+//! Chat answers a typed question (no `SPOKEN_ANSWER_NOTE`, not marked "by
+//! voice"), and not said — ▶ on the phone asks for that.
 //!
 //! Events: `yap-assistant {phase, conversationId, messageId, about?}` (the bar's
 //! capsule), `yap-assistant-turn {phase: asked | answered | failed |
@@ -663,6 +667,17 @@ pub trait Phone: Send + Sync {
     fn step(&self, label: &str);
     /// The answer so far ("" = taken back); `done`: the checked answer.
     fn answer(&self, text: &str, done: bool);
+    /// The checked answer, with its id in Chat (`chat:<conversation>:<index>`).
+    fn checked(&self, text: &str, message_id: &str) {
+        let _ = message_id;
+        self.answer(text, true);
+    }
+    /// Asked out loud (then its answer is said, on the phone); `false`: typed
+    /// on the phone (2026-11-03) — answered as Chat answers a typed
+    /// question, not said (the phone's ▶ asks for that).
+    fn by_voice(&self) -> bool {
+        true
+    }
     /// Start the phone's voice for answer `message_id`: its sentences go
     /// through the feed, its audio to the phone.
     fn voice(&self, message_id: &str) -> Result<std::sync::Arc<crate::voice::tts::Feed>, String>;
@@ -699,6 +714,24 @@ impl Asker {
         match self {
             Asker::Shortcut(g) => Some(*g),
             Asker::Phone(_) => None,
+        }
+    }
+
+    /// Asked out loud: the shortcut always, a phone unless it was typed.
+    fn by_voice(&self) -> bool {
+        match self {
+            Asker::Shortcut(_) => true,
+            Asker::Phone(p) => p.by_voice(),
+        }
+    }
+
+    /// Is the answer said: the shortcut's as "Speak replies" says, a phone's
+    /// when it was asked out loud (it was asked into a headset; a typed one
+    /// is said only when ▶ on the phone asks).
+    fn voiced(&self, speak_replies: bool) -> bool {
+        match self {
+            Asker::Shortcut(_) => speak_replies,
+            Asker::Phone(p) => p.by_voice(),
         }
     }
 
@@ -1147,14 +1180,14 @@ async fn answer(app: AppHandle, asker: Asker, since: u64, question: String, abou
     let asked_text = question.clone();
     // The answer as it's written: the Chat view follows it, the voice
     // starts at its first sentence.
-    // A phone's answer is always said (it was asked into a headset), on the
-    // phone, with no card on this PC's bar.
+    // A phone's answer is said when it was asked out loud (into a headset),
+    // on the phone, with no card on this PC's bar; a typed one isn't.
     let streamed = Streamed {
         app: app.clone(),
         asker: asker.clone(),
         since,
         question: question.clone(),
-        voice_on: cfg.speak_replies || !pc,
+        voice_on: asker.voiced(cfg.speak_replies),
         show_card: cfg.assistant_answer_card && pc,
         s: Mutex::new(Speaking::default()),
     };
@@ -1189,7 +1222,7 @@ async fn answer(app: AppHandle, asker: Asker, since: u64, question: String, abou
             conversation_id,
             &ask,
             Some("assistant"),
-            true,
+            asker.by_voice(),
             asked,
             Some(&streamed as &dyn crate::chat::stream::Sink),
             Some(&stoppable),
@@ -1332,10 +1365,10 @@ async fn answer(app: AppHandle, asker: Asker, since: u64, question: String, abou
             "show": focused,
         }),
     );
-    // The phone has the checked answer.
+    // The phone has the checked answer, and its id (for ▶ there).
     if let Asker::Phone(p) = &asker {
         if p.current() {
-            p.answer(&turn.reply, true);
+            p.checked(&turn.reply, &message_id);
         }
     }
     // Already speaking (the answer was spoken as it came): the rest of what's
@@ -1349,8 +1382,8 @@ async fn answer(app: AppHandle, asker: Asker, since: u64, question: String, abou
     let meeting = crate::voice::tts::meeting_quiet().is_some();
     let interrupted = crate::dictation::pipeline::dictation_state().0 != since;
     // Read now: the switch may have moved while the answer was coming (a
-    // phone's is always said).
-    let voice_on = crate::config::load().speak_replies || !pc;
+    // phone's is said when it was asked out loud).
+    let voice_on = asker.voiced(crate::config::load().speak_replies);
     let mut how = reply(voice_on, meeting, interrupted);
     // A phone's answer: the whole of what's said through its voice, nothing
     // on this PC's bar.
@@ -1462,8 +1495,8 @@ fn finish_streamed(
 ) {
     let meeting = crate::voice::tts::meeting_quiet().is_some();
     let interrupted = crate::dictation::pipeline::dictation_state().0 != since;
-    // A phone's answer is always said.
-    let how = reply(crate::config::load().speak_replies || asker.shortcut().is_none(), meeting, interrupted);
+    // A phone's answer is said when it was asked out loud.
+    let how = reply(asker.voiced(crate::config::load().speak_replies), meeting, interrupted);
     let (said_text, shown) = spoken_answer(&turn.reply, web_sources(turn), SpokenLength::configured(&crate::config::load()));
     let still = asker.current();
     // A phone's: the rest of it on the phone, or nothing more; this PC's bar
@@ -1778,6 +1811,44 @@ mod tests {
         for viewing in [chat, Viewing::New, Viewing::Closed] {
             assert!(!answer_in_view(Seen::No, viewing, Some(7)));
         }
+    }
+
+    /// A phone's turn, asked out loud or typed.
+    struct FakePhone(bool);
+    impl Phone for FakePhone {
+        fn current(&self) -> bool {
+            true
+        }
+        fn stop_id(&self) -> String {
+            "link-test".into()
+        }
+        fn step(&self, _label: &str) {}
+        fn answer(&self, _text: &str, _done: bool) {}
+        fn voice(&self, _message_id: &str) -> Result<std::sync::Arc<crate::voice::tts::Feed>, String> {
+            Err("no voice in a test".into())
+        }
+        fn failed(&self, _message: &str) {}
+        fn by_voice(&self) -> bool {
+            self.0
+        }
+    }
+
+    #[test]
+    fn a_phones_typed_question_is_answered_as_typed_and_not_said() {
+        // Asked out loud on the phone: said there, whatever "Speak replies" says.
+        let spoken = Asker::Phone(std::sync::Arc::new(FakePhone(true)));
+        assert!(spoken.by_voice());
+        assert!(spoken.voiced(false) && spoken.voiced(true));
+        // Typed on the phone: Chat's typed question (no spoken-answer note,
+        // not marked by voice), and not said unless ▶ on the phone asks.
+        let typed = Asker::Phone(std::sync::Arc::new(FakePhone(false)));
+        assert!(!typed.by_voice());
+        assert!(!typed.voiced(false) && !typed.voiced(true));
+        assert_eq!(reply(typed.voiced(true), false, false), Reply::Show);
+        // The shortcut on this PC: asked out loud, said as the switch says.
+        let shortcut = Asker::Shortcut(1);
+        assert!(shortcut.by_voice());
+        assert!(shortcut.voiced(true) && !shortcut.voiced(false));
     }
 
     #[test]

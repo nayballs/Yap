@@ -17,6 +17,7 @@ import {
   PC,
   DEVICE,
   MODELS,
+  openSettings,
 } from './support/harness.js';
 import { TONE_HZ } from './support/audio.js';
 
@@ -508,8 +509,8 @@ test.describe('talking', () => {
     await expect(page.getByTestId('turn')).toHaveCount(0);
   });
 
-  test('the model chip: "On this PC", the list, and set_model', async ({ page }) => {
-    const pc = await mockPc(page);
+  test("a PC from before Chat's picker: the chip, its plain list, and set_model by id", async ({ page }) => {
+    const pc = await mockPc(page, { old: true });
     await open(page);
     await ready(page, pc);
     const chip = page.getByTestId('model-chip');
@@ -520,12 +521,14 @@ test.describe('talking', () => {
     await chip.click();
     const sheet = page.getByTestId('models');
     await expect(sheet).toBeVisible();
-    await expect(sheet.getByRole('button', { name: /Qwen3.5 4B/ })).toHaveAttribute('aria-current', 'true');
-    await expect(sheet.getByRole('button', { name: /Claude Haiku/ })).toContainText('Cloud');
-    await sheet.getByRole('button', { name: /Claude Haiku/ }).click();
+    // No rail: the PC sent no picker, only its list.
+    await expect(page.getByTestId('picker-rail')).toHaveCount(0);
+    await expect(sheet.getByRole('button', { name: /Qwen3.5 4B/ })).toHaveAttribute('aria-pressed', 'true');
+    await expect(sheet.getByRole('button', { name: /Claude Haiku 5.5/ })).toContainText('Cloud');
+    await sheet.getByRole('button', { name: /Claude Haiku 5.5/ }).click();
     await expect.poll(() => pc.of('set_model')).toEqual([{ type: 'set_model', id: MODELS[1].id }]);
     await expect(sheet).toBeHidden();
-    await expect(chip).toContainText('Claude Haiku');
+    await expect(chip).toContainText('Claude Haiku 5.5');
     await expect(chip).not.toContainText('On this PC');
     // The PC's own word wins.
     pc.send({ type: 'ready', pc: PC, model: MODELS[0], models: MODELS });
@@ -537,6 +540,8 @@ test.describe('talking', () => {
     await open(page);
     await ready(page, pc);
     await ask(page, pc, 200);
+    // The settings sheet (⋯) has it.
+    await openSettings(page);
     const select = page.getByTestId('mic');
     await expect.poll(async () => (await select.locator('option').count())).toBeGreaterThan(1);
     const second = await select.locator('option').nth(1).getAttribute('value');

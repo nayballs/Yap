@@ -87,10 +87,32 @@ mod tests {
         let (html, kind) = file("/").unwrap();
         assert_eq!(kind, "text/html; charset=utf-8");
         assert!(String::from_utf8_lossy(html).contains("link.js"), "the page itself, not the stand-in");
-        for f in ["link.js", "dsp.js", "mic-worklet.js", "player-worklet.js"] {
+        for f in ["link.js", "picker.js", "markdown.js", "dsp.js", "mic-worklet.js", "player-worklet.js"] {
             assert_eq!(file(&format!("/{f}")).map(|(_, k)| k), Some("text/javascript; charset=utf-8"), "{f}");
         }
         assert_eq!(file("/manifest.webmanifest").map(|(_, k)| k), Some("application/manifest+json"));
+    }
+
+    #[test]
+    fn chats_picker_code_and_logos_are_served_beside_the_page() {
+        // The desktop's own modules (src/lib/core/), as they are: modules,
+        // so text/javascript, or the phone refuses them.
+        for f in ["chatPicker.js", "modelCatalog.js", "latestModels.js", "ppModels.js", "localContext.js", "modelIcons.js", "providerIds.js", "effort.js"] {
+            let (bytes, kind) = file(&format!("/core/{f}")).unwrap_or_else(|| panic!("core/{f} isn't in the build"));
+            assert_eq!(kind, "text/javascript; charset=utf-8", "{f}");
+            let src = String::from_utf8_lossy(bytes);
+            let imports = src.lines().filter(|l| l.trim_start().starts_with("import ") || l.contains("} from '"));
+            for l in imports {
+                assert!(!l.contains("@tauri-apps") && !l.contains("svelte") && l.contains("from './"), "{f} must stay pure: {l}");
+            }
+        }
+        // The logos, as static files (never HTML from the PC).
+        for f in ["groq", "claude", "gemini", "openai", "openrouter", "qwen"] {
+            assert_eq!(file(&format!("/providers/{f}.svg")).map(|(_, k)| k), Some("image/svg+xml"), "{f}");
+        }
+        // Nothing else of the app's source.
+        assert!(file("/core/aiModel.js").is_none());
+        assert!(file("/core/providers.js").is_none());
     }
 
     #[test]

@@ -12,6 +12,10 @@
 //   transcript heard, the fake model's answer streamed to the phone, Yap's
 //   voice as audio down (test mode's stand-in voice: silence of the right
 //   length) — never this PC's speakers — and the conversation kept in Chat.
+// - A typed question (the composer's `ask`): the fake model's answer in the
+//   same conversation, typed (not "by voice"), nothing said; ▶ Read aloud
+//   then says it on the phone. Chat's picker over the wire: the rail, Latest,
+//   a switch that switches Chat's model on this PC.
 // - Remove cuts the phone off at once; a replayed pairing link, a wrong
 //   secret and another site's page are refused.
 //
@@ -28,6 +32,8 @@ import { RUNS } from './support/yap.js';
 
 const TEST_KEY = 'e2e-fake-key';
 const ANSWER = 'Boil it for six minutes, then cool it in cold water.';
+const TYPED = 'How long should the bread dough rest?';
+const TYPED_ANSWER = 'Rest the dough for about an hour, until it has doubled.';
 
 const test = base.extend({
   fakeLlm: [
@@ -198,6 +204,46 @@ test('a phone pairs with the code both screens show, asks out loud and hears the
   await expect
     .poll(async () => (await yap.invoke('connections_summary')).groups.some((g) => g.label === 'Yap Link · your phone'), { timeout: 15_000 })
     .toBe(true);
+
+  // A typed question (the composer): answered in the same conversation, as
+  // Chat answers a typed one, and not said — not on the phone, not here.
+  await yap.invoke('tts_e2e_spoken', { clear: true });
+  fakeLlm.scriptChat([{ plain: true, content: TYPED_ANSWER }]);
+  await page.getByTestId('input').fill(TYPED);
+  await page.getByTestId('input').press('Enter');
+  await expect(page.getByText(TYPED_ANSWER)).toBeVisible({ timeout: 20_000 });
+  await expect.poll(async () => (await snapshot(page)).turns.at(-1)?.answerId, { timeout: 20_000 }).toMatch(/^chat:\d+:\d+$/);
+  await expect.poll(async () => (await snapshot(page)).phase, { timeout: 15_000 }).toBe('idle');
+  await page.waitForTimeout(1000);
+  expect(await yap.invoke('tts_e2e_spoken')).toEqual([]);
+  expect((await snapshot(page)).player.active).toBe(false);
+  await expectStore(yap, 'chats.json', (store) => {
+    const conv = store.conversations.find((c) => c.messages.some((m) => m.text === TYPED));
+    expect(conv, 'the typed question is in Chat').toBeTruthy();
+    // The same conversation as the spoken question; typed, not "by voice".
+    expect(conv.messages.some((m) => m.role === 'user' && m.voice && m.text.includes('STT stub: received'))).toBe(true);
+    expect(conv.messages.find((m) => m.text === TYPED).voice).toBeFalsy();
+    expect(conv.messages.some((m) => m.role === 'assistant' && m.text === TYPED_ANSWER)).toBe(true);
+    return true;
+  });
+  await shot(page, '04b-phone-typed');
+  // ▶ Read aloud under it: said by Yap's speaker, on the phone.
+  await page.getByTestId('read-aloud').last().click();
+  await expect
+    .poll(async () => (await yap.invoke('tts_e2e_spoken')).map((s) => s.text).join(' '), { timeout: 20_000 })
+    .toContain('Rest the dough');
+  await expect.poll(async () => (await snapshot(page)).reading, { timeout: 30_000 }).toBe('');
+  await expect.poll(async () => (await snapshot(page)).phase, { timeout: 30_000 }).toBe('idle');
+
+  // Chat's picker over the wire: the rail with Groq connected; a switch
+  // switches Chat's model on this PC.
+  await page.getByTestId('model-chip').click();
+  await expect(page.getByTestId('picker-rail').getByRole('tab', { name: /^Groq, connected/ })).toHaveAttribute('aria-selected', 'true');
+  await expect(page.getByTestId('picker-pane').getByRole('group', { name: 'Latest' })).toBeVisible();
+  await shot(page, '04c-phone-picker');
+  await page.getByTestId('picker-pane').getByTestId('picker-row').filter({ hasText: 'GPT-OSS 120B' }).click();
+  await expect.poll(async () => (await yap.invoke('ai_model_status', { scope: 'chat' })).model?.id, { timeout: 10_000 }).toBe('openai/gpt-oss-120b');
+  await expect.poll(async () => (await snapshot(page)).model?.id).toBe('groq|openai/gpt-oss-120b');
 
   // Remove: the phone is cut off at once, and says how to pair again.
   await list.getByRole('button', { name: /^Remove/ }).click();

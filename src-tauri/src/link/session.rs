@@ -13,6 +13,13 @@
 //! once (frames not yet sent are dropped), and it's back to idle — or
 //! listening. Off during meetings, as the Voice Assistant is: `error`.
 //!
+//! A **typed** question (`ask`, 2026-11-03) skips the audio: `heard`,
+//! thinking, the same path and conversation, its answer not said
+//! (`Phone::by_voice` false). **▶ on an answer** (`read_aloud`) says the
+//! whole of one this phone was given (`Hub::gave`, from Chat) on the phone.
+//! **Chat's picker** sets the model as the desktop's does (`set_model` with
+//! a row's provider and model, `set_effort`, `set_fast`: `models.rs`).
+//!
 //! Logs: phases, lengths and timings; never a question, an answer or audio.
 
 use std::net::SocketAddr;
@@ -41,6 +48,12 @@ const NOTHING_HEARD: &str = "Yap didn't catch a question. Try again.";
 const MEETING: &str = "The Voice Assistant is off during meetings. While a meeting records or a call is on, Yap doesn't listen or talk.";
 const NO_SPEECH: &str = "Yap's speech model isn't ready on the PC.";
 
+/// The longest typed question (characters).
+const MAX_TYPED: usize = 4_000;
+const TOO_LONG: &str = "That question is too long for Yap to take from the phone. Shorten it, then send it again.";
+/// ▶ on an answer this phone wasn't given, or one gone from Chat.
+const NOT_HERE: &str = "That answer isn't in Chat on your PC any more, so Yap can't read it out.";
+
 /// **One question's turn**, shared by the session, its task and the Voice
 /// Assistant's path (`assistant::Phone`).
 pub struct Turn {
@@ -48,6 +61,11 @@ pub struct Turn {
     session: u64,
     latest: Arc<AtomicU64>,
     tx: Tx,
+    /// The phone's hub and its device id: the answers it was given (▶).
+    hub: Arc<Hub>,
+    device: String,
+    /// Asked out loud (`false`: typed, not said unless ▶ asks).
+    by_voice: bool,
     /// The answer's id, once its voice started ("chat:<conversation>:<index>").
     message_id: Mutex<Option<String>>,
     playback: Mutex<Option<Arc<voice::PhonePlayback>>>,
@@ -59,12 +77,15 @@ pub struct Turn {
 }
 
 impl Turn {
-    fn new(id: u64, session: u64, latest: Arc<AtomicU64>, tx: Tx) -> Arc<Turn> {
+    fn new(id: u64, session: u64, latest: Arc<AtomicU64>, asking: &Asking, by_voice: bool) -> Arc<Turn> {
         Arc::new(Turn {
             id,
             session,
             latest,
-            tx,
+            tx: asking.tx.clone(),
+            hub: Arc::clone(&asking.hub),
+            device: asking.device.clone(),
+            by_voice,
             message_id: Mutex::new(None),
             playback: Mutex::new(None),
             speaking: Arc::new(AtomicBool::new(false)),
@@ -107,7 +128,20 @@ impl crate::chat::assistant::Phone for Turn {
         if done {
             self.answered.store(true, Ordering::SeqCst);
         }
-        self.tell(Out::Answer { text: text.to_string(), done });
+        self.tell(Out::Answer { text: text.to_string(), done, id: None });
+    }
+
+    fn checked(&self, text: &str, message_id: &str) {
+        self.answered.store(true, Ordering::SeqCst);
+        if crate::chat::assistant::Phone::current(self) {
+            // ▶ on the phone may read it from now on.
+            self.hub.gave(&self.device, message_id);
+        }
+        self.tell(Out::Answer { text: text.to_string(), done: true, id: Some(message_id.to_string()) });
+    }
+
+    fn by_voice(&self) -> bool {
+        self.by_voice
     }
 
     fn voice(&self, message_id: &str) -> Result<Arc<crate::voice::tts::Feed>, String> {
@@ -141,8 +175,11 @@ impl Turn {
 }
 
 /// What the session is doing with the phone's question.
-#[derive(Default)]
 struct Asking {
+    hub: Arc<Hub>,
+    tx: Tx,
+    /// The connected phone's device id.
+    device: String,
     recording: bool,
     audio: Vec<f32>,
     turn: Option<Arc<Turn>>,
@@ -231,7 +268,15 @@ where
     say(&tx, Out::State { phase: Phase::Idle });
     tracing::info!(session, "Yap Link: a phone connected");
 
-    let mut asking = Asking::default();
+    let mut asking = Asking {
+        hub: Arc::clone(&hub),
+        tx: tx.clone(),
+        device: device_id.clone(),
+        recording: false,
+        audio: Vec::new(),
+        turn: None,
+        started: None,
+    };
     loop {
         let next = tokio::select! {
             m = incoming.next() => m,
@@ -255,7 +300,7 @@ where
             }
             Message::Binary(b) => {
                 received += b.len() as u64;
-                on_audio(&hub, &tx, session, &latest, &mut asking, &b);
+                on_audio(&hub, session, &latest, &mut asking, &b);
             }
             Message::Close(_) => break,
             _ => {}
@@ -359,19 +404,22 @@ where
 }
 
 /// Abandon the question under way, if any (an interrupt, a new start, a
-/// cancel): one still being recorded is dropped, one being answered stops.
-fn abandon(latest: &AtomicU64, asking: &mut Asking) {
-    if asking.recording {
+/// cancel, a typed question, ▶): one still being recorded is dropped, one
+/// being answered stops. `true`: there was one.
+fn abandon(latest: &AtomicU64, asking: &mut Asking) -> bool {
+    let recording = asking.recording;
+    if recording {
         asking.recording = false;
         asking.audio = Vec::new();
         latest.fetch_add(1, Ordering::SeqCst);
     }
-    let Some(turn) = asking.turn.take() else { return };
+    let Some(turn) = asking.turn.take() else { return recording };
     let was = crate::chat::assistant::Phone::current(turn.as_ref());
     turn.abandon();
     if was {
         tracing::info!("Yap Link: the phone interrupted its question");
     }
+    recording || was
 }
 
 fn on_message(hub: &Arc<Hub>, tx: &Tx, session: u64, latest: &Arc<AtomicU64>, asking: &mut Asking, m: In) {
@@ -394,7 +442,7 @@ fn on_message(hub: &Arc<Hub>, tx: &Tx, session: u64, latest: &Arc<AtomicU64>, as
         }
         In::Stop => {
             if asking.recording {
-                finish_question(hub, tx, session, latest, asking);
+                finish_question(hub, session, latest, asking);
             }
         }
         // Idle at once, whatever there was to drop: the page waits for it
@@ -403,19 +451,134 @@ fn on_message(hub: &Arc<Hub>, tx: &Tx, session: u64, latest: &Arc<AtomicU64>, as
             abandon(latest, asking);
             say(tx, Out::State { phase: Phase::Idle });
         }
-        In::SetModel { id } => {
+        In::Ask { text } => ask_typed(hub, tx, session, latest, asking, &text),
+        In::ReadAloud { id } => read_aloud(hub, tx, session, latest, asking, &id),
+        In::SetModel { id, provider, model, base_url, file } => {
+            // A row of Chat's picker (`ready.picker`), as the desktop picker
+            // picks it; else one of `ready.models` by its id (a first page).
+            let set = if provider.is_empty() {
+                crate::link::models::set(&hub.app, &id)
+            } else {
+                crate::link::models::set_row(&hub.app, &provider, &model, base_url.as_deref(), file.as_deref())
+            };
             // A fresh `ready` either way: the page shows the pick at once and
             // takes this as the truth (every other phone hears it too, from
             // `yap-chat-model-changed`).
-            if let Err(e) = crate::link::models::set(&hub.app, &id) {
+            if let Err(e) = set {
                 say(tx, Out::Error { message: e });
             }
+            say(tx, hub.ready());
+        }
+        In::SetEffort { level } => {
+            let set = crate::link::models::set_effort(&hub.app, level.as_deref());
+            settled(hub, tx, set);
+        }
+        In::SetFast { on } => {
+            let set = crate::link::models::set_fast(&hub.app, on);
+            settled(hub, tx, set);
+        }
+    }
+}
+
+/// The effort or fast mode set from the phone: the chips on the PC read
+/// again, and every phone hears (`yap-chat-model-changed` with no scope, so
+/// Settings has nothing to adopt); refused, why, and the PC's own word.
+fn settled(hub: &Arc<Hub>, tx: &Tx, set: Result<(), String>) {
+    match set {
+        Ok(()) => {
+            let _ = hub.app.emit("yap-chat-model-changed", serde_json::json!({ "scope": null }));
+        }
+        Err(e) => {
+            say(tx, Out::Error { message: e });
             say(tx, hub.ready());
         }
     }
 }
 
-fn on_audio(hub: &Arc<Hub>, tx: &Tx, session: u64, latest: &Arc<AtomicU64>, asking: &mut Asking, bytes: &[u8]) {
+/// **A typed question** (`ask`): whatever was under way is abandoned (said
+/// as `state idle`, so the page knows the old question's news has ended),
+/// then it's asked as a spoken one is once it's transcribed — `heard`,
+/// thinking, the Voice Assistant's path — but not said.
+fn ask_typed(hub: &Arc<Hub>, tx: &Tx, session: u64, latest: &Arc<AtomicU64>, asking: &mut Asking, text: &str) {
+    if abandon(latest, asking) {
+        say(tx, Out::State { phase: Phase::Idle });
+    }
+    let question = text.trim().to_string();
+    if question.is_empty() {
+        say(tx, Out::Error { message: NOTHING_HEARD.into() });
+        return;
+    }
+    if question.chars().count() > MAX_TYPED {
+        say(tx, Out::Error { message: TOO_LONG.into() });
+        return;
+    }
+    if crate::chat::assistant::is_off() {
+        say(tx, Out::Error { message: MEETING.into() });
+        say(tx, Out::State { phase: Phase::Idle });
+        return;
+    }
+    let id = latest.fetch_add(1, Ordering::SeqCst) + 1;
+    let turn = Turn::new(id, session, Arc::clone(latest), asking, false);
+    asking.turn = Some(Arc::clone(&turn));
+    tracing::info!(chars = question.chars().count(), "Yap Link: a typed question from the phone");
+    let app = hub.app.clone();
+    tauri::async_runtime::spawn(async move { answer(app, turn, question).await });
+}
+
+/// **▶ on an answer** (`read_aloud`): the whole of it said on the phone in
+/// Yap's voice — only an answer this phone was given, as Chat keeps it.
+/// Whatever was under way is abandoned first (`state idle`).
+fn read_aloud(hub: &Arc<Hub>, tx: &Tx, session: u64, latest: &Arc<AtomicU64>, asking: &mut Asking, id: &str) {
+    abandon(latest, asking);
+    say(tx, Out::State { phase: Phase::Idle });
+    if crate::chat::assistant::is_off() {
+        say(tx, Out::Error { message: MEETING.into() });
+        return;
+    }
+    let text = if hub.was_given(&asking.device, id) { answer_text(id) } else { None };
+    let Some(text) = text.filter(|t| !t.trim().is_empty()) else {
+        say(tx, Out::Error { message: NOT_HERE.into() });
+        return;
+    };
+    let turn_id = latest.fetch_add(1, Ordering::SeqCst) + 1;
+    let turn = Turn::new(turn_id, session, Arc::clone(latest), asking, true);
+    // Its answer is in: the voice's end says idle.
+    turn.answered.store(true, Ordering::SeqCst);
+    asking.turn = Some(Arc::clone(&turn));
+    tracing::info!(chars = text.chars().count(), "Yap Link: an answer read aloud on the phone");
+    let id = id.to_string();
+    tauri::async_runtime::spawn(async move {
+        use crate::chat::assistant::Phone;
+        match turn.voice(&id) {
+            Ok(feed) => {
+                feed.push(crate::voice::tts::utterances(&text));
+                feed.close();
+            }
+            Err(e) => {
+                tracing::info!("Yap Link: couldn't read the answer on the phone ({e})");
+                turn.tell(Out::Error { message: format!("Yap couldn't read it out. {e}") });
+                turn.tell(Out::State { phase: Phase::Idle });
+            }
+        }
+    });
+}
+
+/// An answer's words in Chat, by its id (`chat:<conversation>:<index>`).
+fn answer_text(id: &str) -> Option<String> {
+    let (conversation, index) = parse_message_id(id)?;
+    let c = crate::chat::chats::get(conversation)?;
+    c.messages.get(index).filter(|m| m.role == "assistant").map(|m| m.text.clone())
+}
+
+/// `chat:<conversation>:<index>` → its parts. Pure.
+fn parse_message_id(id: &str) -> Option<(u64, usize)> {
+    let mut parts = id.strip_prefix("chat:")?.splitn(2, ':');
+    let conversation = parts.next()?.parse().ok()?;
+    let index = parts.next()?.parse().ok()?;
+    Some((conversation, index))
+}
+
+fn on_audio(hub: &Arc<Hub>, session: u64, latest: &Arc<AtomicU64>, asking: &mut Asking, bytes: &[u8]) {
     if !asking.recording {
         return;
     }
@@ -428,16 +591,16 @@ fn on_audio(hub: &Arc<Hub>, tx: &Tx, session: u64, latest: &Arc<AtomicU64>, aski
     // Two minutes: it's asked as it is.
     if asking.audio.len() >= MAX_SAMPLES {
         tracing::info!("Yap Link: a question reached 2 minutes; asked as it is");
-        finish_question(hub, tx, session, latest, asking);
+        finish_question(hub, session, latest, asking);
     }
 }
 
 /// The question's audio is in: transcribe it and ask.
-fn finish_question(hub: &Arc<Hub>, tx: &Tx, session: u64, latest: &Arc<AtomicU64>, asking: &mut Asking) {
+fn finish_question(hub: &Arc<Hub>, session: u64, latest: &Arc<AtomicU64>, asking: &mut Asking) {
     asking.recording = false;
     let audio = std::mem::take(&mut asking.audio);
     let id = latest.load(Ordering::SeqCst);
-    let turn = Turn::new(id, session, Arc::clone(latest), tx.clone());
+    let turn = Turn::new(id, session, Arc::clone(latest), asking, true);
     asking.turn = Some(Arc::clone(&turn));
     let held = asking.started.take().map(|s| s.elapsed().as_millis() as u64).unwrap_or(0);
     tracing::info!(samples = audio.len(), held_ms = held, "Yap Link: a question from the phone");
@@ -475,6 +638,13 @@ async fn ask(app: tauri::AppHandle, turn: Arc<Turn>, audio: Vec<f32>) {
             return;
         }
     };
+    answer(app, turn, question).await;
+}
+
+/// A question heard (or typed): `heard`, thinking, the Voice Assistant's
+/// path, then idle unless a voice is going (its end says idle).
+async fn answer(app: tauri::AppHandle, turn: Arc<Turn>, question: String) {
+    use crate::chat::assistant::Phone;
     turn.tell(Out::Heard { text: question.clone() });
     if crate::chat::assistant::is_off() {
         turn.tell(Out::Error { message: MEETING.into() });
@@ -484,9 +654,29 @@ async fn ask(app: tauri::AppHandle, turn: Arc<Turn>, audio: Vec<f32>) {
     turn.tell(Out::State { phase: Phase::Thinking });
     let started = Instant::now();
     crate::chat::assistant::ask_from_phone(app, question, Arc::clone(&turn) as Arc<dyn Phone>).await;
-    tracing::info!(ms = started.elapsed().as_millis() as u64, spoken = turn.voiced.load(Ordering::SeqCst), "Yap Link: the phone's question answered");
-    // No voice (nothing to say, or it couldn't start): idle now; else its end says so.
+    tracing::info!(
+        ms = started.elapsed().as_millis() as u64,
+        typed = !turn.by_voice,
+        spoken = turn.voiced.load(Ordering::SeqCst),
+        "Yap Link: the phone's question answered"
+    );
+    // No voice (typed, nothing to say, or it couldn't start): idle now; else its end says so.
     if !turn.voiced.load(Ordering::SeqCst) {
         turn.tell(Out::State { phase: Phase::Idle });
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn read_aloud_names_an_answer_by_its_place_in_chat() {
+        assert_eq!(parse_message_id("chat:12:5"), Some((12, 5)));
+        assert_eq!(parse_message_id("chat:12"), None);
+        assert_eq!(parse_message_id("note:12:5"), None);
+        assert_eq!(parse_message_id("chat:x:5"), None);
+        assert_eq!(parse_message_id("chat:12:-1"), None);
+        assert_eq!(parse_message_id(""), None);
     }
 }
