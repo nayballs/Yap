@@ -92,6 +92,48 @@ for (const scheme of ['light', 'dark']) {
   });
 }
 
+test("Yap's fonts come from the PC, and nothing from anywhere else", async ({ page }) => {
+  const served = await servePage(page);
+  await seedDevice(page);
+  const pc = await mockPc(page);
+  await open(page);
+  await ready(page, pc);
+  await page.evaluate(() => document.fonts.ready);
+  const fonts = await page.evaluate(() => [...document.fonts].filter((f) => f.status === 'loaded').map((f) => f.family));
+  expect(fonts.map((f) => f.replace(/"/g, ''))).toEqual(
+    expect.arrayContaining(['Figtree Variable', 'EB Garamond Variable']),
+  );
+  expect(await page.evaluate(() => getComputedStyle(document.body).fontFamily)).toMatch(/^"?Figtree Variable/);
+  expect(served.filter((s) => s.file && s.file.startsWith('fonts/')).map((s) => s.file).sort()).toEqual(
+    expect.arrayContaining(['fonts/eb-garamond.woff2', 'fonts/figtree.woff2']),
+  );
+  expect(served.filter((s) => s.outside || s.missing)).toEqual([]);
+});
+
+// The first screen at a small, a middling and a large phone, and on its side:
+// no sideways scroll, and Talk on screen, low enough for a thumb.
+for (const [w, h] of [
+  [360, 780],
+  [390, 844],
+  [430, 932],
+  [844, 390],
+]) {
+  test(`Talk in the thumb's reach at ${w}×${h}`, async ({ page }) => {
+    await page.setViewportSize({ width: w, height: h });
+    await servePage(page);
+    await seedDevice(page);
+    const pc = await mockPc(page);
+    await open(page);
+    await ready(page, pc);
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+    const talk = await page.getByTestId('talk').boundingBox();
+    expect(talk.y + talk.height).toBeLessThanOrEqual(h);
+    // Its middle in the lower half of a phone held upright.
+    if (h > w) expect(talk.y + talk.height / 2).toBeGreaterThan(h / 2);
+    if (w > h) await page.screenshot({ path: `${DIR}/landscape-${w}x${h}.png` });
+  });
+}
+
 test('reconnecting, and the step on a narrow phone', async ({ page }) => {
   await page.setViewportSize({ width: 320, height: 640 });
   await servePage(page);

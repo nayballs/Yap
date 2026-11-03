@@ -1,47 +1,117 @@
-/* Yap Link, the phone's page. Yap's warm theme: the `--yap-*` values are
-   copied from src/app.css (light, and the warm dark), since this page is
-   served on its own, with no build step and nothing fetched from elsewhere.
-   System fonts. */
+/* Yap Link, the phone's page, in Yap's own look: its tokens, its two
+   fonts, its buttons, switches and focus ring, Chat's answers and the Yap
+   bar's waveform, on a phone's terms (thumb-sized targets, Talk low on the
+   screen, safe areas, text that grows with the phone's font size).
 
+   The page is served on its own (no build step, nothing fetched from
+   anywhere but the PC), so it can't import src/app.css: the values below
+   are COPIED from it. When app.css changes a colour, change it here too.
+   Where each set comes from is said above it. */
+
+/* ------------------------------------------------------------- fonts */
+
+/* Yap's two typefaces (OFL-1.1, no Reserved Font Names), from this PC: the
+   desktop's own files (@fontsource-variable/figtree and /eb-garamond, their
+   Latin subsets) cut down for this page — Figtree's weight axis held to
+   400–700, EB Garamond fixed at 550 and to Latin-1 (it sets only the page's
+   own headings). Their copyright and licence stay in each file's name
+   table. How they were made: README.md. */
+@font-face {
+  font-family: 'Figtree Variable';
+  font-style: normal;
+  font-weight: 400 700;
+  font-display: swap;
+  src: url('fonts/figtree.woff2') format('woff2');
+}
+@font-face {
+  font-family: 'EB Garamond Variable';
+  font-style: normal;
+  font-weight: 550;
+  font-display: swap;
+  src: url('fonts/eb-garamond.woff2') format('woff2');
+}
+
+/* ------------------------------------------------------------ tokens */
+
+/* Light: src/app.css `:root` (Yap's warm light). */
 :root {
   color-scheme: light dark;
+
+  /* surfaces — white cards on warm paper */
   --yap-bg: #f0ede7;
   --yap-s1: #faf9f6;
   --yap-s2: #ffffff;
   --yap-s3: #f2efe9;
   --yap-raised: #e8e4dc;
+  --yap-raised-soft: #f4f1eb;
+
+  /* text — one warm ink, stepped by opacity */
   --yap-fg: #23211b;
   --yap-fg-80: rgba(35, 33, 27, 0.82);
+  --yap-fg-62: rgba(35, 33, 27, 0.64);
   --yap-muted: #6e6a5f;
+  --yap-muted-55: rgba(110, 106, 95, 0.6);
+
+  /* accent — Yap amber, spent sparingly */
   --yap-primary: #c2690a;
   --yap-primary-fg: #ffffff;
   --yap-primary-wash: rgba(226, 152, 42, 0.16);
   --yap-primary-tint: rgba(226, 152, 42, 0.28);
+  --yap-primary-line: rgba(194, 105, 10, 0.45);
+
+  /* ink — filled buttons */
   --yap-ink: #26231c;
   --yap-ink-hover: #3a3529;
   --yap-ink-fg: #f7f5f0;
+
+  /* borders */
   --yap-border: #dcd7cb;
   --yap-border-subtle: #e7e3d9;
-  --yap-danger: #c23b32;
+  --yap-border-hover: #c8c2b3;
+  --yap-rule: #ebe7de;
+
+  /* semantic */
   --yap-success-text: #17733e;
   --yap-warning: #b07c10;
+  --yap-danger: #c23b32;
+
+  --yap-shadow-sm: 0 1px 2px rgba(60, 50, 30, 0.07), 0 1px 1px rgba(60, 50, 30, 0.04);
+  --yap-shadow-menu: 0 12px 32px rgba(55, 45, 25, 0.16);
+  --yap-shadow-modal: 0 24px 80px rgba(50, 40, 20, 0.28);
+  --yap-scrim: rgba(45, 38, 25, 0.35);
+
   --yap-link: #a85a08;
   --yap-switch-edge: #8c8679;
   --yap-focus-ring: #c2690a;
-  --yap-scrim: rgba(45, 38, 25, 0.35);
-  --yap-shadow-sm: 0 1px 2px rgba(60, 50, 30, 0.07), 0 1px 1px rgba(60, 50, 30, 0.04);
-  --yap-shadow-menu: 0 12px 32px rgba(55, 45, 25, 0.16);
+
+  /* the live waveform (--yap-live; the Yap bar's --bar-wave) */
+  --yap-live: #c2690a;
+
+  --yap-font-ui: 'Figtree Variable', 'Segoe UI Variable Text', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto,
+    'Noto Sans', sans-serif;
+  --yap-font-display: 'EB Garamond Variable', Georgia, 'Palatino Linotype', 'Noto Serif', 'Times New Roman', serif;
+
+  --yap-r-sm: 5px;
   --yap-r: 8px;
   --yap-r-lg: 11px;
   --yap-r-xl: 14px;
   --yap-r-full: 9999px;
   --yap-dur: 150ms;
 
-  --font: system-ui, -apple-system, 'Segoe UI', Roboto, 'Noto Sans', 'Helvetica Neue', Arial, sans-serif;
-  --font-display: Georgia, 'Noto Serif', 'Palatino Linotype', 'Times New Roman', serif;
+  /* ---- the page's own (not in app.css) ---- */
+  /* Talk's live edge on the ink circle: the bar's dark-scheme amber on
+     light's near-black ink, the deeper amber on dark's cream ink. */
+  --talk-live: #f0b04a;
+  --talk-shadow: 0 10px 28px rgba(55, 45, 25, 0.22), 0 2px 6px rgba(55, 45, 25, 0.12);
   --gutter: 16px;
+  /* The header's height, and how much of the options shows under Talk on
+     the first screen (a sign there's more below). */
+  --top-h: 4rem;
+  --peek: 3.25rem;
 }
 
+/* Dark: src/app.css `:root[data-yap-theme='dark']` (Yap's warm dark), here
+   following the phone's own setting. */
 @media (prefers-color-scheme: dark) {
   :root {
     --yap-bg: #161410;
@@ -49,29 +119,50 @@
     --yap-s2: #24211c;
     --yap-s3: #2b2722;
     --yap-raised: #36312a;
+    --yap-raised-soft: #221f1a;
+
     --yap-fg: #f2efe8;
     --yap-fg-80: rgba(242, 239, 232, 0.82);
+    --yap-fg-62: rgba(242, 239, 232, 0.64);
     --yap-muted: #a8a294;
+    --yap-muted-55: rgba(168, 162, 148, 0.8);
+
     --yap-primary: #e2982a;
     --yap-primary-fg: #1f1c16;
     --yap-primary-wash: rgba(226, 152, 42, 0.14);
     --yap-primary-tint: rgba(226, 152, 42, 0.24);
+    --yap-primary-line: rgba(240, 176, 74, 0.5);
+
     --yap-ink: #ece8df;
     --yap-ink-hover: #ffffff;
     --yap-ink-fg: #1c1a16;
+
     --yap-border: #3a352b;
     --yap-border-subtle: #2e2a23;
-    --yap-danger: #e5645e;
+    --yap-border-hover: #4b453a;
+    --yap-rule: #2c2822;
+
     --yap-success-text: #4cc985;
     --yap-warning: #dca03c;
+    --yap-danger: #e5645e;
+
+    --yap-shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.22);
+    --yap-shadow-menu: 0 10px 28px rgba(0, 0, 0, 0.32), 0 0 0 1px rgba(255, 255, 255, 0.04);
+    --yap-shadow-modal: 0 20px 60px rgba(0, 0, 0, 0.42);
+    --yap-scrim: rgba(6, 5, 3, 0.58);
+
     --yap-link: #f0b04a;
     --yap-switch-edge: #8f887a;
     --yap-focus-ring: #f0b04a;
-    --yap-scrim: rgba(6, 5, 3, 0.58);
-    --yap-shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.22);
-    --yap-shadow-menu: 0 10px 28px rgba(0, 0, 0, 0.32), 0 0 0 1px rgba(255, 255, 255, 0.04);
+
+    --yap-live: #f0b04a;
+
+    --talk-live: #c2690a;
+    --talk-shadow: 0 10px 28px rgba(0, 0, 0, 0.4), 0 0 0 1px rgba(255, 255, 255, 0.04);
   }
 }
+
+/* -------------------------------------------------------------- base */
 
 *,
 *::before,
@@ -83,9 +174,17 @@
   display: none !important;
 }
 
+/* The root's size is the phone's (never set in px here): every font size
+   below is in rem, so text grows with the phone's font size. On iPhones
+   that's Dynamic Type's body size. */
 html {
   -webkit-text-size-adjust: 100%;
   text-size-adjust: 100%;
+}
+@supports (font: -apple-system-body) and (-webkit-touch-callout: none) {
+  html {
+    font: -apple-system-body;
+  }
 }
 
 body {
@@ -94,9 +193,14 @@ body {
   min-height: 100dvh;
   display: flex;
   flex-direction: column;
-  background: var(--yap-bg);
+  /* Chat's content sheet. */
+  background: var(--yap-s1);
   color: var(--yap-fg);
-  font: 17px/1.45 var(--font);
+  font-family: var(--yap-font-ui);
+  font-size: 1.0625rem;
+  line-height: 1.45;
+  font-weight: 400;
+  -webkit-font-smoothing: antialiased;
   -webkit-tap-highlight-color: transparent;
   padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
 }
@@ -108,37 +212,113 @@ input {
   color: inherit;
 }
 
+/* Yap's focus ring (--yap-focus): a gap in the surface's own colour, then
+   2 px of amber. `--ring-gap` is the surface under the control. */
 :focus-visible {
-  outline: 2px solid var(--yap-focus-ring);
-  outline-offset: 3px;
+  outline: none;
+  box-shadow:
+    0 0 0 2px var(--ring-gap, var(--yap-s1)),
+    0 0 0 4px var(--yap-focus-ring);
 }
 
-/* ------------------------------------------------------------ header */
+/* ------------------------------------------------------------ buttons */
+
+/* Yap's buttons (src/lib/ui/Button.svelte), at a phone's size: 48 px tall,
+   the radius grown with them. Filled buttons are ink (dark on light, cream on
+   dark); secondary ones a card with a hairline. No hover-only meaning. */
+.btn {
+  min-height: 3rem;
+  min-width: 7.5rem;
+  padding: 0 1.25rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  border: 1px solid transparent;
+  border-radius: var(--yap-r-lg);
+  font-size: 1.0625rem;
+  font-weight: 600;
+  line-height: 1.1;
+  cursor: pointer;
+  touch-action: manipulation;
+  transition:
+    background var(--yap-dur) ease,
+    border-color var(--yap-dur) ease,
+    transform var(--yap-dur) ease;
+}
+.btn:active {
+  transform: scale(0.985);
+}
+.btn svg {
+  width: 1rem;
+  height: 1rem;
+  fill: currentColor;
+  flex: 0 0 auto;
+}
+.primary-btn {
+  background: var(--yap-ink);
+  color: var(--yap-ink-fg);
+  box-shadow: var(--yap-shadow-sm);
+}
+.primary-btn:active {
+  background: var(--yap-ink-hover);
+}
+.secondary-btn {
+  background: var(--yap-s2);
+  border-color: var(--yap-border);
+  color: var(--yap-fg-80);
+  box-shadow: var(--yap-shadow-sm);
+}
+.secondary-btn:active {
+  background: var(--yap-s3);
+  border-color: var(--yap-border-hover);
+}
+@media (hover: hover) {
+  .primary-btn:hover {
+    background: var(--yap-ink-hover);
+  }
+  .secondary-btn:hover {
+    background: var(--yap-s3);
+    border-color: var(--yap-border-hover);
+  }
+}
+.btn:focus-visible {
+  box-shadow:
+    0 0 0 2px var(--ring-gap, var(--yap-s1)),
+    0 0 0 4px var(--yap-focus-ring);
+}
+
+/* ------------------------------------------------------------- header */
 
 .top {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
-  gap: 10px;
-  padding: 12px var(--gutter);
-  min-height: 64px;
+  gap: 8px 9px;
+  padding: 10px var(--gutter);
+  min-height: var(--top-h);
 }
 .mark {
   flex: 0 0 auto;
-  border-radius: 8px;
+  width: 32px;
+  height: 32px;
 }
+/* The PC's name gets what the model leaves; with big text the model goes
+   under it rather than both being cut short. */
 .who {
   display: flex;
   flex-direction: column;
   min-width: 0;
-  flex: 1 1 auto;
+  flex: 1 1 7.5rem;
 }
 .name {
   font-weight: 650;
-  font-size: 17px;
+  font-size: 1.0625rem;
   line-height: 1.2;
+  letter-spacing: -0.005em;
 }
 .conn {
-  font-size: 13.5px;
+  font-size: 0.84375rem;
   color: var(--yap-muted);
   white-space: nowrap;
   overflow: hidden;
@@ -151,7 +331,7 @@ input {
   height: 7px;
   border-radius: 50%;
   margin-right: 6px;
-  vertical-align: 1px;
+  vertical-align: 0.08em;
   background: var(--yap-warning);
 }
 .conn[data-state='on']::before {
@@ -161,36 +341,69 @@ input {
   background: var(--yap-muted);
 }
 
+/* The model: Chat's model chip (views/chat/ModelChip.svelte), a pill with
+   the name and where it runs; the chevron says it opens. */
 .chip {
-  flex: 0 1 auto;
+  flex: 0 0 auto;
   min-width: 0;
-  max-width: 56%;
-  min-height: 48px;
+  max-width: 52%;
+  min-height: 3rem;
+  margin-left: auto;
   display: inline-flex;
-  flex-direction: column;
-  align-items: flex-end;
-  justify-content: center;
-  gap: 1px;
-  padding: 6px 12px;
-  border: 1px solid var(--yap-border);
-  border-radius: var(--yap-r-lg);
+  align-items: center;
+  gap: 2px;
+  padding: 4px 6px 4px 12px;
+  border: 1px solid var(--yap-border-subtle);
+  border-radius: var(--yap-r-full);
   background: var(--yap-s2);
   box-shadow: var(--yap-shadow-sm);
   cursor: pointer;
   text-align: right;
+  touch-action: manipulation;
+  transition:
+    border-color var(--yap-dur),
+    background var(--yap-dur);
+}
+.chip:active {
+  background: var(--yap-s3);
+  border-color: var(--yap-border-hover);
+}
+@media (hover: hover) {
+  .chip:hover {
+    background: var(--yap-s3);
+    border-color: var(--yap-border-hover);
+  }
+}
+.chip-text {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  min-width: 0;
 }
 .chip-label {
   max-width: 100%;
-  font-size: 14.5px;
+  font-size: 0.875rem;
   font-weight: 600;
+  line-height: 1.25;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
 .chip-where {
-  font-size: 12px;
-  color: var(--yap-link);
-  font-weight: 600;
+  font-size: 0.75rem;
+  line-height: 1.25;
+  font-weight: 560;
+  color: var(--yap-muted);
+}
+.chev {
+  flex: 0 0 auto;
+  width: 15px;
+  height: 15px;
+  fill: none;
+  stroke: var(--yap-muted);
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
 }
 
 main {
@@ -200,29 +413,48 @@ main {
   min-height: 0;
 }
 
-/* ---------------------------------------------------------- pairing */
+/* ------------------------------------------------------------ pairing */
 
+/* A card on the sheet; the title in Yap's display serif, as Settings'
+   titles; the code as the PC's own prompt shows it (LinkPairPrompt.svelte),
+   bigger. */
 .pair {
+  --ring-gap: var(--yap-s2);
   margin: 8px var(--gutter) var(--gutter);
-  padding: 24px 20px;
+  padding: 24px 20px 22px;
   background: var(--yap-s2);
-  border-radius: var(--yap-r-xl);
+  border: 1px solid var(--yap-border-subtle);
+  border-radius: 16px;
   box-shadow: var(--yap-shadow-sm);
 }
 .pair h1 {
-  margin: 0 0 12px;
-  font: 600 26px/1.2 var(--font-display);
+  margin: 0 0 14px;
+  font-family: var(--yap-font-display);
+  font-size: 1.875rem;
+  font-weight: 550;
+  line-height: 1.15;
+  letter-spacing: -0.005em;
 }
 .pair p {
   margin: 0 0 12px;
 }
 .pair-say {
-  font-size: 19px;
+  font-size: 1.125rem;
+  color: var(--yap-fg-80);
 }
 .code {
-  margin: 8px 0 16px !important;
-  font: 700 clamp(56px, 22vw, 96px) / 1 var(--font);
-  letter-spacing: 0.14em;
+  margin: 10px 0 18px !important;
+  padding: 14px 0 12px;
+  border-radius: var(--yap-r-xl);
+  background: var(--yap-s1);
+  border: 1px solid var(--yap-border-subtle);
+  text-align: center;
+  font-size: clamp(3.25rem, 17vw, 5.25rem);
+  font-weight: 650;
+  line-height: 1;
+  /* (the spacing's own width after the last digit, balanced) */
+  letter-spacing: 0.18em;
+  text-indent: 0.18em;
   font-variant-numeric: lining-nums tabular-nums;
   color: var(--yap-fg);
 }
@@ -232,8 +464,14 @@ main {
 .pair-wait {
   color: var(--yap-muted);
 }
+.pair-how strong {
+  font-weight: 650;
+}
+.pair-how .btn {
+  margin-top: 6px;
+}
 
-/* ---------------------------------------------------------- talking */
+/* ------------------------------------------------------------ talking */
 
 .talk {
   flex: 1 1 auto;
@@ -242,85 +480,301 @@ main {
   min-height: 0;
 }
 
-/* The conversation keeps one height, so Talk never moves under the thumb;
-   it scrolls inside. */
-.convo-box {
-  flex: 0 0 auto;
-  height: clamp(112px, 30dvh, 360px);
+/* The first screen: the conversation takes what's left, so Talk sits low,
+   where a thumb reaches, and stays put (the small viewport's height, which
+   doesn't move as the address bar comes and goes). */
+.stage {
   display: flex;
   flex-direction: column;
-  min-height: 0;
-}
-.empty {
-  margin: 8px var(--gutter);
-  color: var(--yap-muted);
-  font-size: 17px;
+  min-height: calc(100vh - var(--top-h) - var(--peek));
+  min-height: calc(
+    100svh - var(--top-h) - var(--peek) - env(safe-area-inset-top) - env(safe-area-inset-bottom)
+  );
 }
 
+.convo-box {
+  flex: 1 1 0;
+  min-height: 7rem;
+  display: flex;
+  flex-direction: column;
+  position: relative;
+}
+/* Nothing asked yet: the Voice Assistant's ✦ and a line in Yap's serif. */
+.empty {
+  flex: 1 1 auto;
+  margin: 0;
+  padding: 12px calc(var(--gutter) + 8px);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  text-align: center;
+  text-wrap: balance;
+  font-family: var(--yap-font-display);
+  font-size: 1.5rem;
+  font-weight: 550;
+  line-height: 1.3;
+  color: var(--yap-fg-80);
+}
+.empty .spark {
+  width: 28px;
+  height: 28px;
+  fill: var(--yap-live);
+}
+
+/* Chat's thread: your question in an amber-washed bubble on the right,
+   Yap's answer in a card on the left (views/chat/ChatMessage.svelte). It
+   scrolls inside, its top edge fading. */
 .convo {
   list-style: none;
   margin: 0;
-  padding: 4px var(--gutter) 8px;
-  flex: 1 1 auto;
+  padding: 14px var(--gutter) 10px;
+  flex: 1 1 0;
   min-height: 0;
   overflow-y: auto;
   overscroll-behavior: contain;
   display: flex;
   flex-direction: column;
-  gap: 14px;
+  gap: 16px;
+  -webkit-mask-image: linear-gradient(to bottom, transparent 0, #000 14px);
+  mask-image: linear-gradient(to bottom, transparent 0, #000 14px);
+}
+.convo:empty {
+  display: none;
 }
 .turn {
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 8px;
 }
-.turn p {
+.q,
+.a {
   margin: 0;
   overflow-wrap: anywhere;
-  white-space: pre-wrap;
+  font-size: 1.0625rem;
+  line-height: 1.6;
 }
 .q {
   align-self: flex-end;
   max-width: 86%;
-  padding: 9px 13px;
-  border-radius: var(--yap-r-xl) var(--yap-r-xl) 4px var(--yap-r-xl);
-  background: var(--yap-raised);
-  font-size: 17px;
+  padding: 9px 14px;
+  border-radius: 16px;
+  background: var(--yap-primary-wash);
+  white-space: pre-wrap;
 }
 .a {
   align-self: flex-start;
   max-width: 94%;
-  padding: 2px 2px;
-  font-size: 18px;
-  line-height: 1.5;
-  color: var(--yap-fg-80);
-}
-.a.final {
+  padding: 10px 14px;
+  border-radius: 16px;
+  background: var(--yap-s2);
+  border: 1px solid var(--yap-border-subtle);
   color: var(--yap-fg);
 }
+.a.cancelled {
+  background: transparent;
+  color: var(--yap-muted);
+  font-style: italic;
+}
 
+/* The answer's markdown, as Chat renders it (app.css's .md-*; ChatMessage's
+   paragraph, list, heading and code spacing). */
+.a > :first-child {
+  margin-top: 0;
+}
+.a > :last-child {
+  margin-bottom: 0;
+}
+.a p {
+  margin: 6px 0;
+}
+.a ul,
+.a ol {
+  margin: 6px 0;
+  padding-left: 1.4em;
+  list-style: disc;
+}
+.a ol {
+  list-style: decimal;
+}
+.a li ul {
+  list-style: circle;
+}
+.a li::marker {
+  color: var(--yap-muted);
+}
+.a li + li {
+  margin-top: 2px;
+}
+.a li > ul,
+.a li > ol {
+  margin: 2px 0;
+}
+.a h3,
+.a h4 {
+  margin: 12px 0 4px;
+  font-size: 1.125rem;
+  font-weight: 650;
+  line-height: 1.35;
+}
+.a h4 {
+  font-size: 1.0625rem;
+}
+.a strong {
+  font-weight: 650;
+}
+.a code {
+  font-family: ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
+  font-size: 0.9em;
+  background: var(--yap-s1);
+  border: 1px solid var(--yap-border-subtle);
+  border-radius: var(--yap-r-sm);
+  padding: 0 5px;
+}
+.a pre {
+  margin: 8px 0;
+  padding: 8px 10px;
+  border: 1px solid var(--yap-border-subtle);
+  border-radius: var(--yap-r);
+  background: var(--yap-s1);
+  overflow-x: auto;
+  white-space: pre;
+}
+.a pre code {
+  display: block;
+  padding: 0;
+  border: 0;
+  background: none;
+  font-size: 0.875rem;
+  line-height: 1.5;
+}
+.a blockquote {
+  margin: 8px 0;
+  padding: 0 0 0 10px;
+  border-left: 3px solid color-mix(in srgb, currentColor 22%, transparent);
+  color: color-mix(in srgb, currentColor 78%, transparent);
+}
+.a hr {
+  height: 0;
+  margin: 10px 0;
+  border: none;
+  border-top: 1px solid color-mix(in srgb, currentColor 18%, transparent);
+}
+/* An answer being written: Chat's soft amber caret at the end of its last line. */
+.a.streaming > :is(p, h3, h4, blockquote):last-child::after,
+.a.streaming > :is(ul, ol):last-child > li:last-child::after {
+  content: '';
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  margin-left: 6px;
+  border-radius: 50%;
+  background: var(--yap-primary);
+  vertical-align: middle;
+  animation: caret 1s ease-in-out infinite;
+}
+@keyframes caret {
+  0%,
+  100% {
+    opacity: 0.25;
+  }
+  50% {
+    opacity: 0.9;
+  }
+}
+
+/* What's happening now, between the conversation and Talk. */
 .now {
-  padding: 6px var(--gutter) 0;
-  min-height: 64px;
+  padding: 8px var(--gutter) 0;
+  min-height: 4.75rem;
 }
 .now p {
   margin: 0 0 6px;
 }
+.phase-row {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 9px;
+  min-height: 1.9rem;
+}
 .phase {
-  font-size: 22px;
+  margin: 0 !important;
+  font-size: 1.375rem;
   font-weight: 650;
+  line-height: 1.3;
+  letter-spacing: -0.005em;
   text-align: center;
-  min-height: 1.4em;
 }
 body[data-phase='listening'] .phase {
   color: var(--yap-primary);
 }
+.pmark {
+  display: none;
+  flex: 0 0 auto;
+}
+/* ✦ while it listens (the bar's .spark.listen) */
+.pmark.listen {
+  width: 20px;
+  height: 20px;
+  fill: var(--yap-live);
+  animation: pulse 1.2s ease-in-out infinite;
+}
+body[data-phase='listening'] .pmark.listen {
+  display: block;
+}
+/* three bars while it speaks (the bar's .speakbars) */
+.speakbars {
+  align-items: center;
+  gap: 3px;
+  height: 18px;
+}
+body[data-phase='speaking'] .speakbars {
+  display: inline-flex;
+}
+.speakbars i {
+  display: block;
+  width: 3px;
+  height: 100%;
+  border-radius: 1.5px;
+  background: var(--yap-live);
+  animation: speak 0.9s ease-in-out infinite;
+}
+.speakbars i:nth-child(2) {
+  animation-delay: -0.3s;
+}
+.speakbars i:nth-child(3) {
+  animation-delay: -0.6s;
+}
+@keyframes speak {
+  0%,
+  100% {
+    transform: scaleY(0.35);
+  }
+  50% {
+    transform: scaleY(1);
+  }
+}
+@keyframes pulse {
+  0%,
+  100% {
+    transform: scale(1);
+    opacity: 1;
+  }
+  50% {
+    transform: scale(0.82);
+    opacity: 0.7;
+  }
+}
+
+/* The step Yap's on: Chat's activity line (views/chat/ActivityLine.svelte). */
 .step {
   display: flex;
   justify-content: center;
   align-items: center;
   gap: 8px;
-  font-size: 15px;
+  font-size: 0.9375rem;
   color: var(--yap-muted);
   min-width: 0;
 }
@@ -332,6 +786,7 @@ body[data-phase='listening'] .phase {
 }
 .step-time {
   flex: 0 0 auto;
+  color: var(--yap-muted-55);
   font-variant-numeric: tabular-nums;
 }
 .dots {
@@ -364,50 +819,78 @@ body[data-phase='listening'] .phase {
 }
 .note {
   text-align: center;
-  font-size: 15px;
+  font-size: 0.9375rem;
   color: var(--yap-muted);
 }
+/* An error: a card with a danger edge, the words in the text's colour (as
+   Yap's danger buttons: the red at 40 %). */
 .error {
-  padding: 10px 12px;
-  border-radius: var(--yap-r);
-  border: 1px solid var(--yap-danger);
-  color: var(--yap-danger);
-  background: var(--yap-s2);
-  font-size: 15.5px;
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  padding: 10px 14px;
+  border-radius: var(--yap-r-lg);
+  border: 1px solid color-mix(in srgb, var(--yap-danger) 45%, transparent);
+  background: color-mix(in srgb, var(--yap-danger) 7%, var(--yap-s2));
+  color: var(--yap-fg);
+  font-size: 0.96875rem;
+  line-height: 1.45;
+}
+.error::before {
+  content: '!';
+  flex: 0 0 auto;
+  width: 1.25rem;
+  height: 1.25rem;
+  margin-top: 0.06rem;
+  border-radius: 50%;
+  background: var(--yap-danger);
+  color: var(--yap-s2);
+  font-size: 0.8125rem;
+  font-weight: 700;
+  line-height: 1.25rem;
+  text-align: center;
 }
 
-/* The Talk button, the meter over it, Stop / Cancel under it. */
+/* Talk, the waveform over it, Stop / Cancel under it. */
 .controls {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 10px;
-  padding: 4px var(--gutter) 8px;
+  gap: 12px;
+  padding: 6px var(--gutter) 12px;
 }
+
+/* The Yap bar's waveform (bar/DictationCapsule.svelte .wave): thin amber
+   bars, the newest on the right, older ones scrolling left; at least 7 %
+   tall. Its place is kept while it's hidden, so Talk never moves. */
 .meter {
   display: flex;
   align-items: center;
-  justify-content: center;
-  gap: 3px;
-  height: 36px;
-  width: min(100%, 240px);
+  justify-content: flex-end;
+  gap: 2px;
+  height: 40px;
+  width: min(100%, 298px);
+  overflow: hidden;
   visibility: hidden;
 }
 .meter[data-on='true'] {
   visibility: visible;
 }
 .meter i {
-  flex: 1 1 0;
+  flex: 0 0 3px;
   height: 100%;
-  border-radius: 2px;
-  background: var(--yap-primary);
-  transform: scaleY(0.08);
+  border-radius: 1.5px;
+  background: var(--yap-live);
+  transform: scaleY(0.07);
   transform-origin: center;
   transition: transform 60ms linear;
 }
 
+/* Talk: Yap's filled (ink) button as a big circle. Listening, it takes the
+   Voice Assistant's amber edge (the bar's capsule) with a soft halo. */
 .talk-btn {
-  --size: clamp(148px, 46vw, 196px);
+  --size: clamp(148px, min(46vw, 25svh), 196px);
+  position: relative;
   width: var(--size);
   height: var(--size);
   border-radius: 50%;
@@ -419,7 +902,7 @@ body[data-phase='listening'] .phase {
   gap: 4px;
   background: var(--yap-ink);
   color: var(--yap-ink-fg);
-  box-shadow: var(--yap-shadow-menu);
+  box-shadow: var(--talk-shadow);
   cursor: pointer;
   touch-action: none;
   user-select: none;
@@ -438,16 +921,41 @@ body[data-phase='listening'] .phase {
   cursor: default;
   box-shadow: none;
 }
-.talk-btn[aria-pressed='true'] {
-  background: var(--yap-primary);
-  color: var(--yap-primary-fg);
+.talk-btn:focus-visible {
   box-shadow:
-    0 0 0 10px var(--yap-primary-wash),
-    var(--yap-shadow-menu);
+    0 0 0 3px var(--yap-s1),
+    0 0 0 6px var(--yap-focus-ring),
+    var(--talk-shadow);
+}
+.talk-btn[aria-pressed='true'] {
+  box-shadow:
+    0 0 0 4px var(--yap-live),
+    0 0 0 14px var(--yap-primary-wash),
+    var(--talk-shadow);
+  animation: halo 1.6s ease-in-out infinite;
+}
+.talk-btn[aria-pressed='true'] .mic-icon {
+  color: var(--talk-live);
+}
+@keyframes halo {
+  0%,
+  100% {
+    box-shadow:
+      0 0 0 4px var(--yap-live),
+      0 0 0 10px var(--yap-primary-wash),
+      var(--talk-shadow);
+  }
+  50% {
+    box-shadow:
+      0 0 0 4px var(--yap-live),
+      0 0 0 18px var(--yap-primary-wash),
+      var(--talk-shadow);
+  }
 }
 .mic-icon {
   width: 40px;
   height: 40px;
+  color: inherit;
   fill: none;
   stroke: currentColor;
   stroke-width: 1.8;
@@ -458,65 +966,49 @@ body[data-phase='listening'] .phase {
   stroke: none;
 }
 .talk-label {
-  font-size: 22px;
+  font-size: 1.375rem;
   font-weight: 700;
   line-height: 1.1;
   text-align: center;
   padding: 0 14px;
 }
 .talk-time {
-  font-size: 16px;
+  font-size: 1rem;
+  font-weight: 560;
   font-variant-numeric: tabular-nums;
   min-height: 1.2em;
-  opacity: 0.9;
+  opacity: 0.8;
 }
 
 .secondary {
   display: flex;
   gap: 12px;
-  min-height: 48px;
+  min-height: 3rem;
 }
-.secondary-btn {
-  min-height: 48px;
-  min-width: 120px;
-  padding: 0 20px;
-  border-radius: var(--yap-r-full);
-  border: 1px solid var(--yap-border);
-  background: var(--yap-s2);
-  color: var(--yap-fg);
-  font-weight: 600;
-  font-size: 17px;
-  cursor: pointer;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 8px;
-}
-.secondary-btn svg {
-  width: 18px;
-  height: 18px;
-  fill: currentColor;
-}
-.secondary-btn.stop {
-  background: var(--yap-ink);
-  color: var(--yap-ink-fg);
-  border-color: var(--yap-ink);
-  min-width: 160px;
+.secondary .stop {
+  min-width: 10rem;
 }
 .keep-open {
   margin: 0;
   max-width: 30em;
   text-align: center;
-  font-size: 14.5px;
+  text-wrap: balance;
+  font-size: 0.875rem;
   color: var(--yap-muted);
 }
 
-/* Hands-free and the microphone. */
+/* ------------------------------------------------------------ options */
+
+/* Hands-free, Clearer sound and the microphone: a card of Yap's Settings
+   rows (src/lib/ui/Row.svelte, Toggle.svelte): the words on the left, the
+   control on the right, hairlines between. */
 .options {
+  --ring-gap: var(--yap-s2);
   margin: 4px var(--gutter) 16px;
-  padding: 8px 16px;
+  padding: 2px 16px;
   background: var(--yap-s2);
-  border-radius: var(--yap-r-xl);
+  border: 1px solid var(--yap-border-subtle);
+  border-radius: 16px;
   box-shadow: var(--yap-shadow-sm);
   display: flex;
   flex-direction: column;
@@ -525,16 +1017,43 @@ body[data-phase='listening'] .phase {
   position: relative;
   display: flex;
   align-items: center;
-  gap: 14px;
-  min-height: 56px;
+  gap: 16px;
+  min-height: 3.5rem;
+  padding: 10px 0;
   cursor: pointer;
 }
+.switch + .switch,
+.wait + .switch {
+  border-top: 1px solid var(--yap-rule);
+}
+.switch-text {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.switch-label,
+.field-label {
+  font-weight: 600;
+  line-height: 1.35;
+}
+.hint {
+  font-size: 0.875rem;
+  line-height: 1.45;
+  color: var(--yap-muted);
+}
+/* Yap's switch (Toggle.svelte), at a phone's size: off, a hairline track
+   and a small knob; on, filled ink with the knob in the ink's text colour. */
 .switch input {
   position: absolute;
-  opacity: 0;
+  z-index: 1;
+  right: 0;
+  top: 50%;
   width: 52px;
   height: 32px;
-  margin: 0;
+  margin: -16px 0 0;
+  opacity: 0;
   cursor: pointer;
 }
 .track {
@@ -542,74 +1061,72 @@ body[data-phase='listening'] .phase {
   position: relative;
   width: 52px;
   height: 32px;
-  border-radius: 16px;
+  border-radius: var(--yap-r-full);
   border: 2px solid var(--yap-switch-edge);
-  background: var(--yap-raised);
-  transition: background var(--yap-dur), border-color var(--yap-dur);
+  background: var(--yap-s2);
+  transition:
+    background var(--yap-dur),
+    border-color var(--yap-dur);
 }
 .track::after {
   content: '';
   position: absolute;
-  top: 4px;
-  left: 4px;
-  width: 20px;
-  height: 20px;
+  top: 50%;
+  left: 5px;
+  width: 16px;
+  height: 16px;
   border-radius: 50%;
   background: var(--yap-switch-edge);
-  transition: transform var(--yap-dur), background var(--yap-dur);
+  transform: translateY(-50%);
+  transition:
+    transform var(--yap-dur),
+    width var(--yap-dur),
+    height var(--yap-dur),
+    background var(--yap-dur);
 }
 .switch input:checked + .track {
-  background: var(--yap-primary);
-  border-color: var(--yap-primary);
+  background: var(--yap-ink);
+  border-color: var(--yap-ink);
 }
 .switch input:checked + .track::after {
-  transform: translateX(20px);
-  background: var(--yap-primary-fg);
+  width: 20px;
+  height: 20px;
+  background: var(--yap-ink-fg);
+  transform: translate(19px, -50%);
+}
+.switch input:focus-visible {
+  box-shadow: none;
 }
 .switch input:focus-visible + .track {
-  outline: 2px solid var(--yap-focus-ring);
-  outline-offset: 3px;
-}
-.switch-text {
-  display: flex;
-  flex-direction: column;
-}
-.switch-label,
-.field-label {
-  font-weight: 600;
-}
-.hint {
-  font-size: 14px;
-  color: var(--yap-muted);
-}
-.switch ~ .switch {
-  border-top: 1px solid var(--yap-border-subtle);
-  padding: 8px 0;
+  box-shadow:
+    0 0 0 2px var(--yap-s2),
+    0 0 0 4px var(--yap-focus-ring);
 }
 
-/* Hands-free's wait before sending: a segmented control, one tap. */
+/* Hands-free's wait before sending: Yap's segmented control
+   (Segmented.svelte), one tap. */
 .wait {
   margin: 0;
-  padding: 2px 0 12px;
+  padding: 0 0 14px;
   border: 0;
   min-width: 0;
 }
 .wait legend {
-  padding: 0 0 6px;
+  padding: 0 0 8px;
 }
 .seg {
   display: flex;
   padding: 3px;
   gap: 3px;
   border-radius: var(--yap-r-lg);
-  background: var(--yap-s3);
+  background: var(--yap-raised-soft);
   border: 1px solid var(--yap-border-subtle);
 }
 .seg label {
   position: relative;
   flex: 1 1 0;
   min-width: 0;
-  min-height: 48px;
+  min-height: 3rem;
   display: flex;
   cursor: pointer;
 }
@@ -627,44 +1144,92 @@ body[data-phase='listening'] .phase {
   align-items: center;
   justify-content: center;
   border-radius: var(--yap-r);
-  font-weight: 600;
-  font-size: 15.5px;
+  font-weight: 560;
+  font-size: 0.96875rem;
   line-height: 1.2;
-  color: var(--yap-fg-80);
-  transition: background var(--yap-dur), color var(--yap-dur);
+  color: var(--yap-muted);
+  transition:
+    background var(--yap-dur),
+    color var(--yap-dur);
 }
 .seg small {
   font-weight: 500;
-  font-size: 13px;
+  font-size: 0.8125rem;
   color: var(--yap-muted);
 }
 .seg input:checked + span {
   background: var(--yap-s2);
   color: var(--yap-fg);
-  box-shadow: var(--yap-shadow-sm);
+  box-shadow:
+    var(--yap-shadow-sm),
+    0 0 0 1px var(--yap-border-subtle);
 }
 .seg input:checked + span small {
   color: var(--yap-link);
 }
+.seg input:focus-visible {
+  box-shadow: none;
+}
 .seg input:focus-visible + span {
-  outline: 2px solid var(--yap-focus-ring);
-  outline-offset: 1px;
+  box-shadow:
+    0 0 0 2px var(--yap-raised-soft),
+    0 0 0 4px var(--yap-focus-ring);
 }
 
-/* Sound details: a disclosure at the bottom. */
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px 0 14px;
+  border-top: 1px solid var(--yap-rule);
+}
+/* Yap's select (Select.svelte): a card-coloured box with a hairline and its
+   own chevron. 16 px or more, so a phone doesn't zoom in on it. */
+select {
+  appearance: none;
+  -webkit-appearance: none;
+  min-height: 3rem;
+  width: 100%;
+  padding: 0 40px 0 12px;
+  border-radius: var(--yap-r);
+  border: 1px solid var(--yap-border);
+  background-color: var(--yap-s2);
+  background-image:
+    linear-gradient(45deg, transparent 50%, var(--yap-muted) 50%),
+    linear-gradient(135deg, var(--yap-muted) 50%, transparent 50%);
+  background-position:
+    calc(100% - 20px) 50%,
+    calc(100% - 14px) 50%;
+  background-size: 6px 6px;
+  background-repeat: no-repeat;
+  box-shadow: var(--yap-shadow-sm);
+  font-size: max(16px, 1rem);
+  text-overflow: ellipsis;
+  cursor: pointer;
+}
+select:focus-visible {
+  box-shadow:
+    0 0 0 2px var(--yap-s2),
+    0 0 0 4px var(--yap-focus-ring);
+}
+
+/* Sound details: a disclosure at the foot (Chat's folded steps). */
 .sound {
   margin: 0 var(--gutter) 24px;
   color: var(--yap-muted);
-  font-size: 14.5px;
+  font-size: 0.90625rem;
 }
 .sound summary {
-  min-height: 48px;
+  min-height: 3rem;
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 10px;
+  padding: 0 6px;
+  border-radius: var(--yap-r);
   cursor: pointer;
   font-weight: 600;
   list-style: none;
+  touch-action: manipulation;
 }
 .sound summary::-webkit-details-marker {
   display: none;
@@ -673,6 +1238,7 @@ body[data-phase='listening'] .phase {
   content: '';
   width: 7px;
   height: 7px;
+  margin: 0 2px;
   border-right: 2px solid currentColor;
   border-bottom: 2px solid currentColor;
   transform: rotate(-45deg);
@@ -683,12 +1249,13 @@ body[data-phase='listening'] .phase {
 }
 .sound dl {
   margin: 0;
-  padding: 10px 16px;
+  padding: 12px 16px;
   background: var(--yap-s2);
-  border-radius: var(--yap-r-lg);
+  border: 1px solid var(--yap-border-subtle);
+  border-radius: var(--yap-r-xl);
   display: grid;
   grid-template-columns: minmax(7em, auto) 1fr;
-  gap: 6px 14px;
+  gap: 8px 14px;
 }
 .sound dt {
   color: var(--yap-muted);
@@ -699,41 +1266,33 @@ body[data-phase='listening'] .phase {
   min-width: 0;
   overflow-wrap: anywhere;
 }
-.field {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  padding: 10px 0 8px;
-  border-top: 1px solid var(--yap-border-subtle);
-}
-select {
-  min-height: 48px;
-  width: 100%;
-  padding: 0 12px;
-  border-radius: var(--yap-r);
-  border: 1px solid var(--yap-border);
-  background: var(--yap-s1);
-  font-size: 16px;
-}
 
-/* The model list: a sheet from the bottom. */
+/* --------------------------------------------------------- the models */
+
+/* A sheet from the bottom (thumb's reach), Yap's menu card: the title in
+   the display serif, a row per model, the chosen one washed amber. */
 .sheet {
+  --ring-gap: var(--yap-s2);
   width: 100%;
   max-width: 520px;
+  max-height: 85vh;
   margin: auto auto 0;
   padding: 20px var(--gutter) calc(16px + env(safe-area-inset-bottom));
   border: 0;
-  border-radius: var(--yap-r-xl) var(--yap-r-xl) 0 0;
+  border-radius: 20px 20px 0 0;
   background: var(--yap-s2);
   color: var(--yap-fg);
-  box-shadow: var(--yap-shadow-menu);
+  box-shadow: var(--yap-shadow-modal);
 }
 .sheet::backdrop {
   background: var(--yap-scrim);
 }
 .sheet h2 {
-  margin: 0 0 12px;
-  font-size: 19px;
+  margin: 0 4px 12px;
+  font-family: var(--yap-font-display);
+  font-size: 1.5rem;
+  font-weight: 550;
+  line-height: 1.2;
 }
 .models-list {
   list-style: none;
@@ -744,20 +1303,26 @@ select {
 }
 .model-item {
   width: 100%;
-  min-height: 56px;
+  min-height: 3.5rem;
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 12px;
   padding: 8px 12px;
   border: 0;
-  border-radius: var(--yap-r);
+  border-radius: var(--yap-r-lg);
   background: transparent;
   text-align: left;
   cursor: pointer;
+  touch-action: manipulation;
 }
-.model-item:hover {
+.model-item:active {
   background: var(--yap-s3);
+}
+@media (hover: hover) {
+  .model-item:hover {
+    background: var(--yap-s3);
+  }
 }
 .model-item[aria-current='true'] {
   background: var(--yap-primary-wash);
@@ -773,12 +1338,14 @@ select {
 }
 .mwhere {
   flex: 0 0 auto;
-  font-size: 13.5px;
+  font-size: 0.84375rem;
   color: var(--yap-muted);
 }
-.sheet .secondary-btn {
+.sheet .btn {
   width: 100%;
 }
+
+/* ------------------------------------------------------------ layouts */
 
 /* Wider screens (a tablet, the PC's browser): a column in the middle. */
 @media (min-width: 640px) {
@@ -792,6 +1359,68 @@ select {
   }
 }
 
+/* A phone on its side: the conversation on the left, Talk on the right
+   (in the thumb's reach), the options under them. */
+@media (orientation: landscape) and (max-height: 560px) {
+  :root {
+    --peek: 0px;
+  }
+  body {
+    align-items: stretch;
+  }
+  .top,
+  main {
+    max-width: none;
+  }
+  .stage {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(260px, 38%);
+    grid-template-rows: auto auto 1fr auto;
+    grid-template-areas:
+      'convo now'
+      'convo meter'
+      'convo talk'
+      'hint  secondary';
+    column-gap: 8px;
+  }
+  .convo-box {
+    grid-area: convo;
+    min-height: 0;
+  }
+  .now {
+    grid-area: now;
+    min-height: 0;
+    padding-top: 0;
+  }
+  .controls {
+    display: contents;
+  }
+  .meter {
+    grid-area: meter;
+    justify-self: center;
+    height: 28px;
+  }
+  .talk-btn {
+    grid-area: talk;
+    justify-self: center;
+    align-self: center;
+    --size: clamp(120px, 34svh, 168px);
+  }
+  .secondary {
+    grid-area: secondary;
+    justify-self: center;
+    padding-bottom: 10px;
+  }
+  .keep-open {
+    grid-area: hint;
+    align-self: center;
+    justify-self: center;
+    padding: 0 var(--gutter) 10px;
+  }
+}
+
+/* --------------------------------------------------------------- motion */
+
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,
@@ -802,7 +1431,14 @@ select {
   .dots i {
     opacity: 0.8;
   }
-  .talk-btn:active {
+  .speakbars i {
+    transform: scaleY(0.7);
+  }
+  .talk-btn:active,
+  .btn:active {
     transform: none;
+  }
+  .convo {
+    scroll-behavior: auto;
   }
 }

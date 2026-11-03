@@ -38,6 +38,7 @@ import {
   clock,
   toDb,
 } from './dsp.js';
+import { renderAnswer } from './markdown.js';
 
 const KIND_UP = 0x01;
 const KIND_DOWN = 0x02;
@@ -192,7 +193,8 @@ const el = {
   modelsList: $('models-list'),
 };
 
-const BARS = 28;
+// The Yap bar's waveform: thin bars, the newest on the right (link.css .meter).
+const BARS = 60;
 const levels = new Array(BARS).fill(0);
 for (let i = 0; i < BARS; i++) el.meter.appendChild(document.createElement('i'));
 const bars = [...el.meter.children];
@@ -530,17 +532,6 @@ function currentTurn(create) {
   return t;
 }
 
-/** Answers are said, not read: markdown's marks and citation numbers go. */
-function plain(text) {
-  return text
-    .replace(/\[([^\]]+)\]\((?:[^)]+)\)/g, '$1')
-    .replace(/[ \t]*\[\d+\]/g, '')
-    .replace(/(\*\*|__|`)/g, '')
-    .replace(/^#{1,6}\s+/gm, '')
-    .replace(/[ \t]+\n/g, '\n')
-    .trim();
-}
-
 function renderConvo() {
   const frag = document.createDocumentFragment();
   for (const t of S.turns) {
@@ -553,10 +544,13 @@ function renderConvo() {
     q.textContent = t.q || '…';
     li.appendChild(q);
     if (t.a || t.cancelled) {
-      const a = document.createElement('p');
-      a.className = 'a' + (t.final ? ' final' : '');
+      // The answer as Chat shows it (markdown.js: built as nodes, never HTML).
+      const a = document.createElement('div');
+      const cancelled = t.cancelled && !t.a;
+      a.className = 'a' + (t.final ? ' final' : ' streaming') + (cancelled ? ' cancelled' : '');
       a.dataset.testid = 'answer';
-      a.textContent = t.cancelled && !t.a ? 'Cancelled' : plain(t.a);
+      if (cancelled) a.textContent = 'Cancelled';
+      else a.appendChild(renderAnswer(t.a.trim()));
       li.appendChild(a);
     }
     frag.appendChild(li);
@@ -564,6 +558,23 @@ function renderConvo() {
   el.convo.replaceChildren(frag);
   el.empty.hidden = S.turns.length > 0;
   el.convo.scrollTop = el.convo.scrollHeight;
+}
+
+// The conversation takes the room Talk leaves it (link.css .stage), so it
+// shrinks when an error or a step shows under it: the latest words stay in
+// view, unless the person has scrolled up to read.
+let convoPinned = true;
+el.convo.addEventListener(
+  'scroll',
+  () => {
+    convoPinned = el.convo.scrollHeight - el.convo.scrollTop - el.convo.clientHeight < 24;
+  },
+  { passive: true },
+);
+if (typeof ResizeObserver === 'function') {
+  new ResizeObserver(() => {
+    if (convoPinned) el.convo.scrollTop = el.convo.scrollHeight;
+  }).observe(el.convo);
 }
 
 // --------------------------------------------------------------- the mic
@@ -1059,12 +1070,12 @@ function meter(level) {
   const v = Math.max(0, Math.min(1, (toDb(level) + 60) / 50));
   levels.push(v);
   levels.shift();
-  for (let i = 0; i < BARS; i++) bars[i].style.transform = `scaleY(${(0.08 + levels[i] * 0.92).toFixed(3)})`;
+  for (let i = 0; i < BARS; i++) bars[i].style.transform = `scaleY(${(0.07 + levels[i] * 0.93).toFixed(3)})`;
 }
 
 function resetMeter() {
   levels.fill(0);
-  for (const b of bars) b.style.transform = 'scaleY(0.08)';
+  for (const b of bars) b.style.transform = 'scaleY(0.07)';
 }
 
 // --------------------------------------------------------- talking: actions
