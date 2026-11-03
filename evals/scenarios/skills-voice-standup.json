@@ -1,0 +1,44 @@
+{
+  "name": "skills-voice-standup",
+  "description": "/standup said to the Voice Assistant (\"Write my stand-up update.\", assistant/skill.rs): Chat's own run, whole in the chat — yesterday (the export fix), today (the release notes), blockers (Lena's design review), in the first person, cited — not the one or two sentences of an ordinary spoken answer; the voice says as much of it as \"How much to read aloud\" says.",
+  "tags": ["skills", "meetings", "voice"],
+  "voice": true,
+  "apps": "standard",
+  "seed": {
+    "notes": [
+      {
+        "title": "Team sync",
+        "folder": "Meetings",
+        "meeting": true,
+        "days_ago": 0.8,
+        "participants": ["Tom Reid"],
+        "enhanced": "## Recap\nThe export fix is done; the release notes are next.\n\n## Action plan\n### You\n- [ ] Send the release notes to Ana (due: Friday)\n### Tom Reid\n- [ ] Order the new laptops",
+        "transcript": [
+          { "source": "you", "text": "I finished the export fix this morning, it's merged.", "ts": 0 },
+          { "source": "them", "text": "Nice. I'm ordering the new laptops this week.", "ts": 12 },
+          { "source": "you", "text": "Next I'll write the release notes and send them to Ana by Friday.", "ts": 25 },
+          { "source": "you", "text": "I'm stuck on the settings page though, I'm waiting on Lena's design review.", "ts": 40 }
+        ]
+      }
+    ]
+  },
+  "turns": [
+    {
+      "user": "Write my stand-up update.",
+      "skill": "standup",
+      "expect": {
+        "answer_contains_any": ["export"],
+        "answer_not_contains": ["Yap couldn't tie"],
+        "answer_matches": "(?is)release notes",
+        "min_sources": 1,
+        "tools_not_called": ["create_note", "update_note", "edit_note", "open_app"]
+      },
+      "soft": {
+        "answer_contains_any": ["design review", "Lena"],
+        "answer_not_contains": ["laptops"],
+        "answer_matches": "(?is)yesterday.*today.*blocker",
+        "max_words": 150
+      }
+    }
+  ]
+}
