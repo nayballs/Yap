@@ -7259,7 +7259,7 @@ name = "yap"
 version = "0.1.1"
 dependencies = [
  "arboard",
- "base64 0.22.1",
+ "base64 0.23.1",
  "chrono",
  "chrono-tz",
  "cpal",
