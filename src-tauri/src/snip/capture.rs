@@ -406,7 +406,7 @@ pub(crate) mod win {
         static ALLOWED: OnceLock<bool> = OnceLock::new();
         *ALLOWED.get_or_init(|| {
             let status = GraphicsCaptureAccess::RequestAccessAsync(GraphicsCaptureAccessKind::Borderless)
-                .and_then(|op| op.get());
+                .and_then(|op| op.join());
             match status {
                 Ok(s) => {
                     tracing::info!(status = s.0, "snip: borderless capture request answered");

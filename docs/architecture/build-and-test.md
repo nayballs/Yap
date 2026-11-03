@@ -133,9 +133,18 @@ failures.)
 - **Crates, npm packages and GitHub Actions**: Dependabot (`.github/dependabot.yml`), a PR
   a week per ecosystem with the minor and patch bumps grouped (TipTap's packages and the
   fonts each in one), tested by CI and the E2E workflow like any PR. Left alone on purpose:
-  `tauri-plugin-single-instance` / `tauri-plugin-deep-link` past 2.4.x (2.5 needs tauri
-  2.12), `ort` (pinned to the ONNX Runtime transcribe-rs links), `transcribe-rs` (vendored),
-  and `windows` / `webview2-com` past their minor (they move with tauri / wry).
+  `tauri-plugin-single-instance` / `tauri-plugin-deep-link` past 2.4.x (2.5 needed tauri
+  2.12, which Yap is on since 3 Nov 2026; 2.5.5 lets the single-instance lock go in
+  `cleanup_before_exit`, which the updater's exit hook calls, so that move waits for a
+  check on an installed nightly), `ort` (pinned to the ONNX Runtime transcribe-rs links),
+  `transcribe-rs` (vendored), and `windows` / `windows-core` / `webview2-com` past their
+  minor (they move with tauri / wry: one copy of each, the versions wry builds on).
+- **The Tauri pair**: the `tauri` crate and `@tauri-apps/api` / `@tauri-apps/cli` share a
+  major.minor (2.12 since 3 Nov 2026), as do each `tauri-plugin-*` crate and its
+  `@tauri-apps/plugin-*` package (dialog: 2.8). The CLI refuses a `tauri build` whose
+  pair differs ("Found version mismatched Tauri packages"); the e2e build is a plain
+  `cargo build` and never runs that check, so Dependabot's separate cargo and npm PRs
+  can each look green while a nightly would fail: land a minor of the pair together.
 - **The downloads Yap pins in its own code** (GitHub release assets: the speaker engine,
   sherpa-onnx, eSpeak NG, the on-device engine's floor): `scripts/check-pins.mjs` reads
   every `github.com/<owner>/<repo>/releases/download/<version>/` URL in `src-tauri/src`,

@@ -58,11 +58,11 @@ fn decode_other(bytes: &[u8]) -> Result<(Vec<u8>, u32, u32), String> {
     let stream = InMemoryRandomAccessStream::new().map_err(err)?;
     let writer = DataWriter::CreateDataWriter(&stream).map_err(err)?;
     writer.WriteBytes(bytes).map_err(err)?;
-    writer.StoreAsync().and_then(|op| op.get()).map_err(err)?;
-    writer.FlushAsync().and_then(|op| op.get()).map_err(err)?;
+    writer.StoreAsync().and_then(|op| op.join()).map_err(err)?;
+    writer.FlushAsync().and_then(|op| op.join()).map_err(err)?;
     let _ = writer.DetachStream();
     stream.Seek(0).map_err(err)?;
-    let decoder = BitmapDecoder::CreateAsync(&stream).and_then(|op| op.get()).map_err(err)?;
+    let decoder = BitmapDecoder::CreateAsync(&stream).and_then(|op| op.join()).map_err(err)?;
     let (w, h) = (decoder.OrientedPixelWidth().map_err(err)?, decoder.OrientedPixelHeight().map_err(err)?);
     if w == 0 || h == 0 || w as u64 * h as u64 > MAX_PIXELS {
         return Err("That picture is too big".into());
@@ -75,7 +75,7 @@ fn decode_other(bytes: &[u8]) -> Result<(Vec<u8>, u32, u32), String> {
             ExifOrientationMode::RespectExifOrientation,
             ColorManagementMode::ColorManageToSRgb,
         )
-        .and_then(|op| op.get())
+        .and_then(|op| op.join())
         .and_then(|p| p.DetachPixelData())
         .map_err(err)?;
     let rgba = pixels.to_vec();
