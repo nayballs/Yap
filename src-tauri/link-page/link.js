@@ -32,8 +32,10 @@
 // 1.5 s or 2.5 s — of quiet), the mic resampled to 16 kHz Int16 in an
 // AudioWorklet (mic-worklet.js, dsp.js), the spoken answer as one stream
 // (resampled here frame after frame, played from a jitter buffer in
-// player-worklet.js), "Clearer sound in a headset" (on by default: the mic
-// closed while Yap talks), opening the mic a timed step at a time (never a
+// player-worklet.js) — or, with "Play the voice through the media player",
+// cut at its pauses into WAV files the browser's media player plays (a far
+// bigger buffer than Web Audio's) —, "Clearer sound in a headset" (on by
+// default: the mic closed while Yap talks), opening the mic a timed step at a time (never a
 // silent "Wait…"), Stop and barge-in, the conversation, the step Yap is on
 // and its time, the model chip and Chat's picker, Sound details, the
 // on-screen keyboard (the composer rides above it), reconnects with
@@ -57,6 +59,8 @@ import {
   WAITS,
   EnergyVad,
   Resampler,
+  Segmenter,
+  wav,
   fromInt16,
   elapsed,
   clock,
@@ -93,6 +97,7 @@ const KEY = {
   handsFree: 'yap.link.handsFree',
   wait: 'yap.link.wait',
   clearer: 'yap.link.clearer',
+  media: 'yap.link.media',
   // The conversation, for this tab only (sessionStorage): a reload keeps it.
   thread: 'yap.link.thread',
   // The conversation this phone is in on the PC: its id, or "new".
@@ -280,6 +285,8 @@ const S = {
   // the person turned it off: with the mic open a headset stays in its call
   // mode, which crackles.
   clearer: load(KEY.clearer) !== false,
+  // "Play the voice through the media player": off unless chosen.
+  media: load(KEY.media) === true,
   tick: 0,
   stopTimer: 0,
   gen: 0,
@@ -350,7 +357,9 @@ const el = {
   handsFreeHint: $('handsfree-hint'),
   wait: $('wait'),
   clearer: $('clearer'),
+  media: $('media'),
   sound: $('sound'),
+  soundVia: $('sound-via'),
   soundRate: $('sound-rate'),
   soundLatency: $('sound-latency'),
   soundStart: $('sound-start'),
@@ -2033,6 +2042,7 @@ const idleStats = () => ({
 const player = {
   rate: DOWN_RATE, // speak_start's
   id: 0, // this answer's, on every message to and from the worklet
+  via: null, // how this answer plays: 'worklet', or 'media' (mediaVoice)
   node: null,
   loading: null,
   waiting: [], // messages for the worklet before it's loaded
@@ -2130,24 +2140,31 @@ const player = {
 
   begin(rate) {
     this.stopAll();
-    const ctx = audioContext();
-    if (ctx.state !== 'running') ctx.resume().catch(() => {});
     this.rate = rate;
     this.id++;
     this.accepting = true;
     this.ending = false;
     this.queued = 0;
     this.level = 0;
-    this.rs = new Resampler(rate, ctx.sampleRate);
+    // Through the media player (the setting), or the worklet's one stream.
+    this.via = S.media ? 'media' : 'worklet';
     this.stats = { ...idleStats(), state: 'buffering' };
-    this.last = { startDelayMs: null, startBufferedMs: null, underruns: 0, played: 0, micOpen: false, micClosed: false };
+    this.last = { via: this.via, startDelayMs: null, startBufferedMs: null, underruns: 0, played: 0, micOpen: false, micClosed: false };
+    if (this.via === 'media') {
+      mediaVoice.begin(rate, this.id);
+      return;
+    }
+    const ctx = audioContext();
+    if (ctx.state !== 'running') ctx.resume().catch(() => {});
+    this.rs = new Resampler(rate, ctx.sampleRate);
     this.post({ cmd: 'begin', id: this.id });
     if (this.broken) this.fail();
   },
   push(samples) {
     if (!this.accepting || this.ending || !samples.length) return;
     this.queued += samples.length / this.rate;
-    this.send(this.rs.process(fromInt16(samples)));
+    if (this.via === 'media') mediaVoice.push(samples);
+    else this.send(this.rs.process(fromInt16(samples)));
   },
   send(out) {
     if (!out.length) return;
@@ -2158,6 +2175,10 @@ const player = {
   end() {
     if (!this.accepting || this.ending) return;
     this.ending = true;
+    if (this.via === 'media') {
+      mediaVoice.end();
+      return;
+    }
     this.send(this.rs.flush());
     this.post({ cmd: 'end', id: this.id });
     if (this.broken) this.finished();
@@ -2198,9 +2219,155 @@ const player = {
   },
   /** Silent at once (a 5 ms fade in the worklet); what's left is dropped. */
   stopAll() {
-    if (this.accepting) this.post({ cmd: 'stop', id: this.id });
+    if (this.accepting) {
+      if (this.via === 'media') mediaVoice.stop();
+      else this.post({ cmd: 'stop', id: this.id });
+    }
     this.accepting = false;
     this.ending = false;
+  },
+};
+
+/**
+ * Yap's voice through the browser's media player ("Play the voice through
+ * the media player", in the settings): the answer cut at its pauses (dsp.js
+ * `Segmenter`), each piece a WAV file an `<audio>` element plays whole, the
+ * next one loading while one plays. The browser's media output keeps far
+ * more sound in hand than Web Audio's (Firefox for Android gives Web Audio
+ * its smallest buffer, whatever a page asks: a busy moment on the phone can
+ * crackle there), so it suits a voice that crackles; the cost, a moment's
+ * extra pause where it was cut, and no fade on Stop. At Yap's own 24 kHz:
+ * the browser resamples it. Its numbers go in `player.stats` / `player.last`
+ * as the worklet's do, for Sound details.
+ */
+const mediaVoice = {
+  id: 0, // `player.id` of the answer it's playing
+  seg: null,
+  queue: [], // pieces waiting: { audio, url, secs, peak }
+  now: null, // the piece playing
+  done: 0, // seconds of pieces played to their end
+  began: 0, // when the answer's first frame came
+  ending: false,
+
+  begin(rate, id) {
+    this.stop();
+    this.id = id;
+    this.seg = new Segmenter(rate);
+    this.done = 0;
+    this.began = performance.now();
+    this.ending = false;
+  },
+  push(samples) {
+    if (!this.seg) return;
+    for (const piece of this.seg.push(samples)) this.add(piece);
+  },
+  /** No more frames: the rest is the last piece; finished once it's played. */
+  end() {
+    const rest = this.seg && this.seg.flush();
+    if (rest) this.add(rest);
+    this.ending = true;
+    this.next();
+  },
+  add(piece) {
+    const url = URL.createObjectURL(new Blob([wav(piece, player.rate)], { type: 'audio/wav' }));
+    const audio = new Audio();
+    audio.preload = 'auto';
+    audio.src = url;
+    let peak = 0;
+    for (let i = 0; i < piece.length; i++) peak = Math.max(peak, Math.abs(piece[i]));
+    this.queue.push({ audio, url, secs: piece.length / player.rate, peak: peak / 0x8000 });
+    if (!this.now) this.next();
+  },
+  /** The next piece, when none is playing: or, with none waiting, the end (or a wait for one). */
+  next() {
+    if (this.now || player.id !== this.id || !player.accepting) return;
+    const item = this.queue.shift();
+    if (!item) {
+      if (this.ending) player.finished();
+      else if (player.stats.state === 'playing') {
+        // Ran dry: the next piece hasn't come yet.
+        player.stats.state = 'starved';
+        player.stats.underruns++;
+        this.note();
+      }
+      return;
+    }
+    this.now = item;
+    const id = this.id;
+    const mine = () => id === this.id && this.now === item;
+    item.audio.ontimeupdate = () => {
+      if (mine()) this.note();
+    };
+    item.audio.onended = () => {
+      if (!mine()) return;
+      this.done += item.secs;
+      this.drop(item);
+      this.now = null;
+      this.note();
+      this.next();
+    };
+    item.audio.onerror = () => {
+      if (mine()) this.failed();
+    };
+    const first = player.stats.startDelayMs == null;
+    item.audio.play().then(
+      () => {
+        if (!mine()) return;
+        if (first) {
+          player.stats.startDelayMs = Math.round(performance.now() - this.began);
+          player.stats.startBufferedMs = Math.round(item.secs * 1000);
+        }
+        player.stats.state = 'playing';
+        player.level = item.peak;
+        this.note();
+      },
+      () => {
+        if (mine()) this.failed();
+      },
+    );
+  },
+  /** The browser wouldn't play a piece: said once, and the answer ends. */
+  failed() {
+    S.note = "Couldn't play Yap's voice through the media player on this phone. Turn it off in ⋯ and ask again.";
+    this.stop();
+    player.finished();
+  },
+  /** Its numbers for Sound details (and the snapshot): as the worklet's report. */
+  note() {
+    const playing = this.now ? Math.min(this.now.audio.currentTime || 0, this.now.secs) : 0;
+    const s = player.stats;
+    s.played = this.done + playing;
+    s.buffered = this.queue.reduce((n, q) => n + q.secs, 0) + (this.now ? this.now.secs - playing : 0);
+    const L = player.last;
+    if (L) {
+      L.startDelayMs = s.startDelayMs;
+      L.startBufferedMs = s.startBufferedMs;
+      L.underruns = s.underruns;
+      L.played = s.played;
+    }
+    player.noteMic();
+    renderSound();
+  },
+  drop(item) {
+    item.audio.ontimeupdate = item.audio.onended = item.audio.onerror = null;
+    try {
+      item.audio.pause();
+      item.audio.removeAttribute('src');
+      item.audio.load();
+    } catch {
+      /* gone */
+    }
+    URL.revokeObjectURL(item.url);
+  },
+  /** Silent now; what's waiting is dropped. */
+  stop() {
+    if (this.now) this.drop(this.now);
+    for (const q of this.queue) this.drop(q);
+    this.now = null;
+    this.queue = [];
+    this.seg = null;
+    this.ending = false;
+    this.id = -1;
   },
 };
 
@@ -2405,6 +2572,7 @@ function render() {
   el.wait.hidden = !S.handsFree;
   for (const r of el.wait.querySelectorAll('input[name=wait]')) r.checked = r.value === S.wait;
   el.clearer.checked = S.clearer;
+  el.media.checked = S.media;
   renderSound();
 }
 
@@ -2420,6 +2588,8 @@ function renderSound() {
   if (ctx && typeof ctx.baseLatency === 'number') lat.push(`Base ${msOf(ctx.baseLatency)}`);
   if (ctx && typeof ctx.outputLatency === 'number' && ctx.outputLatency > 0) lat.push(`Output ${msOf(ctx.outputLatency)}`);
   el.soundLatency.textContent = !ctx ? '—' : lat.length ? lat.join(' · ') : 'Not given by this browser';
+  const via = player.last ? player.last.via : S.media ? 'media' : 'worklet';
+  el.soundVia.textContent = via === 'media' ? 'The media player (more sound kept ready)' : 'Web Audio (the shortest delay)';
 
   const L = player.last;
   if (!L) {
@@ -2832,6 +3002,12 @@ el.clearer.addEventListener('change', () => {
   if (S.clearer && S.local === 'idle' && player.active) closeMic();
   render();
 });
+// The next answer plays the new way (one playing carries on as it began).
+el.media.addEventListener('change', () => {
+  S.media = el.media.checked;
+  save(KEY.media, S.media);
+  render();
+});
 el.sound.addEventListener('toggle', renderSound);
 el.mic.addEventListener('change', () => {
   const opt = el.mic.selectedOptions[0];
@@ -3050,7 +3226,11 @@ window.__yapLink = {
         level: player.level,
         loaded: !!player.node,
         last: player.last ? { ...player.last } : null,
+        via: player.via || null,
+        // The media player's pieces: waiting, and one playing.
+        pieces: mediaVoice.queue.length + (mediaVoice.now ? 1 : 0),
       },
+      media: S.media,
     };
   },
 };

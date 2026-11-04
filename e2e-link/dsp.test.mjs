@@ -1,7 +1,8 @@
 // Yap Link's sound maths (src-tauri/link-page/dsp.js) in Node: the resampler
 // both worklets' sound goes through (the mic down to 16 kHz, Yap's voice up
 // from 24 kHz), the answer's ring and jitter buffer, Int16, the hands-free
-// voice detector and the times.
+// voice detector, the voice cut at its pauses for the media player (and its
+// WAV files) and the times.
 // Run: `node --test e2e-link/dsp.test.mjs` (part of `npm run test:link`).
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
@@ -19,6 +20,8 @@ import {
   clock,
   FRAME_SAMPLES,
   DOWN_RATE,
+  Segmenter,
+  wav,
 } from '../src-tauri/link-page/dsp.js';
 
 /** `seconds` of a sine at `hz`, sampled at `rate`. */
@@ -465,4 +468,85 @@ test("the times as Chat's activity line and the Talk button say them", () => {
   assert.equal(elapsed(3720), '1h 2m');
   assert.equal(clock(7.9), '0:07');
   assert.equal(clock(120), '2:00');
+});
+
+/** Int16 voice: `ms` of a 220 Hz tone at `rate`, or of silence. */
+function tone(rate, ms, amp = 6000) {
+  const n = Math.round((rate * ms) / 1000);
+  const out = new Int16Array(n);
+  for (let i = 0; i < n; i++) out[i] = Math.round(amp * Math.sin((2 * Math.PI * 220 * i) / rate));
+  return out;
+}
+const hush = (rate, ms) => new Int16Array(Math.round((rate * ms) / 1000));
+const join = (...parts) => {
+  const out = new Int16Array(parts.reduce((n, p) => n + p.length, 0));
+  let at = 0;
+  for (const p of parts) {
+    out.set(p, at);
+    at += p.length;
+  }
+  return out;
+};
+
+test('the media player’s pieces: cut in the pauses, nothing lost, however the voice arrives', () => {
+  const rate = DOWN_RATE;
+  // Two sentences with a pause between, a short pause inside the first.
+  const voice = join(tone(rate, 900), hush(rate, 40), tone(rate, 900), hush(rate, 200), tone(rate, 1200));
+  for (const size of [12000, 480, 7]) {
+    const seg = new Segmenter(rate);
+    const pieces = [];
+    for (let at = 0; at < voice.length; at += size) pieces.push(...seg.push(voice.subarray(at, at + size)));
+    const last = seg.flush();
+    if (last) pieces.push(last);
+    // Two pieces: the 40 ms pause is too short to cut at, the 200 ms one is cut in.
+    assert.equal(pieces.length, 2, `frames of ${size}`);
+    const cutAt = pieces[0].length;
+    const pauseFrom = Math.round((rate * 1840) / 1000);
+    assert.ok(cutAt > pauseFrom && cutAt < pauseFrom + Math.round(rate * 0.2), `the cut in the pause (${cutAt})`);
+    // Each side of the cut is quiet: no word is split.
+    assert.equal(pieces[0].at(-1), 0);
+    assert.equal(pieces[1][0], 0);
+    assert.deepEqual(join(...pieces), voice, 'end to end, the voice as it came');
+  }
+});
+
+test('the media player’s pieces: the first comes soon, a long one without a pause is cut at its quietest', () => {
+  const rate = DOWN_RATE;
+  // A pause 700 ms in: the first piece may end there (600 ms of voice is enough)…
+  const seg = new Segmenter(rate);
+  const both = join(tone(rate, 700), hush(rate, 120), tone(rate, 700), hush(rate, 120));
+  const first = seg.push(both);
+  assert.equal(first.length, 1);
+  assert.ok(first[0].length < rate);
+  // …but a later piece needs 1.5 s before a pause ends it: the rest is one.
+  assert.equal(seg.flush().length, both.length - first[0].length);
+
+  // 7 s with no pause, a dip at 5.5 s: cut there, at 6 s at the latest.
+  const long = tone(rate, 7000);
+  const dip = Math.round(rate * 5.5);
+  for (let i = dip; i < dip + rate / 50; i++) long[i] = Math.round(long[i] / 50);
+  const seg2 = new Segmenter(rate);
+  const pieces = seg2.push(long);
+  assert.equal(pieces.length, 1);
+  assert.ok(Math.abs(pieces[0].length - (dip + rate / 100)) < rate / 100, `cut in the dip (${pieces[0].length})`);
+  assert.deepEqual(join(...pieces, seg2.flush()), long);
+  assert.equal(new Segmenter(rate).flush(), null);
+});
+
+test('a piece as a WAV file: the header a browser reads, then the samples', () => {
+  const samples = Int16Array.from([0, 1000, -1000, 32767, -32768]);
+  const v = new DataView(wav(samples, 24000));
+  const tag = (at) => String.fromCharCode(...[0, 1, 2, 3].map((i) => v.getUint8(at + i)));
+  assert.equal(tag(0), 'RIFF');
+  assert.equal(v.getUint32(4, true), 36 + 10);
+  assert.equal(tag(8), 'WAVE');
+  assert.equal(tag(12), 'fmt ');
+  assert.equal(v.getUint16(20, true), 1);
+  assert.equal(v.getUint16(22, true), 1);
+  assert.equal(v.getUint32(24, true), 24000);
+  assert.equal(v.getUint32(28, true), 48000);
+  assert.equal(v.getUint16(34, true), 16);
+  assert.equal(tag(36), 'data');
+  assert.equal(v.getUint32(40, true), 10);
+  assert.deepEqual([0, 1, 2, 3, 4].map((i) => v.getInt16(44 + i * 2, true)), [0, 1000, -1000, 32767, -32768]);
 });
