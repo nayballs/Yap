@@ -1,5 +1,5 @@
-// Yap's model catalog — ported from Handy's registry (src-tauri model.rs).
-// `id` values MUST match the Rust registry in src-tauri/src/dictation/stt.rs.
+// Yap's model catalog — ported from Handy's registry (its src-tauri model.rs).
+// `id` values MUST match the Rust registry in desktop/src-tauri/src/dictation/stt.rs.
 // Whisper models run on whisper.cpp (Vulkan GPU); the rest run on ONNX Runtime
 // (DirectML) via transcribe-rs. Shared by Onboarding.svelte and ModelManager.svelte.
 //

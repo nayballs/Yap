@@ -1,4 +1,4 @@
-//! Test mode for the end-to-end UI suite (`e2e/`, see docs/e2e-tests.md).
+//! Test mode for the end-to-end UI suite (`desktop/e2e/`, see docs/e2e-tests.md).
 //!
 //! The suite runs a **debug** build with `YAP_E2E=1` right next to whatever
 //! Yap the developer has open, and drives its webviews over CDP. Test mode
@@ -34,7 +34,7 @@
 //! - it reads no installed apps' icons (Settings' call apps, the bar's call
 //!   card): [`app_icons_dir`] (`YAP_E2E_APP_ICONS`) names stand-ins instead.
 //!
-//! The real-app robot tests (`e2e-real/`) run test mode with
+//! The real-app robot tests (`desktop/e2e-real/`) run test mode with
 //! `YAP_REALTEST=1` on top: **robot mode** (`realtest.rs`), where the paste,
 //! the submit key and the reads of the target field are real again — but
 //! only into the windows the test opened itself.

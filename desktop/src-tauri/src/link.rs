@@ -11,7 +11,7 @@
 //! typed too (`ask`, answered in the same conversation and not spoken; ▶
 //! under an answer has it said, `read_aloud`, only an answer that phone was
 //! given: [`Given`]), and the model chip opens Chat's own picker (its rows
-//! built by `src/lib/core/chatPicker.js`, served beside the page;
+//! built by `desktop/src/lib/core/chatPicker.js`, served beside the page;
 //! `models.rs` `picker` sends what the desktop picker reads). Never
 //! dictation: the phone types nothing into the PC's apps.
 //!

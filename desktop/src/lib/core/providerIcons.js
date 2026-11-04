@@ -1,4 +1,4 @@
-// Brand/provider logos, ported from OpenWhispr (MIT — src/assets/icons/providers).
+// Brand/provider logos, ported from OpenWhispr (MIT — its src/assets/icons/providers).
 // Imported as URLs by Vite and rendered via <img src>. Monochrome logos (drawn in
 // black) render as-is on the light theme; under [data-yap-theme='dark'] (the
 // dark theme, lib/core/appearance.js) they invert to white — OpenWhispr's

@@ -1386,7 +1386,7 @@ The language-model side: the OpenAI-compatible client and its prompts, the on-de
   {provider}` (Settings' Check now), `llm_models {provider, scope?, baseUrl?,
   force?}`. Logs: provider + counts. Test mode never contacts a provider:
   debug-only `YAP_MODELS_STANDIN` (`<standin>/<host><path>?<query>`,
-  `e2e/support/fake-llm.js`); none set = nothing fetched; a self-hosted
+  `desktop/e2e/support/fake-llm.js`); none set = nothing fetched; a self-hosted
   server only on 127.0.0.1. `#[ignore]`d `real_saved_lists`
   (`YAP_MODEL_LISTS=<dir>`) runs the parsers over saved real lists, never
   fetching.
@@ -1663,7 +1663,7 @@ Following its UI rules (`ChatGptSignIn.svelte` inside `ChatGptProvider.svelte`, 
 ### Tests
 
 - The flow's pure parts are tested in each module.
-- `e2e/chatgpt.spec.js` runs against a local fake of OpenAI's sign-in and Responses API (`e2e/support/fake-chatgpt.js`): PKCE, a signed ID token, rotating refresh tokens, a namespaced tool step whose reasoning must come back whole, the usage limit, revocation; and the one ChatGPT entry's states with the plan (the plan only, both with "Your plan | API key", in the picker and Settings; a key only and nothing connected in Settings). `e2e/chat-model-picker.spec.js` has the picker's nothing-connected and key-only states.
+- `desktop/e2e/chatgpt.spec.js` runs against a local fake of OpenAI's sign-in and Responses API (`desktop/e2e/support/fake-chatgpt.js`): PKCE, a signed ID token, rotating refresh tokens, a namespaced tool step whose reasoning must come back whole, the usage limit, revocation; and the one ChatGPT entry's states with the plan (the plan only, both with "Your plan | API key", in the picker and Settings; a key only and nothing connected in Settings). `desktop/e2e/chat-model-picker.spec.js` has the picker's nothing-connected and key-only states.
 - Debug builds point at the fake with `YAP_CHATGPT_ISSUER` and `YAP_CHATGPT_API`.
 - Evaluations run on the real plan with `chatgpt:<model slug>` once the maintainer has signed in.
 

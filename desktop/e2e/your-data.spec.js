@@ -1,5 +1,5 @@
 // Download your data and Reset app (Settings → Privacy & data → Your data;
-// src/lib/settings/YourData.svelte, src-tauri/src/privacy/export.rs and reset.rs):
+// desktop/src/lib/settings/YourData.svelte, desktop/src-tauri/src/privacy/export.rs and reset.rs):
 // - Download your data: one .zip, saved where the test says (Windows' Save
 //   dialog in real use, `e2e_save_path` here) — the history as CSV and JSON,
 //   each note and meeting as Markdown, chats, tasks, memory, the dictionary

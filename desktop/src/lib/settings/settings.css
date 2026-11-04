@@ -1,5 +1,5 @@
 /* Settings' shared page styles (Settings.svelte and its page components in
- * src/lib/settings/). Everything is under .settings-shell, so nothing here
+ * desktop/src/lib/settings/). Everything is under .settings-shell, so nothing here
  * reaches the rest of the window. The rows and headings themselves are the
  * ui/ primitives (Group, Row, Toggle, LinkRow…). */
 

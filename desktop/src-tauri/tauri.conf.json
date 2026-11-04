@@ -8,7 +8,7 @@
     "devUrl": "http://localhost:51437",
     "beforeDevCommand": "npm run dev",
     "beforeBuildCommand": "npm run build",
-    "additionalWatchFolders": ["../phone/web/page"]
+    "additionalWatchFolders": ["../../phone/web/page"]
   },
   "app": {
     "windows": [

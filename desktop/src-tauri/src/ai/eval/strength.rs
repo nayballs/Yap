@@ -583,7 +583,7 @@ mod tests {
 
     #[test]
     fn the_cases_parse_and_each_group_has_some() {
-        let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("../evals/cleanup/strength.json");
+        let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../evals/cleanup/strength.json");
         let b = load(&path).expect("strength.json");
         for g in GROUPS {
             assert!(b.cases.iter().filter(|c| c.group == *g).count() >= 5, "{g}");

@@ -1,5 +1,5 @@
-// Long chats sized to the model (src-tauri/src/chat/budget.rs, compact.rs;
-// src/lib/views/chat/ChatThread.svelte, Composer.svelte, SummaryDialog.svelte,
+// Long chats sized to the model (desktop/src-tauri/src/chat/budget.rs, compact.rs;
+// desktop/src/lib/views/chat/ChatThread.svelte, Composer.svelte, SummaryDialog.svelte,
 // ContextPanel.svelte), 2026-10-25:
 // - A long chat fills the stand-in model's small context (8K): after an
 //   answer, in the background, its older messages are summarised by the

@@ -16,7 +16,7 @@ it borrows is the on-device model's ([ai-models.md](./ai-models.md)).
 
 [Architecture index](./README.md) · [CLAUDE.md](../../CLAUDE.md)
 
-## Modules (`src-tauri/src/search.rs` + `search/`)
+## Modules (`desktop/src-tauri/src/search.rs` + `search/`)
 
 - **`search.rs`** — the root: `init(app)` (the background index),
   `on_config_saved(prev, cfg)` (the switch on: a pass soon; off: the model's
@@ -509,13 +509,13 @@ Details: [`docs/model-evals.md`](../model-evals.md#search-beyond-the-meetings-25
   one, asked again restores, deleted from the archive); an ignored test
   against the real model (`YAP_SEARCH_LLAMAFILE` + `YAP_SEARCH_MODEL`:
   dentist·teeth 0.49 against dentist·beta 0.12).
-- e2e (`e2e/meeting-search.spec.js`, a stand-in embedding server
-  `e2e/support/fake-embed.js` via the debug-only `YAP_E2E_EMBED_URL`, the
+- e2e (`desktop/e2e/meeting-search.spec.js`, a stand-in embedding server
+  `desktop/e2e/support/fake-embed.js` via the debug-only `YAP_E2E_EMBED_URL`, the
   downloads from `startFakeLocalModels`): Settings' download and index;
   the Meetings view's moments by meaning, each opening at its line; Ask
   across meetings' pills, sources, stripped citation, the prompt's passages,
   the scope kept for a follow-up; no model → the passages; Rebuild, Delete,
-  and the network receipts. `e2e/library-search.spec.js` (the same
+  and the network receipts. `desktop/e2e/library-search.spec.js` (the same
   stand-ins): the Notes view's search by words (every folder, marked,
   opening the transcript line, My thoughts' words selected, the summary's
   marked; all the words or nothing) and by meaning; Chat's sidebar search by

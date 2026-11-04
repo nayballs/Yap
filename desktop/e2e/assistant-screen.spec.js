@@ -1,4 +1,4 @@
-// The Voice Assistant sees the window in front (src-tauri/src/chat/assistant/screen.rs):
+// The Voice Assistant sees the window in front (desktop/src-tauri/src/chat/assistant/screen.rs):
 // a spoken question about the screen takes a screenshot of the window that
 // was in front when the shortcut was pressed — by the question's words, or
 // Chat's model for a lone "this" — and the model answers from it.

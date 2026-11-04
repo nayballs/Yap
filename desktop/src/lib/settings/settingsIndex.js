@@ -8,7 +8,7 @@
 // on). `scope` opens one of Language Models' tabs first. `toggle` = a plain
 // on/off config field the result can switch in place.
 //
-// e2e/settings-search.spec.js opens every entry and checks its row is
+// desktop/e2e/settings-search.spec.js opens every entry and checks its row is
 // there, so the index can't drift from the pages.
 import { NAV_GROUPS, PAGE_LABELS } from './nav.js';
 

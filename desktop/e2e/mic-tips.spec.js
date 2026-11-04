@@ -1,5 +1,5 @@
 // Mic-quality tips and the laptop's lid (dictation/mic_tips.rs, dictation/lid.rs,
-// src/lib/notices/micTips.js):
+// desktop/src/lib/notices/micTips.js):
 // - after a dictation with a weak signal — quiet, clipped — "Yap didn't hear
 //   you clearly" with one concrete tip and one button; a clear one says
 //   nothing; rarely (not again the same day); "Show tips" off, none;

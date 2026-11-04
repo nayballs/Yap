@@ -1,4 +1,4 @@
-// The Dictionary view's files, pure (e2e/dictionary-list.spec.js tests it
+// The Dictionary view's files, pure (desktop/e2e/dictionary-list.spec.js tests it
 // without the app): reading an imported file, planning what it adds next
 // to the dictionary there is, and writing an export. Picking, reading and
 // saving the file is Rust's (dictionary/files.rs).

@@ -245,7 +245,7 @@
   on the open bar, off; switched on from the quick note's empty page —
   `quick_note_bar_button` — or Settings → General → Yap bar. An older Yap
   sharing the folder drops it on its next save: the button goes until it's
-  switched on again, nothing else), General → Appearance (`src/lib/core/appearance.js`, every window):
+  switched on again, nothing else), General → Appearance (`desktop/src/lib/core/appearance.js`, every window):
   theme ("system" — Windows' app mode, followed live — | "light" | "dark",
   system; `shell/theme.rs` gives the opaque windows' webviews its background) +
   reading_font ("default" Figtree | "sans" Geist | "serif" Literata |
@@ -926,7 +926,7 @@
   action, a chat's rename or delete, memory's edits, Clear history, a
   history entry's delete) returns it as its error (each store's `saved()`),
   and the page shows it with **Try again** (`saves_retry` → every unsaved
-  store written again; `src/lib/notices/saveErrors.js`, frontend.md); a save that
+  store written again; `desktop/src/lib/notices/saveErrors.js`, frontend.md); a save that
   failed by itself (history after a dictation, memory learning, calendar
   sync, usage and dictionary counts, call-prompt counts, word suggestions)
   is said by one alert through the notice policy (kind `saveFailed`,
@@ -1126,6 +1126,6 @@ index's caches (rebuilt from their sources), `call_speakers.json` (read
 only). Tests: `saving.rs` (no file, set aside, held open, Try again,
 quitting, the merge), `notes.rs` and `dictation/history.rs` (a file held
 open at load never written over, then kept with what was added),
-`versions::take_in`, and `e2e/unread-stores.spec.js` (`YAP_E2E_FAIL_READS`
+`versions::take_in`, and `desktop/e2e/unread-stores.spec.js` (`YAP_E2E_FAIL_READS`
 stages reads that fail from launch, `e2e_fail_reads { store, count }` stages
 or clears them — 0 also reads every such file again at once).

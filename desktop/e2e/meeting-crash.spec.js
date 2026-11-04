@@ -1,4 +1,4 @@
-// A crash mid-meeting (src-tauri/src/meetings/meeting_audio.rs): the meeting's audio
+// A crash mid-meeting (desktop/src-tauri/src/meetings/meeting_audio.rs): the meeting's audio
 // is on disk as it's recorded, so when the test instance is killed outright
 // mid-meeting — no exit hooks, the last chunks never transcribed — the next
 // start finds it:

@@ -1,5 +1,5 @@
 // A fresh install whose engine won't start isn't left dead
-// (src-tauri/src/ai/local_llm/engine.rs `first_start_failed`, engine/updater.rs
+// (desktop/src-tauri/src/ai/local_llm/engine.rs `first_start_failed`, engine/updater.rs
 // `rescue`; 2026-11-01): the floor's CUDA build (an NVIDIA card) never starts
 // and there's nothing to go back to, so it's refused and the floor's next
 // builds are downloaded, checked and tried out of sight in turn — Vulkan

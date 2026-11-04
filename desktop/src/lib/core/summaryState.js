@@ -1,7 +1,7 @@
 // A meeting summary's fields beside its words, as the windows keep them
-// (src-tauri/src/notes/note_edits.rs `SummaryState`): whether "Back to Yap's
+// (desktop/src-tauri/src/notes/note_edits.rs `SummaryState`): whether "Back to Yap's
 // summary" is offered, and Rust's answer laid onto the note shown. Pure
-// (unit-tested in e2e/notes-summary.spec.js); summaryTools.js acts on them.
+// (unit-tested in desktop/e2e/notes-summary.spec.js); summaryTools.js acts on them.
 
 /** A summary's words with every tick taken off (a tick isn't an edit). */
 const unticked = (md) => (md || '').replace(/^(\s*[-*+•][ \t]+\[)[xX](\])/gm, '$1 $2').trim();

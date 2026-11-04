@@ -9,7 +9,7 @@
 // - turned up 12 dB past full scale: "clipped".
 // The judgement is read back with `e2e_mic_tips` (the voice and the room in
 // dBFS, the clipped share); the tip itself is the e2e suite's
-// (e2e/mic-tips.spec.js). Played, never heard: nothing goes to the speakers.
+// (desktop/e2e/mic-tips.spec.js). Played, never heard: nothing goes to the speakers.
 import fs from 'node:fs';
 import path from 'node:path';
 import { test, expect } from './support/robot.js';

@@ -58,7 +58,7 @@ The long-term design (yap-private `docs/phone-remote-design.md`: a PWA on
 Yap's website, WebRTC, away from home through a relay) keeps this protocol's
 messages: moving there is a change of transport only.
 
-## Modules (`src-tauri/src/link.rs` + `link/`)
+## Modules (`desktop/src-tauri/src/link.rs` + `link/`)
 
 | File | What it does |
 |---|---|
@@ -137,7 +137,7 @@ marked), and at the foot the PC's name and **+ New chat**. When Chat's model
 can't read the pictures the card shows **Chat's own line**: "Qwen3.5 4B
 can't read images." with Use <the model that can>, **Send its text
 instead**, Choose another model…, and Send without the pictures. It follows Yap's tokens — `link.css` copies
-`src/app.css`'s `--yap-*` values, light and the warm dark, following the
+`desktop/src/app.css`'s `--yap-*` values, light and the warm dark, following the
 phone's `prefers-color-scheme`, and `phone/web/tests/tokens.spec.js` holds the copy
 to app.css — with Figtree and EB Garamond served from the PC
 (`phone/web/page/fonts/`, 36 KB; never Google Fonts). Where a phone needs its own
@@ -148,7 +148,7 @@ largest, 200 %: the round buttons stop at 56 px, the chip's name first),
 no hover-only affordances, reduced motion, and **on its side two columns**
 (#17's idea kept: the conversation on the left, the composer card on the
 right at the bottom, under the thumb). **Chat's picker** is the desktop's
-code itself: `src/lib/core/chatPicker.js` (and the pure modules it imports)
+code itself: `desktop/src/lib/core/chatPicker.js` (and the pure modules it imports)
 builds the rows on both, served to the phone as they are with the provider
 logos (`build.rs` `LINK_SHARED`, `phone/web/tests/shared.spec.js` keeps them pure).
 Details: the README's "The look" and "Chat's picker".
@@ -421,7 +421,7 @@ Settings filled with copies of it. Now:
   key, not even masked. (A paired phone is trusted with Chat as the person
   at the PC is: pairing takes a yes on the PC with the code both screens
   show, and Settings → Phone removes a phone at once.)
-- **Chat's picker code on the page** is the desktop's own (`src/lib/core/`,
+- **Chat's picker code on the page** is the desktop's own (`desktop/src/lib/core/`,
   pure modules: no Tauri, no Svelte, no imports beyond each other), served as
   static files from this PC with the logos; the page builds its rows as DOM
   nodes, never HTML.
@@ -613,7 +613,7 @@ on the PC while the answer comes stops the voice, as it stops the PC's.
   the words trimmed, or why there are none (`session.rs` `words_out`);
   `ask {speak}` read (only a true one), `"speak"` last in `can`, a hello
   with both `device` and `pair` (`wire.rs`).
-- **E2E** `e2e/link.spec.js`: a test run listens on a free port of 127.0.0.1
+- **E2E** `desktop/e2e/link.spec.js`: a test run listens on a free port of 127.0.0.1
   (`YAP_E2E_LINK_PORT=0`, the port in `link_status`); a headless Chromium
   (Playwright's, else Edge) with a fake microphone opens the real page over
   Yap's own HTTPS (`ignoreHTTPSErrors`, as a phone's Proceed): Settings → Phone

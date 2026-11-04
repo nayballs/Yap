@@ -369,7 +369,7 @@ The AI Chat surface (conversations, the tool-calling loop and its note tools) an
   place for tools gets none, so a GGUF dropped into `llm/` is right too
   (ai-models.md). A strict format that wants the person and the model to
   take turns is asked again so (`llm::taking_turns`, ai-models.md); tested
-  in `e2e/chat-format.spec.js`. **A tool
+  in `desktop/e2e/chat-format.spec.js`. **A tool
   call the provider rejects** (Groq's HTTP 400 `tool_use_failed`: gpt-oss
   left out `note_id`, or called a tool not in the request; llama.cpp's 500
   "Failed to parse input" for a call written as text — `llm::rejected_tool_call`)
@@ -381,7 +381,7 @@ The AI Chat surface (conversations, the tool-calling loop and its note tools) an
   next call to it. Unit-tested end to end against
   `notes.rs`' **in-memory test store** (under `cfg(test)` every test thread
   gets its own empty store and nothing reads or writes `notes.json`), and
-  in `e2e/chat-tools.spec.js` against the scripted fake AI. **Folders are
+  in `desktop/e2e/chat-tools.spec.js` against the scripted fake AI. **Folders are
   Yap's own rule** (a deliberate change from OpenWhispr, whose
   `create_note`/`update_note` made any folder the model named — a chat once
   left an empty "Camping" folder behind): `note_folder` files a note into a
@@ -1042,7 +1042,7 @@ The AI Chat surface (conversations, the tool-calling loop and its note tools) an
   with `llm::CUT_OFF` — "The answer was cut off before it finished. Try
   again." — never asked again under what was shown or said
   (`chat::budget::plain_error` turns any raw "error decoding response body"
-  into the same words; `src/lib/core/aiErrors.js` too). Claude's Messages
+  into the same words; `desktop/src/lib/core/aiErrors.js` too). Claude's Messages
   API stream (`anthropic.rs`) the same, and one that ends without its
   `message_stop` is cut, no longer taken for the whole answer. **A streamed
   call's timeout is how long it may go quiet** (`llm::chat_client`: the
@@ -1544,7 +1544,7 @@ Logs: lengths and how it was decided, never the text. Unit tests
 (`selected::tests`, `ask_or_edit::tests`, `input_hook`'s Ask shortcut,
 `pipeline::recording::tests`, the loop's
 `a_question_about_words_selected_in_another_app_can_never_make_the_chat_act`);
-e2e `ask-selection.spec.js`; robot `e2e-real/ask-selection.real.js`
+e2e `ask-selection.spec.js`; robot `desktop/e2e-real/ask-selection.real.js`
 (passing, 31 Oct: a real Edge box and web page).
 
 ## Strong models' documents, researched as the Claude app does (2026-10-31)
@@ -1695,7 +1695,7 @@ its request, the Sources row's four, "+3 more" and "Show fewer");
 
 ## The Chat view
 
-`src/lib/views/chat/` (split 2026-10-24): `ChatView.svelte` is the view —
+`desktop/src/lib/views/chat/` (split 2026-10-24): `ChatView.svelte` is the view —
 it makes `chatState.svelte.js` (the conversations, sending and the streamed
 answer with ■ and a newer question replacing one, the Voice Assistant's
 questions, Snip to Chat and whether the model reads images, spoken replies,
@@ -1846,7 +1846,7 @@ as `show_picture` lands, on `chat_send`'s channel or the Voice Assistant's
 `yap-assistant-stream`) opens the panel on it mid-turn, as a `document`
 event does, and the answer's bubble gets its pill as it comes
 (`livePictures`); the saved answer takes `chat_send`'s `pictures` (else the
-turn's events). Tested in `e2e/chat-picture-panel.spec.js` (the live event faked
+turn's events). Tested in `desktop/e2e/chat-picture-panel.spec.js` (the live event faked
 on `yap-assistant-stream`). A picture's "Open page" / "Open original" say
 the browser now (2026-11-01): "Open in Brave", "Open page in your browser"
 (`stores/browserName.svelte.js`, below).
@@ -2109,7 +2109,7 @@ turns the safety rule treats as clean; the model reads a tab
 - Test mode loads a page from the web's stand-in (`<standin>/host/path`),
   never the internet, shows no native menu, and has `e2e_page_view_eval` /
   `e2e_page_views` / `e2e_page_view_ask` for the suite
-  (`e2e/chat-pages.spec.js`).
+  (`desktop/e2e/chat-pages.spec.js`).
 
 **Acting on a page: the drive tier** (2026-11-01, step 3 of the page panel;
 `chat/pages/act.rs` + `act/rules.rs`, `act/words.rs`, `act/script.rs`,
@@ -2297,7 +2297,7 @@ review (safely, for any user, in any language Yap speaks).
   with the answer; refs, the gate, a form filled and sent, a buy asked and
   refused, a sign-in refused); the browse evaluation's scenarios checked
   right and wrong (`the_browse_scenarios_pages_work_and_their_checks_tell_right_from_wrong`);
-  `e2e/chat-browse.spec.js` (a strong fake model fills the stand-in rail
+  `desktop/e2e/chat-browse.spec.js` (a strong fake model fills the stand-in rail
   site's form, the strip and its Stop, the card's Allow once and Don't, the
   card fields and a sign-in refused, the page expanded over the thread and
   its strip's Allow once, Enter in a made-up chat's message box asked and
@@ -2582,7 +2582,7 @@ and its Undo, Preview / Source, find, copy, light and dark).
   of Yap's curated list with the live one), split (2026-10-31, the
   maintainer's design after the short menu was reverted) into **Latest** —
   only the newest model of each of the provider's families
-  (`core/latestModels.js`, pure, unit-tested in `e2e/latest-models.spec.js`):
+  (`core/latestModels.js`, pure, unit-tested in `desktop/e2e/latest-models.spec.js`):
   Anthropic's Opus, Fable, Sonnet, Haiku; OpenAI's flagship and small tier
   (GPT-6 Astra, GPT-6 Luna); Gemini's flagship (Pro, or a named top tier
   like Argon) and Flash; Groq's biggest and smallest GPT-OSS; OpenRouter's

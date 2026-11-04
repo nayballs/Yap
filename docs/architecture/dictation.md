@@ -722,7 +722,7 @@ to **Run again** from Home.
   `e2e_mouse_button { button, phase }` (`shell/e2e.rs` →
   `stand_in_mouse`) runs a button through `mouse_button` itself, saying
   whether the hook would have swallowed it. The robot's `hookKeys` sends
-  real ones (`xd:1` / `xu:1`, marked, `e2e-real/support/yaprobot.cs`),
+  real ones (`xd:1` / `xu:1`, marked, `desktop/e2e-real/support/yaprobot.cs`),
   with the pointer over the test pad's middle and back after: a mouse
   button goes to the window under the pointer, not the one in front, and
   one the hook lets by brings that window to the front.
@@ -829,7 +829,7 @@ to **Run again** from Home.
   `side-buttons.spec.js` (the dialog with the hook's stand-in and the
   page's own mouse event, the bindings saved, Undo, Remove, a taken
   button moved when asked, Swap, Skip, the tip once and its Set up), robot
-  `e2e-real/side-buttons.real.js` (real XBUTTON events through the real
+  `desktop/e2e-real/side-buttons.real.js` (real XBUTTON events through the real
   hook: heard while listening, a dictation in toggle and push-to-talk,
   Enter in the test pad, nothing once removed and the pad still in front;
   first run 2026-10-31: all but the removed half passed — its unbound
@@ -897,7 +897,7 @@ to **Run again** from Home.
   terminal? }` (the stand-in window, `e2e_target_window`; nothing read or
   pasted), `e2e_transform_slots`; robot mode `realtest_transform`.
   Unit tests (`transforms::tests`, `input_hook`'s slot test, `as_said`'s
-  undoable), e2e `transforms.spec.js`, robot `e2e-real/transforms.real.js`
+  undoable), e2e `transforms.spec.js`, robot `desktop/e2e-real/transforms.real.js`
   (written, not yet run). **A transform on every dictation** (2026-10-25;
   Wispr Flow's auto-applied transform, by behaviour; optional, off by
   default): Settings → Commands → Transforms → "Run on every dictation" picks
@@ -958,7 +958,7 @@ to **Run again** from Home.
   (`ask_or_edit::tests`: a table of instructions in all seven languages,
   the languages counted, the reply's parsing, the route); e2e
   `ask-selection.spec.js` (fake-llm's `askOrEdit` kind); robot
-  `e2e-real/ask-selection.real.js` (passing, 31 Oct).
+  `desktop/e2e-real/ask-selection.real.js` (passing, 31 Oct).
 - **`dictation/command_screen.rs`** — **a Command that reads the window in
   front** (2026-10-31; Wispr Flow's Instruct Mode, by behaviour, on this
   PC; `pipeline/rewrite.rs` `look_for_command`, above). **In doubt, the
@@ -1001,7 +1001,7 @@ to **Run again** from Home.
   counted, the last dictation's exception, the gate, the yes/no request,
   quoted history found, the bounds, the prompt's size, the draft's
   clean-up); e2e `command-screen.spec.js` (fake-llm's `commandScreen` kind,
-  `rewriteWindow`); robot `e2e-real/command-screen.real.js` (written, not
+  `rewriteWindow`); robot `desktop/e2e-real/command-screen.real.js` (written, not
   yet run).
 - **`dictation/languages.rs`** (+ `languages/catalog.rs`, `languages/nudge.rs`, `languages/text_id.rs`)
   — **My languages** (2026-10-25; Wispr Flow's languages and its "Speaking a
@@ -1141,7 +1141,7 @@ to **Run again** from Home.
   (`languages::tests`, `catalog::tests`, `nudge::tests`, `text_id::tests`:
   a sentence per language, English full of names and code, the gate,
   `input_hook`'s language slots), e2e `languages.spec.js`, robot
-  `e2e-real/languages.real.js`. **Hinglish** (2026-10-29; Wispr Flow's
+  `desktop/e2e-real/languages.real.js`. **Hinglish** (2026-10-29; Wispr Flow's
   "Hindi in Latin letters", by behaviour; `languages/hinglish.rs`): with
   Hindi among My languages, the page offers "Write in Latin letters
   (Hinglish)" (`config.hinglish`, off) and says which speech model hears
@@ -1372,7 +1372,7 @@ to **Run again** from Home.
   counts and returns the last judgement); made-up Bluetooth mics open at
   16 kHz. Unit tests (`mic_tips::tests`: synthetic speech in syllables over
   a room's hiss — clear, a whisper, far, a loud room, clipped; the tips;
-  the rate limits), e2e `mic-tips.spec.js`, robot `e2e-real/mic-tips.real.js`
+  the rate limits), e2e `mic-tips.spec.js`, robot `desktop/e2e-real/mic-tips.real.js`
   (Windows' voice as recorded, 32 dB quieter, under a hiss, 12 dB past full
   scale; not run yet).
 - **`dictation/lid.rs`** — **the laptop's lid** (2026-10-29; Wispr Flow's
@@ -1412,7 +1412,7 @@ to **Run again** from Home.
   `model()` say which. `apply_accelerator_settings` only sets the globals'
   defaults now. `model_fingerprint` (the files' size + newest change) tells a
   re-downloaded model. **transcribe-rs is vendored**
-  (`src-tauri/vendor/transcribe-rs`, through `[patch.crates-io]`; what
+  (`desktop/src-tauri/vendor/transcribe-rs`, through `[patch.crates-io]`; what
   changed is in its `YAP.md`): on DirectML, Parakeet's decoder/joiner and
   preprocessor load on the CPU (the TDT loop's ~200 runs per 11 s of speech
   cost ~1.4 ms each as GPU round trips, ~0.2 ms on the CPU), and the
@@ -1693,7 +1693,7 @@ to **Run again** from Home.
   later). **Test
   mode** opens no device: what would play is kept for the debug-only
   `sound_e2e_heard` (`"minimal.locked"`), each sound "lasting" its length
-  (robot mode plays them). E2E: `e2e/sounds.spec.js`.
+  (robot mode plays them). E2E: `desktop/e2e/sounds.spec.js`.
 - **`dictation/mute.rs`** — **other apps' sound while you dictate** (2026-10-17; it
   replaced the old endpoint mute, which silenced Yap's own start chime and
   any call): **"Silence other apps while you dictate"**

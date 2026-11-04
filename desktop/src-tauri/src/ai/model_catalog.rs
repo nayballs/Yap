@@ -4,8 +4,8 @@
 //! without a Yap update, and one they retire stops being offered.
 //!
 //! The page merges these lists with Yap's own curated registry
-//! (`src/lib/core/ppModels.js`, the recommended order and wording) in one helper
-//! (`src/lib/core/modelCatalog.js`); this side only fetches, filters and caches.
+//! (`desktop/src/lib/core/ppModels.js`, the recommended order and wording) in one helper
+//! (`desktop/src/lib/core/modelCatalog.js`); this side only fetches, filters and caches.
 //!
 //! **Where it asks** (a GET, read-only, short timeouts, off the main thread):
 //! Groq `GET /openai/v1/models`, OpenAI `GET /v1/models` (both Bearer),
@@ -49,7 +49,7 @@
 //!
 //! **Test mode** (`e2e::active`) never contacts a real provider: the
 //! debug-only `YAP_MODELS_STANDIN` stands in for every provider
-//! (`<standin>/<host><path>?<query>`, `e2e/support/fake-llm.js`), and with
+//! (`<standin>/<host><path>?<query>`, `desktop/e2e/support/fake-llm.js`), and with
 //! none set nothing is fetched (the curated lists show). A self-hosted
 //! endpoint in a test run must be the test's own (127.0.0.1).
 

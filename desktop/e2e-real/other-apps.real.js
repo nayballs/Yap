@@ -1,4 +1,4 @@
-// Other apps' sound while you dictate (src-tauri/src/dictation/mute.rs,
+// Other apps' sound while you dictate (desktop/src-tauri/src/dictation/mute.rs,
 // dictation/media_pause.rs): "Silence other apps while you dictate" turns other
 // apps' audio sessions down once the start chime has played and brings
 // each back to exactly its level after the stop chime; "Pause music and

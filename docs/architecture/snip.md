@@ -292,7 +292,7 @@ monitor): Yap's FP16 path read every swatch exactly (worst error 0) on the
 now composes an 8-bit capture of SDR windows without the boost. The case
 that still washes out is an **HDR-aware app** (Chromium, WebView2, Discord)
 that draws SDR content into an FP16 surface at the white level itself
-(ShareX #8895): the robot test (`e2e-real/snip.real.js`) snips swatches on
+(ShareX #8895): the robot test (`desktop/e2e-real/snip.real.js`) snips swatches on
 an Edge page on every monitor for that. Real HDR highlights (video, games)
 clip to white in phase 1.
 
@@ -412,7 +412,7 @@ has the teardown and the numbers) and ported, not copied:
   Chromium scale the original into its box (`object-fit: contain`) and only
   uses `srcset="… 2x"` on a 2x screen; on Windows' 125 % and 150 % that's a
   rescale.
-- **Measured** (`e2e/chat-shots.spec.js` + `-150`: a made-up 1920 × 1080
+- **Measured** (`desktop/e2e/chat-shots.spec.js` + `-150`: a made-up 1920 × 1080
   screenshot of a dark editor, the drawn device pixels against its ideal
   area-averaged copy at the same size; mean difference per channel / edge
   contrast against the ideal's): before, at 100 % the tile 3.92 / 1.11
@@ -812,14 +812,14 @@ doesn't show it (a screenshot never goes there).
   pill, the colours against app.css), `snip.rs` (the voice phrases and their
   negatives), `model_catalog` (the lists' vision flags), `input_hook`
   (Win+Alt+S, its clashes).
-- **e2e** (`e2e/snip.spec.js`, 11 tests in phase 1): fake monitors through
+- **e2e** (`desktop/e2e/snip.spec.js`, 11 tests in phase 1): fake monitors through
   `e2e_snip` (a 1280×720 HDR one at 240 nits through the real FP16 path, a
   960×540 one at 150 %), the hidden overlay driven by `e2e_snip_input`, how
   it went from `e2e_snip_last`: the snip in a new chat with its pixels exact,
   Enter on an empty box, the prompts, Esc / right-click / a click, the
   conversation Chat shows, the "can't read images" line and its switch, a
   server's refusal, saying "snip", the Settings rows, ✂ / + / the in-page
-  shortcut, retention and deletion. `e2e/support/png.js` reads PNGs with
+  shortcut, retention and deletion. `desktop/e2e/support/png.js` reads PNGs with
   Playwright's own pngjs; the fake AI records `images` and can refuse them
   (`rejectImages`). Phase 2 (19 tests in all): a click and Enter take the
   whole monitor (the HDR one's colours converted back); Space and Alt pick
@@ -855,7 +855,7 @@ doesn't show it (a screenshot never goes there).
   table, the card rule, its arguments, the log, the setting),
   `local_llm::is_model_file` (no `mmproj-…` among the models),
   `ai/eval/vision.rs` (the cases file and every screenshot, the judging);
-  e2e `e2e/local-vision.spec.js` (3 tests, a stand-in sidecar and a fake
+  e2e `desktop/e2e/local-vision.spec.js` (3 tests, a stand-in sidecar and a fake
   projector download): Chat on the 4B with a screenshot offers "Download it
   (642 MB)" beside "Send its text instead", its progress in the line, then
   the question goes with the picture and the model loaded its projector for
@@ -863,9 +863,9 @@ doesn't show it (a screenshot never goes there).
   dictation is going on; Settings' switch (off: Chat's "Turn it on"),
   Remove, the download there; the picker's "Reads images" on the 4B. The
   model evaluations (`yap.exe eval --vision`, model-evals.md).
-- **e2e, how they look** (2026-10-31, `e2e/chat-shots.spec.js` at 100 %,
-  `e2e/chat-shots-150.spec.js` at a real 150 %; the tests in
-  `e2e/support/chat-shots.js`, the measuring in `e2e/support/sharpness.js`;
+- **e2e, how they look** (2026-10-31, `desktop/e2e/chat-shots.spec.js` at 100 %,
+  `desktop/e2e/chat-shots-150.spec.js` at a real 150 %; the tests in
+  `desktop/e2e/support/chat-shots.js`, the measuring in `desktop/e2e/support/sharpness.js`;
   4 each): the box's tile — a 120 px square, Rust's thumbnail at its device
   pixels (120 × 68 / 180 × 101 for a 16:9 screen) drawn 1:1 and kept in
   `thumbs/`, the ring's colour and width per theme read from `::after` and
@@ -881,7 +881,7 @@ doesn't show it (a screenshot never goes there).
   `snip.spec.js`: the tile's thumbnail at 120 × 60 for a 200 × 100 snip,
   and a screenshot's thumbnails gone with it (the 7-day sweep, a deleted
   conversation).
-- **Real-app robot** (`e2e-real/snip.real.js`): real monitors, a real drag
+- **Real-app robot** (`desktop/e2e-real/snip.real.js`): real monitors, a real drag
   (`yaprobot snipdrag`, only onto the robot's own overlay) over swatches on
   an Edge page on each monitor: every swatch within ±2, the overlay within
   150 ms; a real Esc cancels and the focus goes back. Phase 2: a real click

@@ -5,7 +5,7 @@
 // - portable mode: the exe is copied next to a `portable` marker, so config,
 //   notes, history and logs live in <run>/app/Data (never %APPDATA%\yap);
 // - its own WebView2 profile (WEBVIEW2_USER_DATA_FOLDER) and CDP port;
-// - YAP_E2E=1 (debug builds only, src-tauri/src/shell/e2e.rs): no global keyboard
+// - YAP_E2E=1 (debug builds only, desktop/src-tauri/src/shell/e2e.rs): no global keyboard
 //   hook, no paste into other apps, no focus stealing, and it quits when we
 //   close its stdin;
 // - YAP_AUTH_URL points at a closed local port: the account service is
@@ -15,13 +15,27 @@
 //   Claude"…) inside the run folder, never in ~/.yap or a real AI app.
 import { spawn, execFileSync } from 'node:child_process';
 import fs from 'node:fs';
+import { createRequire } from 'node:module';
 import net from 'node:net';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { chromium } from '@playwright/test';
 
-export const REPO = fileURLToPath(new URL('../..', import.meta.url));
+/** The desktop app's folder, `desktop/`: its src/, desktop/src-tauri/ and these tests. */
+export const APP = fileURLToPath(new URL('../..', import.meta.url));
+/** The repository's root: test-results/ is there, beside the phone's. */
+export const REPO = path.resolve(APP, '..');
 export const OUT = path.join(REPO, 'test-results', 'app');
+
+/**
+ * A file inside an npm package (`vite`, `bin/vite.js`), wherever npm put the
+ * package: the repo is an npm workspace, which keeps them in the root's
+ * node_modules.
+ */
+export function packageFile(name, file) {
+  const require = createRequire(import.meta.url);
+  return path.join(path.dirname(require.resolve(`${name}/package.json`)), file);
+}
 export const SCREENSHOTS = path.join(OUT, 'screenshots');
 export const RUNS = path.join(OUT, 'runs');
 
@@ -33,9 +47,9 @@ export const RUNS = path.join(OUT, 'runs');
  */
 export const WEBVIEW2_ARGS = '--remote-debugging-port=0 --disable-features=CalculateNativeWinOcclusion --disable-backgrounding-occluded-windows';
 
-/** Where `npm run test:app:build` puts the binary (see e2e/build.mjs). */
+/** Where `npm run test:app:build` puts the binary (see desktop/e2e/build.mjs). */
 export const TARGET_DIR =
-  process.env.YAP_E2E_TARGET_DIR || path.join(REPO, 'src-tauri', 'target', 'e2e');
+  process.env.YAP_E2E_TARGET_DIR || path.join(APP, 'src-tauri', 'target', 'e2e');
 export const EXE = process.env.YAP_E2E_EXE || path.join(TARGET_DIR, 'debug', 'yap.exe');
 
 /** Seeded into every test instance's config.json (a test can add to it). */

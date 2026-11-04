@@ -1,4 +1,4 @@
-// Search beyond the meetings (src-tauri/src/search/library.rs): the Notes
+// Search beyond the meetings (desktop/src-tauri/src/search/library.rs): the Notes
 // view's search over every note (title, My thoughts, summary, transcript)
 // by its words — marked, and opening the note at the match — and by
 // meaning; Chat's sidebar search over titles and messages, and the

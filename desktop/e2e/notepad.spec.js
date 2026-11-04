@@ -1,4 +1,4 @@
-// The meeting notepad (src-tauri/src/meetings/notepad.rs, src/lib/notepad/Notepad.svelte), in
+// The meeting notepad (desktop/src-tauri/src/meetings/notepad.rs, desktop/src/lib/notepad/Notepad.svelte), in
 // Wispr Flow's notepad layout: a window docked to the right edge of the
 // screen that opens when a meeting starts recording — the header (back to
 // Notes, the ⋯ menu, Share, split screen, delete), My thoughts (synced with

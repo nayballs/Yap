@@ -1,4 +1,4 @@
-// Memory feeds dictation (src-tauri/src/memory/vocab.rs), for real: the
+// Memory feeds dictation (desktop/src-tauri/src/memory/vocab.rs), for real: the
 // names of the people and projects Yap remembers are fixed when a dictation
 // mishears them a little (Parakeet, the default model, has only the near-miss
 // pass), and everyday words near those names are never touched — into the

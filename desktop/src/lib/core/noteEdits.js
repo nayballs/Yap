@@ -1,5 +1,5 @@
 // Fixing meeting notes by hand, for the meeting notepad and the Notes view
-// alike (src-tauri/src/notes/note_edits.rs and notes/tasks.rs):
+// alike (desktop/src-tauri/src/notes/note_edits.rs and notes/tasks.rs):
 // - a transcript line's words (`editLine`: double-click or Edit line; the
 //   line keeps its time, voice and audio, is marked edited, and a misheard
 //   word or name it fixed is offered for the dictionary, here, by
@@ -11,7 +11,7 @@
 //   notepadText.js `withTaskMark` for the instant change on screen).
 // The pure parts (`lineRef`, `withLineEdit`, `taskText`, `withTaskMark`,
 // `newSinceSummary`) live in notepadText.js, unit-tested in
-// e2e/notes-edit.spec.js.
+// desktop/e2e/notes-edit.spec.js.
 import { invoke } from '@tauri-apps/api/core';
 import { askConfirm } from '../ui/contextMenu.svelte.js';
 import { askWordSuggestion } from '../notices/wordSuggestions.js';

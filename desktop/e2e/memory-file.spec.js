@@ -1,4 +1,4 @@
-// Settings → Memory → "Import a file…" (src-tauri/src/memory/import.rs) and
+// Settings → Memory → "Import a file…" (desktop/src-tauri/src/memory/import.rs) and
 // "Copy for Claude", with no AI model set up at all: a file import is Yap's
 // own reading, so nothing goes to a model. A made-up Claude memory export
 // (a .zip built here, fictional people) is picked (the dialog's path named

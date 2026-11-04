@@ -6,8 +6,8 @@ The Svelte side's look (theme, window chrome) and the main window: the ControlPa
 
 ## The folder layout (2026-10-24)
 
-`src/` keeps `main.js` (fonts, the markdown links, mounting), `App.svelte`
-(one chunk per window, below) and `app.css` (every token). `src/lib/` is by
+`desktop/src/` keeps `main.js` (fonts, the markdown links, mounting), `App.svelte`
+(one chunk per window, below) and `app.css` (every token). `desktop/src/lib/` is by
 kind, a folder each:
 
 | Folder | What's in it |
@@ -121,7 +121,7 @@ unchanged).
 ## Look and the main window
 
 - **Theme (2026-07-09)** — the main window is **warm-light, Wispr-Flow-inspired**:
-  every token lives in `src/app.css` (`--yap-*`: paper surfaces w/ white cards,
+  every token lives in `desktop/src/app.css` (`--yap-*`: paper surfaces w/ white cards,
   warm ink text, ONE amber accent reserved for keycap chips / active states /
   toggles, **ink** filled buttons via `--yap-ink*`, serif display numerals via
   `--yap-font-display`, light shadow tokens). Typefaces = **the exact pair Wispr Flow
@@ -150,9 +150,9 @@ unchanged).
   there's a **warm dark theme** too (below): every token has a dark value in
   `:root[data-yap-theme='dark']`, and no component hard-codes a surface or
   text colour. **Brand mark** (2026-07-09):
-  `src/assets/yap-logo.svg` — warm-ink rounded badge, amber yapping mouth,
+  `desktop/src/assets/yap-logo.svg` — warm-ink rounded badge, amber yapping mouth,
   cream soundwaves (replaced the old blue `yap-icon.png` in the title bar +
-  onboarding; `src-tauri/icons/*` regenerated from it via `npx tauri icon`).
+  onboarding; `desktop/src-tauri/icons/*` regenerated from it via `npx tauri icon`).
 - **The theme** — Settings → General → Appearance → **Theme**: System (the
   default: Windows' app mode, followed live) / Light / Dark; details in
   [The dark theme](#the-dark-theme-2026-10-22) below.
@@ -205,7 +205,7 @@ unchanged).
   `.drain`, `.run-down`, `.undoline > span` and anything marked
   `data-keep-motion`. The Yap bar's Svelte transitions (`fade`, `scale`,
   `flip`, which run as Web Animations that CSS can't stop) take
-  `motionMs(ms)` = 0 while reduced. `e2e/appearance.spec.js`.
+  `motionMs(ms)` = 0 while reduced. `desktop/e2e/appearance.spec.js`.
 - **Custom window chrome (2026-07-09)** — the settings window is **undecorated**
   (`decorations: false` in tauri.conf.json): ControlPanel draws a 40px
   `data-tauri-drag-region` title bar (brand left; min / max-restore / close
@@ -420,7 +420,7 @@ Flow's dark mode of 19 Oct 2026), for every Yap window.
   with no build step) copies these `--yap-*` values, light and dark, following
   the phone's `prefers-color-scheme`; `phone/web/tests/tokens.spec.js` fails when
   they drift, naming the token (`npm run test:link`; link.md).
-- **Contrast** (AA, `e2e/theme.spec.js` measures the lowest on each page):
+- **Contrast** (AA, `desktop/e2e/theme.spec.js` measures the lowest on each page):
   body text 15:1, Settings descriptions 6.8:1, nav labels 11:1 (main window
   14:1), nav group labels 7.2:1, links 9.1:1 (Chat's 6.7:1), keycaps 7.6:1,
   the tip card 7.4:1, the Home feed 4.8:1; switches: an off edge 4.9:1, on
@@ -561,7 +561,7 @@ Flow's dark mode of 19 Oct 2026), for every Yap window.
   (until then the view held it all and unmounted with it, code review
   2026-10-23 #8). The view keeps only the drop target (its listener's
   promise kept, so leaving early still lets go) and the model's name.
-  `e2e/upload.spec.js` (debug-only `e2e_upload_pace` holds each chunk).
+  `desktop/e2e/upload.spec.js` (debug-only `e2e_upload_pace` holds each chunk).
 - **Speech-to-Text's downloads** live in `modelStore.svelte.js`
   (`downloadModel`: `downloading {id, percent}` from
   `stt-download-progress`, a failure in `downloadError` until the next),
@@ -791,4 +791,4 @@ Flow's dark mode of 19 Oct 2026), for every Yap window.
   devices (Sign out), the Actions manager's rows (Edit, Delete…), the
   notepad's transcript lines (Copy line, Who said this?) and Ask answers
   (Copy, Copy as Markdown, Read aloud, Good / Bad answer) and questions
-  (Copy). `e2e/right-click.spec.js`.
+  (Copy). `desktop/e2e/right-click.spec.js`.

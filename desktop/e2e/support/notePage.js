@@ -1,4 +1,4 @@
-// A note's page in the app (src/lib/components/richtext/RichNote.svelte: the
+// A note's page in the app (desktop/src/lib/components/richtext/RichNote.svelte: the
 // rich text editor notes' My thoughts, the meeting notepad and the quick
 // note are edited on, 2026-10-31). The page answers as the note's text box
 // did — `value` (its markdown), `selectionStart` / `End`,

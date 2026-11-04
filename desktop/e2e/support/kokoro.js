@@ -1,4 +1,4 @@
-// Stand-ins for Kokoro's download (src-tauri/src/voice/tts/registry.rs): a fake
+// Stand-ins for Kokoro's download (desktop/src-tauri/src/voice/tts/registry.rs): a fake
 // model, 54 fake voices, fake dictionaries, and a zip laid out like eSpeak
 // NG's unpacked installer (a debug build takes a zip where the real thing is
 // an .msi), served from a local server, the model slowly enough to see the

@@ -6,7 +6,7 @@ a voice answer short, refuses a prompt injection — and what every request and 
 looked like. It answers questions like "which local model should Yap ship?" with numbers,
 and catches a prompt or tool change that makes a model worse.
 
-It lives in a **debug build** of Yap (`src-tauri/src/ai/eval.rs` + `src-tauri/src/ai/eval/`); a
+It lives in a **debug build** of Yap (`desktop/src-tauri/src/ai/eval.rs` + `desktop/src-tauri/src/ai/eval/`); a
 release build answers `yap.exe eval` with "debug builds only".
 
 ## Running it
@@ -21,7 +21,7 @@ npm run eval -- --raw evals/raw/groq-browser-search.json --keys-from-yap
 $YAP_EVAL_TARGET_DIR/debug/yap.exe eval --model groq:openai/gpt-oss-20b --keys-from-yap --only apps
 ```
 
-`npm run eval` builds into `$YAP_EVAL_TARGET_DIR` (default `src-tauri/target/eval`) and
+`npm run eval` builds into `$YAP_EVAL_TARGET_DIR` (default `desktop/src-tauri/target/eval`) and
 writes run folders to `$YAP_EVAL_OUT` (default `test-results/evals/`, git-ignored). To keep
 builds and runs out of the checkout: `YAP_EVAL_TARGET_DIR=<builds>/evals`, `--out <builds>/eval-runs`.
 `yap.exe eval --help` lists every option; the main ones:
@@ -296,7 +296,7 @@ Yap had to clean is counted (`cleaned`). **Phases** (`--replies-phase`): `with`
 (the Command now) and `without` (the same words alone, as a Command wrote until
 31 Oct 2026: `llm::rewrite_with_samples`, nothing selected). **The body**
 (`--replies-body`): `commands` (the default: the Commands scope's default prompt,
-`evals/replies/commands-prompt.txt`, a copy of `src/lib/settings/scopes.js`'s,
+`evals/replies/commands-prompt.txt`, a copy of `desktop/src/lib/settings/scopes.js`'s,
 named "Jarvis" — "Hey Jarvis, …" needs the scope on) or `none` (the rewrite
 shortcut on the cleanup endpoint). `replies.md` in the run folder (each case's
 rule verdict, window and draft); `models[].replies` in `summary.json`.
@@ -653,7 +653,7 @@ passage holding a gold line, or, with no gold, says so without citing
 `uncited_answer`). `search.md` and `search.json` in the run folder; the
 numbers in `summary.json` (`models[].search`).
 
-**Beyond the meetings** (`--search-library`, `src-tauri/src/ai/eval/library.rs`):
+**Beyond the meetings** (`--search-library`, `desktop/src-tauri/src/ai/eval/library.rs`):
 
 ```bash
 yap.exe eval --search-library --embed <embeddinggemma-300M-Q8_0.gguf>
@@ -2213,7 +2213,7 @@ translations lost the names' capitals ("can you book a meeting room for
 monday with the lyon team") 2 times of 12.
 
 **Whisper's language detection**, on the robot's engines build
-(`e2e-real/languages.real.js`, Whisper large-v3 on the same card): English
+(`desktop/e2e-real/languages.real.js`, Whisper large-v3 on the same card): English
 heard as English with p = 1.00, in 74 and 56 ms — the work `full()` did by
 itself before whenever it wasn't given a language. Told French (My languages
 French only), large-v3 still wrote clear English as English ("The quick

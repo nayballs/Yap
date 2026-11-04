@@ -1,4 +1,4 @@
-// The calendar day to day (src-tauri/src/calendar.rs and calendar/): the
+// The calendar day to day (desktop/src-tauri/src/calendar.rs and calendar/): the
 // next meeting in the tray (its menu item and tooltip, through the
 // debug-only `e2e_tray` hook: a test run's tray is never clicked), folder
 // rules for recurring meetings (calendar/filing.rs: the Meetings view's

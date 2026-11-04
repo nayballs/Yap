@@ -746,7 +746,7 @@ fn scenarios_dir(args: &Args) -> PathBuf {
     if let Some(p) = args.scenarios.clone().or_else(|| std::env::var_os("YAP_EVAL_SCENARIOS").map(PathBuf::from)) {
         return p;
     }
-    for c in ["evals/scenarios", "../evals/scenarios"] {
+    for c in ["evals/scenarios", "../../evals/scenarios"] {
         if Path::new(c).is_dir() {
             return PathBuf::from(c);
         }
@@ -2945,7 +2945,7 @@ mod tests {
     /// Every scenario in the repo parses (unknown fields are errors).
     #[test]
     fn the_repos_scenarios_parse() {
-        let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("..").join("evals").join("scenarios");
+        let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..").join("evals").join("scenarios");
         let args = Args { scenarios: Some(dir), ..Default::default() };
         let all = load_scenarios(&args).expect("scenarios load");
         assert!(all.len() >= 12, "{} scenarios", all.len());
@@ -2972,7 +2972,7 @@ mod tests {
     #[tokio::test]
     async fn the_browse_scenarios_pages_work_and_their_checks_tell_right_from_wrong() {
         use crate::chat::pages::{act, sim};
-        let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("..").join("evals").join("scenarios");
+        let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..").join("evals").join("scenarios");
         let all = load_scenarios(&Args { scenarios: Some(dir), ..Default::default() }).expect("scenarios load");
         let get = |n: &str| all.iter().find(|s| s.name == n).unwrap_or_else(|| panic!("no {n}"));
         let set_up = |s: &Scenario| {

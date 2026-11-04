@@ -1,5 +1,5 @@
 // A strong model's documents, researched as the Claude app does (31 Oct 2026;
-// src-tauri/src/chat/tools.rs `refused_after_web` / `STRONG_LOCKED`,
+// desktop/src-tauri/src/chat/tools.rs `refused_after_web` / `STRONG_LOCKED`,
 // web/turn.rs `Reach`, ai/effort.rs, ai/llm/anthropic.rs):
 // - After reading the web, a strong model (a fake named like GPT-5: its
 //   rich tools) still changes a note and writes a document — each a version
@@ -7,7 +7,7 @@
 // - A new document's outline opens before any search (a search asked for
 //   first is refused until it's up, with no chip); the model is told to read
 //   the pages its facts come from (chat/documents.rs `research_note`).
-// - The Sources row (src/lib/views/chat/sources.js, SourcesRow.svelte): each
+// - The Sources row (desktop/src/lib/views/chat/sources.js, SourcesRow.svelte): each
 //   page once, the pages read and cited first, four, then "+N more".
 // - The on-device-sized model (a fake 4B) is refused the same note change.
 // - A document's turn may search more than 3 times; a plain question can't.

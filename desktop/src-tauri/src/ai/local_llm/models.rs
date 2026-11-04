@@ -40,7 +40,7 @@ pub fn cancel_id(model: &str) -> String {
 /// Where a download comes from: `url` + `sha256` as pinned, or in a debug
 /// build a stand-in from the JSON file `YAP_LLM_SOURCES` (`{"runtime" |
 /// "<curated id>": {"url", "sha256"}}`): how the e2e suite downloads small
-/// fakes from a local server (`e2e/support/local-llm.js`).
+/// fakes from a local server (`desktop/e2e/support/local-llm.js`).
 pub(crate) fn source(key: &str, url: &str, sha256: &str) -> (String, String) {
     #[cfg(debug_assertions)]
     if let Some(path) = std::env::var_os("YAP_LLM_SOURCES").filter(|v| !v.is_empty()) {

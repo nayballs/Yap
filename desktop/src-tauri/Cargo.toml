@@ -225,7 +225,7 @@ webview2-com = "0.39"
 # ggml and MSVC runtime come from that folder. 0.9 (Nov 2026): the same
 # LoadLibraryExW / GetProcAddress calls, the path as its `AsFilename` (an
 # interior NUL now an error, never cut short); a stub build compiles it, only
-# the real runtime loading proves it (e2e/diarization-real.spec.js).
+# the real runtime loading proves it (desktop/e2e/diarization-real.spec.js).
 libloading = "0.9"
 
 [features]

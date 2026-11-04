@@ -522,23 +522,23 @@ The correction dictionary: near-miss (fuzzy) matching, several ways one word is 
   - **2,000 entries**: 200 rows drawn at a time, more as the end of the
     list scrolls into view (or "Show 200 more"), and off-screen rows skip
     layout (`content-visibility`). Measured in the stub debug build
-    (`e2e/dictionary.spec.js`): the view on screen ~150–200 ms, a search
+    (`desktop/e2e/dictionary.spec.js`): the view on screen ~150–200 ms, a search
     ~10 ms, a keystroke in a row ~10 ms. Import… / Export… load when first
     used (the main window's chunk stays under 700 KB).
   - Leaving the view with an edit not saved yet (the half-second wait)
     saves it at once.
-  - Tests: `e2e/dictionary-list.spec.js` (the pure parts, no app: search,
+  - Tests: `desktop/e2e/dictionary-list.spec.js` (the pure parts, no app: search,
     sorts, CSV and text parsing, the import's plan and choices, export
     round trips — several ways heard included —, both Undos, the snippet
     warnings and their speed at 2,200 entries; rich snippets' parsing,
     plain text and the formatting bar's edits, the same cases as
-    `rich.rs`), `e2e/dictionary.spec.js`
+    `rich.rs`), `desktop/e2e/dictionary.spec.js`
     (the view, in light and dark; several ways heard added, saved,
     corrected in a dictation, exported, imported and undone; a snippet's
     length and warnings; a rich snippet made with the bar and Ctrl+I, its
     Undo, both previews, saved as markdown with the plain snippets
     untouched, and dictated — HTML for Outlook and Gmail, the spoken words
-    escaped in it, none for a plain snippet, VS Code or ChatGPT) and `e2e/dictionary-learning.spec.js` (your own
+    escaped in it, none for a plain snippet, VS Code or ChatGPT) and `desktop/e2e/dictionary-learning.spec.js` (your own
     name in a dictation; the snippet offer — toast, bar card, "Don't
     suggest this again" and the switch; a summary edit's word offer). Rust
     unit tests: `pasting/rich.rs` (the subset, what isn't formatting,

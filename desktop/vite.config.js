@@ -1,3 +1,4 @@
+import { fileURLToPath } from 'node:url';
 import { defineConfig } from 'vite';
 import { svelte } from '@sveltejs/vite-plugin-svelte';
 
@@ -28,15 +29,13 @@ function mainChunkBudget() {
 
 // Tauri expects a fixed dev port.
 export default defineConfig({
+  // The desktop app's folder (desktop/), wherever Vite is started from.
+  root: fileURLToPath(new URL('.', import.meta.url)),
   plugins: [svelte(), mainChunkBudget()],
   clearScreen: false,
   server: {
     port: 51437,
     strictPort: true,
-    // The website (site/) is its own Astro project: building it while Yap -
-    // Dev runs must never look like a change to the app (its tsconfig.json
-    // alone would make Vite reload every window).
-    watch: { ignored: ['**/site/**'] },
   },
   build: {
     // Every other chunk: the biggest is the page editor's (richEditor, TipTap

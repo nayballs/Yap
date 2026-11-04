@@ -1,5 +1,5 @@
 // The speaker features that listen to a meeting's audio on disk
-// (src-tauri/src/speakers/), on a recording that has some — a tone with
+// (desktop/src-tauri/src/speakers/), on a recording that has some — a tone with
 // pauses, played 4× real time (the stub engine's lines say how much audio
 // each chunk had):
 // - "Transcribe again" makes new lines; with "Tell speakers apart" on, the

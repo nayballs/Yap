@@ -1,5 +1,5 @@
 <script>
-  // The Yap bar (the `overlay` window; behaviour in src-tauri/src/bar.rs).
+  // The Yap bar (the `overlay` window; behaviour in desktop/src-tauri/src/bar.rs).
   // One fixed-size transparent window, bottom-centre on the monitor with the
   // cursor; everything is drawn inside it, to the measurements of Wispr
   // Flow's Flow Bar (references/wispr-flow/flowbar-spec.md, beside this repo):

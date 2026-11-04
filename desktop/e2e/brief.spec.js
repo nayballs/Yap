@@ -1,4 +1,4 @@
-// Pre-meeting briefs (src-tauri/src/calendar/brief.rs): before a calendar
+// Pre-meeting briefs (desktop/src-tauri/src/calendar/brief.rs): before a calendar
 // meeting, what to know going in — last time with these people, their open
 // items, what Yap remembers about them, the invite's agenda, every line
 // linked to its note — on the reminder card (in the window and on the Yap

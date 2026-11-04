@@ -2,7 +2,7 @@
 // cut into pieces at its sections (`splitSections`), each piece drawn once
 // and kept while its HTML is the same (`drawParts`), and the writing caret
 // at the end of the section being written (`placeCaret`). No Svelte state:
-// tested on its own (e2e/doc-stream.spec.js).
+// tested on its own (desktop/e2e/doc-stream.spec.js).
 import { isPlaceholder } from '../../core/markdown.js';
 
 /**

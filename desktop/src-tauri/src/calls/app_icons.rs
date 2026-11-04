@@ -1,8 +1,8 @@
 //! The call apps' own icons, as installed on this PC, for Settings → General
 //! → Meetings ("Ask about calls in") and the Yap bar's call card
-//! (`src/lib/components/CallAppIcon.svelte`). An app that isn't installed, or that runs
+//! (`desktop/src/lib/components/CallAppIcon.svelte`). An app that isn't installed, or that runs
 //! in a browser (Google Meet, Whereby, Jitsi Meet), shows its bundled mark
-//! instead (`src/lib/bar/callApps.js`), or a letter in its colour.
+//! instead (`desktop/src/lib/bar/callApps.js`), or a letter in its colour.
 //!
 //! **Where the icons come from.** Read-only and local: nothing is launched,
 //! nothing goes over the network, and the only files read are icons and
@@ -93,7 +93,7 @@ const KNOWN_PATHS: &[(&str, &str)] = &[
 // ---- the command ----------------------------------------------------------------
 
 /// `{ app id: data URL }`: the call apps installed here, by their own icons
-/// (`src/lib/stores/callAppIcons.svelte.js`).
+/// (`desktop/src/lib/stores/callAppIcons.svelte.js`).
 #[tauri::command]
 pub async fn meeting_app_icons() -> Result<BTreeMap<String, String>, String> {
     tauri::async_runtime::spawn_blocking(icons)

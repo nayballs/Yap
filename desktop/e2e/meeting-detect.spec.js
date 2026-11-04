@@ -1,4 +1,4 @@
-// Call detection (src-tauri/src/calls/meeting_detect.rs): a call starting offers to
+// Call detection (desktop/src-tauri/src/calls/meeting_detect.rs): a call starting offers to
 // take notes, "Record notes" creates a meeting note and records it, the call
 // ending offers to stop and summarise, and Settings → Meetings
 // decides whether, how and about which apps Yap asks.

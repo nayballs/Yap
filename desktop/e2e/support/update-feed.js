@@ -1,15 +1,15 @@
 // A local stand-in for GitHub's `latest.json`: announces a newer Yap and
 // serves a signed dummy "installer". The test instance is pointed at it with
-// the debug-only YAP_UPDATE_TEST_* variables (src-tauri/src/updates.rs). The
+// the debug-only YAP_UPDATE_TEST_* variables (desktop/src-tauri/src/updates.rs). The
 // signing key is a throwaway made fresh for each run with `tauri signer`.
 import { spawnSync } from 'node:child_process';
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import http from 'node:http';
 import path from 'node:path';
-import { REPO } from './yap.js';
+import { packageFile } from './yap.js';
 
-const CLI = path.join(REPO, 'node_modules', '@tauri-apps', 'cli', 'tauri.js');
+const CLI = packageFile('@tauri-apps/cli', 'tauri.js');
 
 function tauri(args) {
   // Never let a real signing key from the environment near this.

@@ -1,5 +1,5 @@
 // A stand-in for OpenAI's, Gemini's and Groq's speech endpoints
-// (src-tauri/src/voice/tts/openai.rs, gemini.rs, groq.rs, hosted.rs), served
+// (desktop/src-tauri/src/voice/tts/openai.rs, gemini.rs, groq.rs, hosted.rs), served
 // from 127.0.0.1 so a test run never reaches the internet. Yap is pointed at
 // it with the debug-only YAP_OPENAI_TTS_URL, YAP_GEMINI_TTS_URL and
 // YAP_GROQ_TTS_URL (`env`: all three name this one server; their paths

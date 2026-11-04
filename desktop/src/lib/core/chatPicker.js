@@ -4,7 +4,7 @@
 // places — the desktop picker (chatModels.svelte.js fills `ctx` from its
 // stores and the Tauri calls, and reads it reactively) and Yap Link's
 // phone page (phone/web/page/picker.js fills it from the PC's
-// `ready.picker`; `src-tauri/build.rs` serves this file and the pure modules
+// `ready.picker`; `desktop/src-tauri/build.rs` serves this file and the pure modules
 // it imports at core/, so it must never import anything else).
 //
 // `ctx` = {

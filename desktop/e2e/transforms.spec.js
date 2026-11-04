@@ -12,7 +12,7 @@
 // A test run reads and pastes into no other app: the transform and the
 // dictations go to a stand-in window (`e2e_target_window`), and the AI is a
 // stand-in (support/fake-llm.js). The real windows are the robot's
-// (e2e-real/transforms.real.js).
+// (desktop/e2e-real/transforms.real.js).
 import fs from 'node:fs';
 import { test as base, expect, openSettings, closeSettings, settingsDialog, expectStore, setConfig } from './support/fixtures.js';
 import { startFakeLlm, cleanupTranscript, transformText, transformInstruction } from './support/fake-llm.js';

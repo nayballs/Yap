@@ -3,7 +3,7 @@
 Yap runs a tiny **loopback HTTP server** while the app is open so terminals,
 scripts, and coding agents on the same machine can read and write Yap data.
 It's the local-first port of OpenWhispr's CLI bridge (`cliBridge.js` →
-`src-tauri/src/integrations/bridge.rs`): loopback-only, bearer-token authenticated, no
+`desktop/src-tauri/src/integrations/bridge.rs`): loopback-only, bearer-token authenticated, no
 cloud, no account.
 
 Toggled in **Integrations → Local API** (`config.bridge_enabled`, on by
@@ -96,8 +96,8 @@ Wispr's cloud. Yap's is local: the AI app runs **`yap.exe mcp`** on this PC,
 and that process reads the meetings from the running Yap through this local
 API. No server in between, no account. **Settings → AI apps (MCP)** (the Connections
 group, laid out like Wispr's page; Integrations has a "Go to MCP" card) adds
-it to an app in one click (`src/lib/settings/McpSection.svelte` →
-`src-tauri/src/integrations/mcp_clients.rs`); the server is `src-tauri/src/integrations/mcp.rs`.
+it to an app in one click (`desktop/src/lib/settings/McpSection.svelte` →
+`desktop/src-tauri/src/integrations/mcp_clients.rs`); the server is `desktop/src-tauri/src/integrations/mcp.rs`.
 
 What an AI app can do, and what it can't:
 
@@ -233,7 +233,7 @@ page warns about that in dev builds.
   malformed files, BOM/CRLF/tabs, TOML, the `.bak`, Claude Code's lock, a
   stand-in profile) and the real binary (`tests/mcp_stdio.rs`: spawns
   `yap.exe mcp` against a fake bridge).
-- `e2e/mcp.spec.js` adds and removes Yap through Settings → AI apps (MCP) in a
+- `desktop/e2e/mcp.spec.js` adds and removes Yap through Settings → AI apps (MCP) in a
   stand-in profile, then runs a real `yap.exe mcp` session against the test
   instance's bridge (see [e2e-tests.md](./e2e-tests.md)).
 - Debug builds only: `YAP_BRIDGE_FILE` moves the discovery file (the app and

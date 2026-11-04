@@ -16,7 +16,7 @@
 // `realtest_rewrite_text` stands in for the shortcut and the speech: the
 // window in front, its selection read as at the key press (no Ctrl+C in
 // robot mode), the instruction as heard. A stand-in AI model answers
-// (e2e/support/fake-llm.js: the cleanup, and the rewrite by instruction).
+// (desktop/e2e/support/fake-llm.js: the cleanup, and the rewrite by instruction).
 import { test, expect } from './support/robot.js';
 import { edgeExe, hasWindowsTerminal } from './support/targets.js';
 import { startFakeLlm, cleanupTranscript, rewriteText, rewriteInstruction } from '../e2e/support/fake-llm.js';

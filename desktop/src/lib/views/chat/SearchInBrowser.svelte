@@ -1,6 +1,6 @@
 <script>
   // The search under an answer Yap's free web sources couldn't give
-  // (src-tauri/src/web/sources.rs: no search service for the chat, and a
+  // (desktop/src-tauri/src/web/sources.rs: no search service for the chat, and a
   // question about prices, the news, reviews, travel… or nothing found).
   // **Search beside the chat** opens it in the panel's page tab (1 Nov 2026:
   // one click, no app switch); **Open in <browser>** in the person's own

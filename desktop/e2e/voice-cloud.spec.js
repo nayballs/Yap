@@ -1,6 +1,6 @@
 // OpenAI, Gemini and Groq as the voice of spoken replies, on the keys Language
-// Models already has (src-tauri/src/voice/tts/hosted.rs, openai.rs, gemini.rs,
-// groq.rs; src/lib/settings/VoiceSettings.svelte, HostedVoiceSettings.svelte),
+// Models already has (desktop/src-tauri/src/voice/tts/hosted.rs, openai.rs, gemini.rs,
+// groq.rs; desktop/src/lib/settings/VoiceSettings.svelte, HostedVoiceSettings.svelte),
 // against a local stand-in (support/fake-cloud-tts.js, the debug-only
 // YAP_<PROVIDER>_TTS_URL) — never the internet, never a real key — and
 // "Turn other apps down while Yap speaks" (voice/duck.rs):

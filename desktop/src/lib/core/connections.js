@@ -1,4 +1,4 @@
-// The network receipts (src-tauri/src/privacy/net.rs) see every request Rust makes.
+// The network receipts (desktop/src-tauri/src/privacy/net.rs) see every request Rust makes.
 // The one connection a page makes itself is the signed-in account's picture
 // (an <img> from the sign-in provider): it's noted here, by its host only,
 // once per picture while the window is open (the browser caches it after).

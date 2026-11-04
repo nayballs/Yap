@@ -3,7 +3,7 @@
 //! question's picture, the viewer when the picture is bigger than the
 //! window — so the browser never scales it. Its own scaling of a 4K PNG
 //! into a 120 px tile is soft (bilinear between mipmaps, and a picture at a
-//! fraction of a pixel): `e2e/chat-shots.spec.js` measures both against the
+//! fraction of a pixel): `desktop/e2e/chat-shots.spec.js` measures both against the
 //! ideal; area averaging ([`images::shrink`]: every source pixel counts,
 //! nothing aliases) at the drawn size is that ideal.
 //!

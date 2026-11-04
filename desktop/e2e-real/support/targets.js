@@ -1,5 +1,5 @@
 // The windows the robot dictates into, all opened by the harness and all
-// titled with the run's nonce (src-tauri/src/shell/realtest.rs only lets Yap
+// titled with the run's nonce (desktop/src-tauri/src/shell/realtest.rs only lets Yap
 // paste, press keys or read in such windows, or in processes the harness
 // started): the test pad, Windows Terminal (a PowerShell prompt, and a
 // stand-in for Claude Code), an Edge app window showing a "WhatsApp" page,
@@ -18,7 +18,10 @@ import readline from 'node:readline';
 import { fileURLToPath } from 'node:url';
 import { chromium } from '@playwright/test';
 
-export const REPO = fileURLToPath(new URL('../..', import.meta.url));
+/** The desktop app's folder, `desktop/`. */
+export const APP = fileURLToPath(new URL('../..', import.meta.url));
+/** The repository's root: test-results/ is there. */
+export const REPO = path.resolve(APP, '..');
 export const OUT = path.join(REPO, 'test-results', 'real');
 export const RUNS = path.join(OUT, 'runs');
 export const CACHE = path.join(OUT, 'cache');

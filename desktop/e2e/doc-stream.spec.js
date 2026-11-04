@@ -1,5 +1,5 @@
 // The document panel's page as Chat writes it, on its own (no app needed):
-// src/lib/views/chat/docStream.js (the text shown, in pieces; the pace a
+// desktop/src/lib/views/chat/docStream.js (the text shown, in pieces; the pace a
 // section flows in at) and docPieces.js (the page cut at its sections and
 // drawn a piece at a time; the writing caret). jsdom stands in for the
 // page's DOM.

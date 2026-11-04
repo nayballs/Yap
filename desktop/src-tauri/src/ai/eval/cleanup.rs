@@ -453,7 +453,7 @@ pub fn markdown(models: &[(String, Value)]) -> String {
 mod tests {
     #[test]
     fn the_dictations_parse() {
-        let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../evals/cleanup/dictations.json");
+        let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../evals/cleanup/dictations.json");
         let b = super::load(&dir).expect("dictations.json");
         assert!(b.dictations.len() >= 8);
     }

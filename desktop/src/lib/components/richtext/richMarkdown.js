@@ -25,7 +25,7 @@
 // letters, or that block goes without that kind of mark: the words are
 // always kept, never a stray "*" (tested over every place a character can
 // be typed and every few characters a mark can cover:
-// e2e/doc-markdown.spec.js). `head` (the title line, which the panel shows
+// desktop/e2e/doc-markdown.spec.js). `head` (the title line, which the panel shows
 // above the page) and the lines after the last block come back as they were.
 //
 // Where the words are (`sourceMap`): each character of the editor's text

@@ -486,7 +486,7 @@ names only in English). One capture per app settles it. **Steps**
 for some and off for others):
 
 1. Use a debug build's `yap.exe` (Yap - Dev's, or `cargo build` in
-   `src-tauri/`): it prints as it reads. The installed (release) exe writes
+   `desktop/src-tauri/`): it prints as it reads. The installed (release) exe writes
    the same file but prints nothing.
 2. Start the call and leave its window **on screen, not minimised** (a
    minimised window shows nothing). Gallery view first.

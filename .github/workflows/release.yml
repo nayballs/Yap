@@ -60,7 +60,7 @@ jobs:
       - name: Rust cache
         uses: swatinem/rust-cache@v2
         with:
-          workspaces: "./src-tauri -> target"
+          workspaces: "./desktop/src-tauri -> target"
 
       # GPU whisper uses the VULKAN backend (universal — NVIDIA/AMD/Intel), which
       # needs the Vulkan SDK (glslc + headers + loader) to COMPILE ggml-vulkan.
@@ -89,7 +89,7 @@ jobs:
         id: notes
         shell: bash
         run: |
-          current="v$(node -p "require('./src-tauri/tauri.conf.json').version")"
+          current="v$(node -p "require('./desktop/src-tauri/tauri.conf.json').version")"
           prev=$(git tag --list 'v*' --sort=-v:refname --merged HEAD | grep -vx "$current" | head -n1 || true)
           echo "Previous release: ${prev:-none}"
           {
@@ -132,6 +132,8 @@ jobs:
           # on Vulkan, ONNX on DirectML — any Windows GPU, no CUDA. NSIS only:
           # installs come from the custom NSIS installer (normal/portable,
           # deep-link scheme), so latest.json must never point at an MSI.
+          # tauri runs in the desktop app's folder, as in nightly.yml.
+          projectPath: desktop
           args: "--features engines --bundles nsis"
           updaterJsonPreferNsis: true
           # The draft targets the commit that was built. Run from a pushed

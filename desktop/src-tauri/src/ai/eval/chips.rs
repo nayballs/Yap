@@ -366,7 +366,7 @@ mod tests {
 
     #[test]
     fn the_cases_read_and_each_builds_the_request_the_app_sends() {
-        let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("../evals/chips/cases.json");
+        let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../evals/chips/cases.json");
         let cases = load(&path, &[]).unwrap();
         for kind in ["smart", "skill", "longer"] {
             assert!(cases.iter().filter(|c| c.kind == kind).count() >= 2, "{kind}");

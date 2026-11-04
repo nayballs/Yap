@@ -1,5 +1,5 @@
 //! What AI cleanup changed in a dictation, counted: the Rust twin of
-//! `src/lib/core/wordDiff.js` (Home's "AI edited · N changes"). The words
+//! `desktop/src/lib/core/wordDiff.js` (Home's "AI edited · N changes"). The words
 //! as said (history's `said`) against the text Yap pasted, word by word —
 //! a longest common subsequence of words, capitals and punctuation aside
 //! (cleanup adds those to nearly every dictation). Same rules as the page:
@@ -138,7 +138,7 @@ mod tests {
 
     #[test]
     fn counts_as_homes_ai_edited_does() {
-        // e2e/home-ai-edits.spec.js's dictation: two changes, three words.
+        // desktop/e2e/home-ai-edits.spec.js's dictation: two changes, three words.
         let d = diff("we need to fix the login bug before the demo", "We must fix the sign-in bug before the demo.");
         assert_eq!(d, Diff { changes: 2, words: 3 });
         // Only punctuation and capitals: nothing.

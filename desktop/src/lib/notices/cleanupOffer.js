@@ -1,4 +1,4 @@
-// The one gentle offer of AI cleanup (src-tauri/src/ai/cleanup_styles.rs
+// The one gentle offer of AI cleanup (desktop/src-tauri/src/ai/cleanup_styles.rs
 // `offer`): to someone with cleanup off, on a PC whose graphics card runs
 // the on-device model (or with that model already here), once they've done
 // a few dictations. A tip in the main window — only while they're looking at

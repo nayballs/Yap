@@ -1,5 +1,5 @@
 // Yap's on-device model loaded when it's needed, its memory freed when it's
-// idle (src-tauri/src/ai/local_llm/on_demand.rs, 2026-10-25):
+// idle (desktop/src-tauri/src/ai/local_llm/on_demand.rs, 2026-10-25):
 // - launched with on-device cleanup, the model isn't loaded; Settings →
 //   Language Models says "Not loaded · loads when needed", with "Load the
 //   on-device model when Yap starts" off and "Free its memory after it's

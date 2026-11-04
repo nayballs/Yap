@@ -6,7 +6,7 @@
    phone's font size).
 
    The page is served on its own (no build step, nothing fetched from
-   anywhere but the PC), so it can't import src/app.css: the values below
+   anywhere but the PC), so it can't import desktop/src/app.css: the values below
    are COPIED from it. When app.css changes a colour, change it here too.
    Where each set comes from is said above it. */
 
@@ -35,7 +35,7 @@
 
 /* ------------------------------------------------------------ tokens */
 
-/* Light: src/app.css `:root` (Yap's warm light). */
+/* Light: desktop/src/app.css `:root` (Yap's warm light). */
 :root {
   color-scheme: light dark;
 
@@ -107,7 +107,7 @@
   --round: min(2.75rem, 56px);
 }
 
-/* Dark: src/app.css `:root[data-yap-theme='dark']` (Yap's warm dark), here
+/* Dark: desktop/src/app.css `:root[data-yap-theme='dark']` (Yap's warm dark), here
    following the phone's own setting. */
 @media (prefers-color-scheme: dark) {
   :root {
@@ -213,7 +213,7 @@ textarea {
 
 /* ------------------------------------------------------------ buttons */
 
-/* Yap's buttons (src/lib/ui/Button.svelte), at a phone's size: 48 px tall,
+/* Yap's buttons (desktop/src/lib/ui/Button.svelte), at a phone's size: 48 px tall,
    the radius grown with them. Filled buttons are ink (dark on light, cream on
    dark); secondary ones a card with a hairline. No hover-only meaning. */
 .btn {
@@ -1986,7 +1986,7 @@ main {
 /* ------------------------------------------------------------ settings */
 
 /* Hands-free, Clearer sound and the microphone: a card of Yap's Settings
-   rows (src/lib/ui/Row.svelte, Toggle.svelte): the words on the left, the
+   rows (desktop/src/lib/ui/Row.svelte, Toggle.svelte): the words on the left, the
    control on the right, hairlines between. */
 .options {
   --ring-gap: var(--yap-s1);

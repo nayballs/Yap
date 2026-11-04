@@ -5,7 +5,7 @@
 // music and videos while you dictate", off by default. A test run never
 // silences or pauses anything: a stub dictation with both on says so in
 // the log. (The real thing, on the test's own sound only, is
-// e2e-real/other-apps.real.js.)
+// desktop/e2e-real/other-apps.real.js.)
 import fs from 'node:fs';
 import { test, expect, openSettings, closeSettings, expectStore, pressHotkey } from './support/fixtures.js';
 

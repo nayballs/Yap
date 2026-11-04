@@ -1,5 +1,5 @@
 // Chat's document editor's markdown, in and out, on its own (no app
-// needed): src/lib/components/richtext/richMarkdown.js over richSchema.js
+// needed): desktop/src/lib/components/richtext/richMarkdown.js over richSchema.js
 // (TipTap on ProseMirror; the harness in support/richtext.js, shared with
 // note-markdown.spec.js). The note stays markdown: read into the editor and
 // written back untouched it must come out character for character, and a

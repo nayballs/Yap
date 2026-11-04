@@ -67,11 +67,11 @@ its own `_headers`).
   tokens, every person and message made up: `HeroDesk` (a dictation playing on a desk, the
   big amber key; it plays once on view, then on a click or the real F9), `Steps` (how it
   works: the picture stays put while the steps scroll), `TidyDiff` (said → marked → typed,
-  with the app's word diff; `src/lib/diff.ts` works it out at build time), `AppKinds` (the
+  with the app's word diff; `desktop/src/lib/diff.ts` works it out at build time), `AppKinds` (the
   rules per kind of window), `MakeItYours`, `NotepadScene`, `AskScene`, `ChatScene` (Chat
   with a document beside it), `VoiceScene` (the Voice Assistant's reading card) and
   `NetworkScene` (Settings → Network connections). Their shared atoms (a Windows window, the
-  bar's capsule and waveform, chips, tabs) are in `src/styles/scenes.css`; `src/lib/tabs.ts`
+  bar's capsule and waveform, chips, tabs) are in `src/styles/scenes.css`; `desktop/src/lib/tabs.ts`
   runs the tabs. Without script each scene shows its finished state; with reduced motion
   nothing plays by itself.
 - `src/components/`: `DownloadButton`, `Faq`, `LeavesTable` ("what leaves your PC"),

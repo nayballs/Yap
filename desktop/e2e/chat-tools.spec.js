@@ -1,5 +1,5 @@
 // The AI Chat changing part of a note through its tools
-// (src-tauri/src/chat/tools.rs + chat/note_text.rs). The model is a local fake
+// (desktop/src-tauri/src/chat/tools.rs + chat/note_text.rs). The model is a local fake
 // (support/fake-llm.js) scripted call by call, so this checks Yap's side of
 // the tool protocol, not a model's judgement: it searches the note, tries an
 // edit whose text is in two places (refused, and told which lines), edits

@@ -1,4 +1,4 @@
-// Notes as pages you can format (2026-10-31; src/lib/components/richtext/:
+// Notes as pages you can format (2026-10-31; desktop/src/lib/components/richtext/:
 // RichNote.svelte on the rich text editor Chat's documents edit on, TipTap
 // on ProseMirror): the Notes view's My thoughts and the meeting notepad's.
 // The quick note's page: quick-note.spec.js; the markdown on its own:

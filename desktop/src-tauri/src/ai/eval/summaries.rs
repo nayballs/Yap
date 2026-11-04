@@ -391,7 +391,7 @@ mod tests {
     use super::*;
 
     fn cases() -> Vec<Case> {
-        load(&Path::new(env!("CARGO_MANIFEST_DIR")).join("../evals/summaries/cases.json"), &[]).unwrap()
+        load(&Path::new(env!("CARGO_MANIFEST_DIR")).join("../../evals/summaries/cases.json"), &[]).unwrap()
     }
 
     #[test]

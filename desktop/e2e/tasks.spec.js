@@ -1,5 +1,5 @@
-// Tasks, the rest (src-tauri/src/notes/tasks.rs; src/lib/components/MeetingTasks.svelte,
-// src/lib/views/TasksView.svelte), end to end on a seeded meeting with an
+// Tasks, the rest (desktop/src-tauri/src/notes/tasks.rs; desktop/src/lib/components/MeetingTasks.svelte,
+// desktop/src/lib/views/TasksView.svelte), end to end on a seeded meeting with an
 // action plan:
 // - a meeting's **Tasks tab** (the notepad and the Notes view): "1 of 4
 //   done", a task added there ("Priya: book flights (due: Monday)" reads its

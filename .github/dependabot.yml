@@ -4,7 +4,7 @@
 version: 2
 updates:
   - package-ecosystem: cargo
-    directory: /src-tauri
+    directory: /desktop/src-tauri
     schedule:
       interval: weekly
       day: monday
@@ -31,6 +31,8 @@ updates:
       - dependency-name: webview2-com
         update-types: [version-update:semver-minor, version-update:semver-major]
 
+  # The repo's npm workspace: the desktop app's packages (desktop/package.json)
+  # and the root's own test tools, in the one package-lock.json.
   - package-ecosystem: npm
     directory: /
     schedule:

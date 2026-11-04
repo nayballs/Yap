@@ -1,12 +1,12 @@
 // Rich snippets (2026-10-31): a snippet's text may carry formatting —
 // bold, italic, links, bulleted and numbered lists, line breaks — in Yap's
 // own small markdown subset, stored as the snippet's text (an older Yap
-// still reads it as text). The twin of src-tauri/src/pasting/rich.rs,
+// still reads it as text). The twin of desktop/src-tauri/src/pasting/rich.rs,
 // which turns it into the paste's HTML and plain text; this one is for the
 // Dictionary view: whether a snippet is rich, the preview of how it
 // pastes (`parse` → a tree the view draws, never HTML strings), its plain
 // text, and the formatting bar's edits (pure: text and selection in,
-// text and selection out). e2e/dictionary-list.spec.js holds both to the
+// text and selection out). desktop/e2e/dictionary-list.spec.js holds both to the
 // same cases.
 //
 // The subset: **bold**, *italic* or _italic_ (never inside a word), a

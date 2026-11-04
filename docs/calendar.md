@@ -12,20 +12,20 @@ on the PC.
 
 | Piece | Code |
 |---|---|
-| Connections, sync, the reminder card, notes, the nudge, the Ask bar's context, when briefs are made and kept | `src-tauri/src/calendar.rs` |
-| Pre-meeting briefs: what goes in, the AI's part and its checks | `src-tauri/src/calendar/brief.rs` (+ `llm::MEETING_BRIEF_PROMPT`) |
-| Google: OAuth for installed apps, the Calendar API | `src-tauri/src/calendar/google.rs` |
-| iCalendar parsing, recurrence | `src-tauri/src/calendar/ics.rs` |
-| Time zones (IANA, Windows names, a feed's own VTIMEZONEs) | `src-tauri/src/calendar/tz.rs` |
-| Which events count, attendees, reminders, matching a recording to a meeting | `src-tauri/src/calendar/model.rs` |
-| Join links | `src-tauri/src/calendar/links.rs` |
-| Join codes: an event's, and a call window's | `src-tauri/src/calendar/codes.rs`, `src-tauri/src/calendar/call_windows.rs` |
-| Folder rules for recurring meetings | `src-tauri/src/calendar/filing.rs` |
-| Folder rules by company | `src-tauri/src/calendar/filing/companies.rs`, `src/lib/notices/companyFolders.js`, `src/lib/settings/CompanyFolders.svelte` |
-| The next meeting in the tray | `calendar.rs` (`tray_item`), `src-tauri/src/shell/tray.rs` |
-| Credential Manager | `src-tauri/src/calendar/vault.rs` |
-| A note's meeting (`Note::event`, `link_event`) | `src-tauri/src/notes.rs` |
-| UI | `src/lib/views/MeetingsView.svelte`, `src/lib/components/ConnectCalendarDialog.svelte`, `src/lib/settings/ConnectorsSection.svelte`, `src/lib/stores/calendar.svelte.js`, `src/lib/views/integrations/CalendarLinkCard.svelte`, `src/lib/components/CalendarMark.svelte`, `src/lib/components/BriefView.svelte`, `src/lib/core/brief.js` |
+| Connections, sync, the reminder card, notes, the nudge, the Ask bar's context, when briefs are made and kept | `desktop/src-tauri/src/calendar.rs` |
+| Pre-meeting briefs: what goes in, the AI's part and its checks | `desktop/src-tauri/src/calendar/brief.rs` (+ `llm::MEETING_BRIEF_PROMPT`) |
+| Google: OAuth for installed apps, the Calendar API | `desktop/src-tauri/src/calendar/google.rs` |
+| iCalendar parsing, recurrence | `desktop/src-tauri/src/calendar/ics.rs` |
+| Time zones (IANA, Windows names, a feed's own VTIMEZONEs) | `desktop/src-tauri/src/calendar/tz.rs` |
+| Which events count, attendees, reminders, matching a recording to a meeting | `desktop/src-tauri/src/calendar/model.rs` |
+| Join links | `desktop/src-tauri/src/calendar/links.rs` |
+| Join codes: an event's, and a call window's | `desktop/src-tauri/src/calendar/codes.rs`, `desktop/src-tauri/src/calendar/call_windows.rs` |
+| Folder rules for recurring meetings | `desktop/src-tauri/src/calendar/filing.rs` |
+| Folder rules by company | `desktop/src-tauri/src/calendar/filing/companies.rs`, `desktop/src/lib/notices/companyFolders.js`, `desktop/src/lib/settings/CompanyFolders.svelte` |
+| The next meeting in the tray | `calendar.rs` (`tray_item`), `desktop/src-tauri/src/shell/tray.rs` |
+| Credential Manager | `desktop/src-tauri/src/calendar/vault.rs` |
+| A note's meeting (`Note::event`, `link_event`) | `desktop/src-tauri/src/notes.rs` |
+| UI | `desktop/src/lib/views/MeetingsView.svelte`, `desktop/src/lib/components/ConnectCalendarDialog.svelte`, `desktop/src/lib/settings/ConnectorsSection.svelte`, `desktop/src/lib/stores/calendar.svelte.js`, `desktop/src/lib/views/integrations/CalendarLinkCard.svelte`, `desktop/src/lib/components/CalendarMark.svelte`, `desktop/src/lib/components/BriefView.svelte`, `desktop/src/lib/core/brief.js` |
 
 ## Connecting a calendar
 
@@ -527,11 +527,11 @@ them at run time).
   Google's events address and items, the card on the Yap bar (mark, status
   line keeping time, answers) and as a Windows notification (its XML), and
   a new connection's count of meetings in the next 7 days.
-- **e2e** (`npm run test:app`): `e2e/calendar.spec.js` against a local iCal
-  server (`e2e/support/calendar-feed.js`: a meeting a minute away with two
+- **e2e** (`npm run test:app`): `desktop/e2e/calendar.spec.js` against a local iCal
+  server (`desktop/e2e/support/calendar-feed.js`: a meeting a minute away with two
   attendees and a Teams link, a weekly recurring one, an all-day event,
   conflicts, a tentative one) and a local fake of Google
-  (`e2e/support/fake-google.js`: consent, token, revoke and the Calendar
+  (`desktop/e2e/support/fake-google.js`: consent, token, revoke and the Calendar
   API, checking PKCE, the client and the bearer token; debug-only
   `YAP_GOOGLE_{AUTH,TOKEN,REVOKE,API}_URL`):
   Connectors (the Outlook guide, a reset link, one that works); the Meetings
@@ -548,7 +548,7 @@ them at run time).
   Outlook steps, a reset link, then "Calendar connected · 7 meetings in the
   next 7 days" and the dialog closing on the meetings) and Google through
   it (waiting, Cancel, a refusal shown in the dialog, then connected).
-  `e2e/calendar-nudge.spec.js`: no calendar yet (the one grey card, the
+  `desktop/e2e/calendar-nudge.spec.js`: no calendar yet (the one grey card, the
   dialog with Google off in a build without its client, and Connectors'
   line), the nudge once after a meeting and "Not now", past notes by day
   with search, Generate summary and the Ask bar opening Chat, and ◉ Take
@@ -557,7 +557,7 @@ them at run time).
   Credential Manager, and records the links Yap would open
   (`calendar_e2e_opened`) instead of opening a browser. Screenshots:
   `test-results/app/screenshots/calendar/` and `…/calendar-nudge/`.
-  `e2e/brief.spec.js` (seeded notes and memory, the fake AI scripted to
+  `desktop/e2e/brief.spec.js` (seeded notes and memory, the fake AI scripted to
   write two good lines and one about someone no note mentions): the
   reminder card's Brief fold (In short without the invented line, last
   week's 1:1 and not someone else's meeting, You's and Priya's open items
@@ -580,10 +580,10 @@ them at run time).
   deleted; by company: domains, the free-mail list, your own domain left
   out, a series rule over a company's and your move over both, the offer
   once per company and folder and once a day, the past ones a Yes moves and
-  Undo). `e2e/company-folders.spec.js`: a meeting with a client filed by
+  Undo). `desktop/e2e/company-folders.spec.js`: a meeting with a client filed by
   hand gives the offer, Yes files the past ones (not one you moved), the
   next meeting with them is made in the folder, Settings lists the rule and
-  Remove works, and Undo puts the past ones back. `e2e/calendar-day.spec.js`: the tray item and tooltip through
+  Remove works, and Undo puts the past ones back. `desktop/e2e/calendar-day.spec.js`: the tray item and tooltip through
   `e2e_tray` (a click opening a note made ahead, then taking notes on a
   meeting a minute away), folder rules from the Meetings view's menu (a
   one-off filed, a series always filed with the earlier note moved when

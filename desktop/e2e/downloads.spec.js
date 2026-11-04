@@ -1,5 +1,5 @@
-// Every big download's progress and Cancel (src-tauri/src/shell/download.rs,
-// src/lib/core/downloads.js, ui/DownloadProgress.svelte), through the
+// Every big download's progress and Cancel (desktop/src-tauri/src/shell/download.rs,
+// desktop/src/lib/core/downloads.js, ui/DownloadProgress.svelte), through the
 // on-device models' stand-in downloads (support/local-llm.js: small fakes
 // served slowly from 127.0.0.1, held half-way on request; YAP_LLM_SOURCES).
 // While one downloads its row says how far, how fast and how long is left;

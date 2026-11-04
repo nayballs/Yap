@@ -1,4 +1,4 @@
-// Documents beside the chat (src-tauri/src/chat/documents.rs; src/lib/views/chat/
+// Documents beside the chat (desktop/src-tauri/src/chat/documents.rs; desktop/src/lib/views/chat/
 // DocPanel.svelte, chatDoc.svelte.js): an answer to keep is written as a
 // document that opens in a panel to the right of the conversation.
 // - `create_document` opens the panel on the outline at once (each section

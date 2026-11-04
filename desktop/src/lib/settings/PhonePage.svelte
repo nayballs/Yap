@@ -1,5 +1,5 @@
 <script>
-  // Settings → Phone (Yap Link, src-tauri/src/link.rs): talk to Yap's AI
+  // Settings → Phone (Yap Link, desktop/src-tauri/src/link.rs): talk to Yap's AI
   // from a phone on the home Wi-Fi. The switch (`linkEnabled`, auto-saved
   // like every setting: the server starts and stops with it), Pair a phone
   // (a QR code of the pairing link, the link with Copy, the one-time

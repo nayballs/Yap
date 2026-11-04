@@ -1,4 +1,4 @@
-// The meeting recorder's audio, end to end (src-tauri/src/meetings/meeting.rs):
+// The meeting recorder's audio, end to end (desktop/src-tauri/src/meetings/meeting.rs):
 // - a hotkey dictation mid-meeting is kept out of "You" (silence instead of
 //   the words, from its pre-roll on) and leaves a "You dictated here" marker
 //   that summaries skip;
@@ -9,7 +9,7 @@
 // - one side quiet for a while as the other talks: Yap says so, and the
 //   recording carries on.
 // No audio device is opened: the recorder plays you.wav / them.wav, 4× real
-// time (src-tauri/src/shell/e2e.rs), whose debug-only hooks stage a dictation
+// time (desktop/src-tauri/src/shell/e2e.rs), whose debug-only hooks stage a dictation
 // (`e2e_meeting_dictation`, the pipeline's own dictation signal over a
 // stretch of that audio) and a device switch (`e2e_meeting_output_change`),
 // and shorten the quiet-side timings (`e2e_meeting_quiet`). The stub engine

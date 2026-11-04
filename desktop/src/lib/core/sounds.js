@@ -1,6 +1,6 @@
 // Yap's sounds (Settings → Dictation → Sounds): the packs and the moments
 // with a sound, in the words Settings shows. The sounds themselves are made
-// in Rust (src-tauri/src/dictation/sound/packs.rs), by these ids.
+// in Rust (desktop/src-tauri/src/dictation/sound/packs.rs), by these ids.
 
 export const SOUND_PACKS = [
   { id: 'classic', name: 'Classic', desc: 'Two bright notes, as Yap has always played' },

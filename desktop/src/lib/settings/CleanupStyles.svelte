@@ -1,6 +1,6 @@
 <script>
   // Language Models → Dictation cleanup → **Styles by app**
-  // (src-tauri/src/ai/cleanup_styles.rs): "Match the style to the app"
+  // (desktop/src-tauri/src/ai/cleanup_styles.rs): "Match the style to the app"
   // (cfg.cleanupStyles), then a row per kind of app — Email, Work chat,
   // Personal chat, Documents, AI prompts, Terminal, Everything else — with
   // its tone (a Segmented), an example of what you say and what Yap types in

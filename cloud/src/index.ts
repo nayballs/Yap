@@ -41,14 +41,14 @@ const limitBody: MiddlewareHandler = async (c, next) => {
 app.use("/api/auth/*", limitBody);
 app.use("/api/account/*", limitBody);
 
-// What Yap sends (src-tauri/src/auth.rs): `state` is a 16-letter nonce, plus
+// What Yap sends (desktop/src-tauri/src/auth.rs): `state` is a 16-letter nonce, plus
 // "-<port>" for a loopback hand-back; `code_challenge` is an S256 PKCE
 // challenge, a SHA-256 in base64url (43 characters). The desktop plugin
 // keeps both until the sign-in finishes, so nothing else gets in.
 const STATE = /^[A-Za-z0-9._~-]{1,128}$/;
 const S256_CHALLENGE = /^[A-Za-z0-9_-]{43}$/;
 
-// Where Yap's browser sign-in starts (src-tauri/src/auth.rs). This replaces
+// Where Yap's browser sign-in starts (desktop/src-tauri/src/auth.rs). This replaces
 // @better-auth/electron's own /electron/init-oauth-proxy, which re-enters the
 // Worker over HTTP (a fetch to its own base URL). On Cloudflare that hop goes
 // back out through the edge and arrives from the Workers egress IP, so every

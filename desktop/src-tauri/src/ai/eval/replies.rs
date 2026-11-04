@@ -27,7 +27,7 @@
 //! Command wrote until 31 Oct 2026 (`llm::rewrite_with_samples`, nothing
 //! selected). **The body** (`--replies-body commands|none`): the Commands
 //! scope's default prompt (`evals/replies/commands-prompt.txt`, a copy of
-//! `src/lib/settings/scopes.js`'s, "Jarvis" for its name: "Hey Jarvis, …"
+//! `desktop/src/lib/settings/scopes.js`'s, "Jarvis" for its name: "Hey Jarvis, …"
 //! needs the scope on) or none (the rewrite shortcut on the cleanup
 //! endpoint).
 //!
@@ -375,7 +375,7 @@ mod tests {
 
     #[test]
     fn the_cases_file_reads_and_every_case_needs_the_screen_by_the_rule_or_the_model() {
-        let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("../evals/replies");
+        let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../evals/replies");
         let cases = load(&dir.join("cases.json"), &[]).unwrap();
         assert!(cases.len() >= 12, "{}", cases.len());
         for c in &cases {

@@ -1,4 +1,4 @@
-// Yap's built-in Skills (src-tauri/src/chat/skills.rs; Wispr Flow's
+// Yap's built-in Skills (desktop/src-tauri/src/chat/skills.rs; Wispr Flow's
 // Windows build has 24), on a new install:
 // - the core six are in the "/" menus where they run — a meeting's Ask box
 //   /followup-email, /decisions and /summary-for; Chat /prep, /standup,

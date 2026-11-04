@@ -1,6 +1,6 @@
 // Shared hotkey-spec helpers for the capture UI and the in-window fallbacks.
 //
-// Spec formats (kept in sync with src-tauri/src/dictation/input_hook.rs parse_key_spec):
+// Spec formats (kept in sync with desktop/src-tauri/src/dictation/input_hook.rs parse_key_spec):
 //   "kb:120"            — bare key (F9)
 //   "kb:ctrl+shift+32"  — modifier combo (Ctrl+Shift+Space)
 //   "kb:165"            — single right-side modifier (VK_RMENU = RightAlt)

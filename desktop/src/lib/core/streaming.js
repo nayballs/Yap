@@ -1,4 +1,4 @@
-// Streamed answers (src-tauri/src/chat/stream.rs): Chat and the notepad's Ask
+// Streamed answers (desktop/src-tauri/src/chat/stream.rs): Chat and the notepad's Ask
 // sheet show an answer as it's written instead of after it's done.
 //
 // - `streamCall(cmd, args, onEvent)` invokes a command with a Tauri channel

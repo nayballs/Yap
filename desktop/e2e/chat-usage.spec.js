@@ -1,5 +1,5 @@
-// The AI usage tracker (src-tauri/src/ai/usage.rs) and Chat's context ring
-// (src/lib/views/chat/ContextRing.svelte, ContextPanel.svelte; Insights'
+// The AI usage tracker (desktop/src-tauri/src/ai/usage.rs) and Chat's context ring
+// (desktop/src/lib/views/chat/ContextRing.svelte, ContextPanel.svelte; Insights'
 // AiUsageCard.svelte), 2026-10-25:
 // - Every AI call's tokens are counted from the answer's own `usage` (and
 //   llama.cpp's `timings`), streamed or whole: a dictation's cleanup and a

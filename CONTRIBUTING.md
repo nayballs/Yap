@@ -11,8 +11,8 @@ Thanks for wanting to help. Bug reports, ideas and pull requests are all welcome
 
 ## Building Yap
 
-Yap is a [Tauri 2](https://tauri.app) app for Windows: Rust in `src-tauri/`, Svelte 5 in
-`src/`. You need Windows 10 or 11, [Node.js](https://nodejs.org) 20+, and the latest stable
+Yap is a [Tauri 2](https://tauri.app) app for Windows: Rust in `desktop/src-tauri/`, Svelte 5 in
+`desktop/src/`. You need Windows 10 or 11, [Node.js](https://nodejs.org) 20+, and the latest stable
 [Rust](https://rustup.rs) (CI fails on any warning from the newest stable, so run
 `rustup update` now and then).
 
@@ -38,7 +38,7 @@ If you have Yap installed, quit it before starting a dev build: both use `%APPDA
 
 ```bash
 npm run build                                               # the frontend
-cd src-tauri
+cd desktop/src-tauri
 cargo clippy --locked --all-targets -- -D warnings          # what CI runs, warnings are errors
 cargo clippy --locked --release -- -D warnings
 cargo test --locked
@@ -48,7 +48,7 @@ npm run test:app                                            # the end-to-end sui
 
 - **`npm run test:app`** builds a stub debug Yap and drives it with Playwright: about 20
   seconds plus the build, with screenshots in `test-results/app/screenshots/`. Add or extend
-  a spec in `e2e/` for anything you change in the UI. Guide: [docs/e2e-tests.md](./docs/e2e-tests.md).
+  a spec in `desktop/e2e/` for anything you change in the UI. Guide: [docs/e2e-tests.md](./docs/e2e-tests.md).
 - **`npm run test:real`** pastes into real windows on your PC, so it takes the keyboard focus
   for a couple of minutes. It waits until the PC has been idle 10 minutes
   (`YAP_ROBOT_FORCE=1` starts it now) and stops the moment you touch the keyboard or mouse.
@@ -71,15 +71,14 @@ The repository is public, and Yap handles people's words. So:
   `example.com` addresses, `07700 900xxx` phone numbers, fictional towns. Never paste a real
   dictation, a real meeting or someone's name into the repo or an issue.
 - Logs never hold what someone said or typed at `info` level or above: lengths, counts and
-  ids only (`src-tauri/src/privacy/log_privacy.rs` checks this).
+  ids only (`desktop/src-tauri/src/privacy/log_privacy.rs` checks this).
 
 ## Where things are
 
 | Folder | What it is |
 |---|---|
-| `src/` + `src-tauri/` | **The desktop app** (Tauri): its windows (Svelte, `src/`) and its core (Rust, `src-tauri/`). One app for every desktop system: Windows today, macOS and Linux later (see "Platforms" in [app-shell.md](./docs/architecture/app-shell.md#platforms-windows-today-macos-and-linux-later)). |
-| `e2e/`, `e2e-real/` | The desktop app's UI tests (Playwright on a real build) and its robot tests (real pastes into real windows). |
-| [`phone/`](./phone/README.md) | **The phone app**: `web/` today, the page the PC serves to a paired phone (`page/` and its `tests/`). Native phone apps go beside it. The PC's side is `src-tauri/src/link/`. |
+| `desktop/` | **The desktop app** (Tauri): its windows (Svelte, `src/`), its core (Rust, `src-tauri/`), its UI tests (`e2e/`, Playwright on a real build) and robot tests (`e2e-real/`, real pastes into real windows). One app for every desktop system: Windows today, macOS and Linux later (see "Platforms" in [app-shell.md](./docs/architecture/app-shell.md#platforms-windows-today-macos-and-linux-later)). |
+| [`phone/`](./phone/README.md) | **The phone app**: `web/` today, the page the PC serves to a paired phone (`page/` and its `tests/`). Native phone apps go beside it. The PC's side is `desktop/src-tauri/src/link/`. |
 | `cloud/` | The optional accounts service (a Cloudflare Worker). |
 | `site/` | The website. |
 | `evals/` | The model evaluations' cases (`npm run eval`). |

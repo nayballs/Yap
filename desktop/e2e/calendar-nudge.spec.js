@@ -1,4 +1,4 @@
-// Before any calendar is connected (src-tauri/src/calendar.rs): the
+// Before any calendar is connected (desktop/src-tauri/src/calendar.rs): the
 // Meetings view's one "No meetings found" card and the "Connect your
 // calendar" dialog it opens, a build without a Google client explaining
 // itself (there and in Settings → Connectors), the one-time nudge after a

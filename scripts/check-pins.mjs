@@ -134,7 +134,7 @@ async function syncIssue(rows, text) {
 }
 
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
-  const pins = pinsIn(rustFiles(path.join(ROOT, 'src-tauri', 'src')));
+  const pins = pinsIn(rustFiles(path.join(ROOT, 'desktop', 'src-tauri', 'src')));
   const rows = [];
   for (const p of pins) rows.push(await check(p));
   const text = report(rows);

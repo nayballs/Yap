@@ -1,4 +1,4 @@
-// A stand-in for llama.cpp's GitHub releases (src-tauri/src/ai/local_llm/
+// A stand-in for llama.cpp's GitHub releases (desktop/src-tauri/src/ai/local_llm/
 // engine/feed.rs): `/releases` answers like GitHub's releases API (builds as
 // pre-releases, each Windows zip with its "sha256:" digest), and
 // `/download/<tag>/<name>` serves the zips — a stand-in `llama-server.exe`

@@ -1,4 +1,4 @@
-// Meeting search and Ask across meetings (src-tauri/src/search/): Settings →
+// Meeting search and Ask across meetings (desktop/src-tauri/src/search/): Settings →
 // Privacy & data → "Search my meetings by meaning" downloads its model (and
 // the on-device engine) from stand-ins, switches it on and reads every
 // meeting and note in the background; the Meetings view's search lists the

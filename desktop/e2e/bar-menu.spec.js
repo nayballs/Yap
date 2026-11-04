@@ -1,4 +1,4 @@
-// The Yap bar's ^ menu extras (src-tauri/src/bar/menu.rs, src/lib/bar/Overlay.svelte;
+// The Yap bar's ^ menu extras (desktop/src-tauri/src/bar/menu.rs, desktop/src/lib/bar/Overlay.svelte;
 // Wispr Flow's Flow Bar menu, by behaviour): the microphone in use, with the
 // others connected in the order Yap tries them (picking one puts it first in
 // Settings → Dictation → Microphone's order), Paste last transcript (into the

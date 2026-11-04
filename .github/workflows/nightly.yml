@@ -67,7 +67,7 @@ jobs:
       - name: Rust cache
         uses: swatinem/rust-cache@v2
         with:
-          workspaces: "./src-tauri -> target"
+          workspaces: "./desktop/src-tauri -> target"
 
       # GPU whisper uses the VULKAN backend (universal — NVIDIA/AMD/Intel), which
       # needs the Vulkan SDK (glslc + headers + loader) to COMPILE ggml-vulkan.
@@ -95,7 +95,7 @@ jobs:
 
       # Derive a monotonic prerelease version = <baseVersion>-nightly.<run_number>
       # (run_number is monotonic across dispatch + schedule, so the updater always
-      # sees a newer semver than the previous nightly). Patch it into package.json,
+      # sees a newer semver than the previous nightly). Patch it into desktop/'s package.json,
       # tauri.conf.json and Cargo.toml BEFORE the build, and export it to
       # $GITHUB_ENV as NIGHTLY_VERSION for later steps.
       - name: Compute + patch nightly version
@@ -105,14 +105,14 @@ jobs:
         run: |
           cat > patch-nightly-version.cjs <<'EOF'
           const fs = require('fs');
-          const tauriConfPath = 'src-tauri/tauri.conf.json';
+          const tauriConfPath = 'desktop/src-tauri/tauri.conf.json';
           const conf = JSON.parse(fs.readFileSync(tauriConfPath, 'utf8'));
           const base = conf.version; // e.g. "0.1.0"
           const runNumber = process.env.RUN_NUMBER;
           const version = `${base}-nightly.${runNumber}`;
 
-          // package.json
-          const pkgPath = 'package.json';
+          // desktop/package.json
+          const pkgPath = 'desktop/package.json';
           const pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf8'));
           pkg.version = version;
           fs.writeFileSync(pkgPath, JSON.stringify(pkg, null, 2) + '\n');
@@ -123,7 +123,7 @@ jobs:
 
           // Cargo.toml — replace ONLY the version line inside [package], leaving
           // dependency versions untouched.
-          const cargoPath = 'src-tauri/Cargo.toml';
+          const cargoPath = 'desktop/src-tauri/Cargo.toml';
           const lines = fs.readFileSync(cargoPath, 'utf8').split(/\r?\n/);
           let section = '';
           let patched = false;
@@ -174,6 +174,9 @@ jobs:
           # Same broad-compat build as stable (ONNX/DirectML + whisper CPU, no
           # CUDA), PLUS the nightly config merge that points the updater endpoint
           # at the nightly channel's latest.json.
+          # The desktop app's folder: tauri runs there, so the nightly config
+          # below is relative to it.
+          projectPath: desktop
           args: "--features engines -c src-tauri/tauri.nightly.conf.json"
 
       # "What's new" for the in-app update toast (latest.json `notes`) and the

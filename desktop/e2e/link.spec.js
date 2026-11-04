@@ -1,4 +1,4 @@
-// Yap Link, home preview (src-tauri/src/link.rs, docs/architecture/link.md):
+// Yap Link, home preview (desktop/src-tauri/src/link.rs, docs/architecture/link.md):
 // a phone talks to Yap's AI over the home Wi-Fi. Here the "phone" is a
 // headless Chromium (Playwright's own if installed, else Edge) with a fake
 // microphone playing a tone, opening the real page Yap serves

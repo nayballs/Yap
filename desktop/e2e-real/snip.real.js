@@ -1,4 +1,4 @@
-// Snip to Chat for real (src-tauri/src/snip.rs, docs/architecture/snip.md):
+// Snip to Chat for real (desktop/src-tauri/src/snip.rs, docs/architecture/snip.md):
 // the robot's own Yap captures the REAL monitors (Windows.Graphics.Capture,
 // FP16 on an HDR one), its overlay comes up over them, and a real drag
 // (SendInput, the helper's `snipdrag` — refused unless the robot's own

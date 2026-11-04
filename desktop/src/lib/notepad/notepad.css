@@ -1,5 +1,5 @@
 /* The meeting notepad's shared styles: what more than one of its parts
- * (src/lib/notepad/) draws — the tooltips and the ink button. Everything is
+ * (desktop/src/lib/notepad/) draws — the tooltips and the ink button. Everything is
  * under .pad, the notepad's page, so nothing here reaches another window or
  * the components it shows (SpeakerMenu, the toasts…; none of them uses
  * these names). Each selector weighs what its scoped original did — one

@@ -341,7 +341,7 @@ The meeting recorder and its audio kept on disk, rolling digests and the action 
   —, *Always* (the best model there is, the live one when it's the best),
   *Never*; never without its audio, on a pause, or for "Started by
   mistake?". **Which model** (`best_model`, pure): the most accurate
-  installed model (`MODELS`: `src/lib/core/speechModels.js`'s leaderboard figures and
+  installed model (`MODELS`: `desktop/src/lib/core/speechModels.js`'s leaderboard figures and
   each model's languages) that speaks the meeting's language — Settings'
   speech language, else Windows' (`about_you`); unknown: one that speaks
   every language the live one does — and beats the live one (`Meta::model`,

@@ -1,4 +1,4 @@
-// The calendar (src-tauri/src/calendar.rs): Settings → Connectors, the
+// The calendar (desktop/src-tauri/src/calendar.rs): Settings → Connectors, the
 // Meetings view, the reminder card before a meeting, notes that take the
 // meeting's name and attendees, call detection not asking twice, switching
 // notes between back-to-back meetings, Google Calendar in one click, and

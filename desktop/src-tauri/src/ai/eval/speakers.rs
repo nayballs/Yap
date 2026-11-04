@@ -479,7 +479,7 @@ mod tests {
     use super::*;
 
     fn scenarios() -> Vec<Scenario> {
-        let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("..").join("evals").join("speakers");
+        let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..").join("evals").join("speakers");
         load(&dir).expect("the speaker scenarios load")
     }
 

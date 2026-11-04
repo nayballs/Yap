@@ -1,4 +1,4 @@
-// Meeting guard rails (src-tauri/src/calls/meeting_guard.rs, calls/capture.rs): Yap's
+// Meeting guard rails (desktop/src-tauri/src/calls/meeting_guard.rs, calls/capture.rs): Yap's
 // meeting windows leave screen captures while a meeting records (and Yap
 // warns when that's switched off), the maximum recording length (its
 // warning, Keep going, the stop), "When a call ends → Stop and summarise

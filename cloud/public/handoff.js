@@ -13,7 +13,7 @@ const readCookie = () => {
 };
 
 // Builds without the registered scheme (dev, portable) listen on a local
-// port instead and append it to `state` as "-<port>" (src-tauri/src/auth.rs).
+// port instead and append it to `state` as "-<port>" (desktop/src-tauri/src/auth.rs).
 function loopbackPort(code) {
   try {
     const json = atob(code.replace(/-/g, '+').replace(/_/g, '/'));

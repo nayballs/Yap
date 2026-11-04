@@ -14,7 +14,7 @@
 //! changes on a date applies to the calls it covers.
 //!
 //! **Checked 2026-10-25** against [`SOURCES`]. Review it with the curated
-//! model lists (`src/lib/core/ppModels.js`, `CURATED_AT`): add a row per new
+//! model lists (`desktop/src/lib/core/ppModels.js`, `CURATED_AT`): add a row per new
 //! model, move [`PRICES_AS_OF`].
 
 /// The day the table was last checked against the providers' pages.

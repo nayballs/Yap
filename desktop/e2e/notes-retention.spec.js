@@ -1,5 +1,5 @@
 // "Delete meeting transcripts after" (Settings → Privacy & data;
-// src-tauri/src/notes/retention.rs), end to end on seeded meetings: one from
+// desktop/src-tauri/src/notes/retention.rs), end to end on seeded meetings: one from
 // 400 days ago, with its audio kept, and one from last week. Set to 365
 // days, the old meeting's transcript goes at once — its lines, digests and
 // stop marks, and its audio with them — while its notes, its summary and

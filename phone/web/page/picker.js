@@ -1,5 +1,5 @@
 // Chat's model picker on the phone: the desktop's own picker
-// (src/lib/views/chat/ChatModelPicker.svelte) as a sheet from the bottom,
+// (desktop/src/lib/views/chat/ChatModelPicker.svelte) as a sheet from the bottom,
 // with the same structure and words — the provider rail with its logos
 // (Recent, Groq, Gemini, Claude, ChatGPT, OpenRouter, Custom, On this PC),
 // each provider's **Latest** first and **More models (N)** opening in place,
@@ -8,7 +8,7 @@
 // use, and the effort under it.
 //
 // The rows are built by the desktop's own code: core/chatPicker.js and the
-// pure modules it imports (src/lib/core/, served by the PC at core/ as they
+// pure modules it imports (desktop/src/lib/core/, served by the PC at core/ as they
 // are), from what the PC sends in `ready.picker` — the very data the
 // desktop picker reads (link/models.rs `picker`). Picking sends `set_model`
 // with the row's provider, model, server or file, which the PC switches as
@@ -42,7 +42,7 @@ import { labelFor } from './core/modelCatalog.js';
 import { CHATGPT, GPT_TAB, GPT_WAYS, PROVIDER_LABELS } from './core/providerIds.js';
 import { effortNow, effortOptions, effortHint, effortLabel, FAST_NOTE } from './core/effort.js';
 
-/** The marks the PC serves (src-tauri/build.rs LINK_SHARED). */
+/** The marks the PC serves (desktop/src-tauri/build.rs LINK_SHARED). */
 const SERVED = new Set(['openai', 'openai-oss', 'claude', 'gemini', 'gemma', 'groq', 'llama', 'mistral', 'openrouter', 'qwen', 'xai']);
 const RECENT_KEY = 'yap.link.recent';
 const NS = 'http://www.w3.org/2000/svg';

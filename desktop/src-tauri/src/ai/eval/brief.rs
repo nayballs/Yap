@@ -448,7 +448,7 @@ mod tests {
     /// let through, against the scenario they came from.
     #[test]
     fn what_slipped_through_before_is_caught() {
-        let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("..").join("evals").join("briefs");
+        let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..").join("evals").join("briefs");
         let now = chrono::Utc::now().timestamp();
         let facts_of = |name: &str| {
             let s = load(&dir, &[name.to_string()]).unwrap().remove(0);
@@ -506,7 +506,7 @@ mod tests {
     /// (Yap's own part) already passes what it can.
     #[test]
     fn the_scenarios_build_and_yaps_own_part_passes() {
-        let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("..").join("evals").join("briefs");
+        let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..").join("evals").join("briefs");
         let scenarios = load(&dir, &[]).unwrap();
         assert!(scenarios.len() >= 5);
         let now = chrono::Utc::now().timestamp();

@@ -1,5 +1,5 @@
 // The call apps' own icons, as installed on this PC: { appId: data URL }
-// from `meeting_app_icons` (src-tauri/src/calls/app_icons.rs), for CallAppIcon.
+// from `meeting_app_icons` (desktop/src-tauri/src/calls/app_icons.rs), for CallAppIcon.
 // Each window asks the first time it draws one, and again when it draws one
 // 10 minutes later (an app installed or updated meanwhile). Rust keeps the
 // icons in <data>/icons and remakes one only when its app changes, so asking

@@ -1,17 +1,20 @@
 {
-  "name": "yap",
-  "version": "0.1.1",
-  "description": "Yap — a tiny local voice dictation pill",
+  "name": "yap-repo",
+  "private": true,
+  "description": "Yap: the desktop app (desktop/), the phone app (phone/), the accounts service (cloud/) and the website (site/)",
   "type": "module",
+  "workspaces": [
+    "desktop"
+  ],
   "scripts": {
-    "dev": "vite",
-    "build": "vite build",
-    "preview": "vite preview",
-    "tauri": "tauri",
-    "test:app": "node e2e/build.mjs && playwright test -c e2e",
-    "test:app:build": "node e2e/build.mjs",
-    "test:real": "node e2e-real/build.mjs && playwright test -c e2e-real",
-    "test:real:build": "node e2e-real/build.mjs",
+    "dev": "npm run dev -w desktop",
+    "build": "npm run build -w desktop",
+    "preview": "npm run preview -w desktop",
+    "tauri": "npm run tauri -w desktop --",
+    "test:app": "npm run test:app -w desktop --",
+    "test:app:build": "npm run test:app:build -w desktop",
+    "test:real": "npm run test:real -w desktop --",
+    "test:real:build": "npm run test:real:build -w desktop --",
     "test:link": "node --test phone/web/tests/dsp.test.mjs && playwright test -c phone/web/tests",
     "eval": "node scripts/eval.mjs",
     "hooks:install": "node scripts/install-hooks.mjs",
@@ -21,40 +24,7 @@
     "test:pins": "node --test scripts/check-pins.test.mjs",
     "test:launcher": "node --test scripts/dev-launcher.test.mjs"
   },
-  "dependencies": {
-    "@fontsource-variable/eb-garamond": "^5.3.0",
-    "@fontsource-variable/figtree": "^5.3.0",
-    "@fontsource-variable/geist": "5.3.0",
-    "@fontsource-variable/literata": "5.3.0",
-    "@fontsource/opendyslexic": "5.3.0",
-    "@tauri-apps/api": "^2",
-    "@tauri-apps/plugin-dialog": "^2.8.4",
-    "@tiptap/core": "3.32.2",
-    "@tiptap/extension-blockquote": "3.32.2",
-    "@tiptap/extension-bold": "3.32.2",
-    "@tiptap/extension-code": "3.32.2",
-    "@tiptap/extension-code-block": "3.32.2",
-    "@tiptap/extension-document": "3.32.2",
-    "@tiptap/extension-hard-break": "3.32.2",
-    "@tiptap/extension-heading": "3.32.2",
-    "@tiptap/extension-horizontal-rule": "3.32.2",
-    "@tiptap/extension-italic": "3.32.2",
-    "@tiptap/extension-list": "3.32.2",
-    "@tiptap/extension-paragraph": "3.32.2",
-    "@tiptap/extension-strike": "3.32.2",
-    "@tiptap/extension-table": "3.32.2",
-    "@tiptap/extension-text": "3.32.2",
-    "@tiptap/extensions": "3.32.2",
-    "@tiptap/pm": "3.32.2",
-    "dompurify": "3.4.17",
-    "markdown-it": "15.0.3"
-  },
   "devDependencies": {
-    "@playwright/test": "^1.64.1",
-    "@sveltejs/vite-plugin-svelte": "^5",
-    "@tauri-apps/cli": "^2",
-    "jsdom": "26.1.0",
-    "svelte": "^5",
-    "vite": "^6.4.5"
+    "@playwright/test": "^1.64.1"
   }
 }

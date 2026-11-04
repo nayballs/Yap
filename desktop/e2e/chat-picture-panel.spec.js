@@ -1,7 +1,7 @@
 // Pictures Chat found online, shown beside the chat (find and show,
-// 2026-10-31: src/lib/views/chat/DocPanel.svelte, PictureTab.svelte,
+// 2026-10-31: desktop/src/lib/views/chat/DocPanel.svelte, PictureTab.svelte,
 // PicturePills.svelte, chatDoc.svelte.js, panelTabs.js, pictureZoom.js;
-// src-tauri/src/chat/pictures.rs).
+// desktop/src-tauri/src/chat/pictures.rs).
 // - An answer's `pictures` show as thumbnail pills under it, beside its
 //   document's pill; a click opens the panel on that picture.
 // - The panel is a workspace: a tab per document and picture of the

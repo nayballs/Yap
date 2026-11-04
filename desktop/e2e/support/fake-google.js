@@ -1,5 +1,5 @@
 // A local stand-in for Google's OAuth endpoints and the Calendar API, for
-// the one-click Google Calendar connect (src-tauri/src/calendar/google.rs,
+// the one-click Google Calendar connect (desktop/src-tauri/src/calendar/google.rs,
 // pointed here with the debug-only YAP_GOOGLE_*_URL variables and a fake
 // client id). It checks what a real Google would: the PKCE verifier against
 // the challenge, the client, the redirect address, the scopes asked for, and

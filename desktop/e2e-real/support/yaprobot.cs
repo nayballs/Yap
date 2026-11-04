@@ -1,4 +1,4 @@
-// yaprobot.exe — the real-app robot tests' Windows helper (e2e-real/,
+// yaprobot.exe — the real-app robot tests' Windows helper (desktop/e2e-real/,
 // docs/e2e-tests.md "Real-app robot tests"). Compiled on the fly with the
 // C# compiler every Windows has (.NET Framework 4, C# 5: no string
 // interpolation, no `?.`), by support/targets.js.

@@ -1,5 +1,5 @@
 // The on-device model reading screenshots (Snip to Chat, phase 3,
-// src-tauri/src/ai/local_llm/vision.rs, docs/architecture/snip.md):
+// desktop/src-tauri/src/ai/local_llm/vision.rs, docs/architecture/snip.md):
 // - Chat on Qwen3.5 4B on this PC: a screenshot's line offers "Read
 //   screenshots on this PC" (its projector, a download) beside "Send its
 //   text instead"; downloaded there (its progress in the line), the line

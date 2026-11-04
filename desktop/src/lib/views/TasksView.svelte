@@ -1,6 +1,6 @@
 <script>
   // Tasks (sidebar → Tasks): every task in the meetings' action plans (and
-  // any note's summary with "- [ ]" lines), from src-tauri/src/notes/tasks.rs.
+  // any note's summary with "- [ ]" lines), from desktop/src-tauri/src/notes/tasks.rs.
   // Grouped by meeting (newest first) or by person (You first); each with
   // who, when it's due, a link back to the meeting and to the moment it
   // was said ("Said at 12:40": the note opens in Notes at that line). A

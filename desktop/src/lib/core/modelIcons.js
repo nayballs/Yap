@@ -1,11 +1,11 @@
 // Which mark a provider or a model family gets (the Chat model chip, its
 // picker, Settings' model lists), by id: the logos themselves are
-// src/assets/providers/<id>.svg, imported as URLs in providerIcons.js. Pure —
+// desktop/src/assets/providers/<id>.svg, imported as URLs in providerIcons.js. Pure —
 // no imports, no Tauri, no Svelte, no assets — because Yap Link's phone page
-// loads this file as it is (`src-tauri/build.rs` serves it at
+// loads this file as it is (`desktop/src-tauri/build.rs` serves it at
 // core/modelIcons.js, the logos at providers/<id>.svg).
 
-/** The marks there are, by id (each `src/assets/providers/<id>.svg`; "whisper" is OpenAI's). */
+/** The marks there are, by id (each `desktop/src/assets/providers/<id>.svg`; "whisper" is OpenAI's). */
 export const ICON_FILES = {
   openai: 'openai',
   'openai-oss': 'openai-oss',

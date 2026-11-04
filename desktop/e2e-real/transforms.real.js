@@ -9,7 +9,7 @@
 //
 // `realtest_transform` stands in for the shortcut: the window in front,
 // its selection read as at the key press (no Ctrl+C in robot mode). A
-// stand-in AI model answers (e2e/support/fake-llm.js: the cleanup, and the
+// stand-in AI model answers (desktop/e2e/support/fake-llm.js: the cleanup, and the
 // transform by its instruction). Written 2026-10-24.
 import { test, expect } from './support/robot.js';
 import { edgeExe, hasWindowsTerminal } from './support/targets.js';

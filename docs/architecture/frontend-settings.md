@@ -50,7 +50,7 @@ store.
 | `settings/CommandsPage.svelte` / `VoicePage.svelte` / `SpeechPage.svelte` | The other three pages that were inline; `PageExplain.svelte` is Commands' and the Voice Assistant's example note |
 
 Since 2026-10-24 `Settings.svelte` and every part only Settings uses sit in
-`src/lib/settings/` with the pages: `AboutYouSettings`, `AppearanceSettings`,
+`desktop/src/lib/settings/` with the pages: `AboutYouSettings`, `AppearanceSettings`,
 `AccountSection`, `ConnectorsSection`, `McpSection`, `MemorySection`,
 `VoiceSettings`, `ElevenLabsSettings`, `HostedVoiceSettings`,
 `CloudVoiceList`, `WebSearchSettings`,
@@ -184,7 +184,7 @@ on an element that also has a `settings.css` class (`set-note`,
   closes. The nav shows each page's count and dims the rest. Matching: every
   word must be found in the label (weighted most), keywords, line, section or
   page name; a word's start beats its middle; light stemming (`stems`).
-  `e2e/settings-search.spec.js` opens **every index entry** and finds its row,
+  `desktop/e2e/settings-search.spec.js` opens **every index entry** and finds its row,
   so the index can't drift from the pages.
 - **860 × 600** (below 960 px of window): the nav is a **58 px icon rail**
   (28 px items: all 13 pages fit at 600 px without scrolling; a 14th page
@@ -222,7 +222,7 @@ on an element that also has a `settings.css` class (`set-note`,
   headings ink 15:1, the ✕ 4.8:1, an off switch's edge 3.4:1, the focus ring
   3.8:1. Before: descriptions 3.1:1, headings 2.4:1, nav labels 2.3:1, links
   3.75:1, an off track 1.2:1. The suite measures them in the app. **In
-  dark** (`e2e/theme.spec.js`, the lowest of each on the page): descriptions
+  dark** (`desktop/e2e/theme.spec.js`, the lowest of each on the page): descriptions
   and page lines 6.8:1, labels and headings 15:1, nav group labels 7.2:1,
   nav labels 11:1, links 9.1:1, the ✕ 6.8:1, an off switch's edge 4.9:1, an
   on switch 14:1 (its knob on it 14:1), the focus ring (`#f0b04a`) 9.1:1.

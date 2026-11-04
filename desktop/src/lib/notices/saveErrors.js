@@ -1,4 +1,4 @@
-// A save Yap couldn't make (src-tauri/src/shell/saving.rs): a command's error
+// A save Yap couldn't make (desktop/src-tauri/src/shell/saving.rs): a command's error
 // "Couldn't save your note: the disk is full." The change itself happened —
 // Yap keeps it in memory and saves it with the next change — so the caller
 // carries on as if it worked, and the person sees one toast that says so,

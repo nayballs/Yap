@@ -2,7 +2,7 @@
   // Settings → MCP (Connections): Wispr Flow's Settings → MCP page, local.
   // One light card per AI app, in Wispr's order (Claude, ChatGPT, Gemini,
   // Cursor), each with "Add to …": Yap edits that app's own config file
-  // (src-tauri/src/integrations/mcp_clients.rs) so the app starts `yap.exe mcp`
+  // (desktop/src-tauri/src/integrations/mcp_clients.rs) so the app starts `yap.exe mcp`
   // (integrations/mcp.rs). Then "All other apps": one-click rows for the other apps Yap
   // knows, plus the command and JSON for anything else. The apps read
   // meetings and notes through the running Yap's Local API, so the page says

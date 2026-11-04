@@ -1,4 +1,4 @@
-// A paste read late (src-tauri/src/pasting/read_check.rs). Before the
+// A paste read late (desktop/src-tauri/src/pasting/read_check.rs). Before the
 // clipboard-read check, your clipboard came back half a second after the
 // paste keys whatever had happened, so an app that read the clipboard later
 // than that pasted your OLD clipboard instead of the dictation. Now it comes
@@ -11,7 +11,7 @@
 // later, or never.
 //
 // Run alone (it takes the keyboard focus for a minute):
-//   npm run test:real:build && npx playwright test -c e2e-real paste-late
+//   npm run test:real:build && npx playwright test -c desktop/e2e-real paste-late
 import { test, expect } from './support/robot.js';
 
 const COULDNT = "Couldn't paste · it's copied, press Ctrl+V";

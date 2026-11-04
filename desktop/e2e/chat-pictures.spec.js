@@ -1,4 +1,4 @@
-// Find and show pictures (src-tauri/src/chat/pictures.rs, web/page.rs'
+// Find and show pictures (desktop/src-tauri/src/chat/pictures.rs, web/page.rs'
 // page_images, web/turn.rs' candidates, chat/stream.rs `Event::Picture`,
 // chat/chats.rs `pictures`, privacy/net.rs "A picture from the web"):
 // - A page read lists its pictures as ids (p1, p2…), the question's first,

@@ -1,4 +1,4 @@
-// Skills (src-tauri/src/chat/skills.rs): saved instructions run by typing
+// Skills (desktop/src-tauri/src/chat/skills.rs): saved instructions run by typing
 // `/name` — in a meeting's Ask box on that meeting, in Chat and Ask across
 // meetings on the meetings. Pure helpers, shared by every box that takes a
 // Skill (stores/skills.svelte.js keeps the list), and the one-tap prompts

@@ -1,4 +1,4 @@
-// A chat sized to its model, the page's side (src-tauri/src/chat/budget.rs,
+// A chat sized to its model, the page's side (desktop/src-tauri/src/chat/budget.rs,
 // compact.rs): the same token estimate Rust makes (so the message box says
 // "too long" before a paste is sent), Rust's "too long" sentence known by its
 // start, and the summary's words.

@@ -3,7 +3,7 @@
 // into "Latest", the newest model of each of its families, and "More
 // models (N)" under it, the rest, as the Claude Code app keeps the latest
 // Opus, Fable, Sonnet and Haiku up front. The rule, in one place (pure: no
-// Tauri, no Svelte; its tests are e2e/latest-models.spec.js):
+// Tauri, no Svelte; its tests are desktop/e2e/latest-models.spec.js):
 //
 // - Latest: the provider's newest model of each family, in this order —
 //   Anthropic: Opus, Fable, Sonnet, Haiku; OpenAI: its flagship and its

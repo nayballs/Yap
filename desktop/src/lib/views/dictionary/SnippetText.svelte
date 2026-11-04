@@ -5,7 +5,7 @@
   // once it has formatting, a preview of how it pastes: formatted (Outlook,
   // Word, Gmail, Teams, Slack…) or as plain text (terminals, code editors,
   // AI chat boxes). The formatting is Yap's markdown subset, kept as the
-  // snippet's text (richSnippet.js; the paste is src-tauri's pasting/
+  // snippet's text (richSnippet.js; the paste is desktop/src-tauri's pasting/
   // rich.rs). The bar's edits go into the box as typing does, so Ctrl+Z
   // takes them back. The preview is drawn from the parsed text, never as
   // HTML, and its links aren't followed.

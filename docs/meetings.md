@@ -21,26 +21,26 @@ takes its meeting's name, attendees and invite ([The calendar](#the-calendar),
 
 | Piece | Code |
 |---|---|
-| Recorder: capture, chunking, echo check, dictations kept out, following the output device, quiet sides | `src-tauri/src/meetings/meeting.rs` |
-| The dictation signal; the correction dictionary (`apply_corrections`) | `src-tauri/src/dictation/pipeline.rs` |
-| Guard rails: maximum length, quiet meetings and check-ins, the meeting shortcut, notices | `src-tauri/src/calls/meeting_guard.rs` |
-| Hiding meeting windows from screen capture | `src-tauri/src/calls/capture.rs` |
-| Rolling digests, the final input, the checks; the notepad's catch-up, helper and title inputs | `src-tauri/src/meetings/meeting_summary.rs` |
-| The end of a meeting: pause or end, "Started by mistake?", the action plan job | `src-tauri/src/meetings/meeting_end.rs` |
-| "What did I miss?", the one-tap helpers (Questions to ask, Make me sound smart, Follow-up email, Gaps and risks, Make notes longer), a Skill on the meeting, the AI meeting title | `src-tauri/src/meetings/meeting_assist.rs` (inputs: `meeting_summary/chips.rs`) |
-| Skills (/name) and Chat's one-tap prompts | `src-tauri/src/chat/skills.rs` |
-| First-meeting coach marks in the notepad | `src-tauri/src/meetings/coach_marks.rs` |
-| The notepad window: docking, split screen | `src-tauri/src/meetings/notepad.rs` |
-| Who said what: the speaker map, names on lines, 1:1 calendar guesses, line times and splitting | `src-tauri/src/speakers.rs`, `src/lib/components/SpeakerMenu.svelte` |
-| Names for the voices: suggestions from what's said and the invite, the AI's checked answers, "It was me"; the cards | `src-tauri/src/speakers/naming.rs`, `src/lib/components/SpeakerCard.svelte` |
-| Who the call app shows talking (experimental); `yap.exe call-dump` | `src-tauri/src/speakers/call_ui.rs` (+ `call_ui/profiles.json`) |
-| The calendar: meetings, the reminder card, a note's meeting | `src-tauri/src/calendar.rs` (+ `calendar/`; [`calendar.md`](./calendar.md)) |
-| Prompts (`MEETING_DIGEST_PROMPT`, `ACTION_PLAN_BASE_PROMPT`, `ACTION_PLAN_DEFAULT_FRAGMENT`, `CATCH_UP_PROMPT`, `MEETING_ASK_PROMPT`, `MEETING_QUESTIONS_PROMPT`, `MEETING_FOLLOW_UP_PROMPT`, `MEETING_BLIND_SPOTS_PROMPT`, `MEETING_TITLE_PROMPT`) | `src-tauri/src/ai/llm.rs` |
-| Storage (`Note::digests`, `Note::speakers`, `TranscriptSegment::echo` / `::dictated` / `::speaker` / `::start_ms` / `::words`, `Action::kind`, `Note::title_auto`) | `src-tauri/src/notes.rs` |
-| The action run (`note_enhance` / `run_enhance`) | `src-tauri/src/notes/commands.rs` |
-| Fixing the notes: a line's words, the summary's, never written over unasked; tasks ticked and listed | `src-tauri/src/notes/note_edits.rs`, `src-tauri/src/notes/tasks.rs`, `src/lib/core/noteEdits.js`, `src/lib/views/TasksView.svelte` |
-| UI | `src/lib/NotesView.svelte`, `src/lib/Notepad.svelte`, `src/lib/stores/meetingSummary.svelte.js` |
-| Importing another app's transcript (Teams, Zoom, Meet, Otter, Granola) | `src-tauri/src/meetings/import.rs` (+ `import/`), `src/lib/components/TranscriptImportDialog.svelte`, `src/lib/stores/transcriptImport.svelte.js` |
+| Recorder: capture, chunking, echo check, dictations kept out, following the output device, quiet sides | `desktop/src-tauri/src/meetings/meeting.rs` |
+| The dictation signal; the correction dictionary (`apply_corrections`) | `desktop/src-tauri/src/dictation/pipeline.rs` |
+| Guard rails: maximum length, quiet meetings and check-ins, the meeting shortcut, notices | `desktop/src-tauri/src/calls/meeting_guard.rs` |
+| Hiding meeting windows from screen capture | `desktop/src-tauri/src/calls/capture.rs` |
+| Rolling digests, the final input, the checks; the notepad's catch-up, helper and title inputs | `desktop/src-tauri/src/meetings/meeting_summary.rs` |
+| The end of a meeting: pause or end, "Started by mistake?", the action plan job | `desktop/src-tauri/src/meetings/meeting_end.rs` |
+| "What did I miss?", the one-tap helpers (Questions to ask, Make me sound smart, Follow-up email, Gaps and risks, Make notes longer), a Skill on the meeting, the AI meeting title | `desktop/src-tauri/src/meetings/meeting_assist.rs` (inputs: `meeting_summary/chips.rs`) |
+| Skills (/name) and Chat's one-tap prompts | `desktop/src-tauri/src/chat/skills.rs` |
+| First-meeting coach marks in the notepad | `desktop/src-tauri/src/meetings/coach_marks.rs` |
+| The notepad window: docking, split screen | `desktop/src-tauri/src/meetings/notepad.rs` |
+| Who said what: the speaker map, names on lines, 1:1 calendar guesses, line times and splitting | `desktop/src-tauri/src/speakers.rs`, `desktop/src/lib/components/SpeakerMenu.svelte` |
+| Names for the voices: suggestions from what's said and the invite, the AI's checked answers, "It was me"; the cards | `desktop/src-tauri/src/speakers/naming.rs`, `desktop/src/lib/components/SpeakerCard.svelte` |
+| Who the call app shows talking (experimental); `yap.exe call-dump` | `desktop/src-tauri/src/speakers/call_ui.rs` (+ `call_ui/profiles.json`) |
+| The calendar: meetings, the reminder card, a note's meeting | `desktop/src-tauri/src/calendar.rs` (+ `calendar/`; [`calendar.md`](./calendar.md)) |
+| Prompts (`MEETING_DIGEST_PROMPT`, `ACTION_PLAN_BASE_PROMPT`, `ACTION_PLAN_DEFAULT_FRAGMENT`, `CATCH_UP_PROMPT`, `MEETING_ASK_PROMPT`, `MEETING_QUESTIONS_PROMPT`, `MEETING_FOLLOW_UP_PROMPT`, `MEETING_BLIND_SPOTS_PROMPT`, `MEETING_TITLE_PROMPT`) | `desktop/src-tauri/src/ai/llm.rs` |
+| Storage (`Note::digests`, `Note::speakers`, `TranscriptSegment::echo` / `::dictated` / `::speaker` / `::start_ms` / `::words`, `Action::kind`, `Note::title_auto`) | `desktop/src-tauri/src/notes.rs` |
+| The action run (`note_enhance` / `run_enhance`) | `desktop/src-tauri/src/notes/commands.rs` |
+| Fixing the notes: a line's words, the summary's, never written over unasked; tasks ticked and listed | `desktop/src-tauri/src/notes/note_edits.rs`, `desktop/src-tauri/src/notes/tasks.rs`, `desktop/src/lib/core/noteEdits.js`, `desktop/src/lib/views/TasksView.svelte` |
+| UI | `desktop/src/lib/NotesView.svelte`, `desktop/src/lib/Notepad.svelte`, `desktop/src/lib/stores/meetingSummary.svelte.js` |
+| Importing another app's transcript (Teams, Zoom, Meet, Otter, Granola) | `desktop/src-tauri/src/meetings/import.rs` (+ `import/`), `desktop/src/lib/components/TranscriptImportDialog.svelte`, `desktop/src/lib/stores/transcriptImport.svelte.js` |
 
 ## Recording
 
@@ -757,9 +757,9 @@ A meeting's notes aren't Yap's alone to write: a line it misheard, a
 summary that missed the point and the tasks in the action plan are the
 person's to fix (Wispr Flow's Notetaker does the same). Whatever model wrote
 the summary — on this PC or a cloud one — the person's changes are local data,
-and Yap never writes over them without asking. Code: `src-tauri/src/notes/note_edits.rs`
-(lines, the summary, the rule), `src-tauri/src/notes/tasks.rs` (tasks),
-`src/lib/core/noteEdits.js` and `src/lib/views/TasksView.svelte`.
+and Yap never writes over them without asking. Code: `desktop/src-tauri/src/notes/note_edits.rs`
+(lines, the summary, the rule), `desktop/src-tauri/src/notes/tasks.rs` (tasks),
+`desktop/src/lib/core/noteEdits.js` and `desktop/src/lib/views/TasksView.svelte`.
 
 ### A line's words
 
@@ -889,7 +889,7 @@ A meeting Yap didn't record, transcribed by another app, can still become a
 Yap meeting: **Import a transcript…** under Upload's audio drop zone, a
 transcript file dropped on Upload, or the Meetings view's **⋯** (the
 roadmap's "Import from Granola, Otter and Teams/Zoom transcript files";
-`src-tauri/src/meetings/import.rs`). Several files at once.
+`desktop/src-tauri/src/meetings/import.rs`). Several files at once.
 
 | From | The file | What Yap reads |
 |---|---|---|
@@ -934,11 +934,11 @@ within the hour, its summary and notes stay.
 
 While a meeting records, its notes live in a slim window docked to the right
 edge of the screen, beside the call (Wispr Flow's Notetaker notepad, ported to
-Yap: `src-tauri/src/meetings/notepad.rs`, `src/lib/Notepad.svelte`). Its look and
+Yap: `desktop/src-tauri/src/meetings/notepad.rs`, `desktop/src/lib/Notepad.svelte`). Its look and
 behaviour follow Wispr's notepad as measured from its DOM
 (`references/wispr-flow/notepad-spec.md`, beside this repo: sizes, type, colours,
 motion), in Yap's own code, wording and icons; the palette is the
-`--yap-paper-*` tokens in `src/app.css`.
+`--yap-paper-*` tokens in `desktop/src/app.css`.
 
 **When it opens.** Whenever a meeting recording starts, from anywhere ("Record
 notes" on a call prompt, the Notes view's Record, the tray, the Yap bar), with
@@ -1202,7 +1202,7 @@ made-up title shows muted in the notepad and the Notes view.
   the reply, the helper kinds as the page names them, and `clean_email`
   (preamble, fence and markdown out, a subject line first, a one-line "too
   little" left alone).
-- e2e (`e2e/notepad.spec.js`, the notepad is its own page, `yap.notepad`),
+- e2e (`desktop/e2e/notepad.spec.js`, the notepad is its own page, `yap.notepad`),
   with screenshots named after the states in Wispr's own captures for a
   side-by-side look: the text it copies, saves and emails and the
   transcript's layout (the pure helpers in `notepadText.js`); it opens docked
@@ -1262,9 +1262,9 @@ made-up title shows muted in the notepad and the Notes view.
 ## Guard rails
 
 Wispr Flow's Notetaker settings, ported (Settings → Meetings, one
-block under "Ask about calls in"). Code: `src-tauri/src/calls/meeting_guard.rs`,
-`src-tauri/src/calls/capture.rs`, `src/lib/notices/meetingGuard.js`,
-`src/lib/notices/meetingCheckIn.js`.
+block under "Ask about calls in"). Code: `desktop/src-tauri/src/calls/meeting_guard.rs`,
+`desktop/src-tauri/src/calls/capture.rs`, `desktop/src/lib/notices/meetingGuard.js`,
+`desktop/src/lib/notices/meetingCheckIn.js`.
 
 | Setting | Config | Default | Wispr's |
 |---|---|---|---|
@@ -1503,7 +1503,7 @@ KeyTips) and Win the Start menu.
   failed or panicked engine dropped, a model switch meanwhile winning);
   audio only held going after a day.
 - **e2e** (`npm run test:app`), with no audio device and no real AI:
-  - `e2e/meeting-refine.spec.js` (test WAVs at 4×, the fake AI, each refine
+  - `desktop/e2e/meeting-refine.spec.js` (test WAVs at 4×, the fake AI, each refine
     chunk 1.5 s): both sides' first chunk failing (`e2e_meeting_fail`) →
     one notice, a marker per side in notes.json and both views ("Couldn't
     transcribe 0:00–0:… · Try again"), Try again filling each in place;
@@ -1519,21 +1519,21 @@ KeyTips) and Win the Start menu.
     the two sides' chunks — and its time against a quiet one); two meeting
     starts on two threads at once (`e2e_meeting_start_twice`) giving one
     recorder, one test player and one note's audio.
-  - `e2e/meeting-audio-kept.spec.js`: a recording's two FLAC files and its
+  - `desktop/e2e/meeting-audio-kept.spec.js`: a recording's two FLAC files and its
     notes on disk (ended, ~24 s each), a line's clip as a WAV of the right
     length, ▶ → Stop playing; the notepad's ⋯ → Transcribe again (the
     confirm dialog's wording) with a changed dictionary replacing every line,
     My thoughts and a name put on a line kept; deleting the meeting deleting
     its audio; Settings → Meetings saying "1 meeting · 62 KB" and Delete
     all… clearing it, the transcript staying, no ▶ left.
-  - `e2e/meeting-crash.spec.js`: a test instance killed outright mid-meeting
+  - `desktop/e2e/meeting-crash.spec.js`: a test instance killed outright mid-meeting
     (`YapApp.kill()`) and started again on its data (`launchYap({ restart:
     true })`): the note's banner, the offer as a toast (`e2e_meeting_recovery_offer`),
     Transcribe it bringing the call's 48 s into the note in time order, the
     stop mark and the action plan job (needsAi), then Transcribe again from
     the Notes view's menu keeping the summary written while Yap was down and
     a name put on a line.
-  - `e2e/speaker-labels.spec.js`: placed lines (with word times) fed to the
+  - `desktop/e2e/speaker-labels.spec.js`: placed lines (with word times) fed to the
     recorder and the engine's timelines scripted (`e2e_diarize_timeline`; a
     `done` one held until the stop): names filling in in the notepad and the
     Notes view as labels settle, a line split at "Thanks" between two voices
@@ -1543,7 +1543,7 @@ KeyTips) and Win the Start menu.
     put); an engine that failed leaving You/Them with "Couldn't tell
     speakers apart this time."; a 1:1 invite's guess going to the one voice,
     and not to a second one who joins.
-  - `e2e/speakers.spec.js`: lines fed with voices (`speaker: "them-1"`):
+  - `desktop/e2e/speakers.spec.js`: lines fed with voices (`speaker: "them-1"`):
     rename everywhere, merge (a later line of the merged voice follows), just
     this line, in the notepad and the Notes view (each following the other),
     copy with names, "You" only offering a line; a local iCal feed's 1:1
@@ -1553,7 +1553,7 @@ KeyTips) and Win the Start menu.
     "### Priya" and moving an invented owner, Copy as Markdown, Save as .md,
     the local API and `yap.exe mcp`; an old notes.json reading as You/Them
     and taking a name.
-  - `e2e/meeting-audio.spec.js` (test WAVs at 4×): a dictation staged over
+  - `desktop/e2e/meeting-audio.spec.js` (test WAVs at 4×): a dictation staged over
     18–32 s of a meeting (`e2e_meeting_dictation`, the pipeline's own signal)
     while "You" talks at 1–9 s and 21–30 s: one "You" line, a "You dictated
     here" marker, the call carrying on after it, `{ dictated: true }` in
@@ -1567,20 +1567,20 @@ KeyTips) and Win the Start menu.
     with 6 s timings (`e2e_meeting_quiet`), for the call and for the mic,
     with the recording going on. Run against builds with the gate or the
     filling switched off, the dictation and switch tests fail.
-  - `e2e/meetings.spec.js`: the recorder plays test WAVs (4× real time);
+  - `desktop/e2e/meetings.spec.js`: the recorder plays test WAVs (4× real time);
     You/Them segments appear live; ending the meeting without AI shows the
     setup card; a mic track that's a delayed, quieter copy of the call is
     flagged as echo and a turn-taking pair isn't.
-  - `e2e/meeting-summary.spec.js`: two hours of transcript fed in ten-minute
+  - `desktop/e2e/meeting-summary.spec.js`: two hours of transcript fed in ten-minute
     batches through `e2e_meeting_feed`. It checks 11 digest calls, each under
     4,500 tokens with `max_tokens` 700; one final call under 6,000 tokens that
     has the digests and the raw tail but never the raw opening; an action plan
     with Alice, Bob, You, Decisions, Open questions and Unassigned, rendered
     within 15 s of the click; Bob's dropped task put back, the invented
     "Mallory" gone, a made-up deadline removed; and Copy text.
-  - `e2e/notepad.spec.js`: the meeting notepad (see
+  - `desktop/e2e/notepad.spec.js`: the meeting notepad (see
     [Testing the notepad](#testing-the-notepad)).
-  - `e2e/meeting-guards.spec.js`: the overlay's and the notepad's display
+  - `desktop/e2e/meeting-guards.spec.js`: the overlay's and the notepad's display
     affinity is `WDA_EXCLUDEFROMCAPTURE` while a meeting records and 0 after
     (read back with the debug-only `capture_affinity`); with hiding off, the
     screen-share tip and **Update settings** landing on the switch, and
@@ -1590,7 +1590,7 @@ KeyTips) and Win the Start menu.
     automatically" on a simulated call end; the shortcut starting a "Meeting
     · …" note and stopping it, and taking notes on a live call; the Settings
     rows, and recording a new shortcut.
-  - `e2e/meeting-quiet.spec.js`, with seconds for minutes (debug-only
+  - `desktop/e2e/meeting-quiet.spec.js`, with seconds for minutes (debug-only
     `e2e_meeting_checkins`, which also keeps the test player's "mic"
     delivering digital silence, as a real one does, so the audio clock
     runs): a quiet recording counting down in the notepad and stopping with
@@ -1638,7 +1638,7 @@ KeyTips) and Win the Start menu.
     Since 2026-10-24: `e2e_meeting_fail { side?, from?, to? }` (the live
     chunks over a stretch fail), `e2e_meeting_start_twice { first, second }`
     and `YAP_E2E_REFINE_CHUNK_MS` (each refine chunk that long).
-  - Robot, written and not run yet (`e2e-real/meeting-refine.real.js`, an
+  - Robot, written and not run yet (`desktop/e2e-real/meeting-refine.real.js`, an
     `engines` build with Parakeet V3, and Whisper Large for the second
     test): a Windows-TTS supplier call whose call side's first chunk fails
     live — the refine comes first and the first sentence must be there, in
@@ -1751,9 +1751,9 @@ recording it, Yap asks "Stop and summarise?". Personal chat apps (Discord,
 WhatsApp, Signal, Telegram) aren't asked about unless switched on, any app can
 be switched off from its prompt ("Don't ask for Teams"), and the prompts can
 come as a pop-up or quietly. While a call is live, the tray menu offers
-"Record this Teams call" either way. Code: `src-tauri/src/calls/meeting_detect.rs`
-(+ `src/lib/stores/meetingDetect.svelte.js` for the in-app prompts,
-`src-tauri/src/notices/win_toast.rs` for the Windows notifications, `src-tauri/src/shell/tray.rs`
+"Record this Teams call" either way. Code: `desktop/src-tauri/src/calls/meeting_detect.rs`
+(+ `desktop/src/lib/stores/meetingDetect.svelte.js` for the in-app prompts,
+`desktop/src-tauri/src/notices/win_toast.rs` for the Windows notifications, `desktop/src-tauri/src/shell/tray.rs`
 for the tray item).
 
 ### How a call is detected
@@ -2009,11 +2009,11 @@ on) and stops all detection work.
 The call apps show their real icons, as installed on this PC, beside the
 switches in Settings and on the bar's call card, the way Wispr's "Meeting
 detected" card shows Discord's. One component draws them
-(`src/lib/components/CallAppIcon.svelte`), in this order:
+(`desktop/src/lib/components/CallAppIcon.svelte`), in this order:
 
 1. **The app's own icon as installed here** (`calls/app_icons.rs`, the
    `meeting_app_icons` command);
-2. its bundled mark (`src/lib/bar/callApps.js`: Simple Icons, CC0);
+2. its bundled mark (`desktop/src/lib/bar/callApps.js`: Simple Icons, CC0);
 3. a letter badge in its colour: Teams, Slack, Webex and Whereby, which
    Simple Icons doesn't carry (their owners had them removed);
 4. a phone, for anything else.
@@ -2080,8 +2080,8 @@ Store) resolve to their own icons.
   remade after a change or a week, dropped with the app), and the stand-ins.
   The real thing, read-only, writing the cache where you can look at it:
   `YAP_ICONS_OUT=<folder> cargo test --lib app_icons::tests::this_machine -- --ignored --nocapture`.
-- e2e (`npm run test:app`): `e2e/meeting-detect.spec.js` and
-  `e2e/meeting-detect-no-mic.spec.js` drive the flow through the debug-only
+- e2e (`npm run test:app`): `desktop/e2e/meeting-detect.spec.js` and
+  `desktop/e2e/meeting-detect-no-mic.spec.js` drive the flow through the debug-only
   `meeting_detect_simulate { appId, active, fadeMs? }` hook (no debounce;
   `fadeMs` makes that call's prompt fade in a second or two instead of 30 s;
   test mode reads no registry). They cover the prompt, Not now, a prompt
@@ -2093,9 +2093,9 @@ Store) resolve to their own icons.
   the quiet style, the Settings list (every row's icon: its kind, 20 px,
   before the name, lined up in two columns, greyed with detection off), and
   the master toggle. Test mode reads no installed apps' icons: the specs give
-  Teams and Discord stand-ins (`YAP_E2E_APP_ICONS`, `e2e/support/icons.js`),
+  Teams and Discord stand-ins (`YAP_E2E_APP_ICONS`, `desktop/e2e/support/icons.js`),
   so both kinds show. The tray item and the Windows notifications can't be
-  driven over CDP: their logic is in the unit tests. `e2e/bar.spec.js`
+  driven over CDP: their logic is in the unit tests. `desktop/e2e/bar.spec.js`
   covers the prompt as a card on the Yap bar (its menu, its ✕, Teams'
   installed icon and Meet's mark), over a borderless and an exclusive
   fullscreen app, and the countdown (Esc cancels; left alone it records; the
@@ -2166,7 +2166,7 @@ meetings and their notes meet in four places:
   (`claims_call`): a call during a meeting whose card is up, or was
   answered, gets no "Record notes?"; a snoozed card comes back instead.
 
-Tested in `e2e/calendar.spec.js` (the card's Join & take notes recording
+Tested in `desktop/e2e/calendar.spec.js` (the card's Join & take notes recording
 into a note with the meeting's name and attendees, its simulated call not
 asked about again, Esc and snooze, back-to-back switching) and
-`e2e/calendar-nudge.spec.js`.
+`desktop/e2e/calendar-nudge.spec.js`.

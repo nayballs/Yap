@@ -9,7 +9,7 @@ import { expect } from '@playwright/test';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 export const PAGE_DIR = path.resolve(here, '../../page');
-const TAURI_DIR = path.resolve(here, '../../../../src-tauri');
+const TAURI_DIR = path.resolve(here, '../../../../desktop/src-tauri');
 
 /**
  * The desktop's own files the PC serves beside the page, as build.rs embeds

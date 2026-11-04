@@ -1,5 +1,5 @@
 // Every big download's progress and Cancel, the same everywhere
-// (src-tauri/src/shell/download.rs): the on-device AI models and their
+// (desktop/src-tauri/src/shell/download.rs): the on-device AI models and their
 // engine, the speech models, the meeting search model, Kokoro and the
 // speaker engine. Each one's progress event carries its bytes so far and in
 // all, the speed over the last few seconds (`bytesPerSec`), the time left

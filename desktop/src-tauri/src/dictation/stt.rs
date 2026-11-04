@@ -137,7 +137,7 @@ struct ModelDescriptor {
 /// All model artifacts are served from this host (ported from Handy).
 const BASE_URL: &str = "https://blob.handy.computer/";
 
-/// The 14 supported models. The `id` values mirror `src/lib/core/speechModels.js` on the
+/// The 14 supported models. The `id` values mirror `desktop/src/lib/core/speechModels.js` on the
 /// frontend — they're what the UI passes as `model_size`/`modelSize`.
 const MODELS: &[ModelDescriptor] = &[
     // ── File-based Whisper models (.bin) ──

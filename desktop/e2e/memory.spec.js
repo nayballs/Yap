@@ -1,4 +1,4 @@
-// Memory (src-tauri/src/memory.rs, Settings → Memory): what Yap remembers
+// Memory (desktop/src-tauri/src/memory.rs, Settings → Memory): what Yap remembers
 // about the person. The model is the scripted fake (support/fake-llm.js),
 // which knows memory's passes by their prompt ("You keep Yap's memory of
 // the user") and answers them with the changes a spec gives it, so this

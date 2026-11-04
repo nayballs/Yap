@@ -267,7 +267,7 @@ mod tests {
 
     #[test]
     fn the_cases_file_reads_with_cleanup_in_three_languages_and_translations() {
-        let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("../evals/languages/cases.json");
+        let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../evals/languages/cases.json");
         let cases = load(&path, &[]).unwrap();
         for lang in ["fr", "es", "de"] {
             assert!(cases.iter().filter(|c| c.kind == "cleanup" && (c.language == lang || c.mine.iter().any(|m| m == lang))).count() >= 2, "{lang}");

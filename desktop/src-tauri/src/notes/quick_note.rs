@@ -1,6 +1,6 @@
 //! The **quick note**: a small window on its own shortcut for jotting or
 //! dictating a note from any app (Wispr Flow's Scratchpad, adapted: local,
-//! no sync, one note at a time). The page is `src/lib/quicknote/QuickNote.svelte`.
+//! no sync, one note at a time). The page is `desktop/src/lib/quicknote/QuickNote.svelte`.
 //!
 //! - **One window**, `quick-note` in tauri.conf.json: created hidden and
 //!   unfocused at startup like the notepad (the DWM-cloaked first show,

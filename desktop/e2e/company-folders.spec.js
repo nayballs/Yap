@@ -1,4 +1,4 @@
-// Folder rules by company (src-tauri/src/calendar/filing/companies.rs):
+// Folder rules by company (desktop/src-tauri/src/calendar/filing/companies.rs):
 // "Meetings with people from example.com go in Clients", from the calendar
 // invite's attendees' email domains — the person's own company and free
 // mail left out. A meeting with people from another company filed by hand

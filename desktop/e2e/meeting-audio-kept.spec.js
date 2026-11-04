@@ -1,4 +1,4 @@
-// Meeting audio kept on disk (src-tauri/src/meetings/meeting_audio.rs), end to end:
+// Meeting audio kept on disk (desktop/src-tauri/src/meetings/meeting_audio.rs), end to end:
 // - a recording's two sides written to Data/meeting-audio/<note>/ as it
 //   records (FLAC, with a <recording>.json beside them), kept when it ends;
 // - a transcript line's ▶ plays its stretch (`meeting_audio_clip`: both

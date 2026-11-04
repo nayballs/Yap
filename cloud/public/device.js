@@ -1,7 +1,7 @@
 // Sign in with your phone (device.html). Yap on a PC shows a QR code for
 // /device?user_code=…; here the person signs in, any way the service offers,
 // and approves that code while Yap polls /api/auth/device/token
-// (src-tauri/src/auth.rs). A file, not inline, so the CSP in _headers can
+// (desktop/src-tauri/src/auth.rs). A file, not inline, so the CSP in _headers can
 // allow scripts from this origin only; server text only ever goes in via
 // textContent.
 

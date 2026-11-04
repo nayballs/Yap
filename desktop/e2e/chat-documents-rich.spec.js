@@ -1,5 +1,5 @@
 // Documents beside the chat, the rich tools and the panel's two views
-// (src-tauri/src/chat/documents/rich.rs, blocks.rs; src/lib/views/chat/
+// (desktop/src-tauri/src/chat/documents/rich.rs, blocks.rs; desktop/src/lib/views/chat/
 // DocPanel.svelte, chatDoc.svelte.js):
 // - A model that handles tools well (here a fake named like the GPT-5
 //   family: `documents::rich::handles_rich`) gets read_document /

@@ -8,11 +8,11 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { test as base, expect, openSettings, closeSettings } from './support/fixtures.js';
 import { startUpdateFeed } from './support/update-feed.js';
-import { REPO, RUNS } from './support/yap.js';
+import { APP, RUNS } from './support/yap.js';
 
 // The build's own version (CARGO_PKG_VERSION), and the one the feed offers.
 const CURRENT = fs
-  .readFileSync(path.join(REPO, 'src-tauri', 'Cargo.toml'), 'utf8')
+  .readFileSync(path.join(APP, 'src-tauri', 'Cargo.toml'), 'utf8')
   .match(/^version\s*=\s*"([^"]+)"/m)[1];
 const [major, minor, patch] = CURRENT.split('-')[0].split('.').map(Number);
 const VERSION = `${major}.${minor}.${patch + 1}`;

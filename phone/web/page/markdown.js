@@ -1,4 +1,4 @@
-// Yap Link: an answer's markdown, shown as Chat shows it (src/lib/core/
+// Yap Link: an answer's markdown, shown as Chat shows it (desktop/src/lib/core/
 // markdown.js, its spoken-answer subset): paragraphs with their line breaks
 // kept, headings, bullet and numbered lists (one level inside another, "• "
 // lines too, blank lines between items still one list), **bold**,

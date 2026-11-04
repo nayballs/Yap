@@ -1,6 +1,6 @@
 // Delete some of your data (Settings → Privacy & data → Your data;
-// src/lib/settings/YourData.svelte + DeleteSomeData.svelte,
-// src-tauri/src/privacy/reset.rs): a tick box per kind of data, each saying
+// desktop/src/lib/settings/YourData.svelte + DeleteSomeData.svelte,
+// desktop/src-tauri/src/privacy/reset.rs): a tick box per kind of data, each saying
 // how much there is; Yap's confirm dialog names what goes and how much; each
 // kind goes the way Reset app clears it, and only that kind:
 // - chats alone: Chat's conversations and their screenshots go, the notes,

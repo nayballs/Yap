@@ -86,7 +86,7 @@ fn tooltip() -> String {
 
 /// Build the Yap "pac" tray icon (open-mouth circle + sound waves on a
 /// transparent background) for the given state. The body colour signals state:
-/// brand amber idle (matches `src/assets/yap-logo.svg`), red recording, bright
+/// brand amber idle (matches `desktop/src/assets/yap-logo.svg`), red recording, bright
 /// amber processing, grey needs-model. `badge` adds a green dot top-right (an
 /// update is ready). Drawn at 128px so Windows can scale it down crisply.
 fn state_icon(state: &str, badge: bool) -> Image<'static> {

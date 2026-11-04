@@ -1,4 +1,4 @@
-// The quick note (src-tauri/src/notes/quick_note.rs, src/lib/quicknote/QuickNote.svelte):
+// The quick note (desktop/src-tauri/src/notes/quick_note.rs, desktop/src/lib/quicknote/QuickNote.svelte):
 // a small window on its own shortcut (Settings → Shortcuts, unbound by
 // default), the tray's "New quick note" and the Notes view's "Quick note",
 // to jot or dictate a note from any app. Saved as you type as an ordinary

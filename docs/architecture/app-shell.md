@@ -7,7 +7,7 @@ The full stack list, the app's entry and plumbing (`lib.rs`, the tray, context m
 ## Stack
 
 - **Shell:** [Tauri 2](https://tauri.app) (Rust backend + webview frontend).
-- **Frontend:** Svelte 5 + Vite 6 (`src/`). Windows: **settings** (the main
+- **Frontend:** Svelte 5 + Vite 6 (`desktop/src/`). Windows: **settings** (the main
   ControlPanel), **onboarding**, **notepad** (the meeting notepad, docked to
   the screen edge while a meeting records), **quick-note** (the quick note,
   2026-10-28: a small floating window on its own shortcut,
@@ -27,7 +27,7 @@ The full stack list, the app's entry and plumbing (`lib.rs`, the tray, context m
   is Yap's, `richMarkdown.js`, over markdown.js' tokens —
   [chat-and-assistant.md](./chat-and-assistant.md#the-chat-view),
   [notes.md](./notes.md#notes-as-pages-you-can-format-componentsrichtext-2026-10-31)).
-- **Backend:** Rust (`src-tauri/src/`).
+- **Backend:** Rust (`desktop/src-tauri/src/`).
 - **Audio:** `cpal` (capture) + `rodio` (start/stop chime, spoken replies).
 - **Spoken replies:** **Kokoro-82M v1.0** (the default once downloaded:
   onnx-community's fp32 ONNX on Yap's own `ort`, CPU, `engines` builds;
@@ -44,7 +44,7 @@ The full stack list, the app's entry and plumbing (`lib.rs`, the tray, context m
   the "You spoke French" nudge with models that don't say what they heard
   (`dictation/languages/text_id.rs`, [dictation.md](./dictation.md)).
 - **AI cleanup:** `reqwest` → any **OpenAI-compatible** chat endpoint (Groq/OpenAI/
-  OpenRouter, or local Ollama/LM Studio). `src/llm.rs`.
+  OpenRouter, or local Ollama/LM Studio). `desktop/src-tauri/src/ai/llm.rs`.
 - **Text injection:** the Win32 clipboard (`windows` crate: private formats + a
   verified write) + Win32 `SendInput` (paste / Enter); UI Automation reads the text
   around the cursor (`pasting/selection.rs`). `arboard` remains for the chat's copy tool.
@@ -134,8 +134,8 @@ The full stack list, the app's entry and plumbing (`lib.rs`, the tray, context m
 
 ## Platforms: Windows today, macOS and Linux later
 
-The desktop app is **one app for every desktop system**: the same `src/` and
-`src-tauri/`, never a copy per system. Tauri builds it for Windows, macOS and
+The desktop app is **one app for every desktop system**: the same `desktop/src/` and
+`desktop/src-tauri/`, never a copy per system. Tauri builds it for Windows, macOS and
 Linux. Only Windows is built, tested and shipped today; a macOS or Linux build
 has never been tried.
 
@@ -166,7 +166,7 @@ of Yap Link speaks one protocol whatever it runs on.
 
 ## Modules
 
-**The source tree** (2026-10-24): `src-tauri/src/` is grouped by area, as
+**The source tree** (2026-10-24): `desktop/src-tauri/src/` is grouped by area, as
 CLAUDE.md's module index is — `dictation/`, `pasting/`, `dictionary/`, `ai/`,
 `chat/`, `voice/`, `meetings/`, `calls/`, `notices/`, `integrations/`,
 `privacy/`, `shell/`, and the areas that are one module with parts
@@ -448,7 +448,7 @@ re-exported by the module, except `local_llm`'s, which callers name
   (voice/read_aloud.rs), `chat_view_state` + `assistant_stop`
   (chat/assistant.rs), `paste_last_transcript` (pasting/text_injector.rs).
 
-## Window config (`src-tauri/tauri.conf.json`)
+## Window config (`desktop/src-tauri/tauri.conf.json`)
 - **settings**: 1200×800 (min 860×600), titled "Yap" (it hosts the ControlPanel — see above),
   **undecorated** (custom in-page title bar w/ drag region + caption buttons — see the
   "Custom window chrome" bullet above), hidden, hide-on-close. Size/position/maximized

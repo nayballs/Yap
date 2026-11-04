@@ -54,7 +54,7 @@ jobs:
       - name: Rust cache
         uses: swatinem/rust-cache@v2
         with:
-          workspaces: "./src-tauri -> target"
+          workspaces: "./desktop/src-tauri -> target"
 
       - name: Install frontend dependencies
         run: npm ci
@@ -69,7 +69,7 @@ jobs:
       # unused imports, clippy lints — fails the push instead of accumulating.
       # --all-targets lints the unit tests too (clean since 2026-10-05).
       - name: Cargo clippy (stub build, deny warnings)
-        working-directory: src-tauri
+        working-directory: desktop/src-tauri
         run: cargo clippy --locked --all-targets -- -D warnings
 
       # The release profile too (lib + exe, what the installers build): code
@@ -78,7 +78,7 @@ jobs:
       # Checking only, no code generation: ~1.5 min cold on a 16-thread PC,
       # less with the Rust cache warm.
       - name: Cargo clippy (release profile, deny warnings)
-        working-directory: src-tauri
+        working-directory: desktop/src-tauri
         run: cargo clippy --locked --release -- -D warnings
 
   # The phone app (phone/web/): its sound maths in Node, then the page in a

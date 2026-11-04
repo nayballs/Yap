@@ -1,4 +1,4 @@
-// The speaker engine's voices after the fact (src-tauri/src/speakers/):
+// The speaker engine's voices after the fact (desktop/src-tauri/src/speakers/):
 // - **Find speakers** (rerun.rs): the engine run again over a past
 //   meeting's audio from the notepad's ⋯ and the Meetings view's menu, with
 //   progress and Cancel on the job line; only a run that completes changes

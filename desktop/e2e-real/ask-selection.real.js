@@ -14,7 +14,7 @@
 // `realtest_rewrite_text` / `realtest_ask_selection` stand in for the
 // shortcuts and the speech: the window in front, its selection read as at
 // the key press (UI Automation; no Ctrl+C in robot mode). Stand-in AI
-// models answer (e2e/support/fake-llm.js: Commands' rewrite, Chat's
+// models answer (desktop/e2e/support/fake-llm.js: Commands' rewrite, Chat's
 // answer). Written 2026-10-31; its first run found the page's text (the
 // focus on a `tabindex` block of it) taken for a text box: the selected
 // range's own IsReadOnly decides now (pasting/selection.rs).

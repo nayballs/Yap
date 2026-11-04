@@ -3,7 +3,7 @@
   // OpenWhispr's cards are Google Calendar OAuth + paid cloud API keys + a
   // hosted MCP server + their npm CLI. Yap has no cloud, so the surface here
   // is the piece that actually works offline: the LOCAL API BRIDGE
-  // (src-tauri/bridge.rs, their cliBridge.js ported to Rust) — a
+  // (desktop/src-tauri/bridge.rs, their cliBridge.js ported to Rust) — a
   // token-authenticated loopback HTTP server that terminals, scripts, and
   // coding agents can drive while Yap runs.
   import { invoke } from '@tauri-apps/api/core';

@@ -8,7 +8,7 @@
 // A test run reads and pastes into no other app, so its dictations and the
 // shortcut go to a stand-in window (`e2e_target_window`: no window has it)
 // and `e2e_rewrite` stands in for the shortcut and the speech; the rewrite
-// itself, in real windows, is the robot's (e2e-real/rewrite-last.real.js).
+// itself, in real windows, is the robot's (desktop/e2e-real/rewrite-last.real.js).
 import fs from 'node:fs';
 import { test as base, expect, openSettings, closeSettings, settingsDialog, expectStore, setConfig } from './support/fixtures.js';
 import { startFakeLlm, cleanupTranscript, rewriteText } from './support/fake-llm.js';

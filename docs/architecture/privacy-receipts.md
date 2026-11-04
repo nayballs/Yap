@@ -134,7 +134,7 @@ person sees what their choices send where. It never says "nothing leaves".
   and the page's one connection, the **account picture** (`<img>` from the
   sign-in provider in AccountSection, ControlPanel and Settings: `onload` →
   `connections_note {purpose: "account-picture", url}`, once per picture per
-  window, `src/lib/core/connections.js`; Rust takes only purposes on its list and
+  window, `desktop/src/lib/core/connections.js`; Rust takes only purposes on its list and
   only the host). **Not routed:** the model evaluations (`ai/eval/`, debug
   builds, the maintainer's own tool, which logs its requests itself), and the
   `cloud/` server (it's the account service, not Yap; Yap's side of it is
@@ -463,7 +463,7 @@ A dictation or meeting going on: said in a toast, no dialog, for both.
 
 ## e2e
 
-`e2e/your-data.spec.js` (seeded history, a note, a meeting, a chat, a task,
+`desktop/e2e/your-data.spec.js` (seeded history, a note, a meeting, a chat, a task,
 memory, a dictionary, fake keys, made-up audio and a screenshot): the tick
 box says the audio's size; Download… writes the zip through
 `e2e_save_path`, every store in it (the dictation in the CSV, the meeting's
@@ -476,7 +476,7 @@ logs too), keeps config.json (keys, dictionary, About you), Home and Notes
 show it at once, and the next note and dictation are all that's saved
 after.
 
-`e2e/your-data-delete.spec.js` (seeded history with audio, two notes, a
+`desktop/e2e/your-data-delete.spec.js` (seeded history with audio, two notes, a
 meeting with audio, a chat with a screenshot, each note's Ask thread, tasks
 of each kind, a pin, memory and what it read, a word suggestion): the
 picker's headings and each kind's amount ("1 meeting · 2 MB", "Nothing
@@ -491,7 +491,7 @@ other notes keep theirs and their pin; **refused while a test meeting
 records** (the toast, no dialog; `data_delete` and `data_reset` both
 refuse).
 
-`e2e/network-receipts.spec.js`: two fake AI servers, one aliased to
+`desktop/e2e/network-receipts.spec.js`: two fake AI servers, one aliased to
 api.groq.com — a Chat answer from each shows as "Chat · Groq" (Internet,
 api.groq.com) and "Chat · Custom endpoint" (This PC, 127.0.0.1), the filter
 shows each alone, the link opens the list, light and dark screenshots,

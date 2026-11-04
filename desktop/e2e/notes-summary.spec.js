@@ -1,6 +1,6 @@
-// A meeting's summary and its Ask chat, end to end (src-tauri/src/meetings/
+// A meeting's summary and its Ask chat, end to end (desktop/src-tauri/src/meetings/
 // meeting_summary/language.rs, notes/note_edits.rs, chat/note_chats.rs,
-// meetings/meeting_end.rs; src/lib/core/summaryTools.js, noteChat.js):
+// meetings/meeting_end.rs; desktop/src/lib/core/summaryTools.js, noteChat.js):
 // - the summary asked for in the meeting's language: a French meeting's
 //   action plan carries the line that keeps it French and its headings in
 //   English; an English one nothing; the layout opens with a recap and

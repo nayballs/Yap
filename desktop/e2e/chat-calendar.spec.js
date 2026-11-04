@@ -1,4 +1,4 @@
-// Calendar tools in Chat (src-tauri/src/chat/tools/calendar.rs): "what's on
+// Calendar tools in Chat (desktop/src-tauri/src/chat/tools/calendar.rs): "what's on
 // tomorrow?" answered from the calendar Yap keeps on this PC — a local iCal
 // feed (support/calendar-feed.js) connected and synced as Settings does it —
 // through the scripted fake AI (support/fake-llm.js), so this checks Yap's

@@ -1303,7 +1303,7 @@ fn cut_why(e: &reqwest::Error) -> String {
 }
 
 /// What an answer cut off part-way says, plainly — as Chat's
-/// `src/lib/core/aiErrors.js` says any such failure that reaches it.
+/// `desktop/src/lib/core/aiErrors.js` says any such failure that reaches it.
 pub(crate) const CUT_OFF: &str = "The answer was cut off before it finished. Try again.";
 
 /// The longest a streamed answer may run in all ([`chat_client`]).

@@ -1,4 +1,4 @@
-// Quiet meetings and check-ins (src-tauri/src/calls/meeting_guard.rs): after a
+// Quiet meetings and check-ins (desktop/src-tauri/src/calls/meeting_guard.rs): after a
 // stretch with nobody speaking, "Ending notes in 30 s…" counts down (Keep
 // going / Stop now; anyone speaking cancels it), then the recording stops
 // with a notice that says why; "Still in your meeting?" after a calendar

@@ -1,4 +1,4 @@
-// Skills for every box that takes one (src-tauri/src/chat/skills.rs): the
+// Skills for every box that takes one (desktop/src-tauri/src/chat/skills.rs): the
 // list (Yap's own and the person's, each with `shown` — in the `/` menus —
 // and `core`, re-read on `yap-skills-changed`), Settings' "Show in the /
 // menu" switch, and a box's `/` menu (`SkillPicker`): open while the box

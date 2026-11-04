@@ -2,7 +2,7 @@
 // setting in Settings → Dictation → Typing into apps, and what it says about
 // what leaves the PC there and in Privacy & data's table. A test run never
 // reads another app's window (shell/e2e.rs), so the read, the terms and their use
-// are unit-tested in Rust and robot-tested for real (e2e-real/
+// are unit-tested in Rust and robot-tested for real (desktop/e2e-real/
 // screen-names.real.js).
 import { test, expect, openSettings, expectStore } from './support/fixtures.js';
 

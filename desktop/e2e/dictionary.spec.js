@@ -6,7 +6,7 @@
 // differently, left out) and its Undo, Export… as CSV or text, and 2,000
 // entries staying quick. A test run never opens Windows' file dialogs:
 // `e2e_dictionary_file` names the file the next Import… reads or Export…
-// writes. The parsing and sorting rules are e2e/dictionary-list.spec.js's.
+// writes. The parsing and sorting rules are desktop/e2e/dictionary-list.spec.js's.
 // Every word here is made up or an everyday product name.
 import fs from 'node:fs';
 import path from 'node:path';

@@ -1,5 +1,5 @@
 <script>
-  // Settings → About → Report a problem (src-tauri/src/privacy/diagnostics.rs): a
+  // Settings → About → Report a problem (desktop/src-tauri/src/privacy/diagnostics.rs): a
   // diagnostic file the person looks through before it's saved — the file
   // list and a preview of what's in it — then saves where they choose
   // (Windows' Save dialog). Nothing is uploaded: once it's saved, Yap offers

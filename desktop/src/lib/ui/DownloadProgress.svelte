@@ -1,6 +1,6 @@
 <script>
   // A big download under way, the same in every place one is shown
-  // (core/downloads.js, src-tauri/src/shell/download.rs): what's downloading
+  // (core/downloads.js, desktop/src-tauri/src/shell/download.rs): what's downloading
   // and how far ("Qwen3.5 4B… 42%"), a bar, "1.2 GB of 2.8 GB · 24 MB/s ·
   // about 1 min left" once the speed is known, and Cancel — which stops it
   // and takes its half-downloaded file away.

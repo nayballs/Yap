@@ -1,4 +1,4 @@
-// The phone's page wears Yap's own colours: link.css copies src/app.css's
+// The phone's page wears Yap's own colours: link.css copies desktop/src/app.css's
 // `--yap-*` values (it can't import them: it's served on its own). This
 // keeps the copy in step — every `--yap-*` link.css sets, light and dark,
 // is app.css's value — and the browser's colours (the theme-color metas,
@@ -11,7 +11,7 @@ import { PAGE_DIR } from './support/harness.js';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const read = (f) => fs.readFileSync(f, 'utf8').replace(/\/\*[\s\S]*?\*\//g, '');
-const APP = read(path.resolve(here, '../../../src/app.css'));
+const APP = read(path.resolve(here, '../../../desktop/src/app.css'));
 const LINK = read(path.join(PAGE_DIR, 'link.css'));
 
 /** The `{…}` block that follows `at` in `css` (braces balanced). */
@@ -76,6 +76,6 @@ test("the browser's colours are the page's background, light and dark", () => {
   expect([dark.theme_color, dark.background_color]).toEqual([APP_DARK['--yap-s1'], APP_DARK['--yap-s1']]);
   // The icon is Yap's mark.
   expect(fs.readFileSync(path.join(PAGE_DIR, 'icon.svg'), 'utf8')).toBe(
-    fs.readFileSync(path.resolve(here, '../../../src/assets/yap-logo.svg'), 'utf8'),
+    fs.readFileSync(path.resolve(here, '../../../desktop/src/assets/yap-logo.svg'), 'utf8'),
   );
 });

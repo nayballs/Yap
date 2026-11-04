@@ -1,5 +1,5 @@
-// Read aloud, anywhere (src-tauri/src/voice/read_aloud.rs, voice/tts.rs's tracked
-// read, voice/tts/marks.rs; the reading card src/lib/bar/ReadingCard.svelte):
+// Read aloud, anywhere (desktop/src-tauri/src/voice/read_aloud.rs, voice/tts.rs's tracked
+// read, voice/tts/marks.rs; the reading card desktop/src/lib/bar/ReadingCard.svelte):
 // text read aloud in the chosen voice with a card on the Yap bar — the
 // sentence being read, its current word lit up as it's said (karaoke),
 // ⏮ ⏯ ⏭, the speed, Stop, Esc.
@@ -9,7 +9,7 @@
 // have been said goes to the debug-only `tts_e2e_spoken`, and the words'
 // times are worked out from that silent audio's length (the "estimate"
 // timing). Test mode never reads another app's selection (the robot suite,
-// e2e-real/read-aloud.real.js, does that in windows it opens), so here the
+// desktop/e2e-real/read-aloud.real.js, does that in windows it opens), so here the
 // text comes in through `read_aloud_text` — the command a note's or an
 // answer's Read aloud, and the in-page shortcut, use.
 import fs from 'node:fs';

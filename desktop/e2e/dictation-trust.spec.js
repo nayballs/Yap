@@ -8,7 +8,7 @@
 // A test run runs the stub engine and pastes nothing: the benchmark's two
 // devices cost what YAP_E2E_STT_SPEED says (the processor 150 ms, the
 // graphics card 450), "Use what I said" only logs that it would swap (the
-// real swap is the robot's: e2e-real/as-said.real.js), and a dictation's
+// real swap is the robot's: desktop/e2e-real/as-said.real.js), and a dictation's
 // text is the stub's "[STT stub: …]".
 import fs from 'node:fs';
 import path from 'node:path';

@@ -1,5 +1,5 @@
 // A Command that reads the window in front (2026-10-31; Wispr Flow's
-// Instruct Mode, on this PC): src-tauri/src/dictation/command_screen.rs.
+// Instruct Mode, on this PC): desktop/src-tauri/src/dictation/command_screen.rs.
 // - "Hey Jarvis, reply saying Thursday works" (a Command by name): its words
 //   reply to what's on screen, so the window's text goes to the Commands
 //   model with it — between <window> tags, with the rules for a reply — the
@@ -21,7 +21,7 @@
 // The stand-in window (`e2e_target_window`) is no real window: what it
 // "shows" is staged with `e2e_window_text`, nothing is read from or pasted
 // into a real one. The real thing is the robot's
-// (e2e-real/command-screen.real.js). The models are a local fake
+// (desktop/e2e-real/command-screen.real.js). The models are a local fake
 // (support/fake-llm.js).
 import fs from 'node:fs';
 import path from 'node:path';

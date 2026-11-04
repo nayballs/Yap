@@ -7,7 +7,7 @@
 // text box first". A test run pastes nothing and
 // touches no clipboard: `e2e_paste_fails` makes every paste fail that way
 // (the real keys, focus and clipboard are the robot's:
-// e2e-real/paste-safety.real.js). Also `e2e_held_keys`, the robot's say on
+// desktop/e2e-real/paste-safety.real.js). Also `e2e_held_keys`, the robot's say on
 // what the person holds (there's no keyboard hook in a test run).
 import { test, expect, closeToasts, expectStore } from './support/fixtures.js';
 
@@ -65,7 +65,7 @@ test('nothing that takes text had the focus: "Select a text box first", the text
 
 // The clipboard-read check (pasting/read_check.rs): the keys went, but no
 // app read the text off the clipboard within a second. The robot's
-// e2e-real/paste-read.real.js and paste-late.real.js do it for real.
+// desktop/e2e-real/paste-read.real.js and paste-late.real.js do it for real.
 test("no app read the paste: on the clipboard, \"Couldn't paste\", kept in history as not pasted", async ({ yap, main, shot }) => {
   await yap.invoke('e2e_paste_fails', { why: 'notRead' });
   const r = await yap.invoke('e2e_dictation', { text: 'move the stand-up to ten' });

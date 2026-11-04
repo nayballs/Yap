@@ -4,9 +4,36 @@ Feature flags, running in dev, CI, the end-to-end UI suite and the real-app robo
 
 [Architecture index](./README.md) · [CLAUDE.md](../../CLAUDE.md)
 
+## Where the desktop app's build lives (2026-11-04)
+
+The desktop app is the folder `desktop/`, laid out as a standard Tauri app:
+`package.json` (its own packages and scripts), `index.html`, `vite.config.js`,
+`svelte.config.js`, `src/` and `src-tauri/`, with its tests beside them
+(`e2e/`, `e2e-real/`). The repository is an **npm workspace** around it:
+
+- `npm ci` at the root installs every package into the root's `node_modules`
+  (one `package-lock.json`), the desktop's and the root's own (Playwright,
+  which the phone's tests use too).
+- The root's scripts run the desktop's: `npm run tauri dev` is
+  `npm run tauri -w desktop -- dev`, so the Tauri CLI, Vite and `tauri.conf.json`'s
+  `beforeDevCommand` all run in `desktop/`, and paths given to them (`-c
+  src-tauri/tauri.nightly.conf.json`) are from there.
+- The release and nightly builds give `tauri-action` `projectPath: desktop`;
+  CI's Rust steps run in `desktop/src-tauri`.
+- Build output stays where it was relative to the app: `desktop/dist/`
+  (Vite), `desktop/src-tauri/target/` (Cargo, unless `CARGO_TARGET_DIR`, as
+  dev.bat's `<drive>:\t`). Test output stays at the root, `test-results/`.
+- `scripts/` stays at the root (the "Yap - Dev" shortcut runs
+  `scripts\dev.bat`), and so do `evals/` (the model evaluations' cases, read
+  from the repo root) and `docs/`.
+
+A checkout from before the move keeps folders git no longer tracks
+(`src-tauri\gen`, `dist`); `.gitignore` still ignores them, and they can be
+deleted.
+
 ## Build, run & feature flags (important)
 
-Cargo features in `src-tauri/Cargo.toml`:
+Cargo features in `desktop/src-tauri/Cargo.toml`:
 
 | Feature | Effect |
 |---------|--------|
@@ -31,7 +58,7 @@ A **"Yap - Dev"** desktop shortcut launches it; the plain **"Yap"** desktop shor
 *installed* app (it follows the nightly channel).
 **It always runs the latest main** (2026-10-17): before starting, dev.bat runs
 `scripts/dev-update.ps1`, which fast-forwards the checkout to `origin/main` (putting back
-files whose only change is line endings — the Tauri CLI rewrites `src-tauri/Cargo.toml` —
+files whose only change is line endings — the Tauri CLI rewrites `desktop/src-tauri/Cargo.toml` —
 listing what's new, and running `npm install` when `package-lock.json` changed), then
 dev.bat starts its updated self afresh (cmd reads a running batch file line by line, so
 reading on in a rewritten one would go wrong). It skips the update and says why on another
@@ -104,13 +131,13 @@ Accounts: debug builds sign in against a local copy of the account server —
 console; `npm run mock:provider` stands in for a social provider). See
 `cloud/README.md`.
 
-> ⚠️ A *compiled release build* bakes the frontend into the binary — editing `src/`
+> ⚠️ A *compiled release build* bakes the frontend into the binary — editing `desktop/src/`
 > and restarting that `.exe` changes nothing. For live frontend changes use dev
 > (Vite on :51437). If :51437 isn't listening, you're looking at a release build.
 
 ## CI on every push
 `.github/workflows/ci.yml` runs on every push/PR to `main`: `npm run build` (frontend,
-also produces the `dist/` that `generate_context!` needs) + `cargo clippy --locked
+also produces the `desktop/dist/` that `generate_context!` needs) + `cargo clippy --locked
 --all-targets -- -D warnings` (test code included) on the fast **stub** build (no
 `engines`, no Vulkan SDK) — a few minutes on a Windows runner, so a broken commit
 can never reach a nightly. Then `cargo clippy --locked --release -- -D warnings`
@@ -180,7 +207,7 @@ later.
   can each look green while a nightly would fail: land a minor of the pair together.
 - **The downloads Yap pins in its own code** (GitHub release assets: the speaker engine,
   sherpa-onnx, eSpeak NG, the on-device engine's floor): `scripts/check-pins.mjs` reads
-  every `github.com/<owner>/<repo>/releases/download/<version>/` URL in `src-tauri/src`,
+  every `github.com/<owner>/<repo>/releases/download/<version>/` URL in `desktop/src-tauri/src`,
   asks GitHub for each project's latest release and reports which are behind
   (`npm run pins:check`; its tests `npm run test:pins`). A project that releases several
   times a day (`FLOOR_DAYS`: llama.cpp) is only behind once its pin is 30 days older than
@@ -238,7 +265,7 @@ page, `yap.notepad`), and save **named screenshots** to
 `test-results/app/screenshots/<spec>/` (git-ignored; HTML report in
 `test-results/app/report/`, each instance's logs + data in `test-results/app/runs/`).
 Any uncaught JS error in any webview fails the test. ~20 s plus the build
-(`npm run test:app:build`, own target dir `src-tauri/target/e2e` or
+(`npm run test:app:build`, own target dir `desktop/src-tauri/target/e2e` or
 `YAP_E2E_TARGET_DIR`). Safe beside the installed app and a dev build: portable
 data dir, own WebView2 profile + CDP port, F24 hotkey, test mode (`shell/e2e.rs`),
 unreachable account service. (Runners are elevated, so WebView2 ignores the suite's
@@ -252,12 +279,12 @@ and read the PNGs under `screenshots/`. Full guide (incl. adding a test):
 
 ## Real-app robot tests (`npm run test:real`)
 The second layer: a **robot-mode** Yap (`shell/realtest.rs`) pastes into **real windows
-the harness opens** — a WinForms test pad (`e2e-real/support/yaprobot.cs`,
+the harness opens** — a WinForms test pad (`desktop/e2e-real/support/yaprobot.cs`,
 compiled with the .NET Framework's `csc`), Windows Terminal (a PowerShell prompt,
 and a stand-in for Claude Code: its "✳ …" title + bracketed paste, runs nothing),
 Edge app windows with throwaway profiles (a web page's text box; a "WhatsApp"
 page = a chat app), Notepad (skipped while Notepad is open) — and the specs
-(`e2e-real/*.real.js`) assert what actually landed: smart spacing, snippets,
+(`desktop/e2e-real/*.real.js`) assert what actually landed: smart spacing, snippets,
 "press enter", Paste last transcript, the clipboard (yours back, private while
 pasted), AI cleanup via the fake model, terminal one-line mode / coding-CLI line
 breaks / auto-submit, Git Bash's mintty pasted with Shift+Insert, VS Code's
@@ -282,7 +309,7 @@ naming the process). Silencing and pausing other apps follow the same rule
 (sessions of the test's processes, or of a process whose windows all carry
 the nonce; media titled with the nonce): your own music is never touched.
 ⚠ **It takes the keyboard focus for ~2 min** (runs locally
-only, not on CI), so a **hands-off guard** (`e2e-real/support/guard.js`) holds it: it
+only, not on CI), so a **hands-off guard** (`desktop/e2e-real/support/guard.js`) holds it: it
 starts only once the PC has been idle 10 min (`YAP_ROBOT_IDLE_MIN`; `YAP_ROBOT_FORCE=1`
 only when the person at the PC says so), and an input watcher (`yaprobot watch`,
 low-level hooks: input without the injected flags is the person's) ends the run on
@@ -458,9 +485,9 @@ shell waiting for it.
   from the suite's local server — `YAP_TTS_SOURCES` —, a simulated clock, no
   audio device; what would have been said in `tts_e2e_spoken`), no on-device
   model downloaded but the suite's small fakes from 127.0.0.1
-  (`YAP_LLM_SOURCES`, `e2e/support/local-llm.js`; meeting search's model
+  (`YAP_LLM_SOURCES`, `desktop/e2e/support/local-llm.js`; meeting search's model
   under the key `embeddinggemma`), no embedding server started (`search/embedder.rs`:
-  the debug-only `YAP_E2E_EMBED_URL` points at `e2e/support/fake-embed.js`;
+  the debug-only `YAP_E2E_EMBED_URL` points at `desktop/e2e/support/fake-embed.js`;
   unset, a test run's search is keywords only), `e2e_chat_dictation {text}` (a
   question dictated into the Chat view, no mic needed), `e2e_assistant_ask
   {text, listenMs}` (a question to the Voice Assistant, as its shortcut
@@ -468,14 +495,14 @@ shell waiting for it.
   is recorded for `e2e_opened_apps`, the index is the stand-in list
   `YAP_E2E_APPS` names, no icons), never the internet for the web
   (`web.rs`: the debug-only `YAP_EXA_URL` / `YAP_TAVILY_URL` /
-  `YAP_WEB_STANDIN` point at `e2e/support/fake-web.js`; unset, a search or a
+  `YAP_WEB_STANDIN` point at `desktop/e2e/support/fake-web.js`; unset, a search or a
   page read fails; a provider's own search goes to the chat's configured
   endpoint, the fake AI in the suite, which answers Groq's
   `browser_search` and Gemini's `generateContent` shapes), never the PC's
   own region settings (`ai/about_you.rs`: the debug-only `YAP_E2E_LOCALE` — a
   tag or JSON — stands in for Windows; unset, nothing is detected), no AI
   provider's model list (`ai/model_catalog.rs`: the debug-only
-  `YAP_MODELS_STANDIN` points at `e2e/support/fake-llm.js`; unset, the
+  `YAP_MODELS_STANDIN` points at `desktop/e2e/support/fake-llm.js`; unset, the
   curated lists), a stand-in recorded as the service it stands in for in
   the network receipts (`privacy/net.rs`: the debug-only `YAP_E2E_NET_ALIASES`,
   `127.0.0.1:<port>=api.groq.com;…`), Report a problem's file saved where
@@ -492,7 +519,7 @@ shell waiting for it.
   Credential Manager and links recorded (`calendar_e2e_opened`) instead of
   opened in a browser, and it quits when its stdin closes. See
   [`docs/e2e-tests.md`](../e2e-tests.md).
-- **`shell/realtest.rs`** — **robot mode** for the real-app robot tests (`e2e-real/`,
+- **`shell/realtest.rs`** — **robot mode** for the real-app robot tests (`desktop/e2e-real/`,
   `npm run test:real`): test mode + `YAP_REALTEST=1`, debug builds only. The paste,
   the submit key, "Paste last transcript", the UI Automation reads (the text
   around the cursor, the correction-learning watch) and `app_kind`'s title read

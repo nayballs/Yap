@@ -1,4 +1,4 @@
-// Chat's screenshots (Snip to Chat, src-tauri/src/snip.rs): their address
+// Chat's screenshots (Snip to Chat, desktop/src-tauri/src/snip.rs): their address
 // for an <img> — by id only: the yapsnip scheme serves
 // <data>/chat-images/<id>.png and nothing else — the one-tap prompts, how
 // a removed one is said, a screenshot's right-click menu (Copy image, Save

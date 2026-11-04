@@ -333,7 +333,7 @@ mod tests {
     use super::*;
 
     fn bench() -> Bench {
-        load(&Path::new(env!("CARGO_MANIFEST_DIR")).join("../evals/samples/cases.json"), &[]).unwrap()
+        load(&Path::new(env!("CARGO_MANIFEST_DIR")).join("../../evals/samples/cases.json"), &[]).unwrap()
     }
 
     #[test]

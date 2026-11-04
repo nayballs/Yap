@@ -1,7 +1,7 @@
 // The Chat sidebar's search and its archive (ConversationList makes one).
 //
 // Search: every conversation, archived ones too, by the words typed in its
-// title and messages (src-tauri/src/search/library.rs `chats_search`), then
+// title and messages (desktop/src-tauri/src/search/library.rs `chats_search`), then
 // — with "Search by meaning" on — again by meaning; a result opens its
 // conversation at the message, the words marked there.
 //

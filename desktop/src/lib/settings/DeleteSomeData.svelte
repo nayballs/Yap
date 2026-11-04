@@ -10,7 +10,7 @@
 
 <script>
   // Delete some of your data… (Settings → Privacy & data → Your data;
-  // src-tauri/src/privacy/reset.rs): a tick box per kind of data, grouped
+  // desktop/src-tauri/src/privacy/reset.rs): a tick box per kind of data, grouped
   // as the plan groups them, each saying what it removes and how much there
   // is now ("3 chats, 4 screenshots · 12 MB"; "Nothing kept" greys it).
   // Delete… hands the ticked kinds back (`onnext(kinds)`); YourData.svelte

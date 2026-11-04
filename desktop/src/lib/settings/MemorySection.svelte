@@ -1,5 +1,5 @@
 <script>
-  // Settings → Assistant → Memory (src-tauri/src/memory.rs, 2026-10-22):
+  // Settings → Assistant → Memory (desktop/src-tauri/src/memory.rs, 2026-10-22):
   // what Yap remembers about the person, laid out like Claude's Settings →
   // Memory in Settings' one row style (2026-10-22 review): the switches, You,
   // "Tell Yap what to change" and import / export / clear are flat rows; the

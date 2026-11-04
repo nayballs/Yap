@@ -1,5 +1,5 @@
-// Sign in with ChatGPT (src-tauri/src/ai/chatgpt.rs, ai/llm/responses.rs,
-// src/lib/settings/ChatGptSignIn.svelte): Yap's AI on the person's own
+// Sign in with ChatGPT (desktop/src-tauri/src/ai/chatgpt.rs, ai/llm/responses.rs,
+// desktop/src/lib/settings/ChatGptSignIn.svelte): Yap's AI on the person's own
 // ChatGPT plan, against a local fake of OpenAI's sign-in and Responses API
 // (support/fake-chatgpt.js). Nothing goes on the internet.
 // - Settings → Language Models → Chat → Cloud providers → ChatGPT: no key

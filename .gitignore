@@ -1,4 +1,12 @@
 /node_modules
+# The desktop app's build output (desktop/: Vite's dist, Cargo's target,
+# Tauri's generated schemas), and npm's in case it puts any there.
+/desktop/node_modules
+/desktop/dist
+/desktop/src-tauri/target
+/desktop/src-tauri/gen
+# Left behind in checkouts from before the desktop app moved into desktop/
+# (4 Nov 2026): never tracked, safe to delete.
 /dist
 /src-tauri/target
 /src-tauri/gen

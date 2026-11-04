@@ -76,7 +76,7 @@ export async function recordOrigin(userCode: string, req: Request, now = Date.no
     .run();
 }
 
-/** "Yap 0.1.1 on Windows" from Yap's `Yap/0.1.1 (Windows)` (src-tauri's
+/** "Yap 0.1.1 on Windows" from Yap's `Yap/0.1.1 (Windows)` (desktop/src-tauri's
  *  auth.rs sends it); otherwise just "Yap". Anyone can send any user agent,
  *  so only a plain version and a known system get through. */
 export function appLabel(userAgent: string | null): string {

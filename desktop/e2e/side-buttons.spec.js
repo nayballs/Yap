@@ -12,7 +12,7 @@
 // routing: the setup listening, a shortcut on the button, or the tip), and
 // once the page's own mouse event (the dialog hears one when the hook
 // doesn't). The real hook with real XBUTTON events is the robot's
-// (e2e-real/side-buttons.real.js).
+// (desktop/e2e-real/side-buttons.real.js).
 import fs from 'node:fs';
 import { test as base, expect, openSettings, closeSettings, closeToasts, expectStore, setConfig } from './support/fixtures.js';
 

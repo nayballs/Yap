@@ -21,7 +21,7 @@
 use std::sync::Mutex;
 
 /// The line before the text in the question (Chat's bubble folds what's
-/// after it: `src/lib/views/chat/chatImages.js` `SCREEN_TEXT_MARK`).
+/// after it: `desktop/src/lib/views/chat/chatImages.js` `SCREEN_TEXT_MARK`).
 pub const MARK: &str = "[Text read from the screenshot on this PC, sent instead of the picture]";
 /// …with more than one screenshot.
 pub const MARK_MANY: &str = "[Text read from the screenshots on this PC, sent instead of the pictures]";

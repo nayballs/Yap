@@ -302,7 +302,7 @@ mod tests {
 
     #[test]
     fn the_cases_file_reads_and_every_transform_is_one_yap_has() {
-        let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("../evals/transforms/cases.json");
+        let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../evals/transforms/cases.json");
         let cases = load(&path, &[]).unwrap();
         assert!(cases.len() >= 15, "{}", cases.len());
         for c in &cases {

@@ -160,7 +160,7 @@ The AI Notepad: the notes store, folders, the Actions engine, notes you can fix 
 A small window on its own shortcut, to jot or dictate a note from any app
 and find it later in Notes (Wispr Flow's Scratchpad, adapted: local, no
 sync; 2026-10-28; tabs, the hold, Send and the bar's button 2026-10-29). The
-page is `src/lib/quicknote/QuickNote.svelte` (+ `quickNote.js`, its pure
+page is `desktop/src/lib/quicknote/QuickNote.svelte` (+ `quickNote.js`, its pure
 helpers); its parts in Rust are `quick_note/key.rs` (the shortcut's tap and
 hold), `tabs.rs` and `send.rs`. Since 2026-10-31 the note is a page you can
 format, kept markdown (below, "Notes as pages you can format"): the toolbar
@@ -346,7 +346,7 @@ under the tabs, a dictation at the caret as plain text.
   older Yap's save, made and emptied), `key.rs` (tap, hold, chord, a lost
   key-up), `tabs.rs` (what closes, tidy, the file) and `pipeline.rs`
   (`Goes::QuickNote`), `input_hook.rs` (the binding);
-  `e2e/quick-note.spec.js` (a made-up microphone, `YAP_E2E_MICS`, records
+  `desktop/e2e/quick-note.spec.js` (a made-up microphone, `YAP_E2E_MICS`, records
   the hold).
 
 ## Chat's documents (`chat/documents.rs`, 2026-10-30)
@@ -486,7 +486,7 @@ under "The Notes view".
   version at the next change. Unit-tested (folding, the ten minutes, the
   50, a tick, `earlier`, restore and Undo, deletion with the note on disk,
   a stale file, retention, the pinned order, a pin deleted with its note,
-  UTF-16 offsets, `put_in_place`); `e2e/notes-history.spec.js`.
+  UTF-16 offsets, `put_in_place`); `desktop/e2e/notes-history.spec.js`.
 
 ## Notes you can fix (`notes/note_edits.rs`, `notes/tasks.rs`)
 
@@ -619,7 +619,7 @@ the lines of the block it's in, everything else character for character — so
 an older Yap reads and saves it as it always has, and Rust, the summary, the
 local API and search see the same text.
 
-- **The parts** (`src/lib/components/richtext/`): `richEditor.js` (TipTap 3 on
+- **The parts** (`desktop/src/lib/components/richtext/`): `richEditor.js` (TipTap 3 on
   ProseMirror: the note in by the blocks that differ, the toolbar's commands,
   a selection's lines and its stretch of the text, words at the caret),
   `richMarkdown.js` (markdown in and out exactly; `sourceMap`; `plainSlice`),
@@ -714,7 +714,7 @@ local API and search see the same text.
   thoughts as typed in the box read and written back exactly; a tick, a word
   and Enter changing only their lines; pasted text; the source map: every
   character found, a selection and a caret both ways) and
-  `doc-markdown.spec.js` share a harness (`e2e/support/richtext.js`); e2e
+  `doc-markdown.spec.js` share a harness (`desktop/e2e/support/richtext.js`); e2e
   `notes-rich-text.spec.js` (Notes: typed and formatted as exact markdown —
   "## ", "[ ] ", Code, Text style, Ctrl+Z —, a box ticked, a typed version in
   Version history; Preview / Source, remembered, a raw block; a dictation's
@@ -722,12 +722,12 @@ local API and search see the same text.
   typed and formatted while a test meeting records, synced with Notes both
   ways), `quick-note.spec.js` (formatting, a box ticked, a dictation at the
   caret undone in one step, Find's and a menu's Esc), and the notes,
-  notepad, history and transform specs on the page (`e2e/support/notePage.js`:
+  notepad, history and transform specs on the page (`desktop/e2e/support/notePage.js`:
   `noteText`, `expectText`, `selectText`, `pageIn`).
 
 ## The Notes view
 
-`src/lib/views/notes/` (split 2026-10-24): `NotesView.svelte` is the view —
+`desktop/src/lib/views/notes/` (split 2026-10-24): `NotesView.svelte` is the view —
 it makes `notesState.svelte.js` (the notes and folders, the open note saved
 as it's typed and kept in step with the notepad, the recorder, the actions,
 the summary edited in place, the transcript's view and the note's chat),
@@ -912,7 +912,7 @@ dates). [frontend.md](./frontend.md#the-folder-layout-2026-10-24).
   `CLASSES`; an `href` only on `a` and only web/mail, `start` only on `ol`,
   the one `input` a disabled checkbox; no `style`, no handlers, no `data-`
   or other `aria-` attributes). DOMPurify needs a DOM: in a test outside a
-  page (`e2e/markdown.spec.js`) jsdom stands in, and without one it throws
+  page (`desktop/e2e/markdown.spec.js`) jsdom stands in, and without one it throws
   rather than return unsanitised HTML. **Yap's own rules** (markdown-it
   rules in the file): links are `a.md-link` with the address as their
   `title`, opened in the browser by main.js's click handler
@@ -961,7 +961,7 @@ dates). [frontend.md](./frontend.md#the-folder-layout-2026-10-24).
   classes or colours (the reader's mail client sets them) — beside its
   plain-text twin, both on the clipboard in one `ClipboardItem`. Exports
   (Save as .md — `notes::commands::export_markdown`, pure —, Copy, Email)
-  carry talk only: never an echo line, nor a mic-change marker. Tests: `e2e/markdown.spec.js`
+  carry talk only: never an echo line, nor a mic-change marker. Tests: `desktop/e2e/markdown.spec.js`
   (Node + jsdom: lists, tables, links, raw HTML, hostile input against the
   allowlist, citations), plus the rendered views in chat-model, web-search
   (`16-chat-rich-web-answer`), notepad (`46-summary-rich-markdown`,

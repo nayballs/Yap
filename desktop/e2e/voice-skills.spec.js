@@ -1,4 +1,4 @@
-// Skills by voice (src-tauri/src/chat/assistant/skill.rs): a Skill said to
+// Skills by voice (desktop/src-tauri/src/chat/assistant/skill.rs): a Skill said to
 // the Voice Assistant runs as Chat runs a typed one (chat/skills.rs):
 // - "Prep me for my next meeting" (/prep's own question, in other words)
 //   with no calendar: Yap asks out loud which meeting, no model called; the

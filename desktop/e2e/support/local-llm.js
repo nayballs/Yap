@@ -1,4 +1,4 @@
-// Stand-ins for Yap's on-device model downloads (src-tauri/src/ai/local_llm.rs):
+// Stand-ins for Yap's on-device model downloads (desktop/src-tauri/src/ai/local_llm.rs):
 // a fake GGUF per curated id, a fake llama.cpp engine zip (the floor build a
 // first install gets, ai/local_llm/engine.rs: a `llama-server.exe` and a DLL
 // that are a few bytes of text) and NVIDIA's runtime zip, and a fake

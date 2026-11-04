@@ -1,7 +1,7 @@
 // Pure helpers for the meeting notepad (Notepad.svelte) and the Notes view's
 // transcript: what the copy, save and email actions put out, how a
 // transcript is laid out, and what each line's speaker is called (the
-// note's speaker map, src-tauri/src/speakers.rs, read the same way).
+// note's speaker map, desktop/src-tauri/src/speakers.rs, read the same way).
 import { markdownToText } from './markdown.js';
 import { shortMicName } from './mics.js';
 
@@ -434,7 +434,7 @@ export function meetingHelpers(note, recording) {
   return note.enhancedContent?.trim() ? ['followUpEmail', 'blindSpots', 'longer'] : ['followUpEmail', 'blindSpots'];
 }
 
-// ---- fixing notes by hand (noteEdits.js, src-tauri/src/notes/note_edits.rs, notes/tasks.rs) ----
+// ---- fixing notes by hand (noteEdits.js, desktop/src-tauri/src/notes/note_edits.rs, notes/tasks.rs) ----
 
 /** Line `i` of a transcript as `transcript_line_edit` finds it again (`LineRef`). */
 export function lineRef(transcript, i) {

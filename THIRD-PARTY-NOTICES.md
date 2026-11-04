@@ -5,7 +5,7 @@ ports code from other MIT-licensed projects; their copyright and permission
 notices are kept here, as their licences ask. Dependencies pulled in through
 Cargo and npm carry their own licences in their packages.
 
-## Snip to Chat (`src-tauri/src/snip/`)
+## Snip to Chat (`desktop/src-tauri/src/snip/`)
 
 - **robmikh/screenshot-rs** — the Windows.Graphics.Capture single-frame
   pattern in `snip/capture.rs` (a Direct3D 11 device with a WARP fallback,

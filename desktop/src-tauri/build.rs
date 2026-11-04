@@ -1,5 +1,5 @@
 /// The desktop's own files Yap Link's page serves as they are: (where the
-/// page asks for it, where it is). Chat's picker (`src/lib/core/chatPicker.js`
+/// page asks for it, where it is). Chat's picker (`desktop/src/lib/core/chatPicker.js`
 /// and the pure modules it imports, the effort's words) and the marks it
 /// shows. Each must stay pure (no imports beyond this list, no Tauri, no
 /// Svelte): `phone/web/tests/shared.spec.js` holds them to it.
@@ -32,8 +32,8 @@ const LINK_SHARED: &[(&str, &str)] = &[
 /// read from disk at run time. Hidden files (`.…`) are left out (the page's
 /// notes are its README.md, beside the folder).
 fn embed_link_page() {
-    /// The phone's web app, from src-tauri/.
-    const PAGE: &str = "../phone/web/page";
+    /// The phone's web app, from desktop/src-tauri/.
+    const PAGE: &str = "../../phone/web/page";
     use std::path::{Path, PathBuf};
     fn walk(root: &Path, dir: &Path, out: &mut Vec<(String, PathBuf)>) {
         let Ok(entries) = std::fs::read_dir(dir) else { return };

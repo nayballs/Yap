@@ -76,7 +76,7 @@ rolling release's body records as `<!-- built-from: <sha> -->`). **Currently uns
 (Authenticode) — Windows shows a SmartScreen warning until a cert is added; the
 `signCommand` slot is ready. Updater artifacts are minisign-signed
 (`TAURI_SIGNING_PRIVATE_KEY` GitHub secret). The uninstaller's **Delete the
-application data** checkbox (`; --- YAP DATA ---` in `src-tauri/nsis/installer.nsi`)
+application data** checkbox (`; --- YAP DATA ---` in `desktop/src-tauri/nsis/installer.nsi`)
 removes Yap's real data (`%APPDATA%\yap`, `~\.yap`) **and the saved sign-in**
 (`CredDeleteW` on the `yap-account.com.yap.dictation` credential) **and the
 calendars' tokens/links** (`yap-calendar-1…8.com.yap.dictation`) **and Sign in
@@ -117,7 +117,7 @@ on GitHub Actions (Yap builds cleanly there — ONNX + DirectML, no CUDA):
   URL never changes across nightlies.
 
 **Channel separation:** a nightly install follows the nightly endpoint because it is
-built with `-c src-tauri/tauri.nightly.conf.json`, which overrides only the updater
+built with `-c desktop/src-tauri/tauri.nightly.conf.json`, which overrides only the updater
 `endpoints` to `…/releases/download/nightly/latest.json` (same identifier/productName
 as stable — it's the same app on a different endpoint). Because a GitHub *pre-release*
 never resolves as `/releases/latest/`, stable users never see nightly builds, and the
@@ -136,7 +136,7 @@ Yap from before the bump (plugin 2.10) doesn't read the field, so the first nigh
 it is taken as before; the check itself first runs on the nightly after that. Also from
 2.14: `Update::install` checks the bytes' signature again before running the installer,
 and minisign signatures with a non-canonical Ed25519 `S` are refused (`minisign-verify`
-0.3; the CLI never makes those). The e2e feed (`e2e/support/update-feed.js`) signs with
+0.3; the CLI never makes those). The e2e feed (`desktop/e2e/support/update-feed.js`) signs with
 `--app-version`, as a real build does.
 
 **tauri-action v1** (2026-11-03, from v0): the inputs and outputs both workflows use

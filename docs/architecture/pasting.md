@@ -361,7 +361,7 @@ Putting a dictation into the app you're in: the clipboard paste and the submit k
   clipboard (`copy_privately`) and the person is told "Couldn't replace it
   here — copied the raw text instead" (an `notices/alert.rs` "pasteBlocked" alert,
   with why). Test runs only log ("e2e: not swapping the paste for the words
-  as said"); robot mode only in the test's windows (`e2e-real/as-said.real.js`:
+  as said"); robot mode only in the test's windows (`desktop/e2e-real/as-said.real.js`:
   the test pad, Notepad, an Edge box, a chat app and its contenteditable,
   swapped; a terminal, an edited paste and another window in front, refused).
   **The last paste** (2026-10-23): `remember` keeps the last text Yap pasted
@@ -396,7 +396,7 @@ Putting a dictation into the app you're in: the clipboard paste and the submit k
   remembers it as the last paste (`Rewrote::Replaced`); refused → nothing
   changed in the field, the rewrite copied privately with "Couldn't replace
   your last dictation — copied the rewrite instead" (`Rewrote::Copied`).
-  Robot tests: `e2e-real/rewrite-last.real.js`, and Home's paste in
+  Robot tests: `desktop/e2e-real/rewrite-last.real.js`, and Home's paste in
   `as-said.real.js`. **Saved transforms** (`dictation/transforms.rs`,
   [dictation.md](./dictation.md)) take the last dictation by these same
   rules (`rewrite_target`, `rewrite_check`, `replace_last`), and their
@@ -436,7 +436,7 @@ Putting a dictation into the app you're in: the clipboard paste and the submit k
   lengths, never the text. Test mode copies and pastes nothing ("e2e: not
   copying the last transcript"); debug-only `e2e_shortcut { name:
   "paste-last" | "copy-last" }` sends a press as the hook would. e2e
-  `dictation-polish.spec.js`; robot `e2e-real/last-transcript.real.js`
+  `dictation-polish.spec.js`; robot `desktop/e2e-real/last-transcript.real.js`
   (the pad, Notepad, an Edge text box; the clipboard's private formats).
 - **`pasting/modifiers.rs`** — **the modifier keys around Yap's own**
   (2026-10-25). A dictation ended by a chord can leave Alt, Win, Shift or

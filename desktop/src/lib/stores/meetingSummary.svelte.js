@@ -1,4 +1,4 @@
-// The end of a meeting, as Rust runs it (src-tauri/src/meetings/meeting_end.rs), for
+// The end of a meeting, as Rust runs it (desktop/src-tauri/src/meetings/meeting_end.rs), for
 // every window that shows a meeting (the Notes view, the meeting notepad):
 //
 // - `summaries.byNote[noteId]`: the latest action-plan job for a note,

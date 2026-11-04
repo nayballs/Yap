@@ -70,7 +70,7 @@ md.block.ruler.before(
 );
 
 // A document's section still to be written (Chat's documents beside the
-// chat, src-tauri/src/chat/documents.rs): its placeholder line, an HTML
+// chat, desktop/src-tauri/src/chat/documents.rs): its placeholder line, an HTML
 // comment the person never types by accident, drawn as a quiet line with
 // the section's name and what it will say ("Gear: what to wear and where to
 // find it", after Claude's own documents' grey intents) — never as the raw
@@ -418,7 +418,7 @@ export function markdownTokens(text) {
 /**
  * The source line (0-based) of each task checkbox `renderMarkdown(text)`
  * makes, in the order they render: the nth checkbox in the page is the
- * task on `taskLines(text)[n]` (src-tauri/src/notes/tasks.rs ticks it there).
+ * task on `taskLines(text)[n]` (desktop/src-tauri/src/notes/tasks.rs ticks it there).
  */
 export function taskLines(text) {
   const env = { tasks: [] };

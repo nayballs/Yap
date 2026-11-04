@@ -31,7 +31,7 @@
 //!   HTML read the text as before.
 //!
 //! Pure and unit-tested; the frontend's twin is
-//! `src/lib/views/dictionary/richSnippet.js` (the editor's preview), held
+//! `desktop/src/lib/views/dictionary/richSnippet.js` (the editor's preview), held
 //! to the same cases.
 
 use std::borrow::Cow;

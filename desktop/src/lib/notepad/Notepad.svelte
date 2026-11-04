@@ -4,7 +4,7 @@
   // (sizes, type, colours and motion; the palette is `--yap-paper-*` in
   // app.css). This file is the window: the note shown and the meeting, kept
   // in step with Rust's events and the other windows; its parts, top to
-  // bottom, are their own components in src/lib/notepad/:
+  // bottom, are their own components in desktop/src/lib/notepad/:
   //   - NotepadHeader: back, ⋯, split screen, Share, the window buttons;
   //   - NotepadTitle and NotepadTabs: the title and date; My thoughts,
   //     Transcript, Summary;

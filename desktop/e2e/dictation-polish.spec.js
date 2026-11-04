@@ -7,7 +7,7 @@
 // A test run has no input hook (it must never see the developer's keys):
 // `e2e_shortcut` sends a shortcut's press as the hook would. It copies and
 // pastes nothing either: the log says what it would have done (the real
-// paste and clipboard are the robot's, e2e-real/dictation-extras.real.js).
+// paste and clipboard are the robot's, desktop/e2e-real/dictation-extras.real.js).
 // The stub engine transcribes at once unless `e2e_dictation_timing` slows
 // it; `e2e_dictation_cap` shortens the 15-minute limit; `e2e_dictate_audio`
 // plays a tone in the mic's place (`amplitude` 0.005: a whisper, -46 dBFS).

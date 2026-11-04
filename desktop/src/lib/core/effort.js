@@ -1,4 +1,4 @@
-// Effort (src-tauri/src/ai/effort.rs): how hard a cloud model reasons before
+// Effort (desktop/src-tauri/src/ai/effort.rs): how hard a cloud model reasons before
 // it answers, chosen per model in Chat's model picker and Settings →
 // Language Models → Chat. Rust says which levels a model takes (`info`:
 // `{ levels, default, chosen, fast }`, from ai_model_status / effort_info);

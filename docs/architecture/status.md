@@ -97,7 +97,7 @@ Yap's own HTTPS on port 51443 to home-network peers only, pairing by QR with a
 the answer as one stream (a jitter buffer, Clearer sound in a headset).
 **The phone is Ask Yap only**: dictating from the phone (to this PC or to the
 phone) was built and taken out the same day after the maintainer tried it
-(7bbec66e). Unit-tested (`cargo test link::`), e2e-tested (`e2e/link.spec.js`:
+(7bbec66e). Unit-tested (`cargo test link::`), e2e-tested (`desktop/e2e/link.spec.js`:
 a headless browser with a fake mic pairs, asks and hears the answer over Yap's
 own HTTPS) and the page on its own (`npm run test:link`, Chromium and Firefox);
 tried on a real phone by the maintainer.
@@ -123,10 +123,10 @@ reader sees), **file tags** in Cursor's, Windsurf's and VS Code's AI chat
 **Send** shortcut (Enter, or the send key set, from another key or a mouse
 button). Unit-tested (the splitting, mentions and file matching, the
 spoken forms, the focus, the binding, an older Yap's save) and e2e-tested
-(`e2e/chat-editors.spec.js`: the settings in light and dark, the steps a
+(`desktop/e2e/chat-editors.spec.js`: the settings in light and dark, the steps a
 test run takes in a stand-in Slack, Teams, WhatsApp, VS Code, Cursor and
 Claude Code, the Send shortcut) and robot-tested, 8 of 8
-(`e2e-real/chat-messages.real.js`, `editor-files.real.js`: stand-in pages
+(`desktop/e2e-real/chat-messages.real.js`, `editor-files.real.js`: stand-in pages
 with an "@" list in Edge — stacked messages sent and stopped, a mention
 picked with the app's space before a comma taken back, plain @Name where
 the list doesn't say what it highlights, a file tagged in the chat box and
@@ -297,7 +297,7 @@ it, each kind of data against the files config-and-data.md names, the signal
 on synthetic speech, the lid's order) and e2e-tested (`your-data.spec.js`,
 `your-data-delete.spec.js`, `mic-tips.spec.js`). Not tried yet: a real laptop's lid (this PC is a
 desktop), a real Bluetooth headset, the thresholds on the robot's real
-speech (`e2e-real/mic-tips.real.js`, written, not run), a reset of a big
+speech (`desktop/e2e-real/mic-tips.real.js`, written, not run), a reset of a big
 real data folder.
 
 **The quick note** (2026-10-28, [notes.md](./notes.md#the-quick-note-notesquick_noters)):
@@ -405,7 +405,7 @@ guide, two keys through the in-page fallback; `cancelled-dictations.spec.js`:
 Cancelled → Keep → Transcribe, Undo taking it out, Save audio through the
 stubbed dialog, the meeting-notes tip with a shortened length;
 `bar.spec.js` counts cancelled ones apart) and robot-tested with real keys
-through the real hook (`e2e-real/hotkeys.real.js`: a second key, a
+through the real hook (`desktop/e2e-real/hotkeys.real.js`: a second key, a
 key-down whose key-up the hook never heard — swept, hands-free, the next
 press pasting it —, a short press growing into a chord). **Not yet
 tried**: the sweep after a real lock screen, UAC prompt or sleep (the
@@ -475,7 +475,7 @@ scrubbed), shows it before it's saved through the Save dialog, uploads
 nothing, then offers GitHub's new-issue page. Unit-tested (the recorder on
 a real local request, the store's folding and roll-over, hosts without
 paths or queries, a bundle seeded with fake keys and personal details
-holding none of them) and e2e-tested (`e2e/network-receipts.spec.js`: a
+holding none of them) and e2e-tested (`desktop/e2e/network-receipts.spec.js`: a
 cloud call and one on this PC through fake servers, the filter, light and
 dark, Clear; the preview, Save, the zip searched, the issue page). **Not
 yet tried**: the list over a real day of use (a real cloud provider, the
@@ -850,7 +850,7 @@ with Dictate / Meeting notes on hover and Yap's notices as cards (call prompts
 as Wispr's "Meeting detected" card) — e2e-tested with real-window checks of
 its ex-styles and hit-testing, and real mouse clicks on its cards (✕, buttons,
 a call card's ^ menu, a click as a card appears) robot-tested in
-`e2e-real/bar.real.js` (2026-10-21); multi-monitor moves, DPI mixes and games
+`desktop/e2e-real/bar.real.js` (2026-10-21); multi-monitor moves, DPI mixes and games
 still want a hands-on pass.
 On top of that, the main window is now a full **ControlPanel** (Home dictation feed
 w/ Ctrl+K search, Chat, Notes, Upload, Dictionary, Settings as an always-mounted
@@ -1019,7 +1019,7 @@ with your phone** (QR code, device flow) verified end to end in the installed
 nightly `0.1.1-nightly.107` (2026-10-04), along with the "Where you're signed in"
 device list. Known quirk: Better Auth links accounts by exact email, so
 `…@gmail.com` and `…@googlemail.com` (same Gmail inbox) are separate accounts.
-**Real-app robot tests** (`npm run test:real`, `shell/realtest.rs` + `e2e-real/`,
+**Real-app robot tests** (`npm run test:real`, `shell/realtest.rs` + `desktop/e2e-real/`,
 2026-10-17): paste, smart spacing, snippets, "press enter", Paste last transcript,
 the clipboard, terminals (PowerShell, a Claude Code stand-in; Git Bash and a
 VS Code terminal stand-in since 2026-10-21), chat apps, the mic
@@ -1208,8 +1208,8 @@ PNG in 6–7 ms. HDR: known swatches from a GDI window read exactly (worst error
 0) through the FP16 path on the HDR monitor. Unit-tested (the HDR round trip at
 five white levels, crop maths at mixed DPI, request shapes per provider, the
 vision rules, retention, the voice phrases) and e2e-tested over fake monitors
-(`e2e/snip.spec.js`, 11 tests). **Not yet tried**: the interactive overlay by
-hand (a real drag, the focus, Esc through the hook) — `e2e-real/snip.real.js`
+(`desktop/e2e/snip.spec.js`, 11 tests). **Not yet tried**: the interactive overlay by
+hand (a real drag, the focus, Esc through the hook) — `desktop/e2e-real/snip.real.js`
 is written, not yet run; an HDR-aware app's swatches (Edge) on the HDR
 monitor; a real Anthropic / OpenAI / Gemini / OpenRouter request with an
 image (shapes from their docs; the fake's checked).
@@ -1224,10 +1224,10 @@ instead" sends a screenshot's text, read by Windows' OCR on this PC, to a
 model that can't read images; "Reads images" in the model picker and
 Settings' Chat list. **Tested**: unit (the selection state machine, the
 geometry across monitors, the DIB, the decoders, and Windows' **real OCR on
-a fixture** on the maintainer's PC), e2e (`e2e/snip.spec.js`, now 19 tests
+a fixture** on the maintainer's PC), e2e (`desktop/e2e/snip.spec.js`, now 19 tests
 over fake monitors and windows: every action above, a synthetic paste and a
 Tauri drop event, a fake OCR text, the tags), and **robot-tested on the
-maintainer's PC** (`e2e-real/snip.real.js`, 5 of 5, 25 Oct — which also
+maintainer's PC** (`desktop/e2e-real/snip.real.js`, 5 of 5, 25 Oct — which also
 settles phase 1's "not yet run" above: real drags over Edge swatches on
 both monitors, the HDR one included, within ±2, the overlay up in 92–101
 ms in a debug build, a real Esc): a real click and Enter for the whole
@@ -1250,13 +1250,13 @@ its line); after saying "snip" **Yap listens for the question by itself**
 ("Ask about this screenshot…", "Then listen for my question", on; either
 key or ✓ ends it, never a pause; not in a meeting or a call). **Tested**:
 unit (the waiting box, the listen decision, push-to-talk's join-and-release),
-e2e (`e2e/snip.spec.js`, 25 tests: the pretend clipboard and its switch, a
+e2e (`desktop/e2e/snip.spec.js`, 25 tests: the pretend clipboard and its switch, a
 spoken question with a waiting screenshot to the fake AI, no-vision, ✕
 first, a dictation into the box, the voice snip listening and sending, a
 call and Esc listening for nothing). **Not yet tried**: by hand with a real
 microphone (the chime after the snip, the dictation key ending it,
 push-to-talk's join-and-release); the robot spec's new real-clipboard check
-(`e2e-real/snip.real.js`) is written, not yet run.
+(`desktop/e2e-real/snip.real.js`) is written, not yet run.
 
 **Snip to Chat, phase 3: the on-device model reads screenshots** (2026-10-28,
 [snip.md](./snip.md#the-on-device-model-reads-screenshots-phase-3-2026-10-28),
@@ -1268,7 +1268,7 @@ only where it fits beside the model. **Tested**: by hand on the maintainer's
 PC (a scratch llamafile 0.10.6 with Yap's arguments: it loads with MTP, six
 screenshots answered right, load +1.3 s, +0.85 GB on the card, a dictation's
 cleanup unchanged), the model evaluations (`eval --vision`: picture 22/22,
-OCR text 12/22, model-evals.md), unit, e2e (`e2e/local-vision.spec.js`, 3
+OCR text 12/22, model-evals.md), unit, e2e (`desktop/e2e/local-vision.spec.js`, 3
 tests on a stand-in sidecar). **Not yet tried**: in the dev build with the
 real sidecar (the restart with the projector, a dictation during it, the
 idle free, the download from Hugging Face), the processor fallback on a
@@ -1285,7 +1285,7 @@ default, a cloud model only with "With cloud models too" (asked once); a
 model that can't read images gets the window's text (Windows' OCR), named in
 the sources; the receipts say "Voice Assistant + the window in front".
 **Tested**: unit (the rules in seven languages, the person's languages, the
-yes/no request, where it may go), e2e (`e2e/assistant-screen.spec.js`, fake
+yes/no request, where it may go), e2e (`desktop/e2e/assistant-screen.spec.js`, fake
 monitors and window), and on the real Qwen3.5-4B (the yes/no request: 14 of
 16 right, median 180 ms; `eval --vision --vision-path window`, model-evals.md).
 **Not yet tried**: in the dev build with a real microphone and real windows
@@ -1299,7 +1299,7 @@ off`: measured by hand on 0.10.6, no restart); "Thinking…" with the
 thinking folded, then "Thought for 6 s" above the answer. Since 31 Oct 2026
 the model on this PC only: a cloud model has its **effort** (below).
 **Tested**: unit (the fields, the task-local, the stream), e2e
-(`e2e/chat-think.spec.js`), and on the real 4B by hand and through `eval
+(`desktop/e2e/chat-think.spec.js`), and on the real 4B by hand and through `eval
 --vision --think`. **Not yet tried**: the dev build.
 
 **Effort, per model** (2026-10-31, ai-models.md `ai/effort.rs`): Chat's
@@ -1308,7 +1308,7 @@ cloud model reasons — the levels it takes, the chip saying it ("Claude Opus
 5.5 Extra") — sent its provider's way wherever it answers a question, and
 Fast mode for Claude Opus 5.5. **Tested**: unit (every provider's body at
 every level, the table, the providers' lists, the Messages API's body with
-fast mode), e2e (`e2e/chat-effort.spec.js`, `chat-think.spec.js`,
+fast mode), e2e (`desktop/e2e/chat-effort.spec.js`, `chat-think.spec.js`,
 `chat-documents-research.spec.js`) against the fake. **Not yet tried**: a
 real provider at each level — the levels and values come from each
 provider's docs (31 Oct 2026), not from real calls; fast mode on a real
@@ -1328,7 +1328,7 @@ remembered split, light and dark. The Voice Assistant makes one only when
 asked, says a line, and Chat shows it filling. **Tested**: unit (the
 placeholders, the tools and their refusals, the merge, the diff, the
 model's picture of a document, the streamed arguments, the loop end to
-end), e2e (`e2e/chat-documents.spec.js`, 5 tests: the panel and its pill,
+end), e2e (`desktop/e2e/chat-documents.spec.js`, 5 tests: the panel and its pill,
 an edit kept while Chat writes, Undo, close / expand / the split / Open in
 Notes, the Voice Assistant; light and dark screenshots), and the model
 evaluations' `--documents` on the on-device Qwen3.5-4B (model-evals.md
@@ -1425,7 +1425,7 @@ keyword search; on an RTX 5070 Ti 100 passages/s and a question in ~8 ms,
 on its processor 14 passages/s and ~14 ms; answers 33/35 on Qwen3.5-4B,
 4/5 on Groq gpt-oss-20b. Unit-tested (passages, store, dates, ranking, the
 checks) and e2e-tested against a stand-in embedding server
-(`e2e/meeting-search.spec.js`, 5 tests). **Not yet tried**: a real year of
+(`desktop/e2e/meeting-search.spec.js`, 5 tests). **Not yet tried**: a real year of
 meetings (thousands of passages) on a laptop's processor, the app's own
 download from Hugging Face (tested against a stand-in), a dictation started
 mid-batch against the real server (the batch is dropped by the meeting
@@ -1448,7 +1448,7 @@ the Notes box recall@1 0.33 → 0.94, `search_notes` 0.67 → 1.0, past chats
 0.44 → 1.0, memory 0.44 → 1.0 with no item for unrelated questions; Chat's
 answers 12/17 → 16/17 on Qwen3.5-4B, 2/3 → 6/6 on Groq gpt-oss-20b for the
 questions that need a search. Unit- and e2e-tested
-(`e2e/library-search.spec.js`, 8 tests) against the stand-in embedding
+(`desktop/e2e/library-search.spec.js`, 8 tests) against the stand-in embedding
 server. **Not yet tried**: a real library of a thousand notes and hundreds
 of chats with the real model on a processor (the search itself measured at
 ~36 ms over 4,000 passages in a debug build), the Qwen3-Embedding model in
@@ -1461,7 +1461,7 @@ Checked against the code on 2026-11-01. `ROADMAP.md` (private) has the plans.
 
 Pages beside the chat (2026-11-01, chat-and-assistant.md "Pages beside the
 chat"): unit-tested (the rules, the tools' refusals, the registered
-browsers' parsing) and e2e-tested on the stand-in web (`e2e/chat-pages.spec.js`:
+browsers' parsing) and e2e-tested on the stand-in web (`desktop/e2e/chat-pages.spec.js`:
 the page in its own webview with no Yap IPC, Save a shot, `snap_page`,
 `offer_browser`, Ask Yap about this), but not yet tried on real pages
 (an interactive map, a site that signs in), on the person's screen (the

@@ -5,7 +5,7 @@
 // hook (it must never see the developer's keys), so the keys reach the app
 // through the main window's in-page fallback — the hook's own path into
 // the pipeline — and `e2e_hotkey_bindings` shows what the hook was given.
-// The real hook, with real keys, is the robot's (e2e-real/hotkeys.real.js).
+// The real hook, with real keys, is the robot's (desktop/e2e-real/hotkeys.real.js).
 import { test as base, expect, openSettings, closeSettings, expectStore, setConfig } from './support/fixtures.js';
 
 // Made-up microphones (dictation/mics.rs): a quiet tone, on any machine.

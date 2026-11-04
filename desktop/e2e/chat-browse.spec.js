@@ -1,4 +1,4 @@
-// Acting on the pages beside the chat (src-tauri/src/chat/pages/act.rs: the
+// Acting on the pages beside the chat (desktop/src-tauri/src/chat/pages/act.rs: the
 // drive tier, step 3 of the page panel):
 // - a strong model (the fake's "fake-gpt-5": documents::rich::strong) gets
 //   click / type_text / scroll / go_to / switch_tab and read_open_page's

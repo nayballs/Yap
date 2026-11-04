@@ -1,4 +1,4 @@
-// The document panel beside Chat's conversation (src-tauri/src/chat/documents.rs):
+// The document panel beside Chat's conversation (desktop/src-tauri/src/chat/documents.rs):
 // which document it shows, its text, the sections being written as they
 // stream (`section` events), its two views and the Source box's saves,
 // expanded or split, and the split's width (remembered).

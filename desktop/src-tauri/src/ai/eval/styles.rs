@@ -395,7 +395,7 @@ mod tests {
 
     #[test]
     fn the_cases_parse_and_every_kind_has_some() {
-        let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("../evals/cleanup/styles.json");
+        let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../evals/cleanup/styles.json");
         let b = load(&path).expect("styles.json");
         for c in Category::ALL {
             assert!(b.cases.iter().any(|x| x.category == c.id()), "{c:?}");

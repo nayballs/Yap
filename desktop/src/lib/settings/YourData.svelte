@@ -1,6 +1,6 @@
 <script>
   // Settings → Privacy & data → Your data: Download your data, Delete some
-  // of your data and Reset app (src-tauri/src/privacy/export.rs, reset.rs).
+  // of your data and Reset app (desktop/src-tauri/src/privacy/export.rs, reset.rs).
   //
   // - Download your data: one .zip of everything Yap keeps about you —
   //   history, notes and meetings, chats, tasks, memory, the dictionary and

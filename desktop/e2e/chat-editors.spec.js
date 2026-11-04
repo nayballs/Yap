@@ -11,7 +11,7 @@
 // process, title, the text on screen, where the focus is, whether an app's
 // "@" list shows the one typed), and `e2e_dictation` returns the steps Yap
 // would take (`steps`). The real windows are the robot's
-// (e2e-real/chat-editors.real.js).
+// (desktop/e2e-real/chat-editors.real.js).
 import fs from 'node:fs';
 import { test as base, expect, openSettings, closeSettings, expectStore, setConfig } from './support/fixtures.js';
 import { startFakeLlm, cleanupTranscript, transformText, transformInstruction } from './support/fake-llm.js';

@@ -1,4 +1,4 @@
-// The Dictionary view's list, pure (e2e/dictionary-list.spec.js tests it
+// The Dictionary view's list, pure (desktop/e2e/dictionary-list.spec.js tests it
 // without the app): what a search matches, the four sorts, the key "Most
 // used" counts under, a delete's Undo, every way a correction is heard
 // (`heardForms`; config.json's rows grouped by the word they write,

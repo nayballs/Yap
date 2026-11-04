@@ -1,4 +1,4 @@
-// The clipboard-read check (src-tauri/src/pasting/read_check.rs): a
+// The clipboard-read check (desktop/src-tauri/src/pasting/read_check.rs): a
 // dictation goes on the clipboard *promised* (delayed rendering), so Yap's
 // own window is asked for the text the moment an app reads it. That read is
 // the paste's proof: the target read it → it landed, and your clipboard
@@ -8,7 +8,7 @@
 // taken for the target's after them. `robot.lastPaste()` says who read it.
 //
 // Run alone (it takes the keyboard focus for a couple of minutes):
-//   npm run test:real:build && npx playwright test -c e2e-real paste-read
+//   npm run test:real:build && npx playwright test -c desktop/e2e-real paste-read
 // The Electron test needs a runtime (YAP_ROBOT_ELECTRON=<electron.exe>, or
 // `npm i --no-save electron`); the VS Code one needs VS Code. Both skip
 // without them.

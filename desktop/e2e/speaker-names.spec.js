@@ -1,4 +1,4 @@
-// Real names on a meeting's voices (src-tauri/src/speakers/naming.rs): Yap
+// Real names on a meeting's voices (desktop/src-tauri/src/speakers/naming.rs): Yap
 // suggests who each voice is from what the meeting says — someone hands
 // over to Priya and this voice answers, someone thanks her right after it
 // spoke, a voice introduces itself — plus the invite, and (when a meeting

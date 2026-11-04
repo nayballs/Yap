@@ -1,9 +1,9 @@
-// Chat's Think button (src-tauri/src/chat/think.rs): the next question is
+// Chat's Think button (desktop/src-tauri/src/chat/think.rs): the next question is
 // thought through — the on-device Qwen thinks before it answers (up to about
 // 1,500 tokens). For one question: it goes off again once that question is
 // sent. Only for the model on this PC (`chat_think_info`, asked again
 // whenever Chat's model changes): a cloud model's thinking is its effort,
-// chosen in the model picker (src-tauri/src/ai/effort.rs).
+// chosen in the model picker (desktop/src-tauri/src/ai/effort.rs).
 import { invoke } from '@tauri-apps/api/core';
 
 export const think = $state({

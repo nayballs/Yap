@@ -12,7 +12,7 @@ too). **It's Yap's Chat on a phone, in the Claude app's layout**
 (2026-11-03): ☰ and a drawer of Chat's conversations, the thread, a composer
 card with the pictures, +, Chat's model chip with its effort, the mic and
 Send — **Chat's own picker** the desktop's code itself, served beside the
-page ("Chat's own modules", below) — in Yap's tokens (`src/app.css`), fonts
+page ("Chat's own modules", below) — in Yap's tokens (`desktop/src/app.css`), fonts
 and mark, on a phone's terms ("The look", below). About 356 KB as served
 (36 KB of it the fonts, 54 KB Chat's picker modules, 22 KB the logos), 140
 KB gzipped (317 KB and 127 KB before the Claude-app layout; 175 KB and 80 KB
@@ -26,30 +26,30 @@ choice.
 
 ## The files
 
-This folder is the phone's web app (moved here from `src-tauri/link-page/` and
+This folder is the phone's web app (moved here from `desktop/src-tauri/link-page/` and
 `e2e-link/` on 2026-11-04): **`page/`** holds what Yap serves (every file
-in it, embedded in yap.exe by `src-tauri/build.rs`; `tauri dev` rebuilds when
+in it, embedded in yap.exe by `desktop/src-tauri/build.rs`; `tauri dev` rebuilds when
 one changes), **`tests/`** its tests (`npm run test:link`), and this README its
 notes. The PC's side of the conversation is the desktop app's
-`src-tauri/src/link/`. The files in `page/`:
+`desktop/src-tauri/src/link/`. The files in `page/`:
 
 | File | What it is | Served as |
 |---|---|---|
 | `index.html` | The page: the header (☰, "Yap · <PC>" with the connection's dot and the chat's title, the spinner, ⋯), pairing, the thread and Chat's activity line, the composer card (Chat's line for pictures its model can't read, the pictures, the text box, then +, the model chip, the mic, Send / ■, ✕ / ■, the waveform and time while Yap listens), the drawer, the settings sheet (Hands-free and its wait, Clearer sound in a headset, Play the voice through the media player, the microphone picker, Sound details) and the model sheet. | `text/html` |
-| `link.css` | The look ("The look", below): Yap's warm light and dark `--yap-*` tokens (values copied from `src/app.css`, following `prefers-color-scheme`; `phone/web/tests/tokens.spec.js` holds them to it), its fonts, mobile first, 48 px targets, reduced motion respected. | `text/css` |
+| `link.css` | The look ("The look", below): Yap's warm light and dark `--yap-*` tokens (values copied from `desktop/src/app.css`, following `prefers-color-scheme`; `phone/web/tests/tokens.spec.js` holds them to it), its fonts, mobile first, 48 px targets, reduced motion respected. | `text/css` |
 | `markdown.js` | An answer's markdown as Chat shows it (its spoken-answer subset: paragraphs and line breaks, headings, lists, bold, italic, struck, code, quotes, rules), built as DOM nodes, never HTML; links as their words, `[1]` citations left out, a mark still being written shown without its stars. | `text/javascript` |
 | `fonts/figtree.woff2`, `fonts/eb-garamond.woff2` | Yap's UI font and its display serif, cut down from the desktop's own (below). | `font/woff2` |
 | `link.js` | Everything the page does: the connection (hello, pairing, reconnects with backoff, keep-alive pings), typed questions and ▶ Read aloud, the composer and the keyboard, the mic (opened a timed step at a time), Talk (tap or hold; its words in the box, `words`), hands-free, the spoken answer (resampled frame after frame, posted to the player worklet; or cut at its pauses into WAVs for the media player, `mediaVoice`), Clearer sound, barge-in, the conversation (kept in this tab's sessionStorage across a reload), the step and its time, the model chip, the settings sheet, Sound details, the screen wake lock. Exposes a read-only `window.__yapLink.snapshot()` for the tests. | `text/javascript` |
 | `picker.js` | Chat's model picker as a sheet ("Chat's picker", below): the rail with the logos, the panes, More models, the effort; its rows built by `core/chatPicker.js`; a PC from before gets its plain list. The chip's words and its effort (`chipWords`, `chipEffort`). | `text/javascript` |
 | `drawer.js` | The drawer of chats ("The drawer", below): Recents from the PC (`chats`), the search, the one this phone is in marked, + New chat. | `text/javascript` |
 | `photos.js` | A question's pictures ("Pictures", below): a photo made smaller (2,048 px, a JPEG of at most 3 MB, upright, on white) and sent in `0x03` frames. | `text/javascript` |
-| `core/*.js` | **Not in this folder**: Chat's own picker modules from `src/lib/core/` (`chatPicker`, `modelCatalog`, `latestModels`, `ppModels`, `localContext`, `modelIcons`, `providerIds`, `effort`), served as they are (`build.rs` `LINK_SHARED`). | `text/javascript` |
-| `providers/*.svg` | **Not in this folder**: the provider and model-family logos from `src/assets/providers/` the picker and the chip show (Yap's own assets; `build.rs` `LINK_SHARED`). | `image/svg+xml` |
+| `core/*.js` | **Not in this folder**: Chat's own picker modules from `desktop/src/lib/core/` (`chatPicker`, `modelCatalog`, `latestModels`, `ppModels`, `localContext`, `modelIcons`, `providerIds`, `effort`), served as they are (`build.rs` `LINK_SHARED`). | `text/javascript` |
+| `providers/*.svg` | **Not in this folder**: the provider and model-family logos from `desktop/src/assets/providers/` the picker and the chip show (Yap's own assets; `build.rs` `LINK_SHARED`). | `image/svg+xml` |
 | `dsp.js` | The sound maths, with nothing of the page in it: the streaming resampler (windowed sinc, a polyphase table where the rates allow: the mic's rate down to 16 kHz, Yap's 24 kHz voice up to the phone's rate), the answer's ring and jitter buffer (`Playout`), the media player's pieces cut at the voice's pauses (`Segmenter`) and their WAV files (`wav`), Int16, the frame level, hands-free's energy voice detector and its waits, the times as Chat says them. Runs in the page, both worklets and Node's tests. | `text/javascript` |
 | `mic-worklet.js` | The mic's AudioWorklet: the mic at the phone's own rate, mixed to mono, resampled to 16 kHz Int16 (imports `dsp.js`), cut into 20 ms frames. | `text/javascript` |
 | `player-worklet.js` | The answer's AudioWorklet: Yap's voice, already at the phone's rate, played as one stream from `dsp.js`'s `Playout` (the jitter buffer, its fades, underruns counted); reports to the page every ~50 ms. | `text/javascript` |
 | `manifest.webmanifest` | Add to Home screen: name, the page's background as its colours (light, and dark in `user_preferences.color_scheme_dark` where the browser reads it), the icon. | `application/manifest+json` |
-| `icon.svg` | The Yap mark (a copy of `src/assets/yap-logo.svg`; `tokens.spec.js` checks it's the same). | `image/svg+xml` |
+| `icon.svg` | The Yap mark (a copy of `desktop/src/assets/yap-logo.svg`; `tokens.spec.js` checks it's the same). | `image/svg+xml` |
 | `README.md` | This file (not served). | — |
 
 The `.js` files are ES modules: the PC must serve them as
@@ -134,7 +134,7 @@ its own way, the phone wins.
   any case, without accents), **Recents** (each a chat bubble and its title,
   the one this phone is in marked), and at the foot the PC's name (a
   computer mark) and **+ New chat**. Esc, ✕ or a tap on the scrim closes it.
-- **Tokens.** `link.css` copies `src/app.css`'s `--yap-*` values: `:root` for
+- **Tokens.** `link.css` copies `desktop/src/app.css`'s `--yap-*` values: `:root` for
   light, `:root[data-yap-theme='dark']` for Yap's warm dark, here following
   the phone's `prefers-color-scheme`. It can't import them (no build step, a
   page served on its own), so `phone/web/tests/tokens.spec.js` compares every
@@ -196,13 +196,13 @@ models and self-hosted servers, and **the effort** of the model in use (Low
 … Max, its hint) with Fast mode where the model has it.
 
 **Chat's own modules.** The rows aren't rebuilt for the phone: they're
-`src/lib/core/chatPicker.js`'s, the module the desktop picker builds its rows
+`desktop/src/lib/core/chatPicker.js`'s, the module the desktop picker builds its rows
 with too (from a `ctx` its stores fill; here `picker.js` fills it from the
 PC's `ready.picker`, which is what the desktop picker reads: `link/models.rs`
 `picker`). It and the pure modules it imports (`modelCatalog`: Yap's curated
 lists merged with the live ones; `latestModels`: the families; `ppModels`,
 `localContext`, `modelIcons`, `providerIds`, `effort`) are served as they are
-at `core/`, the logos at `providers/` (`src-tauri/build.rs` `LINK_SHARED`).
+at `core/`, the logos at `providers/` (`desktop/src-tauri/build.rs` `LINK_SHARED`).
 So they must stay pure — no Tauri, no Svelte, no assets, no imports beyond
 each other: `phone/web/tests/shared.spec.js` and `link/page.rs`'s tests hold them to
 it.

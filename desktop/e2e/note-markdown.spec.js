@@ -1,6 +1,6 @@
 // Notes' own markdown through the rich text editor, on its own (no app
 // needed; the harness doc-markdown.spec.js uses too, support/richtext.js):
-// src/lib/components/richtext/ — the page notes' My thoughts, the meeting
+// desktop/src/lib/components/richtext/ — the page notes' My thoughts, the meeting
 // notepad and the quick note are edited on (2026-10-31). A note stays
 // markdown, so an older Yap reads it as before:
 // - what Yap and people write in notes — meeting summaries with their

@@ -323,7 +323,7 @@ pub enum WhisperNames {
 
 /// How the Whisper prompt takes the names on screen: **not at all** — the
 /// near-miss pass spells them (2026-10-22, real speech through large-v3,
-/// e2e-real/screen-names-stt.real.js: with the names in its prompt Whisper
+/// desktop/e2e-real/screen-names-stt.real.js: with the names in its prompt Whisper
 /// heard a spoken "row shell" as "Rochelle" with Rochelle on screen, as a
 /// list it dropped full stops and wrote "Zen Tricks"; the pass alone got
 /// every name the prompt did, "Siobhan Nibrian" → "Siobhan Ní Bhriain"

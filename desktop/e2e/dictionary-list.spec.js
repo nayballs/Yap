@@ -1,12 +1,12 @@
 // The Dictionary view's pure parts on their own (no app needed):
-// src/lib/views/dictionary/dictionaryList.js (search, the sorts, a delete's
+// desktop/src/lib/views/dictionary/dictionaryList.js (search, the sorts, a delete's
 // Undo) and dictionaryFile.js (reading an imported file — CSV with quotes,
 // semicolons or tabs, text with arrows or words alone —, the import's plan
 // of what's new, already there, spelled differently or said twice, what
 // the person's choices change, the export and an import's Undo), and
 // richSnippet.js (rich snippets' markdown subset, plain text and the
 // formatting bar's edits). The view
-// itself, with these in it, is e2e/dictionary.spec.js. Every word here is
+// itself, with these in it, is desktop/e2e/dictionary.spec.js. Every word here is
 // made up or an everyday product name.
 import { test, expect } from '@playwright/test';
 import {
@@ -546,7 +546,7 @@ test('the warnings stay quick for a dictionary of thousands', () => {
   expect(ms).toBeLessThan(250);
 });
 
-// ---- Rich snippets (richSnippet.js; its twin is src-tauri's pasting/rich.rs,
+// ---- Rich snippets (richSnippet.js; its twin is desktop/src-tauri's pasting/rich.rs,
 // held to the same cases) ----
 
 test('rich snippets: the subset parses, and what is no formatting stays as typed', () => {

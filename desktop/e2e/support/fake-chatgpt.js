@@ -1,5 +1,5 @@
 // A local stand-in for OpenAI's Sign in with ChatGPT endpoints and the
-// Responses API on a ChatGPT plan (src-tauri/src/ai/chatgpt.rs and
+// Responses API on a ChatGPT plan (desktop/src-tauri/src/ai/chatgpt.rs and
 // ai/llm/responses.rs, pointed here with the debug-only YAP_CHATGPT_ISSUER /
 // YAP_CHATGPT_API variables). It checks what OpenAI would:
 // - sign-in: the discovery document's endpoints on the issuer; a new

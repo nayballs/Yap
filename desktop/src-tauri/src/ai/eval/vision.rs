@@ -309,7 +309,7 @@ mod tests {
 
     #[test]
     fn the_cases_file_reads_and_every_screenshot_is_there() {
-        let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("../evals/vision/cases.json");
+        let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../evals/vision/cases.json");
         let cases = load(&path, &[]).unwrap();
         assert!(cases.cases.len() >= 8, "{}", cases.cases.len());
         for c in &cases.cases {

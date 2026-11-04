@@ -1,7 +1,7 @@
 //! The meeting notepad — Yap's meeting UI while a call runs (Wispr Flow's
 //! Notetaker notepad, ported to Yap): a slim window docked to the right edge
 //! of the screen, with the meeting's own notes ("My thoughts"), the live
-//! transcript, the summary and "What did I miss?" (`src/lib/Notepad.svelte`).
+//! transcript, the summary and "What did I miss?" (`desktop/src/lib/Notepad.svelte`).
 //!
 //! - **One window**, `notepad` in tauri.conf.json, created hidden and
 //!   unfocused at startup like onboarding: it opens instantly, `capture.rs`

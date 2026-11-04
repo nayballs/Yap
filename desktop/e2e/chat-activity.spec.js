@@ -1,4 +1,4 @@
-// What Chat is doing, while it answers (src-tauri/src/chat/activity.rs,
+// What Chat is doing, while it answers (desktop/src-tauri/src/chat/activity.rs,
 // views/chat/ActivityLine.svelte, ChatSteps.svelte), as the Claude Code app
 // shows it:
 // - One line at the thread's foot: a moving mark, the step under way and the

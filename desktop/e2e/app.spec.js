@@ -44,7 +44,7 @@ test('every sidebar view renders', async ({ main, shot }) => {
   }
 });
 
-// The nav's pages, in its order (src/lib/settings/nav.js).
+// The nav's pages, in its order (desktop/src/lib/settings/nav.js).
 const SECTIONS = [
   'General',
   'Dictation',
@@ -247,7 +247,7 @@ test('dictation (stub engine) lands in the Home feed', async ({ yap, main, shot 
   const mics = await yap.invoke('list_audio_devices');
   test.skip(mics.length === 0, 'no microphone here; no-mic.spec.js covers that path');
 
-  // Test mode never pastes the result anywhere (src-tauri/src/shell/e2e.rs).
+  // Test mode never pastes the result anywhere (desktop/src-tauri/src/shell/e2e.rs).
   await pressHotkey(main);
   await expect(yap.overlay.locator('.capsule')).toBeVisible();
   await main.waitForTimeout(1_500);

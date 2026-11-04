@@ -1,6 +1,6 @@
 // The AI providers' ids and short names, with nothing else in the file:
 // providers.js re-exports them (the one place the app imports them from),
-// and Yap Link's phone page loads this file as it is (`src-tauri/build.rs`
+// and Yap Link's phone page loads this file as it is (`desktop/src-tauri/build.rs`
 // serves it at core/providerIds.js), so it must stay pure — no imports, no
 // Tauri, no Svelte, no assets (`phone/web/README.md`, "Chat's own
 // modules").

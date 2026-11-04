@@ -1,6 +1,6 @@
 // Pinned notes, each note's version history, and the saved transforms on a
-// note (src-tauri/src/notes/pins.rs, notes/versions.rs, notes/transform.rs;
-// src/lib/views/notes/: NoteList, NoteMeta's ⋯, VersionHistory, noteMenus.js):
+// note (desktop/src-tauri/src/notes/pins.rs, notes/versions.rs, notes/transform.rs;
+// desktop/src/lib/views/notes/: NoteList, NoteMeta's ⋯, VersionHistory, noteMenus.js):
 // - a pin from the note's menu and from its row: pinned notes first in
 //   Notes and in their folder, a pin mark; kept in note_pins.json (never
 //   notes.json, which an older Yap rewrites), gone with the note;

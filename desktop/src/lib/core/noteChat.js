@@ -1,4 +1,4 @@
-// A note's Ask threads, kept with it (src-tauri/src/chat/note_chats.rs): the
+// A note's Ask threads, kept with it (desktop/src-tauri/src/chat/note_chats.rs): the
 // notepad's Ask sheet and the Notes view's "Ask anything…" bar show the
 // meeting's newest thread when the note opens, keep each turn as it's
 // shown (`keepTurn`), follow each other through `yap-note-chat`, and list

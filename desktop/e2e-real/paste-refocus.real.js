@@ -1,4 +1,4 @@
-// The exact text box (src-tauri/src/pasting/selection.rs `keep_focus`,
+// The exact text box (desktop/src-tauri/src/pasting/selection.rs `keep_focus`,
 // `follow_focus`, `restore_focus`). At a dictation's start Yap keeps the
 // element with the focus; at its paste:
 //
@@ -14,7 +14,7 @@
 // `move()` while "you talk", then pastes.
 //
 // Run alone (it takes the keyboard focus for a minute):
-//   npm run test:real:build && npx playwright test -c e2e-real paste-refocus
+//   npm run test:real:build && npx playwright test -c desktop/e2e-real paste-refocus
 import { test, expect } from './support/robot.js';
 import { edgeExe } from './support/targets.js';
 

@@ -1,5 +1,5 @@
 // "Read screenshots on this PC" (Snip to Chat, phase 3, 2026-10-28;
-// src-tauri/src/ai/local_llm/vision.rs): the on-device model's projector,
+// desktop/src-tauri/src/ai/local_llm/vision.rs): the on-device model's projector,
 // downloaded from Settings → Language Models or from Chat's "can't read
 // images" line, its progress shown in both (a store, so the download
 // carries on with its progress when you leave either), switched on or off,

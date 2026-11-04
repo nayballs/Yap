@@ -4,7 +4,7 @@
 // page's elements, so a note's rendered summary and a chat's answers stay
 // as they are) or selected in a text box (a note's My thoughts). A word
 // matches where it starts a word, case aside, as much of it as was typed —
-// the search's own rule (src-tauri/src/search/library.rs `holds`).
+// the search's own rule (desktop/src-tauri/src/search/library.rs `holds`).
 
 /** The words as the search reads them: lower case, split at anything but
  *  letters and digits, once each. */

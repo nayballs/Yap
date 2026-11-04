@@ -47,9 +47,10 @@ the competitive strategy, see `ROADMAP.md` in the **private** docs repo (below).
 
 ## Where things are
 
-- `src/` + `src-tauri/` — **the desktop app** (Svelte windows, Rust core): one app for every desktop system, Windows today, macOS and Linux later. Code only Windows has stays behind `cfg(windows)` with a fallback that builds elsewhere ([app-shell.md, Platforms](./docs/architecture/app-shell.md#platforms-windows-today-macos-and-linux-later)). Its tests: `e2e/` (UI), `e2e-real/` (robot).
-- `phone/` — **the phone app** ([README](./phone/README.md)): `web/` today (`page/`, served by the PC; `tests/`); native apps go beside it. The PC's side is `src-tauri/src/link/`.
+- `desktop/` — **the desktop app** (Tauri): `src/` its windows (Svelte), `src-tauri/` its core (Rust), `e2e/` its UI tests, `e2e-real/` its robot tests, its own `package.json`. One app for every desktop system, Windows today, macOS and Linux later: code only Windows has stays behind `cfg(windows)` with a fallback that builds elsewhere ([app-shell.md, Platforms](./docs/architecture/app-shell.md#platforms-windows-today-macos-and-linux-later)).
+- `phone/` — **the phone app** ([README](./phone/README.md)): `web/` today (`page/`, served by the PC; `tests/`); native apps go beside it. The PC's side is `desktop/src-tauri/src/link/`.
 - `cloud/` the accounts service · `site/` the website · `evals/` model evaluations · `docs/` how Yap works · `scripts/` dev, build, release and guards.
+- The repo is an npm workspace (since 4 Nov 2026): `npm ci` at the root installs it all into the root's `node_modules`, and the root's scripts run the desktop app's (`npm run tauri dev`, `npm run build`, `npm run test:app`). Paths in these docs are from the repo root.
 
 ---
 
@@ -57,11 +58,11 @@ the competitive strategy, see `ROADMAP.md` in the **private** docs repo (below).
 
 Full list with versions and details: [app-shell.md](./docs/architecture/app-shell.md#stack).
 
-- **Shell:** Tauri 2 — Rust backend (`src-tauri/src/`) + Svelte 5 / Vite 6 frontend (`src/`).
+- **Shell:** Tauri 2 — Rust backend (`desktop/src-tauri/src/`) + Svelte 5 / Vite 6 frontend (`desktop/src/`).
 - **Rich editor:** TipTap 3 on ProseMirror — Chat's document page (its own chunk); the note stays markdown.
 - **Windows:** `settings` (the main window), `onboarding`, `notepad` (meeting notes), `quick-note` (the quick note), `overlay` (the Yap bar).
 - **Audio:** `cpal` capture, `rodio` playback (chimes, spoken replies).
-- **STT:** `transcribe-rs` — whisper.cpp on Vulkan + ONNX models (Parakeet…) on DirectML; `engines` feature. Vendored (`src-tauri/vendor/transcribe-rs`, `[patch.crates-io]`) with two DirectML fixes for Parakeet and its TDT durations read (no "d d d d" runs) — see its `YAP.md`. A transcript's language: `whatlang` + Yap's function words (`languages/text_id.rs`).
+- **STT:** `transcribe-rs` — whisper.cpp on Vulkan + ONNX models (Parakeet…) on DirectML; `engines` feature. Vendored (`desktop/src-tauri/vendor/transcribe-rs`, `[patch.crates-io]`) with two DirectML fixes for Parakeet and its TDT durations read (no "d d d d" runs) — see its `YAP.md`. A transcript's language: `whatlang` + Yap's function words (`languages/text_id.rs`).
 - **AI:** `reqwest` → any OpenAI-compatible endpoint, the person's ChatGPT plan (Sign in with ChatGPT: OpenAI's Responses API, `ai/chatgpt.rs`), or the on-device sidecar: llama.cpp's own `llama-server` builds, kept up to date (`ai/local_llm.rs`, `local_llm/engine.rs`; llamafile on an install that hasn't moved yet).
 - **Spoken replies:** Kokoro-82M (ONNX on `ort`, CPU; eSpeak NG run separately) or Windows' voices; or ElevenLabs (cloud, the user's own key, streamed PCM); or OpenAI, Gemini, Groq (the keys Language Models already has).
 - **Speaker diarization (beta):** Nemotron-3-Diarization on NeMo-Speech.cpp, in a `yap.exe diarize` child.
@@ -104,7 +105,7 @@ blocks. The full order and its rules: [dictation.md](./docs/architecture/dictati
 
 ---
 
-## Module index (`src-tauri/src/`)
+## Module index (`desktop/src-tauri/src/`)
 
 One folder per area (an area's `<area>.rs` lists its modules); a big module's parts are its children
 (`dictation/pipeline/`…). The tree and its rules: [app-shell.md](./docs/architecture/app-shell.md#modules).
@@ -288,7 +289,7 @@ One folder per area (an area's `<area>.rs` lists its modules); a big module's pa
 - `integrations/mcp_clients.rs` — "Add to Claude / ChatGPT / …": edits AI apps' configs safely.
 
 **Yap Link (the phone)** — [link.md](./docs/architecture/link.md)
-- `link.rs` (+ `link/`: server, cert, pairing, devices, session, voice, models, chats, pictures, lan, wire, page) — Yap's AI from a paired phone on the home Wi-Fi (Settings → Phone, off by default): HTTPS on 51443 to home-network peers only (never a Public network), a self-signed certificate (`<data>/link/`), the phone's page embedded from `phone/web/page/`, a WebSocket (protocol v1 and its 2026-11-03 additions, `wire.rs`); the page Yap's Chat in the Claude app's layout: ☰'s drawer of Chat's conversations (`chats.rs`; the phone keeps its own, `chat` on a question, `assistant::phone_conversation`), the thread, a composer card with the pictures (`pictures.rs`: taken or chosen, 2,048 px JPEGs in `0x03` frames, sent as Chat's typed question's screenshots, `commands::question_images`), +, the model chip with its effort, the mic (Talk: its words in the box to check and send — `start {mode:"words"}`, only transcribed, `words`; sent, asked out loud, `ask {speak}` —; hands-free sends and answers out loud) and Send / ■, a typed question (`ask`: answered as typed, not spoken; ▶ `read_aloud` says one), Chat's own picker (`src/lib/core/chatPicker.js` and its pure modules served beside the page with the logos, `build.rs` `LINK_SHARED`; `models.rs` `picker`: what the desktop picker reads, never a key; the effort), the settings a sheet; pairing by a one-time QR token and a 4-digit code on both screens (`link_devices.json`: secrets' hashes; a hello's device counts before its code, only guesses are strikes, a new code forgives them); a question transcribed on the warm engine, asked as the Voice Assistant asks (`assistant::ask_from_phone`), its voice rendered for the phone (`speak_streamed_to`), never this PC's speakers, and played there as one stream (an AudioWorklet's jitter buffer: 250 ms, fades, underruns counted; or, opted in, cut at its pauses into WAVs the browser's media player plays, `mediaVoice`; "Clearer sound in a headset", on by default, lets the mic go while Yap talks; opening the mic a timed step at a time, never a silent "Wait…"; Sound details); hands-free's wait (1 / 1.5 / 2.5 s); Chat's model switched from the phone.
+- `link.rs` (+ `link/`: server, cert, pairing, devices, session, voice, models, chats, pictures, lan, wire, page) — Yap's AI from a paired phone on the home Wi-Fi (Settings → Phone, off by default): HTTPS on 51443 to home-network peers only (never a Public network), a self-signed certificate (`<data>/link/`), the phone's page embedded from `phone/web/page/`, a WebSocket (protocol v1 and its 2026-11-03 additions, `wire.rs`); the page Yap's Chat in the Claude app's layout: ☰'s drawer of Chat's conversations (`chats.rs`; the phone keeps its own, `chat` on a question, `assistant::phone_conversation`), the thread, a composer card with the pictures (`pictures.rs`: taken or chosen, 2,048 px JPEGs in `0x03` frames, sent as Chat's typed question's screenshots, `commands::question_images`), +, the model chip with its effort, the mic (Talk: its words in the box to check and send — `start {mode:"words"}`, only transcribed, `words`; sent, asked out loud, `ask {speak}` —; hands-free sends and answers out loud) and Send / ■, a typed question (`ask`: answered as typed, not spoken; ▶ `read_aloud` says one), Chat's own picker (`desktop/src/lib/core/chatPicker.js` and its pure modules served beside the page with the logos, `build.rs` `LINK_SHARED`; `models.rs` `picker`: what the desktop picker reads, never a key; the effort), the settings a sheet; pairing by a one-time QR token and a 4-digit code on both screens (`link_devices.json`: secrets' hashes; a hello's device counts before its code, only guesses are strikes, a new code forgives them); a question transcribed on the warm engine, asked as the Voice Assistant asks (`assistant::ask_from_phone`), its voice rendered for the phone (`speak_streamed_to`), never this PC's speakers, and played there as one stream (an AudioWorklet's jitter buffer: 250 ms, fades, underruns counted; or, opted in, cut at its pauses into WAVs the browser's media player plays, `mediaVoice`; "Clearer sound in a headset", on by default, lets the mic go while Yap talks; opening the mic a timed step at a time, never a silent "Wait…"; Sound details); hands-free's wait (1 / 1.5 / 2.5 s); Chat's model switched from the phone.
 
 **Accounts** — [accounts.md](./docs/architecture/accounts.md)
 - `auth.rs` — optional accounts: browser/email/phone sign-in, the session, where you're signed in.
@@ -324,11 +325,11 @@ One folder per area (an area's `<area>.rs` lists its modules); a big module's pa
 - `shell/e2e.rs` / `shell/realtest.rs` — test mode, and robot mode's real pastes into the test's own windows.
 - `privacy/log_privacy.rs` — a test: no user content in the log at `info` and above (app-shell.md, Logging).
 
-## Frontend index (`src/`)
+## Frontend index (`desktop/src/`)
 
-[frontend.md](./docs/architecture/frontend.md) unless noted; its [folder layout](./docs/architecture/frontend.md#the-folder-layout-2026-10-24) has every folder and the big views' parts. Paths below are under `src/lib/`.
-- `src/` — `main.js`, `App.svelte` (one chunk per window: each loads only its own view, the Yap bar ~150 KB, not the whole app), `app.css`. `lib/` by kind: `views/` the main window, `settings/` its Settings modal, `notepad/` · `onboarding/` · `bar/` · `quicknote/` the other windows, `components/` shared across them, `stores/` app-wide `*.svelte.js` stores, `notices/` Rust's events as toasts, `core/` helpers and catalogues with no Svelte state, `ui/` the primitives. A big view is a folder of parts, its shared state a `*.svelte.js` beside them that the view makes.
-- Theme — `--yap-*` / `--yap-paper-*` tokens in `src/app.css`, warm light and a warm dark (`[data-yap-theme='dark']`, from the bar's dark scheme; never hard-code a colour), Figtree + EB Garamond; mark `src/assets/yap-logo.svg` ([frontend.md](./docs/architecture/frontend.md#the-dark-theme-2026-10-22)).
+[frontend.md](./docs/architecture/frontend.md) unless noted; its [folder layout](./docs/architecture/frontend.md#the-folder-layout-2026-10-24) has every folder and the big views' parts. Paths below are under `desktop/src/lib/`.
+- `desktop/src/` — `main.js`, `App.svelte` (one chunk per window: each loads only its own view, the Yap bar ~150 KB, not the whole app), `app.css`. `lib/` by kind: `views/` the main window, `settings/` its Settings modal, `notepad/` · `onboarding/` · `bar/` · `quicknote/` the other windows, `components/` shared across them, `stores/` app-wide `*.svelte.js` stores, `notices/` Rust's events as toasts, `core/` helpers and catalogues with no Svelte state, `ui/` the primitives. A big view is a folder of parts, its shared state a `*.svelte.js` beside them that the view makes.
+- Theme — `--yap-*` / `--yap-paper-*` tokens in `desktop/src/app.css`, warm light and a warm dark (`[data-yap-theme='dark']`, from the bar's dark scheme; never hard-code a colour), Figtree + EB Garamond; mark `desktop/src/assets/yap-logo.svg` ([frontend.md](./docs/architecture/frontend.md#the-dark-theme-2026-10-22)).
 - `core/appearance.js` — General → Appearance in every window: Theme (System / Light / Dark → `data-yap-theme`, System follows Windows live; the bar's Match app → `data-bar-theme`; `index.html`'s head script puts it on before the first paint), reading font/size tokens (`--yap-font-reading`, `--yap-reading-scale`) for chats/notes/notepad only, and reduced Motion.
 - `views/ControlPanel.svelte` — the main window (label `settings`): sidebar, Settings modal, title bar (Chat's browser button while Chat shows: `stores/chatBrowser.svelte.js`).
 - `ui/toast.svelte.js` + `ui/noticePolicy.js` — app-wide toasts running the page's notice policy; `notices/` — alerts, the meeting guard rails and check-ins, the cleanup offer, word suggestions, the company folder offer (`companyFolders.js`), `saveErrors.js` (a command's failed save shown with Try again).
@@ -380,7 +381,7 @@ GPU policy: **universal, no CUDA** (Whisper → Vulkan, ONNX → DirectML); buil
 `engines` needs the **Vulkan SDK**. Details: [build-and-test.md](./docs/architecture/build-and-test.md).
 
 **Dev:** `scripts/dev.bat` (= `npm run tauri dev -- --features engines`, Vite on
-**:51437**, hot-reloads `src/`) behind the **"Yap - Dev"** desktop shortcut; the plain
+**:51437**, hot-reloads `desktop/src/`) behind the **"Yap - Dev"** desktop shortcut; the plain
 **"Yap"** shortcut is the *installed* app (nightly channel).
 It runs behind an animated launcher screen (`scripts/dev-launcher.mjs`: stages, a real build
 bar, L for the raw log, a log file; `YAP_DEV_PLAIN=1` for the old output; build-and-test.md).
@@ -398,7 +399,7 @@ npm run tauri dev
 
 Accounts in debug builds: `cd cloud && npm run dev` (wrangler dev on :8787; see `cloud/README.md`).
 
-> ⚠️ A *compiled release build* bakes the frontend into the binary — editing `src/`
+> ⚠️ A *compiled release build* bakes the frontend into the binary — editing `desktop/src/`
 > and restarting that `.exe` changes nothing. For live frontend changes use dev
 > (Vite on :51437). If :51437 isn't listening, you're looking at a release build.
 
@@ -425,7 +426,7 @@ upstream (`npm run pins:check`; build-and-test.md "Keeping what Yap is built fro
 **Dev first, nightly for batches.** Every change goes through these steps in order:
 1. **Claude builds it and tests it.** `npm run build` + `cargo clippy --all-targets
    --locked -- -D warnings` + `cargo test`, then **the e2e specs the change touches**
-   (`npx playwright test -c e2e <spec>` after `npm run test:app:build`; add or extend
+   (`npx playwright test -c desktop/e2e <spec>` after `npm run test:app:build`; add or extend
    a spec for anything new). The full suite (`npm run test:app`, ~35 min) only for a
    batch of changes or before a nightly (the maintainer, 2026-10-25). For anything about **pasting, inserting text,
    the clipboard, terminals/chat apps, the mic path or STT**, also the real-app
@@ -439,7 +440,7 @@ upstream (`npm run pins:check`; build-and-test.md "Keeping what Yap is built fro
    guard every push from here).
 2. **The maintainer tries it in the dev build** ("Yap - Dev" desktop shortcut =
    `scripts\dev.bat`, the real GPU pipeline from this checkout). Anything visual or
-   about how it feels gets checked HERE: Vite hot-reloads `src/` edits in seconds;
+   about how it feels gets checked HERE: Vite hot-reloads `desktop/src/` edits in seconds;
    Rust edits need the dev build restarted (a minute or two to recompile). Something
    off → Claude fixes it → it shows straight away. Never burn a 15-min nightly to
    check something dev shows in seconds. Hand it over with exact steps (the private

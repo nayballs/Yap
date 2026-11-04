@@ -260,7 +260,7 @@ mod tests {
 
     #[test]
     fn the_cases_read_and_the_rules_alone_pass_most_of_them() {
-        let cases = load(&Path::new(env!("CARGO_MANIFEST_DIR")).join("../evals/hinglish/cases.json"), &[]).unwrap();
+        let cases = load(&Path::new(env!("CARGO_MANIFEST_DIR")).join("../../evals/hinglish/cases.json"), &[]).unwrap();
         assert!(cases.len() >= 8);
         let mut passed = 0;
         for c in &cases {

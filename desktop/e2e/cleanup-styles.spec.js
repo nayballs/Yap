@@ -11,7 +11,7 @@
 //
 // A test run reads no other app's window: dictations go to a stand-in app
 // (`e2e_style_app`: a process name and a title, as a real window would
-// give). Real windows are the robot's (e2e-real/cleanup-styles.real.js).
+// give). Real windows are the robot's (desktop/e2e-real/cleanup-styles.real.js).
 import { test as base, expect, openSettings, closeSettings, expectStore, setConfig, settingsDialog } from './support/fixtures.js';
 import { startFakeLlm, cleanupTranscript } from './support/fake-llm.js';
 

@@ -1,4 +1,4 @@
-// Snip to Chat (src-tauri/src/snip.rs, docs/architecture/snip.md): drag a
+// Snip to Chat (desktop/src-tauri/src/snip.rs, docs/architecture/snip.md): drag a
 // box over any screen and the picture goes into Chat for the selected model.
 //
 // Test mode never reads the real screen: `e2e_snip` (shell/e2e.rs) hands the snip

@@ -5,7 +5,7 @@ import { defineConfig } from '@playwright/test';
 export default defineConfig({
   testDir: '.',
   testMatch: '*.spec.js',
-  outputDir: '../test-results/app/playwright',
+  outputDir: '../../test-results/app/playwright',
   globalSetup: './support/global-setup.js',
   // One app instance at a time: specs share nothing, but parallel instances
   // would fight over the screen and slow CI runners down.
@@ -20,7 +20,7 @@ export default defineConfig({
   forbidOnly: !!process.env.CI,
   reporter: [
     ['list'],
-    ['html', { outputFolder: '../test-results/app/report', open: 'never' }],
+    ['html', { outputFolder: '../../test-results/app/report', open: 'never' }],
     ...(process.env.CI ? [['github']] : []),
   ],
 });

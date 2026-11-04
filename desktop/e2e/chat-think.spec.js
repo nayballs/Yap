@@ -1,4 +1,4 @@
-// Think it through (src-tauri/src/chat/think.rs, Chat's Think button): one
+// Think it through (desktop/src-tauri/src/chat/think.rs, Chat's Think button): one
 // question, thought through by the model on this PC.
 // - The button shows for the on-device Qwen3.5 only; a cloud model has its
 //   effort instead (ai/effort.rs, the model picker: chat-effort.spec.js).

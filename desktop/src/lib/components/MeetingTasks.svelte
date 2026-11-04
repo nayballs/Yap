@@ -1,6 +1,6 @@
 <script>
   // A meeting's Tasks tab, in the meeting notepad (look "paper") and the Notes
-  // view (look "app"), after Wispr Flow's (src-tauri/src/notes/tasks.rs): the
+  // view (look "app"), after Wispr Flow's (desktop/src-tauri/src/notes/tasks.rs): the
   // summary's tasks, then the ones added here, with how many are done, a
   // tick for each — where it lives: the summary's "- [x]", or the added
   // task's own — **Complete all** (with Undo), and **Add a task** (Enter

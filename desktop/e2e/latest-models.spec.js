@@ -1,4 +1,4 @@
-// src/lib/core/latestModels.js on its own (no app needed): how Chat's model
+// desktop/src/lib/core/latestModels.js on its own (no app needed): how Chat's model
 // picker splits the selected provider's list into Latest (the newest of
 // each family, as the Claude Code app lists the latest Opus, Fable, Sonnet
 // and Haiku) and More models (the rest, newest first):

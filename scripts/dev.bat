@@ -2,7 +2,7 @@
 REM ── Yap Dev launcher ─────────────────────────────────────────────
 REM Runs Yap from SOURCE with hot-reload (Vite on :51437 + Tauri dev).
 REM This is the LIVE code, not the installed/compiled release build.
-REM Edit files in src/ or src-tauri/ and the app reloads automatically.
+REM Edit desktop\src\ or desktop\src-tauri\ and the app reloads itself.
 REM Keep this window open while you work; close it to stop Yap.
 
 title Yap Dev (live)
@@ -26,7 +26,7 @@ if not defined YAP_DEV_UPDATED (
 REM whisper-rs-sys' cmake build nests paths past Windows MAX_PATH (260) and
 REM MSBuild's FileTracker fails with FTK1011 regardless of the LongPathsEnabled
 REM registry opt-in — same workaround as CI (nightly.yml): build into a SHORT
-REM target dir on this drive instead of src-tauri\target.
+REM target dir on this drive instead of desktop\src-tauri\target.
 set CARGO_TARGET_DIR=%~d0\t
 
 REM Dev-only: expose the webviews on the Chrome DevTools Protocol (CDP) so

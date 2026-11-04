@@ -786,7 +786,7 @@ fn recall_at(ranks: &[Option<usize>], k: usize) -> f64 {
 
 async fn embed_bench(ep: &Endpoint<'_>, rounds: u32) -> Result<Value, String> {
     let client = client()?;
-    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("../evals/retrieval/notes.json");
+    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../evals/retrieval/notes.json");
     let set = load_retrieval(&path)?;
     let (qp, dp) = embed_prefixes(ep.model);
 
@@ -1137,7 +1137,7 @@ mod tests {
 
     #[test]
     fn the_retrieval_set_loads() {
-        let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("../evals/retrieval/notes.json");
+        let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../evals/retrieval/notes.json");
         let r = load_retrieval(&path).expect("notes.json");
         assert!(r.notes.len() >= 20 && r.queries.len() >= 15);
     }

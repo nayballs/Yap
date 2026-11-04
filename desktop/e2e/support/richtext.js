@@ -1,5 +1,5 @@
 // The rich text editor's markdown, in and out, without the app
-// (src/lib/components/richtext/: richMarkdown.js over richSchema.js, TipTap
+// (desktop/src/lib/components/richtext/: richMarkdown.js over richSchema.js, TipTap
 // on ProseMirror): the harness doc-markdown.spec.js (Chat's documents) and
 // note-markdown.spec.js (notes: summaries with tasks, My thoughts, the
 // quick note) share — read, change, written back. ProseMirror's model

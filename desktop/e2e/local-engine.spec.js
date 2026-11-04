@@ -1,4 +1,4 @@
-// The on-device model's engine kept up to date (src-tauri/src/ai/local_llm/
+// The on-device model's engine kept up to date (desktop/src-tauri/src/ai/local_llm/
 // engine.rs, engine/updater.rs; 2026-11-01): Settings → Language Models shows
 // "Engine: llama.cpp b11960"; Check now reads the releases, takes the newest
 // build at least 3 days old (never a newer one), downloads it (its digest

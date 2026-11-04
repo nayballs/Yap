@@ -1,5 +1,5 @@
 // What a meeting's summary offers beside its words, in the notepad and the
-// Notes view alike (src-tauri/src/notes/note_edits.rs):
+// Notes view alike (desktop/src-tauri/src/notes/note_edits.rs):
 // - "Back to Yap's summary" (`canRestore`, `restoreSummary`): Yap keeps its
 //   own version beside one the person edited; going back to it keeps their
 //   ticks, and the toast's Undo saves their version back;
@@ -8,7 +8,7 @@
 // - "Copy for email" (`copySummaryForEmail`): the summary as rich HTML and
 //   plain text on the clipboard at once (markdown.js `emailHtml`).
 // The pure parts are summaryState.js and markdown.js's `emailHtml`,
-// unit-tested in e2e/notes-summary.spec.js and e2e/markdown.spec.js.
+// unit-tested in desktop/e2e/notes-summary.spec.js and desktop/e2e/markdown.spec.js.
 import { invoke } from '@tauri-apps/api/core';
 import { emailHtml, emailText } from './markdown.js';
 import { saveSummary } from './noteEdits.js';

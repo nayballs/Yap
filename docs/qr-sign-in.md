@@ -9,8 +9,8 @@ the background, is then signed in.
 It is the OAuth 2.0 Device Authorization Grant ([RFC 8628]) through Better Auth's
 `deviceAuthorization` plugin. Code: `cloud/src/auth.ts` (plugin config, limits),
 `cloud/src/index.ts` (wrappers around the plugin's routes), `cloud/public/device.*`
-(phone page), `src-tauri/src/auth.rs` (`auth_device_*`, polling, QR drawing),
-`src/lib/settings/AccountSection.svelte` (the panel).
+(phone page), `desktop/src-tauri/src/auth.rs` (`auth_device_*`, polling, QR drawing),
+`desktop/src/lib/settings/AccountSection.svelte` (the panel).
 
 ## Why this design (review of 2026-10-04)
 

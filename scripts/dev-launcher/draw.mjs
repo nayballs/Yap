@@ -21,7 +21,7 @@ export function mix(a, b, t) {
   );
 }
 
-// The brand (src/assets/yap-logo.svg, app.css) on a warm near-black page.
+// The brand (desktop/src/assets/yap-logo.svg, app.css) on a warm near-black page.
 export const C = {
   page: rgb(0x14, 0x12, 0x0f),
   bar: rgb(0x26, 0x21, 0x1b),
@@ -717,7 +717,7 @@ function runningLines(m) {
   L.push({ x: 5, segs: [seg(facts.join(' · '), C.dim)] });
   L.push({ segs: [] });
   if (!state.hot.count && !state.rustRebuilds) {
-    L.push({ x: 5, segs: [seg('No reloads yet: ', C.text), seg('save in src/ and the page hot-reloads; in src-tauri/ and Yap rebuilds.', C.dim)] });
+    L.push({ x: 5, segs: [seg('No reloads yet: ', C.text), seg('save in desktop/src/ and the page hot-reloads; in desktop/src-tauri/ and Yap rebuilds.', C.dim)] });
   } else {
     L.push({ x: 5, segs: [seg(plural(state.hot.count, 'hot reload'), C.cream, 1), seg(' · ', C.faint), seg(plural(state.rustRebuilds, 'Rust rebuild'), C.cream, 1)] });
     for (const r of state.hot.recent.slice(0, 4)) {

@@ -5,7 +5,7 @@ import { bearer, deviceAuthorization, emailOTP } from "better-auth/plugins";
 import { electron } from "@better-auth/electron";
 import { accountDeletedEmail, otpEmail, sendMail } from "./mail";
 
-/** Client id Yap sends with browser sign-ins (src-tauri/src/auth.rs). The
+/** Client id Yap sends with browser sign-ins (desktop/src-tauri/src/auth.rs). The
  *  electron plugin binds the handoff code to it and names the handoff cookie
  *  `better-auth.yap-desktop` after it (public/index.html reads that cookie).
  *  Phone sign-in codes are issued to it alone. */
@@ -149,7 +149,7 @@ const createAuth = () => betterAuth({
       "/device/deny": { window: 60, max: 5 },
     },
   },
-  // Only what Yap calls stays reachable (src-tauri/src/auth.rs: get-session,
+  // Only what Yap calls stays reachable (desktop/src-tauri/src/auth.rs: get-session,
   // list-accounts, sign-out, delete-user, revoke-other-sessions, email codes,
   // the desktop handoff; index.ts calls sign-in/social and get-session). Off,
   // with a reason each:

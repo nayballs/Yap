@@ -12,11 +12,11 @@ Native apps (Android first, then iPhone) will go beside `web/` as their own
 folders, each speaking the same protocol to the PC.
 
 **The PC's side** (the HTTPS server, pairing, the protocol, the voice) is part
-of the desktop app: `src-tauri/src/link/`, described in
+of the desktop app: `desktop/src-tauri/src/link/`, described in
 [`docs/architecture/link.md`](../docs/architecture/link.md). The protocol
-(v1, `src-tauri/src/link/wire.rs`) is the contract every phone app keeps to.
+(v1, `desktop/src-tauri/src/link/wire.rs`) is the contract every phone app keeps to.
 
 **Shared with the desktop**: Chat's model picker code and the providers' logos
-are the desktop's own files (`src/lib/core/`, `src/assets/providers/`), served
-beside the page as they are (`src-tauri/build.rs` `LINK_SHARED`), so the phone
+are the desktop's own files (`desktop/src/lib/core/`, `desktop/src/assets/providers/`), served
+beside the page as they are (`desktop/src-tauri/build.rs` `LINK_SHARED`), so the phone
 and the PC never drift apart.

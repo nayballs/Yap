@@ -1,6 +1,6 @@
 // Network receipts and Report a problem:
-// - Settings → Privacy & data → Network connections (src/lib/settings/
-//   ConnectionsView.svelte, src-tauri/src/privacy/net.rs): a Chat answer from "Groq"
+// - Settings → Privacy & data → Network connections (desktop/src/lib/settings/
+//   ConnectionsView.svelte, desktop/src-tauri/src/privacy/net.rs): a Chat answer from "Groq"
 //   — the fake AI standing in for api.groq.com through the debug-only
 //   YAP_E2E_NET_ALIASES — shows as "Chat · Groq" to api.groq.com, on the
 //   Internet; one from a server on this PC as "Chat · Custom endpoint" at

@@ -1023,7 +1023,7 @@ mod tests {
 
     /// Every file and folder config-and-data.md names in the data folder.
     fn named_in_the_docs() -> BTreeSet<String> {
-        let doc = include_str!("../../../docs/architecture/config-and-data.md");
+        let doc = include_str!("../../../../docs/architecture/config-and-data.md");
         let re = regex::Regex::new(r"(?:%APPDATA%[/\\]yap[/\\]|<data>/)([A-Za-z0-9_.-]+)(/?)").unwrap();
         let named: BTreeSet<String> =
             re.captures_iter(doc).map(|c| format!("{}{}", &c[1], if c[2].is_empty() && !c[1].contains('.') { "/" } else { &c[2] })).collect();

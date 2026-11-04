@@ -43,7 +43,7 @@ fuzzy-matching text afterwards.** It sidesteps the whole "fuzzy string" problem.
 
 ## What Yap has today
 
-`config::apply_dictionary` (`src-tauri/src/config.rs`): case-insensitive regex
+`config::apply_dictionary` (`desktop/src-tauri/src/config.rs`): case-insensitive regex
 replace, `{from → to}` pairs, applied after transcription (and after AI cleanup):
 
 ```rust
@@ -135,7 +135,7 @@ extracted `app.asar`, Handy clone):
 **Shipped in Yap (2026-07-10):** options 1+2 were already in; this pass added
 **3 and 4** — the full Handy split, ported from source:
 
-- `src-tauri/src/dictionary/fuzzy.rs` — Handy's `apply_custom_words` (Levenshtein +
+- `desktop/src-tauri/src/dictionary/fuzzy.rs` — Handy's `apply_custom_words` (Levenshtein +
   `natural`-crate Soundex replicated exactly — it's a NONSTANDARD variant: raw
   first char, strip h/w → dedup → strip vowels — verified against the real
   crates in a scratch build). Adapted to Yap's `{from → to}` entries (n-grams

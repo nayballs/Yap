@@ -1,5 +1,5 @@
 <script>
-  // Think (src-tauri/src/chat/think.rs): the next question thought through,
+  // Think (desktop/src-tauri/src/chat/think.rs): the next question thought through,
   // one question at a time — the on-device Qwen thinks before it answers.
   // Shown only for the model on this PC: a cloud model's thinking is its
   // effort, in the model picker (ai/effort.rs). Asked again whenever Chat's

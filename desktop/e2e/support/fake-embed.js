@@ -1,4 +1,4 @@
-// A stand-in for meeting search's embedding model (src-tauri/src/search/
+// A stand-in for meeting search's embedding model (desktop/src-tauri/src/search/
 // embedder.rs: EmbeddingGemma on llamafile's `--embedding` server), which a
 // test run never starts: Yap is pointed here with the debug-only
 // YAP_E2E_EMBED_URL. `POST /v1/embeddings {input: [...]}` answers as

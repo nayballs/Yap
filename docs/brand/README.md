@@ -1,6 +1,6 @@
 # Yap brand files
 
-- `yap-logo.svg` — the master mark (same as `src/assets/yap-logo.svg`).
+- `yap-logo.svg` — the master mark (same as `desktop/src/assets/yap-logo.svg`).
 - `yap-logo-512.png` — 512×512, for GitHub's OAuth app logo
   (github.com/settings/applications/3897989 → "Upload new logo").
 - `yap-logo-120.png` — 120×120, for Google's OAuth consent screen
@@ -8,6 +8,6 @@
   under 1 MB). Changing it there means re-running Google's brand
   verification (Branding → Verify branding, then Publish branding).
 
-The 512 is a copy of the generated app icon (`src-tauri/icons/icon.png`, from
+The 512 is a copy of the generated app icon (`desktop/src-tauri/icons/icon.png`, from
 `npx tauri icon`) and the 120 is that icon downscaled (Lanczos); regenerate
 the icons, then redo both, if the mark changes.

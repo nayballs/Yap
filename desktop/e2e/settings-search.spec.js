@@ -1,4 +1,4 @@
-// Settings after the 2026-10-22 review (src/lib/settings/): the search at
+// Settings after the 2026-10-22 review (desktop/src/lib/settings/): the search at
 // the top of the nav over a static index of every setting, the old links
 // that must still land (nav.js ALIASES), the 860 × 600 layout (an icon rail,
 // rows that stack), the Meetings page's call apps one level down, and the

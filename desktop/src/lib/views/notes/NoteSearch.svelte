@@ -2,7 +2,7 @@
   // The Notes view's search results (NoteList loads it when a search is
   // typed): every note, whatever its folder — its title, My thoughts,
   // summary and transcript — holding the words typed
-  // (src-tauri/src/search/library.rs `notes_search`), and with "Search by
+  // (desktop/src-tauri/src/search/library.rs `notes_search`), and with "Search by
   // meaning" on, a few that mean them (asked second: the words' results show
   // at once). Each shows the line it found, the words marked; it opens the
   // note there (notesState `openRequested`: the transcript line lit, My

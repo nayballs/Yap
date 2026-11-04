@@ -1,4 +1,4 @@
-//! **Robot mode**: the real-app tests (`e2e-real/`, `npm run test:real`; see
+//! **Robot mode**: the real-app tests (`desktop/e2e-real/`, `npm run test:real`; see
 //! docs/e2e-tests.md, "Real-app robot tests").
 //!
 //! Test mode (`e2e.rs`) never pastes, types, presses a key or reads anything

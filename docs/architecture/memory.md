@@ -10,7 +10,7 @@ is [ai-models.md](./ai-models.md); the dictionary passes it feeds are
 
 [Architecture index](./README.md) · [CLAUDE.md](../../CLAUDE.md)
 
-## Modules (`src-tauri/src/memory.rs` + `memory/`)
+## Modules (`desktop/src-tauri/src/memory.rs` + `memory/`)
 
 - **`memory.rs`** — the store (`<data>/memory.json`: `{items, nextId, read,
   pending, meetings}`, atomic writes, a corrupt file quarantined; never in
@@ -483,7 +483,7 @@ search (`settingsIndex.js`, anchors `memory-search-chats` … `memory-clear`):
   real export** is checked read-only by an ignored test that prints counts
   only: `YAP_MEMORY_IMPORT_CHECK=<path> cargo test --lib memory::import --
   --ignored --nocapture`.
-- e2e (`e2e/memory.spec.js`, `memory-no-ai.spec.js`,
+- e2e (`desktop/e2e/memory.spec.js`, `memory-no-ai.spec.js`,
   `memory-small-model.spec.js`, `memory-file.spec.js` — a made-up Claude
   export built in the test, with no AI model: picked, reviewed with what Yap
   has, what didn't fit struck out, saved, in Settings "Imported from
@@ -504,5 +504,5 @@ search (`settingsIndex.js`, anchors `memory-search-chats` … `memory-clear`):
   Qwen2.5-1.5B, Qwen3.5-2B and 0.8B on the small path — are in
   [`docs/model-evals.md`](../model-evals.md) "Memory" and "Memory on small
   models").
-- Real-app robot tests (`e2e-real/memory.real.js`): names Yap remembers fixed in a
+- Real-app robot tests (`desktop/e2e-real/memory.real.js`): names Yap remembers fixed in a
   real dictation, everyday sentences untouched.

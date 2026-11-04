@@ -5,18 +5,22 @@
 // - A DEBUG build (the harness only exists with debug_assertions), the
 //   default STUB build (no `engines`: no Vulkan SDK needed; Chat doesn't use
 //   speech-to-text), into its own target dir ($YAP_EVAL_TARGET_DIR, default
-//   src-tauri/target/eval), so it never fights `tauri dev` or the e2e build.
+//   desktop/src-tauri/target/eval), so it never fights `tauri dev` or the e2e
+//   build.
 // - Run folders go to $YAP_EVAL_OUT (default test-results/evals, git-ignored)
 //   unless --out is given.
 import { spawnSync } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import path from 'node:path';
+import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
 
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+// The desktop app, whose Rust code the harness is part of.
+const APP = path.join(REPO, 'desktop');
 const TARGET_DIR = process.env.YAP_EVAL_TARGET_DIR
   ? path.resolve(process.env.YAP_EVAL_TARGET_DIR)
-  : path.join(REPO, 'src-tauri', 'target', 'eval');
+  : path.join(APP, 'src-tauri', 'target', 'eval');
 const exe = path.join(TARGET_DIR, 'debug', process.platform === 'win32' ? 'yap.exe' : 'yap');
 
 let args = process.argv.slice(2);
@@ -31,12 +35,13 @@ function run(cmd, cmdArgs, opts = {}) {
 
 if (build) {
   // tauri's generate_context! needs dist/ to exist at compile time.
-  if (!existsSync(path.join(REPO, 'dist', 'index.html'))) {
-    const s = run(process.execPath, [path.join(REPO, 'node_modules', 'vite', 'bin', 'vite.js'), 'build']);
+  if (!existsSync(path.join(APP, 'dist', 'index.html'))) {
+    const vite = path.join(path.dirname(createRequire(import.meta.url).resolve('vite/package.json')), 'bin', 'vite.js');
+    const s = run(process.execPath, [vite, 'build'], { cwd: APP });
     if (s !== 0) process.exit(s);
   }
   const s = run('cargo', ['build', '--locked'], {
-    cwd: path.join(REPO, 'src-tauri'),
+    cwd: path.join(APP, 'src-tauri'),
     env: { CARGO_PROFILE_DEV_DEBUG: 'line-tables-only', ...process.env, CARGO_TARGET_DIR: TARGET_DIR },
   });
   if (s !== 0) process.exit(s);

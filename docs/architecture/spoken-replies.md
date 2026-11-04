@@ -222,7 +222,7 @@ Reading answers aloud: Kokoro and Windows' voices on this PC, ElevenLabs on the 
     `models_of`, `sample_engine` (▶: the preview sentence through the
     provider, its error shown, not kept). Debug-only
     `YAP_OPENAI_TTS_URL` / `YAP_GEMINI_TTS_URL` / `YAP_GROQ_TTS_URL` name a
-    test run's stand-in (`e2e/support/fake-cloud-tts.js`); without one a
+    test run's stand-in (`desktop/e2e/support/fake-cloud-tts.js`); without one a
     test run never reaches the internet. Unit tests against the in-process
     stand-in (`elevenlabs::standin`'s `Reply::Body`: any content type,
     chunked in odd pieces), and the speaker's
@@ -321,7 +321,7 @@ Reading answers aloud: Kokoro and Windows' voices on this PC, ElevenLabs on the 
     example adds the pieces' lists up as they are) — a piece whose times
     start again near zero is put after the audio before it.
     Debug-only `YAP_ELEVENLABS_URL` names a test run's
-    stand-in (`e2e/support/fake-elevenlabs.js`, which serves both
+    stand-in (`desktop/e2e/support/fake-elevenlabs.js`, which serves both
     endpoints); without it a test run
     never reaches the internet. Unit tests run against an in-process
     stand-in (`standin`: chunked PCM in odd pieces, timed JSON lines on
@@ -460,10 +460,10 @@ Reading answers aloud: Kokoro and Windows' voices on this PC, ElevenLabs on the 
     copyAllowed, outcome, text}`. Tests: unit (`plain_blocks`,
     `sentences_for`, `parts`, speeds, ⏮), the speaker's (`a_read_aloud_is_
     made_a_sentence_ahead…`, `a_held_read_aloud…`, `an_engines_own_word_
-    timing…`), `e2e/read-aloud.spec.js` (the card, karaoke, ⏸ ⏭ ⏮, speed,
+    timing…`), `desktop/e2e/read-aloud.spec.js` (the card, karaoke, ⏸ ⏭ ⏮, speed,
     Stop, Esc, Dark + OpenDyslexic, a 30,000-character text made a sentence
     ahead, nothing selected and 🔊, a note, Chat's id, the in-page shortcut,
-    Settings) and `e2e-real/read-aloud.real.js` (the test pad's text box
+    Settings) and `desktop/e2e-real/read-aloud.real.js` (the test pad's text box
     and rich box, Notepad, an Edge page's own text, a terminal never by
     Ctrl+C).
   - **`voice/duck.rs`** — **other apps turned down while Yap speaks**
@@ -497,7 +497,7 @@ Reading answers aloud: Kokoro and Windows' voices on this PC, ElevenLabs on the 
     start (switched off mid-answer: back at once). Test runs touch nothing
     (`realtest::other_apps` = Nobody; `cargo test` never kicks). Unit tests:
     `next_step`, a `Duck` held and let go once; the ledger's arithmetic and
-    hand-over in `other_apps.rs`'s. E2E: `e2e/voice-cloud.spec.js` (the
+    hand-over in `other_apps.rs`'s. E2E: `desktop/e2e/voice-cloud.spec.js` (the
     switch, on by default, saved).
   - **`voice/tts/registry.rs`** — Kokoro's download into `<data>/models/tts/`
     (debug: `YAP_TTS_MODELS`): `kokoro-v1.0/` (model.onnx 325.5 MB + 54

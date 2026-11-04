@@ -1,4 +1,4 @@
-// A stand-in for the web, for src-tauri/src/web.rs in test mode — never the
+// A stand-in for the web, for desktop/src-tauri/src/web.rs in test mode — never the
 // internet. Yap reaches it through the debug-only `YAP_EXA_URL`,
 // `YAP_TAVILY_URL` and `YAP_WEB_STANDIN` (`env` below): Exa's and Tavily's
 // search APIs, game wikis' and Wikipedia's `api.php`, and web pages (a page
@@ -197,7 +197,7 @@ const EXA_RPG = {
   ],
 };
 
-// Yap's free sources (src-tauri/src/web/sources.rs), as their APIs answer:
+// Yap's free sources (desktop/src-tauri/src/web/sources.rs), as their APIs answer:
 // Open-Meteo's geocoder and forecast for Glenbrackie (a made-up town),
 // Stack Exchange's search and answers, GitHub's issue search.
 export const WEATHER_PAGE = 'https://open-meteo.com/en/docs?latitude=56.49&longitude=-3.19';

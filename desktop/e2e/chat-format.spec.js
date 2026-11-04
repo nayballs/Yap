@@ -1,4 +1,4 @@
-// A model on this PC whose chat format is strict (src-tauri/src/ai/llm.rs
+// A model on this PC whose chat format is strict (desktop/src-tauri/src/ai/llm.rs
 // `taking_turns`, chat/tools.rs `supports_tools`, ai/local_llm.rs
 // `template_takes_tools`), 2026-10-27: Gemma 2 9B's format has no place for
 // tools and refuses a conversation that doesn't take turns — llama.cpp

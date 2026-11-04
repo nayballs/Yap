@@ -1,4 +1,4 @@
-// A stand-in for ElevenLabs' API (src-tauri/src/voice/tts/elevenlabs.rs), served
+// A stand-in for ElevenLabs' API (desktop/src-tauri/src/voice/tts/elevenlabs.rs), served
 // from 127.0.0.1 so a test run never reaches the internet. Yap is pointed at
 // it with the debug-only YAP_ELEVENLABS_URL (`env`).
 //

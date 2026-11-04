@@ -1,4 +1,4 @@
-// The on-device model picked for this PC (src-tauri/src/ai/gpu.rs,
+// The on-device model picked for this PC (desktop/src-tauri/src/ai/gpu.rs,
 // ai/local_llm.rs): with a graphics card that can run it, Qwen3.5 4B is
 // "Recommended for this PC" in Settings → Language Models and in the
 // onboarding's AI cleanup step (picked there by default), and someone on the
@@ -7,7 +7,7 @@
 // offered. A big model whose layers stayed on the processor says so, and
 // points at the 1.5B. An installed model uninstalls from its card (the
 // right-click menu or the trash button, asked first), a GGUF of your own
-// too; the one in use can't (src-tauri/src/ai/local_llm/uninstall.rs).
+// too; the one in use can't (desktop/src-tauri/src/ai/local_llm/uninstall.rs).
 //
 // The card is a stand-in (`YAP_E2E_GPU`), the runtime and the default model
 // are empty placeholder files (so "installed"; nothing ever runs or

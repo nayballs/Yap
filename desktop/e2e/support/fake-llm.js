@@ -3,7 +3,7 @@
 // spec can check what Yap sent. Point a test instance's Note Formatting
 // scope at `base` (see meetings.spec.js).
 //
-// It knows Yap's meeting calls by their system prompts (src-tauri/src/ai/llm.rs):
+// It knows Yap's meeting calls by their system prompts (desktop/src-tauri/src/ai/llm.rs):
 // a rolling DIGEST of one part of a meeting, the final ACTION PLAN, and the
 // meeting notepad's helpers: the meeting TITLE, "What did I miss?" (CATCH UP),
 // a follow-up question (MEETING ASK), who a voice is (SPEAKER NAME), and the one-tap chips (QUESTIONS to ask,
@@ -14,14 +14,14 @@
 // mentioned ("Zed", due "Tuesday"), and the action plan invents an owner
 // ("Mallory") and drops one real task. A spec can make the next calls of a
 // kind fail (`failNext`) or answer slowly (`delay`), to see Yap's progress
-// and error states. For the AI Chat's tool loop (src-tauri/src/chat/tools.rs) a
+// and error states. For the AI Chat's tool loop (desktop/src-tauri/src/chat/tools.rs) a
 // spec scripts the model call by call (`scriptChat`): each chat call that
 // offers tools takes the next step, a tool call or an answer, and the
 // request record keeps the messages (the tool results Yap sent back). A
 // step with a `gate` (a promise) waits for it before it answers: the spec
 // acts mid-turn (chat-documents.spec.js edits a document Chat is writing).
 //
-// It also answers the providers' own web searches (src-tauri/src/web/
+// It also answers the providers' own web searches (desktop/src-tauri/src/web/
 // native.rs), the sub-call Yap makes for a `web_search` with "The AI's own
 // search" on: Groq's chat completions with `tools: [{type:
 // "browser_search"}]` (kind "groqSearch": gpt-oss's answer with its
@@ -31,7 +31,7 @@
 // Gale in Baldur's Gate 3. `failNext("groqSearch", 1, 429)` answers the
 // next one with an HTTP error, to see Yap fall back to its own search.
 //
-// **Streaming** (src-tauri/src/chat/stream.rs): a request with `stream: true`
+// **Streaming** (desktop/src-tauri/src/chat/stream.rs): a request with `stream: true`
 // gets server-sent events, as llama.cpp and the cloud providers send them —
 // the content in pieces of a few words, each tool call as a header (index,
 // id, name) then its arguments in fragments, a finish reason, the usage and
@@ -46,14 +46,14 @@
 // `setStreaming(false)` answers whole even when asked to stream (a server
 // that ignores `stream`).
 //
-// **Token counts** (the AI usage tracker, src-tauri/src/ai/usage.rs):
+// **Token counts** (the AI usage tracker, desktop/src-tauri/src/ai/usage.rs):
 // `usage(kind, { usage, timings })` makes a kind's answers carry OpenAI's
 // `usage` and llama.cpp's `timings`, whole (in the body) or streamed (the
 // timings on the finish chunk, the usage chunk after it); a scripted step's
 // `counts` wins. Without it: `usage: {total_tokens: 0}` whole, 10 + 10
 // streamed, as before.
 //
-// It also lists models (src-tauri/src/ai/model_catalog.rs): `GET <base>/models`
+// It also lists models (desktop/src-tauri/src/ai/model_catalog.rs): `GET <base>/models`
 // as a self-hosted OpenAI-compatible server (`serverModels`), and — through
 // `modelsStandin`, the debug-only YAP_MODELS_STANDIN — each cloud provider's
 // own list in that provider's shape (`listModels(provider, models)`: Groq's,
@@ -169,7 +169,7 @@ function listBody(provider, models) {
 
 /** Yap's own token estimate (meeting_summary::estimate_tokens). */
 /**
- * Anthropic's Messages API request (src-tauri/src/ai/llm/anthropic.rs, a
+ * Anthropic's Messages API request (desktop/src-tauri/src/ai/llm/anthropic.rs, a
  * strong Claude's Chat steps) as the OpenAI-shaped messages the rest of
  * the fake reads: the system prompt, user text, tool results as `tool`
  * messages, Claude's tool calls as `tool_calls`.
@@ -394,7 +394,7 @@ const SPEAKER_NAME = 'You identify one voice in a meeting transcript';
 // calendar/brief.rs). "Nothing to add." unless a spec scripts it
 // (`reply('brief', fn)`; brief.spec.js).
 const BRIEF = 'You write a short brief for someone about to go into a meeting';
-// A long chat's older messages, summarised (src-tauri/src/chat/compact.rs):
+// A long chat's older messages, summarised (desktop/src-tauri/src/chat/compact.rs):
 // "- " lines from the messages it's given (each "User: …" line's first
 // words) unless a spec scripts it (`reply('chatSummary', fn)`).
 const CHAT_SUMMARY = 'You keep the notes of a long chat';
@@ -407,16 +407,16 @@ const CHAT_SUMMARY = 'You keep the notes of a long chat';
 const SMART = 'You help someone say something sharp in a meeting';
 const SKILL = 'You carry out a Skill';
 const LONGER = "You rewrite a meeting's notes in more detail";
-// Is a spoken question about the screen? (src-tauri/src/chat/assistant/screen.rs
+// Is a spoken question about the screen? (desktop/src-tauri/src/chat/assistant/screen.rs
 // ASK_PROMPT, for a lone "this"): "no" unless a spec says otherwise
 // (`reply('screenQuestion', fn)`). Never takes a scripted chat step.
 const SCREEN_QUESTION = 'You decide whether a question someone asked a voice assistant';
 // The rewrite shortcut's words about a selection, when Yap's rule can't
-// tell an edit from a question (src-tauri/src/dictation/ask_or_edit.rs
+// tell an edit from a question (desktop/src-tauri/src/dictation/ask_or_edit.rs
 // PROMPT): `{"action": "answer"}` unless a spec says otherwise
 // (`reply('askOrEdit', fn)`). Never takes a scripted chat step.
 const ASK_OR_EDIT = 'You decide what someone wants done with text they selected';
-// Does a Command need the window in front? (src-tauri/src/dictation/
+// Does a Command need the window in front? (desktop/src-tauri/src/dictation/
 // command_screen.rs ASK_PROMPT, for a pronoun with nothing saying what:
 // "tell her Thursday works"): "no" unless a spec says otherwise
 // (`reply('commandScreen', fn)`). Never takes a scripted chat step. (A
@@ -770,7 +770,7 @@ export async function startFakeLlm() {
         return;
       }
       // Anthropic's Messages API: a strong Claude's Chat steps (its server
-      // tools beside Yap's function tools, src-tauri/src/ai/llm/anthropic.rs),
+      // tools beside Yap's function tools, desktop/src-tauri/src/ai/llm/anthropic.rs),
       // or Yap's search sub-call to Claude (web/native.rs).
       if (req.method === 'POST' && url.pathname.endsWith('/messages')) {
         let body;
@@ -950,7 +950,7 @@ export async function startFakeLlm() {
         messages,
         stream: !!body.stream,
         streamOptions: body.stream_options ?? null,
-        // Asked to think it through (src-tauri/src/chat/think.rs): each
+        // Asked to think it through (desktop/src-tauri/src/chat/think.rs): each
         // provider's own fields, as sent.
         think: {
           reasoningEffort: body.reasoning_effort ?? null,

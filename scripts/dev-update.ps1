@@ -22,7 +22,7 @@ try {
         exit 0
     }
 
-    # The Tauri CLI rewrites src-tauri/Cargo.toml with other line endings (and
+    # The Tauri CLI rewrites desktop/src-tauri/Cargo.toml with other line endings (and
     # its own spacing), which shows as a change and blocks the update. Put back
     # any file whose only difference is line endings or spaces; real edits stay.
     # (25 Oct 2026: a missing space after a comma kept every update out.)
@@ -44,6 +44,7 @@ try {
     $before = (git rev-parse HEAD)
     $lockBefore = (git rev-parse HEAD:package-lock.json)
     $pkgBefore = (git rev-parse HEAD:package.json)
+    $appPkgBefore = (git rev-parse HEAD:desktop/package.json) 2>$null
     Say 'Checking GitHub for the latest version...'
     git fetch --quiet origin main
     if ($LASTEXITCODE -ne 0) { Say "Couldn't reach GitHub: running the version already here." Yellow; exit 0 }
@@ -63,8 +64,12 @@ try {
     # install them before Vite starts.
     $lockAfter = (git rev-parse HEAD:package-lock.json)
     $pkgAfter = (git rev-parse HEAD:package.json)
+    $appPkgAfter = (git rev-parse HEAD:desktop/package.json) 2>$null
     $toolsMissing = -not (Test-Path 'node_modules\.bin\tauri.cmd') -or -not (Test-Path 'node_modules\.bin\vite.cmd')
-    if (($lockAfter -ne $lockBefore) -or ($pkgAfter -ne $pkgBefore) -or $toolsMissing) {
+    # (The repo is an npm workspace since 4 Nov 2026: the desktop app's own
+    # packages are in desktop/package.json, all of them installed in the
+    # root's node_modules.)
+    if (($lockAfter -ne $lockBefore) -or ($pkgAfter -ne $pkgBefore) -or ($appPkgAfter -ne $appPkgBefore) -or $toolsMissing) {
         Say 'Installing updated dependencies (npm install)...'
         npm install --no-audit --no-fund
     }

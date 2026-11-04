@@ -37,20 +37,20 @@ credit to you, unless you'd rather not be named.
 
 ## In scope
 
-- **The local API** (`src-tauri/src/integrations/bridge.rs`): an HTTP server on `127.0.0.1`
+- **The local API** (`desktop/src-tauri/src/integrations/bridge.rs`): an HTTP server on `127.0.0.1`
   that only answers requests with the token from `~/.yap/cli-bridge.json`. Ways to reach it
   without the token, from another machine, or from a web page in the browser are in scope.
-- **The MCP server** (`yap.exe mcp`, `src-tauri/src/integrations/mcp.rs`): what an AI app can read or change
+- **The MCP server** (`yap.exe mcp`, `desktop/src-tauri/src/integrations/mcp.rs`): what an AI app can read or change
   through it — meetings and notes only, never dictation history, and notes written only when
   the user allows it.
-- **The updater** (`src-tauri/src/updates.rs`, `tauri-plugin-updater`): an update is installed
+- **The updater** (`desktop/src-tauri/src/updates.rs`, `tauri-plugin-updater`): an update is installed
   only when its minisign signature matches the key built into Yap. Getting Yap to install
   anything else is in scope.
-- **The keyboard and mouse hooks and the clipboard** (`src-tauri/src/dictation/input_hook.rs`,
-  `src-tauri/src/pasting/`): Yap watches for its shortcuts and pastes through the clipboard, then puts back
+- **The keyboard and mouse hooks and the clipboard** (`desktop/src-tauri/src/dictation/input_hook.rs`,
+  `desktop/src-tauri/src/pasting/`): Yap watches for its shortcuts and pastes through the clipboard, then puts back
   what was there. Leaking keystrokes or clipboard contents, or pasting into a window the user
   didn't dictate into, is in scope.
-- **Web content in Chat** (`src-tauri/src/web.rs`, `src-tauri/src/chat/tools.rs`): pages the
+- **Web content in Chat** (`desktop/src-tauri/src/web.rs`, `desktop/src-tauri/src/chat/tools.rs`): pages the
   AI reads must never make Yap act (open apps, change notes, copy to the clipboard).
 - **Secrets and personal data**: the account session and calendar tokens live in Windows
   Credential Manager, AI providers' keys in Yap's settings on the PC, and the logs hold no

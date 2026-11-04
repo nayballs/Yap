@@ -255,7 +255,7 @@ mod quiet {
 /// A test run's window, just shown ([`show_quietly`]): at the bottom of the
 /// z-order, behind the apps of whoever works beside the suite (it still draws
 /// there: the suite turns WebView2's occlusion tracking off,
-/// `e2e/support/yap.js`). Nothing outside test runs, nor in robot mode, whose
+/// `desktop/e2e/support/yap.js`). Nothing outside test runs, nor in robot mode, whose
 /// real windows are its point. (25 Oct 2026: the main window kept popping up
 /// mid-screen during runs.)
 fn behind_in_test_runs(w: &tauri::WebviewWindow) {

@@ -1,4 +1,4 @@
-// Styles by app (src-tauri/src/ai/cleanup_styles.rs): what each kind of app's
+// Styles by app (desktop/src-tauri/src/ai/cleanup_styles.rs): what each kind of app's
 // tones look like on the page — a line per tone and a before/after example
 // per kind and tone (Wispr Flow's example cards, by behaviour) — and the
 // helpers Settings' styles (settings/CleanupStyles.svelte) and onboarding's

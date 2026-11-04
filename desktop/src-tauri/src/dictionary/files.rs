@@ -3,7 +3,7 @@
 //! here, never by the page, so no path crosses the IPC boundary and the
 //! page can't name a file to read or write. Reading what's in the file
 //! (CSV, `heard → written` lines, words), the preview and what's added are
-//! the page's (`src/lib/views/dictionary/dictionaryFile.js`).
+//! the page's (`desktop/src/lib/views/dictionary/dictionaryFile.js`).
 //!
 //! A test run never opens a dialog: `e2e_dictionary_file` names the path
 //! the next Import… reads or Export… writes. The log says sizes only, never

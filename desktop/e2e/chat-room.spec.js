@@ -1,5 +1,5 @@
-// "Give it more room" (src-tauri/src/chat/turn.rs `chat_limits`, chat/budget.rs;
-// src/lib/views/chat/Composer.svelte), 2026-10-25: a paste too long for the
+// "Give it more room" (desktop/src-tauri/src/chat/turn.rs `chat_limits`, chat/budget.rs;
+// desktop/src/lib/views/chat/Composer.svelte), 2026-10-25: a paste too long for the
 // on-device model at its context is said plainly under the box, never sent,
 // with a button that raises the model's context to the next size that fits
 // the graphics card (Settings → Language Models → Local does the same) —

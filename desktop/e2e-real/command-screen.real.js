@@ -14,7 +14,7 @@
 //
 // `realtest_command_text` / `realtest_rewrite_text` stand in for the speech:
 // the window in front becomes the target as at a recording's start. A
-// stand-in model on this PC answers (e2e/support/fake-llm.js: Commands'
+// stand-in model on this PC answers (desktop/e2e/support/fake-llm.js: Commands'
 // draft, "Thursday afternoon works for me" when it was given a window).
 // Written 2026-10-31, not yet run.
 import { test, expect } from './support/robot.js';

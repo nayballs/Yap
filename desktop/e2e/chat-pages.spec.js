@@ -1,4 +1,4 @@
-// Pages beside the chat (src-tauri/src/chat/pages.rs, chat/pages/view.rs;
+// Pages beside the chat (desktop/src-tauri/src/chat/pages.rs, chat/pages/view.rs;
 // the look-and-show plan's Milestone 2):
 // - `open_page` brings the page up in a Page tab: its own WebView2 (its own
 //   profile), laid over the tab by Rust — no Yap IPC in it at all

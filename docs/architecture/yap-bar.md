@@ -140,7 +140,7 @@ The always-there pill above the taskbar: the `overlay` window's Rust side (regio
   French** for each language shortcut that can run (`bar_action
   "dictate-in:<id>"` → `menu::dictate_in`: `languages::arm` around the
   bar's own toggle, as its shortcut's press). The menu scrolls past 440 px
-  (the window is 560 tall). `e2e/bar-menu.spec.js` (made-up microphones).
+  (the window is 560 tall). `desktop/e2e/bar-menu.spec.js` (made-up microphones).
 - **`bar/pointer.rs`** — **first-use pointers** (2026-10-29; Wispr Flow's,
   by behaviour): for someone who has never dictated, a small pointer over
   the idle pill — "Click a text box, then press F9" ("…then hold F9 and
@@ -265,7 +265,7 @@ The always-there pill above the taskbar: the `overlay` window's Rust side (regio
   (`phase` "note": "Nothing selected", "Not now" during a meeting or call,
   "Couldn't read it aloud") is a 400-wide card with the chip, title, body
   (`{key}` = the shortcut, `fillHotkey`) and ✕ (`dismiss`), gone after
-  4.5 s. Light and Dark from the `--bar-*` tokens. `e2e/read-aloud.spec.js`.
+  4.5 s. Light and Dark from the `--bar-*` tokens. `desktop/e2e/read-aloud.spec.js`.
   `bar/BarCard.svelte` (notices: update, guard rails, "Taking notes", the
   call ending, errors) is Wispr's card in Yap's colours: 400 wide,
   the bar surface with a 1 px edge, radius 16, padding 20; a chip naming its

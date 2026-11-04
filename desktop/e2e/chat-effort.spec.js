@@ -1,5 +1,5 @@
-// Effort, per model, in Chat's model picker (src-tauri/src/ai/effort.rs,
-// src/lib/views/chat/ChatModelPicker.svelte, ModelChip.svelte), as the Claude
+// Effort, per model, in Chat's model picker (desktop/src-tauri/src/ai/effort.rs,
+// desktop/src/lib/views/chat/ChatModelPicker.svelte, ModelChip.svelte), as the Claude
 // Code app's model menu has it:
 // - the chip names the model and its effort ("Claude Opus 5.5 Medium": its
 //   default until one is chosen);

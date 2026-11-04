@@ -1,4 +1,4 @@
-// Memory (src-tauri/src/memory.rs) in the main window: the shared store
+// Memory (desktop/src-tauri/src/memory.rs) in the main window: the shared store
 // Settings → Memory draws (`memory.items`, whether an AI model is set up),
 // kept current from `yap-memory-changed`, and the quiet toast when Yap
 // remembered something by itself (`yap-memory-learned`: "Yap remembered:

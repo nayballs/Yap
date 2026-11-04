@@ -1,5 +1,5 @@
 // Asking about selected text without replacing it (2026-10-31; Wispr Flow's
-// Command Mode, its "Lens"): src-tauri/src/dictation/ask_or_edit.rs and
+// Command Mode, its "Lens"): desktop/src-tauri/src/dictation/ask_or_edit.rs and
 // chat/assistant/selected.rs.
 // - Settings → Commands: "Answer questions about the selected text" (on by
 //   default) and Ask about the selection's own shortcut; Settings →
@@ -19,7 +19,7 @@
 //
 // The stand-in window (`e2e_target_window`) is no real window: nothing is
 // read from or pasted into one. The real thing is the robot's
-// (e2e-real/ask-selection.real.js). The models are a local fake
+// (desktop/e2e-real/ask-selection.real.js). The models are a local fake
 // (support/fake-llm.js).
 import fs from 'node:fs';
 import { test as base, expect, openSettings, openView, closeSettings, settingsDialog, expectStore, setConfig } from './support/fixtures.js';

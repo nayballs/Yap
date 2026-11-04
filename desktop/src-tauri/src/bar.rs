@@ -565,7 +565,7 @@ pub struct Status {
     hide_fullscreen: bool,
     /// "app" | "light" | "dark": the page sets `data-bar-theme` from it
     /// ("app" = the theme of Yap's windows, `config.theme`, as the page
-    /// resolves it: src/lib/core/appearance.js).
+    /// resolves it: desktop/src/lib/core/appearance.js).
     theme: &'static str,
     /// The dictation capsule's ✕ / ✓ while it records: "off" (the default) |
     /// "hover" (only while the pointer is on it) | "always". None while the
