@@ -11,6 +11,10 @@ on:
   pull_request:
     branches: [main]
 
+# Read-only token: no job here writes to the repo (CodeQL's actions/missing-workflow-permissions).
+permissions:
+  contents: read
+
 # A newer push supersedes an in-flight run of the same branch.
 concurrency:
   group: ci-${{ github.ref }}

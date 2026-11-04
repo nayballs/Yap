@@ -19,6 +19,10 @@ on:
     branches: [main]
   workflow_dispatch:
 
+# Read-only token: no job here writes to the repo (CodeQL's actions/missing-workflow-permissions).
+permissions:
+  contents: read
+
 # A newer push supersedes an in-flight run of the same branch.
 concurrency:
   group: e2e-${{ github.ref }}
