@@ -77,6 +77,11 @@ if (withFirefox()) {
           'media.navigator.audio.fake_frequency': TONE_HZ,
           // Nothing heard on the PC's speakers.
           'media.volume_scale': '0.0',
+          // Firefox's own pretend sound device, never the PC's: CI's machines
+          // have none, and with no device Firefox's audio never starts (the
+          // page rightly says "The phone's sound didn't start"). The same
+          // here as there, and nothing played on this PC's speakers.
+          'media.cubeb.force_mock_context': true,
         },
       },
     },
