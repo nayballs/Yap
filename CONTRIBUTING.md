@@ -75,6 +75,17 @@ The repository is public, and Yap handles people's words. So:
 
 ## Where things are
 
+| Folder | What it is |
+|---|---|
+| `src/` + `src-tauri/` | **The desktop app** (Tauri): its windows (Svelte, `src/`) and its core (Rust, `src-tauri/`). One app for every desktop system: Windows today, macOS and Linux later (see "Platforms" in [app-shell.md](./docs/architecture/app-shell.md#platforms-windows-today-macos-and-linux-later)). |
+| `e2e/`, `e2e-real/` | The desktop app's UI tests (Playwright on a real build) and its robot tests (real pastes into real windows). |
+| [`phone/`](./phone/README.md) | **The phone app**: `web/` today, the page the PC serves to a paired phone (`page/` and its `tests/`). Native phone apps go beside it. The PC's side is `src-tauri/src/link/`. |
+| `cloud/` | The optional accounts service (a Cloudflare Worker). |
+| `site/` | The website. |
+| `evals/` | The model evaluations' cases (`npm run eval`). |
+| `docs/` | How Yap works: `docs/architecture/`, one file per area. |
+| `scripts/` | Dev, build, release and guard scripts. |
+
 - **[CLAUDE.md](./CLAUDE.md)** is the short index: how Yap works, how to build and test, and
   one line per module.
 - **[docs/architecture/](./docs/architecture/README.md)** has one file per area (dictation,

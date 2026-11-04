@@ -1,7 +1,7 @@
 // Yap Link's sound maths, with nothing of the page in it, so it runs in four
 // places: the mic's AudioWorklet (mic-worklet.js), the answer's AudioWorklet
 // (player-worklet.js), the page (link.js) and Node's test runner
-// (e2e-link/dsp.test.mjs).
+// (phone/web/tests/dsp.test.mjs).
 //
 // - `Resampler`: one rate to another through a windowed-sinc filter, in a
 //   stream (any block size in, every output sample once, the same samples

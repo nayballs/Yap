@@ -1,4 +1,4 @@
-// Yap Link's phone page (src-tauri/link-page/) in a real Chromium, with the
+// Yap Link's phone page (phone/web/page/) in a real Chromium, with the
 // PC mocked: the page's files from a made-up HTTPS origin (page.route), Yap
 // on the PC as a WebSocket mock (page.routeWebSocket), the mic faked from
 // WAV files (support/audio.js). No Yap build, nothing on the network, no
@@ -86,7 +86,7 @@ if (withFirefox()) {
 export default defineConfig({
   testDir: '.',
   testMatch: '*.spec.js',
-  outputDir: '../test-results/link/playwright',
+  outputDir: '../../../test-results/link/playwright',
   globalSetup: './support/global-setup.js',
   // Real-time audio: two at a time is plenty, and keeps the PC calm.
   workers: 2,
@@ -94,7 +94,7 @@ export default defineConfig({
   expect: { timeout: 8_000 },
   retries: process.env.CI ? 1 : 0,
   forbidOnly: !!process.env.CI,
-  reporter: [['list'], ['html', { outputFolder: '../test-results/link/report', open: 'never' }]],
+  reporter: [['list'], ['html', { outputFolder: '../../../test-results/link/report', open: 'never' }]],
   use: {
     headless: true,
     // A phone-sized page.

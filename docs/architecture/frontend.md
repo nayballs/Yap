@@ -416,9 +416,9 @@ Flow's dark mode of 19 Oct 2026), for every Yap window.
   glass and the bar's recording dots are the same in both. Onboarding, the
   one window with Windows' own title bar, gets it dark or light to match
   (`shell/theme.rs`, DWM's immersive dark mode).
-- **Yap Link's phone page** (`src-tauri/link-page/link.css`, served on its own
+- **Yap Link's phone page** (`phone/web/page/link.css`, served on its own
   with no build step) copies these `--yap-*` values, light and dark, following
-  the phone's `prefers-color-scheme`; `e2e-link/tokens.spec.js` fails when
+  the phone's `prefers-color-scheme`; `phone/web/tests/tokens.spec.js` fails when
   they drift, naming the token (`npm run test:link`; link.md).
 - **Contrast** (AA, `e2e/theme.spec.js` measures the lowest on each page):
   body text 15:1, Settings descriptions 6.8:1, nav labels 11:1 (main window

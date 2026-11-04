@@ -26,10 +26,17 @@ choice.
 
 ## The files
 
+This folder is the phone's web app (moved here from `src-tauri/link-page/` and
+`e2e-link/` on 2026-11-04): **`page/`** holds what Yap serves (every file
+in it, embedded in yap.exe by `src-tauri/build.rs`; `tauri dev` rebuilds when
+one changes), **`tests/`** its tests (`npm run test:link`), and this README its
+notes. The PC's side of the conversation is the desktop app's
+`src-tauri/src/link/`. The files in `page/`:
+
 | File | What it is | Served as |
 |---|---|---|
 | `index.html` | The page: the header (☰, "Yap · <PC>" with the connection's dot and the chat's title, the spinner, ⋯), pairing, the thread and Chat's activity line, the composer card (Chat's line for pictures its model can't read, the pictures, the text box, then +, the model chip, the mic, Send / ■, ✕ / ■, the waveform and time while Yap listens), the drawer, the settings sheet (Hands-free and its wait, Clearer sound in a headset, Play the voice through the media player, the microphone picker, Sound details) and the model sheet. | `text/html` |
-| `link.css` | The look ("The look", below): Yap's warm light and dark `--yap-*` tokens (values copied from `src/app.css`, following `prefers-color-scheme`; `e2e-link/tokens.spec.js` holds them to it), its fonts, mobile first, 48 px targets, reduced motion respected. | `text/css` |
+| `link.css` | The look ("The look", below): Yap's warm light and dark `--yap-*` tokens (values copied from `src/app.css`, following `prefers-color-scheme`; `phone/web/tests/tokens.spec.js` holds them to it), its fonts, mobile first, 48 px targets, reduced motion respected. | `text/css` |
 | `markdown.js` | An answer's markdown as Chat shows it (its spoken-answer subset: paragraphs and line breaks, headings, lists, bold, italic, struck, code, quotes, rules), built as DOM nodes, never HTML; links as their words, `[1]` citations left out, a mark still being written shown without its stars. | `text/javascript` |
 | `fonts/figtree.woff2`, `fonts/eb-garamond.woff2` | Yap's UI font and its display serif, cut down from the desktop's own (below). | `font/woff2` |
 | `link.js` | Everything the page does: the connection (hello, pairing, reconnects with backoff, keep-alive pings), typed questions and ▶ Read aloud, the composer and the keyboard, the mic (opened a timed step at a time), Talk (tap or hold; its words in the box, `words`), hands-free, the spoken answer (resampled frame after frame, posted to the player worklet; or cut at its pauses into WAVs for the media player, `mediaVoice`), Clearer sound, barge-in, the conversation (kept in this tab's sessionStorage across a reload), the step and its time, the model chip, the settings sheet, Sound details, the screen wake lock. Exposes a read-only `window.__yapLink.snapshot()` for the tests. | `text/javascript` |
@@ -130,7 +137,7 @@ its own way, the phone wins.
 - **Tokens.** `link.css` copies `src/app.css`'s `--yap-*` values: `:root` for
   light, `:root[data-yap-theme='dark']` for Yap's warm dark, here following
   the phone's `prefers-color-scheme`. It can't import them (no build step, a
-  page served on its own), so `e2e-link/tokens.spec.js` compares every
+  page served on its own), so `phone/web/tests/tokens.spec.js` compares every
   `--yap-*` link.css sets with app.css's, in both themes: **change a colour in
   app.css and that test says which line here to change.** Only the font
   stacks (phone fallbacks added) and the page's own `--gutter` aren't
@@ -197,7 +204,7 @@ lists merged with the live ones; `latestModels`: the families; `ppModels`,
 `localContext`, `modelIcons`, `providerIds`, `effort`) are served as they are
 at `core/`, the logos at `providers/` (`src-tauri/build.rs` `LINK_SHARED`).
 So they must stay pure — no Tauri, no Svelte, no assets, no imports beyond
-each other: `e2e-link/shared.spec.js` and `link/page.rs`'s tests hold them to
+each other: `phone/web/tests/shared.spec.js` and `link/page.rs`'s tests hold them to
 it.
 
 **What stays on the PC**: adding a key or signing in with ChatGPT (the pane
@@ -487,7 +494,7 @@ when you stop talking").
 npm run test:link
 ```
 
-- `e2e-link/dsp.test.mjs` (Node's test runner): the resampler (48 kHz and
+- `phone/web/tests/dsp.test.mjs` (Node's test runner): the resampler (48 kHz and
   44.1 kHz in → exactly 16,000 samples a second, the same sine; any block size;
   aliasing filtered; DC; 24 kHz up to 48 and 44.1 kHz: a sine in 7 odd-sized
   pieces the same as whole, exactly 48,000 / 44,100 samples a second, images
@@ -496,7 +503,7 @@ npm run test:link
   only dips; the end played out; Stop's fade; frames resampled one after
   another played without a seam), Int16, the voice detector (each wait, a soft
   last word kept, a fluttering room neither starting nor holding it), the times.
-- `e2e-link/*.spec.js` (Playwright, `e2e-link/playwright.config.js`): the page
+- `phone/web/tests/*.spec.js` (Playwright, `phone/web/tests/playwright.config.js`): the page
   in a headless Chromium (Playwright's own if it's installed, else Edge;
   `YAP_LINK_CHANNEL` to choose) at a made-up HTTPS origin served by
   `page.route`, with Yap on the PC mocked by `page.routeWebSocket` and the mic

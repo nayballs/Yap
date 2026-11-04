@@ -125,6 +125,11 @@ lints an older local one doesn't — keep local Rust current (`rustup update`) o
 the CI log. (It sat red Jul 9 → Sep 25 2026 on accumulated lints, masking real
 failures.)
 
+Beside it, the **phone** job (2026-11-04) runs the phone app's tests, `npm run
+test:link` (`phone/web/tests/`: the sound maths in Node, then the page in
+Playwright's Chromium and Firefox against a mocked PC; no Yap build), on a
+Windows runner too. Before, they ran only on the maintainer's PC.
+
 `.github/workflows/e2e.yml` runs the **end-to-end UI suite** on the same triggers
 (plus `workflow_dispatch`), separately so `ci.yml` stays quick — see below.
 

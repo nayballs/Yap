@@ -1,5 +1,5 @@
 //! **The phone's page**, served by Yap itself: the files of
-//! `src-tauri/link-page/`, embedded in yap.exe at build time (`build.rs`
+//! `phone/web/page/`, embedded in yap.exe at build time (`build.rs`
 //! lists them), at `/` — `index.html` for `/` — each with its content type
 //! and a strict Content-Security-Policy: everything from this PC, nothing
 //! from anywhere else, and the WebSocket back to the same address only.

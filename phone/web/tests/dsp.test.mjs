@@ -1,9 +1,9 @@
-// Yap Link's sound maths (src-tauri/link-page/dsp.js) in Node: the resampler
+// Yap Link's sound maths (phone/web/page/dsp.js) in Node: the resampler
 // both worklets' sound goes through (the mic down to 16 kHz, Yap's voice up
 // from 24 kHz), the answer's ring and jitter buffer, Int16, the hands-free
 // voice detector, the voice cut at its pauses for the media player (and its
 // WAV files) and the times.
-// Run: `node --test e2e-link/dsp.test.mjs` (part of `npm run test:link`).
+// Run: `node --test phone/web/tests/dsp.test.mjs` (part of `npm run test:link`).
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
@@ -22,7 +22,7 @@ import {
   DOWN_RATE,
   Segmenter,
   wav,
-} from '../src-tauri/link-page/dsp.js';
+} from '../page/dsp.js';
 
 /** `seconds` of a sine at `hz`, sampled at `rate`. */
 function sine(rate, hz, seconds, amp = 0.5) {

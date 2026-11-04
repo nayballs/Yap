@@ -2,7 +2,7 @@
 /// page asks for it, where it is). Chat's picker (`src/lib/core/chatPicker.js`
 /// and the pure modules it imports, the effort's words) and the marks it
 /// shows. Each must stay pure (no imports beyond this list, no Tauri, no
-/// Svelte): `e2e-link/shared.spec.js` holds them to it.
+/// Svelte): `phone/web/tests/shared.spec.js` holds them to it.
 const LINK_SHARED: &[(&str, &str)] = &[
     ("core/chatPicker.js", "../src/lib/core/chatPicker.js"),
     ("core/modelCatalog.js", "../src/lib/core/modelCatalog.js"),
@@ -25,19 +25,22 @@ const LINK_SHARED: &[(&str, &str)] = &[
     ("providers/xai.svg", "../src/assets/providers/xai.svg"),
 ];
 
-/// Yap Link's phone page (`src/link/page.rs`): every file under `link-page/`
+/// Yap Link's phone page (`src/link/page.rs`): every file under
+/// `phone/web/page/`
 /// embedded in yap.exe, listed in `$OUT_DIR/link_page.rs` as
 /// `(path, bytes)` — the page's own files, whatever they are, with nothing
-/// read from disk at run time. Hidden files (`.…`) and the folder's
-/// README.md (its notes, not the page) are left out.
+/// read from disk at run time. Hidden files (`.…`) are left out (the page's
+/// notes are its README.md, beside the folder).
 fn embed_link_page() {
+    /// The phone's web app, from src-tauri/.
+    const PAGE: &str = "../phone/web/page";
     use std::path::{Path, PathBuf};
     fn walk(root: &Path, dir: &Path, out: &mut Vec<(String, PathBuf)>) {
         let Ok(entries) = std::fs::read_dir(dir) else { return };
         for entry in entries.flatten() {
             let path = entry.path();
             let name = entry.file_name().to_string_lossy().into_owned();
-            if name.starts_with('.') || (dir == root && name.eq_ignore_ascii_case("README.md")) {
+            if name.starts_with('.') {
                 continue;
             }
             if path.is_dir() {
@@ -48,12 +51,12 @@ fn embed_link_page() {
             }
         }
     }
-    let root = Path::new("link-page");
-    println!("cargo:rerun-if-changed=link-page");
+    let root = Path::new(PAGE);
+    println!("cargo:rerun-if-changed={PAGE}");
     let mut files = Vec::new();
     walk(root, root, &mut files);
     // Chat's own model picker code and its logos, shared with the desktop
-    // as they are (link-page/README.md, "Chat's own modules"): the pure
+    // as they are (phone/web/README.md, "Chat's own modules"): the pure
     // modules under core/, the provider and family marks under providers/.
     for (served, src) in LINK_SHARED {
         println!("cargo:rerun-if-changed={src}");
@@ -62,7 +65,7 @@ fn embed_link_page() {
         files.push((served.to_string(), abs));
     }
     files.sort();
-    let mut code = String::from("/// Yap Link's page: (path under link-page/, its bytes).\npub static FILES: &[(&str, &[u8])] = &[\n");
+    let mut code = String::from("/// Yap Link's page: (path under phone/web/page/, its bytes).\npub static FILES: &[(&str, &[u8])] = &[\n");
     for (rel, abs) in &files {
         code.push_str(&format!("    ({rel:?}, include_bytes!({:?})),\n", abs.to_string_lossy()));
     }

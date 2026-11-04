@@ -6,7 +6,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
-export const AUDIO_DIR = path.resolve(here, '../../test-results/link/audio');
+export const AUDIO_DIR = path.resolve(here, '../../../../test-results/link/audio');
 /** A steady 440 Hz tone (looped): the frames' rate is read from its pitch. */
 export const TONE_WAV = path.join(AUDIO_DIR, 'tone-440.wav');
 /** Quiet, then 1.2 s of speech-like sound, then quiet (played once). */

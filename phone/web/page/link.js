@@ -3162,7 +3162,7 @@ window.addEventListener('hashchange', () => {
 
 // ------------------------------------------------------------- the tests'
 
-// Read-only, for e2e-link/: what the page is doing and what the player has
+// Read-only, for the tests (phone/web/tests/): what the page is doing and what the player has
 // queued and played. Nothing in it is a secret or changes anything.
 window.__yapLink = {
   snapshot() {

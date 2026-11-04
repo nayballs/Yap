@@ -34,7 +34,7 @@
 //! - `chats.rs` — Chat's conversations for the phone's drawer, a thread opened;
 //! - `pictures.rs` — a question's pictures as they come from the phone;
 //! - `lan.rs` — this PC's addresses, which peers may connect, Public networks;
-//! - `wire.rs` — the protocol (v1, shared with `src-tauri/link-page/`).
+//! - `wire.rs` — the protocol (v1, shared with the phone's page, `phone/web/page/`).
 //!
 //! The long-term design (a PWA on Yap's website over WebRTC, the private
 //! repo's `phone-remote-design.md`) keeps these messages: moving there is a

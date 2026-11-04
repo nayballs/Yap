@@ -74,11 +74,11 @@ messages: moving there is a change of transport only.
 | `link/pictures.rs` | A question's pictures as they come (`picture` and its `0x03` frames): in order, whole, 4 at most, 3 MB each; the question takes them all or none, and says why. Pure. |
 | `link/lan.rs` | This PC's addresses (IP Helper), which peers may connect, Windows' Public networks (Network List Manager). |
 | `link/wire.rs` | The protocol (below), pure. |
-| `link/page.rs` | The page's files, embedded at build time from `src-tauri/link-page/` (`build.rs` lists them; its README.md left out) and the desktop's own Chat picker modules and logos beside them (`build.rs` `LINK_SHARED`: `core/`, `providers/`), their content types and the Content-Security-Policy. |
+| `link/page.rs` | The page's files, embedded at build time from `phone/web/page/` (`build.rs` lists them; its README.md left out) and the desktop's own Chat picker modules and logos beside them (`build.rs` `LINK_SHARED`: `core/`, `providers/`), their content types and the Content-Security-Policy. |
 
-The phone's page itself (`src-tauri/link-page/`: plain HTML, CSS and JS
+The phone's page itself (`phone/web/page/`: plain HTML, CSS and JS
 modules, no build step) has its own notes in its
-[README.md](../../src-tauri/link-page/README.md) and tests in `e2e-link/`.
+[README.md](../../phone/web/README.md) and tests in `phone/web/tests/`.
 
 **It's Yap's Chat in the Claude app's layout** (2026-11-03, the day's third
 pass). **The header**: ☰ on the left opens the drawer, the title in the
@@ -138,9 +138,9 @@ can't read the pictures the card shows **Chat's own line**: "Qwen3.5 4B
 can't read images." with Use <the model that can>, **Send its text
 instead**, Choose another model…, and Send without the pictures. It follows Yap's tokens — `link.css` copies
 `src/app.css`'s `--yap-*` values, light and the warm dark, following the
-phone's `prefers-color-scheme`, and `e2e-link/tokens.spec.js` holds the copy
+phone's `prefers-color-scheme`, and `phone/web/tests/tokens.spec.js` holds the copy
 to app.css — with Figtree and EB Garamond served from the PC
-(`link-page/fonts/`, 36 KB; never Google Fonts). Where a phone needs its own
+(`phone/web/page/fonts/`, 36 KB; never Google Fonts). Where a phone needs its own
 way it has it: 44–48 px targets, safe areas, the composer riding above the
 on-screen keyboard (`interactive-widget=resizes-content`, else the visual
 viewport), text that grows with the phone's font size (to Android's
@@ -150,7 +150,7 @@ no hover-only affordances, reduced motion, and **on its side two columns**
 right at the bottom, under the thumb). **Chat's picker** is the desktop's
 code itself: `src/lib/core/chatPicker.js` (and the pure modules it imports)
 builds the rows on both, served to the phone as they are with the provider
-logos (`build.rs` `LINK_SHARED`, `e2e-link/shared.spec.js` keeps them pure).
+logos (`build.rs` `LINK_SHARED`, `phone/web/tests/shared.spec.js` keeps them pure).
 Details: the README's "The look" and "Chat's picker".
 
 ## The protocol (v1)
@@ -462,7 +462,7 @@ the key Language Models has); with it off, still on
 the phone, in Yap's own voice — Kokoro if downloaded, else Windows voices
 (`tts::phone_voicing`; never a cloud voice not switched on).
 
-**On the phone** (the page's side, `src-tauri/link-page/`; details in its
+**On the phone** (the page's side, `phone/web/page/`; details in its
 README): the down frames play as **one stream**. Each frame is resampled from
 24 kHz to the phone's output rate as it comes, in one windowed-sinc filter
 carried on from frame to frame (`dsp.js` `Resampler`), and played by an
@@ -638,7 +638,7 @@ on the PC while the answer comes stops the voice, as it stops the PC's.
   sixth told "Try again in 10 minutes.", the paired phone still connecting
   from that address, the live code still pairing the new one, and its
   refused tabs coming back with its device.
-- The page on its own: `npm run test:link` (`e2e-link/`, the PC mocked): the
+- The page on its own: `npm run test:link` (`phone/web/tests/`, the PC mocked): the
   sound maths in Node (the resampler both ways, the jitter buffer, the voice
   detector, the media player's pieces cut in the pauses and their WAV files),
   then the page in a headless Chromium — among the rest, the answer's

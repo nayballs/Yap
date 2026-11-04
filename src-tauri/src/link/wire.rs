@@ -1,6 +1,6 @@
 //! **Yap Link's protocol, v1** (`docs/architecture/link.md`): what goes over
 //! the WebSocket at `wss://<pc>:51443/ws`, shared with the phone's page
-//! (`src-tauri/link-page/`). Text frames are JSON `{ "type": … }` ([`In`],
+//! (`phone/web/page/`). Text frames are JSON `{ "type": … }` ([`In`],
 //! [`Out`]); binary frames are audio ([`Frame`]): byte 0 its kind (`0x01`
 //! up, the phone's mic at 16 kHz mono Int16 LE; `0x02` down, Yap's voice,
 //! mono Int16 LE at `speak_start`'s rate), bytes 1–4 its `seq` (u32 LE),

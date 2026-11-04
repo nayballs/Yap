@@ -2,7 +2,7 @@
 // a phone talks to Yap's AI over the home Wi-Fi. Here the "phone" is a
 // headless Chromium (Playwright's own if installed, else Edge) with a fake
 // microphone playing a tone, opening the real page Yap serves
-// (src-tauri/link-page/) over Yap's own HTTPS server — its self-signed
+// (phone/web/page/) over Yap's own HTTPS server — its self-signed
 // certificate accepted as a phone's "Proceed" does (ignoreHTTPSErrors).
 // - Settings → Phone: the switch, Pair a phone (the QR code, the link with
 //   Copy, the one-time warning said), the paired phones with Remove.

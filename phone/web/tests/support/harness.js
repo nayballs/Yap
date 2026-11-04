@@ -1,15 +1,15 @@
 // The phone's page without a PC: its files served from a made-up HTTPS
 // origin through `page.route` (nothing listens anywhere), and Yap on the PC
 // played by `page.routeWebSocket` at wss://<origin>/ws, keeping to the v1
-// protocol (docs/architecture/link.md; src-tauri/link-page/README.md).
+// protocol (docs/architecture/link.md; phone/web/README.md).
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { expect } from '@playwright/test';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
-export const PAGE_DIR = path.resolve(here, '../../src-tauri/link-page');
-const TAURI_DIR = path.resolve(here, '../../src-tauri');
+export const PAGE_DIR = path.resolve(here, '../../page');
+const TAURI_DIR = path.resolve(here, '../../../../src-tauri');
 
 /**
  * The desktop's own files the PC serves beside the page, as build.rs embeds
@@ -222,7 +222,7 @@ function inlineWorklets() {
   };
 }
 
-/** Serves src-tauri/link-page/ at ORIGIN, as Yap does; anything else is refused. */
+/** Serves phone/web/page/ at ORIGIN, as Yap does; anything else is refused. */
 export async function servePage(page) {
   await page.addInitScript(inlineWorklets);
   const served = [];

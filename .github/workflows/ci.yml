@@ -80,3 +80,29 @@ jobs:
       - name: Cargo clippy (release profile, deny warnings)
         working-directory: src-tauri
         run: cargo clippy --locked --release -- -D warnings
+
+  # The phone app (phone/web/): its sound maths in Node, then the page in a
+  # headless Chromium and Firefox against a mocked PC (`npm run test:link`).
+  # No Yap build, nothing on the network: a few minutes, beside `check`.
+  # Windows, as the maintainer runs it (Sound details' "… on Windows").
+  phone:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Setup Node
+        uses: actions/setup-node@v7
+        with:
+          node-version: 24
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Install Playwright's Chromium and Firefox
+        run: npx playwright install chromium firefox
+
+      - name: The phone page's tests (Chromium and Firefox)
+        env:
+          YAP_LINK_FIREFOX: "1"
+        run: npm run test:link

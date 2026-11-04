@@ -132,6 +132,38 @@ The full stack list, the app's entry and plumbing (`lib.rs`, the tray, context m
   [config-and-data.md](./config-and-data.md#a-file-yap-couldnt-read).
   `saving::init` says a store that couldn't be read before the app was up.
 
+## Platforms: Windows today, macOS and Linux later
+
+The desktop app is **one app for every desktop system**: the same `src/` and
+`src-tauri/`, never a copy per system. Tauri builds it for Windows, macOS and
+Linux. Only Windows is built, tested and shipped today; a macOS or Linux build
+has never been tried.
+
+Where Yap leans on Windows (the input hook, pasting with `SendInput`, UI
+Automation, audio sessions, Windows.Graphics.Capture, DWM, notifications,
+Credential Manager, the DXGI graphics-card list…), the rules that keep a port
+possible (2026-11-04; most of the code already does):
+
+- **Windows' crates are Windows-only dependencies** (`windows`,
+  `webview2-com`, … under `[target.'cfg(windows)'.dependencies]` in
+  `Cargo.toml`), so nothing outside a `cfg(windows)` block may name them.
+- **Each Windows-only function has a fallback** under `cfg(not(windows))`
+  that builds and does the honest nothing: an empty list (`ai/gpu.rs`
+  `all_adapters`), "not detected" (`ai/about_you.rs`), a no-op
+  (`local_llm::kill_orphans`), a store in memory (`ai/chatgpt/vault.rs`).
+  About 350 `cfg(windows)` and 150 `cfg(not(windows))` today.
+- **The deciding stays pure, the Windows calls stay thin**: what to do is
+  plain Rust any system runs and tests (placement and hit-testing, the
+  gesture machine, the pipeline's order, matching, the kinds of app); the
+  Win32/WinRT calls sit in a module's own `win` part or behind one function
+  (`apps/win.rs`, `bar/overlay.rs`, `snip/capture.rs`). A Mac or Linux
+  version replaces that part, not the module.
+- **Words about the system say which one**: "Windows' microphone privacy
+  switches", not "your settings", so a Mac's version can say its own.
+
+The phone apps (`phone/`) don't depend on the PC's system: the PC's side
+of Yap Link speaks one protocol whatever it runs on.
+
 ## Modules
 
 **The source tree** (2026-10-24): `src-tauri/src/` is grouped by area, as

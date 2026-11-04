@@ -99,7 +99,7 @@ fn listed_with(cfg: &YapConfig, on_device: &OnDevice) -> (Option<Model>, Vec<Mod
 }
 
 /// **What Chat's picker shows** (2026-11-03), for the phone's own copy of
-/// it (`link-page/picker.js` over `src/lib/core/chatPicker.js`, the very
+/// it (`phone/web/page/picker.js` over `src/lib/core/chatPicker.js`, the very
 /// code the desktop picker builds its rows with): the same data that
 /// picker reads, from the same Rust —
 /// - `status`: `ai_model::status` for Chat (the model in use, the providers

@@ -3,7 +3,7 @@
 // comes in a `ctx`, so the same rows, groups and words are built in two
 // places — the desktop picker (chatModels.svelte.js fills `ctx` from its
 // stores and the Tauri calls, and reads it reactively) and Yap Link's
-// phone page (src-tauri/link-page/picker.js fills it from the PC's
+// phone page (phone/web/page/picker.js fills it from the PC's
 // `ready.picker`; `src-tauri/build.rs` serves this file and the pure modules
 // it imports at core/, so it must never import anything else).
 //
