@@ -285,8 +285,9 @@ const S = {
   // the person turned it off: with the mic open a headset stays in its call
   // mode, which crackles.
   clearer: load(KEY.clearer) !== false,
-  // "Play the voice through the media player": off unless chosen.
-  media: load(KEY.media) === true,
+  // "Play the voice through the media player": the person's choice, else on
+  // in Firefox for Android only (mediaByDefault).
+  media: mediaChoice(load(KEY.media), navigator.userAgent),
   tick: 0,
   stopTimer: 0,
   gen: 0,
@@ -444,6 +445,24 @@ function readFrame(buf) {
 function nonce() {
   const b = crypto.getRandomValues(new Uint8Array(16));
   return btoa(String.fromCharCode(...b)).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+}
+
+/**
+ * Whether Yap's voice plays through the media player before the person has
+ * chosen: in Firefox for Android only. Its Web Audio ignores `latencyHint`
+ * and runs on the phone's shortest output buffer, so a busy moment on the
+ * phone crackles, even with the page's own jitter buffer full. The media
+ * player keeps far more sound ready: on a real phone (4 Nov 2026), Web Audio
+ * crackled and the media player was clean. Everywhere else Web Audio's
+ * shorter delay wins.
+ */
+function mediaByDefault(ua) {
+  return /Android/.test(ua) && /Firefox\//.test(ua);
+}
+
+/** The setting as stored (true / false), or the default for this browser when never chosen. */
+function mediaChoice(stored, ua) {
+  return typeof stored === 'boolean' ? stored : mediaByDefault(ua);
 }
 
 /** "Android · Chrome", for the PC's list of paired phones. */

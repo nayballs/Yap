@@ -414,6 +414,42 @@ test('the media player: off at first; on, an answer plays through it in pieces, 
   expect(p.played).toBeCloseTo(0.4, 2);
 });
 
+test.describe('in Firefox for Android', () => {
+  // A real phone's Firefox (Gecko's Android user agent).
+  test.use({ userAgent: 'Mozilla/5.0 (Android 15; Mobile; rv:144.0) Gecko/144.0 Firefox/144.0' });
+
+  test('the media player is on from the start; turned off, it stays off', async ({ page }) => {
+    const pc = await mockPc(page);
+    await open(page);
+    await ready(page, pc);
+    expect(await page.evaluate(() => localStorage.getItem('yap.link.media'))).toBeNull();
+    await openSettings(page);
+    await expect(page.getByTestId('media')).toBeChecked();
+    await expect(page.getByText("It's on from the start in Firefox for Android.", { exact: false })).toBeVisible();
+    await closeSettings(page);
+
+    await ask(page, pc);
+    speakSentences(pc);
+    await expect.poll(async () => (await player(page)).state).toBe('playing');
+    expect((await player(page)).via).toBe('media');
+    await expect.poll(async () => (await player(page)).active, { timeout: 6000 }).toBe(false);
+
+    // Turned off: kept off on the next visit, and the next answer is Web Audio's.
+    await openSettings(page);
+    await page.getByText('Play the voice through the media player').click();
+    expect(await page.evaluate(() => localStorage.getItem('yap.link.media'))).toBe('false');
+    await open(page);
+    await ready(page, pc);
+    await openSettings(page);
+    await expect(page.getByTestId('media')).not.toBeChecked();
+    await closeSettings(page);
+    await ask(page, pc);
+    speak(pc, 4, 100);
+    await expect.poll(async () => (await player(page)).active, { timeout: 4000 }).toBe(false);
+    expect((await player(page)).via).toBe('worklet');
+  });
+});
+
 test('the media player: Stop is silent at once and drops the rest', async ({ page }) => {
   await chooseMedia(page);
   const pc = await mockPc(page);

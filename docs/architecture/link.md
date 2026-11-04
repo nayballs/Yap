@@ -475,7 +475,10 @@ Audio clip, resampled on its own: a click at every join, a hard gap when one
 was late — a crackle heard in Bluetooth headsets.)
 
 **"Play the voice through the media player"** (the page's switch under
-Clearer sound, **off** unless chosen, kept in the phone's storage; 4 Nov):
+Clearer sound, kept in the phone's storage; 4 Nov). Until the person chooses,
+it's **on in Firefox for Android** and off everywhere else (`mediaByDefault`,
+from the user agent). On a real phone in Firefox, Web Audio crackled and the
+media player was clean (4 Nov evening).
 the answer isn't played by Web Audio but cut at its pauses (`dsp.js`
 `Segmenter`: a piece ends in the middle of an 80 ms pause once it holds
 600 ms of voice — 1.5 s after the first —, or at its quietest 10 ms when it
@@ -488,8 +491,8 @@ can crackle without the jitter buffer ever running dry; the media player's
 output keeps far more sound ready. The cost: a slightly longer pause where it
 was cut, and Stop without the fade. A piece not there when the last one ends
 counts as a gap, as the worklet's do. A phone answer crackling with no gaps
-counted (Firefox, 4 Nov) is what it's for: one long answer each way tells
-the browser's sound from Yap's stream.
+counted (Firefox, 4 Nov) is what it's for: one long answer each way told
+the browser's sound from Yap's stream, and the browser's sound was to blame.
 
 **"Clearer sound in a headset"** (the page's switch under Hands-free, **on by
 default** since 31 Oct for anyone who hasn't chosen; a saved choice is kept in
@@ -643,7 +646,7 @@ on the PC while the answer comes stops the voice, as it stops the PC's.
   detector, the media player's pieces cut in the pauses and their WAV files),
   then the page in a headless Chromium — among the rest, the answer's
   stream (starting at ~250 ms, a late frame faded and counted, Stop's fade),
-  the media player (off at first, kept, an answer in pieces, Stop, a late
+  the media player (off at first, on at first in Firefox for Android, kept, an answer in pieces, Stop, a late
   piece counted as a gap), Clearer sound (on by default, a saved choice kept, releasing and reopening
   the mic, talking over Yap with it off and on), opening the mic's time limits
   (a permission nobody answers, answered late, blocked; a module that never
