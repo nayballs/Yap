@@ -470,6 +470,23 @@ if it runs dry, the last 5 ms fade out, an underrun is counted, and it waits for
 Audio clip, resampled on its own: a click at every join, a hard gap when one
 was late — a crackle heard in Bluetooth headsets.)
 
+**"Play the voice through the media player"** (the page's switch under
+Clearer sound, **off** unless chosen, kept in the phone's storage; 4 Nov):
+the answer isn't played by Web Audio but cut at its pauses (`dsp.js`
+`Segmenter`: a piece ends in the middle of an 80 ms pause once it holds
+600 ms of voice — 1.5 s after the first —, or at its quietest 10 ms when it
+runs 6 s with no pause; nothing lost or repeated), each piece a WAV file
+(`dsp.js` `wav`, at Yap's own 24 kHz: the browser resamples it) that an
+`<audio>` element plays whole, the next loading meanwhile (`link.js`
+`mediaVoice`). Why: Firefox for Android ignores `latencyHint` and gives Web
+Audio its smallest output buffer (about 14 ms), so a busy moment on the phone
+can crackle without the jitter buffer ever running dry; the media player's
+output keeps far more sound ready. The cost: a slightly longer pause where it
+was cut, and Stop without the fade. A piece not there when the last one ends
+counts as a gap, as the worklet's do. A phone answer crackling with no gaps
+counted (Firefox, 4 Nov) is what it's for: one long answer each way tells
+the browser's sound from Yap's stream.
+
 **"Clearer sound in a headset"** (the page's switch under Hands-free, **on by
 default** since 31 Oct for anyone who hasn't chosen; a saved choice is kept in
 the phone's storage): while the page holds the mic, a classic Bluetooth
@@ -483,7 +500,8 @@ is live and unmuted (at most 3 s), while the headset switches back. The cost:
 you can't talk over Yap by voice (Talk while it speaks opens the mic afresh
 first); Stop still works. Off, the mic stays open through the answer and Talk
 while it speaks listens at once. **Sound details** at the bottom of the page
-(the sample rate, the latencies, the last answer's start delay and buffer, its
+(the sample rate, the latencies, which way it played — Web Audio or the media
+player —, the last answer's start delay and buffer, its
 gaps, whether the mic was open while it played, the step opening the mic is on
 or ended on and its time, the browser) tells a stream that ran dry on the
 phone from the headset's own crackle, and a stuck mic from a slow one.
@@ -618,9 +636,11 @@ on the PC while the answer comes stops the voice, as it stops the PC's.
   refused tabs coming back with its device.
 - The page on its own: `npm run test:link` (`e2e-link/`, the PC mocked): the
   sound maths in Node (the resampler both ways, the jitter buffer, the voice
-  detector), then the page in a headless Chromium — among the rest, the answer's
+  detector, the media player's pieces cut in the pauses and their WAV files),
+  then the page in a headless Chromium — among the rest, the answer's
   stream (starting at ~250 ms, a late frame faded and counted, Stop's fade),
-  Clearer sound (on by default, a saved choice kept, releasing and reopening
+  the media player (off at first, kept, an answer in pieces, Stop, a late
+  piece counted as a gap), Clearer sound (on by default, a saved choice kept, releasing and reopening
   the mic, talking over Yap with it off and on), opening the mic's time limits
   (a permission nobody answers, answered late, blocked; a module that never
   loads; the sound never starting; Cancel at any step; `mic-open.spec.js`), the

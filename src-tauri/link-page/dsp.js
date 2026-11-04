@@ -22,6 +22,9 @@
 //   heard for a moment above the room's noise, kept while the level stays
 //   a little above it (a soft last word isn't quiet), then the end after the
 //   wait chosen (`WAITS`: 1 s, 1.5 s or 2.5 s) of quiet.
+// - `Segmenter` / `wav`: Yap's voice cut into pieces at its pauses, each a
+//   WAV file, for the browser's media player ("Play the voice through the
+//   media player", in the settings).
 // - `elapsed`: a time as Chat's activity line says it ("12s", "1m 59s").
 
 /** The rate the PC takes the phone's mic at. */
@@ -553,6 +556,108 @@ export class EnergyVad {
     }
     return null;
   }
+}
+
+/** Quiet enough to cut Yap's voice at, as Int16: about −50 dB. */
+const QUIET = 100;
+
+/**
+ * Yap's voice as it comes, cut into pieces at its pauses, for a media player
+ * (an `<audio>` element plays each piece whole, with a moment between them,
+ * so a cut goes where there's silence already). A piece ends in a pause of
+ * `pauseMs` once it holds `minMs` of voice (the first sooner, `firstMs`, so
+ * Yap starts talking); one that runs to `maxMs` with no such pause is cut at
+ * its quietest 10 ms in the last second. Nothing's lost or repeated: the
+ * pieces, end to end, are the samples pushed. `push(int16)` returns the
+ * pieces it finished; `flush()` the rest (or null).
+ */
+export class Segmenter {
+  constructor(rate, { firstMs = 600, minMs = 1500, maxMs = 6000, pauseMs = 80 } = {}) {
+    this.rate = rate;
+    this.first = Math.round((rate * firstMs) / 1000);
+    this.min = Math.round((rate * minMs) / 1000);
+    this.max = Math.round((rate * maxMs) / 1000);
+    this.pause = Math.max(1, Math.round((rate * pauseMs) / 1000));
+    this.buf = new Int16Array(this.max + rate);
+    this.len = 0;
+    this.quiet = 0; // quiet samples at the end of `buf`
+    this.pieces = 0;
+  }
+
+  push(int16) {
+    const out = [];
+    for (let i = 0; i < int16.length; i++) {
+      const s = int16[i];
+      this.buf[this.len++] = s;
+      this.quiet = s > -QUIET && s < QUIET ? this.quiet + 1 : 0;
+      const enough = this.len >= (this.pieces === 0 ? this.first : this.min);
+      if (this.quiet === this.pause && enough) {
+        // In the pause's middle: each side keeps half of it.
+        out.push(this.cut(this.len - (this.pause >> 1)));
+      } else if (this.len >= this.max) {
+        out.push(this.cut(this.quietest()));
+      }
+    }
+    return out;
+  }
+
+  /** What's left, as the last piece. */
+  flush() {
+    if (!this.len) return null;
+    return this.cut(this.len);
+  }
+
+  /** The first `at` samples as a piece; the rest stays. */
+  cut(at) {
+    const piece = this.buf.slice(0, at);
+    this.buf.copyWithin(0, at, this.len);
+    this.len -= at;
+    this.quiet = Math.min(this.quiet, this.len);
+    this.pieces++;
+    return piece;
+  }
+
+  /** Where to cut a piece with no pause: the middle of its quietest 10 ms in the last second. */
+  quietest() {
+    const win = Math.max(1, Math.round(this.rate / 100));
+    const from = Math.max(0, this.len - this.rate);
+    let sum = 0;
+    for (let i = from; i < from + win && i < this.len; i++) sum += Math.abs(this.buf[i]);
+    let best = sum;
+    let at = from;
+    for (let i = from + win; i < this.len; i++) {
+      sum += Math.abs(this.buf[i]) - Math.abs(this.buf[i - win]);
+      if (sum < best) {
+        best = sum;
+        at = i - win + 1;
+      }
+    }
+    return Math.max(1, Math.min(this.len, at + (win >> 1)));
+  }
+}
+
+/** Int16 mono samples as a WAV file's bytes (PCM, 16-bit, little-endian). */
+export function wav(samples, rate) {
+  const bytes = new ArrayBuffer(44 + samples.length * 2);
+  const v = new DataView(bytes);
+  const tag = (at, text) => {
+    for (let i = 0; i < 4; i++) v.setUint8(at + i, text.charCodeAt(i));
+  };
+  tag(0, 'RIFF');
+  v.setUint32(4, 36 + samples.length * 2, true);
+  tag(8, 'WAVE');
+  tag(12, 'fmt ');
+  v.setUint32(16, 16, true); // the format chunk's length
+  v.setUint16(20, 1, true); // PCM
+  v.setUint16(22, 1, true); // mono
+  v.setUint32(24, rate, true);
+  v.setUint32(28, rate * 2, true); // bytes a second
+  v.setUint16(32, 2, true); // bytes a sample
+  v.setUint16(34, 16, true); // bits a sample
+  tag(36, 'data');
+  v.setUint32(40, samples.length * 2, true);
+  for (let i = 0; i < samples.length; i++) v.setInt16(44 + i * 2, samples[i], true);
+  return bytes;
 }
 
 /** A time as Chat's activity line says it: "12s", "1m 59s", "1h 3m". */

@@ -28,17 +28,17 @@ choice.
 
 | File | What it is | Served as |
 |---|---|---|
-| `index.html` | The page: the header (☰, "Yap · <PC>" with the connection's dot and the chat's title, the spinner, ⋯), pairing, the thread and Chat's activity line, the composer card (Chat's line for pictures its model can't read, the pictures, the text box, then +, the model chip, the mic, Send / ■, ✕ / ■, the waveform and time while Yap listens), the drawer, the settings sheet (Hands-free and its wait, Clearer sound in a headset, the microphone picker, Sound details) and the model sheet. | `text/html` |
+| `index.html` | The page: the header (☰, "Yap · <PC>" with the connection's dot and the chat's title, the spinner, ⋯), pairing, the thread and Chat's activity line, the composer card (Chat's line for pictures its model can't read, the pictures, the text box, then +, the model chip, the mic, Send / ■, ✕ / ■, the waveform and time while Yap listens), the drawer, the settings sheet (Hands-free and its wait, Clearer sound in a headset, Play the voice through the media player, the microphone picker, Sound details) and the model sheet. | `text/html` |
 | `link.css` | The look ("The look", below): Yap's warm light and dark `--yap-*` tokens (values copied from `src/app.css`, following `prefers-color-scheme`; `e2e-link/tokens.spec.js` holds them to it), its fonts, mobile first, 48 px targets, reduced motion respected. | `text/css` |
 | `markdown.js` | An answer's markdown as Chat shows it (its spoken-answer subset: paragraphs and line breaks, headings, lists, bold, italic, struck, code, quotes, rules), built as DOM nodes, never HTML; links as their words, `[1]` citations left out, a mark still being written shown without its stars. | `text/javascript` |
 | `fonts/figtree.woff2`, `fonts/eb-garamond.woff2` | Yap's UI font and its display serif, cut down from the desktop's own (below). | `font/woff2` |
-| `link.js` | Everything the page does: the connection (hello, pairing, reconnects with backoff, keep-alive pings), typed questions and ▶ Read aloud, the composer and the keyboard, the mic (opened a timed step at a time), Talk (tap or hold; its words in the box, `words`), hands-free, the spoken answer (resampled frame after frame, posted to the player worklet), Clearer sound, barge-in, the conversation (kept in this tab's sessionStorage across a reload), the step and its time, the model chip, the settings sheet, Sound details, the screen wake lock. Exposes a read-only `window.__yapLink.snapshot()` for the tests. | `text/javascript` |
+| `link.js` | Everything the page does: the connection (hello, pairing, reconnects with backoff, keep-alive pings), typed questions and ▶ Read aloud, the composer and the keyboard, the mic (opened a timed step at a time), Talk (tap or hold; its words in the box, `words`), hands-free, the spoken answer (resampled frame after frame, posted to the player worklet; or cut at its pauses into WAVs for the media player, `mediaVoice`), Clearer sound, barge-in, the conversation (kept in this tab's sessionStorage across a reload), the step and its time, the model chip, the settings sheet, Sound details, the screen wake lock. Exposes a read-only `window.__yapLink.snapshot()` for the tests. | `text/javascript` |
 | `picker.js` | Chat's model picker as a sheet ("Chat's picker", below): the rail with the logos, the panes, More models, the effort; its rows built by `core/chatPicker.js`; a PC from before gets its plain list. The chip's words and its effort (`chipWords`, `chipEffort`). | `text/javascript` |
 | `drawer.js` | The drawer of chats ("The drawer", below): Recents from the PC (`chats`), the search, the one this phone is in marked, + New chat. | `text/javascript` |
 | `photos.js` | A question's pictures ("Pictures", below): a photo made smaller (2,048 px, a JPEG of at most 3 MB, upright, on white) and sent in `0x03` frames. | `text/javascript` |
 | `core/*.js` | **Not in this folder**: Chat's own picker modules from `src/lib/core/` (`chatPicker`, `modelCatalog`, `latestModels`, `ppModels`, `localContext`, `modelIcons`, `providerIds`, `effort`), served as they are (`build.rs` `LINK_SHARED`). | `text/javascript` |
 | `providers/*.svg` | **Not in this folder**: the provider and model-family logos from `src/assets/providers/` the picker and the chip show (Yap's own assets; `build.rs` `LINK_SHARED`). | `image/svg+xml` |
-| `dsp.js` | The sound maths, with nothing of the page in it: the streaming resampler (windowed sinc, a polyphase table where the rates allow: the mic's rate down to 16 kHz, Yap's 24 kHz voice up to the phone's rate), the answer's ring and jitter buffer (`Playout`), Int16, the frame level, hands-free's energy voice detector and its waits, the times as Chat says them. Runs in the page, both worklets and Node's tests. | `text/javascript` |
+| `dsp.js` | The sound maths, with nothing of the page in it: the streaming resampler (windowed sinc, a polyphase table where the rates allow: the mic's rate down to 16 kHz, Yap's 24 kHz voice up to the phone's rate), the answer's ring and jitter buffer (`Playout`), the media player's pieces cut at the voice's pauses (`Segmenter`) and their WAV files (`wav`), Int16, the frame level, hands-free's energy voice detector and its waits, the times as Chat says them. Runs in the page, both worklets and Node's tests. | `text/javascript` |
 | `mic-worklet.js` | The mic's AudioWorklet: the mic at the phone's own rate, mixed to mono, resampled to 16 kHz Int16 (imports `dsp.js`), cut into 20 ms frames. | `text/javascript` |
 | `player-worklet.js` | The answer's AudioWorklet: Yap's voice, already at the phone's rate, played as one stream from `dsp.js`'s `Playout` (the jitter buffer, its fades, underruns counted); reports to the page every ~50 ms. | `text/javascript` |
 | `manifest.webmanifest` | Add to Home screen: name, the page's background as its colours (light, and dark in `user_preferences.color_scheme_dark` where the browser reads it), the icon. | `application/manifest+json` |
@@ -386,6 +386,19 @@ when you stop talking").
   ms faded); then the answer's finished and the mic's 15 s starts. Before,
   each frame was its own `AudioBufferSourceNode`: the browser resampled each
   clip on its own (a click at every join) and a late one left a hard gap.
+- **Play the voice through the media player** (a switch under Clearer sound,
+  **off** unless chosen, kept as `yap.link.media`): "If Yap's voice crackles,
+  try this…" The answer isn't played by Web Audio: `mediaVoice` cuts it at its
+  pauses (`dsp.js` `Segmenter`: in the middle of an 80 ms pause once a piece
+  holds 600 ms, 1.5 s after the first; at its quietest 10 ms after 6 s with no
+  pause; nothing lost or repeated), makes each piece a WAV file at 24 kHz
+  (`dsp.js` `wav`; the browser resamples it) and plays it with an `<audio>`
+  element, the next loading meanwhile. Firefox for Android ignores
+  `latencyHint` and runs Web Audio on its smallest output buffer (~14 ms), so
+  a busy moment on the phone can crackle with no underrun counted; the media
+  player's output keeps far more ready. The cost: a slightly longer pause where
+  it was cut, Stop without a fade. A piece not there when the last ends is a
+  gap, counted as an underrun; Sound details say which way it played.
 - **Clearer sound in a headset** (a switch under Hands-free in the settings sheet, **on by default**
   for anyone who hasn't chosen; a saved choice is kept, `yap.link.clearer`):
   "A headset's call mode can crackle, so this closes the mic while Yap talks
@@ -432,7 +445,8 @@ when you stop talking").
   the mic really sends sound; still nothing then, it listens anyway and says so
   ("The microphone hasn't sent any sound yet…").
 - **Sound details** (a disclosure at the foot of the settings sheet): the AudioContext's sample
-  rate, `baseLatency` / `outputLatency` where the browser gives them, the last
+  rate, `baseLatency` / `outputLatency` where the browser gives them, which way
+  the answer played (Web Audio, or the media player), the last
   answer (seconds played, how long after its first sound it started and how
   much was buffered then), its gaps (underruns), whether the mic was open while
   it played (and now), **opening the microphone** (the step it's on and for how
@@ -555,7 +569,8 @@ npm run test:link
   (on for a fresh page, a saved off or on kept; the mic's tracks stopped at
   `speak_start` and when a question is sent, opened again after with
   hands-free; off, Talk over Yap listens on the mic already open, on, it opens
-  it afresh), Sound details. `mic-open.spec.js`: a `getUserMedia` nobody
+  it afresh), the media player (off at first and kept, an answer in pieces,
+  Stop, a late piece counted as a gap), Sound details. `mic-open.spec.js`: a `getUserMedia` nobody
   answers (the permission message after ~6 s, Talk and Cancel, Cancel
   recovering, the late mic stopped), answered late, allowed and Talk tried
   afresh, blocked (said at once), an `addModule` that never resolves (the setup
