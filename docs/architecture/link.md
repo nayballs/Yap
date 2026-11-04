@@ -92,7 +92,11 @@ said, its pictures above it — their thumbnails while the page has them,
 else "2 pictures"), the answer as plain text the width of the screen with
 its markdown (`markdown.js`, built as nodes, never HTML), Chat's activity
 line while it works, and under a finished answer **Copy** and **▶ Read
-aloud** as quiet icons. **The composer card** at the bottom: the pictures
+aloud** as quiet icons. It keeps its end in view as the answer's words come
+and its activity and Speaking lines show, until the person scrolls up to
+read (only scrolling up lets go: a scroll event read a frame late, after
+more was drawn below, never does — Firefox stopped following there,
+2026-11-04); back at the end, it follows again. **The composer card** at the bottom: the pictures
 as thumbnails inside it with ✕, the text box ("Ask Yap, or hold to talk";
 Enter sends, Shift+Enter a new line, it grows to five lines), then a row —
 **+** (Take photo, Choose photos), **the model chip with its effort**
@@ -628,7 +632,9 @@ on the PC while the answer comes stops the voice, as it stops the PC's.
   as text), typed questions (`typing.spec.js`: `ask` over the wire, the
   answer in the thread with nothing spoken, ▶ and its ■, Enter and
   Shift+Enter, the box growing, typing over Yap, a PC from before, the
-  keyboard up both ways, a reload keeping the thread), Chat's picker
+  thread following an answer as it's written, typed and spoken, and staying
+  put when scrolled up, the keyboard up both ways, a reload keeping the
+  thread), Chat's picker
   (`picker.spec.js`: the rail and its logos, Latest, More models in place, a
   switch, a provider without a key, ChatGPT's two ways, the effort and Fast
   mode, a PC from before), the drawer and the phone's conversation

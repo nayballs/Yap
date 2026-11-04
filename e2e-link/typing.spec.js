@@ -252,6 +252,92 @@ test('a PC from before typed questions: said plainly, nothing sent', async ({ pa
   await expect(page.getByTestId('error')).toBeHidden();
 });
 
+/** How far the thread is from its end, in pixels. */
+const fromEnd = (page) => page.getByTestId('thread').evaluate((t) => t.scrollHeight - t.scrollTop - t.clientHeight);
+/** Two frames: the browser's scroll events for what was drawn have fired. */
+const frames = (page) => page.evaluate(() => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r))));
+
+test('the thread follows an answer as it’s written, Thinking under the question and all; scrolled up, it stays put', async ({ page }) => {
+  const pc = await mockPc(page);
+  await open(page);
+  await ready(page, pc);
+  // Enough of a conversation that it scrolls.
+  for (let i = 1; i <= 4; i++) {
+    await type(page, pc, `Question ${i} about the allotment rota?`);
+    pc.send({ type: 'answer', text: `Answer ${i}: ${'The rota is on the shed door. '.repeat(3)}`, final: true, id: `chat:9:${i * 2 - 1}` });
+    pc.send({ type: 'state', phase: 'idle' });
+  }
+  await expect.poll(() => fromEnd(page)).toBeLessThan(4);
+  await type(page, pc, 'Who waters the beans this week?');
+  // Thinking shows under the question, after the thread went to its end
+  // (its scroll event comes a frame later): still at the end, Thinking in view.
+  await expect(page.getByTestId('step')).toBeVisible();
+  await frames(page);
+  await expect.poll(() => fromEnd(page)).toBeLessThan(4);
+  await expect(page.getByTestId('step')).toBeInViewport();
+  pc.send({ type: 'state', phase: 'thinking' });
+  pc.send({ type: 'step', label: 'Reading the rota' });
+  await frames(page);
+  // The answer as it's written, a sentence at a time: the end stays in view.
+  const words = 'Sam waters the beans this week, in the evenings once the sun is off them. ';
+  for (let n = 1; n <= 6; n++) {
+    pc.send({ type: 'answer', text: words.repeat(n), final: false });
+    await frames(page);
+    await expect.poll(() => fromEnd(page)).toBeLessThan(4);
+  }
+  pc.send({ type: 'answer', text: words.repeat(7), final: true, id: 'chat:9:9' });
+  pc.send({ type: 'state', phase: 'idle' });
+  await frames(page);
+  await expect.poll(() => fromEnd(page)).toBeLessThan(4);
+  await expect(page.getByTestId('read-aloud').last()).toBeInViewport();
+
+  // Scrolled up to read: the next answer's words don't pull it down.
+  await type(page, pc, 'And next week?');
+  await page.getByTestId('thread').evaluate((t) => {
+    t.scrollTop = 0;
+  });
+  await frames(page);
+  pc.send({ type: 'answer', text: words.repeat(3), final: false });
+  await frames(page);
+  expect(await page.getByTestId('thread').evaluate((t) => t.scrollTop)).toBe(0);
+  // Back at the end: it follows again.
+  await page.getByTestId('thread').evaluate((t) => {
+    t.scrollTop = t.scrollHeight;
+  });
+  await frames(page);
+  pc.send({ type: 'answer', text: words.repeat(6), final: false });
+  await frames(page);
+  await expect.poll(() => fromEnd(page)).toBeLessThan(4);
+});
+
+test('a spoken question answered out loud: the thread follows the answer and its Speaking line', async ({ page }) => {
+  const pc = await mockPc(page, asks);
+  await open(page);
+  await ready(page, pc);
+  for (let i = 1; i <= 4; i++) {
+    await type(page, pc, `Question ${i} about the allotment rota?`);
+    pc.send({ type: 'answer', text: `Answer ${i}: ${'The rota is on the shed door. '.repeat(3)}`, final: true, id: `chat:9:${i * 2 - 1}` });
+    pc.send({ type: 'state', phase: 'idle' });
+  }
+  await ask(page, pc, 300);
+  pc.send({ type: 'heard', text: 'Who has the shed key?' });
+  pc.send({ type: 'state', phase: 'thinking' });
+  await frames(page);
+  const words = 'Priya has the shed key until Sunday, then it goes back on the hook. ';
+  for (let n = 1; n <= 4; n++) {
+    pc.send({ type: 'answer', text: words.repeat(n), final: false });
+    await frames(page);
+  }
+  pc.send({ type: 'answer', text: words.repeat(5), final: true, id: 'chat:9:9' });
+  pc.send({ type: 'state', phase: 'speaking' });
+  pc.send({ type: 'speak_start', rate: 24000 });
+  for (let i = 0; i < 4; i++) pc.sendBinary(downFrame(i, voice(24000, 100)));
+  await frames(page);
+  await expect(page.getByTestId('answer').last()).toHaveClass(/final/);
+  await expect.poll(() => fromEnd(page)).toBeLessThan(4);
+  await expect(page.locator('.speaking').last()).toBeInViewport();
+});
+
 test('the keyboard up (the page resized for it): the composer above it, the thread at its end', async ({ page }) => {
   const pc = await mockPc(page);
   await open(page);

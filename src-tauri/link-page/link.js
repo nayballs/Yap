@@ -1219,14 +1219,29 @@ function renderConvo() {
 // The thread takes the room the composer leaves it, so it shrinks when the
 // keyboard comes up, an error or a note shows, or the box grows: the latest
 // words stay in view, unless the person has scrolled up to read.
+//
+// Only the person scrolling up lets go of the end. A scroll event comes a
+// frame after the scroll, so by then more may have been drawn below (the
+// activity line under a question just sent, the next words of an answer):
+// that's the thread growing, not the person leaving the end, so it never
+// counts (Firefox read it as leaving, 2026-11-04: the answer then went on
+// below the screen). `endTop`: where the thread was put at its end.
 let threadPinned = true;
+let endTop = 0;
 function toEnd() {
   el.thread.scrollTop = el.thread.scrollHeight;
+  endTop = el.thread.scrollTop;
 }
 el.thread.addEventListener(
   'scroll',
   () => {
-    threadPinned = el.thread.scrollHeight - el.thread.scrollTop - el.thread.clientHeight < 32;
+    const t = el.thread;
+    if (t.scrollHeight - t.scrollTop - t.clientHeight < 32) {
+      threadPinned = true;
+      endTop = t.scrollTop;
+    } else if (t.scrollTop < endTop - 1) {
+      threadPinned = false;
+    }
   },
   { passive: true },
 );
@@ -1234,8 +1249,8 @@ if (typeof ResizeObserver === 'function') {
   const keep = new ResizeObserver(() => {
     if (threadPinned) toEnd();
   });
-  keep.observe(el.thread);
-  keep.observe(el.convo);
+  // The thread's own box, and everything in it that comes, goes or grows.
+  for (const node of [el.thread, el.convo, el.step, el.older]) keep.observe(node);
 }
 
 /**
