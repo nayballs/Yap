@@ -231,10 +231,17 @@ light and dark.
   Save dialog from Rust, parented to the window, on a blocking thread; a
   test run takes `e2e_save_path` instead and never opens it) and returns
   the path, or nothing when cancelled; `diagnostics_reveal` shows it in File
-  Explorer (not in test mode); `diagnostics_issue_url` is GitHub's
-  new-issue page with a title and a template carrying only the Yap and
-  Windows lines (`issue_url`, pure) — the page opens it through
-  `open_external`. **Nothing is ever uploaded.**
+  Explorer (not in test mode); `diagnostics_issue_url` is GitHub's bug
+  form (`issues/new?template=bug_report.yml`, the title "Problem: ") with
+  three of its fields filled from system.txt by their ids (`issue_url`,
+  pure): `version` Yap's version alone ("0.1.1-nightly.152"), `windows` the
+  Windows line's value, `hardware` the graphics card and its memory
+  ("… RTX 4070 (12.0 GB)"). Nothing else of system.txt, never a device's or
+  microphone's name, a user name or a path; each value one line of at most
+  120 bytes, one it can't read left out, so the URL stays well under 2 KB.
+  The page opens it through `open_external`. **Nothing is ever uploaded.**
+  (Until 4 Nov 2026 it was a blank issue with a `body=`, which skipped the
+  form: its labels and its required area never applied.)
 - **Tests:** `a_bundle_holds_no_keys_or_personal_details` (in the spirit of
   `privacy/log_privacy.rs`): a config, a log and connections seeded with fake keys,
   a fictional name and note, dictionary words, device names, a custom
@@ -242,7 +249,9 @@ light and dark.
   email → no file of the bundle, nor the zip, holds any of them; plus the
   summary's choices, unknown settings left out, the log's levels and
   masks, whole-word names, user folders with spaces, the connections'
-  hosts, the issue page.
+  hosts, the bug form's fields (their ids, their encoding, what's left out,
+  nothing personal from a system.txt seeded with a microphone, a user
+  folder and a PC name, the URL's length).
 
 ## Settings → About → Report a problem
 
@@ -252,7 +261,17 @@ file…" → **What's in the file** (a focused panel: the file list with what
 each holds and its size, a preview — Settings / System / Connections / Errors
 tabs over a scrollable, focusable `<pre>` —, **Save…**, Cancel, the file's
 name and size) → **Saved Yap diagnostics 2026-10-24.zip**: "Nothing was
-uploaded…", **Open a GitHub issue**, Show in folder, Done.
+uploaded…" (Yap fills in its version, Windows and the graphics card;
+anyone can download a file attached to an issue), **Open a GitHub issue**,
+Show in folder, Done.
+
+**The issue on GitHub.** The bug form (`.github/ISSUE_TEMPLATE/bug_report.yml`)
+labels it `bug` and `needs-triage`, says in its intro and its last box that
+an attached file is public, and asks "Which part of Yap?" (required). A
+workflow, `.github/workflows/issue-labels.yml` (build-and-test.md, "Issue
+labels"), turns that answer into an `area: …` label. The form's field ids
+are what `issue_url` fills: renaming one empties that field. Blank issues
+stay on (`config.yml`): an older Yap still opens one with a `body=`.
 
 ## `privacy/export.rs` — Download your data
 

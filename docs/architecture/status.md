@@ -472,7 +472,8 @@ purpose and host, cloud and on this PC alike, with a filter and Clear.
 Settings → About → Report a problem builds a diagnostic .zip (system, an
 allow-listed settings summary, connections, errors, 3 days of `info`+ logs
 scrubbed), shows it before it's saved through the Save dialog, uploads
-nothing, then offers GitHub's new-issue page. Unit-tested (the recorder on
+nothing, then offers GitHub's bug form with Yap's version, Windows and the
+graphics card filled in. Unit-tested (the recorder on
 a real local request, the store's folding and roll-over, hosts without
 paths or queries, a bundle seeded with fake keys and personal details
 holding none of them) and e2e-tested (`desktop/e2e/network-receipts.spec.js`: a

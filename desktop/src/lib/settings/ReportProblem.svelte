@@ -3,8 +3,8 @@
   // diagnostic file the person looks through before it's saved — the file
   // list and a preview of what's in it — then saves where they choose
   // (Windows' Save dialog). Nothing is uploaded: once it's saved, Yap offers
-  // GitHub's new-issue page with a template (its version and Windows' only),
-  // and the person attaches the file themselves if they want to.
+  // GitHub's bug form with its version, Windows' and the graphics card filled
+  // in, and the person attaches the file themselves if they want to.
   import { invoke } from '@tauri-apps/api/core';
   import { tick } from 'svelte';
   import Row from '../ui/Row.svelte';
@@ -77,7 +77,7 @@
     try {
       openExternalLink(await invoke('diagnostics_issue_url'));
     } catch {
-      openExternalLink('https://github.com/nayballs/Yap/issues/new');
+      openExternalLink('https://github.com/nayballs/Yap/issues/new?template=bug_report.yml');
     }
   }
 
@@ -133,8 +133,9 @@
   <section class="panel" aria-labelledby="report-saved-h" tabindex="-1" bind:this={panel}>
     <h3 id="report-saved-h">Saved {fileName}</h3>
     <p class="lead">
-      Nothing was uploaded. To tell us what went wrong, open an issue on GitHub and attach the file if you're happy to
-      share it.
+      Nothing was uploaded. To tell us what went wrong, open an issue on GitHub: Yap fills in its version, Windows and
+      your graphics card. Anyone can download a file attached to an issue, so attach it only if you're happy to share
+      it.
     </p>
     <div class="actions">
       <Button size="sm" onclick={openIssue}>Open a GitHub issue</Button>

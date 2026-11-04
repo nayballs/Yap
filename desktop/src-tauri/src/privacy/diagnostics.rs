@@ -1,7 +1,7 @@
 //! **Report a problem** (Settings → About): a diagnostic file the person
 //! looks through first, then saves where they choose. Nothing is uploaded:
-//! after saving, Yap offers GitHub's new-issue page with a title and a
-//! template (its version and Windows' only), never the file.
+//! after saving, Yap offers GitHub's bug form with Yap's version, Windows'
+//! and the graphics card filled in ([`issue_url`]), never the file.
 //!
 //! The file is a .zip of:
 //! - `README.txt` — what's in it and what was left out;
@@ -911,8 +911,9 @@ pub fn diagnostics_reveal(app: AppHandle) -> Result<(), String> {
     app.opener().reveal_item_in_dir(&path).map_err(|e| e.to_string())
 }
 
-/// GitHub's new-issue page for Yap, with a title and the template: Yap's
-/// version and Windows' only. Never the file, nothing the person wrote.
+/// GitHub's bug form for Yap, with a title and three of its fields filled
+/// in: Yap's version, Windows' and the graphics card. Never the file,
+/// nothing the person wrote.
 #[tauri::command]
 pub fn diagnostics_issue_url(app: AppHandle) -> String {
     let system = LAST
@@ -920,23 +921,61 @@ pub fn diagnostics_issue_url(app: AppHandle) -> String {
         .unwrap_or_else(|p| p.into_inner())
         .as_ref()
         .map(|b| b.system.clone())
-        .unwrap_or_else(|| system_info(&app));
+        .unwrap_or_else(|| Scrub::this_pc().line(&system_info(&app)));
     issue_url(&system)
 }
 
-/// Pure: the issue page for `system` (its Yap and Windows lines only).
+/// The issue form Report a problem opens: `.github/ISSUE_TEMPLATE/bug_report.yml`.
+const BUG_FORM: &str = "bug_report.yml";
+/// Each filled-in field at most this many bytes (the URL stays well under 2 KB).
+const FIELD_BYTES: usize = 120;
+
+/// Pure: the bug form for `system` (system.txt's text). Only its fields'
+/// own ids, each given only what it asks for: `version` Yap's version
+/// ("0.1.1-nightly.152"), `windows` the Windows line's value, `hardware` the
+/// graphics card. Nothing else of system.txt: never a device's or
+/// microphone's name, a user name or a path. A value it can't read is left
+/// for the person to fill in.
 pub fn issue_url(system: &str) -> String {
-    let pick = |prefix: &str| system.lines().find(|l| l.starts_with(prefix)).unwrap_or("").to_string();
-    let body = format!(
-        "**What happened?**\n\n\n**What did you expect to happen?**\n\n\n**Steps to reproduce**\n1. \n\n---\n{}\n{}\n\n\
-         <!-- If you saved a diagnostic file (Settings → About → Report a problem), look through it first, \
-         then drag it here if you're happy to share it. Yap never uploads it. -->\n",
-        pick("Yap:"),
-        pick("Windows:")
-    );
-    reqwest::Url::parse_with_params(REPO_ISSUES, &[("title", "Problem: "), ("body", body.as_str())])
+    let value = |prefix: &str| system.lines().find_map(|l| l.strip_prefix(prefix)).map_or("", str::trim);
+    // "0.1.1-nightly.152 (nightly, installed, …)" → "0.1.1-nightly.152".
+    let version = value("Yap:").split_whitespace().next().unwrap_or("");
+    let version = if version.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '-' | '+')) { version } else { "" };
+    let fields = [("version", version.to_string()), ("windows", value("Windows:").to_string()), ("hardware", graphics_card(value("Graphics card:")))];
+    let mut params = vec![("template", BUG_FORM.to_string()), ("title", "Problem: ".to_string())];
+    params.extend(fields.into_iter().map(|(id, v)| (id, field(&v))).filter(|(_, v)| !v.is_empty()));
+    reqwest::Url::parse_with_params(REPO_ISSUES, &params)
         .map(|u| u.to_string())
-        .unwrap_or_else(|_| REPO_ISSUES.to_string())
+        .unwrap_or_else(|_| format!("{REPO_ISSUES}?template={BUG_FORM}"))
+}
+
+/// system.txt's graphics card, for the form: "NVIDIA GeForce RTX 4070 ·
+/// 12.0 GB of its own" → "NVIDIA GeForce RTX 4070 (12.0 GB)".
+fn graphics_card(line: &str) -> String {
+    if line.is_empty() {
+        return String::new();
+    }
+    if line.starts_with("none") {
+        return "None Yap can use".into();
+    }
+    let mut parts = line.split(" · ");
+    let name = parts.next().unwrap_or("").trim();
+    match parts.next().map(|m| m.trim_end_matches(" of its own").trim()) {
+        Some(memory) if !memory.is_empty() => format!("{name} ({memory})"),
+        _ => name.to_string(),
+    }
+}
+
+/// One field's value: one line, no control characters, at most
+/// [`FIELD_BYTES`] (cut on a character's edge).
+fn field(v: &str) -> String {
+    let v = v.split_whitespace().collect::<Vec<_>>().join(" ");
+    let v: String = v.chars().filter(|c| !c.is_control()).collect();
+    let mut end = v.len().min(FIELD_BYTES);
+    while !v.is_char_boundary(end) {
+        end -= 1;
+    }
+    v[..end].trim().to_string()
 }
 
 /// Test mode: the path the next Save writes to, in place of the dialog.
@@ -1183,15 +1222,78 @@ mod tests {
         assert!(text.contains("to: your network") && text.contains("to: this PC") && text.contains("to: a host left out"));
     }
 
+    /// A system.txt as `system_info` writes it, with lines the form must
+    /// never get (and a few that system.txt doesn't have but could one day).
+    const SYSTEM: &str = "Yap: 0.1.1-nightly.152 (nightly, installed, speech engines included)\n\
+        Windows: Windows 11 Home 24H2, build 26200.7019\n\
+        Processor: Fake CPU 7 · 16 logical cores\n\
+        Memory: 32 GB\n\
+        Graphics card: Fakeforce RTX 9070 · 12.0 GB of its own\n\
+        Speech model: parakeet-tdt-0.6b-v3 · runs on: gpu\n\
+        Microphone: Headset (Robin's Earbuds)\n\
+        Output: Speakers (Studio Fakebox)\n\
+        Data: C:\\Users\\robinx\\AppData\\Roaming\\yap on ROBINX-PC\n\
+        Made: 2026-10-24 21:05 (this PC's time)\n";
+
+    fn pairs(url: &str) -> Vec<(String, String)> {
+        reqwest::Url::parse(url).unwrap().query_pairs().map(|(k, v)| (k.into_owned(), v.into_owned())).collect()
+    }
+
+    /// The bug form, its own field ids, each with only what it asks for.
     #[test]
-    fn the_issue_page_carries_the_version_and_windows_only() {
-        let b = bundle();
-        let url = issue_url(&b.system);
-        assert!(url.starts_with("https://github.com/nayballs/Yap/issues/new?title=Problem"));
-        let parsed = reqwest::Url::parse(&url).unwrap();
-        let body: String = parsed.query_pairs().find(|(k, _)| k == "body").unwrap().1.into_owned();
-        assert!(body.contains("Yap: 0.1.1 (dev build"));
-        assert!(body.contains("Windows: Windows 11 Home 24H2"));
-        assert!(!body.contains("Processor"));
+    fn the_issue_page_is_the_bug_form_with_its_fields_filled_in() {
+        let url = issue_url(SYSTEM);
+        assert!(url.starts_with("https://github.com/nayballs/Yap/issues/new?template=bug_report.yml&title=Problem"), "{url}");
+        let want = [
+            ("template", "bug_report.yml"),
+            ("title", "Problem: "),
+            ("version", "0.1.1-nightly.152"),
+            ("windows", "Windows 11 Home 24H2, build 26200.7019"),
+            ("hardware", "Fakeforce RTX 9070 (12.0 GB)"),
+        ];
+        let want: Vec<(String, String)> = want.iter().map(|(k, v)| (k.to_string(), v.to_string())).collect();
+        assert_eq!(pairs(&url), want);
+        // Form-encoded: spaces as +, the rest escaped.
+        assert!(url.contains("&title=Problem%3A+&version=0.1.1-nightly.152&windows=Windows+11+Home+24H2%2C+build+26200.7019&hardware=Fakeforce+RTX+9070+%2812.0+GB%29"), "{url}");
+        assert!(url.len() < 512, "{}", url.len());
+        // No body: the form ignores one, and it's where the old page put system.txt.
+        assert!(!pairs(&url).iter().any(|(k, _)| k == "body"));
+    }
+
+    /// Nothing personal from system.txt, and nothing it has besides the
+    /// three fields: no device or microphone, user, PC, path or processor.
+    #[test]
+    fn the_issue_page_holds_nothing_personal() {
+        let url = issue_url(SYSTEM);
+        let all: String = pairs(&url).into_iter().map(|(k, v)| format!("{k}={v}\n")).collect();
+        for leak in SECRETS.iter().copied().chain(["robinx", "Earbuds", "Fakebox", "Fake CPU", "logical cores", "32 GB", "parakeet", "Made", "Users", "AppData"]) {
+            assert!(!all.to_lowercase().contains(&leak.to_lowercase()), "{leak:?} is in {all}");
+        }
+        // The bundle's own (scrubbed) system.txt too.
+        let url = issue_url(&bundle().system);
+        let p = pairs(&url);
+        assert!(p.contains(&("version".into(), "0.1.1".into())), "{p:?}");
+        assert!(p.contains(&("windows".into(), "Windows 11 Home 24H2, build 26200.1".into())), "{p:?}");
+        assert!(!p.iter().any(|(k, _)| k == "hardware"), "{p:?}");
+    }
+
+    /// A value it can't read is left out (the person fills it in); an odd
+    /// one is cut to a line of at most 120 bytes; no card says so.
+    #[test]
+    fn the_issue_page_leaves_out_what_it_cant_read() {
+        // No lines at all (not Windows, an old system.txt): the form alone.
+        let p = pairs(&issue_url(""));
+        assert_eq!(p.iter().map(|(k, _)| k.as_str()).collect::<Vec<_>>(), ["template", "title"]);
+        // A version that isn't one is left out.
+        let p = pairs(&issue_url("Yap: <user>'s build\nGraphics card: none Yap can use (or only the processor's)\n"));
+        assert!(!p.iter().any(|(k, _)| k == "version"), "{p:?}");
+        assert!(p.contains(&("hardware".into(), "None Yap can use".into())), "{p:?}");
+        // A very long card name with letters outside ASCII: one line, ≤ 120 bytes, cut on a letter.
+        let long = format!("Graphics card: {}\tétrange · 4.0 GB of its own\n", "Ëxtrême Fäke Gràphics ".repeat(20));
+        let p = pairs(&issue_url(&long));
+        let hw = &p.iter().find(|(k, _)| k == "hardware").unwrap().1;
+        assert!(hw.len() <= 120 && !hw.contains(['\t', '\n']) && hw.starts_with("Ëxtrême Fäke"), "{hw:?}");
+        let url = issue_url(&format!("Yap: 0.1.1\nWindows: {}\n{long}", "Wïndows ".repeat(40)));
+        assert!(url.len() < 2048, "{}", url.len());
     }
 }

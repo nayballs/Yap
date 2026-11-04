@@ -1,6 +1,10 @@
 name: Bug report
 description: Something in Yap doesn't work as it should.
-labels: ["bug"]
+labels: ["bug", "needs-triage"]
+# The field ids are what Yap's Report a problem fills in (privacy/diagnostics.rs
+# `issue_url`: version, windows, hardware), and the "Which part of Yap?" options
+# are what .github/workflows/issue-labels.yml labels by: keep the ids, and change
+# an option in both places (`npm run test:issue-labels` checks).
 body:
   - type: markdown
     attributes:
@@ -9,8 +13,11 @@ body:
 
         **A diagnostic file helps a lot.** In Yap, open **Settings → About → Report a problem**. Yap
         makes a .zip (your system, settings without keys, recent errors and logs), shows you
-        everything in it, and saves it where you choose. Nothing is uploaded. Look through it, then
-        drag it into the last box below if you're happy to share it.
+        everything in it, and saves it where you choose. Nothing is uploaded. Opened from there,
+        this form already has Yap's version, Windows and your graphics card filled in.
+
+        **Anyone can download a file attached to an issue**, so look through the .zip first, and
+        drag it into the last box below only if you're happy for it to be public.
 
         **Please don't paste anything private**: no dictated text, meeting transcripts, names or API
         keys. Describe what you said instead ("a two-sentence email").
@@ -80,4 +87,6 @@ body:
     id: diagnostics
     attributes:
       label: Diagnostic file or anything else
-      description: Drag the .zip from Settings → About → Report a problem here, or add screenshots.
+      description: >-
+        Drag the .zip from Settings → About → Report a problem here, or add screenshots.
+        Anyone can download what's attached to an issue: look through the .zip first.

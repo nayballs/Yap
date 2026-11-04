@@ -1,6 +1,7 @@
-# Blank issues stay on: Settings → About → Report a problem opens a new issue
-# with its own prefilled body (privacy/diagnostics.rs `issue_url`), which a
-# template-only chooser would drop.
+# Blank issues stay on. Settings → About → Report a problem opens the bug form
+# (bug_report.yml, with Yap's version, Windows and the graphics card filled in:
+# privacy/diagnostics.rs `issue_url`), but an older Yap still opens a blank
+# issue with a prefilled body, which a forms-only chooser would drop.
 blank_issues_enabled: true
 contact_links:
   - name: Questions and help

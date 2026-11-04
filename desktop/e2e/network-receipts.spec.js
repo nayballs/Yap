@@ -14,7 +14,8 @@
 //   summary says a Groq key is set but never shows it, nor About you.
 //   Save writes the file where the test says (Windows' Save dialog in real
 //   use, `e2e_save_path` here); no key, name or note is in any file of it.
-//   "Open a GitHub issue" opens the new-issue page with Yap's version only.
+//   "Open a GitHub issue" opens the bug form with Yap's version, Windows' and
+//   the graphics card only.
 //
 // Nothing leaves the PC: both AI servers are local fakes (support/
 // fake-llm.js). Fictional people and fake keys only.
@@ -235,16 +236,20 @@ test('Report a problem: see what is in the file first, then save it; no key, nam
   const log = Object.entries(zipped).find(([n]) => n.startsWith('logs/'))[1];
   expect(log).not.toMatch(/^\S+\s+DEBUG /m);
 
-  // GitHub's new-issue page: a title and Yap's version, never the file.
+  // GitHub's bug form: a title and its own fields (Yap's version, Windows', the
+  // graphics card), never the file nor a body.
   await saved.getByRole('button', { name: 'Open a GitHub issue' }).click();
   await expect
     .poll(async () => (await yap.invoke('e2e_opened_urls')).find((u) => u.startsWith('https://github.com/nayballs/Yap/issues/new?')))
     .toBeTruthy();
   const issue = (await yap.invoke('e2e_opened_urls')).find((u) => u.startsWith('https://github.com/nayballs/Yap/issues/new?'));
-  const body = new URL(issue).searchParams.get('body');
-  expect(body).toContain('Yap: ');
-  expect(body).not.toContain(GROQ_KEY);
-  expect(body).not.toContain(NAME);
+  expect(issue.startsWith('https://github.com/nayballs/Yap/issues/new?template=bug_report.yml&title=Problem')).toBe(true);
+  const params = new URL(issue).searchParams;
+  expect([...params.keys()].every((k) => ['template', 'title', 'version', 'windows', 'hardware'].includes(k))).toBe(true);
+  expect(params.get('version')).toMatch(/^\d+\.\d+\.\d+[\w.+-]*$/);
+  expect(params.has('body')).toBe(false);
+  expect(issue.length).toBeLessThan(2048);
+  for (const leak of [GROQ_KEY, NAME, 'Example Lane', 'leeks']) expect(decodeURIComponent(issue.replace(/\+/g, ' '))).not.toContain(leak);
   await saved.getByRole('button', { name: 'Done' }).click();
   await expect(group.getByRole('button', { name: 'Report a problem…' })).toBeVisible();
   await closeSettings(main);
