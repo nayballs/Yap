@@ -52,6 +52,12 @@ jobs:
           fi
           node --test scripts/privacy-guard.test.mjs
 
+      # The issue-labels workflow's areas against the bug form's "Which part of
+      # Yap?" options (an option renamed in one but not the other would leave
+      # new issues unlabelled), and its script on made-up events.
+      - name: Issue labels (the bug form's areas)
+        run: node --test scripts/issue-labels.test.mjs
+
       - name: Install Rust stable
         uses: dtolnay/rust-toolchain@stable
 

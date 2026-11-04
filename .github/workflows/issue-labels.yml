@@ -1,0 +1,97 @@
+# A bug report's area as a label: the bug form's (.github/ISSUE_TEMPLATE/
+# bug_report.yml) "Which part of Yap?" answer → one `area: …` label. An edit
+# that changes the answer moves the label; anything else (no answer, one that
+# isn't exactly an option, an issue not made from the form, a title edit) is
+# left alone, so a label the maintainer set by hand stays.
+#
+# The issue's text is untrusted. The script reads it from the event payload
+# and only compares the answer, whole, with the fixed list below: it never
+# reaches a shell, an expression or the log, and the only label it can add is
+# one of the list's. A label that doesn't exist in the repo yet isn't made:
+# the run warns and stops.
+#
+# `npm run test:issue-labels` (CI's check job) holds AREAS to the form's
+# options and runs this script on made-up events.
+name: "Issue labels"
+
+on:
+  issues:
+    types: [opened, edited]
+
+permissions:
+  issues: write
+
+# One run per issue at a time, in order (an edit straight after opening).
+concurrency:
+  group: issue-labels-${{ github.event.issue.number }}
+  cancel-in-progress: false
+
+jobs:
+  area:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Label the issue by area
+        uses: actions/github-script@v9
+        with:
+          script: |
+            // The bug form's "Which part of Yap?" options, word for word, and their labels.
+            const AREAS = new Map([
+              ["Dictation (recording, transcription)", "area: dictation"],
+              ["Pasting into an app", "area: pasting"],
+              ["AI cleanup, Commands or transforms", "area: cleanup"],
+              ["Dictionary and snippets", "area: dictionary"],
+              ["Meetings and the notepad", "area: meetings"],
+              ["Chat or the Voice Assistant", "area: chat"],
+              ["Spoken replies or Read aloud", "area: voice"],
+              ["The Yap bar", "area: bar"],
+              ["Settings, the installer or updates", "area: settings"],
+              ["Something else", "area: other"],
+            ]);
+            const HEADING = "### Which part of Yap?";
+
+            // The answer under the form's heading, when it's exactly one of the options.
+            function areaOf(body) {
+              if (typeof body !== "string") return null;
+              const lines = body.split(/\r?\n/);
+              const at = lines.findIndex((line) => line.trim() === HEADING);
+              if (at < 0) return null;
+              const answer = [];
+              for (const line of lines.slice(at + 1)) {
+                if (line.startsWith("### ")) break;
+                answer.push(line);
+              }
+              const text = answer.join("\n").trim();
+              return AREAS.has(text) ? text : null;
+            }
+
+            const { action, issue, changes } = context.payload;
+            const area = areaOf(issue.body);
+            if (!area) return;
+            let before = null;
+            if (action === "edited") {
+              // Only an edit of the body that changed the answer.
+              if (!changes || !changes.body) return;
+              before = areaOf(changes.body.from);
+              if (before === area) return;
+            }
+
+            const { owner, repo } = context.repo;
+            const label = AREAS.get(area);
+            try {
+              await github.rest.issues.getLabel({ owner, repo, name: label });
+            } catch (e) {
+              if (e.status !== 404) throw e;
+              core.warning(`The label "${label}" doesn't exist yet: create it under Issues → Labels.`);
+              return;
+            }
+            await github.rest.issues.addLabels({ owner, repo, issue_number: issue.number, labels: [label] });
+            if (before) {
+              const old = AREAS.get(before);
+              try {
+                await github.rest.issues.removeLabel({ owner, repo, issue_number: issue.number, name: old });
+              } catch (e) {
+                // Not on the issue any more (taken off by hand): nothing to do.
+                if (e.status !== 404) throw e;
+              }
+            }
+            core.info(`#${issue.number}: ${label}`);

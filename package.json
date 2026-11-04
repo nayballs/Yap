@@ -22,7 +22,8 @@
     "test:privacy": "node --test scripts/privacy-guard.test.mjs",
     "pins:check": "node scripts/check-pins.mjs",
     "test:pins": "node --test scripts/check-pins.test.mjs",
-    "test:launcher": "node --test scripts/dev-launcher.test.mjs"
+    "test:launcher": "node --test scripts/dev-launcher.test.mjs",
+    "test:issue-labels": "node --test scripts/issue-labels.test.mjs"
   },
   "devDependencies": {
     "@playwright/test": "^1.64.1"

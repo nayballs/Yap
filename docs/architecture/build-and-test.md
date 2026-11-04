@@ -160,10 +160,14 @@ Windows runner too. Before, they ran only on the maintainer's PC.
 `.github/workflows/e2e.yml` runs the **end-to-end UI suite** on the same triggers
 (plus `workflow_dispatch`), separately so `ci.yml` stays quick — see below.
 
-**Node 24** in every workflow (ci, e2e, nightly, release, pins; since 3 Nov 2026, was
-20, out of support since April 2026), the PC's own major; setup-node takes the newest
-24.x. The actions themselves run on Node 24 (checkout, setup-node, upload-artifact v7,
-tauri-action v1, rust-cache v2), except `humbletim/install-vulkan-sdk@v1.2` in nightly
+CI's check job also runs `npm run test:issue-labels`, the bug form against the
+issue-labels workflow (below, "Issue labels").
+
+**Node 24** in every workflow that sets Node up (ci, e2e, nightly, release, pins; since
+3 Nov 2026, was 20, out of support since April 2026), the PC's own major; setup-node
+takes the newest 24.x. The actions themselves run on Node 24 (checkout, setup-node,
+upload-artifact v7, tauri-action v1, rust-cache v2, github-script v9 in issue-labels),
+except `humbletim/install-vulkan-sdk@v1.2` in nightly
 and release, whose SDK cache step is `actions/cache@v4` on Node 20 (its latest release:
 the one deprecation warning left). **jsdom stays on 26** (the Node-side specs:
 `markdown`, `doc-stream`, `doc-markdown`, `note-markdown`): jsdom 30 needs
@@ -171,6 +175,30 @@ the one deprecation warning left). **jsdom stays on 26** (the Node-side specs:
 (24.11) Playwright's loader can't load it (`ERR_VM_MODULE_LINK_FAILURE`, "module is not
 linked", from its `require()` of an ES module): move it once the PC's Node is 24.15 or
 later.
+
+## Issue labels (`issue-labels.yml`, 2026-11-04)
+`.github/workflows/issue-labels.yml` runs when an issue is opened or edited and
+labels a bug report by its area: the bug form's "Which part of Yap?" answer (the
+`### Which part of Yap?` section of the issue's body) → one label, `area:
+dictation`, `pasting`, `cleanup`, `dictionary`, `meetings`, `chat`, `voice`, `bar`,
+`settings` or `other`. Only an answer that is exactly one of the form's options
+counts; anything else does nothing. An edit that changes the answer adds the new
+label and takes the old answer's off; an edit that doesn't (the title, the
+description) leaves the labels alone, so one set by hand stays. A label the repo
+doesn't have yet isn't made: the run warns and stops (the labels are made by hand,
+with their colours). The bug form adds `bug` and `needs-triage` itself, and Report
+a problem opens it filled in (privacy-receipts.md, "The issue on GitHub").
+
+It is one `actions/github-script@v9` step on `ubuntu-latest` with `permissions:
+issues: write` and nothing else, and no checkout. Issue text is untrusted: the
+script reads the body from `context.payload`, compares it with its fixed list and
+never puts it in a shell, an expression or the log (the only expression is the
+issue's number, for one run per issue at a time). `npm run test:issue-labels`
+(`scripts/issue-labels.test.mjs`, in CI's check job) holds the script's list to
+the form's dropdown, word for word and in order, runs the script on made-up
+events with a fake client (each option, CRLF, edits, near-misses, a missing label)
+and checks the permissions, the action and the expressions. A new option goes in
+both files.
 
 ## Keeping what Yap is built from current (2026-11-01)
 
