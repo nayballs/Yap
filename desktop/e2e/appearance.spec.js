@@ -141,6 +141,9 @@ const test = base.extend({
 });
 
 const visible = (yap, label) => yap.invoke('plugin:window|is_visible', { label });
+// A computed style, read once: the spec polls it (expect.poll) until it's the
+// one wanted. A note's plain box gives way to its rich editor once that's
+// loaded, and a read of the box just replaced comes back "" (CI, 4 Nov 2026).
 const css = (loc, prop) => loc.evaluate((el, p) => getComputedStyle(el)[p], prop);
 /** The first family of an element's computed font-family. */
 const family = async (loc) => (await css(loc, 'fontFamily')).split(',')[0].replace(/["']/g, '').trim();
@@ -224,23 +227,23 @@ test('the reading font: every choice reaches chats and notes, never the sidebar;
   let n = 2;
   for (const [id, name] of Object.entries(FONTS)) {
     const g = await pick(main, yap, { font: id });
-    expect(await family(g.getByRole('combobox', { name: 'Reading font' }))).toBe(name);
+    await expect.poll(() => family(g.getByRole('combobox', { name: 'Reading font' }))).toBe(name);
     // The preview under the picker reads in it straight away.
-    expect(await family(g.locator('.sample p'))).toBe(name);
+    await expect.poll(() => family(g.locator('.sample p'))).toBe(name);
     await closeSettings(main);
 
     await openChat(main);
     const answer = main.locator('.cbubble.assistant').first();
     const question = main.locator('.cbubble.user').first();
-    expect(await family(answer)).toBe(name);
-    expect(await family(question)).toBe(name);
+    await expect.poll(() => family(answer)).toBe(name);
+    await expect.poll(() => family(question)).toBe(name);
     // A table in an answer reads in it too; code stays monospace.
-    expect(await family(answer.locator('table'))).toBe(name);
-    expect(await family(answer.locator('pre code'))).toBe('ui-monospace');
-    expect(await family(answer.locator('code').first())).toBe('ui-monospace');
+    await expect.poll(() => family(answer.locator('table'))).toBe(name);
+    await expect.poll(() => family(answer.locator('pre code'))).toBe('ui-monospace');
+    await expect.poll(() => family(answer.locator('code').first())).toBe('ui-monospace');
     // …and never the app's own chrome.
-    expect(await family(sidebar(main))).toBe(uiFont);
-    expect(await family(main.getByRole('button', { name: 'New chat' }).first())).toBe(uiFont);
+    await expect.poll(() => family(sidebar(main))).toBe(uiFont);
+    await expect.poll(() => family(main.getByRole('button', { name: 'New chat' }).first())).toBe(uiFont);
     // The bundled font itself loaded (no stand-in), from inside the app.
     if (id !== 'system') {
       await expect
@@ -251,15 +254,15 @@ test('the reading font: every choice reaches chats and notes, never the sidebar;
     await shot(main, `0${n}-chat-${id}`);
 
     await openNote(main);
-    expect(await family(main.getByRole('textbox', { name: 'My thoughts' }))).toBe(name);
-    expect(await family(sidebar(main))).toBe(uiFont);
+    await expect.poll(() => family(main.getByRole('textbox', { name: 'My thoughts' }))).toBe(name);
+    await expect.poll(() => family(sidebar(main))).toBe(uiFont);
     await main.locator('.tabs .tab').filter({ hasText: 'Summary' }).click();
     const rendered = main.locator('.editor .rendered');
     await expect(rendered).toContainText('Send the revised budget');
-    expect(await family(rendered)).toBe(name);
+    await expect.poll(() => family(rendered)).toBe(name);
     // The transcript's lines too, but not their speaker labels.
-    expect(await family(main.locator('.transcript .bubble p').first())).toBe(name);
-    expect(await family(main.locator('.transcript .bubble .who').first())).toBe(uiFont);
+    await expect.poll(() => family(main.locator('.transcript .bubble p').first())).toBe(name);
+    await expect.poll(() => family(main.locator('.transcript .bubble .who').first())).toBe(uiFont);
     if (id === 'serif' || id === 'dyslexic') {
       await main.evaluate(() => document.fonts.ready);
       await shot(main, `0${n}b-note-${id}`);
@@ -275,7 +278,7 @@ test('text size: a few steps around each view’s own size, for the reading text
   await openChat(main);
   const answer = main.locator('.cbubble.assistant').first();
   const navSize = await css(sidebar(main).getByRole('button', { name: 'Chat', exact: true }), 'fontSize');
-  expect(await css(answer, 'fontSize')).toBe('12.5px');
+  await expect.poll(() => css(answer, 'fontSize')).toBe('12.5px');
 
   for (const [size, px] of [
     ['small', '11.5px'],
@@ -284,22 +287,22 @@ test('text size: a few steps around each view’s own size, for the reading text
   ]) {
     await pick(main, yap, { size });
     await closeSettings(main);
-    expect(await css(answer, 'fontSize')).toBe(px);
+    await expect.poll(() => css(answer, 'fontSize')).toBe(px);
     // The line spacing grows with it (unitless × the size).
     expect(parseFloat(await css(answer, 'lineHeight'))).toBeCloseTo(parseFloat(px) * 1.6, 1);
-    expect(await css(sidebar(main).getByRole('button', { name: 'Chat', exact: true }), 'fontSize')).toBe(navSize);
+    await expect.poll(() => css(sidebar(main).getByRole('button', { name: 'Chat', exact: true }), 'fontSize')).toBe(navSize);
   }
   await shot(main, '10-chat-larger');
 
   // A note: 13 px by default, ×1.25.
   await openNote(main);
-  expect(await css(main.getByRole('textbox', { name: 'My thoughts' }), 'fontSize')).toBe('16.25px');
+  await expect.poll(() => css(main.getByRole('textbox', { name: 'My thoughts' }), 'fontSize')).toBe('16.25px');
 
   // OpenDyslexic's wide letters come a little smaller (×0.9), with more room between lines.
   await pick(main, yap, { font: 'dyslexic', size: 'default' });
   await closeSettings(main);
   await openChat(main);
-  expect(await css(answer, 'fontSize')).toBe('11.25px');
+  await expect.poll(() => css(answer, 'fontSize')).toBe('11.25px');
   expect(parseFloat(await css(answer, 'lineHeight'))).toBeCloseTo(11.25 * 1.6 * 1.08, 1);
 
   await pick(main, yap, { font: 'default', size: 'default' });
@@ -318,26 +321,26 @@ test('the meeting notepad follows the font and size live: My thoughts, Transcrip
   const pad = yap.notepad;
   const thoughts = pad.getByRole('textbox', { name: 'My thoughts' });
   await expectText(thoughts, /venue deposit/);
-  expect(await family(thoughts)).toBe('Figtree Variable');
-  expect(await css(thoughts, 'fontSize')).toBe('15px');
+  await expect.poll(() => family(thoughts)).toBe('Figtree Variable');
+  await expect.poll(() => css(thoughts, 'fontSize')).toBe('15px');
 
   // Picked in the main window's Settings → the notepad changes by itself.
   await pick(main, yap, { font: 'serif', size: 'large' });
   await expect.poll(() => family(thoughts), { message: 'the notepad to follow the font' }).toBe('Literata Variable');
   await expect.poll(() => css(thoughts, 'fontSize')).toBe('16.8px');
   // Its chrome keeps Yap's font.
-  expect(await family(pad.getByRole('tab', { name: 'Transcript' }))).toBe('Figtree Variable');
+  await expect.poll(() => family(pad.getByRole('tab', { name: 'Transcript' }))).toBe('Figtree Variable');
 
   await pad.getByRole('tab', { name: 'Transcript' }).click();
   const line = pad.locator('.bubble').first();
   await expect(line).toContainText('budget');
-  expect(await family(line)).toBe('Literata Variable');
+  await expect.poll(() => family(line)).toBe('Literata Variable');
 
   await pad.getByRole('tab', { name: 'Summary' }).click();
   const summary = pad.locator('.rendered');
   await expect(summary).toContainText('Send the revised budget');
-  expect(await family(summary)).toBe('Literata Variable');
-  expect(await css(summary, 'fontSize')).toBe('16.8px');
+  await expect.poll(() => family(summary)).toBe('Literata Variable');
+  await expect.poll(() => css(summary, 'fontSize')).toBe('16.8px');
   await pad.evaluate(() => document.fonts.ready);
   await shot(pad, '20-notepad-summary-serif-large');
 
@@ -348,9 +351,9 @@ test('the meeting notepad follows the font and size live: My thoughts, Transcrip
   const sheet = pad.getByRole('dialog', { name: 'Ask about this meeting' });
   await expect(sheet).toContainText('Alice owns the budget');
   expect(fakeLlm.requests.some((r) => r.kind === 'meetingAsk')).toBe(true);
-  expect(await family(sheet.locator('.mq').last())).toBe('Literata Variable');
-  expect(await family(sheet.locator('.mabody').last())).toBe('Literata Variable');
-  expect(await family(sheet.getByRole('button', { name: 'Copy answer' }))).toBe('Figtree Variable');
+  await expect.poll(() => family(sheet.locator('.mq').last())).toBe('Literata Variable');
+  await expect.poll(() => family(sheet.locator('.mabody').last())).toBe('Literata Variable');
+  await expect.poll(() => family(sheet.getByRole('button', { name: 'Copy answer' }))).toBe('Figtree Variable');
   await shot(pad, '21-notepad-ask-serif');
 
   // OpenDyslexic, live too.
@@ -385,16 +388,16 @@ test('Motion: Reduced stops transitions and animations in every window; System f
   const pill = yap.overlay.locator('.pill');
 
   // Full motion: things glide.
-  expect(await css(thumb, 'transitionProperty')).toMatch(/^transform\b/);
+  await expect.poll(() => css(thumb, 'transitionProperty')).toMatch(/^transform\b/);
   expect(await moving(main)).toBeGreaterThan(0);
   expect(await moving(pad)).toBeGreaterThan(0);
-  if (await pill.count()) expect(await css(pill, 'transitionDuration')).not.toBe('0s');
+  if (await pill.count()) await expect.poll(() => css(pill, 'transitionDuration')).not.toBe('0s');
 
   await pick(main, yap, { motion: 'reduced' });
   await expect(group.getByText('No sliding, fading or pulsing in any Yap window')).toBeVisible();
   expect(await main.evaluate(() => document.documentElement.dataset.motion)).toBe('reduced');
-  expect(await css(thumb, 'transitionProperty')).toBe('none');
-  expect(await css(thumb, 'transitionDuration')).toBe('0s');
+  await expect.poll(() => css(thumb, 'transitionProperty')).toBe('none');
+  await expect.poll(() => css(thumb, 'transitionDuration')).toBe('0s');
   expect(await moving(main)).toBe(0);
   // A spinner and a countdown still turn and drain; anything else stops.
   const kept = await main.evaluate(() => {
@@ -417,18 +420,18 @@ test('Motion: Reduced stops transitions and animations in every window; System f
   expect(await moving(pad)).toBe(0);
   await expect.poll(() => yap.overlay.evaluate(() => document.documentElement.dataset.motion)).toBe('reduced');
   expect(await moving(yap.overlay)).toBe(0);
-  if (await pill.count()) expect(await css(pill, 'transitionProperty')).toBe('none');
+  if (await pill.count()) await expect.poll(() => css(pill, 'transitionProperty')).toBe('none');
 
   // System: motion again, unless Windows' "Animation effects" is off.
   await pick(main, yap, { motion: 'system' });
   expect(await main.evaluate(() => document.documentElement.dataset.motion)).toBeUndefined();
-  expect(await css(thumb, 'transitionProperty')).toMatch(/^transform\b/);
+  await expect.poll(() => css(thumb, 'transitionProperty')).toMatch(/^transform\b/);
   await expect.poll(() => pad.evaluate(() => document.documentElement.dataset.motion ?? null)).toBe(null);
   await expect(group.getByText('Follows Windows’ “Animation effects”, which is on')).toBeVisible();
 
   await main.emulateMedia({ reducedMotion: 'reduce' });
   await expect.poll(() => main.evaluate(() => document.documentElement.dataset.motion ?? null)).toBe('reduced');
-  expect(await css(thumb, 'transitionProperty')).toBe('none');
+  await expect.poll(() => css(thumb, 'transitionProperty')).toBe('none');
   await expect(group.getByText('Follows Windows’ “Animation effects”, which is off: motion is reduced')).toBeVisible();
   await main.emulateMedia({ reducedMotion: 'no-preference' });
   await expect.poll(() => main.evaluate(() => document.documentElement.dataset.motion ?? null)).toBe(null);
