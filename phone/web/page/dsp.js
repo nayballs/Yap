@@ -18,13 +18,13 @@
 //   such gap counted), Stop fades out over 5 ms.
 // - `toInt16` / `fromInt16`: float samples to Int16, clamped, and back.
 // - `rms` / `toDb`: a frame's level, for the meter and the voice detector.
-// - `EnergyVad`: hands-free's end of speech, by energy: speech once it's
+// - `EnergyVad`: hands-free talk's end of speech, by energy: speech once it's
 //   heard for a moment above the room's noise, kept while the level stays
 //   a little above it (a soft last word isn't quiet), then the end after the
 //   wait chosen (`WAITS`: 1 s, 1.5 s or 2.5 s) of quiet.
 // - `Segmenter` / `wav`: Yap's voice cut into pieces at its pauses, each a
-//   WAV file, for the browser's media player ("Play the voice through the
-//   media player", in the settings).
+//   WAV file, for the browser's media player (the way Yap's voice plays;
+//   Web Audio's `Playout` only where the browser refuses it).
 // - `elapsed`: a time as Chat's activity line says it ("12s", "1m 59s").
 
 /** The rate the PC takes the phone's mic at. */
@@ -36,7 +36,7 @@ export const FRAME_SAMPLES = 320;
 /** The rate of Yap's voice coming down (`speak_start`'s, wire::DOWN_RATE). */
 export const DOWN_RATE = 24000;
 
-/** Hands-free's wait before sending, by choice, in ms. */
+/** Hands-free talk's wait before sending, by choice, in ms. */
 export const WAITS = { short: 1000, normal: 1500, long: 2500 };
 
 /** A filter's phases worked out ahead at most (a rate pair with more is interpolated). */

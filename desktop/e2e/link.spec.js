@@ -1,19 +1,21 @@
 // Yap Link, home preview (desktop/src-tauri/src/link.rs, docs/architecture/link.md):
 // a phone talks to Yap's AI over the home Wi-Fi. Here the "phone" is a
 // headless Chromium (Playwright's own if installed, else Edge) with a fake
-// microphone playing a tone, opening the real page Yap serves
+// microphone (a moment of quiet, a second of a voice-like sound, then quiet,
+// from the start for each stream the page opens), opening the real page Yap serves
 // (phone/web/page/) over Yap's own HTTPS server — its self-signed
 // certificate accepted as a phone's "Proceed" does (ignoreHTTPSErrors).
 // - Settings → Phone: the switch, Pair a phone (the QR code, the link with
 //   Copy, the one-time warning said), the paired phones with Remove.
 // - Pairing: the QR's link opened on the phone, "Allow ‘…’ to use Yap?" in
 //   the main window with the code the phone shows too, Allow.
-// - A question: Talk on the phone with hands-free on (the fake mic's audio
-//   up), the stub's transcript heard, the fake model's answer streamed to
-//   the phone, Yap's voice as audio down (test mode's stand-in voice:
-//   silence of the right length) — never this PC's speakers — and the
-//   conversation kept in Chat.
-// - Talk's words in the box (hands-free off, the default): Done puts the
+// - A question: hands-free talk on the phone (the waveform button: the fake
+//   mic's audio up, sent by the quiet after it), the stub's transcript
+//   heard, the fake model's answer streamed to the phone, Yap's voice as
+//   audio down (test mode's stand-in voice: silence of the right length)
+//   through the phone's media player — never this PC's speakers — the
+//   conversation kept in Chat, and the call listening again until End.
+// - Talk's words in the box (always, on a PC that has them): Done puts the
 //   stub's transcript in the phone's text box, nothing in Chat; fixed by
 //   hand, Send asks it as the spoken question it was (`ask {speak}`): by
 //   voice in Chat, the spoken answer's note to the model, said on the phone.
@@ -59,16 +61,6 @@ const WORDS_ANSWER = 'That came through clearly: a short test from the phone.';
 
 /** Every message in Chat on this PC (chats.json). */
 const messages = (store) => store.conversations.reduce((n, c) => n + c.messages.length, 0);
-
-/** The phone's hands-free switch (⋯ → Hands-free), turned to `on`. */
-async function handsFree(page, on) {
-  await page.getByTestId('settings').click();
-  const sw = page.getByTestId('handsfree');
-  if ((await sw.isChecked()) !== on) await page.getByTestId('settings-sheet').getByText('Hands-free').click();
-  await expect(sw).toBeChecked({ checked: on });
-  await page.getByTestId('settings-sheet').getByRole('button', { name: 'Done' }).click();
-  await expect(page.getByTestId('settings-sheet')).toBeHidden();
-}
 
 /** A made-up photo drawn in the phone's page, as a file to choose. */
 async function photo(page) {
@@ -119,11 +111,22 @@ const test = base.extend({
     },
     { scope: 'worker' },
   ],
-  // The phone: one headless browser for the spec, a fake mic playing a tone.
+  // The phone: one headless browser for the spec, a fake mic: quiet, a
+  // second of a voice-like sound, then quiet (played once for each stream
+  // the page opens), so hands-free talk hears where a question ends.
   phone: [
     async ({}, use) => {
       fs.mkdirSync(RUNS, { recursive: true });
-      const wav = writeWav(path.join(RUNS, 'link-phone-mic.wav'), { seconds: 3, rate: 48_000, amplitude: 6000 });
+      const wav = writeWav(path.join(RUNS, 'link-phone-mic.wav'), {
+        seconds: 6,
+        rate: 48_000,
+        amplitude: 6000,
+        gaps: [
+          [0, 0.4],
+          [1.6, 6],
+        ],
+        voice: true,
+      });
       let channel = process.env.YAP_LINK_CHANNEL;
       if (!channel) {
         try {
@@ -135,7 +138,7 @@ const test = base.extend({
       const browser = await chromium.launch({
         channel,
         headless: true,
-        args: ['--use-fake-ui-for-media-stream', '--use-fake-device-for-media-stream', `--use-file-for-fake-audio-capture=${wav}`],
+        args: ['--use-fake-ui-for-media-stream', '--use-fake-device-for-media-stream', `--use-file-for-fake-audio-capture=${wav}%noloop`],
       });
       await use(browser);
       await browser.close();
@@ -224,29 +227,32 @@ test('a phone pairs with the code both screens show, asks out loud and hears the
   // Chat's model is the phone's to see.
   expect((await snapshot(page)).model?.id).toBe('groq|openai/gpt-oss-20b');
 
-  // A question out loud, answered out loud: hands-free on, Talk, a second
-  // of the fake mic, Talk again (Done) to send.
-  await handsFree(page, true);
+  // A question out loud, answered out loud: hands-free talk (the waveform
+  // in Send's place), the fake mic's second of voice, then its quiet, sends
+  // it by itself.
   fakeLlm.scriptChat([{ plain: true, content: ANSWER }]);
   const talk = page.getByTestId('talk');
-  await talk.click();
-  await expect.poll(async () => (await snapshot(page)).frames, { timeout: 10_000 }).toBeGreaterThan(20);
-  await page.waitForTimeout(700);
-  // (Hands-free may have ended it by itself on the tone's quiet: then it's sent already.)
-  if ((await snapshot(page)).local === 'listening') await talk.click();
+  const call = page.getByRole('button', { name: 'Talk hands-free' });
+  await call.click();
+  await expect(call).toHaveAttribute('aria-pressed', 'true');
   // The stub's transcript heard, the answer shown on the phone. (In the
   // question's bubble: the chat's title under the header says it too, once
   // the PC's `chat` comes.)
   await expect(page.getByTestId('heard').filter({ hasText: /STT stub: received/ })).toBeVisible({ timeout: 20_000 });
   await expect(page.getByText(ANSWER)).toBeVisible({ timeout: 20_000 });
-  // Yap's voice came down to the phone (at 24 kHz) and played.
+  // Yap's voice came down to the phone (at 24 kHz) and played, through its media player.
   await expect.poll(async () => (await snapshot(page)).player.rate, { timeout: 20_000 }).toBe(24_000);
+  expect((await snapshot(page)).player.via).toBe('media');
   await shot(page, '04-phone-answered');
   // Said by Yap's speaker (test mode records it), streamed, never on this PC.
   await expect
     .poll(async () => (await yap.invoke('tts_e2e_spoken')).map((s) => s.text).join(' '), { timeout: 20_000 })
     .toContain('six minutes');
-  // Back to ready when the voice is done.
+  // The voice played out, it listens again by itself (the next turn); End ends it.
+  await expect.poll(async () => (await snapshot(page)).local, { timeout: 30_000 }).toBe('listening');
+  await call.click();
+  await expect(call).toHaveAttribute('aria-pressed', 'false');
+  expect((await snapshot(page)).call).toBe(false);
   await expect.poll(async () => (await snapshot(page)).phase, { timeout: 30_000 }).toBe('idle');
   // Kept in Chat, as the Voice Assistant's questions are.
   await expectStore(yap, 'chats.json', (store) => {
@@ -260,10 +266,9 @@ test('a phone pairs with the code both screens show, asks out loud and hears the
     .poll(async () => (await yap.invoke('connections_summary')).groups.some((g) => g.label === 'Yap Link · your phone'), { timeout: 15_000 })
     .toBe(true);
 
-  // Talk's words in the box (hands-free off, the default): Done puts the
-  // stub's transcript in the phone's text box to check — nothing asked,
-  // nothing in Chat — and Send asks it as a typed question, not said.
-  await handsFree(page, false);
+  // Talk's words in the box (always, here): Done puts the stub's transcript
+  // in the phone's text box to check — nothing asked, nothing in Chat — and
+  // Send asks it as the spoken question it was.
   const said = messages(yap.readJson('chats.json'));
   const turns = (await snapshot(page)).turns.length;
   await yap.invoke('tts_e2e_spoken', { clear: true });

@@ -1,9 +1,13 @@
-// The answer's sound on the phone: one stream from a jitter buffer
-// (player-worklet.js, dsp.js `Playout`), "Clearer sound in a headset" (on by
-// default: the mic closed while Yap talks), "Play the voice through the media
-// player" (pieces cut at its pauses, played by <audio>) and Sound details. Yap on the PC
-// mocked, its Done sending the question to answer out loud (as hands-free
-// does; `CAN_BEFORE_WORDS`); the mic the looped 440 Hz tone.
+// The answer's sound on the phone: the browser's media player, the standard
+// way (pieces cut at its pauses, played by <audio>), and Web Audio — one
+// stream from a jitter buffer (player-worklet.js, dsp.js `Playout`) — as
+// the automatic fallback where the browser refuses the media player (a play
+// refused, an error, a piece that never starts: `mediaPlayer`); "Clearer
+// sound in a headset" (on by default: the mic closed while Yap talks) and
+// Sound details. The jitter buffer's own tests reach it through that
+// fallback (`refuseMediaPlayer`). Yap on the PC mocked, its Done sending
+// the question to answer out loud (as a PC from before words does;
+// `CAN_BEFORE_WORDS`); the mic the looped 440 Hz tone.
 import { test, expect } from '@playwright/test';
 import {
   servePage,
@@ -15,8 +19,11 @@ import {
   snapshot,
   downFrame,
   voice,
+  sentences,
   openSettings,
   closeSettings,
+  mediaPlayer,
+  refuseMediaPlayer,
   CAN_BEFORE_WORDS,
 } from './support/harness.js';
 
@@ -56,7 +63,7 @@ async function chooseClearer(page, on) {
 const CLEARER_HINT =
   "A headset's call mode can crackle, so this closes the mic while Yap talks and the headset uses its music mode. You can't talk over Yap by voice; Stop still works.";
 
-/** An answer: speak_start, `n` frames of `ms` each, speak_end, idle. */
+/** An answer: speak_start, `n` frames of `ms` each (a steady tone), speak_end, idle. */
 function speak(pc, n, ms = 100, end = true) {
   pc.send({ type: 'state', phase: 'speaking' });
   pc.send({ type: 'speak_start', rate: 24000 });
@@ -67,12 +74,20 @@ function speak(pc, n, ms = 100, end = true) {
   }
 }
 
+/** A long answer, still coming: `ms` of it in sentences (the media player plays its pieces as they come). */
+function speakOn(pc, ms = 3000) {
+  pc.send({ type: 'state', phase: 'speaking' });
+  pc.send({ type: 'speak_start', rate: 24000 });
+  for (const f of sentences(ms)) pc.sendBinary(f);
+}
+
 test.beforeEach(async ({ page }) => {
   await servePage(page);
   await seedDevice(page);
 });
 
-test('playback starts once about 250 ms is waiting, not before', async ({ page }) => {
+test('Web Audio (the fallback): playback starts once about 250 ms is waiting, not before', async ({ page }) => {
+  await refuseMediaPlayer(page);
   const pc = await mockPc(page);
   await open(page);
   await ready(page, pc);
@@ -116,7 +131,8 @@ test('a short answer (under 250 ms, then speak_end) still plays', async ({ page 
   await expect(page.getByTestId('phase')).toHaveText('Ready');
 });
 
-test('a late frame: one underrun, faded out and back in, never a hard cut', async ({ page }) => {
+test('Web Audio (the fallback), a late frame: one underrun, faded out and back in, never a hard cut', async ({ page }) => {
+  await refuseMediaPlayer(page);
   const pc = await mockPc(page);
   await open(page);
   await ready(page, pc);
@@ -186,7 +202,7 @@ test('Clearer sound off (a saved choice): talking over Yap uses the mic already 
   await ready(page, pc);
   await expect(page.getByTestId('clearer')).not.toBeChecked();
   await ask(page, pc);
-  speak(pc, 30, 100, false);
+  speakOn(pc);
   await expect.poll(async () => (await player(page)).state).toBe('playing');
   // The mic open while Yap talks (the headset in call mode)…
   expect(await tracks.live()).toBe(1);
@@ -206,7 +222,7 @@ test('Clearer sound on (the default): talking over Yap opens the mic afresh, the
   await open(page);
   await ready(page, pc);
   await ask(page, pc);
-  speak(pc, 30, 100, false);
+  speakOn(pc);
   await expect.poll(async () => (await player(page)).state).toBe('playing');
   expect(await tracks.live()).toBe(0);
   const opened = await tracks.opened();
@@ -244,7 +260,7 @@ test('Clearer sound in a headset: the mic let go while Yap talks, open again aft
   await expect.poll(() => tracks.live()).toBe(0);
   expect((await snapshot(page)).micOpen).toBe(false);
   await expect.poll(async () => (await player(page)).active, { timeout: 4000 }).toBe(false);
-  // Hands-free off: it stays closed until Talk.
+  // It stays closed until Talk (hands-free talk opens it for its next turn: handsfree.spec.js).
   await page.waitForTimeout(300);
   expect(await tracks.live()).toBe(0);
   let last = (await player(page)).last;
@@ -257,24 +273,15 @@ test('Clearer sound in a headset: the mic let go while Yap talks, open again aft
   expect(await tracks.opened()).toBe(opened + 1);
   await expect.poll(() => tracks.live()).toBe(0);
   pc.send({ type: 'state', phase: 'thinking' });
-
-  // Hands-free on: once the answer has played out, it opens again by itself,
-  // ready for a follow-up.
-  await openSettings(page);
-  await page.getByText('Hands-free').click();
-  await closeSettings(page);
   speak(pc, 4, 100);
-  await expect.poll(async () => (await player(page)).state).toBe('playing');
-  expect(await tracks.live()).toBe(0);
   await expect.poll(async () => (await player(page)).active, { timeout: 4000 }).toBe(false);
-  await expect.poll(() => tracks.live(), { timeout: 5000 }).toBe(1);
-  expect((await snapshot(page)).micOpen).toBe(true);
   last = (await player(page)).last;
   expect(last.micOpen).toBe(false); // never open while it played
+  expect(last.micClosed).toBe(true);
   await openSettings(page);
   await page.getByText('Sound details').click();
   await expect(page.getByTestId('sound-mic')).toHaveText('Closed');
-  await expect(page.getByTestId('sound-mic-now')).toHaveText('Open');
+  await expect(page.getByTestId('sound-mic-now')).toHaveText('Closed');
 
   // Remembered on the next visit.
   await open(page);
@@ -311,6 +318,8 @@ test('Sound details: the rate, latency, the last answer, the mic and the browser
   await expect(page.getByTestId('sound-latency')).toHaveText(/^(Base \d+ ms( · Output \d+ ms)?|Output \d+ ms|Not given by this browser)$/);
   await expect(page.getByTestId('sound-start')).toHaveText(/^0\.6 s played; started after \d+ ms, with \d{3} ms buffered$/);
   await expect(page.getByTestId('sound-gaps')).toHaveText('None');
+  // Which way it played: the media player, the standard way.
+  await expect(page.getByTestId('sound-via')).toHaveText('The media player (more sound kept ready)');
   // Clearer sound (on by default): the mic let go while it played.
   await expect(page.getByTestId('sound-mic')).toHaveText('Closed');
   await expect(page.getByTestId('sound-mic-now')).toHaveText('Closed');
@@ -344,15 +353,10 @@ test('Sound details, the mic open while it played (Clearer sound off)', async ({
   await expect(page.getByTestId('sound-mic-now')).toHaveText('Open');
 });
 
-/** "Play the voice through the media player" as if chosen before. */
-async function chooseMedia(page) {
-  await page.addInitScript(() => localStorage.setItem('yap.link.media', 'true'));
-}
-
 /** `ms` of quiet, as Int16. */
 const quiet = (rate, ms) => new Int16Array(Math.round((rate * ms) / 1000));
 
-/** Two sentences with a pause between (the media player's pieces are cut there): `speak_start`, then the frames. */
+/** Two sentences with a pause between (the media player's pieces are cut there): `speak_start`, then the frames. 1.6 s in all. */
 function speakSentences(pc, end = true) {
   pc.send({ type: 'state', phase: 'speaking' });
   pc.send({ type: 'speak_start', rate: 24000 });
@@ -365,21 +369,37 @@ function speakSentences(pc, end = true) {
   }
 }
 
-test('the media player: off at first; on, an answer plays through it in pieces, Sound details say so, kept', async ({ page }) => {
+/** The answer's first sentence and its pause, playing through the media player; the rest to come. */
+async function firstPiecePlaying(page, pc) {
+  pc.send({ type: 'state', phase: 'speaking' });
+  pc.send({ type: 'speak_start', rate: 24000 });
+  pc.sendBinary(downFrame(0, voice(24000, 700)));
+  pc.sendBinary(downFrame(1, quiet(24000, 200)));
+  await expect.poll(async () => (await player(page)).state).toBe('playing');
+  expect((await player(page)).via).toBe('media');
+}
+
+/** The rest of that answer: its second sentence, the end. */
+function theRest(pc) {
+  pc.sendBinary(downFrame(2, voice(24000, 700)));
+  pc.send({ type: 'speak_end' });
+  pc.send({ type: 'state', phase: 'idle' });
+}
+
+test('the media player, the standard way: an answer in pieces, played to its end, Sound details say so; no switch for it', async ({ page }) => {
   const pc = await mockPc(page);
   await open(page);
   await ready(page, pc);
+  // No setting for it now: it's how Yap's voice plays.
   await openSettings(page);
-  const sw = page.getByTestId('media');
-  await expect(sw).not.toBeChecked();
-  await expect(page.getByText("If Yap's voice crackles, try this.", { exact: false })).toBeVisible();
-  await page.getByText('Play the voice through the media player').click();
-  await expect(sw).toBeChecked();
-  expect(await page.evaluate(() => localStorage.getItem('yap.link.media'))).toBe('true');
-  expect((await snapshot(page)).media).toBe(true);
+  await expect(page.getByText('Play the voice through the media player')).toHaveCount(0);
+  await page.getByText('Sound details').click();
+  await expect(page.getByTestId('sound-via')).toHaveText('The media player (more sound kept ready)');
   await closeSettings(page);
 
   await ask(page, pc);
+  // Readied within the tap: it played a moment of silence there.
+  await expect.poll(async () => (await snapshot(page)).voice.unlocked).toBe(true);
   speakSentences(pc);
   await expect.poll(async () => (await player(page)).state).toBe('playing');
   let p = await player(page);
@@ -391,67 +411,39 @@ test('the media player: off at first; on, an answer plays through it in pieces, 
   expect(p.played).toBeLessThan(1.75);
   expect(p.underruns).toBe(0);
   expect(p.pieces).toBe(0);
+  expect(p.state).toBe('idle');
   await expect(page.getByTestId('phase')).toHaveText('Ready');
   await openSettings(page);
-  await page.getByText('Sound details').click();
   await expect(page.getByTestId('sound-via')).toHaveText('The media player (more sound kept ready)');
   await expect(page.getByTestId('sound-start')).toHaveText(/^1\.[5-7] s played; started after \d+ ms, with \d+ ms buffered$/);
   await expect(page.getByTestId('sound-gaps')).toHaveText('None');
-
-  // Kept: still on the next visit; off again, the next answer is Web Audio's.
-  await open(page);
-  await ready(page, pc);
-  await openSettings(page);
-  await expect(page.getByTestId('media')).toBeChecked();
-  await page.getByText('Play the voice through the media player').click();
-  expect(await page.evaluate(() => localStorage.getItem('yap.link.media'))).toBe('false');
-  await closeSettings(page);
-  await ask(page, pc);
-  speak(pc, 4, 100);
-  await expect.poll(async () => (await player(page)).active, { timeout: 4000 }).toBe(false);
-  p = await player(page);
-  expect(p.via).toBe('worklet');
-  expect(p.played).toBeCloseTo(0.4, 2);
+  expect((await snapshot(page)).voice).toMatchObject({ via: 'media', why: '' });
 });
 
-test.describe('in Firefox for Android', () => {
+test.describe('a phone that chose before 4 Nov', () => {
   // A real phone's Firefox (Gecko's Android user agent).
   test.use({ userAgent: 'Mozilla/5.0 (Android 15; Mobile; rv:144.0) Gecko/144.0 Firefox/144.0' });
 
-  test('the media player is on from the start; turned off, it stays off', async ({ page }) => {
+  test('"Play the voice through the media player" turned off then: ignored, the media player all the same', async ({ page }) => {
+    await page.addInitScript(() => {
+      if (!sessionStorage.getItem('chose-media')) {
+        localStorage.setItem('yap.link.media', 'false');
+        sessionStorage.setItem('chose-media', '1');
+      }
+    });
     const pc = await mockPc(page);
     await open(page);
     await ready(page, pc);
+    // Tidied away, never read.
     expect(await page.evaluate(() => localStorage.getItem('yap.link.media'))).toBeNull();
-    await openSettings(page);
-    await expect(page.getByTestId('media')).toBeChecked();
-    await expect(page.getByText("It's on from the start in Firefox for Android.", { exact: false })).toBeVisible();
-    await closeSettings(page);
-
     await ask(page, pc);
     speakSentences(pc);
     await expect.poll(async () => (await player(page)).state).toBe('playing');
     expect((await player(page)).via).toBe('media');
-    await expect.poll(async () => (await player(page)).active, { timeout: 6000 }).toBe(false);
-
-    // Turned off: kept off on the next visit, and the next answer is Web Audio's.
-    await openSettings(page);
-    await page.getByText('Play the voice through the media player').click();
-    expect(await page.evaluate(() => localStorage.getItem('yap.link.media'))).toBe('false');
-    await open(page);
-    await ready(page, pc);
-    await openSettings(page);
-    await expect(page.getByTestId('media')).not.toBeChecked();
-    await closeSettings(page);
-    await ask(page, pc);
-    speak(pc, 4, 100);
-    await expect.poll(async () => (await player(page)).active, { timeout: 4000 }).toBe(false);
-    expect((await player(page)).via).toBe('worklet');
   });
 });
 
 test('the media player: Stop is silent at once and drops the rest', async ({ page }) => {
-  await chooseMedia(page);
   const pc = await mockPc(page);
   await open(page);
   await ready(page, pc);
@@ -465,6 +457,7 @@ test('the media player: Stop is silent at once and drops the rest', async ({ pag
   const p = await player(page);
   expect(p.pieces).toBe(0);
   expect(p.played).toBeLessThan(1);
+  expect(p.state).toBe('idle');
   await expect(page.getByTestId('phase')).not.toHaveText('Speaking');
   // Nothing plays on: what it had played stays put.
   await page.waitForTimeout(600);
@@ -472,7 +465,6 @@ test('the media player: Stop is silent at once and drops the rest', async ({ pag
 });
 
 test('the media player: a piece late, a gap counted, then on to the end', async ({ page }) => {
-  await chooseMedia(page);
   const pc = await mockPc(page);
   await open(page);
   await ready(page, pc);
@@ -495,4 +487,101 @@ test('the media player: a piece late, a gap counted, then on to the end', async 
   await openSettings(page);
   await page.getByText('Sound details').click();
   await expect(page.getByTestId('sound-gaps')).toHaveText('1 (the sound ran dry and paused)');
+});
+
+test('the media player refused from the start (as an iPhone may be, without a tap): Web Audio says it all, and every answer after; said in Sound details only', async ({
+  page,
+}) => {
+  await refuseMediaPlayer(page);
+  const pc = await mockPc(page);
+  await open(page);
+  await ready(page, pc);
+  await ask(page, pc);
+  // The tap's moment of silence was refused: the browser said no.
+  await expect.poll(async () => (await snapshot(page)).voice.refused).toBe('NotAllowedError');
+  speakSentences(pc);
+  await expect.poll(async () => (await player(page)).state).toBe('playing');
+  let p = await player(page);
+  expect(p.via).toBe('worklet');
+  expect(p.loaded).toBe(true);
+  await expect.poll(async () => (await player(page)).active, { timeout: 6000 }).toBe(false);
+  p = await player(page);
+  // The whole answer, never silent.
+  expect(p.played).toBeCloseTo(1.6, 1);
+  expect(p.underruns).toBe(0);
+  // Never a note about it (no "turn it off in ⋯"): Sound details say which way, and why.
+  await expect(page.getByTestId('note')).toBeHidden();
+  await expect(page.getByTestId('error')).toBeHidden();
+  await openSettings(page);
+  await page.getByText('Sound details').click();
+  await expect(page.getByTestId('sound-via')).toHaveText('Web Audio: the media player was refused (NotAllowedError)');
+  await closeSettings(page);
+  // The rest of the visit: Web Audio, even with the media player willing now.
+  await page.evaluate(() => (window.__media.refuse = false));
+  await ask(page, pc);
+  speak(pc, 4, 100);
+  await expect.poll(async () => (await player(page)).active, { timeout: 4000 }).toBe(false);
+  p = await player(page);
+  expect(p.via).toBe('worklet');
+  expect(p.played).toBeCloseTo(0.4, 2);
+  expect((await snapshot(page)).voice).toEqual({ via: 'worklet', why: 'was refused (NotAllowedError)', unlocked: false, refused: 'NotAllowedError' });
+});
+
+test('refused mid-answer: the rest goes through Web Audio at once, nothing lost or said twice', async ({ page }) => {
+  const media = await mediaPlayer(page);
+  const pc = await mockPc(page);
+  await open(page);
+  await ready(page, pc);
+  await ask(page, pc);
+  await firstPiecePlaying(page, pc);
+  // The browser stops letting it play: the next piece is refused.
+  await media.set({ refuse: true });
+  theRest(pc);
+  await expect.poll(async () => (await player(page)).via, { timeout: 4000 }).toBe('worklet');
+  await expect.poll(async () => (await player(page)).active, { timeout: 6000 }).toBe(false);
+  const p = await player(page);
+  // All of it, once: the media player's piece, then the rest through Web Audio.
+  expect(p.played).toBeGreaterThan(1.55);
+  expect(p.played).toBeLessThan(1.65);
+  expect(p.last).toMatchObject({ via: 'worklet', fellBack: 'was refused (NotAllowedError)' });
+  await expect(page.getByTestId('note')).toBeHidden();
+  await openSettings(page);
+  await page.getByText('Sound details').click();
+  await expect(page.getByTestId('sound-via')).toHaveText('Web Audio: the media player was refused (NotAllowedError)');
+  await expect(page.getByTestId('sound-start')).toHaveText(/^1\.6 s played; started after \d+ ms, with \d+ ms buffered$/);
+});
+
+test("a piece that never starts: after 2 s Web Audio takes over from there, and the answer's said to its end", async ({ page }) => {
+  const media = await mediaPlayer(page);
+  const pc = await mockPc(page);
+  await open(page);
+  await ready(page, pc);
+  await ask(page, pc);
+  await firstPiecePlaying(page, pc);
+  // The next piece's play is never answered.
+  await media.set({ hang: true });
+  theRest(pc);
+  await expect.poll(async () => (await player(page)).via, { timeout: 5000 }).toBe('worklet');
+  await expect.poll(async () => (await player(page)).active, { timeout: 6000 }).toBe(false);
+  const p = await player(page);
+  expect(p.played).toBeGreaterThan(1.55);
+  expect(p.played).toBeLessThan(1.65);
+  expect(p.last).toMatchObject({ via: 'worklet', fellBack: "didn't start" });
+  expect((await snapshot(page)).voice.via).toBe('worklet');
+});
+
+test("an <audio> error as a piece plays: Web Audio from where it got to", async ({ page }) => {
+  await mediaPlayer(page, { error: true });
+  const pc = await mockPc(page);
+  await open(page);
+  await ready(page, pc);
+  await ask(page, pc);
+  speakSentences(pc);
+  await expect.poll(async () => (await player(page)).via, { timeout: 4000 }).toBe('worklet');
+  await expect.poll(async () => (await player(page)).active, { timeout: 6000 }).toBe(false);
+  const p = await player(page);
+  // What the media player played, then the rest from there: about the whole answer.
+  expect(p.played).toBeGreaterThan(1.5);
+  expect(p.played).toBeLessThan(1.7);
+  expect(p.last).toMatchObject({ via: 'worklet', fellBack: 'stopped with an error' });
 });

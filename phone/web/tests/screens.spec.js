@@ -4,12 +4,13 @@
 // the keyboard up, listening, transcribing, Talk's words in the box,
 // answering (■), two pictures in the composer, the model sheet, the
 // settings sheet; Talk's words sent from the box and answered out loud (the
-// 🎙, ■); a tab restored with an old code, connecting; "Too many tries"
-// with its wait. Also checks nothing
+// 🎙, ■); hands-free talk — the composer with its waveform button, then the
+// call listening, thinking and speaking (■, End) —; a tab restored with an
+// old code, connecting; "Too many tries" with its wait. Also checks nothing
 // overflows sideways, every control is a thumb's size (44 px or more), Yap's
 // fonts and logos come from the page's own origin, and the composer and
 // Talk are on the first screen, low enough for a thumb, upright and on its
-// side.
+// side; and the call's capsule at the largest text and on its side.
 import { test, expect } from '@playwright/test';
 import {
   servePage,
@@ -19,9 +20,12 @@ import {
   ready,
   ask,
   type,
+  snapshot,
   openSettings,
   downFrame,
   voice,
+  sentences,
+  speechMic,
   pickerData,
   photo,
   choosePhotos,
@@ -159,19 +163,22 @@ for (const scheme of ['light', 'dark']) {
         expect(await noSideways(page)).toBe(true);
         await page.getByTestId('input').fill('');
 
-        // Hands-free on: asked out loud, answered and spoken.
-        await openSettings(page);
-        await page.getByText('Hands-free').click();
-        await page.getByTestId('settings-sheet').getByRole('button', { name: 'Done' }).click();
+        // Talk's words sent: asked out loud, answered and spoken.
         await ask(page, pc, 300);
         pc.send({ type: 'state', phase: 'transcribing' });
-        pc.send({ type: 'heard', text: 'Remind me what the print shop needs.' });
+        pc.send({ type: 'words', text: 'Remind me what the print shop needs' });
+        pc.send({ type: 'state', phase: 'idle' });
+        await expect(page.getByTestId('input')).toHaveValue('Remind me what the print shop needs');
+        await page.getByTestId('send').click();
+        await expect.poll(() => pc.of('ask').at(-1)?.speak).toBe(true);
+        pc.send({ type: 'heard', text: 'Remind me what the print shop needs' });
         pc.send({ type: 'state', phase: 'thinking' });
         pc.send({ type: 'answer', text: 'The proofs for the spring flyer, signed off by Friday.', final: false });
         pc.send({ type: 'state', phase: 'speaking' });
         pc.send({ type: 'speak_start', rate: 24000 });
-        for (let i = 0; i < 40; i++) pc.sendBinary(downFrame(i, voice(24000, 100)));
+        for (const f of sentences(4000)) pc.sendBinary(f);
         await expect(page.getByTestId('stop')).toBeVisible();
+        await page.getByTestId('input').blur();
         // One Stop, the composer's; under the answer only "Speaking…".
         await expect(page.getByRole('button', { name: 'Stop' })).toHaveCount(1);
         await expect(page.getByTestId('turn').last().locator('.speaking')).toHaveText('Speaking…');
@@ -203,9 +210,9 @@ for (const scheme of ['light', 'dark']) {
         await page.keyboard.press('Escape');
         await expect(page.getByTestId('models')).toBeHidden();
 
-        // The settings sheet (hands-free on, from above), Sound details open.
+        // The settings sheet (hands-free talk's wait, Clearer sound, the mic), Sound details open.
         await openSettings(page);
-        await expect(page.getByTestId('handsfree')).toBeChecked();
+        await expect(page.getByTestId('wait')).toBeVisible();
         await page.waitForTimeout(250);
         await shot(page, `settings-${at}`);
         expect(await tooSmall(page)).toEqual([]);
@@ -251,6 +258,60 @@ for (const scheme of ['light', 'dark']) {
         expect(await tooSmall(page)).toEqual([]);
         expect(await noSideways(page)).toBe(true);
         await page.getByTestId('stop').click();
+      });
+
+      test(`hands-free talk: the waveform, then a call listening, thinking, speaking (${at})`, async ({ page }) => {
+        await servePage(page);
+        await seedDevice(page);
+        // A mic that says something, then is quiet (the fake one's a steady tone).
+        await speechMic(page);
+        const pc = await mockPc(page, OPUS);
+        await open(page);
+        await ready(page, pc);
+        await page.evaluate(() => document.fonts.ready);
+        await type(page, pc, 'Is the farmers market on this Saturday?');
+        pc.send({ type: 'heard', text: 'Is the farmers market on this Saturday?' });
+        pc.send({ type: 'answer', text: 'Yes, in the square by the town hall.', final: true, id: 'chat:12:1' });
+        pc.send({ type: 'state', phase: 'idle' });
+        await expect(page.getByTestId('read-aloud')).toBeVisible();
+        await page.getByTestId('input').blur();
+        // The composer with the call button: the waveform in Send's place.
+        const call = page.getByRole('button', { name: 'Talk hands-free' });
+        await expect(call).toBeVisible();
+        await page.waitForTimeout(250);
+        await page.getByTestId('composer').screenshot({ path: `${DIR}/composer-call-button-${at}.png` });
+        await shot(page, `call-button-${at}`);
+        // On: listening, the waveform following the mic, End.
+        await call.click();
+        await expect(call).toHaveAttribute('aria-pressed', 'true');
+        await expect(page.getByTestId('phase')).toHaveText('Listening');
+        await page.waitForTimeout(700); // in the speech
+        await shot(page, `call-listening-${at}`);
+        expect(await tooSmall(page)).toEqual([]);
+        expect(await noSideways(page)).toBe(true);
+        // Sent by the quiet after it: Yap thinks.
+        await expect.poll(() => pc.of('stop').length, { timeout: 8000 }).toBe(1);
+        pc.send({ type: 'state', phase: 'transcribing' });
+        pc.send({ type: 'heard', text: 'What time does it open?' });
+        pc.send({ type: 'state', phase: 'thinking' });
+        pc.send({ type: 'step', label: 'Searching the web · farmers market opening times' });
+        await expect(page.getByTestId('phase')).toHaveText('Thinking');
+        await shot(page, `call-thinking-${at}`);
+        expect(await tooSmall(page)).toEqual([]);
+        // Yap answers out loud: Speaking, its voice on the waveform, ■ and End.
+        pc.send({ type: 'answer', text: 'It opens at 8 am and runs until 1 pm.', final: true, id: 'chat:12:3' });
+        pc.send({ type: 'state', phase: 'speaking' });
+        pc.send({ type: 'speak_start', rate: 24000 });
+        for (const f of sentences(6000)) pc.sendBinary(f);
+        await expect(page.getByTestId('phase')).toHaveText('Speaking');
+        await expect.poll(async () => (await snapshot(page)).player.state).toBe('playing');
+        await page.waitForTimeout(400);
+        await shot(page, `call-speaking-${at}`);
+        await page.getByTestId('composer').screenshot({ path: `${DIR}/composer-call-speaking-${at}.png` });
+        expect(await tooSmall(page)).toEqual([]);
+        expect(await noSideways(page)).toBe(true);
+        await call.click();
+        await expect(call).toHaveAttribute('aria-pressed', 'false');
       });
 
       test(`a phone's tab with an old code: connecting, then "Too many tries" with its wait (${at})`, async ({ page }) => {
@@ -367,11 +428,72 @@ for (const size of [130, 200]) {
     const talk = await page.getByTestId('talk').boundingBox();
     expect(talk.y + talk.height).toBeLessThanOrEqual(844);
     expect(talk.x + talk.width).toBeLessThanOrEqual(390);
-    const send = await page.getByTestId('send').boundingBox();
-    expect(send.x + send.width).toBeLessThanOrEqual(390 - 8);
+    // Nothing to send: the call button in Send's place, on the screen.
+    const call = await page.getByTestId('call').boundingBox();
+    expect(call.x + call.width).toBeLessThanOrEqual(390 - 8);
+    expect(call.height).toBeGreaterThanOrEqual(44);
     // The model's name keeps some room.
     const name = await page.locator('#model-label').boundingBox();
     expect(name.width).toBeGreaterThan(30);
     await shot(page, size === 130 ? 'large-text-390x844' : `large-text-${size}-390x844`);
+    // Words to send: Send there instead.
+    await page.getByTestId('input').fill('And on Sundays?');
+    const send = await page.getByTestId('send').boundingBox();
+    expect(send.x + send.width).toBeLessThanOrEqual(390 - 8);
+    await expect(page.getByTestId('call')).toBeHidden();
+  });
+}
+
+// Hands-free talk's capsule where room is shortest: Android's largest text
+// (200 %) on a narrow phone and a middling one, and on its side. Where it's
+// at keeps its room (End is ✕ alone where the card is narrow), and nothing
+// scrolls sideways.
+for (const [label, w, h, text] of [
+  ['200 % text at 360 px', 360, 780, 200],
+  ['200 % text at 390 px', 390, 844, 200],
+  ['130 % text at 360 px', 360, 780, 130],
+  ['on its side', 844, 390, 100],
+]) {
+  test(`hands-free talk ${label}: the call's capsule fits`, async ({ page }) => {
+    await page.setViewportSize({ width: w, height: h });
+    await servePage(page);
+    await seedDevice(page);
+    await speechMic(page);
+    const pc = await mockPc(page, OPUS);
+    await open(page);
+    await ready(page, pc);
+    await page.evaluate((s) => (document.documentElement.style.fontSize = `${s}%`), text);
+    await page.evaluate(() => document.fonts.ready);
+    const fits = () => page.evaluate(() => document.documentElement.scrollWidth <= innerWidth);
+    await page.getByTestId('call').click();
+    await expect(page.getByTestId('phase')).toHaveText('Listening');
+    expect(await fits()).toBe(true);
+    await expect.poll(() => pc.of('stop').length, { timeout: 8000 }).toBe(1);
+    pc.send({ type: 'state', phase: 'transcribing' });
+    pc.send({ type: 'heard', text: 'How long is the walk round the reservoir?' });
+    pc.send({ type: 'state', phase: 'thinking' });
+    pc.send({ type: 'answer', text: 'About 4 miles: allow two hours.', final: true, id: 'chat:13:1' });
+    pc.send({ type: 'state', phase: 'speaking' });
+    pc.send({ type: 'speak_start', rate: 24000 });
+    for (const f of sentences(6000)) pc.sendBinary(f);
+    await expect(page.getByTestId('phase')).toHaveText('Speaking');
+    await expect.poll(async () => (await snapshot(page)).player.state).toBe('playing');
+    expect(await fits()).toBe(true);
+    // "Speaking", ■ and End all on the card, a thumb's size; the word whole.
+    const live = await page.locator('#live-label').boundingBox();
+    const stop = await page.getByTestId('stop').boundingBox();
+    const end = await page.getByTestId('call').boundingBox();
+    const card = await page.getByTestId('composer').boundingBox();
+    expect(await page.locator('#live-label').evaluate((e) => e.scrollWidth <= e.clientWidth + 1)).toBe(true);
+    expect(live.width).toBeGreaterThan(40);
+    for (const b of [stop, end]) {
+      expect(b.height).toBeGreaterThanOrEqual(44);
+      expect(b.x + b.width).toBeLessThanOrEqual(card.x + card.width);
+      expect(b.y + b.height).toBeLessThanOrEqual(h);
+    }
+    expect(stop.x + stop.width).toBeLessThanOrEqual(end.x);
+    await page.waitForTimeout(300);
+    await shot(page, `call-${w}x${h}-text-${text}`);
+    await page.getByTestId('call').click();
   });
 }

@@ -35,19 +35,19 @@ notes. The PC's side of the conversation is the desktop app's
 
 | File | What it is | Served as |
 |---|---|---|
-| `index.html` | The page: the header (☰, "Yap · <PC>" with the connection's dot and the chat's title, the spinner, ⋯), pairing, the thread and Chat's activity line, the composer card (Chat's line for pictures its model can't read, the pictures, the text box, then +, the model chip, the mic, Send / ■, ✕ / ■, the waveform and time while Yap listens), the drawer, the settings sheet (Hands-free and its wait, Clearer sound in a headset, Play the voice through the media player, the microphone picker, Sound details) and the model sheet. | `text/html` |
+| `index.html` | The page: the header (☰, "Yap · <PC>" with the connection's dot and the chat's title, the spinner, ⋯), pairing, the thread and Chat's activity line, the composer card (Chat's line for pictures its model can't read, the pictures, the text box, then +, the model chip, the mic, Send / ■ or hands-free talk's waveform (End while it's on), ✕ / ■, the waveform and time while Yap listens), the drawer, the settings sheet (hands-free talk's wait, Clearer sound in a headset, the microphone picker, Sound details) and the model sheet. | `text/html` |
 | `link.css` | The look ("The look", below): Yap's warm light and dark `--yap-*` tokens (values copied from `desktop/src/app.css`, following `prefers-color-scheme`; `phone/web/tests/tokens.spec.js` holds them to it), its fonts, mobile first, 48 px targets, reduced motion respected. | `text/css` |
 | `markdown.js` | An answer's markdown as Chat shows it (its spoken-answer subset: paragraphs and line breaks, headings, lists, bold, italic, struck, code, quotes, rules), built as DOM nodes, never HTML; links as their words, `[1]` citations left out, a mark still being written shown without its stars. | `text/javascript` |
 | `fonts/figtree.woff2`, `fonts/eb-garamond.woff2` | Yap's UI font and its display serif, cut down from the desktop's own (below). | `font/woff2` |
-| `link.js` | Everything the page does: the connection (hello, pairing, reconnects with backoff, keep-alive pings), typed questions and ▶ Read aloud, the composer and the keyboard, the mic (opened a timed step at a time), Talk (tap or hold; its words in the box, `words`), hands-free, the spoken answer (resampled frame after frame, posted to the player worklet; or cut at its pauses into WAVs for the media player, `mediaVoice`), Clearer sound, barge-in, the conversation (kept in this tab's sessionStorage across a reload), the step and its time, the model chip, the settings sheet, Sound details, the screen wake lock. Exposes a read-only `window.__yapLink.snapshot()` for the tests. | `text/javascript` |
+| `link.js` | Everything the page does: the connection (hello, pairing, reconnects with backoff, keep-alive pings), typed questions and ▶ Read aloud, the composer and the keyboard, the mic (opened a timed step at a time), Talk (tap or hold; its words in the box, `words`), hands-free talk (the call: `startCall`, `callNext`, `endCall`), the spoken answer (cut at its pauses into WAVs for the media player, `mediaVoice`; where the browser refuses that, resampled frame after frame and posted to the player worklet, `fallBack`), Clearer sound, barge-in, the conversation (kept in this tab's sessionStorage across a reload), the step and its time, the model chip, the settings sheet, Sound details, the screen wake lock. Exposes a read-only `window.__yapLink.snapshot()` for the tests. | `text/javascript` |
 | `picker.js` | Chat's model picker as a sheet ("Chat's picker", below): the rail with the logos, the panes, More models, the effort; its rows built by `core/chatPicker.js`; a PC from before gets its plain list. The chip's words and its effort (`chipWords`, `chipEffort`). | `text/javascript` |
 | `drawer.js` | The drawer of chats ("The drawer", below): Recents from the PC (`chats`), the search, the one this phone is in marked, + New chat. | `text/javascript` |
 | `photos.js` | A question's pictures ("Pictures", below): a photo made smaller (2,048 px, a JPEG of at most 3 MB, upright, on white) and sent in `0x03` frames. | `text/javascript` |
 | `core/*.js` | **Not in this folder**: Chat's own picker modules from `desktop/src/lib/core/` (`chatPicker`, `modelCatalog`, `latestModels`, `ppModels`, `localContext`, `modelIcons`, `providerIds`, `effort`), served as they are (`build.rs` `LINK_SHARED`). | `text/javascript` |
 | `providers/*.svg` | **Not in this folder**: the provider and model-family logos from `desktop/src/assets/providers/` the picker and the chip show (Yap's own assets; `build.rs` `LINK_SHARED`). | `image/svg+xml` |
-| `dsp.js` | The sound maths, with nothing of the page in it: the streaming resampler (windowed sinc, a polyphase table where the rates allow: the mic's rate down to 16 kHz, Yap's 24 kHz voice up to the phone's rate), the answer's ring and jitter buffer (`Playout`), the media player's pieces cut at the voice's pauses (`Segmenter`) and their WAV files (`wav`), Int16, the frame level, hands-free's energy voice detector and its waits, the times as Chat says them. Runs in the page, both worklets and Node's tests. | `text/javascript` |
+| `dsp.js` | The sound maths, with nothing of the page in it: the streaming resampler (windowed sinc, a polyphase table where the rates allow: the mic's rate down to 16 kHz, Yap's 24 kHz voice up to the phone's rate), the answer's ring and jitter buffer (`Playout`), the media player's pieces cut at the voice's pauses (`Segmenter`) and their WAV files (`wav`), Int16, the frame level, hands-free talk's energy voice detector and its waits, the times as Chat says them. Runs in the page, both worklets and Node's tests. | `text/javascript` |
 | `mic-worklet.js` | The mic's AudioWorklet: the mic at the phone's own rate, mixed to mono, resampled to 16 kHz Int16 (imports `dsp.js`), cut into 20 ms frames. | `text/javascript` |
-| `player-worklet.js` | The answer's AudioWorklet: Yap's voice, already at the phone's rate, played as one stream from `dsp.js`'s `Playout` (the jitter buffer, its fades, underruns counted); reports to the page every ~50 ms. | `text/javascript` |
+| `player-worklet.js` | The answer's AudioWorklet, the fallback where the browser refuses the media player: Yap's voice, already at the phone's rate, played as one stream from `dsp.js`'s `Playout` (the jitter buffer, its fades, underruns counted); reports to the page every ~50 ms. | `text/javascript` |
 | `manifest.webmanifest` | Add to Home screen: name, the page's background as its colours (light, and dark in `user_preferences.color_scheme_dark` where the browser reads it), the icon. | `application/manifest+json` |
 | `icon.svg` | The Yap mark (a copy of `desktop/src/assets/yap-logo.svg`; `tokens.spec.js` checks it's the same). | `image/svg+xml` |
 | `README.md` | This file (not served). | — |
@@ -78,8 +78,9 @@ its own way, the phone wins.
   (green connected, amber connecting, grey unpaired), the chat's title under
   it, or how the connection is ("Reconnecting to Office PC…") —, a small
   amber spinner while Yap works the question out, and ⋯ on the right: the
-  settings sheet (Hands-free and its wait, Clearer sound in a headset, the
-  microphone, Sound details, Done). No rule under it, as the Claude app.
+  settings sheet (hands-free talk's "Wait before sending", Clearer sound in
+  a headset, the microphone, Sound details, Done). No rule under it, as the
+  Claude app.
 - **The thread**: your question in a bubble on the right (Chat's amber
   wash, a small tail at the bottom right, 🎙 "Asked by voice" when it was
   said; its pictures above it — their thumbnails while this page has them,
@@ -106,23 +107,33 @@ its own way, the phone wins.
   5.5 · Extra", as the Claude app's chip; it opens Chat's picker), a gap,
   **the mic** (round; Talk: a tap, then Done, or a hold while held — a
   *question* for Yap's AI, never dictation into the PC's apps) and **Send
-  ↑** in Yap's amber (the
-  Claude app's orange; dim while there's nothing to send), which is **■**
-  while Yap works the question out (cancel) or says an answer (Stop) — unless
-  there are words to send instead. **While it listens the card is the Yap
+  ↑** in Yap's amber (the Claude app's orange; dim while a picture is
+  being made ready), which is **■** while Yap works the question out
+  (cancel) or says an answer (Stop) — unless there are words to send
+  instead. **With nothing to send, hands-free talk's waveform is in Send's
+  place** (a filled ink circle, "Talk hands-free"), as the Claude app's
+  voice mode button is: it starts the call ("Hands-free talk", below), and
+  while the call is on it's **End**, the bar's ink pill with ✕ (✕ alone on a
+  narrow card at the largest text). **While it listens the card is the Yap
   bar's capsule**, the Voice Assistant's variant (`bar/DictationCapsule.svelte`):
   an amber edge, ✕ on the left, the ✦ and the bar's live waveform (thin amber
   bars, newest on the right, at least 7 % tall, `--yap-live`), the time, and
-  the mic turned into the bar's ink pill saying **Done** — with a ✓ when its
-  words go in the box (the Claude and ChatGPT apps finish dictation so), ↑
-  when it sends (hands-free) — or "Release when done" / "Release to send"
-  while held, "Wait…" while the mic opens, with "Opening the microphone…"
-  where the waveform goes. **Transcribing** (Talk's words for the box): the
-  capsule a moment more, ✕, the ✦, "Transcribing…" and Chat's three amber
-  dots — no waveform, no Done — then the text box is back with the words
-  in it ("Talk's words in the box", below). The round buttons are 44 px and
-  grow with large text to 56 px at most (`--round`), so the row still fits
-  at Android's largest text (200 %).
+  the mic turned into the bar's ink pill saying **Done** — with a ✓ as its
+  words go in the box (the Claude and ChatGPT apps finish dictation so; ↑
+  on a PC from before words, where it sends) — or "Release when done" /
+  "Release to send" while held, "Wait…" while the mic opens, with "Opening
+  the microphone…" where the waveform goes. **Transcribing** (Talk's words
+  for the box): the capsule a moment more, ✕, the ✦, "Transcribing…" and
+  Chat's three amber dots — no waveform, no Done — then the text box is
+  back with the words in it ("Talk's words in the box", below). **In
+  hands-free talk the card is the call's capsule** all along: the ✦, where
+  it's at — "Opening the mic…", **Listening**, **Thinking**, **Speaking** —
+  with the bar's waveform (the mic's while it listens, Yap's voice while it
+  speaks) or Chat's three dots while it thinks, a quiet ■ while Yap answers,
+  and End; the amber glow while it's your turn to talk, the amber edge alone
+  while it's Yap's. The round buttons are 44 px and grow with large text to
+  56 px at most (`--round`), so the row still fits at Android's largest
+  text (200 %).
 - **Chat's line for pictures its model can't read** (`Composer.svelte`'s
   vision line), in the card above the pictures: "Qwen3.5 4B can't read
   images." (or "couldn't read the picture", after the PC's `cant_read`), then
@@ -284,8 +295,9 @@ a reload keeps it; closing the tab doesn't.
 
 The maintainer: Done "auto sends", with nothing "to see what u said". So,
 as the Claude and ChatGPT apps do it, **Talk's words go in the composer's
-text box to check first**, and you send them yourself. With hands-free off
-(the default) and a PC that says `"words"` in `ready.can`, Talk — a tap
+text box to check first**, and you send them yourself. Always (since 4
+Nov: hands-free talk is its own button, below), on a PC that says
+`"words"` in `ready.can`, Talk — a tap
 then Done (a ✓), or a hold then release — sends `start {mode: "words"}`,
 the frames, `stop`: no question bubble, nothing asked. While the PC
 transcribes, the capsule says "Transcribing…" (✕ cancels: `cancel`, the
@@ -313,11 +325,55 @@ again, or type it." The mic gone mid-talk: "What it heard is in the box."
 (and it is, once the PC's words come); the PC's own 2 minutes, or the
 page's: stopped there, the words in the box. Talk, a typed question, ▶ or
 another chat while it transcribes drops the words first, as for a question.
-**Hands-free on** — and a PC from before (no `"words"`) — sends at Done as
-before: the bubble at once, `start {mode: "ask"}`, the answer spoken. Its
-switch says so: "On: sends when you stop talking, and Yap answers out loud.
-Off: your words go in the box to check first." (a PC from before: "Sends
-when you stop talking").
+A PC from before (no `"words"`) takes them at Done as before: the bubble at
+once, `start {mode: "ask"}`, the answer spoken.
+
+## Hands-free talk (4 Nov)
+
+The maintainer, on his phone in a headset: hands-free "sends when he stops
+talking and says the answer, but then stops" — he expected a continuing
+conversation, like a call — and he couldn't find its switch in ⋯. So, as
+the Claude app's voice mode, **hands-free talk is its own button**: the
+waveform in Send's place while there's nothing to send (a filled ink
+circle, `aria-label` "Talk hands-free", `aria-pressed` while it's on). Tap
+it and it's a conversation:
+
+1. **It listens** — the mic opened a timed step at a time ("Opening the
+   mic…", then "Listening" once it's open) — until the wait chosen of quiet
+   after speech (`EnergyVad`, the wait in the settings: "Wait before
+   sending", Short 1 s · Normal 1.5 s · Long 2.5 s, `yap.link.wait`).
+2. **It's sent and asked out loud**: `start {mode: "ask"}`, the frames,
+   `stop` — the very messages a spoken question always used (pictures in
+   the composer go with the first). The question's bubble shows from the
+   start, 🎙.
+3. **Yap thinks, then answers out loud** ("Thinking" with Chat's three dots,
+   then "Speaking" with the waveform following its voice; the activity line
+   in the thread meanwhile).
+4. **Once the answer has played out** here, and the PC is idle (or 3 s
+   after it played out, `CALL_SETTLE_MS`), **it listens again by itself**,
+   and so on (`callNext`). With Clearer sound on (the default) the mic was
+   let go while Yap spoke and opens again for the turn.
+
+The card is the call's capsule all along ("The look", above). **■** while
+Yap thinks or speaks stops that answer (`interrupt`) or calls the question
+off (`cancel`) and goes straight back to listening (`callStopAnswer`): the
+call goes on. A question the PC didn't catch (its `error` before any
+`heard`) says "Yap didn't catch that, so it's listening again." and
+listens again — once: a second in a row ends it. It **ends** (`endCall`)
+with End (the same button: listening cancelled, an answer stopped, a
+question called off), and with the error on screen when the PC refuses a
+question while it listens (during a meeting, say) or can't answer one it
+heard. It ends **quietly, with a note**, when nothing is said for 10 s
+once it's listening ("Hands-free talk ended: nothing was said for 10
+seconds.", `NO_SPEECH_MS`), the connection drops ("…the connection to
+Office PC dropped."), or the page is hidden (`visibilitychange`: "…when
+this page went into the background."); and with the mic's own error (it
+won't open: the error says why; its track ended: what it heard is sent,
+and it ends). The mic is let go when it ends. ▶, another chat or + New chat
+end it too. It's still Ask Yap only — the PC sees spoken questions, one
+after another — never dictation into the PC's apps. The Hands-free switch
+went, and a stored `yap.link.handsFree` is ignored (and removed, with
+`yap.link.media`).
 
 ## What it does where the protocol leaves a choice
 
@@ -346,22 +402,23 @@ when you stop talking").
   next shown.
 - **The hello's `name`** is "Android · Chrome", "iPhone · Safari" and so on;
   `nonce` is 16 random bytes, base64url.
-- **Up frames.** `start {mode: "words"}` (hands-free off, a PC with
-  `"words"`) or `start {mode: "ask"}`, then frames of exactly 320 samples (20
+- **Up frames.** `start {mode: "words"}` (Talk, a PC with `"words"`) or
+  `start {mode: "ask"}` (hands-free talk, a PC from before), then frames of exactly 320 samples (20
   ms at 16 kHz; the last one padded with silence), `seq` counting from 0 for
   each question, then `stop` after the last frame. At most 6,000 frames (2
   minutes): then it stops by itself.
 - **Talk** (the mic). A tap starts, the next tap (or Done) finishes; held for
-  350 ms or more, letting go finishes — its words to the box, or, with
-  hands-free on, the question sent. Cancel (✕) while listening sends `cancel` (no `stop`). Hands-free (the
-  settings sheet, ⋯): the wait chosen under it — **"Wait before sending": Short (1 s) · Normal (1.5 s,
-  the default) · Long (2.5 s)**, remembered (`yap.link.wait`) — of quiet after
-  speech sends `stop`; nothing said for 10 s sends `cancel`. Speech starts 12
-  dB over the room's noise (and over −45 dB); once started it carries on while
-  the level stays 6 dB over the noise and over −52 dB (hysteresis), so a soft
-  last word isn't taken for quiet. For that hold the noise is also the room's
-  typical (median) level before you spoke, so a fluttering noise (a TV) can't
-  keep it going for ever.
+  350 ms or more, letting go finishes — its words to the box (on a PC from
+  before words, the question sent). Cancel (✕) while listening sends
+  `cancel` (no `stop`). Hands-free talk (its own button): the wait chosen in
+  the settings — **"Wait before sending": Short (1 s) · Normal (1.5 s, the
+  default) · Long (2.5 s)**, remembered (`yap.link.wait`) — of quiet after
+  speech sends `stop`; nothing said for 10 s sends `cancel` and ends it.
+  Speech starts 12 dB over the room's noise (and over −45 dB); once started
+  it carries on while the level stays 6 dB over the noise and over −52 dB
+  (hysteresis), so a soft last word isn't taken for quiet. For that hold the
+  noise is also the room's typical (median) level before you spoke, so a
+  fluttering noise (a TV) can't keep it going for ever.
 - **Barge-in.** Talk while it speaks: playback stops at once, then `interrupt`,
   then `start`. Talk while Yap is working on a question: `cancel`, then `start`.
   After a `cancel` or `interrupt`, the old question's late `heard`, `step`,
@@ -373,17 +430,48 @@ when you stop talking").
   it's final); `[1]`-style citations are left out, and links show as their
   words.
 - **`state`.** idle → "Ready", listening → "Listening", transcribing and
-  thinking → "Working it out" (Talk's words for the box: "Transcribing…"),
-  speaking → "Speaking". A `state idle` while the
+  thinking → "Working it out" (Talk's words for the box: "Transcribing…";
+  hands-free talk: "Thinking"), speaking → "Speaking". A `state idle` while the
   phone is listening (after the PC's own `listening`) ends the question on the
   phone without a `stop`: the PC ended it.
 - **`step`** shows as Chat's activity line does: the label, then the time since
   the question was sent ("Searching the web · harbour tides · 4s"); "Thinking"
   until a step comes; gone once the answer's final.
-- **Down frames** play as **one stream**. Each is resampled from
+- **Down frames** play through **the browser's media player** (since 4 Nov,
+  every spoken answer, ▶ included; no setting): `mediaVoice` cuts the answer
+  at its pauses (`dsp.js` `Segmenter`: in the middle of an 80 ms pause once a
+  piece holds 600 ms, 1.5 s after the first; at its quietest 10 ms after 6 s
+  with no pause; nothing lost or repeated), makes each piece a WAV file at 24
+  kHz (`dsp.js` `wav`; the browser resamples it) and plays it with an
+  `<audio>` element, the next loading in a second one meanwhile. Firefox for
+  Android ignores `latencyHint` and runs Web Audio on its smallest output
+  buffer (~14 ms), so a busy moment on the phone can crackle with no underrun
+  counted; the media player's output keeps far more ready (on the
+  maintainer's phone in Firefox, in a Bluetooth headset, Web Audio crackled
+  and the media player was clean). The cost: a slightly longer pause where it
+  was cut, Stop without a fade. A piece not there when the last ends is a
+  gap, counted as an underrun. The two elements are made once, taken in
+  turn, and **readied within the tap** that leads to a spoken answer
+  (`mediaVoice.unlock`: hands-free talk's button, Send of Talk's words, ▶,
+  the release of Talk on a PC from before words — never a press, which a
+  touch browser doesn't count as a gesture): each plays a twentieth of a
+  second of silence, as an iPhone lets an element play later, unasked, only
+  once a tap has played it.
+- **Where the browser refuses the media player — Web Audio, at once.** A
+  tap's play refused (and none played since), a piece's `play()` rejected,
+  an `<audio>` error, or a piece not started 2 s after its `play()`
+  (`MEDIA_START_MS`): `fallBack` hands that answer to Web Audio from where
+  the media player got to — the rest of the piece playing (by its
+  `currentTime`), the pieces waiting, what isn't a piece yet: nothing lost,
+  nothing said twice — and **the rest of the visit uses Web Audio** too
+  (`voice.via`). Said only in Sound details ("Played through: Web Audio:
+  the media player was refused (NotAllowedError)" / "…didn't start" /
+  "…stopped with an error"), never as a note. There the frames play as
+  **one stream**. Each is resampled from
   `speak_start`'s `rate` (24 kHz) to the AudioContext's (48 or 44.1 kHz) as it
   comes, in one windowed-sinc filter carried on from frame to frame, and posted
-  to `player-worklet.js`, which plays from a jitter buffer (`dsp.js`
+  to `player-worklet.js` (loaded with the mic's, so it's ready to take over),
+  which plays from a jitter buffer (`dsp.js`
   `Playout`): silent until **250 ms** is waiting (or `speak_end` came), then
   faded in over 5 ms. **Running dry** (the next frame late): the last 5 ms fade
   out, an underrun is counted, and it waits for **150 ms** more before fading
@@ -393,20 +481,7 @@ when you stop talking").
   ms faded); then the answer's finished and the mic's 15 s starts. Before,
   each frame was its own `AudioBufferSourceNode`: the browser resampled each
   clip on its own (a click at every join) and a late one left a hard gap.
-- **Play the voice through the media player** (a switch under Clearer sound,
-  **off** unless chosen, kept as `yap.link.media`): "If Yap's voice crackles,
-  try this…" The answer isn't played by Web Audio: `mediaVoice` cuts it at its
-  pauses (`dsp.js` `Segmenter`: in the middle of an 80 ms pause once a piece
-  holds 600 ms, 1.5 s after the first; at its quietest 10 ms after 6 s with no
-  pause; nothing lost or repeated), makes each piece a WAV file at 24 kHz
-  (`dsp.js` `wav`; the browser resamples it) and plays it with an `<audio>`
-  element, the next loading meanwhile. Firefox for Android ignores
-  `latencyHint` and runs Web Audio on its smallest output buffer (~14 ms), so
-  a busy moment on the phone can crackle with no underrun counted; the media
-  player's output keeps far more ready. The cost: a slightly longer pause where
-  it was cut, Stop without a fade. A piece not there when the last ends is a
-  gap, counted as an underrun; Sound details say which way it played.
-- **Clearer sound in a headset** (a switch under Hands-free in the settings sheet, **on by default**
+- **Clearer sound in a headset** (a switch under the wait in the settings sheet, **on by default**
   for anyone who hasn't chosen; a saved choice is kept, `yap.link.clearer`):
   "A headset's call mode can crackle, so this closes the mic while Yap talks
   and the headset uses its music mode. You can't talk over Yap by voice; Stop
@@ -418,8 +493,8 @@ when you stop talking").
   switches back) instead of listening at once. When on, the mic's tracks stop
   as soon as the question is sent (so the headset can switch while Yap works it
   out) and, in any case, at `speak_start`; switched on mid-answer, at once. The
-  mic opens again on Talk, or, with hands-free on, once the answer has played
-  out (kept warm 15 s as usual). Off, the mic stays open through the answer and
+  mic opens again on Talk, or for hands-free talk's next turn once the answer
+  has played out. Off, the mic stays open through the answer and
   Talk while it speaks listens on it straight away.
 - **Opening the mic never waits silently.** Each step has a time limit and a
   reason on screen when it runs out (`doOpenMic`): the permission's state where
@@ -453,7 +528,7 @@ when you stop talking").
   ("The microphone hasn't sent any sound yet…").
 - **Sound details** (a disclosure at the foot of the settings sheet): the AudioContext's sample
   rate, `baseLatency` / `outputLatency` where the browser gives them, which way
-  the answer played (Web Audio, or the media player), the last
+  the answer played (the media player, or Web Audio and why), the last
   answer (seconds played, how long after its first sound it started and how
   much was buffered then), its gaps (underruns), whether the mic was open while
   it played (and now), **opening the microphone** (the step it's on and for how
@@ -513,10 +588,23 @@ npm run test:link
   talk, what's shown while Yap works, the answer's markdown (bold, lists one
   inside another, code, a heading; citations gone, a half-written mark without
   its stars, a link as its words, a model's HTML as text and never run), the
-  answer as one stream played to the
+  answer through Web Audio (the fallback) as one stream played to the
   end, Stop (silent, a fade), barge-in, Cancel, a PC from before the picker
-  (the chip, On this PC said once, its plain list), the mic picker, hands-free
-  and its wait choice. `typing.spec.js`: a typed question (`ask` over the
+  (the chip, On this PC said once, its plain list), the mic picker.
+  `handsfree.spec.js` (Chromium's recorded speech, played from the start
+  for each stream the page opens; in Firefox the same made in the page,
+  `speechMic`): hands-free talk — the waveform in Send's place, on, the
+  question sent by the quiet after the speech (`start {mode: "ask"}`), the
+  answer said through the media player with the mic let go, then
+  listening again by itself and the next question sent; End (`cancel`, the
+  composer back, the mic let go); 10 s with nothing said (the note); ■
+  while it answers (`interrupt`, then listening) and while it thinks
+  (`cancel`, then listening); a dropped connection and the page hidden
+  (their notes); a mic that won't open; a question not caught (listening
+  again, once) and one heard and not answered (it ends); the wait in the
+  settings (no Hands-free switch), each choice remembered and used; Talk
+  always the words in the box, a stored Hands-free switch ignored.
+  `typing.spec.js`: a typed question (`ask` over the
   wire, the answer in the thread, nothing spoken and no mic), Enter and
   Shift+Enter and the box growing, ▶ Read aloud and its ■, typing over Yap
   speaking or working, a PC from before typed questions, the keyboard up
@@ -554,11 +642,13 @@ npm run test:link
   transcribing and the late words dropped; the pictures waiting for Send
   (and Chat's line putting the question back still said); a PC from before
   `"speak"` (on screen, no error); the PC's own 2 minutes; the mic gone;
-  hands-free on and a PC from before
-  still sending (the switch's hint each way); at 200 % text and on its side
-  (the box grown to show them all). The specs about a spoken answer talk to
-  a PC whose Done sends (`CAN_BEFORE_WORDS`, as hands-free does: the fake
-  mic's steady tone isn't speech for hands-free to end on).
+  Send in the waveform's place while there are words, the waveform back once
+  the box is emptied; a PC from before still sending; at 200 % text and on
+  its side (the box grown to show them all). The specs about a spoken answer
+  talk to a PC whose Done sends (`CAN_BEFORE_WORDS`, as a PC from before
+  words does: the fake mic's steady tone isn't speech for hands-free talk to
+  end on), the answer's voice in sentences with pauses (`sentences`: where
+  the media player cuts its pieces).
   `pairing.spec.js` — a phone's tabs, against a PC that judges hellos as
   Yap's does (the device first, a strike for each guess, five lock the
   address out): a saved device with an old `#pair=` sends both, connects,
@@ -571,13 +661,20 @@ npm run test:link
   `shared.spec.js` (no
   browser): the desktop modules served at `core/` import only each other,
   nothing of the app, and the logos the picker draws are served. `sound.spec.js`: the
-  stream starting at ~250 ms, a short answer, a late frame (one underrun, never
-  a cut: the largest step between samples stays the tone's own), Clearer sound
-  (on for a fresh page, a saved off or on kept; the mic's tracks stopped at
-  `speak_start` and when a question is sent, opened again after with
-  hands-free; off, Talk over Yap listens on the mic already open, on, it opens
-  it afresh), the media player (off at first and kept, an answer in pieces,
-  Stop, a late piece counted as a gap), Sound details. `mic-open.spec.js`: a `getUserMedia` nobody
+  media player, the standard way (no switch for it; readied within the tap;
+  an answer in pieces played to its end, Sound details saying so; a stored
+  "off" from before ignored; Stop; a late piece counted as a gap), the
+  fallback to Web Audio (refused from the start, as an iPhone may be: the
+  whole answer, and every answer after, said only in Sound details;
+  refused mid-answer, a piece that never starts and an `<audio>` error: the
+  rest from where it got to, nothing lost or said twice — `mediaPlayer`
+  rules the browser's media player), and through Web Audio the stream
+  starting at ~250 ms and a late frame (one underrun, never a cut: the
+  largest step between samples stays the tone's own), a short answer,
+  Clearer sound (on for a fresh page, a saved off or on kept; the mic's
+  tracks stopped at `speak_start` and when a question is sent; off, Talk
+  over Yap listens on the mic already open, on, it opens it afresh), Sound
+  details. `mic-open.spec.js`: a `getUserMedia` nobody
   answers (the permission message after ~6 s, Talk and Cancel, Cancel
   recovering, the late mic stopped), answered late, allowed and Talk tried
   afresh, blocked (said at once), an `addModule` that never resolves (the setup
@@ -588,27 +685,35 @@ npm run test:link
   busy. `screens.spec.js` leaves named screenshots at 360 × 780 and
   390 × 844, light and dark (pairing, empty with the chip's effort, the
   drawer, a chat opened from it, typing with the keyboard up, listening,
-  transcribing, Talk's words in the box, answering with ■ (hands-free),
+  transcribing, Talk's words in the box, answering with ■,
   two pictures in the composer, the model sheet, the settings
-  sheet; Talk's words sent from the box and said, a tab restored with an
-  old code connecting, "Too many tries" with its wait; landscape's two
-  columns, large text at 130 and 200 %), in
+  sheet; Talk's words sent from the box and said; hands-free talk — the
+  composer with its waveform (`composer-call-button-*`, `call-button-*`),
+  then the call listening, thinking and speaking (`call-listening-*`,
+  `call-thinking-*`, `call-speaking-*`, `composer-call-speaking-*`) —; a
+  tab restored with an old code connecting, "Too many tries" with its wait;
+  landscape's two columns, large text at 130 and 200 %; the call's capsule
+  at 200 % text on 360 and 390 px, 130 % on 360 px and on its side,
+  `call-<w>x<h>-text-<n>`), in
   `test-results/link/screenshots/`, and checks every control is 44
   px or more, Yap's two fonts and the logos load from the page's own origin
   (nothing asked of anywhere else), and at 360 × 780, 390 × 844, 430 × 932 and
   on its side (844 × 390) nothing scrolls sideways and the composer and Talk
   are on the first screen, Talk low and on the right, under the thumb; at
-  200 % text the row still fits, the model's name with room.
+  200 % text the row still fits, the model's name with room, the waveform
+  (or Send) on the card; the call's "Speaking" whole, ■ and End on the card.
   `tokens.spec.js` (no browser): link.css's `--yap-*` values are app.css's,
   light and dark; the `theme-color` metas and the manifest are the page's
   background in each; `icon.svg` is Yap's mark. Nothing on the network, no Yap
   build, no window on screen.
 - **In Firefox too** (the `firefox` project, when Playwright's own Firefox is
   installed: `npx playwright install firefox`; `YAP_LINK_FIREFOX=0` leaves it
-  out): `link-page`, `sound`, `mic-open`, `typing`, `picker`, `chats`, `pictures` and `words`, with Firefox's fake mic
+  out): `link-page`, `sound`, `mic-open`, `typing`, `picker`, `chats`, `pictures`, `words`, `pairing` and `handsfree`, with Firefox's fake mic
   (`media.navigator.streams.fake`, `media.navigator.permission.disabled`, its
-  tone at 440 Hz) and its output muted (`media.volume_scale`). Hands-free needs
-  Chromium's recorded speech, and the screenshots are Chromium's.
+  tone at 440 Hz) and its output muted (`media.volume_scale`); hands-free
+  talk hears speech made in the page (`speechMic`: its quiet a room's, never
+  nothing — Firefox sends no sound at all for a silent stream). The
+  screenshots are Chromium's.
 
 One thing the harness does that a phone doesn't: Playwright can't route a
 worklet's own requests, so the tests load `mic-worklet.js`,

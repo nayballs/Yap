@@ -5,7 +5,7 @@
      PC, the mark): ☰ for the drawer of chats, the title in the middle, ⋯
      for the settings; the conversation fills the screen; the composer card
      at the bottom carries the pictures, the text box, +, the model chip with
-     its effort, the mic and Send. -->
+     its effort, the mic, and Send or hands-free talk's waveform. -->
 <html lang="en-GB">
   <head>
     <meta charset="utf-8" />
@@ -80,7 +80,7 @@
             <div id="empty" class="empty">
               <svg class="empty-spark" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M12 2.5c.5 3.9 1.6 6.4 3.1 7.9 1.5 1.5 4 2.6 6.4 3.1-2.4.5-4.9 1.6-6.4 3.1-1.5 1.5-2.6 4-3.1 6.9-.5-2.9-1.6-5.4-3.1-6.9-1.5-1.5-4-2.6-6.9-3.1 2.9-.5 5.4-1.6 6.9-3.1 1.5-1.5 2.6-4 3.1-7.9z" /></svg>
               <h1 class="empty-title">Ask Yap anything</h1>
-              <p class="empty-sub">Type a question, or tap the <strong>mic</strong> and speak. Hold it while you speak, if you like.</p>
+              <p class="empty-sub">Type a question, or tap the <strong>mic</strong> and say it. To talk it through out loud, tap the <strong>waveform</strong>: Yap answers, then listens again.</p>
               <p id="keep-open" class="keep-open">Keep this page open. Your headset works as the mic and speaker.</p>
             </div>
             <p id="older" class="older" data-testid="older" hidden>Earlier messages are in Chat on your PC.</p>
@@ -99,9 +99,11 @@
             <p id="phase" class="vh" role="status" data-testid="phase"></p>
 
             <!-- The composer card: the pictures, the text box, then +, the
-                 model chip, the mic and Send (■ while Yap answers). While
-                 Yap listens it is the Yap bar's capsule: ✕, the waveform,
-                 the time, Done. -->
+                 model chip, the mic and Send (■ while Yap answers; the
+                 waveform for hands-free talk in its place while there's
+                 nothing to send). While Yap listens it is the Yap bar's
+                 capsule: ✕, the waveform, the time, Done; in hands-free
+                 talk, the call's: Listening, Thinking or Speaking, ■, End. -->
             <form id="composer" class="composer" data-state="idle" data-testid="composer" autocomplete="off">
               <!-- Chat's line when its model can't read the pictures: another model, or their text instead. -->
               <div id="vision" class="vision" data-testid="vision" role="status" hidden>
@@ -160,9 +162,8 @@
                 <span class="spacer"></span>
                 <!-- The mic: a tap talks (tap again, or Done, to finish), a
                      hold talks while held. Its words go in the text box to
-                     check and send (hands-free: sent, and answered out
-                     loud). A question to Yap's AI, never dictation into the
-                     PC's apps. -->
+                     check and send. A question to Yap's AI, never dictation
+                     into the PC's apps. -->
                 <button id="talk-btn" class="talk" type="button" aria-pressed="false" data-testid="talk">
                   <svg class="mic-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
                     <rect x="9" y="3" width="6" height="11" rx="3" />
@@ -171,6 +172,15 @@
                   <svg class="done-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M12 19V5M5.5 11.5L12 5l6.5 6.5" /></svg>
                   <svg class="check-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M5 12.5l4.5 4.5L19 7.5" /></svg>
                   <span id="talk-label" class="talk-label">Talk</span>
+                </button>
+                <!-- Hands-free talk (the Claude app's voice mode), in Send's
+                     place while there's nothing to send: Yap listens, sends
+                     when you stop talking, answers out loud, then listens
+                     again. End (the same button) stops it. -->
+                <button id="call-btn" class="callbtn" type="button" aria-pressed="false" aria-label="Talk hands-free" data-testid="call">
+                  <svg class="wave-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M4 10.5v3M8 7.5v9M12 4.5v15M16 7.5v9M20 10.5v3" /></svg>
+                  <svg class="end-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M6.5 6.5l11 11M17.5 6.5l-11 11" /></svg>
+                  <span class="call-label" aria-hidden="true">End</span>
                 </button>
                 <button id="send-btn" class="send" type="submit" aria-label="Send" data-testid="send" disabled>
                   <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M12 19V5M5.5 11.5L12 5l6.5 6.5" /></svg>
@@ -212,21 +222,14 @@
       </div>
     </dialog>
 
-    <!-- The settings: talking hands-free, the headset's sound, the mic, Sound details. -->
+    <!-- The settings: hands-free talk's wait, the headset's sound, the mic, Sound details. -->
     <dialog id="settings" class="sheet" aria-labelledby="settings-title" data-testid="settings-sheet">
       <div class="grab" aria-hidden="true"></div>
       <h2 id="settings-title">Settings</h2>
       <div class="options">
-        <label class="switch">
-          <span class="switch-text">
-            <span class="switch-label">Hands-free</span>
-            <span id="handsfree-hint" class="hint">On: sends when you stop talking, and Yap answers out loud. Off: your words go in the box to check first.</span>
-          </span>
-          <input id="handsfree" type="checkbox" role="switch" data-testid="handsfree" aria-describedby="handsfree-hint" />
-          <span class="track" aria-hidden="true"></span>
-        </label>
-        <fieldset id="wait" class="wait" data-testid="wait" hidden>
+        <fieldset id="wait" class="wait" data-testid="wait" aria-describedby="wait-hint">
           <legend class="field-label">Wait before sending</legend>
+          <p id="wait-hint" class="hint">When you talk hands-free (the waveform by the mic), Yap sends what you said after this much quiet.</p>
           <div class="seg">
             <label><input type="radio" name="wait" value="short" data-testid="wait-short" /><span>Short <small>1 s</small></span></label>
             <label><input type="radio" name="wait" value="normal" data-testid="wait-normal" checked /><span>Normal <small>1.5 s</small></span></label>
@@ -239,14 +242,6 @@
             <span id="clearer-hint" class="hint">A headset's call mode can crackle, so this closes the mic while Yap talks and the headset uses its music mode. You can't talk over Yap by voice; Stop still works.</span>
           </span>
           <input id="clearer" type="checkbox" role="switch" data-testid="clearer" aria-describedby="clearer-hint" />
-          <span class="track" aria-hidden="true"></span>
-        </label>
-        <label class="switch">
-          <span class="switch-text">
-            <span class="switch-label">Play the voice through the media player</span>
-            <span id="media-hint" class="hint">If Yap's voice crackles, try this. It's on from the start in Firefox for Android. The browser's media player keeps more sound ready, so a busy moment on the phone doesn't break it up. There may be a slightly longer pause between sentences.</span>
-          </span>
-          <input id="media" type="checkbox" role="switch" data-testid="media" aria-describedby="media-hint" />
           <span class="track" aria-hidden="true"></span>
         </label>
         <div class="field-row">

@@ -448,6 +448,21 @@ export function voice(rate, ms, hz = 220) {
   return out;
 }
 
+/**
+ * Yap's voice as a voice comes: `ms` of it in sentences (0.7 s at most),
+ * each followed by 0.2 s of quiet — where the media player cuts its pieces
+ * (a steady tone with no pause is held until 6 s of it) — as down frames
+ * numbered from `seq`. Its length: `ms` and 0.2 s a sentence.
+ */
+export function sentences(ms, seq = 0) {
+  const out = [];
+  for (let left = ms; left > 0; left -= 700) {
+    out.push(downFrame(seq++, voice(24000, Math.min(700, left))));
+    out.push(downFrame(seq++, new Int16Array(4800)));
+  }
+  return out;
+}
+
 /** Opens the page (optionally at a fragment) and waits for its script to run. */
 export async function open(page, hash = '') {
   await page.goto(`${ORIGIN}/${hash}`);
@@ -482,7 +497,7 @@ export function pitch(samples, rate) {
   return crossings / 2 / (samples.length / rate);
 }
 
-/** The settings sheet (⋯): Hands-free and its wait, Clearer sound, the mic, Sound details. */
+/** The settings sheet (⋯): hands-free talk's wait, Clearer sound, the mic, Sound details. */
 export async function openSettings(page) {
   await page.getByTestId('settings').click();
   await expect(page.getByTestId('settings-sheet')).toBeVisible();
@@ -499,4 +514,85 @@ export async function type(page, pc, text) {
   await page.getByTestId('input').fill(text);
   await page.getByTestId('input').press('Enter');
   await expect.poll(() => pc.of('ask').length).toBe(asks + 1);
+}
+
+/**
+ * The browser's media player, ruled from the test: every `<audio>` play
+ * goes through, unless `refuse` (rejected with NotAllowedError, as an
+ * iPhone's Safari may without a tap) or `hang` (never answered: a piece that
+ * can't start), or `error` (it starts, then the element reports an error).
+ * Each can be set later too (`window.__media`). Where the media player is
+ * refused, Yap's voice falls back to Web Audio (the player worklet) for the
+ * rest of the visit: the tests of that jitter buffer's timing reach it so.
+ */
+export async function mediaPlayer(page, { refuse = false, hang = false, error = false } = {}) {
+  await page.addInitScript(
+    ([refuse, hang, error]) => {
+      const real = HTMLMediaElement.prototype.play;
+      window.__media = { refuse, hang, error, plays: 0 };
+      HTMLMediaElement.prototype.play = function () {
+        const m = window.__media;
+        m.plays++;
+        if (m.hang) return new Promise(() => {});
+        if (m.refuse) return Promise.reject(new DOMException('play() can only be initiated by a user gesture.', 'NotAllowedError'));
+        const p = real.call(this);
+        if (m.error) setTimeout(() => this.dispatchEvent(new Event('error')), 150);
+        return p;
+      };
+    },
+    [refuse, hang, error],
+  );
+  return {
+    set: (rules) => page.evaluate((r) => Object.assign(window.__media, r), rules),
+    plays: () => page.evaluate(() => window.__media.plays),
+  };
+}
+
+/** The media player refused from the start: Yap's voice through Web Audio (the player worklet), as the fallback has it. */
+export const refuseMediaPlayer = (page) => mediaPlayer(page, { refuse: true });
+
+/**
+ * A mic made in the page (where the browser's own fake one can't say
+ * anything but a tone, Firefox's): each `getUserMedia` a fresh stream of
+ * quiet, then speech-like sound from `from` to `to` seconds (a 140 Hz buzz),
+ * then quiet for good, as SPEECH_WAV is played once by Chromium. Its quiet
+ * is a room's (about −70 dB), never nothing: Firefox sends no sound at all
+ * for a silent stream, and a real mic always hears something.
+ */
+export async function speechMic(page, { from = 0.4, to = 1.6 } = {}) {
+  await page.addInitScript(
+    ([from, to]) => {
+      const md = navigator.mediaDevices;
+      md.getUserMedia = async () => {
+        const ctx = new AudioContext();
+        if (ctx.state !== 'running') await ctx.resume().catch(() => {});
+        const osc = ctx.createOscillator();
+        osc.type = 'sawtooth';
+        osc.frequency.value = 140;
+        const gain = ctx.createGain();
+        const t = ctx.currentTime;
+        const room = 0.0005;
+        gain.gain.setValueAtTime(room, t);
+        gain.gain.setValueAtTime(0.12, t + from);
+        gain.gain.setValueAtTime(room, t + to);
+        const dest = ctx.createMediaStreamDestination();
+        osc.connect(gain).connect(dest);
+        osc.start();
+        for (const track of dest.stream.getAudioTracks()) {
+          const stop = track.stop.bind(track);
+          track.stop = () => {
+            stop();
+            try {
+              osc.stop();
+            } catch {
+              /* stopped */
+            }
+            ctx.close().catch(() => {});
+          };
+        }
+        return dest.stream;
+      };
+    },
+    [from, to],
+  );
 }

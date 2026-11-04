@@ -3,10 +3,23 @@
 // it has it read (`read_aloud`). Enter sends, Shift+Enter makes a new line,
 // the box grows; the composer rides above the on-screen keyboard; a PC from
 // before typed questions says so plainly. Yap on the PC mocked (a spoken
-// question beside them on a PC whose Done sends it, as hands-free does:
-// `asks`; Talk's words for the box are words.spec.js's).
+// question beside them on a PC whose Done sends it, as a PC from before
+// words does: `asks`; Talk's words for the box are words.spec.js's).
 import { test, expect } from '@playwright/test';
-import { servePage, seedDevice, mockPc, open, ready, ask, type, snapshot, downFrame, voice, CAN_BEFORE_WORDS } from './support/harness.js';
+import {
+  servePage,
+  seedDevice,
+  mockPc,
+  open,
+  ready,
+  ask,
+  type,
+  snapshot,
+  downFrame,
+  voice,
+  sentences,
+  CAN_BEFORE_WORDS,
+} from './support/harness.js';
 
 /** A PC whose Done sends the spoken question, and says its answer. */
 const asks = { can: CAN_BEFORE_WORDS };
@@ -126,8 +139,10 @@ test('▶ Read aloud: read_aloud with the answer’s id, Yap’s voice on the ph
   pc.send({ type: 'state', phase: 'idle' });
   pc.send({ type: 'state', phase: 'speaking' });
   pc.send({ type: 'speak_start', rate: 24000 });
-  for (let i = 0; i < 30; i++) pc.sendBinary(downFrame(i, voice(24000, 100)));
+  for (const f of sentences(3000)) pc.sendBinary(f);
   await expect.poll(async () => (await snapshot(page)).player.state).toBe('playing');
+  // Through the media player, the standard way.
+  expect((await snapshot(page)).player.via).toBe('media');
   // ▶ turned into Stop in place, "Speaking…" beside it: the one Stop (none in the composer).
   await expect(page.getByTestId('read-aloud')).toHaveText('Stop');
   await expect(page.getByText('Speaking…')).toBeVisible();

@@ -1,9 +1,11 @@
 // Yap Link's phone page against a mocked PC: pairing, Talk and its frames,
 // what's shown while Yap works, the spoken answer, Stop and barge-in, the
 // model chip, denied, reconnects, pings and the wake lock. (Talk's words in
-// the box, the default with hands-free off: words.spec.js. The spoken
+// the box: words.spec.js; hands-free talk: handsfree.spec.js. The spoken
 // answer's tests here talk to a PC whose Done sends the question —
-// `CAN_BEFORE_WORDS`, as hands-free does today.)
+// `CAN_BEFORE_WORDS`, as a PC from before words does. Those about the
+// stream's own timing play it through Web Audio, the fallback where the
+// browser refuses the media player: `refuseMediaPlayer`.)
 import { test, expect } from '@playwright/test';
 import {
   servePage,
@@ -21,6 +23,7 @@ import {
   DEVICE,
   MODELS,
   openSettings,
+  refuseMediaPlayer,
   CAN_BEFORE_WORDS,
 } from './support/harness.js';
 
@@ -249,7 +252,7 @@ test.describe('talking', () => {
     expect([44100, 48000]).toContain(snap.contextRate);
   });
 
-  test('hold to talk: release sends (a question: hands-free, or a PC from before words)', async ({ page }) => {
+  test('hold to talk: release sends (a question: a PC from before words)', async ({ page }) => {
     const pc = await mockPc(page, asks);
     await open(page);
     await ready(page, pc);
@@ -408,7 +411,10 @@ test.describe('talking', () => {
     await expect(page.getByTestId('error')).toBeHidden();
   });
 
-  test("the answer spoken: one stream at the phone's own rate, played out to the end", async ({ page }) => {
+  test("the answer spoken through Web Audio (the fallback): one stream at the phone's own rate, played out to the end", async ({
+    page,
+  }) => {
+    await refuseMediaPlayer(page);
     const pc = await mockPc(page, asks);
     await open(page);
     await ready(page, pc);
@@ -440,7 +446,10 @@ test.describe('talking', () => {
     expect((await snapshot(page)).contextState).toBe('running');
   });
 
-  test('Stop: interrupt sent, the answer silent at once (a fade, not a cut), its late frames dropped', async ({ page }) => {
+  test('Stop: interrupt sent, the answer silent at once (through Web Audio, a fade, not a cut), its late frames dropped', async ({
+    page,
+  }) => {
+    await refuseMediaPlayer(page);
     const pc = await mockPc(page, asks);
     await open(page);
     await ready(page, pc);

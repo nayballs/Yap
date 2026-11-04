@@ -20,26 +20,36 @@
 // `start {mode: "words"}`, then the PC's `words` go in at the caret, after
 // whatever was typed; Send asks them as said (`ask {speak: true}`: answered
 // out loud, as a spoken question is) when any of the box's words came from
-// Talk since it was last empty or sent. Hands-free (or a PC from before,
-// without "words" in `ready.can`) sends the question at once and Yap
-// answers out loud.
+// Talk since it was last empty or sent. (A PC from before, without "words"
+// in `ready.can`, takes Talk's words as the question at once, answered out
+// loud.)
+//
+// **Hands-free talk** (4 Nov; the Claude app's voice mode) is its own
+// button, the waveform in Send's place while there's nothing to send: a
+// conversation, as a call is — Yap listens, sends what was said after the
+// wait chosen (1 s, 1.5 s or 2.5 s) of quiet, answers out loud, then
+// listens again by itself, until End (the same button), 10 s with nothing
+// said, the connection dropping, the page going into the background or the
+// mic failing. ■ while Yap thinks or speaks stops that answer and listens
+// again. Each turn is an ordinary spoken question (`start {mode: "ask"}`,
+// frames, `stop`): nothing new on the wire, never dictation.
 //
 // What it does: pairing (the QR's #pair=<token>, the 4-digit code, the device
 // kept in localStorage; a hello carries the device and any code this tab
 // has, the device counted first), typed questions (`ask`: answered in the
 // same conversation, not spoken; ▶ under an answer has it read, `read_aloud`),
-// Talk (tap or hold; hands-free ends by itself after the wait chosen — 1 s,
-// 1.5 s or 2.5 s — of quiet), the mic resampled to 16 kHz Int16 in an
-// AudioWorklet (mic-worklet.js, dsp.js), the spoken answer as one stream
-// (resampled here frame after frame, played from a jitter buffer in
-// player-worklet.js) — or, with "Play the voice through the media player",
-// cut at its pauses into WAV files the browser's media player plays (a far
-// bigger buffer than Web Audio's) —, "Clearer sound in a headset" (on by
-// default: the mic closed while Yap talks), opening the mic a timed step at a time (never a
-// silent "Wait…"), Stop and barge-in, the conversation, the step Yap is on
-// and its time, the model chip and Chat's picker, Sound details, the
-// on-screen keyboard (the composer rides above it), reconnects with
-// backoff, keep-alive pings and a screen wake lock.
+// Talk (tap or hold), hands-free talk, the mic resampled to 16 kHz Int16 in
+// an AudioWorklet (mic-worklet.js, dsp.js), the spoken answer through the
+// browser's media player (cut at its pauses into WAV files `<audio>` plays:
+// a far bigger buffer than Web Audio's, clean where Web Audio crackled) —
+// or, where the browser refuses that, as one stream (resampled here frame
+// after frame, played from a jitter buffer in player-worklet.js) —,
+// "Clearer sound in a headset" (on by default: the mic closed while Yap
+// talks), opening the mic a timed step at a time (never a silent "Wait…"),
+// Stop and barge-in, the conversation, the step Yap is on and its time, the
+// model chip and Chat's picker, Sound details, the on-screen keyboard (the
+// composer rides above it), reconnects with backoff, keep-alive pings and a
+// screen wake lock.
 //
 // No service worker: on an origin whose certificate Chrome only accepted
 // after a warning, registration fails ("An SSL certificate error occurred
@@ -77,7 +87,9 @@ const KIND_UP = 0x01;
 const KIND_DOWN = 0x02;
 const MAX_FRAMES = (120 * LINK_RATE) / FRAME_SAMPLES; // a question: 2 minutes at most
 const HOLD_MS = 350; // a press this long is a hold: release sends
-const NO_SPEECH_MS = 10000; // hands-free: nothing said this long → cancelled
+const NO_SPEECH_MS = 10000; // hands-free talk: nothing said this long once it's listening → it ends
+const CALL_SETTLE_MS = 3000; // hands-free talk: the answer played out, the PC's idle awaited at most this long
+const MEDIA_START_MS = 2000; // a piece the media player hasn't started by then: it can't, here (Web Audio takes over)
 const MIC_WARM_MS = 15000; // the mic kept open after a turn, for a follow-up
 const MIC_LIVE_MS = 3000; // the longest a new mic's wait for sound (a headset switching to its call link)
 // Opening the mic never waits silently: each step has a time limit (doOpenMic).
@@ -94,15 +106,19 @@ const KEY = {
   device: 'yap.link.device',
   pc: 'yap.link.pc',
   mic: 'yap.link.mic',
-  handsFree: 'yap.link.handsFree',
   wait: 'yap.link.wait',
   clearer: 'yap.link.clearer',
-  media: 'yap.link.media',
   // The conversation, for this tab only (sessionStorage): a reload keeps it.
   thread: 'yap.link.thread',
   // The conversation this phone is in on the PC: its id, or "new".
   chat: 'yap.link.chat',
 };
+/**
+ * Settings that went on 4 Nov, ignored and tidied away: the Hands-free
+ * switch (hands-free talk is its own button now) and "Play the voice
+ * through the media player" (the standard way now).
+ */
+const GONE = ['yap.link.handsFree', 'yap.link.media'];
 
 /** A PC from before typed questions: said plainly, before anything's sent. */
 const OLD_PC_TYPING = 'Yap on your PC needs an update to answer typed questions. Update Yap there; talking works as before.';
@@ -116,10 +132,25 @@ const forgetBoxNote = () => {
   if (/is in the box\.$/.test(S.note)) S.note = '';
 };
 
-/** Hands-free's hint: what it changes, where the PC can put Talk's words in the box (else it always sends). */
-const HANDS_FREE_HINT = {
-  words: 'On: sends when you stop talking, and Yap answers out loud. Off: your words go in the box to check first.',
-  sends: 'Sends when you stop talking',
+/** Hands-free talk's words: how it ended, when it ended by itself. */
+const CALL_ENDED = {
+  quiet: 'Hands-free talk ended: nothing was said for 10 seconds.',
+  hidden: 'Hands-free talk ended when this page went into the background.',
+  dropped: (pc) => `Hands-free talk ended: the connection to ${pc} dropped.`,
+  micGone: 'The microphone went away (was the headset switched off?). What it heard was sent, and hands-free talk ended.',
+};
+/** A question it didn't catch: it listens again (said once, until the next is heard). */
+const CALL_MISSED = "Yap didn't catch that, so it's listening again.";
+/** The call's state, as its capsule says it. */
+const CALL_WORDS = {
+  offline: '',
+  opening: 'Opening the mic…',
+  listening: 'Listening',
+  transcribing: 'Thinking',
+  working: 'Thinking',
+  speaking: 'Speaking',
+  // (A moment between turns: never "Listening" before the mic is open.)
+  idle: '',
 };
 
 // ------------------------------------------------------------------ storage
@@ -278,16 +309,17 @@ const S = {
   said: false,
   error: '',
   note: '',
-  handsFree: load(KEY.handsFree) === true,
-  // Hands-free's wait before sending: short | normal | long (WAITS).
+  // Hands-free talk is on (the call button): Yap listens again after each answer.
+  call: false,
+  // Questions in a row it didn't catch (a second ends the call).
+  callMisses: 0,
+  callTimer: 0,
+  // Hands-free talk's wait before sending: short | normal | long (WAITS).
   wait: waitChoice(load(KEY.wait)),
   // "Clearer sound in a headset": the mic closed while Yap talks. On unless
   // the person turned it off: with the mic open a headset stays in its call
   // mode, which crackles.
   clearer: load(KEY.clearer) !== false,
-  // "Play the voice through the media player": the person's choice, else on
-  // in Firefox for Android only (mediaByDefault).
-  media: mediaChoice(load(KEY.media), navigator.userAgent),
   tick: 0,
   stopTimer: 0,
   gen: 0,
@@ -349,16 +381,14 @@ const el = {
   talkBtn: $('talk-btn'),
   talkLabel: $('talk-label'),
   talkTime: $('talk-time'),
+  callBtn: $('call-btn'),
   stopBtn: $('stop-btn'),
   cancelBtn: $('cancel-btn'),
   settingsBtn: $('settings-btn'),
   settings: $('settings'),
   settingsClose: $('settings-close'),
-  handsFree: $('handsfree'),
-  handsFreeHint: $('handsfree-hint'),
   wait: $('wait'),
   clearer: $('clearer'),
-  media: $('media'),
   sound: $('sound'),
   soundVia: $('sound-via'),
   soundRate: $('sound-rate'),
@@ -445,24 +475,6 @@ function readFrame(buf) {
 function nonce() {
   const b = crypto.getRandomValues(new Uint8Array(16));
   return btoa(String.fromCharCode(...b)).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
-}
-
-/**
- * Whether Yap's voice plays through the media player before the person has
- * chosen: in Firefox for Android only. Its Web Audio ignores `latencyHint`
- * and runs on the phone's shortest output buffer, so a busy moment on the
- * phone crackles, even with the page's own jitter buffer full. The media
- * player keeps far more sound ready: on a real phone (4 Nov 2026), Web Audio
- * crackled and the media player was clean. Everywhere else Web Audio's
- * shorter delay wins.
- */
-function mediaByDefault(ua) {
-  return /Android/.test(ua) && /Firefox\//.test(ua);
-}
-
-/** The setting as stored (true / false), or the default for this browser when never chosen. */
-function mediaChoice(stored, ua) {
-  return typeof stored === 'boolean' ? stored : mediaByDefault(ua);
 }
 
 /** "Android · Chrome", for the PC's list of paired phones. */
@@ -596,6 +608,12 @@ function dropped(ws) {
   clearTimeout(S.pongTimer);
   const wasReady = S.ready;
   S.ready = false;
+  // Hands-free talk ends with the connection (said once, below).
+  const inCall = S.call;
+  if (inCall) {
+    S.call = false;
+    clearTimeout(S.callTimer);
+  }
   // A question can't carry on across a reconnect (nor words on their way
   // to the box: what's typed there stays).
   if (S.local !== 'idle' || S.phase !== 'idle' || player.active || S.transcribing) {
@@ -614,13 +632,18 @@ function dropped(ws) {
     else if (t) t.final = true;
     saveThread();
     renderConvo();
-    if (wasReady) {
+    if (wasReady && !inCall) {
       S.error = words
         ? `Lost the connection to ${pcName()} before your words came back. Try again once it's back.`
         : listening
           ? `Lost the connection to ${pcName()} while listening. Ask again once it's back.`
           : `Lost the connection to ${pcName()}.`;
     }
+  }
+  if (inCall) {
+    // Quietly, with a note; the mic let go at once (the headset back to its music link).
+    S.note = CALL_ENDED.dropped(pcName());
+    closeMic();
   }
   if (!S.denied) {
     const delay = Math.min(15000, 500 * 2 ** S.retries) * (0.8 + Math.random() * 0.4);
@@ -746,6 +769,9 @@ function onText(text) {
       break;
     case 'heard':
       currentTurn(true).q = String(m.text ?? '');
+      // Hands-free talk caught this one.
+      S.callMisses = 0;
+      if (S.note === CALL_MISSED) S.note = '';
       renderConvo();
       break;
     case 'words':
@@ -783,10 +809,25 @@ function onText(text) {
     case 'speak_end':
       player.end();
       break;
-    case 'error':
+    case 'error': {
       S.error = String(m.message || 'Something went wrong on the PC.');
       S.step = '';
+      const wasListening = S.local !== 'idle';
       if (S.local !== 'idle') endLocalQuestion();
+      // Hands-free talk: a question the PC didn't catch (nothing heard, or
+      // not made out) and it listens again, once; one it refused while it
+      // listened, or one it heard and couldn't answer, ends the call (the
+      // error says why).
+      if (S.call) {
+        const t = currentTurn(false);
+        const caught = !!(t && !t.final && t.q);
+        if (wasListening || caught || S.callMisses >= 1) endCall('', { stop: false });
+        else {
+          S.callMisses++;
+          S.note = CALL_MISSED;
+          S.error = '';
+        }
+      }
       // Words that didn't come (nothing heard, or the PC couldn't make them
       // out): the box keeps what it has.
       if (S.transcribing) {
@@ -806,6 +847,7 @@ function onText(text) {
         }
       }
       break;
+    }
     case 'pong':
       break;
     default:
@@ -845,6 +887,8 @@ function onState(phase) {
     // The PC ended the question itself (its own limit, say).
     if (S.local === 'listening' && S.pcListening) endLocalQuestion();
     if (was !== 'idle') armMicClose();
+    // Hands-free talk: Yap's done (its voice played out here too): listen again.
+    callNext();
   }
   syncTicker();
 }
@@ -1029,6 +1073,7 @@ function letGo() {
 
 /** The drawer's chat: this phone's questions go there, its messages shown. */
 function openChat(id, title) {
+  endCall();
   letGo();
   S.chat = id;
   save(KEY.chat, id);
@@ -1045,6 +1090,7 @@ function openChat(id, title) {
 
 /** + New chat: the next question starts a conversation on the PC. */
 function newChat() {
+  endCall();
   letGo();
   S.chat = 'new';
   save(KEY.chat, 'new');
@@ -1450,10 +1496,14 @@ async function permissionState() {
   }
 }
 
-const PERMISSION_WAIT =
-  'Waiting for the microphone permission. Tap the icon left of the address bar → Microphone → Allow, then tap Talk again.';
-const PERMISSION_BLOCKED =
-  'The microphone is blocked for this page. Tap the icon left of the address bar → Microphone → Allow, then tap Talk again.';
+const PERMISSION_HOW = 'Tap the icon left of the address bar → Microphone → Allow';
+const PERMISSION_WAIT = `Waiting for the microphone permission. ${PERMISSION_HOW}, then tap Talk again.`;
+const PERMISSION_BLOCKED = `The microphone is blocked for this page. ${PERMISSION_HOW}, then tap Talk again.`;
+// Hands-free talk's: it waits on for the permission (going on once it's
+// allowed), and a mic that's blocked ends it (started again from the waveform).
+const PERMISSION_WAIT_CALL = `Waiting for the microphone permission. ${PERMISSION_HOW}: hands-free talk goes on once it's allowed.`;
+const PERMISSION_BLOCKED_CALL = `The microphone is blocked for this page. ${PERMISSION_HOW}, then tap the waveform again.`;
+const PERMISSION_WORDS = [PERMISSION_WAIT, PERMISSION_BLOCKED, PERMISSION_WAIT_CALL, PERMISSION_BLOCKED_CALL];
 
 /** Opening the mic is waiting on the permission (past PERMISSION_MS): Talk tries afresh. */
 const waitingPermission = () => !!(mic.opening && mic.run && mic.run.waiting);
@@ -1580,12 +1630,17 @@ async function doOpenMic(run) {
       if (mic.stream !== stream) return;
       const listening = S.local === 'listening';
       if (listening) stopTalk();
+      // Hands-free talk ends with its mic (what it heard still goes, and is answered).
+      const call = S.call && listening;
+      if (call) endCall('', { stop: false });
       closeMic();
       S.note = !listening
         ? ''
-        : S.talk === 'words'
-          ? MIC_GONE_WORDS
-          : 'The microphone went away (was the headset switched off?). What it heard was sent.';
+        : call
+          ? CALL_ENDED.micGone
+          : S.talk === 'words'
+            ? MIC_GONE_WORDS
+            : 'The microphone went away (was the headset switched off?). What it heard was sent.';
       render();
     };
   }
@@ -1613,7 +1668,9 @@ async function askForMic(run, want, blocked) {
     () => {
       if (run.attempt !== mic.attempt) return;
       run.waiting = true;
-      if (S.local === 'opening') S.error = blocked ? PERMISSION_BLOCKED : PERMISSION_WAIT;
+      if (S.local === 'opening') {
+        S.error = blocked ? (S.call ? PERMISSION_BLOCKED_CALL : PERMISSION_BLOCKED) : S.call ? PERMISSION_WAIT_CALL : PERMISSION_WAIT;
+      }
       render();
     },
     blocked ? 0 : PERMISSION_MS,
@@ -1642,7 +1699,7 @@ async function askForMic(run, want, blocked) {
   }
   if (run.waiting) {
     run.waiting = false;
-    if (S.error === PERMISSION_WAIT || S.error === PERMISSION_BLOCKED) S.error = '';
+    if (PERMISSION_WORDS.includes(S.error)) S.error = '';
   }
   if (fellBack) S.note = `${want.label || 'The chosen microphone'} isn't connected, so this uses the phone's own.`;
   return stream;
@@ -1682,23 +1739,19 @@ function closeMic() {
  * With "Clearer sound in a headset" on (the default), the mic closes as soon as the
  * question is sent (so the headset has the time Yap spends working it out to
  * switch to its music link, A2DP, before the answer starts) and, in any
- * case, when the answer starts (`speak_start`); it opens again on Talk, or
- * once the answer has played out when hands-free is on (then kept warm as
- * above).
+ * case, when the answer starts (`speak_start`); it opens again on Talk, or,
+ * in hands-free talk, for the next turn once the answer has played out
+ * (its timed steps on screen: "Listening" only once it's open).
  */
 function afterQuestionSent() {
   if (S.clearer) closeMic();
   else armMicClose();
 }
 
-/** The answer has played out (or was stopped): the mic's next move. */
+/** The answer has played out (or was stopped): the mic's next move, and hands-free talk's next turn. */
 function afterAnswer() {
-  if (S.clearer && S.handsFree && S.local === 'idle' && !mic.stream) {
-    // Back to the call link, ready for a follow-up (warm, then closed).
-    openMic()
-      .then(armMicClose)
-      .catch(() => {});
-  } else armMicClose();
+  armMicClose();
+  callNext();
 }
 
 function armMicClose() {
@@ -1714,7 +1767,7 @@ function micError(err) {
   switch (err && err.name) {
     case 'NotAllowedError':
     case 'SecurityError':
-      return PERMISSION_BLOCKED;
+      return S.call ? PERMISSION_BLOCKED_CALL : PERMISSION_BLOCKED;
     case 'WorkletSlow':
       return "The audio setup didn't finish: reload the page, then try again.";
     case 'AudioStart':
@@ -1777,13 +1830,13 @@ function onMicMessage(e) {
     S.frames++;
     meter(d.level || 0);
     if (S.local === 'listening') {
-      if (S.handsFree) {
+      // Hands-free talk: sent after the wait chosen of quiet once speech
+      // was heard; nothing said for 10 s, and the call ends.
+      if (S.call && S.talk === 'ask') {
         const said = vad.push(d.level || 0);
         if (said === 'end') stopTalk();
         else if (!vad.heard && S.frames * FRAME_MS >= NO_SPEECH_MS) {
-          cancelTalk();
-          S.note = "Didn't hear anything. Tap Talk to try again.";
-          render();
+          endCall(CALL_ENDED.quiet);
           return;
         }
       }
@@ -1818,24 +1871,31 @@ const busyListening = () => S.local === 'listening' || S.local === 'opening';
 
 /**
  * Does Talk put its words in the box (to check, then send) rather than
- * send them? Yes unless hands-free is on, where the PC can (`words` in
- * `ready.can`; a PC from before always takes the question).
+ * send them? Always, where the PC can (`words` in `ready.can`; a PC from
+ * before takes them as the question). Hands-free talk sends its own.
  */
-const wordsMode = () => can('words') && !S.handsFree;
+const wordsMode = () => can('words');
 
-async function beginTalk() {
+/**
+ * Yap listens: Talk's words for the box (`'words'`), or a question it
+ * answers out loud (`'ask'`: hands-free talk's turns, a PC from before
+ * words). Whatever Yap was doing stops first (barge-in). `keepNote`: hands-
+ * free talk's next turn keeps what the last one said.
+ */
+async function beginTalk(talk = wordsMode() ? 'words' : 'ask', { keepNote = false } = {}) {
   S.error = '';
-  S.note = '';
+  if (!keepNote) S.note = '';
   if (!S.ready) {
     S.error = `Not connected to ${pcName()} yet.`;
+    endCall('', { stop: false });
     render();
     return;
   }
   if (S.local !== 'idle') return;
   keepAwake();
   const now = phaseNow();
-  // What this one's for, chosen now (hands-free switched meanwhile changes the next).
-  S.talk = wordsMode() ? 'words' : 'ask';
+  // What this one's for, chosen now.
+  S.talk = talk;
   // Barge-in: the answer stops at once, then Yap listens.
   if (now === 'speaking') interrupt();
   else if (now === 'transcribing') dropWords();
@@ -1855,7 +1915,11 @@ async function beginTalk() {
   } catch (err) {
     if (S.local === 'opening' && gen === S.gen) {
       S.local = 'idle';
-      if (err && err.name !== 'Abandoned') S.error = micError(err);
+      if (err && err.name !== 'Abandoned') {
+        S.error = micError(err);
+        // Hands-free talk ends with a mic that won't open (the error says why).
+        endCall('', { stop: false });
+      }
       render();
     }
     return;
@@ -1867,6 +1931,7 @@ async function beginTalk() {
   }
   if (!S.ready) {
     S.local = 'idle';
+    endCall('', { stop: false });
     render();
     return;
   }
@@ -1894,6 +1959,92 @@ function restartTalk() {
   giveUpOpening();
   S.local = 'idle';
   beginTalk();
+}
+
+// --------------------------------------------------- hands-free talk
+
+/**
+ * **Hands-free talk** (the call button; the Claude app's voice mode): a
+ * conversation, as a call is. Yap listens; the wait chosen of quiet after
+ * speech sends what was said (`start {mode: "ask"}`, frames, `stop`, as
+ * any spoken question); Yap works it out and answers out loud; once the
+ * answer has played out it listens again by itself (with Clearer sound, the
+ * mic opened afresh for each turn, its timed steps on screen). It ends with
+ * End (the same button), 10 s with nothing said, the connection dropping,
+ * the page going into the background or the mic failing. Asked within the
+ * tap: the phone's sound and the media player readied (a phone wants a
+ * gesture for them).
+ */
+function startCall() {
+  if (S.call) return;
+  S.error = '';
+  S.note = '';
+  if (!S.ready) {
+    S.error = `Not connected to ${pcName()} yet.`;
+    render();
+    return;
+  }
+  const ctx = audioContext();
+  if (ctx.state !== 'running') ctx.resume().catch(() => {});
+  mediaVoice.unlock();
+  S.call = true;
+  S.callMisses = 0;
+  threadPinned = true;
+  beginTalk('ask');
+}
+
+/**
+ * Hands-free talk ends: what it was doing stops too (`stop`: listening
+ * cancelled, a question being worked out called off, an answer being said
+ * stopped) unless the PC has already ended it (an error). The mic is let go
+ * at once (a headset back to its music link). `note`: why, when it ended by
+ * itself.
+ */
+function endCall(note = '', { stop = true } = {}) {
+  if (!S.call) return;
+  S.call = false;
+  S.callMisses = 0;
+  clearTimeout(S.callTimer);
+  S.callTimer = 0;
+  if (stop) letGo();
+  // A turn still waiting for its words goes (nothing was asked in it).
+  const t = currentTurn(false);
+  if (t && !t.final && !t.q && !t.a && S.local === 'idle') S.turns.pop();
+  if (S.note === CALL_MISSED) S.note = '';
+  if (note) S.note = note;
+  closeMic();
+  renderConvo();
+  syncTicker();
+  render();
+}
+
+/**
+ * Hands-free talk's next turn: once Yap has finished — its answer played
+ * out here and the PC idle (or the PC idle with nothing to say) — it
+ * listens again. A PC still "speaking" CALL_SETTLE_MS after its voice played
+ * out here is taken as done (listening interrupts it).
+ */
+function callNext() {
+  clearTimeout(S.callTimer);
+  S.callTimer = 0;
+  if (!S.call || !S.ready || S.local !== 'idle' || S.transcribing || player.active) return;
+  if (S.phase === 'idle') {
+    beginTalk('ask', { keepNote: true });
+    return;
+  }
+  if (S.phase === 'speaking') {
+    S.callTimer = setTimeout(() => {
+      S.callTimer = 0;
+      if (S.call && S.ready && S.local === 'idle' && !player.active) beginTalk('ask', { keepNote: true });
+    }, CALL_SETTLE_MS);
+  }
+}
+
+/** ■ in hands-free talk: the answer stops (or the question being worked out is called off), and Yap listens again. */
+function callStopAnswer() {
+  if (!S.call) return;
+  if (S.local === 'stopping') cancelTalk();
+  beginTalk('ask');
 }
 
 function stopTalk() {
@@ -1963,7 +2114,7 @@ function cancelTalk() {
     if (!sent) {
       // The mic was still opening: that's given up too, whatever step it was on.
       giveUpOpening();
-      if (S.error === PERMISSION_WAIT || S.error === PERMISSION_BLOCKED) S.error = '';
+      if (PERMISSION_WORDS.includes(S.error)) S.error = '';
     }
     endLocalQuestion();
     if (sent) {
@@ -2049,19 +2200,47 @@ const idleStats = () => ({
 });
 
 /**
- * Yap's voice, as one stream. Each down frame (24 kHz Int16) is resampled to
- * the context's rate as it comes, in one filter carried on from frame to
- * frame (never a clip at a time, which clicked at every join), and posted to
- * the player worklet (player-worklet.js), which plays it from a jitter buffer
- * (dsp.js `Playout`): the sound starts once 250 ms is waiting, a late frame
- * fades out and back in (an underrun, counted) instead of a hard gap, Stop is
- * a 5 ms fade. `active` from speak_start until the end has played out, or
- * Stop.
+ * How Yap's voice plays for the rest of this visit: through the browser's
+ * media player (`mediaVoice`, the standard way since 4 Nov: on a real phone
+ * in Firefox, in a Bluetooth headset, Web Audio crackled and the media
+ * player was clean), or through Web Audio (the player worklet) once the
+ * browser has refused the media player — a play refused (an iPhone's Safari
+ * may want a tap for each), an `<audio>` error, a piece that never starts.
+ * `why`: what happened, for Sound details (and nowhere else).
+ */
+const voice = { via: 'media', why: '' };
+
+/**
+ * The browser won't play Yap's voice through the media player: the answer
+ * playing goes on through Web Audio at once, from where the media player
+ * got to (nothing lost, nothing said twice), and so does every answer after
+ * it this visit.
+ */
+function fallBack(why) {
+  if (voice.via !== 'media') return;
+  voice.via = 'worklet';
+  voice.why = why;
+  if (player.accepting && player.via === 'media') player.toWorklet(mediaVoice.takeRest(), why);
+  else mediaVoice.stop();
+  renderSound();
+}
+
+/**
+ * Yap's voice. Through the media player (`mediaVoice`): the answer cut at
+ * its pauses into WAV files `<audio>` plays. Or, where the browser refuses
+ * that (`fallBack`), as one stream through Web Audio: each down frame (24
+ * kHz Int16) resampled to the context's rate as it comes, in one filter
+ * carried on from frame to frame (never a clip at a time, which clicked at
+ * every join), and posted to the player worklet (player-worklet.js), which
+ * plays it from a jitter buffer (dsp.js `Playout`): the sound starts once
+ * 250 ms is waiting, a late frame fades out and back in (an underrun,
+ * counted) instead of a hard gap, Stop is a 5 ms fade. `active` from
+ * speak_start until the end has played out, or Stop.
  */
 const player = {
   rate: DOWN_RATE, // speak_start's
   id: 0, // this answer's, on every message to and from the worklet
-  via: null, // how this answer plays: 'worklet', or 'media' (mediaVoice)
+  via: null, // how this answer plays: 'media' (mediaVoice), or 'worklet'
   node: null,
   loading: null,
   waiting: [], // messages for the worklet before it's loaded
@@ -2071,7 +2250,9 @@ const player = {
   accepting: false,
   ending: false,
   queued: 0, // seconds of the answer received
-  stats: idleStats(), // the worklet's last report
+  stats: idleStats(), // the worklet's last report (or the media player's numbers)
+  // What the media player had played of this answer before Web Audio took over.
+  base: null,
   level: 0, // the loudest sample it played since the report before
   last: null, // the last answer, for Sound details
   get active() {
@@ -2083,9 +2264,10 @@ const player = {
   },
 
   /**
-   * Loads the worklet and makes its node, once, ahead of the first answer.
-   * Resolves when that's done or has failed (`broken`; `slow` when the
-   * module never loaded), never rejects.
+   * Loads the worklet and makes its node, once, ahead of the first answer
+   * (ready for Web Audio to take over at once). Resolves when that's done
+   * or has failed (`broken`; `slow` when the module never loaded), never
+   * rejects.
    */
   prepare() {
     if (this.node || this.broken) return Promise.resolve();
@@ -2143,7 +2325,7 @@ const player = {
       }
       this.node = null;
     }
-    if (this.accepting) {
+    if (this.accepting && this.via === 'worklet') {
       S.note = "Couldn't play Yap's voice on this phone. Reload the page, then ask again.";
       if (this.ending) this.finished();
       else render();
@@ -2165,19 +2347,56 @@ const player = {
     this.ending = false;
     this.queued = 0;
     this.level = 0;
-    // Through the media player (the setting), or the worklet's one stream.
-    this.via = S.media ? 'media' : 'worklet';
+    this.base = null;
+    // A tap's play was refused, and none has played since: the browser said
+    // no to the media player, so Web Audio from the start.
+    if (voice.via === 'media' && mediaVoice.refused && !mediaVoice.unlocked) fallBack(`was refused (${mediaVoice.refused})`);
+    this.via = voice.via;
     this.stats = { ...idleStats(), state: 'buffering' };
-    this.last = { via: this.via, startDelayMs: null, startBufferedMs: null, underruns: 0, played: 0, micOpen: false, micClosed: false };
-    if (this.via === 'media') {
-      mediaVoice.begin(rate, this.id);
-      return;
-    }
+    this.last = {
+      via: this.via,
+      fellBack: this.via === 'worklet' ? voice.why : '',
+      startDelayMs: null,
+      startBufferedMs: null,
+      underruns: 0,
+      played: 0,
+      micOpen: false,
+      micClosed: false,
+    };
+    if (this.via === 'media') mediaVoice.begin(rate, this.id);
+    else this.startWorklet();
+  },
+  /** This answer's stream through Web Audio: a resampler to the context's rate, and the worklet told. */
+  startWorklet() {
     const ctx = audioContext();
     if (ctx.state !== 'running') ctx.resume().catch(() => {});
-    this.rs = new Resampler(rate, ctx.sampleRate);
+    this.rs = new Resampler(this.rate, ctx.sampleRate);
     this.post({ cmd: 'begin', id: this.id });
     if (this.broken) this.fail();
+  },
+  /**
+   * The media player gave up on this answer (`fallBack`): what it hadn't
+   * played goes through Web Audio at once, and the rest as it comes. What
+   * it played still counts in the answer's numbers.
+   */
+  toWorklet({ parts, played }, why) {
+    if (!this.accepting) return;
+    this.via = 'worklet';
+    const s = this.stats;
+    this.base = { played, underruns: s.underruns, startDelayMs: s.startDelayMs, startBufferedMs: s.startBufferedMs };
+    this.stats = { ...idleStats(), state: 'buffering', played, underruns: s.underruns, startDelayMs: s.startDelayMs, startBufferedMs: s.startBufferedMs };
+    if (this.last) {
+      this.last.via = 'worklet';
+      this.last.fellBack = why;
+    }
+    this.startWorklet();
+    if (!this.accepting) return; // (the worklet broke: said, and over)
+    for (const p of parts) if (p.length) this.send(this.rs.process(fromInt16(p)));
+    if (this.ending) {
+      this.send(this.rs.flush());
+      this.post({ cmd: 'end', id: this.id });
+      if (this.broken) this.finished();
+    }
   },
   push(samples) {
     if (!this.accepting || this.ending || !samples.length) return;
@@ -2202,19 +2421,29 @@ const player = {
     this.post({ cmd: 'end', id: this.id });
     if (this.broken) this.finished();
   },
-  /** A report from the worklet. */
+  /** A report from the worklet (with what the media player played first, when it gave up mid-answer). */
   report(d) {
     if (d.id !== this.id || !d.stats) return; // an answer since replaced
-    this.stats = d.stats;
+    const b = this.base;
+    this.stats = b
+      ? {
+          ...d.stats,
+          played: b.played + d.stats.played,
+          underruns: b.underruns + d.stats.underruns,
+          startDelayMs: b.startDelayMs != null ? b.startDelayMs : d.stats.startDelayMs,
+          startBufferedMs: b.startDelayMs != null ? b.startBufferedMs : d.stats.startBufferedMs,
+        }
+      : d.stats;
     this.level = d.level || 0;
     const L = this.last;
     if (L) {
-      if (d.stats.startDelayMs != null) {
-        L.startDelayMs = d.stats.startDelayMs;
-        L.startBufferedMs = d.stats.startBufferedMs;
+      const s = this.stats;
+      if (s.startDelayMs != null) {
+        L.startDelayMs = s.startDelayMs;
+        L.startBufferedMs = s.startBufferedMs;
       }
-      L.underruns = d.stats.underruns;
-      L.played = d.stats.played;
+      L.underruns = s.underruns;
+      L.played = s.played;
     }
     this.noteMic();
     if (Array.isArray(d.events) && d.events.includes('done')) this.finished();
@@ -2232,41 +2461,142 @@ const player = {
     if (!this.accepting) return;
     this.accepting = false;
     this.ending = false;
+    if (this.via === 'media') this.mediaIdle();
     afterAnswer();
     doneSpeaking();
     render();
   },
-  /** Silent at once (a 5 ms fade in the worklet); what's left is dropped. */
+  /** Silent at once (the media player paused; a 5 ms fade in the worklet); what's left is dropped. */
   stopAll() {
     if (this.accepting) {
-      if (this.via === 'media') mediaVoice.stop();
-      else this.post({ cmd: 'stop', id: this.id });
+      if (this.via === 'media') {
+        mediaVoice.stop();
+        this.mediaIdle();
+      } else this.post({ cmd: 'stop', id: this.id });
     }
     this.accepting = false;
     this.ending = false;
   },
+  /** The media player's numbers once it's done or stopped, as the worklet's last report says idle. */
+  mediaIdle() {
+    this.stats.state = 'idle';
+    this.stats.buffered = 0;
+    this.level = 0;
+  },
 };
 
+/** A twentieth of a second of silence as a WAV: played within a tap to ready the media player. */
+let silentUrl = '';
+function silence() {
+  if (!silentUrl) silentUrl = URL.createObjectURL(new Blob([wav(new Int16Array(DOWN_RATE / 20), DOWN_RATE)], { type: 'audio/wav' }));
+  return silentUrl;
+}
+
+/** How loud a piece is every 20 ms (RMS, 0–1): hands-free talk's waveform while Yap speaks. */
+function envelope(piece, rate) {
+  const step = Math.max(1, Math.round(rate / 50));
+  const out = new Float32Array(Math.ceil(piece.length / step));
+  for (let i = 0; i < out.length; i++) {
+    const from = i * step;
+    const to = Math.min(piece.length, from + step);
+    let sum = 0;
+    for (let j = from; j < to; j++) sum += (piece[j] / 0x8000) ** 2;
+    out[i] = Math.sqrt(sum / Math.max(1, to - from));
+  }
+  return out;
+}
+
+/** A media element's play(), as a promise however the browser answers it. */
+function playOf(a) {
+  try {
+    return Promise.resolve(a.play());
+  } catch (err) {
+    return Promise.reject(err);
+  }
+}
+
 /**
- * Yap's voice through the browser's media player ("Play the voice through
- * the media player", in the settings): the answer cut at its pauses (dsp.js
- * `Segmenter`), each piece a WAV file an `<audio>` element plays whole, the
- * next one loading while one plays. The browser's media output keeps far
- * more sound in hand than Web Audio's (Firefox for Android gives Web Audio
- * its smallest buffer, whatever a page asks: a busy moment on the phone can
- * crackle there), so it suits a voice that crackles; the cost, a moment's
- * extra pause where it was cut, and no fade on Stop. At Yap's own 24 kHz:
- * the browser resamples it. Its numbers go in `player.stats` / `player.last`
- * as the worklet's do, for Sound details.
+ * Yap's voice through the browser's media player, the standard way: the
+ * answer cut at its pauses (dsp.js `Segmenter`), each piece a WAV file
+ * (at Yap's own 24 kHz: the browser resamples it) that an `<audio>` element
+ * plays whole, the next loading in the other element meanwhile. The
+ * browser's media output keeps far more sound in hand than Web Audio's
+ * (Firefox for Android gives Web Audio its smallest buffer, whatever a page
+ * asks: a busy moment on the phone crackles there); the cost, a moment's
+ * extra pause where it was cut, and no fade on Stop. Two elements, made
+ * once and taken in turn, readied within a tap (`unlock`): an iPhone lets
+ * an element play later, unasked, only once a tap has played it. Where the
+ * browser refuses (a play refused, an error, a piece that never starts),
+ * `fallBack` hands the rest to Web Audio. Its numbers go in `player.stats`
+ * / `player.last` as the worklet's do, for Sound details.
  */
 const mediaVoice = {
+  els: [], // two <audio> elements, made once and taken in turn
+  unlocked: false, // one has played (within a tap, or a piece)
+  probing: false,
+  refused: '', // a tap's play refused (its error's name), until one plays
   id: 0, // `player.id` of the answer it's playing
   seg: null,
-  queue: [], // pieces waiting: { audio, url, secs, peak }
+  queue: [], // pieces waiting: { samples, url, secs, env, el, started }
   now: null, // the piece playing
   done: 0, // seconds of pieces played to their end
   began: 0, // when the answer's first frame came
   ending: false,
+  timer: 0, // the piece playing: MEDIA_START_MS to start
+
+  /** Element `i` (0 or 1), made the first time it's wanted. */
+  el(i) {
+    if (!this.els[i]) {
+      const a = new Audio();
+      a.preload = 'auto';
+      this.els[i] = a;
+    }
+    return this.els[i];
+  },
+  /** Is element `a` holding a piece (playing it, or loaded next)? */
+  busy(a) {
+    return (!!this.now && this.now.el === a) || this.queue.some((q) => q.el === a);
+  },
+  /** An element holding no piece. */
+  free() {
+    for (let i = 0; i < 2; i++) if (!this.busy(this.el(i))) return this.el(i);
+    return null;
+  },
+  /**
+   * Within a tap that leads to a spoken answer (hands-free talk, Send of
+   * Talk's words, ▶, Talk on a PC from before words): both elements play a
+   * moment of silence, once. A refusal here is the browser saying no to the
+   * media player: the answer starts on Web Audio instead (`player.begin`).
+   */
+  unlock() {
+    if (this.unlocked || this.probing || voice.via !== 'media') return;
+    let plays;
+    try {
+      plays = [0, 1].map((i) => {
+        const a = this.el(i);
+        if (this.busy(a)) return Promise.resolve();
+        a.src = silence();
+        return playOf(a);
+      });
+    } catch (err) {
+      this.refused = (err && err.name) || 'Error';
+      return;
+    }
+    this.probing = true;
+    Promise.all(plays).then(
+      () => {
+        this.probing = false;
+        this.unlocked = true;
+        this.refused = '';
+      },
+      (err) => {
+        this.probing = false;
+        const name = (err && err.name) || 'Error';
+        // (Cut short by a piece of the answer loading there: not a no.)
+        if (name !== 'AbortError') this.refused = name;
+      },
+    );
+  },
 
   begin(rate, id) {
     this.stop();
@@ -2289,13 +2619,23 @@ const mediaVoice = {
   },
   add(piece) {
     const url = URL.createObjectURL(new Blob([wav(piece, player.rate)], { type: 'audio/wav' }));
-    const audio = new Audio();
-    audio.preload = 'auto';
-    audio.src = url;
-    let peak = 0;
-    for (let i = 0; i < piece.length; i++) peak = Math.max(peak, Math.abs(piece[i]));
-    this.queue.push({ audio, url, secs: piece.length / player.rate, peak: peak / 0x8000 });
+    this.queue.push({ samples: piece, url, secs: piece.length / player.rate, env: envelope(piece, player.rate), el: null, started: false });
     if (!this.now) this.next();
+    else this.load();
+  },
+  /** The next piece loads in the other element while this one plays. */
+  load() {
+    const q = this.queue[0];
+    if (!q || q.el) return;
+    const a = this.free();
+    if (!a) return;
+    q.el = a;
+    a.src = q.url;
+    try {
+      a.load();
+    } catch {
+      /* it loads when it's played */
+    }
   },
   /** The next piece, when none is playing: or, with none waiting, the end (or a wait for one). */
   next() {
@@ -2311,49 +2651,84 @@ const mediaVoice = {
       }
       return;
     }
+    const a = item.el || this.free() || this.el(0);
+    if (!item.el) {
+      item.el = a;
+      a.src = item.url;
+    }
     this.now = item;
     const id = this.id;
     const mine = () => id === this.id && this.now === item;
-    item.audio.ontimeupdate = () => {
+    a.ontimeupdate = () => {
       if (mine()) this.note();
     };
-    item.audio.onended = () => {
+    a.onended = () => {
       if (!mine()) return;
+      clearTimeout(this.timer);
       this.done += item.secs;
-      this.drop(item);
+      this.release(item);
       this.now = null;
       this.note();
       this.next();
     };
-    item.audio.onerror = () => {
-      if (mine()) this.failed();
+    a.onerror = () => {
+      if (mine()) fallBack(`stopped with an error${a.error && a.error.code ? ` (code ${a.error.code})` : ''}`);
     };
     const first = player.stats.startDelayMs == null;
-    item.audio.play().then(
+    clearTimeout(this.timer);
+    // A piece that never starts (the play neither refused nor begun): the browser can't, here.
+    this.timer = setTimeout(() => {
+      if (mine() && !item.started) fallBack("didn't start");
+    }, MEDIA_START_MS);
+    playOf(a).then(
       () => {
         if (!mine()) return;
+        clearTimeout(this.timer);
+        item.started = true;
+        this.unlocked = true;
+        this.refused = '';
         if (first) {
           player.stats.startDelayMs = Math.round(performance.now() - this.began);
           player.stats.startBufferedMs = Math.round(item.secs * 1000);
         }
         player.stats.state = 'playing';
-        player.level = item.peak;
         this.note();
       },
-      () => {
-        if (mine()) this.failed();
+      (err) => {
+        if (mine()) fallBack(`was refused (${(err && err.name) || 'Error'})`);
       },
     );
+    this.load();
   },
-  /** The browser wouldn't play a piece: said once, and the answer ends. */
-  failed() {
-    S.note = "Couldn't play Yap's voice through the media player on this phone. Turn it off in ⋯ and ask again.";
+  /**
+   * What's still to say, as samples, and what was played: the rest of the
+   * piece playing (from where it got to), the pieces waiting, what isn't a
+   * piece yet. The media player stops.
+   */
+  takeRest() {
+    const parts = [];
+    let played = this.done;
+    if (this.now) {
+      const t = this.now.started && this.now.el ? this.now.el.currentTime || 0 : 0;
+      const at = Math.min(this.now.samples.length, Math.max(0, Math.floor(t * player.rate)));
+      played += at / player.rate;
+      parts.push(this.now.samples.subarray(at));
+    }
+    for (const q of this.queue) parts.push(q.samples);
+    const rest = this.seg && this.seg.flush();
+    if (rest) parts.push(rest);
     this.stop();
-    player.finished();
+    return { parts, played };
+  },
+  /** How loud the piece playing is now (0 between pieces): the call's waveform. */
+  level() {
+    const n = this.now;
+    if (!n || !n.started || !n.el) return 0;
+    return n.env[Math.min(n.env.length - 1, Math.floor((n.el.currentTime || 0) * 50))] || 0;
   },
   /** Its numbers for Sound details (and the snapshot): as the worklet's report. */
   note() {
-    const playing = this.now ? Math.min(this.now.audio.currentTime || 0, this.now.secs) : 0;
+    const playing = this.now && this.now.started ? Math.min(this.now.el.currentTime || 0, this.now.secs) : 0;
     const s = player.stats;
     s.played = this.done + playing;
     s.buffered = this.queue.reduce((n, q) => n + q.secs, 0) + (this.now ? this.now.secs - playing : 0);
@@ -2367,21 +2742,25 @@ const mediaVoice = {
     player.noteMic();
     renderSound();
   },
-  drop(item) {
-    item.audio.ontimeupdate = item.audio.onended = item.audio.onerror = null;
-    try {
-      item.audio.pause();
-      item.audio.removeAttribute('src');
-      item.audio.load();
-    } catch {
-      /* gone */
+  /** A piece done with: its element free for the next, its file let go. */
+  release(item) {
+    const a = item.el;
+    if (a) {
+      a.ontimeupdate = a.onended = a.onerror = null;
+      try {
+        a.pause();
+      } catch {
+        /* gone */
+      }
     }
+    item.el = null;
     URL.revokeObjectURL(item.url);
   },
   /** Silent now; what's waiting is dropped. */
   stop() {
-    if (this.now) this.drop(this.now);
-    for (const q of this.queue) this.drop(q);
+    clearTimeout(this.timer);
+    if (this.now) this.release(this.now);
+    for (const q of this.queue) this.release(q);
     this.now = null;
     this.queue = [];
     this.seg = null;
@@ -2497,8 +2876,9 @@ function render() {
   } else el.modelBtn.hidden = true;
 
   const now = phaseNow();
+  const call = S.call;
   document.body.dataset.phase = now;
-  el.phase.textContent = PHASE_WORDS[now];
+  el.phase.textContent = call ? CALL_WORDS[now] : PHASE_WORDS[now];
   // A small spinner in the header while Yap works the question out.
   el.busy.hidden = now !== 'working';
 
@@ -2518,18 +2898,22 @@ function render() {
   el.note.textContent = S.note;
 
   // The composer card: the pictures, the text box, then +, the chip, the
-  // mic and Send (■ while Yap answers); while Yap listens, the Yap bar's
-  // capsule (✕, the waveform, the time, Done), and while Talk's words are
-  // transcribed for the box, the capsule with "Transcribing…" (✕ still
-  // cancels).
+  // mic and Send (■ while Yap answers; the call button in its place while
+  // there's nothing to send); while Yap listens, the Yap bar's capsule (✕,
+  // the waveform, the time, Done), and while Talk's words are transcribed
+  // for the box, the capsule with "Transcribing…" (✕ still cancels). In
+  // hands-free talk the card is the call's capsule all along: the ✦, where
+  // it's at (Listening, Thinking, Speaking) with the waveform (the mic's,
+  // then Yap's voice) or Chat's three dots, ■ while Yap answers, and End.
   const listening = now === 'listening';
   const capsule = listening || now === 'opening' || now === 'transcribing';
   const words = S.talk === 'words' && capsule;
   el.composer.dataset.state = now === 'offline' ? 'idle' : now;
+  el.composer.dataset.call = String(call);
   el.composer.dataset.talk = words ? 'words' : 'ask';
   el.composer.dataset.typed = String(S.typed);
   el.composer.dataset.pictures = String(S.attached.length > 0 || S.preparing > 0);
-  el.liveLabel.textContent = now === 'opening' || now === 'transcribing' ? PHASE_WORDS[now] : '';
+  el.liveLabel.textContent = call ? CALL_WORDS[now] : now === 'opening' || now === 'transcribing' ? PHASE_WORDS[now] : '';
   el.talkBtn.disabled = (!S.ready && S.local === 'idle') || now === 'transcribing';
   el.talkBtn.setAttribute('aria-pressed', String(listening || now === 'opening'));
   el.talkLabel.textContent =
@@ -2548,26 +2932,37 @@ function render() {
             ? 'Transcribing…'
             : 'Sending…'
           : 'Talk';
-  el.talkTime.textContent = listening ? clock(S.frames * (FRAME_SAMPLES / LINK_RATE)) : '';
-  el.meter.dataset.on = String(listening);
+  el.talkTime.textContent = listening && !call ? clock(S.frames * (FRAME_SAMPLES / LINK_RATE)) : '';
+  el.talkBtn.hidden = call;
+  // The waveform: the mic's while Yap listens; in hands-free talk, Yap's
+  // voice too while it speaks.
+  el.meter.dataset.on = String(listening || (call && now === 'speaking'));
+  syncVoiceMeter(call && now === 'speaking');
   // + for a picture, where the PC takes them.
-  el.plusWrap.hidden = capsule || !S.ready || !can('pictures');
+  el.plusWrap.hidden = capsule || call || !S.ready || !can('pictures');
   if (el.plusWrap.hidden) closePlusMenu();
   // One button where Send is: ↑ to send; ■ while Yap works the question out
   // (cancel) or says an answer (Stop) — unless there are words to send
   // instead, or ▶ on an answer in the thread is what's playing (then its own
-  // Stop, in place): one Stop at a time.
+  // Stop, in place): one Stop at a time. With nothing to send, the call
+  // button (hands-free talk) is there instead, as the Claude app's voice
+  // mode button is. In the call: ■ while Yap answers (back to listening),
+  // and End.
   const stopSpeaking = now === 'speaking' && !readingInThread() && !S.typed;
   const stopWorking = now === 'working' && !S.typed;
-  el.stopBtn.hidden = capsule || !stopSpeaking;
-  el.sendBtn.hidden = capsule || stopSpeaking || stopWorking;
+  el.stopBtn.hidden = call ? !(now === 'working' || now === 'speaking') : capsule || !stopSpeaking;
+  el.stopBtn.setAttribute('aria-label', call && now === 'working' ? 'Stop the answer' : 'Stop');
+  el.sendBtn.hidden = call || capsule || stopSpeaking || stopWorking || !S.typed;
   el.sendBtn.disabled = !S.typed || S.preparing > 0;
+  el.callBtn.hidden = !call && (capsule || stopSpeaking || stopWorking || S.typed);
+  el.callBtn.disabled = !call && !S.ready;
+  el.callBtn.setAttribute('aria-pressed', String(call));
   // ✕ while it listens (on the left, as the bar's capsule has it); ■ while
   // it works the question out.
-  el.cancelBtn.hidden = !(capsule || stopWorking);
+  el.cancelBtn.hidden = call || !(capsule || stopWorking);
   el.cancelBtn.setAttribute('aria-label', capsule ? 'Cancel' : 'Stop the answer');
   // Chat's line for pictures its model can't read.
-  const line = capsule ? '' : visionLine();
+  const line = capsule || call ? '' : visionLine();
   el.vision.hidden = !line;
   if (line) {
     const name = el.modelLabel.textContent || 'This model';
@@ -2583,16 +2978,28 @@ function render() {
     el.visionPick.textContent = sw ? 'Choose another model…' : 'Choose a model…';
     for (const b of [el.visionSwitch, el.visionAsText, el.visionWithout]) b.disabled = !S.typed;
   }
-  el.handsFree.checked = S.handsFree;
-  // What hands-free changes: where the PC can put Talk's words in the box.
-  // (Not known yet: as a PC today has it.)
-  const known = S.ready || S.can.length > 0;
-  el.handsFreeHint.textContent = !known || can('words') ? HANDS_FREE_HINT.words : HANDS_FREE_HINT.sends;
-  el.wait.hidden = !S.handsFree;
   for (const r of el.wait.querySelectorAll('input[name=wait]')) r.checked = r.value === S.wait;
   el.clearer.checked = S.clearer;
-  el.media.checked = S.media;
   renderSound();
+}
+
+/**
+ * Hands-free talk's waveform while Yap speaks: its voice's loudness, as the
+ * mic's is while it listens (the media player's piece by its place, or the
+ * worklet's last report).
+ */
+let voiceMeterTimer = 0;
+function syncVoiceMeter(on) {
+  if (on && !voiceMeterTimer) {
+    resetMeter();
+    voiceMeterTimer = setInterval(() => {
+      const level = !player.sounding ? 0 : player.via === 'media' ? mediaVoice.level() : player.level * 0.5;
+      meter(level);
+    }, 50);
+  } else if (!on && voiceMeterTimer) {
+    clearInterval(voiceMeterTimer);
+    voiceMeterTimer = 0;
+  }
 }
 
 const num = (n) => Math.round(n).toLocaleString('en-GB');
@@ -2607,8 +3014,12 @@ function renderSound() {
   if (ctx && typeof ctx.baseLatency === 'number') lat.push(`Base ${msOf(ctx.baseLatency)}`);
   if (ctx && typeof ctx.outputLatency === 'number' && ctx.outputLatency > 0) lat.push(`Output ${msOf(ctx.outputLatency)}`);
   el.soundLatency.textContent = !ctx ? '—' : lat.length ? lat.join(' · ') : 'Not given by this browser';
-  const via = player.last ? player.last.via : S.media ? 'media' : 'worklet';
-  el.soundVia.textContent = via === 'media' ? 'The media player (more sound kept ready)' : 'Web Audio (the shortest delay)';
+  // Which way the last answer played (else the next will), and why it wasn't
+  // the media player when it wasn't.
+  const via = player.last ? player.last.via : voice.via;
+  const why = player.last ? player.last.fellBack : voice.why;
+  el.soundVia.textContent =
+    via === 'media' ? 'The media player (more sound kept ready)' : `Web Audio${why ? `: the media player ${why}` : ''}`;
 
   const L = player.last;
   if (!L) {
@@ -2747,10 +3158,12 @@ function sendTyped(how = {}) {
   fitInput();
   if (aloud) {
     // The answer is said here: the sound starts within this tap (a phone
-    // wants a gesture for it), and the mic goes as after a spoken question
-    // (Clearer sound: the headset can switch to its music link meanwhile).
+    // wants a gesture for it: the media player readied, Web Audio too), and
+    // the mic goes as after a spoken question (Clearer sound: the headset
+    // can switch to its music link meanwhile).
     const ctx = audioContext();
     if (ctx.state !== 'running') ctx.resume().catch(() => {});
+    mediaVoice.unlock();
     player.prepare();
     afterQuestionSent();
   }
@@ -2769,6 +3182,8 @@ function sendTyped(how = {}) {
  */
 function readAloud(t) {
   if (!S.ready || !t.answerId) return;
+  // (Hands-free talk ends: ▶ is a one-off, said and done.)
+  endCall();
   keepAwake();
   S.error = '';
   S.note = '';
@@ -2785,9 +3200,11 @@ function readAloud(t) {
   S.speakingTurn = t.id;
   S.phase = 'idle';
   S.step = '';
-  // The sound starts within this tap (a phone wants a gesture for it).
+  // The sound starts within this tap (a phone wants a gesture for it: the
+  // media player readied, Web Audio too).
   const ctx = audioContext();
   if (ctx.state !== 'running') ctx.resume().catch(() => {});
+  mediaVoice.unlock();
   player.prepare();
   renderConvo();
   render();
@@ -2970,6 +3387,10 @@ el.talkBtn.addEventListener('pointerdown', (e) => {
 
 function release(e) {
   lastPointer = performance.now();
+  // Talk asking the question itself (a PC from before words): its answer is
+  // said, so the media player's readied within this release (a touch's
+  // press isn't a gesture yet, its release is).
+  if (S.talk === 'ask' && S.local !== 'idle') mediaVoice.unlock();
   if (!press) return;
   const p = press;
   press = null;
@@ -2992,19 +3413,18 @@ el.talkBtn.addEventListener('click', (e) => {
   if (S.local === 'opening' && waitingPermission()) restartTalk();
   else if (busyListening()) stopTalk();
   else beginTalk();
+  if (S.talk === 'ask') mediaVoice.unlock();
 });
 
-el.stopBtn.addEventListener('click', () => interrupt());
+// Hands-free talk: on, or End.
+el.callBtn.addEventListener('click', () => (S.call ? endCall() : startCall()));
+// ■: in hands-free talk, the answer stops and Yap listens again.
+el.stopBtn.addEventListener('click', () => (S.call ? callStopAnswer() : interrupt()));
 el.cancelBtn.addEventListener('click', () => cancelTalk());
 el.retry.addEventListener('click', () => {
   S.denied = false;
   S.retries = 0;
   connect();
-});
-el.handsFree.addEventListener('change', () => {
-  S.handsFree = el.handsFree.checked;
-  save(KEY.handsFree, S.handsFree);
-  render();
 });
 el.wait.addEventListener('change', (e) => {
   if (e.target.name !== 'wait') return;
@@ -3019,12 +3439,6 @@ el.clearer.addEventListener('change', () => {
   save(KEY.clearer, S.clearer);
   // On while Yap talks: the mic goes now, so the headset can switch.
   if (S.clearer && S.local === 'idle' && player.active) closeMic();
-  render();
-});
-// The next answer plays the new way (one playing carries on as it began).
-el.media.addEventListener('change', () => {
-  S.media = el.media.checked;
-  save(KEY.media, S.media);
   render();
 });
 el.sound.addEventListener('toggle', renderSound);
@@ -3123,7 +3537,12 @@ if (navigator.mediaDevices && navigator.mediaDevices.addEventListener) {
 }
 
 document.addEventListener('visibilitychange', () => {
-  if (document.visibilityState !== 'visible') return;
+  if (document.visibilityState !== 'visible') {
+    // Hands-free talk ends when the page goes into the background (another
+    // app, the screen locked): quietly, with a note.
+    endCall(CALL_ENDED.hidden);
+    return;
+  }
   keepAwake();
   // Back from the lock screen: the sound may have been suspended.
   if (mic.ctx && mic.ctx.state !== 'running') mic.ctx.resume().catch(() => {});
@@ -3203,7 +3622,9 @@ window.__yapLink = {
       speakingTurn: S.speakingTurn,
       frames: S.frames,
       retries: S.retries,
-      handsFree: S.handsFree,
+      // Hands-free talk on, and its questions it didn't catch in a row.
+      call: S.call,
+      callMisses: S.callMisses,
       wait: S.wait,
       waitMs: WAITS[S.wait],
       clearer: S.clearer,
@@ -3249,13 +3670,18 @@ window.__yapLink = {
         // The media player's pieces: waiting, and one playing.
         pieces: mediaVoice.queue.length + (mediaVoice.now ? 1 : 0),
       },
-      media: S.media,
+      // How Yap's voice plays this visit: 'media' (the standard), or 'worklet'
+      // once the browser refused the media player (and why); the media
+      // player readied within a tap, or refused there.
+      voice: { via: voice.via, why: voice.why, unlocked: mediaVoice.unlocked, refused: mediaVoice.refused },
     };
   },
 };
 
 // ------------------------------------------------------------------ start
 
+// Settings that went (GONE): tidied away, never read.
+for (const key of GONE) save(key, null);
 listMics();
 keepAwake();
 render();

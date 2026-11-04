@@ -1004,8 +1004,9 @@ main {
 /* The composer card, as the Claude app has it, in Yap's paper: the
    pictures (thumbnails with ✕), the text box, then a row — + (a photo), the
    model chip with its effort, a gap, the mic and Send (■ while Yap
-   answers). While Yap listens it's the Yap bar's capsule: ✕, the ✦ and the
-   bar's waveform, the time, Done. */
+   answers; hands-free talk's waveform in its place while there's nothing
+   to send). While Yap listens it's the Yap bar's capsule: ✕, the ✦ and the
+   bar's waveform, the time, Done; in hands-free talk, the call's. */
 .composer {
   --ring-gap: var(--yap-s2);
   container: composer / inline-size;
@@ -1168,7 +1169,7 @@ main {
   }
 }
 
-/* The mic. A tap talks (hands-free: tap again, or Done, to send); a hold
+/* The mic. A tap talks (tap again, or Done, to finish); a hold
    talks while held. While Yap listens it turns into Done, the Yap bar's
    ink pill. Its word is for a screen reader until then. */
 .talk {
@@ -1245,7 +1246,7 @@ main {
 .composer[data-state='listening'] .done-icon {
   display: block;
 }
-/* Words for the box (hands-free off): Done is a ✓, as the Claude and
+/* Words for the box (Talk's, where the PC can): Done is a ✓, as the Claude and
    ChatGPT apps finish dictation with — nothing is sent yet. */
 .composer[data-talk='words'][data-state='listening'] .done-icon {
   display: none;
@@ -1299,6 +1300,78 @@ main {
   height: 1.125rem;
   fill: currentColor;
   stroke: none;
+}
+
+/* Hands-free talk (the Claude app's voice mode button): in Send's place
+   while there's nothing to send, a filled ink circle with a waveform (Yap's
+   filled buttons are ink). While the call is on it's End, the bar's ink
+   pill with ✕ — the last thing on the row. */
+.callbtn {
+  flex: 0 0 auto;
+  width: var(--round);
+  height: var(--round);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  border: 0;
+  border-radius: var(--yap-r-full);
+  background: var(--yap-ink);
+  color: var(--yap-ink-fg);
+  box-shadow: var(--yap-shadow-sm);
+  font-size: 1rem;
+  font-weight: 650;
+  line-height: 1;
+  white-space: nowrap;
+  cursor: pointer;
+  touch-action: manipulation;
+  transition:
+    background var(--yap-dur),
+    opacity var(--yap-dur),
+    transform var(--yap-dur);
+}
+.callbtn svg {
+  flex: 0 0 auto;
+  width: 1.375rem;
+  height: 1.375rem;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2.2;
+  stroke-linecap: round;
+}
+.callbtn:disabled {
+  opacity: 0.4;
+  box-shadow: none;
+  cursor: default;
+}
+.callbtn:not(:disabled):active {
+  transform: scale(0.95);
+}
+@media (hover: hover) {
+  .callbtn:hover:not(:disabled) {
+    background: var(--yap-ink-hover);
+  }
+}
+.callbtn .end-icon,
+.call-label {
+  display: none;
+}
+.callbtn[aria-pressed='true'] {
+  order: 10;
+  width: auto;
+  padding: 0 1.125rem 0 0.875rem;
+}
+.callbtn[aria-pressed='true'] .wave-icon {
+  display: none;
+}
+.callbtn[aria-pressed='true'] .end-icon {
+  display: block;
+  width: 1.125rem;
+  height: 1.125rem;
+  stroke-width: 2.4;
+}
+.callbtn[aria-pressed='true'] .call-label {
+  display: inline;
 }
 
 /* ✕ while Yap listens (on the left, as the bar's capsule has it); ■ while
@@ -1393,6 +1466,60 @@ main {
 }
 .composer[data-state='transcribing'] .live-dots {
   display: inline-flex;
+}
+
+/* Hands-free talk: the card is the call's capsule all along — the ✦, where
+   it's at ("Listening", "Thinking", "Speaking"), the bar's waveform (the
+   mic's, then Yap's voice) or Chat's three dots while Yap thinks, ■ while
+   Yap answers (quiet: back to listening) and End. The amber glow while
+   it's your turn to talk; the amber edge alone while it's Yap's. */
+.composer[data-call='true'] {
+  border-color: var(--yap-live);
+  box-shadow: inset 0 0 0 1px var(--yap-live);
+}
+.composer[data-call='true'][data-state='listening'] {
+  box-shadow:
+    inset 0 0 0 1px var(--yap-live),
+    0 0 0 4px var(--yap-primary-wash);
+}
+.composer[data-call='true'] .field,
+.composer[data-call='true'] .chip,
+.composer[data-call='true'] .spacer,
+.composer[data-call='true'] .cbtn,
+.composer[data-call='true'] .send:not(.stop) {
+  display: none;
+}
+.composer[data-call='true'] .live {
+  display: flex;
+}
+.composer[data-call='true'] .live-label {
+  color: var(--yap-fg);
+  font-weight: 600;
+}
+/* Where it's at comes first; the waveform takes what's left. */
+.composer[data-call='true'] .meter {
+  flex: 1 1 0;
+}
+.composer[data-call='true'][data-state='working'] .live-dots {
+  display: inline-flex;
+}
+.composer[data-call='true'] .send.stop {
+  background: var(--yap-s3);
+  color: var(--yap-fg);
+  box-shadow: none;
+}
+/* A narrow card (in em: it follows the phone's text size), Android's
+   largest text: End says it with ✕ alone, and the ✦ steps aside, so where
+   it's at keeps its room. (Its name is the same: "Talk hands-free", on.) */
+@container composer (max-width: 14em) {
+  .composer[data-call='true'] .spark,
+  .callbtn[aria-pressed='true'] .call-label {
+    display: none;
+  }
+  .callbtn[aria-pressed='true'] {
+    width: var(--round);
+    padding: 0;
+  }
 }
 .spark {
   flex: 0 0 auto;
@@ -1985,9 +2112,9 @@ main {
 
 /* ------------------------------------------------------------ settings */
 
-/* Hands-free, Clearer sound and the microphone: a card of Yap's Settings
-   rows (desktop/src/lib/ui/Row.svelte, Toggle.svelte): the words on the left, the
-   control on the right, hairlines between. */
+/* Hands-free talk's wait, Clearer sound and the microphone: a card of Yap's
+   Settings rows (desktop/src/lib/ui/Row.svelte, Toggle.svelte): the words on
+   the left, the control on the right, hairlines between. */
 .options {
   --ring-gap: var(--yap-s1);
   margin: 0 0 10px;
@@ -2088,16 +2215,19 @@ main {
     0 0 0 4px var(--yap-focus-ring);
 }
 
-/* Hands-free's wait before sending, the ChatGPT entry's two ways and the
-   effort: Yap's segmented control (Segmented.svelte), one tap. */
+/* Hands-free talk's wait before sending, the ChatGPT entry's two ways and
+   the effort: Yap's segmented control (Segmented.svelte), one tap. */
 .wait {
   margin: 0;
-  padding: 0 0 14px;
+  padding: 14px 0;
   border: 0;
   min-width: 0;
 }
 .wait legend {
-  padding: 0 0 8px;
+  padding: 0 0 2px;
+}
+.wait .hint {
+  margin: 0 0 10px;
 }
 .seg {
   display: flex;
@@ -2653,6 +2783,7 @@ select:focus-visible {
   .talk:active,
   .rbtn:active,
   .send:active,
+  .callbtn:active,
   .btn:active {
     transform: none;
   }

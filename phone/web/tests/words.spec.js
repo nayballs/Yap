@@ -1,14 +1,14 @@
 // Talk's words in the box (2026-11-03, the Claude and ChatGPT apps' way):
-// with hands-free off, Talk — a tap then Done, or a hold then release —
-// sends `start {mode: "words"}` and `stop`; the PC's `words` go in the
-// composer's text box, at the caret, after anything typed, to check and
-// fix; Send asks them as the spoken question they were (`ask {speak:
-// true}`: the bubble's 🎙, the answer said on the phone, ■, barge-in) —
-// while a question only typed stays typed, answered on screen. Nothing
-// heard keeps the box; ✕ while it transcribes drops the words; the pictures
-// wait in the composer for Send. Hands-free on — and a PC from before,
-// without "words" in `ready.can` — still send at once. Yap on the PC
-// mocked; the mic the looped 440 Hz tone.
+// Talk — a tap then Done, or a hold then release — sends `start {mode:
+// "words"}` and `stop`; the PC's `words` go in the composer's text box, at
+// the caret, after anything typed, to check and fix; Send asks them as the
+// spoken question they were (`ask {speak: true}`: the bubble's 🎙, the
+// answer said on the phone, ■, barge-in) — while a question only typed
+// stays typed, answered on screen. Nothing heard keeps the box; ✕ while it
+// transcribes drops the words; the pictures wait in the composer for Send.
+// A PC from before, without "words" in `ready.can`, still sends at once.
+// (Hands-free talk, which sends by itself: handsfree.spec.js.) Yap on the
+// PC mocked; the mic the looped 440 Hz tone.
 import { test, expect } from '@playwright/test';
 import {
   servePage,
@@ -23,8 +23,7 @@ import {
   pickerData,
   photo,
   choosePhotos,
-  downFrame,
-  voice,
+  sentences,
   CAN_BEFORE_WORDS,
   CAN_BEFORE_SPEAK,
 } from './support/harness.js';
@@ -47,14 +46,14 @@ function words(pc, text) {
 const box = (page) =>
   page.getByTestId('input').evaluate((t) => ({ value: t.value, start: t.selectionStart, end: t.selectionEnd }));
 
-/** The PC's answer said out loud: heard, thinking, the answer, then its voice (`ms` of it). */
+/** The PC's answer said out loud: heard, thinking, the answer, then its voice (`ms` of it, in sentences). */
 function spokenAnswer(pc, { heard, answer, id, ms = 600 }) {
   pc.send({ type: 'heard', text: heard });
   pc.send({ type: 'state', phase: 'thinking' });
   pc.send({ type: 'answer', text: answer, final: true, id });
   pc.send({ type: 'state', phase: 'speaking' });
   pc.send({ type: 'speak_start', rate: 24000 });
-  for (let i = 0; i < ms / 100; i++) pc.sendBinary(downFrame(i, voice(24000, 100)));
+  for (const f of sentences(ms)) pc.sendBinary(f);
 }
 
 /** Talk's words in the box: a tap, a moment of the mic, Done, then the PC's `words`. */
@@ -465,43 +464,33 @@ test('the mic gone mid-talk: what it heard goes in the box, and the page says so
   expect(pc.of('ask')).toHaveLength(0);
 });
 
-test('hands-free on: Done sends at once, the question in the thread, answered out loud', async ({ page }) => {
+test("words in the box: Send in hands-free talk's place; the box emptied, the waveform's back", async ({ page }) => {
   const pc = await mockPc(page);
   await open(page);
   await ready(page, pc);
-  await openSettings(page);
-  // The hint says what the switch changes.
-  await expect(page.locator('#handsfree-hint')).toHaveText(
-    'On: sends when you stop talking, and Yap answers out loud. Off: your words go in the box to check first.',
-  );
-  await page.getByText('Hands-free').click();
-  await expect(page.getByTestId('handsfree')).toBeChecked();
-  await closeSettings(page);
-  await page.getByTestId('input').fill('typed before');
+  const call = page.getByRole('button', { name: 'Talk hands-free' });
+  // Nothing to send: the waveform where Send goes, as the Claude app's voice mode button.
+  await expect(call).toBeVisible();
+  await expect(call).toHaveAttribute('aria-pressed', 'false');
+  await expect(page.getByTestId('send')).toBeHidden();
+  // While Talk listens: the capsule, neither.
   await page.getByTestId('talk').click();
-  await expect.poll(() => pc.of('start')).toEqual([{ type: 'start', mode: 'ask' }]);
-  // The question's bubble while it listens, Done the ↑ of a send.
-  await expect(page.getByTestId('turn')).toHaveCount(1);
-  await expect(page.getByTestId('composer').locator('.done-icon')).toBeVisible();
+  await expect(page.getByTestId('phase')).toHaveText('Listening');
+  await expect(call).toBeHidden();
   await expect.poll(() => pc.frames.length, { timeout: 5000 }).toBeGreaterThan(10);
   await page.getByTestId('talk').click();
   await expect.poll(() => pc.of('stop').length).toBe(1);
-  await expect(page.getByTestId('phase')).toHaveText('Working it out');
-  pc.send({ type: 'state', phase: 'transcribing' });
-  pc.send({ type: 'heard', text: 'Is it going to rain this afternoon?' });
-  pc.send({ type: 'state', phase: 'thinking' });
-  pc.send({ type: 'answer', text: 'Light showers after 3 pm.', final: true, id: 'chat:6:1' });
-  pc.send({ type: 'state', phase: 'speaking' });
-  pc.send({ type: 'speak_start', rate: 24000 });
-  for (let i = 0; i < 4; i++) pc.sendBinary(downFrame(i, voice(24000, 100)));
-  pc.send({ type: 'speak_end' });
-  pc.send({ type: 'state', phase: 'idle' });
-  await expect(page.getByTestId('heard')).toHaveText('Is it going to rain this afternoon?');
-  await expect(page.getByRole('img', { name: 'Asked by voice' })).toHaveCount(1);
-  await expect.poll(async () => (await snapshot(page)).player.played, { timeout: 4000 }).toBeGreaterThan(0.3);
-  // What was typed stays where it was.
-  await expect(page.getByTestId('input')).toHaveValue('typed before');
-  expect(pc.of('ask')).toHaveLength(0);
+  await expect(call).toBeHidden();
+  words(pc, 'Book the dentist for next week');
+  await expect(page.getByTestId('input')).toHaveValue('Book the dentist for next week');
+  // Words to send: Send, lit, in its place.
+  await expect(page.getByTestId('send')).toBeVisible();
+  await expect(page.getByTestId('send')).toBeEnabled();
+  await expect(call).toBeHidden();
+  // Emptied: the waveform again.
+  await page.getByTestId('input').fill('');
+  await expect(call).toBeVisible();
+  await expect(page.getByTestId('send')).toBeHidden();
 });
 
 for (const [name, opts] of [
@@ -512,9 +501,11 @@ for (const [name, opts] of [
     const pc = await mockPc(page, opts);
     await open(page);
     await ready(page, pc);
+    // The settings have no switch for it.
     await openSettings(page);
-    await expect(page.locator('#handsfree-hint')).toHaveText('Sends when you stop talking');
+    await expect(page.getByTestId('settings-sheet').getByText('Hands-free', { exact: true })).toHaveCount(0);
     await closeSettings(page);
+    await expect(page.getByRole('button', { name: 'Talk hands-free' })).toBeVisible();
     await ask(page, pc, 300);
     expect(pc.of('start')).toEqual([{ type: 'start', mode: 'ask' }]);
     await expect(page.getByTestId('turn')).toHaveCount(1);

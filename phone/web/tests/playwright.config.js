@@ -5,8 +5,9 @@
 // window on screen. Run with `npm run test:link`; see the page's README.md.
 //
 // And in Firefox (the "firefox" project), when Playwright's own Firefox is
-// installed (`npx playwright install firefox`): the page's specs that don't
-// need a recorded mic, Firefox's fake mic being a tone (its prefs below).
+// installed (`npx playwright install firefox`): the page's specs but the
+// screenshots, Firefox's fake mic being a tone (its prefs below) — hands-free
+// talk's speech made in the page instead (harness.js `speechMic`).
 // YAP_LINK_FIREFOX=0 leaves it out, =1 insists on it.
 import fs from 'node:fs';
 import { defineConfig, chromium, firefox } from '@playwright/test';
@@ -62,8 +63,9 @@ const projects = [
 if (withFirefox()) {
   projects.push({
     name: 'firefox',
-    // Hands-free needs the recorded speech, and the screenshots are Chromium's.
-    testMatch: /(link-page|sound|mic-open|typing|picker|chats|pictures|words|pairing)\.spec\.js/,
+    // The screenshots are Chromium's. (Hands-free talk hears speechMic's
+    // speech here: Firefox's fake mic is a steady tone.)
+    testMatch: /(link-page|sound|mic-open|typing|picker|chats|pictures|words|pairing|handsfree)\.spec\.js/,
     use: {
       browserName: 'firefox',
       // Firefox has no microphone permission to grant here: its prefs let
