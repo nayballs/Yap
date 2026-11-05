@@ -363,9 +363,12 @@ listens again — once: a second in a row ends it. It **ends** (`endCall`)
 with End (the same button: listening cancelled, an answer stopped, a
 question called off), and with the error on screen when the PC refuses a
 question while it listens (during a meeting, say) or can't answer one it
-heard. It ends **quietly, with a note**, when nothing is said for 10 s
-once it's listening ("Hands-free talk ended: nothing was said for 10
-seconds.", `NO_SPEECH_MS`), the connection drops ("…the connection to
+heard. It ends **quietly, with a note**, when nothing is said for 30 s
+once it's listening ("Hands-free talk ended: nothing was said for 30
+seconds.", `NO_SPEECH_MS`, with a soft falling tone; at 20 s a soft tone
+and the capsule counting down, "Ends in 10 s", `CALL_WARN_MS`: speaking
+keeps it going; the tones through the page's AudioContext, `cue`, the
+mic's level not heard while one plays), the connection drops ("…the connection to
 Office PC dropped."), or the page is hidden (`visibilitychange`: "…when
 this page went into the background."); and with the mic's own error (it
 won't open: the error says why; its track ended: what it heard is sent,
@@ -413,7 +416,8 @@ went, and a stored `yap.link.handsFree` is ignored (and removed, with
   `cancel` (no `stop`). Hands-free talk (its own button): the wait chosen in
   the settings — **"Wait before sending": Short (1 s) · Normal (1.5 s, the
   default) · Long (2.5 s)**, remembered (`yap.link.wait`) — of quiet after
-  speech sends `stop`; nothing said for 10 s sends `cancel` and ends it.
+  speech sends `stop`; nothing said for 30 s sends `cancel` and ends it
+  (a tone and the countdown from 20 s).
   Speech starts 12 dB over the room's noise (and over −45 dB); once started
   it carries on while the level stays 6 dB over the noise and over −52 dB
   (hysteresis), so a soft last word isn't taken for quiet. For that hold the
@@ -597,7 +601,8 @@ npm run test:link
   question sent by the quiet after the speech (`start {mode: "ask"}`), the
   answer said through the media player with the mic let go, then
   listening again by itself and the next question sent; End (`cancel`, the
-  composer back, the mic let go); 10 s with nothing said (the note); ■
+  composer back, the mic let go); 30 s with nothing said (the tone and
+  countdown at 20 s, then the note), and speech after the warning going on; ■
   while it answers (`interrupt`, then listening) and while it thinks
   (`cancel`, then listening); a dropped connection and the page hidden
   (their notes); a mic that won't open; a question not caught (listening

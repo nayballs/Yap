@@ -2,7 +2,8 @@
 // Send's place starts a conversation, as a call is — Yap listens, the wait
 // chosen (Short 1 s, Normal 1.5 s, Long 2.5 s) of quiet after speech sends
 // it (`start {mode: "ask"}`, frames, `stop`), Yap answers out loud, then it
-// listens again by itself; End, 10 s with nothing said, the connection
+// listens again by itself; End, 30 s with nothing said (a soft tone and a
+// countdown from 20 s; speech then keeps it going), the connection
 // dropping, the page hidden or the mic failing end it; ■ while Yap answers
 // goes back to listening.
 //
@@ -147,10 +148,10 @@ test('End ends it: what it was listening to is cancelled, the composer back, the
   expect(pc.of('start')).toHaveLength(1);
 });
 
-test('nothing said for 10 s once it listens: it ends quietly, with a note', async ({ page }) => {
+test('nothing said for 30 s once it listens: a tone and a countdown at 20 s, then it ends quietly, with a note', async ({ page }) => {
   // Clearer sound off: the mic stays open, so the second turn hears the quiet after the speech.
   await chooseClearer(page, false);
-  test.setTimeout(60_000);
+  test.setTimeout(90_000);
   const pc = await mockPc(page);
   await open(page);
   await ready(page, pc);
@@ -159,14 +160,49 @@ test('nothing said for 10 s once it listens: it ends quietly, with a note', asyn
   answer(pc, { heard: 'Is the pool open late?', text: 'Until 9 pm on Thursdays.', id: 'chat:7:1' });
   await expect.poll(() => pc.of('start').length, { timeout: 10_000 }).toBe(2);
   const listening = Date.now();
-  await expect(page.getByTestId('note')).toHaveText('Hands-free talk ended: nothing was said for 10 seconds.', { timeout: 15_000 });
-  expect((Date.now() - listening) / 1000).toBeGreaterThan(9);
+  const label = page.locator('#live-label');
+  // 20 s of quiet: one soft tone, and the capsule counts the last 10 s down
+  // (a screen reader told once).
+  await expect(label).toHaveText(/^Ends in (10|9) s$/, { timeout: 25_000 });
+  expect((Date.now() - listening) / 1000).toBeGreaterThan(19);
+  expect((await snapshot(page)).cues).toBe(1);
+  await expect(page.getByTestId('composer')).toHaveAttribute('data-ending', 'true');
+  await expect(page.getByTestId('phase')).toHaveText('Still listening. Hands-free talk ends in 10 seconds unless you say something.');
+  await expect(label).toHaveText(/^Ends in [1-5] s$/, { timeout: 8_000 });
+  expect((await snapshot(page)).call).toBe(true);
+  // 30 s: it ends, with a falling tone.
+  await expect(page.getByTestId('note')).toHaveText('Hands-free talk ended: nothing was said for 30 seconds.', { timeout: 15_000 });
+  expect((Date.now() - listening) / 1000).toBeGreaterThan(29);
+  expect((await snapshot(page)).cues).toBe(2);
+  expect((await snapshot(page)).callEnding).toBe(0);
   await expect(callBtn(page)).toHaveAttribute('aria-pressed', 'false');
   expect(pc.of('cancel')).toHaveLength(1);
   expect(pc.of('stop')).toHaveLength(1);
   // The empty question goes; the one answered stays.
   await expect(page.getByTestId('turn')).toHaveCount(1);
   expect((await snapshot(page)).micOpen).toBe(false);
+});
+
+test('speech after the warning: the call goes on, and the question is sent', async ({ page }) => {
+  // A mic quiet for 23 s, then a question (every stream the page opens).
+  await speechMic(page, { from: 23, to: 24.2 });
+  test.setTimeout(60_000);
+  const pc = await mockPc(page);
+  await open(page);
+  await ready(page, pc);
+  await callBtn(page).click();
+  await expect.poll(() => pc.of('start').length).toBe(1);
+  const label = page.locator('#live-label');
+  await expect(label).toHaveText(/^Ends in \d+ s$/, { timeout: 25_000 });
+  expect((await snapshot(page)).cues).toBe(1);
+  // Speech: the countdown goes, and the question is sent at the quiet after it.
+  await expect(label).toHaveText('Listening', { timeout: 8_000 });
+  await expect(page.getByTestId('composer')).toHaveAttribute('data-ending', 'false');
+  await expect.poll(() => pc.of('stop').length, { timeout: 8_000 }).toBe(1);
+  expect(pc.of('cancel')).toHaveLength(0);
+  expect((await snapshot(page)).call).toBe(true);
+  expect((await snapshot(page)).cues).toBe(1);
+  await expect(page.getByTestId('note')).toBeHidden();
 });
 
 test('■ while Yap answers: the answer stops and it listens again; ■ while it thinks: called off, and the same', async ({ page }) => {

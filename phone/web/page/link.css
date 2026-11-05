@@ -1496,6 +1496,10 @@ main {
   color: var(--yap-fg);
   font-weight: 600;
 }
+/* Nothing said for 20 s: "Ends in 10 s", counting down without jumping about. */
+.composer[data-call='true'][data-ending='true'] .live-label {
+  font-variant-numeric: tabular-nums;
+}
 /* Where it's at comes first; the waveform takes what's left. */
 .composer[data-call='true'] .meter {
   flex: 1 1 0;

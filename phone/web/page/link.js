@@ -87,7 +87,9 @@ const KIND_UP = 0x01;
 const KIND_DOWN = 0x02;
 const MAX_FRAMES = (120 * LINK_RATE) / FRAME_SAMPLES; // a question: 2 minutes at most
 const HOLD_MS = 350; // a press this long is a hold: release sends
-const NO_SPEECH_MS = 10000; // hands-free talk: nothing said this long once it's listening → it ends
+const NO_SPEECH_MS = 30000; // hands-free talk: nothing said this long once it's listening → it ends
+const CALL_WARN_MS = 20000; // …and this long: a soft tone, and the capsule counts down to the end
+const CUE_DEAF_MS = 500; // a tone's own sound (and its echo) never taken as speech
 const CALL_SETTLE_MS = 3000; // hands-free talk: the answer played out, the PC's idle awaited at most this long
 const MEDIA_START_MS = 2000; // a piece the media player hasn't started by then: it can't, here (Web Audio takes over)
 const MIC_WARM_MS = 15000; // the mic kept open after a turn, for a follow-up
@@ -134,10 +136,19 @@ const forgetBoxNote = () => {
 
 /** Hands-free talk's words: how it ended, when it ended by itself. */
 const CALL_ENDED = {
-  quiet: 'Hands-free talk ended: nothing was said for 10 seconds.',
+  quiet: 'Hands-free talk ended: nothing was said for 30 seconds.',
   hidden: 'Hands-free talk ended when this page went into the background.',
   dropped: (pc) => `Hands-free talk ended: the connection to ${pc} dropped.`,
   micGone: 'The microphone went away (was the headset switched off?). What it heard was sent, and hands-free talk ended.',
+};
+/**
+ * Nothing said for CALL_WARN_MS: the capsule counts the call's last seconds
+ * down (`left`), and a screen reader hears it once (the countdown isn't
+ * announced each second).
+ */
+const CALL_ENDING = {
+  label: (left) => `Ends in ${left} s`,
+  status: 'Still listening. Hands-free talk ends in 10 seconds unless you say something.',
 };
 /** A question it didn't catch: it listens again (said once, until the next is heard). */
 const CALL_MISSED = "Yap didn't catch that, so it's listening again.";
@@ -314,6 +325,12 @@ const S = {
   // Questions in a row it didn't catch (a second ends the call).
   callMisses: 0,
   callTimer: 0,
+  // Nothing said for CALL_WARN_MS this turn: the seconds left before the
+  // call ends (0: not yet, or speech heard since).
+  callEnding: 0,
+  // The mic's level not heard until then (a tone playing: `cue`); the tones played.
+  cueUntil: 0,
+  cues: 0,
   // Hands-free talk's wait before sending: short | normal | long (WAITS).
   wait: waitChoice(load(KEY.wait)),
   // "Clearer sound in a headset": the mic closed while Yap talks. On unless
@@ -1390,6 +1407,40 @@ function audioContext() {
 }
 
 /**
+ * Hands-free talk's soft tones, through the page's AudioContext (never the
+ * media player, which may be playing Yap's voice): 'warn' one note, when the
+ * call is about to end for quiet; 'end' that note falling to a lower one, as
+ * it ends. A headset's wearer hears them without looking. The mic's level
+ * isn't heard meanwhile (CUE_DEAF_MS), so a tone and its echo aren't speech.
+ */
+function cue(kind) {
+  S.cues++;
+  S.cueUntil = performance.now() + CUE_DEAF_MS;
+  let ctx;
+  try {
+    ctx = audioContext();
+  } catch {
+    return;
+  }
+  if (ctx.state !== 'running') ctx.resume().catch(() => {});
+  const notes = kind === 'end' ? [660, 440] : [660];
+  const t0 = ctx.currentTime + 0.02;
+  notes.forEach((hz, i) => {
+    const at = t0 + i * 0.22;
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.type = 'sine';
+    osc.frequency.value = hz;
+    gain.gain.setValueAtTime(0, at);
+    gain.gain.linearRampToValueAtTime(0.12, at + 0.02);
+    gain.gain.exponentialRampToValueAtTime(0.0001, at + 0.2);
+    osc.connect(gain).connect(ctx.destination);
+    osc.start(at);
+    osc.stop(at + 0.22);
+  });
+}
+
+/**
  * A touch's press isn't yet a gesture that lets a page start its sound (its
  * release is): the sound is asked to start again on each of these, so a
  * first Talk's AudioContext doesn't wait on a press that didn't count.
@@ -1831,13 +1882,30 @@ function onMicMessage(e) {
     meter(d.level || 0);
     if (S.local === 'listening') {
       // Hands-free talk: sent after the wait chosen of quiet once speech
-      // was heard; nothing said for 10 s, and the call ends.
+      // was heard. Nothing said for 20 s: a soft tone, and the capsule
+      // counts down; for 30 s, and the call ends (with a falling tone).
       if (S.call && S.talk === 'ask') {
-        const said = vad.push(d.level || 0);
+        const said = vad.push(performance.now() < S.cueUntil ? 0 : d.level || 0);
         if (said === 'end') stopTalk();
-        else if (!vad.heard && S.frames * FRAME_MS >= NO_SPEECH_MS) {
-          endCall(CALL_ENDED.quiet);
-          return;
+        else if (!vad.heard) {
+          const quiet = S.frames * FRAME_MS;
+          if (quiet >= NO_SPEECH_MS) {
+            endCall(CALL_ENDED.quiet);
+            cue('end');
+            return;
+          }
+          if (quiet >= CALL_WARN_MS) {
+            const left = Math.max(1, Math.ceil((NO_SPEECH_MS - quiet) / 1000));
+            if (left !== S.callEnding) {
+              if (!S.callEnding) cue('warn');
+              S.callEnding = left;
+              render();
+            }
+          }
+        } else if (S.callEnding) {
+          // Speech after the warning: the call goes on.
+          S.callEnding = 0;
+          render();
         }
       }
       if (S.frames >= MAX_FRAMES) {
@@ -1937,6 +2005,7 @@ async function beginTalk(talk = wordsMode() ? 'words' : 'ask', { keepNote = fals
   }
   S.seq = 0;
   S.frames = 0;
+  S.callEnding = 0;
   S.qStarted = performance.now();
   S.pcListening = false;
   S.step = '';
@@ -2004,6 +2073,7 @@ function endCall(note = '', { stop = true } = {}) {
   if (!S.call) return;
   S.call = false;
   S.callMisses = 0;
+  S.callEnding = 0;
   clearTimeout(S.callTimer);
   S.callTimer = 0;
   if (stop) letGo();
@@ -2878,7 +2948,8 @@ function render() {
   const now = phaseNow();
   const call = S.call;
   document.body.dataset.phase = now;
-  el.phase.textContent = call ? CALL_WORDS[now] : PHASE_WORDS[now];
+  const ending = call && now === 'listening' && S.callEnding > 0;
+  el.phase.textContent = ending ? CALL_ENDING.status : call ? CALL_WORDS[now] : PHASE_WORDS[now];
   // A small spinner in the header while Yap works the question out.
   el.busy.hidden = now !== 'working';
 
@@ -2913,7 +2984,14 @@ function render() {
   el.composer.dataset.talk = words ? 'words' : 'ask';
   el.composer.dataset.typed = String(S.typed);
   el.composer.dataset.pictures = String(S.attached.length > 0 || S.preparing > 0);
-  el.liveLabel.textContent = call ? CALL_WORDS[now] : now === 'opening' || now === 'transcribing' ? PHASE_WORDS[now] : '';
+  el.liveLabel.textContent = ending
+    ? CALL_ENDING.label(S.callEnding)
+    : call
+      ? CALL_WORDS[now]
+      : now === 'opening' || now === 'transcribing'
+        ? PHASE_WORDS[now]
+        : '';
+  el.composer.dataset.ending = String(ending);
   el.talkBtn.disabled = (!S.ready && S.local === 'idle') || now === 'transcribing';
   el.talkBtn.setAttribute('aria-pressed', String(listening || now === 'opening'));
   el.talkLabel.textContent =
@@ -3625,6 +3703,9 @@ window.__yapLink = {
       // Hands-free talk on, and its questions it didn't catch in a row.
       call: S.call,
       callMisses: S.callMisses,
+      // Nothing said for 20 s: the seconds left (0: not ending); the tones played.
+      callEnding: S.callEnding,
+      cues: S.cues,
       wait: S.wait,
       waitMs: WAITS[S.wait],
       clearer: S.clearer,

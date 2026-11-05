@@ -597,9 +597,16 @@ once; a second in a row, an `error` while it listens (refused: during a
 meeting, say) or one about a question it heard (it couldn't answer) **ends
 it**, the error on screen. It also ends with **End** (the same button,
 pressed; listening is cancelled, an answer stopped) and, quietly with a
-note, when **nothing is said for 10 s** once it's listening
-(`NO_SPEECH_MS`: "Hands-free talk ended: nothing was said for 10
-seconds."), when **the connection drops** ("…the connection to Office PC
+note, when **nothing is said for 30 s** once it's listening
+(`NO_SPEECH_MS`: "Hands-free talk ended: nothing was said for 30
+seconds.", and a soft falling tone) — at **20 s** a soft tone and the
+capsule counting down ("Ends in 10 s", `CALL_WARN_MS`; a screen reader
+told once), speech then keeping it going; the tones are the page's own
+(`cue`, its AudioContext, never the media player), the mic's level not
+heard while one plays (`CUE_DEAF_MS`). 30 s after the voice apps: ChatGPT,
+Gemini Live and the Claude app don't end on quiet at all, the voice-agent
+kits check in after 10–15 s and hang up after about 30–60 s; the page keeps
+the screen on and the mic open, so it has a limit (2026-11-05). It also ends when **the connection drops** ("…the connection to Office PC
 dropped."), when **the page is hidden** (`visibilitychange`: "…when this
 page went into the background.") — or with the **mic's** error (it won't
 open, or its track ended). The mic is let go when it ends. ▶, another chat
@@ -729,7 +736,8 @@ on the PC while the answer comes stops the voice, as it stops the PC's.
   (a permission nobody answers, answered late, blocked; a module that never
   loads; the sound never starting; Cancel at any step; `mic-open.spec.js`),
   hands-free talk (`handsfree.spec.js`: on, sent at the quiet, answered,
-  listening again and the next sent; End; 10 s of quiet; ■ while it answers
+  listening again and the next sent; End; 30 s of quiet, the warning at 20 s
+  and speech after it; ■ while it answers
   and while it thinks; a dropped connection; the page hidden; the mic
   failing; a question not caught, and one not answered; the wait in the
   settings, each choice used; Talk always words in the box), Sound details, the answer's markdown (a model's HTML shown

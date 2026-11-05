@@ -497,3 +497,25 @@ for (const [label, w, h, text] of [
     await page.getByTestId('call').click();
   });
 }
+
+// The call about to end for quiet (20 s with nothing said): "Ends in 10 s"
+// whole on the card at the largest text, counting down.
+test('hands-free talk ending for quiet at 200 % text: the countdown fits', async ({ page }) => {
+  test.setTimeout(60_000);
+  await page.setViewportSize({ width: 360, height: 780 });
+  await servePage(page);
+  await seedDevice(page);
+  await speechMic(page, { from: 50, to: 51 });
+  const pc = await mockPc(page, OPUS);
+  await open(page);
+  await ready(page, pc);
+  await page.evaluate(() => (document.documentElement.style.fontSize = '200%'));
+  await page.evaluate(() => document.fonts.ready);
+  await page.getByTestId('call').click();
+  const label = page.locator('#live-label');
+  await expect(label).toHaveText(/^Ends in (10|9) s$/, { timeout: 25_000 });
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+  expect(await label.evaluate((e) => e.scrollWidth <= e.clientWidth + 1)).toBe(true);
+  await shot(page, 'call-ending-360x780-text-200');
+  await page.getByTestId('call').click();
+});
