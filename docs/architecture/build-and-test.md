@@ -64,7 +64,7 @@ dev.bat starts its updated self afresh (cmd reads a running batch file line by l
 reading on in a rewritten one would go wrong). It skips the update and says why on another
 branch, with real local edits, offline, or when it isn't a fast-forward — Yap still starts.
 It then stops any AI app's `yap.exe mcp` helper running from the dev build's own exe
-(`<drive>:\t\debug\yap.exe`), which would otherwise make the build fail with "Access is
+(`<drive>:\Builds\yap-dev\debug\yap.exe`), which would otherwise make the build fail with "Access is
 denied" (see `integrations/mcp_clients.rs`).
 So merged work reaches the maintainer's dev build by pushing to main; never fast-forward
 that checkout by hand while Yap - Dev runs.

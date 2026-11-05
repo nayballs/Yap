@@ -26,8 +26,10 @@ if not defined YAP_DEV_UPDATED (
 REM whisper-rs-sys' cmake build nests paths past Windows MAX_PATH (260) and
 REM MSBuild's FileTracker fails with FTK1011 regardless of the LongPathsEnabled
 REM registry opt-in — same workaround as CI (nightly.yml): build into a SHORT
-REM target dir on this drive instead of desktop\src-tauri\target.
-set CARGO_TARGET_DIR=%~d0\t
+REM target dir on this drive instead of desktop\src-tauri\target. Kept in a
+REM Builds folder rather than the drive's root; it must stay short (about 22
+REM characters at most: E:\yap-builds\review\target hit the limit).
+set CARGO_TARGET_DIR=%~d0\Builds\yap-dev
 
 REM Dev-only: expose the webviews on the Chrome DevTools Protocol (CDP) so
 REM tooling can inspect them (console errors, event delivery) while diagnosing

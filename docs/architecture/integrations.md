@@ -61,7 +61,7 @@ The token-authenticated local API, Yap's MCP server (`yap.exe mcp`) and adding i
   real one. ⚠ The exe written is this one, **except in a dev build** (debug, not a
   test run): there it's the installed Yap's (`installed_exe`, the uninstall
   entry's `DisplayIcon`) when one is installed — an AI app keeps `yap.exe mcp`
-  running, and a child of `<drive>:\t\debug\yap.exe` locks it, so Yap - Dev's next
+  running, and a child of `<drive>:\Builds\yap-dev\debug\yap.exe` locks it, so Yap - Dev's next
   build fails with "Access is denied" (2026-10-17, Claude Code's `~/.claude.json`).
   The launcher (`dev-update.ps1`) also stops any such helper before building.
 

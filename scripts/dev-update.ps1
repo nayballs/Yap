@@ -79,12 +79,12 @@ try {
 }
 
 # An AI app (Claude, Cursor...) running Yap's MCP server from the dev build's
-# own exe (`<drive>:\t\debug\yap.exe mcp`, dev.bat's CARGO_TARGET_DIR) holds
+# own exe (`<drive>:\Builds\yap-dev\debug\yap.exe mcp`, dev.bat's CARGO_TARGET_DIR) holds
 # that file open, and the build fails with "Access is denied". Settings -> MCP
 # in a dev build now writes the installed Yap's path instead; stop any helper
 # left from before, so the build can replace the exe.
 try {
-    $devExe = Join-Path ([IO.Path]::GetPathRoot((Get-Location).Path)) 't\debug\yap.exe'
+    $devExe = Join-Path ([IO.Path]::GetPathRoot((Get-Location).Path)) 'Builds\yap-dev\debug\yap.exe'
     $helpers = @(Get-CimInstance Win32_Process -Filter "Name='yap.exe'" -ErrorAction Stop |
         Where-Object { $_.ExecutablePath -and ($_.ExecutablePath -ieq $devExe) -and ($_.CommandLine -match '\smcp\s*$') })
     foreach ($h in $helpers) {
