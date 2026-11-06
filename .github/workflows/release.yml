@@ -83,7 +83,9 @@ jobs:
         run: npm ci
 
       # "What's new" (latest.json `notes` for the in-app update toast, and the
-      # draft's body): the app's feat/fix commits since the previous `v*` tag.
+      # draft's body): .github/release-notes/v<version>.md when it's there
+      # (written by hand for a release with too much in it for a list of
+      # commits), else the app's feat/fix commits since the previous `v*` tag.
       # Polish the draft's text before publishing; latest.json keeps this cut.
       - name: Write release notes
         id: notes
@@ -92,9 +94,15 @@ jobs:
           current="v$(node -p "require('./desktop/src-tauri/tauri.conf.json').version")"
           prev=$(git tag --list 'v*' --sort=-v:refname --merged HEAD | grep -vx "$current" | head -n1 || true)
           echo "Previous release: ${prev:-none}"
+          written=".github/release-notes/$current.md"
           {
             echo 'body<<NOTES_EOF'
-            node scripts/release-notes.mjs "$prev"
+            if [ -f "$written" ]; then
+              echo "Notes from $written" >&2
+              cat "$written"
+            else
+              node scripts/release-notes.mjs "$prev"
+            fi
             echo 'NOTES_EOF'
           } >> "$GITHUB_OUTPUT"
 

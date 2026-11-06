@@ -72,7 +72,10 @@ clicks "Restart to update". Its "What's new" comes from latest.json's `notes`:
 both workflows run `scripts/release-notes.mjs`, the app's feat/fix commit subjects
 since the previous release (stable: the previous `v*` tag, via tauri-action's
 `releaseBody`, so polish the draft's text by hand; nightly: since the commit the
-rolling release's body records as `<!-- built-from: <sha> -->`). **Currently unsigned**
+rolling release's body records as `<!-- built-from: <sha> -->`). A stable release
+with too much in it for a list of commits gets notes written by hand in
+`.github/release-notes/v<version>.md` (v0.2.0's, for example): release.yml takes
+that file instead when it's there, so the in-app notes are the written ones too. **Currently unsigned**
 (Authenticode) — Windows shows a SmartScreen warning until a cert is added; the
 `signCommand` slot is ready. Updater artifacts are minisign-signed
 (`TAURI_SIGNING_PRIVATE_KEY` GitHub secret). The uninstaller's **Delete the
