@@ -135,6 +135,9 @@ export function createChatState({ onopensettings = () => null, onopennote = () =
   );
   let inputEl = $state(null);
   let threadEl = $state(null);
+  // The thread's scrollbar's width now (ChatThread measures it, 0 without
+  // one): the composer's column stays centred on the messages' over it.
+  let threadGutter = $state(0);
   // The thread following its bottom (ChatThread's core/stickToBottom.js),
   // while it's drawn: a question sent and a conversation opened go back
   // there; everything else that makes it grow it follows by itself.
@@ -1343,6 +1346,8 @@ export function createChatState({ onopensettings = () => null, onopennote = () =
     set inputEl(v) { inputEl = v; },
     get threadEl() { return threadEl; },
     set threadEl(v) { threadEl = v; },
+    get threadGutter() { return threadGutter; },
+    set threadGutter(v) { threadGutter = v; },
     get follow() { return follow; },
     set follow(v) { follow = v; },
     get scope() { return scope; },

@@ -26,9 +26,10 @@
   /**
    * `chat`: the view's state (chatState.svelte.js); `code`: its Code chats
    * (codeChats.svelte.js); `ontogglelist()`: the list's own button, Hide
-   * your chats · Ctrl+B (ChatView: chatLayout.svelte.js).
+   * your chats · Ctrl+B (ChatView: chatLayout.svelte.js); `el`: the list
+   * itself, for its edge's drag (its width is ChatView's `--chat-list-w`).
    */
-  let { chat, code = null, ontogglelist = null } = $props();
+  let { chat, code = null, ontogglelist = null, el = $bindable(null) } = $props();
 
   const onCode = $derived(!!code?.onCode);
   let newCodeEl = $state(null);
@@ -155,7 +156,7 @@
 </script>
 
 <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
-<aside class="convs" id="chat-list" aria-label="Your chats" onkeydown={listKeydown}>
+<aside class="convs" id="chat-list" aria-label="Your chats" bind:this={el} onkeydown={listKeydown}>
   <!-- The list's head (as the Claude app's sidebar): its button at the top
        left (Hide your chats · Ctrl+B: chatLayout.svelte.js), the Chat | Code
        switch, the list's ⋯. -->
@@ -340,11 +341,12 @@
 </aside>
 
 <style>
-  /* A fixed width on both sides (its rows ellipsize): switching Chat | Code
-     never moves the thread. */
+  /* The same width on both sides (its rows ellipsize): switching Chat | Code
+     never moves the thread. Its edge sets it (ChatView: `--chat-list-w`,
+     224 px until dragged). */
   .convs {
-    flex: 0 0 224px;
-    width: 224px;
+    flex: 0 0 var(--chat-list-w, 224px);
+    width: var(--chat-list-w, 224px);
     min-width: 0;
     box-sizing: border-box;
     display: flex;

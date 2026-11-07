@@ -8,7 +8,12 @@
   // front). ✕ dismisses it for good; done, it goes by itself. A short window
   // leaves it out (the sidebar's rows come first).
   //
+  // In the sidebar narrowed to its rail (core/navRail.js) it's one icon with
+  // what's left to do as its badge; a click expands the rail, card and all.
+  //
   //   view        the view on screen (a change asks again)
+  //   compact     the rail is narrow: its icon
+  //   onexpand    the icon pressed: the rail expanded
   //   onconnect   "Connect your calendar"
   //   onmeetings  the Meetings view
   //   onmcp       Settings → AI apps (MCP)
@@ -17,7 +22,7 @@
   import { onMount } from 'svelte';
   import { calendar } from '../stores/calendar.svelte.js';
 
-  let { view = '', onconnect, onmeetings, onmcp } = $props();
+  let { view = '', compact = false, onexpand = null, onconnect, onmeetings, onmcp } = $props();
 
   let status = $state(null);
   let gone = false;
@@ -67,7 +72,19 @@
   }
 </script>
 
-{#if status?.shown}
+{#if status?.shown && compact}
+  <button
+    type="button"
+    class="mini"
+    aria-label={`Set up meeting notes, ${doneCount} of 3 done`}
+    data-tip={`Set up meeting notes · ${doneCount} of 3 done`}
+    data-testid="meeting-setup-mini"
+    onclick={() => onexpand?.()}
+  >
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="4" y="4" width="16" height="16" rx="3" /><path d="m8 12 2.5 2.5L16 9" /></svg>
+    <span class="left" aria-hidden="true">{3 - doneCount}</span>
+  </button>
+{:else if status?.shown}
   <section class="setup" aria-labelledby="ms-title" data-testid="meeting-setup">
     <div class="head">
       <h2 id="ms-title">Set up meeting notes</h2>
@@ -99,7 +116,11 @@
 {/if}
 
 <style>
+  /* (Its own width while the rail glides open: it fades in once there, never rewrapping on the way.) */
   .setup {
+    min-width: 196px;
+    box-sizing: border-box;
+    transition: opacity 120ms ease;
     margin: 0 2px 8px;
     padding: 10px 10px 8px;
     border: 1px solid var(--yap-border-subtle);
@@ -215,9 +236,57 @@
     font-size: 11.5px;
     color: var(--yap-muted);
   }
+  /* The narrow rail's icon: a row like the rail's own, what's left as its badge. */
+  .mini {
+    position: relative;
+    display: inline-flex;
+    align-items: center;
+    width: 40px;
+    height: 38px;
+    margin: 0 0 6px;
+    padding: 0 11px;
+    box-sizing: border-box;
+    border: none;
+    border-radius: var(--yap-r);
+    background: none;
+    color: var(--yap-fg);
+    cursor: pointer;
+    transition: background var(--yap-dur) ease;
+  }
+  .mini:hover {
+    background: var(--yap-raised-soft);
+  }
+  .mini:focus-visible {
+    outline: 2px solid var(--yap-focus-ring);
+    outline-offset: -2px;
+  }
+  .mini svg {
+    width: 18px;
+    height: 18px;
+    flex: 0 0 auto;
+  }
+  .left {
+    position: absolute;
+    top: 4px;
+    right: 3px;
+    min-width: 14px;
+    height: 14px;
+    padding: 0 3px;
+    box-sizing: border-box;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: var(--yap-r-full);
+    background: var(--yap-primary);
+    color: var(--yap-primary-fg);
+    font-size: 9px;
+    font-weight: 700;
+    line-height: 1;
+  }
   /* A short window: the sidebar's own rows first. */
   @media (max-height: 700px) {
-    .setup {
+    .setup,
+    .mini {
       display: none;
     }
   }
