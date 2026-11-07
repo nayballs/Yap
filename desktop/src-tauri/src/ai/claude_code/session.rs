@@ -35,6 +35,9 @@
 //!   against it ([`Problem::PaysAnotherWay`]).
 //! - **The prompt goes over stdin** ([`Session::send_user`]) as a stream-json
 //!   user message, pictures first as base64 image blocks.
+//! - **The plan's usage** ([`Session::get_usage`]): the experimental
+//!   `get_usage` control request, answered with a `control_response`
+//!   (`usage.rs`).
 //! - **Stopping** ([`Session::interrupt`]): the Agent SDK's control request,
 //!   `{"type":"control_request","request_id":…,"request":{"subtype":
 //!   "interrupt"}}`, when `system/init` lists `interrupt_receipt_v1`
@@ -811,6 +814,15 @@ impl Session {
         let (id, line) = control_request(request);
         self.write_line(&line)?;
         Ok(id)
+    }
+
+    /// **Where the plan's limits stand**: Claude Code's experimental
+    /// `get_usage` control request (`skip_behaviors`: no look through its
+    /// local transcripts, as for a usage meter). Its id: the answer is a
+    /// `ControlResponse` with it (`usage::from_response`). No model call
+    /// (checked on 2.1.296: no prompt sent, 1.9 s with the process start).
+    pub fn get_usage(&self) -> Result<String, String> {
+        self.control(super::usage::request())
     }
 
     /// Stop the turn running now. With `interrupt_receipt_v1` (every

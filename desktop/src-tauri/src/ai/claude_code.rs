@@ -18,6 +18,9 @@
 //! - [`events`]: its output read tolerantly ([`events::Event`]), and what
 //!   went wrong derived ([`events::Problem`]: not signed in, at the plan's
 //!   limit, paying another way).
+//! - [`usage`]: where the plan's limits stand (the experimental
+//!   `get_usage` control request on a session, or a one-off probe), read
+//!   tolerantly into rows, and moved live by a turn's rate-limit events.
 //! - [`transcripts`]: where Claude Code keeps the sessions it ran (its own
 //!   config folder, `projects/<the folder, encoded>/<session>.jsonl`), so
 //!   Yap can delete a plan chat's with the chat.
@@ -39,6 +42,7 @@ pub mod events;
 pub mod fake;
 pub mod session;
 pub mod transcripts;
+pub mod usage;
 
 /// At start (lib.rs setup), in the background: the run folders an earlier
 /// Yap left behind (a crash) removed, never a running Yap's.

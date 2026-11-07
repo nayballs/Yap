@@ -1768,6 +1768,13 @@ with a `result` (checked on 2.1.296: two messages, two results, one
   `CLAUDE_CONFIG_DIR` they set.
 - **The prompt goes over stdin** (`send_user`) as a stream-json user message,
   pictures first as base64 image blocks.
+- **The plan's usage** (`get_usage`, `usage.rs`): Claude Code's
+  experimental control request `{"subtype":"get_usage","skip_behaviors":true}`
+  on a live session, or on a one-off probe (`usage::probe`: the one-shot
+  calls' flags, nothing sent but the request, 15 s at most, always ended).
+  Verified on 2.1.296 signed in on a Max plan (7 Nov): a `control_response`
+  in 1.9 s with the process start, no model call. [Plan usage
+  limits](#plan-usage-limits-2026-11-07) says what's read of it.
 - **Stopping** (`interrupt`): the Agent SDK's control request
   (`{"type":"control_request","request_id":…,"request":{"subtype":"interrupt"}}`)
   when `system/init` lists `interrupt_receipt_v1`; 2.1.296 answers with a
@@ -1789,8 +1796,11 @@ a failure. It reads `system/init` (model, tools, MCP servers, `apiKeySource`,
 `system/permission_denied`, the hooks' events, `stream_event` (text and
 thinking deltas), `assistant` (text, `tool_use`, thinking), `user` (tool
 results), `result` (`session_id`, `usage`, `total_cost_usd`, `terminal_reason`,
-`permission_denials`, the final text), `rate_limit_event`, `tool_progress`
-and control messages.
+`permission_denials`, the final text, `modelUsage`'s context windows),
+`rate_limit_event` (with its `rateLimitType` and `unifiedWindows`),
+`tool_progress` and control messages. Each model call's own tokens come
+from `message_start`'s `usage` (the prompt, the cache's included) and
+`message_delta`'s `output_tokens`: a `result`'s `usage` is the turn's sum.
 
 - **Problems are derived** (`Classifier`), once per turn, just before the
   event that showed them: `NotSignedIn`, `RateLimited` (with when it resets,
@@ -1818,7 +1828,9 @@ next user message, sleep, call an http hook from its `--settings`, call a tool
 of its `--mcp-config`'s server (`_mcp`; with `result_for`, the answer also
 handed back as that tool call's `tool_result`, as Claude Code gives it to the
 model), dump its arguments or which variables it has (never a value), write a
-file in its folder, write to stderr, exit. `{"_for":"chat"}` (or `"job"`,
+file in its folder, write to stderr, exit, answer `get_usage` (`_usage`:
+the body to answer with from then on; none, or `null`: refused, as an
+older Claude Code). `{"_for":"chat"}` (or `"job"`,
 `"ask"`, `"all"`) plays the lines up to the next `_for` only in that kind of
 process — a Job's run (`--permission-prompt-tool`), a plan chat's session (an
 `--mcp-config`, no prompt tool), one question (neither) — so one script plays
@@ -1937,6 +1949,58 @@ comes here, as the ChatGPT plan's go to `llm/responses.rs`.
   "API key · $0.0042" (`core/aiModel.js` `paidLine`, `MessageTokens.costMicros`).
   Nothing known: the way alone.
 
+### Plan usage limits (2026-11-07)
+
+`claude_code/usage.rs` (the request and its answer) and
+`claude_plan/usage.rs` (when it's asked, what's kept): where the plan's
+limits stand, as the Claude desktop app shows them.
+
+- **The answer**, read tolerantly into `PlanUsage` (the subscription; the
+  limits as rows: kind, label parts — "Current session", "Weekly" +
+  "all models" or a scoped limit's model, "Fable" —, percent, severity,
+  when it resets, active; extra usage as used, limit, currency).
+  `response.response` (or `response`): `rate_limits_available` false (an API
+  key, Bedrock, Vertex) → nothing; `rate_limits.limits[]` first (`kind`
+  `<period>_all`, `<period>_scoped` or `<period>`: weekly, session /
+  five_hour, daily, monthly; any other kind left out), the named windows
+  (`five_hour`, `seven_day`, `seven_day_opus`, `seven_day_sonnet`,
+  `model_scoped[]`) when it gives nothing, and the five-hour window as
+  "Current session" when `limits[]` has no session row; a scoped limit at
+  0 % that isn't active left out; severity the answer's word (else from the
+  percent: 80 % a warning, 100 % critical); extra usage from `spend`
+  (`amount_minor` and `exponent`), else `extra_usage` (minor units,
+  `decimal_places`), only when it's on. Everything else (account details,
+  code-named fields) is never read; a field missing or of another type is
+  hidden, never an error. The shape is experimental: the fixture
+  (`fixtures/2.1.296/synthetic-get-usage.json`) is synthetic, no real
+  account's values, with unknown fields kept to prove they're ignored.
+- **When it's asked**, never on a timer and only while the plan's marker is
+  in the key store: after each plan turn on the conversation's warm session
+  (in the background, once the turn lets go of it; also after the plan's
+  limit stopped a turn); when a composer showing the plan chip mounts, the
+  window gets the focus back, or Settings' card shows — at most once a
+  minute, on a free warm session, else a one-off probe (none while every
+  warm session is in a turn: that turn asks after it). An answer with
+  nothing to show, a refusal or none at all: no probe for 30 minutes (and a
+  session that didn't answer in 5 s isn't asked after a turn for 30
+  minutes: the next question would wait behind it).
+- **Live**: a turn's `rate_limit_event`s move the rows they name
+  (`rateLimitType`, `unifiedWindows`: its utilization is a fraction, 1.0 at
+  the limit; rejected is critical, `allowed_warning` at least a warning).
+- **How full the conversation is**: after each plan turn, its last model
+  call's prompt and answer (`Mapper::last_call_tokens`, what the next call
+  starts from) against the model's window (`modelUsage`'s `contextWindow`,
+  else Anthropic's usual, marked "about"). Yap's own context ring isn't
+  shown on the plan: it reads the result's `usage`, the turn's sum over its
+  calls, which overstates it.
+- **In memory only**, never on disk: the latest answer and the last 50 plan
+  conversations' fills (a deleted chat's goes with it). The command
+  `claude_plan_usage {refresh?}` and the event `yap-claude-plan-usage` carry
+  `{usage, contexts}`.
+- **Not in Network connections**: it's Claude Code's own request to
+  Anthropic, on the person's own sign-in.
+- Logs: `info` the outcome and the rows' count, `debug` the percentages.
+
 ### Problems, in plain words
 
 Never an answer: the turn says the problem with the buttons that help
@@ -1957,7 +2021,16 @@ Never an answer: the turn says the problem with the buttons that help
   Claude Code is here: not installed (its install guide, Check again), too
   old (its version and the one Yap needs), signed in with an API key (not a
   plan), not signed in (**Sign in**), or **Connected · Using Claude plan**
-  (its version and plan, Manage usage, **Use for Chat**).
+  (its version and plan, Manage usage, **Use for Chat**), with the plan's
+  usage limits under it, small.
+- **Chat's usage ring** (`views/chat/PlanUsageRing.svelte`, in place of the
+  chip's Manage usage on the plan): filled to the highest active limit's
+  percent, coloured by its severity; hover or click opens **Plan
+  usage limits** — a row per limit ("Weekly · all models · Resets Sat 3:00
+  AM", the percent, a thin bar), extra usage ("Extra usage · £0.00 of
+  £37.50"), last how full this chat is ("This chat · 16% of context"), and
+  **See all →** to `USAGE_URL`. No numbers: no ring at all
+  ([frontend.md](./frontend.md)).
 - **Chat's picker**: Claude is one entry with "Your plan | API key", as
   ChatGPT is (`TAB_WAYS`, `waysState`). The chip says "Using Claude plan" or
   "Anthropic API key".
@@ -1974,18 +2047,26 @@ Never an answer: the turn says the problem with the buttons that help
   the plan's flattening, mapping, citations and sessions, a one-shot call
   not saved, the transcripts' folder names (as Claude Code's own code makes
   them) and their deletion in a fake config folder (a deleted chat's go,
-  another project's stay).
+  another project's stay); the usage answer over the fixture, an API key's
+  answer, a refusal, no `limits[]` (the named windows), unknown kinds and
+  fields, the body one level up, rate-limit events moving the rows, the
+  answer matched by its request id, the fake's `_usage`, the last call's
+  tokens against the turn's sum.
 - E2E: `claude-plan.spec.js` (also: the stand-in keeps the chat's
   transcript in a `CLAUDE_CONFIG_DIR` of the run's own, and deleting the
   chat deletes it, another project's left), `claude-plan-problems.spec.js`,
   `claude-plan-missing.spec.js`, `claude-plan-expired.spec.js`,
-  `claude-plan-limit.spec.js` on the stand-in ([`docs/e2e-tests.md`](../e2e-tests.md)).
+  `claude-plan-limit.spec.js`, `claude-plan-usage.spec.js` on the stand-in
+  ([`docs/e2e-tests.md`](../e2e-tests.md)).
 - **Needs a real signed-in run**: the real stream's shapes (one `assistant`
   event per block, ids, WebSearch and WebFetch results), `mcp__yap__*` under
   `dontAsk` with `--allowedTools`, `--resume` and a mid-turn interrupt, real
   rate-limit events and their reset, the pays-another-way check, whether the
-  plan takes `claude-fable-5-1`, screenshots as image blocks (no e2e), and the
-  context ring (it overstates: the turn's usage is summed over its steps).
+  plan takes `claude-fable-5-1`, screenshots as image blocks (no e2e), real
+  `rate_limit_event`s during a turn (their `utilization` read as a fraction
+  from the recordings; `unifiedWindows`' shape unseen), and `limits[]`'
+  kind for the five-hour session (only weekly kinds were seen; the
+  `five_hour` window stands in).
 
 ## Model evaluations (`npm run eval`)
 How real models do on Yap's own Chat code, with every request and response

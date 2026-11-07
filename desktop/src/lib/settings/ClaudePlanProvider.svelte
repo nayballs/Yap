@@ -18,7 +18,11 @@
   //     login`, in a terminal Yap opens; Yap reads it again when its window
   //     gets the focus back);
   //   - signed in: Connected · Using Claude plan, its version and plan,
-  //     Manage usage, and Use for Chat when Chat is on the key.
+  //     Manage usage, and Use for Chat when Chat is on the key; under it,
+  //     small, the plan's usage limits as Chat's usage ring shows them
+  //     (components/PlanUsageRows.svelte, stores/claudePlanUsage.svelte.js:
+  //     asked when the card shows, at most once a minute; none to be had,
+  //     none shown).
   // Under it, small: Claude Code keeps its own copy of each plan chat, and
   // Yap deletes it with the chat (claude_code/transcripts.rs).
   //
@@ -42,6 +46,8 @@
   import { CLAUDE_PLAN, CLAUDE_PLAN_KEY, CLAUDE_WAYS, maskKey } from '../core/providers.js';
   import { createExternalLinkHandler } from '../core/externalLinks.js';
   import { claudePlan, loadClaudePlan, signInClaudePlan } from '../stores/claudePlan.svelte.js';
+  import { planUsage, watchPlanUsage } from '../stores/claudePlanUsage.svelte.js';
+  import PlanUsageRows from '../components/PlanUsageRows.svelte';
 
   let {
     provider,
@@ -57,6 +63,13 @@
   } = $props();
 
   onMount(() => loadClaudePlan(true));
+
+  // The plan's usage limits, while it's connected and this card shows.
+  $effect(() => {
+    if (!claudePlan.ready) return;
+    return untrack(() => watchPlanUsage());
+  });
+  const usageRows = $derived(claudePlan.ready && (planUsage.usage?.limits?.length || planUsage.usage?.extra) ? planUsage.usage : null);
 
   const KEY_URL = PP_CLOUD_MODELS.anthropic.keyUrl;
   const planOn = $derived(claudePlan.loaded ? claudePlan.ready : planKey === CLAUDE_PLAN_KEY);
@@ -175,6 +188,11 @@
             <Button size="sm" {disabled} onclick={() => choose(CLAUDE_PLAN)}>Use for Chat</Button>
           {/if}
         </div>
+        {#if usageRows}
+          <div class="usage" data-testid="claude-plan-usage">
+            <PlanUsageRows usage={usageRows} small />
+          </div>
+        {/if}
       {/if}
 
       {#if claudePlan.failed || claudePlan.error}
@@ -312,6 +330,9 @@
     gap: 8px;
     flex-wrap: wrap;
     justify-content: flex-end;
+  }
+  .usage {
+    padding: 2px 12px 0;
   }
   .problem {
     margin: 0;
