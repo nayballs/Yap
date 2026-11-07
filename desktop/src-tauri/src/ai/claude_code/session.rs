@@ -269,6 +269,10 @@ pub struct Spec {
     /// folder (the default: `--resume` needs it). `false`:
     /// `--no-session-persistence`, nothing saved (a run nothing resumes).
     pub persist: bool,
+    /// `--disable-slash-commands` ("Disable all skills", 2.1.296's `--help`):
+    /// a message never runs one of the person's own commands or skills (a
+    /// Code chat's session, which loads their settings: read only).
+    pub disable_slash_commands: bool,
 }
 
 impl Spec {
@@ -295,6 +299,7 @@ impl Spec {
             max_budget_usd: None,
             fallback_model: None,
             persist: true,
+            disable_slash_commands: false,
         }
     }
 }
@@ -322,6 +327,7 @@ impl std::fmt::Debug for Spec {
             .field("max_budget_usd", &self.max_budget_usd)
             .field("fallback_model", &self.fallback_model)
             .field("persist", &self.persist)
+            .field("disable_slash_commands", &self.disable_slash_commands)
             .finish_non_exhaustive()
     }
 }
@@ -415,6 +421,9 @@ pub fn args(spec: &Spec, files: &Files) -> Vec<String> {
     }
     if !spec.persist {
         a.push("--no-session-persistence".into());
+    }
+    if spec.disable_slash_commands {
+        a.push("--disable-slash-commands".into());
     }
     a
 }

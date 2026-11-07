@@ -389,6 +389,7 @@ async fn turn(id: &str, message: Option<String>) -> Status {
         folder: Some(folder.clone()),
         approval: Some(Approval { run: id.to_string(), conversation: job.conversation, origin: job.origin }),
         jobs: false,
+        memory: false,
     }) {
         Ok(r) => r,
         Err(e) => return failed_early(id, format!("Couldn't start the job: {e}"), None),

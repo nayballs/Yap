@@ -3381,7 +3381,10 @@ as for every other. Chat, the Voice Assistant on this PC and from the phone.
   none of the person's settings (`--setting-sources ""`); `dontAsk` with
   those tools in `--allowedTools`; in an empty folder of Yap's; `Pay::Plan`
   (no API key in its environment; a run Claude Code would bill to a key is
-  stopped before it asks anything).
+  stopped before it asks anything). **In a Code chat** instead: a Claude Code
+  session in the workspace, with the person's own settings, Claude Code's
+  prompt with Yap's added, read only (`Read`, `Grep`, `Glob`), no memory
+  ([jobs.md](./jobs.md#code-chats), [ai-models.md](./ai-models.md#a-chat-turn-chatturnplanrs)).
 - **The question**: the turn's context and the question
   (`chats::with_context`), its screenshots as image blocks.
 - **Its events → Chat's stream** (`claude_plan/map.rs`, pure): text deltas as
@@ -3486,7 +3489,11 @@ own Claude Code in one of their folders, and reports back when it ends.
   made: `code_chat::with_new` / `adopt_new`), asked out loud too (Chat
   reports it, `chat_view_state`'s `codeFolder`: `assistant::new_code_chat`).
   An empty one greets you as the Code side (`CodeEmpty.svelte`). Kept in
-  `jobs.json`, never chats.json.
+  `jobs.json`, never chats.json. **No Yap memory in a Code chat** (any
+  model): none of memory's passages, "You" or tools, About you without its
+  note, no eager RAG or past chats, never learned from; meetings, notes and
+  tasks read with the tools on request ([jobs.md](./jobs.md#code-chats),
+  [memory.md](./memory.md#code-chats-keep-memory-out)).
 - **On screen** (`views/chat/`, [frontend.md](./frontend.md)):
   - **The switch and the Code side** (`ChatSideSwitch.svelte`,
     `codeChats.svelte.js`): New code chat opens the workspace picker

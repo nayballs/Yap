@@ -12,7 +12,12 @@
 //!   Yap deletes a conversation's with it ([`forget`]: Chat's delete; [`reset`]:
 //!   Delete some of your data → Chats, Reset app), and a session the
 //!   conversation moved on from as soon as it's replaced ([`put`]): only the
-//!   sessions kept here, only under Yap's own `claude/chat/` folder.
+//!   sessions kept here, only under the folder each ran in ([`Kept::cwd`]:
+//!   Yap's own `claude/chat/`, or a Code chat's workspace), only by their
+//!   ids — never another session's there (a job's, the person's own).
+//! - **A Code chat's session runs in its workspace** (`chat/turn/plan.rs`),
+//!   so another folder is another session ([`start`]): the chat so far goes
+//!   into the new one first.
 //! - **Warm** ([`Warm`]): the process stays up 10 minutes after its last
 //!   answer ([`WARM_FOR`], swept every half minute), so the next question
 //!   goes straight in; after that, or for another model or effort, or a
@@ -56,6 +61,37 @@ pub struct Kept {
     pub model: String,
     /// When it last answered (Unix seconds).
     pub ts: u64,
+    /// **The folder it ran in**: a Code chat's workspace (its session runs
+    /// there, `chat/turn/plan.rs`), so Claude Code keeps its transcript in
+    /// that folder's projects folder; empty for Yap's own `claude/chat/`
+    /// (every plain plan chat, and a file from before Code chats).
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub cwd: String,
+}
+
+impl Kept {
+    /// Where Claude Code filed this session ([`Kept::cwd`], else Yap's own
+    /// chat folder).
+    pub fn ran_in(&self) -> std::path::PathBuf {
+        ran_in(&self.cwd)
+    }
+}
+
+/// The folder a session kept with `cwd` ran in. Pure but for the data
+/// folder.
+fn ran_in(cwd: &str) -> std::path::PathBuf {
+    if cwd.trim().is_empty() {
+        super::oneshot::folder_path("chat")
+    } else {
+        std::path::PathBuf::from(cwd)
+    }
+}
+
+/// The same folder, as `Kept::cwd` keeps them (case, slashes and a last
+/// `\` aside: Windows paths). Pure.
+fn same_folder(a: &str, b: &str) -> bool {
+    let norm = |p: &str| p.trim().replace('/', "\\").trim_end_matches('\\').to_lowercase();
+    norm(a) == norm(b)
 }
 
 /// The file.
@@ -130,7 +166,7 @@ pub fn put(conv: u64, mut kept: Kept) {
     let replaced = with_store(|s| {
         let old = s.conversations.insert(conv.to_string(), kept.clone());
         save(s);
-        old.map(|o| o.session).filter(|o| !o.is_empty() && *o != kept.session)
+        old.filter(|o| !o.session.is_empty() && o.session != kept.session)
     });
     if let Some(old) = replaced {
         in_background(move || remove_transcripts(vec![old]));
@@ -150,10 +186,10 @@ pub fn forget(conv: u64) {
         }
         gone
     });
-    let ids: Vec<String> = gone.map(|k| k.session).into_iter().collect();
+    let gone: Vec<Kept> = gone.into_iter().collect();
     in_background(move || {
         end_now(warm.as_slice());
-        remove_transcripts(ids);
+        remove_transcripts(gone);
     });
 }
 
@@ -164,14 +200,14 @@ pub fn reset() -> usize {
     super::usage::forget_contexts();
     let warm: Vec<Arc<Warm>> = lock_warm().drain().map(|(_, w)| w).collect();
     end_now(&warm);
-    let (n, ids) = with_store(|s| {
-        let ids: Vec<String> = s.conversations.values().map(|k| k.session.clone()).collect();
+    let (n, gone) = with_store(|s| {
+        let gone: Vec<Kept> = s.conversations.values().cloned().collect();
         let n = s.conversations.len();
         s.conversations.clear();
         save(s);
-        (n, ids)
+        (n, gone)
     });
-    remove_transcripts(ids);
+    remove_transcripts(gone);
     n
 }
 
@@ -202,12 +238,22 @@ fn in_background(f: impl FnOnce() + Send + 'static) {
 }
 
 /// **Claude Code's own copies of `sessions`** (its transcripts, filed under
-/// Yap's `claude/chat/` folder, `claude_code::transcripts`) deleted: a chat
-/// Yap deletes leaves no copy behind.
-fn remove_transcripts(sessions: Vec<String>) {
-    let sessions: Vec<String> = sessions.into_iter().filter(|s| !s.is_empty()).collect();
-    if !sessions.is_empty() {
-        crate::ai::claude_code::transcripts::remove_for(&super::oneshot::folder_path("chat"), &sessions);
+/// the folder each ran in — Yap's `claude/chat/`, or a Code chat's
+/// workspace — `claude_code::transcripts`) deleted: a chat Yap deletes
+/// leaves no copy behind. Only these sessions' ids, in their own folders:
+/// never another session's (a job's in the same workspace, the person's
+/// own).
+fn remove_transcripts(sessions: Vec<Kept>) {
+    let mut by_folder: Vec<(std::path::PathBuf, Vec<String>)> = Vec::new();
+    for k in sessions.into_iter().filter(|k| !k.session.is_empty()) {
+        let dir = k.ran_in();
+        match by_folder.iter_mut().find(|(d, _)| same_folder(&d.to_string_lossy(), &dir.to_string_lossy())) {
+            Some((_, ids)) => ids.push(k.session),
+            None => by_folder.push((dir, vec![k.session])),
+        }
+    }
+    for (dir, ids) in by_folder {
+        crate::ai::claude_code::transcripts::remove_for(&dir, &ids);
     }
 }
 
@@ -233,10 +279,15 @@ pub enum Start {
     Resume { id: String, unseen: usize },
 }
 
-/// What a turn in a conversation of `len` messages (before its question)
+/// What a turn in a conversation of `len` messages (before its question),
+/// run in `cwd` (a Code chat's workspace; empty: Yap's own chat folder),
 /// starts from, given its kept session. Pure.
-pub fn start(kept: Option<&Kept>, len: usize) -> Start {
+pub fn start(kept: Option<&Kept>, len: usize, cwd: &str) -> Start {
     match kept {
+        // Another folder (a chat made a Code chat, moved to another
+        // workspace, or plain again): another session — Claude Code keeps
+        // sessions by folder, and the new one gets the chat so far.
+        Some(k) if !same_folder(&k.cwd, cwd) => Start::New,
         Some(k) if k.seen <= len => Start::Resume { id: k.session.clone(), unseen: k.seen },
         // Messages deleted since it last answered: it no longer matches.
         _ => Start::New,
@@ -436,7 +487,7 @@ mod tests {
     #[test]
     fn a_session_is_kept_per_conversation_and_only_for_that_conversation() {
         assert_eq!(get(7, 100), None);
-        put(7, Kept { session: "s-1".into(), created: 100, seen: 2, model: "claude-haiku-5-5".into(), ts: 0 });
+        put(7, Kept { session: "s-1".into(), created: 100, seen: 2, model: "claude-haiku-5-5".into(), ..Default::default() });
         let k = get(7, 100).unwrap();
         assert_eq!((k.session.as_str(), k.seen), ("s-1", 2));
         assert!(k.ts > 0);
@@ -500,14 +551,63 @@ mod tests {
     }
 
     #[test]
+    fn a_code_chats_copy_is_found_under_its_workspace_by_its_own_ids_only() {
+        use crate::ai::claude_code::transcripts::{project_dir_name, TEST_CONFIG};
+        let config = std::env::temp_dir().join(format!("yap-code-transcripts-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&config);
+        let workspace = r"D:\Projects\garden-planner";
+        let chats = config.join("projects").join(project_dir_name(&super::super::oneshot::folder_path("chat").to_string_lossy()));
+        let garden = config.join("projects").join(project_dir_name(workspace));
+        assert_eq!(garden.file_name().unwrap(), "D--Projects-garden-planner");
+        std::fs::create_dir_all(&chats).unwrap();
+        std::fs::create_dir_all(&garden).unwrap();
+        let plain = "4d7c1d2e-8a51-4c3b-9f0e-2b6a7e1c5d90";
+        let code = "9f0e2b6a-7e1c-4d90-8a51-4c3b4d7c1d2e";
+        // A job's session in the same workspace, and the person's own: theirs.
+        let job = "1b2c3d4e-0000-4000-8000-000000000003";
+        let own = "1b2c3d4e-0000-4000-8000-000000000004";
+        let transcript = |dir: &std::path::Path, id: &str| dir.join(format!("{id}.jsonl"));
+        std::fs::write(transcript(&chats, plain), "{}\n").unwrap();
+        for id in [code, job, own] {
+            std::fs::write(transcript(&garden, id), "{}\n").unwrap();
+        }
+        std::fs::create_dir_all(garden.join(code)).unwrap();
+        TEST_CONFIG.with(|c| *c.borrow_mut() = Some(config.clone()));
+
+        // A plain plan chat, then made a Code chat: the new session in the
+        // workspace replaces it, and the old one's copy goes from Yap's folder.
+        put(31, Kept { session: plain.into(), created: 9, seen: 2, ..Default::default() });
+        let kept = get(31, 9).unwrap();
+        assert_eq!(start(Some(&kept), 2, workspace), Start::New, "another folder, another session");
+        assert_eq!(start(Some(&kept), 2, ""), Start::Resume { id: plain.into(), unseen: 2 });
+        put(31, Kept { session: code.into(), created: 9, seen: 4, cwd: workspace.into(), ..Default::default() });
+        assert!(!transcript(&chats, plain).exists(), "the plain session it replaced, in Yap's own folder");
+        assert_eq!(get(31, 9).unwrap().ran_in(), std::path::PathBuf::from(workspace));
+        assert_eq!(all()["conversations"]["31"]["cwd"], workspace);
+        let kept = get(31, 9).unwrap();
+        assert_eq!(start(Some(&kept), 4, r"d:/projects/garden-planner/"), Start::Resume { id: code.into(), unseen: 4 }, "the same folder, however it's written");
+        // The chat deleted: its copy goes from the workspace's folder, with
+        // its own files; the job's and the person's own stay.
+        forget(31);
+        assert!(!transcript(&garden, code).exists() && !garden.join(code).exists());
+        assert!(transcript(&garden, job).exists() && transcript(&garden, own).exists());
+        // An older file's session (no cwd) is Yap's own folder's.
+        let old: Kept = serde_json::from_str(r#"{"session":"x","created":5,"seen":4}"#).unwrap();
+        assert_eq!(old.ran_in(), super::super::oneshot::folder_path("chat"));
+        assert!(serde_json::to_value(&old).unwrap().get("cwd").is_none(), "a plain chat's entry is as before");
+        TEST_CONFIG.with(|c| *c.borrow_mut() = None);
+        let _ = std::fs::remove_dir_all(&config);
+    }
+
+    #[test]
     fn a_turn_resumes_with_what_the_session_has_not_seen() {
         let k = Kept { session: "s-1".into(), created: 1, seen: 2, ..Default::default() };
-        assert_eq!(start(None, 0), Start::New);
-        assert_eq!(start(None, 4), Start::New);
-        assert_eq!(start(Some(&k), 2), Start::Resume { id: "s-1".into(), unseen: 2 });
-        assert_eq!(start(Some(&k), 4), Start::Resume { id: "s-1".into(), unseen: 2 });
+        assert_eq!(start(None, 0, ""), Start::New);
+        assert_eq!(start(None, 4, ""), Start::New);
+        assert_eq!(start(Some(&k), 2, ""), Start::Resume { id: "s-1".into(), unseen: 2 });
+        assert_eq!(start(Some(&k), 4, ""), Start::Resume { id: "s-1".into(), unseen: 2 });
         // Messages deleted under it: a new session.
-        assert_eq!(start(Some(&k), 1), Start::New);
+        assert_eq!(start(Some(&k), 1, ""), Start::New);
     }
 
     #[test]

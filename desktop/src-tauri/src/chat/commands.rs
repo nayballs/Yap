@@ -24,9 +24,10 @@ pub fn chat_get(id: u64) -> Result<crate::chat::chats::Conversation, String> {
 pub fn chat_delete(id: u64) -> Result<(), String> {
     crate::chat::chats::delete(id);
     // A later conversation may get its id: nothing of this one carries over
-    // (nor its Claude Code session, on your Claude plan).
+    // (nor its Claude Code session, on your Claude plan, nor its workspace).
     crate::apps::moved_on(Some(id));
     crate::ai::claude_plan::sessions::forget(id);
+    crate::jobs::code_chat::chat_deleted(id);
     Ok(crate::chat::chats::saved()?)
 }
 
@@ -38,6 +39,7 @@ pub fn chat_delete_many(ids: Vec<u64>) -> Result<usize, String> {
     for id in ids {
         crate::apps::moved_on(Some(id));
         crate::ai::claude_plan::sessions::forget(id);
+        crate::jobs::code_chat::chat_deleted(id);
     }
     crate::chat::chats::saved()?;
     Ok(gone)

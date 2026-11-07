@@ -34,8 +34,9 @@
 //!   waiting for the person never holds up a read.
 //! - **Chat's tools** ([`reads`]): `yap.exe mcp`'s meetings, notes, tasks and
 //!   folders (the same views, `mcp::run_tool`, read in process), Yap's memory
-//!   (`search_memory`) and the calendar (`check_calendar`, offered while one
-//!   is connected). Read only; never the dictation history.
+//!   (`search_memory`; never a Code chat's run, [`RunSpec::memory`]) and the
+//!   calendar (`check_calendar`, offered while one is connected). Read only;
+//!   never the dictation history.
 //! - **Jobs' tools** ([`jobs`]), for a Chat run offered them
 //!   ([`RunSpec::jobs`]): `start_job`, `job_status`, `message_job` and
 //!   `stop_job`, the tool loop's own code and rules, for the chat turn the
@@ -147,16 +148,26 @@ pub struct RunSpec {
     /// (its `tools/list` is read once), so a session made without them is
     /// started again to get them (`chat/turn/plan.rs`' fingerprint).
     pub jobs: bool,
+    /// A Chat run reads Yap's memory (`search_memory`): never a Code chat's
+    /// (`jobs/code_chat.rs`: Yap's memory is personal, the project keeps
+    /// its own). Meetings, notes, tasks, folders and the calendar stay.
+    pub memory: bool,
 }
 
 impl RunSpec {
     pub fn new(label: impl Into<String>, tools: Tools) -> RunSpec {
-        RunSpec { label: label.into(), tools, backup_dir: None, folder: None, approval: None, jobs: false }
+        RunSpec { label: label.into(), tools, backup_dir: None, folder: None, approval: None, jobs: false, memory: true }
     }
 
     /// The same, offered Jobs' tools (`on`).
     pub fn with_jobs(mut self, on: bool) -> RunSpec {
         self.jobs = on;
+        self
+    }
+
+    /// The same, with Yap's memory read (`on`) or not (a Code chat's).
+    pub fn with_memory(mut self, on: bool) -> RunSpec {
+        self.memory = on;
         self
     }
 }
@@ -171,6 +182,8 @@ pub struct RunHandle {
     tools: Tools,
     /// Offered Jobs' tools ([`RunSpec::jobs`], a Chat run's).
     jobs: bool,
+    /// Reads Yap's memory ([`RunSpec::memory`]).
+    memory: bool,
     has_backup: bool,
     /// The chat turn its calls belong to ([`RunHandle::begin_turn`]).
     turn: Arc<turn::Slot>,
@@ -255,7 +268,7 @@ impl RunHandle {
     /// …), so a Chat run in `dontAsk` mode can use them. `approve` is never
     /// one: it's the permission prompt tool.
     pub fn allowed_tools(&self) -> Vec<String> {
-        rpc::tool_names(self.tools, true, self.jobs)
+        rpc::tool_names(self.tools, true, self.jobs, self.memory)
             .into_iter()
             .filter(|n| *n != approve::NAME)
             .map(|n| format!("mcp__{SERVER}__{n}"))

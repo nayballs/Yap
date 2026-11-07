@@ -139,7 +139,10 @@ is [ai-models.md](./ai-models.md); the dictionary passes it feeds are
   card it runs sooner. Logs counts and times, never text. **Learning from a
   chat** (`learn_from_chat`, "Learn from my chats",
   on): only the messages since the last pass (`read`), only when the person
-  said something about themselves; then `mark_read`. **The scheduler**
+  said something about themselves; then `mark_read`. **Never a Code chat**
+  (`never_learned`, 7 Nov 2026: [below](#code-chats-keep-memory-out)): its
+  messages are marked read with no model call, so a chat made plain again
+  isn't learned from what it said as one. **The scheduler**
   (`after_turn`, from every `chat_turn`, Voice Assistant included; `start`):
   a chat is read once it's been quiet 5 minutes (10 for a small model on the
   processor); another chat starting makes
@@ -385,6 +388,22 @@ is [ai-models.md](./ai-models.md); the dictionary passes it feeds are
   its system prompt (`search::library::past_chats_block`, by words and
   meaning; the evaluations' 1.5B found the Lisbon restaurant with it).
 
+### Code chats keep memory out
+
+**A Code chat** (a conversation attached to a workspace,
+[jobs.md](./jobs.md#code-chats)) uses none of this, on every model and path
+(decided 7 Nov 2026): project knowledge belongs with the project (its
+`CLAUDE.md`, Claude Code's own memory), and Yap's memory is personal — in a
+Code chat it would duplicate the project's, put personal details within
+reach of a job's brief, a file, a commit or a PR, and fill memory with
+project trivia. So its turn has no "You" block, no memory passages, no
+Preferences note, no past chats, no `remember` / `forget` / `search_chats`
+(and a plan chat's endpoint no `search_memory`), no "Remember that…" pass,
+About you without its note (the name and the region stay), and it's never
+learned from (`chat/turn/prompt.rs` `build`, `chat/turn/run.rs`,
+`chat/turn.rs` `remembered`, `memory/learn.rs` `never_learned`). Memory's
+names still go to dictation. A plain chat is exactly as above.
+
 ## Settings → Memory
 
 `MemorySection.svelte` (Settings → Assistant → Memory, after Commands and
@@ -504,5 +523,9 @@ search (`settingsIndex.js`, anchors `memory-search-chats` … `memory-clear`):
   Qwen2.5-1.5B, Qwen3.5-2B and 0.8B on the small path — are in
   [`docs/model-evals.md`](../model-evals.md) "Memory" and "Memory on small
   models").
+- Code chats (unit `chat::turn::prompt`, `memory::learn`; e2e
+  `code-chats-memory.spec.js`): a Code chat's request with none of memory
+  and About you without its note, nothing learned; the same question in a
+  plain chat with all of it.
 - Real-app robot tests (`desktop/e2e-real/memory.real.js`): names Yap remembers fixed in a
   real dictation, everyday sentences untouched.
