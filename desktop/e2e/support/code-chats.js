@@ -22,6 +22,16 @@ export async function toSide(main, side, { jobsOn = true } = {}) {
   await expect(radio).toHaveAttribute('aria-checked', 'true');
 }
 
+/**
+ * The Chat side, when Jobs is on (else nothing to do): for a spec that turns
+ * Jobs on in some tests and expects "New chat" in the next (a chat that
+ * started a job is a Code chat, and Chat followed it to the Code side).
+ */
+export async function plainSide(main) {
+  const cfg = await main.evaluate(() => window.__TAURI_INTERNALS__.invoke('get_config'));
+  if (cfg?.jobsEnabled) await toSide(main, 'Chat');
+}
+
 /** The workspace picker, wherever it's open. */
 export const workspaceMenu = (main) => main.getByTestId('chat-workspace-menu');
 
