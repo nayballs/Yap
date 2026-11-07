@@ -103,7 +103,8 @@ export const PP_CLOUD_MODELS = {
   },
   // Your Claude plan (ai/claude_plan.rs `MODELS`): the Claude models a
   // plan's Claude Code takes, by their full ids (never aliases). Claude
-  // Code lists none; this is the list. The Chat scope only.
+  // Code lists none; this is the list. Every scope; Haiku first, the
+  // fastest, for a scope moved onto the plan (cleanup, Commands).
   'claude-plan': {
     keyUrl: 'https://claude.ai/settings/usage',
     models: [

@@ -20,6 +20,13 @@
 //! card's end goes out as `yap-claude-approve-done` `{id, run, outcome}`
 //! (`allowed`, `denied`, `timedOut`, `ended`, `cancelled`).
 //!
+//! **A plan** (2026-11-07): Plan mode's `ExitPlanMode` ([`EXIT_PLAN`]) is
+//! the job asking to go ahead with its plan, so its card says so — "The
+//! plan is ready", the plan itself (its input's `plan`, markdown, up to
+//! [`PLAN_MAX`]), **Go ahead** / **Not yet**. Allowed, the job carries the
+//! plan out once its turn ends (`jobs::runner::plan_allowed`); Not yet, it
+//! stays a plan and Claude is told to change nothing.
+//!
 //! The log has the card's id, the tool's name and the outcome; never the
 //! command, the file or the text.
 
@@ -46,6 +53,10 @@ pub const EVENT_DONE: &str = "yap-claude-approve-done";
 const DETAIL_MAX: usize = 2_000;
 /// How much of it the summary line shows.
 const SUMMARY_MAX: usize = 80;
+/// Plan mode's tool for "here's the plan, may I go ahead?".
+pub const EXIT_PLAN: &str = "ExitPlanMode";
+/// How much of a plan its card shows (folded in the thread).
+const PLAN_MAX: usize = 20_000;
 
 /// **A permission prompt waiting for the person**, as the card shows it.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -205,11 +216,13 @@ pub fn definition() -> Value {
     })
 }
 
-/// The answer Claude Code reads: `(text, is_error)`.
-fn decision(outcome: Outcome, input: &Value, wait: Duration) -> String {
+/// The answer Claude Code reads for `tool`.
+fn decision(tool: &str, outcome: Outcome, input: &Value, wait: Duration) -> String {
     let deny = |message: String| json!({ "behavior": "deny", "message": message }).to_string();
     match outcome {
         Outcome::Allowed => json!({ "behavior": "allow", "updatedInput": input }).to_string(),
+        // A plan's Not yet: still a plan, nothing changed.
+        Outcome::Denied if tool == EXIT_PLAN => deny("Not yet: the user hasn't approved the plan. Stay in plan mode and change nothing: end your turn with the plan as it is, and they'll say when to go ahead.".into()),
         Outcome::Denied => deny("The user said no to this in Yap. Don't try to do the same thing another way: carry on without it, and say in your final summary what you couldn't do.".into()),
         Outcome::TimedOut => deny(format!("Nobody answered this permission request in Yap within {}, so it wasn't allowed. Carry on without it if you can, and say in your final summary that it needed the user's permission.", span(wait))),
         Outcome::Ended => deny("The job was stopped in Yap before the user answered.".into()),
@@ -278,9 +291,13 @@ pub fn ask(ep: &Endpoint, run: &Run, args: &serde_json::Map<String, Value>, rpc:
             }
         }
     };
+    // A plan allowed: the job carries it out once this turn ends.
+    if tool == EXIT_PLAN && outcome == Outcome::Allowed {
+        crate::jobs::runner::plan_allowed(&card.run);
+    }
     (ep.emit)(EVENT_DONE, json!({ "id": id, "run": card.run, "outcome": outcome.word() }));
     tracing::info!(id, outcome = outcome.word(), "Claude Code: a permission prompt answered");
-    (decision(outcome, &input, ep.wait), false)
+    (decision(tool, outcome, &input, ep.wait), false)
 }
 
 /// A tool's name for the log: Claude Code's own, or "mcp" for another
@@ -378,6 +395,8 @@ pub fn describe(tool: &str, input: &Value, folder: Option<&Path>) -> (String, St
             clip(&s("prompt"), DETAIL_MAX),
         ),
         "Skill" => (format!("Use a skill: {}", one_line(&s("skill"), SUMMARY_MAX)), String::new()),
+        // Plan mode's "may I go ahead?": the plan itself, as Claude wrote it.
+        EXIT_PLAN => ("The plan is ready".into(), clip(&s("plan"), PLAN_MAX)),
         t if t.starts_with("mcp__") => {
             let mut parts = t.splitn(3, "__").skip(1);
             let server = parts.next().unwrap_or("");
@@ -417,11 +436,31 @@ mod tests {
         assert_eq!(span(Duration::from_secs(90)), "90 seconds");
         assert_eq!(span(Duration::from_millis(300)), "1 second");
         let input = json!({ "command": "ls" });
-        let allow: Value = serde_json::from_str(&decision(Outcome::Allowed, &input, super::super::APPROVE_WAIT)).unwrap();
+        let allow: Value = serde_json::from_str(&decision("Bash", Outcome::Allowed, &input, super::super::APPROVE_WAIT)).unwrap();
         assert_eq!(allow, json!({ "behavior": "allow", "updatedInput": { "command": "ls" } }));
-        let late: Value = serde_json::from_str(&decision(Outcome::TimedOut, &input, super::super::APPROVE_WAIT)).unwrap();
+        let late: Value = serde_json::from_str(&decision("Bash", Outcome::TimedOut, &input, super::super::APPROVE_WAIT)).unwrap();
         assert!(late["message"].as_str().unwrap().contains("within 10 minutes"));
+        let no: Value = serde_json::from_str(&decision("Bash", Outcome::Denied, &input, super::super::APPROVE_WAIT)).unwrap();
+        assert!(no["message"].as_str().unwrap().starts_with("The user said no to this in Yap."));
         assert_eq!(tool_kind("mcp__tracker__create_issue"), "mcp", "another server's name stays out of the log");
         assert_eq!(tool_kind("Bash"), "Bash");
+    }
+
+    #[test]
+    fn a_plan_asks_to_go_ahead_and_not_yet_keeps_it_a_plan() {
+        let plan = "## Watering schedule\n\n1. Add a `watering` section to notes.md\n2. Run the tests";
+        let input = json!({ "plan": plan });
+        let (summary, detail) = describe(EXIT_PLAN, &input, None);
+        assert_eq!(summary, "The plan is ready");
+        assert_eq!(detail, plan, "the plan itself, as markdown");
+        // A long plan is kept far past a command's 2,000 characters.
+        let long = "Step. ".repeat(1_000);
+        assert!(describe(EXIT_PLAN, &json!({ "plan": long }), None).1.chars().count() > DETAIL_MAX);
+        // Go ahead: allowed as asked. Not yet: still a plan, nothing changed.
+        let allow: Value = serde_json::from_str(&decision(EXIT_PLAN, Outcome::Allowed, &input, super::super::APPROVE_WAIT)).unwrap();
+        assert_eq!(allow, json!({ "behavior": "allow", "updatedInput": { "plan": plan } }));
+        let not_yet: Value = serde_json::from_str(&decision(EXIT_PLAN, Outcome::Denied, &input, super::super::APPROVE_WAIT)).unwrap();
+        assert_eq!(not_yet["behavior"], "deny");
+        assert!(not_yet["message"].as_str().unwrap().contains("Stay in plan mode and change nothing"));
     }
 }

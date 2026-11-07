@@ -1,13 +1,19 @@
 <script>
-  // Settings → Language Models → Chat & Voice Assistant → Cloud providers →
-  // Claude (2026-11-07, as ChatGPT's tab): Claude's models two ways, the
-  // plan first:
+  // Settings → Language Models → (every scope) → Cloud providers → Claude
+  // (2026-11-07, as ChatGPT's tab): Claude's models two ways, the plan first:
   //   1. your Claude plan (ai/claude_plan.rs, the provider "claude-plan"):
   //      Yap runs the person's own Claude Code on this PC, signed in with
-  //      their own Claude account; answers use their plan's limits;
-  //   2. an Anthropic API key (the provider "anthropic"), pay per use.
-  // The Chat scope only: Dictation Cleanup, Commands and Note Formatting
-  // keep the key alone (ScopeProviderConfig shows this for "chat").
+  //      their own Claude account; answers use their plan's limits, a little
+  //      slower (Claude Code goes first);
+  //   2. an Anthropic API key (the provider "anthropic"): quickest, pay per use.
+  // Every scope since 7 Nov 2026 (Dictation cleanup on LanguageModelsPage,
+  // Commands, Note Formatting and Chat on ScopeProviderConfig). What each
+  // way is, said under the switch (WayNote.svelte: a line, or for
+  // Dictation cleanup and Commands both ways side by side, `compare`); the
+  // selected model's row says which pays (ModelPicker `paidBy`).
+  // Off Chat, "If your plan can't answer, use my API key" (`fallback`, off by
+  // default: it spends money) shows on the plan with a key saved; Chat keeps
+  // its own "Use my API key for this chat" on the limit's message instead.
   //
   // The plan's card (`data-testid="claude-plan-card"`), by what Claude Code
   // is here (claude_plan_status, stores/claudePlan.svelte.js):
@@ -35,15 +41,23 @@
   //                 until claude_plan_status is in.
   //   model:        the scope's model, bound.
   //   keyEditing:   the key field open (else masked), bound.
+  //   keyBox:       the open key field's box (the cleanup banner's Add key).
   //   images:       "Reads images" in the model list.
+  //   scopeName:    the scope, in "Use for …" ("Chat", "Dictation cleanup", …).
+  //   compare:      both ways side by side (Dictation cleanup, Commands).
+  //   fallback:     "If your plan can't answer, use my API key", bound
+  //                 (`ppPlanFallback` / a scope's `planFallback`).
+  //   fallbackOffered: the scope has that switch (not Chat).
   import { onMount, untrack } from 'svelte';
   import ModelPicker from './ModelPicker.svelte';
+  import WayNote from './WayNote.svelte';
   import Input from '../ui/Input.svelte';
   import Button from '../ui/Button.svelte';
   import Segmented from '../ui/Segmented.svelte';
+  import Toggle from '../ui/Toggle.svelte';
   import ProviderMark from '../views/chat/ProviderMark.svelte';
   import { PP_CLOUD_MODELS } from '../core/ppModels.js';
-  import { CLAUDE_PLAN, CLAUDE_PLAN_KEY, CLAUDE_WAYS, maskKey } from '../core/providers.js';
+  import { CLAUDE_PLAN, CLAUDE_PLAN_KEY, CLAUDE_WAYS, PAID_BY, maskKey } from '../core/providers.js';
   import { createExternalLinkHandler } from '../core/externalLinks.js';
   import { claudePlan, loadClaudePlan, signInClaudePlan } from '../stores/claudePlan.svelte.js';
   import { planUsage, watchPlanUsage } from '../stores/claudePlanUsage.svelte.js';
@@ -58,8 +72,13 @@
     planKey = '',
     model = $bindable(''),
     keyEditing = $bindable(false),
+    keyBox = $bindable(null),
     disabled = false,
     images = false,
+    scopeName = 'Chat',
+    compare = false,
+    fallback = $bindable(false),
+    fallbackOffered = false,
   } = $props();
 
   onMount(() => loadClaudePlan(true));
@@ -84,6 +103,8 @@
   const planName = $derived(
     claudePlan.plan ? `${claudePlan.plan.charAt(0).toUpperCase()}${claudePlan.plan.slice(1)} plan` : 'your Claude plan'
   );
+  // The plan's way can fall back to the key: on the plan, a key saved, not Chat.
+  const offerFallback = $derived(fallbackOffered && onPlan && keyOn);
 
   function choose(p) {
     if (p === provider) return;
@@ -115,6 +136,8 @@
       <Segmented bind:value={() => provider, choose} options={CLAUDE_WAYS} label="Connect Claude with" {disabled} />
     </div>
   {/if}
+  <!-- What the way in use is (or both, side by side, where speed matters most). -->
+  <WayNote way={provider} plan={CLAUDE_PLAN} key="anthropic" {compare} />
 
   {#if planCard}
     <div class="plan" data-testid="claude-plan-card" data-setting="claude-plan">
@@ -185,7 +208,7 @@
             <span class="who">Claude Code {claudePlan.version} · {planName}</span>
           </div>
           {#if !onPlan}
-            <Button size="sm" {disabled} onclick={() => choose(CLAUDE_PLAN)}>Use for Chat</Button>
+            <Button size="sm" {disabled} onclick={() => choose(CLAUDE_PLAN)}>Use for {scopeName}</Button>
           {/if}
         </div>
         {#if usageRows}
@@ -198,7 +221,10 @@
       {#if claudePlan.failed || claudePlan.error}
         <p class="problem" role="alert">{claudePlan.failed || claudePlan.error}</p>
       {/if}
-      <p class="copies" data-testid="claude-plan-copies">Claude Code keeps its own copy of each plan chat; Yap deletes it with the chat.</p>
+      {#if scopeName === 'Chat'}
+        <!-- Only a chat's sessions are saved (a one-off call keeps no copy). -->
+        <p class="copies" data-testid="claude-plan-copies">Claude Code keeps its own copy of each plan chat; Yap deletes it with the chat.</p>
+      {/if}
     </div>
   {/if}
 
@@ -232,7 +258,7 @@
           <button class="keyedit" onclick={() => (keyEditing = true)}>edit</button>
         </div>
       {:else}
-        <div class="keymask editing">
+        <div class="keymask editing" bind:this={keyBox}>
           <Input type="password" bind:value={apiKey} oninput={onkeyinput} {disabled} placeholder="sk-ant-…" ariaLabel="Anthropic API key" />
           {#if masked}<button class="keyedit" onclick={() => (keyEditing = false)}>done</button>{/if}
         </div>
@@ -242,7 +268,19 @@
 
   {#if connected}
     <h4 class="selhead">Model</h4>
-    <ModelPicker {provider} bind:value={model} {disabled} {images} />
+    <ModelPicker {provider} bind:value={model} {disabled} {images} paidBy={PAID_BY[provider]} />
+  {/if}
+
+  {#if offerFallback}
+    <!-- Off by default: it spends money. -->
+    <div class="fallback" data-setting="claude-plan-fallback">
+      <Toggle
+        bind:checked={fallback}
+        {disabled}
+        label="If your plan can't answer, use my API key"
+        desc="When Claude Code is signed out, at your plan's limit or won't start, that call goes to your Anthropic API key once, billed per use."
+      />
+    </div>
   {/if}
 
   {#if !(planOn && keyOn)}
@@ -348,6 +386,10 @@
     display: flex;
     flex-direction: column;
     gap: 8px;
+  }
+  .fallback {
+    padding: 10px 0;
+    border-top: 1px solid var(--yap-rule);
   }
   .keynote {
     margin: -4px 0 0;

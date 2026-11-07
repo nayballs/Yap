@@ -729,9 +729,29 @@ on an element that also has a `settings.css` class (`set-note`,
   as ChatGPT's): Claude's models two ways, **the plan first** — Yap runs the
   person's own Claude Code on this PC, signed in with their own Claude
   account, and answers use their plan's limits (`ai/claude_plan.rs`, the
-  provider `claude-plan`) — then an Anthropic API key, pay per use. **The
-  Chat scope only**: Dictation Cleanup, Commands and Note Formatting keep the
-  key alone (`ScopeProviderConfig` shows the plan for "chat"). The plan's card
+  provider `claude-plan`) — then an Anthropic API key, pay per use. **Every
+  scope** since 7 Nov 2026 (the Chat scope only before): Dictation Cleanup on
+  `LanguageModelsPage.svelte` (its cleanup banner says "Sign in to Claude
+  Code" with Sign in while cleanup is on the plan and Claude Code isn't
+  ready), Commands, Note Formatting and Chat on `ScopeProviderConfig`
+  (`scopeName`: "Use for Commands"…). **What each way is** (the maintainer:
+  "make that distinction in the settings very clear"), `WayNote.svelte`
+  under the switch, words from `providers.js` `WAY_NOTES`: a line for the way
+  in use ("Your Claude plan, through Claude Code on this PC: uses your plan's
+  limits. Expect slightly slower responses." / "Your Anthropic API key:
+  quickest, billed per use."), or for Dictation Cleanup and Commands (`compare`)
+  both ways side by side, the one in use marked "In use"; the ChatGPT tab the
+  same (no speed claimed there: both of its ways are OpenAI's API). The
+  selected model's row says which pays, beside Active (`ModelPicker`
+  `paidBy` → `SelectList`, `PAID_BY`: "Using your Claude plan", "Anthropic API
+  key", "Using ChatGPT plan", "OpenAI API key"). Off Chat, on the plan with an
+  Anthropic key saved: **If your plan can't answer, use my API key**
+  (`data-setting="claude-plan-fallback"`, off by default; `ppPlanFallback`,
+  a scope's `planFallback`; ai-models.md). Groq and Grok keep their key alone
+  (Groq has no subscription, xAI's Grok none an app can use); the Cloud
+  providers line says "Your ChatGPT or Claude plan, or Groq, OpenAI,
+  Anthropic, Gemini or OpenRouter on your own API key". The line about Claude
+  Code's copies of plan chats shows on Chat's tab only. The plan's card
   (`data-testid="claude-plan-card"`) says what Claude Code is here, from
   `stores/claudePlan.svelte.js` (`claude_plan_status`): not installed (its
   install guide, Check again); too old (its version and the one Yap needs);
@@ -749,8 +769,10 @@ on an element that also has a `settings.css` class (`set-note`,
   connected: **Your plan | API key**, as ChatGPT's (`TAB_WAYS` in
   `core/providerIds.js`). The store probes at most once every 5 s (Check
   again always probes), so a window's focus coming and going never starts
-  Claude Code over and over. Three search entries: "Your Claude plan", "Sign
-  in to Claude Code", "Claude: your plan or an API key".
+  Claude Code over and over. Search entries: "Your Claude plan", "Sign
+  in to Claude Code", "Claude: your plan or an API key" (Chat), "Clean up on
+  your Claude plan" and "Commands on your Claude plan", and each one's "If
+  your plan can't answer, use my API key".
   **Spelling** (`#settings-cleanup-spelling`, `RegionSpelling.svelte`: "Write
   in my region's spelling" → `regionSpelling`, greyed while cleanup is off).
   With cleanup on: **Styles by app** (`#settings-cleanup-styles`,

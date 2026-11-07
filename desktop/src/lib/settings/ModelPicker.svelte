@@ -16,7 +16,9 @@
 
   // `images`: tag the models that read images ("Reads images": the Chat
   // scope's list, where a screenshot may go — snip/vision.rs's rules).
-  let { provider, value = $bindable(''), disabled = false, images = false } = $props();
+  // `paidBy`: which way pays, on the selected row (the Claude and ChatGPT
+  // tabs: "Using your Claude plan", "Anthropic API key"; providers.js PAID_BY).
+  let { provider, value = $bindable(''), disabled = false, images = false, paidBy = '' } = $props();
 
   let showMore = $state(false);
   let filter = $state('');
@@ -86,7 +88,7 @@
     </p>
   {/if}
 
-  <SelectList bind:value {options} {disabled} />
+  <SelectList bind:value {options} {disabled} {paidBy} />
 
   {#if merged.more.length > 0}
     <button type="button" class="morebtn" aria-expanded={showMore} onclick={() => (showMore = !showMore)}>
@@ -98,7 +100,7 @@
       {#if merged.more.length > 12}
         <input class="filter" type="search" placeholder="Find a {name} model" aria-label="Find a {name} model" bind:value={filter} />
       {/if}
-      <SelectList bind:value options={moreOptions} {disabled} />
+      <SelectList bind:value options={moreOptions} {disabled} {paidBy} />
       {#if moreOptions.length === 0}<p class="status">No {name} model matches “{filter}”.</p>{/if}
     {/if}
   {/if}

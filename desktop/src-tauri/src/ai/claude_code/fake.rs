@@ -37,7 +37,9 @@
 //!   the job it starts and the report's question. `all` (as from the top):
 //!   every kind.
 //! - `{"_dump_args":true}`: prints `{"type":"system","subtype":"fake_args",
-//!   "args":[…],"cwd":…}`. `{"_dump_args":"<file>"}`: and appends that
+//!   "args":[…],"cwd":…,"pid":…,"user_text":…}` (its process id, and the
+//!   last user message's words: after a `_wait_user`, which process served
+//!   which call). `{"_dump_args":"<file>"}`: and appends that
 //!   line to the file (an e2e spec reads a plan chat's launch there, or a
 //!   job's turns' arguments: `--session-id`, then `--resume`).
 //! - `{"_dump_env":["ANTHROPIC_API_KEY",…]}`: prints `{"type":"system",
@@ -68,6 +70,10 @@
 //! `<CLAUDE_CONFIG_DIR>/projects/<cwd, encoded>/<session>.jsonl`
 //! (`transcripts::project_dir_name`), unless it was started with
 //! `--no-session-persistence`.
+//!
+//! **Start-up**: `YAP_FAKE_CLAUDE_START_MS` waits that long before reading
+//! or printing anything, as Claude Code's own start does (a plan scope's
+//! warm spares are measured against it).
 //!
 //! **`--version`** prints `2.1.296 (Claude Code)` (`YAP_FAKE_CLAUDE_VERSION`
 //! for another); **`auth status`** prints a signed-in status
@@ -131,6 +137,12 @@ pub fn main(args: Vec<String>) -> i32 {
             return 2;
         }
     };
+    // Claude Code's own start-up, simulated (`YAP_FAKE_CLAUDE_START_MS`):
+    // nothing is read or printed until it's over (claude_plan/spare.rs'
+    // measurements).
+    if let Some(ms) = std::env::var("YAP_FAKE_CLAUDE_START_MS").ok().and_then(|v| v.trim().parse::<u64>().ok()).filter(|ms| *ms > 0) {
+        std::thread::sleep(Duration::from_millis(ms.min(60_000)));
+    }
     let (tx, rx) = std::sync::mpsc::channel();
     std::thread::spawn(move || {
         let stdin = std::io::stdin();
@@ -420,7 +432,9 @@ impl Player<'_> {
                 }
             }
             "_dump_args" => {
-                let line = json!({"type":"system","subtype":"fake_args","args":self.ctx.args,"cwd":self.ctx.cwd,"session_id":self.ctx.session_id});
+                // Its process id too: which process served which call (a
+                // plan scope's spares, one call each).
+                let line = json!({"type":"system","subtype":"fake_args","args":self.ctx.args,"cwd":self.ctx.cwd,"session_id":self.ctx.session_id,"pid":std::process::id(),"user_text":self.user_text});
                 // A path: the line appended to that file too, for a test
                 // that can't read the run's stdout (an e2e spec).
                 if let Some(file) = arg.as_str().filter(|f| !f.trim().is_empty()) {

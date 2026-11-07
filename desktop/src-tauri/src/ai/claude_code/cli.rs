@@ -204,6 +204,8 @@ static TEST_PROGRAM: Mutex<Option<Program>> = Mutex::new(None);
 pub fn set_test_program(program: Option<Program>) {
     *TEST_PROGRAM.lock().unwrap_or_else(|p| p.into_inner()) = program;
     forget();
+    // Spares started on the stand-in before play its script, not this one.
+    crate::ai::claude_plan::spare::end_all("the stand-in changed");
 }
 
 /// `YAP_CLAUDE_EXE` / `YAP_CLAUDE_ARGS_PREFIX` (debug builds; read at every

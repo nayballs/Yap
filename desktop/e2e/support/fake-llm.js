@@ -940,6 +940,8 @@ export async function startFakeLlm() {
       requests.push({
         kind,
         model: body.model,
+        // The key it came with (a plan's fallback to the key: claude-plan-scopes-signed-out.spec.js).
+        authorization: req.headers.authorization ?? null,
         maxTokens: body.max_tokens ?? null,
         tokens: messages.reduce((n, m) => n + estimateTokens(String(textOf(m.content) ?? '')), 0),
         system,

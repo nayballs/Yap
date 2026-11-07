@@ -54,6 +54,14 @@ pub async fn job_message(id: String, text: String) -> Result<Job, String> {
     runner::message(&id, &text, go)
 }
 
+/// **Go ahead with a job's plan**: the report card's button (the person's
+/// click is their consent): its next turn now, Yap's own go-ahead at the
+/// chat's Mode. Once: refused once the plan isn't waiting any more.
+#[tauri::command]
+pub async fn job_go_ahead(id: String) -> Result<Job, String> {
+    runner::go_ahead(&id)
+}
+
 /// Undo a job (Undo all: every turn, back to before its first): what Undo
 /// put back (`restored`, `deleted`, `skipped`, `refused`, `failed`: paths
 /// and reasons).

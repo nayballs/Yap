@@ -116,9 +116,9 @@
   // The ChatGPT tab (ChatGptProvider.svelte): the plan or an OpenAI key, one
   // tab; clicked, the plan when it's signed in, else a saved key, else the plan.
   function onCloudTab(v) {
-    // Claude, for Chat: your Claude plan when Claude Code is signed in here,
-    // else an Anthropic key (ClaudePlanProvider.svelte). Other scopes: the key.
-    if (v === CLAUDE_TAB && plansClaude) {
+    // Claude: your Claude plan when Claude Code is signed in here, else an
+    // Anthropic key (ClaudePlanProvider.svelte), in every scope (7 Nov 2026).
+    if (v === CLAUDE_TAB) {
       const planOn = claudePlan.loaded ? claudePlan.ready : sharedKey('claude-plan') === CLAUDE_PLAN_KEY;
       return onCloudProviderChange(claudeWay(planOn));
     }
@@ -126,8 +126,10 @@
     const planOn = chatgpt.loaded ? chatgpt.plan : sharedKey('chatgpt') === CHATGPT_PLAN_KEY;
     onCloudProviderChange(gptWay(planOn, !!sharedKey('openai')));
   }
-  // Your Claude plan is Chat's alone (never cleanup, Commands or meeting notes).
-  const plansClaude = $derived(scopeKey === 'chat');
+  // The scope's name on the plan's card ("Use for Commands").
+  const SCOPE_NAMES = { chat: 'Chat', voiceAgent: 'Commands', noteFormatting: 'Note formatting' };
+  // Both ways side by side where speed matters most (Commands).
+  const compareWays = $derived(scopeKey === 'voiceAgent');
 
   const maskedKey = $derived(maskKey(scope.apiKey));
   // Show the "Disable thinking output" toggle only for reasoning models (or a
@@ -191,9 +193,10 @@
           bind:keyEditing
           {disabled}
           images={scopeKey === 'chat'}
+          compare={compareWays}
         />
-      {:else if plansClaude && cloudTabOf(cloudProvider) === CLAUDE_TAB}
-        <!-- Claude, for Chat: your Claude plan first, or an Anthropic API key. -->
+      {:else if cloudTabOf(cloudProvider) === CLAUDE_TAB}
+        <!-- Claude: your Claude plan first, or an Anthropic API key. -->
         <ClaudePlanProvider
           provider={cloudProvider}
           onprovider={onCloudProviderChange}
@@ -204,7 +207,11 @@
           bind:model={scope.model}
           bind:keyEditing
           {disabled}
-          images
+          images={scopeKey === 'chat'}
+          scopeName={SCOPE_NAMES[scopeKey] || 'this'}
+          compare={compareWays}
+          bind:fallback={scope.planFallback}
+          fallbackOffered={scopeKey !== 'chat'}
         />
       {:else}
         <div class="keyhead">

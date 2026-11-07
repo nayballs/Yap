@@ -633,7 +633,15 @@ pub fn run(app: &AppHandle, cfg: &YapConfig, t: &Transform, origin: Origin, stan
         return r.ended("failed", Some("no AI model".into()));
     }
     if m.api_key.is_empty() && crate::ai::ai_model::KEYED_PROVIDERS.contains(&m.provider.as_str()) {
-        failed(app, format!("Transforms: no {} API key — add one in Language Models", m.provider));
+        failed(
+            app,
+            if m.provider == crate::ai::claude_plan::PROVIDER {
+                // Your Claude plan with Claude Code not ready here.
+                "Transforms: Claude Code isn't signed in on this PC. Sign in to Claude Code in Language Models → Commands → Claude.".to_string()
+            } else {
+                format!("Transforms: no {} API key — add one in Language Models", m.provider)
+            },
+        );
         return r.ended("failed", Some("no API key".into()));
     }
 
