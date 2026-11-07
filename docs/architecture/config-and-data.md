@@ -1077,7 +1077,9 @@
   live transcription preview **on**
   (`streaming_partials`), AI cleanup **off** (turned on locally, the model
   recommended for this PC: Qwen3.5 4B on a graphics card with ≥ 5.5 GiB of its
-  own, else Qwen2.5 1.5B), the "press enter" voice command
+  own, else Qwen2.5 1.5B), on your Claude plan **no fallback to the API key**
+  (`pp_plan_fallback`, a scope's `plan_fallback`: "If your plan can't answer,
+  use my API key", off: it spends money; ai-models.md), the "press enter" voice command
   **on** (`voice_enter`), word suggestions from your corrections **on**
   (`learn_words` — it only asks; nothing is added without a click), the
   region the AI models are told **following Windows** (About you's Region

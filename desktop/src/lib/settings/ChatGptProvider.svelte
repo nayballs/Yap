@@ -31,13 +31,18 @@
   //   keyEditing: the key field open (else masked), bound.
   //   keyBox:     the open key field's box (the cleanup banner's Add key).
   //   images:     "Reads images" in the model list (the Chat scope).
+  //   compare:    both ways side by side (Dictation cleanup, Commands).
+  // What each way is, said under the switch (WayNote.svelte), and the
+  // selected model's row says which pays (ModelPicker `paidBy`), as on the
+  // Claude tab (7 Nov 2026).
   import { onMount, untrack } from 'svelte';
   import ChatGptSignIn from './ChatGptSignIn.svelte';
   import ModelPicker from './ModelPicker.svelte';
+  import WayNote from './WayNote.svelte';
   import Input from '../ui/Input.svelte';
   import Segmented from '../ui/Segmented.svelte';
   import { PP_CLOUD_MODELS } from '../core/ppModels.js';
-  import { CHATGPT, CHATGPT_PLAN_KEY, GPT_WAYS, maskKey } from '../core/providers.js';
+  import { CHATGPT, CHATGPT_PLAN_KEY, GPT_WAYS, PAID_BY, maskKey } from '../core/providers.js';
   import { createExternalLinkHandler } from '../core/externalLinks.js';
   import { chatgpt, loadChatgpt, signInChatgpt } from '../stores/chatgpt.svelte.js';
 
@@ -53,6 +58,7 @@
     keyBox = $bindable(null),
     disabled = false,
     images = false,
+    compare = false,
   } = $props();
 
   onMount(loadChatgpt);
@@ -98,6 +104,8 @@
       <Segmented bind:value={() => provider, choose} options={GPT_WAYS} label="Connect ChatGPT with" {disabled} />
     </div>
   {/if}
+  <!-- What the way in use is (or both, side by side). -->
+  <WayNote way={provider} plan={CHATGPT} key="openai" {compare} />
 
   {#if planCard}
     <ChatGptSignIn {disabled} onstart={() => choose(CHATGPT)} />
@@ -143,7 +151,7 @@
 
   {#if connected}
     <h4 class="selhead">Model</h4>
-    <ModelPicker {provider} bind:value={model} {disabled} {images} />
+    <ModelPicker {provider} bind:value={model} {disabled} {images} paidBy={PAID_BY[provider]} />
   {/if}
 
   {#if !(planOn && keyOn)}

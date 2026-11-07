@@ -71,6 +71,9 @@ pub(crate) fn shutdown_cleanup() {
     // Jobs die with Yap (the kill-on-close job): interrupted, Continue
     // picks them up (jobs.rs).
     jobs::shutdown();
+    // Your Claude plan's warm spares (claude_plan/spare.rs): ended now (the
+    // kill-on-close job would anyway).
+    ai::claude_plan::spare::end_all("Yap quits");
     // Yap Link: no more phones (link.rs).
     link::stop();
     // Other apps' sound: a dictation's silence and Yap's voice's 30 %
@@ -797,6 +800,8 @@ pub fn run() {
             shell::e2e::e2e_claude_approve_auto,
             #[cfg(debug_assertions)]
             shell::e2e::e2e_claude_script,
+            #[cfg(debug_assertions)]
+            ai::claude_plan::spare::e2e_claude_spares,
             #[cfg(debug_assertions)]
             shell::e2e::e2e_snip,
             #[cfg(debug_assertions)]

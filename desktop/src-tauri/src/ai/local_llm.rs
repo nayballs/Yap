@@ -941,12 +941,15 @@ pub fn starting() -> bool {
 /// transcript, never a hang). `provider` is the id the call is attributed
 /// to for the per-provider usage meter.
 pub fn effective_endpoint(cfg: &crate::config::YapConfig) -> (String, String, String, String) {
-    effective_endpoint_for(
+    let ep = effective_endpoint_for(
         &cfg.pp_provider,
         &cfg.pp_base_url,
         &cfg.pp_api_key,
         &cfg.pp_model,
-    )
+    );
+    // Your Claude plan: the call runs under Dictation Cleanup's settings
+    // (its spare, its fallback to the key: claude_plan::resolve).
+    crate::ai::claude_plan::resolve(cfg, crate::ai::claude_plan::Scope::Cleanup, ep)
 }
 
 /// Same as [`effective_endpoint`] but for explicit values — used by per-profile

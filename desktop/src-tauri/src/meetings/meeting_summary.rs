@@ -291,8 +291,9 @@ pub fn resolve_endpoint(cfg: &YapConfig) -> Result<Endpoint, String> {
     let ep = match cfg.llm_scopes.get("noteFormatting") {
         Some(s) if s.enabled && !s.provider.is_empty() => {
             let key = cfg.provider_api_key(&s.provider, &s.api_key);
-            let (base_url, api_key, model, provider) =
-                crate::ai::local_llm::effective_endpoint_for(&s.provider, &s.base_url, &key, &s.model);
+            let ep = crate::ai::local_llm::effective_endpoint_for(&s.provider, &s.base_url, &key, &s.model);
+            // Your Claude plan: under Note Formatting's settings (claude_plan::resolve).
+            let (base_url, api_key, model, provider) = crate::ai::claude_plan::resolve(cfg, crate::ai::claude_plan::Scope::Notes, ep);
             let fragment = if s.prompt.trim().is_empty() {
                 crate::ai::llm::NOTE_DEFAULT_FRAGMENT.to_string()
             } else {
@@ -328,6 +329,9 @@ pub fn resolve_endpoint(cfg: &YapConfig) -> Result<Endpoint, String> {
             "No AI model configured — set one in Settings → Language Models → Note Formatting"
                 .to_string(),
         );
+    }
+    if ep.api_key.is_empty() && ep.provider == crate::ai::claude_plan::PROVIDER {
+        return Err("Claude Code isn't signed in on this PC. Sign in to Claude Code in Settings → Language Models → Note Formatting → Claude.".to_string());
     }
     if ep.api_key.is_empty() && crate::ai::ai_model::KEYED_PROVIDERS.contains(&ep.provider.as_str()) {
         return Err(format!(

@@ -299,9 +299,12 @@ impl Shared {
                                 // Profile keys fall back to the global
                                 // per-provider store, like scopes do.
                                 let key = c.provider_api_key(provider, api_key);
-                                crate::ai::local_llm::effective_endpoint_for(
+                                let ep = crate::ai::local_llm::effective_endpoint_for(
                                     provider, base_url, &key, model,
-                                )
+                                );
+                                // Your Claude plan: under Dictation
+                                // Cleanup's settings (claude_plan::resolve).
+                                crate::ai::claude_plan::resolve(&c, crate::ai::claude_plan::Scope::Cleanup, ep)
                             }
                             None => crate::ai::local_llm::effective_endpoint(&c),
                         };

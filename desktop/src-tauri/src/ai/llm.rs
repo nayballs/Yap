@@ -189,11 +189,18 @@ fn dictionary_suffix(dictionary: &[crate::config::DictionaryEntry]) -> String {
             phrases.join(", ")
         ));
     }
-    format!(
-        "\n\nCustom dictionary — when these appear in the transcript, {}.",
-        parts.join("; ")
-    )
+    format!("\n\n{DICTIONARY_LINE}{}.", parts.join("; "))
 }
+
+/// How the cleanup prompt's dictionary paragraph starts ([`dictionary_suffix`]):
+/// the words a dictation says change from call to call, so a call on the
+/// Claude plan carries them in its message instead (`claude_plan::oneshot::
+/// per_call_parts`).
+pub const DICTIONARY_LINE: &str = "Custom dictionary — when these appear in the transcript, ";
+
+/// How a rewrite's selection starts in its system prompt ([`rewrite_messages`]):
+/// the rest is the selection, a call's own (`per_call_parts`, as above).
+pub const SELECTION_LINE: &str = "Use the following selected text as the context to edit:";
 
 /// The cleanup's system prompt: the guardrails + the editable body, then —
 /// in Yap's own layer, never the person's preset text — the spelling line
@@ -805,9 +812,7 @@ pub fn rewrite_messages(instruction: &str, selection: &str, samples: Option<&str
     let system_prompt = if selection.is_empty() {
         base
     } else {
-        format!(
-            "{base}\n\nUse the following selected text as the context to edit:\n\"\"\"\n{selection}\n\"\"\""
-        )
+        format!("{base}\n\n{SELECTION_LINE}\n\"\"\"\n{selection}\n\"\"\"")
     };
     let user = if selection.is_empty() {
         format!("User's instruction: {instruction}\n\nWrite the requested text. Output ONLY the text, nothing else.")
@@ -1691,10 +1696,34 @@ async fn post_chat_request(
         return Box::pin(responses::post(model, &messages, tools, &extra, timeout, rate_limit_patience, on)).await;
     }
     // The person's Claude plan: one question to their own Claude Code, text
-    // only (ai/claude_plan/oneshot.rs). Never an HTTP call of Yap's.
+    // only (ai/claude_plan/oneshot.rs), for the scope its URL names. Never an
+    // HTTP call of Yap's — unless the plan couldn't answer and that scope
+    // said to use the Anthropic key then ("If your plan can't answer, use my
+    // API key", off by default; never Chat's): the same request, once, on
+    // the key and the same model, counted as the key's.
     if provider == crate::ai::claude_plan::PROVIDER {
-        let _ = (base_url, api_key, temperature, max_tokens, tools, extra, rate_limit_patience);
-        return Box::pin(crate::ai::claude_plan::oneshot::post(model, &messages, timeout, on)).await;
+        // The watcher lent for the plan's try (a shorter borrow), kept for the key's.
+        let lent: Option<OnDelta<'_>> = match on.as_mut() {
+            Some(f) => Some(&mut **f),
+            None => None,
+        };
+        // No marker in the key store: Claude Code isn't ready here (signed
+        // out, missing, too old), so it isn't started at all.
+        let plan = if api_key.trim().is_empty() {
+            Err(crate::ai::claude_plan::oneshot::Failure::Plan(crate::ai::claude_code::events::Problem::NotSignedIn.message()))
+        } else {
+            Box::pin(crate::ai::claude_plan::oneshot::post(base_url, model, &messages, timeout, lent)).await
+        };
+        let failed = match plan {
+            Ok(answer) => return Ok(answer),
+            Err(crate::ai::claude_plan::oneshot::Failure::Plan(why)) => why,
+            Err(other) => return Err(other.message()),
+        };
+        let scope = crate::ai::claude_plan::scope_of_url(base_url);
+        let Some(key) = crate::ai::claude_plan::fallback_key(&crate::config::load(), scope) else { return Err(failed) };
+        tracing::info!(scope = scope.id(), "Claude plan couldn't answer: this call goes to the Anthropic API key, as the scope asks");
+        let url = crate::ai::claude_plan::anthropic_url();
+        return Box::pin(post_chat_request(&url, &key, model, "anthropic", temperature, messages, tools, max_tokens, timeout, rate_limit_patience, extra, on)).await;
     }
     // Yap's on-device model not loaded (yet, or freed while idle; the call
     // has its stand-by address, or the one it had before it was freed): it

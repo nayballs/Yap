@@ -366,7 +366,7 @@ pub fn mask_key(key: &str) -> String {
 /// Save `key` for a cloud provider the way Settings does
 /// (ScopeProviderConfig's `stashApiKey`): the key every scope shares
 /// (`pp_api_keys`), the cleanup's own when cleanup is on that provider, and
-/// the Chat scope's when Chat is (or remembers one for it). Pure.
+/// each scope's that is (or remembers one for it). Pure.
 pub fn set_provider_key(cfg: &mut YapConfig, provider: &str, key: &str) -> Result<(), String> {
     if !KEYED_PROVIDERS.contains(&provider) {
         return Err(format!("{provider} doesn't take an API key"));
@@ -390,7 +390,9 @@ pub fn set_provider_key(cfg: &mut YapConfig, provider: &str, key: &str) -> Resul
     if cfg.pp_provider == provider {
         cfg.pp_api_key = key.to_string();
     }
-    if let Some(s) = cfg.llm_scopes.get_mut("chat") {
+    // Every scope on it (Chat, Commands, Note Formatting: one key per
+    // provider, and a plan's marker in each scope that uses the plan).
+    for s in cfg.llm_scopes.values_mut() {
         if s.provider == provider {
             s.api_key = key.to_string();
         }
@@ -402,13 +404,14 @@ pub fn set_provider_key(cfg: &mut YapConfig, provider: &str, key: &str) -> Resul
 }
 
 /// Forget a keyed provider's key everywhere [`set_provider_key`] puts it
-/// (signing out of ChatGPT). Pure.
+/// (signing out of ChatGPT, Claude Code signed out): the store, cleanup's,
+/// every scope's. Pure.
 pub fn clear_provider_key(cfg: &mut YapConfig, provider: &str) {
     cfg.pp_api_keys.remove(provider);
     if cfg.pp_provider == provider {
         cfg.pp_api_key.clear();
     }
-    if let Some(s) = cfg.llm_scopes.get_mut("chat") {
+    for s in cfg.llm_scopes.values_mut() {
         if s.provider == provider {
             s.api_key.clear();
         }

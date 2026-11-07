@@ -59,6 +59,9 @@ pub(crate) fn resolve_chat_endpoint(
         }
         _ => {
             let (b, k, m, p) = crate::ai::local_llm::effective_endpoint(cfg);
+            // Your Claude plan: Chat's calls stay Chat's (no spare, no
+            // fallback to the key), on the cleanup's model or not.
+            let b = crate::ai::claude_plan::tag(&p, b, crate::ai::claude_plan::Scope::Chat);
             (b, k, m, p, persona, cfg.pp_disable_thinking)
         }
     };

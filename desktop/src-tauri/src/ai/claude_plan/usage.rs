@@ -7,6 +7,10 @@
 //!   connected (the key store's marker):
 //!   - after each plan turn, on the conversation's warm session
 //!     ([`after_turn`]);
+//!   - beside a one-shot call (a dictation's cleanup, a Command, a
+//!     meeting's summary on the plan): its own process asked too, at most
+//!     once a minute ([`due_with_call`]); and the call's own
+//!     `rate_limit_event`s move the rows ([`live`]);
 //!   - when a composer showing the plan chip mounts, or the window gets the
 //!     focus back, or Settings' card shows (`claude_plan_usage {refresh}`):
 //!     at most once a minute ([`EVERY`]), on a warm session that's free,
@@ -230,6 +234,33 @@ pub fn after_turn(w: Arc<sessions::Warm>) {
             None => emit(),
         }
     });
+}
+
+/// **Ask beside a one-shot call?** (a dictation's cleanup, a Command, a
+/// meeting's summary on the plan: `oneshot::post`): the plan connected, the
+/// last ask a minute old ([`EVERY`]) and none quiet. Marked as asked now.
+/// The call's own process answers it: no other process, no model call.
+pub fn due_with_call() -> bool {
+    if !connected() {
+        return false;
+    }
+    with(|s| {
+        let now = Instant::now();
+        let due = s.asked.is_none_or(|t| now.duration_since(t) >= EVERY) && s.quiet_until.is_none_or(|t| now >= t);
+        if due {
+            s.asked = Some(now);
+        }
+        due
+    })
+}
+
+/// What a one-shot call's process said of the limits, kept. No answer (it
+/// ended first) changes nothing: the next call or the page asks again.
+pub fn kept_from_call(asked: &Asked) {
+    if matches!(asked, Asked::NoAnswer) {
+        return;
+    }
+    keep(asked, "call");
 }
 
 /// Ask on `w` if no turn is on it: `None` when one is (that turn asks after).
