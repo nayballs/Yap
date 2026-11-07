@@ -249,12 +249,19 @@ struct Asked<'a> {
 }
 
 /// The question saved ([`open`]): its conversation as it was before it,
-/// the question's index there, and a passage selected in the document
-/// panel that it's about ("Change this…", documents.rs).
+/// the question's index there, a passage selected in the document panel
+/// that it's about ("Change this…", documents.rs), and the workspace when
+/// it's a Code chat.
 struct Opened {
     conv: crate::chat::chats::Conversation,
     user_index: usize,
     selection: Option<crate::chat::documents::Selection>,
+    /// **A Code chat's workspace** (`jobs/code_chat.rs`), read once the
+    /// question is saved (a new code chat is attached as it's made): no
+    /// Yap memory in its turn, About you without its note, nothing found
+    /// by itself (prompt.rs), never learned from (memory/learn.rs), and on
+    /// the Claude plan a session in the workspace (plan.rs).
+    code: Option<crate::jobs::folders::Folder>,
 }
 
 /// **The answer as the model gave it** (`run.rs`, `small.rs`), before
@@ -459,16 +466,19 @@ fn open(t: &Asked<'_>, conversation_id: Option<u64>, asked: impl FnOnce(u64, usi
     // ends, with nothing saved.
     t.stop.answers(conv.id);
     asked(conv.id, user_index);
-    Ok(Opened { conv, user_index, selection })
+    // (After `asked`: a new code chat's conversation is attached there.)
+    let code = crate::jobs::code_chat::folder_of(Some(conv.id));
+    Ok(Opened { conv, user_index, selection, code })
 }
 
 /// **"Remember that…" / "Forget that…" to a model without tools**: Yap's
 /// own memory pass makes the change (memory/learn.rs), and says so — the
 /// turn's answer, saved. A model with tools does it with `remember` /
-/// `forget`. `None`: not one of those.
+/// `forget`. `None`: not one of those — and never in a Code chat, which
+/// keeps Yap's memory out (the words go to the model as they are).
 async fn remembered(t: &Asked<'_>, opened: &Opened) -> Result<Option<ChatTurn>, String> {
     // (Your Claude plan's tools only read: Yap's own pass remembers for it.)
-    if t.gates.tools && t.ep.provider != crate::ai::claude_plan::PROVIDER {
+    if opened.code.is_some() || t.gates.tools && t.ep.provider != crate::ai::claude_plan::PROVIDER {
         return Ok(None);
     }
     let Some(done) = crate::memory::learn::spoken(&t.text).await else {

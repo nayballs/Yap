@@ -14,6 +14,9 @@
 //! - **Yap's own tools** (`mcp__yap__search_notes`…, the run's endpoint,
 //!   `integrations/claude_live.rs`) → `Delta::ToolCall` / `ToolArgs`, their
 //!   input whole → `ServerInput` (the line with what it looks for).
+//! - **A Code chat's reads** (Claude Code's `Read`, `Grep`, `Glob` in its
+//!   workspace) → `Delta::ToolCall` as "read_file", "search_code",
+//!   "find_files" (the line "Reading app.ts"; no chip).
 //! - **Results** (`user` tool results): a chip each, as the tool loop's
 //!   read ("Searched the web: \"…\"", "Read example.com/page"); a search's
 //!   links and a page read become the answer's [`Source`]s, numbered as
@@ -51,6 +54,10 @@ pub enum Tool {
     Fetch,
     /// One of Yap's ("search_notes").
     Yap(String),
+    /// A Code chat's read of its workspace (Claude Code's `Read`, `Grep`,
+    /// `Glob`), by the name Chat's line knows it ("read_file"): a step, no
+    /// chip.
+    Code(&'static str),
     /// Anything else (its ToolSearch…): no chip, no line.
     Other(String),
 }
@@ -60,6 +67,9 @@ impl Tool {
         match name {
             "WebSearch" => Tool::Search,
             "WebFetch" => Tool::Fetch,
+            "Read" => Tool::Code("read_file"),
+            "Grep" => Tool::Code("search_code"),
+            "Glob" => Tool::Code("find_files"),
             n => match n.strip_prefix(YAP_PREFIX) {
                 Some(own) if !own.is_empty() => Tool::Yap(own.to_string()),
                 _ => Tool::Other(n.to_string()),
@@ -72,6 +82,7 @@ impl Tool {
         match self {
             Tool::Search => "web_search",
             Tool::Fetch => "web_fetch",
+            Tool::Code(n) => n,
             Tool::Yap(n) | Tool::Other(n) => n,
         }
     }
@@ -270,11 +281,13 @@ impl Mapper {
     }
 
     /// A call began: Claude Code's web tools as a provider's own (what came
-    /// before isn't the answer, which goes on after), Yap's as a tool call.
+    /// before isn't the answer, which goes on after), Yap's and a Code
+    /// chat's reads as a tool call.
     fn begin(&self, tool: &Tool, out: &mut dyn Out) {
         match tool {
             Tool::Search | Tool::Fetch => out.delta(Delta::Server(tool.name())),
             Tool::Yap(n) => out.delta(Delta::ToolCall(n)),
+            Tool::Code(n) => out.delta(Delta::ToolCall(n)),
             Tool::Other(_) => {}
         }
     }
@@ -336,7 +349,9 @@ impl Mapper {
                 self.chips.push(if is_error { format!("{chip} · didn't work") } else { chip });
                 true
             }
-            Tool::Other(_) => false,
+            // (A Code chat's reads of its workspace: a line while they run,
+            // no chip — the answer says which files it means.)
+            Tool::Code(_) | Tool::Other(_) => false,
         }
     }
 

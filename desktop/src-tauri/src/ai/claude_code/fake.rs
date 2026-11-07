@@ -37,7 +37,8 @@
 //!   the job it starts and the report's question. `all` (as from the top):
 //!   every kind.
 //! - `{"_dump_args":true}`: prints `{"type":"system","subtype":"fake_args",
-//!   "args":[…],"cwd":…}`.
+//!   "args":[…],"cwd":…}`. `{"_dump_args":"<file>"}`: and appends that
+//!   line to the file (an e2e spec reads a plan chat's launch there).
 //! - `{"_dump_env":["ANTHROPIC_API_KEY",…]}`: prints `{"type":"system",
 //!   "subtype":"fake_env","present":{"ANTHROPIC_API_KEY":false,…}}` (never a
 //!   value).
@@ -419,6 +420,14 @@ impl Player<'_> {
             }
             "_dump_args" => {
                 let line = json!({"type":"system","subtype":"fake_args","args":self.ctx.args,"cwd":self.ctx.cwd,"session_id":self.ctx.session_id});
+                // A path: the line appended to that file too, for a test
+                // that can't read the run's stdout (an e2e spec).
+                if let Some(file) = arg.as_str().filter(|f| !f.trim().is_empty()) {
+                    let written = std::fs::OpenOptions::new().create(true).append(true).open(file).and_then(|mut f| writeln!(f, "{line}"));
+                    if let Err(e) = written {
+                        eprintln!("fake-claude: couldn't write the arguments: {e}");
+                    }
+                }
                 self.print(&line.to_string())?;
             }
             "_dump_env" => {

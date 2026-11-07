@@ -185,6 +185,9 @@ pub fn doing(name: &str) -> &'static str {
         "list_meetings" | "search_meetings" | "get_meeting" => "Looking at your meetings…",
         "list_tasks" => "Looking at your tasks…",
         "search_memory" => "Searching Yap's memory…",
+        // A Code chat's reads of its workspace (claude_plan/map.rs).
+        "read_file" => "Reading the code…",
+        "search_code" | "find_files" => "Searching the code…",
         _ => "Working…",
     }
 }

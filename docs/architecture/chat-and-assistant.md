@@ -3426,7 +3426,10 @@ as for every other. Chat, the Voice Assistant on this PC and from the phone.
   none of the person's settings (`--setting-sources ""`); `dontAsk` with
   those tools in `--allowedTools`; in an empty folder of Yap's; `Pay::Plan`
   (no API key in its environment; a run Claude Code would bill to a key is
-  stopped before it asks anything).
+  stopped before it asks anything). **In a Code chat** instead: a Claude Code
+  session in the workspace, with the person's own settings, Claude Code's
+  prompt with Yap's added, read only (`Read`, `Grep`, `Glob`), no memory
+  ([jobs.md](./jobs.md#memory-and-the-plan-in-a-code-chat), [ai-models.md](./ai-models.md#a-chat-turn-chatturnplanrs)).
 - **The question**: the turn's context and the question
   (`chats::with_context`), its screenshots as image blocks.
 - **Its events → Chat's stream** (`claude_plan/map.rs`, pure): text deltas as
@@ -3450,9 +3453,9 @@ as for every other. Chat, the Voice Assistant on this PC and from the phone.
   events tell the run of every web read and of each of Yap's tool calls as
   Claude Code begins it (`ToChat`, `Marks`); what the calls show comes back
   into the turn's stream (`read_turn`): [jobs.md](./jobs.md#from-a-plan-chat).
-- **In a Code chat** a plan turn runs as any plan chat does today; a
-  read-only session in the chat's workspace is decided and landing next
-  ([jobs.md](./jobs.md#chat-and-code)).
+- **In a Code chat** a plan turn is a read-only Claude Code session in the
+  chat's workspace, with the person's own settings and no Yap memory
+  ([jobs.md](./jobs.md#memory-and-the-plan-in-a-code-chat)).
 - **What a plan turn doesn't do in v1** (`gates.rs` `on_the_plan`): documents
   beside the chat, pictures from the web, pages to open or act on, a look at
   the screen (the Voice Assistant gets the window's picture instead), Think's
@@ -3493,7 +3496,13 @@ where they touch Chat's own code.
   and `STRONG_LOCKED`; a job's own output is web content (the dispatch's
   `job_seen`).
 - **A Code chat's prompt line** (`prompt.rs` `build`:
-  `code_chat::prompt_line`), for the tool loop and a plan chat alike.
+  `code_chat::prompt_line_for`), for the tool loop and a plan chat alike.
+- **No Yap memory in a Code chat** (any model): none of memory's passages,
+  "You" or tools, About you without its note, no eager RAG or past chats,
+  never learned from; meetings, notes and tasks read with the tools on
+  request. On the Claude plan its session runs in the workspace, read only
+  ([jobs.md](./jobs.md#code-chats-and-workspaces),
+  [memory.md](./memory.md#code-chats-keep-memory-out)).
 - **A new code chat's first question** carries its workspace (`chat_send`'s
   `codeFolder`; `chat_view_state`'s `codeFolder` for one asked out loud).
 - **`stream::Event::Job`**: a job started in this turn; the panel opens its

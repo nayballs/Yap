@@ -136,7 +136,8 @@ function script(name, chatTurns) {
 }
 
 function freshFolder(dir) {
-  fs.rmSync(dir, { recursive: true, force: true });
+  // (Retried: a Code chat's session ended a moment ago may still be letting go of it.)
+  fs.rmSync(dir, { recursive: true, force: true, maxRetries: 20, retryDelay: 250 });
   fs.mkdirSync(dir, { recursive: true });
   fs.writeFileSync(path.join(dir, 'notes.md'), 'Draft notes\n');
 }
@@ -259,8 +260,13 @@ test('typed on the plan: asked first in the thread, the job runs in the named fo
   expect(await spoken(yap)).toEqual([]);
   await shot(main, '02-plan-job-reported');
 
-  // The conversation's session reads the report with the next question
-  // (it never saw it: the report went the plan's one-question way).
+  // The chat is a Code chat now (its job named a workspace), so its next
+  // question goes to a new session in that workspace (chat/turn/plan.rs: a
+  // Code chat's session runs there), which the stand-in plays from a script
+  // of its own. It reads the chat so far — the report too: it never saw it
+  // (the report went the plan's one-question way).
+  expect((await yap.invoke('job_chat_folder_get', { conversation: job.conversation }))?.name).toBe('garden-planner');
+  await play(yap, 'typed-next', [turn(answers('m3', 'Got: {{user_text}}'))]);
   await send(main, 'Thanks. What did it change?');
   await expect(lastAnswer(main)).toContainText('Got:', { timeout: 20_000 });
   const after = await messagesOf(yap, job.conversation, 6);
@@ -268,6 +274,11 @@ test('typed on the plan: asked first in the thread, the job runs in the named fo
   expect(after[5].text).toContain(REPORT);
   expect(after[5].text).toContain('Thanks. What did it change?');
   await expect.poll(() => yap.readJson('claude_sessions.json').conversations[String(job.conversation)]?.seen).toBe(6);
+  expect(path.resolve(yap.readJson('claude_sessions.json').conversations[String(job.conversation)].cwd).toLowerCase()).toBe(path.resolve(GARDEN).toLowerCase());
+  // Its warm session works in the workspace, and Windows keeps a folder a
+  // process works in: the chat deleted ends it, so the next test's fresh
+  // folder can go.
+  await yap.invoke('chat_delete', { id: job.conversation });
 });
 
 test('by voice on the plan: asked out loud, the spoken yes starts the job, and the report is spoken', async ({ yap, main }) => {

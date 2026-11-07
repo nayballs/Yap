@@ -1731,7 +1731,9 @@ with a `result` (checked on 2.1.296: two messages, two results, one
   of Claude Code's own: plan chats only), `--add-dir`, `--session-id` /
   `--resume`, `--max-budget-usd` (key runs only), `--fallback-model`,
   `--no-session-persistence` (`persist: false`: a run nothing resumes saves no
-  transcript; `-p` only, checked in 2.1.296's `--help`).
+  transcript; `-p` only, checked in 2.1.296's `--help`),
+  `--disable-slash-commands` (a Code chat's session: no message runs one of
+  the person's own commands or skills).
 - **Files, not arguments**: the settings, the MCP config and the system prompt
   are written to a folder of the run's own, `%TEMP%\yap-claude\<id>-<tag>\`,
   removed when the session goes. So nothing needs escaping for a shim and
@@ -1829,7 +1831,8 @@ in; a line whose first key starts with `_` is an instruction: wait for the
 next user message, sleep, call an http hook from its `--settings`, call a tool
 of its `--mcp-config`'s server (`_mcp`; with `result_for`, the answer also
 handed back as that tool call's `tool_result`, as Claude Code gives it to the
-model), dump its arguments or which variables it has (never a value), write a
+model), dump its arguments (`_dump_args`; with a file path, appended there
+too, for an e2e spec) or which variables it has (never a value), write a
 file in its folder, write to stderr, exit, answer `get_usage` (`_usage`:
 the body to answer with from then on; none, or `null`: refused, as an
 older Claude Code). `{"_for":"chat"}` (or `"job"`,
@@ -1896,10 +1899,28 @@ How a plan turn runs (a session per conversation, kept warm 10 minutes in
 place of Claude Code's; Claude Code's web tools and Yap's read-only tools; the
 job tools while Jobs is offered; its events into Chat's stream) is in
 [chat-and-assistant.md](./chat-and-assistant.md#chat-on-your-claude-plan-2026-11-07),
-and its job tools in [jobs.md](./jobs.md#from-a-plan-chat). A plan chat runs
-lean, in an empty folder of Yap's (`claude\chat\` in the data folder), with
-none of the person's own Claude settings: a Code chat's read-only session in
-its workspace is decided and landing next ([jobs.md](./jobs.md#chat-and-code)).
+and its job tools in [jobs.md](./jobs.md#from-a-plan-chat). A plain plan chat
+runs lean, in an empty folder of Yap's (`claude\chat\` in the data folder),
+with none of the person's own Claude settings.
+
+**A plan chat in a Code chat** (7 Nov 2026, [jobs.md](./jobs.md#memory-and-the-plan-in-a-code-chat))
+is a Claude Code session in the workspace, project-aware and read only, in
+place of the lean setup: the workspace as its folder, the person's own
+user, project and local settings (`--setting-sources user,project,local`:
+their CLAUDE.md, CLAUDE.local.md and Claude Code's own memory), Claude
+Code's own prompt with Yap's Code chat words added
+(`--append-system-prompt-file`: it answers about this workspace's code,
+reads files to, and starts a job for any change), `--tools Read,Grep,Glob`
+(plus the web's with the web on; never an edit tool, Bash or PowerShell —
+`--tools` is what the model gets, whatever their settings allow; 2.1.296
+has no LS), `dontAsk` (reads in the workspace need no rule; anything that
+would ask is denied), `blockReadsOutsideWorkingDirectories` in the run's
+own `--settings`, `--disable-slash-commands`, and `--strict-mcp-config` with
+Yap's endpoint only, without `search_memory`. Its prompt has no memory and
+About you without its note. Another workspace is another session (the
+fingerprint has the folder; `claude_sessions.json` keeps it as `cwd`). Its
+events' `Read`, `Grep` and `Glob` show as "Reading app.ts", "Searching the
+code · …" (`claude_plan/map.rs` `Tool::Code`), no chip.
 
 **Claude Code's own copy of a plan chat.** A chat session has to be saved
 for `--resume`, so Claude Code keeps its transcript in its own config folder
@@ -1908,9 +1929,12 @@ outside Yap. **Yap deletes it with the chat**: Chat's delete
 (`sessions::forget`), Delete some of your data → Chats and Reset app
 (`sessions::reset`) delete the transcripts of the sessions
 `claude_sessions.json` names, and a session a conversation moved on from
-goes as soon as it's replaced (`sessions::put`). Only there: never another
-project's transcripts (a job's sessions run in the person's own folders and
-are theirs, as if they'd run Claude Code themselves). Settings' plan card
+goes as soon as it's replaced (`sessions::put`). Each in the folder it ran
+in (`Kept::cwd`): Yap's `claude/chat/`, or a Code chat's workspace, whose
+projects folder also holds the person's own sessions and their jobs' —
+only the files named with the chat's own session ids go there, never
+another session's (a job's sessions are theirs, as if they'd run Claude
+Code themselves). Settings' plan card
 says it in one line: "Claude Code keeps its own copy of each plan chat; Yap
 deletes it with the chat."
 

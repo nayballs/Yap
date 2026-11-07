@@ -73,9 +73,12 @@ pub(super) async fn with_tools(
     // Earlier screenshots: the newest few sent again, the rest a line
     // (snip/turn.rs).
     crate::snip::turn::with_history_images(&mut messages, earlier, &ep.provider, &ep.model, &ep.base_url).await;
+    // A Code chat (jobs/code_chat.rs): none of memory's tools, nor past
+    // chats' (Yap's memory is personal; the project keeps its own).
+    let memory = built.code.is_none();
     let extra = crate::chat::tools::Extra {
-        memory: true,
-        search_chats: cfg.memory_search_chats,
+        memory,
+        search_chats: memory && cfg.memory_search_chats,
         conversation: Some(conv.id),
         calendar: g.calendar.then_some(crate::chat::tools::CalendarTurn { log: &calendar_log, zone: built.calendar_zone, now: t.now.timestamp() }),
         // Each tool result within what the request has left.

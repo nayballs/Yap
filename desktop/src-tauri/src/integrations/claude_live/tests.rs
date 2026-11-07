@@ -264,6 +264,32 @@ fn a_chat_run_connects_lists_and_reads_over_real_http() {
 }
 
 #[test]
+fn a_code_chats_run_reads_meetings_notes_and_tasks_but_never_yaps_memory() {
+    let (ep, _) = endpoint(Duration::from_secs(5), MAX_BACKUP_BYTES);
+    let h = ep.register(RunSpec::new("Code chat", Tools::Chat).with_jobs(true).with_memory(false)).unwrap();
+    let mut c = Client::of(&h);
+    let init = c.request("initialize", json!({ "protocolVersion": "2025-11-25" }));
+    let said = init["result"]["instructions"].as_str().unwrap();
+    assert!(!said.contains("search_memory") && !said.contains("remembers"), "{said}");
+    assert!(said.contains("their meetings") && said.contains("check_calendar") && said.contains("start_job"), "{said}");
+    // Listed, allowed and run: everything but memory.
+    let list = c.request("tools/list", json!({}));
+    assert_eq!(
+        names(&list),
+        ["list_meetings", "search_meetings", "get_meeting", "search_notes", "get_note", "list_tasks", "list_folders", "check_calendar", "start_job", "job_status", "message_job", "stop_job"]
+    );
+    assert!(!h.allowed_tools().iter().any(|t| t.contains("memory")));
+    assert_eq!(c.request("tools/call", json!({ "name": "search_memory", "arguments": { "query": "Sam" } }))["error"]["code"], -32602);
+    let (err, text) = c.tool("get_meeting", json!({ "id": 5 }));
+    assert!(!err && text.contains("[0:15] Them: The beta goes out on Friday."), "{text}");
+    let (err, _) = c.tool("check_calendar", json!({ "day": "tomorrow" }));
+    assert!(!err);
+    // A plain chat's run reads memory, as before.
+    let plain = ep.register(RunSpec::new("Plan chat", Tools::Chat)).unwrap();
+    assert!(plain.allowed_tools().iter().any(|t| t == "mcp__yap__search_memory"));
+}
+
+#[test]
 fn requests_without_the_run_s_key_or_from_another_site_are_refused() {
     let (ep, _) = endpoint(Duration::from_secs(5), MAX_BACKUP_BYTES);
     let h = ep.register(RunSpec::new("Plan chat", Tools::Chat)).unwrap();
