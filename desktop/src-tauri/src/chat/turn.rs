@@ -21,6 +21,7 @@ mod fast;
 mod finish;
 mod gates;
 mod history;
+mod plan;
 mod prompt;
 mod report;
 mod run;
@@ -68,6 +69,9 @@ pub(crate) fn resolve_chat_endpoint(
     }
     if api_key.is_empty() && provider == crate::ai::chatgpt::PROVIDER {
         return Err("Yap isn't signed in to ChatGPT — sign in in Settings → Language Models → ChatGPT".to_string());
+    }
+    if api_key.is_empty() && provider == crate::ai::claude_plan::PROVIDER {
+        return Err(crate::ai::claude_plan::NOT_READY.to_string());
     }
     if api_key.is_empty() && crate::ai::ai_model::KEYED_PROVIDERS.contains(&provider.as_str()) {
         return Err(format!(
@@ -412,7 +416,10 @@ async fn answer_turn(
         sink: w,
         beside: beside.as_ref().map(|b| b as &dyn crate::chat::stream::Dictations),
     });
-    let answer = if t.gates.tools {
+    let answer = if t.ep.provider == crate::ai::claude_plan::PROVIDER {
+        // Your Claude plan: the person's own Claude Code answers (plan.rs).
+        plan::answer(&t, &opened, &built, &fitted, watch.as_ref()).await?
+    } else if t.gates.tools {
         run::with_tools(&t, &opened.conv, &built, &fitted, &sizing, live, watch.as_ref()).await?
     } else {
         // Small/local models: plain chat + eager RAG, or Yap's fixed web
@@ -460,7 +467,8 @@ fn open(t: &Asked<'_>, conversation_id: Option<u64>, asked: impl FnOnce(u64, usi
 /// turn's answer, saved. A model with tools does it with `remember` /
 /// `forget`. `None`: not one of those.
 async fn remembered(t: &Asked<'_>, opened: &Opened) -> Result<Option<ChatTurn>, String> {
-    if t.gates.tools {
+    // (Your Claude plan's tools only read: Yap's own pass remembers for it.)
+    if t.gates.tools && t.ep.provider != crate::ai::claude_plan::PROVIDER {
         return Ok(None);
     }
     let Some(done) = crate::memory::learn::spoken(&t.text).await else {

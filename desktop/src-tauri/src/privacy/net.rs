@@ -314,6 +314,7 @@ pub fn provider_name(id: &str) -> &'static str {
         "groq" => "Groq",
         "openai" => "OpenAI",
         "chatgpt" => "ChatGPT plan",
+        "claude-plan" => "Claude plan",
         "anthropic" => "Anthropic",
         "gemini" => "Gemini",
         "openrouter" => "OpenRouter",

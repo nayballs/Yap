@@ -8,12 +8,15 @@
   import { invoke } from '@tauri-apps/api/core';
   import { listen } from '@tauri-apps/api/event';
   import { onMount, tick, untrack } from 'svelte';
-  import { fmtCount, fmtDay, splitLine, featureLabel, modelRow, costLine, speedLine, tokensWord } from '../../core/aiUsage.js';
+  import { fmtCount, fmtDay, splitLine, planLine, featureLabel, modelRow, costLine, speedLine, tokensWord } from '../../core/aiUsage.js';
   import { createExternalLinkHandler } from '../../core/externalLinks.js';
 
   // Sign in with ChatGPT's usage is the plan's: "Manage usage" by the
   // summary (OpenAI's UI rules).
   const USAGE_URL = 'https://chatgpt.com/settings/usage';
+  // Your Claude plan's (2026-11-07): its answers apart from API spend, with
+  // what they would have cost on the API (Claude Code's own estimate).
+  const CLAUDE_USAGE_URL = 'https://claude.ai/settings/usage';
 
   /**
    * `focus`: 'ai-usage' brings the card into view once it and the stats
@@ -136,6 +139,12 @@
           </div>
         </div>
       </div>
+      {#if shown.planTokens > 0}
+        <p class="note" data-testid="ai-usage-plan">
+          {planLine(shown)}. Your Claude plan's own limits apply to it.
+          <a class="usage" href={CLAUDE_USAGE_URL} onclick={createExternalLinkHandler(CLAUDE_USAGE_URL)}>Manage usage</a>
+        </p>
+      {/if}
       {#if shown.models.some((m) => m.provider === 'chatgpt')}
         <p class="note">
           Your ChatGPT plan's own limits apply to its use.

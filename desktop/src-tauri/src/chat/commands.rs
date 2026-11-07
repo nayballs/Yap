@@ -23,8 +23,10 @@ pub fn chat_get(id: u64) -> Result<crate::chat::chats::Conversation, String> {
 #[tauri::command]
 pub fn chat_delete(id: u64) -> Result<(), String> {
     crate::chat::chats::delete(id);
-    // A later conversation may get its id: nothing of this one carries over.
+    // A later conversation may get its id: nothing of this one carries over
+    // (nor its Claude Code session, on your Claude plan).
     crate::apps::moved_on(Some(id));
+    crate::ai::claude_plan::sessions::forget(id);
     Ok(crate::chat::chats::saved()?)
 }
 
@@ -35,6 +37,7 @@ pub fn chat_delete_many(ids: Vec<u64>) -> Result<usize, String> {
     let gone = crate::chat::chats::delete_many(&ids);
     for id in ids {
         crate::apps::moved_on(Some(id));
+        crate::ai::claude_plan::sessions::forget(id);
     }
     crate::chat::chats::saved()?;
     Ok(gone)

@@ -147,7 +147,9 @@ const LABS = [
 /** `provider`'s families, each reading a model id (`read(id)` → key | null). */
 function familiesOf(provider) {
   if (provider !== 'openrouter') {
-    return (FAMILIES[provider] || []).map((f) => ({ ...f, read: (id) => f.key(bare(id)) }));
+    // Your Claude plan's models are Anthropic's (ai/claude_plan.rs `MODELS`).
+    const own = provider === 'claude-plan' ? 'anthropic' : provider;
+    return (FAMILIES[own] || []).map((f) => ({ ...f, read: (id) => f.key(bare(id)) }));
   }
   return LABS.flatMap(([lab, own]) =>
     FAMILIES[own].map((f) => ({

@@ -1540,6 +1540,7 @@ fn rate_limited_error(provider: &str, wait: Option<Duration>) -> String {
         "groq" => "Groq",
         "openai" => "OpenAI",
         "chatgpt" => "ChatGPT",
+        crate::ai::claude_plan::PROVIDER => "Your Claude plan",
         "anthropic" => "Anthropic",
         "openrouter" => "OpenRouter",
         "gemini" => "Gemini",
@@ -1682,6 +1683,12 @@ async fn post_chat_request(
     if provider == crate::ai::chatgpt::PROVIDER {
         let _ = (base_url, api_key, temperature, max_tokens);
         return Box::pin(responses::post(model, &messages, tools, &extra, timeout, rate_limit_patience, on)).await;
+    }
+    // The person's Claude plan: one question to their own Claude Code, text
+    // only (ai/claude_plan/oneshot.rs). Never an HTTP call of Yap's.
+    if provider == crate::ai::claude_plan::PROVIDER {
+        let _ = (base_url, api_key, temperature, max_tokens, tools, extra, rate_limit_patience);
+        return Box::pin(crate::ai::claude_plan::oneshot::post(model, &messages, timeout, on)).await;
     }
     // Yap's on-device model not loaded (yet, or freed while idle; the call
     // has its stand-by address, or the one it had before it was freed): it

@@ -253,9 +253,12 @@ pub struct Spec {
     pub setting_sources: Option<Vec<String>>,
     /// `--settings`: this run's own settings (its hooks).
     pub settings: Option<Value>,
-    /// `--append-system-prompt-file`: added to Claude Code's own prompt
-    /// (never `--system-prompt`, which replaces it).
+    /// `--append-system-prompt-file`: added to Claude Code's own prompt.
     pub append_system_prompt: Option<String>,
+    /// `--system-prompt-file`: a prompt **in place of** Claude Code's own
+    /// (a coding agent's). Chat on the plan only (`ai/claude_plan.rs`): its
+    /// own chat prompt; Jobs keep Claude Code's and append to it.
+    pub system_prompt: Option<String>,
     /// `--add-dir`: more folders its tools may use.
     pub add_dirs: Vec<PathBuf>,
     pub conversation: Conversation,
@@ -287,6 +290,7 @@ impl Spec {
             setting_sources: None,
             settings: None,
             append_system_prompt: None,
+            system_prompt: None,
             add_dirs: Vec::new(),
             conversation: Conversation::fresh(),
             pay,
@@ -313,6 +317,7 @@ impl std::fmt::Debug for Spec {
             .field("setting_sources", &self.setting_sources)
             .field("settings", &self.settings.is_some())
             .field("append_system_prompt_chars", &self.append_system_prompt.as_ref().map(|p| p.chars().count()))
+            .field("system_prompt_chars", &self.system_prompt.as_ref().map(|p| p.chars().count()))
             .field("add_dirs", &self.add_dirs.len())
             .field("conversation", &self.conversation)
             .field("pay", &self.pay)
@@ -329,6 +334,8 @@ pub struct Files {
     pub settings: Option<PathBuf>,
     pub mcp_config: Option<PathBuf>,
     pub system_prompt: Option<PathBuf>,
+    /// `--system-prompt-file` (the prompt in place of Claude Code's own).
+    pub own_prompt: Option<PathBuf>,
 }
 
 /// Claude Code's arguments for `spec`, with its JSON and prompt in `files`.
@@ -391,6 +398,10 @@ pub fn args(spec: &Spec, files: &Files) -> Vec<String> {
         a.push("--settings".into());
         a.push(f.display().to_string());
     }
+    if let Some(f) = &files.own_prompt {
+        a.push("--system-prompt-file".into());
+        a.push(f.display().to_string());
+    }
     if let Some(f) = &files.system_prompt {
         a.push("--append-system-prompt-file".into());
         a.push(f.display().to_string());
@@ -440,7 +451,7 @@ struct RunFiles {
 
 impl RunFiles {
     fn write(spec: &Spec) -> Result<RunFiles, String> {
-        let wanted = spec.settings.is_some() || spec.mcp_config.is_some() || spec.append_system_prompt.is_some();
+        let wanted = spec.settings.is_some() || spec.mcp_config.is_some() || spec.append_system_prompt.is_some() || spec.system_prompt.is_some();
         if !wanted {
             return Ok(RunFiles { dir: None, files: Files::default() });
         }
@@ -464,6 +475,9 @@ impl RunFiles {
         }
         if let Some(p) = &spec.append_system_prompt {
             out.files.system_prompt = Some(put("system-prompt.txt", p.clone())?);
+        }
+        if let Some(p) = &spec.system_prompt {
+            out.files.own_prompt = Some(put("own-prompt.txt", p.clone())?);
         }
         Ok(out)
     }
@@ -1010,6 +1024,7 @@ mod tests {
             settings: Some(PathBuf::from("s.json")),
             mcp_config: Some(PathBuf::from("m.json")),
             system_prompt: Some(PathBuf::from("p.txt")),
+            own_prompt: Some(PathBuf::from("own.txt")),
         };
         let a = args(&spec, &files);
         let after = |flag: &str| a.iter().position(|x| x == flag).map(|i| a[i + 1].as_str());
@@ -1028,6 +1043,7 @@ mod tests {
         assert_eq!(after("--setting-sources"), Some(""), "none of the person's settings files");
         assert_eq!(after("--settings"), Some("s.json"));
         assert_eq!(after("--append-system-prompt-file"), Some("p.txt"));
+        assert_eq!(after("--system-prompt-file"), Some("own.txt"));
         let dirs = a.iter().position(|x| x == "--add-dir").unwrap();
         assert_eq!(&a[dirs + 1..dirs + 3], [r"C:\Users\imogen\Notes", r"D:\Shared"]);
         assert_eq!(after("--max-budget-usd"), None, "a plan has no budget flag");

@@ -93,7 +93,7 @@ async function send(main, text) {
 test('effort: chosen in the picker for the model in use, on the chip, kept per model and sent', async ({ yap, main, fakeLlm, shot }) => {
   await openView(main, 'Chat');
   // Its default until one is chosen: medium on Opus 5.5.
-  await expect(chip(main)).toHaveText('Claude Opus 5.5 Medium · Anthropic');
+  await expect(chip(main)).toHaveText('Claude Opus 5.5 Medium · Anthropic API key');
   await openPicker(main);
   await expect(effortStrip(main)).toContainText('Claude Opus 5.5');
   await expect(levels(main)).toHaveText(['Low', 'Medium', 'High', 'Extra', 'Max']);
@@ -112,7 +112,7 @@ test('effort: chosen in the picker for the model in use, on the chip, kept per m
   await expectStore(yap, 'config.json', (c) => c.chatEffort?.['anthropic:claude-opus-5-5'] === 'xhigh');
   await fastSwitch(main).click();
   await expect(fastSwitch(main)).toHaveAttribute('aria-pressed', 'true');
-  await expect(chip(main)).toHaveText('Claude Opus 5.5 Extra · Fast · Anthropic');
+  await expect(chip(main)).toHaveText('Claude Opus 5.5 Extra · Fast · Anthropic API key');
   await expectStore(yap, 'config.json', (c) => c.fastMode === true);
   await shot(main, '02-effort-extra-fast');
   await closePicker(main);
@@ -139,26 +139,26 @@ test('effort: chosen in the picker for the model in use, on the chip, kept per m
   // Per model: Sonnet 5.5 has its own (high, its default), and no fast mode.
   const cfg = await yap.invoke('get_config');
   await setConfig(yap, main, { llmScopes: { ...cfg.llmScopes, chat: claude(fakeLlm, 'claude-sonnet-5-5') } });
-  await expect(chip(main)).toHaveText('Claude Sonnet 5.5 High · Anthropic');
+  await expect(chip(main)).toHaveText('Claude Sonnet 5.5 High · Anthropic API key');
   await openPicker(main);
   await expect(levels(main)).toHaveCount(5);
   await expect(fastSwitch(main)).toHaveCount(0);
   await closePicker(main);
   // A Claude with no effort control: no Effort at all.
   await setConfig(yap, main, { llmScopes: { ...cfg.llmScopes, chat: claude(fakeLlm, 'claude-haiku-4-5') } });
-  await expect(chip(main)).toHaveText('Claude Haiku 4.5 · Anthropic');
+  await expect(chip(main)).toHaveText('Claude Haiku 4.5 · Anthropic API key');
   await openPicker(main);
   await expect(effortStrip(main)).toHaveCount(0);
   await closePicker(main);
   // Back on Opus 5.5: Extra, as it was left.
   await setConfig(yap, main, { llmScopes: { ...cfg.llmScopes, chat: claude(fakeLlm, 'claude-opus-5-5') } });
-  await expect(chip(main)).toHaveText('Claude Opus 5.5 Extra · Fast · Anthropic');
+  await expect(chip(main)).toHaveText('Claude Opus 5.5 Extra · Fast · Anthropic API key');
 
   // Back to its default, fast mode off.
   await openPicker(main);
   await levels(main).filter({ hasText: 'Medium' }).click();
   await fastSwitch(main).click();
-  await expect(chip(main)).toHaveText('Claude Opus 5.5 Medium · Anthropic');
+  await expect(chip(main)).toHaveText('Claude Opus 5.5 Medium · Anthropic API key');
   await expectStore(yap, 'config.json', (c) => c.chatEffort?.['anthropic:claude-opus-5-5'] === 'medium' && c.fastMode === false);
   await closePicker(main);
 });

@@ -101,6 +101,18 @@ export const PP_CLOUD_MODELS = {
     // example model for the flow).
     fallback: 'gpt-6.1-sol',
   },
+  // Your Claude plan (ai/claude_plan.rs `MODELS`): the Claude models a
+  // plan's Claude Code takes, by their full ids (never aliases). Claude
+  // Code lists none; this is the list. The Chat scope only.
+  'claude-plan': {
+    keyUrl: 'https://claude.ai/settings/usage',
+    models: [
+      { value: 'claude-haiku-5-5', label: 'Claude Haiku 5.5', desc: 'Fastest Claude, lightest on your plan’s limits' },
+      { value: 'claude-sonnet-5-5', label: 'Claude Sonnet 5.5', desc: 'Balanced speed and intelligence' },
+      { value: 'claude-opus-5-5', label: 'Claude Opus 5.5', desc: 'The most capable Claude for most work' },
+      { value: 'claude-fable-5-1', label: 'Claude Fable 5.1', desc: 'For the hardest reasoning; uses your limits fastest' },
+    ],
+  },
   openrouter: {
     keyUrl: 'https://openrouter.ai/settings/keys',
     models: [

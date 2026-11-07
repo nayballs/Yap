@@ -758,6 +758,11 @@
   Credential Manager (`yap-chatgpt[-2…6]`), removed by Sign out and by the
   uninstaller's "Delete the application data". It stays through Delete some
   of your data and Reset app, like the account sign-in.
+- Your Claude plan's chats: `%APPDATA%/yap/claude_sessions.json` (2026-11-07,
+  `ai/claude_plan/sessions.rs`) — each Chat conversation's Claude Code
+  session id, its `createdTs`, how many of its messages the session has seen,
+  and the model it last ran on. Nothing secret (Claude Code keeps its own
+  sign-in). It goes with Chats in Delete some of your data.
 - Calendar: `%APPDATA%/yap/calendar.json` — connected calendars (name, kind,
   last sync, error), meetings from 12 h ago to 7 days ahead, answered reminders,
   the nudge, and meetings' pre-meeting briefs (`briefs`, by event key, until

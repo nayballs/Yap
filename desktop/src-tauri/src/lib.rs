@@ -483,6 +483,8 @@ pub fn run() {
             ai::chatgpt::chatgpt_e2e_opened,
             ai::claude_code::claude_code_status,
             ai::claude_code::claude_code_sign_in,
+            ai::claude_plan::claude_plan_status,
+            ai::claude_plan::claude_plan_sign_in,
             ai::effort::effort_info,
             ai::effort::chat_set_effort,
             ai::effort::chat_set_fast,
@@ -1143,6 +1145,9 @@ pub fn run() {
             // Jobs (jobs.rs): those the last Yap left running are interrupted;
             // old backups and logs swept.
             jobs::init(&handle);
+            // Chat on your Claude plan (ai/claude_plan.rs): the key store's
+            // marker kept true, the warm sessions swept.
+            ai::claude_plan::init(&handle);
             // Yap Link (Settings → Phone): HTTPS for paired phones on the home Wi-Fi.
             link::sync(&handle, cfg.link_enabled);
 

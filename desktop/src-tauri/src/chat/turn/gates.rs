@@ -78,7 +78,31 @@ impl Gates {
         let act = pictures != Gate::Off && scope.is_none() && !meetings && crate::chat::pages::act::can_act(provider, model);
         let calendar = !meetings && crate::calendar::connected();
         let jobs = tools && !meetings && crate::jobs::offered(cfg);
-        Gates { tools, doc_tools, strong, claude_in_chat, own_search, web_lines, web_on, pictures, screen, act, calendar, jobs }
+        let gates = Gates { tools, doc_tools, strong, claude_in_chat, own_search, web_lines, web_on, pictures, screen, act, calendar, jobs };
+        if provider == crate::ai::claude_plan::PROVIDER {
+            return gates.on_the_plan();
+        }
+        gates
+    }
+
+    /// **Your Claude plan, v1** (chat/turn/plan.rs): it answers, with Claude
+    /// Code's web search and page reads and Yap's read-only tools. No
+    /// documents beside the chat, no pictures from the web, no pages to
+    /// bring up or act on, no look at the screen: those are Yap's tool
+    /// loop's, which a plan turn never runs.
+    fn on_the_plan(self) -> Gates {
+        Gates {
+            strong: false,
+            claude_in_chat: false,
+            own_search: false,
+            web_lines: crate::chat::tools::WebLines::of(false, false, false),
+            pictures: Gate::Off,
+            screen: Gate::Off,
+            act: false,
+            // Jobs from a plan chat come later (its tools over Yap's endpoint).
+            jobs: false,
+            ..self
+        }
     }
 
     /// The tools' schemas every step sends, counted by `counter` (none for
@@ -162,5 +186,10 @@ mod tests {
         let small = Gates::for_turn(&cfg, &endpoint("local", "qwen2.5-1.5b-instruct"), None, false, true);
         assert!(!small.tools && !small.strong && small.web_on);
         assert_eq!(small.pictures, Gate::Off);
+        // Your Claude plan (v1): it answers, with the web, never documents,
+        // pictures, pages or the screen (Yap's tool loop's, which it never runs).
+        let plan = Gates::for_turn(&cfg, &endpoint(crate::ai::claude_plan::PROVIDER, "claude-opus-5-5"), None, false, true);
+        assert!(plan.tools && plan.web_on && !plan.strong && !plan.act && !plan.claude_in_chat && !plan.own_search);
+        assert_eq!((plan.pictures, plan.screen), (Gate::Off, Gate::Off));
     }
 }

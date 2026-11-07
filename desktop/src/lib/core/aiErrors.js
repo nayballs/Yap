@@ -9,6 +9,25 @@ export const CUT_OFF = 'The answer was cut off before it finished. Try again.';
 const UNREACHABLE =
   /error sending request|connection refused|dns error|failed to lookup|timed out|tcp connect|connect error|network is unreachable/;
 
+/** Where the person sees their Claude plan's usage. */
+export const CLAUDE_USAGE_URL = 'https://claude.ai/settings/usage';
+
+/**
+ * **A Chat answer on your Claude plan that didn't come** (Rust's own words,
+ * ai/claude_code/events.rs `Problem::message`, ai/claude_plan.rs
+ * `NOT_READY`): what helps with it — "signIn" (Claude Code isn't signed in
+ * here: Sign in to Claude Code), "limit" (the plan's limit: Manage usage, or
+ * this chat on an API key), "paysAnotherWay" (Claude Code here is set to pay
+ * with a key: Yap stopped it). `null`: not one of those. Pure.
+ */
+export function claudePlanProblem(err) {
+  const raw = String(err?.message ?? err ?? '');
+  if (/Claude Code isn't signed in/i.test(raw)) return 'signIn';
+  if (/reached your Claude plan's limit/i.test(raw)) return 'limit';
+  if (/Claude Code on this PC is set to pay/i.test(raw)) return 'paysAnotherWay';
+  return null;
+}
+
 /**
  * @param {unknown} err  the rejected invoke's error
  * @returns {{ text: string, settings: boolean, known: boolean }} the
@@ -21,6 +40,9 @@ export function aiError(err) {
   const lower = raw.toLowerCase();
   const host = (raw.match(/https?:\/\/([^/\s)]+)/i) || [])[1] || '';
   const said = (text, settings) => ({ text, settings, known: true });
+  // Your Claude plan's problems: said as Rust says them (the buttons that
+  // help go with them, Chat's toast).
+  if (claudePlanProblem(raw)) return said(raw, false);
   if (UNREACHABLE.test(lower)) {
     if (LOCAL_HOST.test(host)) {
       return said(
