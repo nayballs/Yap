@@ -2491,14 +2491,37 @@ blocks); e2e `chat-documents-editor.spec.js` (a word, a cell, an item typed
 action as plain markdown, the toolbar waiting while Chat writes, Chat's
 change landing with the person's words kept, Undo marked, find, dark).
 
-**The split** (`role="separator"`): dragged, or ←/→ (Shift:
-further), Home/End on its handle; at least 320 px, the thread keeps 340;
-its width remembered in this window's `localStorage` (`yapChatDocWidth`).
-**Room**: the conversation list steps aside while a document is open
-unless Chat is 1,240 px wide or more (a "Show your chats" button at the
-thread's top left brings it back until the document closes); a window too
-narrow for the panel beside the thread has it cover the conversation (✕
-goes back). **Under the answer**, a pill per document it made or changed
+**The split** (`role="separator"`, "Resize the panel"; every tab kind,
+the Job tab's too): dragged — its grip on hover, the resize cursor over
+the whole of Chat while it's held, Esc mid-drag putting it back —, or ←/→
+(Shift: further), Home/End on its handle, a double-click back to 460 px; at
+least 320 px, the thread keeps 340 (the composer's chips and the panel's
+buttons never cut off); its width remembered in this window's
+`localStorage` (`yapChatDocWidth`). **The list's button** (2026-11-07, the
+Claude app's "Hide sidebar · Ctrl+B"): at the list's top left, beside the
+Chat | Code switch ("Hide your chats · Ctrl+B"; New chat on its own row
+below), and at the thread's top left while the list is hidden ("Show your
+chats"); Ctrl+B anywhere in Chat but rich text (a document's page keeps it
+for bold) or a dialog; the focus follows the button; the person's choice
+remembered (`yapChatListHidden`). Only the conversation list hides: the
+main window's own navigation stays, the same in every view. **Room**
+(`chatRoom.js`, pure; `chatLayout.svelte.js`): what gives way first is the
+list — it steps aside while a panel is open unless Chat is 1,240 px wide or
+more, the same hidden state its button shows, back when the panel closes;
+asked back meanwhile it stays for that panel, floating over the thread when
+there's no room beside both (Esc, a press in the thread put it aside) —,
+then the panel's width (down to 320), then, in a window too narrow for the
+panel beside the thread, the panel covering the conversation (✕ goes back).
+**Opening calmly** (a job starting, 7 Nov 2026: the list vanished, the
+thread jumped 225 px and shrank, the composer grew 9 px a frame later, the
+panel's chunk popped into an empty gap): every box changes once, in one
+frame — the list aside, the panel at its remembered width, drawn whole
+(DocPanel's chunk fetched once Chat is idle) and faded in over 140 ms
+(never with reduced motion); with Jobs on every message box keeps room for
+a Code chat's label, so a chat turning into a Code chat never moves the
+thread; the list is 224 px on both sides; the thread keeps its newest line
+(`core/stickToBottom.js`). E2e `chat-layout.spec.js` (each frame measured).
+**Under the answer**, a pill per document it made or changed
 ("Lone wolf ranger · Open", `ChatMessage.svelte` `.docpill`; while it's
 written, from the `document` events); a click opens it beside the chat.
 Opening another conversation or a new chat closes the panel; the pills
