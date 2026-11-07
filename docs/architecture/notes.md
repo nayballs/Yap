@@ -725,6 +725,77 @@ local API and search see the same text.
   notepad, history and transform specs on the page (`desktop/e2e/support/notePage.js`:
   `noteText`, `expectText`, `selectText`, `pageIn`).
 
+## Markdown files in Yap (`notes/md_file.rs`, 2026-11-07)
+
+A `.md` or `.markdown` file — a plan, a note, a write-up a job or an
+assistant made — opens in a Yap window of its own, as a page you can format
+or as its Markdown, saved back to the file as you type. The file stays the
+file: it's never copied into notes.json.
+
+- **How one comes in**:
+  - Explorer's **Open with**: the installer registers Yap as a choice for
+    both types, never their default ([app-shell.md](./app-shell.md#file-associations-2026-11-07));
+    Windows lets only the person pick that, from Settings → General →
+    Markdown files' **Open Markdown files with Yap** (`md_open_with_settings`:
+    Windows' Default apps page, on Yap's own page,
+    `ms-settings:defaultapps?registeredAppUser=Yap`).
+  - `yap.exe <path>`: read at start (`args::at_launch`) and from a second
+    launch's arguments in single-instance's callback (`lib.rs`).
+  - **Open a Markdown file…** in Settings → General (the file dialog), or any
+    part of Yap through `open_markdown {path}`.
+- **Which arguments are files** (`md_file/args.rs`, pure): a `.md` or
+  `.markdown` file that exists, made absolute against the folder the launch
+  started in. Never Yap's own flags (`--autostart`), a deep link, or a
+  subcommand's arguments (`yap.exe eval …`).
+- **One window per file** (`doc-` + 12 hex digits of an FNV-1a hash of its
+  path, case and slashes folded: `label_for`): opening the same file again
+  brings its window up. Made on demand ([app-shell.md](./app-shell.md#window-config-desktopsrc-tauritauriconfjson)).
+- **The file is the window's own**: the `md_file_*` commands find it by the
+  calling window's label, never by a path from the page, so a page can only
+  ever touch its own file.
+- **Up to 5 MB** (`MAX_BYTES`): a bigger one says so, plainly. Gone or not
+  allowed: said too.
+- **Its encoding and line endings are kept** (`md_file/text.rs`, pure): UTF-8
+  with or without a byte-order mark, or UTF-16 LE / BE with one; `\r\n` or
+  `\n` (a file with both: the more common one, ties to `\r\n`; none: `\n`).
+  Anything else is shown (`from_utf8_lossy`) but opens **read-only**, as does
+  a read-only file. The footer says how it's written ("UTF-8 · CRLF").
+- **Saving** (the page, `doc/docFile.js`): 600 ms after the last change, and
+  on blur, close and Ctrl+S, one save at a time. Rust writes atomically
+  (`config::atomic_write_bytes`) **only if the file is still what the page
+  last read or wrote** (its stamp: modified time and size). Otherwise the
+  page is told (`conflict`) and asks.
+- **Changes on disk** (a job or an assistant writing the file): the page asks
+  for the stamp every 1.5 s (`md_file_stat`). Nothing unsaved → reloaded in
+  place, where it was scrolled to; unsaved edits → a quiet bar, **"Changed
+  on disk · Reload · Keep mine"**; only its time changed → in step; moved or
+  deleted → **"Save it here again"**.
+- **Closing**: the window asks its page first (`yap-doc-closing`): what's
+  typed is saved, then `md_file_close`. Asked again within 8 s (a page that
+  didn't answer), it closes at once. Unsaved changes that can't be saved
+  (changed on disk, a failed save) are asked about.
+- **Commands**: `open_markdown {path}`, `md_file_info`, `md_file_read`,
+  `md_file_save {text, expect?}`, `md_file_stat`, `md_file_reveal` (the file
+  in Explorer, selected), `md_file_close`, `md_open_with_state` (whether
+  Windows knows Yap as a Markdown app, and opens `.md` with it),
+  `md_open_with_settings`. A test run keeps what it would open outside Yap
+  (`e2e_kept`, read back with `e2e_opened_urls`).
+- **The page**: `desktop/src/lib/doc/DocWindow.svelte` ([frontend.md](./frontend.md)):
+  Preview (`components/richtext/RichNote`, the editor notes and Chat's
+  documents use: a change rewrites only its own block, so the file stays its
+  Markdown exactly) or Source (its Markdown, coloured, editable), the choice
+  remembered; Ctrl+F in both; Read aloud (a `doc:` id, read as a note), Copy,
+  Open folder; the in-page hotkey fallback.
+- E2E: `md-file.spec.js` (the window, saving with the BOM and line endings
+  kept, a change on disk reloaded or asked about, one window per file,
+  Settings → General → Markdown files) and `md-file-launch.spec.js` (a file
+  given at launch: [`docs/e2e-tests.md`](../e2e-tests.md)).
+- **Not yet done**: "Ask about this" on the page; quitting from the tray can
+  lose the last 600 ms of typing; a file with mixed line endings gets the
+  more common one; the atomic replace drops the file's attributes
+  (`ReplaceFileW` would keep them); the installer's registration is
+  untried until a nightly is installed.
+
 ## The Notes view
 
 `desktop/src/lib/views/notes/` (split 2026-10-24): `NotesView.svelte` is the view —

@@ -13,7 +13,9 @@ The full stack list, the app's entry and plumbing (`lib.rs`, the tray, context m
   2026-10-28: a small floating window on its own shortcut,
   `notes/quick_note.rs`, [notes.md](./notes.md#the-quick-note-notesquick_noters)), **overlay** (since 2026-10-05 the
   **Yap bar**, `bar.rs`: an always-there pill, click-through except over what
-  it draws; with the bar off, the transcribing overlay as before). The old
+  it draws; with the bar off, the transcribing overlay as before), and
+  **`doc-<hash>`** (2026-11-07: a Markdown file's window, one per file, made
+  on demand: `notes/md_file.rs`, [notes.md](./notes.md#markdown-files-in-yap-notesmd_filers-2026-11-07)). The old
   pill window was retired 2026-07-09.
 - **Markdown:** [`markdown-it`](https://github.com/markdown-it/markdown-it) 15.0.3
   (MIT) parses answers and notes, [`DOMPurify`](https://github.com/cure53/DOMPurify)
@@ -90,6 +92,13 @@ The full stack list, the app's entry and plumbing (`lib.rs`, the tray, context m
   (server + stdio, no macros): `yap.exe mcp` lets Claude, ChatGPT desktop, Gemini CLI,
   Cursor… read meetings and notes through the local API (`integrations/mcp.rs`); `toml_edit` adds Yap to
   Codex/ChatGPT's `config.toml` (`integrations/mcp_clients.rs`).
+- **Claude Code** (2026-11-07): the person's own installed Claude Code CLI
+  (at least 2.1.259), never shipped with Yap, run unmodified as a child
+  process (`claude -p`, stream-json both ways) on their own sign-in or API
+  key, for Chat on their Claude plan and Jobs (`ai/claude_code.rs`,
+  [ai-models.md](./ai-models.md#the-claude-code-engine-2026-11-07), [jobs.md](./jobs.md)).
+  Its runs reach Yap over a loopback HTTP endpoint (`integrations/claude_live.rs`,
+  `tiny_http`, MCP's request/response subset by hand).
 - **Speaker diarization (beta):** NVIDIA's Nemotron-3-Diarization (q8_0 GGUF,
   OpenMDW-1.1) on NeMo-Speech.cpp 0.2.0 (Apache-2.0, ggml), run by `yap.exe
   diarize`, a child process that loads the runtime's C API DLLs from the data
@@ -207,6 +216,17 @@ re-exported by the module, except `local_llm`'s, which callers name
   (`shell/autostart.rs`, with the sign-in helpers), pure,
   unit-tested. An autostart entry without the argument is written again on
   the next launch that lacks it. Dev builds show Settings on every launch.
+  **A launch with Markdown files** (2026-11-07: Explorer's "Open with",
+  `yap.exe <path>`): `notes::md_file::args::at_launch` reads them at setup
+  (the first launch has no single-instance callback, and a dev build has no
+  single-instance) and each opens in its window; a release launch with files
+  shows only them, never the main window. A second release launch hands its
+  arguments and folder to the running Yap (single-instance's callback): with
+  files, it opens them and nothing else; without, the main window comes up.
+  Setup also starts the run endpoint's app handle (`claude_live::init`),
+  Jobs (`jobs::init`: the jobs the last Yap left running interrupted, the
+  daily sweep) and the plan's look at Claude Code (`claude_plan::init`);
+  `shutdown_cleanup` ends the running jobs (`jobs::shutdown`).
   **`yap.exe bench`'s cold-start copy** (`bench_child`, 2026-10-24:
   `YAP_BENCH_CHILD=1`, honoured only in portable mode — `shell/bench/cold.rs`
   starts it on an empty data folder): no single-instance plugin (it must
@@ -222,6 +242,15 @@ re-exported by the module, except `local_llm`'s, which callers name
   swap the cloak for "park off-screen, show+hide, move back": DWM's close animation
   follows the window back on-screen — that flashed the "Welcome to Yap" window on
   every launch until 2026-09-25.
+- **Claude Code's processes** (2026-11-07, `ai/claude_code/`): each session
+  Yap starts (a plan chat, a one-shot call, a job) is in Yap's kill-on-close
+  job (`procs::end_with_yap`): it ends when Yap does, and a job is then marked
+  interrupted. The sign-in terminal (`claude auth login`) and a job's Open in
+  terminal (`claude --resume`) are the person's own, outside the job: they stay
+  open if Yap quits. **`yap.exe fake-claude <script.jsonl> …`** (debug builds
+  only; `main.rs` runs it before the app, as `mcp` and `diarize`:
+  `run_fake_claude`) is the tests' stand-in for Claude Code
+  ([ai-models.md](./ai-models.md#the-stand-in-fakers-debug-builds)).
 - **`shell/tray.rs`** — state-aware tray icon (runtime-generated coloured dot) + right-click
   menu (model submenu w/ checkmark, Cancel while recording — kept for Undo —, Settings/Quit, Check for
   updates → Settings → About + a manual check); left-click opens Settings. A ready
@@ -290,7 +319,8 @@ re-exported by the module, except `local_llm`'s, which callers name
   written, else Windows' app mode, `AppsUseLightTheme`), and `apply` gives
   the opaque windows' webviews their page's background
   (`set_background_color`: main and onboarding #f0ede7 / #161410, the
-  notepad and the quick note #faf9f6 / #1c1a16 — a test keeps them equal to app.css) so
+  notepad, the quick note and a Markdown file's `doc-…` windows #faf9f6 /
+  #1c1a16 — a test keeps them equal to app.css) so
   nothing shows WebView2's white before a page paints, plus onboarding's
   Windows title bar dark or light (DWM immersive dark mode). Run at setup
   (before the DWM-cloaked first show), from `save_config`, and on the main
@@ -474,6 +504,17 @@ re-exported by the module, except `local_llm`'s, which callers name
   `quick_note.rs` (the bottom right of the cursor's monitor the first time
   and when it's on another one; else where the person put it), never by
   the window-state plugin.
+- **`doc-<hash>`** (not in tauri.conf.json; 2026-11-07, `notes/md_file.rs`):
+  a Markdown file's window, one per file (`doc-` and 12 hex digits of its
+  path's hash), made on demand — 820×900 (min 420×320), undecorated (its own
+  title bar: the file's name and folder), on the paper's colours
+  (`shell/theme.rs`), in the middle of the monitor with the mouse, each next
+  one 28 px down and right (back to the middle before one would leave the
+  screen), never in the window-state plugin's file. Shown by `show_quietly`,
+  then focused (never in a test run). Closing sends `yap-doc-closing` to its
+  page, which saves and calls `md_file_close`; a second close within 8 s
+  closes at once. The page is `desktop/src/lib/doc/DocWindow.svelte`
+  (`App.svelte` and `index.html` treat every `doc-…` label as the kind "doc").
 - **split-preview** (not in tauri.conf.json): created on demand by
   `notepad::show_preview` the first time the notepad's split button is
   hovered — transparent, borderless, click-through, unfocusable, always on top,
@@ -540,3 +581,38 @@ re-exported by the module, except `local_llm`'s, which callers name
   `account` (shows Settings → Account via `yap-open-settings` — the "Open Yap"
   button on `auth.contextmirror.com/security`, linked from the new-sign-in
   email).
+- `bundle.fileAssociations`: `md` and `markdown` ("Markdown document",
+  role Editor, `text/markdown`), written by the installer as below.
+
+## File associations (2026-11-07)
+
+Yap is offered for `.md` and `.markdown` in Explorer's "Open with", and is
+never made their default: Windows lets only the person pick that (Settings →
+General → Markdown files → "Open Markdown files with Yap" opens Windows'
+Default apps page on Yap's own page, `ms-settings:defaultapps?registeredAppUser=Yap`).
+
+- **The installer's own section** (`desktop/src-tauri/nsis/installer.nsi`,
+  `; --- YAP: FILE ASSOCIATIONS ---`, in install and uninstall) replaces
+  upstream's `APP_ASSOCIATE`, which writes the extension's own default value
+  and so takes the type over wherever the person never chose an app. Windows'
+  rules for a well-behaved app instead, under `SHCTX`:
+  - `Software\Classes\Yap.md` / `Yap.markdown`: the ProgIDs (name, icon,
+    `"…\yap.exe" "%1"`);
+  - `Software\Classes\.md\OpenWithProgids` (and `.markdown`): the ProgID, for
+    "Open with";
+  - `Software\Classes\Applications\yap.exe`: its name, icon, open command and
+    `SupportedTypes`, for "Choose another app";
+  - `Software\Yap\Yap\Capabilities` (its name, description, icon and
+    `FileAssociations`) and `Software\RegisteredApplications\Yap` pointing at
+    it, so Yap has its own Default apps page;
+  - Explorer told at once (`UPDATEFILEASSOC`).
+- **Never the extension's default**, nor the person's choice in Default apps
+  (Windows' `UserChoice`).
+- **Uninstall** removes each part only while it still points at this
+  install's exe; **skipped on an update**, which writes them again (Windows
+  keeps the person's choice). **Portable mode** skips the section, as it does
+  deep links.
+- **When upgrading Tauri**, diff the template against upstream's and keep
+  this section (the file's header names every Yap section).
+- **Not yet tried on a real install**: it's built into the nightly and
+  stable installers; unverified until a nightly with it is installed.
