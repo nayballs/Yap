@@ -1728,6 +1728,22 @@ turn is doing now and its time, `chat/activity.rs` above) with
 screenshots and their prompts, +, the box, the mic, Send / ■, `ModelChip`).
 [frontend.md](./frontend.md#the-folder-layout-2026-10-24).
 
+**The thread follows its newest line** (2026-11-07, `core/stickToBottom.js`
+`followBottom`, made by `ChatThread` on `.msgs` and its content `.msgsin`):
+pinned at the bottom while you're there, a ResizeObserver on the content
+and the scroller keeps it there through everything that makes it grow —
+streamed text, the checked answer's glide, cards (ask-first, approve, a
+job's report), pills and pictures loading later, a report or a spoken
+answer read in, the panel opening beside it. A scroll up of yours (wheel,
+scrollbar, keys, a search hit) lets go at once and nothing moves after it;
+"↓" over the thread's foot ("↓ New messages" once a message, more of the
+answer or a job's prompt came) goes back down, smooth unless motion is
+reduced; scrolling back to the bottom follows again. The person's own
+question (typed, dictated, a prompt, asked out loud) and a conversation
+opened go to the bottom (`chatState`'s `scrollThread` → `follow.toBottom()`);
+a spoken answer or a report landing follows only if the thread does.
+e2e: `chat-scroll.spec.js`.
+
 **The document panel** (2026-10-30, `DocPanel.svelte` + `chatDoc.svelte.js`;
 `chat/documents.rs` above): a document a turn makes or changes opens to
 the right of the conversation. **Opens** on the turn's `document` event
