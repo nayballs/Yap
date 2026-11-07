@@ -32,6 +32,8 @@
 //!   "subtype":"fake_env","present":{"ANTHROPIC_API_KEY":false,…}}` (never a
 //!   value).
 //! - `{"_stderr":"text"}`: a line on stderr.
+//! - `{"_write_file":{"path":"notes.md","text":"…"}}`: write a file inside
+//!   the working folder (a job's edit, after its backup hook).
 //! - `{"_exit":N}`: exit with code N.
 //!
 //! **stdin** is read the whole time: user messages queue for `_wait_user`;
@@ -364,6 +366,20 @@ impl Player<'_> {
                 self.print(&line.to_string())?;
             }
             "_stderr" => eprintln!("{}", arg.as_str().unwrap_or("")),
+            "_write_file" => {
+                // A job's edit, as Claude Code's Edit tool makes it: `path`
+                // relative to the working folder (never outside it).
+                let rel = arg["path"].as_str().unwrap_or("");
+                let safe = !rel.is_empty() && std::path::Path::new(rel).components().all(|c| matches!(c, std::path::Component::Normal(_)));
+                if safe {
+                    let path = std::path::Path::new(&self.ctx.cwd).join(rel);
+                    if let Err(e) = std::fs::write(&path, arg["text"].as_str().unwrap_or("")) {
+                        eprintln!("fake-claude: couldn't write {rel}: {e}");
+                    }
+                } else {
+                    eprintln!("fake-claude: _write_file takes a path inside the working folder");
+                }
+            }
             "_exit" => return Ok(Some(arg.as_i64().unwrap_or(0) as i32)),
             other => eprintln!("fake-claude: unknown instruction {other}"),
         }

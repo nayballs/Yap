@@ -32,6 +32,8 @@ pub(super) enum Source {
     Calendar,
     /// `open_app`, `list_apps` (`apps.rs`).
     Apps,
+    /// `start_job`, `job_status`, `message_job`, `stop_job` (`tools/jobs.rs`).
+    Jobs,
     /// Every other name: the note and document tools (`tools/notes.rs`),
     /// which say so for a name they don't know.
     Notes,
@@ -63,6 +65,8 @@ impl Source {
             Source::Calendar
         } else if open_apps && crate::apps::TOOL_NAMES.contains(&name) {
             Source::Apps
+        } else if extra.jobs.is_some() && crate::chat::tools::jobs::NAMES.contains(&name) {
+            Source::Jobs
         } else {
             Source::Notes
         }
@@ -191,6 +195,27 @@ impl Loop<'_> {
                     .await
                     .unwrap_or_else(|e| tool_result(false, Value::Null, format!("The app tool failed: {e}")))
             }
+            Source::Jobs => {
+                // (Named only while jobs are offered, `Source::of`.)
+                let Some(turn) = self.extra.jobs else { return execute(name, &args) };
+                let web_seen = self.web.as_deref().is_some_and(crate::web::Turn::seen) || self.screen_seen || self.job_seen;
+                let ctx = crate::chat::tools::jobs::Ctx {
+                    question: self.question,
+                    previous: self.previous.as_deref(),
+                    conversation: self.extra.conversation,
+                    turn,
+                    web_seen,
+                    live: self.live,
+                };
+                let ran = crate::chat::tools::jobs::execute(name, &args, ctx).await;
+                // A job's own words: web content from here on (the safety rule).
+                self.job_seen |= ran.output_seen;
+                // A job started: its tab opens at once, as a page does.
+                if let (Some(job), Some(live)) = (ran.started, self.live) {
+                    live.sink.send(crate::chat::stream::Event::Job { job });
+                }
+                ran.result
+            }
             Source::Notes => execute(name, &args),
         }
     }
@@ -220,6 +245,11 @@ mod tests {
         // Apps while they're offered.
         assert_eq!(Source::of("open_app", false, &none, false, true), Source::Apps);
         assert_eq!(Source::of("open_app", false, &none, false, false), Source::Notes);
+        // Jobs while they're offered.
+        let jobs = Extra { jobs: Some(crate::chat::tools::JobsTurn::default()), ..Default::default() };
+        assert_eq!(Source::of("start_job", false, &jobs, false, false), Source::Jobs);
+        assert_eq!(Source::of("message_job", true, &jobs, false, true), Source::Jobs);
+        assert_eq!(Source::of("start_job", false, &none, false, false), Source::Notes);
         // Pictures and pages with their gate and the web; the screen with its own gate.
         let look = Extra { pictures: crate::chat::pictures::Gate::Look, screen: crate::chat::pictures::Gate::Look, act: true, ..Default::default() };
         assert_eq!(Source::of(crate::chat::pictures::SHOW, true, &look, false, false), Source::Pictures);

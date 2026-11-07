@@ -362,8 +362,15 @@ pub fn confirm_answer(label: &str, kind: &str) -> Option<bool> {
     Some(allow)
 }
 
-/// The clipboard tool: recorded, answered as the real one answers.
+/// The clipboard tool: recorded, answered as the real one answers. A job's
+/// tools: recorded, never run (a run never starts the person's Claude Code).
 pub fn intercept_tool(name: &str, args: &Value) -> Option<Value> {
+    if crate::chat::tools::jobs::NAMES.contains(&name) {
+        write("job", json!({ "tool": name, "args": args }));
+        let folder = args["folder"].as_str().or_else(|| args["id"].as_str()).unwrap_or("the folder").to_string();
+        let data = json!({ "id": "eval-job", "folder": folder, "status": "running", "note": "A model evaluation: no job runs." });
+        return Some(json!({ "success": true, "data": data, "displayText": format!("Started a job in {folder}") }));
+    }
     if name != "copy_to_clipboard" {
         return None;
     }

@@ -167,6 +167,7 @@ async fn fixed_of(cfg: &crate::config::YapConfig, target: &crate::ai::ai_model::
         act,
         own_search,
         web_question: false,
+        jobs: (target.tools && crate::jobs::offered(cfg)).then_some(crate::chat::tools::JobsTurn::default()),
     };
     let schemas = if target.tools { counter.count(&crate::chat::tools::offered_tools(cfg.open_apps, cfg.web_search && !in_chat, extra).to_string()).await } else { 0 };
     counter.count(&stable).await + schemas

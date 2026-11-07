@@ -88,12 +88,14 @@
 
 mod agent;
 pub mod calendar;
+pub mod jobs;
 mod memory;
 mod notes;
 
 use serde_json::{json, Value};
 
 pub use agent::{offered_tools, run_tool_loop_with, FirstStep};
+pub use jobs::JobsTurn;
 pub use notes::{rag_notes, search_notes};
 #[cfg(debug_assertions)]
 pub use notes::{changed_note, definitions};
@@ -287,6 +289,9 @@ pub struct Extra<'a> {
     /// ([`refused_after_web`]) and the page actions' typed-words check, as
     /// after a page read.
     pub web_question: bool,
+    /// The job tools (`tools/jobs.rs`: jobs on, Claude Code on this PC; not
+    /// across the meetings), and where the turn was asked.
+    pub jobs: Option<JobsTurn>,
 }
 
 /// The calendar tool in a turn ([`calendar::run`]).
@@ -310,8 +315,11 @@ pub struct CalendarTurn<'a> {
 /// something the person wrote (`edit_note` on a document stays refused
 /// after the web; `documents::Turn::refuses`, `rewrite_section`,
 /// `edit_document`'s hashes). A restore isn't the answer's writing: a page
-/// mustn't make Yap undo the person's document.
-pub const ACTION_TOOLS: &[&str] = &["open_app", "create_note", "update_note", "edit_note", "copy_to_clipboard", "remember", "forget", "restore_document"];
+/// mustn't make Yap undo the person's document. Nor may a page start or
+/// steer a job (`start_job`, `message_job`: Claude Code changing the
+/// person's files) — and a job's own output counts as web content
+/// (`tools/jobs.rs`).
+pub const ACTION_TOOLS: &[&str] = &["open_app", "create_note", "update_note", "edit_note", "copy_to_clipboard", "remember", "forget", "restore_document", "start_job", "message_job"];
 
 /// **What stays off after the web for a strong model** (2026-10-31,
 /// `documents::rich::strong`): the tools whose effects reach outside Yap's
@@ -319,14 +327,16 @@ pub const ACTION_TOOLS: &[&str] = &["open_app", "create_note", "update_note", "e
 /// opening an app (it runs something on the PC), the clipboard (it
 /// replaces what the person copied, and carries text to wherever they
 /// paste next) and memory (what Yap remembers goes with every later chat;
-/// `forget` deletes). Yap has no tool that deletes a note or sends
-/// anything anywhere; one added later belongs here. Notes and documents
+/// `forget` deletes) and a job (`start_job`, `message_job`: Claude Code
+/// works on the person's own files and runs commands). Yap has no tool that
+/// deletes a note or sends anything anywhere; one added later belongs here.
+/// Notes and documents
 /// (`create_note`, `update_note`, `edit_note`, `create_document`,
 /// `write_section`, `rewrite_section`, `edit_document`, `restore_document`)
 /// go through after the web as the Claude app's edits do: each one's chip
 /// says what changed, the panel marks it, and every change is a version
 /// with Undo (`notes/versions.rs`: the whole turn at once).
-pub const STRONG_LOCKED: &[&str] = &["open_app", "copy_to_clipboard", "remember", "forget"];
+pub const STRONG_LOCKED: &[&str] = &["open_app", "copy_to_clipboard", "remember", "forget", "start_job", "message_job"];
 
 /// **The safety rule**: after web content came into this turn (`web_seen`),
 /// a call to an action tool is refused, with the reason for the model and a
@@ -344,6 +354,8 @@ pub fn refused_after_web(name: &str, web_seen: bool, strong: bool) -> Option<Val
         "update_note" | "edit_note" => "change a note",
         "restore_document" => "restore a document",
         "remember" | "forget" => "change Yap's memory",
+        "start_job" => "start a job",
+        "message_job" => "tell a job anything",
         _ => "copy to the clipboard",
     };
     Some(tool_error(
@@ -664,6 +676,8 @@ mod tests {
         list.extend(app_definitions().as_array().unwrap().iter().cloned());
         list.extend(web_definitions().as_array().unwrap().iter().cloned());
         list.extend(memory_definitions(Extra { memory: true, search_chats: true, ..Default::default() }).as_array().unwrap().iter().cloned());
+        // A job's tools (start_job and message_job are actions).
+        list.extend(jobs::definitions().as_array().unwrap().iter().cloned());
         all
     }
 

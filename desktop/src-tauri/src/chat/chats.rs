@@ -111,6 +111,12 @@ pub struct ChatMessage {
     /// older Yap's save drops them (the answer stays).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub confirms: Vec<crate::chat::pages::act::confirm::Card>,
+    /// A message that isn't the person's nor the model's: `"jobReport"`, a
+    /// job's report Yap put in the chat (`chat/turn/report.rs`), shown as a
+    /// job card; the model reads it as the job's ([`ChatMessage::sent_text`]).
+    /// Empty for every other message.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub kind: String,
 }
 
 impl ChatMessage {
@@ -118,6 +124,10 @@ impl ChatMessage {
     /// passage a question was asked about (`quote`), so "Make this
     /// shorter" still says what "this" was.
     pub fn sent_text(&self) -> String {
+        // A job's report: the job's words, never the person's (web content).
+        if self.kind == crate::chat::turn::JOB_REPORT {
+            return format!("{}{}", crate::chat::turn::JOB_REPORT_PREFIX, self.text);
+        }
         match &self.quote {
             // Text selected in another app (`assistant/selected.rs`): no
             // note, the app it came from.
@@ -874,6 +884,7 @@ pub fn append_message(
             quote: None,
             browser_search: None,
             confirms: Vec::new(),
+            kind: String::new(),
         });
         conv.updated_ts = now_secs();
         // Asked again in an archived chat: it's back in the list.
@@ -1625,6 +1636,7 @@ mod tests {
             quote: None,
             browser_search: None,
             confirms: vec![],
+            kind: String::new(),
         };
         let messages = vec![
             msg("user", vec![]),
