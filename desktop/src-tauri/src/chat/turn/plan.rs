@@ -114,7 +114,7 @@ pub(crate) const CODE_SETTING_SOURCES: &[&str] = &["user", "project", "local"];
 /// **With jobs offered**, after [`INSTRUCTIONS`]: Yap's job tools, what
 /// they're for, and the safety rule as it holds here; then the tool loop's
 /// own lines for them (`jobs::JOB_TOOL_INSTRUCTIONS`).
-const JOBS: &str = "Yap's job tools (mcp__yap__start_job, mcp__yap__job_status, mcp__yap__message_job, mcp__yap__stop_job) hand a task to the user's own Claude Code, which works in one of their folders in the background: the one way to have files changed or commands run from this chat. After WebSearch or WebFetch this turn, or a job's own words from job_status, Yap won't start a job or tell one anything until the user's next message: say they can ask for it then.";
+const JOBS: &str = "Yap's job tools (mcp__yap__start_job, mcp__yap__job_status, mcp__yap__message_job, mcp__yap__stop_job) hand a task to the user's own Claude Code, which works in one of their folders in the background: the one way to have files changed or commands run from this chat. After WebSearch or WebFetch this turn, or a job's own words from job_status, Yap won't start a job or tell one anything until the user's next message (only their plain \"go ahead\" or \"yes\" to a job's plan or question still goes, in Yap's own words): say they can ask for it then.";
 
 /// Who hears the turn: Chat's stream, a step per model message, a link to
 /// one of the turn's pages shown as its "[n]" as it's written. With a run

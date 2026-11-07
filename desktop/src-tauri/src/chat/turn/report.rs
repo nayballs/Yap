@@ -20,8 +20,12 @@
 //! - **`yap-job-report`** `{job, conversation, messageId, markerId}`: the
 //!   open chat shows it — it never switches to it.
 //! - **Notice** `jobDone` (Info, held over a dictation): with no Yap window
-//!   in front, a card on the Yap bar ("Job done: garden-planner", **Open**),
-//!   else a Windows notification.
+//!   in front, a card on the Yap bar ("Job done: garden-planner", **Open**;
+//!   a plan waiting for its go-ahead, **Go ahead** too), else a Windows
+//!   notification.
+//! - **A plan the person allowed** (ExitPlanMode's Go ahead,
+//!   `jobs::runner`): its report says it's building from the plan, never
+//!   "want me to go ahead?", and no notice (its next turn's report follows).
 //!
 //! The log has ids and outcomes, never the job's words or the answer.
 
@@ -62,6 +66,7 @@ pub(crate) fn queue_job_report(id: &str, n: u32) {
 pub fn marker_text(job: &Job) -> String {
     let what = match (job.status, job.plan, job.asks) {
         (Status::Failed, _, _) => "it didn't finish",
+        (_, true, _) if job.plan_allowed => "it made a plan, and the user allowed it in Yap: it's carrying the plan out now",
         (_, true, _) => "it made a plan and changed nothing yet (the user can say go ahead)",
         (_, _, true) => "it's done and asks the user something",
         _ => "it's done",
@@ -109,6 +114,8 @@ pub fn fallback(job: &Job) -> String {
 fn rules(job: &Job) -> String {
     let more = if job.status == Status::Failed {
         " It didn't finish: say so plainly, and why."
+    } else if job.plan && job.plan_allowed {
+        " It made a plan, the user allowed it, and it's building from the plan now: say so, sum the plan up in a sentence, and don't ask whether to go ahead (Yap tells them when it's done)."
     } else if job.plan {
         " It made a plan and changed nothing yet: say so, sum the plan up in a sentence or two, and ask whether to go ahead."
     } else if job.asks {
@@ -242,9 +249,26 @@ async fn say(reply: &str, message_id: &str) {
     }
 }
 
+/// The bar card's buttons: **Open** — and for a plan waiting for its
+/// go-ahead, **Go ahead** first (the person's click carries it out,
+/// `runner::go_ahead`). Pure.
+pub fn card_buttons(id: &str, status: Status, plan: bool) -> (crate::bar::CardAction, Option<crate::bar::CardAction>) {
+    let open = crate::bar::CardAction::new(format!("open:{id}"), "Open");
+    if plan && status != Status::Failed {
+        (crate::bar::CardAction::new(format!("go:{id}"), "Go ahead"), Some(open))
+    } else {
+        (open, None)
+    }
+}
+
 /// **"Job done"**: with no Yap window in front, a card on the Yap bar (else
-/// a Windows notification), **Open** bringing up its chat.
+/// a Windows notification), **Open** bringing up its chat — and a plan's
+/// **Go ahead**. A plan already allowed says nothing here: it's carrying it
+/// out, and its next turn's report says how that went.
 fn notice(job: &Job, reply: &str) {
+    if job.plan && job.plan_allowed {
+        return;
+    }
     let Some(app) = crate::jobs::runner::app().cloned() else { return };
     let (id, folder, status, plan, asks) = (job.id.clone(), job.folder.clone(), job.status, job.plan, job.asks);
     let body = crate::jobs::steps::clip(reply.trim(), 160);
@@ -260,12 +284,14 @@ fn notice(job: &Job, reply: &str) {
             _ => format!("Job done: {folder}"),
         };
         tracing::info!(id = %id, "Jobs: said with no Yap window in front");
+        let (primary, secondary) = card_buttons(&id, status, plan);
         let card = crate::bar::Card {
             id: NOTICE.into(),
             icon: if status == Status::Failed { "error" } else { "job" },
             title: title.clone(),
             body: body.clone(),
-            primary: Some(crate::bar::CardAction::new(format!("open:{id}"), "Open")),
+            primary: Some(primary),
+            secondary,
             timeout_ms: Some(12_000),
             ..Default::default()
         };
@@ -293,6 +319,11 @@ fn notice(job: &Job, reply: &str) {
 fn card_action(app: &AppHandle, action: &str) {
     if let Some(id) = action.strip_prefix("open:") {
         open_job(app, id);
+    } else if let Some(id) = action.strip_prefix("go:") {
+        // The person's click on a plan's Go ahead: carried out, once.
+        if crate::jobs::runner::go_ahead(id).is_err() {
+            tracing::info!(id, "Jobs: a plan's Go ahead on the bar did nothing (its plan isn't waiting any more)");
+        }
     }
 }
 
@@ -366,6 +397,19 @@ mod tests {
         let failed = Job { status: Status::Failed, error: Some("Claude Code isn't signed in.".into()), text: String::new(), ..job() };
         assert!(marker_text(&failed).contains("What went wrong: Claude Code isn't signed in."));
         assert_eq!(fallback(&failed), "The job in garden-planner didn't finish: Claude Code isn't signed in.");
+        // A plan the person allowed (ExitPlanMode's Go ahead): building from it, no "go ahead?".
+        let allowed = Job { plan: true, plan_allowed: true, ..job() };
+        assert!(marker_text(&allowed).starts_with("The job in garden-planner: it made a plan, and the user allowed it in Yap: it's carrying the plan out now."));
+        assert!(rules(&allowed).contains("it's building from the plan now"));
+        assert!(rules(&allowed).contains("don't ask whether to go ahead"));
+        assert!(!rules(&allowed).contains("and ask whether to go ahead"), "{}", rules(&allowed));
+        // The bar's card: a plan waiting gets Go ahead first; anything else Open alone.
+        let (primary, secondary) = card_buttons("ab12", Status::Done, true);
+        assert_eq!((primary.id.as_str(), primary.label.as_str()), ("go:ab12", "Go ahead"));
+        assert_eq!(secondary.map(|s| (s.id, s.label)), Some(("open:ab12".into(), "Open".into())));
+        let (primary, secondary) = card_buttons("ab12", Status::Done, false);
+        assert_eq!((primary.id.as_str(), secondary.is_none()), ("open:ab12", true));
+        assert_eq!(card_buttons("ab12", Status::Failed, true).0.id, "open:ab12");
         // The model failing: the job's own words.
         assert_eq!(fallback(&job()), "Done. I changed Draft to Final in notes.md and the tests pass.");
         assert_eq!(fallback(&Job { text: String::new(), ..job() }), "The job in garden-planner is done.");

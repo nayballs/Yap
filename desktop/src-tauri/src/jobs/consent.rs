@@ -14,9 +14,20 @@
 //!   the person's own words this turn (a word of theirs that matters, not
 //!   "the" or "please"), or their message is a plain "yes" (to a plan, to
 //!   the job's question).
-//! - **"Go ahead"** after a plan ([`go_ahead`]).
+//! - **"Go ahead"** after a plan ([`go_ahead`]); a message that's nothing
+//!   but a go-ahead or a yes ([`plain_go_ahead`]: after the web, the one
+//!   thing still passed to a job, in Yap's own words).
+//! - **Less than the chat's Mode** ([`asks_lower_mode`], 2026-11-07): the
+//!   chat's model may lower a job's mode only when the person's own words
+//!   ask for it — a plan first, no changes yet, or to be asked first — in
+//!   their languages (My languages' codes, English always; none of theirs
+//!   known: all seven), as `dictation/command_screen.rs` reads them.
 //!
 //! Pure.
+
+use std::sync::LazyLock;
+
+use regex::Regex;
 
 use super::folders::{self, Folder};
 
@@ -88,6 +99,153 @@ pub fn go_ahead(text: &str) -> bool {
 pub fn asks(text: &str) -> bool {
     let t = text.trim().trim_end_matches(|c: char| c == '*' || c == '_' || c == ')' || c.is_whitespace());
     t.ends_with('?')
+}
+
+/// The words a go-ahead may be made of, besides a plain yes ("carry on",
+/// "proceed with the plan", "make the changes").
+const GO_WORDS: &[&str] = &[
+    "go", "ahead", "do", "it", "carry", "on", "out", "proceed", "with", "the", "plan", "that", "this", "make", "changes", "those", "for",
+    "sounds", "looks", "good", "great", "fine", "ok", "okay", "yes", "yeah", "yep", "sure", "please", "let", "lets", "s", "now", "then",
+    "and", "thanks", "thank", "you", "perfect", "alright", "right", "all", "is",
+];
+
+/// **Is `text` nothing but a go-ahead or a yes** — "Yep, that's fine. Go
+/// ahead.", "Yes", "Carry on", "Proceed with the plan" — and no more (no
+/// "…and delete the folder", no question)? After web content in a turn,
+/// this is the one thing still passed to a job, and then only as Yap's own
+/// fixed words (`chat/tools/jobs.rs`). English, as `apps::is_affirmative`.
+pub fn plain_go_ahead(text: &str) -> bool {
+    if crate::apps::is_affirmative(text) {
+        return true;
+    }
+    let t = text.trim();
+    if t.is_empty() || t.ends_with('?') {
+        return false;
+    }
+    let w = folders::words(t);
+    !w.is_empty() && w.len() <= 10 && w.iter().all(|x| GO_WORDS.contains(&x.as_str())) && go_ahead(t)
+}
+
+/// One language's words for wanting less than the chat's Mode: a plan, no
+/// changes yet, being asked first (the text lower-cased, apostrophes
+/// straight, one space between words).
+struct Lang {
+    code: &'static str,
+    words: &'static str,
+}
+
+const LANGS: &[Lang] = &[
+    Lang {
+        code: "en",
+        words: concat!(
+            // A plan: "make a plan first", "plan it", "just plan".
+            r"\bplan (it|this|first|out|ahead|before)\b|\b(just|only) (a )?plan\b|\bplan(ning)? mode\b",
+            r"|\b(a|the|your|its) plan (first|before)\b|\bfirst,? (make )?a plan\b",
+            r"|\b(make|write|draw up|come up with|draft|put together|give me|show me|need|want|prepare) (me |us )?(a|your) plan\b",
+            // No changes yet: "don't change anything", "look but don't touch", "read only", "just research".
+            r"|\b(don't|do not|dont) (change|edit|touch|modify|alter) (anything|a thing|any files?|the files?|the code|any code|it)\b",
+            r"|\b(don't|do not|dont) make (any )?changes\b|\bno changes\b|\bwithout (changing|editing|touching|modifying) (anything|any files?|the code|it)\b",
+            r"|\blook,? but (don't|do not|dont) touch\b|\bread[- ]only\b|\b(just|only) (research|investigate|explore)\b|\bresearch only\b",
+            // Asked first: "ask me before…", "check with me".
+            r"|\bask me (first|before)\b|\bask (for )?my (permission|ok|okay|approval)\b|\bask before\b",
+            r"|\b(check|confirm) with me\b|\bwait for my (ok|okay|approval|go-ahead|go ahead)\b",
+        ),
+    },
+    Lang {
+        code: "fr",
+        words: concat!(
+            r"\b(fais|faites|fais-moi|faites-moi|prépare|préparez|propose|proposez|établis|rédige|rédigez|écris|écrivez) (d'abord )?(un|le|ton|votre) plan\b",
+            r"|\b(un|le) plan d'abord\b|\bd'abord un plan\b|\b(juste|seulement) (un )?plan\b|\bplanifie(z)?\b|\bmode plan\b",
+            r"|\bne (change|changez|modifie|modifiez|touche|touchez) (à )?rien\b|\bsans (rien )?(changer|modifier|toucher)\b",
+            r"|\baucun(e)? (changement|modification)\b|\blecture seule\b|\b(juste|seulement) (des )?recherches?\b|\brecherche seulement\b",
+            r"|\bdemande(z)?(-moi| moi)? (d'abord|avant)\b|\b(vérifie|vérifiez|vois|voyez) avec moi\b",
+        ),
+    },
+    Lang {
+        code: "de",
+        words: concat!(
+            r"\b(mach|mache|macht|erstelle|erstell|erstellt|schreib|schreibe|schreibt) (mir |uns )?(zuerst |erst |erstmal |vorher )?(einen|den|nur einen) plan\b",
+            r"|\b(erst|zuerst|erstmal) (einen |ein )?plan\b|\bnur (einen )?plan\b|\bnur planen\b|\bplane (es|das|erst|zuerst)\b|\bplan(ungs)?modus\b",
+            r"|\b(ändere|änder|ändert|verändere) (noch )?nichts\b|\bnichts (ändern|verändern|anfassen|anrühren)\b|\bfass(e)? nichts an\b",
+            r"|\bkeine änderungen\b|\bohne (etwas )?zu ändern\b|\bnur lesen\b|\bschreibgeschützt\b|\bnur recherch\w*\b",
+            r"|\bfrag(e)? mich (zuerst|vorher|erst)\b|\b(sprich|stimm) dich (vorher |zuerst )?mit mir ab\b|\bfrag (vorher|zuerst) nach\b",
+        ),
+    },
+    Lang {
+        code: "es",
+        words: concat!(
+            r"\b(haz|hazme|prepara|prepárame|preparame|escribe|escríbeme|propón|proponme|elabora) (primero )?(un|el) plan\b",
+            r"|\bun plan primero\b|\bprimero un plan\b|\bs[oó]lo (un )?plan\b|\bplanifica(lo)?\b|\bmodo plan\b",
+            r"|\bno (cambies|modifiques|toques|cambie|modifique|toque) nada\b|\bsin (cambiar|modificar|tocar) nada\b|\bningún cambio\b|\bsin cambios\b",
+            r"|\bs[oó]lo lectura\b|\bmira pero no toques\b|\bs[oó]lo (investiga|investigar|investigación|explora)\b",
+            r"|\bpreg[uú]ntame (antes|primero)\b|\bcons[uú]ltame\b|\bconsulta conmigo\b",
+        ),
+    },
+    Lang {
+        code: "it",
+        words: concat!(
+            r"\b(fai|fammi|prepara|preparami|scrivi|scrivimi|proponi|proponimi) (prima )?(un|il) piano\b",
+            r"|\bprima un piano\b|\bun piano prima\b|\bsolo (un )?piano\b|\bpianifica\b|\bmodalità piano\b",
+            r"|\bnon (cambiare|modificare|toccare) (niente|nulla)\b|\bsenza (cambiare|modificare|toccare) (niente|nulla)\b|\bnessuna modifica\b",
+            r"|\bsola lettura\b|\bguarda ma non toccare\b|\bsolo (ricerca|ricercare|indagare|esplorare)\b",
+            r"|\bchiedimi (prima|il permesso)\b|\bchiedi prima\b|\bconsultami\b|\bverifica con me\b",
+        ),
+    },
+    Lang {
+        code: "pt",
+        words: concat!(
+            r"\b(faz|faça|faca|prepara|prepare|escreve|escreva|propõe|proponha|monta|monte) (primeiro )?(um|o) plano\b",
+            r"|\bum plano primeiro\b|\bprimeiro um plano\b|\b(só|apenas) (um )?plano\b|\bplaneja\b|\bplaneje\b|\bmodo plano\b",
+            r"|\bnão (mudes|mude|alteres|altere|toques|toque|modifiques|modifique) nada\b|\bsem (mudar|alterar|tocar|modificar) nada\b",
+            r"|\bnenhuma (mudança|alteração)\b|\b(somente|só|apenas) leitura\b|\b(só|apenas) (pesquisa|pesquisar|investiga|investigar)\b",
+            r"|\b(pergunta-me|pergunte-me|me pergunte|me pergunta) (antes|primeiro)\b|\bconsulte?-me\b|\bfala comigo antes\b|\bverifique? comigo\b",
+        ),
+    },
+    Lang {
+        code: "nl",
+        words: concat!(
+            r"\b(maak|schrijf|stel) (eerst )?(een|het) plan\b|\beerst een plan\b|\balleen (een )?plan\b|\balleen plannen\b|\bplan het\b|\bplanmodus\b",
+            r"|\b(verander|wijzig) (nog )?niets\b|\bniets (veranderen|wijzigen|aanraken|aanpassen)\b|\braak niets aan\b",
+            r"|\bgeen (wijzigingen|veranderingen)\b|\bzonder (iets )?te (veranderen|wijzigen)\b|\balleen[- ]lezen\b|\balleen (onderzoek|onderzoeken|uitzoeken)\b",
+            r"|\bvraag (het )?(mij|me) (eerst|vooraf)\b|\bvraag eerst\b|\b(overleg|check) (eerst )?met (mij|me)\b",
+        ),
+    },
+];
+
+/// Each language's rule, compiled once.
+static RULES: LazyLock<Vec<(&'static str, Regex)>> = LazyLock::new(|| LANGS.iter().map(|l| (l.code, Regex::new(l.words).expect("static regex"))).collect());
+
+/// The text as the rule reads it: lower case, straight apostrophes, one
+/// space between words.
+fn normal(text: &str) -> String {
+    text.to_lowercase().replace(['\u{2019}', '\u{2018}', '`'], "'").split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
+/// Do `text`'s words ask for less than the chat's Mode, in `langs` (My
+/// languages' codes; English always; none of theirs known: all)?
+fn wants_lower(text: &str, langs: &[String]) -> bool {
+    let text = normal(text);
+    if text.is_empty() {
+        return false;
+    }
+    let all = langs.iter().all(|c| !LANGS.iter().any(|l| c.to_ascii_lowercase().starts_with(l.code)));
+    let mine = |code: &str| all || code == "en" || langs.iter().any(|c| c.to_ascii_lowercase().starts_with(code));
+    RULES.iter().filter(|(code, _)| mine(code)).any(|(_, rule)| rule.is_match(&text))
+}
+
+/// **Did the person ask for less than the chat's Mode** — a plan ("make a
+/// plan first", "plan it", "just plan"), no changes yet ("don't change
+/// anything", "look but don't touch", "read only", "just research"), or to
+/// be asked first ("ask me before…", "check with me")? Their `question`
+/// this turn says so, or it's a plain yes to `previous` (the answer just
+/// before), which asked a question that did. Only then may the chat's
+/// model lower a job's mode (`modes::model_pick`); "look into this and make
+/// our own version" never does.
+pub fn asks_lower_mode(question: &str, previous: Option<&str>, langs: &[String]) -> bool {
+    if wants_lower(question, langs) {
+        return true;
+    }
+    previous.is_some_and(|p| crate::apps::is_affirmative(question) && p.contains('?') && wants_lower(p, langs))
 }
 
 #[cfg(test)]
@@ -180,5 +338,79 @@ mod tests {
         assert!(asks("I updated the header. Should I change the footer too?"));
         assert!(asks("Want me to run the tests? **"));
         assert!(!asks("Done. I changed notes.md."));
+    }
+
+    #[test]
+    fn a_plain_go_ahead_is_nothing_but_a_go_ahead() {
+        for yes in ["Yep, that's fine. Go ahead.", "Yep, go ahead", "Yes", "Go ahead.", "Carry on", "Proceed with the plan", "OK, make the changes", "Sounds good, go for it", "yes please"] {
+            assert!(plain_go_ahead(yes), "{yes}");
+        }
+        for not in ["delete the folder", "go ahead and delete the folder", "Yes, change the footer too", "Go ahead?", "No, don't", "", "What would it change?"] {
+            assert!(!plain_go_ahead(not), "{not}");
+        }
+    }
+
+    #[test]
+    fn only_the_persons_own_words_ask_for_less_than_the_chats_mode() {
+        let en: Vec<String> = vec!["en".into()];
+        // The maintainer's own request (7 Nov): research and a build, no plan asked for.
+        for not in [
+            "can we look into this and make our own version of it combined with the seed tracker",
+            "Fix the failing tests in garden-planner",
+            "add a minimap button for it as well",
+            "update the plan section in the readme",
+            "make a planner page for the beds",
+            "",
+        ] {
+            assert!(!asks_lower_mode(not, None, &en), "{not}");
+        }
+        // A plan.
+        for plan in ["Make a plan first: add a watering schedule", "plan it out before you start", "just plan, I'll decide", "Give me a plan for the minimap", "use plan mode"] {
+            assert!(asks_lower_mode(plan, None, &en), "{plan}");
+        }
+        // No changes yet.
+        for hold in ["Look into the seed tracker but don't change anything", "look but don't touch", "read only for now", "just research how it's done", "Don’t make any changes yet"] {
+            assert!(asks_lower_mode(hold, None, &en), "{hold}");
+        }
+        // Asked first.
+        for ask in ["Tidy notes.md, but ask me before deleting anything", "check with me before you commit", "wait for my OK"] {
+            assert!(asks_lower_mode(ask, None, &en), "{ask}");
+        }
+        // A yes to the answer just before, which asked about a plan.
+        assert!(asks_lower_mode("Yes.", Some("Shall I have it make a plan first?"), &en));
+        assert!(!asks_lower_mode("Yes.", Some("I'll make a plan first."), &en), "no question was asked");
+        assert!(!asks_lower_mode("Yes.", Some("Shall I start the job?"), &en));
+        assert!(!asks_lower_mode("Tell me more", Some("Shall I make a plan first?"), &en), "not a yes");
+    }
+
+    #[test]
+    fn asking_for_a_plan_works_in_the_persons_languages() {
+        let all: Vec<String> = Vec::new();
+        for said in [
+            "Fais d'abord un plan pour le calendrier d'arrosage",
+            "ne change rien, regarde juste",
+            "Mach zuerst einen Plan für den Bewässerungsplan",
+            "ändere nichts, nur lesen",
+            "Haz primero un plan para el riego",
+            "no toques nada todavía",
+            "Fammi prima un piano per l'irrigazione",
+            "non toccare niente",
+            "Faz primeiro um plano para a rega",
+            "não mudes nada ainda",
+            "Maak eerst een plan voor de bewatering",
+            "verander niets",
+            "Frag mich vorher, bevor du etwas löschst",
+            "pregúntame antes de borrar",
+        ] {
+            assert!(asks_lower_mode(said, None, &all), "{said}");
+        }
+        // The person's languages only (English always): French words with German and English.
+        let de: Vec<String> = vec!["de".into()];
+        assert!(asks_lower_mode("Mach zuerst einen Plan", None, &de));
+        assert!(!asks_lower_mode("Fais d'abord un plan", None, &de));
+        assert!(asks_lower_mode("make a plan first", None, &de), "English always");
+        // A request in another language that asks for no plan: none.
+        assert!(!asks_lower_mode("Corrige les tests qui échouent", None, &all));
+        assert!(!asks_lower_mode("Füge einen Minimap-Knopf hinzu", None, &all));
     }
 }

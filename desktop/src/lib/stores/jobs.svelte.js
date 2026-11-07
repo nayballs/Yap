@@ -23,6 +23,8 @@ export const jobs = $state({
   approvals: [],
   /** `{id, conversation}`: a job to show (its chat and tab), from the bar's or a notification's Open. */
   openWanted: null,
+  /** job id → the turn whose plan a report card's Go ahead sent on (its button stays used). */
+  wentAhead: {},
   /** The latest report (`yap-job-report`), and how many came: Chat reads the open chat again. */
   report: null,
   reports: 0,
@@ -99,6 +101,20 @@ export async function answerApproval(id, allow) {
     await invoke('claude_approve_answer', { id, allow: !!allow });
   } catch {
     /* it had lapsed: its job says so */
+  }
+}
+
+/**
+ * **Go ahead with a job's plan** (its report card's button: the person's
+ * click): its next turn now. `turn`: the plan's, its button used from now
+ * on (`wentAhead`), whatever the card's fate.
+ */
+export async function goAheadWithPlan(id, turn = 0) {
+  jobs.wentAhead = { ...jobs.wentAhead, [id]: turn };
+  try {
+    return await invoke('job_go_ahead', { id });
+  } finally {
+    refreshSoon(0);
   }
 }
 

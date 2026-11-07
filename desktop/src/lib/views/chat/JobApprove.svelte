@@ -7,31 +7,72 @@
   // answered here, on the Yap bar, or no longer waiting
   // (`yap-claude-approve-done`). Never answered by voice. Its own small
   // chunk.
+  //
+  // **A plan** (Plan mode's ExitPlanMode, 2026-11-07) reads as one: "The
+  // plan is ready", the plan itself in markdown (folded when long, Show
+  // more), and **Go ahead** / **Not yet**. Go ahead allows it, and the job
+  // carries the plan out at the chat's Mode once its turn ends
+  // (jobs/runner.rs); Not yet keeps it a plan.
   import { answerApproval } from '../../stores/jobs.svelte.js';
+  import { renderMarkdown } from '../../core/markdown.js';
+  import { longSaid } from '../../core/jobs.js';
 
   /** `approvals`: this chat's prompts waiting (`Pending`), oldest first; `onopen(run)` opens the job's tab. */
   let { approvals = [], onopen = null } = $props();
+
+  /** Plan mode's "may I go ahead?" (approve.rs `EXIT_PLAN`). */
+  const isPlan = (a) => a?.tool === 'ExitPlanMode';
+  // Plans opened past their fold, by the prompt's id.
+  let unfolded = $state({});
 </script>
 
 {#each approvals as a (a.id)}
-  <div class="japprove" role="group" aria-label="A job asks to take a step" data-testid="chat-job-approve" data-tool={a.tool}>
-    <svg class="aicon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3l8 3v6c0 4.5-3.4 8.2-8 9-4.6-.8-8-4.5-8-9V6z" /><path d="M12 8v5M12 16.5v.01" /></svg>
-    <div class="abody">
-      <p class="aq">
-        The job in <button type="button" class="alink" onclick={() => onopen?.(a.run)}>{a.label || 'your folder'}</button> asks to:
-        <strong>{a.summary}</strong>
-      </p>
-      {#if a.detail && a.detail.trim() !== a.summary.trim()}
-        <!-- svelte-ignore a11y_no_noninteractive_tabindex (it scrolls: the keyboard reaches it) -->
-        <pre class="adetail" tabindex="0" aria-label="What exactly it would do">{a.detail}</pre>
-      {/if}
-      <p class="awhy">{a.tool}{a.tool ? ' · ' : ''}Only you can allow it, and only for this one step.</p>
-      <div class="abtns">
-        <button type="button" class="aallow" onclick={() => answerApproval(a.id, true)}>Allow once</button>
-        <button type="button" class="adeny" onclick={() => answerApproval(a.id, false)}>Deny</button>
+  {#if isPlan(a)}
+    {@const folds = longSaid(a.detail)}
+    <div class="japprove plan" role="group" aria-label="The job's plan is ready" data-testid="chat-job-approve" data-tool={a.tool} data-kind="plan">
+      <svg class="aicon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 4h6a1 1 0 0 1 1 1v1H8V5a1 1 0 0 1 1-1z" /><path d="M16 5h2a1 1 0 0 1 1 1v14a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1h2" /><path d="M9 12h6M9 16h4" /></svg>
+      <div class="abody">
+        <p class="aq">
+          <strong>The plan is ready</strong> · the job in <button type="button" class="alink" onclick={() => onopen?.(a.run)}>{a.label || 'your folder'}</button>
+        </p>
+        {#if a.detail?.trim()}
+          <div class="aplan" class:folded={folds && !unfolded[a.id]} data-testid="chat-job-plan">
+            <!-- eslint-disable-next-line svelte/no-at-html-tags — renderMarkdown sanitises its output -->
+            <div class="md">{@html renderMarkdown(a.detail)}</div>
+          </div>
+          {#if folds}
+            <button type="button" class="fold" aria-expanded={!!unfolded[a.id]} onclick={() => (unfolded = { ...unfolded, [a.id]: !unfolded[a.id] })}>
+              {unfolded[a.id] ? 'Show less' : 'Show more'}
+            </button>
+          {/if}
+        {/if}
+        <p class="awhy">Go ahead and it carries the plan out at this chat's Mode. Not yet keeps it a plan, with nothing changed.</p>
+        <div class="abtns">
+          <button type="button" class="aallow" onclick={() => answerApproval(a.id, true)}>Go ahead</button>
+          <button type="button" class="adeny" onclick={() => answerApproval(a.id, false)}>Not yet</button>
+        </div>
       </div>
     </div>
-  </div>
+  {:else}
+    <div class="japprove" role="group" aria-label="A job asks to take a step" data-testid="chat-job-approve" data-tool={a.tool}>
+      <svg class="aicon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3l8 3v6c0 4.5-3.4 8.2-8 9-4.6-.8-8-4.5-8-9V6z" /><path d="M12 8v5M12 16.5v.01" /></svg>
+      <div class="abody">
+        <p class="aq">
+          The job in <button type="button" class="alink" onclick={() => onopen?.(a.run)}>{a.label || 'your folder'}</button> asks to:
+          <strong>{a.summary}</strong>
+        </p>
+        {#if a.detail && a.detail.trim() !== a.summary.trim()}
+          <!-- svelte-ignore a11y_no_noninteractive_tabindex (it scrolls: the keyboard reaches it) -->
+          <pre class="adetail" tabindex="0" aria-label="What exactly it would do">{a.detail}</pre>
+        {/if}
+        <p class="awhy">{a.tool}{a.tool ? ' · ' : ''}Only you can allow it, and only for this one step.</p>
+        <div class="abtns">
+          <button type="button" class="aallow" onclick={() => answerApproval(a.id, true)}>Allow once</button>
+          <button type="button" class="adeny" onclick={() => answerApproval(a.id, false)}>Deny</button>
+        </div>
+      </div>
+    </div>
+  {/if}
 {/each}
 
 <style>
@@ -49,12 +90,21 @@
     color: var(--yap-paper-ink);
     font-size: 13px;
   }
+  /* A plan: the job's own proposal, in Yap's calm accent, not a warning. */
+  .japprove.plan {
+    width: min(640px, 100%);
+    border-color: color-mix(in srgb, var(--yap-primary) 40%, var(--yap-paper-rule));
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--yap-primary) 12%, transparent);
+  }
   .aicon {
     flex: 0 0 auto;
     width: 18px;
     height: 18px;
     margin-top: 1px;
     color: var(--yap-warning);
+  }
+  .plan .aicon {
+    color: var(--yap-primary);
   }
   .abody {
     flex: 1 1 auto;
@@ -98,6 +148,69 @@
     overflow-wrap: anywhere;
   }
   .adetail:focus-visible {
+    outline: 2px solid var(--yap-focus-ring);
+    outline-offset: 1px;
+  }
+  /* The plan itself: markdown on the card's page, folded to its first lines. */
+  .aplan {
+    margin: 8px 0 0;
+    padding: 8px 12px;
+    border-radius: 8px;
+    background: var(--yap-paper-s1);
+    font-size: 12.5px;
+    line-height: 1.5;
+  }
+  .aplan .md {
+    overflow-wrap: anywhere;
+  }
+  .aplan .md :global(h1),
+  .aplan .md :global(h2),
+  .aplan .md :global(h3),
+  .aplan .md :global(h4) {
+    margin: 6px 0 4px;
+    font-size: 13px;
+    font-weight: 650;
+  }
+  .aplan .md :global(:first-child) {
+    margin-top: 0;
+  }
+  .aplan .md :global(p) {
+    margin: 0 0 6px;
+  }
+  .aplan .md :global(:last-child) {
+    margin-bottom: 0;
+  }
+  .aplan .md :global(ul),
+  .aplan .md :global(ol) {
+    margin: 2px 0 6px;
+    padding-left: 20px;
+  }
+  .aplan .md :global(code) {
+    font-size: 11.5px;
+    padding: 0 4px;
+    border-radius: 4px;
+    background: var(--yap-paper-s2);
+  }
+  .aplan.folded .md {
+    max-height: 7.5em;
+    overflow: hidden;
+    mask-image: linear-gradient(to bottom, #000 60%, transparent);
+  }
+  .fold {
+    margin: 4px 0 0;
+    padding: 0;
+    border: none;
+    background: none;
+    color: var(--yap-primary);
+    font: inherit;
+    font-size: 12px;
+    font-weight: 600;
+    cursor: pointer;
+  }
+  .fold:hover {
+    text-decoration: underline;
+  }
+  .fold:focus-visible {
     outline: 2px solid var(--yap-focus-ring);
     outline-offset: 1px;
   }

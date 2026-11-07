@@ -152,7 +152,7 @@ pub fn workspaces_changed() {
 /// tool loop and a plan chat alike (`chat/turn/prompt.rs`). Pure.
 pub fn prompt_line_for(folder: &Folder) -> String {
     format!(
-        "This is a Code chat in the user's folder {} ({}): they picked it for jobs. When they ask you to change, fix, build or write something there, start a job: call start_job without a folder (it's this one). Their own request this turn is enough; they needn't name the folder. One Claude Code session per Code chat: once it has a job, each follow-up continues that job as its next turn (start_job does it by itself; fresh: true only when they ask for a new job or a fresh start). message_job and job_status without an id mean this chat's latest job. A job in any other folder still needs the user to name it.",
+        "This is a Code chat in the user's folder {} ({}): they picked it for jobs. When they ask you to change, fix, build or write something there, start a job: call start_job without a folder (it's this one). Their own request this turn is enough; they needn't name the folder. One Claude Code session per Code chat: once it has a job, each follow-up continues that job as its next turn (start_job does it by itself; fresh: true only when they ask for a new job or a fresh start). message_job and job_status without an id mean this chat's latest job. A job runs at this chat's Mode (beside the message box): pass mode only when the user's own words ask for a plan first, no changes yet or to be asked first, never because the task is big. A job in any other folder still needs the user to name it.",
         folder.name, folder.path
     )
 }
@@ -274,6 +274,7 @@ mod tests {
         };
         assert!(job_line(&two).contains("is working now (a request waits for its next turn), after 2 turns"));
         assert!(prompt_line_for(&garden).contains("each follow-up continues that job as its next turn"));
+        assert!(prompt_line_for(&garden).contains("pass mode only when the user's own words ask for a plan first"));
     }
 
     #[test]

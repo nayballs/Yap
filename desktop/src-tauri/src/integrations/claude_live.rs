@@ -74,7 +74,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use tauri::{AppHandle, Emitter};
 
-pub use approve::Pending;
+pub use approve::{Pending, EXIT_PLAN};
 #[cfg(debug_assertions)]
 pub use approve::set_auto_answer;
 
