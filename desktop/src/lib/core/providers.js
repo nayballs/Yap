@@ -81,7 +81,7 @@ export const PP_PROVIDERS = [
  * state is the provider id (`modeOf`).
  */
 export const PROVIDER_MODES = [
-  { value: 'cloud', label: 'Cloud providers', desc: 'Your ChatGPT plan, or Groq, OpenAI, Anthropic, Gemini or OpenRouter on your own API key', kind: 'cloud' },
+  { value: 'cloud', label: 'Cloud providers', desc: 'Your ChatGPT or Claude plan, or Groq, OpenAI, Anthropic, Gemini or OpenRouter on your own API key', kind: 'cloud' },
   { value: 'ondevice', label: 'Local', desc: 'A model on this PC. Nothing leaves it', kind: 'local' },
   { value: 'selfhosted', label: 'Self-hosted', desc: 'Your own server, like Ollama or LM Studio', kind: 'server' },
 ];
@@ -94,11 +94,37 @@ export function modeOf(provider) {
 /** The Cloud providers tab a saved provider id shows under (a two-way entry's: GPT_TAB, CLAUDE_TAB). */
 export const cloudTabOf = (p) => waysTabOf(p) ?? p;
 /**
- * The way a scope moving onto the Claude tab takes (the Chat scope only:
- * the plan is Chat's): the plan when Claude Code is signed in here, else
- * the key (the way that works without installing anything).
+ * The way a scope moving onto the Claude tab takes (every scope since
+ * 7 Nov 2026): the plan when Claude Code is signed in here, else the key
+ * (the way that works without installing anything).
  */
 export const claudeWay = (planOn) => (planOn ? CLAUDE_PLAN : 'anthropic');
+
+/**
+ * **What each way is, in a line** (7 Nov 2026: "make that distinction very
+ * clear"): under the Claude and ChatGPT tabs' ways in every scope. The key is
+ * the quicker way to Claude (the plan goes through Claude Code on this PC
+ * first); the ChatGPT plan is OpenAI's own API, so no speed is claimed for
+ * either of its ways. `short`: the two-row comparison Dictation cleanup and
+ * Commands show.
+ */
+export const WAY_NOTES = {
+  [CLAUDE_PLAN]: {
+    line: "Your Claude plan, through Claude Code on this PC: uses your plan's limits. Expect slightly slower responses.",
+    short: "Uses your plan's limits. Expect slightly slower responses: it goes through Claude Code on this PC.",
+  },
+  anthropic: { line: 'Your Anthropic API key: quickest, billed per use.', short: 'Quickest. Billed per use on your Anthropic account.' },
+  [CHATGPT]: { line: "Your ChatGPT plan: uses your plan's limits.", short: "Uses your ChatGPT plan's limits." },
+  openai: { line: 'Your OpenAI API key: billed per use.', short: 'Billed per use on your OpenAI account.' },
+};
+
+/** Which way pays, on the selected model's row (as Chat's model chip says it). */
+export const PAID_BY = {
+  [CLAUDE_PLAN]: 'Using your Claude plan',
+  anthropic: 'Anthropic API key',
+  [CHATGPT]: 'Using ChatGPT plan',
+  openai: 'OpenAI API key',
+};
 /**
  * The way a scope moving onto the ChatGPT tab takes: the plan when it's
  * signed in, else an OpenAI key already saved, else the plan (Continue with
@@ -109,8 +135,8 @@ export const gptWay = (planOn, keyOn) => (planOn || !keyOn ? CHATGPT : 'openai')
 /** The Cloud providers mode's tabs, with their marks. */
 export const CLOUD_TABS = [
   { value: 'groq', label: 'Groq', icon: PROVIDER_ICONS.groq },
-  // Your Claude plan or an Anthropic key, inside, for Chat
-  // (ClaudePlanProvider.svelte); an Anthropic key elsewhere.
+  // Your Claude plan or an Anthropic key, inside, for every scope
+  // (ClaudePlanProvider.svelte).
   { value: 'anthropic', label: 'Claude', icon: PROVIDER_ICONS.anthropic, mono: true },
   // The plan or an OpenAI key, inside (ChatGptProvider.svelte).
   { value: GPT_TAB, label: 'ChatGPT', icon: PROVIDER_ICONS.openai, mono: true },
@@ -159,6 +185,7 @@ export const CLEANUP_PROVIDER_LABELS = {
   anthropic: 'Anthropic',
   openai: 'OpenAI',
   chatgpt: 'ChatGPT (your plan)',
+  'claude-plan': 'your Claude plan',
   gemini: 'Google Gemini',
   openrouter: 'OpenRouter',
   custom: 'Custom endpoint',

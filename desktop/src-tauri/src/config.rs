@@ -174,6 +174,12 @@ pub struct LlmScope {
     /// (only meaningful for reasoning models). See `pp_disable_thinking`.
     #[serde(default)]
     pub disable_thinking: bool,
+    /// On your Claude plan: a call the plan can't answer goes once to the
+    /// Anthropic API key instead (`pp_plan_fallback`'s, per scope; off by
+    /// default, never offered for Chat, which keeps its own "Use my API key
+    /// for this chat").
+    #[serde(default)]
+    pub plan_fallback: bool,
 }
 
 /// A nickname for an app Yap can open (Settings → Voice Assistant → Opening
@@ -778,6 +784,14 @@ pub struct YapConfig {
     /// reasoning models; harmless for others (they emit no think blocks).
     #[serde(default)]
     pub pp_disable_thinking: bool,
+    /// Dictation cleanup on your Claude plan: a call the plan can't answer
+    /// (Claude Code signed out, the plan's limit, paying another way, it
+    /// won't start) goes once to the Anthropic API key instead ("If your
+    /// plan can't answer, use my API key", Settings; off by default: it
+    /// spends money). Off: the words as said, as any failed cleanup
+    /// (`claude_plan::fallback_key`).
+    #[serde(default)]
+    pub pp_plan_fallback: bool,
     /// GGUF filename (inside `<data>/llm/`) the on-device sidecar should load
     /// instead of the bundled default. Empty = the bundled Qwen model. Users can
     /// drop any GGUF into the folder and pick it in Settings.
@@ -1595,6 +1609,7 @@ impl Default for YapConfig {
             pp_prompt: default_pp_prompt(),
             pp_preset: default_pp_preset(),
             pp_disable_thinking: false,
+            pp_plan_fallback: false,
             pp_local_model: String::new(),
             local_llm_upgrade_dismissed: false,
             local_context: 0,

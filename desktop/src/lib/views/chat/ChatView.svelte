@@ -402,7 +402,8 @@
     chat.loadVoiceSettings();
     chat.refreshVision();
     chat.refreshLimits();
-    // Opened while the Voice Assistant thinks or speaks: its ■ shows here too.
+    // Opened while the Voice Assistant thinks or speaks: its ■ shows here too
+    // (on its question's conversation).
     invoke('assistant_phase').then((p) => (chat.assistantPhase = p)).catch(() => {});
     setTimeout(() => chat.inputEl?.focus(), 0);
     const uns = [
@@ -436,7 +437,8 @@
       // Whether a spoken question is being listened for (Esc calls it off).
       listen('yap-assistant', (e) => {
         chat.assistantListening = e.payload?.phase === 'listening';
-        chat.assistantPhase = e.payload?.phase;
+        // (Its phase and its question's conversation: its ■ shows there only.)
+        chat.assistantPhase = e.payload;
       }),
       listen('yap-voice-replies', (e) => {
         if (typeof e.payload?.on === 'boolean') chat.speakReplies = e.payload.on;

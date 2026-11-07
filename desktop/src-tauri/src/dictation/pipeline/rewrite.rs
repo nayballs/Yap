@@ -43,8 +43,9 @@ pub(crate) fn commands_model(c: &YapConfig) -> CommandsModel {
             // Standard-provider keys are global (shared with the Cleanup
             // tab); an empty scope key falls back to them.
             let key = c.provider_api_key(&s.provider, &s.api_key);
-            let (base_url, api_key, model, provider) =
-                crate::ai::local_llm::effective_endpoint_for(&s.provider, &s.base_url, &key, &s.model);
+            let ep = crate::ai::local_llm::effective_endpoint_for(&s.provider, &s.base_url, &key, &s.model);
+            // Your Claude plan: under Commands' settings (claude_plan::resolve).
+            let (base_url, api_key, model, provider) = crate::ai::claude_plan::resolve(c, crate::ai::claude_plan::Scope::Commands, ep);
             // The agent prompt is templated on the wake word (OpenWhispr's
             // `{{agentName}}`); "Yap" is the unnamed default, matching the
             // tab's copy.
@@ -330,7 +331,12 @@ impl Shared {
             report_rewrite(last.is_some(), "", "failed", Some("no API key".into()));
             let _ = self.app.emit(
                 DICTATION_ERROR,
-                format!("Commands: no {provider} API key — add one in Language Models"),
+                if provider == crate::ai::claude_plan::PROVIDER {
+                    // Your Claude plan with Claude Code not ready here.
+                    "Commands: Claude Code isn't signed in on this PC. Sign in to Claude Code in Language Models → Commands → Claude.".to_string()
+                } else {
+                    format!("Commands: no {provider} API key — add one in Language Models")
+                },
             );
             self.say_failed();
             return;

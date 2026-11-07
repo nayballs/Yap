@@ -67,6 +67,9 @@ fn apply_config(app: &AppHandle, state: State<'_, AppState>, prev: &YapConfig, c
     crate::dictionary::learn::on_dictionary_saved(&prev.dictionary, &cfg.dictionary);
     // A provider key set or changed: check that provider's model list now.
     crate::ai::model_catalog::on_config_saved(&app, prev, &cfg);
+    // Your Claude plan: a scope's warm spare ends when the scope leaves the
+    // plan or changes model (claude_plan/spare.rs).
+    crate::ai::claude_plan::spare::config_changed(&cfg);
     if cfg.debug_logging != prev_debug {
         crate::shell::logging::set_debug_logging(cfg.debug_logging);
     }

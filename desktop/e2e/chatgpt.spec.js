@@ -19,6 +19,9 @@
 //   ("OpenAI API key" on the chip), opened again on the way in use, back to
 //   the plan; Recent and search say which way; Settings' ChatGPT tab with
 //   both, its switch moving the scope between "chatgpt" and "openai";
+// - the plan beyond Chat (7 Nov 2026): a dictation cleaned and a Command run on
+//   it, each scope on its own model; Dictation cleanup's ChatGPT tab says what
+//   each way is, side by side, and that the plan pays;
 // - Sign out revokes the grant at OpenAI; then Settings' tab with a key only
 //   ("Use your ChatGPT plan instead…" signs in), and with nothing connected
 //   ("Use an API key instead" opens the key field).
@@ -267,6 +270,47 @@ test('one ChatGPT entry: the plan alone, then with an OpenAI key and "Your plan 
   await expectStore(yap, 'config.json', (c) => c.llmScopes.chat.provider === 'chatgpt' && c.llmScopes.chat.apiKey === 'chatgpt-plan');
   await expect(gptTab.getByTestId('chatgpt-card')).toContainText('Using ChatGPT plan');
   await closeSettings(main);
+});
+
+test('the ChatGPT plan cleans a dictation and runs a Command, each scope on its own model; Settings says the plan pays', async ({ yap, main, gpt, shot }) => {
+  const cfg = yap.readJson('config.json');
+  expect(cfg.ppApiKeys?.chatgpt).toBe('chatgpt-plan');
+  const commands = { enabled: true, provider: 'chatgpt', baseUrl: 'https://api.openai.com/v1', model: 'gpt-6-luna', apiKey: '', apiKeys: {}, prompt: '', disableThinking: false };
+  await setConfig(yap, main, {
+    postProcessEnabled: true,
+    ppProvider: 'chatgpt',
+    ppBaseUrl: 'https://api.openai.com/v1',
+    ppApiKey: 'chatgpt-plan',
+    ppModel: 'gpt-6.1-sol',
+    agentName: 'Jarvis',
+    llmScopes: { ...cfg.llmScopes, voiceAgent: commands },
+  });
+  // Dictation cleanup on the plan: OpenAI's Responses API, its own instructions.
+  const out = await yap.invoke('e2e_dictation', { text: 'hello from your chatgpt plan' });
+  expect(out.text).toBe('Hello from your ChatGPT plan.');
+  const cleanup = gpt.responses.at(-1);
+  expect(cleanup.model).toBe('gpt-6.1-sol');
+  expect(cleanup.instructions).toMatch(/^You are a dictation cleanup engine/);
+  // A Command on the plan, on Commands' own model.
+  const cmd = await yap.invoke('e2e_command', { text: 'Hey Jarvis, say hello to Sam' });
+  expect(cmd.text).toBe('Hello from your ChatGPT plan.');
+  expect(gpt.responses.at(-1).model).toBe('gpt-6-luna');
+  expect(gpt.responses.at(-1).instructions).not.toMatch(/^You are a dictation cleanup engine/);
+  // Settings → Dictation cleanup → ChatGPT: both ways side by side, the plan's in use and pays.
+  const dialog = await openSettings(main, 'Language Models');
+  await dialog.getByRole('tab', { name: 'Dictation Cleanup' }).click();
+  await dialog.getByRole('tab', { name: 'ChatGPT' }).click();
+  const gptTab = dialog.getByTestId('chatgpt-provider');
+  await expect(gptTab).toHaveAttribute('data-way', 'chatgpt');
+  const inUse = gptTab.getByTestId('way-compare').locator('[aria-current="true"]');
+  await expect(inUse.locator('dt')).toHaveText('Your planIn use');
+  await expect(inUse.locator('dd')).toHaveText("Uses your ChatGPT plan's limits.");
+  await expect(gptTab.getByTestId('way-compare')).toContainText('Billed per use on your OpenAI account.');
+  await expect(gptTab.getByTestId('model-paid-by')).toHaveText('Using ChatGPT plan');
+  await shot(main, '11a-settings-cleanup-chatgpt-plan');
+  await closeSettings(main);
+  await setConfig(yap, main, { postProcessEnabled: false, ppProvider: 'ondevice', ppApiKey: '', llmScopes: { ...yap.readJson('config.json').llmScopes, voiceAgent: { ...commands, enabled: false } } });
+  expect(gpt.problems).toEqual([]);
 });
 
 test('Sign out revokes the grant at OpenAI and leaves the registration for next time', async ({ yap, main, gpt, shot }) => {

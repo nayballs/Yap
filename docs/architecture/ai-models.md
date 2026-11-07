@@ -147,10 +147,13 @@ The language-model side: the OpenAI-compatible client and its prompts, the on-de
   installed Claude Code CLI, driven as a child process on their own sign-in
   or API key, for Chat on the plan and Jobs. See [The Claude Code
   engine](#the-claude-code-engine-2026-11-07).
-- **`ai/claude_plan.rs`** (+ `claude_plan/`: `map`, `oneshot`, `sessions`) —
-  **Chat on your Claude plan** (2026-11-07): the provider "claude-plan",
-  Claude's models on the person's own Claude subscription through their own
-  Claude Code. See [Your Claude plan](#your-claude-plan-2026-11-07).
+- **`ai/claude_plan.rs`** (+ `claude_plan/`: `map`, `oneshot`, `sessions`,
+  `spare`, `usage`) — **Your Claude plan** (2026-11-07): the provider
+  "claude-plan", Claude's models on the person's own Claude subscription
+  through their own Claude Code, in every Language Models scope (Chat, and
+  Dictation Cleanup, Commands and Note Formatting with a warm spare each and
+  an opt-in fallback to the API key). See [Your Claude
+  plan](#your-claude-plan-2026-11-07).
 - **`ai/llm.rs`** — the AI cleanup client (OpenAI-compatible). Frames the transcript as
   data (delimiters + one-shot) so small models *clean* it instead of *answering* it.
   **The dictation's two messages for a hybrid model** (`cleanup_messages`,
@@ -1680,6 +1683,7 @@ Following its UI rules (`ChatGptSignIn.svelte` inside `ChatGptProvider.svelte`, 
 - **Connected · Using ChatGPT plan**, with the account and **Manage usage**.
 - The one-time **"You're using your ChatGPT plan"** notice, with **Got it** (`chatgpt.json` `noticeSeen`).
 - Chat's model chip says "Using ChatGPT plan", with a Manage usage link beside it. On an OpenAI API key it says "OpenAI API key" instead, since the one entry holds both.
+- **Every scope** (checked 7 Nov 2026): Dictation Cleanup, Commands and Note Formatting take the plan as Chat does — every call goes through `llm::post_chat_request` to `responses.rs`, and each scope's ChatGPT tab is the same `ChatGptProvider.svelte` — with what each way is said under the switch ("Your ChatGPT plan: uses your plan's limits." / "Your OpenAI API key: billed per use."; side by side for Dictation Cleanup and Commands, `WayNote.svelte`; no speed claimed: both are OpenAI's API) and the selected model's row saying which pays. The one gap, fixed then: signing out left the marker in Commands' and Note Formatting's own key, so they looked connected (`clear_provider_key` now clears every scope).
 
 ### Receipts
 
@@ -1877,11 +1881,13 @@ didn't fire in a real `-p` run (not looked into).
 
 ## Your Claude plan (2026-11-07)
 
-`ai/claude_plan.rs` (+ `claude_plan/`): Chat's and the Voice Assistant's
-answers from Claude on the person's own Claude subscription, through their own
-Claude Code. It sits beside the Anthropic API key as the ChatGPT plan sits
-beside an OpenAI key. Yap never calls Anthropic itself with a plan: Claude
-Code does, on the person's own sign-in.
+`ai/claude_plan.rs` (+ `claude_plan/`): Yap's AI from Claude on the person's
+own Claude subscription, through their own Claude Code, in every Language
+Models scope: Chat's and the Voice Assistant's answers, and (7 Nov 2026) a
+dictation's cleanup, Commands and saved transforms, and the meeting notes. It
+sits beside the Anthropic API key as the ChatGPT plan sits beside an OpenAI
+key. Yap never calls Anthropic itself with a plan: Claude Code does, on the
+person's own sign-in.
 
 ### The provider
 
@@ -1898,12 +1904,30 @@ Code does, on the person's own sign-in.
   (`as_api`): effort (as `--effort`; no Fast mode through Claude Code),
   images, context sizes, the strong models, Latest. `model_catalog.rs` lists
   them: the CLI has no list of its own.
-- **The Chat scope only**: Chat, the Notes view's Ask, the Voice Assistant
-  and the background calls on the Chat model. Never dictation cleanup,
-  Commands or meeting summaries (too slow, and they'd eat the plan); Settings
-  never offers it there.
+- **Every scope** (7 Nov 2026; until then the Chat scope only): Chat & Voice
+  Assistant (Chat, the Notes view's Ask, the Voice Assistant and the
+  background calls on the Chat model), Dictation Cleanup (also a question
+  cleaned up, a cleanup style's or an app rule's own model), Commands (the
+  rewrite shortcut, saved transforms) and Note Formatting (meeting summaries,
+  the notepad's helpers). The maintainer: "dictation cleanup can be used
+  through the subscription system as well as an API key".
+- **Whose call it is** (`Scope`, `scope_url`): each scope's endpoint names
+  its scope in the placeholder URL — `claude-code://plan/cleanup`,
+  `…/commands`, `…/notes`, and Chat's bare `claude-code://plan` — set where
+  the endpoint is resolved (`local_llm::effective_endpoint` and a cleanup
+  profile's: cleanup; `pipeline::commands_model`: Commands;
+  `meeting_summary::resolve_endpoint`: Note Formatting;
+  `turn::resolve_chat_endpoint`: Chat, also on the cleanup's model). A scope
+  that's off runs on the cleanup's model, under the cleanup's settings
+  (Chat's stays Chat's). The call reads its warm spare, effort and fallback
+  from it.
+- **The key store's marker in every scope**: `set_provider_key` and
+  `clear_provider_key` keep every scope on a provider in step (one key per
+  provider, a plan's marker in each scope that uses it), so a sign-out takes
+  the plan out of Commands and Note Formatting too, and the ChatGPT plan's
+  likewise.
 - **At start** (`init`): only for someone already on the plan (its marker
-  set, or Chat on it), a look at Claude Code in the background, so a
+  set, or a scope on it), a look at Claude Code in the background, so a
   sign-out since is noticed. Nobody else's Claude Code is started by Yap on
   its own.
 - `claude_plan_status {refresh?}` (Settings' card, Chat's picker; it keeps
@@ -1975,24 +1999,121 @@ deletes it with the chat."
 
 ### Every other call (`claude_plan/oneshot.rs`)
 
-Every call on the Chat model that isn't a Chat turn — memory learning, a long
-chat's summary, the Notes view's and the notepad's Ask, Think, the apps' plan,
-Yap's own fast answers, a snip's question, the Voice Assistant's look at the
-screen — arrives at `llm::post_chat_request` as an OpenAI-shaped request and
-comes here, as the ChatGPT plan's go to `llm/responses.rs`.
+Every plan call that isn't a Chat turn — a dictation's cleanup, a Command, a
+saved transform, a meeting's summary and the notepad's helpers, and on the
+Chat model memory learning, a long chat's summary, the Notes view's and the
+notepad's Ask, Think, the apps' plan, Yap's own fast answers, a snip's
+question, the Voice Assistant's look at the screen — arrives at
+`llm::post_chat_request` as an OpenAI-shaped request and comes here, as the
+ChatGPT plan's go to `llm/responses.rs`. Cleanup's own code doesn't change:
+only where its call goes.
 
 - **Lean**: `--tools ""` (no tools at all), no MCP server
   (`--strict-mcp-config` with none), `--setting-sources ""` (none of the
   person's settings, hooks or CLAUDE.md), in an empty folder of Yap's
-  (`claude\ask\` in the data folder) (`ask_spec`).
+  (`claude\ask\` in the data folder) (`ask_spec`, `call_spec`).
 - **Not saved**: `--no-session-persistence`. Nothing resumes a one-shot
   call, so Claude Code keeps no transcript of it.
-- **Flattened**: its system messages are the prompt (`--system-prompt-file`),
-  the rest one message (the earlier turns in a block, then the question), with
-  that question's pictures as image blocks. Tools a caller offers aren't run:
-  the answer is text.
+- **Flattened**: its system messages are the prompt (`--system-prompt-file`,
+  in place of Claude Code's own), the rest one message (the earlier turns in
+  a block, then the question), with that question's pictures as image
+  blocks. Tools a caller offers aren't run: the answer is text.
+- **A call's own words in its message** (`per_call_parts`): the parts of a
+  system prompt that change with every call — the dictionary words a
+  dictation says (`llm::DICTIONARY_LINE`'s paragraph) and a rewrite's
+  selection (`llm::SELECTION_LINE` to the end) — go just before the
+  question, so the system prompt stays the same from one dictation to the
+  next into one kind of app and a warm spare fits it (below). The model
+  reads the same words.
+- **Effort** (`effort_for_scope`): a Chat call at Chat's choice for the
+  model; a cleanup and a Command at the lowest level the model takes
+  (`--effort low` on Claude 5: a dictation can't wait for thinking; none for
+  a model without levels); Note Formatting at the model's own default (no
+  `--effort`). Only Chat has an effort setting.
+- **Models**: a scope moved onto the plan starts on its first model, Claude
+  Haiku 5.5, the fastest (`MODELS` cheapest first).
+- **No marker, no start**: a call with the key store's marker missing
+  (Claude Code signed out, missing, too old) never starts Claude Code: it's
+  the plan's problem at once (below).
 - **Streamed** to whoever watches (`Delta::Content`, `Reasoning`).
-- At least 60 s, since Claude Code starts first.
+- At least 60 s, since Claude Code starts first. A dictation's cleanup has
+  the bar's "Taking longer than usual…" and Skip cleanup, as any.
+
+### A warm spare per scope (`claude_plan/spare.rs`, 2026-11-07)
+
+Starting `claude -p` costs the start-up before Claude Code reads its first
+message. Measured on this PC (2.1.296): `claude --version` 31–71 ms and
+`--help` 150–270 ms (the bundle alone, no session); a `-p` process's
+`get_usage` answered 1.9 s after its start (verified 7 Nov, the plan's usage
+probe), so a session's start is about 1.5–2 s, the time a dictation's cleanup
+would wait for every time. So for **Dictation Cleanup, Commands and Note
+Formatting** on the plan, Yap keeps **one Claude Code per scope already
+started and waiting on stdin** (stream-json input, the one-shot's own lean
+flags): a call's prompt goes to it at once, and a new spare starts behind it.
+
+- **One call each**: a spare serves exactly one call, then its stdin is
+  closed and it ends. Never a second call in the same process: no dictation
+  sees another's text.
+- **Started for what's coming**: Claude Code reads `--system-prompt-file` as
+  it starts, so a spare is made for the system prompt the scope's last 8
+  calls had most often (the latest of equals; in memory only), with the
+  scope's model and effort (`Key`: model, effort, the prompt's hash). A call
+  takes it only when all three match; any other call (another kind of app's
+  style, another model) runs cold exactly as before, and the next spare
+  follows what's most likely. With the per-call parts moved to the message,
+  dictations into one kind of app always match.
+- **Only while it's wanted** (`wanted`): only while that scope is set to the
+  plan (Dictation Cleanup: cleanup on) and the plan is connected (the
+  marker). Nothing at all the first time after Yap starts (no prompt seen
+  yet): that call runs cold and the first spare starts behind it.
+- **Ended**: idle 10 minutes (`IDLE`, the sweep every 30 s); started again
+  at the next dictation's key press (`warm`, from `load_ai_early`, as the
+  on-device model loads on demand: Dictation Cleanup for a dictation,
+  Commands for a dictation or the rewrite shortcut); on sign-out (`sync`, a
+  call's `NotSignedIn`); when a save takes the scope off the plan or onto
+  another model or effort (`config_changed`, from `apply_config`); when the
+  test stand-in changes (`set_test_program`); when Yap quits
+  (`shutdown_cleanup`; the kill-on-close job ends it anyway).
+- **Quietly replaced**: a spare that died, or won't take the message, is
+  dropped and the call starts its own; a call never waits for a spare. One
+  that wouldn't start: none tried for a minute.
+- **Chat's one-off calls run cold**, as before (its turns have their own
+  warm sessions); Note Formatting's calls are background ones, but a
+  notepad helper is one a person waits for.
+- **No window, no folders of its own**: spawned as every run is (piped,
+  `CREATE_NO_WINDOW`, in the kill-on-close job), in `claude\ask\`, its run
+  folder in `%TEMP%\yap-claude\` named for the run-folder sweep and removed
+  when it ends.
+- **Measured on the stand-in** (`spare::tests::a_spare_hides_claude_codes_start_up`,
+  `YAP_FAKE_CLAUDE_START_MS=1500`): a cold call 1531–1554 ms, the same call
+  on a spare under 1 ms of Yap's own (three runs). With the real Claude Code
+  the model's own time remains; the start-up above is what's saved.
+- Logs: `Claude plan: a one-shot call answered` with `scope`, `warm`
+  (whether a spare served it) and `ms`; spares started, ended and why.
+  Never a prompt.
+
+### If the plan can't answer: the key (opt-in, 2026-11-07)
+
+The API key stays the quickest way for every scope; the plan is the one that
+uses the person's subscription. For Dictation Cleanup, Commands and Note
+Formatting on the plan, Settings offers **"If your plan can't answer, use my
+API key"** (`pp_plan_fallback`, a scope's `plan_fallback`; **off by
+default**: it spends money), shown only on the plan with an Anthropic key
+saved, never for Chat (its limit message has "Use my API key for this chat"
+instead, unchanged).
+
+- **When it's on** (`fallback_key`): a plan call that fails because of the
+  plan (`oneshot::Failure::Plan`: Claude Code signed out or missing, its
+  limit, paying another way, a billing or account problem, a process that
+  won't start or ends before it answers) goes **once** to the Anthropic API
+  on the same model id, as the same request (`llm::post_chat_request` with
+  provider "anthropic"): counted as the key's usage, its receipt Anthropic's.
+  Too slow, or an error the model's request got: not the plan's problem, no
+  fallback.
+- **When it's off**: the call fails as any does. A cleanup falls back to the
+  words as said, as every failed cleanup does; a Command says it couldn't.
+- The log says "Claude plan couldn't answer: this call goes to the Anthropic
+  API key" with the scope, never the words.
 
 ### Usage and cost
 
@@ -2041,8 +2162,14 @@ limits stand, as the Claude desktop app shows them.
   warm session is in a turn: that turn asks after it). An answer with
   nothing to show, a refusal or none at all: no probe for 30 minutes (and a
   session that didn't answer in 5 s isn't asked after a turn for 30
-  minutes: the next question would wait behind it).
-- **Live**: a turn's `rate_limit_event`s move the rows they name
+  minutes: the next question would wait behind it). **Beside a cleanup's, a
+  Command's or a meeting's call** (2026-11-07, `due_with_call`): the call's
+  own process gets `get_usage` right after its message, at most once a
+  minute — no other process, no model call; its answer is read as the call
+  runs or, after the answer, in the background for 5 s (`kept_from_call`;
+  none in time changes nothing). Never one per dictation: the minute's cache
+  as for the page's asks.
+- **Live**: a turn's `rate_limit_event`s (a one-shot call's too) move the rows they name
   (`rateLimitType`, `unifiedWindows`: its utilization is a fraction, 1.0 at
   the limit; rejected is critical, `allowed_warning` at least a warning).
 - **How full the conversation is**: after each plan turn, its last model
@@ -2070,17 +2197,31 @@ Never an answer: the turn says the problem with the buttons that help
 | The plan's limit | "You've reached your Claude plan's limit (resets at 4:00 pm)." | Manage usage (claude.ai's usage page), **Use my API key for this chat** (an Anthropic key saved) |
 | Paying another way | "Claude Code on this PC is set to pay another way…" | — (the process is stopped before it asks anything) |
 
+In the other scopes the same problems are the call's error: a cleanup goes
+in as said, a Command says it couldn't, a summary says what went wrong —
+unless the scope's "If your plan can't answer, use my API key" is on (above).
+The cleanup's banner says "Sign in to Claude Code" with **Sign in** while
+cleanup is on the plan and Claude Code isn't ready.
+
 ### On screen
 
-- **Settings → Language Models → Chat & Voice Assistant → Cloud providers →
-  Claude** (the Anthropic tab, renamed **Claude**): the plan's card first,
-  then the API key (`settings/ClaudePlanProvider.svelte`,
+- **Settings → Language Models → every scope → Cloud providers → Claude**
+  (the Anthropic tab, renamed **Claude**; Dictation Cleanup's on
+  `LanguageModelsPage.svelte`, the others' on `ScopeProviderConfig.svelte`):
+  the plan's card first, then the API key (`settings/ClaudePlanProvider.svelte`,
   [frontend-settings.md](./frontend-settings.md)). The card says what
   Claude Code is here: not installed (its install guide, Check again), too
   old (its version and the one Yap needs), signed in with an API key (not a
   plan), not signed in (**Sign in**), or **Connected · Using Claude plan**
-  (its version and plan, Manage usage, **Use for Chat**), with the plan's
-  usage limits under it, small.
+  (its version and plan, Manage usage, **Use for Chat** / **Use for
+  Commands**…), with the plan's usage limits under it, small. **What each
+  way is** (`WayNote.svelte`), under the switch: "Your Claude plan, through
+  Claude Code on this PC: uses your plan's limits. Expect slightly slower
+  responses." / "Your Anthropic API key: quickest, billed per use." — for
+  Dictation Cleanup and Commands both ways side by side, the one in use
+  marked. The selected model's row says which pays ("Using your Claude
+  plan" / "Anthropic API key"). Off Chat, with an Anthropic key saved and the
+  scope on the plan: **If your plan can't answer, use my API key**.
 - **Chat's usage ring** (`views/chat/PlanUsageRing.svelte`, in place of the
   chip's Manage usage on the plan): filled to the highest active limit's
   percent, coloured by its severity; hover or click opens **Plan
@@ -2109,13 +2250,32 @@ Never an answer: the turn says the problem with the buttons that help
   answer, a refusal, no `limits[]` (the named windows), unknown kinds and
   fields, the body one level up, rate-limit events moving the rows, the
   answer matched by its request id, the fake's `_usage`, the last call's
-  tokens against the turn's sum.
+  tokens against the turn's sum. Every scope (2026-11-07,
+  `claude_plan::tests`, `oneshot::tests`, `spare::tests`): each scope's
+  endpoint on the plan and whose it is, a scope that's off on the cleanup's,
+  the marker out of and back into every scope, the fallback only when the
+  scope says (never Chat's), a call's own words in its message, effort by
+  scope; the spares against the stand-in — one call each in its own process,
+  a new one behind it, another call's or a dead one never used, one that
+  wouldn't start not tried again for a minute, ended when idle, on sign-out
+  and when the scope changes — and the gain measured.
 - E2E: `claude-plan.spec.js` (also: the stand-in keeps the chat's
   transcript in a `CLAUDE_CONFIG_DIR` of the run's own, and deleting the
   chat deletes it, another project's left), `claude-plan-problems.spec.js`,
   `claude-plan-missing.spec.js`, `claude-plan-expired.spec.js`,
   `claude-plan-limit.spec.js`, `claude-plan-usage.spec.js` on the stand-in
-  ([`docs/e2e-tests.md`](../e2e-tests.md)).
+  ([`docs/e2e-tests.md`](../e2e-tests.md)); `claude-plan-scopes.spec.js`
+  (every scope's Claude tab, a dictation cleaned and a Command run on the
+  plan, two dictations on two processes — the second a spare —, usage under
+  "cleanup", spares ended) and `claude-plan-scopes-signed-out.spec.js` (Sign
+  in on the banner and the cards, the fallback off then on, against a fake
+  Anthropic: `YAP_E2E_ANTHROPIC_API`, debug builds only). The ChatGPT plan
+  beyond Chat: `chatgpt.spec.js`.
+- **Needs a real signed-in check**: a cleanup and a Command on the real
+  plan (the answer, `--effort low` on Haiku 5.5, the time it takes with a
+  spare), `get_usage` sent beside a message on the same process (answered
+  mid-turn, after it, or not at all with stdin closed), and a spare left
+  waiting 10 minutes (Claude Code's own idle behaviour).
 - **On a real signed-in run** (2026-11-07): a plan chat answered, and the
   plan's usage limits matched Anthropic's own figures. **Not yet confirmed**:
   the stream's finer shapes (one `assistant` event per block, ids, WebSearch

@@ -32,6 +32,7 @@
   // running job's permission prompts for this chat — each in a small chunk.
   import { jobs, jobById } from '../../stores/jobs.svelte.js';
   import { pillsByAnswer } from '../../core/jobs.js';
+  import { chatStatus } from '../../stores/chatStatus.svelte.js';
 
   const jobPills = $derived(pillsByAnswer(jobs.list, chat.activeId, chat.messages));
   const asks = $derived(chat.activeId == null ? [] : jobs.approvals.filter((a) => a.conversation === chat.activeId));
@@ -48,6 +49,14 @@
 
   // The answer's words have begun (a slow start's hint goes).
   const answering = $derived(chat.messages.some((m) => m.streaming && m.text));
+  // Another chat is answering too (Rust's list, stores/chatStatus.svelte.js):
+  // a model on this PC shares itself between them, so a slow start says so.
+  const othersAnswering = $derived(chatStatus.answering.some((id) => id !== String(chat.activeId)));
+  const slowHint = $derived(
+    othersAnswering
+      ? 'Still working: the model runs on this PC and is answering another chat too, so this can take a minute.'
+      : 'Still working: the model runs on this PC, so this can take a minute.'
+  );
 
   // Show summary's button, the focus's way back when its dialog closes.
   let summaryBtn = $state(null);
@@ -246,15 +255,14 @@
             <JobApprove approvals={asks} onopen={openRun} />
           {/await}
         {/if}
-        {#if chat.sending || (chat.assistantPending != null && chat.assistantPending === chat.activeId)}
-          <!-- What the turn is doing now, with its time (chat/activity.rs). -->
+        {#if chat.answeringHere}
+          <!-- What this conversation's turn is doing now, with its time
+               (chat/activity.rs): never another chat's. -->
           <ActivityLine
             step={chat.activity}
             waiting={chat.activityWaiting}
             seconds={chat.waitedS}
-            hint={chat.modelHere && !answering && chat.waitedS >= STILL_WORKING_S
-              ? 'Still working: the model runs on this PC, so this can take a minute.'
-              : ''}
+            hint={chat.modelHere && !answering && chat.waitedS >= STILL_WORKING_S ? slowHint : ''}
           />
         {/if}
       </div>

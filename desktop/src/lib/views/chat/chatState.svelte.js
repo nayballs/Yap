@@ -5,6 +5,9 @@
 // question replacing one still being answered), a question asked out loud
 // (the Voice Assistant), Snip to Chat's screenshots and whether the model
 // reads them, spoken replies, and several conversations picked at once.
+// An answer being written belongs to its conversation (`Answer`, 7 Nov
+// 2026): several can be answering at once, and the thread and the composer
+// show the open one's only.
 import { invoke } from '@tauri-apps/api/core';
 import { tick, untrack } from 'svelte';
 import { toast } from '../../ui/toast.svelte.js';
@@ -25,7 +28,7 @@ import { think, takeThink } from './chatThink.svelte.js';
 import { createDocPanel } from './chatDoc.svelte.js';
 // Chat's status dots (stores/chatStatus.svelte.js): the list as read here,
 // and the ask-first cards waiting in a turn (needs you).
-import { tookList, cardAsked, turnOver } from '../../stores/chatStatus.svelte.js';
+import { chatStatus, tookList, cardAsked, turnOver } from '../../stores/chatStatus.svelte.js';
 
 // The sources an answer's citations point at: its own, else — a follow-up
 // that cites "[1]" from an earlier answer without searching again ("the
@@ -37,6 +40,84 @@ const CITES = /\[\d{1,2}(?:\s*,\s*\d{1,2})*\]/;
 // can take a minute (Rust gives it 2 minutes, llm::LOCAL_CHAT_TIMEOUT),
 // which a bare "Thinking…" makes look hung.
 export const STILL_WORKING_S = 8;
+
+// A turn's events for the panel beside the chat (chatState's `docEvent`):
+// its conversation's, so only while that one is open.
+const PANEL_EVENTS = new Set(['page', 'offer', 'picture', 'document', 'section', 'job']);
+
+/** `have` with the pictures in `more` it hasn't got (by id); `have` itself when none are new. */
+function withImages(have, more) {
+  if (!more?.length) return have;
+  const ids = new Set((have || []).map((i) => i?.id));
+  const added = more.filter((i) => i?.id && !ids.has(i.id));
+  return added.length ? [...(have || []), ...added] : have;
+}
+
+/**
+ * **An answer being written, in its own conversation** (2026-11-07): this
+ * view's typed question's, or a question asked out loud (the Voice
+ * Assistant, a phone) that the view follows. Several conversations can be
+ * answering at once — Rust ends a turn only for a newer question in its
+ * own conversation (chat/stream.rs `Stoppable::answers`) —, so each keeps
+ * its own: its question, the answer so far, what it's doing and since when,
+ * its ■. The thread shows the open conversation's only; opened again, it
+ * picks up where it is.
+ */
+class Answer {
+  /** Its conversation (null: a new chat's, until its question makes it). */
+  conv = $state(null);
+  /** What it's doing now (chat/activity.rs `step`), and a dictation being waited out. */
+  step = $state(null);
+  waiting = $state(false);
+  /** Its ■ was pressed. */
+  stopping = $state(false);
+
+  constructor({ conv = null, turn = null, spoken = false, view = 0, askedId = null, question = null }) {
+    this.conv = conv;
+    // This view's send number (a typed question: its question and bubble carry it), or null.
+    this.turn = turn;
+    // Asked out loud (the Voice Assistant, a phone): its bubble is `spoken`.
+    this.spoken = spoken;
+    // The new chat it was asked in (`viewSeq`), while it has no conversation.
+    this.view = view;
+    // Its question as saved ("chat:<conversation>:<index>"), once it is.
+    this.askedId = askedId;
+    // The question as it was sent: shown until the conversation's read back with it.
+    this.question = question;
+    this.since = Date.now();
+    this.live = liveAnswer();
+    // What it showed so far, for its bubble when its conversation opens again:
+    // the ask-first cards, the documents, pictures, pages and buttons, the screen it looked at.
+    this.confirms = null;
+    this.docs = [];
+    this.pictures = [];
+    this.pages = [];
+    this.offers = [];
+    this.screens = [];
+    this.pagesShown = new Set();
+    // Its ■ and its "a newer question replaces it" (streamCall's), a typed one's.
+    this.stop = null;
+    this.supersede = null;
+  }
+
+  /** What it showed beside the chat, kept for its bubble (a page, a button, a picture, a document). */
+  collect(ev) {
+    if (ev?.kind === 'picture' && ev.picture?.id && !this.pictures.some((p) => p.id === ev.picture.id)) this.pictures = [...this.pictures, ev.picture];
+    if (ev?.kind === 'page' && ev.page?.url && !this.pages.some((p) => p.url === ev.page.url)) this.pages = [...this.pages, ev.page];
+    if (ev?.kind === 'offer' && ev.offer?.url && !this.offers.some((o) => o.url === ev.offer.url)) this.offers = [...this.offers, ev.offer];
+    if (ev?.kind === 'document' && ev.noteId != null) {
+      const d = { id: ev.noteId, title: ev.title };
+      this.docs = this.docs.some((x) => x.id === d.id) ? this.docs.map((x) => (x.id === d.id ? d : x)) : [...this.docs, d];
+    }
+  }
+
+  /** The step's line and the dictation waited out, from the answer so far. */
+  took(ev) {
+    this.live = applyEvent(this.live, ev);
+    this.step = this.live.step;
+    this.waiting = this.live.waiting;
+  }
+}
 
 /**
  * One Chat view's state. Call it while the view is made (its effects belong
@@ -120,22 +201,70 @@ export function createChatState({ onopensettings = () => null, onopennote = () =
   // this…"): `{noteId, title, text, fromLine, toLine, mode}`, quoted over the
   // box and sent with the next question (chat_send's `selection`).
   let quote = $state(null);
-  let sending = $state(false);
-  // The ■ of the answer being written (streamCall's stop), and whether it
-  // was pressed; and its "a newer question replaces it" (streamCall's
-  // supersede).
-  let stopAnswerCall = null;
-  let supersedeAnswerCall = null;
-  let stopping = $state(false);
+
+  // ---- Answers being written, each in its own conversation (`Answer`)
+  // By conversation id (a new chat's typed question: "new:<turn>" until its
+  // question makes the conversation).
+  let turns = $state({});
+  // Numbers the new chats shown (`newChat`): a new chat's question, before
+  // its conversation is made, belongs to the new chat it was asked in.
+  let viewSeq = $state(0);
+  const keyOf = (rec) => (rec.conv != null ? String(rec.conv) : `new:${rec.turn}`);
+  function setTurn(rec) {
+    turns[keyOf(rec)] = rec;
+  }
+  /** `rec` is over: out of the list (unless a newer one there replaced it already). */
+  function dropTurn(rec) {
+    const k = keyOf(rec);
+    if (turns[k] === rec) delete turns[k];
+  }
+  /** `rec`'s conversation was made (a new chat's first question saved): kept under its id. */
+  function adopt(rec, conv) {
+    if (rec.conv === conv) return;
+    dropTurn(rec);
+    rec.conv = conv;
+    setTurn(rec);
+  }
+  /** `rec`'s conversation is the one open (a new chat's: the new chat it was asked in). */
+  const isShown = (rec) => (rec.conv != null ? activeId === rec.conv : activeId == null && rec.view === viewSeq);
+  /** **The open conversation's answer being written**, if any: the only one the thread and the composer show. */
+  const here = $derived.by(() => {
+    if (activeId != null) return turns[String(activeId)] ?? null;
+    for (const r of Object.values(turns)) if (r.conv == null && r.view === viewSeq) return r;
+    return null;
+  });
+  // The open conversation's typed question is being answered: Enter waits
+  // (type ahead), Send is ■. (Another conversation answering never holds
+  // this one up: Rust answers each in its own turn.)
+  const sending = $derived(!!here && !here.spoken);
+  const stopping = $derived(!!here?.stopping);
   // An answer is being written in the thread (its bubble shows, not "Thinking…").
   const streaming = $derived(messages.some((m) => m.streaming));
   // The Voice Assistant's phase (`yap-assistant`: idle, listening, thinking,
-  // speaking). While it thinks or answers (or an answer of its is still
-  // being written here), ■ and Esc stop it, voice and all.
+  // speaking) and the conversation its question went to. While it thinks or
+  // speaks in the open conversation (or an answer asked out loud is still
+  // being written there), ■ and Esc stop it, voice and all; in another
+  // conversation, nothing of it shows here.
   let assistantPhase = $state('idle');
+  let assistantConv = $state(null);
   const assistantAnswering = $derived(
-    assistantPhase === 'thinking' || assistantPhase === 'speaking' || messages.some((m) => m.streaming && m.spoken)
+    !!here?.spoken ||
+      ((assistantPhase === 'thinking' || assistantPhase === 'speaking') && assistantConv != null && assistantConv === activeId) ||
+      messages.some((m) => m.streaming && m.spoken)
   );
+  /** `yap-assistant`'s payload (or `assistant_phase`'s; a bare phase from before). */
+  function setAssistant(v) {
+    if (v == null || typeof v === 'string') {
+      assistantPhase = v || 'idle';
+      return;
+    }
+    assistantPhase = v.phase || 'idle';
+    assistantConv = v.conversationId ?? null;
+  }
+  /** Where the Voice Assistant is now, read again (its question's conversation, once it's chosen). */
+  function refreshAssistant() {
+    invoke('assistant_phase').then(setAssistant).catch(() => {});
+  }
   let inputEl = $state(null);
   let threadEl = $state(null);
   // The thread's scrollbar's width now (ChatThread measures it, 0 without
@@ -195,9 +324,9 @@ export function createChatState({ onopensettings = () => null, onopennote = () =
   // What's in the box came (at least partly) by voice: the question is
   // "asked by voice" (chat_send `voice`).
   let byVoice = false;
-  // A hands-free question arrived while an answer was still coming: sent
-  // once it's in.
-  let sendWhenFree = false;
+  // A hands-free question arrived while the open conversation's answer was
+  // still coming: sent once that one (this `Answer`) is over.
+  let sendWhenFree = null;
   // Numbers this view's sends (their question and bubble carry it: `turn`).
   let sendSeq = 0;
   let alive = true;
@@ -207,10 +336,8 @@ export function createChatState({ onopensettings = () => null, onopennote = () =
   let assistantHotkey = $state('');
   // Chat's model is set up (ai_model_status; re-read on every config save).
   let chatReady = $state(true);
-  // The conversation whose spoken question is being answered ("Thinking…"),
-  // and that question's id ("chat:<conversation>:<index>").
-  let assistantPending = $state(null);
-  let assistantTurn = null;
+  // The open conversation, while a question asked out loud is being answered there ("Thinking…").
+  const assistantPending = $derived(here?.spoken ? here.conv : null);
   // A spoken question is being listened for (`yap-assistant`): Esc here
   // calls it off (the screenshot stays in the box).
   let assistantListening = $state(false);
@@ -218,13 +345,16 @@ export function createChatState({ onopensettings = () => null, onopennote = () =
   // rather than continuing the last one.
   let choseNew = false;
 
-  let waitedS = $state(0);
   let modelHere = $state(false);
-  // What the turn shown is doing now (chat/activity.rs `step` events): the
-  // line at the thread's foot (ActivityLine.svelte), beside `waitedS`. None
-  // yet: "Thinking". `activityWaiting`: a dictation is being waited out.
-  let activity = $state(null);
-  let activityWaiting = $state(false);
+  // What the open conversation's answer is doing now (chat/activity.rs
+  // `step` events): the line at the thread's foot (ActivityLine.svelte),
+  // beside how long it's taken so far (`waitedS`, from when it was asked:
+  // opened again mid-answer, the time goes on). None yet: "Thinking".
+  // `activityWaiting`: a dictation is being waited out.
+  const activity = $derived(here?.step ?? null);
+  const activityWaiting = $derived(!!here?.waiting);
+  let clock = $state(Date.now());
+  const waitedS = $derived(here ? Math.max(0, Math.floor((clock - here.since) / 1000)) : 0);
   // Goes up when an answer (or a question) lands: the context ring reads
   // the conversation's use again (ContextRing.svelte, `chat_context`).
   let contextStamp = $state(0);
@@ -295,20 +425,109 @@ export function createChatState({ onopensettings = () => null, onopennote = () =
     });
   }
   $effect(() => {
-    const busy = sending || (assistantPending != null && assistantPending === activeId);
-    if (!busy) {
-      waitedS = 0;
-      return;
-    }
-    const started = Date.now();
+    if (!here) return;
     invoke('ai_model_status', { scope: 'chat' })
       .then((s) => (modelHere = !!s?.model?.onThisPc))
       .catch(() => {});
-    const timer = setInterval(() => (waitedS = Math.floor((Date.now() - started) / 1000)), 1000);
+    clock = Date.now();
+    const timer = setInterval(() => (clock = Date.now()), 1000);
     return () => clearInterval(timer);
   });
 
   const chatId = (conv, i) => `chat:${conv}:${i}`;
+
+  // ---- An answer's place in the thread (its conversation open)
+
+  /** Its question's index in the thread (-1: not there). */
+  function questionAt(rec) {
+    if (rec.turn != null) {
+      const i = messages.findIndex((m) => m.turn === rec.turn && m.role === 'user');
+      if (i >= 0) return i;
+    }
+    return rec.askedId ? messages.findIndex((m) => m.id === rec.askedId && m.role === 'user') : -1;
+  }
+  /** Its bubble's index in the thread (-1: none yet). */
+  const bubbleAt = (rec) =>
+    rec.spoken
+      ? messages.findLastIndex((m) => m.streaming && m.spoken)
+      : messages.findIndex((m) => m.turn === rec.turn && m.role === 'assistant');
+  /**
+   * Something to show in its bubble yet: text or a tool call — and for a
+   * typed question also a dictation waited out, its thinking, a card —;
+   * until then the line at the foot says "Thinking".
+   */
+  const hasBubble = (rec) => rec.live.started || (!rec.spoken && (rec.live.waiting || !!rec.live.thinking || !!rec.confirms?.length));
+  /** Its bubble as the answer is now. */
+  function bubbleOf(rec) {
+    const l = rec.live;
+    const b = { role: 'assistant', streaming: true, text: l.text, tools: l.chips, doing: l.doing, liveSources: l.sources, waiting: l.waiting, liveThinking: l.thinking, id: null };
+    if (rec.spoken) b.spoken = true;
+    else b.turn = rec.turn;
+    if (rec.confirms?.length) b.confirms = rec.confirms;
+    if (rec.docs.length) b.liveDocs = rec.docs;
+    if (rec.pictures.length) b.livePictures = rec.pictures;
+    if (rec.pages.length) b.livePages = rec.pages;
+    if (rec.offers.length) b.liveOffers = rec.offers;
+    return b;
+  }
+  /** Its conversation open: its bubble drawn as the answer is now (made once there's something to show). */
+  function paint(rec) {
+    if (!isShown(rec)) return;
+    const at = bubbleAt(rec);
+    if (at < 0) {
+      if (!hasBubble(rec)) return;
+      // (A typed answer hangs on its question.)
+      if (!rec.spoken && questionAt(rec) < 0) return;
+      messages = [...messages, bubbleOf(rec)];
+    } else {
+      const m = messages[at];
+      if (!m?.streaming) return;
+      const l = rec.live;
+      m.text = l.text;
+      m.tools = l.chips;
+      m.doing = l.doing;
+      m.liveSources = l.sources;
+      m.waiting = l.waiting;
+      m.liveThinking = l.thinking;
+      if (rec.confirms) m.confirms = rec.confirms;
+    }
+    followThread();
+  }
+  /** The screen the model looked at (look_at_screen): with its question, as its screenshots are. */
+  function lookedAt(rec, images) {
+    rec.screens = withImages(rec.screens, images) || [];
+    if (!isShown(rec)) return;
+    const qi = questionAt(rec);
+    if (qi < 0) return;
+    const next = withImages(messages[qi].images, images);
+    if (next !== messages[qi].images) messages = messages.map((m, i) => (i === qi ? { ...m, images: next } : m));
+  }
+
+  /**
+   * **Conversation `id`'s saved messages as the thread shows them**, with its
+   * answer being written (if any) in place: its question — marked as the
+   * turn's, or as it was sent while it isn't saved yet — and the answer so
+   * far after it. Opened again mid-answer, it picks up where it is: the text
+   * so far and the line, nothing twice.
+   */
+  function withLive(id, saved) {
+    const list = (saved || []).map((m, i) => ({ ...m, id: chatId(id, i) }));
+    const rec = turns[String(id)];
+    if (!rec) return list;
+    let qi = rec.askedId ? list.findIndex((m) => m.id === rec.askedId && m.role === 'user') : -1;
+    // (Saved, but its id not told yet: the question at the end, as sent.)
+    if (qi < 0 && !rec.askedId && rec.question && list.at(-1)?.role === 'user' && list.at(-1).text === rec.question.text) qi = list.length - 1;
+    // Its answer saved already (read as it landed): as saved.
+    if (qi >= 0 && list[qi + 1]?.role === 'assistant') return list;
+    if (qi < 0) {
+      if (!rec.question) return list;
+      list.push({ ...rec.question });
+      qi = list.length - 1;
+    }
+    list[qi] = { ...list[qi], ...(rec.turn != null ? { turn: rec.turn } : {}), images: withImages(list[qi].images, rec.screens) };
+    if (hasBubble(rec)) list.push(bubbleOf(rec));
+    return list;
+  }
 
   // ---- Snip to Chat
 
@@ -442,9 +661,9 @@ export function createChatState({ onopensettings = () => null, onopennote = () =
     }
     if (p?.send && input.trim()) {
       if (sending) {
-        // A newer question while the answer comes: it replaces that one
-        // (nothing saved for it), and goes as soon as it has.
-        sendWhenFree = true;
+        // A newer question while this chat's answer comes: it replaces that
+        // one (nothing saved for it), and goes as soon as it has.
+        sendWhenFree = here;
         replaceAnswer();
       } else send();
     } else {
@@ -483,7 +702,10 @@ export function createChatState({ onopensettings = () => null, onopennote = () =
   async function selectConversation(id) {
     if (id === activeId) return;
     try {
-      const conv = await invoke('chat_get', { id });
+      const answering = !!turns[String(id)];
+      let conv = await invoke('chat_get', { id });
+      // Its answer landed while it was read: read again, so the thread has it.
+      if (answering && !turns[String(id)]) conv = await invoke('chat_get', { id });
       stopReading();
       // Another conversation: its documents and pictures are its own (their
       // pills reopen the panel, its tabs with it).
@@ -494,22 +716,44 @@ export function createChatState({ onopensettings = () => null, onopennote = () =
       summary = conv.summary ?? null;
       showingSummary = false;
       tooLong = '';
-      messages = (conv.messages || []).map((m, i) => ({ ...m, id: chatId(id, i) }));
+      // (Answering still: its question and the answer so far, where they were.)
+      messages = withLive(id, conv.messages);
       scrollThread();
     } catch (e) {
       toast({ title: "Couldn't open conversation", description: String(e), variant: 'destructive' });
     }
   }
 
-  // Every chat screenshot deleted (Settings → Privacy & data): the open
-  // conversation read again, its pictures now "removed" (not mid-answer).
+  // The open conversation answered by a turn this view doesn't follow (one
+  // asked before Chat was last opened, a job's report): read again once
+  // Rust says it's done (`yap-chat-answering`), so its answer shows.
+  // (`{id, followed}`: the open conversation while Rust lists it answering,
+  // and whether that's a turn this view follows — its own `Answer`.)
+  let answeringSeen = null;
+  $effect(() => {
+    const id = activeId;
+    const listed = id != null && chatStatus.answering.includes(String(id));
+    untrack(() => {
+      const was = answeringSeen?.id === id ? answeringSeen : null;
+      if (listed) {
+        answeringSeen = { id, followed: !!here || !!was?.followed };
+        return;
+      }
+      answeringSeen = null;
+      if (was && !was.followed && !here && alive) reloadActive();
+    });
+  });
+
+  // Every chat screenshot deleted (Settings → Privacy & data), a job's
+  // report landing: the open conversation read again (not while its own
+  // typed question is answered; another chat's answering never holds it up).
   async function reloadActive() {
     if (activeId == null || sending) return;
     const id = activeId;
     try {
       const conv = await invoke('chat_get', { id });
       if (activeId === id) {
-        messages = (conv.messages || []).map((m, i) => ({ ...m, id: chatId(id, i) }));
+        messages = withLive(id, conv.messages);
         summary = conv.summary ?? null;
       }
     } catch {
@@ -585,6 +829,8 @@ export function createChatState({ onopensettings = () => null, onopennote = () =
     doc.reset();
     quote = null;
     activeId = null;
+    // Another new chat: a question still being asked in the last one is that one's.
+    viewSeq += 1;
     messages = [];
     summary = null;
     showingSummary = false;
@@ -671,89 +917,106 @@ export function createChatState({ onopensettings = () => null, onopennote = () =
     });
   });
 
-  // A question asked with the assistant shortcut (chat/assistant.rs): this view
-  // switches to its conversation and shows it as it goes — the question at
-  // once, "Thinking…" while the answer comes, then the answer (read aloud by
-  // Rust). Never stops the voice: it's the answer being followed.
-  // A spoken question's answer as it's written (chat/assistant.rs): it grows at
-  // the end of its conversation while that's the one shown.
-  let assistantLive = liveAnswer();
-  // The pages the spoken question's turn showed live beside the chat (a
-  // page Yap opened at once, before this view had a new conversation, is
-  // shown when its answer lands: `followAssistant`).
-  let assistantPagesShown = new Set();
+  // A question asked with the assistant shortcut (chat/assistant.rs), or on a
+  // paired phone: this view switches to its conversation as it's asked and
+  // shows it as it goes — the question at once, "Thinking…" while the answer
+  // comes, then the answer (read aloud by Rust). Never stops the voice: it's
+  // the answer being followed. Each is an `Answer` in its own conversation
+  // (`spoken`): left for another chat, its answer goes on being written
+  // there, shown again when that one opens, and lands there — the view never
+  // switches back for it.
+
   // The spoken answer's own bubble (`spoken`: never this view's own send's).
   const spokenAt = () => messages.findLastIndex((m) => m.streaming && m.spoken);
-  // An event about the spoken question this view follows (one without an
-  // id, as before, counts).
-  const followed = (p) => !p?.userMessageId || !assistantTurn || p.userMessageId === assistantTurn;
+  // The spoken question being answered in conversation `id`, if any.
+  const spokenIn = (id) => (id != null && turns[String(id)]?.spoken ? turns[String(id)] : null);
+  // An event about that question (one without an id, as before, counts):
+  // an older one a newer question there replaced is left alone, so its
+  // events never land in the newer one's bubble.
+  const followedBy = (rec, p) => !p?.userMessageId || !rec.askedId || p.userMessageId === rec.askedId;
+
   function followAssistantStream(p) {
     const id = p?.conversationId;
     // An ask-first card in a spoken question's turn waits on the person (the status dots).
     if (p?.event?.kind === 'confirm') cardAsked(id, p.event);
-    if (id == null || id !== activeId || assistantPending !== id || !followed(p)) return;
-    if (p.event?.kind === 'page' && p.event.page?.url) assistantPagesShown.add(p.event.page.url);
+    const rec = spokenIn(id);
+    if (!alive || !rec || !followedBy(rec, p)) return;
+    const ev = p.event;
+    const shown = isShown(rec);
+    // (A page Yap opened before this view had a new conversation is shown when its answer lands.)
+    if (ev?.kind === 'page' && ev.page?.url && shown) rec.pagesShown.add(ev.page.url);
     // The screen the model looked at (look_at_screen): with the question
     // asked out loud, as a typed question's are.
-    if (p.event?.kind === 'screen' && Array.isArray(p.event.images) && p.event.images.length) {
-      const qi = messages.findIndex((m) => m.id === assistantTurn);
-      if (qi >= 0) {
-        const have = new Set((messages[qi].images || []).map((i) => i.id));
-        const added = p.event.images.filter((i) => i?.id && !have.has(i.id));
-        if (added.length) messages = messages.map((m, i) => (i === qi ? { ...m, images: [...(m.images || []), ...added] } : m));
-      }
+    if (ev?.kind === 'screen' && Array.isArray(ev.images) && ev.images.length) {
+      lookedAt(rec, ev.images);
       return;
     }
-    // A document asked for out loud: the panel shows it filling.
-    const spoken = spokenAt();
-    if (docEvent(p.event, spoken >= 0 ? messages[spoken] : null)) return;
-    assistantLive = applyEvent(assistantLive, p.event);
-    // The line at the thread's foot: what it's doing now.
-    activity = assistantLive.step;
-    activityWaiting = assistantLive.waiting;
-    let at = spokenAt();
-    if (at < 0) {
-      if (!assistantLive.started) return;
-      messages = [...messages, { role: 'assistant', streaming: true, spoken: true, text: '', tools: [], id: null }];
-      at = messages.length - 1;
+    rec.collect(ev);
+    // A document asked for out loud: the panel shows it filling (its conversation open).
+    if (PANEL_EVENTS.has(ev?.kind) || ev?.kind === 'tool') {
+      if (shown) {
+        const at = bubbleAt(rec);
+        if (docEvent(ev, at >= 0 ? messages[at] : null)) return;
+      } else if (ev.kind !== 'tool') return;
     }
-    const last = messages[at];
-    last.text = assistantLive.text;
-    last.tools = assistantLive.chips;
-    last.doing = assistantLive.doing;
-    last.liveSources = assistantLive.sources;
-    last.waiting = assistantLive.waiting;
-    followThread();
+    rec.took(ev);
+    paint(rec);
   }
 
   async function followAssistant(p) {
-    const id = p?.conversationId;
-    if (p?.phase === 'asked') {
-      assistantPending = id ?? null;
-      assistantTurn = p.userMessageId ?? null;
-      assistantLive = liveAnswer();
-      assistantPagesShown = new Set();
-      activity = null;
-      activityWaiting = false;
-    } else if (['answered', 'failed', 'superseded'].includes(p?.phase)) {
+    const id = p?.conversationId ?? null;
+    const phase = p?.phase;
+    // The pages its answer showed live beside the chat.
+    let pagesShown = new Set();
+    if (phase === 'asked') {
+      if (id != null) {
+        // Its own `Answer` (a newer question there replaces the one it
+        // answered: chat/stream.rs); its question as said, until it's read back.
+        setTurn(
+          new Answer({
+            conv: id,
+            spoken: true,
+            askedId: p.userMessageId ?? null,
+            question: p.text ? { role: 'user', text: p.text, voice: true, id: p.userMessageId ?? null } : null,
+          })
+        );
+        // The Voice Assistant's ■ is for its question's conversation (a phone's isn't its).
+        if (assistantPhase === 'thinking') refreshAssistant();
+      }
+    } else if (phase === 'answered' || phase === 'failed' || phase === 'superseded') {
+      const rec = spokenIn(id);
       // An older question a newer one replaced ends after the newer was
       // asked: the newer one stays pending.
-      if (!followed(p)) return;
+      if (rec && !followedBy(rec, p)) return;
+      if (rec) {
+        pagesShown = rec.pagesShown;
+        dropTurn(rec);
+      }
       turnOver(id);
-      assistantPending = null;
-      assistantTurn = null;
-      doc.turnEnded();
-    }
-    if (p?.phase === 'superseded') {
-      // No answer was saved for it: its bubble goes, its question stays.
-      // (Nothing to read back: the newer question's events show the rest.)
-      messages = messages.filter((m) => !(m.streaming && m.spoken));
-      return;
+      if (id != null && activeId === id) doc.turnEnded();
+      if (phase === 'superseded') {
+        // No answer was saved for it: its bubble goes, its question stays.
+        // (Nothing to read back: the newer question's events show the rest.)
+        if (id != null && activeId === id) messages = messages.filter((m) => !(m.streaming && m.spoken));
+        return;
+      }
     }
     if (id == null) return;
+    // The view follows a question as it's asked (and the bar's Open in
+    // Chat); an answer landing in another chat stays there (its dot says
+    // so), never pulling you away from the one you're reading.
+    const follows = phase === 'asked' || phase === 'open';
+    if (!follows && activeId !== id) {
+      refreshList();
+      return;
+    }
     try {
       const conv = await invoke('chat_get', { id });
       if (!alive) return;
+      if (!follows && activeId !== id) {
+        refreshList();
+        return;
+      }
       const switched = activeId !== id;
       if (switched) {
         // Another conversation: the panel's documents and pictures were the last one's.
@@ -762,46 +1025,45 @@ export function createChatState({ onopensettings = () => null, onopennote = () =
         scope = conv.scope || null;
       }
       summary = conv.summary ?? null;
-      // The answer that streamed here, replaced by the saved (checked) one
-      // (only an answer: a newer question's arrival replaces nothing).
-      const streamedAt = p?.phase === 'answered' ? spokenAt() : -1;
-      const streamed = streamedAt >= 0 ? messages[streamedAt].text : null;
-      const fromHeight = streamingHeight(threadEl);
-      messages = (conv.messages || []).map((m, i) => ({
-        ...m,
-        id: chatId(id, i),
-        revisedFrom: i === streamedAt && streamed && streamed.trim() !== m.text.trim() ? fromHeight : 0,
-      }));
-      // A page the answer opened whose live event came before this view had
-      // the conversation ("open YouTube" out loud into a new chat: Yap opens
-      // it at once): the panel shows it now.
-      if (p?.phase === 'answered') {
-        const answer = messages.at(-1);
-        if (answer?.role === 'assistant') for (const pg of answer.pages || []) if (pg?.url && !assistantPagesShown.has(pg.url)) doc.showPage(pg);
-      }
       // Its answer is saved already: a quick one's "answered" came while this
       // view was still opening for the question (ControlPanel brought Chat up
       // on "asked", before this view listened), and it'd say "Thinking" for
       // good. The saved answer after the question ends the wait.
-      if (p?.phase === 'asked' && assistantPending === id && assistantTurn === p.userMessageId) {
+      if (phase === 'asked') {
+        const rec = spokenIn(id);
         const at = Number(String(p.userMessageId ?? '').split(':').pop());
-        if (Number.isInteger(at) && conv.messages?.[at + 1]?.role === 'assistant') {
-          assistantPending = null;
-          assistantTurn = null;
+        if (rec && rec.askedId === p.userMessageId && Number.isInteger(at) && conv.messages?.[at + 1]?.role === 'assistant') {
+          dropTurn(rec);
           doc.turnEnded();
         }
+      }
+      // The answer that streamed here, replaced by the saved (checked) one
+      // (only an answer: a newer question's arrival replaces nothing).
+      const streamedAt = phase === 'answered' ? spokenAt() : -1;
+      const streamed = streamedAt >= 0 ? messages[streamedAt].text : null;
+      const fromHeight = streamingHeight(threadEl);
+      messages = withLive(id, conv.messages).map((m, i) => ({
+        ...m,
+        revisedFrom: i === streamedAt && streamed && streamed.trim() !== String(m.text ?? '').trim() ? fromHeight : 0,
+      }));
+      // A page the answer opened whose live event came before this view had
+      // the conversation ("open YouTube" out loud into a new chat: Yap opens
+      // it at once): the panel shows it now.
+      if (phase === 'answered') {
+        const answer = messages.at(-1);
+        if (answer?.role === 'assistant') for (const pg of answer.pages || []) if (pg?.url && !pagesShown.has(pg.url)) doc.showPage(pg);
       }
       refreshList();
       // The question asked out loud (the person's own), another conversation
       // brought up, the bar's Open in Chat: at its newest. Its answer
       // landing: followed only if the thread is (never a yank to the bottom
       // while you read further up).
-      if (switched || p?.phase === 'asked' || p?.phase === 'open') scrollThread();
+      if (switched || phase === 'asked' || phase === 'open') scrollThread();
       else followThread();
       contextStamp += 1;
       // The bar's Open in Chat on an answer that made a document (or showed
       // a picture): it opens too.
-      const last = p?.phase === 'open' ? messages.at(-1) : null;
+      const last = phase === 'open' ? messages.at(-1) : null;
       const made = last?.documents?.at(-1);
       if (made) doc.show(made.id, { title: made.title });
       else if (last?.pictures?.length) doc.showPicture(last.pictures.at(-1));
@@ -990,35 +1252,17 @@ export function createChatState({ onopensettings = () => null, onopennote = () =
     const turn = ++sendSeq;
     // (Words from a page beside the chat: quoted as a selection, its site named.)
     const sentQuote = about ? (about.page ? { noteId: 0, text: about.text, app: about.page.site || about.page.title || '' } : { noteId: about.noteId, text: about.text }) : null;
-    messages = [...messages, { role: 'user', text, voice, id: null, turn, images: shots, quote: sentQuote }];
-    const firstAt = messages.length - 1;
-    const mine = (role) => messages.findIndex((m) => m.turn === turn && m.role === role);
-    const questionAt = () => {
-      const i = mine('user');
-      return i >= 0 ? i : firstAt;
-    };
-    // The conversation the question went to (a new chat's: from its `turn`
-    // event). Another one opened while the answer came (a click in the
-    // list, New chat): the one shown is left as it is — its messages are
-    // another conversation's, never this answer's place.
-    let sentTo = activeId;
-    const away = (conv) => mine('user') < 0 && (conv == null || activeId !== conv);
-    let askedId = null;
-    sending = true;
-    stopping = false;
+    const question = { role: 'user', text, voice, id: null, turn, images: shots, quote: sentQuote };
+    messages = [...messages, question];
+    // **The answer, in its own conversation** (`Answer`): a new chat's is
+    // that new chat's until its question makes the conversation. Another
+    // conversation opened while it's written (a click in the list, New
+    // chat): the one shown is left as it is, and this one goes on being
+    // written — shown again, where it is, when its conversation opens; it
+    // lands there.
+    const rec = new Answer({ conv: activeId, turn, view: viewSeq, question });
+    setTurn(rec);
     scrollThread();
-    // The answer as it's written: its bubble appears with the first text
-    // or tool call and grows in place.
-    let live = liveAnswer();
-    let made = false;
-    // The pictures this turn showed (`picture` events): its pills, should
-    // the reply not list them.
-    let shownPictures = [];
-    // The pages it brought up and the buttons it offered (chat/pages.rs): the same.
-    let shownPages = [];
-    let shownOffers = [];
-    activity = null;
-    activityWaiting = false;
     // The conversation it went to, for the status dots: an ask-first card
     // waiting there is "needs you", even once Chat is left.
     let cardsIn = activeId;
@@ -1027,23 +1271,21 @@ export function createChatState({ onopensettings = () => null, onopennote = () =
       if (ev?.kind === 'confirm') cardAsked(cardsIn, ev);
       if (!alive) return;
       if (ev?.kind === 'turn') {
-        askedId = ev.userMessageId ?? null;
-        if (ev.conversationId != null) sentTo = ev.conversationId;
-        // A new conversation: it's in the list from the first question.
-        if (activeId == null && ev.conversationId != null) {
-          activeId = ev.conversationId;
+        rec.askedId = ev.userMessageId ?? null;
+        if (ev.conversationId != null && rec.conv !== ev.conversationId) {
+          // A new conversation: open here while its new chat still is, and
+          // in the list from the first question.
+          const shownHere = isShown(rec);
+          adopt(rec, ev.conversationId);
+          if (shownHere && activeId == null) activeId = ev.conversationId;
           refreshList();
         }
         return;
       }
+      const shown = isShown(rec);
       // The screen the model looked at (look_at_screen): with the question, as its screenshots are.
       if (ev?.kind === 'screen' && Array.isArray(ev.images) && ev.images.length) {
-        const qi = mine('user');
-        if (qi >= 0) {
-          const have = new Set((messages[qi].images || []).map((i) => i.id));
-          const added = ev.images.filter((i) => i?.id && !have.has(i.id));
-          if (added.length) messages = messages.map((m, i) => (i === qi ? { ...m, images: [...(m.images || []), ...added] } : m));
-        }
+        lookedAt(rec, ev.images);
         return;
       }
       // Acting on a page beside the chat (chat/pages/act.rs): its tab says
@@ -1052,61 +1294,32 @@ export function createChatState({ onopensettings = () => null, onopennote = () =
       // PageConfirm.svelte, on the answer being written) and in its page
       // tab's strip (the panel may cover the thread: chatDoc's `asking`).
       if (ev?.kind === 'acting') {
-        if (mine('user') >= 0) doc.setActing(ev.key, stopAnswer);
+        if (shown) doc.setActing(ev.key, () => stopTurn(rec));
         return;
       }
       if (ev?.kind === 'switchTab') {
-        if (mine('user') >= 0) doc.showTab(ev.key);
+        if (shown) doc.showTab(ev.key);
         return;
       }
       if (ev?.kind === 'confirm') {
-        if (mine('user') >= 0) doc.setAsking(ev);
-        let at = mine('assistant');
-        if (at < 0) {
-          if (made || mine('user') < 0) return;
-          messages = [...messages, { role: 'assistant', streaming: true, text: '', tools: [], id: null, turn }];
-          at = messages.length - 1;
-          made = true;
-        }
-        const cm = messages[at];
-        const have = cm.confirms || [];
-        cm.confirms = have.some((c) => c.id === ev.id) ? have.map((c) => (c.id === ev.id ? ev : c)) : [...have, ev];
-        followThread();
+        if (shown) doc.setAsking(ev);
+        const have = rec.confirms || [];
+        rec.confirms = have.some((c) => c.id === ev.id) ? have.map((c) => (c.id === ev.id ? ev : c)) : [...have, ev];
+        paint(rec);
         return;
       }
-      if (ev?.kind === 'picture' && ev.picture?.id && !shownPictures.some((p) => p.id === ev.picture.id)) shownPictures = [...shownPictures, ev.picture];
-      if (ev?.kind === 'page' && ev.page?.url && !shownPages.some((p) => p.url === ev.page.url)) shownPages = [...shownPages, ev.page];
-      if (ev?.kind === 'offer' && ev.offer?.url && !shownOffers.some((o) => o.url === ev.offer.url)) shownOffers = [...shownOffers, ev.offer];
+      // The pictures, pages and buttons it showed: its pills, should the reply not list them.
+      rec.collect(ev);
       // A document, a picture or a page of this turn (the panel), while this chat is the one shown.
-      if (ev?.kind === 'document' || ev?.kind === 'section' || ev?.kind === 'picture' || ev?.kind === 'page' || ev?.kind === 'offer' || ev?.kind === 'job' || ev?.kind === 'tool') {
-        if (mine('user') >= 0) {
-          const at = mine('assistant');
+      if (PANEL_EVENTS.has(ev?.kind) || ev?.kind === 'tool') {
+        if (shown) {
+          const at = bubbleAt(rec);
           if (docEvent(ev, at >= 0 ? messages[at] : null)) return;
         } else if (ev.kind !== 'tool') return;
       }
-      live = applyEvent(live, ev);
-      // The line at the thread's foot, while this chat is the one shown.
-      if (mine('user') >= 0) {
-        activity = live.step;
-        activityWaiting = live.waiting;
-      }
-      let ai = mine('assistant');
-      if (ai < 0) {
-        // Not yet (or no longer: another conversation opened meanwhile).
-        if (made || (!live.started && !live.waiting && !live.thinking)) return;
-        messages = [...messages, { role: 'assistant', streaming: true, text: '', tools: [], id: null, turn }];
-        ai = messages.length - 1;
-        made = true;
-      }
-      const m = messages[ai];
-      if (!m?.streaming) return;
-      m.text = live.text;
-      m.tools = live.chips;
-      m.doing = live.doing;
-      m.liveSources = live.sources;
-      m.waiting = live.waiting;
-      m.liveThinking = live.thinking;
-      followThread();
+      // The answer so far and the line at the thread's foot: drawn while this chat is the one shown.
+      rec.took(ev);
+      paint(rec);
     };
     const call = streamCall(
       'chat_send',
@@ -1127,21 +1340,35 @@ export function createChatState({ onopensettings = () => null, onopennote = () =
       },
       onEvent
     );
-    stopAnswerCall = call.stop;
-    supersedeAnswerCall = call.supersede;
+    rec.stop = call.stop;
+    rec.supersede = call.supersede;
     try {
       const res = await call.promise;
       if (!alive) return;
-      if (away(res.conversationId)) {
-        // Saved in its own conversation (the list follows); shown there.
+      if (res.conversationId != null && rec.conv !== res.conversationId) {
+        const shownHere = isShown(rec);
+        adopt(rec, res.conversationId);
+        if (shownHere && activeId == null) activeId = res.conversationId;
+      }
+      if (res.userMessageId) rec.askedId = res.userMessageId;
+      if (!isShown(rec)) {
+        // Saved in its own conversation (the list follows, its dot says
+        // New); shown there when it opens.
         refreshList();
         if (res.speak && res.messageId) speakReply(res.spokenText || res.reply, res.messageId);
         return;
       }
-      activeId = res.conversationId;
-      const qi = questionAt();
+      const qi = questionAt(rec);
+      if (qi < 0) {
+        // (Read back without its question: the conversation as saved.)
+        dropTurn(rec);
+        await reloadActive();
+        refreshList();
+        contextStamp += 1;
+        return;
+      }
       const asked = messages[qi];
-      const ai = mine('assistant');
+      const ai = bubbleAt(rec);
       const streamed = ai >= 0 ? messages[ai].text : null;
       const fromHeight = streamingHeight(threadEl);
       // The checked answer takes the streamed one's place: the same bubble,
@@ -1159,14 +1386,14 @@ export function createChatState({ onopensettings = () => null, onopennote = () =
         // The documents it made or changed (chat/documents.rs): their pills.
         documents: res.documents || [],
         // The pictures it showed beside the chat (chat/pictures.rs): their pills.
-        pictures: res.pictures ?? shownPictures,
+        pictures: res.pictures ?? rec.pictures,
         // "Search in your browser", when Yap's free web sources couldn't give it.
         browserSearch: res.browserSearch ?? null,
         // The pages it brought up (their tabs) and its buttons (chat/pages.rs).
-        pages: res.pages ?? shownPages,
-        offers: res.offers ?? shownOffers,
+        pages: res.pages ?? rec.pages,
+        offers: res.offers ?? rec.offers,
         // The questions it asked before acting on a page (their cards, answered).
-        confirms: ai >= 0 ? messages[ai].confirms || null : null,
+        confirms: (ai >= 0 ? messages[ai].confirms : null) || rec.confirms || null,
         revisedFrom: streamed != null && streamed.trim() !== '' && streamed.trim() !== String(res.reply).trim() ? fromHeight : 0,
       };
       // The question as saved: with its screenshots' text when it went as text.
@@ -1181,28 +1408,44 @@ export function createChatState({ onopensettings = () => null, onopennote = () =
       if (res.speak && answer.id) speakReply(res.spokenText || answer.text, answer.id);
     } catch (e) {
       if (!alive) return;
+      // Its conversation shown now (another one: its messages and its box stay as they are).
+      const shown = isShown(rec);
       if (String(e).includes(SUPERSEDED)) {
         // A newer question in this conversation replaced it (asked out
         // loud, or dictated here and sent): no answer was saved, its bubble
         // goes, the question stays as saved. No error: nothing went wrong.
-        messages = messages
-          .filter((m) => !(m.role === 'assistant' && m.streaming && m.turn === turn))
-          .map((m) => (m.role === 'user' && m.turn === turn && m.id == null ? { ...m, id: askedId } : m));
+        if (shown) {
+          messages = messages
+            .filter((m) => !(m.role === 'assistant' && m.streaming && m.turn === turn))
+            .map((m) => (m.role === 'user' && m.turn === turn && m.id == null ? { ...m, id: rec.askedId } : m));
+        }
         refreshList();
         contextStamp += 1;
         return;
       }
-      const qi = questionAt();
-      // Another conversation shown now: its messages stay as they are.
-      const elsewhere = away(sentTo);
-      if (stopping && String(e).includes(STOPPED)) {
+      const qi = questionAt(rec);
+      if (rec.stopping && String(e).includes(STOPPED)) {
         // Stopped before any of the answer came: the question stays.
-        if (!elsewhere) messages = [...messages.slice(0, qi), { ...messages[qi], stopped: true }];
+        if (shown && qi >= 0) messages = [...messages.slice(0, qi), { ...messages[qi], stopped: true }];
         refreshList();
         contextStamp += 1;
         return;
       }
-      if (!elsewhere) messages = messages.slice(0, qi);
+      // Said so it's clear what to do (aiErrors.js); the raw error is in the log.
+      // A sentence reads as a sentence; only an error Yap can't explain gets
+      // the copyable error box.
+      const why = aiError(e);
+      if (!shown) {
+        // Another chat's question: it stays there as asked (Rust keeps it),
+        // and this chat's box is left alone.
+        toast({
+          title: "Couldn't answer in another chat",
+          description: why.text,
+          ...(why.known ? { variant: 'default', kind: 'error', chip: 'Error', icon: 'alert' } : { variant: 'destructive' }),
+        });
+        return;
+      }
+      if (qi >= 0) messages = messages.slice(0, qi);
       input = text; // give the message back
       quote = about; // …and the passage it was about
       if (thinkIt) think.on = true; // …thought through, as it was asked
@@ -1229,10 +1472,6 @@ export function createChatState({ onopensettings = () => null, onopennote = () =
         if (vision.images !== false) vision = { ...vision, images: false };
         return;
       }
-      // Said so it's clear what to do (aiErrors.js); the raw error is in the log.
-      // A sentence reads as a sentence; only an error Yap can't explain gets
-      // the copyable error box.
-      const why = aiError(e);
       const openSettings = onopensettings();
       // On your Claude plan: the buttons that help (Sign in, Manage usage,
       // this chat on an Anthropic API key).
@@ -1248,16 +1487,14 @@ export function createChatState({ onopensettings = () => null, onopennote = () =
             : {}),
       });
     } finally {
-      // Nothing is being written into the document any more.
-      doc.turnEnded();
+      // Nothing is being written into the document any more (its
+      // conversation's panel: another chat's may still be writing).
+      if (isShown(rec)) doc.turnEnded();
       // (No card of its waits any more.)
       turnOver(cardsIn);
-      sending = false;
-      stopping = false;
-      stopAnswerCall = null;
-      supersedeAnswerCall = null;
-      if (alive && sendWhenFree) {
-        sendWhenFree = false;
+      dropTurn(rec);
+      if (alive && sendWhenFree === rec) {
+        sendWhenFree = null;
         send();
       }
     }
@@ -1292,25 +1529,56 @@ export function createChatState({ onopensettings = () => null, onopennote = () =
     return { action: { label: 'Use my API key for this chat', onClick: onKey }, secondary: usage };
   }
 
-  /** ■: stop the answer being written (what came stays, checked). */
+  /**
+   * ■ (and Esc): stop **the open conversation's** answer being written —
+   * never another chat's (what came stays, checked).
+   */
   function stopAnswer() {
-    if (!sending && assistantAnswering) {
-      invoke('assistant_stop').catch(() => {});
+    const rec = here;
+    if (rec && !rec.spoken) {
+      stopTurn(rec);
       return;
     }
-    if (!sending || stopping || !stopAnswerCall) return;
-    stopping = true;
-    stopAnswerCall();
+    if (rec?.spoken || assistantAnswering) stopSpoken(rec?.conv ?? activeId);
+  }
+
+  /** `rec`'s ■: a typed question's by its own stream; one asked out loud as `stopSpoken`. */
+  function stopTurn(rec) {
+    if (!rec) return;
+    if (rec.spoken) {
+      stopSpoken(rec.conv);
+      return;
+    }
+    if (rec.stopping || !rec.stop) return;
+    rec.stopping = true;
+    rec.stop();
   }
 
   /**
-   * A newer question is waiting to go (`sendWhenFree`): the answer still
-   * coming is dropped, nothing saved for it, so the newer one goes now —
-   * not after an answer to a question you've moved on from.
+   * ■ on an answer asked out loud in conversation `conv`: the Voice
+   * Assistant's own question (its voice and all, `assistant_stop`) when it's
+   * that conversation's; else — one it has moved on from, a phone's — the
+   * turn answering there (`stream_stop_conversation`).
+   */
+  async function stopSpoken(conv) {
+    if (conv == null) return;
+    const now = await invoke('assistant_phase').catch(() => null);
+    setAssistant(now);
+    const its = (now?.phase === 'thinking' || now?.phase === 'speaking') && now?.conversationId === conv;
+    if (its) invoke('assistant_stop').catch(() => {});
+    else invoke('stream_stop_conversation', { conversation: conv }).catch(() => {});
+  }
+
+  /**
+   * A newer question is waiting to go (`sendWhenFree`): the open
+   * conversation's answer still coming is dropped, nothing saved for it, so
+   * the newer one goes now — not after an answer to a question you've moved
+   * on from.
    */
   function replaceAnswer() {
-    if (!sending || stopping || !supersedeAnswerCall) return;
-    supersedeAnswerCall();
+    const rec = here;
+    if (!rec || rec.spoken || rec.stopping || !rec.supersede) return;
+    rec.supersede();
   }
 
   /**
@@ -1352,8 +1620,12 @@ export function createChatState({ onopensettings = () => null, onopennote = () =
     onQuote,
     onPageQuote,
     get sending() { return sending; },
+    // The open conversation has an answer being written (typed or asked out
+    // loud): the line at the thread's foot shows (never another chat's).
+    get answeringHere() { return here != null; },
     get assistantAnswering() { return assistantAnswering; },
-    set assistantPhase(v) { assistantPhase = v || 'idle'; },
+    // `yap-assistant`'s payload, or `assistant_phase`'s.
+    set assistantPhase(v) { setAssistant(v); },
     get stopping() { return stopping; },
     get streaming() { return streaming; },
     get inputEl() { return inputEl; },
