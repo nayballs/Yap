@@ -150,8 +150,11 @@ const LIVE = new Map();
  *   before launch (the robot's STT spec links a model in)
  * @param {boolean} [opts.restart]  start again on the run folder's Data/ as
  *   the last instance left it (after `kill()`: a crash), config included
+ * @param {string[]} [opts.args]  the launch's arguments (a Markdown file to
+ *   open, `md-file.spec.js`); started in the app's folder, so a relative
+ *   path is from there
  */
-export async function launchYap({ name, config = {}, env = {}, data = {}, runsDir = RUNS, exe = EXE, prepare, restart = false }) {
+export async function launchYap({ name, config = {}, env = {}, data = {}, runsDir = RUNS, exe = EXE, prepare, restart = false, args = [] }) {
   if (!fs.existsSync(exe)) {
     throw new Error(`No test build at ${exe} — run \`npm run test:app:build\` first.`);
   }
@@ -200,7 +203,7 @@ export async function launchYap({ name, config = {}, env = {}, data = {}, runsDi
 
   const logPath = path.join(runDir, 'stdout.log');
   const log = fs.openSync(logPath, 'w');
-  const child = spawn(path.join(appDir, 'yap.exe'), [], {
+  const child = spawn(path.join(appDir, 'yap.exe'), args, {
     cwd: appDir,
     env: childEnv,
     // stdin stays open: closing it is how we ask the app to quit (shell/e2e.rs).

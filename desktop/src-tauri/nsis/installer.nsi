@@ -8,15 +8,18 @@
 ; Yap-specific edits are the
 ; portable magic string ("Yap Portable Mode"), the comments, and the
 ; uninstaller's "Delete app data" removing Yap's own data dirs and its saved
-; sign-in (Windows Credential Manager), and finding the previous install's
-; folder after a publisher rename.
+; sign-in (Windows Credential Manager), finding the previous install's
+; folder after a publisher rename, and the file associations (.md,
+; .markdown) registered as "Open with" choices instead of upstream's
+; APP_ASSOCIATE, which takes the type's default over.
 ; Portable changes are marked with "; --- PORTABLE MODE ---" comments, the
 ; data-dir and sign-in removal with "; --- YAP DATA ---", the previous folder
-; with "; --- YAP: PREVIOUS INSTALL DIR ---" (and its two callers).
+; with "; --- YAP: PREVIOUS INSTALL DIR ---" (and its two callers), the
+; associations with "; --- YAP: FILE ASSOCIATIONS ---" (install and uninstall).
 ;
 ; When upgrading Tauri, diff this file against the new upstream template and
-; merge changes while preserving the portable, YAP DATA and PREVIOUS INSTALL
-; DIR sections.
+; merge changes while preserving the portable, YAP DATA, PREVIOUS INSTALL
+; DIR and FILE ASSOCIATIONS sections.
 
 Unicode true
 ManifestDPIAware true
@@ -802,12 +805,49 @@ Section Install
 
   ; --- PORTABLE MODE --- Skip file associations and deep links for portable installs
   ${If} $PortableMode <> 1
-    ; Create file associations
+    ; --- YAP: FILE ASSOCIATIONS --- Yap is offered for its file types (.md,
+    ; .markdown: tauri.conf.json's bundle.fileAssociations), never made their
+    ; default. Upstream's APP_ASSOCIATE writes `.ext`'s own default value, which
+    ; takes the type over from whatever opened it before wherever the person
+    ; never chose one (and backs the old value up beside it); Windows' rules for
+    ; a well-behaved app are to add a ProgID to the type's OpenWithProgids and
+    ; to register its Capabilities, so it shows in "Open with" and on its own
+    ; Default apps page, and to let the person pick it there
+    ; (Settings → General → "Open Markdown files with Yap" opens that page,
+    ; ms-settings:defaultapps?registeredAppUser=${PRODUCTNAME}).
+    ;   Software\Classes\${PRODUCTNAME}.<ext>     the ProgID: its name, icon, open command
+    ;   Software\Classes\.<ext>\OpenWithProgids   ${PRODUCTNAME}.<ext> ("Open with")
+    ;   Software\Classes\Applications\<exe>       its SupportedTypes, for "Choose another app"
+    ;   ${MANUPRODUCTKEY}\Capabilities             FileAssociations .<ext> → the ProgID
+    ;   Software\RegisteredApplications           ${PRODUCTNAME} → those Capabilities
+    ; Removed by the uninstaller (below), only where they still point at this install.
+    {{#if file_associations}}
+      WriteRegStr SHCTX "${MANUPRODUCTKEY}\Capabilities" "ApplicationName" "${PRODUCTNAME}"
+      WriteRegStr SHCTX "${MANUPRODUCTKEY}\Capabilities" "ApplicationDescription" "Local voice dictation, meeting notes and an AI assistant"
+      WriteRegStr SHCTX "${MANUPRODUCTKEY}\Capabilities" "ApplicationIcon" "$\"$INSTDIR\${MAINBINARYNAME}.exe$\",0"
+      WriteRegStr SHCTX "Software\RegisteredApplications" "${PRODUCTNAME}" "${MANUPRODUCTKEY}\Capabilities"
+      WriteRegStr SHCTX "Software\Classes\Applications\${MAINBINARYNAME}.exe" "FriendlyAppName" "${PRODUCTNAME}"
+      WriteRegStr SHCTX "Software\Classes\Applications\${MAINBINARYNAME}.exe\DefaultIcon" "" "$\"$INSTDIR\${MAINBINARYNAME}.exe$\",0"
+      WriteRegStr SHCTX "Software\Classes\Applications\${MAINBINARYNAME}.exe\shell\open\command" "" "$\"$INSTDIR\${MAINBINARYNAME}.exe$\" $\"%1$\""
+    {{/if}}
     {{#each file_associations as |association| ~}}
       {{#each association.ext as |ext| ~}}
-         !insertmacro APP_ASSOCIATE "{{ext}}" "{{or association.name ext}}" "{{association-description association.description ext}}" "$\"$INSTDIR\${MAINBINARYNAME}.exe$\",0" "Open with ${PRODUCTNAME}" "$\"$INSTDIR\${MAINBINARYNAME}.exe$\" $\"%1$\""
+        WriteRegStr SHCTX "Software\Classes\${PRODUCTNAME}.{{ext}}" "" "{{association-description association.description ext}}"
+        WriteRegStr SHCTX "Software\Classes\${PRODUCTNAME}.{{ext}}" "FriendlyTypeName" "{{association-description association.description ext}}"
+        WriteRegStr SHCTX "Software\Classes\${PRODUCTNAME}.{{ext}}\DefaultIcon" "" "$\"$INSTDIR\${MAINBINARYNAME}.exe$\",0"
+        WriteRegStr SHCTX "Software\Classes\${PRODUCTNAME}.{{ext}}\shell" "" "open"
+        WriteRegStr SHCTX "Software\Classes\${PRODUCTNAME}.{{ext}}\shell\open" "" "Open with ${PRODUCTNAME}"
+        WriteRegStr SHCTX "Software\Classes\${PRODUCTNAME}.{{ext}}\shell\open\command" "" "$\"$INSTDIR\${MAINBINARYNAME}.exe$\" $\"%1$\""
+        WriteRegStr SHCTX "Software\Classes\.{{ext}}\OpenWithProgids" "${PRODUCTNAME}.{{ext}}" ""
+        WriteRegStr SHCTX "Software\Classes\Applications\${MAINBINARYNAME}.exe\SupportedTypes" ".{{ext}}" ""
+        WriteRegStr SHCTX "${MANUPRODUCTKEY}\Capabilities\FileAssociations" ".{{ext}}" "${PRODUCTNAME}.{{ext}}"
       {{/each}}
     {{/each}}
+    {{#if file_associations}}
+      ; Explorer reads the new choices now, not at the next sign-in.
+      !insertmacro UPDATEFILEASSOC
+    {{/if}}
+    ; --- END YAP: FILE ASSOCIATIONS ---
 
     ; Register deep links
     {{#each deep_link_protocols as |protocol| ~}}
@@ -950,12 +990,38 @@ Section Uninstall
     Delete "$INSTDIR\\{{this}}"
   {{/each}}
 
-  ; Delete app associations
-  {{#each file_associations as |association| ~}}
-    {{#each association.ext as |ext| ~}}
-      !insertmacro APP_UNASSOCIATE "{{ext}}" "{{or association.name ext}}"
+  ; --- YAP: FILE ASSOCIATIONS --- What the install wrote (above), each part
+  ; only while it still points at this install's exe; never the type's own
+  ; default (Yap never wrote it) nor the person's choice in Default apps
+  ; (Windows' UserChoice: a ProgID gone leaves Windows asking again). Left
+  ; alone on an update, which writes them again: Windows keeps the choice.
+  ${If} $UpdateMode <> 1
+    {{#each file_associations as |association| ~}}
+      {{#each association.ext as |ext| ~}}
+        ReadRegStr $R7 SHCTX "Software\Classes\${PRODUCTNAME}.{{ext}}\shell\open\command" ""
+        ${If} $R7 == "$\"$INSTDIR\${MAINBINARYNAME}.exe$\" $\"%1$\""
+          DeleteRegValue SHCTX "Software\Classes\.{{ext}}\OpenWithProgids" "${PRODUCTNAME}.{{ext}}"
+          DeleteRegKey SHCTX "Software\Classes\${PRODUCTNAME}.{{ext}}"
+        ${EndIf}
+      {{/each}}
     {{/each}}
-  {{/each}}
+    {{#if file_associations}}
+      ReadRegStr $R7 SHCTX "Software\Classes\Applications\${MAINBINARYNAME}.exe\shell\open\command" ""
+      ${If} $R7 == "$\"$INSTDIR\${MAINBINARYNAME}.exe$\" $\"%1$\""
+        DeleteRegKey SHCTX "Software\Classes\Applications\${MAINBINARYNAME}.exe"
+      ${EndIf}
+      ReadRegStr $R7 SHCTX "${MANUPRODUCTKEY}\Capabilities" "ApplicationIcon"
+      ${If} $R7 == "$\"$INSTDIR\${MAINBINARYNAME}.exe$\",0"
+        DeleteRegKey SHCTX "${MANUPRODUCTKEY}\Capabilities"
+        ReadRegStr $R7 SHCTX "Software\RegisteredApplications" "${PRODUCTNAME}"
+        ${If} $R7 == "${MANUPRODUCTKEY}\Capabilities"
+          DeleteRegValue SHCTX "Software\RegisteredApplications" "${PRODUCTNAME}"
+        ${EndIf}
+      ${EndIf}
+      !insertmacro UPDATEFILEASSOC
+    {{/if}}
+  ${EndIf}
+  ; --- END YAP: FILE ASSOCIATIONS ---
 
   ; Delete deep links
   {{#each deep_link_protocols as |protocol| ~}}

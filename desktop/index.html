@@ -16,7 +16,8 @@
         var root = document.documentElement;
         try {
           var label = window.__TAURI_INTERNALS__ && window.__TAURI_INTERNALS__.metadata.currentWindow.label;
-          if (label) root.dataset.window = label;
+          // A Markdown file's window (`doc-<hash>`, one per file) is a "doc".
+          if (label) root.dataset.window = label.indexOf('doc-') === 0 ? 'doc' : label;
         } catch (e) {}
         var theme = 'system';
         var bar = 'app';

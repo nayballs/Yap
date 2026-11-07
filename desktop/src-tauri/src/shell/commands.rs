@@ -7,6 +7,15 @@ use tauri::AppHandle;
 /// first, for the suite (`e2e_opened_urls`).
 static E2E_OPENED_URLS: std::sync::Mutex<Vec<String>> = std::sync::Mutex::new(Vec::new());
 
+/// A test run kept something it would have opened outside Yap (a Settings
+/// page of Windows', a folder in Explorer: `notes/md_file.rs`) for the suite,
+/// with the links (`e2e_opened_urls`).
+pub(crate) fn e2e_kept(what: &str) {
+    if let Ok(mut opened) = E2E_OPENED_URLS.lock() {
+        opened.push(what.to_string());
+    }
+}
+
 /// Is `url` a link Yap opens in the browser? Web and mail only: never
 /// `file:`, `javascript:`, a custom scheme or a bare path.
 fn is_web_or_mail_link(url: &str) -> bool {

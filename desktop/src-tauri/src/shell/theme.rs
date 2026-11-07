@@ -9,7 +9,8 @@
 //! the low memory target, `webview_memory.rs`), the area a resize or
 //! maximise uncovers. Left at WebView2's default (white), a dark Yap would
 //! flash light there. So the opaque windows — the main window, onboarding,
-//! the meeting notepad, the quick note — get their page's background colour from here: at
+//! the meeting notepad, the quick note, a Markdown file's (`notes/md_file.rs`)
+//! — get their page's background colour from here: at
 //! startup (before their DWM-cloaked first show), after every config save,
 //! and when Windows' app mode changes while the theme follows it
 //! (`WindowEvent::ThemeChanged`). The Yap bar and the split preview are
@@ -56,8 +57,10 @@ const OPAQUE: &[(&str, [u8; 3], [u8; 3])] = &[
 ];
 
 /// The background a window's webview gets in `theme` (None: a transparent
-/// window, left alone).
+/// window, left alone). A Markdown file's window (`doc-…`, made on demand,
+/// `notes/md_file.rs`) is on the paper, as the quick note is.
 pub fn background(label: &str, theme: Theme) -> Option<[u8; 3]> {
+    let label = if crate::notes::md_file::is_label(label) { "quick-note" } else { label };
     OPAQUE
         .iter()
         .find(|(l, _, _)| *l == label)
@@ -96,16 +99,18 @@ pub fn system_dark() -> bool {
 /// resolves to. Best-effort; cheap enough to run on every config save.
 pub fn apply(app: &AppHandle, cfg: &crate::config::YapConfig) {
     let theme = resolve(&cfg.theme, system_dark());
-    for (label, _, _) in OPAQUE {
-        let Some(window) = app.get_webview_window(label) else { continue };
-        let Some([r, g, b]) = background(label, theme) else { continue };
+    // The Markdown files' windows open now too.
+    let docs = app.webview_windows().into_keys().filter(|l| crate::notes::md_file::is_label(l));
+    for label in OPAQUE.iter().map(|(l, _, _)| l.to_string()).chain(docs) {
+        let Some(window) = app.get_webview_window(&label) else { continue };
+        let Some([r, g, b]) = background(&label, theme) else { continue };
         if let Err(e) = window.set_background_color(Some(tauri::window::Color(r, g, b, 255))) {
             tracing::debug!(window = %label, "theme: couldn't set the background: {e}");
         }
         // Onboarding is the one window with Windows' own title bar: dark
         // with a dark Yap, even while Windows' app mode is light.
         #[cfg(windows)]
-        if *label == "onboarding" {
+        if label == "onboarding" {
             dark_title_bar(&window, theme == Theme::Dark);
         }
     }
@@ -211,6 +216,9 @@ mod tests {
         assert_eq!(background("notepad", Theme::Dark), Some([0x1c, 0x1a, 0x16]));
         assert_eq!(background("notepad", Theme::Light), Some([0xfa, 0xf9, 0xf6]));
         assert_eq!(background("quick-note", Theme::Dark), Some([0x1c, 0x1a, 0x16]));
+        // A Markdown file's window: the paper, as the quick note.
+        assert_eq!(background("doc-0123456789ab", Theme::Dark), Some([0x1c, 0x1a, 0x16]));
+        assert_eq!(background("doc-0123456789ab", Theme::Light), Some([0xfa, 0xf9, 0xf6]));
         // Transparent windows: never (an opaque background is the grey box).
         assert_eq!(background("overlay", Theme::Dark), None);
         assert_eq!(background("split-preview", Theme::Dark), None);
