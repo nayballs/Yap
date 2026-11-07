@@ -880,6 +880,19 @@ impl Shared {
         if let Some(why) = why {
             on_demand::load_soon(&c, why);
         }
+        // Your Claude plan: the scope's warm spare started again if it ended
+        // while idle (claude_plan/spare.rs) — a dictation's cleanup, and
+        // Commands (said by name in any dictation, or the rewrite shortcut).
+        use crate::ai::claude_plan::{on_plan, spare, Scope};
+        let cleanup = matches!(goes, Goes::Paste | Goes::QuickNote) && !edit && on_plan(&c, Scope::Cleanup);
+        let commands = matches!(goes, Goes::Paste | Goes::QuickNote) && on_plan(&c, Scope::Commands);
+        drop(c);
+        if cleanup {
+            spare::warm(Scope::Cleanup);
+        }
+        if commands {
+            spare::warm(Scope::Commands);
+        }
     }
 
     /// The dead-mic watchdog for recording `session` (`mic_watch.rs`): polls

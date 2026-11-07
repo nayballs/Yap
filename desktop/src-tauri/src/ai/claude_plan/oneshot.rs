@@ -1,9 +1,12 @@
-//! **One question, one answer on the plan**: every call on the Chat model
-//! that isn't a Chat turn — memory learning, a long chat's summary, the
-//! Notes view's and the notepad's Ask, Think, the apps' plan, Yap's own
-//! fast answers, a snip's question, the Voice Assistant's look at the
-//! screen — arrives at `llm::post_chat_request` as an OpenAI-shaped
-//! request and comes here (as the ChatGPT plan's go to `llm/responses.rs`).
+//! **One question, one answer on the plan**: every plan call that isn't a
+//! Chat turn — a dictation's cleanup, a Command, a saved transform, a
+//! meeting's summary and the notepad's helpers (7 Nov 2026: every scope),
+//! and on the Chat model memory learning, a long chat's summary, the Notes
+//! view's and the notepad's Ask, Think, the apps' plan, Yap's own fast
+//! answers, a snip's question, the Voice Assistant's look at the screen —
+//! arrives at `llm::post_chat_request` as an OpenAI-shaped request and comes
+//! here (as the ChatGPT plan's go to `llm/responses.rs`). The endpoint's
+//! URL says which scope it's for (`claude_plan::scope_of_url`).
 //!
 //! - **Lean**: `--tools ""` (no tools at all), no MCP server
 //!   (`--strict-mcp-config` with none), `--setting-sources ""` (none of the
@@ -15,11 +18,28 @@
 //!   prompt (`--system-prompt-file`, in place of Claude Code's own coding
 //!   agent's), the rest one message — the earlier turns in a block, then
 //!   the last question — with that question's pictures as image blocks.
-//!   Tools a caller offers aren't run: the answer is text.
+//!   The parts of a system prompt that change with every call (the
+//!   dictionary words a dictation says, a rewrite's selection:
+//!   [`per_call_parts`]) go just before the question instead, so a warm
+//!   spare made for the scope's usual prompt fits. Tools a caller offers
+//!   aren't run: the answer is text.
+//! - **On a warm spare** when the scope has one waiting for this prompt
+//!   (`spare.rs`; Dictation Cleanup, Commands, Note Formatting), else a
+//!   Claude Code started now; a new spare starts behind it either way.
+//! - **Effort** ([`effort_for_scope`]): Chat's choice for a Chat call; the
+//!   lowest the model takes for a cleanup or a Command (a dictation can't
+//!   wait for thinking); the model's own for Note Formatting.
 //! - **Streamed** to whoever watches (`Delta::Content`, `Reasoning`).
 //! - **Counted** (`usage::record_response`, with Claude Code's own estimate
-//!   of the API price: on a plan, what it saved).
+//!   of the API price: on a plan, what it saved), under the call's feature.
+//! - **The plan's limits** move with the call's own `rate_limit_event`s,
+//!   and at most once a minute the call's own process is asked where they
+//!   stand too (`get_usage` beside the message: no other process, no model
+//!   call; `usage::due_with_call`).
 //! - **Problems** in plain words (`Problem::message`): never an answer.
+//!   The plan's own ([`Failure::Plan`]: signed out, its limit, paying
+//!   another way, Claude Code missing or not starting) may go to the key
+//!   once (`claude_plan::fallback_key`, in `llm::post_chat_request`).
 
 use std::time::Duration;
 
@@ -78,8 +98,11 @@ pub fn flatten(messages: &Value) -> Flat {
     let list: Vec<&Value> = messages.as_array().map(|a| a.iter().collect()).unwrap_or_default();
     let mut flat = Flat::default();
     let mut rest: Vec<&Value> = list.clone();
+    let mut moved: Vec<String> = Vec::new();
     if let Some(first) = list.first().filter(|m| m["role"] == "system") {
-        flat.system = text_of(&first["content"]).trim().to_string();
+        let (stable, per_call) = per_call_parts(text_of(&first["content"]).trim());
+        flat.system = stable;
+        moved = per_call;
         rest.remove(0);
     }
     let last_user = rest.iter().rposition(|m| m["role"] == "user");
@@ -104,7 +127,7 @@ pub fn flatten(messages: &Value) -> Flat {
         }
     };
     let Some(q) = last_user else {
-        flat.prompt = rest.iter().filter_map(|m| said(m)).collect::<Vec<_>>().join("\n\n");
+        flat.prompt = moved.into_iter().chain(rest.iter().filter_map(|m| said(m))).collect::<Vec<_>>().join("\n\n");
         return flat;
     };
     let before: Vec<String> = rest[..q].iter().filter_map(|m| said(m)).collect();
@@ -115,12 +138,37 @@ pub fn flatten(messages: &Value) -> Flat {
     if !before.is_empty() {
         parts.push(format!("<earlier_in_this_conversation>\n{}\n</earlier_in_this_conversation>", before.join("\n\n")));
     }
+    // This call's own instructions, just before its question.
+    parts.extend(moved);
     parts.push(question.trim().to_string());
     if !after.is_empty() {
         parts.push(after.join("\n\n"));
     }
     flat.prompt = parts.join("\n\n");
     flat
+}
+
+/// **A system prompt's parts that change with every call**, taken out: the
+/// dictionary words this dictation says (`llm::DICTIONARY_LINE`'s
+/// paragraph) and a rewrite's selection (`llm::SELECTION_LINE` to the end).
+/// The rest is the same from call to call into one kind of app, so a warm
+/// spare started with it fits the next call; these go in the call's message
+/// instead (the model reads the same words). Pure.
+pub fn per_call_parts(system: &str) -> (String, Vec<String>) {
+    let mut stable = system.to_string();
+    let mut moved: Vec<String> = Vec::new();
+    // A rewrite's selection: the rest of the prompt (it may hold blank lines).
+    if let Some(at) = stable.find(&format!("\n\n{}", crate::ai::llm::SELECTION_LINE)) {
+        moved.push(stable[at + 2..].trim().to_string());
+        stable.truncate(at);
+    }
+    // The dictionary words said: their one paragraph.
+    if let Some(at) = stable.find(&format!("\n\n{}", crate::ai::llm::DICTIONARY_LINE)) {
+        let end = stable[at + 2..].find("\n\n").map_or(stable.len(), |e| at + 2 + e);
+        moved.insert(0, stable[at + 2..end].trim().to_string());
+        stable.replace_range(at..end, "");
+    }
+    (stable, moved)
 }
 
 /// The empty folder plan calls run in (no project's settings, CLAUDE.md or
@@ -141,6 +189,51 @@ pub fn folder_path(what: &str) -> std::path::PathBuf {
 /// (`--effort`), from what's chosen for it in Chat (`ai/effort.rs`).
 pub fn effort_for(model: &str) -> Option<session::Effort> {
     crate::ai::effort::for_call(super::PROVIDER, model).and_then(|(level, _)| session::Effort::parse(level.id()))
+}
+
+/// **The effort a `scope`'s call to `model` runs at**: Chat's choice for a
+/// Chat call ([`effort_for`]); the lowest level the model takes for a
+/// dictation's cleanup and a Command (no thinking a dictation waits for;
+/// none sent for a model without levels); the model's own default for Note
+/// Formatting (no `--effort`). Only Chat has an effort setting.
+pub fn effort_for_scope(scope: super::Scope, model: &str) -> Option<session::Effort> {
+    match scope {
+        super::Scope::Chat => effort_for(model),
+        super::Scope::Cleanup | super::Scope::Commands => crate::ai::effort::caps(super::PROVIDER, model)
+            .and_then(|c| c.levels.first().copied())
+            .and_then(|level| session::Effort::parse(level.id())),
+        super::Scope::Notes => None,
+    }
+}
+
+/// **A call's run** (a spare's, or one started for the call): the lean
+/// one-shot flags ([`ask_spec`]) on `model` at `effort`, with `system` in
+/// place of Claude Code's own prompt, in Yap's empty folder.
+pub fn call_spec(model: &str, effort: Option<session::Effort>, system: &str) -> Result<Spec, String> {
+    let flat = Flat { system: system.to_string(), ..Default::default() };
+    let mut spec = ask_spec(folder("ask")?, model, &flat);
+    spec.effort = effort;
+    Ok(spec)
+}
+
+/// Why a plan call didn't answer.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum Failure {
+    /// **The plan couldn't answer**: Claude Code signed out, the plan's
+    /// limit, paying another way, Claude Code missing or not starting, or
+    /// ending before it answered. A scope's fallback to the key takes it
+    /// (`claude_plan::fallback_key`).
+    Plan(String),
+    /// Anything else (too slow, an error the model's request got): as it is.
+    Other(String),
+}
+
+impl Failure {
+    pub fn message(self) -> String {
+        match self {
+            Failure::Plan(m) | Failure::Other(m) => m,
+        }
+    }
 }
 
 /// The answer's counts, as `usage::record_response` reads them, with
@@ -172,16 +265,48 @@ pub(crate) fn ask_spec(cwd: std::path::PathBuf, model: &str, flat: &Flat) -> Spe
     spec
 }
 
-/// **One call on the plan**, as `llm::post_chat_request` makes it: the
-/// answer as an OpenAI-shaped message (`{role, content}`).
-pub(crate) async fn post(model: &str, messages: &Value, timeout: Duration, on: Option<OnDelta<'_>>) -> Result<Value, String> {
+/// A Claude Code started for this call, the prompt sent.
+fn cold(model: &str, effort: Option<session::Effort>, flat: &Flat, images: &[Image]) -> Result<(Session, tokio::sync::mpsc::UnboundedReceiver<Event>), Failure> {
+    let spec = call_spec(model, effort, &flat.system).map_err(Failure::Plan)?;
+    let (session, rx) = Session::start(spec).map_err(Failure::Plan)?;
+    session.send_user(&flat.prompt, images).map_err(Failure::Plan)?;
+    Ok((session, rx))
+}
+
+/// **One call on the plan**, as `llm::post_chat_request` makes it, for the
+/// scope `base_url` names: the answer as an OpenAI-shaped message
+/// (`{role, content}`).
+pub(crate) async fn post(base_url: &str, model: &str, messages: &Value, timeout: Duration, on: Option<OnDelta<'_>>) -> Result<Value, Failure> {
+    let scope = super::scope_of_url(base_url);
     let flat = flatten(messages);
-    let mut spec = ask_spec(folder("ask")?, model, &flat);
-    spec.effort = effort_for(model);
+    let effort = effort_for_scope(scope, model);
     let images = if crate::snip::vision::reads_images(super::PROVIDER, model) == Some(false) { Vec::new() } else { flat.images.clone() };
-    let (session, mut rx) = Session::start(spec)?;
-    session.send_user(&flat.prompt, &images)?;
+    let began = std::time::Instant::now();
+    // The scope's warm spare when it was made for this prompt; else (none,
+    // another prompt's, or one that won't take the message) a cold start.
+    let key = super::spare::Key::of(model, effort, &flat.system);
+    let (session, mut rx, warm) = match super::spare::take(scope, &key) {
+        Some(s) => match s.session.send_user(&flat.prompt, &images) {
+            Ok(()) => (s.session, s.rx, true),
+            Err(_) => {
+                drop(s);
+                let (session, rx) = cold(model, effort, &flat, &images)?;
+                (session, rx, false)
+            }
+        },
+        None => {
+            let (session, rx) = cold(model, effort, &flat, &images)?;
+            (session, rx, false)
+        }
+    };
+    // Where the plan's limits stand, asked of this very process at most
+    // once a minute (no other process, no model call) — a cleanup's, a
+    // Command's or a meeting's call (Chat's turns ask after themselves).
+    let mut usage_ask = (scope != super::Scope::Chat && super::usage::due_with_call()).then(|| session.get_usage().ok()).flatten();
+    // One call each: stdin closed, it ends after this answer.
     session.end();
+    // The next spare starts now, behind this call.
+    super::spare::after_call(scope, &flat.system);
     let mut quiet = |_: Delta<'_>| {};
     let on: OnDelta<'_> = match on {
         Some(on) => on,
@@ -199,41 +324,59 @@ pub(crate) async fn post(model: &str, messages: &Value, timeout: Duration, on: O
                     StreamKind::Thinking { thinking, .. } => on(Delta::Reasoning(&thinking)),
                     _ => {}
                 },
+                Event::RateLimit(r) => super::usage::live(&r),
+                Event::ControlResponse(c) if usage_ask.as_deref().is_some_and(|id| id == c.request_id) => {
+                    usage_ask = None;
+                    super::usage::kept_from_call(&crate::ai::claude_code::usage::from_response(&c));
+                }
                 Event::Problem(p) => {
                     if matches!(p, crate::ai::claude_code::events::Problem::NotSignedIn) {
                         crate::ai::claude_code::cli::forget();
+                        super::spare::end_all("signed out");
+                        // The key store's marker follows (signed out: no
+                        // more calls start Claude Code until it's back).
+                        std::thread::spawn(|| super::sync(&crate::ai::claude_code::cli::refresh()));
                     }
-                    return Err(p.message());
+                    return Err(Failure::Plan(p.message()));
                 }
                 Event::Result(r) if r.is_error => {
                     let why = r.errors.first().cloned().filter(|e| !e.is_empty()).unwrap_or(r.text);
-                    return Err(if why.trim().is_empty() { "Claude Code couldn't answer.".to_string() } else { format!("Claude Code couldn't answer: {}", why.trim()) });
+                    return Err(Failure::Other(if why.trim().is_empty() { "Claude Code couldn't answer.".to_string() } else { format!("Claude Code couldn't answer: {}", why.trim()) }));
                 }
                 Event::Result(r) => return Ok(r),
                 Event::Exited(_) => break,
                 _ => {}
             }
         }
-        Err("Claude Code stopped before it answered.".to_string())
+        Err(Failure::Plan("Claude Code stopped before it answered.".to_string()))
     })
     .await;
     let result = match waited {
         Ok(r) => r,
-        Err(_) => Err("Claude Code took too long to answer.".to_string()),
+        Err(_) => Err(Failure::Other("Claude Code took too long to answer.".to_string())),
     };
     let r = match result {
         Ok(r) => r,
         Err(e) => {
             session.kill();
-            tracing::info!("Claude plan: a one-shot call didn't answer");
+            tracing::info!(scope = scope.id(), warm, plan = matches!(e, Failure::Plan(_)), "Claude plan: a one-shot call didn't answer");
             return Err(e);
         }
     };
     let counted = crate::ai::usage::Call { provider: super::PROVIDER, model, base_url: super::BASE_URL, turn: true, feature: None };
     crate::ai::usage::record_response(&counted, &usage_value(&r.usage, r.cost_usd), None, None);
+    // The limits' answer still to come: read in the background, the call
+    // not held up (its process ends once it's said).
+    if let Some(id) = usage_ask {
+        tauri::async_runtime::spawn(async move {
+            let asked = crate::ai::claude_code::usage::read_answer(&mut rx, &id, Duration::from_secs(5)).await;
+            super::usage::kept_from_call(&asked);
+            drop(session);
+        });
+    }
     // The answer is the result's words (what streamed, if it said none).
     let text = if r.text.trim().is_empty() { shown } else { r.text };
-    tracing::info!(chars = text.chars().count(), "Claude plan: a one-shot call answered");
+    tracing::info!(scope = scope.id(), warm, ms = began.elapsed().as_millis() as u64, chars = text.chars().count(), "Claude plan: a one-shot call answered");
     Ok(json!({ "role": "assistant", "content": text }))
 }
 
@@ -266,6 +409,40 @@ mod tests {
         // A tool step after the question goes after it.
         let f = flatten(&json!([{ "role": "user", "content": "q" }, { "role": "assistant", "content": null, "tool_calls": [{ "function": { "name": "web_search", "arguments": "{}" } }] }, { "role": "tool", "content": "r" }]));
         assert_eq!(f.prompt, "q\n\nAssistant: (called web_search with {})\n\nTool result: r");
+    }
+
+    #[test]
+    fn a_calls_own_words_go_in_its_message_so_the_system_prompt_stays_the_same() {
+        let entry = |from: &str, to: &str| crate::config::DictionaryEntry { from: from.into(), to: to.into(), fuzzy: true, snippet: false, starred: false, also_heard: Vec::new() };
+        // A dictation's cleanup: the dictionary words it says change from
+        // one dictation to the next; the rest of the prompt doesn't.
+        let said_zentrix = crate::ai::llm::cleanup_messages_full("the zen tricks launch", "Keep it short.", Some("Use British spelling."), None, Some("<samples>A sample.</samples>"), &[entry("zen tricks", "Zentrix")], false);
+        let said_nothing = crate::ai::llm::cleanup_messages_full("see you at three", "Keep it short.", Some("Use British spelling."), None, Some("<samples>A sample.</samples>"), &[], false);
+        let (a, b) = (flatten(&said_zentrix), flatten(&said_nothing));
+        assert_eq!(a.system, b.system, "one spare fits both dictations");
+        assert!(!a.system.contains("Custom dictionary") && a.system.contains("Keep it short.") && a.system.contains("A sample."));
+        let dictionary = a.prompt.find("Custom dictionary — when these appear in the transcript, apply these corrections: \"zen tricks\" → \"Zentrix\".").expect("in the message");
+        assert!(dictionary < a.prompt.find("the zen tricks launch").unwrap(), "just before the dictation");
+        assert!(!b.prompt.contains("Custom dictionary"));
+        // A rewrite's selection (it may hold blank lines) likewise.
+        let with = crate::ai::llm::rewrite_messages("make it shorter", "Dear Sam,\n\nThe launch moves to Friday.", None, "Be brief.");
+        let without = crate::ai::llm::rewrite_messages("write a thank you note", "", None, "Be brief.");
+        let (a, b) = (flatten(&with), flatten(&without));
+        assert_eq!(a.system, b.system);
+        assert!(a.prompt.starts_with("Use the following selected text as the context to edit:\n\"\"\"\nDear Sam,\n\nThe launch moves to Friday.\n\"\"\"\n\nUser's instruction: make it shorter"));
+        // Nothing to move: as it was.
+        assert_eq!(per_call_parts("You summarise chats."), ("You summarise chats.".to_string(), Vec::new()));
+    }
+
+    #[test]
+    fn effort_by_scope_low_for_a_dictation_the_models_own_for_meetings() {
+        use super::super::Scope;
+        // The lowest the model takes for cleanup and Commands (Claude's
+        // levels start at low), never a level a model without them can't take.
+        assert_eq!(effort_for_scope(Scope::Cleanup, "claude-opus-5-5"), Some(session::Effort::Low));
+        assert_eq!(effort_for_scope(Scope::Commands, "claude-sonnet-5-5"), Some(session::Effort::Low));
+        assert_eq!(effort_for_scope(Scope::Notes, "claude-opus-5-5"), None, "Claude Code's own default");
+        assert_eq!(effort_for_scope(Scope::Cleanup, "not-a-claude"), None);
     }
 
     #[test]

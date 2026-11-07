@@ -21,8 +21,9 @@ export const CHATGPT = 'chatgpt';
 /**
  * Chat on your Claude plan (ai/claude_plan.rs): the person's own Claude
  * Code, signed in with their own Claude account, answers. A keyed provider
- * whose key store holds a marker while Claude Code is signed in here; the
- * Chat scope only (never cleanup, Commands or meeting notes).
+ * whose key store holds a marker while Claude Code is signed in here; every
+ * Language Models scope since 7 Nov 2026 (Chat, Dictation cleanup, Commands,
+ * Note formatting).
  */
 export const CLAUDE_PLAN = 'claude-plan';
 

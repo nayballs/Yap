@@ -6,7 +6,9 @@
   //   tag: 'new' (a model the provider added since Yap's list was made) or
   //   'gone' (the saved model, which the provider no longer offers);
   //   images: true — "Reads images" (Snip to Chat: the Chat scope's list).
-  let { value = $bindable(''), options = [], onchange, disabled = false } = $props();
+  //   paidBy: which way pays, on the selected row ("Using your Claude plan",
+  //   "Anthropic API key": a model reached by a plan or a key).
+  let { value = $bindable(''), options = [], onchange, disabled = false, paidBy = '' } = $props();
 
   function pick(v) {
     if (disabled || v === value) return;
@@ -27,6 +29,7 @@
       {#if o.images}<span class="simg">Reads images</span>{/if}
       {#if o.desc}<span class="sdesc">{o.desc}</span>{/if}
       <span class="spacer"></span>
+      {#if value === o.value && paidBy}<span class="spaid" data-testid="model-paid-by">{paidBy}</span>{/if}
       {#if value === o.value}<span class="stag">Active</span>{/if}
     </button>
   {/each}
@@ -150,6 +153,13 @@
     padding: 1px 7px;
     border-radius: var(--yap-r-sm);
     letter-spacing: 0.02em;
+    white-space: nowrap;
+    flex: 0 0 auto;
+  }
+  /* Which way pays, beside Active: quiet, as the model chip's words. */
+  .spaid {
+    font-size: 11px;
+    color: var(--yap-muted);
     white-space: nowrap;
     flex: 0 0 auto;
   }

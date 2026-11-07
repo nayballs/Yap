@@ -166,6 +166,9 @@ export const FIELD_DEFAULTS = {
   ppModel: 'openai/gpt-oss-20b',
   ppPreset: 'default',
   ppDisableThinking: false,
+  // On your Claude plan: a cleanup the plan can't answer goes once to the
+  // Anthropic key (off: the words as said; ai/claude_plan.rs fallback_key).
+  ppPlanFallback: false,
   // The on-device model loads on first use, freed after this many idle
   // minutes (0 = never); at launch only when asked (ai/local_llm/on_demand.rs).
   localModelAtLaunch: false,

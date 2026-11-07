@@ -32,6 +32,7 @@
   import ModelPicker from './ModelPicker.svelte';
   import EndpointModels from './EndpointModels.svelte';
   import ChatGptProvider from './ChatGptProvider.svelte';
+  import ClaudePlanProvider from './ClaudePlanProvider.svelte';
   // CSS order: this page is a chunk of its own (Settings.svelte's PAGES), so
   // all of its styles, the components above included, come after Settings'
   // shared styles, which the main window has already: this page's own
@@ -51,15 +52,20 @@
     MODEL_HINTS,
     CLEANUP_PROVIDER_LABELS,
     CHATGPT_PLAN_KEY,
+    CLAUDE_PLAN,
+    CLAUDE_PLAN_KEY,
+    CLAUDE_TAB,
     GPT_TAB,
     cloudTabOf,
     gptWay,
+    claudeWay,
     maskKey,
     sharedKey,
     stashCleanupKey,
     cleanupNeedsKey,
   } from '../core/providers.js';
   import { chatgpt } from '../stores/chatgpt.svelte.js';
+  import { claudePlan, signInClaudePlan } from '../stores/claudePlan.svelte.js';
   import { SCOPE_TABS, SCOPE_SUBTITLE, SCOPE_DEFAULTS } from './scopes.js';
   import { PP_PRESETS, PP_DEFAULT_BODY } from './cleanupPresets.js';
   import { lm, refreshUsage } from './languageModels.svelte.js';
@@ -157,6 +163,12 @@
   // The ChatGPT tab (ChatGptProvider.svelte): the plan or an OpenAI key, one
   // tab; clicked, the plan when it's signed in, else a saved key, else the plan.
   function onCloudTab(v) {
+    // Claude (ClaudePlanProvider.svelte, 7 Nov 2026): your Claude plan when
+    // Claude Code is signed in here, else an Anthropic key.
+    if (v === CLAUDE_TAB) {
+      const planOn = claudePlan.loaded ? claudePlan.ready : sharedKey(cfg, 'claude-plan') === CLAUDE_PLAN_KEY;
+      return onCloudProviderChange(claudeWay(planOn));
+    }
     if (v !== GPT_TAB) return onCloudProviderChange(v);
     const planOn = chatgpt.loaded ? chatgpt.plan : sharedKey(cfg, 'chatgpt') === CHATGPT_PLAN_KEY;
     onCloudProviderChange(gptWay(planOn, !!sharedKey(cfg, 'openai')));
@@ -261,12 +273,17 @@
           {#if cfg.ppProvider === 'chatgpt'}
             Sign in with ChatGPT
             <span>Cleanup is on, but until you sign in Yap types your words as they are.</span>
+          {:else if cfg.ppProvider === CLAUDE_PLAN}
+            Sign in to Claude Code
+            <span>Cleanup is on your Claude plan, but until Claude Code is signed in on this PC Yap types your words as they are.</span>
           {:else}
             Add your {CLEANUP_PROVIDER_LABELS[cfg.ppProvider] || cfg.ppProvider} API key
             <span>Cleanup is on, but without a key Yap types your words as they are.</span>
           {/if}
         </span>
-        {#if cfg.ppProvider !== 'chatgpt'}<Button size="sm" onclick={focusKey}>Add key</Button>{/if}
+        {#if cfg.ppProvider === CLAUDE_PLAN}
+          {#if claudePlan.installed && !claudePlan.tooOld}<Button size="sm" onclick={signInClaudePlan}>Sign in</Button>{/if}
+        {:else if cfg.ppProvider !== 'chatgpt'}<Button size="sm" onclick={focusKey}>Add key</Button>{/if}
       </div>
     {/if}
     {#if lm.mode === 'cloud'}
@@ -311,6 +328,25 @@
             bind:keyEditing={lm.keyEditing}
             bind:keyBox
             disabled={!cfg.postProcessEnabled}
+            compare
+          />
+        {:else if cloudTabOf(lm.cloudProvider) === CLAUDE_TAB}
+          <!-- Claude: your Claude plan (through Claude Code) or an Anthropic API key. -->
+          <ClaudePlanProvider
+            provider={lm.cloudProvider}
+            onprovider={onCloudProviderChange}
+            bind:apiKey={cfg.ppApiKey}
+            onkeyinput={stashApiKey}
+            anthropicKey={sharedKey(cfg, 'anthropic')}
+            planKey={sharedKey(cfg, 'claude-plan')}
+            bind:model={cfg.ppModel}
+            bind:keyEditing={lm.keyEditing}
+            bind:keyBox
+            disabled={!cfg.postProcessEnabled}
+            scopeName="Dictation cleanup"
+            compare
+            bind:fallback={cfg.ppPlanFallback}
+            fallbackOffered
           />
         {:else}
           <div class="keyhead">

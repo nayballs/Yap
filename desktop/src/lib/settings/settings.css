@@ -118,6 +118,11 @@
   font-size: 12.5px;
   color: var(--yap-muted);
 }
+/* Its button keeps its words on one line beside a long reason. */
+.settings-shell .set-banner > .btn {
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
 
 /* ---- details on demand: "What each provider charges ›" ---- */
 .settings-shell details.set-more > summary {
