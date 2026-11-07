@@ -5,7 +5,7 @@
   // - The **Jobs** switch (`jobsEnabled`); Claude Code on this PC, found and
   //   signed in, or Sign in (ClaudeCodeStatus).
   // - **Pay with**: Your Claude plan / API key (`jobsPay`), saying which is
-  //   in use, and for the key whether Language Models has an Anthropic one.
+  //   in use, and for the key whether Language Models' Claude tab has one.
   // - **Defaults**: model and effort (`jobsModel`, `jobsEffort`), the Mode a
   //   new chat starts in (`jobsMode`; Bypass permissions asks once).
   // - **Folders** (`job_folders_*`): name, path and a cap ("Never above:"),
@@ -81,8 +81,8 @@
   const payLine = $derived(
     cfg.jobsPay === 'key'
       ? hasKey
-        ? 'Jobs are charged to the Anthropic API key in Language Models.'
-        : "There's no Anthropic API key in Language Models yet: add one there, or jobs can't start."
+        ? "Jobs are charged to the API key on Language Models' Claude tab."
+        : "There's no Claude API key in Language Models yet: add one on its Claude tab, or jobs can't start."
       : "Jobs use your Claude plan's limits, through Claude Code's own sign-in. Each job shows what it would have cost on the API."
   );
   const history = $derived(showAll ? jobs.list : jobs.list.slice(0, 20));
@@ -212,7 +212,7 @@
   {#if cfg.jobsPay === 'key' && !hasKey}
     <Row>
       <p class="set-note">
-        <button type="button" class="set-link" onclick={() => goto?.('cleanup')}>Add an Anthropic key in Language Models</button>
+        <button type="button" class="set-link" onclick={() => goto?.('cleanup#chat')}>Add an API key on Language Models' Claude tab</button>
       </p>
     </Row>
   {/if}

@@ -190,6 +190,14 @@ const chip = (main) => main.getByTestId('chat-mode-chip');
 const modeMenu = (main) => main.getByRole('menu', { name: 'Mode' });
 const tab = (main) => main.getByTestId('chat-job');
 
+/** The Mode menu open from its chip, the keyboard in it. */
+async function openMode(main) {
+  await chip(main).click();
+  await expect(modeMenu(main)).toBeVisible();
+  await expect(modeMenu(main).locator('[role="menuitemradio"]:focus')).toHaveCount(1);
+  return modeMenu(main);
+}
+
 async function send(main, text) {
   await main.getByRole('textbox', { name: 'Message' }).fill(text);
   await main.getByRole('button', { name: 'Send' }).click();
@@ -281,14 +289,16 @@ test('core/jobs.js: status, cost by how it is paid, time, steps, pills, problems
   expect([isLive('queued'), isLive('asking'), isLive('done')]).toEqual([true, true, false]);
 
   // Plan and key, told apart.
+  // (In a plan chat's answers' words: core/aiModel.js paidLine, core/money.js.)
   expect(money(0.041)).toBe('$0.04');
+  expect(money(0.0042)).toBe('$0.0042');
   expect(money(0.004)).toBe('$0.004');
-  expect(money(0.0002)).toBe('< $0.001');
-  expect(money(0)).toBe('$0.00');
+  expect(money(0.00002)).toBe('under $0.0001');
+  expect(costLine({ pay: 'plan', cost: 0.0042 })).toBe('Your Claude plan · ≈ $0.0042 on the API');
   expect(costLine({ pay: 'plan', cost: 0.041 })).toBe('Your Claude plan · ≈ $0.04 on the API');
   expect(costLine({ pay: 'plan', cost: 0 })).toBe('Your Claude plan');
-  expect(costLine({ pay: 'key', cost: 0.041 })).toBe('API key · $0.04');
-  expect(costLine({ pay: 'key', cost: 0 })).toBe('API key · $0.00');
+  expect(costLine({ pay: 'key', cost: 0.0042 })).toBe('API key · $0.0042');
+  expect(costLine({ pay: 'key', cost: 0 })).toBe('API key');
 
   expect([duration(12), duration(185), duration(3900), duration(7200)]).toEqual(['12 s', '3 min', '1 h 5 min', '2 h']);
   expect(elapsed({ status: 'running', startedTs: 1000 }, 1090)).toBe('1 min');
@@ -370,9 +380,7 @@ test('the Mode chip: only with Jobs on, Claude Code’s words, keys 1–5, kept 
   await expect(chip(main)).toHaveText('Auto');
 
   // Its menu, worded as Claude Code's.
-  await chip(main).click();
-  const menu = modeMenu(main);
-  await expect(menu).toBeVisible();
+  const menu = await openMode(main);
   await expect(menu.locator('.mtitle')).toHaveText('Mode');
   const items = menu.getByRole('menuitemradio');
   await expect(items.locator('.mname')).toHaveText(['AutoRecommended', 'Manual', 'Accept edits', 'Plan', 'Bypass permissions']);
@@ -400,13 +408,13 @@ test('the Mode chip: only with Jobs on, Claude Code’s words, keys 1–5, kept 
   await expect.poll(async () => (await yap.invoke('job_mode_get', { conversation: first })).mode).toBe('manual');
 
   // ↓ and Enter: the next one; Esc closes without a change.
-  await chip(main).click();
+  await openMode(main);
   await expect(modeMenu(main).getByRole('menuitemradio').nth(1)).toBeFocused();
   await main.keyboard.press('ArrowDown');
   await main.keyboard.press('Enter');
   await expect(chip(main)).toHaveText('Accept edits');
   expect((await yap.invoke('job_mode_get', { conversation: first })).mode).toBe('acceptEdits');
-  await chip(main).click();
+  await openMode(main);
   await main.keyboard.press('Escape');
   await expect(modeMenu(main)).toHaveCount(0);
   await expect(chip(main)).toHaveText('Accept edits');
@@ -424,7 +432,8 @@ test('the Mode chip: only with Jobs on, Claude Code’s words, keys 1–5, kept 
   await expect(chip(main)).toHaveText('Accept edits');
   // A new chat's pick never goes to a conversation opened from the list.
   await main.getByRole('button', { name: 'New chat' }).click();
-  await chip(main).click();
+  await expect(chip(main)).toHaveText('Auto');
+  await openMode(main);
   await main.keyboard.press('4');
   await expect(chip(main)).toHaveText('Plan');
   await main.locator(`.convs [data-conv="${second}"]`).click();
@@ -433,8 +442,7 @@ test('the Mode chip: only with Jobs on, Claude Code’s words, keys 1–5, kept 
 
   // Dark.
   await theme(yap, main, 'dark');
-  await chip(main).click();
-  await expect(modeMenu(main)).toBeVisible();
+  await openMode(main);
   await shot(main, '02-mode-menu-dark');
   await main.keyboard.press('Escape');
   await theme(yap, main, 'light');
@@ -449,7 +457,7 @@ test('Bypass permissions asks once, then the chip is amber and switches freely',
   const conversation = await shownConversation(main);
 
   // The first time: the warning.
-  await chip(main).click();
+  await openMode(main);
   await main.keyboard.press('5');
   const dialog = main.getByRole('alertdialog', { name: 'Use Bypass permissions?' });
   await expect(dialog).toBeVisible();
@@ -460,8 +468,7 @@ test('Bypass permissions asks once, then the chip is amber and switches freely',
   expect((await yap.invoke('job_mode_get', { conversation })).mode).toBe('auto');
 
   // OK: confirmed, set, amber.
-  await chip(main).click();
-  await modeMenu(main).getByRole('menuitemradio', { name: /Bypass permissions/ }).click();
+  await (await openMode(main)).getByRole('menuitemradio', { name: /Bypass permissions/ }).click();
   await dialog.getByRole('button', { name: 'Use Bypass permissions' }).click();
   await expect(chip(main)).toHaveAttribute('data-mode', 'bypassPermissions');
   await expect(chip(main)).toHaveText('Bypass permissions');
@@ -486,11 +493,11 @@ test('Bypass permissions asks once, then the chip is amber and switches freely',
   await theme(yap, main, 'light');
 
   // From now on it switches freely, like Claude Code's.
-  await chip(main).click();
+  await openMode(main);
   await main.keyboard.press('1');
   await expect(chip(main)).toHaveText('Auto');
   await expect(chip(main)).not.toHaveClass(/bypass/);
-  await chip(main).click();
+  await openMode(main);
   await main.keyboard.press('5');
   await expect(main.getByRole('alertdialog')).toHaveCount(0);
   await expect(chip(main)).toHaveAttribute('data-mode', 'bypassPermissions');
@@ -722,7 +729,9 @@ test('a job Claude Code turned away: said plainly, with Sign in; the report card
   expect(job.problem?.kind).toBe('notSignedIn');
   const problem = main.getByTestId('chat-job-problem');
   await expect(problem).toHaveAttribute('data-kind', 'notSignedIn');
-  await expect(problem.locator('.pline')).toHaveText("Claude Code isn't signed in. Sign in to Claude Code, then try again.");
+  // Claude Code's problem in Rust's own words (claude_code/events.rs `Problem::message`).
+  await expect(problem.locator('.pline')).toContainText("Claude Code isn't signed in");
+  await expect(problem.locator('.pcheck')).toHaveText('Sign in to Claude Code, then press Continue.');
   await expect(problem.getByRole('button', { name: 'Sign in' })).toBeVisible();
   await problem.getByRole('button', { name: 'Sign in' }).click();
   await expect(tab(main).getByRole('button', { name: 'Continue' })).toBeVisible();
@@ -748,7 +757,8 @@ test('a job paid by the API key says so, and History tells plan and key apart', 
   await expect(rows.first()).toBeVisible();
   const costs = await dialog.getByTestId('jobs-history-cost').allTextContents();
   expect(costs[0]).toBe('API key · $0.002');
-  expect(costs.some((c) => c.startsWith('Your Claude plan'))).toBe(true);
+  // The jobs before it ran on the plan: said as the plan's.
+  for (const c of costs.slice(1)) expect(c).toMatch(/^Your Claude plan( · ≈ \$[\d.]+ on the API)?( · Undone)?$/);
   await closeSettings(main);
 });
 
@@ -778,7 +788,7 @@ test('Settings → Jobs: the switch, Claude Code, pay with, defaults, folders, a
   const pay = dialog.locator('[data-setting="jobs-pay"]');
   await expect(pay).toContainText("Jobs use your Claude plan's limits");
   await pay.getByRole('tab', { name: 'API key' }).click();
-  await expect(pay).toContainText("There's no Anthropic API key in Language Models yet");
+  await expect(pay).toContainText("There's no Claude API key in Language Models yet");
   await expect.poll(async () => (await yap.invoke('get_config')).jobsPay).toBe('key');
   await pay.getByRole('tab', { name: 'Your Claude plan' }).click();
   await expect.poll(async () => (await yap.invoke('get_config')).jobsPay).toBe('plan');

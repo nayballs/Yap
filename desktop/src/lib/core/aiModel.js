@@ -7,6 +7,8 @@ import { invoke } from '@tauri-apps/api/core';
 import { familyIcon, providerIcon } from './modelIcons.js';
 import { modelsFor, modelLabel } from '../stores/modelCatalog.svelte.js';
 import { PROVIDER_LABELS, KEYED_PROVIDERS as CLOUD_ORDER } from './providers.js';
+// Millionths of a dollar as an answer's line says them (shared with the Jobs screens).
+import { dollars } from './money.js';
 
 /**
  * The model a scope's next call goes to ("chat": the Chat scope, as
@@ -57,13 +59,6 @@ export function modelLine(m) {
   return [modelName(m), providerName(m)].filter(Boolean).join(' · ');
 }
 
-/** Millionths of a dollar as an answer's line says them: "$0.004", "$0.0004", "under $0.0001". */
-function dollars(micros) {
-  const usd = (Number(micros) || 0) / 1_000_000;
-  if (usd < 0.0001) return 'under $0.0001';
-  if (usd < 0.01) return `$${usd.toFixed(4).replace(/0+$/, '')}`;
-  return `$${usd.toFixed(2)}`;
-}
 
 /**
  * **An answer's model line, with how it was paid** (Chat's byline): Claude

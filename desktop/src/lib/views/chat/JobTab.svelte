@@ -26,6 +26,7 @@
   import { renderMarkdown } from '../../core/markdown.js';
   import { isLive, statusWord, statusTone, costLine, elapsed, stepsOf, stepKind, problemWords, modeLabel, modelLabel } from '../../core/jobs.js';
   import { EFFORT_LABELS } from '../../core/effort.js';
+  import { claudePlan, signInClaudePlan } from '../../stores/claudePlan.svelte.js';
 
   /** `doc`: the panel's state (its `job`, a JobRef); `narrow`: no room beside the chat (no expand). */
   let { doc, narrow = false } = $props();
@@ -172,12 +173,10 @@
     await act('open', 'job_open_terminal');
   }
 
+  // Claude Code's own sign-in, in a terminal (the Claude tab's, stores/claudePlan.svelte.js).
   async function signIn() {
-    try {
-      await invoke('claude_code_sign_in');
-    } catch (e) {
-      toast({ title: "Couldn't open Claude Code's sign-in", description: String(e?.message ?? e), variant: 'destructive' });
-    }
+    await signInClaudePlan();
+    if (claudePlan.failed) toast({ title: "Couldn't open Claude Code's sign-in", description: claudePlan.failed, variant: 'destructive' });
   }
 
   async function undo() {
@@ -367,7 +366,8 @@
         }}
       >
         <input type="text" bind:value={message} placeholder="Tell the job…" aria-label="Tell the job" maxlength="4000" autocomplete="off" />
-        <button type="submit" class="tsend" disabled={!message.trim() || !!busy} aria-label="Send to the job" title="Send to the job">
+        <!-- Named apart from Chat's own Send (the message box's). -->
+        <button type="submit" class="tsend" disabled={!message.trim() || !!busy} aria-label="Tell the job" title="Tell the job (Enter)">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12h14M13 6l6 6-6 6" /></svg>
         </button>
       </form>

@@ -5,6 +5,7 @@
 // the answer that started it, a problem in plain words with its one button
 // — and the Mode chip's keys. No Svelte state: pure, tested by
 // desktop/e2e/jobs-ui.spec.js.
+import { dollars } from './money.js';
 
 /** A job's status as the screens say it. */
 export const STATUS_WORDS = {
@@ -32,25 +33,21 @@ export function statusTone(status) {
   return 'idle';
 }
 
-/** Dollars, as small as a job's cost can be: "$0.04", "$0.004", "< $0.001". */
-export function money(usd) {
-  const c = Number(usd);
-  if (!(c > 0)) return '$0.00';
-  if (c >= 0.01) return `$${c.toFixed(2)}`;
-  if (c >= 0.001) return `$${c.toFixed(3)}`;
-  return '< $0.001';
-}
+/** Dollars as an answer's byline says them (core/money.js): "$0.04", "$0.0042", "under $0.0001". */
+export const money = (usd) => dollars((Number(usd) || 0) * 1_000_000);
 
 /**
- * **How a job is paid, and what it cost**, told apart: on the person's
- * Claude plan the cost is only what the API would have charged ("Your
- * Claude plan · ≈ $0.04 on the API"; Claude Code's estimate); on their API
- * key it's what it cost ("API key · $0.04").
+ * **How a job is paid, and what it cost**, told apart — in the words of a
+ * plan chat's answers (core/aiModel.js `paidLine`): on the person's Claude
+ * plan the cost is only what the API would have charged ("Your Claude plan
+ * · ≈ $0.0042 on the API"; Claude Code's estimate); on their API key it's
+ * what it cost ("API key · $0.0042"). Nothing yet: the way alone.
  */
 export function costLine(job) {
   const cost = Number(job?.cost) || 0;
-  if (job?.pay === 'key') return `API key · ${money(cost)}`;
-  return cost > 0 ? `Your Claude plan · ≈ ${money(cost)} on the API` : 'Your Claude plan';
+  const way = job?.pay === 'key' ? 'API key' : 'Your Claude plan';
+  if (!(cost > 0)) return way;
+  return job?.pay === 'key' ? `API key · ${money(cost)}` : `Your Claude plan · ≈ ${money(cost)} on the API`;
 }
 
 /** Seconds as the screens say a length of time: "12 s", "3 min", "1 h 5 min". */
