@@ -1706,7 +1706,10 @@ are **Your Claude plan** and **Jobs**.
   `claude_code_status {refresh?}` and `claude_code_sign_in`.
 - **Sign in** (`open_sign_in`): Windows Terminal, else PowerShell, on `claude
   auth login`, never piped and never in Yap's kill-on-close job (it stays
-  open if Yap quits). Test runs open nothing.
+  open if Yap quits). Test runs open nothing. The terminal itself
+  (`cli/terminal.rs`, shared with a Job's Open in terminal): `wt.exe` also
+  found off `PATH` (its WindowsApps alias), a console of its own with none
+  of Yap's handles, out of Yap's job ([jobs.md](./jobs.md)).
 - Debug builds: `YAP_CLAUDE_EXE` names the program to run instead, and
   `YAP_CLAUDE_ARGS_PREFIX` (a JSON array) the arguments before Claude Code's
   (`["fake-claude","<script.jsonl>"]`). A test run without them finds no
