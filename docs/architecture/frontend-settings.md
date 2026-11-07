@@ -619,7 +619,7 @@ on an element that also has a `settings.css` class (`set-note`,
   **Copy for Claude**, Clear all), the privacy line. With no AI model, a note
   at the top.
 - **Jobs** (`jobs`, `settings/JobsPage.svelte`, under Assistant, 2026-11-07;
-  [jobs.md](./jobs.md#the-screens)): "Hand a task to your own Claude Code
+  [jobs.md](./jobs.md#around-the-tab)): "Hand a task to your own Claude Code
   from Chat or the Voice Assistant. It works in a folder you chose, and tells
   you what it did." **Jobs** (`jobsEnabled`, off); **Claude Code**
   (`ClaudeCodeStatus.svelte`, on the plan card's store: found and its
@@ -638,8 +638,9 @@ on an element that also has a `settings.css` class (`set-note`,
   workspace…**, the folder picker; "A workspace's own Claude settings and MCP
   servers also run."; the Bypass warning on a folder with no cap once Bypass
   is confirmed; "No workspaces yet…"; **Animate Code chats**, `jobsAnimate`,
-  jobs.md "Code chats"); **Ask before starting a job** (`jobsAsk`) and **Read job
-  reports aloud** (`jobsSpeak`); the limits ("Backups of changed files are
+  jobs.md "Code chats"); **Ask before starting a job** (`jobsAsk`: When it
+  matters, the default — a workspace jobs haven't used yet, or after the chat
+  read the web —, Always, Never) and **Read job reports aloud** (`jobsSpeak`); the limits ("Backups of changed files are
   kept 7 days. One job at a time per workspace, at most 3 at once.") and, small,
   "Undo needs Claude Code's hooks, which back up each file before a job
   changes it. If a policy set by your organisation turns hooks off, no
