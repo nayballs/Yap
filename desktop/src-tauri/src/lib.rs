@@ -473,6 +473,7 @@ pub fn run() {
             chat::documents::chat_quote_set,
             chat::think::chat_think_info,
             chat::stream::stream_stop,
+            chat::stream::chat_answering,
             ai::ai_model::ai_model_status,
             ai::ai_model::chat_set_model,
             ai::ai_model::chat_provider_key,
@@ -1318,6 +1319,8 @@ pub fn run() {
             snip::init(&handle);
             // Pages beside the chat (chat/pages/view.rs): the model's shots.
             chat::pages::view::init(&handle);
+            // Which conversations are answering (chat/stream.rs): Chat's status dots.
+            chat::stream::init(&handle);
 
             // A saved transform's shortcut (transforms.rs): its slot, run on
             // its own thread.

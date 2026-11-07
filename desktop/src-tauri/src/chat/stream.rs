@@ -41,13 +41,19 @@
 //!   so far is kept (checked like any answer, `turn::chat_turn`). **A
 //!   newer question** to the same conversation ends a turn still answering
 //!   there the same way, with nothing saved ([`Halt::Superseded`]).
+//! - **Which conversations are answering** ([`ANSWERING_EVENT`],
+//!   [`chat_answering`]): every turn that answers a conversation — typed,
+//!   dictated, the Voice Assistant's, a phone's, a job's report — is in one
+//!   list, and every window hears it change (Chat's status dots,
+//!   `core/chatStatus.js`).
 
 use std::collections::HashMap;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
 use serde::Serialize;
 use serde_json::{json, Value};
+use tauri::{AppHandle, Emitter};
 
 use crate::chat::chats::Source;
 use crate::ai::llm::Delta;
@@ -695,6 +701,50 @@ static ANSWERING: Mutex<Option<Answering>> = Mutex::new(None);
 /// Numbers the turns that answer a conversation ([`Stoppable::answers`]).
 static TURNS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 
+/// **The conversations answering now**, to every window, each time the list
+/// changes: `{conversations: [id…], seq}` (`seq` grows with every change, so
+/// a page drops one that arrives after a newer one).
+pub const ANSWERING_EVENT: &str = "yap-chat-answering";
+static APP: OnceLock<AppHandle> = OnceLock::new();
+/// Counts the changes to [`ANSWERING`], under its lock.
+static ANSWERING_SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+/// The app, for [`ANSWERING_EVENT`] (set once at start; a unit test has none).
+pub fn init(app: &AppHandle) {
+    let _ = APP.set(app.clone());
+}
+
+/// The conversations answering and the change's number (call it under
+/// [`ANSWERING`]'s lock, after the change).
+fn answering_now(map: &Answering, changed: bool) -> (Vec<u64>, u64) {
+    let seq = if changed {
+        ANSWERING_SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1
+    } else {
+        ANSWERING_SEQ.load(std::sync::atomic::Ordering::Relaxed)
+    };
+    let mut ids: Vec<u64> = map.keys().copied().collect();
+    ids.sort_unstable();
+    (ids, seq)
+}
+
+/// The pages hear the list (after the lock is let go).
+fn tell_answering((ids, seq): (Vec<u64>, u64)) {
+    if let Some(app) = APP.get() {
+        let _ = app.emit(ANSWERING_EVENT, json!({ "conversations": ids, "seq": seq }));
+    }
+}
+
+/// **The conversations answering now** (a page that just opened):
+/// `{conversations: [id…], seq}`, as [`ANSWERING_EVENT`] says them.
+#[tauri::command]
+pub fn chat_answering() -> Value {
+    let (ids, seq) = {
+        let mut g = ANSWERING.lock().unwrap_or_else(|p| p.into_inner());
+        answering_now(g.get_or_insert_with(HashMap::new), false)
+    };
+    json!({ "conversations": ids, "seq": seq })
+}
+
 /// A turn's answer that can be **stopped** (the page's ■, registered under
 /// the page's id) and **superseded** (a newer question to its conversation,
 /// once [`Stoppable::answers`] says which) until dropped.
@@ -726,11 +776,17 @@ impl Stoppable {
     /// this PC still steps aside for it and asks again, [`call`].)
     pub fn answers(&self, conversation: u64) {
         let n = TURNS.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1;
-        let older = ANSWERING
-            .lock()
-            .unwrap_or_else(|p| p.into_inner())
-            .get_or_insert_with(HashMap::new)
-            .insert(conversation, (n, Arc::clone(&self.signal)));
+        let (older, now) = {
+            let mut g = ANSWERING.lock().unwrap_or_else(|p| p.into_inner());
+            let map = g.get_or_insert_with(HashMap::new);
+            let older = map.insert(conversation, (n, Arc::clone(&self.signal)));
+            // (A newer turn in a conversation already answering: no change to the list.)
+            let now = older.is_none().then(|| answering_now(map, true));
+            (older, now)
+        };
+        if let Some(now) = now {
+            tell_answering(now);
+        }
         *self.answering.lock().unwrap_or_else(|p| p.into_inner()) = Some((conversation, n));
         if let Some((_, older)) = older.filter(|(_, s)| !Arc::ptr_eq(s, &self.signal)) {
             tracing::info!(conversation, "A newer question in the conversation replaces the answer still coming");
@@ -742,7 +798,7 @@ impl Stoppable {
     /// `false` (and nothing changed) while one does. A turn Yap starts by
     /// itself (a job's report, `turn/report.rs`) waits for it, never ends it.
     pub fn answers_if_idle(&self, conversation: u64) -> bool {
-        let n = {
+        let (n, now) = {
             let mut g = ANSWERING.lock().unwrap_or_else(|p| p.into_inner());
             let map = g.get_or_insert_with(HashMap::new);
             if map.contains_key(&conversation) {
@@ -750,8 +806,9 @@ impl Stoppable {
             }
             let n = TURNS.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1;
             map.insert(conversation, (n, Arc::clone(&self.signal)));
-            n
+            (n, answering_now(map, true))
         };
+        tell_answering(now);
         *self.answering.lock().unwrap_or_else(|p| p.into_inner()) = Some((conversation, n));
         true
     }
@@ -776,11 +833,15 @@ impl Drop for Stoppable {
         }
         let answering = *self.answering.lock().unwrap_or_else(|p| p.into_inner());
         if let Some((conversation, n)) = answering {
-            if let Some(map) = ANSWERING.lock().unwrap_or_else(|p| p.into_inner()).as_mut() {
+            let now = ANSWERING.lock().unwrap_or_else(|p| p.into_inner()).as_mut().and_then(|map| {
                 // Only its own entry: a newer turn's stays.
-                if map.get(&conversation).is_some_and(|(m, _)| *m == n) {
+                map.get(&conversation).is_some_and(|(m, _)| *m == n).then(|| {
                     map.remove(&conversation);
-                }
+                    answering_now(map, true)
+                })
+            });
+            if let Some(now) = now {
+                tell_answering(now);
             }
         }
     }
@@ -1889,5 +1950,37 @@ mod tests {
             // Another chat's report never waits for this one.
             assert!(Stoppable::new(None).answers_if_idle(90_012));
         });
+    }
+
+    // Chat's status dots (core/chatStatus.js) read which conversations are
+    // answering: a turn's conversation from its question to its end, a newer
+    // turn there keeping it in the list, only the turn's own end taking it out.
+    #[test]
+    fn the_conversations_answering_are_listed_while_their_turns_run() {
+        let listed = |id: u64| {
+            let now = chat_answering();
+            now["conversations"].as_array().unwrap().iter().any(|v| v.as_u64() == Some(id))
+        };
+        let seq = || chat_answering()["seq"].as_u64().unwrap();
+        let chat = 90_021;
+        assert!(!listed(chat));
+        let before = seq();
+        let first = Stoppable::new(None);
+        first.answers(chat);
+        assert!(listed(chat), "answering from its question");
+        assert!(seq() > before, "a change is numbered");
+        // A newer question there: still answering, the older turn's end leaves it in.
+        let newer = Stoppable::new(None);
+        newer.answers(chat);
+        drop(first);
+        assert!(listed(chat), "the newer turn still answers");
+        drop(newer);
+        assert!(!listed(chat), "out once its turn ends");
+        // A report's turn too.
+        let report = Stoppable::new(None);
+        assert!(report.answers_if_idle(chat));
+        assert!(listed(chat));
+        drop(report);
+        assert!(!listed(chat));
     }
 }

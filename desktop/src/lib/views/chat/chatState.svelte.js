@@ -23,6 +23,9 @@ import { fmtContext } from '../../core/aiUsage.js';
 import { SkillPicker } from '../../stores/skills.svelte.js';
 import { think, takeThink } from './chatThink.svelte.js';
 import { createDocPanel } from './chatDoc.svelte.js';
+// Chat's status dots (stores/chatStatus.svelte.js): the list as read here,
+// and the ask-first cards waiting in a turn (needs you).
+import { tookList, cardAsked, turnOver } from '../../stores/chatStatus.svelte.js';
 
 // The sources an answer's citations point at: its own, else — a follow-up
 // that cites "[1]" from an earlier answer without searching again ("the
@@ -471,6 +474,7 @@ export function createChatState({ onopensettings = () => null, onopennote = () =
   async function refreshList() {
     try {
       conversations = (await invoke('chats_list')) || [];
+      tookList(conversations);
     } catch {
       conversations = [];
     }
@@ -685,6 +689,8 @@ export function createChatState({ onopensettings = () => null, onopennote = () =
   const followed = (p) => !p?.userMessageId || !assistantTurn || p.userMessageId === assistantTurn;
   function followAssistantStream(p) {
     const id = p?.conversationId;
+    // An ask-first card in a spoken question's turn waits on the person (the status dots).
+    if (p?.event?.kind === 'confirm') cardAsked(id, p.event);
     if (id == null || id !== activeId || assistantPending !== id || !followed(p)) return;
     if (p.event?.kind === 'page' && p.event.page?.url) assistantPagesShown.add(p.event.page.url);
     // The screen the model looked at (look_at_screen): with the question
@@ -733,6 +739,7 @@ export function createChatState({ onopensettings = () => null, onopennote = () =
       // An older question a newer one replaced ends after the newer was
       // asked: the newer one stays pending.
       if (!followed(p)) return;
+      turnOver(id);
       assistantPending = null;
       assistantTurn = null;
       doc.turnEnded();
@@ -1012,7 +1019,12 @@ export function createChatState({ onopensettings = () => null, onopennote = () =
     let shownOffers = [];
     activity = null;
     activityWaiting = false;
+    // The conversation it went to, for the status dots: an ask-first card
+    // waiting there is "needs you", even once Chat is left.
+    let cardsIn = activeId;
     const onEvent = (ev) => {
+      if (ev?.kind === 'turn' && ev.conversationId != null) cardsIn = ev.conversationId;
+      if (ev?.kind === 'confirm') cardAsked(cardsIn, ev);
       if (!alive) return;
       if (ev?.kind === 'turn') {
         askedId = ev.userMessageId ?? null;
@@ -1238,6 +1250,8 @@ export function createChatState({ onopensettings = () => null, onopennote = () =
     } finally {
       // Nothing is being written into the document any more.
       doc.turnEnded();
+      // (No card of its waits any more.)
+      turnOver(cardsIn);
       sending = false;
       stopping = false;
       stopAnswerCall = null;

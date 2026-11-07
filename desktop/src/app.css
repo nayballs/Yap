@@ -134,6 +134,16 @@ body {
   --yap-code-light-width: 1.5px;
   --yap-code-light-dur: 4.5s;
 
+  /* Chat's status dots (core/chatStatus.js, views/chat/StatusDot.svelte):
+     working pulses in the side's own accent (Yap's on Chat, the Code teal
+     on Code), needs you is the warning amber with a soft ring, new is a
+     calm blue that's in no other part of Yap */
+  --yap-status-working: var(--yap-primary);
+  --yap-status-working-code: var(--yap-code);
+  --yap-status-needs: var(--yap-warning);
+  --yap-status-needs-ring: rgba(176, 124, 16, 0.22);
+  --yap-status-new: #2f6fd8;
+
   /* display face — EB Garamond, Wispr's exact serif (stat numerals, hero
      headlines, settings titles; bundled in main.js) */
   --yap-font-display: 'EB Garamond Variable', Georgia, 'Palatino Linotype', 'Times New Roman', serif;
@@ -511,6 +521,9 @@ body {
   --yap-code-tint: rgba(108, 192, 204, 0.16);
   --yap-code-label-bg: #1d2a2c;
   --yap-code-glow: rgba(130, 214, 226, 0.95);
+  /* Chat's status dots: the warning's ring and a blue for the dark surfaces */
+  --yap-status-needs-ring: rgba(220, 160, 60, 0.26);
+  --yap-status-new: #6ea6ff;
 
   --yap-rule: #2c2822;
   --yap-link: #f0b04a;

@@ -118,8 +118,10 @@ The feature keeps the name **Jobs**, in one constant (`core/codeChats.js`
 - **The Code side's list** (`core/codeChats.js` `groupByWorkspace`): a group
   per workspace (its name, its path on hover, folding), its chats newest
   first, the groups by their newest chat; the running jobs above
-  (`RunningJobs.svelte`); a dot on the switch's Code while a job runs and the
-  Chat side shows.
+  (`RunningJobs.svelte`); each row's status dot (working in the Code teal,
+  amber while a step, a card, a question or a plan waits on the person, blue
+  for a report not seen yet), a folded group's and the switch's Code from
+  the Chat side ([chat-and-assistant.md](./chat-and-assistant.md#status-dots-in-chats-list-2026-11-07)).
 - **The look** (`views/chat/codeChat.css`, every value a `--yap-code*` token
   in app.css, light and dark): a calm teal, never the amber Bypass wears; a
   thin accent edge on the box with "Code · garden-planner" on its top edge
@@ -967,6 +969,10 @@ the build's own stand-in replaying `script` from now on),
   `claude_plan::sessions` (the transcript under the workspace by its ids),
   `claude_live` (a run without memory), `memory::learn` (never learned).
   - `chat-scroll.spec.js` covers a job's cards and report in Chat's thread.
+  - `chat-status.spec.js`: Chat's status dots for jobs — a job running in a
+    Code chat you left, a folded workspace, the switch's Code, the rail; a
+    permission prompt and an ask-first card (needs you); a report landing
+    elsewhere (new).
 
 ## Tried for real, and not yet
 
