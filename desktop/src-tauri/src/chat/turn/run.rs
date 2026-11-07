@@ -92,7 +92,7 @@ pub(super) async fn with_tools(
         web_question: t.about_selection.as_ref().is_some_and(|s| s.web),
         // Jobs (tools/jobs.rs): asked out loud, a job that needs asking is
         // asked in words; asked by voice, its report is read aloud.
-        jobs: g.jobs.then_some(crate::chat::tools::JobsTurn { aloud: t.scope == Some("assistant"), voice: t.by_voice || t.scope == Some("assistant") }),
+        jobs: g.jobs.then_some(crate::chat::tools::JobsTurn::asked(t.scope, t.by_voice)),
     };
     let looped = crate::chat::tools::run_tool_loop_with(
         &built.prompt.system,

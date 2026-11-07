@@ -89,7 +89,9 @@ impl Gates {
     /// Code's web search and page reads and Yap's read-only tools. No
     /// documents beside the chat, no pictures from the web, no pages to
     /// bring up or act on, no look at the screen: those are Yap's tool
-    /// loop's, which a plan turn never runs.
+    /// loop's, which a plan turn never runs. Jobs stay as they are (on,
+    /// not across the meetings): their tools go over Yap's run endpoint
+    /// (`integrations/claude_live/jobs.rs`), the tool loop's own code.
     fn on_the_plan(self) -> Gates {
         Gates {
             strong: false,
@@ -99,8 +101,6 @@ impl Gates {
             pictures: Gate::Off,
             screen: Gate::Off,
             act: false,
-            // Jobs from a plan chat come later (its tools over Yap's endpoint).
-            jobs: false,
             ..self
         }
     }
@@ -191,5 +191,9 @@ mod tests {
         let plan = Gates::for_turn(&cfg, &endpoint(crate::ai::claude_plan::PROVIDER, "claude-opus-5-5"), None, false, true);
         assert!(plan.tools && plan.web_on && !plan.strong && !plan.act && !plan.claude_in_chat && !plan.own_search);
         assert_eq!((plan.pictures, plan.screen), (Gate::Off, Gate::Off));
+        // …and keeps jobs as the turn has them (over Yap's run endpoint).
+        assert!(Gates { jobs: true, ..plan }.on_the_plan().jobs);
+        assert!(!Gates { jobs: false, ..plan }.on_the_plan().jobs);
+        assert!(!Gates::for_turn(&YapConfig { jobs_enabled: true, ..cfg.clone() }, &endpoint(crate::ai::claude_plan::PROVIDER, "claude-opus-5-5"), Some("meetings"), true, false).jobs, "never across the meetings");
     }
 }

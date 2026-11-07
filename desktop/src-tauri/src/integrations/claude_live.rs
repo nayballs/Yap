@@ -14,7 +14,8 @@
 //!   (403 / 404 / 401). No CORS headers, ever. The key is only ever in the
 //!   run's command-line JSON and in memory, never in a log or a file.
 //! - **A run** ([`register_run`] → [`RunHandle`]): its label, its tools
-//!   ([`Tools::Chat`]: read only; [`Tools::Job`]: `approve`), where its
+//!   ([`Tools::Chat`]: read only, plus Jobs' when offered; [`Tools::Job`]:
+//!   `approve`), where its
 //!   backups go, and who to ask ([`Approval`]). The handle gives the run's
 //!   `--mcp-config` and `--settings` JSON; dropping it (or [`RunHandle::end`])
 //!   unregisters the run, and a permission prompt still waiting is denied.
@@ -30,6 +31,13 @@
 //!   folders (the same views, `mcp::run_tool`, read in process), Yap's memory
 //!   (`search_memory`) and the calendar (`check_calendar`, offered while one
 //!   is connected). Read only; never the dictation history.
+//! - **Jobs' tools** ([`jobs`]), for a Chat run offered them
+//!   ([`RunSpec::jobs`]): `start_job`, `job_status`, `message_job` and
+//!   `stop_job`, the tool loop's own code and rules, for the chat turn the
+//!   call belongs to ([`turn`]: [`RunHandle::begin_turn`] gives a run its
+//!   turn's question, the answer before it, the conversation, where it was
+//!   asked, and its stream; the web flag; the order of Claude Code's events
+//!   and its calls).
 //! - **`approve`** ([`approve`]), a Job's permission prompt tool: a card for
 //!   the person (`yap-claude-approve`), Allow once / Deny
 //!   ([`claude_approve_answer`]), no answer in 10 minutes a no. Claude Code
@@ -46,9 +54,11 @@
 
 mod approve;
 pub mod backup;
+mod jobs;
 mod reads;
 mod rpc;
 mod server;
+pub mod turn;
 
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex, OnceLock};
@@ -125,11 +135,22 @@ pub struct RunSpec {
     /// gives no `cwd`.
     pub folder: Option<PathBuf>,
     pub approval: Option<Approval>,
+    /// A Chat run offered Jobs' tools too ([`jobs`]): jobs on, Claude Code
+    /// on this PC, not across the meetings. Listed for the whole session
+    /// (its `tools/list` is read once), so a session made without them is
+    /// started again to get them (`chat/turn/plan.rs`' fingerprint).
+    pub jobs: bool,
 }
 
 impl RunSpec {
     pub fn new(label: impl Into<String>, tools: Tools) -> RunSpec {
-        RunSpec { label: label.into(), tools, backup_dir: None, folder: None, approval: None }
+        RunSpec { label: label.into(), tools, backup_dir: None, folder: None, approval: None, jobs: false }
+    }
+
+    /// The same, offered Jobs' tools (`on`).
+    pub fn with_jobs(mut self, on: bool) -> RunSpec {
+        self.jobs = on;
+        self
     }
 }
 
@@ -140,7 +161,11 @@ pub struct RunHandle {
     id: String,
     key: String,
     tools: Tools,
+    /// Offered Jobs' tools ([`RunSpec::jobs`], a Chat run's).
+    jobs: bool,
     has_backup: bool,
+    /// The chat turn its calls belong to ([`RunHandle::begin_turn`]).
+    turn: Arc<turn::Slot>,
 }
 
 impl std::fmt::Debug for RunHandle {
@@ -216,11 +241,21 @@ impl RunHandle {
     /// …), so a Chat run in `dontAsk` mode can use them. `approve` is never
     /// one: it's the permission prompt tool.
     pub fn allowed_tools(&self) -> Vec<String> {
-        rpc::tool_names(self.tools, true)
+        rpc::tool_names(self.tools, true, self.jobs)
             .into_iter()
             .filter(|n| *n != approve::NAME)
             .map(|n| format!("mcp__{SERVER}__{n}"))
             .collect()
+    }
+
+    /// **A chat turn begins on this run** (`chat/turn/plan.rs`, before its
+    /// question goes in, on every turn of a warm session): the calls Claude
+    /// Code makes from now on belong to it — its question, the answer
+    /// before it, the conversation, where it was asked, web content from its
+    /// start ([`turn::Context`]) — and what they show comes out of the
+    /// returned [`turn::Turn`]'s `events`. Dropping it ends the turn.
+    pub fn begin_turn(&self, ctx: turn::Context) -> turn::Turn {
+        self.turn.begin(ctx)
     }
 
     /// Unregister the run now (as dropping the handle does).
