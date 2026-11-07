@@ -11,9 +11,10 @@
 // report's one question on the plan (`ask`). Nobody's real Claude Code, account or files are
 // touched: the job folder is in this run's own folder.
 //
-// - Typed: asked first (the card in the plan chat's thread, the call waiting for Allow once),
-//   the job runs in the named folder, it's reported in that conversation on the plan, and the
-//   conversation's session reads the report with its next question.
+// - Typed: asked first (the job's card in the plan chat's thread, the call waiting for
+//   Start), its tab opening from the plan turn's stream, the job running in the named folder,
+//   reported in that conversation on the plan; the conversation's session reads the report
+//   with its next question.
 // - By voice: asked out loud, the spoken yes starts it, the report is spoken.
 // - Refused: the person's words don't ask for it; the Mode can't be raised; after a
 //   WebSearch in the same turn.
@@ -217,19 +218,24 @@ test('typed on the plan: asked first in the thread, the job runs in the named fo
   await freshChat(main);
   await send(main, 'Start a job in garden-planner: change Draft to Final in notes.md.');
 
-  // Asked first: the card in the plan chat's thread, the call waiting for it.
-  const card = thread(main).getByTestId('chat-page-confirm');
+  // Asked first: the job's card in the plan chat's thread (JobConfirm.svelte),
+  // the call waiting for it.
+  const card = thread(main).getByTestId('chat-job-confirm');
   await expect(card).toHaveAttribute('data-state', 'asking', { timeout: 20_000 });
   await expect(card).toContainText('Yap wants to start a job in ‘garden-planner’ (Auto)');
+  await expect(card.getByTestId('chat-job-brief')).toHaveText(brief.brief);
   expect((await jobs(yap)).length).toBe(before);
   await shot(main, '01-plan-chat-asks-before-a-job');
-  await card.getByRole('button', { name: 'Allow once' }).click();
+  await card.getByRole('button', { name: 'Start' }).click();
   await expect(card).toHaveAttribute('data-state', 'allowed');
   await expect(lastAnswer(main)).toHaveText(STARTED, { timeout: 20_000 });
   await expect(chipsOfLast(main)).toHaveText(['Started a job in garden-planner']);
+  // Its tab opened from the plan turn's stream (`Event::Job`), as the tool loop's does.
+  await expect(main.getByTestId('chat-job')).toBeVisible();
 
   // The job: in the folder named, at the chat's Mode, the question's message kept.
   const job = await ended(yap, (await newJob(yap, before)).id);
+  await expect(main.getByTestId('chat-job-status')).toHaveText('Done');
   expect(job).toMatchObject({ status: 'done', folder: 'garden-planner', path: GARDEN, brief: brief.brief, mode: 'auto', origin: 'typed', text: DONE, files: ['notes.md'] });
   expect(job.messageId).toBe(`chat:${job.conversation}:0`);
   expect(fs.readFileSync(path.join(GARDEN, 'notes.md'), 'utf8')).toBe('Final notes\n');
