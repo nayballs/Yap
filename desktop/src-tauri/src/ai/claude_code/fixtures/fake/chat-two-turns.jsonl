@@ -1,0 +1,17 @@
+// fake-claude example: a plan chat of two turns, each streamed and ended with a result. The second sleeps so an interrupt can stop it.
+// Run: YAP_CLAUDE_EXE=<yap.exe> YAP_CLAUDE_ARGS_PREFIX=["fake-claude","<this file>"]
+{"_wait_user":true}
+{"type":"system","subtype":"init","cwd":"{{cwd}}","session_id":"{{session_id}}","tools":["WebFetch","WebSearch"],"mcp_servers":[],"model":"claude-haiku-5-5","permissionMode":"dontAsk","apiKeySource":"none","claude_code_version":"2.1.296","capabilities":["interrupt_receipt_v1","interrupt_cancel_queued_v1"]}
+{"type":"stream_event","event":{"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}},"parent_tool_use_id":null,"session_id":"{{session_id}}"}
+{"type":"stream_event","event":{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"You asked: "}},"parent_tool_use_id":null,"session_id":"{{session_id}}"}
+{"_sleep_ms":200}
+{"type":"stream_event","event":{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"{{user_text}}"}},"parent_tool_use_id":null,"session_id":"{{session_id}}"}
+{"type":"stream_event","event":{"type":"content_block_stop","index":0},"parent_tool_use_id":null,"session_id":"{{session_id}}"}
+{"type":"assistant","message":{"id":"msg_fake_1","type":"message","role":"assistant","model":"claude-haiku-5-5","content":[{"type":"text","text":"You asked: {{user_text}}"}],"stop_reason":"end_turn"},"parent_tool_use_id":null,"session_id":"{{session_id}}"}
+{"type":"result","subtype":"success","is_error":false,"duration_ms":400,"num_turns":1,"result":"You asked: {{user_text}}","session_id":"{{session_id}}","total_cost_usd":0.0007,"usage":{"input_tokens":900,"output_tokens":12,"cache_creation_input_tokens":0,"cache_read_input_tokens":0},"permission_denials":[],"terminal_reason":"completed"}
+{"_wait_user":true}
+{"type":"system","subtype":"init","cwd":"{{cwd}}","session_id":"{{session_id}}","tools":["WebFetch","WebSearch"],"mcp_servers":[],"model":"claude-haiku-5-5","permissionMode":"dontAsk","apiKeySource":"none","claude_code_version":"2.1.296","capabilities":["interrupt_receipt_v1","interrupt_cancel_queued_v1"]}
+{"type":"stream_event","event":{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"Thinking about it for a while…"}},"parent_tool_use_id":null,"session_id":"{{session_id}}"}
+{"_sleep_ms":5000}
+{"type":"result","subtype":"success","is_error":false,"duration_ms":5100,"num_turns":1,"result":"Done thinking about {{user_text}}.","session_id":"{{session_id}}","total_cost_usd":0.0009,"usage":{"input_tokens":950,"output_tokens":14,"cache_creation_input_tokens":0,"cache_read_input_tokens":800},"permission_denials":[],"terminal_reason":"completed"}
+{"_wait_user":true}

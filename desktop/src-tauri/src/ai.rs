@@ -1,5 +1,6 @@
 //! AI models: what every model is told about you, the OpenAI-compatible
-//! client and its prompts, Sign in with ChatGPT (the person's own plan), cleanup styles, the on-device model (llamafile,
+//! client and its prompts, Sign in with ChatGPT (the person's own plan), the
+//! person's own Claude Code driven as a child (`claude_code`), cleanup styles, the on-device model (llamafile,
 //! GGUF headers, the graphics card), which model a call goes to and how
 //! hard it reasons (effort), the providers' live model lists, the AI usage
 //! tracker (every call's tokens) and the model evaluations.
@@ -8,6 +9,10 @@
 pub mod about_you;
 pub mod ai_model;
 pub mod chatgpt;
+// The engine Chat on your Claude plan and Jobs are built on: until they
+// are, most of its API has no caller outside its tests.
+#[allow(dead_code)]
+pub mod claude_code;
 pub mod cleanup_context;
 pub mod cleanup_format;
 pub mod cleanup_strength;
