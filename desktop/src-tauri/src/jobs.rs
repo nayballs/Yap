@@ -17,7 +17,10 @@
 //!   session with the person's own setup plus Yap's run endpoint (its
 //!   permission cards, the backup hook); followed as `yap-job` events;
 //!   stop, message, continue, undo, open in terminal.
-//! - [`steps`]: each tool call in plain words.
+//! - [`steps`]: each tool call in plain words (a command by its
+//!   description, else tidied); Claude Code's to-do list.
+//! - [`diff`]: an edit's lines removed and added, a written file's lines,
+//!   within their caps, for the tab's "Files changed".
 //! - [`consent`]: the person's own words ask for it (as opening an app).
 //! - [`voice`]: the Voice Assistant asks out loud before a job that needs
 //!   asking; the next question is the answer.
@@ -37,6 +40,7 @@ pub mod approve_card;
 pub mod code_chat;
 pub mod commands;
 pub mod consent;
+pub mod diff;
 pub mod folders;
 pub mod modes;
 pub mod runner;

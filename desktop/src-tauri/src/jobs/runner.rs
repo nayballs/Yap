@@ -19,12 +19,14 @@
 //!   the report is ready to say.
 //! - **Followed** ([`Follow`]): each tool call as a plain line
 //!   (`steps.rs`), the files it changes (its Edit / Write calls and the
-//!   backup manifest), the commands it runs, what it wasn't allowed to do,
+//!   backup manifest) and what changed in them once the call went through
+//!   (`diff.rs`), the commands it runs and what they're for, its to-do
+//!   list, what it says between its calls, what it wasn't allowed to do,
 //!   Claude Code's problems (signed out, at the plan's limit, paying
 //!   another way: that one is stopped at once) and the result — each sent
 //!   as the app event **`yap-job`** (`{id, status, folder, conversation?,
-//!   step?, file?, command?, text?, cost?, problem?, ts}`) and kept in the
-//!   job's `log.jsonl` for its tab.
+//!   step?, file?, command?, about?, said?, todos?, now?, diff?, text?,
+//!   cost?, problem?, ts}`) and kept in the job's `log.jsonl` for its tab.
 //! - **Asking**: a permission card waiting for the person (the endpoint's
 //!   `pending()`): the job is `asking` until it's answered.
 //! - **A turn ends**: the process is told its input is over and exits; a
@@ -53,6 +55,7 @@ use crate::ai::claude_code::events::{Block, Event, Problem, TurnResult};
 use crate::ai::claude_code::session::{self, ApiKey, Conversation, Effort, Pay, Session, Spec};
 use crate::integrations::claude_live::{self, Approval, RunSpec, Tools};
 
+use super::diff;
 use super::folders;
 use super::modes::{self, Mode};
 use super::steps;
@@ -87,10 +90,27 @@ pub struct JobEvent {
     /// A file it changes.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub file: Option<String>,
-    /// A command it runs.
+    /// A command it runs (its `cd` into the folder gone).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub command: Option<String>,
-    /// Its words: as it works, then its final ones.
+    /// What Claude Code said the command does (Bash's `description`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub about: Option<String>,
+    /// What it says as it works, between its tool calls (one line of the
+    /// tab's steps each).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub said: Option<String>,
+    /// Its to-do list, as its latest `TodoWrite` left it.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub todos: Option<Vec<steps::Todo>>,
+    /// The line it's on now, when that isn't a new step: the to-do in
+    /// progress once a tool call came back, the line before it asked.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub now: Option<String>,
+    /// What an edit or a write changed in a file (`diff.rs`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub diff: Option<diff::FileDiff>,
+    /// Its final words (and, from an older Yap, its words as it worked).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub text: Option<String>,
     /// The API's price so far (Claude Code's estimate).
@@ -462,6 +482,41 @@ struct Follow {
     /// One of them went through (its result not an error): the backup hook
     /// ran before it, if hooks run at all.
     edited: bool,
+    /// Tool calls not back yet, by id.
+    open: HashSet<String>,
+    /// Its to-do list, as its latest `TodoWrite` left it.
+    todos: Vec<steps::Todo>,
+    /// The line it's on now (the tab's, the running list's).
+    line: String,
+    /// Edit and Write calls whose diff goes out once they're back.
+    changes: HashMap<String, Change>,
+    /// Diff lines the job's log has (across its turns; `diff::JOB_MAX`).
+    diff_used: usize,
+}
+
+/// An Edit, MultiEdit or Write call waiting for its result: its diff goes
+/// out once it went through.
+struct Change {
+    tool: String,
+    input: serde_json::Value,
+    /// The file, as the tab says it.
+    file: String,
+    /// The job had touched the file before this call.
+    known: bool,
+}
+
+/// A Write's kind: "new" when it made the file (the backup manifest says
+/// it didn't exist before the job, and the job hadn't written it yet this
+/// time), "rewrite" when it was there, "write" when Yap can't tell (no
+/// backups made). Pure.
+fn write_kind(known: bool, state: Option<claude_live::backup::State>) -> &'static str {
+    use claude_live::backup::State;
+    match (known, state) {
+        (true, _) => "rewrite",
+        (false, Some(State::Created)) => "new",
+        (false, Some(_)) => "rewrite",
+        (false, None) => "write",
+    }
 }
 
 /// Whether `tool` is one the backup hook runs before (`Edit`, `Write`,
@@ -495,11 +550,105 @@ impl Follow {
             last_flush: Instant::now(),
             edits: HashSet::new(),
             edited: false,
+            open: HashSet::new(),
+            todos: Vec::new(),
+            line: String::new(),
+            changes: HashMap::new(),
+            diff_used: job.diff_lines as usize,
         }
     }
 
     fn event(&self, job: &Job) -> JobEvent {
         JobEvent::of(job)
+    }
+
+    /// The line it's on now is `line` (no new step): kept and said, when it
+    /// changed.
+    fn now(&mut self, line: String) {
+        if line.is_empty() || line == self.line {
+            return;
+        }
+        self.line = line.clone();
+        if let Some(job) = store::touch(&self.id, |j| j.step = line.clone()) {
+            emit(&JobEvent { now: Some(line), ..self.event(&job) });
+        }
+    }
+
+    /// A tool call: its line, its file or command; a `TodoWrite` its list.
+    fn on_tool(&mut self, id: &str, name: &str, input: &serde_json::Value) {
+        if backed_up_tool(name) {
+            self.edits.insert(id.to_string());
+        }
+        self.open.insert(id.to_string());
+        let seen = steps::of_tool(name, input, &self.folder);
+        // The to-do list: shown as a list, the line the one in progress.
+        if let Some(todos) = seen.todos {
+            self.todos = todos.clone();
+            let line = steps::doing_now(&todos).unwrap_or_else(|| self.line.clone());
+            self.line = line.clone();
+            if let Some(job) = store::touch(&self.id, |j| j.step = line.clone()) {
+                emit(&JobEvent { todos: Some(todos), now: Some(line).filter(|l| !l.is_empty()), ..self.event(&job) });
+            }
+            return;
+        }
+        let mut known = false;
+        let Some(job) = store::touch(&self.id, |j| {
+            j.step = seen.step.clone();
+            if let Some(f) = &seen.file {
+                known = j.files.contains(f);
+                if !known {
+                    j.files.push(f.clone());
+                }
+            }
+            if let Some(c) = &seen.command {
+                j.commands.push(c.clone());
+            }
+        }) else {
+            return;
+        };
+        if let (Some(file), "Edit" | "MultiEdit" | "Write") = (&seen.file, name) {
+            self.changes.insert(id.to_string(), Change { tool: name.to_string(), input: input.clone(), file: file.clone(), known });
+        }
+        self.line = seen.step.clone();
+        emit(&JobEvent { step: Some(seen.step), file: seen.file, command: seen.command, about: seen.about, ..self.event(&job) });
+    }
+
+    /// A tool call came back: an edit's diff once it went through; with
+    /// nothing else out, the line is the to-do in progress.
+    fn on_tool_result(&mut self, id: &str, is_error: bool) {
+        if !is_error && self.edits.contains(id) {
+            self.edited = true;
+        }
+        self.open.remove(id);
+        if let Some(change) = self.changes.remove(id).filter(|_| !is_error) {
+            self.diff_of(change);
+        }
+        if self.open.is_empty() {
+            if let Some(line) = steps::doing_now(&self.todos) {
+                self.now(line);
+            }
+        }
+    }
+
+    /// What `change` did to its file, within the caps, said and logged.
+    fn diff_of(&mut self, change: Change) {
+        let d = if change.tool == "Write" {
+            let content = change.input.get("content").and_then(serde_json::Value::as_str).unwrap_or("");
+            let state = claude_live::backup::read_manifest(&self.backup)
+                .ok()
+                .and_then(|m| m.files.into_iter().find(|e| steps::shown_path(&e.original.to_string_lossy(), &self.folder) == change.file))
+                .map(|e| e.state);
+            Some(diff::of_write(&change.file, content, write_kind(change.known, state)))
+        } else {
+            diff::of_edit(&change.tool, &change.input, &change.file)
+        };
+        let Some(d) = d else { return };
+        let (d, kept) = diff::capped(d, diff::JOB_MAX.saturating_sub(self.diff_used));
+        self.diff_used += kept;
+        let used = self.diff_used as u32;
+        if let Some(job) = store::touch(&self.id, |j| j.diff_lines = used) {
+            emit(&JobEvent { diff: Some(d), ..self.event(&job) });
+        }
     }
 
     /// One event of Claude Code's.
@@ -513,43 +662,27 @@ impl Follow {
             Event::Assistant(a) => {
                 for block in &a.blocks {
                     match block {
-                        Block::ToolUse { id, name, input } => {
-                            if backed_up_tool(name) {
-                                self.edits.insert(id.clone());
-                            }
-                            let seen = steps::of_tool(name, input, &self.folder);
-                            let Some(job) = store::touch(&self.id, |j| {
-                                j.step = seen.step.clone();
-                                if let Some(f) = &seen.file {
-                                    if !j.files.contains(f) {
-                                        j.files.push(f.clone());
-                                    }
-                                }
-                                if let Some(c) = &seen.command {
-                                    j.commands.push(c.clone());
-                                }
-                            }) else {
-                                return;
-                            };
-                            emit(&JobEvent { step: Some(seen.step), file: seen.file, command: seen.command, ..self.event(&job) });
-                        }
+                        Block::ToolUse { id, name, input } => self.on_tool(id, name, input),
+                        // What it says between its calls: a line of its own
+                        // (a helper's words, under a Task, aren't).
                         Block::Text(t) if !t.trim().is_empty() => {
+                            if a.parent_tool_use_id.is_some() {
+                                continue;
+                            }
                             self.last_text = t.trim().to_string();
                             if let Some(job) = store::get(&self.id) {
-                                emit(&JobEvent { text: Some(self.last_text.clone()), ..self.event(&job) });
+                                emit(&JobEvent { said: Some(self.last_text.clone()), ..self.event(&job) });
                             }
                         }
                         _ => {}
                     }
                 }
             }
-            // An edit's result: it went through, after the hooks.
+            // A call back: an edit went through, after the hooks.
             Event::User(u) => {
                 for block in &u.blocks {
-                    if let Block::ToolResult { tool_use_id, is_error: false, .. } = block {
-                        if self.edits.contains(tool_use_id) {
-                            self.edited = true;
-                        }
+                    if let Block::ToolResult { tool_use_id, is_error, .. } = block {
+                        self.on_tool_result(tool_use_id, *is_error);
                     }
                 }
             }
@@ -646,8 +779,10 @@ impl Follow {
                     j.status = status;
                 }
             }) {
+                // Asking: a step of its own; answered, the line it was on.
                 let step = asking.then(|| "Waiting for you to allow a step".to_string());
-                emit(&JobEvent { step, ..self.event(&job) });
+                let now = (!asking).then(|| self.line.clone()).filter(|l| !l.is_empty());
+                emit(&JobEvent { step, now, ..self.event(&job) });
             }
         }
         let stopping = with_state(|s| s.live.get(&self.id).and_then(|l| l.stopping));
@@ -1050,8 +1185,31 @@ mod tests {
         assert_eq!(v["status"], "running");
         assert_eq!(v["conversation"], 3);
         assert_eq!(v["step"], "Reading notes.md");
-        for absent in ["file", "command", "text", "cost", "problem"] {
+        for absent in ["file", "command", "about", "said", "todos", "now", "diff", "text", "cost", "problem"] {
             assert!(v.get(absent).is_none(), "{absent}");
         }
+        // A diff and a to-do list, as the tab reads them.
+        let ev = JobEvent {
+            todos: Some(vec![steps::Todo { content: "Sort the seeds".into(), status: "in_progress".into(), active_form: "Sorting the seeds".into() }]),
+            now: Some("Sorting the seeds".into()),
+            diff: Some(diff::of_write("seeds.md", "# Seeds", "new")),
+            ..JobEvent::of(&job)
+        };
+        let v = serde_json::to_value(&ev).unwrap();
+        assert_eq!(v["todos"][0]["activeForm"], "Sorting the seeds");
+        assert_eq!(v["now"], "Sorting the seeds");
+        assert_eq!(v["diff"], serde_json::json!({ "file": "seeds.md", "kind": "new", "lines": ["+# Seeds"], "added": 1, "removed": 0 }));
+    }
+
+    #[test]
+    fn a_write_is_new_rewritten_or_written() {
+        use claude_live::backup::State;
+        assert_eq!(write_kind(false, Some(State::Created)), "new");
+        assert_eq!(write_kind(false, Some(State::Copied)), "rewrite");
+        assert_eq!(write_kind(false, Some(State::TooBig)), "rewrite");
+        // The job wrote it before (it made it, then wrote it again).
+        assert_eq!(write_kind(true, Some(State::Created)), "rewrite");
+        // No backups made: Yap can't tell.
+        assert_eq!(write_kind(false, None), "write");
     }
 }

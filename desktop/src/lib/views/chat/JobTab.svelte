@@ -5,13 +5,17 @@
   // replay) and the app-wide `yap-job` event (live). Closing the tab never
   // stops the job.
   // - The folder and its status; the mode and model; how long it has run.
-  // - What it's doing now (the latest line moving), then every step in
-  //   plain words: reading a file, searching the web, editing a file,
-  //   running a command.
-  // - The files it changed, the commands it ran, what it wasn't allowed to
-  //   do, its final words (markdown, core/markdown.js), and its cost, told
-  //   apart by how it's paid ("Your Claude plan · ≈ $0.04 on the API" /
-  //   "API key · $0.04").
+  // - What it's doing now (the latest line moving: a step, else the to-do
+  //   in progress), Claude Code's to-do list (✓ done, ● in progress,
+  //   ○ to do), then its timeline (JobTimeline.svelte): every step in plain
+  //   words — reading a file, searching, editing a file, running a command
+  //   by what it's for — and what it said between them, following the live
+  //   end as a terminal does.
+  // - The files it changed, each opening to what changed (JobFiles.svelte),
+  //   the commands it ran with what each was for (a few, then "Show N
+  //   more"), what it wasn't allowed to do, its final words (markdown,
+  //   core/markdown.js), and its cost, told apart by how it's paid ("Your
+  //   Claude plan · ≈ $0.04 on the API" / "API key · $0.04").
   // - A problem with Claude Code itself in plain words, with one button
   //   (Sign in, when it isn't signed in).
   // - Stop (while it works), Continue (stopped, interrupted, failed), Undo
@@ -25,9 +29,28 @@
   import ConfirmDialog from '../../ui/ConfirmDialog.svelte';
   import { toast } from '../../ui/toast.svelte.js';
   import { renderMarkdown } from '../../core/markdown.js';
-  import { isLive, statusWord, statusTone, costLine, elapsed, stepsOf, stepKind, problemWords, modeLabel, modelLabel, canUndo as undoable, NO_BACKUPS } from '../../core/jobs.js';
+  import {
+    isLive,
+    statusWord,
+    statusTone,
+    costLine,
+    elapsed,
+    timelineOf,
+    latestStep,
+    todosOf,
+    todoCount,
+    diffsOf,
+    commandsOf,
+    problemWords,
+    modeLabel,
+    modelLabel,
+    canUndo as undoable,
+    NO_BACKUPS,
+  } from '../../core/jobs.js';
   import { EFFORT_LABELS } from '../../core/effort.js';
   import { claudePlan, signInClaudePlan } from '../../stores/claudePlan.svelte.js';
+  import JobTimeline from './JobTimeline.svelte';
+  import JobFiles from './JobFiles.svelte';
 
   /** `doc`: the panel's state (its `job`, a JobRef); `narrow`: no room beside the chat (no expand). */
   let { doc, narrow = false } = $props();
@@ -41,16 +64,24 @@
   let message = $state('');
   let confirmUndo = $state(false);
   let undone = $state(null); // what Undo put back
-  let stepsEl = $state(null);
   let undoBtn = $state(null);
+  let allCommands = $state(false);
+
+  /** Commands shown before "Show N more". */
+  const FEW_COMMANDS = 3;
 
   // The job as it is now: its saved record, else what the tab was opened with.
   const shown = $derived(job ?? (ref ? { ...ref, files: [], commands: [], denials: [] } : null));
   const live = $derived(isLive(shown?.status));
-  const steps = $derived(stepsOf(log));
-  const latest = $derived(live && steps.length ? steps[steps.length - 1] : null);
-  // Its words while it works (the latest a `text` event brought).
-  const working = $derived(live ? (log.findLast((e) => typeof e?.text === 'string' && e.text.trim())?.text ?? '') : '');
+  // Its steps and what it said, its final words apart.
+  const timeline = $derived(timelineOf(log, live ? '' : shown?.text));
+  const stepCount = $derived(timeline.filter((t) => t.kind === 'step').length);
+  // The line it's on now: its latest step, or the to-do in progress.
+  const latest = $derived(latestStep(log, shown?.status));
+  const todos = $derived(todosOf(log));
+  const diffs = $derived(diffsOf(log));
+  const commands = $derived(commandsOf(shown, log));
+  const shownCommands = $derived(allCommands ? commands : commands.slice(0, FEW_COMMANDS));
   const problem = $derived(problemWords(shown?.problem));
   const ran = $derived(shown ? elapsed(shown, now) : '');
   const canUndo = $derived(undoable(shown));
@@ -70,7 +101,6 @@
       job = r.job;
       log = [...saved, ...heard.filter((e) => !tail.has(JSON.stringify(e)))];
       gone = false;
-      scrollSteps();
     } catch {
       if (doc.job?.id === id) gone = true;
     } finally {
@@ -90,15 +120,10 @@
       log = [];
       undone = null;
       message = '';
+      allCommands = false;
       load(id);
     });
   });
-
-  function scrollSteps() {
-    tick().then(() => {
-      if (stepsEl) stepsEl.scrollTop = stepsEl.scrollHeight;
-    });
-  }
 
   /** One `yap-job` event: into the log; the job as it is now (read again when its status turns). */
   function onJob(ev) {
@@ -117,7 +142,6 @@
     } else {
       refreshSoon();
     }
-    if (ev.step) scrollSteps();
   }
 
   let refreshTimer = null;
@@ -267,59 +291,57 @@
 
       {#if latest}
         <!-- What it's doing now. -->
-        <p class="now" data-testid="chat-job-now" aria-live="polite"><span class="spin" aria-hidden="true"></span>{latest.step}</p>
+        <p class="now" data-testid="chat-job-now" aria-live="polite"><span class="spin" aria-hidden="true"></span>{latest}</p>
       {/if}
 
-      {#if steps.length}
-        <details class="section" open>
-          <summary>Steps <span class="count">{steps.length}</span></summary>
-          <ol class="steps" bind:this={stepsEl} data-testid="chat-job-steps">
-            {#each steps as s, i (i)}
-              {@const kind = stepKind(s)}
-              <li class="step k-{kind}" class:latest={latest && i === steps.length - 1}>
-                <span class="sicon" aria-hidden="true">
-                  {#if kind === 'edit'}
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9" /><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z" /></svg>
-                  {:else if kind === 'command'}
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="m4 17 6-6-6-6" /><path d="M12 19h8" /></svg>
-                  {:else if kind === 'web'}
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9" /><path d="M3 12h18M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18" /></svg>
-                  {:else if kind === 'read' || kind === 'search'}
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z" /><path d="M14 3v5h5" /></svg>
-                  {:else if kind === 'ask'}
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l8 3v6c0 4.5-3.4 8.2-8 9-4.6-.8-8-4.5-8-9V6z" /></svg>
-                  {:else}
-                    <svg viewBox="0 0 24 24" fill="currentColor"><circle cx="12" cy="12" r="2.4" /></svg>
-                  {/if}
-                </span>
-                <span class="stext">{s.step}</span>
+      {#if todos.length}
+        <!-- Claude Code's to-do list, as its latest TodoWrite left it. -->
+        <div class="section todos" data-testid="chat-job-todos">
+          <h3>To-do <span class="count">{todoCount(todos)}</span></h3>
+          <ul class="todolist">
+            {#each todos as t, i (i)}
+              <li class="todo" class:done={t.status === 'completed'} class:doing={t.status === 'in_progress'} data-status={t.status}>
+                <span class="tmark" aria-hidden="true">{t.status === 'completed' ? '✓' : t.status === 'in_progress' ? '●' : '○'}</span>
+                <span class="ttext">{t.content}</span>
+                <span class="sr-only">{t.status === 'completed' ? ', done' : t.status === 'in_progress' ? ', in progress' : ', to do'}</span>
               </li>
             {/each}
-          </ol>
-        </details>
+          </ul>
+        </div>
       {/if}
 
-      {#if working}
-        <p class="working">{working}</p>
+      {#if timeline.length}
+        <details class="section" open>
+          <summary>Steps <span class="count">{stepCount}</span></summary>
+          <JobTimeline items={timeline} {live} />
+        </details>
       {/if}
 
       {#if shown.files?.length}
         <div class="section" data-testid="chat-job-files">
           <h3>Files changed <span class="count">{shown.files.length}</span></h3>
-          <ul class="plain">
-            {#each shown.files as f (f)}<li><code>{f}</code></li>{/each}
-          </ul>
+          <JobFiles files={shown.files} {diffs} />
           {#if shown.noBackups}
             <p class="nobackups" data-testid="chat-job-no-backups">{NO_BACKUPS}</p>
           {/if}
         </div>
       {/if}
-      {#if shown.commands?.length}
+      {#if commands.length}
         <div class="section" data-testid="chat-job-commands">
-          <h3>Commands run <span class="count">{shown.commands.length}</span></h3>
-          <ul class="plain">
-            {#each shown.commands as c, i (i)}<li><code class="cmd">{c}</code></li>{/each}
+          <h3>Commands run <span class="count">{commands.length}</span></h3>
+          <ul class="cmds">
+            {#each shownCommands as c, i (i)}
+              <li data-testid="chat-job-command">
+                {#if c.about}<p class="cabout">{c.about}</p>{/if}
+                <code class="cmd">{c.command}</code>
+              </li>
+            {/each}
           </ul>
+          {#if commands.length > FEW_COMMANDS}
+            <button type="button" class="showmore" aria-expanded={allCommands} onclick={() => (allCommands = !allCommands)}>
+              {allCommands ? 'Show fewer' : `Show ${commands.length - FEW_COMMANDS} more`}
+            </button>
+          {/if}
         </div>
       {/if}
       {#if shown.denials?.length}
@@ -606,53 +628,54 @@
     font-weight: 500;
     color: var(--yap-paper-muted);
   }
-  .steps {
-    max-height: 260px;
+  .todolist {
     margin: 0;
     padding: 0;
-    overflow-y: auto;
     list-style: none;
   }
-  .step {
+  .todo {
     display: flex;
     align-items: flex-start;
     gap: 8px;
-    padding: 3px 0;
-    color: var(--yap-paper-text-2);
+    padding: 2px 0;
     font-size: 12.5px;
-  }
-  .step.latest {
     color: var(--yap-paper-ink);
-    font-weight: 600;
   }
-  .sicon {
+  .tmark {
     flex: 0 0 auto;
-    display: inline-flex;
     width: 14px;
-    height: 14px;
-    margin-top: 2px;
+    text-align: center;
     color: var(--yap-paper-muted);
+    font-size: 11px;
+    line-height: 19px;
   }
-  .k-edit .sicon {
+  .todo.done .tmark {
+    color: var(--yap-success-text);
+    font-weight: 700;
+  }
+  .todo.done .ttext {
+    color: var(--yap-paper-muted);
+    text-decoration: line-through;
+    text-decoration-color: color-mix(in srgb, var(--yap-paper-muted) 60%, transparent);
+  }
+  .todo.doing .tmark {
     color: var(--yap-primary);
   }
-  .k-ask .sicon {
-    color: var(--yap-warning);
+  .todo.doing .ttext {
+    font-weight: 600;
   }
-  .sicon svg {
-    width: 14px;
-    height: 14px;
-  }
-  .stext {
+  .ttext {
     min-width: 0;
     overflow-wrap: anywhere;
   }
-  .working {
-    margin: 10px 0 0;
-    color: var(--yap-paper-text-2);
-    font-style: italic;
-    font-size: 12.5px;
-    overflow-wrap: anywhere;
+  .sr-only {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+    white-space: nowrap;
   }
   .plain {
     margin: 0;
@@ -663,6 +686,46 @@
     padding: 2px 0;
     font-size: 12.5px;
     overflow-wrap: anywhere;
+  }
+  .cmds {
+    margin: 0;
+    padding: 0;
+    list-style: none;
+  }
+  .cmds li {
+    padding: 3px 0;
+    font-size: 12.5px;
+    overflow-wrap: anywhere;
+  }
+  .cmds li + li {
+    border-top: 1px solid color-mix(in srgb, var(--yap-paper-rule) 60%, transparent);
+  }
+  .cabout {
+    margin: 0 0 2px;
+    color: var(--yap-paper-text-2);
+    font-size: 12px;
+  }
+  .cmds code.cmd {
+    display: block;
+    padding: 4px 7px;
+  }
+  .showmore {
+    margin: 4px 0 0;
+    padding: 0;
+    border: none;
+    background: none;
+    color: var(--yap-primary);
+    font: inherit;
+    font-size: 12px;
+    font-weight: 600;
+    cursor: pointer;
+  }
+  .showmore:hover {
+    text-decoration: underline;
+  }
+  .showmore:focus-visible {
+    outline: 2px solid var(--yap-focus-ring);
+    outline-offset: 1px;
   }
   code {
     font-family: var(--yap-font-mono, ui-monospace, monospace);

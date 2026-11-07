@@ -1,9 +1,11 @@
 // Jobs (desktop/src-tauri/src/jobs.rs): Chat or the Voice Assistant hands a
 // task to the person's own Claude Code, in a folder they chose. These are
 // the words the Jobs screens share — a job's status, what it costs and how
-// it's paid, how long it has run, its steps from its log, the pills under
-// the answer that started it, a problem in plain words with its one button
-// — and the Mode chip's keys. No Svelte state: pure, tested by
+// it's paid, how long it has run, its timeline from its log (steps and what
+// it said between them), the line it's on now, Claude Code's to-do list,
+// what changed in each file and the commands it ran, the pills under the
+// answer that started it, a problem in plain words with its one button —
+// and the Mode chip's keys. No Svelte state: pure, tested by
 // desktop/e2e/jobs-ui.spec.js.
 import { dollars } from './money.js';
 
@@ -85,26 +87,139 @@ export function elapsed(job, now = Date.now() / 1000) {
 
 /**
  * A job's steps from its log (`yap-job` events, oldest first): each line
- * once in a row, with the file it changes or the command it runs.
- * `[{step, file, command, ts}]`.
+ * once in a row, with the file it changes or the command it runs (and what
+ * Claude Code said it's for). `[{step, file, command, about, ts}]`.
  */
 export function stepsOf(log) {
+  return timelineOf(log).filter((t) => t.kind === 'step');
+}
+
+/** What a log event says Claude Code said as it worked: `said`, or (an older Yap's log) a `text` while it ran that wasn't its result's. */
+function saidOf(e) {
+  if (typeof e?.said === 'string') return e.said.trim();
+  if (typeof e?.text === 'string' && !e.step && e.cost == null && isLive(e.status)) return e.text.trim();
+  return '';
+}
+
+/**
+ * **A job's timeline** from its log, oldest first: its steps (each line
+ * once in a row) and what it said between them, in order —
+ * `{kind: 'step', step, file, command, about, ts}` or `{kind: 'said', text,
+ * ts}`. `final`: its final words, shown apart, so the same words at the
+ * end aren't said twice.
+ */
+export function timelineOf(log, final = '') {
   const out = [];
   for (const e of log || []) {
+    const said = saidOf(e);
+    if (said) {
+      out.push({ kind: 'said', text: said, ts: Number(e.ts) || 0 });
+      continue;
+    }
     const step = typeof e?.step === 'string' ? e.step.trim() : '';
     if (!step) continue;
     const last = out[out.length - 1];
-    if (last && last.step === step && !e.file && !e.command) continue;
-    out.push({ step, file: e.file || null, command: e.command || null, ts: Number(e.ts) || 0 });
+    if (last?.kind === 'step' && last.step === step && !e.file && !e.command) continue;
+    out.push({ kind: 'step', step, file: e.file || null, command: e.command || null, about: e.about || null, ts: Number(e.ts) || 0 });
+  }
+  const end = String(final || '').trim();
+  if (end) {
+    for (let i = out.length - 1; i >= 0; i--) {
+      if (out[i].kind === 'said' && out[i].text === end) {
+        out.splice(i, 1);
+        break;
+      }
+      if (out[i].kind === 'said') break;
+    }
   }
   return out;
 }
 
-/** The step a job is on now, from its log: its latest line ('' once it's over or before any). */
+/** Narration long enough to fold (its first lines shown, "Show more"). */
+export const longSaid = (text) => String(text || '').length > 280 || String(text || '').split('\n').length > 4;
+
+/**
+ * **The line a job is on now**, from its log: its latest step, or the line
+ * it moved to without one (`now`: the to-do in progress once a call came
+ * back, the line it was on before it asked). '' once it's over or before
+ * any.
+ */
 export function latestStep(log, status) {
   if (!isLive(status)) return '';
-  const steps = stepsOf(log);
-  return steps.length ? steps[steps.length - 1].step : '';
+  let line = '';
+  for (const e of log || []) {
+    if (typeof e?.now === 'string' && e.now.trim()) line = e.now.trim();
+    else if (typeof e?.step === 'string' && e.step.trim()) line = e.step.trim();
+  }
+  return line;
+}
+
+/** **Claude Code's to-do list**, as its latest `TodoWrite` left it: `[{content, status, activeForm}]` (status pending | in_progress | completed). */
+export function todosOf(log) {
+  for (let i = (log?.length ?? 0) - 1; i >= 0; i--) {
+    if (Array.isArray(log[i]?.todos)) return log[i].todos.filter((t) => t && typeof t.content === 'string');
+  }
+  return [];
+}
+
+/** "2 of 5 done". */
+export function todoCount(todos) {
+  const list = todos || [];
+  return `${list.filter((t) => t.status === 'completed').length} of ${list.length} done`;
+}
+
+/** **What changed in each file**, from the log's diffs (`diff.rs`): a Map from the file (as the job's files say it) to its diffs, in order. */
+export function diffsOf(log) {
+  const out = new Map();
+  for (const e of log || []) {
+    const d = e?.diff;
+    if (!d?.file || !Array.isArray(d.lines)) continue;
+    out.set(d.file, [...(out.get(d.file) || []), d]);
+  }
+  return out;
+}
+
+/** A file's diffs added up: `{added, removed, made}` — `made` "new" when the job made it (its first write a new file). */
+export function diffTotals(diffs) {
+  let added = 0;
+  let removed = 0;
+  for (const d of diffs || []) {
+    added += Number(d.added) || 0;
+    removed += Number(d.removed) || 0;
+  }
+  return { added, removed, made: diffs?.[0]?.kind === 'new' ? 'new' : null };
+}
+
+const lines = (n) => (n === 1 ? '1 line' : `${n.toLocaleString('en-GB')} lines`);
+
+/** A written file's heading: "New file · 12 lines", "Rewritten · 12 lines", "Written · 12 lines"; '' for an edit. */
+export function diffTitle(d) {
+  const n = Number(d?.added) || 0;
+  if (d?.kind === 'new') return `New file · ${lines(n)}`;
+  if (d?.kind === 'rewrite') return `Rewritten · ${lines(n)}`;
+  if (d?.kind === 'write') return `Written · ${lines(n)}`;
+  return '';
+}
+
+/** "…12 more lines" past a diff's caps ('' for none). */
+export const moreLines = (n) => (Number(n) > 0 ? `…${Number(n).toLocaleString('en-GB')} more ${Number(n) === 1 ? 'line' : 'lines'}` : '');
+
+/** A diff line's mark and text: `{mark: 'del' | 'add' | 'ctx' | 'gap', text}`. */
+export function diffLine(l) {
+  const s = String(l ?? '');
+  if (s === '@') return { mark: 'gap', text: '' };
+  const m = s.charAt(0);
+  return { mark: m === '-' ? 'del' : m === '+' ? 'add' : 'ctx', text: s.slice(1) };
+}
+
+/**
+ * **The commands it ran**, each with what Claude Code said it's for:
+ * `[{command, about}]` — the job's own list (`job.commands`), with the
+ * descriptions its log's events carry, in order.
+ */
+export function commandsOf(job, log) {
+  const told = (log || []).filter((e) => typeof e?.command === 'string');
+  return (job?.commands || []).map((command, i) => ({ command, about: told[i]?.command === command ? told[i].about || '' : '' }));
 }
 
 /** The message index a chat message id names ("chat:12:4" → 4), or -1. */

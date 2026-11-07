@@ -135,6 +135,10 @@ export function createChatState({ onopensettings = () => null, onopennote = () =
   );
   let inputEl = $state(null);
   let threadEl = $state(null);
+  // The thread following its bottom (ChatThread's core/stickToBottom.js),
+  // while it's drawn: a question sent and a conversation opened go back
+  // there; everything else that makes it grow it follows by itself.
+  let follow = null;
   // 'meetings' when this chat asks across the meetings (the Meetings view's
   // Ask bar, or "Ask across your meetings" here): answers come from the
   // passages Yap finds on this PC and cite them (search/ask.rs). Kept with
@@ -738,7 +742,8 @@ export function createChatState({ onopensettings = () => null, onopennote = () =
     try {
       const conv = await invoke('chat_get', { id });
       if (!alive) return;
-      if (activeId !== id) {
+      const switched = activeId !== id;
+      if (switched) {
         // Another conversation: the panel's documents and pictures were the last one's.
         if (activeId != null) doc.reset();
         activeId = id;
@@ -775,7 +780,12 @@ export function createChatState({ onopensettings = () => null, onopennote = () =
         }
       }
       refreshList();
-      scrollThread();
+      // The question asked out loud (the person's own), another conversation
+      // brought up, the bar's Open in Chat: at its newest. Its answer
+      // landing: followed only if the thread is (never a yank to the bottom
+      // while you read further up).
+      if (switched || p?.phase === 'asked' || p?.phase === 'open') scrollThread();
+      else followThread();
       contextStamp += 1;
       // The bar's Open in Chat on an answer that made a document (or showed
       // a picture): it opens too.
@@ -915,10 +925,12 @@ export function createChatState({ onopensettings = () => null, onopennote = () =
     });
   }
 
+  /**
+   * To the thread's newest, following it again (the person's own question,
+   * a conversation opened). A thread not drawn yet starts there by itself.
+   */
   function scrollThread() {
-    setTimeout(() => {
-      if (threadEl) threadEl.scrollTop = threadEl.scrollHeight;
-    }, 0);
+    follow?.toBottom();
   }
 
   /**
@@ -1280,12 +1292,13 @@ export function createChatState({ onopensettings = () => null, onopennote = () =
     supersedeAnswerCall();
   }
 
-  /** Keep the newest text in view while it's written — unless you scrolled up to read. */
+  /**
+   * Keep the newest text in view while it's written — unless you scrolled up
+   * to read. (The thread's ResizeObserver follows every change by itself:
+   * core/stickToBottom.js. This only nudges it.)
+   */
   function followThread() {
-    const el = threadEl;
-    if (!el) return;
-    const near = el.scrollHeight - el.scrollTop - el.clientHeight < 120;
-    if (near) tick().then(() => (el.scrollTop = el.scrollHeight));
+    follow?.stick();
   }
 
   // Rust decides whether a dictation is for the chat: the box with the
@@ -1326,6 +1339,8 @@ export function createChatState({ onopensettings = () => null, onopennote = () =
     set inputEl(v) { inputEl = v; },
     get threadEl() { return threadEl; },
     set threadEl(v) { threadEl = v; },
+    get follow() { return follow; },
+    set follow(v) { follow = v; },
     get scope() { return scope; },
     set scope(v) { scope = v; },
     get attached() { return waitingShots.list; },

@@ -23,6 +23,13 @@
 // - A slow job: its live line, the running list above the conversations,
 //   "1 job running" on the Yap bar (its click opening the job), Stop,
 //   Continue.
+// - A job read like Claude Code: its to-do list (the running line its item
+//   in progress once a call came back), what it says between steps
+//   (markdown, a long one folded), commands by their descriptions and with
+//   their `cd` into the folder gone, the steps following the live end (and
+//   not when scrolled up: "↓"), Commands run with what each was for, and
+//   Files changed opening to their diffs (an edit, a new file, a file
+//   rewritten), replayed from the log. Light and dark.
 // - The ask-first card as a job; a permission prompt's card in the thread
 //   (Deny) and on the bar (Allow once); a job that wasn't signed in (Sign
 //   in); one paid by API key.
@@ -45,6 +52,16 @@ import {
   elapsed,
   stepsOf,
   latestStep,
+  timelineOf,
+  longSaid,
+  todosOf,
+  todoCount,
+  diffsOf,
+  diffTotals,
+  diffTitle,
+  moreLines,
+  diffLine,
+  commandsOf,
   messageIndex,
   pillsByAnswer,
   canUndo,
@@ -146,6 +163,92 @@ const SLOW = [
   result('Finished slowly.'),
   { _wait_user: true },
 ];
+// ---- a job as Claude Code tells it: its to-do list, what it says, its commands by what they're for, its diffs ----
+
+/** A path as Git Bash writes it (`E:\a\b` → `/e/a/b`), as Claude Code's commands often do. */
+const gitBash = (p) => p.replace(/^([A-Za-z]):[\\/]/, (_, d) => `/${d.toLowerCase()}/`).replace(/\\/g, '/');
+const todo = (content, status, activeForm) => ({ content, status, activeForm });
+const PLAN = [
+  ['Look at how beds are stored', 'Looking at how beds are stored'],
+  ['Add a watering schedule', 'Adding a watering schedule'],
+  ['Write the planting guide', 'Writing the planting guide'],
+];
+/** The to-do list with the first `done` ticked and the next in progress. */
+const todos = (done) => PLAN.map(([c, a], i) => todo(c, i < done ? 'completed' : i === done ? 'in_progress' : 'pending', a));
+const PLANNER = 'export function water(bed) {\n  bed.water += 1;\n  return bed;\n}\n\nexport function plant(bed, seed) {\n  bed.seeds.push(seed);\n  return bed;\n}\n';
+const WATER_OLD = 'export function water(bed) {\n  bed.water += 1;\n  return bed;\n}';
+const WATER_NEW = 'export function water(bed, litres = 2) {\n  bed.water += litres;\n  bed.lastWatered = new Date().toISOString();\n  return bed;\n}';
+const GUIDE = '# Planting guide\n\nTomatoes: after the last frost, in full sun.\nPeppers: two weeks after the tomatoes.\nBeans: straight into the bed in late spring.\n';
+const NOTES = '# Notes\n\nWatering schedule added.\n';
+const LONG_SAY =
+  "Found how beds are stored: each bed is an object with a `water` count, and `water()` adds one every time it's called. Next I'm giving `water()` a number of litres (two by default) and recording when each bed was last watered, so the schedule can tell which beds are due. Then I'll write a short planting guide for the beds that are in the planner today.";
+const FINISHED = 'Done. `water()` now takes litres and records when each bed was last watered, there is a new planting-guide.md, and notes.md says so.';
+/** Bed files read one after another (the steps outgrow their box). */
+const reads = (from, n) =>
+  Array.from({ length: n }, (_, k) => {
+    const id = `toolu_bed${from + k}`;
+    const file = `beds\\bed-${String(from + k).padStart(2, '0')}.json`;
+    return [said(`b${from + k}`, [{ type: 'tool_use', id, name: 'Read', input: { file_path: `{{cwd}}\\${file}` } }]), toolResult(id, '{"name":"Bed","water":0}')];
+  }).flat();
+/** Its first turn: a to-do list, what it says, a command by what it's for and one with a `cd` into the folder, many reads, a step to allow, more reads; then it works on (a Stop ends it). */
+const looking = (folder) => [
+  { _wait_user: true },
+  init('auto'),
+  said('t1', [
+    { type: 'text', text: "I'll start by looking at how the planner stores its **beds**." },
+    { type: 'tool_use', id: 'toolu_todo1', name: 'TodoWrite', input: { todos: todos(0) } },
+  ]),
+  toolResult('toolu_todo1', 'Todos have been modified successfully.'),
+  said('t2', [{ type: 'tool_use', id: 'toolu_ls', name: 'Bash', input: { command: `cd "${gitBash(folder)}" && ls src`, description: 'List the source folder' } }]),
+  toolResult('toolu_ls', 'planner.js'),
+  said('t3', [{ type: 'tool_use', id: 'toolu_grep', name: 'Bash', input: { command: `cd "${gitBash(folder)}" && grep -n "water" "${gitBash(folder)}/src/planner.js" | head -5` } }]),
+  toolResult('toolu_grep', '2:  bed.water += 1;'),
+  ...reads(1, 24),
+  said('t4', [{ type: 'tool_use', id: 'toolu_build', name: 'Bash', input: { command: 'npm run build', description: 'Build the planner' } }]),
+  { _mcp: { tool: 'approve', arguments: { tool_name: 'Bash', input: { command: 'npm run build' }, tool_use_id: 'toolu_build' } } },
+  toolResult('toolu_build', 'built'),
+  ...reads(25, 10),
+  { _sleep_ms: 60000 },
+  result('Stopped.'),
+  { _wait_user: true },
+];
+/** Its next turn: the list ticked off, an edit, a new file, a file rewritten, two more commands, and its summary. */
+const finishing = [
+  { _wait_user: true },
+  init('auto'),
+  said('f1', [{ type: 'tool_use', id: 'toolu_todo2', name: 'TodoWrite', input: { todos: todos(1) } }]),
+  toolResult('toolu_todo2', 'Todos have been modified successfully.'),
+  said('f2', [
+    { type: 'text', text: LONG_SAY },
+    { type: 'tool_use', id: 'toolu_edit', name: 'Edit', input: { file_path: '{{cwd}}\\src\\planner.js', old_string: WATER_OLD, new_string: WATER_NEW } },
+  ]),
+  { _hook: { event: 'PreToolUse', input: { tool_name: 'Edit', tool_use_id: 'toolu_edit', tool_input: { file_path: 'src\\planner.js' } } } },
+  { _write_file: { path: 'src/planner.js', text: PLANNER.replace(WATER_OLD, WATER_NEW) } },
+  toolResult('toolu_edit', 'The file src/planner.js has been updated.'),
+  said('f3', [{ type: 'tool_use', id: 'toolu_test', name: 'Bash', input: { command: 'npm test', description: 'Run the tests' } }]),
+  toolResult('toolu_test', '8 passing'),
+  said('f4', [{ type: 'tool_use', id: 'toolu_check', name: 'Bash', input: { command: 'node --check src/planner.js', description: 'Check the planner still parses' } }]),
+  toolResult('toolu_check', ''),
+  said('f5', [{ type: 'tool_use', id: 'toolu_todo3', name: 'TodoWrite', input: { todos: todos(2) } }]),
+  toolResult('toolu_todo3', 'Todos have been modified successfully.'),
+  said('f6', [
+    { type: 'text', text: 'Now the planting guide.' },
+    { type: 'tool_use', id: 'toolu_guide', name: 'Write', input: { file_path: '{{cwd}}\\planting-guide.md', content: GUIDE } },
+  ]),
+  { _hook: { event: 'PreToolUse', input: { tool_name: 'Write', tool_use_id: 'toolu_guide', tool_input: { file_path: 'planting-guide.md' } } } },
+  { _write_file: { path: 'planting-guide.md', text: GUIDE } },
+  toolResult('toolu_guide', 'File created successfully at: planting-guide.md'),
+  said('f7', [{ type: 'tool_use', id: 'toolu_notes', name: 'Write', input: { file_path: '{{cwd}}\\notes.md', content: NOTES } }]),
+  { _hook: { event: 'PreToolUse', input: { tool_name: 'Write', tool_use_id: 'toolu_notes', tool_input: { file_path: 'notes.md' } } } },
+  { _write_file: { path: 'notes.md', text: NOTES } },
+  toolResult('toolu_notes', 'The file notes.md has been updated.'),
+  said('f8', [{ type: 'tool_use', id: 'toolu_todo4', name: 'TodoWrite', input: { todos: todos(3) } }]),
+  toolResult('toolu_todo4', 'Todos have been modified successfully.'),
+  said('f9', [{ type: 'text', text: FINISHED }], 'end_turn'),
+  result(FINISHED),
+  { _wait_user: true },
+];
+
 /** Claude Code turned away: not signed in. */
 const SIGNED_OUT = [
   { _wait_user: true },
@@ -349,6 +452,69 @@ test('core/jobs.js: status, cost by how it is paid, time, steps, pills, problems
   expect(stepKind({ step: 'Reading docs.example.com/guide/start' })).toBe('web');
   expect(stepKind({ step: 'Reading src\\app.ts' })).toBe('read');
   expect(stepKind({ step: 'Waiting for you to allow a step' })).toBe('ask');
+  // A command's step by what it's for is still a command.
+  expect(stepKind({ step: 'Listing the source folder', command: 'ls src' })).toBe('command');
+
+  // The timeline: steps and what it said, in order; its final words not twice.
+  const told = [
+    { status: 'running', step: 'Starting Claude Code', ts: 1 },
+    { status: 'running', said: "I'll look at the **beds** first.", ts: 2 },
+    { status: 'running', todos: [{ content: 'Look at the beds', status: 'in_progress', activeForm: 'Looking at the beds' }], now: 'Looking at the beds', ts: 3 },
+    { status: 'running', step: 'Listing the source folder', command: 'ls src', about: 'List the source folder', ts: 4 },
+    { status: 'running', now: 'Looking at the beds', ts: 5 },
+    { status: 'running', step: 'Editing src\\planner.js', file: 'src\\planner.js', ts: 6 },
+    { status: 'running', diff: { file: 'src\\planner.js', kind: 'edit', lines: ['-a', '+b', '@', ' c'], added: 1, removed: 1 }, ts: 7 },
+    { status: 'running', step: 'Writing guide.md', file: 'guide.md', ts: 8 },
+    { status: 'running', diff: { file: 'guide.md', kind: 'new', lines: ['+# Guide'], added: 1, removed: 0, more: 40 }, ts: 9 },
+    { status: 'running', diff: { file: 'src\\planner.js', kind: 'edit', lines: ['-d', '+e'], added: 1, removed: 1, all: true }, ts: 10 },
+    { status: 'running', said: 'All done.', ts: 11 },
+    { status: 'running', text: 'All done.', cost: 0.01, ts: 12 },
+  ];
+  const tl = timelineOf(told, 'All done.');
+  expect(tl.map((t) => (t.kind === 'said' ? `said: ${t.text}` : t.step))).toEqual([
+    'Starting Claude Code',
+    "said: I'll look at the **beds** first.",
+    'Listing the source folder',
+    'Editing src\\planner.js',
+    'Writing guide.md',
+  ]);
+  expect(tl[2]).toMatchObject({ command: 'ls src', about: 'List the source folder' });
+  expect(timelineOf(told).filter((t) => t.kind === 'said').map((t) => t.text)).toEqual(["I'll look at the **beds** first.", 'All done.']);
+  // An older Yap's log: its words as it worked came as `text`; its result's (with a cost) never.
+  expect(timelineOf(log).filter((t) => t.kind === 'said').map((t) => t.text)).toEqual(["I'll update it."]);
+  expect([longSaid('short'), longSaid('x'.repeat(300)), longSaid('a\nb\nc\nd\ne')]).toEqual([false, true, true]);
+  // The line it's on: the latest step, or the one it moved to without one.
+  expect(latestStep(told.slice(0, 5), 'running')).toBe('Looking at the beds');
+  expect(latestStep(told.slice(0, 4), 'running')).toBe('Listing the source folder');
+  // Its to-do list, the latest.
+  expect(todosOf(told)).toEqual([{ content: 'Look at the beds', status: 'in_progress', activeForm: 'Looking at the beds' }]);
+  expect(todosOf(log)).toEqual([]);
+  expect(todoCount([{ status: 'completed' }, { status: 'in_progress' }, { status: 'pending' }])).toBe('1 of 3 done');
+  // What changed in each file, in order.
+  const diffs = diffsOf(told);
+  expect([...diffs.keys()]).toEqual(['src\\planner.js', 'guide.md']);
+  expect(diffs.get('src\\planner.js')).toHaveLength(2);
+  expect(diffTotals(diffs.get('src\\planner.js'))).toEqual({ added: 2, removed: 2, made: null });
+  expect(diffTotals(diffs.get('guide.md'))).toEqual({ added: 1, removed: 0, made: 'new' });
+  expect([diffTitle({ kind: 'new', added: 12 }), diffTitle({ kind: 'rewrite', added: 1 }), diffTitle({ kind: 'write', added: 3 }), diffTitle({ kind: 'edit', added: 3 })]).toEqual([
+    'New file · 12 lines',
+    'Rewritten · 1 line',
+    'Written · 3 lines',
+    '',
+  ]);
+  expect([moreLines(40), moreLines(1), moreLines(0), moreLines(1800)]).toEqual(['…40 more lines', '…1 more line', '', '…1,800 more lines']);
+  expect(['-a', '+b', ' c', '@'].map(diffLine)).toEqual([
+    { mark: 'del', text: 'a' },
+    { mark: 'add', text: 'b' },
+    { mark: 'ctx', text: 'c' },
+    { mark: 'gap', text: '' },
+  ]);
+  // The commands it ran, with what each was for.
+  expect(commandsOf({ commands: ['ls src', 'npm test'] }, told)).toEqual([
+    { command: 'ls src', about: 'List the source folder' },
+    { command: 'npm test', about: '' },
+  ]);
+  expect(commandsOf(null, told)).toEqual([]);
 
   // A job's pill goes under the first answer after its question.
   expect(messageIndex('chat:12:4', 12)).toBe(4);
@@ -557,10 +723,13 @@ test('a job: its tab opens at once and follows it, the pill, the report card, Un
   await expect(main.getByTestId('chat-job-meta')).toContainText('Claude Sonnet 5.5 Medium');
   await expect(main.getByTestId('chat-job-elapsed')).toContainText('ran');
   const steps = main.getByTestId('chat-job-steps').locator('.stext');
-  for (const s of ['Starting Claude Code', 'Reading notes.md', 'Editing notes.md', 'Running npm test']) await expect(steps.filter({ hasText: s }).first()).toBeVisible();
+  for (const s of ['Starting Claude Code', 'Reading notes.md', 'Editing notes.md', 'Running the tests']) await expect(steps.filter({ hasText: s }).first()).toBeVisible();
+  // What it said on the way; its final words only once, below.
+  await expect(main.getByTestId('chat-job-said')).toHaveText(["I'll update the notes file."]);
   await expect(main.getByTestId('chat-job-now')).toHaveCount(0);
-  await expect(main.getByTestId('chat-job-files').locator('li')).toHaveText(['notes.md']);
-  await expect(main.getByTestId('chat-job-commands').locator('li')).toHaveText(['npm test']);
+  await expect(main.getByTestId('chat-job-files').locator('.fname')).toHaveText(['notes.md']);
+  await expect(main.getByTestId('chat-job-command').locator('.cabout')).toHaveText(['Run the tests']);
+  await expect(main.getByTestId('chat-job-command').locator('.cmd')).toHaveText(['npm test']);
   await expect(main.getByTestId('chat-job-denials').locator('li')).toHaveText(['Run a command: rm -rf build']);
   await expect(main.getByTestId('chat-job-text')).toContainText(DONE);
   await expect(main.getByTestId('chat-job-cost')).toHaveText('Your Claude plan · ≈ $0.04 on the API');
@@ -620,7 +789,7 @@ test('a job whose edits made no backup (hooks off): its tab says Undo can’t pu
   expect(fs.readFileSync(path.join(GARDEN, 'notes.md'), 'utf8')).toBe('Final notes\n');
   expect(job.noBackups).toBe(true);
   await expect(tab(main)).toHaveAttribute('data-status', 'done');
-  await expect(main.getByTestId('chat-job-files').locator('li')).toHaveText(['notes.md']);
+  await expect(main.getByTestId('chat-job-files').locator('.fname')).toHaveText(['notes.md']);
   await expect(main.getByTestId('chat-job-no-backups')).toHaveText(NO_BACKUPS);
   await expect(tab(main).getByRole('button', { name: 'Undo job' })).toHaveCount(0);
   // The report's facts say so too (the model reads them), never "backed up".
@@ -708,6 +877,165 @@ test('Tell the job…: the person’s words go to the job, its next turn', async
   expect(told.text).toContain('Got: Also sort the list.');
   await expect(main.getByTestId('chat-job-text')).toContainText('Got: Also sort the list.');
   await messagesOf(yap, job.conversation, 6);
+});
+
+// ---------------------------------------------------------------- read like Claude Code
+
+test('a job reads like Claude Code: its to-do list, what it says, commands by what they’re for, the live end, diffs', async ({ yap, main, fakeLlm, shot }) => {
+  fs.mkdirSync(path.join(GARDEN, 'src'), { recursive: true });
+  fs.writeFileSync(path.join(GARDEN, 'src', 'planner.js'), PLANNER);
+  // Its step to allow waits for the test (the steps outgrow their box first).
+  await yap.invoke('e2e_claude_approve_auto', { allow: null });
+  const started = await startJob(yap, main, fakeLlm, { lines: looking(GARDEN), name: 'looking', brief: 'Add a watering schedule to the planner and write a planting guide.', report: null });
+  await expect(tab(main)).toBeVisible();
+  await expect.poll(async () => (await jobs(yap)).find((j) => j.id === started.id).status, { timeout: 20_000 }).toBe('asking');
+
+  const box = main.getByTestId('chat-job-steps');
+  const stepTexts = box.locator('.step .stext');
+  const scroll = () => box.evaluate((el) => ({ top: el.scrollTop, gap: el.scrollHeight - el.clientHeight - el.scrollTop, over: el.scrollHeight > el.clientHeight }));
+  // Steps by what they're for; a command's cd into the folder gone, its paths relative.
+  await expect(stepTexts.filter({ hasText: 'Listing the source folder' })).toHaveCount(1);
+  await expect(stepTexts.filter({ hasText: 'Running grep -n "water" src/planner.js | head -5' })).toHaveCount(1);
+  await expect(stepTexts.filter({ hasText: 'Reading beds\\bed-24.json' })).toHaveCount(1);
+  await expect(main.getByTestId('chat-job-now')).toHaveText('Waiting for you to allow a step');
+  // What it said, in markdown, in its place among the steps.
+  const said1 = main.getByTestId('chat-job-said').first();
+  await expect(said1).toHaveText("I'll start by looking at how the planner stores its beds.");
+  await expect(said1.locator('strong')).toHaveText('beds');
+  // The live end: the steps outgrew their box, which stays at the newest.
+  await expect.poll(async () => (await scroll()).over).toBe(true);
+  await expect.poll(async () => (await scroll()).gap).toBeLessThanOrEqual(8);
+  await expect(box).toHaveAttribute('data-pinned', 'true');
+  await expect(main.getByTestId('chat-job-follow')).toHaveCount(0);
+  // Scrolled up to read: "↓" offered, and it never moves as more come in.
+  await box.evaluate((el) => el.scrollTo(0, 0));
+  await expect(box).toHaveAttribute('data-pinned', 'false');
+  await expect(main.getByTestId('chat-job-follow')).toBeVisible();
+  const before = await stepTexts.count();
+  const prompt = (await yap.invoke('claude_approve_pending')).find((p) => p.run === started.id);
+  await yap.invoke('claude_approve_answer', { id: prompt.id, allow: true });
+  await expect(stepTexts.filter({ hasText: 'Reading beds\\bed-34.json' })).toHaveCount(1);
+  expect(await stepTexts.count()).toBeGreaterThan(before + 9);
+  expect((await scroll()).top).toBe(0);
+  await expect(main.getByTestId('chat-job-follow')).toBeVisible();
+  // "↓": back at the newest, following again.
+  await main.getByTestId('chat-job-follow').click();
+  await expect.poll(async () => (await scroll()).gap).toBeLessThanOrEqual(8);
+  await expect(box).toHaveAttribute('data-pinned', 'true');
+  await expect(main.getByTestId('chat-job-follow')).toHaveCount(0);
+
+  // Nothing more specific running: the line is the to-do in progress.
+  await expect(main.getByTestId('chat-job-now')).toHaveText('Looking at how beds are stored');
+  const list = main.getByTestId('chat-job-todos');
+  await expect(list.locator('h3 .count')).toHaveText('0 of 3 done');
+  await expect(list.locator('.ttext')).toHaveText(PLAN.map(([c]) => c));
+  expect(await list.locator('.todo').evaluateAll((els) => els.map((e) => [e.dataset.status, e.querySelector('.tmark').textContent]))).toEqual([
+    ['in_progress', '●'],
+    ['pending', '○'],
+    ['pending', '○'],
+  ]);
+  // (Allowed: running again once its next tick sees no prompt waiting.)
+  await expect(main.getByTestId('chat-job-status')).toHaveText('Running');
+  await main.locator('.jobbody').evaluate((el) => el.scrollTo(0, 0));
+  await shot(main, '17-job-running-todos-light');
+  await theme(yap, main, 'dark');
+  await shot(main, '18-job-running-todos-dark');
+  await theme(yap, main, 'light');
+  // The running list says the same line.
+  await tab(main).getByRole('button', { name: 'Close the panel' }).click();
+  await expect(main.getByTestId('chat-running-job').locator('.jstep')).toHaveText('Looking at how beds are stored');
+  await main.getByTestId('chat-running-job').click();
+  await expect(tab(main)).toBeVisible();
+
+  // Stop, then Continue: its next turn finishes the list.
+  await tab(main).getByRole('button', { name: 'Stop' }).click();
+  expect((await ended(yap, started.id)).status).toBe('stopped');
+  await script(yap, finishing, 'finishing');
+  fakeLlm.scriptChat([{ plain: true, content: 'It added the watering schedule and wrote a planting guide.' }]);
+  await tab(main).getByRole('button', { name: 'Continue' }).click();
+  const job = await ended(yap, started.id);
+  expect(job.status).toBe('done');
+  await expect(tab(main)).toHaveAttribute('data-status', 'done');
+  await expect(main.getByTestId('chat-job-now')).toHaveCount(0);
+
+  // The list ticked off.
+  await expect(list.locator('h3 .count')).toHaveText('3 of 3 done');
+  expect(await list.locator('.todo .tmark').allTextContents()).toEqual(['✓', '✓', '✓']);
+  // What it said, in order, the long one folded; its summary only once, below.
+  const said = main.getByTestId('chat-job-said');
+  await expect(said).toHaveCount(3);
+  await expect(said.nth(2)).toHaveText('Now the planting guide.');
+  const long = said.nth(1);
+  await expect(long).toHaveClass(/folded/);
+  await long.getByRole('button', { name: 'Show more' }).click();
+  await expect(long).not.toHaveClass(/folded/);
+  await expect(long.getByRole('button', { name: 'Show less' })).toHaveAttribute('aria-expanded', 'true');
+  await expect(main.getByTestId('chat-job-text')).toContainText('now takes litres');
+  for (const s of ['Editing src\\planner.js', 'Running the tests', 'Writing planting-guide.md', 'Writing notes.md']) await expect(stepTexts.filter({ hasText: s })).toHaveCount(1);
+
+  // Commands run: what each was for above it, the command itself (its cd gone), a few then "Show 1 more".
+  const commands = main.getByTestId('chat-job-command');
+  await expect(commands).toHaveCount(3);
+  await expect(commands.nth(0).locator('.cabout')).toHaveText('List the source folder');
+  await expect(commands.nth(0).locator('.cmd')).toHaveText('ls src');
+  await expect(commands.nth(1).locator('.cabout')).toHaveCount(0);
+  await expect(commands.nth(1).locator('.cmd')).toHaveText(`grep -n "water" "${gitBash(GARDEN)}/src/planner.js" | head -5`);
+  await main.getByTestId('chat-job-commands').getByRole('button', { name: 'Show 2 more' }).click();
+  await expect(commands.locator('.cabout')).toHaveText(['List the source folder', 'Build the planner', 'Run the tests', 'Check the planner still parses']);
+  await expect(commands).toHaveCount(5);
+
+  // Files changed: each with its counts, opening to what changed.
+  const file = (f) => main.locator(`[data-testid="chat-job-file"][data-file="${f.replace(/\\/g, '\\\\')}"]`);
+  await expect(main.getByTestId('chat-job-files').locator('.fname')).toHaveText(['src\\planner.js', 'planting-guide.md', 'notes.md']);
+  await expect(file('src\\planner.js').locator('.counts .plus')).toHaveText('+3');
+  await expect(file('src\\planner.js').locator('.counts .minus')).toHaveText('−2');
+  await expect(file('planting-guide.md').locator('.counts .minus')).toHaveCount(0);
+  await expect(file('planting-guide.md').locator('.tag')).toHaveText('New');
+  await file('src\\planner.js').locator('.frow').click();
+  const edit = file('src\\planner.js').getByTestId('chat-job-diff');
+  await expect(edit).toHaveAttribute('data-kind', 'edit');
+  await expect(edit.locator('.dl.del .dt')).toHaveText(['export function water(bed) {', '  bed.water += 1;']);
+  await expect(edit.locator('.dl.add .dt')).toHaveText(['export function water(bed, litres = 2) {', '  bed.water += litres;', '  bed.lastWatered = new Date().toISOString();']);
+  await expect(edit.locator('.dl.ctx .dt')).toHaveText(['  return bed;', '}']);
+  await file('planting-guide.md').locator('.frow').click();
+  const made = file('planting-guide.md').getByTestId('chat-job-diff');
+  await expect(made.locator('.dtitle')).toHaveText('New file · 5 lines');
+  await expect(made.locator('.dl.add .dt').first()).toHaveText('# Planting guide');
+  await file('notes.md').locator('.frow').click();
+  await expect(file('notes.md').getByTestId('chat-job-diff').locator('.dtitle')).toHaveText('Rewritten · 3 lines');
+  // Red and green, in Yap's own colours, light and dark.
+  const tints = () =>
+    edit.evaluate((el) => {
+      const bg = (sel) => getComputedStyle(el.querySelector(sel)).backgroundColor;
+      return { del: bg('.dl.del'), add: bg('.dl.add'), ctx: bg('.dl.ctx') };
+    });
+  for (const which of ['light', 'dark']) {
+    if (which === 'dark') await theme(yap, main, 'dark');
+    const t = await tints();
+    expect(t.del).not.toBe(t.ctx);
+    expect(t.add).not.toBe(t.ctx);
+    expect(t.del).not.toBe(t.add);
+    await file('src\\planner.js').scrollIntoViewIfNeeded();
+    await shot(main, `${which === 'light' ? '19' : '20'}-job-done-diffs-${which}`);
+  }
+  await theme(yap, main, 'light');
+
+  // Replayed from its log: the same, the tab opened afresh.
+  await tab(main).getByRole('button', { name: 'Close the panel' }).click();
+  await messagesOf(yap, job.conversation, 4);
+  await thread(main).getByTestId('chat-job-pill').click();
+  await expect(main.getByTestId('chat-job-said')).toHaveCount(3);
+  await expect(main.getByTestId('chat-job-todos').locator('h3 .count')).toHaveText('3 of 3 done');
+  await file('src\\planner.js').locator('.frow').click();
+  await expect(file('src\\planner.js').getByTestId('chat-job-diff').locator('.dl.add')).toHaveCount(3);
+  // Its log carries the diffs and the list (what the tab replays).
+  const { log } = await yap.invoke('job_get', { id: job.id });
+  expect(log.filter((e) => e.diff).map((e) => [e.diff.file, e.diff.kind])).toEqual([
+    ['src\\planner.js', 'edit'],
+    ['planting-guide.md', 'new'],
+    ['notes.md', 'rewrite'],
+  ]);
+  expect(log.filter((e) => e.todos)).toHaveLength(4);
 });
 
 // ---------------------------------------------------------------- asking

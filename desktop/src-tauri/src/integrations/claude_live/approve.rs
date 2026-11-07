@@ -327,8 +327,16 @@ pub fn describe(tool: &str, input: &Value, folder: Option<&Path>) -> (String, St
     let file = |k: &str| shown(&s(k), folder);
     match tool {
         "Bash" | "PowerShell" => {
+            // The line as the job's steps say a command (its `cd` into the
+            // run's folder gone, its paths relative; never the model's
+            // description: a prompt says what would run), the command whole
+            // below it.
             let cmd = s("command");
-            (format!("Run a command: {}", one_line(&cmd, SUMMARY_MAX)), clip(&cmd, DETAIL_MAX))
+            let line = match folder {
+                Some(f) => crate::jobs::steps::command::relative(&crate::jobs::steps::command::strip_cd(&cmd, f).0, f),
+                None => cmd.clone(),
+            };
+            (format!("Run a command: {}", one_line(&line, SUMMARY_MAX)), clip(&cmd, DETAIL_MAX))
         }
         "Edit" => (
             format!("Edit file: {}", file("file_path")),

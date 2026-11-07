@@ -1,7 +1,8 @@
 // Jobs in the main window (desktop/src-tauri/src/jobs.rs): every job
 // (`job_list`, newest first), kept in step with the app-wide `yap-job`
 // event — its status, files, commands and cost as they change, and the
-// line it's on now (`steps`; a job's own Job carries none: read from its log
+// line it's on now (`steps`: its latest step, or the line it moved to
+// without one, `now`; a job's own Job carries none: read from its log
 // for the ones running when this window opened) —; the permission prompts
 // running jobs are waiting on (`claude_approve_pending`, then
 // `yap-claude-approve` / `-done`), answered only by a click; a report
@@ -75,8 +76,9 @@ function onJob(ev) {
   }
   if (!isLive(ev.status)) {
     if (jobs.steps[ev.id]) jobs.steps = Object.fromEntries(Object.entries(jobs.steps).filter(([k]) => k !== ev.id));
-  } else if (ev.step) {
-    jobs.steps = { ...jobs.steps, [ev.id]: ev.step };
+  } else if (ev.now || ev.step) {
+    // The line it's on: a new step, or one it moved to without one (`now`).
+    jobs.steps = { ...jobs.steps, [ev.id]: ev.now || ev.step };
   }
 }
 

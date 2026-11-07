@@ -1728,6 +1728,22 @@ turn is doing now and its time, `chat/activity.rs` above) with
 screenshots and their prompts, +, the box, the mic, Send / ■, `ModelChip`).
 [frontend.md](./frontend.md#the-folder-layout-2026-10-24).
 
+**The thread follows its newest line** (2026-11-07, `core/stickToBottom.js`
+`followBottom`, made by `ChatThread` on `.msgs` and its content `.msgsin`):
+pinned at the bottom while you're there, a ResizeObserver on the content
+and the scroller keeps it there through everything that makes it grow —
+streamed text, the checked answer's glide, cards (ask-first, approve, a
+job's report), pills and pictures loading later, a report or a spoken
+answer read in, the panel opening beside it. A scroll up of yours (wheel,
+scrollbar, keys, a search hit) lets go at once and nothing moves after it;
+"↓" over the thread's foot ("↓ New messages" once a message, more of the
+answer or a job's prompt came) goes back down, smooth unless motion is
+reduced; scrolling back to the bottom follows again. The person's own
+question (typed, dictated, a prompt, asked out loud) and a conversation
+opened go to the bottom (`chatState`'s `scrollThread` → `follow.toBottom()`);
+a spoken answer or a report landing follows only if the thread does.
+e2e: `chat-scroll.spec.js`.
+
 **The document panel** (2026-10-30, `DocPanel.svelte` + `chatDoc.svelte.js`;
 `chat/documents.rs` above): a document a turn makes or changes opens to
 the right of the conversation. **Opens** on the turn's `document` event
@@ -3484,7 +3500,10 @@ own Claude Code in one of their folders, and reports back when it ends.
     question makes; Bypass asks once, then the chip is amber.
   - **The Job tab** (`JobTab.svelte`, a `job:<id>` tab in `chatDoc` and
     `DocPanel`): opened by the turn's job event, a pill or the bar's Open;
-    steps, files, commands, what wasn't allowed, its final words, its cost,
+    read like Claude Code: its to-do list, its steps and what it says
+    (following the live end), files opening to their diffs, commands with
+    what each is for ([jobs.md](./jobs.md#what-the-tab-shows)), what wasn't
+    allowed, its final words, its cost,
     a problem with one button, Stop / Continue / Undo job / Open in terminal /
     "Tell the job…". Closing it never stops the job.
   - **Pills** under the answer that started a job (`JobPills.svelte`, by the
