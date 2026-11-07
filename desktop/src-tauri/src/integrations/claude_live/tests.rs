@@ -670,7 +670,8 @@ fn a_chat_run_offered_jobs_lists_and_allows_their_tools_and_runs_them_for_its_tu
     let list = c.request("tools/list", json!({}));
     assert_eq!(names(&list)[9..], ["start_job", "job_status", "message_job", "stop_job"]);
     let start = list["result"]["tools"].as_array().unwrap().iter().find(|t| t["name"] == "start_job").unwrap().clone();
-    assert_eq!(start["inputSchema"]["required"], json!(["folder", "brief"]));
+    // (The folder may be left out: in a Code chat it's the chat's, jobs/code_chat.rs.)
+    assert_eq!(start["inputSchema"]["required"], json!(["brief"]));
     for name in ["start_job", "job_status", "message_job", "stop_job"] {
         assert!(h.allowed_tools().contains(&format!("mcp__yap__{name}")), "{name}");
     }
