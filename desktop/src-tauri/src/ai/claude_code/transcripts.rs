@@ -6,8 +6,11 @@
 //! `projects/<the working folder, encoded>/<session id>.jsonl`, with the
 //! session's own files (a subagent's transcript, a big tool result) in
 //! `<session id>/` beside it. A plan chat's session (`claude_plan`) runs in
-//! Yap's own `<data>/claude/chat/`, so a copy of the conversation lands
-//! there, outside Yap; [`remove`] deletes it when Yap deletes the chat.
+//! Yap's own `<data>/claude/chat/` — a Code chat's in its workspace, so its
+//! copy lands in that folder's projects folder, beside the person's own
+//! and their jobs' sessions — outside Yap; [`remove`] deletes it when Yap
+//! deletes the chat (`claude_plan/sessions.rs` keeps which folder each ran
+//! in).
 //!
 //! - **The folder's name** ([`project_dir_name`]), as Claude Code 2.1.296's
 //!   own code makes it (read from its bundled source on 7 Nov 2026, and the
@@ -18,12 +21,13 @@
 //!   `h = 31·h + unit` hash of the path, in base 36).
 //! - **Only Yap's own**: [`remove`] deletes only files named with the session
 //!   ids Yap gave it (UUIDs no other session has), only in the folder for
-//!   Yap's own working folder — matched without case, since Windows may give
-//!   the drive letter either way — or in one whose name ends as that folder's
-//!   last two parts do (`…-claude-chat`: the same folder reached another way,
-//!   such as a junction). Never another session's, never another project's:
-//!   the person's jobs run in their own folders, and those transcripts are
-//!   theirs.
+//!   the working folder they ran in — matched without case, since Windows
+//!   may give the drive letter either way — or in one whose name ends as that
+//!   folder's last two parts do (`…-claude-chat`: the same folder reached
+//!   another way, such as a junction). Never another session's, never
+//!   another project's: in a Code chat's workspace the person's own
+//!   sessions and their jobs' stay (a job's transcript is theirs, as if
+//!   they'd run Claude Code themselves).
 //! - **Test runs** never look in the person's own `~/.claude`: only a
 //!   `CLAUDE_CONFIG_DIR` the test set.
 //!

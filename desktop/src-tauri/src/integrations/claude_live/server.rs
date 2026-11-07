@@ -111,6 +111,7 @@ impl Endpoint {
         let key = random_hex(32)?;
         let tools = spec.tools;
         let jobs = spec.jobs && tools == super::Tools::Chat;
+        let memory = spec.memory;
         let has_backup = spec.backup_dir.is_some();
         let turn = Arc::new(super::turn::Slot::default());
         let run = Arc::new(Run { id: id.clone(), digest: digest(&format!("Bearer {key}")), spec, backups: Mutex::new(()), turn: Arc::clone(&turn) });
@@ -120,7 +121,7 @@ impl Endpoint {
             runs.len()
         };
         tracing::info!(run = %id, tools = ?tools, jobs, backup = has_backup, runs = count, "Claude Code endpoint: a run registered");
-        Ok(RunHandle { endpoint: Arc::clone(self), id, key, tools, jobs, has_backup, turn })
+        Ok(RunHandle { endpoint: Arc::clone(self), id, key, tools, jobs, memory, has_backup, turn })
     }
 
     /// The run's URLs answer 404 from now on; its prompts still waiting

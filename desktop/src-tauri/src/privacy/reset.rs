@@ -852,6 +852,9 @@ fn clear_stores(c: &Choice, done: &mut Done) -> Gone {
     done.chats = gone.chats.len();
     for id in &gone.chats {
         crate::apps::moved_on(Some(*id));
+        // No longer a Code chat either: a later conversation may get its id,
+        // and mustn't start as one (a Code chat keeps Yap's memory out).
+        crate::jobs::code_chat::chat_deleted(*id);
     }
     // Their Claude Code sessions (your Claude plan), the warm ones ended.
     if c.claude_sessions() == Cut::Whole {

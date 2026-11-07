@@ -127,6 +127,12 @@ pub fn describe(name: &str, args: &Value, title_of: &dyn Fn(u64) -> Option<Strin
         "get_meeting" => Activity::new("notes", with(titled(&["id", "note_id"]), "Reading", "Reading a meeting")),
         "list_tasks" => Activity::new("notes", "Looking at your tasks"),
         "search_memory" => Activity::new("memory", dotted(text(&["query"]), "Searching Yap's memory")),
+        // A Code chat's reads of its workspace on your Claude plan (Claude
+        // Code's Read, Grep, Glob: claude_plan/map.rs): the file's name, the
+        // words or the pattern.
+        "read_file" => Activity::new("read", with(text(&["file_path", "path"]).map(|p| file_name(&p)), "Reading", "Reading a file")),
+        "search_code" => Activity::new("search", dotted(text(&["pattern"]), "Searching the code")),
+        "find_files" => Activity::new("search", dotted(text(&["pattern"]), "Looking for files")),
         "copy_to_clipboard" => Activity::new("tool", "Copying to the clipboard"),
         "open_app" => Activity::new("apps", with(text(&["name"]), "Opening", "Opening the app")),
         "list_apps" => Activity::new("apps", "Looking for the app"),
@@ -192,6 +198,12 @@ fn quoted(s: &str) -> String {
     format!("\u{2018}{s}\u{2019}")
 }
 
+/// A path's last part (`D:\Projects\garden-planner\src\app.ts` → `app.ts`),
+/// either slash. Pure.
+fn file_name(path: &str) -> String {
+    path.trim().trim_end_matches(['\\', '/']).rsplit(['\\', '/']).next().unwrap_or("").to_string()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -212,6 +224,12 @@ mod tests {
         assert_eq!(line("start_job", json!({ "folder": r"D:\Projects\garden-planner" })), "Starting a job in garden-planner");
         assert_eq!(line("start_job", json!({ "folder": "garden-planner" })), "Starting a job in garden-planner");
         assert_eq!(line("job_status", json!({})), "Checking the job");
+        // A Code chat's reads of its workspace (on the Claude plan): the file's name only.
+        assert_eq!(line("read_file", json!({ "file_path": r"D:\Projects\garden-planner\src\app.ts" })), "Reading app.ts");
+        assert_eq!(line("read_file", json!({ "file_path": "/home/imogen/garden-planner/README.md" })), "Reading README.md");
+        assert_eq!(line("read_file", Value::Null), "Reading a file");
+        assert_eq!(line("search_code", json!({ "pattern": "water(ing)?" })), "Searching the code · water(ing)?");
+        assert_eq!(line("find_files", json!({ "pattern": "**/*.ts" })), "Looking for files · **/*.ts");
         assert_eq!(line("web_fetch", json!({ "url": "https://www.emberfall.example/wiki/Talents/" })), "Reading emberfall.example/wiki/Talents");
         assert_eq!(line("read_page", json!({ "url": "" })), "Reading a page");
         assert_eq!(line("search_notes", json!({ "query": "kitchen budget" })), "Searching your notes · kitchen budget");

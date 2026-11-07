@@ -1548,10 +1548,10 @@ quote for a question asked out loud.
   - **Not built**: a card for Claude Code's own questions (`AskUserQuestion`
     is denied); a phone job's report spoken on the phone (it's spoken on this
     PC); Codex as a second engine.
-  - **Decided, landing next**: Code chats without Yap's memory, and a Code
-    chat on the plan as a read-only session in its workspace
-    ([jobs.md](./jobs.md#chat-and-code)). **Open**: the feature's name
-    ([jobs.md](./jobs.md#open-questions)).
+  - **Landed 7 Nov, unit- and e2e-tested, not tried for real**: Code chats
+    without Yap's memory, and a Code chat on the plan as a read-only session
+    in its workspace ([jobs.md](./jobs.md#memory-and-the-plan-in-a-code-chat)).
+    **Open**: the feature's name ([jobs.md](./jobs.md#open-questions)).
   - An http `SessionStart` hook didn't fire in a real `-p` run (not looked
     into).
 - **Markdown files** (2026-11-07): the installer's "Open with" is unverified

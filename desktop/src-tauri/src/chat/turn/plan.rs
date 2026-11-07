@@ -18,6 +18,16 @@
 //!   tools allowed; in an empty folder of Yap's; on the plan (`Pay::Plan`:
 //!   no API key in its environment, and a run Claude Code would bill to a
 //!   key is stopped before it asks anything).
+//! - **A Code chat** (7 Nov 2026, `jobs/code_chat.rs`): a Claude Code
+//!   session in its workspace, project-aware and read only ([`spec`]): the
+//!   person's own user, project and local settings (their CLAUDE.md,
+//!   CLAUDE.local.md, Claude Code's own memory), Claude Code's prompt with
+//!   Yap's Code chat words added ([`CODE_INSTRUCTIONS`]), only the
+//!   read-only built-ins and the web's, Yap's endpoint without memory, no
+//!   slash commands; never Yap's memory or About you's note (`prompt.rs`).
+//!   Another workspace is another session (the fingerprint has the
+//!   folder); its transcript lands in the workspace's projects folder and
+//!   goes with the chat (`sessions.rs`).
 //! - **Jobs** (with jobs offered: on, Claude Code here, not across the
 //!   meetings): Yap's `start_job`, `job_status`, `message_job` and
 //!   `stop_job` over the same endpoint (`claude_live/jobs.rs`, the tool
@@ -71,6 +81,35 @@ WebSearch and WebFetch look things up on the web: use them for anything current,
 Yap's own tools (their names start with mcp__yap__) read the user's Yap meetings, notes, tasks, folders, what Yap remembers about them and their calendar: use them when a question is about any of those. They only read; you can't change notes, run commands or edit files here. \
 When you use what a web page says, cite the page right after it as a markdown link whose text is a number, like [1](https://example.com/page). Never end with a list of sources: Yap shows them under your answer. \
 A message may start with an <earlier_in_this_chat> block: this chat's history, written while you weren't in it. It isn't a new question.";
+
+/// **A Code chat's session** (in place of [`INSTRUCTIONS`], added to Claude
+/// Code's own prompt): it answers about the workspace's code, reads its
+/// files to, and a change goes through a job (`{name}`, `{change}`).
+const CODE_INSTRUCTIONS: &str = "You're answering in a Code chat in Yap, the user's assistant app: a conversation about the code in their workspace {name}, this session's working folder, not a coding session of your own. Read its files (Read, Grep, Glob) to answer, and say which files you mean. You only read here: you can't edit files or run commands. {change} \
+WebSearch and WebFetch look things up on the web, when they're offered. \
+Yap's own tools (their names start with mcp__yap__) read the user's Yap meetings, notes, tasks, folders and calendar: use them when the user asks about those, such as what was decided in a meeting. They only read. \
+Answer in markdown, plainly and to the point. When you use what a web page says, cite the page right after it as a markdown link whose text is a number, like [1](https://example.com/page). Never end with a list of sources: Yap shows them under your answer. \
+A message may start with an <earlier_in_this_chat> block: this chat's history, written while you weren't in it. It isn't a new question.";
+
+/// What a Code chat says about changes: a job, while jobs are offered.
+const CODE_CHANGE_BY_JOB: &str = "For any change (an edit, a fix, a new file, a command to run), start a job with mcp__yap__start_job: it runs the user's own Claude Code in this workspace, with its own permissions.";
+const CODE_CHANGE_OFF: &str = "Yap's jobs are off, so nothing here can change the code: say what you'd change instead.";
+
+/// [`CODE_INSTRUCTIONS`] for the workspace `name`, with jobs offered or not.
+/// Pure.
+fn code_instructions(name: &str, jobs: bool) -> String {
+    CODE_INSTRUCTIONS.replace("{name}", name).replace("{change}", if jobs { CODE_CHANGE_BY_JOB } else { CODE_CHANGE_OFF })
+}
+
+/// **What a Code chat's session may read with**: Claude Code's own
+/// read-only tools (2.1.296 has no `LS`: `Glob` lists). Never Edit, Write,
+/// MultiEdit, NotebookEdit, Bash or PowerShell: a change is a job's.
+pub(crate) const CODE_READ_TOOLS: &[&str] = &["Read", "Grep", "Glob"];
+
+/// **The person's own settings**, as in their terminal (their CLAUDE.md,
+/// CLAUDE.local.md, Claude Code's own memory and permissions): a Code
+/// chat's session loads them.
+pub(crate) const CODE_SETTING_SOURCES: &[&str] = &["user", "project", "local"];
 
 /// **With jobs offered**, after [`INSTRUCTIONS`]: Yap's job tools, what
 /// they're for, and the safety rule as it holds here; then the tool loop's
@@ -167,19 +206,23 @@ impl map::Out for ToChat<'_> {
 }
 
 /// The plan's system prompt for this turn: the persona and the answering
-/// line, how to answer here (and the job tools, while offered), the
-/// context's note, About you, memory's "You".
+/// line, how to answer here (a Code chat's own words; and the job tools,
+/// while offered), the context's note, About you, memory's "You" (none in
+/// a Code chat: `prompt.rs` left it out, and About you's note).
 fn system_prompt(t: &Asked<'_>, built: &Built) -> String {
     let mut s = t.ep.persona.trim().to_string();
     s.push_str("\n\n");
-    s.push_str(INSTRUCTIONS);
+    match &built.code {
+        Some(f) => s.push_str(&code_instructions(&f.name, t.gates.jobs)),
+        None => s.push_str(INSTRUCTIONS),
+    }
     if t.gates.jobs {
         s.push(' ');
         s.push_str(&jobs_lines());
     }
     s.push_str("\n\n");
     s.push_str(crate::chat::chats::CONTEXT_NOTE);
-    let profile = crate::ai::about_you::profile_block(&t.profile);
+    let profile = crate::ai::about_you::profile_block(&built.profile);
     if !profile.is_empty() {
         s.push_str("\n\n");
         s.push_str(&profile);
@@ -198,12 +241,14 @@ fn jobs_lines() -> String {
 
 /// What a warm process must have been started with to take this turn (its
 /// tools are listed once: one made without the job tools can't take a turn
-/// that offers them).
-fn fingerprint(system: &str, web: bool, jobs: bool) -> u64 {
+/// that offers them; and it runs in one folder: `cwd`, a Code chat's
+/// workspace, empty for Yap's own).
+fn fingerprint(system: &str, web: bool, jobs: bool, cwd: &str) -> u64 {
     let mut h = std::collections::hash_map::DefaultHasher::new();
     system.hash(&mut h);
     web.hash(&mut h);
     jobs.hash(&mut h);
+    cwd.to_lowercase().hash(&mut h);
     h.finish()
 }
 
@@ -223,41 +268,79 @@ fn run_context(t: &Asked<'_>, opened: &Opened) -> crate::integrations::claude_li
     }
 }
 
-/// The run's flags: Yap's prompt, the web's tools (with the web on), Yap's
-/// tools over its endpoint (read-only, and the job tools while offered:
-/// the run's own list), nothing of the person's settings.
-fn spec(model: &str, effort: Option<Effort>, system: &str, web: bool, conversation: Conversation, run: &crate::integrations::claude_live::RunHandle) -> Result<Spec, String> {
-    let mut spec = Spec::new(oneshot::folder("chat")?, Pay::Plan);
+/// The run's flags (`run`: its tools over Yap's endpoint — read-only, and
+/// the job tools while offered: the run's own list; `--strict-mcp-config`
+/// with Yap's server only, so the person's own MCP servers never start for
+/// a chat):
+///
+/// - **A plain plan chat** (`code` `None`): lean — Yap's prompt in place
+///   of Claude Code's, the web's tools (with the web on) and no other,
+///   nothing of the person's settings (`--setting-sources ""`), in Yap's
+///   own empty `claude/chat/`.
+/// - **A Code chat** (`code`: its workspace): a Claude Code session in the
+///   workspace, as in the person's own terminal but read only — their user,
+///   project and local settings (their CLAUDE.md, CLAUDE.local.md and
+///   Claude Code's own memory), Claude Code's own prompt with Yap's added
+///   (`--append-system-prompt-file`), and only the read-only built-ins
+///   ([`CODE_READ_TOOLS`]) and the web's: `--tools` is the list the model
+///   gets, whatever the person's settings allow (2.1.296's `--help`: "the
+///   list of available tools from the built-in set"; its recordings' init
+///   lists exactly them). Under `dontAsk` the reads in the workspace run
+///   without a rule ("File reads in your working directories … still
+///   run"), anything that would ask is denied, and file reads outside the
+///   workspace are refused outright (`blockReadsOutsideWorkingDirectories`
+///   in the run's own `--settings`). No slash commands: a message never
+///   runs one of their own commands. A change only ever goes through
+///   `start_job`, with all its rules.
+#[allow(clippy::too_many_arguments)]
+fn spec(model: &str, effort: Option<Effort>, system: &str, web: bool, code: Option<&std::path::Path>, conversation: Conversation, run: &crate::integrations::claude_live::RunHandle) -> Result<Spec, String> {
+    let mut spec = match code {
+        Some(dir) => Spec::new(dir, Pay::Plan),
+        None => Spec::new(oneshot::folder("chat")?, Pay::Plan),
+    };
     spec.model = Some(model.to_string()).filter(|m| !m.trim().is_empty());
     spec.effort = effort;
     spec.permission_mode = PermissionMode::DontAsk;
     let web_tools: Vec<String> = if web { vec!["WebSearch".into(), "WebFetch".into()] } else { Vec::new() };
-    spec.tools = Some(web_tools.clone());
-    spec.allowed_tools = web_tools.into_iter().chain(run.allowed_tools()).collect();
+    spec.allowed_tools = web_tools.iter().cloned().chain(run.allowed_tools()).collect();
     spec.mcp_config = Some(run.mcp_config());
     // The run key its MCP config names, in its environment only.
     spec.env = run.env();
     spec.strict_mcp_config = true;
-    spec.setting_sources = Some(Vec::new());
-    spec.system_prompt = Some(system.to_string());
     spec.conversation = conversation;
+    match code {
+        Some(_) => {
+            spec.tools = Some(CODE_READ_TOOLS.iter().map(|t| t.to_string()).chain(web_tools).collect());
+            spec.setting_sources = Some(CODE_SETTING_SOURCES.iter().map(|s| s.to_string()).collect());
+            spec.settings = Some(serde_json::json!({ "permissions": { "blockReadsOutsideWorkingDirectories": true } }));
+            spec.append_system_prompt = Some(system.to_string());
+            spec.disable_slash_commands = true;
+        }
+        None => {
+            spec.tools = Some(web_tools);
+            spec.setting_sources = Some(Vec::new());
+            spec.system_prompt = Some(system.to_string());
+        }
+    }
     Ok(spec)
 }
 
 /// A process for `conv`, started (resuming `resume` when given) and kept
-/// warm; its run offered the job tools with `jobs`.
+/// warm; its run offered the job tools with `jobs`; in `code`'s workspace
+/// for a Code chat (its run without Yap's memory).
 #[allow(clippy::too_many_arguments)]
-fn start(conv: u64, model: &str, effort: Option<Effort>, system: &str, web: bool, jobs: bool, print: u64, resume: Option<&str>) -> Result<(Arc<sessions::Warm>, bool), String> {
-    let run = crate::integrations::claude_live::register_run(crate::integrations::claude_live::RunSpec::new("Chat", crate::integrations::claude_live::Tools::Chat).with_jobs(jobs))?;
+fn start(conv: u64, model: &str, effort: Option<Effort>, system: &str, web: bool, jobs: bool, code: Option<&std::path::Path>, print: u64, resume: Option<&str>) -> Result<(Arc<sessions::Warm>, bool), String> {
+    use crate::integrations::claude_live::{register_run, RunSpec, Tools};
+    let run = register_run(RunSpec::new("Chat", Tools::Chat).with_jobs(jobs).with_memory(code.is_none()))?;
     let conversation = match resume {
         Some(id) => Conversation::Resume(id.to_string()),
         None => Conversation::fresh(),
     };
     let resumed = resume.is_some();
-    let (session, rx) = Session::start(spec(model, effort, system, web, conversation, &run)?)?;
+    let (session, rx) = Session::start(spec(model, effort, system, web, code, conversation, &run)?)?;
     let warm = Arc::new(sessions::Warm::new(session, rx, conv, model.to_string(), effort, print, Some(run)));
     sessions::keep(warm.clone());
-    tracing::info!(resumed, warm = sessions::warm_count(), "Claude plan: a session started for a conversation");
+    tracing::info!(resumed, code = code.is_some(), warm = sessions::warm_count(), "Claude plan: a session started for a conversation");
     Ok((warm, resumed))
 }
 
@@ -393,7 +476,15 @@ pub(super) async fn answer(t: &Asked<'_>, opened: &Opened, built: &Built, fitted
     let system = system_prompt(t, built);
     let web = t.gates.web_on;
     let jobs = t.gates.jobs;
-    let print = fingerprint(&system, web, jobs);
+    // A Code chat's session runs in its workspace (`spec`): that folder
+    // still there, else said plainly (never its name or path in the log).
+    let workspace = built.code.as_ref().map(|f| std::path::PathBuf::from(&f.path));
+    if workspace.as_ref().is_some_and(|w| !w.is_dir()) {
+        tracing::info!("Claude plan: a Code chat's workspace folder is gone");
+        return Err("This Code chat's workspace folder isn't on this PC any more. Pick another workspace, or make it a plain chat.".to_string());
+    }
+    let cwd = built.code.as_ref().map(|f| f.path.clone()).unwrap_or_default();
+    let print = fingerprint(&system, web, jobs, &cwd);
     // The question, its context and its screenshots.
     let question = crate::chat::chats::with_context(&built.prompt.context, &t.text);
     let images = if crate::snip::vision::reads_images(plan::PROVIDER, &model) == Some(false) { Vec::new() } else { question_images() };
@@ -419,11 +510,11 @@ pub(super) async fn answer(t: &Asked<'_>, opened: &Opened, built: &Built, fitted
             Some(w) => (w, true),
             None => {
                 let kept = sessions::get(conv.id, conv.created_ts);
-                let resume = match sessions::start(kept.as_ref(), conv.messages.len()) {
+                let resume = match sessions::start(kept.as_ref(), conv.messages.len(), &cwd) {
                     sessions::Start::Resume { id, .. } if !no_resume => Some(id),
                     _ => None,
                 };
-                start(conv.id, &model, effort, &system, web, jobs, print, resume.as_deref())?
+                start(conv.id, &model, effort, &system, web, jobs, workspace.as_deref(), print, resume.as_deref())?
             }
         };
         // One turn at a time on it: a turn still answering (stopped, or
@@ -436,7 +527,7 @@ pub(super) async fn answer(t: &Asked<'_>, opened: &Opened, built: &Built, fitted
         // What the session hasn't seen: another model's answers since, or —
         // a new session — the chat so far (sized to the model).
         let kept = sessions::get(conv.id, conv.created_ts);
-        let earlier = match (resumed_now, sessions::start(kept.as_ref(), conv.messages.len())) {
+        let earlier = match (resumed_now, sessions::start(kept.as_ref(), conv.messages.len(), &cwd)) {
             (true, sessions::Start::Resume { unseen, .. }) => messages_from(conv, unseen),
             _ => fitted.history.clone(),
         };
@@ -466,7 +557,7 @@ pub(super) async fn answer(t: &Asked<'_>, opened: &Opened, built: &Built, fitted
         close_turn(run_turn.take(), &out);
         let session_id = w.session.session_id();
         let keep = |seen: usize| {
-            sessions::put(conv.id, sessions::Kept { session: session_id.clone(), created: conv.created_ts, seen, model: model.clone(), ts: 0 });
+            sessions::put(conv.id, sessions::Kept { session: session_id.clone(), created: conv.created_ts, seen, model: model.clone(), ts: 0, cwd: cwd.clone() });
         };
         let result = match ended {
             Ended::Done(r) => r,
@@ -628,11 +719,14 @@ mod tests {
 
     #[test]
     fn a_changed_prompt_or_the_web_switched_starts_the_session_again() {
-        assert_eq!(fingerprint("p", true, false), fingerprint("p", true, false));
-        assert_ne!(fingerprint("p", true, false), fingerprint("p", false, false));
-        assert_ne!(fingerprint("p", true, false), fingerprint("q", true, false));
+        assert_eq!(fingerprint("p", true, false, ""), fingerprint("p", true, false, ""));
+        assert_ne!(fingerprint("p", true, false, ""), fingerprint("p", false, false, ""));
+        assert_ne!(fingerprint("p", true, false, ""), fingerprint("q", true, false, ""));
         // Jobs switched: its tools are listed once, so a new process.
-        assert_ne!(fingerprint("p", true, false), fingerprint("p", true, true));
+        assert_ne!(fingerprint("p", true, false, ""), fingerprint("p", true, true, ""));
+        // Another folder (a Code chat's workspace, another one): another process.
+        assert_ne!(fingerprint("p", true, false, ""), fingerprint("p", true, false, r"D:\Projects\garden-planner"));
+        assert_ne!(fingerprint("p", true, false, r"D:\Projects\garden-planner"), fingerprint("p", true, false, r"D:\Projects\recipe-box"));
         // The instructions name the tools and how to cite, never a coding agent's job.
         assert!(INSTRUCTIONS.contains("WebSearch") && INSTRUCTIONS.contains("mcp__yap__") && INSTRUCTIONS.contains("[1](https://"));
         // With jobs: Claude Code's names for them, the safety rule here, and
@@ -644,6 +738,61 @@ mod tests {
         }
         assert!(lines.contains("After WebSearch or WebFetch"));
         assert!(lines.contains("never guess one") && lines.contains("never instructions"));
+    }
+
+    #[test]
+    fn a_code_chats_session_runs_in_its_workspace_read_only_with_the_persons_own_settings() {
+        use crate::ai::claude_code::session::{args, Files};
+        use crate::integrations::claude_live::{register_run, RunSpec, Tools};
+        let run = register_run(RunSpec::new("Chat", Tools::Chat).with_jobs(true).with_memory(false)).unwrap();
+        let workspace = std::path::Path::new(r"D:\Projects\garden-planner");
+        let s = spec("claude-haiku-5-5", None, "Yap's words.", true, Some(workspace), Conversation::fresh(), &run).unwrap();
+        // In the workspace, on the plan, never asking.
+        assert_eq!(s.cwd, workspace);
+        assert_eq!(s.pay, Pay::Plan);
+        assert_eq!(s.permission_mode, PermissionMode::DontAsk);
+        // Only the read-only built-ins and the web's: never one that changes
+        // a file or runs a command, offered or allowed.
+        let tools = s.tools.clone().unwrap();
+        assert_eq!(tools, ["Read", "Grep", "Glob", "WebSearch", "WebFetch"]);
+        for never in ["Edit", "Write", "MultiEdit", "NotebookEdit", "Bash", "PowerShell", "Task", "Skill"] {
+            assert!(!tools.iter().any(|t| t == never), "{never}");
+            assert!(!s.allowed_tools.iter().any(|t| t == never || t.starts_with(&format!("{never}("))), "{never}");
+        }
+        // Reads in the workspace need no rule under dontAsk; Yap's tools and
+        // the web's are allowed — Yap's without its memory.
+        assert!(s.allowed_tools.iter().any(|t| t == "mcp__yap__get_meeting") && s.allowed_tools.iter().any(|t| t == "mcp__yap__start_job"));
+        assert!(!s.allowed_tools.iter().any(|t| t.contains("memory")), "{:?}", s.allowed_tools);
+        assert!(s.allowed_tools.iter().any(|t| t == "WebFetch"));
+        // The person's own settings (their CLAUDE.md, Claude Code's memory),
+        // Yap's server only, Claude Code's own prompt with Yap's added, no
+        // slash commands, no reads outside the workspace.
+        assert_eq!(s.setting_sources, Some(vec!["user".to_string(), "project".into(), "local".into()]));
+        assert!(s.strict_mcp_config);
+        assert_eq!(s.mcp_config.as_ref().unwrap()["mcpServers"].as_object().unwrap().keys().collect::<Vec<_>>(), ["yap"]);
+        assert_eq!((s.append_system_prompt.as_deref(), s.system_prompt.as_deref()), (Some("Yap's words."), None));
+        assert!(s.disable_slash_commands);
+        assert_eq!(s.settings.as_ref().unwrap()["permissions"]["blockReadsOutsideWorkingDirectories"], true);
+        assert!(s.persist, "saved, so it resumes");
+        // As Claude Code gets them.
+        let files = Files { settings: Some(r"C:\t\settings.json".into()), mcp_config: Some(r"C:\t\mcp.json".into()), system_prompt: Some(r"C:\t\append.md".into()), own_prompt: None };
+        let a = args(&s, &files);
+        let after = |flag: &str| a.iter().position(|x| x == flag).and_then(|i| a.get(i + 1)).map(String::as_str);
+        assert_eq!(after("--tools"), Some("Read,Grep,Glob,WebSearch,WebFetch"));
+        assert_eq!(after("--setting-sources"), Some("user,project,local"));
+        assert_eq!(after("--permission-mode"), Some("dontAsk"));
+        assert_eq!(after("--append-system-prompt-file"), Some(r"C:\t\append.md"));
+        assert!(a.iter().any(|x| x == "--strict-mcp-config") && a.iter().any(|x| x == "--disable-slash-commands"));
+        assert!(!a.iter().any(|x| x == "--system-prompt-file"));
+        // The web off: the reads alone.
+        let off = spec("claude-haiku-5-5", None, "Yap's words.", false, Some(workspace), Conversation::fresh(), &run).unwrap();
+        assert_eq!(off.tools.unwrap(), ["Read", "Grep", "Glob"]);
+        // Its words: this workspace's code, read to answer, a change a job's.
+        let with_jobs = code_instructions("garden-planner", true);
+        assert!(with_jobs.contains("their workspace garden-planner") && with_jobs.contains("Read its files (Read, Grep, Glob)") && with_jobs.contains("start a job with mcp__yap__start_job"));
+        assert!(with_jobs.contains("can't edit files or run commands") && !with_jobs.contains("remembers"));
+        assert!(code_instructions("garden-planner", false).contains("Yap's jobs are off"));
+        assert!(!INSTRUCTIONS.contains("Code chat"), "a plain plan chat's own words, as before");
     }
 
     #[test]

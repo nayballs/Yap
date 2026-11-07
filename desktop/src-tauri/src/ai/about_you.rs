@@ -663,6 +663,17 @@ pub struct Profile {
     pub about: String,
 }
 
+impl Profile {
+    /// **For a Code chat** (`jobs/code_chat.rs`, 7 Nov 2026): the name and
+    /// the region (spelling, units, money, the clock) kept, the free-text
+    /// note ("Anything the AI should know about you") left out — it's
+    /// personal, and a Code chat's answers and briefs go into the person's
+    /// project. Pure.
+    pub fn without_note(&self) -> Profile {
+        Profile { about: String::new(), ..self.clone() }
+    }
+}
+
 /// The person's profile, as Settings has it now.
 pub fn profile(cfg: &crate::config::YapConfig) -> Profile {
     Profile {

@@ -107,11 +107,12 @@ pub(super) struct Prompt {
 impl Prompt {
     /// The persona, the instructions for what the model may do (and the
     /// screen's line), and — for a model that calls tools — the clock first
-    /// in the question's context.
-    fn start(t: &Asked<'_>) -> Prompt {
+    /// in the question's context. `memory`: memory's tools are offered (not
+    /// in a Code chat).
+    fn start(t: &Asked<'_>, memory: bool) -> Prompt {
         let g = t.gates;
         let mut system = t.ep.persona.trim().to_string();
-        system.push_str(&instructions(&t.cfg, g.tools, g.doc_tools, g.web_lines, g.web_on, g.pictures, g.act, g.calendar, &t.profile));
+        system.push_str(&instructions(&t.cfg, g.tools, g.doc_tools, g.web_lines, g.web_on, g.pictures, g.act, g.calendar, &t.profile, memory));
         let screen_line = crate::chat::see_screen::instructions(g.screen);
         if !screen_line.is_empty() {
             system.push(' ');
@@ -219,7 +220,11 @@ impl Prompt {
     /// looks up for a model without tools — or a line saying none is
     /// connected —, this chat's documents for a model that changes them,
     /// memory (`memory_here`) and past chats, then how the person wants
-    /// answers. The calendar's meetings it looked up, and its chip.
+    /// answers. The calendar's meetings it looked up, and its chip. `code`:
+    /// a Code chat — no notes found by themselves, nor how the person wants
+    /// answers (memory's); its model reads the notes with its tools when
+    /// asked.
+    #[allow(clippy::too_many_arguments)]
     fn library(
         &mut self,
         t: &Asked<'_>,
@@ -227,9 +232,10 @@ impl Prompt {
         memory_here: Option<String>,
         past_chats: Option<String>,
         calendar_zone: crate::chat::tools::calendar::Zone,
+        code: bool,
     ) -> (Vec<crate::chat::tools::calendar::Cited>, Option<String>) {
         let g = t.gates;
-        let rag = if t.meetings { String::new() } else { rag_context(&t.text, self.in_message) };
+        let rag = if t.meetings || code { String::new() } else { rag_context(&t.text, self.in_message) };
         if !rag.is_empty() {
             self.add(format!("{RAG_LEAD}\n\n{rag}"));
         }
@@ -254,8 +260,8 @@ impl Prompt {
         }
         // How the person wants answers, again last in the context, where a
         // small tool model heeds it (a model without tools has it at the end
-        // of its system prompt, in memory's "You" block).
-        if self.in_message {
+        // of its system prompt, in memory's "You" block). Not in a Code chat.
+        if self.in_message && !code {
             if let Some(note) = crate::memory::answer_note() {
                 self.context.push(note);
             }
@@ -414,11 +420,29 @@ pub(super) struct Built {
     pub(super) replay: bool,
     pub(super) history_note: bool,
     /// About you's block, and memory's "You": the end of a small model's
-    /// web pipeline's prompt too (`small.rs`).
+    /// web pipeline's prompt too (`small.rs`). (A Code chat: About you
+    /// without its note, no "You".)
     pub(super) about: String,
     pub(super) memory_you: String,
+    /// About you as this turn tells it ([`code_profile`]): a plan chat's
+    /// system prompt is written from it (`plan.rs`).
+    pub(super) profile: crate::ai::about_you::Profile,
+    /// A Code chat's workspace (`Opened::code`): no memory in this turn, and
+    /// on the Claude plan its session runs there (`plan.rs`).
+    pub(super) code: Option<crate::jobs::folders::Folder>,
     /// The person's time zone, for the calendar tool.
     pub(super) calendar_zone: crate::chat::tools::calendar::Zone,
+}
+
+/// **About you as a turn tells it**: whole in a plain chat; in a Code chat
+/// (`code`) the name and the region, not the note (`Profile::without_note`).
+/// Pure.
+pub(super) fn code_profile(profile: &crate::ai::about_you::Profile, code: bool) -> crate::ai::about_you::Profile {
+    if code {
+        profile.without_note()
+    } else {
+        profile.clone()
+    }
 }
 
 /// **The prompt for this turn** ([`Prompt`]) and what goes with it
@@ -439,15 +463,23 @@ pub(super) async fn build(t: &Asked<'_>, sizing: &Sizing, opened: &Opened) -> Bu
     // ([`Built::writes_doc`]).
     let writes_doc = g.strong && !t.meetings && crate::chat::documents::writes_document(&t.text, &chat_docs, selection.is_some());
     let outline_first = writes_doc && g.web_on && crate::chat::documents::makes_new_document(&t.text, &chat_docs, selection.is_some());
+    // **A Code chat** (jobs/code_chat.rs, 7 Nov 2026): project knowledge
+    // lives with the project (its CLAUDE.md, Claude Code's own memory), and
+    // Yap's memory is personal — so none of it here (its passages, its
+    // "You", its tools, past chats), About you without its note, and
+    // nothing found by itself: the model reads meetings, notes and tasks
+    // with its tools when asked.
+    let code = opened.code.is_some();
+    let profile = code_profile(&t.profile, code);
     // Memory (memory.rs): the "You" part in the system prompt with About
     // you (stable from turn to turn), what this question is about with it.
-    let memory_you = crate::memory::you_block();
+    let memory_you = if code { String::new() } else { crate::memory::you_block() };
     // By its words, and by meaning when that's on (search/library.rs).
-    let memory_here = crate::search::library::memory_block(&t.text).await;
+    let memory_here = if code { None } else { crate::search::library::memory_block(&t.text).await };
     // "Search and reference past chats": a tool for a model with tools; for
     // one without, the chats a question points back to ("what did we say
     // about Lisbon?"), a couple of lines each.
-    let past_chats = if t.cfg.memory_search_chats && !g.tools && crate::chat::chats::refers_to_past(&t.text) {
+    let past_chats = if !code && t.cfg.memory_search_chats && !g.tools && crate::chat::chats::refers_to_past(&t.text) {
         crate::search::library::past_chats_block(&t.text, conv.id).await
     } else {
         None
@@ -460,14 +492,16 @@ pub(super) async fn build(t: &Asked<'_>, sizing: &Sizing, opened: &Opened) -> Bu
     // (Not for a Claude searching in Chat's request: a replayed call to Yap's
     // `web_search` would share its name with Anthropic's.)
     let (replay, history_note) = web_history_mode(g.tools && g.web_on && !g.claude_in_chat);
-    let about = crate::ai::about_you::prompt_block(&t.profile, t.now);
+    let about = crate::ai::about_you::prompt_block(&profile, t.now);
     let calendar_zone = crate::chat::tools::calendar::Zone::of(t.profile.region.time_zone.as_deref());
-    let mut prompt = Prompt::start(t);
+    let mut prompt = Prompt::start(t, !code);
     // A Code chat (jobs/code_chat.rs): its folder, and that the person's own
     // request is enough there — in the question's context, so the tool loop
     // and a plan chat both have it.
-    if g.jobs {
-        if let Some(line) = crate::jobs::code_chat::prompt_line(Some(conv.id)) {
+    if let (true, Some(folder)) = (g.jobs, opened.code.as_ref()) {
+        prompt.add(crate::jobs::code_chat::prompt_line_for(folder));
+        // Its job there, which a follow-up carries on (one job per Code chat).
+        if let Some(line) = crate::jobs::code_chat::job_line_in(Some(conv.id), folder) {
             prompt.add(line);
         }
     }
@@ -475,8 +509,8 @@ pub(super) async fn build(t: &Asked<'_>, sizing: &Sizing, opened: &Opened) -> Bu
     let here = crate::ai::ai_model::runs_here(&t.ep.provider, &t.ep.base_url);
     let first = first_step(&t.text, &g, here, outline_first, t.about_selection.is_some(), tabs_open);
     let across = prompt.across_meetings(t, &doc_turn).await;
-    let (small_calendar, calendar_chip) = prompt.library(t, &chat_docs, memory_here, past_chats, calendar_zone);
-    prompt.end(&about, &memory_you, &t.profile);
+    let (small_calendar, calendar_chip) = prompt.library(t, &chat_docs, memory_here, past_chats, calendar_zone, code);
+    prompt.end(&about, &memory_you, &profile);
     let spoken = t.by_voice && (t.scope == Some("assistant") || t.cfg.speak_replies);
     prompt.how_to_answer(t, spoken, &chat_docs, selection, sizing.context_size);
     let deep_reach = prompt.research(t, sizing, writes_doc, outline_first);
@@ -501,6 +535,8 @@ pub(super) async fn build(t: &Asked<'_>, sizing: &Sizing, opened: &Opened) -> Bu
         history_note,
         about,
         memory_you,
+        profile,
+        code: opened.code.clone(),
         calendar_zone,
     }
 }
@@ -537,7 +573,8 @@ fn first_step(text: &str, g: &Gates, here: bool, outline_first: bool, about_sele
 /// for one that can't act. The same from turn to turn. A strong model gets
 /// the web's lines that let it keep writing after the web, and a Claude
 /// searching in Chat's own request its own tools' (`web_lines`,
-/// `tools::web_tool_instructions`).
+/// `tools::web_tool_instructions`). `memory`: memory's tools and past
+/// chats' are offered (never in a Code chat).
 #[allow(clippy::too_many_arguments)]
 fn instructions(
     cfg: &YapConfig,
@@ -549,6 +586,7 @@ fn instructions(
     act: bool,
     calendar_on: bool,
     profile: &crate::ai::about_you::Profile,
+    memory: bool,
 ) -> String {
     let mut s = String::new();
     if tools_supported {
@@ -585,11 +623,13 @@ fn instructions(
                 s.push_str(&pages);
             }
         }
-        s.push(' ');
-        s.push_str(&crate::chat::tools::MEMORY_TOOL_INSTRUCTIONS.join(" "));
-        if cfg.memory_search_chats {
+        if memory {
             s.push(' ');
-            s.push_str(&crate::chat::tools::CHATS_TOOL_INSTRUCTIONS.join(" "));
+            s.push_str(&crate::chat::tools::MEMORY_TOOL_INSTRUCTIONS.join(" "));
+            if cfg.memory_search_chats {
+                s.push(' ');
+                s.push_str(&crate::chat::tools::CHATS_TOOL_INSTRUCTIONS.join(" "));
+            }
         }
         if calendar_on {
             s.push(' ');
@@ -657,7 +697,8 @@ pub(crate) fn stable_prompt(
 ) -> String {
     let about = crate::ai::about_you::prompt_block(profile, now);
     let mut s = persona.trim().to_string();
-    s.push_str(&instructions(cfg, tools_supported, doc_tools, web_lines, web_on, pictures, act, calendar_on, profile));
+    // (As a plain chat has it: a Code chat's prompt is a little shorter.)
+    s.push_str(&instructions(cfg, tools_supported, doc_tools, web_lines, web_on, pictures, act, calendar_on, profile, true));
     s.push_str(&ending(tools_supported, profile, &about, &crate::memory::you_block()));
     if tools_supported {
         s.push_str("\n\n");
@@ -727,6 +768,107 @@ mod tests {
         let mut empty = Prompt { context: Vec::new(), ..prompt(true) };
         empty.add_early("Earlier web answers.".into());
         assert_eq!(empty.context, ["Earlier web answers."]);
+    }
+
+    /// Imogen in the UK, with a note of her own (fictional).
+    fn imogen() -> crate::ai::about_you::Profile {
+        let uk = crate::ai::about_you::Detected {
+            locale: Some("en-GB".into()),
+            country: Some("GB".into()),
+            currency: Some("GBP".into()),
+            symbol: Some("£".into()),
+            metric: Some(true),
+            time_zone: Some("Europe/London".into()),
+        };
+        crate::ai::about_you::Profile { region: crate::ai::about_you::resolve(&uk, ""), name: "Imogen".into(), about: "I keep bees on an allotment".into() }
+    }
+
+    fn tool_gates() -> Gates {
+        Gates {
+            tools: true,
+            doc_tools: Default::default(),
+            strong: false,
+            claude_in_chat: false,
+            own_search: false,
+            web_lines: crate::chat::tools::WebLines::of(false, false, false),
+            web_on: false,
+            pictures: Gate::Off,
+            screen: Gate::Off,
+            act: false,
+            calendar: false,
+            jobs: false,
+        }
+    }
+
+    #[test]
+    fn a_code_chats_prompt_keeps_yaps_memory_out_and_about_you_without_its_note() {
+        use crate::memory::ops::Section;
+        use crate::memory::{save_item, ItemInput};
+        // Memory holds a person and how the user wants answers (this
+        // thread's own store), and she's told About you something of hers.
+        save_item(ItemInput { id: None, section: Section::People, title: "Aoife".into(), summary: "Cousin".into(), details: vec!["Lives in Galway".into()], dictation: true }).unwrap();
+        save_item(ItemInput { id: None, section: Section::Preferences, title: String::new(), summary: String::new(), details: vec!["Likes answers as bullet points".into()], dictation: false }).unwrap();
+        let you = crate::memory::you_block();
+        assert!(you.contains("bullet points"), "{you}");
+        let cfg = YapConfig { memory_search_chats: true, ..Default::default() };
+        let ep = super::super::Endpoint {
+            base_url: "https://api.example.com/v1".into(),
+            api_key: String::new(),
+            model: "fake-chat".into(),
+            provider: "custom".into(),
+            persona: "You are a helpful assistant.".into(),
+            disable_thinking: false,
+        };
+        let stop = crate::chat::stream::Stoppable::new(None);
+        let t = Asked {
+            app: None,
+            cfg,
+            text: "Where does Aoife's watering schedule live in this project?".into(),
+            scope: None,
+            by_voice: false,
+            skill: None,
+            meetings: false,
+            about_selection: None,
+            ep,
+            answered_by: serde_json::from_value(serde_json::json!({ "provider": "custom", "id": "fake-chat" })).unwrap(),
+            gates: tool_gates(),
+            profile: imogen(),
+            now: chrono::Utc::now(),
+            watcher: None,
+            stop: &stop,
+        };
+        let conv: crate::chat::chats::Conversation = serde_json::from_value(serde_json::json!({ "id": 4242, "title": "Watering", "createdTs": 1, "updatedTs": 1 })).unwrap();
+        let garden = crate::jobs::folders::Folder { name: "garden-planner".into(), path: r"D:\Projects\garden-planner".into(), cap: None, added_ts: 1 };
+        let opened = Opened { conv, user_index: 0, selection: None, code: Some(garden.clone()) };
+        let rt = tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap();
+        let built = rt.block_on(build(&t, &Sizing::for_tests(128_000), &opened));
+        let all = format!("{}\n{}", built.prompt.system, built.prompt.context.join("\n"));
+        // None of memory: its passages, its "You", how they want answers.
+        for never in ["Lives in Galway", "Cousin", "bullet points", "What Yap remembers"] {
+            assert!(!all.contains(never), "{never}: {all}");
+        }
+        // About you: the name and the region, never the note.
+        assert!(all.contains("Their name is Imogen.") && all.contains("they're in the United Kingdom (British English)"), "{all}");
+        assert!(!all.contains("allotment") && !all.contains("They told Yap"), "{all}");
+        // No memory tools, nor past chats', in its instructions.
+        assert!(built.prompt.system.contains("You have access to tools."));
+        assert!(!built.prompt.system.contains("Use remember") && !built.prompt.system.contains("search_chats"), "{}", built.prompt.system);
+        assert!(built.memory_you.is_empty() && built.profile.about.is_empty() && !built.about.contains("allotment"));
+        assert_eq!(built.code, Some(garden));
+
+        // A plain chat's prompt as before: memory's "You", About you whole,
+        // memory's tools (here the parts `build` writes them from, as a
+        // plain turn's search for memory's passages would read this PC's
+        // own settings).
+        let plain = code_profile(&t.profile, false);
+        let ending = ending(true, &plain, "", &you);
+        assert!(ending.contains("bullet points") && ending.contains("They told Yap: \"I keep bees on an allotment\"") && ending.contains("Their name is Imogen."), "{ending}");
+        let with = instructions(&t.cfg, true, Default::default(), t.gates.web_lines, false, Gate::Off, false, false, &plain, true);
+        assert!(with.contains("Use remember") && with.contains("search_chats"));
+        let without = instructions(&t.cfg, true, Default::default(), t.gates.web_lines, false, Gate::Off, false, false, &plain, false);
+        assert!(!without.contains("Use remember") && !without.contains("search_chats"));
+        // The note's the only part a Code chat drops.
+        assert_eq!(code_profile(&t.profile, true), crate::ai::about_you::Profile { about: String::new(), ..imogen() });
     }
 
     #[test]

@@ -35,12 +35,13 @@ What differs:
 | Under the message box | the model chip | the workspace chip and the Mode chip, then the model chip |
 | The look | Chat's | a teal edge on the box, "Code · garden-planner", a slow light while its job runs |
 | Empty | Chat's greeting | "Work in garden-planner", its path, three prompts (`CodeEmpty.svelte`) |
-| What the model is told | Chat's prompt | Chat's prompt and one more line: this chat's folder, that a request here is enough to start a job, and its job, which a follow-up continues (`code_chat::prompt_line`) |
+| What the model is told | Chat's prompt | Chat's prompt without memory, About you without its note, and one more line: this chat's folder, that a request here is enough to start a job, and its job, which a follow-up continues (`code_chat::prompt_line_for`, `job_line_in`) |
 | Job tools | offered too; a job needs the person to name its folder, or say yes to an offer that named it | the same tools; the folder may be left out (it's the chat's), and the person's own request is enough; one job per chat, each follow-up its next turn ([Turns](#turns-one-job-per-code-chat)) |
-| Memory (today) | Yap's memory: "You" in the prompt, what the question is about, the memory tools, learning from the chat | the same today; decided otherwise (below) |
+| Memory | Yap's memory: "You" in the prompt, what the question is about, the memory tools, learning from the chat | none of it, on any model, and never learned from ([below](#memory-and-the-plan-in-a-code-chat)) |
+| On the Claude plan | a lean session in an empty folder of Yap's | a read-only Claude Code session in the workspace, with the person's own settings ([below](#memory-and-the-plan-in-a-code-chat)) |
 
 Everything else is the same on both sides: the model and its picker, the web,
-documents, the Voice Assistant.
+documents, the Voice Assistant, meetings, notes and tasks read on request.
 
 **When a chat moves:**
 
@@ -54,17 +55,6 @@ documents, the Voice Assistant.
   jobs, a job card's Open, the Voice Assistant's. The switch goes back to the
   side's last conversation; switching to Code with nothing open there starts a
   new code chat on the most recently used workspace.
-
-**Decided 2026-11-07, landing next** (another change; until it lands, a Code
-chat works as the table says):
-
-- **Code chats don't use Yap's memory**: nothing from memory in the prompt,
-  nothing learned from them, no memory tools. About you keeps only the name
-  and the region. Meetings, notes and tasks stay readable when asked for.
-- **A Code chat on the plan** runs as a read-only Claude Code session in its
-  workspace, with the person's own project context (their Claude Code memory
-  and the project's CLAUDE.md). Today it runs as every plan chat does, in an
-  empty folder of Yap's ([ai-models.md](./ai-models.md#your-claude-plan-2026-11-07)).
 
 The feature keeps the name **Jobs**, in one constant (`core/codeChats.js`
 `FEATURE_NAME`): an [open question](#open-questions).
@@ -143,6 +133,76 @@ The feature keeps the name **Jobs**, in one constant (`core/codeChats.js`
   word for word, on Dictation cleanup's model (`cleanup_styles::cleans_question`,
   `assistant::into_code_chat`; dictation.md, chat-and-assistant.md).
 
+### Memory and the plan in a Code chat
+
+Decided 2026-11-07 (the maintainer and Claude), landed the same day.
+
+- **No Yap memory in a Code chat.** Project knowledge belongs with the
+  project (its `CLAUDE.md`, Claude Code's own memory), which Claude Code
+  already keeps and loads; Yap's memory is personal (people, preferences,
+  life). In a Code chat it would duplicate the project's, risk personal
+  details ending up in a brief, a file, a commit or a PR, and fill memory
+  with project trivia. On every model and path (the tool loop, a small
+  model's web pipeline, a plan chat, the Voice Assistant into a Code chat; a
+  job's report has none anyway), its turn has none of memory's passages, its
+  "You" block or how the person wants answers; no `remember`, `forget` or
+  `search_chats` (nor the plan endpoint's `search_memory`: `RunSpec::memory`);
+  no "Remember that…" pass (`chat/turn.rs` `remembered`). The turn knows
+  it's a Code chat once its question is saved (`Opened::code`, so a new
+  code chat's first question too); `chat/turn/prompt.rs` `build` and
+  `run.rs` leave memory out ([memory.md](./memory.md#code-chats-keep-memory-out)).
+- **About you** keeps the name and the region line (spelling, units, money,
+  the clock), never the note ("Anything the AI should know about you":
+  `about_you::Profile::without_note`).
+- **Nothing found by itself**: no eager RAG notes, no past chats. Meetings,
+  notes, tasks and the calendar stay readable with the tools, on request
+  ("build what we decided in yesterday's meeting").
+- **Never learned from** (`memory/learn.rs` `never_learned`): its messages
+  are marked read with no model call, so a chat made plain again isn't
+  learned from what it said as a Code chat. Memory's names fed to dictation
+  are as they were.
+- **A chat deleted** is no Code chat any more (`code_chat::chat_deleted`): a
+  later conversation may get its id.
+- **On the Claude plan, a Code chat is a Claude Code session in the
+  workspace**, project-aware and read only (`chat/turn/plan.rs` `spec`):
+  - the workspace as its folder, and the person's own user, project and
+    local settings (`--setting-sources user,project,local`: their CLAUDE.md,
+    CLAUDE.local.md and Claude Code's own memory, as in their terminal);
+  - Claude Code's own prompt with Yap's Code chat words added
+    (`--append-system-prompt-file`, `CODE_INSTRUCTIONS`: it's answering about
+    this workspace's code, reads files to answer, and starts a job for any
+    change; with Jobs off, it says what it would change);
+  - `--tools Read,Grep,Glob` (and `WebSearch,WebFetch` with the web on),
+    never Edit, Write, MultiEdit, NotebookEdit, Bash or PowerShell (2.1.296
+    has no LS). `--tools` is the list the model gets whatever the person's
+    settings allow (2.1.296's `--help`: "the list of available tools from the
+    built-in set"; the recordings' `system/init` lists exactly them);
+  - `dontAsk` with Yap's tools and the web's allowed: reads in the workspace
+    need no rule ("File reads in your working directories … still run"),
+    anything that would ask is denied; file reads outside the workspace
+    refused (`blockReadsOutsideWorkingDirectories` in the run's own
+    `--settings`); `--disable-slash-commands`, so no message runs one of
+    their own commands;
+  - `--strict-mcp-config` with Yap's endpoint only (without `search_memory`),
+    so the person's own MCP servers don't start for a chat (jobs keep
+    theirs). Changes still only go through `start_job`, with all its rules.
+  - **Another workspace is another session**: the fingerprint has the
+    folder, and `claude_sessions.json` keeps it (`Kept::cwd`). A plain plan
+    chat that becomes a Code chat moves to a new session there with its next
+    question, the chat so far going in first.
+  - **Its transcript** lands in Claude Code's projects folder for the
+    workspace, and goes with the chat by its own session ids only: a job's
+    sessions there, and the person's own, stay
+    ([ai-models.md](./ai-models.md#a-chat-turn-chatturnplanrs)).
+  - While its session is warm (10 minutes after its last answer) Windows
+    keeps the workspace folder from being deleted or renamed, as a terminal
+    open in it would; deleting the chat ends it. A workspace folder that's
+    gone is said plainly ("This Code chat's workspace folder isn't on this
+    PC any more…"), never a session started elsewhere.
+  - Its `Read`, `Grep` and `Glob` show on the activity line ("Reading
+    app.ts", "Searching the code · …": `claude_plan/map.rs` `Tool::Code`),
+    no chip.
+
 ## Turns: one job per Code chat
 
 2026-11-07, after the maintainer's real use: a follow-up on the same project
@@ -170,8 +230,9 @@ carrying on with its context; so are jobs now.
   can't be resumed: its transcript gone from Claude Code's own folder
   (`transcripts::session_kept`, only looked at); the new job's first line
   says why (`whyNew`). The tools' descriptions, `JOB_TOOL_INSTRUCTIONS` and
-  the Code chat's prompt line say so (`code_chat::prompt_line`: the chat's
-  job, its status and turns, "the user's next request there continues it").
+  the Code chat's prompt line say so (`code_chat::job_line_in`, after
+  `prompt_line_for`: the chat's job, its status and turns, "the user's next
+  request there continues it").
 - **Each turn as the chat is then**: the chat's Mode then (`next_turn`, a
   plan still a plan until "go ahead"; the model may only lower it),
   Settings' model and effort then (unless the person asked for their own:
@@ -365,7 +426,9 @@ and each call runs the tool loop's own code and rules.
 - **The person's own setup**: no `--strict-mcp-config`, no
   `--setting-sources`, Claude Code's own tools: their settings, skills, MCP
   servers and CLAUDE.md, as in their terminal. That's their work, so it runs
-  as they set it up. (Plan chats run lean instead: ai-models.md.)
+  as they set it up. (A plain plan chat runs lean instead, and a plan chat
+  in a Code chat in the workspace but read only: ai-models.md, [Memory and
+  the plan in a Code chat](#memory-and-the-plan-in-a-code-chat).)
 - **Yap adds its run endpoint** (`claude_live::register_run`, `Tools::Job`):
   - `--mcp-config` with Yap's server ("yap", over HTTP on 127.0.0.1);
   - `--permission-prompt-tool mcp__yap__approve`: a prompt is a card for the
@@ -879,8 +942,19 @@ the build's own stand-in replaying `script` from now on),
     signed out (Sign in, Check again), and paying by key with nothing to say.
   - `plan-jobs.spec.js`: jobs from a chat on the plan over the endpoint (one
     stand-in script plays the plan chat, the job and the report's question:
-    `_for`), typed, by voice, refused, and in a Code chat (its follow-up
-    carrying the job on: one job, two turns, `--resume`).
+    `_for`), typed (the chat a Code chat after its job, its next question in
+    a new session in the workspace), by voice, refused, and in a Code chat (its
+    follow-up carrying the job on: one job, two turns, `--resume`).
+  - `code-chats-memory.spec.js`: a Code chat's question to the fake model
+    without memory's passages, its "You", how the person wants answers, the
+    eager RAG's note or About you's note (the name and the region kept), no
+    memory tools, nothing learned; the same question in a plain chat with all
+    of it, learned from; a Code chat on the plan: the stand-in's launch
+    (`_dump_args` to a file) in the workspace with `--tools Read,Grep,Glob`,
+    `--setting-sources user,project,local`, Yap's server only, Claude Code's
+    prompt with Yap's added, no slash commands, no `search_memory`; its
+    transcript in the workspace's projects folder, gone with the chat (a
+    job's stays); a plain plan chat as lean as before.
   - `jobs-turns.spec.js`: one job per Code chat — two requests give one job,
     one tab with two turns (the newest open, the earlier folded), two
     reports, the second turn on `--resume` (the stand-in's `_dump_args` to a
@@ -888,6 +962,10 @@ the build's own stand-in replaying `script` from now on),
     turn; a request while it works queued as the next turn; "start fresh" a
     second job, its tab named apart; Undo this turn (refused while a later
     turn changed the same file), Undo all asked first. Light and dark.
+- **Unit** for Code chats and memory: `chat::turn::prompt` (a Code chat's
+  whole prompt built), `chat::turn::plan` (the `Spec`),
+  `claude_plan::sessions` (the transcript under the workspace by its ids),
+  `claude_live` (a run without memory), `memory::learn` (never learned).
   - `chat-scroll.spec.js` covers a job's cards and report in Chat's thread.
 
 ## Tried for real, and not yet
@@ -909,6 +987,14 @@ Code, Open in terminal's blank tab, Chat's thread following a report.
   into its stream before it makes the MCP call (else every `start_job` there
   is refused on doubt), the call waiting while the card is up, and Haiku
   calling `mcp__yap__start_job` and putting the spoken question back.
+- **A Code chat on the plan**: that the workspace's CLAUDE.md,
+  CLAUDE.local.md and Claude Code's own memory load with `--setting-sources
+  user,project,local` beside Yap's appended prompt; that Read, Grep and Glob
+  in the workspace run under `dontAsk` with no rule and a read outside it is
+  refused; that the person's own hooks (their settings bring them, as in
+  their terminal) don't get in the way; and that a setup with an
+  `apiKeyHelper` in their settings is stopped as "paying another way" (as
+  any plan run is).
 - In the dev build: the bar's cards while another app is in front, the real
   folder picker, "1 job running" beside the idle and meeting pills.
 - A real managed policy that turns hooks off (`noBackups` outside the
@@ -930,5 +1016,5 @@ Code, Open in terminal's blank tab, Chat's thread following a report.
   `FEATURE_NAME`); the config fields (`jobs_*`), files (`jobs.json`,
   `job_folders.json`), commands and events keep their names either way.
   Never "Claude Code" in it.
-- **Memory in Code chats**: decided 2026-11-07, landing next
-  ([Chat and Code](#chat-and-code)).
+- **Memory in Code chats**: decided and landed 2026-11-07
+  ([Memory and the plan in a Code chat](#memory-and-the-plan-in-a-code-chat)).
