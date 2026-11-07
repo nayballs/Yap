@@ -2,57 +2,53 @@
   // **A job's tab** beside the chat (Jobs: desktop/src-tauri/src/jobs.rs,
   // chatDoc.svelte.js `job`): what the person's own Claude Code is doing in
   // their folder, as it does it — fed by `job_get` (the job and its log, to
-  // replay) and the app-wide `yap-job` event (live). Closing the tab never
-  // stops the job.
+  // replay) and the app-wide `yap-job` event (live). One tab a job; closing
+  // it never stops the job.
   // - The folder and its status; the mode and model; how long it has run.
-  // - What it's doing now (the latest line moving: a step, else the to-do
-  //   in progress), Claude Code's to-do list (✓ done, ● in progress,
-  //   ○ to do), then its timeline (JobTimeline.svelte): every step in plain
-  //   words — reading a file, searching, editing a file, running a command
-  //   by what it's for — and what it said between them, following the live
-  //   end as a terminal does.
-  // - The files it changed, each opening to what changed (JobFiles.svelte),
-  //   the commands it ran with what each was for (a few, then "Show N
-  //   more"), what it wasn't allowed to do, its final words (markdown,
-  //   core/markdown.js), and its cost, told apart by how it's paid ("Your
-  //   Claude plan · ≈ $0.04 on the API" / "API key · $0.04").
+  // - **Its turns** (2026-11-07: one job per Code chat, each follow-up a turn
+  //   of its own on the same Claude Code session): a section each, its
+  //   request as its header with its status, cost and time, oldest first —
+  //   the newest open (and the one a pill or a report card asked for), the
+  //   earlier folded. A request waiting behind the turn working: "Queued".
+  //   Each turn's section (JobTurn.svelte): the line it's on, its to-do
+  //   list, its timeline, the files it changed with their diffs and **Undo
+  //   this turn**, the commands it ran, what it wasn't allowed to do, its
+  //   final words.
+  // - Its cost in all, told apart by how it's paid ("Your Claude plan · ≈
+  //   $0.04 on the API" / "API key · $0.04").
   // - A problem with Claude Code itself in plain words, with one button
   //   (Sign in, when it isn't signed in).
   // - Stop (while it works), Continue (stopped, interrupted, failed), Undo
-  //   job (a confirm, then what was put back; never when no backups were
-  //   made: Claude Code's hooks didn't run, and the tab says so), Open in terminal (once it
-  //   isn't running), and "Tell the job…": the person's own words, to it at
-  //   once while it works, else its next turn (`job_message`).
+  //   job — **Undo all** once it has turns, back to before its first (a
+  //   confirm, then what was put back; never when no backups were made:
+  //   Claude Code's hooks didn't run, and the tab says so), Open in terminal
+  //   (once it isn't running), and "Tell the job…": the person's own words,
+  //   its next turn (queued while it works: `job_message`).
   import { invoke } from '@tauri-apps/api/core';
   import { listen } from '@tauri-apps/api/event';
   import { onMount, tick, untrack } from 'svelte';
   import ConfirmDialog from '../../ui/ConfirmDialog.svelte';
   import { toast } from '../../ui/toast.svelte.js';
-  import { renderMarkdown } from '../../core/markdown.js';
   import {
     isLive,
     statusWord,
     statusTone,
     costLine,
+    money,
     elapsed,
-    timelineOf,
-    latestStep,
-    todosOf,
-    todoCount,
-    diffsOf,
-    commandsOf,
+    turnsOf,
+    turnStatusWord,
     problemWords,
     modeLabel,
     modelLabel,
     canUndo as undoable,
-    NO_BACKUPS,
+    canUndoTurn,
   } from '../../core/jobs.js';
   import { EFFORT_LABELS } from '../../core/effort.js';
   import { claudePlan, signInClaudePlan } from '../../stores/claudePlan.svelte.js';
-  import JobTimeline from './JobTimeline.svelte';
-  import JobFiles from './JobFiles.svelte';
+  import JobTurn from './JobTurn.svelte';
 
-  /** `doc`: the panel's state (its `job`, a JobRef); `narrow`: no room beside the chat (no expand). */
+  /** `doc`: the panel's state (its `job`, a JobRef, `turn` the one asked for); `narrow`: no room beside the chat (no expand). */
   let { doc, narrow = false } = $props();
 
   const ref = $derived(doc.job);
@@ -63,28 +59,37 @@
   let busy = $state('');
   let message = $state('');
   let confirmUndo = $state(false);
-  let undone = $state(null); // what Undo put back
+  let undone = $state(null); // what Undo all put back
   let undoBtn = $state(null);
-  let allCommands = $state(false);
-
-  /** Commands shown before "Show N more". */
-  const FEW_COMMANDS = 3;
+  // Each turn as the person left it: open or folded (n → bool), what its
+  // Undo put back or why it couldn't (n → words).
+  let folded = $state({});
+  let turnUndone = $state({});
+  let turnRefused = $state({});
+  let bodyEl = $state(null);
 
   // The job as it is now: its saved record, else what the tab was opened with.
   const shown = $derived(job ?? (ref ? { ...ref, files: [], commands: [], denials: [] } : null));
   const live = $derived(isLive(shown?.status));
-  // Its steps and what it said, its final words apart.
-  const timeline = $derived(timelineOf(log, live ? '' : shown?.text));
-  const stepCount = $derived(timeline.filter((t) => t.kind === 'step').length);
-  // The line it's on now: its latest step, or the to-do in progress.
-  const latest = $derived(latestStep(log, shown?.status));
-  const todos = $derived(todosOf(log));
-  const diffs = $derived(diffsOf(log));
-  const commands = $derived(commandsOf(shown, log));
-  const shownCommands = $derived(allCommands ? commands : commands.slice(0, FEW_COMMANDS));
+  const turns = $derived(turnsOf(shown, log));
+  const many = $derived(turns.length > 1);
+  /**
+   * A request waiting its turn: queued behind the turn working, or never
+   * sent (the job stopped first: Continue sends it). Shown as a line, not
+   * a section of steps.
+   */
+  const waiting = (t) =>
+    !t.startedTs &&
+    t.n !== turns[0]?.n &&
+    (t.status === 'queued' ? turns.some((o) => o.n !== t.n && (o.status === 'running' || o.status === 'asking')) : t.status === 'stopped' || t.status === 'interrupted');
+  // The turn working now (or the newest): open unless folded.
+  const current = $derived([...turns].reverse().find((t) => !waiting(t))?.n ?? turns.at(-1)?.n);
   const problem = $derived(problemWords(shown?.problem));
   const ran = $derived(shown ? elapsed(shown, now) : '');
   const canUndo = $derived(undoable(shown));
+
+  const isOpen = (t) => (folded[t.n] ?? t.n !== current) === false;
+  const turnLive = (t) => live && t.n === current;
 
   // Events heard while the log is read: kept, unless the log has them already.
   let loading = false;
@@ -120,12 +125,44 @@
       log = [];
       undone = null;
       message = '';
-      allCommands = false;
+      folded = {};
+      turnUndone = {};
+      turnRefused = {};
       load(id);
     });
   });
 
-  /** One `yap-job` event: into the log; the job as it is now (read again when its status turns). */
+  // A new turn begins (a follow-up, however it was sent): it opens, and the
+  // earlier ones fold again.
+  let lastCurrent = null;
+  $effect(() => {
+    const c = current;
+    const loaded = !!job;
+    untrack(() => {
+      if (!loaded) {
+        lastCurrent = null;
+        return;
+      }
+      if (lastCurrent != null && c > lastCurrent) folded = {};
+      lastCurrent = c;
+    });
+  });
+
+  // A pill's or a report card's turn (or a turn's own start): open, in view
+  // (asked again: again); the others as they'd be — the newest open.
+  $effect(() => {
+    const want = ref?.turn;
+    const seq = ref?.seq;
+    if (want == null) return;
+    untrack(async () => {
+      folded = { [want]: false };
+      await tick();
+      const el = bodyEl?.querySelector(`[data-testid="chat-job-turn"][data-turn="${want}"]`);
+      if (el && seq != null) el.scrollIntoView?.({ block: 'start' });
+    });
+  });
+
+  /** One `yap-job` event: into the log; the job as it is now (read again when its status turns, or a turn is new to it). */
   function onJob(ev) {
     if (!ev?.id || ev.id !== doc.job?.id) return;
     if (loading) heard.push(ev);
@@ -137,8 +174,13 @@
       if (ev.command) next.commands = [...(job.commands || []), ev.command];
       if (typeof ev.cost === 'number') next.cost = ev.cost;
       if (ev.problem) next.problem = ev.problem;
+      // This turn's files as they come (its note says them once read again).
+      if (ev.file && Number.isInteger(ev.turn) && next.turnList?.length) {
+        next.turnList = next.turnList.map((t) => (t.n === ev.turn && !(t.files || []).includes(ev.file) ? { ...t, files: [...(t.files || []), ev.file] } : t));
+      }
       job = next;
-      if (was !== next.status) refreshSoon();
+      const known = !Number.isInteger(ev.turn) || (job.turnList || []).some((t) => t.n === ev.turn);
+      if (was !== next.status || !known || ev.queued) refreshSoon();
     } else {
       refreshSoon();
     }
@@ -209,8 +251,25 @@
     confirmUndo = false;
     if (!r || typeof r !== 'object') return;
     undone = r;
+    turnRefused = {};
     refreshSoon();
     tick().then(() => undoBtn?.focus?.());
+  }
+
+  /** **Undo this turn**: its files back as they were before it — refused while a later turn changed one of them. */
+  async function undoTurn(t) {
+    if (!shown || busy) return;
+    busy = 'undo';
+    turnRefused = { ...turnRefused, [t.n]: '' };
+    try {
+      const r = await invoke('job_undo_turn', { id: shown.id, turn: t.n });
+      turnUndone = { ...turnUndone, [t.n]: undoneLine(r) };
+      refreshSoon();
+    } catch (e) {
+      turnRefused = { ...turnRefused, [t.n]: String(e?.message ?? e) };
+    } finally {
+      busy = '';
+    }
   }
 
   async function send() {
@@ -232,10 +291,18 @@
     return `Undone: ${parts.join('; ')}.`;
   };
   const effortWord = (e) => EFFORT_LABELS[e] || e || '';
+  /** A turn's header line after its title: its status, how long, its cost. */
+  const turnFacts = (t) => {
+    const parts = [turnStatusWord(t)];
+    const took = t.startedTs ? elapsed(t, now) : '';
+    if (took) parts.push(isLive(t.status) ? `${took} so far` : took);
+    if (Number(t.cost) > 0) parts.push(shown?.pay === 'key' ? money(t.cost) : `≈ ${money(t.cost)}`);
+    return parts.join(' · ');
+  };
 </script>
 
 <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
-<section class="jobtab" aria-label="Job" data-testid="chat-job" data-status={shown?.status ?? ''}>
+<section class="jobtab" aria-label="Job" data-testid="chat-job" data-status={shown?.status ?? ''} data-turns={turns.length}>
   <header class="jobhead">
     <svg class="jobicon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" /></svg>
     <h2 class="jobtitle" title={shown?.path || shown?.folder}>{shown?.folder || 'Job'}</h2>
@@ -267,13 +334,15 @@
   {#if gone}
     <p class="jgone">This job isn't in Yap any more.</p>
   {:else if shown}
-    <div class="jobbody">
+    <div class="jobbody" bind:this={bodyEl}>
       <p class="meta" data-testid="chat-job-meta">
         <span>{modeLabel(shown.mode)}</span>
         {#if shown.model}<span>· {modelLabel(shown.model)}{shown.effort ? ` ${effortWord(shown.effort)}` : ''}</span>{/if}
         {#if ran}<span data-testid="chat-job-elapsed">· {live ? `${ran} so far` : `ran ${ran}`}</span>{/if}
+        {#if many}<span data-testid="chat-job-turn-count">· {turns.length} turns</span>{/if}
       </p>
       {#if shown.path}<p class="path" title={shown.path}>{shown.path}</p>{/if}
+      {#if shown.whyNew}<p class="whynew" data-testid="chat-job-why-new">{shown.whyNew}</p>{/if}
 
       {#if problem}
         <div class="problem" role="alert" data-testid="chat-job-problem" data-kind={shown.problem.kind}>
@@ -289,85 +358,56 @@
         </div>
       {/if}
 
-      {#if latest}
-        <!-- What it's doing now. -->
-        <p class="now" data-testid="chat-job-now" aria-live="polite"><span class="spin" aria-hidden="true"></span>{latest}</p>
-      {/if}
-
-      {#if todos.length}
-        <!-- Claude Code's to-do list, as its latest TodoWrite left it. -->
-        <div class="section todos" data-testid="chat-job-todos">
-          <h3>To-do <span class="count">{todoCount(todos)}</span></h3>
-          <ul class="todolist">
-            {#each todos as t, i (i)}
-              <li class="todo" class:done={t.status === 'completed'} class:doing={t.status === 'in_progress'} data-status={t.status}>
-                <span class="tmark" aria-hidden="true">{t.status === 'completed' ? '✓' : t.status === 'in_progress' ? '●' : '○'}</span>
-                <span class="ttext">{t.content}</span>
-                <span class="sr-only">{t.status === 'completed' ? ', done' : t.status === 'in_progress' ? ', in progress' : ', to do'}</span>
-              </li>
-            {/each}
-          </ul>
-        </div>
-      {/if}
-
-      {#if timeline.length}
-        <details class="section" open>
-          <summary>Steps <span class="count">{stepCount}</span></summary>
-          <JobTimeline items={timeline} {live} />
-        </details>
-      {/if}
-
-      {#if shown.files?.length}
-        <div class="section" data-testid="chat-job-files">
-          <h3>Files changed <span class="count">{shown.files.length}</span></h3>
-          <JobFiles files={shown.files} {diffs} />
-          {#if shown.noBackups}
-            <p class="nobackups" data-testid="chat-job-no-backups">{NO_BACKUPS}</p>
-          {/if}
-        </div>
-      {/if}
-      {#if commands.length}
-        <div class="section" data-testid="chat-job-commands">
-          <h3>Commands run <span class="count">{commands.length}</span></h3>
-          <ul class="cmds">
-            {#each shownCommands as c, i (i)}
-              <li data-testid="chat-job-command">
-                {#if c.about}<p class="cabout">{c.about}</p>{/if}
-                <code class="cmd">{c.command}</code>
-              </li>
-            {/each}
-          </ul>
-          {#if commands.length > FEW_COMMANDS}
-            <button type="button" class="showmore" aria-expanded={allCommands} onclick={() => (allCommands = !allCommands)}>
-              {allCommands ? 'Show fewer' : `Show ${commands.length - FEW_COMMANDS} more`}
+      <!-- Its turns: each request and what came of it, the newest open. -->
+      {#each turns as t (t.n)}
+        {@const open = isOpen(t)}
+        {@const queued = waiting(t)}
+        <section class="turn" class:open class:queued data-testid="chat-job-turn" data-turn={t.n} data-status={t.status ?? ''} data-open={open}>
+          {#if queued}
+            <div class="thead" data-testid="chat-job-turn-head">
+              <span class="tdot tone-idle" aria-hidden="true"></span>
+              <span class="ttitle" title={t.request || t.title}>{t.title || 'Your next request'}</span>
+              <span class="tfacts">{turnStatusWord(t)}</span>
+            </div>
+            <p class="tqueued">{t.status === 'queued' ? 'It goes to the job once it finishes this step.' : 'Not sent: the job stopped first. Continue sends it.'}</p>
+          {:else}
+            <button
+              type="button"
+              class="thead"
+              aria-expanded={open}
+              data-testid="chat-job-turn-head"
+              title={t.request || t.title}
+              onclick={() => (folded = { ...folded, [t.n]: open })}
+            >
+              <svg class="tchev" class:down={open} viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m9 6 6 6-6 6" /></svg>
+              <span class="tdot tone-{statusTone(t.status)}" aria-hidden="true"></span>
+              <span class="ttitle">{t.title || shown.folder}</span>
+              <span class="tfacts" data-testid="chat-job-turn-facts">{turnFacts(t)}</span>
             </button>
+            {#if open}
+              <div class="tbody">
+                <JobTurn
+                  job={shown}
+                  turn={t}
+                  live={turnLive(t)}
+                  single={!many}
+                  undoable={many && canUndoTurn(shown, t)}
+                  undone={turnUndone[t.n] || (!many && undone ? undoneLine(undone) : '')}
+                  refused={turnRefused[t.n] || ''}
+                  busy={!!busy}
+                  onundo={() => undoTurn(t)}
+                />
+              </div>
+            {/if}
           {/if}
-        </div>
-      {/if}
-      {#if shown.denials?.length}
-        <div class="section" data-testid="chat-job-denials">
-          <h3>Not allowed</h3>
-          <ul class="plain">
-            {#each shown.denials as d, i (i)}<li>{d.detail || d.tool}</li>{/each}
-          </ul>
-        </div>
+        </section>
+      {/each}
+
+      {#if many && undone}
+        <p class="undone" aria-live="polite" data-testid="chat-job-undone-all">{undoneLine(undone)}</p>
       {/if}
 
-      {#if !live && shown.text}
-        <div class="section final" data-testid="chat-job-text">
-          <h3>{shown.plan ? 'Its plan' : 'What it said'}</h3>
-          <!-- eslint-disable-next-line svelte/no-at-html-tags — renderMarkdown sanitises its output -->
-          <div class="md">{@html renderMarkdown(shown.text)}</div>
-        </div>
-      {/if}
-
-      {#if undone}
-        <p class="undone" aria-live="polite" data-testid="chat-job-undone">{undoneLine(undone)}</p>
-      {:else if shown.undone}
-        <p class="undone">Undone: its files are back as they were.</p>
-      {/if}
-
-      <p class="cost" data-testid="chat-job-cost" data-pay={shown.pay || 'plan'}>{costLine(shown)}</p>
+      <p class="cost" data-testid="chat-job-cost" data-pay={shown.pay || 'plan'}>{costLine(shown)}{many && Number(shown.cost) > 0 ? ' in all' : ''}</p>
     </div>
 
     <footer class="jobfoot">
@@ -378,7 +418,7 @@
           <button type="button" class="pill primary" onclick={carryOn} disabled={!!busy}>Continue</button>
         {/if}
         {#if canUndo}
-          <button type="button" class="pill" bind:this={undoBtn} onclick={() => (confirmUndo = true)} disabled={!!busy}>Undo job</button>
+          <button type="button" class="pill" bind:this={undoBtn} onclick={() => (confirmUndo = true)} disabled={!!busy}>{many ? 'Undo all' : 'Undo job'}</button>
         {/if}
         {#if !live && shown.session && shown.startedTs}
           <button type="button" class="pill" onclick={openTerminal} disabled={!!busy} title="Its session in Windows Terminal, in its folder">Open in terminal</button>
@@ -391,7 +431,7 @@
           send();
         }}
       >
-        <input type="text" bind:value={message} placeholder="Tell the job…" aria-label="Tell the job" maxlength="4000" autocomplete="off" />
+        <input type="text" bind:value={message} placeholder={live ? 'Tell the job (it goes next)…' : 'Tell the job…'} aria-label="Tell the job" maxlength="4000" autocomplete="off" />
         <!-- Named apart from Chat's own Send (the message box's). -->
         <button type="submit" class="tsend" disabled={!message.trim() || !!busy} aria-label="Tell the job" title="Tell the job (Enter)">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12h14M13 6l6 6-6 6" /></svg>
@@ -403,9 +443,11 @@
 
 <ConfirmDialog
   bind:open={confirmUndo}
-  title="Undo this job?"
-  body="Every file it changed goes back to how it was before it, and the files it made are deleted. Yap kept their backups for this."
-  confirmLabel="Undo job"
+  title={many ? 'Undo every turn of this job?' : 'Undo this job?'}
+  body={many
+    ? 'Every file it changed, in every turn, goes back to how it was before its first turn, and the files it made are deleted. Yap kept their backups for this.'
+    : 'Every file it changed goes back to how it was before it, and the files it made are deleted. Yap kept their backups for this.'}
+  confirmLabel={many ? 'Undo all' : 'Undo job'}
   busyLabel="Undoing…"
   busy={busy === 'undo'}
   returnFocus={undoBtn}
@@ -577,182 +619,107 @@
   .problem .pill {
     margin-top: 8px;
   }
-  .now {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    margin: 12px 0 0;
-    padding: 8px 10px;
-    border-radius: 9px;
-    background: var(--yap-paper-s1);
-    font-weight: 600;
-    overflow-wrap: anywhere;
-  }
-  .spin {
-    flex: 0 0 auto;
-    width: 11px;
-    height: 11px;
-    border: 2px solid color-mix(in srgb, var(--yap-primary) 30%, transparent);
-    border-top-color: var(--yap-primary);
-    border-radius: 50%;
-  }
-  @media (prefers-reduced-motion: no-preference) {
-    .spin {
-      animation: spin 0.9s linear infinite;
-    }
-  }
-  :global(:root[data-motion='reduced']) .spin {
-    animation: none;
-  }
-  @keyframes spin {
-    to {
-      transform: rotate(360deg);
-    }
-  }
-  .section {
-    margin: 14px 0 0;
-  }
-  .section > summary,
-  .section > h3 {
-    margin: 0 0 6px;
-    font-size: 12px;
-    font-weight: 650;
-    color: var(--yap-paper-text-2);
-    cursor: default;
-  }
-  .section > summary {
-    cursor: pointer;
-  }
-  .count {
-    margin-left: 4px;
-    font-weight: 500;
-    color: var(--yap-paper-muted);
-  }
-  .todolist {
-    margin: 0;
-    padding: 0;
-    list-style: none;
-  }
-  .todo {
-    display: flex;
-    align-items: flex-start;
-    gap: 8px;
-    padding: 2px 0;
-    font-size: 12.5px;
-    color: var(--yap-paper-ink);
-  }
-  .tmark {
-    flex: 0 0 auto;
-    width: 14px;
-    text-align: center;
-    color: var(--yap-paper-muted);
-    font-size: 11px;
-    line-height: 19px;
-  }
-  .todo.done .tmark {
-    color: var(--yap-success-text);
-    font-weight: 700;
-  }
-  .todo.done .ttext {
-    color: var(--yap-paper-muted);
-    text-decoration: line-through;
-    text-decoration-color: color-mix(in srgb, var(--yap-paper-muted) 60%, transparent);
-  }
-  .todo.doing .tmark {
-    color: var(--yap-primary);
-  }
-  .todo.doing .ttext {
-    font-weight: 600;
-  }
-  .ttext {
-    min-width: 0;
-    overflow-wrap: anywhere;
-  }
-  .sr-only {
-    position: absolute;
-    width: 1px;
-    height: 1px;
-    margin: -1px;
-    overflow: hidden;
-    clip: rect(0 0 0 0);
-    white-space: nowrap;
-  }
-  .plain {
-    margin: 0;
-    padding: 0 0 0 2px;
-    list-style: none;
-  }
-  .plain li {
-    padding: 2px 0;
-    font-size: 12.5px;
-    overflow-wrap: anywhere;
-  }
-  .cmds {
-    margin: 0;
-    padding: 0;
-    list-style: none;
-  }
-  .cmds li {
-    padding: 3px 0;
-    font-size: 12.5px;
-    overflow-wrap: anywhere;
-  }
-  .cmds li + li {
-    border-top: 1px solid color-mix(in srgb, var(--yap-paper-rule) 60%, transparent);
-  }
-  .cabout {
-    margin: 0 0 2px;
-    color: var(--yap-paper-text-2);
-    font-size: 12px;
-  }
-  .cmds code.cmd {
-    display: block;
-    padding: 4px 7px;
-  }
-  .showmore {
-    margin: 4px 0 0;
-    padding: 0;
-    border: none;
-    background: none;
-    color: var(--yap-primary);
-    font: inherit;
-    font-size: 12px;
-    font-weight: 600;
-    cursor: pointer;
-  }
-  .showmore:hover {
-    text-decoration: underline;
-  }
-  .showmore:focus-visible {
-    outline: 2px solid var(--yap-focus-ring);
-    outline-offset: 1px;
-  }
-  code {
-    font-family: var(--yap-font-mono, ui-monospace, monospace);
-    font-size: 12px;
-    padding: 1px 5px;
-    border-radius: 5px;
-    background: var(--yap-paper-s1);
-  }
-  code.cmd {
-    white-space: pre-wrap;
-  }
-  .final .md {
-    font-family: var(--yap-font-reading);
-    font-size: calc(13px * var(--yap-reading-scale));
-    line-height: 1.6;
-    overflow-wrap: anywhere;
-  }
-  .final .md :global(p) {
-    margin: 0 0 8px;
-  }
-  .nobackups {
-    margin: 8px 0 0;
+  .whynew {
+    margin: 10px 0 0;
     padding: 7px 10px;
     border-radius: 9px;
-    background: color-mix(in srgb, var(--yap-warning) 10%, var(--yap-paper));
+    background: var(--yap-paper-s1);
     color: var(--yap-paper-text-2);
     font-size: 12.5px;
+  }
+  /* A turn: its request as a header, its steps under it when open. */
+  .turn {
+    margin: 14px 0 0;
+    border: 1px solid var(--yap-paper-rule);
+    border-radius: 10px;
+    background: var(--yap-paper);
+  }
+  .turn.open {
+    border-color: color-mix(in srgb, var(--yap-primary) 22%, var(--yap-paper-rule));
+  }
+  .turn.queued {
+    border-style: dashed;
+    background: var(--yap-paper-s1);
+  }
+  .thead {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    width: 100%;
+    box-sizing: border-box;
+    min-height: 34px;
+    padding: 6px 10px;
+    border: none;
+    border-radius: 10px;
+    background: none;
+    color: var(--yap-paper-ink);
+    font: inherit;
+    font-size: 12.5px;
+    text-align: left;
+  }
+  button.thead {
+    cursor: pointer;
+  }
+  button.thead:hover {
+    background: var(--yap-paper-s1);
+  }
+  button.thead:focus-visible {
+    outline: 2px solid var(--yap-focus-ring);
+    outline-offset: -2px;
+  }
+  .tchev {
+    flex: 0 0 auto;
+    width: 13px;
+    height: 13px;
+    color: var(--yap-paper-muted);
+    transition: transform 0.15s ease;
+  }
+  .tchev.down {
+    transform: rotate(90deg);
+  }
+  :global(:root[data-motion='reduced']) .tchev {
+    transition: none;
+  }
+  .tdot {
+    flex: 0 0 auto;
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    background: var(--yap-paper-muted);
+  }
+  .tdot.tone-live {
+    background: var(--yap-primary);
+  }
+  .tdot.tone-ask {
+    background: var(--yap-warning);
+  }
+  .tdot.tone-done {
+    background: var(--yap-success);
+  }
+  .tdot.tone-failed {
+    background: var(--yap-danger);
+  }
+  .ttitle {
+    flex: 1 1 auto;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-weight: 650;
+  }
+  .tfacts {
+    flex: 0 0 auto;
+    color: var(--yap-paper-muted);
+    font-size: 11.5px;
+  }
+  .tqueued {
+    margin: -2px 10px 8px 24px;
+    color: var(--yap-paper-text-2);
+    font-size: 12px;
+  }
+  .tbody {
+    padding: 0 12px 12px;
+    border-top: 1px solid color-mix(in srgb, var(--yap-paper-rule) 70%, transparent);
   }
   .undone {
     margin: 12px 0 0;

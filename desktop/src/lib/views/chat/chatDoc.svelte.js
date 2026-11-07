@@ -130,8 +130,9 @@ export function createDocPanel({ onopennote = () => null } = {}) {
   // A live page beside the chat (chat/pages.rs `ShownPage`: its Page tab).
   let page = $state(null);
   // A job beside the chat (jobs.rs `JobRef`: `{id, folder, status, mode,
-  // conversation}`; its Job tab).
+  // conversation, turn?}`; its Job tab).
   let job = $state(null);
+  let jobSeq = 0;
   // Each page tab as it is now (tab key → { title, url, went }): its title
   // and address as Rust says, and where the address bar last took it (a
   // tab shown again opens there). New tabs are counted for their keys.
@@ -357,7 +358,10 @@ export function createDocPanel({ onopennote = () => null } = {}) {
     if (!ref?.id) return;
     if (showing === 'doc') flushSave();
     const known = extra.find((t) => t.key === jobKey(ref.id))?.job;
-    const j = { ...known, ...ref };
+    // One tab a job, whichever of its turns it opens at (`turn`: a pill's,
+    // a report's; none: its newest). `seq` tells the tab it was asked again.
+    jobSeq += 1;
+    const j = { ...known, ...ref, turn: ref.turn ?? null, seq: jobSeq };
     inRow({ key: jobKey(ref.id), kind: 'job', id: ref.id, job: j });
     extra = extra.map((t) => (t.key === jobKey(ref.id) ? { ...t, job: j } : t));
     job = j;

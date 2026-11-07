@@ -167,6 +167,30 @@ pub fn remove(config: &Path, cwd: &Path, sessions: &[String]) -> usize {
     gone
 }
 
+/// **Is session `id`'s transcript kept** (`config`: Claude Code's config
+/// folder) for a session run in `cwd`: `Some(true)` it's there (it can be
+/// resumed), `Some(false)` Claude Code keeps sessions here and this one's
+/// gone (its clean-up took it), `None` Yap can't tell (no `projects/`
+/// folder, an id that isn't a UUID). Only looks. Pure but for the reads.
+pub fn kept(config: &Path, cwd: &Path, id: &str) -> Option<bool> {
+    if !is_session_id(id) {
+        return None;
+    }
+    let entries = std::fs::read_dir(config.join("projects")).ok()?;
+    let found = entries.flatten().any(|entry| {
+        entry.file_type().is_ok_and(|k| k.is_dir() && !k.is_symlink())
+            && files_for(&entry.file_name().to_string_lossy(), cwd)
+            && std::fs::symlink_metadata(entry.path().join(format!("{id}.jsonl"))).is_ok_and(|m| m.is_file())
+    });
+    Some(found)
+}
+
+/// [`kept`] in Claude Code's own config folder ([`config_dir`]): `None`
+/// when there's none to look in.
+pub fn session_kept(cwd: &Path, id: &str) -> Option<bool> {
+    kept(&config_dir()?, cwd, id)
+}
+
 /// [`remove`] in Claude Code's own config folder ([`config_dir`]), said in
 /// the log by count.
 pub fn remove_for(cwd: &Path, sessions: &[String]) -> usize {

@@ -132,14 +132,36 @@ pub fn workspaces_changed() {
 /// tool loop and a plan chat alike (`chat/turn/prompt.rs`). Pure.
 pub fn prompt_line_for(folder: &Folder) -> String {
     format!(
-        "This is a Code chat in the user's folder {} ({}): they picked it for jobs. When they ask you to change, fix, build or write something there, start a job: call start_job without a folder (it's this one). Their own request this turn is enough; they needn't name the folder. message_job and job_status without an id mean this chat's latest job. A job in any other folder still needs the user to name it.",
+        "This is a Code chat in the user's folder {} ({}): they picked it for jobs. When they ask you to change, fix, build or write something there, start a job: call start_job without a folder (it's this one). Their own request this turn is enough; they needn't name the folder. One Claude Code session per Code chat: once it has a job, each follow-up continues that job as its next turn (start_job does it by itself; fresh: true only when they ask for a new job or a fresh start). message_job and job_status without an id mean this chat's latest job. A job in any other folder still needs the user to name it.",
         folder.name, folder.path
     )
 }
 
-/// [`prompt_line_for`] the folder `conversation` is a Code chat in.
+/// [`prompt_line_for`] the folder `conversation` is a Code chat in, and the
+/// chat's job there, when it has one ([`job_line`]).
 pub fn prompt_line(conversation: Option<u64>) -> Option<String> {
-    folder_of(conversation).map(|f| prompt_line_for(&f))
+    let folder = folder_of(conversation)?;
+    let line = prompt_line_for(&folder);
+    let job = conversation.and_then(|c| store::of_conversation(c).into_iter().find(|j| folders::norm(&j.path) == folders::norm(&folder.path)));
+    Some(match job {
+        Some(j) => format!("{line} {}", job_line(&j)),
+        None => line,
+    })
+}
+
+/// **The chat's job, as its prompt says it**: its status and how many turns,
+/// so the model knows a follow-up carries it on. Never its words. Pure.
+pub fn job_line(job: &store::Job) -> String {
+    let turns = job.turn_notes().len();
+    let turns = if turns == 1 { "1 turn".to_string() } else { format!("{turns} turns") };
+    let now = match job.status {
+        store::Status::Queued | store::Status::Running | store::Status::Asking => "working now (a request waits for its next turn)",
+        store::Status::Done => "done",
+        store::Status::Failed => "stopped short",
+        store::Status::Stopped => "stopped",
+        store::Status::Interrupted => "interrupted",
+    };
+    format!("This chat's job there (id {}) is {now}, after {turns}: the user's next request there continues it.", job.id)
 }
 
 /// A job folder with when it was last used: the workspace picker's order.

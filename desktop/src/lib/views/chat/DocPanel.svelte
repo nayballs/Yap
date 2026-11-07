@@ -45,6 +45,8 @@
   import PictureTab from './PictureTab.svelte';
   import PageTab from './PageTab.svelte';
   import JobTab from './JobTab.svelte';
+  import { jobTabName } from '../../core/jobs.js';
+  import { jobById } from '../../stores/jobs.svelte.js';
   import { panelTabs, neighbour } from './panelTabs.js';
   import { tabKeyOf, pageKey as pageTabKey } from './chatDoc.svelte.js';
   import { placed, shown as fadeIn } from './chatImages.js';
@@ -98,7 +100,7 @@
       : t.kind === 'page'
         ? doc.pageNow[t.key]?.title || t.page?.title || t.page?.site || (t.page?.url || doc.pageNow[t.key]?.went ? 'Page' : 'New tab')
         : t.kind === 'job'
-          ? `Job · ${t.job?.folder || 'folder'}`
+          ? jobTabName(t, tabs, jobById)
           : t.title || 'Untitled document';
 
   // The pages this conversation's answers read or showed, newest first: a

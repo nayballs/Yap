@@ -54,11 +54,19 @@ pub async fn job_message(id: String, text: String) -> Result<Job, String> {
     runner::message(&id, &text, go)
 }
 
-/// Undo a job: what Undo put back (`restored`, `deleted`, `skipped`,
-/// `refused`, `failed`: paths and reasons).
+/// Undo a job (Undo all: every turn, back to before its first): what Undo
+/// put back (`restored`, `deleted`, `skipped`, `refused`, `failed`: paths
+/// and reasons).
 #[tauri::command]
 pub async fn job_undo(id: String) -> Result<crate::integrations::claude_live::backup::RestoreReport, String> {
     tauri::async_runtime::spawn_blocking(move || runner::undo(&id)).await.map_err(|e| e.to_string())?
+}
+
+/// Undo one turn of a job (Undo this turn): refused while a later turn
+/// changed one of the same files ("Undo the later change first…").
+#[tauri::command]
+pub async fn job_undo_turn(id: String, turn: u32) -> Result<crate::integrations::claude_live::backup::RestoreReport, String> {
+    tauri::async_runtime::spawn_blocking(move || runner::undo_turn(&id, turn)).await.map_err(|e| e.to_string())?
 }
 
 /// The job's session in Windows Terminal, in its folder (`claude

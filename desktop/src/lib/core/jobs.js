@@ -231,45 +231,148 @@ export function messageIndex(id, conversation) {
 }
 
 /**
- * **The job pills under each answer**: the jobs of `conversation`, each
- * under the first answer after the question that started it (`messageId`).
- * `messages`: the thread's (`role`). A Map from the answer's index to its
- * jobs, oldest first.
+ * **A request in a few words** (a turn's header; jobs/store.rs `title_of`):
+ * its first line to its first sentence's end, cut at a word under 60
+ * characters.
+ */
+export function titleOf(text) {
+  const line = (String(text || '').trim().split('\n').map((l) => l.trim()).find(Boolean) || '').replace(/^[#\-*> ]+/, '');
+  const end = line.search(/[.!?:;](\s|$)/);
+  const sentence = (end >= 0 ? line.slice(0, end) : line).trim();
+  if ([...sentence].length <= 60) return sentence;
+  const cut = [...sentence].slice(0, 60).join('');
+  const at = cut.lastIndexOf(' ');
+  return `${(at > 30 ? cut.slice(0, at) : cut).replace(/[, -]+$/, '')}…`;
+}
+
+/**
+ * **A job's turns** (jobs/store.rs `TurnNote`: 2026-11-07, one job per Code
+ * chat): each request to it and what came of it — `{n, title, request,
+ * status, startedTs, endedTs, cost, files, denials, text, plan, asks, error,
+ * undone, messageId, reportMessageId, events}` — its log split among them
+ * (each event's `turn`; an event without one goes with the turn before it,
+ * an older log's all with its first). A job from before turns: one, made
+ * from the job. An event naming a turn this window hasn't read yet gets a
+ * turn of its own until it does.
+ */
+export function turnsOf(job, log) {
+  if (!job) return [];
+  const notes = job.turnList?.length
+    ? job.turnList
+    : [
+        {
+          n: 1,
+          title: titleOf(job.brief),
+          request: job.brief || '',
+          status: job.status,
+          startedTs: job.startedTs,
+          endedTs: job.endedTs,
+          cost: job.cost,
+          files: job.files || [],
+          denials: job.denials || [],
+          text: job.text || '',
+          plan: job.plan,
+          asks: job.asks,
+          error: job.error,
+          undone: job.undone,
+          messageId: job.messageId,
+          reportMessageId: job.reportMessageId,
+        },
+      ];
+  const events = new Map(notes.map((t) => [t.n, []]));
+  const extra = new Map();
+  let at = notes[0]?.n ?? 1;
+  for (const e of log || []) {
+    if (Number.isInteger(e?.turn)) at = e.turn;
+    if (!events.has(at) && !extra.has(at)) extra.set(at, { n: at, title: e?.queued || '', request: '', status: e?.status, files: [], denials: [], text: '' });
+    (events.get(at) ?? (events.set(at, []), events.get(at))).push(e);
+  }
+  return [...notes, ...[...extra.values()].sort((a, b) => a.n - b.n)].map((t) => ({ ...t, files: t.files || [], denials: t.denials || [], events: events.get(t.n) || [] }));
+}
+
+/** A turn's status as its header says it: queued behind the one working, never sent (stopped first), else the job's words. */
+export function turnStatusWord(t) {
+  if (t?.status === 'queued' && !t.startedTs) return 'Queued';
+  if ((t?.status === 'stopped' || t?.status === 'interrupted') && !t.startedTs) return 'Not sent yet';
+  return statusWord(t?.status);
+}
+
+/** **Undo this turn** is offered: the job is over, the turn changed files, and their backups are there (as `canUndo`). */
+export const canUndoTurn = (job, turn) => !!job && !!turn && !isLive(job.status) && (turn.files?.length ?? 0) > 0 && !turn.undone && !job.swept && !job.noBackups;
+
+/** The answer after message `q`: the first assistant message before the person's next (a report marker skipped), or -1. */
+function answerAfter(messages, q) {
+  for (let i = q + 1; i < messages.length; i++) {
+    if (messages[i]?.kind === 'jobReport') continue;
+    if (messages[i]?.role === 'assistant') return i;
+    if (messages[i]?.role === 'user') return -1;
+  }
+  return -1;
+}
+
+/**
+ * **The job pills under each answer**: each turn of the jobs of
+ * `conversation` under the first answer after the question that asked for
+ * it (its `messageId`; a job from before turns: the job's), one pill a job
+ * an answer (its newest turn there) — `{...job, turn, turnStatus,
+ * turnStarted, turnTitle}`. `messages`: the thread's (`role`). A Map from the answer's
+ * index to its pills, oldest first.
  */
 export function pillsByAnswer(jobs, conversation, messages) {
   const out = new Map();
   if (conversation == null || !messages?.length) return out;
   const mine = (jobs || []).filter((j) => j?.conversation === conversation).sort((a, b) => (a.createdTs || 0) - (b.createdTs || 0));
   for (const j of mine) {
-    const q = messageIndex(j.messageId, conversation);
-    if (q < 0) continue;
-    let at = -1;
-    for (let i = q + 1; i < messages.length; i++) {
-      if (messages[i]?.kind === 'jobReport') continue;
-      if (messages[i]?.role === 'assistant') {
-        at = i;
-        break;
-      }
-      if (messages[i]?.role === 'user') break;
+    const turns = j.turnList?.length ? j.turnList : [{ n: 1, messageId: j.messageId, status: j.status, title: '' }];
+    for (const t of turns) {
+      const q = messageIndex(t.messageId, conversation);
+      if (q < 0) continue;
+      const at = answerAfter(messages, q);
+      if (at < 0) continue;
+      const pill = { ...j, turn: t.n, turnStatus: t.status, turnStarted: Number(t.startedTs) || 0, turnTitle: t.title || '' };
+      const list = out.get(at) || [];
+      const k = list.findIndex((p) => p.id === j.id);
+      if (k >= 0) list[k] = pill;
+      else list.push(pill);
+      out.set(at, list);
     }
-    if (at < 0) continue;
-    out.set(at, [...(out.get(at) || []), j]);
   }
   return out;
 }
 
 /**
  * The job a report marker message is about: the one whose `reportMessageId`
- * it is (a job keeps its latest report's), else — an earlier turn's report
- * of a job reported again since — the newest job in that chat and folder.
- * null when its job is gone (the card still says what the marker says).
+ * it is, or one of whose turns' it is (a job keeps its latest report's, each
+ * turn its own), else — an earlier report from before turns were kept — the
+ * newest job in that chat and folder. null when its job is gone (the card
+ * still says what the marker says).
  */
 export function jobOfReport(jobs, markerId, conversation, folder = '') {
   const list = jobs || [];
-  const exact = list.find((j) => j?.reportMessageId && j.reportMessageId === markerId);
+  const exact = list.find((j) => j?.reportMessageId && j.reportMessageId === markerId) || list.find((j) => (j?.turnList || []).some((t) => t?.reportMessageId === markerId));
   if (exact) return exact;
   if (!folder) return null;
   return list.filter((j) => j?.conversation === conversation && j.folder === folder).sort((a, b) => (b.createdTs || 0) - (a.createdTs || 0))[0] ?? null;
+}
+
+/** The turn of `job` a report marker is about (`null`: not known, an older job's). */
+export const turnOfReport = (job, markerId) => (job?.turnList || []).find((t) => t?.reportMessageId === markerId) ?? null;
+
+/**
+ * **A job tab's name** in the panel's row: "Job · garden-planner" — and,
+ * when another job tab there has the same folder (a fresh job beside the
+ * chat's earlier one), its first request too, so no two tabs read the
+ * same ("Job · garden-planner · Add a minimap button"; failing that, "#2").
+ */
+export function jobTabName(t, tabs, lookup = null) {
+  const folder = t?.job?.folder || 'folder';
+  const same = (tabs || []).filter((o) => o?.kind === 'job' && (o.job?.folder || 'folder') === folder);
+  if (same.length < 2) return `Job · ${folder}`;
+  // (A tab opened from a turn's event has the job's ref only: its turns from the jobs list.)
+  const first = (o) => (lookup?.(o.job?.id) ?? o.job)?.turnList?.[0]?.title || '';
+  const title = first(t);
+  const named = !!title && same.filter((o) => first(o) === title).length === 1;
+  return named ? `Job · ${folder} · ${title}` : `Job · ${folder} #${same.indexOf(t) + 1}`;
 }
 
 /** The report card's line: "Job done", "Job's plan is ready", "Job has a question", "Job didn't finish". */

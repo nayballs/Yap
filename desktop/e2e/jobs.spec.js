@@ -271,7 +271,8 @@ test('a typed request runs a job in a job folder, follows it, reports it in the 
   expect(job.messageId).toBe(`chat:${job.conversation}:0`);
   // The job really edited the file, after the backup hook copied it.
   expect(fs.readFileSync(path.join(GARDEN, 'notes.md'), 'utf8')).toBe('Final notes\n');
-  const backup = path.join(yap.dataDir, 'jobs', job.id, 'backup');
+  // (Each turn's own backups: backup/<turn>/, jobs-turns.spec.js.)
+  const backup = path.join(yap.dataDir, 'jobs', job.id, 'backup', '1');
   const manifest = JSON.parse(fs.readFileSync(path.join(backup, 'manifest.json'), 'utf8'));
   expect(manifest.files.map((f) => [path.basename(f.original), f.state])).toEqual([['notes.md', 'copied']]);
 
@@ -524,10 +525,11 @@ test('a permission card makes a job ask; Stop and Continue; a plan, then go ahea
   await script(yap, SLOW, 'slow');
   before = (await jobs(yap)).length;
   fakeLlm.scriptChat([
-    { tools: [{ name: 'start_job', args: { folder: 'garden-planner', brief: 'Read notes.md slowly.' } }] },
+    // (A Code chat now: a new job only when the person asks for one, jobs-turns.spec.js.)
+    { tools: [{ name: 'start_job', args: { folder: 'garden-planner', brief: 'Read notes.md slowly.', fresh: true } }] },
     { content: "On it: I've started a job in garden-planner." },
   ]);
-  await send(main, 'Start a job in garden-planner to read notes.md slowly.');
+  await send(main, 'Start a new job in garden-planner to read notes.md slowly.');
   let slow = await newJob(yap, before);
   await expect.poll(async () => (await yap.invoke('job_get', { id: slow.id })).log.map((e) => e.step), { timeout: 20_000 }).toContain('Reading notes.md');
   await expect(yap.invoke('job_open_terminal', { id: slow.id })).rejects.toThrow(/Stop the job first/);
@@ -552,11 +554,11 @@ test('a permission card makes a job ask; Stop and Continue; a plan, then go ahea
   await script(yap, PLANNED, 'plan');
   before = (await jobs(yap)).length;
   fakeLlm.scriptChat([
-    { tools: [{ name: 'start_job', args: { folder: 'garden-planner', brief: 'Change Draft to Final in notes.md.', mode: 'plan' } }] },
+    { tools: [{ name: 'start_job', args: { folder: 'garden-planner', brief: 'Change Draft to Final in notes.md.', mode: 'plan', fresh: true } }] },
     { content: "On it: I've started a job in garden-planner. It'll make a plan first." },
     { plain: true, content: 'It made a plan: change Draft to Final in notes.md, then run the tests. Shall it go ahead?' },
   ]);
-  await send(main, 'Start a job in garden-planner, but make a plan first: change Draft to Final in notes.md.');
+  await send(main, 'Start a new job in garden-planner, but make a plan first: change Draft to Final in notes.md.');
   let plan = await ended(yap, (await newJob(yap, before)).id);
   expect(plan).toMatchObject({ status: 'done', mode: 'plan', plan: true, asks: true, text: PLAN });
   let messages = await messagesOf(yap, conversation, 12);

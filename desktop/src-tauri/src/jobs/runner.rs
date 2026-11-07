@@ -29,13 +29,19 @@
 //!   cost?, problem?, ts}`) and kept in the job's `log.jsonl` for its tab.
 //! - **Asking**: a permission card waiting for the person (the endpoint's
 //!   `pending()`): the job is `asking` until it's answered.
-//! - **A turn ends**: the process is told its input is over and exits; a
-//!   message for the job later (`message_job`, Continue) starts it again on
-//!   `--resume`, at the chat's Mode then (`modes::next_turn`: a plan stays
-//!   a plan until "go ahead"). A message while it works goes to it at once
-//!   (its next turn, queued by Claude Code).
-//! - **Done or failed**: reported in its chat (`chat/turn/report.rs`) —
-//!   never one the person stopped.
+//! - **Its turns** (2026-11-07: one job per Code chat, as Claude Code is one
+//!   session per conversation): each request to it is a turn of its own
+//!   (`store::TurnNote`: the brief, then each follow-up — `start_job` in its
+//!   Code chat, `message_job`, the tab's "Tell the job…"), on the same
+//!   session (`--resume`), at the chat's Mode then (`modes::next_turn`: a
+//!   plan stays a plan until "go ahead"), Settings' model and effort then
+//!   (unless the person asked for their own), each with its own backups
+//!   (`jobs/<id>/backup/<n>/`) and its own report. Continue carries on the
+//!   same turn. A request while a turn works **queues as the next turn**
+//!   ([`follow_up`]): sent once this one ends, never into it.
+//! - **A turn ends**: the process is told its input is over and exits.
+//! - **Done or failed**: each turn reported in its chat
+//!   (`chat/turn/report.rs`) — never one the person stopped.
 //! - **Jobs die with Yap** (the kill-on-close job): quitting marks them
 //!   interrupted ([`shutdown`]); `store::at_start` does after a crash.
 //!
@@ -118,14 +124,85 @@ pub struct JobEvent {
     pub cost: Option<f64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub problem: Option<ProblemNote>,
+    /// The turn it's about (`store::TurnNote::n`): the tab's section.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub turn: Option<u32>,
+    /// A request queued as that turn, behind the one working (its title).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub queued: Option<String>,
     /// Unix seconds.
     pub ts: u64,
 }
 
 impl JobEvent {
+    /// About the job's turn now (the newest that ran, else its newest).
     fn of(job: &Job) -> JobEvent {
-        JobEvent { id: job.id.clone(), status: job.status, folder: job.folder.clone(), conversation: job.conversation, ts: store::now_secs(), ..Default::default() }
+        let turn = job.turn_list.iter().rev().find(|t| t.ran()).or(job.turn_list.last()).map(|t| t.n);
+        JobEvent { turn, ..JobEvent::at(job, 0) }
     }
+
+    /// About its turn `n` (0: none).
+    fn at(job: &Job, n: u32) -> JobEvent {
+        JobEvent { id: job.id.clone(), status: job.status, folder: job.folder.clone(), conversation: job.conversation, turn: (n > 0).then_some(n), ts: store::now_secs(), ..Default::default() }
+    }
+}
+
+/// **A request for a job's next turn** (a follow-up, a plan's go-ahead):
+/// what to tell it and how its turn runs.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct Ask {
+    /// What to tell it.
+    pub text: String,
+    /// It in a few words (the tab's header; `store::title_of` when empty).
+    pub title: String,
+    /// The person's message that asked for it (its pill).
+    pub message_id: Option<String>,
+    /// A plan's go-ahead (its turn at the chat's Mode).
+    pub go: bool,
+    /// Lower than the chat's Mode (the model may only lower it).
+    pub mode: Option<Mode>,
+    /// The person's own model and effort for it (else Settings' then).
+    pub model: Option<String>,
+    pub effort: Option<String>,
+}
+
+impl Ask {
+    /// `text` told the job, nothing else asked.
+    pub fn of(text: &str, go: bool) -> Ask {
+        Ask { text: text.trim().to_string(), go, ..Default::default() }
+    }
+
+    fn title(&self) -> String {
+        if self.title.trim().is_empty() { store::title_of(&self.text) } else { store::title_of(&self.title) }
+    }
+
+    /// Another request for the same turn, added: its words after these, the
+    /// lower mode, a go-ahead in either.
+    fn merge(&mut self, more: Ask) {
+        self.text = format!("{}\n\n{}", self.text.trim(), more.text.trim());
+        self.go |= more.go;
+        self.mode = match (self.mode, more.mode) {
+            (Some(a), Some(b)) => Some(a.min(b)),
+            (a, b) => a.or(b),
+        };
+        if more.model.is_some() {
+            self.model = more.model;
+        }
+        if more.effort.is_some() {
+            self.effort = more.effort;
+        }
+    }
+}
+
+/// Where a follow-up went ([`follow_up`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FollowedUp {
+    /// The job was working: its next turn, once this one ends.
+    Queued,
+    /// Its next turn is on its way now.
+    Started,
+    /// The turn about to start (or waiting for a slot) takes it too.
+    Added,
 }
 
 /// A job that has a slot.
@@ -135,14 +212,25 @@ struct Live {
     /// User messages sent, and results back: its input ends when they meet.
     sent: u32,
     results: u32,
-    /// Its input is over (it's finishing): a message waits for the next turn.
+    /// Its input is over (it's finishing).
     input_over: bool,
-    /// Messages for its next turn.
-    pending: Vec<String>,
+    /// Its first message is sent: words for it from now on wait for its
+    /// next turn.
+    started: bool,
+    /// Words for this turn that came while it started (sent with its first).
+    extra: Vec<String>,
+    /// A request for its next turn, waiting for this one to end.
+    pending: Option<Ask>,
     /// The person stopped it (when).
     stopping: Option<Instant>,
     /// Its folder, compared ([`folders::norm`]).
     folder: String,
+}
+
+impl Live {
+    fn new(folder: String) -> Live {
+        Live { session: None, sent: 0, results: 0, input_over: false, started: false, extra: Vec::new(), pending: None, stopping: None, folder }
+    }
 }
 
 #[derive(Default)]
@@ -228,7 +316,7 @@ fn schedule(id: &str, message: Option<String>) {
             s.queue.push_back((id.to_string(), message.clone(), folder.clone()));
             return Placed::Queued;
         }
-        s.live.insert(id.to_string(), Live { session: None, sent: 0, results: 0, input_over: false, pending: Vec::new(), stopping: None, folder });
+        s.live.insert(id.to_string(), Live::new(folder));
         Placed::Go
     });
     match placed {
@@ -236,7 +324,9 @@ fn schedule(id: &str, message: Option<String>) {
         Placed::Queued => {
             if let Some(job) = store::update(id, |j| j.status = Status::Queued) {
                 tracing::info!(id = %job.id, "Jobs: queued behind the others");
-                emit(&JobEvent { step: Some("Waiting for another job to finish".into()), ..JobEvent::of(&job) });
+                // (Its newest turn is the one waiting.)
+                let n = job.turn_list.last().map_or(0, |t| t.n);
+                emit(&JobEvent { step: Some("Waiting for another job to finish".into()), ..JobEvent::at(&job, n) });
             }
         }
         Placed::Go => {
@@ -258,7 +348,7 @@ fn pump() {
                 continue;
             }
             let Some((id, message, folder)) = s.queue.remove(i) else { break };
-            s.live.insert(id.clone(), Live { session: None, sent: 0, results: 0, input_over: false, pending: Vec::new(), stopping: None, folder });
+            s.live.insert(id.clone(), Live::new(folder));
             go.push((id, message));
         }
         go
@@ -269,19 +359,36 @@ fn pump() {
 }
 
 /// One turn of job `id`, from start to the process gone; then its slot goes
-/// to the next, and it's reported — or, told something while it finished,
-/// straight on with that.
+/// to the next, and it's reported — and a request that came while it
+/// worked runs as its next turn.
 async fn run(id: String, message: Option<String>) {
-    let status = turn(&id, message).await;
-    // Messages sent while it finished its turn: for its next one.
-    let pending = with_state(|s| s.live.remove(&id).map(|l| l.pending).unwrap_or_default());
+    let (status, n) = turn(&id, message).await;
+    // A request that came while it worked: its next turn.
+    let pending = with_state(|s| s.live.remove(&id).and_then(|l| l.pending));
     store::flush();
     let ended = matches!(status, Status::Done | Status::Failed);
-    if ended && !pending.is_empty() {
-        tracing::info!(id = %id, messages = pending.len(), "Jobs: carrying on with what was sent meanwhile");
-        resume(&id, Next::Message(pending.join("\n\n")), false);
-    } else if ended {
-        crate::chat::turn::queue_job_report(&id);
+    // Every turn is reported, a turn waiting behind it or not.
+    if ended && n > 0 {
+        crate::chat::turn::queue_job_report(&id, n);
+    }
+    match pending {
+        Some(ask) if ended => {
+            tracing::info!(id = %id, "Jobs: its next turn, asked for while this one worked");
+            let text = ask.text.clone();
+            resume(&id, Next::Message(text), &ask, false);
+        }
+        // Stopped: the request waiting isn't sent (Continue sends it).
+        Some(_) => {
+            if let Some(job) = store::update(&id, |j| {
+                if let Some(t) = j.turn_list.last_mut().filter(|t| !t.ran()) {
+                    t.status = status;
+                }
+            }) {
+                tracing::info!(id = %id, "Jobs: a request waiting for its next turn not sent (stopped)");
+                emit(&JobEvent { step: Some("Not sent yet: Continue sends it".into()), ..JobEvent::at(&job, job.turn_list.last().map_or(0, |t| t.n)) });
+            }
+        }
+        None => {}
     }
     pump();
 }
@@ -294,19 +401,31 @@ fn opening(job: &Job, message: Option<&str>) -> String {
     }
 }
 
-/// The job failed before Claude Code did anything: said, and saved.
-fn failed_early(id: &str, why: String, problem: Option<ProblemNote>) -> Status {
+/// The job's turn `n` failed before Claude Code did anything: said, and
+/// saved.
+fn failed_early(id: &str, n: u32, why: String, problem: Option<ProblemNote>) -> (Status, u32) {
     tracing::info!(id, "Jobs: couldn't start");
+    let now = store::now_secs();
     if let Some(job) = store::update(id, |j| {
         j.status = Status::Failed;
-        j.ended_ts = store::now_secs();
+        j.ended_ts = now;
         j.error = Some(why.clone());
         j.problem = problem.clone();
+        j.plan = false;
+        j.asks = false;
+        j.reported = false;
         j.step.clear();
+        if let Some(t) = j.turn_mut(n) {
+            t.status = Status::Failed;
+            t.ended_ts = now;
+            t.error = Some(why.clone());
+            t.plan = false;
+            t.asks = false;
+        }
     }) {
-        emit(&JobEvent { text: Some(why), problem, ..JobEvent::of(&job) });
+        emit(&JobEvent { text: Some(why), problem, ..JobEvent::at(&job, n) });
     }
-    Status::Failed
+    (Status::Failed, n)
 }
 
 /// How the job pays, or why it can't.
@@ -358,29 +477,33 @@ pub fn job_spec(
 }
 
 /// **One turn**: Claude Code started on the job, `message` (or the brief)
-/// sent, followed until it's gone.
-async fn turn(id: &str, message: Option<String>) -> Status {
-    let Some(job) = store::get(id) else { return Status::Failed };
+/// sent, followed until it's gone. The turn it ran (`store::TurnNote::n`):
+/// the job's newest (a new request's, or the one Continue carries on).
+async fn turn(id: &str, message: Option<String>) -> (Status, u32) {
+    // Its turns kept from now on (a job from before them: one, its brief).
+    let Some(job) = store::update(id, Job::keep_turns) else { return (Status::Failed, 0) };
+    let n = job.turn_list.last().map_or(1, |t| t.n);
     let cfg = crate::config::load();
     let Some(program) = cli::find() else {
-        return failed_early(id, "Claude Code isn't installed on this PC.".into(), None);
+        return failed_early(id, n, "Claude Code isn't installed on this PC.".into(), None);
     };
     let status = tauri::async_runtime::spawn_blocking(cli::status).await.unwrap_or_default();
     if status.too_old {
         let v = status.version.unwrap_or_default();
-        return failed_early(id, format!("Claude Code {v} is too old for jobs: update it to {} or later.", cli::MIN_VERSION), None);
+        return failed_early(id, n, format!("Claude Code {v} is too old for jobs: update it to {} or later.", cli::MIN_VERSION), None);
     }
     let pay = match pay_for(&job, &cfg, &status) {
         Ok(p) => p,
-        Err((why, problem)) => return failed_early(id, why, problem),
+        Err((why, problem)) => return failed_early(id, n, why, problem),
     };
     let folder = PathBuf::from(&job.path);
     if !folder.is_dir() {
-        return failed_early(id, "The job's folder isn't there any more.".into(), None);
+        return failed_early(id, n, "The job's folder isn't there any more.".into(), None);
     }
-    let Some(backup) = store::backup_dir(id) else { return failed_early(id, "That isn't one of Yap's jobs.".into(), None) };
+    // This turn's own backups (first copy wins within it).
+    let Some(backup) = store::turn_backup_dir(id, n) else { return failed_early(id, n, "That isn't one of Yap's jobs.".into(), None) };
     if let Err(e) = std::fs::create_dir_all(&backup) {
-        return failed_early(id, format!("Couldn't make the job's backup folder: {e}"), None);
+        return failed_early(id, n, format!("Couldn't make the job's backup folder: {e}"), None);
     }
     let run = match claude_live::register_run(RunSpec {
         label: job.folder.clone(),
@@ -391,7 +514,7 @@ async fn turn(id: &str, message: Option<String>) -> Status {
         jobs: false,
     }) {
         Ok(r) => r,
-        Err(e) => return failed_early(id, format!("Couldn't start the job: {e}"), None),
+        Err(e) => return failed_early(id, n, format!("Couldn't start the job: {e}"), None),
     };
     let mode = modes::or_auto(&job.mode);
     let resuming = message.is_some() && job.started_ts > 0 && !job.session.is_empty();
@@ -400,27 +523,26 @@ async fn turn(id: &str, message: Option<String>) -> Status {
     let spec = job_spec(&job, &folder, pay, mode, conversation, run.mcp_config(), run.settings(), run.env());
     let (session, mut rx) = match Session::start_with(&program, spec) {
         Ok(s) => s,
-        Err(e) => return failed_early(id, e, None),
+        Err(e) => return failed_early(id, n, e, None),
     };
     let session = Arc::new(session);
-    let first = opening(&job, message.as_deref());
-    // The person stopped it while it started: ended now.
-    let (stopped_early, pending) = with_state(|s| match s.live.get_mut(id) {
+    // The person stopped it while it started: ended now. Words for this
+    // turn that came meanwhile go with its first message.
+    let (stopped_early, extra) = with_state(|s| match s.live.get_mut(id) {
         Some(l) => {
             l.session = Some(Arc::clone(&session));
-            l.sent = 1 + l.pending.len() as u32;
-            (l.stopping.is_some(), std::mem::take(&mut l.pending))
+            l.started = true;
+            l.sent = 1;
+            (l.stopping.is_some(), std::mem::take(&mut l.extra))
         }
         None => (true, Vec::new()),
     });
+    let first = std::iter::once(opening(&job, message.as_deref())).chain(extra.iter().map(|t| format!("Also: {t}"))).collect::<Vec<_>>().join("\n\n");
     if stopped_early {
         session.kill();
-    } else {
-        let sent = std::iter::once(first.as_str()).chain(pending.iter().map(String::as_str)).try_for_each(|m| session.send_user(m, &[]));
-        if let Err(e) = sent {
-            session.kill();
-            return failed_early(id, e, None);
-        }
+    } else if let Err(e) = session.send_user(&first, &[]) {
+        session.kill();
+        return failed_early(id, n, e, None);
     }
     let now = store::now_secs();
     let Some(job) = store::update(id, |j| {
@@ -437,14 +559,28 @@ async fn turn(id: &str, message: Option<String>) -> Status {
         j.error = None;
         j.problem = None;
         j.step = "Starting Claude Code".into();
+        let (model, effort) = (j.model.clone(), j.effort.clone());
+        if let Some(t) = j.turn_mut(n) {
+            t.status = Status::Running;
+            if t.started_ts == 0 {
+                t.started_ts = now;
+            }
+            t.mode = mode.as_str().to_string();
+            t.model = model;
+            t.effort = effort;
+            t.plan = false;
+            t.asks = false;
+            t.error = None;
+            t.undone = false;
+        }
     }) else {
         session.kill();
-        return Status::Failed;
+        return (Status::Failed, n);
     };
-    tracing::info!(id, mode = mode.as_str(), pay = %job.pay, resuming, turn = job.turns, "Jobs: started");
-    emit(&JobEvent { step: Some("Starting Claude Code".into()), ..JobEvent::of(&job) });
+    tracing::info!(id, mode = mode.as_str(), pay = %job.pay, resuming, turn = n, runs = job.turns, "Jobs: started");
+    emit(&JobEvent { step: Some("Starting Claude Code".into()), ..JobEvent::at(&job, n) });
 
-    let mut follow = Follow::new(&job, folder, backup, mode);
+    let mut follow = Follow::new(&job, n, folder, backup, mode);
     let mut tick = tokio::time::interval(Duration::from_millis(500));
     loop {
         tokio::select! {
@@ -457,17 +593,21 @@ async fn turn(id: &str, message: Option<String>) -> Status {
     }
     // Unregistered: a permission card still waiting is a no.
     drop(run);
-    follow.finish()
+    (follow.finish(), n)
 }
 
 /// **Following one turn** of a job.
 struct Follow {
     id: String,
+    /// The turn (`store::TurnNote::n`): its events, its note.
+    n: u32,
     folder: PathBuf,
+    /// This turn's backups.
     backup: PathBuf,
     mode: Mode,
-    /// What the job had cost before this turn.
+    /// What the job had cost before this process, and the turn.
     cost_before: f64,
+    turn_cost_before: f64,
     /// Its latest words.
     last_text: String,
     /// The latest result's outcome and words.
@@ -535,13 +675,15 @@ fn no_backups(edited: bool, backed_up: usize) -> bool {
 }
 
 impl Follow {
-    fn new(job: &Job, folder: PathBuf, backup: PathBuf, mode: Mode) -> Follow {
+    fn new(job: &Job, n: u32, folder: PathBuf, backup: PathBuf, mode: Mode) -> Follow {
         Follow {
             id: job.id.clone(),
+            n,
             folder,
             backup,
             mode,
             cost_before: job.cost,
+            turn_cost_before: job.turn_list.iter().find(|t| t.n == n).map_or(0.0, |t| t.cost),
             last_text: String::new(),
             outcome: None,
             problem: None,
@@ -559,7 +701,7 @@ impl Follow {
     }
 
     fn event(&self, job: &Job) -> JobEvent {
-        JobEvent::of(job)
+        JobEvent::at(job, self.n)
     }
 
     /// The line it's on now is `line` (no new step): kept and said, when it
@@ -592,12 +734,16 @@ impl Follow {
             return;
         }
         let mut known = false;
+        let n = self.n;
         let Some(job) = store::touch(&self.id, |j| {
             j.step = seen.step.clone();
             if let Some(f) = &seen.file {
                 known = j.files.contains(f);
                 if !known {
                     j.files.push(f.clone());
+                }
+                if let Some(t) = j.turn_mut(n).filter(|t| !t.files.contains(f)) {
+                    t.files.push(f.clone());
                 }
             }
             if let Some(c) = &seen.command {
@@ -689,7 +835,14 @@ impl Follow {
             Event::PermissionDenied(d) => {
                 let detail = if d.message.trim().is_empty() { format!("Use {}", d.tool_name) } else { steps::one_line(&d.message, 160) };
                 let line = format!("Not allowed: {}", d.tool_name);
-                if let Some(job) = store::touch(&self.id, |j| j.denials.push(Denial { tool: d.tool_name.clone(), detail })) {
+                let n = self.n;
+                let denial = Denial { tool: d.tool_name.clone(), detail };
+                if let Some(job) = store::touch(&self.id, |j| {
+                    if let Some(t) = j.turn_mut(n) {
+                        t.denials.push(denial.clone());
+                    }
+                    j.denials.push(denial);
+                }) {
                     emit(&JobEvent { step: Some(line), ..self.event(&job) });
                 }
             }
@@ -725,14 +878,29 @@ impl Follow {
             .map(|d| Denial { tool: d.tool_name.clone(), detail: steps::denied(&d.tool_name, &d.tool_input, &self.folder) })
             .collect();
         let cost = self.cost_before + r.cost_usd.max(0.0);
+        let turn_cost = self.turn_cost_before + r.cost_usd.max(0.0);
         let unbacked = no_backups(self.edited, manifest.len());
         if unbacked {
             tracing::info!(id = %self.id, "Jobs: files changed with no backups (Claude Code's hooks didn't run)");
         }
+        let n = self.n;
         let job = store::update(&self.id, |j| {
             j.cost = cost;
             if unbacked {
                 j.no_backups = true;
+            }
+            if let Some(t) = j.turn_mut(n) {
+                t.cost = turn_cost;
+                for f in &manifest {
+                    if !t.files.contains(f) {
+                        t.files.push(f.clone());
+                    }
+                }
+                for d in &denials {
+                    if !t.denials.iter().any(|x| x.tool == d.tool && x.detail == d.detail) {
+                        t.denials.push(d.clone());
+                    }
+                }
             }
             for f in manifest {
                 if !j.files.contains(&f) {
@@ -774,9 +942,13 @@ impl Follow {
         if asking != self.asking {
             self.asking = asking;
             let status = if asking { Status::Asking } else { Status::Running };
+            let n = self.n;
             if let Some(job) = store::update(&self.id, |j| {
                 if j.status.live() {
                     j.status = status;
+                }
+                if let Some(t) = j.turn_mut(n).filter(|t| t.status.live()) {
+                    t.status = status;
                 }
             }) {
                 // Asking: a step of its own; answered, the line it was on.
@@ -814,9 +986,11 @@ impl Follow {
         };
         let plan = self.mode == Mode::Plan && status == Status::Done;
         let asks = status == Status::Done && super::consent::asks(&text);
+        let n = self.n;
+        let now = store::now_secs();
         let job = store::update(&self.id, |j| {
             j.status = status;
-            j.ended_ts = store::now_secs();
+            j.ended_ts = now;
             if !text.is_empty() {
                 j.text = text.clone();
             }
@@ -824,10 +998,22 @@ impl Follow {
             j.plan = plan;
             j.asks = asks;
             j.step.clear();
+            if let Some(t) = j.turn_mut(n) {
+                t.status = status;
+                t.ended_ts = now;
+                if !text.is_empty() {
+                    t.text = super::steps::clip(&text, store::TURN_TEXT_MAX);
+                }
+                t.error = error.clone();
+                t.plan = plan;
+                t.asks = asks;
+            }
         });
-        tracing::info!(id = %self.id, status = status.word(), plan, asks, "Jobs: ended");
+        tracing::info!(id = %self.id, turn = n, status = status.word(), plan, asks, "Jobs: ended");
         if let Some(job) = job {
-            emit(&JobEvent { text: Some(job.text.clone()).filter(|t| !t.is_empty()).or(error), cost: Some(job.cost), problem: job.problem.clone(), ..JobEvent::of(&job) });
+            // Its turn's own words (never an earlier turn's).
+            let said = job.turn_list.iter().find(|t| t.n == n).map(|t| t.text.clone()).unwrap_or_else(|| job.text.clone());
+            emit(&JobEvent { text: Some(said).filter(|t| !t.is_empty()).or(error), cost: Some(job.cost), problem: job.problem.clone(), ..JobEvent::at(&job, n) });
         }
         // Its prompts ended with its run: their card on the bar goes.
         super::approve_card::sync();
@@ -872,14 +1058,21 @@ pub fn stop(id: &str) -> Result<Job, String> {
     let job = store::get(id).ok_or("There's no such job.")?;
     match was {
         Was::Queued | Was::Not if job.status.live() => {
+            let now = store::now_secs();
             let job = store::update(id, |j| {
                 j.status = Status::Stopped;
-                j.ended_ts = store::now_secs();
+                j.ended_ts = now;
                 j.step.clear();
+                for t in j.turn_list.iter_mut().filter(|t| t.status.live()) {
+                    t.status = Status::Stopped;
+                    if t.ran() {
+                        t.ended_ts = now;
+                    }
+                }
             })
             .ok_or("There's no such job.")?;
             tracing::info!(id, "Jobs: stopped before it ran");
-            emit(&JobEvent::of(&job));
+            emit(&JobEvent::at(&job, job.turn_list.last().map_or(0, |t| t.n)));
             Ok(job)
         }
         Was::Live(Some(session)) => {
@@ -895,51 +1088,103 @@ pub fn stop(id: &str) -> Result<Job, String> {
     }
 }
 
-/// **A message for job `id`** (the chat's `message_job`, the tab's box):
-/// to it at once while it works, else its next turn on `--resume`. `go`:
-/// a plan's go-ahead (the next turn at the chat's Mode, carrying it out).
+/// **A message for job `id`** (the tab's "Tell the job…"; the chat's
+/// `message_job` through [`follow_up`]): its next turn. `go`: a plan's
+/// go-ahead (the next turn at the chat's Mode, carrying it out).
 pub fn message(id: &str, text: &str, go: bool) -> Result<Job, String> {
-    let text = text.trim();
-    if text.is_empty() {
+    follow_up(id, Ask::of(text, go)).map(|(job, _)| job)
+}
+
+/// **A follow-up for job `id`** (its Code chat's next request, `message_job`,
+/// "Tell the job…"): a turn of its own on the same session —
+///
+/// - while a turn works, **queued as its next turn** (sent once this one
+///   ends: never two jobs, nor two turns, in the folder at once), its tab
+///   showing it waiting ([`FollowedUp::Queued`]);
+/// - a turn about to start, or waiting for a slot, takes it too
+///   ([`FollowedUp::Added`]);
+/// - else its next turn now, on `--resume` ([`FollowedUp::Started`]).
+pub fn follow_up(id: &str, ask: Ask) -> Result<(Job, FollowedUp), String> {
+    let ask = Ask { text: ask.text.trim().to_string(), ..ask };
+    if ask.text.is_empty() {
         return Err("Say what to tell the job.".into());
     }
-    let job = store::get(id).ok_or("There's no such job.")?;
-    match job.status {
-        Status::Running | Status::Asking => {
-            // To it now (its next turn, as Claude Code queues it), or after
-            // the turn it's finishing.
-            let session = with_state(|s| match s.live.get_mut(id) {
-                Some(l) if !l.input_over && l.session.is_some() => {
-                    l.sent += 1;
-                    l.session.clone()
-                }
-                Some(l) => {
-                    l.pending.push(text.to_string());
-                    None
-                }
-                None => None,
-            });
-            if let Some(session) = session {
-                if session.send_user(text, &[]).is_err() {
-                    with_state(|s| {
-                        if let Some(l) = s.live.get_mut(id) {
-                            l.sent = l.sent.saturating_sub(1);
-                            l.pending.push(text.to_string());
-                        }
-                    });
-                }
+    store::get(id).ok_or("There's no such job.")?;
+    enum At {
+        /// Its process is starting: with its first message.
+        Starting,
+        /// Waiting for a slot (its first turn: `true`).
+        InQueue(bool),
+        /// Working: its next turn (the first request waiting: `true`).
+        Working(bool),
+        Not,
+    }
+    let text = ask.text.clone();
+    let at = with_state(|s| {
+        if let Some(l) = s.live.get_mut(id) {
+            if !l.started && l.stopping.is_none() {
+                l.extra.push(text.clone());
+                return At::Starting;
             }
-            tracing::info!(id, "Jobs: a message for the job while it works");
-            emit(&JobEvent { step: Some("Got your message".into()), ..JobEvent::of(&job) });
-            Ok(job)
+            let first = l.pending.is_none();
+            match &mut l.pending {
+                Some(p) => p.merge(ask.clone()),
+                None => l.pending = Some(ask.clone()),
+            }
+            return At::Working(first);
         }
-        Status::Queued => {
-            let job = store::update(id, |j| j.brief = format!("{}\n\nAlso: {text}", j.brief.trim())).ok_or("There's no such job.")?;
-            Ok(job)
+        if let Some(q) = s.queue.iter_mut().find(|(q, _, _)| q == id) {
+            let first = q.1.is_none();
+            if let Some(m) = q.1.as_mut() {
+                *m = format!("{m}\n\nAlso: {text}");
+            }
+            return At::InQueue(first);
         }
-        _ => {
-            resume(id, Next::Message(text.to_string()), go);
-            store::get(id).ok_or_else(|| "There's no such job.".into())
+        At::Not
+    });
+    let added = |j: &mut Job| {
+        if let Some(t) = j.turn_list.last_mut() {
+            t.request = format!("{}\n\n{}", t.request.trim(), text);
+        }
+    };
+    match at {
+        At::Starting => {
+            let job = store::update(id, added).ok_or("There's no such job.")?;
+            tracing::info!(id, "Jobs: a follow-up for the turn starting");
+            Ok((job, FollowedUp::Added))
+        }
+        At::InQueue(first) => {
+            let job = store::update(id, |j| {
+                if first {
+                    j.brief = format!("{}\n\nAlso: {text}", j.brief.trim());
+                }
+                added(j);
+            })
+            .ok_or("There's no such job.")?;
+            tracing::info!(id, "Jobs: a follow-up for the turn waiting for a slot");
+            Ok((job, FollowedUp::Added))
+        }
+        At::Working(first) => {
+            let title = ask.title();
+            let job = store::update(id, |j| {
+                j.keep_turns();
+                if first {
+                    let n = j.turn_list.last().map_or(0, |t| t.n) + 1;
+                    j.turn_list.push(store::TurnNote { n, title: title.clone(), request: text.clone(), message_id: ask.message_id.clone(), status: Status::Queued, ..Default::default() });
+                } else {
+                    added(j);
+                }
+            })
+            .ok_or("There's no such job.")?;
+            let n = job.turn_list.last().map_or(0, |t| t.n);
+            tracing::info!(id, turn = n, "Jobs: a follow-up queued behind the turn working");
+            emit(&JobEvent { queued: Some(title), ..JobEvent::at(&job, n) });
+            Ok((job, FollowedUp::Queued))
+        }
+        At::Not => {
+            let text = ask.text.clone();
+            resume(id, Next::Message(text), &ask, true);
+            Ok((store::get(id).ok_or("There's no such job.")?, FollowedUp::Started))
         }
     }
 }
@@ -952,8 +1197,9 @@ enum Next {
     Message(String),
 }
 
-/// **Continue job `id`** (stopped, interrupted or failed): on `--resume`,
-/// carrying on; one that never ran starts from its brief.
+/// **Continue job `id`** (stopped, interrupted or failed): its turn carried
+/// on, on `--resume` (one that never ran starts from its brief); a request
+/// that was waiting behind it when it stopped is sent instead.
 pub fn continue_job(id: &str) -> Result<Job, String> {
     let job = store::get(id).ok_or("There's no such job.")?;
     if job.status.live() {
@@ -962,43 +1208,101 @@ pub fn continue_job(id: &str) -> Result<Job, String> {
     if job.status == Status::Done {
         return Err("The job is done: send it a message to carry on.".into());
     }
-    resume(id, Next::CarryOn, false);
+    match job.turn_list.last().filter(|t| !t.ran() && t.n > 1) {
+        Some(waiting) => {
+            let text = waiting.request.clone();
+            resume(id, Next::Message(text.clone()), &Ask::of(&text, false), false);
+        }
+        None => resume(id, Next::CarryOn, &Ask::default(), false),
+    }
     store::get(id).ok_or_else(|| "There's no such job.".into())
 }
 
-/// Job `id`'s next turn (`next`), at the mode it runs at now
-/// ([`modes::next_turn`]; `go`: a plan's go-ahead); one that never ran
-/// starts from its brief (with the message added).
-fn resume(id: &str, next: Next, go: bool) {
+/// The model and effort a job's next turn runs at: `ask`'s (the person's
+/// own), else the job's when the person asked for it before, else Settings'
+/// as they are now. Pure.
+pub fn model_for(job: &Job, ask: &Ask, cfg_model: &str, cfg_effort: &str) -> (String, String, bool, bool) {
+    let model_asked = ask.model.is_some() || job.model_asked;
+    let effort_asked = ask.effort.is_some() || job.effort_asked;
+    let model = ask.model.clone().unwrap_or_else(|| if job.model_asked { job.model.clone() } else { cfg_model.to_string() });
+    let effort = ask.effort.clone().unwrap_or_else(|| if job.effort_asked { job.effort.clone() } else { cfg_effort.to_string() });
+    (model, effort, model_asked, effort_asked)
+}
+
+/// Job `id`'s next turn (`next`, as `ask` asks it), at the mode it runs at
+/// now ([`modes::next_turn`], lowered to `ask.mode`), the model and effort
+/// [`model_for`] says and the way Settings pay now; `new_turn`: a turn of
+/// its own (else the newest carries on). One that never ran starts from its
+/// brief (with the message added).
+fn resume(id: &str, next: Next, ask: &Ask, new_turn: bool) {
     let cfg = crate::config::load();
     let Some(job) = store::get(id) else { return };
     let chip = modes::or_auto(&store::mode_of(job.conversation, &cfg.jobs_mode));
     let cap = folders::list().into_iter().find(|f| folders::norm(&f.path) == folders::norm(&job.path)).and_then(|f| f.cap_mode());
     let was_plan = modes::or_auto(&job.mode) == Mode::Plan;
-    let mode = modes::next_turn(modes::or_auto(&job.mode), chip, cap, go, store::bypass_confirmed());
+    let go = ask.go;
+    let mut mode = modes::next_turn(modes::or_auto(&job.mode), chip, cap, go, store::bypass_confirmed());
+    if let Some(lower) = ask.mode {
+        mode = mode.min(lower);
+    }
+    let (model, effort, model_asked, effort_asked) = model_for(&job, ask, &cfg.jobs_model, &cfg.jobs_effort);
+    let pay = if cfg.jobs_pay == "key" { "key" } else { "plan" };
     let ran = job.started_ts > 0 && !job.session.is_empty();
     let body = match &next {
         Next::CarryOn => format!("{CARRY_ON}\n\n{SUMMARY_LINE}"),
         Next::Message(t) if go && was_plan => format!("{t}\n\nGo ahead: carry out the plan. {SUMMARY_LINE}"),
         Next::Message(t) => format!("{t}\n\n{SUMMARY_LINE}"),
     };
+    let title = ask.title();
     let job = store::update(id, |j| {
+        j.keep_turns();
         j.mode = mode.as_str().to_string();
+        j.model = model.clone();
+        j.effort = effort.clone();
+        j.model_asked = model_asked;
+        j.effort_asked = effort_asked;
+        j.pay = pay.to_string();
         j.status = Status::Queued;
         j.undone = false;
         if let (false, Next::Message(t)) = (ran, &next) {
             j.brief = format!("{}\n\n{}", j.brief.trim(), t.trim());
         }
+        if new_turn {
+            let n = j.turn_list.last().map_or(0, |t| t.n) + 1;
+            let text = match &next {
+                Next::Message(t) => t.clone(),
+                Next::CarryOn => CARRY_ON.to_string(),
+            };
+            j.turn_list.push(store::TurnNote { n, title: title.clone(), request: text, message_id: ask.message_id.clone(), ..Default::default() });
+        }
+        if let Some(t) = j.turn_list.last_mut() {
+            t.status = Status::Queued;
+            t.mode = mode.as_str().to_string();
+            t.model = model.clone();
+            t.effort = effort.clone();
+        }
     });
     if let Some(job) = job {
-        tracing::info!(id, mode = mode.as_str(), go, "Jobs: its next turn");
-        emit(&JobEvent { step: Some("Picking up where it left off".into()), ..JobEvent::of(&job) });
+        let n = job.turn_list.last().map_or(0, |t| t.n);
+        tracing::info!(id, turn = n, mode = mode.as_str(), go, new_turn, "Jobs: its next turn");
+        let step = if new_turn || matches!(next, Next::Message(_)) { "Picking up your request" } else { "Picking up where it left off" };
+        emit(&JobEvent { step: Some(step.into()), ..JobEvent::at(&job, n) });
     }
     schedule(id, ran.then_some(body));
 }
 
-/// **Undo job `id`**: every file it changed put back as it was before it,
-/// every file it made deleted (`backup::restore`). Not while it runs.
+/// What Undo said, as the tab's line: "Undone: 2 files put back".
+fn undone_step(report: &claude_live::backup::RestoreReport) -> String {
+    match report.restored.len() + report.deleted.len() {
+        0 => "Undo: nothing to put back".to_string(),
+        1 => "Undone: 1 file put back".to_string(),
+        n => format!("Undone: {n} files put back"),
+    }
+}
+
+/// **Undo job `id`** (Undo all): every file it changed, in every turn not
+/// undone already, put back as it was before its first turn, every file it
+/// made deleted (`backup::restore_all`). Not while it runs.
 pub fn undo(id: &str) -> Result<claude_live::backup::RestoreReport, String> {
     let job = store::get(id).ok_or("There's no such job.")?;
     if job.status.live() {
@@ -1007,20 +1311,85 @@ pub fn undo(id: &str) -> Result<claude_live::backup::RestoreReport, String> {
     if job.swept {
         return Err("Its backups are gone: Yap keeps them 7 days.".into());
     }
-    let dir = store::backup_dir(id).filter(|d| d.is_dir()).ok_or("This job didn't change any files.")?;
-    let report = claude_live::backup::restore(&dir);
+    let undone: Vec<u32> = job.turn_list.iter().filter(|t| t.undone).map(|t| t.n).collect();
+    let all = store::backup_dirs(id);
+    if all.is_empty() {
+        return Err("This job didn't change any files.".into());
+    }
+    let dirs: Vec<PathBuf> = all.iter().filter(|(n, _)| !undone.contains(n)).map(|(_, d)| d.clone()).collect();
+    if dirs.is_empty() {
+        return Err("Its files are back as they were already.".into());
+    }
+    let report = claude_live::backup::restore_all(&dirs);
     if let Some(e) = &report.error {
         return Err(e.clone());
     }
-    let put_back = report.restored.len() + report.deleted.len();
-    tracing::info!(id, restored = report.restored.len(), deleted = report.deleted.len(), failed = report.failed.len(), "Jobs: undone");
-    if let Some(job) = store::update(id, |j| j.undone = true) {
-        let step = match put_back {
-            0 => "Undo: nothing to put back".to_string(),
-            1 => "Undone: 1 file put back".to_string(),
-            n => format!("Undone: {n} files put back"),
-        };
-        emit(&JobEvent { step: Some(step), ..JobEvent::of(&job) });
+    tracing::info!(id, turns = dirs.len(), restored = report.restored.len(), deleted = report.deleted.len(), failed = report.failed.len(), "Jobs: undone");
+    let turns: Vec<u32> = all.iter().map(|(n, _)| *n).collect();
+    if let Some(job) = store::update(id, |j| {
+        j.undone = true;
+        for t in j.turn_list.iter_mut().filter(|t| turns.contains(&t.n)) {
+            t.undone = true;
+        }
+    }) {
+        emit(&JobEvent { step: Some(undone_step(&report)), ..JobEvent::of(&job) });
+    }
+    Ok(report)
+}
+
+/// The later turn of `later` (`(turn, the files it changed)`, oldest first)
+/// that changed one of `files` too, and that file: the reason an earlier
+/// turn can't be undone first. Pure.
+pub fn later_change<'a>(files: &[PathBuf], later: &'a [(u32, Vec<PathBuf>)]) -> Option<(u32, &'a PathBuf)> {
+    later.iter().rev().find_map(|(n, theirs)| theirs.iter().find(|f| files.iter().any(|m| claude_live::backup::same_path(m, f))).map(|f| (*n, f)))
+}
+
+/// **Undo turn `n` of job `id`**: the files that turn changed put back as
+/// they were before it, the files it made deleted. Refused while a later
+/// turn, not undone, changed one of the same files ("Undo the later change
+/// first"). Not while it runs.
+pub fn undo_turn(id: &str, n: u32) -> Result<claude_live::backup::RestoreReport, String> {
+    let job = store::get(id).ok_or("There's no such job.")?;
+    if job.status.live() {
+        return Err("Stop the job first.".into());
+    }
+    if job.swept {
+        return Err("Its backups are gone: Yap keeps them 7 days.".into());
+    }
+    let notes = job.turn_notes();
+    let turn = notes.iter().find(|t| t.n == n).ok_or("There's no such turn.")?;
+    if turn.undone {
+        return Err("That turn's files are back as they were already.".into());
+    }
+    let all = store::backup_dirs(id);
+    let mine: Vec<PathBuf> = all.iter().filter(|(m, _)| *m == n).map(|(_, d)| d.clone()).collect();
+    if mine.is_empty() {
+        return Err("That turn didn't change any files.".into());
+    }
+    let files: Vec<PathBuf> = mine.iter().flat_map(|d| claude_live::backup::originals(d).unwrap_or_default()).collect();
+    let undone = |m: u32| notes.iter().any(|t| t.n == m && t.undone);
+    let later: Vec<(u32, Vec<PathBuf>)> = all.iter().filter(|(m, _)| *m > n && !undone(*m)).map(|(m, d)| (*m, claude_live::backup::originals(d).unwrap_or_default())).collect();
+    if let Some((m, file)) = later_change(&files, &later) {
+        let title = notes.iter().find(|t| t.n == m).map(|t| t.title.clone()).filter(|t| !t.is_empty()).unwrap_or_else(|| "A later turn".into());
+        let shown = steps::shown_path(&file.to_string_lossy(), std::path::Path::new(&job.path));
+        tracing::info!(id, turn = n, later = m, "Jobs: undo refused: a later turn changed the same file");
+        return Err(format!("Undo the later change first: “{title}” changed {shown} too."));
+    }
+    let report = claude_live::backup::restore_all(&mine);
+    if let Some(e) = &report.error {
+        return Err(e.clone());
+    }
+    tracing::info!(id, turn = n, restored = report.restored.len(), deleted = report.deleted.len(), failed = report.failed.len(), "Jobs: a turn undone");
+    let with_backups: Vec<u32> = all.iter().map(|(m, _)| *m).collect();
+    if let Some(job) = store::update(id, |j| {
+        j.keep_turns();
+        if let Some(t) = j.turn_mut(n) {
+            t.undone = true;
+        }
+        // Every turn with backups undone: the job is.
+        j.undone = with_backups.iter().all(|m| j.turn_list.iter().any(|t| t.n == *m && t.undone));
+    }) {
+        emit(&JobEvent { step: Some(undone_step(&report)), ..JobEvent::at(&job, n) });
     }
     Ok(report)
 }
@@ -1051,8 +1420,7 @@ pub fn shutdown() {
     for (id, session) in &live {
         store::update(id, |j| {
             if j.status.live() {
-                j.status = Status::Interrupted;
-                j.ended_ts = now;
+                store::interrupt(j, now);
             }
         });
         if let Some(s) = session {
@@ -1062,10 +1430,7 @@ pub fn shutdown() {
     // Queued ones too.
     let queued: Vec<String> = store::list().into_iter().filter(|j| j.status.live()).map(|j| j.id).collect();
     for id in &queued {
-        store::update(id, |j| {
-            j.status = Status::Interrupted;
-            j.ended_ts = now;
-        });
+        store::update(id, |j| store::interrupt(j, now));
     }
     if !live.is_empty() || !queued.is_empty() {
         tracing::info!(running = live.len(), queued = queued.len(), "Jobs: interrupted as Yap quits");
@@ -1211,5 +1576,235 @@ mod tests {
         assert_eq!(write_kind(true, Some(State::Created)), "rewrite");
         // No backups made: Yap can't tell.
         assert_eq!(write_kind(false, None), "write");
+    }
+
+    // ---- turns ----
+
+    use store::TurnNote;
+
+    fn turn(n: u32, title: &str, files: &[&str]) -> TurnNote {
+        TurnNote { n, title: title.into(), status: Status::Done, started_ts: n as u64, ended_ts: n as u64, files: files.iter().map(|f| f.to_string()).collect(), ..Default::default() }
+    }
+
+    /// A turn's backups as the backup hook leaves them (`n` 0: an older
+    /// job's, right in `backup/`): each file with its text before the turn,
+    /// or `None`, the turn made it.
+    fn backed_up(id: &str, n: u32, files: &[(&std::path::Path, Option<&str>)]) {
+        use claude_live::backup::{Entry, Manifest, State as B, MANIFEST};
+        let dir = if n == 0 { store::backup_dir(id).unwrap() } else { store::turn_backup_dir(id, n).unwrap() };
+        std::fs::create_dir_all(&dir).unwrap();
+        let mut m = Manifest::default();
+        for (i, (path, before)) in files.iter().enumerate() {
+            let name = format!("{:04}-{}", i + 1, path.file_name().unwrap().to_string_lossy());
+            let (state, backup) = match before {
+                Some(text) => {
+                    std::fs::write(dir.join(&name), text).unwrap();
+                    (B::Copied, name)
+                }
+                None => (B::Created, String::new()),
+            };
+            m.files.push(Entry { original: path.to_path_buf(), state, backup, bytes: 0, tool: "Edit".into(), ts: 0, note: String::new() });
+        }
+        std::fs::write(dir.join(MANIFEST), serde_json::to_vec(&m).unwrap()).unwrap();
+    }
+
+    fn read(p: &std::path::Path) -> String {
+        std::fs::read_to_string(p).unwrap()
+    }
+
+    fn workspace() -> PathBuf {
+        let folder = std::env::temp_dir().join(format!("yap-job-turns-{}", store::new_id()));
+        std::fs::create_dir_all(&folder).unwrap();
+        folder
+    }
+
+    #[test]
+    fn a_request_while_a_turn_works_queues_as_its_next_turn() {
+        let id = store::new_id();
+        store::insert(Job {
+            id: id.clone(),
+            folder: "garden-planner".into(),
+            path: r"D:\Projects\garden-planner".into(),
+            status: Status::Running,
+            started_ts: 5,
+            session: "4d7c1d2e-8a51-4c3b-9f0e-2b6a7e1c5d90".into(),
+            turn_list: vec![TurnNote { status: Status::Running, ..turn(1, "Add a watering schedule", &[]) }],
+            ..Default::default()
+        });
+        with_state(|s| {
+            let mut l = Live::new(folders::norm(r"D:\Projects\garden-planner"));
+            l.started = true;
+            s.live.insert(id.clone(), l);
+        });
+        let (job, how) = follow_up(&id, Ask { text: "Add a minimap button as well.".into(), message_id: Some("chat:4:2".into()), mode: Some(Mode::Plan), ..Default::default() }).unwrap();
+        assert_eq!(how, FollowedUp::Queued);
+        assert_eq!(job.status, Status::Running, "the turn working carries on");
+        assert_eq!(job.turn_list.len(), 2);
+        let next = &job.turn_list[1];
+        assert_eq!((next.n, next.status, next.title.as_str(), next.message_id.as_deref()), (2, Status::Queued, "Add a minimap button as well", Some("chat:4:2")));
+        assert!(!next.ran());
+        // Another while it still works: the same next turn, its words added.
+        let (job, how) = follow_up(&id, Ask::of("And a legend for it.", false)).unwrap();
+        assert_eq!(how, FollowedUp::Queued);
+        assert_eq!(job.turn_list.len(), 2, "never a third turn, nor a second job");
+        assert_eq!(job.turn_list[1].request, "Add a minimap button as well.\n\nAnd a legend for it.");
+        let pending = with_state(|s| s.live.get(&id).and_then(|l| l.pending.clone())).unwrap();
+        assert_eq!(pending.text, "Add a minimap button as well.\n\nAnd a legend for it.");
+        assert_eq!(pending.mode, Some(Mode::Plan), "the lower mode asked kept");
+        assert_eq!(pending.message_id.as_deref(), Some("chat:4:2"));
+        with_state(|s| s.live.remove(&id));
+        assert!(follow_up(&id, Ask::of("   ", false)).is_err());
+
+        // Words while its process starts: with its first message, the same turn.
+        let starting = store::new_id();
+        store::insert(Job { id: starting.clone(), status: Status::Queued, turn_list: vec![TurnNote { status: Status::Queued, request: "Tidy notes.md.".into(), ..turn(1, "Tidy notes.md", &[]) }], ..Default::default() });
+        with_state(|s| s.live.insert(starting.clone(), Live::new("x".into())));
+        let (job, how) = follow_up(&starting, Ask::of("Keep the headings.", false)).unwrap();
+        assert_eq!(how, FollowedUp::Added);
+        assert_eq!(job.turn_list.len(), 1);
+        assert_eq!(job.turn_list[0].request, "Tidy notes.md.\n\nKeep the headings.");
+        assert_eq!(with_state(|s| s.live.remove(&starting).map(|l| l.extra)), Some(vec!["Keep the headings.".to_string()]));
+    }
+
+    #[test]
+    fn a_follow_ups_ask_merges_and_its_model_follows_settings_unless_asked() {
+        let mut a = Ask { text: "Add a minimap.".into(), mode: Some(Mode::Auto), ..Default::default() };
+        a.merge(Ask { text: "Go ahead.".into(), go: true, mode: Some(Mode::Plan), model: Some("claude-opus-5-5".into()), ..Default::default() });
+        assert_eq!((a.text.as_str(), a.go, a.mode, a.model.as_deref()), ("Add a minimap.\n\nGo ahead.", true, Some(Mode::Plan), Some("claude-opus-5-5")));
+        assert_eq!(Ask::of("Add a minimap button to the map view. It shows the beds.", false).title(), "Add a minimap button to the map view");
+        // Settings' model and effort as they are now…
+        let job = Job { model: "claude-sonnet-5-5".into(), effort: "medium".into(), ..Default::default() };
+        assert_eq!(model_for(&job, &Ask::default(), "claude-haiku-5-5", "high"), ("claude-haiku-5-5".into(), "high".into(), false, false));
+        // …the person's own for this turn…
+        let opus = Ask { model: Some("claude-opus-5-5".into()), ..Default::default() };
+        assert_eq!(model_for(&job, &opus, "claude-haiku-5-5", "high"), ("claude-opus-5-5".into(), "high".into(), true, false));
+        // …and kept for the turns after, once they asked.
+        let asked = Job { model: "claude-opus-5-5".into(), model_asked: true, ..job };
+        assert_eq!(model_for(&asked, &Ask::default(), "claude-haiku-5-5", "high").0, "claude-opus-5-5");
+    }
+
+    #[test]
+    fn an_earlier_turn_waits_for_a_later_one_that_changed_the_same_file() {
+        let notes = PathBuf::from(r"D:\Projects\garden-planner\notes.md");
+        let map = PathBuf::from(r"D:\Projects\garden-planner\map.js");
+        let later = vec![(2, vec![map.clone()]), (3, vec![PathBuf::from(r"d:\projects\garden-planner\NOTES.md")])];
+        assert_eq!(later_change(&[notes.clone()], &later).map(|(n, _)| n), Some(3), "the same file, however it's written");
+        assert_eq!(later_change(&[PathBuf::from(r"D:\Projects\garden-planner\beds.json")], &later), None);
+        assert_eq!(later_change(&[notes], &[]), None);
+    }
+
+    #[test]
+    fn each_turn_undoes_on_its_own_and_undo_all_goes_back_before_the_first() {
+        let folder = workspace();
+        let (notes, map) = (folder.join("notes.md"), folder.join("minimap.js"));
+        // Turn 1 changed notes.md (v0 → v1); turn 2 changed it again (v1 →
+        // v2) and made minimap.js.
+        let setup = |id: &str| {
+            store::insert(Job {
+                id: id.into(),
+                folder: "garden-planner".into(),
+                path: folder.to_string_lossy().into_owned(),
+                status: Status::Done,
+                started_ts: 1,
+                files: vec!["notes.md".into(), "minimap.js".into()],
+                turn_list: vec![turn(1, "Add a watering schedule", &["notes.md"]), turn(2, "Add a minimap button", &["notes.md", "minimap.js"])],
+                ..Default::default()
+            });
+            backed_up(id, 1, &[(&notes, Some("v0"))]);
+            backed_up(id, 2, &[(&notes, Some("v1")), (&map, None)]);
+            std::fs::write(&notes, "v2").unwrap();
+            std::fs::write(&map, "map").unwrap();
+        };
+        let a = store::new_id();
+        setup(&a);
+        assert_eq!(store::backup_dirs(&a).iter().map(|(n, _)| *n).collect::<Vec<_>>(), [1, 2]);
+        // The earlier turn first: refused, the later one named.
+        assert_eq!(undo_turn(&a, 1).unwrap_err(), "Undo the later change first: “Add a minimap button” changed notes.md too.");
+        assert_eq!(read(&notes), "v2", "nothing touched");
+        // The later turn: its own files, as they were before it.
+        let r = undo_turn(&a, 2).unwrap();
+        assert_eq!((r.restored.len(), r.deleted.len()), (1, 1));
+        assert_eq!(read(&notes), "v1");
+        assert!(!map.exists());
+        let j = store::get(&a).unwrap();
+        assert!(j.turn_list[1].undone && !j.turn_list[0].undone && !j.undone);
+        assert!(undo_turn(&a, 2).is_err(), "undone already");
+        assert!(undo_turn(&a, 9).is_err());
+        // Now the earlier one goes too: every turn undone, the job is.
+        undo_turn(&a, 1).unwrap();
+        assert_eq!(read(&notes), "v0");
+        assert!(store::get(&a).unwrap().undone);
+
+        // Undo all: back to before its first turn, in one go.
+        let b = store::new_id();
+        setup(&b);
+        let r = undo(&b).unwrap();
+        assert_eq!(read(&notes), "v0");
+        assert!(!map.exists());
+        assert_eq!(r.restored.len(), 1, "notes.md once, from its earliest backup");
+        let j = store::get(&b).unwrap();
+        assert!(j.undone && j.turn_list.iter().all(|t| t.undone));
+        assert!(undo(&b).is_err(), "nothing left to undo");
+        // An undone turn is left out of Undo all.
+        let c = store::new_id();
+        setup(&c);
+        undo_turn(&c, 2).unwrap();
+        std::fs::write(&notes, "edited by hand").unwrap();
+        undo(&c).unwrap();
+        assert_eq!(read(&notes), "v0");
+        // Never while it runs.
+        let d = store::new_id();
+        setup(&d);
+        store::update(&d, |j| j.status = Status::Running);
+        assert_eq!(undo(&d).unwrap_err(), "Stop the job first.");
+        assert_eq!(undo_turn(&d, 2).unwrap_err(), "Stop the job first.");
+        let _ = std::fs::remove_dir_all(folder);
+    }
+
+    #[test]
+    fn an_older_jobs_single_backup_is_its_turn_one() {
+        let folder = workspace();
+        let notes = folder.join("notes.md");
+        // From before turns: one backup, right in backup/, no turns kept.
+        let id = store::new_id();
+        store::insert(Job { id: id.clone(), folder: "garden-planner".into(), path: folder.to_string_lossy().into_owned(), brief: "Tidy notes.md.".into(), status: Status::Done, started_ts: 1, turns: 2, files: vec!["notes.md".into()], ..Default::default() });
+        backed_up(&id, 0, &[(&notes, Some("v0"))]);
+        std::fs::write(&notes, "v1").unwrap();
+        assert_eq!(store::backup_dirs(&id).iter().map(|(n, _)| *n).collect::<Vec<_>>(), [1]);
+        let j = store::get(&id).unwrap();
+        assert!(j.turn_list.is_empty());
+        assert_eq!(j.turn_notes().iter().map(|t| (t.n, t.title.as_str())).collect::<Vec<_>>(), [(1, "Tidy notes.md")]);
+        undo_turn(&id, 1).unwrap();
+        assert_eq!(read(&notes), "v0");
+        assert!(store::get(&id).unwrap().undone);
+        // Undo all, as Undo job did.
+        let again = store::new_id();
+        store::insert(Job { id: again.clone(), path: folder.to_string_lossy().into_owned(), status: Status::Done, files: vec!["notes.md".into()], ..Default::default() });
+        backed_up(&again, 0, &[(&notes, Some("v0"))]);
+        std::fs::write(&notes, "v1").unwrap();
+        undo(&again).unwrap();
+        assert_eq!(read(&notes), "v0");
+        // Its turn 1 carried on since (a backup/1/ of its own): the older copy wins.
+        let both = store::new_id();
+        store::insert(Job { id: both.clone(), path: folder.to_string_lossy().into_owned(), status: Status::Done, ..Default::default() });
+        backed_up(&both, 0, &[(&notes, Some("v0"))]);
+        backed_up(&both, 1, &[(&notes, Some("v1"))]);
+        std::fs::write(&notes, "v2").unwrap();
+        assert_eq!(store::backup_dirs(&both).iter().map(|(n, _)| *n).collect::<Vec<_>>(), [1, 1]);
+        undo_turn(&both, 1).unwrap();
+        assert_eq!(read(&notes), "v0");
+        let _ = std::fs::remove_dir_all(folder);
+    }
+
+    #[test]
+    fn a_turns_events_say_which_turn() {
+        let job = Job { id: "ab12".into(), turn_list: vec![turn(1, "a", &[]), TurnNote { status: Status::Queued, ..turn(2, "b", &[]) }], ..Default::default() };
+        // The newest that ran (the next one is waiting).
+        let job = Job { turn_list: vec![job.turn_list[0].clone(), TurnNote { started_ts: 0, ..job.turn_list[1].clone() }], ..job };
+        assert_eq!(JobEvent::of(&job).turn, Some(1));
+        assert_eq!(JobEvent::at(&job, 2).turn, Some(2));
+        assert_eq!(JobEvent::of(&Job::default()).turn, None, "an older job's: none");
+        let v = serde_json::to_value(JobEvent { queued: Some("Add a minimap".into()), ..JobEvent::at(&job, 2) }).unwrap();
+        assert_eq!((v["turn"].as_u64(), v["queued"].as_str()), (Some(2), Some("Add a minimap")));
     }
 }

@@ -34,7 +34,8 @@ export function questionParts(c) {
     case 'enter':
       return { lead: 'Yap wants to press Enter in', quoted: c.label, then: '' };
     case 'job':
-      return { lead: 'Yap wants to start a job in', quoted: c.label, then: c.job?.modeLabel ? ` (${c.job.modeLabel})` : '' };
+      // A follow-up for the chat's job (its next turn), or a new job.
+      return { lead: c.job?.continues ? 'Yap wants to carry on the job in' : 'Yap wants to start a job in', quoted: c.label, then: c.job?.modeLabel ? ` (${c.job.modeLabel})` : '' };
     default:
       return { lead: 'Yap wants to press', quoted: c?.label || '', then: '' };
   }

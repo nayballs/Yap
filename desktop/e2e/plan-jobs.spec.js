@@ -126,11 +126,11 @@ const JOB = [
 /** The report's one question on the plan (no tools): the chat model's words. */
 const ASK = [{ _for: 'ask' }, { _wait_user: true }, initOf([], 'default'), result(REPORT), { _wait_user: true }];
 
-/** A script: the plan chat's turns, then the job and the report. */
-function script(name, chatTurns) {
+/** A script: the plan chat's turns, then the job (each of its turns plays it) and the report. */
+function script(name, chatTurns, job = JOB) {
   fs.mkdirSync(SCRIPTS, { recursive: true });
   const file = path.join(SCRIPTS, `${name}.jsonl`);
-  const lines = [{ _for: 'chat' }, ...chatTurns.flat(), { _wait_user: true }, ...JOB, ...ASK];
+  const lines = [{ _for: 'chat' }, ...chatTurns.flat(), { _wait_user: true }, ...job, ...ASK];
   fs.writeFileSync(file, lines.map((l) => JSON.stringify(l)).join('\n') + '\n');
   return file;
 }
@@ -157,13 +157,18 @@ const test = base.extend({
   ],
 });
 
+/** The job with each turn's Claude Code arguments written to `file` (the stand-in's `_dump_args`). */
+const jobDumping = (file) => [JOB[0], JOB[1], { _dump_args: file }, ...JOB.slice(2)];
+const argsIn = (file) => (fs.existsSync(file) ? fs.readFileSync(file, 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l).args) : []);
+const flagValue = (args, flag) => (args.includes(flag) ? args[args.indexOf(flag) + 1] : undefined);
+
 const thread = (main) => main.locator('.msgs');
 const lastAnswer = (main) => thread(main).locator('.cbubble.assistant').last();
 const chipsOfLast = (main) => thread(main).locator('.toolchips').last().locator('.toolchip');
 const spoken = async (yap) => (await yap.invoke('tts_e2e_spoken')).map((s) => s.text);
 const ask = (yap, text) => yap.invoke('e2e_assistant_ask', { text, listenMs: 0 });
 const jobs = (yap) => yap.invoke('job_list');
-const play = (yap, name, chatTurns) => yap.invoke('e2e_claude_script', { script: script(name, chatTurns) });
+const play = (yap, name, chatTurns, job = JOB) => yap.invoke('e2e_claude_script', { script: script(name, chatTurns, job) });
 
 async function send(main, text) {
   await main.getByRole('textbox', { name: 'Message' }).fill(text);
@@ -358,4 +363,49 @@ test('a Code chat on the plan: a job asked without naming its workspace runs the
   expect(await yap.invoke('job_chat_folder_get', { conversation: job.conversation })).toMatchObject({ name: 'garden-planner', path: GARDEN });
   expect(yap.readJson('jobs.json').codeChats[String(job.conversation)].path).toBe(GARDEN);
   await messagesOf(yap, job.conversation, 4);
+});
+
+test('a Code chat on the plan: its follow-up carries the chat’s job on, its next turn on --resume', async ({ yap, main }) => {
+  // One job per Code chat, on the plan too: the plan's own Claude Code calls
+  // start_job for the follow-up, and the tool loop's code makes it the job's
+  // next turn (jobs-turns.spec.js has the tool loop's own).
+  const ARGS = path.join(HERE, 'plan-turns-args.jsonl');
+  fs.rmSync(ARGS, { force: true });
+  await play(
+    yap,
+    'code-chat-turns',
+    [
+      turn(yapCall('m1', 'toolu_job', 'start_job', { brief: 'Change Draft to Final in notes.md.', title: 'Change Draft to Final' }), answers('m2', STARTED)),
+      turn(yapCall('m3', 'toolu_more', 'start_job', { brief: 'Add a minimap button for the beds.', title: 'Add a minimap button' }), answers('m4', "On it: I've passed that to the job in garden-planner.")),
+    ],
+    jobDumping(ARGS)
+  );
+  const before = (await jobs(yap)).length;
+  await openView(main, 'Chat');
+  await newCodeChat(main, 'garden-planner');
+  await send(main, 'Change Draft to Final in notes.md.');
+  await expect(chipsOfLast(main)).toHaveText(['Started a job in garden-planner'], { timeout: 20_000 });
+  const job = await ended(yap, (await newJob(yap, before)).id);
+  await messagesOf(yap, job.conversation, 4);
+
+  await send(main, 'could you add a minimap button for it as well?');
+  await expect(chipsOfLast(main)).toHaveText(['Continued the job in garden-planner'], { timeout: 20_000 });
+  await expect.poll(async () => (await jobs(yap)).find((j) => j.id === job.id).turnList?.[1]?.status, { timeout: 30_000 }).toBe('done');
+  const again = await ended(yap, job.id);
+  // One job, two turns, one session: the second resumed the first.
+  expect((await jobs(yap)).length).toBe(before + 1);
+  expect(again.turnList.map((t) => [t.n, t.title, t.status])).toEqual([
+    [1, 'Change Draft to Final', 'done'],
+    [2, 'Add a minimap button', 'done'],
+  ]);
+  const args = argsIn(ARGS);
+  expect(args).toHaveLength(2);
+  expect(flagValue(args[0], '--session-id')).toBe(job.session);
+  expect(flagValue(args[1], '--resume')).toBe(job.session);
+  // A report a turn, the plan's way.
+  const messages = await messagesOf(yap, job.conversation, 8);
+  expect(messages.map((m) => m.kind ?? '')).toEqual(['', '', 'jobReport', '', '', '', 'jobReport', '']);
+  expect(messages[7].text).toBe(REPORT);
+  // Its tab: the job's two turns.
+  await expect(main.getByTestId('chat-job')).toHaveAttribute('data-turns', '2');
 });

@@ -5,8 +5,9 @@
   // and answers in its own words right after. Drawn as a compact job card,
   // not a question: "Job done · garden-planner" (or didn't finish, has a
   // question, its plan is ready), what it changed in a line, and Open, the
-  // job's tab. Its own small chunk.
-  import { reportTitle, reportFolder, jobOfReport, statusTone } from '../../core/jobs.js';
+  // job's tab at that report's turn (a job reports each turn: one tab a
+  // job). Its own small chunk.
+  import { reportTitle, reportFolder, jobOfReport, turnOfReport, statusTone } from '../../core/jobs.js';
   import { jobs } from '../../stores/jobs.svelte.js';
 
   /** `m`: the marker message (its `id` "chat:<conv>:<i>", its `text`); `conversation`: the chat's id; `onopen(job)`. */
@@ -14,22 +15,25 @@
 
   const folder = $derived(reportFolder(m.text));
   const job = $derived(jobOfReport(jobs.list, m.id, conversation, folder));
-  // Its latest report says it as the job is; an earlier one, as it was then.
+  // The turn it reports: said as that turn is (each has its own report);
+  // a job from before turns, its latest report as the job is.
+  const turn = $derived(turnOfReport(job, m.id));
   const latest = $derived(!!job && job.reportMessageId === m.id);
-  const title = $derived(reportTitle(latest ? job : null, m.text));
-  const tone = $derived(latest ? statusTone(job.status) : /didn't finish/.test(title) ? 'failed' : 'done');
+  const as = $derived(turn ?? (latest ? job : null));
+  const title = $derived(reportTitle(as, m.text));
+  const tone = $derived(as ? statusTone(as.status) : /didn't finish/.test(title) ? 'failed' : 'done');
   // What it changed, in a line (the marker's own "Files it changed: …").
   const changed = $derived((/^Files it changed: (.+)$/m.exec(m.text || '')?.[1] ?? '').replace(/\s*\(backed up first\)\.?$/, ''));
 </script>
 
-<div class="jobreport" role="note" aria-label={`${title} · ${job?.folder || folder}`} data-testid="chat-job-report" data-msg-id={m.id || undefined}>
+<div class="jobreport" role="note" aria-label={`${title} · ${job?.folder || folder}`} data-testid="chat-job-report" data-msg-id={m.id || undefined} data-turn={turn?.n ?? undefined}>
   <span class="jdot tone-{tone}" aria-hidden="true"></span>
   <div class="jtext">
     <p class="jtitle">{title} · <span class="jfolder">{job?.folder || folder || 'a folder'}</span></p>
     {#if changed}<p class="jline">Changed {changed}</p>{/if}
   </div>
   {#if job}
-    <button type="button" class="jopen" onclick={() => onopen?.(job)} aria-label={`Open the job in ${job.folder}`}>Open</button>
+    <button type="button" class="jopen" onclick={() => onopen?.({ ...job, turn: turn?.n ?? null })} aria-label={`Open the job in ${job.folder}`}>Open</button>
   {/if}
 </div>
 

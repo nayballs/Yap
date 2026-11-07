@@ -3516,4 +3516,4 @@ own Claude Code in one of their folders, and reports back when it ends.
     the Code side's list (`RunningJobs.svelte`).
   - A report reloads the open chat without switching to it
     (`stores/jobs.svelte.js`).
-- E2E: `jobs.spec.js`, `jobs-ui.spec.js`, `plan-jobs.spec.js`, `jobs-code-chats.spec.js` ([`docs/e2e-tests.md`](../e2e-tests.md)).
+- E2E: `jobs.spec.js`, `jobs-ui.spec.js`, `plan-jobs.spec.js`, `jobs-code-chats.spec.js`, `jobs-turns.spec.js` ([`docs/e2e-tests.md`](../e2e-tests.md)).

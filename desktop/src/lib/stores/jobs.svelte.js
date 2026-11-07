@@ -71,8 +71,10 @@ function onJob(ev) {
     if (typeof ev.cost === 'number') next.cost = ev.cost;
     if (ev.problem) next.problem = ev.problem;
     jobs.list = jobs.list.map((j, k) => (k === i ? next : j));
-    // Over now, or started again: its times, words and denials as saved.
-    if (was.status !== next.status) refreshSoon();
+    // Over now, or started again — or a turn new to this window (a
+    // follow-up, one queued behind the turn working): as saved.
+    const newTurn = Number.isInteger(ev.turn) && !(was.turnList || []).some((t) => t.n === ev.turn);
+    if (was.status !== next.status || newTurn || ev.queued) refreshSoon();
   }
   if (!isLive(ev.status)) {
     if (jobs.steps[ev.id]) jobs.steps = Object.fromEntries(Object.entries(jobs.steps).filter(([k]) => k !== ev.id));

@@ -111,6 +111,8 @@ pub struct JobCard {
     /// Asked because the chat read the web (a page could have slipped
     /// words into the brief).
     pub web: bool,
+    /// A follow-up for the chat's job (its next turn), not a new job.
+    pub continues: bool,
 }
 
 impl Card {

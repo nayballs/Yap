@@ -609,16 +609,19 @@ test('a plain chat that names a workspace becomes a Code chat, Chat follows it, 
   await expect(row(main, conversation)).toBeVisible();
   await shot(main, '09-plain-chat-moved-to-code-light');
 
-  // Its next request needn't name the workspace.
+  // Its next request needn't name the workspace: it carries the chat's job
+  // on, its next turn (one job per Code chat: jobs-turns.spec.js).
   fakeLlm.scriptChat([
     { tools: [{ name: 'start_job', args: { brief: 'Fix the headings in notes.md.' } }] },
-    { content: STARTED },
+    { content: "On it: I've passed that to the job in garden-planner." },
     { plain: true, content: 'It fixed the headings.' },
   ]);
   await send(main, 'Now fix the headings in notes.md.');
-  await expect(chipsOfLast(main)).toHaveText(['Started a job in garden-planner']);
-  const second = await ended(yap, (await newJob(yap, before + 1)).id);
-  expect(second).toMatchObject({ folder: 'garden-planner', path: GARDEN, conversation });
+  await expect(chipsOfLast(main)).toHaveText(['Continued the job in garden-planner']);
+  await expect.poll(async () => (await jobs(yap)).find((j) => j.id === first.id).turnList?.length, { timeout: 20_000 }).toBe(2);
+  const second = await ended(yap, first.id);
+  expect(second).toMatchObject({ folder: 'garden-planner', path: GARDEN, conversation, turns: 2 });
+  expect(second.turnList[1].request).toBe('Fix the headings in notes.md.');
   await messagesOf(yap, conversation, 8);
 
   // Plain chat (the chip's picker): back to the Chat side, nothing job-like.
@@ -641,7 +644,7 @@ test('a plain chat that names a workspace becomes a Code chat, Chat follows it, 
   const told = JSON.parse(fakeLlm.requests.at(-1).messages.filter((m) => m.role === 'tool').at(-1).content);
   expect(told.error).toContain('no folder was named');
   expect(told.error).toContain('never guess one');
-  expect((await jobs(yap)).length).toBe(before + 2);
+  expect((await jobs(yap)).length).toBe(before + 1);
   const last = fakeLlm.requests.filter((r) => r.tools.includes('start_job')).at(-1);
   expect(JSON.stringify(last.messages)).not.toContain(CODE_LINE);
 });
