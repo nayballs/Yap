@@ -117,9 +117,15 @@ pub fn became(conversation: u64, path: &str) {
 
 /// **A conversation deleted** (Chat's delete): it's no Code chat any more.
 /// A later conversation may get its id (ids are the highest plus one), and
-/// it mustn't start as one: a Code chat keeps Yap's memory out.
+/// it mustn't start as one: a Code chat keeps Yap's memory out. Nor may it
+/// carry on the deleted chat's job (one job per Code chat), nor take its
+/// reports: its jobs keep no chat (`store::detach`).
 pub fn chat_deleted(conversation: u64) {
     set(conversation, None);
+    let detached = store::detach(conversation);
+    if detached > 0 {
+        tracing::info!(jobs = detached, "Jobs: a chat deleted, its jobs keep no chat");
+    }
 }
 
 /// **A folder removed** (Settings → Jobs): its chats are plain again, every
@@ -253,6 +259,24 @@ mod tests {
     }
 
     #[test]
+    fn its_prompt_names_the_chats_job_which_a_follow_up_continues() {
+        let garden = folder("garden-planner", 1);
+        assert_eq!(job_line_in(Some(61), &garden), None, "no job yet: nothing to say");
+        store::insert(store::Job { id: "ff66".into(), path: garden.path.clone(), conversation: Some(61), status: store::Status::Done, ..Default::default() });
+        store::insert(store::Job { id: "gg77".into(), path: r"D:\Projects\recipe-box".into(), conversation: Some(61), status: store::Status::Running, created_ts: 9, ..Default::default() });
+        // This chat's job in that workspace, never another's.
+        assert_eq!(job_line_in(Some(61), &garden).unwrap(), "This chat's job there (id ff66) is done, after 1 turn: the user's next request there continues it.");
+        assert_eq!(job_line_in(Some(62), &garden), None);
+        let two = store::Job {
+            status: store::Status::Running,
+            turn_list: vec![store::TurnNote { n: 1, ..Default::default() }, store::TurnNote { n: 2, ..Default::default() }],
+            ..store::get("gg77").unwrap()
+        };
+        assert!(job_line(&two).contains("is working now (a request waits for its next turn), after 2 turns"));
+        assert!(prompt_line_for(&garden).contains("each follow-up continues that job as its next turn"));
+    }
+
+    #[test]
     fn the_workspaces_most_recently_used_first() {
         let all = vec![folder("garden-planner", 10), folder("recipe-box", 20), folder("book-shelf", 5)];
         let mut chats = BTreeMap::new();
@@ -301,8 +325,22 @@ mod tests {
         assert_eq!(folder_of(Some(6)), Some(recipes.clone()));
         // A chat deleted: no Code chat (a later one may get its id).
         set(8, Some(&recipes));
+        store::insert(store::Job {
+            id: "hh88".into(),
+            path: recipes.path.clone(),
+            conversation: Some(8),
+            message_id: Some("chat:8:0".into()),
+            report_message_id: Some("chat:8:2".into()),
+            turn_list: vec![store::TurnNote { n: 1, message_id: Some("chat:8:0".into()), report_message_id: Some("chat:8:2".into()), ..Default::default() }],
+            ..Default::default()
+        });
         chat_deleted(8);
         assert_eq!(folder_of(Some(8)), None);
+        // …nor carry on its job, nor take its reports: the job keeps no chat.
+        assert_eq!(job_line_in(Some(8), &recipes), None);
+        let kept = store::get("hh88").unwrap();
+        assert_eq!((kept.conversation, kept.message_id, kept.report_message_id), (None, None, None));
+        assert_eq!((kept.turn_list[0].message_id.clone(), kept.turn_list[0].report_message_id.clone()), (None, None));
         // A folder no longer a job folder (removed some other way): plain.
         assert!(folders::remove(&recipes.name));
         assert_eq!(folder_of(Some(6)), None);

@@ -602,6 +602,29 @@ pub fn of_conversation(conversation: u64) -> Vec<Job> {
     list().into_iter().filter(|j| j.conversation == Some(conversation)).collect()
 }
 
+/// **A chat deleted**: its jobs keep no chat (a later conversation may get
+/// its id, and must never carry them on or take their reports). How many.
+pub fn detach(conversation: u64) -> usize {
+    with_store(|s| {
+        let mut n = 0;
+        for j in s.jobs.iter_mut().filter(|j| j.conversation == Some(conversation)) {
+            // (Its messages' ids would name the new chat's.)
+            j.conversation = None;
+            j.message_id = None;
+            j.report_message_id = None;
+            for t in j.turn_list.iter_mut() {
+                t.message_id = None;
+                t.report_message_id = None;
+            }
+            n += 1;
+        }
+        if n > 0 {
+            save(s);
+        }
+        n
+    })
+}
+
 // ---- each chat's Mode ----
 
 /// The Mode chip's mode for `conversation` (`default` when it was never set).

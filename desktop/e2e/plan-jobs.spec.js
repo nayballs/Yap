@@ -374,6 +374,9 @@ test('a Code chat on the plan: a job asked without naming its workspace runs the
   expect(await yap.invoke('job_chat_folder_get', { conversation: job.conversation })).toMatchObject({ name: 'garden-planner', path: GARDEN });
   expect(yap.readJson('jobs.json').codeChats[String(job.conversation)].path).toBe(GARDEN);
   await messagesOf(yap, job.conversation, 4);
+  // Its warm session works in the workspace (Windows keeps a folder a process
+  // works in): the chat deleted ends it, so the next test's fresh folder can go.
+  await yap.invoke('chat_delete', { id: job.conversation });
 });
 
 test('a Code chat on the plan: its follow-up carries the chat’s job on, its next turn on --resume', async ({ yap, main }) => {
