@@ -24,6 +24,9 @@
 //! - [`consent`]: the person's own words ask for it (as opening an app).
 //! - [`voice`]: the Voice Assistant asks out loud before a job that needs
 //!   asking; the next question is the answer.
+//! - [`code_chat`]: Code chats — a conversation attached to one job folder
+//!   (a "workspace" in the UI), kept in `jobs.json`; there the folder
+//!   defaults to the chat's and the person's own request is enough.
 //! - [`commands`]: the page's commands (the Jobs UI).
 //! - [`approve_card`]: a running job's permission prompt on the Yap bar
 //!   when no Yap window is in front (Allow once / Deny).
@@ -34,6 +37,7 @@
 //! ([`offered`]).
 
 pub mod approve_card;
+pub mod code_chat;
 pub mod commands;
 pub mod consent;
 pub mod diff;

@@ -32,6 +32,7 @@ import { test as base, expect, openView, setConfig } from './support/fixtures.js
 import { startFakeLlm } from './support/fake-llm.js';
 import { startFakeWeb } from './support/fake-web.js';
 import { RUNS } from './support/yap.js';
+import { toSide } from './support/code-chats.js';
 
 const HERE = path.join(RUNS, 'jobs-spec');
 const SCRIPTS = path.join(HERE, 'scripts');
@@ -176,6 +177,8 @@ async function send(main, text) {
 
 async function freshChat(main) {
   await openView(main, 'Chat');
+  // A plain chat, on the Chat side (a chat that started a job is a Code chat: jobs-code-chats.spec.js).
+  await toSide(main, 'Chat');
   await main.getByRole('button', { name: 'New chat' }).click();
 }
 
@@ -488,6 +491,9 @@ test('asked by voice: Yap asks out loud, the spoken yes starts the job, and the 
   const messages = await messagesOf(yap, job.conversation, 6);
   expect(messages.map((m) => m.kind ?? '')).toEqual(['', '', '', '', 'jobReport', '']);
   expect(messages[3].text).toBe("On it: I've started a job in garden-planner.");
+  // The Voice Assistant's conversation is a Code chat in that workspace now
+  // (jobs/code_chat.rs): its next request needn't name it.
+  expect(await yap.invoke('job_chat_folder_get', { conversation: job.conversation })).toMatchObject({ name: 'garden-planner' });
 });
 
 test('a permission card makes a job ask; Stop and Continue; a plan, then go ahead in the same session', async ({ yap, main, fakeLlm }) => {

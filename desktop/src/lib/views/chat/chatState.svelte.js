@@ -824,7 +824,13 @@ export function createChatState({ onopensettings = () => null, onopennote = () =
   let picked = $state([]);
   let anchor = $state(null);
   // Group conversations OpenWhispr-style: Today / Yesterday / Previous 7 Days / Older.
-  const groups = $derived.by(() => {
+  // (Code chats, codeChats.svelte.js: the list shows one side of Chat at a
+  // time — `groupBy(conversations, byDate)` picks it.)
+  let groupBy = $state(null);
+  // A new chat's workspace for its first question (codeChats.svelte.js).
+  let newChatFolder = null;
+  const groups = $derived(groupBy ? groupBy(conversations, byDate) : byDate(conversations));
+  function byDate(conversations) {
     const now = new Date();
     const startOfDay = (d) => new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
     const today = startOfDay(now);
@@ -844,7 +850,7 @@ export function createChatState({ onopensettings = () => null, onopennote = () =
       else buckets[3].items.push(c);
     }
     return buckets.filter((b) => b.items.length > 0);
-  });
+  }
   const ordered = $derived(groups.flatMap((g) => g.items));
 
   function clickConversation(e, c) {
@@ -1097,6 +1103,8 @@ export function createChatState({ onopensettings = () => null, onopennote = () =
         selection: about && !about.page ? { noteId: about.noteId, text: about.text, fromLine: about.fromLine ?? null, toLine: about.toLine ?? null } : null,
         // Words from a page beside the chat (chat/pages/view.rs `PageQuote`).
         pageQuote: about?.page ? { text: about.text, site: about.page.site || '' } : null,
+        // A new chat made a Code chat before its first question (jobs/code_chat.rs).
+        codeFolder: activeId == null ? (newChatFolder?.() ?? null) : null,
       },
       onEvent
     );
@@ -1384,6 +1392,9 @@ export function createChatState({ onopensettings = () => null, onopennote = () =
     set picked(v) { picked = v; },
     get groups() { return groups; },
     get ordered() { return ordered; },
+    // Code chats (codeChats.svelte.js): the list's side, and a new chat's workspace.
+    set groupBy(fn) { groupBy = fn; },
+    set newChatFolder(fn) { newChatFolder = fn; },
     get convEls() { return convEls; },
     citedSources,
     refreshVision,

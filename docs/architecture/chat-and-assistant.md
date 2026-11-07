@@ -3472,12 +3472,32 @@ own Claude Code in one of their folders, and reports back when it ends.
 - **The spoken yes or no** before a job (`jobs/voice.rs`): the next question
   in the conversation within 2 minutes, answered by Yap itself
   (`turn/fast.rs` `job_answer_turn`, checked in `turn.rs` before any model).
+- **Code chats** (2026-11-07, `jobs/code_chat.rs`,
+  [jobs.md](./jobs.md#code-chats)): with Jobs on, Chat has two sides, flipped
+  by the **Chat | Code** switch at the top of its list (as the Claude app's
+  sidebar): plain conversations, and Code chats, each attached to one of the
+  person's workspaces (the job folders), grouped by workspace. In a Code chat
+  `start_job` and `message_job` may leave the folder out (the chat's), the
+  person's own request this turn is enough there (`consent::start_in`), and
+  the question's context says so (`prompt.rs` `build`: `code_chat::prompt_line`,
+  for the tool loop and a plan chat alike). A plain chat whose job named a
+  folder becomes a Code chat there. A new code chat's first question carries
+  its workspace (`chat_send`'s `codeFolder`, attached as the conversation is
+  made: `code_chat::with_new` / `adopt_new`). Kept in `jobs.json`, never
+  chats.json.
 - **On screen** (`views/chat/`, [frontend.md](./frontend.md)):
-  - **The Mode chip** (`ModeChip.svelte`) beside the model chip, only with
-    Jobs on: Claude Code's modes in its words (Auto, Manual, Accept edits,
-    Plan, Bypass permissions; 1–5, ↑ ↓, Enter, Esc), kept per conversation,
-    a new chat's pick going to the conversation its first question makes;
-    Bypass asks once, then the chip is amber.
+  - **The switch and the Code side** (`ChatSideSwitch.svelte`,
+    `codeChats.svelte.js`): New code chat opens the workspace picker
+    (`WorkspacePicker.svelte`: recent first, Add workspace…, Manage
+    workspaces…); in a Code chat the composer has the workspace chip and the
+    Mode chip (`CodeChips.svelte`), the accent edge and "Code · garden-planner"
+    (`CodeEdge.svelte`, `codeChat.css`), and a slow light round it while a job
+    from it runs ("Animate Code chats"). The Chat side has nothing job-like.
+  - **The Mode chip** (`ModeChip.svelte`) beside the workspace chip, in a
+    Code chat only: Claude Code's modes in its words (Auto, Manual, Accept
+    edits, Plan, Bypass permissions; 1–5, ↑ ↓, Enter, Esc), kept per
+    conversation, a new chat's pick going to the conversation its first
+    question makes; Bypass asks once, then the chip is amber.
   - **The Job tab** (`JobTab.svelte`, a `job:<id>` tab in `chatDoc` and
     `DocPanel`): opened by the turn's job event, a pill or the bar's Open;
     read like Claude Code: its to-do list, its steps and what it says
@@ -3491,7 +3511,7 @@ own Claude Code in one of their folders, and reports back when it ends.
     (`JobReportCard.svelte`, its own "Job" chip), **the ask-first card**
     (`JobConfirm.svelte`: Start / Don't), **a permission prompt** in the
     thread (`JobApprove.svelte`: Allow once / Deny), **running jobs** above
-    the conversation list (`RunningJobs.svelte`).
+    the Code side's list (`RunningJobs.svelte`).
   - A report reloads the open chat without switching to it
     (`stores/jobs.svelte.js`).
-- E2E: `jobs.spec.js`, `jobs-ui.spec.js`, `plan-jobs.spec.js` ([`docs/e2e-tests.md`](../e2e-tests.md)).
+- E2E: `jobs.spec.js`, `jobs-ui.spec.js`, `plan-jobs.spec.js`, `jobs-code-chats.spec.js` ([`docs/e2e-tests.md`](../e2e-tests.md)).

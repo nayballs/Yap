@@ -15,9 +15,17 @@
   import { createChatLibrary } from './chatLibrary.svelte.js';
   // The jobs running now, above the list (Jobs).
   import RunningJobs from './RunningJobs.svelte';
+  // Code chats (codeChats.svelte.js): with Jobs on, the Chat | Code switch;
+  // the Code side's chats grouped by workspace, "New code chat" its picker.
+  import ChatSideSwitch from './ChatSideSwitch.svelte';
+  import WorkspacePicker from './WorkspacePicker.svelte';
 
-  /** `chat`: the view's state (chatState.svelte.js). */
-  let { chat } = $props();
+  /** `chat`: the view's state (chatState.svelte.js); `code`: its Code chats (codeChats.svelte.js). */
+  let { chat, code = null } = $props();
+
+  const onCode = $derived(!!code?.onCode);
+  let newCodeEl = $state(null);
+  let picking = $state(false);
 
   // Search every chat, and the archive (chatLibrary.svelte.js; their lists
   // are ChatLibraryList.svelte, loaded the first time one shows).
@@ -150,11 +158,32 @@
     </div>
   {:else}
     <div class="tools">
-      <button class="tool" onclick={chat.newChat}>
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M13.4 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-7.4" /><path d="M18.4 2.6a2 2 0 0 1 2.8 2.8L13 13.6 9 14.6l1-4z" /></svg>
-        New chat
-      </button>
-      {#if chat.conversations.length}
+      {#if code?.enabled}<ChatSideSwitch {code} />{/if}
+      {#if onCode}
+        <button class="tool newcode" bind:this={newCodeEl} aria-haspopup="menu" aria-expanded={picking} onclick={() => (picking = !picking)}>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M13.4 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-7.4" /><path d="M18.4 2.6a2 2 0 0 1 2.8 2.8L13 13.6 9 14.6l1-4z" /></svg>
+          <span class="tlabel">New code chat</span>
+        </button>
+        {#if picking}
+          <WorkspacePicker
+            {code}
+            anchor={newCodeEl}
+            place="below"
+            title="New code chat in"
+            onpick={(ws) => code.newCodeChat(ws)}
+            onclose={(back) => {
+              picking = false;
+              if (back) newCodeEl?.focus();
+            }}
+          />
+        {/if}
+      {:else}
+        <button class="tool" onclick={chat.newChat}>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M13.4 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-7.4" /><path d="M18.4 2.6a2 2 0 0 1 2.8 2.8L13 13.6 9 14.6l1-4z" /></svg>
+          New chat
+        </button>
+      {/if}
+      {#if chat.ordered.length}
         <button class="listmore" title="More" aria-label="More for chats" aria-haspopup="menu" onclick={listMenu}>
           <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><circle cx="5" cy="12" r="1.7" /><circle cx="12" cy="12" r="1.7" /><circle cx="19" cy="12" r="1.7" /></svg>
         </button>
@@ -162,7 +191,8 @@
     </div>
   {/if}
 
-  <RunningJobs {chat} />
+  <!-- (With Jobs on, on the Code side only: the Chat side has nothing job-like.) -->
+  {#if !code?.enabled || onCode}<RunningJobs {chat} />{/if}
 
   {#if chat.conversations.length || lib.archived.length}
     <div class="searchrow">
@@ -184,12 +214,34 @@
     {#await import('./ChatLibraryList.svelte') then { default: ChatLibraryList }}
       <ChatLibraryList bind:this={libView} {chat} {lib} {searchEl} oncopy={copyConversation} />
     {/await}
-  {:else if chat.conversations.length === 0}
-    <p class="convempty">Start your first conversation</p>
+  {:else if chat.groups.length === 0}
+    {#if onCode}
+      <p class="convempty" data-testid="chat-code-empty">No code chats yet. New code chat picks a workspace on this PC to work in.</p>
+    {:else}
+      <p class="convempty">Start your first conversation</p>
+    {/if}
   {:else}
-    <div class="convscroll">
-      {#each chat.groups as g (g.label)}
-        <div class="gcap">{g.label}</div>
+    <div class="convscroll" data-side={code?.enabled ? code.side : undefined}>
+      {#each chat.groups as g (g.key ?? g.label)}
+        {#if g.collapsible}
+          <!-- A workspace's Code chats (codeChats.svelte.js): its name, its path on hover; folds. -->
+          <button
+            type="button"
+            class="gcap wsgroup"
+            aria-expanded={!g.collapsed}
+            title={g.path}
+            data-testid="chat-workspace-group"
+            data-workspace={g.label}
+            onclick={() => code.fold(g.path)}
+          >
+            <svg class="gchev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m9 6 6 6-6 6" /></svg>
+            <svg class="gglyph" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m8 7-5 5 5 5" /><path d="m16 7 5 5-5 5" /></svg>
+            <span class="gname">{g.label}</span>
+            {#if g.collapsed}<span class="gcount">{g.count}</span>{/if}
+          </button>
+        {:else}
+          <div class="gcap">{g.label}</div>
+        {/if}
         {#each g.items as c (c.id)}
           {#if renaming?.id === c.id}
             <!-- Rename in place (as Notes' folders): Enter or leaving it saves, Esc cancels. -->
@@ -391,6 +443,72 @@
     font-weight: 700;
     text-transform: uppercase;
     letter-spacing: 0.09em;
+    color: var(--yap-muted-55);
+  }
+  /* New code chat: one line beside the switch, however narrow the list. */
+  .tool.newcode {
+    min-width: 0;
+    gap: 7px;
+    padding: 0 8px;
+    white-space: nowrap;
+  }
+  .tlabel {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  /* A workspace's group on the Code side: its name, a fold. */
+  .wsgroup {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    width: 100%;
+    border: none;
+    border-radius: var(--yap-r-sm);
+    background: none;
+    font: inherit;
+    font-size: 10px;
+    font-weight: 700;
+    text-transform: none;
+    letter-spacing: 0.02em;
+    color: var(--yap-muted);
+    text-align: left;
+    cursor: pointer;
+  }
+  .wsgroup:hover {
+    color: var(--yap-fg);
+  }
+  .wsgroup:focus-visible {
+    outline: 1.5px solid var(--yap-primary-line);
+    outline-offset: -1px;
+  }
+  .gchev {
+    flex: 0 0 auto;
+    width: 10px;
+    height: 10px;
+    transition: transform var(--yap-dur);
+  }
+  .wsgroup[aria-expanded='true'] .gchev {
+    transform: rotate(90deg);
+  }
+  .gglyph {
+    flex: 0 0 auto;
+    width: 11px;
+    height: 11px;
+    color: var(--yap-code);
+  }
+  .gname {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: 11.5px;
+    font-weight: 650;
+  }
+  .gcount {
+    margin-left: auto;
+    font-size: 10px;
+    font-weight: 500;
     color: var(--yap-muted-55);
   }
   .conv {

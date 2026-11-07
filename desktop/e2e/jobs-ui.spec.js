@@ -6,7 +6,7 @@
 // `start_job`, and Claude Code is this build's own stand-in (`yap.exe
 // fake-claude <script>`, switched per turn with `e2e_claude_script`). No
 // one's real Claude Code, account or files: the job folders are in this
-// run's own folder; Add folder…'s picker takes a folder the test names.
+// run's own folder; Add workspace…'s picker takes a folder the test names.
 //
 // - core/jobs.js, pure: status words, cost lines told apart by how they're
 //   paid, lengths of time, steps from a log, the pills under the answer
@@ -41,6 +41,7 @@ import path from 'node:path';
 import { test as base, expect, openView, openSettings, closeSettings, setConfig, inAnotherApp, settingsDialog } from './support/fixtures.js';
 import { startFakeLlm } from './support/fake-llm.js';
 import { RUNS } from './support/yap.js';
+import { toSide, newCodeChat } from './support/code-chats.js';
 import {
   statusWord,
   statusTone,
@@ -312,11 +313,20 @@ async function send(main, text) {
   await main.getByRole('button', { name: 'Send' }).click();
 }
 
-async function freshChat(main) {
+async function freshChat(main, { jobsOn = true } = {}) {
   await openView(main, 'Chat');
   // A job's tab open beside the chat: the list stepped aside for it.
   if (await tab(main).count()) await tab(main).getByRole('button', { name: 'Close the panel' }).click();
+  // A plain chat, on the Chat side (a chat that started a job is a Code chat).
+  await toSide(main, 'Chat', { jobsOn });
   await main.getByRole('button', { name: 'New chat' }).click();
+}
+
+/** A new code chat in garden-planner (the Mode chip shows only in Code chats). */
+async function freshCodeChat(main) {
+  await openView(main, 'Chat');
+  if (await tab(main).count()) await tab(main).getByRole('button', { name: 'Close the panel' }).click();
+  await newCodeChat(main, 'garden-planner');
 }
 
 /** The conversation the thread shows, once its last answer is saved. */
@@ -553,11 +563,15 @@ test('core/jobs.js: status, cost by how it is paid, time, steps, pills, problems
 
 // ---------------------------------------------------------------- the Mode chip
 
-test('the Mode chip: only with Jobs on, Claude Code’s words, keys 1–5, kept per conversation', async ({ yap, main, fakeLlm, shot }) => {
+test('the Mode chip: only with Jobs on, in a Code chat, Claude Code’s words, keys 1–5, kept per conversation', async ({ yap, main, fakeLlm, shot }) => {
   await setConfig(yap, main, { jobsEnabled: false });
-  await freshChat(main);
+  await freshChat(main, { jobsOn: false });
   await expect(chip(main)).toHaveCount(0);
   await setConfig(yap, main, { jobsEnabled: true });
+  // A plain chat: nothing job-like (jobs-code-chats.spec.js).
+  await toSide(main, 'Chat');
+  await expect(chip(main)).toHaveCount(0);
+  await freshCodeChat(main);
   await expect(chip(main)).toBeVisible();
   await expect(chip(main)).toHaveText('Auto');
 
@@ -602,7 +616,7 @@ test('the Mode chip: only with Jobs on, Claude Code’s words, keys 1–5, kept 
   await expect(chip(main)).toHaveText('Accept edits');
 
   // Another chat starts at Settings' default; the first keeps its own.
-  await main.getByRole('button', { name: 'New chat' }).click();
+  await newCodeChat(main, 'garden-planner');
   await expect(chip(main)).toHaveText('Auto');
   fakeLlm.scriptChat([{ content: 'Second.' }]);
   await send(main, 'Another one');
@@ -613,7 +627,7 @@ test('the Mode chip: only with Jobs on, Claude Code’s words, keys 1–5, kept 
   await main.locator(`.convs [data-conv="${first}"]`).click();
   await expect(chip(main)).toHaveText('Accept edits');
   // A new chat's pick never goes to a conversation opened from the list.
-  await main.getByRole('button', { name: 'New chat' }).click();
+  await newCodeChat(main, 'garden-planner');
   await expect(chip(main)).toHaveText('Auto');
   await openMode(main);
   await main.keyboard.press('4');
@@ -632,7 +646,7 @@ test('the Mode chip: only with Jobs on, Claude Code’s words, keys 1–5, kept 
 
 test('Bypass permissions asks once, then the chip is amber and switches freely', async ({ yap, main, fakeLlm, shot }) => {
   expect((await yap.invoke('job_mode_get', { conversation: null })).bypassConfirmed).toBe(false);
-  await freshChat(main);
+  await freshCodeChat(main);
   fakeLlm.scriptChat([{ content: 'Ready.' }]);
   await send(main, 'Ready?');
   await expect(lastAnswer(main)).toHaveText('Ready.');
@@ -816,11 +830,14 @@ test('a slow job: its live line, the running list, “1 job running” on the ba
   await row.click();
   await expect(tab(main)).toBeVisible();
 
-  // The bar's line opens Chat on it, from another chat.
+  // The bar's line opens Chat on it, from another chat (on the Chat side:
+  // Chat follows it back to Code, where its chat is now).
   await tab(main).getByRole('button', { name: 'Close the panel' }).click();
+  await toSide(main, 'Chat');
   await main.getByRole('button', { name: 'New chat' }).click();
   await line.click();
   await expect(tab(main)).toBeVisible();
+  await expect(main.getByTestId('chat-side-switch')).toHaveAttribute('data-side', 'code');
   await expect.poll(() => main.evaluate(() => document.querySelector('.cbubble.user')?.textContent?.trim() ?? '')).toBe('Start a job in garden-planner.');
 
   // Stop: it stops, nothing reports it; the list and the bar let it go.
@@ -1146,7 +1163,7 @@ test('Settings → Jobs: the switch, Claude Code, pay with, defaults, folders, a
 
   // The switch, with its one line.
   const enabled = dialog.locator('[data-setting="jobs-enabled"]');
-  await expect(enabled).toContainText('Let Chat and the Voice Assistant hand tasks to your own Claude Code, in folders you choose.');
+  await expect(enabled).toContainText('Let Chat and the Voice Assistant hand tasks to your own Claude Code, in workspaces you choose.');
   await enabled.getByRole('button', { name: 'Jobs' }).click();
   await expect.poll(async () => (await yap.invoke('get_config')).jobsEnabled).toBe(true);
 
@@ -1173,14 +1190,18 @@ test('Settings → Jobs: the switch, Claude Code, pay with, defaults, folders, a
     return [c.jobsModel, c.jobsEffort, c.jobsMode];
   }).toEqual(['claude-opus-5-5', 'high', 'plan']);
 
-  // Folders: garden-planner; Add folder… (the picker stood in for), a cap, Remove.
+  // Workspaces (the job folders): garden-planner; Add workspace… (the picker stood in for), a cap, Remove.
   const folder = (name) => dialog.locator(`[data-testid="jobs-folder"][data-name="${name}"]`);
+  await expect(dialog.locator('#settings-jobs-folders')).toContainText('Workspaces');
   await expect(folder('garden-planner')).toBeVisible();
   await expect(dialog.locator('[data-setting="jobs-folder"]').filter({ has: main.locator('[data-testid="jobs-folder"][data-name="garden-planner"]') })).toContainText(GARDEN);
-  await expect(dialog.getByText("This folder's own Claude settings and MCP servers also run.")).toBeVisible();
+  await expect(dialog.getByText("A workspace's own Claude settings and MCP servers also run.")).toBeVisible();
+  // Animate Code chats: on by default (jobs-code-chats.spec.js turns it off and on).
+  await expect(dialog.locator('[data-setting="jobs-animate"]')).toContainText('Animate Code chats');
+  expect((await yap.invoke('get_config')).jobsAnimate).toBe(true);
   // Test mode opens no dialog: the next pick takes this folder (job_folders_pick).
   await yap.invoke('e2e_job_folder', { path: SHELF });
-  await dialog.getByRole('button', { name: 'Add folder…' }).click();
+  await dialog.getByRole('button', { name: 'Add workspace…' }).click();
   await expect(folder('book-shelf')).toBeVisible();
   expect((await yap.invoke('job_folders_list')).map((f) => f.name)).toContain('book-shelf');
   await folder('book-shelf').getByRole('combobox', { name: 'Never above, in book-shelf' }).selectOption('manual');
@@ -1202,7 +1223,7 @@ test('Settings → Jobs: the switch, Claude Code, pay with, defaults, folders, a
     const c = await yap.invoke('get_config');
     return [c.jobsAsk, c.jobsSpeak];
   }).toEqual(['always', 'always']);
-  await expect(dialog.locator('[data-setting="jobs-limits"]')).toHaveText('Backups of changed files are kept 7 days. One job at a time per folder, at most 3 at once.');
+  await expect(dialog.locator('[data-setting="jobs-limits"]')).toHaveText('Backups of changed files are kept 7 days. One job at a time per workspace, at most 3 at once.');
   await expect(dialog.locator('[data-setting="jobs-backups-hooks"]')).toHaveText(
     "Undo needs Claude Code's hooks, which back up each file before a job changes it. If a policy set by your organisation turns hooks off, no backups are made, and the job's tab says so.",
   );

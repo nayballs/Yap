@@ -8,9 +8,11 @@
   //   in use, and for the key whether Language Models' Claude tab has one.
   // - **Defaults**: model and effort (`jobsModel`, `jobsEffort`), the Mode a
   //   new chat starts in (`jobsMode`; Bypass permissions asks once).
-  // - **Folders** (`job_folders_*`): name, path and a cap ("Never above:"),
-  //   Add folder… (the folder picker), Remove; their own Claude settings
-  //   and MCP servers run too; the Bypass warning where Bypass can run.
+  // - **Workspaces** (the job folders, `job_folders_*`): name, path and a
+  //   cap ("Never above:"), Add workspace… (the folder picker), Remove (its
+  //   Code chats are plain chats again, said here); their own Claude
+  //   settings and MCP servers run too; the Bypass warning where Bypass can
+  //   run. **Animate Code chats** (`jobsAnimate`).
   // - **Ask before starting a job** (`jobsAsk`), **Read job reports aloud**
   //   (`jobsSpeak`), and the limits: backups 7 days, one job a folder, 3
   //   at once; Undo needs Claude Code's hooks (a managed policy can turn
@@ -35,6 +37,7 @@
   import { EFFORT_LABELS } from '../core/effort.js';
   import { jobs, initJobs, refreshJobs } from '../stores/jobs.svelte.js';
   import { statusWord, statusTone, costLine, MODE_LABELS, modelLabel, canUndo } from '../core/jobs.js';
+  import { FEATURE_NAME, CODE_NAME, WORKSPACES, samePath } from '../core/codeChats.js';
 
   let { cfg, goto = null, onshowview = null } = $props();
 
@@ -55,7 +58,7 @@
     { value: 'plan', label: 'Plan' },
   ];
   const ASK = [
-    { value: 'new-or-web', label: 'Only when the chat read the web or the folder is new (Recommended)' },
+    { value: 'new-or-web', label: 'Only when the chat read the web or the workspace is new (Recommended)' },
     { value: 'always', label: 'Always' },
     { value: 'never', label: 'Never' },
   ];
@@ -134,23 +137,32 @@
     modeBefore = BYPASS;
   }
 
-  // Add folder…: Windows' folder picker, opened in Rust (`job_folders_pick`),
+  // Add workspace…: Windows' folder picker, opened in Rust (`job_folders_pick`),
   // the folder picked added there.
   async function addFolder() {
     try {
       const f = await invoke('job_folders_pick');
       if (!f) return;
       await loadFolders();
-      toast({ title: `“${f.name}” added`, description: 'Jobs can work in it now.', variant: 'success' });
+      toast({ title: `“${f.name}” added`, description: `Jobs can work in it now, and ${CODE_NAME} chats can use it.`, variant: 'success' });
     } catch (e) {
-      toast({ title: "Couldn't add that folder", description: String(e?.message ?? e), variant: 'destructive' });
+      toast({ title: "Couldn't add that workspace", description: String(e?.message ?? e), variant: 'destructive' });
     }
   }
 
+  // Remove: its Code chats are plain chats again (jobs/code_chat.rs), said here, once.
   async function removeFolder(f) {
+    let chats = 0;
+    try {
+      const code = await invoke('job_code_chats');
+      chats = Object.values(code?.chats ?? {}).filter((w) => samePath(w.path, f.path)).length;
+    } catch {
+      /* said without the count */
+    }
     try {
       await invoke('job_folders_remove', { name: f.name });
-      toast({ title: `“${f.name}” removed`, description: 'Jobs will ask before working there again. Its jobs stay in History.' });
+      const moved = chats ? ` ${chats === 1 ? 'Its Code chat is a plain chat' : `Its ${chats} Code chats are plain chats`} now.` : '';
+      toast({ title: `“${f.name}” removed`, description: `Jobs will ask before working there again.${moved} Its jobs stay in History.` });
     } catch (e) {
       toast({ title: "Couldn't remove it", description: String(e?.message ?? e), variant: 'destructive' });
     }
@@ -194,13 +206,13 @@
 </script>
 
 <div class="page-h">
-  <h1>Jobs</h1>
-  <p>Hand a task to your own Claude Code from Chat or the Voice Assistant. It works in a folder you chose, and tells you what it did.</p>
+  <h1>{FEATURE_NAME}</h1>
+  <p>Hand a task to your own Claude Code from Chat or the Voice Assistant. It works in a workspace you chose, and tells you what it did.</p>
 </div>
 
-<Group title="Jobs" id="settings-jobs">
+<Group title={FEATURE_NAME} id="settings-jobs">
   <Row setting="jobs-enabled">
-    <Toggle bind:checked={cfg.jobsEnabled} label="Jobs" desc="Let Chat and the Voice Assistant hand tasks to your own Claude Code, in folders you choose." />
+    <Toggle bind:checked={cfg.jobsEnabled} label={FEATURE_NAME} desc="Let Chat and the Voice Assistant hand tasks to your own Claude Code, in workspaces you choose." />
   </Row>
   <ClaudeCodeStatus />
 </Group>
@@ -225,12 +237,12 @@
   <Row label="Effort" desc="Higher effort thinks longer: more thorough, slower, and it uses more of your plan" setting="jobs-effort">
     <Select bind:value={cfg.jobsEffort} options={EFFORTS} ariaLabel="Effort" />
   </Row>
-  <Row label="Mode" desc="The Mode a new chat starts in. Change it for one chat beside Chat's message box." setting="jobs-mode">
+  <Row label="Mode" desc="The Mode a new code chat starts in. Change it for one chat beside Chat's message box." setting="jobs-mode">
     <Select bind:value={cfg.jobsMode} options={MODES} ariaLabel="Mode" onchange={onMode} wide />
   </Row>
 </Group>
 
-<Group title="Folders" desc="Where jobs may work. A job asks first in a folder that isn't here yet." id="settings-jobs-folders">
+<Group title={WORKSPACES} desc="The folders on this PC where jobs may work and Code chats are kept. A job asks first in a folder that isn't here yet." id="settings-jobs-folders">
   {#each folders as f (f.path)}
     <Row label={f.name} setting="jobs-folder" stack>
       {#snippet desc()}
@@ -247,14 +259,17 @@
     </Row>
   {:else}
     <Row>
-      <p class="set-note">No folders yet. Add one, or name a folder's full path when you ask Chat for a job.</p>
+      <p class="set-note">No workspaces yet. Add one, or name a folder's full path when you ask Chat for a job.</p>
     </Row>
   {/each}
-  <Row label="Add folder…" desc="Pick a folder jobs may work in" setting="jobs-add-folder">
-    <Button variant="secondary" size="sm" onclick={addFolder}>Add folder…</Button>
+  <Row label="Add workspace…" desc="Pick a folder on this PC jobs may work in" setting="jobs-add-folder">
+    <Button variant="secondary" size="sm" onclick={addFolder}>Add workspace…</Button>
   </Row>
   <Row>
-    <p class="set-note small">This folder's own Claude settings and MCP servers also run.</p>
+    <p class="set-note small">A workspace's own Claude settings and MCP servers also run.</p>
+  </Row>
+  <Row setting="jobs-animate">
+    <Toggle bind:checked={cfg.jobsAnimate} label="Animate {CODE_NAME} chats" desc="A slow light moves along a {CODE_NAME} chat's message box while its job runs. Never with reduced motion." />
   </Row>
 </Group>
 
@@ -266,7 +281,7 @@
     <Select bind:value={cfg.jobsSpeak} options={SPEAK} ariaLabel="Read job reports aloud" />
   </Row>
   <Row>
-    <p class="set-note" data-setting="jobs-limits">Backups of changed files are kept 7 days. One job at a time per folder, at most 3 at once.</p>
+    <p class="set-note" data-setting="jobs-limits">Backups of changed files are kept 7 days. One job at a time per workspace, at most 3 at once.</p>
   </Row>
   <Row>
     <p class="set-note small" data-setting="jobs-backups-hooks">Undo needs Claude Code's hooks, which back up each file before a job changes it. If a policy set by your organisation turns hooks off, no backups are made, and the job's tab says so.</p>
@@ -297,7 +312,7 @@
     </div>
   {:else}
     <Row>
-      <p class="set-note" data-setting="jobs-history">No jobs yet. Ask Chat to start one, in a folder above.</p>
+      <p class="set-note" data-setting="jobs-history">No jobs yet. Ask Chat to start one, in a workspace above.</p>
     </Row>
   {/each}
   {#if jobs.list.length > 20 && !showAll}

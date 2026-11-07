@@ -23,6 +23,7 @@ import path from 'node:path';
 import { test as base, expect, openView, setConfig } from './support/fixtures.js';
 import { fakeClaude, planConfig, SCRIPTS as PLAN_SCRIPTS } from './support/claude-plan.js';
 import { RUNS } from './support/yap.js';
+import { toSide, newCodeChat } from './support/code-chats.js';
 
 const HERE = path.join(RUNS, 'plan-jobs-spec');
 const SCRIPTS = path.join(HERE, 'scripts');
@@ -171,6 +172,8 @@ async function send(main, text) {
 
 async function freshChat(main) {
   await openView(main, 'Chat');
+  // A plain chat, on the Chat side (a chat that started a job is a Code chat).
+  await toSide(main, 'Chat');
   await main.getByRole('button', { name: 'New chat' }).click();
 }
 
@@ -335,4 +338,24 @@ test('on the plan a job never starts unasked, above the chat Mode, or after a We
     ['Searched the web: "tide times example bay"', "Didn't start a job: not after reading the web"],
   ]);
   await yap.invoke('job_mode_set', { conversation, mode: 'auto' });
+});
+
+test('a Code chat on the plan: a job asked without naming its workspace runs there', async ({ yap, main }) => {
+  // The model leaves the folder out (start_job's folder is optional in a Code
+  // chat), and the session's question carried the chat's line.
+  await play(yap, 'code-chat', [turn(yapCall('m1', 'toolu_job', 'start_job', { brief: 'Change Draft to Final in notes.md.' }), answers('m2', 'Started. You asked: {{user_text}}'))]);
+  const before = (await jobs(yap)).length;
+  await openView(main, 'Chat');
+  await newCodeChat(main, 'garden-planner');
+  // Not a word about the folder: the chat's workspace is enough.
+  await send(main, 'Change Draft to Final in notes.md.');
+  await expect(lastAnswer(main)).toContainText("This is a Code chat in the user's folder garden-planner", { timeout: 20_000 });
+  await expect(chipsOfLast(main)).toHaveText(['Started a job in garden-planner']);
+  const job = await ended(yap, (await newJob(yap, before)).id);
+  expect(job).toMatchObject({ status: 'done', folder: 'garden-planner', path: GARDEN, brief: 'Change Draft to Final in notes.md.', origin: 'typed' });
+  expect(fs.readFileSync(path.join(GARDEN, 'notes.md'), 'utf8')).toBe('Final notes\n');
+  // The conversation is a Code chat in that workspace (jobs.json, never chats.json).
+  expect(await yap.invoke('job_chat_folder_get', { conversation: job.conversation })).toMatchObject({ name: 'garden-planner', path: GARDEN });
+  expect(yap.readJson('jobs.json').codeChats[String(job.conversation)].path).toBe(GARDEN);
+  await messagesOf(yap, job.conversation, 4);
 });

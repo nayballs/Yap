@@ -1,5 +1,6 @@
-//! **The jobs store**: `jobs.json` (every job, each chat's Mode, the one-time
-//! Bypass OK), and each job's own folder under `jobs/<id>/` — `log.jsonl`,
+//! **The jobs store**: `jobs.json` (every job, each chat's Mode, each Code
+//! chat's folder, the one-time Bypass OK), and each job's own folder under
+//! `jobs/<id>/` — `log.jsonl`,
 //! the `yap-job` events it sent (the tab replays them), and `backup/`, the
 //! files Claude Code changed as they were before (the run endpoint's backup
 //! hook writes them, `integrations/claude_live/backup.rs`).
@@ -213,8 +214,21 @@ pub struct Store {
     pub jobs: Vec<Job>,
     /// Each chat's Mode chip (conversation id → mode).
     pub modes: BTreeMap<u64, String>,
+    /// Each Code chat's folder (conversation id → its folder, `code_chat.rs`):
+    /// beside its Mode, never in chats.json.
+    pub code_chats: BTreeMap<u64, CodeChat>,
     /// The Bypass warning was confirmed once.
     pub bypass_confirmed: bool,
+}
+
+/// **A Code chat**: the job folder its conversation is attached to.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default, rename_all = "camelCase")]
+pub struct CodeChat {
+    /// The folder's full path (its name can change; its path is the folder).
+    pub path: String,
+    /// When it was attached (Unix seconds): the workspace picker's recency.
+    pub ts: u64,
 }
 
 /// jobs.json's saves.
@@ -412,6 +426,52 @@ pub fn set_mode(conversation: u64, mode: &str) {
     });
 }
 
+// ---- each Code chat's folder ----
+
+/// The folder `conversation` is a Code chat in (`None`: a plain chat).
+pub fn code_chat_of(conversation: u64) -> Option<CodeChat> {
+    with_store(|s| s.code_chats.get(&conversation).cloned())
+}
+
+/// Attach `conversation` to the folder at `path` (`None`: a plain chat
+/// again). Whether anything changed.
+pub fn set_code_chat(conversation: u64, path: Option<&str>) -> bool {
+    with_store(|s| {
+        let changed = match path {
+            Some(p) => {
+                let same = s.code_chats.get(&conversation).is_some_and(|c| super::folders::norm(&c.path) == super::folders::norm(p));
+                if !same {
+                    s.code_chats.insert(conversation, CodeChat { path: p.to_string(), ts: now_secs() });
+                }
+                !same
+            }
+            None => s.code_chats.remove(&conversation).is_some(),
+        };
+        if changed {
+            save(s);
+        }
+        changed
+    })
+}
+
+/// Every Code chat (conversation id → its folder).
+pub fn code_chats() -> BTreeMap<u64, CodeChat> {
+    with_store(|s| s.code_chats.clone())
+}
+
+/// The Code chats in the folder at `path` turned plain: their ids.
+pub fn drop_code_chats_in(path: &str) -> Vec<u64> {
+    let want = super::folders::norm(path);
+    with_store(|s| {
+        let gone: Vec<u64> = s.code_chats.iter().filter(|(_, c)| super::folders::norm(&c.path) == want).map(|(id, _)| *id).collect();
+        if !gone.is_empty() {
+            s.code_chats.retain(|id, _| !gone.contains(id));
+            save(s);
+        }
+        gone
+    })
+}
+
 pub fn bypass_confirmed() -> bool {
     with_store(|s| s.bypass_confirmed)
 }
@@ -581,7 +641,8 @@ impl LogLines {
 // ---- deleting your data ----
 
 /// **Delete some of your data → Jobs** (`privacy/reset.rs`): every job, its
-/// log and backups, each chat's Mode and the Bypass OK. How many jobs went.
+/// log and backups, each chat's Mode and Code chat folder, and the Bypass
+/// OK. How many jobs went.
 pub fn reset() -> usize {
     let n = with_store(|s| {
         let n = s.jobs.len();
@@ -662,6 +723,28 @@ mod tests {
         assert_eq!(old.jobs[0].status, Status::Running);
         assert_eq!(old.modes.get(&7).map(String::as_str), Some("plan"));
         assert!(!old.bypass_confirmed);
+        assert!(old.code_chats.is_empty(), "a file from before Code chats: every chat plain");
+    }
+
+    #[test]
+    fn each_code_chats_folder_is_kept_beside_its_mode() {
+        assert_eq!(code_chat_of(9), None);
+        assert!(set_code_chat(9, Some(r"D:\Projects\garden-planner")));
+        assert!(!set_code_chat(9, Some(r"d:/projects/garden-planner/")), "the same folder: no change");
+        assert_eq!(code_chat_of(9).unwrap().path, r"D:\Projects\garden-planner");
+        assert!(set_code_chat(10, Some(r"D:\Projects\recipe-box")));
+        assert!(set_code_chat(11, Some(r"D:\Projects\garden-planner")));
+        // Saved as jobs.json has it: its own map, by conversation.
+        let v = with_store(|s| serde_json::to_value(&*s).unwrap());
+        assert_eq!(v["codeChats"]["9"]["path"], r"D:\Projects\garden-planner");
+        // A folder removed: its chats go back to plain, the others stay.
+        let mut gone = drop_code_chats_in(r"D:\Projects\garden-planner\");
+        gone.sort();
+        assert_eq!(gone, [9, 11]);
+        assert_eq!(code_chats().keys().copied().collect::<Vec<_>>(), [10]);
+        assert!(set_code_chat(10, None));
+        assert!(!set_code_chat(10, None));
+        assert!(code_chats().is_empty());
     }
 
     #[test]

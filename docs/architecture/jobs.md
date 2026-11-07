@@ -74,6 +74,8 @@ Yap keeps to them:
   a command's line (its description, else the command tidied). Pure.
 - **`jobs/diff.rs`** — an edit's or a write's diff, within its caps. Pure.
 - **`jobs/consent.rs`** — whose idea a job is. Pure.
+- **`jobs/code_chat.rs`** — Code chats: a conversation attached to one
+  folder ([below](#code-chats)).
 - **`jobs/voice.rs`** — the spoken yes or no before a job starts.
 - **`jobs/approve_card.rs`** — a running job's permission prompt on the Yap
   bar.
@@ -112,6 +114,8 @@ saves ([config-and-data.md](./config-and-data.md)).
     [Undo and backups](#undo-and-backups)), `diffLines` (the diff lines
     its log has: [What the tab shows](#what-the-tab-shows));
   - `modes`: each chat's Mode chip (conversation id → mode);
+  - `codeChats`: each Code chat's folder (conversation id → `{path, ts}`,
+    [Code chats](#code-chats));
   - `bypassConfirmed`: the one-time OK for Bypass permissions.
 - **`jobs/<id>/log.jsonl`** — every `yap-job` event the job sent, one a line,
   appended as it goes (the whole file is never written again); texts over
@@ -130,8 +134,8 @@ saves ([config-and-data.md](./config-and-data.md)).
   (`KEEP_SECS`, at start and then daily). Its record stays in History, marked
   `swept`. A `jobs/<id>/` folder no job names goes once it's as old.
 - **Delete some of your data → Jobs** stops every job first, then deletes
-  every job, its log and backups, each chat's Mode, the Bypass OK and the
-  folders. The files the jobs changed stay as they are. **Download your data**
+  every job, its log and backups, each chat's Mode and Code chat folder, the
+  Bypass OK and the folders. The files the jobs changed stay as they are. **Download your data**
   has `jobs/jobs.json`, `jobs/folders.json` and each job's log, never its
   backups (copies of the person's own files): [privacy-receipts.md](./privacy-receipts.md).
 
@@ -139,9 +143,10 @@ saves ([config-and-data.md](./config-and-data.md)).
 
 - **A folder** has a name ("garden-planner"), its full path and an optional
   cap ("Never above: Manual", for a folder that should never run
-  unattended). Added in Settings → Jobs (Add folder…, a folder picker in
-  Rust: `job_folders_pick`), or the first time a job asks to work in a folder
-  and the person allows it. A name already taken gets a number ("notes 2").
+  unattended). The UI calls it a **workspace**. Added in Settings → Jobs or
+  Chat's workspace picker (Add workspace…, a folder picker in Rust:
+  `job_folders_pick`), or the first time a job asks to work in a folder and
+  the person allows it. A name already taken gets a number ("notes 2").
 - **Which folder a job means** (`folders::resolve`), never a guess:
   - one of the job folders by its name or its path's last part, with case,
     spaces, hyphens and underscores folded ("Photo Tools" = "photo-tools");
@@ -155,6 +160,57 @@ saves ([config-and-data.md](./config-and-data.md)).
   one.
 - Settings says it in small print: **a folder's own Claude settings and MCP
   servers also run** (a job runs with the person's own setup, below).
+
+## Code chats
+
+2026-11-07, after the maintainer tried Jobs for real ("make it quite clear…
+it's not normal chat, it's like coding chat"), on the Claude app's model:
+its sidebar switch between Chat and Code, and Code's environments.
+
+- **Two sides of Chat**: with Jobs on, a **Chat | Code** switch sits at the
+  top of the conversation list (kept between visits). **Chat** is plain
+  conversations, exactly as with Jobs off: no Mode chip, nothing job-like.
+  **Code** lists the **Code chats**, grouped by **workspace** (the UI's word
+  for a job folder), the running jobs on top. The side follows the
+  conversation shown. The feature keeps the name **Jobs**, in one constant
+  (`core/codeChats.js` `FEATURE_NAME`; it may become "Yap Code").
+- **A Code chat** is a conversation attached to one job folder
+  (`jobs/code_chat.rs`), kept in `jobs.json`'s `codeChats` beside its Mode,
+  never in chats.json (an older Yap sharing the data folder drops fields it
+  doesn't know).
+- **What it changes** (and nothing else does): `start_job` and `message_job`
+  may leave the folder out, and it's the chat's; **the person picked that
+  folder, so their own request this turn is enough** to start a job there
+  (`consent::start_in`: the chat's own folder and a message with any words
+  in it; the model decides, as for any tool). The question's context says so
+  (`code_chat::prompt_line`, added in `chat/turn/prompt.rs` `build`, so the
+  tool loop and a plan chat both have it): "This is a Code chat in the
+  user's folder garden-planner (…): … call start_job without a folder …".
+  Asking first, the refusal after web content or a job's own output, the
+  mode only lowered, a folder's cap, Bypass's OK and the evaluations'
+  intercept are all as in any chat. A job in another folder still needs the
+  person to name it.
+- **A plain chat becomes one** when a job starts from it (typed, or by voice
+  in the Voice Assistant's conversation) in a folder the person named
+  (`code_chat::became`, from `chat/tools/jobs.rs` `begin`): its next request
+  needn't name it, and Chat follows it to the Code side.
+- **New code chat** opens the workspace picker; the new chat waits for its
+  first question with its workspace, which goes with it (`chat_send`'s
+  `codeFolder`): the conversation it makes is attached as it's made, before
+  the prompt is built (`code_chat::with_new`, `adopt_new` in `send_turn`'s
+  `asked`).
+- **Plain chat** (the workspace chip's picker) takes a Code chat back to the
+  Chat side.
+- **A folder removed** in Settings → Jobs: its chats are plain again
+  (`code_chat::removed`), and the removal's toast says so once ("Its 2 Code
+  chats are plain chats now.").
+- **The look** (`views/chat/codeChat.css`, every value a `--yap-code*` token in
+  app.css, light and dark: a calm teal, never the warning amber Bypass
+  wears): a thin accent edge on the message box with "Code · garden-planner"
+  on its top edge, and, while a job from this chat runs, a slow light
+  travelling round it ("Animate Code chats", `jobsAnimate`, on by default;
+  never with reduced motion). The switch is the main cue; this is the
+  second.
 
 ## The Mode
 
@@ -304,7 +360,9 @@ same code and rules.
   job in garden-planner to fix the tests?" → "Yes."). A folder is the same
   word in every language, so this holds in all of them. Never a note's, a
   page's or a job's own words: "No job was started: the user's latest message
-  doesn't ask for a job in that folder…".
+  doesn't ask for a job in that folder…". **In a Code chat**, a job in the
+  chat's own folder needs only the person's own request this turn
+  (`start_in`; [Code chats](#code-chats)).
 - **What goes to a job** (`message_job`) carries a word of the person's that
   matters (three letters or more, not "the" or "please"), or their message is
   a plain yes or "go ahead".
@@ -420,8 +478,18 @@ or done with a question.
 `desktop/src/lib/`, over the commands and events below
 ([frontend.md](./frontend.md), [chat-and-assistant.md](./chat-and-assistant.md#jobs-in-chat-2026-11-07)).
 
-- **The Mode chip** (`views/chat/ModeChip.svelte`), beside the model chip
-  under Chat's box, only with Jobs on: "Auto ▾" opens **Mode** with Claude
+- **Code chats** ([above](#code-chats); `views/chat/codeChats.svelte.js`,
+  made by ChatView): `ChatSideSwitch.svelte` (Chat | Code at the top of the
+  list, a dot on Code while a job runs and Chat shows), the Code side's
+  groups (`core/codeChats.js` `groupByWorkspace`, through `chatState`'s
+  `groupBy`: a workspace's name, its path on hover, folding, newest first),
+  **New code chat** and the workspace chip's picker (`WorkspacePicker.svelte`:
+  the workspaces most recently used first, Add workspace…, Manage
+  workspaces…, and in a chat's own chip Plain chat), `CodeChips.svelte` (the
+  workspace chip and the Mode chip, first under the box) and `CodeEdge.svelte`
+  with `codeChat.css` (the look).
+- **The Mode chip** (`views/chat/ModeChip.svelte`), beside the workspace chip
+  under Chat's box, in a Code chat only: "Auto ▾" opens **Mode** with Claude
   Code's words, a check on the one in use, 1–5 to pick, ↑ ↓ and Enter, Esc.
   Kept per conversation (`job_mode_get` / `job_mode_set`); a new chat shows
   Settings' default and keeps a pick for the conversation its first question
@@ -453,7 +521,7 @@ or done with a question.
   its description, which is the model's word for it), the command (whole) or
   edit itself, **Allow once** / **Deny**
   (`claude_approve_answer`). Never answered by voice.
-- **Running jobs** (`RunningJobs.svelte`) above Chat's conversation list:
+- **Running jobs** (`RunningJobs.svelte`) above the Code side's list:
   the folder, the line it's on (the tab's own words: a step, or the to-do in
   progress; or "Waiting for you"), how long; a click opens its chat and tab.
 - **`stores/jobs.svelte.js`**: every job, kept in step with `yap-job`, the
@@ -475,9 +543,10 @@ or done with a question.
   Code on this PC, found and signed in, or Sign in (`ClaudeCodeStatus.svelte`,
   the plan card's store); **Pay with** (Your Claude plan / API key); the
   defaults (model: Opus, Sonnet or Haiku 5.5; effort; the Mode a new chat
-  starts in); **Folders** (name, path, "Never above:", Remove, Add folder…,
+  starts in); **Workspaces** (the folders: name, path, "Never above:",
+  Remove — its Code chats plain again, said in the toast —, Add workspace…,
   the small print; the Bypass warning on a folder with no cap once Bypass is
-  confirmed); **Ask before starting a job**; **Read job reports aloud**; the
+  confirmed; **Animate Code chats**); **Ask before starting a job**; **Read job reports aloud**; the
   limits ("Backups of changed files are kept 7 days. One job at a time per
   folder, at most 3 at once.") and, small, "Undo needs Claude Code's hooks,
   which back up each file before a job changes it. If a policy set by your
@@ -597,6 +666,7 @@ The run endpoint's backup hook (`integrations/claude_live/backup.rs`,
 | `yap-job-open` | `{id, conversation}` (with `yap-assistant-turn {phase: "open", conversationId, show: true}`) |
 | `yap-claude-approve` | `{id, run, conversation, origin, tool, summary, detail, label, askedTs}` — `run` is the job's id |
 | `yap-claude-approve-done` | `{id, run, outcome}` — allowed \| denied \| timedOut \| ended \| cancelled |
+| `yap-code-chat` | `{conversations, folder, removed?}` — those chats are Code chats in `folder` now (`null`: plain); `removed`: a folder removed in Settings, its name |
 
 **Chat's stream**: `{kind: "job", job: {id, folder, status, mode, conversation?}}`
 when a turn starts one (`stream::Event::Job`, a `JobRef`). The ask-first card
@@ -616,13 +686,16 @@ modeLabel, brief, newFolder, web}`, answered by `chat_page_confirm`.
 | `job_folders_list` / `job_folders_add {path, name?, cap?}` / `job_folders_pick` / `job_folders_remove {name}` / `job_folders_set_cap {name, cap?}` | the folders (`pick`: the folder picker, then added) |
 | `job_mode_get {conversation?}` / `job_mode_set {conversation, mode}` | a chat's Mode: `{mode, label, bypassConfirmed, modes}` (Bypass refused until confirmed) |
 | `job_bypass_confirmed` | the one-time OK |
+| `job_chat_folder_get {conversation}` / `job_chat_folder_set {conversation, folder?}` | a chat's workspace (`null`: plain); set by a folder's name or path |
+| `job_code_chats` | `{chats: {id: folder}, workspaces: [folder + usedTs]}`: every Code chat, and the workspaces most recently used first |
+| `chat_send {…, codeFolder?}` | (Chat's) a new chat's first question, made a Code chat in that workspace |
 | `claude_approve_answer {id, allow}` / `claude_approve_pending` | a permission prompt's answer; the prompts waiting (`integrations/claude_live.rs`) |
 | `claude_code_status {refresh?}` / `claude_code_sign_in` | Claude Code on this PC; its sign-in terminal (`ai/claude_code.rs`) |
 
 Debug builds, test mode only: `e2e_claude_script {script?}` (Claude Code is
 the build's own stand-in replaying `script` from now on), `e2e_claude_approve_auto
 {allow?}` (every prompt answered at once) and `e2e_job_folder {path}` (the
-folder the next Add folder… takes).
+folder the next Add workspace… takes).
 
 ## Tests
 
@@ -630,7 +703,11 @@ folder the next Add folder… takes).
   the store (interrupted at start, the sweep, the log's trim and cap), the
   folders (resolve, names, paths said), the modes (lower only, the cap,
   Bypass's OK, the next turn), consent (in a folder named, a yes to an offer,
-  not a note's words), the spoken answer, the runner's slots and spec (the
+  not a note's words; in a Code chat its own request, and a plain chat's
+  rules exactly as before), Code chats (kept in `codeChats`, alive while their
+  folder is a job folder, a plain chat becoming one, a new chat's workspace,
+  a removed folder, the workspaces by use, a job left unnamed), the spoken
+  answer, the runner's slots and spec (the
   run key only in its environment), the steps' words (a description used;
   the `cd` prefix gone, quoted, unquoted, `/d/…` and `D:\…`; paths
   relative), the to-do list, the diffs and their caps, a write's kind, the
@@ -664,13 +741,23 @@ folder the next Add folder… takes).
     and not when scrolled up, Commands run, Files changed opening to an
     edit's, a new file's and a rewritten file's diffs, replayed from the
     log). Light and dark.
+  - `jobs-code-chats.spec.js`: `core/codeChats.js`; the switch only with
+    Jobs on, a plain Chat side; New code chat's picker (Add workspace…,
+    Manage workspaces…); a Code chat's composer (the workspace chip, the
+    Mode chip, the edge and its label); a new code chat's job left unnamed
+    running there (its prompt line; kept in jobs.json, never chats.json;
+    message_job without an id); a plain chat becoming a Code chat and Chat
+    following it, Plain chat turning it back; the Code side's groups and
+    folding, the running jobs only there; the light, its switch and reduced
+    motion; a removed workspace. Light and dark.
   - `plan-jobs.spec.js`: from a chat on the plan, its own Claude Code calling
     the job tools over the endpoint (one stand-in script plays the plan
     chat's session, the job and the report's question: `_for`). Typed: the
     card in the plan chat's thread, the call waiting for Start, the tab, the
     job in the named folder, the report, the session reading it next turn.
     By voice: asked out loud, the spoken yes, the report spoken. Refused: not
-    the person's words, a raised Mode, after a WebSearch in the same turn.
+    the person's words, a raised Mode, after a WebSearch in the same turn. A
+    Code chat on the plan: a job left unnamed runs in its workspace.
 
 ## Not yet done, and what needs a real signed-in run
 

@@ -1,0 +1,80 @@
+/* **The Code chat look** (codeChats.svelte.js, CodeEdge.svelte), in one
+   place so it's easy to change: every colour and timing a token in app.css
+   (--yap-code*, light and dark). The switch at the top of the list is the
+   main cue; this is the second:
+   - a thin accent edge on the message box (Composer's `.inputbar`), with
+     the label "Code · garden-planner" sitting on its top edge;
+   - while a job from this chat runs, with "Animate Code chats" on, a slow
+     light travelling round that edge. Never with reduced motion (Windows'
+     or Settings → General → Appearance): the edge stays, still.
+   No backdrop-filter, no big shadows: one masked ring, one rotating angle. */
+
+.composer.code-chat > .inputbar,
+.composer.code-chat > .inputbar:focus-within {
+  margin-top: 9px;
+  border-color: var(--yap-code-line);
+  box-shadow:
+    0 0 0 1px var(--yap-code-ring),
+    var(--yap-shadow-sm);
+}
+.composer.code-chat > .inputbar:focus-within {
+  border-color: var(--yap-code);
+}
+
+.code-edge-label {
+  position: absolute;
+  top: 0;
+  left: 14px;
+  z-index: 1;
+  max-width: calc(100% - 28px);
+  transform: translateY(-50%);
+  padding: 0 7px;
+  border: 1px solid var(--yap-code-line);
+  border-radius: var(--yap-r-full);
+  background: var(--yap-code-label-bg);
+  color: var(--yap-code);
+  font-size: 10.5px;
+  font-weight: 650;
+  letter-spacing: 0.01em;
+  line-height: 15px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* The light: a conic gradient turning behind a ring-shaped mask. */
+@property --yap-code-angle {
+  syntax: '<angle>';
+  inherits: false;
+  initial-value: 0deg;
+}
+.code-edge-light {
+  position: absolute;
+  inset: -1px;
+  z-index: 0;
+  padding: var(--yap-code-light-width);
+  border-radius: inherit;
+  pointer-events: none;
+  background: conic-gradient(from var(--yap-code-angle), transparent 0deg, transparent 250deg, var(--yap-code-glow) 320deg, transparent 360deg);
+  -webkit-mask:
+    linear-gradient(#000 0 0) content-box,
+    linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  mask-composite: exclude;
+  animation: yap-code-light var(--yap-code-light-dur) linear infinite;
+}
+@keyframes yap-code-light {
+  to {
+    --yap-code-angle: 360deg;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .code-edge-light {
+    display: none;
+    animation: none;
+  }
+}
+:root[data-motion='reduced'] .code-edge-light {
+  display: none;
+  animation: none;
+}

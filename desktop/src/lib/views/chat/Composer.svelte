@@ -28,17 +28,19 @@
   import { tooLongLine } from './chatBudget.js';
   import SkillMenu from '../../components/SkillMenu.svelte';
   import ModelChip from './ModelChip.svelte';
-  // Jobs' Mode chip, beside it (shown with Jobs on).
-  import ModeChip from './ModeChip.svelte';
+  // A Code chat's workspace chip and Jobs' Mode chip, before it, and its
+  // box's edge (codeChats.svelte.js, codeChat.css).
+  import CodeChips from './CodeChips.svelte';
+  import CodeEdge from './CodeEdge.svelte';
   import ContextRing from './ContextRing.svelte';
   import ThinkButton from './ThinkButton.svelte';
 
   /**
    * `chat`: the view's state; `onopensettings(section)`: ControlPanel's
    * Settings; `onopenusage()`: Insights' AI usage card (the context ring's
-   * See all).
+   * See all). `code`: the view's Code chats (codeChats.svelte.js).
    */
-  let { chat, onopensettings = null, onopenusage = null } = $props();
+  let { chat, code = null, onopensettings = null, onopenusage = null } = $props();
 
   // The model chip (its picker opens for "Choose another model…").
   let chipRef = $state(null);
@@ -159,7 +161,7 @@
      the message, the mic, and Send once there's something to send;
      under it, quiet, whether answers are read aloud and the model the
      message goes to. The model picker opens above it all. -->
-<div class="composer" class:dropping={chat.dragging} data-model-picker-above>
+<div class="composer" class:dropping={chat.dragging} class:code-chat={!!code?.current} data-model-picker-above>
   {#if chat.dragging}
     <!-- Files dragged over Chat: a drop puts the pictures in the box. -->
     <div class="dropnote" data-testid="chat-drop-note" aria-live="polite">Drop pictures to ask about them</div>
@@ -300,6 +302,7 @@
     </div>
   {/if}
   <div class="inputbar">
+    <CodeEdge {code} />
     <div class="pluswrap" bind:this={plusEl}>
       <button
         class="plusbtn"
@@ -376,7 +379,9 @@
           : 'Ask about this passage…'
         : chat.attached.length
           ? 'Ask about this screenshot…'
-          : 'Ask about your notes, or type / for Skills'}
+          : code?.current
+            ? `Ask for a change in ${code.current.name}, or anything else`
+            : 'Ask about your notes, or type / for Skills'}
       aria-label="Message"
       aria-busy={chat.sending}
       aria-autocomplete="list"
@@ -420,8 +425,8 @@
     {/if}
   </div>
   <div class="composerfoot">
+    <CodeChips {chat} {code} />
     <ModelChip bind:this={chipRef} {onopensettings} quiet conversationId={chat.activeId} />
-    <ModeChip {chat} />
     <!-- How much of the model's context this chat uses (bottom right, as
          Claude's chat box shows it); its panel has the day's AI use. -->
     <span class="footgap"></span>

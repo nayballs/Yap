@@ -20,6 +20,7 @@ import path from 'node:path';
 import { test as base, expect, openView, setConfig } from './support/fixtures.js';
 import { startFakeLlm } from './support/fake-llm.js';
 import { RUNS } from './support/yap.js';
+import { plainSide } from './support/code-chats.js';
 
 const HERE = path.join(RUNS, 'chat-scroll-spec');
 const SCRIPTS = path.join(HERE, 'scripts');
@@ -73,6 +74,8 @@ async function freshChat(main) {
   // A job's tab open beside the chat from an earlier test: closed.
   const job = main.getByTestId('chat-job');
   if (await job.count()) await job.getByRole('button', { name: 'Close the panel' }).click();
+  // Jobs on: a plain chat, on the Chat side (a chat that started a job is a Code chat).
+  await plainSide(main);
   await main.getByRole('button', { name: 'New chat' }).click();
 }
 

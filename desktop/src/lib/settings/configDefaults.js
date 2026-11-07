@@ -114,6 +114,8 @@ export const FIELD_DEFAULTS = {
   jobsAsk: 'new-or-web',
   jobsSpeak: 'voice',
   jobsMax: 3,
+  // "Animate Code chats": a slow light along a Code chat's box while its job runs.
+  jobsAnimate: true,
   // Memory (MemorySection.svelte, memory.rs): the switches only.
   memorySearchChats: true,
   memoryLearnChats: true,

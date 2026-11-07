@@ -119,6 +119,21 @@ body {
   --yap-shot-drop: 0 1px 2px rgba(60, 50, 30, 0.08);
   --yap-shot-scrim: rgba(28, 23, 14, 0.62);
 
+  /* Code chats (views/chat/codeChat.css): a calm teal, never the warning
+     amber Bypass permissions wears — the accent and its text, the box's
+     edge and its soft ring, the workspace chip's wash and hover, the label
+     on the box's edge, and the light that travels round it while a job
+     runs (its width and one turn's time) */
+  --yap-code: #2a7684;
+  --yap-code-line: rgba(42, 118, 132, 0.55);
+  --yap-code-ring: rgba(42, 118, 132, 0.12);
+  --yap-code-wash: rgba(42, 118, 132, 0.08);
+  --yap-code-tint: rgba(42, 118, 132, 0.16);
+  --yap-code-label-bg: #eef5f6;
+  --yap-code-glow: rgba(42, 150, 168, 0.95);
+  --yap-code-light-width: 1.5px;
+  --yap-code-light-dur: 4.5s;
+
   /* display face — EB Garamond, Wispr's exact serif (stat numerals, hero
      headlines, settings titles; bundled in main.js) */
   --yap-font-display: 'EB Garamond Variable', Georgia, 'Palatino Linotype', 'Times New Roman', serif;
@@ -483,6 +498,14 @@ body {
   --yap-shot-ring-hover: rgba(255, 255, 255, 0.34);
   --yap-shot-drop: 0 1px 2px rgba(0, 0, 0, 0.28);
   --yap-shot-scrim: rgba(4, 3, 2, 0.74);
+  /* Code chats: the same teal, brighter on the dark surfaces */
+  --yap-code: #6cc0cc;
+  --yap-code-line: rgba(108, 192, 204, 0.5);
+  --yap-code-ring: rgba(108, 192, 204, 0.1);
+  --yap-code-wash: rgba(108, 192, 204, 0.08);
+  --yap-code-tint: rgba(108, 192, 204, 0.16);
+  --yap-code-label-bg: #1d2a2c;
+  --yap-code-glow: rgba(130, 214, 226, 0.95);
 
   --yap-rule: #2c2822;
   --yap-link: #f0b04a;
