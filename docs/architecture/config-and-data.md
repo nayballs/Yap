@@ -340,7 +340,8 @@
   or a chat that read the web —, "always" or "never"; "new-or-web") +
   jobs_speak ("Read job reports aloud": "voice" — when the job was asked by
   voice —, "always" or "never"; "voice") + jobs_max (at most this many jobs
-  at once, one per folder, 1 to 3; 3) — new fields only, no `migrate_once`
+  at once, one per folder, 1 to 3; 3) + jobs_animate ("Animate Code chats":
+  a slow light round a Code chat's box while its job runs; on) — new fields only, no `migrate_once`
   step; an older Yap sharing the folder drops them on its save (Jobs off
   again),
   Commands' edit_hotkey (the rewrite shortcut)
@@ -803,7 +804,8 @@
   allowed to do, its final words, its cost so far — Claude Code's estimate —,
   a problem, whether it was a plan or asks something, reported, undone,
   swept, and `noBackups` when it changed files with no backups made), each
-  chat's Mode chip (`modes`) and the one-time Bypass OK
+  chat's Mode chip (`modes`), each Code chat's folder (`codeChats`:
+  conversation id → `{path, ts}`, jobs.md "Code chats") and the one-time Bypass OK
   (`bypassConfirmed`); and `%APPDATA%/yap/jobs/`, a folder per job:
   `log.jsonl` (its `yap-job` events, appended line by line, at most 5,000
   lines) and `backup/` (the files it changed as they were before it, as

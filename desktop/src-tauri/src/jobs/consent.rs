@@ -7,6 +7,9 @@
 //!   ("Shall I start a job in garden-planner to fix the tests?" → "Yes.").
 //!   A folder is the same word in every language, so this holds in all of
 //!   them.
+//! - **In a Code chat** ([`start_in`]): a job in the chat's own folder needs
+//!   only the person's own request this turn (they picked the folder); any
+//!   other folder, and every plain chat, as above.
 //! - **Telling one something** ([`message`]): what goes to the job carries
 //!   the person's own words this turn (a word of theirs that matters, not
 //!   "the" or "please"), or their message is a plain "yes" (to a plan, to
@@ -26,6 +29,17 @@ pub fn start(question: &str, previous: Option<&str>, folder: &Folder) -> bool {
     }
     let Some(previous) = previous else { return false };
     crate::apps::is_affirmative(question) && previous.contains('?') && names(previous, folder)
+}
+
+/// **In a Code chat** (`chat`: the folder the person attached the chat to,
+/// `jobs::code_chat`): a job in that folder is theirs when their message
+/// this turn asks anything at all — they picked the folder, so "fix the
+/// failing tests" is enough, and the model decides, as it does for any
+/// tool. A job in another folder, and every job in a plain chat (`chat`
+/// `None`): [`start`], exactly as before.
+pub fn start_in(question: &str, previous: Option<&str>, folder: &Folder, chat: Option<&Folder>) -> bool {
+    let here = chat.is_some_and(|c| folders::norm(&c.path) == folders::norm(&folder.path));
+    (here && !folders::words(question).is_empty()) || start(question, previous, folder)
 }
 
 /// Does `text` name `folder`: its name's words in a row, its path's last
@@ -102,6 +116,46 @@ mod tests {
         assert!(!start("Summarise my reminders note", None, &f));
         assert!(!start("fix the tests", None, &f));
         assert!(!start("Yes.", None, &f));
+    }
+
+    #[test]
+    fn in_a_code_chat_the_persons_own_request_is_enough_for_its_folder() {
+        let garden = garden();
+        let recipes = Folder { name: "recipe-box".into(), path: r"D:\Projects\recipe-box".into(), cap: None, added_ts: 1 };
+        // The chat's own folder: their request this turn, without naming it.
+        assert!(start_in("Fix the failing tests", None, &garden, Some(&garden)));
+        assert!(start_in("add a dark theme", None, &garden, Some(&Folder { path: r"d:/projects/garden-planner/".into(), ..garden.clone() })), "the same folder, however its path is written");
+        assert!(start_in("Yes.", Some("Shall I fix them?"), &garden, Some(&garden)));
+        // Nothing asked: nothing starts.
+        assert!(!start_in("", None, &garden, Some(&garden)));
+        assert!(!start_in("  ?! ", None, &garden, Some(&garden)));
+        // Another folder from a Code chat: named by the person, as in a plain chat.
+        assert!(!start_in("Fix the failing tests", None, &recipes, Some(&garden)));
+        assert!(start_in("Fix the failing tests in recipe-box", None, &recipes, Some(&garden)));
+    }
+
+    #[test]
+    fn a_plain_chats_rules_are_exactly_as_before() {
+        let f = garden();
+        let offer = Some("I can start a job in garden-planner to fix them. Shall I?");
+        let cases: &[(&str, Option<&str>)] = &[
+            ("Start a job in garden-planner to fix the failing tests", None),
+            ("in my garden planner project, tidy the readme", None),
+            (r"Have Claude Code fix D:\Projects\garden-planner\src", None),
+            ("Yes.", offer),
+            ("yes please", offer),
+            ("Are you sure?", offer),
+            ("Yes.", Some("Do you want a summary of the note?")),
+            ("Yes.", Some("I started a job in garden-planner.")),
+            ("Summarise my reminders note", None),
+            ("fix the tests", None),
+            ("Yes.", None),
+            ("", None),
+        ];
+        for (question, previous) in cases {
+            assert_eq!(start_in(question, *previous, &f, None), start(question, *previous, &f), "{question}");
+        }
+        assert!(!start_in("fix the tests", None, &f, None), "a plain chat still needs the folder named");
     }
 
     #[test]

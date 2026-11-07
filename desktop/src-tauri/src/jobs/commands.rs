@@ -1,6 +1,7 @@
 //! **The Jobs UI's commands**: the jobs and their logs, Stop, Continue, a
-//! message, Undo, Open in terminal, the folders, each chat's Mode and the
-//! one-time Bypass OK. (Starting a job is Chat's: `start_job`.)
+//! message, Undo, Open in terminal, the folders, each chat's Mode and
+//! workspace (Code chats), and the one-time Bypass OK. (Starting a job is
+//! Chat's: `start_job`.)
 
 use serde::Serialize;
 use serde_json::Value;
@@ -8,7 +9,7 @@ use serde_json::Value;
 use super::folders::{self, Folder};
 use super::modes::{self, Mode};
 use super::store::{self, Job};
-use super::{consent, runner};
+use super::{code_chat, consent, runner};
 
 /// A job with its log (the tab replays it).
 #[derive(Debug, Clone, Serialize)]
@@ -130,10 +131,16 @@ pub fn e2e_job_folder(path: String) -> Result<(), String> {
     Ok(())
 }
 
-/// Remove a folder (by its name or path): whether one went. Its jobs stay.
+/// Remove a folder (by its name or path): whether one went. Its jobs stay;
+/// its Code chats are plain chats again, said once (`yap-code-chat`).
 #[tauri::command]
 pub async fn job_folders_remove(name: String) -> bool {
-    folders::remove(&name)
+    let folder = code_chat::find(&name);
+    let gone = folders::remove(&name);
+    if let (true, Some(f)) = (gone, folder) {
+        code_chat::removed(&f);
+    }
+    gone
 }
 
 /// Cap a folder's mode (`None`: no cap).
@@ -189,4 +196,41 @@ pub async fn job_mode_set(conversation: u64, mode: String) -> Result<ModeView, S
 pub async fn job_bypass_confirmed() {
     store::confirm_bypass();
     tracing::info!("Jobs: Bypass permissions confirmed");
+}
+
+/// A chat's workspace: the job folder it's a Code chat in (`None`: a plain
+/// chat).
+#[tauri::command]
+pub async fn job_chat_folder_get(conversation: u64) -> Option<Folder> {
+    code_chat::folder_of(Some(conversation))
+}
+
+/// Make a chat a Code chat in `folder` (a job folder's name or path), or a
+/// plain chat again (`None`): the workspace chip's pick. Every window hears
+/// (`yap-code-chat`).
+#[tauri::command]
+pub async fn job_chat_folder_set(conversation: u64, folder: Option<String>) -> Result<Option<Folder>, String> {
+    let found = match folder.as_deref().map(str::trim).filter(|f| !f.is_empty()) {
+        Some(f) => Some(code_chat::find(f).ok_or("That isn't one of your workspaces.")?),
+        None => None,
+    };
+    code_chat::set(conversation, found.as_ref());
+    store::saved().map_err(|e| e.to_string())?;
+    Ok(found)
+}
+
+/// Chat's Code side: every Code chat with its folder, and the workspaces,
+/// most recently used first.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CodeChats {
+    /// Conversation id → its folder.
+    pub chats: std::collections::BTreeMap<u64, Folder>,
+    pub workspaces: Vec<code_chat::Workspace>,
+}
+
+#[tauri::command]
+pub async fn job_code_chats() -> CodeChats {
+    let (chats, workspaces) = code_chat::listing();
+    CodeChats { chats, workspaces }
 }

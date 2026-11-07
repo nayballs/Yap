@@ -18,8 +18,12 @@
   import { toast } from '../../ui/toast.svelte.js';
   import { modeForKey, MODE_KEYS } from '../../core/jobs.js';
 
-  /** `chat`: the Chat view's state (its conversation, and whether a question is on its way). */
-  let { chat } = $props();
+  /**
+   * `chat`: the Chat view's state (its conversation, and whether a question
+   * is on its way). `shown`: a Code chat's (CodeChips.svelte) — hidden in a
+   * plain chat, still mounted so a new chat's pick reaches its conversation.
+   */
+  let { chat, shown: visible = true } = $props();
 
   const BYPASS = 'bypassPermissions';
   const WARNING = 'Claude Code can run anything on your PC without asking. Use it only in folders you trust.';
@@ -189,7 +193,7 @@
 
 <svelte:window onpointerdowncapture={onWindowPointer} onresize={() => open && place()} />
 
-{#if enabled}
+{#if enabled && visible}
   <div class="modechip" bind:this={wrapEl}>
     <button
       type="button"

@@ -463,6 +463,14 @@ pub(super) async fn build(t: &Asked<'_>, sizing: &Sizing, opened: &Opened) -> Bu
     let about = crate::ai::about_you::prompt_block(&t.profile, t.now);
     let calendar_zone = crate::chat::tools::calendar::Zone::of(t.profile.region.time_zone.as_deref());
     let mut prompt = Prompt::start(t);
+    // A Code chat (jobs/code_chat.rs): its folder, and that the person's own
+    // request is enough there — in the question's context, so the tool loop
+    // and a plan chat both have it.
+    if g.jobs {
+        if let Some(line) = crate::jobs::code_chat::prompt_line(Some(conv.id)) {
+            prompt.add(line);
+        }
+    }
     let tabs_open = prompt.tabs(t).await;
     let here = crate::ai::ai_model::runs_here(&t.ep.provider, &t.ep.base_url);
     let first = first_step(&t.text, &g, here, outline_first, t.about_selection.is_some(), tabs_open);

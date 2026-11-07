@@ -1248,6 +1248,11 @@ pub struct YapConfig {
     /// At most this many jobs at once (one per folder), 1 to 3.
     #[serde(default = "default_jobs_max")]
     pub jobs_max: u32,
+    /// "Animate Code chats": a slow light moving along a Code chat's message
+    /// box while a job from it runs (never with reduced motion). On by
+    /// default; the page's alone.
+    #[serde(default = "default_true")]
+    pub jobs_animate: bool,
 
     // ---- Memory (Settings → Memory; `memory.rs`) ----
     // The switches only: what Yap remembers lives in memory.json, never
@@ -1657,6 +1662,7 @@ impl Default for YapConfig {
             jobs_ask: default_jobs_ask(),
             jobs_speak: default_jobs_speak(),
             jobs_max: default_jobs_max(),
+            jobs_animate: true,
             memory_search_chats: true,
             memory_learn_chats: true,
             memory_learn_meetings: false,

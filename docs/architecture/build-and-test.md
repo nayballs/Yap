@@ -411,7 +411,8 @@ ever reaches it, or anyone's Claude account.
   and the plan are never offered there by accident. `e2e_claude_script
   {script?}` switches the stand-in's script per turn; `e2e_claude_approve_auto
   {allow?}` answers every permission prompt at once; `e2e_job_folder {path}`
-  is the folder the next Add folder… takes.
+  is the folder the next Add workspace… takes (Settings → Jobs, or Chat's
+  workspace picker).
 - **The recordings**: `desktop/src-tauri/src/ai/claude_code/fixtures/<version>/`,
   per Claude Code version — `real-*` recorded from the real one **signed out,
   with an empty config folder** (`CLAUDE_CONFIG_DIR`), so no login and no

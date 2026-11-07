@@ -113,6 +113,7 @@
   import { chatRequest } from '../../stores/chatRequest.svelte.js';
   import { openContextMenu } from '../../ui/contextMenu.svelte.js';
   import { createChatState } from './chatState.svelte.js';
+  import { createCodeChats } from './codeChats.svelte.js';
   import ConversationList from './ConversationList.svelte';
   import ChatThread from './ChatThread.svelte';
   import Composer from './Composer.svelte';
@@ -130,6 +131,9 @@
 
   const chat = createChatState({ onopensettings: () => onopensettings, onopennote: () => onopennote });
   const doc = chat.doc;
+  // **Code chats** (codeChats.svelte.js): with Jobs on, the list's Chat |
+  // Code switch, a Code chat's workspace and its look.
+  const code = createCodeChats(chat, { opensettings: () => onopensettings });
 
   // **Jobs** (stores/jobs.svelte.js): the bar card's or a notification's
   // Open (`yap-job-open`) shows the job's chat and its tab; a report landing
@@ -278,7 +282,9 @@
     }
     if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'n') {
       e.preventDefault();
-      chat.newChat();
+      // On the Code side: a new code chat in this one's workspace.
+      if (code.onCode && (code.current ?? code.workspaces[0])) code.newCodeChat(code.current ?? code.workspaces[0]);
+      else chat.newChat();
     } else if ((e.ctrlKey || e.metaKey) && e.shiftKey && !e.altKey && e.key.toLowerCase() === 'b' && !e.defaultPrevented && !e.target?.closest?.('.ProseMirror')) {
       // (Not over a document being written: the editor's own keys first.)
       e.preventDefault();
@@ -402,6 +408,8 @@
         chat.followAssistant(req.assistant);
         return;
       }
+      // (A plain chat, on the Chat side: never a Code chat's.)
+      code.toChat();
       chat.newChat();
       chat.scope = req.scope ?? null;
       chat.input = req.text;
@@ -416,7 +424,7 @@
 <div class="chat" bind:this={chatEl}>
   <!-- Conversation sidebar (out of reach while the document covers it) -->
   <div class="listslot" class:aside={listAside} inert={cover || listAside || undefined}>
-    <ConversationList {chat} />
+    <ConversationList {chat} {code} />
   </div>
 
   <!-- Thread -->
@@ -428,7 +436,7 @@
       </button>
     {/if}
     <ChatThread {chat} {onopensettings} />
-    <Composer {chat} {onopensettings} {onopenusage} />
+    <Composer {chat} {code} {onopensettings} {onopenusage} />
   </section>
 
   {#if doc.open}

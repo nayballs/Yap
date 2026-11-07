@@ -628,13 +628,15 @@ on an element that also has a `settings.css` class (`set-note`,
   for the key, whether Language Models' Claude tab has one, with a link);
   **Defaults**: Model (Opus, Sonnet or Haiku 5.5, `jobsModel`), Effort
   (`jobsEffort`), Mode (the Mode a new chat starts in, `jobsMode`; Bypass
-  permissions asks once, as the chip does); **Folders** (`job_folders_*`:
-  name, path, "Never above:" a cap, Remove; **Add folder…**, the folder
-  picker; "This folder's own Claude settings and MCP servers also run."; the
-  Bypass warning on a folder with no cap once Bypass is confirmed; "No
-  folders yet…"); **Ask before starting a job** (`jobsAsk`) and **Read job
+  permissions asks once, as the chip does); **Workspaces** (2026-11-07: the
+  UI's word for the job folders, `job_folders_*`: name, path, "Never above:"
+  a cap, Remove — its Code chats plain again, the toast says so —; **Add
+  workspace…**, the folder picker; "A workspace's own Claude settings and MCP
+  servers also run."; the Bypass warning on a folder with no cap once Bypass
+  is confirmed; "No workspaces yet…"; **Animate Code chats**, `jobsAnimate`,
+  jobs.md "Code chats"); **Ask before starting a job** (`jobsAsk`) and **Read job
   reports aloud** (`jobsSpeak`); the limits ("Backups of changed files are
-  kept 7 days. One job at a time per folder, at most 3 at once.") and, small,
+  kept 7 days. One job at a time per workspace, at most 3 at once.") and, small,
   "Undo needs Claude Code's hooks, which back up each file before a job
   changes it. If a policy set by your organisation turns hooks off, no
   backups are made, and the job's tab says so." (`jobs-backups-hooks`);

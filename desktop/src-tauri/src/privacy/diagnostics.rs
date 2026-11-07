@@ -166,6 +166,7 @@ const COPY: &[&str] = &[
     "jobsAsk",
     "jobsSpeak",
     "jobsMax",
+    "jobsAnimate",
     "memorySearchChats",
     "memoryLearnChats",
     "memoryLearnMeetings",
