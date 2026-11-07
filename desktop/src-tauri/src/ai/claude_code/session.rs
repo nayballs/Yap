@@ -753,8 +753,13 @@ impl Session {
 impl Drop for Session {
     fn drop(&mut self) {
         self.end();
-        let shared = self.shared.clone();
         let files = self.files.take();
+        if self.shared.wait_exit(Duration::ZERO).is_some() {
+            // Already gone: its files go now.
+            drop(files);
+            return;
+        }
+        let shared = self.shared.clone();
         let _ = std::thread::Builder::new().name("claude-code-end".into()).spawn(move || {
             if shared.wait_exit(DROP_GRACE).is_none() {
                 shared.kill_tree();
@@ -941,6 +946,15 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("yap-cc-session-{tag}-{}", &new_session_id()[..8]));
         std::fs::create_dir_all(&dir).unwrap();
         dir
+    }
+
+    /// Remove a test's folder once the stand-in that worked in it has gone
+    /// (Windows keeps a running process's folder).
+    fn remove_soon(dir: &Path) {
+        let until = Instant::now() + Duration::from_secs(10);
+        while std::fs::remove_dir_all(dir).is_err() && dir.exists() && Instant::now() < until {
+            std::thread::sleep(Duration::from_millis(50));
+        }
     }
 
     #[test]
@@ -1236,7 +1250,7 @@ mod tests {
         assert_eq!(exited, Event::Exited(Some(0)), "stdin closed: it exits");
         assert!(!session.is_running());
         assert!(session.send_user("too late", &[]).is_err());
-        let _ = std::fs::remove_dir_all(&dir);
+        remove_soon(&dir);
     }
 
     #[tokio::test]
@@ -1254,7 +1268,7 @@ mod tests {
         session.kill();
         assert!(matches!(next_where(&mut rx, "exit", |e| matches!(e, Event::Exited(_))).await, Event::Exited(_)));
         assert!(!session.is_running());
-        let _ = std::fs::remove_dir_all(&dir);
+        remove_soon(&dir);
     }
 
     #[tokio::test]
@@ -1295,7 +1309,7 @@ mod tests {
         let err = oneshot_with(&program, spec, "Say hello", Duration::from_millis(1500)).await.unwrap_err();
         assert_eq!(err, OneshotError::Failed("Claude Code took too long to answer.".into()));
         assert!(started.elapsed() < Duration::from_secs(20));
-        let _ = std::fs::remove_dir_all(&dir);
+        remove_soon(&dir);
     }
 
     #[test]
@@ -1359,6 +1373,6 @@ mod tests {
         session.end();
         let exited = next_where(&mut rx, "exit", |e| matches!(e, Event::Exited(_))).await;
         println!("{exited:?}");
-        let _ = std::fs::remove_dir_all(&dir);
+        remove_soon(&dir);
     }
 }
