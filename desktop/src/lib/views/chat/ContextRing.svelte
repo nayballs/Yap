@@ -29,7 +29,10 @@
   let ringEl = $state(null);
   let seq = 0;
 
-  const shown = $derived(!!use && use.context > 0 && use.messages > 0);
+  // Not on your Claude plan: Claude Code's counts are a turn's sum, so this
+  // would overstate it; the plan's usage ring says how full the chat is
+  // instead (PlanUsageRing.svelte).
+  const shown = $derived(!!use && use.context > 0 && use.messages > 0 && use.model?.provider !== 'claude-plan');
   const pct = $derived(use ? percentOf(use.used, use.context) : 0);
   const label = $derived(use ? ringLabel(use) : '');
   // The ring: r 7 in an 18 px box.

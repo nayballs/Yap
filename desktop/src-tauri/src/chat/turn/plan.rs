@@ -39,6 +39,10 @@
 //! - **Usage** from the result (`usage::record_response`), Claude Code's
 //!   estimate of the API price kept with the answer; Yap's own summary of a
 //!   long chat is skipped (Claude Code compacts its own session).
+//! - **The plan's limits** (`claude_plan::usage`): a turn's rate-limit
+//!   events move the usage ring live; after the turn, how full the
+//!   conversation is ([`fill_of`]: its last model call's) and `get_usage`
+//!   asked on this session once it's free.
 //! - **Problems** in plain words (`Problem::message`): not signed in, the
 //!   plan's limit, paying another way. Never an answer.
 
@@ -308,8 +312,11 @@ async fn read_turn(
         tokio::select! {
             ev = rx.recv() => {
                 let Some(ev) = ev else { return Ended::Gone { started } };
-                if matches!(ev, Event::Init(_)) {
-                    started = true;
+                match &ev {
+                    Event::Init(_) => started = true,
+                    // Where the plan's limits stand, live on the usage ring.
+                    Event::RateLimit(r) => plan::usage::live(r),
+                    _ => {}
                 }
                 match mapper.feed(&ev, out) {
                     Fed::More => {}
@@ -363,6 +370,19 @@ async fn interrupted(warm: &sessions::Warm, rx: &mut tokio::sync::mpsc::Unbounde
         warm.session.kill();
     }
     resets
+}
+
+/// How full a plan conversation is after a turn: its last model call's
+/// prompt and answer (`Mapper::last_call_tokens`) against the model's
+/// context window, Claude Code's own word (`modelUsage`) else Anthropic's
+/// usual. `None` when the turn's calls didn't say their usage.
+async fn fill_of(mapper: &Mapper, result: &crate::ai::claude_code::events::TurnResult, model: &str) -> Option<plan::usage::Fill> {
+    let used = mapper.last_call_tokens()?;
+    let (window, known) = match result.context_window(model) {
+        Some(n) => (n, true),
+        None => crate::chat::budget::context_window(&crate::config::load(), plan::PROVIDER, model, plan::BASE_URL).await,
+    };
+    Some(plan::usage::Fill { used, window, known })
 }
 
 /// **The answer on the person's Claude plan** (see the module's doc).
@@ -474,6 +494,10 @@ pub(super) async fn answer(t: &Asked<'_>, opened: &Opened, built: &Built, fitted
                 }
                 w.set_busy(false);
                 drop(rx);
+                if matches!(p, Problem::RateLimited { .. }) {
+                    // The plan's limits as they stand now, on the ring.
+                    plan::usage::after_turn(w.clone());
+                }
                 tracing::info!("Claude plan: the turn hit a problem; no answer");
                 return Err(p.message());
             }
@@ -528,6 +552,16 @@ pub(super) async fn answer(t: &Asked<'_>, opened: &Opened, built: &Built, fitted
         out.end();
         w.set_busy(false);
         drop(rx);
+        // How full this conversation is now (its last model call's; the
+        // result's counts are the turn's sum), and where the plan's limits
+        // stand: asked on this session once it's free (`claude_plan/usage.rs`).
+        if !result.is_error {
+            let answered = if mapper.model().is_empty() { model.as_str() } else { mapper.model() };
+            if let Some(fill) = fill_of(&mapper, &result, answered).await {
+                plan::usage::note_context(conv.id, fill);
+            }
+        }
+        plan::usage::after_turn(w.clone());
         if result.is_error {
             let why = result.errors.first().cloned().filter(|e| !e.trim().is_empty()).unwrap_or_else(|| result.text.clone());
             tracing::info!(reason = result.terminal_reason.as_deref().unwrap_or(""), "Claude plan: the turn ended with an error");

@@ -26,12 +26,16 @@
 //! - **Every other call on the Chat model** (memory learning, a summary,
 //!   notes' Ask, Think, …): one question, one answer ([`oneshot`]), from
 //!   `llm::post_chat_request`.
+//! - **Plan usage limits** ([`usage`]): where the plan's limits stand
+//!   (Claude Code's own `get_usage`), for Chat's usage ring and Settings'
+//!   card; kept in memory only.
 //!
 //! How it works: docs/architecture/ai-models.md, "Your Claude plan".
 
 pub mod map;
 pub mod oneshot;
 pub mod sessions;
+pub mod usage;
 
 use std::sync::OnceLock;
 
@@ -48,7 +52,8 @@ pub const PLAN_KEY: &str = "claude-plan";
 /// A base URL for the scope (an empty one means "no model set up"):
 /// nothing is ever sent to it.
 pub const BASE_URL: &str = "claude-code://plan";
-/// Where the person sees their plan's usage (Manage usage).
+/// Where the person sees their plan's usage (Manage usage; the usage
+/// ring's See all).
 pub const USAGE_URL: &str = "https://claude.ai/settings/usage";
 /// How to install Claude Code.
 pub const INSTALL_URL: &str = "https://code.claude.com/docs/en/setup";
@@ -152,6 +157,9 @@ pub fn sync(s: &cli::Status) {
         return;
     }
     tracing::info!(on, "Claude plan: the key store's marker follows Claude Code");
+    if !on {
+        usage::clear();
+    }
     let _ = crate::shell::settings::change_config(app, |cfg| {
         if on {
             crate::ai::ai_model::set_provider_key(cfg, PROVIDER, PLAN_KEY)

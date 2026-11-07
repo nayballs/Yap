@@ -1,0 +1,39 @@
+{
+  "//": "Synthetic, built from the shape Claude Code 2.1.296 gave a signed-in Max plan for the experimental get_usage control request (7 Nov 2026), with no real account's values: other percentages, times, currency and limit. The fields Yap doesn't read are kept, some renamed to code names, to prove they're ignored. claude_code/usage.rs reads it; the e2e (claude-plan-usage.spec.js) plays it through the stand-in with its times moved to now.",
+  "type": "control_response",
+  "response": {
+    "subtype": "success",
+    "request_id": "yap_1_0a1b2c3d",
+    "response": {
+      "subscription_type": "max",
+      "rate_limits_available": true,
+      "rate_limits": {
+        "five_hour": { "utilization": 23.0, "resets_at": "2026-11-07T15:00:00.412000+00:00" },
+        "seven_day": { "utilization": 9.0, "resets_at": "2026-11-14T03:00:00.412000+00:00" },
+        "seven_day_opus": { "utilization": 0.0, "resets_at": null },
+        "seven_day_sonnet": null,
+        "seven_day_oauth_apps": null,
+        "model_scoped": [{ "display_name": "Fable", "utilization": 4.0, "resets_at": "2026-11-14T03:00:00.412000+00:00" }],
+        "extra_usage": { "is_enabled": true, "monthly_limit": 2500, "used_credits": 340, "utilization": 13.6, "currency": "EUR", "decimal_places": 2, "out_of_credits": false },
+        "limits": [
+          { "kind": "weekly_all", "group": "weekly", "percent": 9, "severity": "normal", "resets_at": "2026-11-14T03:00:00.412000+00:00", "scope": null, "is_active": true, "marmalade_tier": 3 },
+          { "kind": "weekly_scoped", "group": "weekly", "percent": 4, "severity": "normal", "resets_at": "2026-11-14T03:00:00.412000+00:00", "scope": { "model": { "id": "claude-fable-5-1", "display_name": "Fable" }, "surface": null }, "is_active": true },
+          { "kind": "weekly_scoped", "group": "weekly", "percent": 0, "severity": "normal", "resets_at": null, "scope": { "model": { "id": "claude-opus-5-5", "display_name": "Opus" }, "surface": null }, "is_active": false },
+          { "kind": "quokka_window", "group": "lunar", "percent": 61, "severity": "normal", "resets_at": null, "scope": null, "is_active": true }
+        ],
+        "spend": {
+          "used": { "amount_minor": 340, "currency": "EUR", "exponent": 2 },
+          "limit": { "amount_minor": 2500, "currency": "EUR", "exponent": 2 },
+          "percent": 13.6,
+          "severity": "normal",
+          "enabled": true,
+          "tangerine_reset": "monthly"
+        },
+        "pelican_cadence": { "flux": 7, "drift": [1, 2] },
+        "overage_bucket_v2": "teal"
+      },
+      "kumquat_flags": ["heron", "wren"],
+      "behaviors": null
+    }
+  }
+}
