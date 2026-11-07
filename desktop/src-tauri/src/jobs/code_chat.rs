@@ -8,7 +8,7 @@
 //! - **What it changes**: in a Code chat, `start_job` and `message_job` may
 //!   leave the folder out (it's the chat's), and the person's own request
 //!   this turn is enough to start a job there (`consent::start_in`); the
-//!   chat's prompt says so ([`prompt_line`]). Everything else is as in any
+//!   chat's prompt says so ([`prompt_line_for`]). Everything else is as in any
 //!   chat: asking first, the refusal after web content or a job's output,
 //!   the Mode only lowered, a folder's cap, Bypass's OK.
 //! - **A plain chat becomes one** ([`became`]) once a job starts from it in a
@@ -23,7 +23,14 @@
 //!   question's new conversation is attached there
 //!   (`assistant::new_code_chat`).
 //! - **A folder removed** (Settings → Jobs): its chats are plain again,
-//!   said once ([`removed`]).
+//!   said once ([`removed`]). A chat deleted is no Code chat ([`chat_deleted`]).
+//! - **No Yap memory in a Code chat** (7 Nov 2026): project knowledge lives
+//!   with the project (its CLAUDE.md, Claude Code's own memory), and Yap's
+//!   memory is personal. A Code chat's turn has none of memory's passages,
+//!   its "You" block or its tools, About you without its note, nothing
+//!   found by itself (the eager RAG, past chats), and it's never learned
+//!   from (`chat/turn/prompt.rs`, `memory/learn.rs`). On the Claude plan its
+//!   session runs in the workspace, read only (`chat/turn/plan.rs`).
 //! - Every change goes to every window as **`yap-code-chat`**.
 //!
 //! The log has ids and counts, never a folder's name or path.
@@ -108,6 +115,13 @@ pub fn became(conversation: u64, path: &str) {
     }
 }
 
+/// **A conversation deleted** (Chat's delete): it's no Code chat any more.
+/// A later conversation may get its id (ids are the highest plus one), and
+/// it mustn't start as one: a Code chat keeps Yap's memory out.
+pub fn chat_deleted(conversation: u64) {
+    set(conversation, None);
+}
+
 /// **A folder removed** (Settings → Jobs): its chats are plain again, every
 /// window told once, with its name. How many.
 pub fn removed(folder: &Folder) -> usize {
@@ -135,11 +149,6 @@ pub fn prompt_line_for(folder: &Folder) -> String {
         "This is a Code chat in the user's folder {} ({}): they picked it for jobs. When they ask you to change, fix, build or write something there, start a job: call start_job without a folder (it's this one). Their own request this turn is enough; they needn't name the folder. message_job and job_status without an id mean this chat's latest job. A job in any other folder still needs the user to name it.",
         folder.name, folder.path
     )
-}
-
-/// [`prompt_line_for`] the folder `conversation` is a Code chat in.
-pub fn prompt_line(conversation: Option<u64>) -> Option<String> {
-    folder_of(conversation).map(|f| prompt_line_for(&f))
 }
 
 /// A job folder with when it was last used: the workspace picker's order.
@@ -241,10 +250,9 @@ mod tests {
         let garden = make(&base.join("garden-planner"));
         let recipes = make(&base.join("recipe-box"));
         assert_eq!(folder_of(Some(5)), None, "a plain chat");
-        assert_eq!(prompt_line(Some(5)), None);
         assert!(set(5, Some(&garden)));
         assert_eq!(folder_of(Some(5)), Some(garden.clone()));
-        assert!(prompt_line(Some(5)).unwrap().starts_with(&format!("This is a Code chat in the user's folder garden-planner ({})", garden.path)));
+        assert!(prompt_line_for(&folder_of(Some(5)).unwrap()).starts_with(&format!("This is a Code chat in the user's folder garden-planner ({})", garden.path)));
         // Found by name or path.
         assert_eq!(find("Garden-Planner"), Some(garden.clone()));
         assert_eq!(find(&recipes.path), Some(recipes.clone()));
@@ -267,6 +275,10 @@ mod tests {
         assert_eq!(removed(&garden), 1);
         assert_eq!(folder_of(Some(5)), None);
         assert_eq!(folder_of(Some(6)), Some(recipes.clone()));
+        // A chat deleted: no Code chat (a later one may get its id).
+        set(8, Some(&recipes));
+        chat_deleted(8);
+        assert_eq!(folder_of(Some(8)), None);
         // A folder no longer a job folder (removed some other way): plain.
         assert!(folders::remove(&recipes.name));
         assert_eq!(folder_of(Some(6)), None);

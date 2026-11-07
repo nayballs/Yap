@@ -35,6 +35,9 @@
     { keys: ['Ctrl', '/'], label: 'This sheet' },
     { keys: ['Ctrl', 'K'], label: 'Search your dictations on Home' },
     { keys: ['Ctrl', 'F'], label: 'Search Settings, notes or chats' },
+    { keys: ['Ctrl', 'N'], label: 'New chat, in Chat' },
+    { keys: ['Ctrl', 'B'], label: 'Hide or show your chats, in Chat' },
+    { keys: ['Ctrl', 'Shift', 'B'], label: 'The browser beside the chat, in Chat' },
     { keys: ['Esc'], label: 'Close a dialog, a menu or Settings' },
   ];
 

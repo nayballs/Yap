@@ -212,7 +212,7 @@ impl Robot {
         dictation_ended();
         let _ = shared.app.emit("yap-state", "processing");
         tracing::info!(len = text.len(), "e2e: a question for the Voice Assistant from a transcript");
-        let asked = shared.assistant.swap(false, Ordering::SeqCst) && shared.ask_assistant(text.trim());
+        let asked = shared.assistant.swap(false, Ordering::SeqCst) && shared.ask_assistant(text.trim()).await;
         busy.done();
         let _ = shared.app.emit("yap-state", "idle");
         if asked {
@@ -256,7 +256,7 @@ impl Robot {
         dictation_ended();
         let _ = shared.app.emit("yap-state", "processing");
         tracing::info!(len = text.len(), "e2e: a question about the selection from a transcript");
-        let asked = shared.assistant.swap(false, Ordering::SeqCst) && shared.ask_assistant(text.trim());
+        let asked = shared.assistant.swap(false, Ordering::SeqCst) && shared.ask_assistant(text.trim()).await;
         busy.done();
         let _ = shared.app.emit("yap-state", "idle");
         if asked {

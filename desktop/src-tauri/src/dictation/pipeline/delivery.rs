@@ -13,7 +13,7 @@ use crate::config;
 
 #[cfg(debug_assertions)]
 use super::busy::CRASH_NEXT;
-use super::finish::{apply_corrections, as_said_text, finish_dictation_with};
+use super::finish::{apply_corrections, as_said_text, corrections, finish_dictation_with};
 use super::steps::Steps;
 #[cfg(debug_assertions)]
 use super::LAST_DELIVERED;
@@ -32,6 +32,20 @@ pub(super) fn undo_window_gone() -> crate::notices::alert::Alert {
         action: None,
         timeout_ms: 12_000,
     }
+}
+
+/// What an AI cleanup is for ([`Shared::cleanup_pass`]).
+#[derive(Clone, Copy)]
+pub(super) enum For<'a> {
+    /// A dictation into the app `Target` is: routed as Dictation cleanup
+    /// has it (styles by app, the person's app rules), while AI cleanup is on.
+    App(&'a crate::ai::cleanup_styles::Target),
+    /// A question said to Yap's AI with its side's "Clean up what you say…"
+    /// switch on (`cleanup_styles::cleans_question`): as an AI prompt,
+    /// literally, on Dictation cleanup's model, whether or not AI cleanup is
+    /// on (`cleanup_styles::question_plan`); never with the text before a
+    /// cursor, nor a transform after it.
+    Question,
 }
 
 impl Shared {
@@ -119,9 +133,20 @@ impl Shared {
         // one "Use what I said" away.
         let translation = crate::dictation::languages::translate_dictation(&self.app, &raw, &cfg).await;
         let translated = translation.is_some();
-        let (cleaned, style) = match translation {
-            Some(translated) => (translated, None),
-            None => self.clean_up(&raw, &style_target, screen.as_deref(), true).await,
+        // A question said into the Chat view's box, its side's "Clean up
+        // what you say…" switch on (Chat's, or Code chats' for the Code chat
+        // it shows): cleaned as a question to Yap's AI is, whether or not AI
+        // cleanup is on. Off: as any dictation into Yap's window.
+        // (`Some(code)`: cleaned so, `code` the Code chat's switch.)
+        let question = self
+            .to_chat
+            .load(Ordering::SeqCst)
+            .then(|| crate::chat::assistant::chat_box_in_code_chat(&cfg))
+            .filter(|&code| crate::ai::cleanup_styles::cleans_question(&cfg, code));
+        let (cleaned, style) = match (translation, question) {
+            (Some(translated), _) => (translated, None),
+            (None, Some(code)) => (self.clean_question(&raw, code, true).await, None),
+            (None, None) => self.clean_up(&raw, &style_target, screen.as_deref(), true).await,
         };
 
         // The correction dictionary (exact, then fuzzy for
@@ -205,7 +230,7 @@ impl Shared {
         screen: Option<&crate::dictionary::screen_terms::ScreenTerms>,
         watch: bool,
     ) -> (String, Option<crate::ai::cleanup_styles::Style>) {
-        match self.cleanup_pass(raw, target, screen, watch).await {
+        match self.cleanup_pass(raw, For::App(target), screen, watch).await {
             // Skip cleanup (the bar): the words as transcribed, nothing more.
             (text, style, true) => (text, style),
             // Then a transform on every dictation, if one is picked.
@@ -241,12 +266,13 @@ impl Shared {
         })
     }
 
-    /// The AI cleanup itself ([`Shared::clean_up`]): the text, the style it
-    /// was written in, and whether the bar's Skip cleanup cut it short.
-    async fn cleanup_pass(
+    /// The AI cleanup itself ([`Shared::clean_up`], a question's
+    /// [`Shared::clean_question`]): the text, the style it was written in,
+    /// and whether the bar's Skip cleanup cut it short.
+    pub(super) async fn cleanup_pass(
         &self,
         raw: &str,
-        target: &crate::ai::cleanup_styles::Target,
+        how: For<'_>,
         screen: Option<&crate::dictionary::screen_terms::ScreenTerms>,
         watch: bool,
     ) -> (String, Option<crate::ai::cleanup_styles::Style>, bool) {
@@ -257,12 +283,16 @@ impl Shared {
         // said"). The
         // endpoint comes from the matched profile's LLM override when it
         // has one, else the global settings — either way "ondevice" routes
-        // through the sidecar when it's up.
+        // through the sidecar when it's up. A question's: the AI prompt's
+        // literal plan on cleanup's own model, its switch already said yes.
         let snapshot = || {
             self.config
                 .read()
                 .map(|c| {
-                    let plan = crate::ai::cleanup_styles::resolve(&c, target);
+                    let (plan, enabled) = match how {
+                        For::App(target) => (crate::ai::cleanup_styles::resolve(&c, target), c.post_process_enabled),
+                        For::Question => (Some(crate::ai::cleanup_styles::question_plan(&c)), true),
+                    };
                     let (pp_base_url, pp_api_key, pp_model, pp_provider) =
                         match plan.as_ref().and_then(|p| p.endpoint.as_ref()) {
                             Some((provider, base_url, api_key, model)) => {
@@ -277,7 +307,7 @@ impl Shared {
                         };
                     (
                         c.dictionary.clone(),
-                        c.post_process_enabled,
+                        enabled,
                         pp_base_url,
                         pp_api_key,
                         pp_model,
@@ -328,8 +358,9 @@ impl Shared {
                 };
                 // The text before the cursor (`cleanup_context.rs`), last
                 // before the transcript: a live dictation's only, to a model
-                // on this PC, or a cloud one with its switch on.
-                let cursor = if watch {
+                // on this PC, or a cloud one with its switch on. Never a
+                // question's: it goes into no text box.
+                let cursor = if watch && matches!(how, For::App(_)) {
                     self.config.read().ok().and_then(|c| crate::ai::cleanup_context::for_cleanup(&c, &pp_base_url))
                 } else {
                     None
@@ -447,7 +478,7 @@ impl Shared {
         // (and sends it, hands-free or after "press enter"); nothing is
         // pasted, no key pressed.
         if self.to_chat.swap(false, Ordering::SeqCst) {
-            return self.deliver_to_chat(raw, corrected, voice_enter);
+            return self.deliver_to_chat(raw, corrected, voice_enter, said);
         }
         // The quick note's: its page puts the text at its cursor.
         if self.to_note.swap(false, Ordering::SeqCst) {
@@ -710,8 +741,9 @@ impl Shared {
     /// {text, send}` — the page inserts `text` at its caret and, when `send`
     /// ("Talk back hands-free", or "press enter" said at the end;
     /// `tts::sends_by_itself`), sends it as asked by voice. Kept in history
-    /// like any dictation.
-    fn deliver_to_chat(&self, raw: String, text: String, said_enter: bool) -> Delivered {
+    /// like any dictation, with its words as said when cleanup changed them
+    /// (`said`: Home's "AI edited · N changes").
+    fn deliver_to_chat(&self, raw: String, text: String, said_enter: bool, said: Option<String>) -> Delivered {
         let text = text.trim().to_string();
         let send = self
             .config
@@ -728,15 +760,16 @@ impl Shared {
                 .map(|c| (c.history_enabled, c.model_size.clone()))
                 .unwrap_or((false, String::new()));
             let secs = self.audio_secs.lock().ok().and_then(|mut s| s.take());
+            let said = said.as_deref().map(str::trim).filter(|s| !s.is_empty() && *s != text);
             if history_enabled {
                 let audio = self.audio_id.lock().ok().and_then(|mut a| a.take());
-                self.record_in_yap(&raw, &text, &model, audio.as_deref(), secs);
+                self.record_in_yap(&raw, &text, said, &model, audio.as_deref(), secs);
                 if let Some(id) = audio {
                     crate::dictation::recent_audio::finished(&id);
                 }
                 let _ = self.app.emit("yap-history-changed", ());
             }
-            self.count_in_yap(&raw, &text, secs);
+            self.count_in_yap(&raw, &text, said, secs);
         }
         let report = Delivered {
             text,
@@ -771,7 +804,7 @@ impl Shared {
             let audio = self.audio_id.lock().ok().and_then(|mut a| a.take());
             let secs = self.audio_secs.lock().ok().and_then(|mut s| s.take());
             if history_enabled {
-                self.record_in_yap(&raw, &text, &model, audio.as_deref(), secs);
+                self.record_in_yap(&raw, &text, None, &model, audio.as_deref(), secs);
                 if let Some(id) = audio {
                     crate::dictation::recent_audio::finished(&id);
                 }
@@ -779,7 +812,7 @@ impl Shared {
             } else if let Some(id) = audio {
                 crate::dictation::recent_audio::discard(&id);
             }
-            self.count_in_yap(&raw, &text, secs);
+            self.count_in_yap(&raw, &text, None, secs);
         }
         let report = Delivered {
             text,
@@ -795,38 +828,78 @@ impl Shared {
         report
     }
 
-    /// A question for the **Voice Assistant**, transcribed: the correction
-    /// dictionary as for any dictation (no cleanup, voice command or
-    /// snippets: the AI reads it as asked), then `assistant::heard` — Chat
-    /// answers and Yap reads it aloud. `false`: nothing was said.
-    pub(super) fn ask_assistant(&self, transcript: &str) -> bool {
-        let question = self
-            .config
-            .read()
-            .map(|c| apply_corrections(transcript, &c))
-            .unwrap_or_else(|_| transcript.to_string());
-        let question = question.trim().to_string();
+    /// A question for the **Voice Assistant**, transcribed: AI cleanup when
+    /// its side's "Clean up what you say…" switch says so (Chat's, or Code
+    /// chats': [`Shared::clean_question`]), then the correction dictionary as
+    /// for any dictation (no voice command or snippets: the AI reads it as
+    /// asked), then `assistant::heard` — Chat answers and Yap reads it
+    /// aloud. `false`: nothing was said.
+    ///
+    /// Before any cleanup, on the words as said: nothing heard, and "snip"
+    /// said as the whole question (a screenshot never waits on a model).
+    /// While it's cleaned, a question that may be about the screen has Chat's
+    /// model asked about that already (`screen::ask_early`).
+    pub(super) async fn ask_assistant(&self, transcript: &str) -> bool {
+        let cfg = self.config.read().map(|c| c.clone()).unwrap_or_default();
         // Ask about the selection's question (its shortcut read it at the
         // press): about that text, never anything else.
         let about = self.ask_selection.lock().ok().and_then(|mut g| g.take());
-        if question.is_empty() {
-            tracing::info!("Voice Assistant: nothing heard");
-            crate::chat::assistant::nothing(&self.app);
-            return false;
-        }
+        let selection = about.is_some();
+        let (conversation, code) = crate::chat::assistant::shortcut_goes(&cfg, selection);
+        // Its side's "Clean up what you say…" switch on: cleaned, with Chat's
+        // model asked meanwhile whether it may be about the screen (not one
+        // about a selection: that's what it's about).
+        let c = &cfg;
+        let clean = crate::ai::cleanup_styles::cleans_question(c, code).then_some(|raw: String, said: String| async move {
+            if !selection {
+                crate::chat::assistant::screen::ask_early(&self.app, &said, c, conversation);
+            }
+            self.clean_question(&raw, code, true).await
+        });
+        let question = match question_words(transcript, c, selection, clean).await {
+            Heard::Nothing => {
+                tracing::info!("Voice Assistant: nothing heard");
+                crate::chat::assistant::nothing(&self.app);
+                return false;
+            }
+            // "Snip" said as the whole question: a screenshot, not a question.
+            Heard::Snip => {
+                crate::chat::assistant::nothing(&self.app);
+                crate::snip::start(&self.app, crate::snip::Origin::Voice);
+                return true;
+            }
+            Heard::Question(q) => q,
+        };
         if let Some(about) = about {
             crate::chat::assistant::ask_about(&self.app, question, about);
-            return true;
-        }
-        // "Snip" said as the whole question: a screenshot, not a question.
-        if self.snip_said(&question) {
-            crate::chat::assistant::nothing(&self.app);
-            crate::snip::start(&self.app, crate::snip::Origin::Voice);
             return true;
         }
         tracing::info!(len = question.len(), "Voice Assistant: a question");
         crate::chat::assistant::heard(&self.app, question);
         true
+    }
+
+    /// **A question said to Yap's AI, cleaned up** (its side's switch on,
+    /// `cleanup_styles::cleans_question`: `code`, a Code chat's): as an AI
+    /// prompt, literally, on Dictation cleanup's model ([`For::Question`]),
+    /// best effort as every cleanup is — an error, a timeout or an answer
+    /// that lost the question gives the transcript back. `watch`: asked at
+    /// this PC — "Loading the AI model…" while the on-device model loads, and
+    /// past its usual time "Taking longer than usual…", each with the bar's
+    /// Skip cleanup (the words as transcribed at once). Not a phone's: nothing
+    /// on this PC's bar. The log has the time it took, never the words.
+    pub(super) async fn clean_question(&self, raw: &str, code: bool, watch: bool) -> String {
+        let started = std::time::Instant::now();
+        let (text, _, skipped) = self.cleanup_pass(raw, For::Question, None, watch).await;
+        tracing::info!(
+            ms = started.elapsed().as_millis() as u64,
+            code_chat = code,
+            skipped,
+            changed = text.trim() != raw.trim(),
+            chars = text.chars().count(),
+            "Spoken question: AI cleanup"
+        );
+        text
     }
     /// The dictation's last state: "idle", or "cleaned" — the bar's "Cleaned
     /// up · Use what I said" — for [`as_said::OFFER_MS`] when it offers the
@@ -890,12 +963,13 @@ impl Shared {
     }
 
     /// A dictation into one of Yap's own windows (Chat's box, the quick
-    /// note) in history, with how long it was spoken for.
-    fn record_in_yap(&self, raw: &str, text: &str, model: &str, audio: Option<&str>, secs: Option<f32>) {
+    /// note) in history, with how long it was spoken for (and its words as
+    /// said, `said`, when cleanup changed them).
+    fn record_in_yap(&self, raw: &str, text: &str, said: Option<&str>, model: &str, audio: Option<&str>, secs: Option<f32>) {
         crate::dictation::history::record_dictation(crate::dictation::history::Dictation {
             raw,
             text,
-            said: None,
+            said,
             model,
             app: "yap.exe",
             audio,
@@ -906,11 +980,158 @@ impl Shared {
     }
 
     /// …and in the stats (Home, Insights), whether or not history keeps it.
-    fn count_in_yap(&self, raw: &str, text: &str, secs: Option<f32>) {
+    fn count_in_yap(&self, raw: &str, text: &str, said: Option<&str>, secs: Option<f32>) {
         let dict = self.config.read().map(|c| c.dictionary.clone()).unwrap_or_default();
         crate::dictation::stats::dictated(
             &self.app,
-            crate::dictation::stats::Counted { raw, text, said: None, app: "yap.exe", secs, dict: &dict, at: None },
+            crate::dictation::stats::Counted { raw, text, said, app: "yap.exe", secs, dict: &dict, at: None },
         );
+    }
+}
+
+/// A Voice Assistant question's words, once [`question_words`] is done.
+#[derive(Debug, PartialEq, Eq)]
+pub(super) enum Heard {
+    /// Nothing said (or nothing but fillers, cleaned away).
+    Nothing,
+    /// "Snip" said as the whole question: a screenshot, not a question.
+    Snip,
+    /// The question to ask.
+    Question(String),
+}
+
+/// **A Voice Assistant question's words, in order** ([`Shared::ask_assistant`]):
+/// the transcript through the dictionary first (not counted: the words as
+/// said), for nothing heard and a lone "snip" (not about a selection,
+/// `about_selection`: that's a question) — both before any model, so a
+/// screenshot never waits on one; then, its side's switch on, the AI cleanup
+/// (`clean`, given the transcript and those words as said: it gives the
+/// transcript back itself when it fails, times out or is skipped), and the
+/// dictionary after it, counted, as a dictation has them. Pure but for
+/// `clean`.
+pub(super) async fn question_words<F, Fut>(transcript: &str, cfg: &config::YapConfig, about_selection: bool, clean: Option<F>) -> Heard
+where
+    F: FnOnce(String, String) -> Fut,
+    Fut: std::future::Future<Output = String>,
+{
+    let said = corrections(transcript, cfg).trim().to_string();
+    if said.is_empty() {
+        return Heard::Nothing;
+    }
+    if !about_selection && cfg.snip_voice && crate::snip::is_snip_phrase(&said) {
+        return Heard::Snip;
+    }
+    let question = match clean {
+        Some(clean) => apply_corrections(&clean(transcript.trim().to_string(), said).await, cfg),
+        None => apply_corrections(transcript, cfg),
+    };
+    match question.trim() {
+        "" => Heard::Nothing,
+        q => Heard::Question(q.to_string()),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::future::{ready, Ready};
+    use std::sync::Mutex;
+
+    type Clean = fn(String, String) -> Ready<String>;
+
+    fn cfg() -> config::YapConfig {
+        let mut c = config::YapConfig { dictionary_fuzzy: false, snip_voice: true, ..Default::default() };
+        c.dictionary.push(serde_json::from_value(serde_json::json!({ "from": "cloud code", "to": "Claude Code" })).unwrap());
+        c
+    }
+
+    /// A cleanup stand-in: fillers and the false start out, as a cleanup
+    /// model writes it; what it was given kept for the test.
+    fn tidy(given: &Mutex<Vec<(String, String)>>) -> impl FnOnce(String, String) -> Ready<String> + '_ {
+        move |raw: String, said: String| {
+            given.lock().unwrap().push((raw.clone(), said));
+            let out = raw.replace("um ", "").replace("uh ", "").replace("so so ", "");
+            let mut c = out.chars();
+            ready(c.next().map(|f| f.to_uppercase().collect::<String>() + c.as_str()).unwrap_or_default() + "?")
+        }
+    }
+
+    /// Never asked: the test fails if it is.
+    fn never() -> Option<Clean> {
+        Some(|_, _| panic!("no cleanup expected here"))
+    }
+
+    const NONE: Option<Clean> = None;
+
+    fn run_with<F, Fut>(c: &config::YapConfig, transcript: &str, about_selection: bool, clean: Option<F>) -> Heard
+    where
+        F: FnOnce(String, String) -> Fut,
+        Fut: std::future::Future<Output = String>,
+    {
+        let rt = tokio::runtime::Builder::new_current_thread().build().unwrap();
+        rt.block_on(question_words(transcript, c, about_selection, clean))
+    }
+
+    fn run<F, Fut>(transcript: &str, about_selection: bool, clean: Option<F>) -> Heard
+    where
+        F: FnOnce(String, String) -> Fut,
+        Fut: std::future::Future<Output = String>,
+    {
+        run_with(&cfg(), transcript, about_selection, clean)
+    }
+
+    #[test]
+    fn a_question_is_cleaned_when_its_switch_is_on_and_as_said_when_off() {
+        let given = Mutex::new(Vec::new());
+        let said = "um so so what's on uh my calendar today";
+        assert_eq!(run(said, false, Some(tidy(&given))), Heard::Question("What's on my calendar today?".into()));
+        // The cleanup got the transcript, and the words as said beside it.
+        assert_eq!(given.lock().unwrap().as_slice(), [(said.to_string(), said.to_string())]);
+        // Off (or no cleanup model): the words as said, through the dictionary.
+        assert_eq!(run(said, false, NONE), Heard::Question(said.into()));
+    }
+
+    #[test]
+    fn a_cleanup_that_failed_or_was_skipped_gives_the_words_as_said() {
+        // `clean_question` gives the transcript back on an error, a timeout,
+        // an answer that lost the question or the bar's Skip cleanup.
+        let back = Some(|raw: String, _said: String| ready(raw));
+        assert_eq!(run(" um ask cloud code to fix the tests ", false, back), Heard::Question("um ask Claude Code to fix the tests".into()));
+    }
+
+    #[test]
+    fn the_dictionary_has_the_last_word_after_the_cleanup() {
+        let given = Mutex::new(Vec::new());
+        // The model kept the misheard words: the correction still lands.
+        assert_eq!(run("um ask cloud code to fix the tests", false, Some(tidy(&given))), Heard::Question("Ask Claude Code to fix the tests?".into()));
+        let given = given.lock().unwrap();
+        // The cleanup got the transcript, never the corrected words…
+        assert_eq!(given[0].0, "um ask cloud code to fix the tests");
+        // …with the words as said, corrected, beside it (the early screen check's).
+        assert_eq!(given[0].1, "um ask Claude Code to fix the tests");
+    }
+
+    #[test]
+    fn nothing_heard_and_a_lone_snip_never_wait_on_a_model() {
+        assert_eq!(run("   ", false, never()), Heard::Nothing);
+        assert_eq!(run("Snip.", false, never()), Heard::Snip);
+        assert_eq!(run("take a screenshot", false, never()), Heard::Snip);
+        // Fillers alone, cleaned away to nothing: nothing to ask.
+        let empty = Some(|_: String, _: String| ready(String::new()));
+        assert_eq!(run("um uh", false, empty), Heard::Nothing);
+        // "Say 'snip'…" off: a question like any.
+        let c = config::YapConfig { snip_voice: false, ..cfg() };
+        assert_eq!(run_with(&c, "snip", false, NONE), Heard::Question("snip".into()));
+    }
+
+    #[test]
+    fn a_question_about_the_selection_is_cleaned_and_never_a_snip() {
+        let given = Mutex::new(Vec::new());
+        // Ask about the selection: its words cleaned as any question's (the
+        // selection itself never goes to the cleanup)…
+        assert_eq!(run("um what does uh this mean", true, Some(tidy(&given))), Heard::Question("What does this mean?".into()));
+        assert_eq!(given.lock().unwrap().len(), 1);
+        // …and "snip" about it is a question, as before.
+        assert_eq!(run("snip", true, NONE), Heard::Question("snip".into()));
     }
 }

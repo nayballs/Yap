@@ -844,17 +844,29 @@ fn finish_question(hub: &Arc<Hub>, session: u64, latest: &Arc<AtomicU64>, asking
     tauri::async_runtime::spawn(async move { ask(app, turn, audio).await });
 }
 
-/// The phone's audio through the warm engine and the dictionary (`PhoneEar`).
-async fn transcribe(app: &tauri::AppHandle, audio: Vec<f32>) -> Result<String, String> {
+/// The phone's audio through the warm engine and the dictionary (`PhoneEar`)
+/// — and AI cleanup for a question going into a Code chat with "Clean up
+/// what you say in Code chats" on (`turn`'s conversation, as the Voice
+/// Assistant's path will choose it: [`code_chat_cleans`]). A plain chat's
+/// stay as said, as before.
+async fn transcribe(app: &tauri::AppHandle, turn: &Turn, audio: Vec<f32>) -> Result<String, String> {
     let ear = {
         let state = app.state::<crate::AppState>();
         let guard = state.pipeline.lock().unwrap_or_else(|p| p.into_inner());
         guard.as_ref().map(|p| p.phone_ear())
     };
     match ear {
-        Some(ear) => ear.question(audio).await,
+        Some(ear) => ear.question(audio, code_chat_cleans(turn)).await,
         None => Err(NO_SPEECH.to_string()),
     }
+}
+
+/// Is the phone's question for a Code chat, cleaned up there
+/// (`cleanup_styles::cleans_question`, the Code chats' switch)?
+fn code_chat_cleans(turn: &Turn) -> bool {
+    use crate::chat::assistant::Phone;
+    let cfg = crate::config::load();
+    crate::chat::assistant::phone_in_code_chat(&cfg, turn.chat()) && crate::ai::cleanup_styles::cleans_question(&cfg, true)
 }
 
 /// **Words for the phone's box**: transcribed, said back (`words`, or why
@@ -862,7 +874,7 @@ async fn transcribe(app: &tauri::AppHandle, audio: Vec<f32>) -> Result<String, S
 async fn words(app: tauri::AppHandle, turn: Arc<Turn>, audio: Vec<f32>) {
     use crate::chat::assistant::Phone;
     turn.tell(Out::State { phase: Phase::Transcribing });
-    let heard = transcribe(&app, audio).await;
+    let heard = transcribe(&app, &turn, audio).await;
     if !turn.current() {
         return;
     }
@@ -891,7 +903,7 @@ fn words_out(heard: Result<String, String>) -> Out {
 async fn ask(app: tauri::AppHandle, turn: Arc<Turn>, audio: Vec<f32>) {
     use crate::chat::assistant::Phone;
     turn.tell(Out::State { phase: Phase::Transcribing });
-    let heard = transcribe(&app, audio).await;
+    let heard = transcribe(&app, &turn, audio).await;
     if !turn.current() {
         return;
     }

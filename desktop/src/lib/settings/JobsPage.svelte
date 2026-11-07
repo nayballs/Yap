@@ -3,7 +3,8 @@
   // the Voice Assistant hand a task to the person's own Claude Code, in a
   // folder they chose, and it reports back.
   // - The **Jobs** switch (`jobsEnabled`); Claude Code on this PC, found and
-  //   signed in, or Sign in (ClaudeCodeStatus).
+  //   signed in, or Sign in (ClaudeCodeStatus); **Clean up what you say in
+  //   Code chats** (`jobsCleanSpeech`, CleanSpeech).
   // - **Pay with**: Your Claude plan / API key (`jobsPay`), saying which is
   //   in use, and for the key whether Language Models' Claude tab has one.
   // - **Defaults**: model and effort (`jobsModel`, `jobsEffort`), the Mode a
@@ -33,6 +34,7 @@
   import ConfirmDialog from '../ui/ConfirmDialog.svelte';
   import { toast } from '../ui/toast.svelte.js';
   import ClaudeCodeStatus from './ClaudeCodeStatus.svelte';
+  import CleanSpeech from './CleanSpeech.svelte';
   import { sharedKey } from '../core/providers.js';
   import { EFFORT_LABELS } from '../core/effort.js';
   import { jobs, initJobs, refreshJobs } from '../stores/jobs.svelte.js';
@@ -215,6 +217,17 @@
     <Toggle bind:checked={cfg.jobsEnabled} label={FEATURE_NAME} desc="Let Chat and the Voice Assistant hand tasks to your own Claude Code, in workspaces you choose." />
   </Row>
   <ClaudeCodeStatus />
+  <!-- What's said into a Code chat, cleaned up as an AI prompt, word for
+       word (ai/cleanup_styles.rs `cleans_question`); plain chats have their
+       own switch in Settings → Voice Assistant. -->
+  <CleanSpeech
+    {cfg}
+    {goto}
+    field="jobsCleanSpeech"
+    setting="jobs-clean-speech"
+    label="Clean up what you say in {CODE_NAME} chats"
+    desc="Fillers and false starts taken out of spoken questions and requests, your words kept. Uses your dictation cleanup's model."
+  />
 </Group>
 
 <Group title="Paying for jobs" id="settings-jobs-pay">

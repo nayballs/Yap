@@ -944,6 +944,15 @@ pub struct YapConfig {
     /// Chat. ▶ Read aloud on a message always reads all of it.
     #[serde(default = "default_spoken_length")]
     pub spoken_length: String,
+    /// "Clean up what you say in Chat" (Settings → Voice Assistant): a
+    /// question said into a plain chat — the assistant shortcut's, Ask about
+    /// the selection's, the Chat view's mic — goes through AI cleanup as an
+    /// AI prompt, literally (fillers and false starts out, the words kept),
+    /// on Dictation cleanup's model, whether or not "AI cleanup" itself is
+    /// on (`cleanup_styles::cleans_question`). No cleanup model set up: the
+    /// words as said. On by default; an older Yap drops it (on again).
+    #[serde(default = "default_true")]
+    pub chat_clean_speech: bool,
     /// "Let Yap open apps when you ask" (Settings → Voice Assistant → Opening
     /// apps; `apps.rs`): "open Spotify" in Chat or to the Voice Assistant
     /// opens an app from the Start menu's list of apps installed on this PC
@@ -1253,6 +1262,12 @@ pub struct YapConfig {
     /// default; the page's alone.
     #[serde(default = "default_true")]
     pub jobs_animate: bool,
+    /// "Clean up what you say in Code chats" (Settings → Jobs): the same as
+    /// [`YapConfig::chat_clean_speech`] for a question said into a Code chat
+    /// (one, a new code chat waiting with its workspace, the Code side's).
+    /// On by default; its own switch, so each side is chosen apart.
+    #[serde(default = "default_true")]
+    pub jobs_clean_speech: bool,
 
     // ---- Memory (Settings → Memory; `memory.rs`) ----
     // The switches only: what Yap remembers lives in memory.json, never
@@ -1606,6 +1621,7 @@ impl Default for YapConfig {
             assistant_screen_cloud: false,
             assistant_screen_asked: false,
             spoken_length: default_spoken_length(),
+            chat_clean_speech: true,
             open_apps: true,
             apps_blocked: Vec::new(),
             app_nicknames: Vec::new(),
@@ -1663,6 +1679,7 @@ impl Default for YapConfig {
             jobs_speak: default_jobs_speak(),
             jobs_max: default_jobs_max(),
             jobs_animate: true,
+            jobs_clean_speech: true,
             memory_search_chats: true,
             memory_learn_chats: true,
             memory_learn_meetings: false,

@@ -4,6 +4,16 @@ The AI Chat surface (conversations, the tool-calling loop and its note tools) an
 
 [Architecture index](./README.md) · [CLAUDE.md](../../CLAUDE.md)
 
+**Chat and Code** (2026-11-07). With Jobs on, Chat has two sides, switched at
+the top of its conversation list: **Chat**, the plain conversations this file
+describes, and **Code**, conversations attached to a workspace (a folder on
+this PC) where a request can start a job: the person's own Claude Code working
+in that folder, followed in a Job tab beside the chat. A Code chat is a Chat
+conversation with a few differences (the workspace and Mode chips, one more
+line in its prompt, its look); what they are, and how a chat moves between
+the sides, is in [jobs.md](./jobs.md#chat-and-code). With Jobs off, Chat has
+one side.
+
 ## Modules
 
 - **`chat/chats.rs`** — the AI Chat surface's conversation store (`chats.json`): a
@@ -1226,9 +1236,21 @@ The AI Chat surface (conversations, the tool-calling loop and its note tools) an
   meetings" (alert `assistantMeetingOff`, over the meeting, every press) —
   and nothing in Yap talks: `tts::say` refuses, Chat's auto-speak stays
   quiet. The question is transcribed with the correction dictionary (exact
-  + near-miss, as a dictation), never the AI cleanup pass (the Chat model
-  reads it as asked; cleanup would add delay), snippets or the voice
-  command. Phases
+  + near-miss, as a dictation), never snippets or the voice command; **AI
+  cleanup only by its side's switch** (2026-11-07, the maintainer: questions
+  landed full of "um"): "Clean up what you say in Chat" (Settings → Voice
+  Assistant, `chat_clean_speech`) for a plain chat, "…in Code chats"
+  (Settings → Jobs, `jobs_clean_speech`) for a Code chat or a new code chat
+  waiting with its workspace (`shortcut_goes`, `into_code_chat`), both on,
+  each apart from "AI cleanup": as an AI prompt, literally, on Dictation
+  cleanup's model (`cleanup_styles::question_plan`; no model set up: as said,
+  Settings says so), its guards and Skip cleanup on the capsule — the Chat
+  view's mic the same; "snip" and nothing-heard decided first; the dictionary
+  after (`pipeline::ask_assistant`, dictation.md). It adds the cleanup's time
+  (~0.15 s on the on-device 4B here, ~0.5–0.85 s on Groq): meanwhile a maybe
+  about the screen is put to Chat's model already (`screen::ask_early`, its
+  word taken by `look`). A phone's question for a Code chat is cleaned (off
+  the bar); a plain chat's stays as said. Phases
   `Idle → Listening → Thinking → Speaking` in `yap-assistant {phase,
   conversationId, messageId}` (the bar). `listening` (from
   `capture_target`; bumps a generation, drops the last answer's card),
@@ -2481,14 +2503,37 @@ blocks); e2e `chat-documents-editor.spec.js` (a word, a cell, an item typed
 action as plain markdown, the toolbar waiting while Chat writes, Chat's
 change landing with the person's words kept, Undo marked, find, dark).
 
-**The split** (`role="separator"`): dragged, or ←/→ (Shift:
-further), Home/End on its handle; at least 320 px, the thread keeps 340;
-its width remembered in this window's `localStorage` (`yapChatDocWidth`).
-**Room**: the conversation list steps aside while a document is open
-unless Chat is 1,240 px wide or more (a "Show your chats" button at the
-thread's top left brings it back until the document closes); a window too
-narrow for the panel beside the thread has it cover the conversation (✕
-goes back). **Under the answer**, a pill per document it made or changed
+**The split** (`role="separator"`, "Resize the panel"; every tab kind,
+the Job tab's too): dragged — its grip on hover, the resize cursor over
+the whole of Chat while it's held, Esc mid-drag putting it back —, or ←/→
+(Shift: further), Home/End on its handle, a double-click back to 460 px; at
+least 320 px, the thread keeps 340 (the composer's chips and the panel's
+buttons never cut off); its width remembered in this window's
+`localStorage` (`yapChatDocWidth`). **The list's button** (2026-11-07, the
+Claude app's "Hide sidebar · Ctrl+B"): at the list's top left, beside the
+Chat | Code switch ("Hide your chats · Ctrl+B"; New chat on its own row
+below), and at the thread's top left while the list is hidden ("Show your
+chats"); Ctrl+B anywhere in Chat but rich text (a document's page keeps it
+for bold) or a dialog; the focus follows the button; the person's choice
+remembered (`yapChatListHidden`). Only the conversation list hides: the
+main window's own navigation stays, the same in every view. **Room**
+(`chatRoom.js`, pure; `chatLayout.svelte.js`): what gives way first is the
+list — it steps aside while a panel is open unless Chat is 1,240 px wide or
+more, the same hidden state its button shows, back when the panel closes;
+asked back meanwhile it stays for that panel, floating over the thread when
+there's no room beside both (Esc, a press in the thread put it aside) —,
+then the panel's width (down to 320), then, in a window too narrow for the
+panel beside the thread, the panel covering the conversation (✕ goes back).
+**Opening calmly** (a job starting, 7 Nov 2026: the list vanished, the
+thread jumped 225 px and shrank, the composer grew 9 px a frame later, the
+panel's chunk popped into an empty gap): every box changes once, in one
+frame — the list aside, the panel at its remembered width, drawn whole
+(DocPanel's chunk fetched once Chat is idle) and faded in over 140 ms
+(never with reduced motion); with Jobs on every message box keeps room for
+a Code chat's label, so a chat turning into a Code chat never moves the
+thread; the list is 224 px on both sides; the thread keeps its newest line
+(`core/stickToBottom.js`). E2e `chat-layout.spec.js` (each frame measured).
+**Under the answer**, a pill per document it made or changed
 ("Lone wolf ranger · Open", `ChatMessage.svelte` `.docpill`; while it's
 written, from the `document` events); a click opens it beside the chat.
 Opening another conversation or a new chat closes the panel; the pills
@@ -3381,7 +3426,10 @@ as for every other. Chat, the Voice Assistant on this PC and from the phone.
   none of the person's settings (`--setting-sources ""`); `dontAsk` with
   those tools in `--allowedTools`; in an empty folder of Yap's; `Pay::Plan`
   (no API key in its environment; a run Claude Code would bill to a key is
-  stopped before it asks anything).
+  stopped before it asks anything). **In a Code chat** instead: a Claude Code
+  session in the workspace, with the person's own settings, Claude Code's
+  prompt with Yap's added, read only (`Read`, `Grep`, `Glob`), no memory
+  ([jobs.md](./jobs.md#memory-and-the-plan-in-a-code-chat), [ai-models.md](./ai-models.md#a-chat-turn-chatturnplanrs)).
 - **The question**: the turn's context and the question
   (`chats::with_context`), its screenshots as image blocks.
 - **Its events → Chat's stream** (`claude_plan/map.rs`, pure): text deltas as
@@ -3399,18 +3447,15 @@ as for every other. Chat, the Voice Assistant on this PC and from the phone.
 - **Stop, and a newer question**: the interrupt (`Session::interrupt`), and
   the turn read to its end (10 s at most, else the process is ended), so the
   next question's events are its own.
-- **Jobs** (while offered: `on_the_plan` keeps `jobs`): Yap's `start_job`,
-  `job_status`, `message_job` and `stop_job` over the same endpoint, in
-  `--allowedTools` and named in the prompt with the safety rule as it holds
-  here (`plan.rs` `JOBS`, then `JOB_TOOL_INSTRUCTIONS`). Each turn opens on
-  the session's run (`RunHandle::begin_turn`: the question, the answer before
-  it, the conversation, where it was asked, text selected in another app as
-  web content); the turn's events tell the run of every web read and of each
-  of Yap's tool calls as Claude Code begins it (`ToChat`, `Marks`), so a job
-  call is checked after every web read before it; what the calls show (the
-  card before a job, its tab) comes back into the turn's stream
-  (`read_turn`). The session's fingerprint includes jobs: switching Jobs on or
-  off starts it again. [jobs.md](./jobs.md#from-a-plan-chat).
+- **Jobs** (while offered: `on_the_plan` keeps `jobs`): Yap's job tools over
+  the same endpoint, allowed and named in the prompt (`plan.rs` `JOBS`). Each
+  turn opens on the session's run (`RunHandle::begin_turn`), and the turn's
+  events tell the run of every web read and of each of Yap's tool calls as
+  Claude Code begins it (`ToChat`, `Marks`); what the calls show comes back
+  into the turn's stream (`read_turn`): [jobs.md](./jobs.md#from-a-plan-chat).
+- **In a Code chat** a plan turn is a read-only Claude Code session in the
+  chat's workspace, with the person's own settings and no Yap memory
+  ([jobs.md](./jobs.md#memory-and-the-plan-in-a-code-chat)).
 - **What a plan turn doesn't do in v1** (`gates.rs` `on_the_plan`): documents
   beside the chat, pictures from the web, pages to open or act on, a look at
   the screen (the Voice Assistant gets the window's picture instead), Think's
@@ -3436,84 +3481,37 @@ as for every other. Chat, the Voice Assistant on this PC and from the phone.
 
 ## Jobs in Chat (2026-11-07)
 
-Chat's side of [Jobs](./jobs.md): any chat model hands a task to the person's
-own Claude Code in one of their folders, and reports back when it ends.
+Jobs and Code chats are described whole in [jobs.md](./jobs.md); this is
+where they touch Chat's own code.
 
-- **The tools** (`chat/tools/jobs.rs`): `start_job` (folder, brief, model?,
-  effort?, mode?), `job_status`, `message_job`, `stop_job`. Offered while
-  jobs are offered (`Gates::jobs`: tools, not the Meetings view's Ask, and
-  `jobs::offered`), to any model that calls tools; `Extra::jobs` carries
-  whether the turn was asked out loud (a job that needs asking is asked in
-  words) and by voice (its report is read aloud: `JobsTurn::asked`). Their
-  instructions in `prompt.rs` (`JOB_TOOL_INSTRUCTIONS`). **Two callers, one
-  implementation** (`execute` with a `Ctx`): the tool loop
-  (`tools/agent/dispatch.rs`, after its gate's safety rule) and a plan chat,
-  whose Claude Code calls them over Yap's run endpoint
-  (`integrations/claude_live/jobs.rs`, the same safety rule first, for the
-  turn the call belongs to: `claude_live/turn.rs`;
-  [jobs.md](./jobs.md#from-a-plan-chat)).
-- **Their rules** ([jobs.md](./jobs.md#starting-a-job-from-chat)): the
-  person's own message names the folder or says yes to the offer
-  (`jobs/consent.rs`); the folder is one of theirs or a full path they said,
-  never a guess (`jobs/folders.rs`); the job runs at the chat's Mode or lower
-  (`jobs/modes.rs`); asked first for a new folder or after a web answer (a
-  `confirm` card with `act: "job"`, or a spoken yes or no out loud).
+- **The tools** (`chat/tools/jobs.rs`): `start_job`, `job_status`,
+  `message_job`, `stop_job`, a `Source` of their own (`dispatch.rs`
+  `Source::Jobs`) while jobs are offered (`Gates::jobs`: a model with tools,
+  not the Meetings view's Ask). `Extra::jobs` carries whether the turn was
+  asked out loud (a job that needs asking is asked in words) and by voice
+  (its report is read aloud: `JobsTurn::asked`). The same code answers a plan
+  chat's calls over Yap's run endpoint ([jobs.md](./jobs.md#from-a-plan-chat)).
+  Their rules: [jobs.md](./jobs.md#starting-a-job).
 - **The safety rule**: `start_job` and `message_job` are in `ACTION_TOOLS`
-  and `STRONG_LOCKED`, refused once web content is in the turn — and a job's
-  own output is web content (`job_status`, the dispatch's `job_seen`), so a
-  status never steers a job.
-- **`stream::Event::Job`** `{kind: "job", job: {id, folder, status, mode,
-  conversation?}}`: a job started in this turn; the panel opens its tab at
-  once. Its progress is the app-wide `yap-job` event.
-- **The report** (`chat/turn/report.rs`): a turn Yap starts itself, never
-  over an answer; the `jobReport` marker, then Chat's model's one to three
-  sentences, read aloud when the job came by voice; `yap-job-report`, which
-  never switches the open chat ([jobs.md](./jobs.md#the-report)).
-- **The spoken yes or no** before a job (`jobs/voice.rs`): the next question
-  in the conversation within 2 minutes, answered by Yap itself
-  (`turn/fast.rs` `job_answer_turn`, checked in `turn.rs` before any model).
-- **Code chats** (2026-11-07, `jobs/code_chat.rs`,
-  [jobs.md](./jobs.md#code-chats)): with Jobs on, Chat has two sides, flipped
-  by the **Chat | Code** switch at the top of its list (as the Claude app's
-  sidebar): plain conversations, and Code chats, each attached to one of the
-  person's workspaces (the job folders), grouped by workspace. In a Code chat
-  `start_job` and `message_job` may leave the folder out (the chat's), the
-  person's own request this turn is enough there (`consent::start_in`), and
-  the question's context says so (`prompt.rs` `build`: `code_chat::prompt_line`,
-  for the tool loop and a plan chat alike). A plain chat whose job named a
-  folder becomes a Code chat there. A new code chat's first question carries
-  its workspace (`chat_send`'s `codeFolder`, attached as the conversation is
-  made: `code_chat::with_new` / `adopt_new`), asked out loud too (Chat
-  reports it, `chat_view_state`'s `codeFolder`: `assistant::new_code_chat`).
-  An empty one greets you as the Code side (`CodeEmpty.svelte`). Kept in
-  `jobs.json`, never chats.json.
-- **On screen** (`views/chat/`, [frontend.md](./frontend.md)):
-  - **The switch and the Code side** (`ChatSideSwitch.svelte`,
-    `codeChats.svelte.js`): New code chat opens the workspace picker
-    (`WorkspacePicker.svelte`: recent first, Add workspace…, Manage
-    workspaces…); in a Code chat the composer has the workspace chip and the
-    Mode chip (`CodeChips.svelte`), the accent edge and "Code · garden-planner"
-    (`CodeEdge.svelte`, `codeChat.css`), and a slow light round it while a job
-    from it runs ("Animate Code chats"). The Chat side has nothing job-like.
-  - **The Mode chip** (`ModeChip.svelte`) beside the workspace chip, in a
-    Code chat only: Claude Code's modes in its words (Auto, Manual, Accept
-    edits, Plan, Bypass permissions; 1–5, ↑ ↓, Enter, Esc), kept per
-    conversation, a new chat's pick going to the conversation its first
-    question makes; Bypass asks once, then the chip is amber.
-  - **The Job tab** (`JobTab.svelte`, a `job:<id>` tab in `chatDoc` and
-    `DocPanel`): opened by the turn's job event, a pill or the bar's Open;
-    read like Claude Code: its to-do list, its steps and what it says
-    (following the live end), files opening to their diffs, commands with
-    what each is for ([jobs.md](./jobs.md#what-the-tab-shows)), what wasn't
-    allowed, its final words, its cost,
-    a problem with one button, Stop / Continue / Undo job / Open in terminal /
-    "Tell the job…". Closing it never stops the job.
-  - **Pills** under the answer that started a job (`JobPills.svelte`, by the
-    job's `messageId`), **the report card** "Job done · garden-planner"
-    (`JobReportCard.svelte`, its own "Job" chip), **the ask-first card**
-    (`JobConfirm.svelte`: Start / Don't), **a permission prompt** in the
-    thread (`JobApprove.svelte`: Allow once / Deny), **running jobs** above
-    the Code side's list (`RunningJobs.svelte`).
-  - A report reloads the open chat without switching to it
-    (`stores/jobs.svelte.js`).
-- E2E: `jobs.spec.js`, `jobs-ui.spec.js`, `plan-jobs.spec.js`, `jobs-code-chats.spec.js` ([`docs/e2e-tests.md`](../e2e-tests.md)).
+  and `STRONG_LOCKED`; a job's own output is web content (the dispatch's
+  `job_seen`).
+- **A Code chat's prompt line** (`prompt.rs` `build`:
+  `code_chat::prompt_line_for`), for the tool loop and a plan chat alike.
+- **No Yap memory in a Code chat** (any model): none of memory's passages,
+  "You" or tools, About you without its note, no eager RAG or past chats,
+  never learned from; meetings, notes and tasks read with the tools on
+  request. On the Claude plan its session runs in the workspace, read only
+  ([jobs.md](./jobs.md#code-chats-and-workspaces),
+  [memory.md](./memory.md#code-chats-keep-memory-out)).
+- **A new code chat's first question** carries its workspace (`chat_send`'s
+  `codeFolder`; `chat_view_state`'s `codeFolder` for one asked out loud).
+- **`stream::Event::Job`**: a job started in this turn; the panel opens its
+  tab at once.
+- **The report** (`chat/turn/report.rs`), a turn Yap starts itself, and the
+  spoken yes or no before a job (`turn/fast.rs` `job_answer_turn`, checked in
+  `turn.rs` before any model): [jobs.md](./jobs.md#reports).
+- **On screen** (`views/chat/`): the Chat | Code switch and the Code side,
+  the workspace and Mode chips, the Job tab and its cards:
+  [jobs.md](./jobs.md#code-chats-and-workspaces) and
+  [jobs.md](./jobs.md#the-job-tab). A report reloads the open chat without
+  switching to it.

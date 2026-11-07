@@ -48,6 +48,8 @@ import { toast } from '../../ui/toast.svelte.js';
 import { showSaveError } from '../../notices/saveErrors.js';
 import { isPlaceholder, pendingSections } from '../../core/markdown.js';
 import { sectionText } from './docSections.js';
+// The panel's widths and the room it leaves (chatRoom.js: the rules, pure).
+import { MIN_WIDTH, DEFAULT_WIDTH, THREAD_MIN, LIST_STAYS } from './chatRoom.js';
 
 export { sectionRange } from './docSections.js';
 
@@ -55,19 +57,7 @@ export { sectionRange } from './docSections.js';
 export const PANEL_ORIGIN = 'chat-panel';
 
 const WIDTH_KEY = 'yapChatDocWidth';
-export const MIN_WIDTH = 320;
-export const DEFAULT_WIDTH = 460;
-/**
- * The least the conversation keeps beside the panel. Less room than that
- * and the panel's least (a narrow window): it covers the conversation
- * instead, ✕ going back.
- */
-export const THREAD_MIN = 340;
-/**
- * Chat at least this wide keeps its conversation list beside an open
- * document; narrower, the list steps aside for it.
- */
-export const LIST_STAYS = 1240;
+export { MIN_WIDTH, DEFAULT_WIDTH, THREAD_MIN, LIST_STAYS };
 
 /** Where each document was scrolled to, per view (`${id}:${view}` → px), while Yap runs. */
 const scrolls = new Map();

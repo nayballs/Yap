@@ -70,6 +70,22 @@ impl Sizing {
     pub(super) fn plain(&self, e: String, provider: &str) -> String {
         crate::chat::budget::plain_error(e, &self.label, self.context_size, provider)
     }
+
+    /// A cloud model's Chat turn with `context` tokens, measured as nothing
+    /// (a unit test building a turn's prompt, `prompt.rs`).
+    #[cfg(test)]
+    pub(super) fn for_tests(context: u64) -> Sizing {
+        Sizing {
+            kind: crate::chat::budget::Kind::Chat,
+            mode: crate::chat::budget::Mode::Messages,
+            counter: crate::chat::budget::Counter::for_call("custom", "https://api.example.com/v1"),
+            context_size: context,
+            context_known: true,
+            label: String::new(),
+            schemas: 0,
+            question_tokens: 0,
+        }
+    }
 }
 
 /// What [`fit`] chose: the budget the turn's requests are held to, where

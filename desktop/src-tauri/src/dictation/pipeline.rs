@@ -1131,9 +1131,9 @@ impl Pipeline {
 pub(crate) struct PhoneEar(Arc<Shared>);
 
 impl PhoneEar {
-    /// See `Shared::phone_question`.
-    pub(crate) async fn question(&self, audio: Vec<f32>) -> Result<String, String> {
-        self.0.phone_question(audio).await
+    /// See `Shared::phone_question` (`code_chat`: cleaned for a Code chat).
+    pub(crate) async fn question(&self, audio: Vec<f32>, code_chat: bool) -> Result<String, String> {
+        self.0.phone_question(audio, code_chat).await
     }
 }
 

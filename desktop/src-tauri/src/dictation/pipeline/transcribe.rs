@@ -310,10 +310,11 @@ impl Shared {
                 lease.after_transcribing(&transcription);
                 drop(lease);
                 match transcription {
-                    // A question for the Voice Assistant: corrected, then
-                    // to Chat and read aloud (assistant.rs). Nothing pasted.
+                    // A question for the Voice Assistant: cleaned up when its
+                    // side's switch says so, corrected, then to Chat and read
+                    // aloud (assistant.rs). Nothing pasted.
                     Ok(text) if self.assistant.swap(false, Ordering::SeqCst) => {
-                        if !self.ask_assistant(text.trim()) {
+                        if !self.ask_assistant(text.trim()).await {
                             error_msg = Some("Yap didn't catch a question — try again");
                         }
                     }
@@ -383,9 +384,13 @@ impl Shared {
     /// a dictation or a meeting's chunk that has it out; loaded into the slot
     /// when nobody has it) in My languages, then the correction dictionary
     /// (exact, then near-misses), as the Voice Assistant's question gets it:
-    /// no AI cleanup, snippets or voice commands. Nothing kept, listed or
-    /// pasted; the language heard isn't this PC's dictation's.
-    pub(super) async fn phone_question(self: &Arc<Self>, audio: Vec<f32>) -> Result<String, String> {
+    /// no snippets or voice commands, and AI cleanup only for `code_chat` —
+    /// a question for a Code chat with "Clean up what you say in Code chats"
+    /// on and a cleanup model ready (`link/session.rs` asks
+    /// `cleanup_styles::cleans_question`): its words cleaned as the
+    /// shortcut's are, with nothing on this PC's bar. Nothing kept, listed
+    /// or pasted; the language heard isn't this PC's dictation's.
+    pub(super) async fn phone_question(self: &Arc<Self>, audio: Vec<f32>, code_chat: bool) -> Result<String, String> {
         if audio.is_empty() {
             return Ok(String::new());
         }
@@ -410,7 +415,12 @@ impl Shared {
         drop(lease);
         self.touch_activity();
         let said = result.map_err(|e| format!("The transcription failed: {e}"))?;
-        let question = apply_corrections(said.text.trim(), &cfg).trim().to_string();
+        let heard = if code_chat && !said.text.trim().is_empty() {
+            self.clean_question(said.text.trim(), true, false).await
+        } else {
+            said.text
+        };
+        let question = apply_corrections(heard.trim(), &cfg).trim().to_string();
         tracing::info!(samples, len = question.len(), "Yap Link: a phone's question transcribed");
         Ok(question)
     }

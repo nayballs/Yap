@@ -197,8 +197,11 @@
 </div>
 
 <style>
+  /* In a narrow thread (the panel beside it) it gives way first: its name,
+     then where it runs, ellipsized; never past its pill. */
   .modelchip {
     position: relative;
+    flex: 0 4 auto;
     min-width: 0;
     display: flex;
     align-items: center;
@@ -226,6 +229,7 @@
     gap: 6px;
     min-width: 0;
     max-width: 100%;
+    overflow: hidden;
     height: 26px;
     padding: 0 8px 0 6px;
     border: 1px solid var(--yap-border-subtle);
@@ -272,6 +276,8 @@
     --pm-glyph: var(--yap-warning);
   }
   .cname {
+    flex: 0 8 auto;
+    min-width: 0;
     font-weight: 600;
     color: var(--yap-fg);
     overflow: hidden;
@@ -282,7 +288,10 @@
   }
   .cprov {
     color: var(--yap-muted);
-    flex: 0 0 auto;
+    flex: 0 1 auto;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
   }
   .ceffort {
     color: var(--yap-muted);

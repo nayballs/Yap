@@ -90,8 +90,12 @@
   // a panel on the right (DocPanel, chatDoc.svelte.js) and fills section by
   // section; a pill under the answer reopens it. The split between the
   // conversation and the panel is dragged (or moved with the arrow keys on
-  // its handle) and remembered; with no room beside the conversation (a
-  // narrow window) the panel covers it, ✕ going back. Words selected there
+  // its handle, a double-click back to the default) and remembered; with no
+  // room beside the conversation (a narrow window) the panel covers it, ✕
+  // going back. The conversation list has its own button (Hide your chats ·
+  // Ctrl+B, 2026-11-07, as the Claude app's sidebar), remembered; it steps
+  // aside by itself only while a panel needs the room, its button showing
+  // (chatLayout.svelte.js, chatRoom.js). Words selected there
   // ("Change this…") wait over the box as a quote, and the next question
   // takes them however it comes: typed, dictated into the box, or asked out
   // loud with Chat in view (Rust keeps a copy, `yap-chat-quote`).
@@ -109,7 +113,7 @@
   import { invoke } from '@tauri-apps/api/core';
   import { listen } from '@tauri-apps/api/event';
   import { getCurrentWebview } from '@tauri-apps/api/webview';
-  import { onMount, onDestroy, untrack } from 'svelte';
+  import { onMount, onDestroy, untrack, tick } from 'svelte';
   import { chatRequest } from '../../stores/chatRequest.svelte.js';
   import { openContextMenu } from '../../ui/contextMenu.svelte.js';
   import { createChatState } from './chatState.svelte.js';
@@ -118,7 +122,8 @@
   import ChatThread from './ChatThread.svelte';
   import Composer from './Composer.svelte';
   import ShotViewer from './ShotViewer.svelte';
-  import { MIN_WIDTH, THREAD_MIN, LIST_STAYS, tabKeyOf } from './chatDoc.svelte.js';
+  import { MIN_WIDTH, tabKeyOf } from './chatDoc.svelte.js';
+  import { createChatLayout } from './chatLayout.svelte.js';
   import { chatBrowser } from '../../stores/chatBrowser.svelte.js';
   import { memoryTakesDrops } from '../../stores/memory.svelte.js';
   import { jobs, initJobs, jobById } from '../../stores/jobs.svelte.js';
@@ -186,37 +191,25 @@
   });
   onDestroy(() => (chatBrowser.open = false));
 
-  // Chat's own width: too narrow for the document beside the conversation,
-  // it covers it instead.
+  // **Chat's layout** (chatLayout.svelte.js, the rules chatRoom.js's): the
+  // conversation list shown or hidden (its button, Ctrl+B; stepped aside
+  // while a panel needs the room, back when it closes), the split between
+  // the thread and the panel, and what gives way in a narrow window (the
+  // list, then the panel's width, then the panel covering the conversation).
+  const layout = createChatLayout(doc);
+  const room = $derived(layout.room);
+  const cover = $derived(room.cover);
+  const narrow = $derived(room.narrow);
   let chatEl = $state(null);
-  let chatWidth = $state(0);
-  // The conversation list's own width (a long title widens it). While a
-  // document is open beside the chat, the list steps aside unless Chat is
-  // wide: the conversation on the left, the document on the right ("Show
-  // your chats" over the thread brings it back; so does ✕).
-  let listWidth = $state(224);
-  let listWanted = $state(false);
-  const listAside = $derived(doc.open && !doc.expanded && chatWidth < LIST_STAYS && !listWanted);
-  // Asked back while one document was open: until it closes.
-  $effect(() => {
-    if (!doc.open) listWanted = false;
-  });
-  // The most the panel may take: the list (when it shows) and the thread keep theirs.
-  const room = $derived(chatWidth - (listAside ? 0 : listWidth) - THREAD_MIN);
-  const narrow = $derived(chatWidth > 0 && chatWidth - THREAD_MIN < MIN_WIDTH);
-  const cover = $derived(doc.open && (narrow || doc.expanded));
-  const maxWidth = $derived(Math.max(MIN_WIDTH, room));
-  // Its width now: the remembered one, within what there's room for.
-  const shownWidth = $derived(Math.min(doc.width, maxWidth));
   $effect(() => {
     const el = chatEl;
     if (!el || typeof ResizeObserver === 'undefined') return;
     const list = el.querySelector('.convs');
     const measure = () => {
-      chatWidth = el.clientWidth;
-      // (Not while it's stepped aside: it keeps its last width.)
+      layout.chatWidth = el.clientWidth;
+      // (Not while it's hidden: it keeps its last width.)
       const w = list?.getBoundingClientRect().width;
-      if (w) listWidth = w;
+      if (w) layout.listWidth = w;
     };
     const ro = new ResizeObserver(measure);
     ro.observe(el);
@@ -225,36 +218,88 @@
     return () => ro.disconnect();
   });
 
-  // The split's handle: dragged, or the arrow keys on it.
-  let dragging = false;
+  // The panel's own chunk (DocPanel: documents, pictures, pages, jobs),
+  // fetched once Chat is idle so a panel opens whole in its first frame —
+  // never an empty gap it then pops into (a job starting, 7 Nov 2026).
+  let DocPanel = $state(null);
+  let panelLoading = null;
+  function loadPanel() {
+    panelLoading ??= import('./DocPanel.svelte')
+      .then((m) => (DocPanel = m.default))
+      .catch(() => (panelLoading = null));
+    return panelLoading;
+  }
+  onMount(() => {
+    const idle = window.requestIdleCallback ?? ((f) => setTimeout(f, 300));
+    idle(() => loadPanel());
+  });
+  $effect(() => {
+    if (doc.open && !DocPanel) untrack(loadPanel);
+  });
+
+  // The split's handle: dragged (the whole of Chat keeps the resize cursor
+  // while it's held; Esc puts it back), its keys, a double-click to the default.
   function splitDown(e) {
     if (e.button !== 0) return;
-    dragging = true;
+    layout.dragStart();
     e.currentTarget.setPointerCapture?.(e.pointerId);
+    e.currentTarget.focus?.({ preventScroll: true });
     e.preventDefault();
   }
   function splitMove(e) {
-    if (!dragging || !chatEl) return;
-    const right = chatEl.getBoundingClientRect().right;
-    doc.setWidth(right - e.clientX, maxWidth);
+    if (!layout.dragging || !chatEl) return;
+    layout.dragTo(e.clientX, chatEl.getBoundingClientRect().right);
   }
   function splitUp() {
-    if (!dragging) return;
-    dragging = false;
-    doc.keepWidth();
+    layout.dragEnd();
   }
   function splitKey(e) {
-    const step = e.shiftKey ? 80 : 24;
-    if (e.key === 'ArrowLeft') doc.setWidth(shownWidth + step, maxWidth);
-    else if (e.key === 'ArrowRight') doc.setWidth(shownWidth - step, maxWidth);
-    else if (e.key === 'Home') doc.setWidth(maxWidth, maxWidth);
-    else if (e.key === 'End') doc.setWidth(MIN_WIDTH, maxWidth);
-    else return;
-    e.preventDefault();
-    doc.keepWidth();
+    if (e.key === 'Escape' && layout.dragging) {
+      e.preventDefault();
+      e.stopPropagation();
+      layout.dragEnd(true);
+    } else if (layout.key(e)) e.preventDefault();
+  }
+
+  // B, by its letter or (a page beside the chat's keys come as `yap-page-key`) its key code.
+  const isB = (e) => e.key?.toLowerCase() === 'b' || (!e.key && e.keyCode === 66);
+
+  /**
+   * Ctrl+B: the list shown or hidden — not where Ctrl+B makes text bold (a
+   * document beside the chat, any rich text), nor under a panel covering
+   * the conversation.
+   */
+  function listKey(e) {
+    if (e.defaultPrevented || cover) return false;
+    if (e.target?.closest?.('.ProseMirror, [contenteditable="true"], [contenteditable=""], .docpart')) return false;
+    // (Nor from a dialog or a menu over Chat: Settings, a confirm.)
+    if (e.target?.closest?.('[role="dialog"], [role="alertdialog"], [role="menu"]')) return false;
+    toggleList();
+    return true;
+  }
+
+  /**
+   * The list's button (either of its places) and Ctrl+B. The focus on the
+   * button, or in the list as it goes, moves to the button's other place, so
+   * the keyboard never loses its way; anywhere else (the box) it stays.
+   */
+  async function toggleList() {
+    const had = document.activeElement;
+    const follow = !had || had === document.body || !!had.closest?.('.convs, .showchats');
+    layout.toggle();
+    if (!follow) return;
+    await tick();
+    chatEl?.querySelector(room.listShown ? '[data-testid="chat-list-toggle"]' : '.showchats')?.focus();
   }
 
   function onKeydown(e) {
+    // The list floating over the thread (asked back with no room beside it): Esc puts it aside.
+    if (e.key === 'Escape' && room.listFloats && !e.defaultPrevented) {
+      const inList = !!document.activeElement?.closest?.('.convs');
+      layout.dismissFloating();
+      if (inList) tick().then(() => chatEl?.querySelector('.showchats')?.focus());
+      return;
+    }
     // The document covering the conversation (expanded): Esc puts it back beside it.
     if (e.key === 'Escape' && doc.open && doc.expanded && !narrow && !e.defaultPrevented) {
       doc.expanded = false;
@@ -285,10 +330,13 @@
       // On the Code side: a new code chat in this one's workspace.
       if (code.onCode && (code.current ?? code.workspaces[0])) code.newCodeChat(code.current ?? code.workspaces[0]);
       else chat.newChat();
-    } else if ((e.ctrlKey || e.metaKey) && e.shiftKey && !e.altKey && e.key.toLowerCase() === 'b' && !e.defaultPrevented && !e.target?.closest?.('.ProseMirror')) {
+    } else if ((e.ctrlKey || e.metaKey) && e.shiftKey && !e.altKey && isB(e) && !e.defaultPrevented && !e.target?.closest?.('.ProseMirror')) {
       // (Not over a document being written: the editor's own keys first.)
       e.preventDefault();
       toggleBrowser();
+    } else if ((e.ctrlKey || e.metaKey) && !e.shiftKey && !e.altKey && isB(e) && !e.repeat) {
+      // The list's button (Hide / Show your chats).
+      if (listKey(e)) e.preventDefault();
     } else if (e.key === 'Escape' && chat.speakingId?.startsWith('chat:')) {
       e.preventDefault();
       chat.stopReading();
@@ -421,18 +469,36 @@
 
 <svelte:window onkeydown={onKeydown} onpaste={onPaste} />
 
-<div class="chat" bind:this={chatEl}>
-  <!-- Conversation sidebar (out of reach while the document covers it) -->
-  <div class="listslot" class:aside={listAside} inert={cover || listAside || undefined}>
-    <ConversationList {chat} {code} />
+<div class="chat" class:resizing={layout.dragging} bind:this={chatEl}>
+  <!-- The conversation list: hidden by its button (or Ctrl+B), stepped aside
+       for a panel in a narrow Chat, floating over the thread when asked back
+       with no room beside both; out of reach while a panel covers it. -->
+  <div class="listslot" class:aside={!room.listShown} class:floating={room.listFloats} inert={cover || !room.listShown || undefined}>
+    <ConversationList {chat} {code} ontogglelist={toggleList} />
   </div>
 
-  <!-- Thread -->
-  <section class="thread" class:withbtn={listAside} inert={cover || undefined}>
-    {#if listAside}
-      <!-- The list stepped aside for the document: back with one click. -->
-      <button type="button" class="showchats" onclick={() => (listWanted = true)} aria-label="Show your chats" title="Show your chats">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2" /><path d="M9 4v16" /></svg>
+  <!-- Thread (a press in it puts a floating list aside) -->
+  <!-- svelte-ignore a11y_no_static_element_interactions -->
+  <section
+    class="thread"
+    class:withbtn={!room.listShown}
+    inert={cover || undefined}
+    onpointerdown={room.listFloats ? () => layout.dismissFloating() : undefined}
+  >
+    {#if !room.listShown}
+      <!-- The list's button in its other place: the list back. -->
+      <button
+        type="button"
+        class="showchats"
+        onclick={toggleList}
+        aria-label="Show your chats"
+        title="Show your chats · Ctrl+B"
+        aria-keyshortcuts="Control+B"
+        aria-expanded="false"
+        aria-controls="chat-list"
+        data-testid="chat-list-show"
+      >
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2.5" /><path d="M9 4v16" /></svg>
       </button>
     {/if}
     <ChatThread {chat} {code} {onopensettings} />
@@ -441,28 +507,39 @@
 
   {#if doc.open}
     {#if !cover}
-      <!-- The split: drag it, or the arrow keys (Shift: further). -->
+      <!-- The split: drag it (Esc puts it back), the arrow keys (Shift:
+           further; Home / End), a double-click back to the default. A
+           focusable separator is a widget (WAI-ARIA's window splitter). -->
+      <!-- svelte-ignore a11y_no_noninteractive_tabindex a11y_no_noninteractive_element_interactions -->
       <div
         class="split"
+        class:held={layout.dragging}
         role="separator"
         aria-orientation="vertical"
-        aria-label="Resize the document"
-        aria-valuenow={shownWidth}
+        aria-label="Resize the panel"
+        aria-controls="chat-panel"
+        aria-valuenow={room.panelWidth}
         aria-valuemin={MIN_WIDTH}
-        aria-valuemax={maxWidth}
+        aria-valuemax={room.maxWidth}
+        aria-valuetext={`${room.panelWidth} pixels wide`}
+        title="Drag to resize · Double-click to reset"
         tabindex="0"
+        data-testid="chat-split"
         onpointerdown={splitDown}
         onpointermove={splitMove}
         onpointerup={splitUp}
         onpointercancel={splitUp}
+        onlostpointercapture={splitUp}
+        ondblclick={() => layout.reset()}
         onkeydown={splitKey}
       ></div>
     {/if}
-    <div class="docslot" class:cover style={cover ? undefined : `width: ${shownWidth}px`}>
-      <!-- Its own chunk, loaded the first time a document or a picture opens. -->
-      {#await import('./DocPanel.svelte') then { default: DocPanel }}
+    <!-- Its width from its first frame, its content faded in once (never with
+         reduced motion); the panel's ground while its chunk is on its way. -->
+    <div id="chat-panel" class="docslot" class:cover class:ground={!DocPanel} style={cover ? undefined : `width: ${room.panelWidth}px`} data-testid="chat-panel-slot">
+      {#if DocPanel}
         <DocPanel {doc} {cover} {narrow} onquote={chat.setQuote} messages={chat.messages} conversationId={chat.activeId} />
-      {/await}
+      {/if}
     </div>
   {/if}
 </div>
@@ -480,17 +557,53 @@
     display: flex;
     min-height: 0;
   }
+  /* The split held: the resize cursor everywhere, nothing selected on the way. */
+  .chat.resizing,
+  .chat.resizing :global(*) {
+    cursor: col-resize !important;
+    user-select: none;
+  }
   .listslot.aside {
     display: none;
   }
   .listslot {
     display: contents;
   }
-  /* The document beside the conversation, its width the split's. */
+  /* Asked back with no room beside the thread and the panel: over the thread. */
+  .listslot.floating {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    left: 0;
+    z-index: 4;
+    display: flex;
+    box-shadow: var(--yap-shadow-menu);
+  }
+  /* The panel beside the conversation, its width the split's from its first
+     frame; its content fades in once as it opens (nothing moves). */
   .docslot {
     flex: 0 0 auto;
     display: flex;
+    min-width: 0;
     min-height: 0;
+    animation: yap-panel-in 140ms ease-out;
+  }
+  .docslot.ground {
+    background: var(--yap-paper);
+    border-left: 1px solid var(--yap-border-subtle);
+  }
+  @keyframes yap-panel-in {
+    from {
+      opacity: 0;
+    }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .docslot {
+      animation: none;
+    }
+  }
+  :global(:root[data-motion='reduced']) .docslot {
+    animation: none;
   }
   .docslot > :global(.docpanel) {
     flex: 1 1 auto;
@@ -500,11 +613,13 @@
     inset: 0;
     z-index: 5;
   }
+  /* The split: a 10 px handle over the panel's edge; its line and grip on
+     hover, focus and while it's held. */
   .split {
-    flex: 0 0 6px;
-    margin: 0 -3px;
+    flex: 0 0 10px;
+    margin: 0 -5px;
     position: relative;
-    z-index: 2;
+    z-index: 3;
     cursor: col-resize;
     touch-action: none;
   }
@@ -513,14 +628,38 @@
     position: absolute;
     top: 0;
     bottom: 0;
-    left: 2px;
+    left: 4px;
     width: 2px;
     background: transparent;
-    transition: background 0.15s;
+    transition: background var(--yap-dur, 0.15s);
+  }
+  .split::before {
+    content: '';
+    position: absolute;
+    top: 50%;
+    left: 2px;
+    z-index: 1;
+    width: 6px;
+    height: 32px;
+    margin-top: -16px;
+    border-radius: var(--yap-r-full);
+    background: var(--yap-primary-line);
+    opacity: 0;
+    transition: opacity var(--yap-dur, 0.15s);
   }
   .split:hover::after,
-  .split:focus-visible::after {
+  .split:focus-visible::after,
+  .split.held::after {
     background: var(--yap-primary-line);
+  }
+  .split:hover::before,
+  .split:focus-visible::before,
+  .split.held::before {
+    opacity: 1;
+  }
+  .split.held::after,
+  .split.held::before {
+    background: var(--yap-primary);
   }
   .split:focus-visible {
     outline: none;
@@ -534,36 +673,38 @@
     min-height: 0;
     padding: 16px 20px;
   }
-  .thread.withbtn {
-    padding-left: 44px;
+  /* The list's button over the thread's top left: the thread's own parts
+     keep clear of it; the composer keeps its whole width (a narrow thread). */
+  .thread.withbtn > :global(:not(.composer):not(.showchats)) {
+    margin-left: 26px;
   }
+  /* The list's button where the list was: as in its head, the same place. */
   .showchats {
     position: absolute;
     top: 10px;
     left: 8px;
     z-index: 3;
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    width: 28px;
-    height: 28px;
+    display: grid;
+    place-items: center;
+    width: 30px;
+    height: 30px;
     padding: 0;
-    border: 1px solid var(--yap-border-subtle);
+    border: none;
     border-radius: var(--yap-r);
-    background: var(--yap-s1);
+    background: none;
     color: var(--yap-muted);
     cursor: pointer;
   }
   .showchats:hover {
+    background: var(--yap-s2);
     color: var(--yap-fg);
-    border-color: var(--yap-border-hover);
   }
   .showchats:focus-visible {
     outline: 2px solid var(--yap-focus-ring);
     outline-offset: 1px;
   }
   .showchats svg {
-    width: 15px;
-    height: 15px;
+    width: 16px;
+    height: 16px;
   }
 </style>
