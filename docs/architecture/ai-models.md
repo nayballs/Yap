@@ -1679,16 +1679,15 @@ Following its UI rules (`ChatGptSignIn.svelte` inside `ChatGptProvider.svelte`, 
 ## The Claude Code engine (2026-11-07)
 
 `ai/claude_code.rs` (+ `claude_code/`): Yap drives the person's own installed
-Claude Code CLI as a child process. Chat on your Claude plan (below) and
-[Jobs](./jobs.md) build on it.
+Claude Code CLI as a child process. Two features build on it: **Your Claude
+plan** (Chat's answers on the person's plan, below) and **Jobs** (Chat hands a
+task to Claude Code in one of the person's folders: [jobs.md](./jobs.md)).
 
-**The rules** (Anthropic's legal page for Claude Code,
-code.claude.com/docs/en/legal-and-compliance, read 2026-11-07; [jobs.md](./jobs.md#the-rules)):
-the binary is the person's own and unmodified, the login is theirs (their
-Claude plan or their API key, billed to them), and Yap never reads or stores
-Claude credentials. Sign-in is Claude Code's own `claude auth login`, in a
-terminal the person owns. Nothing is ever named "Claude Code": the features
-are **Your Claude plan** and **Jobs**.
+**Anthropic's terms** hold for both, and are written down once, in
+[jobs.md](./jobs.md#anthropics-terms): the person's own unmodified Claude
+Code, their own login (plan or API key), Claude Code's own sign-in, Yap never
+reading or storing Claude credentials, and never "Claude Code" in a feature's
+name.
 
 ### Finding it (`cli.rs`)
 
@@ -1851,8 +1850,9 @@ Code version in `claude_code/fixtures/<version>/` (`real-*` recorded signed
 out with an empty config folder, `synthetic-*` built from the documented
 shapes) replay too; its own examples are in `fixtures/fake/`.
 
-**Not yet seen**: an http `SessionStart` hook didn't fire in a real `-p` run
-(not looked into). Nothing has run against a signed-in Claude Code yet.
+**Seen on a real signed-in Claude Code** (the maintainer's, 2026-11-07): a
+plan chat, a job, `get_usage`. **Not yet seen**: an http `SessionStart` hook
+didn't fire in a real `-p` run (not looked into).
 
 ## Your Claude plan (2026-11-07)
 
@@ -1891,20 +1891,15 @@ Code does, on the person's own sign-in.
 
 ### A Chat turn (`chat/turn/plan.rs`)
 
-See [chat-and-assistant.md](./chat-and-assistant.md#chat-on-your-claude-plan-2026-11-07):
-a Claude Code session per conversation (`claude_plan/sessions.rs`, kept in
-`claude_sessions.json`, warm 10 minutes), Yap's own chat prompt in place of
-Claude Code's (`--system-prompt-file`), Claude Code's `WebSearch` and
-`WebFetch`, Yap's read-only tools over its run endpoint, nothing of the
-person's settings, `dontAsk`, in an empty folder of Yap's (`claude\chat\`
-in the data folder), its events mapped into Chat's stream
-(`claude_plan/map.rs`). **With Jobs offered**, the run also lists Yap's job
-tools (`RunSpec::jobs`), allowed in `--allowedTools` and named in the prompt;
-the session's fingerprint includes jobs (switching Jobs restarts it), and each
-turn calls `RunHandle::begin_turn(Context)` — the question, the previous
-answer, the conversation, where it was asked, text selected in another app —
-whose `Turn` carries the card and the Job tab's events back; dropping it ends
-the turn, and a call with no turn open does nothing ([jobs.md](./jobs.md#from-a-plan-chat)).
+How a plan turn runs (a session per conversation, kept warm 10 minutes in
+`claude_plan/sessions.rs` and `claude_sessions.json`; Yap's own chat prompt in
+place of Claude Code's; Claude Code's web tools and Yap's read-only tools; the
+job tools while Jobs is offered; its events into Chat's stream) is in
+[chat-and-assistant.md](./chat-and-assistant.md#chat-on-your-claude-plan-2026-11-07),
+and its job tools in [jobs.md](./jobs.md#from-a-plan-chat). A plan chat runs
+lean, in an empty folder of Yap's (`claude\chat\` in the data folder), with
+none of the person's own Claude settings: a Code chat's read-only session in
+its workspace is decided and landing next ([jobs.md](./jobs.md#chat-and-code)).
 
 **Claude Code's own copy of a plan chat.** A chat session has to be saved
 for `--resume`, so Claude Code keeps its transcript in its own config folder
@@ -1948,9 +1943,10 @@ comes here, as the ChatGPT plan's go to `llm/responses.rs`.
   would have charged, never spend.
 - **AI usage keeps it apart**: the plan's tokens and their "API value"
   (`plan_tokens`, `plan_value_micros`), never in the month's spend.
-- An answer's byline: "Your Claude plan · ≈ $0.0042 on the API"; on the key,
-  "API key · $0.0042" (`core/aiModel.js` `paidLine`, `MessageTokens.costMicros`).
-  Nothing known: the way alone.
+- **An answer's byline** says which way paid: "Your Claude plan · ≈ $0.0042
+  on the API"; on the key, "API key · $0.0042" (`core/aiModel.js` `paidLine`,
+  `MessageTokens.costMicros`). Nothing known: the way alone. A job's cost line
+  says the same ([jobs.md](./jobs.md#paying-your-plan-or-a-key)).
 
 ### Plan usage limits (2026-11-07)
 
@@ -2061,15 +2057,17 @@ Never an answer: the turn says the problem with the buttons that help
   `claude-plan-missing.spec.js`, `claude-plan-expired.spec.js`,
   `claude-plan-limit.spec.js`, `claude-plan-usage.spec.js` on the stand-in
   ([`docs/e2e-tests.md`](../e2e-tests.md)).
-- **Needs a real signed-in run**: the real stream's shapes (one `assistant`
-  event per block, ids, WebSearch and WebFetch results), `mcp__yap__*` under
-  `dontAsk` with `--allowedTools`, `--resume` and a mid-turn interrupt, real
-  rate-limit events and their reset, the pays-another-way check, whether the
-  plan takes `claude-fable-5-1`, screenshots as image blocks (no e2e), real
-  `rate_limit_event`s during a turn (their `utilization` read as a fraction
-  from the recordings; `unifiedWindows`' shape unseen), and `limits[]`'
-  kind for the five-hour session (only weekly kinds were seen; the
-  `five_hour` window stands in).
+- **On a real signed-in run** (2026-11-07): a plan chat answered, and the
+  plan's usage limits matched Anthropic's own figures. **Not yet confirmed**:
+  the stream's finer shapes (one `assistant` event per block, ids, WebSearch
+  and WebFetch results), `mcp__yap__*` under `dontAsk` with `--allowedTools`,
+  `--resume` after a warm session ended and a mid-turn interrupt, real
+  rate-limit events during a turn and their reset (`utilization` read as a
+  fraction from the recordings; `unifiedWindows`' shape unseen), the
+  pays-another-way check, whether the plan takes `claude-fable-5-1`,
+  screenshots as image blocks (no e2e either), and `limits[]`' kind for the
+  five-hour session (only weekly kinds were seen; the `five_hour` window
+  stands in).
 
 ## Model evaluations (`npm run eval`)
 How real models do on Yap's own Chat code, with every request and response

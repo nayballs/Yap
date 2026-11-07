@@ -1,7 +1,8 @@
 <script>
   // Settings → Voice Assistant (chat/assistant.rs + voice/tts.rs): ask Yap's Chat out
   // loud and hear the answer. Not Commands, which type. The assistant
-  // shortcut, Read aloud (voice/read_aloud.rs), opening apps (OpenAppsSettings),
+  // shortcut, "Clean up what you say in Chat" (CleanSpeech), Read aloud
+  // (voice/read_aloud.rs), opening apps (OpenAppsSettings),
   // web search (WebSearchSettings), spoken replies in Chat, the voice
   // (VoiceSettings) and a link to its model in Language Models.
   //
@@ -19,6 +20,7 @@
   import OpenAppsSettings from './OpenAppsSettings.svelte';
   import WebSearchSettings from './WebSearchSettings.svelte';
   import KokoroOffer from './KokoroOffer.svelte';
+  import CleanSpeech from './CleanSpeech.svelte';
   import { kokoro } from './kokoro.svelte.js';
   import { formatHotkeySpec, fillHotkey } from '../core/hotkeys.js';
   import SettingsHotkey from './SettingsHotkey.svelte';
@@ -92,6 +94,17 @@
       <p class="set-note">Set an assistant shortcut to ask Yap from any app, even while its window is closed.</p>
     </Row>
   {/if}
+  <!-- A spoken question cleaned up as an AI prompt, word for word
+       (ai/cleanup_styles.rs `cleans_question`); Code chats have their own
+       switch in Settings → Jobs. -->
+  <CleanSpeech
+    {cfg}
+    {goto}
+    field="chatCleanSpeech"
+    setting="chat-clean-speech"
+    label="Clean up what you say in Chat"
+    desc="Fillers and false starts taken out of spoken questions, your words kept. Uses your dictation cleanup's model."
+  />
   <Row setting="answer-card">
     <Toggle
       bind:checked={cfg.assistantAnswerCard}

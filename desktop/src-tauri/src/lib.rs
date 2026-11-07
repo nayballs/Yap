@@ -321,6 +321,7 @@ pub fn run() {
             ai::cleanup_styles::cleanup_styles_catalog,
             ai::cleanup_styles::cleanup_offer_status,
             ai::cleanup_styles::cleanup_offer_seen,
+            ai::cleanup_styles::question_cleanup_status,
             ai::writing_samples::writing_samples_get,
             ai::writing_samples::writing_samples_set,
             ai::commands::local_llm_start,

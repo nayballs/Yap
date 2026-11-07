@@ -1,6 +1,9 @@
 <script>
-  // Chat's conversation list (OpenWhispr's ConversationList): New chat and
-  // the list's ⋯ (Select all, Delete all chats…), the conversations grouped
+  // Chat's conversation list (OpenWhispr's ConversationList): its head — the
+  // list's own button (Hide your chats · Ctrl+B, at its top left as the
+  // Claude app's sidebar has it: chatLayout.svelte.js), the Chat | Code switch
+  // and the list's ⋯ (Select all, Delete all chats…) —, New chat on its own
+  // row, and the conversations grouped
   // Today / Yesterday / Previous 7 Days / Older. A conversation — also from
   // its hover ⋯ and the ContextMenu key / Shift+F10 — has Rename (in place:
   // Enter or leaving it saves, Esc cancels; chat/chats.rs `rename`), Copy as
@@ -20,8 +23,12 @@
   import ChatSideSwitch from './ChatSideSwitch.svelte';
   import WorkspacePicker from './WorkspacePicker.svelte';
 
-  /** `chat`: the view's state (chatState.svelte.js); `code`: its Code chats (codeChats.svelte.js). */
-  let { chat, code = null } = $props();
+  /**
+   * `chat`: the view's state (chatState.svelte.js); `code`: its Code chats
+   * (codeChats.svelte.js); `ontogglelist()`: the list's own button, Hide
+   * your chats · Ctrl+B (ChatView: chatLayout.svelte.js).
+   */
+  let { chat, code = null, ontogglelist = null } = $props();
 
   const onCode = $derived(!!code?.onCode);
   let newCodeEl = $state(null);
@@ -148,7 +155,34 @@
 </script>
 
 <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
-<aside class="convs" onkeydown={listKeydown}>
+<aside class="convs" id="chat-list" aria-label="Your chats" onkeydown={listKeydown}>
+  <!-- The list's head (as the Claude app's sidebar): its button at the top
+       left (Hide your chats · Ctrl+B: chatLayout.svelte.js), the Chat | Code
+       switch, the list's ⋯. -->
+  <div class="head">
+    {#if ontogglelist}
+      <button
+        type="button"
+        class="sidebtn"
+        aria-label="Hide your chats"
+        title="Hide your chats · Ctrl+B"
+        aria-keyshortcuts="Control+B"
+        aria-expanded="true"
+        aria-controls="chat-list"
+        data-testid="chat-list-toggle"
+        onclick={() => ontogglelist()}
+      >
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2.5" /><path d="M9 4v16" /></svg>
+      </button>
+    {/if}
+    {#if code?.enabled}<ChatSideSwitch {code} />{/if}
+    <span class="headgap"></span>
+    {#if chat.ordered.length && !chat.picked.length}
+      <button class="listmore" title="More" aria-label="More for chats" aria-haspopup="menu" onclick={listMenu}>
+        <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><circle cx="5" cy="12" r="1.7" /><circle cx="12" cy="12" r="1.7" /><circle cx="19" cy="12" r="1.7" /></svg>
+      </button>
+    {/if}
+  </div>
   {#if chat.picked.length}
     <div class="tools selbar" role="toolbar" aria-label="Selected chats">
       <span class="selcount" title="Shift+click selects a range, Ctrl+click adds or takes out one">{chat.picked.length} selected</span>
@@ -158,7 +192,6 @@
     </div>
   {:else}
     <div class="tools">
-      {#if code?.enabled}<ChatSideSwitch {code} />{/if}
       {#if onCode}
         <button class="tool newcode" bind:this={newCodeEl} aria-haspopup="menu" aria-expanded={picking} onclick={() => (picking = !picking)}>
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M13.4 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-7.4" /><path d="M18.4 2.6a2 2 0 0 1 2.8 2.8L13 13.6 9 14.6l1-4z" /></svg>
@@ -181,11 +214,6 @@
         <button class="tool" onclick={chat.newChat}>
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M13.4 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-7.4" /><path d="M18.4 2.6a2 2 0 0 1 2.8 2.8L13 13.6 9 14.6l1-4z" /></svg>
           New chat
-        </button>
-      {/if}
-      {#if chat.ordered.length}
-        <button class="listmore" title="More" aria-label="More for chats" aria-haspopup="menu" onclick={listMenu}>
-          <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><circle cx="5" cy="12" r="1.7" /><circle cx="12" cy="12" r="1.7" /><circle cx="19" cy="12" r="1.7" /></svg>
         </button>
       {/if}
     </div>
@@ -312,19 +340,63 @@
 </aside>
 
 <style>
+  /* A fixed width on both sides (its rows ellipsize): switching Chat | Code
+     never moves the thread. */
   .convs {
     flex: 0 0 224px;
+    width: 224px;
+    min-width: 0;
+    box-sizing: border-box;
     display: flex;
     flex-direction: column;
     min-height: 0;
     border-right: 1px solid var(--yap-border-subtle);
     background: var(--yap-s0, var(--yap-s1));
   }
+  /* Its head: the list's button, the Chat | Code switch, ⋯. */
+  .head {
+    flex: 0 0 auto;
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    min-width: 0;
+    padding: 10px 8px 2px;
+  }
+  .headgap {
+    flex: 1 1 auto;
+  }
+  .sidebtn {
+    flex: 0 0 auto;
+    width: 30px;
+    height: 30px;
+    display: grid;
+    place-items: center;
+    padding: 0;
+    border: none;
+    border-radius: var(--yap-r);
+    background: none;
+    color: var(--yap-muted);
+    cursor: pointer;
+  }
+  .sidebtn:hover {
+    background: var(--yap-s2);
+    color: var(--yap-fg);
+  }
+  .sidebtn:focus-visible,
+  .listmore:focus-visible {
+    outline: 2px solid var(--yap-focus-ring);
+    outline-offset: 1px;
+  }
+  .sidebtn svg {
+    width: 16px;
+    height: 16px;
+  }
   .tools {
-    padding: 12px 8px 4px;
+    padding: 2px 8px 4px;
     display: flex;
     align-items: center;
     gap: 2px;
+    min-width: 0;
   }
   .listmore {
     flex: 0 0 auto;
@@ -346,9 +418,12 @@
     width: 14px;
     height: 14px;
   }
+  /* (As tall as New chat's row: picking never moves the list.) */
   .selbar {
     gap: 6px;
-    padding: 12px 10px 4px;
+    min-height: 36px;
+    box-sizing: border-box;
+    padding: 2px 10px 4px;
   }
   .selcount {
     flex: 1 1 auto;
@@ -406,6 +481,8 @@
     gap: 9px;
     flex: 1 1 auto;
     width: 100%;
+    min-width: 0;
+    white-space: nowrap;
     height: 30px;
     padding: 0 10px;
     border: none;

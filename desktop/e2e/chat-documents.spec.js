@@ -527,7 +527,7 @@ test('the panel closes, expands, moves its split from the keyboard and opens in 
   await expect(main.locator('.docslot.cover')).toHaveCount(0);
 
   // The split, from the keyboard: narrower, and remembered when it opens again.
-  const split = main.getByRole('separator', { name: 'Resize the document' });
+  const split = main.getByRole('separator', { name: 'Resize the panel' });
   const before = Number(await split.getAttribute('aria-valuenow'));
   await split.focus();
   await main.keyboard.press('ArrowRight');

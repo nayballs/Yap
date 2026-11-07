@@ -46,7 +46,14 @@ typed and it offers to add it to the dictionary)**
 (`pipeline::finish_dictation_with` does the dictionary, the names on screen,
 the command and snippets;
 `text_injector::prepare_dictation` the fitting; `app_kind::submit_key` the
-key). Cleanup is
+key). **A question said to Yap's AI** (2026-11-07: the Voice Assistant, the
+Chat view's mic) goes: "nothing heard" and a lone "snip" first, then AI
+cleanup as an AI prompt, literally, on Dictation cleanup's model whatever "AI
+cleanup" says, when its side's switch is on ("Clean up what you say in Chat",
+"…in Code chats": `cleanup_styles::cleans_question` / `question_plan`), then
+the dictionary — no transform, voice command or snippets
+(`delivery::question_words`, `Shared::clean_question`; chat-and-assistant.md).
+Cleanup is
 best-effort — any error/timeout falls back to the raw transcript, so dictation
 never blocks; so does an answer that left out most of what was said
 (`cleanup_styles::lost_the_dictation`, ai-models.md). The log says its

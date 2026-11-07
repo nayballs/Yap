@@ -146,6 +146,9 @@ export const longSaid = (text) => String(text || '').length > 280 || String(text
  */
 export function latestStep(log, status) {
   if (!isLive(status)) return '';
+  // Waiting on the person's Allow / Deny: that, whatever line came after it
+  // (a to-do's update can land a moment after the wait began).
+  if (status === 'asking') return 'Waiting for you to allow a step';
   let line = '';
   for (const e of log || []) {
     if (typeof e?.now === 'string' && e.now.trim()) line = e.now.trim();

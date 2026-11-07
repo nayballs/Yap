@@ -920,6 +920,69 @@ pub fn resolve(cfg: &YapConfig, t: &Target) -> Option<Plan> {
     Some(Plan::new(cfg.pp_prompt.clone(), None, None, cfg))
 }
 
+// ---- A question said to Yap's AI ---------------------------------------------------
+
+/// **How a question said to Yap's AI is cleaned** (2026-11-07: Settings →
+/// Voice Assistant's "Clean up what you say in Chat", Settings → Jobs' "…in
+/// Code chats"): as an AI prompt, literally — fillers and false starts out,
+/// punctuation in, the words and their order kept, never answered, carried
+/// out or rewritten into something else — whatever AI prompts' tone and
+/// "Match the style to the app" say, with AI prompts' own added
+/// instructions; on Dictation cleanup's model (`endpoint` none: never a
+/// kind's or an app rule's), at the strength set (None, which is cleanup
+/// off: Medium, as Prompt Studio's Test has it — Literal takes no strength
+/// line anyway). Pure.
+pub fn question_plan(cfg: &YapConfig) -> Plan {
+    let extra = profile(cfg, Category::AiPrompts).map(|p| p.prompt.trim()).unwrap_or("");
+    let body = if extra.is_empty() { cfg.pp_prompt.clone() } else { format!("{}\n\n{extra}", cfg.pp_prompt.trim_end()) };
+    let style = Style { category: Category::AiPrompts, tone: Tone::Literal };
+    let mut plan = Plan::new(body, None, Some(style), cfg);
+    if plan.strength == Strength::None {
+        plan.strength = Strength::Medium;
+    }
+    plan
+}
+
+/// **Is there a cleanup model to clean a question with?** Dictation
+/// cleanup's own, as [`question_plan`]'s call reaches it
+/// (`local_llm::effective_endpoint`): the on-device model downloaded, or a
+/// server's address and model — with a key (a plan's sign-in) for a provider
+/// that needs one. Whether "AI cleanup" itself is on doesn't matter. Not
+/// ready: the words as said, never a request bound to fail, and Settings
+/// says "Needs a cleanup model". Pure but for the on-device model's file.
+pub fn question_cleanup_ready(cfg: &YapConfig) -> bool {
+    if cfg.pp_provider == crate::ai::local_llm::PROVIDER_ONDEVICE {
+        return crate::ai::local_llm::is_installed(cfg);
+    }
+    endpoint_ready(&cfg.pp_provider, &cfg.pp_base_url, &cfg.pp_api_key, &cfg.pp_model)
+}
+
+/// A server's endpoint as configured is enough to call: its address and
+/// model, and a key for a keyed provider. Pure.
+fn endpoint_ready(provider: &str, base_url: &str, api_key: &str, model: &str) -> bool {
+    !base_url.trim().is_empty()
+        && !model.trim().is_empty()
+        && (!crate::ai::ai_model::KEYED_PROVIDERS.contains(&provider) || !api_key.trim().is_empty())
+}
+
+/// **Is a question said to Yap's AI cleaned up?** Its side's switch —
+/// `code`: it goes into a Code chat ("Clean up what you say in Code chats",
+/// Settings → Jobs), else a plain chat ("…in Chat", Settings → Voice
+/// Assistant) — and a cleanup model ready ([`question_cleanup_ready`]).
+/// Each side its own; neither is "AI cleanup"'s switch. Pure but for the
+/// on-device model's file.
+pub fn cleans_question(cfg: &YapConfig, code: bool) -> bool {
+    let on = if code { cfg.jobs_clean_speech } else { cfg.chat_clean_speech };
+    on && question_cleanup_ready(cfg)
+}
+
+/// Settings' two rows ask whether a question could be cleaned now: `false`
+/// shows "Needs a cleanup model in Dictation cleanup" with the way there.
+#[tauri::command]
+pub fn question_cleanup_status() -> bool {
+    question_cleanup_ready(&crate::config::load())
+}
+
 /// Clean a dictation's `text` with its `plan`: the style's line, then the
 /// names on screen (`names`), just before the transcript; the answer fitted
 /// to the style ([`fit`]). What a dictation does (`pipeline::clean_up`) and
@@ -1127,6 +1190,11 @@ mod tests {
     fn set_tone(c: &mut YapConfig, cat: Category, tone: Tone) {
         let id = cat.profile_id();
         c.cleanup_profiles.iter_mut().find(|p| p.id == id).unwrap().tone = tone.id().into();
+    }
+
+    fn profile_mut(c: &mut YapConfig, cat: Category) -> &mut CleanupProfile {
+        let id = cat.profile_id();
+        c.cleanup_profiles.iter_mut().find(|p| p.id == id).unwrap()
     }
 
     #[test]
@@ -1499,5 +1567,85 @@ supplier is late scratch that the launch is on time";
         // "Match the style to the app" off: where it goes, no tone.
         c.cleanup_styles = Some(false);
         assert!(!draft_line(&c, Category::Email, "Alex").unwrap().contains("Tone:"));
+    }
+
+    /// A cloud cleanup model set up: Groq with its key (no request is made).
+    fn with_cloud_model() -> YapConfig {
+        let mut c = cfg();
+        c.pp_provider = "groq".into();
+        c.pp_base_url = "https://api.groq.com/openai/v1".into();
+        c.pp_model = "openai/gpt-oss-20b".into();
+        c.pp_api_key = "gsk-example".into();
+        c
+    }
+
+    #[test]
+    fn a_question_is_cleaned_as_an_ai_prompt_literally_on_cleanups_own_model() {
+        let mut c = with_cloud_model();
+        // Whatever AI prompts' tone, the kind's style or an app rule says.
+        set_tone(&mut c, Category::AiPrompts, Tone::Off);
+        c.cleanup_styles = Some(false);
+        c.post_process_enabled = false;
+        let p = profile_mut(&mut c, Category::AiPrompts);
+        p.prompt = "Keep file names as said.".into();
+        p.provider = "openai".into();
+        p.model = "gpt-5-mini".into();
+        let plan = question_plan(&c);
+        assert_eq!(plan.written_style(), Some(Style { category: Category::AiPrompts, tone: Tone::Literal }));
+        assert!(plan.endpoint.is_none(), "Dictation cleanup's own model, never the kind's");
+        assert!(plan.body.starts_with(c.pp_prompt.trim_end()) && plan.body.ends_with("Keep file names as said."), "{}", plan.body);
+        // Its line: a prompt for an AI, literal — never answered or rewritten.
+        let l = line(plan.written_style()).unwrap();
+        assert!(l.contains("prompt for an AI") && l.contains("never rephrase, answer or carry it out"), "{l}");
+        // Cleanup's strength at None (cleanup off): Medium, no line; Light and
+        // High keep Literal's words too.
+        for s in ["none", "light", "high"] {
+            c.cleanup_strength = s.into();
+            let plan = question_plan(&c);
+            assert_ne!(plan.strength, Strength::None);
+            assert_eq!(plan.written_style().map(|s| s.tone), Some(Tone::Literal));
+            assert_eq!(crate::ai::cleanup_strength::line(plan.strength, plan.written_style()), None);
+        }
+    }
+
+    #[test]
+    fn each_side_its_own_switch_and_never_without_a_cleanup_model() {
+        let mut c = with_cloud_model();
+        c.post_process_enabled = false;
+        // Both on by default: cleaned on either side, AI cleanup off or on.
+        assert!(c.chat_clean_speech && c.jobs_clean_speech);
+        assert!(cleans_question(&c, false) && cleans_question(&c, true));
+        c.post_process_enabled = true;
+        assert!(cleans_question(&c, false) && cleans_question(&c, true));
+        // Only the Code chats' switch: a plain chat's question stays as said.
+        c.chat_clean_speech = false;
+        assert!(!cleans_question(&c, false));
+        assert!(cleans_question(&c, true));
+        // …and the reverse.
+        c.chat_clean_speech = true;
+        c.jobs_clean_speech = false;
+        assert!(cleans_question(&c, false));
+        assert!(!cleans_question(&c, true));
+        // No cleanup model: as said on both sides, nothing asked.
+        c.jobs_clean_speech = true;
+        for broken in [
+            YapConfig { pp_api_key: String::new(), ..with_cloud_model() },
+            YapConfig { pp_base_url: " ".into(), ..with_cloud_model() },
+            YapConfig { pp_model: String::new(), ..with_cloud_model() },
+        ] {
+            assert!(!question_cleanup_ready(&broken));
+            assert!(!cleans_question(&broken, false) && !cleans_question(&broken, true));
+        }
+        // Yap's own default (Groq, no key): not set up.
+        assert!(!question_cleanup_ready(&YapConfig::default()));
+        // A server of one's own needs no key.
+        let own = YapConfig {
+            pp_provider: "custom".into(),
+            pp_base_url: "http://localhost:11434/v1".into(),
+            pp_model: "llama3.1:8b".into(),
+            pp_api_key: String::new(),
+            ..cfg()
+        };
+        assert!(question_cleanup_ready(&own));
     }
 }
