@@ -171,14 +171,21 @@ pub fn run() {
     // installed Yap — with the plugin on, a `tauri dev` instance pings the
     // running installed app and silently exits within seconds, which broke
     // every "run the dev build" workflow (incl. Voice Mirror's App Preview).
-    // On a duplicate release launch, surface the app instead of doing nothing.
+    // On a duplicate release launch, surface the app instead of doing nothing
+    // — or, launched with Markdown files ("Open with", `yap.exe <path>`),
+    // open each in its window (notes/md_file.rs) and nothing else.
     // (Nor `yap.exe bench`'s throwaway copy: it must start, not wake yours.)
     #[cfg(not(debug_assertions))]
     let builder = if bench_child() {
         builder
     } else {
-        builder.plugin(tauri_plugin_single_instance::init(|app, _argv, _cwd| {
+        builder.plugin(tauri_plugin_single_instance::init(|app, argv, cwd| {
             use tauri::Manager;
+            let files = notes::md_file::args::existing(&argv, std::path::Path::new(&cwd));
+            if !files.is_empty() {
+                notes::md_file::open_soon(app, files);
+                return;
+            }
             if let Some(settings) = app.get_webview_window("settings") {
                 shell::window::show_quietly(&settings);
                 let _ = settings.unminimize();
@@ -221,6 +228,9 @@ pub fn run() {
             tauri_plugin_window_state::Builder::default()
                 .with_state_flags(shell::window::window_state_flags())
                 .with_denylist(&["overlay", "onboarding", "notepad", "split-preview", "quick-note"])
+                // A Markdown file's window (one per file, notes/md_file.rs)
+                // is placed by Yap; its file would grow with every file opened.
+                .with_filter(|label| !notes::md_file::is_label(label))
                 .build(),
         )
     };
@@ -594,6 +604,15 @@ pub fn run() {
             notes::quick_note::tabs::quick_note_tabs,
             notes::quick_note::send::quick_note_send_target,
             notes::quick_note::send::quick_note_send,
+            notes::md_file::open_markdown,
+            notes::md_file::md_file_info,
+            notes::md_file::md_file_read,
+            notes::md_file::md_file_save,
+            notes::md_file::md_file_stat,
+            notes::md_file::md_file_reveal,
+            notes::md_file::md_file_close,
+            notes::md_file::md_open_with_state,
+            notes::md_file::md_open_with_settings,
             calls::meeting_guard::meeting_shortcut,
             calls::meeting_guard::meeting_keep_going,
             calls::meeting_guard::meeting_limit_status,
@@ -1105,11 +1124,20 @@ pub fn run() {
             if let Some(settings) = app.get_webview_window("settings") {
                 shell::window::show_quietly(&settings);
             }
-            // Release builds: a launch by the person brings the main window
-            // up (`launch_shows_window`); sign-in and "Start hidden" stay in
-            // the tray.
+            // Markdown files this launch was given ("Open with", `yap.exe
+            // <path>`), each in its window (notes/md_file.rs) — read here
+            // too, not only in single-instance's callback: the first launch
+            // has no callback, and a dev build has no single-instance.
+            let launch_files = notes::md_file::args::at_launch();
             #[cfg(not(debug_assertions))]
-            if shell::autostart::launch_shows_window(
+            let opened_files = !launch_files.is_empty();
+            notes::md_file::open_soon(&handle, launch_files);
+            // Release builds: a launch by the person brings the main window
+            // up (`launch_shows_window`) — not one to open a file, which
+            // shows only that; sign-in and "Start hidden" stay in the tray.
+            #[cfg(not(debug_assertions))]
+            if !opened_files
+                && shell::autostart::launch_shows_window(
                 shell::autostart::launched_at_sign_in(cfg.autostart),
                 cfg.start_hidden,
                 !dictation::commands::installed_models().is_empty(),

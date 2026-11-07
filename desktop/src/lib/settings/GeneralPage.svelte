@@ -2,7 +2,8 @@
   // Settings → General (2026-10-22 review: the hotkey, audio and meetings
   // went to Dictation and Meetings): language and region, what the AI knows
   // about you, startup and updates, Links (which browser opens them:
-  // OpenLinksIn.svelte), Appearance (the theme, the reading text, Motion),
+  // OpenLinksIn.svelte), Markdown files (MarkdownFiles.svelte), Appearance
+  // (the theme, the reading text, Motion),
   // the Yap bar (bar.rs) and tips.
   //
   //   cfg:            Settings' config $state (auto-save does the saving).
@@ -69,6 +70,11 @@
 <!-- Which browser Yap's links open in (shell/browsers.rs): its own chunk. -->
 {#await import('./OpenLinksIn.svelte') then { default: OpenLinksIn }}
   <OpenLinksIn {cfg} />
+{/await}
+
+<!-- .md files in Yap's own window (notes/md_file.rs): Windows' Default apps, and a file to open. Its own chunk. -->
+{#await import('./MarkdownFiles.svelte') then { default: MarkdownFiles }}
+  <MarkdownFiles />
 {/await}
 
 <!-- The theme, the reading font and size, and Motion, for every window

@@ -11,6 +11,7 @@
 //! columns, meeting transcript/participants (arrive with the Phase-6 recorder).
 
 pub mod commands;
+pub mod md_file;
 pub mod note_edits;
 pub mod pins;
 pub mod quick_note;

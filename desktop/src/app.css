@@ -530,7 +530,9 @@ body {
 :root[data-window='notepad'],
 :root[data-window='notepad'] body,
 :root[data-window='quick-note'],
-:root[data-window='quick-note'] body {
+:root[data-window='quick-note'] body,
+:root[data-window='doc'],
+:root[data-window='doc'] body {
   background: var(--yap-paper);
   color-scheme: light;
 }
@@ -541,7 +543,9 @@ body {
 :root[data-yap-theme='dark'][data-window='notepad'],
 :root[data-yap-theme='dark'][data-window='notepad'] body,
 :root[data-yap-theme='dark'][data-window='quick-note'],
-:root[data-yap-theme='dark'][data-window='quick-note'] body {
+:root[data-yap-theme='dark'][data-window='quick-note'] body,
+:root[data-yap-theme='dark'][data-window='doc'],
+:root[data-yap-theme='dark'][data-window='doc'] body {
   color-scheme: dark;
 }
 

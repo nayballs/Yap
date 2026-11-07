@@ -407,7 +407,7 @@ mod z {
 /// `set_focus`, except in e2e test runs: when Windows won't hand a background
 /// process the foreground, tao falls back to pressing Alt in whichever app has
 /// focus — the developer's, while the suite runs beside them.
-fn focus(w: &tauri::WebviewWindow) {
+pub(crate) fn focus(w: &tauri::WebviewWindow) {
     brought_forward();
     if !crate::shell::e2e::active() {
         let _ = w.set_focus();

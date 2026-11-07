@@ -38,8 +38,8 @@ export function initSpeech(prefixes) {
   });
 }
 
-/** Where a message id comes from, for the reading card. */
-const sourceOf = (id) => (id?.startsWith('note:') ? 'note' : 'chat');
+/** Where a message id comes from, for the reading card (a Markdown file's window, "doc:", reads as a note). */
+const sourceOf = (id) => (id?.startsWith('note:') || id?.startsWith('doc:') ? 'note' : 'chat');
 
 /**
  * Read `text` (markdown) aloud as `id`, with the reading card on the Yap
