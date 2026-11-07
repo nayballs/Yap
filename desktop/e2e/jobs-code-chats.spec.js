@@ -694,7 +694,8 @@ test('the Code side: grouped by workspace, newest first, folding, the running jo
   for (const id of [one, two, three]) await expect(row(main, id)).toHaveCount(0);
   await toSide(main, 'Code');
 
-  // A job running: on top of the Code side, never on the Chat side (a dot on Code instead).
+  // A job running: on top of the Code side, never on the Chat side (Code's
+  // status dot says it instead: chat-status.spec.js has the dots' rules).
   await script(yap, SLOW, 'slow-list');
   const before = (await jobs(yap)).length;
   await main.locator(`.convs [data-conv="${three}"]`).click();
@@ -710,11 +711,12 @@ test('the Code side: grouped by workspace, newest first, folding, the running jo
   await theme(yap, main, 'light');
   await toSide(main, 'Chat');
   await expect(main.getByTestId('chat-running-jobs')).toHaveCount(0);
-  await expect(main.getByTestId('chat-side-busy')).toBeVisible();
+  await expect(main.getByTestId('chat-side-status')).toHaveAttribute('data-state', 'working');
   await shot(main, '13-chat-side-while-a-job-runs-light');
   await yap.invoke('job_stop', { id: slow.id });
   await ended(yap, slow.id);
-  await expect(main.getByTestId('chat-side-busy')).toHaveCount(0);
+  // (Stopped, so not working; an earlier test's chat may still have something new.)
+  await expect.poll(() => main.evaluate(() => document.querySelector('[data-testid="chat-side-status"]')?.dataset.state ?? '')).not.toBe('working');
 });
 
 // ---------------------------------------------------------------- the moving light

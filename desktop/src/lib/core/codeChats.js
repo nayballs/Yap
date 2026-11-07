@@ -32,7 +32,8 @@ export function sideOf(id, chats) {
  * **The Code side's list**: Code chats grouped by workspace, each group the
  * workspace's name (its path on hover) and its chats newest first; the
  * groups by their newest chat. `collapsed` (path → true) folds a group: its
- * header stays, with how many it holds. Only workspaces with chats.
+ * header stays, with how many it holds (`count`) and which (`ids`: its
+ * status dot, the strongest of theirs). Only workspaces with chats.
  */
 export function groupByWorkspace(conversations, chats, collapsed = {}) {
   // Newest first: by when it was last changed, then (the same second) the
@@ -50,7 +51,7 @@ export function groupByWorkspace(conversations, chats, collapsed = {}) {
     .map((g) => {
       const items = [...g.items].sort(newer);
       const folded = !!collapsed?.[g.path];
-      return { key: g.key, label: g.label, path: g.path, workspace: g.workspace, collapsible: true, collapsed: folded, count: items.length, top: items[0], items: folded ? [] : items };
+      return { key: g.key, label: g.label, path: g.path, workspace: g.workspace, collapsible: true, collapsed: folded, count: items.length, ids: items.map((c) => c.id), top: items[0], items: folded ? [] : items };
     })
     .sort((a, b) => newer(a.top, b.top) || a.label.localeCompare(b.label));
 }

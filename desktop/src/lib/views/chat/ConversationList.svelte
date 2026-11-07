@@ -23,6 +23,11 @@
   // the Code side's chats grouped by workspace, "New code chat" its picker.
   import ChatSideSwitch from './ChatSideSwitch.svelte';
   import WorkspacePicker from './WorkspacePicker.svelte';
+  // Each row's status dot — working, needs you, new (core/chatStatus.js,
+  // stores/chatStatus.svelte.js); a folded workspace's, its strongest.
+  import StatusDot from './StatusDot.svelte';
+  import { chatStatus } from '../../stores/chatStatus.svelte.js';
+  import { strongest } from '../../core/chatStatus.js';
 
   /**
    * `chat`: the view's state (chatState.svelte.js); `code`: its Code chats
@@ -177,7 +182,7 @@
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2.5" /><path d="M9 4v16" /></svg>
       </button>
     {/if}
-    {#if code?.enabled}<ChatSideSwitch {code} />{/if}
+    {#if code?.enabled}<ChatSideSwitch {chat} {code} />{/if}
     <span class="headgap"></span>
     {#if chat.ordered.length && !chat.picked.length}
       <button class="listmore" title="More" aria-label="More for chats" aria-haspopup="menu" onclick={listMenu}>
@@ -267,7 +272,10 @@
             <svg class="gchev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m9 6 6 6-6 6" /></svg>
             <svg class="gglyph" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m8 7-5 5 5 5" /><path d="m16 7 5 5-5 5" /></svg>
             <span class="gname">{g.label}</span>
-            {#if g.collapsed}<span class="gcount">{g.count}</span>{/if}
+            {#if g.collapsed}
+              <StatusDot s={strongest(chatStatus.byId, g.ids)} code testid="chat-group-status" />
+              <span class="gcount">{g.count}</span>
+            {/if}
           </button>
         {:else}
           <div class="gcap">{g.label}</div>
@@ -317,6 +325,7 @@
                 <span class="pickmark" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="m5 12.5 4.5 4.5L19 7.5" /></svg></span>
               {/if}
               <span class="ctitle">{c.title || 'Untitled'}{#if chat.picked.includes(c.id)}<span class="sr-only">, selected</span>{/if}</span>
+              <StatusDot s={chatStatus.byId[c.id]} code={onCode} />
               <button
                 class="more"
                 title="More"

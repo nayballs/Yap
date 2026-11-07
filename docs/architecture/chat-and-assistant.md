@@ -3543,3 +3543,41 @@ where they touch Chat's own code.
   [jobs.md](./jobs.md#code-chats-and-workspaces) and
   [jobs.md](./jobs.md#the-job-tab). A report reloads the open chat without
   switching to it.
+
+## Status dots in Chat's list (2026-11-07)
+
+After the Claude Code app's sidebar: each row of Chat's list says what its
+conversation is doing, at its right (`views/chat/StatusDot.svelte`; the
+rules pure in `core/chatStatus.js`, kept live for the whole main window by
+`stores/chatStatus.svelte.js`, started by ControlPanel).
+
+- **Working** (a soft pulse; the Code teal on the Code side, Yap's accent on
+  Chat): a job of the chat's queued or running, or an answer being written
+  there — typed, the Voice Assistant's, a phone's, a job's report. Rust
+  lists the conversations answering (`chat/stream.rs`: every `Stoppable`
+  that `answers` one; `chat_answering`, `yap-chat-answering {conversations,
+  seq}`). A spell under 300 ms never shows; two less than 300 ms apart (a
+  job ending, its report starting) are one. Steady under reduced motion.
+- **Needs you** (amber with a soft ring, steady; it outranks working): a
+  job's permission prompt or a job `asking`, an ask-first card waiting in a
+  turn's stream (`confirm`: told by chatState as it streams, even once Chat
+  is left), or a job's turn that ended with a question or a plan for "go
+  ahead" — until the person writes there after its report (`chats_list`'s
+  `askedAt`), it runs again, or a day has passed.
+- **New** (blue): its last answer (`chats_list`'s `answerAt`) is past the
+  last one seen there, and it isn't on screen. Opening it clears it. Seen is
+  kept per conversation in this window's storage (`yap.chat.seen`, the last
+  answer's index; a first run counts everything there as seen), never
+  chats.json. "A job's report is in" when the answer follows a report marker.
+- **Also**: a folded workspace group shows the strongest of its chats'
+  beside its name; the Chat | Code switch's side not shown shows the
+  strongest of its side's (`chat-side-status`, said with the segment by
+  `aria-describedby`); the menu rail's Chat icon is amber while anything
+  needs you, from every view, and pulses while a chat works and another view
+  shows (frontend.md). The running jobs list above is as it was.
+- Each dot is named for a screen reader and in its tooltip ("Needs you: a
+  job waits for you to allow a step", "Working: writing an answer", "New: a
+  job's report is in").
+- Tests: `chat-status.spec.js` (the pure rules, then each state in the app,
+  light and dark), `cargo test chat::stream` (the list of conversations
+  answering) and `chat::chats` (`answerAt` / `askedAt`).

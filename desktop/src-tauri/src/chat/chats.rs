@@ -496,8 +496,11 @@ pub fn rename(id: u64, title: &str) -> Result<String, String> {
 }
 
 /// Chat's conversation summaries, newest-updated first, the archived ones
-/// left out: `{ id, title, updatedTs, messageCount }` (a note's Ask threads
-/// are the note's: [`for_note`]).
+/// left out: `{ id, title, updatedTs, messageCount, answerAt, askedAt }` (a
+/// note's Ask threads are the note's: [`for_note`]). `answerAt`: its last
+/// answer's index (-1: none), `askedAt`: the person's last message's (a
+/// job's report marker isn't theirs): Chat's status dots
+/// (`core/chatStatus.js`: a new answer, a job's question still unanswered).
 pub fn list() -> Value {
     with_store(|s| {
         let mut sorted: Vec<&Conversation> =
@@ -506,16 +509,26 @@ pub fn list() -> Value {
         let items: Vec<Value> = sorted
             .into_iter()
             .map(|c| {
+                let (answer_at, asked_at) = last_answer_and_question(&c.messages);
                 json!({
                     "id": c.id,
                     "title": c.title,
                     "updatedTs": c.updated_ts,
                     "messageCount": c.messages.len(),
+                    "answerAt": answer_at,
+                    "askedAt": asked_at,
                 })
             })
             .collect();
         json!(items)
     })
+}
+
+/// The index of the last answer and of the person's last message (a job's
+/// report marker is the job's, not theirs); -1 for none. Pure.
+fn last_answer_and_question(messages: &[ChatMessage]) -> (i64, i64) {
+    let at = |want: fn(&ChatMessage) -> bool| messages.iter().rposition(want).map_or(-1, |i| i as i64);
+    (at(|m| m.role == "assistant"), at(|m| m.role == "user" && m.kind.is_empty()))
 }
 
 /// The archived conversations, archived last first:
@@ -1657,6 +1670,19 @@ mod tests {
 
     fn said(role: &str, text: &str) -> ChatMessage {
         ChatMessage { role: role.into(), text: text.into(), ..Default::default() }
+    }
+
+    // Chat's status dots: the last answer, and the person's last message —
+    // a job's report marker is the job's, never theirs.
+    #[test]
+    fn the_list_knows_the_last_answer_and_the_persons_last_message() {
+        assert_eq!(last_answer_and_question(&[]), (-1, -1));
+        assert_eq!(last_answer_and_question(&[said("user", "Fix the tests")]), (-1, 0));
+        let marker = ChatMessage { kind: "jobReport".into(), ..said("user", "The job in garden-planner: it's done.") };
+        let thread = [said("user", "Fix the tests"), said("assistant", "On it."), marker, said("assistant", "Done.")];
+        assert_eq!(last_answer_and_question(&thread), (3, 0));
+        let replied = [&thread[..], &[said("user", "Thanks")]].concat();
+        assert_eq!(last_answer_and_question(&replied), (3, 4));
     }
 
     fn web_answer(text: &str, query: &str) -> ChatMessage {

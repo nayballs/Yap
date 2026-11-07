@@ -128,6 +128,8 @@
   import { chatBrowser } from '../../stores/chatBrowser.svelte.js';
   import { memoryTakesDrops } from '../../stores/memory.svelte.js';
   import { jobs, initJobs, jobById } from '../../stores/jobs.svelte.js';
+  import { initChatStatus, setShown, markSeen } from '../../stores/chatStatus.svelte.js';
+  import { lastAnswerAt } from '../../core/chatStatus.js';
 
   // Opens a Settings section (ControlPanel's openSettings): the chip's
   // "Language model settings…". `onopennote({id, line, ts, field})`: a
@@ -155,6 +157,19 @@
       doc.showJob(j ?? { id: want.id, conversation: want.conversation });
     });
   });
+  // **The status dots** (stores/chatStatus.svelte.js): the conversation on
+  // screen is never "new", and its answers are seen as they land.
+  initChatStatus();
+  $effect(() => {
+    const id = chat.activeId ?? null;
+    untrack(() => setShown(id));
+  });
+  $effect(() => {
+    const id = chat.activeId;
+    const at = lastAnswerAt(chat.messages);
+    if (id != null && at >= 0) untrack(() => markSeen(id, at));
+  });
+  onDestroy(() => setShown(null));
   let reportsSeen = jobs.reports;
   $effect(() => {
     const n = jobs.reports;

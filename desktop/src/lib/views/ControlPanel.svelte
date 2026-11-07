@@ -49,6 +49,11 @@
   // Jobs: followed from the start, so a bar card's Open (`yap-job-open`)
   // finds Chat ready for it.
   import { initJobs } from '../stores/jobs.svelte.js';
+  // Chat's status dots (core/chatStatus.js): followed from the start, so the
+  // rail's Chat says when something needs you, or works while you're elsewhere.
+  import { chatStatus, initChatStatus } from '../stores/chatStatus.svelte.js';
+  import { any } from '../core/chatStatus.js';
+  import StatusDot from './chat/StatusDot.svelte';
   // The sidebar as a rail (core/navRail.js): its ☰ and Ctrl+\, remembered;
   // Chat narrows it for a panel's room (chatRoom.js).
   import { RAIL_WIDE, RAIL_NARROW, RAIL_SHORTCUT, isRailKey } from '../core/navRail.js';
@@ -76,6 +81,17 @@
   prefetchHome().catch(() => {});
 
   let activeView = $state('home');
+  // **The rail's Chat** (core/chatStatus.js): amber while anything waits on
+  // you, wherever you are; a soft pulse while a chat works and another view
+  // shows. Nothing for "new": that's the list's to say.
+  const chatDot = $derived(
+    any(chatStatus.byId, 'needs')
+      ? { state: 'needs', why: '' }
+      : activeView !== 'chat' && any(chatStatus.byId, 'working')
+        ? { state: 'working', why: '' }
+        : null
+  );
+  const chatDotWords = $derived(chatDot?.state === 'needs' ? 'Needs you' : chatDot ? 'Working' : '');
   // A part of Insights to bring into view when it opens ('ai-usage': Chat's
   // context ring's "See all").
   let insightsFocus = $state(null);
@@ -296,6 +312,7 @@
   onMount(() => {
     const uns = [];
     initJobs();
+    initChatStatus();
     // The views' chunks (VIEWS above), fetched once the window is idle, so
     // opening one never waits.
     const idle = window.requestIdleCallback ?? ((f) => setTimeout(f, 2000));
@@ -505,16 +522,24 @@
     </div>
     <div class="nav" id="main-nav">
       {#each NAV as item (item.id)}
+        {@const dot = item.id === 'chat' ? chatDot : null}
         <button
           class="navitem"
           class:active={activeView === item.id}
           aria-current={activeView === item.id ? 'page' : undefined}
-          data-tip={item.label}
+          data-tip={dot ? `${item.label} · ${chatDotWords}` : item.label}
+          data-nav={item.id}
+          aria-describedby={dot ? 'nav-chat-status-words' : undefined}
           onclick={() => (activeView = item.id)}
         >
-          <span class="navicon">{@render navIcon(item.id)}</span>
+          <span class="navicon">
+            {@render navIcon(item.id)}
+            {#if dot}<StatusDot s={dot} place="badge" decorative testid="nav-chat-status" />{/if}
+          </span>
           <span class="navlabel">{item.label}</span>
         </button>
+        <!-- (Its words for a screen reader, outside the button: its name stays "Chat".) -->
+        {#if dot}<span id="nav-chat-status-words" class="sr-only">{chatDotWords}</span>{/if}
       {/each}
     </div>
 
@@ -953,10 +978,26 @@
     color: var(--yap-fg);
   }
   .navicon {
+    position: relative;
     display: inline-flex;
     width: 18px;
     height: 18px;
     flex: 0 0 auto;
+    /* (Chat's status dot on its icon's top right, ringed in the rail's own surface.) */
+    --sdot-top: -2px;
+    --sdot-right: -3px;
+    --sdot-bg: var(--yap-bg);
+  }
+  .navitem.active .navicon {
+    --sdot-bg: var(--yap-s2);
+  }
+  .sr-only {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+    white-space: nowrap;
   }
   .navicon :global(svg) {
     width: 100%;
