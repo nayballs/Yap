@@ -49,6 +49,10 @@
   // Jobs: followed from the start, so a bar card's Open (`yap-job-open`)
   // finds Chat ready for it.
   import { initJobs } from '../stores/jobs.svelte.js';
+  // The sidebar as a rail (core/navRail.js): its ☰ and Ctrl+\, remembered;
+  // Chat narrows it for a panel's room (chatRoom.js).
+  import { RAIL_WIDE, RAIL_NARROW, RAIL_SHORTCUT, isRailKey } from '../core/navRail.js';
+  import { navRail, railIsNarrow, toggleRail, glided } from '../stores/navRail.svelte.js';
 
   // Home is in this window's chunk; every other view is a chunk of its own,
   // loaded the first time it shows and fetched once the window is idle
@@ -82,6 +86,9 @@
   // updates.svelte.js). This window owns the ToastHost, so it starts it.
   initUpdates();
   let acctUser = $derived(account.status?.signedIn ? account.status.user : null);
+  // The rail narrow now (the person's, or Chat's for a panel's room).
+  const railNarrow = $derived(railIsNarrow());
+  const railTip = $derived(`${railNarrow ? 'Expand' : 'Collapse'} the sidebar · ${RAIL_SHORTCUT}`);
   let acctImgFailed = $state(false);
   let settingsOpen = $state(false);
   // Call detection (calls/meeting_detect.rs via meetingDetect.svelte.js): "call
@@ -245,6 +252,16 @@
       e.preventDefault();
       helpOpen = false;
       sheetOpen = !sheetOpen;
+      return;
+    }
+    // Ctrl+\ anywhere in the window: the sidebar collapsed or expanded — not
+    // a key Yap's in-page shortcuts took first (one of the person's own
+    // global shortcuts), nor from Settings, a dialog or a menu over it.
+    if (isRailKey(e) && !e.repeat && !e.defaultPrevented) {
+      if (settingsOpen || sheetOpen || whatsNewOpen || menuOrDialogOpen()) return;
+      if (e.target?.closest?.('[role="dialog"], [role="alertdialog"], [role="menu"]')) return;
+      e.preventDefault();
+      toggleRail();
       return;
     }
     // Esc closes a right-click menu or the confirm dialog first (ui/contextMenu.svelte.js).
@@ -455,13 +472,44 @@
   </div>
 
   <div class="cols">
-  <nav class="side" aria-label="Main">
-    <div class="nav">
+  <!-- The sidebar, a rail (core/navRail.js): ☰ at its top (Ctrl+\) collapses
+       it to its icons, each with its name as a tooltip — only on a hover or
+       the keyboard's focus, never opening the rail over the view. -->
+  <nav
+    class="side"
+    class:narrow={railNarrow}
+    class:glide={navRail.animate}
+    aria-label="Main"
+    data-nav-rail
+    data-testid="nav-rail"
+    style:--rail-wide="{RAIL_WIDE}px"
+    style:--rail-narrow="{RAIL_NARROW}px"
+    ontransitionend={(e) => e.target === e.currentTarget && e.propertyName === 'width' && glided()}
+  >
+    <div class="railtop">
+      <button
+        type="button"
+        class="navitem railbtn tipped"
+        aria-label={railNarrow ? 'Expand the sidebar' : 'Collapse the sidebar'}
+        aria-expanded={!railNarrow}
+        aria-controls="main-nav"
+        aria-keyshortcuts={'Control+\\'}
+        data-tip={railTip}
+        data-testid="nav-rail-toggle"
+        onclick={toggleRail}
+      >
+        <span class="navicon">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="M4 6.5h16M4 12h16M4 17.5h16" /></svg>
+        </span>
+      </button>
+    </div>
+    <div class="nav" id="main-nav">
       {#each NAV as item (item.id)}
         <button
           class="navitem"
           class:active={activeView === item.id}
           aria-current={activeView === item.id ? 'page' : undefined}
+          data-tip={item.label}
           onclick={() => (activeView = item.id)}
         >
           <span class="navicon">{@render navIcon(item.id)}</span>
@@ -473,10 +521,12 @@
     <div class="spacer"></div>
 
     <!-- "Set up meeting notes" until it's done or dismissed (shell/guide.rs;
-         its own chunk). -->
+         its own chunk); in the narrow rail its icon, which expands it. -->
     {#await import('./MeetingSetup.svelte') then { default: MeetingSetup }}
       <MeetingSetup
         view={activeView}
+        compact={railNarrow}
+        onexpand={toggleRail}
         onconnect={() => {
           settingsOpen = false;
           activeView = 'meetings';
@@ -491,7 +541,7 @@
     {/await}
 
     <div class="bottom">
-      <button class="navitem" onclick={() => openSettings()}>
+      <button class="navitem" data-tip="Settings" onclick={() => openSettings()}>
         <span class="navicon">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3" /><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09a1.65 1.65 0 0 0 1.51-1 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33h.01a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51h.01a1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82v.01a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" /></svg>
         </span>
@@ -502,7 +552,7 @@
 
       <div class="rule"></div>
 
-      <button class="acct" class:signed={!!acctUser} onclick={() => openSettings('account')}>
+      <button class="acct" class:signed={!!acctUser} data-tip={acctUser ? displayName(acctUser) : 'Sign in'} onclick={() => openSettings('account')}>
         <span class="acct-avatar">
           {#if acctUser?.image && !acctImgFailed}
             <img src={acctUser.image} alt="" referrerpolicy="no-referrer" onload={() => noteAccountPicture(acctUser.image)} onerror={() => (acctImgFailed = true)} />
@@ -830,12 +880,37 @@
     display: flex;
   }
 
+  /* The sidebar, a rail: 220 px with its labels, 56 px of icons narrow
+     (core/navRail.js), every icon's centre 28 px from the window's edge in
+     both, so nothing but the width moves. The person's ☰ glides it (one
+     short transition; none with reduced motion: app.css); Chat narrowing it
+     for a panel lands at once, in the panel's frame. */
   .side {
-    flex: 0 0 200px;
+    flex: 0 0 auto;
+    box-sizing: border-box;
+    width: var(--rail-wide, 220px);
     display: flex;
     flex-direction: column;
-    padding: 4px 10px 12px;
+    padding: 4px 8px 12px;
     background: var(--yap-bg);
+  }
+  .side.narrow {
+    width: var(--rail-narrow, 56px);
+  }
+  .side.glide {
+    transition: width 180ms cubic-bezier(0.2, 0, 0, 1);
+  }
+  .railtop {
+    display: flex;
+    margin-bottom: 2px;
+  }
+  .navitem.railbtn {
+    flex: 0 0 auto;
+    width: 40px;
+    color: var(--yap-fg-62, var(--yap-muted));
+  }
+  .navitem.railbtn:hover {
+    color: var(--yap-fg);
   }
 
   .nav,
@@ -846,12 +921,14 @@
   }
   /* Wispr-weight nav: full-ink semibold labels even when inactive. */
   .navitem {
+    position: relative;
     display: flex;
     align-items: center;
     gap: 11px;
     width: 100%;
     height: 38px;
     padding: 0 11px;
+    box-sizing: border-box;
     border: none;
     border-radius: var(--yap-r);
     background: none;
@@ -885,6 +962,66 @@
     width: 100%;
     height: 100%;
   }
+  .navitem:focus-visible,
+  .acct:focus-visible {
+    outline: 2px solid var(--yap-focus-ring);
+    outline-offset: -2px;
+  }
+  /* A label clips as the rail narrows and fades with it (it stays the
+     button's name: narrow, it's the tooltip's too). */
+  .navlabel,
+  .acct-who {
+    flex: 1 1 auto;
+    min-width: 0;
+    overflow: hidden;
+    white-space: nowrap;
+  }
+  .side.narrow .navlabel,
+  .side.narrow .acct-who {
+    opacity: 0;
+  }
+  .side.glide .navlabel,
+  .side.glide .acct-who {
+    transition: opacity 140ms ease;
+  }
+  /* Narrow, each icon's name (and its shortcut) beside it on a hover or the
+     keyboard's focus, the title bar's dark tooltip; ☰ has its own in both. */
+  .side :global([data-tip])::after {
+    /* (Its alt text empty: drawn, never part of the button's name.) */
+    content: attr(data-tip) / '';
+    position: absolute;
+    top: 50%;
+    left: calc(100% + 10px);
+    transform: translateY(-50%);
+    padding: 4px 9px;
+    border-radius: 7px;
+    background: var(--yap-ink);
+    color: var(--yap-ink-fg);
+    font-size: 11.5px;
+    font-weight: 600;
+    line-height: 1.35;
+    white-space: nowrap;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 120ms ease;
+    z-index: 60;
+  }
+  .side.narrow :global([data-tip]:hover)::after,
+  .side.narrow :global([data-tip]:focus-visible)::after,
+  .side .tipped:hover::after,
+  .side .tipped:focus-visible::after {
+    opacity: 1;
+    transition-delay: 200ms;
+  }
+  /* (Not while it glides: a tooltip appears where the icon settles, and the
+     meeting setup's card once there's room for it.) */
+  .side.glide :global([data-tip])::after {
+    opacity: 0 !important;
+  }
+  .side.glide :global(.setup) {
+    opacity: 0;
+    pointer-events: none;
+  }
   .spacer {
     flex: 1;
   }
@@ -895,11 +1032,13 @@
   }
 
   .acct {
+    position: relative;
     display: flex;
     align-items: center;
     gap: 9px;
     width: 100%;
-    padding: 7px 10px;
+    box-sizing: border-box;
+    padding: 7px 8px;
     border: none;
     border-radius: var(--yap-r);
     background: none;
@@ -951,7 +1090,6 @@
   .acct-who {
     display: flex;
     flex-direction: column;
-    min-width: 0;
   }
   .acct-who .l1 {
     font-size: 13.5px;

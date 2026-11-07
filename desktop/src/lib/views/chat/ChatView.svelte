@@ -123,6 +123,7 @@
   import Composer from './Composer.svelte';
   import ShotViewer from './ShotViewer.svelte';
   import { MIN_WIDTH, tabKeyOf } from './chatDoc.svelte.js';
+  import { LIST_MIN } from './chatRoom.js';
   import { createChatLayout } from './chatLayout.svelte.js';
   import { chatBrowser } from '../../stores/chatBrowser.svelte.js';
   import { memoryTakesDrops } from '../../stores/memory.svelte.js';
@@ -204,16 +205,16 @@
   $effect(() => {
     const el = chatEl;
     if (!el || typeof ResizeObserver === 'undefined') return;
-    const list = el.querySelector('.convs');
+    // The app's rail beside Chat (ControlPanel), measured with it: the two
+    // always add up to the same, gliding or not (chatRoom.js).
+    const rail = document.querySelector('[data-nav-rail]');
     const measure = () => {
       layout.chatWidth = el.clientWidth;
-      // (Not while it's hidden: it keeps its last width.)
-      const w = list?.getBoundingClientRect().width;
-      if (w) layout.listWidth = w;
+      layout.railWidth = rail ? Math.round(rail.getBoundingClientRect().width) : 0;
     };
     const ro = new ResizeObserver(measure);
     ro.observe(el);
-    if (list) ro.observe(list);
+    if (rail) ro.observe(rail);
     measure();
     return () => ro.disconnect();
   });
@@ -259,6 +260,32 @@
       e.stopPropagation();
       layout.dragEnd(true);
     } else if (layout.key(e)) e.preventDefault();
+  }
+
+  // The list's edge (as the split's): dragged from the list's own left edge
+  // (Chat's, or the floating list's), its keys, a double-click to 224 px.
+  let listEl = $state(null);
+  function edgeDown(e) {
+    if (e.button !== 0) return;
+    layout.listDragStart();
+    e.currentTarget.setPointerCapture?.(e.pointerId);
+    e.currentTarget.focus?.({ preventScroll: true });
+    e.preventDefault();
+  }
+  function edgeMove(e) {
+    if (!layout.listDragging) return;
+    const left = (listEl ?? chatEl)?.getBoundingClientRect().left ?? 0;
+    layout.listDragTo(e.clientX, left);
+  }
+  function edgeUp() {
+    layout.listDragEnd();
+  }
+  function edgeKey(e) {
+    if (e.key === 'Escape' && layout.listDragging) {
+      e.preventDefault();
+      e.stopPropagation();
+      layout.listDragEnd(true);
+    } else if (layout.listKey(e)) e.preventDefault();
   }
 
   // B, by its letter or (a page beside the chat's keys come as `yap-page-key`) its key code.
@@ -473,8 +500,40 @@
   <!-- The conversation list: hidden by its button (or Ctrl+B), stepped aside
        for a panel in a narrow Chat, floating over the thread when asked back
        with no room beside both; out of reach while a panel covers it. -->
-  <div class="listslot" class:aside={!room.listShown} class:floating={room.listFloats} inert={cover || !room.listShown || undefined}>
-    <ConversationList {chat} {code} ontogglelist={toggleList} />
+  <div
+    class="listslot"
+    class:aside={!room.listShown}
+    class:floating={room.listFloats}
+    inert={cover || !room.listShown || undefined}
+    style:--chat-list-w="{room.listWidth}px"
+  >
+    <ConversationList bind:el={listEl} {chat} {code} ontogglelist={toggleList} />
+    <!-- The list's edge: drag it (Esc puts it back), ←/→ (Shift: further),
+         Home / End, a double-click back to 224 px. A focusable separator
+         is a widget (WAI-ARIA's window splitter). -->
+    <!-- svelte-ignore a11y_no_noninteractive_tabindex a11y_no_noninteractive_element_interactions -->
+    <div
+      class="listedge"
+      class:held={layout.listDragging}
+      role="separator"
+      aria-orientation="vertical"
+      aria-label="Resize your chats"
+      aria-controls="chat-list"
+      aria-valuenow={room.listWidth}
+      aria-valuemin={LIST_MIN}
+      aria-valuemax={room.listMax}
+      aria-valuetext={`${room.listWidth} pixels wide`}
+      title="Drag to resize · Double-click to reset"
+      tabindex="0"
+      data-testid="chat-list-edge"
+      onpointerdown={edgeDown}
+      onpointermove={edgeMove}
+      onpointerup={edgeUp}
+      onpointercancel={edgeUp}
+      onlostpointercapture={edgeUp}
+      ondblclick={() => layout.listReset()}
+      onkeydown={edgeKey}
+    ></div>
   </div>
 
   <!-- Thread (a press in it puts a floating list aside) -->
@@ -664,6 +723,56 @@
   .split:focus-visible {
     outline: none;
   }
+  /* The list's edge: the split's look, over the list's right border. */
+  .listedge {
+    flex: 0 0 10px;
+    margin: 0 -5px;
+    position: relative;
+    z-index: 3;
+    cursor: col-resize;
+    touch-action: none;
+  }
+  .listedge::after {
+    content: '';
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    left: 4px;
+    width: 2px;
+    background: transparent;
+    transition: background var(--yap-dur, 0.15s);
+  }
+  .listedge::before {
+    content: '';
+    position: absolute;
+    top: 50%;
+    left: 2px;
+    z-index: 1;
+    width: 6px;
+    height: 32px;
+    margin-top: -16px;
+    border-radius: var(--yap-r-full);
+    background: var(--yap-primary-line);
+    opacity: 0;
+    transition: opacity var(--yap-dur, 0.15s);
+  }
+  .listedge:hover::after,
+  .listedge:focus-visible::after,
+  .listedge.held::after {
+    background: var(--yap-primary-line);
+  }
+  .listedge:hover::before,
+  .listedge:focus-visible::before,
+  .listedge.held::before {
+    opacity: 1;
+  }
+  .listedge.held::after,
+  .listedge.held::before {
+    background: var(--yap-primary);
+  }
+  .listedge:focus-visible {
+    outline: none;
+  }
   .thread {
     position: relative;
     flex: 1 1 auto;
@@ -674,8 +783,13 @@
     padding: 16px 20px;
   }
   /* The list's button over the thread's top left: the thread's own parts
-     keep clear of it; the composer keeps its whole width (a narrow thread). */
-  .thread.withbtn > :global(:not(.composer):not(.showchats)) {
+     keep clear of it; the composer keeps its whole width (a narrow thread).
+     The messages' column (ChatThread) keeps clear by itself, only as far as
+     it needs to: centred in a wide thread, it never moves. */
+  .thread.withbtn {
+    --thread-clear: 26px;
+  }
+  .thread.withbtn > :global(:not(.composer):not(.showchats):not(.threadbox):not(.scopeline)) {
     margin-left: 26px;
   }
   /* The list's button where the list was: as in its head, the same place. */

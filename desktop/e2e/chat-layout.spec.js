@@ -140,11 +140,13 @@ async function theme(yap, main, which) {
   await expect.poll(() => main.evaluate(() => document.documentElement.dataset.yapTheme)).toBe(which);
 }
 
-/** This window's own layout choices forgotten (the list shown, the split at its default). */
+/** This window's own layout choices forgotten (the list shown at its width, the split at its default; the app's rail expanded). */
 async function forgetLayout(main) {
   await main.evaluate(() => {
     localStorage.removeItem('yapChatListHidden');
+    localStorage.removeItem('yapChatListWidth');
     localStorage.removeItem('yapChatDocWidth');
+    localStorage.removeItem('yapNavCollapsed');
   });
 }
 
@@ -583,7 +585,8 @@ for (const where of ['plain', 'code']) {
 // ---------------------------------------------------------------- narrow windows
 
 test('a narrow window: the panel gives way, the list floats when asked back, then the panel covers', async ({ yap, main, fakeLlm, shot }) => {
-  await main.setViewportSize({ width: 1000, height: 760 });
+  // (The window's least, 860: the app's rail has narrowed for the panel first, main-layout.spec.js.)
+  await main.setViewportSize({ width: 860, height: 760 });
   await openDocument(main, fakeLlm, 'Window boxes');
   const width = await chatWidth(main);
   const room = chatRoom({ chat: width, panelOpen: true, want: DEFAULT_WIDTH });
@@ -618,7 +621,7 @@ test('a narrow window: the panel gives way, the list floats when asked back, the
   // Narrower still: the panel covers the conversation; Ctrl+B leaves the list alone.
   await main.locator('.conv').filter({ hasText: 'Plan my window boxes' }).click();
   await main.locator('[data-testid="chat-doc-pill"]').filter({ hasText: 'Window boxes' }).click();
-  await main.setViewportSize({ width: 860, height: 640 });
+  await main.setViewportSize({ width: 700, height: 640 });
   await expect(slot(main)).toHaveClass(/\bcover\b/);
   await expect(split(main)).toHaveCount(0);
   await box(main).evaluate((el) => el.blur());

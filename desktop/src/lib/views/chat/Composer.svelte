@@ -163,7 +163,14 @@
      message goes to. The model picker opens above it all. With Jobs on,
      every box keeps room for a Code chat's label on its edge: a chat
      turning into a Code chat (its job starting) never moves the thread. -->
-<div class="composer" class:dropping={chat.dragging} class:code-chat={!!code?.current} class:code-room={!!code?.enabled} data-model-picker-above>
+<div
+  class="composer"
+  class:dropping={chat.dragging}
+  class:code-chat={!!code?.current}
+  class:code-room={!!code?.enabled}
+  style:--thread-gutter="{chat.threadGutter}px"
+  data-model-picker-above
+>
   {#if chat.dragging}
     <!-- Files dragged over Chat: a drop puts the pictures in the box. -->
     <div class="dropnote" data-testid="chat-drop-note" aria-live="polite">Drop pictures to ask about them</div>
@@ -462,9 +469,17 @@
     color: var(--yap-muted);
   }
 
+  /* On the messages' readable column (ChatThread: --yap-thread-width,
+     centred in a wide thread), moved by half the thread's scrollbar so the
+     two share one centre; the thread's whole width in a narrow one. */
   .composer {
     flex: 0 0 auto;
-    margin-top: 10px;
+    position: relative;
+    left: calc(-1 * min(var(--thread-gutter, 0px) / 2, max(0px, (100% - var(--yap-thread-width)) / 2)));
+    box-sizing: border-box;
+    width: 100%;
+    max-width: var(--yap-thread-width);
+    margin: 10px auto 0;
     display: flex;
     flex-direction: column;
     gap: 4px;

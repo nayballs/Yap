@@ -2515,15 +2515,42 @@ Chat | Code switch ("Hide your chats · Ctrl+B"; New chat on its own row
 below), and at the thread's top left while the list is hidden ("Show your
 chats"); Ctrl+B anywhere in Chat but rich text (a document's page keeps it
 for bold) or a dialog; the focus follows the button; the person's choice
-remembered (`yapChatListHidden`). Only the conversation list hides: the
-main window's own navigation stays, the same in every view. **Room**
-(`chatRoom.js`, pure; `chatLayout.svelte.js`): what gives way first is the
-list — it steps aside while a panel is open unless Chat is 1,240 px wide or
+remembered (`yapChatListHidden`). **The list's edge** (2026-11-07, the
+maintainer: "I can't move the line that shows the thread"): a separator on
+its right border ("Resize your chats", the split's look and cursor), dragged
+(Esc mid-drag puts it back), ←/→ (Shift: further), Home / End, a
+double-click back to 224 px; between 200 and 420, the thread keeping its
+340 (and a panel beside it its 320: the drag stops there, so the list never
+starts floating mid-drag); remembered (`yapChatListWidth`); Ctrl+B still
+hides it whole. **Room** (`chatRoom.js`, pure; `chatLayout.svelte.js`;
+since 2026-11-07 with the main window's rail, frontend.md "The sidebar as
+a rail"): what gives way first is **the app's rail** — while a panel is
+open, unless Chat beside it expanded is 1,240 px wide (1,016 with the list
+hidden by the person), it narrows to its icons: the state its ☰ shows,
+landing in the panel's frame, never remembered, back when the panel closes
+or Chat goes; ☰ meanwhile keeps it open for that panel —, then **the list**
+— it steps aside while a panel is open unless Chat is 1,240 px wide or
 more, the same hidden state its button shows, back when the panel closes;
 asked back meanwhile it stays for that panel, floating over the thread when
 there's no room beside both (Esc, a press in the thread put it aside) —,
 then the panel's width (down to 320), then, in a window too narrow for the
 panel beside the thread, the panel covering the conversation (✕ goes back).
+Chat and the rail are measured together (they always add up to the same,
+so a glide never flips a rule half-way). At 1,920 px nothing gives way; at
+1,400 the rail does; at 1,280 the list too; at 860 (the window's least) the
+panel narrows to 450; it covers only below that.
+**The readable column** (2026-11-07): in a wide thread the messages and the
+composer sit on one centred column at most `--yap-thread-width` wide
+(app.css: 768 px, the Claude app's and ChatGPT's 48rem, × the Text size so
+a line keeps its length) — the activity line, cards, job pills and prompts
+and the composer's Code label with them (ChatThread's `.msgsin`, Composer's
+`.composer`). The scroller stays the thread's whole width (its scrollbar at
+the thread's edge); the composer, the scope line and "↓" are moved by half
+the scrollbar (`chat.threadGutter`, measured) so all share one centre; the
+column keeps clear of the list's button only as far as it must
+(`--thread-clear`). Beside a panel the column just fills less of the room;
+a narrow thread is its own width, as before; documents, the Job tab and
+pages aren't touched. E2e `main-layout.spec.js`.
 **Opening calmly** (a job starting, 7 Nov 2026: the list vanished, the
 thread jumped 225 px and shrank, the composer grew 9 px a frame later, the
 panel's chunk popped into an empty gap): every box changes once, in one
@@ -2531,7 +2558,7 @@ frame — the list aside, the panel at its remembered width, drawn whole
 (DocPanel's chunk fetched once Chat is idle) and faded in over 140 ms
 (never with reduced motion); with Jobs on every message box keeps room for
 a Code chat's label, so a chat turning into a Code chat never moves the
-thread; the list is 224 px on both sides; the thread keeps its newest line
+thread; the list keeps its width on both sides; the thread keeps its newest line
 (`core/stickToBottom.js`). E2e `chat-layout.spec.js` (each frame measured).
 **Under the answer**, a pill per document it made or changed
 ("Lone wolf ranger · Open", `ChatMessage.svelte` `.docpill`; while it's

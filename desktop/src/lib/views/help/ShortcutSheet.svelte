@@ -33,6 +33,7 @@
   /** In Yap's own window. */
   const IN_APP = [
     { keys: ['Ctrl', '/'], label: 'This sheet' },
+    { keys: ['Ctrl', '\\'], label: 'Collapse or expand the sidebar' },
     { keys: ['Ctrl', 'K'], label: 'Search your dictations on Home' },
     { keys: ['Ctrl', 'F'], label: 'Search Settings, notes or chats' },
     { keys: ['Ctrl', 'N'], label: 'New chat, in Chat' },

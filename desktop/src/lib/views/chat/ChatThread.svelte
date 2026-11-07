@@ -63,15 +63,27 @@
   let { chat, code = null, onopensettings = null } = $props();
 
   // The width a question's screenshots may take: a bubble's (78 % of the
-  // thread). Settled a moment after a resize, so a window being dragged
-  // wider doesn't ask Rust for a thumbnail at every pixel (they're drawn at
-  // exactly their device pixels: chatImages.js `sentPlaced`). The thread's
-  // content box, not its clientWidth: Svelte reads clientWidth when the
-  // border box resizes, which a scrollbar appearing never does.
+  // messages' column). Settled a moment after a resize, so a window being
+  // dragged wider doesn't ask Rust for a thumbnail at every pixel (they're
+  // drawn at exactly their device pixels: chatImages.js `sentPlaced`). The
+  // column's content box, not its clientWidth: Svelte reads clientWidth
+  // when the border box resizes, which a scrollbar appearing never does.
   let msgsBox = $state(null);
+  let colBox = $state(null);
+  const colWidth = $derived(colBox?.width ?? 0);
   let room = $state(0);
+  // **The readable column** (2026-11-07, as the Claude app's and ChatGPT's
+  // 48rem): the messages at most `--yap-thread-width` wide, centred in a
+  // wide thread, the composer on the same column (Composer.svelte); the
+  // scroller stays the thread's whole width, so its scrollbar sits at the
+  // thread's edge and the composer's column is moved by half its width.
   $effect(() => {
-    const next = msgsBox?.width > 0 ? Math.floor(msgsBox.width * 0.78) : 0;
+    msgsBox;
+    const el = chat.threadEl;
+    chat.threadGutter = el ? Math.max(0, el.offsetWidth - el.clientWidth) : 0;
+  });
+  $effect(() => {
+    const next = colWidth > 0 ? Math.floor(colWidth * 0.78) : 0;
     if (!untrack(() => room) || !next) {
       room = next;
       return;
@@ -180,15 +192,16 @@
 {:else}
   {#if chat.scope === 'meetings'}
     <!-- This conversation asks across the meetings, follow-ups too. -->
-    <p class="scopeline" data-testid="chat-across-meetings">
+    <p class="scopeline" data-testid="chat-across-meetings" style:--thread-gutter="{chat.threadGutter}px">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="7" /><path d="m20 20-3.5-3.5" /></svg>
       Asking across your meetings and notes
     </p>
   {/if}
-  <div class="threadbox">
-    <!-- The thread scrolls (.msgs); what's in it (.msgsin) is what grows. -->
+  <div class="threadbox" style:--thread-gutter="{chat.threadGutter}px">
+    <!-- The thread scrolls (.msgs); what's in it (.msgsin, the readable
+         column) is what grows. -->
     <div class="msgs" bind:this={chat.threadEl} bind:contentRect={msgsBox}>
-      <div class="msgsin" bind:this={contentEl}>
+      <div class="msgsin" bind:this={contentEl} bind:contentRect={colBox} data-testid="chat-column">
         {#each chat.messages as m, i (i)}
           {#if chat.summary && i === chat.summary.upto}
             <!-- A long chat's older messages, summarised (chat/compact.rs): the
@@ -383,6 +396,9 @@
   }
   /* A conversation asked across the meetings says so over its thread. */
   .scopeline {
+    position: relative;
+    /* (On the messages' column: the scrollbar's half to the left, as the composer.) */
+    left: calc(-1 * min(var(--thread-gutter, 0px) / 2, max(0px, (100% - var(--yap-thread-width)) / 2)));
     display: flex;
     align-items: center;
     gap: 6px;
@@ -432,6 +448,16 @@
     min-height: 0;
     padding: 2px;
   }
+  /* The readable column: at most --yap-thread-width, centred in a wide
+     thread; in a narrow one the thread's whole width, clear of the list's
+     button while the list is hidden (ChatView's --thread-clear) — and in a
+     wide one the centre never moves when it shows or goes. */
+  .msgsin,
+  .scopeline {
+    max-width: var(--yap-thread-width);
+    margin-left: max(var(--thread-clear, 0px), calc((100% - var(--yap-thread-width)) / 2));
+    margin-right: auto;
+  }
   .msgsin {
     display: flex;
     flex-direction: column;
@@ -441,7 +467,8 @@
      "New messages" when something came (as Claude's app and Slack have it). */
   .tobottom {
     position: absolute;
-    left: 50%;
+    /* (Under the column's centre: the scrollbar's half to the left.) */
+    left: calc(50% - var(--thread-gutter, 0px) / 2);
     bottom: 10px;
     z-index: 2;
     transform: translateX(-50%);
