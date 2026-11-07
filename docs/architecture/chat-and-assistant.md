@@ -3458,7 +3458,10 @@ own Claude Code in one of their folders, and reports back when it ends.
     Bypass asks once, then the chip is amber.
   - **The Job tab** (`JobTab.svelte`, a `job:<id>` tab in `chatDoc` and
     `DocPanel`): opened by the turn's job event, a pill or the bar's Open;
-    steps, files, commands, what wasn't allowed, its final words, its cost,
+    read like Claude Code: its to-do list, its steps and what it says
+    (following the live end), files opening to their diffs, commands with
+    what each is for ([jobs.md](./jobs.md#what-the-tab-shows)), what wasn't
+    allowed, its final words, its cost,
     a problem with one button, Stop / Continue / Undo job / Open in terminal /
     "Tell the job…". Closing it never stops the job.
   - **Pills** under the answer that started a job (`JobPills.svelte`, by the

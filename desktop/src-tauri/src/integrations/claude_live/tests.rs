@@ -429,6 +429,11 @@ fn cards_say_what_a_tool_would_do_in_plain_words() {
     let (s, d) = describe("Bash", &json!({ "command": format!("echo {}\nsecond line", "x".repeat(200)) }), None);
     assert!(s.starts_with("Run a command: echo xxx") && s.chars().count() <= "Run a command: ".len() + 80 && s.ends_with('…'));
     assert!(d.contains('\n'), "the detail keeps the lines");
+    // A cd into the run's folder: gone from the line, kept in the detail; never the model's description.
+    let garden = Path::new(r"D:\Projects\garden-planner");
+    let cmd = r#"cd "/d/Projects/garden-planner" && rm -rf "/d/Projects/garden-planner/build""#;
+    let (s, d) = describe("Bash", &json!({ "command": cmd, "description": "Tidy up" }), Some(garden));
+    assert_eq!((s.as_str(), d.as_str()), ("Run a command: rm -rf build", cmd));
     assert_eq!(describe("WebFetch", &json!({ "url": "https://docs.example.com/guide?x=1" }), None).0, "Open a web page: docs.example.com");
     assert_eq!(describe("WebSearch", &json!({ "query": "rust  tiny_http" }), None).0, "Search the web: rust tiny_http");
     assert_eq!(describe("mcp__tracker__create_issue", &json!({ "title": "Bug" }), None).0, "Use create_issue from tracker");
