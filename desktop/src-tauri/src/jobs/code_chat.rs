@@ -17,7 +17,11 @@
 //! - **A new chat** made a Code chat before its first question: the page
 //!   sends the workspace with the question (`chat_send`'s `codeFolder`), and
 //!   the conversation it makes is attached as it's made, before the prompt
-//!   is built ([`with_new`], [`adopt_new`]).
+//!   is built ([`with_new`], [`adopt_new`]). Asked out loud instead (the
+//!   Voice Assistant, with Chat showing that new chat), the same: Chat says
+//!   which workspace it shows (`chat_view_state`'s `codeFolder`), and the
+//!   question's new conversation is attached there
+//!   (`assistant::new_code_chat`).
 //! - **A folder removed** (Settings → Jobs): its chats are plain again,
 //!   said once ([`removed`]).
 //! - Every change goes to every window as **`yap-code-chat`**.
@@ -184,12 +188,13 @@ pub async fn with_new<F: std::future::Future>(folder: Option<String>, f: F) -> F
 }
 
 /// **The conversation a new chat's first question made** (`chat_send`'s
-/// turn, as it's made): attached to the workspace the page picked for it.
-pub fn adopt_new(conversation: u64) {
+/// turn, or the Voice Assistant's, as it's made): attached to the workspace
+/// the page picked for it. That workspace, when it was attached.
+pub fn adopt_new(conversation: u64) -> Option<Folder> {
     let wanted = NEW_CHAT.try_with(|f| f.clone()).ok().flatten();
-    if let Some(folder) = wanted.as_deref().and_then(find) {
-        set(conversation, Some(&folder));
-    }
+    let folder = wanted.as_deref().and_then(find)?;
+    set(conversation, Some(&folder));
+    Some(folder)
 }
 
 #[cfg(test)]
@@ -265,14 +270,15 @@ mod tests {
         let base = std::env::temp_dir().join(format!("yap-code-chat-new-{}", store::new_id()));
         let garden = make(&base.join("garden-planner"));
         let rt = tokio::runtime::Builder::new_current_thread().build().unwrap();
-        // Outside a question from the page (the Voice Assistant's): nothing.
-        adopt_new(20);
+        // Outside a new chat's first question (a phone's, one continuing a
+        // conversation): nothing.
+        assert_eq!(adopt_new(20), None);
         assert_eq!(folder_of(Some(20)), None);
-        rt.block_on(with_new(None, async { adopt_new(21) }));
+        assert_eq!(rt.block_on(with_new(None, async { adopt_new(21) })), None);
         assert_eq!(folder_of(Some(21)), None);
-        rt.block_on(with_new(Some("garden-planner".into()), async { adopt_new(22) }));
+        assert_eq!(rt.block_on(with_new(Some("garden-planner".into()), async { adopt_new(22) })), Some(garden.clone()));
         assert_eq!(folder_of(Some(22)), Some(garden.clone()));
-        rt.block_on(with_new(Some("not-a-workspace".into()), async { adopt_new(23) }));
+        assert_eq!(rt.block_on(with_new(Some("not-a-workspace".into()), async { adopt_new(23) })), None);
         assert_eq!(folder_of(Some(23)), None);
         let _ = std::fs::remove_dir_all(base);
     }

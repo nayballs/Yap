@@ -647,12 +647,14 @@ export function createChatState({ onopensettings = () => null, onopennote = () =
 
   // What this view shows, for a question asked out loud (chat/assistant.rs
   // `choose_conversation`): the conversation open here, a new chat someone
-  // asked for, or — nothing chosen — no preference.
+  // asked for, or — nothing chosen — no preference; and a new code chat's
+  // workspace (its new conversation is a Code chat there, `new_code_chat`).
   function reportView(open = true) {
     invoke('chat_view_state', {
       open,
       conversationId: activeId,
       newChat: activeId == null && choseNew,
+      codeFolder: activeId == null ? (pendingFolder?.() ?? null) : null,
     }).catch(() => {});
   }
   $effect(() => {
@@ -827,8 +829,10 @@ export function createChatState({ onopensettings = () => null, onopennote = () =
   // (Code chats, codeChats.svelte.js: the list shows one side of Chat at a
   // time — `groupBy(conversations, byDate)` picks it.)
   let groupBy = $state(null);
-  // A new chat's workspace for its first question (codeChats.svelte.js).
+  // A new chat's workspace for its first question (codeChats.svelte.js):
+  // taken by the question sent, and (`pendingFolder`) the one shown.
   let newChatFolder = null;
+  let pendingFolder = null;
   const groups = $derived(groupBy ? groupBy(conversations, byDate) : byDate(conversations));
   function byDate(conversations) {
     const now = new Date();
@@ -1395,6 +1399,7 @@ export function createChatState({ onopensettings = () => null, onopennote = () =
     // Code chats (codeChats.svelte.js): the list's side, and a new chat's workspace.
     set groupBy(fn) { groupBy = fn; },
     set newChatFolder(fn) { newChatFolder = fn; },
+    set pendingFolder(fn) { pendingFolder = fn; },
     get convEls() { return convEls; },
     citedSources,
     refreshVision,

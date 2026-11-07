@@ -67,3 +67,31 @@ export function plainOnly(conversations, chats) {
 export function pickerRows(workspaces, current) {
   return (workspaces ?? []).map((w) => ({ ...w, on: !!current && samePath(w.path, current.path) }));
 }
+
+// ---- an empty Code chat's greeting (CodeEmpty.svelte) ----
+
+/** What a Code chat is for, in one line. */
+export const CODE_INTRO = `Ask for a change, a fix or an explanation. ${FEATURE_NAME} run your own Claude Code here, and you can follow each step beside the chat.`;
+
+/** The one-tap prompts: each fills the box, never sent by itself (a request here can start a job). */
+export const CODE_PROMPTS = ['Explain how this project is laid out', "Find and fix what's failing", 'What changed here recently?'];
+
+/**
+ * **What stands between this PC and a job**, from Claude Code's status
+ * (stores/claudePlan.svelte.js) and how jobs pay (`jobsPay`): nothing (null,
+ * also while it's still being looked for), or a line and its one button —
+ * `install` (not on this PC), `update` (too old), `sign-in` (signed out, on
+ * the plan: a key pays without a sign-in), `check` (signing in, in the
+ * terminal Yap opened).
+ */
+export function claudeCodeHint(cc, pay = 'plan') {
+  if (!cc?.loaded) return null;
+  if (!cc.installed) return { state: 'missing', text: `${FEATURE_NAME} run your own Claude Code, and it isn't on this PC yet.`, action: 'install', label: 'Install Claude Code' };
+  if (cc.tooOld) {
+    const version = cc.version ? `Claude Code ${cc.version}` : 'This Claude Code';
+    return { state: 'old', text: `${version} is too old for jobs: Yap needs ${cc.minVersion} or newer.`, action: 'update', label: 'How to update' };
+  }
+  if (cc.loggedIn || pay === 'key') return null;
+  if (cc.signingIn) return { state: 'signing-in', text: 'Finish signing in to Claude Code in the terminal Yap opened.', action: 'check', label: 'Check again' };
+  return { state: 'signed-out', text: "Claude Code isn't signed in on this PC yet.", action: 'sign-in', label: 'Sign in' };
+}

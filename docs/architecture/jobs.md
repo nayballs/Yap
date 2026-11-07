@@ -198,7 +198,19 @@ its sidebar switch between Chat and Code, and Code's environments.
   first question with its workspace, which goes with it (`chat_send`'s
   `codeFolder`): the conversation it makes is attached as it's made, before
   the prompt is built (`code_chat::with_new`, `adopt_new` in `send_turn`'s
-  `asked`).
+  `asked`). **Asked out loud** instead (the Voice Assistant, that new chat
+  on screen): the same — Chat reports the workspace it shows
+  (`chat_view_state`'s `codeFolder`), and a question that makes a new
+  conversation is a Code chat there (`assistant::new_code_chat`, never a
+  phone's); its `yap-assistant-turn` carries `codeFolder`, so Chat marks it
+  at once and stays on the Code side.
+- **An empty Code chat** greets you as the Code side (`CodeEmpty.svelte`, not
+  Chat's greeting): the `</>` mark, "Work in garden-planner" with its path,
+  one line (`core/codeChats.js` `CODE_INTRO`), three prompts that fill the
+  box, never sent (`CODE_PROMPTS`: a request here can start a job), and,
+  when something stands in a job's way, one line with its button
+  (`claudeCodeHint` on the Claude plan store: not installed, too old, or
+  signed out on the plan — **Sign in**; paying with a key needs no sign-in).
 - **Plain chat** (the workspace chip's picker) takes a Code chat back to the
   Chat side.
 - **A folder removed** in Settings → Jobs: its chats are plain again

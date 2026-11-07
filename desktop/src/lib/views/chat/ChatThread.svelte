@@ -4,7 +4,8 @@
   // (ActivityLine: "Searching the web · … · 1m 59s"; a model on this PC slow
   // to start says why), or — no messages yet — what Chat is for, what it
   // needs if no AI model is set up, and the Voice Assistant's shortcut (or
-  // how to set one).
+  // how to set one). An empty Code chat greets you as the Code side instead
+  // (CodeEmpty.svelte).
   //
   // It keeps its newest line in view while it grows (core/stickToBottom.js,
   // 2026-11-07): pinned at the bottom while you're there — streamed text,
@@ -25,6 +26,7 @@
   import { promptChips } from '../../core/skills.js';
   import ChatMessage from './ChatMessage.svelte';
   import ActivityLine from './ActivityLine.svelte';
+  import CodeEmpty from './CodeEmpty.svelte';
   // Jobs (desktop/src-tauri/src/jobs.rs): the pills of the jobs an answer
   // started, a job's report as a job card (`kind: "jobReport"`), and a
   // running job's permission prompts for this chat — each in a small chunk.
@@ -54,8 +56,11 @@
     summaryBtn?.focus({ preventScroll: true });
   }
 
-  /** `chat`: the view's state; `onopensettings(section)`: ControlPanel's Settings. */
-  let { chat, onopensettings = null } = $props();
+  /**
+   * `chat`: the view's state; `code`: its Code chats (codeChats.svelte.js);
+   * `onopensettings(section)`: ControlPanel's Settings.
+   */
+  let { chat, code = null, onopensettings = null } = $props();
 
   // The width a question's screenshots may take: a bubble's (78 % of the
   // thread). Settled a moment after a resize, so a window being dragged
@@ -129,7 +134,10 @@
   }
 </script>
 
-{#if chat.messages.length === 0}
+{#if chat.messages.length === 0 && code?.current}
+  <!-- An empty Code chat: the Code side's own greeting. -->
+  <CodeEmpty {chat} {code} {onopensettings} />
+{:else if chat.messages.length === 0}
   <div class="empty">
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" /><path d="M8 9h8M8 13h5" /></svg>
     {#if chat.scope === 'meetings'}
