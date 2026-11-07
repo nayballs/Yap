@@ -104,6 +104,13 @@ export function createCodeChats(chat, { opensettings = () => null } = {}) {
       chats = r?.chats ?? {};
       workspaces = r?.workspaces ?? [];
       loaded = true;
+      // A new code chat's pick that's no longer a workspace (removed in
+      // Settings → Jobs) lets it go: the most recent one instead, or none
+      // ("Choose a workspace"). One still there takes its latest name and cap.
+      if (pending) {
+        const still = workspaces.find((w) => samePath(w.path, pending.path));
+        pending = still ?? (side === 'code' && chat.activeId == null ? (workspaces[0] ?? null) : null);
+      }
     } catch {
       /* keep the last */
     }

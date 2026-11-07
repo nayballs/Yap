@@ -80,6 +80,7 @@ pub async fn job_folders_list() -> Vec<Folder> {
 pub async fn job_folders_add(path: String, name: Option<String>, cap: Option<String>) -> Result<Folder, String> {
     let added = folders::add(&path, name.as_deref(), cap.as_deref())?;
     folders::saved().map_err(|e| e.to_string())?;
+    code_chat::workspaces_changed();
     Ok(added)
 }
 
@@ -95,6 +96,7 @@ pub async fn job_folders_pick(app: tauri::AppHandle, window: tauri::WebviewWindo
     let added = folders::add(&path, None, None)?;
     folders::saved().map_err(|e| e.to_string())?;
     tracing::info!("Jobs: a folder picked and added");
+    code_chat::workspaces_changed();
     Ok(Some(added))
 }
 
@@ -146,7 +148,9 @@ pub async fn job_folders_remove(name: String) -> bool {
 /// Cap a folder's mode (`None`: no cap).
 #[tauri::command]
 pub async fn job_folders_set_cap(name: String, cap: Option<String>) -> Result<Folder, String> {
-    folders::set_cap(&name, cap.as_deref())
+    let capped = folders::set_cap(&name, cap.as_deref())?;
+    code_chat::workspaces_changed();
+    Ok(capped)
 }
 
 /// The Mode chip, as the page shows it.

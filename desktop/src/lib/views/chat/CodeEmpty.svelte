@@ -34,6 +34,16 @@
     }, 0);
   }
 
+  /** Add workspace…: Windows' folder picker; the folder picked opens a new code chat. */
+  async function addThenOpen() {
+    try {
+      const w = await code.addWorkspace();
+      if (w) code.newCodeChat(w);
+    } catch {
+      /* the picker said why, or was cancelled */
+    }
+  }
+
   function act(h) {
     if (h.action === 'install' || h.action === 'update') openExternalLink(claudePlan.installUrl);
     else if (h.action === 'sign-in') signInClaudePlan();
@@ -41,10 +51,22 @@
   }
 </script>
 
-<div class="codeempty" data-testid="chat-code-empty" data-workspace={ws.name}>
+<div class="codeempty" data-testid="chat-code-empty" data-workspace={ws?.name ?? ''}>
   <svg class="mark" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"
     ><path d="m8 7-5 5 5 5" /><path d="m16 7 5 5-5 5" /><path d="m13.5 5-3 14" /></svg
   >
+  {#if !ws}
+    <!-- The Code side with no workspace to work in (none yet, or the one
+         picked was removed): pick one, or add one. -->
+    <h2 class="title">Choose a workspace</h2>
+    <p class="intro">A code chat works in a folder on this PC. Pick one, or add one, and jobs can work there.</p>
+    <div class="prompts" role="group" aria-label="Workspaces">
+      {#each code.workspaces.slice(0, 3) as w (w.path)}
+        <button type="button" class="prompt" data-testid="chat-code-empty-workspace" title={w.path} onclick={() => code.newCodeChat(w)}>{w.name}</button>
+      {/each}
+      <button type="button" class="prompt" data-testid="chat-code-empty-add" onclick={addThenOpen}>Add workspace…</button>
+    </div>
+  {:else}
   <h2 class="title">Work in <span class="name">{ws.name}</span></h2>
   <p class="path" title={ws.path}>{ws.path}</p>
   <p class="intro">{CODE_INTRO}</p>
@@ -62,6 +84,7 @@
     {#if claudePlan.failed}
       <p class="note" role="alert">{claudePlan.failed}</p>
     {/if}
+  {/if}
   {/if}
   {#if !chat.chatReady}
     <!-- Before a first question fails: what Chat needs (a Code chat's too). -->

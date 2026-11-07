@@ -114,9 +114,18 @@ pub fn removed(folder: &Folder) -> usize {
     let gone = store::drop_code_chats_in(&folder.path);
     if !gone.is_empty() {
         tracing::info!(chats = gone.len(), "Jobs: a workspace removed, its Code chats plain again");
-        emit(&Changed { conversations: gone.clone(), folder: None, removed: Some(folder.name.clone()) });
     }
+    // Always told, Code chats or none: a new code chat waiting with this
+    // workspace picked lets it go, and every picker drops it.
+    emit(&Changed { conversations: gone.clone(), folder: None, removed: Some(folder.name.clone()) });
     gone.len()
+}
+
+/// **The workspaces changed** (one added, picked or capped in Settings →
+/// Jobs or Chat's picker): every window reads them again (`yap-code-chat`
+/// naming no conversation).
+pub fn workspaces_changed() {
+    emit(&Changed::default());
 }
 
 /// **A Code chat's line** in its prompt: the question's context, for Yap's

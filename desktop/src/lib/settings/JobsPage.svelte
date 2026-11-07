@@ -58,7 +58,7 @@
     { value: 'plan', label: 'Plan' },
   ];
   const ASK = [
-    { value: 'new-or-web', label: 'Only when the chat read the web or the workspace is new (Recommended)' },
+    { value: 'new-or-web', label: 'When it matters (Recommended)' },
     { value: 'always', label: 'Always' },
     { value: 'never', label: 'Never' },
   ];
@@ -274,7 +274,7 @@
 </Group>
 
 <Group title="Asking and reports" id="settings-jobs-asking">
-  <Row label="Ask before starting a job" desc="A card in Chat, or a question out loud, before it starts" setting="jobs-ask" stack>
+  <Row label="Ask before starting a job" desc="A card in Chat, or a question out loud, before a job starts. When it matters: in a workspace jobs haven't used yet, or after the chat read the web." setting="jobs-ask" stack>
     <Select bind:value={cfg.jobsAsk} options={ASK} ariaLabel="Ask before starting a job" wide />
   </Row>
   <Row label="Read job reports aloud" desc="When a job ends, its report in the chat's own voice" setting="jobs-speak">

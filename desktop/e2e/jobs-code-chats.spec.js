@@ -778,3 +778,37 @@ test('a workspace removed in Settings turns its chats back to plain, said once',
   await expect(wsChip(main)).toHaveCount(0);
   await expect(modeChip(main)).toHaveCount(0);
 });
+
+// The thread's empty state (the sidebar's "No code chats yet" shares its test id).
+const threadEmpty = (main) => main.locator('div.codeempty[data-testid="chat-code-empty"]');
+
+test('a new code chat waiting on a removed workspace lets it go; with none left it asks for one', async ({ yap, main }) => {
+  // (Only this test's two workspaces: an earlier test's book-shelf would come first.)
+  await yap.invoke('job_folders_remove', { name: 'book-shelf' });
+  // An empty code chat in recipe-box, nothing asked yet: the workspace waits for its first question.
+  await codeChat(main, 'recipe-box');
+  await expect(threadEmpty(main)).toHaveAttribute('data-workspace', 'recipe-box');
+
+  // Removed in Settings (no Code chats of its own needed): the waiting chat takes the most recent one left.
+  await yap.invoke('job_folders_remove', { name: 'recipe-box' });
+  await expect(wsChip(main)).toHaveAttribute('data-workspace', 'garden-planner');
+  await expect(threadEmpty(main)).toHaveAttribute('data-workspace', 'garden-planner');
+
+  // None left: the Code side asks for one, the chip says "Choose a workspace".
+  await yap.invoke('job_folders_remove', { name: 'garden-planner' });
+  await expect(threadEmpty(main)).toHaveAttribute('data-workspace', '');
+  await expect(threadEmpty(main).getByRole('heading', { name: 'Choose a workspace' })).toBeVisible();
+  await expect(wsChip(main)).toHaveAttribute('data-workspace', '');
+  await expect(main.getByTestId('chat-code-empty-workspace')).toHaveCount(0);
+
+  // A workspace added elsewhere (Settings → Jobs) shows here at once, ready to pick.
+  await yap.invoke('job_folders_add', { path: GARDEN });
+  await expect(main.getByTestId('chat-code-empty-workspace')).toHaveText(['garden-planner']);
+
+  // Add workspace… from the empty state: the folder picked opens a new code chat there.
+  await yap.invoke('e2e_job_folder', { path: RECIPES });
+  await main.getByTestId('chat-code-empty-add').click();
+  await expect(wsChip(main)).toHaveAttribute('data-workspace', 'recipe-box');
+  await expect(threadEmpty(main)).toHaveAttribute('data-workspace', 'recipe-box');
+  await expect(threadEmpty(main).getByRole('heading', { name: /Work in/ })).toBeVisible();
+});

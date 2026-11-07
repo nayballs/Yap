@@ -134,7 +134,7 @@
   }
 </script>
 
-{#if chat.messages.length === 0 && code?.current}
+{#if chat.messages.length === 0 && (code?.current || code?.onCode)}
   <!-- An empty Code chat: the Code side's own greeting. -->
   <CodeEmpty {chat} {code} {onopensettings} />
 {:else if chat.messages.length === 0}
