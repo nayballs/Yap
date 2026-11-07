@@ -13,7 +13,7 @@
   // right-click menu: Copy / Copy as Markdown / Read aloud, a question's
   // Copy.
   import { renderMarkdown } from '../../core/markdown.js';
-  import { modelLine, whereItRuns } from '../../core/aiModel.js';
+  import { paidLine, whereItRuns } from '../../core/aiModel.js';
   import { closePartial, settle } from '../../core/streaming.js';
   import { menuKey, openContextMenu } from '../../ui/contextMenu.svelte.js';
   import { removedLine, sizeLine, imageItems, splitScreenText, sentPlaced, shown } from './chatImages.js';
@@ -269,7 +269,7 @@
       </span>
     {:else if m.model}
       <!-- The model that wrote it (older answers don't say). -->
-      <span class="byline" title={whereItRuns(m.model)}>{modelLine(m.model)}</span>
+      <span class="byline" title={whereItRuns(m.model)}>{paidLine(m.model, m.tokens)}</span>
     {/if}
     {#if m.stopped}
       <span class="byline stopped" title="You stopped this answer while it was being written">· Stopped</span>

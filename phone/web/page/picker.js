@@ -3,7 +3,8 @@
 // with the same structure and words — the provider rail with its logos
 // (Recent, Groq, Gemini, Claude, ChatGPT, OpenRouter, Custom, On this PC),
 // each provider's **Latest** first and **More models (N)** opening in place,
-// OpenAI's two ways as one "ChatGPT" entry ("Your plan | API key"), the
+// OpenAI's two ways as one "ChatGPT" entry and Claude's as one "Claude" entry
+// ("Your plan | API key", core/providerIds.js `TAB_WAYS`), the
 // on-device models, "Reads images" and the other tags, ✓ on the model in
 // use, and the effort under it.
 //
@@ -24,7 +25,7 @@
 import {
   cloudInfo,
   isCloud,
-  gptState,
+  waysState,
   railTabs,
   startTab,
   cloudRows,
@@ -39,7 +40,7 @@ import {
 } from './core/chatPicker.js';
 import { ICON_FILES, MONOCHROME_PROVIDERS, ICON_TINTS, familyIcon, providerIcon } from './core/modelIcons.js';
 import { labelFor } from './core/modelCatalog.js';
-import { CHATGPT, GPT_TAB, GPT_WAYS, PROVIDER_LABELS } from './core/providerIds.js';
+import { CHATGPT, GPT_TAB, CLAUDE_PLAN, CLAUDE_TAB, TAB_WAYS, PROVIDER_LABELS } from './core/providerIds.js';
 import { effortNow, effortOptions, effortHint, effortLabel, FAST_NOTE } from './core/effort.js';
 
 /** The marks the PC serves (desktop/src-tauri/build.rs LINK_SHARED). */
@@ -182,7 +183,8 @@ function pushRecent(entry) {
 export function createPicker({ dialog, send, onPicked, onChanged }) {
   let ready = null; // the last `ready`
   let sel = 'groq';
-  let gptWay = CHATGPT;
+  // A two-way entry's way when both are connected, by tab (TAB_WAYS).
+  const wayOf = { [GPT_TAB]: CHATGPT, [CLAUDE_TAB]: CLAUDE_PLAN };
   const moreChoice = {};
 
   const data = () => ready?.picker || null;
@@ -209,7 +211,9 @@ export function createPicker({ dialog, send, onPicked, onChanged }) {
     const p = data();
     if (p?.status) {
       sel = startTab(p.status);
-      gptWay = (p.status.ready ? p.status.model?.provider : p.status.provider) === 'openai' ? 'openai' : CHATGPT;
+      // Each two-way entry starts on the way the model in use goes, else its plan.
+      const using = p.status.ready ? p.status.model?.provider : p.status.provider;
+      for (const [tab, t] of Object.entries(TAB_WAYS)) wayOf[tab] = using === t.key ? t.key : t.plan;
       // The one in use counts as used (Recent), as Chat's chip has it.
       const m = p.status.ready ? p.status.model : null;
       if (m) {
@@ -405,6 +409,11 @@ export function createPicker({ dialog, send, onPicked, onChanged }) {
       c.appendChild(
         h('div', 'cdesc', 'Sign in with ChatGPT in Yap on your PC (Settings → Language Models → ChatGPT), or add an OpenAI API key there. Then pick its models here.'),
       );
+    } else if (p === CLAUDE_PLAN || p === CLAUDE_TAB) {
+      c.appendChild(h('div', 'ctitle', 'Connect Claude'));
+      c.appendChild(
+        h('div', 'cdesc', 'Sign in to Claude Code on your PC for your Claude plan (Settings → Language Models → Chat → Claude), or add an Anthropic API key there. Then pick its models here.'),
+      );
     } else {
       c.appendChild(h('div', 'ctitle', `Connect ${info?.short || p}`));
       c.appendChild(h('div', 'cdesc', `Add an ${info?.name || p} API key in Yap on your PC: Settings → Language Models. Keys stay on the PC; then pick its models here.`));
@@ -423,12 +432,17 @@ export function createPicker({ dialog, send, onPicked, onChanged }) {
       const rows = recentRows(readRecent(), c);
       if (rows.length) box.appendChild(group('Recent', rows, { header: false, where: true }));
       else box.appendChild(h('p', 'pk-empty', 'The models you pick show up here.'));
-    } else if (sel === GPT_TAB) {
-      const g = gptState(status, gptWay);
+    } else if (TAB_WAYS[sel]) {
+      // A two-way entry: ChatGPT's (the plan, an OpenAI key) or Claude's
+      // (your Claude plan, an Anthropic key).
+      const t = TAB_WAYS[sel];
+      const g = waysState(sel, status, wayOf[sel]);
       const w = g.shown;
-      box.appendChild(head('openai', 'spark', 'ChatGPT', [w ? providerLine(w, c) : { text: 'Not set up' }]));
-      if (g.planOn && g.keyOn) box.appendChild(ways(w));
-      if (!w) box.appendChild(connectCard(GPT_TAB));
+      const icon = providerIcon(t.plan) || 'openai';
+      const name = w ? (w === t.plan ? t.name : cloudInfo(w)?.name || t.name) : t.name;
+      box.appendChild(head(icon, 'spark', name, [w ? providerLine(w, c) : { text: 'Not set up' }]));
+      if (g.planOn && g.keyOn) box.appendChild(ways(sel, w));
+      if (!w) box.appendChild(connectCard(sel));
       else models({ provider: w, ...cloudRows(w, c) }, box);
     } else if (isCloud(sel)) {
       const info = cloudInfo(sel);
@@ -460,21 +474,22 @@ export function createPicker({ dialog, send, onPicked, onChanged }) {
     return box;
   }
 
-  /** The ChatGPT entry with both ways connected: which list shows. */
-  function ways(w) {
+  /** A two-way entry with both ways connected: which list shows. */
+  function ways(tab, w) {
+    const t = TAB_WAYS[tab];
     const box = h('div', 'ways seg');
     box.setAttribute('role', 'radiogroup');
-    box.setAttribute('aria-label', 'Connect ChatGPT with');
+    box.setAttribute('aria-label', `Connect ${t.name} with`);
     box.dataset.testid = 'picker-ways';
-    for (const o of GPT_WAYS) {
+    for (const o of t.ways) {
       const l = h('label');
       const i = h('input');
       i.type = 'radio';
-      i.name = 'gpt-way';
+      i.name = `${tab}-way`;
       i.value = o.value;
       i.checked = o.value === w;
       i.addEventListener('change', () => {
-        gptWay = o.value;
+        wayOf[tab] = o.value;
         build();
       });
       l.append(i, h('span', null, o.label));

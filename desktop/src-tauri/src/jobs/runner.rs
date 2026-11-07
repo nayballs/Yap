@@ -935,7 +935,7 @@ mod tests {
         let folder = std::env::temp_dir();
         let mcp = serde_json::json!({ "mcpServers": { "yap": { "type": "http" } } });
         let hooks = serde_json::json!({ "hooks": {} });
-        let files = session::Files { mcp_config: Some("mcp.json".into()), settings: Some("settings.json".into()), system_prompt: None };
+        let files = session::Files { mcp_config: Some("mcp.json".into()), settings: Some("settings.json".into()), system_prompt: None, own_prompt: None };
         let spec = job_spec(&job, &folder, Pay::Plan, Mode::Plan, Conversation::New("4d7c1d2e-8a51-4c3b-9f0e-2b6a7e1c5d90".into()), mcp.clone(), hooks.clone());
         let a = session::args(&spec, &files);
         let after = |flag: &str| a.iter().position(|x| x == flag).and_then(|i| a.get(i + 1)).map(String::as_str);

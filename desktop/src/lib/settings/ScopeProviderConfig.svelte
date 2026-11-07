@@ -9,6 +9,7 @@
   import ModelPicker from './ModelPicker.svelte';
   import EndpointModels from './EndpointModels.svelte';
   import ChatGptProvider from './ChatGptProvider.svelte';
+  import ClaudePlanProvider from './ClaudePlanProvider.svelte';
   import Input from '../ui/Input.svelte';
   import Toggle from '../ui/Toggle.svelte';
   import Row from '../ui/Row.svelte';
@@ -21,15 +22,19 @@
     BASE_URLS,
     MODEL_HINTS,
     CHATGPT_PLAN_KEY,
+    CLAUDE_PLAN_KEY,
+    CLAUDE_TAB,
     GPT_TAB,
     cloudTabOf,
     gptWay,
+    claudeWay,
     isKeyed,
     modeOf,
     maskKey,
     sharedKey as storeKey,
   } from '../core/providers.js';
   import { chatgpt } from '../stores/chatgpt.svelte.js';
+  import { claudePlan } from '../stores/claudePlan.svelte.js';
   import { createExternalLinkHandler } from '../core/externalLinks.js';
   import { untrack } from 'svelte';
 
@@ -111,10 +116,18 @@
   // The ChatGPT tab (ChatGptProvider.svelte): the plan or an OpenAI key, one
   // tab; clicked, the plan when it's signed in, else a saved key, else the plan.
   function onCloudTab(v) {
+    // Claude, for Chat: your Claude plan when Claude Code is signed in here,
+    // else an Anthropic key (ClaudePlanProvider.svelte). Other scopes: the key.
+    if (v === CLAUDE_TAB && plansClaude) {
+      const planOn = claudePlan.loaded ? claudePlan.ready : sharedKey('claude-plan') === CLAUDE_PLAN_KEY;
+      return onCloudProviderChange(claudeWay(planOn));
+    }
     if (v !== GPT_TAB) return onCloudProviderChange(v);
     const planOn = chatgpt.loaded ? chatgpt.plan : sharedKey('chatgpt') === CHATGPT_PLAN_KEY;
     onCloudProviderChange(gptWay(planOn, !!sharedKey('openai')));
   }
+  // Your Claude plan is Chat's alone (never cleanup, Commands or meeting notes).
+  const plansClaude = $derived(scopeKey === 'chat');
 
   const maskedKey = $derived(maskKey(scope.apiKey));
   // Show the "Disable thinking output" toggle only for reasoning models (or a
@@ -178,6 +191,20 @@
           bind:keyEditing
           {disabled}
           images={scopeKey === 'chat'}
+        />
+      {:else if plansClaude && cloudTabOf(cloudProvider) === CLAUDE_TAB}
+        <!-- Claude, for Chat: your Claude plan first, or an Anthropic API key. -->
+        <ClaudePlanProvider
+          provider={cloudProvider}
+          onprovider={onCloudProviderChange}
+          bind:apiKey={scope.apiKey}
+          onkeyinput={stashApiKey}
+          anthropicKey={sharedKey('anthropic')}
+          planKey={sharedKey('claude-plan')}
+          bind:model={scope.model}
+          bind:keyEditing
+          {disabled}
+          images
         />
       {:else}
         <div class="keyhead">

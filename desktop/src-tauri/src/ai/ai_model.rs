@@ -35,8 +35,16 @@ use crate::ai::local_llm::PROVIDER_ONDEVICE;
 
 /// Cloud providers that need a key (and share one key across every scope).
 /// "chatgpt" (Sign in with ChatGPT, `ai/chatgpt.rs`) holds a marker while
-/// signed in, never a key the person pastes.
-pub const KEYED_PROVIDERS: [&str; 6] = ["groq", "anthropic", "openai", "gemini", "openrouter", crate::ai::chatgpt::PROVIDER];
+/// signed in, never a key the person pastes; so does "claude-plan" (Chat on
+/// your Claude plan, `ai/claude_plan.rs`) while Claude Code is signed in here.
+pub const KEYED_PROVIDERS: [&str; 7] =
+    ["groq", "anthropic", "openai", "gemini", "openrouter", crate::ai::chatgpt::PROVIDER, crate::ai::claude_plan::PROVIDER];
+
+/// A keyed provider whose key store holds a plan's marker, never a key
+/// (the ChatGPT plan, the Claude plan): no key to show or paste.
+pub fn is_plan(provider: &str) -> bool {
+    provider == crate::ai::chatgpt::PROVIDER || provider == crate::ai::claude_plan::PROVIDER
+}
 
 const NOT_INSTALLED: &str =
     "Yap's on-device model isn't installed. Install it in Settings → Language Models → Dictation Cleanup → Local.";
@@ -75,6 +83,7 @@ pub fn standard_base_url(provider: &str) -> Option<&'static str> {
         "anthropic" => "https://api.anthropic.com/v1",
         "openai" => "https://api.openai.com/v1",
         "chatgpt" => crate::ai::chatgpt::BASE_URL,
+        crate::ai::claude_plan::PROVIDER => crate::ai::claude_plan::BASE_URL,
         "gemini" => "https://generativelanguage.googleapis.com/v1beta/openai/",
         "openrouter" => "https://openrouter.ai/api/v1",
         _ => return None,
@@ -213,6 +222,7 @@ pub fn answering_line(m: &ChatModel) -> String {
         "anthropic" => " from Anthropic",
         "openai" => " from OpenAI",
         crate::ai::chatgpt::PROVIDER => " from OpenAI, on the user's ChatGPT plan",
+        crate::ai::claude_plan::PROVIDER => " from Anthropic, on the user's Claude plan",
         "gemini" => " from Google",
         "groq" => ", served by Groq",
         "openrouter" => ", through OpenRouter",
@@ -365,6 +375,10 @@ pub fn set_provider_key(cfg: &mut YapConfig, provider: &str, key: &str) -> Resul
     // The ChatGPT plan's marker only, set by its sign-in.
     if provider == crate::ai::chatgpt::PROVIDER && key != crate::ai::chatgpt::PLAN_KEY {
         return Err("Sign in with ChatGPT instead: it doesn't take an API key".to_string());
+    }
+    // The Claude plan's marker only, set while Claude Code is signed in.
+    if provider == crate::ai::claude_plan::PROVIDER && key != crate::ai::claude_plan::PLAN_KEY {
+        return Err("Sign in to Claude Code instead: your Claude plan doesn't take an API key".to_string());
     }
     if key.is_empty() {
         return Err("Paste the API key first".to_string());
@@ -559,10 +573,10 @@ pub fn status(cfg: &YapConfig, scope: Scope, on_device: &OnDevice) -> Status {
         from_scope: own_scope(cfg, scope).is_some(),
         provider: configured_provider(cfg, scope).to_string(),
         keyed: keyed_providers(cfg),
-        // (The ChatGPT plan's marker isn't a key to show.)
+        // (A plan's marker isn't a key to show.)
         masked_keys: keyed_providers(cfg)
             .into_iter()
-            .filter(|p| *p != crate::ai::chatgpt::PROVIDER)
+            .filter(|p| !is_plan(p))
             .map(|p| (p, mask_key(&chat_key(cfg, p))))
             .collect(),
         servers: servers(cfg),
@@ -608,6 +622,9 @@ pub fn set_chat_model(
             return Err(NOT_INSTALLED.to_string());
         }
     } else if server.is_none() && !keyed_providers(cfg).contains(&provider) {
+        if provider == crate::ai::claude_plan::PROVIDER {
+            return Err(crate::ai::claude_plan::NOT_READY.to_string());
+        }
         return Err(format!(
             "No {provider} API key — add one in Settings → Language Models"
         ));

@@ -223,6 +223,10 @@ export const SETTINGS_INDEX = [
   { page: 'cleanup', scope: 'voiceAgent', section: 'Commands', label: 'Commands model', desc: 'The model that carries out Commands', keywords: 'commands agent model prompt', anchor: 'scope-model' },
   { page: 'cleanup', scope: 'noteFormatting', section: 'Note Formatting', label: 'Note formatting model', desc: 'Meeting summaries and note actions', keywords: 'notes meeting summary action plan model', anchor: 'scope-model' },
   { page: 'cleanup', scope: 'chat', section: 'Chat & Voice Assistant', label: 'Chat model', desc: 'The model that answers in Chat and out loud', keywords: 'chat assistant model answers chatgpt plan openai gpt api key claude gemini groq', anchor: 'scope-model' },
+  // Your Claude plan (ClaudePlanProvider.svelte): on Chat's Claude tab.
+  { page: 'cleanup', scope: 'chat', section: 'Chat & Voice Assistant', label: 'Your Claude plan', desc: 'Chat with Claude on your own Claude plan, through Claude Code on this PC', keywords: 'claude plan subscription pro max claude code anthropic sign in login chat assistant', anchor: 'claude-plan', fallback: 'scope-model' },
+  { page: 'cleanup', scope: 'chat', section: 'Chat & Voice Assistant', label: 'Sign in to Claude Code', desc: "Claude Code's own sign-in, in a terminal, for your Claude plan", keywords: 'claude code sign in login auth terminal plan subscription account', anchor: 'claude-plan-sign-in', fallback: 'scope-model' },
+  { page: 'cleanup', scope: 'chat', section: 'Chat & Voice Assistant', label: 'Claude: your plan or an API key', desc: 'Which way Chat pays for Claude', keywords: 'claude anthropic plan api key switch way pay billing usage', anchor: 'claude-ways', fallback: 'scope-model' },
   { page: 'cleanup', scope: 'chat', section: 'Chat & Voice Assistant', label: 'Effort', desc: 'How hard the Chat model thinks before it answers', keywords: 'effort thinking think reasoning reason extra max low medium high', anchor: 'scope-effort', fallback: 'scope-model' },
 
   // ---- Connectors ----

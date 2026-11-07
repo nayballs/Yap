@@ -475,6 +475,9 @@ pub fn supports_tools(provider: &str, model: &str) -> bool {
         "groq" | "anthropic" | "openai" | "gemini" | "openrouter" | "chatgpt" => {
             crate::ai::model_catalog::tools_for(provider, model) != Some(false)
         }
+        // Your Claude plan: Claude Code's web tools and Yap's own, over its
+        // run endpoint (chat/turn/plan.rs), never Yap's tool loop.
+        crate::ai::claude_plan::PROVIDER => true,
         "custom" => true,
         // The on-device model's chat format said it has no place for tools.
         p if p == crate::ai::local_llm::PROVIDER_ONDEVICE && crate::ai::local_llm::template_takes_tools(model) == Some(false) => false,

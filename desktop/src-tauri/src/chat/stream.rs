@@ -181,6 +181,10 @@ pub fn doing(name: &str) -> &'static str {
         "job_status" => "Checking the job…",
         "message_job" => "Telling the job…",
         "stop_job" => "Stopping the job…",
+        // Yap's read-only tools on your Claude plan (claude_live.rs).
+        "list_meetings" | "search_meetings" | "get_meeting" => "Looking at your meetings…",
+        "list_tasks" => "Looking at your tasks…",
+        "search_memory" => "Searching Yap's memory…",
         _ => "Working…",
     }
 }

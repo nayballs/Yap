@@ -240,7 +240,10 @@ fn listed(provider: &str, model: &str) -> Option<(Vec<Level>, Option<Level>, Opt
 /// Effort item). The provider's list first, where it says; then the
 /// table.
 pub fn caps(provider: &str, model: &str) -> Option<Caps> {
-    let provider = crate::ai::chatgpt::as_openai(provider);
+    // Your Claude plan's models are Anthropic's, taken as `--effort` (no
+    // Fast mode through Claude Code); the ChatGPT plan's OpenAI's.
+    let on_plan = provider == crate::ai::claude_plan::PROVIDER;
+    let provider = crate::ai::claude_plan::as_api(provider);
     let list = matches!(provider, "anthropic" | "openrouter").then(|| listed(provider, model)).flatten();
     let from_list = list.as_ref().filter(|(l, _, _)| !l.is_empty());
     let (levels, default): (Vec<Level>, Option<Level>) = match provider {
@@ -271,7 +274,7 @@ pub fn caps(provider: &str, model: &str) -> Option<Caps> {
     if levels.is_empty() {
         return None;
     }
-    Some(Caps { levels, default, fast: claude_fast(provider, model) })
+    Some(Caps { levels, default, fast: !on_plan && claude_fast(provider, model) })
 }
 
 /// **The request's fields** for `level` on `provider`'s `model` (`fast`:
@@ -295,6 +298,9 @@ pub fn fields(provider: &str, model: &str, level: Level, fast: bool, tools: bool
         }
         // The ChatGPT plan's Responses API reasons with tools (responses.rs).
         "chatgpt" => json!({ "reasoning_effort": level.id() }),
+        // Your Claude plan: Claude Code's `--effort` (claude_plan/oneshot.rs,
+        // chat/turn/plan.rs), nothing in a request body.
+        crate::ai::claude_plan::PROVIDER => json!({}),
         "openai" if tools && openai_tools_without_reasoning(model) => json!({ "reasoning_effort": "none" }),
         "openai" | "groq" | "gemini" => json!({ "reasoning_effort": level.id() }),
         "openrouter" => json!({ "reasoning": { "effort": level.id() } }),

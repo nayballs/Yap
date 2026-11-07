@@ -1240,7 +1240,9 @@ async fn answer(app: AppHandle, asker: Asker, since: u64, question: String, abou
     // With Yap's own window in front the window in front is Yap, which a
     // capture leaves out: a model that calls tools looks itself
     // (`look_at_screen`: every monitor and the page beside the chat).
-    let chat_looks = focused && endpoint.as_ref().is_some_and(|(_, _, model, provider, _, _)| crate::chat::tools::supports_tools(provider, model));
+    // (Your Claude plan has no `look_at_screen`: it gets the window's picture.)
+    let chat_looks = focused
+        && endpoint.as_ref().is_some_and(|(_, _, model, provider, _, _)| provider != crate::ai::claude_plan::PROVIDER && crate::chat::tools::supports_tools(provider, model));
     let mut took_window = false;
     if let (Some(generation), false, Some((base_url, api_key, model, provider, _persona, _thinking))) =
         (asker.shortcut(), shots_wait || quote.is_some() || about_selection || chat_looks || said.is_some(), &endpoint)

@@ -29,13 +29,17 @@
   import { menuOrDialogOpen } from '../../ui/contextMenu.svelte.js';
   import { effortLabel, effortNow } from '../../core/effort.js';
   import { createExternalLinkHandler } from '../../core/externalLinks.js';
+  import { loadClaudePlan } from '../../stores/claudePlan.svelte.js';
 
   // Chat on the person's ChatGPT plan (Sign in with ChatGPT): "Using
   // ChatGPT plan" by the model, and "Manage usage" (OpenAI's UI rules). On an
   // OpenAI API key, "OpenAI API key": the picker's one ChatGPT entry has
   // both ways, so the chip says which pays (2026-11-02).
   const USAGE_URL = 'https://chatgpt.com/settings/usage';
-  const PAYS = { chatgpt: 'Using ChatGPT plan', openai: 'OpenAI API key' };
+  // Claude the same way (2026-11-07): your Claude plan (your own Claude
+  // Code, ai/claude_plan.rs) or an Anthropic API key.
+  const CLAUDE_USAGE_URL = 'https://claude.ai/settings/usage';
+  const PAYS = { chatgpt: 'Using ChatGPT plan', openai: 'OpenAI API key', 'claude-plan': 'Using Claude plan', anthropic: 'Anthropic API key' };
 
   // `quiet`: no pill, just the words (under the Chat composer, as Claude
   // Code shows its model).
@@ -99,7 +103,9 @@
       return;
     }
     // The providers' live lists too (a day-old one is checked behind it),
-    // and the on-device models on this PC.
+    // and the on-device models on this PC. On your Claude plan: Claude Code
+    // looked at behind it (a sign-out since takes its marker away).
+    if (model?.provider === 'claude-plan') loadClaudePlan();
     await Promise.all([refresh(), loadCatalog(), refreshLocal()]);
     const cur = currentEntry();
     if (cur && (cur.provider !== 'ondevice' || cur.file)) pushRecent(cur);
@@ -166,6 +172,8 @@
     </button>
     {#if model?.provider === 'chatgpt'}
       <a class="usage" href={USAGE_URL} onclick={createExternalLinkHandler(USAGE_URL)}>Manage usage</a>
+    {:else if model?.provider === 'claude-plan'}
+      <a class="usage" href={CLAUDE_USAGE_URL} onclick={createExternalLinkHandler(CLAUDE_USAGE_URL)}>Manage usage</a>
     {/if}
   {/if}
 

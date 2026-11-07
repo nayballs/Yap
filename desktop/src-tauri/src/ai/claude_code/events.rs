@@ -337,20 +337,47 @@ pub enum Problem {
 }
 
 impl Problem {
-    /// Plain words for the person.
+    /// Plain words for the person. Chat's page knows them by their start
+    /// ("Claude Code isn't signed in", "You've reached your Claude plan's
+    /// limit", "Claude Code on this PC is set to pay"): the buttons that
+    /// help (Sign in, Manage usage) go with them (`core/aiErrors.js`).
     pub fn message(&self) -> String {
         match self {
-            Problem::NotSignedIn => "Claude Code isn't signed in. Sign in to Claude Code, then try again.".into(),
+            Problem::NotSignedIn => "Claude Code isn't signed in on this PC. Sign in to Claude Code, then try again.".into(),
             Problem::RateLimited { credits_required: true, .. } => {
-                "You've used your Claude plan's included usage. It continues once you add usage credits.".into()
+                "You've reached your Claude plan's limit: its included usage is used up. It continues once you add usage credits.".into()
+            }
+            Problem::RateLimited { resets_at: Some(at), .. } => {
+                format!("You've reached your Claude plan's limit (resets at {}).", resets_words(*at, &chrono::Local::now()))
             }
             Problem::RateLimited { .. } => "You've reached your Claude plan's limit.".into(),
             Problem::Billing => "Claude couldn't bill this account. Check your Claude billing, then try again.".into(),
             Problem::Account { .. } => "This Claude account can't be used with Claude Code right now.".into(),
+            Problem::PaysAnotherWay { source } if matches!(source.as_str(), "ANTHROPIC_API_KEY" | "apiKeyHelper" | "/login managed key") => {
+                "Claude Code on this PC is set to pay another way (an API key or a key helper in its own settings), so this wouldn't use your Claude plan. Yap stopped it before it asked anything.".into()
+            }
             Problem::PaysAnotherWay { .. } => {
-                "Claude Code is set up to pay a different way than Yap asked, so Yap stopped it.".into()
+                "Claude Code on this PC is set to pay a different way than Yap asked, so Yap stopped it before it asked anything.".into()
             }
         }
+    }
+}
+
+/// When a limit resets (Unix seconds), as the person reads it: "4:00 pm"
+/// today, "Sun 9:00 am" within the week, else "20 Nov, 4:00 pm". Pure but
+/// for `now`.
+pub fn resets_words<Tz: chrono::TimeZone>(at: i64, now: &chrono::DateTime<Tz>) -> String
+where
+    Tz::Offset: std::fmt::Display,
+{
+    let Some(when) = chrono::DateTime::from_timestamp(at, 0).map(|t| t.with_timezone(&now.timezone())) else {
+        return "a later time".into();
+    };
+    let time = when.format("%-I:%M %P").to_string();
+    match (when.date_naive() - now.date_naive()).num_days() {
+        0 => time,
+        1..=6 => format!("{} {time}", when.format("%a")),
+        _ => format!("{}, {time}", when.format("%-d %b")),
     }
 }
 
@@ -1017,6 +1044,17 @@ pub(crate) mod tests {
         ] {
             assert!(p.message().ends_with('.'));
         }
+        assert!(Problem::NotSignedIn.message().contains("Sign in to Claude Code"));
+        assert!(Problem::RateLimited { resets_at: None, credits_required: false }.message().starts_with("You've reached your Claude plan's limit"));
+        assert!(Problem::RateLimited { resets_at: Some(1_794_067_200), credits_required: false }.message().contains("(resets at "));
+        assert!(Problem::PaysAnotherWay { source: "apiKeyHelper".into() }.message().contains("wouldn't use your Claude plan"));
+        // When a limit resets, in the person's words.
+        use chrono::TimeZone;
+        let now = chrono::Utc.with_ymd_and_hms(2026, 11, 7, 10, 0, 0).unwrap();
+        let at = |d: u32, h: u32| chrono::Utc.with_ymd_and_hms(2026, 11, d, h, 0, 0).unwrap().timestamp();
+        assert_eq!(resets_words(at(7, 16), &now), "4:00 pm");
+        assert_eq!(resets_words(at(8, 9), &now), "Sun 9:00 am");
+        assert_eq!(resets_words(at(20, 16), &now), "20 Nov, 4:00 pm");
         assert_eq!(serde_json::to_value(Problem::NotSignedIn).unwrap(), serde_json::json!({"kind":"notSignedIn"}));
         assert_eq!(
             serde_json::to_value(Problem::RateLimited { resets_at: Some(5), credits_required: false }).unwrap(),

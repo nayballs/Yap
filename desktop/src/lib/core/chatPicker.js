@@ -21,8 +21,9 @@
 //   family, and "More models (N)", the rest newest first
 //   (core/latestModels.js); a provider without a key shows its curated
 //   models greyed with "Add key"; OpenAI's two ways, the ChatGPT plan and an
-//   API key, are one rail entry, "ChatGPT" (GPT_TAB), each way's rows saying
-//   which pays;
+//   API key, are one rail entry, "ChatGPT" (GPT_TAB), and Claude's, your
+//   Claude plan and an Anthropic key, "Claude" (CLAUDE_TAB): each way's
+//   rows say which pays (`TAB_WAYS`, `waysState`);
 // - "On this PC": Yap's on-device models (the curated set with "Recommended
 //   for this PC", GGUFs of the person's own) and any self-hosted server on
 //   this PC; "Custom": a server elsewhere that Settings has the address of;
@@ -32,17 +33,23 @@ import { mergeModels, labelFor, ago } from './modelCatalog.js';
 import { contextInfo, fmtTokens } from './localContext.js';
 import { latestModels } from './latestModels.js';
 import { familyIcon, providerIcon } from './modelIcons.js';
-import { CHATGPT, GPT_TAB } from './providerIds.js';
+import { CHATGPT, GPT_TAB, CLAUDE_PLAN, CLAUDE_TAB, TAB_WAYS } from './providerIds.js';
 
 /**
  * The cloud providers, in the rail's order. `short` names the rail entry;
  * `tab` is the entry when it isn't the provider's own (OpenAI's two ways
- * share "ChatGPT"), `way` what a row from it says pays (Recent, search).
+ * share "ChatGPT", Claude's "Claude"), `way` what a row from it says pays
+ * (Recent, search); `keyWay` the same for a key once its entry's plan is
+ * connected too.
  */
 export const CLOUD_PROVIDERS = [
   { id: 'groq', name: 'Groq', short: 'Groq' },
   { id: 'gemini', name: 'Google Gemini', short: 'Gemini' },
-  { id: 'anthropic', name: 'Anthropic', short: 'Claude' },
+  // Claude's two ways, one entry (2026-11-07): your Claude plan (your own
+  // Claude Code, ai/claude_plan.rs) first; then an Anthropic API key. The
+  // plan shows only once it's connected (Claude Code signed in here).
+  { id: CLAUDE_PLAN, name: 'Claude', short: 'Claude', tab: CLAUDE_TAB, way: 'Claude plan', words: 'claude anthropic plan subscription', hidden: true },
+  { id: 'anthropic', name: 'Anthropic', short: 'Claude', keyWay: 'Anthropic API key' },
   // OpenAI's models, two ways, one entry (2026-11-02): Sign in with ChatGPT,
   // the person's plan, first (ai/chatgpt.rs); then an OpenAI API key.
   { id: 'chatgpt', name: 'ChatGPT', short: 'ChatGPT', tab: GPT_TAB, way: 'ChatGPT plan', words: 'chatgpt openai gpt plan' },
@@ -65,14 +72,32 @@ export const CLOUD_RAIL = CLOUD_PROVIDERS.reduce((tabs, p) => {
 }, []);
 
 /**
- * The ChatGPT entry: which ways are connected, and the way its pane shows —
- * the only one connected, else (both) `way` as the person left the switch.
+ * A two-way entry (`TAB_WAYS`: ChatGPT's, Claude's): which ways are
+ * connected, and the way its pane shows — the only one connected, else
+ * (both) `way` as the person left the switch.
  */
-export function gptState(status, way) {
-  const planOn = !!status?.keyed?.includes(CHATGPT);
-  const keyOn = !!status?.keyed?.includes('openai');
-  const shown = planOn && keyOn ? way : planOn ? CHATGPT : keyOn ? 'openai' : null;
+export function waysState(tab, status, way) {
+  const t = TAB_WAYS[tab];
+  if (!t) return { planOn: false, keyOn: false, shown: null };
+  const planOn = !!status?.keyed?.includes(t.plan);
+  const keyOn = !!status?.keyed?.includes(t.key);
+  const shown = planOn && keyOn ? way : planOn ? t.plan : keyOn ? t.key : null;
   return { planOn, keyOn, shown };
+}
+
+/** The ChatGPT entry's (`waysState` for GPT_TAB). */
+export function gptState(status, way) {
+  return waysState(GPT_TAB, status, way);
+}
+
+/** What a row of `p` says pays (Recent, search): its way, once both of its entry's are there. */
+export function wayName(p, status) {
+  const info = cloudInfo(p);
+  if (!info) return p;
+  if (info.way) return info.way;
+  const t = TAB_WAYS[tabOf(p)];
+  if (info.keyWay && t && status?.keyed?.includes(t.plan)) return info.keyWay;
+  return info.short || p;
 }
 
 /** "2.8 GB", "398 MB". */
@@ -306,7 +331,7 @@ export function cloudRows(p, ctx) {
   const connected = !!status?.keyed?.includes(p);
   const cur = connected && status?.ready && status.model?.provider === p ? status.model.id : '';
   const merged = mergeModels(p, entry, { current: cur });
-  const where = cloudInfo(p)?.way || cloudInfo(p)?.short || p;
+  const where = wayName(p, status);
   // The context the provider's live list gives ("1M context"), as info:
   // only from the list Yap already has, never a call of its own.
   const live = entry?.models ?? [];
@@ -343,7 +368,7 @@ export function cloudRows(p, ctx) {
             imagesTag(images),
             i.tools === false && tag('warn', 'no note tools'),
           ])
-        : [tag('key', p === CHATGPT ? 'Sign in' : 'Add key'), imagesTag(images)].filter(Boolean),
+        : [tag('key', p === CHATGPT || p === CLAUDE_PLAN ? 'Sign in' : 'Add key'), imagesTag(images)].filter(Boolean),
     };
   };
   const rows = merged.items.map(row);
@@ -369,9 +394,11 @@ export function allCloudRows(p, ctx) {
 export function providerLine(p, ctx) {
   const status = ctx.status;
   const short = cloudInfo(p)?.short || p;
-  if (!status?.keyed?.includes(p)) return { text: p === 'chatgpt' ? 'Not signed in' : 'Not set up' };
+  if (!status?.keyed?.includes(p)) return { text: p === 'chatgpt' || p === CLAUDE_PLAN ? 'Not signed in' : 'Not set up' };
   const entry = ctx.catalog?.[p];
   if (p === 'chatgpt' && !entry?.checking) return { text: 'Using ChatGPT plan' };
+  // Its list is Yap's own (Claude Code lists none): never "checked".
+  if (p === CLAUDE_PLAN) return { text: 'Using Claude plan · through Claude Code on this PC' };
   if (entry?.checking) return { text: `Checking ${short}'s models…` };
   if (mergeModels(p, entry).live) return { text: `Connected · checked ${ago(entry.fetchedAt)}` };
   if (entry?.error) return { text: `Couldn't check: ${entry.error}. Showing Yap's list.`, warn: true };
@@ -423,9 +450,11 @@ export function searchGroups(q, ctx) {
   };
   const groups = [];
   for (const p of CLOUD_PROVIDERS) {
+    // A plan that shows only once connected (the Claude plan): not before.
+    if (p.hidden && !ctx.status?.keyed?.includes(p.id)) continue;
     // OpenAI's two ways: "openai", "gpt" or "chatgpt" find both, each its own group.
     const hits = allCloudRows(p.id, ctx).filter((r) => match(r, `${p.name} ${p.short} ${p.words || ''}`));
-    if (hits.length) groups.push({ id: p.id, label: p.way || p.short, icon: providerIcon(p.id), rows: hits });
+    if (hits.length) groups.push({ id: p.id, label: wayName(p.id, ctx.status), icon: providerIcon(p.id), rows: hits });
   }
   const { installed, available } = localRows(ctx);
   const servers = ctx.status?.servers || [];

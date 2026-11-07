@@ -322,7 +322,7 @@ test('a provider without a key connects right in the picker', async ({ yap, main
   expect(JSON.stringify(yap.readJson('model_catalog.json'))).not.toContain(ANTHROPIC_KEY);
 
   await pane(main).getByRole('button', { name: /^Claude Sonnet 5\.5/ }).click();
-  await expect(chip(main)).toHaveText('Claude Sonnet 5.5 High · Anthropic');
+  await expect(chip(main)).toHaveText('Claude Sonnet 5.5 High · Anthropic API key');
   await expect(chip(main).locator('.mark')).toHaveAttribute('data-icon', 'claude');
   await expectStore(yap, 'config.json', (c) => c.llmScopes.chat.provider === 'anthropic' && c.llmScopes.chat.model === 'claude-sonnet-5-5');
   expect(yap.readJson('config.json').llmScopes.chat.apiKey).toBe(ANTHROPIC_KEY);
@@ -384,7 +384,7 @@ test('Claude: Latest has the four newest, More models the older ones, which can 
     // Pick an older one: Chat uses it; the effort strip follows it.
     await more.getByRole('button', { name: /^Claude Opus 4\.6/ }).click();
     await expect(pop).toBeHidden();
-    await expect(chip(main)).toHaveText('Claude Opus 4.6 High · Anthropic');
+    await expect(chip(main)).toHaveText('Claude Opus 4.6 High · Anthropic API key');
     await expectStore(yap, 'config.json', (c) => c.llmScopes.chat.provider === 'anthropic' && c.llmScopes.chat.model === 'claude-opus-4-6');
 
     // Opened again: on Claude, More models open, the one in use ✓ where it is.
@@ -421,7 +421,7 @@ test('Claude: Latest has the four newest, More models the older ones, which can 
     await search.fill('opus 4.7');
     await search.press('Enter');
     await expect(picker(main)).toBeHidden();
-    await expect(chip(main)).toHaveText('Claude Opus 4.7 High · Anthropic');
+    await expect(chip(main)).toHaveText('Claude Opus 4.7 High · Anthropic API key');
     await chip(main).click();
     await expect(moreButton(main)).toHaveAttribute('aria-expanded', 'true');
     await expect(older(main, 'Claude').getByRole('button', { name: /^Claude Opus 4\.7/ })).toHaveAttribute('aria-pressed', 'true');
@@ -430,7 +430,7 @@ test('Claude: Latest has the four newest, More models the older ones, which can 
     // A latest one: the strip follows again (Fast mode is Opus 5.5's), and
     // More models stays as it was left, while Yap runs.
     await latest(main).getByRole('button', { name: /^Claude Opus 5\.5/ }).click();
-    await expect(chip(main)).toHaveText('Claude Opus 5.5 Medium · Anthropic');
+    await expect(chip(main)).toHaveText('Claude Opus 5.5 Medium · Anthropic API key');
     await chip(main).click();
     await expect(latest(main).getByRole('button', { name: /^Claude Opus 5\.5/ })).toHaveAttribute('aria-pressed', 'true');
     await expect(levels).toHaveText(['Low', 'Medium', 'High', 'Extra', 'Max']);

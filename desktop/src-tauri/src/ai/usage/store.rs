@@ -86,7 +86,15 @@ impl Row {
             (None, None) => (r.total.unwrap_or(0), 0),
             (p, a) => (p.unwrap_or(0), a.unwrap_or(0)),
         };
-        let cost = if here { None } else { super::prices::cost_micros(provider, model, day, prompt, answer) };
+        // A Claude plan's call: Claude Code's own estimate of the API price
+        // (what it would have cost; never spend), else Anthropic's list price.
+        let cost = if here {
+            None
+        } else if provider == crate::ai::claude_plan::PROVIDER {
+            r.said_cost_micros().or_else(|| super::prices::cost_micros("anthropic", model, day, prompt, answer))
+        } else {
+            super::prices::cost_micros(provider, model, day, prompt, answer)
+        };
         Row {
             provider: provider.to_string(),
             model: model.to_string(),
@@ -191,7 +199,7 @@ pub fn day_key(d: NaiveDate) -> String {
     d.format("%Y-%m-%d").to_string()
 }
 
-fn today() -> NaiveDate {
+pub(crate) fn today() -> NaiveDate {
     chrono::Local::now().date_naive()
 }
 
@@ -402,10 +410,14 @@ pub struct ModelUse {
     pub answer: u64,
     pub calls: u64,
     /// The estimate, millionths of a dollar: `None` when there's no price
-    /// for the model (or it ran on this PC).
+    /// for the model (or it ran on this PC). On a Claude plan, what it
+    /// would have cost on the API (the plan pays; [`ModelUse::plan`]).
     pub cost_micros: Option<u64>,
     /// How fast it wrote (tokens a second), when its server said.
     pub per_second: Option<f64>,
+    /// On the person's Claude plan: `cost_micros` is its API value, not spend.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub plan: bool,
 }
 
 /// One feature's use over a stretch of days.
@@ -431,10 +443,16 @@ pub struct Totals {
     /// Tokens on this PC, and elsewhere.
     pub here: u64,
     pub cloud: u64,
-    /// The cloud calls' estimated cost (models with a price).
+    /// The cloud calls' estimated cost (models with a price): API spend
+    /// only, never a plan's calls.
     pub cost_micros: u64,
     /// Cloud tokens with no price known (not in the estimate).
     pub unpriced: u64,
+    /// **On the person's Claude plan**: its tokens, and what they would have
+    /// cost on the API (Claude Code's estimate). The plan pays: never in
+    /// `cost_micros`.
+    pub plan_tokens: u64,
+    pub plan_value_micros: u64,
     /// Most tokens first.
     pub models: Vec<ModelUse>,
     pub features: Vec<FeatureUse>,
@@ -490,12 +508,17 @@ pub fn totals(store: &Store, today: NaiveDate, days: i64, name: &dyn Fn(&str) ->
             t.answer += r.answer;
             t.calls += r.calls;
             t.unreported += r.unreported;
-            let priced = !r.here && super::prices::has_price(&r.provider, &r.model);
+            // A Claude plan's calls: their API value apart, never spend.
+            let plan = r.provider == crate::ai::claude_plan::PROVIDER;
+            let priced = !r.here && (plan || super::prices::has_price(&r.provider, &r.model));
             if r.here {
                 t.here += tokens;
             } else {
                 t.cloud += tokens;
-                if priced {
+                if plan {
+                    t.plan_tokens += tokens;
+                    t.plan_value_micros += r.cost_micros;
+                } else if priced {
                     t.cost_micros += r.cost_micros;
                 } else {
                     t.unpriced += tokens;
@@ -517,6 +540,7 @@ pub fn totals(store: &Store, today: NaiveDate, days: i64, name: &dyn Fn(&str) ->
             tokens: m.tokens(),
             per_second: (m.gen_ms > 0 && m.gen_tokens > 0).then(|| m.gen_tokens as f64 * 1000.0 / m.gen_ms as f64),
             cost_micros: priced.then_some(m.cost_micros),
+            plan: m.provider == crate::ai::claude_plan::PROVIDER,
             provider: m.provider,
             model: m.model,
             here: m.here,
@@ -589,7 +613,7 @@ mod tests {
     }
 
     fn reported(prompt: u64, answer: u64) -> Reported {
-        Reported { prompt: Some(prompt), answer: Some(answer), total: Some(prompt + answer), speed: Speed::default() }
+        Reported { prompt: Some(prompt), answer: Some(answer), total: Some(prompt + answer), speed: Speed::default(), cost_usd: None }
     }
 
     fn call(provider: &str, model: &str, here: bool, feature: Feature, r: Reported, day: &str) -> Row {
@@ -618,6 +642,26 @@ mod tests {
         // The file keeps no text, only these counts.
         let json = serde_json::to_string(&s).unwrap();
         assert!(json.contains("\"2026-10-25\"") && json.contains("\"costMicros\""));
+    }
+
+    #[test]
+    fn a_claude_plans_calls_count_their_api_value_apart_from_spend() {
+        let mut s = Store::default();
+        let day = "2026-11-07";
+        let plan = crate::ai::claude_plan::PROVIDER;
+        // Claude Code's own estimate for a plan call; the list price for a key's.
+        s.add(day, &call(plan, "claude-haiku-5-5", false, Feature::Chat, Reported { cost_usd: Some(0.004), ..reported(9_000, 120) }, day));
+        s.add(day, &call(plan, "claude-haiku-5-5", false, Feature::Chat, reported(1_000, 100), day));
+        s.add(day, &call("anthropic", "claude-haiku-5-5", false, Feature::Chat, reported(1_000, 100), day));
+        let t = totals(&s, d(day), 1, &|_| String::new());
+        // 1,000 × $0.10/M + 100 × $0.50/M = $0.00015, the key's spend.
+        assert_eq!(t.cost_micros, 150);
+        assert_eq!((t.plan_tokens, t.plan_value_micros), (10_220, 4_000 + 150));
+        let p = t.models.iter().find(|m| m.provider == plan).unwrap();
+        assert!(p.plan);
+        assert_eq!(p.cost_micros, Some(4_150));
+        assert!(!t.models.iter().find(|m| m.provider == "anthropic").unwrap().plan);
+        assert_eq!(t.unpriced, 0);
     }
 
     #[test]
@@ -704,7 +748,7 @@ mod tests {
     #[test]
     fn the_on_device_speed_is_its_tokens_over_its_time_each_day() {
         let mut s = Store::default();
-        let fast = Reported { prompt: Some(1_000), answer: Some(240), total: None, speed: Speed { read_tokens: 1_000, read_ms: 500, gen_tokens: 240, gen_ms: 2_000 } };
+        let fast = Reported { prompt: Some(1_000), answer: Some(240), total: None, speed: Speed { read_tokens: 1_000, read_ms: 500, gen_tokens: 240, gen_ms: 2_000 }, cost_usd: None };
         let slow = Reported { speed: Speed { read_tokens: 0, read_ms: 0, gen_tokens: 60, gen_ms: 2_000 }, ..fast };
         s.add("2026-10-24", &Row::of_call("ondevice", "q", true, Feature::Chat, &fast, "2026-10-24"));
         s.add("2026-10-25", &Row::of_call("ondevice", "q", true, Feature::Chat, &fast, "2026-10-25"));

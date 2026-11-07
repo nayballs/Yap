@@ -9,7 +9,7 @@
  * The cloud providers with an API key in the shared store, in Settings'
  * order (Rust's `ai_model::KEYED_PROVIDERS`).
  */
-export const KEYED_PROVIDERS = ['groq', 'anthropic', 'openai', 'gemini', 'openrouter', 'chatgpt'];
+export const KEYED_PROVIDERS = ['groq', 'anthropic', 'openai', 'gemini', 'openrouter', 'chatgpt', 'claude-plan'];
 
 /**
  * Sign in with ChatGPT (ai/chatgpt.rs): a keyed provider whose key store
@@ -17,6 +17,14 @@ export const KEYED_PROVIDERS = ['groq', 'anthropic', 'openai', 'gemini', 'openro
  * key the person pastes. Its calls use the sign-in's token.
  */
 export const CHATGPT = 'chatgpt';
+
+/**
+ * Chat on your Claude plan (ai/claude_plan.rs): the person's own Claude
+ * Code, signed in with their own Claude account, answers. A keyed provider
+ * whose key store holds a marker while Claude Code is signed in here; the
+ * Chat scope only (never cleanup, Commands or meeting notes).
+ */
+export const CLAUDE_PLAN = 'claude-plan';
 
 /**
  * OpenAI's models, two ways (2026-11-02: one "ChatGPT" entry instead of the
@@ -33,12 +41,43 @@ export const GPT_WAYS = [
   { value: 'openai', label: 'API key' },
 ];
 
+/**
+ * Claude's models, two ways (2026-11-07, as ChatGPT's): the person's Claude
+ * plan first (their own Claude Code, provider "claude-plan"), then an
+ * Anthropic API key ("anthropic"). The tab keeps Anthropic's id.
+ */
+export const CLAUDE_TAB = 'anthropic';
+export const CLAUDE_PROVIDERS = [CLAUDE_PLAN, 'anthropic'];
+/** The Claude entry's two-way switch, when both are connected. */
+export const CLAUDE_WAYS = [
+  { value: CLAUDE_PLAN, label: 'Your plan' },
+  { value: 'anthropic', label: 'API key' },
+];
+
+/**
+ * **The entries with two ways in** (a plan, or an API key), by tab: which
+ * provider is each way, and the switch. One table for ChatGPT and Claude.
+ */
+export const TAB_WAYS = {
+  [GPT_TAB]: { plan: CHATGPT, key: 'openai', ways: GPT_WAYS, name: 'ChatGPT' },
+  [CLAUDE_TAB]: { plan: CLAUDE_PLAN, key: 'anthropic', ways: CLAUDE_WAYS, name: 'Claude' },
+};
+
+/** The two-way entry `p` is a way of (`TAB_WAYS`' tab), else null. */
+export function waysTabOf(p) {
+  return Object.keys(TAB_WAYS).find((t) => TAB_WAYS[t].plan === p || TAB_WAYS[t].key === p) ?? null;
+}
+
+/** A plan's way (its key store holds a marker, never a key). */
+export const isPlan = (p) => p === CHATGPT || p === CLAUDE_PLAN;
+
 /** Short names: the Chat model's chip and picker (aiModel.js), Settings' link rows. */
 export const PROVIDER_LABELS = {
   groq: 'Groq',
   anthropic: 'Anthropic',
   openai: 'OpenAI',
   chatgpt: 'ChatGPT',
+  'claude-plan': 'Your Claude plan',
   gemini: 'Gemini',
   openrouter: 'OpenRouter',
   ondevice: 'On this PC',

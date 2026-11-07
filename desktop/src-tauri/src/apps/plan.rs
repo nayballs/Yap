@@ -308,8 +308,10 @@ pub async fn plan_for(text: &str, cfg: &YapConfig, conversation: Option<u64>) ->
     if !answers_yap {
         open_request(text)?;
     }
-    let model_can_tool = crate::chat::turn::resolve_chat_endpoint(cfg)
-        .is_ok_and(|(_, _, model, provider, _, _)| crate::chat::tools::supports_tools(&provider, &model));
+    // (Your Claude plan has no `open_app`: Yap opens apps for it.)
+    let model_can_tool = crate::chat::turn::resolve_chat_endpoint(cfg).is_ok_and(|(_, _, model, provider, _, _)| {
+        provider != crate::ai::claude_plan::PROVIDER && crate::chat::tools::supports_tools(&provider, &model)
+    });
     let (text, cfg) = (text.to_string(), cfg.clone());
     tauri::async_runtime::spawn_blocking(move || plan_with(&text, &cfg, &apps(false), model_can_tool, &recall))
         .await

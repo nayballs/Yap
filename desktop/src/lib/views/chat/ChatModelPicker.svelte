@@ -49,11 +49,12 @@
   import Toggle from '../../ui/Toggle.svelte';
   import { providerIcon, modelName } from '../../core/aiModel.js';
   import { effortNow, effortOptions, effortHint, FAST_NOTE } from '../../core/effort.js';
-  import { PROVIDER_LABELS, CHATGPT, GPT_TAB, GPT_WAYS } from '../../core/providers.js';
+  import { PROVIDER_LABELS, CHATGPT, GPT_TAB, GPT_WAYS, CLAUDE_PLAN, CLAUDE_TAB, CLAUDE_WAYS } from '../../core/providers.js';
   import { loadCatalog } from '../../stores/modelCatalog.svelte.js';
   import { forgetVisionTags } from '../../stores/visionTags.svelte.js';
   import { openExternalLink } from '../../core/externalLinks.js';
   import { chatgpt, loadChatgpt, signInChatgpt, cancelChatgpt } from '../../stores/chatgpt.svelte.js';
+  import { claudePlan, loadClaudePlan, signInClaudePlan } from '../../stores/claudePlan.svelte.js';
   import { toast } from '../../ui/toast.svelte.js';
   import { openContextMenu, menuKey, menuOpenFor } from '../../ui/contextMenu.svelte.js';
   import { uninstallItems } from '../../core/localModels.js';
@@ -63,6 +64,7 @@
     isCloud,
     tabOf,
     gptState,
+    waysState,
     keyUrl,
     fmtSize,
     local,
@@ -112,10 +114,17 @@
     const m = status?.ready ? status.model : null;
     return (m?.provider || status?.provider) === 'openai' ? 'openai' : CHATGPT;
   }
+  // The Claude entry's, the same way: the plan unless an API key's model is in use.
+  function startClaudeWay() {
+    const m = status?.ready ? status.model : null;
+    return (m?.provider || status?.provider) === 'anthropic' ? 'anthropic' : CLAUDE_PLAN;
+  }
 
   let sel = $state(startTab());
   let gptWay = $state(startWay());
-  // Its OpenAI key field opened ("Use an API key instead", "…an OpenAI API key instead…").
+  let claudeWay = $state(startClaudeWay());
+  // A two-way entry's key field opened ("Use an API key instead", "…an
+  // OpenAI / Anthropic API key instead…"): the entry shown's.
   let gptKeyOpen = $state(false);
   let q = $state('');
   let busy = $state('');
@@ -161,10 +170,17 @@
       const g = gptState(status, gptWay);
       return { kind: 'gpt', ...g, list: g.shown ? { provider: g.shown, ...cloudRows(g.shown, status) } : null };
     }
+    if (sel === CLAUDE_TAB) {
+      // Nothing connected: the API key's models, greyed, with its connect
+      // box (as before); the plan links in under them.
+      const g = waysState(CLAUDE_TAB, status, claudeWay);
+      const p = g.shown || 'anthropic';
+      return { kind: 'claude', ...g, list: { provider: p, ...cloudRows(p, status) } };
+    }
     return { kind: 'cloud', provider: sel, ...cloudRows(sel, status) };
   });
-  // The cloud models on show: a provider's, or the ChatGPT entry's way's.
-  const list = $derived(view.kind === 'cloud' ? view : view.kind === 'gpt' ? view.list : null);
+  // The cloud models on show: a provider's, or a two-way entry's way's.
+  const list = $derived(view.kind === 'cloud' ? view : view.kind === 'gpt' || view.kind === 'claude' ? view.list : null);
   // Their More models: open or not.
   const moreOpen = $derived(!!list && list.older.length > 0 && moreIsOpen(list.provider, list.older));
   const firstPick = $derived(
@@ -229,11 +245,13 @@
     gptKeyOpen = false;
     keyError = '';
     keyDraft = '';
+    // Claude: whether Claude Code is here and signed in (the plan's way).
+    if (id === CLAUDE_TAB) loadClaudePlan();
     if (focus) tick().then(() => focusTab(id));
   }
 
   // A way connected while the picker is open (a key saved here, a sign-in
-  // finished in the browser): the ChatGPT entry shows that one.
+  // finished in the browser or the terminal): the entry shows that one.
   let wasOn = untrack(() => gptState(status, CHATGPT));
   $effect(() => {
     const now = gptState(status, CHATGPT);
@@ -241,6 +259,35 @@
     else if (now.keyOn && !wasOn.keyOn) gptWay = 'openai';
     wasOn = now;
   });
+  let claudeWasOn = untrack(() => waysState(CLAUDE_TAB, status, CLAUDE_PLAN));
+  $effect(() => {
+    const now = waysState(CLAUDE_TAB, status, CLAUDE_PLAN);
+    if (now.planOn && !claudeWasOn.planOn) claudeWay = CLAUDE_PLAN;
+    else if (now.keyOn && !claudeWasOn.keyOn) claudeWay = 'anthropic';
+    claudeWasOn = now;
+  });
+  // Opened on Claude: Claude Code's status (it syncs the plan's marker).
+  untrack(() => {
+    if (sel === CLAUDE_TAB) loadClaudePlan();
+  });
+
+  /**
+   * "Use your Claude plan instead…": Claude Code's own sign-in in a terminal
+   * when it's here (the picker reads the status again when Yap gets the
+   * focus back); its install page when it isn't, or is too old.
+   */
+  async function useClaudePlan() {
+    if (!claudePlan.loaded) await loadClaudePlan();
+    if (claudePlan.ready) {
+      await loadClaudePlan(true);
+      return;
+    }
+    if (!claudePlan.installed || claudePlan.tooOld) {
+      openExternalLink(claudePlan.installUrl);
+      return;
+    }
+    await signInClaudePlan();
+  }
 
   /** The ChatGPT entry's OpenAI key field, opened (focused) or closed. */
   async function openGptKey(open = true) {
@@ -338,6 +385,12 @@
     if (busy || !row) return;
     if (row.action === 'key') {
       selectTab(tabOf(row.provider));
+      // A Claude plan model: Claude Code's sign-in.
+      if (row.provider === CLAUDE_PLAN) {
+        claudeWay = CLAUDE_PLAN;
+        useClaudePlan();
+        return;
+      }
       // An OpenAI model: the ChatGPT entry, its key field open.
       if (row.provider === 'openai') gptKeyOpen = true;
       await tick();
@@ -601,21 +654,49 @@
   <p class="cnote">Stored only on this PC, like the keys in Settings.</p>
 {/snippet}
 
-{#snippet connect(p, replacing)}
+{#snippet connect(p, replacing, other = false)}
   {@const info = cloudInfo(p)}
   <form class="connect" onsubmit={(e) => (e.preventDefault(), saveKey(p))}>
     <div>
-      <div class="ctitle">{replacing ? `Replace the ${info.short} key` : p === 'openai' ? 'Use an OpenAI API key' : `Connect ${info.short}`}</div>
+      <div class="ctitle">{replacing ? `Replace the ${info.short} key` : p === 'openai' ? 'Use an OpenAI API key' : other ? `Use an ${info.name} API key` : `Connect ${info.short}`}</div>
       <div class="cdesc">
         {replacing
           ? `Paste a new ${info.name} API key. Yap checks its models with it straight away.`
-          : p === 'openai'
-            ? 'Pay per message on your OpenAI account. Yap fetches the current models straight away.'
+          : p === 'openai' || other
+            ? `Pay per message on your ${info.name} account. Yap fetches the current models straight away.`
             : `Paste an ${info.name} API key. Yap fetches the current models straight away.`}
       </div>
     </div>
-    {@render keyFields(p, replacing ? () => (changingKey = '') : p === 'openai' ? () => openGptKey(false) : null)}
+    {@render keyFields(p, replacing ? () => (changingKey = '') : p === 'openai' || other ? () => openGptKey(false) : null)}
   </form>
+{/snippet}
+
+<!-- The Claude entry's other way, under its models: an Anthropic API key
+     under the plan's; your Claude plan (your own Claude Code) under the
+     key's, or with nothing connected. -->
+{#snippet claudeOther(view)}
+  {#if view.shown === CLAUDE_PLAN}
+    {#if gptKeyOpen}
+      {@render connect('anthropic', false, true)}
+    {:else}
+      <button class="waylink" data-nav="claude-other" onfocus={() => (navKey = 'claude-other')} onclick={() => openGptKey(true)}>Use an Anthropic API key instead…</button>
+    {/if}
+  {:else if claudePlan.signingIn && !claudePlan.ready}
+    <p class="waywait" role="status" data-testid="claude-plan-wait">
+      Finish signing in to Claude Code in the terminal Yap opened.
+      <button class="linkbtn" type="button" onclick={() => loadClaudePlan(true, true)}>Check again</button>
+    </p>
+  {:else}
+    <button class="waylink" data-nav="claude-other" data-testid="claude-plan-link" onfocus={() => (navKey = 'claude-other')} onclick={useClaudePlan}>Use your Claude plan instead…</button>
+    <p class="waynote">
+      {!claudePlan.loaded || claudePlan.installed
+        ? claudePlan.tooOld
+          ? `Claude Code ${claudePlan.version} is too old: Yap needs ${claudePlan.minVersion} or newer.`
+          : "Yap runs Claude Code on this PC, signed in with your own Claude account. Answers use your plan's limits."
+        : "Claude Code isn't on this PC yet: this opens its install guide."}
+    </p>
+  {/if}
+  {#if claudePlan.failed}<p class="cerr wayerr" role="alert">{claudePlan.failed}</p>{/if}
 {/snippet}
 
 <!-- The ChatGPT entry with nothing connected: the plan first (OpenAI's
@@ -853,6 +934,28 @@
           {#if !(view.planOn && view.keyOn)}
             {@render gptOther(view)}
           {/if}
+        {/if}
+      {:else if view.kind === 'claude'}
+        <!-- Claude: your Claude plan (your own Claude Code) or an Anthropic
+             API key (waysState). Nothing connected: the key's box, as before,
+             and the plan under the models. -->
+        {@const w = view.list.provider}
+        {@const onPlan = w === CLAUDE_PLAN}
+        {@render head(providerIcon(w), 'spark', onPlan ? 'Claude' : 'Anthropic', [providerLine(w, status)], onPlan ? null : keySide, 'anthropic')}
+        {#if view.planOn && view.keyOn}
+          <!-- Both connected: which list shows (the model picked says which pays). -->
+          <div class="ways" data-testid="claude-ways">
+            <Segmented bind:value={() => w, (v) => ((claudeWay = v), (changingKey = ''))} options={CLAUDE_WAYS} label="Connect Claude with" />
+          </div>
+        {/if}
+        {#if !onPlan && !view.keyOn}
+          {@render connect('anthropic', false)}
+        {:else if !onPlan && changingKey === 'anthropic'}
+          {@render connect('anthropic', true)}
+        {/if}
+        {@render models(view.list)}
+        {#if !(view.planOn && view.keyOn)}
+          {@render claudeOther(view)}
         {/if}
       {:else if view.kind === 'custom'}
         {@render head(null, 'server', 'Custom server', [{ text: 'Your own OpenAI-compatible servers, as set up in Settings' }])}
@@ -1593,6 +1696,11 @@
   }
   .wayerr {
     margin: 2px 10px 0;
+  }
+  .waynote {
+    margin: 0 10px 4px;
+    color: var(--yap-muted);
+    font-size: 12px;
   }
 
   /* buttons */

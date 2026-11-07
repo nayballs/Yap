@@ -145,6 +145,12 @@ pub struct LastCall {
     pub answer: Option<u64>,
     /// How fast it wrote (tokens a second; llama.cpp's timings).
     pub per_second: Option<f64>,
+    /// **The turn's estimated cost so far** (millionths of a dollar), every
+    /// call of it added up: the cloud's list price, or Claude Code's own
+    /// estimate on a Claude plan (what it would have cost on the API). An
+    /// answer's "API key · $0.004" / "Your Claude plan · ≈ $0.004 on the
+    /// API". `None`: on this PC, or no price known.
+    pub cost_micros: Option<u64>,
 }
 
 /// Run `fut` keeping the last call it makes ([`last_call`] inside it): a
@@ -184,9 +190,17 @@ pub struct Reported {
     /// The provider's own total (some say only that).
     pub total: Option<u64>,
     pub speed: Speed,
+    /// What the call would cost on the API, as the caller says it (Claude
+    /// Code's `total_cost_usd` on a Claude plan), in dollars.
+    pub cost_usd: Option<f64>,
 }
 
 impl Reported {
+    /// The cost the call says of itself, in millionths of a dollar.
+    pub fn said_cost_micros(&self) -> Option<u64> {
+        self.cost_usd.filter(|c| c.is_finite() && *c >= 0.0).map(|c| (c * 1_000_000.0).round() as u64)
+    }
+
     /// All the call's tokens: the provider's total, else prompt + answer.
     pub fn total_tokens(&self) -> u64 {
         self.total.unwrap_or_else(|| self.prompt.unwrap_or(0) + self.answer.unwrap_or(0))
@@ -230,6 +244,8 @@ pub fn parse(v: &Value) -> Reported {
         r.answer = (m["candidatesTokenCount"].is_number() || m["thoughtsTokenCount"].is_number()).then_some(written);
         r.total = n(&m["totalTokenCount"]);
     }
+    // Claude Code's own estimate of the API price (a Claude plan's call).
+    r.cost_usd = v["total_cost_usd"].as_f64();
     let t = &v["timings"];
     if t.is_object() {
         let ms = |count: Option<u64>, ms: Option<f64>, per_s: Option<f64>| -> u64 {
@@ -280,6 +296,23 @@ pub fn record_response(call: &Call, response: &Value, remaining_req: Option<u64>
     count(call, &reported);
 }
 
+/// **One call's estimated cost** (millionths of a dollar): what it says of
+/// itself (Claude Code's own estimate, on a Claude plan: what it would have
+/// cost on the API), else its list price today (a plan call priced as
+/// Anthropic's). `None`: on this PC, or no price known. Pure but for the
+/// day.
+pub fn call_cost(provider: &str, model: &str, here: bool, r: &Reported) -> Option<u64> {
+    if here {
+        return None;
+    }
+    let (prompt, answer) = match (r.prompt, r.answer) {
+        (None, None) => (r.total.unwrap_or(0), 0),
+        (p, a) => (p.unwrap_or(0), a.unwrap_or(0)),
+    };
+    let priced_as = if provider == crate::ai::claude_plan::PROVIDER { "anthropic" } else { provider };
+    r.said_cost_micros().or_else(|| prices::cost_micros(priced_as, model, &store::day_key(store::today()), prompt, answer))
+}
+
 /// [`record_response`] for search by meaning's embeddings: the tracker
 /// only (Groq's meter, and the on-device model's "Cleanups today" beside
 /// it, count chat calls).
@@ -288,16 +321,25 @@ pub fn record_embeddings(call: &Call, response: &Value) {
 }
 
 fn count(call: &Call, reported: &Reported) {
-    if call.turn {
-        let last = LastCall { prompt: reported.prompt, answer: reported.answer, per_second: reported.speed.per_second() };
-        let _ = TALLY.try_with(|t| *t.lock().unwrap_or_else(|p| p.into_inner()) = Some(last));
-    }
     // Named as the chip names it ("ondevice" on a cloud endpoint is that
     // provider); on this PC as the network receipts place it (a test run's
     // stand-in for a cloud provider counts as that provider's cloud).
     let target = crate::ai::ai_model::describe(call.provider, call.model, call.base_url, "");
     let here = target.provider == crate::ai::local_llm::PROVIDER_ONDEVICE
         || crate::privacy::net::place_of_url(call.base_url) == Some(crate::privacy::net::Place::Pc);
+    if call.turn {
+        let cost = call_cost(&target.provider, &target.model, here, reported);
+        let _ = TALLY.try_with(|t| {
+            let mut t = t.lock().unwrap_or_else(|p| p.into_inner());
+            // The turn's cost so far, every call of it.
+            let before = t.and_then(|l| l.cost_micros);
+            let cost_micros = match (before, cost) {
+                (None, None) => None,
+                (a, b) => Some(a.unwrap_or(0) + b.unwrap_or(0)),
+            };
+            *t = Some(LastCall { prompt: reported.prompt, answer: reported.answer, per_second: reported.speed.per_second(), cost_micros });
+        });
+    }
     let feature = call.feature.unwrap_or_else(current_feature);
     tracing::debug!(
         provider = %target.provider,
@@ -417,9 +459,23 @@ mod tests {
             last_call()
         })
         .await;
-        assert_eq!(last, Some(LastCall { prompt: Some(500), answer: Some(40), per_second: None }));
+        // Its cost: both of the turn's own calls at Groq's list price (not
+        // the provider's search sub-call).
+        let cost = prices::cost_micros("groq", "openai/gpt-oss-20b", &store::day_key(store::today()), 10, 2).unwrap()
+            + prices::cost_micros("groq", "openai/gpt-oss-20b", &store::day_key(store::today()), 500, 40).unwrap();
+        assert_eq!(last, Some(LastCall { prompt: Some(500), answer: Some(40), per_second: None, cost_micros: Some(cost) }));
         // Outside a turn: nothing kept.
         assert_eq!(last_call(), None);
+        // A Claude plan's call: Claude Code's own estimate, whatever the list says.
+        let plan = Call { provider: crate::ai::claude_plan::PROVIDER, model: "claude-haiku-5-5", base_url: crate::ai::claude_plan::BASE_URL, turn: true, feature: None };
+        let last = tallied(async {
+            record_response(&plan, &json!({ "usage": { "input_tokens": 900, "output_tokens": 12 }, "total_cost_usd": 0.0007 }), None, None);
+            last_call()
+        })
+        .await;
+        assert_eq!(last.and_then(|l| l.cost_micros), Some(700));
+        // On this PC: none.
+        assert_eq!(call_cost("ondevice", "qwen", true, &parse(&json!({ "usage": { "prompt_tokens": 9 } }))), None);
 
         // The receipts' scope names it, a finer one here wins.
         let f = crate::privacy::net::within(crate::privacy::net::Feature::Dictation, async { current_feature() }).await;

@@ -11,7 +11,9 @@ import { toast } from '../../ui/toast.svelte.js';
 import { askConfirm } from '../../ui/contextMenu.svelte.js';
 import { showSaveError } from '../../notices/saveErrors.js';
 import { modelName } from '../../core/aiModel.js';
-import { aiError } from '../../core/aiErrors.js';
+import { aiError, claudePlanProblem, CLAUDE_USAGE_URL } from '../../core/aiErrors.js';
+import { openExternalLink } from '../../core/externalLinks.js';
+import { signInClaudePlan } from '../../stores/claudePlan.svelte.js';
 import { streamCall, liveAnswer, applyEvent, streamingHeight, STOPPED, SUPERSEDED } from '../../core/streaming.js';
 import { speech, initSpeech, readAloud as speakText, speakReply, stopReading as stopSpeech } from '../../stores/speech.svelte.js';
 import { DEFAULT_PROMPT, MAX_SHOTS, visionRefused, pastedImage, keepPasted } from './chatImages.js';
@@ -1193,13 +1195,18 @@ export function createChatState({ onopensettings = () => null, onopennote = () =
       // the copyable error box.
       const why = aiError(e);
       const openSettings = onopensettings();
+      // On your Claude plan: the buttons that help (Sign in, Manage usage,
+      // this chat on an Anthropic API key).
+      const planHelp = await claudePlanHelp(e);
       toast({
         title: "Couldn't send",
         description: why.text,
         ...(why.known ? { variant: 'default', kind: 'error', chip: 'Error', icon: 'alert' } : { variant: 'destructive' }),
-        ...(why.settings && openSettings
-          ? { action: { label: 'Open Language Models', onClick: () => openSettings('cleanup#chat') } }
-          : {}),
+        ...(planHelp
+          ? planHelp
+          : why.settings && openSettings
+            ? { action: { label: 'Open Language Models', onClick: () => openSettings('cleanup#chat') } }
+            : {}),
       });
     } finally {
       // Nothing is being written into the document any more.
@@ -1213,6 +1220,35 @@ export function createChatState({ onopensettings = () => null, onopennote = () =
         send();
       }
     }
+  }
+
+  /**
+   * **What helps when your Claude plan couldn't answer** (aiErrors.js
+   * `claudePlanProblem`), as the toast's buttons: Claude Code not signed in
+   * here → Sign in to Claude Code (its own sign-in, in a terminal); the
+   * plan's limit → Manage usage, and — an Anthropic key saved — Use my API
+   * key for this chat (Chat on the key, the same model, the question sent
+   * again). `null`: none of those.
+   */
+  async function claudePlanHelp(e) {
+    const kind = claudePlanProblem(e);
+    if (kind === 'signIn') {
+      return { action: { label: 'Sign in to Claude Code', onClick: () => signInClaudePlan() } };
+    }
+    if (kind !== 'limit') return null;
+    const usage = { label: 'Manage usage', onClick: () => openExternalLink(CLAUDE_USAGE_URL) };
+    const st = await invoke('ai_model_status', { scope: 'chat' }).catch(() => null);
+    const id = st?.model?.provider === 'claude-plan' ? st.model.id : '';
+    if (!id || !st?.keyed?.includes('anthropic')) return { action: usage };
+    const onKey = async () => {
+      try {
+        await invoke('chat_set_model', { provider: 'anthropic', model: id, baseUrl: null, file: null });
+        if (alive && !sending && input.trim()) send();
+      } catch (err) {
+        toast({ title: "Couldn't switch the model", description: String(err), variant: 'destructive' });
+      }
+    };
+    return { action: { label: 'Use my API key for this chat', onClick: onKey }, secondary: usage };
   }
 
   /** ■: stop the answer being written (what came stays, checked). */
