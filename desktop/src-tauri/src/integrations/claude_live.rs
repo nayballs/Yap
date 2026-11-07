@@ -1,6 +1,6 @@
 //! **The endpoint Claude Code runs talk back to** (2026-11-07). Yap starts
 //! the person's own Claude Code CLI for Chat on their Claude plan and for
-//! Jobs (`claude -p … --mcp-config <json> --settings <json>
+//! Jobs (`claude -p … --mcp-config <file> --settings <file>
 //! --permission-prompt-tool mcp__yap__approve`); this is what those runs
 //! reach: a loopback HTTP listener inside the running Yap. It needs no Local
 //! API (`bridge.rs` can be off) and it reaches the live UI.
@@ -11,14 +11,19 @@
 //!   PC in its `Host` (a web page on a name that resolves here can't reach
 //!   it), carries no other site's `Origin`, and names a registered run with
 //!   that run's key: 32 random bytes per run, sent as `Authorization: Bearer`
-//!   (403 / 404 / 401). No CORS headers, ever. The key is only ever in the
-//!   run's command-line JSON and in memory, never in a log or a file.
+//!   (403 / 404 / 401). No CORS headers, ever. The key is only ever in
+//!   memory and in the run's environment ([`RunHandle::env`], as
+//!   `YAP_RUN_KEY`): its MCP config and hook settings say `${YAP_RUN_KEY}`,
+//!   which Claude Code fills in itself, so the key is never in a file, on a
+//!   command line or in a log. (The run's own commands inherit its
+//!   environment; they already run with the person's own rights.)
 //! - **A run** ([`register_run`] → [`RunHandle`]): its label, its tools
 //!   ([`Tools::Chat`]: read only, plus Jobs' when offered; [`Tools::Job`]:
 //!   `approve`), where its
 //!   backups go, and who to ask ([`Approval`]). The handle gives the run's
-//!   `--mcp-config` and `--settings` JSON; dropping it (or [`RunHandle::end`])
-//!   unregisters the run, and a permission prompt still waiting is denied.
+//!   `--mcp-config` and `--settings` JSON and the environment they name;
+//!   dropping it unregisters the run, and a permission prompt still waiting
+//!   is denied.
 //! - **MCP over HTTP** at `POST /mcp/<run>` ([`rpc`]): the Streamable HTTP
 //!   transport's request/response subset, JSON answers only, no sessions,
 //!   no SSE stream (`GET` is 405, which the transport allows). Claude Code
@@ -47,7 +52,7 @@
 //!   file, an http `PreToolUse` hook (`POST /hook/<run>/PreToolUse`) copies
 //!   it into the run's backup folder once, with a `manifest.json`; a file
 //!   that didn't exist yet is noted as created. [`backup::restore`] puts
-//!   them back (Undo job), [`backup::restore_only`] some of them.
+//!   them back (Undo job).
 //!
 //! **The log** has ids, counts, tool names and outcomes, never a command,
 //! a file's path or contents, a prompt or a key.
@@ -73,6 +78,8 @@ pub use approve::Pending;
 pub use approve::set_auto_answer;
 
 use server::Endpoint;
+
+use crate::ai::claude_code::session::RUN_KEY_VAR;
 
 /// The MCP server's name in a run's config: its tools are
 /// `mcp__yap__<tool>`.
@@ -155,7 +162,8 @@ impl RunSpec {
 }
 
 /// **A registered run.** Dropping it unregisters the run: its URL answers
-/// 404 from then on, and a permission prompt still waiting is denied.
+/// 404 from then on, and a permission prompt still waiting is denied. Its
+/// key reaches the run only through [`RunHandle::env`].
 pub struct RunHandle {
     endpoint: Arc<Endpoint>,
     id: String,
@@ -176,10 +184,12 @@ impl std::fmt::Debug for RunHandle {
 
 impl RunHandle {
     /// The run's id (in its URLs; not secret, not the key).
+    #[cfg(test)]
     pub fn id(&self) -> &str {
         &self.id
     }
 
+    #[cfg(test)]
     pub fn port(&self) -> u16 {
         self.endpoint.port
     }
@@ -189,31 +199,38 @@ impl RunHandle {
         format!("http://127.0.0.1:{}/mcp/{}", self.endpoint.port, self.id)
     }
 
-    /// `Authorization`'s value for this run.
+    /// `Authorization`'s value for this run, as it's sent (tests: what
+    /// Claude Code makes of [`authorization`]).
+    #[cfg(test)]
     fn bearer(&self) -> String {
         format!("Bearer {}", self.key)
     }
 
-    /// **`--mcp-config`** (with `--strict-mcp-config`): Yap's server only.
+    /// **The run's environment**: its key under [`RUN_KEY_VAR`]
+    /// (`Spec::env`; never `CLAUDE…` or `ANTHROPIC_…`, so the scrub keeps
+    /// it).
+    pub fn env(&self) -> Vec<(String, String)> {
+        vec![(RUN_KEY_VAR.to_string(), self.key.clone())]
+    }
+
+    /// **`--mcp-config`** (with `--strict-mcp-config`): Yap's server only,
+    /// its key named, never written ([`RunHandle::env`]).
     pub fn mcp_config(&self) -> Value {
         json!({
             "mcpServers": {
                 SERVER: {
                     "type": "http",
                     "url": self.mcp_url(),
-                    "headers": { "Authorization": self.bearer() },
+                    "headers": { "Authorization": authorization() },
                     "timeout": TOOL_TIMEOUT_MS,
                 }
             }
         })
     }
 
-    pub fn mcp_config_json(&self) -> String {
-        self.mcp_config().to_string()
-    }
-
     /// **`--settings`**: the backup hook for a run with a backup folder,
-    /// else nothing (`{}`).
+    /// else nothing (`{}`). An http hook's headers take only the variables
+    /// it lists in `allowedEnvVars`.
     pub fn settings(&self) -> Value {
         if !self.has_backup {
             return json!({});
@@ -225,16 +242,13 @@ impl RunHandle {
                     "hooks": [{
                         "type": "http",
                         "url": format!("http://127.0.0.1:{}/hook/{}/PreToolUse", self.endpoint.port, self.id),
-                        "headers": { "Authorization": self.bearer() },
+                        "headers": { "Authorization": authorization() },
+                        "allowedEnvVars": [RUN_KEY_VAR],
                         "timeout": HOOK_TIMEOUT_SECS,
                     }]
                 }]
             }
         })
-    }
-
-    pub fn settings_json(&self) -> String {
-        self.settings().to_string()
     }
 
     /// The run's own tools as `--allowedTools` names (`mcp__yap__list_meetings`
@@ -257,9 +271,13 @@ impl RunHandle {
     pub fn begin_turn(&self, ctx: turn::Context) -> turn::Turn {
         self.turn.begin(ctx)
     }
+}
 
-    /// Unregister the run now (as dropping the handle does).
-    pub fn end(self) {}
+/// `Authorization` as a run's files name it, `Bearer ${YAP_RUN_KEY}`:
+/// Claude Code fills the key in from the run's environment
+/// ([`RunHandle::env`]).
+fn authorization() -> String {
+    format!("Bearer ${{{RUN_KEY_VAR}}}")
 }
 
 impl Drop for RunHandle {

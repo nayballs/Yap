@@ -103,9 +103,9 @@ pub fn exe_names() -> std::collections::HashMap<u32, String> {
 
 /// When the live process `pid` started (a FILETIME, 100 ns since 1601), or
 /// `None` (gone, or not ours to ask). Tells a process from a later one that
-/// was given the same id.
+/// was given the same id (robot mode, `realtest.rs`; whose a Claude Code
+/// run's folder is, `ai/claude_code/session.rs`).
 #[cfg(windows)]
-#[cfg_attr(not(debug_assertions), allow(dead_code))] // robot mode (realtest.rs) only
 pub fn created(pid: u32) -> Option<u64> {
     imp::created(pid)
 }

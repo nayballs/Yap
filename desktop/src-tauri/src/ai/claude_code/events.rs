@@ -84,12 +84,6 @@ pub struct Init {
     pub effort: Option<String>,
 }
 
-impl Init {
-    /// Whether this Claude Code says it can do `capability`.
-    pub fn can(&self, capability: &str) -> bool {
-        self.capabilities.iter().any(|c| c == capability)
-    }
-}
 
 #[derive(Clone, Debug, Default, PartialEq, Serialize)]
 pub struct McpServer {
@@ -201,13 +195,6 @@ pub struct Assistant {
     /// (`authentication_failed`, `rate_limit`, `billing_error`, …).
     pub error: Option<String>,
     pub stop_reason: Option<String>,
-}
-
-impl Assistant {
-    /// The message's text blocks, joined.
-    pub fn text(&self) -> String {
-        join_text(&self.blocks)
-    }
 }
 
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -839,8 +826,7 @@ pub(crate) mod tests {
         let Event::Init(init) = &events[0] else { panic!("init first") };
         assert_eq!(init.version, "2.1.296");
         assert_eq!(init.api_key_source, "none");
-        assert!(init.can("interrupt_receipt_v1"));
-        assert!(!init.can("interrupt_receipt_v9"));
+        assert!(init.capabilities.iter().any(|c| c == "interrupt_receipt_v1"));
         assert_eq!(init.permission_mode, "dontAsk");
         let Some(Event::Result(r)) = events.last() else { panic!("result last") };
         assert!(r.is_error);
@@ -933,7 +919,7 @@ pub(crate) mod tests {
             .collect();
         assert_eq!(thinking, "They want a greeting.");
         let a = events.iter().find_map(|e| if let Event::Assistant(a) = e { Some(a.clone()) } else { None }).unwrap();
-        assert_eq!(a.text(), "Hello, Imogen. The meeting is at 3 pm.");
+        assert_eq!(join_text(&a.blocks), "Hello, Imogen. The meeting is at 3 pm.");
         assert!(matches!(&a.blocks[0], Block::Thinking(t) if t == "They want a greeting."));
         let Some(Event::Result(r)) = events.last() else { panic!() };
         assert!(!r.is_error);

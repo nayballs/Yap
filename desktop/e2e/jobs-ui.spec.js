@@ -17,7 +17,9 @@
 //   amber and switches freely. Light and dark.
 // - A job's tab opening at once, its log, files, commands, what it wasn't
 //   allowed, its words and cost; the pill under the answer; the report as a
-//   job card; Undo job. Light and dark.
+//   job card; Undo job. Light and dark. A job whose edits went through with
+//   no backup made (Claude Code's hooks didn't run): its tab says Undo can't
+//   put the files back, and offers no Undo.
 // - A slow job: its live line, the running list above the conversations,
 //   "1 job running" on the Yap bar (its click opening the job), Stop,
 //   Continue.
@@ -44,6 +46,8 @@ import {
   latestStep,
   messageIndex,
   pillsByAnswer,
+  canUndo,
+  NO_BACKUPS,
   jobOfReport,
   reportTitle,
   reportFolder,
@@ -126,6 +130,8 @@ const EDIT = [
   result(DONE, { permission_denials: [{ tool_name: 'Bash', tool_use_id: 'toolu_rm', tool_input: { command: 'rm -rf build' } }] }),
   { _wait_user: true },
 ];
+/** The same edit with Claude Code's hooks off (a managed policy): the edit goes through, no backup is made. */
+const EDIT_NO_HOOK = EDIT.filter((l) => !l._hook);
 /** Says what it was told. */
 const ECHO = [{ _wait_user: true }, init('auto'), result('Got: {{user_text}}', { total_cost_usd: 0.002 }), { _wait_user: true }];
 /** The same, paid by the API key Yap gave it. */
@@ -287,6 +293,16 @@ test('core/jobs.js: status, cost by how it is paid, time, steps, pills, problems
   expect(statusTone('running')).toBe('live');
   expect(statusTone('interrupted')).toBe('idle');
   expect([isLive('queued'), isLive('asking'), isLive('done')]).toEqual([true, true, false]);
+  // Undo: once it's over, with files changed and their backups there.
+  const changed = { status: 'done', files: ['notes.md'] };
+  expect(canUndo(changed)).toBe(true);
+  expect(canUndo({ ...changed, status: 'running' })).toBe(false);
+  expect(canUndo({ ...changed, files: [] })).toBe(false);
+  expect(canUndo({ ...changed, undone: true })).toBe(false);
+  expect(canUndo({ ...changed, swept: true })).toBe(false);
+  expect(canUndo({ ...changed, noBackups: true })).toBe(false);
+  expect(canUndo(null)).toBe(false);
+  expect(NO_BACKUPS).toBe("No backups were made, so Undo can't put these files back.");
 
   // Plan and key, told apart.
   // (In a plan chat's answers' words: core/aiModel.js paidLine, core/money.js.)
@@ -576,6 +592,33 @@ test('a job: its tab opens at once and follows it, the pill, the report card, Un
   await expect.poll(async () => (await jobs(yap)).find((j) => j.id === job.id).undone).toBe(true);
 });
 
+test('a job whose edits made no backup (hooks off): its tab says Undo can’t put them back, and offers no Undo', async ({ yap, main, fakeLlm, shot }) => {
+  const started = await startJob(yap, main, fakeLlm, {
+    lines: EDIT_NO_HOOK,
+    name: 'edit-no-hook',
+    brief: 'Change Draft to Final in notes.md, then run the tests.',
+    report: "Done. I changed notes.md from Draft to Final; no backup was made, so Undo can't put it back.",
+    ask: 'Start a job in garden-planner: change Draft to Final in notes.md and run the tests.',
+  });
+  const job = await ended(yap, started.id);
+  expect(job.status).toBe('done');
+  // The edit went through and nothing was backed up: marked.
+  expect(fs.readFileSync(path.join(GARDEN, 'notes.md'), 'utf8')).toBe('Final notes\n');
+  expect(job.noBackups).toBe(true);
+  await expect(tab(main)).toHaveAttribute('data-status', 'done');
+  await expect(main.getByTestId('chat-job-files').locator('li')).toHaveText(['notes.md']);
+  await expect(main.getByTestId('chat-job-no-backups')).toHaveText(NO_BACKUPS);
+  await expect(tab(main).getByRole('button', { name: 'Undo job' })).toHaveCount(0);
+  // The report's facts say so too (the model reads them), never "backed up".
+  const messages = await messagesOf(yap, job.conversation, 4);
+  const marker = messages.find((m) => m.kind === 'jobReport');
+  expect(marker.text).toContain("Files it changed: notes.md (no backups were made, so Undo can't put them back).");
+  expect(marker.text).not.toContain('backed up first');
+  await shot(main, '06b-job-tab-no-backups');
+  // A job whose hook ran (the one before) is never marked.
+  expect((await jobs(yap)).filter((j) => j.id !== job.id && j.files?.length).every((j) => !j.noBackups)).toBe(true);
+});
+
 test('a slow job: its live line, the running list, “1 job running” on the bar, Stop and Continue', async ({ yap, main, fakeLlm, shot }) => {
   const started = await startJob(yap, main, fakeLlm, { lines: SLOW, name: 'slow', brief: 'Read notes.md slowly.', report: null });
   await expect(tab(main)).toBeVisible();
@@ -832,6 +875,9 @@ test('Settings → Jobs: the switch, Claude Code, pay with, defaults, folders, a
     return [c.jobsAsk, c.jobsSpeak];
   }).toEqual(['always', 'always']);
   await expect(dialog.locator('[data-setting="jobs-limits"]')).toHaveText('Backups of changed files are kept 7 days. One job at a time per folder, at most 3 at once.');
+  await expect(dialog.locator('[data-setting="jobs-backups-hooks"]')).toHaveText(
+    "Undo needs Claude Code's hooks, which back up each file before a job changes it. If a policy set by your organisation turns hooks off, no backups are made, and the job's tab says so.",
+  );
   await expect(dialog.getByTestId('jobs-connections-note')).toHaveText("Jobs connect to Anthropic through Claude Code itself, so they aren't in Network connections.");
   await shot(main, '15-settings-jobs-light');
   await theme(yap, main, 'dark');

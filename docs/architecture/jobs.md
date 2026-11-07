@@ -103,7 +103,9 @@ saves ([config-and-data.md](./config-and-data.md)).
     its latest final words (`text`), its cost so far, a problem with Claude
     Code (`{kind, message, resetsAt?}`), an error, its turns, whether its
     latest turn was a plan (`plan`) or ends in a question (`asks`), whether
-    it was reported (and the report's marker id), `undone`, `swept`;
+    it was reported (and the report's marker id), `undone`, `swept`,
+    `noBackups` (it changed files and no backups were made:
+    [Undo and backups](#undo-and-backups));
   - `modes`: each chat's Mode chip (conversation id → mode);
   - `bypassConfirmed`: the one-time OK for Bypass permissions.
 - **`jobs/<id>/log.jsonl`** — every `yap-job` event the job sent, one a line,
@@ -196,7 +198,14 @@ folder.
   - `--permission-prompt-tool mcp__yap__approve`: a prompt is a card for the
     person (below), never answered by voice;
   - `--settings` with the backup hook: each file copied into
-    `jobs/<id>/backup/` before it's first changed.
+    `jobs/<id>/backup/` before it's first changed;
+  - the run's key in its environment (`YAP_RUN_KEY`, `RunHandle::env`):
+    both files name it as `${YAP_RUN_KEY}`, so it's never in a file.
+- **Its session is saved** (Claude Code's transcript, in the person's own
+  config folder under their folder's name): `--resume` and Open in terminal
+  need it, and it's theirs, as if they'd run Claude Code themselves. Yap
+  never deletes a job's transcript (Delete some of your data → Jobs
+  neither).
 - **The flags**: `--permission-mode` from the job's mode, `--model` (a full
   id, `jobs_model` unless the person named one: Sonnet 5.5 by default),
   `--effort` (`jobs_effort`, medium), `--session-id` for its first turn, then
@@ -219,7 +228,9 @@ folder.
   the command it runs (Bash, PowerShell), `system/permission_denied` and the
   result's `permission_denials`, Claude Code's problems (signed out, at the
   plan's limit, billing, the account, paying another way) and the result:
-  its words, `total_cost_usd`, the outcome. Each change goes out as the app
+  its words, `total_cost_usd`, the outcome. An edit tool's call whose result
+  came back without an error, with the backup list still empty at the turn's
+  result, marks the job `noBackups` ([below](#undo-and-backups)). Each change goes out as the app
   event **`yap-job`** and into the job's log. Saved at most every 2 s while
   it works, and at every turn's end.
 - **Asking**: a permission card waiting for the person (`claude_live::pending`)
@@ -404,8 +415,10 @@ or done with a question.
   the commands, what wasn't allowed, its final words (markdown), its cost told
   apart by how it's paid ("Your Claude plan · ≈ $0.04 on the API" / "API key
   · $0.04"), a problem with one button (Sign in), and **Stop**, **Continue**,
-  **Undo job** (a confirm, then what was put back), **Open in terminal** and
-  "Tell the job…". **Closing the tab never stops the job.**
+  **Undo job** (a confirm, then what was put back; `core/jobs.js` `canUndo`),
+  **Open in terminal** and "Tell the job…". A job marked `noBackups` says
+  under its files "No backups were made, so Undo can't put these files
+  back." and offers no Undo. **Closing the tab never stops the job.**
 - **Pills** (`JobPills.svelte`) under the answer that started a job (found by
   the job's `messageId`): the folder and a status dot; a click opens its tab.
 - **The report card** (`JobReportCard.svelte`): the `jobReport` marker as
@@ -443,8 +456,11 @@ or done with a question.
   the small print; the Bypass warning on a folder with no cap once Bypass is
   confirmed); **Ask before starting a job**; **Read job reports aloud**; the
   limits ("Backups of changed files are kept 7 days. One job at a time per
-  folder, at most 3 at once."); **History** (each job's status, folder, when
-  and cost, Open and Undo).
+  folder, at most 3 at once.") and, small, "Undo needs Claude Code's hooks,
+  which back up each file before a job changes it. If a policy set by your
+  organisation turns hooks off, no backups are made, and the job's tab says
+  so."; **History** (each job's status, folder, when and cost, Open and
+  Undo).
 
 ## Undo and backups
 
@@ -470,8 +486,20 @@ The run endpoint's backup hook (`integrations/claude_live/backup.rs`,
   backed up: only Claude Code's edit tools go through the hook. A denied
   Write is still noted as created (the hook runs before the permission
   check), so Undo would delete a file of that name made later by something
-  else. Hooks can be turned off by a managed policy (`allowedHttpHookUrls`),
-  and never run under `--bare`; Settings → Jobs doesn't say so yet.
+  else.
+- **When hooks don't run**: a managed policy can turn them off
+  (`disableAllHooks`, `allowManagedHooksOnly`, `allowedHttpHookUrls`, or
+  `httpHookAllowedEnvVars` keeping the run's key out of the header), and they
+  never run under `--bare`. Then nothing is backed up. Settings → Jobs says
+  so in a line ("Undo needs Claude Code's hooks…"), and **the runner tells
+  when it happened** (`runner::no_backups`, certain, no guess): an edit
+  tool's call (`Edit`, `Write`, `MultiEdit`, `NotebookEdit`) came back
+  without an error — Claude Code runs `PreToolUse` hooks before a tool, and
+  Yap's hook notes every file it's called for, copied or not — yet the
+  backup list is empty at the turn's result. The job is marked `noBackups`
+  (kept), its tab says "No backups were made, so Undo can't put these files
+  back." with no Undo, History offers none, and the report's facts say so
+  (never "backed up first"), so the chat's model doesn't promise a backup.
 
 ## Privacy
 
@@ -482,6 +510,9 @@ The run endpoint's backup hook (`integrations/claude_live/backup.rs`,
   connections says so: "Jobs connect to Anthropic through Claude Code itself,
   so they aren't in Network connections." Nor are the runs' requests to Yap's
   own endpoint on 127.0.0.1.
+- **The run key is never in a file**: only in memory and the run's
+  environment (`YAP_RUN_KEY`); the run's files name it
+  ([integrations.md](./integrations.md)).
 - **Test runs never reach the person's Claude Code**: a run with `YAP_E2E=1`
   and no `YAP_CLAUDE_EXE` finds none, so jobs aren't offered.
 
@@ -529,13 +560,15 @@ folder the next Add folder… takes).
   the store (interrupted at start, the sweep, the log's trim and cap), the
   folders (resolve, names, paths said), the modes (lower only, the cap,
   Bypass's OK, the next turn), consent (in a folder named, a yes to an offer,
-  not a note's words), the spoken answer, the runner's slots and spec, the
-  steps' words, the report's marker and fallback, the approve card.
+  not a note's words), the spoken answer, the runner's slots and spec (the
+  run key only in its environment), the steps' words, the report's marker
+  and fallback (no backups said as such), the approve card, `noBackups`.
 - **E2E** (`desktop/e2e/jobs.spec.js`, `jobs-ui.spec.js`,
   [`docs/e2e-tests.md`](../e2e-tests.md)): the scripted fake AI calls
   `start_job`, and Claude Code is the build's own stand-in (`yap.exe
   fake-claude <script>`, switched per turn with `e2e_claude_script`), whose
-  scripts call the run's backup hook, write the file and ask `approve`. The
+  scripts call the run's backup hook (its key expanded from the run's
+  environment, as Claude Code expands it), write the file and ask `approve`. The
   job folders are in the run's own folder: nobody's real Claude Code, account
   or files.
   - `jobs.spec.js`: a typed job end to end (steps, files, commands, denials,
@@ -549,8 +582,10 @@ folder the next Add folder… takes).
     once, amber); the tab, the pill, the report card, Undo; a slow job's live
     line, the running list, "1 job running" on the bar, Stop, Continue; the
     ask-first card, a prompt in the thread (Deny) and on the bar (Allow
-    once); a job not signed in (Sign in); one paid by key; Settings → Jobs;
-    the Network connections note. Light and dark.
+    once); a job not signed in (Sign in); one paid by key; a job whose edit
+    went through with no hook (no backups: the tab's line, no Undo, the
+    report's facts); Settings → Jobs (the hooks line too); the Network
+    connections note. Light and dark.
   - `plan-jobs.spec.js`: from a chat on the plan, its own Claude Code calling
     the job tools over the endpoint (one stand-in script plays the plan
     chat's session, the job and the report's question: `_for`). Typed: the
@@ -582,6 +617,6 @@ the shapes from Claude Code's docs and the signed-out recordings
   PC's speakers, not the phone's.
 - **A question from Claude Code** (`AskUserQuestion`) has no card yet: it's
   denied, and Claude is told to choose and say what it chose in its summary.
-- Settings → Jobs doesn't yet say that a managed policy or `--bare` turns the
-  backup hook off.
+- A real managed policy that turns hooks off, to see `noBackups` happen
+  outside the stand-in.
 - Codex as a second engine on the same runner: later.

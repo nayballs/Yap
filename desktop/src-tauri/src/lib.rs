@@ -1142,6 +1142,9 @@ pub fn run() {
 
             // Local API bridge (Integrations): loopback server for CLIs/agents.
             integrations::bridge::sync(&handle, cfg.bridge_enabled);
+            // The Claude Code engine (ai/claude_code.rs): the run folders a crashed
+            // Yap left in %TEMP%\yap-claude\ swept, in the background.
+            ai::claude_code::init();
             // Claude Code runs' endpoint (integrations/claude_live.rs): its events;
             // the listener starts with the first run.
             integrations::claude_live::init(&handle);

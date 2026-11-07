@@ -33,6 +33,16 @@ export function statusTone(status) {
   return 'idle';
 }
 
+/**
+ * **Undo job is offered**: it's over, it changed files, and their backups
+ * are there — not undone already, not swept (7 days on), and made at all
+ * (`noBackups`: Claude Code's hooks didn't run, so nothing was backed up).
+ */
+export const canUndo = (job) => !!job && !isLive(job.status) && (job.files?.length ?? 0) > 0 && !job.undone && !job.swept && !job.noBackups;
+
+/** The job's tab when it changed files with no backups made. */
+export const NO_BACKUPS = "No backups were made, so Undo can't put these files back.";
+
 /** Dollars as an answer's byline says them (core/money.js): "$0.04", "$0.0042", "under $0.0001". */
 export const money = (usd) => dollars((Number(usd) || 0) * 1_000_000);
 

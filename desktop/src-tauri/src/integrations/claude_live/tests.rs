@@ -12,7 +12,7 @@ use serde_json::{json, Value};
 use super::approve::describe;
 use super::reads::{render_calendar, Reads};
 use super::server::{Emit, Endpoint};
-use super::backup::{self, restore, restore_only, Entry, Manifest, State, MAX_BACKUP_BYTES};
+use super::backup::{self, restore, Entry, Manifest, State, MAX_BACKUP_BYTES};
 use super::*;
 use crate::integrations::mcp::{list_meetings, BridgeError};
 use crate::notes::Note;
@@ -135,7 +135,10 @@ impl Client {
         let server = &h.mcp_config()["mcpServers"]["yap"];
         let url = server["url"].as_str().unwrap();
         let path = url.split_once(&format!("127.0.0.1:{}", h.port())).unwrap().1.to_string();
-        Client { port: h.port(), path, auth: server["headers"]["Authorization"].as_str().unwrap().to_string(), next: 1 }
+        // The key as Claude Code sends it: its config names it, the run's
+        // environment has it.
+        assert_eq!(server["headers"]["Authorization"], "Bearer ${YAP_RUN_KEY}");
+        Client { port: h.port(), path, auth: h.bearer(), next: 1 }
     }
 
     fn post(&self, msg: &Value) -> (u16, String) {
@@ -174,11 +177,17 @@ fn a_chat_run_connects_lists_and_reads_over_real_http() {
     let server = &h.mcp_config()["mcpServers"]["yap"];
     assert_eq!(server["type"], "http");
     assert_eq!(server["url"], format!("http://127.0.0.1:{}/mcp/{}", ep.port, h.id()));
-    let auth = server["headers"]["Authorization"].as_str().unwrap();
-    assert!(auth.starts_with("Bearer ") && auth.len() == 7 + 64, "32 bytes of hex");
+    // The key is named, never written: Claude Code fills it in from the
+    // run's environment (`YAP_RUN_KEY`).
+    assert_eq!(server["headers"]["Authorization"], "Bearer ${YAP_RUN_KEY}");
+    let env = h.env();
+    assert_eq!(env.len(), 1);
+    assert_eq!(env[0].0, crate::ai::claude_code::session::RUN_KEY_VAR);
+    assert!(env[0].1.len() == 64 && env[0].1.bytes().all(|b| b.is_ascii_hexdigit()), "32 bytes of hex");
+    assert!(!h.mcp_config().to_string().contains(&env[0].1));
+    assert_eq!(h.bearer(), format!("Bearer {}", env[0].1));
     assert_eq!(server["timeout"], TOOL_TIMEOUT_MS);
     assert_eq!(h.settings(), json!({}), "no backups, no hook");
-    assert!(!h.mcp_config_json().is_empty() && h.settings_json() == "{}");
 
     let mut c = Client::of(&h);
     // Claude Code 2.1.296 probes the 2026 era first; "method not found"
@@ -280,7 +289,7 @@ fn requests_without_the_run_s_key_or_from_another_site_are_refused() {
     assert_eq!(status, 403, "no preflight answered");
     // Ended: the run's URL is gone, the other run's still answers.
     let path = c.path.clone();
-    h.end();
+    drop(h);
     assert_eq!(post(&path, &[("Authorization", c.auth.clone())]), 404);
     let o = Client::of(&other);
     assert_eq!(http(o.port, "POST", &o.path, &[("Authorization", o.auth.clone())], &ping).0, 200);
@@ -435,7 +444,7 @@ fn hook(h: &RunHandle, input: &Value) -> (u16, String) {
     let hook = &h.settings()["hooks"]["PreToolUse"][0]["hooks"][0];
     let url = hook["url"].as_str().unwrap();
     let path = url.split_once(&format!("127.0.0.1:{}", h.port())).unwrap().1;
-    http(h.port(), "POST", path, &[("Authorization", hook["headers"]["Authorization"].as_str().unwrap().to_string()), ("Content-Type", "application/json".into())], &input.to_string())
+    http(h.port(), "POST", path, &[("Authorization", h.bearer()), ("Content-Type", "application/json".into())], &input.to_string())
 }
 
 fn edit_input(work: &Path, tool: &str, key: &str, path: &str) -> Value {
@@ -472,7 +481,11 @@ fn the_backup_hook_keeps_the_first_copy_and_undo_puts_everything_back() {
     let hk = &group["hooks"][0];
     assert_eq!((hk["type"].as_str(), hk["timeout"].as_u64()), (Some("http"), Some(HOOK_TIMEOUT_SECS)));
     assert_eq!(hk["url"], format!("http://127.0.0.1:{}/hook/{}/PreToolUse", h.port(), h.id()));
-    assert_eq!(hk["headers"]["Authorization"], h.mcp_config()["mcpServers"]["yap"]["headers"]["Authorization"]);
+    // Its key named, as the MCP server's is; an http hook's headers take
+    // only the variables it lists.
+    assert_eq!(hk["headers"]["Authorization"], "Bearer ${YAP_RUN_KEY}");
+    assert_eq!(hk["allowedEnvVars"], json!(["YAP_RUN_KEY"]));
+    assert!(!settings.to_string().contains(&h.env()[0].1), "the key is never in the settings");
 
     let a = work.join("a.txt");
     // First edit: copied, and the hook says carry on.
@@ -504,13 +517,6 @@ fn the_backup_hook_keeps_the_first_copy_and_undo_puts_everything_back() {
     assert_eq!(std::fs::read_to_string(backups.join(&m.files[0].backup)).unwrap(), "before", "the first copy wins");
     assert!(m.files.iter().all(|e| e.state != State::Copied || !e.backup.contains(['/', '\\'])));
     std::fs::write(work.join("docs").join("guide.ipynb"), "{\"cells\":[1]}").unwrap();
-
-    // Undo some: a path the manifest doesn't name is refused, nothing moves.
-    let outside = root.join("elsewhere.txt");
-    let some = restore_only(&backups, std::slice::from_ref(&outside));
-    assert_eq!((some.refused.len(), some.restored.len()), (1, 0));
-    assert_eq!(some.refused[0].path, outside);
-    assert_eq!(std::fs::read_to_string(&a).unwrap(), "after one edit");
 
     // Undo all.
     let report = restore(&backups);
@@ -614,12 +620,13 @@ fn real_claude_code_connects_to_the_endpoint() {
             }
         }
         cmd.env("CLAUDE_CONFIG_DIR", root.join("config"))
+            .envs(h.env())
             .current_dir(&root)
-            .args(["-p", "hello", "--output-format", "stream-json", "--verbose", "--tools", "", "--strict-mcp-config"])
+            .args(["-p", "hello", "--output-format", "stream-json", "--verbose", "--tools", "", "--strict-mcp-config", "--no-session-persistence"])
             .arg("--mcp-config")
-            .arg(h.mcp_config_json())
+            .arg(h.mcp_config().to_string())
             .arg("--settings")
-            .arg(h.settings_json());
+            .arg(h.settings().to_string());
         if prompt_tool {
             cmd.args(["--permission-prompt-tool", PERMISSION_TOOL]);
         }
@@ -704,7 +711,8 @@ fn yap_s_endpoint_starts_once_and_each_run_has_its_own_key() {
     let b = register_run(RunSpec::new("Two", Tools::Job)).unwrap();
     assert_eq!(a.port(), b.port(), "one listener");
     assert_ne!(a.id(), b.id());
-    assert_ne!(a.mcp_config()["mcpServers"]["yap"]["headers"], b.mcp_config()["mcpServers"]["yap"]["headers"]);
+    assert_ne!(a.env(), b.env());
+    assert_eq!(a.mcp_config()["mcpServers"]["yap"]["headers"], b.mcp_config()["mcpServers"]["yap"]["headers"], "both name it; each run's environment has its own");
     assert!(!format!("{a:?}").contains(&Client::of(&a).auth[7..]), "Debug never shows the key");
     assert!(!claude_approve_answer(987_654, true), "nothing waits");
     assert!(claude_approve_pending().is_empty());

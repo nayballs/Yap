@@ -15,7 +15,8 @@
   // - A problem with Claude Code itself in plain words, with one button
   //   (Sign in, when it isn't signed in).
   // - Stop (while it works), Continue (stopped, interrupted, failed), Undo
-  //   job (a confirm, then what was put back), Open in terminal (once it
+  //   job (a confirm, then what was put back; never when no backups were
+  //   made: Claude Code's hooks didn't run, and the tab says so), Open in terminal (once it
   //   isn't running), and "Tell the job…": the person's own words, to it at
   //   once while it works, else its next turn (`job_message`).
   import { invoke } from '@tauri-apps/api/core';
@@ -24,7 +25,7 @@
   import ConfirmDialog from '../../ui/ConfirmDialog.svelte';
   import { toast } from '../../ui/toast.svelte.js';
   import { renderMarkdown } from '../../core/markdown.js';
-  import { isLive, statusWord, statusTone, costLine, elapsed, stepsOf, stepKind, problemWords, modeLabel, modelLabel } from '../../core/jobs.js';
+  import { isLive, statusWord, statusTone, costLine, elapsed, stepsOf, stepKind, problemWords, modeLabel, modelLabel, canUndo as undoable, NO_BACKUPS } from '../../core/jobs.js';
   import { EFFORT_LABELS } from '../../core/effort.js';
   import { claudePlan, signInClaudePlan } from '../../stores/claudePlan.svelte.js';
 
@@ -52,7 +53,7 @@
   const working = $derived(live ? (log.findLast((e) => typeof e?.text === 'string' && e.text.trim())?.text ?? '') : '');
   const problem = $derived(problemWords(shown?.problem));
   const ran = $derived(shown ? elapsed(shown, now) : '');
-  const canUndo = $derived(!!shown && !live && (shown.files?.length ?? 0) > 0 && !shown.undone && !shown.swept);
+  const canUndo = $derived(undoable(shown));
 
   // Events heard while the log is read: kept, unless the log has them already.
   let loading = false;
@@ -308,6 +309,9 @@
           <ul class="plain">
             {#each shown.files as f (f)}<li><code>{f}</code></li>{/each}
           </ul>
+          {#if shown.noBackups}
+            <p class="nobackups" data-testid="chat-job-no-backups">{NO_BACKUPS}</p>
+          {/if}
         </div>
       {/if}
       {#if shown.commands?.length}
@@ -678,6 +682,14 @@
   }
   .final .md :global(p) {
     margin: 0 0 8px;
+  }
+  .nobackups {
+    margin: 8px 0 0;
+    padding: 7px 10px;
+    border-radius: 9px;
+    background: color-mix(in srgb, var(--yap-warning) 10%, var(--yap-paper));
+    color: var(--yap-paper-text-2);
+    font-size: 12.5px;
   }
   .undone {
     margin: 12px 0 0;

@@ -54,6 +54,14 @@
 //! "aborted_streaming"`), the script skipping on to the next `_wait_user`.
 //! Any other control request gets an error response.
 //!
+//! **Its transcript**, as Claude Code saves a session: with
+//! `YAP_FAKE_CLAUDE_TRANSCRIPTS=1` and a `CLAUDE_CONFIG_DIR` (a test's own
+//! folder: never without both, so never the person's own `~/.claude`), each
+//! user message is appended to
+//! `<CLAUDE_CONFIG_DIR>/projects/<cwd, encoded>/<session>.jsonl`
+//! (`transcripts::project_dir_name`), unless it was started with
+//! `--no-session-persistence`.
+//!
 //! **`--version`** prints `2.1.296 (Claude Code)` (`YAP_FAKE_CLAUDE_VERSION`
 //! for another); **`auth status`** prints a signed-in status
 //! (`YAP_FAKE_CLAUDE_LOGGED_IN=0`: signed out, exit 1); **`auth login`**
@@ -149,6 +157,9 @@ pub struct Ctx {
     pub mcp_servers: Map<String, Value>,
     /// Variables to read instead of the environment (tests).
     pub vars: Option<HashMap<String, String>>,
+    /// Started without `--no-session-persistence`: a transcript is kept
+    /// (when the test asks for one: [`Ctx::transcript`]).
+    pub persist: bool,
 }
 
 impl Ctx {
@@ -156,6 +167,7 @@ impl Ctx {
         let mut ctx = Ctx {
             args: args.to_vec(),
             cwd: std::env::current_dir().map(|d| d.display().to_string()).unwrap_or_default(),
+            persist: !args.iter().any(|a| a == "--no-session-persistence"),
             ..Default::default()
         };
         let mut i = 0;
@@ -196,6 +208,17 @@ impl Ctx {
             Some(vars) => vars.get(name).cloned(),
             None => std::env::var(name).ok(),
         }
+    }
+
+    /// Where this session's transcript goes, as Claude Code files it: only
+    /// with `YAP_FAKE_CLAUDE_TRANSCRIPTS=1` and a `CLAUDE_CONFIG_DIR`, and
+    /// never under `--no-session-persistence`.
+    pub fn transcript(&self) -> Option<std::path::PathBuf> {
+        if !self.persist || self.var("YAP_FAKE_CLAUDE_TRANSCRIPTS").is_none_or(|v| v.trim() != "1") {
+            return None;
+        }
+        let config = self.var("CLAUDE_CONFIG_DIR").filter(|v| !v.trim().is_empty())?;
+        Some(std::path::Path::new(&config).join("projects").join(super::transcripts::project_dir_name(&self.cwd)).join(format!("{}.jsonl", self.session_id)))
     }
 
     /// What kind of run this is, for `_for`: "job" (a permission prompt
@@ -341,6 +364,7 @@ impl Player<'_> {
                 self.skipping = false;
                 loop {
                     if let Some(text) = self.queue.pop_front() {
+                        self.record(&text);
                         self.user_text = text;
                         self.in_turn = true;
                         return Ok(None);
@@ -417,6 +441,20 @@ impl Player<'_> {
             other => eprintln!("fake-claude: unknown instruction {other}"),
         }
         Ok(None)
+    }
+
+    /// A user message into the session's transcript, as Claude Code keeps
+    /// one ([`Ctx::transcript`]).
+    fn record(&self, text: &str) {
+        let Some(path) = self.ctx.transcript() else { return };
+        let line = json!({"type":"user","sessionId":self.ctx.session_id,"cwd":self.ctx.cwd,"message":{"role":"user","content":text}}).to_string();
+        let wrote = path.parent().map_or(Ok(()), std::fs::create_dir_all).and_then(|()| {
+            let mut f = std::fs::OpenOptions::new().create(true).append(true).open(&path)?;
+            writeln!(f, "{line}")
+        });
+        if let Err(e) = wrote {
+            eprintln!("fake-claude: couldn't keep the transcript: {e}");
+        }
     }
 
     /// POST to the matching http hooks; a `hook_response` line each.
@@ -706,6 +744,33 @@ mod tests {
         assert_eq!(out[0]["args"], json!(["-p", "--model", "claude-haiku-5-5"]));
         assert_eq!(out[1]["present"], json!({"YAP_RUN_KEY":true,"ANTHROPIC_API_KEY":false,"EMPTY":false}));
         assert_eq!(out.len(), 2);
+    }
+
+    #[test]
+    fn it_keeps_a_transcript_as_claude_code_does_only_when_asked() {
+        let config = std::env::temp_dir().join(format!("yap-cc-fake-transcript-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&config);
+        let vars = HashMap::from([("YAP_FAKE_CLAUDE_TRANSCRIPTS".to_string(), "1".to_string()), ("CLAUDE_CONFIG_DIR".to_string(), config.display().to_string())]);
+        let script = "{\"_wait_user\":true}\n{\"type\":\"result\",\"result\":\"ok\"}\n{\"_wait_user\":true}\n";
+        let mut c = ctx(&["-p", "--session-id", "4d7c1d2e-8a51-4c3b-9f0e-2b6a7e1c5d90"]);
+        c.vars = Some(vars.clone());
+        let path = c.transcript().unwrap();
+        assert_eq!(path, config.join("projects").join("C--Users-imogen-Projects-example").join("4d7c1d2e-8a51-4c3b-9f0e-2b6a7e1c5d90.jsonl"));
+        run(script, &c, &[USER, USER], true);
+        let kept: Vec<Value> = std::fs::read_to_string(&path).unwrap().lines().map(|l| serde_json::from_str(l).unwrap()).collect();
+        assert_eq!(kept.len(), 2, "each user message");
+        assert_eq!(kept[0]["message"]["content"], "Is \"Priya\" in?");
+        assert_eq!(kept[0]["sessionId"], "4d7c1d2e-8a51-4c3b-9f0e-2b6a7e1c5d90");
+        // Not with --no-session-persistence, nor without both variables.
+        let mut once = ctx(&["-p", "--no-session-persistence"]);
+        once.vars = Some(vars);
+        assert_eq!(once.transcript(), None);
+        let mut unasked = ctx(&["-p"]);
+        unasked.vars = Some(HashMap::from([("CLAUDE_CONFIG_DIR".to_string(), config.display().to_string())]));
+        assert_eq!(unasked.transcript(), None);
+        unasked.vars = Some(HashMap::from([("YAP_FAKE_CLAUDE_TRANSCRIPTS".to_string(), "1".to_string())]));
+        assert_eq!(unasked.transcript(), None, "never the person's own ~/.claude");
+        let _ = std::fs::remove_dir_all(&config);
     }
 
     #[test]

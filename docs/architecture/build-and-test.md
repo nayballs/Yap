@@ -400,8 +400,13 @@ ever reaches it, or anyone's Claude account.
   as Claude Code: the build's own `yap.exe`) and `YAP_CLAUDE_ARGS_PREFIX` (a
   JSON array of the arguments before Claude Code's:
   `["fake-claude","<script.jsonl>"]`); the stand-in's own
-  `YAP_FAKE_CLAUDE_LOGGED_IN` (`0`: signed out, exit 1) and
-  `YAP_FAKE_CLAUDE_VERSION` (another version, say a too-old one). **A test
+  `YAP_FAKE_CLAUDE_LOGGED_IN` (`0`: signed out, exit 1),
+  `YAP_FAKE_CLAUDE_VERSION` (another version, say a too-old one) and
+  `YAP_FAKE_CLAUDE_TRANSCRIPTS` (`1`, with a `CLAUDE_CONFIG_DIR` the test
+  made: each session's transcript kept there as Claude Code keeps it, unless
+  `--no-session-persistence`; `claude-plan.spec.js`). A test run looks for
+  Claude Code's transcripts only in a `CLAUDE_CONFIG_DIR` it set, never the
+  person's `~/.claude`. **A test
   run (`YAP_E2E=1`) without `YAP_CLAUDE_EXE` finds no Claude Code**, so jobs
   and the plan are never offered there by accident. `e2e_claude_script
   {script?}` switches the stand-in's script per turn; `e2e_claude_approve_auto

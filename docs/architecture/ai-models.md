@@ -1722,25 +1722,50 @@ with a `result` (checked on 2.1.296: two messages, two results, one
 
 - **The `Spec`**: the folder, model (a full id), `--effort`, `--permission-mode`
   (always set: from 2.1.302 a `-p` run starts in manual mode when nothing sets
-  one; `dontAsk` by default), `--permission-prompts`,
-  `--permission-prompt-tool`, `--tools`, `--allowedTools` /
-  `--disallowedTools`, `--mcp-config` and `--strict-mcp-config`,
-  `--setting-sources`, `--settings`, `--append-system-prompt-file` or
-  `--system-prompt-file` (a prompt in place of Claude Code's own: plan chats
-  only), `--add-dir`, `--session-id` / `--resume`, `--max-budget-usd` (key
-  runs only), `--fallback-model`.
+  one; `dontAsk` by default), `--permission-prompt-tool`, `--tools`,
+  `--allowedTools` / `--disallowedTools`, `--mcp-config` and
+  `--strict-mcp-config`, `--setting-sources`, `--settings`,
+  `--append-system-prompt-file` or `--system-prompt-file` (a prompt in place
+  of Claude Code's own: plan chats only), `--add-dir`, `--session-id` /
+  `--resume`, `--max-budget-usd` (key runs only), `--fallback-model`,
+  `--no-session-persistence` (`persist: false`: a run nothing resumes saves no
+  transcript; `-p` only, checked in 2.1.296's `--help`).
 - **Files, not arguments**: the settings, the MCP config and the system prompt
   are written to a folder of the run's own, `%TEMP%\yap-claude\<id>-<tag>\`,
   removed when the session goes. So nothing needs escaping for a shim and
-  Windows' 32 K command-line limit never bites. (A crash leaves its folder;
-  nothing sweeps them at start yet.)
+  Windows' 32 K command-line limit never bites. Each folder names the Yap
+  that made it (`yap-owner`: its process id and when it started), and at
+  start (`claude_code::init`) **the sweep** removes the ones a crashed Yap
+  left (`sweep_run_folders`): its Yap no longer running, or no owner and a
+  day old. Only folders named as Yap names them, never a link, never another
+  running Yap's (a dev build beside the installed one), never anything else
+  in `%TEMP%`.
+- **A run's secrets never go in a file**: the run endpoint's key is in the
+  run's environment under `YAP_RUN_KEY` (`session::RUN_KEY_VAR`, through
+  `Spec::env`; `RunHandle::env`), and its MCP config and hook settings name
+  it as `${YAP_RUN_KEY}` (the hook lists it in `allowedEnvVars`, as an http
+  hook must). Claude Code fills it in itself. An inherited `YAP_RUN_KEY` (a
+  Yap started from a job's command) is taken off every run.
 - **Paying is never ambiguous** (`environment`): Yap's environment with every
   `CLAUDE…` and `ANTHROPIC_…` variable taken off (`cli::clean_env`;
-  `CLAUDE_CONFIG_DIR` stays), then `ANTHROPIC_API_KEY` set for a key run and
-  absent for a plan run. A `Spec::env` entry can't put any of them back. So a
-  Bedrock, Vertex or proxy setup made only with environment variables doesn't
-  reach a run. And `system/init`'s `apiKeySource` is checked against the way
-  asked (`Problem::PaysAnotherWay`).
+  `CLAUDE_CONFIG_DIR` stays, and Yap's own `YAP_…` names), then
+  `ANTHROPIC_API_KEY` set for a key run and absent for a plan run. A
+  `Spec::env` entry can't put any of them back. So a Bedrock, Vertex or proxy
+  setup made only with environment variables doesn't reach a run. And
+  `system/init`'s `apiKeySource` is checked against the way asked
+  (`Problem::PaysAnotherWay`).
+- **Its transcripts** (`transcripts.rs`): Claude Code saves each session in
+  its own config folder (`CLAUDE_CONFIG_DIR`, else `~/.claude`) as
+  `projects/<the working folder, encoded>/<session id>.jsonl`, with the
+  session's own files in `<session id>/` beside it. The folder's name, read
+  from 2.1.296's own code: every UTF-16 unit that isn't an ASCII letter or
+  digit becomes `-` (`E:\Projects\garden-planner` →
+  `E--Projects-garden-planner`), and a name over 200 is cut to 200 with `-`
+  and a base-36 hash added. `remove` deletes given sessions' transcripts for
+  one working folder (its folder matched without case, or one whose name
+  ends as its last two parts do: `…-claude-chat`), only files named with
+  those session ids (UUIDs), nothing else. Test runs look only in a
+  `CLAUDE_CONFIG_DIR` they set.
 - **The prompt goes over stdin** (`send_user`) as a stream-json user message,
   pictures first as base64 image blocks.
 - **Stopping** (`interrupt`): the Agent SDK's control request
@@ -1752,7 +1777,6 @@ with a `result` (checked on 2.1.296: two messages, two results, one
 - **Spawned like the speaker engine**: piped stdio, no window, in Yap's
   kill-on-close job (`procs::end_with_yap`), a reader thread turning stdout
   into `Event`s on a channel, stderr to the log at debug.
-- **`oneshot`**: one question, one answer.
 - The log at `info` has ids, counts and outcomes, never the prompt or an
   answer.
 
@@ -1799,7 +1823,13 @@ file in its folder, write to stderr, exit. `{"_for":"chat"}` (or `"job"`,
 process — a Job's run (`--permission-prompt-tool`), a plan chat's session (an
 `--mcp-config`, no prompt tool), one question (neither) — so one script plays
 a plan chat, the job it starts and the report's question. An interrupt is
-answered as 2.1.296 does. `--version` says 2.1.296
+answered as 2.1.296 does. Headers expand `${VAR}` as Claude Code does (an
+MCP server's from the environment, an http hook's only for the variables in
+its `allowedEnvVars`), so a run's key reaches Yap's endpoint only through the
+run's environment. With `YAP_FAKE_CLAUDE_TRANSCRIPTS=1` and a
+`CLAUDE_CONFIG_DIR` (both: never the person's own `~/.claude`) it keeps each
+session's transcript as Claude Code does, unless started with
+`--no-session-persistence`. `--version` says 2.1.296
 (`YAP_FAKE_CLAUDE_VERSION` for another), `auth status` says signed in
 (`YAP_FAKE_CLAUDE_LOGGED_IN=0`: signed out, exit 1). Recordings per Claude
 Code version in `claude_code/fixtures/<version>/` (`real-*` recorded signed
@@ -1861,6 +1891,19 @@ answer, the conversation, where it was asked, text selected in another app —
 whose `Turn` carries the card and the Job tab's events back; dropping it ends
 the turn, and a call with no turn open does nothing ([jobs.md](./jobs.md#from-a-plan-chat)).
 
+**Claude Code's own copy of a plan chat.** A chat session has to be saved
+for `--resume`, so Claude Code keeps its transcript in its own config folder
+(`projects/<…-claude-chat>/<session>.jsonl`, `claude_code/transcripts.rs`),
+outside Yap. **Yap deletes it with the chat**: Chat's delete
+(`sessions::forget`), Delete some of your data → Chats and Reset app
+(`sessions::reset`) delete the transcripts of the sessions
+`claude_sessions.json` names, and a session a conversation moved on from
+goes as soon as it's replaced (`sessions::put`). Only there: never another
+project's transcripts (a job's sessions run in the person's own folders and
+are theirs, as if they'd run Claude Code themselves). Settings' plan card
+says it in one line: "Claude Code keeps its own copy of each plan chat; Yap
+deletes it with the chat."
+
 ### Every other call (`claude_plan/oneshot.rs`)
 
 Every call on the Chat model that isn't a Chat turn — memory learning, a long
@@ -1872,7 +1915,9 @@ comes here, as the ChatGPT plan's go to `llm/responses.rs`.
 - **Lean**: `--tools ""` (no tools at all), no MCP server
   (`--strict-mcp-config` with none), `--setting-sources ""` (none of the
   person's settings, hooks or CLAUDE.md), in an empty folder of Yap's
-  (`claude\ask\` in the data folder).
+  (`claude\ask\` in the data folder) (`ask_spec`).
+- **Not saved**: `--no-session-persistence`. Nothing resumes a one-shot
+  call, so Claude Code keeps no transcript of it.
 - **Flattened**: its system messages are the prompt (`--system-prompt-file`),
   the rest one message (the earlier turns in a block, then the question), with
   that question's pictures as image blocks. Tools a caller offers aren't run:
@@ -1921,11 +1966,18 @@ Never an answer: the turn says the problem with the buttons that help
 
 ### Tests
 
-- Unit: the engine's flags, environment and files, the parser against the
-  recordings, the problems, the stand-in round trips (the test binary re-run
-  as the stand-in: [build-and-test.md](./build-and-test.md#claude-code-in-tests-2026-11-07)),
-  the plan's flattening, mapping, citations and sessions.
-- E2E: `claude-plan.spec.js`, `claude-plan-problems.spec.js`,
+- Unit: the engine's flags, environment and files (the run key only in the
+  environment, an inherited one dropped), the start-up sweep (a dead Yap's
+  folders only), the parser against the recordings, the problems, the
+  stand-in round trips (the test binary re-run as the stand-in:
+  [build-and-test.md](./build-and-test.md#claude-code-in-tests-2026-11-07)),
+  the plan's flattening, mapping, citations and sessions, a one-shot call
+  not saved, the transcripts' folder names (as Claude Code's own code makes
+  them) and their deletion in a fake config folder (a deleted chat's go,
+  another project's stay).
+- E2E: `claude-plan.spec.js` (also: the stand-in keeps the chat's
+  transcript in a `CLAUDE_CONFIG_DIR` of the run's own, and deleting the
+  chat deletes it, another project's left), `claude-plan-problems.spec.js`,
   `claude-plan-missing.spec.js`, `claude-plan-expired.spec.js`,
   `claude-plan-limit.spec.js` on the stand-in ([`docs/e2e-tests.md`](../e2e-tests.md)).
 - **Needs a real signed-in run**: the real stream's shapes (one `assistant`

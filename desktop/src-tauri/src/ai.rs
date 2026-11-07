@@ -9,9 +9,6 @@
 pub mod about_you;
 pub mod ai_model;
 pub mod chatgpt;
-// The engine Chat on your Claude plan and Jobs are built on: until they
-// are, most of its API has no caller outside its tests.
-#[allow(dead_code)]
 pub mod claude_code;
 pub mod claude_plan;
 pub mod cleanup_context;

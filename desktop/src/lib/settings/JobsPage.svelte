@@ -13,7 +13,8 @@
   //   and MCP servers run too; the Bypass warning where Bypass can run.
   // - **Ask before starting a job** (`jobsAsk`), **Read job reports aloud**
   //   (`jobsSpeak`), and the limits: backups 7 days, one job a folder, 3
-  //   at once.
+  //   at once; Undo needs Claude Code's hooks (a managed policy can turn
+  //   them off: then no backups, and the job's tab says so).
   // - **History** (`job_list`): each job's status, folder, when and cost
   //   (plan and key told apart), Open (Chat on it) and Undo.
   //
@@ -33,7 +34,7 @@
   import { sharedKey } from '../core/providers.js';
   import { EFFORT_LABELS } from '../core/effort.js';
   import { jobs, initJobs, refreshJobs } from '../stores/jobs.svelte.js';
-  import { isLive, statusWord, statusTone, costLine, MODE_LABELS, modelLabel } from '../core/jobs.js';
+  import { statusWord, statusTone, costLine, MODE_LABELS, modelLabel, canUndo } from '../core/jobs.js';
 
   let { cfg, goto = null, onshowview = null } = $props();
 
@@ -190,7 +191,6 @@
 
   const when = (secs) =>
     secs ? new Date(secs * 1000).toLocaleString(undefined, { day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit' }) : '';
-  const canUndo = (j) => !isLive(j.status) && (j.files?.length ?? 0) > 0 && !j.undone && !j.swept;
 </script>
 
 <div class="page-h">
@@ -267,6 +267,9 @@
   </Row>
   <Row>
     <p class="set-note" data-setting="jobs-limits">Backups of changed files are kept 7 days. One job at a time per folder, at most 3 at once.</p>
+  </Row>
+  <Row>
+    <p class="set-note small" data-setting="jobs-backups-hooks">Undo needs Claude Code's hooks, which back up each file before a job changes it. If a policy set by your organisation turns hooks off, no backups are made, and the job's tab says so.</p>
   </Row>
 </Group>
 

@@ -40,7 +40,7 @@
 //! The log has ids, counts and outcomes: never a brief, a path, a command or
 //! an output.
 
-use std::collections::{HashMap, VecDeque};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex, MutexGuard, OnceLock};
 use std::time::{Duration, Instant};
@@ -307,11 +307,23 @@ fn pay_for(job: &Job, cfg: &crate::config::YapConfig, status: &cli::Status) -> R
 
 /// **A job's Claude Code run**: in its folder, the person's own setup (no
 /// `--strict-mcp-config`, no `--setting-sources`, Claude Code's own tools)
-/// with Yap's endpoint added (`mcp_config`, the backup hook's `settings`),
-/// its permission prompts to Yap's `approve`, at `mode`, its model and
-/// effort, on `conversation`. Pure.
-pub fn job_spec(job: &Job, folder: &std::path::Path, pay: Pay, mode: Mode, conversation: Conversation, mcp_config: serde_json::Value, settings: serde_json::Value) -> Spec {
+/// with Yap's endpoint added (the run's `mcp_config`, the backup hook's
+/// `settings`, and `env`: the run key both of them name), its permission
+/// prompts to Yap's `approve`, at `mode`, its model and effort, on
+/// `conversation`. Its session is kept (`--resume`, Open in terminal). Pure.
+#[allow(clippy::too_many_arguments)]
+pub fn job_spec(
+    job: &Job,
+    folder: &std::path::Path,
+    pay: Pay,
+    mode: Mode,
+    conversation: Conversation,
+    mcp_config: serde_json::Value,
+    settings: serde_json::Value,
+    env: Vec<(String, String)>,
+) -> Spec {
     let mut spec = Spec::new(folder, pay);
+    spec.env = env;
     spec.model = Some(job.model.clone()).filter(|m| !m.trim().is_empty());
     spec.effort = Effort::parse(&job.effort);
     spec.permission_mode = mode.permission();
@@ -365,7 +377,7 @@ async fn turn(id: &str, message: Option<String>) -> Status {
     let resuming = message.is_some() && job.started_ts > 0 && !job.session.is_empty();
     let session_id = if job.session.is_empty() { session::new_session_id() } else { job.session.clone() };
     let conversation = if resuming { Conversation::Resume(session_id) } else { Conversation::New(session_id) };
-    let spec = job_spec(&job, &folder, pay, mode, conversation, run.mcp_config(), run.settings());
+    let spec = job_spec(&job, &folder, pay, mode, conversation, run.mcp_config(), run.settings(), run.env());
     let (session, mut rx) = match Session::start_with(&program, spec) {
         Ok(s) => s,
         Err(e) => return failed_early(id, e, None),
@@ -445,6 +457,26 @@ struct Follow {
     /// When its input ended (its last result came).
     input_over_at: Option<Instant>,
     last_flush: Instant,
+    /// The edit tools' calls this turn (the backup hook's tools), by id.
+    edits: HashSet<String>,
+    /// One of them went through (its result not an error): the backup hook
+    /// ran before it, if hooks run at all.
+    edited: bool,
+}
+
+/// Whether `tool` is one the backup hook runs before (`Edit`, `Write`,
+/// `MultiEdit`, `NotebookEdit`). Pure.
+fn backed_up_tool(tool: &str) -> bool {
+    claude_live::BACKUP_MATCHER.split('|').any(|t| t == tool)
+}
+
+/// **No backups were made**: an edit went through this turn (Claude Code
+/// runs `PreToolUse` hooks before a tool, and Yap's hook notes every file
+/// it's called for, copied or not), yet the job's backup list is empty —
+/// so its hooks never ran (a managed policy turned them off, `--bare`) or
+/// never reached Yap. Pure.
+fn no_backups(edited: bool, backed_up: usize) -> bool {
+    edited && backed_up == 0
 }
 
 impl Follow {
@@ -461,6 +493,8 @@ impl Follow {
             asking: false,
             input_over_at: None,
             last_flush: Instant::now(),
+            edits: HashSet::new(),
+            edited: false,
         }
     }
 
@@ -479,7 +513,10 @@ impl Follow {
             Event::Assistant(a) => {
                 for block in &a.blocks {
                     match block {
-                        Block::ToolUse { name, input, .. } => {
+                        Block::ToolUse { id, name, input } => {
+                            if backed_up_tool(name) {
+                                self.edits.insert(id.clone());
+                            }
                             let seen = steps::of_tool(name, input, &self.folder);
                             let Some(job) = store::touch(&self.id, |j| {
                                 j.step = seen.step.clone();
@@ -503,6 +540,16 @@ impl Follow {
                             }
                         }
                         _ => {}
+                    }
+                }
+            }
+            // An edit's result: it went through, after the hooks.
+            Event::User(u) => {
+                for block in &u.blocks {
+                    if let Block::ToolResult { tool_use_id, is_error: false, .. } = block {
+                        if self.edits.contains(tool_use_id) {
+                            self.edited = true;
+                        }
                     }
                 }
             }
@@ -545,8 +592,15 @@ impl Follow {
             .map(|d| Denial { tool: d.tool_name.clone(), detail: steps::denied(&d.tool_name, &d.tool_input, &self.folder) })
             .collect();
         let cost = self.cost_before + r.cost_usd.max(0.0);
+        let unbacked = no_backups(self.edited, manifest.len());
+        if unbacked {
+            tracing::info!(id = %self.id, "Jobs: files changed with no backups (Claude Code's hooks didn't run)");
+        }
         let job = store::update(&self.id, |j| {
             j.cost = cost;
+            if unbacked {
+                j.no_backups = true;
+            }
             for f in manifest {
                 if !j.files.contains(&f) {
                     j.files.push(f);
@@ -937,7 +991,8 @@ mod tests {
         let mcp = serde_json::json!({ "mcpServers": { "yap": { "type": "http" } } });
         let hooks = serde_json::json!({ "hooks": {} });
         let files = session::Files { mcp_config: Some("mcp.json".into()), settings: Some("settings.json".into()), system_prompt: None, own_prompt: None };
-        let spec = job_spec(&job, &folder, Pay::Plan, Mode::Plan, Conversation::New("4d7c1d2e-8a51-4c3b-9f0e-2b6a7e1c5d90".into()), mcp.clone(), hooks.clone());
+        let key = vec![(session::RUN_KEY_VAR.to_string(), "run-key".to_string())];
+        let spec = job_spec(&job, &folder, Pay::Plan, Mode::Plan, Conversation::New("4d7c1d2e-8a51-4c3b-9f0e-2b6a7e1c5d90".into()), mcp.clone(), hooks.clone(), key.clone());
         let a = session::args(&spec, &files);
         let after = |flag: &str| a.iter().position(|x| x == flag).and_then(|i| a.get(i + 1)).map(String::as_str);
         assert_eq!(after("--permission-prompt-tool"), Some("mcp__yap__approve"));
@@ -948,16 +1003,34 @@ mod tests {
         assert_eq!(after("--mcp-config"), Some("mcp.json"));
         assert_eq!(after("--settings"), Some("settings.json"));
         // Their own setup: their MCP servers, settings files and tools.
-        for never in ["--strict-mcp-config", "--setting-sources", "--tools", "--resume", "--permission-prompts"] {
+        // Its session kept, for --resume and Open in terminal.
+        for never in ["--strict-mcp-config", "--setting-sources", "--tools", "--resume", "--no-session-persistence"] {
             assert!(!a.iter().any(|x| x == never), "{never} in {a:?}");
         }
         assert_eq!((spec.mcp_config, spec.settings), (Some(mcp.clone()), Some(hooks.clone())));
+        // The run key in its environment, which its files name.
+        assert_eq!(spec.env, key);
         // A later turn resumes it, at the mode it runs at then.
-        let spec = job_spec(&job, &folder, Pay::Plan, Mode::Auto, Conversation::Resume("prev".into()), mcp, hooks);
+        let spec = job_spec(&job, &folder, Pay::Plan, Mode::Auto, Conversation::Resume("prev".into()), mcp, hooks, key);
         let a = session::args(&spec, &files);
         let after = |flag: &str| a.iter().position(|x| x == flag).and_then(|i| a.get(i + 1)).map(String::as_str);
         assert_eq!((after("--resume"), after("--permission-mode")), (Some("prev"), Some("auto")));
         assert!(!a.iter().any(|x| x == "--session-id"));
+    }
+
+    #[test]
+    fn a_turn_that_edited_with_no_backup_is_marked() {
+        for tool in ["Edit", "Write", "MultiEdit", "NotebookEdit"] {
+            assert!(backed_up_tool(tool), "{tool}");
+        }
+        for tool in ["Bash", "Read", "WebFetch", "mcp__yap__approve", "edit", ""] {
+            assert!(!backed_up_tool(tool), "{tool}");
+        }
+        // An edit through, nothing in the backup list: the hooks never ran.
+        assert!(no_backups(true, 0));
+        // Backed up (copied, created, too big or failed: all listed), or no edit.
+        assert!(!no_backups(true, 1));
+        assert!(!no_backups(false, 0));
     }
 
     #[test]

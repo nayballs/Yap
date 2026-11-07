@@ -8,6 +8,9 @@
 //! - **Lean**: `--tools ""` (no tools at all), no MCP server
 //!   (`--strict-mcp-config` with none), `--setting-sources ""` (none of the
 //!   person's settings, hooks or CLAUDE.md), in an empty folder of Yap's.
+//! - **Not saved**: `--no-session-persistence` (`Spec::persist`): nothing
+//!   resumes a one-shot call, so Claude Code keeps no transcript of it in
+//!   its own config folder.
 //! - **The request flattened** ([`flatten`]): its system messages are the
 //!   prompt (`--system-prompt-file`, in place of Claude Code's own coding
 //!   agent's), the rest one message — the earlier turns in a block, then
@@ -121,11 +124,17 @@ pub fn flatten(messages: &Value) -> Flat {
 }
 
 /// The empty folder plan calls run in (no project's settings, CLAUDE.md or
-/// MCP servers in it): `<data>/claude/<what>/`.
+/// MCP servers in it): `<data>/claude/<what>/`, made if it isn't there.
 pub fn folder(what: &str) -> Result<std::path::PathBuf, String> {
-    let dir = crate::config::data_dir().join("claude").join(what);
+    let dir = folder_path(what);
     std::fs::create_dir_all(&dir).map_err(|e| format!("Couldn't make a folder for Claude Code: {e}"))?;
     Ok(dir)
+}
+
+/// [`folder`]'s path, made or not (`chat`: where Claude Code files a plan
+/// chat's transcripts, `claude_plan/sessions.rs`).
+pub fn folder_path(what: &str) -> std::path::PathBuf {
+    crate::config::data_dir().join("claude").join(what)
 }
 
 /// The effort a call to `model` runs at, as Claude Code takes it
@@ -148,17 +157,27 @@ pub fn usage_value(u: &crate::ai::claude_code::events::Usage, cost_usd: f64) -> 
     })
 }
 
+/// **A one-shot call's run**, in `cwd`: on the plan, `model`, no tools, no
+/// MCP server, none of the person's settings, `flat`'s system prompt in
+/// place of Claude Code's, and not saved (nothing resumes it). Pure.
+pub(crate) fn ask_spec(cwd: std::path::PathBuf, model: &str, flat: &Flat) -> Spec {
+    let mut spec = Spec::new(cwd, Pay::Plan);
+    spec.model = Some(model.to_string()).filter(|m| !m.trim().is_empty());
+    spec.tools = Some(Vec::new());
+    spec.strict_mcp_config = true;
+    spec.setting_sources = Some(Vec::new());
+    // Nothing resumes it: no transcript in Claude Code's own folder.
+    spec.persist = false;
+    spec.system_prompt = Some(if flat.system.is_empty() { "You are a helpful assistant.".to_string() } else { flat.system.clone() });
+    spec
+}
+
 /// **One call on the plan**, as `llm::post_chat_request` makes it: the
 /// answer as an OpenAI-shaped message (`{role, content}`).
 pub(crate) async fn post(model: &str, messages: &Value, timeout: Duration, on: Option<OnDelta<'_>>) -> Result<Value, String> {
     let flat = flatten(messages);
-    let mut spec = Spec::new(folder("ask")?, Pay::Plan);
-    spec.model = Some(model.to_string()).filter(|m| !m.trim().is_empty());
+    let mut spec = ask_spec(folder("ask")?, model, &flat);
     spec.effort = effort_for(model);
-    spec.tools = Some(Vec::new());
-    spec.strict_mcp_config = true;
-    spec.setting_sources = Some(Vec::new());
-    spec.system_prompt = Some(if flat.system.is_empty() { "You are a helpful assistant.".to_string() } else { flat.system.clone() });
     let images = if crate::snip::vision::reads_images(super::PROVIDER, model) == Some(false) { Vec::new() } else { flat.images.clone() };
     let (session, mut rx) = Session::start(spec)?;
     session.send_user(&flat.prompt, &images)?;
@@ -247,6 +266,23 @@ mod tests {
         // A tool step after the question goes after it.
         let f = flatten(&json!([{ "role": "user", "content": "q" }, { "role": "assistant", "content": null, "tool_calls": [{ "function": { "name": "web_search", "arguments": "{}" } }] }, { "role": "tool", "content": "r" }]));
         assert_eq!(f.prompt, "q\n\nAssistant: (called web_search with {})\n\nTool result: r");
+    }
+
+    #[test]
+    fn a_one_shot_call_runs_lean_and_leaves_no_transcript() {
+        let flat = flatten(&json!([{ "role": "system", "content": "Title chats." }, { "role": "user", "content": "Title this chat." }]));
+        let spec = ask_spec(std::env::temp_dir(), "claude-haiku-5-5", &flat);
+        let a = session::args(&spec, &session::Files { own_prompt: Some("own.txt".into()), ..Default::default() });
+        let after = |flag: &str| a.iter().position(|x| x == flag).and_then(|i| a.get(i + 1)).map(String::as_str);
+        assert!(a.contains(&"--no-session-persistence".to_string()), "nothing resumes it: no transcript kept");
+        assert_eq!(after("--tools"), Some(""));
+        assert_eq!(after("--setting-sources"), Some(""));
+        assert!(a.contains(&"--strict-mcp-config".to_string()) && !a.contains(&"--mcp-config".to_string()));
+        assert_eq!(after("--model"), Some("claude-haiku-5-5"));
+        assert_eq!(after("--system-prompt-file"), Some("own.txt"));
+        assert_eq!(spec.system_prompt.as_deref(), Some("Title chats."));
+        assert_eq!(spec.pay, Pay::Plan);
+        assert!(spec.env.is_empty(), "no run key: no endpoint");
     }
 
     #[test]

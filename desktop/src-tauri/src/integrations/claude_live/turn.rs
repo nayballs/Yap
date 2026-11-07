@@ -206,6 +206,7 @@ impl Turn {
     }
 
     /// Its number on the run.
+    #[cfg(test)]
     pub fn number(&self) -> u64 {
         self.marks.n
     }

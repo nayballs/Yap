@@ -19,6 +19,8 @@
   //     gets the focus back);
   //   - signed in: Connected · Using Claude plan, its version and plan,
   //     Manage usage, and Use for Chat when Chat is on the key.
+  // Under it, small: Claude Code keeps its own copy of each plan chat, and
+  // Yap deletes it with the chat (claude_code/transcripts.rs).
   //
   //   provider:     'claude-plan' | 'anthropic', the scope's.
   //   onprovider:   (p) => the scope put on p (its key and model follow).
@@ -178,6 +180,7 @@
       {#if claudePlan.failed || claudePlan.error}
         <p class="problem" role="alert">{claudePlan.failed || claudePlan.error}</p>
       {/if}
+      <p class="copies" data-testid="claude-plan-copies">Claude Code keeps its own copy of each plan chat; Yap deletes it with the chat.</p>
     </div>
   {/if}
 
@@ -266,6 +269,12 @@
     margin: 0;
     font-size: 12.5px;
     line-height: 1.55;
+    color: var(--yap-muted);
+  }
+  .copies {
+    margin: 0;
+    font-size: 11.5px;
+    line-height: 1.5;
     color: var(--yap-muted);
   }
   .state {
