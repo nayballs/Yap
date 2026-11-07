@@ -243,6 +243,12 @@ test('core/codeChats.js: the label, paths, sides, the Code side’s groups, the 
     ['recipe-box', [3]],
   ]);
   expect(groups[0]).toMatchObject({ path: garden.path, collapsible: true, collapsed: false, count: 2 });
+  // The same second: the later conversation first, its group too.
+  const sameSecond = groupByWorkspace([{ id: 1, updatedTs: 9 }, { id: 3, updatedTs: 9 }, { id: 4, updatedTs: 9 }], chats);
+  expect(sameSecond.map((g) => [g.label, g.items.map((c) => c.id)])).toEqual([
+    ['garden-planner', [4, 1]],
+    ['recipe-box', [3]],
+  ]);
   // Folded: the header stays, with how many.
   const folded = groupByWorkspace(conversations, chats, { [garden.path]: true });
   expect(folded[0]).toMatchObject({ collapsed: true, count: 2, items: [] });

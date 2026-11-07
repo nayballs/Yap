@@ -35,23 +35,24 @@ export function sideOf(id, chats) {
  * header stays, with how many it holds. Only workspaces with chats.
  */
 export function groupByWorkspace(conversations, chats, collapsed = {}) {
+  // Newest first: by when it was last changed, then (the same second) the
+  // later conversation (ids only grow).
+  const newer = (a, b) => (b.updatedTs || 0) - (a.updatedTs || 0) || (b.id || 0) - (a.id || 0);
   const groups = new Map();
   for (const c of conversations ?? []) {
     const ws = chats?.[c.id];
     if (!ws?.path) continue;
     const key = ws.path.toLowerCase();
-    if (!groups.has(key)) groups.set(key, { key: `ws:${ws.path}`, label: ws.name, path: ws.path, workspace: ws, items: [], newest: 0 });
-    const g = groups.get(key);
-    g.items.push(c);
-    g.newest = Math.max(g.newest, c.updatedTs || 0);
+    if (!groups.has(key)) groups.set(key, { key: `ws:${ws.path}`, label: ws.name, path: ws.path, workspace: ws, items: [] });
+    groups.get(key).items.push(c);
   }
   return [...groups.values()]
     .map((g) => {
-      const items = [...g.items].sort((a, b) => (b.updatedTs || 0) - (a.updatedTs || 0));
+      const items = [...g.items].sort(newer);
       const folded = !!collapsed?.[g.path];
-      return { key: g.key, label: g.label, path: g.path, workspace: g.workspace, collapsible: true, collapsed: folded, count: items.length, newest: g.newest, items: folded ? [] : items };
+      return { key: g.key, label: g.label, path: g.path, workspace: g.workspace, collapsible: true, collapsed: folded, count: items.length, top: items[0], items: folded ? [] : items };
     })
-    .sort((a, b) => b.newest - a.newest || a.label.localeCompare(b.label));
+    .sort((a, b) => newer(a.top, b.top) || a.label.localeCompare(b.label));
 }
 
 /** The plain conversations (the Chat side): no workspace. */
