@@ -5,7 +5,16 @@
   // to start says why), or — no messages yet — what Chat is for, what it
   // needs if no AI model is set up, and the Voice Assistant's shortcut (or
   // how to set one).
+  //
+  // It keeps its newest line in view while it grows (core/stickToBottom.js,
+  // 2026-11-07): pinned at the bottom while you're there — streamed text,
+  // a card, a pill, a picture loading, the report of a job read in, the
+  // panel opening beside it —, left where you put it once you scroll up,
+  // with "↓" (and "New messages" when something came meanwhile) to go back.
   import { untrack } from 'svelte';
+  import { fade } from 'svelte/transition';
+  import { motionMs } from '../../core/appearance.js';
+  import { followBottom } from '../../core/stickToBottom.js';
   import { formatHotkeySpec } from '../../core/hotkeys.js';
   import { messageItems } from '../../core/itemMenus.js';
   import { openContextMenu } from '../../ui/contextMenu.svelte.js';
@@ -66,6 +75,50 @@
     return () => clearTimeout(t);
   });
 
+  // ---- Following the bottom (core/stickToBottom.js)
+  // `pinned`: at the bottom, following it. `unseen`: something came (a
+  // message, more of the answer, a job's card) while you'd scrolled up.
+  let contentEl = $state(null);
+  let pinned = $state(true);
+  let unseen = $state(false);
+  $effect(() => {
+    const el = chat.threadEl;
+    const inner = contentEl;
+    if (!el || !inner) return;
+    const follow = untrack(() => {
+      pinned = true;
+      unseen = false;
+      return followBottom(el, inner, {
+        onchange: (s) => {
+          pinned = s.pinned;
+          if (s.pinned) unseen = false;
+        },
+      });
+    });
+    // chatState's own moves: a question sent, a conversation opened.
+    chat.follow = follow;
+    return () => {
+      follow.destroy();
+      if (chat.follow === follow) chat.follow = null;
+    };
+  });
+  // What's new at the thread's end: a message, the answer's words, a job's prompt.
+  const tail = $derived(`${chat.messages.length}:${chat.messages.at(-1)?.text?.length ?? 0}:${asks.length}`);
+  let tailSeen = '';
+  $effect(() => {
+    const t = tail;
+    untrack(() => {
+      if (tailSeen && t !== tailSeen && !pinned) unseen = true;
+      tailSeen = t;
+    });
+  });
+  /** "↓": back to the newest, following it again (the focus to the box, where the next words go). */
+  function toLatest() {
+    chat.follow?.toBottom({ smooth: true });
+    unseen = false;
+    chat.inputEl?.focus({ preventScroll: true });
+  }
+
   function messageMenu(e, m) {
     const reading = !!m.id && chat.speakingId === m.id;
     openContextMenu(
@@ -124,61 +177,82 @@
       Asking across your meetings and notes
     </p>
   {/if}
-  <div class="msgs" bind:this={chat.threadEl} bind:contentRect={msgsBox}>
-    {#each chat.messages as m, i (i)}
-      {#if chat.summary && i === chat.summary.upto}
-        <!-- A long chat's older messages, summarised (chat/compact.rs): the
-             model gets the summary in their place, the latest whole. -->
-        <div class="summarised" role="separator" aria-label={SUMMARY_DIVIDER} data-testid="chat-summary-divider">
-          <span class="rule"></span>
-          <span class="stext">{SUMMARY_DIVIDER} ·</span>
-          <button type="button" class="showsum" bind:this={summaryBtn} onclick={() => (chat.showingSummary = true)}>Show summary</button>
-          <span class="rule"></span>
-        </div>
-      {/if}
-      {#if m.kind === 'jobReport'}
-        {#await import('./JobReportCard.svelte') then { default: JobReportCard }}
-          <JobReportCard {m} conversation={chat.activeId} onopen={openJob} />
-        {/await}
-      {:else}
-      <ChatMessage
-        {m}
-        last={i === chat.messages.length - 1}
-        sources={chat.citedSources(i)}
-        reading={m.role === 'assistant' && !!m.id && chat.speakingId === m.id}
-        keepDays={chat.keepDays}
-        {room}
-        onview={(img) => (chat.viewing = img)}
-        onmenu={(e) => messageMenu(e, m)}
-        onread={() => chat.readAloud(m)}
-        onsource={(s) => chat.openSource(s)}
-        ondoc={(d) => chat.doc.show(d.id, { title: d.title })}
-        onpicture={(p) => chat.doc.showPicture(p)}
-        onpage={(p) => chat.doc.showPage(p)}
-      />
-      {/if}
-      {#if jobPills.get(i)?.length}
-        {#await import('./JobPills.svelte') then { default: JobPills }}
-          <JobPills jobs={jobPills.get(i)} onopen={openJob} />
-        {/await}
-      {/if}
-    {/each}
-    {#if asks.length}
-      <!-- A running job of this chat asks to take a step: Allow once / Deny. -->
-      {#await import('./JobApprove.svelte') then { default: JobApprove }}
-        <JobApprove approvals={asks} onopen={openRun} />
-      {/await}
-    {/if}
-    {#if chat.sending || (chat.assistantPending != null && chat.assistantPending === chat.activeId)}
-      <!-- What the turn is doing now, with its time (chat/activity.rs). -->
-      <ActivityLine
-        step={chat.activity}
-        waiting={chat.activityWaiting}
-        seconds={chat.waitedS}
-        hint={chat.modelHere && !answering && chat.waitedS >= STILL_WORKING_S
-          ? 'Still working: the model runs on this PC, so this can take a minute.'
-          : ''}
-      />
+  <div class="threadbox">
+    <!-- The thread scrolls (.msgs); what's in it (.msgsin) is what grows. -->
+    <div class="msgs" bind:this={chat.threadEl} bind:contentRect={msgsBox}>
+      <div class="msgsin" bind:this={contentEl}>
+        {#each chat.messages as m, i (i)}
+          {#if chat.summary && i === chat.summary.upto}
+            <!-- A long chat's older messages, summarised (chat/compact.rs): the
+                 model gets the summary in their place, the latest whole. -->
+            <div class="summarised" role="separator" aria-label={SUMMARY_DIVIDER} data-testid="chat-summary-divider">
+              <span class="rule"></span>
+              <span class="stext">{SUMMARY_DIVIDER} ·</span>
+              <button type="button" class="showsum" bind:this={summaryBtn} onclick={() => (chat.showingSummary = true)}>Show summary</button>
+              <span class="rule"></span>
+            </div>
+          {/if}
+          {#if m.kind === 'jobReport'}
+            {#await import('./JobReportCard.svelte') then { default: JobReportCard }}
+              <JobReportCard {m} conversation={chat.activeId} onopen={openJob} />
+            {/await}
+          {:else}
+            <ChatMessage
+              {m}
+              last={i === chat.messages.length - 1}
+              sources={chat.citedSources(i)}
+              reading={m.role === 'assistant' && !!m.id && chat.speakingId === m.id}
+              keepDays={chat.keepDays}
+              {room}
+              onview={(img) => (chat.viewing = img)}
+              onmenu={(e) => messageMenu(e, m)}
+              onread={() => chat.readAloud(m)}
+              onsource={(s) => chat.openSource(s)}
+              ondoc={(d) => chat.doc.show(d.id, { title: d.title })}
+              onpicture={(p) => chat.doc.showPicture(p)}
+              onpage={(p) => chat.doc.showPage(p)}
+            />
+          {/if}
+          {#if jobPills.get(i)?.length}
+            {#await import('./JobPills.svelte') then { default: JobPills }}
+              <JobPills jobs={jobPills.get(i)} onopen={openJob} />
+            {/await}
+          {/if}
+        {/each}
+        {#if asks.length}
+          <!-- A running job of this chat asks to take a step: Allow once / Deny. -->
+          {#await import('./JobApprove.svelte') then { default: JobApprove }}
+            <JobApprove approvals={asks} onopen={openRun} />
+          {/await}
+        {/if}
+        {#if chat.sending || (chat.assistantPending != null && chat.assistantPending === chat.activeId)}
+          <!-- What the turn is doing now, with its time (chat/activity.rs). -->
+          <ActivityLine
+            step={chat.activity}
+            waiting={chat.activityWaiting}
+            seconds={chat.waitedS}
+            hint={chat.modelHere && !answering && chat.waitedS >= STILL_WORKING_S
+              ? 'Still working: the model runs on this PC, so this can take a minute.'
+              : ''}
+          />
+        {/if}
+      </div>
+    </div>
+    {#if !pinned}
+      <!-- Scrolled up: back to the newest, following it again. -->
+      <button
+        type="button"
+        class="tobottom"
+        class:unseen
+        data-testid="chat-to-bottom"
+        aria-label={unseen ? 'New messages: scroll to the latest' : 'Scroll to the latest'}
+        title="Scroll to the latest"
+        onclick={toLatest}
+        transition:fade={{ duration: motionMs(120) }}
+      >
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 5v14" /><path d="m6 13 6 6 6-6" /></svg>
+        {#if unseen}<span>New messages</span>{/if}
+      </button>
     {/if}
   </div>
 {/if}
@@ -336,13 +410,69 @@
   .setkey:hover {
     text-decoration: underline;
   }
+  /* The thread's place: the scroller, and "↓" over its foot. */
+  .threadbox {
+    position: relative;
+    flex: 1 1 auto;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+  }
   .msgs {
     flex: 1 1 auto;
     overflow-y: auto;
     min-height: 0;
+    padding: 2px;
+  }
+  .msgsin {
     display: flex;
     flex-direction: column;
     gap: 8px;
-    padding: 2px;
+  }
+  /* Scrolled up: a small round "↓" over the thread's foot, a pill with
+     "New messages" when something came (as Claude's app and Slack have it). */
+  .tobottom {
+    position: absolute;
+    left: 50%;
+    bottom: 10px;
+    z-index: 2;
+    transform: translateX(-50%);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    min-width: 30px;
+    height: 30px;
+    padding: 0 7px;
+    border: 1px solid var(--yap-border-subtle);
+    border-radius: var(--yap-r-full);
+    background: var(--yap-s1);
+    color: var(--yap-fg);
+    box-shadow: var(--yap-shadow-popover);
+    font: inherit;
+    font-size: 12px;
+    font-weight: 600;
+    white-space: nowrap;
+    cursor: pointer;
+    transition:
+      background 0.15s,
+      border-color 0.15s;
+  }
+  .tobottom.unseen {
+    padding: 0 12px 0 9px;
+    color: var(--yap-primary);
+  }
+  .tobottom:hover {
+    background: var(--yap-s2);
+    border-color: var(--yap-border-hover);
+  }
+  .tobottom:focus-visible {
+    outline: 2px solid var(--yap-focus-ring);
+    outline-offset: 2px;
+  }
+  .tobottom svg {
+    flex: 0 0 auto;
+    width: 15px;
+    height: 15px;
   }
 </style>
