@@ -163,7 +163,7 @@ One folder per area (an area's `<area>.rs` lists its modules); a big module's pa
 - `pasting/app_kind.rs` — terminal (which one, its paste keys; an editor's, a browser's or Visual Studio's terminal) / coding CLI / chat app / other, and what each changes.
 
 **Dictionary** — [dictionary.md](./docs/architecture/dictionary.md)
-- `dictionary/fuzzy.rs` — near-miss correction (Levenshtein + Soundex), prompt-echo guard, sound distances.
+- `dictionary/fuzzy.rs` — near-miss correction (Levenshtein + Soundex; never everyday words for an entry, `own_near_miss`), the entries a transcript says for cleanup's dictionary line and an answer adding one (`entries_said`, `words_added`), prompt-echo guard, sound distances.
 - `dictionary/dict_usage.rs` — how often each dictionary word is used; orders the Whisper prompt (starred words first).
 - `dictionary/files.rs` — the Dictionary view's Import… / Export… files: Windows' dialogs opened in Rust, a file's text decoded (UTF-8, UTF-16, Windows-1252).
 - `dictionary/learn.rs` — "Suggest words from your corrections": the 60 s field watch and the offer; a meeting line's fix and a summary's word swap (at Done) offered too.

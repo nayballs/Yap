@@ -982,6 +982,13 @@ pub async fn clean(
     let ours = before_transcript(style_line.as_deref(), strength_line.as_deref());
     let ours = before_transcript(ours.as_deref(), format_line.as_deref());
     let before = before_transcript(ours.as_deref(), names);
+    // Only the dictionary's entries this transcript says (`fuzzy::
+    // entries_said`): told every entry, the on-device 4B put "ChatGPT" in
+    // place of "chat" (2026-11-07).
+    let told = {
+        let everyday = crate::dictionary::fuzzy::everyday_words();
+        crate::dictionary::fuzzy::entries_said(text, dictionary, &everyday)
+    };
     let out = crate::ai::llm::cleanup_with_samples(
         text,
         base_url,
@@ -992,7 +999,7 @@ pub async fn clean(
         spelling,
         before.as_deref(),
         plan.samples.as_deref(),
-        dictionary,
+        &told,
         disable_thinking,
     )
     .await?;
@@ -1005,6 +1012,17 @@ pub async fn clean(
     let out = if plan.formatting { crate::ai::cleanup_format::lay_out(text, &fitted, style, plan.strength) } else { fitted };
     if grew_past_the_dictation(text, &out) {
         return Err(format!("the answer added to the dictation ({} chars back for {})", out.chars().count(), text.chars().count()));
+    }
+    // A word it was told written more often than said, where nothing like
+    // it was heard ("our chat" → "our ChatGPT" beside a "chat GPT" said).
+    let added = if told.is_empty() {
+        0
+    } else {
+        let everyday = crate::dictionary::fuzzy::everyday_words();
+        crate::dictionary::fuzzy::words_added(text, &out, &told, &everyday)
+    };
+    if added > 0 {
+        return Err(format!("the answer added to the dictation: a dictionary word {added} more time(s)"));
     }
     Ok(out)
 }

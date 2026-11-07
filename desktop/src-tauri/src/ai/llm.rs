@@ -131,6 +131,9 @@ pub fn build_system_prompt(body: &str) -> String {
 /// become "use this spelling"; differing entries become explicit corrections.
 /// A snippet's phrase is listed to keep word for word (Yap expands it after
 /// cleanup, `config::apply_snippets`); its text never goes to the model.
+/// A dictation's cleanup passes only the entries its transcript says
+/// (`fuzzy::entries_said`, `cleanup_styles::clean`): told them all, the
+/// on-device 4B put "ChatGPT" in place of "chat" (2026-11-07).
 fn dictionary_suffix(dictionary: &[crate::config::DictionaryEntry]) -> String {
     let mut phrases: Vec<String> = Vec::new();
     // Each written word with every way it's heard (its rows, and an entry's

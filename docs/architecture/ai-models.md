@@ -183,7 +183,9 @@ The language-model side: the OpenAI-compatible client and its prompts, the on-de
   after the dictation's restated instruction, `cleanup_message`,
   `SpellingAt::Both`: in the system prompt alone Qwen3.5-4B changed only
   words like its examples and the 1.5B none, docs/model-evals.md) and the
-  custom dictionary. **The dictation's language** (My languages,
+  custom dictionary (`dictionary_suffix`) — only the entries the transcript
+  says (`fuzzy::entries_said`, 2026-11-07: told every entry, the 4B wrote
+  "ChatGPT" for "chat" and "API"; dictionary.md). **The dictation's language** (My languages,
   `dictation/languages.rs`, 2026-10-25): `languages::language_line` goes
   with the style's line and the names on screen just before the transcript
   (`cleanup_styles::before_transcript` → `llm::with_names_line`; never in the

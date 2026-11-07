@@ -25,7 +25,11 @@ pub(crate) fn apply_corrections(text: &str, cfg: &YapConfig) -> String {
 fn corrections(text: &str, cfg: &YapConfig) -> String {
     let corrected = config::apply_dictionary(text, &cfg.dictionary);
     if cfg.dictionary_fuzzy && !stt::is_whisper_model(&cfg.model_size) {
-        let fixed = crate::dictionary::fuzzy::apply_fuzzy(&corrected, &cfg.dictionary);
+        // Everyday words (the built-in list, then the spell checker's; the
+        // list alone without one) are never a near-miss of a dictionary
+        // word, only its spelling (`fuzzy::own_near_miss`).
+        let everyday = crate::dictionary::fuzzy::everyday_words();
+        let fixed = crate::dictionary::fuzzy::apply_fuzzy_with(&corrected, &cfg.dictionary, &everyday);
         // Your own name (About you) and the names Yap remembers
         // (memory/vocab.rs), more carefully: only where what was heard
         // isn't an ordinary word itself.

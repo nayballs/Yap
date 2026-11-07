@@ -234,9 +234,179 @@ fn extract_punctuation(word: &str) -> (&str, &str) {
 /// Applies fuzzy dictionary correction to `text` (Handy's `apply_custom_words`
 /// adapted to Yap's `{from → to}` entries). Greedy n-grams of 1–3 words (which
 /// one wins: see the loop); each match consumes its words and emits the
-/// entry's `to` with the original case pattern + edge punctuation.
+/// entry's `to` with the original case pattern + edge punctuation. Everyday
+/// words are the built-in list's ([`apply_fuzzy_with`] for the spell
+/// checker's too, as a dictation runs it).
+#[cfg(test)]
 pub fn apply_fuzzy(text: &str, dict: &[DictionaryEntry]) -> String {
-    apply_with(text, dict, &|_, _, _| true)
+    apply_fuzzy_with(text, dict, &crate::dictionary::learn::is_frequent)
+}
+
+/// [`apply_fuzzy`] with `is_word` ("is this lower-case word an everyday
+/// one?": the built-in list, then Windows' spell checker, as a dictation
+/// runs it) for [`own_near_miss`]'s rules.
+pub fn apply_fuzzy_with(text: &str, dict: &[DictionaryEntry], is_word: &dyn Fn(&str) -> bool) -> String {
+    apply_with(text, dict, &|run, replacement, dist| own_near_miss(run, replacement, dist, dict, is_word))
+}
+
+/// May `run` (a dictation's words) be a near-miss of the dictionary word
+/// written `replacement`, `dist` edits from one of its spellings? Its
+/// spelling exactly (any case, any spacing: "Chat G P T"), always; else
+/// never when the run is two words or more, every one an everyday word
+/// (`is_word`, two letters or more: a spelled-out "g p t" isn't) — they
+/// were said, not the entry: with "chat gpt" → "ChatGPT", "cloud" →
+/// "claude" and "wive" → "WoW" in a dictionary, "catch up to", "chats
+/// from", "could we" and "we have" passed Handy's score on their Soundex
+/// code alone (0.5–0.57 × 0.3) and "chat got" one letter off; the
+/// maintainer's dictations got "trying to ChatGPT that programme?"
+/// (2026-11-07). One word the spell checker knows (the built-in list's
+/// never get here, `apply_with`) is that word when the dictionary's is
+/// longer ("chat" is never "ChatGPT"), still fixed when it isn't
+/// ("clawed" → "claude", as Parakeet hears it). Nor a run that's one word
+/// of a spelling of several ("vertex" for "Vertex AI"). "chat GBT",
+/// "chatgbt" and "Chat G PT" are still fixed.
+fn own_near_miss(run: &[&str], replacement: &str, dist: usize, dict: &[DictionaryEntry], is_word: &dyn Fn(&str) -> bool) -> bool {
+    if dist == 0 {
+        return true;
+    }
+    // A letter said on its own ("g p t") is no everyday word; "a" and "I"
+    // are ("Clot I enabled…" with "cloud" → "claude": the "I" isn't the
+    // name's, 2026-11-07).
+    let everyday = |w: &&str| {
+        let key = build_ngram(std::slice::from_ref(w));
+        match letters_key(&key).as_str() {
+            "a" | "i" => true,
+            k => k.chars().count() >= 2 && is_word(&key),
+        }
+    };
+    match run {
+        [one] if everyday(one) && letters_key(replacement).chars().count() > letters_key(one).chars().count() => return false,
+        [_] => {}
+        _ if run.iter().all(everyday) => return false,
+        _ => {}
+    }
+    let heard = letters_key(&run.join(" "));
+    let one_part = dict
+        .iter()
+        .filter(|e| e.to.trim() == replacement)
+        .flat_map(|e| std::iter::once(e.to.as_str()).chain(e.heard()))
+        .any(|spelling| {
+            let parts: Vec<&str> = spelling.split_whitespace().collect();
+            parts.len() >= 2 && parts.iter().any(|p| letters_key(p) == heard)
+        });
+    !one_part
+}
+
+/// "Is this lower-case word an everyday one?" as a dictation asks it of
+/// its own dictionary: the built-in list, then Windows' spell checker (made
+/// only when a word needs it; the list alone without one). Not `Send`:
+/// make it where it's used, never across an `.await`.
+pub(crate) fn everyday_words() -> impl Fn(&str) -> bool {
+    let ordinary = std::cell::OnceCell::new();
+    move |w: &str| crate::dictionary::learn::is_frequent(w) || ordinary.get_or_init(crate::dictionary::learn::Ordinary::new).is(w)
+}
+
+/// **The dictionary's entries `text` (a transcript) says**, for AI
+/// cleanup's dictionary line (`llm::dictionary_suffix`): an entry whose
+/// written word is in it, or that the exact or near-miss pass would put in
+/// ([`apply_fuzzy_with`]'s rules); a snippet whose phrase is in it. Until
+/// 2026-11-07 cleanup was told the whole dictionary with every dictation,
+/// and the on-device 4B put "ChatGPT" in place of "chat", "our chat" and
+/// "API" in 10 of the maintainer's dictations, "Haiku" for another name. Pure
+/// but for `is_word`.
+pub fn entries_said(text: &str, dict: &[DictionaryEntry], is_word: &dyn Fn(&str) -> bool) -> Vec<DictionaryEntry> {
+    let words: Vec<&str> = text.split_whitespace().collect();
+    dict.iter()
+        .filter(|e| {
+            if e.snippet {
+                return written_times(&words, &e.from) > 0;
+            }
+            let one = std::slice::from_ref(*e);
+            written_times(&words, &e.to) > 0
+                || crate::config::apply_dictionary(text, one) != text
+                || apply_fuzzy_with(text, one, is_word) != text
+        })
+        .cloned()
+        .collect()
+}
+
+/// How many times AI cleanup's answer (`cleaned`) put in a word of `told`
+/// (the entries it was told, [`entries_said`]) that the transcript (`raw`)
+/// doesn't say there, once Yap's own exact and near-miss passes have run
+/// over both: added where nothing was taken out, or in place of words that
+/// neither spell nor sound like any of the entry's spellings (plain edit
+/// distance or `sound_distance` ≤ 0.34) — "our chat" → "our ChatGPT"
+/// beside a "chat GPT" said. A word heard a little wrong and fixed from
+/// the context ("quad subscriptions" → "claude subscriptions", "QN" →
+/// "Qwen") is the line's job and doesn't count. Then the words as said go
+/// in (`cleanup_styles::clean`). Pure but for `is_word`.
+pub fn words_added(raw: &str, cleaned: &str, told: &[DictionaryEntry], is_word: &dyn Fn(&str) -> bool) -> usize {
+    let fix = |t: &str| apply_fuzzy_with(&crate::config::apply_dictionary(t, told), told, is_word);
+    let entries: Vec<&DictionaryEntry> = told.iter().filter(|e| !e.snippet && !e.to.trim().is_empty()).collect();
+    // Does `heard` spell or sound like a spelling of the word written `w`
+    // (its own, every way it's heard, every row of it)?
+    let sounds_like = |heard: &str, w: &str| {
+        !heard.is_empty()
+            && entries.iter().filter(|e| e.to.trim().eq_ignore_ascii_case(w)).any(|e| {
+                std::iter::once(e.to.as_str())
+                    .chain(e.heard())
+                    .any(|s| plain_spelling_distance(heard, s) <= 0.34 || sound_distance(heard, s).0 <= 0.34)
+            })
+    };
+    let (said, wrote) = (fix(raw), fix(cleaned));
+    let changes = crate::dictation::stats::word_diff::changes(&said, &wrote);
+    let (said, wrote): (Vec<&str>, Vec<&str>) = (said.split_whitespace().collect(), wrote.split_whitespace().collect());
+    let mut seen: Vec<&str> = Vec::new();
+    let mut added = 0;
+    for e in &entries {
+        let w = e.to.trim();
+        if seen.iter().any(|s| s.eq_ignore_ascii_case(w)) {
+            continue;
+        }
+        seen.push(w);
+        // Written more often than said at all (a word only moved isn't)…
+        let more = written_times(&wrote, w).saturating_sub(written_times(&said, w));
+        if more == 0 {
+            continue;
+        }
+        // …and put where nothing like it was heard.
+        let unheard: usize = changes
+            .iter()
+            .map(|(taken, put)| {
+                let put: Vec<&str> = put.iter().map(String::as_str).collect();
+                let times = written_times(&put, w);
+                let heard_it = taken.iter().any(|t| sounds_like(t, w)) || sounds_like(&taken.concat(), w);
+                if heard_it { 0 } else { times }
+            })
+            .sum();
+        added += more.min(unheard);
+    }
+    added
+}
+
+/// How many times `words` write `term` itself: runs of up to its words'
+/// count with its letters, any case ("ChatGPT's" counts). Pure.
+fn written_times(words: &[&str], term: &str) -> usize {
+    let key = letters_key(term);
+    if key.is_empty() {
+        return 0;
+    }
+    let longest = term.split_whitespace().count().max(1);
+    let of = |run: &[&str]| {
+        let l = letters_key(&run.join(" "));
+        l == key || l.strip_suffix('s').is_some_and(|l| l == key)
+    };
+    let (mut i, mut times) = (0, 0);
+    while i < words.len() {
+        match (1..=longest.min(words.len() - i)).find(|&n| of(&words[i..i + n])) {
+            Some(n) => {
+                times += 1;
+                i += n;
+            }
+            None => i += 1,
+        }
+    }
+    times
 }
 
 /// `text`'s words as one key, the way a heard run of words is compared:
@@ -384,13 +554,18 @@ fn apply_with(text: &str, dict: &[DictionaryEntry], accept: &dyn Fn(&[&str], &st
         // strsim/natural crates — and "che" vanished from the output.)
         // Nor is a run taken whose first word adds nothing to the match:
         // that protects the word BEFORE a term ("to Kubernetes").
+        // Four words only with a spelling's very letters: "Chat G P T"
+        // (three would leave its "T", 2026-11-07).
         let mut chosen: Option<(usize, &str, usize)> = None; // (n, replacement, dist)
-        for n in 1..=3usize {
+        for n in 1..=4usize {
             if i + n > words.len() || (n > 1 && gaps[i + n - 1].contains(['\n', '\r'])) {
                 break;
             }
             let run = &words[i..i + n];
             if let Some((replacement, dist)) = find_best_match(&build_ngram(run), &candidates) {
+                if n == 4 && dist > 0 {
+                    continue;
+                }
                 // An everyday word is never a near-miss of a term, only its
                 // exact spelling: "could" isn't "cloud" → "Claude" (the maintainer,
                 // 2026-10-21: "was there anything that Claude be changed"),
@@ -639,6 +814,118 @@ mod tests {
         // A real near-miss that isn't an everyday word still snaps.
         assert_eq!(apply_fuzzy("ask clawd about it", &dict), "ask claude about it");
         assert_eq!(apply_fuzzy("my notio page", &dict), "my Notion page");
+    }
+
+    /// A two-word heard form ("chat gpt" → "ChatGPT"): everyday words were
+    /// taken for it (2026-11-07: of 13 of the maintainer's dictations with
+    /// "ChatGPT" pasted, 1 said it), "chat GBT" is its real job.
+    #[test]
+    fn everyday_words_are_never_a_near_miss_of_a_dictionary_word() {
+        let dict = vec![entry("chat gpt", "ChatGPT")];
+        for said in [
+            // As Parakeet heard them (the near-miss pass had made each "ChatGPT").
+            "trying to catch up to that programme?",
+            "Trying to catch up to whisper flow.",
+            "it's responding to chats from the little box.",
+            "Also, the chat got spawned with a lot of sources.",
+            // As cleanup had made them (the dictionary line, now only for
+            // what's said, `entries_said`): the pass leaves them.
+            "we could use chat to communicate",
+            "to get that chat feature to work",
+            "we could give chat or Yap a terminal",
+            // Everyday phrases.
+            "I'll catch up tomorrow.",
+            "The chat is open.",
+            "Chats from yesterday.",
+            "Let's chat.",
+            "Catch you later.",
+        ] {
+            assert_eq!(apply_fuzzy(said, &dict), said);
+        }
+        // Its real near-misses.
+        assert_eq!(apply_fuzzy("like Chat GBT, Brock, all the models", &dict), "like ChatGPT, Brock, all the models");
+        assert_eq!(apply_fuzzy("open chatgbt now", &dict), "open ChatGPT now");
+        assert_eq!(apply_fuzzy("ask chat g p t", &dict), "ask ChatGPT");
+        assert_eq!(apply_fuzzy("ask Chat G PT now", &dict), "ask ChatGPT now");
+        assert_eq!(apply_fuzzy("turn it into chat gpt", &dict), "turn it into ChatGPT");
+        let kube = vec![entry("cooper netties", "Kubernetes")];
+        assert_eq!(apply_fuzzy("deploy to cooper netties", &kube), "deploy to Kubernetes");
+        assert_eq!(apply_fuzzy("deploy to cooper nettis", &kube), "deploy to Kubernetes");
+        // One word of a two-word heard form never stands for the whole,
+        // everyday or not ("Vertex" alone isn't "Vertex AI").
+        let vertex = vec![entry("vertex ai", "Vertex AI")];
+        assert_eq!(apply_fuzzy("the vertex count", &vertex), "the vertex count");
+        assert_eq!(apply_fuzzy("on vertex ay", &vertex), "on Vertex AI");
+    }
+
+    /// Two everyday words passed Handy's score on their Soundex code alone
+    /// against one-word entries too ("could we" for a heard "cloud", "we
+    /// have" for a heard "wive"; 2026-11-07): never again. One word the
+    /// spell checker knows is still a near-miss of a dictionary word no
+    /// longer than it.
+    #[test]
+    fn two_everyday_words_are_never_a_one_word_entry() {
+        let dict = vec![entry("cloud", "claude"), entry("wive", "WoW")];
+        // The tests' spell checker: the built-in list and a few more.
+        let is_word = |w: &str| crate::dictionary::learn::is_frequent(w) || ["clawed", "chat"].contains(&w);
+        for said in ["Could we try it again?", "I think we have it.", "So we have two options.", "Could we, though?"] {
+            assert_eq!(apply_fuzzy_with(said, &dict, &is_word), said);
+            // The built-in list alone catches these too.
+            assert_eq!(apply_fuzzy(said, &dict), said);
+        }
+        // As Parakeet hears the name: a word in its own right, no shorter.
+        assert_eq!(apply_fuzzy_with("ask clawed about it", &dict, &is_word), "ask claude about it");
+        assert_eq!(apply_fuzzy_with("I play wov", &dict, &is_word), "I play WoW");
+        // A spell checker's word shorter than the dictionary's: the word,
+        // and the "I" after it isn't swallowed instead.
+        let gpt = vec![entry("chat gpt", "ChatGPT")];
+        assert_eq!(apply_fuzzy_with("open chat", &gpt, &is_word), "open chat");
+        let is_word = |w: &str| is_word(w) || w == "clot";
+        assert_eq!(apply_fuzzy_with("Clot I enabled it", &dict, &is_word), "Clot I enabled it");
+    }
+
+    /// AI cleanup is told only the dictionary's entries the transcript says,
+    /// and an answer writing one more often than said is caught.
+    #[test]
+    fn cleanup_hears_only_the_dictionary_words_said() {
+        let dict = vec![
+            entry("chat gpt", "ChatGPT"),
+            entry("haku", "Haiku"),
+            entry("quen", "Qwen"),
+            DictionaryEntry { snippet: true, ..entry("my address", "1 Example Road") },
+        ];
+        let words = crate::dictionary::learn::is_frequent;
+        let told = |t: &str| entries_said(t, &dict, &words).into_iter().map(|e| e.to).collect::<Vec<_>>();
+        for said in ["we could use chat to communicate", "this is the API dashboard", "we could do it as Tiku for now", "trying to catch up to that"] {
+            assert!(told(said).is_empty(), "{said:?} → {:?}", told(said));
+        }
+        assert_eq!(told("like Chat GBT, Brock"), ["ChatGPT"]);
+        assert_eq!(told("ChatGPT and haku"), ["ChatGPT", "Haiku"]);
+        assert_eq!(told("I said quen"), ["Qwen"]);
+        assert_eq!(told("send it to my address"), ["1 Example Road"]);
+        // Said once, written twice: one put in place of "our chat".
+        let raw = "this is going to turn it into chat gpt and we add it to our chat";
+        let one = entries_said(raw, &dict, &words);
+        assert_eq!(words_added(raw, "This is going to turn it into ChatGPT, and we add it to our chat.", &one, &words), 0);
+        assert_eq!(words_added(raw, "This is going to turn it into ChatGPT, and we add it to our ChatGPT.", &one, &words), 1);
+        assert_eq!(words_added(raw, "This turns it into ChatGPT's", &one, &words), 0);
+        // Only moved: not added.
+        let raw = "chat gpt um is what i asked";
+        let one = entries_said(raw, &dict, &words);
+        assert_eq!(words_added(raw, "What I asked was ChatGPT.", &one, &words), 0);
+        // A word heard a little wrong, fixed from the context: the line's
+        // job, not an addition (a dictation's "quad subscriptions").
+        let cloud = vec![entry("cloud", "claude"), entry("quen", "Qwen")];
+        let raw = "you're a cloud model and it costs a bit to have quad subscriptions and i like quen and qn 3";
+        let one = entries_said(raw, &cloud, &words);
+        assert_eq!(
+            words_added(raw, "You're a claude model, and it costs a bit to have claude subscriptions. I like Qwen and Qwen 3.", &one, &words),
+            0
+        );
+        // In place of a word nothing like it: counted.
+        assert_eq!(words_added(raw, "You're a claude model, and it costs a bit to have claude subscriptions. I like Qwen and Qwen 3 and Qwen keys.", &one, &words), 1);
+        // Nothing told: nothing counted.
+        assert_eq!(words_added("so what", "So, ChatGPT.", &[], &words), 0);
     }
 
     #[test]

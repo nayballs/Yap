@@ -61,7 +61,12 @@ that the transcript doesn't have, nor with a word different
 (`cleanup_context::copied`, in `delivery::cleanup_pass` after `trim_echo`);
 and one that writes a name on screen more times than the transcript seems
 to say it (`screen_terms::names_added`: in place of another word, or
-added). Those two log a count at `debug`. The log says its
+added). Those two log a count at `debug`. Cleanup is told only the
+dictionary's entries the transcript says (`fuzzy::entries_said`), and an
+answer that writes one more often than the transcript does, both through
+the exact and near-miss passes, where nothing like it was heard, is thrown
+out too (`fuzzy::words_added`, in `cleanup_styles::clean`; dictionary.md).
+The log says its
 kind at `warn` (`llm::error_kind`: timed out, HTTP 500, parse failed…)
 and the error itself only at `debug`: a server's can quote what the model
 wrote (llama.cpp's "Failed to parse input at pos N: …"); a rewrite's and a
