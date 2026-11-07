@@ -446,6 +446,8 @@ test('core/jobs.js: status, cost by how it is paid, time, steps, pills, problems
   expect(stepsOf(log).map((s) => s.step)).toEqual(['Starting Claude Code', 'Reading notes.md', 'Editing notes.md', 'Editing notes.md', 'Running npm test']);
   expect(latestStep(log, 'running')).toBe('Running npm test');
   expect(latestStep(log, 'done')).toBe('');
+  // Waiting on Allow / Deny wins over any line that came after the wait began.
+  expect(latestStep([...log, { now: 'Building the planner' }], 'asking')).toBe('Waiting for you to allow a step');
   expect(stepKind({ step: 'Editing notes.md', file: 'notes.md' })).toBe('edit');
   expect(stepKind({ step: 'Running npm test' })).toBe('command');
   expect(stepKind({ step: 'Searching the web · tide tables' })).toBe('web');
