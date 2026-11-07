@@ -160,8 +160,10 @@
 <!-- Composer (after Claude Code's): + (voice replies and their volume),
      the message, the mic, and Send once there's something to send;
      under it, quiet, whether answers are read aloud and the model the
-     message goes to. The model picker opens above it all. -->
-<div class="composer" class:dropping={chat.dragging} class:code-chat={!!code?.current} data-model-picker-above>
+     message goes to. The model picker opens above it all. With Jobs on,
+     every box keeps room for a Code chat's label on its edge: a chat
+     turning into a Code chat (its job starting) never moves the thread. -->
+<div class="composer" class:dropping={chat.dragging} class:code-chat={!!code?.current} class:code-room={!!code?.enabled} data-model-picker-above>
   {#if chat.dragging}
     <!-- Files dragged over Chat: a drop puts the pictures in the box. -->
     <div class="dropnote" data-testid="chat-drop-note" aria-live="polite">Drop pictures to ask about them</div>
@@ -466,6 +468,9 @@
     display: flex;
     flex-direction: column;
     gap: 4px;
+  }
+  .composer.code-room > .inputbar {
+    margin-top: 9px;
   }
   .inputbar {
     position: relative;

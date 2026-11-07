@@ -49,8 +49,10 @@
 
 <style>
   /* The model chip's quiet look, in the Code accent. */
+  /* (In a narrow thread it gives way after the model chip: its name ellipsized.) */
   .wschip {
-    flex: none;
+    flex: 0 1 auto;
+    min-width: 72px;
     display: inline-flex;
     align-items: center;
     gap: 5px;
