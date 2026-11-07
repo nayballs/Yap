@@ -587,6 +587,11 @@ fn instructions(
             s.push(' ');
             s.push_str(&crate::chat::tools::calendar::CALENDAR_TOOL_INSTRUCTIONS.join(" "));
         }
+        // Jobs (chat/tools/jobs.rs): jobs on and Claude Code on this PC.
+        if crate::jobs::offered(cfg) {
+            s.push(' ');
+            s.push_str(&crate::chat::tools::jobs::JOB_TOOL_INSTRUCTIONS.join(" "));
+        }
     } else {
         // No tools: it can't do anything on the PC, so it mustn't say so.
         s.push_str("\n\n");
@@ -730,6 +735,7 @@ mod tests {
             screen: Gate::Off,
             act: false,
             calendar: false,
+            jobs: false,
         };
         let asks = "What's the latest version of Python?";
         assert!(crate::web::needs_web(asks), "the test's question needs the web");

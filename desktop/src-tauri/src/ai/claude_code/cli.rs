@@ -185,10 +185,28 @@ pub fn find() -> Option<Program> {
     find_in(dirs::home_dir().as_deref(), std::env::var_os("PATH").as_deref(), std::env::var_os("PATHEXT").as_deref())
 }
 
+/// A test run's stand-in, set while Yap runs (`e2e_claude_script`): it wins
+/// over `YAP_CLAUDE_EXE`.
+#[cfg(debug_assertions)]
+static TEST_PROGRAM: Mutex<Option<Program>> = Mutex::new(None);
+
+/// **A test run's stand-in from now on** (debug builds, `e2e_claude_script`):
+/// `program`, or back to `YAP_CLAUDE_EXE` / nothing (`None`). The next
+/// [`status`] probes it afresh.
+#[cfg(debug_assertions)]
+pub fn set_test_program(program: Option<Program>) {
+    *TEST_PROGRAM.lock().unwrap_or_else(|p| p.into_inner()) = program;
+    forget();
+}
+
 /// `YAP_CLAUDE_EXE` / `YAP_CLAUDE_ARGS_PREFIX` (debug builds; read at every
-/// start, so a test can change them while Yap runs).
+/// start, so a test can change them while Yap runs) — or a test run's
+/// stand-in ([`set_test_program`]).
 #[cfg(debug_assertions)]
 fn debug_override() -> Option<Program> {
+    if let Some(p) = TEST_PROGRAM.lock().unwrap_or_else(|p| p.into_inner()).clone() {
+        return Some(p);
+    }
     let exe = std::env::var_os("YAP_CLAUDE_EXE").filter(|v| !v.is_empty())?;
     let prefix = match std::env::var("YAP_CLAUDE_ARGS_PREFIX") {
         Ok(v) if !v.trim().is_empty() => serde_json::from_str::<Vec<String>>(&v).unwrap_or_else(|_| {
@@ -511,6 +529,46 @@ pub fn open_sign_in() -> Result<(), String> {
 #[cfg(windows)]
 fn open_terminal(program: &Program) -> Result<(), String> {
     let home = dirs::home_dir().unwrap_or_else(std::env::temp_dir);
+    in_terminal(program, &home, &["auth", "login"], "Claude Code sign-in")
+        .map_err(|e| format!("Couldn't open a terminal to sign in to Claude Code: {e}"))
+}
+
+#[cfg(not(windows))]
+fn open_terminal(_program: &Program) -> Result<(), String> {
+    Err("Run `claude auth login` in a terminal to sign in to Claude Code.".into())
+}
+
+/// **A job's session in the person's own terminal** (a Job's Open in
+/// terminal): Windows Terminal (else PowerShell) in `folder`, on `claude
+/// --resume <session>` — the person's own Claude Code from there on, never
+/// in Yap's kill-on-close job (it stays open if Yap quits), never piped.
+/// Test runs open nothing.
+pub fn open_resume(folder: &Path, session: &str, title: &str) -> Result<(), String> {
+    let program = find().ok_or_else(|| "Claude Code isn't installed on this PC.".to_string())?;
+    if session.is_empty() || !session.chars().all(|c| c.is_ascii_alphanumeric() || c == '-') {
+        return Err("This job has no Claude Code session to open.".into());
+    }
+    if crate::shell::e2e::active() {
+        tracing::info!("claude code: a job's terminal (test mode: not opened)");
+        return Ok(());
+    }
+    resume_terminal(&program, folder, session, title)
+}
+
+#[cfg(windows)]
+fn resume_terminal(program: &Program, folder: &Path, session: &str, title: &str) -> Result<(), String> {
+    in_terminal(program, folder, &["--resume", session], title).map_err(|e| format!("Couldn't open a terminal: {e}"))
+}
+
+#[cfg(not(windows))]
+fn resume_terminal(_program: &Program, _folder: &Path, session: &str, _title: &str) -> Result<(), String> {
+    Err(format!("Run `claude --resume {session}` in a terminal in the job's folder."))
+}
+
+/// `program args` in a new terminal window in `cwd` titled `title`:
+/// Windows Terminal, else PowerShell; Yap's cleaned environment.
+#[cfg(windows)]
+fn in_terminal(program: &Program, cwd: &Path, args: &[&str], title: &str) -> Result<(), String> {
     let path = program.path().to_string_lossy().to_string();
     // The command the terminal runs: Claude Code itself, or its shim
     // through cmd (kept open so its words stay readable).
@@ -520,15 +578,15 @@ fn open_terminal(program: &Program) -> Result<(), String> {
         vec![path.clone()]
     };
     run.extend(program.prefix.iter().cloned());
-    run.extend(["auth".to_string(), "login".to_string()]);
+    run.extend(args.iter().map(|a| a.to_string()));
     let wt = std::env::var_os("PATH").and_then(|p| which("wt", &p, std::env::var_os("PATHEXT").as_deref()));
     if let Some(wt) = wt {
         let mut cmd = Command::new(wt);
-        cmd.args(["-w", "new", "--title", "Claude Code sign-in", "-d"]).arg(&home).args(&run);
+        cmd.args(["-w", "new", "--title", title, "-d"]).arg(cwd).args(&run);
         give_clean_env(&mut cmd);
-        match cmd.current_dir(&home).spawn() {
+        match cmd.current_dir(cwd).spawn() {
             Ok(_) => {
-                tracing::info!("claude code: sign-in opened in Windows Terminal");
+                tracing::info!("claude code: a terminal opened in Windows Terminal");
                 return Ok(());
             }
             Err(e) => tracing::warn!("claude code: Windows Terminal didn't start ({e}); trying PowerShell"),
@@ -541,15 +599,10 @@ fn open_terminal(program: &Program) -> Result<(), String> {
     let mut cmd = Command::new("powershell.exe");
     cmd.args(["-NoExit", "-NoProfile", "-Command", &script]).creation_flags(CREATE_NEW_CONSOLE);
     give_clean_env(&mut cmd);
-    cmd.current_dir(&home)
+    cmd.current_dir(cwd)
         .spawn()
-        .map(|_| tracing::info!("claude code: sign-in opened in PowerShell"))
-        .map_err(|e| format!("Couldn't open a terminal to sign in to Claude Code: {e}"))
-}
-
-#[cfg(not(windows))]
-fn open_terminal(_program: &Program) -> Result<(), String> {
-    Err("Run `claude auth login` in a terminal to sign in to Claude Code.".into())
+        .map(|_| tracing::info!("claude code: a terminal opened in PowerShell"))
+        .map_err(|e| e.to_string())
 }
 
 #[cfg(test)]

@@ -104,6 +104,16 @@ export const FIELD_DEFAULTS = {
   diarizationModel: 'nemotron-3-diarization',
   meetingReminder: '15s',
   meetingBrief: true,
+  // Jobs (jobs.rs): Chat hands a task to the person's own Claude Code. The
+  // jobs, folders and each chat's Mode live in jobs.json / job_folders.json.
+  jobsEnabled: false,
+  jobsPay: 'plan',
+  jobsModel: 'claude-sonnet-5-5',
+  jobsEffort: 'medium',
+  jobsMode: 'auto',
+  jobsAsk: 'new-or-web',
+  jobsSpeak: 'voice',
+  jobsMax: 3,
   // Memory (MemorySection.svelte, memory.rs): the switches only.
   memorySearchChats: true,
   memoryLearnChats: true,

@@ -54,6 +54,9 @@ pub(super) struct Gates {
     /// The calendar (chat/tools/calendar.rs): a tool while one is connected
     /// (not across the meetings, whose passages are numbered on their own).
     pub calendar: bool,
+    /// Jobs (chat/tools/jobs.rs): with tools, jobs on and Claude Code on
+    /// this PC; not across the meetings (that's about the meetings).
+    pub jobs: bool,
 }
 
 impl Gates {
@@ -74,7 +77,8 @@ impl Gates {
         let screen = if chat_in_view { crate::chat::see_screen::gate(cfg, tools, provider, model) } else { Gate::Off };
         let act = pictures != Gate::Off && scope.is_none() && !meetings && crate::chat::pages::act::can_act(provider, model);
         let calendar = !meetings && crate::calendar::connected();
-        Gates { tools, doc_tools, strong, claude_in_chat, own_search, web_lines, web_on, pictures, screen, act, calendar }
+        let jobs = tools && !meetings && crate::jobs::offered(cfg);
+        Gates { tools, doc_tools, strong, claude_in_chat, own_search, web_lines, web_on, pictures, screen, act, calendar, jobs }
     }
 
     /// The tools' schemas every step sends, counted by `counter` (none for
@@ -100,6 +104,7 @@ impl Gates {
             act: self.act,
             own_search: self.own_search,
             web_question: false,
+            jobs: self.jobs.then_some(crate::chat::tools::JobsTurn::default()),
         };
         counter.count(&crate::chat::tools::offered_tools(cfg.open_apps, self.web_on && !self.claude_in_chat, extra).to_string()).await
     }

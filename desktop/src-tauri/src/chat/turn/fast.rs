@@ -108,6 +108,55 @@ pub(super) fn page_turn(
     })
 }
 
+/// **The answer to Yap's spoken question before a job** (`jobs/voice.rs`):
+/// a yes starts it ("On it: I've started a job in garden-planner."), its tab
+/// opening at once (`Event::Job`); a no doesn't. Saved like any turn, no
+/// model.
+pub(super) fn job_answer_turn(
+    conversation_id: Option<u64>,
+    text: &str,
+    by_voice: bool,
+    asked: impl FnOnce(u64, usize) + Send,
+    answer: crate::jobs::voice::Answer,
+    watcher: Option<&dyn crate::chat::stream::Sink>,
+    stop: &crate::chat::stream::Stoppable,
+) -> Result<ChatTurn, String> {
+    let conv = turn_conversation(conversation_id, text);
+    let user_index = crate::chat::chats::append(conv.id, "user", text, &[], None, by_voice)?;
+    stop.answers(conv.id);
+    asked(conv.id, user_index);
+    let (reply, chip) = match answer {
+        crate::jobs::voice::Answer::Yes(w) => match crate::chat::tools::jobs::start_waiting(*w) {
+            Ok(job) => {
+                if let Some(w) = watcher {
+                    w.send(crate::chat::stream::Event::Job { job: job.reference() });
+                }
+                (format!("On it: I've started a job in {}.", job.folder), format!("Started a job in {}", job.folder))
+            }
+            Err(e) => (format!("I couldn't start the job: {e}"), "Didn't start a job".to_string()),
+        },
+        crate::jobs::voice::Answer::No(w) => ("Okay, I won't start it.".to_string(), format!("Didn't start a job in {}: you said no", w.folder.name)),
+    };
+    let tools_used = vec![chip];
+    let index = crate::chat::chats::append(conv.id, "assistant", &reply, &tools_used, None, false)?;
+    tracing::info!("Chat: Yap's question before a job, answered by Yap itself");
+    Ok(ChatTurn {
+        conversation_id: conv.id,
+        user_index,
+        index,
+        reply,
+        tools_used,
+        model: None,
+        sources: Vec::new(),
+        stopped: false,
+        tokens: None,
+        documents: Vec::new(),
+        pictures: Vec::new(),
+        pages: Vec::new(),
+        offers: Vec::new(),
+    })
+}
+
 /// A turn Yap answers itself (`apps.rs`): the request saved like any
 /// question, the app opened (or why not) as the answer, with its chip. No
 /// model, so none is named. Like any newer question, it replaces an answer

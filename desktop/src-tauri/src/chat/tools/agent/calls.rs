@@ -46,7 +46,7 @@ impl Loop<'_> {
             if let Some(live) = self.live {
                 crate::chat::activity::tell(live.sink, crate::chat::activity::of_call(name, &args));
             }
-            let web_seen = self.web.as_deref().is_some_and(crate::web::Turn::seen) || self.screen_seen;
+            let web_seen = self.web.as_deref().is_some_and(crate::web::Turn::seen) || self.screen_seen || self.job_seen;
             let result = match gate(name, &args, hold_web, web_seen, &self.extra) {
                 Some(refusal) => refusal,
                 None => {

@@ -22,6 +22,7 @@ mod finish;
 mod gates;
 mod history;
 mod prompt;
+mod report;
 mod run;
 mod small;
 
@@ -31,6 +32,8 @@ use crate::config::{self, YapConfig};
 
 pub(crate) use history::next_room;
 pub(crate) use prompt::stable_prompt;
+// A job's report, a turn Yap starts itself (report.rs).
+pub(crate) use report::{queue_job_report, JOB_REPORT, JOB_REPORT_PREFIX};
 
 /// Resolve the **Chat** scope's endpoint + persona (falling back to the global
 /// cleanup endpoint when the scope is off) and fail fast on keyless cloud
@@ -318,6 +321,14 @@ async fn answer_turn(
     let aloud = scope == Some("assistant");
     if let Some((s, said)) = skill.as_ref().and_then(|s| crate::chat::skills::ask_first(s, aloud).map(|a| (s, a))) {
         return fast::skill_asks_turn(conversation_id, &text, by_voice, asked, stop, &said, &s.skill.command);
+    }
+    // Yap's spoken question before a job ("Should I start a job in …?"),
+    // answered: a yes starts it, a no drops it — Yap's own answer, no model
+    // (jobs/voice.rs).
+    if skill.is_none() {
+        if let Some(answer) = crate::jobs::voice::answered(conversation_id, &text) {
+            return fast::job_answer_turn(conversation_id, &text, by_voice, asked, answer, watcher, stop);
+        }
     }
     let meetings = scope == Some("meetings") || skill.is_some();
     // Chat itself, or the Voice Assistant asked with Chat in view: the page

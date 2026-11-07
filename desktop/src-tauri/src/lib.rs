@@ -18,6 +18,7 @@ mod config;
 mod dictation;
 mod dictionary;
 mod integrations;
+mod jobs;
 mod link;
 mod meetings;
 mod memory;
@@ -67,6 +68,9 @@ pub(crate) fn shutdown_cleanup() {
     // Meeting search's model (search/embedder.rs) on the same engine.
     search::shutdown();
     integrations::bridge::stop();
+    // Jobs die with Yap (the kill-on-close job): interrupted, Continue
+    // picks them up (jobs.rs).
+    jobs::shutdown();
     // Yap Link: no more phones (link.rs).
     link::stop();
     // Other apps' sound: a dictation's silence and Yap's voice's 30 %
@@ -515,6 +519,20 @@ pub fn run() {
             integrations::bridge::bridge_status,
             integrations::claude_live::claude_approve_answer,
             integrations::claude_live::claude_approve_pending,
+            jobs::commands::job_list,
+            jobs::commands::job_get,
+            jobs::commands::job_stop,
+            jobs::commands::job_continue,
+            jobs::commands::job_message,
+            jobs::commands::job_undo,
+            jobs::commands::job_open_terminal,
+            jobs::commands::job_folders_list,
+            jobs::commands::job_folders_add,
+            jobs::commands::job_folders_remove,
+            jobs::commands::job_folders_set_cap,
+            jobs::commands::job_mode_get,
+            jobs::commands::job_mode_set,
+            jobs::commands::job_bypass_confirmed,
             link::link_status,
             link::link_pair_start,
             link::link_pair_cancel,
@@ -767,6 +785,7 @@ pub fn run() {
             #[cfg(debug_assertions)]
             shell::e2e::e2e_claude_approve_auto,
             #[cfg(debug_assertions)]
+            shell::e2e::e2e_claude_script,
             #[cfg(debug_assertions)]
             shell::e2e::e2e_snip,
             #[cfg(debug_assertions)]
@@ -1121,6 +1140,9 @@ pub fn run() {
             // Claude Code runs' endpoint (integrations/claude_live.rs): its events;
             // the listener starts with the first run.
             integrations::claude_live::init(&handle);
+            // Jobs (jobs.rs): those the last Yap left running are interrupted;
+            // old backups and logs swept.
+            jobs::init(&handle);
             // Yap Link (Settings → Phone): HTTPS for paired phones on the home Wi-Fi.
             link::sync(&handle, cfg.link_enabled);
 

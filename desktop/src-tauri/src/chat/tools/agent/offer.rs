@@ -6,8 +6,8 @@ use crate::chat::tools::memory::memory_definitions;
 use crate::chat::tools::{app_definitions, web_definitions, Extra};
 
 /// The tools a turn's steps offer (every step the same): the note tools,
-/// and the apps', the web's, memory's and the calendar's when the turn has
-/// them. Also what Chat's budget measures (`turn.rs`).
+/// and the apps', the web's, memory's, the calendar's and the jobs' when the
+/// turn has them. Also what Chat's budget measures (`turn.rs`).
 pub fn offered_tools(open_apps: bool, web: bool, extra: Extra<'_>) -> Value {
     // The note tools, with the documents' set this model gets.
     let mut tools = crate::chat::tools::notes::definitions_for(extra.doc_tools);
@@ -44,6 +44,12 @@ pub fn offered_tools(open_apps: bool, web: bool, extra: Extra<'_>) -> Value {
     if extra.calendar.is_some() {
         if let (Some(all), Some(cal)) = (tools.as_array_mut(), crate::chat::tools::calendar::definitions().as_array()) {
             all.extend(cal.iter().cloned());
+        }
+    }
+    // Jobs (tools/jobs.rs): jobs on and Claude Code on this PC.
+    if extra.jobs.is_some() {
+        if let (Some(all), Some(jobs)) = (tools.as_array_mut(), crate::chat::tools::jobs::definitions().as_array()) {
+            all.extend(jobs.iter().cloned());
         }
     }
     tools

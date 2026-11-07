@@ -96,7 +96,7 @@ use serde::Serialize;
 use serde_json::{json, Value};
 
 pub use index::{apps, App, Source};
-pub use plan::{carry_out, moved_on, plan_for, remember, search_asked, site_asked, Plan};
+pub use plan::{carry_out, is_affirmative, moved_on, plan_for, remember, search_asked, site_asked, Plan};
 pub use tools::{claims_unasked, correct_claim, execute_tool, NO_TOOLS_NOTE, NO_TOOLS_OPEN, TOOL_NAMES};
 
 /// A score at least this good opens an app.

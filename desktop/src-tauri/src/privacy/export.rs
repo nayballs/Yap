@@ -13,6 +13,9 @@
 //!   `notes/versions.json`, each note's earlier versions (`notes/versions.rs`);
 //! - `tasks.json`, `skills.json` (the person's own Skills), `chats/chats.json` with each chat as Markdown, and
 //!   `memory/` — Memory's own export (`memory::export`) and `memory.json`;
+//! - `jobs/` — the jobs Chat handed to Claude Code (`jobs.json`), their
+//!   folders (`folders.json`) and each job's log (never its backups: copies
+//!   of the person's own files);
 //! - `dictionary/dictionary.csv` — corrections and snippets, the CSV the
 //!   Dictionary view's Export… writes ([`dictionary_csv`]);
 //! - `settings.json` — config.json **without secrets** ([`settings_export`]):
@@ -339,6 +342,11 @@ pub struct Inputs {
     /// skills.json: the person's own Skills (chat/skills.rs).
     pub skills: Value,
     pub memory: Vec<crate::memory::ops::Item>,
+    /// jobs.json as it is (`jobs/store.rs`), job_folders.json's folders, and
+    /// each job's log (its id, the log's lines).
+    pub jobs: Value,
+    pub job_folders: Value,
+    pub job_logs: Vec<(String, String)>,
     /// About you's lines for Memory's You.md.
     pub about: Vec<(&'static str, String)>,
     pub dictionary: Vec<crate::config::DictionaryEntry>,
@@ -362,6 +370,8 @@ notes/versions.json, each note's earlier versions (Version history), newest firs
 - tasks.json: the tasks you added and the ones you archived.\n\
 - skills.json: the Skills you made (your own instructions, run with /name).\n\
 - memory/: what Yap remembers about you, as Markdown, and memory.json.\n\
+- jobs/: the jobs Chat handed to Claude Code (jobs.json), the folders they may work in (folders.json) \
+and each job's log (<id>.log.jsonl). Not the backups: they're copies of your own files.\n\
 - dictionary/dictionary.csv: your corrections and snippets, as the Dictionary's Export writes them \
 (Import reads it back).\n\
 - writing_samples.json: the writing samples you gave Yap (Settings → Commands).\n\
@@ -421,6 +431,13 @@ screenshots/: Chat's screenshots (PNG).\n"
         files.push((format!("memory/{name}"), text.into_bytes()));
     }
     files.push(("memory/memory.json".into(), pretty(&json!({ "items": i.memory }))));
+
+    // Jobs (jobs/store.rs): the jobs, their folders and their logs.
+    files.push(("jobs/jobs.json".into(), pretty(&i.jobs)));
+    files.push(("jobs/folders.json".into(), pretty(&json!({ "folders": i.job_folders }))));
+    for (id, log) in &i.job_logs {
+        files.push((format!("jobs/{}.log.jsonl", file_stem(id)), log.clone().into_bytes()));
+    }
 
     // Dictionary, settings.
     files.push(("dictionary/dictionary.csv".into(), dictionary_csv(&i.dictionary).into_bytes()));
@@ -634,6 +651,12 @@ fn inputs(audio: bool) -> Inputs {
         tasks: serde_json::to_value(crate::notes::task_store::snapshot()).unwrap_or(Value::Null),
         skills: serde_json::to_value(crate::chat::skills::own()).unwrap_or(Value::Null),
         memory: crate::memory::items(),
+        jobs: json!({ "jobs": crate::jobs::store::list() }),
+        job_folders: serde_json::to_value(crate::jobs::folders::list()).unwrap_or(Value::Null),
+        job_logs: crate::jobs::store::list()
+            .iter()
+            .filter_map(|j| crate::jobs::store::log_path(&j.id).and_then(|p| std::fs::read_to_string(p).ok()).map(|l| (j.id.clone(), l)))
+            .collect(),
         about,
         dictionary: cfg.dictionary.clone(),
         writing_samples: crate::ai::writing_samples::snapshot().samples,
@@ -876,6 +899,9 @@ mod tests {
             tasks: json!({ "tasks": [], "archived": [] }),
             skills: json!({ "skills": [{ "id": "s1", "name": "Budget numbers", "command": "budget-numbers", "instructions": "List every amount said.", "runsOn": "meeting" }] }),
             memory: vec![],
+            jobs: json!({ "jobs": [{ "id": "ab12", "folder": "garden-planner", "status": "done", "text": "Done. I tidied the readme." }] }),
+            job_folders: json!([{ "name": "garden-planner", "path": "D:\\Projects\\garden-planner" }]),
+            job_logs: vec![("ab12".into(), "{\"id\":\"ab12\",\"status\":\"running\",\"step\":\"Reading README.md\"}\n".into())],
             about: vec![("Name", "Robin Example".into())],
             dictionary: cfg.dictionary.clone(),
             writing_samples: vec![crate::ai::writing_samples::Sample {
@@ -910,12 +936,17 @@ mod tests {
             "skills.json",
             "memory/You.md",
             "memory/memory.json",
+            "jobs/jobs.json",
+            "jobs/folders.json",
+            "jobs/ab12.log.jsonl",
             "dictionary/dictionary.csv",
             "writing_samples.json",
             "settings.json",
         ] {
             assert!(names.contains(&want), "{want} in {names:?}");
         }
+        let jobs = String::from_utf8_lossy(&files.iter().find(|(n, _)| n == "jobs/jobs.json").unwrap().1).to_string();
+        assert!(jobs.contains("I tidied the readme"), "{jobs}");
         let samples = String::from_utf8_lossy(&files.iter().find(|(n, _)| n == "writing_samples.json").unwrap().1).to_string();
         assert!(samples.contains("allotment gate"), "{samples}");
         assert!(names.iter().any(|n| n.starts_with("notes/") && n.ends_with("Allotment plans.md")), "{names:?}");

@@ -16,6 +16,11 @@
 //! takes itself out). A model evaluation answers as its scenario says
 //! (`eval::confirm_answer`).
 //!
+//! **A job's card** too (act "job", `chat/tools/jobs.rs`): before a job
+//! starts in a folder new to jobs, or after the chat read the web — "Start a
+//! job in garden-planner?" with its folder, mode and brief ([`JobCard`]),
+//! Allow once / Don't, answered the same way.
+//!
 //! The log has the question's id and the answer, never the button's words,
 //! the typed text or the page.
 
@@ -82,6 +87,30 @@ pub struct Card {
     /// with the answer.
     #[serde(skip_serializing_if = "String::is_empty")]
     pub key: String,
+    /// A job's card (act "job"): what would start. An older Yap's save
+    /// drops it (the card stays, with its folder as its label).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub job: Option<JobCard>,
+}
+
+/// **The job a card asks about** (act "job"): its folder, mode and brief.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default, rename_all = "camelCase")]
+pub struct JobCard {
+    /// The folder's name, and its path.
+    pub folder: String,
+    pub path: String,
+    /// `auto` | `manual` | `acceptEdits` | `plan` | `bypassPermissions`, and
+    /// as the chip says it ("Auto").
+    pub mode: String,
+    pub mode_label: String,
+    /// What Claude Code would be asked.
+    pub brief: String,
+    /// Not a job folder yet: allowing it lets jobs work there from now on.
+    pub new_folder: bool,
+    /// Asked because the chat read the web (a page could have slipped
+    /// words into the brief).
+    pub web: bool,
 }
 
 impl Card {
@@ -106,6 +135,8 @@ pub struct Ask<'a> {
     pub does: &'a str,
     pub text: &'a str,
     pub key: &'a str,
+    /// A job's card (act "job").
+    pub job: Option<JobCard>,
 }
 
 /// A question waiting: taken out of the waiting list when dropped (answered,
@@ -174,6 +205,7 @@ pub async fn ask(live: Option<crate::chat::stream::Live<'_>>, what: Ask<'_>) -> 
             act: what.act.to_string(),
             text: what.text.to_string(),
             key: what.key.to_string(),
+            job: what.job.clone(),
         })
     };
     live.sink.send(card("asking"));
@@ -202,7 +234,7 @@ mod tests {
     }
 
     fn book() -> Ask<'static> {
-        Ask { act: "press", label: "Book now", site: "rail.example.com", does: "book", text: "", key: "page:https://rail.example.com" }
+        Ask { act: "press", label: "Book now", site: "rail.example.com", does: "book", text: "", key: "page:https://rail.example.com", job: None }
     }
 
     #[tokio::test]

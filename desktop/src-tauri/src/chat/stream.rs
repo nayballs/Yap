@@ -134,6 +134,10 @@ pub enum Event {
     /// answers with `chat_page_confirm(id, allow)`. Flat on the wire:
     /// `{kind: "confirm", id, label, …}`.
     Confirm(crate::chat::pages::act::confirm::Card),
+    /// **A job started** from this turn (`start_job`, `chat/tools/jobs.rs`):
+    /// the panel opens its tab (`job:<id>`), as for a page. Its progress is
+    /// the app-wide `yap-job` event (`jobs/runner.rs`).
+    Job { job: crate::jobs::JobRef },
 }
 
 /// Tool calls whose arguments the page sees as they come: a document's
@@ -173,6 +177,10 @@ pub fn doing(name: &str) -> &'static str {
         "scroll" => "Scrolling the page…",
         "go_to" => "Going to a page…",
         "switch_tab" => "Switching tabs…",
+        "start_job" => "Starting a job…",
+        "job_status" => "Checking the job…",
+        "message_job" => "Telling the job…",
+        "stop_job" => "Stopping the job…",
         _ => "Working…",
     }
 }
@@ -721,6 +729,24 @@ impl Stoppable {
             tracing::info!(conversation, "A newer question in the conversation replaces the answer still coming");
             older.fire(Halt::Superseded);
         }
+    }
+
+    /// [`answers`](Self::answers), only while no turn answers `conversation`:
+    /// `false` (and nothing changed) while one does. A turn Yap starts by
+    /// itself (a job's report, `turn/report.rs`) waits for it, never ends it.
+    pub fn answers_if_idle(&self, conversation: u64) -> bool {
+        let n = {
+            let mut g = ANSWERING.lock().unwrap_or_else(|p| p.into_inner());
+            let map = g.get_or_insert_with(HashMap::new);
+            if map.contains_key(&conversation) {
+                return false;
+            }
+            let n = TURNS.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1;
+            map.insert(conversation, (n, Arc::clone(&self.signal)));
+            n
+        };
+        *self.answering.lock().unwrap_or_else(|p| p.into_inner()) = Some((conversation, n));
+        true
     }
 
     /// Fires when the page stops it or a newer question replaces it: why.
@@ -1831,6 +1857,30 @@ mod tests {
             assert!(stop("turn-stopped", Halt::Stopped));
             Stoppable::new(None).answers(third);
             assert_eq!(stopped.halted().await, Halt::Stopped);
+        });
+    }
+
+    // A job's report (turn/report.rs) waits while its chat is answering, and
+    // never ends that answer; once it answers there itself, a newer question
+    // replaces it as it would any turn.
+    #[test]
+    fn a_report_waits_for_the_answer_and_never_ends_it() {
+        let rt = tokio::runtime::Builder::new_current_thread().enable_time().build().unwrap();
+        rt.block_on(async {
+            let chat = 90_011;
+            let answering = Stoppable::new(None);
+            answering.answers(chat);
+            let report = Stoppable::new(None);
+            assert!(!report.answers_if_idle(chat), "queued while the chat answers");
+            assert!(tokio::time::timeout(Duration::from_millis(30), answering.halted()).await.is_err(), "the answer goes on");
+            drop(answering);
+            assert!(report.answers_if_idle(chat), "its turn once the answer's done");
+            // A question asked now replaces the report's answer.
+            let question = Stoppable::new(None);
+            question.answers(chat);
+            assert_eq!(tokio::time::timeout(Duration::from_secs(1), report.halted()).await, Ok(Halt::Superseded));
+            // Another chat's report never waits for this one.
+            assert!(Stoppable::new(None).answers_if_idle(90_012));
         });
     }
 }

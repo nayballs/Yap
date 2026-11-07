@@ -1214,6 +1214,41 @@ pub struct YapConfig {
     #[serde(default = "default_true")]
     pub meeting_brief: bool,
 
+    // ---- Jobs (Settings → Assistant → Jobs; `jobs.rs`) ----
+    // Chat and the Voice Assistant hand a task to the person's own Claude
+    // Code, which works in one of their folders in the background. The
+    // jobs, their folders and each chat's Mode live in jobs.json and
+    // job_folders.json, never here.
+    /// "Let Chat start jobs": the `start_job` tools are offered (when Claude
+    /// Code is on this PC). Off by default: Settings → Jobs turns it on.
+    #[serde(default)]
+    pub jobs_enabled: bool,
+    /// How jobs pay: "plan" (the person's Claude plan, through Claude
+    /// Code's own sign-in) or "key" (their Anthropic API key).
+    #[serde(default = "default_jobs_pay")]
+    pub jobs_pay: String,
+    /// The model a job runs on unless the chat's model names one (a full id).
+    #[serde(default = "default_jobs_model")]
+    pub jobs_model: String,
+    /// Its effort: low | medium | high | xhigh | max.
+    #[serde(default = "default_jobs_effort")]
+    pub jobs_effort: String,
+    /// The Mode chip's default for a chat: auto | manual | acceptEdits |
+    /// plan | bypassPermissions (Bypass only once confirmed).
+    #[serde(default = "default_jobs_mode")]
+    pub jobs_mode: String,
+    /// "Ask before starting a job": "new-or-web" (a folder used for the
+    /// first time, or the chat read the web), "always" or "never".
+    #[serde(default = "default_jobs_ask")]
+    pub jobs_ask: String,
+    /// "Read job reports aloud": "voice" (when the job was asked by voice),
+    /// "always" or "never".
+    #[serde(default = "default_jobs_speak")]
+    pub jobs_speak: String,
+    /// At most this many jobs at once (one per folder), 1 to 3.
+    #[serde(default = "default_jobs_max")]
+    pub jobs_max: u32,
+
     // ---- Memory (Settings → Memory; `memory.rs`) ----
     // The switches only: what Yap remembers lives in memory.json, never
     // here (Settings' wholesale saves would put an old copy back).
@@ -1415,6 +1450,27 @@ fn default_tts_provider() -> String {
 fn default_diarization_model() -> String {
     crate::speakers::diarize::DEFAULT_MODEL.into()
 }
+fn default_jobs_pay() -> String {
+    "plan".into()
+}
+fn default_jobs_model() -> String {
+    "claude-sonnet-5-5".into()
+}
+fn default_jobs_effort() -> String {
+    "medium".into()
+}
+fn default_jobs_mode() -> String {
+    "auto".into()
+}
+fn default_jobs_ask() -> String {
+    "new-or-web".into()
+}
+fn default_jobs_speak() -> String {
+    "voice".into()
+}
+fn default_jobs_max() -> u32 {
+    3
+}
 
 impl Default for YapConfig {
     fn default() -> Self {
@@ -1593,6 +1649,14 @@ impl Default for YapConfig {
             meeting_hotkey: default_meeting_hotkey(),
             meeting_reminder: default_meeting_reminder(),
             meeting_brief: true,
+            jobs_enabled: false,
+            jobs_pay: default_jobs_pay(),
+            jobs_model: default_jobs_model(),
+            jobs_effort: default_jobs_effort(),
+            jobs_mode: default_jobs_mode(),
+            jobs_ask: default_jobs_ask(),
+            jobs_speak: default_jobs_speak(),
+            jobs_max: default_jobs_max(),
             memory_search_chats: true,
             memory_learn_chats: true,
             memory_learn_meetings: false,

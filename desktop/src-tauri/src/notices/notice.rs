@@ -196,6 +196,10 @@ pub fn rule(kind: &str) -> Rule {
         // "Stopped at 2 hours", "Yap can't hear the call"…: not twice in ten
         // minutes.
         "meeting-notice" => Rule { cooldown_ms: 10 * MIN, ..info },
+        // "Job done: garden-planner" (chat/turn/report.rs), with no Yap
+        // window in front: a notice, held over a dictation, gone if unseen a
+        // minute (its chat has the report).
+        "jobDone" => info,
         // Coaching: about dictating, so never during a meeting either; one
         // of the tips "Show tips" switches off.
         "hint" => Rule { hold_meeting: true, tip: true, ..tip },

@@ -392,9 +392,11 @@ pub fn chunk_chat(conv: &crate::chat::chats::Conversation) -> Vec<Chunk> {
         if text.is_empty() {
             continue;
         }
-        let speaker = if m.role == "user" { "You" } else { "Yap" }.to_string();
+        // A job's report (`chat/turn/report.rs`) is the job's, not the person's.
+        let theirs = m.role == "user" && m.kind.is_empty();
+        let speaker = if theirs { "You" } else if m.role == "user" { "Job" } else { "Yap" }.to_string();
         let w = word_count(&text);
-        let asks = m.role == "user";
+        let asks = theirs;
         if w > MAX_WORDS {
             // A long answer: its question goes with its first piece (when
             // there's room for a good part of one), every other piece is a

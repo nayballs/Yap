@@ -289,6 +289,9 @@ struct Loop<'a> {
     /// another app's or a page's selected words (`Extra::web_question`), from
     /// the start.
     screen_seen: bool,
+    /// A job's own words came in (`job_status`, `tools/jobs.rs`): web
+    /// content for the safety rule, so they never start or steer a job.
+    job_seen: bool,
     /// The next step must search ([`FirstStep::MustSearch`]).
     must_search: bool,
     /// A notes search that found nothing has led to the web (once a turn).
@@ -465,6 +468,7 @@ async fn tool_loop(
         messages,
         tools_used: Vec::new(),
         screen_seen: extra.web_question,
+        job_seen: false,
         must_search: must_search_first,
         led_to_web: false,
         rejected: 0,

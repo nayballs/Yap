@@ -384,7 +384,8 @@ pub async fn learn_from_chat(conversation: u64, announce: bool) -> Result<Applie
     let len = conv.messages.len();
     let start = super::read_upto(conversation).min(len);
     let new = &conv.messages[start..];
-    let user_texts: Vec<&str> = new.iter().filter(|m| m.role == "user").map(|m| m.text.as_str()).collect();
+    // (A job's report in the chat is the job's words, never the person's.)
+    let user_texts: Vec<&str> = new.iter().filter(|m| m.role == "user" && m.kind.is_empty()).map(|m| m.text.as_str()).collect();
     let ep = endpoint(&cfg);
     let small = ep.as_ref().is_ok_and(|ep| chat_path(ep) == Path::Small);
     if user_texts.is_empty() || !small && !prompt::worth_a_pass(&user_texts) {
@@ -399,8 +400,8 @@ pub async fn learn_from_chat(conversation: u64, announce: bool) -> Result<Applie
         return Err(DEFERRED.to_string());
     }
     let pair = |m: &crate::chat::chats::ChatMessage| (m.role.clone(), m.text.clone());
-    let before: Vec<(String, String)> = conv.messages[start.saturating_sub(2)..start].iter().map(pair).collect();
-    let fresh: Vec<(String, String)> = new.iter().map(pair).collect();
+    let before: Vec<(String, String)> = conv.messages[start.saturating_sub(2)..start].iter().filter(|m| m.kind.is_empty()).map(pair).collect();
+    let fresh: Vec<(String, String)> = new.iter().filter(|m| m.kind.is_empty()).map(pair).collect();
     let budget = if ep.local() { 1_800 } else { 2_400 };
     let user = prompt::pass_input(
         &prompt::listing(&super::items(), 900),
@@ -412,7 +413,7 @@ pub async fn learn_from_chat(conversation: u64, announce: bool) -> Result<Applie
     let about_you = crate::ai::about_you::profile(&cfg);
     let changes = ops::drop_about_you(changes, &super::items(), &about_you.name, &about_you.about);
     // Grounded in what the person said (theirs, not the AI's answers).
-    let said: Vec<&str> = conv.messages[start.saturating_sub(2)..].iter().filter(|m| m.role == "user").map(|m| m.text.as_str()).collect();
+    let said: Vec<&str> = conv.messages[start.saturating_sub(2)..].iter().filter(|m| m.role == "user" && m.kind.is_empty()).map(|m| m.text.as_str()).collect();
     let applied = super::change(
         &changes,
         &Rules {

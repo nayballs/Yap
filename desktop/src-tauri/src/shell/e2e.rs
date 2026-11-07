@@ -692,6 +692,28 @@ pub fn e2e_claude_approve_auto(allow: Option<bool>) -> Result<(), String> {
     Ok(())
 }
 
+/// Test mode only: Claude Code is, from now on, this build's own stand-in
+/// replaying `script` (`yap.exe fake-claude <script>`, `ai/claude_code/
+/// fake.rs`) — a job's next turn runs it, so a spec can give each turn its
+/// script. `None`: back to `YAP_CLAUDE_EXE`, or no Claude Code at all.
+#[cfg(debug_assertions)]
+#[tauri::command]
+pub fn e2e_claude_script(script: Option<String>) -> Result<(), String> {
+    if !active() {
+        return Err("Only in e2e test mode".to_string());
+    }
+    let program = match script {
+        Some(s) => {
+            let exe = std::env::current_exe().map_err(|e| e.to_string())?;
+            Some(crate::ai::claude_code::cli::Program::new(exe).with_prefix(vec!["fake-claude".into(), s]))
+        }
+        None => None,
+    };
+    tracing::info!(on = program.is_some(), "e2e: Claude Code's stand-in");
+    crate::ai::claude_code::cli::set_test_program(program);
+    Ok(())
+}
+
 /// Test mode only: the next `count` saves of a store (`store`: its id,
 /// "notes", "history", "chats"…) fail as if the disk were full, so a spec
 /// sees what the person would (`saving.rs`). `count` 0: none.
