@@ -99,6 +99,14 @@ pub fn run_diarize_child() -> i32 {
     speakers::diarize::run_child()
 }
 
+/// `yap.exe fake-claude <script.jsonl> …` (main.rs, debug builds): a
+/// stand-in for Claude Code that replays a script, for tests
+/// (`ai/claude_code/fake.rs`). Nothing of the app itself starts.
+#[cfg(debug_assertions)]
+pub fn run_fake_claude() -> i32 {
+    ai::claude_code::fake::main(std::env::args().skip(2).collect())
+}
+
 /// `yap.exe eval …` (main.rs): the model evaluation harness (`eval.rs`,
 /// docs/model-evals.md). Debug builds only; a release build says so and
 /// exits. Returns the exit code (0 = every scenario passed).
@@ -459,6 +467,8 @@ pub fn run() {
             ai::chatgpt::chatgpt_sign_out,
             ai::chatgpt::chatgpt_notice_seen,
             ai::chatgpt::chatgpt_e2e_opened,
+            ai::claude_code::claude_code_status,
+            ai::claude_code::claude_code_sign_in,
             ai::effort::effort_info,
             ai::effort::chat_set_effort,
             ai::effort::chat_set_fast,
