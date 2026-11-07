@@ -116,6 +116,8 @@ export const FIELD_DEFAULTS = {
   jobsMax: 3,
   // "Animate Code chats": a slow light along a Code chat's box while its job runs.
   jobsAnimate: true,
+  // "Clean up what you say in Code chats" (ai/cleanup_styles.rs `cleans_question`).
+  jobsCleanSpeech: true,
   // Memory (MemorySection.svelte, memory.rs): the switches only.
   memorySearchChats: true,
   memoryLearnChats: true,
@@ -214,6 +216,9 @@ export const FIELD_DEFAULTS = {
   assistantScreen: true,
   assistantScreenCloud: false,
   assistantScreenAsked: false,
+  // "Clean up what you say in Chat": a spoken question cleaned up as an AI
+  // prompt, word for word, on Dictation cleanup's model (cleanup_styles.rs).
+  chatCleanSpeech: true,
   // Settings → Phone (link.rs): Yap Link for paired phones on the home Wi-Fi.
   linkEnabled: false,
   spokenLength: '1m',

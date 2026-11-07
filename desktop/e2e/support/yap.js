@@ -64,6 +64,11 @@ export const BASE_CONFIG = {
   // System): screenshots and measured colours stay the same everywhere.
   // theme.spec.js covers Dark and System.
   theme: 'light',
+  // A spoken question isn't cleaned up unless a spec asks (on by default:
+  // clean-speech.spec.js turns them on), so a spec with a cleanup model
+  // set up sees its questions' calls as before.
+  chatCleanSpeech: false,
+  jobsCleanSpeech: false,
   configVersion: 1,
 };
 

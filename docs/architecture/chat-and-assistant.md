@@ -1226,9 +1226,21 @@ The AI Chat surface (conversations, the tool-calling loop and its note tools) an
   meetings" (alert `assistantMeetingOff`, over the meeting, every press) —
   and nothing in Yap talks: `tts::say` refuses, Chat's auto-speak stays
   quiet. The question is transcribed with the correction dictionary (exact
-  + near-miss, as a dictation), never the AI cleanup pass (the Chat model
-  reads it as asked; cleanup would add delay), snippets or the voice
-  command. Phases
+  + near-miss, as a dictation), never snippets or the voice command; **AI
+  cleanup only by its side's switch** (2026-11-07, the maintainer: questions
+  landed full of "um"): "Clean up what you say in Chat" (Settings → Voice
+  Assistant, `chat_clean_speech`) for a plain chat, "…in Code chats"
+  (Settings → Jobs, `jobs_clean_speech`) for a Code chat or a new code chat
+  waiting with its workspace (`shortcut_goes`, `into_code_chat`), both on,
+  each apart from "AI cleanup": as an AI prompt, literally, on Dictation
+  cleanup's model (`cleanup_styles::question_plan`; no model set up: as said,
+  Settings says so), its guards and Skip cleanup on the capsule — the Chat
+  view's mic the same; "snip" and nothing-heard decided first; the dictionary
+  after (`pipeline::ask_assistant`, dictation.md). It adds the cleanup's time
+  (~0.15 s on the on-device 4B here, ~0.5–0.85 s on Groq): meanwhile a maybe
+  about the screen is put to Chat's model already (`screen::ask_early`, its
+  word taken by `look`). A phone's question for a Code chat is cleaned (off
+  the bar); a plain chat's stays as said. Phases
   `Idle → Listening → Thinking → Speaking` in `yap-assistant {phase,
   conversationId, messageId}` (the bar). `listening` (from
   `capture_target`; bumps a generation, drops the last answer's card),

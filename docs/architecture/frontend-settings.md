@@ -628,7 +628,11 @@ on an element that also has a `settings.css` class (`set-note`,
   for the key, whether Language Models' Claude tab has one, with a link);
   **Defaults**: Model (Opus, Sonnet or Haiku 5.5, `jobsModel`), Effort
   (`jobsEffort`), Mode (the Mode a new chat starts in, `jobsMode`; Bypass
-  permissions asks once, as the chip does); **Workspaces** (2026-11-07: the
+  permissions asks once, as the chip does); under the Jobs switch, **Clean
+  up what you say in Code chats** (`jobsCleanSpeech`, `CleanSpeech.svelte`,
+  shared with Voice Assistant's "…in Chat", `chatCleanSpeech`: no cleanup
+  model set up, `question_cleanup_status`, "Needs a cleanup model in Language
+  Models → Dictation cleanup" with the way there); **Workspaces** (2026-11-07: the
   UI's word for the job folders, `job_folders_*`: name, path, "Never above:"
   a cap, Remove — its Code chats plain again, the toast says so —; **Add
   workspace…**, the folder picker; "A workspace's own Claude settings and MCP

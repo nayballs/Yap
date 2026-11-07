@@ -182,6 +182,15 @@
           {/each}
         </div>
       {/if}
+    {:else if askThinking && skipOffer}
+      <!-- The question's AI cleanup ("Clean up what you say…",
+           pipeline::ask_assistant) is slow, or waits for the on-device
+           model: said, with Skip cleanup (the words as transcribed, asked
+           at once), as a dictation's capsule has it. -->
+      <span class="txt soft" role="status">{workText}</span>
+      <button class="undo" title="Ask the words as transcribed, without AI cleanup" onclick={() => act('skip-cleanup')}
+        >Skip cleanup</button
+      >
     {:else if askThinking}
       <!-- (A question about the screen: the window in front is being taken
            and read first, chat/assistant/screen.rs. Then what the answer is
@@ -198,7 +207,8 @@
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5.5 12.5l4 4 9-9" /></svg>
       </button>
     {/if}
-    {#if askThinking || askSpeaking}
+    {#if (askThinking && !skipOffer) || askSpeaking}
+      <!-- (Not beside Skip cleanup: the question isn't asked yet.) -->
       <button class="sbtn" aria-label={askSpeaking ? 'Stop speaking' : 'Stop the answer'} title="Stop" onclick={() => act('assistant-stop')}>
         <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><rect x="7" y="7" width="10" height="10" rx="2" /></svg>
       </button>

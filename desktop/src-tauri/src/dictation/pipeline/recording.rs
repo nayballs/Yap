@@ -860,9 +860,13 @@ impl Shared {
     fn load_ai_early(&self, goes: Goes, edit: bool, hwnd: isize, kind: crate::pasting::app_kind::AppKind) {
         use crate::ai::local_llm::{on_demand, PROVIDER_ONDEVICE};
         let Ok(c) = self.config.read() else { return };
+        // A question cleaned up on it ("Clean up what you say…",
+        // `cleanup_styles::cleans_question`): either side's switch, as which
+        // side it goes to is known once it's said.
+        let cleans_here = c.pp_provider == PROVIDER_ONDEVICE && (c.chat_clean_speech || (c.jobs_enabled && c.jobs_clean_speech));
         let why = match goes {
-            Goes::Assistant => (on_demand::scope_provider(&c, "chat") == PROVIDER_ONDEVICE).then_some("assistant"),
-            Goes::ChatBox => (on_demand::scope_provider(&c, "chat") == PROVIDER_ONDEVICE).then_some("chat"),
+            Goes::Assistant => (on_demand::scope_provider(&c, "chat") == PROVIDER_ONDEVICE || cleans_here).then_some("assistant"),
+            Goes::ChatBox => (on_demand::scope_provider(&c, "chat") == PROVIDER_ONDEVICE || cleans_here).then_some("chat"),
             Goes::Paste if edit => (on_demand::scope_provider(&c, "voiceAgent") == PROVIDER_ONDEVICE).then_some("rewrite"),
             // A dictation, pasted or into the quick note: cleaned up as any.
             Goes::Paste | Goes::QuickNote => {
