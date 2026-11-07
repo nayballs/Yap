@@ -38,7 +38,8 @@
 //!   every kind.
 //! - `{"_dump_args":true}`: prints `{"type":"system","subtype":"fake_args",
 //!   "args":[…],"cwd":…}`. `{"_dump_args":"<file>"}`: and appends that
-//!   line to the file (an e2e spec reads a plan chat's launch there).
+//!   line to the file (an e2e spec reads a plan chat's launch there, or a
+//!   job's turns' arguments: `--session-id`, then `--resume`).
 //! - `{"_dump_env":["ANTHROPIC_API_KEY",…]}`: prints `{"type":"system",
 //!   "subtype":"fake_env","present":{"ANTHROPIC_API_KEY":false,…}}` (never a
 //!   value).

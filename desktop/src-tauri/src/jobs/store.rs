@@ -39,6 +39,8 @@ pub const KEEP_SECS: u64 = 7 * 24 * 60 * 60;
 pub const LOG_MAX_LINES: usize = 5_000;
 /// The most characters of text a log line keeps.
 const LOG_TEXT_MAX: usize = 4_000;
+/// The most characters of a turn's final words its note keeps.
+pub const TURN_TEXT_MAX: usize = 8_000;
 
 /// Where a job is.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -184,9 +186,74 @@ pub struct Job {
     pub swept: bool,
     /// The diff lines its log has so far (`diff::JOB_MAX` at most).
     pub diff_lines: u32,
+    /// **Its turns** (2026-11-07: one job per Code chat): each request to
+    /// it — its brief, each follow-up — and what came of it. A field of its
+    /// own (an older Yap drops it on its save; a job without it reads as one
+    /// turn, [`Job::turn_notes`]).
+    pub turn_list: Vec<TurnNote>,
+    /// Its model was the person's own ask (kept for its next turns), not
+    /// Settings' default (which its next turns take as it is then).
+    pub model_asked: bool,
+    pub effort_asked: bool,
+    /// Why this is a new job and not the chat's earlier one carried on (its
+    /// session couldn't be resumed): the tab's first line.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub why_new: Option<String>,
     /// The step it's on now (not kept: the tab's live line).
     #[serde(skip)]
     pub step: String,
+}
+
+/// **One turn of a job**: one request to it (its brief, a follow-up, a
+/// plan's go-ahead) and what came of it. Continue carries on the same turn.
+/// Its backups are `jobs/<id>/backup/<n>/` ([`turn_backup_dir`]).
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default, rename_all = "camelCase")]
+pub struct TurnNote {
+    /// 1, 2, …: its place in the job.
+    pub n: u32,
+    /// The request in a few words: the tab's header ("Add a minimap button").
+    pub title: String,
+    /// What it was asked (the brief, the follow-up), as the person's chat
+    /// put it.
+    pub request: String,
+    /// The person's message that asked for it ("chat:<conversation>:<index>"):
+    /// its pill goes under the answer after it.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub message_id: Option<String>,
+    /// Queued until it runs (behind the turn running, or a slot).
+    pub status: Status,
+    /// What it ran at.
+    pub mode: String,
+    pub model: String,
+    pub effort: String,
+    /// Unix seconds (0: never ran).
+    pub started_ts: u64,
+    pub ended_ts: u64,
+    /// Its own cost (Claude Code's estimate, as the job's).
+    pub cost: f64,
+    /// The files it changed.
+    pub files: Vec<String>,
+    /// What it wasn't allowed to do.
+    pub denials: Vec<Denial>,
+    /// Its final words.
+    pub text: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+    pub plan: bool,
+    pub asks: bool,
+    /// Its report's marker ("chat:<conversation>:<index>").
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub report_message_id: Option<String>,
+    /// Undo this turn put its files back.
+    pub undone: bool,
+}
+
+impl TurnNote {
+    /// It ran (or runs) in a Claude Code process.
+    pub fn ran(&self) -> bool {
+        self.started_ts > 0
+    }
 }
 
 /// A job as the page's tab opens it (`stream::Event::Job`).
@@ -199,12 +266,103 @@ pub struct JobRef {
     pub mode: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub conversation: Option<u64>,
+    /// The turn the tab opens at (its newest, else the one asked about).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub turn: Option<u32>,
 }
 
 impl Job {
     pub fn reference(&self) -> JobRef {
-        JobRef { id: self.id.clone(), folder: self.folder.clone(), status: self.status, mode: self.mode.clone(), conversation: self.conversation }
+        JobRef {
+            id: self.id.clone(),
+            folder: self.folder.clone(),
+            status: self.status,
+            mode: self.mode.clone(),
+            conversation: self.conversation,
+            turn: self.turn_list.last().map(|t| t.n),
+        }
     }
+
+    /// **Its turns**: the ones kept, or — a job from before turns were kept
+    /// (or saved by an older Yap) — one made from the job itself. Pure.
+    pub fn turn_notes(&self) -> Vec<TurnNote> {
+        if !self.turn_list.is_empty() {
+            return self.turn_list.clone();
+        }
+        vec![TurnNote {
+            n: 1,
+            title: title_of(&self.brief),
+            request: self.brief.clone(),
+            message_id: self.message_id.clone(),
+            status: self.status,
+            mode: self.mode.clone(),
+            model: self.model.clone(),
+            effort: self.effort.clone(),
+            started_ts: self.started_ts,
+            ended_ts: self.ended_ts,
+            cost: self.cost,
+            files: self.files.clone(),
+            denials: self.denials.clone(),
+            text: self.text.clone(),
+            error: self.error.clone(),
+            plan: self.plan,
+            asks: self.asks,
+            report_message_id: self.report_message_id.clone(),
+            undone: self.undone,
+        }]
+    }
+
+    /// Its turns kept from now on ([`Job::turn_notes`] written in).
+    pub fn keep_turns(&mut self) {
+        if self.turn_list.is_empty() {
+            self.turn_list = self.turn_notes();
+        }
+    }
+
+    /// Turn `n`, to change.
+    pub fn turn_mut(&mut self, n: u32) -> Option<&mut TurnNote> {
+        self.turn_list.iter_mut().find(|t| t.n == n)
+    }
+
+    /// The job as its turn `n` left it: its status, words, files, denials,
+    /// cost and errors that turn's (the report's facts are one turn's).
+    /// Pure.
+    pub fn as_of_turn(&self, n: u32) -> Job {
+        let Some(t) = self.turn_notes().into_iter().find(|t| t.n == n) else { return self.clone() };
+        Job {
+            status: t.status,
+            text: t.text,
+            files: t.files,
+            denials: t.denials,
+            error: t.error,
+            plan: t.plan,
+            asks: t.asks,
+            ..self.clone()
+        }
+    }
+}
+
+/// **A request in a few words** (a turn's header): its first line, to its
+/// first sentence's end, cut at a word under 60 characters. Pure.
+pub fn title_of(text: &str) -> String {
+    let line = text.trim().lines().map(str::trim).find(|l| !l.is_empty()).unwrap_or("");
+    let line = line.trim_start_matches(['#', '-', '*', '>', ' ']);
+    // A sentence ends at . ! ? : or ; with a space (or the line's end) after it.
+    let end = line
+        .char_indices()
+        .find(|&(i, c)| {
+            let rest = &line[i + c.len_utf8()..];
+            matches!(c, '.' | '!' | '?' | ':' | ';') && (rest.is_empty() || rest.starts_with(char::is_whitespace))
+        })
+        .map_or(line.len(), |(i, _)| i);
+    let sentence = line[..end].trim();
+    const MAX: usize = 60;
+    if sentence.chars().count() <= MAX {
+        return sentence.to_string();
+    }
+    let cut: String = sentence.chars().take(MAX).collect();
+    let at = cut.rfind(' ').filter(|&i| i > MAX / 2).unwrap_or(cut.len());
+    format!("{}…", cut[..at].trim_end_matches([',', ' ', '-']))
 }
 
 /// What jobs.json holds.
@@ -282,9 +440,42 @@ pub fn dir(id: &str) -> Option<PathBuf> {
     valid_id(id).then(|| root().join(id))
 }
 
-/// `jobs/<id>/backup/`.
+/// `jobs/<id>/backup/`: every turn's backups (a job from before turns had
+/// one backup, here, read as its turn 1's: [`backup_dirs`]).
 pub fn backup_dir(id: &str) -> Option<PathBuf> {
     dir(id).map(|d| d.join("backup"))
+}
+
+/// `jobs/<id>/backup/<n>/`: turn `n`'s backups (first copy wins within it).
+pub fn turn_backup_dir(id: &str, n: u32) -> Option<PathBuf> {
+    backup_dir(id).map(|d| d.join(n.to_string()))
+}
+
+/// **Every turn's backup folders** on disk, oldest first: `(turn, folder)` —
+/// a job from before turns (its manifest right in `backup/`) as turn 1's,
+/// before a `backup/1/` of its own (its turn 1 continued since). Only
+/// folders with a manifest.
+pub fn backup_dirs(id: &str) -> Vec<(u32, PathBuf)> {
+    let Some(root) = backup_dir(id) else { return Vec::new() };
+    let manifest = crate::integrations::claude_live::backup::MANIFEST;
+    let mut out: Vec<(u32, PathBuf)> = Vec::new();
+    if root.join(manifest).is_file() {
+        out.push((1, root.clone()));
+    }
+    let mut turns: Vec<(u32, PathBuf)> = std::fs::read_dir(&root)
+        .into_iter()
+        .flatten()
+        .flatten()
+        .filter(|e| e.path().is_dir())
+        .filter_map(|e| {
+            let name = e.file_name().to_string_lossy().into_owned();
+            let n = name.parse::<u32>().ok().filter(|n| *n > 0 && name == n.to_string())?;
+            e.path().join(manifest).is_file().then(|| (n, e.path()))
+        })
+        .collect();
+    turns.sort_by_key(|(n, _)| *n);
+    out.extend(turns);
+    out
 }
 
 /// `jobs/<id>/log.jsonl`.
@@ -411,6 +602,29 @@ pub fn of_conversation(conversation: u64) -> Vec<Job> {
     list().into_iter().filter(|j| j.conversation == Some(conversation)).collect()
 }
 
+/// **A chat deleted**: its jobs keep no chat (a later conversation may get
+/// its id, and must never carry them on or take their reports). How many.
+pub fn detach(conversation: u64) -> usize {
+    with_store(|s| {
+        let mut n = 0;
+        for j in s.jobs.iter_mut().filter(|j| j.conversation == Some(conversation)) {
+            // (Its messages' ids would name the new chat's.)
+            j.conversation = None;
+            j.message_id = None;
+            j.report_message_id = None;
+            for t in j.turn_list.iter_mut() {
+                t.message_id = None;
+                t.report_message_id = None;
+            }
+            n += 1;
+        }
+        if n > 0 {
+            save(s);
+        }
+        n
+    })
+}
+
 // ---- each chat's Mode ----
 
 /// The Mode chip's mode for `conversation` (`default` when it was never set).
@@ -500,16 +714,29 @@ pub fn at_start() -> usize {
     })
 }
 
-/// Every live job in `jobs` interrupted at `now`; how many. Pure.
+/// Every live job in `jobs` interrupted at `now` (and its turns not over);
+/// how many. Pure.
 pub fn interrupt_live(jobs: &mut [Job], now: u64) -> usize {
     let mut n = 0;
     for j in jobs.iter_mut().filter(|j| j.status.live()) {
-        j.status = Status::Interrupted;
-        j.ended_ts = now;
-        j.updated_ts = now;
+        interrupt(j, now);
         n += 1;
     }
     n
+}
+
+/// Job `j` interrupted at `now`, with its turns not over (a request waiting
+/// behind the turn that ran too: Continue sends it). Pure.
+pub fn interrupt(j: &mut Job, now: u64) {
+    j.status = Status::Interrupted;
+    j.ended_ts = now;
+    j.updated_ts = now;
+    for t in j.turn_list.iter_mut().filter(|t| t.status.live()) {
+        t.status = Status::Interrupted;
+        if t.ran() {
+            t.ended_ts = now;
+        }
+    }
 }
 
 /// The jobs whose backups and log are due to go at `now`: ended over
@@ -797,6 +1024,73 @@ mod tests {
         // Never a path from an id.
         assert!(dir("..").is_none() && dir(r"a\b").is_none() && dir("").is_none());
         assert!(log_read("../x").is_empty());
+    }
+
+    #[test]
+    fn a_jobs_turns_are_kept_in_a_field_of_their_own_and_an_older_job_is_one_turn() {
+        let j = Job {
+            id: "ab12".into(),
+            brief: "Add a watering schedule to the planner. Then tidy notes.md.".into(),
+            status: Status::Done,
+            text: "Done.".into(),
+            files: vec!["notes.md".into()],
+            message_id: Some("chat:3:0".into()),
+            report_message_id: Some("chat:3:2".into()),
+            ..Default::default()
+        };
+        // Before turns were kept (or saved by an older Yap): one, from the job.
+        let one = j.turn_notes();
+        assert_eq!(one.len(), 1);
+        assert_eq!((one[0].n, one[0].title.as_str(), one[0].status, one[0].text.as_str()), (1, "Add a watering schedule to the planner", Status::Done, "Done."));
+        assert_eq!((one[0].message_id.as_deref(), one[0].report_message_id.as_deref()), (Some("chat:3:0"), Some("chat:3:2")));
+        assert_eq!(one[0].files, ["notes.md"]);
+        // Kept from now on; a second turn beside it.
+        let mut j = j;
+        j.keep_turns();
+        j.turn_list.push(TurnNote { n: 2, title: "Add a minimap button".into(), status: Status::Failed, text: "It broke.".into(), files: vec!["map.js".into()], error: Some("Claude Code stopped.".into()), ..Default::default() });
+        let v = serde_json::to_value(&j).unwrap();
+        assert_eq!(v["turnList"][1]["title"], "Add a minimap button");
+        assert_eq!(v["turnList"][0]["messageId"], "chat:3:0");
+        let back: Job = serde_json::from_value(v).unwrap();
+        assert_eq!(back.turn_list, j.turn_list);
+        // The job as a turn left it: the report's facts are that turn's.
+        let second = j.as_of_turn(2);
+        assert_eq!((second.status, second.text.as_str(), second.files.clone(), second.error.as_deref()), (Status::Failed, "It broke.", vec!["map.js".to_string()], Some("Claude Code stopped.")));
+        assert_eq!(j.as_of_turn(1).files, ["notes.md"]);
+        // An older Yap's file (no turnList): read, and its job one turn.
+        let old: Job = serde_json::from_str(r#"{"id":"cd34","brief":"Tidy it","status":"done","turns":3}"#).unwrap();
+        assert!(old.turn_list.is_empty());
+        assert_eq!(old.turn_notes().len(), 1);
+        assert_eq!(old.reference().turn, None);
+        assert_eq!(j.reference().turn, Some(2));
+    }
+
+    #[test]
+    fn a_request_in_a_few_words() {
+        assert_eq!(title_of("Add a minimap button to the map view. It should show every bed."), "Add a minimap button to the map view");
+        assert_eq!(title_of("could you add a minimap button for it as well?"), "could you add a minimap button for it as well");
+        assert_eq!(title_of("\n\n# Fix the tests: they fail on CI\nmore"), "Fix the tests");
+        assert_eq!(title_of("Use v2.1 of the planner"), "Use v2.1 of the planner", "a dot inside a word isn't a sentence's end");
+        let long = title_of("Rework the watering schedule so that every bed in the planner gets its own reminder and colour");
+        assert!(long.ends_with('…') && long.chars().count() <= 61, "{long}");
+        assert!(long.starts_with("Rework the watering schedule so that every bed"), "{long}");
+        assert_eq!(title_of(""), "");
+    }
+
+    #[test]
+    fn interrupted_with_its_turns_and_a_request_still_waiting() {
+        let mut j = Job {
+            status: Status::Running,
+            turn_list: vec![
+                TurnNote { n: 1, status: Status::Running, started_ts: 5, ..Default::default() },
+                TurnNote { n: 2, status: Status::Queued, ..Default::default() },
+            ],
+            ..Default::default()
+        };
+        interrupt(&mut j, 50);
+        assert_eq!(j.status, Status::Interrupted);
+        assert_eq!(j.turn_list.iter().map(|t| (t.status, t.ended_ts)).collect::<Vec<_>>(), [(Status::Interrupted, 50), (Status::Interrupted, 0)]);
+        assert!(!j.turn_list[1].ran(), "never sent: Continue sends it");
     }
 
     #[test]

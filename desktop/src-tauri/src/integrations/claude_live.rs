@@ -52,8 +52,8 @@
 //! - **The backup hook** ([`backup`]): before Claude Code edits or writes a
 //!   file, an http `PreToolUse` hook (`POST /hook/<run>/PreToolUse`) copies
 //!   it into the run's backup folder once, with a `manifest.json`; a file
-//!   that didn't exist yet is noted as created. [`backup::restore`] puts
-//!   them back (Undo job).
+//!   that didn't exist yet is noted as created. [`backup::restore_all`]
+//!   puts them back (Undo: a job's turn, or all of them, each its own run).
 //!
 //! **The log** has ids, counts, tool names and outcomes, never a command,
 //! a file's path or contents, a prompt or a key.

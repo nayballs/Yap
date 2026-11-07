@@ -117,9 +117,15 @@ pub fn became(conversation: u64, path: &str) {
 
 /// **A conversation deleted** (Chat's delete): it's no Code chat any more.
 /// A later conversation may get its id (ids are the highest plus one), and
-/// it mustn't start as one: a Code chat keeps Yap's memory out.
+/// it mustn't start as one: a Code chat keeps Yap's memory out. Nor may it
+/// carry on the deleted chat's job (one job per Code chat), nor take its
+/// reports: its jobs keep no chat (`store::detach`).
 pub fn chat_deleted(conversation: u64) {
     set(conversation, None);
+    let detached = store::detach(conversation);
+    if detached > 0 {
+        tracing::info!(jobs = detached, "Jobs: a chat deleted, its jobs keep no chat");
+    }
 }
 
 /// **A folder removed** (Settings → Jobs): its chats are plain again, every
@@ -146,9 +152,33 @@ pub fn workspaces_changed() {
 /// tool loop and a plan chat alike (`chat/turn/prompt.rs`). Pure.
 pub fn prompt_line_for(folder: &Folder) -> String {
     format!(
-        "This is a Code chat in the user's folder {} ({}): they picked it for jobs. When they ask you to change, fix, build or write something there, start a job: call start_job without a folder (it's this one). Their own request this turn is enough; they needn't name the folder. message_job and job_status without an id mean this chat's latest job. A job in any other folder still needs the user to name it.",
+        "This is a Code chat in the user's folder {} ({}): they picked it for jobs. When they ask you to change, fix, build or write something there, start a job: call start_job without a folder (it's this one). Their own request this turn is enough; they needn't name the folder. One Claude Code session per Code chat: once it has a job, each follow-up continues that job as its next turn (start_job does it by itself; fresh: true only when they ask for a new job or a fresh start). message_job and job_status without an id mean this chat's latest job. A job in any other folder still needs the user to name it.",
         folder.name, folder.path
     )
+}
+
+/// **The chat's job, as its prompt says it** (one job per Code chat): the
+/// conversation's job in `folder`, its status and how many turns, so the
+/// model knows a follow-up carries it on (`chat/turn/prompt.rs`, after
+/// [`prompt_line_for`]). None while the chat has none there.
+pub fn job_line_in(conversation: Option<u64>, folder: &Folder) -> Option<String> {
+    let job = store::of_conversation(conversation?).into_iter().find(|j| folders::norm(&j.path) == folders::norm(&folder.path))?;
+    Some(job_line(&job))
+}
+
+/// **The chat's job, as its prompt says it**: its status and how many turns,
+/// so the model knows a follow-up carries it on. Never its words. Pure.
+pub fn job_line(job: &store::Job) -> String {
+    let turns = job.turn_notes().len();
+    let turns = if turns == 1 { "1 turn".to_string() } else { format!("{turns} turns") };
+    let now = match job.status {
+        store::Status::Queued | store::Status::Running | store::Status::Asking => "working now (a request waits for its next turn)",
+        store::Status::Done => "done",
+        store::Status::Failed => "stopped short",
+        store::Status::Stopped => "stopped",
+        store::Status::Interrupted => "interrupted",
+    };
+    format!("This chat's job there (id {}) is {now}, after {turns}: the user's next request there continues it.", job.id)
 }
 
 /// A job folder with when it was last used: the workspace picker's order.
@@ -229,6 +259,24 @@ mod tests {
     }
 
     #[test]
+    fn its_prompt_names_the_chats_job_which_a_follow_up_continues() {
+        let garden = folder("garden-planner", 1);
+        assert_eq!(job_line_in(Some(61), &garden), None, "no job yet: nothing to say");
+        store::insert(store::Job { id: "ff66".into(), path: garden.path.clone(), conversation: Some(61), status: store::Status::Done, ..Default::default() });
+        store::insert(store::Job { id: "gg77".into(), path: r"D:\Projects\recipe-box".into(), conversation: Some(61), status: store::Status::Running, created_ts: 9, ..Default::default() });
+        // This chat's job in that workspace, never another's.
+        assert_eq!(job_line_in(Some(61), &garden).unwrap(), "This chat's job there (id ff66) is done, after 1 turn: the user's next request there continues it.");
+        assert_eq!(job_line_in(Some(62), &garden), None);
+        let two = store::Job {
+            status: store::Status::Running,
+            turn_list: vec![store::TurnNote { n: 1, ..Default::default() }, store::TurnNote { n: 2, ..Default::default() }],
+            ..store::get("gg77").unwrap()
+        };
+        assert!(job_line(&two).contains("is working now (a request waits for its next turn), after 2 turns"));
+        assert!(prompt_line_for(&garden).contains("each follow-up continues that job as its next turn"));
+    }
+
+    #[test]
     fn the_workspaces_most_recently_used_first() {
         let all = vec![folder("garden-planner", 10), folder("recipe-box", 20), folder("book-shelf", 5)];
         let mut chats = BTreeMap::new();
@@ -277,8 +325,22 @@ mod tests {
         assert_eq!(folder_of(Some(6)), Some(recipes.clone()));
         // A chat deleted: no Code chat (a later one may get its id).
         set(8, Some(&recipes));
+        store::insert(store::Job {
+            id: "hh88".into(),
+            path: recipes.path.clone(),
+            conversation: Some(8),
+            message_id: Some("chat:8:0".into()),
+            report_message_id: Some("chat:8:2".into()),
+            turn_list: vec![store::TurnNote { n: 1, message_id: Some("chat:8:0".into()), report_message_id: Some("chat:8:2".into()), ..Default::default() }],
+            ..Default::default()
+        });
         chat_deleted(8);
         assert_eq!(folder_of(Some(8)), None);
+        // …nor carry on its job, nor take its reports: the job keeps no chat.
+        assert_eq!(job_line_in(Some(8), &recipes), None);
+        let kept = store::get("hh88").unwrap();
+        assert_eq!((kept.conversation, kept.message_id, kept.report_message_id), (None, None, None));
+        assert_eq!((kept.turn_list[0].message_id.clone(), kept.turn_list[0].report_message_id.clone()), (None, None));
         // A folder no longer a job folder (removed some other way): plain.
         assert!(folders::remove(&recipes.name));
         assert_eq!(folder_of(Some(6)), None);

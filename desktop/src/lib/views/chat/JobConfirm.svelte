@@ -31,7 +31,18 @@
     }
   }
 
-  const done = (s) => (s === 'allowed' ? 'Started.' : s === 'timedOut' ? "No answer in time, so Yap didn't start it." : "Yap didn't start it.");
+  const done = (s) =>
+    j.continues
+      ? s === 'allowed'
+        ? 'Sent to the job.'
+        : s === 'timedOut'
+          ? "No answer in time, so Yap didn't send it."
+          : "Yap didn't send it."
+      : s === 'allowed'
+        ? 'Started.'
+        : s === 'timedOut'
+          ? "No answer in time, so Yap didn't start it."
+          : "Yap didn't start it.";
 </script>
 
 <div class="jconfirm" class:asking={st === 'asking'} role="group" aria-label="Yap asks before starting a job" data-testid="chat-job-confirm" data-state={st}>
@@ -51,7 +62,7 @@
     {#if st === 'asking'}
       <p class="jwhy">{whyOf(card)} Only you can say yes.</p>
       <div class="jbtns">
-        <button type="button" class="jstart" onclick={() => answer(true)}>Start</button>
+        <button type="button" class="jstart" onclick={() => answer(true)}>{j.continues ? 'Send' : 'Start'}</button>
         <button type="button" class="jdeny" onclick={() => answer(false)}>Don't</button>
       </div>
     {:else}

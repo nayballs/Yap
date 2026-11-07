@@ -529,6 +529,7 @@ pub fn run() {
             jobs::commands::job_continue,
             jobs::commands::job_message,
             jobs::commands::job_undo,
+            jobs::commands::job_undo_turn,
             jobs::commands::job_open_terminal,
             jobs::commands::job_folders_list,
             jobs::commands::job_folders_add,

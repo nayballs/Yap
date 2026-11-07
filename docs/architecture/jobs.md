@@ -35,8 +35,8 @@ What differs:
 | Under the message box | the model chip | the workspace chip and the Mode chip, then the model chip |
 | The look | Chat's | a teal edge on the box, "Code · garden-planner", a slow light while its job runs |
 | Empty | Chat's greeting | "Work in garden-planner", its path, three prompts (`CodeEmpty.svelte`) |
-| What the model is told | Chat's prompt | Chat's prompt without memory, About you without its note, and one more line: this chat's folder, and that a request here is enough to start a job (`code_chat::prompt_line_for`) |
-| Job tools | offered too; a job needs the person to name its folder, or say yes to an offer that named it | the same tools; the folder may be left out (it's the chat's), and the person's own request is enough |
+| What the model is told | Chat's prompt | Chat's prompt without memory, About you without its note, and one more line: this chat's folder, that a request here is enough to start a job, and its job, which a follow-up continues (`code_chat::prompt_line_for`, `job_line_in`) |
+| Job tools | offered too; a job needs the person to name its folder, or say yes to an offer that named it | the same tools; the folder may be left out (it's the chat's), and the person's own request is enough; one job per chat, each follow-up its next turn ([Turns](#turns-one-job-per-code-chat)) |
 | Memory | Yap's memory: "You" in the prompt, what the question is about, the memory tools, learning from the chat | none of it, on any model, and never learned from ([below](#memory-and-the-plan-in-a-code-chat)) |
 | On the Claude plan | a lean session in an empty folder of Yap's | a read-only Claude Code session in the workspace, with the person's own settings ([below](#memory-and-the-plan-in-a-code-chat)) |
 
@@ -203,13 +203,76 @@ Decided 2026-11-07 (the maintainer and Claude), landed the same day.
     app.ts", "Searching the code · …": `claude_plan/map.rs` `Tool::Code`),
     no chip.
 
+## Turns: one job per Code chat
+
+2026-11-07, after the maintainer's real use: a follow-up on the same project
+("could you add a minimap button for it as well?") started a second job, a
+fresh Claude Code session that had to read everything again, in a second
+tab. Claude Code itself is one session per conversation, each follow-up
+carrying on with its context; so are jobs now.
+
+- **A turn** (`store::TurnNote`, in `jobs.json`'s own `turnList`): one
+  request to the job — its brief, then each follow-up — and what came of it:
+  `n`, its `title` (the request in a few words: the model's `title`, else
+  `store::title_of`), its `request`, the person's message that asked for it
+  (`messageId`: its pill), its status and times, the mode, model and effort
+  it ran at, its own cost, files, denials and final words, its report's
+  marker, whether it's undone. **Continue carries on the same turn.** A job
+  without a `turnList` (from before, or saved by an older Yap, which drops
+  the field) reads as one turn made from the job (`Job::turn_notes`).
+- **Continuation by default** (`chat/tools/jobs.rs` `decide`): `start_job` in
+  a Code chat, in a folder where that chat has a job (its latest there,
+  `chats_job_in`), is that job's next turn (`runner::follow_up`), its brief
+  the turn's request — whichever tool the model calls (`message_job` is the
+  same). A new job only with `fresh: true` (the person asked for a new job,
+  a fresh start, a new session), in another workspace, in a plain chat
+  (whose first job makes it a Code chat, as before), or when the session
+  can't be resumed: its transcript gone from Claude Code's own folder
+  (`transcripts::session_kept`, only looked at); the new job's first line
+  says why (`whyNew`). The tools' descriptions, `JOB_TOOL_INSTRUCTIONS` and
+  the Code chat's prompt line say so (`code_chat::job_line_in`, after
+  `prompt_line_for`: the chat's job, its status and turns, "the user's next
+  request there continues it").
+- **Each turn as the chat is then**: the chat's Mode then (`next_turn`, a
+  plan still a plan until "go ahead"; the model may only lower it),
+  Settings' model and effort then (unless the person asked for their own:
+  `modelAsked`, kept for the turns after), and how Settings pay then.
+- **A request while it works** queues as its next turn: the chat says "The
+  job in garden-planner is still working: I'll pass that on when it finishes
+  this step." (the tool's `say`; chip "Queued for the job in …"), its tab
+  shows it waiting ("Queued"), and it's sent once the turn ends (that turn
+  reported first). Two while it works: one next turn. Never two jobs (nor
+  two turns) in a folder at once. Stopped first: not sent ("Not sent yet");
+  Continue sends it.
+- **Consent and safety, unchanged**: the person's own words this turn
+  (`consent::start_in`), refused after web content or a job's own output,
+  the Mode only lowered, the caps, Bypass's OK. Asked first as `start_job`
+  is (Settings' "always", or the web in what led here), never as a new
+  workspace: the card says "Yap wants to carry on the job in …" (`JobCard`
+  `continues`, **Send** / **Don't**); out loud, "Should I pass that to the
+  job in garden-planner, in Auto mode? Say yes to send it."
+- **The tab**: one a job (`job:<id>`), each turn a section (`JobTurn.svelte`)
+  — its request as its header with its status, time and cost; the newest
+  open, the earlier folded (a new turn folds them again); a queued one a
+  line. A pill under each turn's answer and each turn's report card open it
+  at their turn (`JobRef.turn`). Two job tabs in one folder (a fresh job
+  beside the chat's earlier one) are named apart by their first request
+  (`core/jobs.js` `jobTabName`), else a number: the only way two tabs could
+  read the same.
+- **Reports**: one a turn, through the same report path
+  (`queue_job_report(id, turn)`: that turn's facts, `Job::as_of_turn`), each
+  spoken per `jobs_speak`.
+- **Undo this turn** and **Undo all**: [Undo and backups](#undo-and-backups).
+
 ## Starting a job
 
 ### The tools
 
-`chat/tools/jobs.rs`: `start_job` (folder?, brief, model?, effort?, mode?),
-`job_status` (id or folder; none: this chat's latest), `message_job` (id or
-folder, text) and `stop_job` (id or folder).
+`chat/tools/jobs.rs`: `start_job` (folder?, brief, title?, fresh?, model?,
+effort?, mode?), `job_status` (id or folder; none: this chat's latest),
+`message_job` (id or folder, text, title?) and `stop_job` (id or folder).
+In a Code chat `start_job` carries the chat's job on
+([Turns](#turns-one-job-per-code-chat)).
 
 - **Offered** to any chat model that calls tools while jobs are offered
   (`jobs::offered`: Jobs on and Claude Code on this PC; `Gates::jobs`: never
@@ -407,14 +470,17 @@ and each call runs the tool loop's own code and rules.
   told its input is over and exits (ended after 15 s if it doesn't). Done,
   failed, or done with a question (`consent::asks`: its last sentence a
   question) are reported in its chat; stopped and interrupted jobs aren't.
-- **A message for a job** (`message_job`, the tab's "Tell the job…"): while it
-  works, it goes at once (Claude Code queues it for its next turn); after its
-  turn, it starts the next on `--resume`; while queued, it's added to the
-  brief ("Also: …"). "Go ahead" after a plan carries the plan out, at the
-  chat's Mode.
-- **Continue** (stopped, interrupted or failed): "Carry on with the task from
-  where you stopped." on `--resume`; one that never ran starts from its brief.
-  A done job takes a message instead.
+- **A message for a job** (`message_job`, the tab's "Tell the job…", a Code
+  chat's follow-up): a turn of its own ([Turns](#turns-one-job-per-code-chat),
+  `runner::follow_up`), its own process (`--resume`), backups and report:
+  while it works, queued as its next turn, never sent into the turn working;
+  after its turn, the next starts now; while its process starts, or it waits
+  for a slot, the turn about to run takes it ("Also: …"). "Go ahead" after a
+  plan carries the plan out, at the chat's Mode.
+- **Continue** (stopped, interrupted or failed): its turn carried on, "Carry
+  on with the task from where you stopped." on `--resume`; one that never
+  ran starts from its brief; a request that was waiting behind a turn when it
+  stopped is sent instead. A done job takes a message instead.
 - **Stop**: a queued job comes off the queue; a running one gets the
   interrupt control request (`Session::interrupt`) and is ended if it hasn't
   stopped within 8 s.
@@ -448,10 +514,17 @@ instead of a terminal (rebuilt after the maintainer's first real job,
 2026-11-07).
 
 - **The header**: the folder and status, mode and model, how long it has run,
-  its cost ([Paying](#paying-your-plan-or-a-key)), a problem with its one
-  button (Sign in), and **Stop**, **Continue**, **Undo job** (a confirm, then
-  what was put back; `core/jobs.js` `canUndo`), **Open in terminal** and "Tell
-  the job…".
+  its cost ([Paying](#paying-your-plan-or-a-key); "in all" once it has
+  turns), a problem with its one button (Sign in), and **Stop**,
+  **Continue**, **Undo job** / **Undo all** (a confirm, then what was put
+  back; `core/jobs.js` `canUndo`), **Open in terminal** and "Tell the job…"
+  (its next turn).
+- **Its turns** (`JobTurn.svelte`, `core/jobs.js` `turnsOf`: each log event's
+  `turn`; [Turns](#turns-one-job-per-code-chat)): a section a turn, its
+  request as its header with its status, time and cost; the newest open, the
+  earlier folded; a request queued behind the turn working, a line. Each
+  turn's section has what follows, and **Undo this turn** under its files
+  once the job has several.
 - **The running line**: the latest step; once every call came back, the to-do
   in progress (`activeForm`, "Adding a watering schedule"), as Claude Code's
   spinner says it.
@@ -492,13 +565,17 @@ instead of a terminal (rebuilt after the maintainer's first real job,
 
 ### Around the tab
 
-- **Pills** (`JobPills.svelte`) under the answer that started a job (by its
-  `messageId`): the folder and a status dot; a click opens its tab.
+- **Pills** (`JobPills.svelte`) under each answer that started a job or
+  carried it on (by each turn's `messageId`): the folder, the turn's request
+  once there are several, and a status dot; a click opens its tab at that
+  turn.
 - **The report card** (`JobReportCard.svelte`): the `jobReport` marker as "Job
   done · garden-planner" (or didn't finish, has a question, its plan is
-  ready), what it changed in a line, and Open.
+  ready: as its turn ended), what it changed in a line, and Open (the tab at
+  that turn).
 - **The ask-first card** (`JobConfirm.svelte`, in PageConfirm's chunk): Start
-  / Don't ([Asking first](#asking-first)).
+  / Don't ([Asking first](#asking-first)); for a follow-up, "Yap wants to
+  carry on the job in …", Send / Don't.
 - **A permission prompt** (`JobApprove.svelte`) in the thread of the chat that
   started the job: the tool, what it would do ("Run a command: npm test"), the
   command (whole) or the edit, **Allow once** / **Deny**
@@ -534,8 +611,10 @@ instead of a terminal (rebuilt after the maintainer's first real job,
 
 ## Reports
 
-`chat/turn/report.rs`: a turn Yap starts itself when a job is done, failed, or
-done with a question.
+`chat/turn/report.rs`: a turn Yap starts itself when a job's turn is done,
+failed, or done with a question — one a turn, with that turn's facts
+(`queue_job_report(id, turn)`, `Job::as_of_turn`), a turn queued behind it
+or not.
 
 - **Never over an answer**: it waits while the chat is answering
   (`Stoppable::answers_if_idle`, up to 30 minutes), then answers there. A
@@ -659,15 +738,19 @@ saves ([config-and-data.md](./config-and-data.md)).
     Code (`{kind, message, resetsAt?}`), an error, its turns, whether its
     latest turn was a plan (`plan`) or ends in a question (`asks`), whether
     it was reported (and the report's marker id), `undone`, `swept`,
-    `noBackups`, `diffLines`;
+    `noBackups`, `diffLines`; `turnList` (its turns, a field of its own:
+    [Turns](#turns-one-job-per-code-chat)), `modelAsked` / `effortAsked`
+    (the person's own model or effort, kept for its next turns), `whyNew`
+    (why it's a new job and not the chat's carried on);
   - `modes`: each chat's Mode (conversation id → mode);
   - `codeChats`: each Code chat's folder (conversation id → `{path, ts}`);
   - `bypassConfirmed`: the one-time OK for Bypass permissions.
 - **`jobs/<id>/log.jsonl`**: every `yap-job` event the job sent, one a line,
   appended as it goes (the file is never written whole again); texts over
   4,000 characters trimmed, at most 5,000 lines. The tab replays it.
-- **`jobs/<id>/backup/`**: the files it changed, as they were before it
-  (`manifest.json` and `0001-<name>`…).
+- **`jobs/<id>/backup/<turn>/`**: the files each turn changed, as they were
+  before it (`manifest.json` and `0001-<name>`…). A job from before turns
+  has one right in `backup/`, read as its turn 1's (`store::backup_dirs`).
 - **`job_folders.json`** (`jobs/folders.rs`): the workspaces.
 - A job id is Yap's own: the time and four random bytes in hex, letters and
   digits only (`valid_id`), so it's never a path.
@@ -691,17 +774,30 @@ The run endpoint's backup hook (`integrations/claude_live/backup.rs`,
 
 - **Before a file is first changed**, Claude Code's http `PreToolUse` hook on
   `Edit|Write|MultiEdit|NotebookEdit` posts its input to Yap. A file that
-  exists is copied into `jobs/<id>/backup/` as `0001-<name>` (a plain name,
-  never a path); one that doesn't is noted as **created**, so Undo deletes it;
-  one over 50 MB is noted as too big, not copied. `manifest.json` maps each
-  copy to the original's absolute path.
-- **The first copy wins**: a later edit of the same file changes nothing, so
-  the backup is the file from before the job, across turns too.
+  exists is copied into the turn's `jobs/<id>/backup/<turn>/` as
+  `0001-<name>` (a plain name, never a path); one that doesn't is noted as
+  **created**, so Undo deletes it; one over 50 MB is noted as too big, not
+  copied. `manifest.json` maps each copy to the original's absolute path.
+- **The first copy wins within a turn**: a later edit of the same file in
+  that turn changes nothing, so its backup is the file from before the turn.
+  The next turn backs it up again, as it was then.
 - **The hook never blocks or denies** a tool: it answers `{}` at once.
-- **Undo job** (`job_undo`, not while it runs): every backup put back and
-  every file it made deleted (`backup::restore`), touching only the paths the
-  manifest names; what was restored, deleted, skipped, refused or failed comes
-  back to the page. The job is marked `undone` until its next turn.
+- **Undo this turn** (`job_undo_turn {id, turn}`, a turn's own button once a
+  job has several; not while it runs): that turn's files put back as they
+  were before it, the files it made deleted (`backup::restore_all`).
+  **Refused while a later turn, not undone, changed one of the same files**:
+  "Undo the later change first: “Add a minimap button” changed notes.md too."
+  (`runner::later_change`).
+- **Undo all** (`job_undo`; **Undo job** while the job has one turn; asked
+  first): every turn not undone already, each file put back as its earliest
+  backup has it — as it was before the job's first turn — and every file a
+  turn made deleted; touching only the paths the manifests name; what was
+  restored, deleted, skipped, refused or failed comes back to the page. The
+  job is marked `undone` (every turn with backups undone) until its next
+  turn.
+- **A job from before turns**: its one backup (right in `backup/`) is its
+  turn 1's; a turn 1 carried on since (its own `backup/1/` too) undoes from
+  the older copy first.
 - **Kept 7 days** after the job ended, then swept: "Its backups are gone: Yap
   keeps them 7 days."
 - **Limits**: a file changed another way (a command, a script, `sed`) isn't
@@ -768,17 +864,18 @@ Pages (`desktop/src/lib/`): `views/chat/` (`ChatSideSwitch`,
 
 | Event | Payload |
 |---|---|
-| `yap-job` | `{id, status, folder, conversation?, step?, file?, command?, about?, said?, todos?, now?, diff?, text?, cost?, problem?, ts}` — `status` queued \| running \| asking \| done \| failed \| stopped \| interrupted; `about` a command's description; `said` its words between tool calls; `todos` `[{content, status, activeForm?}]` (status pending \| in_progress \| completed); `now` the line it's on with no new step; `diff` `{file, kind, lines, added, removed, more?, all?}` — `kind` edit \| new \| rewrite \| write, each line its mark first (`-`, `+`, ` `; a lone `@` a gap); `text` its final words (an older Yap's words as it worked too); `problem` `{kind, message, resetsAt?}`, `kind` notSignedIn \| rateLimited \| billing \| account \| paysAnotherWay |
-| `yap-job-report` | `{job, conversation, messageId, markerId, status}` — `messageId` null when a newer question came first |
+| `yap-job` | `{id, status, folder, conversation?, step?, file?, command?, about?, said?, todos?, now?, diff?, text?, cost?, problem?, turn?, queued?, ts}` — `turn` the turn it's about (`TurnNote.n`), `queued` a request queued as that turn (its title); `status` queued \| running \| asking \| done \| failed \| stopped \| interrupted; `about` a command's description; `said` its words between tool calls; `todos` `[{content, status, activeForm?}]` (status pending \| in_progress \| completed); `now` the line it's on with no new step; `diff` `{file, kind, lines, added, removed, more?, all?}` — `kind` edit \| new \| rewrite \| write, each line its mark first (`-`, `+`, ` `; a lone `@` a gap); `text` its final words (an older Yap's words as it worked too); `problem` `{kind, message, resetsAt?}`, `kind` notSignedIn \| rateLimited \| billing \| account \| paysAnotherWay |
+| `yap-job-report` | `{job, turn, conversation, messageId, markerId, status}` — the turn it reports, and its status; `messageId` null when a newer question came first |
 | `yap-job-open` | `{id, conversation}` (with `yap-assistant-turn {phase: "open", conversationId, show: true}`) |
 | `yap-claude-approve` | `{id, run, conversation, origin, tool, summary, detail, label, askedTs}` — `run` is the job's id |
 | `yap-claude-approve-done` | `{id, run, outcome}` — allowed \| denied \| timedOut \| ended \| cancelled |
 | `yap-code-chat` | `{conversations, folder, removed?}` — those chats are Code chats in `folder` now (`null`: plain); `removed`: a workspace removed in Settings, its name; no conversations: the workspaces changed |
 
-**Chat's stream**: `{kind: "job", job: {id, folder, status, mode, conversation?}}`
-when a turn starts one (`stream::Event::Job`, a `JobRef`). The ask-first card
+**Chat's stream**: `{kind: "job", job: {id, folder, status, mode, conversation?, turn?}}`
+when a turn starts one, or carries a Code chat's job on (`stream::Event::Job`, a
+`JobRef`: `turn` the one its tab opens at). The ask-first card
 is a `confirm` event with `act: "job"` and `job: {folder, path, mode,
-modeLabel, brief, newFolder, web}`, answered by `chat_page_confirm`.
+modeLabel, brief, newFolder, web, continues}`, answered by `chat_page_confirm`.
 
 **Commands** (`jobs/commands.rs` unless said):
 
@@ -787,8 +884,9 @@ modeLabel, brief, newFolder, web}`, answered by `chat_page_confirm`.
 | `job_list` | every job, newest first |
 | `job_get {id}` | `{job, log}`: the job and its `yap-job` events (none once swept) |
 | `job_stop {id}` / `job_continue {id}` | Stop; Continue a stopped, interrupted or failed one |
-| `job_message {id, text}` | the tab's "Tell the job…" ("go ahead" after a plan carries it out) |
-| `job_undo {id}` | `{restored, deleted, skipped, refused, failed, error?}` |
+| `job_message {id, text}` | the tab's "Tell the job…": its next turn, queued while it works ("go ahead" after a plan carries it out) |
+| `job_undo {id}` | Undo all: `{restored, deleted, skipped, refused, failed, error?}` |
+| `job_undo_turn {id, turn}` | Undo this turn, the same; refused ("Undo the later change first…") while a later turn changed one of its files |
 | `job_open_terminal {id}` | its session in Windows Terminal, once it isn't running |
 | `job_folders_list` / `job_folders_add {path, name?, cap?}` / `job_folders_pick` / `job_folders_remove {name}` / `job_folders_set_cap {name, cap?}` | the workspaces (`pick`: the folder picker, then added) |
 | `job_mode_get {conversation?}` / `job_mode_set {conversation, mode}` | a chat's Mode: `{mode, label, bypassConfirmed, modes}` (Bypass refused until confirmed) |
@@ -816,7 +914,12 @@ the build's own stand-in replaying `script` from now on),
   folder, the workspaces by use), the spoken answer, the runner's slots and
   spec (the run key only in its environment), the steps' words, the to-do
   list, the diffs and their caps, a write's kind, the report's marker and
-  fallback, the approve card, `noBackups`.
+  fallback, the approve card, `noBackups`; turns: a Code chat's `start_job`
+  after its job carries it on, `fresh` or another workspace a new job, a
+  session gone a new job and why, a request while it works queued as one
+  next turn, a turn's title, an older job read as one turn, interrupted with
+  a request waiting, per-turn backups, Undo this turn, Undo all, "Undo the
+  later change first", an older job's single backup as its turn 1.
 - **E2E** ([`docs/e2e-tests.md`](../e2e-tests.md)): the scripted fake AI calls
   `start_job`, and Claude Code is the build's own stand-in (`yap.exe
   fake-claude <script>`, switched per turn with `e2e_claude_script`), whose
@@ -840,7 +943,8 @@ the build's own stand-in replaying `script` from now on),
   - `plan-jobs.spec.js`: jobs from a chat on the plan over the endpoint (one
     stand-in script plays the plan chat, the job and the report's question:
     `_for`), typed (the chat a Code chat after its job, its next question in
-    a new session in the workspace), by voice, refused, and in a Code chat.
+    a new session in the workspace), by voice, refused, and in a Code chat (its
+    follow-up carrying the job on: one job, two turns, `--resume`).
   - `code-chats-memory.spec.js`: a Code chat's question to the fake model
     without memory's passages, its "You", how the person wants answers, the
     eager RAG's note or About you's note (the name and the region kept), no
@@ -851,6 +955,13 @@ the build's own stand-in replaying `script` from now on),
     prompt with Yap's added, no slash commands, no `search_memory`; its
     transcript in the workspace's projects folder, gone with the chat (a
     job's stays); a plain plan chat as lean as before.
+  - `jobs-turns.spec.js`: one job per Code chat — two requests give one job,
+    one tab with two turns (the newest open, the earlier folded), two
+    reports, the second turn on `--resume` (the stand-in's `_dump_args` to a
+    file), a pill and a report card a turn opening the same tab at their
+    turn; a request while it works queued as the next turn; "start fresh" a
+    second job, its tab named apart; Undo this turn (refused while a later
+    turn changed the same file), Undo all asked first. Light and dark.
 - **Unit** for Code chats and memory: `chat::turn::prompt` (a Code chat's
   whole prompt built), `chat::turn::plan` (the `Spec`),
   `claude_plan::sessions` (the transcript under the workspace by its ids),

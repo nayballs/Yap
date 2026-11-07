@@ -19,8 +19,10 @@
 //! it never blocks or denies a tool — and a file it couldn't copy is noted
 //! as such.
 //!
-//! [`restore`] puts every backup back and deletes the files the run
-//! created. It touches only the paths the manifest names (plain absolute paths, outside the backup
+//! [`restore_all`] puts every backup back and deletes the files the run
+//! created — for several runs at once too (a job's turns, each its own
+//! backup folder: `jobs/<id>/backup/<turn>/`), each file as its earliest
+//! backup has it, so the files are as they were before the first. It touches only the paths the manifest names (plain absolute paths, outside the backup
 //! folder) and reads only plain file names inside the backup folder; any
 //! other is refused and said in the [`RestoreReport`].
 //!
@@ -309,18 +311,47 @@ pub(super) fn record(dir: &Path, folder: Option<&Path>, input: &Value, max: u64)
 
 // ---- Undo ----
 
-/// **Undo a run**: every backup put back, every file it created deleted.
+/// **Undo a run**: every backup put back, every file it created deleted
+/// ([`restore_all`] of one).
+#[cfg(test)]
 pub fn restore(dir: &Path) -> RestoreReport {
+    restore_all(&[dir.to_path_buf()])
+}
+
+/// The files a backup folder's manifest names: what a turn changed, for
+/// "Undo the later change first".
+pub fn originals(dir: &Path) -> Result<Vec<PathBuf>, String> {
+    Ok(read_manifest(dir)?.files.into_iter().map(|e| e.original).collect())
+}
+
+/// The same file (Windows' names don't care about case).
+pub fn same_path(a: &Path, b: &Path) -> bool {
+    key(a) == key(b)
+}
+
+/// **Undo several runs at once** (a job's turns, `dirs` oldest first): each
+/// file put back as its *earliest* backup has it — as it was before the
+/// first of them — and every file one of them made deleted. A manifest that
+/// can't be read: nothing done.
+pub fn restore_all(dirs: &[PathBuf]) -> RestoreReport {
     let mut report = RestoreReport::default();
-    let manifest = match read_manifest(dir) {
-        Ok(m) => m,
-        Err(e) => {
-            report.error = Some(e);
-            return report;
+    let mut manifests = Vec::new();
+    for dir in dirs {
+        match read_manifest(dir) {
+            Ok(m) => manifests.push((dir, m)),
+            Err(e) => {
+                report.error = Some(e);
+                return report;
+            }
         }
-    };
-    for e in &manifest.files {
-        put_back(dir, e, &mut report);
+    }
+    let mut seen = std::collections::HashSet::new();
+    for (dir, manifest) in &manifests {
+        for e in &manifest.files {
+            if seen.insert(key(&e.original)) {
+                put_back(dir, e, &mut report);
+            }
+        }
     }
     tracing::info!(
         restored = report.restored.len(),

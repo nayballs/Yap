@@ -500,6 +500,10 @@ pub(super) async fn build(t: &Asked<'_>, sizing: &Sizing, opened: &Opened) -> Bu
     // and a plan chat both have it.
     if let (true, Some(folder)) = (g.jobs, opened.code.as_ref()) {
         prompt.add(crate::jobs::code_chat::prompt_line_for(folder));
+        // Its job there, which a follow-up carries on (one job per Code chat).
+        if let Some(line) = crate::jobs::code_chat::job_line_in(Some(conv.id), folder) {
+            prompt.add(line);
+        }
     }
     let tabs_open = prompt.tabs(t).await;
     let here = crate::ai::ai_model::runs_here(&t.ep.provider, &t.ep.base_url);

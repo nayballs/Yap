@@ -24,7 +24,10 @@ pub struct Waiting {
     /// Not a job folder yet: added once they say yes.
     pub new_folder: bool,
     pub folder: Folder,
+    /// The job to start (or, with `follow_up`, the chat's job to carry on).
     pub job: super::store::Job,
+    /// A follow-up for the chat's job: its next turn, once they say yes.
+    pub follow_up: Option<super::runner::Ask>,
 }
 
 struct Slot {
@@ -88,6 +91,11 @@ pub fn question(folder: &str, mode: &str, new_folder: bool) -> String {
     }
 }
 
+/// The question Yap asks out loud before a follow-up for the chat's job.
+pub fn question_follow_up(folder: &str, mode: &str) -> String {
+    format!("Should I pass that to the job in {folder}, in {mode} mode? Say yes to send it.")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -98,6 +106,7 @@ mod tests {
             new_folder: true,
             folder: Folder { name: "garden-planner".into(), path: r"D:\Projects\garden-planner".into(), cap: None, added_ts: 0 },
             job: super::super::store::Job { id: "ab".into(), ..Default::default() },
+            follow_up: None,
         }
     }
 

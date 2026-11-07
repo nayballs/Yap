@@ -3505,8 +3505,9 @@ where they touch Chat's own code.
   [memory.md](./memory.md#code-chats-keep-memory-out)).
 - **A new code chat's first question** carries its workspace (`chat_send`'s
   `codeFolder`; `chat_view_state`'s `codeFolder` for one asked out loud).
-- **`stream::Event::Job`**: a job started in this turn; the panel opens its
-  tab at once.
+- **`stream::Event::Job`**: a job started in this turn, or the Code chat's
+  job carried on (its next turn: [jobs.md](./jobs.md#turns-one-job-per-code-chat));
+  the panel opens its tab at once, at that turn.
 - **The report** (`chat/turn/report.rs`), a turn Yap starts itself, and the
   spoken yes or no before a job (`turn/fast.rs` `job_answer_turn`, checked in
   `turn.rs` before any model): [jobs.md](./jobs.md#reports).

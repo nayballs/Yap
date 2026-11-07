@@ -127,11 +127,12 @@ pub(super) fn job_answer_turn(
     asked(conv.id, user_index);
     let (reply, chip) = match answer {
         crate::jobs::voice::Answer::Yes(w) => match crate::chat::tools::jobs::start_waiting(*w) {
-            Ok(job) => {
+            // A new job, or (a follow-up) the chat's job carried on.
+            Ok(begun) => {
                 if let Some(w) = watcher {
-                    w.send(crate::chat::stream::Event::Job { job: job.reference() });
+                    w.send(crate::chat::stream::Event::Job { job: begun.reference() });
                 }
-                (format!("On it: I've started a job in {}.", job.folder), format!("Started a job in {}", job.folder))
+                (begun.say, begun.chip)
             }
             Err(e) => (format!("I couldn't start the job: {e}"), "Didn't start a job".to_string()),
         },
