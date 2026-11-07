@@ -182,7 +182,7 @@ mod tests {
     }
 
     fn answered(text: &str, prompt: u64, answer: u64) -> ChatMessage {
-        ChatMessage { tokens: Some(MessageTokens { prompt, answer, per_second: Some(118.5) }), ..said("assistant", text) }
+        ChatMessage { tokens: Some(MessageTokens { prompt, answer, per_second: Some(118.5), cost_micros: None }), ..said("assistant", text) }
     }
 
     #[test]

@@ -66,7 +66,7 @@ use url::Url;
 use crate::config::YapConfig;
 
 /// The cloud providers with a list to ask for (every keyed provider).
-pub const PROVIDERS: [&str; 6] = crate::ai::ai_model::KEYED_PROVIDERS;
+pub const PROVIDERS: [&str; 7] = crate::ai::ai_model::KEYED_PROVIDERS;
 
 /// A good list is used and not asked for again for a day.
 pub const FRESH_FOR: u64 = 24 * 60 * 60;
@@ -460,6 +460,7 @@ fn label(provider: &str) -> &str {
         "anthropic" => "Anthropic",
         "openai" => "OpenAI",
         "chatgpt" => "ChatGPT",
+        crate::ai::claude_plan::PROVIDER => "your Claude plan",
         "gemini" => "Gemini",
         "openrouter" => "OpenRouter",
         "local" | "custom" => "the server",
@@ -545,6 +546,12 @@ async fn fetch(
         // the sign-in's token (the key store holds only a marker).
         "chatgpt" => {
             let list = crate::ai::chatgpt::models().await?;
+            Ok((list.len(), list.into_iter().map(|(id, name)| CatalogModel { id, name, ..Default::default() }).collect()))
+        }
+        // Your Claude plan: Claude Code lists no models; Yap's own list of
+        // full ids (`claude_plan::MODELS`), asked of nobody.
+        crate::ai::claude_plan::PROVIDER => {
+            let list = crate::ai::claude_plan::catalog();
             Ok((list.len(), list.into_iter().map(|(id, name)| CatalogModel { id, name, ..Default::default() }).collect()))
         }
         "anthropic" => {
@@ -1258,8 +1265,9 @@ fn broadcast(app: &AppHandle) {
 /// One check per provider at a time; the result is stored and broadcast.
 async fn refresh(app: Option<AppHandle>, provider: &str, key: String, force: bool) {
     // (The ChatGPT plan's list goes where its sign-in does: a test run's
-    // own fake, `chatgpt::oauth::api_base`.)
-    let Some(ep) = Endpoints::current().or_else(|| (provider == crate::ai::chatgpt::PROVIDER).then_some(Endpoints { standin: None })) else {
+    // own fake, `chatgpt::oauth::api_base`; the Claude plan's is Yap's own,
+    // asked of nobody.)
+    let Some(ep) = Endpoints::current().or_else(|| crate::ai::ai_model::is_plan(provider).then_some(Endpoints { standin: None })) else {
         return; // a test run without a stand-in: never online
     };
     let now = now_secs();

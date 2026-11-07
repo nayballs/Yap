@@ -13,6 +13,7 @@ pub mod chatgpt;
 // are, most of its API has no caller outside its tests.
 #[allow(dead_code)]
 pub mod claude_code;
+pub mod claude_plan;
 pub mod cleanup_context;
 pub mod cleanup_format;
 pub mod cleanup_strength;

@@ -93,13 +93,29 @@ export function costLine(m) {
   if (m.here) return 'free, on your PC';
   // Sign in with ChatGPT: it counts towards the plan, not dollars.
   if (m.provider === 'chatgpt') return 'on your ChatGPT plan';
+  // Your Claude plan: the plan pays; what it would have cost on the API
+  // (Claude Code's own estimate), apart from spend.
+  if (m.provider === 'claude-plan' || m.plan) {
+    return m.costMicros > 0 ? `on your Claude plan · ${aboutCost(m.costMicros)} on the API` : 'on your Claude plan';
+  }
   if (m.costMicros == null) return 'no price known';
   return aboutCost(m.costMicros);
 }
 
 /**
+ * A stretch's Claude plan use, apart from spend: "12K tokens on your Claude
+ * plan · ≈ $0.04 on the API, not charged" ('' none).
+ */
+export function planLine(t) {
+  if (!t?.planTokens) return '';
+  const value = t.planValueMicros > 0 ? ` · ${aboutCost(t.planValueMicros)} on the API, not charged` : '';
+  return `${fmtCount(t.planTokens)} tokens on your Claude plan${value}`;
+}
+
+/**
  * A stretch's split: "4.4K on this PC · 1.2K cloud · ≈ $0.01", "1.2K cloud",
- * "free, on your PC" (all on this PC), "none yet".
+ * "free, on your PC" (all on this PC), "none yet". The cost is API spend
+ * only (a Claude plan's calls aren't in it: `planLine`).
  */
 export function splitLine(t) {
   if (!t?.calls) return 'none yet';

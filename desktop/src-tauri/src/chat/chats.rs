@@ -146,6 +146,12 @@ pub struct MessageTokens {
     pub answer: u64,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub per_second: Option<f64>,
+    /// The turn's estimated cost, every call of it (millionths of a dollar,
+    /// `usage::LastCall::cost_micros`): "API key · $0.004" under the answer,
+    /// or on a Claude plan "≈ $0.004 on the API". An older Yap's save drops
+    /// it (the line then says none).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cost_micros: Option<u64>,
 }
 
 impl MessageTokens {
@@ -154,7 +160,7 @@ impl MessageTokens {
         if last.prompt.is_none() && last.answer.is_none() {
             return None;
         }
-        Some(MessageTokens { prompt: last.prompt.unwrap_or(0), answer: last.answer.unwrap_or(0), per_second: last.per_second })
+        Some(MessageTokens { prompt: last.prompt.unwrap_or(0), answer: last.answer.unwrap_or(0), per_second: last.per_second, cost_micros: last.cost_micros })
     }
 }
 

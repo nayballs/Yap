@@ -219,6 +219,11 @@ pub async fn after_answer(app: Option<&AppHandle>, conversation: u64, ep: Endpoi
     if budget::mode() != budget::Mode::Summary {
         return;
     }
+    // Your Claude plan: Claude Code compacts its own session (and Yap's
+    // summary would be a call on the plan of its own).
+    if ep.provider == crate::ai::claude_plan::PROVIDER {
+        return;
+    }
     if crate::ai::eval::active() {
         check(app.cloned(), conversation, ep, look).await;
         return;

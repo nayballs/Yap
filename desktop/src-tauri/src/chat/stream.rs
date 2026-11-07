@@ -173,6 +173,10 @@ pub fn doing(name: &str) -> &'static str {
         "scroll" => "Scrolling the page…",
         "go_to" => "Going to a page…",
         "switch_tab" => "Switching tabs…",
+        // Yap's read-only tools on your Claude plan (claude_live.rs).
+        "list_meetings" | "search_meetings" | "get_meeting" => "Looking at your meetings…",
+        "list_tasks" => "Looking at your tasks…",
+        "search_memory" => "Searching Yap's memory…",
         _ => "Working…",
     }
 }

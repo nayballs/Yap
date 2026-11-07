@@ -32,6 +32,8 @@ export {
   isCloud,
   tabOf,
   gptState,
+  waysState,
+  wayName,
   fmtSize,
   sameUrl,
   whereLocal,

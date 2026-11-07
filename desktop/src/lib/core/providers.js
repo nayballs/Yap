@@ -15,14 +15,31 @@
 //   Gemini is "Google Gemini" where the words go): the sets are below, side
 //   by side, so making them one is a change here.
 import { PROVIDER_ICONS } from './providerIcons.js';
-import { KEYED_PROVIDERS, CHATGPT, GPT_TAB, GPT_PROVIDERS, GPT_WAYS, PROVIDER_LABELS } from './providerIds.js';
+import {
+  KEYED_PROVIDERS,
+  CHATGPT,
+  GPT_TAB,
+  GPT_PROVIDERS,
+  GPT_WAYS,
+  CLAUDE_PLAN,
+  CLAUDE_TAB,
+  CLAUDE_PROVIDERS,
+  CLAUDE_WAYS,
+  TAB_WAYS,
+  waysTabOf,
+  isPlan,
+  PROVIDER_LABELS,
+} from './providerIds.js';
 
-// The keyed providers, ChatGPT's id, OpenAI's two ways and the short names
-// live in providerIds.js (pure: Yap Link's phone page loads it as it is);
-// this is where the app imports them from.
-export { KEYED_PROVIDERS, CHATGPT, GPT_TAB, GPT_PROVIDERS, GPT_WAYS, PROVIDER_LABELS };
+// The keyed providers, ChatGPT's and the Claude plan's ids, the two-way
+// entries (OpenAI's, Claude's) and the short names live in providerIds.js
+// (pure: Yap Link's phone page loads it as it is); this is where the app
+// imports them from.
+export { KEYED_PROVIDERS, CHATGPT, GPT_TAB, GPT_PROVIDERS, GPT_WAYS, CLAUDE_PLAN, CLAUDE_TAB, CLAUDE_PROVIDERS, CLAUDE_WAYS, TAB_WAYS, waysTabOf, isPlan, PROVIDER_LABELS };
 
 export const CHATGPT_PLAN_KEY = 'chatgpt-plan';
+/** The key store's marker while Claude Code is signed in here (ai/claude_plan.rs). */
+export const CLAUDE_PLAN_KEY = 'claude-plan';
 export const isKeyed = (p) => KEYED_PROVIDERS.includes(p);
 
 /** The Cloud providers tabs: the keyed providers and a custom endpoint. */
@@ -34,6 +51,8 @@ export const BASE_URLS = {
   anthropic: 'https://api.anthropic.com/v1',
   openai: 'https://api.openai.com/v1',
   chatgpt: 'https://api.openai.com/v1',
+  // Your Claude plan: nothing is sent here (ai/claude_plan.rs BASE_URL).
+  'claude-plan': 'claude-code://plan',
   gemini: 'https://generativelanguage.googleapis.com/v1beta/openai/',
   openrouter: 'https://openrouter.ai/api/v1',
   local: 'http://localhost:11434/v1',
@@ -72,8 +91,14 @@ export function modeOf(provider) {
   return provider === 'ondevice' ? 'ondevice' : provider === 'local' ? 'selfhosted' : 'cloud';
 }
 
-/** The Cloud providers tab a saved provider id shows under (OpenAI's two ways: GPT_TAB). */
-export const cloudTabOf = (p) => (GPT_PROVIDERS.includes(p) ? GPT_TAB : p);
+/** The Cloud providers tab a saved provider id shows under (a two-way entry's: GPT_TAB, CLAUDE_TAB). */
+export const cloudTabOf = (p) => waysTabOf(p) ?? p;
+/**
+ * The way a scope moving onto the Claude tab takes (the Chat scope only:
+ * the plan is Chat's): the plan when Claude Code is signed in here, else
+ * the key (the way that works without installing anything).
+ */
+export const claudeWay = (planOn) => (planOn ? CLAUDE_PLAN : 'anthropic');
 /**
  * The way a scope moving onto the ChatGPT tab takes: the plan when it's
  * signed in, else an OpenAI key already saved, else the plan (Continue with
@@ -84,7 +109,9 @@ export const gptWay = (planOn, keyOn) => (planOn || !keyOn ? CHATGPT : 'openai')
 /** The Cloud providers mode's tabs, with their marks. */
 export const CLOUD_TABS = [
   { value: 'groq', label: 'Groq', icon: PROVIDER_ICONS.groq },
-  { value: 'anthropic', label: 'Anthropic', icon: PROVIDER_ICONS.anthropic, mono: true },
+  // Your Claude plan or an Anthropic key, inside, for Chat
+  // (ClaudePlanProvider.svelte); an Anthropic key elsewhere.
+  { value: 'anthropic', label: 'Claude', icon: PROVIDER_ICONS.anthropic, mono: true },
   // The plan or an OpenAI key, inside (ChatGptProvider.svelte).
   { value: GPT_TAB, label: 'ChatGPT', icon: PROVIDER_ICONS.openai, mono: true },
   { value: 'gemini', label: 'Gemini', icon: PROVIDER_ICONS.gemini },
@@ -98,6 +125,7 @@ export const MODEL_HINTS = {
   anthropic: 'e.g. claude-haiku-4-5',
   openai: 'e.g. gpt-5-mini',
   chatgpt: 'a model your ChatGPT plan offers',
+  'claude-plan': 'a Claude model your plan offers',
   gemini: 'e.g. gemini-3.5-flash',
   openrouter: 'e.g. meta-llama/llama-3.1-8b-instruct',
   local: 'your Ollama / LM Studio model name (e.g. llama3.1)',
@@ -117,6 +145,7 @@ export const SCOPE_PROVIDER_LABELS = {
   anthropic: 'Anthropic',
   openai: 'OpenAI',
   chatgpt: 'ChatGPT',
+  'claude-plan': 'your Claude plan',
   gemini: 'Gemini',
   openrouter: 'OpenRouter',
   ondevice: 'Local',
@@ -143,6 +172,7 @@ export const PROVIDER_DESTINATIONS = {
   anthropic: 'Anthropic',
   openai: 'OpenAI',
   chatgpt: 'OpenAI, on your ChatGPT plan',
+  'claude-plan': 'Anthropic, through Claude Code on your Claude plan',
   gemini: 'Google Gemini',
   openrouter: 'OpenRouter',
   custom: 'your custom endpoint',

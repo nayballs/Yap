@@ -11,7 +11,8 @@
 //!   (`notes::commands::export_markdown`, what "Save as .md" writes), and
 //!   `notes/notes.json`, the whole store (folders and actions too), and
 //!   `notes/versions.json`, each note's earlier versions (`notes/versions.rs`);
-//! - `tasks.json`, `skills.json` (the person's own Skills), `chats/chats.json` with each chat as Markdown, and
+//! - `tasks.json`, `skills.json` (the person's own Skills), `chats/chats.json` with each chat as Markdown
+//!   (and `chats/claude_sessions.json`, each chat's Claude Code session on your Claude plan, when any), and
 //!   `memory/` — Memory's own export (`memory::export`) and `memory.json`;
 //! - `dictionary/dictionary.csv` — corrections and snippets, the CSV the
 //!   Dictionary view's Export… writes ([`dictionary_csv`]);
@@ -335,6 +336,9 @@ pub struct Inputs {
     /// Each note's version history (`notes::versions::export_all`).
     pub note_versions: Vec<Value>,
     pub chats: Vec<crate::chat::chats::Conversation>,
+    /// claude_sessions.json: each Chat conversation's Claude Code session
+    /// on your Claude plan (`ai/claude_plan/sessions.rs`).
+    pub claude_sessions: Value,
     pub tasks: Value,
     /// skills.json: the person's own Skills (chat/skills.rs).
     pub skills: Value,
@@ -413,6 +417,10 @@ screenshots/: Chat's screenshots (PNG).\n"
         files.push((name, chat_markdown(c, when).into_bytes()));
     }
     files.push(("chats/chats.json".into(), pretty(&json!({ "conversations": i.chats }))));
+    // Which Claude Code session each chat on your Claude plan was (when any was).
+    if i.claude_sessions["conversations"].as_object().is_some_and(|c| !c.is_empty()) {
+        files.push(("chats/claude_sessions.json".into(), pretty(&i.claude_sessions)));
+    }
 
     // Tasks, your Skills, memory.
     files.push(("tasks.json".into(), pretty(&i.tasks)));
@@ -631,6 +639,7 @@ fn inputs(audio: bool) -> Inputs {
         notes_json: crate::notes::store_json(),
         note_versions: crate::notes::versions::export_all(),
         chats: crate::chat::chats::with_all(|c| c.to_vec()),
+        claude_sessions: crate::ai::claude_plan::sessions::all(),
         tasks: serde_json::to_value(crate::notes::task_store::snapshot()).unwrap_or(Value::Null),
         skills: serde_json::to_value(crate::chat::skills::own()).unwrap_or(Value::Null),
         memory: crate::memory::items(),
@@ -873,6 +882,7 @@ mod tests {
             notes_json: "{\"notes\":[]}".into(),
             note_versions: vec![json!({ "note": 7, "title": "Allotment: plans?", "versions": [{ "n": 1, "kind": "typed", "text": "Leeks" }] })],
             chats: vec![],
+            claude_sessions: json!({ "conversations": { "3": { "session": "0b8f4c1e-6a2d-4f5e-9c1b-2d3e4f5a6b7c", "created": 1_790_000_000u64, "seen": 2, "model": "claude-haiku-5-5", "ts": 1_790_000_100u64 } } }),
             tasks: json!({ "tasks": [], "archived": [] }),
             skills: json!({ "skills": [{ "id": "s1", "name": "Budget numbers", "command": "budget-numbers", "instructions": "List every amount said.", "runsOn": "meeting" }] }),
             memory: vec![],
@@ -906,6 +916,7 @@ mod tests {
             "notes/notes.json",
             "notes/versions.json",
             "chats/chats.json",
+            "chats/claude_sessions.json",
             "tasks.json",
             "skills.json",
             "memory/You.md",

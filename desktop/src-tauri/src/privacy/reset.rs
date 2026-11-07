@@ -171,8 +171,8 @@ pub const KINDS: &[About] = &[
         group: CHAT,
         label: "Chats",
         says: "Every chat, archived ones too, with its screenshots. Documents Chat wrote stay in Notes",
-        files: &["(chats.json)", "chat-images/", "(memory.json)", "(search-index/)"],
-        stores: &["chats", "memory"],
+        files: &["(chats.json)", "chat-images/", "claude_sessions.json", "(memory.json)", "(search-index/)"],
+        stores: &["chats", "claudeSessions", "memory"],
     },
     About {
         kind: Kind::Memory,
@@ -398,6 +398,12 @@ impl Choice {
         Cut::of(self.has(Kind::Chats), false)
     }
 
+    /// claude_sessions.json: Chat's conversations' Claude Code sessions
+    /// (your Claude plan; Ask threads have none).
+    pub fn claude_sessions(&self) -> Cut {
+        Cut::of(self.has(Kind::Chats), false)
+    }
+
     /// memory.json: what's remembered, or what the passes read of chats and
     /// meetings that went.
     pub fn memory(&self) -> Cut {
@@ -470,6 +476,7 @@ const STORES: &[(&str, Rule)] = &[
     ("tasks.json", Choice::tasks),
     ("chats.json", Choice::chats),
     ("chat-images/", Choice::chat_images),
+    ("claude_sessions.json", Choice::claude_sessions),
     ("memory.json", Choice::memory),
     ("search-index/", Choice::search_index),
     ("calendar.json", Choice::briefs),
@@ -490,6 +497,7 @@ const SET_ASIDE: &[(&str, Rule)] = &[
     ("notes", Choice::notes),
     ("note_pins", Choice::notes),
     ("chats", Choice::chats),
+    ("claude_sessions", Choice::claude_sessions),
     ("memory", Choice::memory),
     ("tasks", Choice::tasks),
     ("dictation_stats", Choice::stats),
@@ -811,6 +819,10 @@ fn clear_stores(c: &Choice, done: &mut Done) -> Gone {
     for id in &gone.chats {
         crate::apps::moved_on(Some(*id));
     }
+    // Their Claude Code sessions (your Claude plan), the warm ones ended.
+    if c.claude_sessions() == Cut::Whole {
+        crate::ai::claude_plan::sessions::reset();
+    }
     // Memory: all of it (Undo's copies too), or what it read of what went.
     match c.memory() {
         Cut::Whole => done.memory = crate::memory::reset(),
@@ -940,6 +952,9 @@ fn run(app: &AppHandle, c: &Choice) -> Result<Done, String> {
     }
     if c.chats() != Cut::Keep {
         crate::chat::chats::saved()?;
+    }
+    if c.claude_sessions() != Cut::Keep {
+        crate::ai::claude_plan::sessions::saved()?;
     }
     if c.memory() != Cut::Keep {
         crate::memory::saved()?;

@@ -51,7 +51,7 @@ pub fn family_rule(provider: &str, model: &str) -> Option<bool> {
     let id = model.to_ascii_lowercase();
     // A routed id ("openai/gpt-5-mini") is judged by its model's name.
     let name = id.rsplit('/').next().unwrap_or(&id);
-    match crate::ai::chatgpt::as_openai(provider) {
+    match crate::ai::claude_plan::as_api(provider) {
         "ondevice" => Some(false),
         "anthropic" => id.starts_with("claude").then_some(true),
         "gemini" => {

@@ -120,6 +120,13 @@ pub fn describe(name: &str, args: &Value, title_of: &dyn Fn(u64) -> Option<Strin
         "edit_note" | "update_note" => Activity::new("notes", with(titled(&["note_id", "id"]), "Changing", "Changing a note")),
         "create_note" => Activity::new("notes", with(text(&["title"]).map(|t| quoted(&t)), "Writing", "Writing a note")),
         "list_folders" => Activity::new("notes", "Looking at your folders"),
+        // Yap's read-only tools on your Claude plan (its run endpoint,
+        // integrations/claude_live.rs: `yap.exe mcp`'s, memory's).
+        "list_meetings" => Activity::new("notes", "Looking through your meetings"),
+        "search_meetings" => Activity::new("notes", dotted(text(&["query"]), "Searching your meetings")),
+        "get_meeting" => Activity::new("notes", with(titled(&["id", "note_id"]), "Reading", "Reading a meeting")),
+        "list_tasks" => Activity::new("notes", "Looking at your tasks"),
+        "search_memory" => Activity::new("memory", dotted(text(&["query"]), "Searching Yap's memory")),
         "copy_to_clipboard" => Activity::new("tool", "Copying to the clipboard"),
         "open_app" => Activity::new("apps", with(text(&["name"]), "Opening", "Opening the app")),
         "list_apps" => Activity::new("apps", "Looking for the app"),
@@ -233,6 +240,12 @@ mod tests {
         assert_eq!(line("switch_tab", json!({ "tab": 2 })), "Switching tabs beside the chat");
         assert_eq!(describe("click", &Value::Null, &titles).mark, "page");
         assert_eq!(line("something_new", json!({})), "Working");
+        // Yap's read-only tools on a Claude plan.
+        assert_eq!(line("search_meetings", json!({ "query": "launch" })), "Searching your meetings · launch");
+        assert_eq!(line("get_meeting", json!({ "id": 7 })), "Reading ‘Tidecaller guide’");
+        assert_eq!(line("get_meeting", json!({ "id": 99 })), "Reading a meeting");
+        assert_eq!(line("search_memory", json!({ "query": "Sam" })), "Searching Yap's memory · Sam");
+        assert_eq!(line("list_tasks", json!({})), "Looking at your tasks");
         // The kinds the page may mark.
         assert_eq!(describe("web_search", &Value::Null, &titles).mark, "search");
         assert_eq!(describe("web_fetch", &Value::Null, &titles).mark, "read");

@@ -57,6 +57,34 @@ export function modelLine(m) {
   return [modelName(m), providerName(m)].filter(Boolean).join(' · ');
 }
 
+/** Millionths of a dollar as an answer's line says them: "$0.004", "$0.0004", "under $0.0001". */
+function dollars(micros) {
+  const usd = (Number(micros) || 0) / 1_000_000;
+  if (usd < 0.0001) return 'under $0.0001';
+  if (usd < 0.01) return `$${usd.toFixed(4).replace(/0+$/, '')}`;
+  return `$${usd.toFixed(2)}`;
+}
+
+/**
+ * **An answer's model line, with how it was paid** (Chat's byline): Claude
+ * on your Claude plan "Claude Haiku 5.5 · Your Claude plan · ≈ $0.004 on the
+ * API" (Claude Code's estimate of what the plan saved), on an Anthropic key
+ * "Claude Haiku 5.5 · API key · $0.004" (the list price); any other model as
+ * `modelLine`. `tokens`: the answer's (`costMicros`, the turn's estimate).
+ */
+export function paidLine(m, tokens) {
+  if (!m) return '';
+  const cost = tokens?.costMicros;
+  const known = typeof cost === 'number' && cost >= 0;
+  if (m.provider === 'claude-plan') {
+    return [modelName(m), 'Your Claude plan', known && cost > 0 ? `≈ ${dollars(cost)} on the API` : ''].filter(Boolean).join(' · ');
+  }
+  if (m.provider === 'anthropic') {
+    return [modelName(m), 'API key', known ? dollars(cost) : ''].filter(Boolean).join(' · ');
+  }
+  return modelLine(m);
+}
+
 /**
  * Where the model runs, in one line: "Runs on this PC: nothing leaves it",
  * "Runs in Groq's cloud", "Runs on my-server:8080".
@@ -64,6 +92,7 @@ export function modelLine(m) {
 export function whereItRuns(m, host = '') {
   if (!m) return '';
   if (m.provider === 'ondevice') return 'Runs on this PC: nothing leaves it';
+  if (m.provider === 'claude-plan') return "Runs in Anthropic's cloud on your Claude plan, through Claude Code on this PC";
   if (m.onThisPc) return host ? `Runs on this PC (${host})` : 'Runs on this PC';
   if (CLOUD_ORDER.includes(m.provider)) return `Runs in ${PROVIDER_LABELS[m.provider]}'s cloud`;
   return host ? `Runs on ${host}` : 'Runs on your own server';
