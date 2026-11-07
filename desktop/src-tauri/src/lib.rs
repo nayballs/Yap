@@ -528,6 +528,7 @@ pub fn run() {
             jobs::commands::job_open_terminal,
             jobs::commands::job_folders_list,
             jobs::commands::job_folders_add,
+            jobs::commands::job_folders_pick,
             jobs::commands::job_folders_remove,
             jobs::commands::job_folders_set_cap,
             jobs::commands::job_mode_get,
@@ -862,6 +863,8 @@ pub fn run() {
             dictionary::learn::e2e_learn_correction,
             #[cfg(debug_assertions)]
             dictionary::files::e2e_dictionary_file,
+            #[cfg(debug_assertions)]
+            jobs::commands::e2e_job_folder,
             #[cfg(debug_assertions)]
             dictionary::snippet_offer::e2e_snippet_offer_reset,
             #[cfg(debug_assertions)]

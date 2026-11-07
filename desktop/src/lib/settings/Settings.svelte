@@ -46,6 +46,7 @@
     voice: () => import('./VoicePage.svelte'),
     memory: () => import('./MemorySection.svelte'),
     skills: () => import('./SkillsPage.svelte'),
+    jobs: () => import('./JobsPage.svelte'),
     models: () => import('./SpeechPage.svelte'),
     cleanup: () => import('./LanguageModelsPage.svelte'),
     connectors: () => import('./ConnectorsSection.svelte'),
@@ -621,6 +622,10 @@
           {:else if section === 'skills'}
             {#await PAGES.skills() then { default: SkillsPage }}
               <SkillsPage />
+            {/await}
+          {:else if section === 'jobs'}
+            {#await PAGES.jobs() then { default: JobsPage }}
+              <JobsPage {cfg} {goto} {onshowview} />
             {/await}
           {:else if section === 'models'}
             {#await PAGES.models() then { default: SpeechPage }}

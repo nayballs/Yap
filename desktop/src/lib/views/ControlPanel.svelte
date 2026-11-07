@@ -46,6 +46,9 @@
   import { menuOrDialogOpen } from '../ui/contextMenu.svelte.js';
   import { noteAccountPicture } from '../core/connections.js';
   import { prefetchHome } from './home/homeData.js';
+  // Jobs: followed from the start, so a bar card's Open (`yap-job-open`)
+  // finds Chat ready for it.
+  import { initJobs } from '../stores/jobs.svelte.js';
 
   // Home is in this window's chunk; every other view is a chunk of its own,
   // loaded the first time it shows and fetched once the window is idle
@@ -275,6 +278,7 @@
   // (`yap-dictation-error`): one place.
   onMount(() => {
     const uns = [];
+    initJobs();
     // The views' chunks (VIEWS above), fetched once the window is idle, so
     // opening one never waits.
     const idle = window.requestIdleCallback ?? ((f) => setTimeout(f, 2000));

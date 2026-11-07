@@ -122,7 +122,7 @@ pub struct Card {
     pub style: &'static str,
     /// The glyph by the title: "call" | "update" | "notes" | "timer" |
     /// "screen" | "error" | "tip" | "dictionary" | "mic" | "clipboard" |
-    /// "assistant" | "".
+    /// "assistant" | "job" (Jobs: a job done, a step to allow) | "".
     /// On a call card, "calendar" stands in for a missing app mark (a
     /// calendar meeting with no call app).
     pub icon: &'static str,
@@ -610,6 +610,10 @@ pub struct Status {
     /// The first-use pointers still due (`bar/pointer.rs`), for someone
     /// who has never dictated.
     first_use: Option<pointer::Due>,
+    /// Jobs not over yet (`jobs/`: queued, running or asking): the bar says
+    /// "1 job running" while it's idle, and a click opens the newest one
+    /// (`bar_action "jobs"`).
+    jobs: usize,
 }
 
 pub fn status() -> Status {
@@ -617,6 +621,7 @@ pub fn status() -> Status {
     let meeting = crate::meetings::meeting::state();
     let call = crate::calls::meeting_detect::tray_item().map(|(_, label)| label);
     let first_use = pointer::status();
+    let jobs = crate::jobs::store::live_ids().len();
     let now = now_ms();
     let s = lock();
     Status {
@@ -646,6 +651,7 @@ pub fn status() -> Status {
             .map(|c| c.id.clone())
             .collect(),
         first_use,
+        jobs,
     }
 }
 
@@ -1506,6 +1512,13 @@ fn act(app: &AppHandle, action: &str) -> Result<(), String> {
         "quick-note" => {
             give_focus_back();
             crate::notes::quick_note::toggle_soon(app);
+        }
+        // "1 job running" (`jobs/`): the main window on the newest job's
+        // chat and its tab.
+        "jobs" => {
+            if let Some(id) = crate::jobs::store::live_ids().into_iter().next() {
+                crate::chat::turn::open_job(app, &id);
+            }
         }
         // The ^ menu's Paste last transcript (`bar/menu.rs`): into the app
         // you're in, as its shortcut does.

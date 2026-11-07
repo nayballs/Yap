@@ -89,6 +89,12 @@ export function createChatState({ onopensettings = () => null, onopennote = () =
       doc.onSection(ev);
       return true;
     }
+    // A job this turn started (chat/tools/jobs.rs): its tab opens at once,
+    // as a page's does; its pill comes with the jobs list (stores/jobs.svelte.js).
+    if (ev?.kind === 'job') {
+      if (ev.job?.id) doc.showJob(ev.job);
+      return true;
+    }
     if (ev?.kind === 'tool') doc.onTool(ev);
     return false;
   }
@@ -1033,7 +1039,7 @@ export function createChatState({ onopensettings = () => null, onopennote = () =
       if (ev?.kind === 'page' && ev.page?.url && !shownPages.some((p) => p.url === ev.page.url)) shownPages = [...shownPages, ev.page];
       if (ev?.kind === 'offer' && ev.offer?.url && !shownOffers.some((o) => o.url === ev.offer.url)) shownOffers = [...shownOffers, ev.offer];
       // A document, a picture or a page of this turn (the panel), while this chat is the one shown.
-      if (ev?.kind === 'document' || ev?.kind === 'section' || ev?.kind === 'picture' || ev?.kind === 'page' || ev?.kind === 'offer' || ev?.kind === 'tool') {
+      if (ev?.kind === 'document' || ev?.kind === 'section' || ev?.kind === 'picture' || ev?.kind === 'page' || ev?.kind === 'offer' || ev?.kind === 'job' || ev?.kind === 'tool') {
         if (mine('user') >= 0) {
           const at = mine('assistant');
           if (docEvent(ev, at >= 0 ? messages[at] : null)) return;

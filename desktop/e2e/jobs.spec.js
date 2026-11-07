@@ -1,10 +1,11 @@
 // Jobs (desktop/src-tauri/src/jobs.rs, chat/tools/jobs.rs, chat/turn/report.rs):
 // Chat or the Voice Assistant hands a task to the person's own Claude Code,
 // which works in one of their folders in the background; Yap follows it and
-// the chat's model reports back — out loud when it was asked by voice. No
-// Jobs UI yet (a later wave): everything is driven through the scripted fake
-// AI (`scriptChat`) and Yap's commands, and checked through `job_get`, the
-// `yap-job` events, the conversation and the files.
+// the chat's model reports back — out loud when it was asked by voice. The
+// backend's side: everything is driven through the scripted fake AI
+// (`scriptChat`) and Yap's commands, and checked through `job_get`, the
+// `yap-job` events, the conversation and the files (the Jobs screens have
+// their own spec, jobs-ui.spec.js).
 //
 // Claude Code is this build's own stand-in (`yap.exe fake-claude <script>`,
 // ai/claude_code/fake.rs), switched per turn with the debug-only
@@ -408,13 +409,14 @@ test('a folder new to jobs is asked first, and a job never starts or is steered 
     { plain: true, content: 'It tidied notes.md in recipe-box.' },
   ]);
   await send(main, `Start a job in ${RECIPES} to tidy notes.md.`);
-  const card = thread(main).getByTestId('chat-page-confirm');
+  // (The Jobs UI's own card for a job: JobConfirm.svelte.)
+  const card = thread(main).getByTestId('chat-job-confirm');
   await expect(card).toHaveAttribute('data-state', 'asking');
   await expect(card).toContainText('Yap wants to start a job in ‘recipe-box’ (Auto)');
   await expect(card).toContainText('Jobs haven’t worked in this folder before.');
   expect((await jobs(yap)).length).toBe(before);
   await shot(main, '02-asked-before-a-new-folder');
-  await card.getByRole('button', { name: 'Allow once' }).click();
+  await card.getByRole('button', { name: 'Start' }).click();
   await expect(lastAnswer(main)).toHaveText("On it: I've started a job in recipe-box.");
   const job = await ended(yap, (await newJob(yap, before)).id);
   expect(job).toMatchObject({ folder: 'recipe-box', path: RECIPES, status: 'done' });
