@@ -65,7 +65,7 @@ The token-authenticated local API, Yap's MCP server (`yap.exe mcp`) and adding i
   build fails with "Access is denied" (2026-10-17, Claude Code's `~/.claude.json`).
   The launcher (`dev-update.ps1`) also stops any such helper before building.
 - **`integrations/claude_live.rs`** (+ `claude_live/`: `server`, `rpc`,
-  `approve`, `backup`, `reads`, `jobs`, `turn`) — **the endpoint Claude Code runs talk back
+  `approve`, `backup`, `reads`, `jobs`, `eyes`, `turn`) — **the endpoint Claude Code runs talk back
   to** (2026-11-07): Yap starts the person's own Claude Code for Chat on
   their Claude plan and for [Jobs](./jobs.md) (ai-models.md, "The Claude Code
   engine"), and those runs reach this. Below.
@@ -121,14 +121,38 @@ no Local API (the bridge can be off), and it reaches the live UI.
   after the same safety rule and the evaluation's intercept. The list is read
   once per session, so a session made without them is started again to get
   them. [jobs.md](./jobs.md#from-a-plan-chat).
-- **A Chat run's turn** (`turn.rs`): `RunHandle::begin_turn(Context)` gives
+- **The screen and the pages from a plan chat** (`eyes.rs`, 2026-11-07): for
+  a Chat run registered with `RunSpec::eyes` (`with_eyes`: the screen look's
+  gate and the pages' and pictures', as the tool loop's `Gates` has them;
+  never a Job's run), `look_at_screen`, `open_page`, `read_open_page`,
+  `switch_tab`, `snap_page`, `find_pictures`, `look_at_picture` and
+  `show_picture`, listed with the tool loop's own schemas and descriptions
+  (reads `readOnlyHint`; opening a page, switching tabs and showing a picture
+  not, so Claude Code runs them in order), each call run by the tool loop's
+  own code (`see_screen::execute`, `pages::execute`, `act::execute` for
+  `switch_tab` alone, `pictures::execute`) on the turn's own web side (a
+  `web::Turn`: the person's links, the pages Claude Code's searches found,
+  `Marks::found`). Refused first for a turn asked away from Chat
+  (`Context::eyes`) and — the screen — during a meeting or a call. The
+  result's JSON is the first content block; each picture looked at follows
+  as a line saying what it is and **MCP image content**
+  (`{"type":"image","data","mimeType"}`), which Claude Code 2.1.296 turns into
+  an image block the model reads. What a call shows goes to the turn's stream
+  (`Event::Screen`, `Event::Page`, `Event::SwitchTab`, `Event::Picture`); the
+  screenshots are kept with the question. A capture or a page's shot takes a
+  few seconds, well inside the run's 11-minute tool timeout. Never acting on
+  a page (`click`, `type_text`, `scroll`, `go_to`).
+  [chat-and-assistant.md](./chat-and-assistant.md#chat-on-your-claude-plan-2026-11-07).
+- **A Chat run's turn** (`turn.rs`): `RunHandle::begin_turn(Context, web)` gives
   the run its turn — the question, the answer before it, the conversation,
   where it was asked (`JobsTurn`), web content from the start — and a `Turn`
   whose stream carries what a call shows (the job's card, its tab) back to
   the plan turn; dropping it ends the turn, and a call waiting on the person
   stops. A call with no turn open does nothing. **The web flag** comes from
   the turn's start, the plan turn's events (`Marks::web`: a `WebSearch` or
-  `WebFetch` beginning) and `job_status` (`Slot::set_web`). **One order for
+  `WebFetch` beginning; `Marks::began`: one of Yap's calls that brings the
+  screen's or a page's words in, `eyes::SEES`) and `job_status`, a look or a
+  page read (`Slot::set_web`). **One order for
   two paths**: a call that acts first waits, at most 5 s (`SEEN_WAIT`), for
   its own tool call to show in the turn's events (`Marks::began`,
   `Slot::seen`), since Claude Code writes a tool call's start before it runs
@@ -170,8 +194,11 @@ no Local API (the bridge can be off), and it reaches the live UI.
   file's path or contents, a prompt or a key.
 - Tested in `claude_live/tests.rs` (the listener's refusals, the MCP subset,
   the reads, `approve`'s card and its ends, the hook, restore, the job tools
-  for a turn, the key named in the files and only in the run's environment) and through the stand-in in the Jobs and plan e2e specs
-  (`plan-jobs.spec.js` for the job tools over the endpoint).
+  for a turn, the screen's and the pages' tools listed, allowed and refused,
+  the key named in the files and only in the run's environment) and through the stand-in in the Jobs and plan e2e specs
+  (`plan-jobs.spec.js` for the job tools over the endpoint, `plan-eyes.spec.js`
+  for the screen and the pages: the stand-in's `_mcp` `dump` says what it got,
+  image content as type and size).
 
 ## The Integrations view
 

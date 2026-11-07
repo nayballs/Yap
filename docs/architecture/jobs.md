@@ -188,6 +188,13 @@ Decided 2026-11-07 (the maintainer and Claude), landed the same day.
   - `--strict-mcp-config` with Yap's endpoint only (without `search_memory`),
     so the person's own MCP servers don't start for a chat (jobs keep
     theirs). Changes still only go through `start_job`, with all its rules.
+  - **The screen and the pages beside the chat** (7 Nov 2026), as a plain
+    plan chat has them: `look_at_screen`, `open_page`, `read_open_page`,
+    `switch_tab`, `snap_page` and the picture tools over the same endpoint
+    (`claude_live/eyes.rs`), allowed in `--allowedTools`, and the line after
+    Yap's Code chat words that it can look at the screen and open pages when
+    asked ("look at this site's design and take screenshots"). A job still
+    works with the person's own tools, never these.
   - **Another workspace is another session**: the fingerprint has the
     folder, and `claude_sessions.json` keeps it (`Kept::cwd`). A plain plan
     chat that becomes a Code chat moves to a new session there with its next
