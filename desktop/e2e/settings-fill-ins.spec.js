@@ -44,6 +44,10 @@ test("a Chat scope saved where config.json had none survives Settings' next save
   await main.waitForTimeout(700);
   const chat = yap.readConfig().llmScopes.chat;
   expect([chat.enabled, chat.baseUrl, chat.apiKey]).toEqual([true, CHAT.baseUrl, CHAT.apiKey]);
+  // The gaps nobody else filled have Settings' scopes, saved once
+  // (settings-scopes.spec.js: taken back each time, they were filled in and
+  // auto-saved again every 400 ms).
+  expect(Object.keys(yap.readConfig().llmScopes).sort()).toEqual(['chat', 'noteFormatting', 'voiceAgent']);
   await offer.click();
   await expectStore(yap, 'config.json', (c) => c.asSaidOffer === false);
   await closeSettings(main);
