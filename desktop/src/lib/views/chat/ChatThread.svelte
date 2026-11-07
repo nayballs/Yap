@@ -16,6 +16,19 @@
   import { promptChips } from '../../core/skills.js';
   import ChatMessage from './ChatMessage.svelte';
   import ActivityLine from './ActivityLine.svelte';
+  // Jobs (desktop/src-tauri/src/jobs.rs): the pills of the jobs an answer
+  // started, a job's report as a job card (`kind: "jobReport"`), and a
+  // running job's permission prompts for this chat — each in a small chunk.
+  import { jobs, jobById } from '../../stores/jobs.svelte.js';
+  import { pillsByAnswer } from '../../core/jobs.js';
+
+  const jobPills = $derived(pillsByAnswer(jobs.list, chat.activeId, chat.messages));
+  const asks = $derived(chat.activeId == null ? [] : jobs.approvals.filter((a) => a.conversation === chat.activeId));
+  const openJob = (j) => chat.doc.showJob(j);
+  const openRun = (run) => {
+    const j = jobById(run);
+    if (j) chat.doc.showJob(j);
+  };
 
   // The one-tap prompts (chat/skills.rs: the first three of Prepare for my
   // next meeting — with a calendar —, Write my stand-up, List my open
@@ -123,6 +136,11 @@
           <span class="rule"></span>
         </div>
       {/if}
+      {#if m.kind === 'jobReport'}
+        {#await import('./JobReportCard.svelte') then { default: JobReportCard }}
+          <JobReportCard {m} conversation={chat.activeId} onopen={openJob} />
+        {/await}
+      {:else}
       <ChatMessage
         {m}
         last={i === chat.messages.length - 1}
@@ -138,7 +156,19 @@
         onpicture={(p) => chat.doc.showPicture(p)}
         onpage={(p) => chat.doc.showPage(p)}
       />
+      {/if}
+      {#if jobPills.get(i)?.length}
+        {#await import('./JobPills.svelte') then { default: JobPills }}
+          <JobPills jobs={jobPills.get(i)} onopen={openJob} />
+        {/await}
+      {/if}
     {/each}
+    {#if asks.length}
+      <!-- A running job of this chat asks to take a step: Allow once / Deny. -->
+      {#await import('./JobApprove.svelte') then { default: JobApprove }}
+        <JobApprove approvals={asks} onopen={openRun} />
+      {/await}
+    {/if}
     {#if chat.sending || (chat.assistantPending != null && chat.assistantPending === chat.activeId)}
       <!-- What the turn is doing now, with its time (chat/activity.rs). -->
       <ActivityLine

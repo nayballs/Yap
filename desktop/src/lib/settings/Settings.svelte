@@ -46,6 +46,7 @@
     voice: () => import('./VoicePage.svelte'),
     memory: () => import('./MemorySection.svelte'),
     skills: () => import('./SkillsPage.svelte'),
+    jobs: () => import('./JobsPage.svelte'),
     models: () => import('./SpeechPage.svelte'),
     cleanup: () => import('./LanguageModelsPage.svelte'),
     connectors: () => import('./ConnectorsSection.svelte'),
@@ -409,6 +410,9 @@
     {:else if id === 'skills'}
       <!-- A slash in a box: run a Skill with /name. -->
       <rect x="3.5" y="4.5" width="17" height="15" rx="3" /><path d="m13.5 8.5-3 7" />
+    {:else if id === 'jobs'}
+      <!-- A folder with a prompt: a task handed to Claude Code in a folder. -->
+      <path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" /><path d="m8 11 2 2-2 2M12.5 15h3" />
     {:else if id === 'models'}
       <path d="M3 12h2M7 8v8M11 5v14M15 9v6M19 11v2" />
     {:else if id === 'cleanup'}
@@ -621,6 +625,10 @@
           {:else if section === 'skills'}
             {#await PAGES.skills() then { default: SkillsPage }}
               <SkillsPage />
+            {/await}
+          {:else if section === 'jobs'}
+            {#await PAGES.jobs() then { default: JobsPage }}
+              <JobsPage {cfg} {goto} {onshowview} />
             {/await}
           {:else if section === 'models'}
             {#await PAGES.models() then { default: SpeechPage }}

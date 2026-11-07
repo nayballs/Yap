@@ -256,7 +256,7 @@ fn notice(job: &Job, reply: &str) {
         tracing::info!(id = %id, "Jobs: said with no Yap window in front");
         let card = crate::bar::Card {
             id: NOTICE.into(),
-            icon: if status == Status::Failed { "error" } else { "assistant" },
+            icon: if status == Status::Failed { "error" } else { "job" },
             title: title.clone(),
             body: body.clone(),
             primary: Some(crate::bar::CardAction::new(format!("open:{id}"), "Open")),
@@ -286,19 +286,20 @@ fn notice(job: &Job, reply: &str) {
 
 fn card_action(app: &AppHandle, action: &str) {
     if let Some(id) = action.strip_prefix("open:") {
-        open(app, id);
+        open_job(app, id);
     }
 }
 
 #[cfg(windows)]
 fn toast_action(app: &AppHandle, arg: &str) {
     if let Some(id) = arg.strip_prefix("job:open:") {
-        open(app, id);
+        open_job(app, id);
     }
 }
 
-/// **Open**: the main window, on the job's chat (and its tab, `yap-job-open`).
-fn open(app: &AppHandle, id: &str) {
+/// **Open**: the main window, on the job's chat (and its tab, `yap-job-open`)
+/// — the card's Open, and the Yap bar's "1 job running" (`bar.rs`).
+pub(crate) fn open_job(app: &AppHandle, id: &str) {
     let Some(job) = store::get(id) else { return };
     if let Err(e) = crate::shell::window::show_settings(app) {
         tracing::warn!("Jobs: couldn't open the main window ({e})");

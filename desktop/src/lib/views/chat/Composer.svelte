@@ -27,6 +27,8 @@
   import { tooLongLine } from './chatBudget.js';
   import SkillMenu from '../../components/SkillMenu.svelte';
   import ModelChip from './ModelChip.svelte';
+  // Jobs' Mode chip, beside it (shown with Jobs on).
+  import ModeChip from './ModeChip.svelte';
   import ContextRing from './ContextRing.svelte';
   import ThinkButton from './ThinkButton.svelte';
 
@@ -418,6 +420,7 @@
   </div>
   <div class="composerfoot">
     <ModelChip bind:this={chipRef} {onopensettings} quiet />
+    <ModeChip {chat} />
     <!-- How much of the model's context this chat uses (bottom right, as
          Claude's chat box shows it); its panel has the day's AI use. -->
     <span class="footgap"></span>

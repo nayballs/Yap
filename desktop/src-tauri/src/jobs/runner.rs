@@ -161,13 +161,21 @@ pub fn app() -> Option<&'static AppHandle> {
     APP.get()
 }
 
-/// Send `ev` to the page and keep it in the job's log.
+/// How many jobs weren't over when the Yap bar was last told.
+static LIVE_TOLD: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(usize::MAX);
+
+/// Send `ev` to the page and keep it in the job's log; the Yap bar hears
+/// when the number of jobs not over yet changes ("1 job running").
 pub fn emit(ev: &JobEvent) {
     if let Ok(v) = serde_json::to_value(ev) {
         store::log_append(&ev.id, &v);
     }
     if let Some(app) = APP.get() {
         let _ = app.emit(EVENT, ev);
+        let live = store::live_ids().len();
+        if LIVE_TOLD.swap(live, std::sync::atomic::Ordering::Relaxed) != live {
+            crate::bar::refresh(app);
+        }
     }
 }
 
@@ -596,6 +604,8 @@ impl Follow {
             store::flush();
             self.last_flush = Instant::now();
         }
+        // A prompt waiting with no Yap window in front: on the Yap bar too.
+        super::approve_card::sync();
     }
 
     /// The process is gone: the turn's end, saved and said.
@@ -630,6 +640,8 @@ impl Follow {
         if let Some(job) = job {
             emit(&JobEvent { text: Some(job.text.clone()).filter(|t| !t.is_empty()).or(error), cost: Some(job.cost), problem: job.problem.clone(), ..JobEvent::of(&job) });
         }
+        // Its prompts ended with its run: their card on the bar goes.
+        super::approve_card::sync();
         status
     }
 }

@@ -39,8 +39,10 @@ export const config = $state({ cfg: null, loaded: false, saved: false });
 
 let base = null;
 // This copy as first set up (defaults and fill-ins included): a setting
-// config.json doesn't have yet, unchanged here since, is no change of this
-// copy's (`fill`).
+// config.json didn't have, unchanged here since and saved there by another
+// surface, is no change of this copy's (`fill`); one config.json still
+// hasn't got stays this copy's, and goes in with the next save (a fill-in
+// taken back each time was filled in again, and auto-saved, every 400 ms).
 let pristine = null;
 let syncing = Promise.resolve();
 /** Settings' reaction to values taken in from outside (`syncConfig`). @type {(taken: string[]) => void} */
@@ -84,7 +86,7 @@ async function adoptSaved() {
   if (!config.loaded || !config.cfg || !base) return;
   const disk = await invoke('get_config');
   const mine = cleanConfig(config.cfg);
-  adopt(mine, merge3(fill(base, pristine), mine, disk));
+  adopt(mine, merge3(fill(base, pristine, disk), mine, disk));
   base = disk;
 }
 
@@ -93,7 +95,7 @@ export function persist() {
   return inTurn(async () => {
     const mine = cleanConfig(config.cfg);
     const disk = await invoke('get_config');
-    const next = merge3(fill(base, pristine), mine, disk);
+    const next = merge3(fill(base, pristine, disk), mine, disk);
     adopt(mine, next);
     if (same(next, disk)) {
       base = disk;

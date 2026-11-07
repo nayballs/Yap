@@ -22,12 +22,15 @@
 //! - [`voice`]: the Voice Assistant asks out loud before a job that needs
 //!   asking; the next question is the answer.
 //! - [`commands`]: the page's commands (the Jobs UI).
+//! - [`approve_card`]: a running job's permission prompt on the Yap bar
+//!   when no Yap window is in front (Allow once / Deny).
 //!
 //! Chat's side: `chat/tools/jobs.rs` (`start_job`, `job_status`,
 //! `message_job`, `stop_job`), `chat/turn/report.rs` (the report turn).
 //! Offered only with "Let Chat start jobs" on and Claude Code on this PC
 //! ([`offered`]).
 
+pub mod approve_card;
 pub mod commands;
 pub mod consent;
 pub mod folders;
