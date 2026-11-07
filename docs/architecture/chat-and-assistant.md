@@ -1244,7 +1244,7 @@ The AI Chat surface (conversations, the tool-calling loop and its note tools) an
   Chat & Voice Assistant; a model that fails → `assistantFailed`, the
   reason + "Your question is in Chat."); else **`choose_conversation(viewing,
   open_exists, latest, now)`** (pure): the conversation open in the Chat
-  view (`chat_view_state {open, conversationId, newChat}`: ChatView
+  view (`chat_view_state {open, conversationId, newChat, codeFolder}`: ChatView
   reports it), a new one if "New chat" was clicked there, else the last
   updated if under `RECENT_SECS` (30 min) — so pressing again asks a
   follow-up — else a new one; then `turn::chat_turn` (the Chat view's
@@ -3483,8 +3483,10 @@ own Claude Code in one of their folders, and reports back when it ends.
   for the tool loop and a plan chat alike). A plain chat whose job named a
   folder becomes a Code chat there. A new code chat's first question carries
   its workspace (`chat_send`'s `codeFolder`, attached as the conversation is
-  made: `code_chat::with_new` / `adopt_new`). Kept in `jobs.json`, never
-  chats.json.
+  made: `code_chat::with_new` / `adopt_new`), asked out loud too (Chat
+  reports it, `chat_view_state`'s `codeFolder`: `assistant::new_code_chat`).
+  An empty one greets you as the Code side (`CodeEmpty.svelte`). Kept in
+  `jobs.json`, never chats.json.
 - **On screen** (`views/chat/`, [frontend.md](./frontend.md)):
   - **The switch and the Code side** (`ChatSideSwitch.svelte`,
     `codeChats.svelte.js`): New code chat opens the workspace picker

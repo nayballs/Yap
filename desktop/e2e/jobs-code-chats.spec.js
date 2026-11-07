@@ -25,13 +25,32 @@
 //   on hover; the running jobs on top, never on the Chat side.
 // - The moving light while a job runs: the Animate switch, reduced motion.
 // - A removed workspace: its chats are plain again, said once.
+// - The Voice Assistant on a new code chat not sent yet: its question makes
+//   a Code chat in that workspace (`chat_view_state`'s `codeFolder`); an
+//   open conversation and a plain new chat as before.
+// - An empty code chat's own greeting (CodeEmpty.svelte): the workspace, its
+//   prompts filling the box (never sent), what's missing for a job (Claude
+//   Code not here; signed out, with Sign in: jobs-code-chats-signed-out.spec.js,
+//   a Yap of its own); the Chat side's greeting as ever. Light and dark.
 import fs from 'node:fs';
 import path from 'node:path';
 import { test as base, expect, openView, openSettings, closeSettings, setConfig, settingsDialog } from './support/fixtures.js';
 import { startFakeLlm } from './support/fake-llm.js';
 import { RUNS } from './support/yap.js';
 import { toSide, newCodeChat, workspaceMenu, sideSwitch } from './support/code-chats.js';
-import { FEATURE_NAME, CODE_NAME, codeLabel, samePath, sideOf, groupByWorkspace, plainOnly, pickerRows } from '../src/lib/core/codeChats.js';
+import {
+  FEATURE_NAME,
+  CODE_NAME,
+  CODE_INTRO,
+  CODE_PROMPTS,
+  codeLabel,
+  samePath,
+  sideOf,
+  groupByWorkspace,
+  plainOnly,
+  pickerRows,
+  claudeCodeHint,
+} from '../src/lib/core/codeChats.js';
 
 const HERE = path.join(RUNS, 'jobs-code-chats-spec');
 const SCRIPTS = path.join(HERE, 'scripts');
@@ -129,6 +148,21 @@ const tab = (main) => main.getByTestId('chat-job');
 const group = (main, name) => main.locator(`[data-testid="chat-workspace-group"][data-workspace="${name}"]`);
 const row = (main, id) => main.locator(`.convs [data-conv="${id}"]`);
 const folderOf = (yap, conversation) => yap.invoke('job_chat_folder_get', { conversation });
+/** A question to the Voice Assistant, as its shortcut asks it (voice-assistant.spec.js's way). */
+const askAloud = (yap, text) => yap.invoke('e2e_assistant_ask', { text, listenMs: 0 });
+const box = (main) => main.getByRole('textbox', { name: 'Message' });
+const codeEmpty = (main) => main.getByTestId('chat-code-empty');
+const CHAT_GREETING = 'Ask about your notes, transcripts, or anything else';
+/** The workspace group a conversation's row is listed under (the Code side's list is flat: headers, then rows). */
+const groupOfRow = (main, id) =>
+  main.evaluate((want) => {
+    let group = null;
+    for (const e of document.querySelectorAll('.convscroll [data-conv], .convscroll [data-testid="chat-workspace-group"]')) {
+      if (e.dataset.testid === 'chat-workspace-group') group = e.dataset.workspace;
+      else if (Number(e.dataset.conv) === want) return group;
+    }
+    return undefined;
+  }, id);
 
 async function send(main, text) {
   await main.getByRole('textbox', { name: 'Message' }).fill(text);
@@ -257,6 +291,28 @@ test('core/codeChats.js: the label, paths, sides, the Code side’s groups, the 
     ['recipe-box', false],
     ['garden-planner', true],
   ]);
+});
+
+test('core/codeChats.js: an empty Code chat’s words, and what stands between this PC and a job', () => {
+  expect(CODE_INTRO).toBe('Ask for a change, a fix or an explanation. Jobs run your own Claude Code here, and you can follow each step beside the chat.');
+  expect(CODE_PROMPTS).toEqual(['Explain how this project is laid out', "Find and fix what's failing", 'What changed here recently?']);
+  const ready = { loaded: true, installed: true, tooOld: false, loggedIn: true, version: '2.1.296', minVersion: '2.1.259' };
+  // Still looking, or ready: nothing to say.
+  expect(claudeCodeHint({ ...ready, loaded: false })).toBeNull();
+  expect(claudeCodeHint(ready)).toBeNull();
+  // Not on this PC, too old.
+  expect(claudeCodeHint({ ...ready, installed: false, loggedIn: false })).toMatchObject({ state: 'missing', action: 'install', label: 'Install Claude Code' });
+  expect(claudeCodeHint({ ...ready, tooOld: true, version: '2.1.200' })).toMatchObject({
+    state: 'old',
+    text: 'Claude Code 2.1.200 is too old for jobs: Yap needs 2.1.259 or newer.',
+    label: 'How to update',
+  });
+  // Signed out: Sign in on the plan; an API key pays without a sign-in.
+  expect(claudeCodeHint({ ...ready, loggedIn: false })).toMatchObject({ state: 'signed-out', action: 'sign-in', label: 'Sign in' });
+  expect(claudeCodeHint({ ...ready, loggedIn: false }, 'key')).toBeNull();
+  expect(claudeCodeHint({ ...ready, installed: false, loggedIn: false }, 'key')).toMatchObject({ state: 'missing' });
+  // Signing in, in the terminal Yap opened: Check again.
+  expect(claudeCodeHint({ ...ready, loggedIn: false, signingIn: true })).toMatchObject({ state: 'signing-in', action: 'check', label: 'Check again' });
 });
 
 // ---------------------------------------------------------------- the switch and the picker
@@ -411,6 +467,119 @@ test('a new code chat: its first question makes a Code chat, and a job asked wit
   const told = await ended(yap, job.id);
   expect(told.text).toContain('Got: Also sort the list.');
   await messagesOf(yap, conversation, 8);
+});
+
+// ---------------------------------------------------------------- asked out loud
+
+test('the Voice Assistant on a new code chat not sent yet: its question makes a Code chat in that workspace', async ({ yap, main, fakeLlm, shot }) => {
+  await codeChat(main, 'recipe-box');
+  await expect(codeEmpty(main)).toBeVisible();
+  // Asked out loud with the new code chat on screen (the main window in front).
+  fakeLlm.scriptChat([{ content: 'The soups are in soups.md.' }]);
+  await askAloud(yap, 'where are the soup recipes');
+  await expect(lastAnswer(main)).toHaveText('The soups are in soups.md.');
+  const conversation = await shownConversation(main);
+  const question = thread(main).locator('.cbubble.user').last();
+  await expect(question).toContainText('where are the soup recipes');
+  await expect(question.getByLabel('Asked by voice')).toBeVisible();
+  // A Code chat in recipe-box, attached as it was made: its prompt says so.
+  expect(await folderOf(yap, conversation)).toMatchObject({ name: 'recipe-box', path: RECIPES });
+  expect(yap.readJson('jobs.json').codeChats[String(conversation)].path).toBe(RECIPES);
+  const asked = fakeLlm.requests.filter((r) => JSON.stringify(r.messages).includes('where are the soup recipes'))[0];
+  expect(JSON.stringify(asked.messages)).toContain("This is a Code chat in the user's folder recipe-box");
+  // Chat stayed on the Code side: a Code chat's box, listed under its workspace.
+  await expect(sideSwitch(main)).toHaveAttribute('data-side', 'code');
+  await expect(wsChip(main)).toHaveText('recipe-box');
+  await expect(composer(main)).toHaveClass(/code-chat/);
+  await expect(main.getByTestId('chat-code-label')).toHaveText('Code · recipe-box');
+  await expect(row(main, conversation)).toBeVisible();
+  await expect.poll(() => groupOfRow(main, conversation)).toBe('recipe-box');
+  await shot(main, '15-asked-out-loud-into-a-new-code-chat-light');
+
+  // Asked again with it open: the same conversation, still a Code chat.
+  fakeLlm.scriptChat([{ content: 'Two soups so far.' }]);
+  await askAloud(yap, 'how many soups are there');
+  await expect(lastAnswer(main)).toHaveText('Two soups so far.');
+  expect(await shownConversation(main)).toBe(conversation);
+  expect(await folderOf(yap, conversation)).toMatchObject({ name: 'recipe-box' });
+
+  // A plain new chat (the Chat side): out loud, a plain conversation, as ever.
+  await plainChat(main);
+  fakeLlm.scriptChat([{ content: 'It is sunny today.' }]);
+  await askAloud(yap, 'what is the weather like');
+  await expect(lastAnswer(main)).toHaveText('It is sunny today.');
+  const plain = await shownConversation(main);
+  expect(plain).not.toBe(conversation);
+  expect(await folderOf(yap, plain)).toBeNull();
+  await expect(sideSwitch(main)).toHaveAttribute('data-side', 'chat');
+  await expect(wsChip(main)).toHaveCount(0);
+  const plainAsked = fakeLlm.requests.filter((r) => JSON.stringify(r.messages).includes('what is the weather like'))[0];
+  expect(JSON.stringify(plainAsked.messages)).not.toContain('This is a Code chat');
+});
+
+// ---------------------------------------------------------------- an empty code chat
+
+test('an empty code chat greets you as the Code side, its prompts fill the box; the Chat side’s greeting as before', async ({ yap, main, fakeLlm, shot }) => {
+  await codeChat(main, 'garden-planner');
+  const empty = codeEmpty(main);
+  await expect(empty).toBeVisible();
+  await expect(empty.getByRole('heading', { name: 'Work in garden-planner' })).toBeVisible();
+  await expect(empty.locator('.path')).toHaveText(GARDEN);
+  await expect(empty.locator('.path')).toHaveAttribute('title', GARDEN);
+  await expect(empty).toContainText(CODE_INTRO);
+  await expect(empty.getByTestId('chat-code-prompt')).toHaveText(CODE_PROMPTS);
+  // Never Chat's greeting here.
+  await expect(main.getByText(CHAT_GREETING)).toHaveCount(0);
+  await expect(main.getByRole('button', { name: 'Ask across your meetings' })).toHaveCount(0);
+  // Claude Code here is this build's stand-in, signed in: nothing to say.
+  await expect(main.getByTestId('chat-code-claude')).toHaveCount(0);
+  await shot(main, '16-empty-code-chat-light');
+
+  // A prompt fills the box, the caret after it, and nothing is sent.
+  const before = fakeLlm.requests.length;
+  const fix = "Find and fix what's failing";
+  await empty.getByRole('button', { name: fix }).click();
+  await expect(box(main)).toHaveValue(fix);
+  await expect(box(main)).toBeFocused();
+  expect(await box(main).evaluate((el) => [el.selectionStart, el.selectionEnd])).toEqual([fix.length, fix.length]);
+  await empty.getByRole('button', { name: 'What changed here recently?' }).click();
+  await expect(box(main)).toHaveValue('What changed here recently?');
+  await main.waitForTimeout(400);
+  expect(fakeLlm.requests.length).toBe(before);
+  await expect(empty).toBeVisible();
+  await box(main).fill('');
+
+  // Another workspace: its name and path.
+  await wsChip(main).click();
+  await workspaceMenu(main).getByRole('menuitemradio', { name: 'recipe-box' }).click();
+  await expect(empty.getByRole('heading', { name: 'Work in recipe-box' })).toBeVisible();
+  await expect(empty.locator('.path')).toHaveText(RECIPES);
+
+  // Dark.
+  await theme(yap, main, 'dark');
+  await shot(main, '17-empty-code-chat-dark');
+  await theme(yap, main, 'light');
+
+  // Claude Code not on this PC (no stand-in): one line, Install Claude Code.
+  await yap.invoke('e2e_claude_script', { script: null });
+  await openView(main, 'Home');
+  await openView(main, 'Chat');
+  await toSide(main, 'Code');
+  await expect(empty).toBeVisible();
+  const hint = main.getByTestId('chat-code-claude');
+  await expect(hint).toHaveAttribute('data-state', 'missing');
+  await expect(hint).toContainText("Jobs run your own Claude Code, and it isn't on this PC yet.");
+  await expect(hint.getByRole('button', { name: 'Install Claude Code' })).toBeVisible();
+  await script(yap, ECHO, 'echo');
+
+  // The Chat side: Chat's greeting, exactly as ever.
+  await toSide(main, 'Chat');
+  await main.getByRole('button', { name: 'New chat' }).click();
+  await expect(codeEmpty(main)).toHaveCount(0);
+  await expect(main.getByText(CHAT_GREETING)).toBeVisible();
+  await expect(main.getByRole('button', { name: 'Ask across your meetings' })).toBeVisible();
+  await expect(main.locator('.empty')).toContainText('for answers that cite the moment they come from.');
+  await shot(main, '18-chat-side-greeting-light');
 });
 
 // ---------------------------------------------------------------- a plain chat becomes one

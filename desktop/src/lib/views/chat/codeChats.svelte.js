@@ -11,8 +11,12 @@
 // - **A new code chat** ("New code chat", the workspace picker) waits for
 //   its first question with its workspace (`pending`), which goes with it
 //   (`chat_send`'s `codeFolder`): Rust attaches the conversation it makes
-//   before the prompt is built. Switching to Code with no code chat open
-//   starts one on the most recently used workspace.
+//   before the prompt is built. Asked out loud instead (the Voice
+//   Assistant), the same: this view tells Rust the workspace it shows
+//   (`chat_view_state`'s `codeFolder`), and the question's
+//   `yap-assistant-turn` says it was attached (its `codeFolder`). Switching
+//   to Code with no code chat open starts one on the most recently used
+//   workspace. Empty, it greets you as the Code side (CodeEmpty.svelte).
 // - **The workspace chip** in a Code chat's composer switches its workspace
 //   (`job_chat_folder_set`) or makes it a plain chat again.
 // - **Where it's kept**: Rust's `jobs.json` (`job_code_chats`), never
@@ -56,6 +60,8 @@ function write(key, value) {
 export function createCodeChats(chat, { opensettings = () => null } = {}) {
   let enabled = $state(false);
   let animate = $state(true);
+  /** How jobs pay (`jobsPay`): "plan" needs Claude Code signed in, "key" doesn't. */
+  let pay = $state('plan');
   let loaded = $state(false);
   /** Conversation id → its workspace (`{name, path, cap?}`). */
   let chats = $state({});
@@ -85,6 +91,7 @@ export function createCodeChats(chat, { opensettings = () => null } = {}) {
       const cfg = await invoke('get_config');
       enabled = !!cfg?.jobsEnabled;
       animate = cfg?.jobsAnimate !== false;
+      pay = cfg?.jobsPay === 'key' ? 'key' : 'plan';
     } catch {
       /* keep */
     }
@@ -119,6 +126,15 @@ export function createCodeChats(chat, { opensettings = () => null } = {}) {
     sentWith = pending;
     return pending.path;
   };
+  // …and Rust knows it, for a question asked out loud (`chat_view_state`).
+  chat.pendingFolder = () => (enabled && pending ? pending.path : null);
+  $effect(() => {
+    void pending;
+    void enabled;
+    untrack(() => {
+      if (chat.activeId == null) chat.reportView();
+    });
+  });
 
   // The conversation shown changed: a new code chat's conversation marked at
   // once (Rust attached it as it was made), a new chat on the Code side
@@ -137,6 +153,10 @@ export function createCodeChats(chat, { opensettings = () => null } = {}) {
         sentWith = null;
         // (Rust's word on it — `yap-code-chat` — settles it; a moment later regardless.)
         setTimeout(refresh, 1500);
+      } else if (was === null && id !== null && pending && samePath(of(id)?.path, pending.path)) {
+        // A question asked out loud made this new code chat's conversation
+        // (marked as it was asked: `yap-assistant-turn`).
+        pending = null;
       } else if (id === null) {
         sentWith = null;
         if (enabled && side === 'code' && !pending) pending = of(was) ?? workspaces[0] ?? null;
@@ -179,6 +199,14 @@ export function createCodeChats(chat, { opensettings = () => null } = {}) {
       // A job started: the workspaces' order changes.
       listen('yap-job', (e) => {
         if (e.payload?.status === 'queued') refresh();
+      }),
+      // A question asked out loud made a new code chat's conversation: a
+      // Code chat at once, before Chat shows it (the box never flickers plain).
+      listen('yap-assistant-turn', (e) => {
+        const p = e.payload;
+        if (p?.phase !== 'asked' || p.conversationId == null || !p.codeFolder?.path) return;
+        chats = { ...chats, [p.conversationId]: p.codeFolder };
+        setTimeout(refresh, 1500);
       }),
     ];
     return () => uns.forEach((u) => u.then((f) => f()).catch(() => {}));
@@ -263,6 +291,7 @@ export function createCodeChats(chat, { opensettings = () => null } = {}) {
   return {
     get enabled() { return enabled; },
     get loaded() { return loaded; },
+    get pay() { return pay; },
     get side() { return side; },
     get onCode() { return onCode; },
     get current() { return current; },

@@ -22,9 +22,10 @@
 //!    to Chat — the conversation open in the Chat view, else the last one if
 //!    it was updated in the last [`RECENT_SECS`], else a new one
 //!    ([`choose_conversation`]) — through `turn::chat_turn`, as a typed
-//!    question would. The Chat view follows live (`yap-assistant-turn`), the
-//!    question marked as asked by voice; with the main window in front, Chat
-//!    comes up with it. The capsule says what the answer is doing in
+//!    question would (a new code chat on screen, its workspace picked: the
+//!    new conversation is a Code chat there, [`new_code_chat`]). The Chat
+//!    view follows live (`yap-assistant-turn`), the question marked as asked
+//!    by voice; with the main window in front, Chat comes up with it. The capsule says what the answer is doing in
 //!    "Thinking…"'s place — "Searching the web · …", "Reading …"
 //!    (`yap-assistant-step`, `chat/activity.rs`).
 //! 3. **Speaking**: the answer is read aloud whatever "When to speak" says
@@ -230,6 +231,17 @@ pub fn choose_conversation(viewing: Viewing, open_exists: bool, latest: Option<(
         Some((id, updated)) if now.saturating_sub(updated) < RECENT_SECS => Choice::Continue(id),
         _ => Choice::New,
     }
+}
+
+/// **A new Code chat's workspace** for a spoken question (2026-11-07): Chat
+/// shows a new code chat, its workspace picked and no question yet
+/// (`picked`, `chat_view_state`'s `codeFolder`), and the question makes a
+/// new conversation (`conversation`: none to continue) — it's that Code
+/// chat, attached as it's made, as a typed first question's is
+/// (`jobs::code_chat::with_new`). Never a phone's (`pc`: the shortcut's).
+/// Pure.
+pub fn new_code_chat(pc: bool, conversation: Option<u64>, picked: Option<String>) -> Option<String> {
+    picked.filter(|f| pc && conversation.is_none() && !f.trim().is_empty())
 }
 
 /// How an answer is given.
@@ -453,6 +465,10 @@ pub fn is_off() -> bool {
     crate::voice::tts::meeting_quiet().is_some()
 }
 static VIEW: Mutex<Viewing> = Mutex::new(Viewing::Closed);
+/// The workspace of the new code chat Chat shows (no question yet): a
+/// spoken question's new conversation is a Code chat there
+/// ([`new_code_chat`]).
+static NEW_CODE_CHAT: Mutex<Option<String>> = Mutex::new(None);
 
 /// Never held while emitting, touching windows or another module's lock.
 fn lock() -> MutexGuard<'static, State> {
@@ -461,6 +477,10 @@ fn lock() -> MutexGuard<'static, State> {
 
 fn view() -> Viewing {
     *VIEW.lock().unwrap_or_else(|p| p.into_inner())
+}
+
+fn code_chat_shown() -> Option<String> {
+    NEW_CODE_CHAT.lock().unwrap_or_else(|p| p.into_inner()).clone()
 }
 
 /// What the Chat view shows (Snip to Chat puts a screenshot in the
@@ -1132,6 +1152,9 @@ async fn answer(app: AppHandle, asker: Asker, since: u64, question: String, abou
     let waiting = crate::snip::waiting::now();
     let shots_wait = pc && !about_selection && said.is_none() && !waiting.images.is_empty();
     let conversation_id = if shots_wait { waiting.conversation_id } else { continued };
+    // A new code chat on screen, its workspace picked: the new conversation
+    // is a Code chat there (jobs/code_chat.rs).
+    let code_folder = new_code_chat(pc, conversation_id, code_chat_shown());
     // "Open Teams" needs no model, nor a "yes" to Yap's "Did you mean …?":
     // Yap opens it and says so (apps.rs). Never a question about a selection
     // or a Skill.
@@ -1287,6 +1310,9 @@ async fn answer(app: AppHandle, asker: Asker, since: u64, question: String, abou
         s: Mutex::new(Speaking::default()),
     };
     let asked = |conv: u64, index: usize| {
+        // A new code chat's question: its conversation attached as it's made
+        // (before the prompt is built), and the Chat view told at once.
+        let code = crate::jobs::code_chat::adopt_new(conv);
         if pc {
             lock().conversation = Some(conv);
         }
@@ -1309,6 +1335,7 @@ async fn answer(app: AppHandle, asker: Asker, since: u64, question: String, abou
                 "text": asked_text,
                 "userMessageId": format!("chat:{conv}:{index}"),
                 "show": focused,
+                "codeFolder": code,
             }),
         );
     };
@@ -1339,6 +1366,8 @@ async fn answer(app: AppHandle, asker: Asker, since: u64, question: String, abou
     let turn = selected::with(about, turn);
     // Asked with Chat in view: it shows the answer (`asked_in_chat`).
     let turn = IN_CHAT.scope(in_chat, turn);
+    // A new code chat's: the conversation it makes is a Code chat in its workspace.
+    let turn = crate::jobs::code_chat::with_new(code_folder, turn);
     // Its AI calls and searches are the Voice Assistant's in the network
     // receipts (net.rs), though they run Chat's code — and say so when the
     // window in front or a selection went with them, or the question came
@@ -1805,15 +1834,18 @@ pub fn on_tts_state(app: &AppHandle, speaking: bool, message_id: Option<&str>) {
 /// where a spoken question goes ([`choose_conversation`]), and where the
 /// screenshots in its box wait (`snip/waiting.rs`). `new_chat`: no
 /// conversation, because "New chat" was clicked (a Chat view just opened on
-/// nothing has no preference: as if closed).
+/// nothing has no preference: as if closed). `code_folder`: that new chat is
+/// a new code chat, its workspace picked (a name or path): a spoken
+/// question's new conversation is a Code chat there ([`new_code_chat`]).
 #[tauri::command]
-pub fn chat_view_state(open: bool, conversation_id: Option<u64>, new_chat: Option<bool>) {
+pub fn chat_view_state(open: bool, conversation_id: Option<u64>, new_chat: Option<bool>, code_folder: Option<String>) {
     *VIEW.lock().unwrap_or_else(|p| p.into_inner()) = match (open, conversation_id) {
         (false, _) => Viewing::Closed,
         (true, Some(id)) => Viewing::Conversation(id),
         (true, None) if new_chat.unwrap_or(false) => Viewing::New,
         (true, None) => Viewing::Closed,
     };
+    *NEW_CODE_CHAT.lock().unwrap_or_else(|p| p.into_inner()) = code_folder.filter(|f| open && conversation_id.is_none() && !f.trim().is_empty());
     // The screenshots waiting in its box wait in what it shows.
     crate::snip::waiting::viewing(open, conversation_id);
 }
@@ -1877,6 +1909,19 @@ mod tests {
     #[test]
     fn a_new_chat_in_the_chat_view_gets_a_new_conversation() {
         assert_eq!(choose_conversation(Viewing::New, false, Some((9, NOW - 10)), NOW), Choice::New);
+    }
+
+    #[test]
+    fn a_new_code_chat_on_screen_makes_the_spoken_questions_conversation_a_code_chat() {
+        let garden = || Some("garden-planner".to_string());
+        // Its new conversation: a Code chat in the workspace Chat shows.
+        assert_eq!(new_code_chat(true, None, garden()).as_deref(), Some("garden-planner"));
+        // One it continues keeps what it is; a phone's question keeps its own;
+        // no new code chat on screen, nothing.
+        assert_eq!(new_code_chat(true, Some(4), garden()), None);
+        assert_eq!(new_code_chat(false, None, garden()), None);
+        assert_eq!(new_code_chat(true, None, None), None);
+        assert_eq!(new_code_chat(true, None, Some("  ".into())), None);
     }
 
     #[test]
