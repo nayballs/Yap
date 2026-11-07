@@ -244,6 +244,68 @@ pub fn new_code_chat(pc: bool, conversation: Option<u64>, picked: Option<String>
     picked.filter(|f| pc && conversation.is_none() && !f.trim().is_empty())
 }
 
+// ---- which side a spoken question goes to (its cleanup's switch) -------------------------
+
+/// **Does a spoken question go into a Code chat?** (2026-11-07: each side
+/// has its own "Clean up what you say…" switch,
+/// `cleanup_styles::cleans_question`.) Jobs on, and the conversation it
+/// continues is a Code chat (`is_code`: `code_chat::folder_of`), or it makes
+/// a new one in a workspace (`new_code`: a new code chat waiting with its
+/// workspace, [`new_code_chat`]). Else it's Chat's. Pure.
+pub fn into_code_chat(jobs_on: bool, conversation: Option<u64>, new_code: Option<&str>, is_code: impl Fn(u64) -> bool) -> bool {
+    jobs_on && (new_code.is_some_and(|f| !f.trim().is_empty()) || conversation.is_some_and(is_code))
+}
+
+fn is_code_chat(id: u64) -> bool {
+    crate::jobs::code_chat::folder_of(Some(id)).is_some()
+}
+
+/// Where the shortcut's question being transcribed will go, as [`answer`]
+/// chooses it: the conversation it continues (the screenshots waiting in
+/// Chat's box: theirs, unless it's about a selection — a Skill said doesn't
+/// take them either, but they wait in what Chat shows, the one it continues
+/// anyway), and whether that's a Code chat — a new code chat on screen
+/// making one ([`into_code_chat`]). Read before the question's cleanup,
+/// which follows its side's switch (`pipeline::ask_assistant`).
+pub(crate) fn shortcut_goes(cfg: &crate::config::YapConfig, about_selection: bool) -> (Option<u64>, bool) {
+    let viewing = view();
+    let open_exists = matches!(viewing, Viewing::Conversation(id) if crate::chat::chats::get(id).is_some());
+    let continued = match choose_conversation(viewing, open_exists, crate::chat::chats::latest(), now_secs()) {
+        Choice::Continue(id) => Some(id),
+        Choice::New => None,
+    };
+    let waiting = crate::snip::waiting::now();
+    let conversation = if !about_selection && !waiting.images.is_empty() { waiting.conversation_id } else { continued };
+    let new_code = new_code_chat(true, conversation, code_chat_shown());
+    (conversation, into_code_chat(cfg.jobs_enabled, conversation, new_code.as_deref(), is_code_chat))
+}
+
+/// Is a dictation into the Chat view's box (its mic) going into a Code chat:
+/// the one Chat shows, or the new code chat it shows with its workspace?
+pub(crate) fn chat_box_in_code_chat(cfg: &crate::config::YapConfig) -> bool {
+    match view() {
+        Viewing::Conversation(id) => into_code_chat(cfg.jobs_enabled, Some(id), None, is_code_chat),
+        Viewing::New => into_code_chat(cfg.jobs_enabled, None, code_chat_shown().as_deref(), is_code_chat),
+        Viewing::Closed => false,
+    }
+}
+
+/// Is a phone's question (`wanted`: the conversation it said, Yap Link)
+/// going into a Code chat, as [`answer`] chooses its conversation
+/// ([`phone_conversation`])? A phone never makes a new code chat.
+pub(crate) fn phone_in_code_chat(cfg: &crate::config::YapConfig, wanted: crate::link::wire::ChatRef) -> bool {
+    let viewing = view();
+    let open_exists = matches!(viewing, Viewing::Conversation(id) if crate::chat::chats::get(id).is_some());
+    let chosen = choose_conversation(viewing, open_exists, crate::chat::chats::latest(), now_secs());
+    let usable = matches!(wanted, crate::link::wire::ChatRef::Id(id)
+        if crate::chat::chats::get(id).is_some_and(|c| crate::link::chats::usable(&c)));
+    let conversation = match phone_conversation(wanted, usable, chosen) {
+        Choice::Continue(id) => Some(id),
+        Choice::New => None,
+    };
+    into_code_chat(cfg.jobs_enabled, conversation, None, is_code_chat)
+}
+
 /// How an answer is given.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Reply {
@@ -1273,7 +1335,7 @@ async fn answer(app: AppHandle, asker: Asker, since: u64, question: String, abou
         let ep = screen::Endpoint { base_url, api_key, model, provider };
         let look_app = app.clone();
         let show = move |on: bool| looking(&look_app, generation, on);
-        if let Some(look) = screen::look(&app, &question, &cfg, ep, conversation_id, &show).await {
+        if let Some(look) = screen::look(&app, &question, &cfg, ep, conversation_id, generation, &show).await {
             took_window = look.took;
             if look.took && look.question.is_none() {
                 window_picture = Some((provider.clone(), model.clone()));
@@ -1922,6 +1984,21 @@ mod tests {
         assert_eq!(new_code_chat(false, None, garden()), None);
         assert_eq!(new_code_chat(true, None, None), None);
         assert_eq!(new_code_chat(true, None, Some("  ".into())), None);
+    }
+
+    #[test]
+    fn a_spoken_question_is_a_code_chats_when_it_goes_into_one() {
+        let code = |id: u64| id == 7;
+        // A Code chat it continues, or a new code chat on screen making one.
+        assert!(into_code_chat(true, Some(7), None, code));
+        assert!(into_code_chat(true, None, Some("garden-planner"), code));
+        // A plain chat, a new plain one: Chat's.
+        assert!(!into_code_chat(true, Some(4), None, code));
+        assert!(!into_code_chat(true, None, None, code));
+        assert!(!into_code_chat(true, None, Some(" "), code));
+        // Jobs off: everything is Chat's, as the Chat view shows it.
+        assert!(!into_code_chat(false, Some(7), None, code));
+        assert!(!into_code_chat(false, None, Some("garden-planner"), code));
     }
 
     #[test]

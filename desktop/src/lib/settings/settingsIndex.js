@@ -144,6 +144,7 @@ export const SETTINGS_INDEX = [
 
   // ---- Voice Assistant ----
   { page: 'voice', section: 'Assistant shortcut', label: 'Assistant shortcut', desc: 'Ask out loud from any app', keywords: 'shortcut hotkey assistant voice ask', anchor: 'assistant-shortcut' },
+  { page: 'voice', section: 'Assistant shortcut', label: 'Clean up what you say in Chat', desc: 'Fillers and false starts taken out of spoken questions, your words kept', keywords: 'clean up cleanup filler um uh false starts spoken questions voice dictated chat assistant ai cleanup tidy', anchor: 'chat-clean-speech', toggle: 'chatCleanSpeech' },
   { page: 'voice', section: 'Assistant shortcut', label: 'Show the answer on the Yap bar', desc: 'Your question and its answer above the bar', keywords: 'answer card bar', anchor: 'answer-card', toggle: 'assistantAnswerCard' },
   { page: 'voice', section: 'Assistant shortcut', label: 'Let Yap’s AI see your screen when you ask about it', desc: '“What\'s this error?” takes a screenshot of the window you were in', keywords: 'screen screenshot window see look vision error page chart assistant', anchor: 'assistant-screen', toggle: 'assistantScreen' },
   { page: 'voice', section: 'Assistant shortcut', label: 'With cloud models too', desc: 'The window in front goes to a cloud model too', keywords: 'screen screenshot window cloud privacy upload assistant', anchor: 'assistant-screen-cloud', toggle: 'assistantScreenCloud' },
@@ -190,6 +191,7 @@ export const SETTINGS_INDEX = [
   // Jobs (JobsPage.svelte, jobs.rs)
   { page: 'jobs', section: 'Jobs', label: 'Jobs', desc: 'Let Chat and the Voice Assistant hand tasks to your own Claude Code', keywords: 'jobs claude code agent task background folder automate coding run', anchor: 'jobs-enabled', toggle: 'jobsEnabled' },
   { page: 'jobs', section: 'Jobs', label: 'Claude Code', desc: 'Found on this PC and signed in, or Sign in', keywords: 'claude code sign in login installed version status plan', anchor: 'jobs-claude-code' },
+  { page: 'jobs', section: 'Jobs', label: 'Clean up what you say in Code chats', desc: 'Fillers and false starts taken out of spoken questions and requests, your words kept', keywords: 'clean up cleanup filler um uh false starts spoken questions requests voice dictated code chats jobs ai cleanup tidy', anchor: 'jobs-clean-speech', toggle: 'jobsCleanSpeech' },
   { page: 'jobs', section: 'Paying for jobs', label: 'Pay with', desc: 'Your Claude plan, or an API key', keywords: 'jobs pay billing plan subscription api key anthropic cost price', anchor: 'jobs-pay' },
   { page: 'jobs', section: 'Defaults', label: 'Model', desc: 'The Claude model a job runs on', keywords: 'jobs model opus sonnet haiku claude', anchor: 'jobs-model' },
   { page: 'jobs', section: 'Defaults', label: 'Effort', desc: 'How hard a job thinks', keywords: 'jobs effort thinking reasoning low medium high extra max', anchor: 'jobs-effort' },

@@ -283,6 +283,10 @@
   older Yap sharing the folder drops them on its save, so the first comes
   back on (an older Yap never takes the window anyway), the cloud one off
   and the ask may come once more — no `migrate_once` step +
+  chat_clean_speech ("Clean up what you say in Chat", Settings → Voice
+  Assistant: a spoken question in a plain chat cleaned up as an AI prompt,
+  word for word, on Dictation cleanup's model, `cleanup_styles::cleans_question`;
+  true) — 2026-11-07, a new field: an older Yap drops it, on again +
   (assistant_stop_on_pause, "Stop listening when I pause", removed
   2026-10-25: an older Yap still reads it, default on), Read aloud's read_hotkey ("" = unbound, the
   default; `voice/read_aloud.rs`: the selection in any app read aloud, its speed
@@ -341,7 +345,9 @@
   jobs_speak ("Read job reports aloud": "voice" — when the job was asked by
   voice —, "always" or "never"; "voice") + jobs_max (at most this many jobs
   at once, one per folder, 1 to 3; 3) + jobs_animate ("Animate Code chats":
-  a slow light round a Code chat's box while its job runs; on) — new fields only, no `migrate_once`
+  a slow light round a Code chat's box while its job runs; on) +
+  jobs_clean_speech ("Clean up what you say in Code chats": chat_clean_speech's
+  twin for a Code chat's spoken questions, its own switch; on, 2026-11-07) — new fields only, no `migrate_once`
   step; an older Yap sharing the folder drops them on its save (Jobs off
   again),
   Commands' edit_hotkey (the rewrite shortcut)

@@ -21,8 +21,9 @@ pub(crate) fn apply_corrections(text: &str, cfg: &YapConfig) -> String {
 }
 
 /// [`apply_corrections`] without counting the words as used (the words as
-/// said, beside the cleaned text that already counted them).
-fn corrections(text: &str, cfg: &YapConfig) -> String {
+/// said, beside the cleaned text that already counted them; a spoken
+/// question's words looked at before its cleanup).
+pub(crate) fn corrections(text: &str, cfg: &YapConfig) -> String {
     let corrected = config::apply_dictionary(text, &cfg.dictionary);
     if cfg.dictionary_fuzzy && !stt::is_whisper_model(&cfg.model_size) {
         let fixed = crate::dictionary::fuzzy::apply_fuzzy(&corrected, &cfg.dictionary);

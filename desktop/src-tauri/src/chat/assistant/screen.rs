@@ -48,7 +48,7 @@
 //! what was on screen.
 
 use std::sync::atomic::{AtomicIsize, Ordering};
-use std::sync::LazyLock;
+use std::sync::{LazyLock, Mutex};
 
 use regex::Regex;
 use serde_json::{json, Value};
@@ -419,6 +419,65 @@ async fn model_says(question: &str, conversation: Option<u64>, ep: &Endpoint<'_>
     }
 }
 
+// ---- …asked early, while the question is cleaned up ------------------------------------------
+
+/// The model's word on a maybe, asked while question `generation` was
+/// cleaned up ([`ask_early`]).
+struct Early {
+    generation: u64,
+    task: tauri::async_runtime::JoinHandle<bool>,
+}
+
+static EARLY: Mutex<Option<Early>> = Mutex::new(None);
+
+/// **Ask early whether a spoken question is about the screen** (2026-11-07):
+/// a question cleaned up first (its side's "Clean up what you say…" switch,
+/// `pipeline::ask_assistant`) would wait out the cleanup, then the model's
+/// yes or no on a maybe — up to 3 s on a model loading on this PC. So that
+/// yes or no is asked now, on its words as said (`said`: the dictionary's,
+/// fillers and all, which never decide it), beside the cleanup; [`look`]
+/// takes the word when the cleaned question is a maybe too, and throws it
+/// away otherwise. Only what the rules call a maybe, where the window may
+/// go (a cloud model only when allowed), with Chat's model set up, the
+/// assistant on, nothing waiting in Chat's box (screenshots go instead of
+/// the window), and Yap's own window not in front (a model that looks
+/// itself may look then): asked only when [`look`] would ask it. The capture
+/// still waits for the cleaned question. Nothing is taken or shown here.
+pub fn ask_early(app: &AppHandle, said: &str, cfg: &crate::config::YapConfig, conversation: Option<u64>) {
+    if about_in(said, &crate::dictation::languages::my_languages(cfg)) != About::Maybe || crate::chat::assistant::is_off() {
+        return;
+    }
+    let Ok((base_url, api_key, model, provider, _, _)) = crate::chat::turn::resolve_chat_endpoint(cfg) else { return };
+    if allowed(cfg.assistant_screen, cfg.assistant_screen_cloud, leaves_pc(&provider, &base_url)) != Allowed::Yes
+        || !crate::snip::waiting::now().images.is_empty()
+        || crate::notices::notice::window_seen(app) == crate::notices::notice::Seen::Front
+    {
+        return;
+    }
+    let generation = super::lock().generation;
+    let said = said.to_string();
+    tracing::info!("Voice Assistant: asking whether the question is about the screen while it's cleaned up");
+    let task = tauri::async_runtime::spawn(async move {
+        let ep = Endpoint { base_url: &base_url, api_key: &api_key, model: &model, provider: &provider };
+        model_says(&said, conversation, &ep).await
+    });
+    if let Some(old) = EARLY.lock().unwrap_or_else(|p| p.into_inner()).replace(Early { generation, task }) {
+        old.task.abort();
+    }
+}
+
+/// Question `generation`'s early word, if one was asked (taken; an older
+/// question's is dropped).
+fn take_early(generation: u64) -> Option<tauri::async_runtime::JoinHandle<bool>> {
+    let early = EARLY.lock().unwrap_or_else(|p| p.into_inner()).take()?;
+    if early.generation == generation {
+        Some(early.task)
+    } else {
+        early.task.abort();
+        None
+    }
+}
+
 // ---- may it go? -----------------------------------------------------------------------------
 
 /// Whether the window may go to the model.
@@ -555,16 +614,28 @@ impl Look {
 
 /// **A spoken question, looked at**: `None` when it isn't about the screen
 /// (or the setting's off); else what goes with it. `looking(true)` while the
-/// window is taken and read (the capsule says so).
+/// window is taken and read (the capsule says so). `generation`: the
+/// question's, whose model's word may have been asked early ([`ask_early`]).
 pub async fn look(
     app: &AppHandle,
     question: &str,
     cfg: &crate::config::YapConfig,
     ep: Endpoint<'_>,
     conversation: Option<u64>,
+    generation: u64,
     looking: &(dyn Fn(bool) + Send + Sync),
 ) -> Option<Look> {
     let about = about_in(question, &crate::dictation::languages::my_languages(cfg));
+    // The word asked early is for a maybe only: the cleaned question isn't
+    // one, it isn't wanted.
+    let early = take_early(generation);
+    let early = match early {
+        Some(task) if about != About::Maybe => {
+            task.abort();
+            None
+        }
+        e => e,
+    };
     if about == About::No {
         return None;
     }
@@ -589,16 +660,30 @@ pub async fn look(
         return None;
     }
     looking(true);
-    let out = take(app, question, &ep, about, conversation).await;
+    let out = take(app, question, &ep, about, conversation, early).await;
     looking(false);
     out
 }
 
-/// [`look`]'s work once the window may go: the model's word on a maybe,
-/// the capture, then its picture or its text.
-async fn take(app: &AppHandle, question: &str, ep: &Endpoint<'_>, about: About, conversation: Option<u64>) -> Option<Look> {
-    if about == About::Maybe && !model_says(question, conversation, ep).await {
-        return None;
+/// [`look`]'s work once the window may go: the model's word on a maybe
+/// (`early`: asked already, beside the question's cleanup), the capture,
+/// then its picture or its text.
+async fn take(
+    app: &AppHandle,
+    question: &str,
+    ep: &Endpoint<'_>,
+    about: About,
+    conversation: Option<u64>,
+    early: Option<tauri::async_runtime::JoinHandle<bool>>,
+) -> Option<Look> {
+    if about == About::Maybe {
+        let yes = match early {
+            Some(task) => task.await.unwrap_or(false),
+            None => model_says(question, conversation, ep).await,
+        };
+        if !yes {
+            return None;
+        }
     }
     let hwnd = WINDOW.load(Ordering::SeqCst);
     let capture_app = app.clone();

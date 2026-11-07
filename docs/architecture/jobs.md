@@ -136,6 +136,12 @@ The feature keeps the name **Jobs**, in one constant (`core/codeChats.js`
   (`CodeEdge.svelte`); while a job from this chat runs, a slow light
   travelling round it ("Animate Code chats", `jobsAnimate`, on; never with
   reduced motion). The switch is the main cue, the look the second.
+- **What's said into a Code chat** (2026-11-07): "Clean up what you say in
+  Code chats" (Settings → Jobs, `jobs_clean_speech`, on; its own switch,
+  apart from Chat's and from "AI cleanup") cleans a spoken question or
+  request — the Voice Assistant's, Chat's mic, a phone's — as an AI prompt,
+  word for word, on Dictation cleanup's model (`cleanup_styles::cleans_question`,
+  `assistant::into_code_chat`; dictation.md, chat-and-assistant.md).
 
 ## Starting a job
 
