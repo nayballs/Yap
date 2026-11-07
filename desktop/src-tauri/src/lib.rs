@@ -485,6 +485,7 @@ pub fn run() {
             ai::claude_code::claude_code_sign_in,
             ai::claude_plan::claude_plan_status,
             ai::claude_plan::claude_plan_sign_in,
+            ai::claude_plan::usage::claude_plan_usage,
             ai::effort::effort_info,
             ai::effort::chat_set_effort,
             ai::effort::chat_set_fast,

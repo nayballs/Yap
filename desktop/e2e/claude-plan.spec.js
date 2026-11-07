@@ -5,8 +5,9 @@
 // YAP_CLAUDE_ARGS_PREFIX), signed in, from support/fake-claude/plan-chat.jsonl: nothing
 // goes on the internet and no real Claude Code or account is used.
 // - The picker: Claude is one entry with "Your plan | API key" (an Anthropic key saved
-//   too); the chip says which pays ("Using Claude plan", "Anthropic API key") with
-//   Manage usage on the plan; an API model picked, then back to the plan.
+//   too); the chip says which pays ("Using Claude plan", "Anthropic API key"); this
+//   stand-in refuses get_usage, so no usage ring on the plan (and no error); an API model
+//   picked, then back to the plan.
 // - Settings → Language Models → Chat → Claude: the plan's card, signed in ("Connected ·
 //   Using Claude plan", the version), the switch, Use for Chat.
 // - A plan chat: streamed, a web search step ("Searching the web · …"), its chip, the
@@ -104,7 +105,11 @@ async function onPlan(yap, main) {
 test('the picker has one Claude entry, "Your plan | API key", and the chip says which pays', async ({ yap, main, shot }) => {
   await openView(main, 'Chat');
   await expect(chip(main)).toHaveText(/Claude Haiku 5\.5.*· Using Claude plan/);
-  await expect(main.locator('.modelchip .usage')).toHaveText('Manage usage');
+  // The plan's usage ring is where Manage usage was (claude-plan-usage.spec.js); this
+  // stand-in refuses get_usage, as an older Claude Code would: no ring at all, no error.
+  await expect.poll(() => fs.readFileSync(yap.logPath, 'utf8'), { timeout: 20_000 }).toMatch(/Claude plan: usage asked.*outcome="?refused/);
+  await expect(main.getByTestId('plan-usage-ring')).toHaveCount(0);
+  await expect(main.locator('.modelchip .usage')).toHaveCount(0);
   await chip(main).click();
   await expect(picker(main)).toBeVisible();
   // Opened on Claude, the plan's way: both connected, so the switch.

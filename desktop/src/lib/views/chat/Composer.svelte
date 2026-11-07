@@ -3,9 +3,10 @@
   // replies and their volume), the message, the mic, and Send once there's
   // something to send — ■ Stop while an answer comes (Esc too); under it,
   // quiet, the model the message goes to (ModelChip, whose picker opens
-  // above it all), and bottom right the context ring (ContextRing: how much
+  // above it all; on your Claude plan, the plan's usage ring beside it:
+  // PlanUsageRing), and bottom right the context ring (ContextRing: how much
   // of the model's context this chat uses, and the day's AI use in its
-  // panel). Snip to Chat (snip.rs): the screenshots this question
+  // panel; not on the plan, whose ring says how full the chat is). Snip to Chat (snip.rs): the screenshots this question
   // carries sit over the box with three one-tap questions, and — a model
   // that can't read images — one line saying so, with the switch, or
   // "Send its text instead" (Windows' OCR on this PC: snip/ocr.rs); the
@@ -425,7 +426,7 @@
   </div>
   <div class="composerfoot">
     <CodeChips {chat} {code} />
-    <ModelChip bind:this={chipRef} {onopensettings} quiet />
+    <ModelChip bind:this={chipRef} {onopensettings} quiet conversationId={chat.activeId} />
     <!-- How much of the model's context this chat uses (bottom right, as
          Claude's chat box shows it); its panel has the day's AI use. -->
     <span class="footgap"></span>

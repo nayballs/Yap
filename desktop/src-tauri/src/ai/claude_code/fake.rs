@@ -45,6 +45,10 @@
 //! - `{"_write_file":{"path":"notes.md","text":"…"}}`: write a file inside
 //!   the working folder (a job's edit, after its backup hook).
 //! - `{"_exit":N}`: exit with code N.
+//! - `{"_usage":{…}}`: from now on, a `get_usage` control request is
+//!   answered with this body (`control_response` / `success` / `response`:
+//!   it, as 2.1.296 answers; `claude_code/usage.rs`). `{"_usage":null}`:
+//!   refused again, as before any `_usage` (an older Claude Code).
 //!
 //! **stdin** is read the whole time: user messages queue for `_wait_user`;
 //! an interrupt control request is answered at once
@@ -52,7 +56,8 @@
 //! does) and, mid-turn, ends the turn with the fake's own aborted result
 //! (`subtype: "error_during_execution"`, `terminal_reason:
 //! "aborted_streaming"`), the script skipping on to the next `_wait_user`.
-//! Any other control request gets an error response.
+//! `get_usage` is answered with the script's `_usage`, if it set one. Any
+//! other control request gets an error response.
 //!
 //! **Its transcript**, as Claude Code saves a session: with
 //! `YAP_FAKE_CLAUDE_TRANSCRIPTS=1` and a `CLAUDE_CONFIG_DIR` (a test's own
@@ -246,7 +251,7 @@ fn json_or_file(v: &str) -> Result<Value, String> {
 /// Play `script`: `input` is stdin's lines (closed: stdin closed). The exit
 /// code.
 pub fn play(script: &str, ctx: &Ctx, input: Receiver<String>, out: &mut dyn Write) -> Result<i32, String> {
-    let mut p = Player { ctx, input, out, queue: VecDeque::new(), user_text: String::new(), in_turn: false, skipping: false, closed: false, hooks: 0 };
+    let mut p = Player { ctx, input, out, queue: VecDeque::new(), user_text: String::new(), in_turn: false, skipping: false, closed: false, hooks: 0, usage: None };
     // `_for`: the kind of run the lines play in (`None`: every kind).
     let kind = ctx.kind();
     let mut part: Option<String> = None;
@@ -298,6 +303,8 @@ struct Player<'a> {
     skipping: bool,
     closed: bool,
     hooks: u32,
+    /// What `get_usage` answers (`_usage`); none: refused.
+    usage: Option<Value>,
 }
 
 impl Player<'_> {
@@ -347,6 +354,9 @@ impl Player<'_> {
                         });
                         self.print(&aborted.to_string())?;
                     }
+                } else if let (Some("get_usage"), Some(body)) = (v["request"]["subtype"].as_str(), self.usage.as_ref()) {
+                    let answer = json!({"type":"control_response","response":{"subtype":"success","request_id":id,"response":body}});
+                    self.print(&answer.to_string())?;
                 } else {
                     let refused = json!({"type":"control_response","response":{"subtype":"error","request_id":id,"error":"fake-claude doesn't do this control request"}});
                     self.print(&refused.to_string())?;
@@ -438,6 +448,7 @@ impl Player<'_> {
                 }
             }
             "_exit" => return Ok(Some(arg.as_i64().unwrap_or(0) as i32)),
+            "_usage" => self.usage = Some(arg.clone()).filter(|a| !a.is_null()),
             other => eprintln!("fake-claude: unknown instruction {other}"),
         }
         Ok(None)
@@ -720,6 +731,23 @@ mod tests {
         assert_eq!(out[2]["session_id"], "s1");
         assert_eq!(out[3]["response"]["subtype"], "error");
         assert_eq!(out[4]["result"], "second: again");
+    }
+
+    #[test]
+    fn get_usage_is_answered_with_the_scripts_usage_else_refused() {
+        let c = ctx(&["-p", "--tools", ""]);
+        let ask = |id: &str| format!(r#"{{"type":"control_request","request_id":"{id}","request":{{"subtype":"get_usage","skip_behaviors":true}}}}"#);
+        let (a, b, d) = (ask("u1"), ask("u2"), ask("u3"));
+        // Refused until the script sets an answer; that answer after; refused again after null.
+        let script = "{\"_wait_user\":true}\n{\"_usage\":{\"rate_limits_available\":true,\"rate_limits\":{\"five_hour\":{\"utilization\":12}}}}\n{\"_wait_user\":true}\n{\"_usage\":null}\n{\"_wait_user\":true}\n";
+        let (code, out) = run_timed(script, &c, vec![(0, a.as_str()), (0, USER), (200, b.as_str()), (0, USER), (200, d.as_str())]);
+        assert_eq!(code, 0);
+        let answers: Vec<(&str, &str)> = out.iter().map(|v| (v["response"]["request_id"].as_str().unwrap(), v["response"]["subtype"].as_str().unwrap())).collect();
+        assert_eq!(answers, [("u1", "error"), ("u2", "success"), ("u3", "error")]);
+        assert_eq!(out[1]["response"]["response"]["rate_limits"]["five_hour"]["utilization"], 12);
+        let Some(crate::ai::claude_code::events::Event::ControlResponse(r)) = crate::ai::claude_code::events::parse_line(&out[1].to_string()) else { panic!() };
+        let crate::ai::claude_code::usage::Asked::Answered(Some(u)) = crate::ai::claude_code::usage::from_response(&r) else { panic!() };
+        assert_eq!(u.limits[0].title, "Current session");
     }
 
     #[test]

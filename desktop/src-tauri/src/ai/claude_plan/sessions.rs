@@ -141,6 +141,7 @@ pub fn put(conv: u64, mut kept: Kept) {
 /// is being deleted): its process ended first, so nothing more goes into
 /// the transcript.
 pub fn forget(conv: u64) {
+    super::usage::forget_context(conv);
     let warm = take(conv);
     let gone = with_store(|s| {
         let gone = s.conversations.remove(&conv.to_string());
@@ -160,6 +161,7 @@ pub fn forget(conv: u64) {
 /// warm process ended, Claude Code's copies of them deleted. How many there
 /// were.
 pub fn reset() -> usize {
+    super::usage::forget_contexts();
     let warm: Vec<Arc<Warm>> = lock_warm().drain().map(|(_, w)| w).collect();
     end_now(&warm);
     let (n, ids) = with_store(|s| {
@@ -382,6 +384,12 @@ pub fn end_warm(conv: u64) {
     if let Some(w) = take(conv) {
         w.session.end();
     }
+}
+
+/// Every warm process still running (the plan's usage is asked on a free
+/// one: `usage.rs`).
+pub fn all_warm() -> Vec<Arc<Warm>> {
+    lock_warm().values().filter(|w| w.session.is_running()).cloned().collect()
 }
 
 /// How many processes are warm (tests, the log).

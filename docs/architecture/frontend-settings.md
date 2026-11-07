@@ -734,7 +734,11 @@ on an element that also has a `settings.css` class (`set-note`,
   signed in (**Sign in**: Claude Code's own `claude auth login` in a terminal
   Yap opens, "Finish signing in…", read again when the window gets the focus
   back); signed in: **Connected · Using Claude plan**, its version and plan,
-  Manage usage, and **Use for Chat** while Chat is on the key. Under it, small
+  Manage usage, and **Use for Chat** while Chat is on the key, then the
+  plan's usage limits, small (`claude-plan-usage`: Chat's usage ring's rows,
+  `components/PlanUsageRows.svelte` `small`, `stores/claudePlanUsage.svelte.js`;
+  asked when the card shows, at most once a minute; none to be had, none
+  shown; [ai-models.md](./ai-models.md#plan-usage-limits-2026-11-07)). Under it, small
   (`claude-plan-copies`): "Claude Code keeps its own copy of each plan chat;
   Yap deletes it with the chat." (ai-models.md). Both
   connected: **Your plan | API key**, as ChatGPT's (`TAB_WAYS` in

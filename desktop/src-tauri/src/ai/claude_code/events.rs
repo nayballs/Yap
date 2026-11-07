@@ -21,7 +21,12 @@
 //! - `control_response` answers a control request Yap sent on stdin
 //!   (`{"type":"control_response","response":{"subtype":"success",
 //!   "request_id":…,"response":{"still_queued":[]}}}` for an interrupt,
-//!   seen on 2.1.296).
+//!   seen on 2.1.296; the plan's usage for `get_usage`, `usage.rs`).
+//! - **The context a call used**: `message_start`'s `usage` (the prompt:
+//!   `input_tokens` and the cache's) and `message_delta`'s `output_tokens`,
+//!   per model call ([`StreamKind::MessageStart`], [`StreamKind::MessageDelta`]),
+//!   where a `result`'s `usage` is summed over the turn's calls; the
+//!   `result`'s `modelUsage` says each model's context window.
 
 use serde::Serialize;
 use serde_json::Value;
@@ -148,7 +153,9 @@ pub struct Stream {
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum StreamKind {
-    MessageStart { id: Option<String>, model: Option<String> },
+    /// A model call began. `prompt`: what it read (`input_tokens` and the
+    /// cache's, from its `usage`), when it said.
+    MessageStart { id: Option<String>, model: Option<String>, prompt: Option<u64> },
     BlockStart { index: u64, block: BlockStart },
     /// `content_block_delta` / `text_delta`.
     Text { index: u64, text: String },
@@ -158,7 +165,8 @@ pub enum StreamKind {
     /// piece at a time.
     ToolInput { index: u64, partial_json: String },
     BlockStop { index: u64 },
-    MessageDelta { stop_reason: Option<String> },
+    /// `output_tokens`: what the call has written so far, when it said.
+    MessageDelta { stop_reason: Option<String>, output_tokens: Option<u64> },
     MessageStop,
     /// `ping`, `signature_delta`, `citations_delta`, …
     Other(Value),
@@ -251,12 +259,20 @@ pub struct TurnResult {
     pub permission_denials: Vec<Denial>,
     /// The error subtypes' messages.
     pub errors: Vec<String>,
+    /// `modelUsage`'s `contextWindow` by model: how big each model's
+    /// context is, as Claude Code runs it.
+    pub context_windows: Vec<(String, u64)>,
 }
 
 impl TurnResult {
     /// Stopped by an interrupt, not finished.
     pub fn interrupted(&self) -> bool {
         self.terminal_reason.as_deref().is_some_and(|r| r.starts_with("aborted"))
+    }
+
+    /// `model`'s context window, as `modelUsage` says it.
+    pub fn context_window(&self, model: &str) -> Option<u64> {
+        self.context_windows.iter().find(|(m, _)| m == model).map(|(_, n)| *n).filter(|n| *n > 0)
     }
 }
 
@@ -267,9 +283,25 @@ pub struct RateLimit {
     /// When the limit resets, Unix seconds (a value in milliseconds is
     /// turned into seconds).
     pub resets_at: Option<i64>,
+    /// How much of it is used, as Claude Code says it (a fraction, 1.0 at
+    /// the limit, in the recordings).
     pub utilization: Option<f64>,
     /// `credits_required`: a claude.ai plan whose included usage is spent.
     pub error_code: Option<String>,
+    /// `rateLimitType`: the window it's about (`five_hour`, `seven_day`,
+    /// `seven_day_opus`, `seven_day_sonnet`, `overage`, …).
+    pub kind: Option<String>,
+    /// `unifiedWindows`, when it comes: every window's numbers (read
+    /// tolerantly: an object by window, or a list naming each).
+    pub windows: Vec<RateWindow>,
+}
+
+/// One window of a `rate_limit_event`'s `unifiedWindows`.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct RateWindow {
+    pub kind: String,
+    pub utilization: Option<f64>,
+    pub resets_at: Option<i64>,
 }
 
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -289,6 +321,9 @@ pub struct ControlResponse {
     /// The answer's body (`{"still_queued":[…]}` for an interrupt).
     pub response: Value,
     pub error: Option<String>,
+    /// The whole `response` object (a body some versions may put there
+    /// rather than under `response.response`).
+    pub whole: Value,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -447,6 +482,8 @@ pub fn from_value(v: Value) -> Event {
                 resets_at: i.get("resetsAt").and_then(Value::as_f64).map(unix_seconds),
                 utilization: i.get("utilization").and_then(Value::as_f64),
                 error_code: opt_str(i, "errorCode"),
+                kind: opt_str(i, "rateLimitType"),
+                windows: rate_windows(i.get("unifiedWindows")),
             })
         }),
         "tool_progress" => Some(Event::ToolProgress(ToolProgress {
@@ -462,6 +499,7 @@ pub fn from_value(v: Value) -> Event {
                 ok: str_of(r, "subtype") == "success",
                 response: r.get("response").cloned().unwrap_or(Value::Null),
                 error: r.get("error").map(|e| e.as_str().map(str::to_string).unwrap_or_else(|| e.to_string())),
+                whole: r.clone(),
             })
         }),
         "control_request" => v.get("request").filter(|r| r.is_object()).map(|r| {
@@ -535,7 +573,47 @@ fn result(v: &Value) -> TurnResult {
             })
             .unwrap_or_default(),
         errors: strings(v, "errors"),
+        context_windows: v
+            .get("modelUsage")
+            .and_then(Value::as_object)
+            .map(|m| m.iter().filter_map(|(model, u)| Some((model.clone(), u.get("contextWindow").and_then(Value::as_u64)?))).collect())
+            .unwrap_or_default(),
     }
+}
+
+/// `unifiedWindows`, whichever way it comes: `{"seven_day": {utilization,
+/// resetsAt}, …}` or `[{rateLimitType|type|window, utilization, resetsAt},
+/// …]`. Anything else: none.
+fn rate_windows(v: Option<&Value>) -> Vec<RateWindow> {
+    let one = |kind: &str, w: &Value| -> Option<RateWindow> {
+        let w = w.as_object()?;
+        let at = w.get("resetsAt").or_else(|| w.get("resets_at"));
+        Some(RateWindow {
+            kind: kind.to_string(),
+            utilization: w.get("utilization").and_then(Value::as_f64),
+            resets_at: at.and_then(Value::as_f64).map(unix_seconds),
+        })
+    };
+    let all: Vec<RateWindow> = match v {
+        Some(Value::Object(m)) => m.iter().filter_map(|(k, w)| one(k, w)).collect(),
+        Some(Value::Array(a)) => a
+            .iter()
+            .filter_map(|w| {
+                let kind = ["rateLimitType", "type", "window"].iter().find_map(|k| w.get(*k).and_then(Value::as_str))?;
+                one(kind, w)
+            })
+            .collect(),
+        _ => Vec::new(),
+    };
+    all.into_iter().filter(|w| !w.kind.is_empty()).collect()
+}
+
+/// A call's prompt, from its `usage`: what it read new, from the cache
+/// and into it. `None` when it says nothing.
+fn prompt_of(usage: Option<&Value>) -> Option<u64> {
+    let u = usage.filter(|u| u.is_object())?;
+    let keys = ["input_tokens", "cache_creation_input_tokens", "cache_read_input_tokens"];
+    keys.iter().any(|k| u.get(*k).is_some_and(Value::is_number)).then(|| keys.iter().map(|k| u64_of(u, k)).sum())
 }
 
 fn stream_kind(e: &Value) -> StreamKind {
@@ -543,7 +621,7 @@ fn stream_kind(e: &Value) -> StreamKind {
     match str_of(e, "type") {
         "message_start" => {
             let m = e.get("message").cloned().unwrap_or(Value::Null);
-            StreamKind::MessageStart { id: opt_str(&m, "id"), model: opt_str(&m, "model") }
+            StreamKind::MessageStart { id: opt_str(&m, "id"), model: opt_str(&m, "model"), prompt: prompt_of(m.get("usage")) }
         }
         "content_block_start" => {
             let b = e.get("content_block").cloned().unwrap_or(Value::Null);
@@ -569,6 +647,7 @@ fn stream_kind(e: &Value) -> StreamKind {
         "content_block_stop" => StreamKind::BlockStop { index },
         "message_delta" => StreamKind::MessageDelta {
             stop_reason: e.get("delta").and_then(|d| d.get("stop_reason")).and_then(Value::as_str).map(str::to_string),
+            output_tokens: e.get("usage").and_then(|u| u.get("output_tokens")).and_then(Value::as_u64),
         },
         "message_stop" => StreamKind::MessageStop,
         _ => StreamKind::Other(e.clone()),
@@ -927,6 +1006,39 @@ pub(crate) mod tests {
         assert_eq!((r.usage.input_tokens, r.usage.output_tokens, r.usage.cache_read_input_tokens), (1200, 42, 1000));
         assert!((r.cost_usd - 0.0021).abs() < 1e-9);
         assert!(problems(&events, Paying::Plan).is_empty());
+        // Each call's own prompt and answer (the result's are the turn's
+        // sum), and the model's context window.
+        let starts: Vec<Option<u64>> = events
+            .iter()
+            .filter_map(|e| match e {
+                Event::Stream(Stream { kind: StreamKind::MessageStart { prompt, .. }, .. }) => Some(*prompt),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(starts, [Some(1200)]);
+        assert!(events.iter().any(|e| matches!(e, Event::Stream(Stream { kind: StreamKind::MessageDelta { output_tokens: Some(42), .. }, .. }))));
+        assert_eq!(r.context_window("claude-haiku-5-5"), Some(200_000));
+        assert_eq!(r.context_window("claude-opus-5-5"), None);
+    }
+
+    #[test]
+    fn a_calls_prompt_counts_the_cache_and_rate_limits_say_their_window() {
+        let start = |usage: Value| match from_value(serde_json::json!({"type":"stream_event","event":{"type":"message_start","message":{"id":"m","usage":usage}}})) {
+            Event::Stream(Stream { kind: StreamKind::MessageStart { prompt, .. }, .. }) => prompt,
+            e => panic!("{e:?}"),
+        };
+        assert_eq!(start(serde_json::json!({"input_tokens":12,"cache_creation_input_tokens":300,"cache_read_input_tokens":41_000,"output_tokens":1})), Some(41_312));
+        assert_eq!(start(serde_json::json!({"output_tokens":1})), None, "nothing about the prompt");
+        assert_eq!(start(Value::Null), None);
+        let e = from_value(serde_json::json!({"type":"rate_limit_event","rate_limit_info":{"status":"allowed_warning","rateLimitType":"seven_day","utilization":0.86,"resetsAt":1_794_067_200,
+            "unifiedWindows":{"five_hour":{"utilization":0.4,"resetsAt":1_794_000_000},"seven_day":{"utilization":0.86},"odd":7}}}));
+        let Event::RateLimit(r) = e else { panic!() };
+        assert_eq!(r.kind.as_deref(), Some("seven_day"));
+        assert_eq!(r.windows.len(), 2, "{:?}", r.windows);
+        assert!(r.windows.contains(&RateWindow { kind: "five_hour".into(), utilization: Some(0.4), resets_at: Some(1_794_000_000) }));
+        let listed = from_value(serde_json::json!({"type":"rate_limit_event","rate_limit_info":{"status":"allowed","unifiedWindows":[{"rateLimitType":"five_hour","utilization":0.1},{"utilization":0.2}]}}));
+        let Event::RateLimit(r) = listed else { panic!() };
+        assert_eq!(r.windows, [RateWindow { kind: "five_hour".into(), utilization: Some(0.1), resets_at: None }], "one with no name left out");
     }
 
     #[test]

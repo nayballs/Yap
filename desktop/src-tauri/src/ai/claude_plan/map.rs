@@ -23,6 +23,12 @@
 //!   turn's sources becomes Yap's own "[n]", so the Sources row, the pills
 //!   and the checks (`finish::check`) work as for any answer.
 //!
+//! - **How full the conversation is** ([`Mapper::last_call_tokens`]): the
+//!   turn's last model call's prompt (`message_start`'s usage, the cache's
+//!   included) and answer (`message_delta`'s `output_tokens`), what the
+//!   next call starts from. The result's `usage` is summed over the turn's
+//!   calls, so it overstates it.
+//!
 //! A subagent's own messages (`parent_tool_use_id`) are never shown.
 
 use std::collections::{HashMap, HashSet};
@@ -121,6 +127,8 @@ pub struct Mapper {
     pages: Vec<String>,
     looked: bool,
     model: String,
+    /// The last model call's prompt and answer so far, in tokens.
+    last_call: Option<(u64, u64)>,
 }
 
 impl Mapper {
@@ -151,6 +159,12 @@ impl Mapper {
     /// The model that answered (`system/init`'s).
     pub fn model(&self) -> &str {
         &self.model
+    }
+
+    /// The turn's last model call: its prompt and its answer, in tokens
+    /// (how full the conversation is now). `None` when it didn't say.
+    pub fn last_call_tokens(&self) -> Option<u64> {
+        self.last_call.map(|(prompt, answer)| prompt + answer)
     }
 
     /// One event: what it says to `out`, and whether the turn goes on.
@@ -205,7 +219,9 @@ impl Mapper {
 
     fn stream(&mut self, kind: &StreamKind, out: &mut dyn Out) {
         match kind {
-            StreamKind::MessageStart { id, .. } => {
+            StreamKind::MessageStart { id, prompt, .. } => {
+                // A new model call: what it read.
+                self.last_call = prompt.map(|p| (p, 0));
                 // This message streams: its whole copy after says nothing new.
                 self.open.clear();
                 self.streamed = true;
@@ -236,6 +252,11 @@ impl Mapper {
                     if let Tool::Yap(name) = &o.tool {
                         out.delta(Delta::ToolArgs { name, so_far: &o.json });
                     }
+                }
+            }
+            StreamKind::MessageDelta { output_tokens: Some(n), .. } => {
+                if let Some(call) = self.last_call.as_mut() {
+                    call.1 = *n;
                 }
             }
             StreamKind::BlockStop { index } => {
@@ -752,6 +773,27 @@ mod tests {
         assert_eq!(m.sources().len(), 1);
         assert!(m.sources()[0].opened);
         assert_eq!(m.pages(), ["Step one: unplug it."]);
+    }
+
+    #[test]
+    fn how_full_the_conversation_is_is_the_last_calls_prompt_and_answer() {
+        // Two calls in one turn (a search, then the answer): the result's
+        // usage sums them (10,400 read); the conversation is what the last
+        // one read and wrote.
+        let lines = [
+            r#"{"type":"stream_event","event":{"type":"message_start","message":{"id":"m1","usage":{"input_tokens":5000,"cache_read_input_tokens":0,"output_tokens":1}}}}"#,
+            r#"{"type":"stream_event","event":{"type":"message_delta","delta":{"stop_reason":"tool_use"},"usage":{"output_tokens":40}}}"#,
+            r#"{"type":"stream_event","event":{"type":"message_start","message":{"id":"m2","usage":{"input_tokens":200,"cache_creation_input_tokens":100,"cache_read_input_tokens":5100,"output_tokens":1}}}}"#,
+            r#"{"type":"stream_event","event":{"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"output_tokens":60}}}"#,
+            r#"{"type":"result","subtype":"success","usage":{"input_tokens":5200,"cache_read_input_tokens":5100,"cache_creation_input_tokens":100,"output_tokens":100},"modelUsage":{"claude-haiku-5-5":{"contextWindow":200000}}}"#,
+        ];
+        let (m, _, end) = run(&lines);
+        assert_eq!(m.last_call_tokens(), Some(5_460));
+        let Some(Fed::Done(r)) = end else { panic!() };
+        assert_eq!(r.context_window("claude-haiku-5-5"), Some(200_000));
+        // A call that says nothing of its prompt: not known.
+        let (m, _, _) = run(&[r#"{"type":"stream_event","event":{"type":"message_start","message":{"id":"m1"}}}"#]);
+        assert_eq!(m.last_call_tokens(), None);
     }
 
     #[test]

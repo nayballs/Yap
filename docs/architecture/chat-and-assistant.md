@@ -2547,7 +2547,7 @@ and its Undo, Preview / Source, find, copy, light and dark).
   shows "Opus 5.5 Extra": the one chosen, else its default; "· Fast" with
   fast mode; `core/effort.js`; OpenAI's models say which way pays: "· Using
   ChatGPT plan" with Manage usage beside it, or "· OpenAI API key"; Claude's
-  the same since 2026-11-07: "· Using Claude plan" or "· Anthropic API key") / "Qwen3.5 4B · On this PC", "· no note tools" for a local model under 4B,
+  the same since 2026-11-07: "· Using Claude plan" — with the plan's usage ring beside it in place of Manage usage, [ai-models.md](./ai-models.md#plan-usage-limits-2026-11-07) — or "· Anthropic API key") / "Qwen3.5 4B · On this PC", "· no note tools" for a local model under 4B,
   where it runs in its tooltip (and, on the on-device model, "Context: 8K
   tokens": `ai_model_status.context`), "No AI model" when nothing is set up;
   bottom right of the same row, **the context ring** ([below](#the-context-ring-2026-10-25)). The
@@ -3145,7 +3145,9 @@ open conversation uses up the Chat model's context.
   ring (r 7 in 18 px) over `--yap-raised`, filled in `--yap-primary`,
   warmer from 80 % (`--yap-danger` mixed in) and `--yap-danger` from 95 %
   (`core/aiUsage.js ringColor`); light and dark from the tokens. Hidden on
-  a new chat (nothing to show). Hover or focus: a tooltip "38% of context
+  a new chat (nothing to show), and on your Claude plan (Claude Code's counts
+  are a turn's sum over its calls, so it would overstate: the plan's usage
+  ring says how full the chat is from its last call instead). Hover or focus: a tooltip "38% of context
   used" ("About 38%…" for an estimate or an approximate context); the
   button's accessible name says the same; `data-percent`. Read again after
   each answer, stop or newer question (`chatState`'s `contextStamp`), when
@@ -3409,7 +3411,11 @@ as for every other. Chat, the Voice Assistant on this PC and from the phone.
 - **On screen**: Claude is one entry in the picker, "Your plan | API key"
   ([The Chat view](#the-chat-view): `TAB_WAYS` in `core/providerIds.js`,
   `waysState` in `core/chatPicker.js`, the phone's picker the same table);
-  the chip "Using Claude plan" / "Anthropic API key".
+  the chip "Using Claude plan" / "Anthropic API key"; on the plan, the usage
+  ring beside it ("Plan usage limits", how full this chat is; Yap's context
+  ring not shown: [ai-models.md](./ai-models.md#plan-usage-limits-2026-11-07)).
+  A turn's rate-limit events move the ring live; after it, `get_usage` is
+  asked on its session once it's free.
 - E2E: `claude-plan*.spec.js` ([`docs/e2e-tests.md`](../e2e-tests.md)).
 
 ## Jobs in Chat (2026-11-07)

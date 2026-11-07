@@ -30,6 +30,7 @@
   import { effortLabel, effortNow } from '../../core/effort.js';
   import { createExternalLinkHandler } from '../../core/externalLinks.js';
   import { loadClaudePlan } from '../../stores/claudePlan.svelte.js';
+  import PlanUsageRing from './PlanUsageRing.svelte';
 
   // Chat on the person's ChatGPT plan (Sign in with ChatGPT): "Using
   // ChatGPT plan" by the model, and "Manage usage" (OpenAI's UI rules). On an
@@ -37,13 +38,16 @@
   // both ways, so the chip says which pays (2026-11-02).
   const USAGE_URL = 'https://chatgpt.com/settings/usage';
   // Claude the same way (2026-11-07): your Claude plan (your own Claude
-  // Code, ai/claude_plan.rs) or an Anthropic API key.
+  // Code, ai/claude_plan.rs) or an Anthropic API key. On the plan, the usage
+  // ring in place of Manage usage (PlanUsageRing.svelte: "Plan usage
+  // limits", its See all to the plan's usage page).
   const CLAUDE_USAGE_URL = 'https://claude.ai/settings/usage';
   const PAYS = { chatgpt: 'Using ChatGPT plan', openai: 'OpenAI API key', 'claude-plan': 'Using Claude plan', anthropic: 'Anthropic API key' };
 
   // `quiet`: no pill, just the words (under the Chat composer, as Claude
-  // Code shows its model).
-  let { onopensettings = null, quiet = false } = $props();
+  // Code shows its model). `conversationId`: the open conversation (the
+  // plan's usage ring says how full it is).
+  let { onopensettings = null, quiet = false, conversationId = null } = $props();
 
   let status = $state(null);
   let open = $state(false);
@@ -173,7 +177,7 @@
     {#if model?.provider === 'chatgpt'}
       <a class="usage" href={USAGE_URL} onclick={createExternalLinkHandler(USAGE_URL)}>Manage usage</a>
     {:else if model?.provider === 'claude-plan'}
-      <a class="usage" href={CLAUDE_USAGE_URL} onclick={createExternalLinkHandler(CLAUDE_USAGE_URL)}>Manage usage</a>
+      <PlanUsageRing {conversationId} usageUrl={CLAUDE_USAGE_URL} />
     {/if}
   {/if}
 
