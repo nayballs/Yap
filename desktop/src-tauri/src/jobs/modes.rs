@@ -192,7 +192,16 @@ pub fn model_pick(chip: Mode, asked: Option<Mode>, person_asked: bool) -> Pick {
 /// unconfirmed falls back to Auto (the person's own chip can't be Bypass
 /// unconfirmed; a hand-edited file can). Pure.
 pub fn next_turn(job_mode: Mode, chip: Mode, cap: Option<Mode>, go_ahead: bool, bypass_ok: bool) -> Mode {
-    let mode = if job_mode == Mode::Plan && !go_ahead { Mode::Plan } else { chip };
+    let mode = if job_mode == Mode::Plan && !go_ahead {
+        Mode::Plan
+    } else if go_ahead && chip == Mode::Plan {
+        // The chip says plan first, and the person approved the plan: it's
+        // built asking before each change (Manual), as Claude Code's own
+        // "Yes, and manually approve edits"; a folder capped at Plan stays one.
+        Mode::Manual
+    } else {
+        chip
+    };
     let mode = cap.map_or(mode, |c| mode.min(c));
     if mode == Mode::Bypass && !bypass_ok {
         Mode::Auto.min(cap.unwrap_or(Mode::Auto))
@@ -279,6 +288,11 @@ mod tests {
         assert_eq!(next_turn(Mode::Plan, Mode::Auto, None, false, false), Mode::Plan);
         assert_eq!(next_turn(Mode::Plan, Mode::Auto, None, true, false), Mode::Auto);
         assert_eq!(next_turn(Mode::Plan, Mode::Auto, Some(Mode::AcceptEdits), true, false), Mode::AcceptEdits);
+        // The chip is Plan and the plan's approved: built asking before each
+        // change; a folder capped at Plan keeps it a plan.
+        assert_eq!(next_turn(Mode::Plan, Mode::Plan, None, true, false), Mode::Manual);
+        assert_eq!(next_turn(Mode::Plan, Mode::Plan, Some(Mode::Plan), true, false), Mode::Plan);
+        assert_eq!(next_turn(Mode::Plan, Mode::Plan, None, false, false), Mode::Plan);
         // Otherwise the chip, as it is now (the person moved it).
         assert_eq!(next_turn(Mode::Auto, Mode::Manual, None, false, false), Mode::Manual);
         assert_eq!(next_turn(Mode::AcceptEdits, Mode::Auto, None, false, false), Mode::Auto);

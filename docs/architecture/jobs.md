@@ -407,7 +407,10 @@ turn simply ended: nothing carried on, though "yes" plainly meant go ahead.
   when it ends with its plan (`plan`), it's `planAllowed` and its next turn
   starts at once — Yap's own go-ahead ("Go ahead with the plan.",
   `runner::GO_AHEAD`), `go`, at the chat's Mode as it is then (capped as
-  usual), on `--resume`: exactly as a typed "go ahead". A request queued
+  usual), on `--resume`: exactly as a typed "go ahead". A chat whose Mode
+  is Plan builds an approved plan at **Manual** (asking before each change,
+  as Claude Code's own "manually approve edits"; `modes::next_turn`); a
+  folder capped at Plan keeps it a plan. A request queued
   meanwhile goes as that turn instead, as the go-ahead. Claude Code carried
   the plan out in the same turn after all (an edit went through): it's
   done, no plan, nothing more (`runner::after_plan`).
