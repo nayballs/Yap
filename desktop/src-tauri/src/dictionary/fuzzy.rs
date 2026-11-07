@@ -255,7 +255,7 @@ pub fn apply_fuzzy_with(text: &str, dict: &[DictionaryEntry], is_word: &dyn Fn(&
 /// never when the run is two words or more, every one an everyday word
 /// (`is_word`, two letters or more: a spelled-out "g p t" isn't) — they
 /// were said, not the entry: with "chat gpt" → "ChatGPT", "cloud" →
-/// "claude" and "wive" → "WoW" in a dictionary, "catch up to", "chats
+/// "claude" and "wive" → "Wyvo" in a dictionary, "catch up to", "chats
 /// from", "could we" and "we have" passed Handy's score on their Soundex
 /// code alone (0.5–0.57 × 0.3) and "chat got" one letter off; the
 /// maintainer's dictations got "trying to ChatGPT that programme?"
@@ -865,7 +865,7 @@ mod tests {
     /// longer than it.
     #[test]
     fn two_everyday_words_are_never_a_one_word_entry() {
-        let dict = vec![entry("cloud", "claude"), entry("wive", "WoW")];
+        let dict = vec![entry("cloud", "claude"), entry("wive", "Wyvo")];
         // The tests' spell checker: the built-in list and a few more.
         let is_word = |w: &str| crate::dictionary::learn::is_frequent(w) || ["clawed", "chat"].contains(&w);
         for said in ["Could we try it again?", "I think we have it.", "So we have two options.", "Could we, though?"] {
@@ -875,7 +875,7 @@ mod tests {
         }
         // As Parakeet hears the name: a word in its own right, no shorter.
         assert_eq!(apply_fuzzy_with("ask clawed about it", &dict, &is_word), "ask claude about it");
-        assert_eq!(apply_fuzzy_with("I play wov", &dict, &is_word), "I play WoW");
+        assert_eq!(apply_fuzzy_with("I use wov", &dict, &is_word), "I use Wyvo");
         // A spell checker's word shorter than the dictionary's: the word,
         // and the "I" after it isn't swallowed instead.
         let gpt = vec![entry("chat gpt", "ChatGPT")];

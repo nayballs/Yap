@@ -101,11 +101,11 @@ The correction dictionary: near-miss (fuzzy) matching, several ways one word is 
   and never one word of a spelling of several ("vertex" for "Vertex AI").
   Handy's Soundex discount (× 0.3) had let "catch up to", "chats from",
   "could we", "could do", "we have" and "we we" through as "ChatGPT",
-  "claude" and "WoW" (0.5–0.57 × 0.3 < 0.18), and "chat got" was a letter
+  "claude" and a three-letter name (0.5–0.57 × 0.3 < 0.18), and "chat got" was a letter
   from "chat gpt": in the maintainer's history, 13 dictations pasted
   "ChatGPT" and 1 said it. Measured on his own transcripts (the pass alone,
   counts only): 25 of the 235 in his history and 12 of the 141 in his test
-  set changed, every one a wrong swap undone ("ChatGPT" 11 → 3, "WoW" 17 →
+  set changed, every one a wrong swap undone ("ChatGPT" 11 → 3, a three-letter name 17 →
   3, "claude" 195 → 172) but one "Clot" said for Claude; "Chat GBT",
   "chatgbt", "Chat G P T" and "cooper netties" still fixed. Shortest-first
   n-gram choice (deliberate fix over Handy's word-swallowing longest-first greedy),
