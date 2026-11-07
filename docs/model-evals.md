@@ -193,15 +193,19 @@ yap.exe eval --strength --strength-quick --strength-phase after --model groq:ope
 ```
 
 Instead of the scenarios, each case in `evals/cleanup/strength.json` (a dictation as
-speech-to-text writes it, its `group` — strength, format or cursor —, its strength,
-kind of app and tone, the text `before` the cursor for a cursor case, and checks)
+speech-to-text writes it, its `group` — strength, format, cursor or names —, its strength,
+kind of app and tone, the text `before` the cursor for a cursor case, the `names`
+on screen cleanup is told how to spell — said or not —, and checks)
 is cleaned through the dictation's own code (`cleanup_styles::resolve` for a
 stand-in app, `cleanup_styles::clean`) **before** — Medium, no formatting line, no
 text before the cursor: the call every dictation made until 25 Oct 2026 — and
 **after**: its strength (`ai/cleanup_strength.rs`), the list or email line when one
 is said and the layout where the model didn't (`ai/cleanup_format.rs`), and the
 text before the cursor with what the model wrote out again of it taken off
-(`ai/cleanup_context.rs`). A cursor case is judged as the field ends up, after
+(`ai/cleanup_context.rs`), and the names line (`screen_terms::NAMES_LINE`; before:
+the line as it was until 7 Nov 2026). An after answer that copied 5 words or more
+from those lines fails ("copied text from before the cursor": a dictation throws it
+out). A cursor case is judged as the field ends up, after
 `smart_insert::fit_to_context` (which a dictation gets either way). The checks are
 styles.json's plus `keeps_words` (Light: every word said but filler sounds, "you
 know" and stutters, in order, at most `added_max` added), `ratio_max`/`ratio_min`
@@ -211,8 +215,9 @@ rate overall, per group and per strength, the time and llama.cpp's prompt tokens
 processed. `--strength-quick` keeps the 9 cases marked `quick` (~22k Groq tokens a
 phase: run the phases apart); `--only` picks cases by name or group.
 `YAP_EVAL_STRENGTH_LINES` (`{"light": "…", "high": "…"}`), `YAP_EVAL_FORMAT_LINES`
-(`{"numbered": "…", "bullets": "…", "email": "…"}`) and `YAP_EVAL_CURSOR_LINE` (the
-line, `{text}` the text) try other wordings without a rebuild. `strength.md` in the
+(`{"numbered": "…", "bullets": "…", "email": "…"}`), `YAP_EVAL_CURSOR_LINE` (the
+line, `{text}` the text) and `YAP_EVAL_NAMES_LINE` (`{names}` the names) try other
+wordings without a rebuild. `strength.md` in the
 run folder; `models[].strength` in `summary.json`.
 
 ### Pre-meeting briefs (`--brief`)
@@ -2366,6 +2371,60 @@ on the 1.5B, no change on Groq (0/2 either way). No model got the question's "?"
 other** (a cloud provider, a server on the network) unless Privacy & data's "Send
 the text before the cursor to cleanup" is on — it didn't help gpt-oss-20b here, and
 it sends what's on screen.
+
+## Names on screen and the text before the cursor (7 Nov 2026)
+
+**The question**: a real dictation into a chat app, with a place name in the
+chat on screen and "cloud" → "Claude" in the dictionary, came back from the
+on-device 4B with the place name for "Claude"; the next one in the same box
+came back with the box's earlier dictation written out again after it and
+the place name at the end. Speech-to-text was right both times. Rust named
+the place to cleanup because "thingy" and "toggle" were one sound from its
+four-sound key (`screen_terms::run_seems` now refuses that, a word in its
+own right and a protected spelling), and the 4B took "Spell these names as
+written: …" as a name to put in. Which wording of the names line, and of
+the text-before-the-cursor line, keeps the 4B from doing that? `--strength
+--only cursor,names` over the 8 cursor cases, 4 new ones (an earlier
+dictation before the cursor, with and without a name on screen) and 6
+`names` cases (a case's `names`: the line sent whether the transcript says
+the name or not — 3 don't, the bug's three sentences with a fictional place;
+3 do, heard a little wrong), the after phase ×3 on Qwen3.5-4B (graphics
+card, llama.cpp b11985 with MTP); `YAP_EVAL_NAMES_LINE` / `YAP_EVAL_CURSOR_LINE`
+try wordings. An
+after answer with a 5-word run copied from the lines before the transcript
+fails ("copied text from before the cursor"; a dictation throws it out,
+`cleanup_context::copied`). Run folders went to a scratch folder, gone.
+
+| Names line | Cursor (36) | of which a name and the text before the cursor (6) | Names (18) |
+|---|---|---|---|
+| "Spell these names as written: {names}." (until 7 Nov) | 26 | 0 (copied, and "let's talk about <name> as well") | 12 |
+| + "Use them only where the transcript already says one…; never in place of another word, and never add one." | 25 | 0 | 9 (swapped "Claude" every time) |
+| "If the transcript says any of these names, spell it as written: {names}." | 33 | 6 | 13 ("Siobhán": accents added) |
+| "If the transcript says any of these names, write it exactly as here: {names}." | 30 | 6 | 12 |
+| **"If the transcript says one of these names, spell it exactly as written here: {names}. Leave every other word as it is."** | 33 | **6** | **17** |
+| "These names, if the transcript says them, are spelled: {names}." | 33 | 6 | 15 ("Siobhán") |
+
+So a conditional line with "exactly as written here" and nothing about what
+not to do; naming the swap ("never in place of another word") made the 4B do
+it. With the shipped names line, the cursor line ×6 on the cursor cases:
+"…which is already written and is not part of your output. Clean up only the
+transcript…" (until 7 Nov) 63/72; **"Where it goes: right after "…" (already
+written, for reference only). Return only the cleaned transcript, so it
+follows on from that text."** 66/72; "…it is for reference only, never to
+repeat. Clean up only the transcript and return only that…" 45/54 ×3 (it
+repeated "send me the" every time). Now and then (one round in three in a
+few runs, with either line) the 4B wrote the cursor line itself out before
+the transcript ("where it goes: right after …"): `grew_past_the_dictation`
+caught the longer old line's echo, and `copied` takes the line's own words
+as context too. The whole `--strength` set after the change: 127/138 after
+(92 %); its original 36 cases 102/108 (104/108 on 25 Oct; cursor-question's
+"?" failed then too, and email-with-list, which nothing here touches, kept
+its two items as prose every round on today's llama.cpp build);
+`grew_past_the_dictation` threw out nothing there.
+The maintainer's own dictations (`dictation-check run --cleanup`, 141, no
+text before the cursor or names on screen): no cleanup thrown out, the
+most any grew 1.07 × its letters. Shipped: `screen_terms::NAMES_LINE`,
+`cleanup_context::LINE`.
 
 ## Meeting summaries (25 Oct 2026)
 

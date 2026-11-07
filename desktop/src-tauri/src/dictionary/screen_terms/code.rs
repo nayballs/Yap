@@ -18,7 +18,8 @@
 //!   in a sentence. A file is always written as named when its extension
 //!   is said.
 //! - **AI cleanup** is told the names a transcript seems to hold, in the
-//!   line it already gets ("Spell these names as written: userService.ts.").
+//!   line it already gets ("…spell it exactly as written here:
+//!   userService.ts. …", `screen_terms::NAMES_LINE`).
 //! - **Bounded**: names come out of the ≤ 20,000 characters the read
 //!   already has (plus, in an editor, one time-boxed UI Automation call for
 //!   its tabs and tree items, `screen_terms::uia`); ≤ 100 files and 150

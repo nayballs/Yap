@@ -343,7 +343,15 @@ The language-model side: the OpenAI-compatible client and its prompts, the on-de
   44-second dictation of 114 words came back from the on-device Qwen3.5-4B as
   "I've." and was pasted; the same request replayed nine times came back
   whole, and the lowest share of words any other cleanup in their history
-  kept was 68%.
+  kept was 68%. **So is one that grew past it** (`grew_past_the_dictation`,
+  2026-11-07): letters and digits (any script; spaces, punctuation and line
+  breaks don't count) past 1.5 × the transcript's + 60, after `fit` and
+  `lay_out` — an answer instead of a cleanup, a dictation written out twice,
+  text it was given copied in. Over 9,812 cleanups in the model evaluations
+  (every strength, lists, emails with their frames, the text before the
+  cursor) the most any grew was 2.05 × a 62-letter dictation (+65, an
+  email's made-up frame), none past 1.4 × + 50; `llm::error_kind` says "the
+  answer added to the dictation".
   `clean` is the one call (`pipeline::clean_up`, the model evaluations'
   `--styles`). **The window** (`Target::of_window`, at the paste): its
   process (`text_injector::app_name_for`), the kind read at record start,
@@ -431,12 +439,20 @@ The language-model side: the OpenAI-compatible client and its prompts, the on-de
   — only with "Send the text before the cursor to cleanup" on
   (`cursor_context_cloud`, Privacy & data, off: it didn't help gpt-oss-20b in
   the evaluations, and it sends what's on screen). **The line** (`LINE`,
-  last before the transcript): "Where it goes: right after "…", which is
-  already written and is not part of your output. Clean up only the
-  transcript, so it follows on from that text." — other wordings made the
-  4B write the text out again (docs/model-evals.md); **`trim_echo`** (pure)
+  last before the transcript): "Where it goes: right after "…" (already
+  written, for reference only). Return only the cleaned transcript, so it
+  follows on from that text." (2026-11-07; until then "…which is already
+  written and is not part of your output. Clean up only the transcript…":
+  63/72 → 66/72 on the cursor cases) — other wordings, "never to repeat"
+  among them, made the 4B write the text out again (docs/model-evals.md);
+  **`trim_echo`** (pure)
   takes off what a cleanup writes out again anyway (a bullet the cursor's
-  line has; the text's last sentence of three words or more at the start).
+  line has; the text's last sentence of three words or more at the start),
+  and **`copied`** (pure) throws out a cleanup that still has a run of 5
+  words or more from the lines before the transcript (this one, the names
+  on screen's…) that the transcript doesn't: the words as said go in
+  (2026-11-07: the 4B wrote the field's earlier dictation out again after
+  the new one).
   Such a cleanup's receipt is "AI cleanup + text before the cursor · Groq"
   (`net::Feature::DictationContext`); Privacy & data's "What leaves this PC"
   has its row. Measured: 4B 18/24 → 21/24, 1.5B 10/16 → 12/16 on the cursor

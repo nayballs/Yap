@@ -403,6 +403,11 @@ const FILLERS: &[&str] = &[
     "um", "umm", "ummm", "uhm", "uh", "uhh", "uhhh", "er", "erm", "err", "ah", "ahh", "eh", "hmm", "hmmm", "hm", "mm", "mmm", "mhm",
 ];
 
+/// Is `w` (a lower-case word) a hesitation sound ("um", "erm")?
+pub(crate) fn is_filler(w: &str) -> bool {
+    FILLERS.contains(&w)
+}
+
 /// A dictation of filler alone ("Um, uh.", "uh you know um"): nothing to
 /// type. "you know" counts only beside a hesitation sound. Pure.
 pub fn filler_only(text: &str) -> bool {
@@ -458,6 +463,29 @@ pub fn lost_the_dictation(raw: &str, cleaned: &str) -> bool {
     let said = said.len() - from;
     let kept = words_of(cleaned).iter().filter(|w| !FILLERS.contains(&w.as_str())).count();
     said >= LOST_MIN_WORDS && kept * 4 < said
+}
+
+/// How much longer than the transcript a cleanup may come back, in letters
+/// and digits (any script; spaces, punctuation and line breaks don't
+/// count): [`GROWN_RATIO`] times as long and [`GROWN_SLACK`] more.
+/// Measured over 9,812 cleanups in the model evaluations (2026-10 runs:
+/// every strength, lists, emails and their frames, the text before the
+/// cursor): the most any grew was 2.05 times a 62-letter dictation (an
+/// email's made-up subject, greeting and sign-off, +65), and none passed
+/// 1.4 times + 50. A real cleanup grows by a greeting and sign-off at most;
+/// one past this wrote more than was said (2026-11-07: an earlier
+/// dictation copied after the new one).
+pub const GROWN_RATIO: f64 = 1.5;
+/// See [`GROWN_RATIO`].
+pub const GROWN_SLACK: usize = 60;
+
+/// **Did the cleanup add to the dictation?** Its letters and digits past
+/// [`GROWN_RATIO`] × the transcript's + [`GROWN_SLACK`]. Then the words as
+/// said go in instead ([`clean`]'s error, as for [`lost_the_dictation`]).
+/// Pure.
+pub fn grew_past_the_dictation(raw: &str, cleaned: &str) -> bool {
+    let letters = |s: &str| s.chars().filter(|c| c.is_alphanumeric()).count();
+    letters(cleaned) as f64 > letters(raw) as f64 * GROWN_RATIO + GROWN_SLACK as f64
 }
 
 /// A text without its one final full stop (an ellipsis stays).
@@ -974,7 +1002,11 @@ pub async fn clean(
     let fitted = fit(style, text, &out);
     // A list or an email the line asked for, laid out where the model kept
     // it on one line (`cleanup_format::lay_out`).
-    Ok(if plan.formatting { crate::ai::cleanup_format::lay_out(text, &fitted, style, plan.strength) } else { fitted })
+    let out = if plan.formatting { crate::ai::cleanup_format::lay_out(text, &fitted, style, plan.strength) } else { fitted };
+    if grew_past_the_dictation(text, &out) {
+        return Err(format!("the answer added to the dictation ({} chars back for {})", out.chars().count(), text.chars().count()));
+    }
+    Ok(out)
 }
 
 /// An app of each kind, as a dictation would find it (the model
@@ -1445,6 +1477,34 @@ supplier is late scratch that the launch is on time";
         // After the take-back it's judged as any dictation is.
         let long = format!("{raw} and everyone should plan for the review on Friday with the full slides and the budget ready");
         assert!(lost_the_dictation(&long, "Okay."));
+    }
+
+    #[test]
+    fn a_cleanup_that_added_to_the_dictation_is_caught() {
+        // Answered instead of cleaned, or written out twice.
+        assert!(grew_past_the_dictation(
+            "what's the capital of france",
+            "The capital of France is Paris, a city known for the Eiffel Tower, the Louvre and its cafés, \
+             and the seat of the French government."
+        ));
+        let said = "can we move the review to thursday because half the team is away on wednesday and the slides aren't \
+            ready yet so let's aim for the afternoon and send the agenda round tomorrow morning and remind everyone to bring their laptops";
+        let once = "Can we move the review to Thursday? Half the team is away on Wednesday, and the slides aren't ready yet. \
+            Let's aim for the afternoon, send the agenda round tomorrow morning, and remind everyone to bring their laptops.";
+        assert!(!grew_past_the_dictation(said, once));
+        assert!(grew_past_the_dictation(said, &format!("{once} {once}")));
+        // What a cleanup really adds: an email's frame, a list's layout,
+        // digits for numbers, punctuation in a language without spaces.
+        assert!(!grew_past_the_dictation(
+            "can you send the report by friday",
+            "Hi Sam,\n\nCan you send the report by Friday?\n\nBest regards,\nAlexandra Okafor-Lindqvist"
+        ));
+        assert!(!grew_past_the_dictation("first milk second eggs third bread", "1. Milk\n2. Eggs\n3. Bread"));
+        assert!(!grew_past_the_dictation("about two hundred thousand pounds", "About £200,000."));
+        assert!(!grew_past_the_dictation("今日は天気がいいですね", "今日は、天気がいいですね。"));
+        // The same text, or shorter: never.
+        assert!(!grew_past_the_dictation(said, said));
+        assert!(!grew_past_the_dictation(said, ""));
     }
 
     #[test]

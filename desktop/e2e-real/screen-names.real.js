@@ -104,21 +104,21 @@ test('AI cleanup is told the names on screen the transcript seems to hold, and o
   try {
     await dictateInto(robot, page, 'so the zentrics pilot moves to kubernetes');
     const asked = cleanups().at(-1);
-    expect(asked.user).toMatch(/Spell these names as written: [^\n]*Zentrix/);
-    expect(asked.user).toMatch(/Spell these names as written: [^\n]*Kubernetes/);
+    expect(asked.user).toMatch(/spell it exactly as written here: [^\n]*Zentrix/);
+    expect(asked.user).toMatch(/spell it exactly as written here: [^\n]*Kubernetes/);
     // Only what it seems to say: nothing else of the screen's goes.
     expect(asked.user).not.toMatch(/Rochelle|Siobhan|GPT-OSS/);
     // Never in the system prompt (the same for every dictation).
-    expect(asked.system).not.toContain('Spell these names');
+    expect(asked.system).not.toContain('spell it exactly as written here');
 
     // A dictation holding none of them: no line at all.
     await dictateInto(robot, page, 'see you at the station at noon');
-    expect(cleanups().at(-1).user).not.toContain('Spell these names');
+    expect(cleanups().at(-1).user).not.toContain('spell it exactly as written here');
 
     // Off: none either.
     await robot.configure({ screenNames: false });
     await dictateInto(robot, page, 'so the zentrics pilot moves to kubernetes');
-    expect(cleanups().at(-1).user).not.toContain('Spell these names');
+    expect(cleanups().at(-1).user).not.toContain('spell it exactly as written here');
   } finally {
     await robot.configure({ screenNames: true, postProcessEnabled: false, ppBaseUrl: '' });
     await llm.close();

@@ -1,5 +1,5 @@
 {
-  "description": "Cleanup strength, smart formatting and the text before the cursor (ai/cleanup_strength.rs, ai/cleanup_format.rs, ai/cleanup_context.rs), for `yap.exe eval --strength`: dictations as speech-to-text writes them, each cleaned through the dictation's own code (`cleanup_styles::resolve` for a stand-in app of its kind, then `cleanup_styles::clean`) twice: **before** (the call every dictation made until 25 Oct 2026: Medium, no formatting line, no text before the cursor) and **after** (the case's strength, the formatting line when a list or an email frame is said, the text before the cursor in `before`). A case with `before` is judged after `smart_insert::fit_to_context` — what the field ends up with. `group`: strength | format | cursor. `strength`: light | medium | high (default medium). `category`: a kind of app (default other), `tone` one of its tones (default its own). `quick`: the cases a cloud model's run keeps (`--strength-quick`). Checks: those of styles.json (`has`, `has_any`, `not`, `exact`, `starts_with`, `lines_min`, `lowercase`, `keep`, `no_final_period`, `empty`, `max_words`), plus `keeps_words` (every word said but filler sounds and stutters is kept, at most `added_max` words added — default 1; apostrophes ignored, a number word may be a digit), `ratio_max` / `ratio_min` (its words against the dictation's, fillers out), `list_items` (at least n lines starting \"1.\", \"-\", \"*\" or \"•\"), `no_list` (one paragraph, no list line), `ends_with`, `not_starts_with` (any case), `first_line_max_words`, `last_line_has_any`. People and places are fictional.",
+  "description": "Cleanup strength, smart formatting and the text before the cursor (ai/cleanup_strength.rs, ai/cleanup_format.rs, ai/cleanup_context.rs), for `yap.exe eval --strength`: dictations as speech-to-text writes them, each cleaned through the dictation's own code (`cleanup_styles::resolve` for a stand-in app of its kind, then `cleanup_styles::clean`) twice: **before** (the call every dictation made until 25 Oct 2026: Medium, no formatting line, no text before the cursor) and **after** (the case's strength, the formatting line when a list or an email frame is said, the text before the cursor in `before`). A case with `before` is judged after `smart_insert::fit_to_context` — what the field ends up with. `group`: strength | format | cursor | names. `names`: names on screen cleanup is told how to spell (`screen_terms::NAMES_LINE`; before: the line as it was until 7 Nov 2026), said or not; an after answer that copied text from `before` fails (a dictation throws it out, `cleanup_context::copied`).`strength`: light | medium | high (default medium). `category`: a kind of app (default other), `tone` one of its tones (default its own). `quick`: the cases a cloud model's run keeps (`--strength-quick`). Checks: those of styles.json (`has`, `has_any`, `not`, `exact`, `starts_with`, `lines_min`, `lowercase`, `keep`, `no_final_period`, `empty`, `max_words`), plus `keeps_words` (every word said but filler sounds and stutters is kept, at most `added_max` words added — default 1; apostrophes ignored, a number word may be a digit), `ratio_max` / `ratio_min` (its words against the dictation's, fillers out), `list_items` (at least n lines starting \"1.\", \"-\", \"*\" or \"•\"), `no_list` (one paragraph, no list line), `ends_with`, `not_starts_with` (any case), `first_line_max_words`, `last_line_has_any`. People and places are fictional.",
   "cases": [
     {
       "name": "light-ramble-keeps-words",
@@ -258,6 +258,78 @@
       "before": "If the tests pass on Windows,",
       "text": "we can ship on wednesday",
       "checks": { "starts_with": "we can", "has": ["Wednesday"] }
+    },
+    {
+      "name": "cursor-no-copy-earlier",
+      "group": "cursor",
+      "before": "Then let me know if there's anything else we should add to this. It's working really well, though. ",
+      "text": "and the export button should only be in the settings for now um but let's talk about the name as well",
+      "checks": { "has": ["export", "name as well"], "not": ["let me know", "working really well"] }
+    },
+    {
+      "name": "cursor-no-copy-question",
+      "group": "cursor",
+      "before": "Could you check the invoice numbers before Friday? Sam said the totals look off. ",
+      "text": "also can you send the updated figures to the finance team when you get a chance",
+      "checks": { "has": ["finance team"], "not": ["invoice numbers", "totals look off"] }
+    },
+    {
+      "name": "cursor-no-copy-names",
+      "group": "cursor",
+      "names": ["Corkwell"],
+      "before": "Thanks for sorting the venue in Corkwell. The room looks great. ",
+      "text": "can we also book the projector for the afternoon session",
+      "checks": { "has": ["projector"], "not": ["Corkwell", "room looks great"] }
+    },
+    {
+      "name": "cursor-no-copy-names-earlier",
+      "group": "cursor",
+      "names": ["Corkwell"],
+      "before": "Then let me know if there's anything else we should add to this. It's working really well, though. ",
+      "text": "and the export toggle should only be in the jobs for now um but let's talk about the name as well",
+      "checks": { "has": ["toggle", "name as well"], "not": ["let me know", "working really well", "Corkwell"] }
+    },
+    {
+      "name": "names-long-not-for-another-word",
+      "group": "names",
+      "names": ["Corkwell"],
+      "text": "and what this would do it would hide the chat sidebar thingy i think is probably a cool idea i think that's what claude code does so there's a few things to look at here claude",
+      "checks": { "has": ["Claude Code", "thingy"], "not": ["Corkwell"] }
+    },
+    {
+      "name": "names-not-for-another-word",
+      "group": "names",
+      "names": ["Corkwell"],
+      "text": "so there's a few things to look at here claude",
+      "checks": { "has": ["Claude"], "not": ["Corkwell"] }
+    },
+    {
+      "name": "names-never-added",
+      "group": "names",
+      "names": ["Corkwell"],
+      "text": "and the cleanup toggle should only be in the settings but let's talk about the name as well",
+      "checks": { "has": ["toggle", "name as well"], "not": ["Corkwell"] }
+    },
+    {
+      "name": "names-one-of-two-said",
+      "group": "names",
+      "names": ["Zentrix", "Corkwell"],
+      "text": "the zentrics pilot starts on monday and the sidebar thingy still needs work",
+      "checks": { "has": ["Zentrix", "thingy"], "not": ["Corkwell"] }
+    },
+    {
+      "name": "names-heard-a-little-wrong",
+      "group": "names",
+      "names": ["Corkwell"],
+      "text": "we drove up to korkwel on tuesday",
+      "checks": { "has": ["Corkwell", "Tuesday"] }
+    },
+    {
+      "name": "names-full-name",
+      "group": "names",
+      "names": ["Siobhan Ní Bhriain"],
+      "text": "i told siobhan nibrian about the launch",
+      "checks": { "has": ["Siobhan Ní Bhriain", "launch"] }
     }
   ]
 }

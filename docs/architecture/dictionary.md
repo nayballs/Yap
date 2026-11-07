@@ -173,7 +173,8 @@ The correction dictionary: near-miss (fuzzy) matching, several ways one word is 
   with (2026-10-29, found by the chat robot: "Priyanka can you check?" had
   become "Priyanka Raman you check?" with Priyanka Raman on screen; "Priyanka
   Ramen" is still fixed), and is never a spelling the dictionary or memory gives
-  (`protected`: they have the final say; those terms are no targets
+  nor a run holding one ("here, Claude" with "Claude" in the dictionary,
+  2026-11-07; `protected`: they have the final say; those terms are no targets
   either); and only when the speech model wrote what it heard as a name (a
   capital: "Rachelle", "Zentrics", "GPTOSS" — Parakeet wrote a spoken "row
   shell" as "rouchell", which it then took for "Rochelle"); one word in
@@ -186,15 +187,33 @@ The correction dictionary: near-miss (fuzzy) matching, several ways one word is 
   Bhriain") and no everyday sentence changed; robot mode can put them
   back to measure again (`YAP_REALTEST_SCREEN_WHISPER` = list | sentence |
   off, `screen-names-stt.real.js`). **AI
-  cleanup** gets "Spell these names as written: Zentrix, Kubernetes." in
+  cleanup** gets "If the transcript says one of these names, spell it
+  exactly as written here: Zentrix, Kubernetes. Leave every other word as
+  it is." (`NAMES_LINE`) in
   the dictation's own message, never the system prompt (`llm::
   cleanup_with_names` / `with_names_line`: before "Transcript:", at the
   start of the transcript's message when it's split, so a hybrid model's
   cached instruction stays the same) — ≤ 8 terms the raw transcript seems
-  to contain (`in_transcript`: the same letters, or spelled or sounding
-  alike, looser than the pass — the model has the context; a handle only
-  as it's said, "at zentrix dev"), never one the dictionary or memory
-  spells. That line is all that can leave the PC (with the transcript, to
+  to contain (`in_transcript` / `run_seems`: the same letters, or spelled
+  alike — plain edit distance ≤ 0.4 —, or spelled a little alike (≤ 0.6)
+  and sounding alike: the same sound key, or one sound off only when the
+  keys have 5 sounds or more ("cooper netties" for Kubernetes), or the
+  same Soundex code; looser than the pass; a handle only as it's said, "at
+  zentrix dev"), never one the dictionary or memory spells, and never from
+  a run holding a protected spelling, one word that's a word in its own
+  right (the spell checker's), or a run of a very different length (over
+  40 %). Until 2026-11-07 one sound off counted at any length and with no
+  spelling bound: Parakeet's "thingy" and "toggle" were a sound from a
+  four-sound place name on the screen of the maintainer's chat, cleanup
+  was told the name, and the on-device 4B put it in place of "Claude" (in
+  his dictionary) and, with the text before the cursor, wrote his earlier
+  dictation out again ending "…as well. <the name>." The line said only
+  "Spell these names as written: …" then; the conditional wording held on
+  the 4B where that, and "never in place of another word", didn't
+  ([model-evals.md](../model-evals.md), "Names on screen"). An answer that
+  writes a name more times than the transcript seems to say it is thrown
+  out, the words as said going in (`names_added`, `pipeline::delivery`).
+  That line is all that can leave the PC (with the transcript, to
   a cloud cleanup provider; Settings and Privacy & data say so); the
   screen's text never does.
   **Code names** (`dictionary/screen_terms/code.rs`, 2026-10-29; Wispr
@@ -229,7 +248,7 @@ The correction dictionary: near-miss (fuzzy) matching, several ways one word is 
   near-misses" on; the longest name first (the file over its class).
   "user service dot ts" → `userService.ts`, "get user by id" →
   `getUserById`. **AI cleanup** gets the names a transcript seems to say
-  first in its "Spell these names as written" line (`said_in`; ≤ 8 in
+  first in its names line (`said_in`; ≤ 8 in
   all). **The editor's own text** reaches UI Automation only with its
   screen reader mode on (VS Code's "Screen Reader Optimized": Monaco
   exposes a page of code around the cursor then, an empty box otherwise).

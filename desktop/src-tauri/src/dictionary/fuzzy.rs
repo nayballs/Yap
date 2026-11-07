@@ -252,8 +252,8 @@ pub fn ngram_key(text: &str) -> String {
 /// (`is_word`) — "row shell", "zen tricks", and "hash map" with a
 /// "HashMap" on screen, stay as said —, when the speech model wrote it as a
 /// name too (a capital: "Rachelle", "Zentrics", "GPTOSS"; Parakeet heard
-/// the spoken "row shell" as "rouchell", which is no name), never when it's
-/// a spelling `keep` protects (the dictionary's or memory's, as
+/// the spoken "row shell" as "rouchell", which is no name), never when it
+/// is or holds a spelling `keep` protects (the dictionary's or memory's, as
 /// [`ngram_key`]s), and only when it spells **and** sounds like the term:
 /// plain edit distance ≤ 0.34 of the longer spelling and
 /// [`sound_distance`] ≤ 0.4, on top of Handy's score. One word with the
@@ -266,7 +266,9 @@ pub fn apply_screen(
 ) -> String {
     apply_with(text, terms, &|run, replacement, dist| {
         let heard = build_ngram(run);
-        if keep(&heard) {
+        // Nor a run with a protected spelling in it ("here, Claude" with
+        // "Claude" in the dictionary): the person's own word stays.
+        if (0..run.len()).any(|a| (a + 1..=run.len()).any(|b| keep(&build_ngram(&run[a..b])))) {
             return false;
         }
         let unordinary = run.iter().any(|w| !is_word(&build_ngram(std::slice::from_ref(w))));

@@ -49,7 +49,19 @@ the command and snippets;
 key). Cleanup is
 best-effort — any error/timeout falls back to the raw transcript, so dictation
 never blocks; so does an answer that left out most of what was said
-(`cleanup_styles::lost_the_dictation`, ai-models.md). The log says its
+(`cleanup_styles::lost_the_dictation`, ai-models.md), and **one that added to
+it** (2026-11-07: the on-device 4B, given the text before the cursor and a
+name on screen, wrote the person's earlier dictation out again after the
+new one and ended it with the name): one grown past 1.5 × the transcript's
+letters and digits + 60 (`cleanup_styles::grew_past_the_dictation`: none of
+9,812 evaluation cleanups, emails' frames and lists among them, passed
+1.4 × + 50); one with a run of 5 words or more from the lines it was
+given beside the transcript — the text before the cursor, Yap's own words —
+that the transcript doesn't have, nor with a word different
+(`cleanup_context::copied`, in `delivery::cleanup_pass` after `trim_echo`);
+and one that writes a name on screen more times than the transcript seems
+to say it (`screen_terms::names_added`: in place of another word, or
+added). Those two log a count at `debug`. The log says its
 kind at `warn` (`llm::error_kind`: timed out, HTTP 500, parse failed…)
 and the error itself only at `debug`: a server's can quote what the model
 wrote (llama.cpp's "Failed to parse input at pos N: …"); a rewrite's and a
@@ -102,8 +114,9 @@ paste or a question; inside a sentence ("snip the ends off") it's dictated.
 `capture_target` starts a background read of the target window's visible
 text beside the cursor read (a pasted dictation only: not a rewrite, the
 assistant or the Chat box); `deliver` takes them once
-(`screen_terms::take`) for cleanup's "Spell these names as written: …"
-line and the near-miss pass (`finish_dictation_with`); a cancel forgets
+(`screen_terms::take`) for cleanup's names line ("If the transcript says
+one of these names, spell it exactly as written here: …") and the
+near-miss pass (`finish_dictation_with`); a cancel forgets
 them. Never waited for: still reading = not used (a robot test delays the
 read 8 s: the dictation pastes as fast as without it). `run_stt`'s Whisper
 prompt goes through `screen_terms::whisper_prompt` (`dictation_prompt`),

@@ -50,6 +50,11 @@ pub struct Case {
     /// The text before the cursor (cursor cases).
     #[serde(default)]
     pub before: String,
+    /// Names on screen cleanup is told how to spell (`screen_terms::
+    /// NAMES_LINE`; before: the line as it was until 7 Nov 2026), whether
+    /// the transcript says them or not.
+    #[serde(default)]
+    pub names: Vec<String>,
     #[serde(default)]
     pub quick: bool,
     #[serde(default)]
@@ -76,7 +81,10 @@ pub struct Checks {
 }
 
 pub const PHASES: &[&str] = &["before", "after"];
-pub const GROUPS: &[&str] = &["strength", "format", "cursor"];
+pub const GROUPS: &[&str] = &["strength", "format", "cursor", "names"];
+
+/// The names line as it was until 7 Nov 2026 (the before phase).
+const NAMES_LINE_BEFORE: &str = "Spell these names as written: {names}.";
 
 impl Case {
     fn category(&self) -> Category {
@@ -337,6 +345,8 @@ async fn clean(phase: &'static str, case: &Case, ep: &Endpoint<'_>) -> Shot {
     let paced0 = record::paced_ms();
     let t0 = Instant::now();
     let asked;
+    // The lines before the transcript, for the copy check below.
+    let mut given: Option<String> = None;
     let out = match cleanup_styles::resolve(&cfg, &cleanup_styles::sample_target(case.category())) {
         Some(mut plan) => {
             plan.formatting = after;
@@ -347,6 +357,20 @@ async fn clean(phase: &'static str, case: &Case, ep: &Endpoint<'_>) -> Shot {
                 None
             };
             let cursor = before.as_deref().map(crate::ai::cleanup_context::line);
+            // As a dictation has them: the names on screen, then the text
+            // before the cursor.
+            // `YAP_EVAL_NAMES_LINE` ("{names}" the names) tries another
+            // wording after.
+            let names = (!case.names.is_empty()).then(|| {
+                let line = match std::env::var("YAP_EVAL_NAMES_LINE").ok().filter(|l| after && l.contains("{names}")) {
+                    Some(l) => l,
+                    None if after => crate::dictionary::screen_terms::NAMES_LINE.to_string(),
+                    None => NAMES_LINE_BEFORE.to_string(),
+                };
+                line.replace("{names}", &case.names.join(", "))
+            });
+            let lines = cleanup_styles::before_transcript(names.as_deref(), cursor.as_deref());
+            given = lines.clone();
             cleanup_styles::clean(
                 &case.text,
                 ep.base_url,
@@ -355,7 +379,7 @@ async fn clean(phase: &'static str, case: &Case, ep: &Endpoint<'_>) -> Shot {
                 ep.provider,
                 &plan,
                 spelling.as_deref(),
-                cursor.as_deref(),
+                lines.as_deref(),
                 &[],
                 false,
             )
@@ -391,10 +415,21 @@ async fn clean(phase: &'static str, case: &Case, ep: &Endpoint<'_>) -> Shot {
             .trim()
             .to_string()
     };
+    // An answer that copied text from the lines before the transcript (the
+    // text before the cursor, Yap's own words): a dictation throws it out
+    // (the words as said go in, `cleanup_context::copied`); here it fails,
+    // with what the model wrote kept to read.
+    let copied = after
+        && error.is_none()
+        && given.as_deref().is_some_and(|g| crate::ai::cleanup_context::copied(g, &case.text, &output).is_some());
     let failures = if error.is_some() {
         vec!["error".to_string()]
     } else {
-        failures(&case.checks, &case.text, &output)
+        let mut f = failures(&case.checks, &case.text, &output);
+        if copied {
+            f.push("copied text from before the cursor".to_string());
+        }
+        f
     };
     Shot {
         phase,
@@ -503,7 +538,7 @@ pub async fn run(
 /// output.
 pub fn markdown(models: &[(String, Value)]) -> String {
     let mut md = String::from(
-        "# Cleanup strength, formatting and the text before the cursor\n\nEach case cleaned as before (Medium, no formatting line, no text before the cursor) and after (its strength, the formatting line when one is said, the text before the cursor); a cursor case judged after `smart_insert::fit_to_context`. Pass = every check held.\n\n| Model | Phase | Passed | Strength | Format | Cursor | Light | Medium | High | Mean ms | Prompt tok processed | Tokens |\n|---|---|---|---|---|---|---|---|---|---|---|---|\n",
+        "# Cleanup strength, formatting and the text before the cursor\n\nEach case cleaned as before (Medium, no formatting line, no text before the cursor) and after (its strength, the formatting line when one is said, the text before the cursor); a cursor case judged after `smart_insert::fit_to_context`. Pass = every check held.\n\n| Model | Phase | Passed | Strength | Format | Cursor | Names | Light | Medium | High | Mean ms | Prompt tok processed | Tokens |\n|---|---|---|---|---|---|---|---|---|---|---|---|---|\n",
     );
     let t = |v: &Value| format!("{}/{}", v["passed"], v["n"]);
     for (label, r) in models {
@@ -523,13 +558,14 @@ pub fn markdown(models: &[(String, Value)]) -> String {
                     .unwrap_or_default()
             };
             md.push_str(&format!(
-                "| {label} | {} | {}/{} | {} | {} | {} | {} | {} | {} | {} | {} | {} |\n",
+                "| {label} | {} | {}/{} | {} | {} | {} | {} | {} | {} | {} | {} | {} | {} |\n",
                 p["phase"].as_str().unwrap_or(""),
                 p["passed"],
                 p["n"],
                 g("strength"),
                 g("format"),
                 g("cursor"),
+                g("names"),
                 s("light"),
                 s("medium"),
                 s("high"),
