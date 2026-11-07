@@ -175,6 +175,10 @@ pub struct Job {
     pub report_message_id: Option<String>,
     /// Undo job put its files back.
     pub undone: bool,
+    /// It changed files and no backups were made: Claude Code's hooks
+    /// didn't run (a managed policy turned them off), so Undo can't put
+    /// them back (`runner::no_backups`).
+    pub no_backups: bool,
     /// Its backups and log are gone (7 days after it ended).
     pub swept: bool,
     /// The step it's on now (not kept: the tab's live line).

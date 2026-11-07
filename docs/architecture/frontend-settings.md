@@ -634,9 +634,13 @@ on an element that also has a `settings.css` class (`set-note`,
   Bypass warning on a folder with no cap once Bypass is confirmed; "No
   folders yet…"); **Ask before starting a job** (`jobsAsk`) and **Read job
   reports aloud** (`jobsSpeak`); the limits ("Backups of changed files are
-  kept 7 days. One job at a time per folder, at most 3 at once."); **History**
-  (`job_list`: each job's status dot, folder, when and cost — plan and key
-  told apart, `core/jobs.js` `costLine` — Open (Chat on it) and Undo, 20 at
+  kept 7 days. One job at a time per folder, at most 3 at once.") and, small,
+  "Undo needs Claude Code's hooks, which back up each file before a job
+  changes it. If a policy set by your organisation turns hooks off, no
+  backups are made, and the job's tab says so." (`jobs-backups-hooks`);
+  **History** (`job_list`: each job's status dot, folder, when and cost —
+  plan and key told apart, `core/jobs.js` `costLine` — Open (Chat on it) and
+  Undo, offered by `core/jobs.js` `canUndo` (never for a job with no backups made), 20 at
   first). Twelve search entries (`settingsIndex.js`), a nav entry
   (`nav.js`), `PAGES.jobs`.
 - **Speech-to-Text** (`models`, `ModelManager.svelte`): **Your model** first —
@@ -728,7 +732,9 @@ on an element that also has a `settings.css` class (`set-note`,
   signed in (**Sign in**: Claude Code's own `claude auth login` in a terminal
   Yap opens, "Finish signing in…", read again when the window gets the focus
   back); signed in: **Connected · Using Claude plan**, its version and plan,
-  Manage usage, and **Use for Chat** while Chat is on the key. Both
+  Manage usage, and **Use for Chat** while Chat is on the key. Under it, small
+  (`claude-plan-copies`): "Claude Code keeps its own copy of each plan chat;
+  Yap deletes it with the chat." (ai-models.md). Both
   connected: **Your plan | API key**, as ChatGPT's (`TAB_WAYS` in
   `core/providerIds.js`). The store probes at most once every 5 s (Check
   again always probes), so a window's focus coming and going never starts

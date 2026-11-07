@@ -14,24 +14,38 @@
 //   plan · ≈ $0.0042 on the API"; a second question in the same session (one Claude Code
 //   process: claude_sessions.json keeps it, the log says one start); AI usage shows the
 //   plan apart from API spend.
+// - Claude Code's own copy of a plan chat (its transcript, in its config folder: here a
+//   CLAUDE_CONFIG_DIR of the run's own, the stand-in keeping one as Claude Code does)
+//   goes when the chat is deleted; another project's in that folder stays.
 // - The Voice Assistant on the plan: the answer spoken from its first sentence.
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { test as base, expect, openView, openSettings, closeSettings, expectStore } from './support/fixtures.js';
-import { EXE } from './support/yap.js';
+import { EXE, RUNS } from './support/yap.js';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const SCRIPT = path.join(HERE, 'support', 'fake-claude', 'plan-chat.jsonl');
 const ANTHROPIC_KEY = 'sk-ant-e2e-fake-00001234';
 const PLAN_CHAT = { enabled: true, provider: 'claude-plan', baseUrl: 'claude-code://plan', model: 'claude-haiku-5-5', apiKey: 'claude-plan', apiKeys: {}, prompt: '', disableThinking: false };
+// Claude Code's config folder for this run (never the person's ~/.claude): the stand-in keeps
+// each session's transcript in it, as Claude Code does (YAP_FAKE_CLAUDE_TRANSCRIPTS).
+const CLAUDE_CONFIG = path.join(RUNS, 'claude-plan-claude-config');
+const PROJECTS = path.join(CLAUDE_CONFIG, 'projects');
+/** Every transcript the stand-in kept: `{ folder, file }`. */
+const transcripts = () =>
+  fs.existsSync(PROJECTS)
+    ? fs.readdirSync(PROJECTS).flatMap((folder) => fs.readdirSync(path.join(PROJECTS, folder)).filter((f) => f.endsWith('.jsonl')).map((file) => ({ folder, file })))
+    : [];
 
 const test = base.extend({
   yapOptions: [
     async ({}, use) => {
+      fs.rmSync(CLAUDE_CONFIG, { recursive: true, force: true });
+      fs.mkdirSync(CLAUDE_CONFIG, { recursive: true });
       await use({
         name: 'claude-plan',
-        env: { YAP_CLAUDE_EXE: EXE, YAP_CLAUDE_ARGS_PREFIX: JSON.stringify(['fake-claude', SCRIPT]) },
+        env: { YAP_CLAUDE_EXE: EXE, YAP_CLAUDE_ARGS_PREFIX: JSON.stringify(['fake-claude', SCRIPT]), CLAUDE_CONFIG_DIR: CLAUDE_CONFIG, YAP_FAKE_CLAUDE_TRANSCRIPTS: '1' },
         config: {
           postProcessEnabled: false,
           ppProvider: 'ondevice',
@@ -134,6 +148,7 @@ test('Settings → Chat → Claude: the plan card signed in, the switch and Use 
   await expect(card.locator('[data-state="ready"]')).toContainText('Connected · Using Claude plan');
   await expect(card).toContainText('Claude Code 2.1.296');
   await expect(card.getByRole('link', { name: 'Manage usage' })).toBeVisible();
+  await expect(card.getByTestId('claude-plan-copies')).toHaveText('Claude Code keeps its own copy of each plan chat; Yap deletes it with the chat.');
   await expect(dialog.getByTestId('claude-provider')).toHaveAttribute('data-way', 'claude-plan');
   await shot(main, '03-settings-claude-plan-connected');
 
@@ -199,6 +214,22 @@ test('a plan chat streams, searches the web, cites its page and keeps one sessio
   await expect(plan).toContainText('on the API, not charged');
   await expect(main.getByTestId('ai-usage-models')).toContainText('on your Claude plan · ≈ $0.0053 on the API');
   await shot(main, '07-ai-usage-claude-plan');
+
+  // Claude Code's own copy of the chat: its session's transcript, filed under Yap's
+  // claude/chat folder (the run's data folder, encoded as Claude Code names it).
+  const convId = conv().id;
+  const mine = transcripts().filter((t) => t.file === `${session}.jsonl`);
+  expect(mine.map((t) => t.folder.toLowerCase())).toEqual([path.join(yap.dataDir, 'claude', 'chat').replace(/[^a-zA-Z0-9]/g, '-').toLowerCase()]);
+  // Another project's in the same config folder (the person's own job, say), with the same
+  // file name even: never touched.
+  const theirs = path.join(PROJECTS, 'E--Projects-garden-planner', `${session}.jsonl`);
+  fs.mkdirSync(path.dirname(theirs), { recursive: true });
+  fs.writeFileSync(theirs, '{}\n');
+  // The chat deleted: Claude Code's copy goes with it.
+  await yap.invoke('chat_delete', { id: convId });
+  await expect.poll(() => transcripts().filter((t) => t.file === `${session}.jsonl`).map((t) => t.folder)).toEqual(['E--Projects-garden-planner']);
+  expect(fs.existsSync(theirs)).toBe(true);
+  await expect.poll(() => yap.readJson('claude_sessions.json').conversations[String(convId)]).toBeUndefined();
 });
 
 test('the Voice Assistant on the plan speaks the answer from its first sentence', async ({ yap, main }) => {

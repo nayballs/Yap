@@ -301,6 +301,10 @@ pub const STAYS: &[Part] = &[
             "quieted_apps.json",
             "call_speakers.json",
             "icons/",
+            // Your Claude plan's empty working folders (claude/chat, claude/ask):
+            // nothing of the person's is in them (Claude Code keeps its own
+            // copy of a plan chat in its own folder; Chats deletes it).
+            "claude/",
         ],
     },
 ];

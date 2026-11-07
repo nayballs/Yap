@@ -91,10 +91,15 @@ no Local API (the bridge can be off), and it reaches the live UI.
   server only, `type: "http"`, its `timeout` 660,000 ms: Claude Code's limit
   per tool call, which also lifts its 5-minute idle floor for an HTTP server,
   so a prompt can wait its 10 minutes) and its `--settings` (the backup hook,
-  for a run with a backup folder). The key is in those two files in the run's
-  folder under `%TEMP%\yap-claude\` (removed with the session) and in memory,
-  never in a log. Dropping the handle unregisters the run: its URLs answer
-  404, and a prompt still waiting is denied.
+  for a run with a backup folder). **The key is never in a file**: both name
+  it as `Bearer ${YAP_RUN_KEY}` (the hook lists `YAP_RUN_KEY` in
+  `allowedEnvVars`, as an http hook must), and the key itself is only in
+  memory and in the run's environment (`RunHandle::env` → `Spec::env`; the
+  scrub keeps Yap's own names), which Claude Code fills them in from. Never on
+  a command line or in a log. (The run's own commands inherit its
+  environment; they already run with the person's own rights.) Dropping the
+  handle unregisters the run: its URLs answer 404, and a prompt still
+  waiting is denied.
 - **MCP over HTTP** at `POST /mcp/<run>` (`rpc.rs`): the Streamable HTTP
   transport's request/response subset, JSON answers only, no sessions and no
   SSE stream (`GET` is 405, which the transport allows). Claude Code 2.1.296
@@ -152,13 +157,20 @@ no Local API (the bridge can be off), and it reaches the live UI.
   the manifest names. A denied Write is still noted as created.
   [jobs.md](./jobs.md#undo-and-backups).
 - **Limits**: hooks can be turned off by a managed policy
-  (`allowedHttpHookUrls`) and never run under `--bare`. The endpoint's
-  requests aren't in the network receipts (they never leave this PC).
+  (`disableAllHooks`, `allowManagedHooksOnly`, `allowedHttpHookUrls`;
+  `httpHookAllowedEnvVars` can keep the key out of the header) and never run
+  under `--bare`. Then no
+  backups are made: the runner marks a job whose edits went through with an
+  empty backup list (`noBackups`), its tab says "No backups were made, so
+  Undo can't put these files back.", and Settings → Jobs says Undo needs
+  Claude Code's hooks ([jobs.md](./jobs.md#undo-and-backups)). The
+  endpoint's requests aren't in the network receipts (they never leave this
+  PC).
 - **The log** has ids, counts, tool names and outcomes, never a command, a
   file's path or contents, a prompt or a key.
 - Tested in `claude_live/tests.rs` (the listener's refusals, the MCP subset,
   the reads, `approve`'s card and its ends, the hook, restore, the job tools
-  for a turn) and through the stand-in in the Jobs and plan e2e specs
+  for a turn, the key named in the files and only in the run's environment) and through the stand-in in the Jobs and plan e2e specs
   (`plan-jobs.spec.js` for the job tools over the endpoint).
 
 ## The Integrations view

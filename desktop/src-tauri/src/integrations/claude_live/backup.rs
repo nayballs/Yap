@@ -20,8 +20,7 @@
 //! as such.
 //!
 //! [`restore`] puts every backup back and deletes the files the run
-//! created; [`restore_only`] does it for some of them. Either touches only
-//! the paths the manifest names (plain absolute paths, outside the backup
+//! created. It touches only the paths the manifest names (plain absolute paths, outside the backup
 //! folder) and reads only plain file names inside the backup folder; any
 //! other is refused and said in the [`RestoreReport`].
 //!
@@ -311,17 +310,7 @@ pub(super) fn record(dir: &Path, folder: Option<&Path>, input: &Value, max: u64)
 // ---- Undo ----
 
 /// **Undo a run**: every backup put back, every file it created deleted.
-pub fn restore(backup_dir: &Path) -> RestoreReport {
-    undo(backup_dir, None)
-}
-
-/// **Undo some files of a run**: those of `paths` the manifest names; any
-/// other is refused.
-pub fn restore_only(backup_dir: &Path, paths: &[PathBuf]) -> RestoreReport {
-    undo(backup_dir, Some(paths))
-}
-
-fn undo(dir: &Path, only: Option<&[PathBuf]>) -> RestoreReport {
+pub fn restore(dir: &Path) -> RestoreReport {
     let mut report = RestoreReport::default();
     let manifest = match read_manifest(dir) {
         Ok(m) => m,
@@ -330,22 +319,7 @@ fn undo(dir: &Path, only: Option<&[PathBuf]>) -> RestoreReport {
             return report;
         }
     };
-    let chosen: Vec<&Entry> = match only {
-        None => manifest.files.iter().collect(),
-        Some(paths) => {
-            let mut chosen = Vec::new();
-            for p in paths {
-                let found = normal(p).and_then(|n| manifest.files.iter().find(|e| key(&e.original) == key(&n)));
-                match found {
-                    Some(e) if !chosen.iter().any(|c: &&Entry| std::ptr::eq(*c, e)) => chosen.push(e),
-                    Some(_) => {}
-                    None => report.refused.push(Skipped { path: p.clone(), reason: "not one of the files this job changed".into() }),
-                }
-            }
-            chosen
-        }
-    };
-    for e in chosen {
+    for e in &manifest.files {
         put_back(dir, e, &mut report);
     }
     tracing::info!(

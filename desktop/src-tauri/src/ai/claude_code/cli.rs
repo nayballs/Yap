@@ -91,6 +91,7 @@ impl Program {
     }
 
     /// The program with `prefix` before Claude Code's arguments.
+    #[cfg_attr(not(debug_assertions), allow(dead_code))] // the stand-in's (`YAP_CLAUDE_EXE`): debug builds and tests only
     pub fn with_prefix(mut self, prefix: Vec<String>) -> Program {
         self.prefix = prefix;
         self

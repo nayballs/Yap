@@ -231,6 +231,8 @@ fn spec(model: &str, effort: Option<Effort>, system: &str, web: bool, conversati
     spec.tools = Some(web_tools.clone());
     spec.allowed_tools = web_tools.into_iter().chain(run.allowed_tools()).collect();
     spec.mcp_config = Some(run.mcp_config());
+    // The run key its MCP config names, in its environment only.
+    spec.env = run.env();
     spec.strict_mcp_config = true;
     spec.setting_sources = Some(Vec::new());
     spec.system_prompt = Some(system.to_string());

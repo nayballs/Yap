@@ -13,13 +13,20 @@
 //!   --json`), opening the sign-in terminal.
 //! - [`session`]: one `claude -p` process in stream-json both ways
 //!   ([`session::Spec`] → its flags and environment, the prompt over stdin,
-//!   interrupt, end, kill; [`session::oneshot`] for one question).
+//!   interrupt, end, kill; `claude_plan/oneshot.rs` asks one question on
+//!   it).
 //! - [`events`]: its output read tolerantly ([`events::Event`]), and what
 //!   went wrong derived ([`events::Problem`]: not signed in, at the plan's
 //!   limit, paying another way).
+//! - [`transcripts`]: where Claude Code keeps the sessions it ran (its own
+//!   config folder, `projects/<the folder, encoded>/<session>.jsonl`), so
+//!   Yap can delete a plan chat's with the chat.
 //! - `fake` (debug builds): `yap.exe fake-claude <script.jsonl>`, a
 //!   stand-in that replays a script, for tests (`YAP_CLAUDE_EXE` +
 //!   `YAP_CLAUDE_ARGS_PREFIX`).
+//!
+//! At start ([`init`]) the run folders a crashed Yap left in
+//! `%TEMP%\yap-claude\` are swept ([`session::sweep_run_folders`]).
 //!
 //! Recordings per Claude Code version in `claude_code/fixtures/<version>/`
 //! (`real-*` recorded signed out with an empty config folder, `synthetic-*`
@@ -31,6 +38,15 @@ pub mod events;
 #[cfg(debug_assertions)]
 pub mod fake;
 pub mod session;
+pub mod transcripts;
+
+/// At start (lib.rs setup), in the background: the run folders an earlier
+/// Yap left behind (a crash) removed, never a running Yap's.
+pub fn init() {
+    let _ = std::thread::Builder::new().name("claude-code-sweep".into()).spawn(|| {
+        session::sweep_run_folders();
+    });
+}
 
 /// Claude Code on this PC (Settings' plan card): installed, its version,
 /// too old, signed in. Cached 30 s; `refresh` probes again.

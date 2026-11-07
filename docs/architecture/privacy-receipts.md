@@ -370,11 +370,17 @@ a tick box per **kind** of data. "Clear everything and keep my settings"
   - *Chat and memory* — **Chats** (Chat's conversations, archived ones too,
     not notes' Ask threads, and every screenshot in `chat-images/`, the ones
     waiting in Chat's box too, and each chat's Claude Code session on the
-    plan, `claude_sessions.json`; the documents Chat wrote stay in Notes),
+    plan, `claude_sessions.json`, with Claude Code's own copy of it: the
+    session's transcript in Claude Code's config folder, deleted only under
+    Yap's own `claude\chat\` folder there, never another project's
+    (`ai/claude_code/transcripts.rs`; deleting one chat deletes its copy too);
+    the documents Chat wrote stay in Notes),
     **Jobs** (2026-11-07, `jobs.json`, `jobs/`, `job_folders.json`: every job
     Chat started, with its log and the backups Undo job uses, each chat's
     Mode, the Bypass OK and the job folders; running jobs are stopped first;
-    the files the jobs changed stay as they are),
+    the files the jobs changed stay as they are, and so do Claude Code's own
+    transcripts of the jobs: they ran in the person's folders, and are
+    theirs to resume or delete, as if they'd run Claude Code themselves),
     **What Yap remembers** (`memory.json`: every item, what the passes read
     and what waited for one, and Undo's copies), **Pages beside the chat**
     (2026-11-01: the cookies, sign-ins and site data of the pages opened

@@ -11,12 +11,22 @@
 //!   (`--settings`, `--mcp-config`, `--append-system-prompt-file`, all
 //!   checked on 2.1.296), removed when the session goes. So nothing needs
 //!   escaping for an npm shim, Windows' 32 K command-line limit never bites,
-//!   and nothing secret is on a command line every program can read.
+//!   and nothing secret is on a command line every program can read. Each
+//!   folder names the Yap that made it (`yap-owner`: its process id and
+//!   when it started), so a crash's leftovers are swept at the next start
+//!   ([`sweep_run_folders`]) and another Yap's live runs never are.
 //! - **A run's secrets** (the key of Yap's run endpoint) go in [`Spec::env`]
-//!   and are named in the MCP config as `${VAR}`: Claude Code fills them in
-//!   from its environment (checked on 2.1.296 for an http server's
-//!   `headers`, inline and from a file; http hooks' `headers` take `$VAR` /
-//!   `${VAR}` when the hook lists the variable in `allowedEnvVars`).
+//!   under [`RUN_KEY_VAR`] and are named in the MCP config and the hooks as
+//!   `${VAR}`: Claude Code fills them in from its environment (checked on
+//!   2.1.296 for an http server's `headers`, inline and from a file; http
+//!   hooks' `headers` take `$VAR` / `${VAR}` when the hook lists the
+//!   variable in `allowedEnvVars`). So the files never hold the key. An
+//!   inherited [`RUN_KEY_VAR`] (a Yap started from a job's command) never
+//!   reaches a run.
+//! - **Session persistence**: Claude Code saves every session it runs as a
+//!   transcript in its own config folder (`transcripts.rs`).
+//!   [`Spec::persist`] `false` (`--no-session-persistence`, `-p` only) saves
+//!   none: for a run nothing resumes (the plan's one-shot calls).
 //! - **Paying is never ambiguous** ([`environment`]): the environment is
 //!   Yap's with every `CLAUDE…` / `ANTHROPIC_…` variable taken off
 //!   (`cli::clean_env`; `CLAUDE_CONFIG_DIR` stays), then `ANTHROPIC_API_KEY`
@@ -51,7 +61,7 @@ use serde_json::{json, Value};
 use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
 
 use super::cli::{self, Program};
-use super::events::{self, Classifier, Event, Paying, Problem, Usage};
+use super::events::{self, Classifier, Event, Paying, Problem};
 
 /// How long a dropped session gets to exit by itself before it's ended.
 const DROP_GRACE: Duration = Duration::from_secs(3);
@@ -59,6 +69,11 @@ const DROP_GRACE: Duration = Duration::from_secs(3);
 const INTERRUPT_GRACE: Duration = Duration::from_secs(2);
 /// How long the reader waits for the process once its stdout closed.
 const EXIT_WAIT: Duration = Duration::from_secs(10);
+
+/// **The variable a run's endpoint key goes in** (`integrations/claude_live.rs`
+/// writes `${YAP_RUN_KEY}` into the run's MCP config and hooks): Yap's own
+/// name, never Claude Code's (`cli::keeps_env` keeps it).
+pub const RUN_KEY_VAR: &str = "YAP_RUN_KEY";
 
 // ---- The spec ----
 
@@ -115,29 +130,6 @@ impl PermissionMode {
             PermissionMode::DontAsk => "dontAsk",
             PermissionMode::Plan => "plan",
             PermissionMode::BypassPermissions => "bypassPermissions",
-        }
-    }
-
-    pub fn parse(s: &str) -> Option<PermissionMode> {
-        use PermissionMode::*;
-        [Manual, AcceptEdits, Auto, DontAsk, Plan, BypassPermissions].into_iter().find(|m| m.as_str() == s.trim())
-    }
-}
-
-/// `--permission-prompts`: who answers a prompt in a `-p` run.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum PermissionPrompts {
-    /// The host: `--permission-prompt-tool` (Yap's `approve`).
-    Host,
-    /// Nobody: anything that would ask is denied (unattended jobs).
-    Off,
-}
-
-impl PermissionPrompts {
-    pub fn as_str(self) -> &'static str {
-        match self {
-            PermissionPrompts::Host => "host",
-            PermissionPrompts::Off => "none",
         }
     }
 }
@@ -233,7 +225,6 @@ pub struct Spec {
     pub model: Option<String>,
     pub effort: Option<Effort>,
     pub permission_mode: PermissionMode,
-    pub permission_prompts: Option<PermissionPrompts>,
     /// `--permission-prompt-tool` (`mcp__yap__approve`).
     pub permission_prompt_tool: Option<String>,
     /// `--tools`: exactly these built-in tools. `Some(vec![])` is none at
@@ -263,14 +254,18 @@ pub struct Spec {
     pub add_dirs: Vec<PathBuf>,
     pub conversation: Conversation,
     pub pay: Pay,
-    /// More environment variables for this run (a run endpoint's key). A
-    /// `CLAUDE…` / `ANTHROPIC_…` name is refused (`CLAUDE_CONFIG_DIR` is
-    /// allowed).
+    /// More environment variables for this run (a run endpoint's key, under
+    /// [`RUN_KEY_VAR`]). A `CLAUDE…` / `ANTHROPIC_…` name is refused
+    /// (`CLAUDE_CONFIG_DIR` is allowed).
     pub env: Vec<(String, String)>,
     /// `--max-budget-usd`: API key runs only (ignored on a plan).
     pub max_budget_usd: Option<f64>,
     /// `--fallback-model`.
     pub fallback_model: Option<String>,
+    /// Claude Code saves the session as a transcript in its own config
+    /// folder (the default: `--resume` needs it). `false`:
+    /// `--no-session-persistence`, nothing saved (a run nothing resumes).
+    pub persist: bool,
 }
 
 impl Spec {
@@ -280,7 +275,6 @@ impl Spec {
             model: None,
             effort: None,
             permission_mode: PermissionMode::default(),
-            permission_prompts: None,
             permission_prompt_tool: None,
             tools: None,
             allowed_tools: Vec::new(),
@@ -297,6 +291,7 @@ impl Spec {
             env: Vec::new(),
             max_budget_usd: None,
             fallback_model: None,
+            persist: true,
         }
     }
 }
@@ -307,7 +302,6 @@ impl std::fmt::Debug for Spec {
             .field("model", &self.model)
             .field("effort", &self.effort)
             .field("permission_mode", &self.permission_mode)
-            .field("permission_prompts", &self.permission_prompts)
             .field("permission_prompt_tool", &self.permission_prompt_tool)
             .field("tools", &self.tools)
             .field("allowed_tools", &self.allowed_tools)
@@ -324,6 +318,7 @@ impl std::fmt::Debug for Spec {
             .field("env", &self.env.iter().map(|(k, _)| k.as_str()).collect::<Vec<_>>())
             .field("max_budget_usd", &self.max_budget_usd)
             .field("fallback_model", &self.fallback_model)
+            .field("persist", &self.persist)
             .finish_non_exhaustive()
     }
 }
@@ -367,9 +362,6 @@ pub fn args(spec: &Spec, files: &Files) -> Vec<String> {
         push("--effort", e.as_str().to_string());
     }
     push("--permission-mode", spec.permission_mode.as_str().to_string());
-    if let Some(p) = spec.permission_prompts {
-        push("--permission-prompts", p.as_str().to_string());
-    }
     if let Some(t) = spec.permission_prompt_tool.as_deref().filter(|t| !t.is_empty()) {
         push("--permission-prompt-tool", t.to_string());
     }
@@ -418,17 +410,22 @@ pub fn args(spec: &Spec, files: &Files) -> Vec<String> {
         a.push("--fallback-model".into());
         a.push(m.to_string());
     }
+    if !spec.persist {
+        a.push("--no-session-persistence".into());
+    }
     a
 }
 
-/// The run's environment: `inherited` cleaned (`cli::clean_env`), `extra`
-/// added, and `ANTHROPIC_API_KEY` for a key run (never for a plan run).
+/// The run's environment: `inherited` cleaned (`cli::clean_env`, and an
+/// inherited [`RUN_KEY_VAR`]), `extra` added, and `ANTHROPIC_API_KEY` for a
+/// key run (never for a plan run).
 pub fn environment(
     inherited: impl IntoIterator<Item = (OsString, OsString)>,
     pay: &Pay,
     extra: &[(String, String)],
 ) -> Result<Vec<(OsString, OsString)>, String> {
     let mut env = cli::clean_env(inherited);
+    env.retain(|(k, _)| !k.to_string_lossy().eq_ignore_ascii_case(RUN_KEY_VAR));
     for (name, value) in extra {
         if name.is_empty() || name.contains('=') || !cli::keeps_env(name) {
             return Err(format!("{name} can't be set for a Claude Code run: it would change how Claude Code signs in or pays."));
@@ -440,6 +437,119 @@ pub fn environment(
         env.push(("ANTHROPIC_API_KEY".into(), key.into()));
     }
     Ok(env)
+}
+
+/// Where every run's folder goes: `<temp>/yap-claude/`.
+fn runs_root() -> PathBuf {
+    std::env::temp_dir().join("yap-claude")
+}
+
+/// The file in a run's folder naming the Yap that made it:
+/// `<process id> <when it started>` (a FILETIME; 0 when unknown).
+const OWNER: &str = "yap-owner";
+
+/// A run folder with no owner (a crash before it was written, or an older
+/// Yap's) is swept once it's this old: no run of Yap's lasts a day.
+const UNOWNED_STALE: Duration = Duration::from_secs(24 * 60 * 60);
+
+/// This Yap, as a run folder's owner names it.
+fn owner_line() -> String {
+    format!("{} {}", std::process::id(), own_start())
+}
+
+/// When this process started (a FILETIME), 0 when Windows won't say.
+fn own_start() -> u64 {
+    static START: std::sync::OnceLock<u64> = std::sync::OnceLock::new();
+    *START.get_or_init(|| {
+        #[cfg(windows)]
+        {
+            crate::shell::procs::created(std::process::id()).unwrap_or(0)
+        }
+        #[cfg(not(windows))]
+        {
+            0
+        }
+    })
+}
+
+/// Whether the Yap a run folder names is still running: `Some(true)` it is
+/// (that process, started then), `Some(false)` it isn't, `None` can't tell.
+fn owner_alive(pid: u32, started: u64) -> Option<bool> {
+    if pid == std::process::id() && (started == 0 || started == own_start()) {
+        return Some(true);
+    }
+    #[cfg(windows)]
+    {
+        match crate::shell::procs::created(pid) {
+            Some(t) => Some(started == 0 || t == started),
+            // Not one Windows lets Yap ask about, but still there: can't tell.
+            None if crate::shell::procs::exe_names().contains_key(&pid) => None,
+            None => Some(false),
+        }
+    }
+    #[cfg(not(windows))]
+    {
+        None
+    }
+}
+
+/// A run folder's name as [`RunFiles::write`] makes it: up to 8 letters or
+/// digits (the session id's start), `-`, 12 hex digits. Pure.
+fn is_run_folder_name(name: &str) -> bool {
+    let Some((short, tag)) = name.rsplit_once('-') else { return false };
+    short.len() <= 8 && short.bytes().all(|b| b.is_ascii_alphanumeric()) && tag.len() == 12 && tag.bytes().all(|b| b.is_ascii_hexdigit())
+}
+
+/// **The start-up sweep**: the run folders under `root` no running Yap owns
+/// — its owner gone ([`OWNER`], told by `alive`), or no owner and older
+/// than [`UNOWNED_STALE`] at `now` — removed. Only folders named as Yap
+/// names them ([`is_run_folder_name`]), never a link, never a file or
+/// anything else there. How many went.
+fn sweep_runs_in(root: &Path, alive: impl Fn(u32, u64) -> Option<bool>, now: std::time::SystemTime) -> usize {
+    let Ok(entries) = std::fs::read_dir(root) else { return 0 };
+    let mut gone = 0;
+    for entry in entries.flatten() {
+        // The entry itself, links not followed.
+        let Ok(kind) = entry.file_type() else { continue };
+        if !kind.is_dir() || kind.is_symlink() {
+            continue;
+        }
+        let name = entry.file_name();
+        if !is_run_folder_name(&name.to_string_lossy()) {
+            continue;
+        }
+        let dir = entry.path();
+        let owner = std::fs::read_to_string(dir.join(OWNER)).ok().and_then(|s| {
+            let mut parts = s.split_whitespace();
+            Some((parts.next()?.parse::<u32>().ok()?, parts.next()?.parse::<u64>().ok()?))
+        });
+        let old = || {
+            entry
+                .metadata()
+                .and_then(|m| m.modified())
+                .ok()
+                .and_then(|t| now.duration_since(t).ok())
+                .is_some_and(|age| age >= UNOWNED_STALE)
+        };
+        let stale = match owner.map(|(pid, started)| alive(pid, started)) {
+            Some(Some(live)) => !live,
+            Some(None) | None => old(),
+        };
+        if stale && std::fs::remove_dir_all(&dir).is_ok() {
+            gone += 1;
+        }
+    }
+    gone
+}
+
+/// **At start** (`claude_code::init`): the run folders a crashed Yap left
+/// under `<temp>/yap-claude/` removed; another running Yap's left alone.
+pub fn sweep_run_folders() -> usize {
+    let gone = sweep_runs_in(&runs_root(), owner_alive, std::time::SystemTime::now());
+    if gone > 0 {
+        tracing::info!(gone, "claude code: run folders left by an earlier Yap removed");
+    }
+    gone
 }
 
 /// The run's own folder of files (settings, MCP config, system prompt),
@@ -459,9 +569,11 @@ impl RunFiles {
         let _ = getrandom::fill(&mut raw);
         let tag: String = raw.iter().map(|b| format!("{b:02x}")).collect();
         let short: String = spec.conversation.id().chars().filter(char::is_ascii_alphanumeric).take(8).collect();
-        let dir = std::env::temp_dir().join("yap-claude").join(format!("{short}-{tag}"));
+        let dir = runs_root().join(format!("{short}-{tag}"));
         std::fs::create_dir_all(&dir).map_err(|e| format!("Couldn't make a folder for Claude Code's settings: {e}"))?;
         let mut out = RunFiles { dir: Some(dir.clone()), files: Files::default() };
+        // Whose it is, first: the start-up sweep leaves a live Yap's alone.
+        let _ = std::fs::write(dir.join(OWNER), owner_line());
         let put = |name: &str, body: String| -> Result<PathBuf, String> {
             let path = dir.join(name);
             std::fs::write(&path, body).map_err(|e| format!("Couldn't write Claude Code's settings: {e}"))?;
@@ -500,13 +612,6 @@ pub struct Image {
     pub media_type: String,
     /// The bytes, base64.
     pub base64: String,
-}
-
-impl Image {
-    pub fn from_bytes(media_type: &str, bytes: &[u8]) -> Image {
-        use base64::Engine as _;
-        Image { media_type: media_type.to_string(), base64: base64::engine::general_purpose::STANDARD.encode(bytes) }
-    }
 }
 
 impl std::fmt::Debug for Image {
@@ -682,11 +787,8 @@ impl Session {
         lock(&self.shared.state).session_id.clone()
     }
 
-    pub fn pid(&self) -> u32 {
-        self.shared.pid
-    }
-
     /// The latest `system/init`'s capabilities (empty before the first turn).
+    #[cfg(test)]
     pub fn capabilities(&self) -> Vec<String> {
         lock(&self.shared.state).capabilities.clone()
     }
@@ -745,12 +847,6 @@ impl Session {
     pub fn kill(&self) {
         self.end();
         self.shared.kill_tree();
-    }
-
-    /// Wait (blocking) up to `timeout` for the process to end; its exit
-    /// code (`Some(None)`: none), or `None` if it's still running.
-    pub fn wait(&self, timeout: Duration) -> Option<Option<i32>> {
-        self.shared.wait_exit(timeout)
     }
 
     fn write_line(&self, line: &str) -> Result<(), String> {
@@ -858,103 +954,81 @@ fn forward_stderr(child: &mut Child) {
     }
 }
 
-// ---- One question, one answer ----
-
-/// A one-shot answer.
-#[derive(Clone, Debug, PartialEq)]
-pub struct Reply {
-    pub text: String,
-    pub usage: Usage,
-    /// Claude Code's estimate of the API price (on a plan: what it saved).
-    pub cost_usd: f64,
-    pub session_id: String,
-    /// The model that answered (`system/init`'s).
-    pub model: String,
-}
-
-#[derive(Clone, Debug, PartialEq)]
-pub enum OneshotError {
-    /// Signed out, at the limit, paying the wrong way…
-    Problem(Problem),
-    /// Anything else, in plain words.
-    Failed(String),
-}
-
-impl std::fmt::Display for OneshotError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            OneshotError::Problem(p) => f.write_str(&p.message()),
-            OneshotError::Failed(s) => f.write_str(s),
-        }
-    }
-}
-
-/// Ask once (memory learning, a title, a summary): start Claude Code on
-/// `spec`, send `prompt`, close stdin and wait for the turn's `result` (at
-/// most `timeout`). A [`Problem`] ends it at once. The process is ended when
-/// this returns.
-pub async fn oneshot(spec: Spec, prompt: &str, timeout: Duration) -> Result<Reply, OneshotError> {
-    let program = cli::find().ok_or_else(|| OneshotError::Failed("Claude Code isn't installed on this PC.".into()))?;
-    oneshot_with(&program, spec, prompt, timeout).await
-}
-
-/// [`oneshot`] on `program` (Claude Code, or a stand-in).
-pub async fn oneshot_with(program: &Program, spec: Spec, prompt: &str, timeout: Duration) -> Result<Reply, OneshotError> {
-    let (session, mut rx) = Session::start_with(program, spec).map_err(OneshotError::Failed)?;
-    session.send_user(prompt, &[]).map_err(OneshotError::Failed)?;
-    session.end();
-    let mut model = String::new();
-    let waited = tokio::time::timeout(timeout, async {
-        while let Some(event) = rx.recv().await {
-            match event {
-                Event::Init(init) => model = init.model,
-                Event::Problem(p) => return Err(OneshotError::Problem(p)),
-                Event::Result(r) if r.is_error => {
-                    let why = r.errors.first().cloned().filter(|e| !e.is_empty()).unwrap_or_else(|| r.text.clone());
-                    return Err(OneshotError::Failed(if why.is_empty() { "Claude Code couldn't answer.".into() } else { why }));
-                }
-                Event::Result(r) => {
-                    return Ok(Reply { text: r.text, usage: r.usage, cost_usd: r.cost_usd, session_id: r.session_id, model: model.clone() })
-                }
-                Event::Exited(_) => break,
-                _ => {}
-            }
-        }
-        Err(OneshotError::Failed("Claude Code stopped before it answered.".into()))
-    })
-    .await;
-    match waited {
-        Ok(result) => {
-            if result.is_err() {
-                session.kill();
-            }
-            result
-        }
-        Err(_) => {
-            session.kill();
-            Err(OneshotError::Failed("Claude Code took too long to answer.".into()))
-        }
-    }
-}
-
-/// The folder a one-shot call runs in when nothing else fits: an empty one
-/// of Yap's own under the temp folder (no project's settings, CLAUDE.md or
-/// MCP servers in it).
-pub fn empty_folder() -> Result<PathBuf, String> {
-    let dir = std::env::temp_dir().join("yap-claude").join("empty");
-    std::fs::create_dir_all(&dir).map_err(|e| format!("Couldn't make a folder for Claude Code: {e}"))?;
-    Ok(dir)
-}
-
-/// `true` when `dir` is Yap's own (a run's files, [`empty_folder`]).
-pub fn is_yaps_folder(dir: &Path) -> bool {
-    crate::shell::procs::is_under(&std::env::temp_dir().join("yap-claude"), &dir.to_string_lossy())
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ai::claude_code::events::{StreamKind, TurnResult};
+    use crate::ai::claude_code::events::{StreamKind, TurnResult, Usage};
+
+    /// A one-shot answer.
+    #[derive(Clone, Debug, PartialEq)]
+    struct Reply {
+        text: String,
+        usage: Usage,
+        /// Claude Code's estimate of the API price (on a plan: what it saved).
+        cost_usd: f64,
+        /// The model that answered (`system/init`'s).
+        model: String,
+    }
+
+    #[derive(Clone, Debug, PartialEq)]
+    enum OneshotError {
+        /// Signed out, at the limit, paying the wrong way…
+        Problem(Problem),
+        /// Anything else, in plain words.
+        Failed(String),
+    }
+
+    impl std::fmt::Display for OneshotError {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            match self {
+                OneshotError::Problem(p) => f.write_str(&p.message()),
+                OneshotError::Failed(s) => f.write_str(s),
+            }
+        }
+    }
+
+    /// One question, one answer on `program` (the stand-in): `prompt` sent,
+    /// stdin closed, the turn's `result` (at most `timeout`); a [`Problem`]
+    /// ends it at once. Yap's own one-shot calls are the plan's
+    /// (`claude_plan/oneshot.rs`, streamed); this checks the engine's
+    /// problems against the recordings.
+    async fn oneshot_with(program: &Program, spec: Spec, prompt: &str, timeout: Duration) -> Result<Reply, OneshotError> {
+        let (session, mut rx) = Session::start_with(program, spec).map_err(OneshotError::Failed)?;
+        session.send_user(prompt, &[]).map_err(OneshotError::Failed)?;
+        session.end();
+        let mut model = String::new();
+        let waited = tokio::time::timeout(timeout, async {
+            while let Some(event) = rx.recv().await {
+                match event {
+                    Event::Init(init) => model = init.model,
+                    Event::Problem(p) => return Err(OneshotError::Problem(p)),
+                    Event::Result(r) if r.is_error => {
+                        let why = r.errors.first().cloned().filter(|e| !e.is_empty()).unwrap_or_else(|| r.text.clone());
+                        return Err(OneshotError::Failed(if why.is_empty() { "Claude Code couldn't answer.".into() } else { why }));
+                    }
+                    Event::Result(r) => {
+                        return Ok(Reply { text: r.text, usage: r.usage, cost_usd: r.cost_usd, model: model.clone() })
+                    }
+                    Event::Exited(_) => break,
+                    _ => {}
+                }
+            }
+            Err(OneshotError::Failed("Claude Code stopped before it answered.".into()))
+        })
+        .await;
+        match waited {
+            Ok(result) => {
+                if result.is_err() {
+                    session.kill();
+                }
+                result
+            }
+            Err(_) => {
+                session.kill();
+                Err(OneshotError::Failed("Claude Code took too long to answer.".into()))
+            }
+        }
+    }
 
     fn temp_dir(tag: &str) -> PathBuf {
         let dir = std::env::temp_dir().join(format!("yap-cc-session-{tag}-{}", &new_session_id()[..8]));
@@ -1010,7 +1084,6 @@ mod tests {
         spec.model = Some("claude-opus-5-5".into());
         spec.effort = Some(Effort::XHigh);
         spec.permission_mode = PermissionMode::Auto;
-        spec.permission_prompts = Some(PermissionPrompts::Off);
         spec.permission_prompt_tool = Some("mcp__yap__approve".into());
         spec.tools = Some(vec!["WebSearch".into(), "WebFetch".into()]);
         spec.allowed_tools = vec!["mcp__yap__search_notes".into(), "Bash(git diff *)".into()];
@@ -1033,7 +1106,6 @@ mod tests {
         assert_eq!(after("--model"), Some("claude-opus-5-5"));
         assert_eq!(after("--effort"), Some("xhigh"));
         assert_eq!(after("--permission-mode"), Some("auto"));
-        assert_eq!(after("--permission-prompts"), Some("none"));
         assert_eq!(after("--permission-prompt-tool"), Some("mcp__yap__approve"));
         assert_eq!(after("--tools"), Some("WebSearch,WebFetch"));
         assert_eq!(after("--allowedTools"), Some("mcp__yap__search_notes,Bash(git diff *)"));
@@ -1049,13 +1121,16 @@ mod tests {
         assert_eq!(after("--max-budget-usd"), None, "a plan has no budget flag");
         assert_eq!(after("--fallback-model"), Some("claude-sonnet-5-5"));
         assert!(!a.iter().any(|x| x.contains('{')), "no JSON on the command line");
+        assert!(!a.contains(&"--no-session-persistence".to_string()), "saved by default: --resume needs it");
 
         spec.pay = Pay::ApiKey(ApiKey::new("sk-ant-example"));
         spec.tools = Some(vec![]);
+        spec.persist = false;
         let a = args(&spec, &files);
         let after = |flag: &str| a.iter().position(|x| x == flag).map(|i| a[i + 1].as_str());
         assert_eq!(after("--max-budget-usd"), Some("0.5"));
         assert_eq!(after("--tools"), Some(""), "no tools at all");
+        assert!(a.contains(&"--no-session-persistence".to_string()), "a run nothing resumes saves no transcript");
         assert!(!a.iter().any(|x| x.contains("sk-ant")), "the key is never an argument");
         assert_eq!(format!("{:?}", spec.pay), "ApiKey(ApiKey(…))");
     }
@@ -1092,16 +1167,27 @@ mod tests {
         for sneaky in ["ANTHROPIC_API_KEY", "anthropic_auth_token", "CLAUDE_CODE_USE_BEDROCK", "CLAUDECODE", "", "A=B"] {
             assert!(environment(inherited.clone(), &Pay::Plan, &[(sneaky.into(), "x".into())]).is_err(), "{sneaky}");
         }
-        let moved = environment(inherited, &Pay::Plan, &[("CLAUDE_CONFIG_DIR".into(), "E:\\other".into())]).unwrap();
+        let moved = environment(inherited.clone(), &Pay::Plan, &[("CLAUDE_CONFIG_DIR".into(), "E:\\other".into())]).unwrap();
         assert_eq!(get(&moved, "CLAUDE_CONFIG_DIR").as_deref(), Some("E:\\other"));
         assert_eq!(moved.iter().filter(|(k, _)| k.to_string_lossy().eq_ignore_ascii_case("CLAUDE_CONFIG_DIR")).count(), 1);
+
+        // The run key: the run's own goes in (the scrub keeps Yap's name); one
+        // Yap inherited (started from a job's command) never reaches a run.
+        let mut from_a_job = inherited;
+        from_a_job.push((OsString::from("yap_run_key"), OsString::from("a-parent-runs-key")));
+        let none = environment(from_a_job.clone(), &Pay::Plan, &[]).unwrap();
+        assert_eq!(get(&none, RUN_KEY_VAR), None);
+        let own = environment(from_a_job, &Pay::Plan, &[(RUN_KEY_VAR.into(), "this-runs-key".into())]).unwrap();
+        assert_eq!(get(&own, RUN_KEY_VAR).as_deref(), Some("this-runs-key"));
+        assert_eq!(own.iter().filter(|(k, _)| k.to_string_lossy().eq_ignore_ascii_case(RUN_KEY_VAR)).count(), 1);
+        assert!(cli::keeps_env(RUN_KEY_VAR));
     }
 
     #[test]
     fn user_messages_carry_words_and_pictures() {
         let v: Value = serde_json::from_str(&user_message("What's \"this\"?\nLine two", &[])).unwrap();
         assert_eq!(v, json!({"type":"user","message":{"role":"user","content":[{"type":"text","text":"What's \"this\"?\nLine two"}]}}));
-        let png = Image::from_bytes("image/png", &[0x89, b'P', b'N', b'G']);
+        let png = Image { media_type: "image/png".into(), base64: "iVBORw==".into() };
         assert_eq!(format!("{png:?}"), "Image(image/png, 8 base64 chars)");
         let v: Value = serde_json::from_str(&user_message("And this?", std::slice::from_ref(&png))).unwrap();
         let content = v["message"]["content"].as_array().unwrap();
@@ -1123,12 +1209,7 @@ mod tests {
         }
         assert_eq!(Effort::parse("XHIGH"), Some(Effort::XHigh));
         assert_eq!(Effort::parse("extreme"), None);
-        use PermissionMode::*;
-        for m in [Manual, AcceptEdits, Auto, DontAsk, Plan, BypassPermissions] {
-            assert_eq!(PermissionMode::parse(m.as_str()), Some(m));
-        }
-        assert_eq!(PermissionMode::default(), DontAsk);
-        assert_eq!(PermissionPrompts::Off.as_str(), "none");
+        assert_eq!(PermissionMode::default(), PermissionMode::DontAsk);
     }
 
     #[test]
@@ -1146,14 +1227,75 @@ mod tests {
         assert!(shown.contains("YAP_RUN_KEY") && shown.contains("append_system_prompt_chars: Some(33)"), "{shown}");
         let files = RunFiles::write(&spec).unwrap();
         let dir = files.dir.clone().unwrap();
-        assert!(is_yaps_folder(&dir));
+        assert!(crate::shell::procs::is_under(&runs_root(), &dir.to_string_lossy()));
+        assert!(is_run_folder_name(&dir.file_name().unwrap().to_string_lossy()), "{dir:?}");
         let mcp: Value = serde_json::from_str(&std::fs::read_to_string(files.files.mcp_config.as_ref().unwrap()).unwrap()).unwrap();
         assert_eq!(mcp["mcpServers"]["yap"]["headers"]["Authorization"], "Bearer ${YAP_RUN_KEY}");
         assert_eq!(std::fs::read_to_string(files.files.system_prompt.as_ref().unwrap()).unwrap(), "About you: Priya, at example.com.");
+        // No file of the run's holds the key; the owner is this Yap.
+        for f in std::fs::read_dir(&dir).unwrap().flatten() {
+            assert!(!std::fs::read_to_string(f.path()).unwrap().contains("secret-run-key"), "{:?}", f.path());
+        }
+        assert_eq!(std::fs::read_to_string(dir.join(OWNER)).unwrap(), owner_line());
+        // The sweep reads this Yap as running; one with its id that started
+        // at another time (an earlier Yap whose id was reused) as gone.
+        assert_eq!(owner_alive(std::process::id(), own_start()), Some(true));
+        #[cfg(windows)]
+        {
+            assert!(own_start() > 0);
+            assert_eq!(owner_alive(std::process::id(), own_start() - 1), Some(false));
+        }
         drop(files);
         assert!(!dir.exists(), "removed with the run");
         let none = RunFiles::write(&Spec::new(std::env::temp_dir(), Pay::Plan)).unwrap();
         assert!(none.dir.is_none() && none.files == Files::default());
+    }
+
+    #[test]
+    fn the_start_up_sweep_takes_only_dead_yaps_run_folders() {
+        let root = temp_dir("sweep");
+        let made = |name: &str, owner: Option<&str>| {
+            let d = root.join(name);
+            std::fs::create_dir_all(&d).unwrap();
+            std::fs::write(d.join("mcp.json"), "{}").unwrap();
+            if let Some(o) = owner {
+                std::fs::write(d.join(OWNER), o).unwrap();
+            }
+            d
+        };
+        let dead = made("4d7c1d2e-0123456789ab", Some("41 1000"));
+        let live = made("9f0e2b6a-abcdef012345", Some("42 2000"));
+        let unsure = made("5c6d7e8f-a1b2c3d4e5f6", Some("43 3000"));
+        let unowned = made("aa-00112233aabb", None);
+        let garbled = made("bb-ffeeddccbbaa", Some("not an owner"));
+        // Never Yap's: other names, a file.
+        let other = made("empty", Some("41 1000"));
+        let named_alike = made("4d7c1d2e-0123456789abX", Some("41 1000"));
+        std::fs::write(root.join("0123abcd-001122334455"), "a file, not a run").unwrap();
+        // 41 is gone; 42 runs (started at 2000; a later 42 isn't it); 43 can't be told.
+        let alive = |pid: u32, started: u64| match pid {
+            41 => Some(false),
+            42 => Some(started == 2000),
+            _ => None,
+        };
+        // Now: the unowned ones are new, so they stay.
+        let now = std::time::SystemTime::now();
+        assert_eq!(sweep_runs_in(&root, alive, now), 1);
+        assert!(!dead.exists(), "its Yap is gone");
+        for kept in [&live, &unsure, &unowned, &garbled, &other, &named_alike] {
+            assert!(kept.exists(), "{kept:?}");
+        }
+        assert!(root.join("0123abcd-001122334455").is_file());
+        // A day on: the ones with no owner Yap can read go too; a live one,
+        // and one whose owner can't be told but is young, stay… until they're old.
+        let later = now + UNOWNED_STALE + Duration::from_secs(60);
+        assert_eq!(sweep_runs_in(&root, alive, later), 3);
+        assert!(!unowned.exists() && !garbled.exists() && !unsure.exists());
+        assert!(live.exists() && other.exists() && named_alike.exists());
+        assert_eq!(sweep_runs_in(&root.join("not-there"), alive, later), 0);
+        assert!(is_run_folder_name("abc-0123456789ab") && is_run_folder_name("-0123456789ab"));
+        assert!(!is_run_folder_name("abcdefghi-0123456789ab") && !is_run_folder_name("ab_c-0123456789ab") && !is_run_folder_name("abc-0123456789ag"));
+        remove_soon(&root);
     }
 
     // ---- Round trips against the fake ----
@@ -1379,7 +1521,7 @@ mod tests {
         println!("version {}, capabilities {:?}", init.version, init.capabilities);
         assert_eq!(init.session_id, id);
         assert_eq!(init.api_key_source, "none");
-        assert!(init.can("interrupt_receipt_v1"));
+        assert!(init.capabilities.iter().any(|c| c == "interrupt_receipt_v1"));
         assert!(seen.contains(&Event::Problem(Problem::NotSignedIn)), "{seen:?}");
         let r: Vec<&TurnResult> = seen.iter().filter_map(|e| if let Event::Result(r) = e { Some(r) } else { None }).collect();
         assert!(r[0].is_error);

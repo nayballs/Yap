@@ -7,6 +7,12 @@
 //!   how many of its messages the session has seen, the model it last ran
 //!   on, and when. Saved through `saving.rs`; it goes with Chats in Delete
 //!   some of your data, and comes in Download your data.
+//! - **Claude Code's own copy**: Claude Code saves each session as a
+//!   transcript in its own config folder (`claude_code/transcripts.rs`).
+//!   Yap deletes a conversation's with it ([`forget`]: Chat's delete; [`reset`]:
+//!   Delete some of your data → Chats, Reset app), and a session the
+//!   conversation moved on from as soon as it's replaced ([`put`]): only the
+//!   sessions kept here, only under Yap's own `claude/chat/` folder.
 //! - **Warm** ([`Warm`]): the process stays up 10 minutes after its last
 //!   answer ([`WARM_FOR`], swept every half minute), so the next question
 //!   goes straight in; after that, or for another model or effort, or a
@@ -116,38 +122,91 @@ pub fn get(conv: u64, created: u64) -> Option<Kept> {
     with_store(|s| s.conversations.get(&conv.to_string()).filter(|k| k.created == created && !k.session.is_empty()).cloned())
 }
 
-/// Keep `conv`'s session as it is now.
+/// Keep `conv`'s session as it is now. A session it replaces (the
+/// conversation moved on to a new one) is no use any more: Claude Code's
+/// copy of it goes.
 pub fn put(conv: u64, mut kept: Kept) {
     kept.ts = now_secs();
-    with_store(|s| {
-        s.conversations.insert(conv.to_string(), kept);
+    let replaced = with_store(|s| {
+        let old = s.conversations.insert(conv.to_string(), kept.clone());
         save(s);
+        old.map(|o| o.session).filter(|o| !o.is_empty() && *o != kept.session)
     });
+    if let Some(old) = replaced {
+        in_background(move || remove_transcripts(vec![old]));
+    }
 }
 
-/// Forget `conv`'s session (its process ended too).
+/// Forget `conv`'s session, and Claude Code's copy of it (the conversation
+/// is being deleted): its process ended first, so nothing more goes into
+/// the transcript.
 pub fn forget(conv: u64) {
-    end_warm(conv);
-    with_store(|s| {
-        if s.conversations.remove(&conv.to_string()).is_some() {
+    let warm = take(conv);
+    let gone = with_store(|s| {
+        let gone = s.conversations.remove(&conv.to_string());
+        if gone.is_some() {
             save(s);
         }
+        gone
+    });
+    let ids: Vec<String> = gone.map(|k| k.session).into_iter().collect();
+    in_background(move || {
+        end_now(warm.as_slice());
+        remove_transcripts(ids);
     });
 }
 
 /// **Delete some of your data → Chats**: every session forgotten, every
-/// warm process ended. How many there were.
+/// warm process ended, Claude Code's copies of them deleted. How many there
+/// were.
 pub fn reset() -> usize {
     let warm: Vec<Arc<Warm>> = lock_warm().drain().map(|(_, w)| w).collect();
-    for w in &warm {
-        w.session.end();
-    }
-    with_store(|s| {
+    end_now(&warm);
+    let (n, ids) = with_store(|s| {
+        let ids: Vec<String> = s.conversations.values().map(|k| k.session.clone()).collect();
         let n = s.conversations.len();
         s.conversations.clear();
         save(s);
-        n
-    })
+        (n, ids)
+    });
+    remove_transcripts(ids);
+    n
+}
+
+/// How long a deleted chat's process gets to be gone before its transcript
+/// is deleted anyway.
+const END_WAIT: Duration = Duration::from_secs(5);
+
+/// The processes of chats being deleted, ended now (their answers have
+/// nowhere to go) and waited for, at most [`END_WAIT`]: then nothing more
+/// goes into their transcripts.
+fn end_now(warm: &[Arc<Warm>]) {
+    for w in warm {
+        w.session.kill();
+    }
+    let until = Instant::now() + END_WAIT;
+    while warm.iter().any(|w| w.session.is_running()) && Instant::now() < until {
+        std::thread::sleep(Duration::from_millis(50));
+    }
+}
+
+/// `f` on a thread of its own (a unit test: now).
+fn in_background(f: impl FnOnce() + Send + 'static) {
+    if cfg!(test) {
+        f();
+    } else {
+        let _ = std::thread::Builder::new().name("claude-transcripts".into()).spawn(f);
+    }
+}
+
+/// **Claude Code's own copies of `sessions`** (its transcripts, filed under
+/// Yap's `claude/chat/` folder, `claude_code::transcripts`) deleted: a chat
+/// Yap deletes leaves no copy behind.
+fn remove_transcripts(sessions: Vec<String>) {
+    let sessions: Vec<String> = sessions.into_iter().filter(|s| !s.is_empty()).collect();
+    if !sessions.is_empty() {
+        crate::ai::claude_code::transcripts::remove_for(&super::oneshot::folder_path("chat"), &sessions);
+    }
 }
 
 /// A failed save, said (Delete some of your data).
@@ -390,6 +449,46 @@ mod tests {
         // An unknown field or an older file: read all the same.
         let old: Store = serde_json::from_str(r#"{"conversations":{"3":{"session":"x","created":5,"seen":4,"extra":1}}}"#).unwrap();
         assert_eq!(old.conversations["3"].seen, 4);
+    }
+
+    #[test]
+    fn claude_codes_copy_of_a_session_goes_with_its_chat() {
+        use crate::ai::claude_code::transcripts::{project_dir_name, TEST_CONFIG};
+        // A fake CLAUDE_CONFIG_DIR with the plan chats' transcripts in it.
+        let config = std::env::temp_dir().join(format!("yap-plan-transcripts-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&config);
+        let chats = config.join("projects").join(project_dir_name(&super::super::oneshot::folder_path("chat").to_string_lossy()));
+        let theirs = config.join("projects").join("E--Projects-garden-planner");
+        std::fs::create_dir_all(&chats).unwrap();
+        std::fs::create_dir_all(&theirs).unwrap();
+        let ids = ["4d7c1d2e-8a51-4c3b-9f0e-2b6a7e1c5d90", "9f0e2b6a-7e1c-4d90-8a51-4c3b4d7c1d2e", "1b2c3d4e-0000-4000-8000-000000000001", "1b2c3d4e-0000-4000-8000-000000000002"];
+        let transcript = |dir: &std::path::Path, id: &str| dir.join(format!("{id}.jsonl"));
+        for id in ids {
+            std::fs::write(transcript(&chats, id), "{}\n").unwrap();
+            std::fs::write(transcript(&theirs, id), "{}\n").unwrap();
+        }
+        TEST_CONFIG.with(|c| *c.borrow_mut() = Some(config.clone()));
+
+        // A conversation that moved on to a new session: the old copy goes.
+        put(21, Kept { session: ids[0].into(), created: 5, ..Default::default() });
+        put(21, Kept { session: ids[0].into(), created: 5, seen: 2, ..Default::default() });
+        assert!(transcript(&chats, ids[0]).exists(), "the same session kept: nothing goes");
+        put(21, Kept { session: ids[1].into(), created: 5, ..Default::default() });
+        assert!(!transcript(&chats, ids[0]).exists(), "the session it replaced");
+        // The conversation deleted: its session's copy goes.
+        forget(21);
+        assert!(!transcript(&chats, ids[1]).exists());
+        // Delete some of your data → Chats: every kept session's.
+        put(22, Kept { session: ids[2].into(), created: 1, ..Default::default() });
+        put(23, Kept { session: ids[3].into(), created: 1, ..Default::default() });
+        assert_eq!(reset(), 2);
+        assert!(!transcript(&chats, ids[2]).exists() && !transcript(&chats, ids[3]).exists());
+        // The person's own project, with the same file names: never touched.
+        for id in ids {
+            assert!(transcript(&theirs, id).exists(), "{id}");
+        }
+        TEST_CONFIG.with(|c| *c.borrow_mut() = None);
+        let _ = std::fs::remove_dir_all(&config);
     }
 
     #[test]
