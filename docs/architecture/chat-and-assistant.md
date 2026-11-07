@@ -3381,6 +3381,18 @@ as for every other. Chat, the Voice Assistant on this PC and from the phone.
 - **Stop, and a newer question**: the interrupt (`Session::interrupt`), and
   the turn read to its end (10 s at most, else the process is ended), so the
   next question's events are its own.
+- **Jobs** (while offered: `on_the_plan` keeps `jobs`): Yap's `start_job`,
+  `job_status`, `message_job` and `stop_job` over the same endpoint, in
+  `--allowedTools` and named in the prompt with the safety rule as it holds
+  here (`plan.rs` `JOBS`, then `JOB_TOOL_INSTRUCTIONS`). Each turn opens on
+  the session's run (`RunHandle::begin_turn`: the question, the answer before
+  it, the conversation, where it was asked, text selected in another app as
+  web content); the turn's events tell the run of every web read and of each
+  of Yap's tool calls as Claude Code begins it (`ToChat`, `Marks`), so a job
+  call is checked after every web read before it; what the calls show (the
+  card before a job, its tab) comes back into the turn's stream
+  (`read_turn`). The session's fingerprint includes jobs: switching Jobs on or
+  off starts it again. [jobs.md](./jobs.md#from-a-plan-chat).
 - **What a plan turn doesn't do in v1** (`gates.rs` `on_the_plan`): documents
   beside the chat, pictures from the web, pages to open or act on, a look at
   the screen (the Voice Assistant gets the window's picture instead), Think's
@@ -3410,9 +3422,14 @@ own Claude Code in one of their folders, and reports back when it ends.
   jobs are offered (`Gates::jobs`: tools, not the Meetings view's Ask, and
   `jobs::offered`), to any model that calls tools; `Extra::jobs` carries
   whether the turn was asked out loud (a job that needs asking is asked in
-  words) and by voice (its report is read aloud). Not yet from a plan chat
-  (`on_the_plan` turns `jobs` off). Their instructions in `prompt.rs`
-  (`JOB_TOOL_INSTRUCTIONS`).
+  words) and by voice (its report is read aloud: `JobsTurn::asked`). Their
+  instructions in `prompt.rs` (`JOB_TOOL_INSTRUCTIONS`). **Two callers, one
+  implementation** (`execute` with a `Ctx`): the tool loop
+  (`tools/agent/dispatch.rs`, after its gate's safety rule) and a plan chat,
+  whose Claude Code calls them over Yap's run endpoint
+  (`integrations/claude_live/jobs.rs`, the same safety rule first, for the
+  turn the call belongs to: `claude_live/turn.rs`;
+  [jobs.md](./jobs.md#from-a-plan-chat)).
 - **Their rules** ([jobs.md](./jobs.md#starting-a-job-from-chat)): the
   person's own message names the folder or says yes to the offer
   (`jobs/consent.rs`); the folder is one of theirs or a full path they said,
@@ -3452,4 +3469,4 @@ own Claude Code in one of their folders, and reports back when it ends.
     the conversation list (`RunningJobs.svelte`).
   - A report reloads the open chat without switching to it
     (`stores/jobs.svelte.js`).
-- E2E: `jobs.spec.js`, `jobs-ui.spec.js` ([`docs/e2e-tests.md`](../e2e-tests.md)).
+- E2E: `jobs.spec.js`, `jobs-ui.spec.js`, `plan-jobs.spec.js` ([`docs/e2e-tests.md`](../e2e-tests.md)).

@@ -65,7 +65,7 @@ The token-authenticated local API, Yap's MCP server (`yap.exe mcp`) and adding i
   build fails with "Access is denied" (2026-10-17, Claude Code's `~/.claude.json`).
   The launcher (`dev-update.ps1`) also stops any such helper before building.
 - **`integrations/claude_live.rs`** (+ `claude_live/`: `server`, `rpc`,
-  `approve`, `backup`, `reads`) — **the endpoint Claude Code runs talk back
+  `approve`, `backup`, `reads`, `jobs`, `turn`) — **the endpoint Claude Code runs talk back
   to** (2026-11-07): Yap starts the person's own Claude Code for Chat on
   their Claude plan and for [Jobs](./jobs.md) (ai-models.md, "The Claude Code
   engine"), and those runs reach this. Below.
@@ -83,7 +83,8 @@ no Local API (the bridge can be off), and it reaches the live UI.
   404, 401). No CORS headers, ever. Each request runs on a thread of its own,
   so a permission prompt waiting for the person never holds up a read.
 - **A run** (`register_run(RunSpec)` → `RunHandle`): its label, its tools
-  (`Tools::Chat`: read only; `Tools::Job`: `approve`), where its backups go,
+  (`Tools::Chat`: read only, plus Jobs' with `RunSpec::jobs`; `Tools::Job`:
+  `approve`), where its backups go,
   and who to ask (`Approval`: the job's id, its conversation, typed or by
   voice). **A key per run**: 32 random bytes, compared by SHA-256, sent as
   `Authorization: Bearer`. The handle gives the run's `--mcp-config` (Yap's
@@ -107,6 +108,26 @@ no Local API (the bridge can be off), and it reaches the live UI.
   (`check_calendar`, while one is connected). Read only; never the dictation
   history. `RunHandle::allowed_tools` names them for `--allowedTools`, so a
   plan chat in `dontAsk` can use them.
+- **Jobs' tools from a plan chat** (`jobs.rs`, 2026-11-07): for a Chat run
+  registered with `RunSpec::jobs` (`with_jobs`: jobs on, Claude Code here,
+  not across the meetings), `start_job`, `job_status`, `message_job` and
+  `stop_job`, listed with the tool loop's own schemas and descriptions, and
+  each call run by the tool loop's own code (`chat/tools/jobs.rs` `execute`),
+  after the same safety rule and the evaluation's intercept. The list is read
+  once per session, so a session made without them is started again to get
+  them. [jobs.md](./jobs.md#from-a-plan-chat).
+- **A Chat run's turn** (`turn.rs`): `RunHandle::begin_turn(Context)` gives
+  the run its turn — the question, the answer before it, the conversation,
+  where it was asked (`JobsTurn`), web content from the start — and a `Turn`
+  whose stream carries what a call shows (the job's card, its tab) back to
+  the plan turn; dropping it ends the turn, and a call waiting on the person
+  stops. A call with no turn open does nothing. **The web flag** comes from
+  the turn's start, the plan turn's events (`Marks::web`: a `WebSearch` or
+  `WebFetch` beginning) and `job_status` (`Slot::set_web`). **One order for
+  two paths**: a call that acts first waits, at most 5 s (`SEEN_WAIT`), for
+  its own tool call to show in the turn's events (`Marks::began`,
+  `Slot::seen`), since Claude Code writes a tool call's start before it runs
+  it; not seen in time, it's refused as after the web.
 - **`approve`** (`approve.rs`), a Job's permission prompt tool
   (`--permission-prompt-tool mcp__yap__approve`). When nothing else decides a
   tool call, Claude Code calls it with `{tool_name, input, tool_use_id}` and
@@ -136,8 +157,9 @@ no Local API (the bridge can be off), and it reaches the live UI.
 - **The log** has ids, counts, tool names and outcomes, never a command, a
   file's path or contents, a prompt or a key.
 - Tested in `claude_live/tests.rs` (the listener's refusals, the MCP subset,
-  the reads, `approve`'s card and its ends, the hook, restore) and through
-  the stand-in in the Jobs and plan e2e specs.
+  the reads, `approve`'s card and its ends, the hook, restore, the job tools
+  for a turn) and through the stand-in in the Jobs and plan e2e specs
+  (`plan-jobs.spec.js` for the job tools over the endpoint).
 
 ## The Integrations view
 

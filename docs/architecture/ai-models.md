@@ -1791,9 +1791,15 @@ script as Claude Code would (main.rs runs it before the app). A script line is
 printed as it is, with `{{session_id}}`, `{{user_text}}` and `{{cwd}}` filled
 in; a line whose first key starts with `_` is an instruction: wait for the
 next user message, sleep, call an http hook from its `--settings`, call a tool
-of its `--mcp-config`'s server, dump its arguments or which variables it has
-(never a value), write a file in its folder, write to stderr, exit. An
-interrupt is answered as 2.1.296 does. `--version` says 2.1.296
+of its `--mcp-config`'s server (`_mcp`; with `result_for`, the answer also
+handed back as that tool call's `tool_result`, as Claude Code gives it to the
+model), dump its arguments or which variables it has (never a value), write a
+file in its folder, write to stderr, exit. `{"_for":"chat"}` (or `"job"`,
+`"ask"`, `"all"`) plays the lines up to the next `_for` only in that kind of
+process — a Job's run (`--permission-prompt-tool`), a plan chat's session (an
+`--mcp-config`, no prompt tool), one question (neither) — so one script plays
+a plan chat, the job it starts and the report's question. An interrupt is
+answered as 2.1.296 does. `--version` says 2.1.296
 (`YAP_FAKE_CLAUDE_VERSION` for another), `auth status` says signed in
 (`YAP_FAKE_CLAUDE_LOGGED_IN=0`: signed out, exit 1). Recordings per Claude
 Code version in `claude_code/fixtures/<version>/` (`real-*` recorded signed
@@ -1847,7 +1853,13 @@ Claude Code's (`--system-prompt-file`), Claude Code's `WebSearch` and
 `WebFetch`, Yap's read-only tools over its run endpoint, nothing of the
 person's settings, `dontAsk`, in an empty folder of Yap's (`claude\chat\`
 in the data folder), its events mapped into Chat's stream
-(`claude_plan/map.rs`).
+(`claude_plan/map.rs`). **With Jobs offered**, the run also lists Yap's job
+tools (`RunSpec::jobs`), allowed in `--allowedTools` and named in the prompt;
+the session's fingerprint includes jobs (switching Jobs restarts it), and each
+turn calls `RunHandle::begin_turn(Context)` — the question, the previous
+answer, the conversation, where it was asked, text selected in another app —
+whose `Turn` carries the card and the Job tab's events back; dropping it ends
+the turn, and a call with no turn open does nothing ([jobs.md](./jobs.md#from-a-plan-chat)).
 
 ### Every other call (`claude_plan/oneshot.rs`)
 

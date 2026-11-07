@@ -1082,23 +1082,11 @@ mod tests {
     fn named_in_the_docs() -> BTreeSet<String> {
         let doc = include_str!("../../../../docs/architecture/config-and-data.md");
         let re = regex::Regex::new(r"(?:%APPDATA%[/\\]yap[/\\]|<data>/)([A-Za-z0-9_.-]+)(/?)").unwrap();
-        let mut named: BTreeSet<String> =
+        let named: BTreeSet<String> =
             re.captures_iter(doc).map(|c| format!("{}{}", &c[1], if c[2].is_empty() && !c[1].contains('.') { "/" } else { &c[2] })).collect();
         assert!(named.len() >= 20, "{named:?}");
-        // Jobs' stores (jobs/store.rs, folders.rs, 2026-11-07): their docs
-        // come with the Jobs docs (docs/architecture/jobs.md, config-and-
-        // data.md). Once config-and-data.md names them, this goes.
-        for f in UNDOCUMENTED_YET {
-            if named.contains(*f) {
-                panic!("config-and-data.md names {f} now: take it out of UNDOCUMENTED_YET");
-            }
-            named.insert(f.to_string());
-        }
         named
     }
-
-    /// Stores whose lines in config-and-data.md are still to be written.
-    const UNDOCUMENTED_YET: &[&str] = &["jobs.json", "jobs/", "job_folders.json"];
 
     fn stays(file: &str) -> bool {
         STAYS.iter().flat_map(|p| p.files).any(|f| *f == file)

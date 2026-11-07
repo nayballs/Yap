@@ -32,7 +32,7 @@ store.
 |---|---|
 | `settings/configSync.svelte.js` | The config copy (`config.cfg`, `loaded`, the "Saved ✓" pulse), `base` / `pristine`, `inTurn`, `adopt` / `adoptSaved` on `yap-config-saved`, `persist`, the 400 ms auto-save (`syncConfig`, with an `onAdopted(keys)` hook; `autoSave` says a failed save with Try again) |
 | `settings/configDefaults.js` | `FIELD_DEFAULTS` (a new setting's default goes here) and `cleanConfig(cfg)`, the saved payload (was `buildClean`) |
-| `settings/configMerge.js` | The pure part: `merge3`, `fill`, `same`, `copy` |
+| `settings/configMerge.js` | The pure part: `merge3`, `fill(base, pristine, theirs)`, `same`, `copy` |
 | `settings/adoptions.svelte.js` | `followOutsideChanges`: the one-off adoptions (`yap-config-patched`, `yap-provider-key-saved`, a call app's choice, the on-device context and state, the Chat chip's scope, spoken replies' switch / volume / speed, the consent message, the bar turned off) |
 | `settings/dictionarySync.svelte.js` | `followDictionary`: the Dictionary view's list both ways, its echo guard, learned words |
 | `settings/hotkeyFallback.svelte.js` | `followHotkeyFallback`: the in-page keys (meeting, assistant, read aloud, snip, the language shortcuts, dictation, in that order), and a mouse button on Dictate (a side button: mousedown / mouseup → `dictation_key`, `actionMatchesMouse`) |
@@ -123,8 +123,20 @@ on an element that also has a `settings.css` class (`set-note`,
   overwritten (`adopt` skips it). The older one-off adoptions
   (`yap-config-patched`, `yap-chat-model-changed`, `yap-dictionary-learned`,
   `yap-meeting-detect-choice`, …; `settings/adoptions.svelte.js` and
-  `dictionarySync.svelte.js`) still run; they and this agree. The copy and
+  `dictionarySync.svelte.js`) still run; they and this agree. **Settings'
+  fill-ins** (its defaults and `ensureScopes`' scopes, kept in `pristine`):
+  `fill(base, pristine, theirs)` fills a hole in `base` only where
+  config.json (`theirs`, as `persist` and `adoptSaved` read it) has a value
+  since, so a value another surface saved there wins. A hole config.json
+  still has keeps Settings' fill-in, saved with the next save. (Until
+  2026-11-07 `fill` filled every hole, ones config.json still had too: the
+  merge took config.json's hole back, the scopes were dropped and filled in
+  again, and the auto-save ran every 400 ms for good — an `llmScopes`
+  without the Commands or Note Formatting scope, Rust's `{}` on a fresh
+  install too —, the Chat tab remounting each time.) The copy and
   the merge are `settings/configSync.svelte.js`. e2e:
+  `settings-scopes.spec.js` (an `llmScopes` with only the Chat scope: filled
+  in once, saved, no remount loop); `settings-fill-ins.spec.js`;
   `speech-models.spec.js` (a model switched on the Speech-to-Text page, then
   as the tray does, survives a switch flipped in Settings);
   `save-errors.spec.js` (a switch flipped while saves fail: one toast, the
@@ -297,6 +309,16 @@ on an element that also has a `settings.css` class (`set-note`,
   (`notifySuggestions`), Feature tips (`notifyFeatureTips`, off with Show
   tips), Milestones (`notifyMilestones`), News (`notifyNews`: "Updated to
   …" after an update).
+  **Markdown files** (2026-11-07, `settings/MarkdownFiles.svelte`, its own
+  chunk; `notes/md_file.rs`, [notes.md](./notes.md#markdown-files-in-yap-notesmd_filers-2026-11-07)):
+  **Open Markdown files with Yap** (`#open-markdown-with`) — the installer
+  offers Yap for `.md` and `.markdown` ("Open with") and never makes it
+  their default, so the button opens Windows' Default apps page on Yap's own
+  page (`md_open_with_settings`), where you pick Yap once; its line says
+  whether `.md` files open with Yap now (`md_open_with_state`, read again
+  when the window gets the focus back), or that this copy isn't installed (a
+  dev or portable Yap: Windows doesn't know it) — and **Open a Markdown
+  file…** (`#open-markdown-file`: the file dialog, then its window).
 - **Dictation** (`settings/DictationPage.svelte`): **Start and stop**
   (`#settings-hotkey`): Hotkey (`hotkey`), Recording mode (Toggle /
   Push-to-talk; in push-to-talk its line says how double-tap goes hands-free),
@@ -596,6 +618,27 @@ on an element that also has a `settings.css` class (`set-note`,
   Yap's own, picked or dropped, its review with what didn't fit —, Export,
   **Copy for Claude**, Clear all), the privacy line. With no AI model, a note
   at the top.
+- **Jobs** (`jobs`, `settings/JobsPage.svelte`, under Assistant, 2026-11-07;
+  [jobs.md](./jobs.md#the-screens)): "Hand a task to your own Claude Code
+  from Chat or the Voice Assistant. It works in a folder you chose, and tells
+  you what it did." **Jobs** (`jobsEnabled`, off); **Claude Code**
+  (`ClaudeCodeStatus.svelte`, on the plan card's store: found and its
+  version, signed in and its plan, or **Sign in**; a key login is enough for
+  jobs paid by key); **Pay with** Your Claude plan / API key (`jobsPay`;
+  for the key, whether Language Models' Claude tab has one, with a link);
+  **Defaults**: Model (Opus, Sonnet or Haiku 5.5, `jobsModel`), Effort
+  (`jobsEffort`), Mode (the Mode a new chat starts in, `jobsMode`; Bypass
+  permissions asks once, as the chip does); **Folders** (`job_folders_*`:
+  name, path, "Never above:" a cap, Remove; **Add folder…**, the folder
+  picker; "This folder's own Claude settings and MCP servers also run."; the
+  Bypass warning on a folder with no cap once Bypass is confirmed; "No
+  folders yet…"); **Ask before starting a job** (`jobsAsk`) and **Read job
+  reports aloud** (`jobsSpeak`); the limits ("Backups of changed files are
+  kept 7 days. One job at a time per folder, at most 3 at once."); **History**
+  (`job_list`: each job's status dot, folder, when and cost — plan and key
+  told apart, `core/jobs.js` `costLine` — Open (Chat on it) and Undo, 20 at
+  first). Twelve search entries (`settingsIndex.js`), a nav entry
+  (`nav.js`), `PAGES.jobs`.
 - **Speech-to-Text** (`models`, `ModelManager.svelte`): **Your model** first —
   a card with its name, size, languages and "In use", or "Not downloaded" +
   Download (never "Active" for a model that isn't on this PC), and Change
@@ -671,6 +714,26 @@ on an element that also has a `settings.css` class (`set-note`,
   banner's Add key for `openai` lands on the tab with the key field open
   (`bind:keyBox`). Nav aliases and the search index had no OpenAI-tab links;
   the search's cleanup and Chat model entries know "chatgpt plan".
+  **The Claude tab** (2026-11-07, the Anthropic tab renamed, `settings/ClaudePlanProvider.svelte`,
+  as ChatGPT's): Claude's models two ways, **the plan first** — Yap runs the
+  person's own Claude Code on this PC, signed in with their own Claude
+  account, and answers use their plan's limits (`ai/claude_plan.rs`, the
+  provider `claude-plan`) — then an Anthropic API key, pay per use. **The
+  Chat scope only**: Dictation Cleanup, Commands and Note Formatting keep the
+  key alone (`ScopeProviderConfig` shows the plan for "chat"). The plan's card
+  (`data-testid="claude-plan-card"`) says what Claude Code is here, from
+  `stores/claudePlan.svelte.js` (`claude_plan_status`): not installed (its
+  install guide, Check again); too old (its version and the one Yap needs);
+  signed in with an API key (a Console login: not a plan); found but not
+  signed in (**Sign in**: Claude Code's own `claude auth login` in a terminal
+  Yap opens, "Finish signing in…", read again when the window gets the focus
+  back); signed in: **Connected · Using Claude plan**, its version and plan,
+  Manage usage, and **Use for Chat** while Chat is on the key. Both
+  connected: **Your plan | API key**, as ChatGPT's (`TAB_WAYS` in
+  `core/providerIds.js`). The store probes at most once every 5 s (Check
+  again always probes), so a window's focus coming and going never starts
+  Claude Code over and over. Three search entries: "Your Claude plan", "Sign
+  in to Claude Code", "Claude: your plan or an API key".
   **Spelling** (`#settings-cleanup-spelling`, `RegionSpelling.svelte`: "Write
   in my region's spelling" → `regionSpelling`, greyed while cleanup is off).
   With cleanup on: **Styles by app** (`#settings-cleanup-styles`,

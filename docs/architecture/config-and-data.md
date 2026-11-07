@@ -328,6 +328,21 @@
   search_by_meaning ("Search my meetings by meaning", off; `search/`,
   Settings → Privacy & data: switched on by the model's download, off by its
   Delete; the index and model live in the data folder, below),
+  Jobs (2026-11-07, `jobs.rs`, Settings → Assistant → Jobs; the jobs, their
+  folders and each chat's Mode are in jobs.json and job_folders.json, never
+  here): jobs_enabled ("Let Chat start jobs", off) + jobs_pay ("plan" — the
+  person's Claude plan, through Claude Code's own sign-in — | "key", their
+  Anthropic key; "plan") + jobs_model (a full id, "claude-sonnet-5-5") +
+  jobs_effort (low | medium | high | xhigh | max, "medium") + jobs_mode (the
+  Mode a new chat starts in: "auto" | "manual" | "acceptEdits" | "plan" |
+  "bypassPermissions", Bypass only once confirmed; "auto") + jobs_ask ("Ask
+  before starting a job": "new-or-web" — a folder used for the first time,
+  or a chat that read the web —, "always" or "never"; "new-or-web") +
+  jobs_speak ("Read job reports aloud": "voice" — when the job was asked by
+  voice —, "always" or "never"; "voice") + jobs_max (at most this many jobs
+  at once, one per folder, 1 to 3; 3) — new fields only, no `migrate_once`
+  step; an older Yap sharing the folder drops them on its save (Jobs off
+  again),
   Commands' edit_hotkey (the rewrite shortcut)
   + agent_name + the `voiceAgent` scope (field and key names unchanged by
   the 2026-10-18 rename, so no setting resets). JSON
@@ -762,7 +777,41 @@
   `ai/claude_plan/sessions.rs`) — each Chat conversation's Claude Code
   session id, its `createdTs`, how many of its messages the session has seen,
   and the model it last ran on. Nothing secret (Claude Code keeps its own
-  sign-in). It goes with Chats in Delete some of your data.
+  sign-in). It goes with Chats in Delete some of your data, and comes in
+  Download your data (`chats/claude_sessions.json`). Claude Code keeps the
+  sessions themselves in its own config folder, never Yap's. The plan's runs
+  work in two empty folders of Yap's in the data folder, `claude\chat\` (Chat
+  turns) and `claude\ask\` (one-shot calls), so no project's settings,
+  CLAUDE.md or MCP servers are in them; Yap writes nothing into them. (Not
+  yet decided in `privacy/reset.rs`: they hold nothing of the person's.)
+- **Jobs** (2026-11-07, `jobs/store.rs`, [jobs.md](./jobs.md)):
+  `%APPDATA%/yap/jobs.json` — every job Chat started (its conversation and the
+  message that asked, typed or by voice, the folder's name and path, the
+  brief, model, effort, mode, how it pays, Claude Code's session id, status
+  and times, the files it changed, the commands it ran, what it wasn't
+  allowed to do, its final words, its cost so far — Claude Code's estimate —,
+  a problem, whether it was a plan or asks something, reported, undone,
+  swept), each chat's Mode chip (`modes`) and the one-time Bypass OK
+  (`bypassConfirmed`); and `%APPDATA%/yap/jobs/`, a folder per job:
+  `log.jsonl` (its `yap-job` events, appended line by line, at most 5,000
+  lines) and `backup/` (the files it changed as they were before it, as
+  `0001-<name>`…, with `manifest.json`: the original paths, which were
+  created). A job's log and backups go 7 days after it ended (its record
+  stays, `swept`); a job still live when Yap starts is marked interrupted.
+  `%APPDATA%/yap/job_folders.json` (`jobs/folders.rs`) — the folders jobs may
+  work in: name, path, an optional cap on the mode, when added. Files of
+  their own, never fields in chats.json (an older Yap drops fields it doesn't
+  know). All three go with **Jobs** in Delete some of your data (running jobs
+  stopped first; the files the jobs changed stay) and come in Download your
+  data (the backups never do). Nothing secret.
+- **Claude Code's run files**: `%TEMP%\yap-claude\<id>-<tag>\` — a run's
+  `settings.json` (its hooks), `mcp.json` (Yap's run endpoint, with the run's
+  key) and system prompt, removed when the session ends. Not in the data
+  folder; a crash can leave a run's folder behind (nothing sweeps them yet).
+- **Markdown files** opened in Yap (2026-11-07, `notes/md_file.rs`) stay where
+  they are: Yap reads and writes the file itself, never a copy in the data
+  folder. Its window's Preview / Source choice is the page's `localStorage`
+  (`yap.doc.view`).
 - Calendar: `%APPDATA%/yap/calendar.json` — connected calendars (name, kind,
   last sync, error), meetings from 12 h ago to 7 days ahead, answered reminders,
   the nudge, and meetings' pre-meeting briefs (`briefs`, by event key, until
@@ -1036,7 +1085,14 @@
   for questions asked by voice, `speak_when`, and a dictated question is sent
   by itself, `talk_back_hands_free`) in **Kokoro's af_bella** at 1× once
   Kokoro is downloaded (`tts_engine` "kokoro"), Windows' default voice
-  until then.
+  until then; **Jobs off** (`jobs_enabled`), and once on: paid with the
+  Claude plan, Sonnet 5.5 at medium effort, a new chat in Auto, asked first
+  only for a new folder or after the web, reports read aloud when asked by
+  voice, 3 at once (2026-11-07). **Settings' first save** writes any
+  Language Models scope config.json lacks (Commands, Note Formatting, Chat:
+  `ensureScopes`, seeded off), once — a fresh install's `llmScopes` is `{}`
+  (2026-11-07: until then it was filled in again every 400 ms,
+  frontend-settings.md).
 
 ## A file Yap couldn't read
 
