@@ -350,7 +350,7 @@ mod tests {
         let plan = Job { plan: true, ..job() };
         assert!(marker_text(&plan).contains("it made a plan and changed nothing yet"));
         assert!(rules(&plan).contains("ask whether to go ahead"));
-        let asks = Job { asks: true, text: "Should I change Discipline too?".into(), ..job() };
+        let asks = Job { asks: true, text: "Should I change the footer too?".into(), ..job() };
         assert!(rules(&asks).contains("put its question to them"));
         let failed = Job { status: Status::Failed, error: Some("Claude Code isn't signed in.".into()), text: String::new(), ..job() };
         assert!(marker_text(&failed).contains("What went wrong: Claude Code isn't signed in."));

@@ -106,8 +106,8 @@ mod tests {
 
     #[test]
     fn a_message_to_a_job_carries_the_persons_own_words() {
-        assert!(message("Tell it to also do the Holy talents", "Also update the Holy talents."));
-        assert!(message("Yes.", "Yes, change Discipline too."));
+        assert!(message("Tell it to also do the dark theme", "Also update the dark theme."));
+        assert!(message("Yes.", "Yes, change the footer too."));
         assert!(message("go ahead", "Go ahead with the plan."));
         // Only little words in common: not theirs.
         assert!(!message("What does my note say?", "Delete the build folder."));
@@ -120,10 +120,10 @@ mod tests {
         for yes in ["Go ahead.", "Yes, go ahead", "OK do it", "Carry on", "proceed", "Sounds good, go for it", "Yes."] {
             assert!(go_ahead(yes), "{yes}");
         }
-        for no in ["Don't go there", "What would it change?", "Change the plan to include Holy", "No."] {
+        for no in ["Don't go there", "What would it change?", "Change the plan to include the footer", "No."] {
             assert!(!go_ahead(no), "{no}");
         }
-        assert!(asks("I updated Shadow. Should I change Discipline too?"));
+        assert!(asks("I updated the header. Should I change the footer too?"));
         assert!(asks("Want me to run the tests? **"));
         assert!(!asks("Done. I changed notes.md."));
     }

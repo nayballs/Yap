@@ -220,8 +220,8 @@ pub enum Resolved {
     Missing(String),
 }
 
-/// A name's words, for comparing: lower case, letters and digits ("WoW
-/// AddOns" = "wow-addons" = "wow_addons").
+/// A name's words, for comparing: lower case, letters and digits ("Photo
+/// Tools" = "photo-tools" = "photo_tools").
 pub fn words(s: &str) -> Vec<String> {
     s.split(|c: char| !c.is_alphanumeric()).filter(|w| !w.is_empty()).map(str::to_lowercase).collect()
 }
@@ -297,15 +297,15 @@ mod tests {
 
     #[test]
     fn a_folder_is_found_by_its_name_never_guessed() {
-        let folders = vec![folder("garden-planner", r"D:\Projects\garden-planner"), folder("WoW AddOns", r"D:\Games\Interface\AddOns")];
+        let folders = vec![folder("garden-planner", r"D:\Projects\garden-planner"), folder("Photo Tools", r"D:\Tools\PhotoScripts")];
         let known = |arg: &str| match resolve(arg, &[], &folders, &there) {
             Resolved::Known(f) => Some(f.name),
             _ => None,
         };
         assert_eq!(known("garden-planner").as_deref(), Some("garden-planner"));
         assert_eq!(known("Garden Planner").as_deref(), Some("garden-planner"));
-        assert_eq!(known("wow addons").as_deref(), Some("WoW AddOns"));
-        assert_eq!(known("AddOns").as_deref(), Some("WoW AddOns"), "its path's last part");
+        assert_eq!(known("photo tools").as_deref(), Some("Photo Tools"));
+        assert_eq!(known("PhotoScripts").as_deref(), Some("Photo Tools"), "its path's last part");
         assert_eq!(known(r"d:/projects/garden-planner/").as_deref(), Some("garden-planner"), "its path");
         // Close isn't the same: never guessed.
         assert_eq!(resolve("garden", &[], &folders, &there), Resolved::Unknown);
