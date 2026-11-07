@@ -13,6 +13,7 @@
   import { invoke } from '@tauri-apps/api/core';
   import { toast } from '../../ui/toast.svelte.js';
   import { openContextMenu, menuKey, menuOpenFor, devInspect } from '../../ui/contextMenu.svelte.js';
+  import { overflowTip } from '../../ui/overflowTip.js';
   import { showSaveError } from '../../notices/saveErrors.js';
   import { copyText, conversationMarkdown } from '../../core/itemMenus.js';
   import { createChatLibrary } from './chatLibrary.svelte.js';
@@ -302,6 +303,7 @@
               tabindex="0"
               aria-haspopup="menu"
               data-conv={c.id}
+              use:overflowTip
               onmousedown={(e) => e.shiftKey && e.preventDefault()}
               onclick={(e) => chat.clickConversation(e, c)}
               oncontextmenu={(e) => conversationMenu(e, c)}

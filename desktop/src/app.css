@@ -737,3 +737,29 @@ mark.found {
 .shotframe img.shown {
   opacity: 1;
 }
+
+/* The full text of a cut-off line, on a hover (ui/overflowTip.js): the
+   title bar's dark tooltip, wrapping, floating on the page so a scrolling
+   list never clips it. */
+.yap-overflow-tip {
+  position: fixed;
+  z-index: 1000;
+  max-width: 320px;
+  padding: 6px 10px;
+  border-radius: 8px;
+  background: var(--yap-ink);
+  color: var(--yap-ink-fg);
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 1.4;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  pointer-events: none;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.18);
+  animation: yap-overflow-tip-in 120ms ease-out;
+}
+@keyframes yap-overflow-tip-in {
+  from {
+    opacity: 0;
+  }
+}

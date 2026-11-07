@@ -634,3 +634,33 @@ test('a narrow window: the panel gives way, the list floats when asked back, the
   await expect(list(main)).toBeVisible();
   await theme(yap, main, 'light');
 });
+
+test('a chat’s title cut off in the list shows in full on a hover; one that fits shows nothing', async ({ main, fakeLlm }) => {
+  await openView(main, 'Chat');
+  await toSide(main, 'Chat');
+  await main.getByRole('button', { name: 'New chat' }).click();
+  const long = 'Could you plan the raised beds for spring with the tomatoes, peppers and beans in the sunniest corner please';
+  fakeLlm.scriptChat([{ content: 'Here is a plan.' }]);
+  await send(main, long);
+  await expect(main.locator('.cbubble.assistant').last()).toContainText('Here is a plan.');
+  const row = main.locator('.convs .conv').first();
+  const tip = main.getByTestId('overflow-tip');
+  await row.hover();
+  await expect(tip).toBeVisible();
+  await expect(tip).toHaveText((await row.locator('.ctitle').textContent()).trim());
+  // Beside the row, not under the list's edge.
+  const r = await row.boundingBox();
+  const t = await tip.boundingBox();
+  expect(t.x).toBeGreaterThanOrEqual(r.x + r.width);
+  await main.mouse.move(5, 5);
+  await expect(tip).toHaveCount(0);
+
+  // A title that fits: no tooltip.
+  await main.getByRole('button', { name: 'New chat' }).click();
+  fakeLlm.scriptChat([{ content: 'Yes.' }]);
+  await send(main, 'Soup?');
+  await expect(main.locator('.cbubble.assistant').last()).toContainText('Yes.');
+  await main.locator('.convs .conv').first().hover();
+  await main.waitForTimeout(700);
+  await expect(tip).toHaveCount(0);
+});
