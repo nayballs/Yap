@@ -18,9 +18,10 @@ the chat side is [chat-and-assistant.md](./chat-and-assistant.md#jobs-in-chat-20
 - **Asked for in words**: "Have Claude Code fix the failing tests in
   garden-planner." The model calls `start_job`; Yap says "On it: I've started
   a job in garden-planner." and the job's tab opens beside the chat.
-- **Followed**: each step in plain words ("Reading src/app.ts", "Running npm
-  test"), the files it changed, the commands it ran, what it wasn't allowed
-  to do, and its cost.
+- **Followed**, as Claude Code itself tells it: each step in plain words
+  ("Reading src/app.ts", "Running the tests"), its to-do list, what it says
+  between steps, the files it changed and what changed in them, the commands
+  it ran and what each was for, what it wasn't allowed to do, and its cost.
 - **Reported**: when it ends, the chat's model says what it did in one to
   three sentences, in the chat that started it.
 - **Undone**: every file it changed was backed up first. **Undo job** puts
@@ -68,7 +69,10 @@ Yap keeps to them:
   words them, and the rules a model meets when it asks for one. Pure.
 - **`jobs/runner.rs`** — the runs: slots, the queue, each turn followed,
   stop, message, continue, undo, open in terminal.
-- **`jobs/steps.rs`** — each tool call as a line in plain words. Pure.
+- **`jobs/steps.rs`** — each tool call as a line in plain words, and
+  Claude Code's to-do list (`TodoWrite`). Pure. **`jobs/steps/command.rs`**:
+  a command's line (its description, else the command tidied). Pure.
+- **`jobs/diff.rs`** — an edit's or a write's diff, within its caps. Pure.
 - **`jobs/consent.rs`** — whose idea a job is. Pure.
 - **`jobs/voice.rs`** — the spoken yes or no before a job starts.
 - **`jobs/approve_card.rs`** — a running job's permission prompt on the Yap
@@ -105,12 +109,14 @@ saves ([config-and-data.md](./config-and-data.md)).
     latest turn was a plan (`plan`) or ends in a question (`asks`), whether
     it was reported (and the report's marker id), `undone`, `swept`,
     `noBackups` (it changed files and no backups were made:
-    [Undo and backups](#undo-and-backups));
+    [Undo and backups](#undo-and-backups)), `diffLines` (the diff lines
+    its log has: [What the tab shows](#what-the-tab-shows));
   - `modes`: each chat's Mode chip (conversation id → mode);
   - `bypassConfirmed`: the one-time OK for Bypass permissions.
 - **`jobs/<id>/log.jsonl`** — every `yap-job` event the job sent, one a line,
   appended as it goes (the whole file is never written again); texts over
-  4,000 characters trimmed, at most 5,000 lines. The tab replays it.
+  4,000 characters trimmed, at most 5,000 lines. The tab replays it: its
+  steps, what it said, its to-do list and its diffs.
 - **`jobs/<id>/backup/`** — the files it changed, as they were before it
   (`manifest.json` and `0001-<name>`…; [Undo and backups](#undo-and-backups)).
 - **`job_folders.json`** (`jobs/folders.rs`) — the folders jobs may work in:
@@ -224,9 +230,14 @@ folder.
   is too old for jobs: update it to 2.1.259 or later."), the folder still
   there, its backup folder made.
 - **Followed** (`Follow`): every `tool_use` as a line (`steps.rs`), the file
-  it changes (Edit, Write, MultiEdit, NotebookEdit, and the backup manifest),
-  the command it runs (Bash, PowerShell), `system/permission_denied` and the
-  result's `permission_denials`, Claude Code's problems (signed out, at the
+  it changes (Edit, Write, MultiEdit, NotebookEdit, and the backup manifest)
+  and, once the call came back without an error, what changed in it
+  (`diff.rs`), the command it runs (Bash, PowerShell) with its description,
+  a `TodoWrite`'s list, its text between tool calls (a helper's under a Task
+  left out), the line it's on when no step is running (`now`: the to-do in
+  progress once every call came back, the line before it asked once a step
+  is allowed), `system/permission_denied` and the result's
+  `permission_denials`, Claude Code's problems (signed out, at the
   plan's limit, billing, the account, paying another way) and the result:
   its words, `total_cost_usd`, the outcome. An edit tool's call whose result
   came back without an error, with the backup list still empty at the turn's
@@ -411,10 +422,11 @@ or done with a question.
   beside the chat: `chatDoc.svelte.js`, `DocPanel.svelte`): opens on the
   turn's job event, a pill, the bar's Open. Fed by `job_get` (the job and its
   log, to replay) and `yap-job` (live). The folder and status, mode and
-  model, how long it has run, the line it's on now, every step, the files,
-  the commands, what wasn't allowed, its final words (markdown), its cost told
-  apart by how it's paid ("Your Claude plan · ≈ $0.04 on the API" / "API key
-  · $0.04"), a problem with one button (Sign in), and **Stop**, **Continue**,
+  model, how long it has run, the line it's on now, its to-do list, every
+  step and what it said, the files and their diffs ([What the tab
+  shows](#what-the-tab-shows)), the commands, what wasn't allowed, its final
+  words (markdown), its cost told apart by how it's paid ("Your Claude plan
+  · ≈ $0.04 on the API" / "API key · $0.04"), a problem with one button (Sign in), and **Stop**, **Continue**,
   **Undo job** (a confirm, then what was put back; `core/jobs.js` `canUndo`),
   **Open in terminal** and "Tell the job…". A job marked `noBackups` says
   under its files "No backups were made, so Undo can't put these files
@@ -428,11 +440,13 @@ or done with a question.
   Start / Don't.
 - **A permission prompt** (`JobApprove.svelte`) in the thread of the chat
   that started the job: the tool, what it would do ("Run a command: npm
-  test"), the command or edit itself, **Allow once** / **Deny**
+  test": a command's `cd` into the job's folder left out of that line, never
+  its description, which is the model's word for it), the command (whole) or
+  edit itself, **Allow once** / **Deny**
   (`claude_approve_answer`). Never answered by voice.
 - **Running jobs** (`RunningJobs.svelte`) above Chat's conversation list:
-  the folder, the line it's on (or "Waiting for you"), how long; a click opens
-  its chat and tab.
+  the folder, the line it's on (the tab's own words: a step, or the to-do in
+  progress; or "Waiting for you"), how long; a click opens its chat and tab.
 - **`stores/jobs.svelte.js`**: every job, kept in step with `yap-job`, the
   prompts waiting, the latest report and the bar's Open, started once per
   window (ControlPanel). **`core/jobs.js`**: the words they share (status,
@@ -461,6 +475,51 @@ or done with a question.
   organisation turns hooks off, no backups are made, and the job's tab says
   so."; **History** (each job's status, folder, when and cost, Open and
   Undo).
+
+### What the tab shows
+
+After the maintainer's first real job (2026-11-07), the tab reads like Claude
+Code itself, so a job can be followed from the panel instead of a terminal.
+
+- **Steps in plain words** (`steps.rs`): a command by the description Claude
+  Code gave it, as a doing word ("List the add-on folders" → "Listing the
+  add-on folders"; a description that doesn't start with a verb Yap knows
+  stays as it is); without one, the command with a leading `cd <the job's
+  folder, or a folder in it> &&` (or `;`, or a new line) gone — quoted or
+  not, `D:\…`, `D:/…`, Git Bash's `/d/…`, WSL's `/mnt/d/…`; `cd`, `cd /d`,
+  `Set-Location`, `pushd` — its paths relative to the folder, on one line,
+  cut at a word (`command.rs`). Read, Edit, Write, Grep and Glob say their
+  paths relative too ("Searching src · water"). The same line is the running
+  line and the running list's; a permission card (in the thread and on the
+  bar) says a command the same way, but never by its description.
+- **The running line**: the latest step; once every call came back, the
+  to-do in progress (`activeForm`, "Adding a watering schedule"), as Claude
+  Code's spinner says it.
+- **Claude Code's to-do list** near the top: ✓ done, ● in progress,
+  ○ to do, "2 of 3 done", as its latest `TodoWrite` left it (no step of its
+  own).
+- **What it says** between tool calls: lines of the timeline, in order, in
+  markdown; a long one folded to four lines (Show more). Its final words
+  aren't said twice (they're "What it said", below).
+- **Following the live end** (`JobTimeline.svelte`, `ui/followEnd.js`): the
+  timeline's box stays pinned to the newest line while the person is at its
+  bottom (a ResizeObserver on its content, never a scroll per event), never
+  moves while they've scrolled up to read, and shows "↓" to go back down and
+  follow again.
+- **Files changed** (`JobFiles.svelte`): each file with its lines added and
+  removed, opening to what changed (`diff.rs`): an Edit's or MultiEdit's
+  `old_string` → `new_string`, lines removed in red and added in green with
+  three unchanged around them (a gap `⋯` between parts), in the theme's
+  `--yap-danger` / `--yap-success` in light and dark; a Write "New file · N
+  lines" (the manifest says it didn't exist), "Rewritten · N lines" (it was
+  there, or the job wrote it before), "Written" (no backups: Yap can't tell),
+  its first lines. **Caps**: 200 lines an edit, 2,000 a job (`diffLines`),
+  300 characters a line; past them "…N more lines". A diff goes out with the
+  call's result, so a refused or failed edit has none.
+- **Commands run**: each with its description above it and the command
+  whole below (its `cd` into the folder gone); three, then "Show N more".
+- Replayed from `job_get`'s log; an older job's log (its words as `text`)
+  still shows what it said.
 
 ## Undo and backups
 
@@ -504,7 +563,9 @@ The run endpoint's backup hook (`integrations/claude_live/backup.rs`,
 ## Privacy
 
 - **The log** has ids, counts, states, modes and outcomes: never a brief, a
-  path, a command, an output or a key (`privacy/log_privacy.rs`).
+  path, a command, an output, a diff or a key (`privacy/log_privacy.rs`). A
+  job's diffs and words go only in its own `log.jsonl` and its `yap-job`
+  events.
 - **Claude Code's own traffic isn't in Network connections**: it's its own
   program, with its own connections. Settings → Privacy & data → Network
   connections says so: "Jobs connect to Anthropic through Claude Code itself,
@@ -522,7 +583,7 @@ The run endpoint's backup hook (`integrations/claude_live/backup.rs`,
 
 | Event | Payload |
 |---|---|
-| `yap-job` | `{id, status, folder, conversation?, step?, file?, command?, text?, cost?, problem?, ts}` — `status` queued \| running \| asking \| done \| failed \| stopped \| interrupted; `problem` `{kind, message, resetsAt?}`, `kind` notSignedIn \| rateLimited \| billing \| account \| paysAnotherWay |
+| `yap-job` | `{id, status, folder, conversation?, step?, file?, command?, about?, said?, todos?, now?, diff?, text?, cost?, problem?, ts}` — `status` queued \| running \| asking \| done \| failed \| stopped \| interrupted; `about` a command's description; `said` its words between tool calls; `todos` `[{content, status, activeForm?}]` (status pending \| in_progress \| completed); `now` the line it's on with no new step; `diff` `{file, kind, lines, added, removed, more?, all?}` — `kind` edit \| new \| rewrite \| write, each line its mark first (`-`, `+`, ` `; a lone `@` a gap); `text` its final words (an older Yap's words as it worked too); `problem` `{kind, message, resetsAt?}`, `kind` notSignedIn \| rateLimited \| billing \| account \| paysAnotherWay |
 | `yap-job-report` | `{job, conversation, messageId, markerId, status}` — `messageId` null when a newer question came first |
 | `yap-job-open` | `{id, conversation}` (with `yap-assistant-turn {phase: "open", conversationId, show: true}`) |
 | `yap-claude-approve` | `{id, run, conversation, origin, tool, summary, detail, label, askedTs}` — `run` is the job's id |
@@ -561,8 +622,11 @@ folder the next Add folder… takes).
   folders (resolve, names, paths said), the modes (lower only, the cap,
   Bypass's OK, the next turn), consent (in a folder named, a yes to an offer,
   not a note's words), the spoken answer, the runner's slots and spec (the
-  run key only in its environment), the steps' words, the report's marker
-  and fallback (no backups said as such), the approve card, `noBackups`.
+  run key only in its environment), the steps' words (a description used;
+  the `cd` prefix gone, quoted, unquoted, `/d/…` and `D:\…`; paths
+  relative), the to-do list, the diffs and their caps, a write's kind, the
+  report's marker and fallback (no backups said as such), the approve card,
+  `noBackups`.
 - **E2E** (`desktop/e2e/jobs.spec.js`, `jobs-ui.spec.js`,
   [`docs/e2e-tests.md`](../e2e-tests.md)): the scripted fake AI calls
   `start_job`, and Claude Code is the build's own stand-in (`yap.exe
@@ -585,7 +649,12 @@ folder the next Add folder… takes).
     once); a job not signed in (Sign in); one paid by key; a job whose edit
     went through with no hook (no backups: the tab's line, no Undo, the
     report's facts); Settings → Jobs (the hooks line too); the Network
-    connections note. Light and dark.
+    connections note; a job read like Claude Code (its to-do list and the
+    running line on its item in progress, what it says, commands by their
+    descriptions and without their `cd`, the steps following the live end
+    and not when scrolled up, Commands run, Files changed opening to an
+    edit's, a new file's and a rewritten file's diffs, replayed from the
+    log). Light and dark.
   - `plan-jobs.spec.js`: from a chat on the plan, its own Claude Code calling
     the job tools over the endpoint (one stand-in script plays the plan
     chat's session, the job and the report's question: `_for`). Typed: the

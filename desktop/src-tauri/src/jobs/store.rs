@@ -181,6 +181,8 @@ pub struct Job {
     pub no_backups: bool,
     /// Its backups and log are gone (7 days after it ended).
     pub swept: bool,
+    /// The diff lines its log has so far (`diff::JOB_MAX` at most).
+    pub diff_lines: u32,
     /// The step it's on now (not kept: the tab's live line).
     #[serde(skip)]
     pub step: String,

@@ -275,9 +275,13 @@ test('a typed request runs a job in a job folder, follows it, reports it in the 
   // Its log: what the tab replays, the yap-job events as they went out.
   const { log } = await yap.invoke('job_get', { id: job.id });
   const steps = log.map((e) => e.step).filter(Boolean);
-  for (const s of ['Starting Claude Code', 'Reading notes.md', 'Editing notes.md', 'Running npm test']) expect(steps).toContain(s);
+  // (A command's line is what Claude Code said it's for, as a doing word.)
+  for (const s of ['Starting Claude Code', 'Reading notes.md', 'Editing notes.md', 'Running the tests']) expect(steps).toContain(s);
   expect(log.find((e) => e.file === 'notes.md')).toBeTruthy();
-  expect(log.find((e) => e.command === 'npm test')).toBeTruthy();
+  expect(log.find((e) => e.command === 'npm test')).toMatchObject({ about: 'Run the tests' });
+  // What it said as it worked, and the edit's diff once it went through.
+  expect(log.find((e) => e.said)?.said).toBe("I'll update the notes file.");
+  expect(log.find((e) => e.diff)?.diff).toEqual({ file: 'notes.md', kind: 'edit', lines: ['-Draft', '+Final'], added: 1, removed: 1 });
   expect(log.at(-1)).toMatchObject({ id: job.id, status: 'done', text: DONE, folder: 'garden-planner' });
   const live = await heard(main, 'yap-job');
   expect(live.filter((e) => e.id === job.id).map((e) => e.status)).toEqual(expect.arrayContaining(['running', 'done']));
