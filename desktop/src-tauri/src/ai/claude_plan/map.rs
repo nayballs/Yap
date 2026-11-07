@@ -305,6 +305,12 @@ impl Mapper {
                 true
             }
             Tool::Yap(name) => {
+                // One that answers as the tool loop's tools do (Jobs':
+                // `{"success", "displayText", …}`): its own chip, refusals too.
+                if let Some(chip) = display_text(text) {
+                    self.chips.push(chip);
+                    return true;
+                }
                 let chip = yap_chip(name, input);
                 self.chips.push(if is_error { format!("{chip} · didn't work") } else { chip });
                 true
@@ -397,6 +403,14 @@ pub fn search_links(structured: Option<&Value>, text: &str) -> Vec<(String, Stri
         }
     }
     out
+}
+
+/// A result in the tool loop's shape (`{"success", "displayText", …}`, the
+/// job tools'): its chip. Pure.
+fn display_text(text: &str) -> Option<String> {
+    let v: Value = serde_json::from_str(text.trim()).ok()?;
+    v.get("success")?;
+    v["displayText"].as_str().map(str::trim).filter(|s| !s.is_empty()).map(str::to_string)
 }
 
 /// The chip of one of Yap's own tools, as the tool loop words its own.
@@ -704,6 +718,24 @@ mod tests {
         assert_eq!(log.chips, [vec!["Searched your notes: \"kitchen budget\"".to_string()]]);
         assert!(!m.looked() && m.sources().is_empty());
         assert!(matches!(end, Some(Fed::Done(_))));
+    }
+
+    #[test]
+    fn a_job_tools_chip_is_its_results_own_as_in_the_tool_loop() {
+        let started = r#"{\"success\":true,\"data\":{\"id\":\"ab12\"},\"displayText\":\"Started a job in garden-planner\"}"#;
+        let refused = r#"{\"success\":false,\"error\":\"start_job is not allowed\",\"data\":null,\"displayText\":\"Didn't start a job: not after reading the web\"}"#;
+        let lines = [
+            r#"{"type":"assistant","message":{"id":"m1","content":[{"type":"tool_use","id":"j1","name":"mcp__yap__start_job","input":{"folder":"garden-planner","brief":"Tidy notes.md"}},{"type":"tool_use","id":"j2","name":"mcp__yap__start_job","input":{"folder":"garden-planner"}}]}}"#.to_string(),
+            format!(r#"{{"type":"user","message":{{"role":"user","content":[{{"type":"tool_result","tool_use_id":"j1","content":[{{"type":"text","text":"{started}"}}]}}]}}}}"#),
+            format!(r#"{{"type":"user","message":{{"role":"user","content":[{{"type":"tool_result","tool_use_id":"j2","content":[{{"type":"text","text":"{refused}"}}],"is_error":true}}]}}}}"#),
+        ];
+        let refs: Vec<&str> = lines.iter().map(String::as_str).collect();
+        let (m, log, _) = run(&refs);
+        assert_eq!(m.chips(), ["Started a job in garden-planner", "Didn't start a job: not after reading the web"]);
+        assert!(log.said.contains(&"call start_job".to_string()), "{:?}", log.said);
+        // Plain text from another of Yap's tools: its usual chip.
+        assert_eq!(display_text("2 notes"), None);
+        assert_eq!(display_text(r#"{"displayText":"no success field"}"#), None);
     }
 
     #[test]

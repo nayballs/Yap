@@ -35,6 +35,8 @@ pub struct Run {
     /// One backup at a time per run (Claude Code can edit files in
     /// parallel), so the first copy of a file is the one kept.
     pub backups: Mutex<()>,
+    /// The chat turn its calls belong to (`turn.rs`), shared with its handle.
+    pub turn: Arc<super::turn::Slot>,
 }
 
 /// **The endpoint**: the listener, its runs, its permission prompts.
@@ -108,15 +110,17 @@ impl Endpoint {
         let id = random_hex(16)?;
         let key = random_hex(32)?;
         let tools = spec.tools;
+        let jobs = spec.jobs && tools == super::Tools::Chat;
         let has_backup = spec.backup_dir.is_some();
-        let run = Arc::new(Run { id: id.clone(), digest: digest(&format!("Bearer {key}")), spec, backups: Mutex::new(()) });
+        let turn = Arc::new(super::turn::Slot::default());
+        let run = Arc::new(Run { id: id.clone(), digest: digest(&format!("Bearer {key}")), spec, backups: Mutex::new(()), turn: Arc::clone(&turn) });
         let count = {
             let mut runs = self.runs.lock().unwrap_or_else(|p| p.into_inner());
             runs.insert(id.clone(), run);
             runs.len()
         };
-        tracing::info!(run = %id, tools = ?tools, backup = has_backup, runs = count, "Claude Code endpoint: a run registered");
-        Ok(RunHandle { endpoint: Arc::clone(self), id, key, tools, has_backup })
+        tracing::info!(run = %id, tools = ?tools, jobs, backup = has_backup, runs = count, "Claude Code endpoint: a run registered");
+        Ok(RunHandle { endpoint: Arc::clone(self), id, key, tools, jobs, has_backup, turn })
     }
 
     /// The run's URLs answer 404 from now on; its prompts still waiting

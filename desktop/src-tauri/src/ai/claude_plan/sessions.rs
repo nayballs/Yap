@@ -261,6 +261,12 @@ impl Warm {
     pub fn fits(&self, model: &str, effort: Option<Effort>, prompt: u64) -> bool {
         self.model == model && self.effort == effort && self.prompt == prompt
     }
+
+    /// Its registration with Yap's run endpoint (a turn's context goes on
+    /// it: `RunHandle::begin_turn`).
+    pub fn run(&self) -> Option<&crate::integrations::claude_live::RunHandle> {
+        self._run.as_ref()
+    }
 }
 
 static WARM: Mutex<Option<HashMap<u64, Arc<Warm>>>> = Mutex::new(None);
