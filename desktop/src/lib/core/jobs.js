@@ -293,6 +293,25 @@ export function turnsOf(job, log) {
   return [...notes, ...[...extra.values()].sort((a, b) => a.n - b.n)].map((t) => ({ ...t, files: t.files || [], denials: t.denials || [], events: events.get(t.n) || [] }));
 }
 
+/**
+ * **How long a job has worked**, its turns added up (the time between them
+ * left out: a follow-up asked hours later isn't hours of work); a job from
+ * before turns, `elapsed`. '' before it ever started.
+ */
+export function workedFor(job, now = Date.now() / 1000) {
+  const turns = (job?.turnList || []).filter((t) => Number(t.startedTs) > 0);
+  if (turns.length < 2) return elapsed(job, now);
+  const last = turns.at(-1);
+  const secs = turns.reduce((sum, t) => {
+    const to = t === last && isLive(job.status) ? now : Number(t.endedTs) || Number(t.startedTs);
+    return sum + Math.max(0, to - Number(t.startedTs));
+  }, 0);
+  return duration(secs);
+}
+
+/** The turn a job is on now (the newest that ran), for how long it has been at it: the running list's time. */
+export const turnNow = (job) => [...(job?.turnList || [])].reverse().find((t) => Number(t.startedTs) > 0) ?? null;
+
 /** A turn's status as its header says it: queued behind the one working, never sent (stopped first), else the job's words. */
 export function turnStatusWord(t) {
   if (t?.status === 'queued' && !t.startedTs) return 'Queued';
@@ -371,8 +390,12 @@ export function jobTabName(t, tabs, lookup = null) {
   const folder = t?.job?.folder || 'folder';
   const same = (tabs || []).filter((o) => o?.kind === 'job' && (o.job?.folder || 'folder') === folder);
   if (same.length < 2) return `Job · ${folder}`;
-  // (A tab opened from a turn's event has the job's ref only: its turns from the jobs list.)
-  const first = (o) => (lookup?.(o.job?.id) ?? o.job)?.turnList?.[0]?.title || '';
+  // (A tab opened from a turn's event has the job's ref only: its turns from
+  // the jobs list; a job from before turns, its brief's first words.)
+  const first = (o) => {
+    const j = lookup?.(o.job?.id) ?? o.job;
+    return j?.turnList?.[0]?.title || titleOf(j?.brief) || '';
+  };
   const title = first(t);
   const named = !!title && same.filter((o) => first(o) === title).length === 1;
   return named ? `Job · ${folder} · ${title}` : `Job · ${folder} #${same.indexOf(t) + 1}`;

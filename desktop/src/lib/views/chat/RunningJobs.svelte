@@ -5,7 +5,7 @@
   // has run; a click opens its chat and its Job tab. Nothing while none run.
   import { onMount } from 'svelte';
   import { jobs } from '../../stores/jobs.svelte.js';
-  import { isLive, statusWord, statusTone, elapsed } from '../../core/jobs.js';
+  import { isLive, statusWord, statusTone, elapsed, turnNow } from '../../core/jobs.js';
 
   /** `chat`: the view's state (its conversations and the panel). */
   let { chat } = $props();
@@ -24,6 +24,11 @@
   }
 
   const lineOf = (j) => (j.status === 'asking' ? 'Waiting for you to allow a step' : jobs.steps[j.id] || statusWord(j.status));
+  // How long it has been at its request now: its turn's time (a follow-up's, not the job's first).
+  const tookOf = (j, at) => {
+    const t = turnNow(j);
+    return elapsed(t ? { ...t, status: j.status } : j, at);
+  };
 </script>
 
 {#if running.length}
@@ -34,7 +39,7 @@
         <span class="jtext">
           <span class="jtop">
             <span class="jfolder">{j.folder}</span>
-            {#if elapsed(j, now)}<span class="jtime">{elapsed(j, now)}</span>{/if}
+            {#if tookOf(j, now)}<span class="jtime">{tookOf(j, now)}</span>{/if}
           </span>
           <span class="jstep">{lineOf(j)}</span>
         </span>

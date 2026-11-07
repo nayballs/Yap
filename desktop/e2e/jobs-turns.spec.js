@@ -29,7 +29,7 @@ import { test as base, expect, openView, setConfig } from './support/fixtures.js
 import { startFakeLlm } from './support/fake-llm.js';
 import { RUNS } from './support/yap.js';
 import { newCodeChat } from './support/code-chats.js';
-import { turnsOf, titleOf, turnStatusWord, canUndoTurn, pillsByAnswer, jobOfReport, turnOfReport, jobTabName } from '../src/lib/core/jobs.js';
+import { turnsOf, titleOf, turnStatusWord, canUndoTurn, pillsByAnswer, jobOfReport, turnOfReport, jobTabName, workedFor, turnNow } from '../src/lib/core/jobs.js';
 
 const HERE = path.join(RUNS, 'jobs-turns-spec');
 const SCRIPTS = path.join(HERE, 'scripts');
@@ -340,6 +340,16 @@ test('core/jobs.js: a job’s turns from its log, their words, the pills a turn 
   expect(jobTabName(refOnly, [a, refOnly], (id) => (id === 'j2' ? b.job : null))).toBe('Job · garden-planner · Start over on the planner');
   const twin = { kind: 'job', job: { id: 'j4', folder: 'garden-planner', turnList: [{ title: 'Add a watering schedule' }] } };
   expect(jobTabName(twin, [a, twin])).toBe('Job · garden-planner #2');
+  // Two jobs from before turns in one Code chat (as the maintainer had): their briefs' first words.
+  const older = { kind: 'job', job: { id: 'j5', folder: 'garden-planner' } };
+  expect(jobTabName(older, [a, older], (id) => (id === 'j5' ? { brief: 'Fix the beds page. Then run the tests.' } : null))).toBe('Job · garden-planner · Fix the beds page');
+  // How long it worked: its turns added up, not the hours between them; the running list, its turn now.
+  const worked = { status: 'done', startedTs: 100, endedTs: 7300, turnList: [{ startedTs: 100, endedTs: 160 }, { startedTs: 7200, endedTs: 7300 }] };
+  expect(workedFor(worked, 8000)).toBe('2 min');
+  expect(workedFor({ ...worked, status: 'running', turnList: [worked.turnList[0], { startedTs: 7200 }] }, 7230)).toBe('1 min');
+  expect(workedFor({ status: 'done', startedTs: 100, endedTs: 160 }, 999), 'a job from before turns').toBe('1 min');
+  expect(turnNow(worked)).toEqual({ startedTs: 7200, endedTs: 7300 });
+  expect(turnNow({ turnList: [{ startedTs: 5 }, { status: 'queued', startedTs: 0 }] })).toEqual({ startedTs: 5 });
 });
 
 // ---------------------------------------------------------------- one job, its turns

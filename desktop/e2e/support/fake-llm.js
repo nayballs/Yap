@@ -830,7 +830,8 @@ export async function startFakeLlm() {
           reply(failing.status, failing.body ?? { type: 'error', error: { type: 'api_error', message: 'fake failure: the model is down' } });
           return;
         }
-        const step = offered.length > 0 || chatScript[0]?.plain ? chatScript.shift() : undefined;
+        // (A long chat's summary in the background never takes a scripted step.)
+        const step = kind !== 'chatSummary' && (offered.length > 0 || chatScript[0]?.plain) ? chatScript.shift() : undefined;
         if (step?.gate) {
           record.gated = true;
           await step.gate;
@@ -995,9 +996,11 @@ export async function startFakeLlm() {
       };
       // The chat's tool loop, scripted: the next step's tool calls or answer.
       // A step without tools offered takes one too when it says `plain`
-      // (a model's answer without tools, the loop's last call).
+      // (a model's answer without tools, the loop's last call) — never a long
+      // chat's summary in the background (chat/compact.rs), which would take
+      // a job report's scripted words: it has its own reply.
       const step =
-        kind !== 'screenQuestion' && kind !== 'askOrEdit' && kind !== 'commandScreen' && (offered.length > 0 || chatScript[0]?.plain)
+        kind !== 'screenQuestion' && kind !== 'askOrEdit' && kind !== 'commandScreen' && kind !== 'chatSummary' && (offered.length > 0 || chatScript[0]?.plain)
           ? chatScript.shift()
           : undefined;
       if (step) {

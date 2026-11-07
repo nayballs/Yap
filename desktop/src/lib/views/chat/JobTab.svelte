@@ -36,6 +36,7 @@
     costLine,
     money,
     elapsed,
+    workedFor,
     turnsOf,
     turnStatusWord,
     problemWords,
@@ -85,7 +86,8 @@
   // The turn working now (or the newest): open unless folded.
   const current = $derived([...turns].reverse().find((t) => !waiting(t))?.n ?? turns.at(-1)?.n);
   const problem = $derived(problemWords(shown?.problem));
-  const ran = $derived(shown ? elapsed(shown, now) : '');
+  // How long it has worked: its turns added up (not the time between them).
+  const ran = $derived(shown ? workedFor(shown, now) : '');
   const canUndo = $derived(undoable(shown));
 
   const isOpen = (t) => (folded[t.n] ?? t.n !== current) === false;

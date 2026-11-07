@@ -1687,10 +1687,13 @@ mod tests {
     fn an_earlier_turn_waits_for_a_later_one_that_changed_the_same_file() {
         let notes = PathBuf::from(r"D:\Projects\garden-planner\notes.md");
         let map = PathBuf::from(r"D:\Projects\garden-planner\map.js");
-        let later = vec![(2, vec![map.clone()]), (3, vec![PathBuf::from(r"d:\projects\garden-planner\NOTES.md")])];
-        assert_eq!(later_change(&[notes.clone()], &later).map(|(n, _)| n), Some(3), "the same file, however it's written");
+        let later = vec![(2, vec![map.clone()]), (3, vec![notes.clone()])];
+        assert_eq!(later_change(std::slice::from_ref(&notes), &later).map(|(n, _)| n), Some(3));
         assert_eq!(later_change(&[PathBuf::from(r"D:\Projects\garden-planner\beds.json")], &later), None);
-        assert_eq!(later_change(&[notes], &[]), None);
+        assert_eq!(later_change(std::slice::from_ref(&notes), &[]), None);
+        // Windows' names don't care about case: the same file, however it's written.
+        #[cfg(windows)]
+        assert_eq!(later_change(&[notes], &[(4, vec![PathBuf::from(r"d:\projects\garden-planner\NOTES.md")])]).map(|(n, _)| n), Some(4));
     }
 
     #[test]
