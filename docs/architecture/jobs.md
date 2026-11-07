@@ -254,7 +254,16 @@ folder.
 - **Open in terminal**, once it isn't running: Windows Terminal (else
   PowerShell) in the folder on `claude --resume <session>`, titled
   "garden-planner · Claude Code" — the person's own Claude Code from there on,
-  outside Yap's job object. Test runs open nothing.
+  outside Yap's job object. Test runs open nothing. How (`cli/terminal.rs`):
+  `wt.exe` on `PATH`, else its alias in `%LOCALAPPDATA%\Microsoft\WindowsApps`;
+  both routes run PowerShell on an `-EncodedCommand` script (title,
+  `Set-Location`, then Claude Code), so no folder name crosses a parser
+  (wt's `;` escaped in `--title` and `-d`); started with `CreateProcessW`
+  and none of Yap's handles, so the console's own input and output reach
+  Claude Code (Rust's `Command` handed it Yap's pipes: a blank tab that
+  closed, 7 Nov); `CREATE_BREAKAWAY_FROM_JOB`, so it outlives Yap even when
+  Yap was started inside a job (a dev build in `cargo run`'s); only a job
+  that allows no breakaway keeps it (logged).
 - **Cost** is Claude Code's estimate of the API's price, added up across the
   job's turns (each process's `total_cost_usd` is taken as its whole turn's).
   On a plan it's what the API would have charged, never a charge.

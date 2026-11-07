@@ -18,6 +18,9 @@
 //! - [`open_sign_in`] opens Windows Terminal (or PowerShell) on `claude auth
 //!   login`: Claude Code's own sign-in, in a window the person owns, never in
 //!   Yap's kill-on-close job. Yap never sees or stores what they sign in with.
+//!   [`open_resume`] does the same for a Job's session; how a terminal is
+//!   opened (its own console, out of Yap's job, `wt.exe` off `PATH`):
+//!   [`terminal`].
 //!
 //! Debug builds: `YAP_CLAUDE_EXE` names the program to run instead (the
 //! fake, `yap.exe`), and `YAP_CLAUDE_ARGS_PREFIX` (a JSON array of strings)
@@ -33,6 +36,9 @@ use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
 use serde::{Deserialize, Serialize};
+
+#[cfg(windows)]
+mod terminal;
 
 /// The oldest Claude Code Yap drives: 2.1.259 has `--permission-prompts`.
 pub const MIN_VERSION: Version = Version { major: 2, minor: 1, patch: 259 };
@@ -222,7 +228,7 @@ fn debug_override() -> Option<Program> {
 /// [`find`] with the home folder, `PATH` and `PATHEXT` given (tests).
 pub fn find_in(home: Option<&Path>, path: Option<&OsStr>, pathext: Option<&OsStr>) -> Option<Program> {
     let native = home.map(|h| h.join(".local").join("bin").join(if cfg!(windows) { "claude.exe" } else { "claude" }));
-    if let Some(native) = native.filter(|p| p.is_file()) {
+    if let Some(native) = native.filter(|p| is_program(p)) {
         return Some(Program::new(native));
     }
     // Only what Yap can start: an exe, or a batch shim through cmd (never a
@@ -282,7 +288,7 @@ pub fn which(name: &str, path: &OsStr, pathext: Option<&OsStr>) -> Option<PathBu
         }
         if exts.is_empty() || has_listed_ext {
             let bare = dir.join(name);
-            if bare.is_file() {
+            if is_program(&bare) {
                 return Some(bare);
             }
         }
@@ -290,12 +296,20 @@ pub fn which(name: &str, path: &OsStr, pathext: Option<&OsStr>) -> Option<PathBu
             // PATHEXT is upper case; the file is found either way, named the
             // way it's usually written.
             let candidate = dir.join(format!("{name}{}", ext.to_ascii_lowercase()));
-            if candidate.is_file() {
+            if is_program(&candidate) {
                 return Some(candidate);
             }
         }
     }
     None
+}
+
+/// A file that can be started: a file, or an App Execution Alias
+/// (`%LOCALAPPDATA%\Microsoft\WindowsApps\wt.exe`, a reparse point that
+/// can't be opened through: today's `is_file` reads it anyway, and read as
+/// itself it's a file whichever Rust built Yap).
+pub(crate) fn is_program(path: &Path) -> bool {
+    path.is_file() || std::fs::symlink_metadata(path).is_ok_and(|m| m.is_file())
 }
 
 // ---- The environment ----
@@ -567,43 +581,10 @@ fn resume_terminal(_program: &Program, _folder: &Path, session: &str, _title: &s
 }
 
 /// `program args` in a new terminal window in `cwd` titled `title`:
-/// Windows Terminal, else PowerShell; Yap's cleaned environment.
+/// Windows Terminal, else PowerShell ([`terminal`]).
 #[cfg(windows)]
 fn in_terminal(program: &Program, cwd: &Path, args: &[&str], title: &str) -> Result<(), String> {
-    let path = program.path().to_string_lossy().to_string();
-    // The command the terminal runs: Claude Code itself, or its shim
-    // through cmd (kept open so its words stay readable).
-    let mut run: Vec<String> = if program.is_shim() {
-        vec!["cmd.exe".into(), "/k".into(), path.clone()]
-    } else {
-        vec![path.clone()]
-    };
-    run.extend(program.prefix.iter().cloned());
-    run.extend(args.iter().map(|a| a.to_string()));
-    let wt = std::env::var_os("PATH").and_then(|p| which("wt", &p, std::env::var_os("PATHEXT").as_deref()));
-    if let Some(wt) = wt {
-        let mut cmd = Command::new(wt);
-        cmd.args(["-w", "new", "--title", title, "-d"]).arg(cwd).args(&run);
-        give_clean_env(&mut cmd);
-        match cmd.current_dir(cwd).spawn() {
-            Ok(_) => {
-                tracing::info!("claude code: a terminal opened in Windows Terminal");
-                return Ok(());
-            }
-            Err(e) => tracing::warn!("claude code: Windows Terminal didn't start ({e}); trying PowerShell"),
-        }
-    }
-    use std::os::windows::process::CommandExt;
-    const CREATE_NEW_CONSOLE: u32 = 0x0000_0010;
-    let quoted: Vec<String> = run.iter().map(|a| format!("'{}'", a.replace('\'', "''"))).collect();
-    let script = format!("& {}", quoted.join(" "));
-    let mut cmd = Command::new("powershell.exe");
-    cmd.args(["-NoExit", "-NoProfile", "-Command", &script]).creation_flags(CREATE_NEW_CONSOLE);
-    give_clean_env(&mut cmd);
-    cmd.current_dir(cwd)
-        .spawn()
-        .map(|_| tracing::info!("claude code: a terminal opened in PowerShell"))
-        .map_err(|e| e.to_string())
+    terminal::open(program, cwd, args, title).map(|_| ())
 }
 
 #[cfg(test)]
@@ -689,6 +670,30 @@ mod tests {
         }
         assert_eq!(which("nothing-here", &path, Some(&ext)), None);
         let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// An App Execution Alias (`wt.exe`, `winget.exe`… in
+    /// `%LOCALAPPDATA%\Microsoft\WindowsApps`: reparse points) is found like
+    /// any program. Any alias on this PC will do; none, nothing to check.
+    #[cfg(windows)]
+    #[test]
+    fn an_app_execution_alias_is_found() {
+        use std::os::windows::fs::MetadataExt;
+        const FILE_ATTRIBUTE_REPARSE_POINT: u32 = 0x400;
+        let Some(folder) = dirs::data_local_dir().map(|d| d.join("Microsoft").join("WindowsApps")) else { return };
+        let alias = std::fs::read_dir(&folder).into_iter().flatten().flatten().map(|e| e.path()).find(|p| {
+            has_ext(p, &["exe"]) && std::fs::symlink_metadata(p).is_ok_and(|m| m.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT != 0)
+        });
+        let Some(alias) = alias else {
+            println!("no App Execution Alias on this PC");
+            return;
+        };
+        assert!(is_program(&alias), "{}", alias.display());
+        let stem = alias.file_stem().unwrap().to_string_lossy().into_owned();
+        let path = std::env::join_paths([folder]).unwrap();
+        let found = which(&stem, &path, Some(OsStr::new(".EXE"))).map(|p| p.display().to_string().to_lowercase());
+        assert_eq!(found, Some(alias.display().to_string().to_lowercase()));
+        assert!(!is_program(&std::env::temp_dir()), "a folder isn't a program");
     }
 
     #[test]
