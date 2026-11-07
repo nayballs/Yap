@@ -6,6 +6,11 @@
 //!   (the composer's chip, else Settings → Jobs' default). The model may ask
 //!   for a lower one ("make a plan first": Plan), **never a higher one**: a
 //!   web page can't talk a job into Bypass.
+//! - **The person chooses, never the model on its own** ([`model_pick`],
+//!   2026-11-07): a lower mode the model asks for takes effect only when
+//!   the person's own words this turn asked for it (`consent::
+//!   asks_lower_mode`: a plan, no changes yet, being asked first); else the
+//!   chip's mode runs, and the tool's result says so ([`Pick::note`]).
 //! - **A folder's cap** lowers it further (a folder that never runs
 //!   unattended: capped at Manual).
 //! - **Bypass permissions** only once the person has confirmed its warning
@@ -148,6 +153,39 @@ pub fn effective(chip: Mode, asked: Option<Mode>, cap: Option<Mode>, bypass_ok: 
     Ok(mode)
 }
 
+/// What the chat's model's `mode` comes to ([`model_pick`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Pick {
+    /// The mode asked, as [`effective`] takes it (`None`: the chip's).
+    pub asked: Option<Mode>,
+    /// A lower mode the model asked for on its own, left out.
+    pub ignored: Option<Mode>,
+}
+
+impl Pick {
+    /// What the tool's result tells the model when its mode was left out.
+    pub fn note(&self, chip: Mode) -> Option<String> {
+        let ignored = self.ignored?;
+        let why = if ignored == Mode::Plan { "the user didn't ask for a plan" } else { "the user didn't ask for a lower one" };
+        Some(format!("The job runs at the chat's Mode ({}): {why}.", chip.label()))
+    }
+}
+
+/// **The model's `mode`, as the person's words allow it** (2026-11-07,
+/// after the maintainer's "look into this and make our own version" ran as
+/// a plan under a Bypass chip): a mode lower than the chat's (`chip`) takes
+/// effect only when the person asked for less (`person_asked`:
+/// `consent::asks_lower_mode`); otherwise it's left out and the chip's
+/// mode runs. One above the chip stays asked, so [`effective`] still
+/// refuses it. Pure.
+pub fn model_pick(chip: Mode, asked: Option<Mode>, person_asked: bool) -> Pick {
+    match asked {
+        Some(m) if m < chip && !person_asked => Pick { asked: None, ignored: Some(m) },
+        Some(m) if m == chip => Pick { asked: None, ignored: None },
+        a => Pick { asked: a, ignored: None },
+    }
+}
+
 /// The mode a job's next turn runs at: the chat's Mode now (`chip`, which
 /// the person may have moved since), capped by the folder — except a plan
 /// waiting for its go-ahead, which stays a plan until "go ahead". Bypass
@@ -208,6 +246,31 @@ mod tests {
         assert_eq!(effective(Mode::Bypass, None, None, false), Err(Refused::BypassUnconfirmed));
         assert_eq!(effective(Mode::Bypass, None, None, true), Ok(Mode::Bypass));
         assert_eq!(effective(Mode::Bypass, Some(Mode::Bypass), None, true), Ok(Mode::Bypass));
+    }
+
+    #[test]
+    fn a_lower_mode_takes_effect_only_when_the_person_asked_for_it() {
+        // A Bypass chip, and the model chose Plan on its own: left out, the chip's mode runs.
+        let pick = model_pick(Mode::Bypass, Some(Mode::Plan), false);
+        assert_eq!(pick, Pick { asked: None, ignored: Some(Mode::Plan) });
+        assert_eq!(effective(Mode::Bypass, pick.asked, None, true), Ok(Mode::Bypass));
+        assert_eq!(pick.note(Mode::Bypass).as_deref(), Some("The job runs at the chat's Mode (Bypass permissions): the user didn't ask for a plan."));
+        assert_eq!(model_pick(Mode::Auto, Some(Mode::Manual), false).note(Mode::Auto).as_deref(), Some("The job runs at the chat's Mode (Auto): the user didn't ask for a lower one."));
+        // The person asked ("make a plan first"): Plan.
+        let pick = model_pick(Mode::Bypass, Some(Mode::Plan), true);
+        assert_eq!(pick, Pick { asked: Some(Mode::Plan), ignored: None });
+        assert_eq!(effective(Mode::Bypass, pick.asked, None, true), Ok(Mode::Plan));
+        assert_eq!(pick.note(Mode::Bypass), None);
+        // Nothing asked, or the chip's own: the chip's, nothing said.
+        assert_eq!(model_pick(Mode::Auto, None, false), Pick { asked: None, ignored: None });
+        assert_eq!(model_pick(Mode::Auto, Some(Mode::Auto), false), Pick { asked: None, ignored: None });
+        // Above the chip: still asked, so still refused — whatever the person said.
+        for said in [false, true] {
+            let pick = model_pick(Mode::Manual, Some(Mode::Auto), said);
+            assert_eq!(effective(Mode::Manual, pick.asked, None, true), Err(Refused::Raised { asked: Mode::Auto, chip: Mode::Manual }));
+        }
+        // A folder's cap still lowers the chip's mode.
+        assert_eq!(effective(Mode::Bypass, model_pick(Mode::Bypass, Some(Mode::Plan), false).asked, Some(Mode::Manual), true), Ok(Mode::Manual));
     }
 
     #[test]

@@ -40,6 +40,12 @@
 //!   same turn. A request while a turn works **queues as the next turn**
 //!   ([`follow_up`]): sent once this one ends, never into it.
 //! - **A turn ends**: the process is told its input is over and exits.
+//! - **Allowing a plan means go ahead** (2026-11-07): a Plan-mode turn whose
+//!   ExitPlanMode prompt the person allowed ([`plan_allowed`]: the card's
+//!   Go ahead, in the thread or on the bar) ends as a plan and its next
+//!   turn starts at once, at the chat's Mode with Yap's go-ahead
+//!   ([`GO_AHEAD`]), as "go ahead" in the chat would. Not yet: it stays a
+//!   plan, and the report card's Go ahead ([`go_ahead`]) carries it out.
 //! - **Done or failed**: each turn reported in its chat
 //!   (`chat/turn/report.rs`) — never one the person stopped.
 //! - **Jobs die with Yap** (the kill-on-close job): quitting marks them
@@ -75,6 +81,13 @@ pub const MAX: usize = 3;
 pub const SUMMARY_LINE: &str = "When you're done, finish with a short summary of what you changed and anything you couldn't do.";
 /// What Continue says to a job that was stopped or interrupted.
 pub const CARRY_ON: &str = "Carry on with the task from where you stopped.";
+/// **Yap's own go-ahead** for a plan (2026-11-07): its plan allowed on
+/// ExitPlanMode's card, the report card's Go ahead, the bar's, and the
+/// person's plain "go ahead" after web content in their turn — never the
+/// chat model's words.
+pub const GO_AHEAD: &str = "Go ahead with the plan.";
+/// Yap's own yes to a job's question, after web content in the turn.
+pub const YES_GO_AHEAD: &str = "Yes, go ahead.";
 /// How long a stopped job gets to end its turn before it's ended.
 const STOP_GRACE: Duration = Duration::from_secs(8);
 /// How long a job whose input is over gets to exit by itself.
@@ -172,6 +185,12 @@ impl Ask {
         Ask { text: text.trim().to_string(), go, ..Default::default() }
     }
 
+    /// **A plan's go-ahead** in Yap's own words ([`GO_AHEAD`]): its turn at
+    /// the chat's Mode, carrying the plan out.
+    pub fn go_ahead() -> Ask {
+        Ask { text: GO_AHEAD.to_string(), title: "Go ahead with the plan".into(), go: true, ..Default::default() }
+    }
+
     fn title(&self) -> String {
         if self.title.trim().is_empty() { store::title_of(&self.text) } else { store::title_of(&self.title) }
     }
@@ -223,14 +242,52 @@ struct Live {
     pending: Option<Ask>,
     /// The person stopped it (when).
     stopping: Option<Instant>,
+    /// The person allowed its plan this turn (ExitPlanMode's card: Go
+    /// ahead): a plan turn's next turn carries it out ([`plan_allowed`]).
+    plan_allowed: bool,
     /// Its folder, compared ([`folders::norm`]).
     folder: String,
 }
 
 impl Live {
     fn new(folder: String) -> Live {
-        Live { session: None, sent: 0, results: 0, input_over: false, started: false, extra: Vec::new(), pending: None, stopping: None, folder }
+        Live { session: None, sent: 0, results: 0, input_over: false, started: false, extra: Vec::new(), pending: None, stopping: None, plan_allowed: false, folder }
     }
+}
+
+/// **The person allowed job `id`'s plan** (Claude Code's ExitPlanMode
+/// prompt, answered Go ahead on the thread's card or the bar's:
+/// `claude_live/approve.rs`). Once that turn ends with its plan, its next
+/// turn starts at once at the chat's Mode with Yap's go-ahead, as a "go
+/// ahead" said in the chat would ([`run`]). A job not running, or a turn
+/// not in Plan mode (`Follow::finish` checks), changes nothing.
+pub fn plan_allowed(id: &str) {
+    let marked = with_state(|s| s.live.get_mut(id).map(|l| l.plan_allowed = true).is_some());
+    if marked {
+        tracing::info!(id, "Jobs: its plan allowed (it carries on once this turn ends)");
+    }
+}
+
+/// Test only: job `id` as if its turn had started (a request for it queues
+/// as its next turn), or not (`None`): no Claude Code runs.
+#[cfg(test)]
+pub fn test_live(id: &str, folder: Option<&str>) {
+    with_state(|s| match folder {
+        Some(f) => {
+            let mut l = Live::new(folders::norm(f));
+            l.started = true;
+            s.live.insert(id.to_string(), l);
+        }
+        None => {
+            s.live.remove(id);
+        }
+    });
+}
+
+/// Test only: the request waiting for job `id`'s next turn.
+#[cfg(test)]
+pub fn test_pending(id: &str) -> Option<Ask> {
+    with_state(|s| s.live.get(id).and_then(|l| l.pending.clone()))
 }
 
 #[derive(Default)]
@@ -371,7 +428,24 @@ async fn run(id: String, message: Option<String>) {
     if ended && n > 0 {
         crate::chat::turn::queue_job_report(&id, n);
     }
+    // Its plan allowed on ExitPlanMode's card: carried out now, at the
+    // chat's Mode, as a "go ahead" in the chat would (a request that came
+    // meanwhile goes with it, as the go-ahead).
+    let go_on = status == Status::Done && store::get(&id).is_some_and(|j| j.turn_list.iter().any(|t| t.n == n && t.plan_allowed));
     match pending {
+        _ if go_on => {
+            tracing::info!(id = %id, turn = n, "Jobs: its plan was allowed; carrying it out");
+            match pending {
+                Some(ask) => {
+                    let ask = Ask { go: true, ..ask };
+                    resume(&id, Next::Message(ask.text.clone()), &ask, false);
+                }
+                None => {
+                    let ask = Ask::go_ahead();
+                    resume(&id, Next::Message(ask.text.clone()), &ask, true);
+                }
+            }
+        }
         Some(ask) if ended => {
             tracing::info!(id = %id, "Jobs: its next turn, asked for while this one worked");
             let text = ask.text.clone();
@@ -412,6 +486,7 @@ fn failed_early(id: &str, n: u32, why: String, problem: Option<ProblemNote>) -> 
         j.error = Some(why.clone());
         j.problem = problem.clone();
         j.plan = false;
+        j.plan_allowed = false;
         j.asks = false;
         j.reported = false;
         j.step.clear();
@@ -420,6 +495,7 @@ fn failed_early(id: &str, n: u32, why: String, problem: Option<ProblemNote>) -> 
             t.ended_ts = now;
             t.error = Some(why.clone());
             t.plan = false;
+            t.plan_allowed = false;
             t.asks = false;
         }
     }) {
@@ -555,6 +631,7 @@ async fn turn(id: &str, message: Option<String>) -> (Status, u32) {
         j.turns += 1;
         j.mode = mode.as_str().to_string();
         j.plan = false;
+        j.plan_allowed = false;
         j.asks = false;
         j.reported = false;
         j.error = None;
@@ -570,6 +647,7 @@ async fn turn(id: &str, message: Option<String>) -> (Status, u32) {
             t.model = model;
             t.effort = effort;
             t.plan = false;
+            t.plan_allowed = false;
             t.asks = false;
             t.error = None;
             t.undone = false;
@@ -939,7 +1017,10 @@ impl Follow {
     /// Every half second: a permission card waiting, a stop taking too
     /// long, a job that won't exit, and what changed saved.
     fn on_tick(&mut self, session: &Session) {
-        let asking = claude_live::pending().iter().any(|p| p.run == self.id);
+        let waiting = claude_live::pending();
+        let asking = waiting.iter().any(|p| p.run == self.id);
+        // Its plan waiting for the person's go-ahead (ExitPlanMode's card).
+        let plan = waiting.iter().any(|p| p.run == self.id && p.tool == claude_live::EXIT_PLAN);
         if asking != self.asking {
             self.asking = asking;
             let status = if asking { Status::Asking } else { Status::Running };
@@ -953,7 +1034,7 @@ impl Follow {
                 }
             }) {
                 // Asking: a step of its own; answered, the line it was on.
-                let step = asking.then(|| "Waiting for you to allow a step".to_string());
+                let step = asking.then(|| if plan { "Waiting for you: its plan is ready" } else { "Waiting for you to allow a step" }.to_string());
                 let now = (!asking).then(|| self.line.clone()).filter(|l| !l.is_empty());
                 emit(&JobEvent { step, now, ..self.event(&job) });
             }
@@ -985,8 +1066,12 @@ impl Follow {
                 (Status::Failed, self.last_text.clone(), Some(why))
             }
         };
-        let plan = self.mode == Mode::Plan && status == Status::Done;
-        let asks = status == Status::Done && super::consent::asks(&text);
+        // Its plan allowed on ExitPlanMode's card (`plan_allowed`): carried
+        // out next ([`run`]) — unless Claude Code carried it out in this turn
+        // already (an edit went through after the go-ahead): then it's done.
+        let allowed = with_state(|s| s.live.get(&self.id).is_some_and(|l| l.plan_allowed));
+        let (plan, plan_allowed) = after_plan(self.mode == Mode::Plan && status == Status::Done, allowed, self.edited);
+        let asks = status == Status::Done && !plan_allowed && super::consent::asks(&text);
         let n = self.n;
         let now = store::now_secs();
         let job = store::update(&self.id, |j| {
@@ -997,6 +1082,7 @@ impl Follow {
             }
             j.error = error.clone();
             j.plan = plan;
+            j.plan_allowed = plan_allowed;
             j.asks = asks;
             j.step.clear();
             if let Some(t) = j.turn_mut(n) {
@@ -1007,10 +1093,11 @@ impl Follow {
                 }
                 t.error = error.clone();
                 t.plan = plan;
+                t.plan_allowed = plan_allowed;
                 t.asks = asks;
             }
         });
-        tracing::info!(id = %self.id, turn = n, status = status.word(), plan, asks, "Jobs: ended");
+        tracing::info!(id = %self.id, turn = n, status = status.word(), plan, plan_allowed, asks, "Jobs: ended");
         if let Some(job) = job {
             // Its turn's own words (never an earlier turn's).
             let said = job.turn_list.iter().find(|t| t.n == n).map(|t| t.text.clone()).unwrap_or_else(|| job.text.clone());
@@ -1020,6 +1107,16 @@ impl Follow {
         super::approve_card::sync();
         status
     }
+}
+
+/// **A plan turn's end**: `(plan, plan_allowed)` for a turn that ended as a
+/// plan (`planned`: in Plan mode, done), whose ExitPlanMode the person
+/// allowed (`allowed`), and that changed a file after all (`edited`: Claude
+/// Code carried the plan out itself) — then it's no plan any more, and
+/// nothing carries on. Pure.
+pub fn after_plan(planned: bool, allowed: bool, edited: bool) -> (bool, bool) {
+    let plan = planned && !(allowed && edited);
+    (plan, plan && allowed)
 }
 
 /// A result's outcome: stopped (when the person stopped it), failed, or done.
@@ -1094,6 +1191,23 @@ pub fn stop(id: &str) -> Result<Job, String> {
 /// go-ahead (the next turn at the chat's Mode, carrying it out).
 pub fn message(id: &str, text: &str, go: bool) -> Result<Job, String> {
     follow_up(id, Ask::of(text, go)).map(|(job, _)| job)
+}
+
+/// **Go ahead with job `id`'s plan** (the report card's Go ahead, the bar's
+/// "Job's plan is ready" card: the person's click is their consent): its
+/// next turn now, Yap's own go-ahead ([`GO_AHEAD`]) at the chat's Mode.
+/// Once only: refused while it works, or once its latest turn isn't a plan
+/// waiting for its go-ahead.
+pub fn go_ahead(id: &str) -> Result<Job, String> {
+    let job = store::get(id).ok_or("There's no such job.")?;
+    if job.status.live() {
+        return Err("The job is working on it already.".into());
+    }
+    if !job.plan || job.plan_allowed {
+        return Err("There's no plan waiting for a go-ahead: the job carried on already.".into());
+    }
+    tracing::info!(id, "Jobs: its plan's go-ahead, from a card");
+    follow_up(id, Ask::go_ahead()).map(|(job, _)| job)
 }
 
 /// **A follow-up for job `id`** (its Code chat's next request, `message_job`,
@@ -1810,5 +1924,51 @@ mod tests {
         assert_eq!(JobEvent::of(&Job::default()).turn, None, "an older job's: none");
         let v = serde_json::to_value(JobEvent { queued: Some("Add a minimap".into()), ..JobEvent::at(&job, 2) }).unwrap();
         assert_eq!((v["turn"].as_u64(), v["queued"].as_str()), (Some(2), Some("Add a minimap")));
+    }
+
+    #[test]
+    fn allowing_a_plan_carries_it_out_and_a_cards_go_ahead_goes_once() {
+        // A plan turn's end: allowed, its next turn carries it out; not, it's a plan.
+        assert_eq!(after_plan(true, true, false), (true, true));
+        assert_eq!(after_plan(true, false, false), (true, false), "Not yet: still a plan");
+        assert_eq!(after_plan(true, true, true), (false, false), "Claude Code carried it out itself: done");
+        assert_eq!(after_plan(false, true, false), (false, false), "not a plan turn");
+        // The card's Go ahead marks a running job; nothing else.
+        let id = store::new_id();
+        let path = r"D:\Projects\garden-planner";
+        plan_allowed(&id);
+        assert!(with_state(|s| !s.live.contains_key(&id)));
+        test_live(&id, Some(path));
+        plan_allowed(&id);
+        assert!(with_state(|s| s.live.get(&id).is_some_and(|l| l.plan_allowed)));
+        test_live(&id, None);
+        // Yap's own go-ahead, as "go ahead" in the chat.
+        let a = Ask::go_ahead();
+        assert_eq!((a.text.as_str(), a.go, a.title()), (GO_AHEAD, true, "Go ahead with the plan".to_string()));
+        // The turn's allowance is its report's (one turn's facts).
+        let allowed = Job { turn_list: vec![TurnNote { plan: true, plan_allowed: true, ..turn(1, "Plan the minimap", &[]) }], ..Default::default() };
+        assert!(allowed.as_of_turn(1).plan_allowed);
+        // The report card's Go ahead: refused unless a plan waits for it.
+        store::insert(Job { id: id.clone(), path: path.into(), status: Status::Running, mode: "plan".into(), plan: true, ..Default::default() });
+        assert!(go_ahead(&id).is_err(), "working on it already");
+        store::update(&id, |j| {
+            j.status = Status::Done;
+            j.plan = false;
+        });
+        assert!(go_ahead(&id).unwrap_err().contains("no plan waiting"));
+        store::update(&id, |j| {
+            j.plan = true;
+            j.plan_allowed = true;
+        });
+        assert!(go_ahead(&id).is_err(), "allowed already: carrying it out");
+        // A plan waiting: Yap's go-ahead as its next turn (queued here, as
+        // the runner has it, with no Claude Code run).
+        store::update(&id, |j| j.plan_allowed = false);
+        test_live(&id, Some(path));
+        let job = go_ahead(&id).unwrap();
+        let sent = test_pending(&id).expect("its next turn");
+        assert_eq!((sent.text.as_str(), sent.go), (GO_AHEAD, true));
+        assert_eq!(job.turn_list.last().map(|t| t.title.as_str()), Some("Go ahead with the plan"));
+        test_live(&id, None);
     }
 }

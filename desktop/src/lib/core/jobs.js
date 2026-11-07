@@ -138,6 +138,9 @@ export function timelineOf(log, final = '') {
 /** Narration long enough to fold (its first lines shown, "Show more"). */
 export const longSaid = (text) => String(text || '').length > 280 || String(text || '').split('\n').length > 4;
 
+/** The line of a job whose plan waits for the person's Go ahead (jobs/runner.rs `on_tick`). */
+export const PLAN_WAITING = 'Waiting for you: its plan is ready';
+
 /**
  * **The line a job is on now**, from its log: its latest step, or the line
  * it moved to without one (`now`: the to-do in progress once a call came
@@ -147,8 +150,12 @@ export const longSaid = (text) => String(text || '').length > 280 || String(text
 export function latestStep(log, status) {
   if (!isLive(status)) return '';
   // Waiting on the person's Allow / Deny: that, whatever line came after it
-  // (a to-do's update can land a moment after the wait began).
-  if (status === 'asking') return 'Waiting for you to allow a step';
+  // (a to-do's update can land a moment after the wait began) — a plan's
+  // Go ahead / Not yet as its own line (jobs/runner.rs).
+  if (status === 'asking') {
+    const asked = [...(log || [])].reverse().find((e) => typeof e?.step === 'string' && /^Waiting for you\b/.test(e.step));
+    return asked?.step === PLAN_WAITING ? PLAN_WAITING : 'Waiting for you to allow a step';
+  }
   let line = '';
   for (const e of log || []) {
     if (typeof e?.now === 'string' && e.now.trim()) line = e.now.trim();
@@ -401,11 +408,15 @@ export function jobTabName(t, tabs, lookup = null) {
   return named ? `Job · ${folder} · ${title}` : `Job · ${folder} #${same.indexOf(t) + 1}`;
 }
 
-/** The report card's line: "Job done", "Job's plan is ready", "Job has a question", "Job didn't finish". */
+/** A plan the person allowed (ExitPlanMode's Go ahead): its report card's line. */
+export const PLAN_ALLOWED = 'Job is carrying out its plan';
+
+/** The report card's line: "Job done", "Job's plan is ready", "Job is carrying out its plan", "Job has a question", "Job didn't finish". */
 export function reportTitle(job, markerText = '') {
   // (A job at work again since says what the marker said.)
   if (job && !isLive(job.status)) {
     if (job.status === 'failed') return "Job didn't finish";
+    if (job.plan && job.planAllowed) return PLAN_ALLOWED;
     if (job.plan) return "Job's plan is ready";
     if (job.asks) return 'Job has a question';
     if (job.status === 'stopped') return 'Job stopped';
@@ -413,9 +424,23 @@ export function reportTitle(job, markerText = '') {
   }
   // From the marker's own words (jobs/report.rs `marker_text`).
   if (/: it didn't finish\./.test(markerText)) return "Job didn't finish";
+  if (/: it made a plan, and the user allowed it/.test(markerText)) return PLAN_ALLOWED;
   if (/: it made a plan/.test(markerText)) return "Job's plan is ready";
   if (/asks the user something/.test(markerText)) return 'Job has a question';
   return 'Job done';
+}
+
+/**
+ * **A report's plan still waits for its go-ahead** (its card's Go ahead,
+ * `job_go_ahead`): the turn it reports is a plan, not allowed already, it's
+ * the job's latest turn, and the job isn't working. A job from before turns:
+ * the job itself, when this is its latest report.
+ */
+export function planWaits(job, turn, latest = false) {
+  if (!job || isLive(job.status) || !job.plan || job.planAllowed) return false;
+  const last = (job.turnList || []).at(-1);
+  if (turn) return !!turn.plan && !turn.planAllowed && !!last && last.n === turn.n;
+  return latest && !last;
 }
 
 /** The folder a report marker names ("The job in garden-planner: …"). */

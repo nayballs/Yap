@@ -169,6 +169,9 @@ pub struct Job {
     pub turns: u32,
     /// Its latest turn ran in Plan mode: `text` is a plan, nothing changed.
     pub plan: bool,
+    /// Its latest turn's plan was allowed (Claude Code's ExitPlanMode card,
+    /// Go ahead): its next turn carries the plan out (`runner::run`).
+    pub plan_allowed: bool,
     /// Its final words ask the person something.
     pub asks: bool,
     /// Its latest turn has been reported in its chat.
@@ -241,6 +244,9 @@ pub struct TurnNote {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
     pub plan: bool,
+    /// Its plan was allowed (ExitPlanMode's Go ahead): the next turn carries
+    /// it out.
+    pub plan_allowed: bool,
     pub asks: bool,
     /// Its report's marker ("chat:<conversation>:<index>").
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -306,6 +312,7 @@ impl Job {
             text: self.text.clone(),
             error: self.error.clone(),
             plan: self.plan,
+            plan_allowed: self.plan_allowed,
             asks: self.asks,
             report_message_id: self.report_message_id.clone(),
             undone: self.undone,
@@ -336,6 +343,7 @@ impl Job {
             denials: t.denials,
             error: t.error,
             plan: t.plan,
+            plan_allowed: t.plan_allowed,
             asks: t.asks,
             ..self.clone()
         }

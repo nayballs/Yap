@@ -433,7 +433,7 @@ ever reaches it, or anyone's Claude account.
   Claude Code installed here, with an empty `CLAUDE_CONFIG_DIR` of its own so
   it never sees a login and never reaches the API (not signed in, the
   interrupt's receipt).
-- E2E: `claude-plan*.spec.js`, `jobs.spec.js`, `jobs-ui.spec.js`,
+- E2E: `claude-plan*.spec.js`, `jobs.spec.js`, `jobs-ui.spec.js`, `jobs-plans.spec.js`,
   `plan-jobs.spec.js` ([`docs/e2e-tests.md`](../e2e-tests.md)).
 
 ## The benchmark (`yap.exe bench`)

@@ -47,7 +47,11 @@ impl Loop<'_> {
                 crate::chat::activity::tell(live.sink, crate::chat::activity::of_call(name, &args));
             }
             let web_seen = self.web.as_deref().is_some_and(crate::web::Turn::seen) || self.screen_seen || self.job_seen;
-            let result = match gate(name, &args, hold_web, web_seen, &self.extra) {
+            // The safety rule's one exception: the person's plain go-ahead
+            // to a job (`message_job` then sends Yap's own words, never the
+            // model's: `tools/jobs.rs`).
+            let goes_ahead = web_seen && crate::chat::tools::jobs::goes_ahead_after_web(name, self.question);
+            let result = match gate(name, &args, hold_web, web_seen && !goes_ahead, &self.extra) {
                 Some(refusal) => refusal,
                 None => {
                     let source = Source::of(name, self.web.is_some(), &self.extra, self.claude_web, self.open_apps);

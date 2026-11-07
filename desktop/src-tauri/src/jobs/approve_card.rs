@@ -4,6 +4,9 @@
 //! nobody would see the card in Chat's thread: the bar shows it too —
 //! "Allow a step in garden-planner?", the step in plain words, **Allow
 //! once** / **Deny** (`claude_approve_answer`). Never answered by voice.
+//! A plan (Plan mode's ExitPlanMode, 2026-11-07) reads as one: "The plan is
+//! ready in garden-planner", its first line, **Go ahead** / **Not yet**
+//! (the plan itself is in the thread's card).
 //!
 //! One card at a time (`jobApprove`, a question in `notices/notice.rs`
 //! that waits out a dictation): the oldest prompt waiting. Answered here or
@@ -48,9 +51,32 @@ pub fn oldest(pending: &[Pending], is_job: impl Fn(&str) -> bool) -> Option<&Pen
     pending.iter().filter(|p| is_job(&p.run)).min_by_key(|p| p.id)
 }
 
+/// A plan's first line, as the bar says it: its first words that aren't
+/// blank, without markdown's marks ("## Watering" → "Watering"). Pure.
+pub fn plan_line(plan: &str) -> String {
+    let line = plan.lines().map(str::trim).find(|l| !l.trim_matches(|c: char| "#*-_>=` ".contains(c)).is_empty()).unwrap_or("");
+    let line = line.trim_start_matches(|c: char| "#*->` ".contains(c));
+    let line = line.trim_start_matches(|c: char| c.is_ascii_digit()).trim_start_matches(['.', ')']).trim();
+    super::steps::clip(&line.replace("**", "").replace('`', ""), BODY_MAX)
+}
+
 /// The card for prompt `p`. Pure.
 pub fn card(p: &Pending) -> crate::bar::Card {
     let place = if p.label.trim().is_empty() { "a job".to_string() } else { p.label.trim().to_string() };
+    if p.tool == claude_live::EXIT_PLAN {
+        // A plan: the person's go-ahead, or not yet.
+        let line = plan_line(&p.detail);
+        return crate::bar::Card {
+            id: CARD.into(),
+            icon: "job",
+            title: format!("The plan is ready in {place}"),
+            body: if line.is_empty() { "Go ahead with it?".into() } else { line },
+            primary: Some(crate::bar::CardAction::new(format!("allow:{}", p.id), "Go ahead")),
+            secondary: Some(crate::bar::CardAction::new(format!("deny:{}", p.id), "Not yet")),
+            timeout_ms: None,
+            ..Default::default()
+        };
+    }
     crate::bar::Card {
         id: CARD.into(),
         icon: "job",
@@ -195,5 +221,19 @@ mod tests {
         assert_eq!(answer_of("allow:x"), None);
         let unnamed = card(&Pending { label: " ".into(), ..pending(1, "job1") });
         assert_eq!(unnamed.title, "Allow a step in a job?");
+    }
+
+    #[test]
+    fn a_plan_on_the_bar_says_its_ready_with_go_ahead_and_not_yet() {
+        let plan = Pending { tool: "ExitPlanMode".into(), summary: "The plan is ready".into(), detail: "\n## Add a **watering** schedule\n\n1. Edit notes.md".into(), ..pending(4, "job1") };
+        let c = card(&plan);
+        assert_eq!(c.title, "The plan is ready in garden-planner");
+        assert_eq!(c.body, "Add a watering schedule", "a short line: the plan's first, without its marks");
+        assert_eq!(c.primary.as_ref().map(|a| (a.id.as_str(), a.label.as_str())), Some(("allow:4", "Go ahead")));
+        assert_eq!(c.secondary.as_ref().map(|a| (a.id.as_str(), a.label.as_str())), Some(("deny:4", "Not yet")));
+        assert!(c.timeout_ms.is_none());
+        assert_eq!(answer_of("allow:4"), Some((4, true)), "Go ahead allows it");
+        assert_eq!(plan_line("1. Read the beds file\n2. Add the schedule"), "Read the beds file");
+        assert_eq!(card(&Pending { detail: String::new(), ..plan }).body, "Go ahead with it?");
     }
 }
