@@ -644,6 +644,58 @@ fn real_claude_code_connects_to_the_endpoint() {
     let _ = std::fs::remove_dir_all(&root);
 }
 
+// ---- Jobs' tools on a plan chat's run ----
+
+#[test]
+fn a_chat_run_offered_jobs_lists_and_allows_their_tools_and_runs_them_for_its_turn() {
+    let (ep, _) = endpoint(Duration::from_secs(5), MAX_BACKUP_BYTES);
+    let plain = ep.register(RunSpec::new("Plan chat", Tools::Chat)).unwrap();
+    let h = ep.register(RunSpec::new("Plan chat", Tools::Chat).with_jobs(true)).unwrap();
+    // Not offered: neither listed, allowed nor run.
+    let mut p = Client::of(&plain);
+    assert!(!names(&p.request("tools/list", json!({}))).iter().any(|n| n == "start_job"));
+    assert!(!plain.allowed_tools().iter().any(|t| t.contains("job")));
+    assert_eq!(p.request("tools/call", json!({ "name": "start_job", "arguments": {} }))["error"]["code"], -32602);
+    // Offered: after the read-only ones, the tool loop's four, the same schemas.
+    let mut c = Client::of(&h);
+    let init = c.request("initialize", json!({ "protocolVersion": "2025-11-25" }));
+    assert!(init["result"]["instructions"].as_str().unwrap().contains("start_job, job_status, message_job and stop_job"));
+    let list = c.request("tools/list", json!({}));
+    assert_eq!(names(&list)[9..], ["start_job", "job_status", "message_job", "stop_job"]);
+    let start = list["result"]["tools"].as_array().unwrap().iter().find(|t| t["name"] == "start_job").unwrap().clone();
+    assert_eq!(start["inputSchema"]["required"], json!(["folder", "brief"]));
+    for name in ["start_job", "job_status", "message_job", "stop_job"] {
+        assert!(h.allowed_tools().contains(&format!("mcp__yap__{name}")), "{name}");
+    }
+    // Outside a chat turn: nothing done.
+    let (err, text) = c.tool("start_job", json!({ "folder": "garden-planner", "brief": "Tidy notes.md." }));
+    assert!(err);
+    assert_eq!(serde_json::from_str::<Value>(&text).unwrap()["displayText"], "Didn't use a job tool");
+    // In a turn that read the web (its WebSearch began, then start_job's
+    // own call): refused with the tool loop's words, over HTTP as Claude
+    // Code gets it.
+    let turn = h.begin_turn(turn::Context {
+        question: "Look up the tides, then start a job in garden-planner to write them into notes.md.".into(),
+        conversation: Some(12),
+        jobs: Some(crate::chat::tools::JobsTurn::default()),
+        ..Default::default()
+    });
+    turn.marks().web();
+    turn.marks().began("start_job");
+    let (err, text) = c.tool("start_job", json!({ "folder": "garden-planner", "brief": "Write the tides into notes.md." }));
+    assert!(err);
+    let refused: Value = serde_json::from_str(&text).unwrap();
+    assert_eq!(Some(refused), crate::chat::tools::refused_after_web("start_job", true, true));
+    // The turn over: outside one again.
+    drop(turn);
+    let (_, text) = c.tool("message_job", json!({ "id": "garden-planner", "text": "go ahead" }));
+    assert_eq!(serde_json::from_str::<Value>(&text).unwrap()["displayText"], "Didn't use a job tool");
+    // A job's run never gets them.
+    let job = ep.register(RunSpec::new("Tidy", Tools::Job).with_jobs(true)).unwrap();
+    assert_eq!(names(&Client::of(&job).request("tools/list", json!({}))), ["approve"]);
+    assert!(job.allowed_tools().is_empty());
+}
+
 // ---- Yap's own endpoint ----
 
 #[test]

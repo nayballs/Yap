@@ -26,6 +26,16 @@
 //!   its headers (`${VAR}` / `${VAR:-default}` from the environment, as
 //!   Claude Code does). Prints `{"type":"system","subtype":"fake_mcp",
 //!   "server":…,"tool":…,"response":<the JSON-RPC response>|null,"error":…}`.
+//!   With `"result_for":"<tool_use id>"`, then also the call's answer as
+//!   Claude Code hands it to the model: a `user` message with that id's
+//!   `tool_result` (the answer's text blocks, its `isError`).
+//! - `{"_for":"chat"}` (or `"job"`, `"ask"`, `"all"`): the lines up to the
+//!   next `_for` play only in a process of that kind — `job` started with
+//!   `--permission-prompt-tool` (a Job's run), `chat` with an
+//!   `--mcp-config` but no prompt tool (a plan chat's session), `ask` with
+//!   neither (one question, no tools) — so one script plays a plan chat,
+//!   the job it starts and the report's question. `all` (as from the top):
+//!   every kind.
 //! - `{"_dump_args":true}`: prints `{"type":"system","subtype":"fake_args",
 //!   "args":[…],"cwd":…}`.
 //! - `{"_dump_env":["ANTHROPIC_API_KEY",…]}`: prints `{"type":"system",
@@ -187,6 +197,18 @@ impl Ctx {
             None => std::env::var(name).ok(),
         }
     }
+
+    /// What kind of run this is, for `_for`: "job" (a permission prompt
+    /// tool), "chat" (an MCP server, no prompt tool) or "ask" (neither).
+    pub fn kind(&self) -> &'static str {
+        if self.args.iter().any(|a| a == "--permission-prompt-tool") {
+            "job"
+        } else if self.args.iter().any(|a| a == "--mcp-config") {
+            "chat"
+        } else {
+            "ask"
+        }
+    }
 }
 
 fn json_or_file(v: &str) -> Result<Value, String> {
@@ -202,6 +224,9 @@ fn json_or_file(v: &str) -> Result<Value, String> {
 /// code.
 pub fn play(script: &str, ctx: &Ctx, input: Receiver<String>, out: &mut dyn Write) -> Result<i32, String> {
     let mut p = Player { ctx, input, out, queue: VecDeque::new(), user_text: String::new(), in_turn: false, skipping: false, closed: false, hooks: 0 };
+    // `_for`: the kind of run the lines play in (`None`: every kind).
+    let kind = ctx.kind();
+    let mut part: Option<String> = None;
     for raw in script.lines() {
         let line = raw.trim();
         if line.is_empty() || line.starts_with("//") {
@@ -210,6 +235,13 @@ pub fn play(script: &str, ctx: &Ctx, input: Receiver<String>, out: &mut dyn Writ
         p.drain()?;
         let v: Value = serde_json::from_str(line).map_err(|e| format!("a script line isn't JSON: {e}"))?;
         let control = v.as_object().and_then(|o| o.iter().next()).filter(|(k, _)| k.starts_with('_'));
+        if let Some(("_for", arg)) = control.map(|(k, a)| (k.as_str(), a)) {
+            part = arg.as_str().filter(|s| *s != "all").map(str::to_string);
+            continue;
+        }
+        if part.as_deref().is_some_and(|p| p != kind) {
+            continue;
+        }
         if p.skipping && control.is_none_or(|(k, _)| k != "_wait_user") {
             continue;
         }
@@ -347,8 +379,9 @@ impl Player<'_> {
                 }
             }
             "_mcp" => {
-                let line = self.mcp(arg);
-                self.print(&line)?;
+                for line in self.mcp(arg) {
+                    self.print(&line)?;
+                }
             }
             "_dump_args" => {
                 let line = json!({"type":"system","subtype":"fake_args","args":self.ctx.args,"cwd":self.ctx.cwd,"session_id":self.ctx.session_id});
@@ -421,8 +454,31 @@ impl Player<'_> {
         lines
     }
 
-    /// A tool call on the run's MCP server; the `fake_mcp` line.
-    fn mcp(&self, arg: &Value) -> String {
+    /// A tool call on the run's MCP server: the `fake_mcp` line, and with
+    /// `result_for` the `tool_result` the model would get.
+    fn mcp(&self, arg: &Value) -> Vec<String> {
+        let line = self.mcp_call(arg);
+        let Some(id) = arg["result_for"].as_str() else { return vec![line] };
+        let v: Value = serde_json::from_str(&line).unwrap_or(Value::Null);
+        let (text, is_error) = match (&v["response"]["result"], &v["response"]["error"], &v["error"]) {
+            (r, _, _) if r.is_object() => {
+                let text: Vec<&str> = r["content"].as_array().into_iter().flatten().filter(|b| b["type"] == "text").filter_map(|b| b["text"].as_str()).collect();
+                (text.join(""), r["isError"].as_bool().unwrap_or(false))
+            }
+            (_, e, _) if e.is_object() => (format!("MCP error {}: {}", e["code"], e["message"].as_str().unwrap_or("")), true),
+            (_, _, e) => (e.as_str().unwrap_or("The MCP call failed.").to_string(), true),
+        };
+        let result = json!({
+            "type": "user",
+            "message": { "role": "user", "content": [{ "type": "tool_result", "tool_use_id": id, "content": [{ "type": "text", "text": text }], "is_error": is_error }] },
+            "parent_tool_use_id": null,
+            "session_id": self.ctx.session_id,
+        });
+        vec![line, result.to_string()]
+    }
+
+    /// The call itself; the `fake_mcp` line.
+    fn mcp_call(&self, arg: &Value) -> String {
         let tool = arg["tool"].as_str().unwrap_or("");
         let named = arg["server"].as_str();
         let server = match named {
@@ -629,6 +685,18 @@ mod tests {
     }
 
     #[test]
+    fn one_script_plays_a_chat_its_job_and_a_question_each_its_own_part() {
+        let script = "{\"type\":\"result\",\"result\":\"every kind\"}\n{\"_for\":\"chat\"}\n{\"type\":\"result\",\"result\":\"chat\"}\n{\"_for\":\"job\"}\n{\"type\":\"result\",\"result\":\"job\"}\n{\"_for\":\"ask\"}\n{\"type\":\"result\",\"result\":\"ask\"}\n{\"_for\":\"all\"}\n{\"type\":\"result\",\"result\":\"all again\"}\n";
+        let said = |args: &[&str]| -> Vec<String> {
+            let c = ctx(args);
+            run(script, &c, &[], true).1.iter().map(|v| v["result"].as_str().unwrap().to_string()).collect()
+        };
+        assert_eq!(said(&["-p", "--mcp-config", "{\"mcpServers\":{}}", "--strict-mcp-config"]), ["every kind", "chat", "all again"]);
+        assert_eq!(said(&["-p", "--mcp-config", "{\"mcpServers\":{}}", "--permission-prompt-tool", "mcp__yap__approve"]), ["every kind", "job", "all again"]);
+        assert_eq!(said(&["-p", "--tools", "", "--strict-mcp-config"]), ["every kind", "ask", "all again"]);
+    }
+
+    #[test]
     fn it_reports_args_env_and_exit_codes() {
         let mut c = ctx(&["-p", "--model", "claude-haiku-5-5"]);
         c.vars = Some(HashMap::from([("YAP_RUN_KEY".to_string(), "k".to_string()), ("EMPTY".to_string(), String::new())]));
@@ -728,10 +796,11 @@ mod tests {
 {"_hook":{"event":"PostToolUse","input":{"tool_name":"Edit"}}}
 {"_mcp":{"tool":"approve","arguments":{"tool_name":"Bash","input":{"command":"ls"}}}}
 {"_mcp":{"tool":"approve","server":"missing"}}
+{"_mcp":{"tool":"approve","server":"missing","result_for":"toolu_9"}}
 "#;
         let (code, out) = run(script, &c, &[], false);
         assert_eq!(code, 0);
-        assert_eq!(out.len(), 3, "one hook fitted; two MCP lines");
+        assert_eq!(out.len(), 5, "one hook fitted; three MCP lines, the last with its tool result");
         assert_eq!(out[0]["subtype"], "hook_response");
         assert_eq!(out[0]["outcome"], "success");
         assert!(out[0]["output"].as_str().unwrap().contains("permissionDecision"));
@@ -739,6 +808,11 @@ mod tests {
         assert_eq!(out[1]["server"], "yap");
         assert_eq!(out[1]["response"]["result"]["content"][0]["text"], "{\"behavior\":\"allow\"}");
         assert_eq!(out[2]["error"], "no such MCP server in --mcp-config");
+        // A failed call's tool result, as the model would get it.
+        assert_eq!(out[4]["type"], "user");
+        let block = &out[4]["message"]["content"][0];
+        assert_eq!((block["tool_use_id"].as_str(), block["is_error"].as_bool()), (Some("toolu_9"), Some(true)));
+        assert_eq!(block["content"][0]["text"], "no such MCP server in --mcp-config");
         let seen = seen.lock().unwrap().clone();
         let urls: Vec<&str> = seen.iter().map(|s| s.0.as_str()).collect();
         assert_eq!(urls, ["/hook/backup", "/mcp/run1", "/mcp/run1", "/mcp/run1"]);

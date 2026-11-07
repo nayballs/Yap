@@ -25,6 +25,13 @@
 //!   a job.
 //! - A started job goes to the page at once (`stream::Event::Job`: its tab
 //!   opens), with the question's message id kept on the job.
+//!
+//! **Two callers, one implementation** ([`execute`] with a [`Ctx`]): Yap's
+//! own tool loop (`tools/agent/dispatch.rs`, after its gate's safety rule),
+//! and a chat on the person's Claude plan, whose Claude Code calls these
+//! tools over Yap's run endpoint (`integrations/claude_live/jobs.rs`: the
+//! same safety rule first, then this, for the turn the call belongs to,
+//! `claude_live/turn.rs`).
 
 use serde_json::{json, Value};
 
@@ -55,6 +62,16 @@ pub struct JobsTurn {
     /// Asked by voice (out loud, or dictated into Chat): its report is read
     /// aloud ("When I asked by voice").
     pub voice: bool,
+}
+
+impl JobsTurn {
+    /// A turn asked at `scope` ("assistant": the Voice Assistant, out loud),
+    /// `by_voice` (dictated into Chat): every turn that offers jobs says so
+    /// this way (the tool loop's, a plan chat's). Pure.
+    pub fn asked(scope: Option<&str>, by_voice: bool) -> JobsTurn {
+        let aloud = scope == Some("assistant");
+        JobsTurn { aloud, voice: by_voice || aloud }
+    }
 }
 
 /// The tools' definitions, the person's job folders named in `start_job`'s.
@@ -474,6 +491,14 @@ mod tests {
         assert!(!modes.as_array().unwrap().iter().any(|m| m == "bypassPermissions"), "the model can't ask for Bypass");
         assert!(defs[0]["function"]["description"].as_str().unwrap().contains("Their job folders: none yet"));
         assert!(JOB_TOOL_INSTRUCTIONS.join(" ").contains("never guess one"));
+    }
+
+    #[test]
+    fn where_a_turn_was_asked_says_how_a_job_asks_and_reports() {
+        assert_eq!(JobsTurn::asked(None, false), JobsTurn { aloud: false, voice: false }, "typed in Chat: a card, a quiet report");
+        assert_eq!(JobsTurn::asked(None, true), JobsTurn { aloud: false, voice: true }, "dictated into Chat: a card, the report read aloud");
+        assert_eq!(JobsTurn::asked(Some("assistant"), false), JobsTurn { aloud: true, voice: true }, "out loud: asked in words");
+        assert_eq!(JobsTurn::asked(Some("meetings"), false), JobsTurn::default());
     }
 
     #[test]
