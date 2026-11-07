@@ -200,6 +200,10 @@ pub fn rule(kind: &str) -> Rule {
         // window in front: a notice, held over a dictation, gone if unseen a
         // minute (its chat has the report).
         "jobDone" => info,
+        // A running job asks to take a step (`jobs/approve_card.rs`), with no
+        // Yap window in front: a question that waits for its answer (Chat's
+        // thread has it too), never over a dictation.
+        "jobApprove" => Rule { hold_dictation: true, ..prompt },
         // Coaching: about dictating, so never during a meeting either; one
         // of the tips "Show tips" switches off.
         "hint" => Rule { hold_meeting: true, tip: true, ..tip },

@@ -376,6 +376,16 @@ pub fn flush() {
     with_store(|s| save(s));
 }
 
+/// The jobs not over yet (queued, running or asking), newest first: their
+/// ids (the Yap bar's "1 job running" and where its click goes).
+pub fn live_ids() -> Vec<String> {
+    with_store(|s| {
+        let mut live: Vec<&Job> = s.jobs.iter().filter(|j| j.status.live()).collect();
+        live.sort_by(|a, b| b.created_ts.cmp(&a.created_ts).then_with(|| b.id.cmp(&a.id)));
+        live.into_iter().map(|j| j.id.clone()).collect()
+    })
+}
+
 /// The jobs a chat started, newest first.
 pub fn of_conversation(conversation: u64) -> Vec<Job> {
     list().into_iter().filter(|j| j.conversation == Some(conversation)).collect()

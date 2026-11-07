@@ -82,6 +82,54 @@ pub async fn job_folders_add(path: String, name: Option<String>, cap: Option<Str
     Ok(added)
 }
 
+/// **Add folder…** (Settings → Jobs): Windows' folder picker, opened here
+/// (as the Dictionary's files are: the page never names the folder), and
+/// the folder picked added. `None` when the person cancelled. A test run
+/// never opens a dialog: `e2e_job_folder` names the folder the next pick
+/// takes.
+#[tauri::command]
+pub async fn job_folders_pick(app: tauri::AppHandle, window: tauri::WebviewWindow) -> Result<Option<Folder>, String> {
+    let Some(path) = pick_folder(&app, window).await? else { return Ok(None) };
+    let path = path.to_string_lossy().into_owned();
+    let added = folders::add(&path, None, None)?;
+    folders::saved().map_err(|e| e.to_string())?;
+    tracing::info!("Jobs: a folder picked and added");
+    Ok(Some(added))
+}
+
+/// The folder the person picked (a test run: the one it named).
+async fn pick_folder(app: &tauri::AppHandle, window: tauri::WebviewWindow) -> Result<Option<std::path::PathBuf>, String> {
+    #[cfg(debug_assertions)]
+    if crate::shell::e2e::active() {
+        let _ = (app, window);
+        return E2E_FOLDER
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .take()
+            .map(Some)
+            .ok_or_else(|| "A test run names the folder first (e2e_job_folder).".to_string());
+    }
+    use tauri_plugin_dialog::DialogExt;
+    let dialog = app.dialog().file().set_parent(&window).set_title("Choose a folder for jobs");
+    let picked = tauri::async_runtime::spawn_blocking(move || dialog.blocking_pick_folder()).await.map_err(|e| e.to_string())?;
+    Ok(picked.and_then(|p| p.into_path().ok()))
+}
+
+/// Test mode: the folder the next Add folder… takes, in place of the dialog.
+#[cfg(debug_assertions)]
+static E2E_FOLDER: std::sync::Mutex<Option<std::path::PathBuf>> = std::sync::Mutex::new(None);
+
+/// Test mode: name the folder the next Add folder… picks.
+#[cfg(debug_assertions)]
+#[tauri::command]
+pub fn e2e_job_folder(path: String) -> Result<(), String> {
+    if !crate::shell::e2e::active() {
+        return Err("test mode only".into());
+    }
+    *E2E_FOLDER.lock().unwrap_or_else(|p| p.into_inner()) = Some(std::path::PathBuf::from(path));
+    Ok(())
+}
+
 /// Remove a folder (by its name or path): whether one went. Its jobs stay.
 #[tauri::command]
 pub async fn job_folders_remove(name: String) -> bool {

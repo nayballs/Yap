@@ -13,6 +13,8 @@
   import { showSaveError } from '../../notices/saveErrors.js';
   import { copyText, conversationMarkdown } from '../../core/itemMenus.js';
   import { createChatLibrary } from './chatLibrary.svelte.js';
+  // The jobs running now, above the list (Jobs).
+  import RunningJobs from './RunningJobs.svelte';
 
   /** `chat`: the view's state (chatState.svelte.js). */
   let { chat } = $props();
@@ -159,6 +161,8 @@
       {/if}
     </div>
   {/if}
+
+  <RunningJobs {chat} />
 
   {#if chat.conversations.length || lib.archived.length}
     <div class="searchrow">

@@ -120,6 +120,7 @@
   import { MIN_WIDTH, THREAD_MIN, LIST_STAYS, tabKeyOf } from './chatDoc.svelte.js';
   import { chatBrowser } from '../../stores/chatBrowser.svelte.js';
   import { memoryTakesDrops } from '../../stores/memory.svelte.js';
+  import { jobs, initJobs, jobById } from '../../stores/jobs.svelte.js';
 
   // Opens a Settings section (ControlPanel's openSettings): the chip's
   // "Language model settings…". `onopennote({id, line, ts, field})`: a
@@ -129,6 +130,32 @@
 
   const chat = createChatState({ onopensettings: () => onopensettings, onopennote: () => onopennote });
   const doc = chat.doc;
+
+  // **Jobs** (stores/jobs.svelte.js): the bar card's or a notification's
+  // Open (`yap-job-open`) shows the job's chat and its tab; a report landing
+  // in the chat shown (`yap-job-report`) is read in, never switching chats.
+  initJobs();
+  $effect(() => {
+    const want = jobs.openWanted;
+    if (!want?.id) return;
+    jobs.openWanted = null;
+    untrack(async () => {
+      if (want.conversation != null && want.conversation !== chat.activeId) await chat.selectConversation(want.conversation);
+      const j = jobById(want.id);
+      doc.showJob(j ?? { id: want.id, conversation: want.conversation });
+    });
+  });
+  let reportsSeen = jobs.reports;
+  $effect(() => {
+    const n = jobs.reports;
+    const r = jobs.report;
+    untrack(() => {
+      if (n === reportsSeen) return;
+      reportsSeen = n;
+      if (r?.conversation != null && r.conversation === chat.activeId) chat.reloadActive();
+      chat.refreshList();
+    });
+  });
 
   // **The browser** (the title bar's button, Ctrl+Shift+B; as Claude Code's):
   // the panel's page tabs — the last page shown, unless its tab was closed,

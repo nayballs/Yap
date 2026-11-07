@@ -27,6 +27,8 @@ export const NAV_GROUPS = [
       { id: 'voice', label: 'Voice Assistant' },
       { id: 'memory', label: 'Memory' },
       { id: 'skills', label: 'Skills' },
+      // Jobs (jobs.rs): Chat hands a task to the person's own Claude Code.
+      { id: 'jobs', label: 'Jobs' },
     ],
   },
   {

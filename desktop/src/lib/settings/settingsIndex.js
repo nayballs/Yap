@@ -187,6 +187,20 @@ export const SETTINGS_INDEX = [
   { page: 'skills', section: 'More Skills', label: 'More Skills', desc: '/tickets, /risks, /coach and more, one switch away', keywords: 'skills more extra tickets prd product requirements risks coach weekly recap decision log open questions one-to-one project update', anchor: 'skills-more' },
   { page: 'skills', section: 'More Skills', label: 'Show in the / menu', desc: "Each Skill's switch: in the / menu and one-tap prompts, or not", keywords: 'skills slash menu show hide switch turn on off add remove list', anchor: 'skills-more' },
 
+  // Jobs (JobsPage.svelte, jobs.rs)
+  { page: 'jobs', section: 'Jobs', label: 'Jobs', desc: 'Let Chat and the Voice Assistant hand tasks to your own Claude Code', keywords: 'jobs claude code agent task background folder automate coding run', anchor: 'jobs-enabled', toggle: 'jobsEnabled' },
+  { page: 'jobs', section: 'Jobs', label: 'Claude Code', desc: 'Found on this PC and signed in, or Sign in', keywords: 'claude code sign in login installed version status plan', anchor: 'jobs-claude-code' },
+  { page: 'jobs', section: 'Paying for jobs', label: 'Pay with', desc: 'Your Claude plan, or an API key', keywords: 'jobs pay billing plan subscription api key anthropic cost price', anchor: 'jobs-pay' },
+  { page: 'jobs', section: 'Defaults', label: 'Model', desc: 'The Claude model a job runs on', keywords: 'jobs model opus sonnet haiku claude', anchor: 'jobs-model' },
+  { page: 'jobs', section: 'Defaults', label: 'Effort', desc: 'How hard a job thinks', keywords: 'jobs effort thinking reasoning low medium high extra max', anchor: 'jobs-effort' },
+  { page: 'jobs', section: 'Defaults', label: 'Mode', desc: 'The Mode a new chat starts in: Auto, Manual, Accept edits, Plan or Bypass permissions', keywords: 'jobs mode permissions auto manual accept edits plan bypass default', anchor: 'jobs-mode' },
+  { page: 'jobs', section: 'Folders', label: 'Folders', desc: 'Where jobs may work, and the most each may run in', keywords: 'jobs folders projects directory cap limit never above remove', anchor: 'jobs-add-folder' },
+  { page: 'jobs', section: 'Folders', label: 'Add folder…', desc: 'Pick a folder jobs may work in', keywords: 'jobs add folder project directory picker', anchor: 'jobs-add-folder' },
+  { page: 'jobs', section: 'Asking and reports', label: 'Ask before starting a job', desc: 'Only when the chat read the web or the folder is new, always, or never', keywords: 'jobs ask confirm before start card approve', anchor: 'jobs-ask' },
+  { page: 'jobs', section: 'Asking and reports', label: 'Read job reports aloud', desc: 'When you asked by voice, always, or never', keywords: 'jobs report read aloud speak voice spoken', anchor: 'jobs-speak' },
+  { page: 'jobs', section: 'Asking and reports', label: 'Backups and limits', desc: 'Backups kept 7 days; one job a folder, 3 at once', keywords: 'jobs backups undo limits at once concurrent', anchor: 'jobs-limits' },
+  { page: 'jobs', section: 'History', label: 'History', desc: 'Every job: its status, folder, when and cost', keywords: 'jobs history past list cost undo open', anchor: 'jobs-history' },
+
   // ---- Speech-to-Text ----
   { page: 'models', section: 'Speech model', label: 'Speech model', desc: 'The model that turns your voice into text', keywords: 'speech to text transcription model parakeet whisper canary moonshine download', anchor: 'stt-model' },
   { page: 'models', section: 'Speakers in meetings', label: 'Speaker models', desc: 'For telling speakers apart in meetings', keywords: 'diarization speakers model', anchor: 'speakers' },
