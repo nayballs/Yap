@@ -675,6 +675,23 @@ pub fn e2e_upload_pace(ms: u64) -> Result<(), String> {
     Ok(())
 }
 
+/// Test mode only: every permission prompt a Claude Code run sends Yap
+/// (`integrations/claude_live/approve.rs`) is answered at once — `allow`
+/// `true` Allow, `false` Deny — or waits for `claude_approve_answer` as in
+/// the app (`null`, the default). The cards (`yap-claude-approve`) and their
+/// ends still go out, and `claude_approve_pending` lists the waiting ones,
+/// so a spec can also answer them one by one.
+#[cfg(debug_assertions)]
+#[tauri::command]
+pub fn e2e_claude_approve_auto(allow: Option<bool>) -> Result<(), String> {
+    if !active() {
+        return Err("Only in e2e test mode".to_string());
+    }
+    tracing::info!(allow = ?allow, "e2e: Claude Code permission prompts answered at once");
+    crate::integrations::claude_live::set_auto_answer(allow);
+    Ok(())
+}
+
 /// Test mode only: the next `count` saves of a store (`store`: its id,
 /// "notes", "history", "chats"…) fail as if the disk were full, so a spec
 /// sees what the person would (`saving.rs`). `count` 0: none.

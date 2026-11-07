@@ -416,6 +416,18 @@ fn route(
             .unwrap_or(default)
     };
 
+    // The reads Claude Code runs share (`read_path`): meetings, notes,
+    // tasks, folders.
+    if *method == Method::Get {
+        if let Some(answer) = read_route(segs, params) {
+            match answer {
+                Ok(body) => respond_json(request, 200, &body),
+                Err((status, code, message)) => respond_error(request, status, code, &message),
+            }
+            return;
+        }
+    }
+
     match (method, segs) {
         (Method::Get, ["v1", "health"]) => {
             respond_json(
@@ -425,54 +437,7 @@ fn route(
             );
         }
 
-        // ---- notes ----
-        (Method::Get, ["v1", "notes", "list"]) => {
-            let folder = query_get(params, "folder");
-            let note_type = query_get(params, "note_type");
-            let mut items: Vec<Value> = match crate::notes::list() {
-                Value::Array(a) => a,
-                _ => Vec::new(),
-            };
-            if let Some(f) = folder {
-                items.retain(|n| {
-                    n.get("folder").and_then(|v| v.as_str()).map(|v| v.eq_ignore_ascii_case(f))
-                        == Some(true)
-                });
-            }
-            if let Some(t) = note_type {
-                items.retain(|n| n.get("noteType").and_then(|v| v.as_str()) == Some(t));
-            }
-            items.truncate(limit(100));
-            respond_json(request, 200, &list_envelope(Value::Array(items)));
-        }
-        (Method::Get, ["v1", "notes", "search"]) => {
-            let q = query_get(params, "q").unwrap_or("");
-            if q.trim().is_empty() {
-                respond_error(request, 400, "validation_error", "Search query is required");
-                return;
-            }
-            let results: Vec<Value> = crate::chat::tools::search_notes(q, limit(20))
-                .into_iter()
-                .map(|(score, n)| {
-                    let preview: String = n.content.chars().take(200).collect();
-                    json!({
-                        "id": n.id,
-                        "title": n.title,
-                        "folder": n.folder,
-                        "noteType": n.note_type,
-                        "score": score,
-                        "preview": preview,
-                        "createdTs": n.created_ts,
-                        "updatedTs": n.updated_ts,
-                    })
-                })
-                .collect();
-            respond_json(request, 200, &list_envelope(json!(results)));
-        }
-        (Method::Get, ["v1", "notes", id]) => match parse_id(id).and_then(crate::notes::get) {
-            Some(note) => respond_json(request, 200, &json!({ "data": note })),
-            None => respond_error(request, 404, "not_found", &format!("Note {} not found", id)),
-        },
+        // ---- notes (their reads in `read_route`) ----
         (Method::Post, ["v1", "notes", "create"]) => {
             // Notes an AI app saves through `yap.exe mcp` say so.
             let source = match str_field(body, "source") {
@@ -524,10 +489,7 @@ fn route(
             }
         }
 
-        // ---- folders ----
-        (Method::Get, ["v1", "folders", "list"]) => {
-            respond_json(request, 200, &list_envelope(json!(crate::notes::folders())));
-        }
+        // ---- folders (the list in `read_route`) ----
         (Method::Post, ["v1", "folders", "create"]) => {
             let name = str_field(body, "name").unwrap_or("").trim().to_string();
             if name.is_empty() {
@@ -540,38 +502,7 @@ fn route(
             respond_saved(request, crate::notes::SAVER.status(), |r| respond_json(r, 201, &body));
         }
 
-        // ---- meetings (what `yap.exe mcp` reads; views in mcp.rs) ----
-        (Method::Get, ["v1", "meetings", "list"]) => {
-            let notes = crate::notes::all();
-            let items = crate::integrations::mcp::list_meetings(&notes, query_get(params, "folder"), limit(50));
-            respond_json(request, 200, &list_envelope(json!(items)));
-        }
-        (Method::Get, ["v1", "meetings", "search"]) => {
-            let q = query_get(params, "q").unwrap_or("");
-            if crate::integrations::mcp::query_words(q).is_empty() {
-                respond_error(
-                    request,
-                    400,
-                    "validation_error",
-                    "Search with at least one word of three or more letters",
-                );
-                return;
-            }
-            let notes = crate::notes::all();
-            let items = crate::integrations::mcp::search_meetings(&notes, q, limit(10));
-            respond_json(request, 200, &list_envelope(json!(items)));
-        }
-        // ---- tasks (the checkboxes in notes' summaries, tasks.rs): read only ----
-        (Method::Get, ["v1", "tasks", "list"]) => {
-            let status = query_get(params, "status").unwrap_or("open");
-            if !matches!(status, "open" | "done" | "all") {
-                respond_error(request, 400, "validation_error", "status is open, done or all");
-                return;
-            }
-            let notes = crate::notes::all();
-            let items = crate::integrations::mcp::list_tasks(&notes, status, limit(200));
-            respond_json(request, 200, &list_envelope(json!(items)));
-        }
+        // ---- meetings and tasks: in `read_route` ----
         (Method::Get, ["v1", "mcp", "config"]) => {
             let allow = crate::config::load().mcp_allow_writes;
             respond_json(request, 200, &json!({ "data": { "allowWrites": allow } }));
@@ -609,6 +540,114 @@ fn route(
 
         _ => respond_error(request, 404, "not_found", "Not found"),
     }
+}
+
+/// A read route's failure: status, code, message.
+type ReadError = (u16, &'static str, String);
+
+/// **The reads**: the routes `yap.exe mcp`'s tools read meetings, notes,
+/// tasks and folders through — `GET /v1/notes/list|search|<id>`,
+/// `/v1/folders/list`, `/v1/meetings/list|search`, `/v1/tasks/list` — as the
+/// response's JSON body. `None` for every other route (the dictation
+/// history's among them: never read here). Shared with the Claude Code runs'
+/// endpoint ([`read_path`]), so both serve the same views.
+fn read_route(segs: &[&str], params: &[(String, String)]) -> Option<Result<Value, ReadError>> {
+    let limit = |default: usize| {
+        query_get(params, "limit")
+            .and_then(|v| v.parse::<usize>().ok())
+            .unwrap_or(default)
+    };
+    let found = match segs {
+        ["v1", "notes", "list"] => {
+            let folder = query_get(params, "folder");
+            let note_type = query_get(params, "note_type");
+            let mut items: Vec<Value> = match crate::notes::list() {
+                Value::Array(a) => a,
+                _ => Vec::new(),
+            };
+            if let Some(f) = folder {
+                items.retain(|n| {
+                    n.get("folder").and_then(|v| v.as_str()).map(|v| v.eq_ignore_ascii_case(f))
+                        == Some(true)
+                });
+            }
+            if let Some(t) = note_type {
+                items.retain(|n| n.get("noteType").and_then(|v| v.as_str()) == Some(t));
+            }
+            items.truncate(limit(100));
+            Ok(list_envelope(Value::Array(items)))
+        }
+        ["v1", "notes", "search"] => {
+            let q = query_get(params, "q").unwrap_or("");
+            if q.trim().is_empty() {
+                return Some(Err((400, "validation_error", "Search query is required".into())));
+            }
+            let results: Vec<Value> = crate::chat::tools::search_notes(q, limit(20))
+                .into_iter()
+                .map(|(score, n)| {
+                    let preview: String = n.content.chars().take(200).collect();
+                    json!({
+                        "id": n.id,
+                        "title": n.title,
+                        "folder": n.folder,
+                        "noteType": n.note_type,
+                        "score": score,
+                        "preview": preview,
+                        "createdTs": n.created_ts,
+                        "updatedTs": n.updated_ts,
+                    })
+                })
+                .collect();
+            Ok(list_envelope(json!(results)))
+        }
+        ["v1", "notes", id] => match parse_id(id).and_then(crate::notes::get) {
+            Some(note) => Ok(json!({ "data": note })),
+            None => Err((404, "not_found", format!("Note {} not found", id))),
+        },
+        ["v1", "folders", "list"] => Ok(list_envelope(json!(crate::notes::folders()))),
+        // ---- meetings (what `yap.exe mcp` reads; views in mcp.rs) ----
+        ["v1", "meetings", "list"] => {
+            let notes = crate::notes::all();
+            let items = crate::integrations::mcp::list_meetings(&notes, query_get(params, "folder"), limit(50));
+            Ok(list_envelope(json!(items)))
+        }
+        ["v1", "meetings", "search"] => {
+            let q = query_get(params, "q").unwrap_or("");
+            if crate::integrations::mcp::query_words(q).is_empty() {
+                return Some(Err((
+                    400,
+                    "validation_error",
+                    "Search with at least one word of three or more letters".into(),
+                )));
+            }
+            let notes = crate::notes::all();
+            let items = crate::integrations::mcp::search_meetings(&notes, q, limit(10));
+            Ok(list_envelope(json!(items)))
+        }
+        // ---- tasks (the checkboxes in notes' summaries, tasks.rs): read only ----
+        ["v1", "tasks", "list"] => {
+            let status = query_get(params, "status").unwrap_or("open");
+            if !matches!(status, "open" | "done" | "all") {
+                return Some(Err((400, "validation_error", "status is open, done or all".into())));
+            }
+            let notes = crate::notes::all();
+            let items = crate::integrations::mcp::list_tasks(&notes, status, limit(200));
+            Ok(list_envelope(json!(items)))
+        }
+        _ => return None,
+    };
+    Some(found)
+}
+
+/// [`read_route`] for a path with its query (`/v1/meetings/search?q=…`), as
+/// `mcp.rs`'s tools ask for it: the Claude Code runs' endpoint reads
+/// meetings and notes in process this way (`claude_live/reads.rs`), with
+/// no Local API needed. `None`: not one of the reads.
+pub(crate) fn read_path(path: &str) -> Option<Result<Value, (u16, String)>> {
+    let (path, query) = path.split_once('?').unwrap_or((path, ""));
+    let params = parse_query(query);
+    let segs: Vec<&str> = path.trim_matches('/').split('/').collect();
+    read_route(&segs, &params).map(|r| r.map_err(|(status, _, message)| (status, message)))
 }
 
 /// `DELETE /v1/notes/{id}`: the note deleted (its id), or the answer —
@@ -672,6 +711,19 @@ mod tests {
         server.join().unwrap();
         // ...a closed port (a crashed instance's leftover file) doesn't.
         assert!(!bridge_answers(port, "token"));
+    }
+
+    /// The reads Claude Code runs share are meetings, notes, tasks and
+    /// folders: never the dictation history, the health check or a write.
+    #[test]
+    fn the_shared_reads_never_include_the_dictation_history() {
+        for path in ["/v1/transcriptions/list", "/v1/transcriptions/1759000000", "/v1/health", "/v1/mcp/config", "/v1/notes/create/extra", "/v1/folders/create"] {
+            assert!(read_path(path).is_none(), "{path}");
+        }
+        let refused = read_path("/v1/meetings/search?q=a").unwrap().unwrap_err();
+        assert_eq!(refused.0, 400, "a search needs a word of three letters");
+        assert_eq!(read_path("/v1/tasks/list?status=later").unwrap().unwrap_err().0, 400);
+        assert_eq!(read_path("/v1/notes/0").unwrap().unwrap_err().0, 404);
     }
 
     #[test]
