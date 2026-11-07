@@ -391,7 +391,7 @@ is [ai-models.md](./ai-models.md); the dictionary passes it feeds are
 ### Code chats keep memory out
 
 **A Code chat** (a conversation attached to a workspace,
-[jobs.md](./jobs.md#code-chats)) uses none of this, on every model and path
+[jobs.md](./jobs.md#memory-and-the-plan-in-a-code-chat)) uses none of this, on every model and path
 (decided 7 Nov 2026): project knowledge belongs with the project (its
 `CLAUDE.md`, Claude Code's own memory), and Yap's memory is personal — in a
 Code chat it would duplicate the project's, put personal details within
