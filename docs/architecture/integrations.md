@@ -64,6 +64,102 @@ The token-authenticated local API, Yap's MCP server (`yap.exe mcp`) and adding i
   running, and a child of `<drive>:\Builds\yap-dev\debug\yap.exe` locks it, so Yap - Dev's next
   build fails with "Access is denied" (2026-10-17, Claude Code's `~/.claude.json`).
   The launcher (`dev-update.ps1`) also stops any such helper before building.
+- **`integrations/claude_live.rs`** (+ `claude_live/`: `server`, `rpc`,
+  `approve`, `backup`, `reads`, `jobs`, `turn`) — **the endpoint Claude Code runs talk back
+  to** (2026-11-07): Yap starts the person's own Claude Code for Chat on
+  their Claude plan and for [Jobs](./jobs.md) (ai-models.md, "The Claude Code
+  engine"), and those runs reach this. Below.
+
+## Claude Code runs' endpoint (`integrations/claude_live.rs`, 2026-11-07)
+
+A loopback HTTP listener inside the running Yap. Unlike `yap.exe mcp` it needs
+no Local API (the bridge can be off), and it reaches the live UI.
+
+- **The listener** (`server.rs`): `127.0.0.1` on a port the system picks,
+  started the first time a run is registered, then kept while Yap runs. A
+  request is refused unless it comes from this PC, names this PC in its
+  `Host` (a web page on a name that resolves here can't reach it), carries no
+  other site's `Origin`, and names a registered run with that run's key (403,
+  404, 401). No CORS headers, ever. Each request runs on a thread of its own,
+  so a permission prompt waiting for the person never holds up a read.
+- **A run** (`register_run(RunSpec)` → `RunHandle`): its label, its tools
+  (`Tools::Chat`: read only, plus Jobs' with `RunSpec::jobs`; `Tools::Job`:
+  `approve`), where its backups go,
+  and who to ask (`Approval`: the job's id, its conversation, typed or by
+  voice). **A key per run**: 32 random bytes, compared by SHA-256, sent as
+  `Authorization: Bearer`. The handle gives the run's `--mcp-config` (Yap's
+  server only, `type: "http"`, its `timeout` 660,000 ms: Claude Code's limit
+  per tool call, which also lifts its 5-minute idle floor for an HTTP server,
+  so a prompt can wait its 10 minutes) and its `--settings` (the backup hook,
+  for a run with a backup folder). The key is in those two files in the run's
+  folder under `%TEMP%\yap-claude\` (removed with the session) and in memory,
+  never in a log. Dropping the handle unregisters the run: its URLs answer
+  404, and a prompt still waiting is denied.
+- **MCP over HTTP** at `POST /mcp/<run>` (`rpc.rs`): the Streamable HTTP
+  transport's request/response subset, JSON answers only, no sessions and no
+  SSE stream (`GET` is 405, which the transport allows). Claude Code 2.1.296
+  first probes with `server/discover` (protocol 2026-07-28); Yap answers
+  "method not found", and it falls back to `initialize` with 2025-11-25,
+  which Yap echoes. Then `tools/list`, `tools/call`, `ping`.
+- **Chat's tools** (`reads.rs`): `yap.exe mcp`'s seven reads — meetings,
+  notes, tasks and folders, the same views through `mcp::run_tool` over any
+  `Bridge`, here read in process (`bridge::read_route` / `read_path`, without
+  the HTTP) —, Yap's memory (`search_memory`) and the calendar
+  (`check_calendar`, while one is connected). Read only; never the dictation
+  history. `RunHandle::allowed_tools` names them for `--allowedTools`, so a
+  plan chat in `dontAsk` can use them.
+- **Jobs' tools from a plan chat** (`jobs.rs`, 2026-11-07): for a Chat run
+  registered with `RunSpec::jobs` (`with_jobs`: jobs on, Claude Code here,
+  not across the meetings), `start_job`, `job_status`, `message_job` and
+  `stop_job`, listed with the tool loop's own schemas and descriptions, and
+  each call run by the tool loop's own code (`chat/tools/jobs.rs` `execute`),
+  after the same safety rule and the evaluation's intercept. The list is read
+  once per session, so a session made without them is started again to get
+  them. [jobs.md](./jobs.md#from-a-plan-chat).
+- **A Chat run's turn** (`turn.rs`): `RunHandle::begin_turn(Context)` gives
+  the run its turn — the question, the answer before it, the conversation,
+  where it was asked (`JobsTurn`), web content from the start — and a `Turn`
+  whose stream carries what a call shows (the job's card, its tab) back to
+  the plan turn; dropping it ends the turn, and a call waiting on the person
+  stops. A call with no turn open does nothing. **The web flag** comes from
+  the turn's start, the plan turn's events (`Marks::web`: a `WebSearch` or
+  `WebFetch` beginning) and `job_status` (`Slot::set_web`). **One order for
+  two paths**: a call that acts first waits, at most 5 s (`SEEN_WAIT`), for
+  its own tool call to show in the turn's events (`Marks::began`,
+  `Slot::seen`), since Claude Code writes a tool call's start before it runs
+  it; not seen in time, it's refused as after the web.
+- **`approve`** (`approve.rs`), a Job's permission prompt tool
+  (`--permission-prompt-tool mcp__yap__approve`). When nothing else decides a
+  tool call, Claude Code calls it with `{tool_name, input, tool_use_id}` and
+  waits for `{"behavior":"allow","updatedInput":…}` or `{"behavior":"deny",
+  "message":…}`. A run started with the flag keeps it out of the model's own
+  tools (checked on 2.1.296), so only Claude Code calls it. **The person
+  decides**: a card (`yap-claude-approve`) in plain words ("Run a command:
+  npm test", "Edit file: src/app.ts"), Allow once / Deny
+  (`claude_approve_answer`; `claude_approve_pending` lists the waiting ones).
+  No answer in 10 minutes, the run ended, or Claude Code cancelled the call:
+  a no, said to Claude in words it can put in its report. Every card's end
+  goes out as `yap-claude-approve-done`. `AskUserQuestion` is denied with no
+  card: "Yap can't show questions while a job runs…". Test mode can answer
+  every card at once (`e2e_claude_approve_auto`).
+- **The backup hook** (`backup.rs`): before Claude Code edits or writes a
+  file, an http `PreToolUse` hook on `Edit|Write|MultiEdit|NotebookEdit`
+  (`POST /hook/<run>/PreToolUse`, 60 s `timeout`) copies it into the run's
+  backup folder once (the first copy wins), with a `manifest.json`; a file
+  that didn't exist is noted as created; one over 50 MB as too big. It always
+  answers `{}` at once, never blocking or denying a tool. `restore` (Undo job)
+  puts them back and deletes what the run created, touching only the paths
+  the manifest names. A denied Write is still noted as created.
+  [jobs.md](./jobs.md#undo-and-backups).
+- **Limits**: hooks can be turned off by a managed policy
+  (`allowedHttpHookUrls`) and never run under `--bare`. The endpoint's
+  requests aren't in the network receipts (they never leave this PC).
+- **The log** has ids, counts, tool names and outcomes, never a command, a
+  file's path or contents, a prompt or a key.
+- Tested in `claude_live/tests.rs` (the listener's refusals, the MCP subset,
+  the reads, `approve`'s card and its ends, the hook, restore, the job tools
+  for a turn) and through the stand-in in the Jobs and plan e2e specs
+  (`plan-jobs.spec.js` for the job tools over the endpoint).
 
 ## The Integrations view
 

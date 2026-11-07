@@ -386,6 +386,50 @@ that turned 114 words into "I've.", 28 Oct).
   kept). With the decoder from before 27 Oct put back: "how" 10 times and "d"
   61 times flagged, both worse than the baseline, exit 1.
 
+## Claude Code in tests (2026-11-07)
+
+Chat on your Claude plan and Jobs drive the person's own Claude Code
+([ai-models.md](./ai-models.md#the-claude-code-engine-2026-11-07)). No test
+ever reaches it, or anyone's Claude account.
+
+- **The stand-in**: `yap.exe fake-claude <script.jsonl> …` (debug builds,
+  `ai/claude_code/fake.rs`) replays a script as Claude Code would, calls the
+  run's hooks and MCP tools when the script says, and answers `--version` and
+  `auth status` itself.
+- **The variables** (debug builds only): `YAP_CLAUDE_EXE` (the program to run
+  as Claude Code: the build's own `yap.exe`) and `YAP_CLAUDE_ARGS_PREFIX` (a
+  JSON array of the arguments before Claude Code's:
+  `["fake-claude","<script.jsonl>"]`); the stand-in's own
+  `YAP_FAKE_CLAUDE_LOGGED_IN` (`0`: signed out, exit 1) and
+  `YAP_FAKE_CLAUDE_VERSION` (another version, say a too-old one). **A test
+  run (`YAP_E2E=1`) without `YAP_CLAUDE_EXE` finds no Claude Code**, so jobs
+  and the plan are never offered there by accident. `e2e_claude_script
+  {script?}` switches the stand-in's script per turn; `e2e_claude_approve_auto
+  {allow?}` answers every permission prompt at once; `e2e_job_folder {path}`
+  is the folder the next Add folder… takes.
+- **The recordings**: `desktop/src-tauri/src/ai/claude_code/fixtures/<version>/`,
+  per Claude Code version — `real-*` recorded from the real one **signed out,
+  with an empty config folder** (`CLAUDE_CONFIG_DIR`), so no login and no
+  call to the API (not logged in, an invalid key, the interrupt's receipt,
+  an http MCP server's handshake); `synthetic-*` built from the documented
+  shapes (text and thinking, a tool call, a denied one, the plan's limit).
+  The stand-in's own examples are in `fixtures/fake/`; the e2e specs' in
+  `desktop/e2e/support/fake-claude/`. Unit tests parse every recording.
+- **The unit tests' stand-in, without a Yap build**: `session.rs`' round
+  trips run **the test binary itself** as Claude Code (`Program` on
+  `current_exe()` with the prefix `<module>::fake_claude_stand_in --exact
+  --nocapture --quiet --test-threads=1 --`): libtest stops reading options at
+  `--`, so Claude Code's arguments after it are filters that match no test,
+  and only `fake_claude_stand_in` runs — a no-op in a normal run, the fake
+  when `YAP_FAKE_CLAUDE_STAND_IN` names a script.
+- **The real one, by hand**: `cargo test claude_code::session -- --ignored
+  --nocapture` runs `the_real_claude_code_signed_out_says_so` against the
+  Claude Code installed here, with an empty `CLAUDE_CONFIG_DIR` of its own so
+  it never sees a login and never reaches the API (not signed in, the
+  interrupt's receipt).
+- E2E: `claude-plan*.spec.js`, `jobs.spec.js`, `jobs-ui.spec.js`,
+  `plan-jobs.spec.js` ([`docs/e2e-tests.md`](../e2e-tests.md)).
+
 ## The benchmark (`yap.exe bench`)
 
 **`shell/bench.rs`** (+ `shell/bench/machine.rs`, `shell/bench/cold.rs`; 2026-10-24): how fast

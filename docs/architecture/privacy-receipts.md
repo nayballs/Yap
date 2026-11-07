@@ -21,6 +21,13 @@ model downloads, GitHub's updates, the optional account service and the
 calendars. The list shows **every** connection, cloud ones included, so the
 person sees what their choices send where. It never says "nothing leaves".
 
+**Except Claude Code's** (2026-11-07): Chat on your Claude plan and Jobs run
+the person's own Claude Code ([ai-models.md](./ai-models.md#the-claude-code-engine-2026-11-07),
+[jobs.md](./jobs.md)), a program of its own that connects to Anthropic (and
+the web, for its searches and page reads) by itself. Yap sends nothing for
+them, so they aren't in the list, and the page says so. Nor are the runs'
+requests to Yap's own endpoint on 127.0.0.1 (`integrations/claude_live.rs`).
+
 ## `privacy/net.rs` — the recorder
 
 - **One place.** Every reqwest request goes out through
@@ -182,7 +189,9 @@ success colour, Your network, Internet) that opens (`aria-expanded`) to its
 hosts: the host in monospace with its chip, counts and sizes, first to
 last, "for Chat, Voice Assistant", and the latest moments with their
 status. Live: `yap-connections` reloads it. Colours are `--yap-*` tokens,
-light and dark.
+light and dark. Under the explanation (2026-11-07,
+`data-testid="connections-jobs-note"`): "Jobs connect to Anthropic through
+Claude Code itself, so they aren't in Network connections."
 
 ## `privacy/diagnostics.rs` — Report a problem
 
@@ -287,10 +296,15 @@ stay on (`config.yml`): an older Yap still opens one with a `body=`.
   names made safe and unique, `file_stem`), `notes/notes.json` (the whole
   store, folders and actions too) and `notes/versions.json` (each note's
   earlier versions, newest first: `notes::versions::export_all`); each chat as `chats/<date> <title>.md`
-  (who and when, the model) and `chats/chats.json`; `tasks.json`;
+  (who and when, the model) and `chats/chats.json` (and
+  `chats/claude_sessions.json`, each chat's Claude Code session on the
+  person's Claude plan, when there are any, 2026-11-07); `tasks.json`;
   `skills.json` (the person's own Skills, `chat/skills.rs`); `memory/`
   — Memory's own export's Markdown (`memory::export::files`, About you on
-  You.md) and `memory.json`; `dictionary/dictionary.csv` — the CSV the
+  You.md) and `memory.json`; `jobs/` (2026-11-07, [jobs.md](./jobs.md)) —
+  `jobs/jobs.json` (every job, each chat's Mode), `jobs/folders.json` (the
+  folders jobs may work in) and each job's log as `jobs/<id>.log.jsonl`, never
+  its backups (copies of the person's own files); `dictionary/dictionary.csv` — the CSV the
   Dictionary's Export… writes (`dictionary_csv`: Heard, Written, Kind,
   Near-misses, Starred, a byte-order mark and Windows line ends; the rows
   writing one word together, as the view groups them; Import… reads it back);
@@ -355,7 +369,12 @@ a tick box per **kind** of data. "Clear everything and keep my settings"
     added** (tasks.json's tasks with no note; a note's go with it).
   - *Chat and memory* — **Chats** (Chat's conversations, archived ones too,
     not notes' Ask threads, and every screenshot in `chat-images/`, the ones
-    waiting in Chat's box too; the documents Chat wrote stay in Notes),
+    waiting in Chat's box too, and each chat's Claude Code session on the
+    plan, `claude_sessions.json`; the documents Chat wrote stay in Notes),
+    **Jobs** (2026-11-07, `jobs.json`, `jobs/`, `job_folders.json`: every job
+    Chat started, with its log and the backups Undo job uses, each chat's
+    Mode, the Bypass OK and the job folders; running jobs are stopped first;
+    the files the jobs changed stay as they are),
     **What Yap remembers** (`memory.json`: every item, what the passes read
     and what waited for one, and Undo's copies), **Pages beside the chat**
     (2026-11-01: the cookies, sign-ins and site data of the pages opened

@@ -29,7 +29,15 @@ The always-there pill above the taskbar: the `overlay` window's Rust side (regio
   names its shortcut, `Status.quickNoteHotkey`; [notes.md](./notes.md#the-quick-note-notesquick_noters))
   and a ^ menu (Open Yap, New meeting note, Paste last transcript, Settings,
   the microphone and the languages — `bar/menu.rs`, below —, Hide the bar
-  for 1 hour, Turn off the bar — `bar_action`); **dictating** =
+  for 1 hour, Turn off the bar — `bar_action`); **jobs at work**
+  (2026-11-07, [jobs.md](./jobs.md)): `Status.jobs`, how many jobs are queued,
+  running or asking (`jobs::store::live_ids`; the runner refreshes the bar
+  when the number changes), says **"1 job running"** / "2 jobs running" in a
+  small chip nearest the pill while the bar is idle or a meeting records, never
+  during a dictation, the reading card or a first-use pointer (region
+  `jobs`, `data-testid="bar-jobs"`); a click (`bar_action "jobs"`) opens the
+  main window on the newest job's chat and its tab (`chat::turn::open_job`);
+  **dictating** =
   the dictation overlay (waveform, live partials, Transcribing…, errors), with
   ✕ (`dictation-cancel`) and ✓ (`dictation-stop`: stop and paste, as the
   hotkey's second press — into the app the dictation started in) while it
@@ -98,7 +106,13 @@ The always-there pill above the taskbar: the `overlay` window's Rust side (regio
   the quiet countdown and the check-ins, notices), `updates` ("Yap X is ready"), `calendar` (the reminder before a
   meeting, as a call card), `coaching` (push-to-talk tips), `learn` (a word
   to add to the dictionary), `alert` (a paste into an admin app, Windows'
-  microphone privacy), `assistant` (the Voice Assistant's answer, style
+  microphone privacy), Jobs (2026-11-07: `jobDone`, "Job done:
+  garden-planner" with **Open**, from `chat/turn/report.rs`; `jobApprove`, a
+  running job's permission prompt, "Allow a step in garden-planner?" with the
+  step in plain words, **Allow once** / **Deny**, from `jobs/approve_card.rs`:
+  the oldest prompt waiting, one at a time, never answered by voice, its ✕
+  only hiding it while the prompt still waits in Chat; both only with no Yap
+  window in front; icon `job`), `assistant` (the Voice Assistant's answer, style
   "answer"; Esc stops its voice; only while the answer isn't in view in
   Chat — the main window in front, or on screen beside the app in front
   showing that conversation, `assistant::answer_in_view` on
@@ -269,7 +283,7 @@ The always-there pill above the taskbar: the `overlay` window's Rust side (regio
   `bar/BarCard.svelte` (notices: update, guard rails, "Taking notes", the
   call ending, errors) is Wispr's card in Yap's colours: 400 wide,
   the bar surface with a 1 px edge, radius 16, padding 20; a chip naming its
-  kind (Update, Meeting, Call, Tip, Error; icon `tip` = a bulb, the coaching
+  kind (Update, Meeting, Call, Tip, Error, Job — icon `job`, 2026-11-07; icon `tip` = a bulb, the coaching
   hints, whose `{key}` the card names from its `hotkey`), the title 15 / 600, the body 15
   muted, a ghost button and a primary one (ink on light, cream on dark) at
   radius 8, the ✕ 24×24 at 30 % top-right; a `countdown` line with a ring

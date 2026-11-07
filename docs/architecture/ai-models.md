@@ -142,6 +142,15 @@ The language-model side: the OpenAI-compatible client and its prompts, the on-de
 - **`ai/llm/responses.rs`** — **the ChatGPT plan on OpenAI's Responses API**
   (2026-11-01): every call on the provider "chatgpt", whatever the feature,
   from `post_chat_request`. See [Sign in with ChatGPT](#sign-in-with-chatgpt-2026-11-01).
+- **`ai/claude_code.rs`** (+ `claude_code/`: `cli`, `session`, `events`,
+  `fake`) — **the Claude Code engine** (2026-11-07): the person's own
+  installed Claude Code CLI, driven as a child process on their own sign-in
+  or API key, for Chat on the plan and Jobs. See [The Claude Code
+  engine](#the-claude-code-engine-2026-11-07).
+- **`ai/claude_plan.rs`** (+ `claude_plan/`: `map`, `oneshot`, `sessions`) —
+  **Chat on your Claude plan** (2026-11-07): the provider "claude-plan",
+  Claude's models on the person's own Claude subscription through their own
+  Claude Code. See [Your Claude plan](#your-claude-plan-2026-11-07).
 - **`ai/llm.rs`** — the AI cleanup client (OpenAI-compatible). Frames the transcript as
   data (delimiters + one-shot) so small models *clean* it instead of *answering* it.
   **The dictation's two messages for a hybrid model** (`cleanup_messages`,
@@ -1666,6 +1675,265 @@ Following its UI rules (`ChatGptSignIn.svelte` inside `ChatGptProvider.svelte`, 
 - `desktop/e2e/chatgpt.spec.js` runs against a local fake of OpenAI's sign-in and Responses API (`desktop/e2e/support/fake-chatgpt.js`): PKCE, a signed ID token, rotating refresh tokens, a namespaced tool step whose reasoning must come back whole, the usage limit, revocation; and the one ChatGPT entry's states with the plan (the plan only, both with "Your plan | API key", in the picker and Settings; a key only and nothing connected in Settings). `desktop/e2e/chat-model-picker.spec.js` has the picker's nothing-connected and key-only states.
 - Debug builds point at the fake with `YAP_CHATGPT_ISSUER` and `YAP_CHATGPT_API`.
 - Evaluations run on the real plan with `chatgpt:<model slug>` once the maintainer has signed in.
+
+## The Claude Code engine (2026-11-07)
+
+`ai/claude_code.rs` (+ `claude_code/`): Yap drives the person's own installed
+Claude Code CLI as a child process. Chat on your Claude plan (below) and
+[Jobs](./jobs.md) build on it.
+
+**The rules** (Anthropic's legal page for Claude Code,
+code.claude.com/docs/en/legal-and-compliance, read 2026-11-07; [jobs.md](./jobs.md#the-rules)):
+the binary is the person's own and unmodified, the login is theirs (their
+Claude plan or their API key, billed to them), and Yap never reads or stores
+Claude credentials. Sign-in is Claude Code's own `claude auth login`, in a
+terminal the person owns. Nothing is ever named "Claude Code": the features
+are **Your Claude plan** and **Jobs**.
+
+### Finding it (`cli.rs`)
+
+- **Where**: `%USERPROFILE%\.local\bin\claude.exe` (the native install) first,
+  then `PATH` with `PATHEXT` (`which`). An npm `claude.cmd` shim runs through
+  `cmd /d /s /c`, and only with arguments that need no batch escaping: Yap
+  never puts a prompt, JSON or a system prompt on the command line.
+- **Version**: `claude --version` ("2.1.296 (Claude Code)"). Older than
+  **2.1.259** (`MIN_VERSION`, the first with `--permission-prompts`) is "too
+  old".
+- **Signed in**: `claude auth status --json`, exit code 1 when signed out.
+  Only `loggedIn`, `authMethod`, `apiProvider` and `subscriptionType` are
+  read; anything else it says (an email, an organisation) is never kept.
+- `status` is cached for 30 s (`refresh` probes again); the commands
+  `claude_code_status {refresh?}` and `claude_code_sign_in`.
+- **Sign in** (`open_sign_in`): Windows Terminal, else PowerShell, on `claude
+  auth login`, never piped and never in Yap's kill-on-close job (it stays
+  open if Yap quits). Test runs open nothing.
+- Debug builds: `YAP_CLAUDE_EXE` names the program to run instead, and
+  `YAP_CLAUDE_ARGS_PREFIX` (a JSON array) the arguments before Claude Code's
+  (`["fake-claude","<script.jsonl>"]`). A test run without them finds no
+  Claude Code, so the e2e suite never reaches the person's own.
+
+### A session (`session.rs`)
+
+One process holds one conversation: `claude -p --input-format stream-json
+--output-format stream-json --verbose --include-partial-messages`, then what
+the `Spec` asks for. Every user message on stdin is a turn, and every turn ends
+with a `result` (checked on 2.1.296: two messages, two results, one
+`session_id`).
+
+- **The `Spec`**: the folder, model (a full id), `--effort`, `--permission-mode`
+  (always set: from 2.1.302 a `-p` run starts in manual mode when nothing sets
+  one; `dontAsk` by default), `--permission-prompts`,
+  `--permission-prompt-tool`, `--tools`, `--allowedTools` /
+  `--disallowedTools`, `--mcp-config` and `--strict-mcp-config`,
+  `--setting-sources`, `--settings`, `--append-system-prompt-file` or
+  `--system-prompt-file` (a prompt in place of Claude Code's own: plan chats
+  only), `--add-dir`, `--session-id` / `--resume`, `--max-budget-usd` (key
+  runs only), `--fallback-model`.
+- **Files, not arguments**: the settings, the MCP config and the system prompt
+  are written to a folder of the run's own, `%TEMP%\yap-claude\<id>-<tag>\`,
+  removed when the session goes. So nothing needs escaping for a shim and
+  Windows' 32 K command-line limit never bites. (A crash leaves its folder;
+  nothing sweeps them at start yet.)
+- **Paying is never ambiguous** (`environment`): Yap's environment with every
+  `CLAUDE…` and `ANTHROPIC_…` variable taken off (`cli::clean_env`;
+  `CLAUDE_CONFIG_DIR` stays), then `ANTHROPIC_API_KEY` set for a key run and
+  absent for a plan run. A `Spec::env` entry can't put any of them back. So a
+  Bedrock, Vertex or proxy setup made only with environment variables doesn't
+  reach a run. And `system/init`'s `apiKeySource` is checked against the way
+  asked (`Problem::PaysAnotherWay`).
+- **The prompt goes over stdin** (`send_user`) as a stream-json user message,
+  pictures first as base64 image blocks.
+- **Stopping** (`interrupt`): the Agent SDK's control request
+  (`{"type":"control_request","request_id":…,"request":{"subtype":"interrupt"}}`)
+  when `system/init` lists `interrupt_receipt_v1`; 2.1.296 answers with a
+  `control_response` (`success`, `{"still_queued":[]}`) before the turn's
+  `result`. Otherwise stdin is closed and the process tree ended. Windows has
+  no SIGINT; `kill` ends the tree.
+- **Spawned like the speaker engine**: piped stdio, no window, in Yap's
+  kill-on-close job (`procs::end_with_yap`), a reader thread turning stdout
+  into `Event`s on a channel, stderr to the log at debug.
+- **`oneshot`**: one question, one answer.
+- The log at `info` has ids, counts and outcomes, never the prompt or an
+  answer.
+
+### Its output (`events.rs`)
+
+A tolerant parser: one `Event` a line, any type Yap doesn't know kept whole
+(`Other`), a line that isn't JSON counted by its length (`NotJson`), never
+a failure. It reads `system/init` (model, tools, MCP servers, `apiKeySource`,
+`capabilities`), `system/status`, `system/api_retry`,
+`system/permission_denied`, the hooks' events, `stream_event` (text and
+thinking deltas), `assistant` (text, `tool_use`, thinking), `user` (tool
+results), `result` (`session_id`, `usage`, `total_cost_usd`, `terminal_reason`,
+`permission_denials`, the final text), `rate_limit_event`, `tool_progress`
+and control messages.
+
+- **Problems are derived** (`Classifier`), once per turn, just before the
+  event that showed them: `NotSignedIn`, `RateLimited` (with when it resets,
+  or that usage credits are needed), `Billing`, `Account`, `PaysAnotherWay`.
+  Each has its words (`Problem::message`: "Claude Code isn't signed in on this
+  PC. Sign in to Claude Code, then try again.", "You've reached your Claude
+  plan's limit (resets at 4:00 pm).") — the page matches them for its buttons
+  (`core/aiErrors.js` `claudePlanProblem`).
+- **Checked on 2.1.296, signed out**: a turn that can't reach Claude still
+  ends with a `result`, `subtype: "success"` but `is_error: true`,
+  `terminal_reason: "api_error"` and the words "Not logged in · Please run
+  /login" (the `assistant` message before it carries `error:
+  "authentication_failed"`): that's `NotSignedIn`, never an answer.
+  `system/init` comes again before every turn. MCP and hook headers take
+  `${VAR}` from the environment. An http MCP server is first probed with
+  `server/discover`, then `initialize` with 2025-11-25.
+
+### The stand-in (`fake.rs`, debug builds)
+
+`yap.exe fake-claude <script.jsonl> [Claude Code's arguments…]` replays a
+script as Claude Code would (main.rs runs it before the app). A script line is
+printed as it is, with `{{session_id}}`, `{{user_text}}` and `{{cwd}}` filled
+in; a line whose first key starts with `_` is an instruction: wait for the
+next user message, sleep, call an http hook from its `--settings`, call a tool
+of its `--mcp-config`'s server (`_mcp`; with `result_for`, the answer also
+handed back as that tool call's `tool_result`, as Claude Code gives it to the
+model), dump its arguments or which variables it has (never a value), write a
+file in its folder, write to stderr, exit. `{"_for":"chat"}` (or `"job"`,
+`"ask"`, `"all"`) plays the lines up to the next `_for` only in that kind of
+process — a Job's run (`--permission-prompt-tool`), a plan chat's session (an
+`--mcp-config`, no prompt tool), one question (neither) — so one script plays
+a plan chat, the job it starts and the report's question. An interrupt is
+answered as 2.1.296 does. `--version` says 2.1.296
+(`YAP_FAKE_CLAUDE_VERSION` for another), `auth status` says signed in
+(`YAP_FAKE_CLAUDE_LOGGED_IN=0`: signed out, exit 1). Recordings per Claude
+Code version in `claude_code/fixtures/<version>/` (`real-*` recorded signed
+out with an empty config folder, `synthetic-*` built from the documented
+shapes) replay too; its own examples are in `fixtures/fake/`.
+
+**Not yet seen**: an http `SessionStart` hook didn't fire in a real `-p` run
+(not looked into). Nothing has run against a signed-in Claude Code yet.
+
+## Your Claude plan (2026-11-07)
+
+`ai/claude_plan.rs` (+ `claude_plan/`): Chat's and the Voice Assistant's
+answers from Claude on the person's own Claude subscription, through their own
+Claude Code. It sits beside the Anthropic API key as the ChatGPT plan sits
+beside an OpenAI key. Yap never calls Anthropic itself with a plan: Claude
+Code does, on the person's own sign-in.
+
+### The provider
+
+- **"claude-plan"**, a keyed provider. Its key store holds the marker
+  `PLAN_KEY` ("claude-plan") while Claude Code is found here, new enough and
+  signed in (`sync`), and drops it once it isn't. So every "has this
+  provider a key?" check works as for the others; `set_provider_key` takes
+  nothing else for it. It's never a credential.
+- **A placeholder base URL**, `claude-code://plan` (an empty one means "no
+  model set up"): nothing is ever sent to it.
+- **Its models** (`MODELS`, cheapest first): `claude-haiku-5-5`,
+  `claude-sonnet-5-5`, `claude-opus-5-5`, `claude-fable-5-1`. Full ids, never
+  aliases, so every rule keyed on a model id reads them as Anthropic's
+  (`as_api`): effort (as `--effort`; no Fast mode through Claude Code),
+  images, context sizes, the strong models, Latest. `model_catalog.rs` lists
+  them: the CLI has no list of its own.
+- **The Chat scope only**: Chat, the Notes view's Ask, the Voice Assistant
+  and the background calls on the Chat model. Never dictation cleanup,
+  Commands or meeting summaries (too slow, and they'd eat the plan); Settings
+  never offers it there.
+- **At start** (`init`): only for someone already on the plan (its marker
+  set, or Chat on it), a look at Claude Code in the background, so a
+  sign-out since is noticed. Nobody else's Claude Code is started by Yap on
+  its own.
+- `claude_plan_status {refresh?}` (Settings' card, Chat's picker; it keeps
+  the marker in step) and `claude_plan_sign_in`. `on_a_key`: signed in with a
+  Console API key, which isn't a plan.
+
+### A Chat turn (`chat/turn/plan.rs`)
+
+See [chat-and-assistant.md](./chat-and-assistant.md#chat-on-your-claude-plan-2026-11-07):
+a Claude Code session per conversation (`claude_plan/sessions.rs`, kept in
+`claude_sessions.json`, warm 10 minutes), Yap's own chat prompt in place of
+Claude Code's (`--system-prompt-file`), Claude Code's `WebSearch` and
+`WebFetch`, Yap's read-only tools over its run endpoint, nothing of the
+person's settings, `dontAsk`, in an empty folder of Yap's (`claude\chat\`
+in the data folder), its events mapped into Chat's stream
+(`claude_plan/map.rs`). **With Jobs offered**, the run also lists Yap's job
+tools (`RunSpec::jobs`), allowed in `--allowedTools` and named in the prompt;
+the session's fingerprint includes jobs (switching Jobs restarts it), and each
+turn calls `RunHandle::begin_turn(Context)` — the question, the previous
+answer, the conversation, where it was asked, text selected in another app —
+whose `Turn` carries the card and the Job tab's events back; dropping it ends
+the turn, and a call with no turn open does nothing ([jobs.md](./jobs.md#from-a-plan-chat)).
+
+### Every other call (`claude_plan/oneshot.rs`)
+
+Every call on the Chat model that isn't a Chat turn — memory learning, a long
+chat's summary, the Notes view's and the notepad's Ask, Think, the apps' plan,
+Yap's own fast answers, a snip's question, the Voice Assistant's look at the
+screen — arrives at `llm::post_chat_request` as an OpenAI-shaped request and
+comes here, as the ChatGPT plan's go to `llm/responses.rs`.
+
+- **Lean**: `--tools ""` (no tools at all), no MCP server
+  (`--strict-mcp-config` with none), `--setting-sources ""` (none of the
+  person's settings, hooks or CLAUDE.md), in an empty folder of Yap's
+  (`claude\ask\` in the data folder).
+- **Flattened**: its system messages are the prompt (`--system-prompt-file`),
+  the rest one message (the earlier turns in a block, then the question), with
+  that question's pictures as image blocks. Tools a caller offers aren't run:
+  the answer is text.
+- **Streamed** to whoever watches (`Delta::Content`, `Reasoning`).
+- At least 60 s, since Claude Code starts first.
+
+### Usage and cost
+
+- Every call is counted (`usage::record_response`) from the result's `usage`,
+  as "claude-plan", with Claude Code's own estimate of the API price
+  (`total_cost_usd`; else Anthropic's list price): on a plan, what the API
+  would have charged, never spend.
+- **AI usage keeps it apart**: the plan's tokens and their "API value"
+  (`plan_tokens`, `plan_value_micros`), never in the month's spend.
+- An answer's byline: "Your Claude plan · ≈ $0.0042 on the API"; on the key,
+  "API key · $0.0042" (`core/aiModel.js` `paidLine`, `MessageTokens.costMicros`).
+  Nothing known: the way alone.
+
+### Problems, in plain words
+
+Never an answer: the turn says the problem with the buttons that help
+(Chat's toast, `chatState.svelte.js`):
+
+| Problem | Says | Buttons |
+|---|---|---|
+| Not signed in (or Claude Code missing, too old) | "Claude Code isn't signed in on this PC…" | Sign in to Claude Code |
+| The plan's limit | "You've reached your Claude plan's limit (resets at 4:00 pm)." | Manage usage (claude.ai's usage page), **Use my API key for this chat** (an Anthropic key saved) |
+| Paying another way | "Claude Code on this PC is set to pay another way…" | — (the process is stopped before it asks anything) |
+
+### On screen
+
+- **Settings → Language Models → Chat & Voice Assistant → Cloud providers →
+  Claude** (the Anthropic tab, renamed **Claude**): the plan's card first,
+  then the API key (`settings/ClaudePlanProvider.svelte`,
+  [frontend-settings.md](./frontend-settings.md)). The card says what
+  Claude Code is here: not installed (its install guide, Check again), too
+  old (its version and the one Yap needs), signed in with an API key (not a
+  plan), not signed in (**Sign in**), or **Connected · Using Claude plan**
+  (its version and plan, Manage usage, **Use for Chat**).
+- **Chat's picker**: Claude is one entry with "Your plan | API key", as
+  ChatGPT is (`TAB_WAYS`, `waysState`). The chip says "Using Claude plan" or
+  "Anthropic API key".
+- **Receipts**: none. Yap sends nothing for the plan; Claude Code connects
+  on its own, outside Network connections ([privacy-receipts.md](./privacy-receipts.md)).
+
+### Tests
+
+- Unit: the engine's flags, environment and files, the parser against the
+  recordings, the problems, the stand-in round trips (the test binary re-run
+  as the stand-in: [build-and-test.md](./build-and-test.md#claude-code-in-tests-2026-11-07)),
+  the plan's flattening, mapping, citations and sessions.
+- E2E: `claude-plan.spec.js`, `claude-plan-problems.spec.js`,
+  `claude-plan-missing.spec.js`, `claude-plan-expired.spec.js`,
+  `claude-plan-limit.spec.js` on the stand-in ([`docs/e2e-tests.md`](../e2e-tests.md)).
+- **Needs a real signed-in run**: the real stream's shapes (one `assistant`
+  event per block, ids, WebSearch and WebFetch results), `mcp__yap__*` under
+  `dontAsk` with `--allowedTools`, `--resume` and a mid-turn interrupt, real
+  rate-limit events and their reset, the pays-another-way check, whether the
+  plan takes `claude-fable-5-1`, screenshots as image blocks (no e2e), and the
+  context ring (it overstates: the turn's usage is summed over its steps).
 
 ## Model evaluations (`npm run eval`)
 How real models do on Yap's own Chat code, with every request and response

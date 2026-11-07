@@ -55,6 +55,33 @@ tables, method and how anyone can run it and send theirs:
 
 ## What works
 
+**Your Claude plan, Jobs and Markdown files** (2026-11-07,
+[ai-models.md](./ai-models.md#your-claude-plan-2026-11-07), [jobs.md](./jobs.md),
+[notes.md](./notes.md#markdown-files-in-yap-notesmd_filers-2026-11-07)): Yap
+drives the person's own Claude Code (`ai/claude_code/`, unmodified, their own
+sign-in) for **Chat on their Claude plan** (Claude is one entry in the picker,
+"Your plan | API key", told apart on the chip and each answer's byline) and
+for **Jobs** (any chat model hands a task to Claude Code in one of their
+folders; the Mode chip, the Job tab, Undo from backups, a report in the chat's
+own words, out loud when asked by voice; from a plan chat too, over Yap's run
+endpoint, `integrations/claude_live/`). **Markdown files** open in a Yap
+window of their own (Preview / Source, saved back, following changes on
+disk), offered by the installer in "Open with". Unit-tested (the engine's
+flags and environment, the parser against Claude Code 2.1.296's signed-out
+recordings, the endpoint's refusals and MCP subset, `approve`, the backup
+hook and restore, the job store, folders, modes, consent, the report; a
+Markdown file's encodings and arguments) and e2e-tested on Yap's own stand-in
+for Claude Code (`yap.exe fake-claude`): `claude-plan*.spec.js`,
+`jobs.spec.js`, `jobs-ui.spec.js`, `plan-jobs.spec.js`, `md-file*.spec.js`
+([`docs/e2e-tests.md`](../e2e-tests.md)). The real Claude Code was run only
+**signed out**, with an empty config folder (the recordings, and
+`the_real_claude_code_signed_out_says_so` by hand). **Not yet tried**:
+anything against a real signed-in Claude Code (below), and the installer's
+"Open with" until a nightly with it is installed. **Settings no longer
+re-saves every 400 ms** (2026-11-07, `configMerge.js` `fill`): an `llmScopes`
+missing a scope remounted the Chat tab (and asked Claude Code again) in a
+loop, fresh installs too; `settings-scopes.spec.js`.
+
 **Find and show pictures** (2026-10-31 – 11-01, [chat-and-assistant.md](./chat-and-assistant.md),
 `chat/pictures.rs`): Chat finds a picture on the web and shows it beside the
 chat. A page read and a search list each page's pictures by id (`p1`, `p2`…;
@@ -1482,6 +1509,34 @@ quote for a question asked out loud.
   chat can't be renamed from the Notes view (the notepad's Past chats only).
   The on-device Qwen3.5-4B shows another picture when the one asked for
   isn't there (Find and show's evaluation, 3/6, above).
+- **Your Claude plan and Jobs** (2026-11-07): **nothing has run against a
+  real signed-in Claude Code yet** — every turn and job in the tests is the
+  stand-in replaying the documented shapes and 2.1.296's signed-out
+  recordings. Still to see on a real plan and key: the real stream's shapes
+  (one `assistant` event per block, ids, WebSearch / WebFetch results),
+  `mcp__yap__*` under `dontAsk` with `--allowedTools`, `--resume` (after a
+  warm session ends, after Yap was killed mid-job) and a mid-turn interrupt,
+  real rate-limit events and their reset, the pays-another-way check, whether
+  the plan takes `claude-fable-5-1`, screenshots as image blocks (no e2e
+  either), `total_cost_usd` across a job's turns, real `permission_denied`
+  events and Plan mode's output, Windows Terminal resuming a job's session,
+  `claude auth status`'s exit code when signed in, Claude Code writing a tool
+  call's start before its MCP call (else a plan chat's `start_job` is refused
+  on doubt every time), and Haiku calling `mcp__yap__start_job` and putting
+  the spoken question back. In the dev build: the real steps' wording and
+  prompts, the bar's cards while another app is in front, the folder picker,
+  "1 job running" beside the idle and meeting pills. Not built: a card for
+  Claude Code's own questions (`AskUserQuestion` is denied), Settings → Jobs
+  saying a managed policy or `--bare` turns the backup hook off, a sweep of
+  run folders a crash left in `%TEMP%\yap-claude\`, a phone job's report
+  spoken on the phone (it's spoken on this PC). The context ring overstates a
+  plan turn (its usage summed over the turn's steps). An http `SessionStart`
+  hook didn't fire in a real `-p` run (not looked into).
+- **Markdown files** (2026-11-07): the installer's "Open with" is unverified
+  until a nightly with it is installed; "Ask about this" isn't built;
+  quitting from the tray can lose the last 600 ms of typing; mixed line
+  endings become the more common one; the atomic replace drops the file's
+  attributes.
 - **Memory** isn't synced between PCs.
 - **Spoken replies**: ElevenLabs isn't yet tried with a real key; Kokoro's
   Japanese and Mandarin voices aren't offered (no pronunciation step for
