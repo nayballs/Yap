@@ -180,16 +180,21 @@ pub fn live(r: &RateLimit) {
 /// call's prompt and answer against the model's `window`. Kept for the
 /// latest [`CONTEXTS`] conversations, in memory only.
 pub fn note_context(conv: u64, fill: Fill) {
+    with(|s| keep_context(&mut s.contexts, conv, fill));
+}
+
+/// [`note_context`] on `list`: the conversation's latest fill last, the
+/// oldest dropped past [`CONTEXTS`]; a fill with no known window isn't kept.
+/// Pure.
+fn keep_context(list: &mut std::collections::VecDeque<(u64, Fill)>, conv: u64, fill: Fill) {
     if fill.window == 0 {
         return;
     }
-    with(|s| {
-        s.contexts.retain(|(id, _)| *id != conv);
-        s.contexts.push_back((conv, fill));
-        while s.contexts.len() > CONTEXTS {
-            s.contexts.pop_front();
-        }
-    });
+    list.retain(|(id, _)| *id != conv);
+    list.push_back((conv, fill));
+    while list.len() > CONTEXTS {
+        list.pop_front();
+    }
 }
 
 /// A conversation deleted: its context goes.
@@ -293,25 +298,23 @@ pub async fn claude_plan_usage(refresh: Option<bool>) -> Shown {
 mod tests {
     use super::*;
 
+    // On a list of its own: the app-wide one is shared with every test that
+    // forgets the plan's sessions (Delete some of your data's tests among
+    // them), running at the same time.
     #[test]
     fn contexts_are_kept_for_the_latest_conversations_only() {
-        forget_contexts();
-        note_context(1, Fill { used: 32_000, window: 200_000, known: true });
-        note_context(2, Fill { used: 5, window: 0, known: false });
-        note_context(1, Fill { used: 41_000, window: 200_000, known: true });
-        let s = shown();
-        assert_eq!(s.contexts.len(), 1, "no window: not kept");
-        assert_eq!(s.contexts["1"].used, 41_000, "the latest turn's");
+        let mut list = std::collections::VecDeque::new();
+        keep_context(&mut list, 1, Fill { used: 32_000, window: 200_000, known: true });
+        keep_context(&mut list, 2, Fill { used: 5, window: 0, known: false });
+        keep_context(&mut list, 1, Fill { used: 41_000, window: 200_000, known: true });
+        assert_eq!(list.len(), 1, "no window: not kept");
+        assert_eq!(list[0].1.used, 41_000, "the latest turn's");
         for id in 10..10 + CONTEXTS as u64 + 5 {
-            note_context(id, Fill { used: id, window: 1_000, known: false });
+            keep_context(&mut list, id, Fill { used: id, window: 1_000, known: false });
         }
-        let s = shown();
-        assert_eq!(s.contexts.len(), CONTEXTS);
-        assert!(!s.contexts.contains_key("1") && s.contexts.contains_key(&(9 + CONTEXTS as u64 + 5).to_string()));
-        forget_context(9 + CONTEXTS as u64 + 5);
-        assert_eq!(shown().contexts.len(), CONTEXTS - 1);
+        assert_eq!(list.len(), CONTEXTS);
+        assert!(!list.iter().any(|(id, _)| *id == 1) && list.back().is_some_and(|(id, _)| *id == 9 + CONTEXTS as u64 + 5));
         let v = serde_json::to_value(Shown { usage: None, contexts: [("7".to_string(), Fill { used: 1, window: 2, known: true })].into() }).unwrap();
         assert_eq!(v, serde_json::json!({"usage": null, "contexts": {"7": {"used": 1, "window": 2, "known": true}}}));
-        forget_contexts();
     }
 }
