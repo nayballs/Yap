@@ -503,6 +503,8 @@ pub fn run() {
             voice::tts::tts_cloud_usage,
             voice::tts::tts_cloud_preview,
             integrations::bridge::bridge_status,
+            integrations::claude_live::claude_approve_answer,
+            integrations::claude_live::claude_approve_pending,
             link::link_status,
             link::link_pair_start,
             link::link_pair_cancel,
@@ -752,6 +754,8 @@ pub fn run() {
             shell::e2e::e2e_fail_reads,
             #[cfg(debug_assertions)]
             shell::e2e::e2e_upload_pace,
+            #[cfg(debug_assertions)]
+            shell::e2e::e2e_claude_approve_auto,
             #[cfg(debug_assertions)]
             #[cfg(debug_assertions)]
             shell::e2e::e2e_snip,
@@ -1104,6 +1108,9 @@ pub fn run() {
 
             // Local API bridge (Integrations): loopback server for CLIs/agents.
             integrations::bridge::sync(&handle, cfg.bridge_enabled);
+            // Claude Code runs' endpoint (integrations/claude_live.rs): its events;
+            // the listener starts with the first run.
+            integrations::claude_live::init(&handle);
             // Yap Link (Settings → Phone): HTTPS for paired phones on the home Wi-Fi.
             link::sync(&handle, cfg.link_enabled);
 

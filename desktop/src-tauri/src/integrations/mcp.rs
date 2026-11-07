@@ -326,7 +326,7 @@ pub enum BridgeError {
 
 impl BridgeError {
     /// What the AI app's model reads.
-    fn explain(&self) -> String {
+    pub fn explain(&self) -> String {
         match self {
             BridgeError::NotRunning => NOT_RUNNING.to_string(),
             BridgeError::Api { status: 401, .. } => "Yap didn't accept the connection (its local API file is out of date). Ask the user to restart Yap, then try again.".to_string(),
@@ -411,7 +411,7 @@ impl Bridge for HttpBridge {
 }
 
 /// `(status, body)` from a raw HTTP/1.x response (chunked or not).
-fn parse_http_response(raw: &[u8]) -> Option<(u16, Vec<u8>)> {
+pub(crate) fn parse_http_response(raw: &[u8]) -> Option<(u16, Vec<u8>)> {
     let split = raw.windows(4).position(|w| w == b"\r\n\r\n")?;
     let head = std::str::from_utf8(&raw[..split]).ok()?;
     let rest = &raw[split + 4..];
@@ -451,156 +451,140 @@ impl<B: Bridge> YapMcp<B> {
         }
     }
 
-    async fn call(
-        &self,
-        method: &'static str,
-        path: String,
-        body: Option<Value>,
-    ) -> Result<Value, BridgeError> {
-        let bridge = Arc::clone(&self.bridge);
-        tokio::task::spawn_blocking(move || bridge.call(method, &path, body.as_ref()))
-            .await
-            .unwrap_or(Err(BridgeError::NotRunning))
-    }
-
-    async fn get(&self, path: String) -> Result<Value, BridgeError> {
-        self.call("GET", path, None).await
-    }
-
     /// Whether the person lets AI apps save notes (asked of Yap each time;
     /// unreachable = no).
     async fn writes_allowed(&self) -> bool {
-        self.get("/v1/mcp/config".to_string())
+        let bridge = Arc::clone(&self.bridge);
+        tokio::task::spawn_blocking(move || writes_allowed(&*bridge))
             .await
-            .is_ok_and(|v| v["data"]["allowWrites"] == json!(true))
+            .unwrap_or(false)
     }
 
     async fn run_tool(&self, name: &str, args: &JsonObject) -> Result<String, String> {
-        let fail = |e: BridgeError| e.explain();
-        match name {
-            "list_meetings" => {
-                let limit = arg_u64(args, "limit").unwrap_or(20).clamp(1, 100);
-                let v = self
-                    .get(format!("/v1/meetings/list?limit={limit}"))
-                    .await
-                    .map_err(fail)?;
-                Ok(render_meeting_list(&v["data"]))
-            }
-            "search_meetings" => {
-                let query = arg_str(args, "query").unwrap_or("");
-                if query_words(query).is_empty() {
-                    return Err("Search with at least one word of three or more letters (a name, a topic, something that was said).".to_string());
-                }
-                let limit = arg_u64(args, "limit").unwrap_or(5).clamp(1, 20);
-                let v = self
-                    .get(format!(
-                        "/v1/meetings/search?q={}&limit={limit}",
-                        encode(query)
-                    ))
-                    .await
-                    .map_err(fail)?;
-                Ok(render_meeting_search(query, &v["data"]))
-            }
-            "get_meeting" => {
-                let id = arg_u64(args, "id").ok_or("Give the meeting's id (from list_meetings or search_meetings).")?;
-                let page = arg_u64(args, "transcript_page").unwrap_or(1).max(1) as usize;
-                let note = self.note(id).await?;
-                if !is_meeting(&note) {
-                    return Err(format!(
-                        "Note {id} isn't a meeting (it has no recording); read it with get_note."
-                    ));
-                }
-                render_meeting(&note, page)
-            }
-            "search_notes" => {
-                let query = arg_str(args, "query").unwrap_or("");
-                if query_words(query).is_empty() {
-                    return Err("Search with at least one word of three or more letters.".to_string());
-                }
-                let limit = arg_u64(args, "limit").unwrap_or(10).clamp(1, 30);
-                let v = self
-                    .get(format!("/v1/notes/search?q={}&limit={limit}", encode(query)))
-                    .await
-                    .map_err(fail)?;
-                Ok(render_note_search(query, &v["data"]))
-            }
-            "get_note" => {
-                let id = arg_u64(args, "id").ok_or("Give the note's id (from search_notes or list_meetings).")?;
-                Ok(render_note(&self.note(id).await?))
-            }
-            "list_tasks" => {
-                let status = match arg_str(args, "status").unwrap_or("open") {
-                    s @ ("open" | "done" | "all") => s,
-                    _ => return Err("status is \"open\", \"done\" or \"all\".".to_string()),
-                };
-                let limit = arg_u64(args, "limit").unwrap_or(50).clamp(1, 200);
-                let v = self
-                    .get(format!("/v1/tasks/list?status={status}&limit={limit}"))
-                    .await
-                    .map_err(fail)?;
-                Ok(render_tasks(status, &v["data"]))
-            }
-            "list_folders" => {
-                let folders = self.get("/v1/folders/list".to_string()).await.map_err(fail)?;
-                let notes = self
-                    .get("/v1/notes/list?limit=1000000".to_string())
-                    .await
-                    .map_err(fail)?;
-                Ok(render_folders(&folders["data"], &notes["data"]))
-            }
-            "create_note" => {
-                if !self.writes_allowed().await {
-                    return Err("Saving notes from AI apps is switched off in Yap. The user can switch it on in Yap: Settings → MCP → \"Let AI apps save notes to Yap\".".to_string());
-                }
-                let title = arg_str(args, "title").unwrap_or("").trim().to_string();
-                let content = arg_str(args, "content").unwrap_or("").to_string();
-                if title.is_empty() && content.trim().is_empty() {
-                    return Err("A note needs a title or some content.".to_string());
-                }
-                let folder = arg_str(args, "folder").unwrap_or("").trim().to_string();
-                if !folder.is_empty() {
-                    self.call(
-                        "POST",
-                        "/v1/folders/create".to_string(),
-                        Some(json!({ "name": folder })),
-                    )
-                    .await
-                    .map_err(fail)?;
-                }
-                let v = self
-                    .call(
-                        "POST",
-                        "/v1/notes/create".to_string(),
-                        Some(json!({
-                            "title": title,
-                            "content": content,
-                            "folder": folder,
-                            "source": "mcp",
-                        })),
-                    )
-                    .await
-                    .map_err(fail)?;
-                let note = &v["data"];
-                Ok(format!(
-                    "Saved “{}” to Yap (note id {}, folder {}).",
-                    note["title"].as_str().unwrap_or(&title),
-                    note["id"],
-                    note["folder"].as_str().unwrap_or("Personal")
-                ))
-            }
-            other => Err(format!("Unknown tool: {other}")),
-        }
+        let bridge = Arc::clone(&self.bridge);
+        let (name, args) = (name.to_string(), args.clone());
+        tokio::task::spawn_blocking(move || run_tool(&*bridge, &name, &args))
+            .await
+            .unwrap_or_else(|_| Err(BridgeError::NotRunning.explain()))
     }
+}
 
-    async fn note(&self, id: u64) -> Result<Note, String> {
-        match self.get(format!("/v1/notes/{id}")).await {
-            Ok(v) => serde_json::from_value(v["data"].clone())
-                .map_err(|_| "Yap sent a note that couldn't be read.".to_string()),
-            Err(BridgeError::Api { status: 404, .. }) => Err(format!(
-                "There's no note with id {id}. Find ids with list_meetings, search_meetings or search_notes."
-            )),
-            Err(e) => Err(e.explain()),
+fn get(bridge: &dyn Bridge, path: String) -> Result<Value, BridgeError> {
+    bridge.call("GET", &path, None)
+}
+
+/// Whether the person lets AI apps save notes (asked of Yap each time;
+/// unreachable = no). Blocking.
+fn writes_allowed(bridge: &dyn Bridge) -> bool {
+    get(bridge, "/v1/mcp/config".to_string()).is_ok_and(|v| v["data"]["allowWrites"] == json!(true))
+}
+
+/// **One tool call**, over any [`Bridge`]: the text the model reads, or the
+/// tool's error. Blocking. `yap.exe mcp` runs it over the local API
+/// ([`HttpBridge`]); Claude Code runs started by Yap run it in process
+/// (`claude_live.rs`), so both read the same views.
+pub fn run_tool(bridge: &dyn Bridge, name: &str, args: &JsonObject) -> Result<String, String> {
+    let fail = |e: BridgeError| e.explain();
+    match name {
+        "list_meetings" => {
+            let limit = arg_u64(args, "limit").unwrap_or(20).clamp(1, 100);
+            let v = get(bridge, format!("/v1/meetings/list?limit={limit}")).map_err(fail)?;
+            Ok(render_meeting_list(&v["data"]))
         }
+        "search_meetings" => {
+            let query = arg_str(args, "query").unwrap_or("");
+            if query_words(query).is_empty() {
+                return Err("Search with at least one word of three or more letters (a name, a topic, something that was said).".to_string());
+            }
+            let limit = arg_u64(args, "limit").unwrap_or(5).clamp(1, 20);
+            let v = get(bridge, format!("/v1/meetings/search?q={}&limit={limit}", encode(query))).map_err(fail)?;
+            Ok(render_meeting_search(query, &v["data"]))
+        }
+        "get_meeting" => {
+            let id = arg_u64(args, "id").ok_or("Give the meeting's id (from list_meetings or search_meetings).")?;
+            let page = arg_u64(args, "transcript_page").unwrap_or(1).max(1) as usize;
+            let note = note_of(bridge, id)?;
+            if !is_meeting(&note) {
+                return Err(format!(
+                    "Note {id} isn't a meeting (it has no recording); read it with get_note."
+                ));
+            }
+            render_meeting(&note, page)
+        }
+        "search_notes" => {
+            let query = arg_str(args, "query").unwrap_or("");
+            if query_words(query).is_empty() {
+                return Err("Search with at least one word of three or more letters.".to_string());
+            }
+            let limit = arg_u64(args, "limit").unwrap_or(10).clamp(1, 30);
+            let v = get(bridge, format!("/v1/notes/search?q={}&limit={limit}", encode(query))).map_err(fail)?;
+            Ok(render_note_search(query, &v["data"]))
+        }
+        "get_note" => {
+            let id = arg_u64(args, "id").ok_or("Give the note's id (from search_notes or list_meetings).")?;
+            Ok(render_note(&note_of(bridge, id)?))
+        }
+        "list_tasks" => {
+            let status = match arg_str(args, "status").unwrap_or("open") {
+                s @ ("open" | "done" | "all") => s,
+                _ => return Err("status is \"open\", \"done\" or \"all\".".to_string()),
+            };
+            let limit = arg_u64(args, "limit").unwrap_or(50).clamp(1, 200);
+            let v = get(bridge, format!("/v1/tasks/list?status={status}&limit={limit}")).map_err(fail)?;
+            Ok(render_tasks(status, &v["data"]))
+        }
+        "list_folders" => {
+            let folders = get(bridge, "/v1/folders/list".to_string()).map_err(fail)?;
+            let notes = get(bridge, "/v1/notes/list?limit=1000000".to_string()).map_err(fail)?;
+            Ok(render_folders(&folders["data"], &notes["data"]))
+        }
+        "create_note" => {
+            if !writes_allowed(bridge) {
+                return Err("Saving notes from AI apps is switched off in Yap. The user can switch it on in Yap: Settings → MCP → \"Let AI apps save notes to Yap\".".to_string());
+            }
+            let title = arg_str(args, "title").unwrap_or("").trim().to_string();
+            let content = arg_str(args, "content").unwrap_or("").to_string();
+            if title.is_empty() && content.trim().is_empty() {
+                return Err("A note needs a title or some content.".to_string());
+            }
+            let folder = arg_str(args, "folder").unwrap_or("").trim().to_string();
+            if !folder.is_empty() {
+                bridge
+                    .call("POST", "/v1/folders/create", Some(&json!({ "name": folder })))
+                    .map_err(fail)?;
+            }
+            let v = bridge
+                .call(
+                    "POST",
+                    "/v1/notes/create",
+                    Some(&json!({
+                        "title": title,
+                        "content": content,
+                        "folder": folder,
+                        "source": "mcp",
+                    })),
+                )
+                .map_err(fail)?;
+            let note = &v["data"];
+            Ok(format!(
+                "Saved “{}” to Yap (note id {}, folder {}).",
+                note["title"].as_str().unwrap_or(&title),
+                note["id"],
+                note["folder"].as_str().unwrap_or("Personal")
+            ))
+        }
+        other => Err(format!("Unknown tool: {other}")),
+    }
+}
+
+fn note_of(bridge: &dyn Bridge, id: u64) -> Result<Note, String> {
+    match get(bridge, format!("/v1/notes/{id}")) {
+        Ok(v) => serde_json::from_value(v["data"].clone())
+            .map_err(|_| "Yap sent a note that couldn't be read.".to_string()),
+        Err(BridgeError::Api { status: 404, .. }) => Err(format!(
+            "There's no note with id {id}. Find ids with list_meetings, search_meetings or search_notes."
+        )),
+        Err(e) => Err(e.explain()),
     }
 }
 
