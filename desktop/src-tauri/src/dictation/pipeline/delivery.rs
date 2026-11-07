@@ -415,6 +415,22 @@ impl Shared {
                             Some(before) => crate::ai::cleanup_context::trim_echo(before, &c),
                             None => c,
                         };
+                        // Cleanup never adds text from what it was given to
+                        // fit the dictation to: a run of words copied from
+                        // the lines before the transcript (the text before
+                        // the cursor, Yap's own words), or a name on screen
+                        // where the dictation doesn't say it. Then the words
+                        // as said.
+                        let copied = names.as_deref().and_then(|lines| crate::ai::cleanup_context::copied(lines, raw, &c));
+                        if let Some(words) = copied {
+                            tracing::debug!(words, "AI cleanup copied text from the lines it was given: the words as said go in");
+                            return (raw.to_string(), None, false);
+                        }
+                        let added = crate::dictionary::screen_terms::names_added(screen, raw, &c, &dict, &about_name);
+                        if added > 0 {
+                            tracing::debug!(added, "AI cleanup put in a name on screen the dictation doesn't say: the words as said go in");
+                            return (raw.to_string(), None, false);
+                        }
                         // Hinglish: a cleanup that translated it gives way
                         // to the words as spelt out; anything the model
                         // still wrote in Devanagari, in Latin letters too.

@@ -83,6 +83,20 @@ fn align(a: &[String], b: &[String]) -> Vec<Op> {
 
 /// The words as said (`said`) against the cleaned text (`cleaned`).
 pub fn diff(said: &str, cleaned: &str) -> Diff {
+    let mut out = Diff::default();
+    for (taken, put) in changes(said, cleaned) {
+        out.changes += 1;
+        out.words += taken.len().max(put.len());
+    }
+    out
+}
+
+/// Each change cleanup made, in order: the words taken out and the words
+/// put in, as [`word_key`]s (punctuation-only tokens left out; a change of
+/// none of either isn't one). What [`diff`] counts; the dictionary's check
+/// on cleanup (`fuzzy::words_added`) reads which words a dictionary word
+/// took the place of.
+pub fn changes(said: &str, cleaned: &str) -> Vec<(Vec<String>, Vec<String>)> {
     let a: Vec<String> = said.split_whitespace().map(word_key).collect();
     let b: Vec<String> = cleaned.split_whitespace().map(word_key).collect();
     // The same start and end first: most of a dictation is.
@@ -97,7 +111,7 @@ pub fn diff(said: &str, cleaned: &str) -> Diff {
     }
     let (a, b) = (&a[start..end_a], &b[start..end_b]);
     let ops = align(a, b);
-    let mut out = Diff::default();
+    let mut out = Vec::new();
     let mut k = 0;
     while k < ops.len() {
         if ops[k] == Op::Same {
@@ -105,18 +119,17 @@ pub fn diff(said: &str, cleaned: &str) -> Diff {
             continue;
         }
         // A change: the run up to the next word both share.
-        let (mut taken, mut put) = (0, 0);
+        let (mut taken, mut put) = (Vec::new(), Vec::new());
         while k < ops.len() && ops[k] != Op::Same {
             match ops[k] {
-                Op::Del(i) if !a[i].is_empty() => taken += 1,
-                Op::Add(j) if !b[j].is_empty() => put += 1,
+                Op::Del(i) if !a[i].is_empty() => taken.push(a[i].clone()),
+                Op::Add(j) if !b[j].is_empty() => put.push(b[j].clone()),
                 _ => {}
             }
             k += 1;
         }
-        if taken > 0 || put > 0 {
-            out.changes += 1;
-            out.words += taken.max(put);
+        if !taken.is_empty() || !put.is_empty() {
+            out.push((taken, put));
         }
     }
     out

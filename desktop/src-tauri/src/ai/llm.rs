@@ -131,6 +131,9 @@ pub fn build_system_prompt(body: &str) -> String {
 /// become "use this spelling"; differing entries become explicit corrections.
 /// A snippet's phrase is listed to keep word for word (Yap expands it after
 /// cleanup, `config::apply_snippets`); its text never goes to the model.
+/// A dictation's cleanup passes only the entries its transcript says
+/// (`fuzzy::entries_said`, `cleanup_styles::clean`): told them all, the
+/// on-device 4B put "ChatGPT" in place of "chat" (2026-11-07).
 fn dictionary_suffix(dictionary: &[crate::config::DictionaryEntry]) -> String {
     let mut phrases: Vec<String> = Vec::new();
     // Each written word with every way it's heard (its rows, and an entry's
@@ -259,8 +262,9 @@ pub async fn cleanup(
 }
 
 /// [`cleanup`] for a dictation, with `names`: the line naming the terms on
-/// screen the transcript seems to contain ("Spell these names as written:
-/// Zentrix, Siobhan Ní Bhriain.", `screen_terms::cleanup_line`), in the
+/// screen the transcript seems to contain ("If the transcript says one of
+/// these names, spell it exactly as written here: Zentrix, Siobhan Ní
+/// Bhriain. …", `screen_terms::cleanup_line`), in the
 /// dictation's own message ([`cleanup_messages_with_names`]).
 #[allow(clippy::too_many_arguments)]
 pub async fn cleanup_with_names(
@@ -1473,6 +1477,8 @@ pub(crate) fn error_kind(error: &str) -> String {
         "no answer"
     } else if lower.starts_with("the answer left out") {
         "the answer lost the dictation"
+    } else if lower.starts_with("the answer added to") {
+        "the answer added to the dictation"
     } else if lower.starts_with("the provider sent an error") || lower.starts_with("it ended early") || e.starts_with(CUT_OFF) {
         "the stream broke off"
     } else {
@@ -2459,6 +2465,7 @@ mod tests {
             (format!("failed to parse response: expected value at line 1 ({said})"), "parse failed"),
             ("response missing choices[0].message.content".to_string(), "no answer"),
             ("the answer left out most of the dictation (4 chars back)".to_string(), "the answer lost the dictation"),
+            ("the answer added to the dictation (412 chars back for 120)".to_string(), "the answer added to the dictation"),
             (format!("{CONTEXT_EXCEEDED} (HTTP 400)"), "too long for the model's context"),
             (rate_limited_error("groq", None), "rate limited"),
             (format!("the provider sent an error mid-way: {said}"), "the stream broke off"),

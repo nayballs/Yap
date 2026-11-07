@@ -102,10 +102,13 @@ pub fn line(before: &str) -> String {
 /// The line's wording ("{text}": the text before the cursor). Measured
 /// (docs/model-evals.md "Cleanup strength and formatting"): naming a
 /// capital, a question mark or "the whole sentence" made Qwen3.5-4B write
-/// the text before the cursor out again, or a "?" after a statement.
-pub const LINE: &str =
-    "Where it goes: right after \"{text}\", which is already written and is not part of your \
-output. Clean up only the transcript, so it follows on from that text.";
+/// the text before the cursor out again, or a "?" after a statement; so
+/// did "never to repeat" (2026-11-07). "For reference only" and "return
+/// only the cleaned transcript" (2026-11-07, after the 4B wrote an earlier
+/// dictation out again): 66/72 on the cursor cases against the line before
+/// it's 63/72, none copied.
+pub const LINE: &str = "Where it goes: right after \"{text}\" (already written, for reference only). \
+Return only the cleaned transcript, so it follows on from that text.";
 
 fn eval_wording() -> Option<String> {
     if !crate::ai::eval::active() {
@@ -164,6 +167,48 @@ pub fn trim_echo(before: &str, cleaned: &str) -> String {
         return out[end..].trim_start_matches([',', ' ']).to_string();
     }
     cleaned.to_string()
+}
+
+/// [`copied`] throws out a cleanup that copied a run of this many words or
+/// more.
+pub const COPIED_RUN: usize = 5;
+
+/// **Did the cleanup copy text from what it was given beside the
+/// transcript?** `context`: the lines before the transcript — the text
+/// before the cursor in its [`line`], the names on screen's, the
+/// language's. The number of words in the longest run of [`COPIED_RUN`] or
+/// more in `cleaned` (what [`trim_echo`] left) that `context` has word for
+/// word and the transcript (`raw`) doesn't — nor with one word different
+/// (a word cleanup fixed): the on-device Qwen3.5-4B wrote the field's last
+/// two sentences, an earlier dictation, out again after a new one, and
+/// once the line itself ("Where it goes: right after…", 2026-11-07). The
+/// text before the cursor is there to fit the dictation to, never to copy:
+/// then the words as said go in (`pipeline::delivery`). Words compare by
+/// their letters and digits, any case; filler sounds in the transcript
+/// don't count. `None`: nothing copied. Pure.
+pub fn copied(context: &str, raw: &str, cleaned: &str) -> Option<usize> {
+    let words = |s: &str| -> Vec<String> {
+        s.split(|c: char| !c.is_alphanumeric() && c != '\'' && c != '’')
+            .map(|w| w.chars().filter(|c| c.is_alphanumeric()).flat_map(char::to_lowercase).collect::<String>())
+            .filter(|w| !w.is_empty())
+            .collect()
+    };
+    let (given, out) = (words(context), words(cleaned));
+    let said: Vec<String> = words(raw).into_iter().filter(|w| !crate::ai::cleanup_styles::is_filler(w)).collect();
+    if given.len() < COPIED_RUN || out.len() < COPIED_RUN {
+        return None;
+    }
+    let in_given: std::collections::HashSet<&[String]> = given.windows(COPIED_RUN).collect();
+    let near_said = |g: &[String]| said.windows(COPIED_RUN).any(|s| s.iter().zip(g).filter(|(a, b)| a != b).count() <= 1);
+    // Every word of `cleaned` in a copied run of COPIED_RUN words.
+    let mut copied = vec![false; out.len()];
+    for (i, g) in out.windows(COPIED_RUN).enumerate() {
+        if in_given.contains(g) && !near_said(g) {
+            copied[i..i + COPIED_RUN].iter_mut().for_each(|c| *c = true);
+        }
+    }
+    let longest = copied.split(|c| !c).map(<[bool]>::len).max().unwrap_or(0);
+    (longest >= COPIED_RUN).then_some(longest)
 }
 
 /// The text before the cursor for this dictation's cleanup at `base_url`,
@@ -296,6 +341,56 @@ mod tests {
             trim_echo("Hi", "Hi there"),
             "Hi there",
             "under three words: kept"
+        );
+    }
+
+    /// The snowball (2026-11-07): the field held an earlier dictation, and
+    /// the cleanup of the next one wrote it out again after it. Thrown out;
+    /// a cleanup that only fits the dictation to the text is kept.
+    #[test]
+    fn a_cleanup_that_copied_text_from_before_the_cursor_is_caught() {
+        let before = "And then let me know if there's anything else we should add to this. It's working really well, though. ";
+        let raw = "and the cleanup switch should only be in the settings for now um but let's talk about the name as well";
+        let copied_it = "And the cleanup switch should only be in the settings for now. But let's talk about the name as well. \
+            And then let me know if there's anything else we should add to this. It's working really well, though.";
+        assert_eq!(copied(before, raw, copied_it), Some(19));
+        // Only its last sentence again, at the end.
+        let tail = "And the cleanup switch should only be in the settings for now. It's working really well, though.";
+        assert_eq!(copied(before, raw, tail), Some(5));
+        // Cleaned as said: nothing copied.
+        let cleaned = "And the cleanup switch should only be in the settings for now. But let's talk about the name as well.";
+        assert_eq!(copied(before, raw, cleaned), None);
+        // As a dictation checks it: against the line the text went in.
+        assert_eq!(copied(&line(before), raw, copied_it), Some(19));
+        assert_eq!(copied(&line(before), raw, cleaned), None);
+        // The line itself written out (the 4B, once in a model evaluation).
+        let short = line("Do you know whether");
+        let echo = "where it goes: right after \"Do you know whether\" (already written, for reference only). The venue has step-free access.";
+        assert!(copied(&short, "the venue has step free access", echo).is_some());
+        assert_eq!(copied(&short, "the venue has step free access", "the venue has step-free access?"), None);
+
+        // A sentence continued (trim_echo took the echo off first).
+        let before = "We spoke to the landlord yesterday and";
+        let raw = "we spoke to the landlord yesterday and he said the heating will be fixed by monday";
+        let echoed = "We spoke to the landlord yesterday, and he said the heating will be fixed by Monday.";
+        let out = trim_echo(before, echoed);
+        assert_eq!(out, "he said the heating will be fixed by Monday.");
+        assert_eq!(copied(before, "he said the heating will be fixed by monday", &out), None);
+        // Words the person said again are theirs, as is a word cleanup fixed.
+        assert_eq!(copied(before, raw, echoed), None);
+        let before = "Let me know if you have any questions. ";
+        assert_eq!(copied(before, "and let me know if you got any problems", "And let me know if you have any problems."), None);
+        // Fewer than five words alike: kept.
+        assert_eq!(copied("Thanks for the update. ", "i'll review it tonight", "Thanks for the update, I'll review it tonight."), None);
+        // A list and an email's frame, laid out: kept.
+        assert_eq!(copied("Hi Sam,\n\n", "thanks for the figures first the budget second the dates", "Thanks for the figures.\n\n1. The budget\n2. The dates"), None);
+        assert_eq!(
+            copied(
+                "Shopping list:\n- Milk\n- Eggs\n- ",
+                "bread and some butter for the weekend",
+                "Bread and some butter for the weekend"
+            ),
+            None
         );
     }
 

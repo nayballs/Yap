@@ -1153,7 +1153,10 @@ Word, a remote desktop, Discord/Slack's focus-moving paste.
 [dictionary.md](./dictionary.md)): the target window's visible text read
 over UI Automation at record start (in the background, never waited for),
 its names and terms used for that dictation only — a strict near-miss pass
-for every model and cleanup's "Spell these names as written" line, not the
+for every model and cleanup's names line (2026-11-07: only names the
+transcript seems to say, never for a dictionary word; an answer that puts
+one in thrown out — unit-tested and in the model evaluations, not yet in
+real use), not the
 Whisper prompt (measured: it made Whisper hear "row shell" as "Rochelle").
 Extraction, the guards (≈ 50 everyday sentences against a busy screen's
 ~60 terms with this PC's spell checker), the session and the cleanup line

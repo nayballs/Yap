@@ -91,12 +91,43 @@ The correction dictionary: near-miss (fuzzy) matching, several ways one word is 
   exactly), threshold 0.18, ≥3-char terms, case/punctuation preserved; a single
   everyday word (`learn::is_frequent`) is never a near-miss, only its exact
   spelling ("could" stays "could" with "cloud → Claude" in the dictionary,
-  "motion" never becomes "Notion"; 2026-10-21); shortest-first
+  "motion" never becomes "Notion"; 2026-10-21); **the dictionary's own pass**
+  (`apply_fuzzy_with` / `own_near_miss`, 2026-11-07; `pipeline::corrections`
+  with `everyday_words`: the built-in list, then the spell checker) also never
+  takes a run of two words or more that are all everyday words ("a" and "I"
+  count, a letter said alone doesn't) for anything but an entry's exact
+  letters, never one spell-checker word for a longer dictionary word ("chat"
+  isn't "ChatGPT"; "clawed" still becomes "claude", "clot" no longer does),
+  and never one word of a spelling of several ("vertex" for "Vertex AI").
+  Handy's Soundex discount (× 0.3) had let "catch up to", "chats from",
+  "could we", "could do", "we have" and "we we" through as "ChatGPT",
+  "claude" and "WoW" (0.5–0.57 × 0.3 < 0.18), and "chat got" was a letter
+  from "chat gpt": in the maintainer's history, 13 dictations pasted
+  "ChatGPT" and 1 said it. Measured on his own transcripts (the pass alone,
+  counts only): 25 of the 235 in his history and 12 of the 141 in his test
+  set changed, every one a wrong swap undone ("ChatGPT" 11 → 3, "WoW" 17 →
+  3, "claude" 195 → 172) but one "Clot" said for Claude; "Chat GBT",
+  "chatgbt", "Chat G P T" and "cooper netties" still fixed. Shortest-first
   n-gram choice (deliberate fix over Handy's word-swallowing longest-first greedy),
   and never a run whose first word adds nothing (`first_word_adds_nothing`: the
   later words make the same term as closely alone), so the word or list marker
   before a term survives ("to Kubernetes", "1. kubernetes"; found by the real-app
-  robot, 2026-10-17). Max 3 words per n-gram, so "Chat G P T" (4) leaves a "T".
+  robot, 2026-10-17). Max 3 words per n-gram, and 4 when they spell an entry's
+  very letters ("Chat G P T", 2026-11-07; three had left its "T").
+  **AI cleanup is told only the entries the transcript says** (`entries_said`:
+  its written word, or what the exact or near-miss pass would put in, or a
+  snippet's phrase; `cleanup_styles::clean`), and an answer that writes one
+  more often than the transcript does once the passes have run over both,
+  in place of words that neither spell nor sound like it (≤ 0.34 either way,
+  `stats::word_diff::changes` says what it replaced) or added, is thrown out
+  (`words_added`; "quad subscriptions" → "claude subscriptions" is a fix
+  and stays): told the whole dictionary with every dictation, the on-device
+  4B wrote "ChatGPT" for "chat", "our chat" and "API", and "Haiku" for
+  another name said. His test set (`dictation-check --cleanup`, his own
+  dictionary): cleanup's "ChatGPT" 4 → 1 (the "Chat GBT" said), "Haiku" 5 →
+  3, "Qwen" 7 → 5 (one wrong, and one "QN 3" no longer fixed: nothing in
+  the transcript spells or sounds enough like "quen" to be told), no
+  cleanup thrown out.
   The text between the words is kept as it was, line breaks included, and a
   run never reaches over a line break (an email's "Hi Sam," keeps its own
   line: until 2026-10-24 every pass here — the dictionary's, memory's names,
@@ -173,7 +204,8 @@ The correction dictionary: near-miss (fuzzy) matching, several ways one word is 
   with (2026-10-29, found by the chat robot: "Priyanka can you check?" had
   become "Priyanka Raman you check?" with Priyanka Raman on screen; "Priyanka
   Ramen" is still fixed), and is never a spelling the dictionary or memory gives
-  (`protected`: they have the final say; those terms are no targets
+  nor a run holding one ("here, Claude" with "Claude" in the dictionary,
+  2026-11-07; `protected`: they have the final say; those terms are no targets
   either); and only when the speech model wrote what it heard as a name (a
   capital: "Rachelle", "Zentrics", "GPTOSS" — Parakeet wrote a spoken "row
   shell" as "rouchell", which it then took for "Rochelle"); one word in
@@ -186,15 +218,33 @@ The correction dictionary: near-miss (fuzzy) matching, several ways one word is 
   Bhriain") and no everyday sentence changed; robot mode can put them
   back to measure again (`YAP_REALTEST_SCREEN_WHISPER` = list | sentence |
   off, `screen-names-stt.real.js`). **AI
-  cleanup** gets "Spell these names as written: Zentrix, Kubernetes." in
+  cleanup** gets "If the transcript says one of these names, spell it
+  exactly as written here: Zentrix, Kubernetes. Leave every other word as
+  it is." (`NAMES_LINE`) in
   the dictation's own message, never the system prompt (`llm::
   cleanup_with_names` / `with_names_line`: before "Transcript:", at the
   start of the transcript's message when it's split, so a hybrid model's
   cached instruction stays the same) — ≤ 8 terms the raw transcript seems
-  to contain (`in_transcript`: the same letters, or spelled or sounding
-  alike, looser than the pass — the model has the context; a handle only
-  as it's said, "at zentrix dev"), never one the dictionary or memory
-  spells. That line is all that can leave the PC (with the transcript, to
+  to contain (`in_transcript` / `run_seems`: the same letters, or spelled
+  alike — plain edit distance ≤ 0.4 —, or spelled a little alike (≤ 0.6)
+  and sounding alike: the same sound key, or one sound off only when the
+  keys have 5 sounds or more ("cooper netties" for Kubernetes), or the
+  same Soundex code; looser than the pass; a handle only as it's said, "at
+  zentrix dev"), never one the dictionary or memory spells, and never from
+  a run holding a protected spelling, one word that's a word in its own
+  right (the spell checker's), or a run of a very different length (over
+  40 %). Until 2026-11-07 one sound off counted at any length and with no
+  spelling bound: Parakeet's "thingy" and "toggle" were a sound from a
+  four-sound place name on the screen of the maintainer's chat, cleanup
+  was told the name, and the on-device 4B put it in place of "Claude" (in
+  his dictionary) and, with the text before the cursor, wrote his earlier
+  dictation out again ending "…as well. <the name>." The line said only
+  "Spell these names as written: …" then; the conditional wording held on
+  the 4B where that, and "never in place of another word", didn't
+  ([model-evals.md](../model-evals.md), "Names on screen"). An answer that
+  writes a name more times than the transcript seems to say it is thrown
+  out, the words as said going in (`names_added`, `pipeline::delivery`).
+  That line is all that can leave the PC (with the transcript, to
   a cloud cleanup provider; Settings and Privacy & data say so); the
   screen's text never does.
   **Code names** (`dictionary/screen_terms/code.rs`, 2026-10-29; Wispr
@@ -229,7 +279,7 @@ The correction dictionary: near-miss (fuzzy) matching, several ways one word is 
   near-misses" on; the longest name first (the file over its class).
   "user service dot ts" → `userService.ts`, "get user by id" →
   `getUserById`. **AI cleanup** gets the names a transcript seems to say
-  first in its "Spell these names as written" line (`said_in`; ≤ 8 in
+  first in its names line (`said_in`; ≤ 8 in
   all). **The editor's own text** reaches UI Automation only with its
   screen reader mode on (VS Code's "Screen Reader Optimized": Monaco
   exposes a page of code around the cursor then, an empty box otherwise).

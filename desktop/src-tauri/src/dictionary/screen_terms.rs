@@ -27,13 +27,17 @@
 //!      what was heard must not be ordinary words only, must be written as
 //!      a name (a capital), must spell **and** sound close
 //!      (`fuzzy::apply_screen`), and is never a spelling the dictionary or
-//!      memory gives (those have the final say).
+//!      memory gives, nor a run holding one (those have the final say).
 //!    - **Not the Whisper prompt**: measured with real speech, it made
 //!      Whisper hear everyday words as a name on screen ([`whisper_names`]).
-//!    - **AI cleanup**: "Spell these names as written: …" with the few terms
-//!      the transcript seems to contain ([`ScreenTerms::cleanup_line`]) —
-//!      the only part that can leave the PC (with the transcript, to a cloud
-//!      cleanup provider); the screen's text never does.
+//!    - **AI cleanup**: "If the transcript says one of these names, spell
+//!      it exactly as written here: …" ([`NAMES_LINE`]) with the few terms
+//!      the transcript seems to contain ([`cleanup_line`], [`run_seems`]:
+//!      never a word in its own right, a dictionary word or a word that
+//!      only shares a short name's sounds) — the only part that can leave
+//!      the PC (with the transcript, to a cloud cleanup provider); the
+//!      screen's text never does. An answer that writes one more times
+//!      than the transcript says it is thrown out ([`names_added`]).
 //! 4. **In an editor or a terminal** (2026-10-29, `code.rs`): the same text
 //!    gives the dictation's file names and code symbols, written as the
 //!    code has them when said aloud ("user service dot ts" →
@@ -169,15 +173,17 @@ impl ScreenTerms {
 
     /// The terms `transcript` (what the model heard) seems to contain, best
     /// match first, at most [`CLEANUP_TERMS`] — none that `keep` says the
-    /// dictionary or memory already spells.
-    pub fn in_transcript(&self, transcript: &str, keep: &dyn Fn(&str) -> bool) -> Vec<&str> {
+    /// dictionary or memory already spells, and none from a run holding a
+    /// spelling they give ([`run_seems`]). `is_word`: is this lower-case
+    /// word an everyday one?
+    pub fn in_transcript(&self, transcript: &str, keep: &dyn Fn(&str) -> bool, is_word: &dyn Fn(&str) -> bool) -> Vec<&str> {
         let words: Vec<&str> = transcript.split_whitespace().collect();
         let mut found: Vec<(f64, usize, &str)> = Vec::new();
         for (i, t) in self.terms.iter().enumerate() {
             if keep(&crate::dictionary::fuzzy::ngram_key(&t.text)) {
                 continue;
             }
-            if let Some(score) = seems_said(&words, t) {
+            if let Some(score) = seems_said(&words, t, keep, is_word) {
                 found.push((score, i, &t.text));
             }
         }
@@ -185,9 +191,30 @@ impl ScreenTerms {
         found.into_iter().take(CLEANUP_TERMS).map(|(_, _, t)| t).collect()
     }
 
-    /// AI cleanup's line ("Spell these names as written: Zentrix, Siobhan
-    /// Ní Bhriain."), or `None` when the transcript seems to hold none.
-    pub fn cleanup_line(&self, transcript: &str, keep: &dyn Fn(&str) -> bool) -> Option<String> {
+    /// How many more times `answer` (a cleanup's) writes a name it was told
+    /// ([`in_transcript`]'s) than `transcript` seems to say it: a name put
+    /// in place of another word ("…look at here, Claude." with a place
+    /// name on screen came back with the place, 2026-11-07), or added. 0:
+    /// none. Code names said aloud aren't counted (matched word for word).
+    pub fn names_added(&self, transcript: &str, answer: &str, keep: &dyn Fn(&str) -> bool, is_word: &dyn Fn(&str) -> bool) -> usize {
+        let heard: Vec<&str> = transcript.split_whitespace().collect();
+        let wrote: Vec<&str> = answer.split_whitespace().collect();
+        self.in_transcript(transcript, keep, is_word)
+            .into_iter()
+            .filter_map(|name| self.terms.iter().find(|t| t.text == name))
+            .map(|t| written_times(&wrote, &t.text).saturating_sub(said_times(&heard, t, keep, is_word)))
+            .sum()
+    }
+
+    /// AI cleanup's line ([`names_line`]) for `transcript`, as the module's
+    /// [`cleanup_line`] makes it.
+    #[cfg(test)]
+    fn cleanup_line(&self, transcript: &str, keep: &dyn Fn(&str) -> bool, is_word: &dyn Fn(&str) -> bool) -> Option<String> {
+        names_line(&self.cleanup_names(transcript, keep, is_word))
+    }
+
+    /// The names [`cleanup_line`] gives, at most [`CLEANUP_TERMS`].
+    fn cleanup_names(&self, transcript: &str, keep: &dyn Fn(&str) -> bool, is_word: &dyn Fn(&str) -> bool) -> Vec<String> {
         // Code names said aloud first ("user service dot ts" → userService.ts):
         // matched word for word, they're the surest.
         let mut terms: Vec<String> = self
@@ -198,7 +225,7 @@ impl ScreenTerms {
             .into_iter()
             .filter(|t| !keep(&crate::dictionary::fuzzy::ngram_key(t)))
             .collect();
-        for t in self.in_transcript(transcript, keep) {
+        for t in self.in_transcript(transcript, keep, is_word) {
             if terms.len() >= CLEANUP_TERMS {
                 break;
             }
@@ -206,53 +233,52 @@ impl ScreenTerms {
                 terms.push(t.to_string());
             }
         }
-        (!terms.is_empty()).then(|| format!("Spell these names as written: {}.", terms.join(", ")))
+        terms
     }
 }
 
+/// AI cleanup's line naming the terms on screen ("{names}": "Zentrix,
+/// Siobhan Ní Bhriain"). Until 2026-11-07 it was "Spell these names as
+/// written: {names}.", and the on-device Qwen3.5-4B took it as names to put
+/// in: "…look at here, Claude." came back with the place name on screen
+/// for "Claude", and with the text before the cursor too it wrote that out
+/// again and "let's talk about <the name> as well". Measured on the 4B
+/// (docs/model-evals.md, "Names on screen", 2026-11-07, ×3; the `names`
+/// cases, some with a name the transcript doesn't say): the old line 12/18
+/// and 0/6 with the text before the cursor too; "…never in place of another
+/// word, and never add one" 9/18 (it swapped "Claude" every time); this
+/// line 17/18 and 6/6, a full name's accents kept.
+pub const NAMES_LINE: &str =
+    "If the transcript says one of these names, spell it exactly as written here: {names}. Leave every other word as it is.";
+
+/// [`NAMES_LINE`] with `names` ("…spell it exactly as written here:
+/// Zentrix, Siobhan Ní Bhriain. …"), `None` for none. Pure.
+fn names_line(names: &[String]) -> Option<String> {
+    (!names.is_empty()).then(|| NAMES_LINE.replace("{names}", &names.join(", ")))
+}
+
+/// The fewest sounds the longer of a heard run's and a term's
+/// [`fuzzy::sound_key`]s has for one sound off to count ([`run_seems`]):
+/// with fewer, one sound off is another word ("thingy" and "toggle" are a
+/// sound from a four-sound place name, 2026-11-07), so the sounds must be
+/// the same.
+const SOUNDS_FOR_NEAR: usize = 5;
+
 /// How closely `words` (a transcript's) seem to hold `term`: the best of its
-/// runs of 1 … (the term's parts + 1) words, `None` when none is close.
-/// Looser than the near-miss pass (cleanup's model has the context to
-/// decide): the same letters (0), or alike in spelling (plain edit distance
-/// ≤ 0.4 of the longer), or in sound (`fuzzy::sound_distance` ≤ 0.25), or
-/// both a little (the Soundex code and ≤ 0.6). A handle only as it's said
-/// whole ([`handle_said`]).
-fn seems_said(words: &[&str], term: &Term) -> Option<f64> {
+/// runs of 1 … (the term's parts + 1) words ([`run_seems`]), `None` when
+/// none is close. A handle only as it's said whole ([`handle_said`]).
+fn seems_said(words: &[&str], term: &Term, keep: &dyn Fn(&str) -> bool, is_word: &dyn Fn(&str) -> bool) -> Option<f64> {
     if term.kind == Kind::Handle {
         return handle_said(words, &term.text);
     }
+    let key = letters(&term.text);
+    if key.chars().count() < 3 {
+        return None;
+    }
     let mut best: Option<f64> = None;
-    {
-        let part = &term.text;
-        let key = letters(part);
-        if key.chars().count() < 3 {
-            return None;
-        }
-        let pieces = part.split(|c: char| !c.is_alphanumeric()).filter(|p| !p.is_empty()).count().max(1);
-        for n in 1..=(pieces + 1).min(5) {
-            for run in words.windows(n) {
-                let heard = letters(&run.join(" "));
-                // A run of everyday words only is no name ("the plan").
-                if heard.is_empty() || run.iter().all(|w| crate::dictionary::learn::is_frequent(&letters(w))) && heard != key {
-                    continue;
-                }
-                let score = if heard == key {
-                    0.0
-                } else {
-                    let plain = crate::dictionary::fuzzy::plain_spelling_distance(&heard, &key);
-                    let (sound, len) = crate::dictionary::fuzzy::sound_distance(&heard, &key);
-                    let (soundex, _) = crate::dictionary::fuzzy::spelling_distance(&heard, &key);
-                    let soundex_hit = soundex < plain;
-                    if plain <= 0.4 {
-                        plain
-                    } else if sound <= 0.25 && len >= 3 {
-                        sound + 0.1
-                    } else if soundex_hit && plain <= 0.6 {
-                        plain
-                    } else {
-                        continue;
-                    }
-                };
+    for n in 1..=run_words(term) {
+        for run in words.windows(n) {
+            if let Some(score) = run_seems(run, &key, keep, is_word) {
                 if best.is_none_or(|b| score < b) {
                     best = Some(score);
                 }
@@ -260,6 +286,118 @@ fn seems_said(words: &[&str], term: &Term) -> Option<f64> {
         }
     }
     best
+}
+
+/// The longest run of words [`seems_said`] compares with `term`: its parts
+/// and one more (a word heard as two, "zen tricks"), at most 5.
+fn run_words(term: &Term) -> usize {
+    let pieces = term.text.split(|c: char| !c.is_alphanumeric()).filter(|p| !p.is_empty()).count().max(1);
+    (pieces + 1).min(5)
+}
+
+/// How closely `run` (a transcript's words) seems to be the term whose
+/// [`letters`] are `key`, `None` when it isn't. Looser than the near-miss
+/// pass, as cleanup's model reads the whole dictation — but it never sees
+/// the screen, and the on-device 4B put a name it was told in place of
+/// another word (2026-11-07), so never:
+/// - a run holding a spelling the dictionary or memory gives (`keep`, as
+///   [`fuzzy::ngram_key`]s: "Claude" in the dictionary is never a name on
+///   screen), nor everyday words only ("the plan"; [`learn::is_frequent`]);
+/// - one word that's a word in its own right (`is_word`: "thingy",
+///   "toggle", "graph" with Grafana on screen) other than the term's own
+///   letters;
+/// - a run of a very different length from the term (more than 40 % of
+///   the longer, at least 2 letters: "cork" isn't "Corkwell").
+///
+/// Then: the same letters (0), or alike in spelling (plain edit distance ≤
+/// 0.4 of the longer), or both spelled a little alike (≤ 0.6) and in sound
+/// (the same [`fuzzy::sound_key`], or `fuzzy::sound_distance` ≤ 0.25 when
+/// the longer key has [`SOUNDS_FOR_NEAR`] sounds or more: "cooper netties"
+/// for Kubernetes) or the same Soundex code.
+fn run_seems(run: &[&str], key: &str, keep: &dyn Fn(&str) -> bool, is_word: &dyn Fn(&str) -> bool) -> Option<f64> {
+    let heard = letters(&run.join(" "));
+    if heard.is_empty() {
+        return None;
+    }
+    let protected = (0..run.len()).any(|a| (a + 1..=run.len()).any(|b| keep(&crate::dictionary::fuzzy::ngram_key(&run[a..b].join(" ")))));
+    if protected {
+        return None;
+    }
+    if heard == key {
+        return Some(0.0);
+    }
+    if run.iter().all(|w| crate::dictionary::learn::is_frequent(&letters(w))) {
+        return None;
+    }
+    if let [one] = run {
+        if is_word(&letters(one)) {
+            return None;
+        }
+    }
+    let (h, k) = (heard.chars().count(), key.chars().count());
+    if h.abs_diff(k) as f64 > (h.max(k) as f64 * 0.4).max(2.0) {
+        return None;
+    }
+    let plain = crate::dictionary::fuzzy::plain_spelling_distance(&heard, key);
+    if plain <= 0.4 {
+        return Some(plain);
+    }
+    if plain > 0.6 {
+        return None;
+    }
+    let (sound, sounds) = crate::dictionary::fuzzy::sound_distance(&heard, key);
+    let (soundex, _) = crate::dictionary::fuzzy::spelling_distance(&heard, key);
+    let sounds_alike = sounds >= 3 && (sound == 0.0 || (sound <= 0.25 && sounds >= SOUNDS_FOR_NEAR));
+    if sounds_alike {
+        Some(sound + 0.1)
+    } else if soundex < plain {
+        Some(plain)
+    } else {
+        None
+    }
+}
+
+/// How many times `words` (a transcript's) seem to say `term`: runs that
+/// [`run_seems`] takes for it, none sharing a word. Pure.
+fn said_times(words: &[&str], term: &Term, keep: &dyn Fn(&str) -> bool, is_word: &dyn Fn(&str) -> bool) -> usize {
+    if term.kind == Kind::Handle {
+        return handle_said(words, &term.text).map_or(0, |_| 1);
+    }
+    let key = letters(&term.text);
+    let longest = run_words(term);
+    let (mut i, mut times) = (0, 0);
+    while i < words.len() {
+        match (1..=longest.min(words.len() - i)).find(|&n| run_seems(&words[i..i + n], &key, keep, is_word).is_some()) {
+            Some(n) => {
+                times += 1;
+                i += n;
+            }
+            None => i += 1,
+        }
+    }
+    times
+}
+
+/// How many times `words` (a cleanup's answer) write `term` itself: runs
+/// of up to its parts' words with its letters ("Zentrix's" counts). Pure.
+fn written_times(words: &[&str], term: &str) -> usize {
+    let key = letters(term);
+    let longest = term.split_whitespace().count().max(1);
+    let of = |run: &[&str]| {
+        let l = letters(&run.join(" "));
+        l == key || l.strip_suffix('s').is_some_and(|l| l == key)
+    };
+    let (mut i, mut times) = (0, 0);
+    while i < words.len() {
+        match (1..=longest.min(words.len() - i)).find(|&n| of(&words[i..i + n])) {
+            Some(n) => {
+                times += 1;
+                i += n;
+            }
+            None => i += 1,
+        }
+    }
+    times
 }
 
 /// Does the transcript say the handle ("@zentrix_dev": "at zentrix dev" or
@@ -410,11 +548,23 @@ pub fn correct(text: &str, screen: Option<&ScreenTerms>, cfg: &YapConfig) -> Str
 pub fn cleanup_line(screen: Option<&ScreenTerms>, raw: &str, dictionary: &[DictionaryEntry], about_name: &str) -> Option<String> {
     let screen = screen?;
     let keep = protected(dictionary, about_name);
-    let line = screen.cleanup_line(raw, &|k| keep.contains(k));
-    if let Some(l) = &line {
-        tracing::debug!(terms = l.matches(", ").count() + 1, "AI cleanup is told how names on screen are spelled");
+    let words = crate::memory::Words::new();
+    let names = screen.cleanup_names(raw, &|k| keep.contains(k), &|w| words.is(w));
+    if !names.is_empty() {
+        tracing::debug!(terms = names.len(), "AI cleanup is told how names on screen are spelled");
     }
-    line
+    names_line(&names)
+}
+
+/// Did AI cleanup's answer (`cleaned`) write a name on screen it was told
+/// ([`cleanup_line`]) more times than the transcript (`raw`) seems to say
+/// it — in place of another word, or added? How many more; then the words
+/// as said go in (`pipeline::delivery`).
+pub fn names_added(screen: Option<&ScreenTerms>, raw: &str, cleaned: &str, dictionary: &[DictionaryEntry], about_name: &str) -> usize {
+    let Some(screen) = screen else { return 0 };
+    let keep = protected(dictionary, about_name);
+    let words = crate::memory::Words::new();
+    screen.names_added(raw, cleaned, &|k| keep.contains(k), &|w| words.is(w))
 }
 
 // ---- the read, one per dictation ---------------------------------------------------------------
@@ -1269,7 +1419,7 @@ mod tests {
         crate::dictionary::learn::is_frequent(w)
             || [
                 "row", "shell", "zen", "tricks", "cooper", "netties", "rachel", "breen", "nee", "tricky", "tricks",
-                "kindle", "gross", "oss", "boss",
+                "kindle", "gross", "oss", "boss", "centric",
             ]
             .contains(&w)
     }
@@ -1391,30 +1541,146 @@ mod tests {
         }];
         let keep: HashSet<String> = dict.iter().flat_map(|e| [crate::dictionary::fuzzy::ngram_key(&e.to), crate::dictionary::fuzzy::ngram_key(&e.from)]).collect();
         assert_eq!(s.correct("The ZenTrix pilot.", &|k| keep.contains(k), &words), "The ZenTrix pilot.");
-        assert!(!s.in_transcript("the zentrix pilot", &|k| keep.contains(k)).contains(&"Zentrix"));
+        assert!(!s.in_transcript("the zentrix pilot", &|k| keep.contains(k), &words).contains(&"Zentrix"));
     }
 
     #[test]
     fn cleanup_hears_only_the_names_the_transcript_seems_to_hold() {
         let s = screen(SCREEN);
         let none = |_: &str| false;
-        let line = s.cleanup_line("so the zentrics pilot is on", &none);
-        assert_eq!(line.as_deref(), Some("Spell these names as written: Zentrix."));
-        let found = s.in_transcript("so i told shiobhan about the zentrics pilot", &none);
+        let line = s.cleanup_line("so the zentrics pilot is on", &none, &words);
+        assert_eq!(line, Some(NAMES_LINE.replace("{names}", "Zentrix")));
+        assert_eq!(
+            line.as_deref(),
+            Some("If the transcript says one of these names, spell it exactly as written here: Zentrix. Leave every other word as it is.")
+        );
+        let found = s.in_transcript("so i told shiobhan about the zentrics pilot", &none, &words);
         assert!(found.contains(&"Zentrix"), "{found:?}");
         assert!(found.contains(&"Siobhan"), "{found:?}");
         // Spelled too far from it to tell ("Siobhan" said as it sounds,
         // as Parakeet writes it): a gap.
-        assert!(!s.in_transcript("so i told shivon", &none).contains(&"Siobhan"));
+        assert!(!s.in_transcript("so i told shivon", &none, &words).contains(&"Siobhan"));
         assert!(!found.contains(&"Kubernetes") && !found.contains(&"Rochelle"), "{found:?}");
         // The exact spelling heard counts too (keeps cleanup from changing it).
-        assert!(s.in_transcript("Kubernetes is fine", &none).contains(&"Kubernetes"));
+        assert!(s.in_transcript("Kubernetes is fine", &none, &words).contains(&"Kubernetes"));
         // Nothing on screen in it: no line.
-        assert_eq!(s.cleanup_line("see you at the station at noon", &none), None);
+        assert_eq!(s.cleanup_line("see you at the station at noon", &none, &words), None);
         // A handle as it's said; its name alone is the product.
-        assert!(s.in_transcript("ping at zentrix dev about it", &none).contains(&"@zentrix_dev"));
-        assert!(s.in_transcript("ping at zentrix underscore dev", &none).contains(&"@zentrix_dev"));
-        assert!(!s.in_transcript("ping the zentrix dev team", &none).contains(&"@zentrix_dev"));
+        assert!(s.in_transcript("ping at zentrix dev about it", &none, &words).contains(&"@zentrix_dev"));
+        assert!(s.in_transcript("ping at zentrix underscore dev", &none, &words).contains(&"@zentrix_dev"));
+        assert!(!s.in_transcript("ping the zentrix dev team", &none, &words).contains(&"@zentrix_dev"));
+    }
+
+    /// Names heard a little wrong, as speech-to-text writes them: still
+    /// named to cleanup after the thresholds were tightened (2026-11-07).
+    #[test]
+    fn names_heard_a_little_wrong_are_still_named_to_cleanup() {
+        let s = screen(
+            "The Zentrix pilot with Siobhan Ní Bhriain, and Rochelle runs Kubernetes and Grafana; \
+             we store it in Supabase near Corkwell.",
+        );
+        let none = |_: &str| false;
+        for (heard, name) in [
+            ("so the zen tricks pilot", "Zentrix"),
+            ("the zentrics pilot", "Zentrix"),
+            ("i told siobhan nibrian", "Siobhan Ní Bhriain"),
+            ("ask shiobhan", "Siobhan"),
+            ("ask rachelle", "Rochelle"),
+            ("the cooper netties cluster", "Kubernetes"),
+            ("open graph ana", "Grafana"),
+            ("store it in suppa base", "Supabase"),
+            ("we drove to cork well", "Corkwell"),
+            ("the Korkwell office", "Corkwell"),
+        ] {
+            let found = s.in_transcript(heard, &none, &words);
+            assert!(found.contains(&name), "{heard:?} → {found:?}");
+        }
+    }
+
+    /// A word that merely shares a name's sounds is never that name: with
+    /// a four-sound place name on screen, Parakeet's "thingy" and "toggle"
+    /// named it to cleanup, and the on-device 4B put it in place of
+    /// another word (2026-11-07). Fictional names; the same pattern.
+    #[test]
+    fn a_word_sharing_a_names_sounds_is_never_named_to_cleanup() {
+        // "Corkwell": four sounds (k r k l), as the place was.
+        let s = screen("Directions to Corkwell, dashboards in Grafana, the Zentrix pilot.");
+        for term in ["Corkwell", "Grafana", "Zentrix"] {
+            assert!(s.terms.iter().any(|t| t.text == term), "{term} on screen: {:?}", s.terms);
+        }
+        let none = |_: &str| false;
+        for heard in [
+            "So there's a few things to look at here, Claude.",
+            "it would hide the chat sidebar thingy, I think",
+            "But let's talk about the name as well.",
+            "And the cleanup toggle should only be in the settings.",
+            "Draw a circle round it.",
+            "The fire began to crackle.",
+            "Her hair is curly.",
+            "Pull the cork out.",
+            "Plot it on a graph first.",
+            // A word in its own right (the spell checker's) is that word.
+            "A user centric design.",
+        ] {
+            let found = s.in_transcript(heard, &none, &words);
+            assert!(found.is_empty(), "{heard:?} → {found:?}");
+            assert_eq!(s.cleanup_line(heard, &none, &words), None, "{heard:?}");
+        }
+    }
+
+    /// A word the person put in the dictionary (or a way it's heard) is
+    /// never taken for a name on screen: not named to cleanup, and not
+    /// changed by the near-miss pass — alone or with the word before it.
+    #[test]
+    fn a_dictionary_word_is_never_swapped_for_a_name_on_screen() {
+        let dict = [DictionaryEntry {
+            from: "cloud".into(),
+            to: "Claude".into(),
+            fuzzy: true,
+            snippet: false,
+            starred: false,
+            also_heard: Vec::new(),
+        }];
+        let keep = protected(&dict, "");
+        let keep = |k: &str| keep.contains(k);
+        // Names a letter or two from the dictionary's word.
+        let s = screen("Booked by Claudia Ruiz: the Clawde studio and the Kloud pilot.");
+        for heard in ["So there's a few things to look at here, Claude.", "It runs on the cloud now.", "Ask Claude about it."] {
+            let found = s.in_transcript(heard, &keep, &words);
+            assert!(found.is_empty(), "{heard:?} → {found:?}");
+            assert_eq!(s.correct(heard, &keep, &words), heard);
+        }
+        // Without the entry, "Claude" would be heard as the name on screen
+        // (the same pass, nothing protected).
+        assert!(!s.in_transcript("Ask Claude about it.", &|_| false, &words).is_empty());
+        // And through the module's own entry points, as a dictation runs them.
+        let screen_terms = screen("Directions to Corkwell and the Clawde studio.");
+        let line = cleanup_line(Some(&screen_terms), "So there's a few things to look at here, Claude.", &dict, "");
+        assert_eq!(line, None);
+    }
+
+    /// A cleanup that writes a name on screen more times than the
+    /// transcript seems to say it put it in place of another word, or
+    /// added it: counted, so the words as said go in.
+    #[test]
+    fn a_cleanup_that_puts_in_a_name_is_caught() {
+        let s = screen("Directions to Corkwell, the Zentrix pilot with Siobhan Ní Bhriain.");
+        let none = |_: &str| false;
+        let raw = "i have no idea why it said cork well i said claude";
+        // Said once, written once: as it should be.
+        assert_eq!(s.names_added(raw, "I have no idea why it said Corkwell. I said Claude.", &none, &words), 0);
+        // In place of "Claude" too: one more than said.
+        assert_eq!(s.names_added(raw, "I have no idea why it said Corkwell. I said Corkwell.", &none, &words), 1);
+        // Added at the end, as the snowball did.
+        let raw = "but let's talk about the zentrics pilot as well";
+        assert_eq!(s.names_added(raw, "But let's talk about the Zentrix pilot as well.", &none, &words), 0);
+        assert_eq!(s.names_added(raw, "But let's talk about the Zentrix pilot as well. Zentrix.", &none, &words), 1);
+        assert_eq!(s.names_added(raw, "But let's talk about the Zentrix's pilot as well. Zentrix.", &none, &words), 1);
+        // A full name, said a little wrong and written right.
+        let raw = "i told siobhan nibrian about it";
+        assert_eq!(s.names_added(raw, "I told Siobhan Ní Bhriain about it.", &none, &words), 0);
+        // Nothing named: nothing counted.
+        assert_eq!(s.names_added("see you at noon", "See you at noon.", &none, &words), 0);
     }
 
     /// An editor's window: its file names and symbols said aloud are
@@ -1434,8 +1700,8 @@ mod tests {
         // Off: as said.
         let off = crate::config::YapConfig { screen_names: false, ..cfg };
         assert_eq!(correct("call get user by id", Some(&s), &off), "call get user by id");
-        let line = s.cleanup_line("fix user service dot ts", &|_| false).unwrap();
-        assert!(line.starts_with("Spell these names as written: userService.ts"), "{line}");
+        let line = s.cleanup_line("fix user service dot ts", &|_| false, &words).unwrap();
+        assert!(line.contains("spell it exactly as written here: userService.ts"), "{line}");
         // Not a code app: no code names.
         assert!(terms_of(&read, None, &words, true).code.is_none());
     }
