@@ -473,6 +473,7 @@ pub fn run() {
             chat::documents::chat_quote_set,
             chat::think::chat_think_info,
             chat::stream::stream_stop,
+            chat::stream::stream_stop_conversation,
             chat::stream::chat_answering,
             ai::ai_model::ai_model_status,
             ai::ai_model::chat_set_model,

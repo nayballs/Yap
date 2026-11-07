@@ -41,6 +41,8 @@ export const chatStatus = $state({
   conversations: null,
   /** The conversation on screen (Chat showing it), or null. */
   shown: null,
+  /** The conversations answering now, as Rust lists them (ids as strings). */
+  answering: [],
 });
 
 /** conversation → when this window saw it start answering (ms). */
@@ -213,6 +215,7 @@ function onAnswering(p, first = false) {
   const ended = Object.keys(answering).some((id) => !next[id]);
   const begun = ids.some((id) => !answering[id]);
   answering = next;
+  if (ended || begun) chatStatus.answering = ids;
   // A turn ended (its answer saved) or began (the person's question saved): the list again.
   if (ended || begun) refreshListSoon();
   update();
