@@ -302,6 +302,15 @@ pub struct Extra<'a> {
     /// fitted to a small context (`turn/fit.rs`) keeps the pages beside the
     /// chat without them.
     pub without_pictures: bool,
+    /// **Picture files on this PC without the web** (`chat/pictures/local.rs`,
+    /// the turn's `files` gate): `show_picture` (and `look_at_picture` for a
+    /// model that reads images) taking a file's path only — a Code chat, or a
+    /// question naming a picture file, with the web off. Off whenever the
+    /// web is on (the pictures' own tools take paths there).
+    pub files: crate::chat::pictures::Gate,
+    /// Where those pictures are kept for the turn (the answer keeps the ones
+    /// shown).
+    pub file_pictures: Option<&'a crate::chat::pictures::Files>,
 }
 
 /// The calendar tool in a turn ([`calendar::run`]).

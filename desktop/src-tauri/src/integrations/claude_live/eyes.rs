@@ -29,6 +29,11 @@
 //!   `find_pictures` lists a page's; `show_picture` shows one of the turn's
 //!   candidates (a page's pictures, a shot); `look_at_picture` hands it to
 //!   the model first.
+//! - **Picture files without the web** ([`Eyes::files`], 8 Nov 2026,
+//!   `chat/pictures/local.rs`): a Code chat on the plan, or a question
+//!   naming a picture file, with the web off — `show_picture` and
+//!   `look_at_picture` by a path only (`pictures::execute_files`), nothing
+//!   else of the panel's.
 //!
 //! **The turn's web side** is a `web::Turn` of its own (the person's links,
 //! the per-turn caps, the pictures and pages shown): the pages Claude Code's
@@ -99,19 +104,29 @@ pub struct Eyes {
     pub screen: Gate,
     pub pictures: Gate,
     pub act: bool,
+    /// Picture files on this PC without the web (`chat/pictures/local.rs`,
+    /// the turn's `files` gate): `show_picture` and `look_at_picture` by a
+    /// path only. Off whenever `pictures` is on (those take paths there).
+    pub files: Gate,
 }
 
 impl Eyes {
     /// Anything to offer.
     pub fn any(self) -> bool {
-        self.screen != Gate::Off || self.pictures != Gate::Off
+        self.screen != Gate::Off || self.pictures != Gate::Off || self.files != Gate::Off
     }
 
     /// What a turn may use of what its session lists: never more.
     pub fn within(self, session: Eyes) -> Eyes {
         let clamp = |turn: Gate, listed: Gate| if listed == Gate::Off { Gate::Off } else { turn };
         let pictures = clamp(self.pictures, session.pictures);
-        Eyes { screen: clamp(self.screen, session.screen), pictures, act: self.act && session.act && pictures != Gate::Off }
+        Eyes { screen: clamp(self.screen, session.screen), pictures, act: self.act && session.act && pictures != Gate::Off, files: clamp(self.files, session.files) }
+    }
+
+    /// Only picture files (the web off): `show_picture` and `look_at_picture`
+    /// by a path, no web's pictures.
+    pub fn files_only(self) -> bool {
+        self.pictures == Gate::Off && self.files != Gate::Off
     }
 }
 
@@ -149,7 +164,7 @@ pub fn offers(eyes: Eyes, name: &str) -> bool {
     match name {
         see_screen::LOOK => see_screen::offers(eyes.screen, name),
         n if pages::ALL.contains(&n) => pages::offers(eyes.pictures, eyes.act, n),
-        n if PICTURES.contains(&n) => eyes.pictures.offers(n, true),
+        n if PICTURES.contains(&n) => eyes.pictures.offers(n, true) || (eyes.pictures == Gate::Off && pictures::file_offers(eyes.files, n)),
         _ => false,
     }
 }
@@ -166,6 +181,10 @@ fn loop_definitions(eyes: Eyes) -> Vec<Value> {
     let mut all = each(see_screen::definitions(eyes.screen));
     all.extend(each(pages::definitions(eyes.pictures, eyes.act)));
     all.extend(each(pictures::definitions(eyes.pictures, true)));
+    // (The web off: picture files by a path only.)
+    if eyes.pictures == Gate::Off {
+        all.extend(each(pictures::file_definitions(eyes.files)));
+    }
     let name = |d: &Value| d["function"]["name"].as_str().unwrap_or("").to_string();
     let order = all_names();
     let mut out: Vec<Value> = all.into_iter().filter(|d| offers(eyes, &name(d))).collect();
@@ -245,6 +264,10 @@ pub fn refused(name: &str, eyes: Eyes, meeting: bool) -> Option<Value> {
             ));
         }
         return None;
+    }
+    // The web off: picture files by a path only, nothing else of the panel's.
+    if eyes.files_only() {
+        return (!pictures::file_offers(eyes.files, name)).then(|| failed(&format!("{name} isn't offered for this model."), &format!("Unknown tool: {name}")));
     }
     if eyes.pictures == Gate::Off {
         return Some(failed(
@@ -376,7 +399,17 @@ async fn run_for(slot: &Slot, turn: &Call, name: &str, args: &Value, wait: std::
         }
         (result, run.looks)
     } else {
-        let run = pictures::execute(&mut w, name, args, PROVIDER, BASE_URL).await;
+        let run = if turn.ctx.eyes.files_only() {
+            // The web off: a picture file by its path (pictures/local.rs);
+            // a look is outside content, as a web picture's.
+            let run = pictures::execute_files(&mut w.pictures, name, args, PROVIDER, BASE_URL).await;
+            if run.look.is_some() {
+                w.mark_seen();
+            }
+            run
+        } else {
+            pictures::execute(&mut w, name, args, PROVIDER, BASE_URL).await
+        };
         if let Some(picture) = run.shown {
             send(Event::Picture { picture });
         }

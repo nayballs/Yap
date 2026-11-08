@@ -396,6 +396,10 @@ async fn answer_turn(
     crate::chat::compact::turn_started();
     // What this model may do in this turn (gates.rs).
     let mut gates = gates::Gates::for_turn(&cfg, &ep, scope, meetings, chat_in_view);
+    // Picture files on this PC without the web (pictures/local.rs): a Code
+    // chat, or a question naming a picture file, has one to show.
+    let code_chat = crate::agents::code_chat::folder_of(conversation_id).is_some() || (conversation_id.is_none() && crate::agents::code_chat::new_chat_folder().is_some());
+    gates.files = gates.files_gate(&ep, scope, meetings, chat_in_view, code_chat || crate::chat::pictures::local::names_a_picture(&text));
     // The connectors this chat switched off in its + menu (Connectors ▸,
     // `connectors/chats.rs`): none left on, none offered — nor Yap's line
     // about them in the prompt.
@@ -585,8 +589,10 @@ pub(crate) struct FixedParts {
 /// tokens (`known`: it said so) in `conversation` (a Code chat's: no
 /// memory, its agents kept), each request held to `cap`.
 async fn fixed_parts(cfg: &YapConfig, ep: &Endpoint, conversation: Option<u64>, context: u64, known: bool, counter: &crate::chat::budget::Counter, cap: Option<u64>) -> FixedParts {
-    let gates = gates::Gates::for_turn(cfg, ep, None, false, true);
+    let mut gates = gates::Gates::for_turn(cfg, ep, None, false, true);
     let code = crate::agents::code_chat::folder_of(conversation).is_some();
+    // A Code chat's picture files without the web (pictures/local.rs).
+    gates.files = gates.files_gate(ep, None, false, true, code);
     let profile = crate::ai::about_you::profile(cfg);
     let connectors = gates.connectors.then(|| crate::chat::tools::connectors::Turn::for_turn(cfg, &ep.provider, &ep.model, None, context, conversation)).flatten();
     let parts = fit::Parts { persona: &ep.persona, profile: &profile, now: crate::ai::eval::now(), code, connectors: connectors.as_ref(), conversation };

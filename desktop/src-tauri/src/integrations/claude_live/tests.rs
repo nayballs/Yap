@@ -741,7 +741,7 @@ fn a_chat_run_offered_agents_lists_and_allows_their_tools_and_runs_them_for_its_
 fn a_chat_run_offered_the_screen_and_pages_lists_and_allows_them_and_refuses_them_where_the_tool_loop_would() {
     use crate::chat::pictures::Gate;
     let (ep, _) = endpoint(Duration::from_secs(5), MAX_BACKUP_BYTES);
-    let sees = eyes::Eyes { screen: Gate::Look, pictures: Gate::Look, act: true };
+    let sees = eyes::Eyes { screen: Gate::Look, pictures: Gate::Look, act: true, files: Gate::Off };
     let plain = ep.register(RunSpec::new("Plan chat", Tools::Chat)).unwrap();
     let h = ep.register(RunSpec::new("Plan chat", Tools::Chat).with_eyes(sees)).unwrap();
     // Not offered: neither listed, allowed nor run.
