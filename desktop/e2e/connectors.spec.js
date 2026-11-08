@@ -145,6 +145,7 @@ test('Yours: a link added with its token, its tools set one by one and by group,
   await expect(dialog.getByTestId('connector-used')).toContainText('Not used yet');
   await yap.invoke('connector_call_tool', { id, tool: 'turn_off', args: { area: 'hall' } });
   await expect(dialog.getByTestId('connector-used')).toContainText('Last used just now');
+  await dialog.getByRole('button', { name: 'Back to Connectors' }).scrollIntoViewIfNeeded();
   await shot(main, 'connector-page');
   await setConfig(yap, main, { theme: 'dark' });
   await shot(main, 'connector-page-dark');

@@ -284,7 +284,7 @@
       {#if c.tools?.length}
         <p class="fine" data-testid="connector-cost">
           {offered.length === 1 ? '1 tool is' : `${offered.length} tools are`} on for Chat{#if c.tokens > 0}, about {c.tokens.toLocaleString()} tokens of every Chat step{/if}.
-          {#if conn.budget?.mode && conn.budget.mode !== 'all'}{budgetLine(conn.budget, modelName(conn.budget.model))}{/if}
+          {#if conn.budget?.mode === 'search' || conn.budget?.mode === 'deferred'}{budgetLine(conn.budget, modelName(conn.budget.model))}{/if}
         </p>
         {#each groups as g (g.kind)}
           {@const gv = groupValue(g)}

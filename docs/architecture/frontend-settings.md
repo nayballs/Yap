@@ -839,12 +839,17 @@ on an element that also has a `settings.css` class (`set-note`,
     dot and Rust's line, the button it asks for — Sign in, Cancel, Try
     again —, the switch, ⋯ and right-click: Open, Sign in (again), Sign
     out, Refresh tools, Remove…), or "No connectors yet" with Discover
-    connectors.
+    connectors; under it which way Chat's model gets the tools
+    (`connectors_budget`, `budgetLine`: every tool, or tool search past its
+    share) and "Let connectors work during meetings" (`cfg.connectorsInMeetings`,
+    Settings' config copy, passed in as `cfg`).
   - **`ConnectorDetail.svelte`** (a connector's page, one level down,
     "‹ Connectors"): the header (mark, name, "by …" and Tested with Yap from
     its catalogue entry, status, Sign in / Sign in again / Cancel / Try
     again, Sign out, the switch), what it reaches (the link, or the exact
-    command line in a mono box, variables by name), Tools — grouped Reads ·
+    command line in a mono box, variables by name), **Where Yap uses it**
+    (Chat, Voice Assistant, During meetings: `connector_set_where`; Your
+    phone shown off until wave 6), Tools — grouped Reads ·
     Changes things · Can delete, each group's own three-way control and
     each tool's (`ToolRow.svelte`: Always allow · Ask first · Off as radios,
     no Always allow for one that can delete, only Off for one Yap can't

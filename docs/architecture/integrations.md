@@ -498,9 +498,18 @@ aren't found). The page and its parts:
   …") with the one button it asks for (Sign in, Cancel, Try again), its
   switch and ⋯. Live: `yap-connector-status` patches a row,
   `yap-connectors-changed` reads the list again.
+- **Below the list**: which way Chat's model gets the tools
+  (`connectors_budget`: the tools Chat may use — enabled, `where.chat` —
+  against the model's share, `budget::cap` of its context and a free plan's
+  rate, then `budget::mode`: "… gets every tool you've left on", or "…finds
+  the ones it needs with Yap's tool search" / "with its own tool search", or
+  that the model doesn't use connectors), and **"Let connectors work during
+  meetings"** (`connectors_in_meetings`, off).
 - **A connector's page**: what it reaches (the link, or the program's exact
   command line as approved, its variables by name, a secret one 🔒), sign in
-  / out, its tools grouped Reads · Changes things · Can delete with Always
+  / out, **Where Yap uses it** (`connector_set_where {id, places: {chat?,
+  voice?, meetings?}}`: Chat, the Voice Assistant, during meetings; the
+  phone shown off and not changeable until wave 6), its tools grouped Reads · Changes things · Can delete with Always
   allow / Ask first / Off each and a group's own control (a tool that can
   delete never offers Always allow; one Yap can't offer offers only Off; a
   group's control leaves one whose description reads like orders alone),
