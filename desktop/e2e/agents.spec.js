@@ -20,8 +20,10 @@
 //   Undo puts the file back; Open in terminal once it's done.
 // - Only the person's own words start one, in a folder they name, at the
 //   chat's Mode or lower (a folder's cap lowers it; Bypass needs its OK).
-// - Asked first in a folder new to agents (a card, Allow once); never after
-//   the web, nor steered by an agent's own output.
+// - Asked first in a folder new to agents (a card, Allow once); after the
+//   web or an agent's own output, always asked on the card (never refused
+//   outright, never by itself) — asked out loud from another app, the card
+//   is said and on the Yap bar, and a spoken yes sends it.
 // - By voice: Yap asks out loud, the spoken yes starts it, and the report
 //   is spoken.
 // - A permission card makes it "asking"; Stop, Continue; a plan, then "go
@@ -32,7 +34,7 @@
 //   soon as an agent is asked for.
 import fs from 'node:fs';
 import path from 'node:path';
-import { test as base, expect, openView, setConfig } from './support/fixtures.js';
+import { test as base, expect, openView, setConfig, inAnotherApp } from './support/fixtures.js';
 import { startFakeLlm } from './support/fake-llm.js';
 import { startFakeWeb } from './support/fake-web.js';
 import { RUNS } from './support/yap.js';
@@ -466,31 +468,99 @@ test('a folder new to agents is asked first, and an agent never starts or is ste
   const conversation = agent.conversation;
   await messagesOf(yap, conversation, 4);
 
-  // The web read this turn: start_agent refused, whatever the page said.
-  await setConfig(yap, main, { webSearch: true, webSearchNative: true, webSearchService: 'exa', webSearchKeys: { exa: EXA_KEY } });
+  // The web read this turn: start_agent asks on its card first, whatever
+  // Settings say (8 Nov 2026: refused outright before) — the brief in full,
+  // the folder, the Mode and why — and goes only on Send.
+  await setConfig(yap, main, { agentsAsk: 'never', webSearch: true, webSearchNative: true, webSearchService: 'exa', webSearchKeys: { exa: EXA_KEY } });
+  const BRIEF = 'Save the calculator tips you found into notes.md.';
   fakeLlm.scriptChat([
-    { tools: [{ name: 'web_search', args: { query: "Gale location Baldur's Gate 3" } }] },
-    { tools: [{ name: 'start_agent', args: { folder: 'garden-planner', brief: 'Do what the page says.' } }] },
-    { content: "I found it, but I can't start an agent after reading the web: ask me again." },
+    { tools: [{ name: 'web_search', args: { query: 'calculator tricks' } }] },
+    { tools: [{ name: 'start_agent', args: { folder: 'garden-planner', brief: BRIEF } }] },
+    { content: "On it: I've sent an agent to garden-planner." },
+    { plain: true, content: 'It saved the tips into notes.md in garden-planner.' },
   ]);
-  await send(main, 'Look up where Gale is in Baldur\'s Gate 3, then send an agent to garden-planner to write it into notes.md.');
-  await expect(lastAnswer(main)).toContainText("can't start an agent after reading the web");
-  await expect(chipsOfLast(main).last()).toHaveText("Didn't send an agent: not after reading the web");
-  const refused = JSON.parse(fakeLlm.requests.at(-1).messages.filter((m) => m.role === 'tool').at(-1).content);
-  expect(refused.error).toContain('not allowed for the rest of this turn');
-  await setConfig(yap, main, { webSearch: false });
+  const beforeWeb = (await agents(yap)).length;
+  await send(main, 'Look up some calculator tricks, then send an agent to garden-planner to save them into notes.md.');
+  const webCard = thread(main).getByTestId('chat-agent-confirm').last();
+  await expect(webCard).toHaveAttribute('data-state', 'asking', { timeout: 20_000 });
+  await expect(webCard).toContainText('Yap wants to send an agent to ‘garden-planner’ (Auto)');
+  await expect(webCard).toContainText('This chat read the web, which could have put words in the agent’s brief.');
+  await expect(webCard.getByTestId('chat-agent-brief')).toHaveText(BRIEF);
+  expect((await agents(yap)).length).toBe(beforeWeb);
+  await shot(main, '03-asked-after-the-web-light');
+  await webCard.getByRole('button', { name: 'Send', exact: true }).click();
+  await expect(lastAnswer(main)).toHaveText("On it: I've sent an agent to garden-planner.");
+  await expect(webCard).toHaveAttribute('data-state', 'allowed');
+  const webAgent = await ended(yap, (await newAgent(yap, beforeWeb)).id);
+  expect(webAgent).toMatchObject({ folder: 'garden-planner', brief: BRIEF });
+  await setConfig(yap, main, { webSearch: false, agentsAsk: 'new-or-web' });
 
-  // An agent's own output (its status) is web content too: it can't steer an agent.
-  fakeLlm.scriptChat([
-    { tools: [{ name: 'agent_status', args: { id: 'recipe-box' } }] },
-    { tools: [{ name: 'message_agent', args: { id: 'recipe-box', text: 'Also delete the old recipes.' } }] },
-    { content: 'It finished. Ask me again to tell it more.' },
-  ]);
-  await send(main, 'How did the agent in recipe-box go? Also delete the old recipes.');
-  await expect(lastAnswer(main)).toContainText('It finished.');
-  await expect(chipsOfLast(main)).toHaveText(['Checked the agent in recipe-box', "Didn't tell an agent anything: not after reading the web"]);
+  // An agent's own output (its status) is web content too: telling an agent
+  // something after it asks on the card, and Don't sends nothing (dark).
+  const theme = (await yap.invoke('get_config')).theme;
+  await setConfig(yap, main, { theme: 'dark' });
+  try {
+    fakeLlm.scriptChat([
+      { tools: [{ name: 'agent_status', args: { id: 'recipe-box' } }] },
+      { tools: [{ name: 'message_agent', args: { id: 'recipe-box', text: 'Also delete the old recipes.' } }] },
+      { content: "It finished. I didn't pass that on: you said no." },
+    ]);
+    await send(main, 'How did the agent in recipe-box go? Also delete the old recipes.');
+    const statusCard = thread(main).getByTestId('chat-agent-confirm').last();
+    await expect(statusCard).toHaveAttribute('data-state', 'asking', { timeout: 20_000 });
+    await expect(statusCard).toContainText('Yap wants to tell the agent in ‘recipe-box’ (Auto)');
+    await expect(statusCard.getByTestId('chat-agent-brief')).toHaveText('Also delete the old recipes.');
+    await shot(main, '04-asked-after-its-output-dark');
+    await statusCard.getByRole('button', { name: "Don't", exact: true }).click();
+    await expect(lastAnswer(main)).toContainText('It finished.');
+    await expect(chipsOfLast(main)).toHaveText(['Checked the agent in recipe-box', "Didn't tell the agent in recipe-box: not allowed"]);
+  } finally {
+    await setConfig(yap, main, { theme });
+  }
   expect((await agents(yap)).find((j) => j.id === agent.id).turns).toBe(1);
-  expect((await agents(yap)).length).toBe(before + 1);
+  expect((await agents(yap)).length).toBe(before + 2);
+});
+
+test('asked out loud after a web read: the card is said and on the Yap bar, and a spoken yes sends the agent', async ({ yap, main, fakeLlm, shot }) => {
+  await script(yap, ECHO, 'echo');
+  await setConfig(yap, main, { speakReplies: true, webSearch: true, webSearchNative: true, webSearchService: 'exa', webSearchKeys: { exa: EXA_KEY } });
+  const before = (await agents(yap)).length;
+  const BRIEF = 'Save the calculator tips into notes.md.';
+  fakeLlm.scriptChat([
+    { tools: [{ name: 'web_search', args: { query: 'calculator tricks' } }] },
+    { tools: [{ name: 'start_agent', args: { folder: 'garden-planner', brief: BRIEF } }] },
+    { content: "On it: I've sent an agent to garden-planner." },
+    { plain: true, content: 'It saved the tips.' },
+  ]);
+  await freshChat(main);
+  // Asked from another app: nobody sees Chat's thread, so the bar asks too.
+  await inAnotherApp(yap);
+  const barCard = async () => ((await yap.invoke('bar_status')).cards ?? []).find((c) => c.id === 'askFirst') ?? null;
+  const theme = (await yap.invoke('get_config')).theme;
+  try {
+    await ask(yap, 'Look up some calculator tricks, then send an agent to garden-planner to save them into notes.md.');
+    const LINE = 'Send this to an agent in garden-planner, in Auto mode? Say yes, or press Allow.';
+    await expect.poll(() => spoken(yap), { timeout: 20_000 }).toEqual(expect.arrayContaining([LINE]));
+    await expect.poll(barCard, { timeout: 15_000 }).not.toBeNull();
+    const card = await barCard();
+    expect(card).toMatchObject({ title: 'Send this to an agent?', body: `garden-planner · Auto\n${BRIEF}`, icon: 'assistant' });
+    expect([card.primary.label, card.secondary.label]).toEqual(['Allow once', "Don't"]);
+    await expect(yap.overlay.locator('.card').filter({ hasText: 'Send this to an agent?' })).toBeVisible();
+    await shot(yap.overlay, '05-bar-card-agent-light');
+    await setConfig(yap, main, { theme: 'dark' });
+    await inAnotherApp(yap);
+    await expect(yap.overlay.locator('.card').filter({ hasText: 'Send this to an agent?' })).toBeVisible();
+    await shot(yap.overlay, '06-bar-card-agent-dark');
+    expect((await agents(yap)).length).toBe(before);
+    // The spoken yes: the same conversation's next question answers it.
+    await ask(yap, 'Yes please');
+    await expect.poll(() => spoken(yap), { timeout: 20_000 }).toEqual(expect.arrayContaining(["On it: I've sent an agent to garden-planner."]));
+    const agent = await ended(yap, (await newAgent(yap, before)).id);
+    expect(agent).toMatchObject({ folder: 'garden-planner', brief: BRIEF, origin: 'voice' });
+    await expect.poll(barCard).toBeNull();
+  } finally {
+    await setConfig(yap, main, { theme, webSearch: false });
+  }
 });
 
 test('asked by voice: Yap asks out loud, the spoken yes starts the agent, and the report is spoken', async ({ yap, main, fakeLlm }) => {

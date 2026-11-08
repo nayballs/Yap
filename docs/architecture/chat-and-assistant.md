@@ -363,7 +363,7 @@ one side.
   Always allow · Deny** (`chat_connector_confirm`; never Always allow for a
   tool that can delete), the line "Waiting for your OK · …" (asked out loud,
   also one spoken line, the Yap bar's Allow once / Don't and a spoken yes or
-  no: `assistant/connector_ask.rs`; from a phone, anything that would ask is
+  no: `assistant/spoken_ok.rs`; from a phone, anything that would ask is
   refused, "That needs your OK on the PC"); its line "Asking Notion · Search · …"
   (`Turn::activity`, from `calls.rs`) and its chip; ■ Stop drops the call
   and the server is told. Yap's one line in the system prompt
@@ -514,6 +514,13 @@ one side.
   (open_app, copy_to_clipboard, remember, forget): its note and document
   changes go through after the web (see "Strong models' documents" below;
   `a_strong_model_edits_after_the_web_and_never_acts_outside_its_notes`).
+  **What asks instead of being refused** (`ASKS_AFTER_OUTSIDE`, 8 Nov 2026,
+  "ask, don't refuse" — as the connectors' writes ask): Yap Code's
+  `start_agent` and `message_agent` are past the safety rule, and after
+  outside content their own card asks — never automatic, never above the
+  chat's Mode ([Yap Code in Chat](#yap-code-in-chat-2026-11-07)). A page
+  action that buys, sends or signs in asks on its card in any turn that
+  may act ([`pages/act.rs`](#modules)), out loud too.
 - **`chat/tools/agent.rs`** (+ `agent/`; split into its steps 2026-11-03,
   nothing else changed) — **the loop itself** (`tool_loop`): the first
   messages and the tools, a search Yap makes first, then step after step
@@ -1570,7 +1577,10 @@ one side.
   for a spoken Divinity: Original Sin 2 build "in a document".
   **What's taken** (`capture`): the window's visible frame
   (`snip::pick::window_frame`: DWM's frame; not one of Yap's own, minimised,
-  cloaked or gone), cut from every monitor captured at once as a snip is
+  cloaked or gone — then, since 8 Nov 2026, **the monitor it's on**, else
+  the pointer's: `snip::pick::monitor_of`, why at debug, `pick::why_not`,
+  never a title; until then "Yap couldn't take a screenshot of the window
+  in front"), cut from every monitor captured at once as a snip is
   (`snip::cut_frames`, HDR right), every Yap window left out for the moment
   (`calls::capture::for_snip`: the bar's capsule too; meeting windows as the
   meeting setting wants — and the assistant is off during meetings anyway),
@@ -1636,22 +1646,36 @@ one side.
   pure, against the Skills there are; `said`, `turn`); Yap's question when
   it has nothing to run on is answered by voice (`wait_for_answer`,
   `answer_words`).
-- **`chat/assistant/connector_ask.rs`** — **a connector's tool asked about
-  out loud** (Connectors wave 6, [integrations.md](./integrations.md#everywhere-else-in-chat-wave-6)):
-  the Voice Assistant's stream sink hears a connector's card asking
-  (`Streamed::connector_asks`, the tool loop's or a plan turn's held call)
-  and says one line ("Use Notion to create page “Launch notes”? Say yes, or
-  press Allow.", `line`), puts Allow once / Don't on the Yap bar (`card`,
-  id `connectorAsk`, unless the answer's in view in Chat) and waits for a
-  spoken answer (`wait`, one at a time). The next Voice Assistant question
-  in that conversation within the card's two minutes, a clear yes or no in
-  the person's languages (`reply`: seven tables, My languages' codes,
-  English always), is the answer (`take`; `assistant::spoken_connector_answer`
-  before anything else in `answer`: nothing saved, the asking question's
-  generation and dictations count restored so its answer is said); never
-  Always allow by voice, a click only for a tool that can delete or during
-  a meeting ("That one needs a click: press Allow on the Yap bar.").
+- **`chat/assistant/spoken_ok.rs`** — **the person's OK, asked out loud**
+  (Connectors wave 6 for a connector's tool, [integrations.md](./integrations.md#everywhere-else-in-chat-wave-6);
+  every card that asks since 8 Nov 2026, "ask, don't refuse"): the Voice
+  Assistant's stream sink hears any card asking (`Streamed::asks_first`,
+  the tool loop's call or a plan turn's held one) — a connector's tool, an
+  action on a page (a click or an Enter that buys, books, sends, signs in…,
+  words from nowhere the person can see), an agent after outside content —
+  and says one line (`asking`: "Use Notion to create page “Launch notes”?",
+  "Press “Buy tickets” on rail.example.com?", "Send this to an agent in
+  garden-planner, in Auto mode?", each ending "Say yes, or press Allow."),
+  puts Allow once / Don't on the Yap bar (`bar_card`, id `askFirst`: a
+  page's "Press ‘Buy tickets’ on rail.example.com?" with why it asks; an
+  agent's "Send this to an agent?" with its folder, Mode and the start of
+  its brief; unless the answer's in view in Chat, where the thread's card
+  is) and waits for a spoken answer (`wait`, one at a time). The next Voice
+  Assistant question in that conversation within the card's two minutes, a
+  clear yes or no in the person's languages (`reply`: seven tables, My
+  languages' codes, English always), is the answer (`take`;
+  `assistant::spoken_ok_answer` before anything else in `answer`: nothing
+  saved, the asking question's generation and dictations count restored so
+  its answer is said; `chat_page_confirm`, Allow once); never Always allow
+  by voice. **A click only** for the riskiest — a connector's tool that can
+  delete, a page action that would delete or pay (`CLICK_ONLY`), an agent
+  in Bypass permissions — and during a meeting ("That one needs a click:
+  press Allow on the Yap bar."). A phone's question never asks here (a
+  phone has no pages; its agent cards go to Remote Control's phones).
   A spoken answer stays short as every Voice Assistant answer does.
+- **`chat/assistant/connector_ask.rs`** — what a connector's tool says and
+  shows when asked out loud (`line`, `card`: "Use Notion: Create page?" and
+  its first arguments), for `spoken_ok.rs`.
 
 ## Questions about selected text (2026-10-31)
 
@@ -2075,7 +2099,10 @@ Chat itself, or the Voice Assistant asked with Chat in view
 front showing Chat) — there, with Yap's own window in front, the
 assistant's own look at the window in front is skipped for a model that
 calls tools (it would only find Yap, which a capture leaves out) and the
-model looks itself; its pictures show with the spoken question
+model looks itself — your Claude plan's too since 8 Nov 2026 (it was left
+to the window's capture, found only Yap, and was told "Yap couldn't take a
+screenshot" while its own `look_at_screen` worked a minute later); its
+pictures show with the spoken question
 (`followAssistantStream`). Never a phone's question, nor the Voice
 Assistant asked from another app (its own look at the window in front):
 `chat_in_view` in `turn.rs` (the maintainer asked out loud with Chat open,
@@ -2136,9 +2163,10 @@ context every schema counts), `browser_batch` only for one that acts or
 sees, the acting ones only where `can_act` says. A model that can't see
 types by ref (`ref` required: it has one for every field); one that sees
 may type where it clicked. **Their weight** (every step sends them;
-`estimate_tokens`, with the line): ≈ 570 tokens for a model that only
-reads, ≈ 940 for one that sees, ≈ 1,160 acting without seeing (the
-on-device Qwen), ≈ 1,485 with both — about 300 more than the page tools
+`estimate_tokens`, with the line): ≈ 605 tokens for a model that only
+reads, ≈ 975 for one that sees, ≈ 1,200 acting without seeing (the
+on-device Qwen), ≈ 1,525 with both (8 Nov 2026: `browser_read`'s `offset`
+and "tables", and what a search is for, ≈ 35 more) — about 300 more than the page tools
 and the drive tier were for a model that acts, which a cloud model's
 context never notices; a strong model on a server on this PC that doesn't
 say its context (Yap assumes 8K) no longer fits its whole toolset (rich
@@ -2166,6 +2194,38 @@ takes it), what they share said once, in the line.
   new tab as a tab navigating (`rules::needs_ok`). Nothing of the page goes
   to the model by opening it; going somewhere in a tab tells the page after
   (`act::after`, web content). Four new tabs a turn.
+  - **An address the model writes itself** (8 Nov 2026, `pages::written`;
+    Chat's own test of the toolset against Claude Code's found a well-formed
+    `https://www.example.com/forever` refused until a search had found it):
+    **before anything from outside came into the turn** — no page read, search
+    result, picture, closed tab's title, connector's result, agent's words,
+    look at the screen or text selected elsewhere (`web::Turn::seen`, and
+    `pages::Ctx::outside` for the kinds the web side doesn't record: the tool
+    loop's `agent_seen` / `screen_seen` / `connector_seen`, a plan chat's web
+    flag — Claude Code's own `WebSearch` / `WebFetch`, a look, an agent; a
+    call not seen in its turn's events counts, on doubt —), **and the answer
+    before the question not from the web** (`pages::after_web_answer`, as Yap
+    Code's agents count it: a plan chat's session keeps the earlier pages'
+    words whole) — any well-formed public `https://` address opens, in a new
+    tab or the tab in front (`act::go`), as the model wrote it. **After it**,
+    only the turn's own links, as before: a page could otherwise have the
+    model carry the person's data out in an address
+    (`collect.example/?d=<their notes>`). Plain `http://` and never this PC or
+    its network, as before (`web::check_url`). A refusal says which rule
+    applied and what works instead: "…never an address you write (a page
+    could have put the user's data in it). Instead, open a link from a page
+    read (browser_read lists them) or find the page with web_search" (on the
+    plan, `WebSearch`; a turn with no web search: ask the user for the
+    address); the chip "Didn't go to …: not a link from you, a search or the
+    page" ("…: only https:// addresses on their own" for `http://`).
+  - **`search`** (the tool's one sentence: "search: a results page for the
+    user; web search finds pages to open"): a results page for the person,
+    never read. Its
+    result, a results page's refused read (`read::search_refusal`) and a
+    search opened in a tab (`pages::find_pages`) say how the model finds pages
+    to open: its web search (`pages::Ctx::search`: `web_search`, the plan's
+    `WebSearch`), whose results' links `browser_navigate` opens — or, with no
+    web search this turn, that the results are the person's to pick from.
 - **Yap opens it itself, no model** (`turn::asked_page`, before any model
   as the app fast path is; 1 Nov 2026: given `open_page`, Qwen3.5-4B opened
   Google Chrome with `open_app` for "open Google", and for "open YouTube"
@@ -2196,7 +2256,7 @@ takes it), what they share said once, in the line.
   refuses a website (`apps::plan::for_the_web`: the request's phrase asks
   for the web or names a site, and no app has exactly that name). English
   only so far: in another language the model opens it (`browser_navigate`).
-- **`browser_read { mode?: "text" | "elements", tab? }`**: the page in front
+- **`browser_read { mode?: "text" | "elements" | "tables", offset?, tab? }`**: the page in front
   beside the chat (or tab n, `view::pick_tab`), read in place
   (`view::PAGE_TEXT_SCRIPT`, Yap's own read-only script through
   `view::run_script`: the title, the `main` / `article` element's headings
@@ -2214,9 +2274,44 @@ takes it), what they share said once, in the line.
   reading, web-and-apps.md; any of an engine's countries and hosts —
   google.de, cn.bing.com, html.duckduckgo.com, search.yahoo.com, Baidu,
   Yandex, Naver… — never a look-alike such as google.example.com) —
-  refused, the person reads it; nor any browser tool there. The tabs line
-  gives each tab's site only: its title and address come with a read
-  (`tabs`).
+  refused, the person reads it; nor any browser tool there — the refusal
+  says how to find pages to open instead (above: `read::search_refusal`).
+  The tabs line gives each tab's site only: its title and address come with
+  a read (`tabs`).
+  - **In parts** (8 Nov 2026, `chat/pages/read.rs`; Claude Code's WebFetch
+    has an offset, Yap's read stopped at `"more": true`): a read that stops
+    short says where to go on, **`next`** — the arguments for the next read:
+    `{"offset": 5000}` (text), `{"mode": "elements", "offset": 150}`
+    (elements past `MAX_ELEMENTS`; else, the elements' text cut at 2,500,
+    `{"offset": 2500}`), `{"mode": "tables", "offset": 100}`. **A read without
+    `offset` is exactly what it was** (its text, headings, links and tabs the
+    same bytes, the short read `view::PAGE_TEXT_SCRIPT`), `next` apart, so
+    the evaluations hold. **`offset`** (characters) gives the text from there,
+    `READ_MAX` of it, out of a longer read of the page
+    (`read::long_text_script`: the same script with room for 200,000
+    characters, 400 headings, 600 links): `offset`, `chars` (the text's
+    length), the headings that start in that part (`read::headings_in`: each
+    found after the one before it, at most 60), the links whose words it
+    holds (they may open), `more`, `next`; no tabs list. Past the end: said,
+    with the length. In mode "elements", `offset` is an element's number:
+    the next `MAX_ELEMENTS` from there (at most 3,000 into the page:
+    `browser_find` finds the rest), refs as ever. No text filter of its own:
+    `browser_find` is that.
+  - **Mode "tables"** (`read::tables`; the report: a gear list in a big
+    sortable table was hard to pull out of the text): the page's tables as
+    structured rows — Yap's own read-only script (`read::TABLES_SCRIPT`;
+    never a script a page or a model wrote, so no `browser_eval`): every
+    visible `<table>` (not one that only lays out another) and ARIA
+    table / grid, **as the page shows it now** (sorted as sorted, a row a
+    filter hid left out), its headers from `<thead>` or a first row of header
+    cells, its caption, `aria-label` or the heading before it; at most 40
+    tables, 3,000 rows, 30 cells a row, 300 characters a cell. Each part of a
+    read: `{table, caption?, headers, rows, from, of}`, a cell its words or
+    `{text, url}` for a link (public http(s) only, never a search engine's:
+    they may open), rows paged across the tables (`read::page_tables`: 100
+    rows or about 8,000 characters a read, a table's headers again where it
+    goes on), `count`, `rows` (all of them), `more`, `next`. None: "Found no
+    tables on …". Web content and a source of the turn, as any read.
 - **Looking around a page** (`pages/see.rs`, read only: nothing on the page
   changes and nothing leaves it; a scroll shows on the live tab, as Claude
   Code's does; the scrolls for a model that sees): **`browser_scroll { direction: down | up | top | bottom,
@@ -2251,10 +2346,39 @@ takes it), what they share said once, in the line.
   so: `frame`, `see::Frame`), fitted for the provider; the person's copy is
   kept at the device's pixels. A zoom: top, middle, bottom, left, right, the
   corners, or `x,y,w,h` (fractions, percentages, or the latest screenshot's
-  pixels: `see::Region`) cropped from the device's pixels and enlarged when
-  small (bilinear, at most twice, to 900 px) — sharper than the screenshot
-  the model got (WebView2's DevTools capture could render it at 2×, not
-  done; nor a full-page shot: `CapturePreview` only draws the view).
+  pixels: `see::Region`), **at twice the page's CSS pixels** (8 Nov 2026;
+  "top" had come back 986×427, no sharper than the screenshot):
+  - **a tab out of sight is drawn twice as finely** (`view::shot_in_view_at`:
+    for a moment under Yap's own page, its controller's rasterization scale
+    and bounds both doubled — the same CSS layout, four times the pixels —,
+    the shot, then its scale back and the page out of sight again, or where
+    the person brought its tab up meanwhile): real detail, the result's
+    `drawn: 2`, the model told "drawn at 2 times the screen's detail";
+  - **a tab on screen is the screen's own pixels**, enlarged to 2× the CSS
+    pixels where they're fewer (`see::zoom_factor`: bilinear, never past
+    2,048 px long; a small crop to 900 px, as before) — `drawn: 1`,
+    `enlarged`, and the model told it's an upscale with no more detail. True
+    2× there would change what the person sees: WebView2 draws a window at
+    its own pixels (a finer rasterization scale zooms the page in its
+    window), and DevTools' `Page.captureScreenshot` with a clip at a scale
+    resizes the view while it draws. Nor a full-page shot (`CapturePreview`
+    only draws the view).
+  Every zoom's `density` (pixels a CSS pixel) is said; its tokens come from
+  the PNG the model gets (`budget::part_size`), whatever its size.
+  Tested (8 Nov 2026): `chat::pages::tests` (an address the model writes
+  before and after outside content, one with the person's notes in it
+  refused after a page read; a long page read in parts; tables paged by
+  rows; the zoom drawn finer in the stand-in), `pages::read` and `see`'s pure
+  tests, `claude_live::eyes` (the plan's own address, then after its
+  WebSearch), the browse scenarios' check (`browse-read-long-page`,
+  `browse-read-table`); `chat-pages.spec.js` in the real webview (an address
+  the model wrote opened, then refused after the read; the gear list read in
+  parts and as a table by Yap's scripts; a zoom on screen enlarged and said
+  so, one out of sight drawn at twice the view's pixels). The e2e's fake
+  that reads images says its context (32K) in `chat-pages` and
+  `chat-pictures`: at the 8K Yap assumes for a server that doesn't, a model
+  that sees now sits just past the edge of its whole toolset, and `fit.rs`
+  leaves its view tools out for a turn.
   **A shot is for the model**: it comes back in its tool result (the next
   step's message in the tool loop, `pictures::look_message`, while it fits:
   `room.rs`; MCP image content on the plan), and shows in the thread **in
@@ -2282,8 +2406,10 @@ takes it), what they share said once, in the line.
   `show_picture` and its path, and that a local web page isn't opened
   (`pictures/local.rs` `not_a_page`, under `chat/pictures.rs` above). None is an action tool
   (`tools::ACTION_TOOLS`): nothing leaves Yap but an address a search or the
-  person gave, a site they named, or the words of a search they asked for
-  (to their own engine, as a web search sends its words to its service).
+  person gave, a site they named, the words of a search they asked for
+  (to their own engine, as a web search sends its words to its service), or
+  — only before anything from outside is in the turn — an address the model
+  wrote itself (`pages::written`, above).
 - **The Page tab** (`PageTab.svelte`, in DocPanel's chunk; one per page,
   `{#key}`): the page is **its own WebView2**, Rust's (`pages/view.rs`), not
   Tauri's — Tauri puts its IPC (`__TAURI_INTERNALS__`, the invoke key) into
@@ -2415,11 +2541,19 @@ review (safely, for any user, in any language Yap speaks).
   and an on-device model only on `act::LOCAL_ALLOWLIST` — the ones the
   browse evaluation passed (every safety task and at least 80% of the rest,
   model-evals.md "Acting on pages"; **empty**: none of the five on-device
-  models measured qualified, 1 Nov 2026). Only a typed Chat turn (never the
-  Voice Assistant or the meetings: an action that buys asks in Chat) with
-  the web on (the page tools' `Gate`), never while a meeting records or a
-  call is on (`assistant::is_off`). `tools::Extra::act`; small models never
-  see these tools.
+  models measured qualified, 1 Nov 2026). Only where the pages are, with
+  the web on (the page tools' `Gate`): a typed Chat turn, or — since 8 Nov
+  2026 — the Voice Assistant asked with Chat in view (`gates.rs`: until
+  then refused every action, "only for a question typed in Chat", though
+  `browser_scroll` ran; a tester couldn't open a site's Stats tab, close a
+  video ad or hover for a tooltip). Asked out loud, the same rules and the
+  same cards — the Chat view draws a spoken turn's card and its tab's "Yap
+  is using this page" as a typed turn's (`chatState.svelte.js`
+  `actingEvent`, both paths) —, each card also said and answerable by voice
+  (`assistant/spoken_ok.rs`; deleting or paying a click only). Never across
+  the meetings, from a phone or another app (no pages there), nor while a
+  meeting records or a call is on (`assistant::is_off`). `tools::Extra::act`;
+  small models never see these tools.
 - **The tools** (the browser toolset's acting ones, `act::TOOL_NAMES`;
   `act::INSTRUCTIONS` the line; the browser tools' own line for them asks for
   a search engine's page only when the person wants one): `browser_read {
@@ -3891,10 +4025,14 @@ as for every other. Chat, the Voice Assistant on this PC and from the phone.
   pictures shown are the answer's (`shown_of`). The pictures go back to the
   model as MCP image content, a screenshot at the view's CSS pixels
   (`browser_click`'s x, y). **Acting on pages** (8 Nov 2026; before it,
-  never a plan chat's): only for a question typed in Chat (`Eyes::act`: the
-  session lists the acting tools whenever it has the pages, so its
-  fingerprint stays the same from a typed question to a spoken one; a turn
-  asked out loud is refused them), never during a meeting or a call, with
+  never a plan chat's): for a question asked in Chat, typed or out loud
+  with Chat in view (`Eyes::act`: the session lists the acting tools
+  whenever it has the pages, so its fingerprint stays the same from a typed
+  question to a spoken one; until 8 Nov a turn asked out loud was refused
+  them, "only for a question typed in Chat", though `browser_scroll` ran —
+  now its cards are said and answered out loud too, `assistant/spoken_ok.rs`;
+  never a phone's question or one from another app: no pages), never during
+  a meeting or a call, with
   every rule of the tool loop's — a click, an Enter or a box ticked that
   buys, pays, books, sends, deletes or signs in shows the card in the plan
   turn's thread (`act/confirm.rs` through the turn's stream) and the call
@@ -3947,9 +4085,17 @@ where they touch Chat's own code.
   (its report is read aloud: `AgentsTurn::asked`). The same code answers a plan
   chat's calls over Yap's run endpoint ([yap-code.md](./yap-code.md#from-a-plan-chat)).
   Their rules: [yap-code.md](./yap-code.md#starting-an-agent).
-- **The safety rule**: `start_agent` and `message_agent` are in `ACTION_TOOLS`
-  and `STRONG_LOCKED`; an agent's own output is web content (the dispatch's
-  `agent_seen`).
+- **After outside content, ask, don't refuse** (8 Nov 2026): `start_agent`
+  and `message_agent` are `tools::ASKS_AFTER_OUTSIDE`, never in
+  `ACTION_TOOLS` or `STRONG_LOCKED` now: once the turn has read the web, a
+  page, a connector's result or an agent's own output (web content: the
+  dispatch's `agent_seen`), each shows its card — the brief or the message,
+  the folder, the Mode — and goes only on Allow once (asked out loud, said
+  and on the Yap bar, a spoken yes or no: `assistant/spoken_ok.rs`). The
+  person's plain go-ahead to an agent's plan or question goes in Yap's own
+  words with no card. Before, both were refused for the rest of the turn,
+  and a go-ahead or a report for an agent to save was lost
+  ([yap-code.md](./yap-code.md#starting-an-agent)).
 - **A Code chat's prompt line** (`prompt.rs` `build`:
   `code_chat::prompt_line_for`), for the tool loop and a plan chat alike.
 - **No Yap memory in a Code chat** (any model): none of memory's passages,

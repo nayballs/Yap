@@ -108,10 +108,15 @@ fn refused_in_a_meeting_and_away_from_chat_before_anything_runs() {
     let away = Eyes::default();
     assert_eq!(refused(see_screen::LOOK, away, false).unwrap()["displayText"], "Didn't look at your screen: not asked in Chat");
     assert_eq!(refused(pages::SCREENSHOT, away, false).unwrap()["displayText"], "Didn't use the panel beside the chat: not asked in Chat");
-    // Asked out loud with Chat in view: reading yes, acting no.
-    let spoken = Eyes { act: false, ..LOOK };
-    assert_eq!(refused(pages::READ, spoken, false), None);
-    assert_eq!(refused(act::TYPE, spoken, false).unwrap()["displayText"], "Didn't act on the page: not a question typed in Chat");
+    // Asked out loud with Chat in view: acting as a typed question does (its
+    // card says the question out loud too); clicks, hovers and keys alike.
+    for n in [act::CLICK, act::HOVER, act::KEY, act::TYPE, act::FORM_INPUT, pages::SCROLL] {
+        assert_eq!(refused(n, LOOK, false), None, "{n}");
+    }
+    // A turn that may not act (none asked so now, but its gate's word holds).
+    let reads = Eyes { act: false, ..LOOK };
+    assert_eq!(refused(pages::READ, reads, false), None);
+    assert_eq!(refused(act::TYPE, reads, false).unwrap()["displayText"], "Didn't act on the page: not for this question");
     // A shot for a model that can't see: not offered.
     assert!(refused(pages::SCREENSHOT, Eyes { screen: Gate::Show, pictures: Gate::Show, act: true, files: Gate::Off }, false).is_some());
     assert_eq!(refused(see_screen::LOOK, LOOK, false), None);
@@ -155,9 +160,10 @@ fn a_page_tool_runs_the_tool_loops_code_on_the_turns_web_side() {
     let mut turn = test_begin_seeing(&slot, Context { question: "What's the best garden planner page?".into(), conversation: None, eyes: LOOK, ..Default::default() }, web("What's the best garden planner page?"));
     let call = slot.call().unwrap();
     let run = |name: &str, args: Value| tauri::async_runtime::block_on(run_for(&slot, &call, name, &args, std::time::Duration::ZERO));
-    // A page nobody gave nor found: refused, as in the tool loop.
+    // A page nobody gave nor found, its call not seen in the turn's events
+    // (so, on doubt, after outside content): refused, as in the tool loop.
     let (r, _) = run(pages::NAVIGATE, json!({ "url": "https://garden.example.com/planner" }));
-    assert_eq!(r["displayText"], "Didn't bring up garden.example.com/planner: not a link from you or the search");
+    assert_eq!(r["displayText"], "Didn't bring up garden.example.com/planner: not a link from you, a search or the page");
     // Claude Code's search found it: opened beside the chat, the page told.
     turn.marks().found(&[crate::chat::chats::Source { n: 1, title: "Garden planner".into(), url: "https://garden.example.com/planner".into(), ..Default::default() }]);
     let (r, looks) = run(pages::NAVIGATE, json!({ "url": "https://garden.example.com/planner" }));
@@ -179,6 +185,25 @@ fn a_page_tool_runs_the_tool_loops_code_on_the_turns_web_side() {
     assert!(!slot.web(call.n));
     turn.marks().began(pages::SCREENSHOT);
     assert!(slot.web(call.n));
+}
+
+#[test]
+fn a_plan_chats_own_address_opens_only_before_outside_content() {
+    let slot = Arc::new(Slot::default());
+    let q = "Open the forever page on example.com";
+    let turn = test_begin_seeing(&slot, Context { question: q.into(), conversation: None, eyes: LOOK, ..Default::default() }, web(q));
+    let call = slot.call().unwrap();
+    let run = |name: &str, args: Value| tauri::async_runtime::block_on(run_for(&slot, &call, name, &args, std::time::Duration::ZERO));
+    // Claude Code's call showed in the turn's events, nothing from outside before it: it opens.
+    turn.marks().began(pages::NAVIGATE);
+    let (r, _) = run(pages::NAVIGATE, json!({ "url": "https://www.example.com/forever" }));
+    assert_eq!(r["displayText"], "Brought up example.com/forever beside the chat", "{r}");
+    // Once its WebSearch began: refused, its own search named for what works.
+    turn.marks().web();
+    turn.marks().began(pages::TABS);
+    let (r, _) = run(pages::TABS, json!({ "action": "new", "url": "https://www.example.com/other" }));
+    assert_eq!(r["displayText"], "Didn't bring up example.com/other: not a link from you, a search or the page", "{r}");
+    assert!(r["error"].as_str().unwrap().contains("find the page with WebSearch"), "{r}");
 }
 
 /// The stand-in browser's pages for a plan chat's turn.

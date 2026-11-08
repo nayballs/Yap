@@ -47,7 +47,7 @@
 //! **The web** (Yap's own; `web.rs`): `web_search` and `read_page`,
 //! offered while "Look things up on the web" is on. Read-only, numbered
 //! sources the answer cites as `[1]`. **The safety rule**
-//! ([`refused_after_web`]): once web content is in a turn (a search's
+//! ([`refused_after_outside`]): once web content is in a turn (a search's
 //! results; a page read, acted on, switched to or named as it closed; the
 //! screen; text selected in another app or on a page and asked about —
 //! never text selected in Yap's own windows), the action tools
@@ -288,7 +288,7 @@ pub struct Extra<'a> {
     /// selected in another app or on a page beside the chat
     /// (`assistant::selected::Selected::web`; never one of Yap's own
     /// windows'). Web content from the turn's start — the safety rule
-    /// ([`refused_after_web`]) and the page actions' typed-words check, as
+    /// ([`refused_after_outside`]) and the page actions' typed-words check, as
     /// after a page read.
     pub web_question: bool,
     /// The agent tools (`tools/agents.rs`: agents on, Claude Code on this PC; not
@@ -334,11 +334,23 @@ pub struct CalendarTurn<'a> {
 /// something the person wrote (`edit_note` on a document stays refused
 /// after the web; `documents::Turn::refuses`, `rewrite_section`,
 /// `edit_document`'s hashes). A restore isn't the answer's writing: a page
-/// mustn't make Yap undo the person's document. Nor may a page start or
-/// steer an agent (`start_agent`, `message_agent`: Claude Code changing the
-/// person's files) — and an agent's own output counts as web content
-/// (`tools/agents.rs`).
-pub const ACTION_TOOLS: &[&str] = &["open_app", "create_note", "update_note", "edit_note", "copy_to_clipboard", "remember", "forget", "restore_document", "start_agent", "message_agent"];
+/// mustn't make Yap undo the person's document. An agent isn't here: after
+/// outside content it asks the person instead ([`ASKS_AFTER_OUTSIDE`]).
+pub const ACTION_TOOLS: &[&str] = &["open_app", "create_note", "update_note", "edit_note", "copy_to_clipboard", "remember", "forget", "restore_document"];
+
+/// **What asks the person after outside content, instead of being refused**
+/// (8 Nov 2026, "ask, don't refuse"): starting or steering an agent
+/// (`start_agent`, `message_agent`: Claude Code changing the person's files
+/// and running commands). Once the turn has read the web, a page, a
+/// connector's result or an agent's own output (which counts as web content,
+/// `tools/agents.rs`), each call shows its card — the brief or the message,
+/// the folder, the Mode — and goes only on the person's Allow once (asked
+/// out loud, the Yap bar's card and a spoken yes or no too:
+/// `assistant/spoken_ok.rs`), never by itself, and never above the chat's
+/// Mode. The person's plain go-ahead to an agent's plan or question still
+/// goes without a card, in Yap's own words. Neither tool is ever refused by
+/// the safety rule ([`refused_after_outside`]).
+pub const ASKS_AFTER_OUTSIDE: &[&str] = &["start_agent", "message_agent"];
 
 /// **What stays off after the web for a strong model** (2026-10-31,
 /// `documents::rich::strong`): the tools whose effects reach outside Yap's
@@ -346,16 +358,17 @@ pub const ACTION_TOOLS: &[&str] = &["open_app", "create_note", "update_note", "e
 /// opening an app (it runs something on the PC), the clipboard (it
 /// replaces what the person copied, and carries text to wherever they
 /// paste next) and memory (what Yap remembers goes with every later chat;
-/// `forget` deletes) and an agent (`start_agent`, `message_agent`: Claude Code
-/// works on the person's own files and runs commands). Yap has no tool that
-/// deletes a note or sends anything anywhere; one added later belongs here.
+/// `forget` deletes). An agent asks the person instead
+/// ([`ASKS_AFTER_OUTSIDE`]). Yap has no tool that deletes a note or sends
+/// anything anywhere; one added later belongs here (or asks, as an agent
+/// does).
 /// Notes and documents
 /// (`create_note`, `update_note`, `edit_note`, `create_document`,
 /// `write_section`, `rewrite_section`, `edit_document`, `restore_document`)
 /// go through after the web as the Claude app's edits do: each one's chip
 /// says what changed, the panel marks it, and every change is a version
 /// with Undo (`notes/versions.rs`: the whole turn at once).
-pub const STRONG_LOCKED: &[&str] = &["open_app", "copy_to_clipboard", "remember", "forget", "start_agent", "message_agent"];
+pub const STRONG_LOCKED: &[&str] = &["open_app", "copy_to_clipboard", "remember", "forget"];
 
 /// **What outside content a turn has seen** (the safety rule's): the web (a
 /// search, a page, a picture from it, an agent's words, text selected in
@@ -377,7 +390,9 @@ impl Seen {
 /// a call to an action tool is refused, with the reason for the model and a
 /// chip for the person; `None` = go ahead. Every other tool (reading notes,
 /// searching, reading pages) still runs. A strong model (`strong`) is
-/// refused only [`STRONG_LOCKED`]. ([`refused_after_outside`] with the web.)
+/// refused only [`STRONG_LOCKED`]. ([`refused_after_outside`] with the web;
+/// the tests' shorthand since agents ask instead, 8 Nov 2026.)
+#[cfg(test)]
 pub fn refused_after_web(name: &str, web_seen: bool, strong: bool) -> Option<Value> {
     refused_after_outside(name, Seen { web: web_seen, ..Seen::default() }, strong)
 }
@@ -398,8 +413,6 @@ pub fn refused_after_outside(name: &str, seen: Seen, strong: bool) -> Option<Val
         "update_note" | "edit_note" => "change a note",
         "restore_document" => "restore a document",
         "remember" | "forget" => "change Yap's memory",
-        "start_agent" => "send an agent",
-        "message_agent" => "tell an agent anything",
         _ => "copy to the clipboard",
     };
     // A connector's result: said so (it may have come with the web too).
@@ -733,7 +746,7 @@ mod tests {
         list.extend(app_definitions().as_array().unwrap().iter().cloned());
         list.extend(web_definitions().as_array().unwrap().iter().cloned());
         list.extend(memory_definitions(Extra { memory: true, search_chats: true, ..Default::default() }).as_array().unwrap().iter().cloned());
-        // An agent's tools (start_agent and message_agent are actions).
+        // An agent's tools (start_agent and message_agent ask after outside content).
         list.extend(agents::definitions().as_array().unwrap().iter().cloned());
         all
     }
@@ -770,6 +783,20 @@ mod tests {
         }
         for name in ["search_notes", "get_note", "list_apps", "web_search", "read_page"] {
             assert!(left.iter().any(|d| d == name), "{name} gone");
+        }
+    }
+
+    #[test]
+    fn after_outside_content_an_agent_asks_and_is_never_refused() {
+        // 8 Nov 2026: refusing them lost the person's go-ahead and the
+        // report the chat wrote; their card asks instead (tools/agents.rs).
+        let every = Seen { web: true, screen: true, connector: true };
+        for name in ASKS_AFTER_OUTSIDE {
+            for strong in [false, true] {
+                assert!(refused_after_outside(name, every, strong).is_none(), "{name} (strong: {strong})");
+            }
+            assert!(!ACTION_TOOLS.contains(name) && !STRONG_LOCKED.contains(name), "{name}");
+            assert!(tool_names(&every_tool()).iter().any(|d| d == name), "{name} isn't a tool");
         }
     }
 

@@ -26,9 +26,13 @@
 //! arguments as key: value lines, secrets masked ([`ConnectorCard`]) —
 //! **Allow once · Always allow · Deny** (no Always allow for a tool that can
 //! delete), answered with `chat_connector_confirm(id, answer)`; Always allow
-//! is [`Answer::AlwaysAllowed`] (state "always"). Asked out loud (the Voice
-//! Assistant, `chat/assistant/connector_ask.rs`), the same question also
-//! has the Yap bar's Allow once / Don't and a spoken yes or no.
+//! is [`Answer::AlwaysAllowed`] (state "always").
+//!
+//! **Asked out loud** (the Voice Assistant, `chat/assistant/spoken_ok.rs`,
+//! 8 Nov 2026 for every card): a page's, an agent's or a connector's question
+//! is also said in one line, put on the Yap bar with Allow once / Don't, and
+//! answered by a spoken yes or no (`chat_page_confirm`: Allow once, never
+//! Always allow).
 //!
 //! The log has the question's id and the answer, never the button's words,
 //! the typed text or the page.

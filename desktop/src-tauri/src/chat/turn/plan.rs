@@ -46,8 +46,8 @@
 //!   endpoint (`claude_live/eyes.rs`, the tool loop's own code and rules),
 //!   listed for the session ([`session_eyes`]) and named in the prompt
 //!   ([`eyes_lines`]), a Code chat's too; each turn may use them only where
-//!   the tool loop would ([`turn_eyes`]: asked in Chat; acting on a page
-//!   only typed there, each buy, send or sign-in on the person's card), its
+//!   the tool loop would ([`turn_eyes`]: asked in Chat, typed or out loud;
+//!   each buy, send or sign-in on a page on the person's card), its
 //!   web side a `web::Turn` of its own ([`web_side`]) that hears of the
 //!   pages Claude Code finds. Their screenshots show with the question, a
 //!   page's tab opens, a shot shows in the turn's steps, a card asks, all
@@ -140,7 +140,7 @@ pub(crate) const CODE_SETTING_SOURCES: &[&str] = &["user", "project", "local"];
 /// **With agents offered**, after [`INSTRUCTIONS`]: Yap's agent tools, what
 /// they're for, and the safety rule as it holds here; then the tool loop's
 /// own lines for them (`agents::AGENT_TOOL_INSTRUCTIONS`).
-const AGENTS: &str = "Yap's agent tools (mcp__yap__start_agent, mcp__yap__agent_status, mcp__yap__message_agent, mcp__yap__stop_agent) send an agent, the user's own Claude Code, to work in one of their folders in the background (call it an agent when you talk to the user): the one way to have files changed or commands run from this chat. After WebSearch or WebFetch this turn, or an agent's own words from agent_status, Yap won't start an agent or tell one anything until the user's next message (only their plain \"go ahead\" or \"yes\" to an agent's plan or question still goes, in Yap's own words): say they can ask for it then.";
+const AGENTS: &str = "Yap's agent tools (mcp__yap__start_agent, mcp__yap__agent_status, mcp__yap__message_agent, mcp__yap__stop_agent) send an agent, the user's own Claude Code, to work in one of their folders in the background (call it an agent when you talk to the user): the one way to have files changed or commands run from this chat. After WebSearch or WebFetch this turn, or an agent's own words from agent_status, Yap asks the user on its own card before it starts an agent or tells one anything (their plain \"go ahead\" or \"yes\" to an agent's plan or question goes in Yap's own words): the call waits for their answer; after a no, don't try again.";
 
 /// **With the screen or the pages offered** (`claude_live/eyes.rs`), after
 /// the instructions: Yap's tools for them by Claude Code's names (`{tools}`),
@@ -161,7 +161,7 @@ const CONNECTORS: &str = "Yap's tools named with a connector's name and two unde
 
 /// [`EYES`]'s word on acting: for a session that may act, and one that
 /// doesn't.
-const ACTS: &str = "For a question typed in Yap's Chat they also click and type on pages: anything that buys, books, sends or signs in waits for the user's OK on Yap's card.";
+const ACTS: &str = "For a question asked in Yap's Chat they also click and type on pages: anything that buys, books, sends or signs in waits for the user's OK on Yap's card.";
 const NO_ACTS: &str = "They read and look at pages, never click or type on them.";
 
 /// [`EYES`] for `eyes`, then the tool loop's own lines for them (the
@@ -239,9 +239,9 @@ fn session_eyes(t: &Asked<'_>, code: bool) -> crate::integrations::claude_live::
 }
 
 /// **What this turn may use of them**: the turn's own gates (`gates.rs`:
-/// Chat, or the Voice Assistant with Chat in view; never a phone's question
-/// or one from another app; acting only for a question typed in Chat),
-/// never more than the session lists.
+/// Chat, or the Voice Assistant with Chat in view, acting on the pages too;
+/// never a phone's question or one from another app), never more than the
+/// session lists.
 fn turn_eyes(t: &Asked<'_>, session: crate::integrations::claude_live::eyes::Eyes) -> crate::integrations::claude_live::eyes::Eyes {
     crate::integrations::claude_live::eyes::Eyes { screen: t.gates.screen, pictures: t.gates.pictures, act: t.gates.act, files: t.gates.files }.within(session)
 }

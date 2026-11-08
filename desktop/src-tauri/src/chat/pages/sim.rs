@@ -373,13 +373,110 @@ impl Browser {
     /// A page's words and links (`read_open_page` without elements).
     pub fn text(&self, key: &str) -> Result<PageText, String> {
         let s = self.read(key, 24_000, 200)?;
+        Ok(Self::text_of_snapshot(s))
+    }
+
+    /// **A long page's words** (`backend::text_long`): up to `max`
+    /// characters, every heading (400 at most) and link, as the long read
+    /// gives them.
+    pub fn text_up_to(&self, key: &str, max: usize) -> Result<PageText, String> {
+        let mut s = self.read(key, max, 2000)?;
+        let tab = self.tab(key)?;
+        let doc = dom_query::Document::from(tab.html.as_str());
+        s.headings = Page::read(&doc, tab).headings_up_to(400);
+        Ok(Self::text_of_snapshot(s))
+    }
+
+    fn text_of_snapshot(s: Snapshot) -> PageText {
         let links = s
             .elements
             .iter()
             .filter(|e| e.role == "link" && !e.href.is_empty())
             .map(|e| super::view::PageLink { text: super::act::rules::name_of(e), href: e.href.clone() })
             .collect();
-        Ok(PageText { title: s.title, headings: s.headings, text: s.text, links })
+        PageText { title: s.title, headings: s.headings, text: s.text, links }
+    }
+
+    /// **What's in view of tab `key`, drawn `scale` times finer** (1–2):
+    /// [`Browser::shot`]'s picture at that many more pixels, the same colours
+    /// at the same places. The stand-in draws out of sight, so always at the
+    /// scale asked.
+    pub fn shot_at(&self, key: &str, scale: f64) -> Result<(Vec<u8>, f64), String> {
+        let tab = self.tab(key)?;
+        let k = scale.clamp(1.0, 2.0);
+        let (w, h) = (((VIEW_W / 4) as f64 * k).round() as u32, ((VIEW_H / 4) as f64 * k).round() as u32);
+        let red = ((tab.scroll / 8) % 256) as u8;
+        let rgba: Vec<u8> = (0..h).flat_map(|y| (0..w).flat_map(move |x| [red, (x * 255 / (w - 1)) as u8, (y * 255 / (h - 1)) as u8, 255])).collect();
+        Ok((crate::snip::images::encode_png(&rgba, w, h, true)?, k))
+    }
+
+    /// **Tab `key`'s tables** as Yap's tables script reads the live page
+    /// (`read::TABLES_SCRIPT`): every visible `<table>` (not one around
+    /// another) and ARIA table or grid, its visible rows, its headers from
+    /// `<thead>` or a first row of header cells, a cell's link made
+    /// absolute; its caption, `aria-label`, else the heading before it.
+    pub fn tables(&self, key: &str) -> Result<super::read::Tables, String> {
+        use super::read::{Cell, Table, Tables};
+        let tab = self.tab(key)?;
+        let doc = dom_query::Document::from(tab.html.as_str());
+        let page = Page::read(&doc, tab);
+        const GRID: &str = "table, [role=table], [role=grid], [role=treegrid]";
+        // The heading before each table, in the page's order.
+        let mut before: HashMap<dom_query::NodeId, String> = HashMap::new();
+        let mut last = String::new();
+        for n in doc.root().descendants_it().filter(|n| n.is_element()) {
+            if n.is("h1, h2, h3, h4, h5, h6, [role=heading]") && page.visible(&n) {
+                last = Page::text_of(&n);
+            } else if n.is(GRID) {
+                before.insert(n.id, last.clone());
+            }
+        }
+        let clip = |s: String| s.chars().take(300).collect::<String>();
+        let cell = |c: &dom_query::NodeRef| {
+            let href = dom_query::Selection::from(*c).select("a[href]").nodes().first().and_then(|a| a.attr("href")).map(|h| join(&tab.url, &h)).filter(|h| h.starts_with("http"));
+            Cell { t: clip(Page::text_of(c)), h: href.unwrap_or_default() }
+        };
+        let head_cell = |c: &dom_query::NodeRef| c.node_name().is_some_and(|n| n.eq_ignore_ascii_case("th")) || c.attr("role").is_some_and(|r| r.eq_ignore_ascii_case("columnheader"));
+        let mut out = Vec::new();
+        for t in doc.select(GRID).nodes() {
+            if !page.visible(t) {
+                continue;
+            }
+            let native = t.node_name().is_some_and(|n| n.eq_ignore_ascii_case("table"));
+            let inside = dom_query::Selection::from(*t);
+            if native && inside.select("table").exists() {
+                continue;
+            }
+            let rows: Vec<dom_query::NodeRef> = if native {
+                inside.select("tr").nodes().to_vec()
+            } else {
+                inside.select("[role=row]").nodes().iter().filter(|r| r.ancestors_it(None).find(|a| a.is(GRID)).is_some_and(|a| a.id == t.id)).copied().collect()
+            };
+            let rows: Vec<dom_query::NodeRef> = rows.into_iter().filter(|r| page.visible(r)).collect();
+            fn cells<'d>(native: bool, r: &dom_query::NodeRef<'d>) -> Vec<dom_query::NodeRef<'d>> {
+                if native {
+                    r.element_children().into_iter().filter(|c| c.node_name().is_some_and(|n| n.eq_ignore_ascii_case("td") || n.eq_ignore_ascii_case("th"))).collect()
+                } else {
+                    dom_query::Selection::from(*r).select("[role=cell], [role=gridcell], [role=columnheader], [role=rowheader]").nodes().to_vec()
+                }
+            }
+            let Some(first) = rows.first() else { continue };
+            let in_head = |r: &dom_query::NodeRef| r.ancestors_it(None).any(|a| a.node_name().is_some_and(|n| n.eq_ignore_ascii_case("thead")));
+            let header_row = rows.iter().rev().find(|r| native && in_head(r)).copied();
+            let (headers, body): (Vec<String>, Vec<dom_query::NodeRef>) = match header_row {
+                Some(h) => (cells(native, &h).iter().map(|c| clip(Page::text_of(c))).collect(), rows.iter().filter(|r| !in_head(r)).copied().collect()),
+                None if !cells(native, first).is_empty() && cells(native, first).iter().all(head_cell) => (cells(native, first).iter().map(|c| clip(Page::text_of(c))).collect(), rows[1..].to_vec()),
+                None => (Vec::new(), rows.clone()),
+            };
+            let body: Vec<Vec<Cell>> = body.iter().map(|r| cells(native, r).iter().take(30).map(cell).collect::<Vec<Cell>>()).filter(|cs| cs.iter().any(|c| !c.t.is_empty() || !c.h.is_empty())).collect();
+            if body.is_empty() || body.iter().map(Vec::len).max().unwrap_or(0).max(headers.len()) < 2 {
+                continue;
+            }
+            let caption = inside.select("caption").nodes().first().map(Page::text_of).filter(|c| !c.is_empty() && native);
+            let caption = caption.or_else(|| t.attr("aria-label").map(|a| a.split_whitespace().collect::<Vec<_>>().join(" ")).filter(|a| !a.is_empty())).unwrap_or_else(|| before.get(&t.id).cloned().unwrap_or_default());
+            out.push(Table { caption: caption.chars().take(120).collect(), headers, rows: body });
+        }
+        Ok(Tables { title: title_of(&tab.html), url: tab.url.clone(), tables: out, more: false })
     }
 
     /// **A page with its elements**, as the element script reads one: its
@@ -1079,7 +1176,11 @@ impl<'a> Page<'a> {
     }
 
     fn headings(&self) -> Vec<String> {
-        self.doc.select("h1, h2, h3").nodes().iter().map(Self::text_of).filter(|h| !h.is_empty()).take(30).collect()
+        self.headings_up_to(30)
+    }
+
+    fn headings_up_to(&self, n: usize) -> Vec<String> {
+        self.doc.select("h1, h2, h3").nodes().iter().map(Self::text_of).filter(|h| !h.is_empty()).take(n).collect()
     }
 
     /// The page's main words (its `main` / `article`, else its body), the

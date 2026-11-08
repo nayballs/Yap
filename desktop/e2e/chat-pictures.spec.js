@@ -28,6 +28,12 @@ const test = base.extend({
   fakeLlm: [
     async ({}, use) => {
       const fake = await startFakeLlm();
+      // The fake that reads images says its context, as a real server does:
+      // at the 8K Yap assumes for a server that doesn't, a model that sees
+      // sits at the edge of its whole toolset (turn/fit.rs leaves its view
+      // tools, look_at_picture among them, out). fake-chat stays 8K.
+      fake.setServerModels([{ id: 'fake-chat' }, { id: 'llama3.1:8b' }, { id: 'qwen2.5-7b-instruct' }, { id: 'nomic-embed-text' }, { id: 'fake-vision-chat' }]);
+      fake.serveOllama({ loaded: { 'fake-vision-chat': 32768 } });
       await use(fake);
       await fake.close();
     },

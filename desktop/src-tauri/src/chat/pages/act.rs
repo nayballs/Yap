@@ -7,9 +7,11 @@
 //!   Claude too) and the on-device models on [`LOCAL_ALLOWLIST`] — only
 //!   those that passed the browse evaluation (`ai/eval/`,
 //!   `docs/model-evals.md` "Acting on pages"): every safety task and 80% of
-//!   the rest. Only in a typed Chat turn with the web on (the page tools'
-//!   gate), never during a meeting or a call. Small models never see these
-//!   tools.
+//!   the rest. Only in a Chat turn with the web on (the page tools' gate) —
+//!   typed, or the Voice Assistant asked with Chat in view, its cards then
+//!   said and answered out loud too (`assistant/spoken_ok.rs`) —, never
+//!   during a meeting or a call, nor from a phone (no panel there). Small
+//!   models never see these tools.
 //! - **The tools** ([`TOOL_NAMES`]; `browser_read { mode: "elements" }` and
 //!   `browser_find` give the refs, `rules::element_lines`):
 //!   `browser_click {ref | x, y}` (a point in the latest
@@ -27,10 +29,12 @@
 //!   whatever the field is called; clicks into such a field or a sign-in
 //!   form's (by ref or by point); fills in a sign-in form (the person signs
 //!   in themselves, in the panel); types more than [`rules::MAX_TYPED`]
-//!   characters at once; goes to an address that isn't from this turn's
-//!   results, the person, a site they named, or a link on a page read this
-//!   turn — and only ever to the address as Yap holds it, never the model's
-//!   copy (a fragment or `utm_…` added would carry words out); reads or acts
+//!   characters at once; once anything from outside is in the turn, goes to
+//!   an address that isn't from this turn's results, the person, a site they
+//!   named, or a link on a page read this turn — and only ever to the address
+//!   as Yap holds it, never the model's copy (a fragment or `utm_…` added
+//!   would carry words out; before outside content, a well-formed `https://`
+//!   address the model wrote opens: `pages::written`); reads or acts
 //!   on a search engine's results. **An action that would buy, pay, book,
 //!   confirm, order, cancel, subscribe, send, delete, agree or sign in asks
 //!   the person first** — a click (by ref or point), Enter (typed, or a key:
@@ -94,7 +98,7 @@ pub fn on_allowlist(model: &str) -> bool {
 /// say so for any model (`eval::browse_forced`); else the strong cloud
 /// models (`documents::rich::strong`; your Claude plan's Claude), and a
 /// model on this PC only on [`LOCAL_ALLOWLIST`]. The turn adds the web and
-/// a typed Chat question.
+/// a question asked in Chat (typed, or out loud with Chat in view).
 pub fn can_act(provider: &str, model: &str) -> bool {
     if let Some(on) = crate::ai::eval::browse_forced() {
         return on;
@@ -801,10 +805,11 @@ fn stored_address(turn: &crate::web::Turn, given: &str) -> Option<(String, Optio
 
 /// **`browser_navigate` in a tab**: to an address — this turn's results, the
 /// person's links, a site they named, a link on a page read this turn,
-/// always as Yap holds it — or a search on their engine; a link whose words
-/// or address would buy, unsubscribe, confirm… asks first, as its click
-/// would.
-pub(super) async fn go(turn: &mut crate::web::Turn, args: &Value, live: Option<crate::chat::stream::Live<'_>>) -> Value {
+/// always as Yap holds it; before outside content, one the model wrote
+/// (`pages::written`) — or a search on their engine; a link whose words or
+/// address would buy, unsubscribe, confirm… asks first, as its click would.
+pub(super) async fn go(turn: &mut crate::web::Turn, args: &Value, ctx: &super::Ctx<'_>) -> Value {
+    let live = ctx.live;
     let search = args["search"].as_str().map(str::trim).filter(|w| !w.is_empty()).map(|w| rules::clip(w, 200));
     let given = args["url"].as_str().unwrap_or("").trim().to_string();
     let (url, link) = match (given.is_empty(), search) {
@@ -820,12 +825,10 @@ pub(super) async fn go(turn: &mut crate::web::Turn, args: &Value, live: Option<c
             }
             match stored_address(turn, &given) {
                 Some(found) => found,
-                None => {
-                    return failed(
-                        "browser_navigate only takes an address from this turn's search results, the user's message, a site the user named, or a link on a page read this turn. Search for it first.".into(),
-                        format!("Didn't go to {}: not a link from you, a search or the page", crate::web::short_url(&given)),
-                    )
-                }
+                None => match super::written_or_refused(&given, turn, ctx, &format!("Didn't go to {}", crate::web::short_url(&given))) {
+                    Ok(url) => (url, None),
+                    Err(refused) => return refused,
+                },
             }
         }
     };
@@ -872,9 +875,9 @@ pub(super) async fn go(turn: &mut crate::web::Turn, args: &Value, live: Option<c
         format!("Went to {} in tab {}", crate::web::short_url(&url), t.tab)
     };
     let note = if searched {
-        "The search is open in that tab for the user, on their own search engine: Yap doesn't read search results. Say it's open."
+        format!("The search is open in that tab for the user, on their own search engine: Yap doesn't read search results. Say it's open. {}", super::find_pages(ctx.search))
     } else {
-        NOTE
+        NOTE.to_string()
     };
     json!({ "success": true, "data": data, "note": note, "displayText": display })
 }

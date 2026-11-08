@@ -23,7 +23,7 @@
 //!   turn's thread (`ConnectorConfirm.svelte`, through the turn's stream)
 //!   — asked out loud, also Yap's spoken line, the Yap bar's Allow once /
 //!   Don't and a spoken yes or no (wave 6: the Voice Assistant's sink hears
-//!   the card, `chat/assistant/connector_ask.rs`) —
+//!   the card, `chat/assistant/spoken_ok.rs`) —
 //!   while **the HTTP call is held** for the person's answer, as `approve`
 //!   holds an agent's prompt (the card's two minutes and the call, within
 //!   [`CALL_LIMIT`], inside the run's 11-minute tool timeout); a no, no

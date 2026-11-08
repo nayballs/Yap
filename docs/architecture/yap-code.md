@@ -263,8 +263,9 @@ carrying on with its context; so are agents now.
   two turns) in a folder at once. Stopped first: not sent ("Not sent yet");
   Continue sends it.
 - **Consent and safety, unchanged**: the person's own words this turn
-  (`consent::start_in`), refused after web content or an agent's own output
-  (but for the person's plain go-ahead: [The safety rule](#the-safety-rule)),
+  (`consent::start_in`), asked on the card after web content or an agent's
+  own output (but for the person's plain go-ahead, Yap's own words with no
+  card: [The safety rule](#the-safety-rule)),
   the Mode only lowered and only on the person's word, the caps, Bypass's OK. Asked first as `start_agent`
   is (Settings' "always", or the web in what led here), never as a new
   workspace: the card says "Yap wants to carry on the agent in …" (`AgentCard`
@@ -344,13 +345,27 @@ slipped words into the brief), **Always** or **Never**.
   act "agent"): the folder and its path, the mode, the brief in full, and why
   Yap asks. **Start** / **Don't** (`chat_page_confirm`); no answer in two
   minutes is a no.
-- **Out loud** (the Voice Assistant, `agents/voice.rs`): a card nobody sees
-  would just wait, so Yap asks in words: "Should I send an agent to
-  garden-planner, in Auto mode? Say yes to send it." The next question in
-  that conversation within 2 minutes is the answer, read by Yap itself with no
-  model (`chat/turn/fast.rs` `agent_answer_turn`): a plain yes starts it, a no
-  drops it ("Okay, I won't start it."), anything else drops it and is asked as
-  usual.
+- **Out loud** (the Voice Assistant, `agents/voice.rs`), with nothing from
+  outside this turn: a card nobody sees would just wait, so Yap asks in
+  words: "Should I send an agent to garden-planner, in Auto mode? Say yes to
+  send it." The next question in that conversation within 2 minutes is the
+  answer, read by Yap itself with no model (`chat/turn/fast.rs`
+  `agent_answer_turn`): a plain yes starts it, a no drops it ("Okay, I won't
+  start it."), anything else drops it and is asked as usual.
+- **After outside content, always, and on the card** (8 Nov 2026, whatever
+  `agents_ask` says: `tools::agents::ask_first`): once the turn has read the
+  web, a page, a connector's result or an agent's own words, `start_agent`
+  and `message_agent` show the card — the brief or the message in full, the
+  folder, the Mode, "This chat read the web, which could have put words in
+  the agent's brief." — and the call waits for Send / Don't. Asked out loud,
+  the same card is said ("Send this to an agent in garden-planner, in Auto
+  mode? Say yes, or press Allow."; a follow-up "Pass this to the agent in
+  …"), put on the Yap bar ("Send this to an agent?", its folder, Mode and
+  the start of its brief; Allow once / Don't, unless Chat shows the answer)
+  and answered by a spoken yes or no (`chat/assistant/spoken_ok.rs`, as a
+  connector's tool or a page action asks): the brief must be seen or heard
+  before it goes. A click only for an agent in Bypass permissions, and
+  during a meeting. Never automatic, and the card never raises the Mode.
 
 ### The Mode
 
@@ -450,26 +465,33 @@ turn simply ended: nothing carried on, though "yes" plainly meant go ahead.
 
 ### The safety rule
 
-`start_agent` and `message_agent` are in `tools::ACTION_TOOLS` and
-`STRONG_LOCKED`: refused for the rest of a turn once web content is in it, for
-every model, strong ones too. **An agent's own output is web content**
-(`agent_status`'s result, `Ran::output_seen`), so a status or a report can never
-start or steer an agent. Text selected in another app is web content too.
-`agent_status` and `stop_agent` still run.
+**Ask, don't refuse** (8 Nov 2026). `start_agent` and `message_agent` are
+`tools::ASKS_AFTER_OUTSIDE`: never in `ACTION_TOOLS` or `STRONG_LOCKED`, never
+refused by the safety rule. Once outside content is in the turn — the web, a
+page, the screen, a connector's result, text selected in another app — each
+asks on its card first ([Asking first](#asking-first)), for every model.
+**An agent's own output is web content** (`agent_status`'s result,
+`Ran::output_seen`: an agent's output can carry a page's words), so a status or
+a report never starts or steers an agent by itself: the person sees the brief
+or the message on the card and says yes. `agent_status` and `stop_agent` run
+as ever. Until 8 Nov both were refused for the rest of the turn: a tester's
+"go ahead" was lost, and a chat that had researched couldn't hand its report to
+an agent to save.
 
-**The person's own go-ahead always gets through** (2026-11-07: "Yep, that's
+**The person's own go-ahead goes without a card** (2026-11-07: "Yep, that's
 fine. Go ahead." was refused because the model checked the agent first). After
-web content or an agent's own words in the turn, `message_agent` still goes when
-the person's message this turn is nothing but a go-ahead or a yes
-(`consent::plain_go_ahead`: `apps::is_affirmative`, or only go-ahead words
-with `go_ahead`; no "…and delete the folder", no question; English) to an agent
-waiting on its plan or its question (`tools::agents::fixed_go_ahead`) — and the
-text that reaches the agent is Yap's own ("Go ahead with the plan.", or "Yes,
-go ahead." to a question), never the model's words. Both callers ask
-`goes_ahead_after_web` before their safety rule: the tool loop
-(`tools/agent/calls.rs`) and a plan chat's endpoint (`claude_live/agents.rs`,
-its web flag). Anything else after the web stays refused, `message_agent`
-itself refusing too: the rule is there to stop injected text steering an agent.
+outside content in the turn, when the person's message this turn is nothing
+but a go-ahead or a yes (`consent::plain_go_ahead`: `apps::is_affirmative`, or
+only go-ahead words with `go_ahead`; no "…and delete the folder", no question;
+English) to an agent waiting on its plan or its question
+(`tools::agents::fixed_go_ahead`), the text that reaches the agent is Yap's own
+("Go ahead with the plan.", or "Yes, go ahead." to a question), never the
+model's words — through `message_agent`, and since 8 Nov through `start_agent`
+carrying a Code chat's agent on too. **The go-ahead lost once** (8 Nov): in a
+Code chat the model passed the person's "go ahead" on with `start_agent` (which
+carries the chat's agent on) after `agent_status`, and only `message_agent` had
+the go-ahead's exception — so it was refused. Both now: the go-ahead in Yap's
+words; anything else the card.
 
 ### From a plan chat
 
@@ -482,8 +504,8 @@ and each call runs the tool loop's own code and rules.
   registered with the run (`RunSpec::agents`), allowed in `--allowedTools`, and
   named in the prompt with the safety rule as it holds there ("After
   WebSearch or WebFetch this turn, or an agent's own words from agent_status, Yap
-  won't start an agent or tell one anything until the user's next message"),
-  then `AGENT_TOOL_INSTRUCTIONS`. A session's tools are listed once, so the
+  asks the user on its own card before it starts an agent or tells one
+  anything…: the call waits for their answer"), then `AGENT_TOOL_INSTRUCTIONS`. A session's tools are listed once, so the
   session's fingerprint includes agents: switching Yap Code on or off starts it
   again.
 - **Whose turn a call is** (`integrations/claude_live/turn.rs`): each plan
@@ -501,12 +523,13 @@ and each call runs the tool loop's own code and rules.
   (`SEEN_WAIT`), for its own tool call to show in the turn's events. Claude
   Code writes a tool call's start before it runs it, and its stdout is in
   order, so every web read before it has been counted by then. Not seen in
-  time: refused as after the web ("didn't show in its turn's events" in the
-  log).
-- **Then the same guards**: the safety rule (`refused_after_outside`: after
-  the web, an agent's words or a connector's result — "Didn't send an agent:
-  not after a connector's result", `Slot::connector`), the evaluation's
-  intercept, consent, the folder, the mode.
+  time: asked first as after the web ("didn't show in its turn's events" in
+  the log).
+- **Then the same guards**: after outside content (the web, an agent's words
+  or a connector's result, `Slot::connector`) the call asks on its card and
+  **the HTTP call is held** for the answer, as a connector's held call is
+  (8 Nov 2026; refused outright before); the evaluation's intercept,
+  consent, the folder, the mode.
 - **No connectors in an agent** (Connectors wave 7): a plan chat's session
   may list the person's connectors (`claude_live/connectors.rs`), but an
   agent's run never does — it keeps the person's own Claude Code setup
@@ -515,7 +538,8 @@ and each call runs the tool loop's own code and rules.
 - **What the calls show** (the ask-first card, a started agent's tab) goes into
   that turn's stream, so it shows in the plan chat's thread. The call waits
   for Start: the card's two minutes are well inside the run's 11-minute tool
-  timeout. Out loud, Yap's spoken question, as in the tool loop.
+  timeout. Out loud, Yap's spoken question, as in the tool loop (after
+  outside content, the card said, on the bar and answered by voice).
 - **The report** goes the plan's one-shot way (Chat's model, no tools); the
   conversation's session reads the marker and the answer as "Earlier in this
   chat" with its next question.
@@ -1010,14 +1034,15 @@ Each rule is in full above; together:
 - **The person's own words** start an agent, never a note's, a page's or an
   agent's ([The person's own words](#the-persons-own-words)).
 - **Asked first** in a new workspace and after the web ([Asking first](#asking-first)).
-- **Refused after web content** in the turn, an agent's own output included
-  ([The safety rule](#the-safety-rule)); on the plan, a call not yet seen in
-  the turn's events is refused on doubt ([From a plan chat](#from-a-plan-chat)).
+- **Always asked on the card after outside content** in the turn, an agent's
+  own output included — never by itself ([The safety rule](#the-safety-rule));
+  on the plan, a call not yet seen in the turn's events asks on doubt ([From
+  a plan chat](#from-a-plan-chat)).
 - **The Mode only lowered** by a model, and only when the person's words ask
   for it, capped by the workspace; **Bypass needs its one-time OK** ([The
   Mode](#the-mode)).
-- **After the web, only the person's plain go-ahead** reaches an agent, in Yap's
-  own words ([The safety rule](#the-safety-rule)).
+- **After the web, only the person's plain go-ahead** reaches an agent without
+  a card, in Yap's own words ([The safety rule](#the-safety-rule)).
 - **Every permission prompt is a card** (Allow once / Deny; a plan's Go ahead /
   Not yet), never answered by voice.
 - **Undo from backups** ([Undo and backups](#undo-and-backups)).
@@ -1271,7 +1296,10 @@ the build's own stand-in replaying `script` from now on),
   the store (interrupted at start, the sweep, the log's trim and cap), the
   person's words for a lower Mode in seven languages and the model's mode
   left out without them (`consent`, `modes::model_pick`), a plain go-ahead
-  and Yap's own words after the web through both callers, a plan allowed
+  and Yap's own words after the web through both callers, after outside
+  content the card always (`ask_first`; its brief, folder and Mode; Don't
+  sends nothing, Allow once sends the person's words; the plan endpoint's
+  call held while its card asks on the turn's stream), a plan allowed
   carried out and the report card's Go ahead once (`runner`), the plan card
   (`approve`, `approve_card`), the plan's report, the
   workspaces (resolve, names, paths said), the modes (lower only, the cap,
@@ -1303,8 +1331,9 @@ the build's own stand-in replaying `script` from now on),
     settings and a chat with a report and a card) read by today's Yap,
     nothing lost; the old Settings link lands on Yap Code.
   - `agents.spec.js`: the backend end to end, its rules (the person's words,
-    the Mode, asking first, refused after the web), by voice, a permission
-    card, Stop, Continue, a plan then "go ahead".
+    the Mode, asking first, after the web and its own output the card — Send,
+    Don't), by voice (asked out loud after a web read: said, on the bar, a
+    spoken yes), a permission card, Stop, Continue, a plan then "go ahead".
   - `agents-ui.spec.js`: the Mode chip, the Agent tab read like Claude Code, the
     pill, the report card, Undo, the cards in the thread and on the bar, an agent
     not signed in and one paid by key, no backups, Settings → Yap Code, the Network

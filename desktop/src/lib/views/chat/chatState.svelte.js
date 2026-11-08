@@ -459,11 +459,12 @@ export function createChatState({ onopensettings = () => null, onopennote = () =
       ? messages.findLastIndex((m) => m.streaming && m.spoken)
       : messages.findIndex((m) => m.turn === rec.turn && m.role === 'assistant');
   /**
-   * Something to show in its bubble yet: text or a tool call — and for a
-   * typed question also a dictation waited out, its thinking, a card —;
-   * until then the line at the foot says "Thinking".
+   * Something to show in its bubble yet: text, a tool call or a card that
+   * asks (asked out loud too) — and for a typed question also a dictation
+   * waited out, its thinking —; until then the line at the foot says
+   * "Thinking".
    */
-  const hasBubble = (rec) => rec.live.started || (!rec.spoken && (rec.live.waiting || !!rec.live.thinking || !!rec.confirms?.length));
+  const hasBubble = (rec) => rec.live.started || !!rec.confirms?.length || (!rec.spoken && (rec.live.waiting || !!rec.live.thinking));
   /** Its bubble as the answer is now. */
   function bubbleOf(rec) {
     const l = rec.live;
@@ -950,6 +951,39 @@ export function createChatState({ onopensettings = () => null, onopennote = () =
   // events never land in the newer one's bubble.
   const followedBy = (rec, p) => !p?.userMessageId || !rec.askedId || p.userMessageId === rec.askedId;
 
+  /**
+   * **Acting on a page beside the chat, and a card that asks first**, as a
+   * turn's event — typed or asked out loud (chat/pages/act.rs): its tab says
+   * so (with Stop: this turn's ■), a tab the model switched to shows, one it
+   * closed goes (its page is gone already), and an action that would buy,
+   * pay, book… — or an agent, a connector's tool — asks on its card on the
+   * answer being written (PageConfirm.svelte and its kin) and in its page
+   * tab's strip (the panel may cover the thread: chatDoc's `asking`).
+   * `true`: it was one of these.
+   */
+  function actingEvent(rec, ev, shown) {
+    if (ev?.kind === 'acting') {
+      if (shown) doc.setActing(ev.key, () => stopTurn(rec));
+      return true;
+    }
+    if (ev?.kind === 'switchTab') {
+      if (shown) doc.showTab(ev.key);
+      return true;
+    }
+    if (ev?.kind === 'closeTab') {
+      if (shown) doc.closeTab(ev.key);
+      return true;
+    }
+    if (ev?.kind === 'confirm') {
+      if (shown) doc.setAsking(ev);
+      const have = rec.confirms || [];
+      rec.confirms = have.some((c) => c.id === ev.id) ? have.map((c) => (c.id === ev.id ? ev : c)) : [...have, ev];
+      paint(rec);
+      return true;
+    }
+    return false;
+  }
+
   function followAssistantStream(p) {
     const id = p?.conversationId;
     // An ask-first card in a spoken question's turn waits on the person (the status dots).
@@ -958,6 +992,10 @@ export function createChatState({ onopensettings = () => null, onopennote = () =
     if (!alive || !rec || !followedBy(rec, p)) return;
     const ev = p.event;
     const shown = isShown(rec);
+    // Acting on a page, and a card asking first (a page's, an agent's, a
+    // connector's), as for a typed question (8 Nov 2026: a spoken turn acts
+    // on pages too; its card is also said and on the Yap bar, spoken_ok.rs).
+    if (actingEvent(rec, ev, shown)) return;
     // (A page Yap opened before this view had a new conversation is shown when its answer lands.)
     if (ev?.kind === 'page' && ev.page?.url && shown) rec.pagesShown.add(ev.page.url);
     // The screen the model looked at (look_at_screen): with the question
@@ -1337,31 +1375,7 @@ export function createChatState({ onopensettings = () => null, onopennote = () =
         lookedAt(rec, ev.images);
         return;
       }
-      // Acting on a page beside the chat (chat/pages/act.rs): its tab says
-      // so (with Stop: this turn's ■), a tab the model switched to shows,
-      // and an action that would buy, pay, book… asks here first (its card,
-      // PageConfirm.svelte, on the answer being written) and in its page
-      // tab's strip (the panel may cover the thread: chatDoc's `asking`).
-      if (ev?.kind === 'acting') {
-        if (shown) doc.setActing(ev.key, () => stopTurn(rec));
-        return;
-      }
-      if (ev?.kind === 'switchTab') {
-        if (shown) doc.showTab(ev.key);
-        return;
-      }
-      // A tab the model closed (browser_tabs): its page is gone already.
-      if (ev?.kind === 'closeTab') {
-        if (shown) doc.closeTab(ev.key);
-        return;
-      }
-      if (ev?.kind === 'confirm') {
-        if (shown) doc.setAsking(ev);
-        const have = rec.confirms || [];
-        rec.confirms = have.some((c) => c.id === ev.id) ? have.map((c) => (c.id === ev.id ? ev : c)) : [...have, ev];
-        paint(rec);
-        return;
-      }
+      if (actingEvent(rec, ev, shown)) return;
       // The pictures, pages and buttons it showed: its pills, should the reply not list them.
       rec.collect(ev);
       // A document, a picture or a page of this turn (the panel), while this chat is the one shown.

@@ -50,12 +50,9 @@ impl Loop<'_> {
                 };
                 crate::chat::activity::tell(live.sink, step);
             }
-            let seen = self.seen();
-            // The safety rule's one exception: the person's plain go-ahead
-            // to an agent (`message_agent` then sends Yap's own words, never the
-            // model's: `tools/agents.rs`).
-            let goes_ahead = seen.any() && crate::chat::tools::agents::goes_ahead_after_web(name, self.question);
-            let result = match gate(name, &args, hold_web, if goes_ahead { crate::chat::tools::Seen::default() } else { seen }, &self.extra) {
+            // (An agent after outside content isn't refused here: its own
+            // card asks, `tools/agents.rs`.)
+            let result = match gate(name, &args, hold_web, self.seen(), &self.extra) {
                 Some(refusal) => refusal,
                 None => {
                     let source = Source::of(name, self.web.is_some(), &self.extra, self.claude_web, self.open_apps);

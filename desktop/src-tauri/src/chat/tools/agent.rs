@@ -346,7 +346,7 @@ impl Loop<'_> {
 /// too (`apps.rs`), acting on `question`, the person's own message. `web`:
 /// the turn's web side while web search is on (`web.rs`): its tools are
 /// offered, its sources collected, and once web content is in the turn the
-/// action tools are refused ([`super::refused_after_web`]). `history`: the earlier
+/// action tools are refused ([`super::refused_after_outside`]). `history`: the earlier
 /// messages as OpenAI messages (`chats::history_messages`: an earlier web
 /// answer's search replayed as its tool call). `context`: what Yap adds to
 /// the question for this turn (the time, notes found, …), sent in the
