@@ -2762,9 +2762,23 @@ and its Undo, Preview / Source, find, copy, light and dark).
   AI Chat surface (OpenWhispr `chat/ChatView.tsx` port): conversation sidebar
   (Today/Yesterday/Previous 7 Days/Older grouping, Ctrl+N, hover-delete;
   **several at once**: Shift+click a range, Ctrl+click one, Ctrl+A in the
-  list → a "3 selected · Delete · Cancel" bar, Delete key / Esc; the list's
-  ⋯ menu has Select all and "Delete all chats…", every delete asked first;
-  `chat_delete_many` = one write, `chats::delete_many`; **search**
+  list → a "3 selected · Archive · Delete · ✕" bar (✕ = Cancel · Esc),
+  Delete key / Esc; the list's ⋯ menu has Select all and "Delete all
+  chats…", every delete asked first; `chat_delete_many` = one write,
+  `chats::delete_many`. **Only the rows the list shows** are ever picked or
+  deleted (8 Nov 2026): Select all, Ctrl+A and "Delete all chats…" take the
+  side on screen (Chat or Code), its open workspaces' chats only (a folded
+  one's are out), never an archived chat or a meeting's Ask thread (neither
+  is in `chats_list`); a selection lets go of whatever leaves the list (the
+  Chat | Code switch, a fold, an archive) for good, and of everything while
+  the search's results or Archived show in the list's place (no ⋯ there,
+  Ctrl+A picks nothing) — `chatState.svelte.js` `shownPicked`,
+  `askDeleteMany` (from `ordered`), ConversationList `rows`. The bar fits
+  the list on one row at every width its edge allows (200–420 px) and sits
+  above the edge: its count reads "12 selected" while that fits, else the
+  rows' ✓ and the number ("selected" wrapped out of sight, still read out),
+  by the room it has (`countFits`, `data-fit`: full / short / num)
+  (`chat-select.spec.js`, `chat-select-shown.spec.js`); **search**
   (2026-10-25): "Search chats…" under New chat — every conversation's title
   and messages, archived ones too, by the words typed and then by meaning
   (`chats_search`), each result its title and the message it found with
