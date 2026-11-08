@@ -638,7 +638,7 @@ on an element that also has a `settings.css` class (`set-note`,
   workspace…**, the folder picker; "A workspace's own Claude settings and MCP
   servers also run."; the Bypass warning on a folder with no cap once Bypass
   is confirmed; "No workspaces yet…"; **Animate Code chats**, `agentsAnimate`,
-  yap-code.md "Code chats"); **Ask before starting an agent** (`agentsAsk`: When it
+  yap-code.md "Code chats"); **Ask before sending an agent** (`agentsAsk`: When it
   matters, the default — a workspace agents haven't used yet, or after the chat
   read the web —, Always, Never) and **Read agent reports aloud** (`agentsSpeak`); the limits ("Backups of changed files are
   kept 7 days. One agent at a time per workspace, at most 3 at once.") and, small,

@@ -152,7 +152,7 @@ no Local API (the bridge can be off), and it reaches the live UI.
   (`POST /hook/<run>/PreToolUse`, 60 s `timeout`) copies it into the run's
   backup folder once (the first copy wins), with a `manifest.json`; a file
   that didn't exist is noted as created; one over 50 MB as too big. It always
-  answers `{}` at once, never blocking or denying a tool. `restore` (Undo agent)
+  answers `{}` at once, never blocking or denying a tool. `restore` (Undo the agent's changes)
   puts them back and deletes what the run created, touching only the paths
   the manifest names. A denied Write is still noted as created.
   [yap-code.md](./yap-code.md#undo-and-backups).

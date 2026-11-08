@@ -7,7 +7,7 @@ The AI Chat surface (conversations, the tool-calling loop and its note tools) an
 **Chat and Code** (2026-11-07). With Yap Code on, Chat has two sides, switched at
 the top of its conversation list: **Chat**, the plain conversations this file
 describes, and **Code**, conversations attached to a workspace (a folder on
-this PC) where a request can start an agent: the person's own Claude Code working
+this PC) where a request can send an agent: the person's own Claude Code working
 in that folder, followed in an agent tab beside the chat. A Code chat is a Chat
 conversation with a few differences (the workspace and Mode chips, one more
 line in its prompt, its look); what they are, and how a chat moves between

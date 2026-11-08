@@ -297,7 +297,7 @@ In a Code chat `start_agent` carries the chat's agent on
   information, never instructions.
 - **The model and effort**: one of Claude's models by full id when the model
   names one, else `agents_model` (Sonnet 5.5); `agents_effort` (medium).
-- **Started**: saved, handed to the runner, "On it: I've started an agent in
+- **Started**: saved, handed to the runner, "On it: I've sent an agent to
   garden-planner." The answer's step goes to the page at once
   (`stream::Event::Agent`), so its tab opens. The question's message id
   (`chat:<conversation>:<index>`) is kept on the agent for its pill.
@@ -333,8 +333,8 @@ slipped words into the brief), **Always** or **Never**.
   Yap asks. **Start** / **Don't** (`chat_page_confirm`); no answer in two
   minutes is a no.
 - **Out loud** (the Voice Assistant, `agents/voice.rs`): a card nobody sees
-  would just wait, so Yap asks in words: "Should I start an agent in
-  garden-planner, in Auto mode? Say yes to start it." The next question in
+  would just wait, so Yap asks in words: "Should I send an agent to
+  garden-planner, in Auto mode? Say yes to send it." The next question in
   that conversation within 2 minutes is the answer, read by Yap itself with no
   model (`chat/turn/fast.rs` `agent_answer_turn`): a plain yes starts it, a no
   drops it ("Okay, I won't start it."), anything else drops it and is asked as
@@ -421,10 +421,10 @@ turn simply ended: nothing carried on, though "yes" plainly meant go ahead.
   done, no plan, nothing more (`runner::after_plan`).
 - **Its report** says it's building from the plan, never "want me to go
   ahead?" (marker: "it made a plan, and the user allowed it in Yap…"; the
-  card: "Agent is carrying out its plan"), and has no bar notice: the next
+  card: "The agent is carrying out its plan"), and has no bar notice: the next
   turn's report follows.
 - **Not yet** (denied): Claude is told to change nothing and end with the
-  plan as it is; it stays a plan, reported as before ("Agent's plan is
+  plan as it is; it stays a plan, reported as before ("The agent's plan is
   ready").
 - **Go ahead on the report** (`AgentReportCard.svelte`, `agent_go_ahead`,
   `runner::go_ahead`): a "The agent's plan is ready" card whose plan is still the
@@ -686,7 +686,7 @@ instead of a terminal (rebuilt after the maintainer's first real agent,
   or Haiku 5.5; effort; the Mode a new chat starts in); **Workspaces** (name,
   path, "Never above:", Remove, Add workspace…, the small print, the Bypass
   warning on a workspace with no cap once Bypass is confirmed, **Animate Code
-  chats**); **Ask before starting an agent**; **Read agent reports aloud**; the
+  chats**); **Ask before sending an agent**; **Read agent reports aloud**; the
   limits ("Backups of changed files are kept 7 days. One agent at a time per
   workspace, at most 3 at once.") and the hooks line ("Undo needs Claude
   Code's hooks…"); **History** (each agent's status, folder, when and cost, Open
@@ -730,8 +730,8 @@ or not.
   switches** the chat shown (the Voice Assistant's follow does).
 - **"Agent done: garden-planner"** (`agentDone`, Info, held over a dictation):
   with no Yap window in front, a card on the Yap bar with **Open**, else a
-  Windows notification. Its title says which: "Agent didn't finish", "Agent's plan
-  is ready" (on the bar with **Go ahead** first, then Open), "Agent has a
+  Windows notification. Its title says which: "Agent didn't finish", "The agent's
+  plan is ready" (on the bar with **Go ahead** first, then Open), "The agent has a
   question"; a plan already allowed has none. Open brings up the main window on the
   agent's chat and its tab (`open_agent`: `yap-assistant-turn {phase: "open"}` and
   `yap-agent-open`). Its chat deleted: the notice alone.
@@ -1122,7 +1122,7 @@ the build's own stand-in replaying `script` from now on),
     asked for a plan (its result says why), "make a plan first" a plan; the
     plan card (the stand-in's `_mcp approve` on ExitPlanMode) in the thread
     and on the bar, Go ahead carrying the plan out at once at the chip's
-    mode on `--resume`, its report "Agent is carrying out its plan"; Not yet a
+    mode on `--resume`, its report "The agent is carrying out its plan"; Not yet a
     plan, the report card's Go ahead once, the bar's "The agent's plan is ready"
     Go ahead. Light and dark.
 - **Unit** for Code chats and memory: `chat::turn::prompt` (a Code chat's

@@ -376,7 +376,7 @@ a tick box per **kind** of data. "Clear everything and keep my settings"
     (`ai/claude_code/transcripts.rs`; deleting one chat deletes its copy too);
     the documents Chat wrote stay in Notes),
     **Yap Code** (2026-11-07, `agents.json`, `agents/`, `workspaces.json`: every agent
-    Chat started, with its log and the backups Undo agent uses, each chat's
+    Chat started, with its log and the backups Undo uses, each chat's
     Mode, the Bypass OK and the workspaces; running agents are stopped first;
     the files the agents changed stay as they are, and so do Claude Code's own
     transcripts of the agents: they ran in the person's folders, and are
