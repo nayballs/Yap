@@ -121,6 +121,10 @@ Puts a question to Chat and waits until the turn ends (answered, stopped or fail
   of each card while it waited — each `{file, window, theme, set, width, height,
   dpr}` (the thread's with `pieces`, `cssHeight`, `scrollHeight`); `shotErrors` says
   what couldn't be taken.
+- `questionImages`: the screenshots Chat kept with the question itself, each
+  `{source, asText}` — a snip, the window in front a spoken question's words took
+  (`"window"`), the model's own `look_at_screen` (`"screen"`, or `"window"` asked out
+  loud from another app). Not the lab's shots: Yap's.
 
 ```json
 {"ok":true,"turn":2,"status":"answered","conversation":2,"question":"Buy me a ticket for the 09:42 here: https://rail.example.com/results?…","spoken":false,
@@ -407,7 +411,7 @@ warn).
 | `failed` | `true`: some call failed (`ok: false`); `false`: none did. |
 | `card` | `true` / `false`: a card was asked or not; `{ "kind": "page", "does": "buy", … }`: one like it was. |
 | `answerContains` / `answerNotContains` / `answerMatches` | the answer has the words (any case) / hasn't / matches the regex. |
-| `pictures`, `files`, `documents`, `pagesShown`, `sources`, `tools` | how many: a number, or `{ "min": 1, "max": 3 }`. |
+| `pictures`, `files`, `documents`, `pagesShown`, `sources`, `questionImages`, `tools` | how many: a number, or `{ "min": 1, "max": 3 }` (`questionImages`: the screenshots kept with the question itself). |
 | `tool` | some call matches all of it (a list: each one does): `name`, `via`, `ok`, `refused`, `args` (`{ "tab": 1, "keys": "/enter/i", "ref": "*" }`: equal, a regex, or there at all), `argsHas` / `argsLack`, `result` / `resultNot` (words or a regex on the whole result), and `path` into the result's JSON (`"data.scroll.y"`) with `equals`, `gt`, `gte`, `lt`, `matches` or `notMatches`. The whole arguments and results: the turn's transcript. |
 | `agent` | an agent (from the last `wait agents`, else now) has `status`, `files` (a count), `folder`, `error` (`null`: none), `mode` (`bypassPermissions`…), `plan`, `readOnly` (its latest turn read only); `count` how many must (one by default). |
 | `selector` | `{ "window": "main", "css": "…" }` shows (`present: false`: doesn't; `count`: how many show), over CDP (`probe`). |
@@ -419,6 +423,7 @@ warn).
 |---|---|---|
 | `browser-tools` | the default `start` (web on) | The browser tools' fixes of 8 Nov 2026, in three questions on Wikipedia, MDN and example.com: `browser_scroll` reporting where it ended (`data.scroll.y`, not at the top), `browser_scroll_to` by ref scrolling, `tab` on `browser_find` and `browser_scroll`, "changed" after a hover, PageDown and a click that opens a box, Escape closing a hover preview (soft), Enter after typing submitting through the check (`went to`, no card), a dropdown's choice not called typing, `find_pictures` and the lead picture (the thread's shot shows which), the bad-ref error not blaming the page. Then, in two more, the gaps closed the same day: a double click selecting a word and a right-click on Wikipedia (no menu of its own: said so); MDN at a desktop width (`browser_tabs` width 1280: its shot saying so, its live examples listed as frames from another site; soft, MDN decides what it draws); jQuery UI's sortable demo, a list in a same-origin frame, read and an item dragged (`browser_drag`, what moved said: soft). Turns 4 and 5 carry the fake AI's calls (placeholders for the live pages' refs), so `start --fake --live-web --model fake-gpt-5-vision` runs them with no model's usage; turns 1–3 carry none. |
 | `share-files` | `start --yap-code on` | Chat sharing files from a Code chat's workspace: one picture, then three (inline), then `notes.md` (a card); the workspace seeded with three drawn pictures and a made-up `notes.md`. **Its `todo`**: written before the share-files tool reached main — put its real name in `used` and check where an answer keeps file cards (`turns.mjs` `files`) once it has. |
+| `voice-screen` | the default `start` (`--fake` passes) | No guessing about the screen (8 Nov 2026): a typed question about comic conventions near Kellbrook (made up), then, `spoken`, the two follow-ups that each sent a screenshot of the game in front ("The one that's on the 5th to the 8th of February, where is it…", "How many people usually attend that specific one? Can you look?"): each answered with no screenshot kept with it (`questionImages: 0`), and — soft, a real model's call — no `look_at_screen`. |
 | `agent-panel` | `start --yap-code on` | An agent at work in `lab-sandbox`, its cards allowed: the Agent panel and the thread's to-do card while it runs and once it's done (named shots, both themes), the agent done with a file changed. Then a plan nobody acts on (8 Nov 2026): a fresh agent asked for a plan first, its prompt answered no (`answer next deny`), its plan in Needs you with its buttons in the row (`plan-waiting`); a newer fresh agent at work in the same Code chat (`newer-turn-running`), and once it's done the plan is "Plan not used" in Finished, not Needs you (`plan-not-used`). Then a Bypass permissions Code chat asked to catch up on the workspace (`set` `bypass`): no card, the agent read only at Bypass, never a plan, done, nothing in Needs you. Its `fake` steps make it pass on `--fake` too (the stand-in agent). |
 
 ## Checking that it looks right

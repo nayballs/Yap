@@ -47,7 +47,7 @@ pub fn offered_tools(open_apps: bool, web: bool, extra: Extra<'_>) -> Value {
         all.extend(pages.iter().cloned());
     }
     // The screen (chat/see_screen.rs): not tied to the web.
-    if let (Some(all), Some(screen)) = (tools.as_array_mut(), crate::chat::see_screen::definitions(extra.screen).as_array()) {
+    if let (Some(all), Some(screen)) = (tools.as_array_mut(), crate::chat::see_screen::definitions(extra.screen, extra.screen_takes).as_array()) {
         all.extend(screen.iter().cloned());
     }
     if let (Some(all), Some(memory_tools)) = (tools.as_array_mut(), memory_definitions(extra).as_array()) {

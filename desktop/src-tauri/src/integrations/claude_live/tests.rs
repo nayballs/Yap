@@ -774,7 +774,7 @@ fn a_chat_run_offered_the_screen_and_pages_lists_and_allows_them_and_refuses_the
     let list = c.request("tools/list", json!({}));
     assert_eq!(names(&list)[9..], eyes::all_names());
     let look = list["result"]["tools"].as_array().unwrap().iter().find(|t| t["name"] == "look_at_screen").unwrap().clone();
-    assert_eq!(look["inputSchema"], crate::chat::see_screen::definitions(Gate::Look)[0]["function"]["parameters"]);
+    assert_eq!(look["inputSchema"], crate::chat::see_screen::definitions(Gate::Look, crate::chat::see_screen::Takes::Screen)[0]["function"]["parameters"]);
     for name in eyes::all_names() {
         assert!(h.allowed_tools().contains(&format!("mcp__yap__{name}")), "{name}");
     }
@@ -782,12 +782,12 @@ fn a_chat_run_offered_the_screen_and_pages_lists_and_allows_them_and_refuses_the
     let (err, text) = c.tool("look_at_screen", json!({}));
     assert!(err);
     assert_eq!(serde_json::from_str::<Value>(&text).unwrap()["displayText"], "Didn't look: not part of a chat turn");
-    // A turn asked away from Chat (another app, a phone): refused, nothing taken.
+    // A turn whose screen is off (a phone's, or from another app with no look allowed): refused, nothing taken.
     let turn = h.begin_turn(turn::Context { question: "Have a look at my screen".into(), conversation: Some(14), ..Default::default() }, None);
     let r = c.request("tools/call", json!({ "name": "look_at_screen", "arguments": {} }));
     assert_eq!(r["result"]["isError"], true);
     assert_eq!(r["result"]["content"].as_array().unwrap().len(), 1, "no pictures");
-    assert_eq!(serde_json::from_str::<Value>(r["result"]["content"][0]["text"].as_str().unwrap()).unwrap()["displayText"], "Didn't look at your screen: not asked in Chat");
+    assert_eq!(serde_json::from_str::<Value>(r["result"]["content"][0]["text"].as_str().unwrap()).unwrap()["displayText"], "Didn't look at your screen: not for this question");
     let (err, text) = c.tool("browser_navigate", json!({ "url": "https://wiki.example.com/" }));
     assert!(err && text.contains("no panel beside the chat"), "{text}");
     drop(turn);

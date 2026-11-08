@@ -226,6 +226,16 @@ export function answerOf(conv, fromIndex = 0) {
   return null;
 }
 
+/** The question a turn asked in conversation `conv`: its first person's
+ * message from `fromIndex` on (Chat's saved one). Pure. */
+export function questionOf(conv, fromIndex = 0) {
+  const messages = conv?.messages ?? [];
+  for (let i = Math.max(0, fromIndex); i < messages.length; i++) {
+    if (messages[i].role === 'user') return messages[i];
+  }
+  return null;
+}
+
 /**
  * **`ask`'s JSON**: what the turn did. `turn`: `{ n, question, spoken,
  * startedAt, endedAt?, status, error, conversation, askedAt (the
@@ -255,6 +265,10 @@ export function summarize({ turn, items, conv, pages = [], approvals = [], agent
     conversation: turn.conversation ?? conversationOf(items),
     question: cut(turn.question, 300),
     spoken: !!turn.spoken,
+    // The screenshots kept with the question itself: a snip, the window in
+    // front its words took, the model's own look at the screen ("window" or
+    // "screen"), each by its source.
+    questionImages: (questionOf(conv, turn.askedAt ?? 0)?.images ?? []).map((i) => ({ source: i.source ?? '', asText: !!i.asText })),
     answer: cut(answer, ANSWER_MAX),
     model: message?.model ?? sent?.reply?.model ?? null,
     steps,

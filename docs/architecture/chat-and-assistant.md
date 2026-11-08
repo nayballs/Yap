@@ -1459,9 +1459,9 @@ one side.
   Settings says so), its guards and Skip cleanup on the capsule — the Chat
   view's mic the same; "snip" and nothing-heard decided first; the dictionary
   after (`pipeline::ask_assistant`, dictation.md). It adds the cleanup's time
-  (~0.15 s on the on-device 4B here, ~0.5–0.85 s on Groq): meanwhile a maybe
-  about the screen is put to Chat's model already (`screen::ask_early`, its
-  word taken by `look`). A phone's question for a Code chat is cleaned (off
+  (~0.15 s on the on-device 4B here, ~0.5–0.85 s on Groq); no model is asked
+  about the screen beside it (since 8 Nov 2026 none is asked at all). A
+  phone's question for a Code chat is cleaned (off
   the bar); a plain chat's stays as said. Phases
   `Idle → Listening → Thinking → Speaking` in `yap-assistant {phase,
   conversationId, messageId}` (the bar). `listening` (from
@@ -1639,31 +1639,36 @@ one side.
   answer that phone was given, read from `chats.json`). Never dictation:
   nothing is typed into an app on the PC.
 - **`chat/assistant/screen.rs`** — **the Voice Assistant sees the window in
-  front** (2026-10-29): a spoken question about the screen ("what's this
-  error?", "summarise this page", "what does this chart say?") takes a
-  screenshot of the window that was in front when the shortcut was pressed
-  (`window_in_front`, from `pipeline::capture_target`), and the model answers
-  from it. **Never for every question**: cheap rules first (`about_in`,
-  pure, in the person's own languages — My languages' codes, English always:
-  Dutch "dit" is French for "said"): phrases that point at the screen ("on
-  my screen", "what's this?", "qu'est-ce que c'est", "was ist das?",
-  "summarise this") and a demonstrative before a screen word ("this
-  error", "cette page", "dieser Fehler") say **yes**; "this" alone, or
-  "that error", is a **maybe**; anything else **no** ("this weekend" isn't
-  the screen). A maybe is the model's call (`model_says`: one short request
-  to Chat's own model, `ASK_PROMPT`, with its last answer, so "is this
-  right?" after an answer is about the answer; 4 tokens on this PC, gpt-oss
-  at low effort; anything but a clear yes is a no). On the real Qwen3.5-4B
-  (29 Oct 2026): 14 of 16 such questions right, median 180 ms, slowest 0.5 s.
-  **An ask for something to be made** (`asks_to_make`, 2026-10-31: `MAKES`,
-  in the same seven languages — "…in a document", "make this a document",
-  "fais-moi un guide…", "in einem Dokument", "en un documento", "num
-  documento", "maak een plan…" — and English's `documents::asks_for_document`)
-  is no maybe: its "this" is the thing to make ("can you build me this
-  level by level… in a document"), and "this document" in it is the new one;
-  only words that point at the screen itself still take it ("summarise this
-  page into a document"). The Voice Assistant spent 2.9 s on Claude's yes/no
-  for a spoken Divinity: Original Sin 2 build "in a document".
+  front** (2026-10-29): a spoken question whose words point at the screen
+  ("what's this error?", "summarise this page", "what does this chart
+  say?") takes a screenshot of the window that was in front when the
+  shortcut was pressed (`window_in_front`, from `pipeline::capture_target`)
+  **at once**, and the model answers from it. **Only when the words say
+  so** (`about_in`, pure, in the person's own languages — My languages'
+  codes, English always: Dutch "dit" is French for "said"): phrases that
+  point at the screen ("on my screen", "what's this?", "qu'est-ce que
+  c'est", "was ist das?", "summarise this") and a demonstrative before a
+  screen word ("this error", "cette page", "dieser Fehler") say **yes**;
+  anything else **no** — a lone "this" or "that" too ("is this right?",
+  "how many go to that one?"; "this weekend" isn't the screen). **No
+  guessing** (the maintainer, 8 Nov 2026): a lone "this" or "that" was a
+  maybe, put to Chat's model in a one-second yes/no request with the last
+  answer only (`model_says`, `ASK_PROMPT`, asked early beside the
+  question's cleanup: `ask_early`), and two spoken follow-ups about a
+  convention just discussed ("The one that's on the 5th to the 8th of
+  February, where is it…", "How many people usually attend that specific
+  one? Can you look?") each sent a screenshot of the game in front. That
+  step is gone, its wait with it: otherwise **the answering model looks
+  itself if it needs to**, with the whole conversation in view
+  (`look_at_screen`, "Chat looks at the screen" in [The Chat
+  view](#the-chat-view): asked from another app it takes this window in
+  front, `take_in_front`). **An ask for
+  something to be made** (`asks_to_make`, 2026-10-31: `MAKES`, in the same
+  seven languages — "…in a document", "make this a document", "fais-moi un
+  guide…", "in einem Dokument", "en un documento", "num documento", "maak
+  een plan…" — and English's `documents::asks_for_document`): "this
+  document" in it is the new one; only words that point at the screen
+  itself take it ("summarise this page into a document").
   **What's taken** (`capture`): the window's visible frame
   (`snip::pick::window_frame`: DWM's frame; not one of Yap's own, minimised,
   cloaked or gone — then, since 8 Nov 2026, **the monitor it's on**, else
@@ -1686,8 +1691,7 @@ one side.
   screen meets a cloud model the alert asks once (`ask_once`, kind
   `assistantScreen`, **Allow** = `alert::ALLOW_SCREEN_CLOUD`;
   `assistant_screen_asked`), and the model is told it can't see the screen
-  (`not_sent_note`), so it says so rather than guess; a maybe isn't asked
-  about when nothing could go. **With it**: the picture through the typed
+  (`not_sent_note`), so it says so rather than guess. **With it**: the picture through the typed
   path's steps (`turn::prepare`; the on-device model loads its projector
   first, `vision::ensure`) and a line in the question's context saying what
   it is (`PICTURE_NOTE`, `snip::turn::TurnImages.note`, read by `chat_turn`);
@@ -1703,12 +1707,14 @@ one side.
   capsule says "Looking at the window…" meanwhile (`yap-assistant {about:
   "window"}` while thinking). **Network receipts**: the turn runs as
   `net::Feature::AssistantScreen` — "Voice Assistant + the window in front ·
-  Groq". Logs: the rule's verdict, sizes and timings, never the question or
+  Groq". Logs: where it may go, sizes and timings, never the question or
   the screen. Unit-tested (every rule in seven languages, the person's
-  languages, the yes/no request and reply, where it may go); e2e
-  `assistant-screen.spec.js` (fake monitors and a fake window in front
+  languages, the two follow-ups of 8 Nov taking nothing, where it may go);
+  e2e `assistant-screen.spec.js` (fake monitors and a fake window in front
   through `e2e_snip {start: false}`, `snip::take_fake`: never the real
-  screen). **Commands use the same rule and capture** (2026-10-31,
+  screen; the follow-ups with no screenshot and no request first, the
+  model's own look getting the window), Yap Lab's `voice-screen` script.
+  **Commands use the same rule and capture** (2026-10-31,
   `dictation/command_screen.rs`, [dictation.md](./dictation.md)): a Command
   that replies to what's on screen ("Hey Jarvis, reply saying Thursday
   works") gets the window's **text** over UI Automation, the box being
@@ -1720,8 +1726,9 @@ one side.
   `command_screen::gate`. Only when next to no text could be read, and the
   Commands model reads images, does it take the window's picture here
   (`capture_window`, the same capture; deleted once sent, never a chat's).
-  Its maybe goes to the Commands model, its yes/no with
-  `says_yes`.
+  Its maybe still goes to the Commands model (`command_screen::model_says`,
+  its own `says_yes`, moved there on 8 Nov 2026 with the Voice Assistant's
+  yes/no gone).
 - **`chat/assistant/selected.rs`** — a question about text selected in
   another app ([below](#questions-about-selected-text-2026-10-31)): the
   `Selected { text, app, web }` a turn is about (a task-local, `with` /
@@ -2236,14 +2243,38 @@ model looks itself — your Claude plan's too since 8 Nov 2026 (it was left
 to the window's capture, found only Yap, and was told "Yap couldn't take a
 screenshot" while its own `look_at_screen` worked a minute later); its
 pictures show with the spoken question
-(`followAssistantStream`). Never a phone's question, nor the Voice
-Assistant asked from another app (its own look at the window in front):
-`chat_in_view` in `turn.rs` (the maintainer asked out loud with Chat open,
-"have a look", and Haiku said it couldn't see — 1 Nov 2026). **On your
+(`followAssistantStream`). Chat in view: `chat_in_view` in `turn.rs` (the
+maintainer asked out loud with Chat open, "have a look", and Haiku said it
+couldn't see — 1 Nov 2026). **Asked out loud from another app** (8 Nov
+2026, `see_screen::Takes::Window`): the Voice Assistant's words no longer
+guess — only words that point at the screen take the window at once
+(`assistant/screen.rs`) — so the answering model is offered the look
+itself, with the whole conversation in view, and it takes **the window that
+was in front at the shortcut's press** (`assistant::screen::take_in_front`:
+the clear words' own capture, every Yap window left out, source "window"),
+never every monitor nor a page (there's no panel): its picture for a model
+that reads images, else its text read on this PC. Its description and
+prompt line say when, in one sentence: only when the question needs what's
+on their screen, never for "it" or "that one" from the conversation, and
+never to look something up. Only for the shortcut's question with nothing
+else going with it — no screenshots waiting, window already taken, quote,
+selection or Skill (`assistant::may_look_at_window`, a task-local the
+turn's gates read: `Here::window` in `gates.rs`) — and only where the
+window itself may go (`see_screen::window_gate`: "Let Yap's AI see your
+screen" on; a cloud model only once "…with cloud models too" is, until then
+a question whose words point at the screen asks once). Never a phone's
+question, never across the meetings or during one (refused then, as
+always). Chip "Looked at the window in front"; shown on the question in
+Chat's screenshot frame. In `fit.rs`'s screen family as the monitors' look
+is. **On your
 Claude plan** (7 Nov 2026) the same look, and the page tools below, go over
 Yap's run endpoint with the same code and rules, the pictures to Claude Code
 as MCP image content ([Chat on your Claude plan](#chat-on-your-claude-plan-2026-11-07),
-`claude_live/eyes.rs`). A screen shot in an earlier message is held
+`claude_live/eyes.rs`) — asked out loud from another app too: the session
+lists the look as Chat has it, the turn's own `Context::takes` makes it the
+window in front, and the question's line says so (`plan.rs` `away_line`:
+the page tools don't work, the look sees only the window in front, and
+when to use it). A screen shot in an earlier message is held
 back from a cloud model as a window shot is (`snip::turn::captured`: "window"
 or "screen", sent again only while `window_may_go`). The prompt line: "use it
 whenever they ask you to look at, see, check or screenshot something… Never

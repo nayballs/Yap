@@ -222,6 +222,19 @@ pub fn ask_messages(instruction: &str) -> Value {
     ])
 }
 
+/// Did the model say yes? Its first word, in English or the languages the
+/// rules know. Pure.
+fn says_yes(reply: &str) -> bool {
+    let first = reply
+        .trim()
+        .trim_start_matches(|c: char| !c.is_alphanumeric())
+        .split(|c: char| !c.is_alphanumeric())
+        .next()
+        .unwrap_or("")
+        .to_lowercase();
+    matches!(first.as_str(), "yes" | "y" | "oui" | "ja" | "sí" | "si" | "sim" | "true")
+}
+
 /// The Commands model decides a maybe: one short request (≤ 8 s; a model on
 /// this PC 15 s, it may be loading). Anything but a clear yes is a no.
 pub async fn model_says(instruction: &str, ep: &crate::dictation::ask_or_edit::Endpoint<'_>) -> bool {
@@ -244,7 +257,7 @@ pub async fn model_says(instruction: &str, ep: &crate::dictation::ask_or_edit::E
     let ms = t.elapsed().as_millis() as u64;
     match asked {
         Ok(reply) => {
-            let yes = crate::chat::assistant::screen::says_yes(&reply);
+            let yes = says_yes(&reply);
             tracing::info!(yes, ms, "Command: the model said whether it needs the window in front");
             yes
         }
@@ -853,6 +866,16 @@ mod tests {
         let user = m[1]["content"].as_str().unwrap();
         assert!(user.starts_with("The instruction: \"tell her Thursday works\""));
         assert!(user.chars().count() < 200);
+    }
+
+    #[test]
+    fn the_models_word_is_yes_or_no() {
+        for r in ["yes", "Yes.", "YES", " yes, it is", "\"yes\"", "Oui", "ja", "Sí"] {
+            assert!(says_yes(r), "{r}");
+        }
+        for r in ["no", "No.", "", "Not really", "I can't tell", "maybe"] {
+            assert!(!says_yes(r), "{r}");
+        }
     }
 
     #[test]

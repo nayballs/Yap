@@ -1,7 +1,7 @@
 // "Clean up what you say…" (desktop/src-tauri/src/ai/cleanup_styles.rs
 // `cleans_question` / `question_plan`, dictation/pipeline/delivery.rs
-// `ask_assistant` / `clean_question`, chat/assistant.rs `shortcut_goes`,
-// chat/assistant/screen.rs `ask_early`; Settings' CleanSpeech.svelte): a
+// `ask_assistant` / `clean_question`, chat/assistant.rs `shortcut_goes`;
+// Settings' CleanSpeech.svelte): a
 // question said to Yap's AI — the Voice Assistant's shortcut, the Chat
 // view's mic — goes through AI cleanup as an AI prompt, word for word
 // (fillers and false starts out), on Dictation cleanup's model, whatever
@@ -14,8 +14,8 @@
 //   cleaned; off: as said there, while Chat's is on.
 // - Best effort: a cleanup that fails gives the words as said; a slow one
 //   says so on the bar with Skip cleanup, which asks the words as said now.
-// - A question that may be about the screen: Chat's model is asked that
-//   while the question is cleaned, once.
+// - A lone "this": no model is asked whether it's about the screen (since
+//   8 Nov 2026 the answering model looks itself if it needs to).
 // - No cleanup model: the words as said, no request; both Settings rows say
 //   what's missing, with the way there. Light and dark.
 //
@@ -198,26 +198,20 @@ test('best effort: a cleanup that fails gives the words as said; a slow one offe
   fakeLlm.delay('cleanup', 0);
 });
 
-test('a question that may be about the screen: Chat’s model is asked that while the question is cleaned, once', async ({ yap, main, fakeLlm }) => {
+test('a lone "this", cleaned: no model is asked whether it’s about the screen, before or after the cleanup', async ({ yap, main, fakeLlm }) => {
+  // (8 Nov 2026: the yes/no request that once went out beside the cleanup is
+  // gone; the answering model looks itself if it needs to.)
   await plainChat(main);
   // The person is in another app (the window in front could be what it's about).
   await inAnotherApp(yap);
-  fakeLlm.delay('cleanup', 2_500);
   fakeLlm.scriptChat([{ content: 'It looks right.' }]);
   const before = screenAsks(fakeLlm).length;
-  const started = Date.now();
-  const asked = askAloud(yap, 'um is uh this right');
-  // Asked before the cleanup is back…
-  await expect.poll(() => screenAsks(fakeLlm).length, { timeout: 2_000 }).toBe(before + 1);
-  expect(Date.now() - started).toBeLessThan(2_400);
-  await asked;
+  await askAloud(yap, 'um is uh this right');
   await mainOnScreen(yap);
   await expect(lastAnswer(main)).toHaveText('It looks right.');
   await expect(lastQuestion(main)).toContainText('Is this right?');
-  // …and once: the cleaned question took that word.
-  expect(screenAsks(fakeLlm).length).toBe(before + 1);
-  expect(log(yap)).toContain("asking whether the question is about the screen while it's cleaned up");
-  fakeLlm.delay('cleanup', 0);
+  expect(screenAsks(fakeLlm).length).toBe(before);
+  expect(log(yap)).not.toContain('asking whether the question is about the screen');
 });
 
 test('no cleanup model: the words as said, and both Settings rows say what’s missing, light and dark', async ({ yap, main, fakeLlm, shot }) => {

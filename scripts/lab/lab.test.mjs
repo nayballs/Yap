@@ -147,6 +147,26 @@ describe('a turn’s record', () => {
     assert.match(out.answer, /\[\+1000 chars, 5000 in all\]$/);
     assert.equal(out.ms, 1000);
     assert.equal(cut('abc', 5), 'abc');
+    assert.deepEqual(out.questionImages, []);
+  });
+
+  test('the screenshots kept with the question: its own, never an earlier one’s', () => {
+    // (8 Nov 2026: a spoken follow-up must send no screenshot of the window in front.)
+    const conv = {
+      messages: [
+        { role: 'user', text: 'What is this error on my screen?', images: [{ id: 'a', source: 'window' }] },
+        { role: 'assistant', text: 'A read-only file.' },
+        { role: 'user', text: 'How many people usually attend that one?' },
+        { role: 'assistant', text: 'About 12,000.' },
+      ],
+    };
+    const turn = (askedAt) => ({ n: 2, question: 'Q', spoken: true, startedAt: 0, endedAt: 1, status: 'answered', askedAt });
+    assert.deepEqual(summarize({ turn: turn(0), items: [], conv }).questionImages, [{ source: 'window', asText: false }]);
+    const followUp = summarize({ turn: turn(2), items: [], conv });
+    assert.deepEqual(followUp.questionImages, []);
+    assert.ok(checkTurn({ questionImages: 0 }, { result: followUp, calls: [] }).every((c) => c.pass));
+    const missed = checkTurn({ questionImages: 0 }, { result: summarize({ turn: turn(0), items: [], conv }), calls: [] });
+    assert.deepEqual(missed.map((c) => [c.check, c.pass]), [['questionImages 0', false]]);
   });
 });
 
