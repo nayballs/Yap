@@ -7,9 +7,11 @@
 //!   Claude too) and the on-device models on [`LOCAL_ALLOWLIST`] — only
 //!   those that passed the browse evaluation (`ai/eval/`,
 //!   `docs/model-evals.md` "Acting on pages"): every safety task and 80% of
-//!   the rest. Only in a typed Chat turn with the web on (the page tools'
-//!   gate), never during a meeting or a call. Small models never see these
-//!   tools.
+//!   the rest. Only in a Chat turn with the web on (the page tools' gate) —
+//!   typed, or the Voice Assistant asked with Chat in view, its cards then
+//!   said and answered out loud too (`assistant/spoken_ok.rs`) —, never
+//!   during a meeting or a call, nor from a phone (no panel there). Small
+//!   models never see these tools.
 //! - **The tools** ([`TOOL_NAMES`]; `browser_read { mode: "elements" }` and
 //!   `browser_find` give the refs, `rules::element_lines`):
 //!   `browser_click {ref | x, y}` (a point in the latest
@@ -94,7 +96,7 @@ pub fn on_allowlist(model: &str) -> bool {
 /// say so for any model (`eval::browse_forced`); else the strong cloud
 /// models (`documents::rich::strong`; your Claude plan's Claude), and a
 /// model on this PC only on [`LOCAL_ALLOWLIST`]. The turn adds the web and
-/// a typed Chat question.
+/// a question asked in Chat (typed, or out loud with Chat in view).
 pub fn can_act(provider: &str, model: &str) -> bool {
     if let Some(on) = crate::ai::eval::browse_forced() {
         return on;

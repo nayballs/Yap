@@ -48,8 +48,11 @@ pub(super) struct Gates {
     /// in front).
     pub screen: Gate,
     /// Acting on the pages beside the chat (chat/pages/act.rs): the models
-    /// proven good at it, in a typed Chat turn (never the Voice Assistant
-    /// or the meetings: a click that buys asks in Chat's thread).
+    /// proven good at it, wherever the pages are — typed in Chat, or the
+    /// Voice Assistant asked with Chat in view (since 8 Nov 2026: a click
+    /// that buys asks on its card in the thread, and out loud too,
+    /// `assistant/spoken_ok.rs`). Never across the meetings, nor a phone's
+    /// question or one from another app (no panel: no pages).
     pub act: bool,
     /// The calendar (chat/tools/calendar.rs): a tool while one is connected
     /// (not across the meetings, whose passages are numbered on their own).
@@ -113,7 +116,7 @@ impl Gates {
         let web_on = cfg.web_search && !meetings;
         let pictures = Gate::for_model(web_on && tools && (scope != Some("assistant") || chat_in_view), provider, model);
         let screen = if chat_in_view { crate::chat::see_screen::gate(cfg, tools, provider, model) } else { Gate::Off };
-        let act = pictures != Gate::Off && scope.is_none() && !meetings && crate::chat::pages::act::can_act(provider, model);
+        let act = pictures != Gate::Off && matches!(scope, None | Some("assistant")) && !meetings && crate::chat::pages::act::can_act(provider, model);
         let calendar = !meetings && (here.calendar)();
         let agents = tools && !meetings && (here.yap_code)();
         // (An evaluation's connectors scenario gives any model that calls
@@ -248,10 +251,11 @@ mod tests {
         let away = Gates::for_turn(&cfg, &strong, Some("assistant"), false, false);
         assert!(away.web_on && !away.act);
         assert_eq!(away.pictures, Gate::Off);
-        // …and with Chat in view, its pictures; acting on pages stays a typed turn's.
+        // …and with Chat in view, its pictures and pages, acting on them as a
+        // typed turn does (a card that asks is said out loud too).
         let in_view = Gates::for_turn(&cfg, &strong, Some("assistant"), false, true);
         assert_ne!(in_view.pictures, Gate::Off);
-        assert!(!in_view.act);
+        assert!(in_view.act);
         // The web off: none of it.
         let off = Gates::for_turn(&YapConfig { web_search: false, ..cfg.clone() }, &strong, None, false, true);
         assert!(!off.web_on && !off.act);
@@ -262,7 +266,7 @@ mod tests {
         assert_eq!(small.pictures, Gate::Off);
         // Your Claude plan: it answers, with the web, never documents (Yap's
         // tool loop's, which it never runs); the browser (acting on its
-        // pages too, typed in Chat), pictures and the screen as the tool
+        // pages too, asked in Chat), pictures and the screen as the tool
         // loop has them (over Yap's run endpoint): a Claude reads images.
         let plan_ep = endpoint(crate::ai::claude_plan::PROVIDER, "claude-opus-5-5");
         let plan = Gates::for_turn(&YapConfig { assistant_screen: true, ..cfg.clone() }, &plan_ep, None, false, true);
@@ -271,8 +275,11 @@ mod tests {
         // …the same as a Claude on an API key.
         let keyed = Gates::for_turn(&YapConfig { assistant_screen: true, ..cfg.clone() }, &endpoint("anthropic", "claude-opus-5-5"), None, false, true);
         assert_eq!((keyed.pictures, keyed.screen, keyed.act), (plan.pictures, plan.screen, plan.act));
-        // Asked out loud with Chat in view: no acting, as for any model.
-        assert!(!Gates::for_turn(&YapConfig { assistant_screen: true, ..cfg.clone() }, &plan_ep, Some("assistant"), false, true).act);
+        // Asked out loud with Chat in view: acting too, as for any model.
+        assert!(Gates::for_turn(&YapConfig { assistant_screen: true, ..cfg.clone() }, &plan_ep, Some("assistant"), false, true).act);
+        // From another app (and so a phone's question): no pages, no acting.
+        assert!(!Gates::for_turn(&YapConfig { assistant_screen: true, ..cfg.clone() }, &plan_ep, Some("assistant"), false, false).act);
+        assert!(!Gates::for_turn(&cfg, &strong, Some("assistant"), false, false).act);
         // From another app, or with the screen's switch off: as for any model.
         let away = Gates::for_turn(&YapConfig { assistant_screen: true, ..cfg.clone() }, &plan_ep, Some("assistant"), false, false);
         assert_eq!((away.pictures, away.screen), (Gate::Off, Gate::Off));

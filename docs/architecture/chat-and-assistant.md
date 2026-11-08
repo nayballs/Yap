@@ -363,7 +363,7 @@ one side.
   Always allow · Deny** (`chat_connector_confirm`; never Always allow for a
   tool that can delete), the line "Waiting for your OK · …" (asked out loud,
   also one spoken line, the Yap bar's Allow once / Don't and a spoken yes or
-  no: `assistant/connector_ask.rs`; from a phone, anything that would ask is
+  no: `assistant/spoken_ok.rs`; from a phone, anything that would ask is
   refused, "That needs your OK on the PC"); its line "Asking Notion · Search · …"
   (`Turn::activity`, from `calls.rs`) and its chip; ■ Stop drops the call
   and the server is told. Yap's one line in the system prompt
@@ -514,6 +514,13 @@ one side.
   (open_app, copy_to_clipboard, remember, forget): its note and document
   changes go through after the web (see "Strong models' documents" below;
   `a_strong_model_edits_after_the_web_and_never_acts_outside_its_notes`).
+  **What asks instead of being refused** (`ASKS_AFTER_OUTSIDE`, 8 Nov 2026,
+  "ask, don't refuse" — as the connectors' writes ask): Yap Code's
+  `start_agent` and `message_agent` are past the safety rule, and after
+  outside content their own card asks — never automatic, never above the
+  chat's Mode ([Yap Code in Chat](#yap-code-in-chat-2026-11-07)). A page
+  action that buys, sends or signs in asks on its card in any turn that
+  may act ([`pages/act.rs`](#modules)), out loud too.
 - **`chat/tools/agent.rs`** (+ `agent/`; split into its steps 2026-11-03,
   nothing else changed) — **the loop itself** (`tool_loop`): the first
   messages and the tools, a search Yap makes first, then step after step
@@ -1499,7 +1506,10 @@ one side.
   for a spoken Divinity: Original Sin 2 build "in a document".
   **What's taken** (`capture`): the window's visible frame
   (`snip::pick::window_frame`: DWM's frame; not one of Yap's own, minimised,
-  cloaked or gone), cut from every monitor captured at once as a snip is
+  cloaked or gone — then, since 8 Nov 2026, **the monitor it's on**, else
+  the pointer's: `snip::pick::monitor_of`, why at debug, `pick::why_not`,
+  never a title; until then "Yap couldn't take a screenshot of the window
+  in front"), cut from every monitor captured at once as a snip is
   (`snip::cut_frames`, HDR right), every Yap window left out for the moment
   (`calls::capture::for_snip`: the bar's capsule too; meeting windows as the
   meeting setting wants — and the assistant is off during meetings anyway),
@@ -1565,22 +1575,36 @@ one side.
   pure, against the Skills there are; `said`, `turn`); Yap's question when
   it has nothing to run on is answered by voice (`wait_for_answer`,
   `answer_words`).
-- **`chat/assistant/connector_ask.rs`** — **a connector's tool asked about
-  out loud** (Connectors wave 6, [integrations.md](./integrations.md#everywhere-else-in-chat-wave-6)):
-  the Voice Assistant's stream sink hears a connector's card asking
-  (`Streamed::connector_asks`, the tool loop's or a plan turn's held call)
-  and says one line ("Use Notion to create page “Launch notes”? Say yes, or
-  press Allow.", `line`), puts Allow once / Don't on the Yap bar (`card`,
-  id `connectorAsk`, unless the answer's in view in Chat) and waits for a
-  spoken answer (`wait`, one at a time). The next Voice Assistant question
-  in that conversation within the card's two minutes, a clear yes or no in
-  the person's languages (`reply`: seven tables, My languages' codes,
-  English always), is the answer (`take`; `assistant::spoken_connector_answer`
-  before anything else in `answer`: nothing saved, the asking question's
-  generation and dictations count restored so its answer is said); never
-  Always allow by voice, a click only for a tool that can delete or during
-  a meeting ("That one needs a click: press Allow on the Yap bar.").
+- **`chat/assistant/spoken_ok.rs`** — **the person's OK, asked out loud**
+  (Connectors wave 6 for a connector's tool, [integrations.md](./integrations.md#everywhere-else-in-chat-wave-6);
+  every card that asks since 8 Nov 2026, "ask, don't refuse"): the Voice
+  Assistant's stream sink hears any card asking (`Streamed::asks_first`,
+  the tool loop's call or a plan turn's held one) — a connector's tool, an
+  action on a page (a click or an Enter that buys, books, sends, signs in…,
+  words from nowhere the person can see), an agent after outside content —
+  and says one line (`asking`: "Use Notion to create page “Launch notes”?",
+  "Press “Buy tickets” on rail.example.com?", "Send this to an agent in
+  garden-planner, in Auto mode?", each ending "Say yes, or press Allow."),
+  puts Allow once / Don't on the Yap bar (`bar_card`, id `askFirst`: a
+  page's "Press ‘Buy tickets’ on rail.example.com?" with why it asks; an
+  agent's "Send this to an agent?" with its folder, Mode and the start of
+  its brief; unless the answer's in view in Chat, where the thread's card
+  is) and waits for a spoken answer (`wait`, one at a time). The next Voice
+  Assistant question in that conversation within the card's two minutes, a
+  clear yes or no in the person's languages (`reply`: seven tables, My
+  languages' codes, English always), is the answer (`take`;
+  `assistant::spoken_ok_answer` before anything else in `answer`: nothing
+  saved, the asking question's generation and dictations count restored so
+  its answer is said; `chat_page_confirm`, Allow once); never Always allow
+  by voice. **A click only** for the riskiest — a connector's tool that can
+  delete, a page action that would delete or pay (`CLICK_ONLY`), an agent
+  in Bypass permissions — and during a meeting ("That one needs a click:
+  press Allow on the Yap bar."). A phone's question never asks here (a
+  phone has no pages; its agent cards go to Remote Control's phones).
   A spoken answer stays short as every Voice Assistant answer does.
+- **`chat/assistant/connector_ask.rs`** — what a connector's tool says and
+  shows when asked out loud (`line`, `card`: "Use Notion: Create page?" and
+  its first arguments), for `spoken_ok.rs`.
 
 ## Questions about selected text (2026-10-31)
 
@@ -2001,7 +2025,10 @@ Chat itself, or the Voice Assistant asked with Chat in view
 front showing Chat) — there, with Yap's own window in front, the
 assistant's own look at the window in front is skipped for a model that
 calls tools (it would only find Yap, which a capture leaves out) and the
-model looks itself; its pictures show with the spoken question
+model looks itself — your Claude plan's too since 8 Nov 2026 (it was left
+to the window's capture, found only Yap, and was told "Yap couldn't take a
+screenshot" while its own `look_at_screen` worked a minute later); its
+pictures show with the spoken question
 (`followAssistantStream`). Never a phone's question, nor the Voice
 Assistant asked from another app (its own look at the window in front):
 `chat_in_view` in `turn.rs` (the maintainer asked out loud with Chat open,
@@ -2338,11 +2365,17 @@ review (safely, for any user, in any language Yap speaks).
   and an on-device model only on `act::LOCAL_ALLOWLIST` — the ones the
   browse evaluation passed (every safety task and at least 80% of the rest,
   model-evals.md "Acting on pages"; **empty**: none of the five on-device
-  models measured qualified, 1 Nov 2026). Only a typed Chat turn (never the
-  Voice Assistant or the meetings: an action that buys asks in Chat) with
-  the web on (the page tools' `Gate`), never while a meeting records or a
-  call is on (`assistant::is_off`). `tools::Extra::act`; small models never
-  see these tools.
+  models measured qualified, 1 Nov 2026). Only where the pages are, with
+  the web on (the page tools' `Gate`): a typed Chat turn, or — since 8 Nov
+  2026 — the Voice Assistant asked with Chat in view (`gates.rs`: until
+  then refused every action, "only for a question typed in Chat", though
+  `browser_scroll` ran; a tester couldn't open a site's Stats tab, close a
+  video ad or hover for a tooltip). Asked out loud, the same rules and the
+  same cards, each card also said and answerable by voice
+  (`assistant/spoken_ok.rs`; deleting or paying a click only). Never across
+  the meetings, from a phone or another app (no pages there), nor while a
+  meeting records or a call is on (`assistant::is_off`). `tools::Extra::act`;
+  small models never see these tools.
 - **The tools** (the browser toolset's acting ones, `act::TOOL_NAMES`;
   `act::INSTRUCTIONS` the line; the browser tools' own line for them asks for
   a search engine's page only when the person wants one): `browser_read {
@@ -3810,10 +3843,14 @@ as for every other. Chat, the Voice Assistant on this PC and from the phone.
   pictures shown are the answer's (`shown_of`). The pictures go back to the
   model as MCP image content, a screenshot at the view's CSS pixels
   (`browser_click`'s x, y). **Acting on pages** (8 Nov 2026; before it,
-  never a plan chat's): only for a question typed in Chat (`Eyes::act`: the
-  session lists the acting tools whenever it has the pages, so its
-  fingerprint stays the same from a typed question to a spoken one; a turn
-  asked out loud is refused them), never during a meeting or a call, with
+  never a plan chat's): for a question asked in Chat, typed or out loud
+  with Chat in view (`Eyes::act`: the session lists the acting tools
+  whenever it has the pages, so its fingerprint stays the same from a typed
+  question to a spoken one; until 8 Nov a turn asked out loud was refused
+  them, "only for a question typed in Chat", though `browser_scroll` ran —
+  now its cards are said and answered out loud too, `assistant/spoken_ok.rs`;
+  never a phone's question or one from another app: no pages), never during
+  a meeting or a call, with
   every rule of the tool loop's — a click, an Enter or a box ticked that
   buys, pays, books, sends, deletes or signs in shows the card in the plan
   turn's thread (`act/confirm.rs` through the turn's stream) and the call
@@ -3866,9 +3903,17 @@ where they touch Chat's own code.
   (its report is read aloud: `AgentsTurn::asked`). The same code answers a plan
   chat's calls over Yap's run endpoint ([yap-code.md](./yap-code.md#from-a-plan-chat)).
   Their rules: [yap-code.md](./yap-code.md#starting-an-agent).
-- **The safety rule**: `start_agent` and `message_agent` are in `ACTION_TOOLS`
-  and `STRONG_LOCKED`; an agent's own output is web content (the dispatch's
-  `agent_seen`).
+- **After outside content, ask, don't refuse** (8 Nov 2026): `start_agent`
+  and `message_agent` are `tools::ASKS_AFTER_OUTSIDE`, never in
+  `ACTION_TOOLS` or `STRONG_LOCKED` now: once the turn has read the web, a
+  page, a connector's result or an agent's own output (web content: the
+  dispatch's `agent_seen`), each shows its card — the brief or the message,
+  the folder, the Mode — and goes only on Allow once (asked out loud, said
+  and on the Yap bar, a spoken yes or no: `assistant/spoken_ok.rs`). The
+  person's plain go-ahead to an agent's plan or question goes in Yap's own
+  words with no card. Before, both were refused for the rest of the turn,
+  and a go-ahead or a report for an agent to save was lost
+  ([yap-code.md](./yap-code.md#starting-an-agent)).
 - **A Code chat's prompt line** (`prompt.rs` `build`:
   `code_chat::prompt_line_for`), for the tool loop and a plan chat alike.
 - **No Yap memory in a Code chat** (any model): none of memory's passages,

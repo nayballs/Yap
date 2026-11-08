@@ -22,17 +22,28 @@
 //!   answer the person is replying to: a page could have slipped words into
 //!   the brief). Typed: a card in the thread (`pages/act/confirm.rs`, act
 //!   "agent": the folder, the mode, the brief), Allow once / Don't. Out loud
-//!   (the Voice Assistant): a spoken question, the next answer its yes or no
-//!   (`agents::voice`), since nobody would see a card.
-//! - **The safety rule**: `start_agent` and `message_agent` are action tools
-//!   (`tools::ACTION_TOOLS` and `STRONG_LOCKED`), refused once web content
-//!   is in the turn — and an agent's own output is web content (`agent_status`'s
-//!   [`Ran::output_seen`]), so a status or a report never starts or steers
-//!   an agent. **One exception** ([`goes_ahead_after_web`], 2026-11-07): the
-//!   person's message this turn is nothing but a go-ahead or a yes
-//!   (`consent::plain_go_ahead`) to an agent waiting on its plan or its
-//!   question — then `message_agent` still goes, with Yap's own fixed words
-//!   (`runner::GO_AHEAD`, `YES_GO_AHEAD`), never the model's.
+//!   (the Voice Assistant), with nothing from outside this turn: a spoken
+//!   question, the next answer its yes or no (`agents::voice`), since nobody
+//!   would see a card.
+//! - **After outside content, ask, don't refuse** (8 Nov 2026,
+//!   `tools::ASKS_AFTER_OUTSIDE`): once the turn has read the web, a page, a
+//!   connector's result or an agent's own words (`agent_status`'s
+//!   [`Ran::output_seen`]: an agent's output can carry web content),
+//!   `start_agent` and `message_agent` always ask — whatever `agents_ask`
+//!   says — on the card, with the brief or the message in full, the folder
+//!   and the Mode; the call waits for the person's Allow once (two minutes:
+//!   no answer is a no). Asked out loud, the same card is said and put on
+//!   the Yap bar, and a spoken yes or no answers it
+//!   (`chat/assistant/spoken_ok.rs`): the person hears and sees what would
+//!   go before it goes. Never by itself, and never above the chat's Mode
+//!   (Bypass is never raised by it). Until then both were refused outright,
+//!   and the person's go-ahead, or the report the chat wrote for an agent to
+//!   save, was lost. **The person's plain go-ahead** (`consent::
+//!   plain_go_ahead`: their message this turn nothing but a go-ahead or a
+//!   yes) to an agent waiting on its plan or its question goes with no card,
+//!   in Yap's own fixed words (`runner::GO_AHEAD`, `YES_GO_AHEAD`), never
+//!   the model's — through `message_agent`, or `start_agent` carrying a Code
+//!   chat's agent on ([`fixed_go_ahead`]).
 //! - A started agent goes to the page at once (`stream::Event::Agent`: its tab
 //!   opens), with the question's message id kept on the agent.
 //! - **A Code chat** (`agents::code_chat`): `start_agent` and `message_agent` may
@@ -49,11 +60,10 @@
 //!   resumed (its transcript gone: the new agent's first line says so).
 //!
 //! **Two callers, one implementation** ([`execute`] with a [`Ctx`]): Yap's
-//! own tool loop (`tools/agent/dispatch.rs`, after its gate's safety rule),
-//! and a chat on the person's Claude plan, whose Claude Code calls these
-//! tools over Yap's run endpoint (`integrations/claude_live/agents.rs`: the
-//! same safety rule first, then this, for the turn the call belongs to,
-//! `claude_live/turn.rs`).
+//! own tool loop (`tools/agent/dispatch.rs`, after its gate), and a chat on
+//! the person's Claude plan, whose Claude Code calls these tools over Yap's
+//! run endpoint (`integrations/claude_live/agents.rs`: the call held while
+//! its card asks, for the turn the call belongs to, `claude_live/turn.rs`).
 
 use serde_json::{json, Value};
 
@@ -180,7 +190,9 @@ pub struct Ctx<'a> {
     pub previous: Option<&'a str>,
     pub conversation: Option<u64>,
     pub turn: AgentsTurn,
-    /// Web content (or an agent's output, or another app's text) is in this turn.
+    /// Outside content is in this turn — the web, a page, a connector's
+    /// result, an agent's output, another app's text: `start_agent` and
+    /// `message_agent` ask on their card first (`tools::ASKS_AFTER_OUTSIDE`).
     pub web_seen: bool,
     /// Whoever watches the turn (the card goes there).
     pub live: Option<crate::chat::stream::Live<'a>>,
@@ -207,7 +219,7 @@ pub async fn execute(name: &str, args: &Value, ctx: Ctx<'_>) -> Ran {
     match name {
         "start_agent" => start_agent(args, ctx).await,
         "agent_status" => agent_status(args, ctx.conversation),
-        "message_agent" => message_agent(args, &ctx),
+        "message_agent" => message_agent(args, &ctx).await,
         "stop_agent" => Ran::of(stop_agent(args, ctx.conversation)),
         other => Ran::of(tool_result(false, Value::Null, format!("Unknown tool: {other}"))),
     }
@@ -319,17 +331,26 @@ async fn start_agent(args: &Value, ctx: Ctx<'_>) -> Ran {
     let why_new = match decide(chat_folder.is_some(), new_folder, fresh(args), prev.as_ref(), cant_resume) {
         Decided::CarryOn => {
             let Some(prev) = prev else { return Ran::of(tool_error("There's no such agent.".into(), Value::Null, "Didn't send an agent".into())) };
+            // After outside content, the person's plain go-ahead to what the
+            // chat's agent asked (its plan, its question): Yap's own words,
+            // never the model's, and no card — as `message_agent` sends it
+            // (8 Nov 2026: a Code chat's model carried the agent on with
+            // start_agent after agent_status, and the go-ahead was refused).
+            let fixed = if ctx.web_seen && consent::plain_go_ahead(ctx.question) { fixed_go_ahead(&prev) } else { None };
+            if fixed.is_some() {
+                tracing::info!(id = %prev.id, "start_agent: the person's plain go-ahead after outside content, in Yap's own words");
+            }
             let ask = runner::Ask {
-                text: brief.to_string(),
-                title: title.to_string(),
+                text: fixed.unwrap_or(brief).to_string(),
+                title: fixed.map_or_else(|| title.to_string(), store::title_of),
                 message_id: question_id(ctx.conversation),
-                go: consent::go_ahead(brief) || (prev.plan && crate::apps::is_affirmative(ctx.question)),
-                mode: phone_cap(asked_mode),
+                go: fixed.is_some() || consent::go_ahead(brief) || (prev.plan && crate::apps::is_affirmative(ctx.question)),
+                mode: phone_cap(asked_mode.filter(|_| fixed.is_none())),
                 model: asked_model,
                 effort: asked_effort.map(|e| e.as_str().to_string()),
                 phone: phone.clone(),
             };
-            return carry_on(prev, ask, &folder, mode, web, mode_note, ctx).await;
+            return carry_on(prev, ask, &folder, mode, web, fixed.is_some(), mode_note, ctx).await;
         }
         Decided::New(why) => {
             if why.is_some() {
@@ -374,14 +395,10 @@ async fn start_agent(args: &Value, ctx: Ctx<'_>) -> Ran {
         why_new,
         ..Default::default()
     };
-    // Ask first: a folder new to agents, or the web in what led here.
-    let ask = match cfg.agents_ask.as_str() {
-        "always" => true,
-        "never" => false,
-        _ => new_folder || web,
-    };
-    if ask {
-        if ctx.turn.aloud {
+    // Ask first: a folder new to agents, or the web in what led here — and
+    // always after outside content this turn, whatever the setting.
+    match ask_first(&cfg.agents_ask, ctx.web_seen, new_folder, web, ctx.turn.aloud) {
+        Some(AskFirst::InWords) => {
             let Some(conversation) = ctx.conversation else {
                 return Ran::of(tool_error("No agent was sent: there's nobody to ask.".into(), Value::Null, "Didn't send an agent".into()));
             };
@@ -390,13 +407,16 @@ async fn start_agent(args: &Value, ctx: Ctx<'_>) -> Ran {
             tracing::info!(new_folder, web, "start_agent: asked out loud first");
             return asked_aloud(&q, &folder);
         }
-        if !allowed(&ctx, &folder, mode, brief, new_folder, web, false).await {
-            return Ran::of(tool_error(
-                "No agent was sent: the user didn't allow it. Tell them it didn't go, and don't try again unless they ask.".into(),
-                Value::Null,
-                format!("Didn't send an agent to {}: not allowed", folder.name),
-            ));
+        Some(AskFirst::Card) => {
+            if !allowed(&ctx, &folder, mode, brief, new_folder, web, false).await {
+                return Ran::of(tool_error(
+                    "No agent was sent: the user didn't allow it. Tell them it didn't go, and don't try again unless they ask.".into(),
+                    Value::Null,
+                    format!("Didn't send an agent to {}: not allowed", folder.name),
+                ));
+            }
         }
+        None => {}
     }
     match begin(agent, new_folder) {
         Ok(agent) => started(agent, mode_note),
@@ -467,6 +487,33 @@ fn cant_resume(agent: &Agent) -> Option<String> {
     }
 }
 
+/// How an agent asks the person first.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AskFirst {
+    /// Out loud with nothing from outside this turn: Yap's question in
+    /// words, the next spoken answer its yes or no (`agents/voice.rs`).
+    InWords,
+    /// The card, the call waiting for it (asked out loud: said and on the
+    /// Yap bar too, `assistant/spoken_ok.rs`).
+    Card,
+}
+
+/// **Whether an agent asks first, and how**: Settings' `setting`
+/// (`agents_ask`: "always", "never", else a folder new to agents or the web
+/// in what led here — `new_folder`, `web`), and always after outside content
+/// this turn (`outside`), whatever the setting — then on the card, out loud
+/// too (`aloud`): what would go must be seen before it goes. `None`: it goes.
+/// Pure.
+pub fn ask_first(setting: &str, outside: bool, new_folder: bool, web: bool, aloud: bool) -> Option<AskFirst> {
+    let asks = outside
+        || match setting {
+            "always" => true,
+            "never" => false,
+            _ => new_folder || web,
+        };
+    asks.then_some(if aloud && !outside { AskFirst::InWords } else { AskFirst::Card })
+}
+
 /// The tool's answer while Yap asks out loud first.
 fn asked_aloud(q: &str, folder: &Folder) -> Ran {
     Ran::of(tool_result(
@@ -510,16 +557,15 @@ async fn allowed(ctx: &Ctx<'_>, folder: &Folder, mode: Mode, brief: &str, new_fo
 /// **`start_agent` in a Code chat whose agent is in that folder**: the request
 /// is the agent's next turn (`runner::follow_up`), asked first as a new agent
 /// would be (Settings' "always", or the web in what led here: never a new
-/// folder), its tab opening at that turn.
-async fn carry_on(prev: Agent, ask: runner::Ask, folder: &Folder, mode: Mode, web: bool, mode_note: Option<String>, ctx: Ctx<'_>) -> Ran {
+/// folder; always after outside content this turn), its tab opening at that
+/// turn. `fixed`: the request is Yap's own words for the person's plain
+/// go-ahead ([`fixed_go_ahead`]), theirs already: no card.
+#[allow(clippy::too_many_arguments)]
+async fn carry_on(prev: Agent, ask: runner::Ask, folder: &Folder, mode: Mode, web: bool, fixed: bool, mode_note: Option<String>, ctx: Ctx<'_>) -> Ran {
     let cfg = crate::config::load();
-    let first = match cfg.agents_ask.as_str() {
-        "always" => true,
-        "never" => false,
-        _ => web,
-    };
-    if first {
-        if ctx.turn.aloud {
+    let first = if fixed { None } else { ask_first(&cfg.agents_ask, ctx.web_seen, false, web, ctx.turn.aloud) };
+    match first {
+        Some(AskFirst::InWords) => {
             let Some(conversation) = ctx.conversation else {
                 return Ran::of(tool_error("Nothing was sent to the agent: there's nobody to ask.".into(), Value::Null, "Didn't tell an agent anything".into()));
             };
@@ -528,13 +574,16 @@ async fn carry_on(prev: Agent, ask: runner::Ask, folder: &Folder, mode: Mode, we
             tracing::info!(web, "start_agent: a follow-up asked out loud first");
             return asked_aloud(&q, folder);
         }
-        if !allowed(&ctx, folder, mode, &ask.text, false, web, true).await {
-            return Ran::of(tool_error(
-                "Nothing was sent to the agent: the user didn't allow it. Tell them, and don't try again unless they ask.".into(),
-                Value::Null,
-                format!("Didn't carry on the agent in {}: not allowed", folder.name),
-            ));
+        Some(AskFirst::Card) => {
+            if !allowed(&ctx, folder, mode, &ask.text, false, web, true).await {
+                return Ran::of(tool_error(
+                    "Nothing was sent to the agent: the user didn't allow it. Tell them, and don't try again unless they ask.".into(),
+                    Value::Null,
+                    format!("Didn't carry on the agent in {}: not allowed", folder.name),
+                ));
+            }
         }
+        None => {}
     }
     match follow(&prev.id, ask) {
         Ok(b) => {
@@ -707,18 +756,9 @@ fn agent_status(args: &Value, conversation: Option<u64>) -> Ran {
     }
 }
 
-/// **The safety rule's one exception** (2026-11-07): after web content in
-/// the turn, `message_agent` still goes when the person's message this turn
-/// is nothing but a go-ahead or a yes (`consent::plain_go_ahead`) — and
-/// then only Yap's own words reach the agent ([`fixed_go_ahead`]), never the
-/// model's. Both callers ask this before their safety rule: the tool loop
-/// (`tools/agent/calls.rs`) and a plan chat's endpoint
-/// (`claude_live/agents.rs`). Pure.
-pub fn goes_ahead_after_web(name: &str, question: &str) -> bool {
-    name == "message_agent" && consent::plain_go_ahead(question)
-}
-
-/// **Yap's own words for the person's plain go-ahead** to `agent`: "Go ahead
+/// **Yap's own words for the person's plain go-ahead** to `agent` after
+/// outside content (`consent::plain_go_ahead`: their message this turn is
+/// nothing but a go-ahead or a yes; no card, it's theirs): "Go ahead
 /// with the plan." to a plan waiting (or a plan turn working: its next turn
 /// carries it out), "Yes, go ahead." to its question; `None` when it's
 /// waiting on neither (a go-ahead to nothing the agent asked). Pure.
@@ -737,8 +777,10 @@ pub fn fixed_go_ahead(agent: &Agent) -> Option<&'static str> {
 }
 
 /// **`message_agent`**: the agent's next turn (`runner::follow_up`: queued
-/// while it works), its tab opening at that turn.
-fn message_agent(args: &Value, ctx: &Ctx<'_>) -> Ran {
+/// while it works), its tab opening at that turn — after outside content,
+/// on the person's Allow once (the card: the message, the folder, the
+/// Mode), unless it's their plain go-ahead in Yap's own words.
+async fn message_agent(args: &Value, ctx: &Ctx<'_>) -> Ran {
     let Some(agent) = find(arg(args, &["id", "agent", "folder"]), ctx.conversation) else {
         return Ran::of(tool_error("There's no such agent. Use agent_status to find it.".into(), Value::Null, "Didn't tell an agent anything: which one?".into()));
     };
@@ -755,22 +797,13 @@ fn message_agent(args: &Value, ctx: &Ctx<'_>) -> Ran {
             format!("The agent in {} is on it already", agent.folder),
         ));
     }
-    // After the web (or an agent's own words) in this turn: only the person's
-    // plain go-ahead to what the agent asked, in Yap's own words.
-    let fixed = if ctx.web_seen {
-        match fixed_go_ahead(&agent).filter(|_| plain) {
-            Some(words) => {
-                tracing::info!(id = %agent.id, "message_agent: the person's plain go-ahead after the web, in Yap's own words");
-                Some(words)
-            }
-            None => {
-                tracing::info!("message_agent refused: after the web");
-                return Ran::of(crate::chat::tools::refused_after_web("message_agent", true, true).unwrap_or(Value::Null));
-            }
-        }
-    } else {
-        None
-    };
+    // After outside content (the web, an agent's own words…) in this turn:
+    // the person's plain go-ahead to what the agent asked goes in Yap's own
+    // words; anything else asks on the card first (below).
+    let fixed = if ctx.web_seen && plain { fixed_go_ahead(&agent) } else { None };
+    if fixed.is_some() {
+        tracing::info!(id = %agent.id, "message_agent: the person's plain go-ahead after outside content, in Yap's own words");
+    }
     let text: &str = fixed.unwrap_or(said);
     if text.is_empty() {
         return Ran::of(tool_error("text is required: what to tell the agent, in the user's words.".into(), Value::Null, "Didn't tell the agent anything".into()));
@@ -797,6 +830,19 @@ fn message_agent(args: &Value, ctx: &Ctx<'_>) -> Ran {
     let phone = message_id.as_deref().and_then(crate::agents::remote::phone_of_message);
     let mode = pick.asked.filter(|m| *m < chip);
     let mode = if phone.is_some() { Some(crate::agents::remote::phone_mode(mode.unwrap_or(crate::agents::remote::PHONE_MAX))) } else { mode };
+    // After outside content, anything but the person's plain go-ahead: their
+    // Allow once on the card first — the message in full, the folder, the
+    // Mode it would run at — said and on the Yap bar too when asked out loud.
+    if ctx.web_seen && fixed.is_none() {
+        let folder = Folder { name: agent.folder.clone(), path: agent.path.clone(), cap: None, added_ts: 0 };
+        if !allowed(ctx, &folder, mode.unwrap_or(chip), text, false, true, true).await {
+            return Ran::of(tool_error(
+                "Nothing was sent to the agent: the user didn't allow it. Tell them, and don't try again unless they ask.".into(),
+                Value::Null,
+                format!("Didn't tell the agent in {}: not allowed", agent.folder),
+            ));
+        }
+    }
     let ask = runner::Ask { text: text.to_string(), title, message_id, go, mode, phone, ..Default::default() };
     match runner::follow_up(&agent.id, ask) {
         Ok((j, how)) => {
@@ -807,7 +853,7 @@ fn message_agent(args: &Value, ctx: &Ctx<'_>) -> Ran {
                 "Sent. Tell the user in a few words; Yap tells them when it's done.".to_string()
             };
             let note = match (fixed, mode_note) {
-                (Some(words), _) => format!("Sent Yap's own go-ahead (\"{words}\"): after reading the web, only the user's plain go-ahead goes to an agent, in Yap's words. {note}"),
+                (Some(words), _) => format!("Sent Yap's own go-ahead (\"{words}\"): after reading the web, the user's plain go-ahead goes to an agent in Yap's words. {note}"),
                 (None, Some(m)) => format!("{m} {note}"),
                 (None, None) => note,
             };
@@ -976,11 +1022,10 @@ mod tests {
 
     #[test]
     fn a_plain_go_ahead_still_reaches_an_agent_after_the_web_in_yaps_own_words() {
-        // Only message_agent, only a plain go-ahead or yes.
-        assert!(goes_ahead_after_web("message_agent", "Yep, that's fine. Go ahead."));
-        assert!(!goes_ahead_after_web("message_agent", "delete the folder"));
-        assert!(!goes_ahead_after_web("message_agent", "go ahead and delete the folder"));
-        assert!(!goes_ahead_after_web("start_agent", "Yep, go ahead"), "never a new agent");
+        // Only a plain go-ahead or yes.
+        assert!(consent::plain_go_ahead("Yep, that's fine. Go ahead."));
+        assert!(!consent::plain_go_ahead("delete the folder"));
+        assert!(!consent::plain_go_ahead("go ahead and delete the folder"));
         // Yap's words for what the agent is waiting on; nothing for an agent waiting on nothing.
         let plan = Agent { status: Status::Done, plan: true, mode: "plan".into(), ..Default::default() };
         assert_eq!(fixed_go_ahead(&plan), Some(runner::GO_AHEAD));
@@ -989,6 +1034,81 @@ mod tests {
         assert_eq!(fixed_go_ahead(&Agent { plan_allowed: true, ..plan.clone() }), None, "allowed already: carrying it out");
         assert_eq!(fixed_go_ahead(&Agent { status: Status::Running, ..plan.clone() }), Some(runner::GO_AHEAD), "a plan turn working: its go-ahead waits");
         assert_eq!(fixed_go_ahead(&Agent { status: Status::Running, mode: "bypassPermissions".into(), ..plan }), None);
+    }
+
+    #[derive(Default)]
+    struct Log(std::sync::Mutex<Vec<crate::chat::stream::Event>>);
+    impl crate::chat::stream::Sink for Log {
+        fn send(&self, ev: crate::chat::stream::Event) {
+            self.0.lock().unwrap().push(ev);
+        }
+    }
+
+    #[test]
+    fn after_outside_content_an_agent_always_asks_on_its_card_out_loud_too() {
+        use AskFirst::{Card, InWords};
+        // Outside content this turn: the card, whatever Settings say, typed or out loud.
+        for setting in ["never", "new-or-web", "always"] {
+            assert_eq!(ask_first(setting, true, false, false, false), Some(Card), "{setting}");
+            assert_eq!(ask_first(setting, true, false, false, true), Some(Card), "{setting}, out loud: said and on the bar");
+        }
+        // Nothing from outside: as before (out loud, in words).
+        assert_eq!(ask_first("new-or-web", false, true, false, true), Some(InWords));
+        assert_eq!(ask_first("new-or-web", false, false, true, false), Some(Card));
+        assert_eq!(ask_first("new-or-web", false, false, false, false), None);
+        assert_eq!(ask_first("never", false, true, true, false), None);
+        assert_eq!(ask_first("always", false, false, false, true), Some(InWords));
+    }
+
+    /// `allowed`'s card through a watcher, answered `allow` from the page: the
+    /// answer, and the card as the page saw it.
+    async fn card_answered(allow: bool, continues: bool) -> (bool, crate::chat::pages::act::confirm::Card) {
+        use crate::chat::pages::act::confirm;
+        let log = Log::default();
+        let ctx = Ctx {
+            question: "Have an agent save that report into notes/research.md",
+            previous: None,
+            conversation: None,
+            turn: AgentsTurn { aloud: true, voice: true },
+            web_seen: true,
+            live: Some(crate::chat::stream::Live { sink: &log, beside: None }),
+        };
+        let folder = Folder { name: "garden-planner".into(), path: r"D:\Projects\garden-planner".into(), cap: None, added_ts: 0 };
+        let fut = allowed(&ctx, &folder, Mode::Auto, "Save the research report below into notes/research.md.", false, true, continues);
+        let answering = async {
+            loop {
+                let asking = log.0.lock().unwrap().iter().find_map(|e| match e {
+                    crate::chat::stream::Event::Confirm(c) if c.state == "asking" => Some(c.clone()),
+                    _ => None,
+                });
+                if let Some(card) = asking {
+                    assert!(confirm::chat_page_confirm(card.id, allow));
+                    return card;
+                }
+                tokio::task::yield_now().await;
+            }
+        };
+        tokio::join!(fut, answering)
+    }
+
+    #[tokio::test]
+    async fn the_card_shows_the_brief_the_folder_and_the_mode_and_only_allow_once_sends_it() {
+        let (sent, card) = card_answered(true, false).await;
+        assert!(sent, "Allow once: it goes");
+        assert_eq!((card.act.as_str(), card.label.as_str(), card.does.as_str()), ("agent", "garden-planner", "send an agent"));
+        let a = card.agent.clone().unwrap();
+        assert_eq!((a.folder.as_str(), a.mode.as_str(), a.mode_label.as_str()), ("garden-planner", "auto", "Auto"));
+        assert_eq!(a.brief, "Save the research report below into notes/research.md.");
+        assert!(a.web && !a.new_folder && !a.continues);
+        // Asked out loud, the same card is said and carded on the bar.
+        let said = crate::chat::assistant::spoken_ok::asking(&card, false).unwrap();
+        assert_eq!(said.line, "Send this to an agent in garden-planner, in Auto mode? Say yes, or press Allow.");
+        assert!(said.spoken);
+        // Don't: nothing goes. A follow-up's card says so.
+        let (sent, card) = card_answered(false, true).await;
+        assert!(!sent);
+        assert_eq!(card.does, "tell the agent");
+        assert!(card.agent.unwrap().continues);
     }
 
     /// An agent of conversation `conv` in a plan turn that's working (as the
@@ -1025,11 +1145,25 @@ mod tests {
         assert_eq!(sent.text, runner::GO_AHEAD, "never the model's words");
         assert!(sent.go);
         runner::test_live(&id, None);
-        // "delete the folder" after agent_status: refused, as ever.
+        // "delete the folder" after agent_status: the card asks (8 Nov 2026:
+        // refused outright before) — Don't: nothing sent.
         let id = planning(62);
+        crate::chat::pages::act::confirm::answer_in_test(Some(false));
         let ran = tauri::async_runtime::block_on(execute("message_agent", &json!({ "text": "Delete the folder." }), ctx("delete the folder", None, true, Some(62))));
-        assert_eq!(Some(ran.result), crate::chat::tools::refused_after_web("message_agent", true, true));
+        assert_eq!(ran.result["success"], false, "{}", ran.result);
+        assert_eq!(ran.result["displayText"], "Didn't tell the agent in garden-planner: not allowed");
         assert_eq!(runner::test_pending(&id), None, "nothing sent");
+        // Nobody to ask (no card watched, no answer): nothing sent either.
+        crate::chat::pages::act::confirm::answer_in_test(None);
+        let ran = tauri::async_runtime::block_on(execute("message_agent", &json!({ "text": "Delete the folder." }), ctx("delete the folder", None, true, Some(62))));
+        assert_eq!(ran.result["displayText"], "Didn't tell the agent in garden-planner: not allowed");
+        assert_eq!(runner::test_pending(&id), None);
+        // Allow once: the person's own words go, as their card showed them.
+        crate::chat::pages::act::confirm::answer_in_test(Some(true));
+        let ran = tauri::async_runtime::block_on(execute("message_agent", &json!({ "text": "Delete the folder." }), ctx("delete the folder", None, true, Some(62))));
+        assert_eq!(ran.result["success"], true, "{}", ran.result);
+        assert_eq!(runner::test_pending(&id).map(|a| a.text).as_deref(), Some("Delete the folder."));
+        crate::chat::pages::act::confirm::answer_in_test(None);
         runner::test_live(&id, None);
         // A plain go-ahead to an agent carrying it out already: nothing more sent.
         let id = planning(63);

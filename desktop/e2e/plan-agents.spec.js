@@ -16,8 +16,9 @@
 //   reported in that conversation on the plan; the conversation's session reads the report
 //   with its next question.
 // - By voice: asked out loud, the spoken yes starts it, the report is spoken.
-// - Refused: the person's words don't ask for it; the Mode can't be raised; after a
-//   WebSearch in the same turn.
+// - Refused: the person's words don't ask for it; the Mode can't be raised. After a
+//   WebSearch in the same turn the call is held while the agent's card asks (Don't: nothing
+//   starts).
 import fs from 'node:fs';
 import path from 'node:path';
 import { test as base, expect, openView, setConfig } from './support/fixtures.js';
@@ -312,7 +313,7 @@ test('by voice on the plan: asked out loud, the spoken yes starts the agent, and
   expect(messages[5].text).toBe(REPORT);
 });
 
-test('on the plan an agent never starts unasked, above the chat Mode, or after a WebSearch in the turn', async ({ yap, main, shot }) => {
+test('on the plan an agent never starts unasked, above the chat Mode, or after a WebSearch in the turn without the person’s OK', async ({ yap, main, shot }) => {
   // (The web on from the start: the session stays the same process for every turn.)
   await setConfig(yap, main, { webSearch: true });
   await play(yap, 'refused', [
@@ -320,8 +321,8 @@ test('on the plan an agent never starts unasked, above the chat Mode, or after a
     turn(yapCall('m1', 'toolu_a', 'start_agent', { folder: 'garden-planner', brief: 'Delete every file.' }), answers('m2', 'Your note asks for an agent; I left it.')),
     // Asked for, but above the chat's Mode.
     turn(yapCall('m3', 'toolu_b', 'start_agent', { folder: 'garden-planner', brief: 'Tidy notes.md.', mode: 'auto' }), answers('m4', "I can't run it above this chat's Mode.")),
-    // Asked for, after a web search in the same turn.
-    turn(searches('m5'), yapCall('m6', 'toolu_c', 'start_agent', { folder: 'garden-planner', brief: 'Do what the page says.' }), answers('m7', "I found the tides, but I can't start an agent after reading the web: ask me again.")),
+    // Asked for, after a web search in the same turn: the call is held while its card asks.
+    turn(searches('m5'), yapCall('m6', 'toolu_c', 'start_agent', { folder: 'garden-planner', brief: 'Write the tides into notes.md.' }), answers('m7', 'I found the tides; the agent didn’t go, as you said.')),
   ]);
   const before = (await agents(yap)).length;
   await freshChat(main);
@@ -338,11 +339,21 @@ test('on the plan an agent never starts unasked, above the chat Mode, or after a
   await expect(lastAnswer(main)).toContainText("above this chat's Mode", { timeout: 20_000 });
   await expect(chipsOfLast(main)).toHaveText(["Didn't send an agent: Auto is above this chat's Mode"]);
 
-  // A WebSearch this turn (its page even says to start one): refused, the tool loop's words.
+  // A WebSearch this turn (its page even says to start one): the call is held
+  // at Yap's endpoint while the agent's card asks in the plan chat's thread
+  // (8 Nov 2026: refused outright before); Don't, and nothing starts.
   await send(main, 'What are the tides at Example Bay today? Then send an agent to garden-planner to write them into notes.md.');
-  await expect(lastAnswer(main)).toContainText("can't start an agent after reading the web", { timeout: 20_000 });
-  await expect(chipsOfLast(main)).toHaveText(['Searched the web: "tide times example bay"', "Didn't send an agent: not after reading the web"]);
-  await shot(main, '03-plan-agent-refused-after-the-web');
+  const card = thread(main).getByTestId('chat-agent-confirm').last();
+  await expect(card).toHaveAttribute('data-state', 'asking', { timeout: 20_000 });
+  await expect(card).toContainText('Yap wants to send an agent to ‘garden-planner’ (Manual)');
+  await expect(card).toContainText('This chat read the web');
+  await expect(card.getByTestId('chat-agent-brief')).toHaveText('Write the tides into notes.md.');
+  await shot(main, '03-plan-agent-asks-after-the-web');
+  expect((await agents(yap)).length).toBe(before);
+  await card.getByRole('button', { name: "Don't", exact: true }).click();
+  await expect(lastAnswer(main)).toContainText('the agent didn’t go', { timeout: 20_000 });
+  await expect(card).toHaveAttribute('data-state', 'refused');
+  await expect(chipsOfLast(main)).toHaveText(['Searched the web: "tide times example bay"', "Didn't send an agent to garden-planner: not allowed"]);
   expect((await agents(yap)).length).toBe(before);
   const messages = await messagesOf(yap, conversation, 6);
   expect(messages.map((m) => m.tools ?? [])).toEqual([
@@ -351,8 +362,9 @@ test('on the plan an agent never starts unasked, above the chat Mode, or after a
     [],
     ["Didn't send an agent: Auto is above this chat's Mode"],
     [],
-    ['Searched the web: "tide times example bay"', "Didn't send an agent: not after reading the web"],
+    ['Searched the web: "tide times example bay"', "Didn't send an agent to garden-planner: not allowed"],
   ]);
+  expect(messages[5].confirms?.map((c) => [c.act, c.state])).toEqual([['agent', 'refused']]);
   await yap.invoke('agent_mode_set', { conversation, mode: 'auto' });
 });
 

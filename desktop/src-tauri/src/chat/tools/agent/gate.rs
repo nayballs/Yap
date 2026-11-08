@@ -69,10 +69,15 @@ mod tests {
     #[test]
     fn a_connectors_result_locks_yaps_own_actions_as_the_web_does() {
         let strong = Extra { strong: true, ..Default::default() };
-        for name in ["open_app", "copy_to_clipboard", "remember", "forget", "start_agent", "message_agent"] {
+        for name in ["open_app", "copy_to_clipboard", "remember", "forget"] {
             let r = gate(name, &json!({}), false, CONNECTOR, &strong).expect(name);
             assert!(r["displayText"].as_str().unwrap().ends_with("not after a connector's result"), "{r}");
             assert!(r["error"].as_str().unwrap().contains("a connector's result came in"), "{r}");
+        }
+        // An agent gets past the gate: its own card asks (tools/agents.rs).
+        for name in ["start_agent", "message_agent"] {
+            assert_eq!(gate(name, &json!({}), false, CONNECTOR, &strong), None, "{name}");
+            assert_eq!(gate(name, &json!({}), false, WEB, &Extra::default()), None, "{name}");
         }
         // Its notes and documents still change for a strong model; reads run.
         assert_eq!(gate("create_note", &json!({}), false, CONNECTOR, &strong), None);

@@ -204,11 +204,12 @@ pub fn rule(kind: &str) -> Rule {
         // Yap window in front: a question that waits for its answer (Chat's
         // thread has it too), never over a dictation.
         "agentApprove" => Rule { hold_dictation: true, ..prompt },
-        // A connector's tool the Voice Assistant asks about
-        // (`chat/assistant/connector_ask.rs`): the answer to the person's own
+        // A call the Voice Assistant asks about before it runs — a
+        // connector's tool, an action on a page, an agent
+        // (`chat/assistant/spoken_ok.rs`): the answer to the person's own
         // spoken question, against its two minutes — at once, never dropped,
         // and not held over the recording that may be their spoken yes.
-        "connectorAsk" => prompt,
+        "askFirst" => prompt,
         // Coaching: about dictating, so never during a meeting either; one
         // of the tips "Show tips" switches off.
         "hint" => Rule { hold_meeting: true, tip: true, ..tip },
