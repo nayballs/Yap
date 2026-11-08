@@ -7,7 +7,7 @@ import { invoke } from '@tauri-apps/api/core';
 import { familyIcon, providerIcon } from './modelIcons.js';
 import { modelsFor, modelLabel } from '../stores/modelCatalog.svelte.js';
 import { PROVIDER_LABELS, KEYED_PROVIDERS as CLOUD_ORDER } from './providers.js';
-// Millionths of a dollar as an answer's line says them (shared with the Jobs screens).
+// Millionths of a dollar as an answer's line says them (shared with Yap Code's screens).
 import { dollars } from './money.js';
 
 /**

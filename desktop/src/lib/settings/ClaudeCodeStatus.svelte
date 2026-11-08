@@ -1,5 +1,5 @@
 <script>
-  // **Claude Code on this PC**, as Settings → Jobs shows it: the same
+  // **Claude Code on this PC**, as Settings → Yap Code shows it: the same
   // status and Sign in as Language Models' Claude tab
   // (ClaudePlanProvider.svelte), from the one store
   // (stores/claudePlan.svelte.js, `claude_plan_status`: probes throttled to
@@ -12,22 +12,23 @@
   import Button from '../ui/Button.svelte';
   import { openExternalLink } from '../core/externalLinks.js';
   import { claudePlan, loadClaudePlan, signInClaudePlan } from '../stores/claudePlan.svelte.js';
+  import { FEATURE_NAME } from '../core/codeChats.js';
 
   /** `setting`: the row's anchor. */
-  let { setting = 'jobs-claude-code' } = $props();
+  let { setting = 'yap-code-claude-code' } = $props();
 
   onMount(() => loadClaudePlan(true));
 
   const planName = (p) => (p ? `Claude ${String(p).charAt(0).toUpperCase()}${String(p).slice(1)}` : '');
-  // Jobs run on a key login too (Pay with: API key): signed in is enough.
+  // Agents run on a key login too (Pay with: API key): signed in is enough.
   const ok = $derived(claudePlan.loaded && claudePlan.installed && !claudePlan.tooOld && claudePlan.loggedIn);
   const line = $derived(
     !claudePlan.loaded
       ? 'Looking for Claude Code on this PC…'
       : !claudePlan.installed
-        ? "Claude Code isn't installed on this PC. Jobs run your own Claude Code: install it, then check again."
+        ? "Claude Code isn't installed on this PC. Agents run your own Claude Code: install it, then check again."
         : claudePlan.tooOld
-          ? `Claude Code ${claudePlan.version} is too old for jobs: Yap needs ${claudePlan.minVersion} or newer.`
+          ? `Claude Code ${claudePlan.version} is too old for ${FEATURE_NAME}: Yap needs ${claudePlan.minVersion} or newer.`
           : claudePlan.loggedIn
             ? `Claude Code ${claudePlan.version ?? ''} · signed in${claudePlan.plan ? ` · ${planName(claudePlan.plan)}` : claudePlan.onAKey ? ' with an API key' : ''}`
             : `Claude Code ${claudePlan.version ?? ''} is on this PC, but isn't signed in.`
@@ -36,7 +37,7 @@
 </script>
 
 <Row label="Claude Code" desc={line} {setting}>
-  <div class="cc" data-testid="jobs-claude-code" data-state={state}>
+  <div class="cc" data-testid="yap-code-claude-code" data-state={state}>
     {#if ok}
       <span class="okmark" aria-hidden="true">✓</span>
     {/if}

@@ -63,8 +63,8 @@
     language: 'Languages',
     // A save that failed (shell/saving.rs), or "Saved" after Try again.
     save: 'Saving',
-    // A job done, or a running job asking to take a step (jobs/).
-    job: 'Job',
+    // An agent done, or a running agent asking to take a step (agents/).
+    agent: 'Agent',
   };
   const answer = $derived(card.style === 'answer');
   const chip = $derived(card.chip ?? CHIPS[card.icon] ?? null);
@@ -110,7 +110,7 @@
       {:else if card.icon === 'commands'}
         <!-- A wand, as Settings → Commands has it. -->
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m4 20 11-11" /><path d="m13 7 4 4" /><path d="M17 3v3M15.5 4.5h3M20 9v2M19 10h2M9 3v2M8 4h2" /></svg>
-      {:else if card.icon === 'job'}
+      {:else if card.icon === 'agent'}
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" /></svg>
       {:else if card.icon === 'assistant'}
         <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 2.5c.5 3.9 1.6 6.4 3.1 7.9 1.5 1.5 4 2.6 6.4 3.1-2.4.5-4.9 1.6-6.4 3.1-1.5 1.5-2.6 4-3.1 6.9-.5-2.9-1.6-5.4-3.1-6.9-1.5-1.5-4-2.6-6.9-3.1 2.9-.5 5.4-1.6 6.9-3.1 1.5-1.5 2.6-4 3.1-7.9z" /></svg>

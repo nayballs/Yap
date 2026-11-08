@@ -1,5 +1,5 @@
 // **Follow the live end**, as a terminal does: a Svelte action on a scroll
-// box whose content grows at the bottom (a job's steps). While the person
+// box whose content grows at the bottom (an agent's steps). While the person
 // is at the bottom it stays pinned there, the newest line in view as the
 // content grows — a ResizeObserver on the content (the box's first child)
 // and the box, never a scroll per event. Scrolled up to read, it never
@@ -8,7 +8,7 @@
 //
 //   <div class="box" use:followEnd={{ onchange: (p) => (pinned = p) }}><ol>…</ol></div>
 //
-// Used by the Job tab (views/chat/JobTimeline.svelte).
+// Used by the Agent tab (views/chat/AgentTimeline.svelte).
 
 /** How close to the bottom still counts as there (px). */
 const NEAR = 8;

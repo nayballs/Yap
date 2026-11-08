@@ -96,7 +96,7 @@
   {/if}
   <!-- A spoken question cleaned up as an AI prompt, word for word
        (ai/cleanup_styles.rs `cleans_question`); Code chats have their own
-       switch in Settings → Jobs. -->
+       switch in Settings → Yap Code. -->
   <CleanSpeech
     {cfg}
     {goto}

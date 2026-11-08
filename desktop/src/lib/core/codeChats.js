@@ -1,14 +1,19 @@
-// **Code chats** (desktop/src-tauri/src/jobs/code_chat.rs): Chat has two
+// **Code chats** (desktop/src-tauri/src/agents/code_chat.rs): Chat has two
 // sides, flipped by the switch at the top of its list — **Chat** (plain
 // conversations, as ever) and **Code** (conversations attached to one of the
 // person's workspaces, where Chat hands tasks to their own Claude Code).
 // The words they share and the list's grouping, pure.
 
-/** The feature's name, in one place (it may become "Yap Code"). Never "Claude Code" anything. */
-export const FEATURE_NAME = 'Jobs';
+/**
+ * **The feature's name**, in one place (Rust's is `agents::FEATURE`): "Jobs"
+ * until 7 Nov 2026, and the app's own name will change too. Never "Claude
+ * Code" nor "Anthropic" anything (Anthropic's rule). Each run of the
+ * person's own Claude Code is **an agent**.
+ */
+export const FEATURE_NAME = 'Yap Code';
 /** What the UI calls a conversation attached to a workspace, and its side of Chat. */
 export const CODE_NAME = 'Code';
-/** What the UI calls a job folder. */
+/** What the UI calls a workspace. */
 export const WORKSPACE = 'workspace';
 export const WORKSPACES = 'Workspaces';
 
@@ -72,14 +77,14 @@ export function pickerRows(workspaces, current) {
 // ---- an empty Code chat's greeting (CodeEmpty.svelte) ----
 
 /** What a Code chat is for, in one line. */
-export const CODE_INTRO = `Ask for a change, a fix or an explanation. ${FEATURE_NAME} run your own Claude Code here, and you can follow each step beside the chat.`;
+export const CODE_INTRO = 'Ask for a change, a fix or an explanation. Agents run your own Claude Code here, and you can follow each step beside the chat.';
 
-/** The one-tap prompts: each fills the box, never sent by itself (a request here can start a job). */
+/** The one-tap prompts: each fills the box, never sent by itself (a request here can send an agent). */
 export const CODE_PROMPTS = ['Explain how this project is laid out', "Find and fix what's failing", 'What changed here recently?'];
 
 /**
- * **What stands between this PC and a job**, from Claude Code's status
- * (stores/claudePlan.svelte.js) and how jobs pay (`jobsPay`): nothing (null,
+ * **What stands between this PC and an agent**, from Claude Code's status
+ * (stores/claudePlan.svelte.js) and how agents pay (`agentsPay`): nothing (null,
  * also while it's still being looked for), or a line and its one button —
  * `install` (not on this PC), `update` (too old), `sign-in` (signed out, on
  * the plan: a key pays without a sign-in), `check` (signing in, in the
@@ -87,10 +92,10 @@ export const CODE_PROMPTS = ['Explain how this project is laid out', "Find and f
  */
 export function claudeCodeHint(cc, pay = 'plan') {
   if (!cc?.loaded) return null;
-  if (!cc.installed) return { state: 'missing', text: `${FEATURE_NAME} run your own Claude Code, and it isn't on this PC yet.`, action: 'install', label: 'Install Claude Code' };
+  if (!cc.installed) return { state: 'missing', text: `${FEATURE_NAME} runs your own Claude Code, and it isn't on this PC yet.`, action: 'install', label: 'Install Claude Code' };
   if (cc.tooOld) {
     const version = cc.version ? `Claude Code ${cc.version}` : 'This Claude Code';
-    return { state: 'old', text: `${version} is too old for jobs: Yap needs ${cc.minVersion} or newer.`, action: 'update', label: 'How to update' };
+    return { state: 'old', text: `${version} is too old for ${FEATURE_NAME}: Yap needs ${cc.minVersion} or newer.`, action: 'update', label: 'How to update' };
   }
   if (cc.loggedIn || pay === 'key') return null;
   if (cc.signingIn) return { state: 'signing-in', text: 'Finish signing in to Claude Code in the terminal Yap opened.', action: 'check', label: 'Check again' };

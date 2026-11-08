@@ -1,6 +1,6 @@
 //! **The endpoint Claude Code runs talk back to** (2026-11-07). Yap starts
 //! the person's own Claude Code CLI for Chat on their Claude plan and for
-//! Jobs (`claude -p … --mcp-config <file> --settings <file>
+//! Yap Code (`claude -p … --mcp-config <file> --settings <file>
 //! --permission-prompt-tool mcp__yap__approve`); this is what those runs
 //! reach: a loopback HTTP listener inside the running Yap. It needs no Local
 //! API (`bridge.rs` can be off) and it reaches the live UI.
@@ -18,7 +18,7 @@
 //!   command line or in a log. (The run's own commands inherit its
 //!   environment; they already run with the person's own rights.)
 //! - **A run** ([`register_run`] → [`RunHandle`]): its label, its tools
-//!   ([`Tools::Chat`]: read only, plus Jobs' when offered; [`Tools::Job`]:
+//!   ([`Tools::Chat`]: read only, plus Yap Code's when offered; [`Tools::Agent`]:
 //!   `approve`), where its
 //!   backups go, and who to ask ([`Approval`]). The handle gives the run's
 //!   `--mcp-config` and `--settings` JSON and the environment they name;
@@ -37,14 +37,14 @@
 //!   (`search_memory`; never a Code chat's run, [`RunSpec::memory`]) and the
 //!   calendar (`check_calendar`, offered while one is connected). Read only;
 //!   never the dictation history.
-//! - **Jobs' tools** ([`jobs`]), for a Chat run offered them
-//!   ([`RunSpec::jobs`]): `start_job`, `job_status`, `message_job` and
-//!   `stop_job`, the tool loop's own code and rules, for the chat turn the
+//! - **Yap Code's tools** ([`agents`]), for a Chat run offered them
+//!   ([`RunSpec::agents`]): `start_agent`, `agent_status`, `message_agent` and
+//!   `stop_agent`, the tool loop's own code and rules, for the chat turn the
 //!   call belongs to ([`turn`]: [`RunHandle::begin_turn`] gives a run its
 //!   turn's question, the answer before it, the conversation, where it was
 //!   asked, and its stream; the web flag; the order of Claude Code's events
 //!   and its calls).
-//! - **`approve`** ([`approve`]), a Job's permission prompt tool: a card for
+//! - **`approve`** ([`approve`]), an agent's permission prompt tool: a card for
 //!   the person (`yap-claude-approve`), Allow once / Deny
 //!   ([`claude_approve_answer`]), no answer in 10 minutes a no. Claude Code
 //!   keeps it out of the model's own tools. Test mode can answer every card
@@ -53,14 +53,14 @@
 //!   file, an http `PreToolUse` hook (`POST /hook/<run>/PreToolUse`) copies
 //!   it into the run's backup folder once, with a `manifest.json`; a file
 //!   that didn't exist yet is noted as created. [`backup::restore_all`]
-//!   puts them back (Undo: a job's turn, or all of them, each its own run).
+//!   puts them back (Undo: an agent's turn, or all of them, each its own run).
 //!
 //! **The log** has ids, counts, tool names and outcomes, never a command,
 //! a file's path or contents, a prompt or a key.
 
 mod approve;
 pub mod backup;
-mod jobs;
+mod agents;
 mod reads;
 mod rpc;
 mod server;
@@ -105,11 +105,11 @@ pub enum Tools {
     /// Chat on the person's Claude plan: meetings, notes, tasks, folders,
     /// memory and the calendar, read only.
     Chat,
-    /// A Job: `approve` (its permission prompts), for now.
-    Job,
+    /// An agent: `approve` (its permission prompts), for now.
+    Agent,
 }
 
-/// How the person asked for the run (a Job's report is spoken when asked by
+/// How the person asked for the run (an agent's report is spoken when asked by
 /// voice).
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -119,11 +119,11 @@ pub enum Origin {
     Voice,
 }
 
-/// Who a run's permission prompts are for: the card names the job and the
+/// Who a run's permission prompts are for: the card names the agent and the
 /// conversation that started it.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Approval {
-    /// The job's (or run's) id, as Yap's own UI knows it.
+    /// The agent's (or run's) id, as Yap's own UI knows it.
     pub run: String,
     pub conversation: Option<u64>,
     pub origin: Origin,
@@ -135,33 +135,33 @@ pub struct RunSpec {
     /// A short name for the card and the UI ("Shadow talents"); never logged.
     pub label: String,
     pub tools: Tools,
-    /// Where the backup hook copies files before they're edited (a Job's
-    /// `jobs/<id>/backup/`). `None`: no hook in the run's settings.
+    /// Where the backup hook copies files before they're edited (an agent's
+    /// `agents/<id>/backup/`). `None`: no hook in the run's settings.
     pub backup_dir: Option<PathBuf>,
     /// The run's working folder: approve's cards name files relative to it,
     /// and the hook resolves a relative path against it when Claude Code
     /// gives no `cwd`.
     pub folder: Option<PathBuf>,
     pub approval: Option<Approval>,
-    /// A Chat run offered Jobs' tools too ([`jobs`]): jobs on, Claude Code
+    /// A Chat run offered Yap Code's tools too ([`agents`]): agents on, Claude Code
     /// on this PC, not across the meetings. Listed for the whole session
     /// (its `tools/list` is read once), so a session made without them is
     /// started again to get them (`chat/turn/plan.rs`' fingerprint).
-    pub jobs: bool,
+    pub agents: bool,
     /// A Chat run reads Yap's memory (`search_memory`): never a Code chat's
-    /// (`jobs/code_chat.rs`: Yap's memory is personal, the project keeps
+    /// (`agents/code_chat.rs`: Yap's memory is personal, the project keeps
     /// its own). Meetings, notes, tasks, folders and the calendar stay.
     pub memory: bool,
 }
 
 impl RunSpec {
     pub fn new(label: impl Into<String>, tools: Tools) -> RunSpec {
-        RunSpec { label: label.into(), tools, backup_dir: None, folder: None, approval: None, jobs: false, memory: true }
+        RunSpec { label: label.into(), tools, backup_dir: None, folder: None, approval: None, agents: false, memory: true }
     }
 
-    /// The same, offered Jobs' tools (`on`).
-    pub fn with_jobs(mut self, on: bool) -> RunSpec {
-        self.jobs = on;
+    /// The same, offered Yap Code's tools (`on`).
+    pub fn with_agents(mut self, on: bool) -> RunSpec {
+        self.agents = on;
         self
     }
 
@@ -180,8 +180,8 @@ pub struct RunHandle {
     id: String,
     key: String,
     tools: Tools,
-    /// Offered Jobs' tools ([`RunSpec::jobs`], a Chat run's).
-    jobs: bool,
+    /// Offered Yap Code's tools ([`RunSpec::agents`], a Chat run's).
+    agents: bool,
     /// Reads Yap's memory ([`RunSpec::memory`]).
     memory: bool,
     has_backup: bool,
@@ -268,7 +268,7 @@ impl RunHandle {
     /// …), so a Chat run in `dontAsk` mode can use them. `approve` is never
     /// one: it's the permission prompt tool.
     pub fn allowed_tools(&self) -> Vec<String> {
-        rpc::tool_names(self.tools, true, self.jobs, self.memory)
+        rpc::tool_names(self.tools, true, self.agents, self.memory)
             .into_iter()
             .filter(|n| *n != approve::NAME)
             .map(|n| format!("mcp__{SERVER}__{n}"))

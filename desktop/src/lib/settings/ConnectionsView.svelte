@@ -156,8 +156,8 @@
   <strong>On this PC</strong> means it never left the computer: the on-device AI model, a server of your own on this PC, or
   an app using the Local API.
 </p>
-<!-- Jobs (jobs.rs): Claude Code is its own program, with its own connections. -->
-<p class="explain" data-testid="connections-jobs-note">Jobs connect to Anthropic through Claude Code itself, so they aren't in Network connections.</p>
+<!-- Yap Code (agents.rs): Claude Code is its own program, with its own connections. -->
+<p class="explain" data-testid="connections-yap-code-note">Agents connect to Anthropic through Claude Code itself, so they aren't in Network connections.</p>
 
 {#if failed}
   <p class="set-note">Yap couldn't read its list of connections.</p>

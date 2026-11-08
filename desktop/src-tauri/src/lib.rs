@@ -18,7 +18,7 @@ mod config;
 mod dictation;
 mod dictionary;
 mod integrations;
-mod jobs;
+mod agents;
 mod link;
 mod meetings;
 mod memory;
@@ -68,9 +68,9 @@ pub(crate) fn shutdown_cleanup() {
     // Meeting search's model (search/embedder.rs) on the same engine.
     search::shutdown();
     integrations::bridge::stop();
-    // Jobs die with Yap (the kill-on-close job): interrupted, Continue
-    // picks them up (jobs.rs).
-    jobs::shutdown();
+    // Agents die with Yap (the kill-on-close job): interrupted, Continue
+    // picks them up (agents.rs).
+    agents::shutdown();
     // Your Claude plan's warm spares (claude_plan/spare.rs): ended now (the
     // kill-on-close job would anyway).
     ai::claude_plan::spare::end_all("Yap quits");
@@ -527,26 +527,26 @@ pub fn run() {
             integrations::bridge::bridge_status,
             integrations::claude_live::claude_approve_answer,
             integrations::claude_live::claude_approve_pending,
-            jobs::commands::job_list,
-            jobs::commands::job_get,
-            jobs::commands::job_stop,
-            jobs::commands::job_continue,
-            jobs::commands::job_message,
-            jobs::commands::job_go_ahead,
-            jobs::commands::job_undo,
-            jobs::commands::job_undo_turn,
-            jobs::commands::job_open_terminal,
-            jobs::commands::job_folders_list,
-            jobs::commands::job_folders_add,
-            jobs::commands::job_folders_pick,
-            jobs::commands::job_folders_remove,
-            jobs::commands::job_folders_set_cap,
-            jobs::commands::job_mode_get,
-            jobs::commands::job_mode_set,
-            jobs::commands::job_chat_folder_get,
-            jobs::commands::job_chat_folder_set,
-            jobs::commands::job_code_chats,
-            jobs::commands::job_bypass_confirmed,
+            agents::commands::agent_list,
+            agents::commands::agent_get,
+            agents::commands::agent_stop,
+            agents::commands::agent_continue,
+            agents::commands::agent_message,
+            agents::commands::agent_go_ahead,
+            agents::commands::agent_undo,
+            agents::commands::agent_undo_turn,
+            agents::commands::agent_open_terminal,
+            agents::commands::workspaces_list,
+            agents::commands::workspaces_add,
+            agents::commands::workspaces_pick,
+            agents::commands::workspaces_remove,
+            agents::commands::workspaces_set_cap,
+            agents::commands::agent_mode_get,
+            agents::commands::agent_mode_set,
+            agents::commands::code_chat_workspace_get,
+            agents::commands::code_chat_workspace_set,
+            agents::commands::code_chats_list,
+            agents::commands::agent_bypass_confirmed,
             link::link_status,
             link::link_pair_start,
             link::link_pair_cancel,
@@ -879,7 +879,7 @@ pub fn run() {
             #[cfg(debug_assertions)]
             dictionary::files::e2e_dictionary_file,
             #[cfg(debug_assertions)]
-            jobs::commands::e2e_job_folder,
+            agents::commands::e2e_workspace,
             #[cfg(debug_assertions)]
             dictionary::snippet_offer::e2e_snippet_offer_reset,
             #[cfg(debug_assertions)]
@@ -994,6 +994,9 @@ pub fn run() {
         })
         .setup(|app| {
             let handle = app.handle().clone();
+            // Yap Code's files under the names they had as Jobs, moved before
+            // anything reads them (agents.rs).
+            agents::ensure_moved();
             let cfg = config::load();
             // Every save of config.json tells the windows (Settings' copy
             // adopts it); one Yap couldn't read at start is said once the
@@ -1161,9 +1164,9 @@ pub fn run() {
             // Claude Code runs' endpoint (integrations/claude_live.rs): its events;
             // the listener starts with the first run.
             integrations::claude_live::init(&handle);
-            // Jobs (jobs.rs): those the last Yap left running are interrupted;
-            // old backups and logs swept.
-            jobs::init(&handle);
+            // Yap Code's agents (agents.rs): those the last Yap left running
+            // are interrupted; old backups and logs swept.
+            agents::init(&handle);
             // Chat on your Claude plan (ai/claude_plan.rs): the key store's
             // marker kept true, the warm sessions swept.
             ai::claude_plan::init(&handle);

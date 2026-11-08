@@ -1,7 +1,7 @@
 <script>
   // **Chat | Code**, at the top of Chat's conversation list (as the Claude
   // app's sidebar switch): two places, plain conversations and Code chats
-  // (codeChats.svelte.js). Shown only with Jobs on. The side not shown has
+  // (codeChats.svelte.js). Shown only with Yap Code on. The side not shown has
   // a status dot by the rows' own rules (core/chatStatus.js): the strongest
   // of its chats' — needs you, working, new.
   import { CODE_NAME, sideOf } from '../../core/codeChats.js';

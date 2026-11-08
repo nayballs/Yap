@@ -1,6 +1,6 @@
 //! **The Claude Code engine**: Yap drives the person's own installed Claude
 //! Code CLI as a child process, on their own sign-in (their Claude plan) or
-//! their own API key. Chat on your Claude plan and Jobs build on it.
+//! their own API key. Chat on your Claude plan and Yap Code build on it.
 //!
 //! Yap never reads or stores Claude credentials, never signs anyone in
 //! itself (sign-in is Claude Code's own `claude auth login`, in a terminal

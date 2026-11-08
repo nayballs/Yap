@@ -1,22 +1,22 @@
 <script>
-  // **The Mode chip** beside the model chip under Chat's box (Jobs,
-  // desktop/src-tauri/src/jobs/modes.rs; after Claude Code's own mode menu,
+  // **The Mode chip** beside the model chip under Chat's box (Yap Code,
+  // desktop/src-tauri/src/agents/modes.rs; after Claude Code's own mode menu,
   // its words): "Auto ▾" opens **Mode** — Auto (Recommended) · Manual ·
   // Accept edits · Plan · Bypass permissions, each with Claude Code's line,
   // a check on the one in use, 1–5 to pick while it's open, ↑ ↓ and Enter,
-  // Esc to close. It's the mode the jobs this chat starts run at (the chat's
+  // Esc to close. It's the mode the agents this chat starts run at (the chat's
   // model may only lower it, never raise it), kept per conversation
-  // (`job_mode_get` / `job_mode_set`); a new chat shows Settings → Jobs'
+  // (`agent_mode_get` / `agent_mode_set`); a new chat shows Settings → Yap Code'
   // default and keeps a pick until its conversation exists. Shown only with
-  // Jobs on. **Bypass permissions** asks once (a ConfirmDialog: "Claude
-  // Code can run anything on your PC without asking…"; `job_bypass_confirmed`)
+  // Yap Code on. **Bypass permissions** asks once (a ConfirmDialog: "Claude
+  // Code can run anything on your PC without asking…"; `agent_bypass_confirmed`)
   // and then switches freely; the chip is amber while it's on.
   import { invoke } from '@tauri-apps/api/core';
   import { listen } from '@tauri-apps/api/event';
   import { onMount, tick, untrack } from 'svelte';
   import ConfirmDialog from '../../ui/ConfirmDialog.svelte';
   import { toast } from '../../ui/toast.svelte.js';
-  import { modeForKey, MODE_KEYS } from '../../core/jobs.js';
+  import { modeForKey, MODE_KEYS } from '../../core/agents.js';
 
   /**
    * `chat`: the Chat view's state (its conversation, and whether a question
@@ -47,7 +47,7 @@
 
   async function loadEnabled() {
     try {
-      enabled = !!(await invoke('get_config'))?.jobsEnabled;
+      enabled = !!(await invoke('get_config'))?.agentsEnabled;
     } catch {
       /* keep */
     }
@@ -55,7 +55,7 @@
 
   async function load(conversation) {
     try {
-      const v = await invoke('job_mode_get', { conversation: conversation ?? null });
+      const v = await invoke('agent_mode_get', { conversation: conversation ?? null });
       if ((chat.activeId ?? null) === (conversation ?? null)) view = v;
     } catch {
       /* keep the last */
@@ -75,7 +75,7 @@
       if (was === null && id !== null && pending && (chat.sending || chat.assistantPending === id)) {
         const mode = pending;
         pending = null;
-        invoke('job_mode_set', { conversation: id, mode })
+        invoke('agent_mode_set', { conversation: id, mode })
           .then((v) => {
             if (chat.activeId === id) view = v;
           })
@@ -140,7 +140,7 @@
       return;
     }
     try {
-      view = await invoke('job_mode_set', { conversation: id, mode });
+      view = await invoke('agent_mode_set', { conversation: id, mode });
     } catch (e) {
       toast({ title: "Couldn't change the Mode", description: String(e?.message ?? e), variant: 'destructive' });
     }
@@ -148,7 +148,7 @@
 
   async function confirmBypass() {
     try {
-      await invoke('job_bypass_confirmed');
+      await invoke('agent_bypass_confirmed');
       if (view) view = { ...view, bypassConfirmed: true };
     } catch {
       return;
@@ -202,8 +202,8 @@
       bind:this={chipEl}
       aria-haspopup="menu"
       aria-expanded={open}
-      aria-label={`Mode for jobs: ${shownLabel}. Change mode`}
-      title={bypass ? `Bypass permissions: ${WARNING}` : 'The mode jobs from this chat run in'}
+      aria-label={`Mode for agents: ${shownLabel}. Change mode`}
+      title={bypass ? `Bypass permissions: ${WARNING}` : 'The mode agents from this chat run in'}
       data-testid="chat-mode-chip"
       data-mode={shown}
       onclick={toggle}

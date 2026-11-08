@@ -5,12 +5,12 @@
   // — cleaned up as an AI prompt, literally (fillers and false starts out,
   // the words kept), on Dictation cleanup's model, whatever AI cleanup's own
   // switch says. One row each side, each its own switch: Settings → Voice
-  // Assistant (`chatCleanSpeech`), Settings → Jobs (`jobsCleanSpeech`). No
+  // Assistant (`chatCleanSpeech`), Settings → Yap Code (`agentsCleanSpeech`). No
   // cleanup model set up (`question_cleanup_status`): the words go as said,
   // and the row says so with the way there.
   //
   //   cfg:     Settings' config $state (auto-save does the saving).
-  //   field:   'chatCleanSpeech' | 'jobsCleanSpeech'.
+  //   field:   'chatCleanSpeech' | 'agentsCleanSpeech'.
   //   label, desc, setting: the row's words and its search anchor.
   //   goto:    opens another Settings page.
   import { invoke } from '@tauri-apps/api/core';

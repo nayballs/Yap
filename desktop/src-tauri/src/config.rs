@@ -1237,51 +1237,63 @@ pub struct YapConfig {
     #[serde(default = "default_true")]
     pub meeting_brief: bool,
 
-    // ---- Jobs (Settings → Assistant → Jobs; `jobs.rs`) ----
+    // ---- Yap Code (Settings → Assistant → Yap Code; `agents.rs`) ----
     // Chat and the Voice Assistant hand a task to the person's own Claude
-    // Code, which works in one of their folders in the background. The
-    // jobs, their folders and each chat's Mode live in jobs.json and
-    // job_folders.json, never here.
-    /// "Let Chat start jobs": the `start_job` tools are offered (when Claude
-    /// Code is on this PC). Off by default: Settings → Jobs turns it on.
+    // Code: an agent, which works in one of their workspaces in the
+    // background. The agents, the workspaces and each chat's Mode live in
+    // agents.json and workspaces.json, never here. Each setting was
+    // `jobs…` until 7 Nov 2026: read by that name too (its alias), saved
+    // under the new one from v8 of [`migrate_once`].
+    /// The switch "Yap Code": the `start_agent` tools are offered (when
+    /// Claude Code is on this PC). Off by default.
     #[serde(default)]
-    pub jobs_enabled: bool,
-    /// How jobs pay: "plan" (the person's Claude plan, through Claude
+    #[serde(alias = "jobsEnabled")]
+    pub agents_enabled: bool,
+    /// How agents pay: "plan" (the person's Claude plan, through Claude
     /// Code's own sign-in) or "key" (their Anthropic API key).
-    #[serde(default = "default_jobs_pay")]
-    pub jobs_pay: String,
-    /// The model a job runs on unless the chat's model names one (a full id).
-    #[serde(default = "default_jobs_model")]
-    pub jobs_model: String,
+    #[serde(default = "default_agents_pay")]
+    #[serde(alias = "jobsPay")]
+    pub agents_pay: String,
+    /// The model an agent runs on unless the chat's model names one (a full id).
+    #[serde(default = "default_agents_model")]
+    #[serde(alias = "jobsModel")]
+    pub agents_model: String,
     /// Its effort: low | medium | high | xhigh | max.
-    #[serde(default = "default_jobs_effort")]
-    pub jobs_effort: String,
+    #[serde(default = "default_agents_effort")]
+    #[serde(alias = "jobsEffort")]
+    pub agents_effort: String,
     /// The Mode chip's default for a chat: auto | manual | acceptEdits |
     /// plan | bypassPermissions (Bypass only once confirmed).
-    #[serde(default = "default_jobs_mode")]
-    pub jobs_mode: String,
-    /// "Ask before starting a job": "new-or-web" (a folder used for the
+    #[serde(default = "default_agents_mode")]
+    #[serde(alias = "jobsMode")]
+    pub agents_mode: String,
+    /// "Ask before starting an agent": "new-or-web" (a folder used for the
     /// first time, or the chat read the web), "always" or "never".
-    #[serde(default = "default_jobs_ask")]
-    pub jobs_ask: String,
-    /// "Read job reports aloud": "voice" (when the job was asked by voice),
+    #[serde(default = "default_agents_ask")]
+    #[serde(alias = "jobsAsk")]
+    pub agents_ask: String,
+    /// "Read agent reports aloud": "voice" (when the agent was asked by voice),
     /// "always" or "never".
-    #[serde(default = "default_jobs_speak")]
-    pub jobs_speak: String,
-    /// At most this many jobs at once (one per folder), 1 to 3.
-    #[serde(default = "default_jobs_max")]
-    pub jobs_max: u32,
+    #[serde(default = "default_agents_speak")]
+    #[serde(alias = "jobsSpeak")]
+    pub agents_speak: String,
+    /// At most this many agents at once (one per folder), 1 to 3.
+    #[serde(default = "default_agents_max")]
+    #[serde(alias = "jobsMax")]
+    pub agents_max: u32,
     /// "Animate Code chats": a slow light moving along a Code chat's message
-    /// box while a job from it runs (never with reduced motion). On by
+    /// box while an agent from it runs (never with reduced motion). On by
     /// default; the page's alone.
     #[serde(default = "default_true")]
-    pub jobs_animate: bool,
-    /// "Clean up what you say in Code chats" (Settings → Jobs): the same as
+    #[serde(alias = "jobsAnimate")]
+    pub agents_animate: bool,
+    /// "Clean up what you say in Code chats" (Settings → Yap Code): the same as
     /// [`YapConfig::chat_clean_speech`] for a question said into a Code chat
     /// (one, a new code chat waiting with its workspace, the Code side's).
     /// On by default; its own switch, so each side is chosen apart.
     #[serde(default = "default_true")]
-    pub jobs_clean_speech: bool,
+    #[serde(alias = "jobsCleanSpeech")]
+    pub agents_clean_speech: bool,
 
     // ---- Memory (Settings → Memory; `memory.rs`) ----
     // The switches only: what Yap remembers lives in memory.json, never
@@ -1484,25 +1496,25 @@ fn default_tts_provider() -> String {
 fn default_diarization_model() -> String {
     crate::speakers::diarize::DEFAULT_MODEL.into()
 }
-fn default_jobs_pay() -> String {
+fn default_agents_pay() -> String {
     "plan".into()
 }
-fn default_jobs_model() -> String {
+fn default_agents_model() -> String {
     "claude-sonnet-5-5".into()
 }
-fn default_jobs_effort() -> String {
+fn default_agents_effort() -> String {
     "medium".into()
 }
-fn default_jobs_mode() -> String {
+fn default_agents_mode() -> String {
     "auto".into()
 }
-fn default_jobs_ask() -> String {
+fn default_agents_ask() -> String {
     "new-or-web".into()
 }
-fn default_jobs_speak() -> String {
+fn default_agents_speak() -> String {
     "voice".into()
 }
-fn default_jobs_max() -> u32 {
+fn default_agents_max() -> u32 {
     3
 }
 
@@ -1685,16 +1697,16 @@ impl Default for YapConfig {
             meeting_hotkey: default_meeting_hotkey(),
             meeting_reminder: default_meeting_reminder(),
             meeting_brief: true,
-            jobs_enabled: false,
-            jobs_pay: default_jobs_pay(),
-            jobs_model: default_jobs_model(),
-            jobs_effort: default_jobs_effort(),
-            jobs_mode: default_jobs_mode(),
-            jobs_ask: default_jobs_ask(),
-            jobs_speak: default_jobs_speak(),
-            jobs_max: default_jobs_max(),
-            jobs_animate: true,
-            jobs_clean_speech: true,
+            agents_enabled: false,
+            agents_pay: default_agents_pay(),
+            agents_model: default_agents_model(),
+            agents_effort: default_agents_effort(),
+            agents_mode: default_agents_mode(),
+            agents_ask: default_agents_ask(),
+            agents_speak: default_agents_speak(),
+            agents_max: default_agents_max(),
+            agents_animate: true,
+            agents_clean_speech: true,
             memory_search_chats: true,
             memory_learn_chats: true,
             memory_learn_meetings: false,
@@ -1825,7 +1837,7 @@ fn migrate_retired_groq_models(cfg: &mut YapConfig) {
 
 /// Current config schema version (see [`YapConfig::config_version`]). Bump it
 /// together with a new step in [`migrate_once`].
-const CONFIG_VERSION: u32 = 7;
+const CONFIG_VERSION: u32 = 8;
 
 /// One-time migrations, keyed by `config_version`. Returns whether anything
 /// ran; [`load`] then saves the result so no step ever runs twice.
@@ -1902,6 +1914,13 @@ fn migrate_once(cfg: &mut YapConfig) -> bool {
         // three of the core — in skills.json's `menu`. An older config never
         // ran a Yap with Skills: it gets the core six, as a new install.
         crate::chat::skills::keep_the_first_six();
+    }
+    if cfg.config_version < 8 {
+        // v8 (2026-11-07): Jobs became Yap Code, each run an agent. Its
+        // settings were `jobsEnabled`, `jobsPay`… and are `agentsEnabled`,
+        // `agentsPay`… now: read by either name (each field's alias), and
+        // this step's save writes the new names once, the values as they
+        // were. (Its files move in `agents::moved`.)
     }
     cfg.config_version = CONFIG_VERSION;
     true
@@ -3642,6 +3661,32 @@ mod tests {
         let mut reloaded: YapConfig = serde_json::from_str(&serde_json::to_string(&cfg).unwrap()).unwrap();
         assert!(!migrate_once(&mut reloaded));
         assert!(!shown().contains(&"coach".to_string()));
+    }
+
+    #[test]
+    fn jobs_settings_become_yap_codes_with_nothing_lost() {
+        // A config saved as Jobs (v7): every `jobs…` setting, none a default.
+        let old = r#"{"configVersion":7,"jobsEnabled":true,"jobsPay":"key","jobsModel":"claude-opus-5-5","jobsEffort":"max","jobsMode":"plan","jobsAsk":"always","jobsSpeak":"never","jobsMax":1,"jobsAnimate":false,"jobsCleanSpeech":false}"#;
+        let mut cfg: YapConfig = serde_json::from_str(old).unwrap();
+        assert!(migrate_once(&mut cfg), "v8 saves it once");
+        assert!(cfg.agents_enabled, "never loses the switch");
+        assert_eq!(
+            (cfg.agents_pay.as_str(), cfg.agents_model.as_str(), cfg.agents_effort.as_str(), cfg.agents_mode.as_str(), cfg.agents_ask.as_str(), cfg.agents_speak.as_str()),
+            ("key", "claude-opus-5-5", "max", "plan", "always", "never")
+        );
+        assert_eq!((cfg.agents_max, cfg.agents_animate, cfg.agents_clean_speech), (1, false, false));
+        // Saved under the new names only, and read back the same; never again.
+        let saved: serde_json::Value = serde_json::to_value(&cfg).unwrap();
+        let keys: Vec<&String> = saved.as_object().unwrap().keys().collect();
+        assert!(keys.iter().all(|k| !k.starts_with("jobs")), "{keys:?}");
+        assert_eq!(saved["agentsEnabled"], true);
+        assert_eq!(saved["agentsPay"], "key");
+        let mut back: YapConfig = serde_json::from_value(saved).unwrap();
+        assert!(!migrate_once(&mut back));
+        assert!(back.agents_enabled && back.agents_pay == "key" && back.agents_max == 1);
+        // A new install: Yap Code's defaults, off.
+        let fresh: YapConfig = serde_json::from_str("{}").unwrap();
+        assert!(!fresh.agents_enabled && fresh.agents_animate && fresh.agents_clean_speech);
     }
 
     #[test]

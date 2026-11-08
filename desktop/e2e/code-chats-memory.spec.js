@@ -1,4 +1,4 @@
-// Code chats and Yap's memory (desktop/src-tauri/src/jobs/code_chat.rs, chat/turn/prompt.rs,
+// Code chats and Yap's memory (desktop/src-tauri/src/agents/code_chat.rs, chat/turn/prompt.rs,
 // chat/turn/plan.rs, memory/learn.rs; 7 Nov 2026): project knowledge lives with the project
 // (its CLAUDE.md, Claude Code's own memory) and Yap's memory is personal, so a Code chat uses
 // none of it — on every model — and is never learned from. About you keeps the name and the
@@ -18,7 +18,7 @@
 //   built-ins, `--setting-sources user,project,local`, Yap's MCP server only, Claude Code's own
 //   prompt with Yap's added, no slash commands), its prompt without memory or the note, Yap's
 //   endpoint without search_memory; its transcript in the workspace's projects folder, gone
-//   with the chat (a job's session there stays). A plain plan chat as lean as before.
+//   with the chat (an agent's session there stays). A plain plan chat as lean as before.
 import fs from 'node:fs';
 import path from 'node:path';
 import { test as base, expect, setConfig } from './support/fixtures.js';
@@ -113,7 +113,7 @@ const test = base.extend({
           meetingReminder: 'never',
           webSearch: false,
           speakReplies: false,
-          jobsEnabled: true,
+          agentsEnabled: true,
           memoryLearnChats: true,
           memorySearchChats: true,
           aboutName: 'Imogen',
@@ -150,7 +150,7 @@ test.beforeAll(async ({ yap }) => {
   await yap.invoke('memory_save_item', { item: { section: 'people', title: 'Aoife', summary: 'Cousin', details: ['Lives in Galway'] } });
   await yap.invoke('memory_save_item', { item: { section: 'preferences', title: '', summary: '', details: ['Likes answers as bullet points'] } });
   await yap.invoke('note_create', { title: 'Watering schedule', content: 'Water the tomatoes every Tuesday.' });
-  if (!(await yap.invoke('job_folders_list')).some((f) => f.name === 'garden-planner')) await yap.invoke('job_folders_add', { path: GARDEN });
+  if (!(await yap.invoke('workspaces_list')).some((f) => f.name === 'garden-planner')) await yap.invoke('workspaces_add', { path: GARDEN });
 });
 
 test('a Code chat’s question carries none of Yap’s memory, About you without its note, and nothing is learned from it', async ({ yap, main, fakeLlm }) => {
@@ -158,7 +158,7 @@ test('a Code chat’s question carries none of Yap’s memory, About you without
   fakeLlm.reply('memory', () => JSON.stringify({ changes: [{ action: 'add', section: 'people', name: 'Aoife', facts: ['Builds garden planners'] }] }));
   fakeLlm.scriptChat([{ content: 'It lives in water.ts.' }]);
   const sent = await yap.invoke('chat_send', { conversationId: null, text: QUESTION, codeFolder: 'garden-planner' });
-  expect((await yap.invoke('job_chat_folder_get', { conversation: sent.conversationId }))?.name).toBe('garden-planner');
+  expect((await yap.invoke('code_chat_workspace_get', { conversation: sent.conversationId }))?.name).toBe('garden-planner');
   const asked = askedWith(fakeLlm, QUESTION);
   expect(asked, 'the chat request').toBeTruthy();
   const all = JSON.stringify(asked.messages);
@@ -170,7 +170,7 @@ test('a Code chat’s question carries none of Yap’s memory, About you without
   expect(all).not.toContain('They told Yap');
   // It's a Code chat (its line), and its tools read meetings and notes on request — never memory's.
   expect(all).toContain("This is a Code chat in the user's folder garden-planner");
-  expect(asked.tools).toEqual(expect.arrayContaining(['search_notes', 'get_note', 'start_job']));
+  expect(asked.tools).toEqual(expect.arrayContaining(['search_notes', 'get_note', 'start_agent']));
   for (const tool of ['remember', 'forget', 'search_chats']) expect(asked.tools, tool).not.toContain(tool);
 
   // A quiet Code chat is never read for memory: no pass, nothing kept.
@@ -189,7 +189,7 @@ test('the same question in a plain chat carries Yap’s memory as before, and is
   fakeLlm.scriptChat([{ content: 'Your note says Tuesdays.' }]);
   const text = `${QUESTION} (a plain chat)`;
   const sent = await yap.invoke('chat_send', { conversationId: null, text });
-  expect(await yap.invoke('job_chat_folder_get', { conversation: sent.conversationId })).toBeNull();
+  expect(await yap.invoke('code_chat_workspace_get', { conversation: sent.conversationId })).toBeNull();
   const all = JSON.stringify(askedWith(fakeLlm, text).messages);
   for (const kept of PERSONAL) expect(all, kept).toContain(kept);
   expect(all).toContain('They told Yap');
@@ -221,7 +221,7 @@ test('a Code chat on the plan runs Claude Code in its workspace, read only, with
   expect(after(args, '--permission-mode')).toBe('dontAsk');
   const allowed = after(args, '--allowedTools').split(',');
   for (const never of ['Edit', 'Write', 'MultiEdit', 'NotebookEdit', 'Bash', 'PowerShell']) expect(allowed, never).not.toContain(never);
-  expect(allowed).toEqual(expect.arrayContaining(['mcp__yap__get_meeting', 'mcp__yap__search_notes', 'mcp__yap__start_job']));
+  expect(allowed).toEqual(expect.arrayContaining(['mcp__yap__get_meeting', 'mcp__yap__search_notes', 'mcp__yap__start_agent']));
   expect(allowed).not.toContain('mcp__yap__search_memory');
   expect(args).toContain('--strict-mcp-config');
   expect(args).toContain('--disable-slash-commands');
@@ -240,7 +240,7 @@ test('a Code chat on the plan runs Claude Code in its workspace, read only, with
   expect(settings.permissions.blockReadsOutsideWorkingDirectories).toBe(true);
 
   // Its session kept with the folder it ran in; Claude Code's copy of it in the workspace's
-  // projects folder, beside a job's session there (another id: theirs).
+  // projects folder, beside an agent's session there (another id: theirs).
   const conv = String(sent.conversationId);
   await expect.poll(() => yap.readJson('claude_sessions.json')?.conversations?.[conv]?.cwd).toBeTruthy();
   const kept = yap.readJson('claude_sessions.json').conversations[conv];
@@ -250,11 +250,11 @@ test('a Code chat on the plan runs Claude Code in its workspace, read only, with
   await expect.poll(() => mine().map((t) => t.folder.toLowerCase())).toEqual([folderName]);
   const theirs = path.join(PROJECTS, mine()[0].folder, '1b2c3d4e-0000-4000-8000-00000000c0de.jsonl');
   fs.writeFileSync(theirs, '{}\n');
-  // The chat deleted: its copy goes; the job's stays.
+  // The chat deleted: its copy goes; the agent's stays.
   await yap.invoke('chat_delete', { id: sent.conversationId });
   await expect.poll(() => mine().length).toBe(0);
   expect(fs.existsSync(theirs)).toBe(true);
-  expect(await yap.invoke('job_chat_folder_get', { conversation: sent.conversationId })).toBeNull();
+  expect(await yap.invoke('code_chat_workspace_get', { conversation: sent.conversationId })).toBeNull();
 
   // A plain plan chat: as lean as before, in Yap's own folder.
   await yap.invoke('chat_send', { conversationId: null, text: 'What is a cold frame?' });

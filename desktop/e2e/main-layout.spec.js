@@ -22,7 +22,7 @@
 //   on one 768 px column (the scrollbar's half allowed for), with the list
 //   hidden or shown, beside a panel; a narrow thread its own width.
 // - **Every size**: 900, 1280, 1920 and 2560 px, Home and Chat (both sides,
-//   with a document and with a job's tab): nothing overlaps, nothing cut off.
+//   with a document and with an agent's tab): nothing overlaps, nothing cut off.
 import fs from 'node:fs';
 import path from 'node:path';
 import { test as base, expect, openView, setConfig, sidebar, settingsDialog, closeSettings } from './support/fixtures.js';
@@ -51,7 +51,7 @@ const COLUMN = 768;
 /** The window's frame around Chat beside the rail: the view's margins (2 + 10) and its border (2). */
 const FRAME = 14;
 
-// ---- the fake Claude Code's script (as chat-layout.spec.js): a job that takes its time ----
+// ---- the fake Claude Code's script (as chat-layout.spec.js): an agent that takes its time ----
 const init = {
   type: 'system',
   subtype: 'init',
@@ -113,7 +113,7 @@ const panel = (main) => main.getByTestId('chat-doc');
 const slot = (main) => main.getByTestId('chat-panel-slot');
 const editor = (main) => panel(main).locator('.docedit');
 const threadBox = (main) => main.locator('section.thread');
-const jobTab = (main) => main.getByTestId('chat-job');
+const agentTab = (main) => main.getByTestId('chat-agent');
 
 /** An element's box (CSS px, rounded). */
 const rect = (loc) =>
@@ -251,7 +251,7 @@ test.beforeEach(async ({ yap, main, fakeLlm }) => {
   await setConfig(yap, main, {
     theme: 'light',
     motion: 'system',
-    jobsEnabled: false,
+    agentsEnabled: false,
     webSearch: false,
     speakReplies: false,
     llmScopes: { chat: { enabled: true, provider: 'custom', baseUrl: fakeLlm.base, model: 'fake-chat', apiKey: '', apiKeys: {}, prompt: '', disableThinking: false } },
@@ -803,14 +803,14 @@ test('a wide thread reads in one centred 768 px column, the composer on it; a na
 
 // ---------------------------------------------------------------- every size
 
-test('every size, 900 to 2560 px: Home and Chat, a document and a Code chat’s job beside it — nothing overlaps or cuts off', async ({ yap, main, fakeLlm, shot }) => {
+test('every size, 900 to 2560 px: Home and Chat, a document and a Code chat’s agent beside it — nothing overlaps or cuts off', async ({ yap, main, fakeLlm, shot }) => {
   test.setTimeout(150_000);
   fs.rmSync(GARDEN, { recursive: true, force: true });
   fs.mkdirSync(GARDEN, { recursive: true });
   fs.writeFileSync(path.join(GARDEN, 'notes.md'), 'Draft notes\n');
   await yap.invoke('e2e_claude_approve_auto', { allow: true });
-  await setConfig(yap, main, { jobsEnabled: true, jobsAsk: 'new-or-web', jobsSpeak: 'never', jobsPay: 'plan', jobsMode: 'auto' });
-  if (!(await yap.invoke('job_folders_list')).some((f) => f.name === 'garden-planner')) await yap.invoke('job_folders_add', { path: GARDEN });
+  await setConfig(yap, main, { agentsEnabled: true, agentsAsk: 'new-or-web', agentsSpeak: 'never', agentsPay: 'plan', agentsMode: 'auto' });
+  if (!(await yap.invoke('workspaces_list')).some((f) => f.name === 'garden-planner')) await yap.invoke('workspaces_add', { path: GARDEN });
   const SIZES = [
     [900, 760],
     [1280, 800],
@@ -843,46 +843,46 @@ test('every size, 900 to 2560 px: Home and Chat, a document and a Code chat’s 
   }
   await panel(main).getByRole('button', { name: 'Close the document' }).click();
 
-  // The Code side: a job starting, its tab beside the chat.
+  // The Code side: an agent starting, its tab beside the chat.
   await main.setViewportSize({ width: 1920, height: 1040 });
   await yap.invoke('e2e_claude_script', { script: writeScript('slow', SLOW) });
   fakeLlm.scriptChat([
-    { tools: [{ name: 'start_job', args: { folder: 'garden-planner', brief: 'Read notes.md slowly.' } }] },
-    { content: "On it: I've started a job in garden-planner." },
+    { tools: [{ name: 'start_agent', args: { folder: 'garden-planner', brief: 'Read notes.md slowly.' } }] },
+    { content: "On it: I've sent an agent to garden-planner." },
   ]);
   await toSide(main, 'Code');
   await main.getByRole('button', { name: 'New code chat' }).click();
   await main.getByTestId('chat-workspace-menu').getByRole('menuitemradio', { name: 'garden-planner', exact: true }).click();
-  await send(main, 'Start a job in garden-planner.');
-  await expect(jobTab(main)).toBeVisible();
-  await expect(main.locator('.cbubble.assistant').last()).toContainText("On it: I've started a job in garden-planner.");
+  await send(main, 'Send an agent to garden-planner.');
+  await expect(agentTab(main)).toBeVisible();
+  await expect(main.locator('.cbubble.assistant').last()).toContainText("On it: I've sent an agent to garden-planner.");
   // At 1,920 nothing needs to give way: the rail and the list stay, the column centred beside the tab.
   expect(await railWidth(main)).toBe(RAIL_WIDE);
   await expect(list(main)).toBeVisible();
   const b = await columnBoxes(main);
   expect(b.col.w).toBe(COLUMN);
   expect(Math.abs(b.col.x - b.comp.x)).toBeLessThanOrEqual(1);
-  await shot(main, '16-code-job-tab-1920-light');
+  await shot(main, '16-code-agent-tab-1920-light');
   await theme(yap, main, 'dark');
-  await shot(main, '17-code-job-tab-1920-dark');
+  await shot(main, '17-code-agent-tab-1920-dark');
   await theme(yap, main, 'light');
   // Everything collapsed beside it.
   await railBtn(main).click();
   await box(main).click();
   await main.keyboard.press('Control+b');
   await expect.poll(() => railWidth(main)).toBe(RAIL_NARROW);
-  await shot(main, '18-code-job-tab-1920-everything-collapsed');
+  await shot(main, '18-code-agent-tab-1920-everything-collapsed');
   await railBtn(main).click();
   await main.keyboard.press('Control+b');
   for (const [w, hgt] of SIZES) {
     await main.setViewportSize({ width: w, height: hgt });
-    await expectNothingOverlaps(main, `the Code side at ${w}, a job's tab open`);
-    await shot(main, `19-code-job-tab-${w}`);
+    await expectNothingOverlaps(main, `the Code side at ${w}, an agent's tab open`);
+    await shot(main, `19-code-agent-tab-${w}`);
   }
   await main.setViewportSize({ width: 1280, height: 800 });
-  await jobTab(main).getByRole('button', { name: 'Stop' }).click();
-  await expect(main.getByTestId('chat-job-status')).toHaveText('Stopped', { timeout: 20_000 });
-  await jobTab(main).getByRole('button', { name: 'Close the panel' }).click();
+  await agentTab(main).getByRole('button', { name: 'Stop' }).click();
+  await expect(main.getByTestId('chat-agent-status')).toHaveText('Stopped', { timeout: 20_000 });
+  await agentTab(main).getByRole('button', { name: 'Close the panel' }).click();
   await toSide(main, 'Chat');
-  await setConfig(yap, main, { jobsEnabled: false });
+  await setConfig(yap, main, { agentsEnabled: false });
 });

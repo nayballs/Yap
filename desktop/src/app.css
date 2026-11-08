@@ -122,7 +122,7 @@ body {
   /* Code chats (views/chat/codeChat.css): a calm teal, never the warning
      amber Bypass permissions wears — the accent and its text, the box's
      edge and its soft ring, the workspace chip's wash and hover, the label
-     on the box's edge, and the light that travels round it while a job
+     on the box's edge, and the light that travels round it while an agent
      runs (its width and one turn's time) */
   --yap-code: #2a7684;
   --yap-code-line: rgba(42, 118, 132, 0.55);

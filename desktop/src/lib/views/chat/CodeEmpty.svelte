@@ -3,8 +3,8 @@
   // greeting in the thread's place, quiet, in the Code chat's teal — the
   // code mark, "Work in garden-planner" with its path under it, what a Code
   // chat is for, three one-tap prompts that fill the box (never sent by
-  // themselves: a request here can start a job, so you read it first), and
-  // what stands between this PC and a job when something does (Claude Code
+  // themselves: a request here can start an agent, so you read it first), and
+  // what stands between this PC and an agent when something does (Claude Code
   // not on this PC, too old, or signed out on the plan: Sign in, Claude
   // Code's own in a terminal; the store is the Claude plan card's,
   // stores/claudePlan.svelte.js). Chat's own greeting is ChatThread's.
@@ -59,7 +59,7 @@
     <!-- The Code side with no workspace to work in (none yet, or the one
          picked was removed): pick one, or add one. -->
     <h2 class="title">Choose a workspace</h2>
-    <p class="intro">A code chat works in a folder on this PC. Pick one, or add one, and jobs can work there.</p>
+    <p class="intro">A code chat works in a folder on this PC. Pick one, or add one, and agents can work there.</p>
     <div class="prompts" role="group" aria-label="Workspaces">
       {#each code.workspaces.slice(0, 3) as w (w.path)}
         <button type="button" class="prompt" data-testid="chat-code-empty-workspace" title={w.path} onclick={() => code.newCodeChat(w)}>{w.name}</button>
@@ -76,7 +76,7 @@
     {/each}
   </div>
   {#if hint}
-    <!-- What stands between this PC and a job: one line, one button. -->
+    <!-- What stands between this PC and an agent: one line, one button. -->
     <p class="note" data-testid="chat-code-claude" data-state={hint.state}>
       {hint.text}
       <button type="button" class="link" disabled={hint.action === 'check' && claudePlan.checking} onclick={() => act(hint)}>{hint.label}</button>

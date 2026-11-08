@@ -6,7 +6,7 @@ use crate::chat::tools::memory::memory_definitions;
 use crate::chat::tools::{app_definitions, web_definitions, Extra};
 
 /// The tools a turn's steps offer (every step the same): the note tools,
-/// and the apps', the web's, memory's, the calendar's and the jobs' when the
+/// and the apps', the web's, memory's, the calendar's and the agents' when the
 /// turn has them. Also what Chat's budget measures (`turn.rs`).
 pub fn offered_tools(open_apps: bool, web: bool, extra: Extra<'_>) -> Value {
     // The note tools, with the documents' set this model gets.
@@ -46,10 +46,10 @@ pub fn offered_tools(open_apps: bool, web: bool, extra: Extra<'_>) -> Value {
             all.extend(cal.iter().cloned());
         }
     }
-    // Jobs (tools/jobs.rs): jobs on and Claude Code on this PC.
-    if extra.jobs.is_some() {
-        if let (Some(all), Some(jobs)) = (tools.as_array_mut(), crate::chat::tools::jobs::definitions().as_array()) {
-            all.extend(jobs.iter().cloned());
+    // Yap Code (tools/agents.rs): agents on and Claude Code on this PC.
+    if extra.agents.is_some() {
+        if let (Some(all), Some(agents)) = (tools.as_array_mut(), crate::chat::tools::agents::definitions().as_array()) {
+            all.extend(agents.iter().cloned());
         }
     }
     tools

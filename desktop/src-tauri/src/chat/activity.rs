@@ -175,11 +175,13 @@ pub fn describe(name: &str, args: &Value, title_of: &dyn Fn(u64) -> Option<Strin
             Activity::new("picture", with(text(&["url"]).map(|u| crate::web::short_url(&u)), "Taking a shot of", "Taking a shot of a page"))
         }
         "offer_browser" => Activity::new("tool", "Adding a button to open it in your browser"),
-        // Jobs (chat/tools/jobs.rs): the folder it works in.
-        "start_job" => Activity::new("tool", with(text(&["folder"]).map(|f| crate::jobs::folders::name_of(&f)), "Starting a job in", "Starting a job")),
-        "job_status" => Activity::new("tool", "Checking the job"),
-        "message_job" => Activity::new("tool", "Telling the job"),
-        "stop_job" => Activity::new("tool", "Stopping the job"),
+        // Yap Code's agents (chat/tools/agents.rs): the workspace it's sent
+        // to. (Its tools' names until 7 Nov 2026 too — `start_job`… — as a
+        // Claude plan session from before the rename may still call them.)
+        "start_agent" | "start_job" => Activity::new("tool", with(text(&["folder"]).map(|f| crate::agents::workspaces::name_of(&f)), "Sending an agent to", "Sending an agent")),
+        "agent_status" | "job_status" => Activity::new("tool", "Checking on the agent"),
+        "message_agent" | "message_job" => Activity::new("tool", "Telling the agent"),
+        "stop_agent" | "stop_job" => Activity::new("tool", "Stopping the agent"),
         _ => Activity::new("tool", "Working"),
     }
 }
@@ -221,9 +223,12 @@ mod tests {
     fn each_tool_call_says_what_it_does_and_with_what() {
         assert_eq!(line("web_search", json!({ "query": "tidecaller  lone wolf\nbuild" })), "Searching the web · tidecaller lone wolf build");
         assert_eq!(line("web_search", Value::Null), "Searching the web");
-        assert_eq!(line("start_job", json!({ "folder": r"D:\Projects\garden-planner" })), "Starting a job in garden-planner");
-        assert_eq!(line("start_job", json!({ "folder": "garden-planner" })), "Starting a job in garden-planner");
-        assert_eq!(line("job_status", json!({})), "Checking the job");
+        assert_eq!(line("start_agent", json!({ "folder": r"D:\Projects\garden-planner" })), "Sending an agent to garden-planner");
+        assert_eq!(line("start_agent", json!({ "folder": "garden-planner" })), "Sending an agent to garden-planner");
+        assert_eq!(line("agent_status", json!({})), "Checking on the agent");
+        // Their names before the rename to Yap Code read the same.
+        assert_eq!(line("start_job", json!({ "folder": "garden-planner" })), "Sending an agent to garden-planner");
+        assert_eq!(line("stop_job", json!({})), "Stopping the agent");
         // A Code chat's reads of its workspace (on the Claude plan): the file's name only.
         assert_eq!(line("read_file", json!({ "file_path": r"D:\Projects\garden-planner\src\app.ts" })), "Reading app.ts");
         assert_eq!(line("read_file", json!({ "file_path": "/home/imogen/garden-planner/README.md" })), "Reading README.md");

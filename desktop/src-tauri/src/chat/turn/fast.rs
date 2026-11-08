@@ -108,16 +108,16 @@ pub(super) fn page_turn(
     })
 }
 
-/// **The answer to Yap's spoken question before a job** (`jobs/voice.rs`):
-/// a yes starts it ("On it: I've started a job in garden-planner."), its tab
-/// opening at once (`Event::Job`); a no doesn't. Saved like any turn, no
+/// **The answer to Yap's spoken question before an agent** (`agents/voice.rs`):
+/// a yes starts it ("On it: I've started an agent in garden-planner."), its tab
+/// opening at once (`Event::Agent`); a no doesn't. Saved like any turn, no
 /// model.
-pub(super) fn job_answer_turn(
+pub(super) fn agent_answer_turn(
     conversation_id: Option<u64>,
     text: &str,
     by_voice: bool,
     asked: impl FnOnce(u64, usize) + Send,
-    answer: crate::jobs::voice::Answer,
+    answer: crate::agents::voice::Answer,
     watcher: Option<&dyn crate::chat::stream::Sink>,
     stop: &crate::chat::stream::Stoppable,
 ) -> Result<ChatTurn, String> {
@@ -126,21 +126,21 @@ pub(super) fn job_answer_turn(
     stop.answers(conv.id);
     asked(conv.id, user_index);
     let (reply, chip) = match answer {
-        crate::jobs::voice::Answer::Yes(w) => match crate::chat::tools::jobs::start_waiting(*w) {
-            // A new job, or (a follow-up) the chat's job carried on.
+        crate::agents::voice::Answer::Yes(w) => match crate::chat::tools::agents::start_waiting(*w) {
+            // A new agent, or (a follow-up) the chat's agent carried on.
             Ok(begun) => {
                 if let Some(w) = watcher {
-                    w.send(crate::chat::stream::Event::Job { job: begun.reference() });
+                    w.send(crate::chat::stream::Event::Agent { agent: begun.reference() });
                 }
                 (begun.say, begun.chip)
             }
-            Err(e) => (format!("I couldn't start the job: {e}"), "Didn't start a job".to_string()),
+            Err(e) => (format!("I couldn't start the agent: {e}"), "Didn't send an agent".to_string()),
         },
-        crate::jobs::voice::Answer::No(w) => ("Okay, I won't start it.".to_string(), format!("Didn't start a job in {}: you said no", w.folder.name)),
+        crate::agents::voice::Answer::No(w) => ("Okay, I won't send it.".to_string(), format!("Didn't send an agent to {}: you said no", w.folder.name)),
     };
     let tools_used = vec![chip];
     let index = crate::chat::chats::append(conv.id, "assistant", &reply, &tools_used, None, false)?;
-    tracing::info!("Chat: Yap's question before a job, answered by Yap itself");
+    tracing::info!("Chat: Yap's question before an agent, answered by Yap itself");
     Ok(ChatTurn {
         conversation_id: conv.id,
         user_index,

@@ -1,4 +1,4 @@
-//! **Backups before Claude Code edits a file**, so a Job can be undone.
+//! **Backups before Claude Code edits a file**, so an agent can be undone.
 //!
 //! The run's `--settings` has an http `PreToolUse` hook on
 //! `Edit|Write|MultiEdit|NotebookEdit` (code.claude.com/docs/en/hooks: the
@@ -20,8 +20,8 @@
 //! as such.
 //!
 //! [`restore_all`] puts every backup back and deletes the files the run
-//! created — for several runs at once too (a job's turns, each its own
-//! backup folder: `jobs/<id>/backup/<turn>/`), each file as its earliest
+//! created — for several runs at once too (an agent's turns, each its own
+//! backup folder: `agents/<id>/backup/<turn>/`), each file as its earliest
 //! backup has it, so the files are as they were before the first. It touches only the paths the manifest names (plain absolute paths, outside the backup
 //! folder) and reads only plain file names inside the backup folder; any
 //! other is refused and said in the [`RestoreReport`].
@@ -329,7 +329,7 @@ pub fn same_path(a: &Path, b: &Path) -> bool {
     key(a) == key(b)
 }
 
-/// **Undo several runs at once** (a job's turns, `dirs` oldest first): each
+/// **Undo several runs at once** (an agent's turns, `dirs` oldest first): each
 /// file put back as its *earliest* backup has it — as it was before the
 /// first of them — and every file one of them made deleted. A manifest that
 /// can't be read: nothing done.

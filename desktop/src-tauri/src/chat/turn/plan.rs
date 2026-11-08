@@ -18,7 +18,7 @@
 //!   tools allowed; in an empty folder of Yap's; on the plan (`Pay::Plan`:
 //!   no API key in its environment, and a run Claude Code would bill to a
 //!   key is stopped before it asks anything).
-//! - **A Code chat** (7 Nov 2026, `jobs/code_chat.rs`): a Claude Code
+//! - **A Code chat** (7 Nov 2026, `agents/code_chat.rs`): a Claude Code
 //!   session in its workspace, project-aware and read only ([`spec`]): the
 //!   person's own user, project and local settings (their CLAUDE.md,
 //!   CLAUDE.local.md, Claude Code's own memory), Claude Code's prompt with
@@ -28,16 +28,16 @@
 //!   Another workspace is another session (the fingerprint has the
 //!   folder); its transcript lands in the workspace's projects folder and
 //!   goes with the chat (`sessions.rs`).
-//! - **Jobs** (with jobs offered: on, Claude Code here, not across the
-//!   meetings): Yap's `start_job`, `job_status`, `message_job` and
-//!   `stop_job` over the same endpoint (`claude_live/jobs.rs`, the tool
+//! - **Yap Code** (with agents offered: on, Claude Code here, not across the
+//!   meetings): Yap's `start_agent`, `agent_status`, `message_agent` and
+//!   `stop_agent` over the same endpoint (`claude_live/agents.rs`, the tool
 //!   loop's own code and rules), allowed in `--allowedTools` and named in
-//!   the prompt ([`JOBS`]). Each turn opens on the session's run
+//!   the prompt ([`AGENTS`]). Each turn opens on the session's run
 //!   (`RunHandle::begin_turn`: the question, the answer before it, the
 //!   conversation, where it was asked); the turn's events tell the run of
 //!   every web read and of each of Yap's tool calls as Claude Code begins
-//!   it ([`ToChat`]), so a job call is checked after every web read before
-//!   it; what the calls show (the card before a job, its tab) comes back
+//!   it ([`ToChat`]), so an agent call is checked after every web read before
+//!   it; what the calls show (the card before an agent, its tab) comes back
 //!   into the turn's stream ([`read_turn`]).
 //! - **The question**: the turn's context and the question
 //!   (`chats::with_context`), its screenshots as image blocks.
@@ -84,26 +84,26 @@ A message may start with an <earlier_in_this_chat> block: this chat's history, w
 
 /// **A Code chat's session** (in place of [`INSTRUCTIONS`], added to Claude
 /// Code's own prompt): it answers about the workspace's code, reads its
-/// files to, and a change goes through a job (`{name}`, `{change}`).
+/// files to, and a change goes through an agent (`{name}`, `{change}`).
 const CODE_INSTRUCTIONS: &str = "You're answering in a Code chat in Yap, the user's assistant app: a conversation about the code in their workspace {name}, this session's working folder, not a coding session of your own. Read its files (Read, Grep, Glob) to answer, and say which files you mean. You only read here: you can't edit files or run commands. {change} \
 WebSearch and WebFetch look things up on the web, when they're offered. \
 Yap's own tools (their names start with mcp__yap__) read the user's Yap meetings, notes, tasks, folders and calendar: use them when the user asks about those, such as what was decided in a meeting. They only read. \
 Answer in markdown, plainly and to the point. When you use what a web page says, cite the page right after it as a markdown link whose text is a number, like [1](https://example.com/page). Never end with a list of sources: Yap shows them under your answer. \
 A message may start with an <earlier_in_this_chat> block: this chat's history, written while you weren't in it. It isn't a new question.";
 
-/// What a Code chat says about changes: a job, while jobs are offered.
-const CODE_CHANGE_BY_JOB: &str = "For any change (an edit, a fix, a new file, a command to run), start a job with mcp__yap__start_job: it runs the user's own Claude Code in this workspace, with its own permissions.";
-const CODE_CHANGE_OFF: &str = "Yap's jobs are off, so nothing here can change the code: say what you'd change instead.";
+/// What a Code chat says about changes: an agent, while agents are offered.
+const CODE_CHANGE_BY_AGENT: &str = "For any change (an edit, a fix, a new file, a command to run), send an agent with mcp__yap__start_agent: it runs the user's own Claude Code in this workspace, with its own permissions.";
+const CODE_CHANGE_OFF: &str = "Yap's agents are off, so nothing here can change the code: say what you'd change instead.";
 
-/// [`CODE_INSTRUCTIONS`] for the workspace `name`, with jobs offered or not.
+/// [`CODE_INSTRUCTIONS`] for the workspace `name`, with agents offered or not.
 /// Pure.
-fn code_instructions(name: &str, jobs: bool) -> String {
-    CODE_INSTRUCTIONS.replace("{name}", name).replace("{change}", if jobs { CODE_CHANGE_BY_JOB } else { CODE_CHANGE_OFF })
+fn code_instructions(name: &str, agents: bool) -> String {
+    CODE_INSTRUCTIONS.replace("{name}", name).replace("{change}", if agents { CODE_CHANGE_BY_AGENT } else { CODE_CHANGE_OFF })
 }
 
 /// **What a Code chat's session may read with**: Claude Code's own
 /// read-only tools (2.1.296 has no `LS`: `Glob` lists). Never Edit, Write,
-/// MultiEdit, NotebookEdit, Bash or PowerShell: a change is a job's.
+/// MultiEdit, NotebookEdit, Bash or PowerShell: a change is an agent's.
 pub(crate) const CODE_READ_TOOLS: &[&str] = &["Read", "Grep", "Glob"];
 
 /// **The person's own settings**, as in their terminal (their CLAUDE.md,
@@ -111,10 +111,10 @@ pub(crate) const CODE_READ_TOOLS: &[&str] = &["Read", "Grep", "Glob"];
 /// chat's session loads them.
 pub(crate) const CODE_SETTING_SOURCES: &[&str] = &["user", "project", "local"];
 
-/// **With jobs offered**, after [`INSTRUCTIONS`]: Yap's job tools, what
+/// **With agents offered**, after [`INSTRUCTIONS`]: Yap's agent tools, what
 /// they're for, and the safety rule as it holds here; then the tool loop's
-/// own lines for them (`jobs::JOB_TOOL_INSTRUCTIONS`).
-const JOBS: &str = "Yap's job tools (mcp__yap__start_job, mcp__yap__job_status, mcp__yap__message_job, mcp__yap__stop_job) hand a task to the user's own Claude Code, which works in one of their folders in the background: the one way to have files changed or commands run from this chat. After WebSearch or WebFetch this turn, or a job's own words from job_status, Yap won't start a job or tell one anything until the user's next message (only their plain \"go ahead\" or \"yes\" to a job's plan or question still goes, in Yap's own words): say they can ask for it then.";
+/// own lines for them (`agents::AGENT_TOOL_INSTRUCTIONS`).
+const AGENTS: &str = "Yap's agent tools (mcp__yap__start_agent, mcp__yap__agent_status, mcp__yap__message_agent, mcp__yap__stop_agent) send an agent, the user's own Claude Code, to work in one of their folders in the background (call it an agent when you talk to the user): the one way to have files changed or commands run from this chat. After WebSearch or WebFetch this turn, or an agent's own words from agent_status, Yap won't start an agent or tell one anything until the user's next message (only their plain \"go ahead\" or \"yes\" to an agent's plan or question still goes, in Yap's own words): say they can ask for it then.";
 
 /// Who hears the turn: Chat's stream, a step per model message, a link to
 /// one of the turn's pages shown as its "[n]" as it's written. With a run
@@ -134,7 +134,7 @@ impl<'a> ToChat<'a> {
         ToChat { step: sink.map(|s| Step::new(s, true)), sink, cites: map::Cites::default(), sources: Vec::new(), marks }
     }
 
-    /// What one of Yap's tools showed for the turn (a card, a job's tab),
+    /// What one of Yap's tools showed for the turn (a card, an agent's tab),
     /// to the watcher.
     fn event(&self, ev: crate::chat::stream::Event) {
         if let Some(sink) = self.sink {
@@ -206,19 +206,19 @@ impl map::Out for ToChat<'_> {
 }
 
 /// The plan's system prompt for this turn: the persona and the answering
-/// line, how to answer here (a Code chat's own words; and the job tools,
+/// line, how to answer here (a Code chat's own words; and the agent tools,
 /// while offered), the context's note, About you, memory's "You" (none in
 /// a Code chat: `prompt.rs` left it out, and About you's note).
 fn system_prompt(t: &Asked<'_>, built: &Built) -> String {
     let mut s = t.ep.persona.trim().to_string();
     s.push_str("\n\n");
     match &built.code {
-        Some(f) => s.push_str(&code_instructions(&f.name, t.gates.jobs)),
+        Some(f) => s.push_str(&code_instructions(&f.name, t.gates.agents)),
         None => s.push_str(INSTRUCTIONS),
     }
-    if t.gates.jobs {
+    if t.gates.agents {
         s.push(' ');
-        s.push_str(&jobs_lines());
+        s.push_str(&agents_lines());
     }
     s.push_str("\n\n");
     s.push_str(crate::chat::chats::CONTEXT_NOTE);
@@ -234,34 +234,34 @@ fn system_prompt(t: &Asked<'_>, built: &Built) -> String {
     s
 }
 
-/// [`JOBS`] and the tool loop's lines for the job tools. Pure.
-fn jobs_lines() -> String {
-    format!("{JOBS} {}", crate::chat::tools::jobs::JOB_TOOL_INSTRUCTIONS.join(" "))
+/// [`AGENTS`] and the tool loop's lines for the agent tools. Pure.
+fn agents_lines() -> String {
+    format!("{AGENTS} {}", crate::chat::tools::agents::AGENT_TOOL_INSTRUCTIONS.join(" "))
 }
 
 /// What a warm process must have been started with to take this turn (its
-/// tools are listed once: one made without the job tools can't take a turn
+/// tools are listed once: one made without the agent tools can't take a turn
 /// that offers them; and it runs in one folder: `cwd`, a Code chat's
 /// workspace, empty for Yap's own).
-fn fingerprint(system: &str, web: bool, jobs: bool, cwd: &str) -> u64 {
+fn fingerprint(system: &str, web: bool, agents: bool, cwd: &str) -> u64 {
     let mut h = std::collections::hash_map::DefaultHasher::new();
     system.hash(&mut h);
     web.hash(&mut h);
-    jobs.hash(&mut h);
+    agents.hash(&mut h);
     cwd.to_lowercase().hash(&mut h);
     h.finish()
 }
 
 /// **The turn's context for its run** (`claude_live/turn.rs`): the
 /// question, the answer just before it, the conversation, where it was
-/// asked (jobs offered), and web content from its start — what the tool
-/// loop's job calls get from their turn.
+/// asked (agents offered), and web content from its start — what the tool
+/// loop's agent calls get from their turn.
 fn run_context(t: &Asked<'_>, opened: &Opened) -> crate::integrations::claude_live::turn::Context {
     crate::integrations::claude_live::turn::Context {
         question: t.text.clone(),
         previous: opened.conv.messages.last().filter(|m| m.role == "assistant").map(|m| m.sent_text()),
         conversation: Some(opened.conv.id),
-        jobs: t.gates.jobs.then(|| crate::chat::tools::JobsTurn::asked(t.scope, t.by_voice)),
+        agents: t.gates.agents.then(|| crate::chat::tools::AgentsTurn::asked(t.scope, t.by_voice)),
         // Words selected in another app (never one of Yap's own windows):
         // web content, as the tool loop's `Extra::web_question`.
         web: t.about_selection.as_ref().is_some_and(|s| s.web),
@@ -269,7 +269,7 @@ fn run_context(t: &Asked<'_>, opened: &Opened) -> crate::integrations::claude_li
 }
 
 /// The run's flags (`run`: its tools over Yap's endpoint — read-only, and
-/// the job tools while offered: the run's own list; `--strict-mcp-config`
+/// the agent tools while offered: the run's own list; `--strict-mcp-config`
 /// with Yap's server only, so the person's own MCP servers never start for
 /// a chat):
 ///
@@ -291,7 +291,7 @@ fn run_context(t: &Asked<'_>, opened: &Opened) -> crate::integrations::claude_li
 ///   workspace are refused outright (`blockReadsOutsideWorkingDirectories`
 ///   in the run's own `--settings`). No slash commands: a message never
 ///   runs one of their own commands. A change only ever goes through
-///   `start_job`, with all its rules.
+///   `start_agent`, with all its rules.
 #[allow(clippy::too_many_arguments)]
 fn spec(model: &str, effort: Option<Effort>, system: &str, web: bool, code: Option<&std::path::Path>, conversation: Conversation, run: &crate::integrations::claude_live::RunHandle) -> Result<Spec, String> {
     let mut spec = match code {
@@ -326,12 +326,12 @@ fn spec(model: &str, effort: Option<Effort>, system: &str, web: bool, code: Opti
 }
 
 /// A process for `conv`, started (resuming `resume` when given) and kept
-/// warm; its run offered the job tools with `jobs`; in `code`'s workspace
+/// warm; its run offered the agent tools with `agents`; in `code`'s workspace
 /// for a Code chat (its run without Yap's memory).
 #[allow(clippy::too_many_arguments)]
-fn start(conv: u64, model: &str, effort: Option<Effort>, system: &str, web: bool, jobs: bool, code: Option<&std::path::Path>, print: u64, resume: Option<&str>) -> Result<(Arc<sessions::Warm>, bool), String> {
+fn start(conv: u64, model: &str, effort: Option<Effort>, system: &str, web: bool, agents: bool, code: Option<&std::path::Path>, print: u64, resume: Option<&str>) -> Result<(Arc<sessions::Warm>, bool), String> {
     use crate::integrations::claude_live::{register_run, RunSpec, Tools};
-    let run = register_run(RunSpec::new("Chat", Tools::Chat).with_jobs(jobs).with_memory(code.is_none()))?;
+    let run = register_run(RunSpec::new("Chat", Tools::Chat).with_agents(agents).with_memory(code.is_none()))?;
     let conversation = match resume {
         Some(id) => Conversation::Resume(id.to_string()),
         None => Conversation::fresh(),
@@ -378,8 +378,8 @@ async fn next_shown(calls: &mut Option<&mut tokio::sync::mpsc::UnboundedReceiver
 
 /// Read one turn's events to its result (or a problem, the process's end, a
 /// Stop or a newer question, the time limit), telling the stream — and
-/// what Yap's tools show for the turn meanwhile (`calls`: a card before a
-/// job, its tab), as they show it.
+/// what Yap's tools show for the turn meanwhile (`calls`: a card before an
+/// agent, its tab), as they show it.
 async fn read_turn(
     rx: &mut tokio::sync::mpsc::UnboundedReceiver<Event>,
     mapper: &mut Mapper,
@@ -475,7 +475,7 @@ pub(super) async fn answer(t: &Asked<'_>, opened: &Opened, built: &Built, fitted
     let effort = oneshot::effort_for(&model);
     let system = system_prompt(t, built);
     let web = t.gates.web_on;
-    let jobs = t.gates.jobs;
+    let agents = t.gates.agents;
     // A Code chat's session runs in its workspace (`spec`): that folder
     // still there, else said plainly (never its name or path in the log).
     let workspace = built.code.as_ref().map(|f| std::path::PathBuf::from(&f.path));
@@ -484,7 +484,7 @@ pub(super) async fn answer(t: &Asked<'_>, opened: &Opened, built: &Built, fitted
         return Err("This Code chat's workspace folder isn't on this PC any more. Pick another workspace, or make it a plain chat.".to_string());
     }
     let cwd = built.code.as_ref().map(|f| f.path.clone()).unwrap_or_default();
-    let print = fingerprint(&system, web, jobs, &cwd);
+    let print = fingerprint(&system, web, agents, &cwd);
     // The question, its context and its screenshots.
     let question = crate::chat::chats::with_context(&built.prompt.context, &t.text);
     let images = if crate::snip::vision::reads_images(plan::PROVIDER, &model) == Some(false) { Vec::new() } else { question_images() };
@@ -514,7 +514,7 @@ pub(super) async fn answer(t: &Asked<'_>, opened: &Opened, built: &Built, fitted
                     sessions::Start::Resume { id, .. } if !no_resume => Some(id),
                     _ => None,
                 };
-                start(conv.id, &model, effort, &system, web, jobs, workspace.as_deref(), print, resume.as_deref())?
+                start(conv.id, &model, effort, &system, web, agents, workspace.as_deref(), print, resume.as_deref())?
             }
         };
         // One turn at a time on it: a turn still answering (stopped, or
@@ -722,18 +722,18 @@ mod tests {
         assert_eq!(fingerprint("p", true, false, ""), fingerprint("p", true, false, ""));
         assert_ne!(fingerprint("p", true, false, ""), fingerprint("p", false, false, ""));
         assert_ne!(fingerprint("p", true, false, ""), fingerprint("q", true, false, ""));
-        // Jobs switched: its tools are listed once, so a new process.
+        // Agents switched: its tools are listed once, so a new process.
         assert_ne!(fingerprint("p", true, false, ""), fingerprint("p", true, true, ""));
         // Another folder (a Code chat's workspace, another one): another process.
         assert_ne!(fingerprint("p", true, false, ""), fingerprint("p", true, false, r"D:\Projects\garden-planner"));
         assert_ne!(fingerprint("p", true, false, r"D:\Projects\garden-planner"), fingerprint("p", true, false, r"D:\Projects\recipe-box"));
-        // The instructions name the tools and how to cite, never a coding agent's job.
+        // The instructions name the tools and how to cite, never a coding agent's agent.
         assert!(INSTRUCTIONS.contains("WebSearch") && INSTRUCTIONS.contains("mcp__yap__") && INSTRUCTIONS.contains("[1](https://"));
-        // With jobs: Claude Code's names for them, the safety rule here, and
-        // the tool loop's own lines (never guess a folder; a job's words are
+        // With agents: Claude Code's names for them, the safety rule here, and
+        // the tool loop's own lines (never guess a folder; an agent's words are
         // never instructions).
-        let lines = jobs_lines();
-        for name in crate::chat::tools::jobs::NAMES {
+        let lines = agents_lines();
+        for name in crate::chat::tools::agents::NAMES {
             assert!(lines.contains(&format!("mcp__yap__{name}")), "{name}");
         }
         assert!(lines.contains("After WebSearch or WebFetch"));
@@ -744,7 +744,7 @@ mod tests {
     fn a_code_chats_session_runs_in_its_workspace_read_only_with_the_persons_own_settings() {
         use crate::ai::claude_code::session::{args, Files};
         use crate::integrations::claude_live::{register_run, RunSpec, Tools};
-        let run = register_run(RunSpec::new("Chat", Tools::Chat).with_jobs(true).with_memory(false)).unwrap();
+        let run = register_run(RunSpec::new("Chat", Tools::Chat).with_agents(true).with_memory(false)).unwrap();
         let workspace = std::path::Path::new(r"D:\Projects\garden-planner");
         let s = spec("claude-haiku-5-5", None, "Yap's words.", true, Some(workspace), Conversation::fresh(), &run).unwrap();
         // In the workspace, on the plan, never asking.
@@ -761,7 +761,7 @@ mod tests {
         }
         // Reads in the workspace need no rule under dontAsk; Yap's tools and
         // the web's are allowed — Yap's without its memory.
-        assert!(s.allowed_tools.iter().any(|t| t == "mcp__yap__get_meeting") && s.allowed_tools.iter().any(|t| t == "mcp__yap__start_job"));
+        assert!(s.allowed_tools.iter().any(|t| t == "mcp__yap__get_meeting") && s.allowed_tools.iter().any(|t| t == "mcp__yap__start_agent"));
         assert!(!s.allowed_tools.iter().any(|t| t.contains("memory")), "{:?}", s.allowed_tools);
         assert!(s.allowed_tools.iter().any(|t| t == "WebFetch"));
         // The person's own settings (their CLAUDE.md, Claude Code's memory),
@@ -787,11 +787,11 @@ mod tests {
         // The web off: the reads alone.
         let off = spec("claude-haiku-5-5", None, "Yap's words.", false, Some(workspace), Conversation::fresh(), &run).unwrap();
         assert_eq!(off.tools.unwrap(), ["Read", "Grep", "Glob"]);
-        // Its words: this workspace's code, read to answer, a change a job's.
-        let with_jobs = code_instructions("garden-planner", true);
-        assert!(with_jobs.contains("their workspace garden-planner") && with_jobs.contains("Read its files (Read, Grep, Glob)") && with_jobs.contains("start a job with mcp__yap__start_job"));
-        assert!(with_jobs.contains("can't edit files or run commands") && !with_jobs.contains("remembers"));
-        assert!(code_instructions("garden-planner", false).contains("Yap's jobs are off"));
+        // Its words: this workspace's code, read to answer, a change an agent's.
+        let with_agents = code_instructions("garden-planner", true);
+        assert!(with_agents.contains("their workspace garden-planner") && with_agents.contains("Read its files (Read, Grep, Glob)") && with_agents.contains("send an agent with mcp__yap__start_agent"));
+        assert!(with_agents.contains("can't edit files or run commands") && !with_agents.contains("remembers"));
+        assert!(code_instructions("garden-planner", false).contains("Yap's agents are off"));
         assert!(!INSTRUCTIONS.contains("Code chat"), "a plain plan chat's own words, as before");
     }
 
@@ -809,12 +809,12 @@ mod tests {
             m.feed(&parse_line(l).unwrap(), out);
         };
         feed(&mut mapper, &mut out, r#"{"type":"stream_event","event":{"type":"message_start","message":{"id":"m1"}}}"#);
-        feed(&mut mapper, &mut out, r#"{"type":"stream_event","event":{"type":"content_block_start","index":0,"content_block":{"type":"tool_use","id":"t1","name":"mcp__yap__start_job","input":{}}}}"#);
-        assert!(slot.seen(n, "start_job", std::time::Duration::ZERO), "Yap's tool call, as it began");
+        feed(&mut mapper, &mut out, r#"{"type":"stream_event","event":{"type":"content_block_start","index":0,"content_block":{"type":"tool_use","id":"t1","name":"mcp__yap__start_agent","input":{}}}}"#);
+        assert!(slot.seen(n, "start_agent", std::time::Duration::ZERO), "Yap's tool call, as it began");
         assert!(!slot.web(n));
         // The whole message again: the same call, not a second one.
-        feed(&mut mapper, &mut out, r#"{"type":"assistant","message":{"id":"m1","content":[{"type":"tool_use","id":"t1","name":"mcp__yap__start_job","input":{}}]}}"#);
-        assert!(!slot.seen(n, "start_job", std::time::Duration::ZERO));
+        feed(&mut mapper, &mut out, r#"{"type":"assistant","message":{"id":"m1","content":[{"type":"tool_use","id":"t1","name":"mcp__yap__start_agent","input":{}}]}}"#);
+        assert!(!slot.seen(n, "start_agent", std::time::Duration::ZERO));
         // A web search begins: the turn has read the web.
         feed(&mut mapper, &mut out, r#"{"type":"stream_event","event":{"type":"message_start","message":{"id":"m2"}}}"#);
         feed(&mut mapper, &mut out, r#"{"type":"stream_event","event":{"type":"content_block_start","index":0,"content_block":{"type":"tool_use","id":"s1","name":"WebSearch","input":{}}}}"#);

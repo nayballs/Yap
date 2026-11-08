@@ -8,7 +8,7 @@
 //! `<session id>/` beside it. A plan chat's session (`claude_plan`) runs in
 //! Yap's own `<data>/claude/chat/` — a Code chat's in its workspace, so its
 //! copy lands in that folder's projects folder, beside the person's own
-//! and their jobs' sessions — outside Yap; [`remove`] deletes it when Yap
+//! and their agents' sessions — outside Yap; [`remove`] deletes it when Yap
 //! deletes the chat (`claude_plan/sessions.rs` keeps which folder each ran
 //! in).
 //!
@@ -26,7 +26,7 @@
 //!   folder's last two parts do (`…-claude-chat`: the same folder reached
 //!   another way, such as a junction). Never another session's, never
 //!   another project's: in a Code chat's workspace the person's own
-//!   sessions and their jobs' stay (a job's transcript is theirs, as if
+//!   sessions and their agents' stay (an agent's transcript is theirs, as if
 //!   they'd run Claude Code themselves).
 //! - **Test runs** never look in the person's own `~/.claude`: only a
 //!   `CLAUDE_CONFIG_DIR` the test set.
@@ -284,7 +284,7 @@ mod tests {
         // The drive letter the other way round.
         let lower = projects.join("c--Users-imogen-AppData-Roaming-yap-claude-chat-x");
         put(&lower.join(format!("{gone_id}.jsonl")), "not one of Yap's: the name doesn't end alike\n");
-        // The person's own project: their job's session, even one with the same file name.
+        // The person's own project: their agent's session, even one with the same file name.
         let theirs = projects.join("E--Projects-garden-planner");
         put(&theirs.join(format!("{gone_id}.jsonl")), "{}\n");
         put(&theirs.join("1b2c3d4e-0000-4000-8000-000000000001.jsonl"), "{}\n");

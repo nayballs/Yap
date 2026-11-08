@@ -95,8 +95,8 @@ The full stack list, the app's entry and plumbing (`lib.rs`, the tray, context m
 - **Claude Code** (2026-11-07): the person's own installed Claude Code CLI
   (at least 2.1.259), never shipped with Yap, run unmodified as a child
   process (`claude -p`, stream-json both ways) on their own sign-in or API
-  key, for Chat on their Claude plan and Jobs (`ai/claude_code.rs`,
-  [ai-models.md](./ai-models.md#the-claude-code-engine-2026-11-07), [jobs.md](./jobs.md)).
+  key, for Chat on their Claude plan and Yap Code (`ai/claude_code.rs`,
+  [ai-models.md](./ai-models.md#the-claude-code-engine-2026-11-07), [yap-code.md](./yap-code.md)).
   Its runs reach Yap over a loopback HTTP endpoint (`integrations/claude_live.rs`,
   `tiny_http`, MCP's request/response subset by hand).
 - **Speaker diarization (beta):** NVIDIA's Nemotron-3-Diarization (q8_0 GGUF,
@@ -224,9 +224,9 @@ re-exported by the module, except `local_llm`'s, which callers name
   arguments and folder to the running Yap (single-instance's callback): with
   files, it opens them and nothing else; without, the main window comes up.
   Setup also starts the run endpoint's app handle (`claude_live::init`),
-  Jobs (`jobs::init`: the jobs the last Yap left running interrupted, the
+  Yap Code (`agents::init`: the agents the last Yap left running interrupted, the
   daily sweep) and the plan's look at Claude Code (`claude_plan::init`);
-  `shutdown_cleanup` ends the running jobs (`jobs::shutdown`).
+  `shutdown_cleanup` ends the running agents (`agents::shutdown`).
   **`yap.exe bench`'s cold-start copy** (`bench_child`, 2026-10-24:
   `YAP_BENCH_CHILD=1`, honoured only in portable mode — `shell/bench/cold.rs`
   starts it on an empty data folder): no single-instance plugin (it must
@@ -243,9 +243,9 @@ re-exported by the module, except `local_llm`'s, which callers name
   follows the window back on-screen — that flashed the "Welcome to Yap" window on
   every launch until 2026-09-25.
 - **Claude Code's processes** (2026-11-07, `ai/claude_code/`): each session
-  Yap starts (a plan chat, a one-shot call, a job) is in Yap's kill-on-close
-  job (`procs::end_with_yap`): it ends when Yap does, and a job is then marked
-  interrupted. The sign-in terminal (`claude auth login`) and a job's Open in
+  Yap starts (a plan chat, a one-shot call, an agent) is in Yap's kill-on-close
+  job (`procs::end_with_yap`): it ends when Yap does, and an agent is then marked
+  interrupted. The sign-in terminal (`claude auth login`) and an agent's Open in
   terminal (`claude --resume`) are the person's own, outside the job: they stay
   open if Yap quits. **`yap.exe fake-claude <script.jsonl> …`** (debug builds
   only; `main.rs` runs it before the app, as `mcp` and `diarize`:

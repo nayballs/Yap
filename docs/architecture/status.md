@@ -55,22 +55,22 @@ tables, method and how anyone can run it and send theirs:
 
 ## What works
 
-**Your Claude plan, Jobs, Code chats and Markdown files** (2026-11-07,
-[ai-models.md](./ai-models.md#your-claude-plan-2026-11-07), [jobs.md](./jobs.md),
+**Your Claude plan, Yap Code, Code chats and Markdown files** (2026-11-07,
+[ai-models.md](./ai-models.md#your-claude-plan-2026-11-07), [yap-code.md](./yap-code.md),
 [notes.md](./notes.md#markdown-files-in-yap-notesmd_filers-2026-11-07)). Yap
 drives the person's own Claude Code (`ai/claude_code/`: unmodified, their own
 sign-in) for two things:
 - **Chat on their Claude plan**: Claude is one entry in the picker, "Your
   plan | API key", told apart on the chip and on every answer's byline; on
   the plan, the usage ring and "Plan usage limits".
-- **Jobs**: any chat model, on the plan or a key, hands a task to Claude Code
-  in one of the person's folders; the Mode chip, the Job tab (read like
+- **Yap Code**: any chat model, on the plan or a key, hands a task to Claude Code
+  in one of the person's folders; the Mode chip, the Agent tab (read like
   Claude Code: steps, its to-do list, diffs, commands, cost), Allow / Deny
   cards, Undo from backups, a report in the chat's own words (out loud when
   asked by voice), Open in terminal. From a plan chat too, over Yap's run
-  endpoint (`integrations/claude_live/`). With Jobs on, Chat has two sides,
-  **Chat** and **Code**: Code chats are grouped by workspace and start jobs
-  there on the person's own request ([jobs.md](./jobs.md#chat-and-code)).
+  endpoint (`integrations/claude_live/`). With Yap Code on, Chat has two sides,
+  **Chat** and **Code**: Code chats are grouped by workspace and start agents
+  there on the person's own request ([yap-code.md](./yap-code.md#chat-and-code)).
 
 Also that day: **Markdown files** open in a Yap window of their own (Preview /
 Source, saved back, following changes on disk), offered by the installer in
@@ -84,19 +84,19 @@ too).
 **How it was tested:**
 - **Unit**: the engine's flags, environment and files, the parser against
   Claude Code 2.1.296's signed-out recordings, the endpoint's refusals and MCP
-  subset, `approve`, the backup hook and restore, the job store, workspaces,
+  subset, `approve`, the backup hook and restore, the agent store, workspaces,
   modes, consent, Code chats, the steps' words and diffs, the report, the
   plan's usage answer; a Markdown file's encodings and arguments.
 - **E2E on Yap's own stand-in for Claude Code** (`yap.exe fake-claude`):
-  `claude-plan*.spec.js`, `jobs.spec.js`, `jobs-ui.spec.js`,
-  `jobs-code-chats*.spec.js`, `plan-jobs.spec.js`, `chat-scroll.spec.js`,
+  `claude-plan*.spec.js`, `agents.spec.js`, `agents-ui.spec.js`,
+  `agents-code-chats*.spec.js`, `plan-agents.spec.js`, `chat-scroll.spec.js`,
   `md-file*.spec.js`, `settings-scopes.spec.js` ([`docs/e2e-tests.md`](../e2e-tests.md)).
   No spec reaches a real Claude Code or account.
 - **The maintainer's real runs** (2026-11-07, a real signed-in Claude Code on
-  a Claude plan): a plan chat; a real job that built a small project, followed
-  in the Job tab and reported out loud; the plan's usage limits, checked
+  a Claude plan): a plan chat; a real agent that built a small project, followed
+  in the Agent tab and reported out loud; the plan's usage limits, checked
   against Anthropic's own figures for the account. What they turned up was
-  fixed the same day (the Job tab's reading, Open in terminal's blank tab,
+  fixed the same day (the Agent tab's reading, Open in terminal's blank tab,
   the thread following a report).
 
 What hasn't been tried yet is under [Not yet done](#not-yet-done).
@@ -1531,9 +1531,9 @@ quote for a question asked out loud.
   chat can't be renamed from the Notes view (the notepad's Past chats only).
   The on-device Qwen3.5-4B shows another picture when the one asked for
   isn't there (Find and show's evaluation, 3/6, above).
-- **Your Claude plan, Jobs and Code chats** (2026-11-07): tried for real only
-  as above (a plan chat, one job, the usage limits, a spoken report).
-  - **Not yet tried on a real run**: a job paid by key; a job's cost across
+- **Your Claude plan, Yap Code and Code chats** (2026-11-07): tried for real only
+  as above (a plan chat, one agent, the usage limits, a spoken report).
+  - **Not yet tried on a real run**: an agent paid by key; an agent's cost across
     several turns (`total_cost_usd`, assumed whole per process); `--resume`
     after a warm session ended and after Yap was killed mid-job; a mid-turn
     interrupt; real `permission_denied` events and Plan mode's output; Open
@@ -1542,19 +1542,19 @@ quote for a question asked out loud.
     pays-another-way check; whether the plan takes `claude-fable-5-1`;
     screenshots as image blocks (no e2e either); WebSearch / WebFetch
     results' exact shapes.
-  - **Jobs from a plan chat**: whether Claude Code writes a tool call's start
-    before its MCP call (else a plan chat's `start_job` is refused on doubt
-    every time), and Haiku calling `mcp__yap__start_job` and putting the
+  - **Agents from a plan chat**: whether Claude Code writes a tool call's start
+    before its MCP call (else a plan chat's `start_agent` is refused on doubt
+    every time), and Haiku calling `mcp__yap__start_agent` and putting the
     spoken question back.
   - **In the dev build**: the bar's cards while another app is in front, the
-    real folder picker, "1 job running" beside the idle and meeting pills.
+    real folder picker, "1 agent working" beside the idle and meeting pills.
   - **Not built**: a card for Claude Code's own questions (`AskUserQuestion`
-    is denied); a phone job's report spoken on the phone (it's spoken on this
+    is denied); a phone agent's report spoken on the phone (it's spoken on this
     PC); Codex as a second engine.
   - **Landed 7 Nov, unit- and e2e-tested, not tried for real**: Code chats
     without Yap's memory, and a Code chat on the plan as a read-only session
-    in its workspace ([jobs.md](./jobs.md#memory-and-the-plan-in-a-code-chat)).
-    **Open**: the feature's name ([jobs.md](./jobs.md#open-questions)).
+    in its workspace ([yap-code.md](./yap-code.md#memory-and-the-plan-in-a-code-chat)).
+    **Open**: the feature's name ([yap-code.md](./yap-code.md#open-questions)).
   - An http `SessionStart` hook didn't fire in a real `-p` run (not looked
     into).
 - **Markdown files** (2026-11-07): the installer's "Open with" is unverified

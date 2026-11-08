@@ -145,7 +145,7 @@ The language-model side: the OpenAI-compatible client and its prompts, the on-de
 - **`ai/claude_code.rs`** (+ `claude_code/`: `cli`, `session`, `events`,
   `fake`) — **the Claude Code engine** (2026-11-07): the person's own
   installed Claude Code CLI, driven as a child process on their own sign-in
-  or API key, for Chat on the plan and Jobs. See [The Claude Code
+  or API key, for Chat on the plan and Yap Code. See [The Claude Code
   engine](#the-claude-code-engine-2026-11-07).
 - **`ai/claude_plan.rs`** (+ `claude_plan/`: `map`, `oneshot`, `sessions`,
   `spare`, `usage`) — **Your Claude plan** (2026-11-07): the provider
@@ -1702,11 +1702,11 @@ Following its UI rules (`ChatGptSignIn.svelte` inside `ChatGptProvider.svelte`, 
 
 `ai/claude_code.rs` (+ `claude_code/`): Yap drives the person's own installed
 Claude Code CLI as a child process. Two features build on it: **Your Claude
-plan** (Chat's answers on the person's plan, below) and **Jobs** (Chat hands a
-task to Claude Code in one of the person's folders: [jobs.md](./jobs.md)).
+plan** (Chat's answers on the person's plan, below) and **Yap Code** (Chat hands a
+task to Claude Code in one of the person's folders: [yap-code.md](./yap-code.md)).
 
 **Anthropic's terms** hold for both, and are written down once, in
-[jobs.md](./jobs.md#anthropics-terms): the person's own unmodified Claude
+[yap-code.md](./yap-code.md#anthropics-terms): the person's own unmodified Claude
 Code, their own login (plan or API key), Claude Code's own sign-in, Yap never
 reading or storing Claude credentials, and never "Claude Code" in a feature's
 name.
@@ -1728,9 +1728,9 @@ name.
 - **Sign in** (`open_sign_in`): Windows Terminal, else PowerShell, on `claude
   auth login`, never piped and never in Yap's kill-on-close job (it stays
   open if Yap quits). Test runs open nothing. The terminal itself
-  (`cli/terminal.rs`, shared with a Job's Open in terminal): `wt.exe` also
+  (`cli/terminal.rs`, shared with an agent's Open in terminal): `wt.exe` also
   found off `PATH` (its WindowsApps alias), a console of its own with none
-  of Yap's handles, out of Yap's job ([jobs.md](./jobs.md)).
+  of Yap's handles, out of Yap's job ([yap-code.md](./yap-code.md)).
 - Debug builds: `YAP_CLAUDE_EXE` names the program to run instead, and
   `YAP_CLAUDE_ARGS_PREFIX` (a JSON array) the arguments before Claude Code's
   (`["fake-claude","<script.jsonl>"]`). A test run without them finds no
@@ -1771,7 +1771,7 @@ with a `result` (checked on 2.1.296: two messages, two results, one
   `Spec::env`; `RunHandle::env`), and its MCP config and hook settings name
   it as `${YAP_RUN_KEY}` (the hook lists it in `allowedEnvVars`, as an http
   hook must). Claude Code fills it in itself. An inherited `YAP_RUN_KEY` (a
-  Yap started from a job's command) is taken off every run.
+  Yap started from an agent's command) is taken off every run.
 - **Paying is never ambiguous** (`environment`): Yap's environment with every
   `CLAUDE…` and `ANTHROPIC_…` variable taken off (`cli::clean_env`;
   `CLAUDE_CONFIG_DIR` stays, and Yap's own `YAP_…` names), then
@@ -1857,11 +1857,11 @@ model), dump its arguments (`_dump_args`; with a file path, appended there
 too, for an e2e spec) or which variables it has (never a value), write a
 file in its folder, write to stderr, exit, answer `get_usage` (`_usage`:
 the body to answer with from then on; none, or `null`: refused, as an
-older Claude Code). `{"_for":"chat"}` (or `"job"`,
+older Claude Code). `{"_for":"chat"}` (or `"agent"`,
 `"ask"`, `"all"`) plays the lines up to the next `_for` only in that kind of
-process — a Job's run (`--permission-prompt-tool`), a plan chat's session (an
+process — an agent's run (`--permission-prompt-tool`), a plan chat's session (an
 `--mcp-config`, no prompt tool), one question (neither) — so one script plays
-a plan chat, the job it starts and the report's question. An interrupt is
+a plan chat, the agent it starts and the report's question. An interrupt is
 answered as 2.1.296 does. Headers expand `${VAR}` as Claude Code does (an
 MCP server's from the environment, an http hook's only for the variables in
 its `allowedEnvVars`), so a run's key reaches Yap's endpoint only through the
@@ -1876,7 +1876,7 @@ out with an empty config folder, `synthetic-*` built from the documented
 shapes) replay too; its own examples are in `fixtures/fake/`.
 
 **Seen on a real signed-in Claude Code** (the maintainer's, 2026-11-07): a
-plan chat, a job, `get_usage`. **Not yet seen**: an http `SessionStart` hook
+plan chat, an agent, `get_usage`. **Not yet seen**: an http `SessionStart` hook
 didn't fire in a real `-p` run (not looked into).
 
 ## Your Claude plan (2026-11-07)
@@ -1939,20 +1939,20 @@ person's own sign-in.
 How a plan turn runs (a session per conversation, kept warm 10 minutes in
 `claude_plan/sessions.rs` and `claude_sessions.json`; Yap's own chat prompt in
 place of Claude Code's; Claude Code's web tools and Yap's read-only tools; the
-job tools while Jobs is offered; its events into Chat's stream) is in
+agent tools while Yap Code is offered; its events into Chat's stream) is in
 [chat-and-assistant.md](./chat-and-assistant.md#chat-on-your-claude-plan-2026-11-07),
-and its job tools in [jobs.md](./jobs.md#from-a-plan-chat). A plain plan chat
+and its agent tools in [yap-code.md](./yap-code.md#from-a-plan-chat). A plain plan chat
 runs lean, in an empty folder of Yap's (`claude\chat\` in the data folder),
 with none of the person's own Claude settings.
 
-**A plan chat in a Code chat** (7 Nov 2026, [jobs.md](./jobs.md#memory-and-the-plan-in-a-code-chat))
+**A plan chat in a Code chat** (7 Nov 2026, [yap-code.md](./yap-code.md#memory-and-the-plan-in-a-code-chat))
 is a Claude Code session in the workspace, project-aware and read only, in
 place of the lean setup: the workspace as its folder, the person's own
 user, project and local settings (`--setting-sources user,project,local`:
 their CLAUDE.md, CLAUDE.local.md and Claude Code's own memory), Claude
 Code's own prompt with Yap's Code chat words added
 (`--append-system-prompt-file`: it answers about this workspace's code,
-reads files to, and starts a job for any change), `--tools Read,Grep,Glob`
+reads files to, and starts an agent for any change), `--tools Read,Grep,Glob`
 (plus the web's with the web on; never an edit tool, Bash or PowerShell —
 `--tools` is what the model gets, whatever their settings allow; 2.1.296
 has no LS), `dontAsk` (reads in the workspace need no rule; anything that
@@ -1973,9 +1973,9 @@ outside Yap. **Yap deletes it with the chat**: Chat's delete
 `claude_sessions.json` names, and a session a conversation moved on from
 goes as soon as it's replaced (`sessions::put`). Each in the folder it ran
 in (`Kept::cwd`): Yap's `claude/chat/`, or a Code chat's workspace, whose
-projects folder also holds the person's own sessions and their jobs' —
+projects folder also holds the person's own sessions and their agents' —
 only the files named with the chat's own session ids go there, never
-another session's (a job's sessions are theirs, as if they'd run Claude
+another session's (an agent's sessions are theirs, as if they'd run Claude
 Code themselves). Settings' plan card
 says it in one line: "Claude Code keeps its own copy of each plan chat; Yap
 deletes it with the chat."
@@ -2108,8 +2108,8 @@ instead, unchanged).
   (`plan_tokens`, `plan_value_micros`), never in the month's spend.
 - **An answer's byline** says which way paid: "Your Claude plan · ≈ $0.0042
   on the API"; on the key, "API key · $0.0042" (`core/aiModel.js` `paidLine`,
-  `MessageTokens.costMicros`). Nothing known: the way alone. A job's cost line
-  says the same ([jobs.md](./jobs.md#paying-your-plan-or-a-key)).
+  `MessageTokens.costMicros`). Nothing known: the way alone. An agent's cost line
+  says the same ([yap-code.md](./yap-code.md#paying-your-plan-or-a-key)).
 
 ### Plan usage limits (2026-11-07)
 

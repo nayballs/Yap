@@ -863,7 +863,7 @@ impl Shared {
         // A question cleaned up on it ("Clean up what you say…",
         // `cleanup_styles::cleans_question`): either side's switch, as which
         // side it goes to is known once it's said.
-        let cleans_here = c.pp_provider == PROVIDER_ONDEVICE && (c.chat_clean_speech || (c.jobs_enabled && c.jobs_clean_speech));
+        let cleans_here = c.pp_provider == PROVIDER_ONDEVICE && (c.chat_clean_speech || (c.agents_enabled && c.agents_clean_speech));
         let why = match goes {
             Goes::Assistant => (on_demand::scope_provider(&c, "chat") == PROVIDER_ONDEVICE || cleans_here).then_some("assistant"),
             Goes::ChatBox => (on_demand::scope_provider(&c, "chat") == PROVIDER_ONDEVICE || cleans_here).then_some("chat"),

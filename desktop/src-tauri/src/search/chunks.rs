@@ -392,9 +392,9 @@ pub fn chunk_chat(conv: &crate::chat::chats::Conversation) -> Vec<Chunk> {
         if text.is_empty() {
             continue;
         }
-        // A job's report (`chat/turn/report.rs`) is the job's, not the person's.
+        // An agent's report (`chat/turn/report.rs`) is the agent's, not the person's.
         let theirs = m.role == "user" && m.kind.is_empty();
-        let speaker = if theirs { "You" } else if m.role == "user" { "Job" } else { "Yap" }.to_string();
+        let speaker = if theirs { "You" } else if m.role == "user" { "Agent" } else { "Yap" }.to_string();
         let w = word_count(&text);
         let asks = theirs;
         if w > MAX_WORDS {

@@ -3,8 +3,8 @@
 // and its page tab's strip (PageTab.svelte), so the two always say the same.
 // `act`: press (a button or a link; an older card has none), enter (Enter
 // in a field), open (go to a link's address), type (typed words, `text`),
-// job (a job about to start, chat/tools/jobs.rs: `job` {folder, path, mode,
-// modeLabel, brief, newFolder, web}; the Jobs UI gives it a card of its own).
+// agent (an agent about to start, chat/tools/agents.rs: `agent` {folder, path, mode,
+// modeLabel, brief, newFolder, web}; Yap Code gives it a card of its own).
 
 const WHY = {
   buy: 'It may buy something.',
@@ -33,9 +33,9 @@ export function questionParts(c) {
       return { lead: 'Yap wants to open', quoted: c.label, then: '' };
     case 'enter':
       return { lead: 'Yap wants to press Enter in', quoted: c.label, then: '' };
-    case 'job':
-      // A follow-up for the chat's job (its next turn), or a new job.
-      return { lead: c.job?.continues ? 'Yap wants to carry on the job in' : 'Yap wants to start a job in', quoted: c.label, then: c.job?.modeLabel ? ` (${c.job.modeLabel})` : '' };
+    case 'agent':
+      // A follow-up for the chat's agent (its next turn), or a new agent.
+      return { lead: c.agent?.continues ? 'Yap wants to tell the agent in' : 'Yap wants to send an agent to', quoted: c.label, then: c.agent?.modeLabel ? ` (${c.agent.modeLabel})` : '' };
     default:
       return { lead: 'Yap wants to press', quoted: c?.label || '', then: '' };
   }
@@ -44,9 +44,9 @@ export function questionParts(c) {
 /** Why it asks, in a line. */
 export function whyOf(c) {
   if (c?.act === 'type') return 'Those words aren’t in what you said, nor on the page.';
-  if (c?.act === 'job') {
-    if (c.job?.newFolder) return 'Jobs haven’t worked in this folder before.';
-    if (c.job?.web) return 'This chat read the web, which could have put words in the job’s brief.';
+  if (c?.act === 'agent') {
+    if (c.agent?.newFolder) return 'No agent has worked in this folder before.';
+    if (c.agent?.web) return 'This chat read the web, which could have put words in the agent’s brief.';
     return 'Claude Code would work on your files.';
   }
   return WHY[c?.does] || 'It may do something on the site for you.';
@@ -54,7 +54,7 @@ export function whyOf(c) {
 
 /** What a card says once answered (`state`: allowed, refused, timedOut). */
 export function doneWords(c, state) {
-  const verb = c?.act === 'type' ? 'type' : c?.act === 'open' ? 'open' : c?.act === 'job' ? 'start' : 'press';
+  const verb = c?.act === 'type' ? 'type' : c?.act === 'open' ? 'open' : c?.act === 'agent' ? 'send' : 'press';
   if (state === 'allowed') return 'Allowed once.';
   if (state === 'timedOut') return `No answer in time, so Yap didn’t ${verb} it.`;
   return `Yap didn’t ${verb} it.`;

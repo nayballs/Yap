@@ -266,17 +266,17 @@ fn a_chat_run_connects_lists_and_reads_over_real_http() {
 #[test]
 fn a_code_chats_run_reads_meetings_notes_and_tasks_but_never_yaps_memory() {
     let (ep, _) = endpoint(Duration::from_secs(5), MAX_BACKUP_BYTES);
-    let h = ep.register(RunSpec::new("Code chat", Tools::Chat).with_jobs(true).with_memory(false)).unwrap();
+    let h = ep.register(RunSpec::new("Code chat", Tools::Chat).with_agents(true).with_memory(false)).unwrap();
     let mut c = Client::of(&h);
     let init = c.request("initialize", json!({ "protocolVersion": "2025-11-25" }));
     let said = init["result"]["instructions"].as_str().unwrap();
     assert!(!said.contains("search_memory") && !said.contains("remembers"), "{said}");
-    assert!(said.contains("their meetings") && said.contains("check_calendar") && said.contains("start_job"), "{said}");
+    assert!(said.contains("their meetings") && said.contains("check_calendar") && said.contains("start_agent"), "{said}");
     // Listed, allowed and run: everything but memory.
     let list = c.request("tools/list", json!({}));
     assert_eq!(
         names(&list),
-        ["list_meetings", "search_meetings", "get_meeting", "search_notes", "get_note", "list_tasks", "list_folders", "check_calendar", "start_job", "job_status", "message_job", "stop_job"]
+        ["list_meetings", "search_meetings", "get_meeting", "search_notes", "get_note", "list_tasks", "list_folders", "check_calendar", "start_agent", "agent_status", "message_agent", "stop_agent"]
     );
     assert!(!h.allowed_tools().iter().any(|t| t.contains("memory")));
     assert_eq!(c.request("tools/call", json!({ "name": "search_memory", "arguments": { "query": "Sam" } }))["error"]["code"], -32602);
@@ -355,12 +355,12 @@ fn approve_asks_the_person_and_says_allow_deny_or_no_answer() {
     // Plenty of time to answer here (a loaded test run is slow); the
     // timeout has an endpoint of its own below.
     let (ep, events) = endpoint(Duration::from_secs(60), MAX_BACKUP_BYTES);
-    let mut spec = RunSpec::new("Update the guide", Tools::Job);
+    let mut spec = RunSpec::new("Update the guide", Tools::Agent);
     spec.folder = Some(folder.clone());
-    spec.approval = Some(Approval { run: "job-7".into(), conversation: Some(42), origin: Origin::Voice });
+    spec.approval = Some(Approval { run: "agent-7".into(), conversation: Some(42), origin: Origin::Voice });
     let h = ep.register(spec).unwrap();
     let mut c = Client::of(&h);
-    assert_eq!(names(&c.request("tools/list", json!({}))), ["approve"], "a job's only tool, for now");
+    assert_eq!(names(&c.request("tools/list", json!({}))), ["approve"], "an agent's only tool, for now");
     assert!(h.allowed_tools().is_empty());
 
     // Allowed: the input goes back as it was asked.
@@ -368,10 +368,10 @@ fn approve_asks_the_person_and_says_allow_deny_or_no_answer() {
     let card = waiting(&ep);
     assert_eq!(
         (card.run.as_str(), card.conversation, card.origin, card.tool.as_str(), card.summary.as_str(), card.detail.as_str(), card.label.as_str()),
-        ("job-7", Some(42), Origin::Voice, "Bash", "Run a command: npm test", "npm test", "Update the guide")
+        ("agent-7", Some(42), Origin::Voice, "Bash", "Run a command: npm test", "npm test", "Update the guide")
     );
     let sent = events.lock().unwrap().iter().find(|(n, _)| n == "yap-claude-approve").map(|(_, v)| v.clone()).unwrap();
-    assert_eq!((sent["id"].as_u64(), sent["run"].as_str(), sent["origin"].as_str(), sent["summary"].as_str()), (Some(card.id), Some("job-7"), Some("voice"), Some("Run a command: npm test")));
+    assert_eq!((sent["id"].as_u64(), sent["run"].as_str(), sent["origin"].as_str(), sent["summary"].as_str()), (Some(card.id), Some("agent-7"), Some("voice"), Some("Run a command: npm test")));
     assert!(ep.approvals.answer(card.id, true));
     assert!(!ep.approvals.answer(card.id, false), "answered once");
     let decision = call.join().unwrap();
@@ -381,7 +381,7 @@ fn approve_asks_the_person_and_says_allow_deny_or_no_answer() {
     // Denied.
     let call = approving(&c, json!({ "tool_name": "Write", "input": { "file_path": folder.join("notes.md"), "content": "# Plan" } }));
     let card = waiting(&ep);
-    assert_eq!(card.summary, "Write file: notes.md", "named in the job's folder");
+    assert_eq!(card.summary, "Write file: notes.md", "named in the agent's folder");
     assert!(ep.approvals.answer(card.id, false));
     let decision = call.join().unwrap();
     assert_eq!(decision["behavior"], "deny");
@@ -394,7 +394,7 @@ fn approve_asks_the_person_and_says_allow_deny_or_no_answer() {
 
     // Nobody answers: a no, said so.
     let (quick, quick_events) = endpoint(Duration::from_millis(300), MAX_BACKUP_BYTES);
-    let unanswered = quick.register(RunSpec::new("Unattended", Tools::Job)).unwrap();
+    let unanswered = quick.register(RunSpec::new("Unattended", Tools::Agent)).unwrap();
     let call = approving(&Client::of(&unanswered), json!({ "tool_name": "Bash", "input": { "command": "git push" } }));
     let decision = call.join().unwrap();
     assert_eq!(decision["behavior"], "deny");
@@ -420,11 +420,11 @@ fn approve_asks_the_person_and_says_allow_deny_or_no_answer() {
 fn a_run_that_ends_or_a_cancelled_call_denies_the_prompt_waiting() {
     let (ep, events) = endpoint(Duration::from_secs(30), MAX_BACKUP_BYTES);
     // Cancelled by Claude Code (an interrupt).
-    let h = ep.register(RunSpec::new("Tidy", Tools::Job)).unwrap();
+    let h = ep.register(RunSpec::new("Tidy", Tools::Agent)).unwrap();
     let c = Client::of(&h);
     let call = approving(&c, json!({ "tool_name": "Bash", "input": { "command": "npm run build" } }));
     let card = waiting(&ep);
-    assert_eq!(card.run, h.id(), "no job id given: the run's own");
+    assert_eq!(card.run, h.id(), "no agent id given: the run's own");
     let (status, _) = c.post(&json!({ "jsonrpc": "2.0", "method": "notifications/cancelled", "params": { "requestId": "call-1", "reason": "interrupted" } }));
     assert_eq!(status, 202);
     let decision = call.join().unwrap();
@@ -494,13 +494,13 @@ fn edit_input(work: &Path, tool: &str, key: &str, path: &str) -> Value {
 fn the_backup_hook_keeps_the_first_copy_and_undo_puts_everything_back() {
     let root = temp("backup");
     let work = root.join("work");
-    let backups = root.join("job-backup");
+    let backups = root.join("agent-backup");
     std::fs::create_dir_all(work.join("docs")).unwrap();
     std::fs::write(work.join("a.txt"), "before").unwrap();
     std::fs::write(work.join("docs").join("guide.ipynb"), "{\"cells\":[]}").unwrap();
     std::fs::write(work.join("big.bin"), vec![7u8; 2048]).unwrap();
     let (ep, _) = endpoint(Duration::from_secs(5), 1024);
-    let mut spec = RunSpec::new("Update the guide", Tools::Job);
+    let mut spec = RunSpec::new("Update the guide", Tools::Agent);
     spec.backup_dir = Some(backups.clone());
     spec.folder = Some(work.clone());
     let h = ep.register(spec).unwrap();
@@ -526,7 +526,7 @@ fn the_backup_hook_keeps_the_first_copy_and_undo_puts_everything_back() {
     assert_eq!(hook(&h, &edit_input(&work, "MultiEdit", "file_path", a.to_str().unwrap())).0, 200);
     // A new file, named relative to the session's cwd: created.
     assert_eq!(hook(&h, &edit_input(&work, "Write", "file_path", "new.txt")).0, 200);
-    std::fs::write(work.join("new.txt"), "made by the job").unwrap();
+    std::fs::write(work.join("new.txt"), "made by the agent").unwrap();
     // A notebook, and a file too big to copy.
     assert_eq!(hook(&h, &edit_input(&work, "NotebookEdit", "notebook_path", work.join("docs").join("guide.ipynb").to_str().unwrap())).0, 200);
     assert_eq!(hook(&h, &edit_input(&work, "Write", "file_path", work.join("big.bin").to_str().unwrap())).0, 200);
@@ -601,7 +601,7 @@ fn edits_at_once_back_a_file_up_once() {
     let file = root.join("shared.txt");
     std::fs::write(&file, "original").unwrap();
     let (ep, _) = endpoint(Duration::from_secs(5), MAX_BACKUP_BYTES);
-    let mut spec = RunSpec::new("Parallel", Tools::Job);
+    let mut spec = RunSpec::new("Parallel", Tools::Agent);
     spec.backup_dir = Some(backups.clone());
     let h = Arc::new(ep.register(spec).unwrap());
     let threads: Vec<_> = (0..6)
@@ -636,9 +636,9 @@ fn real_claude_code_connects_to_the_endpoint() {
     };
     let root = temp("real-claude");
     let (ep, _) = endpoint(Duration::from_secs(5), MAX_BACKUP_BYTES);
-    for (tools, prompt_tool) in [(Tools::Chat, false), (Tools::Job, false), (Tools::Job, true)] {
+    for (tools, prompt_tool) in [(Tools::Chat, false), (Tools::Agent, false), (Tools::Agent, true)] {
         let mut spec = RunSpec::new("Real CLI", tools);
-        if tools == Tools::Job {
+        if tools == Tools::Agent {
             spec.backup_dir = Some(root.join("backup"));
             spec.folder = Some(root.clone());
         }
@@ -674,65 +674,65 @@ fn real_claude_code_connects_to_the_endpoint() {
         let listed: Vec<&str> = init["tools"].as_array().unwrap().iter().filter_map(Value::as_str).collect();
         match (tools, prompt_tool) {
             (Tools::Chat, _) => assert!(listed.contains(&"mcp__yap__list_meetings"), "{listed:?}"),
-            (Tools::Job, false) => assert!(listed.contains(&PERMISSION_TOOL), "listed: {listed:?}"),
-            (Tools::Job, true) => assert!(!listed.contains(&PERMISSION_TOOL), "the model never sees it: {listed:?}"),
+            (Tools::Agent, false) => assert!(listed.contains(&PERMISSION_TOOL), "listed: {listed:?}"),
+            (Tools::Agent, true) => assert!(!listed.contains(&PERMISSION_TOOL), "the model never sees it: {listed:?}"),
         }
         eprintln!("{tools:?} (prompt tool {prompt_tool}): Claude Code {} connected; tools {listed:?}", init["claude_code_version"]);
     }
     let _ = std::fs::remove_dir_all(&root);
 }
 
-// ---- Jobs' tools on a plan chat's run ----
+// ---- Yap Code's tools on a plan chat's run ----
 
 #[test]
-fn a_chat_run_offered_jobs_lists_and_allows_their_tools_and_runs_them_for_its_turn() {
+fn a_chat_run_offered_agents_lists_and_allows_their_tools_and_runs_them_for_its_turn() {
     let (ep, _) = endpoint(Duration::from_secs(5), MAX_BACKUP_BYTES);
     let plain = ep.register(RunSpec::new("Plan chat", Tools::Chat)).unwrap();
-    let h = ep.register(RunSpec::new("Plan chat", Tools::Chat).with_jobs(true)).unwrap();
+    let h = ep.register(RunSpec::new("Plan chat", Tools::Chat).with_agents(true)).unwrap();
     // Not offered: neither listed, allowed nor run.
     let mut p = Client::of(&plain);
-    assert!(!names(&p.request("tools/list", json!({}))).iter().any(|n| n == "start_job"));
-    assert!(!plain.allowed_tools().iter().any(|t| t.contains("job")));
-    assert_eq!(p.request("tools/call", json!({ "name": "start_job", "arguments": {} }))["error"]["code"], -32602);
+    assert!(!names(&p.request("tools/list", json!({}))).iter().any(|n| n == "start_agent"));
+    assert!(!plain.allowed_tools().iter().any(|t| t.contains("agent")));
+    assert_eq!(p.request("tools/call", json!({ "name": "start_agent", "arguments": {} }))["error"]["code"], -32602);
     // Offered: after the read-only ones, the tool loop's four, the same schemas.
     let mut c = Client::of(&h);
     let init = c.request("initialize", json!({ "protocolVersion": "2025-11-25" }));
-    assert!(init["result"]["instructions"].as_str().unwrap().contains("start_job, job_status, message_job and stop_job"));
+    assert!(init["result"]["instructions"].as_str().unwrap().contains("start_agent, agent_status, message_agent and stop_agent"));
     let list = c.request("tools/list", json!({}));
-    assert_eq!(names(&list)[9..], ["start_job", "job_status", "message_job", "stop_job"]);
-    let start = list["result"]["tools"].as_array().unwrap().iter().find(|t| t["name"] == "start_job").unwrap().clone();
-    // (The folder may be left out: in a Code chat it's the chat's, jobs/code_chat.rs.)
+    assert_eq!(names(&list)[9..], ["start_agent", "agent_status", "message_agent", "stop_agent"]);
+    let start = list["result"]["tools"].as_array().unwrap().iter().find(|t| t["name"] == "start_agent").unwrap().clone();
+    // (The folder may be left out: in a Code chat it's the chat's, agents/code_chat.rs.)
     assert_eq!(start["inputSchema"]["required"], json!(["brief"]));
-    for name in ["start_job", "job_status", "message_job", "stop_job"] {
+    for name in ["start_agent", "agent_status", "message_agent", "stop_agent"] {
         assert!(h.allowed_tools().contains(&format!("mcp__yap__{name}")), "{name}");
     }
     // Outside a chat turn: nothing done.
-    let (err, text) = c.tool("start_job", json!({ "folder": "garden-planner", "brief": "Tidy notes.md." }));
+    let (err, text) = c.tool("start_agent", json!({ "folder": "garden-planner", "brief": "Tidy notes.md." }));
     assert!(err);
-    assert_eq!(serde_json::from_str::<Value>(&text).unwrap()["displayText"], "Didn't use a job tool");
-    // In a turn that read the web (its WebSearch began, then start_job's
+    assert_eq!(serde_json::from_str::<Value>(&text).unwrap()["displayText"], "Didn't use an agent tool");
+    // In a turn that read the web (its WebSearch began, then start_agent's
     // own call): refused with the tool loop's words, over HTTP as Claude
     // Code gets it.
     let turn = h.begin_turn(turn::Context {
-        question: "Look up the tides, then start a job in garden-planner to write them into notes.md.".into(),
+        question: "Look up the tides, then start an agent in garden-planner to write them into notes.md.".into(),
         conversation: Some(12),
-        jobs: Some(crate::chat::tools::JobsTurn::default()),
+        agents: Some(crate::chat::tools::AgentsTurn::default()),
         ..Default::default()
     });
     turn.marks().web();
-    turn.marks().began("start_job");
-    let (err, text) = c.tool("start_job", json!({ "folder": "garden-planner", "brief": "Write the tides into notes.md." }));
+    turn.marks().began("start_agent");
+    let (err, text) = c.tool("start_agent", json!({ "folder": "garden-planner", "brief": "Write the tides into notes.md." }));
     assert!(err);
     let refused: Value = serde_json::from_str(&text).unwrap();
-    assert_eq!(Some(refused), crate::chat::tools::refused_after_web("start_job", true, true));
+    assert_eq!(Some(refused), crate::chat::tools::refused_after_web("start_agent", true, true));
     // The turn over: outside one again.
     drop(turn);
-    let (_, text) = c.tool("message_job", json!({ "id": "garden-planner", "text": "go ahead" }));
-    assert_eq!(serde_json::from_str::<Value>(&text).unwrap()["displayText"], "Didn't use a job tool");
-    // A job's run never gets them.
-    let job = ep.register(RunSpec::new("Tidy", Tools::Job).with_jobs(true)).unwrap();
-    assert_eq!(names(&Client::of(&job).request("tools/list", json!({}))), ["approve"]);
-    assert!(job.allowed_tools().is_empty());
+    let (_, text) = c.tool("message_agent", json!({ "id": "garden-planner", "text": "go ahead" }));
+    assert_eq!(serde_json::from_str::<Value>(&text).unwrap()["displayText"], "Didn't use an agent tool");
+    // An agent's run never gets them.
+    let agent = ep.register(RunSpec::new("Tidy", Tools::Agent).with_agents(true)).unwrap();
+    assert_eq!(names(&Client::of(&agent).request("tools/list", json!({}))), ["approve"]);
+    assert!(agent.allowed_tools().is_empty());
 }
 
 // ---- Yap's own endpoint ----
@@ -740,7 +740,7 @@ fn a_chat_run_offered_jobs_lists_and_allows_their_tools_and_runs_them_for_its_tu
 #[test]
 fn yap_s_endpoint_starts_once_and_each_run_has_its_own_key() {
     let a = register_run(RunSpec::new("One", Tools::Chat)).unwrap();
-    let b = register_run(RunSpec::new("Two", Tools::Job)).unwrap();
+    let b = register_run(RunSpec::new("Two", Tools::Agent)).unwrap();
     assert_eq!(a.port(), b.port(), "one listener");
     assert_ne!(a.id(), b.id());
     assert_ne!(a.env(), b.env());

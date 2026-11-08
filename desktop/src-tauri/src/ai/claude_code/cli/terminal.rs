@@ -1,4 +1,4 @@
-//! **A terminal the person owns** (a Job's Open in terminal, Claude Code's
+//! **A terminal the person owns** (an agent's Open in terminal, Claude Code's
 //! sign-in): Windows Terminal, else Windows PowerShell in a console of its
 //! own, running a short PowerShell script ([`script`]: the title, the
 //! folder, then Claude Code). The script goes as `-EncodedCommand`, so no

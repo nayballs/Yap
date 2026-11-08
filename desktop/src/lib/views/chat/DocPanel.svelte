@@ -38,15 +38,15 @@
   // Rust's, laid over the tab, one PageTab per page. With a page showing,
   // the row is there even alone, with a + at its end for a new page tab
   // (Ctrl+T in the panel), as Claude Code's browser pane has; a page tab's
-  // name is the page's title as it is now. A job Chat started (Jobs) shows
-  // in a Job tab (JobTab.svelte): its folder's name on the row; closing it
-  // never stops the job.
+  // name is the page's title as it is now. An agent Chat started (Yap Code) shows
+  // in an agent tab (AgentTab.svelte): its folder's name on the row; closing it
+  // never stops the agent.
   import { tick, untrack } from 'svelte';
   import PictureTab from './PictureTab.svelte';
   import PageTab from './PageTab.svelte';
-  import JobTab from './JobTab.svelte';
-  import { jobTabName } from '../../core/jobs.js';
-  import { jobById } from '../../stores/jobs.svelte.js';
+  import AgentTab from './AgentTab.svelte';
+  import { agentTabName } from '../../core/agents.js';
+  import { agentById } from '../../stores/agents.svelte.js';
   import { panelTabs, neighbour } from './panelTabs.js';
   import { tabKeyOf, pageKey as pageTabKey } from './chatDoc.svelte.js';
   import { placed, shown as fadeIn } from './chatImages.js';
@@ -99,8 +99,8 @@
       ? t.picture?.caption || t.picture?.alt || 'Picture'
       : t.kind === 'page'
         ? doc.pageNow[t.key]?.title || t.page?.title || t.page?.site || (t.page?.url || doc.pageNow[t.key]?.went ? 'Page' : 'New tab')
-        : t.kind === 'job'
-          ? jobTabName(t, tabs, jobById)
+        : t.kind === 'agent'
+          ? agentTabName(t, tabs, agentById)
           : t.title || 'Untitled document';
 
   // The pages this conversation's answers read or showed, newest first: a
@@ -619,7 +619,7 @@
 </script>
 
 <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
-<aside class="docpanel" class:cover aria-label={doc.showing === 'page' ? 'Page' : doc.showing === 'job' ? 'Job' : away ? 'Picture' : 'Document'} data-testid="chat-doc" onkeydown={panelKey}>
+<aside class="docpanel" class:cover aria-label={doc.showing === 'page' ? 'Page' : doc.showing === 'agent' ? 'Agent' : away ? 'Picture' : 'Document'} data-testid="chat-doc" onkeydown={panelKey}>
   {#if tabs.length > 1 || doc.showing === 'page'}
     <!-- This conversation's documents, pictures and pages, newest last; + a new page tab. -->
     <div class="tabrow">
@@ -647,7 +647,7 @@
               </span>
             {:else if t.kind === 'page'}
               <svg class="tabicon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9" /><path d="M3 12h18M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18" /></svg>
-            {:else if t.kind === 'job'}
+            {:else if t.kind === 'agent'}
               <svg class="tabicon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" /></svg>
             {:else}
               <svg class="tabicon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z" /><path d="M14 3v5h5" /><path d="M9 13h6M9 17h4" /></svg>
@@ -673,9 +673,9 @@
     {#key tabKeyOf(doc.page)}
       <PageTab {doc} {narrow} {conversationId} recent={recentPages} />
     {/key}
-  {:else if doc.showing === 'job' && doc.job}
-    <!-- A job Chat started: what it's doing, live (closing it never stops it). -->
-    <JobTab {doc} {narrow} />
+  {:else if doc.showing === 'agent' && doc.agent}
+    <!-- An agent Chat started: what it's doing, live (closing it never stops it). -->
+    <AgentTab {doc} {narrow} />
   {/if}
   {#if doc.id != null}
   <!-- The document (behind a picture: still here, out of sight). -->

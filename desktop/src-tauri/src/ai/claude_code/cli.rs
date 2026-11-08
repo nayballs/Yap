@@ -18,7 +18,7 @@
 //! - [`open_sign_in`] opens Windows Terminal (or PowerShell) on `claude auth
 //!   login`: Claude Code's own sign-in, in a window the person owns, never in
 //!   Yap's kill-on-close job. Yap never sees or stores what they sign in with.
-//!   [`open_resume`] does the same for a Job's session; how a terminal is
+//!   [`open_resume`] does the same for an agent's session; how a terminal is
 //!   opened (its own console, out of Yap's job, `wt.exe` off `PATH`):
 //!   [`terminal`].
 //!
@@ -555,7 +555,7 @@ fn open_terminal(_program: &Program) -> Result<(), String> {
     Err("Run `claude auth login` in a terminal to sign in to Claude Code.".into())
 }
 
-/// **A job's session in the person's own terminal** (a Job's Open in
+/// **An agent's session in the person's own terminal** (an agent's Open in
 /// terminal): Windows Terminal (else PowerShell) in `folder`, on `claude
 /// --resume <session>` — the person's own Claude Code from there on, never
 /// in Yap's kill-on-close job (it stays open if Yap quits), never piped.
@@ -563,10 +563,10 @@ fn open_terminal(_program: &Program) -> Result<(), String> {
 pub fn open_resume(folder: &Path, session: &str, title: &str) -> Result<(), String> {
     let program = find().ok_or_else(|| "Claude Code isn't installed on this PC.".to_string())?;
     if session.is_empty() || !session.chars().all(|c| c.is_ascii_alphanumeric() || c == '-') {
-        return Err("This job has no Claude Code session to open.".into());
+        return Err("This agent has no Claude Code session to open.".into());
     }
     if crate::shell::e2e::active() {
-        tracing::info!("claude code: a job's terminal (test mode: not opened)");
+        tracing::info!("claude code: an agent's terminal (test mode: not opened)");
         return Ok(());
     }
     resume_terminal(&program, folder, session, title)
@@ -579,7 +579,7 @@ fn resume_terminal(program: &Program, folder: &Path, session: &str, title: &str)
 
 #[cfg(not(windows))]
 fn resume_terminal(_program: &Program, _folder: &Path, session: &str, _title: &str) -> Result<(), String> {
-    Err(format!("Run `claude --resume {session}` in a terminal in the job's folder."))
+    Err(format!("Run `claude --resume {session}` in a terminal in the agent's workspace."))
 }
 
 /// `program args` in a new terminal window in `cwd` titled `title`:

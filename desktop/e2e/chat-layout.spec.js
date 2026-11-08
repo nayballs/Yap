@@ -16,7 +16,7 @@
 //   thread's 340 held), Esc mid-drag putting it back, the arrow keys
 //   (Shift: further), Home / End, a double-click back to 460; remembered when
 //   the panel opens again. Mid-drag in light and dark.
-// - **A job starting** (the fake Claude Code, as jobs-ui.spec.js): its tab
+// - **An agent starting** (the fake Claude Code, as agents-ui.spec.js): its tab
 //   opens at the remembered width in the same frame the list steps aside —
 //   every box measured each frame: one change, never an intermediate width,
 //   the composer's height the same throughout (a chat turning into a Code
@@ -37,7 +37,7 @@ const HERE = path.join(RUNS, 'chat-layout-spec');
 const SCRIPTS = path.join(HERE, 'scripts');
 const GARDEN = path.join(HERE, 'folders', 'garden-planner');
 
-// ---- the fake Claude Code's script (as jobs-ui.spec.js has them): a job that takes its time ----
+// ---- the fake Claude Code's script (as agents-ui.spec.js has them): an agent that takes its time ----
 const init = {
   type: 'system',
   subtype: 'init',
@@ -93,7 +93,7 @@ const showBtn = (main) => main.getByTestId('chat-list-show');
 const panel = (main) => main.getByTestId('chat-doc');
 const slot = (main) => main.getByTestId('chat-panel-slot');
 const split = (main) => main.getByRole('separator', { name: 'Resize the panel' });
-const jobTab = (main) => main.getByTestId('chat-job');
+const agentTab = (main) => main.getByTestId('chat-agent');
 const editor = (main) => panel(main).locator('.docedit');
 const threadBox = (main) => main.locator('section.thread');
 
@@ -194,16 +194,16 @@ test.beforeEach(async ({ yap, main, fakeLlm }) => {
   fs.writeFileSync(path.join(GARDEN, 'notes.md'), 'Draft notes\n');
   await yap.invoke('e2e_claude_approve_auto', { allow: true });
   await setConfig(yap, main, {
-    jobsEnabled: true,
-    jobsAsk: 'new-or-web',
-    jobsSpeak: 'never',
-    jobsPay: 'plan',
-    jobsMode: 'auto',
+    agentsEnabled: true,
+    agentsAsk: 'new-or-web',
+    agentsSpeak: 'never',
+    agentsPay: 'plan',
+    agentsMode: 'auto',
     webSearch: false,
     speakReplies: false,
     llmScopes: { chat: { enabled: true, provider: 'custom', baseUrl: fakeLlm.base, model: 'fake-chat', apiKey: '', apiKeys: {}, prompt: '', disableThinking: false } },
   });
-  if (!(await yap.invoke('job_folders_list')).some((f) => f.name === 'garden-planner')) await yap.invoke('job_folders_add', { path: GARDEN });
+  if (!(await yap.invoke('workspaces_list')).some((f) => f.name === 'garden-planner')) await yap.invoke('workspaces_add', { path: GARDEN });
 });
 
 test.afterEach(async ({ main }) => {
@@ -219,8 +219,8 @@ test('chatRoom.js: the list, then the panel’s width, then the panel covering; 
   expect(chatRoom({ chat: 966, hidden: true })).toMatchObject({ listShown: false });
   // A panel in a Chat narrower than LIST_STAYS: the list steps aside (Yap's,
   // not remembered), the panel at its remembered width.
-  const job = chatRoom({ chat: 966, panelOpen: true, want: 520 });
-  expect(job).toMatchObject({ listShown: false, listAuto: true, cover: false, panelWidth: 520, maxWidth: 966 - THREAD_MIN });
+  const agent = chatRoom({ chat: 966, panelOpen: true, want: 520 });
+  expect(agent).toMatchObject({ listShown: false, listAuto: true, cover: false, panelWidth: 520, maxWidth: 966 - THREAD_MIN });
   // Wide enough: the list stays beside both.
   expect(chatRoom({ chat: LIST_STAYS, panelOpen: true, want: 520 })).toMatchObject({ listShown: true, listAuto: false, panelWidth: 520 });
   // Brought back with room beside both: the panel gives way, the thread keeps 340.
@@ -463,7 +463,7 @@ test('Ctrl+B in a document beside the chat makes the words bold; the split drags
   expect((await rect(slot(main))).w).toBe(380);
 });
 
-// ---------------------------------------------------------------- a job starting
+// ---------------------------------------------------------------- an agent starting
 
 /** Every box that could move, each frame from now on (`window.__layout`). */
 function recordFrames() {
@@ -483,7 +483,7 @@ function recordFrames() {
       thread: box(q('section.thread')),
       slot: box(q('[data-testid="chat-panel-slot"]')),
       panel: box(q('[data-testid="chat-doc"]')),
-      job: box(q('[data-testid="chat-job"]')),
+      agent: box(q('[data-testid="chat-agent"]')),
       composer: box(q('.composer')),
       atBottom: m ? m.scrollHeight - m.clientHeight - m.scrollTop < 4 : null,
       scrolls: m ? m.scrollHeight > m.clientHeight + 4 : null,
@@ -494,7 +494,7 @@ function recordFrames() {
 }
 
 for (const where of ['plain', 'code']) {
-  test(`a job starting from a ${where} chat: its tab opens at the remembered width, in one frame, nothing else moving`, async ({ yap, main, fakeLlm, shot }) => {
+  test(`an agent starting from a ${where} chat: its tab opens at the remembered width, in one frame, nothing else moving`, async ({ yap, main, fakeLlm, shot }) => {
     // The panel was 520 wide last time.
     await main.evaluate(() => localStorage.setItem('yapChatDocWidth', '520'));
     await reopenChat(main);
@@ -502,8 +502,8 @@ for (const where of ['plain', 'code']) {
     fakeLlm.scriptChat([
       // (Long, and never the same line twice: an answer repeating itself is cut, chat/stream.rs.)
       { content: Array.from({ length: 40 }, (_, i) => `Bed ${i + 1} gets ${['beans', 'peas', 'kale', 'leeks', 'chard'][i % 5]}, ${(i % 7) + 1} litres a week, planted in week ${(i * 3) % 13 + 1}.`).join('\n\n') },
-      { tools: [{ name: 'start_job', args: { folder: 'garden-planner', brief: 'Read notes.md slowly.' } }] },
-      { content: "On it: I've started a job in garden-planner." },
+      { tools: [{ name: 'start_agent', args: { folder: 'garden-planner', brief: 'Read notes.md slowly.' } }] },
+      { content: "On it: I've sent an agent to garden-planner." },
     ]);
     if (where === 'plain') {
       await toSide(main, 'Chat');
@@ -519,10 +519,10 @@ for (const where of ['plain', 'code']) {
     await expect.poll(() => msgs(main).evaluate((m) => m.scrollHeight - m.clientHeight - m.scrollTop)).toBeLessThan(4);
 
     await main.evaluate(recordFrames);
-    await send(main, 'Start a job in garden-planner.');
-    await expect(jobTab(main)).toBeVisible();
-    await shot(main, `07-job-tab-opening-${where}`);
-    await expect(main.locator('.cbubble.assistant').last()).toContainText("On it: I've started a job in garden-planner.");
+    await send(main, 'Send an agent to garden-planner.');
+    await expect(agentTab(main)).toBeVisible();
+    await shot(main, `07-agent-tab-opening-${where}`);
+    await expect(main.locator('.cbubble.assistant').last()).toContainText("On it: I've sent an agent to garden-planner.");
     await main.waitForTimeout(600);
     const frames = await main.evaluate(() => {
       window.__layout.on = false;
@@ -532,13 +532,13 @@ for (const where of ['plain', 'code']) {
     const changes = (field) => frames.filter((f, i) => i > 0 && key(f[field]) !== key(frames[i - 1][field]));
 
     // The slot: from its first frame at the remembered width, never another;
-    // the panel and its Job tab drawn in that very frame (no empty gap).
+    // the panel and its Agent tab drawn in that very frame (no empty gap).
     const first = frames.findIndex((f) => f.slot);
     expect(first, 'the panel opened').toBeGreaterThan(0);
     const opened = frames[first];
     expect(opened.slot[1]).toBe(520);
     expect(opened.panel?.[1], 'the panel in its first frame').toBe(520);
-    expect(opened.job, 'the Job tab in its first frame').not.toBeNull();
+    expect(opened.agent, 'the Agent tab in its first frame').not.toBeNull();
     expect(new Set(frames.slice(first).map((f) => key([f.slot[0], f.slot[1]]))).size, 'the panel never moves').toBe(1);
     // The list stepped aside in that same frame, and the thread changed once:
     // no intermediate width before or after.
@@ -557,7 +557,7 @@ for (const where of ['plain', 'code']) {
 
     if (where === 'code') {
       await theme(yap, main, 'dark');
-      await shot(main, '08-job-tab-opening-dark');
+      await shot(main, '08-agent-tab-opening-dark');
       await theme(yap, main, 'light');
       // A Code chat at the thread's least (the workspace and Mode chips): nothing cut off.
       await split(main).focus();
@@ -565,19 +565,19 @@ for (const where of ['plain', 'code']) {
       await expect.poll(async () => (await rect(threadBox(main))).w).toBe(THREAD_MIN);
       await expectComposerInside(main);
       await shot(main, '11-code-chat-at-the-thread-least');
-      // The Job tab at the panel's least: its buttons all there.
+      // The Agent tab at the panel's least: its buttons all there.
       await main.keyboard.press('End');
       await expect.poll(async () => (await rect(slot(main))).w).toBe(MIN_WIDTH);
-      const p = await rect(jobTab(main));
+      const p = await rect(agentTab(main));
       for (const name of ['Stop', 'Close the panel']) {
-        const r = await rect(jobTab(main).getByRole('button', { name, exact: true }).first());
-        expect(r.right, `${name} inside the Job tab`).toBeLessThanOrEqual(p.right);
+        const r = await rect(agentTab(main).getByRole('button', { name, exact: true }).first());
+        expect(r.right, `${name} inside the Agent tab`).toBeLessThanOrEqual(p.right);
       }
-      await shot(main, '12-job-tab-at-its-least');
+      await shot(main, '12-agent-tab-at-its-least');
     }
-    await jobTab(main).getByRole('button', { name: 'Stop' }).click();
-    await expect(main.getByTestId('chat-job-status')).toHaveText('Stopped', { timeout: 20_000 });
-    await jobTab(main).getByRole('button', { name: 'Close the panel' }).click();
+    await agentTab(main).getByRole('button', { name: 'Stop' }).click();
+    await expect(main.getByTestId('chat-agent-status')).toHaveText('Stopped', { timeout: 20_000 });
+    await agentTab(main).getByRole('button', { name: 'Close the panel' }).click();
     await expect(list(main)).toBeVisible();
   });
 }

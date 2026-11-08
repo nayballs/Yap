@@ -14,7 +14,7 @@
 //!   conversation moved on from as soon as it's replaced ([`put`]): only the
 //!   sessions kept here, only under the folder each ran in ([`Kept::cwd`]:
 //!   Yap's own `claude/chat/`, or a Code chat's workspace), only by their
-//!   ids — never another session's there (a job's, the person's own).
+//!   ids — never another session's there (an agent's, the person's own).
 //! - **A Code chat's session runs in its workspace** (`chat/turn/plan.rs`),
 //!   so another folder is another session ([`start`]): the chat so far goes
 //!   into the new one first.
@@ -241,7 +241,7 @@ fn in_background(f: impl FnOnce() + Send + 'static) {
 /// the folder each ran in — Yap's `claude/chat/`, or a Code chat's
 /// workspace — `claude_code::transcripts`) deleted: a chat Yap deletes
 /// leaves no copy behind. Only these sessions' ids, in their own folders:
-/// never another session's (a job's in the same workspace, the person's
+/// never another session's (an agent's in the same workspace, the person's
 /// own).
 fn remove_transcripts(sessions: Vec<Kept>) {
     let mut by_folder: Vec<(std::path::PathBuf, Vec<String>)> = Vec::new();
@@ -563,12 +563,12 @@ mod tests {
         std::fs::create_dir_all(&garden).unwrap();
         let plain = "4d7c1d2e-8a51-4c3b-9f0e-2b6a7e1c5d90";
         let code = "9f0e2b6a-7e1c-4d90-8a51-4c3b4d7c1d2e";
-        // A job's session in the same workspace, and the person's own: theirs.
-        let job = "1b2c3d4e-0000-4000-8000-000000000003";
+        // An agent's session in the same workspace, and the person's own: theirs.
+        let agent = "1b2c3d4e-0000-4000-8000-000000000003";
         let own = "1b2c3d4e-0000-4000-8000-000000000004";
         let transcript = |dir: &std::path::Path, id: &str| dir.join(format!("{id}.jsonl"));
         std::fs::write(transcript(&chats, plain), "{}\n").unwrap();
-        for id in [code, job, own] {
+        for id in [code, agent, own] {
             std::fs::write(transcript(&garden, id), "{}\n").unwrap();
         }
         std::fs::create_dir_all(garden.join(code)).unwrap();
@@ -587,10 +587,10 @@ mod tests {
         let kept = get(31, 9).unwrap();
         assert_eq!(start(Some(&kept), 4, r"d:/projects/garden-planner/"), Start::Resume { id: code.into(), unseen: 4 }, "the same folder, however it's written");
         // The chat deleted: its copy goes from the workspace's folder, with
-        // its own files; the job's and the person's own stay.
+        // its own files; the agent's and the person's own stay.
         forget(31);
         assert!(!transcript(&garden, code).exists() && !garden.join(code).exists());
-        assert!(transcript(&garden, job).exists() && transcript(&garden, own).exists());
+        assert!(transcript(&garden, agent).exists() && transcript(&garden, own).exists());
         // An older file's session (no cwd) is Yap's own folder's.
         let old: Kept = serde_json::from_str(r#"{"session":"x","created":5,"seen":4}"#).unwrap();
         assert_eq!(old.ran_in(), super::super::oneshot::folder_path("chat"));

@@ -1,7 +1,7 @@
 <script>
   // **A Code chat's chips**, first under Chat's box (codeChats.svelte.js):
   // the workspace chip — "</> garden-planner ▾", the workspace picker above
-  // it to switch the chat's workspace or make it a plain chat — and Jobs'
+  // it to switch the chat's workspace or make it a plain chat — and Agents'
   // Mode chip beside it. A plain chat shows neither (the Mode chip stays
   // mounted, hidden, so a new chat's pick still reaches its conversation).
   import { tick } from 'svelte';

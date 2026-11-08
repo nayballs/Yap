@@ -111,11 +111,12 @@ pub struct ChatMessage {
     /// older Yap's save drops them (the answer stays).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub confirms: Vec<crate::chat::pages::act::confirm::Card>,
-    /// A message that isn't the person's nor the model's: `"jobReport"`, a
-    /// job's report Yap put in the chat (`chat/turn/report.rs`), shown as a
-    /// job card; the model reads it as the job's ([`ChatMessage::sent_text`]).
-    /// Empty for every other message.
-    #[serde(default, skip_serializing_if = "String::is_empty")]
+    /// A message that isn't the person's nor the model's: `"agentReport"`, an
+    /// agent's report Yap put in the chat (`chat/turn/report.rs`), shown as an
+    /// agent's card; the model reads it as the agent's ([`ChatMessage::sent_text`]).
+    /// Empty for every other message. (A chat saved before the rename to
+    /// Yap Code says `"jobReport"`: read as today's, `agents::renamed`.)
+    #[serde(default, skip_serializing_if = "String::is_empty", deserialize_with = "crate::agents::renamed")]
     pub kind: String,
 }
 
@@ -124,9 +125,9 @@ impl ChatMessage {
     /// passage a question was asked about (`quote`), so "Make this
     /// shorter" still says what "this" was.
     pub fn sent_text(&self) -> String {
-        // A job's report: the job's words, never the person's (web content).
-        if self.kind == crate::chat::turn::JOB_REPORT {
-            return format!("{}{}", crate::chat::turn::JOB_REPORT_PREFIX, self.text);
+        // An agent's report: the agent's words, never the person's (web content).
+        if self.kind == crate::chat::turn::AGENT_REPORT {
+            return format!("{}{}", crate::chat::turn::AGENT_REPORT_PREFIX, self.text);
         }
         match &self.quote {
             // Text selected in another app (`assistant/selected.rs`): no
@@ -498,9 +499,9 @@ pub fn rename(id: u64, title: &str) -> Result<String, String> {
 /// Chat's conversation summaries, newest-updated first, the archived ones
 /// left out: `{ id, title, updatedTs, messageCount, answerAt, askedAt }` (a
 /// note's Ask threads are the note's: [`for_note`]). `answerAt`: its last
-/// answer's index (-1: none), `askedAt`: the person's last message's (a
-/// job's report marker isn't theirs): Chat's status dots
-/// (`core/chatStatus.js`: a new answer, a job's question still unanswered).
+/// answer's index (-1: none), `askedAt`: the person's last message's (an
+/// agent's report marker isn't theirs): Chat's status dots
+/// (`core/chatStatus.js`: a new answer, an agent's question still unanswered).
 pub fn list() -> Value {
     with_store(|s| {
         let mut sorted: Vec<&Conversation> =
@@ -524,8 +525,8 @@ pub fn list() -> Value {
     })
 }
 
-/// The index of the last answer and of the person's last message (a job's
-/// report marker is the job's, not theirs); -1 for none. Pure.
+/// The index of the last answer and of the person's last message (an agent's
+/// report marker is the agent's, not theirs); -1 for none. Pure.
 fn last_answer_and_question(messages: &[ChatMessage]) -> (i64, i64) {
     let at = |want: fn(&ChatMessage) -> bool| messages.iter().rposition(want).map_or(-1, |i| i as i64);
     (at(|m| m.role == "assistant"), at(|m| m.role == "user" && m.kind.is_empty()))
@@ -1673,12 +1674,12 @@ mod tests {
     }
 
     // Chat's status dots: the last answer, and the person's last message —
-    // a job's report marker is the job's, never theirs.
+    // an agent's report marker is the agent's, never theirs.
     #[test]
     fn the_list_knows_the_last_answer_and_the_persons_last_message() {
         assert_eq!(last_answer_and_question(&[]), (-1, -1));
         assert_eq!(last_answer_and_question(&[said("user", "Fix the tests")]), (-1, 0));
-        let marker = ChatMessage { kind: "jobReport".into(), ..said("user", "The job in garden-planner: it's done.") };
+        let marker = ChatMessage { kind: "agentReport".into(), ..said("user", "The agent in garden-planner: it's done.") };
         let thread = [said("user", "Fix the tests"), said("assistant", "On it."), marker, said("assistant", "Done.")];
         assert_eq!(last_answer_and_question(&thread), (3, 0));
         let replied = [&thread[..], &[said("user", "Thanks")]].concat();

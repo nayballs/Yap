@@ -4,16 +4,16 @@
 // - At the bottom it stays there while it grows: a long answer streaming
 //   (checked from a ResizeObserver made after the thread's own, so it sees
 //   each change once the thread has followed it), a picture that loads after
-//   the answer, a job's ask-first card (its own chunk, drawn after the
+//   the answer, an agent's ask-first card (its own chunk, drawn after the
 //   question), its tab opening beside the chat and its report read in.
 // - Scrolled up (the wheel) it stays where it was put while the answer goes
 //   on, and "↓ New messages" shows; the button goes back down and follows
 //   again. Light and dark, with and without "New messages".
-// - A job's report while you read further up: nothing moves, "New messages".
+// - An agent's report while you read further up: nothing moves, "New messages".
 // - The person's own question and a conversation opened: at the bottom.
 //
-// The model is the local fake (support/fake-llm.js); a job's Claude Code is
-// this build's own stand-in (`yap.exe fake-claude`, as jobs-ui.spec.js has
+// The model is the local fake (support/fake-llm.js); an agent's Claude Code is
+// this build's own stand-in (`yap.exe fake-claude`, as agents-ui.spec.js has
 // it), in this run's own folder. Fictional details only.
 import fs from 'node:fs';
 import path from 'node:path';
@@ -71,10 +71,10 @@ async function atBottom(main, message = 'the thread at its bottom') {
 
 async function freshChat(main) {
   await openView(main, 'Chat');
-  // A job's tab open beside the chat from an earlier test: closed.
-  const job = main.getByTestId('chat-job');
-  if (await job.count()) await job.getByRole('button', { name: 'Close the panel' }).click();
-  // Jobs on: a plain chat, on the Chat side (a chat that started a job is a Code chat).
+  // An agent's tab open beside the chat from an earlier test: closed.
+  const agent = main.getByTestId('chat-agent');
+  if (await agent.count()) await agent.getByRole('button', { name: 'Close the panel' }).click();
+  // Yap Code on: a plain chat, on the Chat side (a chat that started an agent is a Code chat).
   await plainSide(main);
   await main.getByRole('button', { name: 'New chat' }).click();
 }
@@ -270,7 +270,7 @@ test('your own question goes to the bottom, from wherever you were; a conversati
   await expect(toBottom(main)).toHaveCount(0);
 });
 
-// ---------------------------------------------------------------- a job's report
+// ---------------------------------------------------------------- an agent's report
 
 const init = () => ({
   type: 'system',
@@ -308,15 +308,15 @@ function writeScript(name, lines) {
   return file;
 }
 
-const jobs = (yap) => yap.invoke('job_list');
+const agents = (yap) => yap.invoke('agent_list');
 
-/** Jobs on, `garden-planner` fresh, Claude Code's stand-in working `ms` before it's done. */
-async function jobsReady(yap, main, ms) {
+/** Yap Code on, `garden-planner` fresh, Claude Code's stand-in working `ms` before it's done. */
+async function agentsReady(yap, main, ms) {
   fs.rmSync(GARDEN, { recursive: true, force: true });
   fs.mkdirSync(GARDEN, { recursive: true });
   fs.writeFileSync(path.join(GARDEN, 'notes.md'), 'Beds to plan\n');
   await yap.invoke('e2e_claude_approve_auto', { allow: true });
-  await setConfig(yap, main, { jobsEnabled: true, jobsAsk: 'new-or-web', jobsSpeak: 'never', jobsPay: 'plan', jobsMode: 'auto', speakReplies: false });
+  await setConfig(yap, main, { agentsEnabled: true, agentsAsk: 'new-or-web', agentsSpeak: 'never', agentsPay: 'plan', agentsMode: 'auto', speakReplies: false });
   await yap.invoke('e2e_claude_script', { script: writeScript(`work-${ms}`, work(ms)) });
 }
 
@@ -330,11 +330,11 @@ async function longChat(main, fakeLlm, question, lead) {
   await atBottom(main);
 }
 
-/** The model's turns for a job in `folder`: it starts it, says so, and later reports `report`. */
-function jobTurns(fakeLlm, folder, report) {
+/** The model's turns for an agent in `folder`: it starts it, says so, and later reports `report`. */
+function agentTurns(fakeLlm, folder, report) {
   fakeLlm.scriptChat([
-    { tools: [{ name: 'start_job', args: { folder, brief: 'Plan the raised beds in notes.md.' } }] },
-    { content: "On it: I've started a job in garden-planner. I'll tell you when it's done." },
+    { tools: [{ name: 'start_agent', args: { folder, brief: 'Plan the raised beds in notes.md.' } }] },
+    { content: "On it: I've sent an agent to garden-planner. I'll tell you when it's done." },
     { plain: true, content: report },
   ]);
 }
@@ -349,47 +349,47 @@ async function inView(main, els) {
   }
 }
 
-test("a job while you're at the bottom: its ask-first card, its tab opening beside the chat, its report — each in view", async ({ yap, main, fakeLlm, shot }) => {
+test("an agent while you're at the bottom: its ask-first card, its tab opening beside the chat, its report — each in view", async ({ yap, main, fakeLlm, shot }) => {
   const REPORT = 'Done. I planned the raised beds in notes.md: leeks, kale and broad beans, with the paths between them.';
-  await jobsReady(yap, main, 1500);
-  // A folder jobs haven't worked in: Yap asks first, with a card in the thread.
-  await yap.invoke('job_folders_remove', { name: 'garden-planner' }).catch(() => {});
+  await agentsReady(yap, main, 1500);
+  // A folder agents haven't worked in: Yap asks first, with a card in the thread.
+  await yap.invoke('workspaces_remove', { name: 'garden-planner' }).catch(() => {});
   await longChat(main, fakeLlm, 'What could go in the raised beds?', 'Here are some ideas for the raised beds:');
-  const before = (await jobs(yap)).length;
-  jobTurns(fakeLlm, GARDEN, REPORT);
-  await send(main, `Start a job in ${GARDEN} to plan the raised beds.`);
+  const before = (await agents(yap)).length;
+  agentTurns(fakeLlm, GARDEN, REPORT);
+  await send(main, `Send an agent to ${GARDEN} to plan the raised beds.`);
 
-  const card = thread(main).getByTestId('chat-job-confirm');
+  const card = thread(main).getByTestId('chat-agent-confirm');
   await expect(card).toHaveAttribute('data-state', 'asking');
   await atBottom(main, 'the thread at its bottom with the ask-first card');
   await inView(main, [card]);
 
   // Started: its tab opens beside the chat (the thread narrower, its lines longer).
-  await card.getByRole('button', { name: 'Start' }).click();
-  await expect.poll(async () => (await jobs(yap)).length, { message: 'a job to start' }).toBe(before + 1);
-  await expect(main.getByTestId('chat-job')).toBeVisible();
+  await card.getByRole('button', { name: 'Send' }).click();
+  await expect.poll(async () => (await agents(yap)).length, { message: 'an agent to start' }).toBe(before + 1);
+  await expect(main.getByTestId('chat-agent')).toBeVisible();
   await expect(lastAnswer(main)).toContainText("I'll tell you when it's done.");
-  await atBottom(main, 'the thread at its bottom with the job tab open');
+  await atBottom(main, 'the thread at its bottom with the agent tab open');
 
-  // The report: the job's card, then the chat model's own words.
-  await expect(thread(main).getByTestId('chat-job-report')).toBeVisible({ timeout: 30_000 });
+  // The report: the agent's card, then the chat model's own words.
+  await expect(thread(main).getByTestId('chat-agent-report')).toBeVisible({ timeout: 30_000 });
   await expect(lastAnswer(main)).toHaveText(REPORT);
   await atBottom(main, 'the thread at its bottom after the report');
   await expect(toBottom(main)).toHaveCount(0);
-  await inView(main, [thread(main).getByTestId('chat-job-report'), lastAnswer(main)]);
-  await shot(main, '05-job-report-followed');
+  await inView(main, [thread(main).getByTestId('chat-agent-report'), lastAnswer(main)]);
+  await shot(main, '05-agent-report-followed');
 });
 
-test("a job's report while you read further up: nothing moves, and “New messages” says it came", async ({ yap, main, fakeLlm }) => {
+test("an agent's report while you read further up: nothing moves, and “New messages” says it came", async ({ yap, main, fakeLlm }) => {
   const REPORT = 'Done. The raised beds are planned in notes.md, three of them along the fence.';
-  await jobsReady(yap, main, 5000);
-  if (!(await yap.invoke('job_folders_list')).some((f) => f.name === 'garden-planner')) await yap.invoke('job_folders_add', { path: GARDEN });
+  await agentsReady(yap, main, 5000);
+  if (!(await yap.invoke('workspaces_list')).some((f) => f.name === 'garden-planner')) await yap.invoke('workspaces_add', { path: GARDEN });
   await longChat(main, fakeLlm, 'What grows well along a fence?', 'Here is what grows well along a fence:');
-  const before = (await jobs(yap)).length;
-  jobTurns(fakeLlm, 'garden-planner', REPORT);
-  await send(main, 'Start a job in garden-planner to plan the beds by the fence.');
-  await expect.poll(async () => (await jobs(yap)).length, { message: 'a job to start' }).toBe(before + 1);
-  const job = (await jobs(yap))[0];
+  const before = (await agents(yap)).length;
+  agentTurns(fakeLlm, 'garden-planner', REPORT);
+  await send(main, 'Send an agent to garden-planner to plan the beds by the fence.');
+  await expect.poll(async () => (await agents(yap)).length, { message: 'an agent to start' }).toBe(before + 1);
+  const agent = (await agents(yap))[0];
   await expect(lastAnswer(main)).toContainText("I'll tell you when it's done.");
   await atBottom(main);
 
@@ -397,14 +397,14 @@ test("a job's report while you read further up: nothing moves, and “New messag
   const held = await scrollTop(main);
   await expect(toBottom(main)).toBeVisible();
   await expect(toBottom(main)).not.toContainText('New messages');
-  await expect.poll(async () => (await jobs(yap)).find((j) => j.id === job.id)?.status, { timeout: 30_000 }).toBe('done');
+  await expect.poll(async () => (await agents(yap)).find((j) => j.id === agent.id)?.status, { timeout: 30_000 }).toBe('done');
 
-  await expect(thread(main).getByTestId('chat-job-report')).toHaveCount(1, { timeout: 30_000 });
+  await expect(thread(main).getByTestId('chat-agent-report')).toHaveCount(1, { timeout: 30_000 });
   await expect(lastAnswer(main)).toHaveText(REPORT);
   await expect(toBottom(main)).toContainText('New messages');
   expect(Math.abs((await scrollTop(main)) - held)).toBeLessThanOrEqual(1);
 
   await toBottom(main).click();
   await atBottom(main);
-  await inView(main, [thread(main).getByTestId('chat-job-report'), lastAnswer(main)]);
+  await inView(main, [thread(main).getByTestId('chat-agent-report'), lastAnswer(main)]);
 });

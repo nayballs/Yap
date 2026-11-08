@@ -63,7 +63,7 @@ pub enum Kind {
     Chats,
     Memory,
     Pages,
-    Jobs,
+    Agents,
     Suggestions,
     AiUsage,
     Receipts,
@@ -193,16 +193,16 @@ pub const KINDS: &[About] = &[
         files: &[],
         stores: &[],
     },
-    // Every job Claude Code ran from Chat, its log and backups (its Undo
-    // goes with them), each chat's Mode and the folders jobs may work in.
-    // Running jobs are stopped first. The files the jobs changed stay.
+    // Every agent Claude Code ran from Chat, its log and backups (its Undo
+    // goes with them), each chat's Mode and the folders agents may work in.
+    // Running agents are stopped first. The files the agents changed stay.
     About {
-        kind: Kind::Jobs,
+        kind: Kind::Agents,
         group: CHAT,
-        label: "Jobs",
-        says: "Every job Chat started, with its log and the backups Undo job uses, each chat's Mode and your job folders. The files the jobs changed stay as they are",
-        files: &["jobs.json", "jobs/", "job_folders.json"],
-        stores: &["jobs", "jobFolders"],
+        label: crate::agents::FEATURE,
+        says: "Every agent Chat sent, with its log and the backups Undo uses, each chat's Mode and your workspaces. The files the agents changed stay as they are",
+        files: &["agents.json", "agents/", "workspaces.json"],
+        stores: &["agents", "workspaces"],
     },
     About {
         kind: Kind::Suggestions,
@@ -440,9 +440,9 @@ impl Choice {
         Cut::of(self.has(Kind::Suggestions), false)
     }
 
-    /// jobs.json, jobs/ and job_folders.json.
-    pub fn jobs(&self) -> Cut {
-        Cut::of(self.has(Kind::Jobs), false)
+    /// agents.json, agents/ and workspaces.json.
+    pub fn agents(&self) -> Cut {
+        Cut::of(self.has(Kind::Agents), false)
     }
 
     /// snippet_suggestions.json's noted phrases (its switch stays).
@@ -503,9 +503,9 @@ const STORES: &[(&str, Rule)] = &[
     ("calendar.json", Choice::briefs),
     ("word_suggestions.json", Choice::word_suggestions),
     ("snippet_suggestions.json", Choice::snippet_suggestions),
-    ("jobs.json", Choice::jobs),
-    ("jobs/", Choice::jobs),
-    ("job_folders.json", Choice::jobs),
+    ("agents.json", Choice::agents),
+    ("agents/", Choice::agents),
+    ("workspaces.json", Choice::agents),
     ("ai_usage.json", Choice::ai_usage),
     ("groq_usage.json", Choice::ai_usage),
     ("connections.json", Choice::receipts),
@@ -529,8 +529,8 @@ const SET_ASIDE: &[(&str, Rule)] = &[
     ("groq_usage", Choice::ai_usage),
     ("word_suggestions", Choice::word_suggestions),
     ("connections", Choice::receipts),
-    ("jobs", Choice::jobs),
-    ("job_folders", Choice::jobs),
+    ("agents", Choice::agents),
+    ("workspaces", Choice::agents),
 ];
 
 /// Whether `file` (a name in the data folder) is a set-aside copy of one of
@@ -700,11 +700,11 @@ fn measure(pages: Option<&Path>) -> Vec<Line> {
                     let (_, bytes) = pages.map(dir_bytes).unwrap_or((0, 0));
                     (None, bytes, bytes == 0)
                 }
-                Kind::Jobs => {
-                    let n = crate::jobs::store::list().len();
-                    let folders = crate::jobs::folders::list().len();
-                    let bytes = crate::jobs::store::disk_bytes() + file_bytes(&data.join("jobs.json")) + file_bytes(&data.join("job_folders.json"));
-                    (counts([count(n, "job", "jobs"), count(folders, "folder", "folders")]), bytes, n == 0 && folders == 0 && bytes == 0)
+                Kind::Agents => {
+                    let n = crate::agents::store::list().len();
+                    let folders = crate::agents::workspaces::list().len();
+                    let bytes = crate::agents::store::disk_bytes() + file_bytes(&data.join("agents.json")) + file_bytes(&data.join("workspaces.json"));
+                    (counts([count(n, "agent", "agents"), count(folders, "workspace", "workspaces")]), bytes, n == 0 && folders == 0 && bytes == 0)
                 }
                 Kind::Suggestions => {
                     let n = crate::dictionary::learn::offered();
@@ -764,8 +764,8 @@ pub struct Done {
     pub meeting_audio: usize,
     pub briefs: usize,
     pub logs: usize,
-    /// Jobs that went (their logs and backups with them).
-    pub jobs: usize,
+    /// Agents that went (their logs and backups with them).
+    pub agents: usize,
     pub set_aside: usize,
     /// Whether Yap needs a restart to finish (never so far: kept for the page).
     pub restart: bool,
@@ -854,7 +854,7 @@ fn clear_stores(c: &Choice, done: &mut Done) -> Gone {
         crate::apps::moved_on(Some(*id));
         // No longer a Code chat either: a later conversation may get its id,
         // and mustn't start as one (a Code chat keeps Yap's memory out).
-        crate::jobs::code_chat::chat_deleted(*id);
+        crate::agents::code_chat::chat_deleted(*id);
     }
     // Their Claude Code sessions (your Claude plan), the warm ones ended.
     if c.claude_sessions() == Cut::Whole {
@@ -915,12 +915,12 @@ fn clear_files(app: &AppHandle, c: &Choice, done: &mut Done) -> Result<(), Strin
     if c.word_suggestions() == Cut::Whole {
         crate::dictionary::learn::forget_all();
     }
-    // Jobs: the running ones stopped first, then every job, its log and
-    // backups, the chats' Modes and the folders (jobs/store.rs, folders.rs).
-    if c.jobs() == Cut::Whole {
-        crate::jobs::runner::stop_all();
-        done.jobs = crate::jobs::store::reset();
-        crate::jobs::folders::reset();
+    // Agents: the running ones stopped first, then every agent, its log and
+    // backups, the chats' Modes and the folders (agents/store.rs, workspaces.rs).
+    if c.agents() == Cut::Whole {
+        crate::agents::runner::stop_all();
+        done.agents = crate::agents::store::reset();
+        crate::agents::workspaces::reset();
     }
     if c.snippet_suggestions() != Cut::Keep {
         crate::dictionary::snippet_offer::forget_noted();
@@ -1009,9 +1009,9 @@ fn run(app: &AppHandle, c: &Choice) -> Result<Done, String> {
     if c.word_suggestions() != Cut::Keep {
         crate::dictionary::learn::SAVER.check()?;
     }
-    if c.jobs() != Cut::Keep {
-        crate::jobs::store::saved()?;
-        crate::jobs::folders::saved()?;
+    if c.agents() != Cut::Keep {
+        crate::agents::store::saved()?;
+        crate::agents::workspaces::saved()?;
     }
     if let Err(e) = index {
         tracing::warn!("Deleting your data: the search index's folder wasn't deleted ({e})");
@@ -1060,7 +1060,7 @@ async fn delete(app: AppHandle, c: Choice) -> Result<Done, String> {
         meeting_audio = done.meeting_audio,
         briefs = done.briefs,
         logs = done.logs,
-        jobs = done.jobs,
+        agents = done.agents,
         set_aside = done.set_aside,
         "Deleting your data: done"
     );

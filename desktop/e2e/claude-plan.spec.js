@@ -225,7 +225,7 @@ test('a plan chat streams, searches the web, cites its page and keeps one sessio
   const convId = conv().id;
   const mine = transcripts().filter((t) => t.file === `${session}.jsonl`);
   expect(mine.map((t) => t.folder.toLowerCase())).toEqual([path.join(yap.dataDir, 'claude', 'chat').replace(/[^a-zA-Z0-9]/g, '-').toLowerCase()]);
-  // Another project's in the same config folder (the person's own job, say), with the same
+  // Another project's in the same config folder (the person's own agent, say), with the same
   // file name even: never touched.
   const theirs = path.join(PROJECTS, 'E--Projects-garden-planner', `${session}.jsonl`);
   fs.mkdirSync(path.dirname(theirs), { recursive: true });

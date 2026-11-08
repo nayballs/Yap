@@ -429,7 +429,7 @@ pub(super) struct Built {
     pub(super) profile: crate::ai::about_you::Profile,
     /// A Code chat's workspace (`Opened::code`): no memory in this turn, and
     /// on the Claude plan its session runs there (`plan.rs`).
-    pub(super) code: Option<crate::jobs::folders::Folder>,
+    pub(super) code: Option<crate::agents::workspaces::Folder>,
     /// The person's time zone, for the calendar tool.
     pub(super) calendar_zone: crate::chat::tools::calendar::Zone,
 }
@@ -463,7 +463,7 @@ pub(super) async fn build(t: &Asked<'_>, sizing: &Sizing, opened: &Opened) -> Bu
     // ([`Built::writes_doc`]).
     let writes_doc = g.strong && !t.meetings && crate::chat::documents::writes_document(&t.text, &chat_docs, selection.is_some());
     let outline_first = writes_doc && g.web_on && crate::chat::documents::makes_new_document(&t.text, &chat_docs, selection.is_some());
-    // **A Code chat** (jobs/code_chat.rs, 7 Nov 2026): project knowledge
+    // **A Code chat** (agents/code_chat.rs, 7 Nov 2026): project knowledge
     // lives with the project (its CLAUDE.md, Claude Code's own memory), and
     // Yap's memory is personal — so none of it here (its passages, its
     // "You", its tools, past chats), About you without its note, and
@@ -495,13 +495,13 @@ pub(super) async fn build(t: &Asked<'_>, sizing: &Sizing, opened: &Opened) -> Bu
     let about = crate::ai::about_you::prompt_block(&profile, t.now);
     let calendar_zone = crate::chat::tools::calendar::Zone::of(t.profile.region.time_zone.as_deref());
     let mut prompt = Prompt::start(t, !code);
-    // A Code chat (jobs/code_chat.rs): its folder, and that the person's own
+    // A Code chat (agents/code_chat.rs): its folder, and that the person's own
     // request is enough there — in the question's context, so the tool loop
     // and a plan chat both have it.
-    if let (true, Some(folder)) = (g.jobs, opened.code.as_ref()) {
-        prompt.add(crate::jobs::code_chat::prompt_line_for(folder));
-        // Its job there, which a follow-up carries on (one job per Code chat).
-        if let Some(line) = crate::jobs::code_chat::job_line_in(Some(conv.id), folder) {
+    if let (true, Some(folder)) = (g.agents, opened.code.as_ref()) {
+        prompt.add(crate::agents::code_chat::prompt_line_for(folder));
+        // Its agent there, which a follow-up carries on (one agent per Code chat).
+        if let Some(line) = crate::agents::code_chat::agent_line_in(Some(conv.id), folder) {
             prompt.add(line);
         }
     }
@@ -635,10 +635,10 @@ fn instructions(
             s.push(' ');
             s.push_str(&crate::chat::tools::calendar::CALENDAR_TOOL_INSTRUCTIONS.join(" "));
         }
-        // Jobs (chat/tools/jobs.rs): jobs on and Claude Code on this PC.
-        if crate::jobs::offered(cfg) {
+        // Yap Code (chat/tools/agents.rs): agents on and Claude Code on this PC.
+        if crate::agents::offered(cfg) {
             s.push(' ');
-            s.push_str(&crate::chat::tools::jobs::JOB_TOOL_INSTRUCTIONS.join(" "));
+            s.push_str(&crate::chat::tools::agents::AGENT_TOOL_INSTRUCTIONS.join(" "));
         }
     } else {
         // No tools: it can't do anything on the PC, so it mustn't say so.
@@ -796,7 +796,7 @@ mod tests {
             screen: Gate::Off,
             act: false,
             calendar: false,
-            jobs: false,
+            agents: false,
         }
     }
 
@@ -838,7 +838,7 @@ mod tests {
             stop: &stop,
         };
         let conv: crate::chat::chats::Conversation = serde_json::from_value(serde_json::json!({ "id": 4242, "title": "Watering", "createdTs": 1, "updatedTs": 1 })).unwrap();
-        let garden = crate::jobs::folders::Folder { name: "garden-planner".into(), path: r"D:\Projects\garden-planner".into(), cap: None, added_ts: 1 };
+        let garden = crate::agents::workspaces::Folder { name: "garden-planner".into(), path: r"D:\Projects\garden-planner".into(), cap: None, added_ts: 1 };
         let opened = Opened { conv, user_index: 0, selection: None, code: Some(garden.clone()) };
         let rt = tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap();
         let built = rt.block_on(build(&t, &Sizing::for_tests(128_000), &opened));
@@ -885,7 +885,7 @@ mod tests {
             screen: Gate::Off,
             act: false,
             calendar: false,
-            jobs: false,
+            agents: false,
         };
         let asks = "What's the latest version of Python?";
         assert!(crate::web::needs_web(asks), "the test's question needs the web");

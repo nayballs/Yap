@@ -5,6 +5,8 @@
 // Pure data and functions (no Svelte), shared by Settings.svelte, the search
 // index (settingsIndex.js) and the e2e suite.
 
+import { FEATURE_NAME } from '../core/codeChats.js';
+
 /** Nav groups, in order. `label: null` = the first, unlabelled group. */
 export const NAV_GROUPS = [
   {
@@ -27,8 +29,9 @@ export const NAV_GROUPS = [
       { id: 'voice', label: 'Voice Assistant' },
       { id: 'memory', label: 'Memory' },
       { id: 'skills', label: 'Skills' },
-      // Jobs (jobs.rs): Chat hands a task to the person's own Claude Code.
-      { id: 'jobs', label: 'Jobs' },
+      // Yap Code (agents.rs): Chat sends an agent, the person's own Claude
+      // Code, to work in one of their workspaces ("jobs" until 7 Nov 2026).
+      { id: 'yap-code', label: FEATURE_NAME },
     ],
   },
   {
@@ -84,6 +87,8 @@ export const ALIASES = {
   'advanced#system': 'general#startup',
   'advanced#debug': 'privacy#logs',
   'advanced#dictionary': 'dictation#dictionary',
+  // Yap Code was Jobs until 7 Nov 2026.
+  jobs: 'yap-code',
 };
 
 /**

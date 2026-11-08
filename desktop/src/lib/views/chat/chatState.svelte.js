@@ -94,10 +94,10 @@ export function createChatState({ onopensettings = () => null, onopennote = () =
       doc.onSection(ev);
       return true;
     }
-    // A job this turn started (chat/tools/jobs.rs): its tab opens at once,
-    // as a page's does; its pill comes with the jobs list (stores/jobs.svelte.js).
-    if (ev?.kind === 'job') {
-      if (ev.job?.id) doc.showJob(ev.job);
+    // An agent this turn started (chat/tools/agents.rs): its tab opens at once,
+    // as a page's does; its pill comes with the agents list (stores/agents.svelte.js).
+    if (ev?.kind === 'agent') {
+      if (ev.agent?.id) doc.showAgent(ev.agent);
       return true;
     }
     if (ev?.kind === 'tool') doc.onTool(ev);
@@ -1078,7 +1078,7 @@ export function createChatState({ onopensettings = () => null, onopennote = () =
       if (ev?.kind === 'page' && ev.page?.url && !shownPages.some((p) => p.url === ev.page.url)) shownPages = [...shownPages, ev.page];
       if (ev?.kind === 'offer' && ev.offer?.url && !shownOffers.some((o) => o.url === ev.offer.url)) shownOffers = [...shownOffers, ev.offer];
       // A document, a picture or a page of this turn (the panel), while this chat is the one shown.
-      if (ev?.kind === 'document' || ev?.kind === 'section' || ev?.kind === 'picture' || ev?.kind === 'page' || ev?.kind === 'offer' || ev?.kind === 'job' || ev?.kind === 'tool') {
+      if (ev?.kind === 'document' || ev?.kind === 'section' || ev?.kind === 'picture' || ev?.kind === 'page' || ev?.kind === 'offer' || ev?.kind === 'agent' || ev?.kind === 'tool') {
         if (mine('user') >= 0) {
           const at = mine('assistant');
           if (docEvent(ev, at >= 0 ? messages[at] : null)) return;
@@ -1122,7 +1122,7 @@ export function createChatState({ onopensettings = () => null, onopennote = () =
         selection: about && !about.page ? { noteId: about.noteId, text: about.text, fromLine: about.fromLine ?? null, toLine: about.toLine ?? null } : null,
         // Words from a page beside the chat (chat/pages/view.rs `PageQuote`).
         pageQuote: about?.page ? { text: about.text, site: about.page.site || '' } : null,
-        // A new chat made a Code chat before its first question (jobs/code_chat.rs).
+        // A new chat made a Code chat before its first question (agents/code_chat.rs).
         codeFolder: activeId == null ? (newChatFolder?.() ?? null) : null,
       },
       onEvent

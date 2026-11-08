@@ -104,20 +104,20 @@ export const FIELD_DEFAULTS = {
   diarizationModel: 'nemotron-3-diarization',
   meetingReminder: '15s',
   meetingBrief: true,
-  // Jobs (jobs.rs): Chat hands a task to the person's own Claude Code. The
-  // jobs, folders and each chat's Mode live in jobs.json / job_folders.json.
-  jobsEnabled: false,
-  jobsPay: 'plan',
-  jobsModel: 'claude-sonnet-5-5',
-  jobsEffort: 'medium',
-  jobsMode: 'auto',
-  jobsAsk: 'new-or-web',
-  jobsSpeak: 'voice',
-  jobsMax: 3,
-  // "Animate Code chats": a slow light along a Code chat's box while its job runs.
-  jobsAnimate: true,
+  // Yap Code (agents.rs): Chat hands a task to the person's own Claude Code. The
+  // agents, folders and each chat's Mode live in agents.json / workspaces.json.
+  agentsEnabled: false,
+  agentsPay: 'plan',
+  agentsModel: 'claude-sonnet-5-5',
+  agentsEffort: 'medium',
+  agentsMode: 'auto',
+  agentsAsk: 'new-or-web',
+  agentsSpeak: 'voice',
+  agentsMax: 3,
+  // "Animate Code chats": a slow light along a Code chat's box while its agent runs.
+  agentsAnimate: true,
   // "Clean up what you say in Code chats" (ai/cleanup_styles.rs `cleans_question`).
-  jobsCleanSpeech: true,
+  agentsCleanSpeech: true,
   // Memory (MemorySection.svelte, memory.rs): the switches only.
   memorySearchChats: true,
   memoryLearnChats: true,
