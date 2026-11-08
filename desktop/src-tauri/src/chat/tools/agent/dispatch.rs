@@ -20,6 +20,8 @@ pub(super) enum Source {
     Web,
     /// Pictures from the web looked at or shown (`chat/pictures.rs`).
     Pictures,
+    /// Picture files on this PC without the web (`chat/pictures/local.rs`).
+    Files,
     /// `look_at_screen` (`chat/see_screen.rs`).
     Screen,
     /// The browser beside the chat (`chat/pages.rs`: going, reading,
@@ -54,6 +56,8 @@ impl Source {
             Source::Web
         } else if web && !extra.without_pictures && extra.pictures.offers(name, claude_web || extra.own_search) {
             Source::Pictures
+        } else if !web && crate::chat::pictures::file_offers(extra.files, name) {
+            Source::Files
         } else if crate::chat::see_screen::offers(extra.screen, name) {
             Source::Screen
         } else if web && crate::chat::pages::offers(extra.pictures, extra.act, name) {
@@ -166,6 +170,29 @@ impl Loop<'_> {
                         }
                         result
                     }
+                }
+            }
+            Source::Files => {
+                // A picture file on this PC without the web (chat/pictures/
+                // local.rs): shown, the page hears it at once; looked at, it
+                // goes with the next step while it fits — outside content
+                // from then on, as the screen's is.
+                let Some(files) = self.extra.file_pictures else { return execute(name, &args) };
+                let run = files.execute(name, &args, self.provider, self.base_url).await;
+                if let (Some(picture), Some(live)) = (run.shown, self.live) {
+                    live.sink.send(crate::chat::stream::Event::Picture { picture });
+                }
+                match run.look {
+                    Some(look) if !self.room.takes_picture(&self.messages, looks, &look) => {
+                        tracing::info!(provider = self.provider, "Chat: no room left in the model's context for the picture file; not looked at");
+                        tool_error(crate::chat::budget::NO_ROOM_TO_LOOK.to_string(), Value::Null, "Didn't look at a picture: no room left in the model's context".to_string())
+                    }
+                    Some(look) => {
+                        self.screen_seen = true;
+                        looks.push(look);
+                        run.result
+                    }
+                    None => run.result,
                 }
             }
             Source::Screen => {
@@ -294,6 +321,13 @@ mod tests {
         assert_eq!(Source::of(crate::chat::pictures::SHOW, false, &look, false, false), Source::Notes);
         assert_eq!(Source::of(crate::chat::see_screen::LOOK, false, &look, false, false), Source::Screen);
         assert_eq!(Source::of(crate::chat::see_screen::LOOK, false, &none, false, false), Source::Notes);
+        // Picture files without the web: show (and look, for a model that reads images).
+        let files = Extra { files: crate::chat::pictures::Gate::Look, ..Default::default() };
+        assert_eq!(Source::of(crate::chat::pictures::SHOW, false, &files, false, false), Source::Files);
+        assert_eq!(Source::of(crate::chat::pictures::LOOK, false, &files, false, false), Source::Files);
+        assert_eq!(Source::of(crate::chat::pictures::FIND, false, &files, false, false), Source::Notes);
+        assert_eq!(Source::of(crate::chat::pictures::LOOK, false, &Extra { files: crate::chat::pictures::Gate::Show, ..files }, false, false), Source::Notes);
+        assert_eq!(Source::of(crate::chat::pictures::SHOW, true, &files, false, false), Source::Notes, "never with the web");
         // The browser: every tool of it with the pages; acting only for a model that may.
         for name in crate::chat::pages::ALL {
             assert_eq!(Source::of(name, true, &look, false, false), Source::Pages, "{name}");

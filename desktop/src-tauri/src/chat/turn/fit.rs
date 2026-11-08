@@ -71,6 +71,10 @@ pub(super) enum Family {
     /// `open_app`, `list_apps` and their lines (Yap opens a plainly asked-for
     /// app itself, before any model: `apps::plan_for`).
     Apps,
+    /// Picture files on this PC without the web (`show_picture` and
+    /// `look_at_picture` by a path, `chat/pictures/local.rs`): cheap, and
+    /// only offered when the turn has one to show — kept then ([`keeps`]).
+    Files,
 }
 
 /// **The order families go in** — what costs most and matters least to a
@@ -91,12 +95,14 @@ pub(super) enum Family {
 /// 9. past chats, ~110;
 /// 10. the browser beside the chat, ~550 (the web's search and page reads
 ///     stay);
-/// 11. apps, ~280 — last, after the browser: its line says websites open
-///     there "never with open_app" ([`Family::waits`]).
+/// 11. apps, ~280 — after the browser: its line says websites open
+///     there "never with open_app" ([`Family::waits`]);
+/// 12. picture files without the web, ~110 — last, and kept whenever
+///     they're offered (a Code chat, a question naming a picture file).
 ///
 /// Never: the notes and documents' tools, the web's, memory's `remember` /
 /// `forget` — what Chat is for.
-pub(super) const ORDER: [Family; 11] = [
+pub(super) const ORDER: [Family; 12] = [
     Family::Acting,
     Family::Seeing,
     Family::Agents,
@@ -108,6 +114,7 @@ pub(super) const ORDER: [Family; 11] = [
     Family::PastChats,
     Family::Browser,
     Family::Apps,
+    Family::Files,
 ];
 
 impl Family {
@@ -125,6 +132,7 @@ impl Family {
             Family::PastChats => "past_chats",
             Family::Browser => "browser",
             Family::Apps => "apps",
+            Family::Files => "files",
         }
     }
 
@@ -138,6 +146,8 @@ impl Family {
         match self {
             Family::Acting => Gates { act: false, ..g },
             Family::Seeing if g.pictures == Gate::Look => Gates { pictures: Gate::Show, ..g },
+            // (Without the web: a picture file's look, as a web picture's.)
+            Family::Seeing if g.files == Gate::Look => Gates { files: Gate::Show, ..g },
             Family::Seeing => g,
             Family::Agents => Gates { agents: false, ..g },
             Family::Connectors => Gates { connectors: false, ..g },
@@ -148,6 +158,7 @@ impl Family {
             Family::PastChats => Gates { past_chats: false, ..g },
             Family::Browser => Gates { pictures: Gate::Off, act: false, ..g },
             Family::Apps => Gates { apps: false, ..g },
+            Family::Files => Gates { files: Gate::Off, ..g },
         }
     }
 
@@ -208,6 +219,11 @@ pub(super) fn keeps(question: &str, previous: Option<&str>, code: bool, workspac
     let mut keep = Shed::default();
     if code || about_agents(question, workspaces) || previous.is_some_and(|p| p.contains('?') && about_agents(p, workspaces)) {
         keep = keep.with(Family::Agents);
+    }
+    // Picture files without the web: what a Code chat or a question naming
+    // one is offered them for.
+    if code || crate::chat::pictures::local::names_a_picture(question) {
+        keep = keep.with(Family::Files);
     }
     if crate::chat::tools::calendar::asks_about_calendar(question) {
         keep = keep.with(Family::Calendar);
@@ -417,6 +433,7 @@ mod tests {
             apps: true,
             past_chats: true,
             picture_tools: true,
+            files: Gate::Off,
         }
     }
 
@@ -595,7 +612,8 @@ mod tests {
         let persona = persona();
         for code in [false, true] {
             let parts = Parts { persona: &persona, profile: &profile, now: chrono::Utc::now(), code, connectors: None, conversation: Some(7) };
-            for g in [strong_model(), small_model(), Gates { act: true, ..small_model() }] {
+            let files = Gates { web_on: false, pictures: Gate::Off, act: false, files: Gate::Look, ..strong_model() };
+            for g in [strong_model(), small_model(), Gates { act: true, ..small_model() }, files] {
                 let all = seen(&g, &parts).names;
                 // Each family gone after the ones before it, as a turn sheds them.
                 let mut shed = Shed::default();
@@ -642,6 +660,29 @@ mod tests {
         let est = |g: &Gates| u64::from(g.act) * 500 + u64::from(g.agents) * 1_500 + u64::from(g.pictures != Gate::Off) * 550 + u64::from(g.apps) * 280;
         assert_eq!(costs(g, Shed::default(), est), [(Family::Acting, 500), (Family::Agents, 1_500), (Family::Browser, 550), (Family::Apps, 280)]);
         assert_eq!(costs(g, keeps("Click the first link on this page", None, false, &[]), est), [(Family::Agents, 1_500)]);
+    }
+
+    #[test]
+    fn a_code_chat_without_the_web_keeps_its_picture_files() {
+        // Cheap, and offered only when the turn has one to show: last, and kept then.
+        assert_eq!(ORDER.last(), Some(&Family::Files));
+        assert!(keeps("anything", None, true, &[]).has(Family::Files));
+        assert!(keeps("Show me C:\\Projects\\garden-planner\\docs\\concept.png", None, false, &[]).has(Family::Files));
+        assert!(!keeps("Show me the concept picture", None, false, &[]).has(Family::Files));
+        // Seeing goes: a file's look too, its show stays.
+        let g = Gates { web_on: false, pictures: Gate::Off, act: false, files: Gate::Look, ..small_model() };
+        assert_eq!(Family::Seeing.off(g).files, Gate::Show);
+        assert_eq!(Family::Files.off(g).files, Gate::Off);
+        // A Code chat on an 8K model: others go, its picture files stay.
+        let profile = crate::ai::about_you::Profile::default();
+        let persona = persona();
+        let parts = Parts { persona: &persona, profile: &profile, now: chrono::Utc::now(), code: true, connectors: None, conversation: Some(7) };
+        let (counter, at_8k) = (Counter::estimate_only(), room(8_192));
+        let asked = "Show me the concept picture the agent made";
+        let question = estimate(asked) + crate::chat::budget::MESSAGE_OVERHEAD;
+        let fitted = run(fit(g, &parts, &counter, at_8k, question, || keeps(asked, None, true, &[])));
+        assert!(!fitted.shed.has(Family::Files) && fitted.gates.files != Gate::Off, "{:?}", fitted.shed.names());
+        assert!(seen(&fitted.gates, &parts).names.iter().any(|n| n == "show_picture"));
     }
 
     #[test]
