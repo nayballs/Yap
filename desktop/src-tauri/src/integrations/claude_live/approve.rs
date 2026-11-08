@@ -103,13 +103,33 @@ impl Outcome {
     }
 }
 
+/// **Who answered a card** (Remote Control, 2026-11-08): the person at this
+/// PC, or a paired phone (its id and name). Every card's end says it
+/// (`yap-claude-approve-done`'s `by`, `byName`), so the PC's card closes
+/// "Allowed from Office phone".
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum By {
+    Pc,
+    Phone { device: String, name: String },
+}
+
+impl By {
+    /// As the event says it: `"pc"` or `"phone"`.
+    pub fn word(&self) -> &'static str {
+        match self {
+            By::Pc => "pc",
+            By::Phone { .. } => "phone",
+        }
+    }
+}
+
 struct Waiting {
     card: Pending,
     /// The live run's id (its handle's), whatever the card's `run` says.
     live: String,
     /// The JSON-RPC request's id, for a cancel.
     rpc: String,
-    tx: mpsc::Sender<Outcome>,
+    tx: mpsc::Sender<(Outcome, Option<By>)>,
 }
 
 /// **The prompts waiting**, one book per endpoint.
@@ -124,10 +144,21 @@ impl Book {
         self.waiting.lock().unwrap_or_else(|p| p.into_inner())
     }
 
-    /// The person's answer: `true` if that prompt was still waiting.
+    /// The person's answer at this PC: `true` if that prompt was still waiting.
     pub fn answer(&self, id: u64, allow: bool) -> bool {
+        self.answer_by(id, allow, By::Pc)
+    }
+
+    /// **An answer, and who gave it**: `true` if that prompt was still
+    /// waiting — the first answer wins, from wherever it came.
+    pub fn answer_by(&self, id: u64, allow: bool, by: By) -> bool {
         let Some(w) = self.lock().remove(&id) else { return false };
-        w.tx.send(if allow { Outcome::Allowed } else { Outcome::Denied }).is_ok()
+        w.tx.send((if allow { Outcome::Allowed } else { Outcome::Denied }, Some(by))).is_ok()
+    }
+
+    /// Prompt `id`, if it's still waiting.
+    pub fn waiting(&self, id: u64) -> Option<Pending> {
+        self.lock().get(&id).map(|w| w.card.clone())
     }
 
     /// Deny every prompt of a run that ended (each one's own thread says
@@ -148,7 +179,7 @@ impl Book {
             ids.into_iter().filter_map(|id| map.remove(&id)).collect()
         };
         for w in &closed {
-            let _ = w.tx.send(outcome);
+            let _ = w.tx.send((outcome, None));
         }
         closed.len()
     }
@@ -279,15 +310,15 @@ pub fn ask(ep: &Endpoint, run: &Run, args: &serde_json::Map<String, Value>, rpc:
     if let Some(allow) = auto_answer() {
         ep.approvals.answer(id, allow);
     }
-    let outcome = match rx.recv_timeout(ep.wait) {
+    let (outcome, by) = match rx.recv_timeout(ep.wait) {
         Ok(o) => o,
         Err(_) => {
             // Taken out unless an answer got there first.
             let gone = ep.approvals.lock().remove(&id).is_none();
             if gone {
-                rx.try_recv().unwrap_or(Outcome::TimedOut)
+                rx.try_recv().unwrap_or((Outcome::TimedOut, None))
             } else {
-                Outcome::TimedOut
+                (Outcome::TimedOut, None)
             }
         }
     };
@@ -295,9 +326,21 @@ pub fn ask(ep: &Endpoint, run: &Run, args: &serde_json::Map<String, Value>, rpc:
     if tool == EXIT_PLAN && outcome == Outcome::Allowed {
         crate::agents::runner::plan_allowed(&card.run);
     }
-    (ep.emit)(EVENT_DONE, json!({ "id": id, "run": card.run, "outcome": outcome.word() }));
-    tracing::info!(id, outcome = outcome.word(), "Claude Code: a permission prompt answered");
+    (ep.emit)(EVENT_DONE, done_payload(id, &card.run, outcome, by.as_ref()));
+    tracing::info!(id, outcome = outcome.word(), by = by.as_ref().map(By::word), "Claude Code: a permission prompt answered");
     (decision(tool, outcome, &input, ep.wait), false)
+}
+
+/// **A card's end** (`yap-claude-approve-done`): `{id, run, outcome, by}`,
+/// `by` `"pc"`, `"phone"` (with `byName` and `byDevice`) or `null` (nobody
+/// answered: it timed out, the run ended or was cancelled). Pure.
+pub fn done_payload(id: u64, run: &str, outcome: Outcome, by: Option<&By>) -> Value {
+    let mut v = json!({ "id": id, "run": run, "outcome": outcome.word(), "by": by.map(By::word) });
+    if let Some(By::Phone { device, name }) = by {
+        v["byName"] = json!(name);
+        v["byDevice"] = json!(device);
+    }
+    v
 }
 
 /// A tool's name for the log: Claude Code's own, or "mcp" for another
@@ -444,6 +487,27 @@ mod tests {
         assert!(no["message"].as_str().unwrap().starts_with("The user said no to this in Yap."));
         assert_eq!(tool_kind("mcp__tracker__create_issue"), "mcp", "another server's name stays out of the log");
         assert_eq!(tool_kind("Bash"), "Bash");
+    }
+
+    #[test]
+    fn a_cards_end_says_who_answered_and_the_first_answer_wins() {
+        let phone = By::Phone { device: "p-1".into(), name: "Office phone".into() };
+        assert_eq!(
+            done_payload(7, "ab12", Outcome::Allowed, Some(&phone)),
+            json!({ "id": 7, "run": "ab12", "outcome": "allowed", "by": "phone", "byName": "Office phone", "byDevice": "p-1" })
+        );
+        assert_eq!(done_payload(7, "ab12", Outcome::Denied, Some(&By::Pc)), json!({ "id": 7, "run": "ab12", "outcome": "denied", "by": "pc" }));
+        assert_eq!(done_payload(7, "ab12", Outcome::TimedOut, None), json!({ "id": 7, "run": "ab12", "outcome": "timedOut", "by": null }));
+        // The book: the first answer wins, whoever gives it.
+        let book = Book::default();
+        let (tx, rx) = mpsc::channel();
+        let card = Pending { id: 3, run: "ab12".into(), conversation: Some(4), origin: Origin::Typed, tool: "Bash".into(), summary: "Run a command: npm test".into(), detail: "npm test".into(), label: "garden-planner".into(), asked_ts: 1 };
+        book.lock().insert(3, Waiting { card: card.clone(), live: "run-1".into(), rpc: "1".into(), tx });
+        assert_eq!(book.waiting(3), Some(card));
+        assert!(book.answer_by(3, true, phone.clone()));
+        assert!(!book.answer(3, false), "the PC came second");
+        assert!(book.waiting(3).is_none());
+        assert_eq!(rx.try_recv().unwrap(), (Outcome::Allowed, Some(phone)));
     }
 
     #[test]

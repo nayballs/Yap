@@ -253,6 +253,8 @@ export const SETTINGS_INDEX = [
   { page: 'phone', section: 'Your phone', label: 'Use Yap from your phone (on your home Wi-Fi)', desc: 'Ask out loud on your phone and hear the answer', keywords: 'phone mobile android iphone headset bluetooth link remote wifi wi-fi voice assistant', anchor: 'link-enabled', toggle: 'linkEnabled' },
   { page: 'phone', section: 'Pair a phone', label: 'Pair a phone', desc: 'A code to scan with your phone', keywords: 'pair pairing qr code scan phone link connect', anchor: 'link-pair', fallback: 'link-enabled' },
   { page: 'phone', section: 'Paired phones', label: 'Paired phones', desc: 'Your phones, and Remove', keywords: 'phones devices remove unpair revoke forget', anchor: 'link-phones' },
+  { page: 'phone', section: 'Remote Control', label: 'Remote Control', desc: 'Use Yap Code from your paired phones: follow agents, allow their steps, send them work', keywords: 'remote control code agents phone approve allow steps yap code away', anchor: 'link-remote', toggle: 'linkRemoteControl' },
+  { page: 'phone', section: 'Remote Control', label: 'Keep this PC awake while agents work', desc: 'While Remote Control is on', keywords: 'awake sleep power remote control agents', anchor: 'link-keep-awake', toggle: 'linkKeepAwake', fallback: 'link-remote' },
 
   // ---- Privacy & data ----
   { page: 'privacy', section: 'What leaves this PC', label: 'What leaves this PC', desc: 'Feature by feature, as Yap is set up', keywords: 'privacy cloud data sent private', anchor: 'leaves' },

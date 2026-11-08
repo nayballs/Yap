@@ -143,6 +143,10 @@ pub struct AgentEvent {
     /// A request queued as that turn, behind the one working (its title).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub queued: Option<String>,
+    /// A paired phone's action (Remote Control: `agents/remote.rs`), with
+    /// its line in `step` ("Allowed from Office phone · Run a command: …").
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub remote: Option<super::remote::RemoteNote>,
     /// Unix seconds.
     pub ts: u64,
 }
@@ -177,6 +181,9 @@ pub struct Ask {
     /// The person's own model and effort for it (else Settings' then).
     pub model: Option<String>,
     pub effort: Option<String>,
+    /// A paired phone's action (Remote Control): the phone's id. Its turn
+    /// runs at most at Auto, and is reported on that phone.
+    pub phone: Option<String>,
 }
 
 impl Ask {
@@ -209,6 +216,9 @@ impl Ask {
         }
         if more.effort.is_some() {
             self.effort = more.effort;
+        }
+        if more.phone.is_some() {
+            self.phone = more.phone;
         }
     }
 }
@@ -332,16 +342,30 @@ static LIVE_TOLD: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsiz
 /// Send `ev` to the page and keep it in the agent's log; the Yap bar hears
 /// when the number of agents not over yet changes ("1 agent working").
 pub fn emit(ev: &AgentEvent) {
-    if let Ok(v) = serde_json::to_value(ev) {
-        store::log_append(&ev.id, &v);
-    }
+    let v = serde_json::to_value(ev).ok();
+    let line = v.as_ref().and_then(|v| store::log_append(&ev.id, v));
     if let Some(app) = APP.get() {
         let _ = app.emit(EVENT, ev);
         let live = store::live_ids().len();
         if LIVE_TOLD.swap(live, std::sync::atomic::Ordering::Relaxed) != live {
             crate::bar::refresh(app);
+            // Keeping the PC awake while agents work (Remote Control on).
+            crate::shell::awake::poke();
         }
     }
+    // A phone watching it (Remote Control): its log line numbers it there.
+    if let Some(v) = v {
+        crate::link::agent_event(&ev.id, line, v);
+    }
+}
+
+/// **A paired phone's action in agent `id`'s log** (Remote Control): its
+/// tab shows `line` where it happened ("Allowed from Office phone · Run a
+/// command: npm test"), at turn `n` (0: its turn now).
+pub fn note_remote(id: &str, n: u32, line: String, note: super::remote::RemoteNote) {
+    let Some(agent) = store::get(id) else { return };
+    let base = if n > 0 { AgentEvent::at(&agent, n) } else { AgentEvent::of(&agent) };
+    emit(&AgentEvent { step: Some(line), remote: Some(note), ..base });
 }
 
 /// The most agents at once now (1 to [`MAX`]).
@@ -596,6 +620,17 @@ async fn turn(id: &str, message: Option<String>) -> (Status, u32) {
         Err(e) => return failed_early(id, n, format!("Couldn't start the agent: {e}"), None),
     };
     let mode = modes::or_auto(&agent.mode);
+    // **A phone's turn runs at most at Auto** (Remote Control, design §5.3),
+    // whatever set its mode: its question asked for it, or the phone's own
+    // action carried it on (`agents/remote.rs`). The last gate, here.
+    let asked = agent.turn_list.iter().find(|t| t.n == n).and_then(|t| t.message_id.clone());
+    let mode = match super::remote::phone_of_turn(id, n, asked.as_deref()) {
+        Some(_) if mode > super::remote::PHONE_MAX => {
+            tracing::info!(id, turn = n, was = mode.as_str(), "Agents: a phone's turn, run at Auto");
+            super::remote::phone_mode(mode)
+        }
+        _ => mode,
+    };
     let resuming = message.is_some() && agent.started_ts > 0 && !agent.session.is_empty();
     let session_id = if agent.session.is_empty() { session::new_session_id() } else { agent.session.clone() };
     let conversation = if resuming { Conversation::Resume(session_id) } else { Conversation::New(session_id) };
@@ -1201,6 +1236,12 @@ pub fn message(id: &str, text: &str, go: bool) -> Result<Agent, String> {
 /// Once only: refused while it works, or once its latest turn isn't a plan
 /// waiting for its go-ahead.
 pub fn go_ahead(id: &str) -> Result<Agent, String> {
+    go_ahead_from(id, None)
+}
+
+/// [`go_ahead`], from paired phone `phone` (Remote Control): the plan's
+/// turn is the phone's (at most Auto, reported there).
+pub fn go_ahead_from(id: &str, phone: Option<&str>) -> Result<Agent, String> {
     let agent = store::get(id).ok_or("There's no such agent.")?;
     if agent.status.live() {
         return Err("The agent is working on it already.".into());
@@ -1208,8 +1249,8 @@ pub fn go_ahead(id: &str) -> Result<Agent, String> {
     if !agent.plan || agent.plan_allowed {
         return Err("There's no plan waiting for a go-ahead: the agent carried on already.".into());
     }
-    tracing::info!(id, "Agents: its plan's go-ahead, from a card");
-    follow_up(id, Ask::go_ahead()).map(|(agent, _)| agent)
+    tracing::info!(id, phone = phone.is_some(), "Agents: its plan's go-ahead, from a card");
+    follow_up(id, Ask { phone: phone.map(str::to_string), ..Ask::go_ahead() }).map(|(agent, _)| agent)
 }
 
 /// **A follow-up for agent `id`** (its Code chat's next request, `message_agent`,
@@ -1226,7 +1267,10 @@ pub fn follow_up(id: &str, ask: Ask) -> Result<(Agent, FollowedUp), String> {
     if ask.text.is_empty() {
         return Err("Say what to tell the agent.".into());
     }
-    store::get(id).ok_or("There's no such agent.")?;
+    let current = store::get(id).ok_or("There's no such agent.")?;
+    // A phone's words never join a turn that runs above Auto: they wait for
+    // a turn of their own (at most Auto), as a request while it works does.
+    let joins = ask.phone.is_none() || modes::or_auto(&current.mode) <= super::remote::PHONE_MAX;
     enum At {
         /// Its process is starting: with its first message.
         Starting,
@@ -1239,7 +1283,7 @@ pub fn follow_up(id: &str, ask: Ask) -> Result<(Agent, FollowedUp), String> {
     let text = ask.text.clone();
     let at = with_state(|s| {
         if let Some(l) = s.live.get_mut(id) {
-            if !l.started && l.stopping.is_none() {
+            if !l.started && l.stopping.is_none() && joins {
                 l.extra.push(text.clone());
                 return At::Starting;
             }
@@ -1278,6 +1322,11 @@ pub fn follow_up(id: &str, ask: Ask) -> Result<(Agent, FollowedUp), String> {
                 added(j);
             })
             .ok_or("There's no such agent.")?;
+            // A phone's words in the turn waiting: it's the phone's too (at
+            // most Auto when it starts).
+            if let (Some(device), Some(t)) = (&ask.phone, agent.turn_list.last()) {
+                super::remote::mark_turn(id, t.n, device);
+            }
             tracing::info!(id, "Agents: a follow-up for the turn waiting for a slot");
             Ok((agent, FollowedUp::Added))
         }
@@ -1294,6 +1343,9 @@ pub fn follow_up(id: &str, ask: Ask) -> Result<(Agent, FollowedUp), String> {
             })
             .ok_or("There's no such agent.")?;
             let n = agent.turn_list.last().map_or(0, |t| t.n);
+            if let Some(device) = &ask.phone {
+                super::remote::mark_turn(id, n, device);
+            }
             tracing::info!(id, turn = n, "Agents: a follow-up queued behind the turn working");
             emit(&AgentEvent { queued: Some(title), ..AgentEvent::at(&agent, n) });
             Ok((agent, FollowedUp::Queued))
@@ -1318,6 +1370,12 @@ enum Next {
 /// on, on `--resume` (one that never ran starts from its brief); a request
 /// that was waiting behind it when it stopped is sent instead.
 pub fn continue_agent(id: &str) -> Result<Agent, String> {
+    continue_from(id, None)
+}
+
+/// [`continue_agent`], from paired phone `phone` (Remote Control): the turn
+/// it carries on is the phone's (at most Auto, reported there).
+pub fn continue_from(id: &str, phone: Option<&str>) -> Result<Agent, String> {
     let agent = store::get(id).ok_or("There's no such agent.")?;
     if agent.status.live() {
         return Err("The agent is still running.".into());
@@ -1325,12 +1383,13 @@ pub fn continue_agent(id: &str) -> Result<Agent, String> {
     if agent.status == Status::Done {
         return Err("The agent is done: send it a message to carry on.".into());
     }
+    let phone = phone.map(str::to_string);
     match agent.turn_list.last().filter(|t| !t.ran() && t.n > 1) {
         Some(waiting) => {
             let text = waiting.request.clone();
-            resume(id, Next::Message(text.clone()), &Ask::of(&text, false), false);
+            resume(id, Next::Message(text.clone()), &Ask { phone, ..Ask::of(&text, false) }, false);
         }
-        None => resume(id, Next::CarryOn, &Ask::default(), false),
+        None => resume(id, Next::CarryOn, &Ask { phone, ..Ask::default() }, false),
     }
     store::get(id).ok_or_else(|| "There's no such agent.".into())
 }
@@ -1361,6 +1420,10 @@ fn resume(id: &str, next: Next, ask: &Ask, new_turn: bool) {
     let mut mode = modes::next_turn(modes::or_auto(&agent.mode), chip, cap, go, store::bypass_confirmed());
     if let Some(lower) = ask.mode {
         mode = mode.min(lower);
+    }
+    // A phone's (its action, or its question): at most Auto.
+    if ask.phone.is_some() || ask.message_id.as_deref().and_then(super::remote::phone_of_message).is_some() {
+        mode = super::remote::phone_mode(mode);
     }
     let (model, effort, model_asked, effort_asked) = model_for(&agent, ask, &cfg.agents_model, &cfg.agents_effort);
     let pay = if cfg.agents_pay == "key" { "key" } else { "plan" };
@@ -1401,6 +1464,10 @@ fn resume(id: &str, next: Next, ask: &Ask, new_turn: bool) {
     });
     if let Some(agent) = agent {
         let n = agent.turn_list.last().map_or(0, |t| t.n);
+        // A phone's action: this turn is the phone's (at most Auto, reported there).
+        if let Some(device) = &ask.phone {
+            super::remote::mark_turn(id, n, device);
+        }
         tracing::info!(id, turn = n, mode = mode.as_str(), go, new_turn, "Agents: its next turn");
         let step = if new_turn || matches!(next, Next::Message(_)) { "Picking up your request" } else { "Picking up where it left off" };
         emit(&AgentEvent { step: Some(step.into()), ..AgentEvent::at(&agent, n) });

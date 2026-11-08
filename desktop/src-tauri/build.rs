@@ -12,6 +12,8 @@ const LINK_SHARED: &[(&str, &str)] = &[
     ("core/modelIcons.js", "../src/lib/core/modelIcons.js"),
     ("core/providerIds.js", "../src/lib/core/providerIds.js"),
     ("core/effort.js", "../src/lib/core/effort.js"),
+    // Remote Control's wire, defined once for the page and the PC (link/wire.rs's tests).
+    ("core/codeWire.js", "../src/lib/core/codeWire.js"),
     ("providers/openai.svg", "../src/assets/providers/openai.svg"),
     ("providers/openai-oss.svg", "../src/assets/providers/openai-oss.svg"),
     ("providers/claude.svg", "../src/assets/providers/claude.svg"),

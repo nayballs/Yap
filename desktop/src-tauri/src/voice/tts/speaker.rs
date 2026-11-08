@@ -614,18 +614,21 @@ pub fn speak(text: &str, message_id: Option<String>) -> Result<(), String> {
 pub fn speak_streamed(message_id: Option<String>) -> Result<Arc<Feed>, String> {
     let cfg = crate::config::load();
     let opener = if crate::shell::e2e::active() { sim_opener() } else { rodio_opener(cfg.output_device.clone()) };
-    streamed(message_id, voicing(&cfg), opener, &cfg)
+    streamed(message_id, voicing(&cfg), opener, &cfg, false)
 }
 
 /// **Say a streamed answer somewhere other than this PC's speakers** (Yap
 /// Link: the phone, `link/voice.rs`): [`speak_streamed`] with `voicing` and
 /// the audio handed to `open`'s playback — the same speaker, one voice at a
-/// time, never over a dictation or a meeting.
+/// time, never over a dictation or a meeting. (Test mode records it as said
+/// `elsewhere`.)
 pub fn speak_streamed_to(message_id: Option<String>, voicing: Voicing, open: Opener) -> Result<Arc<Feed>, String> {
-    streamed(message_id, voicing, open, &crate::config::load())
+    streamed(message_id, voicing, open, &crate::config::load(), true)
 }
 
-fn streamed(message_id: Option<String>, voicing: Voicing, opener: Opener, cfg: &crate::config::YapConfig) -> Result<Arc<Feed>, String> {
+fn streamed(message_id: Option<String>, voicing: Voicing, opener: Opener, cfg: &crate::config::YapConfig, elsewhere: bool) -> Result<Arc<Feed>, String> {
+    #[cfg(not(debug_assertions))]
+    let _ = elsewhere;
     if let Some(why) = meeting_quiet() {
         return Err(why.into());
     }
@@ -645,6 +648,7 @@ fn streamed(message_id: Option<String>, voicing: Voicing, opener: Opener, cfg: &
             volume: volume(),
             fallback: None,
             streamed: true,
+            elsewhere,
         });
     }
     let fallback = cloud.map(|plan| fallback_for(plan, message_id.clone(), rate));
@@ -707,6 +711,7 @@ pub(super) fn say(sentences: Vec<String>, message_id: Option<String>, voicing: V
             volume: volume(),
             fallback: None,
             streamed: false,
+            elsewhere: false,
         });
     }
     let fallback = cloud.map(|plan| fallback_for(plan, message_id.clone(), rate));
@@ -750,6 +755,7 @@ pub fn read(track: Arc<Track>, from: usize, message_id: String, rate: f32) -> Re
             volume: volume(),
             fallback: None,
             streamed: false,
+            elsewhere: false,
         });
     }
     let fallback = cloud.map(|plan| fallback_for(plan, Some(message_id.clone()), rate));
@@ -796,6 +802,7 @@ fn fallback_for(plan: CloudPlan, message_id: Option<String>, rate: f32) -> Fallb
                     volume: volume(),
                     fallback: Some(error.to_string()),
                     streamed: false,
+                    elsewhere: false,
                 });
             }
             let _ = left;

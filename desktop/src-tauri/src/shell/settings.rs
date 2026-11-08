@@ -137,6 +137,9 @@ fn apply_config(app: &AppHandle, state: State<'_, AppState>, prev: &YapConfig, c
     crate::integrations::bridge::sync(&app, cfg.bridge_enabled);
     // …and Settings → Phone's "Use Yap from your phone" (link.rs).
     crate::link::sync(&app, cfg.link_enabled);
+    // …and its Remote Control (link/code.rs: the phones told, the bar's mark,
+    // the PC kept awake while agents work).
+    crate::link::config_changed(prev, &cfg);
     // …and the "Detect calls and offer to take notes" toggle.
     crate::calls::meeting_detect::sync(&app, cfg.meeting_detection);
     // Hiding meeting windows from screen shares may have flipped mid-meeting.

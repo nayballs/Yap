@@ -634,6 +634,14 @@ main {
   background: var(--yap-primary-wash);
   white-space: pre-wrap;
 }
+/* An agent's report (Yap Code, `kind: "agentReport"`): a quiet note, never
+   the person's own bubble (the Code side's report cards come in wave 2). */
+.report {
+  align-self: flex-start;
+  margin: 0;
+  color: var(--yap-muted);
+  font-size: 0.875rem;
+}
 /* A question's pictures: its thumbnails while this page has them, else how many. */
 .qpics {
   align-self: flex-end;

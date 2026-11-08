@@ -17,15 +17,33 @@
   import { renderMarkdown } from '../../core/markdown.js';
   import { longSaid } from '../../core/agents.js';
 
-  /** `approvals`: this chat's prompts waiting (`Pending`), oldest first; `onopen(run)` opens the agent's tab. */
-  let { approvals = [], onopen = null } = $props();
+  /**
+   * `approvals`: this chat's prompts waiting (`Pending`), oldest first;
+   * `answered`: the ones a paired phone answered (Remote Control,
+   * `agents.remoteAnswers`), each closed with who; `onopen(run)` opens the
+   * agent's tab.
+   */
+  let { approvals = [], answered = [], onopen = null } = $props();
 
   /** Plan mode's "may I go ahead?" (approve.rs `EXIT_PLAN`). */
   const isPlan = (a) => a?.tool === 'ExitPlanMode';
+  /** "Allowed from Office phone · Run a command: npm test". */
+  function fromPhone(a) {
+    const yes = a.outcome === 'allowed';
+    if (isPlan(a)) return yes ? `Went ahead from ${a.byName}: the plan` : `Kept as a plan from ${a.byName}`;
+    return `${yes ? 'Allowed' : 'Denied'} from ${a.byName} · ${a.summary}`;
+  }
   // Plans opened past their fold, by the prompt's id.
   let unfolded = $state({});
 </script>
 
+{#each answered as a (a.id)}
+  <!-- Answered from a paired phone (Remote Control): closed here, with who. -->
+  <p class="aremote" data-testid="chat-agent-approve-remote" data-outcome={a.outcome}>
+    <svg class="pmark" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="7" y="2.5" width="10" height="19" rx="2.2" /><path d="M11 18h2" /></svg>
+    {fromPhone(a)}
+  </p>
+{/each}
 {#each approvals as a (a.id)}
   {#if isPlan(a)}
     {@const folds = longSaid(a.detail)}
@@ -76,6 +94,21 @@
 {/each}
 
 <style>
+  .aremote {
+    align-self: flex-start;
+    display: inline-flex;
+    gap: 6px;
+    align-items: center;
+    margin: 0;
+    color: var(--yap-muted);
+    font-size: 12.5px;
+    overflow-wrap: anywhere;
+  }
+  .pmark {
+    flex: none;
+    width: 13px;
+    height: 13px;
+  }
   .japprove {
     align-self: flex-start;
     display: flex;

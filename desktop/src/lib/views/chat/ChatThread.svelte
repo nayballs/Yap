@@ -36,6 +36,8 @@
 
   const agentPills = $derived(pillsByAnswer(agents.list, chat.activeId, chat.messages));
   const asks = $derived(chat.activeId == null ? [] : agents.approvals.filter((a) => a.conversation === chat.activeId));
+  // Answered from a paired phone (Remote Control): "Allowed from Office phone".
+  const answeredRemote = $derived(chat.activeId == null ? [] : agents.remoteAnswers.filter((a) => a.conversation === chat.activeId));
   const openAgent = (j) => chat.doc.showAgent(j);
   const openRun = (run) => {
     const j = agentById(run);
@@ -249,10 +251,11 @@
             {/await}
           {/if}
         {/each}
-        {#if asks.length}
-          <!-- A running agent of this chat asks to take a step: Allow once / Deny. -->
+        {#if asks.length || answeredRemote.length}
+          <!-- A running agent of this chat asks to take a step: Allow once / Deny
+               (and the ones a paired phone answered, closed with who). -->
           {#await import('./AgentApprove.svelte') then { default: AgentApprove }}
-            <AgentApprove approvals={asks} onopen={openRun} />
+            <AgentApprove approvals={asks} answered={answeredRemote} onopen={openRun} />
           {/await}
         {/if}
         {#if chat.answeringHere}

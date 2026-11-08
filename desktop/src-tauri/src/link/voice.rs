@@ -18,18 +18,9 @@ use std::time::{Duration, Instant};
 use crate::link::wire::{self, Out, Phase};
 use crate::voice::tts::{Opened, Opener, Pcm, Playback};
 
-/// What a session's writer sends (`session.rs`).
-pub enum Wire {
-    Text(String),
-    /// A down frame of the voice of turn `turn` (dropped if that turn was
-    /// interrupted meanwhile).
-    Audio { turn: u64, bytes: Vec<u8> },
-    /// Close the socket.
-    Close,
-}
-
-/// The session's way out, from any thread.
-pub type Tx = tokio::sync::mpsc::UnboundedSender<Wire>;
+/// What a session's writer sends, and its way out from any thread: the
+/// control lane and the agent lane (`lanes.rs`).
+pub use crate::link::lanes::{Tx, Wire};
 
 /// Say `out` to the phone.
 pub fn say(tx: &Tx, out: Out) {
@@ -179,7 +170,7 @@ mod tests {
     fn rig() -> (tokio::sync::mpsc::UnboundedReceiver<Wire>, Arc<PhonePlayback>, Arc<std::sync::atomic::AtomicU64>, Opener) {
         let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
         let latest = Arc::new(std::sync::atomic::AtomicU64::new(3));
-        let (open, play) = opener(tx, 3, Arc::clone(&latest), Arc::new(AtomicBool::new(false)), Arc::new(AtomicBool::new(true)));
+        let (open, play) = opener(tx.into(), 3, Arc::clone(&latest), Arc::new(AtomicBool::new(false)), Arc::new(AtomicBool::new(true)));
         (rx, play, latest, open)
     }
 
@@ -223,7 +214,7 @@ mod tests {
         let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
         let latest = Arc::new(std::sync::atomic::AtomicU64::new(1));
         let answered = Arc::new(AtomicBool::new(false));
-        let (open, _play) = opener(tx.clone(), 1, Arc::clone(&latest), Arc::new(AtomicBool::new(false)), Arc::clone(&answered));
+        let (open, _play) = opener(tx.clone().into(), 1, Arc::clone(&latest), Arc::new(AtomicBool::new(false)), Arc::clone(&answered));
         let opened = open().unwrap();
         opened.play.append(Pcm { sample_rate: 24_000, channels: 1, samples: vec![0.0; 240] });
         // Its words came before a tool call: stopped, the answer not in yet.
@@ -232,7 +223,7 @@ mod tests {
         assert_eq!(t.last().map(String::as_str), Some(r#"{"type":"state","phase":"thinking"}"#));
         // A voice with nothing said (no audio came): no speak_end, but idle.
         answered.store(true, Ordering::SeqCst);
-        let (open, _play) = opener(tx, 1, latest, Arc::new(AtomicBool::new(false)), answered);
+        let (open, _play) = opener(tx.into(), 1, latest, Arc::new(AtomicBool::new(false)), answered);
         drop(open().unwrap().keep);
         let (t, a) = texts(&mut rx);
         assert!(a.is_empty());

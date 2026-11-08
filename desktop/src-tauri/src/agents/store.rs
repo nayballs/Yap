@@ -812,10 +812,10 @@ pub fn sweep(now: u64) -> usize {
 
 /// Append `line` (one `yap-agent` event) to agent `id`'s log, its texts
 /// trimmed; nothing past [`LOG_MAX_LINES`].
-pub fn log_append(id: &str, line: &Value) {
-    let Some(path) = log_path(id) else { return };
+pub fn log_append(id: &str, line: &Value) -> Option<u64> {
+    let path = log_path(id)?;
     if crate::ai::eval::active() {
-        return;
+        return None;
     }
     let mut line = line.clone();
     if let Some(o) = line.as_object_mut() {
@@ -829,7 +829,7 @@ pub fn log_append(id: &str, line: &Value) {
     }
     let count = LOG_LINES.with_count(id, &path);
     if count >= LOG_MAX_LINES {
-        return;
+        return None;
     }
     if let Some(parent) = path.parent() {
         let _ = std::fs::create_dir_all(parent);
@@ -840,16 +840,30 @@ pub fn log_append(id: &str, line: &Value) {
         .open(&path)
         .and_then(|mut f| f.write_all(format!("{line}\n").as_bytes()));
     match wrote {
-        Ok(()) => LOG_LINES.bump(id),
-        Err(e) => tracing::debug!("Agents: a log line couldn't be written ({})", e.kind()),
+        Ok(()) => {
+            LOG_LINES.bump(id);
+            // Its line in the file, from 1 (Remote Control numbers the
+            // phone's events by it: `link/lanes.rs`).
+            Some(count as u64 + 1)
+        }
+        Err(e) => {
+            tracing::debug!("Agents: a log line couldn't be written ({})", e.kind());
+            None
+        }
     }
 }
 
 /// Agent `id`'s log, oldest first (lines that don't read are left out).
 pub fn log_read(id: &str) -> Vec<Value> {
+    log_read_numbered(id).into_iter().map(|(_, v)| v).collect()
+}
+
+/// Agent `id`'s log with each event's line in the file (from 1), oldest
+/// first; lines that don't read are left out, their numbers kept.
+pub fn log_read_numbered(id: &str) -> Vec<(u64, Value)> {
     let Some(path) = log_path(id) else { return Vec::new() };
     std::fs::read_to_string(path)
-        .map(|s| s.lines().filter_map(|l| serde_json::from_str::<Value>(l).ok()).collect())
+        .map(|s| s.lines().enumerate().filter_map(|(i, l)| serde_json::from_str::<Value>(l).ok().map(|v| (i as u64 + 1, v))).collect())
         .unwrap_or_default()
 }
 

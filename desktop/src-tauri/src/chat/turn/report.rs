@@ -182,10 +182,46 @@ async fn report(id: &str, n: u32) {
     tracing::info!(id, turn = n, by_model, "Agents: reported in its chat");
     emit(&agent, n, conv, Some(&message_id), &marker_id);
     if speaks(&agent) {
+        // Where it's said follows who asked (Remote Control, 2026-11-08): a
+        // turn asked from a phone on that phone, never this PC's speakers.
+        let asked = agent.turn_list.iter().find(|t| t.n == n).and_then(|t| t.message_id.clone()).or_else(|| agent.message_id.clone());
+        let by = crate::agents::remote::phone_of_turn(&agent.id, n, asked.as_deref());
         let (reply, message_id) = (reply.clone(), message_id.clone());
-        tauri::async_runtime::spawn(async move { say(&reply, &message_id).await });
+        match said_where(by, crate::link::phone_connected) {
+            Said::Pc => {
+                tauri::async_runtime::spawn(async move { say(&reply, &message_id).await });
+            }
+            Said::Phone(device) => {
+                tauri::async_runtime::spawn(async move {
+                    crate::link::say_report(&device, &reply, &message_id).await;
+                });
+            }
+            Said::Nowhere => tracing::info!(id, turn = n, "Agents: a report not said (the phone that asked isn't connected)"),
+        }
     }
     notice(&agent, &reply);
+}
+
+/// Where a report is said.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Said {
+    /// This PC's speakers: the turn was asked here.
+    Pc,
+    /// That phone (Yap Link's voice to it): it asked, and it's connected.
+    Phone(String),
+    /// Not at all: the phone that asked has gone (the person isn't at the
+    /// PC; the report is in the chat).
+    Nowhere,
+}
+
+/// **Where agent turn's report is said** (`asked_by`: the phone that asked
+/// for it, if one did). Pure.
+pub fn said_where(asked_by: Option<String>, connected: impl Fn(&str) -> bool) -> Said {
+    match asked_by {
+        None => Said::Pc,
+        Some(d) if connected(&d) => Said::Phone(d),
+        Some(_) => Said::Nowhere,
+    }
 }
 
 /// The page hears the report: `{agent, turn, conversation, messageId,
@@ -387,6 +423,20 @@ mod tests {
         let v = serde_json::to_value(&marker).unwrap();
         assert_eq!(v["kind"], "agentReport");
         assert!(serde_json::to_value(ChatMessage::default()).unwrap().get("kind").is_none());
+    }
+
+    #[test]
+    fn a_report_is_said_where_it_was_asked_never_on_this_pc_for_a_phone() {
+        // Asked at the PC: its speakers.
+        assert_eq!(said_where(None, |_| true), Said::Pc);
+        // Asked from a phone that's connected: on that phone.
+        assert_eq!(said_where(Some("p-office".into()), |d| d == "p-office"), Said::Phone("p-office".into()));
+        // That phone gone: not said at all (never the PC's speakers).
+        assert_eq!(said_where(Some("p-office".into()), |_| false), Said::Nowhere);
+        // The routing reads the phone's question from the turn (agents/remote.rs).
+        crate::agents::remote::asked("chat:4:2", "p-office");
+        assert_eq!(said_where(crate::agents::remote::phone_of_turn("ab12", 1, Some("chat:4:2")), |_| true), Said::Phone("p-office".into()));
+        assert_eq!(said_where(crate::agents::remote::phone_of_turn("ab12", 1, Some("chat:4:5")), |_| true), Said::Pc);
     }
 
     #[test]

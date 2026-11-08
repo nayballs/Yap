@@ -103,9 +103,10 @@ The feature's name, **Yap Code**, is one constant on each side ([Names](#names))
   built (`code_chat::with_new`, `adopt_new`).
 - **Asked out loud** with that new chat on screen: Chat tells Rust the
   workspace it shows (`chat_view_state`'s `codeFolder`), the question's new
-  conversation is a Code chat there (`assistant::new_code_chat`; never a
-  phone's), and its `yap-assistant-turn` carries `codeFolder`, so Chat stays
-  on the Code side.
+  conversation is a Code chat there (`assistant::new_code_chat`; not what
+  the PC shows for a phone's: a phone with Remote Control names its own with
+  `code_new`, `Phone::new_code_folder`), and its `yap-assistant-turn` carries
+  `codeFolder`, so Chat stays on the Code side.
 - **An empty Code chat** (`CodeEmpty.svelte`): the `</>` mark, "Work in
   garden-planner" and its path, one line (`CODE_INTRO`), three prompts that
   fill the box and are never sent by themselves (`CODE_PROMPTS`). When
@@ -732,7 +733,10 @@ or not.
   is.
 - **Read aloud** (`agents_speak`): "voice" (the default: when the agent was asked
   out loud or dictated into Chat), "always" or "never". Once the speaker and
-  the mic are free (up to 5 minutes); never in a meeting or a call.
+  the mic are free (up to 5 minutes); never in a meeting or a call. **Where**
+  follows who asked (2026-11-08, `said_where`): a turn asked from a paired
+  phone (`agents::remote::phone_of_turn`) is said on that phone (Yap Link's
+  voice to it), never this PC's speakers; that phone gone, not said at all.
 - **`yap-agent-report`**: the open chat reloads and shows it; it **never
   switches** the chat shown (the Voice Assistant's follow does).
 - **"Agent done: garden-planner"** (`agentDone`, Info, held over a dictation):
@@ -742,6 +746,42 @@ or not.
   question"; a plan already allowed has none. Open brings up the main window on the
   agent's chat and its tab (`open_agent`: `yap-assistant-turn {phase: "open"}` and
   `yap-agent-open`). Its chat deleted: the notice alone.
+
+## Remote Control (the phone)
+
+2026-11-08, wave 1 (the wire and the PC's side; the phone's screens are wave
+2): a paired phone (Yap Link) may follow and steer Yap Code — the Code side's
+list, an agent's live view, its Allow once / Deny and plan cards, the ask-first
+card, Stop, Continue, "Tell the agent…", Go ahead, Undo (after the phone's
+confirm), the Mode up to Auto, a new Code chat in an existing workspace.
+Off by default (Settings → Phone → Remote Control), each phone ticked for it,
+each workspace allowing it (its **Environment card**, opened from the "Code ·
+garden-planner" label: `CodeEnvironment.svelte`). Every message is checked
+by the PC; the whole of it — the messages, the gates, the fresh-tap rule, the
+lanes — is in [link.md](./link.md#remote-control-yap-code-from-the-phone-2026-11-08).
+
+What it changes here:
+
+- **A phone's turn runs at most at Auto** (`agents/remote.rs` `PHONE_MAX`),
+  never Bypass, whatever the chat's Mode: a turn whose request was a phone's
+  question (remembered as it's saved) or the phone's own action
+  (`runner::Ask::phone`: Continue, Go ahead, "Tell the agent…") is held there
+  when it starts (`runner::turn`), and `start_agent` / `message_agent` lower
+  it there too. A phone's words never join a turn starting above Auto.
+- **Its report is said on that phone** ([Reports](#reports)).
+- **Answers say who gave them**: `yap-claude-approve-done` gains `by` (`"pc"`,
+  `"phone"` with `byName` and `byDevice`, `null`), the thread's card closes
+  "Allowed from Kitchen tablet · Run a command: npm test"
+  (`agents.remoteAnswers`, `AgentApprove.svelte`), and the agent's log has
+  the line where it happened (`AgentEvent::remote`, `runner::note_remote`);
+  the trail is `remote_control.json`'s (who, what, which agent, never the
+  command).
+- **A chat's Mode changing** goes out as `yap-agent-mode {conversation, mode}`
+  (`agent_mode_set`, and a phone's `set_mode`).
+- **An agent's events** reach a watching phone from `runner::emit` with their
+  log line (`store::log_append` returns it; `store::log_read_numbered`).
+- **The PC kept awake** while agents work and Remote Control is on
+  (`shell/awake.rs`, "Keep this PC awake while agents work").
 
 ## Paying: your plan or a key
 
@@ -991,7 +1031,11 @@ Rust (`desktop/src-tauri/src/`):
   plain words, the to-do list; pure) · `diff.rs` (an edit's diff; pure) ·
   `consent.rs` (whose idea an agent is; pure) · `code_chat.rs` (Code chats) ·
   `voice.rs` (the spoken yes or no) · `approve_card.rs` (a permission prompt
-  on the Yap bar) · `commands.rs`.
+  on the Yap bar) · `remote.rs` (Remote Control's records: the phones'
+  ticks, the workspaces' switches, a phone's turns, the audit trail;
+  `remote_control.json`) · `commands.rs`.
+- `link/code.rs` (+ `code/`) — Remote Control's side of Yap Link: the phone's
+  Code messages through their gates ([link.md](./link.md)).
 - `chat/tools/agents.rs` — the four tools, for the tool loop and a plan chat.
 - `chat/turn/report.rs` — the report.
 - `integrations/claude_live/agents.rs` and `turn.rs` — the agent tools from a
@@ -1017,7 +1061,8 @@ Pages (`desktop/src/lib/`): `views/chat/` (`ChatSideSwitch`,
 | `yap-agent-report` | `{agent, turn, conversation, messageId, markerId, status}` — the turn it reports, and its status; `messageId` null when a newer question came first |
 | `yap-agent-open` | `{id, conversation}` (with `yap-assistant-turn {phase: "open", conversationId, show: true}`) |
 | `yap-claude-approve` | `{id, run, conversation, origin, tool, summary, detail, label, askedTs}` — `run` is the agent's id; a plan's (`tool` "ExitPlanMode"): `summary` "The plan is ready", `detail` the plan |
-| `yap-claude-approve-done` | `{id, run, outcome}` — allowed \| denied \| timedOut \| ended \| cancelled |
+| `yap-claude-approve-done` | `{id, run, outcome, by, byName?, byDevice?}` — outcome allowed \| denied \| timedOut \| ended \| cancelled; `by` "pc", "phone" (a paired phone: its name and id, Remote Control) or null |
+| `yap-agent-mode` | `{conversation, mode}` — a chat's Mode changed (the chip, or a phone) |
 | `yap-code-chat` | `{conversations, folder, removed?}` — those chats are Code chats in `folder` now (`null`: plain); `removed`: a workspace removed in Settings, its name; no conversations: the workspaces changed |
 
 **Chat's stream**: `{kind: "agent", agent: {id, folder, status, mode, conversation?, turn?}}`
@@ -1178,8 +1223,8 @@ Code, Open in terminal's blank tab, Chat's thread following a report.
 
 - A question from Claude Code (`AskUserQuestion`) has no card: it's denied,
   and Claude is told to choose and say what it chose in its summary.
-- An agent asked from the phone (Yap Link) has its report spoken on this PC's
-  speakers, not the phone's.
+- Remote Control's phone screens (wave 2): the PC's side and the wire are in
+  ([Remote Control](#remote-control-the-phone)).
 - Codex as a second engine on the same runner: later.
 
 ## Open questions

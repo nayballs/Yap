@@ -945,7 +945,11 @@ function turnsOf(messages) {
   for (const m of Array.isArray(messages) ? messages : []) {
     if (!m || typeof m.text !== 'string') continue;
     const blank = { id: ++S.turnId, q: '', a: '', final: true, cancelled: false, typed: true, answerId: '', pictures: 0, pics: [] };
-    if (m.role === 'user') {
+    if (m.role === 'user' && m.kind === 'agentReport') {
+      // An agent's report (Yap Code): never the person's own bubble; its
+      // first line as a quiet note above the answer that follows it.
+      turns.push({ ...blank, q: String(m.text).split('\n')[0], report: true });
+    } else if (m.role === 'user') {
       turns.push({ ...blank, q: m.text, typed: !m.voice, pictures: Math.max(0, Number(m.pictures) || 0) });
     } else if (m.role === 'assistant') {
       let t = turns[turns.length - 1];
@@ -1237,7 +1241,14 @@ function renderConvo() {
       chip.append(icon('', PHOTO), document.createTextNode(t.pictures === 1 ? '1 picture' : `${t.pictures} pictures`));
       li.appendChild(chip);
     }
-    if (t.q || !t.pictures) {
+    if (t.report) {
+      // An agent's report (its marker): a note, not the person's bubble.
+      const r = document.createElement('p');
+      r.className = 'report';
+      r.dataset.testid = 'report';
+      r.textContent = t.q || 'Agent report';
+      li.appendChild(r);
+    } else if (t.q || !t.pictures) {
       const q = document.createElement('p');
       q.className = 'q';
       q.dataset.testid = 'heard';

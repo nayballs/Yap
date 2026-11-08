@@ -224,6 +224,10 @@ export const FIELD_DEFAULTS = {
   chatCleanSpeech: true,
   // Settings → Phone (link.rs): Yap Link for paired phones on the home Wi-Fi.
   linkEnabled: false,
+  // Settings → Phone → Remote Control (link/code.rs): Yap Code from the paired
+  // phones ticked for it; and the PC kept awake while agents work (shell/awake.rs).
+  linkRemoteControl: false,
+  linkKeepAwake: true,
   spokenLength: '1m',
   openApps: true,
   appsBlocked: [],

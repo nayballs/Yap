@@ -34,7 +34,12 @@
 //! - `chats.rs` — Chat's conversations for the phone's drawer, a thread opened;
 //! - `pictures.rs` — a question's pictures as they come from the phone;
 //! - `lan.rs` — this PC's addresses, which peers may connect, Public networks;
-//! - `wire.rs` — the protocol (v1, shared with the phone's page, `phone/web/page/`).
+//! - `wire.rs` — the protocol (v1, shared with the phone's page, `phone/web/page/`;
+//!   the Code side's part defined once in `desktop/src/lib/core/codeWire.js`);
+//! - `code.rs` (+ `code/gates.rs`, `code/view.rs`) — **Remote Control** (2026-11-08):
+//!   Yap Code from a paired phone, every message through the gates;
+//! - `lanes.rs` — a phone's way out in two lanes: the control lane (capped)
+//!   and the watched agent's lane (coalesced, bounded, resync when full).
 //!
 //! The long-term design (a PWA on Yap's website over WebRTC, the private
 //! repo's `phone-remote-design.md`) keeps these messages: moving there is a
@@ -43,8 +48,10 @@
 
 pub mod cert;
 pub mod chats;
+pub mod code;
 pub mod devices;
 pub mod lan;
+pub mod lanes;
 pub mod models;
 pub mod page;
 pub mod pairing;
@@ -88,9 +95,17 @@ struct Ask {
 /// A connected phone.
 pub struct Live {
     pub device: String,
+    /// Its name as it said hello ("Android · Firefox").
+    pub name: String,
     pub tx: Tx,
     /// Cuts it off (it was removed).
     pub kill: Arc<tokio::sync::Notify>,
+    /// The conversation its questions go to (its session's).
+    pub chat: Arc<Mutex<wire::ChatRef>>,
+    /// Its Code side (Remote Control).
+    pub code: Arc<code::PhoneCode>,
+    /// Asks its session to do something (an agent's report said there).
+    pub cmd: tokio::sync::mpsc::UnboundedSender<session::Cmd>,
 }
 
 /// **What the running server shares** with its connections.
@@ -105,6 +120,8 @@ pub struct Hub {
     /// these, never anything else in Chat.
     answers: Mutex<Given>,
     ids: AtomicU64,
+    /// Remote Control's own (`code.rs`): which phone was sent which card…
+    pub code: code::Shared,
 }
 
 /// The answers kept per phone for ▶.
@@ -194,23 +211,26 @@ impl Hub {
     pub fn connected(&self, session: u64, live: Live) {
         locked(&self.live).insert(session, live);
         let _ = self.app.emit(CHANGED, ());
+        crate::bar::refresh(&self.app);
     }
 
     pub fn disconnected(&self, session: u64) {
         locked(&self.live).remove(&session);
         let _ = self.app.emit(CHANGED, ());
+        crate::bar::refresh(&self.app);
     }
 
     fn connected_devices(&self) -> Vec<String> {
         locked(&self.live).values().map(|l| l.device.clone()).collect()
     }
 
-    /// `ready`: this PC, Chat's model and the others, what it answers beyond
-    /// v1, and what Chat's picker shows.
-    pub fn ready(&self) -> Out {
+    /// `ready` for phone `device`: this PC, Chat's model and the others,
+    /// what it answers beyond v1, what Chat's picker shows, and whether
+    /// Remote Control is on for it (`code.rs`).
+    pub fn ready_for(&self, device: &str) -> Out {
         let cfg = crate::config::load();
         let (model, models) = models::listed(&cfg);
-        Out::Ready { pc: lan::pc_name(), model, models, can: wire::CAN.to_vec(), picker: Some(models::picker(&cfg)) }
+        Out::Ready { pc: lan::pc_name(), model, models, can: wire::CAN.to_vec(), picker: Some(models::picker(&cfg)), code: Some(code::ready_code(device)) }
     }
 
     /// Phone `device` was given answer `id` (▶ may read it).
@@ -225,9 +245,9 @@ impl Hub {
 
     /// Chat's model changed (here, in Chat, from a phone): every phone hears.
     fn broadcast_ready(&self) {
-        let ready = self.ready();
-        for l in locked(&self.live).values() {
-            say(&l.tx, ready.clone());
+        let live: Vec<(Tx, String)> = locked(&self.live).values().map(|l| (l.tx.clone(), l.device.clone())).collect();
+        for (tx, device) in live {
+            say(&tx, self.ready_for(&device));
         }
     }
 
@@ -253,7 +273,7 @@ struct Running {
     hub: Arc<Hub>,
     stop: tokio::sync::watch::Sender<bool>,
     port: u16,
-    listening: tauri::EventId,
+    listening: Vec<tauri::EventId>,
 }
 
 static RUNNING: Mutex<Option<Running>> = Mutex::new(None);
@@ -325,6 +345,7 @@ fn start(app: &AppHandle) {
         live: Mutex::new(HashMap::new()),
         answers: Mutex::new(Given::default()),
         ids: AtomicU64::new(0),
+        code: code::Shared::default(),
     });
     let (stop, stopped) = tokio::sync::watch::channel(false);
     for l in std::iter::once(listener).chain(v6) {
@@ -338,7 +359,27 @@ fn start(app: &AppHandle) {
         });
     }
     let listen_hub = Arc::clone(&hub);
-    let listening = app.listen("yap-chat-model-changed", move |_| listen_hub.broadcast_ready());
+    let mut listening = vec![app.listen("yap-chat-model-changed", move |_| listen_hub.broadcast_ready())];
+    // Remote Control (`code.rs`): what Yap Code says goes to the phones
+    // that may follow it (each filtered there: the switches, the workspace).
+    type OnEvent = fn(&Arc<Hub>, &serde_json::Value);
+    let code_events: [(&str, OnEvent); 5] = [
+        (crate::integrations::claude_live::APPROVE_EVENT, code::on_approve),
+        (crate::integrations::claude_live::APPROVE_DONE_EVENT, code::on_approve_done),
+        (crate::chat::turn::AGENT_REPORT_EVENT, code::on_report),
+        (code::MODE_EVENT, code::on_mode),
+        (crate::chat::stream::ANSWERING_EVENT, code::on_answering),
+    ];
+    for (event, on) in code_events {
+        let h = Arc::clone(&hub);
+        listening.push(app.listen(event, move |e| {
+            if let Ok(v) = serde_json::from_str::<serde_json::Value>(e.payload()) {
+                on(&h, &v);
+            }
+        }));
+    }
+    code::on_answering(&hub, &crate::chat::stream::chat_answering());
+    code::refresh(&crate::config::load());
     tracing::info!(port, addresses = addresses.len(), "Yap Link: listening for phones on the home network");
     *running = Some(Running { hub, stop, port, listening });
     drop(running);
@@ -350,7 +391,9 @@ pub fn stop() {
     let Some(r) = locked(&RUNNING).take() else { return };
     let _ = r.stop.send(true);
     r.hub.close_all();
-    r.hub.app.unlisten(r.listening);
+    for id in r.listening {
+        r.hub.app.unlisten(id);
+    }
     tracing::info!("Yap Link: off");
     let _ = r.hub.app.emit(CHANGED, ());
 }
@@ -367,6 +410,156 @@ pub fn titled(id: u64, title: &str) {
     for l in locked(&h.live).values() {
         say(&l.tx, out.clone());
     }
+}
+
+// ---- Remote Control (2026-11-08, `code.rs`) -----------------------------------------------
+
+/// **An agent's event** (`agents::runner::emit`, `line` its log line): the
+/// phones watching that agent hear it (Remote Control).
+pub fn agent_event(id: &str, line: Option<u64>, event: serde_json::Value) {
+    if let Some(h) = hub() {
+        code::agent_event(&h, id, line, event);
+    }
+}
+
+/// **The config was saved**: Remote Control's switches again, and every
+/// phone told when they changed what it may do; the bar's phone mark; the
+/// PC kept awake or not.
+pub fn config_changed(prev: &crate::config::YapConfig, cfg: &crate::config::YapConfig) {
+    code::refresh(cfg);
+    let changed = prev.link_remote_control != cfg.link_remote_control || prev.agents_enabled != cfg.agents_enabled || prev.link_keep_awake != cfg.link_keep_awake;
+    if !changed {
+        return;
+    }
+    tracing::info!(on = cfg.link_remote_control, "Remote Control: its switches changed");
+    if let Some(h) = hub() {
+        code::ready_all(&h);
+        crate::bar::refresh(&h.app);
+    }
+    crate::shell::awake::poke();
+}
+
+/// **The phone the bar's mark is for**: the first connected phone that may
+/// use Remote Control now (its name).
+pub fn remote_phone() -> Option<String> {
+    let h = hub()?;
+    let live: Vec<(String, String)> = locked(&h.live).values().map(|l| (l.device.clone(), l.name.clone())).collect();
+    live.into_iter().find(|(d, _)| code::on_for(d)).map(|(_, n)| n)
+}
+
+/// Is phone `device` connected now?
+pub fn phone_connected(device: &str) -> bool {
+    hub().is_some_and(|h| locked(&h.live).values().any(|l| l.device == device))
+}
+
+/// How long an agent's report waits to be said on its phone.
+const REPORT_WAIT: std::time::Duration = std::time::Duration::from_secs(5 * 60);
+
+/// **An agent's report, said on the phone that asked for it** (never this
+/// PC's speakers): once Yap's voice and the phone are free (up to 5
+/// minutes). `false`: that phone isn't connected (or stayed busy), so it
+/// isn't said at all.
+pub async fn say_report(device: &str, text: &str, message_id: &str) -> bool {
+    let since = std::time::Instant::now();
+    loop {
+        if crate::voice::tts::meeting_quiet().is_some() {
+            tracing::info!("Remote Control: a report not said on the phone (a meeting or a call)");
+            return false;
+        }
+        let Some(cmd) = hub().and_then(|h| locked(&h.live).values().find(|l| l.device == device).map(|l| l.cmd.clone())) else {
+            tracing::info!("Remote Control: a report not said (its phone isn't connected)");
+            return false;
+        };
+        if crate::voice::tts::speaking_id().is_none() {
+            let (reply, said) = tokio::sync::oneshot::channel();
+            let sent = cmd.send(session::Cmd::Say { text: text.to_string(), message_id: message_id.to_string(), reply }).is_ok();
+            if sent && said.await.unwrap_or(false) {
+                tracing::info!(chars = text.chars().count(), "Remote Control: a report said on the phone that asked");
+                return true;
+            }
+        }
+        if since.elapsed() > REPORT_WAIT {
+            tracing::info!("Remote Control: a report not said on the phone (it stayed busy)");
+            return false;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+    }
+}
+
+/// A phone in Remote Control's lists (Settings → Phone, the Environment card).
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RemotePhone {
+    pub id: String,
+    pub name: String,
+    pub connected: bool,
+    /// Ticked for Remote Control.
+    pub remote: bool,
+}
+
+/// **Remote Control's state** for a page: the switch and what it needs,
+/// workspace `workspace`'s switch, the paired phones.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RemoteStatus {
+    /// Settings → Phone → Remote Control.
+    pub on: bool,
+    /// Yap Link on (Use Yap from your phone).
+    pub link: bool,
+    /// Yap Code on.
+    pub yap_code: bool,
+    /// Its workspace allows it (none asked: true).
+    pub workspace_allowed: bool,
+    pub phones: Vec<RemotePhone>,
+}
+
+/// The Environment card's and Settings' Remote Control (`workspace`: a
+/// workspace's name, for its switch).
+#[tauri::command]
+pub fn link_remote_status(workspace: Option<String>) -> RemoteStatus {
+    let cfg = crate::config::load();
+    let connected = hub().map(|h| h.connected_devices()).unwrap_or_default();
+    RemoteStatus {
+        on: cfg.link_remote_control,
+        link: cfg.link_enabled,
+        yap_code: cfg.agents_enabled,
+        workspace_allowed: workspace.as_deref().is_none_or(crate::agents::remote::workspace_allows),
+        phones: devices::list()
+            .into_iter()
+            .map(|d| RemotePhone { connected: connected.contains(&d.id), remote: crate::agents::remote::phone_on(&d.id), id: d.id, name: d.name })
+            .collect(),
+    }
+}
+
+/// **Tick a phone for Remote Control** (Settings → Phone), or not: it's
+/// told at once what it may do now.
+#[tauri::command]
+pub fn link_phone_remote(app: AppHandle, id: String, on: bool) -> bool {
+    if !devices::list().iter().any(|d| d.id == id) {
+        return false;
+    }
+    let changed = crate::agents::remote::set_phone(&id, on);
+    tracing::info!(on, changed, "Remote Control: a phone's tick");
+    if let Some(h) = hub() {
+        code::ready_all(&h);
+    }
+    let _ = app.emit(CHANGED, ());
+    crate::bar::refresh(&app);
+    changed
+}
+
+/// **A workspace's Remote Control switch** (its Environment card): off, no
+/// phone sees or acts on it.
+#[tauri::command]
+pub fn link_workspace_remote(app: AppHandle, name: String, on: bool) -> bool {
+    let changed = crate::agents::remote::set_workspace(&name, on);
+    tracing::info!(on, changed, "Remote Control: a workspace's switch");
+    if let Some(h) = hub() {
+        // Its agents' watchers let go at their next event; the dots now.
+        code::dirty(&h);
+    }
+    let _ = app.emit(CHANGED, ());
+    changed
 }
 
 // ---- commands ---------------------------------------------------------------------------
@@ -388,6 +581,14 @@ pub struct PhoneView {
     pub paired: u64,
     pub last_seen: u64,
     pub connected: bool,
+    /// Ticked for Remote Control.
+    pub remote: bool,
+    /// Its last remote action ("Allowed a step in garden-planner") and when
+    /// (unix seconds).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub last_action: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub last_action_ts: Option<u64>,
 }
 
 /// Settings → Phone's state.
@@ -439,7 +640,19 @@ fn status_without_networks() -> Status {
         public: None,
         phones: devices::list()
             .into_iter()
-            .map(|d| PhoneView { connected: connected.contains(&d.id), id: d.id, name: d.name, paired: d.paired, last_seen: d.last_seen })
+            .map(|d| {
+                let last = crate::agents::remote::last_of(&d.id);
+                PhoneView {
+                    connected: connected.contains(&d.id),
+                    remote: crate::agents::remote::phone_on(&d.id),
+                    last_action: last.as_ref().map(|(w, _)| w.clone()),
+                    last_action_ts: last.map(|(_, ts)| ts),
+                    id: d.id,
+                    name: d.name,
+                    paired: d.paired,
+                    last_seen: d.last_seen,
+                }
+            })
             .collect(),
         asks: hub.map(|h| h.asks()).unwrap_or_default(),
     }
@@ -516,8 +729,11 @@ pub fn link_pair_answer(id: u64, allow: bool) -> bool {
 #[tauri::command]
 pub fn link_remove(app: AppHandle, id: String) -> bool {
     let gone = devices::remove(&id);
+    // Its Remote Control tick and marks go with it (its trail stays).
+    crate::agents::remote::forget_phone(&id);
     if let Some(h) = hub() {
         h.cut_off(&id);
+        code::forget(&h, &id);
     }
     tracing::info!(gone, "Yap Link: a phone removed");
     let _ = app.emit(CHANGED, ());

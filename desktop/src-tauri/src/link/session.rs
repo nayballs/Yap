@@ -42,6 +42,13 @@
 //! voice, the Voice Assistant's spoken answer, said on the phone) when any
 //! of the box's words came from Talk, else as a typed one.
 //!
+//! **Remote Control** (2026-11-08, `code.rs`): the Code side's messages go
+//! through its gates (`code::handle`); `ready` says whether this phone may
+//! use them (`ready.code`); a phone's question asked into a Code chat is
+//! remembered as the phone's (`agents/remote.rs`: its agent's turn runs at
+//! most at Auto, its report is said here — [`Cmd::Say`]); `code_new` makes
+//! the next new chat a Code chat in that workspace.
+//!
 //! **The hello** carries the phone's device, the QR's token, or both (a tab
 //! restored with an old `#pair=`, the code scanned again): the device counts
 //! first (`pairing::judge`). Only a hello that's refused waits out its
@@ -87,6 +94,14 @@ const NOT_HERE: &str = "That answer isn't in Chat on your PC any more, so Yap ca
 /// A conversation the phone opened that's gone (deleted, archived).
 const CHAT_GONE: &str = "That chat isn't in Chat on your PC any more. Your next question starts a new one.";
 
+/// **What the PC asks a phone's session to do** (`link.rs`).
+pub enum Cmd {
+    /// Say an agent's report on this phone (its turn was asked from here):
+    /// `reply` true once its voice started, false while the phone is busy
+    /// with a question (asked again later).
+    Say { text: String, message_id: String, reply: tokio::sync::oneshot::Sender<bool> },
+}
+
 /// **One question's turn**, shared by the session, its task and the Voice
 /// Assistant's path (`assistant::Phone`).
 pub struct Turn {
@@ -116,6 +131,8 @@ pub struct Turn {
     answered: Arc<AtomicBool>,
     /// A voice was started for it (its end says idle).
     voiced: AtomicBool,
+    /// A new Code chat's workspace (`code_new`), taken by its first question.
+    new_code: Arc<Mutex<Option<String>>>,
 }
 
 impl Turn {
@@ -138,7 +155,13 @@ impl Turn {
             speaking: Arc::new(AtomicBool::new(false)),
             answered: Arc::new(AtomicBool::new(false)),
             voiced: AtomicBool::new(false),
+            new_code: Arc::clone(&asking.code.new_code),
         })
+    }
+
+    /// Still under way: its answer not in yet, or its voice going.
+    fn busy(&self) -> bool {
+        crate::chat::assistant::Phone::current(self) && (!self.answered.load(Ordering::SeqCst) || self.speaking.load(Ordering::SeqCst))
     }
 
     /// **Abandon it**: no longer current (its frames still queued are
@@ -228,6 +251,19 @@ impl crate::chat::assistant::Phone for Turn {
         self.tell(Out::Chat { id: conversation, title });
     }
 
+    fn question_saved(&self, conversation: u64, index: usize) {
+        // This phone's question (Remote Control: an agent it asks for runs at
+        // most at Auto, and its report is said here).
+        crate::agents::remote::asked(&format!("chat:{conversation}:{index}"), &self.device);
+    }
+
+    fn new_code_folder(&self) -> Option<String> {
+        if self.chat != ChatRef::New {
+            return None;
+        }
+        self.new_code.lock().unwrap_or_else(|p| p.into_inner()).take()
+    }
+
     fn pictures(&self) -> (Vec<String>, bool) {
         (self.pictures.lock().unwrap_or_else(|p| p.into_inner()).clone(), self.as_text)
     }
@@ -276,13 +312,24 @@ struct Asking {
     chat: Arc<Mutex<ChatRef>>,
     /// The pictures the next question takes, as they come.
     pictures: Pictures,
+    /// Its name as it said hello, and its Code side (Remote Control).
+    name: String,
+    code: Arc<crate::link::code::PhoneCode>,
 }
 
 impl Asking {
     /// The phone said which conversation (an `open_chat`, a `new_chat`, a
-    /// question's `chat`).
+    /// question's `chat`). Another than a new one: no new Code chat waits.
     fn set_chat(&self, chat: ChatRef) {
         *self.chat.lock().unwrap_or_else(|p| p.into_inner()) = chat;
+        if chat != ChatRef::New {
+            self.code.new_code.lock().unwrap_or_else(|p| p.into_inner()).take();
+        }
+    }
+
+    /// A question being recorded, or one being answered or said.
+    fn busy(&self) -> bool {
+        self.recording || self.turn.as_ref().is_some_and(|t| t.busy())
     }
 }
 
@@ -295,7 +342,9 @@ where
     let config = WebSocketConfig::default().max_message_size(Some(wire::MAX_FRAME)).max_frame_size(Some(wire::MAX_FRAME));
     let ws = tokio_tungstenite::WebSocketStream::from_partially_read(stream, part, Role::Server, Some(config)).await;
     let (mut sink, mut incoming) = ws.split();
-    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<Wire>();
+    // Two lanes out (`lanes.rs`): the control lane first and capped, the
+    // watched agent's events bounded and coalesced.
+    let (tx, mut rx) = crate::link::lanes::channel();
     let latest = Arc::new(AtomicU64::new(0));
     let sent = Arc::new(AtomicU64::new(0));
     // The writer: text as it comes, a turn's audio only while it's the latest.
@@ -370,9 +419,17 @@ where
     // ---- connected ----
     devices::seen(&device_id, &name);
     let kill = Arc::new(tokio::sync::Notify::new());
-    hub.connected(session, Live { device: device_id.clone(), tx: tx.clone(), kill: Arc::clone(&kill) });
-    say(&tx, hub.ready());
+    let chat = Arc::new(Mutex::new(ChatRef::Choose));
+    let code = Arc::new(crate::link::code::PhoneCode::default());
+    let (cmd, mut cmds) = tokio::sync::mpsc::unbounded_channel::<Cmd>();
+    say(&tx, hub.ready_for(&device_id));
     say(&tx, Out::State { phase: Phase::Idle });
+    hub.connected(
+        session,
+        Live { device: device_id.clone(), name: name.clone(), tx: tx.clone(), kill: Arc::clone(&kill), chat: Arc::clone(&chat), code: Arc::clone(&code), cmd },
+    );
+    // Remote Control on for it: the status dots and the cards waiting.
+    crate::link::code::connected(&hub, &tx, &device_id, &code);
     tracing::info!(session, "Yap Link: a phone connected");
 
     let mut asking = Asking {
@@ -384,12 +441,18 @@ where
         audio: Vec::new(),
         turn: None,
         started: None,
-        chat: Arc::new(Mutex::new(ChatRef::Choose)),
+        chat,
         pictures: Pictures::default(),
+        name: name.clone(),
+        code,
     };
     loop {
         let next = tokio::select! {
             m = incoming.next() => m,
+            Some(c) = cmds.recv() => {
+                on_cmd(&hub, session, &latest, &mut asking, c);
+                continue;
+            }
             _ = kill.notified() => {
                 say(&tx, Out::Denied { reason: pairing::REMOVED.into() });
                 break;
@@ -531,6 +594,9 @@ where
     match devices::add(name) {
         Ok((device, secret)) => {
             tracing::info!("Yap Link: a phone was paired");
+            // Paired while Remote Control is on: ticked for it (one paired
+            // before stays off until ticked in Settings → Phone).
+            crate::agents::remote::paired(&device, crate::config::load().link_remote_control);
             say(tx, Out::Paired { device: DeviceCreds { id: device.clone(), secret } });
             let _ = hub.app.emit(crate::link::CHANGED, ());
             Some(device)
@@ -561,7 +627,54 @@ fn abandon(latest: &AtomicU64, asking: &mut Asking) -> bool {
     recording || was
 }
 
+/// **What the PC asked of this session** ([`Cmd`]).
+fn on_cmd(hub: &Arc<Hub>, session: u64, latest: &Arc<AtomicU64>, asking: &mut Asking, c: Cmd) {
+    match c {
+        Cmd::Say { text, message_id, reply } => {
+            // Never over a question being asked, answered or said.
+            if asking.busy() || crate::chat::assistant::is_off() {
+                let _ = reply.send(false);
+                return;
+            }
+            let _ = reply.send(true);
+            speak_on_phone(hub, session, latest, asking, &message_id, text);
+        }
+    }
+}
+
+/// **Say `text` on the phone** (answer `message_id` in Chat), whole, in
+/// Yap's voice, as its own turn: ▶ on an answer, and an agent's report said
+/// on the phone that asked for it.
+fn speak_on_phone(hub: &Arc<Hub>, session: u64, latest: &Arc<AtomicU64>, asking: &mut Asking, message_id: &str, text: String) {
+    hub.gave(&asking.device, message_id);
+    let turn_id = latest.fetch_add(1, Ordering::SeqCst) + 1;
+    let turn = Turn::new(turn_id, session, Arc::clone(latest), asking, true, Carries::default());
+    // Its answer is in: the voice's end says idle.
+    turn.answered.store(true, Ordering::SeqCst);
+    asking.turn = Some(Arc::clone(&turn));
+    let id = message_id.to_string();
+    tauri::async_runtime::spawn(async move {
+        use crate::chat::assistant::Phone;
+        match turn.voice(&id) {
+            Ok(feed) => {
+                feed.push(crate::voice::tts::utterances(&text));
+                feed.close();
+            }
+            Err(e) => {
+                tracing::info!("Yap Link: couldn't say it on the phone ({e})");
+                turn.tell(Out::Error { message: format!("Yap couldn't read it out. {e}") });
+                turn.tell(Out::State { phase: Phase::Idle });
+            }
+        }
+    });
+}
+
 fn on_message(hub: &Arc<Hub>, tx: &Tx, session: u64, latest: &Arc<AtomicU64>, asking: &mut Asking, m: In) {
+    if crate::link::code::is_code(&m) {
+        // Remote Control: through its gates, every one, on every message.
+        let cx = crate::link::code::Ctx { hub, tx, device: &asking.device, name: &asking.name, phone: &asking.code, chat: &asking.chat };
+        return crate::link::code::handle(&cx, m);
+    }
     match m {
         In::Ping => say(tx, Out::Pong),
         In::Hello { .. } => say(tx, Out::Error { message: "Already connected.".into() }),
@@ -633,12 +746,15 @@ fn on_message(hub: &Arc<Hub>, tx: &Tx, session: u64, latest: &Arc<AtomicU64>, as
         }
         In::Chats => {
             let items = crate::chat::chats::with_all(crate::link::chats::recents);
+            // A Code chat's workspace named (Remote Control on for it).
+            let items = crate::link::code::drawer(&asking.device, items);
             say(tx, Out::Chats { items });
         }
         In::OpenChat { id } => open_chat(hub, tx, asking, id),
         In::NewChat => {
             asking.set_chat(ChatRef::New);
-            say(tx, Out::Thread { id: None, title: String::new(), messages: Vec::new(), more: false });
+            asking.code.new_code.lock().unwrap_or_else(|p| p.into_inner()).take();
+            say(tx, empty_thread());
         }
         In::ReadAloud { id } => read_aloud(hub, tx, session, latest, asking, &id),
         In::SetModel { id, provider, model, base_url, file } => {
@@ -655,16 +771,18 @@ fn on_message(hub: &Arc<Hub>, tx: &Tx, session: u64, latest: &Arc<AtomicU64>, as
             if let Err(e) = set {
                 say(tx, Out::Error { message: e });
             }
-            say(tx, hub.ready());
+            say(tx, hub.ready_for(&asking.device));
         }
         In::SetEffort { level } => {
             let set = crate::link::models::set_effort(&hub.app, level.as_deref());
-            settled(hub, tx, set);
+            settled(hub, tx, &asking.device, set);
         }
         In::SetFast { on } => {
             let set = crate::link::models::set_fast(&hub.app, on);
-            settled(hub, tx, set);
+            settled(hub, tx, &asking.device, set);
         }
+        // (The Code side's: `code::handle`, above.)
+        _ => {}
     }
 }
 
@@ -677,7 +795,7 @@ fn open_chat(hub: &Arc<Hub>, tx: &Tx, asking: &mut Asking, id: u64) {
     let Some(conv) = conv else {
         asking.set_chat(ChatRef::New);
         say(tx, Out::Error { message: CHAT_GONE.into() });
-        say(tx, Out::Thread { id: None, title: String::new(), messages: Vec::new(), more: false });
+        say(tx, empty_thread());
         return;
     };
     asking.set_chat(ChatRef::Id(id));
@@ -687,21 +805,28 @@ fn open_chat(hub: &Arc<Hub>, tx: &Tx, asking: &mut Asking, id: u64) {
             hub.gave(&asking.device, answer);
         }
     }
-    tracing::info!(messages = messages.len(), more, "Yap Link: the phone opened a chat");
-    say(tx, Out::Thread { id: Some(id), title, messages, more });
+    // A Code chat's own parts (Remote Control on for this phone).
+    let (code, agents, cards) = crate::link::code::thread_parts(hub, &asking.device, id);
+    tracing::info!(messages = messages.len(), more, code = code.is_some(), "Yap Link: the phone opened a chat");
+    say(tx, Out::Thread { id: Some(id), title, messages, more, code, agents, cards });
+}
+
+/// A new chat's thread: nothing in it yet.
+fn empty_thread() -> Out {
+    Out::Thread { id: None, title: String::new(), messages: Vec::new(), more: false, code: None, agents: Vec::new(), cards: Vec::new() }
 }
 
 /// The effort or fast mode set from the phone: the chips on the PC read
 /// again, and every phone hears (`yap-chat-model-changed` with no scope, so
 /// Settings has nothing to adopt); refused, why, and the PC's own word.
-fn settled(hub: &Arc<Hub>, tx: &Tx, set: Result<(), String>) {
+fn settled(hub: &Arc<Hub>, tx: &Tx, device: &str, set: Result<(), String>) {
     match set {
         Ok(()) => {
             let _ = hub.app.emit("yap-chat-model-changed", serde_json::json!({ "scope": null }));
         }
         Err(e) => {
             say(tx, Out::Error { message: e });
-            say(tx, hub.ready());
+            say(tx, hub.ready_for(device));
         }
     }
 }
@@ -760,27 +885,8 @@ fn read_aloud(hub: &Arc<Hub>, tx: &Tx, session: u64, latest: &Arc<AtomicU64>, as
         say(tx, Out::Error { message: NOT_HERE.into() });
         return;
     };
-    let turn_id = latest.fetch_add(1, Ordering::SeqCst) + 1;
-    let turn = Turn::new(turn_id, session, Arc::clone(latest), asking, true, Carries::default());
-    // Its answer is in: the voice's end says idle.
-    turn.answered.store(true, Ordering::SeqCst);
-    asking.turn = Some(Arc::clone(&turn));
     tracing::info!(chars = text.chars().count(), "Yap Link: an answer read aloud on the phone");
-    let id = id.to_string();
-    tauri::async_runtime::spawn(async move {
-        use crate::chat::assistant::Phone;
-        match turn.voice(&id) {
-            Ok(feed) => {
-                feed.push(crate::voice::tts::utterances(&text));
-                feed.close();
-            }
-            Err(e) => {
-                tracing::info!("Yap Link: couldn't read the answer on the phone ({e})");
-                turn.tell(Out::Error { message: format!("Yap couldn't read it out. {e}") });
-                turn.tell(Out::State { phase: Phase::Idle });
-            }
-        }
-    });
+    speak_on_phone(hub, session, latest, asking, id, text);
 }
 
 /// An answer's words in Chat, by its id (`chat:<conversation>:<index>`).
@@ -866,7 +972,9 @@ async fn transcribe(app: &tauri::AppHandle, turn: &Turn, audio: Vec<f32>) -> Res
 fn code_chat_cleans(turn: &Turn) -> bool {
     use crate::chat::assistant::Phone;
     let cfg = crate::config::load();
-    crate::chat::assistant::phone_in_code_chat(&cfg, turn.chat()) && crate::ai::cleanup_styles::cleans_question(&cfg, true)
+    // (A new Code chat waiting for this question: `code_new`.)
+    let new_code = turn.chat() == ChatRef::New && turn.new_code.lock().unwrap_or_else(|p| p.into_inner()).is_some();
+    (crate::chat::assistant::phone_in_code_chat(&cfg, turn.chat()) || (cfg.agents_enabled && new_code)) && crate::ai::cleanup_styles::cleans_question(&cfg, true)
 }
 
 /// **Words for the phone's box**: transcribed, said back (`words`, or why

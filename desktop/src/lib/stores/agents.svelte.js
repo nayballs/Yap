@@ -21,6 +21,12 @@ export const agents = $state({
   steps: {},
   /** The permission prompts waiting, oldest first (`Pending`). */
   approvals: [],
+  /**
+   * Prompts answered from a paired phone (Remote Control, `by: "phone"`),
+   * newest last: `{id, run, conversation, tool, summary, outcome, byName}` —
+   * the thread's card closes saying so ("Allowed from Office phone").
+   */
+  remoteAnswers: [],
   /** `{id, conversation}`: an agent to show (its chat and tab), from the bar's or a notification's Open. */
   openWanted: null,
   /** agent id → the turn whose plan a report card's Go ahead sent on (its button stays used). */
@@ -142,6 +148,13 @@ export function initAgents() {
   }).catch(() => {});
   listen('yap-claude-approve-done', (e) => {
     const id = e.payload?.id;
-    if (id != null) agents.approvals = agents.approvals.filter((a) => a.id !== id);
+    if (id == null) return;
+    // Answered from a phone (Remote Control): the card closes with who.
+    const card = agents.approvals.find((a) => a.id === id);
+    if (e.payload?.by === 'phone' && card) {
+      const done = { id, run: card.run, conversation: card.conversation, tool: card.tool, summary: card.summary, outcome: e.payload.outcome, byName: e.payload.byName || 'your phone' };
+      agents.remoteAnswers = [...agents.remoteAnswers.filter((a) => a.id !== id), done].slice(-20);
+    }
+    agents.approvals = agents.approvals.filter((a) => a.id !== id);
   }).catch(() => {});
 }

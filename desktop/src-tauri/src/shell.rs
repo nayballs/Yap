@@ -3,6 +3,7 @@
 //! mode, and `yap.exe bench`. How it works: docs/architecture/app-shell.md.
 
 pub mod autostart;
+pub mod awake;
 pub mod bench;
 pub mod browsers;
 pub mod com;

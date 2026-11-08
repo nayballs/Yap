@@ -40,6 +40,16 @@
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+  /* A button (it opens the Environment card: CodeEnvironment.svelte). */
+  font-family: inherit;
+  cursor: pointer;
+}
+.code-edge-label:hover {
+  border-color: var(--yap-code);
+}
+.code-edge-label:focus-visible {
+  outline: none;
+  box-shadow: var(--yap-focus);
 }
 
 /* The light: a conic gradient turning behind a ring-shaped mask. */
