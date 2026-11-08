@@ -107,7 +107,7 @@ pub async fn chat_context(conversation_id: Option<u64>) -> ContextUse {
     let counter = Counter::for_call(&target.provider, &target.base_url);
     let (context, context_known) = budget::context_window(&cfg, &target.provider, &target.model, &target.base_url).await;
     // The parts every request carries, as `chat_limits` measures them.
-    let fixed = fixed_of(&cfg, &target, &counter).await;
+    let fixed = fixed_of(&cfg, &target, &counter, context).await;
     let b = budget::budget(context, context_known, fixed, Kind::Chat, target.tools, budget::request_cap(&target.provider, &target.model));
     let replay = target.tools && cfg.web_search;
     let costs = budget::message_costs(&counter, messages, replay).await;
@@ -131,8 +131,9 @@ pub async fn chat_context(conversation_id: Option<u64>) -> ContextUse {
 }
 
 /// The parts of a Chat request that don't change with the question, for
-/// `target`: the stable prompt and the tools' schemas.
-async fn fixed_of(cfg: &crate::config::YapConfig, target: &crate::ai::ai_model::Target, counter: &Counter) -> u64 {
+/// `target` (with `context` tokens): the stable prompt and the tools'
+/// schemas, the connectors' as a typed question gets them.
+async fn fixed_of(cfg: &crate::config::YapConfig, target: &crate::ai::ai_model::Target, counter: &Counter, context: u64) -> u64 {
     let persona = cfg
         .llm_scopes
         .get("chat")
@@ -151,7 +152,9 @@ async fn fixed_of(cfg: &crate::config::YapConfig, target: &crate::ai::ai_model::
     let lines = crate::chat::tools::WebLines::of(strong, in_chat, own_search);
     let pictures = crate::chat::pictures::Gate::for_model(cfg.web_search && target.tools, &target.provider, &target.model);
     let act = pictures != crate::chat::pictures::Gate::Off && crate::chat::pages::act::can_act(&target.provider, &target.model);
-    let stable = crate::chat::turn::stable_prompt(cfg, &persona, target.tools, doc_tools, lines, cfg.web_search, pictures, act, calendar_on, &profile, crate::ai::eval::now());
+    let connectors = crate::chat::tools::connectors::may(&target.provider, strong) && crate::chat::tools::connectors::offers_any(cfg, None);
+    let stable = crate::chat::turn::stable_prompt(cfg, &persona, target.tools, doc_tools, lines, cfg.web_search, pictures, act, calendar_on, connectors, &profile, crate::ai::eval::now());
+    let connectors = connectors.then(|| crate::chat::tools::connectors::Turn::for_turn(cfg, &target.provider, &target.model, None, context)).flatten();
     let log = crate::chat::tools::calendar::Log::default();
     let extra = crate::chat::tools::Extra {
         memory: true,
@@ -168,8 +171,10 @@ async fn fixed_of(cfg: &crate::config::YapConfig, target: &crate::ai::ai_model::
         own_search,
         web_question: false,
         agents: (target.tools && crate::agents::offered(cfg)).then_some(crate::chat::tools::AgentsTurn::default()),
+        connectors: connectors.as_ref(),
     };
-    let schemas = if target.tools { counter.count(&crate::chat::tools::offered_tools(cfg.open_apps, cfg.web_search && !in_chat, extra).to_string()).await } else { 0 };
+    let offered = crate::chat::tools::offered_tools(cfg.open_apps, cfg.web_search && !in_chat, extra);
+    let schemas = if target.tools { counter.count(&crate::chat::budget::loaded_tools(&offered).to_string()).await } else { 0 };
     counter.count(&stable).await + schemas
 }
 

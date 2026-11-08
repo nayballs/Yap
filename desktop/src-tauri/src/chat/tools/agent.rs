@@ -292,6 +292,9 @@ struct Loop<'a> {
     /// An agent's own words came in (`agent_status`, `tools/agents.rs`): web
     /// content for the safety rule, so they never start or steer an agent.
     agent_seen: bool,
+    /// A connector's server answered (`tools/connectors.rs`): outside
+    /// content for the rest of the turn, as a page read is.
+    connector_seen: bool,
     /// The next step must search ([`FirstStep::MustSearch`]).
     must_search: bool,
     /// A notes search that found nothing has led to the web (once a turn).
@@ -313,6 +316,17 @@ impl Loop<'_> {
         if let Some(turn) = self.web.as_deref_mut() {
             search_for_the_model(turn, query, &mut self.messages, &mut self.tools_used, self.room, self.live).await;
             report(self.live, &self.tools_used, Some(turn), self.extra.calendar.map(|c| c.log));
+        }
+    }
+
+    /// **The outside content this turn has seen** (the safety rule's, the
+    /// connectors' consent's): the web — a search, a page, an agent's words,
+    /// selected words from elsewhere —, the screen, a connector's result.
+    fn seen(&self) -> super::Seen {
+        super::Seen {
+            web: self.web.as_deref().is_some_and(crate::web::Turn::seen) || self.agent_seen,
+            screen: self.screen_seen,
+            connector: self.connector_seen,
         }
     }
 
@@ -469,6 +483,7 @@ async fn tool_loop(
         tools_used: Vec::new(),
         screen_seen: extra.web_question,
         agent_seen: false,
+        connector_seen: false,
         must_search: must_search_first,
         led_to_web: false,
         rejected: 0,

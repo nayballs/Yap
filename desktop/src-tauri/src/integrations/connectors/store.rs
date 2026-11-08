@@ -482,7 +482,6 @@ pub fn update<R>(id: &str, f: impl FnOnce(&mut Connector) -> R) -> Result<R, Str
 /// Connector `id`'s tool was just called: `last_used` now, saved only when
 /// the one kept is a minute old or more (a burst of calls is one save).
 /// Whether it was saved.
-#[cfg_attr(not(debug_assertions), allow(dead_code))]
 pub fn used(id: &str) -> bool {
     let t = now();
     let stale = with_store(|s| s.connectors.iter().find(|c| c.id == id).is_some_and(|c| c.last_used.is_none_or(|u| t.saturating_sub(u) >= 60)));

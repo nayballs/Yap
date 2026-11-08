@@ -2,9 +2,10 @@
 //! at a link (Streamable HTTP, or the older HTTP+SSE, with a token or
 //! headers) or a program on this PC (stdio, its exact command line shown
 //! first), and Yap keeps its tools, each Always allow / Ask first / Off,
-//! for Chat and the Voice Assistant to use (wave 4; nothing offers them to
-//! a model yet). How it works: docs/architecture/integrations.md,
-//! "Connectors (preview)".
+//! for Chat and the Voice Assistant to use (`chat/tools/connectors.rs`:
+//! offered to the strong cloud models, asked about by `consent.rs`, sized
+//! by `budget.rs`). How it works: docs/architecture/integrations.md,
+//! "Connectors (preview)" and "Connectors in Chat".
 //!
 //! - `store.rs` connectors.json · `cache.rs` connector_tools.json ·
 //!   `vault.rs` the secrets, in Credential Manager;
@@ -14,8 +15,10 @@
 //! - `oauth.rs` signing in to a link in the browser (the MCP authorization
 //!   spec: discovery, the client, PKCE on the loopback, tokens in the
 //!   vault) · `refresh.rs` one refresh at a time across Yaps;
-//! - `names.rs` / `schema.rs` / `results.rs` what a model would see ·
+//! - `names.rs` / `schema.rs` / `results.rs` what a model sees ·
 //!   `call.rs` one call (timeout, progress, stop);
+//! - `consent.rs` whether a call runs, asks first or is refused ·
+//!   `budget.rs` how many tools a model gets, and tool search past that;
 //! - `catalog.rs` the bundled list Settings' Discover shows · `import.rs`
 //!   a setup read from Claude Desktop or pasted;
 //! - `fake.rs` fake servers for the tests.
@@ -30,11 +33,13 @@
 //! wave 5); Chat has no tool for it, a page beside the chat has no Yap IPC,
 //! and the deep link takes none.
 
+pub mod budget;
 pub mod cache;
 pub mod call;
 pub mod catalog;
+pub mod consent;
 #[cfg(test)]
-mod fake;
+pub(crate) mod fake;
 pub mod import;
 pub mod local;
 pub mod manager;
@@ -631,9 +636,7 @@ pub async fn refresh(id: &str, fresh: bool) -> Result<Diff, String> {
 
 /// Connector `c`'s connection for a call: up already, or started — and
 /// then listed again first (a changed tool drops back to Ask first before
-/// any call: the rug-pull check). (Only a debug build calls tools until
-/// Chat's loop does, wave 4.)
-#[cfg_attr(not(debug_assertions), allow(dead_code))]
+/// any call: the rug-pull check).
 pub async fn ensure(c: &Connector) -> Result<Peer<RoleClient>, String> {
     let m = manager();
     if m.is_up(&c.id) {
@@ -811,6 +814,58 @@ pub async fn connector_set_where(id: String, places: WherePatch) -> Result<View,
     tracing::info!(connector = %id, chat = c.where_.chat, voice = c.where_.voice, meetings = c.where_.meetings, "connectors: where it's used changed");
     changed();
     Ok(view(&c))
+}
+
+/// How the Chat model gets the connectors' tools (Settings' line): every
+/// tool as it is, or tool search past its share of the context.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BudgetView {
+    /// The Chat model (none set up: `None`).
+    pub model: Option<crate::chat::chats::ChatModel>,
+    /// That model gets connectors at all (the strong cloud models).
+    pub gets: bool,
+    /// What the tools Chat may use cost each step, and the model's share.
+    pub tokens: u64,
+    pub cap: u64,
+    /// "all" | "search" (`find_tools` / `use_tool`) | "deferred"
+    /// (Anthropic's own tool search) | "none".
+    pub mode: &'static str,
+}
+
+/// The tokens of the tools Chat may use: each enabled connector's in Chat
+/// (`where.chat`), as its view counts them. Pure.
+pub fn chat_tokens(views: &[View]) -> u64 {
+    views.iter().filter(|v| v.enabled && v.where_.chat).map(|v| v.tokens as u64).sum()
+}
+
+/// **Which way the Chat model gets them**: its share (`budget::cap`, its
+/// context and a free plan's rate) against what the tools cost
+/// (`budget::mode`), as a Chat turn decides it.
+#[tauri::command]
+pub async fn connectors_budget() -> Result<BudgetView, String> {
+    require()?;
+    let cfg = crate::config::load();
+    let tokens = chat_tokens(&store::list().iter().map(view).collect::<Vec<_>>());
+    let on_device = crate::ai::ai_model::OnDevice::here(&cfg);
+    let Ok(target) = crate::ai::ai_model::target(&cfg, crate::ai::ai_model::Scope::Chat, &on_device) else {
+        return Ok(BudgetView { model: None, gets: false, tokens, cap: 0, mode: "none" });
+    };
+    let strong = target.tools && crate::chat::documents::rich::strong(&target.provider, &target.model);
+    let gets = crate::chat::tools::connectors::may(&target.provider, strong);
+    let (context, _) = crate::chat::budget::context_window(&cfg, &target.provider, &target.model, &target.base_url).await;
+    let cap = budget::cap(context, crate::chat::budget::rate_cap(&target.provider));
+    let messages_api = crate::ai::llm::anthropic::speaks_messages(&target.provider, &target.model);
+    let mode = if !gets {
+        "none"
+    } else {
+        match budget::mode(tokens, cap, messages_api) {
+            budget::Mode::All => "all",
+            budget::Mode::Search => "search",
+            budget::Mode::Deferred => "deferred",
+        }
+    };
+    Ok(BudgetView { model: Some(target.chat_model()), gets, tokens, cap, mode })
 }
 
 /// Show details: the server, the address, a program's last stderr lines
@@ -1057,9 +1112,9 @@ pub async fn connector_call_tool(id: String, tool: String, args: Option<Value>, 
 }
 
 /// One call to connector `id`'s `tool` (Off and unknown tools refused),
-/// through the receipts as the connector's. Wave 4's tool loop puts its
-/// consent before this.
-#[cfg_attr(not(debug_assertions), allow(dead_code))]
+/// through the receipts as the connector's: the debug command's way.
+/// Chat's tool loop has its own ([`call_for_chat`], after its consent).
+#[cfg(debug_assertions)]
 pub async fn call_tool(id: &str, tool: &str, args: &Value, timeout: Option<Duration>) -> Result<Value, String> {
     let c = store::get(id).ok_or("There's no such connector.")?;
     let peer = ensure(&c).await?;
@@ -1070,42 +1125,106 @@ pub async fn call_tool(id: &str, tool: &str, args: &Value, timeout: Option<Durat
         Some(_) => {}
     }
     let timeout = timeout.unwrap_or_else(|| call::timeout_for(c.timeout_secs));
-    let started = std::time::Instant::now();
     let display = format!("{} · {tool}", c.kind());
-    let signed = oauth::state_of(&c, &manager().status(id));
-    let out = call::call(&peer, tool, args, timeout, &call::Stop::new()).await;
-    let ms = started.elapsed().as_millis() as u64;
-    // Settings' "Last used" (told when it changed: at most once a minute).
-    if store::used(id) {
-        changed();
+    match call_logged(&c, &peer, tool, args, timeout).await {
+        Ok(shaped) => Ok(shaped.to_value(&display)),
+        Err(e) => Ok(serde_json::json!({ "success": false, "error": e, "data": Value::Null, "displayText": display })),
     }
-    match out {
-        Ok(shaped) => {
-            tracing::info!(connector = id, tool, ms, success = shaped.success, chars = shaped.text.len(), "connectors: tool called");
-            Ok(shaped.to_value(&display))
-        }
-        Err(e) => {
-            tracing::info!(connector = id, tool, ms, outcome = e.word(), "connectors: tool call failed");
-            // The server refused the sign-in on this call (it ended, or it
-            // wants more access): said so; not the connection's failure.
-            let now = store::get(id);
-            if let Some(words) = now.as_ref().and_then(|n| sign_in_trouble(n, signed)) {
-                if now.as_ref().is_some_and(|n| n.auth.expired) {
-                    manager().stop(id, false).await;
-                }
-                return Ok(serde_json::json!({ "success": false, "error": words, "data": Value::Null, "displayText": display }));
-            }
-            if e == call::CallError::Lost {
-                manager().broke(id).await;
-            }
-            Ok(serde_json::json!({ "success": false, "error": e.words(&c.kind()), "data": Value::Null, "displayText": display }))
+}
+
+/// **A call from Chat's tool loop** (`chat/tools/connectors.rs`, after its
+/// consent): connector `c`'s `tool` on `peer`, within the connector's own
+/// timeout. Its answer shaped, or why there isn't one in plain words.
+pub async fn call_for_chat(c: &Connector, peer: &Peer<RoleClient>, tool: &str, args: &Value) -> Result<results::Shaped, String> {
+    call_logged(c, peer, tool, args, call::timeout_for(c.timeout_secs)).await
+}
+
+/// A call under way, for the log: dropped before it ends (■ Stop, a newer
+/// question) it says the call was stopped — the server is told by
+/// `call.rs` (`notifications/cancelled`).
+struct Calling<'a> {
+    id: &'a str,
+    tool: &'a str,
+    started: std::time::Instant,
+    done: bool,
+}
+
+impl Drop for Calling<'_> {
+    fn drop(&mut self) {
+        if !self.done {
+            let ms = self.started.elapsed().as_millis() as u64;
+            tracing::info!(connector = self.id, tool = self.tool, ms, outcome = "cancelled", "connectors: tool call stopped");
         }
     }
 }
 
+/// One call, logged ([`Calling`]): the connector's id, the tool's name, the
+/// outcome, the time and the answer's length — never its arguments or its
+/// answer. A lost connection is the manager's to start again.
+async fn call_logged(c: &Connector, peer: &Peer<RoleClient>, tool: &str, args: &Value, timeout: Duration) -> Result<results::Shaped, String> {
+    let signed = oauth::state_of(c, &manager().status(&c.id));
+    let mut calling = Calling { id: &c.id, tool, started: std::time::Instant::now(), done: false };
+    let out = call::call(peer, tool, args, timeout, &call::Stop::new()).await;
+    calling.done = true;
+    let ms = calling.started.elapsed().as_millis() as u64;
+    // Settings' "Last used" (told when it changed: at most once a minute).
+    if store::used(&c.id) {
+        changed();
+    }
+    match out {
+        Ok(shaped) => {
+            tracing::info!(connector = %c.id, tool, ms, success = shaped.success, chars = shaped.text.len(), "connectors: tool called");
+            Ok(shaped)
+        }
+        Err(e) => {
+            tracing::info!(connector = %c.id, tool, ms, outcome = e.word(), "connectors: tool call failed");
+            // The server refused the sign-in on this call (it ended, or it
+            // wants more access): said so; not the connection's failure.
+            let now = store::get(&c.id);
+            if let Some(words) = now.as_ref().and_then(|n| sign_in_trouble(n, signed)) {
+                if now.as_ref().is_some_and(|n| n.auth.expired) {
+                    manager().stop(&c.id, false).await;
+                }
+                return Err(words);
+            }
+            if e == call::CallError::Lost {
+                manager().broke(&c.id).await;
+            }
+            Err(e.words(&c.kind()))
+        }
+    }
+}
+
+/// **Always allow, from Chat's card**: connector `id`'s `tool` set to
+/// Always allow, pinned to the definition it was shown for (`hash`) — never
+/// a tool that can delete, nor one whose definition changed since. Every
+/// window hears of it.
+pub fn allow_always(id: &str, tool: &str, hash: &str) -> Result<(), String> {
+    let listing = cache::get(id).ok_or("Its tools haven't been listed yet.")?;
+    let t = listing.tools.iter().find(|t| t.name == tool).ok_or("It has no such tool.")?;
+    if t.kind == Kind::Deletes {
+        return Err("A tool that can delete always asks first.".into());
+    }
+    if t.hash != hash {
+        return Err("The tool changed since Yap asked.".into());
+    }
+    store::update(id, |c| {
+        c.tools.insert(tool.to_string(), store::ToolSetting { setting: Setting::Allow, hash: hash.to_string() });
+    })?;
+    tracing::info!(connector = id, tool, "connectors: a tool set to Always allow from Chat");
+    changed();
+    Ok(())
+}
+
+/// The preview's switch for a unit test on this thread (and a fresh store).
+#[cfg(test)]
+pub(crate) fn switch_for_test(on: bool) {
+    tests::set_switch(on);
+    store::reset_for_test();
+}
+
 /// A call failed because of its sign-in, judged by the state before it
 /// (`was`) and now: what to say. Pure but for the one sign-in in flight.
-#[cfg_attr(not(debug_assertions), allow(dead_code))]
 fn sign_in_trouble(now: &Connector, was: Option<oauth::SignInState>) -> Option<String> {
     let state = oauth::state_of(now, &Status::Idle)?;
     if Some(state) == was || state == oauth::SignInState::SignedIn {

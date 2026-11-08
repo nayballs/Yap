@@ -579,7 +579,7 @@ pub async fn chat_limits() -> Limits {
     let (context, context_known) = crate::chat::budget::context_window(&cfg, &ep.provider, &ep.model, &ep.base_url).await;
     let profile = crate::ai::about_you::profile(&cfg);
     let stable = gates.stable_prompt(&cfg, &ep.persona, &profile, crate::ai::eval::now());
-    let schemas = gates.schemas(&cfg, &counter, None).await;
+    let schemas = gates.schemas(&cfg, &ep, None, context, &counter, None).await;
     let fixed = counter.count(&stable).await + schemas;
     let budget = crate::chat::budget::budget(context, context_known, fixed, crate::chat::budget::Kind::Chat, gates.tools, crate::chat::budget::rate_cap(&ep.provider));
     let label = crate::chat::budget::model_label(&ep.provider, &ep.model, &crate::ai::local_llm::active_model_display(&cfg));

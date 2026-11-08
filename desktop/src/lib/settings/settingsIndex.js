@@ -252,6 +252,7 @@ export const SETTINGS_INDEX = [
   { page: 'connectors', section: 'Connectors', label: 'Add a custom connector', desc: 'A server at a link, with a token or a sign-in', keywords: 'add custom connector mcp server url link remote http token oauth', anchor: 'connector-add', preview: 'connectors' },
   { page: 'connectors', section: 'Connectors', label: 'Add a program on this PC', desc: 'A local MCP server, its command shown before it runs', keywords: 'program local stdio npx uvx docker command mcp server', anchor: 'connector-add', preview: 'connectors' },
   { page: 'connectors', section: 'Connectors', label: 'Import from Claude Desktop', desc: 'Its MCP servers, read from its settings', keywords: 'import claude desktop claude_desktop_config mcpservers json', anchor: 'connector-add', preview: 'connectors' },
+  { page: 'connectors', section: 'Connectors', label: 'Let connectors work during meetings', desc: 'While a meeting records or a call is on; every change asks', keywords: 'connectors meetings calls recording during allow', anchor: 'connectors-in-meetings', toggle: 'connectorsInMeetings', preview: 'connectors' },
   { page: 'connectors', section: 'Connectors', label: 'Paste a connector setup', desc: 'An mcpServers block, a link or an npx line', keywords: 'paste json mcpservers setup config', anchor: 'connector-add', preview: 'connectors' },
 
   // ---- AI apps (MCP) ----

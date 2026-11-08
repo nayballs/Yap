@@ -26,6 +26,7 @@
   import { toast } from '../../ui/toast.svelte.js';
   import { askConfirm } from '../../ui/contextMenu.svelte.js';
   import { openExternalLink } from '../../core/externalLinks.js';
+  import { modelName } from '../../core/aiModel.js';
   import {
     conn,
     connectorById,
@@ -42,6 +43,7 @@
     putConnector,
     ago,
     words,
+    budgetLine,
   } from './connectors.svelte.js';
 
   //   meetingsOn: "Let connectors work during meetings" (connectors_in_meetings).
@@ -282,6 +284,7 @@
       {#if c.tools?.length}
         <p class="fine" data-testid="connector-cost">
           {offered.length === 1 ? '1 tool is' : `${offered.length} tools are`} on for Chat{#if c.tokens > 0}, about {c.tokens.toLocaleString()} tokens of every Chat step{/if}.
+          {#if conn.budget?.mode && conn.budget.mode !== 'all'}{budgetLine(conn.budget, modelName(conn.budget.model))}{/if}
         </p>
         {#each groups as g (g.kind)}
           {@const gv = groupValue(g)}

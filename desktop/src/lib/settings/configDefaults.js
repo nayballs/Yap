@@ -261,6 +261,9 @@ export const FIELD_DEFAULTS = {
   aboutMe: '',
   regionCountry: '',
   regionSpelling: true,
+  // Connectors (preview): "Let connectors work during meetings", Settings →
+  // Connectors' foot (chat/tools/connectors.rs reads it), off.
+  connectorsInMeetings: false,
 };
 
 // The cleaned config payload the backend expects (trimmed dictionary,

@@ -26,14 +26,17 @@
   import DiscoverGrid from './DiscoverGrid.svelte';
   import ConnectorSheet from './ConnectorSheet.svelte';
   import AddDialog from './AddDialog.svelte';
-  import { conn, loadConnectors, loadCatalog, signOut, removeConnector } from './connectors.svelte.js';
+  import Toggle from '../../ui/Toggle.svelte';
+  import { conn, loadConnectors, loadCatalog, loadBudget, budgetLine, signOut, removeConnector } from './connectors.svelte.js';
+  import { modelName } from '../../core/aiModel.js';
   import { entryOf, filterYours, joinArgs } from './catalog.js';
   import { openContextMenu, askConfirm } from '../../ui/contextMenu.svelte.js';
   import { toast } from '../../ui/toast.svelte.js';
 
   //   visit: counts Settings' visits to the page (its nav item, a link, a
   //   search result): each one comes back to Yours' list.
-  let { goto = null, visit = 0 } = $props();
+  //   cfg: Settings' config copy ("Let connectors work during meetings").
+  let { goto = null, visit = 0, cfg = null } = $props();
 
   let query = $state('');
   let addBtn = $state(null);
@@ -50,6 +53,7 @@
       conn.open = null;
       query = '';
       loadConnectors();
+      loadBudget();
     });
   });
   onMount(() => {
@@ -132,7 +136,7 @@
 </script>
 
 {#if openId}
-  <ConnectorDetail id={openId} entry={entryFor(conn.list.find((c) => c.id === openId))} onback={() => (conn.open = null)} />
+  <ConnectorDetail id={openId} entry={entryFor(conn.list.find((c) => c.id === openId))} meetingsOn={!!cfg?.connectorsInMeetings} onback={() => (conn.open = null)} />
 {:else}
   <div class="cpage" data-setting="connectors-page">
     <header class="top">
@@ -194,7 +198,20 @@
             {/each}
           </div>
         {/if}
+        {#if conn.list.length && conn.budget}
+          <p class="fine" data-testid="connectors-budget" data-mode={conn.budget.mode}>{budgetLine(conn.budget, modelName(conn.budget.model))}</p>
+        {/if}
       </section>
+
+      {#if cfg}
+        <section class="sec meet" data-setting="connectors-in-meetings">
+          <Toggle
+            bind:checked={cfg.connectorsInMeetings}
+            label="Let connectors work during meetings"
+            desc="While a meeting records or a call is on, for the connectors you allow in meetings. Every change they make asks with a click; the meeting's own AI never uses them."
+          />
+        </section>
+      {/if}
     {/if}
   </div>
 {/if}

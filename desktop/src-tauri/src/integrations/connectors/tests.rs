@@ -28,6 +28,11 @@ fn on() {
     store::reset_for_test();
 }
 
+/// The switch, for another module's tests (`connectors::switch_for_test`).
+pub(super) fn set_switch(on: bool) {
+    SWITCH.with(|s| s.set(on));
+}
+
 fn link(url: &str) -> Spec {
     Spec { name: "Fake link".into(), url: Some(url.into()), ..Default::default() }
 }

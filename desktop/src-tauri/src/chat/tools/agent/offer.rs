@@ -52,5 +52,11 @@ pub fn offered_tools(open_apps: bool, web: bool, extra: Extra<'_>) -> Value {
             all.extend(agents.iter().cloned());
         }
     }
+    // The connectors' (tools/connectors.rs): last, in the connectors' order —
+    // each as it is, deferred behind Anthropic's tool search, or
+    // `find_tools` / `use_tool` past the budget.
+    if let (Some(all), Some(c)) = (tools.as_array_mut(), extra.connectors) {
+        all.extend(c.definitions());
+    }
     tools
 }

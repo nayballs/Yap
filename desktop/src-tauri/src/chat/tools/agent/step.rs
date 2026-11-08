@@ -22,11 +22,13 @@ pub(super) enum Step {
 }
 
 /// What a step on Anthropic's Messages API carries besides the request:
-/// Claude's own web tools for the turn (`web::Turn::server_tools`).
-fn native(web: Option<&crate::web::Turn>) -> crate::ai::llm::anthropic::Native {
-    crate::ai::llm::anthropic::Native {
-        server_tools: web.and_then(crate::web::Turn::server_tools).unwrap_or_default(),
-    }
+/// Claude's own web tools for the turn (`web::Turn::server_tools`), and its
+/// tool search when the connectors' tools are deferred behind it
+/// (`tools/connectors.rs`, past their budget).
+fn native(web: Option<&crate::web::Turn>, connectors: Option<&crate::chat::tools::connectors::Turn>) -> crate::ai::llm::anthropic::Native {
+    let mut server_tools = web.and_then(crate::web::Turn::server_tools).unwrap_or_default();
+    server_tools.extend(connectors.and_then(crate::chat::tools::connectors::Turn::server_tool));
+    crate::ai::llm::anthropic::Native { server_tools }
 }
 
 impl Loop<'_> {
@@ -59,7 +61,7 @@ impl Loop<'_> {
             req.max_tokens = Some(MUST_SEARCH_TOKENS);
         }
         if self.native_chat {
-            req.native = Some(native(self.web.as_deref()));
+            req.native = Some(native(self.web.as_deref(), self.extra.connectors));
         }
         let answer = ask(step_live, &req, true).await;
         // A server that won't be made to search (it refuses `tool_choice`,
@@ -203,7 +205,7 @@ impl Loop<'_> {
             crate::ai::llm::ChatRequest::chat(self.base_url, self.api_key, self.model, self.provider, 0.5, Value::Array(self.messages), None, None)
         };
         if self.native_chat {
-            req.native = Some(native(self.web.as_deref()));
+            req.native = Some(native(self.web.as_deref(), self.extra.connectors));
         }
         let msg = ask(self.live, &req, false).await?;
         let content = msg["content"].as_str().unwrap_or("").trim().to_string();

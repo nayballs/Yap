@@ -182,7 +182,13 @@ pub fn body(req: &ChatRequest, server: &[Value], stream: bool) -> Value {
         .filter(|t| t["function"]["name"].is_string())
         .map(|t| {
             let f = &t["function"];
-            json!({ "name": f["name"], "description": f["description"].as_str().unwrap_or(""), "input_schema": f["parameters"] })
+            let mut tool = json!({ "name": f["name"], "description": f["description"].as_str().unwrap_or(""), "input_schema": f["parameters"] });
+            // A connector's tool behind Claude's tool search (chat/tools/
+            // connectors.rs, past their budget): loaded only when found.
+            if t["defer_loading"] == true {
+                tool["defer_loading"] = json!(true);
+            }
+            tool
         })
         .collect();
     tools.extend(server.iter().cloned());
@@ -775,6 +781,37 @@ mod tests {
         // Opus 5.5 takes no temperature; nothing streamed.
         assert!(b.get("temperature").is_none() && b.get("stream").is_none());
         assert_eq!(b["max_tokens"], MAX_TOKENS);
+    }
+
+    /// Connectors' tools past their budget (chat/tools/connectors.rs): each
+    /// one deferred behind Claude's own tool search, Yap's tools loaded as
+    /// ever; what Claude found and called comes back as its blocks and a
+    /// tool call, and goes back unchanged.
+    #[test]
+    fn connectors_tools_past_the_budget_wait_behind_claudes_tool_search() {
+        let mut deferred = function("notion__create_pages");
+        deferred["defer_loading"] = json!(true);
+        let tools = json!([function("search_notes"), deferred]);
+        let server = [json!({ "type": "tool_search_tool_bm25_20251119", "name": "tool_search_tool_bm25" })];
+        let b = body(&req(json!([{ "role": "user", "content": "Make a Notion page" }]), Some(tools)), &server, false);
+        let t = b["tools"].as_array().unwrap();
+        assert!(t[0].get("defer_loading").is_none(), "Yap's own tools load as ever: {t:?}");
+        assert_eq!(t[1]["defer_loading"], json!(true));
+        assert_eq!(t[1]["name"], "notion__create_pages");
+        assert_eq!(t[2], server[0]);
+        // Claude's answer: a search, what it found, then the call.
+        let answer = json!({ "content": [
+            { "type": "server_tool_use", "id": "s1", "name": "tool_search_tool_bm25", "input": { "query": "notion page" } },
+            { "type": "tool_search_tool_result", "tool_use_id": "s1", "content": { "type": "tool_search_tool_search_result", "tool_references": [{ "type": "tool_reference", "tool_name": "notion__create_pages" }] } },
+            { "type": "tool_use", "id": "t1", "name": "notion__create_pages", "input": { "title": "Launch notes" } }
+        ] });
+        let m = message_of(&answer);
+        assert_eq!(m["tool_calls"][0]["function"]["name"], "notion__create_pages");
+        assert!(m.get("yap_web").is_none(), "not a web search: {m}");
+        // The next step sends its blocks back as they came.
+        let next = body(&req(json!([{ "role": "user", "content": "Make a Notion page" }, m]), None), &server, false);
+        assert_eq!(next["messages"][1]["content"].as_array().unwrap().len(), 3);
+        assert_eq!(next["messages"][1]["content"][1]["type"], "tool_search_tool_result");
     }
 
     /// Each effort level's request body (ai/effort.rs), with fast mode.

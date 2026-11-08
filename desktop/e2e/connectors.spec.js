@@ -93,6 +93,18 @@ test('Yours: a link added with its token, its tools set one by one and by group,
   await add.getByRole('button', { name: 'Done' }).click();
   await expect(add).toBeHidden();
   await expect(row(main, 'Home lights')).toContainText('Connected · 9 tools');
+  // Which way Chat's model gets them (connectors_budget), said under the list.
+  const budget = await yap.invoke('connectors_budget');
+  expect(['all', 'search', 'deferred', 'none']).toContain(budget.mode);
+  await expect(dialog.getByTestId('connectors-budget')).toHaveAttribute('data-mode', budget.mode);
+  await expect(dialog.getByTestId('connectors-budget')).not.toBeEmpty();
+  // "Let connectors work during meetings": off, then on, saved.
+  const meetings = dialog.getByRole('button', { name: 'Let connectors work during meetings' });
+  await expect(meetings).toHaveAttribute('aria-pressed', 'false');
+  await meetings.click();
+  await expect.poll(async () => (await yap.invoke('get_config')).connectorsInMeetings).toBe(true);
+  await meetings.click();
+  await expect.poll(async () => (await yap.invoke('get_config')).connectorsInMeetings).toBe(false);
 
   // Its page.
   await row(main, 'Home lights').getByRole('button', { name: /^Home lights:/ }).click();

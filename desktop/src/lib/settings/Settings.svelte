@@ -666,7 +666,7 @@
             {/await}
           {:else if section === 'connectors' && connectorsOn}
             {#await PAGES.connectorsPreview() then { default: ConnectorsPage }}
-              <ConnectorsPage {goto} visit={connectorsVisit} />
+              <ConnectorsPage {goto} {cfg} visit={connectorsVisit} />
             {/await}
           {:else if section === 'connectors'}
             <div class="page-h">

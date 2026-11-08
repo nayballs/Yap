@@ -961,7 +961,18 @@ fn at<'a>(v: &'a mut Value, path: &[Seg]) -> Option<&'a mut Value> {
 /// fitted into room a picture already took). Pure.
 pub fn request_tokens(messages: &[Value], tools: &Value, provider: &str, here: bool) -> u64 {
     messages.iter().map(|m| estimate(&message_text(m)) + images_in(m, provider, here) + MESSAGE_OVERHEAD).sum::<u64>()
-        + if tools.is_null() { 0 } else { estimate(&tools.to_string()) }
+        + if tools.is_null() { 0 } else { estimate(&loaded_tools(tools).to_string()) }
+}
+
+/// The tools a request loads into the model's context: all but the ones
+/// deferred behind Claude's tool search (`defer_loading`: connectors' tools
+/// past their budget, `chat/tools/connectors.rs`), which cost nothing until
+/// found. Pure.
+pub fn loaded_tools(tools: &Value) -> Value {
+    match tools.as_array() {
+        Some(all) if all.iter().any(|t| t["defer_loading"] == true) => Value::Array(all.iter().filter(|t| t["defer_loading"] != true).cloned().collect()),
+        _ => tools.clone(),
+    }
 }
 
 /// A PNG's data URL that's only its header (a picture's size, nothing

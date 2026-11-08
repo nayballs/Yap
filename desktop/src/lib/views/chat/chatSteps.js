@@ -21,7 +21,7 @@ const DOC_CHIP =
 /** A chip's mark: 'guard' | 'web' | 'calendar' | 'doc' | 'tool'. */
 export const chipKind = (t) =>
   // (What Yap never does on a page, and a click the person said no to, too.)
-  /: (not after reading the web|Yap never types .+|sign in yourself in the panel|you said no|no answer in time|couldn't ask you)$/.test(t)
+  /: (not after reading the web|not after a connector's result|Yap never types .+|sign in yourself in the panel|you said no|no answer in time|couldn't ask you|it needs your OK in Chat)$/.test(t)
     ? 'guard'
     : WEB_CHIP.test(t)
       ? 'web'
@@ -84,6 +84,10 @@ const STEPS = [
   [/^Opened /, 'opened'],
   [/^(Found \d+ apps? for|Listed |No apps? )/, 'apps'],
   [/^Copied/, 'copied'],
+  // A connector's tool (chat/tools/connectors.rs): tool search, then a call
+  // ("Notion · Search (launch plan)": the connector, a dot, the tool).
+  [/^Looked for a connector's tool/, 'toolSearch'],
+  [/^[^"·:]+ · [^:]+$/, 'connector'],
 ];
 
 const SAY = {
@@ -129,6 +133,8 @@ const SAY = {
   opened: (n) => n1(n, 'opened an app', 'opened {n} apps'),
   apps: () => 'looked for an app',
   copied: () => 'copied to the clipboard',
+  toolSearch: (n) => times(n, "looked for a connector's tool"),
+  connector: (n) => n1(n, 'used a connector', 'used connectors {n} times'),
   tool: (n) => n1(n, 'used a tool', 'used {n} tools'),
   failed: (n) => n1(n, "1 didn't go through", "{n} didn't go through"),
 };

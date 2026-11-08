@@ -23,6 +23,8 @@ export const conn = $state({
   /** Discover's list (connector_catalog), read the first time it shows. */
   catalog: null,
   catalogError: '',
+  /** How Chat's model gets the tools (connectors_budget). */
+  budget: null,
   /** The Yours | Discover tab, and the connector whose page is open. */
   tab: 'yours',
   open: null,
@@ -72,6 +74,30 @@ export async function loadCatalog() {
   return conn.catalog;
 }
 
+/**
+ * How Chat's model gets the tools (connectors_budget): every tool, or tool
+ * search past its share of the context (integrations/connectors/budget.rs).
+ */
+export async function loadBudget() {
+  try {
+    conn.budget = await invoke('connectors_budget');
+  } catch {
+    conn.budget = null;
+  }
+  return conn.budget;
+}
+
+/** The budget's line, in words (`name`: the model's short name). */
+export function budgetLine(b, name) {
+  if (!b) return '';
+  if (!b.model) return "Set up Chat's model in Language Models: its tools go to the model you chat with.";
+  if (!b.gets) return `${name} doesn't use connectors: they're for the strong cloud models (Claude, GPT-5, Gemini…). Pick one for Chat in Language Models.`;
+  const cost = `about ${Number(b.tokens).toLocaleString()} tokens a step`;
+  if (b.mode === 'all') return b.tokens ? `${name} gets every tool you've left on (${cost}).` : `${name} gets every tool you leave on.`;
+  const how = b.mode === 'deferred' ? 'with its own tool search' : "with Yap's tool search";
+  return `Your tools are more than ${name}'s share (${cost}, its share ${Number(b.cap).toLocaleString()}), so it finds the ones it needs ${how}. Turning some off brings them back in whole.`;
+}
+
 /** One connector's view put in place (a command answered with it). */
 export function putConnector(view) {
   if (!view?.id) return;
@@ -94,6 +120,7 @@ function follow() {
   listen('yap-connectors-changed', () => {
     loadConnectors();
     if (conn.catalog) loadCatalog();
+    if (conn.budget) loadBudget();
   }).catch(() => (following = false));
   listen('yap-connector-status', (e) => patchStatus(e.payload)).catch(() => {});
 }
