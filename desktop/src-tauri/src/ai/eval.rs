@@ -292,8 +292,9 @@ pub fn adjust_body(body: &mut Value) {
 }
 
 /// Every tool call of the chat's tool loop, with its result (the run logs
-/// it and scores it).
+/// it and scores it; a Yap Lab run keeps it too, `shell/lab.rs`).
 pub fn tool_called(name: &str, args: &Value, result: &Value) {
+    crate::shell::lab::tool(name, args, result);
     #[cfg(debug_assertions)]
     {
         if active() {
