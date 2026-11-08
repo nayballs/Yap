@@ -928,6 +928,10 @@ export function createChatState({ onopensettings = () => null, onopennote = () =
 
   // The spoken answer's own bubble (`spoken`: never this view's own send's).
   const spokenAt = () => messages.findLastIndex((m) => m.streaming && m.spoken);
+  // The conversations this view is opening for a question asked out loud,
+  // and the pages of answers that landed meanwhile (`followAssistant`).
+  const opening = new Set();
+  const landedEarly = new Map();
   // The spoken question being answered in conversation `id`, if any.
   const spokenIn = (id) => (id != null && turns[String(id)]?.spoken ? turns[String(id)] : null);
   // An event about that question (one without an id, as before, counts):
@@ -1007,9 +1011,14 @@ export function createChatState({ onopensettings = () => null, onopennote = () =
     // so), never pulling you away from the one you're reading.
     const follows = phase === 'asked' || phase === 'open';
     if (!follows && activeId !== id) {
+      // Answered while this view is still opening that conversation for its
+      // question (a quick one: "Show me <address>" needs no model): the
+      // pages it showed are brought up once the view gets there.
+      if (phase === 'answered' && opening.has(id)) landedEarly.set(id, pagesShown);
       refreshList();
       return;
     }
+    if (phase === 'asked') opening.add(id);
     try {
       const conv = await invoke('chat_get', { id });
       if (!alive) return;
@@ -1029,13 +1038,24 @@ export function createChatState({ onopensettings = () => null, onopennote = () =
       // view was still opening for the question (ControlPanel brought Chat up
       // on "asked", before this view listened), and it'd say "Thinking" for
       // good. The saved answer after the question ends the wait.
+      // (Its pages are shown below, as a landed answer's: "Show me <address>"
+      // out loud needs no model, so its answer can land before this view has
+      // its conversation, and the "answered" for it found the view elsewhere.)
+      let landed = false;
       if (phase === 'asked') {
+        opening.delete(id);
         const rec = spokenIn(id);
         const at = Number(String(p.userMessageId ?? '').split(':').pop());
         if (rec && rec.askedId === p.userMessageId && Number.isInteger(at) && conv.messages?.[at + 1]?.role === 'assistant') {
+          pagesShown = rec.pagesShown;
+          landed = true;
           dropTurn(rec);
           doc.turnEnded();
+        } else if (landedEarly.has(id)) {
+          pagesShown = landedEarly.get(id);
+          landed = true;
         }
+        landedEarly.delete(id);
       }
       // The answer that streamed here, replaced by the saved (checked) one
       // (only an answer: a newer question's arrival replaces nothing).
@@ -1049,7 +1069,7 @@ export function createChatState({ onopensettings = () => null, onopennote = () =
       // A page the answer opened whose live event came before this view had
       // the conversation ("open YouTube" out loud into a new chat: Yap opens
       // it at once): the panel shows it now.
-      if (phase === 'answered') {
+      if (phase === 'answered' || landed) {
         const answer = messages.at(-1);
         if (answer?.role === 'assistant') for (const pg of answer.pages || []) if (pg?.url && !pagesShown.has(pg.url)) doc.showPage(pg);
       }
