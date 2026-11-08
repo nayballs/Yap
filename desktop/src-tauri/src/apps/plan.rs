@@ -75,7 +75,7 @@ pub fn plan_with(text: &str, cfg: &YapConfig, apps: &[App], model_can_tool: bool
     // A website, with pages opening beside the chat (the web on): not an app
     // whose name it only starts ("Google" isn't Google Chrome) — Yap opens a
     // site it knows itself (`site_asked`, Chat's turn), else the model's
-    // `open_page`. An app named exactly still opens, unless the words ask for
+    // `browser_navigate`. An app named exactly still opens, unless the words ask for
     // the web ("…in the browser").
     if cfg.web_search && for_the_web(&request.phrase, &found) {
         return None;
@@ -662,7 +662,7 @@ mod tests {
     fn a_website_opens_beside_the_chat_not_an_app_that_only_starts_with_its_name() {
         let apps = pc();
         let web = YapConfig { web_search: true, ..YapConfig::default() };
-        // With pages beside the chat: "Google" is the website (the model's open_page), not Google Chrome.
+        // With pages beside the chat: "Google" is the website (the model's browser_navigate), not Google Chrome.
         assert!(plan("can you open up google for me", &web, &apps, true).is_none());
         assert!(plan("open youtube", &web, &apps, true).is_none());
         // Words that ask for the web, even with an app of that name.

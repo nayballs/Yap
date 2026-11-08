@@ -1,6 +1,6 @@
 {
   "name": "everyday-shop-link-from-page",
-  "description": "Everyday tasks: the shop's own results page is open beside the chat; the user asks which one has stereo output and for its link. The link comes from the page's links (read_open_page), its address exactly. Made-up shop, stand-in web.",
+  "description": "Everyday tasks: the shop's own results page is open beside the chat; the user asks which one has stereo output and for its link. The link comes from the page's links (browser_read), its address exactly. Made-up shop, stand-in web.",
   "tags": [
     "everyday",
     "web"
@@ -28,7 +28,7 @@
       "expect": {
         "tools_called": [
           {
-            "name": "read_open_page"
+            "name": "browser_read"
           }
         ],
         "answer_contains": [

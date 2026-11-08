@@ -48,6 +48,10 @@ impl Loop<'_> {
             // A document's sections, one chip ("Wrote 4 sections in …").
             crate::chat::documents::push_chip(&mut self.tools_used, d.to_string());
         }
+        // A browser batch: each of its steps' chips (chat/pages.rs).
+        for d in result["displayTexts"].as_array().into_iter().flatten().filter_map(Value::as_str).filter(|d| !d.is_empty()) {
+            self.tools_used.push(d.to_string());
+        }
         self.report();
         // Within what the request has left (a long page read on an 8K
         // model, several notes): never past the model's context.

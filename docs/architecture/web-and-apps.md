@@ -192,8 +192,8 @@ Chat's and the Voice Assistant's two ways of reaching outside Yap: looking thing
   `"pictures"`. **`fetch_picture`** (show / look): the same guards, `image/*`
   only (never SVG), ≤ 10 MB (`Content-Length` refused before a byte, a
   stream stopped past it), `Purpose::WebPicture` ("A picture from the web").
-  **Pages beside the chat** (2026-11-01, `chat/pages.rs`): `show_page`,
-  `snap_page` and `offer_browser` take a page by the same rule as
+  **Pages beside the chat** (2026-11-01, `chat/pages.rs`): `browser_navigate`
+  and the other `browser_*` tools take a page by the same rule as
   `read_page` (`Turn::allowed`, `check_url`), their state on the turn
   (`Turn::pages`, `TurnPages`); the page itself loads in its own WebView2
   (`chat/pages/view.rs`: its own profile, no Yap IPC, every navigation
@@ -588,7 +588,7 @@ Chat's and the Voice Assistant's two ways of reaching outside Yap: looking thing
   `for_the_web`: a site people open by name, "open Google" (`WEBSITES`),
   that no app has exactly as its name, or words asking for the web, "…in
   the browser", "website", ".com" (`WEB_CUES`) — is the model's too, which
-  opens it beside the chat with `open_page`, 1 Nov 2026: "open Google" had
+  opens it beside the chat with `browser_navigate` (`open_page` until 8 Nov), 1 Nov 2026: "open Google" had
   opened Google Chrome; "open Chrome", "open Spotify" still open the app)
   → one app → opened, "Opening Microsoft Teams." + chip `Opened Microsoft
   Teams` (no model call: works with no AI and the 1.5B local model);

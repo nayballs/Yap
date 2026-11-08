@@ -1512,12 +1512,12 @@ Checked against the code on 2026-11-01. `ROADMAP.md` (private) has the plans.
 Pages beside the chat (2026-11-01, chat-and-assistant.md "Pages beside the
 chat"): unit-tested (the rules, the tools' refusals, the registered
 browsers' parsing) and e2e-tested on the stand-in web (`desktop/e2e/chat-pages.spec.js`:
-the page in its own webview with no Yap IPC, Save a shot, `snap_page`,
+the page in its own webview with no Yap IPC, Save a shot, the browser toolset (scroll, find, screenshots in the steps, zoom; `chat-browse.spec.js`: clicks by ref and by point, keys, batches, tabs; `plan-eyes.spec.js` on the plan),
 `offer_browser`, Ask Yap about this), but not yet tried on real pages
 (an interactive map, a site that signs in), on the person's screen (the
 page's native window over Yap's at other scalings and on a second monitor,
 toasts hiding it), with the native menu, with a chosen browser opening a
-link, or with `snap_page` while Yap's window is hidden (it likely times
+link, or with `browser_screenshot` of a tab out of sight on a second monitor at another scaling (drawn under Yap's page for a moment; it may time
 out: "is Yap's window on screen?"). Not done: a popover on words selected
 in the page, the pages' profile in "Delete some of your data", and a page
 quote for a question asked out loud.

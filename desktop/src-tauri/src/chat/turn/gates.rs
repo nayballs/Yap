@@ -87,13 +87,14 @@ impl Gates {
 
     /// **Your Claude plan** (chat/turn/plan.rs): it answers, with Claude
     /// Code's web search and page reads and Yap's read-only tools. No
-    /// documents beside the chat and no acting on pages: those stay Yap's
-    /// tool loop's, which a plan turn never runs. The look at the screen,
-    /// the pages beside the chat and the pictures from the web stay as the
-    /// tool loop has them here (7 Nov 2026): their tools go over Yap's run
-    /// endpoint (`integrations/claude_live/eyes.rs`), the tool loop's own
-    /// code — so the tabs open are told with the question, as for any
-    /// model. Agents stay as they are too (on, not across the meetings,
+    /// documents beside the chat: those stay Yap's tool loop's, which a plan
+    /// turn never runs. The look at the screen, the browser beside the chat
+    /// (acting on its pages too, since 8 Nov 2026, each buy, send or sign-in
+    /// on the person's card) and the pictures from the web stay as the tool
+    /// loop has them here: their tools go over Yap's run endpoint
+    /// (`integrations/claude_live/eyes.rs`), the tool loop's own code — so
+    /// the tabs open are told with the question, as for any model. Agents
+    /// stay as they are too (on, not across the meetings,
     /// `claude_live/agents.rs`).
     fn on_the_plan(self) -> Gates {
         Gates {
@@ -101,7 +102,6 @@ impl Gates {
             claude_in_chat: false,
             own_search: false,
             web_lines: crate::chat::tools::WebLines::of(false, false, false),
-            act: false,
             ..self
         }
     }
@@ -187,17 +187,19 @@ mod tests {
         let small = Gates::for_turn(&cfg, &endpoint("local", "qwen2.5-1.5b-instruct"), None, false, true);
         assert!(!small.tools && !small.strong && small.web_on);
         assert_eq!(small.pictures, Gate::Off);
-        // Your Claude plan: it answers, with the web, never documents or
-        // acting on pages (Yap's tool loop's, which it never runs); the
-        // pages, pictures and the screen as the tool loop has them (over
-        // Yap's run endpoint): a Claude reads images.
+        // Your Claude plan: it answers, with the web, never documents (Yap's
+        // tool loop's, which it never runs); the browser (acting on its
+        // pages too, typed in Chat), pictures and the screen as the tool
+        // loop has them (over Yap's run endpoint): a Claude reads images.
         let plan_ep = endpoint(crate::ai::claude_plan::PROVIDER, "claude-opus-5-5");
         let plan = Gates::for_turn(&YapConfig { assistant_screen: true, ..cfg.clone() }, &plan_ep, None, false, true);
-        assert!(plan.tools && plan.web_on && !plan.strong && !plan.act && !plan.claude_in_chat && !plan.own_search);
+        assert!(plan.tools && plan.web_on && !plan.strong && plan.act && !plan.claude_in_chat && !plan.own_search);
         assert_eq!((plan.pictures, plan.screen), (Gate::Look, Gate::Look));
-        // …the same as a Claude on an API key, but for acting on pages.
+        // …the same as a Claude on an API key.
         let keyed = Gates::for_turn(&YapConfig { assistant_screen: true, ..cfg.clone() }, &endpoint("anthropic", "claude-opus-5-5"), None, false, true);
-        assert_eq!((keyed.pictures, keyed.screen), (plan.pictures, plan.screen));
+        assert_eq!((keyed.pictures, keyed.screen, keyed.act), (plan.pictures, plan.screen, plan.act));
+        // Asked out loud with Chat in view: no acting, as for any model.
+        assert!(!Gates::for_turn(&YapConfig { assistant_screen: true, ..cfg.clone() }, &plan_ep, Some("assistant"), false, true).act);
         // From another app, or with the screen's switch off: as for any model.
         let away = Gates::for_turn(&YapConfig { assistant_screen: true, ..cfg.clone() }, &plan_ep, Some("assistant"), false, false);
         assert_eq!((away.pictures, away.screen), (Gate::Off, Gate::Off));

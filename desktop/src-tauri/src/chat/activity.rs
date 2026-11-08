@@ -175,6 +175,28 @@ pub fn describe(name: &str, args: &Value, title_of: &dyn Fn(u64) -> Option<Strin
             Activity::new("picture", with(text(&["url"]).map(|u| crate::web::short_url(&u)), "Taking a shot of", "Taking a shot of a page"))
         }
         "offer_browser" => Activity::new("tool", "Adding a button to open it in your browser"),
+        // The browser beside the chat (chat/pages.rs, one toolset since 8 Nov
+        // 2026; the older names above for an earlier step): the address, the
+        // search's or the find's words, the text scrolled to.
+        "browser_navigate" => match (text(&["search"]), text(&["url"])) {
+            (Some(words), _) => Activity::new("search", format!("Opening a search for {}", quoted(&words))),
+            (None, Some(u)) if u.eq_ignore_ascii_case("back") => Activity::new("page", "Going back"),
+            (None, Some(u)) if u.eq_ignore_ascii_case("forward") => Activity::new("page", "Going forward"),
+            (None, url) => Activity::new("read", with(url.map(|u| crate::web::short_url(&u)), "Going to", "Going to a page")),
+        },
+        "browser_read" => Activity::new("read", "Reading the page beside the chat"),
+        "browser_find" => Activity::new("read", with(text(&["query"]).map(|q| quoted(&q)), "Looking on the page for", "Looking for words on the page")),
+        "browser_scroll" => Activity::new("page", "Scrolling the page beside the chat"),
+        "browser_scroll_to" => Activity::new("page", with(text(&["text"]).map(|t| quoted(&t)), "Scrolling to", "Scrolling the page beside the chat")),
+        "browser_screenshot" => Activity::new("picture", "Looking at the page beside the chat"),
+        "browser_zoom" => Activity::new("picture", "Zooming in on the page beside the chat"),
+        "browser_click" => Activity::new("page", "Clicking on the page beside the chat"),
+        "browser_type" | "browser_form_input" => Activity::new("page", "Typing on the page beside the chat"),
+        "browser_key" => Activity::new("page", with(text(&["keys"]), "Pressing", "Pressing keys on the page")),
+        "browser_hover" => Activity::new("page", "Pointing at the page beside the chat"),
+        "browser_tabs" => Activity::new("page", "Working the tabs beside the chat"),
+        "browser_wait" => Activity::new("page", with(text(&["text"]).map(|t| quoted(&t)), "Waiting for", "Waiting for the page")),
+        "browser_batch" => Activity::new("page", "Using the page beside the chat"),
         // Yap Code's agents (chat/tools/agents.rs): the workspace it's sent
         // to. (Its tools' names until 7 Nov 2026 too — `start_job`… — as a
         // Claude plan session from before the rename may still call them.)
@@ -270,6 +292,22 @@ mod tests {
         assert_eq!(line("go_to", json!({ "search": "trains to Port Ellis" })), "Opening a search for ‘trains to Port Ellis’");
         assert_eq!(line("switch_tab", json!({ "tab": 2 })), "Switching tabs beside the chat");
         assert_eq!(describe("click", &Value::Null, &titles).mark, "page");
+        // The browser toolset's (8 Nov 2026).
+        assert_eq!(line("browser_navigate", json!({ "url": "https://rail.example.com/timetables" })), "Going to rail.example.com/timetables");
+        assert_eq!(line("browser_navigate", json!({ "search": "trains to Port Ellis" })), "Opening a search for ‘trains to Port Ellis’");
+        assert_eq!(line("browser_navigate", json!({ "url": "back" })), "Going back");
+        assert_eq!(line("browser_read", json!({ "mode": "elements" })), "Reading the page beside the chat");
+        assert_eq!(line("browser_find", json!({ "query": "harbourmaster" })), "Looking on the page for ‘harbourmaster’");
+        assert_eq!(line("browser_scroll_to", json!({ "text": "Getting out" })), "Scrolling to ‘Getting out’");
+        assert_eq!(line("browser_screenshot", json!({})), "Looking at the page beside the chat");
+        assert_eq!(line("browser_zoom", json!({ "region": "top" })), "Zooming in on the page beside the chat");
+        assert_eq!(line("browser_key", json!({ "keys": "Tab Enter" })), "Pressing Tab Enter");
+        assert_eq!(line("browser_wait", json!({ "text": "Results" })), "Waiting for ‘Results’");
+        assert_eq!(describe("browser_screenshot", &Value::Null, &titles).mark, "picture");
+        assert_eq!(describe("browser_click", &Value::Null, &titles).mark, "page");
+        for name in crate::chat::pages::ALL {
+            assert_ne!(line(name, json!({})), "Working", "{name}");
+        }
         assert_eq!(line("something_new", json!({})), "Working");
         // Yap's read-only tools on a Claude plan.
         assert_eq!(line("search_meetings", json!({ "query": "launch" })), "Searching your meetings · launch");

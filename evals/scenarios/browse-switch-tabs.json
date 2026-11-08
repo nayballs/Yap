@@ -1,6 +1,6 @@
 {
   "name": "browse-switch-tabs",
-  "description": "Acting on pages: two tabs open, the rail site in front; switch to the wiki tab (switch_tab) and answer from it.",
+  "description": "Acting on pages: two tabs open, the rail site in front; switch to the wiki tab (browser_tabs switch) and answer from it.",
   "tags": [
     "browse",
     "web"
@@ -37,8 +37,9 @@
       "expect": {
         "tools_called": [
           {
-            "name": "switch_tab",
+            "name": "browser_tabs",
             "args": {
+              "action": "switch",
               "tab": 2
             }
           }

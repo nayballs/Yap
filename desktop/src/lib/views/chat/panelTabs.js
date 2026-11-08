@@ -27,7 +27,7 @@ export function panelItems(messages) {
       at.set(key, out.length);
       out.push({ key, kind: 'doc', id: d.id, title: d.title || '' });
     }
-    for (const p of m.pictures?.length ? m.pictures : m.livePictures || []) {
+    for (const p of (m.pictures?.length ? m.pictures : m.livePictures || []).filter((x) => !x?.chip)) {
       if (!p?.id) continue;
       const key = picKey(p.id);
       if (at.has(key)) continue;

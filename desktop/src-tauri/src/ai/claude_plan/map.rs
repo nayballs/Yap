@@ -21,7 +21,7 @@
 //!   read ("Searched the web: \"…\"", "Read example.com/page"); a search's
 //!   links and a page read become the answer's [`Source`]s, numbered as
 //!   found ([`Out::chips`] after each) — the page beside the chat that Yap's
-//!   `read_open_page` read too. One of Yap's that answers in the tool loop's
+//!   `browser_read` read too. One of Yap's that answers in the tool loop's
 //!   shape has its own chip (`displayText`), its pictures after it (MCP
 //!   image content, `claude_live/eyes.rs`) never in the way.
 //! - **The answer's citations** ([`cite`]): the plan's prompt asks for a
@@ -360,8 +360,8 @@ impl Mapper {
                 // One that answers as the tool loop's tools do (Agents',
                 // the screen's and the pages': `{"success", "displayText",
                 // …}`): its own chip, refusals too.
-                if let Some(chip) = display_text(text) {
-                    self.chips.push(chip);
+                if let Some(chips) = display_texts(text) {
+                    self.chips.extend(chips);
                     return true;
                 }
                 let chip = yap_chip(name, input);
@@ -469,11 +469,15 @@ fn leading_json(text: &str) -> Option<Value> {
 }
 
 /// A result in the tool loop's shape (`{"success", "displayText", …}`, the
-/// agent tools', the screen's and the pages'): its chip. Pure.
-fn display_text(text: &str) -> Option<String> {
+/// agent tools', the screen's and the browser's): its chips — its own, and
+/// a browser batch's steps' (`displayTexts`). Pure.
+fn display_texts(text: &str) -> Option<Vec<String>> {
     let v = leading_json(text)?;
     v.get("success")?;
-    v["displayText"].as_str().map(str::trim).filter(|s| !s.is_empty()).map(str::to_string)
+    let chip = |s: &str| Some(s.trim()).filter(|s| !s.is_empty()).map(str::to_string);
+    let mut out: Vec<String> = v["displayText"].as_str().and_then(chip).into_iter().collect();
+    out.extend(v["displayTexts"].as_array().into_iter().flatten().filter_map(Value::as_str).filter_map(chip));
+    (!out.is_empty()).then_some(out)
 }
 
 /// The chip of one of Yap's own tools, as the tool loop words its own.
@@ -797,11 +801,13 @@ mod tests {
         assert_eq!(m.chips(), ["Sent an agent to garden-planner", "Didn't send an agent: not after reading the web"]);
         assert!(log.said.contains(&"call start_agent".to_string()), "{:?}", log.said);
         // Plain text from another of Yap's tools: its usual chip.
-        assert_eq!(display_text("2 notes"), None);
+        assert_eq!(display_texts("2 notes"), None);
         // A result with its pictures' lines after it (the screen's): its own chip.
         let looked = r#"{"success":true,"data":{"monitors":2},"displayText":"Looked at your screen (2 monitors)"}(From Yap, not the user.) Monitor 1 of 2 as it is now.[Image saved to tool-results/a.png]"#;
-        assert_eq!(display_text(looked).as_deref(), Some("Looked at your screen (2 monitors)"));
-        assert_eq!(display_text(r#"{"displayText":"no success field"}"#), None);
+        assert_eq!(display_texts(looked), Some(vec!["Looked at your screen (2 monitors)".to_string()]));
+        // A browser batch: each of its steps' chips.
+        assert_eq!(display_texts(r#"{"success":false,"displayText":"","displayTexts":["Scrolled down wiki.example.com","Looked at the page · wiki.example.com"]}"#).unwrap(), ["Scrolled down wiki.example.com", "Looked at the page · wiki.example.com"]);
+        assert_eq!(display_texts(r#"{"displayText":"no success field"}"#), None);
     }
 
     #[test]
@@ -809,7 +815,7 @@ mod tests {
         let read = r#"{\"success\":true,\"data\":{\"tab\":1,\"n\":1,\"title\":\"Fort Joy - Example Wiki\",\"url\":\"https://wiki.example.com/wiki/Fort_Joy\",\"text\":\"Every chest marked.\"},\"displayText\":\"Read wiki.example.com/wiki/Fort_Joy beside the chat\"}"#;
         let looked = r#"{\"success\":true,\"data\":{\"monitors\":1},\"displayText\":\"Looked at your screen\"}"#;
         let lines = [
-            r#"{"type":"assistant","message":{"id":"m1","content":[{"type":"tool_use","id":"r1","name":"mcp__yap__read_open_page","input":{}},{"type":"tool_use","id":"s1","name":"mcp__yap__look_at_screen","input":{}}]}}"#.to_string(),
+            r#"{"type":"assistant","message":{"id":"m1","content":[{"type":"tool_use","id":"r1","name":"mcp__yap__browser_read","input":{}},{"type":"tool_use","id":"s1","name":"mcp__yap__look_at_screen","input":{}}]}}"#.to_string(),
             format!(r#"{{"type":"user","message":{{"role":"user","content":[{{"type":"tool_result","tool_use_id":"r1","content":[{{"type":"text","text":"{read}"}}]}}]}}}}"#),
             // Its picture as Claude Code hands it on: an image block, then where it kept it.
             format!(
