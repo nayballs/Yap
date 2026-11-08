@@ -346,7 +346,7 @@ test('on the plan an agent never starts unasked, above the chat Mode, or after a
   const card = thread(main).getByTestId('chat-agent-confirm').last();
   await expect(card).toHaveAttribute('data-state', 'asking', { timeout: 20_000 });
   await expect(card).toContainText('Yap wants to send an agent to ‘garden-planner’ (Manual)');
-  await expect(card).toContainText('This chat read the web');
+  await expect(card).toContainText('This chat just read the web, which could have put words in the agent’s brief.');
   await expect(card.getByTestId('chat-agent-brief')).toHaveText('Write the tides into notes.md.');
   await shot(main, '03-plan-agent-asks-after-the-web');
   expect((await agents(yap)).length).toBe(before);
@@ -437,4 +437,67 @@ test('a Code chat on the plan: its follow-up carries the chat’s agent on, its 
   // (Its warm session works in the workspace: the chat deleted ends it, so a
   // later fresh folder can go.)
   await yap.invoke('chat_delete', { id: agent.conversation });
+});
+
+test('a Bypass Code chat on the plan: “catch up on it” and the model’s plan run read only at Bypass, with no card', async ({ yap, main }) => {
+  // The endpoint's calls run the tool loop's rules (chat/tools/agents.rs): no
+  // plan to approve under Bypass, Settings' "always" skipped, never asked.
+  const ARGS = path.join(HERE, 'plan-bypass-args.jsonl');
+  fs.rmSync(ARGS, { force: true });
+  const LOOKED = "I'm caught up: notes.md keeps the beds; nothing changed.";
+  const reader = [
+    { _for: 'agent' },
+    { _wait_user: true },
+    { _dump_args: ARGS },
+    initOf(['Bash', 'Read'], 'bypassPermissions'),
+    whole('r1', [{ type: 'tool_use', id: 'toolu_read', name: 'Read', input: { file_path: '{{cwd}}\\notes.md' } }], 'tool_use'),
+    { type: 'user', message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: 'toolu_read', content: 'Draft notes' }] }, parent_tool_use_id: null, session_id: SID },
+    whole('r2', [{ type: 'text', text: LOOKED }], 'end_turn'),
+    result(LOOKED, { total_cost_usd: 0.004 }),
+    { _wait_user: true },
+  ];
+  await yap.invoke('agent_bypass_confirmed');
+  await setConfig(yap, main, { agentsMode: 'bypassPermissions', agentsAsk: 'always' });
+  try {
+    await play(
+      yap,
+      'code-chat-bypass',
+      [
+        turn(yapCall('m1', 'toolu_agent', 'start_agent', { brief: 'Get caught up with this folder and say where it stands. Change nothing.', read_only: true }), answers('m2', STARTED)),
+        turn(yapCall('m3', 'toolu_plan', 'start_agent', { brief: 'Plan a watering schedule for notes.md.', mode: 'plan', fresh: true }), answers('m4', STARTED)),
+      ],
+      reader
+    );
+    const before = (await agents(yap)).length;
+    await openView(main, 'Chat');
+    await newCodeChat(main, 'garden-planner');
+    await expect(main.getByTestId('chat-mode-chip')).toContainText('Bypass permissions');
+    await send(main, 'Can you get yourself caught up with this folder? Let me know when you are.');
+    await expect(chipsOfLast(main)).toHaveText(['Sent an agent to garden-planner'], { timeout: 20_000 });
+    const looked = await ended(yap, (await newAgent(yap, before)).id);
+    expect(looked).toMatchObject({ status: 'done', mode: 'bypassPermissions', plan: false, text: LOOKED });
+    expect(looked.turnList[0].readOnly).toBe(true);
+    await messagesOf(yap, looked.conversation, 4);
+
+    // The model asks for Plan on its own: read only at Bypass, never a plan card.
+    await send(main, 'Start a new agent to look at a watering schedule for notes.md.');
+    await expect(chipsOfLast(main)).toHaveText(['Sent an agent to garden-planner'], { timeout: 20_000 });
+    const planned = await ended(yap, (await newAgent(yap, before + 1)).id);
+    expect(planned).toMatchObject({ status: 'done', mode: 'bypassPermissions', plan: false });
+    expect(planned.turnList[0].readOnly).toBe(true);
+    const args = argsIn(ARGS);
+    expect(args).toHaveLength(2);
+    for (const a of args) {
+      expect(flagValue(a, '--permission-mode')).toBe('bypassPermissions');
+      expect(flagValue(a, '--disallowedTools')).toBe('Edit,Write,MultiEdit,NotebookEdit,EnterPlanMode');
+    }
+    await messagesOf(yap, looked.conversation, 8);
+    // No card on the way: the agent's, a plan's, a permission's.
+    await expect(thread(main).getByTestId('chat-agent-confirm')).toHaveCount(0);
+    await expect(thread(main).locator('[data-testid="chat-agent-approve"]')).toHaveCount(0);
+    expect(fs.readFileSync(path.join(GARDEN, 'notes.md'), 'utf8')).toBe('Draft notes\n');
+    await yap.invoke('chat_delete', { id: looked.conversation });
+  } finally {
+    await setConfig(yap, main, { agentsMode: 'auto', agentsAsk: 'new-or-web' });
+  }
 });

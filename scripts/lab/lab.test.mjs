@@ -197,6 +197,13 @@ describe('shots, the sheet and scripts', () => {
     assert.equal(checkTurn({ used: 'x' }, { result: null })[0].detail, 'no turn yet: ask first');
     const agents = { agents: [{ id: 'a1', status: 'done', files: ['notes.md'] }] };
     assert.ok(checkTurn({ agent: { status: 'done', files: { min: 1 } } }, { result: null, agents }).every((c) => c.pass));
+    // An agent's mode, plan and read-only turn (agent-panel's Bypass catch-up).
+    const bypass = { agents: [{ id: 'a1', status: 'done', mode: 'auto', files: ['notes.md'] }, { id: 'a2', status: 'done', mode: 'bypassPermissions', plan: false, readOnly: true, files: [] }] };
+    assert.ok(checkTurn({ agent: { mode: 'bypassPermissions', readOnly: true, plan: false, status: 'done' } }, { result: null, agents: bypass }).every((c) => c.pass));
+    const notRead = checkTurn({ agent: { mode: 'auto', readOnly: true } }, { result: null, agents: bypass });
+    assert.ok(!notRead[0].pass);
+    assert.match(notRead[0].check, /mode auto, readOnly true/);
+    assert.match(notRead[0].detail, /a2: done, bypassPermissions read only/);
     const screen = screenChecks({ selector: [{ window: 'panel', css: '.x' }, { css: '.y', present: false }], visible: 'THE END' });
     assert.deepEqual(screen.map((s) => s.args.window), ['panel', 'main', 'thread']);
     assert.equal(probePasses(screen[0].want, { visible: 2 }), true);

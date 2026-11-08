@@ -96,6 +96,9 @@ struct Now {
     /// the turn ends).
     events: UnboundedSender<Event>,
     web: bool,
+    /// Claude Code began a `WebSearch` or `WebFetch` this turn: an agent's
+    /// ask-first card says "the web".
+    searched: bool,
     /// A connector's server answered this turn (outside content, said so).
     connector: bool,
     /// Claude Code's calls to each of Yap's tools that this turn's events
@@ -146,6 +149,7 @@ impl Slot {
             s.now = Some(Now {
                 n,
                 web: ctx.web,
+                searched: false,
                 connector: false,
                 ctx: Arc::new(ctx),
                 events: tx,
@@ -209,6 +213,11 @@ impl Slot {
         self.with(n, |t| t.connector).unwrap_or(false)
     }
 
+    /// Did Claude Code begin a `WebSearch` or `WebFetch` in turn `n`?
+    pub fn searched(&self, n: u64) -> bool {
+        self.with(n, |t| t.searched).unwrap_or(false)
+    }
+
     /// **Wait for Claude Code's own call to `name`** to show in turn `n`'s
     /// events — one an earlier call hasn't taken — and take it: `true`.
     /// `false`: not within `wait`, or the turn ended.
@@ -253,6 +262,7 @@ pub struct Marks {
 impl Marks {
     /// Claude Code began a `WebSearch` or `WebFetch`.
     pub fn web(&self) {
+        self.slot.with(self.n, |t| t.searched = true);
         self.slot.set_web(self.n);
         self.slot.changed.notify_all();
     }

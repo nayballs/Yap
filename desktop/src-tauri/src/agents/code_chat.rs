@@ -152,7 +152,7 @@ pub fn workspaces_changed() {
 /// tool loop and a plan chat alike (`chat/turn/prompt.rs`). Pure.
 pub fn prompt_line_for(folder: &Folder) -> String {
     format!(
-        "This is a Code chat in the user's folder {} ({}): they picked it for {}. When they ask you to change, fix, build or write something there, send an agent: call start_agent without a folder (it's this one). Their own request this turn is enough; they needn't name the folder. One Claude Code session per Code chat: once it has an agent, each follow-up continues that agent as its next turn (start_agent does it by itself; fresh: true only when they ask for a new agent or a fresh start). message_agent and agent_status without an id mean this chat's latest agent. An agent runs at this chat's Mode (beside the message box): pass mode only when the user's own words ask for a plan first, no changes yet or to be asked first, never because the task is big. An agent in any other folder still needs the user to name it.",
+        "This is a Code chat in the user's folder {} ({}): they picked it for {}. When they ask you to change, fix, build or write something there, send an agent: call start_agent without a folder (it's this one); to only look (\"catch up\", \"don't change anything\"), start_agent with read_only: true, never mode plan. Their own request this turn is enough; they needn't name the folder. One Claude Code session per Code chat: once it has an agent, each follow-up continues that agent as its next turn (start_agent does it by itself; fresh: true only when they ask for a new agent or a fresh start). message_agent and agent_status without an id mean this chat's latest agent. An agent runs at this chat's Mode (beside the message box): pass mode only when the user's own words ask for a plan (plan) or to be asked first (manual), never because the task is big. An agent in any other folder still needs the user to name it.",
         folder.name, folder.path, super::FEATURE
     )
 }
@@ -280,7 +280,7 @@ mod tests {
         };
         assert!(agent_line(&two).contains("is working now (a request waits for its next turn), after 2 turns"));
         assert!(prompt_line_for(&garden).contains("each follow-up continues that agent as its next turn"));
-        assert!(prompt_line_for(&garden).contains("pass mode only when the user's own words ask for a plan first"));
+        assert!(prompt_line_for(&garden).contains("pass mode only when the user's own words ask for a plan (plan)") && prompt_line_for(&garden).contains("start_agent with read_only: true, never mode plan"));
     }
 
     #[test]

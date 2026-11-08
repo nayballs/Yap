@@ -125,14 +125,29 @@ fn run_for(slot: &Slot, id: &str, turn: &Call, name: &str, args: Value, wait: Du
     // not seen in time, it's after outside content, on doubt. Then the call
     // asks on its card (held here for the answer), never refused for it.
     let acts = crate::chat::tools::ASKS_AFTER_OUTSIDE.contains(&name);
+    let mut doubt = false;
     let outside = if acts {
         let counted = slot.seen(turn.n, name, wait);
         if !counted {
             tracing::info!(run = %id, tool = name, "Claude Code: an agent tool's call didn't show in the turn first; asked first on doubt");
+            doubt = true;
         }
         !counted || slot.web(turn.n)
     } else {
         slot.web(turn.n)
+    };
+    // What it was, for the ask-first card's one line of why (the web flag
+    // here also stands for a page, the screen or an agent's own words).
+    let what = if !outside || doubt {
+        ""
+    } else if slot.connector(turn.n) {
+        agents::OUTSIDE_CONNECTOR
+    } else if turn.ctx.web {
+        agents::OUTSIDE_SELECTED
+    } else if slot.searched(turn.n) {
+        agents::OUTSIDE_WEB
+    } else {
+        ""
     };
     if acts && outside {
         tracing::info!(run = %id, tool = name, connector = slot.connector(turn.n), "Claude Code: an agent tool after outside content; it asks first");
@@ -148,6 +163,7 @@ fn run_for(slot: &Slot, id: &str, turn: &Call, name: &str, args: Value, wait: Du
         conversation: turn.ctx.conversation,
         turn: asked,
         web_seen: outside,
+        outside: what,
         live: Some(Live { sink: &sink, beside: None }),
     };
     // Run as the tool loop runs it; the turn ending (a Stop, a newer

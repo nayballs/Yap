@@ -228,6 +228,13 @@ pub struct TurnNote {
     pub status: Status,
     /// What it ran at.
     pub mode: String,
+    /// **A read-only turn** (8 Nov 2026): "catch up", "have a look", "don't
+    /// change anything" — at its mode, Claude Code's editing tools off
+    /// (`runner::READ_ONLY_OFF`), never a plan to approve. A field of the
+    /// turn's own: an older Yap drops it on its save (a Continue then runs
+    /// it with its tools).
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub read_only: bool,
     pub model: String,
     pub effort: String,
     /// Unix seconds (0: never ran).

@@ -298,13 +298,32 @@ impl Loop<'_> {
             Source::Agents => {
                 // (Named only while agents are offered, `Source::of`.)
                 let Some(turn) = self.extra.agents else { return execute(name, &args) };
-                let web_seen = self.seen().any();
+                let seen = self.seen();
+                let web_seen = seen.any();
+                // What it was, for the ask-first card's one line of why.
+                let outside = {
+                    use crate::chat::tools::agents as a;
+                    if self.agent_seen {
+                        a::OUTSIDE_AGENT
+                    } else if seen.connector {
+                        a::OUTSIDE_CONNECTOR
+                    } else if self.extra.web_question {
+                        a::OUTSIDE_SELECTED
+                    } else if seen.web {
+                        a::OUTSIDE_WEB
+                    } else if seen.screen {
+                        a::OUTSIDE_SCREEN
+                    } else {
+                        ""
+                    }
+                };
                 let ctx = crate::chat::tools::agents::Ctx {
                     question: self.question,
                     previous: self.previous.as_deref(),
                     conversation: self.extra.conversation,
                     turn,
                     web_seen,
+                    outside,
                     live: self.live,
                 };
                 let ran = crate::chat::tools::agents::execute(name, &args, ctx).await;

@@ -267,7 +267,10 @@ test('core/agents.js: a plan allowed reads as carried out; a waiting plan’s Go
 
 // ---------------------------------------------------------------- the Mode
 
-test('a Bypass chip: “look into this and make our own version” runs at Bypass, whatever the model asks; “make a plan first” is a plan', async ({ yap, main, fakeLlm }) => {
+test('a Bypass chip never stops for a plan: the model’s plan is a read-only run at Bypass, “make a plan first” too, no card', async ({ yap, main, fakeLlm }) => {
+  // (8 Nov 2026, the maintainer: "if I have bypass permissions, I shouldn't be
+  // accepting plans". Under Auto, "make a plan first" is still a plan: the
+  // plan card's tests below.)
   await yap.invoke('agent_bypass_confirmed');
   await setConfig(yap, main, { agentsMode: 'bypassPermissions' });
   try {
@@ -276,38 +279,132 @@ test('a Bypass chip: “look into this and make our own version” runs at Bypas
     let before = (await agents(yap)).length;
     await codeChat(main);
     await expect(main.getByTestId('chat-mode-chip')).toContainText('Bypass permissions');
-    // The maintainer's own words that day: research and a build, no plan asked for.
+    // The maintainer's words on 7 Nov, and the model's own Plan: never a plan
+    // to approve under Bypass — read only at Bypass, the result says why.
     fakeLlm.scriptChat([
-      { tools: [{ name: 'start_agent', args: { brief: 'Look into the seed tracker and build our own version combined with the garden planner.', title: 'Our own seed tracker', mode: 'plan' } }] },
+      { tools: [{ name: 'start_agent', args: { brief: 'Look into the seed tracker and how we could build our own version combined with the garden planner.', title: 'Our own seed tracker', mode: 'plan' } }] },
       { content: STARTED },
-      { plain: true, content: 'Done: it built our own version.' },
+      { plain: true, content: 'It looked into the seed tracker: here is how ours could work.' },
     ]);
     await send(main, 'can we look into this seed tracker and make our own version of it combined with the garden planner');
     const look = await ended(yap, (await newAgent(yap, before)).id);
-    expect(look).toMatchObject({ status: 'done', mode: 'bypassPermissions', plan: false });
+    expect(look).toMatchObject({ status: 'done', mode: 'bypassPermissions', plan: false, asks: false });
+    expect(look.turnList[0]).toMatchObject({ readOnly: true, mode: 'bypassPermissions' });
     expect(after(argsSeen().at(-1), '--permission-mode')).toBe('bypassPermissions');
+    expect(after(argsSeen().at(-1), '--disallowedTools')).toBe('Edit,Write,MultiEdit,NotebookEdit,EnterPlanMode');
+    expect(look.text).toContain("This is read only: don't change, create or delete any files");
     const told = lastTool(fakeLlm);
     expect(told.success).toBe(true);
-    expect(told.data.mode).toBe('Bypass permissions');
-    expect(told.data.note).toContain("The agent runs at the chat's Mode (Bypass permissions): the user didn't ask for a plan.");
+    expect(told.data).toMatchObject({ mode: 'Bypass permissions', read_only: true });
+    expect(told.data.note).toContain("No plan mode: this chat's Mode is Bypass permissions, so an agent never stops for a plan.");
     await messagesOf(yap, look.conversation, 4);
 
-    // The person asks for a plan: a plan, the chip's Bypass lowered.
+    // The person asks for a plan in so many words: still no plan to approve
+    // under Bypass — read only, its report the plan; no card at any point.
     before = (await agents(yap)).length;
     await codeChat(main);
     fakeLlm.scriptChat([
       { tools: [{ name: 'start_agent', args: { brief: 'Add a watering schedule to notes.md.', mode: 'plan' } }] },
       { content: STARTED },
-      { plain: true, content: 'It made a plan: a watering schedule in notes.md. Shall it go ahead?' },
+      { plain: true, content: 'Its plan: a watering schedule in notes.md. Say go ahead and it builds it.' },
     ]);
     await send(main, 'Make a plan first: add a watering schedule to notes.md.');
     const plan = await ended(yap, (await newAgent(yap, before)).id);
-    expect(plan).toMatchObject({ status: 'done', mode: 'plan', plan: true, planAllowed: false });
-    expect(after(argsSeen().at(-1), '--permission-mode')).toBe('plan');
-    expect(lastTool(fakeLlm).data.note).not.toContain("the user didn't ask for a plan");
+    expect(plan).toMatchObject({ status: 'done', mode: 'bypassPermissions', plan: false, planAllowed: false });
+    expect(plan.turnList[0].readOnly).toBe(true);
+    expect(after(argsSeen().at(-1), '--permission-mode')).toBe('bypassPermissions');
+    expect(lastTool(fakeLlm).data.note).toContain('No plan mode');
     await messagesOf(yap, plan.conversation, 4);
+    await expect(planCard(main)).toHaveCount(0);
+    await expect(thread(main).getByTestId('chat-agent-confirm')).toHaveCount(0);
+    await expect(thread(main).getByTestId('chat-agent-go-ahead')).toHaveCount(0);
+    expect(fs.readFileSync(path.join(GARDEN, 'notes.md'), 'utf8')).toBe('Draft notes\n');
+
+    // "Go ahead": its next turn at Bypass, its tools back (no longer read only).
+    fakeLlm.scriptChat([
+      { tools: [{ name: 'message_agent', args: { text: 'go ahead' } }] },
+      { content: 'Going ahead.' },
+      { plain: true, content: 'Done: it added the watering schedule.' },
+    ]);
+    await send(main, 'Go ahead.');
+    await expect.poll(async () => (await agentOf(yap, plan.id)).turnList?.[1]?.status, { timeout: 30_000 }).toBe('done');
+    const built = await ended(yap, plan.id);
+    expect(built.turnList[1]).toMatchObject({ mode: 'bypassPermissions' });
+    expect(built.turnList[1].readOnly).toBeFalsy();
+    expect(after(argsSeen().at(-1), '--disallowedTools')).toBe('EnterPlanMode');
+    await messagesOf(yap, plan.conversation, 8);
   } finally {
     await setConfig(yap, main, { agentsMode: 'auto' });
+  }
+});
+
+test('a Bypass Code chat: “catch up on this folder” runs read only with no card and no question, and reports back', async ({ yap, main, fakeLlm, shot }) => {
+  await yap.invoke('agent_bypass_confirmed');
+  await setConfig(yap, main, { agentsMode: 'bypassPermissions', agentsAsk: 'always' });
+  // Cards ask as in the app (none answered by the test): any card would wait.
+  await yap.invoke('e2e_claude_approve_auto', { allow: null });
+  const PROMPTS = path.join(HERE, 'catch-up-approve.jsonl');
+  fs.rmSync(PROMPTS, { force: true });
+  const CAUGHT_UP = "I'm caught up: garden-planner keeps the beds and a planting calendar in notes.md; nothing's changed.";
+  try {
+    fs.rmSync(ARGS, { force: true });
+    await script(
+      yap,
+      [
+        { _wait_user: true },
+        { _dump_args: ARGS },
+        init('bypassPermissions'),
+        said('c1', [{ type: 'text', text: "I'll look around first." }, { type: 'tool_use', id: 'toolu_log', name: 'Bash', input: { command: 'git log --oneline -5', description: 'See the recent commits' } }]),
+        // A prompt Claude Code still sends in Bypass (its own safety checks):
+        // answered no at once in Yap, with no card.
+        { _mcp: { tool: 'approve', arguments: { tool_name: 'Bash', input: { command: 'git log --oneline -5' }, tool_use_id: 'toolu_log' }, dump: PROMPTS } },
+        toolResult('toolu_log', 'a1b2c3 Add the planting calendar'),
+        said('c2', [{ type: 'tool_use', id: 'toolu_read', name: 'Read', input: { file_path: '{{cwd}}\\notes.md' } }]),
+        toolResult('toolu_read', 'Draft notes'),
+        said('c3', [{ type: 'text', text: CAUGHT_UP }], 'end_turn'),
+        result(CAUGHT_UP, 0.008),
+        { _wait_user: true },
+      ],
+      'catch-up'
+    );
+    const before = (await agents(yap)).length;
+    await codeChat(main);
+    await expect(main.getByTestId('chat-mode-chip')).toContainText('Bypass permissions');
+    const BRIEF = 'Get caught up with the garden-planner folder: read it and say what it is and where it stands. Change nothing.';
+    fakeLlm.scriptChat([
+      { tools: [{ name: 'start_agent', args: { brief: BRIEF, title: 'Catch up on garden-planner', read_only: true } }] },
+      { content: STARTED },
+      { plain: true, content: "It's caught up: garden-planner keeps the beds and a planting calendar in notes.md, and it changed nothing." },
+    ]);
+    await send(main, 'Hey Claude, can you get yourself caught up with this folder? When you get to speed with it, let me know.');
+    const agent = await ended(yap, (await newAgent(yap, before)).id);
+    // Bypass, read only, no plan, never asking: Settings' "always" skipped too.
+    expect(agent).toMatchObject({ status: 'done', mode: 'bypassPermissions', plan: false, brief: BRIEF });
+    expect(agent.turnList[0]).toMatchObject({ readOnly: true, title: 'Catch up on garden-planner' });
+    const args = argsSeen().at(-1);
+    expect(after(args, '--permission-mode')).toBe('bypassPermissions');
+    expect(after(args, '--disallowedTools')).toBe('Edit,Write,MultiEdit,NotebookEdit,EnterPlanMode');
+    expect(args).not.toContain('--dangerously-skip-permissions');
+    expect(agent.text).toBe(CAUGHT_UP);
+    // Claude Code's own prompt: answered no, nobody asked, never a card.
+    const prompt = fs.readFileSync(PROMPTS, 'utf8');
+    expect(prompt).toContain('runs in Bypass permissions in Yap, so nobody is asked');
+    expect(await yap.invoke('claude_approve_pending')).toEqual([]);
+    // Reported back in the chat, with no card or question on the way.
+    const messages = await messagesOf(yap, agent.conversation, 4);
+    expect(messages.map((m) => m.kind ?? '')).toEqual(['', '', 'agentReport', '']);
+    expect(messages[1].confirms ?? []).toEqual([]);
+    expect(lastTool(fakeLlm).data).toMatchObject({ mode: 'Bypass permissions', read_only: true });
+    await expect(thread(main).getByTestId('chat-agent-confirm')).toHaveCount(0);
+    await expect(thread(main).locator('[data-testid="chat-agent-approve"]')).toHaveCount(0);
+    await expect(thread(main).getByTestId('chat-agent-report')).toHaveCount(1);
+    expect(fs.readFileSync(path.join(GARDEN, 'notes.md'), 'utf8')).toBe('Draft notes\n');
+    await shot(main, '07-bypass-catch-up-reported-light');
+    await theme(yap, main, 'dark');
+    await shot(main, '08-bypass-catch-up-reported-dark');
+    await theme(yap, main, 'light');
+  } finally {
+    await setConfig(yap, main, { agentsMode: 'auto', agentsAsk: 'new-or-web' });
   }
 });
 

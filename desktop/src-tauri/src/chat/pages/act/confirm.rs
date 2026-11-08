@@ -188,6 +188,12 @@ pub struct AgentCard {
     pub web: bool,
     /// A follow-up for the chat's agent (its next turn), not a new agent.
     pub continues: bool,
+    /// **What this turn read from outside** ("the web", "a connector's
+    /// result"; empty: nothing this turn): why the card asks, in one line —
+    /// "This chat just read the web, which could have put words in the
+    /// agent's brief." The one card Bypass permissions still shows.
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub outside: String,
 }
 
 impl Card {

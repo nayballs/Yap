@@ -1,6 +1,6 @@
 {
   "name": "agent-panel",
-  "about": "An agent at work in lab-sandbox from a Code chat, its cards allowed: shots of the Agent panel beside the chat and the thread's to-do card while it runs and once it's done, in both themes. Its `fake` steps play only in a --fake lab (the stand-in agent), so the script's own flow can be checked offline.",
+  "about": "An agent at work in lab-sandbox from a Code chat, its cards allowed: shots of the Agent panel beside the chat and the thread's to-do card while it runs and once it's done, in both themes. Then a Bypass permissions Code chat asked to catch up on the workspace: no card or question asked, the agent read only at Bypass (never a plan to approve), done. Its `fake` steps play only in a --fake lab (the stand-in agent), so the script's own flow can be checked offline.",
   "needs": { "yapCode": true },
   "steps": [
     { "fake": [{ "tools": [{ "name": "start_agent", "args": { "brief": "Add tablespoons to src/convert.js (1 tbsp = 15 ml) with a test, run the tests, then tick that item in TODO.md." } }] }, { "content": "On it: I've sent an agent to lab-sandbox." }] },
@@ -20,6 +20,26 @@
     { "shot": "todo-done", "window": "main", "selector": "[data-testid=\"chat-agent-todo-card\"]", "optional": true },
     { "shot": "thread-done", "window": "thread" },
     { "expect": { "selector": [{ "window": "panel", "css": "[data-testid=\"chat-agent-panel\"]" }, { "window": "panel", "css": "[data-testid=\"chat-agent-row\"]", "count": { "min": 1 } }] } },
-    { "expect": { "selector": { "window": "thread", "css": "[data-testid=\"chat-agent-todo-card\"]" } }, "soft": true, "note": "The to-do card shows only when the agent kept a to-do list." }
+    { "expect": { "selector": { "window": "thread", "css": "[data-testid=\"chat-agent-todo-card\"]" } }, "soft": true, "note": "The to-do card shows only when the agent kept a to-do list." },
+    { "set": { "bypass": true }, "note": "New chats' Mode: Bypass permissions (the test Yap's own one-time OK)." },
+    { "fake": [{ "tools": [{ "name": "start_agent", "args": { "brief": "Get caught up with this workspace: read TODO.md and src/, then say what it is and what's left to do. Change nothing.", "title": "Catch up on lab-sandbox", "read_only": true } }] }, { "content": "On it: I've sent an agent to lab-sandbox to catch up." }] },
+    {
+      "ask": "Can you get yourself caught up with this workspace? When you're up to speed with it, let me know what it is and what's left to do.",
+      "chat": "code:lab-sandbox",
+      "timeout": 300
+    },
+    {
+      "expect": {
+        "used": "start_agent",
+        "refused": false,
+        "card": false,
+        "tool": [{ "name": "start_agent", "path": "data.read_only", "equals": true }, { "name": "start_agent", "path": "data.mode", "equals": "Bypass permissions" }]
+      },
+      "note": "Bypass: no card or question before the agent starts, and a request to catch up is a read-only run, never a plan."
+    },
+    { "wait": "agents", "timeout": 900 },
+    { "expect": { "agent": { "mode": "bypassPermissions", "readOnly": true, "plan": false, "status": "done" } }, "note": "Read only at Bypass, done without waiting on anyone." },
+    { "shot": "bypass-catch-up-done", "window": "thread", "note": "The catch-up's report in the thread, with no card on the way." },
+    { "set": { "bypass": false } }
   ]
 }

@@ -146,6 +146,11 @@ pub struct Approval {
     pub run: String,
     pub conversation: Option<u64>,
     pub origin: Origin,
+    /// **Nobody is asked** (an agent's turn in Bypass permissions, 8 Nov
+    /// 2026): a prompt Claude Code still sends (its own safety checks, the
+    /// person's own `ask` rules) is answered no at once, with no card
+    /// (`approve::UNATTENDED`).
+    pub unattended: bool,
 }
 
 /// **A run to register.**

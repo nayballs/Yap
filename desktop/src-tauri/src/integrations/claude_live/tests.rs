@@ -357,7 +357,7 @@ fn approve_asks_the_person_and_says_allow_deny_or_no_answer() {
     let (ep, events) = endpoint(Duration::from_secs(60), MAX_BACKUP_BYTES);
     let mut spec = RunSpec::new("Update the guide", Tools::Agent);
     spec.folder = Some(folder.clone());
-    spec.approval = Some(Approval { run: "agent-7".into(), conversation: Some(42), origin: Origin::Voice });
+    spec.approval = Some(Approval { run: "agent-7".into(), conversation: Some(42), origin: Origin::Voice, unattended: false });
     let h = ep.register(spec).unwrap();
     let mut c = Client::of(&h);
     assert_eq!(names(&c.request("tools/list", json!({}))), ["approve"], "an agent's only tool, for now");
@@ -414,6 +414,23 @@ fn approve_asks_the_person_and_says_allow_deny_or_no_answer() {
     let (err, text) = c.tool("approve", json!({}));
     assert!(err && text.contains("tool_name"));
     let _ = std::fs::remove_dir_all(&folder);
+}
+
+#[test]
+fn in_bypass_permissions_a_prompt_is_answered_no_at_once_with_no_card() {
+    let (ep, events) = endpoint(Duration::from_secs(60), MAX_BACKUP_BYTES);
+    let mut spec = RunSpec::new("Catch up on the add-on", Tools::Agent);
+    spec.approval = Some(Approval { run: "agent-8".into(), conversation: Some(43), origin: Origin::Voice, unattended: true });
+    let h = ep.register(spec).unwrap();
+    let c = Client::of(&h);
+    // A safety check Claude Code still asks about in Bypass: no card, no wait, a no.
+    let started = Instant::now();
+    let decision = approving(&c, json!({ "tool_name": "Write", "input": { "file_path": ".claude/settings.json", "content": "{}" } })).join().unwrap();
+    assert!(started.elapsed() < Duration::from_secs(10), "never a wait for a card");
+    assert_eq!(decision["behavior"], "deny");
+    assert_eq!(decision["message"], super::approve::UNATTENDED);
+    assert!(ep.approvals.pending().is_empty());
+    assert!(!events.lock().unwrap().iter().any(|(n, _)| n == "yap-claude-approve" || n == "yap-claude-approve-done"), "no card at all");
 }
 
 #[test]
