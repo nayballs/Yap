@@ -107,6 +107,8 @@ async fn the_offer_follows_the_switch_the_settings_where_and_meetings() {
     let off: Off = [id.clone()].into();
     assert!(offered(Surface::Chat, false, false, &off).is_empty());
     assert!(offered(Surface::Voice, false, false, &off).is_empty());
+    assert!(offered_for_plan(Surface::Chat, false, false, &off).is_empty(), "a plan chat's too");
+    assert_eq!(offered_for_plan(Surface::Chat, false, false, &Off::new()).len(), 2);
     // Off: never offered.
     connector_set_tool(id.clone(), "turn_off".into(), "off".into()).await.unwrap();
     assert_eq!(wires(Surface::Chat, false, false), ["homelights__list_lights"]);
@@ -309,6 +311,10 @@ async fn from_a_phone_reads_run_and_anything_that_would_ask_is_refused_with_the_
     let names: Vec<Value> = turn.definitions().iter().map(|t| t["function"]["name"].clone()).collect();
     assert_eq!(names, [json!("homelights__list_lights")]);
     assert!(turn.owns("homelights__turn_off"));
+    // A plan chat asked from the phone: the same reads only.
+    let plan = Turn::for_plan(offered_for_plan(Surface::Phone, false, false, &Off::new()), Surface::Phone, false).unwrap();
+    assert_eq!(plan.tools().iter().map(|t| t.wire.as_str()).collect::<Vec<_>>(), ["homelights__list_lights"]);
+    assert!(plan.owns("homelights__turn_off"));
     let log = Log::default();
     let ctx = |outside: bool| Ctx { question: "Which of my lights are on?", own: &[], outside, live: Some(Live { sink: &log, beside: None }) };
     // A read runs.

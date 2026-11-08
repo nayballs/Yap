@@ -119,13 +119,19 @@ pub fn may(provider: &str, strong: bool) -> bool {
 /// whatever its chat switched off (the turn's gates; nothing read while
 /// the preview is off).
 pub fn offers_any(cfg: &crate::config::YapConfig, scope: Option<&str>) -> bool {
-    !offered(Surface::of(scope), in_meeting(), cfg.connectors_in_meetings, &Off::new()).is_empty()
+    any_usable(Surface::of(scope), offered(Surface::of(scope), in_meeting(), cfg.connectors_in_meetings, &Off::new()))
 }
 
 /// [`offers_any`] in chat `conversation` (`None`: a new chat's), the
 /// connectors it switched off left out (`connectors/chats.rs`).
 pub fn offers_any_in(cfg: &crate::config::YapConfig, scope: Option<&str>, conversation: Option<u64>) -> bool {
-    !offered(Surface::of(scope), in_meeting(), cfg.connectors_in_meetings, &crate::integrations::connectors::chats::off(conversation)).is_empty()
+    any_usable(Surface::of(scope), offered(Surface::of(scope), in_meeting(), cfg.connectors_in_meetings, &crate::integrations::connectors::chats::off(conversation)))
+}
+
+/// Whether any of `tools` would be offered where it was asked (a phone's:
+/// its reads set to Always allow, [`phone_may`]).
+fn any_usable(surface: Surface, tools: Vec<Offered>) -> bool {
+    tools.iter().any(|t| surface != Surface::Phone || phone_may(t))
 }
 
 /// The connectors a chat switched off (their ids).
@@ -444,13 +450,14 @@ impl Turn {
         if name == FIND {
             return Ran { result: self.find(args), ..Ran::default() };
         }
+        // The tool asked for (`use_tool`'s, from its own arguments).
+        let asked = args_tool(name, args);
         let (tool, args) = self.target(name, args);
         // A phone's write (or Ask first): known, never run from there.
-        if let (None, Some(t)) = (tool, self.held(&args_tool(name, &args))) {
+        if let (None, Some(t)) = (tool, self.held(&asked)) {
             return phone_refused(t, ctx.live);
         }
         let Some(t) = tool else {
-            let asked = args_tool(name, &args);
             return Ran {
                 result: tool_error(format!("There's no connector tool called \"{asked}\" this turn. Use find_tools to find one."), Value::Null, "Didn't use a connector: no such tool".into()),
                 ..Ran::default()

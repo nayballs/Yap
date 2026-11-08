@@ -896,8 +896,9 @@ pub struct ChatConnector {
 #[derive(Debug, Clone, Default, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ChatConnectors {
-    /// Connectors ▸ shows: the preview on, Chat's model gets connectors,
-    /// and one at least is on and allowed in Chat.
+    /// Connectors ▸ shows: the preview on, Chat's model gets connectors
+    /// (in its tool loop, or on your Claude plan through Yap's endpoint),
+    /// and one at least is enabled and allowed in Chat (on here or not).
     pub shown: bool,
     pub connectors: Vec<ChatConnector>,
 }
@@ -934,9 +935,11 @@ pub async fn connector_chat_list(conversation_id: Option<u64>) -> ChatConnectors
     }
     let cfg = crate::config::load();
     let on_device = crate::ai::ai_model::OnDevice::here(&cfg);
+    // (Your Claude plan gets them through Yap's run endpoint, wave 7: its
+    // chats honour these switches too.)
     let gets = crate::ai::ai_model::target(&cfg, crate::ai::ai_model::Scope::Chat, &on_device).is_ok_and(|t| {
         let strong = t.tools && crate::chat::documents::rich::strong(&t.provider, &t.model);
-        crate::chat::tools::connectors::may(&t.provider, strong)
+        crate::chat::tools::connectors::may(&t.provider, strong) || t.provider == crate::ai::claude_plan::PROVIDER
     });
     chat_menu(&store::list(), &chats::off(conversation_id), gets)
 }
