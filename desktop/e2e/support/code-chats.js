@@ -35,6 +35,22 @@ export async function plainSide(main) {
 /** The workspace picker, wherever it's open. */
 export const workspaceMenu = (main) => main.getByTestId('chat-workspace-menu');
 
+/**
+ * **An agent's whole timeline** (its tab's other view, AgentTab.svelte): the
+ * tab opens on its panel (AgentPanel.svelte, 2026-11-08), and a row's Open
+ * shows the timeline at that turn — `n`, else the panel's first row (the
+ * newest turn there). Nothing when the timeline shows already.
+ */
+export async function agentTimeline(main, n = null) {
+  const panel = main.getByTestId('chat-agent-panel');
+  await expect(main.getByTestId('chat-agent-panel').or(main.getByTestId('chat-agent-back'))).toBeVisible();
+  if (!(await panel.count())) return;
+  const row = n == null ? panel.getByTestId('chat-agent-row').first() : panel.locator(`[data-testid="chat-agent-row"][data-turn="${n}"]`);
+  if ((await row.getAttribute('data-open')) !== 'true') await row.locator('.rhead').click();
+  await row.getByTestId('chat-agent-row-open').click();
+  await expect(main.getByTestId('chat-agent-back')).toBeVisible();
+}
+
 /** A new code chat in the workspace `name`: the Code side, "New code chat", its pick. */
 export async function newCodeChat(main, name) {
   await toSide(main, 'Code');

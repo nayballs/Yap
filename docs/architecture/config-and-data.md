@@ -836,7 +836,12 @@
   and times, the files it changed, the commands it ran, what it wasn't
   allowed to do, its final words, its cost so far — Claude Code's estimate —,
   a problem, whether it was a plan or asks something, reported, undone,
-  swept, and `noBackups` when it changed files with no backups made), each
+  swept, and `noBackups` when it changed files with no backups made; each
+  turn's to-do list, `todos`, and what it used, `usage` — its tokens, its
+  context's fill against the model's window, an estimate of its cost while
+  Claude Code hasn't priced it: 2026-11-08, `agents/usage.rs`, new fields of
+  the turn's own that an older Yap drops on its save, so the turn then shows
+  no numbers and its log's list), each
   chat's Mode chip (`modes`), each Code chat's folder (`codeChats`:
   conversation id → `{path, ts}`, yap-code.md "Code chats") and the one-time Bypass OK
   (`bypassConfirmed`); and `%APPDATA%/yap/agents/`, a folder per agent:

@@ -27,6 +27,9 @@
 //!   description, else tidied); Claude Code's to-do list.
 //! - [`diff`]: an edit's lines removed and added, a written file's lines,
 //!   within their caps, for the tab's "Files changed".
+//! - [`usage`]: what each turn used — its tokens, its context's fill, an
+//!   estimate of its cost while it works (the Agent panel's numbers, after
+//!   savvy-progress's agents panel).
 //! - [`consent`]: the person's own words ask for it (as opening an app).
 //! - [`voice`]: the Voice Assistant asks out loud before an agent that needs
 //!   asking; the next question is the answer.
@@ -56,6 +59,7 @@ pub mod remote;
 pub mod runner;
 pub mod steps;
 pub mod store;
+pub mod usage;
 pub mod voice;
 
 pub use store::AgentRef;

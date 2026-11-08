@@ -28,7 +28,8 @@
   import ActivityLine from './ActivityLine.svelte';
   import CodeEmpty from './CodeEmpty.svelte';
   // Yap Code (desktop/src-tauri/src/agents.rs): the pills of the agents an answer
-  // started, an agent's report as an agent card (`kind: "agentReport"`), and a
+  // started, an agent's report as an agent card (`kind: "agentReport"`), in a
+  // Code chat each turn's to-do card under its pill (AgentTodoCard), and a
   // running agent's permission prompts for this chat — each in a small chunk.
   import { agents, agentById } from '../../stores/agents.svelte.js';
   import { pillsByAnswer } from '../../core/agents.js';
@@ -43,6 +44,8 @@
     const j = agentById(run);
     if (j) chat.doc.showAgent(j);
   };
+  /** A pill's turn has a to-do list (its card under the pill, AgentTodoCard). */
+  const hasTodos = (p) => ((p.turnList || []).find((t) => t.n === (p.turn ?? 1)) ?? (p.turnList?.length ? null : p))?.todos?.length > 0;
 
   // The one-tap prompts (chat/skills.rs: the first three of Prepare for my
   // next meeting — with a calendar —, Write my stand-up, List my open
@@ -249,6 +252,14 @@
             {#await import('./AgentPills.svelte') then { default: AgentPills }}
               <AgentPills agents={agentPills.get(i)} onopen={openAgent} />
             {/await}
+            {#if code?.current}
+              <!-- In a Code chat: each turn's to-do list under its pill, live while it works, then folded as its record. -->
+              {#each agentPills.get(i).filter(hasTodos) as p (`${p.id}:${p.turn ?? 1}`)}
+                {#await import('./AgentTodoCard.svelte') then { default: AgentTodoCard }}
+                  <AgentTodoCard agent={p} turn={p.turn ?? 1} line={agents.steps[p.id] || ''} />
+                {/await}
+              {/each}
+            {/if}
           {/if}
         {/each}
         {#if asks.length || answeredRemote.length}

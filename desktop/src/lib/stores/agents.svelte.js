@@ -1,6 +1,7 @@
 // Yap Code's agents in the main window (desktop/src-tauri/src/agents.rs): every agent
 // (`agent_list`, newest first), kept in step with the app-wide `yap-agent`
-// event — its status, files, commands and cost as they change, and the
+// event — its status, files, commands and cost as they change, each turn's
+// to-do list and what it has used (`todos`, `usage`), and the
 // line it's on now (`steps`: its latest step, or the line it moved to
 // without one, `now`; an agent's own Agent carries none: read from its log
 // for the ones running when this window opened) —; the permission prompts
@@ -78,6 +79,11 @@ function onAgent(ev) {
     if (ev.command) next.commands = [...(was.commands || []), ev.command];
     if (typeof ev.cost === 'number') next.cost = ev.cost;
     if (ev.problem) next.problem = ev.problem;
+    // Its turn's to-do list and what it has used, as they come (the Agent
+    // panel's rows, the thread's to-do card: agents/usage.rs).
+    if (Number.isInteger(ev.turn) && (ev.todos || ev.usage) && was.turnList?.length) {
+      next.turnList = was.turnList.map((t) => (t.n === ev.turn ? { ...t, ...(ev.todos ? { todos: ev.todos } : {}), ...(ev.usage ? { usage: ev.usage } : {}) } : t));
+    }
     agents.list = agents.list.map((j, k) => (k === i ? next : j));
     // Over now, or started again — or a turn new to this window (a
     // follow-up, one queued behind the turn working): as saved.

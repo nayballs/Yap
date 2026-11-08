@@ -14,10 +14,11 @@
 // own (`--session-id`, then `--resume`). No one's real Claude Code, account
 // or files: the workspace is in this run's own folder.
 //
-// - Two requests in a Code chat: one agent, one tab with two turns (the
-//   newest open, the earlier folded), two reports, the second turn on
-//   `--resume` of the same session; a pill under each answer and a report
-//   card each, all opening the same tab at their turn. Light and dark.
+// - Two requests in a Code chat: one agent, one tab with two turns (its
+//   panel's two rows; its timeline the newest open, the earlier folded), two
+//   reports, the second turn on `--resume` of the same session; a pill under
+//   each answer and a report card each, all opening the same tab at their
+//   turn's row. Light and dark.
 // - A request while the agent works: queued as its next turn (said so, shown
 //   so), sent once the turn ends, never a second agent.
 // - "Start fresh" (`fresh: true`): a second agent, its tab named apart.
@@ -28,7 +29,7 @@ import path from 'node:path';
 import { test as base, expect, openView, setConfig } from './support/fixtures.js';
 import { startFakeLlm } from './support/fake-llm.js';
 import { RUNS } from './support/yap.js';
-import { newCodeChat } from './support/code-chats.js';
+import { newCodeChat, agentTimeline } from './support/code-chats.js';
 import { turnsOf, titleOf, turnStatusWord, canUndoTurn, pillsByAnswer, agentOfReport, turnOfReport, agentTabName, workedFor, turnNow } from '../src/lib/core/agents.js';
 
 const HERE = path.join(RUNS, 'agents-turns-spec');
@@ -184,6 +185,8 @@ const script = (yap, lines, name) => yap.invoke('e2e_claude_script', { script: w
 const tab = (main) => main.getByTestId('chat-agent');
 const turnsIn = (main) => tab(main).getByTestId('chat-agent-turn');
 const turnAt = (main, n) => tab(main).locator(`[data-testid="chat-agent-turn"][data-turn="${n}"]`);
+/** Turn `n`'s row in the tab's panel (AgentPanel.svelte). */
+const rowAt = (main, n) => tab(main).locator(`[data-testid="chat-agent-row"][data-turn="${n}"]`);
 /** The latest tool result the chat model was given. */
 const lastTool = (fakeLlm) => JSON.parse(fakeLlm.requests.filter((r) => r.messages.some((m) => m.role === 'tool')).at(-1).messages.filter((m) => m.role === 'tool').at(-1).content);
 
@@ -409,6 +412,14 @@ test('two requests in a Code chat: one agent, one tab with two turns, two report
   await expect(tab(main)).toBeVisible();
   await expect(main.getByTestId('chat-panel-tabs')).toHaveCount(0);
   await expect(tab(main)).toHaveAttribute('data-turns', '2');
+  // Its panel: a row a turn, the newest first, both finished.
+  await expect(tab(main).getByTestId('chat-agent-row')).toHaveCount(2);
+  await expect(tab(main).getByTestId('chat-agent-row').first()).toHaveAttribute('data-turn', '2');
+  await expect(tab(main).locator('[data-testid="chat-agent-group"][data-group="finished"] [data-testid="chat-agent-group-head"]')).toHaveText('Finished · 2');
+  await expect(rowAt(main, 1).getByTestId('chat-agent-row-title')).toHaveText('Add a watering schedule');
+  await expect(rowAt(main, 2).getByTestId('chat-agent-row-title')).toHaveText('Add a minimap button');
+  // Its whole timeline: a section a turn.
+  await agentTimeline(main);
   await expect(turnsIn(main)).toHaveCount(2);
   await expect(turnAt(main, 1)).toHaveAttribute('data-open', 'false');
   await expect(turnAt(main, 2)).toHaveAttribute('data-open', 'true');
@@ -449,7 +460,8 @@ test('two requests in a Code chat: one agent, one tab with two turns, two report
   await closeTab(main);
   await pills.nth(0).click();
   await expect(tab(main)).toBeVisible();
-  await expect(turnAt(main, 1)).toHaveAttribute('data-open', 'true');
+  await expect(rowAt(main, 1)).toHaveAttribute('data-open', 'true');
+  await expect(rowAt(main, 2)).toHaveAttribute('data-open', 'false');
   await expect(main.getByTestId('chat-panel-tabs')).toHaveCount(0);
   const reports = thread(main).getByTestId('chat-agent-report');
   await expect(reports).toHaveCount(2);
@@ -458,6 +470,9 @@ test('two requests in a Code chat: one agent, one tab with two turns, two report
   await expect(reports.nth(1).locator('.jline')).toHaveText('Changed notes.md, minimap.js');
   await closeTab(main);
   await reports.nth(1).getByRole('button', { name: 'Open the agent in garden-planner' }).click();
+  await expect(rowAt(main, 2)).toHaveAttribute('data-open', 'true');
+  // Its Open: the timeline at that turn.
+  await agentTimeline(main, 2);
   await expect(turnAt(main, 2)).toHaveAttribute('data-open', 'true');
   await expect(main.getByTestId('chat-panel-tabs')).toHaveCount(0);
   // The chat's prompt said so: its agent, a follow-up continues it.
@@ -489,6 +504,10 @@ test('a request while the agent works queues as its next turn: said so, shown so
   await expect(chipsOfLast(main)).toHaveText(['Queued for the agent in garden-planner']);
   expect(lastTool(fakeLlm)).toMatchObject({ success: true, data: { id: agent.id, turn: 2, say: QUEUED } });
   // Waiting in the tab, behind the turn working; still one agent.
+  await expect(tab(main).locator('[data-testid="chat-agent-group"][data-group="queued"] [data-testid="chat-agent-row"]')).toHaveCount(1);
+  await expect(rowAt(main, 2).getByTestId('chat-agent-row-line')).toHaveText('Goes to the agent once it finishes this step.');
+  await expect(rowAt(main, 1)).toHaveAttribute('data-state', 'running');
+  await agentTimeline(main, 1);
   await expect(turnAt(main, 2)).toHaveAttribute('data-status', 'queued');
   await expect(turnAt(main, 2).locator('.ttitle')).toHaveText('Add a legend');
   await expect(turnAt(main, 2).locator('.tfacts')).toHaveText('Queued');
@@ -535,8 +554,9 @@ test('“start fresh”: a second agent in the workspace, its tab named apart fr
   await messagesOf(yap, conversation, 12);
   // Both agents' tabs in the row, never two that read the same.
   await thread(main).getByTestId('chat-agent-pill').first().click();
-  const names = await main.getByTestId('chat-panel-tab').evaluateAll((els) => els.filter((e) => e.dataset.key?.startsWith('agent:')).map((e) => e.getAttribute('title')));
-  expect(names).toEqual(['Agent · garden-planner · Add a watering schedule', 'Agent · garden-planner · Start over on the planner']);
+  // (Once the agents list has the fresh agent's turns: a moment after its tab opens.)
+  const names = () => main.getByTestId('chat-panel-tab').evaluateAll((els) => els.filter((e) => e.dataset.key?.startsWith('agent:')).map((e) => e.getAttribute('title')));
+  await expect.poll(names).toEqual(['Agent · garden-planner · Add a watering schedule', 'Agent · garden-planner · Start over on the planner']);
   // The fresh agent is the chat's agent from now on: its newest in the workspace.
   await closeTab(main);
   await script(yap, ECHO, 'echo-after-fresh');
@@ -556,6 +576,7 @@ test('“start fresh”: a second agent in the workspace, its tab named apart fr
 test('Undo this turn: refused while a later turn changed the same file, then each turn back; Undo all, asked first', async ({ yap, main, fakeLlm, shot }) => {
   const { agent } = await twoTurns(yap, main, fakeLlm);
   await expect(tab(main)).toBeVisible();
+  await agentTimeline(main);
   // The earlier turn first: refused, and why.
   await turnAt(main, 1).getByTestId('chat-agent-turn-head').click();
   await turnAt(main, 1).getByTestId('chat-agent-undo-turn').click();
