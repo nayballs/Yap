@@ -85,21 +85,22 @@ impl Gates {
         gates
     }
 
-    /// **Your Claude plan, v1** (chat/turn/plan.rs): it answers, with Claude
+    /// **Your Claude plan** (chat/turn/plan.rs): it answers, with Claude
     /// Code's web search and page reads and Yap's read-only tools. No
-    /// documents beside the chat, no pictures from the web, no pages to
-    /// bring up or act on, no look at the screen: those are Yap's tool
-    /// loop's, which a plan turn never runs. Jobs stay as they are (on,
-    /// not across the meetings): their tools go over Yap's run endpoint
-    /// (`integrations/claude_live/jobs.rs`), the tool loop's own code.
+    /// documents beside the chat and no acting on pages: those stay Yap's
+    /// tool loop's, which a plan turn never runs. The look at the screen,
+    /// the pages beside the chat and the pictures from the web stay as the
+    /// tool loop has them here (7 Nov 2026): their tools go over Yap's run
+    /// endpoint (`integrations/claude_live/eyes.rs`), the tool loop's own
+    /// code — so the tabs open are told with the question, as for any
+    /// model. Jobs stay as they are too (on, not across the meetings,
+    /// `claude_live/jobs.rs`).
     fn on_the_plan(self) -> Gates {
         Gates {
             strong: false,
             claude_in_chat: false,
             own_search: false,
             web_lines: crate::chat::tools::WebLines::of(false, false, false),
-            pictures: Gate::Off,
-            screen: Gate::Off,
             act: false,
             ..self
         }
@@ -186,11 +187,25 @@ mod tests {
         let small = Gates::for_turn(&cfg, &endpoint("local", "qwen2.5-1.5b-instruct"), None, false, true);
         assert!(!small.tools && !small.strong && small.web_on);
         assert_eq!(small.pictures, Gate::Off);
-        // Your Claude plan (v1): it answers, with the web, never documents,
-        // pictures, pages or the screen (Yap's tool loop's, which it never runs).
-        let plan = Gates::for_turn(&cfg, &endpoint(crate::ai::claude_plan::PROVIDER, "claude-opus-5-5"), None, false, true);
+        // Your Claude plan: it answers, with the web, never documents or
+        // acting on pages (Yap's tool loop's, which it never runs); the
+        // pages, pictures and the screen as the tool loop has them (over
+        // Yap's run endpoint): a Claude reads images.
+        let plan_ep = endpoint(crate::ai::claude_plan::PROVIDER, "claude-opus-5-5");
+        let plan = Gates::for_turn(&YapConfig { assistant_screen: true, ..cfg.clone() }, &plan_ep, None, false, true);
         assert!(plan.tools && plan.web_on && !plan.strong && !plan.act && !plan.claude_in_chat && !plan.own_search);
-        assert_eq!((plan.pictures, plan.screen), (Gate::Off, Gate::Off));
+        assert_eq!((plan.pictures, plan.screen), (Gate::Look, Gate::Look));
+        // …the same as a Claude on an API key, but for acting on pages.
+        let keyed = Gates::for_turn(&YapConfig { assistant_screen: true, ..cfg.clone() }, &endpoint("anthropic", "claude-opus-5-5"), None, false, true);
+        assert_eq!((keyed.pictures, keyed.screen), (plan.pictures, plan.screen));
+        // From another app, or with the screen's switch off: as for any model.
+        let away = Gates::for_turn(&YapConfig { assistant_screen: true, ..cfg.clone() }, &plan_ep, Some("assistant"), false, false);
+        assert_eq!((away.pictures, away.screen), (Gate::Off, Gate::Off));
+        let off = Gates::for_turn(&YapConfig { assistant_screen: false, ..cfg.clone() }, &plan_ep, None, false, true);
+        assert_eq!((off.pictures, off.screen), (Gate::Look, Gate::Off));
+        // Across the meetings: none of them.
+        let across = Gates::for_turn(&YapConfig { assistant_screen: true, ..cfg.clone() }, &plan_ep, Some("meetings"), true, false);
+        assert_eq!((across.pictures, across.screen), (Gate::Off, Gate::Off));
         // …and keeps jobs as the turn has them (over Yap's run endpoint).
         assert!(Gates { jobs: true, ..plan }.on_the_plan().jobs);
         assert!(!Gates { jobs: false, ..plan }.on_the_plan().jobs);

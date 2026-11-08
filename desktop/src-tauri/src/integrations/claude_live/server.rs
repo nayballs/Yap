@@ -112,6 +112,12 @@ impl Endpoint {
         let tools = spec.tools;
         let jobs = spec.jobs && tools == super::Tools::Chat;
         let memory = spec.memory;
+        // The screen and the pages: a Chat run's only.
+        let mut spec = spec;
+        if tools != super::Tools::Chat {
+            spec.eyes = super::eyes::Eyes::default();
+        }
+        let eyes = spec.eyes;
         let has_backup = spec.backup_dir.is_some();
         let turn = Arc::new(super::turn::Slot::default());
         let run = Arc::new(Run { id: id.clone(), digest: digest(&format!("Bearer {key}")), spec, backups: Mutex::new(()), turn: Arc::clone(&turn) });
@@ -120,8 +126,8 @@ impl Endpoint {
             runs.insert(id.clone(), run);
             runs.len()
         };
-        tracing::info!(run = %id, tools = ?tools, jobs, backup = has_backup, runs = count, "Claude Code endpoint: a run registered");
-        Ok(RunHandle { endpoint: Arc::clone(self), id, key, tools, jobs, memory, has_backup, turn })
+        tracing::info!(run = %id, tools = ?tools, jobs, eyes = eyes.any(), backup = has_backup, runs = count, "Claude Code endpoint: a run registered");
+        Ok(RunHandle { endpoint: Arc::clone(self), id, key, tools, jobs, memory, eyes, has_backup, turn })
     }
 
     /// The run's URLs answer 404 from now on; its prompts still waiting

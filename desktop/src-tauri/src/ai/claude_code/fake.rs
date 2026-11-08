@@ -28,7 +28,10 @@
 //!   "server":…,"tool":…,"response":<the JSON-RPC response>|null,"error":…}`.
 //!   With `"result_for":"<tool_use id>"`, then also the call's answer as
 //!   Claude Code hands it to the model: a `user` message with that id's
-//!   `tool_result` (the answer's text blocks, its `isError`).
+//!   `tool_result` (the answer's text blocks, its image content as image
+//!   blocks, its `isError`). With `"dump":"<file>"`, a line appended to that
+//!   file with what the call gave (its content's blocks: text whole, an
+//!   image's type and size, never its data), for an e2e spec.
 //! - `{"_for":"chat"}` (or `"job"`, `"ask"`, `"all"`): the lines up to the
 //!   next `_for` play only in a process of that kind — `job` started with
 //!   `--permission-prompt-tool` (a Job's run), `chat` with an
@@ -528,22 +531,28 @@ impl Player<'_> {
     }
 
     /// A tool call on the run's MCP server: the `fake_mcp` line, and with
-    /// `result_for` the `tool_result` the model would get.
+    /// `result_for` the `tool_result` the model would get. With `dump`, a
+    /// line appended to that file: the result's content blocks (an image's
+    /// type and size, never its data; [`dumped`]).
     fn mcp(&self, arg: &Value) -> Vec<String> {
         let line = self.mcp_call(arg);
-        let Some(id) = arg["result_for"].as_str() else { return vec![line] };
         let v: Value = serde_json::from_str(&line).unwrap_or(Value::Null);
-        let (text, is_error) = match (&v["response"]["result"], &v["response"]["error"], &v["error"]) {
-            (r, _, _) if r.is_object() => {
-                let text: Vec<&str> = r["content"].as_array().into_iter().flatten().filter(|b| b["type"] == "text").filter_map(|b| b["text"].as_str()).collect();
-                (text.join(""), r["isError"].as_bool().unwrap_or(false))
+        if let Some(file) = arg["dump"].as_str().filter(|f| !f.trim().is_empty()) {
+            let written = std::fs::OpenOptions::new().create(true).append(true).open(file).and_then(|mut f| writeln!(f, "{}", dumped(&v)));
+            if let Err(e) = written {
+                eprintln!("fake-claude: couldn't write the MCP call: {e}");
             }
-            (_, e, _) if e.is_object() => (format!("MCP error {}: {}", e["code"], e["message"].as_str().unwrap_or("")), true),
-            (_, _, e) => (e.as_str().unwrap_or("The MCP call failed.").to_string(), true),
+        }
+        let Some(id) = arg["result_for"].as_str() else { return vec![line] };
+        let content = match (&v["response"]["result"], &v["response"]["error"], &v["error"]) {
+            (r, _, _) if r.is_object() => Ok((tool_result_content(&r["content"]), r["isError"].as_bool().unwrap_or(false))),
+            (_, e, _) if e.is_object() => Err(format!("MCP error {}: {}", e["code"], e["message"].as_str().unwrap_or(""))),
+            (_, _, e) => Err(e.as_str().unwrap_or("The MCP call failed.").to_string()),
         };
+        let (content, is_error) = content.unwrap_or_else(|text| (vec![json!({ "type": "text", "text": text })], true));
         let result = json!({
             "type": "user",
-            "message": { "role": "user", "content": [{ "type": "tool_result", "tool_use_id": id, "content": [{ "type": "text", "text": text }], "is_error": is_error }] },
+            "message": { "role": "user", "content": [{ "type": "tool_result", "tool_use_id": id, "content": content, "is_error": is_error }] },
             "parent_tool_use_id": null,
             "session_id": self.ctx.session_id,
         });
@@ -571,6 +580,53 @@ impl Player<'_> {
         };
         json!({"type":"system","subtype":"fake_mcp","server":name,"tool":tool,"response":response,"error":error,"session_id":self.ctx.session_id}).to_string()
     }
+}
+
+/// **An MCP result's content as Claude Code hands it to the model** (2.1.296,
+/// its MCP client): the text blocks' words joined into one text block, and
+/// each image content (`{"type":"image","data","mimeType"}`) as an image
+/// block (`{"type":"image","source":{"type":"base64","media_type","data"}}`)
+/// in its place. Pure.
+fn tool_result_content(content: &Value) -> Vec<Value> {
+    let mut out: Vec<Value> = Vec::new();
+    let mut words = String::new();
+    for b in content.as_array().into_iter().flatten() {
+        match b["type"].as_str() {
+            Some("text") => words.push_str(b["text"].as_str().unwrap_or("")),
+            Some("image") => {
+                if !words.is_empty() {
+                    out.push(json!({ "type": "text", "text": std::mem::take(&mut words) }));
+                }
+                out.push(json!({ "type": "image", "source": { "type": "base64", "media_type": b["mimeType"], "data": b["data"] } }));
+            }
+            _ => {}
+        }
+    }
+    if !words.is_empty() || out.is_empty() {
+        out.push(json!({ "type": "text", "text": words }));
+    }
+    out
+}
+
+/// **What an MCP call gave, for a test to read** (`_mcp`'s `dump`): the
+/// tool, whether it failed, and its content — text whole, an image's type
+/// and size in bytes (never its data). Pure.
+fn dumped(v: &Value) -> Value {
+    let result = &v["response"]["result"];
+    let content: Vec<Value> = result["content"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .map(|b| match b["type"].as_str() {
+            Some("image") => {
+                let data = b["data"].as_str().unwrap_or("");
+                let bytes = base64::Engine::decode(&base64::engine::general_purpose::STANDARD, data).map_or(0, |d| d.len());
+                json!({ "type": "image", "mimeType": b["mimeType"], "bytes": bytes })
+            }
+            _ => json!({ "type": b["type"], "text": b["text"] }),
+        })
+        .collect();
+    json!({ "tool": v["tool"], "isError": result["isError"].as_bool().unwrap_or(v["error"].is_string()), "content": content, "error": v["error"] })
 }
 
 /// A user message's words (its text blocks, joined).
@@ -943,6 +999,25 @@ mod tests {
         assert_eq!(call["method"], "tools/call");
         assert_eq!(call["params"]["arguments"]["input"]["command"], "ls");
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn an_mcp_results_pictures_reach_the_model_as_image_blocks_and_a_dump_never_has_their_data() {
+        let content = json!([
+            { "type": "text", "text": "{\"success\":true}" },
+            { "type": "text", "text": "Monitor 1." },
+            { "type": "image", "data": "iVBORw0KGgo=", "mimeType": "image/png" },
+        ]);
+        assert_eq!(
+            tool_result_content(&content),
+            [json!({ "type": "text", "text": "{\"success\":true}Monitor 1." }), json!({ "type": "image", "source": { "type": "base64", "media_type": "image/png", "data": "iVBORw0KGgo=" } })]
+        );
+        // Text only: one block, as before.
+        assert_eq!(tool_result_content(&json!([{ "type": "text", "text": "a" }, { "type": "text", "text": "b" }])), [json!({ "type": "text", "text": "ab" })]);
+        let dump = dumped(&json!({ "tool": "look_at_screen", "response": { "result": { "content": content, "isError": false } }, "error": null }));
+        assert_eq!(dump["tool"], "look_at_screen");
+        assert_eq!(dump["content"][2], json!({ "type": "image", "mimeType": "image/png", "bytes": 8 }));
+        assert!(!dump.to_string().contains("iVBOR"));
     }
 
     #[test]
