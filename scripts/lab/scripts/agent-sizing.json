@@ -4,8 +4,8 @@
   "needs": { "yapCode": true },
   "steps": [
     { "set": { "config": { "agentsAsk": "never", "agentsCeilingModel": "" } }, "note": "No ask-first card, and no ceiling (\"No limit\", the default)." },
-    { "fake": [{ "tools": [{ "name": "start_agent", "args": { "brief": "Rename the variable x to count in src/convert.js, then run the tests.", "title": "Rename x to count", "model": "claude-haiku-5-5", "effort": "low", "sizing": "a one-line rename" } }] }, { "content": "On it: I've sent an agent to lab-sandbox." }] },
-    { "ask": "rename the variable x to count in convert.js", "chat": "code:lab-sandbox", "cards": "allow", "timeout": 300 },
+    { "fake": [{ "tools": [{ "name": "start_agent", "args": { "brief": "Rename the function cupsToMl to cupsToMillilitres in src/convert.js and its test, then run the tests.", "title": "Rename cupsToMl", "model": "claude-haiku-5-5", "effort": "low", "sizing": "a one-line rename" } }] }, { "content": "On it: I've sent an agent to lab-sandbox." }] },
+    { "ask": "rename the function cupsToMl to cupsToMillilitres in convert.js and its test", "chat": "code:lab-sandbox", "cards": "allow", "timeout": 300 },
     { "expect": { "used": "start_agent", "refused": false } },
     { "expect": { "tool": { "name": "start_agent", "argsHas": ["model", "effort"] } }, "soft": true, "note": "The chat sized it: a model and an effort in its call." },
     { "wait": "agents", "cards": "allow", "timeout": 900 },
