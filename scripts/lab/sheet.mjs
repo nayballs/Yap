@@ -175,7 +175,38 @@ async function browser() {
   return chromium.launch({ headless: true, ...(channel && channel !== 'chromium' ? { channel } : {}) });
 }
 
-/** The HTML file `html` rendered to the PNG `png`, its whole height: `{ width, height }`. */
+/** A page of a sheet at most this tall: chat apps refuse images over 8000 px. */
+export const PAGE_MAX = 7600;
+
+/**
+ * Where to cut a sheet `height` px tall into pages of at most `max` px:
+ * at a block's top (`tops`: each turn's header and each shot's cell, in px)
+ * where one fits, else straight at `max` (a block taller than a page).
+ * `[{ y, h }]`. Pure.
+ */
+export function pageCuts(height, tops, max = PAGE_MAX) {
+  const starts = [...new Set(tops.filter((t) => t > 0 && t < height).map(Math.round))].sort((a, b) => a - b);
+  const out = [];
+  let y = 0;
+  while (y < height) {
+    if (height - y <= max) {
+      out.push({ y, h: height - y });
+      break;
+    }
+    const fit = starts.filter((t) => t > y && t - y <= max).pop();
+    const end = fit ?? y + max;
+    out.push({ y, h: end - y });
+    y = end;
+  }
+  return out;
+}
+
+/**
+ * The HTML file `html` rendered to the PNG `png`, its whole height, and — when
+ * it's taller than a page — the same cut into pages between its shots
+ * (`<png>-p1.png`, …), each under [`PAGE_MAX`], to send or view whole.
+ * `{ width, height, pages }`.
+ */
 export async function renderSheet(html, png) {
   const b = await browser();
   try {
@@ -183,14 +214,28 @@ export async function renderSheet(html, png) {
     await page.goto(pathToFileURL(html).href, { waitUntil: 'load' });
     await page.evaluate(() => Promise.all([...document.images].map((i) => (i.complete ? null : new Promise((r) => (i.onload = i.onerror = r))))));
     const height = await page.evaluate(() => Math.ceil(document.documentElement.scrollHeight));
-    const parts = [];
-    for (let y = 0; y < height; y += CAPTURE_MAX) {
-      const h = Math.min(CAPTURE_MAX, height - y);
-      parts.push({ png: await page.screenshot({ fullPage: true, clip: { x: 0, y, width: WIDTH, height: h }, timeout: 60_000 }) });
-    }
-    const bytes = parts.length === 1 ? parts[0].png : stitch(parts);
+    const grab = async (y, h) => {
+      const parts = [];
+      for (let at = y; at < y + h; at += CAPTURE_MAX) {
+        const ph = Math.min(CAPTURE_MAX, y + h - at);
+        parts.push({ png: await page.screenshot({ fullPage: true, clip: { x: 0, y: at, width: WIDTH, height: ph }, timeout: 60_000 }) });
+      }
+      return parts.length === 1 ? parts[0].png : stitch(parts);
+    };
+    const bytes = await grab(0, height);
     fs.writeFileSync(png, bytes);
-    return pngSize(bytes);
+    const pages = [];
+    if (height > PAGE_MAX) {
+      const tops = await page.evaluate(() => [...document.querySelectorAll('h2, .turn, figure.cell')].map((e) => e.getBoundingClientRect().top + window.scrollY));
+      const cuts = pageCuts(height, tops);
+      const stem = png.replace(/\.png$/i, '');
+      for (const [i, c] of cuts.entries()) {
+        const file = `${stem}-p${i + 1}.png`;
+        fs.writeFileSync(file, await grab(c.y, c.h));
+        pages.push(file);
+      }
+    }
+    return { ...pngSize(bytes), pages };
   } finally {
     await b.close().catch(() => {});
   }
@@ -209,7 +254,25 @@ export async function makeSheet({ lab, turns, out, title = 'Yap Lab', subtitle =
   const png = out ? path.resolve(out) : path.join(lab, 'sheets', `sheet-${stamp}.png`);
   const html = png.replace(/\.png$/i, '') + '.html';
   fs.mkdirSync(path.dirname(png), { recursive: true });
-  fs.writeFileSync(html, sheetHtml({ title, subtitle, turns: list, dir: path.dirname(html) }));
+  // The sheet keeps its own copies of its shots (`<sheet>_files/`): the next
+  // `start` writes its turns' shots into the same `shots/NNN/` folders, which
+  // left an earlier sheet's page pointing at another run's pictures.
+  const own = png.replace(/\.png$/i, '') + '_files';
+  fs.mkdirSync(own, { recursive: true });
+  const kept = list.map((t) => ({
+    ...t,
+    shots: t.shots.map((s) => {
+      const name = `${String(t.turn).padStart(3, '0')}-${path.basename(s.file)}`;
+      const copy = path.join(own, name);
+      try {
+        fs.copyFileSync(s.file, copy);
+        return { ...s, file: copy };
+      } catch {
+        return s;
+      }
+    }),
+  }));
+  fs.writeFileSync(html, sheetHtml({ title, subtitle, turns: kept, dir: path.dirname(html) }));
   const size = await renderSheet(html, png);
   return { png, html, ...size, turns: list.map((t) => t.turn), shots: list.reduce((n, t) => n + t.shots.length, 0) };
 }

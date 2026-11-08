@@ -18,6 +18,19 @@ import path from 'node:path';
 import { REPO, buildFresh, labConfig, onOff, parseArgs, parseModel, parseSize } from './options.mjs';
 import { coloursIn, drawPng, meanLuma, pngSize, readPng, stitch } from './png.mjs';
 import { checkTurn, kindOf, probePasses, resultObject, screenChecks } from './script.mjs';
+import { pageCuts, PAGE_MAX } from './sheet.mjs';
+
+describe('a tall sheet in pages', () => {
+  test('cut between shots where one fits, each under a page', () => {
+    const cuts = pageCuts(13021, [0, 40, 900, 5000, 7500, 7700, 9000, 12000]);
+    assert.deepEqual(cuts, [{ y: 0, h: 7500 }, { y: 7500, h: 5521 }]);
+    assert.ok(cuts.every((c) => c.h <= PAGE_MAX));
+  });
+  test('one page when it fits; straight cuts when no shot starts in reach', () => {
+    assert.deepEqual(pageCuts(5000, [100]), [{ y: 0, h: 5000 }]);
+    assert.deepEqual(pageCuts(20000, []), [{ y: 0, h: PAGE_MAX }, { y: PAGE_MAX, h: PAGE_MAX }, { y: 2 * PAGE_MAX, h: 20000 - 2 * PAGE_MAX }]);
+  });
+});
 import { SEGMENT, TILE, parseTurns, placeShot, sheetHtml } from './sheet.mjs';
 import { shotNames, themesOf } from './shots.mjs';
 import { fillArgs, refIn, templated } from './fake.mjs';
@@ -482,7 +495,9 @@ describe('a --fake run, end to end', { timeout: 900_000 }, () => {
     assert.ok(out.height > 1000, String(out.height));
     const html = fs.readFileSync(out.html, 'utf8');
     assert.match(html, /<h2>Turn 2 /);
-    assert.match(html, /<img src="\.\.\/shots\/002\/01-thread-light\.png"/);
+    // Its own copies of its shots, so the next run's shots can't replace them.
+    assert.match(html, /<img src="test-sheet_files\/002-01-thread-light\.png"/);
+    assert.ok(fs.existsSync(path.join(LAB, 'sheets', 'test-sheet_files', '002-01-thread-light.png')));
     assert.match(lab('sheet', '--turns', '99').error, /No shots for turns 99/);
   });
 

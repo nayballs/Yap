@@ -267,6 +267,9 @@ its own CSS size; a thread shot taller than 1,400 pixels is cut into even pieces
 (`1/3`, `2/3`…) with light and dark side by side, so it stays readable. `--turns`: `3`,
 `1-3`, `2-` or `1,4`. Rendered in the lab's own headless browser (Playwright's Chromium
 when it's installed, else Edge; `YAP_LAB_CHANNEL` to choose). Works after `stop` too.
+A sheet taller than 7,600 pixels is also written as **pages** (`<sheet>-p1.png`, …),
+cut between its shots (`pageCuts`), each under the 8,000 pixels a chat app accepts
+whole: send those, not the tall one. The JSON lists them in `pages`.
 
 ```json
 {"ok":true,"png":"…\\sheets\\sheet-2026-11-08T13-38-52.png","html":"…\\sheets\\sheet-2026-11-08T13-38-52.html","width":1600,"height":4688,"turns":[1],"shots":6}
