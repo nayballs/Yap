@@ -144,14 +144,30 @@ jobs:
           EOF
           node patch-nightly-version.cjs
 
+      # The bundler's own tools (NSIS, nsis_tauri_utils.dll, …), which it
+      # downloads from GitHub Releases into %LOCALAPPDATA%\tauri: kept between
+      # runs, so a GitHub download outage (504s, 8 Nov 2026) can't fail the
+      # bundle step. The bundler checks what it finds and fetches anything
+      # missing or wrong itself.
+      - name: Cache the bundler's tools
+        uses: actions/cache@v4
+        with:
+          path: ~/AppData/Local/tauri
+          key: tauri-bundler-tools-${{ runner.os }}-${{ hashFiles('desktop/src-tauri/Cargo.lock') }}
+          restore-keys: tauri-bundler-tools-${{ runner.os }}-
+
       # Build-only mode: NOT setting tagName/releaseName/releaseId means
       # tauri-action just builds (and minisign-signs) the artifacts and does NOT
       # create its own release (v1 too: no GITHUB_TOKEN needed, no workflow
       # artifacts unless uploadWorkflowArtifacts). We publish the rolling
       # `nightly` release ourselves below.
+      # A failure is tried once more after a pause (the step below): the
+      # bundle's downloads from GitHub Releases can 504 for a while; the
+      # compile is cached in the target folder, so the second try only bundles.
       - name: Build + sign (Tauri, nightly config)
         uses: tauri-apps/tauri-action@v1
         id: tauri
+        continue-on-error: true
         env:
           # Updater (minisign) signing — required so latest.json's signature is
           # valid and the in-app updater accepts the artifact.
@@ -176,6 +192,29 @@ jobs:
           # at the nightly channel's latest.json.
           # The desktop app's folder: tauri runs there, so the nightly config
           # below is relative to it.
+          projectPath: desktop
+          args: "--features engines -c src-tauri/tauri.nightly.conf.json"
+
+      - name: Wait before trying the build again
+        if: steps.tauri.outcome == 'failure'
+        shell: bash
+        run: sleep 120
+
+      # The same build as above, once more: a real failure fails here too.
+      - name: Build + sign again (after a failure)
+        if: steps.tauri.outcome == 'failure'
+        uses: tauri-apps/tauri-action@v1
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+          YAP_GOOGLE_CALENDAR_CLIENT_ID: ${{ secrets.YAP_GOOGLE_CALENDAR_CLIENT_ID }}
+          YAP_GOOGLE_CALENDAR_CLIENT_SECRET: ${{ secrets.YAP_GOOGLE_CALENDAR_CLIENT_SECRET }}
+          GGML_NATIVE: "OFF"
+          GGML_AVX: "OFF"
+          GGML_AVX2: "OFF"
+          GGML_FMA: "OFF"
+          GGML_F16C: "OFF"
+        with:
           projectPath: desktop
           args: "--features engines -c src-tauri/tauri.nightly.conf.json"
 
