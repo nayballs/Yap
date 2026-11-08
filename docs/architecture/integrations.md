@@ -372,7 +372,10 @@ after. **Nothing offers a connector's tools to a model yet.**
   choice, Yap's metadata document and its registration, PKCE (RFC 7636's
   vector), the authorize address, `state` and `iss`, the loopback's one
   answer, token responses and client authentication, the refresh margin,
-  the scopes, one sign-in at a time and the refresh guard; and against
+  the scopes, one sign-in at a time and the refresh guard (a unit test's
+  loopback listens on any free port, never the fixed 51439 a running Yap's
+  sign-in or the e2e suite's needs — `loopback::first_port` —, except the
+  one test of the app's own order, which passes with it busy too); and against
   `fake.rs`'s OAuth fake (an MCP server with its own authorization server)
   the whole sign-in — registered once and reused, PKCE checked, the tokens
   in the vault and in no file, calls carrying them, the receipts —, two
