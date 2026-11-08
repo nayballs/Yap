@@ -1,6 +1,6 @@
 //! **The page pane**: a live web page beside the chat — the panel's Page
-//! tab (`show_page`, `chat/pages.rs`) — and the out-of-sight page a shot is
-//! taken of (`snap_page`).
+//! tab (`browser_navigate`, `chat/pages.rs`) — and what the model sees of it
+//! (`browser_screenshot`: [`shot_in_view`]).
 //!
 //! **Its own webview, not Yap's.** Each page is a WebView2 controller of its
 //! own, made here with WebView2's API (webview2-com), not by Tauri: Tauri
@@ -53,10 +53,10 @@
 //! app is, `assistant/selected.rs`, the site named) and **Read aloud**
 //! (`voice/read_aloud.rs`); **Snip to Chat** always (`snip.rs`).
 //!
-//! **A shot** (`page_view_shot`, the tab's Save a shot; [`snap`], the
-//! model's `snap_page`): `ICoreWebView2::CapturePreview` as a PNG — the
-//! page as it is in the panel, or loaded for the shot in a host under
-//! Yap's own page (out of sight, 1280 × 800, at 100 %) and closed after.
+//! **A shot** (`page_view_shot`, the tab's Save a shot; [`shot_in_view`],
+//! the model's `browser_screenshot`): `ICoreWebView2::CapturePreview` as a
+//! PNG of what's in view at its scroll — on screen as it is, out of sight
+//! drawn a moment under Yap's own page at the size the panel last had.
 //!
 //! **Test mode** loads a page from the web's stand-in (`YAP_WEB_STANDIN`,
 //! `web.rs`: `https://host/path` from `<standin>/host/path`), never the
@@ -75,7 +75,7 @@ use crate::chat::assistant::selected::Selected;
 
 static APP: OnceLock<AppHandle> = OnceLock::new();
 
-/// Keep the app for the model's `snap_page` (it runs without one).
+/// Keep the app for the model's browser tools (they run without one).
 pub fn init(app: &AppHandle) {
     let _ = APP.set(app.clone());
 }
@@ -99,15 +99,17 @@ pub const QUOTE_EVENT: &str = "yap-page-quote";
 pub const PROFILE: &str = "YapPages";
 /// Pages kept alive at once.
 pub const MAX_VIEWS: usize = 4;
-/// A shot's page, in CSS pixels (at 100 %).
+/// The size a page out of sight is laid out at before any has been on
+/// screen (physical pixels).
 pub const SNAP_W: i32 = 1280;
 pub const SNAP_H: i32 = 800;
-/// How long a shot's page may take to load…
-const LOAD_TIMEOUT: Duration = Duration::from_secs(20);
-/// …the time it's given after, for its pictures and scripts…
+/// The time a page loaded for a shot gets after it loads, for its pictures
+/// and scripts…
 const SETTLE: Duration = Duration::from_millis(1200);
-/// …and how long the shot itself may take.
+/// …how long a shot may take…
 const SHOT_TIMEOUT: Duration = Duration::from_secs(10);
+/// …and the moment a page out of sight is given to draw before its shot.
+const DRAW: Duration = Duration::from_millis(350);
 /// How long one of Yap's scripts in a page may take (a page stuck in a loop).
 pub const SCRIPT_TIMEOUT: Duration = Duration::from_secs(10);
 /// A dialog a click opens comes a moment after it: still Yap's to dismiss.
@@ -661,13 +663,29 @@ pub fn types_a_character(vk: u32) -> bool {
     matches!(vk, 0x20 | 0x30..=0x39 | 0x41..=0x5A | 0x60..=0x6F | 0xBA..=0xC0 | 0xDB..=0xDF | 0xE2)
 }
 
-/// **The model's `snap_page`**: the page's shot as a PNG — as it is in the
-/// panel when it's open there, else loaded out of sight for it.
-pub async fn snap(url: String) -> Result<Vec<u8>, String> {
+/// **What's in view of page `key` now**, as a PNG at the device's pixels
+/// (`browser_screenshot`, `browser_zoom`): its own webview's
+/// `CapturePreview` at its current scroll — on screen as it is; out of
+/// sight (another tab in front, the panel closed), drawn for a moment under
+/// Yap's own page at the size it had in the panel, so the shot is what the
+/// person would see there. No page is loaded for it.
+pub async fn shot_in_view(key: &str) -> Result<Vec<u8>, String> {
     let app = APP.get().cloned().ok_or("Yap's window isn't ready to take a shot.")?;
-    let (standin, offline) = web_route();
-    let load = load_url(&url, standin.as_deref(), offline)?;
-    imp::snap(app, url, load).await
+    imp::shot_in_view(app, key.to_string()).await
+}
+
+/// **Page `key` back or forward** in its own history (`browser_navigate`'s
+/// "back" / "forward").
+pub async fn history(key: &str, back: bool) -> Result<(), String> {
+    let app = APP.get().cloned().ok_or("Yap's window isn't ready.")?;
+    imp::go(app, key.to_string(), if back { imp::Go::Back } else { imp::Go::Forward }).await
+}
+
+/// **Page `key` closed** (`browser_tabs`' "close"; the Chat view closes its
+/// tab on `stream::Event::CloseTab`).
+pub async fn close(key: &str) -> Result<(), String> {
+    let app = APP.get().cloned().ok_or("Yap's window isn't ready.")?;
+    imp::close(app, Some(key.to_string())).await
 }
 
 /// Test mode: a page's script run in it (what the suite checks: no Yap IPC
@@ -750,7 +768,7 @@ mod imp {
     pub async fn shot_of(_: AppHandle, _: String) -> Result<Vec<u8>, String> {
         Err(NO.into())
     }
-    pub async fn snap(_: AppHandle, _: String, _: String) -> Result<Vec<u8>, String> {
+    pub async fn shot_in_view(_: AppHandle, _: String) -> Result<Vec<u8>, String> {
         Err(NO.into())
     }
     pub async fn eval(_: AppHandle, _: String, _: String) -> Result<String, String> {
@@ -809,7 +827,7 @@ mod win {
     };
 
     use super::{
-        error_words, evict, may_navigate, menu_keep, next_tab, refused_request, section_script, shown_url, Bounds, ViewState, DIALOG_EVENT, EVENT, LOAD_TIMEOUT, PROFILE, QUOTE_EVENT, SETTLE,
+        error_words, evict, may_navigate, menu_keep, next_tab, refused_request, section_script, shown_url, Bounds, ViewState, DIALOG_EVENT, DRAW, EVENT, PROFILE, QUOTE_EVENT, SETTLE,
         SHOT_TIMEOUT, SNAP_H, SNAP_W,
     };
 
@@ -914,7 +932,9 @@ mod win {
         static ENV: RefCell<Option<(ICoreWebView2Environment, ICoreWebView2Controller)>> = const { RefCell::new(None) };
         static CLASS: Cell<bool> = const { Cell::new(false) };
         static TICK: Cell<u64> = const { Cell::new(0) };
-        static SNAPS: Cell<u64> = const { Cell::new(0) };
+        /// The size pages last had on screen (physical pixels): a page out of
+        /// sight is laid out at it (`put`).
+        static STAGE: Cell<(i32, i32)> = const { Cell::new((SNAP_W, SNAP_H)) };
         /// A page's dialog waiting for the person (its tab's strip asks):
         /// the page's key, the dialog and its deferral.
         static DIALOGS: RefCell<Vec<(String, ICoreWebView2ScriptDialogOpeningEventArgs, ICoreWebView2Deferral)>> = const { RefCell::new(Vec::new()) };
@@ -1045,12 +1065,19 @@ mod win {
         }
     }
 
-    /// Put `host` (and its controller) over `bounds`, on top; or out of sight.
+    /// Put `host` (and its controller) over `bounds`, on top; or out of
+    /// sight — still laid out at the size pages last had on screen
+    /// ([`STAGE`]), so a page opened out of sight, or scrolled while it's
+    /// there, is the page the person sees when its tab comes up (and the
+    /// model's shot of it is that view).
     fn put(host: HWND, controller: Option<&ICoreWebView2Controller>, bounds: Option<Bounds>, snap: bool) {
         unsafe {
             match bounds {
                 Some(b) => {
                     let (w, h) = (b.w.max(1), b.h.max(1));
+                    if !snap {
+                        STAGE.with(|s| s.set((w, h)));
+                    }
                     // A shot's page sits under Yap's own page: drawn, never seen.
                     let z = if snap { HWND_BOTTOM } else { HWND_TOP };
                     let (ox, oy) = if snap { (0, 0) } else { page_origin() };
@@ -1063,6 +1090,8 @@ mod win {
                 None => {
                     let _ = ShowWindow(host, SW_HIDE);
                     if let Some(c) = controller {
+                        let (w, h) = STAGE.with(Cell::get);
+                        let _ = c.SetBounds(RECT { left: 0, top: 0, right: w, bottom: h });
                         let _ = c.SetIsVisible(false);
                     }
                 }
@@ -2019,37 +2048,38 @@ mod win {
         }
     }
 
-    /// **The model's shot of `url`**: the panel's page when it's that one
-    /// and has loaded, else the page loaded under Yap's own for it.
-    pub async fn snap(app: AppHandle, url: String, load: String) -> Result<Vec<u8>, String> {
-        let want = crate::web::normal_url(&url);
-        let open = {
-            let w = want.clone();
-            main_thread(&app, move |_| {
-                VIEWS.with(|v| v.borrow().iter().find(|x| x.loaded && x.bounds.is_some() && x.snap.is_none() && crate::web::normal_url(&x.url) == w).map(|x| x.key.clone()))
-            })
-            .await?
-        };
-        if let Some(key) = open {
-            return shot_of(app, key).await;
-        }
-        let key = format!("snap:{}", SNAPS.with(|s| {
-            s.set(s.get() + 1);
-            s.get()
-        }));
-        let (tx, rx) = tokio::sync::oneshot::channel::<Result<Vec<u8>, String>>();
-        let (a, k) = (app.clone(), key.clone());
-        let bounds = Some(Bounds { x: 0, y: 0, w: SNAP_W, h: SNAP_H });
-        main_thread(&app, move |root| make_or_place(&a, root, k, url, load, String::new(), bounds, Some(tx))).await??;
-        match tokio::time::timeout(LOAD_TIMEOUT + SETTLE + SHOT_TIMEOUT, rx).await {
-            Ok(Ok(res)) => res,
-            Ok(Err(_)) => Err("The page closed before its shot.".into()),
-            Err(_) => {
-                let a = app.clone();
-                let _ = main_thread(&app, move |_| close_one(&a, &key)).await;
-                Err("The page didn't load in time.".into())
+    /// **What's in view of page `key` now** (the model's shot): on screen,
+    /// as it is; out of sight, its host put under Yap's own page at the
+    /// panel's size for a moment (drawn, never seen: the shot's frame is
+    /// what the person would see), then out of sight again — unless the
+    /// person brought its tab up meanwhile.
+    pub async fn shot_in_view(app: AppHandle, key: String) -> Result<Vec<u8>, String> {
+        let k = key.clone();
+        let drawn = main_thread(&app, move |_| {
+            let Some((host, Some(controller), Some(_))) = handles(&k) else { return Err("That page isn't open (yet).".to_string()) };
+            let on_screen = VIEWS.with(|v| v.borrow().iter().find(|x| x.key == k).is_some_and(|x| x.bounds.is_some()));
+            if !on_screen {
+                let (w, h) = STAGE.with(Cell::get);
+                put(host, Some(&controller), Some(Bounds { x: 0, y: 0, w, h }), true);
             }
+            Ok(!on_screen)
+        })
+        .await??;
+        if drawn {
+            // A frame drawn at that size first.
+            tokio::time::sleep(DRAW).await;
         }
+        let shot = shot_of(app.clone(), key.clone()).await;
+        if drawn {
+            let _ = main_thread(&app, move |_| {
+                let still_hidden = VIEWS.with(|v| v.borrow().iter().find(|x| x.key == key).map(|x| (x.bounds.is_none(), x.host, x.controller.clone())));
+                if let Some((true, host, controller)) = still_hidden {
+                    put(host, controller.as_ref(), None, false);
+                }
+            })
+            .await;
+        }
+        shot
     }
 
     /// The page's menu: the safe items, and Yap's.

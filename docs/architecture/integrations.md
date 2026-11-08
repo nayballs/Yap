@@ -121,27 +121,39 @@ no Local API (the bridge can be off), and it reaches the live UI.
   after the same safety rule and the evaluation's intercept. The list is read
   once per session, so a session made without them is started again to get
   them. [yap-code.md](./yap-code.md#from-a-plan-chat).
-- **The screen and the pages from a plan chat** (`eyes.rs`, 2026-11-07): for
-  a Chat run registered with `RunSpec::eyes` (`with_eyes`: the screen look's
-  gate and the pages' and pictures', as the tool loop's `Gates` has them;
-  never an agent's run), `look_at_screen`, `open_page`, `read_open_page`,
-  `switch_tab`, `snap_page`, `find_pictures`, `look_at_picture` and
-  `show_picture`, listed with the tool loop's own schemas and descriptions
-  (reads `readOnlyHint`; opening a page, switching tabs and showing a picture
-  not, so Claude Code runs them in order), each call run by the tool loop's
-  own code (`see_screen::execute`, `pages::execute`, `act::execute` for
-  `switch_tab` alone, `pictures::execute`) on the turn's own web side (a
+- **The screen and the pages from a plan chat** (`eyes.rs`, 2026-11-07; the
+  one browser toolset since 8 Nov 2026): for a Chat run registered with
+  `RunSpec::eyes` (`with_eyes`: the screen look's gate, the pages' and
+  pictures', and whether it may act on them, as the tool loop's `Gates` has
+  them; never an agent's run), `look_at_screen`, every `browser_*` tool
+  (`browser_navigate`, `browser_read`, `browser_find`, `browser_scroll`,
+  `browser_scroll_to`, `browser_screenshot`, `browser_zoom`, `browser_tabs`,
+  `browser_wait`, `browser_batch`; and `browser_click`, `browser_type`,
+  `browser_key`, `browser_hover`, `browser_form_input` while the run may
+  act), `find_pictures`, `look_at_picture` and `show_picture` (`all_names`),
+  listed with the tool loop's own schemas and descriptions (`readOnlyHint`
+  only for the reads that change neither the page nor what's in view —
+  `look_at_screen`, `browser_read`, `browser_find`, the pictures' look and
+  find —, so Claude Code runs a scroll, a shot or a click in order), each
+  call run by the tool loop's own code (`see_screen::execute`,
+  `pages::execute`, `pictures::execute`) on the turn's own web side (a
   `web::Turn`: the person's links, the pages Claude Code's searches found,
   `Marks::found`). Refused first for a turn asked away from Chat
-  (`Context::eyes`) and — the screen — during a meeting or a call. The
-  result's JSON is the first content block; each picture looked at follows
-  as a line saying what it is and **MCP image content**
-  (`{"type":"image","data","mimeType"}`), which Claude Code 2.1.296 turns into
-  an image block the model reads. What a call shows goes to the turn's stream
-  (`Event::Screen`, `Event::Page`, `Event::SwitchTab`, `Event::Picture`); the
-  screenshots are kept with the question. A capture or a page's shot takes a
-  few seconds, well inside the run's 11-minute tool timeout. Never acting on
-  a page (`click`, `type_text`, `scroll`, `go_to`).
+  (`Context::eyes`), acting for a turn not typed in Chat (`Eyes::act`), and
+  — the screen and acting — during a meeting or a call (`eyes::refused`). The
+  result's JSON is the first content block (its `displayText` the chip, a
+  batch's `displayTexts` each step's); each picture looked at — the screen's,
+  a page's screenshot or zoom, in order — follows as a line saying what it is
+  and **MCP image content** (`{"type":"image","data","mimeType"}`), which
+  Claude Code 2.1.296 turns into an image block the model reads. What a call
+  shows goes to the turn's stream (`Event::Screen`, `Event::Page`,
+  `Event::Shot`, `Event::SwitchTab`, `Event::CloseTab`, `Event::Acting`,
+  `Event::Confirm`, `Event::Picture`); the screenshots are kept with the
+  question, a page's shots with the answer (in its steps). A click, an Enter
+  or a box ticked that buys, pays, books, sends, deletes or signs in shows
+  the person's card and the call waits for it (two minutes at most), as an
+  agent's ask-first card does; a capture or a page's shot takes a few
+  seconds — both well inside the run's 11-minute tool timeout.
   [chat-and-assistant.md](./chat-and-assistant.md#chat-on-your-claude-plan-2026-11-07).
 - **A Chat run's turn** (`turn.rs`): `RunHandle::begin_turn(Context, web)` gives
   the run its turn — the question, the answer before it, the conversation,

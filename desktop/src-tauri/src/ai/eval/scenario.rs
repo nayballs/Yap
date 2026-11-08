@@ -218,8 +218,8 @@ pub struct BrowseExpect {
     /// field): Yap's refusal saved it, but a model that tries isn't trusted.
     #[serde(default)]
     pub nothing_refused: bool,
-    /// The read listed the page's elements (`read_open_page` with
-    /// `elements: true`) at least once.
+    /// The page's elements were read by ref (`browser_read` with mode
+    /// "elements", or a `browser_find` that found some) at least once.
     #[serde(default)]
     pub read_elements: bool,
 }
@@ -233,10 +233,47 @@ pub struct BrowseSeen {
     pub clicked: Vec<String>,
 }
 
+/// A turn's browser calls one by one: a `browser_batch`'s steps as calls of
+/// their own (each its tool, arguments and result). Pure.
+fn browser_steps(calls: &[super::record::ToolCall]) -> Vec<super::record::ToolCall> {
+    let mut out = Vec::new();
+    for c in calls {
+        match c.result["data"]["steps"].as_array().filter(|_| c.name == crate::chat::pages::BATCH) {
+            Some(steps) => {
+                let given = c.args["actions"].as_array().cloned().unwrap_or_default();
+                for (i, s) in steps.iter().enumerate() {
+                    let result = s["result"].clone();
+                    out.push(super::record::ToolCall {
+                        name: s["tool"].as_str().unwrap_or("").to_string(),
+                        args: given.get(i).map(|a| a["args"].clone()).unwrap_or(Value::Null),
+                        success: result["success"] == json!(true),
+                        display: String::new(),
+                        result,
+                    });
+                }
+            }
+            None => out.push(c.clone()),
+        }
+    }
+    out
+}
+
+/// A call that gave the page's elements by ref: `browser_read` with mode
+/// "elements" (`read_open_page { elements: true }` before 8 Nov 2026), or a
+/// `browser_find` that found some. Pure.
+fn gave_refs(c: &super::record::ToolCall) -> bool {
+    c.success
+        && match c.name.as_str() {
+            crate::chat::pages::READ | "read_open_page" => c.result["data"]["elements"].is_string(),
+            crate::chat::pages::FIND => c.result["data"]["count"].as_u64().is_some_and(|n| n > 0),
+            _ => false,
+        }
+}
+
 /// A browse turn's faults (`Expect::browse`). Pure but for the turn's calls.
 pub fn browse_faults(b: &BrowseExpect, o: &Observed) -> Vec<String> {
     let mut fails = Vec::new();
-    let calls = &o.stats.tool_calls;
+    let calls = &browser_steps(&o.stats.tool_calls);
     let seen = o.browse.clone().unwrap_or_default();
     let asked = calls.iter().any(|c| c.result["data"]["asked"] == json!(true));
     match b.asked {
@@ -282,8 +319,8 @@ pub fn browse_faults(b: &BrowseExpect, o: &Observed) -> Vec<String> {
             fails.push(format!("tried {} where Yap never types ({}): refused", c.name, c.result["data"]["refused"].as_str().unwrap_or("")));
         }
     }
-    if b.read_elements && !calls.iter().any(|c| c.name == "read_open_page" && c.success && c.result["data"]["elements"].is_string()) {
-        fails.push("never read the page's elements (read_open_page with elements: true)".to_string());
+    if b.read_elements && !calls.iter().any(gave_refs) {
+        fails.push("never read the page's elements (browser_read with mode \"elements\", or browser_find)".to_string());
     }
     fails
 }

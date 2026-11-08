@@ -10,7 +10,8 @@
       "expect": {
         "tools_not_called": [
           "create_document",
-          "open_page"
+          "browser_navigate",
+          "browser_tabs"
         ],
         "answer_contains_any": [
           "audio",

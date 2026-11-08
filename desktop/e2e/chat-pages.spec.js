@@ -1,12 +1,13 @@
 // Pages beside the chat (desktop/src-tauri/src/chat/pages.rs, chat/pages/view.rs;
 // the look-and-show plan's Milestone 2):
-// - `open_page` brings the page up in a Page tab: its own WebView2 (its own
-//   profile), laid over the tab by Rust — no Yap IPC in it at all
-//   (`window.__TAURI_INTERNALS__` absent, Yap's IPC unreachable); Back /
-//   Reload / Save a shot / Open in your browser; the answer keeps it (its
-//   pill, `pages` in chats.json); its tab closes it. A search opens on the
-//   person's engine; a site they named, at its home page.
-// - `read_open_page` reads the page open beside the chat; every question
+// - `browser_navigate` brings the page up in a Page tab (no tab open yet):
+//   its own WebView2 (its own profile), laid over the tab by Rust — no Yap
+//   IPC in it at all (`window.__TAURI_INTERNALS__` absent, Yap's IPC
+//   unreachable); Back / Reload / Save a shot / Open in your browser; the
+//   answer keeps it (its pill, `pages` in chats.json); its tab closes it. A
+//   search opens on the person's engine; a site they named (`browser_tabs`
+//   new), at its home page.
+// - `browser_read` reads the page open beside the chat; every question
 //   says which tabs are open.
 // - The page never reaches this PC: its own requests, a worker's, a shared
 //   worker's or a service worker's to an address that isn't the page's are
@@ -14,9 +15,12 @@
 // - "Ask Yap about this" on words selected there: quoted over Chat's box,
 //   asked as a selection — and web content, so a question about them never
 //   makes Yap act (the safety rule).
-// - `snap_page` (a model that reads images) takes a shot of the page (loaded
-//   out of sight) and shows it as a picture: a picture tab and a pill, kept
-//   like a pasted picture.
+// - Browsing a page as the Claude Code app's browser is browsed (a model
+//   that reads images): `browser_wait`, `browser_scroll`, `browser_find`,
+//   `browser_scroll_to`, then `browser_screenshot` — what's in view now, at
+//   that scroll — and `browser_zoom`: the shots go to the model and show in
+//   the answer's steps as thumbnails (opening large), never as a tab or a
+//   pill.
 // - No model gets `offer_browser` any more: the tab's Open in … follows
 //   Settings → General → Links.
 //
@@ -30,8 +34,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { test as base, expect, expectStore, setConfig, openView, openSettings, closeSettings, settingsDialog } from './support/fixtures.js';
 import { startFakeLlm } from './support/fake-llm.js';
-import { startFakeWeb, FORT_JOY_URL } from './support/fake-web.js';
-import { readPng } from './support/png.js';
+import { startFakeWeb, FORT_JOY_URL, DOCKS_URL, BAND } from './support/fake-web.js';
+import { readPng, pixel, near } from './support/png.js';
 
 const BROWSERS = [
   { key: 'Brave', name: 'Brave', command: '"C:\\Program Files\\BraveSoftware\\Brave-Browser\\Application\\brave.exe"' },
@@ -109,23 +113,27 @@ async function ask(main, text) {
   await main.getByRole('button', { name: 'Send' }).click();
 }
 
-test('open_page brings the live page up beside the chat: its own webview, no Yap IPC, Open in your browser', async ({ yap, main, fakeLlm, shot }) => {
+test('browser_navigate brings the live page up beside the chat: its own webview, no Yap IPC, Open in your browser', async ({ yap, main, fakeLlm, shot }) => {
   await setConfig(yap, main, chatConfig(fakeLlm));
   const from = fakeLlm.requests.length;
   fakeLlm.scriptChat([
-    { tools: [{ name: 'open_page', args: { url: FORT_JOY_URL, section: 'Map' } }] },
+    { tools: [{ name: 'browser_navigate', args: { url: FORT_JOY_URL } }] },
     { content: 'It’s open beside the chat: the map is under Map.' },
   ]);
   await ask(main, `Bring up the treasure map page ${FORT_JOY_URL}`);
 
-  // Every tool-using model with the web gets the page tools, told how in one
-  // line: no shot for one that can't see, no offer_browser for any.
+  // Every tool-using model with the web gets the browser tools, told how in
+  // one line: none of the view's for one that can't see (it reads the whole
+  // page), no batch for one that only reads, no offer_browser for any.
   await expect.poll(() => chatCalls(fakeLlm, from).length).toBeGreaterThanOrEqual(2);
   const calls = chatCalls(fakeLlm, from);
-  expect(calls[0].tools).toEqual(expect.arrayContaining(['open_page', 'read_open_page']));
-  expect(calls[0].tools).not.toContain('snap_page');
+  expect(calls[0].tools).toEqual(expect.arrayContaining(['browser_navigate', 'browser_read', 'browser_find', 'browser_tabs', 'browser_wait']));
+  for (const name of ['browser_scroll', 'browser_scroll_to', 'browser_screenshot', 'browser_zoom', 'browser_batch']) {
+    expect(calls[0].tools).not.toContain(name);
+  }
+  expect(calls[0].tools).not.toContain('browser_click');
   expect(calls[0].tools).not.toContain('offer_browser');
-  expect(calls[0].system).toContain('open_page opens a page beside the chat');
+  expect(calls[0].system).toContain('browser_navigate opens a page when the user asks');
   expect(toolResult(calls[1])).toMatchObject({ success: true, shown: true, displayText: 'Brought up wiki.example.com/wiki/Fort_Joy beside the chat' });
 
   // The Page tab, the page in it (the stand-in's), its title from the page.
@@ -173,7 +181,7 @@ test('open_page brings the live page up beside the chat: its own webview, no Yap
 
   // Kept with the answer.
   await expectStore(yap, 'chats.json', (s) =>
-    s.conversations.some((c) => c.messages.at(-1)?.pages?.[0]?.url === FORT_JOY_URL && c.messages.at(-1).pages[0].section === 'Map')
+    s.conversations.some((c) => c.messages.at(-1)?.pages?.[0]?.url === FORT_JOY_URL)
   );
 
   // Save a shot: a picture of the page as it is, its tab, kept with the answer.
@@ -279,39 +287,98 @@ test('words selected on the page: Ask Yap about this quotes them over the box, a
   await expect(main.getByTestId('chat-quote-sent').last()).toContainText('Every treasure chest marked');
 });
 
-test('snap_page takes a shot of the page and shows it as a picture tab (a model that reads images)', async ({ yap, main, fakeLlm, shot }) => {
-  // ("vision" in the fake's id: a model that reads images, the only kind offered snap_page.)
+test('the model browses a page: waits, scrolls, finds a heading, looks at the view it scrolled to and zooms in; the shots are in its steps, never a tab', async ({ yap, main, fakeLlm, shot }) => {
+  // ("vision" in the fake's id: a model that reads images, the only kind offered shots.)
   await setConfig(yap, main, { ...chatConfig(fakeLlm), llmScopes: { chat: { enabled: true, provider: 'custom', baseUrl: fakeLlm.base, model: 'fake-vision-chat' } } });
   const from = fakeLlm.requests.length;
-  fakeLlm.scriptChat([{ tools: [{ name: 'snap_page', args: { url: FORT_JOY_URL } }] }, { content: 'Here’s a shot of the page, beside the chat.' }]);
-  await ask(main, `Get me a screenshot of ${FORT_JOY_URL}`);
+  const SAID = 'The night ferry leaves after nightfall: that’s the way out.';
+  fakeLlm.scriptChat([
+    { tools: [{ name: 'browser_navigate', args: { url: DOCKS_URL } }] },
+    { tools: [{ name: 'browser_wait', args: { text: 'night ferry is boarding' } }] },
+    { tools: [{ name: 'browser_scroll', args: { direction: 'down' } }] },
+    { tools: [{ name: 'browser_find', args: { query: 'Getting out' } }] },
+    { tools: [{ name: 'browser_scroll_to', args: { text: 'Getting out' } }] },
+    { tools: [{ name: 'browser_screenshot', args: {} }] },
+    { tools: [{ name: 'browser_zoom', args: { region: 'bottom' } }] },
+    { content: SAID },
+  ]);
+  await ask(main, `How do I get out of the docks? ${DOCKS_URL}`);
+  await expect(main.getByText(SAID)).toBeVisible({ timeout: 60_000 });
+  const calls = chatCalls(fakeLlm, from);
+  // A model that reads images: the shots too, and how to browse in the line; never the acting tools.
+  expect(calls[0].tools).toEqual(expect.arrayContaining(['browser_navigate', 'browser_read', 'browser_scroll', 'browser_scroll_to', 'browser_screenshot', 'browser_zoom']));
+  expect(calls[0].tools).not.toContain('browser_click');
+  expect(calls[0].system).toContain('browser_scroll or browser_scroll_to it, then browser_screenshot; browser_zoom for small text');
+  // Waited for the line that comes later; scrolled a screen; found the heading by its ref.
+  expect(toolResult(calls[2])).toMatchObject({ success: true, displayText: 'Waited for ‘night ferry is boarding’ on wiki.example.com' });
+  const scrolled = toolResult(calls[3]);
+  expect(scrolled).toMatchObject({ success: true, displayText: 'Scrolled down wiki.example.com' });
+  expect(scrolled.data.scroll.y).toBeGreaterThan(0);
+  const found = toolResult(calls[4]);
+  expect(found.displayText).toMatch(/^Found \d+ match(es)? for ‘Getting out’ on wiki\.example\.com$/);
+  expect(found.data.matches).toMatch(/\[\d+\] heading "Getting out"/);
+  const to = toolResult(calls[5]);
+  expect(to).toMatchObject({ success: true, displayText: 'Scrolled to ‘Getting out’ on wiki.example.com', data: { kind: 'heading' } });
+  // The shot: what's in view now, at that scroll, for the model (in the next step's message).
+  const looked = toolResult(calls[6]);
+  expect(looked).toMatchObject({ success: true, displayText: 'Looked at the page · wiki.example.com', data: { picture: 'p1' } });
+  expect(looked.data.scroll.y).toBe(to.data.scroll.y);
+  expect(looked.frame).toMatch(/^browser_click's x, y are in this picture's pixels: \d+×\d+, the page's view\.$/);
+  const sent = calls[7].messages.filter((m) => m.role === 'user' && Array.isArray(m.content) && m.content.some((p) => p.type === 'image_url'));
+  expect(sent).toHaveLength(1);
+  expect(toolResult(calls[7])).toMatchObject({ success: true, displayText: 'Zoomed in on the page · wiki.example.com' });
 
-  // Its picture tab, as the turn goes.
-  await expect(main.getByTestId('chat-picture')).toBeVisible({ timeout: 40_000 });
-  await expect(main.getByTestId('chat-picture-caption')).toHaveText('A shot of wiki.example.com');
-  await expect(main.getByText('Here’s a shot of the page')).toBeVisible();
-  const result = toolResult(chatCalls(fakeLlm, from)[1]);
-  expect(result).toMatchObject({ success: true, shown: true, picture: 'p1', w: 1280, h: 800, displayText: 'Took a shot of wiki.example.com/wiki/Fort_Joy' });
-  // It can look at it.
-  expect(result.note).toContain('look_at_picture p1');
-  // Its pill; the page it was of, its source line; stored like a pasted picture.
-  await expect(main.getByTestId('chat-picture-pill')).toHaveCount(1);
-  await expect(main.getByTestId('chat-picture-source')).toContainText('From wiki.example.com');
-  const file = path.join(yap.dataDir, 'chat-images', `${result.id}.png`);
-  expect(fs.existsSync(file)).toBe(true);
-  const png = readPng(fs.readFileSync(file));
-  expect([png.width, png.height]).toEqual([1280, 800]);
-  await expect(main.getByText('Took a shot of a page')).toBeVisible();
-  await shot(main, '02-a-shot-of-the-page');
-  // The page loaded for it is gone.
-  await expect.poll(async () => (await views(yap)).filter((v) => v.key.startsWith('snap:')).length).toBe(0);
+  // Kept with the answer as step shots (their chips), each a chat image; never a tab or a pill.
+  let kept = [];
+  await expectStore(yap, 'chats.json', (s) => {
+    const m = s.conversations.flatMap((c) => c.messages).findLast((x) => x.role === 'assistant' && x.text === SAID);
+    kept = m?.pictures || [];
+    return kept.length === 2;
+  });
+  expect(kept.map((p) => p.chip)).toEqual(['Looked at the page · wiki.example.com', 'Zoomed in on the page · wiki.example.com']);
+  // Of the view as it was scrolled: the harbour's green above, the way out's blue below — none of the top's red.
+  const view = readPng(fs.readFileSync(path.join(yap.dataDir, 'chat-images', `${kept[0].id}.png`)));
+  const at = (fx, fy) => pixel(view, Math.floor(view.width * fx), Math.floor(view.height * fy));
+  expect(near(at(0.5, 0.97), BAND.out, 25)).toBe(true);
+  expect(near(at(0.5, 0.03), BAND.harbour, 25)).toBe(true);
+  for (const fy of [0.03, 0.3, 0.6, 0.97]) expect(near(at(0.9, fy), BAND.top, 30)).toBe(false);
+  // The zoom: the bottom of that view, at the device's pixels (enlarged when small).
+  const zoomed = readPng(fs.readFileSync(path.join(yap.dataDir, 'chat-images', `${kept[1].id}.png`)));
+  expect(near(pixel(zoomed, Math.floor(zoomed.width / 2), zoomed.height - 4), BAND.out, 25)).toBe(true);
+  // No new tab, no picture tab, no pill: the one page tab.
+  await expect(main.getByTestId('chat-picture')).toHaveCount(0);
+  await expect(main.getByTestId('chat-picture-pill')).toHaveCount(0);
+  await expect(main.getByTestId('chat-panel-tab')).toHaveCount(1);
+  expect((await views(yap)).filter((v) => v.key.startsWith('page:'))).toHaveLength(1);
+
+  // The thread: the two shots beside the folded steps, then each on its own step; one opens large.
+  const steps = main.getByTestId('chat-steps').last();
+  await expect(steps.getByTestId('chat-steps-shots').getByTestId('chat-step-shot')).toHaveCount(2);
+  await expect(steps.locator('summary')).toContainText('looked at the page, zoomed in');
+  await shot(main, '02-two-shots-beside-the-steps');
+  await steps.locator('summary').click();
+  const onSteps = steps.locator('.toolchips').getByTestId('chat-step-shot');
+  await expect(onSteps).toHaveCount(2);
+  await expect(steps.locator('.toolchip.withshot')).toHaveText(['Looked at the page · wiki.example.com', 'Zoomed in on the page · wiki.example.com']);
+  await expect.poll(() => onSteps.first().locator('img').evaluate((img) => img.complete && img.naturalWidth > 0)).toBe(true);
+  await shot(main, '03-two-shots-in-the-steps');
+  await setConfig(yap, main, { theme: 'dark' });
+  await expect.poll(() => main.evaluate(() => document.documentElement.dataset.yapTheme)).toBe('dark');
+  await shot(main, '04-two-shots-in-the-steps-dark');
+  await setConfig(yap, main, { theme: 'light' });
+  await onSteps.first().click();
+  const viewer = main.getByRole('dialog', { name: 'Screenshot' });
+  await expect(viewer).toBeVisible();
+  await expect.poll(() => viewer.locator('img').evaluate((img) => img.complete && img.naturalWidth > 0)).toBe(true);
+  await main.keyboard.press('Escape');
+  await expect(viewer).toHaveCount(0);
 });
 
-test('open_page opens a search or a site the person named; read_open_page reads the page in front; Open in … follows Links', async ({ yap, main, fakeLlm }) => {
+test('browser_navigate opens a search, browser_tabs a site the person named; browser_read reads the page in front; Open in … follows Links', async ({ yap, main, fakeLlm }) => {
   await setConfig(yap, main, { ...chatConfig(fakeLlm), webSearchBrowser: 'duckduckgo' });
   // Words: a search on the person's engine, beside the chat (Yap never reads it).
   let from = fakeLlm.requests.length;
-  fakeLlm.scriptChat([{ tools: [{ name: 'open_page', args: { search: 'train times Kellbrook to Port Ellis' } }] }, { content: 'The search is open beside the chat.' }]);
+  fakeLlm.scriptChat([{ tools: [{ name: 'browser_navigate', args: { search: 'train times Kellbrook to Port Ellis' } }] }, { content: 'The search is open beside the chat.' }]);
   // (Worded so Yap leaves it to the model: "search for …" it would open itself.)
   await ask(main, 'I need the train times from Kellbrook to Port Ellis up beside the chat');
   await expect(main.getByText('The search is open beside the chat.')).toBeVisible({ timeout: 20_000 });
@@ -319,14 +386,14 @@ test('open_page opens a search or a site the person named; read_open_page reads 
   await expect(main.getByTestId('chat-page-address')).toHaveValue('https://duckduckgo.com/?q=train+times+Kellbrook+to+Port+Ellis', { timeout: 20_000 });
   // The next question says what's open; reading a search engine's results is refused.
   from = fakeLlm.requests.length;
-  fakeLlm.scriptChat([{ tools: [{ name: 'read_open_page', args: {} }] }, { content: 'Pick a result and I can help.' }]);
+  fakeLlm.scriptChat([{ tools: [{ name: 'browser_read', args: {} }] }, { content: 'Pick a result and I can help.' }]);
   await main.getByRole('textbox', { name: 'Message' }).fill('What does it say?');
   await main.getByRole('button', { name: 'Send' }).click();
   await expect(main.getByText('Pick a result and I can help.')).toBeVisible({ timeout: 20_000 });
   let calls = chatCalls(fakeLlm, from);
   // (Each tab's number is its own for the session: the earlier tests' tabs had theirs.)
   // Each tab's site only, never its title or address: the page writes those.
-  const tabsLine = JSON.stringify(calls[0].messages).match(/Open beside the chat: .*? read_open_page reads one\./)?.[0] ?? '';
+  const tabsLine = JSON.stringify(calls[0].messages).match(/Open beside the chat: .*? browser_read reads one\./)?.[0] ?? '';
   expect(tabsLine).toMatch(/tab \d+ \(duckduckgo\.com\), search results, in front[.;]/);
   expect(tabsLine).not.toContain('Search:');
   expect(tabsLine).not.toContain('train');
@@ -340,7 +407,7 @@ test('open_page opens a search or a site the person named; read_open_page reads 
   await expect(main.getByText('wiki.example.com is open beside the chat.')).toBeVisible({ timeout: 20_000 });
   await expect.poll(async () => (await views(yap)).find((v) => v.key === KEY)?.loaded, { timeout: 20_000 }).toBe(true);
   from = fakeLlm.requests.length;
-  fakeLlm.scriptChat([{ tools: [{ name: 'read_open_page', args: {} }] }, { content: 'It marks every treasure chest [1].' }]);
+  fakeLlm.scriptChat([{ tools: [{ name: 'browser_read', args: {} }] }, { content: 'It marks every treasure chest [1].' }]);
   await main.getByRole('textbox', { name: 'Message' }).fill('What is this page about?');
   await main.getByRole('button', { name: 'Send' }).click();
   await expect(main.getByText('It marks every treasure chest')).toBeVisible({ timeout: 20_000 });
@@ -358,7 +425,7 @@ test('open_page opens a search or a site the person named; read_open_page reads 
 
   // A site the person named: its home page, though no search found it.
   from = fakeLlm.requests.length;
-  fakeLlm.scriptChat([{ tools: [{ name: 'open_page', args: { url: 'https://www.exampletube.com/' } }] }, { content: 'ExampleTube is open.' }]);
+  fakeLlm.scriptChat([{ tools: [{ name: 'browser_tabs', args: { action: 'new', url: 'https://www.exampletube.com/' } }] }, { content: 'ExampleTube is open.' }]);
   await say(main, 'Open ExampleTube for me');
   await expect(main.getByText('ExampleTube is open.')).toBeVisible({ timeout: 20_000 });
   expect(toolResult(chatCalls(fakeLlm, from)[1])).toMatchObject({ success: true, displayText: 'Brought up exampletube.com beside the chat' });
@@ -581,7 +648,7 @@ test('asked out loud with Chat in view: Yap opens the page itself and the model 
   await expect(main.getByText('That is the wiki article open beside the chat.')).toBeVisible({ timeout: 40_000 });
   const calls = chatCalls(fakeLlm, from);
   expect(calls[0].tools).toContain('look_at_screen');
-  expect(calls[0].tools).toContain('open_page');
+  expect(calls[0].tools).toContain('browser_navigate');
   expect(toolResult(calls[1])).toMatchObject({ success: true, displayText: 'Looked at your screen and the page beside the chat' });
   expect(fakeLlm.requests.slice(from).some((r) => r.kind === 'screenQuestion')).toBe(false);
   // Its pictures show with the question asked out loud.
@@ -594,7 +661,7 @@ test('asked out loud with Chat in view: Yap opens the page itself and the model 
     await yap.invoke('e2e_assistant_ask', { text: 'Open YouTube', listenMs: 0 });
     await expect.poll(() => chatCalls(fakeLlm, away).length, { timeout: 20_000 }).toBeGreaterThanOrEqual(1);
     const tools = chatCalls(fakeLlm, away)[0].tools;
-    expect(tools).not.toContain('open_page');
+    expect(tools).not.toContain('browser_navigate');
     expect(tools).not.toContain('look_at_screen');
   } finally {
     await yap.invoke('e2e_focus', { focused: true });
@@ -606,7 +673,7 @@ test('look_at_screen sees the page open beside the chat too, as its own picture 
   await setConfig(yap, main, { ...chatConfig(fakeLlm), assistantScreen: true, llmScopes: { chat: { enabled: true, provider: 'custom', baseUrl: fakeLlm.base, model: 'fake-vision-chat' } } });
   await yap.invoke('e2e_snip', { monitors: [{ x: 0, y: 0, width: 1280, height: 720, scale: 1, hdr: false, whiteNits: 80 }], windows: [], start: false });
   // A page open beside the chat.
-  fakeLlm.scriptChat([{ tools: [{ name: 'open_page', args: { url: FORT_JOY_URL } }] }, { content: 'It’s open beside the chat.' }]);
+  fakeLlm.scriptChat([{ tools: [{ name: 'browser_navigate', args: { url: FORT_JOY_URL } }] }, { content: 'It’s open beside the chat.' }]);
   await ask(main, `Bring up the wiki page ${FORT_JOY_URL}`);
   await expect(main.getByTestId('chat-page-address')).toHaveValue(FORT_JOY_URL, { timeout: 40_000 });
   await expect.poll(async () => (await views(yap)).find((v) => v.key === KEY)?.loaded, { timeout: 20_000 }).toBe(true);

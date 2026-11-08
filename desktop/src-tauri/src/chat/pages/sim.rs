@@ -3,8 +3,20 @@
 //! `ai/eval/`), or a unit test's, read and acted on in Rust — no WebView2,
 //! no window, nothing on the internet. It answers everything the panel's
 //! real pages do (`pages/backend.rs`): the tabs, a page's text, its
-//! elements with refs, describe / click / type / scroll, going somewhere,
-//! the tab in front.
+//! elements and text blocks with refs, describe / click / type / scroll /
+//! keys / hover / ticking a box, the element at a point and the one with the
+//! focus, going somewhere and back, the tab in front or closed, a shot of
+//! the view.
+//!
+//! **Its layout** (for scrolling, `browser_scroll_to`, a point clicked and
+//! the headings in view): a [`VIEW_W`] × [`VIEW_H`] view; each block of
+//! text or element a line of [`LINE`] pixels in the page's order, one
+//! inside another on its line, `data-sim-y="<px>"` where it says; an element
+//! with `data-sim-rect="x,y,w,h"` (page pixels) is what a point there hits.
+//! `data-sim-hover="<id>"` shows a `hidden` element when hovered,
+//! `data-sim-after="<ms>"` keeps one out until that long after the page
+//! loaded (`browser_wait`). A shot ([`Browser::shot`]) encodes the scroll in
+//! its red and the point in its green and blue.
 //!
 //! It reads a page's HTML as the element script reads the live page
 //! (`act/script.rs`): the same candidates (links, buttons, inputs, selects,
@@ -40,9 +52,23 @@ pub struct Log {
     /// Every field typed into: the field's words (name, label, `name`, id)
     /// and the text.
     pub typed: Vec<(String, String)>,
-    /// Every click that went through: the element's words.
+    /// Every click that went through: the element's words (a click at a
+    /// point: "words @ x,y").
     pub clicked: Vec<String>,
+    /// Every key pressed, in order.
+    pub keys: Vec<String>,
+    /// Every element hovered over: its words.
+    pub hovered: Vec<String>,
 }
+
+/// The stand-in view's size (CSS pixels), and the room each block of text
+/// takes in its layout (a block's `data-sim-y` puts it where it says).
+pub const VIEW_W: i64 = 1280;
+pub const VIEW_H: i64 = 800;
+const LINE: i64 = 60;
+/// What a block of text is, for the layout, `browser_find` and
+/// `browser_scroll_to` (the element script's own list).
+const BLOCK: &str = "h1, h2, h3, h4, h5, h6, [role=heading], p, li, td, th, dt, dd, caption, figcaption, blockquote, pre, summary, label, legend, a, button, option";
 
 struct Tab {
     key: String,
@@ -62,6 +88,38 @@ struct Tab {
     /// A read with its elements has numbered this page's elements: refs exist
     /// only then, as the element script numbers only what it has seen.
     seen: bool,
+    /// The element with the focus (its ref).
+    focus: Option<u32>,
+    /// Elements a hover showed (`data-sim-hover="<id>"`: their ids).
+    shown: HashSet<String>,
+    /// The tab's history: where Back and Forward go.
+    back: Vec<String>,
+    forward: Vec<String>,
+    /// When its page loaded: an element with `data-sim-after="<ms>"` shows
+    /// that long after (a page that loads as you go).
+    loaded: std::time::Instant,
+}
+
+impl Tab {
+    fn new(key: String, id: usize, used: u64, url: &str, html: String) -> Tab {
+        Tab {
+            key,
+            id,
+            used,
+            url: url.to_string(),
+            html,
+            values: HashMap::new(),
+            checked: HashMap::new(),
+            hidden: HashSet::new(),
+            scroll: 0,
+            seen: false,
+            focus: None,
+            shown: HashSet::new(),
+            back: Vec::new(),
+            forward: Vec::new(),
+            loaded: std::time::Instant::now(),
+        }
+    }
 }
 
 /// **The stand-in browser**: its pages, its tabs, the one in front.
@@ -164,7 +222,7 @@ impl Browser {
         self.log.visited.push(url.to_string());
         let id = self.next_id;
         self.next_id += 1;
-        self.tabs.push(Tab { key: key.clone(), id, used: now, url: url.to_string(), html, values: HashMap::new(), checked: HashMap::new(), hidden: HashSet::new(), scroll: 0, seen: false });
+        self.tabs.push(Tab::new(key.clone(), id, now, url, html));
         self.front = self.tabs.len() - 1;
         key
     }
@@ -199,8 +257,18 @@ impl Browser {
         Ok(())
     }
 
-    /// **Tab `key` goes to `url`** (an address, a link, a form).
+    /// **Tab `key` goes to `url`** (an address, a link, a form): the page it
+    /// was on is where Back goes.
     pub fn navigate(&mut self, key: &str, url: &str) -> Result<(), String> {
+        let tab = self.tab_mut(key)?;
+        let was = tab.url.clone();
+        tab.back.push(was);
+        tab.forward.clear();
+        self.load(key, url)
+    }
+
+    /// Tab `key`'s page is `url` from now on, afresh.
+    fn load(&mut self, key: &str, url: &str) -> Result<(), String> {
         let html = self.page_for(url);
         let tab = self.tab_mut(key)?;
         tab.url = url.to_string();
@@ -208,10 +276,98 @@ impl Browser {
         tab.values.clear();
         tab.checked.clear();
         tab.hidden.clear();
+        tab.shown.clear();
         tab.scroll = 0;
         tab.seen = false;
+        tab.focus = None;
+        tab.loaded = std::time::Instant::now();
         self.log.visited.push(url.to_string());
         Ok(())
+    }
+
+    /// **Tab `key` back or forward** in its history (nowhere to go: it stays).
+    pub fn history(&mut self, key: &str, back: bool) -> Result<(), String> {
+        let tab = self.tab_mut(key)?;
+        let to = if back { tab.back.pop() } else { tab.forward.pop() };
+        let Some(to) = to else { return Ok(()) };
+        let was = tab.url.clone();
+        if back {
+            tab.forward.push(was);
+        } else {
+            tab.back.push(was);
+        }
+        self.load(key, &to)
+    }
+
+    /// **Tab `key` closed**: the one before it in front.
+    pub fn close(&mut self, key: &str) -> Result<(), String> {
+        let i = self.tabs.iter().position(|t| t.key == key).ok_or("That page isn't open.")?;
+        self.tabs.remove(i);
+        if self.front >= self.tabs.len() || self.front > i {
+            self.front = self.front.saturating_sub(1);
+        }
+        Ok(())
+    }
+
+    /// **Where tab `key` is in view**: its scroll, the view's size (the
+    /// stand-in's, [`VIEW_W`] × [`VIEW_H`]) and the headings in view.
+    pub fn in_view(&self, key: &str) -> Result<super::see::InView, String> {
+        let tab = self.tab(key)?;
+        let doc = dom_query::Document::from(tab.html.as_str());
+        let page = Page::read(&doc, tab);
+        Ok(page.in_view())
+    }
+
+    /// **Tab `key`'s visible text blocks**, each with its ref (numbered
+    /// from now on, as the element script numbers what it lists).
+    pub fn blocks(&mut self, key: &str) -> Result<Vec<super::see::Block>, String> {
+        let blocks = {
+            let tab = self.tab(key)?;
+            let doc = dom_query::Document::from(tab.html.as_str());
+            let page = Page::read(&doc, tab);
+            page.blocks()
+        };
+        self.tab_mut(key)?.seen = true;
+        Ok(blocks)
+    }
+
+    /// **The element at (`x`, `y`)** of tab `key`'s view: the last element
+    /// whose `data-sim-rect="x,y,w,h"` (page pixels) holds that point, as
+    /// its nearest link, button or field, else itself; numbered from now on.
+    pub fn at(&mut self, key: &str, x: f64, y: f64) -> Result<Described, String> {
+        let r = {
+            let tab = self.tab(key)?;
+            let doc = dom_query::Document::from(tab.html.as_str());
+            let page = Page::read(&doc, tab);
+            page.at(x, y + tab.scroll as f64)
+        };
+        self.tab_mut(key)?.seen = true;
+        match r {
+            Some(r) => self.describe(key, r),
+            None => {
+                let mut d = self.describe(key, 0)?;
+                d.el = None;
+                Ok(d)
+            }
+        }
+    }
+
+    /// **The element with the focus** on tab `key` (a click or typing put it
+    /// there; Tab moves it).
+    pub fn active(&self, key: &str) -> Result<Described, String> {
+        let r = self.tab(key)?.focus.unwrap_or(0);
+        self.describe(key, r)
+    }
+
+    /// **What's in view of tab `key`**, as a PNG: [`VIEW_W`] × [`VIEW_H`],
+    /// each pixel's red its scroll (÷ 8, mod 256), green its x, blue its y —
+    /// so a check can tell which part of the page, and of the view, it shows.
+    pub fn shot(&self, key: &str) -> Result<Vec<u8>, String> {
+        let tab = self.tab(key)?;
+        let (w, h) = (VIEW_W as u32 / 4, VIEW_H as u32 / 4);
+        let red = ((tab.scroll / 8) % 256) as u8;
+        let rgba: Vec<u8> = (0..h).flat_map(|y| (0..w).flat_map(move |x| [red, (x * 255 / (w - 1)) as u8, (y * 255 / (h - 1)) as u8, 255])).collect();
+        crate::snip::images::encode_png(&rgba, w, h, true)
     }
 
     /// A page's words and links (`read_open_page` without elements).
@@ -273,24 +429,55 @@ impl Browser {
         let doc = dom_query::Document::from(tab.html.as_str());
         let page = Page::read(&doc, tab);
         // (No read has numbered this page's elements yet: no ref is one.)
-        let el = r.checked_sub(1).filter(|_| tab.seen).and_then(|i| page.candidates.get(i as usize)).filter(|n| page.visible(n)).map(|n| page.describe(n, r));
+        let el = page.node(r).filter(|_| tab.seen).filter(|n| page.visible(n)).map(|n| page.describe(&n, r));
         let form = el.as_ref().filter(|e| e.form >= 0).and_then(|e| page.forms_info().into_iter().find(|f| f.form == e.form));
         Ok(Described { el, form, password: page.password(), payment: page.payment(), title: title_of(&tab.html), headings: page.headings(), url: tab.url.clone() })
     }
 
+    /// Where tab `key` is now, as the element script answers it.
+    fn scrolled(&self, key: &str) -> Result<Value, String> {
+        let v = self.in_view(key)?;
+        let s = v.scroll;
+        Ok(json!({ "r": "ok", "scroll": { "x": s.x, "y": s.y, "w": s.w, "h": s.h, "max": s.max, "dpr": s.dpr }, "inView": v.in_view }))
+    }
+
+    /// **Scroll** tab `key`: `to` down / up (`amount` screens), top, bottom,
+    /// or element `r` into view (centred).
+    fn scroll(&mut self, key: &str, a: &Value, r: u32) -> Result<Value, String> {
+        let (max, at) = {
+            let tab = self.tab(key)?;
+            let doc = dom_query::Document::from(tab.html.as_str());
+            let page = Page::read(&doc, tab);
+            let at = (r > 0).then(|| page.layout().into_iter().find(|(x, _)| *x == r).map(|(_, y)| y));
+            (page.in_view().scroll.max, at)
+        };
+        let step = (VIEW_H as f64 * 0.85 * a["amount"].as_f64().unwrap_or(1.0).clamp(0.1, 10.0)).round() as i64;
+        let tab = self.tab_mut(key)?;
+        tab.scroll = match at {
+            Some(None) => return Ok(json!({ "r": "gone" })),
+            Some(Some(y)) => y - VIEW_H / 2 + LINE / 2,
+            None => match a["to"].as_str().unwrap_or("down") {
+                "up" => tab.scroll - step,
+                "top" => 0,
+                "bottom" => max,
+                _ => tab.scroll + step,
+            },
+        }
+        .clamp(0, max);
+        self.scrolled(key)
+    }
+
     /// **An action** (`script.rs`'s, the same answers): `click`, `type`
-    /// (`text`, `submit`) or `scroll` (`to`, `ref`), on element `ref` if it's
-    /// still `role` "`name`".
+    /// (`text`, `submit`), `scroll` (`to`, `amount`, `ref`), `clickAt` (`x`,
+    /// `y`), `hover`, `check` (`on`) or `key` (`keys`), on element `ref` if
+    /// it's still `role` "`name`".
     pub fn act(&mut self, key: &str, op: &str, a: &Value) -> Result<Value, String> {
         let r = a["ref"].as_u64().unwrap_or(0) as u32;
         if op == "scroll" {
-            let tab = self.tab_mut(key)?;
-            tab.scroll = match (r, a["to"].as_str()) {
-                (0, Some("up")) => (tab.scroll - 640).max(0),
-                (0, _) => (tab.scroll + 640).min(2400),
-                (r, _) => (i64::from(r) * 40).min(2400),
-            };
-            return Ok(json!({ "r": "ok", "scroll": { "y": tab.scroll, "h": 800, "max": 2400 } }));
+            return self.scroll(key, a, r);
+        }
+        if op == "key" {
+            return self.keys(key, a, r);
         }
         let d = self.describe(key, r)?;
         let Some(el) = d.el.clone() else { return Ok(json!({ "r": "gone" })) };
@@ -300,10 +487,43 @@ impl Browser {
         if el.disabled {
             return Ok(json!({ "r": "disabled" }));
         }
+        // A click at a point: still that element there.
+        if op == "clickAt" {
+            let (x, y) = (a["x"].as_f64().unwrap_or(-1.0), a["y"].as_f64().unwrap_or(-1.0));
+            if self.at(key, x, y)?.el.map(|e| e.r) != Some(r) {
+                return Ok(json!({ "r": "changed" }));
+            }
+            let mut done = self.act(key, "click", &json!({ "ref": r, "role": el.role, "name": el.name }))?;
+            if let Some(last) = self.log.clicked.last_mut() {
+                *last = format!("{last} @ {},{}", x.round(), y.round());
+            }
+            done["at"] = json!(true);
+            return Ok(done);
+        }
+        if op == "hover" {
+            let tab = self.tab(key)?;
+            let doc = dom_query::Document::from(tab.html.as_str());
+            let page = Page::read(&doc, tab);
+            let shows = page.node(r).and_then(|n| n.attr("data-sim-hover").map(|v| v.to_string()));
+            drop(page);
+            self.log.hovered.push(rules::name_of(&el));
+            if let Some(id) = shows {
+                self.tab_mut(key)?.shown.insert(id);
+            }
+            return Ok(json!({ "r": "ok" }));
+        }
+        if op == "check" {
+            let on = a["on"].as_bool().unwrap_or(true);
+            if el.checked.unwrap_or(false) != on {
+                self.log.clicked.push(rules::name_of(&el));
+                self.tab_mut(key)?.checked.insert(r, on);
+            }
+            return Ok(json!({ "r": "ok", "checked": on }));
+        }
         let tab = self.tab(key)?;
         let doc = dom_query::Document::from(tab.html.as_str());
         let page = Page::read(&doc, tab);
-        let node = page.candidates[(r - 1) as usize];
+        let Some(node) = page.node(r) else { return Ok(json!({ "r": "gone" })) };
         let attr = |k: &str| node.attr(k).map(|v| v.to_string()).unwrap_or_default();
         let tag = node.node_name().map(|n| n.to_ascii_lowercase()).unwrap_or_default();
         match op {
@@ -316,6 +536,7 @@ impl Browser {
                 let current = tab.url.clone();
                 drop(page);
                 self.log.clicked.push(rules::name_of(&el));
+                self.tab_mut(key)?.focus = Some(r);
                 if !hide.is_empty() {
                     self.tab_mut(key)?.hidden.insert(hide);
                 }
@@ -362,7 +583,7 @@ impl Browser {
                 };
                 let words = format!("{} {} {} {}", el.name, el.label, el.field, el.id);
                 drop(page);
-                self.tab_mut(key)?.values.insert(r, value.clone());
+                { let t = self.tab_mut(key)?; t.values.insert(r, value.clone()); t.focus = Some(r); }
                 let mut seen: Vec<String> = Vec::new();
                 let words: Vec<&str> = words.split_whitespace().filter(|w| !seen.contains(&w.to_lowercase()) && { seen.push(w.to_lowercase()); true }).collect();
                 self.log.typed.push((words.join(" "), value.clone()));
@@ -370,7 +591,7 @@ impl Browser {
                     let tab = self.tab(key)?;
                     let doc = dom_query::Document::from(tab.html.as_str());
                     let page = Page::read(&doc, tab);
-                    let node = page.candidates[(r - 1) as usize];
+                    let Some(node) = page.node(r) else { return Ok(json!({ "r": "gone" })) };
                     let url = page.submission(&node, Some(()));
                     drop(page);
                     if let Some(url) = url {
@@ -382,6 +603,87 @@ impl Browser {
             }
             other => Err(format!("Unknown action {other}")),
         }
+    }
+
+    /// **Keys** pressed in turn (the element script's `key`): in element
+    /// `r` first (if it's still `role` "`name`"), else the one with the
+    /// focus — Tab moves it, Enter submits a field's form or clicks a link
+    /// or button, Space clicks a button or box, the arrows choose a
+    /// select's option, and with nothing focused the paging keys scroll.
+    fn keys(&mut self, key: &str, a: &Value, r: u32) -> Result<Value, String> {
+        if r > 0 {
+            let d = self.describe(key, r)?;
+            let Some(el) = d.el else { return Ok(json!({ "r": "gone" })) };
+            if el.role != a["role"].as_str().unwrap_or("") || el.name != a["name"].as_str().unwrap_or("") {
+                return Ok(json!({ "r": "changed" }));
+            }
+            self.tab_mut(key)?.focus = Some(r);
+        }
+        let keys: Vec<String> = a["keys"].as_array().map(|k| k.iter().filter_map(|s| s.as_str().map(str::to_string)).collect()).unwrap_or_default();
+        for k in &keys {
+            self.log.keys.push(k.clone());
+            let focus = self.tab(key)?.focus;
+            let el = focus.and_then(|f| self.describe(key, f).ok()).and_then(|d| d.el);
+            match (k.as_str(), &el) {
+                ("Tab" | "Shift+Tab", _) => {
+                    let order: Vec<u32> = {
+                        let tab = self.tab(key)?;
+                        let doc = dom_query::Document::from(tab.html.as_str());
+                        let page = Page::read(&doc, tab);
+                        page.candidates.iter().enumerate().filter(|(_, n)| page.visible(n) && !n.has_attr("disabled")).map(|(i, _)| i as u32 + 1).collect()
+                    };
+                    let at = focus.and_then(|f| order.iter().position(|x| *x == f));
+                    let next = match (k.as_str(), at) {
+                        ("Tab", Some(i)) => order.get(i + 1),
+                        ("Tab", None) => order.first(),
+                        (_, Some(i)) => i.checked_sub(1).and_then(|j| order.get(j)),
+                        (_, None) => order.last(),
+                    };
+                    if let Some(n) = next.copied() {
+                        let t = self.tab_mut(key)?;
+                        t.focus = Some(n);
+                        t.seen = true;
+                    }
+                }
+                ("Enter", Some(e)) if rules::takes_text(e) && e.options.is_empty() => {
+                    let url = {
+                        let tab = self.tab(key)?;
+                        let doc = dom_query::Document::from(tab.html.as_str());
+                        let page = Page::read(&doc, tab);
+                        page.node(e.r).and_then(|n| page.submission(&n, Some(())))
+                    };
+                    if let Some(url) = url {
+                        self.navigate(key, &url)?;
+                    }
+                }
+                ("Enter" | "Space", Some(e)) if matches!(e.role.as_str(), "link" | "button" | "checkbox" | "radio" | "switch") => {
+                    self.act(key, "click", &json!({ "ref": e.r, "role": e.role, "name": e.name }))?;
+                }
+                ("ArrowDown" | "ArrowUp", Some(e)) if !e.options.is_empty() => {
+                    let i = e.options.iter().position(|o| *o == e.value).unwrap_or(0);
+                    let j = if k == "ArrowDown" { (i + 1).min(e.options.len() - 1) } else { i.saturating_sub(1) };
+                    let pick = e.options[j].clone();
+                    self.tab_mut(key)?.values.insert(e.r, pick);
+                }
+                ("PageDown" | "PageUp" | "Home" | "End" | "Space" | "ArrowDown" | "ArrowUp", None) => {
+                    let to = match k.as_str() {
+                        "PageUp" | "ArrowUp" => "up",
+                        "Home" => "top",
+                        "End" => "bottom",
+                        _ => "down",
+                    };
+                    let amount = if k.starts_with("Arrow") { 0.06 } else { 1.0 };
+                    self.scroll(key, &json!({ "to": to, "amount": amount }), 0)?;
+                }
+                _ => {}
+            }
+        }
+        let focus = self.tab(key)?.focus;
+        let focused = focus.and_then(|f| self.describe(key, f).ok()).and_then(|d| d.el);
+        let mut out = self.scrolled(key)?;
+        out["keys"] = json!(keys);
+        out["focused"] = serde_json::to_value(focused).unwrap_or(Value::Null);
+        Ok(out)
     }
 }
 
@@ -412,12 +714,17 @@ struct Page<'a> {
     doc: &'a dom_query::Document,
     tab: &'a Tab,
     candidates: Vec<dom_query::NodeRef<'a>>,
+    /// The blocks of text that aren't candidates, then the elements with a
+    /// `data-sim-rect` that are neither: numbered after the candidates.
+    extra: Vec<dom_query::NodeRef<'a>>,
     forms: Vec<dom_query::NodeRef<'a>>,
 }
 
 impl<'a> Page<'a> {
     fn read(doc: &'a dom_query::Document, tab: &'a Tab) -> Page<'a> {
         let mut candidates = Vec::new();
+        let mut blocks = Vec::new();
+        let mut rects = Vec::new();
         let mut forms = Vec::new();
         for node in doc.root().descendants_it() {
             if !node.is_element() {
@@ -432,24 +739,133 @@ impl<'a> Page<'a> {
             }
             if node.is(CANDIDATE) && !(name == "input" && node.attr("type").is_some_and(|t| t.eq_ignore_ascii_case("hidden"))) {
                 candidates.push(node);
+            } else if node.is(BLOCK) {
+                blocks.push(node);
+            } else if node.has_attr("data-sim-rect") {
+                rects.push(node);
             }
         }
-        Page { doc, tab, candidates, forms }
+        blocks.extend(rects);
+        Page { doc, tab, candidates, extra: blocks, forms }
     }
 
-    /// Not hidden: no `hidden`, `aria-hidden="true"`, `display: none` or
-    /// `visibility: hidden` on it or above it, nor hidden by a click
-    /// (`data-sim-hide`).
+    /// The element ref `r` names (a candidate, a block of text, an element
+    /// with a rect), as the element script's `R.els`.
+    fn node(&self, r: u32) -> Option<dom_query::NodeRef<'a>> {
+        let i = r.checked_sub(1)? as usize;
+        self.candidates.get(i).or_else(|| self.extra.get(i.checked_sub(self.candidates.len())?)).copied()
+    }
+
+    /// `node`'s ref.
+    fn ref_of(&self, node: &dom_query::NodeRef) -> Option<u32> {
+        if let Some(i) = self.candidates.iter().position(|c| c.id == node.id) {
+            return Some(i as u32 + 1);
+        }
+        self.extra.iter().position(|c| c.id == node.id).map(|j| (self.candidates.len() + j) as u32 + 1)
+    }
+
+    /// **Where each visible element is** (page pixels from the top): a
+    /// block or candidate a line of its own ([`LINE`]; `data-sim-y` where
+    /// it says), one inside another on its line. Each ref and its y.
+    fn layout(&self) -> Vec<(u32, i64)> {
+        let mut placed: Vec<(dom_query::NodeId, i64)> = Vec::new();
+        let mut out = Vec::new();
+        let mut next = 0i64;
+        for node in self.doc.root().descendants_it().filter(|n| n.is_element()) {
+            let Some(r) = self.ref_of(&node) else { continue };
+            if !self.visible(&node) {
+                continue;
+            }
+            let inside = node.ancestors_it(None).find_map(|a| placed.iter().find(|(id, _)| *id == a.id).map(|(_, y)| *y));
+            let y = match (node.attr("data-sim-y").and_then(|y| y.trim().parse::<i64>().ok()), inside) {
+                (Some(y), _) => y,
+                (None, Some(y)) => y,
+                (None, None) => {
+                    let y = next;
+                    next += LINE;
+                    y
+                }
+            };
+            next = next.max(y + LINE);
+            placed.push((node.id, y));
+            out.push((r, y));
+        }
+        out
+    }
+
+    /// Where the tab is in view, and the headings there.
+    fn in_view(&self) -> super::see::InView {
+        let layout = self.layout();
+        let height = layout.iter().map(|(_, y)| y + LINE).max().unwrap_or(0);
+        let max = (height - VIEW_H).max(0);
+        let y = self.tab.scroll.clamp(0, max);
+        let in_view = layout
+            .iter()
+            .filter(|(_, at)| (y..y + VIEW_H).contains(at))
+            .filter_map(|(r, _)| self.node(*r))
+            .filter(|n| n.is("h1, h2, h3, h4, [role=heading]"))
+            .map(|n| Self::text_of(&n).chars().take(100).collect::<String>())
+            .filter(|t| !t.is_empty())
+            .take(8)
+            .collect();
+        super::see::InView { scroll: super::see::View { x: 0, y, w: VIEW_W, h: VIEW_H, max, dpr: 1.0 }, in_view }
+    }
+
+    /// The visible blocks of text, each with its ref.
+    fn blocks(&self) -> Vec<super::see::Block> {
+        self.doc
+            .root()
+            .descendants_it()
+            .filter(|n| n.is_element() && n.is(BLOCK) && self.visible(n))
+            .filter_map(|n| {
+                let text: String = Self::text_of(&n).chars().take(400).collect();
+                let tag = n.node_name().map(|t| t.to_ascii_lowercase()).unwrap_or_default();
+                let role = n.attr("role").map(|r| r.to_ascii_lowercase()).unwrap_or_default();
+                (!text.is_empty()).then(|| self.ref_of(&n).map(|r| super::see::Block { r, tag, role, text })).flatten()
+            })
+            .collect()
+    }
+
+    /// The ref at point (`x`, `y`) of the page (pixels from its top): the
+    /// last visible element with a `data-sim-rect` holding it, as its
+    /// nearest candidate, else itself.
+    fn at(&self, x: f64, y: f64) -> Option<u32> {
+        let hit = self
+            .doc
+            .select("[data-sim-rect]")
+            .nodes()
+            .iter()
+            .filter(|n| self.visible(n))
+            .rfind(|n| {
+                let r: Vec<f64> = n.attr("data-sim-rect").map(|s| s.split(',').filter_map(|p| p.trim().parse().ok()).collect()).unwrap_or_default();
+                r.len() == 4 && x >= r[0] && x < r[0] + r[2] && y >= r[1] && y < r[1] + r[3]
+            })
+            .copied()?;
+        let candidate = std::iter::once(hit).chain(hit.ancestors_it(None)).find(|n| self.candidates.iter().any(|c| c.id == n.id));
+        self.ref_of(&candidate.unwrap_or(hit))
+    }
+
+    /// Not hidden: no `hidden` (unless a hover showed it), `aria-hidden=
+    /// "true"`, `display: none` or `visibility: hidden` on it or above it,
+    /// nor hidden by a click (`data-sim-hide`), nor still to come
+    /// (`data-sim-after`).
     fn visible(&self, node: &dom_query::NodeRef) -> bool {
         std::iter::once(*node).chain(node.ancestors_it(None)).filter(|n| n.is_element()).all(|n| {
             let style = n.attr("style").map(|s| s.to_ascii_lowercase().replace(' ', "")).unwrap_or_default();
             let id = n.id_attr().map(|i| i.to_string()).unwrap_or_default();
-            !n.has_attr("hidden")
+            (!n.has_attr("hidden") || (!id.is_empty() && self.tab.shown.contains(&id)))
                 && n.attr("aria-hidden").is_none_or(|v| !v.eq_ignore_ascii_case("true"))
                 && !style.contains("display:none")
                 && !style.contains("visibility:hidden")
                 && (id.is_empty() || !self.tab.hidden.contains(&id))
+                && self.due(&n)
         })
+    }
+
+    /// An element with `data-sim-after="<ms>"` is there that long after its
+    /// page loaded.
+    fn due(&self, n: &dom_query::NodeRef) -> bool {
+        n.attr("data-sim-after").and_then(|ms| ms.trim().parse::<u64>().ok()).is_none_or(|ms| self.tab.loaded.elapsed() >= std::time::Duration::from_millis(ms))
     }
 
     fn text_of(n: &dom_query::NodeRef) -> String {
@@ -671,7 +1087,17 @@ impl<'a> Page<'a> {
     fn text(&self) -> String {
         let html = self.doc.html().to_string();
         let copy = dom_query::Document::from(html.as_str());
-        copy.select("script, style, noscript, template, [hidden], [aria-hidden=true]").remove();
+        copy.select("script, style, noscript, template, [aria-hidden=true]").remove();
+        for n in copy.select("[hidden]").nodes() {
+            if !n.id_attr().is_some_and(|id| self.tab.shown.contains(&id.to_string())) {
+                n.remove_from_parent();
+            }
+        }
+        for n in copy.select("[data-sim-after]").nodes() {
+            if !self.due(n) {
+                n.remove_from_parent();
+            }
+        }
         for n in copy.select("[style]").nodes() {
             let s = n.attr("style").map(|s| s.to_ascii_lowercase().replace(' ', "")).unwrap_or_default();
             if s.contains("display:none") || s.contains("visibility:hidden") {

@@ -85,9 +85,9 @@ fn open_app_tool(args: &Value, question: &str, previous: Option<&str>, cfg: &Yap
     // A website, with pages beside the chat: never an app ("Google" opened
     // Google Chrome, 1 Nov 2026).
     if cfg.web_search && super::plan::for_the_web(&name.to_lowercase(), &found) {
-        tracing::info!("open_app refused: a website, for open_page");
+        tracing::info!("open_app refused: a website, for browser_navigate");
         return tool_error(
-            "That's a website, not an app: open it beside the chat with open_page (its home page, or search words).".to_string(),
+            "That's a website, not an app: open it beside the chat with browser_navigate (its home page, or search words).".to_string(),
             Value::Null,
             format!("Didn't open {said}: a website"),
         );
@@ -147,7 +147,7 @@ fn open_app_tool(args: &Value, question: &str, previous: Option<&str>, cfg: &Yap
             // With pages beside the chat, a name that's no app may be a site
             // ("open Emberwiki": Claude Haiku 5.5 asked "is it a website?"
             // rather than looking, 1 Nov 2026).
-            let web = if cfg.web_search { "It may be a website: web_search for it now and open_page the result, without asking. " } else { "" };
+            let web = if cfg.web_search { "It may be a website: web_search for it now and browser_navigate to the result, without asking. " } else { "" };
             let hint = if names.is_empty() {
                 format!("{web}Else call list_apps to see the apps installed, or tell the user.")
             } else {

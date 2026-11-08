@@ -192,8 +192,8 @@ Decided 2026-11-07 (the maintainer and Claude), landed the same day.
     so the person's own MCP servers don't start for a chat (agents keep
     theirs). Changes still only go through `start_agent`, with all its rules.
   - **The screen and the pages beside the chat** (7 Nov 2026), as a plain
-    plan chat has them: `look_at_screen`, `open_page`, `read_open_page`,
-    `switch_tab`, `snap_page` and the picture tools over the same endpoint
+    plan chat has them: `look_at_screen`, the `browser_*` toolset (acting too,
+    on the card, since 8 Nov 2026) and the picture tools over the same endpoint
     (`claude_live/eyes.rs`), allowed in `--allowedTools`, and the line after
     Yap's Code chat words that it can look at the screen and open pages when
     asked ("look at this site's design and take screenshots"). An agent still

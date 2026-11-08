@@ -85,6 +85,20 @@ pub struct ShownPicture {
     /// The page's number in the answer's Sources (0: not a source).
     #[serde(default)]
     pub n: usize,
+    /// **A shot for the model** (`browser_screenshot`, `browser_zoom`,
+    /// 8 Nov 2026): its step's chip ("Looked at the page · example.com"). It
+    /// shows in the answer's steps, a thumbnail on that step, never as a
+    /// pill or a tab beside the chat (an older Yap drops the field and shows
+    /// it as a picture, as shots were). Empty: a picture shown beside the chat.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub chip: String,
+}
+
+impl ShownPicture {
+    /// A shot in the steps, not a picture shown beside the chat.
+    pub fn in_steps(&self) -> bool {
+        !self.chip.is_empty()
+    }
 }
 
 /// A caption's most characters.
@@ -509,14 +523,21 @@ pub async fn show(turn: &mut crate::web::Turn, args: &Value) -> Run {
         Some(said) => clip(said, CAPTION_MAX),
         None => clip(&c.about(), CAPTION_MAX),
     };
-    // Shown already this turn: the one there is (a page's shot is shown as
-    // it's taken).
+    // Shown already this turn: the one there is. (A page's shot is in the
+    // steps as it's taken: shown beside the chat, it's a picture of its own.)
     let shot = c.image.url.strip_prefix(SHOT);
-    if let Some(p) = turn.pictures.shown.iter().find(|p| shot.map_or(p.image_url == c.image.url, |id| p.id == id)) {
+    if let Some(p) = turn.pictures.shown.iter().filter(|p| !p.in_steps()).find(|p| shot.map_or(p.image_url == c.image.url, |id| p.id == id)) {
         let result = json!({ "success": true, "shown": true, "id": p.id, "w": p.w, "h": p.h, "displayText": "" });
         return Run { result, ..Default::default() };
     }
-    if turn.pictures.shown.len() >= MAX_SHOWN {
+    if let Some(p) = shot.and_then(|id| turn.pictures.shown.iter().find(|p| p.id == id)).cloned() {
+        let picture = ShownPicture { chip: String::new(), caption: caption.clone(), ..p };
+        turn.pictures.shown.push(picture.clone());
+        tracing::info!(picture = %c.id, "Chat: a page's shot shown beside the chat");
+        let result = json!({ "success": true, "shown": true, "id": picture.id, "w": picture.w, "h": picture.h, "displayText": format!("Showed {} from {}", quoted(&caption), if picture.page.site.is_empty() { "the page".to_string() } else { picture.page.site.clone() }) });
+        return Run { result, shown: Some(picture), look: None };
+    }
+    if turn.pictures.shown.iter().filter(|p| !p.in_steps()).count() >= MAX_SHOWN {
         return Run {
             result: failed(format!("You've shown {MAX_SHOWN} pictures this turn: answer the user now."), format!("Didn't show {}: {MAX_SHOWN} pictures a turn", quoted(&caption))),
             ..Default::default()
@@ -552,6 +573,7 @@ pub async fn show(turn: &mut crate::web::Turn, args: &Value) -> Run {
         image_url: c.image.url.clone(),
         page: c.page.clone(),
         n: c.n,
+        chip: String::new(),
     };
     tracing::info!(picture = %c.id, w = image.w, h = image.h, "Chat: a picture shown beside the chat");
     turn.pictures.shown.push(picture.clone());

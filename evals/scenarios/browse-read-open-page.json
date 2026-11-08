@@ -27,7 +27,7 @@
       "expect": {
         "tools_called": [
           {
-            "name": "read_open_page"
+            "name": "browser_read"
           }
         ],
         "answer_contains": [

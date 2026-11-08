@@ -11,7 +11,7 @@
 // A chip about the web (web.rs), a page beside the chat (chat/pages.rs, and
 // acting on one: chat/pages/act.rs) or the safety rule (chat/tools.rs).
 const WEB_CHIP =
-  /^(Searched the web|Couldn't search the web|Didn't search for|Didn't search the web for|Read [^"]|Couldn't read [^"]|Didn't read |Answered from |Brought up |Couldn't bring up |Didn't bring up |Took a shot of |Couldn't take a shot of |Didn't take a shot of |Offered to open |Didn't offer |Clicked |Typed in |Scrolled |Went to |Opened a search in tab |Showed tab |Couldn't (click|type|scroll|go|switch)|Didn't (click|type|press|go|open|act|switch))/;
+  /^(Searched the web|Couldn't search the web|Didn't search for|Didn't search the web for|Read [^"]|Couldn't read [^"]|Didn't read |Answered from |Brought up |Couldn't bring up |Didn't bring up |Took a shot of |Couldn't take a shot of |Didn't take a shot of |Offered to open |Didn't offer |Clicked |Typed in |Scrolled |Went to |Went (back|forward) in tab |Opened a search in tab |Showed tab |Closed tab |Listed the tabs |Looked at the page · |Zoomed in on the page · |Found (\d+ match(es)?|no match) for|Waited |Pressed |Hovered over |(Un)?[Tt]icked |Chose |Couldn't (click|type|scroll|go|switch|look at|zoom in|press|hover|set|open a tab|close tab|run|search|find|wait|act)|Didn't (click|type|press|go|open|act|switch|look|zoom|tick|run|use|see|find))/;
 // The calendar's (chat/tools/calendar.rs).
 const CALENDAR_CHIP = /^(Checked your calendar|Found \d+ meetings? with|No meetings with|Free |Busy |No calendar connected|Couldn't read the (day|time) )/;
 // A document's (chat/documents.rs, and the rich tools': documents/rich.rs).
@@ -54,9 +54,17 @@ const STEPS = [
   [/^(Added "[^"]*" to "|Added to "|Changed (a table in|a part of) "|Took a part out of "|Moved a part of "|Made \d+ changes in "|Restored version \d+ of ")/, 'docEdit'],
   [/^Clicked /, 'clicked'],
   [/^Typed in /, 'typed'],
+  [/^((Un)?[Tt]icked |Chose )/, 'set'],
+  [/^Pressed /, 'pressed'],
+  [/^Hovered over /, 'hovered'],
   [/^Scrolled /, 'scrolled'],
-  [/^(Went to |Opened a search in tab )/, 'went'],
+  [/^(Went to |Went (back|forward) in tab |Opened a search in tab )/, 'went'],
   [/^Showed tab /, 'switched'],
+  [/^(Closed tab |Listed the tabs )/, 'tabs'],
+  [/^Looked at the page · /, 'pageLooked'],
+  [/^Zoomed in on the page · /, 'zoomed'],
+  [/^Found (\d+ match(es)?|no match) for /, 'found'],
+  [/^Waited /, 'waited'],
   [/^Brought up a search for /, 'searchOpened'],
   [/^Brought up /, 'page'],
   [/^Took a shot of /, 'shot'],
@@ -91,9 +99,17 @@ const SAY = {
   readBeside: (n) => n1(n, 'read the page beside the chat', 'read {n} pages beside the chat'),
   clicked: (n) => n1(n, 'clicked on the page', 'clicked {n} times on the page'),
   typed: (n) => n1(n, 'typed on the page', 'typed in {n} fields'),
+  set: (n) => n1(n, 'set a field', 'set {n} fields'),
+  pressed: (n) => n1(n, 'pressed keys', 'pressed keys {n} times'),
+  hovered: (n) => n1(n, 'pointed at the page', 'pointed at the page {n} times'),
   scrolled: () => 'scrolled the page',
   went: (n) => n1(n, 'went to a page', 'went to {n} pages'),
   switched: (n) => n1(n, 'switched tabs', 'switched tabs {n} times'),
+  tabs: () => 'worked the tabs',
+  pageLooked: (n) => n1(n, 'looked at the page', 'looked at the page {n} times'),
+  zoomed: (n) => n1(n, 'zoomed in', 'zoomed in {n} times'),
+  found: (n) => times(n, 'looked for words on the page'),
+  waited: () => 'waited for the page',
   searchOpened: (n) => n1(n, 'opened a search', 'opened {n} searches'),
   page: (n) => n1(n, 'brought up a page', 'brought up {n} pages'),
   shot: (n) => n1(n, 'took a shot of a page', 'took {n} shots of pages'),
@@ -144,6 +160,28 @@ export function stepsSummary(chips) {
   if (failed) counts.set('failed', failed);
   const line = [...counts].map(([k, n]) => SAY[k](n)).join(', ');
   return line ? line[0].toUpperCase() + line.slice(1) : '';
+}
+
+/**
+ * **The shots the model took, on their steps** (chat/pages/see.rs: a
+ * `ShownPicture` with its step's `chip`, "Looked at the page · example.com"):
+ * for each chip, the next shot of that chip not yet placed, else null — the
+ * k-th shot of a step's words is on the k-th step with them. `rest`: any
+ * left over (a step's words changed since). Pure.
+ */
+export function stepShots(chips, shots) {
+  const left = [...(shots || [])].filter((s) => s?.id && s.chip);
+  const on = (chips || []).map((chip) => {
+    const i = left.findIndex((s) => s.chip === String(chip).trim());
+    return i < 0 ? null : left.splice(i, 1)[0];
+  });
+  return { on, rest: left };
+}
+
+/** The shots kept with an answer (its pictures with a step's chip), or as they come. Pure. */
+export function shotsOf(m) {
+  const kept = (m?.pictures || []).filter((p) => p?.chip);
+  return kept.length ? kept : m?.liveShots || [];
 }
 
 /** A turn's time so far: "12s", "1m 59s", "1h 4m". Pure. */

@@ -458,8 +458,8 @@ one side.
   (`refused_after_web`, `ACTION_TOOLS` = open_app, create_note,
   update_note, edit_note, copy_to_clipboard): once web content is in a turn
   (`Turn::seen`, or the loop's `screen_seen`: a search's results; a page
-  read — `read_page`, `read_open_page`, an action's page after,
-  `switch_tab`'s tab, the tab `open_page` closed to make room, named —; a
+  read — `read_page`, `browser_read`, a find or a scroll, an action's page after,
+  a switched tab, the tab a new one closed to make room, named —; a
   page's shot; the screen looked at; **text selected in another app or on a
   page beside the chat** and asked about, from the turn's start —
   `Selected::web`, `Extra::web_question` — never text selected in Yap's own
@@ -877,15 +877,16 @@ one side.
   `chat-documents-rich.spec.js`; evaluations `--documents --tag
   documents-edits --doc-tools rich|simple`
   ([model-evals.md](../model-evals.md#the-rich-document-tools-31-oct-2026)).
-- **`chat/pages.rs`** (+ `pages/view.rs`) — **pages beside the chat**
-  (2026-11-01, the plan's Milestone 2): `show_page`, `snap_page`,
-  `offer_browser` (`ShownPage {url, title, site, section}`,
-  `BrowserOffer {url, why, site}`; `TurnPages` on the turn's `web::Turn`;
+- **`chat/pages.rs`** (+ `pages/view.rs`, `pages/see.rs`, `pages/act.rs`) —
+  **the browser beside the chat** (2026-11-01, the plan's Milestone 2; one
+  `browser_*` toolset since 8 Nov 2026: `pages::execute`, `pages::Ctx`,
+  `pages::Run`; `ShownPage {url, title, site, section}`, `BrowserOffer {url,
+  why, site}` for older answers; `TurnPages` on the turn's `web::Turn`;
   `ChatMessage.pages` / `offers`, `chats::set_pages`; `{kind: "page"}` /
-  `{kind: "offer"}`), and the Page tab's own WebView2 — its own profile, no
-  Yap IPC, public http(s) only — with its commands (`page_view_show` /
-  `place` / `close` / `close_all` / `back` / `reload` / `shot`). See "Pages
-  beside the chat" under The Chat view.
+  `{kind: "shot"}` / `{kind: "closeTab"}`), and the Page tab's own WebView2
+  — its own profile, no Yap IPC, public http(s) only — with its commands
+  (`page_view_show` / `place` / `close` / `close_all` / `back` / `reload` /
+  `shot`). See "Pages beside the chat" under The Chat view.
 - **`chat/pictures.rs`** — **find and show pictures** (2026-10-31,
   yap-private `docs/look-and-show-plan.md` Milestone 1; the contract with
   the frontend: `ShownPicture`, `{kind: "picture"}`, `ChatMessage.pictures`).
@@ -1963,32 +1964,76 @@ your screen (2 monitors) and the page beside the chat", the live line
 `chat/pages.rs`, `chat/pages/view.rs`; reshaped the same day after the
 maintainer's first real try — "open Google" opened the Chrome app, a site
 named but not searched for was refused, a search wasn't offered beside the
-chat). Tools for every tool-using model with the web on (`pages::on`: the
-same models as the picture tools; Yap does the work, so no judgment is
-needed), one short general line in the system prompt (`pages::instructions`:
-open a page or a search here when the user asks to open, show or search for
-something; websites never with `open_app`; read the page open beside the
-chat for "this page"; ≤ 400 tokens with the schemas), and every question
-says which tabs are open (`pages::tabs_line`: "Open beside the chat: tab 1
-(wiki.example.com), in front; tab 2 (duckduckgo.com), search results.
-read_open_page reads one.", from `view::open_tabs`) — **each tab's number
-and site only** (3 Nov 2026): never its title or path, which the page
-writes and which went with every question while the tab stayed open, in
-turns the safety rule treats as clean; the model reads a tab
-(`read_open_page`, web content) to learn what's on it:
-- **`open_page { url? | search?, section? }`** (`show_page`, its earlier
-  name, is the same): a live page in a **Page tab** (`stream::Event::Page
-  {page: ShownPage}` opens it mid-turn; the answer keeps it,
-  `ChatMessage.pages`, so its tab comes back with the conversation; a pill
-  under the answer, `PagePills.svelte`) — a page from this turn's results or
-  the person's messages (opened at the address the turn holds for it,
+chat; **one browser toolset since 8 Nov 2026**, below). Tools for every
+tool-using model with the web on (`pages::on`: the same models as the
+picture tools; Yap does the work, so no judgment is needed), one short
+general line in the system prompt (`pages::instructions`: the `browser_*`
+tools work the tabs the user watches, `tab` a tab's number; open a page or a
+search here when the user asks to open, show or search for something;
+websites never with `open_app`; `browser_read` for "this page", exact and
+cheaper than a picture; for a model that reads images, "scroll or
+scroll_to the part you need, then browser_screenshot; browser_zoom for
+small text"), and every question says which tabs are open
+(`pages::tabs_line`: "Open beside the chat: tab 1 (wiki.example.com), in
+front; tab 2 (duckduckgo.com), search results. browser_read reads one.",
+from `view::open_tabs`) — **each tab's number and site only** (3 Nov 2026):
+never its title or path, which the page writes and which went with every
+question while the tab stayed open, in turns the safety rule treats as
+clean; the model reads a tab (`browser_read`, web content) to learn what's
+on it.
+
+**The browser toolset** (8 Nov 2026; the maintainer, using a Code chat on
+his plan: "can we just do tools exactly like you have for ours", Claude
+Code's own browser): one family of `browser_*` tools, **the same for every
+model with the pages** — the tool loop on a key or this PC, and plan chats
+over the run endpoint (`claude_live/eyes.rs`) —, one implementation behind it
+(`pages::execute`; `pages/see.rs` the viewing tools, `pages/act.rs` the
+acting ones), minus Claude Code's developer-only ones (running JS, the
+console, the network, resizing), right-click, double-click and drag.
+Before it, a shot opened as a new tab ("A shot of example.com") and only
+ever showed the top of the page, and a plan chat couldn't scroll, so the
+model asked the person to snip the part it wanted. Older names (`open_page`,
+`show_page`, `read_open_page`, `snap_page`, `switch_tab`, `click`,
+`type_text`, `scroll`, `go_to`) are the tools they are now
+(`pages::renamed`); a stored chat's chips read as they did. **What each
+model gets** (`pages::offers`, `definitions`): the same tools under the
+same names, minus what it can't use — **the view's** (`pages::VIEW`:
+`browser_scroll`, `browser_scroll_to`, `browser_screenshot`,
+`browser_zoom`) **only for a model that reads images** (one that can't
+reads the whole page with `browser_read`, and on the on-device model's 8K
+context every schema counts), `browser_batch` only for one that acts or
+sees, the acting ones only where `can_act` says. A model that can't see
+types by ref (`ref` required: it has one for every field); one that sees
+may type where it clicked. **Their weight** (every step sends them;
+`estimate_tokens`, with the line): ≈ 570 tokens for a model that only
+reads, ≈ 940 for one that sees, ≈ 1,160 acting without seeing (the
+on-device Qwen), ≈ 1,485 with both — about 300 more than the page tools
+and the drive tier were for a model that acts, which a cloud model's
+context never notices; a strong model on a server on this PC that doesn't
+say its context (Yap assumes 8K) no longer fits its whole toolset (rich
+documents, web, browser) beside a question (the e2e's strong fakes say
+32K). `tab` is in the schemas only where a tab is chosen (navigate, read,
+screenshot, tabs: the others act on the tab in front, and every tool still
+takes it), what they share said once, in the line.
+- **`browser_navigate { url | search | "back" | "forward", tab? }`**: the
+  tab in front (or tab n) goes there — the turn's results, the person's
+  links, a link on a page read (`act::go`: always the address Yap holds,
+  never the model's copy), its own history — and with no tab open, **a new
+  Page tab** (`pages::open`, as `browser_tabs { action: "new" }`):
+  `stream::Event::Page {page: ShownPage}` opens it mid-turn; the answer keeps
+  it, `ChatMessage.pages`, so its tab comes back with the conversation; a
+  pill under the answer, `PagePills.svelte` — a page from this turn's results
+  or the person's messages (opened at the address the turn holds for it,
   `Turn::stored`, never the model's copy with a fragment or `utm_…` added),
   **the home page of a site the person named**
   (`named_site`: "open ExampleTube" → `https://www.exampletube.com/`; the
   site itself or `www.`, no path, query or other subdomain, its name a word
   of the question), or **search words** on the person's engine
-  (`web_search_browser`, the address bar's; titled "Search: …"). Nothing of
-  the page goes to the model by opening it.
+  (`web_search_browser`, the address bar's; titled "Search: …"). A link whose
+  words or address would buy, unsubscribe, confirm or sign in asks first, a
+  new tab as a tab navigating (`rules::needs_ok`). Nothing of the page goes
+  to the model by opening it; going somewhere in a tab tells the page after
+  (`act::after`, web content). Four new tabs a turn.
 - **Yap opens it itself, no model** (`turn::asked_page`, before any model
   as the app fast path is; 1 Nov 2026: given `open_page`, Qwen3.5-4B opened
   Google Chrome with `open_app` for "open Google", and for "open YouTube"
@@ -2011,48 +2056,96 @@ turns the safety rule treats as clean; the model reads a tab
   On the person's engine. With Chat in view only — typed, or asked out loud
   with Chat in view (`chat_in_view`); never a phone, the Voice Assistant
   from another app, the meetings, a Skill, or a question carrying a
-  screenshot. The page tools likewise (the Voice Assistant from another app
-  and a phone get none); acting on a page stays Chat's typed questions'
+  screenshot. The browser tools likewise (the Voice Assistant from another
+  app and a phone get none); acting on a page stays Chat's typed questions'
   (`act` only with no scope: its card isn't wired to the spoken answer yet). The
   answer is one line ("The search for “…” is open beside the chat, on
   Google."), the page kept with it (`page_turn`, `Event::Page`). `open_app`
   refuses a website (`apps::plan::for_the_web`: the request's phrase asks
   for the web or names a site, and no app has exactly that name). English
-  only so far: in another language the model opens it (`open_page`).
-- **`read_open_page { tab? }`**: the page in front beside the chat (or tab
-  n, `view::pick_tab`), read in place (`view::PAGE_TEXT_SCRIPT`, Yap's own
-  read-only script through `view::run_script`: the title, the `main` /
-  `article` element's headings and text, else the page's) — its text cut at
-  `READ_MAX` (5,000 characters, `more` when there's more), its headings,
-  **its links** (the main part's, once each, their words and address, at
-  most `LINKS_MAX` = 40, never a search engine's: for "send me the link to
-  that one" — Haiku couldn't give a listing's address from its text alone,
-  1 Nov 2026 — and `open_page` may open one: `act::remember_page_links`,
-  `checked`), the tabs open; a source of the turn (`Turn::read_open`: numbered,
-  opened, cited as [n]) and **web content** (the safety rule). **Never a
-  search engine's results page** (`search_page`: their terms forbid
-  automated reading, web-and-apps.md; any of an engine's countries and hosts
-  — google.de, cn.bing.com, html.duckduckgo.com, search.yahoo.com, Baidu,
-  Yandex, Naver… — never a look-alike such as google.example.com) — refused,
-  the person reads it; a shot of one too. The tabs line gives each tab's
-  site only: its title and address come with a read (`tabs`).
-- **`snap_page { url? }`** — **only for a model that reads images**
-  (`Gate::Look`; one that can't was only told not to describe it): the page
-  in front when there's no url; the page's shot (`CapturePreview`, a PNG): the
-  panel's page as it is when it's that page and loaded, else the page loaded
-  for it in a host under Yap's own page (out of sight, 1280 × 800 at 100 %,
-  `SETTLE` 1.2 s after it loads, 20 s to load), kept like a pasted picture
-  and shown as one (`ShownPicture`, its page the source, `imageUrl` empty:
-  no original to open; a picture tab, a pill). It's a candidate of the turn
-  (`TurnPictures::add_shot`, `yap-shot:<id>`): a model that reads images can
-  `look_at_picture` it at once (no download), and `show_picture` of it
-  returns the one shown. A shot is web content (the safety rule).
+  only so far: in another language the model opens it (`browser_navigate`).
+- **`browser_read { mode?: "text" | "elements", tab? }`**: the page in front
+  beside the chat (or tab n, `view::pick_tab`), read in place
+  (`view::PAGE_TEXT_SCRIPT`, Yap's own read-only script through
+  `view::run_script`: the title, the `main` / `article` element's headings
+  and text, else the page's) — its text cut at `READ_MAX` (5,000
+  characters, `more` when there's more), its headings, **its links** (the
+  main part's, once each, their words and address, at most `LINKS_MAX` = 40,
+  never a search engine's: for "send me the link to that one" — Haiku
+  couldn't give a listing's address from its text alone, 1 Nov 2026 — and
+  `browser_navigate` may open one: `act::remember_page_links`, `checked`),
+  the tabs open; a source of the turn (`Turn::read_open`: numbered, opened,
+  cited as [n]) and **web content** (the safety rule). Mode "elements" (any
+  model now: it changes nothing) lists the links, buttons and fields by ref
+  instead (`rules::element_lines`, the text cut at 2,500). **Never a search
+  engine's results page** (`search_page`: their terms forbid automated
+  reading, web-and-apps.md; any of an engine's countries and hosts —
+  google.de, cn.bing.com, html.duckduckgo.com, search.yahoo.com, Baidu,
+  Yandex, Naver… — never a look-alike such as google.example.com) —
+  refused, the person reads it; nor any browser tool there. The tabs line
+  gives each tab's site only: its title and address come with a read
+  (`tabs`).
+- **Looking around a page** (`pages/see.rs`, read only: nothing on the page
+  changes and nothing leaves it; a scroll shows on the live tab, as Claude
+  Code's does; the scrolls for a model that sees): **`browser_scroll { direction: down | up | top | bottom,
+  amount?: screens }`** — the page's own scroller, or the biggest scrolling
+  part of an app-like page (`script.rs` `scroller`) — answers where it is
+  (`scroll {y, h, max, at_top, at_end}`) and the headings in view;
+  **`browser_scroll_to { ref | text }`** scrolls an element, or the best
+  place the words appear (`see::best_match`: case, accents and curly quotes
+  folded; a heading that is just those words first, then any heading, then
+  the shortest block holding them, over the page's visible text blocks with
+  refs, `script::blocks`), into the middle of the view, with what's around
+  it; nothing found, the nearest blocks by the words they share
+  (`near_matches`, "Didn't find ‘…’"); **`browser_find { query }`** lists the
+  elements whose words match, then the text blocks holding them, each with
+  its ref, kind and words (`see::matches`, at most 15: a heading's ref
+  scrolls there, a button's clicks); **`browser_wait { seconds?, text? }`**
+  waits for the words (folded) or, without them, until the page settles
+  (loaded, its text still for 0.8 s), at most 10 s; **`browser_tabs {
+  action: list | new | switch | close, tab? }`** — the list's titles are web
+  content; switch shows the tab (`Event::SwitchTab`), close closes it
+  (`Event::CloseTab`, `view::close`). All of them web content from what they
+  bring in (`Turn::mark_seen`).
+- **`browser_screenshot { tab? }`** and **`browser_zoom { region }`** —
+  **only for a model that reads images** (`Gate::Look`): **what's in view
+  now**, in the tab's own webview at its current scroll
+  (`view::shot_in_view`: `CapturePreview` as it is on screen; a tab out of
+  sight — another in front, the panel closed — drawn for a moment under
+  Yap's own page at the size the panel last had, so the shot is what the
+  person would see there; a hidden tab is laid out at that size all along,
+  `put`'s `STAGE`). No page is loaded for it. The model's copy is the view at
+  its CSS pixels (`browser_click`'s x, y are in its pixels, the result says
+  so: `frame`, `see::Frame`), fitted for the provider; the person's copy is
+  kept at the device's pixels. A zoom: top, middle, bottom, left, right, the
+  corners, or `x,y,w,h` (fractions, percentages, or the latest screenshot's
+  pixels: `see::Region`) cropped from the device's pixels and enlarged when
+  small (bilinear, at most twice, to 900 px) — sharper than the screenshot
+  the model got (WebView2's DevTools capture could render it at 2×, not
+  done; nor a full-page shot: `CapturePreview` only draws the view).
+  **A shot is for the model**: it comes back in its tool result (the next
+  step's message in the tool loop, `pictures::look_message`, while it fits:
+  `room.rs`; MCP image content on the plan), and shows in the thread **in
+  the turn's steps** as a thumbnail on its step ("Looked at the page ·
+  example.com", "Zoomed in on the page · example.com"; `stream::Event::Shot`,
+  `ShownPicture::chip`), never as a tab or a pill; kept with the answer in
+  its `pictures` (`chat-images/`, deleted with it) — an older Yap drops the
+  `chip` and shows them as pictures. A candidate of the turn too
+  (`TurnPictures::add_shot`, `yap-shot:<id>`): `show_picture` of it shows it
+  beside the chat as a picture of its own (pictures the model chooses to
+  show keep their behaviour). Twelve shots and zooms a turn; web content.
+- **`browser_batch { actions: [{tool, args}…] }`** (a model that acts or
+  sees): up to ten browser tools
+  in order in one call, each with its own rules (a card waits as usual),
+  stopping at the first that fails — a refusal, a card said no to; each
+  step's chip (`displayTexts`, folded into the steps one by one: `fold.rs`,
+  `claude_plan::map`), the pictures in order. Never a batch in a batch.
 - **`offer_browser { url, why }`** is **no longer offered** (1 Nov 2026:
   the Page tab has Open in <browser>, and one tool fewer helps a small
   model): an older answer's buttons still show (`BrowserOffers.svelte`,
   `ChatMessage.offers`), and the code stays for them.
 - **Which pages**: as above, public http(s) only (`web::check_url`); four
-  pages and three shots a turn. None is an action tool
+  new tabs and twelve shots a turn. None is an action tool
   (`tools::ACTION_TOOLS`): nothing leaves Yap but an address a search or the
   person gave, a site they named, or the words of a search they asked for
   (to their own engine, as a web search sends its words to its service).
@@ -2102,7 +2195,7 @@ turns the safety rule treats as clean; the model reads a tab
   cover Yap's own UI otherwise. So the page **keeps its place** (scroll, a
   map's zoom) while another tab shows, and **closes with its tab**
   (`page_view_close`); another conversation or leaving Chat closes them all;
-  at most four stay alive (the least recently shown goes; when `open_page`
+  at most four stay alive (the least recently shown goes; when a new tab
   made the fifth, its result says which tab closed, `closed`). **Each tab's
   number is its own for the session** (`view::NEXT_TAB`: closing or
   evicting another never renumbers it, and a closed tab's number is never
@@ -2182,32 +2275,53 @@ maintainer's ask: "offer tabs, read the page and act with Yap but only for
 models that are good with that stuff". Reworked the same day after a code
 review (safely, for any user, in any language Yap speaks).
 - **Who** (`act::can_act`): the strong cloud models (`documents::rich::
-  strong`: Claude, GPT-5, Gemini, the large open ones) and an on-device model
-  only on `act::LOCAL_ALLOWLIST` — the ones the browse evaluation passed
-  (every safety task and at least 80% of the rest, model-evals.md "Acting on
-  pages"; **empty**: none of the five on-device models measured qualified, 1 Nov 2026). Only a typed
-  Chat turn (never the Voice Assistant or the meetings: an action that buys
-  asks in Chat) with the web on (the page tools' `Gate`).
-  `tools::Extra::act`; small models never see these tools.
-- **The tools** (≤ 650 tokens with the line, `act::definitions`,
-  `act::INSTRUCTIONS`; the page tools' own line is `act::PAGES_LINE` for
-  them, a search engine's page only when the person wants one):
-  `read_open_page { elements: true }` lists the page's
-  links, buttons and fields by ref, one a line (`rules::element_lines`:
-  `[3] textbox "From" = "Kellbrook"`, `[5] button "Find trains" (submits the
-  form)`, `[7] link "Buy tickets" → rail.example.com/buy?train=1 (asks the
-  user first)`, `[9] textbox "Card number" (Yap never types here: payment
-  card details)`), its text then cut at 2,500 characters, its links ones
-  `go_to` may open this turn (`TurnPages::links`: each one's address as the
-  page has it and its words, `act::Link`); `click {tab?, ref}`,
-  `type_text {tab?, ref, text, submit?}` (a select: the option with those
-  words; an editable region: the words go in at its caret, or after what's
-  there, `execCommand('insertText')`, never over a draft — the result's
-  `field` says all it holds now; `submit`: Enter, its form's
-  `requestSubmit`), `scroll {tab?, to: up | down | ref}`, `go_to {tab?, url
-  | search}` (this turn's results, the person's links, a site they named, a
-  link on a page read this turn, or a search on their engine), `switch_tab
-  {tab}`. **`go_to` goes only to the address as Yap holds it**
+  strong`: Claude, GPT-5, Gemini, the large open ones; your Claude plan's
+  Claude too, over the run endpoint since 8 Nov 2026, `claude_live/eyes.rs`)
+  and an on-device model only on `act::LOCAL_ALLOWLIST` — the ones the
+  browse evaluation passed (every safety task and at least 80% of the rest,
+  model-evals.md "Acting on pages"; **empty**: none of the five on-device
+  models measured qualified, 1 Nov 2026). Only a typed Chat turn (never the
+  Voice Assistant or the meetings: an action that buys asks in Chat) with
+  the web on (the page tools' `Gate`), never while a meeting records or a
+  call is on (`assistant::is_off`). `tools::Extra::act`; small models never
+  see these tools.
+- **The tools** (the browser toolset's acting ones, `act::TOOL_NAMES`;
+  `act::INSTRUCTIONS` the line; the browser tools' own line for them asks for
+  a search engine's page only when the person wants one): `browser_read {
+  mode: "elements" }` (or `browser_find`) lists the page's links, buttons
+  and fields by ref, one a line (`rules::element_lines`: `[3] textbox "From"
+  = "Kellbrook"`, `[5] button "Find trains" (submits the form)`, `[7] link
+  "Buy tickets" → rail.example.com/buy?train=1 (asks the user first)`, `[9]
+  textbox "Card number" (Yap never types here: payment card details)`), its
+  text then cut at 2,500 characters, its links ones `browser_navigate` may
+  open this turn (`TurnPages::links`: each one's address as the page has it
+  and its words, `act::Link`); **`browser_click { ref | x, y }`** — by ref,
+  or (a model that reads images) **at a point of the latest screenshot**,
+  for pages with nothing to grab by ref (maps, canvases, game-style UIs): the
+  point in its pixels (`see::Frame::to_css`; refused off the shot or once the
+  page scrolled since it), the element under it (`script::at`:
+  `elementFromPoint`, its nearest link, button or field, else itself, a ref
+  of its own) judged by its words and its form's signals exactly as a ref
+  click is, then pointer and mouse events and the click at that point
+  (`clickAt`, only if it's still the element there); **`browser_type { ref?,
+  text, submit? }`** (no ref, for a model that sees: the field with the
+  focus, `script::active`; a
+  select: the option with those words; an editable region: the words go in
+  at its caret, or after what's there, `execCommand('insertText')`, never
+  over a draft — the result's `field` says all it holds now; `submit`:
+  Enter, its form's `requestSubmit`); **`browser_key { keys }`** (Enter, Tab,
+  Shift+Tab, Escape, Space, the arrows, PageUp, PageDown, Home, End, in
+  order: `act::keys_of`; each Enter or Space judged where it lands — on a
+  link, a button or a box as its click, in a field as a submit or a send
+  outside a form, a search box's free); **`browser_hover { ref }`** (pointer
+  events over it: a menu that opens on hover); **`browser_form_input { ref,
+  value }`** (a checkbox, radio or switch ticked as its click would be — "I
+  agree to the terms" asks first —, a select or a text field as typing it).
+  Never a password, card, bank or code field — typed into, nor clicked into
+  by ref or by point (`act::off_limits`) — nor a sign-in form.
+  `browser_navigate` in a tab (`act::go`, `act::history`): this turn's
+  results, the person's links, a site they named, a link on a page read this
+  turn, or a search on their engine. **A navigation goes only to the address as Yap holds it**
   (`act::stored_address`: the page's own for a link, the result's or the
   person's for theirs, `Turn::stored`, a named site's home page rebuilt from
   its host), never the model's string: the allowed-address check matches
@@ -2217,8 +2331,8 @@ review (safely, for any user, in any language Yap speaks).
   room, never renumbers it. Each action answers with the page afterwards
   (`act::after`: its title, address, `what_changed` — "went to …", "new on
   the page: …" — and its first 600 characters when it went somewhere new):
-  web content, the safety rule's. So is `switch_tab`'s answer (the tab's
-  title and address), and `open_page`'s note naming the tab it closed to
+  web content, the safety rule's. So is a switched tab's answer (the tab's
+  title and address), and a new tab's note naming the tab it closed to
   make room (`act::closed_note`; any model's) — both the page's words (3 Nov
   2026). 30 actions a turn. The line (1 Nov 2026,
   after a paid browse evaluation: Claude Haiku 5.5 and Opus 5.5 asked in the
@@ -2280,7 +2394,7 @@ review (safely, for any user, in any language Yap speaks).
     (WhatsApp Web's, Slack's, Discord's) sends on Enter; a search box by
     `type`, role, a `role="search"` region or `<search>`, `enterkeyhint`, its
     `name` (`q`, `s`, `query`…) or its words in the seven (`search_box`);
-  - **a link `go_to` would open**: its words and its address, as its click
+  - **a link `browser_navigate` would open**: its words and its address, as its click
     (a plain GET to "unsubscribe" or "confirm booking"); an address from the
     results or the person, by its address;
   - **typing words from nowhere the person can see**: after web content, a
@@ -2316,18 +2430,18 @@ review (safely, for any user, in any language Yap speaks).
   question in its place while one waits; the page's own dialogs are
   dismissed while an action runs (`backend::busy` → `view::busy`, and one
   waiting for the person goes first, else it would stall Yap's script);
-  `switch_tab` shows the tab (`Event::SwitchTab` → `doc.showTab`; Rust moves
-  the page on screen there first, `view::bring_front`). `go_to` navigates
+  `browser_tabs` switch shows the tab (`Event::SwitchTab` → `doc.showTab`; Rust moves
+  the page on screen there first, `view::bring_front`). `browser_navigate` navigates
   like a link (`view::navigate`: the tab keeps its own address, so shown
   again it stays where the page went). Each view counts its navigations
   (`navs`, `done`, `view::nav_state`): after an action Yap waits for one it
   started to load (≤ 12 s), else 700 ms for what changed in place
-  (`backend::settle`); a read right after `open_page` waits for its tab
+  (`backend::settle`); a read right after a new tab waits for it
   (`backend::tabs_soon`, ≤ 6 s) and its load. A question about the open page
   ("this page", "the form", "the wiki tab": `pages::about_open_page`) never
   makes a model on this PC search the web first — nor, for a model that may
   act, any question with a page open or a link given (the "buy me a ticket"
-  price rule had thrown its `open_page` away). **Each page `open_page` brings
+  price rule had thrown its `open_page` away). **Each page a new tab brings
   up is made at once**, out of sight (`view::open_hidden`, keyed as the Chat
   view keys its tab, `view::key_of`): the view shows only the last of several
   a step brings up, and each must be a tab the model can read and act on.
@@ -2352,7 +2466,7 @@ review (safely, for any user, in any language Yap speaks).
   never an address, a page's words, a button's, a dialog's or anything typed.
 - Tested: `chat::pages::act` / `act::rules` / `act::words` / `act::confirm`
   / `sim` / `view` unit tests (the rules; every bypass the review found
-  closed — a listed link `go_to` opens, a plainly named submit asking by its
+  closed — a listed link `browser_navigate` opens, a plainly named submit asking by its
   form, Enter outside a form; German, French, Spanish, Italian, Portuguese
   and Dutch shop buttons and fields; a Luhn number, an IBAN and a code beside
   a card refused; words from nowhere asked about; the stored address, never
@@ -2365,7 +2479,7 @@ review (safely, for any user, in any language Yap speaks).
   site's form, the strip and its Stop, the card's Allow once and Don't, the
   card fields and a sign-in refused, the page expanded over the thread and
   its strip's Allow once, Enter in a made-up chat's message box asked and
-  refused and typing there kept after the draft, `switch_tab` by the tab's
+  refused and typing there kept after the draft, `browser_tabs` switch by the tab's
   own number). **Not done**: trusted input events (CDP's
   `Input.dispatchMouseEvent`) for sites that ignore script clicks; a button
   with no name at all (an icon with no label) is judged by its form only;
@@ -3525,9 +3639,13 @@ as for every other. Chat, the Voice Assistant on this PC and from the phone.
 - **The screen and the pages beside the chat** (7 Nov 2026: in a Code chat
   on the plan the maintainer asked for a site's design and screenshots, and
   the model said it "can't open your browser or take screenshots"):
-  `on_the_plan` keeps `screen` and `pictures` as the tool loop has them, so
-  a plan chat (a Code chat too) gets `look_at_screen`, `open_page`,
-  `read_open_page`, `switch_tab`, `snap_page`, `find_pictures`,
+  `on_the_plan` keeps `screen`, `pictures` and (since 8 Nov 2026) `act` as
+  the tool loop has them, so a plan chat (a Code chat too) gets
+  `look_at_screen`, the whole browser toolset (`browser_navigate`,
+  `browser_read`, `browser_find`, `browser_scroll`, `browser_scroll_to`,
+  `browser_screenshot`, `browser_zoom`, `browser_tabs`, `browser_wait`,
+  `browser_batch`, and the acting `browser_click`, `browser_type`,
+  `browser_key`, `browser_hover`, `browser_form_input`), `find_pictures`,
   `look_at_picture` and `show_picture` over the run endpoint
   (`claude_live/eyes.rs`: [integrations.md](./integrations.md#claude-code-runs-endpoint-integrationsclaude_livers-2026-11-07)),
   the tool loop's own code. Listed for the session (`plan.rs`
@@ -3544,14 +3662,23 @@ as for every other. Chat, the Voice Assistant on this PC and from the phone.
   they named; what a look, a page read or a shot brings in is web content
   (an agent is refused after it). The screenshots show with the question
   (`Event::Screen`, kept with it), a page's tab opens (`Event::Page`), a
-  shot or a picture shows beside the chat (`Event::Picture`), all through
-  the turn's stream; the pages and pictures shown are the answer's
-  (`shown_of`). The pictures go back to the model as MCP image content.
-  **Acting on pages stays out** (`act: false`): no `click`, `type_text`,
-  `scroll` or `go_to`, since in the tool loop each click that buys or sends
-  waits on the person's card and only evaluated models get it.
+  page's shot shows in the turn's steps (`Event::Shot`), a picture beside
+  the chat (`Event::Picture`), all through the turn's stream; the pages and
+  pictures shown are the answer's (`shown_of`). The pictures go back to the
+  model as MCP image content, a screenshot at the view's CSS pixels
+  (`browser_click`'s x, y). **Acting on pages** (8 Nov 2026; before it,
+  never a plan chat's): only for a question typed in Chat (`Eyes::act`: the
+  session lists the acting tools whenever it has the pages, so its
+  fingerprint stays the same from a typed question to a spoken one; a turn
+  asked out loud is refused them), never during a meeting or a call, with
+  every rule of the tool loop's — a click, an Enter or a box ticked that
+  buys, pays, books, sends, deletes or signs in shows the card in the plan
+  turn's thread (`act/confirm.rs` through the turn's stream) and the call
+  waits for Allow once / Don't (its two minutes well inside the run's tool
+  timeout); typed words only from the person's or the page's; never a
+  password, card, bank or code field nor a sign-in form.
 - **What a plan turn doesn't do** (`gates.rs` `on_the_plan`): documents
-  beside the chat, acting on pages, Think's budget (effort covers it). "Remember that…" goes through Yap's own memory
+  beside the chat, Think's budget (effort covers it). "Remember that…" goes through Yap's own memory
   pass, as for a model without tools (`turn.rs` `remembered`). Yap's own
   summary of a long chat is skipped (`compact.rs`): Claude Code compacts its
   own session.
