@@ -121,6 +121,17 @@ fn exists() -> bool {
     TEST_STORE.with(|s| s.borrow().is_some())
 }
 
+/// What connector_chats.json holds, for Download your data
+/// (`privacy/export.rs`): `None` when no chat has a connector switched off.
+/// Read whatever `connectors_preview` says, as the export describes what's
+/// stored.
+pub fn snapshot() -> Option<File> {
+    if !exists() {
+        return None;
+    }
+    with_store(|s| (!s.chats.is_empty()).then(|| File { version: 1, ..s.clone() }))
+}
+
 /// Whether the store was read (or made) in this run (the switch-off test).
 #[cfg(test)]
 pub fn touched() -> bool {
@@ -328,6 +339,20 @@ mod tests {
         chat_deleted(5);
         super::super::switch_for_test(true);
         assert!(off(Some(5)).is_empty(), "the deletion took it out anyway");
+    }
+
+    #[test]
+    fn download_your_data_gets_what_is_stored_whatever_the_switch_says() {
+        reset_for_test();
+        assert_eq!(snapshot(), None, "nothing stored: no file");
+        super::super::switch_for_test(true);
+        set(5, "c3", false).unwrap();
+        super::super::switch_for_test(false);
+        let kept = snapshot().expect("a chat's switch stored");
+        assert_eq!((kept.version, kept.chats["5"].off.clone()), (1, ["c3".to_string()].into()));
+        super::super::switch_for_test(true);
+        set(5, "c3", true).unwrap();
+        assert_eq!(snapshot(), None, "every connector back on: nothing to export");
     }
 
     #[test]

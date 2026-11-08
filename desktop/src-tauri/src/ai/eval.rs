@@ -32,6 +32,8 @@ mod chips;
 #[cfg(debug_assertions)]
 mod cleanup;
 #[cfg(debug_assertions)]
+mod connectors;
+#[cfg(debug_assertions)]
 mod languages;
 #[cfg(debug_assertions)]
 mod library;
@@ -174,6 +176,20 @@ pub fn browse_forced() -> Option<bool> {
         }
     }
     None
+}
+
+/// A connectors scenario (`connectors` in its file, Connectors wave 8):
+/// Chat's model gets the connectors' tools whatever Yap's rule says (a
+/// strong cloud model) — the evaluation decides which models may. `false`
+/// outside a run, or a scenario without it (or with `yap_rule`).
+pub fn connectors_forced() -> bool {
+    #[cfg(debug_assertions)]
+    {
+        if active() {
+            return record::connectors_forced();
+        }
+    }
+    false
 }
 
 /// **The person's answer to a click that asks first** in a browse scenario

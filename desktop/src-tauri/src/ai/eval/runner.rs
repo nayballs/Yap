@@ -956,6 +956,8 @@ fn settings_for(m: &Model, s: &Scenario, apps: &[AppEntry], web: &WebPlan) -> cr
         web_search: web.on,
         web_search_native: web.native,
         web_search_service: web.service.clone(),
+        // A connectors scenario: the preview on (`eval/connectors.rs`).
+        connectors_preview: s.connectors.is_some(),
         ..Default::default()
     };
     if web.on && !web.key.is_empty() {
@@ -1206,6 +1208,29 @@ async fn run_scenario(
         }
     }
     record::set_config(Some(settings_for(m, s, &apps, &web)));
+    // Connectors (a connectors scenario): its made-up servers on this PC,
+    // added as the person would add them (the run's settings have the
+    // preview on), any model given them unless the scenario keeps Yap's
+    // rule, and the person's answer to a card.
+    let connectors = match &s.connectors {
+        Some(spec) => {
+            record::set_connectors_forced(!spec.yap_rule);
+            if s.browse.is_none() {
+                record::set_browse(Some(spec.confirm.clone().unwrap_or_else(|| "deny".to_string())), false);
+            }
+            match super::connectors::Seeded::start(spec).await {
+                Ok(c) => Some(c),
+                Err(e) => {
+                    record::set_connectors_forced(false);
+                    return error_row(m, &name, &format!("connectors: {e}"));
+                }
+            }
+        }
+        None => {
+            record::set_connectors_forced(false);
+            None
+        }
+    };
     let forced = match s.tools.as_deref() {
         Some("on") => Some(true),
         Some("off") => Some(false),
@@ -1231,6 +1256,7 @@ async fn run_scenario(
             "notes": crate::notes::all().len(),
             "folders": crate::notes::folders(),
             "web": web.describe(),
+            "connector_tools": connectors.as_ref().map(super::connectors::Seeded::wire_names),
         }),
     );
 
@@ -1355,6 +1381,8 @@ async fn run_scenario(
         let mut o = Observed { stats, opened, memory_done, memory_gained, ..Default::default() };
         // The stand-in browser's log so far (a browse scenario).
         o.browse = crate::chat::pages::sim::with(|b| scenario::BrowseSeen { visited: b.log.visited.clone(), typed: b.log.typed.clone(), clicked: b.log.clicked.clone() });
+        // What reached the connectors' servers this turn, and the cards asked.
+        o.connectors = connectors.as_ref().map(|c| super::connectors::ConnectorsSeen { reached: c.reached(), asked: record::take_connector_asks() });
         // What a follow-up's "[1]" points at — for "where did you get that?",
         // only the answer it asks about — and whether the answer before it
         // searched (a "did you look that up?" asks about that one).
@@ -1458,6 +1486,15 @@ async fn run_scenario(
         }
         crate::chat::pages::sim::install(None);
         record::set_browse(None, false);
+    }
+    // The connectors go with their scenario.
+    if let Some(c) = connectors {
+        c.stop().await;
+        record::set_connectors_forced(false);
+        let _ = record::take_connector_asks();
+        if s.browse.is_none() {
+            record::set_browse(None, false);
+        }
     }
     let all = Observed::merge(&seen);
     // A turn's error was reported with that turn.

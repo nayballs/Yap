@@ -1097,14 +1097,21 @@
     of its tools was last called, saved at most once a minute (Settings'
     "Last used"; 2026-11-08). Never a token or a secret.
     Fields this build doesn't know are kept on its save (a newer Yap's).
-    Settings: it stays through Delete some of your data and Reset app.
-    Through `saving.rs` ("your connectors").
+    Settings: it stays through Delete some of your data and Reset app, all
+    but its browser sign-ins' part (`signedIn`, the scopes, `wants`), which
+    goes with **Connector sign-ins** (`privacy/reset.rs`, Connectors wave 8:
+    the registration and the person's own client stay). Download your data
+    has an allow-list of it as `connectors/connectors.json`, Report a
+    problem only counts. Those three go by what's stored, whatever
+    `connectors_preview` says now (the preview tried, then turned off:
+    Reset app still ends the sign-ins). Through `saving.rs` ("your connectors").
   - `%APPDATA%/yap/connector_tools.json` (`cache.rs`) — `{version, listings:
     {c3: {listedAt, ttlMs, server, tools, truncated}}}`: each connector's tools
     as last listed (name, title, the description capped at 1,000
     characters, the input schema made safe for every provider, annotations,
     kind, hash, tokens, a flag or the reason it's skipped). A cache: rebuilt at
-    the next listing, a failed save only logged (`Saver::quiet`).
+    the next listing, a failed save only logged (`Saver::quiet`). It stays
+    through Delete some of your data and Reset app, with the connectors.
   - `%APPDATA%/yap/connector_chats.json` (`integrations/connectors/chats.rs`,
     wave 6) — `{version, chats: {"12": {off: ["c2"]}}}`: the connectors each
     Chat conversation switched off in its + menu (Connectors ▸), by its id;
@@ -1129,8 +1136,12 @@
     `yap-connector-c<N>-<part>.com.yap.dictation` (parts `-1`…`-8`, 1,100
     characters each; a portable Yap adds a hash of its data folder), never in
     a file; removed with the connector (a sign-in revoked first) and by the
-    uninstaller's "Delete the application data" (all 24 × 8 names). Signing
-    out removes the tokens and keeps the client's secret. A test run
+    uninstaller's "Delete the application data" (all 24 × 8 names, by
+    `CredDeleteW`). Signing out removes the tokens and keeps the client's
+    secret; so do Delete some of your data's Connector sign-ins and Reset
+    app, for every connector at once (a pasted token, headers and secret
+    variables stay: keys the person gave on purpose). Download your data
+    never reads them. A test run
     (`YAP_E2E=1`) keeps them in `connector-secrets.e2e.json` in its own data
     folder instead.
 - Account session: a Windows Credential Manager generic credential

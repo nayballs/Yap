@@ -425,7 +425,10 @@ re-exported by the module, except `local_llm`'s, which callers name
   logging, whose hint says so), never an API key or a token at any level.
   `privacy/log_privacy.rs` is a lint-style test that fails on an `info!`/`warn!`/
   `error!` formatting a content-named variable (`text = %…`, `{answer}`,
-  `device = %…`); the
+  `device = %…`), and holds the connectors' modules to more (2026-11-08: no
+  address, command line, variable, header, token or secret, nothing a server
+  says about itself, no call's input or answer, nor the connector's name:
+  [integrations.md](./integrations.md#connectors-and-your-data-wave-8)); the
   webviews' `frontend_log` lines follow the same rule.
 - **`privacy/net.rs`** / **`privacy/diagnostics.rs`** — the network receipts (every request
   goes out through `net::Recorded::send_for`; `net::init` in setup names

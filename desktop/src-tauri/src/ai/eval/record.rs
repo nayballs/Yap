@@ -350,7 +350,8 @@ pub fn browse_forced() -> Option<bool> {
 
 /// The scenario's answer to a click that asks first, recorded
 /// (`browse_confirm`): its kind and the button's words (the run's own made-up
-/// page).
+/// page). A connector's card (kind "connector") is kept for the turn's
+/// checks too ([`take_connector_asks`]).
 pub fn confirm_answer(label: &str, kind: &str) -> Option<bool> {
     let allow = {
         let mut b = BROWSE.lock().unwrap_or_else(|p| p.into_inner());
@@ -359,7 +360,29 @@ pub fn confirm_answer(label: &str, kind: &str) -> Option<bool> {
         mode == "allow" || (mode == "first" && *asked == 1)
     };
     write("browse_confirm", json!({ "label": label, "kind": kind, "allowed": allow }));
+    if kind == "connector" {
+        CONNECTOR_ASKS.lock().unwrap_or_else(|p| p.into_inner()).push((label.to_string(), allow));
+    }
     Some(allow)
+}
+
+/// A connectors scenario's (`connectors`, `eval/connectors.rs`): any model
+/// gets connectors' tools, whatever Yap's rule says (`eval::connectors_forced`).
+static CONNECTORS_FORCED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+/// The connector cards asked this turn: each one's label and answer.
+static CONNECTOR_ASKS: Mutex<Vec<(String, bool)>> = Mutex::new(Vec::new());
+
+pub fn set_connectors_forced(on: bool) {
+    CONNECTORS_FORCED.store(on, Ordering::SeqCst);
+}
+
+pub fn connectors_forced() -> bool {
+    CONNECTORS_FORCED.load(Ordering::SeqCst)
+}
+
+/// The connector cards asked since the last time.
+pub fn take_connector_asks() -> Vec<(String, bool)> {
+    std::mem::take(&mut *CONNECTOR_ASKS.lock().unwrap_or_else(|p| p.into_inner()))
 }
 
 /// The clipboard tool: recorded, answered as the real one answers. An agent's

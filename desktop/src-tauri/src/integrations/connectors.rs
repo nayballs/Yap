@@ -23,6 +23,8 @@
 //!   a setup read from Claude Desktop or pasted;
 //! - `chats.rs` each chat's own switches (the composer's Connectors ▸,
 //!   `connector_chats.json`);
+//! - `privacy.rs` what Delete some of your data, Download your data and
+//!   Report a problem do with them (wave 8);
 //! - `fake.rs` fake servers for the tests.
 //!
 //! **The switch**: everything here is behind `connectors_preview` (config,
@@ -48,6 +50,7 @@ pub mod local;
 pub mod manager;
 pub mod names;
 pub mod oauth;
+pub mod privacy;
 pub mod refresh;
 pub mod remote;
 pub mod results;
@@ -149,7 +152,7 @@ impl StatusView {
 /// Tell every window connector `id`'s status now (its sign-in changed).
 pub(crate) fn tell(id: &str) {
     if let Some(app) = APP.get() {
-        let _ = app.emit(STATUS, StatusView::of(id, manager().status(id)));
+        let _ = app.emit(STATUS, StatusView::of(id, status_if_started(id)));
     }
 }
 
@@ -189,6 +192,35 @@ pub fn manager() -> &'static Manager {
             });
             new_manager()
         })
+    }
+}
+
+/// Connector `id`'s status, without starting the manager when nothing has
+/// connected yet in this run (then it waits to start: Idle). For Report a
+/// problem's counts and the status event.
+pub(crate) fn status_if_started(id: &str) -> Status {
+    #[cfg(test)]
+    {
+        manager().status(id)
+    }
+    #[cfg(not(test))]
+    {
+        MANAGER.get().map_or(Status::Idle, |m| m.status(id))
+    }
+}
+
+/// Stop connector `id`'s connection, if this run's manager has started at
+/// all (with the preview off it never has: nothing to stop, nothing started).
+pub(crate) async fn stop_if_started(id: &str) {
+    #[cfg(test)]
+    {
+        manager().stop(id, false).await;
+    }
+    #[cfg(not(test))]
+    {
+        if let Some(m) = MANAGER.get() {
+            m.stop(id, false).await;
+        }
     }
 }
 

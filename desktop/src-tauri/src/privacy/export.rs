@@ -12,13 +12,18 @@
 //!   `notes/notes.json`, the whole store (folders and actions too), and
 //!   `notes/versions.json`, each note's earlier versions (`notes/versions.rs`);
 //! - `tasks.json`, `skills.json` (the person's own Skills), `chats/chats.json` with each chat as Markdown
-//!   (and `chats/claude_sessions.json`, each chat's Claude Code session on your Claude plan, when any), and
+//!   (and `chats/claude_sessions.json`, each chat's Claude Code session on your Claude plan, when any, and
+//!   `chats/connector_chats.json`, the connectors each chat switched off, by id, when any), and
 //!   `memory/` — Memory's own export (`memory::export`) and `memory.json`;
 //! - `agents/` — Yap Code's agents, the tasks Chat handed to Claude Code
 //!   (`agents.json`), the workspaces (`workspaces.json`) and each agent's log (never its backups: copies
 //!   of the person's own files);
 //! - `dictionary/dictionary.csv` — corrections and snippets, the CSV the
 //!   Dictionary view's Export… writes ([`dictionary_csv`]);
+//! - `connectors/connectors.json` — whenever a connector is kept (the preview on or off), the
+//!   connectors and each tool's setting (`connectors::privacy::export`: an
+//!   allow-list, header and variable names only; the tokens and secrets stay
+//!   in Credential Manager, which this never reads);
 //! - `settings.json` — config.json **without secrets** ([`settings_export`]):
 //!   every field that holds a key, a token or a password is left out by its
 //!   name (a list, then a rule a test holds every setting to), a value that
@@ -356,6 +361,12 @@ pub struct Inputs {
     pub dictionary: Vec<crate::config::DictionaryEntry>,
     /// The writing samples (`ai/writing_samples.rs`).
     pub writing_samples: Vec<crate::ai::writing_samples::Sample>,
+    /// The connectors and their tools' settings, without a secret
+    /// (`connectors::privacy::export`); `None` when none is kept and the preview is off.
+    pub connectors: Option<Value>,
+    /// connector_chats.json: the connectors each chat switched off (ids
+    /// only; `connectors::chats::snapshot`), when any.
+    pub connector_chats: Option<Value>,
     /// config.json as `YapConfig` serialises.
     pub config: Value,
     /// Whether the audio is in it (the README says).
@@ -379,11 +390,22 @@ and each agent's log (<id>.log.jsonl). Not the backups: they're copies of your o
 - dictionary/dictionary.csv: your corrections and snippets, as the Dictionary's Export writes them \
 (Import reads it back).\n\
 - writing_samples.json: the writing samples you gave Yap (Settings → Commands).\n\
+{connectors}\
 - settings.json: your settings. Never in it: API keys, tokens, passwords and your account's sign-in. \
 `leftOut` names the settings taken out.\n\
 {audio}\n\
 Not in it: the speech and AI models, Yap's log, its caches and anything kept by Windows' Credential Manager \
-(your account's sign-in, your calendars' tokens).\n";
+(your account's sign-in, your calendars' tokens, your connectors' tokens and secrets).\n";
+
+/// README's line for the connectors' file.
+const README_CONNECTORS: &str = "- connectors/connectors.json: your connectors (preview), how each is reached and signs in, where Yap \
+uses it and each tool's setting. Never a token, a secret or a header's value: those stay in Windows' Credential Manager.\n";
+
+/// The connectors' file (`connectors::privacy::export`'s), when it
+/// gave one. Pure.
+pub fn connectors_files(connectors: Option<&Value>) -> Vec<(String, Vec<u8>)> {
+    connectors.map(|v| ("connectors/connectors.json".to_string(), serde_json::to_string_pretty(v).unwrap_or_default().into_bytes())).into_iter().collect()
+}
 
 /// The file's text parts, in order: (name in the zip, bytes). Pure.
 pub fn text_files(i: &Inputs, when: &dyn Fn(u64) -> String) -> Vec<(String, Vec<u8>)> {
@@ -394,7 +416,10 @@ screenshots/: Chat's screenshots (PNG).\n"
     } else {
         "- No audio or screenshots: you left them out.\n"
     };
-    let readme = README.replace("{made}", &i.made).replace("{audio}\n", audio);
+    let readme = README
+        .replace("{made}", &i.made)
+        .replace("{audio}\n", audio)
+        .replace("{connectors}", if i.connectors.is_some() { README_CONNECTORS } else { "" });
     files.push(("README.txt".into(), readme.into_bytes()));
     let pretty = |v: &dyn erased::Json| v.pretty().into_bytes();
 
@@ -431,6 +456,10 @@ screenshots/: Chat's screenshots (PNG).\n"
     if i.claude_sessions["conversations"].as_object().is_some_and(|c| !c.is_empty()) {
         files.push(("chats/claude_sessions.json".into(), pretty(&i.claude_sessions)));
     }
+    // The connectors each chat switched off (Connectors ▸), when any did.
+    if let Some(c) = &i.connector_chats {
+        files.push(("chats/connector_chats.json".into(), pretty(c)));
+    }
 
     // Tasks, your Skills, memory.
     files.push(("tasks.json".into(), pretty(&i.tasks)));
@@ -450,6 +479,8 @@ screenshots/: Chat's screenshots (PNG).\n"
     // Dictionary, settings.
     files.push(("dictionary/dictionary.csv".into(), dictionary_csv(&i.dictionary).into_bytes()));
     files.push(("writing_samples.json".into(), pretty(&json!({ "samples": i.writing_samples }))));
+    // Connectors (preview): their list and tools' settings, no secret.
+    files.extend(connectors_files(i.connectors.as_ref()));
     files.push(("settings.json".into(), pretty(&settings_export(&i.config))));
     files
 }
@@ -669,6 +700,8 @@ fn inputs(audio: bool) -> Inputs {
         about,
         dictionary: cfg.dictionary.clone(),
         writing_samples: crate::ai::writing_samples::snapshot().samples,
+        connectors: crate::integrations::connectors::privacy::export(),
+        connector_chats: crate::integrations::connectors::chats::snapshot().and_then(|f| serde_json::to_value(f).ok()),
         config: serde_json::to_value(&cfg).unwrap_or(Value::Null),
         audio,
     }
@@ -920,6 +953,8 @@ mod tests {
                 kind: "email".into(),
                 added_ms: 1,
             }],
+            connector_chats: Some(json!({ "version": 1, "chats": { "3": { "off": ["c1"] } } })),
+            connectors: Some(json!({ "connectors": [{ "id": "c1", "name": "Allotment tracker", "reached": { "kind": "link", "address": "https://mcp.example.com/mcp", "headerNames": ["X-Api-Key"] } }] })),
             config: serde_json::to_value(cfg).unwrap(),
             audio: false,
         }
@@ -943,6 +978,7 @@ mod tests {
             "notes/versions.json",
             "chats/chats.json",
             "chats/claude_sessions.json",
+            "chats/connector_chats.json",
             "tasks.json",
             "skills.json",
             "memory/You.md",
@@ -952,10 +988,17 @@ mod tests {
             "agents/ab12.log.jsonl",
             "dictionary/dictionary.csv",
             "writing_samples.json",
+            "connectors/connectors.json",
             "settings.json",
         ] {
             assert!(names.contains(&want), "{want} in {names:?}");
         }
+        let readme = String::from_utf8_lossy(&files[0].1).to_string();
+        assert!(readme.contains("connectors/connectors.json") && readme.contains("- settings.json"), "{readme}");
+        // No connector kept (and the preview off): no file, no line.
+        let off = text_files(&Inputs { connectors: None, ..inputs_with(&cfg) }, &when);
+        assert!(!off.iter().any(|(n, _)| n.starts_with("connectors/")));
+        assert!(!String::from_utf8_lossy(&off[0].1).contains("connectors/"));
         let agents = String::from_utf8_lossy(&files.iter().find(|(n, _)| n == "agents/agents.json").unwrap().1).to_string();
         assert!(agents.contains("I tidied the readme"), "{agents}");
         let samples = String::from_utf8_lossy(&files.iter().find(|(n, _)| n == "writing_samples.json").unwrap().1).to_string();

@@ -479,6 +479,39 @@ mod tests {
         assert_eq!(bounds, [PARTS, super::super::store::MAX]);
     }
 
+    /// **The uninstaller's way** (`installer.nsi`, "Delete the application
+    /// data"): `CredDeleteW` on `yap-connector-c<N>-<part>.com.yap.dictation`,
+    /// a generic credential (type 1), for every connector and part. Here on
+    /// names of this test's own, the same shape: what the vault keeps is
+    /// gone after it. (Wave 8: the uninstaller's names are the vault's.)
+    #[cfg(windows)]
+    #[test]
+    fn the_uninstallers_names_remove_what_the_vault_keeps() {
+        #[link(name = "advapi32")]
+        extern "system" {
+            fn CredDeleteW(target: *const u16, kind: u32, flags: u32) -> i32;
+        }
+        let nsi = include_str!("../../../nsis/installer.nsi");
+        assert!(nsi.contains(&format!("yap-connector-c$1-$2.{SERVICE}")), "the uninstaller deletes the vault's names");
+        assert!(nsi.contains("CredDeleteW(w \"yap-connector-c$1-$2.com.yap.dictation\", i 1, i 0)"), "as generic credentials");
+        let service = "com.yap.test-uninstall";
+        let prefix = format!("yap-connector-uninstalltest-{}", std::process::id());
+        let v = Vault::os(service, &prefix);
+        let long = Secrets { token: Some("u".repeat(PART_CHARS * 2 + 5)), ..some() };
+        v.save("c24", &long).unwrap();
+        assert_eq!(v.load("c24"), long);
+        for i in 0..PARTS {
+            let target: Vec<u16> = format!("{}.{service}", v.user("c24", i)).encode_utf16().chain(std::iter::once(0)).collect();
+            unsafe {
+                CredDeleteW(target.as_ptr(), 1, 0);
+            }
+        }
+        assert!(v.load("c24").is_empty(), "every part gone by the uninstaller's names");
+        for i in 0..PARTS {
+            assert!(v.backend.get(&v.user("c24", i)).is_none());
+        }
+    }
+
     /// The real Windows Credential Manager, under a service and names of
     /// this test's own (never Yap's), removed at the end.
     #[test]
