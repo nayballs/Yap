@@ -39,6 +39,10 @@
 //! by their size. The record holds the lab's own questions and the pages
 //! they read, in the lab's own folder: never Yap's log, never a normal run
 //! (release builds compile it all out: [`on`] is always `false`).
+//!
+//! **The main window's size** (`YAP_LAB_WINDOW`, "1280x860": `lab start
+//! --size`): set once at the end of setup, so the lab's screenshots of one
+//! run compare with another's.
 
 use serde_json::Value;
 use tauri::AppHandle;
@@ -120,7 +124,7 @@ mod imp {
     use std::sync::Mutex;
 
     use serde_json::{json, Map, Value};
-    use tauri::{AppHandle, Listener};
+    use tauri::{AppHandle, Listener, Manager};
 
     /// The app-wide events a lab run keeps.
     const EVENTS: &[&str] = &[
@@ -209,7 +213,31 @@ mod imp {
                 record("event", json!({ "name": name, "payload": payload }));
             });
         }
+        size_main_window(app);
         tracing::info!("lab: the record is on");
+    }
+
+    /// The main window at `YAP_LAB_WINDOW`'s size (logical pixels: the
+    /// page's CSS pixels), when the lab asked for one.
+    fn size_main_window(app: &AppHandle) {
+        let Ok(spec) = std::env::var("YAP_LAB_WINDOW") else { return };
+        let Some((width, height)) = window_size(&spec) else {
+            tracing::warn!("lab: YAP_LAB_WINDOW isn't WIDTHxHEIGHT within 860x600 to 7680x4320");
+            return;
+        };
+        let Some(w) = app.get_webview_window("settings") else { return };
+        match w.set_size(tauri::LogicalSize::new(width, height)) {
+            Ok(()) => tracing::info!(width, height, "lab: the main window sized"),
+            Err(e) => tracing::warn!("lab: couldn't size the main window: {e}"),
+        }
+    }
+
+    /// "1280x860" → its width and height, within the main window's minimum
+    /// (860 × 600) and an 8K screen. Pure.
+    pub(super) fn window_size(spec: &str) -> Option<(f64, f64)> {
+        let (w, h) = spec.trim().split_once(['x', 'X', '×'])?;
+        let (w, h) = (w.trim().parse::<u32>().ok()?, h.trim().parse::<u32>().ok()?);
+        ((860..=7680).contains(&w) && (600..=4320).contains(&h)).then_some((f64::from(w), f64::from(h)))
     }
 
     /// `v` with long strings cut (their length said) and pictures' base64
@@ -262,6 +290,16 @@ mod imp {
             assert_eq!(v["n"], json!(3));
             // A short `data` field or one with words is kept.
             assert_eq!(shrink(json!({ "data": "hello there" }))["data"], json!("hello there"));
+        }
+
+        #[test]
+        fn the_window_size_is_width_by_height_within_bounds() {
+            assert_eq!(window_size("1280x860"), Some((1280.0, 860.0)));
+            assert_eq!(window_size(" 1600 X 900 "), Some((1600.0, 900.0)));
+            assert_eq!(window_size("1920×1080"), Some((1920.0, 1080.0)));
+            assert_eq!(window_size("800x600"), None);
+            assert_eq!(window_size("1280"), None);
+            assert_eq!(window_size("wide x tall"), None);
         }
 
         #[test]

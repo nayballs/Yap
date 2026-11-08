@@ -57,7 +57,7 @@ export function buildFresh(stamp, head) {
 // ---------------------------------------------------------------- arguments
 
 /** Flags that take no value. */
-const SWITCHES = new Set(['spoken', 'fake', 'live-web', 'stale-ok', 'no-wait', 'agents', 'keep-workspace']);
+const SWITCHES = new Set(['spoken', 'fake', 'live-web', 'stale-ok', 'no-wait', 'agents', 'keep-workspace', 'no-shots']);
 
 /**
  * `argv` (after the command) → `{ _: [positional…], flag: value }`.
@@ -79,6 +79,22 @@ export function parseArgs(argv) {
     else throw new Error(`--${name} needs a value`);
   }
   return out;
+}
+
+/** The main window's size in a lab run (`--size`): the same every run, so shots compare. */
+export const SIZE = '1280x860';
+
+/**
+ * `--size WIDTHxHEIGHT` → "1280x860": at least the main window's minimum
+ * (860 × 600), at most an 8K screen. Pure.
+ */
+export function parseSize(v, fallback = SIZE) {
+  const s = String(v ?? fallback).trim();
+  const m = /^(\d{3,4})\s*[x×]\s*(\d{3,4})$/i.exec(s);
+  if (!m) throw new Error(`--size is WIDTHxHEIGHT (like ${SIZE}), not "${v}"`);
+  const [w, h] = [Number(m[1]), Number(m[2])];
+  if (w < 860 || h < 600 || w > 7680 || h > 4320) throw new Error("--size is at least 860x600 (the main window's minimum) and at most 7680x4320");
+  return `${w}x${h}`;
 }
 
 /** "on" / "off" (or true / false) → a boolean; `fallback` when not given. Pure. */

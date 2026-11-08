@@ -7,12 +7,20 @@
 //   start [--model …] [--effort …] [--web on|off] [--yap-code on|off]
 //         [--connectors on|off] [--workspace <dir>] [--build <exe>]
 //         [--stale-ok] [--fake [--live-web]] [--idle <min>]
+//         [--size 1280x860] [--no-shots] [--theme light|dark]
 //   check                                  is Claude Code here and signed in?
-//   ask "<text>" [--spoken] [--chat new|<id>|code:<workspace>] [--timeout 600]
-//   wait [--timeout 600] [--agents]
+//   ask "<text>" [--spoken] [--chat new|same|<id>|code:<workspace>]
+//       [--timeout 600] [--no-shots] [--theme light|dark]
+//   wait [--timeout 600] [--agents [--cards allow|deny]]
 //   answer <card-id> allow|deny|always [--timeout 600] [--no-wait]
-//   cancel | shot [--window main|bar|panel|page] | state | logs [--since N]
+//   cancel | state | agents | logs [--since N]
+//   shot [--window thread|main|bar|panel|page] [--theme light|dark|both]
+//        [--name <n>] [--selector <css>]
+//   probe --window <w> [--css <selector>] [--text <words>]
+//   set '<json>' | set [--web on|off] [--yap-code on|off] [--connectors on|off]
 //   report <prompt> [--timeout 540] [--cards deny|allow] [--no-wait]
+//   sheet [--turns 1-3] [--out <png>]      a contact sheet of the run's shots
+//   run <script.json|.mjs> [--no-shots] [--theme light|dark]
 //   fake '<json steps>'                    (start --fake: script the fake AI)
 //   stop
 import { spawn, spawnSync } from 'node:child_process';
@@ -20,7 +28,10 @@ import fs from 'node:fs';
 import http from 'node:http';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { APP, REPO, buildFresh, exeIn, headCommit, labDir, onOff, parseArgs, parseModel, stampIn, targetDir } from './options.mjs';
+import { APP, REPO, buildFresh, exeIn, headCommit, labDir, onOff, parseArgs, parseModel, parseSize, stampIn, targetDir } from './options.mjs';
+import { loadScript, runScript, scriptFile } from './script.mjs';
+import { makeSheet, runShots } from './sheet.mjs';
+import { themesOf } from './shots.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const LAB = labDir();
@@ -104,6 +115,8 @@ async function start(args, { check = false } = {}) {
   const web = onOff(args.web, true, 'web');
   const yapCode = onOff(args['yap-code'], false, 'yap-code');
   const connectors = onOff(args.connectors, false, 'connectors');
+  const size = parseSize(args.size);
+  if (args.theme !== undefined) themesOf(args.theme);
   // The build: the lab's own (fresh), or the one named.
   const target = targetDir();
   const exe = args.build ? path.resolve(args.build) : exeIn(target);
@@ -142,6 +155,11 @@ async function start(args, { check = false } = {}) {
     exe,
     build: stamp,
     idle: Number(args.idle ?? (check ? 5 : 120)),
+    // Screenshots after every question (and while a card waits): on unless
+    // --no-shots, in both themes unless --theme; the main window at `size`.
+    size,
+    shots: !args['no-shots'],
+    theme: args.theme ?? 'both',
   };
   fs.writeFileSync(path.join(LAB, 'start.json'), JSON.stringify(options, null, 2));
   const logFd = fs.openSync(path.join(LAB, 'daemon.log'), 'a');
@@ -202,17 +220,60 @@ async function main() {
       return send('ask', { ...args, text: args._.join(' ') });
     case 'fake':
       return send('fake', { script: args._.join(' ') || undefined });
+    case 'set':
+      // A JSON object (`set '{"web": true, "files": [...]}'`), or flags.
+      return send('set', args._.length ? JSON.parse(args._.join(' ')) : args);
+    case 'sheet':
+      return { ok: true, ...(await makeSheet({ lab: LAB, turns: args.turns, out: args.out, title: 'Yap Lab', subtitle: subtitle() })) };
+    case 'run':
+      return run(args);
     case 'wait':
     case 'answer':
     case 'cancel':
     case 'shot':
+    case 'probe':
     case 'state':
+    case 'agents':
     case 'logs':
     case 'report':
       return send(command, args);
     default:
-      return { ok: false, error: `Commands: build, start, check, ask, wait, answer, cancel, shot, state, logs, report, fake, stop (docs/lab.md)` };
+      return { ok: false, error: `Commands: build, start, check, ask, wait, answer, cancel, shot, probe, set, state, agents, logs, report, sheet, run, fake, stop (docs/lab.md)` };
   }
+}
+
+/** The sheet's subtitle: the run's model and build, from what `start` wrote. */
+function subtitle() {
+  try {
+    const s = JSON.parse(fs.readFileSync(path.join(LAB, 'start.json'), 'utf8'));
+    return [s.modelSpec, s.fake ? 'fake' : '', s.build?.commit ? `build ${String(s.build.commit).slice(0, 9)}` : '', new Date().toISOString().slice(0, 16).replace('T', ' ')].filter(Boolean).join(' · ');
+  } catch {
+    return '';
+  }
+}
+
+// ---------------------------------------------------------------- run
+
+/**
+ * `run <script>`: a feature script's steps against the running lab, a
+ * contact sheet of its turns, and one JSON summary: each step passed or
+ * failed, the failures' details, the sheet. Exit 1 on any failed expect.
+ */
+async function run(args) {
+  const started = Date.now();
+  const file = scriptFile(args._[0]);
+  const script = await loadScript(file);
+  const state = await send('state', {});
+  if (!state.ok) return { ok: false, script: file, error: state.error };
+  if (args.theme !== undefined) themesOf(args.theme);
+  const out = await runScript(script, { send, state, options: { shots: args['no-shots'] ? false : undefined, theme: args.theme } });
+  let sheet = null;
+  // A contact sheet of the script's turns, when they have shots.
+  if (runShots(LAB, (n) => out.turns.includes(n)).length) {
+    const stamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+    sheet = await makeSheet({ lab: LAB, turns: (n) => out.turns.includes(n), out: path.join(LAB, 'sheets', `${script.name}-${stamp}.png`), title: `Yap Lab script: ${script.name}`, subtitle: subtitle() }).catch((e) => ({ error: e.message.split('\n')[0] }));
+  }
+  return { ok: out.ok, script: file, name: script.name, ...(script.about ? { about: script.about } : {}), passed: out.steps.filter((s) => s.ok).length, failed: out.steps.filter((s) => !s.ok).length, failures: out.failures, warnings: out.warnings, ...(out.stopped ? { stopped: out.stopped } : {}), turns: out.turns, sheet, steps: out.steps, ms: Date.now() - started };
 }
 
 main()
