@@ -97,7 +97,23 @@ mod tests {
     fn chats_picker_code_and_logos_are_served_beside_the_page() {
         // The desktop's own modules (desktop/src/lib/core/), as they are: modules,
         // so text/javascript, or the phone refuses them.
-        for f in ["chatPicker.js", "modelCatalog.js", "latestModels.js", "ppModels.js", "localContext.js", "modelIcons.js", "providerIds.js", "effort.js"] {
+        for f in [
+            "chatPicker.js",
+            "modelCatalog.js",
+            "latestModels.js",
+            "ppModels.js",
+            "localContext.js",
+            "modelIcons.js",
+            "providerIds.js",
+            "effort.js",
+            // Remote Control's Code side (wave 2): Yap Code's words and the status dots.
+            "codeWire.js",
+            "agents.js",
+            "money.js",
+            "codeChats.js",
+            "chatStatus.js",
+            "pageConfirm.js",
+        ] {
             let (bytes, kind) = file(&format!("/core/{f}")).unwrap_or_else(|| panic!("core/{f} isn't in the build"));
             assert_eq!(kind, "text/javascript; charset=utf-8", "{f}");
             let src = String::from_utf8_lossy(bytes);

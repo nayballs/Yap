@@ -1,8 +1,10 @@
 # The phone app
 
 Yap on a phone: ask Yap's AI on your PC from your phone, out loud or typed,
-and hear or read the answer. The PC does the work (speech, the AI, Chat's
-conversations); the phone is a remote for it.
+and hear or read the answer; and, with **Remote Control** on (Settings →
+Phone), Yap Code from the phone: follow its agents, allow their steps with a
+tap, send them work. The PC does the work (speech, the AI, Chat's
+conversations, the agents); the phone is a remote for it.
 
 | Folder | What it is |
 |---|---|

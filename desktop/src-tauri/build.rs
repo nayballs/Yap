@@ -14,6 +14,15 @@ const LINK_SHARED: &[(&str, &str)] = &[
     ("core/effort.js", "../src/lib/core/effort.js"),
     // Remote Control's wire, defined once for the page and the PC (link/wire.rs's tests).
     ("core/codeWire.js", "../src/lib/core/codeWire.js"),
+    // The phone's Code side (Remote Control, wave 2): Yap Code's own words and
+    // rules — an agent's status, cost, turns, steps and diffs; the Code chats'
+    // grouping; the status dots; an ask-first card's words — read as the
+    // desktop reads them.
+    ("core/agents.js", "../src/lib/core/agents.js"),
+    ("core/money.js", "../src/lib/core/money.js"),
+    ("core/codeChats.js", "../src/lib/core/codeChats.js"),
+    ("core/chatStatus.js", "../src/lib/core/chatStatus.js"),
+    ("core/pageConfirm.js", "../src/lib/views/chat/pageConfirm.js"),
     ("providers/openai.svg", "../src/assets/providers/openai.svg"),
     ("providers/openai-oss.svg", "../src/assets/providers/openai-oss.svg"),
     ("providers/claude.svg", "../src/assets/providers/claude.svg"),
