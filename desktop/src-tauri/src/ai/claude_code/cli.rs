@@ -186,7 +186,9 @@ pub fn find() -> Option<Program> {
     if let Some(p) = debug_override() {
         return Some(p);
     }
-    if crate::shell::e2e::active() {
+    // A test run finds none — but a Yap Lab run that isn't `--fake`
+    // (shell/lab.rs) finds the person's own, as the app does.
+    if crate::shell::e2e::active() && !crate::shell::lab::live() {
         return None;
     }
     find_in(dirs::home_dir().as_deref(), std::env::var_os("PATH").as_deref(), std::env::var_os("PATHEXT").as_deref())

@@ -47,6 +47,8 @@ pub(super) async fn with_tools(
         }
         let mut turn = crate::web::Turn::new(settings, crate::web::Endpoints::current(), &t.text, &earlier)
             .with_earlier_sources(conv.messages.iter().flat_map(|m| m.sources.iter().map(|s| s.url.as_str())));
+        // A picture file on this PC (pictures/local.rs): the chat's own.
+        turn.pictures.local = crate::chat::pictures::local::Context::of_chat(conv, &t.text);
         // A strong model looks further once it writes a document: now,
         // for a question that asks for one, else at its first document
         // call (`agent.rs`).
@@ -87,7 +89,11 @@ pub(super) async fn with_tools(
     // Yap Code (tools/agents.rs): asked out loud, an agent that needs asking is
     // asked in words; asked by voice, its report is read aloud.
     let agents = crate::chat::tools::AgentsTurn::asked(t.scope, t.by_voice);
+    // Picture files on this PC without the web (pictures/local.rs): where
+    // the turn keeps them (the answer keeps the ones shown).
+    let files = (g.files != crate::chat::pictures::Gate::Off).then(|| crate::chat::pictures::Files::new(crate::chat::pictures::local::Context::of_chat(conv, &t.text)));
     let extra = crate::chat::tools::Extra {
+        file_pictures: files.as_ref(),
         // Each tool result within what the request has left.
         room: (sizing.mode != crate::chat::budget::Mode::Messages).then_some(fitted.budget.request),
         docs: Some(&built.doc_turn),
@@ -136,7 +142,8 @@ pub(super) async fn with_tools(
     let mut sources = web.as_ref().map(|w| w.sources_for(&reply)).unwrap_or_default();
     // The pictures it showed (chat/pictures.rs): each one's page is a
     // source of the answer too, so its number means something.
-    let shown = web.as_ref().map(|w| w.pictures.shown.clone()).unwrap_or_default();
+    let mut shown = web.as_ref().map(|w| w.pictures.shown.clone()).unwrap_or_default();
+    shown.extend(files.as_ref().map(crate::chat::pictures::Files::shown).unwrap_or_default());
     if let Some(w) = web.as_ref() {
         for p in shown.iter().filter(|p| p.n > 0) {
             if !sources.iter().any(|s| s.n == p.n) {

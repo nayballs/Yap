@@ -663,6 +663,11 @@ pub fn checked(turn: &crate::web::Turn, args: &Value, doing: &str, ctx: &Ctx<'_>
             format!("Couldn't {doing} a page: no address"),
         ));
     }
+    // A file on this PC is never a page here: a picture goes beside the chat
+    // with show_picture (chat/pictures/local.rs).
+    if let Some(e) = crate::chat::pictures::local::not_a_page(&url) {
+        return Err(failed(e, format!("Didn't {doing} {}: a file on this PC", crate::chat::pictures::local::chip_name(&url))));
+    }
     if let Err(e) = crate::web::check_url(&url) {
         return Err(failed(e.clone(), format!("Didn't {doing} {shown}: {}", crate::web::short(&e))));
     }

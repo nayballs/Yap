@@ -289,8 +289,9 @@ impl Endpoints {
             offline: false,
         };
         // A model evaluation's live web scenario (eval.rs) runs in test mode
-        // but asks the real services and wikis.
-        if !crate::shell::e2e::active() || crate::ai::eval::web_live() {
+        // but asks the real services and wikis; so does a Yap Lab run that
+        // isn't `--fake` (shell/lab.rs): the pages beside the chat too.
+        if !crate::shell::e2e::active() || crate::ai::eval::web_live() || crate::shell::lab::live() {
             return real;
         }
         #[cfg(debug_assertions)]

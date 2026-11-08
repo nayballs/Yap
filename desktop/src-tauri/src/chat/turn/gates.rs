@@ -75,6 +75,13 @@ pub(super) struct Gates {
     /// chat go by the gate alone. Off only in a turn fitted to a small
     /// context (`fit.rs`).
     pub picture_tools: bool,
+    /// **Picture files on this PC without the web** (chat/pictures/local.rs):
+    /// `show_picture` — and `look_at_picture` for a model that reads images —
+    /// taking a file's path only, in a turn that has one to show (a Code
+    /// chat, or a question naming a picture file: [`Gates::files_gate`]).
+    /// Off by default, and whenever the web is on (the pictures' own tools
+    /// take paths there), so a turn with the web is as it was.
+    pub files: Gate,
 }
 
 /// What [`Gates::for_turn`] reads of this PC: Yap Code offered
@@ -121,7 +128,7 @@ impl Gates {
         let evaluated = tools && provider != crate::ai::claude_plan::PROVIDER && crate::ai::eval::connectors_forced();
         let connectors = !meetings && (evaluated || crate::chat::tools::connectors::may(provider, strong)) && (here.connectors)();
         let (apps, past_chats, picture_tools) = (cfg.open_apps, cfg.memory_search_chats, true);
-        let gates = Gates { tools, doc_tools, strong, claude_in_chat, own_search, web_lines, web_on, pictures, screen, act, calendar, agents, connectors, apps, past_chats, picture_tools };
+        let gates = Gates { tools, doc_tools, strong, claude_in_chat, own_search, web_lines, web_on, pictures, screen, act, calendar, agents, connectors, apps, past_chats, picture_tools, files: Gate::Off };
         if provider == crate::ai::claude_plan::PROVIDER {
             return gates.on_the_plan();
         }
@@ -187,7 +194,24 @@ impl Gates {
             agents: self.agents.then_some(agents),
             connectors: connectors.filter(|_| self.connectors),
             without_pictures: !self.picture_tools,
+            files: self.files,
+            file_pictures: None,
         }
+    }
+
+    /// **The picture files' gate** (chat/pictures/local.rs) for a turn whose
+    /// pictures' gate is off because the web is: what `ep`'s model may do
+    /// with a picture file on this PC (look and show, or show) when the
+    /// turn has one to show (`wanted`: a Code chat, or a question naming a
+    /// picture file), it calls tools, and there's a panel to show it in —
+    /// Chat, or the Voice Assistant with Chat in view; never across the
+    /// meetings. Off with the web on. Pure.
+    pub(super) fn files_gate(&self, ep: &Endpoint, scope: Option<&str>, meetings: bool, chat_in_view: bool, wanted: bool) -> Gate {
+        let panel = !meetings && (scope != Some("assistant") || chat_in_view);
+        if !wanted || !self.tools || !panel || self.web_on || self.pictures != Gate::Off {
+            return Gate::Off;
+        }
+        Gate::for_model(true, &ep.provider, &ep.model)
     }
 
     /// **The tools every step sends** for these gates (none for a model
@@ -387,7 +411,8 @@ mod tests {
             ("connectors", Box::new(|_| t::connectors::INSTRUCTIONS.to_string()), vec!["recipes__search"]),
             ("documents", Box::new(|g| t::tool_instructions(g.doc_tools)), vec!["create_document"]),
             ("screen", Box::new(|g| crate::chat::see_screen::instructions(g.screen).to_string()), vec!["look_at_screen"]),
-            ("pictures", Box::new(|g| crate::chat::pictures::instructions(g.pictures, g.web_lines == t::WebLines::Claude)), vec!["show_picture"]),
+            // (The web's pictures, else picture files by a path: show_picture either way.)
+            ("pictures", Box::new(|g| if g.files != Gate::Off { crate::chat::pictures::file_instructions(g.files).to_string() } else { crate::chat::pictures::instructions(g.pictures, g.web_lines == t::WebLines::Claude) }), vec!["show_picture"]),
             ("browser", Box::new(|g| crate::chat::pages::instructions(g.pictures, g.act)), vec!["browser_navigate", "browser_read"]),
             ("acting", Box::new(|_| crate::chat::pages::act::INSTRUCTIONS.to_string()), vec!["browser_click"]),
         ];
@@ -402,14 +427,21 @@ mod tests {
                     let cfg = YapConfig { web_search: on(0), web_search_native: on(1), open_apps: on(2), memory_search_chats: on(3), assistant_screen: on(4), ..Default::default() };
                     let (yap_code, calendar, connectors) = (on(5), on(6), on(7));
                     let here = Here { yap_code: &|| yap_code, calendar: &|| calendar, connectors: &|| connectors };
-                    let g = Gates::for_turn_on(&cfg, &ep, scope, meetings, in_view, &here);
-                    for code in [false, true] {
-                        let (prompt, offered) = sent(&g, &ep.persona, code);
-                        // The agent lines as before 8 Nov 2026 (Yap Code on, a
-                        // model that calls tools) but across the meetings.
-                        let agent_line = prompt.contains(&t::agents::AGENT_TOOL_INSTRUCTIONS.join(" "));
-                        assert_eq!(agent_line, g.tools && yap_code && !meetings, "{provider} {model} {scope:?} {bits:08b} code: {code}");
-                        seen.push((format!("{provider} {model} {scope:?} in view: {in_view} {bits:08b} code: {code}"), g, prompt, offered));
+                    let unfiled = Gates::for_turn_on(&cfg, &ep, scope, meetings, in_view, &here);
+                    // Picture files without the web, wanted (a Code chat, a
+                    // picture file named) or not.
+                    for wanted in [false, true] {
+                        let g = Gates { files: unfiled.files_gate(&ep, scope, meetings, in_view, wanted), ..unfiled };
+                        // Only without the web, and never across the meetings.
+                        assert!(g.files == Gate::Off || (!g.web_on && !meetings && g.pictures == Gate::Off && g.tools), "{provider} {model} {scope:?} {bits:08b}");
+                        for code in [false, true] {
+                            let (prompt, offered) = sent(&g, &ep.persona, code);
+                            // The agent lines as before 8 Nov 2026 (Yap Code on, a
+                            // model that calls tools) but across the meetings.
+                            let agent_line = prompt.contains(&t::agents::AGENT_TOOL_INSTRUCTIONS.join(" "));
+                            assert_eq!(agent_line, g.tools && yap_code && !meetings, "{provider} {model} {scope:?} {bits:08b} code: {code}");
+                            seen.push((format!("{provider} {model} {scope:?} in view: {in_view} {bits:08b} code: {code} files: {wanted}"), g, prompt, offered));
+                        }
                     }
                 }
             }
@@ -442,5 +474,48 @@ mod tests {
             }
         }
         assert!(checked > 10_000, "{checked}");
+    }
+
+    #[test]
+    fn a_code_chat_with_the_web_off_shows_a_picture_file_by_its_path() {
+        // 8 Nov 2026: a picture on this PC needs no web search. A Code chat
+        // (or a question naming a picture file) with the web off gets
+        // show_picture — and look_at_picture for a model that reads images —
+        // by a path only, and one line saying just that.
+        let cfg = YapConfig { web_search: false, agents_enabled: true, assistant_screen: false, ..Default::default() };
+        let here = Here { yap_code: &|| true, calendar: &|| false, connectors: &|| false };
+        for (provider, model, base) in MODELS {
+            let ep = keyed(provider, model, base);
+            let before = Gates::for_turn_on(&cfg, &ep, None, false, true, &here);
+            let after = Gates { files: before.files_gate(&ep, None, false, true, true), ..before };
+            let (p0, t0) = sent(&before, &ep.persona, true);
+            let (p1, t1) = sent(&after, &ep.persona, true);
+            let reads = crate::snip::vision::reads_images(provider, model) == Some(true) && provider != crate::ai::local_llm::PROVIDER_ONDEVICE;
+            println!("{provider} {model}, a Code chat with the web off\n  before: {t0:?}\n  after: {t1:?}\n  line: {}", crate::chat::pictures::file_instructions(after.files));
+            assert!(!t0.iter().any(|n| n == "show_picture" || n == "look_at_picture"), "{provider} {model}: before, none");
+            assert_eq!(after.files, if reads { Gate::Look } else { Gate::Show }, "{provider} {model}");
+            assert!(t1.iter().any(|n| n == "show_picture"), "{provider} {model}");
+            assert_eq!(t1.iter().any(|n| n == "look_at_picture"), reads, "{provider} {model}");
+            // Nothing else changed: the same tools and the same prompt but the line.
+            assert_eq!(t1.iter().filter(|n| *n != "show_picture" && *n != "look_at_picture").collect::<Vec<_>>(), t0.iter().collect::<Vec<_>>());
+            let line = crate::chat::pictures::file_instructions(after.files);
+            assert_eq!(p1.replacen(&format!(" {line}"), "", 1), p0, "{provider} {model}");
+            // The path only: no "p3", no word of the web.
+            let tools = after.offered(None, Some(7), true);
+            for t in tools.as_array().unwrap().iter().filter(|t| t["function"]["name"].as_str().is_some_and(|n| n.ends_with("_picture"))) {
+                let props = &t["function"]["parameters"]["properties"];
+                assert!(props["path"].is_object() && props["picture"].is_null(), "{t}");
+                assert!(!t.to_string().contains("p3") && !t.to_string().contains("web"), "{t}");
+            }
+            assert!(!line.contains("web") && !line.contains("p3"));
+            // Never across the meetings, nor from another app (no panel).
+            assert_eq!(before.files_gate(&ep, Some("meetings"), true, false, true), Gate::Off);
+            assert_eq!(before.files_gate(&ep, Some("assistant"), false, false, true), Gate::Off);
+            // Nothing to show (a plain chat naming no picture file): none.
+            assert_eq!(before.files_gate(&ep, None, false, true, false), Gate::Off);
+            // The web on: the pictures' own tools take paths already.
+            let web = Gates::for_turn_on(&YapConfig { web_search: true, ..cfg.clone() }, &ep, None, false, true, &here);
+            assert_eq!(web.files_gate(&ep, None, false, true, true), Gate::Off);
+        }
     }
 }

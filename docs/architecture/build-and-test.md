@@ -386,6 +386,19 @@ that turned 114 words into "I've.", 28 Oct).
   kept). With the decoder from before 27 Oct put back: "how" 10 times and "d"
   61 times flagged, both worse than the baseline, exit 1.
 
+## Yap Lab (`npm run lab`, 2026-11-08)
+
+A test Yap that a Claude Code session questions through Yap's own Chat — typed in
+Chat's box, or spoken through `e2e_assistant_ask` — on the real web and the person's
+own Claude plan, reading back each turn's tools (arguments and results), cards, pages
+and answer as JSON from the test Yap's record (`shell/lab.rs`: test mode with
+`YAP_LAB=1`, and `YAP_LAB_LIVE=1` unless `--fake`), and `report <prompt>` having it
+test a tool family and write up what fails. Its own build (`npm run lab -- build`,
+the e2e suite's stub debug build in a target dir of its own) and folder
+(`test-results/lab/`); `npm run test:lab` runs it offline on the e2e suite's
+stand-ins. Real runs spend the person's Claude plan: ask first. Guide:
+[`docs/lab.md`](../lab.md).
+
 ## Claude Code in tests (2026-11-07)
 
 Chat on your Claude plan and Yap Code drive the person's own Claude Code
@@ -408,7 +421,9 @@ ever reaches it, or anyone's Claude account.
   Claude Code's transcripts only in a `CLAUDE_CONFIG_DIR` it set, never the
   person's `~/.claude`. **A test
   run (`YAP_E2E=1`) without `YAP_CLAUDE_EXE` finds no Claude Code**, so agents
-  and the plan are never offered there by accident. `e2e_claude_script
+  and the plan are never offered there by accident (a Yap Lab run that isn't
+  `--fake` is the one exception: it finds the person's own, as the app does,
+  and never signs in; `docs/lab.md`). `e2e_claude_script
   {script?}` switches the stand-in's script per turn; `e2e_claude_approve_auto
   {allow?}` answers every permission prompt at once; `e2e_workspace {path}`
   is the folder the next Add workspace… takes (Settings → Yap Code, or Chat's
