@@ -499,14 +499,29 @@ struct Queue {
     writing: bool,
 }
 
+#[cfg(not(test))]
 static QUEUE: Mutex<Option<Queue>> = Mutex::new(None);
 /// Held while files are written (one writer at a time): the newest
 /// snapshot on disk per file, never an older one over it.
 static WRITTEN: Mutex<Option<HashMap<PathBuf, u64>>> = Mutex::new(None);
 
+// Unit tests queue their own thread's snapshots, as their notes store and
+// folder are their own: a test's Reset app (which takes every snapshot still
+// to be written) or its writer never takes another test's running beside it.
+#[cfg(test)]
+thread_local! {
+    static QUEUE: RefCell<Queue> = RefCell::new(Queue::default());
+}
+
+#[cfg(not(test))]
 fn with_queue<R>(f: impl FnOnce(&mut Queue) -> R) -> R {
     let mut g = QUEUE.lock().unwrap_or_else(|p| p.into_inner());
     f(g.get_or_insert_with(Queue::default))
+}
+
+#[cfg(test)]
+fn with_queue<R>(f: impl FnOnce(&mut Queue) -> R) -> R {
+    QUEUE.with(|q| f(&mut q.borrow_mut()))
 }
 
 #[cfg(not(test))]
@@ -1182,6 +1197,25 @@ mod tests {
         assert_eq!(reset(), 1);
         assert!(!file.exists() && !set_aside.exists());
         assert!(list(id).unwrap().is_empty(), "nothing in memory either");
+        TEST_DIR.with(|t| *t.borrow_mut() = None);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A test's Reset app takes the snapshots still to be written: its own
+    /// thread's, never those of a test running beside it.
+    #[test]
+    fn a_reset_on_another_thread_leaves_this_ones_snapshots() {
+        let dir = scratch("beside");
+        let id = 987_654;
+        queue_file(&File::new(id, 1));
+        std::thread::spawn(|| {
+            let _ = scratch("beside-reset");
+            reset();
+        })
+        .join()
+        .unwrap();
+        write_pending().unwrap();
+        assert!(dir.join(format!("{id}.json")).exists(), "the reset beside it took this thread's snapshot");
         TEST_DIR.with(|t| *t.borrow_mut() = None);
         let _ = std::fs::remove_dir_all(&dir);
     }
