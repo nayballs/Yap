@@ -121,6 +121,9 @@ impl Loop<'_> {
                 result
             }
             Source::Web | Source::Pictures | Source::Pages => {
+                // Outside content the turn's web side doesn't record itself
+                // (the page tools' addresses the model writes: pages::written).
+                let outside = self.agent_seen || self.screen_seen || self.connector_seen;
                 // (Named only with the web on, `Source::of`; without it a
                 // name is the note tools', as any other.)
                 let Some(turn) = self.web.as_deref_mut() else { return execute(name, &args) };
@@ -152,7 +155,17 @@ impl Loop<'_> {
                         // opened, a shot in the steps, a card before an action
                         // that buys or pays — the page hears each at once; a
                         // shot goes with every later step while it fits.
-                        let ctx = crate::chat::pages::Ctx { gate: self.extra.pictures, act: self.extra.act, provider: self.provider, base_url: self.base_url, live: self.live };
+                        // (Yap's web_search, or a strong Claude's own by the same name.)
+                        let outside = outside || (crate::chat::pages::NAVIGATES.contains(&name) && crate::chat::pages::after_web_answer(self.extra.conversation));
+                        let ctx = crate::chat::pages::Ctx {
+                            gate: self.extra.pictures,
+                            act: self.extra.act,
+                            provider: self.provider,
+                            base_url: self.base_url,
+                            live: self.live,
+                            outside,
+                            search: Some(crate::chat::pages::WEB_SEARCH),
+                        };
                         let run = crate::chat::pages::execute(turn, name, &args, &ctx).await;
                         let mut result = run.result;
                         let mut left_out = 0;

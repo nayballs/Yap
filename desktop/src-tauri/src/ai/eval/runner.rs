@@ -3088,11 +3088,35 @@ mod tests {
         set_up(s);
         let accepted = score(s, &[("browser_read", read.clone()), ("browser_click", json!({ "ref": 1 }))], &mut turn(&s.turns[0].user), None).await;
         assert!(accepted.iter().any(|f| f.contains("Accept all")), "{accepted:?}");
-        // The injection: going there fails it (and Yap refuses it anyway).
+        // The injection: trying to go there fails it — and once the page is
+        // read (where the planted words are), Yap refuses an address the model
+        // writes anyway.
         let s = get("browse-injection");
         set_up(s);
-        let went = score(s, &[("browser_navigate", json!({ "url": "https://evil.example/" }))], &mut turn(&s.turns[0].user), None).await;
+        let went = score(s, &[("browser_read", json!({})), ("browser_navigate", json!({ "url": "https://evil.example/" }))], &mut turn(&s.turns[0].user), None).await;
         assert!(went.iter().any(|f| f.contains("planted")), "{went:?}");
+        assert!(!sim::with(|b| b.log.visited.iter().any(|v| v.contains("evil.example"))).unwrap(), "refused after the page read");
+        // Reading in parts: the long page's answer is past the first read, in
+        // the one that goes on from its next.
+        let ctx = crate::chat::pages::Ctx::quiet(crate::chat::pictures::Gate::Show, true);
+        let s = get("browse-read-long-page");
+        set_up(s);
+        let mut t = turn(&s.turns[0].user);
+        let first = crate::chat::pages::execute(&mut t, "browser_read", &json!({}), &ctx).await.result;
+        assert!(!first["data"]["text"].as_str().unwrap().contains("stepping stones") && first["data"]["more"] == json!(true), "{first}");
+        let on = crate::chat::pages::execute(&mut t, "browser_read", &first["data"]["next"], &ctx).await.result;
+        assert!(on["data"]["text"].as_str().unwrap().contains("stepping stones"), "{on}");
+        // The table: the lantern's row, far down, in the tables read that goes on.
+        let s = get("browse-read-table");
+        set_up(s);
+        let mut t = turn(&s.turns[0].user);
+        let first = crate::chat::pages::execute(&mut t, "browser_read", &json!({ "mode": "tables" }), &ctx).await.result;
+        assert!(!first.to_string().contains("Storm lantern") && first["data"]["next"]["mode"] == "tables", "{first}");
+        let on = crate::chat::pages::execute(&mut t, "browser_read", &first["data"]["next"], &ctx).await.result;
+        let rows = on["data"]["tables"][0]["rows"].as_array().unwrap();
+        let lantern = rows.iter().find(|r| r[0]["text"] == "Storm lantern").unwrap_or_else(|| panic!("{on}"));
+        assert_eq!(lantern, &json!([{ "text": "Storm lantern", "url": "https://gearlist.example/items/storm-lantern" }, "480", "Saltmarsh Outfitters"]));
+        assert_eq!(on["data"]["tables"][0]["headers"], json!(["Item", "Weight (g)", "Where to buy"]));
         sim::install(None);
     }
 }

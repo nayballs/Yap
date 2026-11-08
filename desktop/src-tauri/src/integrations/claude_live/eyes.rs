@@ -377,9 +377,14 @@ async fn run_for(slot: &Slot, turn: &Call, name: &str, args: &Value, wait: std::
     };
     // Claude Code's own call shows in the turn's events first, so every page
     // its searches and reads found before it is counted (else on, as found).
-    if !slot.seen(turn.n, name, wait) {
+    let counted = slot.seen(turn.n, name, wait);
+    if !counted {
         tracing::debug!(tool = name, "Claude Code endpoint: a page tool's call didn't show in its turn's events in time");
     }
+    // Outside content before it (its WebSearch / WebFetch, a look, an agent's
+    // words, selected text; on doubt, yes), or the answer before came from the
+    // web: an address the model writes no longer opens (`pages::written`).
+    let outside = !counted || slot.web(turn.n) || (pages::NAVIGATES.contains(&name) && pages::after_web_answer(turn.ctx.conversation));
     let mut w = web.lock().await;
     for s in slot.found(turn.n) {
         w.number(&s.title, &s.url);
@@ -391,7 +396,15 @@ async fn run_for(slot: &Slot, turn: &Call, name: &str, args: &Value, wait: std::
     let (result, looks) = if pages::ALL.contains(&name) {
         // The browser: a page opened, a shot in the steps, a card before an
         // action that buys — through the turn's stream, as the tool loop's.
-        let ctx = pages::Ctx { gate: turn.ctx.eyes.pictures, act: turn.ctx.eyes.act, provider: PROVIDER, base_url: BASE_URL, live: Some(Live { sink: &sink, beside: None }) };
+        let ctx = pages::Ctx {
+            gate: turn.ctx.eyes.pictures,
+            act: turn.ctx.eyes.act,
+            provider: PROVIDER,
+            base_url: BASE_URL,
+            live: Some(Live { sink: &sink, beside: None }),
+            outside,
+            search: Some("WebSearch"),
+        };
         let run = pages::execute(&mut w, name, args, &ctx).await;
         let mut result = run.result;
         if !run.looks.is_empty() {

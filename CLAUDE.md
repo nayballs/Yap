@@ -182,7 +182,7 @@ One folder per area (an area's `<area>.rs` lists its modules); a big module's pa
 - `chat/tools/agents.rs` — Yap Code's four tools; never after web content.
 - `chat/tools/connectors.rs` — connectors' tools in Chat (preview), every call through `consent::decide`.
 - `chat/assistant.rs` (+ `assistant/`: `connector_ask.rs`, `screen.rs`, `selected.rs`, `skill.rs`, `spoken_ok.rs`: every card that asks first, said and answered out loud) — the Voice Assistant; off during meetings.
-- `chat/pages.rs` (+ `pages/`: `view.rs`, `see.rs`, `act.rs`, `backend.rs`, `sim.rs`) — the browser beside the chat: its own WebView2, no Yap IPC, public http(s) only.
+- `chat/pages.rs` (+ `pages/`: `view.rs`, `see.rs`, `read.rs`, `act.rs`, `backend.rs`, `sim.rs`) — the browser beside the chat: its own WebView2, no Yap IPC, public http(s) only; `read.rs` a page read in parts (`offset`, `next`) and its tables as rows.
 - `chat/see_screen.rs` — `look_at_screen`; never in a meeting.
 - `chat/think.rs` — Think it through, on the on-device model.
 - `chat/documents.rs` (+ `documents/rich.rs`, `blocks.rs`) — documents beside the chat; the person's edits win (`merge3`).

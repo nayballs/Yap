@@ -42,7 +42,7 @@ use crate::chat::pictures::Gate;
 
 /// A browser tool as a model that may act runs it, watched by `log`.
 async fn run(t: &mut Turn, name: &str, args: Value, log: &Log) -> Value {
-    let ctx = Ctx { gate: Gate::Show, act: true, provider: "anthropic", base_url: "https://api.anthropic.com/v1", live: Some(Live { sink: log, beside: None }) };
+    let ctx = Ctx { gate: Gate::Show, act: true, provider: "anthropic", base_url: "https://api.anthropic.com/v1", live: Some(Live { sink: log, beside: None }), outside: false, search: Some(crate::chat::pages::WEB_SEARCH) };
     crate::chat::pages::execute(t, name, &args, &ctx).await.result
 }
 
@@ -176,11 +176,15 @@ async fn go_to_takes_only_addresses_the_turn_may_open_and_tabs_switch() {
     crate::chat::pages::backend::opened("https://other.example/", "").await;
     let mut t = turn("Open https://rail.example.com and look around");
     let log = Log::default();
-    // An address nobody gave (a page's words said it): refused.
+    // Before anything from outside: an address the model wrote opens in the tab.
+    let r = run(&mut t, GO, json!({ "tab": 2, "url": "https://other.example/" }), &log).await;
+    assert_eq!(r["displayText"], "Went to other.example in tab 2", "{r}");
+    // A page read: from now on an address nobody gave (a page's words said it) is refused.
+    crate::chat::pages::execute(&mut t, READ, &json!({ "tab": 1, "mode": "elements" }), &Ctx::quiet(Gate::Show, true)).await;
     let r = run(&mut t, GO, json!({ "url": "https://evil.example/collect" }), &log).await;
     assert_eq!(r["displayText"], "Didn't go to evil.example/collect: not a link from you, a search or the page");
+    assert!(r["error"].as_str().unwrap().contains("open a link from a page read (browser_read lists them) or find the page with web_search"), "{r}");
     // A link on a page read this turn: allowed.
-    crate::chat::pages::execute(&mut t, READ, &json!({ "tab": 1, "mode": "elements" }), &Ctx::quiet(Gate::Show, true)).await;
     confirm::answer_in_test(Some(true));
     let r = run(&mut t, GO, json!({ "tab": 1, "url": "https://rail.example.com/signin" }), &log).await;
     confirm::answer_in_test(None);

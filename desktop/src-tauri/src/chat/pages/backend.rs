@@ -93,6 +93,31 @@ pub async fn text(key: &str) -> Result<PageText, String> {
     view::page_text(key).await
 }
 
+/// **A long page's words** (`browser_read { offset }`): the same read, up to
+/// `read::TEXT_FULL` characters (`read::long_text_script`).
+pub async fn text_long(key: &str) -> Result<PageText, String> {
+    sim!(|b| b.text_up_to(key, super::read::TEXT_FULL));
+    wait_loaded(key).await;
+    let raw = view::run_script(key, super::read::long_text_script()).await?;
+    serde_json::from_str(&raw).map_err(|_| "The page couldn't be read.".to_string())
+}
+
+/// **A page's tables** (`browser_read { mode: "tables" }`): as it shows
+/// them now (`read::TABLES_SCRIPT`), links as the page's own addresses.
+pub async fn tables(key: &str) -> Result<super::read::Tables, String> {
+    sim!(|b| b.tables(key));
+    wait_loaded(key).await;
+    let raw = view::run_script(key, super::read::TABLES_SCRIPT.to_string()).await?;
+    let mut t: super::read::Tables = serde_json::from_str(&raw).map_err(|_| "The page's tables couldn't be read.".to_string())?;
+    t.url = view::shown(&t.url);
+    for c in t.tables.iter_mut().flat_map(|t| t.rows.iter_mut()).flatten() {
+        if !c.h.is_empty() {
+            c.h = view::shown(&c.h);
+        }
+    }
+    Ok(t)
+}
+
 /// **A page with its elements** (`browser_read { mode: "elements" }`, `browser_find`): its
 /// text cut at `text_max`, at most `max` elements; addresses as the page's
 /// own (a test run's stand-in's turned back).
@@ -172,6 +197,16 @@ pub async fn shot(key: &str) -> Result<Vec<u8>, String> {
     sim!(|b| b.shot(key));
     wait_loaded(key).await;
     view::shot_in_view(key).await
+}
+
+/// **What's in view of page `key` now, drawn `scale` times finer** where
+/// that can't be seen (`view::shot_in_view_at`: a page out of sight); else
+/// at the device's pixels. The PNG and the scale it was drawn at (1: the
+/// device's own).
+pub async fn shot_at(key: &str, scale: f64) -> Result<(Vec<u8>, f64), String> {
+    sim!(|b| b.shot_at(key, scale));
+    wait_loaded(key).await;
+    view::shot_in_view_at(key, scale).await
 }
 
 /// Page `key` has loaded (the stand-in browser's always has).

