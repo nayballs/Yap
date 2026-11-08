@@ -1153,8 +1153,18 @@ async fn tabs(turn: &mut crate::web::Turn, args: &Value, ctx: &Ctx<'_>) -> Value
                     return failed(e.clone(), format!("Couldn't close tab {n}: {}", crate::web::short(&e)));
                 }
                 ctx.tell(Event::CloseTab { key: t.key.clone() });
+                // The one in front closed: Rust put the next one in front
+                // (`view::Front::closed`), and the view shows it — the next
+                // call with no tab acts on what the person sees.
+                let mut data = json!({ "tab": n, "closed": true });
+                if t.front {
+                    if let Some(next) = backend::tabs().await.into_iter().find(|x| x.front) {
+                        ctx.tell(Event::SwitchTab { key: next.key.clone() });
+                        data["front"] = json!(next.tab);
+                    }
+                }
                 tracing::info!(tab = n, "Chat: a tab beside the chat closed");
-                return json!({ "success": true, "data": { "tab": n, "closed": true }, "displayText": format!("Closed tab {n} beside the chat") });
+                return json!({ "success": true, "data": data, "displayText": format!("Closed tab {n} beside the chat") });
             }
             if let Err(e) = backend::front(&t.key).await {
                 return failed(e.clone(), format!("Couldn't switch tabs: {}", crate::web::short(&e)));

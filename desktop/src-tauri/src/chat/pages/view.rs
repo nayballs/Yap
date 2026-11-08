@@ -364,6 +364,82 @@ pub fn evict(views: &[(String, u64, bool)]) -> Option<String> {
     views.iter().filter(|(_, _, on)| !on).min_by_key(|(_, used, _)| *used).or_else(|| views.iter().min_by_key(|(_, used, _)| *used)).map(|(k, _, _)| k.clone())
 }
 
+/// **The tab in front** (8 Nov 2026: a `browser_read` straight after
+/// `browser_tabs` new read the tab before it, still on screen until the
+/// Chat view showed the new one): Rust decides, the view follows. One per
+/// panel (the stand-in browser has its own): the tab Rust last put in
+/// front — a page brought up, a tab switched to, one the view showed (the
+/// person's pick), the next one after the front one closed — stays in front
+/// while it's open, whatever is on screen. Pure (the time is given).
+#[derive(Debug, Clone, Default)]
+pub struct Front {
+    chosen: Option<String>,
+    /// Rust's own pick the view hasn't shown yet, and when it was made: the
+    /// view showing another tab meanwhile is it catching up on an older
+    /// event (a switch before), never the person's pick — for [`FOLLOW`].
+    waiting: Option<(String, std::time::Instant)>,
+}
+
+/// How long the view has to show Rust's pick before a tab it shows counts as
+/// the person's own again (the view follows within moments; a view that
+/// never shows it — Chat out of sight — mustn't hold the person's clicks off).
+pub const FOLLOW: std::time::Duration = std::time::Duration::from_secs(3);
+
+impl Front {
+    /// **Rust puts tab `key` in front** (a page brought up, `switch_tab`, an
+    /// action on a tab out of sight): at once, before the view shows it.
+    pub fn pick(&mut self, key: &str, now: std::time::Instant) {
+        self.chosen = Some(key.to_string());
+        self.waiting = Some((key.to_string(), now));
+    }
+
+    /// **The view shows tab `key`** (its Page tab made or shown, the address
+    /// bar's page): the person's pick — in front — unless it's the view
+    /// still catching up while Rust's own waits to be shown ([`FOLLOW`]).
+    pub fn shown(&mut self, key: &str, now: std::time::Instant) {
+        match &self.waiting {
+            Some((k, _)) if k == key => self.waiting = None,
+            Some((_, at)) if now.duration_since(*at) < FOLLOW => return,
+            _ => self.waiting = None,
+        }
+        self.chosen = Some(key.to_string());
+    }
+
+    /// **Tab `gone` closed** (`keys`: the tabs in the order they opened,
+    /// `gone` among them): the one in front closing, the one after it is,
+    /// else the one before, as the panel's row gives way (`panelTabs.js`
+    /// `neighbour`).
+    pub fn closed(&mut self, keys: &[String], gone: &str) {
+        if self.waiting.as_ref().is_some_and(|(k, _)| k == gone) {
+            self.waiting = None;
+        }
+        if self.chosen.as_deref() != Some(gone) {
+            return;
+        }
+        self.chosen = keys.iter().position(|k| k == gone).and_then(|i| keys.get(i + 1).or_else(|| i.checked_sub(1).and_then(|j| keys.get(j)))).cloned();
+    }
+
+    /// Every tab closed.
+    pub fn clear(&mut self) {
+        *self = Front::default();
+    }
+
+    /// The key Rust last put in front, if any.
+    pub fn chosen(&self) -> Option<&str> {
+        self.chosen.as_deref()
+    }
+
+    /// **Which tab is in front** (`tabs`: key, on screen, when last shown):
+    /// the chosen one while it's open; without one, the one on screen, else
+    /// the one shown last.
+    pub fn of(&self, tabs: &[(String, bool, u64)]) -> Option<String> {
+        if let Some(c) = self.chosen.as_deref().filter(|c| tabs.iter().any(|(k, _, _)| k == c)) {
+            return Some(c.to_string());
+        }
+        tabs.iter().find(|(_, on, _)| *on).or_else(|| tabs.iter().max_by_key(|(_, _, used)| *used)).map(|(k, _, _)| k.clone())
+    }
+}
+
 /// The page's menu items kept (WebView2's names, `ICoreWebView2ContextMenuItem::
 /// Name`): moving about, copying and the editing commands — never Save as,
 /// Print, Open in a new window, Inspect or the like.
@@ -434,7 +510,7 @@ pub async fn page_view_show(app: AppHandle, key: String, url: String, section: O
     let (standin, offline) = web_route();
     let load = load_url(&url, standin.as_deref(), offline)?;
     let section = section.map(|s| s.chars().take(crate::chat::pages::SECTION_MAX).collect::<String>()).unwrap_or_default();
-    imp::show(app, key, url, load, section, bounds).await.map(|_| ())
+    imp::show(app, key, url, load, section, bounds, false).await.map(|_| ())
 }
 
 /// **A page's dialog answered** in its tab's strip (`alert`, `confirm`,
@@ -659,7 +735,7 @@ pub async fn open_hidden(url: &str, section: &str) -> Option<(usize, String)> {
     let (standin, offline) = web_route();
     let load = load_url(url, standin.as_deref(), offline).ok()?;
     let section: String = section.chars().take(crate::chat::pages::SECTION_MAX).collect();
-    match imp::show(app, key_of(url), url.to_string(), load, section, None).await {
+    match imp::show(app, key_of(url), url.to_string(), load, section, None, true).await {
         Ok(closed) => closed,
         Err(e) => {
             tracing::debug!("A page brought up wasn't made out of sight: {e}");
@@ -836,7 +912,7 @@ mod imp {
         Reload,
     }
 
-    pub async fn show(_: AppHandle, _: String, _: String, _: String, _: String, _: Option<Bounds>) -> Result<Option<(usize, String)>, String> {
+    pub async fn show(_: AppHandle, _: String, _: String, _: String, _: String, _: Option<Bounds>, _: bool) -> Result<Option<(usize, String)>, String> {
         Err(NO.into())
     }
     pub async fn answer_dialog(_: AppHandle, _: String, _: bool, _: Option<String>) -> Result<(), String> {
@@ -1036,6 +1112,9 @@ mod win {
 
     thread_local! {
         static VIEWS: RefCell<Vec<View>> = const { RefCell::new(Vec::new()) };
+        /// The tab in front (`super::Front`): never what's merely placed on
+        /// screen.
+        static FRONT: RefCell<super::Front> = RefCell::new(super::Front::default());
         /// Yap's WebView2 environment (the main window's) and its controller.
         static ENV: RefCell<Option<(ICoreWebView2Environment, ICoreWebView2Controller)>> = const { RefCell::new(None) };
         static CLASS: Cell<bool> = const { Cell::new(false) };
@@ -1089,6 +1168,21 @@ mod win {
             t.set(t.get() + 1);
             t.get()
         })
+    }
+
+    /// Rust puts page `key` in front (`Front::pick`).
+    fn pick_front(key: &str) {
+        FRONT.with(|f| f.borrow_mut().pick(key, std::time::Instant::now()));
+    }
+
+    /// The view shows page `key` (`Front::shown`).
+    fn shown_front(key: &str) {
+        FRONT.with(|f| f.borrow_mut().shown(key, std::time::Instant::now()));
+    }
+
+    /// A page tab (not a shot's or a clearing's page).
+    fn is_tab(x: &View) -> bool {
+        x.snap.is_none() && !x.key.starts_with("snap:") && !x.key.starts_with("clear:")
     }
 
     /// Run `f` on the main thread with Yap's main webview's controller; its
@@ -1319,9 +1413,19 @@ mod win {
 
     // ---- show, place, close --------------------------------------------------------------
 
-    pub async fn show(app: AppHandle, key: String, url: String, load: String, section: String, bounds: Option<Bounds>) -> Result<Option<(usize, String)>, String> {
+    /// `rust`: a page Yap brought up itself (in front at once), else one the
+    /// view shows.
+    pub async fn show(app: AppHandle, key: String, url: String, load: String, section: String, bounds: Option<Bounds>, rust: bool) -> Result<Option<(usize, String)>, String> {
         let a = app.clone();
-        main_thread(&app, move |root| make_or_place(&a, root, key, url, load, section, bounds, None)).await?
+        main_thread(&app, move |root| {
+            if rust {
+                pick_front(&key);
+            } else {
+                shown_front(&key);
+            }
+            make_or_place(&a, root, key, url, load, section, bounds, None)
+        })
+        .await?
     }
 
     /// Show page `key` (made the first time); a shot's page (`snap`) is made
@@ -1370,8 +1474,12 @@ mod win {
         // Room for one more: the least recently shown one goes.
         let mut closed = None;
         if snap.is_none() {
-            let alive: Vec<(String, u64, bool)> =
-                VIEWS.with(|v| v.borrow().iter().filter(|x| x.snap.is_none() && !x.key.starts_with("snap:") && !x.key.starts_with("clear:")).map(|x| (x.key.clone(), x.used, x.bounds.is_some())).collect());
+            // (The one in front is kept, as the one on screen is: the new one
+            // never goes.)
+            let front = FRONT.with(|f| f.borrow().chosen().map(str::to_string));
+            let alive: Vec<(String, u64, bool)> = VIEWS.with(|v| {
+                v.borrow().iter().filter(|x| is_tab(x)).map(|x| (x.key.clone(), x.used, x.bounds.is_some() || front.as_deref() == Some(x.key.as_str()))).collect()
+            });
             if let Some(gone) = evict(&alive) {
                 tracing::info!(views = alive.len(), "Chat: the least recently shown page closed to make room");
                 closed = VIEWS.with(|v| {
@@ -1987,6 +2095,9 @@ mod win {
     fn close_one(app: &AppHandle, key: &str) {
         // A dialog it had waiting: answered Cancel (never left hanging).
         finish_dialog(app, key, false, None);
+        // The one in front closing: the next one is (`Front::closed`).
+        let keys: Vec<String> = VIEWS.with(|v| v.borrow().iter().filter(|x| is_tab(x)).map(|x| x.key.clone()).collect());
+        FRONT.with(|f| f.borrow_mut().closed(&keys, key));
         let gone = VIEWS.with(|v| {
             let mut v = v.borrow_mut();
             let i = v.iter().position(|x| x.key == key)?;
@@ -2007,7 +2118,10 @@ mod win {
         main_thread(&app, move |_| {
             let keys: Vec<String> = match key {
                 Some(k) => vec![k],
-                None => VIEWS.with(|v| v.borrow().iter().filter(|x| x.snap.is_none()).map(|x| x.key.clone()).collect()),
+                None => {
+                    FRONT.with(|f| f.borrow_mut().clear());
+                    VIEWS.with(|v| v.borrow().iter().filter(|x| x.snap.is_none()).map(|x| x.key.clone()).collect())
+                }
             };
             for k in &keys {
                 close_one(&a, k);
@@ -2046,6 +2160,8 @@ mod win {
     pub async fn go_to(app: AppHandle, key: String, url: String, load: String, bounds: Option<Bounds>) -> Result<(), String> {
         let a = app.clone();
         main_thread(&app, move |root| {
+            // The tab the person typed in: in front.
+            shown_front(&key);
             let open = VIEWS.with(|v| {
                 let mut v = v.borrow_mut();
                 let view = v.iter_mut().find(|x| x.key == key)?;
@@ -2092,6 +2208,7 @@ mod win {
             if handles(&key).is_none() {
                 return Err("That page isn't open.".to_string());
             }
+            pick_front(&key);
             let on_screen = VIEWS.with(|v| v.borrow().iter().find(|x| x.bounds.is_some() && x.key != key && x.snap.is_none() && !x.key.starts_with("snap:")).map(|x| (x.key.clone(), x.host, x.controller.clone(), x.bounds)));
             let moved = on_screen.as_ref().and_then(|(_, _, _, b)| *b);
             if let Some((old, host, controller, _)) = on_screen {
@@ -2505,11 +2622,11 @@ mod win {
                     .map(|x| (x.id, x.key.clone(), x.url.clone(), x.core.clone(), x.bounds.is_some(), x.used, x.width))
                     .collect()
             });
-            let shown = alive.iter().any(|(_, _, _, _, on, _, _)| *on);
-            let last = alive.iter().map(|(_, _, _, _, _, used, _)| *used).max().unwrap_or(0);
+            let order: Vec<(String, bool, u64)> = alive.iter().map(|(_, k, _, _, on, used, _)| (k.clone(), *on, *used)).collect();
+            let front = FRONT.with(|f| f.borrow().of(&order));
             alive
                 .into_iter()
-                .map(|(id, key, url, core, on, used, width)| {
+                .map(|(id, key, url, core, _, _, width)| {
                     let (mut now, mut title) = (url, String::new());
                     if let Some(core) = core {
                         unsafe {
@@ -2526,7 +2643,8 @@ mod win {
                             }
                         }
                     }
-                    super::OpenTab { tab: id, key, title, url: now, front: if shown { on } else { used == last }, width }
+                    let front = front.as_deref() == Some(key.as_str());
+                    super::OpenTab { tab: id, key, title, url: now, front, width }
                 })
                 .collect()
         })

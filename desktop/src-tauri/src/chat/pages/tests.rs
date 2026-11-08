@@ -898,3 +898,110 @@ async fn a_tab_at_a_desktop_width_is_read_and_seen_as_a_desktop_site_and_an_olde
     assert!(r["error"].as_str().unwrap().starts_with("width is a number of CSS pixels from 480 to 2560"), "{r}");
     sim::install(None);
 }
+
+#[tokio::test]
+async fn a_new_tab_is_in_front_at_once_whatever_the_view_is_showing() {
+    // (8 Nov 2026: a browser_read straight after browser_tabs new read the
+    // tab before it, still on screen until the Chat view showed the new one.)
+    for view in ["on the old tab", "not showing", "catching up"] {
+        sim::install(Some(web()));
+        let shop = sim::with(|b| {
+            let k = b.open("https://shop.example.com/");
+            b.view_shows(&k);
+            k
+        })
+        .unwrap();
+        if view == "not showing" {
+            // Yap's window hidden, another view, something over the page.
+            sim::with(|b| b.view_places(None));
+        }
+        let mut t = turn("Open https://emberwiki.example/wiki/Saltmarsh_Docks in a new tab and tell me who the harbourmaster is");
+        let log = Log::default();
+        let r = call(&mut t, TABS, json!({ "action": "new", "url": "https://emberwiki.example/wiki/Saltmarsh_Docks" }), &log).await.result;
+        assert_eq!(r["success"], true, "{view}: {r}");
+        if view == "catching up" {
+            // The view showing the old tab again (an older event) before the new one's lands.
+            sim::with(|b| b.view_shows(&shop));
+        }
+        let r = call(&mut t, READ, json!({}), &log).await.result;
+        assert_eq!(r["data"]["title"], "Saltmarsh Docks - Emberwiki", "{view}: {r}");
+        assert!(r["data"]["text"].as_str().unwrap().contains("Edda Vane"), "{view}: {r}");
+        assert_eq!(r["data"]["tabs"][1]["front"], true, "{view}: {r}");
+        // The view follows: once it has shown the new tab, the person's own pick counts again.
+        sim::with(|b| {
+            b.view_shows("page:https://emberwiki.example/wiki/Saltmarsh_Docks");
+            b.view_shows(&shop);
+        });
+        assert!(sim::with(|b| b.tabs()[0].front).unwrap(), "{view}: the person's pick");
+        sim::install(None);
+    }
+}
+
+#[tokio::test]
+async fn a_switch_and_a_close_leave_rusts_front_tab_in_front_and_the_view_told() {
+    sim::install(Some(web()));
+    let keys = sim::with(|b| {
+        let a = b.open("https://shop.example.com/");
+        let c = b.open("https://emberwiki.example/wiki/Saltmarsh_Docks");
+        let d = b.open("https://maps.example.com/west");
+        b.view_shows(&d);
+        [a, c, d]
+    })
+    .unwrap();
+    let mut t = turn("Switch to the shop, then close it");
+    let log = Log::default();
+    // A switch: in front before the view shows it, though tab 3 is still on screen.
+    call(&mut t, TABS, json!({ "action": "switch", "tab": 1 }), &log).await;
+    assert_eq!(call(&mut t, READ, json!({}), &log).await.result["data"]["title"], "Example Shop");
+    // Closing the one in front: the next one is, and the view is told to show it.
+    let r = call(&mut t, TABS, json!({ "action": "close", "tab": 1 }), &log).await.result;
+    assert_eq!(r["data"]["front"], 2, "{r}");
+    let events = log.0.lock().unwrap().clone();
+    let close_at = events.iter().position(|e| matches!(e, Event::CloseTab { key } if *key == keys[0])).unwrap();
+    assert!(matches!(&events[close_at + 1], Event::SwitchTab { key } if *key == keys[1]), "{:?}", &events[close_at..]);
+    assert_eq!(call(&mut t, READ, json!({}), &log).await.result["data"]["title"], "Saltmarsh Docks - Emberwiki");
+    // Closing one behind: nothing moves, the view isn't told to switch.
+    let before = log.0.lock().unwrap().len();
+    let r = call(&mut t, TABS, json!({ "action": "close", "tab": 3 }), &log).await.result;
+    assert!(r["data"]["front"].is_null(), "{r}");
+    assert!(!log.0.lock().unwrap()[before..].iter().any(|e| matches!(e, Event::SwitchTab { .. })));
+    assert_eq!(call(&mut t, READ, json!({}), &log).await.result["data"]["title"], "Saltmarsh Docks - Emberwiki");
+    sim::install(None);
+}
+
+#[test]
+fn the_front_tab_is_rusts_pick_until_the_view_has_shown_it() {
+    use super::view::{Front, FOLLOW};
+    use std::time::Instant;
+    let t0 = Instant::now();
+    let tabs = |on: Option<&str>| -> Vec<(String, bool, u64)> { ["a", "b", "c"].iter().enumerate().map(|(i, k)| (k.to_string(), on == Some(*k), i as u64)).collect() };
+    let mut f = Front::default();
+    // Nothing chosen: the one on screen, else the one shown last.
+    assert_eq!(f.of(&tabs(Some("a"))).as_deref(), Some("a"));
+    assert_eq!(f.of(&tabs(None)).as_deref(), Some("c"));
+    // Rust's pick: in front at once, whatever is on screen.
+    f.pick("b", t0);
+    assert_eq!(f.of(&tabs(Some("a"))).as_deref(), Some("b"));
+    // The view catching up on another tab meanwhile: not the person's pick.
+    f.shown("a", t0 + FOLLOW / 2);
+    assert_eq!(f.of(&tabs(Some("a"))).as_deref(), Some("b"));
+    // Once it has shown Rust's, the view's next tab is the person's.
+    f.shown("b", t0 + FOLLOW / 2);
+    f.shown("a", t0 + FOLLOW / 2);
+    assert_eq!(f.of(&tabs(Some("a"))).as_deref(), Some("a"));
+    // A view that never shows Rust's pick doesn't hold the person off for long.
+    f.pick("c", t0);
+    f.shown("a", t0 + FOLLOW);
+    assert_eq!(f.chosen(), Some("a"));
+    // The one in front closing: the next one, else the one before.
+    let keys: Vec<String> = ["a", "b", "c"].iter().map(|k| k.to_string()).collect();
+    f.closed(&keys, "a");
+    assert_eq!(f.chosen(), Some("b"));
+    f.closed(&keys[1..], "c");
+    assert_eq!(f.chosen(), Some("b"), "one behind closing moves nothing");
+    f.closed(&keys[1..2], "b");
+    assert_eq!(f.chosen(), None);
+    f.pick("z", t0);
+    f.clear();
+    assert_eq!(f.chosen(), None);
+}

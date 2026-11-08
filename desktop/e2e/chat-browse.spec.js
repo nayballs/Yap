@@ -492,6 +492,37 @@ test('browser_tabs switches to a tab beside the chat', async ({ yap, main, fakeL
   await expect.poll(async () => (await views(yap)).find((v) => v.key === keyOf(RAIL_URL))?.onScreen).toBe(false);
 });
 
+test('a new tab is in front at once: a read in the same step reads it, not the tab still on screen; closing it puts the next in front and shows it', async ({ yap, main, fakeLlm }) => {
+  // (8 Nov 2026: a browser_read straight after browser_tabs new read the tab
+  // before it, on screen until the Chat view showed the new one.)
+  await setConfig(yap, main, chatConfig(fakeLlm));
+  // (Opened by Yap itself, no model: "Open <address>".)
+  await ask(main, `Open ${FORT_JOY_URL}`);
+  await expect(main.getByText('wiki.example.com is open beside the chat.')).toBeVisible({ timeout: 30_000 });
+  const from = fakeLlm.requests.length;
+  await expect.poll(async () => (await views(yap)).find((v) => v.key === keyOf(FORT_JOY_URL))?.onScreen, { timeout: 20_000 }).toBe(true);
+  // The wiki on screen; in one step (no moment for the view between), a new tab and a read with no tab.
+  const railTab = (r) => lastResult(r).data.tabs.find((t) => t.url.startsWith(RAIL_URL)).tab;
+  fakeLlm.scriptChat([
+    { tools: [{ name: 'browser_tabs', args: { action: 'new', url: RAIL_URL } }, { name: 'browser_read', args: {} }] },
+    { tools: [{ name: 'browser_tabs', args: (r) => ({ action: 'close', tab: railTab(r) }) }, { name: 'browser_read', args: {} }] },
+    { content: 'Read both.' },
+  ]);
+  await say(main, `What does the rail site at ${RAIL_URL} say? Put it in a tab beside the wiki, then close it again.`);
+  await expect(main.getByText('Read both.')).toBeVisible({ timeout: 40_000 });
+  const calls = chatCalls(fakeLlm, from).filter((r) => toolResults(r).length);
+  const step1 = toolResults(calls.find((r) => toolResults(r).some((x) => x?.displayText === 'Brought up rail.example.com beside the chat')));
+  const read1 = step1.at(-1);
+  expect(read1).toMatchObject({ success: true, data: { title: 'Example Rail' } });
+  expect(read1.data.tabs.find((t) => t.url.startsWith(RAIL_URL)).front).toBe(true);
+  // Closing the one in front: the wiki is (Rust's pick), read at once, and the view shows it.
+  const last = toolResults(chatCalls(fakeLlm, from).at(-1));
+  expect(last.at(-2)).toMatchObject({ success: true, data: { closed: true, front: read1.data.tabs.find((t) => t.url.includes('Fort_Joy')).tab } });
+  expect(last.at(-1)).toMatchObject({ success: true, data: { title: 'Fort Joy - Example Wiki' } });
+  await expect(main.getByTestId('chat-page-title')).toHaveText('Fort Joy - Example Wiki', { timeout: 20_000 });
+  await expect.poll(async () => (await views(yap)).find((v) => v.key === keyOf(FORT_JOY_URL))?.onScreen, { timeout: 20_000 }).toBe(true);
+});
+
 /** Chat on a strong fake model that reads images ("gpt-5" and "vision" in its id). */
 function seeingConfig(fakeLlm) {
   return { ...chatConfig(fakeLlm), llmScopes: { chat: { enabled: true, provider: 'custom', baseUrl: fakeLlm.base, model: 'fake-gpt-5-vision' } } };
