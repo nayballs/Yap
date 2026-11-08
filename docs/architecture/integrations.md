@@ -71,17 +71,18 @@ The token-authenticated local API, Yap's MCP server (`yap.exe mcp`) and adding i
   engine"), and those runs reach this. Below.
 - **`integrations/connectors.rs`** (+ `connectors/`: `store`, `cache`, `vault`,
   `manager`, `local`, `remote` + `remote/legacy`, `names`, `schema`, `results`,
-  `call`, `fake`, `tests`) — **connectors (preview, 2026-11-08)**: the other
-  direction, Yap as an MCP client of servers the person adds. Below.
+  `call`, `catalog` + `catalog.json`, `import`, `fake`, `tests`) — **connectors
+  (preview, 2026-11-08)**: the other direction, Yap as an MCP client of
+  servers the person adds. Below.
 
 ## Connectors (preview)
 
 Yap as an **MCP client**: the person adds a server at a link or a program on
 this PC, and Yap keeps its tools for Chat, the Voice Assistant and plan chats
-to use. Waves 1 (the core and programs), 2 (links with tokens) and 3
-(signing in through the browser) are built; the tools in Chat's loop (4),
-Settings → Connectors (5) and the rest come after. **Nothing offers a
-connector's tools to a model yet.**
+to use. Waves 1 (the core and programs), 2 (links with tokens), 3
+(signing in through the browser) and 5 (Settings → Connectors and its
+catalogue, below) are built; the tools in Chat's loop (4) and the rest come
+after. **Nothing offers a connector's tools to a model yet.**
 
 - **The switch** (`connectors::enabled`): `connectors_preview` in config.json
   (off by default), or `YAP_CONNECTORS=1` in a debug build (the e2e suite
@@ -103,8 +104,11 @@ connector's tools to a model yet.**
   and the fingerprint the person allowed), the auth kind, where Yap may use
   it (chat, voice, plan on; phone, meetings off), and **each tool's setting**
   — `allow` (Always allow), `ask` (Ask first) or `off` — pinned to the hash
-  of the definition it was set for. Fields this build doesn't know are kept.
-  [config-and-data.md](./config-and-data.md).
+  of the definition it was set for, where it came from (`origin`: `custom`,
+  `catalog` with the entry's id and the catalogue's version, or `import`
+  with `from`: `claude-desktop` | `paste`) and when a tool of it was last
+  called (`lastUsed`, saved at most once a minute). Fields this build
+  doesn't know are kept. [config-and-data.md](./config-and-data.md).
 - **The tools** (`cache.rs`, `connector_tools.json`): each connector's tools as
   last listed (all pages; at most 500), each with its **kind** from the
   annotations — `readOnlyHint` → Reads, `destructiveHint: false` → Changes,
@@ -330,13 +334,17 @@ connector's tools to a model yet.**
   "cancelled", connector}`, a failure its error in plain words),
   `connector_sign_in_cancel {id}`, `connector_sign_out {id}` (`{confirmed,
   connector}`), `connector_set_client {id, clientId, secret?}` (the person's
-  own client; an empty id forgets it) —, and in debug builds
+  own client; an empty id forgets it) —, the catalogue's and the imports'
+  (below) — `connector_catalog`, `connectors_import_scan {source}`,
+  `connectors_import {source, picks}`, and `connector_add`'s `catalog` —,
+  and in debug builds
   only `connector_call_tool {id, tool, args, timeoutMs}` (a tool called
   directly, Off and unknown ones refused: the tests' and a debug check's).
   A view has `signIn` for a link that signs in in the browser (`{state,
   host, client, ownClientId, hasOwnSecret, scopes, redirectUri}`: the
   sign-in server's host the browser opens, the client the last sign-in used,
-  the redirect a hand-entered client registers).
+  the redirect a hand-entered client registers), and `origin`, `catalog`
+  (the entry it came from) and `lastUsed`.
   **Events**: `yap-connectors-changed` (any change) and
   `yap-connector-status` (`{id, state, line, signIn?, …}`: `signIn`
   "needs-sign-in" | "signing-in" | "signed-in" | "expired", and the line
@@ -381,6 +389,120 @@ connector's tools to a model yet.**
   says, OpenID for an issuer with a path, a slow server, the fixed port
   busy), the browser played by the test: the address Yap would open, the
   fake's consent approved, the loopback opened.
+
+### Settings → Connectors (wave 5, 2026-11-08)
+
+With the preview on, Settings → Connectors is the Claude app's page (its
+Settings → Customize → Connectors): **Yours | Discover**, a search box,
+**+ Add ▾**. Off, it's the calendars' page as before (and its search entries
+aren't found). The page and its parts:
+[frontend-settings.md](./frontend-settings.md), "Connectors".
+
+- **Yours**: Yap's calendars first (their cards, unchanged), then a row per
+  connector: its mark or initial, its status in plain words (Rust's line —
+  "Connected · 12 tools", "Needs sign-in…", "Signing in… Finish in your
+  browser.", "Your sign-in to … has ended. Sign in again.", "Couldn't start:
+  …") with the one button it asks for (Sign in, Cancel, Try again), its
+  switch and ⋯. Live: `yap-connector-status` patches a row,
+  `yap-connectors-changed` reads the list again.
+- **A connector's page**: what it reaches (the link, or the program's exact
+  command line as approved, its variables by name, a secret one 🔒), sign in
+  / out, its tools grouped Reads · Changes things · Can delete with Always
+  allow / Ask first / Off each and a group's own control (a tool that can
+  delete never offers Always allow; one Yap can't offer offers only Off; a
+  group's control leaves one whose description reads like orders alone),
+  what they cost a Chat step, Refresh tools, Advanced (your own client ID and
+  secret, `connector_set_client`), Show details (`connector_details`: the
+  server, its MCP version, a program's last stderr lines), "Last used …",
+  and Remove… (asked first; `connector_remove` revokes a sign-in).
+- **+ Add**: **Custom connector…** (a name, the address, a token or request
+  headers — masked, sent straight to `connector_add`, then forgotten by the
+  page —; added, it shows what it found: the server's own name and tools, a
+  sign-in to start with Sign in and Cancel, or why it didn't connect),
+  **Program on this PC…** (`connector_preview`'s exact command line and
+  warnings before anything runs; Approve and run sends its fingerprint
+  back), **Import from Claude Desktop…** and **Paste a setup…** (below).
+- **Discover**: the catalogue's cards (below) with + (✓ once added, which
+  opens it), "Coming later" with Why?, and a quiet "More coming" line: no
+  registry search in v1 (it needs a hosted copy of the MCP Registry, the
+  maintainer's to approve). + opens a sheet: who makes it, **Tested with
+  Yap** only where the catalogue has a date, how it signs in, where its
+  data goes, the vendor's page, and Connect — a sign-in one is added from
+  its entry and the browser opens at once; a token one has its masked field
+  and where to make one; a program opens + Add's program form filled in.
+- **Imports** (`import.rs`): `connectors_import_scan {source}` reads a setup —
+  `{from: "claude-desktop"}`: Claude Desktop's `claude_desktop_config.json`
+  `mcpServers`, both builds' copies (`mcp_clients::claude_desktop_files`, a
+  test run's stand-in profile), **read only**; `{from: "paste", text}`: an
+  `mcpServers` block (or VS Code's `servers`), a server's own JSON, a link,
+  or an `npx …` / `uvx …` line — and shows each server whole: a program's
+  resolved command line, warnings and fingerprint, a link's address, its
+  variables and headers **by name only** (an `Authorization: Bearer` header
+  is the token), whether one of yours reaches it already, why it can't be
+  added. Yap's own entry (`yap mcp`, any name) is never offered.
+  `connectors_import {source, picks: [{key, approved}]}` reads it **again**
+  and adds the ticked ones — each program only with the fingerprint the
+  person saw —, so a secret goes from the setup to the vault and never
+  through the page; `origin: {kind: "import", from}`.
+
+### The catalogue (`catalog.rs` + `catalog.json`, wave 5b)
+
+Discover's list is **bundled with Yap** (`include_str!`: nothing is fetched
+to show it; a test run's own file through `YAP_E2E_CONNECTOR_CATALOG`). Only
+connectors Yap can use today: official servers that let any app sign in by
+itself (dynamic registration; Yap's client ID metadata document once it's
+hosted), take a pasted token, or run on this PC. Each entry: `id` (stable
+when its address changes), `name`, `publisher`, `blurb`, `logo` (a mark in
+`desktop/src/assets/connectors/`: Simple Icons', CC0, in the brand's colour;
+none → its initial on `color`), `url` (+ `fallbackSse`, `urlEditable` for a
+server on the person's network), `signIn` (`oauth` | `token` | `local`),
+`token` (`help`, `url`: where to make one), a program's `command`, `args`,
+`needs`, `tested` (YYYY-MM-DD: someone signed in and ran its tools with this
+Yap; **null for every entry until then**, and Yap never shows a tick
+claiming anyone's review), `notes`, `defaults` (tools that start **stricter**
+— Ask first or Off, never Always allow: Stripe's refunds and payment links
+Off), `docs`. `catalog::check` holds every entry to that (https on the
+internet, unique ids, a token entry says where to make one, …), and its
+unit test the bundled list (no tested dates, the famous ones as cards).
+
+- **Adding from it** (`Spec.catalog`): Rust takes the entry's own address,
+  transport and name — the person gives only a token, a name, and an
+  address where the entry lets them (Home Assistant) — and keeps `origin:
+  {kind: "catalog", catalog, catalogVersion}`. Its receipts and logs name
+  the entry ("Connector · Notion", "Connector sign-in · Notion":
+  `Connector::kind`), never a name the person typed. Its new tools start at
+  the entry's `defaults` (`catalog::start_settings`, only stricter).
+- **The list (8 Nov 2026)**, from the design's survey of the official
+  servers: **signing in in the browser** — Notion, Linear, Atlassian,
+  Supabase (added read-only: `?read_only=true`), Sentry, Cloudflare,
+  Airtable, Intercom (its US address), Granola, Fireflies, Stripe (money
+  tools Off; a sandbox first) —, several also taking a token instead
+  (Linear, Supabase, Cloudflare, Airtable, Fireflies, Stripe); **a token** —
+  GitHub (no sign-in for other apps yet), Zapier (a connection token for
+  apps it doesn't list), Home Assistant (its long-lived token, at the
+  person's own address) —; **a program** — Files (`npx -y
+  @modelcontextprotocol/server-filesystem` and the folders the person adds).
+  **Coming later** with why: Google Workspace (its servers are a preview for
+  reviewed apps, Gmail and Drive need a security review), Microsoft 365 (an
+  admin per organisation and a paid Copilot plan), Slack (Marketplace apps
+  only), Figma (its own list of apps, closed for now). Left out until they
+  can be signed in to by any app: Vercel (Yap's metadata document isn't
+  hosted yet), monday.com (each account's admin approves), PayPal and
+  Todoist (unclear), Canva, Asana, HubSpot, Zoom, Dropbox (Yap's own app
+  registration with each).
+- **Tests**: unit tests of the bundled list and the checks, adding from it
+  (the entry's address whatever the page sends, the receipts' name, a token
+  entry's token, an editable address), the stricter defaults, a pasted
+  setup shown without its secrets and added only as seen; and
+  `connectors.spec.js` (Yours, a link with a token, its tools' settings, a
+  program shown before it runs, one that won't start and Try again, a
+  sign-in through `fake-mcp-oauth.js` with Cancel, Sign out, Remove asking
+  first, Import from Claude Desktop and Paste, the search entries, the page
+  with the switch off, screenshots light and dark) and
+  `connectors-discover.spec.js` (a fake catalogue: the cards, Tested with
+  Yap only where it's set, search, Coming later, + for a sign-in, a token
+  and a program, ✓, the receipts' names, a catalogue id Yap doesn't have
+  refused).
 
 ## Claude Code runs' endpoint (`integrations/claude_live.rs`, 2026-11-07)
 

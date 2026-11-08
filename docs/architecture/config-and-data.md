@@ -1090,7 +1090,12 @@
     registration, whether it sends `iss`, its client-authentication methods),
     `registration` (the dynamic registration Yap made, for that issuer only:
     `{issuer, clientId, authMethod, redirectUris, registered}`) and `own`
-    (`{clientId}`: the person's own client). Never a token or a secret.
+    (`{clientId}`: the person's own client). `origin` says where it came
+    from (`{kind: "custom"}`; `{kind: "catalog", catalog, catalogVersion}`
+    for one added from Discover's bundled catalogue; `{kind: "import", from:
+    "claude-desktop" | "paste"}`), and `lastUsed` (unix seconds) when one
+    of its tools was last called, saved at most once a minute (Settings'
+    "Last used"; 2026-11-08). Never a token or a secret.
     Fields this build doesn't know are kept on its save (a newer Yap's).
     Settings: it stays through Delete some of your data and Reset app.
     Through `saving.rs` ("your connectors").
