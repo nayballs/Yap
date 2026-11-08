@@ -225,18 +225,21 @@ fn away_line(session: crate::integrations::claude_live::eyes::Eyes, turn: crate:
 /// **The connectors' tools a plain plan chat's session lists**
 /// (`claude_live/connectors.rs`): wave 4's offer where the turn was asked
 /// (`chat/tools/connectors.rs` `offered_for_plan`: the preview on, each
-/// connector's `where.plan` and `where.chat` — `where.voice` asked out loud
-/// —, never a phone's question, during a meeting only those allowed then).
+/// connector's `where.plan` and `where.chat` — `where.voice` asked out loud,
+/// `where.phone` from a phone, its reads only —, on in `conversation` (the
+/// composer's Connectors ▸: the session's fingerprint has the list, so a
+/// switch starts a new session), during a meeting only those allowed then).
 /// Never a Code chat's (`code`: its session reads the workspace), nor across
 /// the meetings. `None` without any.
-fn plan_connectors(t: &Asked<'_>, code: bool) -> Option<crate::integrations::claude_live::connectors::Listed> {
+fn plan_connectors(t: &Asked<'_>, code: bool, conversation: u64) -> Option<crate::integrations::claude_live::connectors::Listed> {
     use crate::chat::tools::connectors as conn;
     if code || t.meetings || !t.gates.tools {
         return None;
     }
     let surface = conn::Surface::of(t.scope);
     let meeting = conn::in_meeting();
-    let turn = conn::Turn::for_plan(conn::offered_for_plan(surface, meeting, t.cfg.connectors_in_meetings), surface, meeting)?;
+    let off = crate::integrations::connectors::chats::off(Some(conversation));
+    let turn = conn::Turn::for_plan(conn::offered_for_plan(surface, meeting, t.cfg.connectors_in_meetings, &off), surface, meeting)?;
     tracing::info!(tools = turn.tools().len(), "Claude plan: connectors' tools offered");
     Some(crate::integrations::claude_live::connectors::Listed::of(Arc::new(turn)))
 }
@@ -681,7 +684,7 @@ pub(super) async fn answer(t: &Asked<'_>, opened: &Opened, built: &Built, fitted
     let this_turn = turn_eyes(t, eyes);
     // The person's connectors (claude_live/connectors.rs): listed for the
     // session, this turn's own for its calls.
-    let connectors = plan_connectors(t, built.code.is_some());
+    let connectors = plan_connectors(t, built.code.is_some(), conv.id);
     let system = system_prompt(t, built, eyes, connectors.is_some());
     let web = t.gates.web_on;
     let agents = t.gates.agents;

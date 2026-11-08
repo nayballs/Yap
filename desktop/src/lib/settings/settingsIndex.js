@@ -245,6 +245,8 @@ export const SETTINGS_INDEX = [
   { page: 'connectors', section: 'Connectors', label: 'Google Calendar', desc: 'Reminders for Google meetings', keywords: 'calendar google connect', anchor: 'google-calendar' },
   { page: 'connectors', section: 'Connectors', label: 'Outlook Calendar', desc: 'Reminders for Outlook meetings', keywords: 'calendar outlook microsoft office ics', anchor: 'outlook-calendar' },
   { page: 'connectors', section: 'Connectors', label: 'Other calendar', desc: 'iCloud, Fastmail or any iCal link', keywords: 'calendar icloud fastmail ical ics webcal', anchor: 'other-calendar' },
+  // The preview's own switch (connectors/ConnectorsPreview.svelte): on both pages.
+  { page: 'connectors', section: 'Connectors', label: 'Connectors (preview)', desc: 'Tools from your apps and services for Chat and the Voice Assistant', keywords: 'connectors preview mcp servers tools apps services turn on enable', anchor: 'connectors-preview', toggle: 'connectorsPreview' },
   // The connectors preview's page (connectors/ConnectorsPage.svelte): found
   // only while it's on (`preview`; visibleIndex below).
   { page: 'connectors', section: 'Connectors', label: 'Your connectors', desc: 'The services and programs Chat and the Voice Assistant can use', keywords: 'connectors mcp servers tools yours sign in token tools permissions always allow ask first', anchor: 'your-connectors', preview: 'connectors' },

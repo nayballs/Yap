@@ -27,6 +27,7 @@
   import ConnectorSheet from './ConnectorSheet.svelte';
   import AddDialog from './AddDialog.svelte';
   import Toggle from '../../ui/Toggle.svelte';
+  import ConnectorsPreview from './ConnectorsPreview.svelte';
   import { conn, loadConnectors, loadCatalog, loadBudget, budgetLine, signOut, removeConnector } from './connectors.svelte.js';
   import { modelName } from '../../core/aiModel.js';
   import { entryOf, filterYours, joinArgs } from './catalog.js';
@@ -211,6 +212,8 @@
             desc="While a meeting records or a call is on, for the connectors you allow in meetings. Every change they make asks with a click; the meeting's own AI never uses them."
           />
         </section>
+        <!-- The preview's own switch (off: back to the calendars' page). -->
+        <ConnectorsPreview {cfg} />
       {/if}
     {/if}
   </div>

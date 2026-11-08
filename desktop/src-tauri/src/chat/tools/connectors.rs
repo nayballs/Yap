@@ -6,18 +6,24 @@
 //! - **Who gets them** ([`may`]): the strong cloud models only
 //!   (`documents::rich::strong`; never a model on this PC — an evaluation
 //!   comes first — nor the Claude plan's runs, which get them through Yap's
-//!   endpoint later), in Chat and the Voice Assistant asked on this PC;
-//!   never across the meetings, never a phone's question in this wave
-//!   ([`Surface`]), and while a meeting records or a call is on only with
-//!   "Let connectors work during meetings" (`connectors_in_meetings`) or the
-//!   connector's own `where.meetings`.
+//!   endpoint), in Chat, the Voice Assistant and a paired phone (wave 6:
+//!   its reads only); never across the meetings ([`Surface`]), and while a
+//!   meeting records or a call is on only with "Let connectors work during
+//!   meetings" (`connectors_in_meetings`) **and** the connector's own
+//!   `where.meetings` — then reads as set and every write asks with a click
+//!   (the design's rule: a meeting is other people's words, so a write is
+//!   never a spoken yes, but it isn't refused outright either).
 //! - **Which tools** ([`offered`]): each enabled connector's tools as last
 //!   listed (`cache.rs`: a turn never waits for a server to offer them),
-//!   allowed where the turn was asked (`where.chat`, `where.voice`), whose
-//!   setting isn't Off and whose schema was made safe — by their wire names
-//!   (`names::Map`, `<slug>__<tool>`: the same as Settings shows), in the
-//!   connectors' order then the tools' names, so every step and every turn
-//!   sends the same list.
+//!   allowed where the turn was asked (`where.chat`, `where.voice`,
+//!   `where.phone`) and **on in its chat** (the composer's Connectors ▸,
+//!   `connectors/chats.rs`), whose setting isn't Off and whose schema was
+//!   made safe — by their wire names (`names::Map`, `<slug>__<tool>`: the
+//!   same as Settings shows), in the connectors' order then the tools'
+//!   names, so every step and every turn sends the same list. **From the
+//!   phone** only the reads set to Always allow are offered ([`phone_may`]);
+//!   its others are known by name and refused ("That needs your OK on the
+//!   PC"): no card can show there.
 //! - **How many** (`budget.rs`): within the cap every tool as it is; past
 //!   it `find_tools` / `use_tool` ([`FIND`], [`USE`]), or for Claude on the
 //!   Messages API every tool deferred behind Anthropic's tool search
@@ -27,8 +33,10 @@
 //!   before it runs), then `consent::decide` on the setting as it is now —
 //!   run, ask first (a card in the thread, `pages/act/confirm.rs`: "Use
 //!   Notion: Create page?", its arguments readable and secrets masked,
-//!   **Allow once · Always allow · Deny**; asked out loud, the card waits in
-//!   Chat and the bar's line says so), or refused (Off; nobody to ask). Its
+//!   **Allow once · Always allow · Deny**; asked out loud, Yap also says one
+//!   line and the Yap bar asks, a spoken yes or no answering it:
+//!   `assistant/connector_ask.rs`), or refused (Off; nobody to ask: the
+//!   phone's "needs your OK on the PC"). Its
 //!   chip ("Notion · Search (launch plan)", "Didn't use Notion · Create
 //!   page: you said no"), its result shaped (`results.rs`: text, a picture
 //!   kept aside for a model that reads images, as a page's shot is), and
@@ -81,7 +89,7 @@ pub enum Surface {
     Chat,
     /// The Voice Assistant, asked on this PC.
     Voice,
-    /// A paired phone (Yap Link): no connectors in this wave.
+    /// A paired phone (Yap Link): the reads set to Always allow only.
     Phone,
 }
 
@@ -107,11 +115,21 @@ pub fn may(provider: &str, strong: bool) -> bool {
     strong && provider != crate::ai::local_llm::PROVIDER_ONDEVICE && provider != "local" && provider != crate::ai::claude_plan::PROVIDER
 }
 
-/// Whether a question asked at `scope` would get any connector tool now
-/// (the turn's gates; nothing read while the preview is off).
+/// Whether a question asked at `scope` would get any connector tool now,
+/// whatever its chat switched off (the turn's gates; nothing read while
+/// the preview is off).
 pub fn offers_any(cfg: &crate::config::YapConfig, scope: Option<&str>) -> bool {
-    !offered(Surface::of(scope), in_meeting(), cfg.connectors_in_meetings).is_empty()
+    !offered(Surface::of(scope), in_meeting(), cfg.connectors_in_meetings, &Off::new()).is_empty()
 }
+
+/// [`offers_any`] in chat `conversation` (`None`: a new chat's), the
+/// connectors it switched off left out (`connectors/chats.rs`).
+pub fn offers_any_in(cfg: &crate::config::YapConfig, scope: Option<&str>, conversation: Option<u64>) -> bool {
+    !offered(Surface::of(scope), in_meeting(), cfg.connectors_in_meetings, &crate::integrations::connectors::chats::off(conversation)).is_empty()
+}
+
+/// The connectors a chat switched off (their ids).
+pub type Off = std::collections::BTreeSet<String>;
 
 /// A meeting records or a call is on.
 pub fn in_meeting() -> bool {
@@ -183,25 +201,28 @@ impl Offered {
 }
 
 /// **The tools a turn may offer** (`surface`: where it was asked; `meeting`:
-/// one records or a call is on; `allow_meetings`: connectors may work then):
-/// each enabled connector's, as last listed, allowed there, not Off and
-/// offerable — in the connectors' order, then by name. Reads the store and
-/// the cache only (in memory after their first read); nothing while the
-/// preview is off.
-pub fn offered(surface: Surface, meeting: bool, allow_meetings: bool) -> Vec<Offered> {
-    offered_where(surface, meeting, allow_meetings, false)
+/// one records or a call is on; `allow_meetings`: "Let connectors work
+/// during meetings"; `off`: the connectors its chat switched off): each
+/// enabled connector's, as last listed, allowed there, on in that chat, not
+/// Off and offerable — in the connectors' order, then by name. During a
+/// meeting, only a connector allowed then (the switch **and** its own
+/// `where.meetings`). Reads the store and the cache only (in memory after
+/// their first read); nothing while the preview is off. (A phone's: all of
+/// its connectors' here; the turn keeps the reads, [`Turn::of`].)
+pub fn offered(surface: Surface, meeting: bool, allow_meetings: bool, off: &Off) -> Vec<Offered> {
+    offered_where(surface, meeting, allow_meetings, false, off)
 }
 
 /// **The tools a plan chat's turn may list** (`claude_live/connectors.rs`):
 /// [`offered`]'s, of the connectors allowed in plan chats too
-/// (`where.plan`). Nothing while the preview is off, nor on a phone.
-pub fn offered_for_plan(surface: Surface, meeting: bool, allow_meetings: bool) -> Vec<Offered> {
-    offered_where(surface, meeting, allow_meetings, true)
+/// (`where.plan`), on in its chat. Nothing while the preview is off.
+pub fn offered_for_plan(surface: Surface, meeting: bool, allow_meetings: bool, off: &Off) -> Vec<Offered> {
+    offered_where(surface, meeting, allow_meetings, true, off)
 }
 
 /// [`offered`], and with `plan` only the connectors whose `where.plan` is on.
-fn offered_where(surface: Surface, meeting: bool, allow_meetings: bool, plan: bool) -> Vec<Offered> {
-    if surface == Surface::Phone || !connectors::enabled() {
+fn offered_where(surface: Surface, meeting: bool, allow_meetings: bool, plan: bool, off: &Off) -> Vec<Offered> {
+    if !connectors::enabled() {
         return Vec::new();
     }
     let mut map = names::Map::default();
@@ -210,9 +231,9 @@ fn offered_where(surface: Surface, meeting: bool, allow_meetings: bool, plan: bo
         let here = match surface {
             Surface::Chat => c.where_.chat,
             Surface::Voice => c.where_.voice,
-            Surface::Phone => false,
+            Surface::Phone => c.where_.phone,
         };
-        if !c.enabled || !here || (plan && !c.where_.plan) || (meeting && !allow_meetings && !c.where_.meetings) {
+        if !c.enabled || !here || off.contains(&c.id) || (plan && !c.where_.plan) || (meeting && !(allow_meetings && c.where_.meetings)) {
             continue;
         }
         let Some(listing) = connectors::cache::get(&c.id) else { continue };
@@ -248,6 +269,9 @@ fn offered_where(surface: Surface, meeting: bool, allow_meetings: bool, plan: bo
 #[derive(Debug, Clone)]
 pub struct Turn {
     tools: Vec<Offered>,
+    /// A phone's tools it can't use from there (writes, Ask first): never
+    /// offered, refused by name ("needs your OK on the PC").
+    held: Vec<Offered>,
     mode: budget::Mode,
     surface: Surface,
     /// A meeting records or a call is on: every write asks.
@@ -263,21 +287,23 @@ impl Turn {
     /// Messages API). `None` without any. Pure.
     #[allow(clippy::too_many_arguments)]
     pub fn of(tools: Vec<Offered>, context: u64, rate_cap: Option<u64>, messages_api: bool, surface: Surface, meeting: bool, reads_images: bool, provider: &str) -> Option<Turn> {
+        let (tools, held) = for_surface(tools, surface);
         if tools.is_empty() {
             return None;
         }
         let total: u64 = tools.iter().map(|t| t.tokens).sum();
         let mode = budget::mode(total, budget::cap(context, rate_cap), messages_api);
-        Some(Turn { tools, mode, surface, meeting, reads_images, provider: provider.to_string() })
+        Some(Turn { tools, held, mode, surface, meeting, reads_images, provider: provider.to_string() })
     }
 
-    /// **This turn's**, for its model (`provider`, `model`) and where it was
-    /// asked (`scope`), with `context` tokens: the tools [`offered`] there
-    /// now. (The caller has checked [`may`].)
-    pub fn for_turn(cfg: &crate::config::YapConfig, provider: &str, model: &str, scope: Option<&str>, context: u64) -> Option<Turn> {
+    /// **This turn's**, for its model (`provider`, `model`), where it was
+    /// asked (`scope`) and its chat (`conversation`; `None`: a new chat's),
+    /// with `context` tokens: the tools [`offered`] there now. (The caller
+    /// has checked [`may`].)
+    pub fn for_turn(cfg: &crate::config::YapConfig, provider: &str, model: &str, scope: Option<&str>, context: u64, conversation: Option<u64>) -> Option<Turn> {
         let surface = Surface::of(scope);
         let meeting = in_meeting();
-        let tools = offered(surface, meeting, cfg.connectors_in_meetings);
+        let tools = offered(surface, meeting, cfg.connectors_in_meetings, &crate::integrations::connectors::chats::off(conversation));
         let reads = crate::chat::pictures::Gate::for_model(true, provider, model) == crate::chat::pictures::Gate::Look;
         let messages_api = crate::ai::llm::anthropic::speaks_messages(provider, model);
         let turn = Turn::of(tools, context, crate::chat::budget::rate_cap(provider), messages_api, surface, meeting, reads, provider)?;
@@ -290,7 +316,8 @@ impl Turn {
     /// own tool search past its budget, so never `find_tools`), a Claude
     /// that reads images. `None` without any. Pure.
     pub fn for_plan(tools: Vec<Offered>, surface: Surface, meeting: bool) -> Option<Turn> {
-        (!tools.is_empty()).then(|| Turn { tools, mode: budget::Mode::All, surface, meeting, reads_images: true, provider: crate::ai::claude_plan::PROVIDER.to_string() })
+        let (tools, held) = for_surface(tools, surface);
+        (!tools.is_empty()).then(|| Turn { tools, held, mode: budget::Mode::All, surface, meeting, reads_images: true, provider: crate::ai::claude_plan::PROVIDER.to_string() })
     }
 
     /// Its tools, as offered.
@@ -344,9 +371,15 @@ impl Turn {
         self.tools.iter().find(|t| t.wire == wire)
     }
 
-    /// Whether `name` is one of this turn's (a tool, or tool search's).
+    /// A phone's tool a wire name stands for, that it can't use there.
+    fn held(&self, wire: &str) -> Option<&Offered> {
+        self.held.iter().find(|t| t.wire == wire)
+    }
+
+    /// Whether `name` is one of this turn's (a tool, tool search's, or one a
+    /// phone can't use there).
     pub fn owns(&self, name: &str) -> bool {
-        self.tool(name).is_some() || (self.mode == budget::Mode::Search && (name == FIND || name == USE))
+        self.tool(name).is_some() || self.held(name).is_some() || (self.mode == budget::Mode::Search && (name == FIND || name == USE))
     }
 
     /// **The step the page shows** for a call of `name` with `args`:
@@ -412,6 +445,10 @@ impl Turn {
             return Ran { result: self.find(args), ..Ran::default() };
         }
         let (tool, args) = self.target(name, args);
+        // A phone's write (or Ask first): known, never run from there.
+        if let (None, Some(t)) = (tool, self.held(&args_tool(name, &args))) {
+            return phone_refused(t, ctx.live);
+        }
         let Some(t) = tool else {
             let asked = args_tool(name, &args);
             return Ran {
@@ -449,13 +486,18 @@ impl Turn {
             outside: ctx.outside,
             own_words: consent::own_words(args, &t.schema, &said),
             risky: consent::risky(&t.tool, t.title.as_deref()),
-            watching: ctx.live.is_some(),
+            // (A phone's question has its page, but no card shows there.)
+            watching: ctx.live.is_some() && self.surface != Surface::Phone,
             meeting: self.meeting,
         };
         match consent::decide(input) {
             consent::Decision::Run => {}
             consent::Decision::Refuse(consent::Refusal::Off) => {
                 return failed(format!("{label} is off in Yap's Settings → Connectors. Don't call it."), format!("Didn't use {label}: it's off"));
+            }
+            consent::Decision::Refuse(consent::Refusal::NobodyToAsk) if self.surface == Surface::Phone => {
+                tracing::info!(connector = %t.id, tool = %t.tool, "Chat: a connector's tool needed the user's OK on a phone's question; refused");
+                return phone_refused(t, ctx.live);
             }
             consent::Decision::Refuse(consent::Refusal::NobodyToAsk) => {
                 tracing::info!(connector = %t.id, tool = %t.tool, "Chat: a connector's tool needed the user's OK, and nobody watches the turn; refused");
@@ -465,10 +507,12 @@ impl Turn {
                 );
             }
             consent::Decision::Ask { why, always } => {
+                // (Asked out loud: Yap says it and the bar asks too, so it
+                // no longer only waits in Chat.)
                 if let Some(live) = ctx.live {
-                    let line = if self.surface == Surface::Voice { format!("Your OK is waiting in Chat \u{b7} {label}") } else { format!("Waiting for your OK \u{b7} {label}") };
-                    crate::chat::activity::tell(live.sink, Activity { mark: "connector", line });
+                    crate::chat::activity::tell(live.sink, Activity { mark: "connector", line: format!("Waiting for your OK \u{b7} {label}") });
                 }
+                let voice = self.surface == Surface::Voice;
                 let card = ConnectorCard {
                     connector: t.connector.clone(),
                     tool: t.shown(),
@@ -476,7 +520,10 @@ impl Turn {
                     always,
                     why: why_word(why).into(),
                     kind: kind_word(listed.kind).into(),
-                    voice: self.surface == Surface::Voice,
+                    voice,
+                    // A spoken yes may answer it: never a tool that can
+                    // delete, nor during a meeting (a click only).
+                    spoken: voice && listed.kind != Kind::Deletes && !self.meeting,
                 };
                 let shown = t.shown();
                 let what = confirm::Ask { act: "connector", label: &shown, site: &t.connector, does: "connector", ..Default::default() };
@@ -563,6 +610,40 @@ pub struct Ran {
     pub reached: bool,
     /// Its pictures, for a model that reads images.
     pub looks: Vec<crate::chat::pictures::Look>,
+}
+
+/// **What runs from a phone** (Yap Link, wave 6): a read set to Always
+/// allow — anything else would ask, and no card shows there. Pure.
+pub fn phone_may(t: &Offered) -> bool {
+    t.kind == Kind::Reads && t.setting == Setting::Allow
+}
+
+/// A turn's tools where it was asked: a phone's split into what it may use
+/// and what it may not ([`phone_may`]); anywhere else all of them. Pure.
+fn for_surface(tools: Vec<Offered>, surface: Surface) -> (Vec<Offered>, Vec<Offered>) {
+    if surface == Surface::Phone {
+        tools.into_iter().partition(phone_may)
+    } else {
+        (tools, Vec::new())
+    }
+}
+
+/// **A phone's call that would need the person's OK**: refused; the phone's
+/// step line says so ("That needs your OK on the PC · Notion · Create
+/// page"), and the model is told to say so.
+fn phone_refused(t: &Offered, live: Option<crate::chat::stream::Live<'_>>) -> Ran {
+    let label = t.label();
+    if let Some(live) = live {
+        crate::chat::activity::tell(live.sink, Activity { mark: "connector", line: format!("That needs your OK on the PC \u{b7} {label}") });
+    }
+    Ran {
+        result: tool_error(
+            format!("{label} needs the user's OK, and from the phone Yap only reads with connectors. Don't try it again: tell them it needs their OK on the PC, in Chat or with the Voice Assistant."),
+            Value::Null,
+            format!("Didn't use {label}: it needs your OK on the PC"),
+        ),
+        ..Ran::default()
+    }
 }
 
 /// The tool a call named (`use_tool`'s `tool`, else the name), for the

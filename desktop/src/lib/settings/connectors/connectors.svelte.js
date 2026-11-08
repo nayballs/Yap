@@ -236,7 +236,7 @@ export async function setEnabled(c, enabled) {
   }
 }
 
-/** Where Yap may use it: `{chat?, voice?, meetings?}` (never the phone here yet). */
+/** Where Yap may use it: `{chat?, voice?, meetings?, phone?}` (the phone: its reads only). */
 export async function setWhere(c, places) {
   try {
     putConnector(await invoke('connector_set_where', { id: c.id, places }));

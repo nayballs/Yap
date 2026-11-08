@@ -264,6 +264,8 @@ export const FIELD_DEFAULTS = {
   // Connectors (preview): "Let connectors work during meetings", Settings →
   // Connectors' foot (chat/tools/connectors.rs reads it), off.
   connectorsInMeetings: false,
+  // "Connectors (preview)" (Settings → Connectors): off by default.
+  connectorsPreview: false,
 };
 
 // The cleaned config payload the backend expects (trimmed dictionary,

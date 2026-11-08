@@ -178,17 +178,40 @@ async fn a_pasted_setup_is_shown_whole_without_its_secrets_and_added_as_seen() {
 }
 
 #[tokio::test]
-async fn where_it_is_used_changes_chat_voice_and_meetings_never_the_phone() {
+async fn where_it_is_used_changes_chat_voice_meetings_and_the_phone() {
     on();
     let c = add(&Spec { name: "Wiki".into(), url: Some("https://mcp.example.com/mcp".into()), ..Default::default() }).unwrap();
     assert_eq!(c.where_, store::Where::default());
     let v = connector_set_where(c.id.clone(), WherePatch { voice: Some(false), meetings: Some(true), ..Default::default() }).await.unwrap();
     assert_eq!(v.where_, store::Where { chat: true, voice: false, phone: false, plan: true, meetings: true });
-    // The phone isn't one of its fields: a page can't turn it on yet.
+    // The phone (wave 6: its reads only, `chat/tools/connectors.rs`), off by default.
     let patch: WherePatch = serde_json::from_value(json!({ "chat": false, "phone": true })).unwrap();
     let v = connector_set_where(c.id.clone(), patch).await.unwrap();
-    assert!(!v.where_.chat && !v.where_.phone);
+    assert!(!v.where_.chat && v.where_.phone && !v.where_.voice, "only what the patch names changes");
+    // A plan chat's switch isn't one of its fields: Settings doesn't show it.
+    let patch: WherePatch = serde_json::from_value(json!({ "plan": false })).unwrap();
+    assert!(connector_set_where(c.id.clone(), patch).await.unwrap().where_.plan);
     assert!(connector_set_where("c99".into(), WherePatch::default()).await.is_err());
+}
+
+#[test]
+fn a_chats_menu_lists_the_connectors_allowed_in_chat_each_on_unless_switched_off() {
+    on();
+    let link = |name: &str| Spec { name: name.into(), url: Some("https://mcp.example.com/mcp".into()), ..Default::default() };
+    let wiki = add(&link("Wiki")).unwrap();
+    let tracker = add(&link("Tracker")).unwrap();
+    let lights = add(&link("Lights")).unwrap();
+    store::update(&tracker.id, |c| c.where_.chat = false).unwrap();
+    store::update(&lights.id, |c| c.enabled = false).unwrap();
+    let off: std::collections::BTreeSet<String> = [wiki.id.clone()].into();
+    let m = chat_menu(&store::list(), &off, true);
+    assert!(m.shown);
+    assert_eq!(m.connectors.iter().map(|c| (c.name.as_str(), c.on)).collect::<Vec<_>>(), [("Wiki", false)], "enabled and allowed in Chat only");
+    assert!(chat_menu(&store::list(), &Default::default(), true).connectors[0].on, "a new chat: every one on");
+    // A Chat model that doesn't get connectors, or none to list: no Connectors ▸.
+    assert!(!chat_menu(&store::list(), &off, false).shown);
+    store::update(&wiki.id, |c| c.where_.chat = false).unwrap();
+    assert!(!chat_menu(&store::list(), &off, true).shown);
 }
 
 #[test]

@@ -26,6 +26,7 @@ import { fmtContext } from '../../core/aiUsage.js';
 import { SkillPicker } from '../../stores/skills.svelte.js';
 import { think, takeThink } from './chatThink.svelte.js';
 import { createDocPanel } from './chatDoc.svelte.js';
+import { createChatConnectors } from './chatConnectors.svelte.js';
 // Chat's status dots (stores/chatStatus.svelte.js): the list as read here,
 // and the ask-first cards waiting in a turn (needs you).
 import { chatStatus, tookList, cardAsked, turnOver } from '../../stores/chatStatus.svelte.js';
@@ -134,6 +135,8 @@ export function createChatState({ onopensettings = () => null, onopennote = () =
   // The panel beside the conversation (chat/documents.rs, chatDoc.svelte.js):
   // a tab per document and picture of this conversation.
   const doc = createDocPanel({ onopennote });
+  // This chat's connectors (the + menu's Connectors ▸, chatConnectors.svelte.js).
+  const connectors = createChatConnectors(() => activeId);
 
   /**
    * A turn's document events (`document`: made or changed, the panel shows
@@ -845,6 +848,8 @@ export function createChatState({ onopensettings = () => null, onopennote = () =
     byVoice = false;
     scope = null;
     choseNew = true;
+    // A new chat has every connector on.
+    connectors.resetNew();
     reportView();
     setTimeout(() => inputEl?.focus(), 0);
   }
@@ -1367,6 +1372,8 @@ export function createChatState({ onopensettings = () => null, onopennote = () =
         pageQuote: about?.page ? { text: about.text, site: about.page.site || '' } : null,
         // A new chat made a Code chat before its first question (agents/code_chat.rs).
         codeFolder: activeId == null ? (newChatFolder?.() ?? null) : null,
+        // A new chat's connectors switched off in its + menu (connectors/chats.rs).
+        connectorsOff: activeId == null ? connectors.newChatOff() : null,
       },
       onEvent
     );
@@ -1638,6 +1645,7 @@ export function createChatState({ onopensettings = () => null, onopennote = () =
 
   return {
     get doc() { return doc; },
+    get connectors() { return connectors; },
     get conversations() { return conversations; },
     set conversations(v) { conversations = v; },
     get activeId() { return activeId; },

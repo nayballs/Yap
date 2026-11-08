@@ -7,12 +7,15 @@
   // page?", the arguments as key: value lines (secrets masked, long values
   // cut by Rust), why Yap asks, and **Allow once · Always allow · Deny**
   // (`chat_connector_confirm`; no Always allow for a tool that can delete,
-  // nor one that's Always allow already). Asked out loud, the card waits
-  // here. No answer in two minutes is a no. Kept with the answer, answered
+  // nor one that's Always allow already). Asked out loud, Yap also says it
+  // and the Yap bar asks (assistant/connector_ask.rs): a spoken yes or no,
+  // or the bar's Allow once / Don't, answers this same card — unless it
+  // needs a click (it can delete, a meeting is on). No answer in two
+  // minutes is a no. Kept with the answer, answered
   // (ChatMessage.confirms). In PageConfirm's chunk.
   import { invoke } from '@tauri-apps/api/core';
 
-  /** `card`: the confirm event (`{id, state, connector: {connector, tool, args: [{key, value, cut, secret}], always, why, kind, voice}}`). */
+  /** `card`: the confirm event (`{id, state, connector: {connector, tool, args: [{key, value, cut, secret}], always, why, kind, voice, spoken}}`). */
   let { card } = $props();
 
   // Answered here, before Rust's next event says so.
@@ -67,7 +70,8 @@
       </dl>
     {/if}
     {#if st === 'asking'}
-      <p class="cwhy">{why}{#if c.voice}{' '}You asked out loud: answer here.{/if} Only you can say yes.</p>
+      <!-- Asked out loud (assistant/connector_ask.rs): a spoken yes or no answers it too, unless it needs a click. -->
+      <p class="cwhy">{why}{#if c.voice}{' '}{c.spoken ? 'You asked out loud: say yes or no, or answer here.' : 'You asked out loud: this one needs a click.'}{/if} Only you can say yes.</p>
       <div class="cbtns">
         <button type="button" class="callow" onclick={() => answer('once')}>Allow once</button>
         {#if c.always}<button type="button" class="calways" onclick={() => answer('always')}>Always allow</button>{/if}

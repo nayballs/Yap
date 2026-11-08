@@ -182,7 +182,7 @@ async fn added(srv: &fake::HttpFake) -> (String, Arc<Turn>) {
 
 /// The plan's turn of the tools as they're offered now.
 fn turn_now() -> Arc<Turn> {
-    Arc::new(Turn::for_plan(offered_for_plan(Surface::Chat, false, false), Surface::Chat, false).expect("tools offered"))
+    Arc::new(Turn::for_plan(offered_for_plan(Surface::Chat, false, false, &Default::default()), Surface::Chat, false).expect("tools offered"))
 }
 
 fn ctx(tools: &Arc<Turn>, question: &str, watched: bool) -> Context {

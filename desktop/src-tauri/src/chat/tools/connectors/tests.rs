@@ -59,7 +59,7 @@ async fn added(srv: &fake::HttpFake) -> String {
 }
 
 fn chat_turn() -> Turn {
-    Turn::of(offered(Surface::Chat, false, false), 32_768, None, false, Surface::Chat, false, false, "custom").expect("tools offered")
+    Turn::of(offered(Surface::Chat, false, false, &Off::new()), 32_768, None, false, Surface::Chat, false, false, "custom").expect("tools offered")
 }
 
 /// The next card asked on `log`, answered `reply` from the page.
@@ -90,25 +90,32 @@ fn only_strong_cloud_models_get_connectors_and_never_on_a_phone() {
 async fn the_offer_follows_the_switch_the_settings_where_and_meetings() {
     // The switch off: nothing, and nothing read.
     crate::integrations::connectors::switch_for_test(false);
-    assert!(offered(Surface::Chat, false, false).is_empty());
+    assert!(offered(Surface::Chat, false, false, &Off::new()).is_empty());
     assert!(!crate::integrations::connectors::store::touched());
     let srv = fake::http(Mode::Answer);
     let id = added(&srv).await;
-    let wires = |s, m, a| offered(s, m, a).into_iter().map(|t| t.wire).collect::<Vec<_>>();
+    let wires = |s, m, a| offered(s, m, a, &Off::new()).into_iter().map(|t| t.wire).collect::<Vec<_>>();
     // Named as Settings shows them; Always allow and Ask first both offered.
     assert_eq!(wires(Surface::Chat, false, false), ["homelights__list_lights", "homelights__turn_off"]);
     assert!(wires(Surface::Chat, false, false).iter().all(|w| crate::integrations::connectors::names::provider_safe(w)));
     assert_eq!(wires(Surface::Voice, false, false).len(), 2);
-    // Never on a phone in this wave.
+    // The phone: only once its `where.phone` is on (its reads are the turn's, below).
     assert!(wires(Surface::Phone, false, false).is_empty());
+    store::update(&id, |c| c.where_.phone = true).unwrap();
+    assert_eq!(wires(Surface::Phone, false, false).len(), 2);
+    // A chat that switched it off (its + menu): none of its tools there.
+    let off: Off = [id.clone()].into();
+    assert!(offered(Surface::Chat, false, false, &off).is_empty());
+    assert!(offered(Surface::Voice, false, false, &off).is_empty());
     // Off: never offered.
     connector_set_tool(id.clone(), "turn_off".into(), "off".into()).await.unwrap();
     assert_eq!(wires(Surface::Chat, false, false), ["homelights__list_lights"]);
-    // During a meeting: only with connectors allowed then, or this one's own `where.meetings`.
+    // During a meeting: only with connectors allowed then and this one's own `where.meetings`.
     assert!(wires(Surface::Chat, true, false).is_empty());
-    assert_eq!(wires(Surface::Chat, true, true).len(), 1);
+    assert!(wires(Surface::Chat, true, true).is_empty(), "the switch alone isn't enough");
     store::update(&id, |c| c.where_.meetings = true).unwrap();
-    assert_eq!(wires(Surface::Chat, true, false).len(), 1);
+    assert!(wires(Surface::Chat, true, false).is_empty(), "nor its own alone");
+    assert_eq!(wires(Surface::Chat, true, true).len(), 1);
     // Where it may be used: Chat, the Voice Assistant.
     store::update(&id, |c| c.where_.chat = false).unwrap();
     assert!(wires(Surface::Chat, false, false).is_empty());
@@ -156,7 +163,7 @@ fn within_the_budget_every_tool_past_it_tool_search() {
 async fn find_tools_gives_the_matches_definitions_and_use_tool_runs_one() {
     let srv = fake::http(Mode::Answer);
     added(&srv).await;
-    let mut tools = offered(Surface::Chat, false, false);
+    let mut tools = offered(Surface::Chat, false, false, &Off::new());
     // (Made many: tool search.)
     for i in 0..200 {
         let mut t = tools[0].clone();
@@ -264,17 +271,65 @@ async fn a_call_runs_asks_or_is_refused_as_its_setting_and_the_turn_say() {
 }
 
 #[tokio::test]
-async fn asked_out_loud_the_card_waits_in_chat_and_the_line_says_so() {
+async fn asked_out_loud_the_card_says_so_and_a_spoken_yes_may_answer_it_but_never_in_a_meeting() {
     let srv = fake::http(Mode::Answer);
     added(&srv).await;
-    let turn = Turn::of(offered(Surface::Voice, false, false), 32_768, None, false, Surface::Voice, false, false, "custom").unwrap();
-    let log = Log::default();
     let hall = json!({ "area": "hall" });
+    for (meeting, spoken) in [(false, true), (true, false)] {
+        let turn = Turn::of(offered(Surface::Voice, false, false, &Off::new()), 32_768, None, false, Surface::Voice, meeting, false, "custom").unwrap();
+        let log = Log::default();
+        let ctx = Ctx { question: "turn off the hall lights", own: &[], outside: false, live: Some(Live { sink: &log, beside: None }) };
+        let (r, ()) = tokio::join!(turn.execute("homelights__turn_off", &hall, ctx), answer_next(&log, "deny"));
+        assert!(!r.reached);
+        let c = log.cards()[0].connector.clone().unwrap();
+        // The Voice Assistant's sink says it and puts it on the bar (assistant/connector_ask.rs).
+        assert!(c.voice);
+        assert_eq!(c.spoken, spoken, "a spoken yes during a meeting: never (meeting {meeting})");
+        assert!(log.steps().iter().any(|s| s == "Waiting for your OK · Home lights · turn_off"), "{:?}", log.steps());
+    }
+    // Typed in Chat: neither.
+    let log = Log::default();
     let ctx = Ctx { question: "turn off the hall lights", own: &[], outside: false, live: Some(Live { sink: &log, beside: None }) };
-    let (r, ()) = tokio::join!(turn.execute("homelights__turn_off", &hall, ctx), answer_next(&log, "deny"));
+    let typed = chat_turn();
+    let (_, ()) = tokio::join!(typed.execute("homelights__turn_off", &hall, ctx), answer_next(&log, "deny"));
+    let c = log.cards()[0].connector.clone().unwrap();
+    assert!(!c.voice && !c.spoken);
+}
+
+#[tokio::test]
+async fn from_a_phone_reads_run_and_anything_that_would_ask_is_refused_with_the_phones_line() {
+    let srv = fake::http(Mode::Answer);
+    let id = added(&srv).await;
+    let calls = || srv.said().iter().filter(|l| l.contains("tools/call")).count();
+    // `where.phone` off (the default): nothing from the phone.
+    assert!(Turn::of(offered(Surface::Phone, false, false, &Off::new()), 32_768, None, false, Surface::Phone, false, false, "custom").is_none());
+    store::update(&id, |c| c.where_.phone = true).unwrap();
+    let turn = Turn::of(offered(Surface::Phone, false, false, &Off::new()), 32_768, None, false, Surface::Phone, false, false, "custom").unwrap();
+    // Only the read set to Always allow is offered; the write is known by its name.
+    let names: Vec<Value> = turn.definitions().iter().map(|t| t["function"]["name"].clone()).collect();
+    assert_eq!(names, [json!("homelights__list_lights")]);
+    assert!(turn.owns("homelights__turn_off"));
+    let log = Log::default();
+    let ctx = |outside: bool| Ctx { question: "Which of my lights are on?", own: &[], outside, live: Some(Live { sink: &log, beside: None }) };
+    // A read runs.
+    let r = turn.execute("homelights__list_lights", &json!({}), ctx(false)).await;
+    assert!(r.reached);
+    assert_eq!(r.result["data"]["text"], "Kitchen: on");
+    // A write: refused, no card (none can show on the phone), the phone's line.
+    let n = calls();
+    let r = turn.execute("homelights__turn_off", &json!({ "area": "hall" }), ctx(false)).await;
     assert!(!r.reached);
-    assert!(log.cards()[0].connector.as_ref().unwrap().voice);
-    assert!(log.steps().iter().any(|s| s == "Your OK is waiting in Chat · Home lights · turn_off"), "{:?}", log.steps());
+    assert_eq!(r.result["displayText"], "Didn't use Home lights · turn_off: it needs your OK on the PC");
+    assert!(r.result["error"].as_str().unwrap().contains("OK on the PC"));
+    assert!(log.steps().iter().any(|s| s == "That needs your OK on the PC · Home lights · turn_off"), "{:?}", log.steps());
+    // A read that would ask (after outside content, words that aren't the person's): refused too.
+    let r = turn.execute("homelights__list_lights", &json!({ "area": "hall" }), ctx(true)).await;
+    assert_eq!(r.result["displayText"], "Didn't use Home lights · list_lights: it needs your OK on the PC");
+    assert_eq!(calls(), n, "nothing sent");
+    assert!(log.cards().is_empty());
+    // Its read set to Ask first: not offered from the phone either.
+    connector_set_tool(id.clone(), "list_lights".into(), "ask".into()).await.unwrap();
+    assert!(Turn::of(offered(Surface::Phone, false, false, &Off::new()), 32_768, None, false, Surface::Phone, false, false, "custom").is_none());
 }
 
 #[tokio::test]

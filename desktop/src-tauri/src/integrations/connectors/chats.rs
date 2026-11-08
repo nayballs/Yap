@@ -161,11 +161,6 @@ pub fn off(conversation: Option<u64>) -> BTreeSet<String> {
     }
 }
 
-/// Whether connector `id` is on in chat `conversation`.
-pub fn is_on(conversation: Option<u64>, id: &str) -> bool {
-    !off(conversation).contains(id)
-}
-
 /// **Switch connector `id` on or off in chat `conversation`.** Saved (an
 /// entry that's empty again goes). `Err`: the save failed.
 pub fn set(conversation: u64, id: &str, on: bool) -> Result<(), String> {
@@ -278,8 +273,8 @@ mod tests {
         super::super::switch_for_test(true);
         assert!(off(Some(7)).is_empty(), "nobody touched it: every connector on");
         set(7, "c2", false).unwrap();
-        assert!(!is_on(Some(7), "c2") && is_on(Some(7), "c1"));
-        assert!(is_on(Some(8), "c2"), "another chat keeps its own");
+        assert!(off(Some(7)).contains("c2") && !off(Some(7)).contains("c1"));
+        assert!(!off(Some(8)).contains("c2"), "another chat keeps its own");
         // Back on: the entry goes.
         set(7, "c2", true).unwrap();
         assert!(with_store(|s| s.chats.is_empty()));

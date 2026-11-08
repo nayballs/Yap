@@ -722,7 +722,11 @@ model" and "couldn't answer" words (as `error`), `chat_turn` with scope
 `yap-assistant-stream`), the network receipts' "Voice Assistant from your
 phone". Not the PC's own things: the window in front, the screenshots in Chat's
 box (the phone's own pictures go instead), a quoted passage, the bar's
-capsule and card.
+capsule and card. **Connectors** (preview, wave 6: [integrations.md](./integrations.md#everywhere-else-in-chat-wave-6)):
+only a connector whose "Your phone" is on, and only its reads set to Always
+allow; anything that would ask is refused, said on the phone as a `step`
+("That needs your OK on the PC · Notion · Create page") and in the answer —
+no card on the phone in v1, and nothing new on the wire.
 
 **Speaking**: the same `Streamed` sink speaks from the answer's first whole
 sentence and the rest once it's checked, as much as "How much to read aloud"

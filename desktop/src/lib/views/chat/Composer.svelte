@@ -1,6 +1,9 @@
 <script>
-  // Chat's composer (after Claude Code's): + (Take a screenshot, voice
-  // replies and their volume), the message, the mic, and Send once there's
+  // Chat's composer (after Claude Code's): + (Take a screenshot; with the
+  // connectors preview on and a model that gets them, Connectors ▸ — a
+  // switch per connector for this chat, then Manage connectors…, as Claude's
+  // composer has: chatConnectors.svelte.js; voice replies and their volume),
+  // the message, the mic, and Send once there's
   // something to send — ■ Stop while an answer comes (Esc too); under it,
   // quiet, the model the message goes to (ModelChip, whose picker opens
   // above it all; on your Claude plan, the plan's usage ring beside it:
@@ -34,6 +37,7 @@
   import CodeEdge from './CodeEdge.svelte';
   import ContextRing from './ContextRing.svelte';
   import ThinkButton from './ThinkButton.svelte';
+  import ConnectorLogo from '../../settings/connectors/ConnectorLogo.svelte';
 
   /**
    * `chat`: the view's state; `onopensettings(section)`: ControlPanel's
@@ -145,6 +149,22 @@
   }
   function plusOutside(e) {
     if (chat.plusOpen && plusEl && !plusEl.contains(e.target)) chat.plusOpen = false;
+  }
+
+  // Connectors ▸ (connectors/chats.rs): read again as the menu opens, its
+  // flyout shut with it.
+  let connOpen = $state(false);
+  $effect(() => {
+    if (chat.plusOpen) chat.connectors.refresh();
+    else connOpen = false;
+  });
+  async function flipConnector(c) {
+    const r = await chat.connectors.toggle(c.id, !c.on);
+    if (!r.ok) toast({ title: `Couldn't switch ${c.name} for this chat`, description: r.why, variant: 'destructive' });
+  }
+  function manageConnectors() {
+    chat.plusOpen = false;
+    onopensettings?.('connectors');
   }
 
   // The mic: a dictation into the chat box (chat_dictate: the text comes
@@ -336,6 +356,41 @@
             </span>
           </button>
           <div class="optsep"></div>
+          {#if chat.connectors.shown}
+            <!-- Connectors ▸ (connectors/chats.rs): this chat's switches, as Claude's composer has. -->
+            <div class="optsub">
+              <button
+                class="optrow"
+                aria-haspopup="true"
+                aria-expanded={connOpen}
+                aria-label="Connectors"
+                data-testid="chat-connectors-row"
+                onclick={() => (connOpen = !connOpen)}
+                onkeydown={(e) => e.key === 'ArrowRight' && (connOpen = true)}
+              >
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 7V3M15 7V3" /><path d="M6 7h12v4a6 6 0 0 1-12 0z" /><path d="M12 17v4" /></svg>
+                <span class="opttext">
+                  <span class="optname">Connectors</span>
+                  <span class="optdesc">{chat.connectors.onCount} of {chat.connectors.list.length} on in this chat</span>
+                </span>
+                <svg class="optchev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m9 6 6 6-6 6" /></svg>
+              </button>
+              {#if connOpen}
+                <div class="pluspop subpop" role="group" aria-label="Connectors in this chat" data-testid="chat-connectors-menu">
+                  {#each chat.connectors.list as c (c.id)}
+                    <button class="optrow" aria-pressed={c.on} aria-label={c.name} title={c.on ? `${c.name} is on in this chat` : `${c.name} is off in this chat`} onclick={() => flipConnector(c)}>
+                      <ConnectorLogo logo={c.logo} name={c.name} color={c.color} size={20} />
+                      <span class="opttext"><span class="optname">{c.name}</span></span>
+                      <span class="switch" class:on={c.on} aria-hidden="true"><span></span></span>
+                    </button>
+                  {/each}
+                  <div class="optsep"></div>
+                  <button class="optlink" onclick={manageConnectors}>Manage connectors…</button>
+                </div>
+              {/if}
+            </div>
+            <div class="optsep"></div>
+          {/if}
           <!-- Spoken replies on / off (Settings → Voice Assistant → Speak replies). -->
           <button class="optrow" aria-pressed={chat.speakReplies} aria-label="Voice replies" title={voiceTitle} onclick={toggleVoiceReplies}>
             {#if chat.speakReplies}
@@ -611,6 +666,24 @@
   }
   .optvol {
     padding: 6px 8px 8px 34px;
+  }
+  /* Connectors ▸: its flyout beside the menu, as Claude's composer opens it. */
+  .optsub {
+    position: relative;
+  }
+  .optrow > .optchev {
+    width: 14px;
+    height: 14px;
+  }
+  .subpop {
+    left: calc(100% + 12px);
+    bottom: -6px;
+    width: 240px;
+    max-height: 320px;
+    overflow-y: auto;
+  }
+  .subpop .optrow {
+    padding: 6px 8px;
   }
   .optsep {
     height: 1px;

@@ -120,7 +120,8 @@ impl Gates {
 
     /// The tools' schemas every step sends, counted by `counter` (none for
     /// a model without tools): what the prompt and the question must fit
-    /// beside. `conversation`: the one asking (`search_chats` leaves it out);
+    /// beside. `conversation`: the one asking (`search_chats` leaves it out;
+    /// the connectors it switched off aren't offered);
     /// `ep`, `scope` and `context` (the model's, in tokens): what the
     /// connectors' tools come to (`connectors::Turn::for_turn`, as the turn
     /// builds them). `code`: it's a Code chat, which offers none of memory's
@@ -130,7 +131,7 @@ impl Gates {
         if !self.tools {
             return 0;
         }
-        let connectors = self.connectors.then(|| crate::chat::tools::connectors::Turn::for_turn(cfg, &ep.provider, &ep.model, scope, context)).flatten();
+        let connectors = self.connectors.then(|| crate::chat::tools::connectors::Turn::for_turn(cfg, &ep.provider, &ep.model, scope, context, conversation)).flatten();
         // (Only whether the calendar's offered matters to its schema.)
         let log = crate::chat::tools::calendar::Log::default();
         let extra = crate::chat::tools::Extra {

@@ -157,7 +157,7 @@ async fn fixed_of(cfg: &crate::config::YapConfig, target: &crate::ai::ai_model::
     let act = pictures != crate::chat::pictures::Gate::Off && crate::chat::pages::act::can_act(&target.provider, &target.model);
     let connectors = crate::chat::tools::connectors::may(&target.provider, strong) && crate::chat::tools::connectors::offers_any(cfg, None);
     let stable = crate::chat::turn::stable_prompt(cfg, &persona, target.tools, doc_tools, lines, cfg.web_search, pictures, act, calendar_on, connectors, &profile, crate::ai::eval::now(), code);
-    let connectors = connectors.then(|| crate::chat::tools::connectors::Turn::for_turn(cfg, &target.provider, &target.model, None, context)).flatten();
+    let connectors = connectors.then(|| crate::chat::tools::connectors::Turn::for_turn(cfg, &target.provider, &target.model, None, context, None)).flatten();
     let log = crate::chat::tools::calendar::Log::default();
     let extra = crate::chat::tools::Extra {
         memory: !code,
