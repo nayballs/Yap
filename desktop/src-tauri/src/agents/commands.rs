@@ -20,16 +20,24 @@ pub struct AgentWithLog {
     pub log: Vec<Value>,
 }
 
+/// An agent as the page reads it: `active` when the runner has it now (so a
+/// row whose record says it's at work, but that nothing runs, can be moved
+/// to Finished).
+fn as_read(mut agent: Agent) -> Agent {
+    agent.active = runner::active(&agent.id);
+    agent
+}
+
 /// Every agent, newest first.
 #[tauri::command]
 pub async fn agent_list() -> Vec<Agent> {
-    store::list()
+    store::list().into_iter().map(as_read).collect()
 }
 
 /// An agent and its log.
 #[tauri::command]
 pub async fn agent_get(id: String) -> Result<AgentWithLog, String> {
-    let agent = store::get(&id).ok_or("There's no such agent.")?;
+    let agent = as_read(store::get(&id).ok_or("There's no such agent.")?);
     let log = tauri::async_runtime::spawn_blocking(move || store::log_read(&id)).await.unwrap_or_default();
     Ok(AgentWithLog { agent, log })
 }
@@ -37,13 +45,13 @@ pub async fn agent_get(id: String) -> Result<AgentWithLog, String> {
 /// Stop an agent (a queued one comes off the queue).
 #[tauri::command]
 pub async fn agent_stop(id: String) -> Result<Agent, String> {
-    runner::stop(&id)
+    runner::stop(&id).map(as_read)
 }
 
 /// Continue a stopped, interrupted or failed agent.
 #[tauri::command]
 pub async fn agent_continue(id: String) -> Result<Agent, String> {
-    runner::continue_agent(&id)
+    runner::continue_agent(&id).map(as_read)
 }
 
 /// A message for an agent, typed in its tab: to it at once while it works,
@@ -51,15 +59,32 @@ pub async fn agent_continue(id: String) -> Result<Agent, String> {
 #[tauri::command]
 pub async fn agent_message(id: String, text: String) -> Result<Agent, String> {
     let go = consent::go_ahead(&text);
-    runner::message(&id, &text, go)
+    runner::message(&id, &text, go).map(as_read)
 }
 
-/// **Go ahead with an agent's plan**: the report card's button (the person's
-/// click is their consent): its next turn now, Yap's own go-ahead at the
-/// chat's Mode. Once: refused once the plan isn't waiting any more.
+/// **Go ahead with an agent's plan**: the report card's button, the Agent
+/// panel's row (the person's click is their consent): its next turn now,
+/// Yap's own go-ahead at the chat's Mode. `turn`: an earlier turn's plan (a
+/// Plan not used row's Go ahead); none, its latest turn's. Once: refused
+/// once that plan went ahead.
 #[tauri::command]
-pub async fn agent_go_ahead(id: String) -> Result<Agent, String> {
-    runner::go_ahead(&id)
+pub async fn agent_go_ahead(id: String, turn: Option<u32>) -> Result<Agent, String> {
+    runner::go_ahead_turn(&id, turn, None).map(as_read)
+}
+
+/// **Move to finished** (an Agent panel row's menu): a row whose record says
+/// it's at work but that nothing runs, or a plan still waiting, moved to
+/// Finished. Never stops or changes an agent's work: refused while it runs.
+#[tauri::command]
+pub async fn agent_move_to_finished(id: String, turn: u32) -> Result<Agent, String> {
+    runner::move_to_finished(&id, turn).map(as_read)
+}
+
+/// **Dismiss** an Agent panel row (`dismissed`: true, the default), or show
+/// it again (false): hidden there, kept in the log and History.
+#[tauri::command]
+pub async fn agent_dismiss(id: String, turn: u32, dismissed: Option<bool>) -> Result<Agent, String> {
+    runner::dismiss(&id, turn, dismissed.unwrap_or(true)).map(as_read)
 }
 
 /// Undo an agent (Undo all: every turn, back to before its first): what Undo

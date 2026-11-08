@@ -857,7 +857,13 @@
   context's fill against the model's window, an estimate of its cost while
   Claude Code hasn't priced it: 2026-11-08, `agents/usage.rs`, new fields of
   the turn's own that an older Yap drops on its save, so the turn then shows
-  no numbers and its log's list), each
+  no numbers and its log's list); a plan nobody acted on, set aside once a
+  newer turn began in its chat (`planUnused`, "Plan not used": the turn's,
+  and the agent's for its latest turn) and an Agent panel row dismissed
+  (`dismissed`, the turn's) — 2026-11-08, flags left out while false, whose
+  loss on an older Yap's save is harmless: at the next start
+  `store::migrate` sets aside again every plan still waiting that isn't its
+  chat's latest turn, and a dismissed row just shows again; each
   chat's Mode chip (`modes`), each Code chat's folder (`codeChats`:
   conversation id → `{path, ts}`, yap-code.md "Code chats") and the one-time Bypass OK
   (`bypassConfirmed`); and `%APPDATA%/yap/agents/`, a folder per agent:

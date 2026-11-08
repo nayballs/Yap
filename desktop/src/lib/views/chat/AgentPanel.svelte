@@ -24,29 +24,50 @@
   // - **The crew moves only on screen**: paused while the window is hidden
   //   or minimised (stores/windowShown.svelte.js) or the panel is out of
   //   view; still under reduced motion (crew.css).
+  // - **Needs you only while something truly waits, live** (2026-11-08):
+  //   a permission prompt still waiting, a plan's go-ahead on the latest
+  //   turn with nothing newer begun, an ask-first card — each row with its
+  //   card's own buttons inline (Allow once / Deny and what it asks, Go
+  //   ahead / Not yet, Send / Don't), through the same commands the thread's
+  //   cards use, so whichever is answered first, both close. A plan nobody
+  //   acted on is "Plan not used", in Finished (Go ahead in its details).
+  // - **A row's menu** (⋯, right-click, the menu key): Move to finished (a
+  //   row whose agent nothing runs), Dismiss / Restore ("Show dismissed" at
+  //   Finished's foot), Stop (asked first) for an agent at work.
   // Live from the `yap-agent` events the tab and stores/agents.svelte.js
   // hear: nothing polled.
+  import { invoke } from '@tauri-apps/api/core';
   import { onMount, tick, untrack } from 'svelte';
-  import { panelRows, panelGroups, panelTotals, statsLine, fmtTokens, fmtClock, costWords, latestSteps, modeTone } from '../../core/agentPanel.js';
+  import { panelRows, panelGroups, panelTotals, statsLine, fmtTokens, fmtClock, costWords, latestSteps, modeTone, rowActions } from '../../core/agentPanel.js';
   import { modeLabel, modelLabel, costLine } from '../../core/agents.js';
   import { effortLabel } from '../../core/effort.js';
   import { characterFor, crewLabel } from '../../core/crew.js';
   import { overflowTip } from '../../ui/overflowTip.js';
+  import { openContextMenu, menuKey, menuOpenFor, askConfirm } from '../../ui/contextMenu.svelte.js';
+  import { toast } from '../../ui/toast.svelte.js';
   import { windowShown, followWindowShown } from '../../stores/windowShown.svelte.js';
+  import { answerApproval, goAheadWithPlan, rowAction } from '../../stores/agents.svelte.js';
   import { panelMemory } from './agentPanelMemory.svelte.js';
   import CrewAvatar from './CrewAvatar.svelte';
 
   /**
    * `agent`: the tab's agent as it is now; `agents`: the Code chat's agents,
    * the tab's first; `logs`: agent id → its log; `steps`: agent id → the line
-   * it's on; `now`: unix seconds (the clock); `want`: `{key, seq}`, a row to
-   * open and show (a pill's, a report card's); `onopen(row)`: Open.
+   * it's on; `approvals`: the permission prompts waiting (stores/agents);
+   * `cards`: the agent ask-first cards waiting in its chat
+   * (stores/chatStatus); `now`: unix seconds (the clock); `want`: `{key,
+   * seq}`, a row to open and show (a pill's, a report card's);
+   * `onopen(row)`: Open.
    */
-  let { agent, agents = [], logs = {}, steps = {}, now = Date.now() / 1000, want = null, onopen = null } = $props();
+  let { agent, agents = [], logs = {}, steps = {}, approvals = [], cards = [], now = Date.now() / 1000, want = null, onopen = null } = $props();
 
-  const rows = $derived(panelRows(agents, { logs, steps, now }));
+  /** Every row, the dismissed ones too (the totals count them); the ones shown. */
+  const every = $derived(panelRows(agents, { logs, steps, now, approvals, cards, dismissed: true }));
+  const showDismissed = $derived(!!panelMemory.dismissed[agent?.id ?? '']);
+  const dismissedCount = $derived(every.filter((r) => r.dismissed).length);
+  const rows = $derived(showDismissed ? every : every.filter((r) => !r.dismissed));
   const groups = $derived(panelGroups(rows));
-  const totals = $derived(panelTotals(rows));
+  const totals = $derived(panelTotals(every.filter((r) => r.kind === 'turn')));
   const cost = $derived(costWords(totals.cost, { pay: agent?.pay, estimated: totals.approx && agent?.pay === 'key' }));
 
   let rootEl = $state(null);
@@ -98,6 +119,78 @@
     heads[to]?.focus();
   }
 
+  // ---- Needs you's buttons, and a row's menu ----
+
+  /** The row key being answered (its buttons off meanwhile). */
+  let acting = $state('');
+  /** Each row's element (its menu's focus back, its ⋯ kept while the menu is up). */
+  const rowEls = $state({});
+
+  async function doing(r, what, run) {
+    if (acting) return;
+    acting = r.key;
+    try {
+      await run();
+    } catch (e) {
+      toast({ title: `Couldn't ${what}`, description: String(e?.message ?? e), variant: 'destructive' });
+    } finally {
+      acting = '';
+    }
+  }
+
+  /** A permission prompt's Allow once / Deny — a plan's Go ahead / Not yet: the thread's card's own answer. */
+  const answer = (r, allow) => doing(r, allow ? 'allow it' : 'deny it', () => answerApproval(r.needs.approval.id, allow));
+  /** A plan its turn ended with: Go ahead (its report card's own), Not yet (set aside: Plan not used). */
+  const goAhead = (r) => doing(r, 'go ahead with the plan', () => goAheadWithPlan(r.agentId, r.n));
+  const notYet = (r) => doing(r, 'set the plan aside', () => rowAction('agent_move_to_finished', r.agentId, r.n));
+  /** An ask-first card's Send / Don't (`chat_page_confirm`, as the thread's card answers it). */
+  const confirm = (r, allow) => doing(r, allow ? 'send it' : 'cancel it', () => invoke('chat_page_confirm', { id: r.card.id, allow }));
+
+  /** **A row's menu**: Move to finished, Dismiss / Restore, Stop (asked first). */
+  function rowMenu(e, r) {
+    const a = rowActions(r);
+    const items = [
+      a.finish && { label: 'Move to finished', icon: 'check', onselect: () => doing(r, 'move it to Finished', () => rowAction('agent_move_to_finished', r.agentId, r.n)) },
+      a.dismiss && { label: 'Dismiss', icon: 'archive', onselect: () => doing(r, 'dismiss it', () => rowAction('agent_dismiss', r.agentId, r.n, { dismissed: true })) },
+      a.restore && { label: 'Restore', icon: 'restore', onselect: () => doing(r, 'restore it', () => rowAction('agent_dismiss', r.agentId, r.n, { dismissed: false })) },
+      a.stop && { separator: true },
+      a.stop && {
+        label: 'Stop…',
+        icon: 'stop',
+        danger: true,
+        onselect: () =>
+          askConfirm({
+            title: 'Stop the agent?',
+            body: `The agent in ${r.agent?.folder || 'this workspace'} stops where it is. Continue carries it on later.`,
+            confirmLabel: 'Stop',
+            busyLabel: 'Stopping…',
+            returnFocus: rowEls[r.key] ?? null,
+            run: async () => {
+              try {
+                await invoke('agent_stop', { id: r.agentId });
+              } catch (err) {
+                toast({ title: "Couldn't stop the agent", description: String(err?.message ?? err), variant: 'destructive' });
+                return false;
+              }
+            },
+          }),
+      },
+    ];
+    return openContextMenu(e, items, { label: `Turn ${r.title}`, row: rowEls[r.key] ?? null });
+  }
+  const hasMenu = (r) => {
+    const a = rowActions(r);
+    return a.finish || a.dismiss || a.restore || a.stop;
+  };
+
+  /** A row's head's keys: ↑ ↓ between rows, the menu key opens its menu. */
+  function headKey(e, r) {
+    if (menuKey(e, (ev) => rowMenu(ev, r))) return;
+    nav(e);
+  }
+
+  const toggleDismissed = () => (panelMemory.dismissed = { ...panelMemory.dismissed, [agent?.id ?? '']: !showDismissed });
+
   const pct = (v) => `${Math.round(Math.max(0, Math.min(1, v)) * 100)}%`;
   const todoMark = (s) => (s === 'completed' ? '✓' : s === 'in_progress' ? '●' : '○');
   const todoWord = (s) => (s === 'completed' ? ', done' : s === 'in_progress' ? ', in progress' : ', to do');
@@ -148,7 +241,26 @@
           {#each g.rows as r (r.key)}
             {@const isOpen = !!open[r.key]}
             {@const steps8 = isOpen ? latestSteps(r.events) : []}
-            <li class="row" class:open={isOpen} data-testid="chat-agent-row" data-key={r.key} data-turn={r.n} data-agent={r.agentId} data-state={r.state} data-status={r.status ?? ''} data-open={isOpen}>
+            {@const menu = hasMenu(r)}
+            <!-- svelte-ignore a11y_no_noninteractive_element_interactions (its right-click menu: the ⋯ button and the menu key are the keyboard's way) -->
+            <li
+              class="row"
+              class:open={isOpen}
+              class:menuopen={menuOpenFor(rowEls[r.key])}
+              class:hasmenu={menu}
+              bind:this={rowEls[r.key]}
+              data-testid="chat-agent-row"
+              data-key={r.key}
+              data-kind={r.kind}
+              data-turn={r.n}
+              data-agent={r.agentId}
+              data-state={r.state}
+              data-status={r.status ?? ''}
+              data-open={isOpen}
+              data-unused={r.unused ? 'true' : null}
+              data-dismissed={r.dismissed ? 'true' : null}
+              oncontextmenu={(e) => menu && rowMenu(e, r)}
+            >
               <button
                 type="button"
                 class="rhead"
@@ -156,7 +268,7 @@
                 aria-expanded={isOpen}
                 aria-controls="more-{r.key}"
                 onclick={() => toggle(r.key)}
-                onkeydown={nav}
+                onkeydown={(e) => headKey(e, r)}
                 use:overflowTip={{ text: r.title }}
               >
                 <CrewAvatar
@@ -191,7 +303,58 @@
                   ><span class="fill" style:width={pct(r.progress.value)}></span></span>
                 </span>
               </button>
-              {#if isOpen}
+              {#if menu}
+                <button
+                  type="button"
+                  class="more"
+                  title="More"
+                  aria-label={`More for ${r.title}`}
+                  aria-haspopup="menu"
+                  data-more
+                  data-testid="chat-agent-row-menu"
+                  onclick={(e) => rowMenu(e, r)}
+                >
+                  <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><circle cx="5" cy="12" r="1.7" /><circle cx="12" cy="12" r="1.7" /><circle cx="19" cy="12" r="1.7" /></svg>
+                </button>
+              {/if}
+              {#if r.needs}
+                {@const busyRow = acting === r.key}
+                <!-- What waits on the person, with its card's own buttons. -->
+                <div class="rneeds" role="group" aria-label={`${r.title}: needs you`} data-testid="chat-agent-row-needs" data-kind={r.needs.kind}>
+                  {#if r.needs.kind === 'approve'}
+                    <p class="nwhat">Asks to: <strong data-testid="chat-agent-row-asks">{r.needs.approval.summary}</strong></p>
+                    {#if r.needs.approval.detail && r.needs.approval.detail.trim() !== (r.needs.approval.summary || '').trim()}
+                      <!-- svelte-ignore a11y_no_noninteractive_tabindex (it scrolls: the keyboard reaches it) -->
+                      <pre class="ndetail" tabindex="0" aria-label="What exactly it would do">{r.needs.approval.detail}</pre>
+                    {/if}
+                    <div class="nbtns">
+                      <button type="button" class="nbtn primary" disabled={busyRow} onclick={() => answer(r, true)}>Allow once</button>
+                      <button type="button" class="nbtn" disabled={busyRow} onclick={() => answer(r, false)}>Deny</button>
+                    </div>
+                  {:else if r.needs.kind === 'plan'}
+                    <div class="nbtns">
+                      <button type="button" class="nbtn primary" disabled={busyRow} onclick={() => answer(r, true)}>Go ahead</button>
+                      <button type="button" class="nbtn" disabled={busyRow} onclick={() => answer(r, false)}>Not yet</button>
+                    </div>
+                  {:else if r.needs.kind === 'goahead'}
+                    <div class="nbtns">
+                      <button type="button" class="nbtn primary" disabled={busyRow} onclick={() => goAhead(r)}>Go ahead</button>
+                      <button type="button" class="nbtn" disabled={busyRow} onclick={() => notYet(r)}>Not yet</button>
+                    </div>
+                  {:else if r.needs.kind === 'confirm'}
+                    {#if r.request}
+                      <!-- The brief in full: it's seen before it goes (the safety rule). -->
+                      <!-- svelte-ignore a11y_no_noninteractive_tabindex (it scrolls: the keyboard reaches it) -->
+                      <div class="ndetail brief" tabindex="0" role="region" aria-label="The agent's brief" data-testid="chat-agent-row-brief">{r.request}</div>
+                    {/if}
+                    <div class="nbtns">
+                      <button type="button" class="nbtn primary" disabled={busyRow} onclick={() => confirm(r, true)}>Send</button>
+                      <button type="button" class="nbtn" disabled={busyRow} onclick={() => confirm(r, false)}>Don't</button>
+                    </div>
+                  {/if}
+                </div>
+              {/if}
+              {#if isOpen && r.kind === 'turn'}
                 <div class="rmore" id="more-{r.key}" data-testid="chat-agent-row-more">
                   {#if r.todos.length}
                     <ul class="todolist" data-testid="chat-agent-row-todos" aria-label="To-dos">
@@ -211,6 +374,10 @@
                   {/if}
                   <div class="rfoot">
                     <span class="counts" data-testid="chat-agent-row-counts">{plural(r.commands, 'command', 'commands')} · {plural(r.files, 'file', 'files')} changed</span>
+                    {#if rowActions(r).goAhead}
+                      <!-- A plan nobody used: start it now, as a turn of its own. -->
+                      <button type="button" class="openbtn primary" data-testid="chat-agent-row-go-ahead" disabled={acting === r.key} onclick={() => goAhead(r)} aria-label={`Go ahead with the plan for ${r.title}`}>Go ahead</button>
+                    {/if}
                     <button type="button" class="openbtn" data-testid="chat-agent-row-open" onclick={() => onopen?.(r)} aria-label={`Open the whole timeline of ${r.title}`}>Open</button>
                   </div>
                 </div>
@@ -218,12 +385,23 @@
             </li>
           {/each}
         </ul>
+        {#if g.id === 'finished'}{@render dismissedFoot()}{/if}
       {/if}
     </section>
   {:else}
     <p class="pempty">Nothing yet.</p>
   {/each}
+  {#if !groups.some((g) => g.id === 'finished')}{@render dismissedFoot()}{/if}
 </div>
+
+{#snippet dismissedFoot()}
+  {#if dismissedCount}
+    <!-- The rows dismissed: shown again (in Finished) or hidden, for this agent while the window stays open. -->
+    <button type="button" class="dismissedbtn" data-testid="chat-agent-show-dismissed" aria-pressed={showDismissed} onclick={toggleDismissed}>
+      {showDismissed ? 'Hide dismissed' : `Show dismissed · ${dismissedCount}`}
+    </button>
+  {/if}
+{/snippet}
 
 <style>
   .apanel {
@@ -376,10 +554,141 @@
     list-style: none;
   }
   .row {
+    position: relative;
     border-bottom: 1px solid var(--yap-paper-rule);
   }
   .row:last-child {
     border-bottom: none;
+  }
+  /* Room for the row's ⋯ at its top right. */
+  .row.hasmenu .rtop {
+    padding-right: 24px;
+  }
+  /* A row's ⋯ (its menu): on a hover, a focus inside, or while its menu is up. */
+  .more {
+    position: absolute;
+    top: 6px;
+    right: 2px;
+    display: grid;
+    place-items: center;
+    width: 24px;
+    height: 24px;
+    padding: 0;
+    border: none;
+    border-radius: 6px;
+    background: none;
+    color: var(--yap-paper-muted);
+    cursor: pointer;
+    opacity: 0;
+  }
+  .more svg {
+    width: 15px;
+    height: 15px;
+  }
+  .row:hover .more,
+  .row:focus-within .more,
+  .row.menuopen .more {
+    opacity: 1;
+  }
+  .more:hover {
+    background: var(--yap-paper-s2);
+    color: var(--yap-paper-ink);
+  }
+  .more:focus-visible {
+    opacity: 1;
+    outline: 2px solid var(--yap-focus-ring);
+    outline-offset: 1px;
+  }
+  /* What waits on the person, with its card's own buttons, under the row's head. */
+  .rneeds {
+    margin: -2px 4px 10px 50px;
+    font-size: 12px;
+  }
+  .nwhat {
+    margin: 0 0 6px;
+    color: var(--yap-paper-ink);
+    overflow-wrap: anywhere;
+  }
+  .nwhat strong {
+    font-weight: 650;
+  }
+  .ndetail {
+    max-height: 120px;
+    margin: 0 0 8px;
+    padding: 6px 9px;
+    overflow: auto;
+    border-radius: 7px;
+    background: var(--yap-paper-s1);
+    font-family: var(--yap-font-mono, ui-monospace, monospace);
+    font-size: 11.5px;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+  }
+  .ndetail.brief {
+    font-family: inherit;
+    font-size: 12px;
+    line-height: 1.45;
+  }
+  .ndetail:focus-visible {
+    outline: 2px solid var(--yap-focus-ring);
+    outline-offset: 1px;
+  }
+  .nbtns {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+  .nbtn {
+    height: 26px;
+    padding: 0 12px;
+    border: 1px solid var(--yap-paper-rule);
+    border-radius: 999px;
+    background: var(--yap-paper);
+    color: var(--yap-paper-ink);
+    font: inherit;
+    font-size: 12px;
+    font-weight: 600;
+    cursor: pointer;
+  }
+  .nbtn:hover {
+    background: var(--yap-paper-s2);
+  }
+  .nbtn.primary,
+  .openbtn.primary {
+    border-color: var(--yap-primary-line);
+    background: var(--yap-primary);
+    color: var(--yap-primary-fg);
+  }
+  .nbtn.primary:hover,
+  .openbtn.primary:hover {
+    background: var(--yap-primary-hover);
+  }
+  .nbtn:disabled,
+  .openbtn:disabled {
+    opacity: 0.6;
+    cursor: default;
+  }
+  .nbtn:focus-visible,
+  .dismissedbtn:focus-visible {
+    outline: 2px solid var(--yap-focus-ring);
+    outline-offset: 1px;
+  }
+  /* "Show dismissed · 2" at Finished's foot. */
+  .dismissedbtn {
+    align-self: flex-start;
+    margin: 4px 0 0;
+    padding: 2px 4px 2px 0;
+    border: none;
+    border-radius: 6px;
+    background: none;
+    color: var(--yap-paper-muted);
+    font: inherit;
+    font-size: 11.5px;
+    font-weight: 600;
+    cursor: pointer;
+  }
+  .dismissedbtn:hover {
+    color: var(--yap-paper-ink);
   }
   .rhead {
     display: flex;

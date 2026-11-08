@@ -62,6 +62,9 @@ import {
   todoSummary,
   shortModel,
   poseOf,
+  needsOf,
+  rowPose,
+  rowActions,
 } from '../src/lib/core/agentPanel.js';
 
 const CREW_CSS = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'src', 'lib', 'views', 'chat', 'crew', 'crew.css');
@@ -171,6 +174,32 @@ const ECHO = [
   init(),
   said('e1', [{ type: 'text', text: 'Got: {{user_text}}' }], ECHO_USE, 'end_turn'),
   result('Got: {{user_text}}', 0.002, ECHO_USE),
+  { _wait_user: true },
+];
+
+/** Plan mode: it reads notes.md, asks ExitPlanMode's permission (the plan card), and ends its turn with the plan. */
+const PLAN_MD = '## Bolder bag markers\n\n1. Thicker outlines for the seed bags on the map\n2. A legend line in notes.md';
+const PLAN_SAID = "Here's the plan: bolder bag markers and a legend line. Shall I go ahead?";
+const PLANNING = [
+  { _wait_user: true },
+  { ...init(), permissionMode: 'plan', tools: ['Bash', 'Edit', 'Read', 'Write', 'ExitPlanMode'] },
+  said('q1', [{ type: 'tool_use', id: 'toolu_read', name: 'Read', input: { file_path: '{{cwd}}\\notes.md' } }], use(900, 0, 0, 40)),
+  toolResult('toolu_read', 'Draft notes'),
+  said('q2', [{ type: 'tool_use', id: 'toolu_plan', name: 'ExitPlanMode', input: { plan: PLAN_MD } }], use(100, 0, 900, 60)),
+  { _mcp: { tool: 'approve', arguments: { tool_name: 'ExitPlanMode', input: { plan: PLAN_MD }, tool_use_id: 'toolu_plan' }, result_for: 'toolu_plan' } },
+  said('q3', [{ type: 'text', text: PLAN_SAID }], use(50, 0, 1000, 30), 'end_turn'),
+  result(PLAN_SAID, 0.01, use(1050, 0, 1900, 130)),
+  { _wait_user: true },
+];
+/** A newer request that works for a while (so it's still Running when the panel is looked at), then says what it was told. */
+const SLOW_USE = use(60, 0, 2000, 40);
+const SLOW = [
+  { _wait_user: true },
+  init(),
+  said('w1', [{ type: 'text', text: 'Working on it.' }], SLOW_USE),
+  { _sleep_ms: 9000 },
+  said('w2', [{ type: 'text', text: 'Got: {{user_text}}' }], SLOW_USE, 'end_turn'),
+  result('Got: {{user_text}}', 0.003, SLOW_USE),
   { _wait_user: true },
 ];
 
@@ -300,21 +329,54 @@ test('core/agentPanel.js: tokens and time, the context, progress, the third line
   const t3 = { n: 3, title: 'And a legend', request: 'And a legend.', status: 'queued', startedTs: 0 };
   const running = { ...agent, turnList: [t1, t2, t3] };
   expect([stateOf(running, t1, now), stateOf(running, t2, now), stateOf(running, t3, now)]).toEqual(['finished', 'running', 'queued']);
-  expect(stateOf(running, { ...t2, status: 'asking' }, now)).toBe('needs');
+  // A step to allow: Needs you while its prompt still waits (the live truth), else it's at work.
+  const prompt = { id: 7, run: 'a1', tool: 'Bash', summary: 'Run a command: npm test', detail: 'npm test' };
+  expect(stateOf(running, { ...t2, status: 'asking' }, now, { approval: prompt })).toBe('needs');
+  expect(stateOf(running, { ...t2, status: 'asking' }, now)).toBe('running');
+  expect(needsOf('needs', { ...t2, status: 'asking' }, prompt)).toEqual({ kind: 'approve', approval: prompt });
+  expect(needsOf('needs', { ...t2, status: 'asking' }, { ...prompt, tool: 'ExitPlanMode' }).kind).toBe('plan');
   expect(rowLine(running, t2, { todos: t2.todos, line: 'Writing the planting guide' })).toBe('3/7 · Writing the planting guide');
-  expect(rowLine(running, { ...t2, status: 'asking' }, { todos: t2.todos, line: 'Waiting for you to allow a step' })).toBe('3/7 · Waiting for you to allow a step');
+  expect(rowLine(running, { ...t2, status: 'asking' }, { todos: t2.todos, line: 'Waiting for you to allow a step', state: 'needs' })).toBe('3/7 · Waiting for you to allow a step');
+  expect(rowLine(running, { ...t2, status: 'asking' }, { todos: t2.todos, line: 'Waiting for you to allow a step' })).toBe('3/7 · Writing the planting guide');
   expect(rowLine(running, t1, { todos: t1.todos })).toBe('7/7 · All done');
   expect(rowLine(running, { ...t2, todos: [] }, { line: 'Reading beds.json' })).toBe('Reading beds.json');
   expect(rowLine(running, { ...t1, status: 'failed', error: 'Claude Code stopped before it finished.' }, {})).toBe("Didn't finish · Claude Code stopped before it finished.");
   expect(rowLine(running, { ...t1, status: 'stopped' }, {})).toBe('Stopped');
   expect(rowLine(running, t3, { state: 'queued' })).toBe('Goes to the agent once it finishes this step.');
-  // A plan waiting for its go-ahead, or a question, on its latest turn: needs you (a day at most).
-  const planned = { ...agent, status: 'done', plan: true, turnList: [{ ...t1, plan: true }] };
+  // A plan waiting for its go-ahead on its latest turn, nothing newer: needs you (a day at most).
+  const planned = { ...agent, status: 'done', plan: true, endedTs: t1.endedTs, turnList: [{ ...t1, plan: true }] };
   expect(stateOf(planned, planned.turnList[0], now)).toBe('needs');
+  expect(needsOf('needs', planned.turnList[0], null)).toEqual({ kind: 'goahead' });
   expect(rowLine(planned, { ...planned.turnList[0], todos: [] }, { state: 'needs' })).toBe('Its plan is ready');
+  expect(rowPose('needs', planned.turnList[0])).toBe('needs');
   expect(stateOf(planned, planned.turnList[0], now + 2 * 86_400)).toBe('finished');
-  const asked = { ...agent, status: 'done', turnList: [{ ...t1, asks: true }] };
-  expect(stateOf(asked, asked.turnList[0], now)).toBe('needs');
+  // Set aside ("Plan not used": a newer turn began in its chat, agents/store.rs): Finished,
+  // a neutral pose (neither ✓ nor failed), its line, Go ahead in its details; dismissed, hidden.
+  const aside = { ...planned, planUnused: true, turnList: [{ ...t1, plan: true, planUnused: true }] };
+  expect(stateOf(aside, aside.turnList[0], now)).toBe('finished');
+  const [unusedRow] = panelRows([aside], { now });
+  expect(unusedRow).toMatchObject({ state: 'finished', unused: true, pose: 'unused', statusWord: 'Plan not used', needs: null });
+  expect(unusedRow.line).toBe('7/7 · Plan not used');
+  // (With no to-do list, its bar is its context in grey, never a done one's full bar.)
+  const [bare] = panelRows([{ ...aside, turnList: [{ ...aside.turnList[0], todos: [] }] }], { now });
+  expect(bare.progress).toEqual({ value: 0.01, kind: 'context' });
+  expect(rowActions({ ...unusedRow, agent: { ...aside, active: false } })).toMatchObject({ goAhead: true, dismiss: true, finish: false, stop: false });
+  expect(panelRows([{ ...aside, turnList: [{ ...aside.turnList[0], dismissed: true }] }], { now })).toEqual([]);
+  expect(panelRows([{ ...aside, turnList: [{ ...aside.turnList[0], dismissed: true }] }], { now, dismissed: true })[0]).toMatchObject({ dismissed: true });
+  // A question it ended with: no card to answer, so not Needs you (the chat's report says it).
+  const asked = { ...agent, status: 'done', turnList: [{ ...t1, asks: true, todos: [] }] };
+  expect(stateOf(asked, asked.turnList[0], now)).toBe('finished');
+  expect(rowLine(asked, asked.turnList[0], {})).toBe('It has a question for you');
+  // A row whose record says running, but nothing runs it: Move to finished (and no Stop).
+  const dead = panelRows([{ ...running, active: false }], { now }).find((r) => r.n === 2);
+  expect(rowActions(dead)).toMatchObject({ finish: true, stop: false, dismiss: false });
+  const alive = panelRows([{ ...running, active: true }], { now }).find((r) => r.n === 2);
+  expect(rowActions(alive)).toMatchObject({ finish: false, stop: true, dismiss: false });
+  // An ask-first card waiting in the chat: its own Needs you row, the brief in full, Send / Don't.
+  const card = { id: 3, act: 'agent', state: 'asking', label: 'garden-planner', agent: { folder: 'garden-planner', mode: 'auto', modeLabel: 'Auto', brief: 'Add a legend to the map.', continues: true } };
+  const [cardRow] = panelRows([], { cards: [card, { ...card, id: 4, state: 'allowed' }] });
+  expect(cardRow).toMatchObject({ kind: 'confirm', state: 'needs', needs: { kind: 'confirm' }, title: 'Add a legend to the map', request: 'Add a legend to the map.', line: 'Yap wants to tell the agent in garden-planner', pose: 'needs' });
+  expect(rowActions(cardRow)).toEqual({ stop: false, finish: false, dismiss: false, restore: false, goAhead: false });
 
   // The rows, their groups (newest first) and the header's totals.
   const rows = panelRows([running], { steps: { a1: 'Writing the planting guide' }, now });
@@ -486,8 +548,22 @@ test('the Agent panel: a Code chat’s agent live, needing you, finished; the to
   await expect(avatar).toHaveAttribute('data-pose', 'needs');
   await expect(avatar.locator('.bubble')).toHaveText('!');
   await expect(avatar).toHaveAttribute('aria-label', 'Sonnet, needs you, Auto mode');
+  // The answer, in the row: what it asks, and the thread's card's own buttons.
+  const needs = row(main, 1).getByTestId('chat-agent-row-needs');
+  await expect(needs).toHaveAttribute('data-kind', 'approve');
+  await expect(needs.getByTestId('chat-agent-row-asks')).toHaveText('Run a command: npm test');
+  await expect(needs.getByRole('button', { name: 'Allow once' })).toBeVisible();
+  await expect(needs.getByRole('button', { name: 'Deny' })).toBeVisible();
+  await expect(thread(main).getByTestId('chat-agent-approve')).toBeVisible();
   await shot(main, '03-panel-needs-you');
-  await thread(main).getByTestId('chat-agent-approve').getByRole('button', { name: 'Allow once' }).click();
+  // The status dot agrees (the chat's own row in the list), and the bar counts it at work.
+  const conv = (await agents(yap)).find((j) => j.id === id).conversation;
+  await expect(convDot(main, conv)).toHaveAttribute('data-state', 'needs');
+  await expect(convDot(main, conv)).toHaveAttribute('data-why', 'approve');
+  expect((await yap.invoke('bar_status')).agents).toBeGreaterThanOrEqual(1);
+  // Allowed in the row: the thread's card closes too.
+  await needs.getByRole('button', { name: 'Allow once' }).click();
+  await expect(thread(main).getByTestId('chat-agent-approve')).toHaveCount(0, { timeout: 10_000 });
 
   // Finished: ✓, and its totals as Claude Code's result says them.
   const agent = await ended(yap, id);
@@ -611,6 +687,250 @@ test('the Agent panel: a Code chat’s agent live, needing you, finished; the to
   await yap.invoke('e2e_claude_approve_auto', { allow: true });
 });
 
+// ---------------------------------------------------------------- Needs you, live
+
+const needsOfRow = (r) => r.getByTestId('chat-agent-row-needs');
+const rowOf = (main, id, n) => panel(main).locator(`[data-testid="chat-agent-row"][data-key="${id}:${n}"]`);
+const convDot = (main, conversation) => main.locator(`.convs [data-conv="${conversation}"]`).getByTestId('chat-status');
+const planCard = (main) => thread(main).locator('[data-testid="chat-agent-approve"][data-kind="plan"]');
+
+/**
+ * A plan agent in a new Code chat ("Read only, don't change any files": Plan
+ * mode), waiting on its plan card. `reports`: the chat model's words for the
+ * reports to come.
+ */
+async function planAgent(yap, main, fakeLlm, reports) {
+  await script(yap, PLANNING, 'planning');
+  await openView(main, 'Chat');
+  if (await tab(main).count()) await tab(main).getByRole('button', { name: 'Close the panel' }).click();
+  await newCodeChat(main, 'garden-planner');
+  const before = (await agents(yap)).length;
+  fakeLlm.scriptChat([
+    { tools: [{ name: 'start_agent', args: { brief: 'Plan bolder bag markers on the map. Read only: change no files.', title: "Read only, don't change any files", mode: 'plan' } }] },
+    { content: STARTED },
+    ...reports.map((content) => ({ plain: true, content })),
+  ]);
+  await send(main, "Read only, don't change any files: plan bolder bag markers on the map.");
+  await expect.poll(async () => (await agents(yap)).length, { timeout: 20_000 }).toBe(before + 1);
+  const agent = (await agents(yap))[0];
+  await expect.poll(async () => (await agents(yap)).find((j) => j.id === agent.id).status, { timeout: 30_000 }).toBe('asking');
+  return agent;
+}
+
+test('Needs you, live: a plan’s Go ahead in the row starts it, and the thread’s card closes too', async ({ yap, main, fakeLlm, shot }) => {
+  await yap.invoke('e2e_claude_approve_auto', { allow: null });
+  const p = await planAgent(yap, main, fakeLlm, ['It made a plan and is building it now.', 'Done: the bag markers are bolder.']);
+  await script(yap, ECHO, 'echo');
+  // The live plan prompt: Needs you, its card's own buttons in the row, the dot amber.
+  await expect(panel(main)).toBeVisible();
+  const r = rowOf(main, p.id, 1);
+  await expect(r).toHaveAttribute('data-state', 'needs');
+  await expect(needsOfRow(r)).toHaveAttribute('data-kind', 'plan');
+  await expect(needsOfRow(r).getByRole('button', { name: 'Go ahead' })).toBeVisible();
+  await expect(needsOfRow(r).getByRole('button', { name: 'Not yet' })).toBeVisible();
+  await expect(r.getByTestId('chat-agent-row-avatar')).toHaveAttribute('data-pose', 'needs');
+  await expect(planCard(main)).toHaveCount(1);
+  await expect(convDot(main, p.conversation)).toHaveAttribute('data-state', 'needs');
+  await shot(main, '14-needs-plan-live-light');
+  await theme(yap, main, 'dark');
+  await shot(main, '15-needs-plan-live-dark');
+  await theme(yap, main, 'light');
+  // Go ahead in the row: the thread's plan card closes, and the plan is carried out at once.
+  await needsOfRow(r).getByRole('button', { name: 'Go ahead' }).click();
+  await expect(planCard(main)).toHaveCount(0, { timeout: 10_000 });
+  await expect.poll(async () => (await agents(yap)).find((j) => j.id === p.id).turnList?.length, { timeout: 20_000 }).toBe(2);
+  const done = await ended(yap, p.id);
+  await expect.poll(async () => (await agents(yap)).find((j) => j.id === p.id).turnList[1].status, { timeout: 30_000 }).toBe('done');
+  const turns = (await agents(yap)).find((j) => j.id === p.id).turnList;
+  expect(turns[0]).toMatchObject({ plan: true, planAllowed: true });
+  expect(turns[0].planUnused ?? false).toBe(false);
+  expect(turns[1]).toMatchObject({ title: 'Go ahead with the plan', status: 'done' });
+  await messagesOf(yap, done.conversation, 6);
+  // Nothing waits now: no Needs you, and the dot says nothing needs you.
+  await expect(group(main, 'needs')).toHaveCount(0);
+  await expect(convDot(main, p.conversation)).not.toHaveAttribute('data-state', 'needs');
+  await yap.invoke('e2e_claude_approve_auto', { allow: true });
+});
+
+test('a plan nobody acted on: Needs you while it waits, then “Plan not used” in Finished once a newer turn runs; its Go ahead; Dismiss and Show dismissed', async ({ yap, main, fakeLlm, shot }) => {
+  await yap.invoke('e2e_claude_approve_auto', { allow: null });
+  const p = await planAgent(yap, main, fakeLlm, ['It made a plan: bolder bag markers and a legend line. Shall it go ahead?']);
+  const conversation = p.conversation;
+  // Not yet in the row: the plan card's answer — the thread's card closes, the turn ends as a plan.
+  await needsOfRow(rowOf(main, p.id, 1)).getByRole('button', { name: 'Not yet' }).click();
+  await expect(planCard(main)).toHaveCount(0, { timeout: 10_000 });
+  const planned = await ended(yap, p.id);
+  expect(planned).toMatchObject({ status: 'done', plan: true, planAllowed: false });
+  await messagesOf(yap, conversation, 4);
+  // Its plan waits (the latest turn, nothing newer): Needs you, Go ahead / Not yet, looking up, never ✓.
+  const r = rowOf(main, p.id, 1);
+  await expect(r).toHaveAttribute('data-state', 'needs');
+  await expect(needsOfRow(r)).toHaveAttribute('data-kind', 'goahead');
+  await expect(r.getByTestId('chat-agent-row-line')).toHaveText('Its plan is ready');
+  await expect(r.getByTestId('chat-agent-row-avatar')).toHaveAttribute('data-pose', 'needs');
+  await expect(r.locator('.badge')).toHaveCount(0);
+  await expect(convDot(main, conversation)).toHaveAttribute('data-state', 'needs');
+  await expect(convDot(main, conversation)).toHaveAttribute('data-why', 'plan');
+  await shot(main, '16-needs-plan-waiting-light');
+  await theme(yap, main, 'dark');
+  await shot(main, '16-needs-plan-waiting-dark');
+  await theme(yap, main, 'light');
+
+  // A newer request: a fresh agent in the same Code chat, still running —
+  // the maintainer's panel (8 Nov), where the old plan stayed Needs you for ever.
+  await script(yap, SLOW, 'slow');
+  fakeLlm.scriptChat([
+    { tools: [{ name: 'start_agent', args: { brief: 'Make the bag markers on the map bolder.', title: 'Bolder bag markers', fresh: true } }] },
+    { content: STARTED },
+    { plain: true, content: 'Done: the bag markers are bolder.' },
+  ]);
+  const before = (await agents(yap)).length;
+  await send(main, 'Start fresh: make the bag markers on the map bolder.');
+  await expect.poll(async () => (await agents(yap)).length, { timeout: 20_000 }).toBe(before + 1);
+  const n = (await agents(yap))[0];
+  expect(n.id).not.toBe(p.id);
+  await expect.poll(async () => (await agents(yap)).find((j) => j.id === n.id).status, { timeout: 20_000 }).toBe('running');
+  // Set aside, as agents.json keeps it: the plan isn't the chat's latest turn any more.
+  await expect.poll(async () => (await agents(yap)).find((j) => j.id === p.id).turnList[0].planUnused ?? false, { timeout: 10_000 }).toBe(true);
+  await expectStore(yap, 'agents.json', (j) => j.agents.find((a) => a.id === p.id)?.turnList?.[0]?.planUnused === true && j.agents.find((a) => a.id === p.id)?.planUnused === true);
+  // The panel (the plan agent's tab): no Needs you; the plan in Finished, "Plan not used", a plain still pose.
+  await yap.invoke('plugin:event|emit', { event: 'yap-agent-open', payload: { id: p.id, conversation } });
+  await expect(panel(main)).toBeVisible();
+  await expect(group(main, 'needs')).toHaveCount(0);
+  await expect(rowOf(main, n.id, 1)).toHaveAttribute('data-state', 'running');
+  await expect(r).toHaveAttribute('data-state', 'finished');
+  await expect(r).toHaveAttribute('data-unused', 'true');
+  await expect(r.getByTestId('chat-agent-row-line')).toHaveText('Plan not used');
+  await expect(r.getByTestId('chat-agent-row-avatar')).toHaveAttribute('data-pose', 'unused');
+  await expect(r.locator('.badge, .bubble')).toHaveCount(0);
+  await expect(needsOfRow(r)).toHaveCount(0);
+  // The dot and the bar agree: at work, nothing needs you.
+  await expect(convDot(main, conversation)).toHaveAttribute('data-state', 'working');
+  expect((await yap.invoke('bar_status')).agents).toBe((await agents(yap)).filter((j) => ['queued', 'running', 'asking'].includes(j.status)).length);
+  // What Chat's model hears: a plan not used, in plain words.
+  await shot(main, '17-plan-not-used-light');
+  await theme(yap, main, 'dark');
+  await shot(main, '18-plan-not-used-dark');
+  await theme(yap, main, 'light');
+
+  // The newer one done: the plan's Go ahead, in its details — a new turn of its agent.
+  await script(yap, ECHO, 'echo');
+  await ended(yap, n.id);
+  await messagesOf(yap, conversation, 8);
+  await r.locator('.rhead').click();
+  const go = r.getByTestId('chat-agent-row-go-ahead');
+  await expect(go).toHaveText('Go ahead');
+  fakeLlm.scriptChat([{ plain: true, content: 'Done: the bag markers are bolder.' }]);
+  await go.click();
+  await expect.poll(async () => (await agents(yap)).find((j) => j.id === p.id).turnList?.length, { timeout: 20_000 }).toBe(2);
+  await expect.poll(async () => (await agents(yap)).find((j) => j.id === p.id).turnList[1].status, { timeout: 30_000 }).toBe('done');
+  const went = (await agents(yap)).find((j) => j.id === p.id);
+  expect(went.turnList[0]).toMatchObject({ plan: true, planAllowed: true });
+  expect(went.turnList[0].planUnused ?? false).toBe(false);
+  expect(went.turnList[1].title).toBe('Go ahead with the plan');
+  await messagesOf(yap, conversation, 10);
+
+  // ⋯ Dismiss: the newer agent's row hidden (kept in its log and History); Show dismissed brings it back.
+  const nr = rowOf(main, n.id, 1);
+  await expect(nr).toHaveAttribute('data-state', 'finished');
+  await nr.hover();
+  await nr.getByTestId('chat-agent-row-menu').click();
+  await expect(main.getByRole('menuitem', { name: 'Stop…' })).toHaveCount(0);
+  await expect(main.getByRole('menuitem', { name: 'Move to finished' })).toHaveCount(0);
+  await main.getByRole('menuitem', { name: 'Dismiss' }).click();
+  await expect(nr).toHaveCount(0);
+  await expectStore(yap, 'agents.json', (j) => j.agents.find((a) => a.id === n.id)?.turnList?.[0]?.dismissed === true);
+  expect((await yap.invoke('agent_get', { id: n.id })).log.length).toBeGreaterThan(0);
+  const showDismissed = panel(main).getByTestId('chat-agent-show-dismissed');
+  await expect(showDismissed).toHaveText('Show dismissed · 1');
+  await showDismissed.click();
+  await expect(nr).toHaveAttribute('data-dismissed', 'true');
+  await expect(showDismissed).toHaveText('Hide dismissed');
+  await shot(main, '19-show-dismissed-light');
+  await theme(yap, main, 'dark');
+  await shot(main, '19-show-dismissed-dark');
+  await theme(yap, main, 'light');
+  // Restore (right-click): back for good.
+  await nr.click({ button: 'right' });
+  await main.getByRole('menuitem', { name: 'Restore' }).click();
+  await expect(nr).not.toHaveAttribute('data-dismissed', 'true');
+  await expect(showDismissed).toHaveCount(0);
+  await expectStore(yap, 'agents.json', (j) => !j.agents.find((a) => a.id === n.id)?.turnList?.[0]?.dismissed);
+  await yap.invoke('e2e_claude_approve_auto', { allow: true });
+});
+
+test('Move to finished: a row whose record says running, but nothing runs it; the dot and the bar agree; never Stop’s', async ({ yap, main, fakeLlm, shot }) => {
+  await openView(main, 'Chat');
+  if (await tab(main).count()) await tab(main).getByRole('button', { name: 'Close the panel' }).click();
+  await newCodeChat(main, 'garden-planner');
+  fakeLlm.scriptChat([{ plain: true, content: 'Hello! What shall we build?' }]);
+  await send(main, 'Hello.');
+  await expect(thread(main)).toContainText('What shall we build?', { timeout: 20_000 });
+  const conversation = Math.max(...(await yap.invoke('chats_list')).map((c) => c.id));
+  const now = Math.floor(Date.now() / 1000);
+  const D = `deada${now.toString(16)}`;
+  // As a crash would leave it: "running" in agents.json, no Claude Code behind it.
+  await yap.invoke('e2e_agents_seed', {
+    agents: [
+      {
+        id: D,
+        conversation,
+        folder: 'garden-planner',
+        path: GARDEN,
+        brief: 'Bolder bag markers.',
+        model: 'claude-sonnet-5-5',
+        effort: 'medium',
+        mode: 'auto',
+        pay: 'plan',
+        status: 'running',
+        createdTs: now - 400,
+        startedTs: now - 380,
+        updatedTs: now,
+        turns: 1,
+        turnList: [seedTurn(now, 1, 'Bolder bag markers', 'auto', 'claude-sonnet-5-5', 'running')],
+      },
+    ],
+  });
+  await yap.invoke('plugin:event|emit', { event: 'yap-agent-open', payload: { id: D, conversation } });
+  await expect(panel(main)).toBeVisible({ timeout: 20_000 });
+  const r = rowOf(main, D, 1);
+  await expect(r).toHaveAttribute('data-state', 'running');
+  // Everyone says it's at work: the panel, the dot, the bar.
+  await expect(convDot(main, conversation)).toHaveAttribute('data-state', 'working');
+  await expect.poll(async () => (await yap.invoke('bar_status')).agents).toBeGreaterThanOrEqual(1);
+  const barBefore = (await yap.invoke('bar_status')).agents;
+  // ⋯: Move to finished (nothing runs it), no Stop.
+  await r.hover();
+  await r.getByTestId('chat-agent-row-menu').click();
+  await expect(main.getByRole('menuitem', { name: 'Stop…' })).toHaveCount(0);
+  await shot(main, '20-move-to-finished-menu-light');
+  await main.keyboard.press('Escape');
+  await expect(main.getByRole('menuitem', { name: 'Move to finished' })).toHaveCount(0);
+  await theme(yap, main, 'dark');
+  await r.hover();
+  await r.getByTestId('chat-agent-row-menu').click();
+  await shot(main, '20-move-to-finished-menu-dark');
+  await main.keyboard.press('Escape');
+  await theme(yap, main, 'light');
+  await r.hover();
+  await r.getByTestId('chat-agent-row-menu').click();
+  await main.getByRole('menuitem', { name: 'Move to finished' }).click();
+  await expect(r).toHaveAttribute('data-state', 'finished');
+  await expect(r).toHaveAttribute('data-status', 'interrupted');
+  const moved = (await agents(yap)).find((j) => j.id === D);
+  expect(moved).toMatchObject({ status: 'interrupted' });
+  expect(moved.turnList[0].status).toBe('interrupted');
+  // …and they all agree again: not at work.
+  await expect(convDot(main, conversation)).not.toHaveAttribute('data-state', 'working');
+  await expect.poll(async () => (await yap.invoke('bar_status')).agents).toBe(barBefore - 1);
+  await theme(yap, main, 'dark');
+  await shot(main, '21-moved-to-finished-dark');
+  await theme(yap, main, 'light');
+  // A real agent at work is never moved: refused while the runner has it.
+  await expect(yap.invoke('agent_move_to_finished', { id: 'nosuchagent', turn: 1 })).rejects.toThrow(/no such agent/i);
+  await tab(main).getByRole('button', { name: 'Close the panel' }).click();
+});
+
 // ---------------------------------------------------------------- the crew, seeded
 
 /** A seeded turn of an agent: its Mode, model and status (agents/store.rs `TurnNote`). */
@@ -651,7 +971,7 @@ async function showCrewSheet(main) {
     <div id="crew-sheet" data-testid="crew-sheet"><h2>Yap's crew</h2>
     <h3>Every character, working (each with a Mode's prop)</h3><div class="crow">${CHARACTER_IDS.map((c, i) => cell(c, PROP_IDS[i % PROP_IDS.length], 'working', `${crewName(c)} · ${props[PROP_IDS[i % PROP_IDS.length]]}`)).join('')}</div>
     <h3>The Modes' props (Sonnet, working)</h3><div class="crow">${PROP_IDS.map((p) => cell('sonnet', p, 'working', props[p])).join('')}</div>
-    <h3>The poses (Opus, Plan)</h3><div class="crow">${['working', 'needs', 'done', 'stopped', 'failed', 'queued'].map((pose) => cell('opus', 'plan', pose, pose)).join('')}</div></div>`;
+    <h3>The poses (Opus, Plan)</h3><div class="crow">${['working', 'needs', 'done', 'stopped', 'failed', 'queued', 'unused'].map((pose) => cell('opus', 'plan', pose, pose)).join('')}</div></div>`;
   await main.evaluate((h) => {
     const host = document.createElement('div');
     host.id = 'crew-sheet-host';
@@ -674,6 +994,7 @@ test('the crew: a character a row in each Mode and pose; rows folded, ▸ rememb
   const now = Math.floor(Date.now() / 1000);
   const A = `crewa${now.toString(16)}`;
   const B = `crewb${now.toString(16)}`;
+  const C = `crewc${now.toString(16)}`;
   const base = { conversation, folder: 'garden-planner', path: GARDEN, effort: 'medium', pay: 'plan', updatedTs: now };
   await yap.invoke('e2e_agents_seed', {
     agents: [
@@ -695,23 +1016,43 @@ test('the crew: a character a row in each Mode and pose; rows folded, ▸ rememb
         ],
       },
       {
+        // Needs you (live: its plan waits for Go ahead on its latest turn, nothing newer).
         ...base,
         id: B,
         brief: 'Tidy notes.md.',
         model: 'claude-opus-5-5',
         mode: 'manual',
-        status: 'asking',
-        createdTs: now - 200,
-        startedTs: now - 150,
+        status: 'done',
+        plan: true,
+        // (Ready after A's running turn began: nothing newer than it.)
+        createdTs: now - 320,
+        startedTs: now - 300,
+        endedTs: now - 240,
         turns: 1,
-        turnList: [seedTurn(now, 1, 'Tidy notes.md', 'manual', 'claude-opus-5-5', 'asking')],
+        turnList: [seedTurn(now, 1, 'Tidy notes.md', 'manual', 'claude-opus-5-5', 'done', { plan: true, startedTs: now - 300, endedTs: now - 240 })],
+      },
+      {
+        // A plan nobody went ahead with ("Plan not used"): Finished, neither ✓ nor failed.
+        ...base,
+        id: C,
+        brief: "Read only, don't change any files.",
+        model: 'claude-opus-5-5',
+        mode: 'plan',
+        status: 'done',
+        plan: true,
+        planUnused: true,
+        createdTs: now - 1200,
+        startedTs: now - 780,
+        endedTs: now - 720,
+        turns: 1,
+        turnList: [seedTurn(now, 1, "Read only, don't change any files", 'plan', 'claude-opus-5-5', 'done', { plan: true, planUnused: true })],
       },
     ],
   });
   const open = () => yap.invoke('plugin:event|emit', { event: 'yap-agent-open', payload: { id: A, conversation } });
   await open();
   await expect(panel(main)).toBeVisible({ timeout: 20_000 });
-  await expect(panel(main).getByTestId('chat-agent-row')).toHaveCount(5, { timeout: 20_000 });
+  await expect(panel(main).getByTestId('chat-agent-row')).toHaveCount(6, { timeout: 20_000 });
 
   // A character a row: who the model is, its Mode's prop, how it stands — and its label.
   const ROWS = [
@@ -720,6 +1061,7 @@ test('the crew: a character a row in each Mode and pose; rows folded, ▸ rememb
     [A, 3, 'opus', 'bypass', 'failed', 'Bypass permissions'],
     [A, 2, 'fable', 'edits', 'stopped', 'Accept edits'],
     [A, 1, 'haiku', 'plan', 'done', 'Plan'],
+    [C, 1, 'opus', 'plan', 'unused', 'Plan'],
   ];
   for (const [id, n, character, prop, pose, mode] of ROWS) {
     const avatar = avatarOf(main, id, n);
@@ -736,6 +1078,13 @@ test('the crew: a character a row in each Mode and pose; rows folded, ▸ rememb
   await expect(avatarOf(main, A, 3).locator('.badge.failed')).toHaveText('×');
   await expect(avatarOf(main, A, 2).locator('.badge, .bubble')).toHaveCount(0);
   expect(await styleIn(avatarOf(main, A, 2), 'svg', 'filter')).toContain('grayscale(1)');
+  // A plan nobody used: no badge, in its own colours, still; its line says so.
+  await expect(avatarOf(main, C, 1).locator('.badge, .bubble')).toHaveCount(0);
+  expect(await styleIn(avatarOf(main, C, 1), 'svg', 'filter')).toBe('none');
+  await expect(panel(main).locator(`[data-testid="chat-agent-row"][data-key="${C}:1"]`)).toHaveAttribute('data-unused', 'true');
+  await expect(panel(main).locator(`[data-testid="chat-agent-row"][data-key="${C}:1"]`).getByTestId('chat-agent-row-line')).toHaveText('Plan not used');
+  // A plan waiting (Needs you) looks up, never sits with a ✓.
+  await expect(avatarOf(main, B, 1).locator('.badge')).toHaveCount(0);
   // Needs you looks up; done sits, its eyes shut.
   expect(await styleIn(avatarOf(main, B, 1), '.c-eyes', 'transform')).toMatch(/matrix\(1, 0, 0, 1, 0, -1\)/);
   expect(await styleIn(avatarOf(main, A, 1), '.c-bod', 'transform')).toMatch(/matrix\(1, 0, 0, 1, 0, 1\)/);
@@ -743,7 +1092,7 @@ test('the crew: a character a row in each Mode and pose; rows folded, ▸ rememb
   // Its group heads as savvy's: "Running · 1", Finished with Collapse.
   await expect(group(main, 'needs').getByTestId('chat-agent-group-head')).toHaveText('Needs you · 1');
   await expect(group(main, 'running').getByTestId('chat-agent-group-head')).toHaveText('Running · 1');
-  await expect(group(main, 'finished').getByTestId('chat-agent-group-head')).toHaveText('Finished · 3');
+  await expect(group(main, 'finished').getByTestId('chat-agent-group-head')).toHaveText('Finished · 4');
   await expect(group(main, 'finished').getByTestId('chat-agent-group-head')).toHaveAttribute('data-act', 'Collapse');
 
   // Only the working one moves: its feet step, its flag flutters; the others are still.
@@ -757,6 +1106,7 @@ test('the crew: a character a row in each Mode and pose; rows folded, ▸ rememb
     [A, 1],
     [A, 2],
     [A, 3],
+    [C, 1],
   ]) {
     expect(await styleIn(avatarOf(main, id, n), '.c-fl', 'animationName')).toBe('none');
   }
@@ -796,7 +1146,7 @@ test('the crew: a character a row in each Mode and pose; rows folded, ▸ rememb
   await expect(finishedHead).toHaveAttribute('data-act', 'Expand');
   await expect(group(main, 'finished').getByTestId('chat-agent-row')).toHaveCount(0);
   await finishedHead.click();
-  await expect(group(main, 'finished').getByTestId('chat-agent-row')).toHaveCount(3);
+  await expect(group(main, 'finished').getByTestId('chat-agent-row')).toHaveCount(4);
 
   // Screenshots: the five rows (a taller window, so they all show), light and
   // dark; the avatars close up at 2× (the page drawn at twice its pixels, light and dark).
@@ -838,9 +1188,11 @@ test('the crew: a character a row in each Mode and pose; rows folded, ▸ rememb
   await theme(yap, main, 'light');
   await main.evaluate(() => document.getElementById('crew-sheet-host')?.remove());
 
-  // Tidy: the seeded agents stop "working".
+  // Tidy: the seeded agents stop "working", and no plan of theirs waits.
   await yap.invoke('e2e_agents_seed', {
-    agents: (await agents(yap)).filter((j) => j.id === A || j.id === B).map((j) => ({ ...j, status: 'stopped', turnList: (j.turnList || []).map((t) => ({ ...t, status: t.status === 'running' || t.status === 'asking' ? 'stopped' : t.status })) })),
+    agents: (await agents(yap))
+      .filter((j) => j.id === A || j.id === B || j.id === C)
+      .map((j) => ({ ...j, status: j.status === 'done' ? 'done' : 'stopped', planUnused: !!j.plan, turnList: (j.turnList || []).map((t) => ({ ...t, planUnused: !!t.plan, status: t.status === 'running' || t.status === 'asking' ? 'stopped' : t.status })) })),
   });
   await tab(main).getByRole('button', { name: 'Close the panel' }).click();
   await main.emulateMedia({ reducedMotion: null });

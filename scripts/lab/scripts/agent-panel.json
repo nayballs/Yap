@@ -1,6 +1,6 @@
 {
   "name": "agent-panel",
-  "about": "An agent at work in lab-sandbox from a Code chat, its cards allowed: shots of the Agent panel beside the chat and the thread's to-do card while it runs and once it's done, in both themes. Its `fake` steps play only in a --fake lab (the stand-in agent), so the script's own flow can be checked offline.",
+  "about": "An agent at work in lab-sandbox from a Code chat, its cards allowed: shots of the Agent panel beside the chat and the thread's to-do card while it runs and once it's done, in both themes. Then a plan nobody acts on: Needs you while it waits, and \"Plan not used\" in Finished (not Needs you) once a newer agent runs in the same Code chat. Its `fake` steps play only in a --fake lab (the stand-in agent), so the script's own flow can be checked offline.",
   "needs": { "yapCode": true },
   "steps": [
     { "fake": [{ "tools": [{ "name": "start_agent", "args": { "brief": "Add tablespoons to src/convert.js (1 tbsp = 15 ml) with a test, run the tests, then tick that item in TODO.md." } }] }, { "content": "On it: I've sent an agent to lab-sandbox." }] },
@@ -20,6 +20,44 @@
     { "shot": "todo-done", "window": "main", "selector": "[data-testid=\"chat-agent-todo-card\"]", "optional": true },
     { "shot": "thread-done", "window": "thread" },
     { "expect": { "selector": [{ "window": "panel", "css": "[data-testid=\"chat-agent-panel\"]" }, { "window": "panel", "css": "[data-testid=\"chat-agent-row\"]", "count": { "min": 1 } }] } },
-    { "expect": { "selector": { "window": "thread", "css": "[data-testid=\"chat-agent-todo-card\"]" } }, "soft": true, "note": "The to-do card shows only when the agent kept a to-do list." }
+    { "expect": { "selector": { "window": "thread", "css": "[data-testid=\"chat-agent-todo-card\"]" } }, "soft": true, "note": "The to-do card shows only when the agent kept a to-do list." },
+
+    { "note": "A plan nobody acted on (8 Nov 2026: an old plan stayed in Needs you for ever, below a newer turn already running)." },
+    { "set": { "config": { "agentsAsk": "never" } } },
+    { "fake": [{ "tools": [{ "name": "start_agent", "args": { "brief": "Make a plan for adding teaspoons to src/convert.js (1 tsp = 5 ml). Read only: change no files.", "title": "Read only, don't change any files", "mode": "plan", "fresh": true } }] }, { "content": "On it: a fresh agent in lab-sandbox is making a plan." }] },
+    {
+      "ask": "Read only, don't change any files: start a fresh agent that makes a plan for adding teaspoons to src/convert.js (1 tsp = 5 ml).",
+      "chat": "same",
+      "timeout": 300
+    },
+    { "expect": { "used": "start_agent", "refused": false } },
+    { "wait": "agents", "timeout": 600, "note": "Until it asks (the plan's prompt; the stand-in's step)." },
+    { "answer": "next", "how": "deny", "note": "Not yet: the turn ends with its plan, which is left waiting (no more cards answered)." },
+    { "wait": "agents", "timeout": 600 },
+    { "expect": { "agent": { "status": "done" } } },
+    {
+      "expect": { "selector": { "window": "panel", "css": "[data-testid=\"chat-agent-group\"][data-group=\"needs\"] [data-testid=\"chat-agent-row-needs\"]" } },
+      "note": "The plan waits on its latest turn, nothing newer: Needs you, with Go ahead / Not yet in its row."
+    },
+    { "shot": "plan-waiting", "window": "panel" },
+    { "fake": [{ "tools": [{ "name": "start_agent", "args": { "brief": "Add teaspoons to src/convert.js (1 tsp = 5 ml) with a test, and run the tests.", "title": "Add teaspoons", "fresh": true } }] }, { "content": "On it: a fresh agent in lab-sandbox is adding teaspoons." }] },
+    {
+      "ask": "Leave that plan for now. Start a fresh agent: add teaspoons to src/convert.js (1 tsp = 5 ml) with a test, and run the tests.",
+      "chat": "same",
+      "cards": "allow",
+      "timeout": 300
+    },
+    { "expect": { "used": "start_agent", "refused": false } },
+    { "shot": "newer-turn-running", "window": "panel", "note": "The newer agent at work: the old plan no longer in Needs you." },
+    {
+      "expect": { "selector": [{ "window": "panel", "css": "[data-testid=\"chat-agent-row-needs\"][data-kind=\"goahead\"]", "present": false }, { "window": "panel", "css": "[data-testid=\"chat-agent-row\"][data-unused=\"true\"][data-state=\"finished\"]" }] },
+      "note": "No plan waits in Needs you now (the newer agent's own step to allow may: that one truly waits); the old plan is in Finished."
+    },
+    { "wait": "agents", "cards": "allow", "timeout": 900 },
+    { "shot": "plan-not-used", "window": "panel" },
+    {
+      "expect": { "selector": [{ "window": "panel", "css": "[data-testid=\"chat-agent-group\"][data-group=\"needs\"]", "present": false }, { "window": "panel", "css": "[data-testid=\"chat-agent-row\"][data-unused=\"true\"][data-state=\"finished\"]" }] },
+      "note": "The plan nobody acted on is \"Plan not used\", in Finished, not Needs you."
+    }
   ]
 }

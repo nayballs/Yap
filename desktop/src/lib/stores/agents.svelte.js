@@ -86,9 +86,11 @@ function onAgent(ev) {
     }
     agents.list = agents.list.map((j, k) => (k === i ? next : j));
     // Over now, or started again — or a turn new to this window (a
-    // follow-up, one queued behind the turn working): as saved.
+    // follow-up, one queued behind the turn working), or its record changed
+    // with no step (a plan set aside, a row dismissed or moved to
+    // Finished: `changed`): as saved.
     const newTurn = Number.isInteger(ev.turn) && !(was.turnList || []).some((t) => t.n === ev.turn);
-    if (was.status !== next.status || newTurn || ev.queued) refreshSoon();
+    if (was.status !== next.status || newTurn || ev.queued || ev.changed) refreshSoon();
   }
   if (!isLive(ev.status)) {
     if (agents.steps[ev.id]) agents.steps = Object.fromEntries(Object.entries(agents.steps).filter(([k]) => k !== ev.id));
@@ -117,14 +119,28 @@ export async function answerApproval(id, allow) {
 }
 
 /**
- * **Go ahead with an agent's plan** (its report card's button: the person's
- * click): its next turn now. `turn`: the plan's, its button used from now
- * on (`wentAhead`), whatever the card's fate.
+ * **Go ahead with an agent's plan** (its report card's button, the Agent
+ * panel's row: the person's click): its next turn now. `turn`: the plan's
+ * (an earlier turn's, a Plan not used row's, starts as a turn of its own),
+ * its button used from now on (`wentAhead`), whatever the card's fate.
  */
 export async function goAheadWithPlan(id, turn = 0) {
   agents.wentAhead = { ...agents.wentAhead, [id]: turn };
   try {
-    return await invoke('agent_go_ahead', { id });
+    return await invoke('agent_go_ahead', { id, turn: turn || null });
+  } finally {
+    refreshSoon(0);
+  }
+}
+
+/**
+ * **An Agent panel row's own actions** (its menu, its Not yet): Move to
+ * finished (`agent_move_to_finished`), Dismiss or Restore (`agent_dismiss`).
+ * Neither stops or changes the agent's work. The agent as it is now.
+ */
+export async function rowAction(cmd, id, turn, args = {}) {
+  try {
+    return await invoke(cmd, { id, turn, ...args });
   } finally {
     refreshSoon(0);
   }

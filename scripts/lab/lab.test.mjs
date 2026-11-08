@@ -118,6 +118,8 @@ describe('a turn’s record', () => {
       ['approve:3', 'approve', 'asking', 'allow|deny'],
       ['plan:a2', 'plan', 'asking', 'allow|deny'],
     ]);
+    // A plan set aside ("Plan not used") waits on nobody.
+    assert.deepEqual(cardsOf([], { agents: [{ id: 'a3', folder: 'lab-sandbox', status: 'done', plan: true, planAllowed: false, planUnused: true }] }), []);
   });
 
   test('summed up: the answer, steps, tools, the cards waiting, and the hint', () => {

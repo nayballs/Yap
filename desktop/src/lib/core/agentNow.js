@@ -10,6 +10,28 @@ export const isLive = (status) => status === 'queued' || status === 'running' ||
 /** The line of an agent whose plan waits for the person's Go ahead (agents/runner.rs `on_tick`). */
 export const PLAN_WAITING = 'Waiting for you: its plan is ready';
 
+/** A plan still waits on the person this long after its turn ended (seconds). */
+export const PLAN_WAITS_S = 24 * 3600;
+
+/**
+ * **An agent's plan waits for the person's go-ahead, now** (2026-11-08: an
+ * old plan stayed "Needs you" for ever, below a newer turn already
+ * running). Its latest turn ended as a plan (`plan`, mirrored on the agent
+ * as agents.json keeps it), not allowed, not set aside — "Plan not used":
+ * a newer turn began in its chat (agents/store.rs `set_plans_aside`), or
+ * the person put it aside or dismissed it — the agent isn't at work, and
+ * it ended within the day (`now`: unix seconds). The one rule the Agent
+ * panel, Chat's status dots and the phone's share (an agent in brief, the
+ * phone's, has the same fields).
+ */
+export function planWaitsNow(agent, now = Date.now() / 1000) {
+  if (!agent || agent.status !== 'done' || !agent.plan || agent.planAllowed || agent.planUnused) return false;
+  const last = agent.turnList?.length ? agent.turnList.at(-1) : null;
+  if (last?.dismissed || last?.planUnused) return false;
+  const ended = Number(agent.endedTs) || Number(last?.endedTs) || 0;
+  return !ended || now - ended <= PLAN_WAITS_S;
+}
+
 /**
  * **The line an agent is on now**, from its log: its latest step, or the line
  * it moved to without one (`now`: the to-do in progress once a call came

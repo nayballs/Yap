@@ -106,7 +106,9 @@ export function cardsOf(items, { approvals = [], agents = [] } = {}) {
     cards.set(`approve:${p.id}`, { id: `approve:${p.id}`, kind: 'approve', act: 'approve', tool: p.tool, label: p.summary ?? '', detail: cut(p.detail ?? '', 300), run: p.run, state: 'asking', answers: ['allow', 'deny'] });
   }
   for (const a of agents) {
-    if (a.plan && !a.planAllowed && !['queued', 'running', 'asking'].includes(String(a.status).toLowerCase())) {
+    // (A plan set aside — "Plan not used": a newer turn began in its chat, or
+    // it was put aside — waits on nobody, as the Agent panel has it.)
+    if (a.plan && !a.planAllowed && !a.planUnused && !['queued', 'running', 'asking'].includes(String(a.status).toLowerCase())) {
       cards.set(`plan:${a.id}`, { id: `plan:${a.id}`, kind: 'plan', act: 'go ahead', label: `${a.folder}: Go ahead with the plan?`, detail: cut(a.text ?? '', 300), state: 'asking', answers: ['allow', 'deny'] });
     }
   }

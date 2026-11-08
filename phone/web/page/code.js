@@ -172,7 +172,7 @@ export function reportOf(agents, conversation, t) {
   const last = agent?.turnList?.at?.(-1) ?? null;
   const isLast = !!turn && !!last && turn.n === last.n;
   const latest = !!agent && !!markerId && agent.reportMessageId === markerId;
-  const as = isLast ? { ...turn, plan: agent.plan, planAllowed: agent.planAllowed, asks: agent.asks } : turn ? null : latest ? agent : null;
+  const as = isLast ? { ...turn, plan: agent.plan, planAllowed: agent.planAllowed, planUnused: agent.planUnused, asks: agent.asks } : turn ? null : latest ? agent : null;
   const title = reportTitle(as, text);
   const tone = as ? statusTone(as.status) : turn ? statusTone(turn.status) : /didn't finish/.test(title) ? 'failed' : 'done';
   const changed = (/^Files it changed: (.+)$/m.exec(text)?.[1] ?? '').replace(/\s*\(backed up first\)\.?$/, '');

@@ -349,6 +349,7 @@ async fn start_agent(args: &Value, ctx: Ctx<'_>) -> Ran {
                 model: asked_model,
                 effort: asked_effort.map(|e| e.as_str().to_string()),
                 phone: phone.clone(),
+                plan_turn: None,
             };
             return carry_on(prev, ask, &folder, mode, web, fixed.is_some(), mode_note, ctx).await;
         }
@@ -721,9 +722,30 @@ fn status_of(j: &Agent) -> Value {
         "not_allowed": j.denials.iter().map(|d| d.detail.as_str()).collect::<Vec<_>>(),
         "its_words": crate::agents::steps::clip(&j.text, 1_500),
         "plan": j.plan,
+        "plan_waits": j.plan_waits(),
+        "plan_not_used": j.plan && j.plan_unused,
+        "plan_note": plan_note(j),
         "asks_you": j.asks,
         "error": j.error,
     })
+}
+
+/// **Its plan in plain words** for `agent_status` (2026-11-08: a plan nobody
+/// acted on is "Plan not used" once a newer request began): waiting for the
+/// user's go-ahead, set aside, or carried out; `null` when its latest turn
+/// was no plan. Pure.
+fn plan_note(j: &Agent) -> Value {
+    if !j.plan || j.status.live() {
+        return Value::Null;
+    }
+    let words = if j.plan_allowed {
+        "Its plan was allowed: it's being carried out."
+    } else if j.plan_unused {
+        "Its plan wasn't used: the user moved on to a newer request before going ahead. It isn't waiting for anything; if they say go ahead with that plan, message_agent carries it out."
+    } else {
+        "Its plan is ready and waits for the user's go-ahead."
+    };
+    json!(words)
 }
 
 /// **`agent_status`**: its result carries the agent's own words (web content

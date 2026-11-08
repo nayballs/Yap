@@ -4439,12 +4439,18 @@ rules pure in `core/chatStatus.js`, kept live for the whole main window by
   that `answers` one; `chat_answering`, `yap-chat-answering {conversations,
   seq}`). A spell under 300 ms never shows; two less than 300 ms apart (an
   agent ending, its report starting) are one. Steady under reduced motion.
-- **Needs you** (amber with a soft ring, steady; it outranks working): an
-  agent's permission prompt or an agent `asking`, an ask-first card waiting in a
-  turn's stream (`confirm`: told by chatState as it streams, even once Chat
-  is left), or an agent's turn that ended with a question or a plan for "go
-  ahead" — until the person writes there after its report (`chats_list`'s
-  `askedAt`), it runs again, or a day has passed.
+- **Needs you** (amber with a soft ring, steady; it outranks working), only
+  while something truly waits, live (2026-11-08, as the Agent panel's Needs
+  you: [yap-code.md](./yap-code.md#the-panel)): an agent's permission prompt
+  still waiting (the prompts list — an agent's `asking` status alone isn't
+  one), an ask-first card waiting in a turn's stream (`confirm`: told by
+  chatState as it streams, even once Chat is left), or an agent's plan
+  waiting for "go ahead" on its latest turn with nothing newer begun in its
+  chat (`core/agentNow.js` `planWaitsNow`: not set aside as "Plan not used",
+  not dismissed, within the day). Until 8 Nov a question an agent ended with
+  counted too, and the person writing there after its report (`askedAt`)
+  cleared it: a question has no card to answer (its report reads as new),
+  and a plan waits until a newer turn starts or the person answers it.
 - **New** (blue): its last answer (`chats_list`'s `answerAt`) is past the
   last one seen there, and it isn't on screen. Opening it clears it. Seen is
   kept per conversation in this window's storage (`yap.chat.seen`, the last

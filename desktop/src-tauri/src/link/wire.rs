@@ -384,6 +384,11 @@ pub struct Brief {
     pub asks: bool,
     pub plan: bool,
     pub plan_allowed: bool,
+    /// Its latest turn's plan was set aside ("Plan not used", 2026-11-08): it
+    /// no longer waits on the person (`core/agents.js` `planWaits`). Left
+    /// out when false.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub plan_unused: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub message_id: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]

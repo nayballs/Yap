@@ -151,7 +151,11 @@ async function tick() {
       return;
     }
     t.approvals = (await tryInvoke('claude_approve_pending', {}, [])) ?? [];
-    const agents = await agentsNow();
+    // A plan an agent was already waiting with before this question isn't
+    // this turn's card (`wait --agents --cards` answers it): only the ones
+    // ready since. (A turn that starts an agent sets the older ones aside:
+    // "Plan not used".)
+    const agents = (await agentsNow()).filter((a) => !a.plan || (Number(a.endedTs) || 0) * 1000 >= t.startedAt);
     const pending = pendingOf(cardsOf(t.items, { approvals: t.approvals, agents })).filter((c) => !t.answered.has(c.id));
     if (!pending.length) {
       t.status = 'running';
@@ -515,7 +519,11 @@ async function answerCard(card, how) {
   } else if (kind === 'approve') {
     answered = await invoke('claude_approve_answer', { id: Number(raw), allow });
   } else if (kind === 'plan') {
-    answered = !!(allow ? await invoke('agent_go_ahead', { id: raw }) : await invoke('agent_stop', { id: raw }));
+    // Go ahead, or Not yet — the Agent panel's: the plan set aside ("Plan not
+    // used", agents/runner.rs `move_to_finished`), so it waits no more. (Stop
+    // did nothing to an agent whose turn is over.)
+    const latest = (await agentsNow()).find((a) => a.id === raw)?.turnList?.at(-1)?.n ?? 1;
+    answered = !!(allow ? await invoke('agent_go_ahead', { id: raw }) : await invoke('agent_move_to_finished', { id: raw, turn: latest }));
   } else {
     throw new Error(`No card ${card.id}`);
   }
