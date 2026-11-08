@@ -155,6 +155,34 @@ PAGES['chat.example.com/general'] = `<!doctype html><html><head><title>#general 
     });
   </script></main></body></html>`;
 
+// A long wiki page for browsing it (chat/pages/see.rs, chat-pages.spec.js):
+// three tall bands of one colour each — red at the top, green with the
+// harbourmaster, blue from "Getting out" — so a shot says which part of the
+// page was in view; and a line that comes a moment after the page loads
+// (browser_wait).
+export const DOCKS_URL = 'https://wiki.example.com/wiki/Saltmarsh_Docks';
+export const BAND = { top: [220, 40, 40], harbour: [40, 170, 60], out: [40, 70, 220] };
+const band = ([r, g, b]) => `background:rgb(${r},${g},${b});height:1600px;margin:0;padding:24px;color:#fff`;
+PAGES['wiki.example.com/wiki/Saltmarsh_Docks'] = `<!doctype html><html><head><title>Saltmarsh Docks - Example Wiki</title>
+  <style>html,body{margin:0}h1,h2,p{margin:0 0 12px}</style></head><body><main>
+  <section style="${band(BAND.top)}"><h1>Saltmarsh Docks</h1><p>The harbour south of Fort Joy.</p></section>
+  <section style="${band(BAND.harbour)}"><h2>Harbourmaster</h2><p>The harbourmaster, Edda Vane, sells the boat ticket to the mainland for 120 gold.</p></section>
+  <section style="${band(BAND.out)}"><h2>Getting out</h2><p>The night ferry leaves after nightfall.</p><p id="later"></p></section>
+  <script>setTimeout(function () { document.getElementById('later').textContent = 'The night ferry is boarding.'; }, 3000);</script>
+</main></body></html>`;
+
+// A map you click at a point (browser_click's x, y): two fields drawn as
+// plain blocks, nothing to grab by ref, each saying it was picked; and a
+// password box under them, which a point never clicks into.
+export const BOARD_URL = 'https://maps.example.com/board';
+PAGES['maps.example.com/board'] = `<!doctype html><html><head><title>Field map - Example Maps</title>
+  <style>html,body{margin:0}.f{position:absolute;top:0;height:60vh;width:50vw}#w{left:0;background:#9c6}#e{left:50vw;background:#cb5}#pw{position:absolute;top:66vh;left:5vw;width:40vw;height:16vh;box-sizing:border-box}#picked{position:absolute;top:88vh;left:5vw}</style></head><body><main>
+  <div class="f" id="w" onclick="document.getElementById('picked').textContent='Picked: west field'"></div>
+  <div class="f" id="e" onclick="document.getElementById('picked').textContent='Picked: east field'"></div>
+  <form action="session" method="post"><input id="pw" type="password" name="pw" aria-label="Password"></form>
+  <p id="picked">Picked: nothing</p>
+</main></body></html>`;
+
 /** The rail site's results for the stations asked for (`from`, `to`). */
 function railResults(q) {
   const right = /^kellbrook$/i.test((q.get('from') || '').trim()) && /^port ellis$/i.test((q.get('to') || '').trim());

@@ -7,8 +7,12 @@
 //!   buttons and fields (visible ones, in the page's order, at most
 //!   `rules::MAX_ELEMENTS`), each with its ref; its forms (a password field?
 //!   where it goes, its submit button's words); where it's scrolled to.
-//! - `describe`: one element by its ref, as it is now, with its form.
-//! - `click`, `type`, `scroll`: the action — only if the element is still
+//! - `describe`: one element by its ref, as it is now, with its form; `at`:
+//!   the element at a point of the view; `active`: the one with the focus.
+//! - `pos`: where the page is scrolled to, its view's size and the headings
+//!   in view; `blocks`: its visible text blocks, each with a ref.
+//! - `click`, `type`, `scroll`, `clickAt`, `hover`, `check`, `key`: the
+//!   action — only if the element is still
 //!   the one described (its role and name, checked in the same script run as
 //!   the action: a page can't swap it in between).
 //!
@@ -63,17 +67,49 @@ else if(!m&&(t==='input'||t==='textarea')&&['submit','button','reset','image'].i
 else if(!m&&el.isContentEditable){d.value=sq(el.innerText).slice(0,200);}
 return d;}
 var SEL='a[href],button,input:not([type=hidden]),select,textarea,summary,[role=button],[role=link],[role=checkbox],[role=radio],[role=tab],[role=menuitem],[role=switch],[role=combobox],[role=textbox],[role=searchbox],[role=option],[contenteditable=""],[contenteditable=true]';
-function scrollAt(){var de=D.documentElement;return {y:Math.round(W.scrollY),h:Math.round(W.innerHeight),max:Math.max(0,Math.round((de?de.scrollHeight:0)-W.innerHeight))};}
+function scroller(){var se=D.scrollingElement||D.documentElement;if(!se||se.scrollHeight>W.innerHeight+2)return null;var best=null,area=0,all=D.querySelectorAll('body *');for(var i=0;i<all.length&&i<6000;i++){var e=all[i];if(e.scrollHeight>e.clientHeight+2){var o=getComputedStyle(e).overflowY;if(o==='auto'||o==='scroll'){var ar=e.clientWidth*e.clientHeight;if(ar>area){area=ar;best=e;}}}}return best;}
+function scrollAt(){var de=D.documentElement,sc=scroller();if(sc)return {x:Math.round(W.scrollX),y:Math.round(sc.scrollTop),w:Math.round(W.innerWidth),h:Math.round(sc.clientHeight),max:Math.max(0,Math.round(sc.scrollHeight-sc.clientHeight)),dpr:W.devicePixelRatio||1};
+return {x:Math.round(W.scrollX),y:Math.round(W.scrollY),w:Math.round(W.innerWidth),h:Math.round(W.innerHeight),max:Math.max(0,Math.round((de?de.scrollHeight:0)-W.innerHeight)),dpr:W.devicePixelRatio||1};}
+function inView(){var out=[],hs=D.querySelectorAll('h1,h2,h3,h4,[role=heading]');for(var i=0;i<hs.length&&out.length<8;i++){var r=hs[i].getBoundingClientRect();if(r.bottom>0&&r.top<W.innerHeight&&vis(hs[i])){var t=sq(hs[i].innerText);if(t)out.push(t.slice(0,100));}}return out;}
 function heads(){return [].slice.call(D.querySelectorAll('h1,h2,h3')).slice(0,30).map(function(h){return sq(h.innerText);}).filter(Boolean);}
 function find(){var el=R.els[a.ref];return el&&el.isConnected?el:null;}
 function same(el){var d=desc(el);return d.role===a.role&&d.name===a.name;}
 function fire(el,k){el.dispatchEvent(new Event(k,{bubbles:true}));}
+function base(el){var b={password:!!D.querySelector('input[type=password]'),payment:takesCard(D),title:sq(D.title),headings:heads(),url:location.href};if(!el){b.el=null;return b;}b.el=desc(el);b.form=el.form?formsInfo()[F.indexOf(el.form)]:null;return b;}
+if(op==='pos')return {r:'ok',scroll:scrollAt(),inView:inView()};
+if(op==='blocks'){var bl=D.querySelectorAll('h1,h2,h3,h4,h5,h6,[role=heading],p,li,td,th,dt,dd,caption,figcaption,blockquote,pre,summary,label,legend,a,button,option'),bs=[],tot=0;
+for(var i=0;i<bl.length&&bs.length<a.max;i++){var e=bl[i];if(!vis(e))continue;var t=sq(e.innerText||e.textContent);if(!t)continue;t=t.slice(0,a.chars);tot+=t.length;if(tot>a.total)break;bs.push({ref:refOf(e),tag:tag(e),role:(e.getAttribute('role')||'').toLowerCase(),text:t});}
+return {r:'ok',blocks:bs};}
+if(op==='at'){var hit=D.elementFromPoint(Number(a.x),Number(a.y));return base(hit?(hit.closest(SEL)||hit):null);}
+if(op==='active'){var ae=D.activeElement;return base(ae&&ae!==D.body&&ae!==D.documentElement?ae:null);}
+if(op==='clickAt'){var el=find();if(!el)return {r:'gone'};if(!same(el))return {r:'changed'};if(el.disabled)return {r:'disabled'};var hit=D.elementFromPoint(Number(a.x),Number(a.y));if(!hit||!(hit===el||el.contains(hit)))return {r:'changed'};
+var o={bubbles:true,cancelable:true,composed:true,clientX:Number(a.x),clientY:Number(a.y),view:W,button:0};try{hit.dispatchEvent(new PointerEvent('pointerdown',o));}catch(e){}hit.dispatchEvent(new MouseEvent('mousedown',o));try{el.focus();}catch(e){}try{hit.dispatchEvent(new PointerEvent('pointerup',o));}catch(e){}hit.dispatchEvent(new MouseEvent('mouseup',o));
+var tg=tag(el)==='a'?(el.getAttribute('target')||'').toLowerCase():'';if(tg&&tg!=='_self'&&tg!=='_parent'&&tg!=='_top'&&/^https?:/i.test(el.href)){location.assign(el.href);return {r:'ok',went:true};}
+hit.dispatchEvent(new MouseEvent('click',o));return {r:'ok'};}
+if(op==='hover'){var el=find();if(!el)return {r:'gone'};if(!same(el))return {r:'changed'};try{el.scrollIntoView({block:'center'});}catch(e){}var br=el.getBoundingClientRect(),o={bubbles:true,cancelable:true,clientX:br.left+br.width/2,clientY:br.top+br.height/2,view:W};
+['pointerover','pointerenter','mouseover','mouseenter','pointermove','mousemove'].forEach(function(k){try{el.dispatchEvent(k.indexOf('pointer')===0?new PointerEvent(k,o):new MouseEvent(k,o));}catch(e){}});return {r:'ok'};}
+if(op==='check'){var el=find();if(!el)return {r:'gone'};if(!same(el))return {r:'changed'};if(el.disabled)return {r:'disabled'};var isOn=function(){return itype(el)?!!el.checked:el.getAttribute('aria-checked')==='true';};if(isOn()!==!!a.on){try{el.scrollIntoView({block:'center'});}catch(e){}el.click();}return {r:'ok',checked:isOn()};}
+if(op==='key'){var t0=a.ref?find():null;if(a.ref){if(!t0)return {r:'gone'};if(!same(t0))return {r:'changed'};try{t0.focus();}catch(e){}}var kd=[];
+for(var ki=0;ki<a.keys.length;ki++){var k=a.keys[ki],cur=D.activeElement||D.body;
+if(k==='Tab'||k==='Shift+Tab'){var fs=[].slice.call(D.querySelectorAll('a[href],button,input:not([type=hidden]),select,textarea,[tabindex],[contenteditable=""],[contenteditable=true]')).filter(function(e){return vis(e)&&!e.disabled&&e.tabIndex>=0;});var j=fs.indexOf(cur);var nx=fs[k==='Tab'?j+1:(j<0?fs.length-1:j-1)];if(nx){try{nx.focus();}catch(e){}}kd.push(k);continue;}
+var ko={key:k==='Space'?' ':k,code:k==='Space'?'Space':k,keyCode:({Enter:13,Escape:27,Space:32,ArrowUp:38,ArrowDown:40,ArrowLeft:37,ArrowRight:39,PageUp:33,PageDown:34,Home:36,End:35})[k]||0,bubbles:true,cancelable:true};
+var go=cur.dispatchEvent(new KeyboardEvent('keydown',ko));
+if(go){var ct=tag(cur),cr=roleOf(cur);
+if(k==='Enter'){if(cur.form&&ct==='input'){if(cur.form.requestSubmit)cur.form.requestSubmit();else cur.form.submit();}else if(ct==='a'||ct==='button'||cr==='button'||cr==='link'){cur.click();}else{cur.dispatchEvent(new KeyboardEvent('keypress',ko));}}
+else if(k==='Space'&&(ct==='button'||itype(cur)==='checkbox'||itype(cur)==='radio'||cr==='button')){cur.click();}
+else if(ct==='select'&&(k==='ArrowDown'||k==='ArrowUp')){var si=cur.selectedIndex+(k==='ArrowDown'?1:-1);if(si>=0&&si<cur.options.length){cur.selectedIndex=si;fire(cur,'input');fire(cur,'change');}}
+else if(cur===D.body||cur===D.documentElement||ct==='a'){var sc=scroller(),sh=Math.round(W.innerHeight*0.85),by=({PageDown:sh,Space:sh,PageUp:-sh,ArrowDown:40,ArrowUp:-40})[k];if(by){if(sc)sc.scrollBy(0,by);else W.scrollBy(0,by);}else if(k==='Home'){if(sc)sc.scrollTop=0;else W.scrollTo(W.scrollX,0);}else if(k==='End'){if(sc)sc.scrollTop=sc.scrollHeight;else W.scrollTo(W.scrollX,D.documentElement.scrollHeight);}}}
+cur.dispatchEvent(new KeyboardEvent('keyup',ko));kd.push(k);}
+var fe=D.activeElement;return {r:'ok',keys:kd,focused:fe&&fe!==D.body&&fe!==D.documentElement?desc(fe):null,scroll:scrollAt()};}
 if(op==='snap'){var main=D.querySelector('main,article,[role=main]')||D.body;var all=D.querySelectorAll(SEL),els=[],more=false;
 for(var i=0;i<all.length;i++){if(!vis(all[i]))continue;if(els.length>=a.max){more=true;break;}els.push(desc(all[i]));}
 return {title:sq(D.title),url:location.href,text:main?sq(main.innerText).slice(0,a.text):'',headings:heads(),elements:els,forms:formsInfo(),password:!!D.querySelector('input[type=password]'),payment:takesCard(D),more:more,scroll:scrollAt()};}
 if(op==='describe'){var el=find();var base={password:!!D.querySelector('input[type=password]'),payment:takesCard(D),title:sq(D.title),headings:heads(),url:location.href};
 if(!el){base.el=null;return base;}base.el=desc(el);base.form=el.form?formsInfo()[F.indexOf(el.form)]:null;return base;}
-if(op==='scroll'){if(a.ref){var s=find();if(!s)return {r:'gone'};s.scrollIntoView({block:'center'});}else{W.scrollBy(0,(a.to==='up'?-1:1)*Math.round(W.innerHeight*0.8));}return {r:'ok',scroll:scrollAt()};}
+if(op==='scroll'){if(a.ref){var s=find();if(!s)return {r:'gone'};s.scrollIntoView({block:'center'});}
+else{var sc=scroller(),d=a.to||'down',n=Math.max(0.1,Math.min(10,Number(a.amount)||1)),step=Math.round((sc?sc.clientHeight:W.innerHeight)*0.85*n);
+if(d==='top'){if(sc)sc.scrollTop=0;else W.scrollTo(W.scrollX,0);}else if(d==='bottom'){if(sc)sc.scrollTop=sc.scrollHeight;else W.scrollTo(W.scrollX,D.documentElement.scrollHeight);}else{if(sc)sc.scrollBy(0,(d==='up'?-1:1)*step);else W.scrollBy(0,(d==='up'?-1:1)*step);}}
+return {r:'ok',scroll:scrollAt(),inView:inView()};}
 var el=find();if(!el)return {r:'gone'};if(!same(el))return {r:'changed'};if(el.disabled)return {r:'disabled'};
 var caretIn=(function(){var s=W.getSelection();return !!(s&&s.rangeCount&&el.contains(s.anchorNode));})();
 try{el.scrollIntoView({block:'center'});}catch(e){}try{el.focus();}catch(e){}
@@ -132,9 +168,62 @@ pub fn type_text(r: u32, role: &str, name: &str, text: &str, submit: bool) -> St
     build("type", serde_json::json!({ "ref": r, "role": role, "name": name, "text": text, "submit": submit }))
 }
 
-/// Scroll the page up or down a screen, or element `r` into view.
-pub fn scroll(to_up: bool, r: Option<u32>) -> String {
-    build("scroll", serde_json::json!({ "to": if to_up { "up" } else { "down" }, "ref": r }))
+/// Scroll the page `to` "up", "down" (`amount` screens), "top" or "bottom",
+/// or element `r` into view (centred). Its answer: where it is now and the
+/// headings in view.
+pub fn scroll(to: &str, amount: f64, r: Option<u32>) -> String {
+    build("scroll", serde_json::json!({ "to": to, "amount": amount, "ref": r }))
+}
+
+/// Where the page is scrolled to, its view's size and the headings in view.
+pub fn pos() -> String {
+    build("pos", serde_json::json!({}))
+}
+
+/// The page's visible text blocks (headings, paragraphs, list items, cells,
+/// links, buttons…), each with a ref: at most `max`, `chars` characters
+/// each, `total` in all.
+pub fn blocks(max: usize, chars: usize, total: usize) -> String {
+    build("blocks", serde_json::json!({ "max": max, "chars": chars, "total": total }))
+}
+
+/// The element at point (`x`, `y`) of the view (CSS pixels), described as
+/// `describe` does (its nearest link, button or field, else itself).
+pub fn at(x: f64, y: f64) -> String {
+    build("at", serde_json::json!({ "x": x, "y": y }))
+}
+
+/// The element with the focus, described as `describe` does.
+pub fn active() -> String {
+    build("active", serde_json::json!({}))
+}
+
+/// A click at (`x`, `y`) on element `r`, if it's still `role` "`name`" and
+/// still the one at that point (pointer and mouse events there, then the
+/// click).
+pub fn click_at(r: u32, role: &str, name: &str, x: f64, y: f64) -> String {
+    build("clickAt", serde_json::json!({ "ref": r, "role": role, "name": name, "x": x, "y": y }))
+}
+
+/// The pointer over element `r`, if it's still `role` "`name`".
+pub fn hover(r: u32, role: &str, name: &str) -> String {
+    build("hover", serde_json::json!({ "ref": r, "role": role, "name": name }))
+}
+
+/// A checkbox, radio or switch `r` ticked (`on`) or not, if it's still
+/// `role` "`name`" (a click when it isn't already so).
+pub fn check(r: u32, role: &str, name: &str, on: bool) -> String {
+    build("check", serde_json::json!({ "ref": r, "role": role, "name": name, "on": on }))
+}
+
+/// `keys` pressed in turn (Enter, Tab, Shift+Tab, Escape, Space, the arrows,
+/// PageUp, PageDown, Home, End) in element `r` (if it's still `role`
+/// "`name`"), else in the one with the focus.
+pub fn keys(keys: &[String], r: Option<(u32, &str, &str)>) -> String {
+    match r {
+        Some((r, role, name)) => build("key", serde_json::json!({ "keys": keys, "ref": r, "role": role, "name": name })),
+        None => build("key", serde_json::json!({ "keys": keys, "ref": 0 })),
+    }
 }
 
 #[cfg(test)]
@@ -151,7 +240,11 @@ mod tests {
         assert_eq!(v, serde_json::json!({ "ref": 4, "role": "textbox", "name": "From", "text": "Kellbrook\"});alert(1);//</script>", "submit": true }));
         assert!(snap(2500, 150).contains("})(\"snap\",{"));
         assert!(describe(7).contains("})(\"describe\",{\"ref\":7})"));
-        assert!(scroll(true, None).contains("\"to\":\"up\""));
+        assert!(scroll("up", 1.0, None).contains("\"to\":\"up\""));
+        assert!(click_at(3, "button", "Go", 120.0, 48.5).contains("})(\"clickAt\",{"));
+        assert!(keys(&["Enter".into()], None).contains("\"keys\":[\"Enter\"]"));
+        // A point click runs before the shared path (which scrolls the element into view: the point would move).
+        assert!(LIB.find("op==='clickAt'").unwrap() < LIB.find("var caretIn").unwrap());
         // Never a secret's value: the library masks them by type, autocomplete and name.
         assert!(LIB.contains("current-password|new-password|one-time-code") && LIB.contains("masked:m"));
         // Every action checks the element is still the one described first.

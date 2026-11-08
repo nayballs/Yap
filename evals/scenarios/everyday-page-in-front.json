@@ -1,6 +1,6 @@
 {
   "name": "everyday-page-in-front",
-  "description": "Everyday tasks: a product page is open beside the chat; \"will this work with my PS5, and does it do stereo?\" is answered from the page (read_open_page): yes to both. Made-up shop, stand-in web.",
+  "description": "Everyday tasks: a product page is open beside the chat; \"will this work with my PS5, and does it do stereo?\" is answered from the page (browser_read): yes to both. Made-up shop, stand-in web.",
   "tags": [
     "everyday",
     "web"
@@ -28,7 +28,7 @@
       "expect": {
         "tools_called": [
           {
-            "name": "read_open_page"
+            "name": "browser_read"
           }
         ],
         "answer_contains_any": [

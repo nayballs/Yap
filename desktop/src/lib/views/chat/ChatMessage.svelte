@@ -42,7 +42,8 @@
   // written) as they come.
   const docs = $derived(m.role === 'assistant' ? (m.documents?.length ? m.documents : m.liveDocs || []) : []);
   // The pictures it found online and showed beside the chat: the same.
-  const pics = $derived(m.role === 'assistant' ? (m.pictures?.length ? m.pictures : m.livePictures || []) : []);
+  // (A shot the model took for itself is on its step, never a pill: `chip`.)
+  const pics = $derived(m.role === 'assistant' ? (m.pictures?.length ? m.pictures : m.livePictures || []).filter((p) => !p?.chip) : []);
   // The live pages it brought up, and the buttons it offered for the
   // person's browser (chat/pages.rs): the same.
   const pages = $derived(m.role === 'assistant' ? (m.pages?.length ? m.pages : m.livePages || []) : []);
@@ -192,7 +193,7 @@
 {/if}
 {#if m.role === 'assistant' && m.tools?.length}
   <!-- What its tools did, folded under it (chat/activity.rs). -->
-  <ChatSteps tools={m.tools} />
+  <ChatSteps tools={m.tools} {m} {onview} />
 {/if}
 {#if m.role === 'assistant' && m.confirms?.length}
   <!-- Yap asks before a click that buys, pays, books… on a page beside the

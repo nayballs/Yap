@@ -78,7 +78,6 @@ export function ensureScopes(cfg) {
         apiKeys: {},
         prompt: SCOPE_DEFAULTS[key].prompt,
         disableThinking: false,
-        planFallback: false,
       };
     }
     const s = cfg.llmScopes[key];

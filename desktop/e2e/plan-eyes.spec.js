@@ -1,6 +1,6 @@
 // The screen and the pages beside the chat for a chat on your Claude plan
 // (desktop/src-tauri/src/integrations/claude_live/eyes.rs, chat/turn/plan.rs): the plan's own
-// Claude Code calls Yap's look_at_screen, open_page, snap_page… over Yap's run endpoint, and
+// Claude Code calls Yap's look_at_screen and browser_* tools over Yap's run endpoint, and
 // each call runs the tool loop's own code and rules (chat/see_screen.rs, chat/pages.rs) for the
 // chat turn it belongs to. What it takes of the screen goes back to Claude Code as MCP image
 // content; what it shows goes to the plan turn's stream, as the tool loop's does.
@@ -16,7 +16,8 @@
 // - Typed, the screen: a cloud model, so asked once (the model says it couldn't look; Allow
 //   lets it), then the screenshots show with the question and Claude Code gets the pictures.
 // - The pages: a page Claude Code's WebSearch found opens in the panel's Page tab, and
-//   snap_page's shot shows as a picture; both kept with the answer.
+//   the model scrolls it and looks: its shots go back as image content and show in the turn's steps,
+//   kept with the answer. A click that buys waits on the person's card, as in the tool loop.
 // - A Code chat on the plan: the same look, its tools allowed in its session.
 // - During a call: refused, nothing taken.
 import fs from 'node:fs';
@@ -41,7 +42,7 @@ const CHAT_INIT = {
   subtype: 'init',
   cwd: '{{cwd}}',
   session_id: SID,
-  tools: ['WebFetch', 'WebSearch', 'mcp__yap__look_at_screen', 'mcp__yap__open_page', 'mcp__yap__snap_page'],
+  tools: ['WebFetch', 'WebSearch', 'mcp__yap__look_at_screen', 'mcp__yap__browser_navigate', 'mcp__yap__browser_screenshot', 'mcp__yap__browser_click'],
   mcp_servers: [{ name: 'yap', status: 'connected' }],
   model: MODEL,
   permissionMode: 'dontAsk',
@@ -248,15 +249,17 @@ test('a plan chat asks to look at the screen: asked once, then the screenshots s
   await theme(yap, main, 'light');
 });
 
-test('a plan chat opens the page its search found beside the chat, and snap_page’s shot shows as a picture', async ({ yap, main, shot }) => {
+test('a plan chat opens the page its search found, scrolls it and looks: the shots come back as image content and show in its steps, never a tab', async ({ yap, main, shot }) => {
   const DUMP = fresh('pages.jsonl');
-  const SAID = 'The Fort Joy map is open beside the chat, and there’s a shot of it.';
+  const SAID = 'The Fort Joy map is open beside the chat; I looked at its map section.';
   await play(yap, 'pages', [
     turn(
       searches('m1'),
-      yapCall('m2', 'toolu_open', 'open_page', { url: FORT_JOY_URL, section: 'Map' }, DUMP),
-      yapCall('m3', 'toolu_snap', 'snap_page', { url: FORT_JOY_URL }, DUMP),
-      answers('m4', SAID)
+      yapCall('m2', 'toolu_open', 'browser_navigate', { url: FORT_JOY_URL }, DUMP),
+      yapCall('m3', 'toolu_to', 'browser_scroll_to', { text: 'Map' }, DUMP),
+      yapCall('m4', 'toolu_snap', 'browser_screenshot', {}, DUMP),
+      yapCall('m5', 'toolu_zoom', 'browser_zoom', { region: 'top-left' }, DUMP),
+      answers('m6', SAID)
     ),
   ]);
   await freshChat(main);
@@ -266,31 +269,74 @@ test('a plan chat opens the page its search found beside the chat, and snap_page
   // The page Claude Code's own WebSearch found: brought up in a Page tab, as the tool loop does.
   await expect(main.getByTestId('chat-page')).toBeVisible({ timeout: 30_000 });
   await expect(main.getByTestId('chat-page-address')).toHaveValue(FORT_JOY_URL, { timeout: 20_000 });
-  // The shot: kept like a pasted picture and shown as one (a picture tab, a pill).
   await expect(lastAnswer(main)).toHaveText(SAID, { timeout: 40_000 });
-  await expect(main.getByTestId('chat-picture')).toBeVisible({ timeout: 20_000 });
-  await expect(main.getByTestId('chat-picture-caption')).toHaveText('A shot of Fort Joy - Example Wiki');
   await expect(chipsOfLast(main)).toHaveText([
     'Searched the web: "fort joy treasure map"',
     'Brought up wiki.example.com/wiki/Fort_Joy beside the chat',
-    'Took a shot of wiki.example.com/wiki/Fort_Joy',
+    'Scrolled to ‘Map’ on wiki.example.com',
+    'Looked at the page · wiki.example.com',
+    'Zoomed in on the page · wiki.example.com',
   ]);
-  const [opened, snapped] = linesOf(DUMP);
+  const [opened, scrolled, looked, zoomed] = linesOf(DUMP);
   expect(resultOf(opened)).toMatchObject({ success: true, shown: true });
-  expect(resultOf(snapped)).toMatchObject({ success: true, shown: true, picture: 'p1' });
-  // A shot is looked at with look_at_picture, as in the tool loop: none goes back by itself.
-  expect(resultOf(snapped).note).toContain('look_at_picture p1');
-  expect(imagesIn(snapped)).toEqual([]);
-  const file = path.join(yap.dataDir, 'chat-images', `${resultOf(snapped).id}.png`);
-  expect(fs.existsSync(file)).toBe(true);
-  // Both kept with the answer: its tab and its picture come back with the conversation.
+  expect(resultOf(scrolled)).toMatchObject({ success: true, data: { kind: 'heading' } });
+  // The shot and the zoom go back to Claude Code as image content, after the line saying what each is.
+  expect(resultOf(looked)).toMatchObject({ success: true, data: { picture: 'p1' } });
+  expect(resultOf(looked).note).toContain("The page's pictures follow in this result");
+  expect(imagesIn(looked)).toHaveLength(1);
+  expect(looked.content[1].text).toContain('as it\'s in view now');
+  expect(imagesIn(zoomed)).toHaveLength(1);
+  // Never a picture tab or a pill: the shots are the turn's steps', kept with the answer.
+  await expect(main.getByTestId('chat-picture')).toHaveCount(0);
+  await expect(main.getByTestId('chat-picture-pill')).toHaveCount(0);
+  const steps = thread(main).getByTestId('chat-steps').last();
+  await expect(steps.getByTestId('chat-steps-shots').getByTestId('chat-step-shot')).toHaveCount(2);
   await expectStore(yap, 'chats.json', (s) =>
-    s.conversations.some((c) => c.messages.some((m) => m.role === 'assistant' && m.text === SAID && m.pages?.[0]?.url === FORT_JOY_URL && m.pictures?.length === 1))
+    s.conversations.some((c) =>
+      c.messages.some((m) => m.role === 'assistant' && m.text === SAID && m.pages?.[0]?.url === FORT_JOY_URL && m.pictures?.length === 2 && m.pictures.every((p) => p.chip))
+    )
   );
-  await shot(main, '04-plan-chat-page-and-its-shot');
+  await steps.locator('summary').click();
+  await expect(steps.locator('.toolchips').getByTestId('chat-step-shot')).toHaveCount(2);
+  await shot(main, '04-plan-chat-page-and-its-shots-in-the-steps');
   await theme(yap, main, 'dark');
-  await shot(main, '05-plan-chat-page-and-its-shot-dark');
+  await shot(main, '05-plan-chat-page-and-its-shots-in-the-steps-dark');
   await theme(yap, main, 'light');
+});
+
+test('a plan chat acts on a page with the same card: a click that buys waits for the person, a no stops it', async ({ yap, main, shot }) => {
+  const DUMP = fresh('act.jsonl');
+  const SAID = 'I didn’t buy it: you said no. You can buy it yourself in the panel.';
+  const results = 'https://rail.example.com/results?from=Kellbrook&to=Port+Ellis&when=Today';
+  await play(yap, 'act', [
+    turn(
+      yapCall('m1', 'toolu_open', 'browser_navigate', { url: results }, DUMP),
+      yapCall('m2', 'toolu_find', 'browser_find', { query: 'Buy tickets' }, DUMP),
+      yapCall('m3', 'toolu_click', 'browser_click', { ref: 1 }, DUMP),
+      answers('m4', SAID)
+    ),
+  ]);
+  await freshChat(main);
+  await send(main, `Buy me the 09:42 ticket on ${results}`);
+  // The card, in the plan turn's thread: the call waits for the person.
+  const card = main.getByTestId('chat-page-confirm');
+  await expect(card).toHaveAttribute('data-state', 'asking', { timeout: 40_000 });
+  await expect(card).toContainText('Yap wants to press ‘Buy tickets’ on rail.example.com');
+  await shot(main, '06-plan-chat-asks-before-buying');
+  await card.getByRole('button', { name: "Don't" }).click();
+  await expect(lastAnswer(main)).toHaveText(SAID, { timeout: 30_000 });
+  await expect(card).toHaveAttribute('data-state', 'refused');
+  const clicked = linesOf(DUMP)[2];
+  expect(clicked).toMatchObject({ tool: 'browser_click', isError: true });
+  expect(resultOf(clicked)).toMatchObject({ success: false, displayText: "Didn't click ‘Buy tickets’: you said no", data: { asked: true, allowed: false } });
+  await expect(chipsOfLast(main)).toHaveText([
+    /Brought up rail\.example\.com\/results.* beside the chat/,
+    /Found \d+ matches for ‘Buy tickets’ on rail\.example\.com/,
+    "Didn't click ‘Buy tickets’: you said no",
+  ]);
+  // Nothing bought: the page is still the results.
+  const page = (await yap.invoke('e2e_page_views')).find((v) => v.url.startsWith('https://rail.example.com/results'));
+  expect(JSON.parse(await yap.invoke('e2e_page_view_eval', { key: page.key, script: 'location.pathname' }))).toMatch(/\/results$/);
 });
 
 test('a Code chat on the plan looks at the screen too: its session allows the tools, the screenshots show with the question', async ({ yap, main, shot }) => {
@@ -318,10 +364,10 @@ test('a Code chat on the plan looks at the screen too: its session allows the to
   // The Code chat's session: in its workspace, the screen's and the pages' tools allowed.
   const [launch] = linesOf(ARGS);
   const allowed = launch.args[launch.args.indexOf('--allowedTools') + 1] ?? '';
-  for (const name of ['look_at_screen', 'open_page', 'read_open_page', 'switch_tab', 'snap_page', 'show_picture']) {
+  for (const name of ['look_at_screen', 'browser_navigate', 'browser_read', 'browser_tabs', 'browser_screenshot', 'browser_click', 'show_picture']) {
     expect(allowed).toContain(`mcp__yap__${name}`);
   }
-  expect(allowed).not.toContain('mcp__yap__click');
+  expect(allowed).not.toContain('mcp__yap__open_page');
   expect(path.resolve(launch.cwd).toLowerCase()).toBe(path.resolve(GARDEN).toLowerCase());
   await shot(main, '06-code-chat-looked-at-the-screen');
   // Its warm session works in the workspace (Windows keeps a folder a process works in): the

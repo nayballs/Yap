@@ -76,6 +76,9 @@ pub(crate) fn shutdown_cleanup() {
     ai::claude_plan::spare::end_all("Yap quits");
     // Yap Link: no more phones (link.rs).
     link::stop();
+    // Connectors' programs and links (integrations/connectors.rs): stopped,
+    // within 3 s; their jobs end any program left.
+    integrations::connectors::shutdown();
     // Other apps' sound: a dictation's silence and Yap's voice's 30 %
     // (dictation/other_apps.rs), all back.
     dictation::mute::restore_all();
@@ -560,6 +563,16 @@ pub fn run() {
             integrations::mcp_clients::mcp_clients_status,
             integrations::mcp_clients::mcp_client_add,
             integrations::mcp_clients::mcp_client_remove,
+            integrations::connectors::connectors_list,
+            integrations::connectors::connector_preview,
+            integrations::connectors::connector_add,
+            integrations::connectors::connector_remove,
+            integrations::connectors::connector_set_enabled,
+            integrations::connectors::connector_refresh_tools,
+            integrations::connectors::connector_set_tool,
+            integrations::connectors::connector_details,
+            #[cfg(debug_assertions)]
+            integrations::connectors::connector_call_tool,
             auth::auth_status,
             auth::auth_check_methods,
             auth::auth_start,
@@ -1168,6 +1181,9 @@ pub fn run() {
             // Claude Code runs' endpoint (integrations/claude_live.rs): its events;
             // the listener starts with the first run.
             integrations::claude_live::init(&handle);
+            // Connectors (preview, integrations/connectors.rs): the events'
+            // app only; nothing read or started until one is used.
+            integrations::connectors::init(&handle);
             // Yap Code's agents (agents.rs): those the last Yap left running
             // are interrupted; old backups and logs swept.
             agents::init(&handle);

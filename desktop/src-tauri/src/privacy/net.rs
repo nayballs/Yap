@@ -268,6 +268,10 @@ pub enum Purpose {
     /// A paired phone connecting to Yap (Yap Link, `link.rs`): the page's
     /// files and its conversation with Yap, inbound, from your network.
     Phone,
+    /// A connector's server (`integrations/connectors/remote.rs`): its
+    /// listing, its tools' calls. The connector's catalogue name, else "A
+    /// connector": never a name the person typed.
+    Connector(String),
 }
 
 /// The free sources a keyless web search asks (`web/sources.rs`), each its
@@ -365,6 +369,7 @@ impl Purpose {
             Purpose::VoiceSample(s) => ("voice", format!("Voice sample · {s}"), "Settings"),
             Purpose::LocalApi => ("localapi", "Local API · apps on this PC".into(), "AI apps (MCP)"),
             Purpose::Phone => ("phone", "Yap Link · your phone".into(), "Phone"),
+            Purpose::Connector(k) => ("connector", format!("Connector · {k}"), f("Connectors")),
         };
         Described { kind, label, feature }
     }
@@ -1205,6 +1210,11 @@ mod tests {
         assert_eq!(Purpose::FreeSource(FreeSource::Arxiv).describe(Some(Feature::Assistant)).feature, "Voice Assistant");
         assert_eq!(Purpose::Download(Download::SpeechModel).describe(None).label, "Speech model download");
         assert_eq!(Purpose::ModelList("OpenRouter".into()).describe(None).label, "Model list · OpenRouter");
+        // A connector's server: its own purpose, under the feature that
+        // called it (a debug call: Connectors).
+        let d = Purpose::Connector("A connector".into()).describe(Some(Feature::Chat));
+        assert_eq!((d.kind, d.label.as_str(), d.feature), ("connector", "Connector · A connector", "Chat"));
+        assert_eq!(Purpose::Connector("A connector".into()).describe(None).feature, "Connectors");
     }
 
     #[tokio::test]

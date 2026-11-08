@@ -177,8 +177,9 @@ pub struct LlmScope {
     /// On your Claude plan: a call the plan can't answer goes once to the
     /// Anthropic API key instead (`pp_plan_fallback`'s, per scope; off by
     /// default, never offered for Chat, which keeps its own "Use my API key
-    /// for this chat").
-    #[serde(default)]
+    /// for this chat"). Only written when on: a scope the person never
+    /// touched is saved exactly as it was.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub plan_fallback: bool,
 }
 
@@ -1089,6 +1090,14 @@ pub struct YapConfig {
     /// tool; Settings → MCP). Off by default: they can only read.
     #[serde(default)]
     pub mcp_allow_writes: bool,
+    /// Connectors (preview, `integrations/connectors.rs`): Yap as an MCP
+    /// client, its servers' tools for Chat later. Off by default, and
+    /// nothing about connectors is read, started or sent while it is; a
+    /// debug build also takes `YAP_CONNECTORS=1`. Not in Settings until the
+    /// whole feature lands; an older Yap drops it on its save and it's off
+    /// again.
+    #[serde(default)]
+    pub connectors_preview: bool,
     /// "Use Yap from your phone (on your home Wi-Fi)" (Settings → Phone,
     /// `link.rs`): Yap serves HTTPS on port 51443 to paired phones on the
     /// home network. Off by default; an older Yap drops it on its save and
@@ -1683,6 +1692,7 @@ impl Default for YapConfig {
             history_keep: String::new(),
             bridge_enabled: true,
             mcp_allow_writes: false,
+            connectors_preview: false,
             link_enabled: false,
             link_remote_control: false,
             link_keep_awake: true,

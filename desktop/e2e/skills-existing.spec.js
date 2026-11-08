@@ -27,7 +27,8 @@ test('keeps the six Skills it had in the menus, beside the core, and its own fir
   const stored = yap.readJson('skills.json');
   expect(stored.menu).toEqual({ 'builtin:coach': true, 'builtin:risks': true, 'builtin:weekly-recap': true });
   expect(stored.skills.map((s) => s.command)).toEqual(['budget-numbers']);
-  expect((await yap.invoke('get_config')).configVersion).toBe(7);
+  // Its migration (v7) ran; later ones may have run after it.
+  expect((await yap.invoke('get_config')).configVersion).toBeGreaterThanOrEqual(7);
 
   // Chat's "/": its own, then Yap's that run across the meetings.
   await openView(main, 'Chat');

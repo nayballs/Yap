@@ -115,13 +115,11 @@ pub enum Event {
     /// `chat/pictures.rs`), the moment it lands: the panel opens on it, as
     /// for a document.
     Picture { picture: crate::chat::pictures::ShownPicture },
-    /// A live page brought up beside the chat (`show_page`,
-    /// `chat/pages.rs`), the moment it's asked for: the panel opens a Page
-    /// tab on it.
+    /// A live page brought up beside the chat in a new tab
+    /// (`browser_navigate`, `browser_tabs`: `chat/pages.rs`), the moment
+    /// it's asked for: the panel opens a Page tab on it. (An older answer's
+    /// `offer_browser` buttons come with the answer, never as an event.)
     Page { page: crate::chat::pages::ShownPage },
-    /// A button offered under the answer (`offer_browser`): open a page in
-    /// the person's browser.
-    Offer { offer: crate::chat::pages::BrowserOffer },
     /// The screen as the model looked at it (`look_at_screen`,
     /// `chat/see_screen.rs`): shown with the question, in the screenshot
     /// frame, the moment it's taken.
@@ -129,8 +127,14 @@ pub enum Event {
     /// **Yap is acting on page tab `key`** (`chat/pages/act.rs`): its tab
     /// says "Yap is using this page", with Stop, until the turn ends.
     Acting { key: String },
-    /// **Show page tab `key`** (`switch_tab`).
+    /// **Show page tab `key`** (`browser_tabs` "switch").
     SwitchTab { key: String },
+    /// **Close page tab `key`** (`browser_tabs` "close").
+    CloseTab { key: String },
+    /// **A shot the model took of a page** (`browser_screenshot`,
+    /// `browser_zoom`, `chat/pages/see.rs`): for the turn's steps — a
+    /// thumbnail on its step (its `chip`), never a tab or a pill.
+    Shot { picture: crate::chat::pictures::ShownPicture },
     /// **A question before an action** that would buy, pay, book… (or
     /// type words from nowhere the person can see: `pages/act/confirm.rs`):
     /// its card in the thread and in its page tab's strip — "Yap wants to
@@ -175,13 +179,20 @@ pub fn doing(name: &str) -> &'static str {
         "show_picture" => "Showing a picture…",
         "find_pictures" => "Looking for pictures…",
         "show_page" | "open_page" => "Bringing up a page…",
-        "read_open_page" => "Reading the page…",
-        "snap_page" => "Taking a shot of a page…",
+        "read_open_page" | "browser_read" => "Reading the page…",
+        "snap_page" | "browser_screenshot" => "Looking at the page…",
+        "browser_zoom" => "Zooming in on the page…",
+        "browser_find" => "Looking for words on the page…",
+        "browser_wait" => "Waiting for the page…",
+        "browser_tabs" => "Working the tabs…",
+        "browser_batch" => "Using the page…",
         "offer_browser" => "Adding a button…",
-        "click" => "Clicking on the page…",
-        "type_text" => "Typing on the page…",
-        "scroll" => "Scrolling the page…",
-        "go_to" => "Going to a page…",
+        "click" | "browser_click" => "Clicking on the page…",
+        "type_text" | "browser_type" | "browser_form_input" => "Typing on the page…",
+        "browser_key" => "Pressing keys on the page…",
+        "browser_hover" => "Pointing at the page…",
+        "scroll" | "browser_scroll" | "browser_scroll_to" => "Scrolling the page…",
+        "go_to" | "browser_navigate" => "Going to a page…",
         "switch_tab" => "Switching tabs…",
         "start_agent" => "Sending an agent…",
         "agent_status" => "Checking on the agent…",

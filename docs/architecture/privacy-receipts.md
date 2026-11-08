@@ -137,7 +137,18 @@ requests to Yap's own endpoint on 127.0.0.1 (`integrations/claude_live.rs`).
   so *your network* (a test's loopback: this PC), with its status (200, 101,
   403…) and bytes; [link.md](./link.md); the AI calls of a question asked
   from the phone run as `Feature::AssistantPhone`, "Voice Assistant from your
-  phone · Groq")
+  phone · Groq"),
+  **connectors** (preview, 2026-11-08: "Connector · A connector",
+  `Purpose::Connector(kind)`, kind "connector" — the page's plug icon —:
+  every request to a connector's server at a link, `integrations/connectors/remote.rs`
+  sending each Streamable HTTP POST, GET and DELETE, and the older HTTP+SSE
+  stream and its POSTs, through `send_for`; `kind` is the catalogue's name
+  for a connector from the catalogue (wave 5b), else "A connector", never
+  the name the person typed; its feature the turn's that called the tool —
+  Chat, the Voice Assistant (wave 4) — else "Connectors". Its host only,
+  never the link's path, a token or a header. A connector that's a program
+  on this PC makes its own requests, which Yap can't see: only its links
+  are here; [integrations.md](./integrations.md#connectors-preview))
   and the page's one connection, the **account picture** (`<img>` from the
   sign-in provider in AccountSection, ControlPanel and Settings: `onload` →
   `connections_note {purpose: "account-picture", url}`, once per picture per

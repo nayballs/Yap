@@ -10,7 +10,7 @@
 //!   asked for), captured at once the way a snip is (`snip/capture.rs`: HDR
 //!   right), with every Yap window left out for the moment of the capture
 //!   (`calls/capture.rs` `for_snip`) — the page beside the chat is
-//!   `snap_page`'s. Fitted to the provider (`snip/images.rs` `fit_for`), and
+//!   `browser_screenshot`'s. Fitted to the provider (`snip/images.rs` `fit_for`), and
 //!   **shown with the question** in the screenshot frame (`Event::Screen`,
 //!   `chats::add_question_images`; source "screen"): kept and swept as
 //!   Chat's screenshots are, so the person sees exactly what was looked at.
@@ -243,14 +243,14 @@ struct Beside {
 }
 
 /// **The page in front beside the chat**, if one's open: its shot as it is
-/// in the panel (`view::snap`), never a search engine's results
+/// in the panel, at its scroll (`view::shot_in_view`), never a search engine's results
 /// (`pages::search_page`).
 async fn page_beside(gate: Gate) -> Option<Beside> {
     let tab = crate::chat::pages::view::open_tabs().await.into_iter().find(|t| t.front)?;
     if crate::chat::pages::search_page(&tab.url) {
         return None;
     }
-    let png = crate::chat::pages::view::snap(tab.url.clone()).await.ok()?;
+    let png = crate::chat::pages::view::shot_in_view(&tab.key).await.ok()?;
     let bytes = png.clone();
     let image = tauri::async_runtime::spawn_blocking(move || crate::snip::attach::keep(&bytes, "screen")).await.ok()?.ok()?;
     let text = if gate == Gate::Show {

@@ -18,9 +18,8 @@ pub(super) enum Source {
     Pictures,
     /// `look_at_screen` (`chat/see_screen.rs`).
     Screen,
-    /// Acting on a page beside the chat (`chat/pages/act.rs`).
-    Act,
-    /// The pages beside the chat (`chat/pages.rs`).
+    /// The browser beside the chat (`chat/pages.rs`: going, reading,
+    /// looking, and — for the models that may — acting).
     Pages,
     /// `remember`, `forget` (memory.rs).
     Memory,
@@ -51,9 +50,7 @@ impl Source {
             Source::Pictures
         } else if crate::chat::see_screen::offers(extra.screen, name) {
             Source::Screen
-        } else if web && crate::chat::pages::offers_act(extra.pictures, extra.act, name) {
-            Source::Act
-        } else if web && crate::chat::pages::offers(extra.pictures, name) {
+        } else if web && crate::chat::pages::offers(extra.pictures, extra.act, name) {
             Source::Pages
         } else if extra.memory && MEMORY_TOOL_NAMES.contains(&name) {
             Source::Memory
@@ -81,7 +78,7 @@ impl Loop<'_> {
     /// page brought up, the screen taken) goes to it as it happens.
     pub(super) async fn dispatch(&mut self, source: Source, name: &str, args: Value, looks: &mut Vec<crate::chat::pictures::Look>) -> Value {
         match source {
-            Source::Web | Source::Pictures | Source::Act | Source::Pages => {
+            Source::Web | Source::Pictures | Source::Pages => {
                 // (Named only with the web on, `Source::of`; without it a
                 // name is the note tools', as any other.)
                 let Some(turn) = self.web.as_deref_mut() else { return execute(name, &args) };
@@ -108,25 +105,28 @@ impl Loop<'_> {
                             }
                         }
                     }
-                    // An action on a page beside the chat (chat/pages/act.rs):
-                    // its rules in Rust, a click that buys or pays asked first.
-                    Source::Act => crate::chat::pages::act::execute(turn, name, &args, self.live).await,
                     _ => {
-                        // A page brought up, a shot of one, a button for the
-                        // person's browser (chat/pages.rs): the page hears each at once.
-                        let run = crate::chat::pages::execute(turn, name, &args, self.extra.pictures, self.extra.act).await;
-                        if let Some(live) = self.live {
-                            if let Some(page) = run.page {
-                                live.sink.send(crate::chat::stream::Event::Page { page });
-                            }
-                            if let Some(offer) = run.offer {
-                                live.sink.send(crate::chat::stream::Event::Offer { offer });
-                            }
-                            if let Some(picture) = run.picture {
-                                live.sink.send(crate::chat::stream::Event::Picture { picture });
+                        // The browser beside the chat (chat/pages.rs): a page
+                        // opened, a shot in the steps, a card before an action
+                        // that buys or pays — the page hears each at once; a
+                        // shot goes with every later step while it fits.
+                        let ctx = crate::chat::pages::Ctx { gate: self.extra.pictures, act: self.extra.act, provider: self.provider, base_url: self.base_url, live: self.live };
+                        let run = crate::chat::pages::execute(turn, name, &args, &ctx).await;
+                        let mut result = run.result;
+                        let mut left_out = 0;
+                        for look in run.looks {
+                            if self.room.takes_picture(&self.messages, looks, &look) {
+                                looks.push(look);
+                            } else {
+                                left_out += 1;
                             }
                         }
-                        run.result
+                        if left_out > 0 {
+                            tracing::info!(provider = self.provider, left_out, "Chat: no room left in the model's context for a page's shot");
+                            crate::ai::eval::post_fix("look_no_room");
+                            result["note"] = Value::String(crate::chat::budget::NO_ROOM_TO_LOOK.to_string());
+                        }
+                        result
                     }
                 }
             }
@@ -256,8 +256,15 @@ mod tests {
         assert_eq!(Source::of(crate::chat::pictures::SHOW, false, &look, false, false), Source::Notes);
         assert_eq!(Source::of(crate::chat::see_screen::LOOK, false, &look, false, false), Source::Screen);
         assert_eq!(Source::of(crate::chat::see_screen::LOOK, false, &none, false, false), Source::Notes);
+        // The browser: every tool of it with the pages; acting only for a model that may.
+        for name in crate::chat::pages::ALL {
+            assert_eq!(Source::of(name, true, &look, false, false), Source::Pages, "{name}");
+        }
+        assert_eq!(Source::of(crate::chat::pages::act::CLICK, true, &Extra { act: false, ..look }, false, false), Source::Notes);
+        assert_eq!(Source::of(crate::chat::pages::SCREENSHOT, true, &Extra { pictures: crate::chat::pictures::Gate::Show, ..look }, false, false), Source::Notes);
+        // An older name: the tool it is now.
         assert_eq!(Source::of("open_page", true, &look, false, false), Source::Pages);
-        assert_eq!(Source::of("click", true, &look, false, false), Source::Act);
+        assert_eq!(Source::of("click", true, &look, false, false), Source::Pages);
         assert_eq!(Source::of("click", true, &Extra { act: false, ..look }, false, false), Source::Notes);
         // `find_pictures` only where Yap's own page reads aren't offered.
         assert_eq!(Source::of(crate::chat::pictures::FIND, true, &look, false, false), Source::Notes);

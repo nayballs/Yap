@@ -35,6 +35,12 @@ const test = base.extend({
   fakeLlm: [
     async ({}, use) => {
       const fake = await startFakeLlm();
+      // The strong fake's server says its context, as a strong model's does
+      // (its whole toolset with the web on — the documents', the web's,
+      // every browser tool — doesn't fit the 8K Yap assumes for a server on
+      // this PC that doesn't say).
+      fake.setServerModels([{ id: 'fake-chat' }, { id: 'fake-gpt-5' }]);
+      fake.serveOllama({ loaded: { 'fake-gpt-5': 32768 } });
       await use(fake);
       await fake.close();
     },

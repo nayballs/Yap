@@ -1,10 +1,18 @@
 // Acting on the pages beside the chat (desktop/src-tauri/src/chat/pages/act.rs: the
-// drive tier, step 3 of the page panel):
+// browser toolset's acting tools):
 // - a strong model (the fake's "fake-gpt-5": documents::rich::strong) gets
-//   click / type_text / scroll / go_to / switch_tab and read_open_page's
-//   `elements`; it fills a made-up rail site's journey form, sends it and
-//   reads the next train — the tab says "Yap is using this page" (with Stop)
-//   while the turn goes;
+//   browser_click / browser_type / browser_key / browser_hover /
+//   browser_form_input beside the tools every model has, and browser_read's
+//   mode "elements"; it fills a made-up rail site's journey form, sends it
+//   and reads the next train — the tab says "Yap is using this page" (with
+//   Stop) while the turn goes;
+// - a click at a point of the latest screenshot (a strong model that reads
+//   images): the element under it, judged as a ref click is — a point on a
+//   password box refused;
+// - a batch of steps (find, scroll, screenshot, zoom, click) runs in order and
+//   stops at a card said no to;
+// - typing into a page's search box and pressing Enter needs no card;
+// - the tabs listed and closed;
 // - a click that would buy asks first: a card in the thread, "Yap wants to
 //   press ‘Buy tickets’ on rail.example.com" — Don't refuses it, Allow once
 //   lets it through — and the payment page's card fields are never typed;
@@ -13,7 +21,7 @@
 //   the card's question too, with Allow once / Don't, in step with the card;
 // - Enter in a chat page's message box (an editable region outside any
 //   form) asks first, and typing there goes in after the draft;
-// - switch_tab shows the tab beside the chat (by its own number).
+// - browser_tabs switches to a tab beside the chat (by its own number).
 // A model that isn't strong ("fake-chat") gets none of it (chat-pages.spec.js).
 //
 // Nothing leaves the PC: the model is the scripted fake AI
@@ -21,14 +29,20 @@
 // the debug-only YAP_WEB_STANDIN). The pages are their own WebView2s laid over
 // Yap's window: the checks read them through the debug-only
 // `e2e_page_view_eval` / `e2e_page_views`. Fictional sites only.
-import { test as base, expect, setConfig, openView } from './support/fixtures.js';
+import { test as base, expect, expectStore, setConfig, openView } from './support/fixtures.js';
 import { startFakeLlm } from './support/fake-llm.js';
-import { startFakeWeb, RAIL_URL, RAIL_RESULTS_URL, RAIL_SIGNIN_URL, FORT_JOY_URL, CHAT_URL } from './support/fake-web.js';
+import { startFakeWeb, RAIL_URL, RAIL_RESULTS_URL, RAIL_SIGNIN_URL, FORT_JOY_URL, CHAT_URL, BOARD_URL } from './support/fake-web.js';
 
 const test = base.extend({
   fakeLlm: [
     async ({}, use) => {
       const fake = await startFakeLlm();
+      // The strong fakes' server says their context, as a strong model's
+      // does (a strong model's whole toolset — the documents', the web's,
+      // every browser tool — doesn't fit the 8K Yap assumes for a server
+      // on this PC that doesn't say).
+      fake.setServerModels([{ id: 'fake-chat' }, { id: 'fake-gpt-5' }, { id: 'fake-gpt-5-vision' }]);
+      fake.serveOllama({ loaded: { 'fake-gpt-5': 32768, 'fake-gpt-5-vision': 32768 } });
       await use(fake);
       await fake.close();
     },
@@ -95,10 +109,10 @@ test('a strong model fills in a form and sends it; the tab says Yap is using it,
   let release;
   const held = new Promise((r) => (release = r));
   fakeLlm.scriptChat([
-    { tools: [{ name: 'open_page', args: { url: RAIL_URL } }] },
-    { tools: [{ name: 'read_open_page', args: { elements: true } }] },
-    { tools: [{ name: 'type_text', args: (r) => ({ ref: refIn(r, 'From'), text: 'Kellbrook' }) }] },
-    { tools: [{ name: 'type_text', args: (r) => ({ ref: refIn(r, 'To'), text: 'Port Ellis', submit: true }) }] },
+    { tools: [{ name: 'browser_navigate', args: { url: RAIL_URL } }] },
+    { tools: [{ name: 'browser_read', args: { mode: 'elements' } }] },
+    { tools: [{ name: 'browser_type', args: (r) => ({ ref: refIn(r, 'From'), text: 'Kellbrook' }) }] },
+    { tools: [{ name: 'browser_type', args: (r) => ({ ref: refIn(r, 'To'), text: 'Port Ellis', submit: true }) }] },
     // (Held: the turn stays open while the tab's strip is checked.)
     { content: 'The next train leaves at 09:42 from platform 2.', gate: held },
   ]);
@@ -107,9 +121,12 @@ test('a strong model fills in a form and sends it; the tab says Yap is using it,
   // The drive tier's tools and line, for a strong model.
   await expect.poll(() => chatCalls(fakeLlm, from).length, { timeout: 30_000 }).toBeGreaterThanOrEqual(5);
   const calls = chatCalls(fakeLlm, from);
-  expect(calls[0].tools).toEqual(expect.arrayContaining(['open_page', 'read_open_page', 'click', 'type_text', 'scroll', 'go_to', 'switch_tab']));
-  expect(calls[0].system).toContain('To act on the page beside the chat');
-  expect(calls[0].system).toContain('Yap never types passwords, card or bank details');
+  expect(calls[0].tools).toEqual(expect.arrayContaining(['browser_navigate', 'browser_read', 'browser_find', 'browser_click', 'browser_type', 'browser_key', 'browser_hover', 'browser_form_input', 'browser_tabs', 'browser_wait', 'browser_batch']));
+  // The view's tools only for a model that sees it: this one reads the page.
+  expect(calls[0].tools).not.toContain('browser_scroll');
+  expect(calls[0].tools).not.toContain('browser_screenshot');
+  expect(calls[0].system).toContain('To act on a page');
+  expect(calls[0].system).toContain('Never passwords, card or bank details');
 
   // The read: the form's fields and button by ref.
   const read = lastResult(calls[2]);
@@ -144,8 +161,8 @@ test('Stop on the tab stops the turn acting on the page', async ({ yap, main, fa
   let release;
   const held = new Promise((r) => (release = r));
   fakeLlm.scriptChat([
-    { tools: [{ name: 'open_page', args: { url: RAIL_URL } }] },
-    { tools: [{ name: 'scroll', args: { to: 'down' } }] },
+    { tools: [{ name: 'browser_navigate', args: { url: RAIL_URL } }] },
+    { tools: [{ name: 'browser_key', args: { keys: 'Tab' } }] },
     { content: 'Never shown.', gate: held },
   ]);
   await ask(main, `Have a look around ${RAIL_URL}`);
@@ -163,9 +180,9 @@ test('a click that buys asks first: Don’t refuses it, Allow once lets it throu
   await setConfig(yap, main, chatConfig(fakeLlm));
   let from = fakeLlm.requests.length;
   fakeLlm.scriptChat([
-    { tools: [{ name: 'open_page', args: { url: RAIL_RESULTS_URL } }] },
-    { tools: [{ name: 'read_open_page', args: { elements: true } }] },
-    { tools: [{ name: 'click', args: (r) => ({ ref: refIn(r, 'Buy tickets') }) }] },
+    { tools: [{ name: 'browser_navigate', args: { url: RAIL_RESULTS_URL } }] },
+    { tools: [{ name: 'browser_read', args: { mode: 'elements' } }] },
+    { tools: [{ name: 'browser_click', args: (r) => ({ ref: refIn(r, 'Buy tickets') }) }] },
     { content: 'I didn’t buy it: you said no. You can buy it yourself in the panel.' },
   ]);
   await ask(main, `Buy me a ticket for the 09:42 here: ${RAIL_RESULTS_URL}`);
@@ -193,9 +210,9 @@ test('a click that buys asks first: Don’t refuses it, Allow once lets it throu
   // Asked again, Allow once: clicked (the ref still holds: the same page).
   from = fakeLlm.requests.length;
   fakeLlm.scriptChat([
-    { tools: [{ name: 'click', args: { ref: 1 } }] },
-    { tools: [{ name: 'read_open_page', args: { elements: true } }] },
-    { tools: [{ name: 'type_text', args: (r) => ({ ref: refIn(r, 'Card number'), text: 'my card' }) }] },
+    { tools: [{ name: 'browser_click', args: { ref: 1 } }] },
+    { tools: [{ name: 'browser_read', args: { mode: 'elements' } }] },
+    { tools: [{ name: 'browser_type', args: (r) => ({ ref: refIn(r, 'Card number'), text: 'my card' }) }] },
     { content: 'The payment page is open: enter your card details yourself.' },
   ]);
   await say(main, 'Go ahead and buy it.');
@@ -220,12 +237,12 @@ test('a sign-in form is the person’s: its password and email are refused', asy
   await setConfig(yap, main, chatConfig(fakeLlm));
   const from = fakeLlm.requests.length;
   fakeLlm.scriptChat([
-    { tools: [{ name: 'open_page', args: { url: RAIL_SIGNIN_URL } }] },
-    { tools: [{ name: 'read_open_page', args: { elements: true } }] },
+    { tools: [{ name: 'browser_navigate', args: { url: RAIL_SIGNIN_URL } }] },
+    { tools: [{ name: 'browser_read', args: { mode: 'elements' } }] },
     {
       tools: [
-        { name: 'type_text', args: (r) => ({ ref: refIn(r, 'Password'), text: 'Tulip-Kettle-42' }) },
-        { name: 'type_text', args: (r) => ({ ref: refIn(r, 'Email'), text: 'sam.rivers@example.com' }) },
+        { name: 'browser_type', args: (r) => ({ ref: refIn(r, 'Password'), text: 'Tulip-Kettle-42' }) },
+        { name: 'browser_type', args: (r) => ({ ref: refIn(r, 'Email'), text: 'sam.rivers@example.com' }) },
       ],
     },
     { content: 'Please sign in yourself in the panel beside the chat.' },
@@ -247,9 +264,9 @@ test('with the page covering the thread, its strip asks the card’s question to
   await setConfig(yap, main, chatConfig(fakeLlm));
   const from = fakeLlm.requests.length;
   fakeLlm.scriptChat([
-    { tools: [{ name: 'open_page', args: { url: RAIL_RESULTS_URL } }] },
-    { tools: [{ name: 'read_open_page', args: { elements: true } }] },
-    { tools: [{ name: 'click', args: (r) => ({ ref: refIn(r, 'Buy tickets') }) }] },
+    { tools: [{ name: 'browser_navigate', args: { url: RAIL_RESULTS_URL } }] },
+    { tools: [{ name: 'browser_read', args: { mode: 'elements' } }] },
+    { tools: [{ name: 'browser_click', args: (r) => ({ ref: refIn(r, 'Buy tickets') }) }] },
     { content: 'The payment page is open: enter your card details yourself.' },
   ]);
   await ask(main, `Buy me a ticket for the 09:42 here: ${RAIL_RESULTS_URL}`);
@@ -277,9 +294,9 @@ test('Enter in a chat page’s message box asks first; typing there keeps the dr
   await setConfig(yap, main, chatConfig(fakeLlm));
   let from = fakeLlm.requests.length;
   fakeLlm.scriptChat([
-    { tools: [{ name: 'open_page', args: { url: CHAT_URL } }] },
-    { tools: [{ name: 'read_open_page', args: { elements: true } }] },
-    { tools: [{ name: 'type_text', args: (r) => ({ ref: refIn(r, 'Message #general'), text: 'see you at 6', submit: true }) }] },
+    { tools: [{ name: 'browser_navigate', args: { url: CHAT_URL } }] },
+    { tools: [{ name: 'browser_read', args: { mode: 'elements' } }] },
+    { tools: [{ name: 'browser_type', args: (r) => ({ ref: refIn(r, 'Message #general'), text: 'see you at 6', submit: true }) }] },
     { content: 'I didn’t send it: you said no.' },
   ]);
   await ask(main, `Tell #general see you at 6, on ${CHAT_URL}`);
@@ -302,8 +319,8 @@ test('Enter in a chat page’s message box asks first; typing there keeps the dr
   // Typed without Enter: in after the draft, never over it; the result says what the box holds.
   from = fakeLlm.requests.length;
   fakeLlm.scriptChat([
-    { tools: [{ name: 'read_open_page', args: { elements: true } }] },
-    { tools: [{ name: 'type_text', args: (r) => ({ ref: refIn(r, 'Message #general'), text: 'see you at 6' }) }] },
+    { tools: [{ name: 'browser_read', args: { mode: 'elements' } }] },
+    { tools: [{ name: 'browser_type', args: (r) => ({ ref: refIn(r, 'Message #general'), text: 'see you at 6' }) }] },
     { content: 'It’s in the box, not sent.' },
   ]);
   await say(main, 'Just type see you at 6 in the box then, don’t send it');
@@ -315,15 +332,15 @@ test('Enter in a chat page’s message box asks first; typing there keeps the dr
   expect(await inPage(yap, CHAT_URL, "document.querySelectorAll('#sent li').length")).toBe(0);
 });
 
-test('switch_tab shows the tab beside the chat', async ({ yap, main, fakeLlm }) => {
+test('browser_tabs switches to a tab beside the chat', async ({ yap, main, fakeLlm }) => {
   await setConfig(yap, main, chatConfig(fakeLlm));
   const from = fakeLlm.requests.length;
   // (Tab numbers are each tab's own for the session: the read lists them.)
   const wikiTab = (r) => lastResult(r).data.tabs.find((t) => t.url.includes('Fort_Joy')).tab;
   fakeLlm.scriptChat([
-    { tools: [{ name: 'open_page', args: { url: FORT_JOY_URL } }, { name: 'open_page', args: { url: RAIL_URL } }] },
-    { tools: [{ name: 'read_open_page', args: {} }] },
-    { tools: [{ name: 'switch_tab', args: (r) => ({ tab: wikiTab(r) }) }] },
+    { tools: [{ name: 'browser_tabs', args: { action: 'new', url: FORT_JOY_URL } }, { name: 'browser_tabs', args: { action: 'new', url: RAIL_URL } }] },
+    { tools: [{ name: 'browser_read', args: {} }] },
+    { tools: [{ name: 'browser_tabs', args: (r) => ({ action: 'switch', tab: wikiTab(r) }) }] },
     { content: 'The wiki is in front.' },
   ]);
   await ask(main, `Open ${FORT_JOY_URL} and ${RAIL_URL}, then show me the wiki`);
@@ -335,4 +352,148 @@ test('switch_tab shows the tab beside the chat', async ({ yap, main, fakeLlm }) 
   await expect(main.getByTestId('chat-page-title')).toHaveText('Fort Joy - Example Wiki', { timeout: 20_000 });
   await expect.poll(async () => (await views(yap)).find((v) => v.key === keyOf(FORT_JOY_URL))?.onScreen, { timeout: 20_000 }).toBe(true);
   await expect.poll(async () => (await views(yap)).find((v) => v.key === keyOf(RAIL_URL))?.onScreen).toBe(false);
+});
+
+/** Chat on a strong fake model that reads images ("gpt-5" and "vision" in its id). */
+function seeingConfig(fakeLlm) {
+  return { ...chatConfig(fakeLlm), llmScopes: { chat: { enabled: true, provider: 'custom', baseUrl: fakeLlm.base, model: 'fake-gpt-5-vision' } } };
+}
+
+/** The latest screenshot's size in a request's results ("900×700" → [900, 700]). */
+function shotSize(request) {
+  const shotResult = toolResults(request).reverse().find((r) => typeof r?.data?.size === 'string' && r.frame);
+  return shotResult ? shotResult.data.size.split('×').map(Number) : [0, 0];
+}
+
+test('a click at a point of the screenshot: the element under it, judged as a ref click is; a password box refused', async ({ yap, main, fakeLlm }) => {
+  await setConfig(yap, main, seeingConfig(fakeLlm));
+  const from = fakeLlm.requests.length;
+  fakeLlm.scriptChat([
+    { tools: [{ name: 'browser_navigate', args: { url: BOARD_URL } }] },
+    { tools: [{ name: 'browser_screenshot', args: {} }] },
+    // The east field: three quarters across, a third down.
+    { tools: [{ name: 'browser_click', args: (r) => ({ x: Math.round(shotSize(r)[0] * 0.75), y: Math.round(shotSize(r)[1] * 0.3) }) }] },
+    // The password box, a quarter from the bottom.
+    { tools: [{ name: 'browser_click', args: (r) => ({ x: Math.round(shotSize(r)[0] * 0.2), y: Math.round(shotSize(r)[1] * 0.74) }) }] },
+    { content: 'I picked the east field; the password is yours to type.' },
+  ]);
+  await ask(main, `On the field map, pick the east field: ${BOARD_URL}`);
+  await expect(main.getByText('I picked the east field')).toBeVisible({ timeout: 60_000 });
+  const calls = chatCalls(fakeLlm, from);
+  expect(calls[0].tools).toContain('browser_screenshot');
+  expect(lastResult(calls[2])).toMatchObject({ success: true, displayText: 'Looked at the page · maps.example.com' });
+  expect(lastResult(calls[2]).frame).toContain("browser_click's x, y are in this picture's pixels");
+  // The picture the model got is the page's view at its CSS pixels: a point in it is that point of the page.
+  expect(shotSize(calls[3])).toEqual(await inPage(yap, BOARD_URL, '[window.innerWidth, window.innerHeight]'));
+  const clicked = lastResult(calls[3]);
+  // (A block with no words: named by its id.)
+  expect(clicked).toMatchObject({ success: true, displayText: 'Clicked ‘e’ on maps.example.com', data: { at: { role: 'div' } } });
+  expect(await inPage(yap, BOARD_URL, "document.getElementById('picked').textContent")).toBe('Picked: east field');
+  const refused = lastResult(calls[4]);
+  expect(refused).toMatchObject({ success: false, displayText: "Didn't click ‘Password’: Yap never types a password", data: { refused: 'sensitive' } });
+  expect(await inPage(yap, BOARD_URL, "document.activeElement ? document.activeElement.id : ''")).not.toBe('pw');
+});
+
+test('a batch runs its steps in order, its shots in the steps, and stops at a card said no to', async ({ yap, main, fakeLlm, shot }) => {
+  await setConfig(yap, main, seeingConfig(fakeLlm));
+  const from = fakeLlm.requests.length;
+  fakeLlm.scriptChat([
+    { tools: [{ name: 'browser_navigate', args: { url: RAIL_RESULTS_URL } }] },
+    {
+      tools: [
+        {
+          name: 'browser_batch',
+          args: {
+            actions: [
+              { tool: 'browser_find', args: { query: 'Buy tickets' } },
+              { tool: 'browser_scroll', args: { direction: 'down' } },
+              { tool: 'browser_screenshot' },
+              { tool: 'browser_zoom', args: { region: 'top' } },
+              { tool: 'browser_click', args: { ref: 1 } },
+              { tool: 'browser_screenshot' },
+            ],
+          },
+        },
+      ],
+    },
+    { content: 'I stopped before buying: you said no.' },
+  ]);
+  await ask(main, `Have a look at the 09:42 and buy it: ${RAIL_RESULTS_URL}`);
+  // The click asks first, in the middle of the batch: Don't.
+  const card = main.getByTestId('chat-page-confirm');
+  await expect(card).toHaveAttribute('data-state', 'asking', { timeout: 40_000 });
+  await expect(card).toContainText('Yap wants to press ‘Buy tickets’ on rail.example.com');
+  await card.getByRole('button', { name: "Don't" }).click();
+  await expect(main.getByText('I stopped before buying: you said no.')).toBeVisible({ timeout: 30_000 });
+  const calls = chatCalls(fakeLlm, from);
+  const batch = lastResult(calls[2]);
+  expect(batch).toMatchObject({ success: false, data: { ran: 5, of: 6 } });
+  expect(batch.displayTexts).toEqual([
+    expect.stringMatching(/^Found \d+ matches for ‘Buy tickets’ on rail\.example\.com$/),
+    'Scrolled down rail.example.com',
+    'Looked at the page · rail.example.com',
+    'Zoomed in on the page · rail.example.com',
+    "Didn't click ‘Buy tickets’: you said no",
+  ]);
+  expect(batch.note).toMatch(/^Stopped at step 5 of 6/);
+  // Its two pictures went to the model, in order; nothing was bought.
+  const sent = calls[2].messages.filter((m) => m.role === 'user' && Array.isArray(m.content)).flatMap((m) => m.content.filter((p) => p.type === 'image_url'));
+  expect(sent).toHaveLength(2);
+  expect(await inPage(yap, RAIL_RESULTS_URL, 'location.pathname')).toMatch(/\/results$/);
+  // Each step a chip; the two shots on theirs.
+  const steps = main.getByTestId('chat-steps').last();
+  await expect(steps.getByTestId('chat-steps-shots').getByTestId('chat-step-shot')).toHaveCount(2);
+  await steps.locator('summary').click();
+  await expect(steps.locator('.toolchip')).toHaveCount(6);
+  await expect(steps.locator('.toolchip.withshot')).toHaveCount(2);
+  await expectStore(yap, 'chats.json', (s) => s.conversations.some((c) => c.messages.some((m) => m.text === 'I stopped before buying: you said no.' && m.pictures?.filter((p) => p.chip).length === 2)));
+  await shot(main, '04-a-batch-stopped-at-a-card');
+});
+
+test('typing into a page’s search box and pressing Enter needs no card', async ({ yap, main, fakeLlm }) => {
+  await setConfig(yap, main, chatConfig(fakeLlm));
+  const from = fakeLlm.requests.length;
+  fakeLlm.scriptChat([
+    { tools: [{ name: 'browser_navigate', args: { url: CHAT_URL } }] },
+    { tools: [{ name: 'browser_read', args: { mode: 'elements' } }] },
+    { tools: [{ name: 'browser_type', args: (r) => ({ ref: refIn(r, 'Find in chat'), text: 'Sam' }) }] },
+    { tools: [{ name: 'browser_key', args: { keys: 'Enter' } }] },
+    { tools: [{ name: 'browser_key', args: { keys: 'ctrl+w' } }] },
+    { content: 'I searched the chat for Sam.' },
+  ]);
+  await ask(main, `Find Sam in the chat on ${CHAT_URL}`);
+  await expect(main.getByText('I searched the chat for Sam.')).toBeVisible({ timeout: 40_000 });
+  const calls = chatCalls(fakeLlm, from);
+  expect(lastResult(calls[3])).toMatchObject({ success: true, displayText: 'Typed in ‘Find in chat’ on chat.example.com', data: { field: 'Sam' } });
+  const pressed = lastResult(calls[4]);
+  expect(pressed).toMatchObject({ success: true, displayText: 'Pressed Enter on chat.example.com' });
+  expect(pressed.data.asked).toBeUndefined();
+  expect(pressed.data.focused).toMatch(/textbox "Find in chat"/);
+  await expect(main.getByTestId('chat-page-confirm')).toHaveCount(0);
+  // A key Yap doesn't press: said so, nothing pressed.
+  expect(lastResult(calls[5])).toMatchObject({ success: false, displayText: "Couldn't press keys: none Yap presses" });
+  // The message box sent nothing.
+  expect(await inPage(yap, CHAT_URL, "document.querySelectorAll('#sent li').length")).toBe(0);
+});
+
+test('the tabs beside the chat: listed, and one closed', async ({ yap, main, fakeLlm }) => {
+  await setConfig(yap, main, chatConfig(fakeLlm));
+  const from = fakeLlm.requests.length;
+  const railTab = (r) => lastResult(r).data.tabs.find((t) => t.url.startsWith(RAIL_URL)).tab;
+  fakeLlm.scriptChat([
+    { tools: [{ name: 'browser_navigate', args: { url: FORT_JOY_URL } }] },
+    { tools: [{ name: 'browser_tabs', args: { action: 'new', url: RAIL_URL } }] },
+    { tools: [{ name: 'browser_tabs', args: { action: 'list' } }] },
+    { tools: [{ name: 'browser_tabs', args: (r) => ({ action: 'close', tab: railTab(r) }) }] },
+    { content: 'The rail tab is closed; the wiki stays.' },
+  ]);
+  await ask(main, `Open ${FORT_JOY_URL} and ${RAIL_URL}, then close the rail one`);
+  await expect(main.getByText('The rail tab is closed; the wiki stays.')).toBeVisible({ timeout: 40_000 });
+  const calls = chatCalls(fakeLlm, from);
+  expect(lastResult(calls[2])).toMatchObject({ success: true, displayText: 'Brought up rail.example.com beside the chat' });
+  expect(lastResult(calls[3])).toMatchObject({ success: true, displayText: 'Listed the tabs beside the chat (2)' });
+  const n = railTab(calls[3]);
+  expect(lastResult(calls[4])).toMatchObject({ success: true, displayText: `Closed tab ${n} beside the chat` });
+  await expect.poll(async () => (await views(yap)).some((v) => v.key === keyOf(RAIL_URL))).toBe(false);
+  expect((await views(yap)).some((v) => v.key === keyOf(FORT_JOY_URL))).toBe(true);
 });

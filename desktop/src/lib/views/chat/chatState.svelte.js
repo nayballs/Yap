@@ -91,6 +91,8 @@ class Answer {
     this.confirms = null;
     this.docs = [];
     this.pictures = [];
+    // The shots the model took of a page (its steps' thumbnails: chat/pages/see.rs).
+    this.shots = [];
     this.pages = [];
     this.offers = [];
     this.screens = [];
@@ -103,6 +105,7 @@ class Answer {
   /** What it showed beside the chat, kept for its bubble (a page, a button, a picture, a document). */
   collect(ev) {
     if (ev?.kind === 'picture' && ev.picture?.id && !this.pictures.some((p) => p.id === ev.picture.id)) this.pictures = [...this.pictures, ev.picture];
+    if (ev?.kind === 'shot' && ev.picture?.id && !this.shots.some((p) => p.id === ev.picture.id)) this.shots = [...this.shots, ev.picture];
     if (ev?.kind === 'page' && ev.page?.url && !this.pages.some((p) => p.url === ev.page.url)) this.pages = [...this.pages, ev.page];
     if (ev?.kind === 'offer' && ev.offer?.url && !this.offers.some((o) => o.url === ev.offer.url)) this.offers = [...this.offers, ev.offer];
     if (ev?.kind === 'document' && ev.noteId != null) {
@@ -466,6 +469,7 @@ export function createChatState({ onopensettings = () => null, onopennote = () =
     if (rec.confirms?.length) b.confirms = rec.confirms;
     if (rec.docs.length) b.liveDocs = rec.docs;
     if (rec.pictures.length) b.livePictures = rec.pictures;
+    if (rec.shots.length) b.liveShots = rec.shots;
     if (rec.pages.length) b.livePages = rec.pages;
     if (rec.offers.length) b.liveOffers = rec.offers;
     return b;
@@ -490,6 +494,7 @@ export function createChatState({ onopensettings = () => null, onopennote = () =
       m.waiting = l.waiting;
       m.liveThinking = l.thinking;
       if (rec.confirms) m.confirms = rec.confirms;
+      if (rec.shots.length) m.liveShots = rec.shots;
     }
     followThread();
   }
@@ -1086,7 +1091,7 @@ export function createChatState({ onopensettings = () => null, onopennote = () =
       const last = phase === 'open' ? messages.at(-1) : null;
       const made = last?.documents?.at(-1);
       if (made) doc.show(made.id, { title: made.title });
-      else if (last?.pictures?.length) doc.showPicture(last.pictures.at(-1));
+      else if (last?.pictures?.some((p) => !p.chip)) doc.showPicture(last.pictures.filter((p) => !p.chip).at(-1));
     } catch {
       /* deleted meanwhile */
     }
@@ -1321,6 +1326,11 @@ export function createChatState({ onopensettings = () => null, onopennote = () =
         if (shown) doc.showTab(ev.key);
         return;
       }
+      // A tab the model closed (browser_tabs): its page is gone already.
+      if (ev?.kind === 'closeTab') {
+        if (shown) doc.closeTab(ev.key);
+        return;
+      }
       if (ev?.kind === 'confirm') {
         if (shown) doc.setAsking(ev);
         const have = rec.confirms || [];
@@ -1406,7 +1416,7 @@ export function createChatState({ onopensettings = () => null, onopennote = () =
         // The documents it made or changed (chat/documents.rs): their pills.
         documents: res.documents || [],
         // The pictures it showed beside the chat (chat/pictures.rs): their pills.
-        pictures: res.pictures ?? rec.pictures,
+        pictures: res.pictures ?? [...rec.pictures, ...rec.shots],
         // "Search in your browser", when Yap's free web sources couldn't give it.
         browserSearch: res.browserSearch ?? null,
         // The pages it brought up (their tabs) and its buttons (chat/pages.rs).

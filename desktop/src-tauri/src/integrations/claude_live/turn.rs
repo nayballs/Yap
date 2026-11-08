@@ -223,10 +223,10 @@ impl Marks {
     }
 
     /// Claude Code began a call to Yap's tool `name` ("start_agent"). One
-    /// that brings the screen's or a page's words in (`eyes::SEES`): web
+    /// that brings the screen's or a page's words in (`eyes::sees`): web
     /// content from now on, as a `WebSearch` beginning is.
     pub fn began(&self, name: &str) {
-        let sees = super::eyes::SEES.contains(&name);
+        let sees = super::eyes::sees(name);
         self.slot.with(self.n, |t| {
             *t.began.entry(name.to_string()).or_insert(0) += 1;
             t.web |= sees;
