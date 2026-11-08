@@ -54,6 +54,13 @@
 //!   take of the screen or a page goes back to the model as MCP image
 //!   content, and what they show to the turn's stream (the screenshots with
 //!   the question, a page's tab, a shot in the steps, a card, a picture).
+//! - **The person's connectors** ([`connectors`], Connectors wave 7), for a
+//!   Chat run on their plan offered them ([`RunSpec::connectors`]): every
+//!   connector tool the turn may use that isn't Off, by Yap's names
+//!   (`mcp__yap__notion__search`), all in `--allowedTools` so Yap's own
+//!   settings decide — Always allow runs, Ask first holds the HTTP call
+//!   while Yap's card asks in Chat, a no is a refusal the model reads —, a
+//!   server's answer outside content for the rest of the turn.
 //! - **`approve`** ([`approve`]), an agent's permission prompt tool: a card for
 //!   the person (`yap-claude-approve`), Allow once / Deny
 //!   ([`claude_approve_answer`]), no answer in 10 minutes a no. Claude Code
@@ -70,6 +77,7 @@
 
 mod approve;
 pub mod backup;
+pub mod connectors;
 pub mod eyes;
 mod agents;
 mod reads;
@@ -167,11 +175,15 @@ pub struct RunSpec {
     /// as far as these gates say. Listed for the whole session, as the agent
     /// tools are; each turn says what it may use of them (`turn::Context`).
     pub eyes: eyes::Eyes,
+    /// A plan chat's connector tools ([`connectors`]): listed for the whole
+    /// session (its hash in the session's fingerprint, `chat/turn/plan.rs`),
+    /// each call for the turn it belongs to. Never an agent's run.
+    pub connectors: Option<connectors::Listed>,
 }
 
 impl RunSpec {
     pub fn new(label: impl Into<String>, tools: Tools) -> RunSpec {
-        RunSpec { label: label.into(), tools, backup_dir: None, folder: None, approval: None, agents: false, memory: true, eyes: eyes::Eyes::default() }
+        RunSpec { label: label.into(), tools, backup_dir: None, folder: None, approval: None, agents: false, memory: true, eyes: eyes::Eyes::default(), connectors: None }
     }
 
     /// The same, offered Yap Code's tools (`on`).
@@ -191,6 +203,12 @@ impl RunSpec {
         self.eyes = eyes;
         self
     }
+
+    /// The same, with the person's connectors' tools (`None`: none).
+    pub fn with_connectors(mut self, listed: Option<connectors::Listed>) -> RunSpec {
+        self.connectors = listed;
+        self
+    }
 }
 
 /// **A registered run.** Dropping it unregisters the run: its URL answers
@@ -207,6 +225,8 @@ pub struct RunHandle {
     memory: bool,
     /// Sees the screen and the pages ([`RunSpec::eyes`], a Chat run's).
     eyes: eyes::Eyes,
+    /// Its connector tools' names ([`RunSpec::connectors`], a Chat run's).
+    connectors: Vec<String>,
     has_backup: bool,
     /// The chat turn its calls belong to ([`RunHandle::begin_turn`]).
     turn: Arc<turn::Slot>,
@@ -288,12 +308,15 @@ impl RunHandle {
     }
 
     /// The run's own tools as `--allowedTools` names (`mcp__yap__list_meetings`
-    /// …), so a Chat run in `dontAsk` mode can use them. `approve` is never
-    /// one: it's the permission prompt tool.
+    /// …), so a Chat run in `dontAsk` mode can use them — its connectors'
+    /// too, whose calls Yap's own settings decide ([`connectors`]). `approve`
+    /// is never one: it's the permission prompt tool.
     pub fn allowed_tools(&self) -> Vec<String> {
         rpc::tool_names(self.tools, true, self.agents, self.memory, self.eyes)
             .into_iter()
             .filter(|n| *n != approve::NAME)
+            .map(str::to_string)
+            .chain(self.connectors.iter().cloned())
             .map(|n| format!("mcp__{SERVER}__{n}"))
             .collect()
     }

@@ -503,8 +503,15 @@ and each call runs the tool loop's own code and rules.
   order, so every web read before it has been counted by then. Not seen in
   time: refused as after the web ("didn't show in its turn's events" in the
   log).
-- **Then the same guards**: the safety rule (`refused_after_web`), the
-  evaluation's intercept, consent, the folder, the mode.
+- **Then the same guards**: the safety rule (`refused_after_outside`: after
+  the web, an agent's words or a connector's result — "Didn't send an agent:
+  not after a connector's result", `Slot::connector`), the evaluation's
+  intercept, consent, the folder, the mode.
+- **No connectors in an agent** (Connectors wave 7): a plan chat's session
+  may list the person's connectors (`claude_live/connectors.rs`), but an
+  agent's run never does — it keeps the person's own Claude Code setup
+  (their MCP servers, their claude.ai connectors); the listener drops them
+  from a `Tools::Agent` run, and a Code chat's session gets none either.
 - **What the calls show** (the ask-first card, a started agent's tab) goes into
   that turn's stream, so it shows in the plan chat's thread. The call waits
   for Start: the card's two minutes are well inside the run's 11-minute tool

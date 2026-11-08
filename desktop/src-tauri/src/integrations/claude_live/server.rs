@@ -112,12 +112,14 @@ impl Endpoint {
         let tools = spec.tools;
         let agents = spec.agents && tools == super::Tools::Chat;
         let memory = spec.memory;
-        // The screen and the pages: a Chat run's only.
+        // The screen, the pages and the connectors: a Chat run's only.
         let mut spec = spec;
         if tools != super::Tools::Chat {
             spec.eyes = super::eyes::Eyes::default();
+            spec.connectors = None;
         }
         let eyes = spec.eyes;
+        let connectors: Vec<String> = spec.connectors.as_ref().map(|l| l.names().map(str::to_string).collect()).unwrap_or_default();
         let has_backup = spec.backup_dir.is_some();
         let turn = Arc::new(super::turn::Slot::default());
         let run = Arc::new(Run { id: id.clone(), digest: digest(&format!("Bearer {key}")), spec, backups: Mutex::new(()), turn: Arc::clone(&turn) });
@@ -126,8 +128,8 @@ impl Endpoint {
             runs.insert(id.clone(), run);
             runs.len()
         };
-        tracing::info!(run = %id, tools = ?tools, agents, eyes = eyes.any(), backup = has_backup, runs = count, "Claude Code endpoint: a run registered");
-        Ok(RunHandle { endpoint: Arc::clone(self), id, key, tools, agents, memory, eyes, has_backup, turn })
+        tracing::info!(run = %id, tools = ?tools, agents, eyes = eyes.any(), connectors = connectors.len(), backup = has_backup, runs = count, "Claude Code endpoint: a run registered");
+        Ok(RunHandle { endpoint: Arc::clone(self), id, key, tools, agents, memory, eyes, connectors, has_backup, turn })
     }
 
     /// The run's URLs answer 404 from now on; its prompts still waiting
