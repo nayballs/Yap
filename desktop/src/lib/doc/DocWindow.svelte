@@ -13,7 +13,7 @@
   //   way out: blur, close, Ctrl+S), one save at a time, each only while the
   //   file is still what the page last read or wrote (`expect`, its stamp:
   //   modified time and size); Rust keeps its encoding and line endings.
-  // - **Changes on disk** (a job or an assistant writing the file): looked
+  // - **Changes on disk** (an agent or an assistant writing the file): looked
   //   for every 1.5 s. Nothing typed and unsaved here → reloaded in place,
   //   where it was scrolled to; typed and unsaved → a quiet bar, "Changed on
   //   disk · Reload · Keep mine". Moved or deleted → "Save it here again".

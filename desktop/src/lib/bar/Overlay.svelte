@@ -82,8 +82,8 @@
     dictationButtons: 'off',
     // The first-use pointers still due (bar/pointer.rs): { idle, recording, hold } | null.
     firstUse: null,
-    // Jobs not over yet (jobs/): "1 job running" while the bar is idle.
-    jobs: 0,
+    // Agents not over yet (agents/): "1 agent working" while the bar is idle.
+    agents: 0,
   });
   // The --bar-* colours (app.css): `data-bar-theme`, Match app resolved with
   // the theme of Yap's windows (lib/core/appearance.js, which also follows it as
@@ -289,15 +289,15 @@
     }
   }
   const dictate = () => act('dictate');
-  // "1 job running" (Jobs): Chat on the newest one's chat and its tab.
-  const openJobs = () => act('jobs');
+  // "1 agent working" (Yap Code): Chat on the newest one's chat and its tab.
+  const openAgents = () => act('agents');
   // Shown beside the idle (or meeting) pill only, never over a dictation,
   // the reading card or a first-use pointer.
-  const jobsLine = $derived(
-    bar.enabled && bar.shown && bar.jobs > 0 && (mode === 'idle' || mode === 'meeting') && !reading.active && !pointerText
-      ? bar.jobs === 1
-        ? '1 job running'
-        : `${bar.jobs} jobs running`
+  const agentsLine = $derived(
+    bar.enabled && bar.shown && bar.agents > 0 && (mode === 'idle' || mode === 'meeting') && !reading.active && !pointerText
+      ? bar.agents === 1
+        ? '1 agent working'
+        : `${bar.agents} agents working`
       : ''
   );
   const meetingNotes = () => act('meeting');
@@ -443,17 +443,17 @@
 
 <div class="stage" class:top={bar.edge === 'top'} class:pop={popping} onpointermove={onStageMove} role="presentation">
   <div class="cards" style={`${bar.edge === 'top' ? 'top' : 'bottom'}:${8 + Math.max(dockH, 20) + 20}px`}>
-    {#if jobsLine}
-      <!-- Jobs at work (jobs/): a quiet line nearest the pill; a click opens Chat on the newest. -->
+    {#if agentsLine}
+      <!-- Agents at work (agents/): a quiet line nearest the pill; a click opens Chat on the newest. -->
       <button
         type="button"
-        class="jobsline"
-        data-region="jobs"
-        data-testid="bar-jobs"
-        aria-label={`${jobsLine}: open in Chat`}
-        onclick={openJobs}
+        class="agentsline"
+        data-region="agents"
+        data-testid="bar-agents"
+        aria-label={`${agentsLine}: open in Chat`}
+        onclick={openAgents}
         transition:fade={{ duration: motionMs(140) }}
-      ><span class="jdot" aria-hidden="true"></span>{jobsLine}</button>
+      ><span class="jdot" aria-hidden="true"></span>{agentsLine}</button>
     {/if}
     {#if pointerText}
       <!-- First-use pointer (bar/pointer.rs): words only, click-through. -->
@@ -745,9 +745,9 @@
     border-top-color: transparent;
     border-bottom-color: var(--bar-tooltip);
   }
-  /* "1 job running": a small chip of the bar's own surface (no shadow: a
+  /* "1 agent working": a small chip of the bar's own surface (no shadow: a
      transparent window), nearest the pill. */
-  .jobsline {
+  .agentsline {
     display: inline-flex;
     align-items: center;
     gap: 7px;
@@ -764,11 +764,11 @@
     white-space: nowrap;
     cursor: pointer;
   }
-  .jobsline:hover {
+  .agentsline:hover {
     background: var(--bar-surface-hover);
     color: var(--bar-text);
   }
-  .stage.top .jobsline {
+  .stage.top .agentsline {
     margin-bottom: 0;
     margin-top: -6px;
   }

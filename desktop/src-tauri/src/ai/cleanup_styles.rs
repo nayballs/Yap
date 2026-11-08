@@ -951,7 +951,7 @@ pub fn resolve(cfg: &YapConfig, t: &Target) -> Option<Plan> {
 // ---- A question said to Yap's AI ---------------------------------------------------
 
 /// **How a question said to Yap's AI is cleaned** (2026-11-07: Settings →
-/// Voice Assistant's "Clean up what you say in Chat", Settings → Jobs' "…in
+/// Voice Assistant's "Clean up what you say in Chat", Settings → Yap Code' "…in
 /// Code chats"): as an AI prompt, literally — fillers and false starts out,
 /// punctuation in, the words and their order kept, never answered, carried
 /// out or rewritten into something else — whatever AI prompts' tone and
@@ -995,12 +995,12 @@ fn endpoint_ready(provider: &str, base_url: &str, api_key: &str, model: &str) ->
 
 /// **Is a question said to Yap's AI cleaned up?** Its side's switch —
 /// `code`: it goes into a Code chat ("Clean up what you say in Code chats",
-/// Settings → Jobs), else a plain chat ("…in Chat", Settings → Voice
+/// Settings → Yap Code), else a plain chat ("…in Chat", Settings → Voice
 /// Assistant) — and a cleanup model ready ([`question_cleanup_ready`]).
 /// Each side its own; neither is "AI cleanup"'s switch. Pure but for the
 /// on-device model's file.
 pub fn cleans_question(cfg: &YapConfig, code: bool) -> bool {
-    let on = if code { cfg.jobs_clean_speech } else { cfg.chat_clean_speech };
+    let on = if code { cfg.agents_clean_speech } else { cfg.chat_clean_speech };
     on && question_cleanup_ready(cfg)
 }
 
@@ -1691,7 +1691,7 @@ supplier is late scratch that the launch is on time";
         let mut c = with_cloud_model();
         c.post_process_enabled = false;
         // Both on by default: cleaned on either side, AI cleanup off or on.
-        assert!(c.chat_clean_speech && c.jobs_clean_speech);
+        assert!(c.chat_clean_speech && c.agents_clean_speech);
         assert!(cleans_question(&c, false) && cleans_question(&c, true));
         c.post_process_enabled = true;
         assert!(cleans_question(&c, false) && cleans_question(&c, true));
@@ -1701,11 +1701,11 @@ supplier is late scratch that the launch is on time";
         assert!(cleans_question(&c, true));
         // …and the reverse.
         c.chat_clean_speech = true;
-        c.jobs_clean_speech = false;
+        c.agents_clean_speech = false;
         assert!(cleans_question(&c, false));
         assert!(!cleans_question(&c, true));
         // No cleanup model: as said on both sides, nothing asked.
-        c.jobs_clean_speech = true;
+        c.agents_clean_speech = true;
         for broken in [
             YapConfig { pp_api_key: String::new(), ..with_cloud_model() },
             YapConfig { pp_base_url: " ".into(), ..with_cloud_model() },

@@ -33,10 +33,10 @@ How loud Yap may be: the notice policy (one place, one at a time, held while dic
   call (also "Stop taking notes?" and "Switch to Zoom?", 2026-10-29),
   calendar, meeting-limit, meeting-checkin (also the meeting's other
   questions: the call on another mic, "Your PC was asleep", "Start notes
-  automatically for Teams calls?"; `meeting_guard::ask`), jobApprove (a
-  running job asking to take a step, "Allow a step in garden-planner?",
-  2026-11-07, `jobs/approve_card.rs`: a question that waits for its answer,
-  never over a dictation; Chat's thread has it too, [jobs.md](./jobs.md)) — > Alert — micBlocked,
+  automatically for Teams calls?"; `meeting_guard::ask`), agentApprove (a
+  running agent asking to take a step, "Allow a step in garden-planner?",
+  2026-11-07, `agents/approve_card.rs`: a question that waits for its answer,
+  never over a dictation; Chat's thread has it too, [yap-code.md](./yap-code.md)) — > Alert — micBlocked,
   pasteBlocked (an admin app, keys Windows didn't take, "Select a text box
   first": `pasting/text_injector.rs` `Left`, one per failed paste),
   clipboardBusy (edit mode's Ctrl+C left the clipboard alone or couldn't
@@ -53,7 +53,7 @@ How loud Yap may be: the notice policy (one place, one at a time, held while dic
   H2 connected · Use it for dictation?", `dictation/mics/offer.rs`, which
   rate-limits it itself and never asks during a dictation), micSwitched
   ("Using Contoso H2 for dictation", the same words not twice in 10 min),
-  jobDone ("Job done: garden-planner" with Open, 2026-11-07,
+  agentDone ("Agent done: garden-planner" with Open, 2026-11-07,
   `chat/turn/report.rs`: with no Yap window in front, held over a dictation,
   gone if unseen a minute — its chat has the report; with the bar off, a
   Windows notification with Open instead),

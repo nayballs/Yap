@@ -46,9 +46,9 @@
   import { menuOrDialogOpen } from '../ui/contextMenu.svelte.js';
   import { noteAccountPicture } from '../core/connections.js';
   import { prefetchHome } from './home/homeData.js';
-  // Jobs: followed from the start, so a bar card's Open (`yap-job-open`)
+  // Yap Code's agents: followed from the start, so a bar card's Open (`yap-agent-open`)
   // finds Chat ready for it.
-  import { initJobs } from '../stores/jobs.svelte.js';
+  import { initAgents } from '../stores/agents.svelte.js';
   // Chat's status dots (core/chatStatus.js): followed from the start, so the
   // rail's Chat says when something needs you, or works while you're elsewhere.
   import { chatStatus, initChatStatus } from '../stores/chatStatus.svelte.js';
@@ -311,7 +311,7 @@
   // (`yap-dictation-error`): one place.
   onMount(() => {
     const uns = [];
-    initJobs();
+    initAgents();
     initChatStatus();
     // The views' chunks (VIEWS above), fetched once the window is idle, so
     // opening one never waits.

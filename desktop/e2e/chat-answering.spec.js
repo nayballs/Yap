@@ -11,12 +11,12 @@
 // - Two chats answering at once (Rust ends a turn only for a newer question in
 //   its own conversation, chat/stream.rs): B asks while A answers; ■ in A
 //   stops A's answer only, Esc in B B's.
-// - A job's report being written in A (a turn Yap starts itself,
+// - An agent's report being written in A (a turn Yap starts itself,
 //   chat/turn/report.rs) while B shows: B unchanged, Send free.
 // - A question asked out loud (the Voice Assistant) answered in A while B
 //   shows: none of it, nor its ■, in B; back in A, its answer so far.
-// The model is a local fake (support/fake-llm.js) streaming slowly; jobs are
-// driven as jobs-ui.spec.js drives them (Claude Code is this build's own
+// The model is a local fake (support/fake-llm.js) streaming slowly; agents are
+// driven as agents-ui.spec.js drives them (Claude Code is this build's own
 // stand-in, the workspace in this run's own folder).
 import fs from 'node:fs';
 import path from 'node:path';
@@ -28,7 +28,7 @@ import { toSide, newCodeChat, sideSwitch } from './support/code-chats.js';
 const HERE = path.join(RUNS, 'chat-answering-spec');
 const SCRIPTS = path.join(HERE, 'scripts');
 const GARDEN = path.join(HERE, 'folders', 'garden-planner');
-const STARTED = "On it: I've started a job in garden-planner.";
+const STARTED = "On it: I've sent an agent to garden-planner.";
 
 const test = base.extend({
   fakeLlm: [
@@ -55,7 +55,7 @@ const thread = (main) => main.locator('.msgs');
 const streamingBubble = (main) => main.getByTestId('chat-streaming');
 const activityLine = (main) => main.getByTestId('chat-activity');
 const stopButton = (main) => main.getByRole('button', { name: 'Stop the answer' });
-const sendButton = (main) => main.getByRole('button', { name: 'Send' });
+const sendButton = (main) => main.getByRole('button', { name: 'Send', exact: true });
 const lastAnswer = (main) => thread(main).locator('.cbubble.assistant').last();
 const row = (main, id) => main.locator(`.convs [data-conv="${id}"]`);
 const dot = (main, id) => row(main, id).getByTestId('chat-status');
@@ -118,7 +118,7 @@ const LONG = [
 
 test.describe('answers in their own chats', () => {
   test.beforeEach(async ({ yap, main, fakeLlm }) => {
-    await setConfig(yap, main, { jobsEnabled: false, webSearch: false, speakReplies: false, llmScopes: chatScope(fakeLlm) });
+    await setConfig(yap, main, { agentsEnabled: false, webSearch: false, speakReplies: false, llmScopes: chatScope(fakeLlm) });
     await openView(main, 'Chat');
   });
 
@@ -289,7 +289,7 @@ test.describe('answers in their own chats', () => {
   });
 });
 
-// ---- A job's report being written in another chat
+// ---- An agent's report being written in another chat
 
 const init = (mode) => ({
   type: 'system',
@@ -347,24 +347,24 @@ function writeScript(name, lines) {
   return file;
 }
 
-test.describe('a job’s report', () => {
+test.describe('an agent’s report', () => {
   test.beforeEach(async ({ yap, main, fakeLlm }) => {
     fs.rmSync(GARDEN, { recursive: true, force: true });
     fs.mkdirSync(GARDEN, { recursive: true });
     fs.writeFileSync(path.join(GARDEN, 'notes.md'), 'Draft notes\n');
     await yap.invoke('e2e_claude_approve_auto', { allow: true });
     await setConfig(yap, main, {
-      jobsEnabled: true,
-      jobsAsk: 'new-or-web',
-      jobsSpeak: 'never',
-      jobsPay: 'plan',
-      jobsMode: 'auto',
+      agentsEnabled: true,
+      agentsAsk: 'new-or-web',
+      agentsSpeak: 'never',
+      agentsPay: 'plan',
+      agentsMode: 'auto',
       webSearch: false,
       speakReplies: false,
       llmScopes: chatScope(fakeLlm),
     });
-    const have = (await yap.invoke('job_folders_list')).map((f) => f.name);
-    if (!have.includes('garden-planner')) await yap.invoke('job_folders_add', { path: GARDEN });
+    const have = (await yap.invoke('workspaces_list')).map((f) => f.name);
+    if (!have.includes('garden-planner')) await yap.invoke('workspaces_add', { path: GARDEN });
   });
 
   test('a report being written in A while B shows: B unchanged, its Send free; it lands in A', async ({ yap, main, fakeLlm, shot }) => {
@@ -373,30 +373,30 @@ test.describe('a job’s report', () => {
     await newChat(main);
     const boxes = await askAndWait(main, fakeLlm, 'Plan my window boxes', 'Herbs on the kitchen sill.');
 
-    // A code chat starts a job; its report waits for the fake model's gate.
+    // A code chat starts an agent; its report waits for the fake model's gate.
     await newCodeChat(main, 'garden-planner');
     await yap.invoke('e2e_claude_script', { script: writeScript('reads', READS) });
-    const before = (await yap.invoke('job_list')).length;
+    const before = (await yap.invoke('agent_list')).length;
     const gatedBefore = fakeLlm.requests.filter((r) => r.gated).length;
     let release;
     const gate = new Promise((r) => (release = r));
     fakeLlm.scriptChat([
-      { tools: [{ name: 'start_job', args: { brief: 'Read notes.md.' } }] },
+      { tools: [{ name: 'start_agent', args: { brief: 'Read notes.md.' } }] },
       { content: STARTED },
       { plain: true, content: 'Done: notes.md says Draft notes.', gate },
     ]);
     await send(main, 'Read notes.md.');
-    await expect.poll(async () => (await yap.invoke('job_list')).length, { timeout: 20_000 }).toBe(before + 1);
+    await expect.poll(async () => (await yap.invoke('agent_list')).length, { timeout: 20_000 }).toBe(before + 1);
     await expect(lastAnswer(main)).toContainText(STARTED);
     const garden = await openId(main);
-    const job = (await yap.invoke('job_list'))[0];
+    const agent = (await yap.invoke('agent_list'))[0];
 
-    // Over to the window boxes while the job works and its report is written.
-    if (await main.getByTestId('chat-job').count()) await main.getByTestId('chat-job').getByRole('button', { name: 'Close the panel' }).click();
+    // Over to the window boxes while the agent works and its report is written.
+    if (await main.getByTestId('chat-agent').count()) await main.getByTestId('chat-agent').getByRole('button', { name: 'Close the panel' }).click();
     await toSide(main, 'Chat');
     await row(main, boxes).click();
     await expect(lastAnswer(main)).toContainText('Herbs on the kitchen sill.');
-    await expect.poll(async () => (await yap.invoke('job_list')).find((j) => j.id === job.id)?.status, { timeout: 30_000 }).toBe('done');
+    await expect.poll(async () => (await yap.invoke('agent_list')).find((j) => j.id === agent.id)?.status, { timeout: 30_000 }).toBe('done');
     // (The report's model call, held at the gate.)
     await expect.poll(() => fakeLlm.requests.filter((r) => r.gated).length, { timeout: 20_000 }).toBeGreaterThan(gatedBefore);
     await expect.poll(() => answering(yap), { timeout: 10_000 }).toContain(garden);

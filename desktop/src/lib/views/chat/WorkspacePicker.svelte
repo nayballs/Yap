@@ -1,9 +1,9 @@
 <script>
   // **The workspace picker** (Code chats, codeChats.svelte.js; after the
-  // Claude app's environment menu): the person's workspaces — the job
+  // Claude app's environment menu): the person's workspaces — the agent
   // folders — most recently used first, each its path on hover, a check on
   // the one in use; **Add workspace…** (Windows' folder picker, in Rust:
-  // `job_folders_pick`) and **Manage workspaces…** (Settings → Jobs); in a
+  // `workspaces_pick`) and **Manage workspaces…** (Settings → Yap Code); in a
   // Code chat's own chip, **Plain chat** too (it leaves Code). Opened from
   // "New code chat" (below it) or the composer's workspace chip (above it):
   // ↑ ↓, Enter, Home / End, Esc, Tab out.

@@ -73,7 +73,7 @@ pub(super) async fn with_tools(
     // Earlier screenshots: the newest few sent again, the rest a line
     // (snip/turn.rs).
     crate::snip::turn::with_history_images(&mut messages, earlier, &ep.provider, &ep.model, &ep.base_url).await;
-    // A Code chat (jobs/code_chat.rs): none of memory's tools, nor past
+    // A Code chat (agents/code_chat.rs): none of memory's tools, nor past
     // chats' (Yap's memory is personal; the project keeps its own).
     let memory = built.code.is_none();
     let extra = crate::chat::tools::Extra {
@@ -93,9 +93,9 @@ pub(super) async fn with_tools(
         // Words selected in another app or on a page beside the chat (never
         // one of Yap's own windows): web content.
         web_question: t.about_selection.as_ref().is_some_and(|s| s.web),
-        // Jobs (tools/jobs.rs): asked out loud, a job that needs asking is
+        // Yap Code (tools/agents.rs): asked out loud, an agent that needs asking is
         // asked in words; asked by voice, its report is read aloud.
-        jobs: g.jobs.then_some(crate::chat::tools::JobsTurn::asked(t.scope, t.by_voice)),
+        agents: g.agents.then_some(crate::chat::tools::AgentsTurn::asked(t.scope, t.by_voice)),
     };
     let looped = crate::chat::tools::run_tool_loop_with(
         &built.prompt.system,

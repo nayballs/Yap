@@ -28,7 +28,7 @@
   import { tooLongLine } from './chatBudget.js';
   import SkillMenu from '../../components/SkillMenu.svelte';
   import ModelChip from './ModelChip.svelte';
-  // A Code chat's workspace chip and Jobs' Mode chip, before it, and its
+  // A Code chat's workspace chip and Yap Code's Mode chip, before it, and its
   // box's edge (codeChats.svelte.js, codeChat.css).
   import CodeChips from './CodeChips.svelte';
   import CodeEdge from './CodeEdge.svelte';
@@ -160,9 +160,9 @@
 <!-- Composer (after Claude Code's): + (voice replies and their volume),
      the message, the mic, and Send once there's something to send;
      under it, quiet, whether answers are read aloud and the model the
-     message goes to. The model picker opens above it all. With Jobs on,
+     message goes to. The model picker opens above it all. With Yap Code on,
      every box keeps room for a Code chat's label on its edge: a chat
-     turning into a Code chat (its job starting) never moves the thread. -->
+     turning into a Code chat (its agent starting) never moves the thread. -->
 <div
   class="composer"
   class:dropping={chat.dragging}

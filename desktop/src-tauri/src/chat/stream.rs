@@ -43,7 +43,7 @@
 //!   there the same way, with nothing saved ([`Halt::Superseded`]).
 //! - **Which conversations are answering** ([`ANSWERING_EVENT`],
 //!   [`chat_answering`]): every turn that answers a conversation — typed,
-//!   dictated, the Voice Assistant's, a phone's, a job's report — is in one
+//!   dictated, the Voice Assistant's, a phone's, an agent's report — is in one
 //!   list, and every window hears it change (Chat's status dots,
 //!   `core/chatStatus.js`).
 
@@ -140,10 +140,10 @@ pub enum Event {
     /// answers with `chat_page_confirm(id, allow)`. Flat on the wire:
     /// `{kind: "confirm", id, label, …}`.
     Confirm(crate::chat::pages::act::confirm::Card),
-    /// **A job started** from this turn (`start_job`, `chat/tools/jobs.rs`):
-    /// the panel opens its tab (`job:<id>`), as for a page. Its progress is
-    /// the app-wide `yap-job` event (`jobs/runner.rs`).
-    Job { job: crate::jobs::JobRef },
+    /// **An agent started** from this turn (`start_agent`, `chat/tools/agents.rs`):
+    /// the panel opens its tab (`agent:<id>`), as for a page. Its progress is
+    /// the app-wide `yap-agent` event (`agents/runner.rs`).
+    Agent { agent: crate::agents::AgentRef },
 }
 
 /// Tool calls whose arguments the page sees as they come: a document's
@@ -183,10 +183,10 @@ pub fn doing(name: &str) -> &'static str {
         "scroll" => "Scrolling the page…",
         "go_to" => "Going to a page…",
         "switch_tab" => "Switching tabs…",
-        "start_job" => "Starting a job…",
-        "job_status" => "Checking the job…",
-        "message_job" => "Telling the job…",
-        "stop_job" => "Stopping the job…",
+        "start_agent" => "Sending an agent…",
+        "agent_status" => "Checking on the agent…",
+        "message_agent" => "Telling the agent…",
+        "stop_agent" => "Stopping the agent…",
         // Yap's read-only tools on your Claude plan (claude_live.rs).
         "list_meetings" | "search_meetings" | "get_meeting" => "Looking at your meetings…",
         "list_tasks" => "Looking at your tasks…",
@@ -796,7 +796,7 @@ impl Stoppable {
 
     /// [`answers`](Self::answers), only while no turn answers `conversation`:
     /// `false` (and nothing changed) while one does. A turn Yap starts by
-    /// itself (a job's report, `turn/report.rs`) waits for it, never ends it.
+    /// itself (an agent's report, `turn/report.rs`) waits for it, never ends it.
     pub fn answers_if_idle(&self, conversation: u64) -> bool {
         let (n, now) = {
             let mut g = ANSWERING.lock().unwrap_or_else(|p| p.into_inner());
@@ -1958,7 +1958,7 @@ mod tests {
         });
     }
 
-    // A job's report (turn/report.rs) waits while its chat is answering, and
+    // An agent's report (turn/report.rs) waits while its chat is answering, and
     // never ends that answer; once it answers there itself, a newer question
     // replaces it as it would any turn.
     #[test]

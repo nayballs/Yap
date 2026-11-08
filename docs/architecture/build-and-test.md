@@ -388,7 +388,7 @@ that turned 114 words into "I've.", 28 Oct).
 
 ## Claude Code in tests (2026-11-07)
 
-Chat on your Claude plan and Jobs drive the person's own Claude Code
+Chat on your Claude plan and Yap Code drive the person's own Claude Code
 ([ai-models.md](./ai-models.md#the-claude-code-engine-2026-11-07)). No test
 ever reaches it, or anyone's Claude account.
 
@@ -407,11 +407,11 @@ ever reaches it, or anyone's Claude account.
   `--no-session-persistence`; `claude-plan.spec.js`). A test run looks for
   Claude Code's transcripts only in a `CLAUDE_CONFIG_DIR` it set, never the
   person's `~/.claude`. **A test
-  run (`YAP_E2E=1`) without `YAP_CLAUDE_EXE` finds no Claude Code**, so jobs
+  run (`YAP_E2E=1`) without `YAP_CLAUDE_EXE` finds no Claude Code**, so agents
   and the plan are never offered there by accident. `e2e_claude_script
   {script?}` switches the stand-in's script per turn; `e2e_claude_approve_auto
-  {allow?}` answers every permission prompt at once; `e2e_job_folder {path}`
-  is the folder the next Add workspace… takes (Settings → Jobs, or Chat's
+  {allow?}` answers every permission prompt at once; `e2e_workspace {path}`
+  is the folder the next Add workspace… takes (Settings → Yap Code, or Chat's
   workspace picker).
 - **The recordings**: `desktop/src-tauri/src/ai/claude_code/fixtures/<version>/`,
   per Claude Code version — `real-*` recorded from the real one **signed out,
@@ -433,8 +433,8 @@ ever reaches it, or anyone's Claude account.
   Claude Code installed here, with an empty `CLAUDE_CONFIG_DIR` of its own so
   it never sees a login and never reaches the API (not signed in, the
   interrupt's receipt).
-- E2E: `claude-plan*.spec.js`, `jobs.spec.js`, `jobs-ui.spec.js`, `jobs-plans.spec.js`,
-  `plan-jobs.spec.js` ([`docs/e2e-tests.md`](../e2e-tests.md)).
+- E2E: `claude-plan*.spec.js`, `agents.spec.js`, `agents-ui.spec.js`, `agents-plans.spec.js`,
+  `plan-agents.spec.js` ([`docs/e2e-tests.md`](../e2e-tests.md)).
 
 ## The benchmark (`yap.exe bench`)
 

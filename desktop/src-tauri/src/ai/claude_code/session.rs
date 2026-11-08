@@ -21,7 +21,7 @@
 //!   2.1.296 for an http server's `headers`, inline and from a file; http
 //!   hooks' `headers` take `$VAR` / `${VAR}` when the hook lists the
 //!   variable in `allowedEnvVars`). So the files never hold the key. An
-//!   inherited [`RUN_KEY_VAR`] (a Yap started from a job's command) never
+//!   inherited [`RUN_KEY_VAR`] (a Yap started from an agent's command) never
 //!   reaches a run.
 //! - **Session persistence**: Claude Code saves every session it runs as a
 //!   transcript in its own config folder (`transcripts.rs`).
@@ -251,7 +251,7 @@ pub struct Spec {
     pub append_system_prompt: Option<String>,
     /// `--system-prompt-file`: a prompt **in place of** Claude Code's own
     /// (a coding agent's). Chat on the plan only (`ai/claude_plan.rs`): its
-    /// own chat prompt; Jobs keep Claude Code's and append to it.
+    /// own chat prompt; Agents keep Claude Code's and append to it.
     pub system_prompt: Option<String>,
     /// `--add-dir`: more folders its tools may use.
     pub add_dirs: Vec<PathBuf>,
@@ -1193,12 +1193,12 @@ mod tests {
         assert_eq!(moved.iter().filter(|(k, _)| k.to_string_lossy().eq_ignore_ascii_case("CLAUDE_CONFIG_DIR")).count(), 1);
 
         // The run key: the run's own goes in (the scrub keeps Yap's name); one
-        // Yap inherited (started from a job's command) never reaches a run.
-        let mut from_a_job = inherited;
-        from_a_job.push((OsString::from("yap_run_key"), OsString::from("a-parent-runs-key")));
-        let none = environment(from_a_job.clone(), &Pay::Plan, &[]).unwrap();
+        // Yap inherited (started from an agent's command) never reaches a run.
+        let mut from_an_agent = inherited;
+        from_an_agent.push((OsString::from("yap_run_key"), OsString::from("a-parent-runs-key")));
+        let none = environment(from_an_agent.clone(), &Pay::Plan, &[]).unwrap();
         assert_eq!(get(&none, RUN_KEY_VAR), None);
-        let own = environment(from_a_job, &Pay::Plan, &[(RUN_KEY_VAR.into(), "this-runs-key".into())]).unwrap();
+        let own = environment(from_an_agent, &Pay::Plan, &[(RUN_KEY_VAR.into(), "this-runs-key".into())]).unwrap();
         assert_eq!(get(&own, RUN_KEY_VAR).as_deref(), Some("this-runs-key"));
         assert_eq!(own.iter().filter(|(k, _)| k.to_string_lossy().eq_ignore_ascii_case(RUN_KEY_VAR)).count(), 1);
         assert!(cli::keeps_env(RUN_KEY_VAR));

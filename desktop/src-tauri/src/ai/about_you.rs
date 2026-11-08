@@ -664,7 +664,7 @@ pub struct Profile {
 }
 
 impl Profile {
-    /// **For a Code chat** (`jobs/code_chat.rs`, 7 Nov 2026): the name and
+    /// **For a Code chat** (`agents/code_chat.rs`, 7 Nov 2026): the name and
     /// the region (spelling, units, money, the clock) kept, the free-text
     /// note ("Anything the AI should know about you") left out — it's
     /// personal, and a Code chat's answers and briefs go into the person's

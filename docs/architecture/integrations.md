@@ -65,9 +65,9 @@ The token-authenticated local API, Yap's MCP server (`yap.exe mcp`) and adding i
   build fails with "Access is denied" (2026-10-17, Claude Code's `~/.claude.json`).
   The launcher (`dev-update.ps1`) also stops any such helper before building.
 - **`integrations/claude_live.rs`** (+ `claude_live/`: `server`, `rpc`,
-  `approve`, `backup`, `reads`, `jobs`, `eyes`, `turn`) — **the endpoint Claude Code runs talk back
+  `approve`, `backup`, `reads`, `agents`, `eyes`, `turn`) — **the endpoint Claude Code runs talk back
   to** (2026-11-07): Yap starts the person's own Claude Code for Chat on
-  their Claude plan and for [Jobs](./jobs.md) (ai-models.md, "The Claude Code
+  their Claude plan and for [Yap Code](./yap-code.md) (ai-models.md, "The Claude Code
   engine"), and those runs reach this. Below.
 
 ## Claude Code runs' endpoint (`integrations/claude_live.rs`, 2026-11-07)
@@ -83,9 +83,9 @@ no Local API (the bridge can be off), and it reaches the live UI.
   404, 401). No CORS headers, ever. Each request runs on a thread of its own,
   so a permission prompt waiting for the person never holds up a read.
 - **A run** (`register_run(RunSpec)` → `RunHandle`): its label, its tools
-  (`Tools::Chat`: read only, plus Jobs' with `RunSpec::jobs`; `Tools::Job`:
+  (`Tools::Chat`: read only, plus Yap Code's with `RunSpec::agents`; `Tools::Agent`:
   `approve`), where its backups go,
-  and who to ask (`Approval`: the job's id, its conversation, typed or by
+  and who to ask (`Approval`: the agent's id, its conversation, typed or by
   voice). **A key per run**: 32 random bytes, compared by SHA-256, sent as
   `Authorization: Bearer`. The handle gives the run's `--mcp-config` (Yap's
   server only, `type: "http"`, its `timeout` 660,000 ms: Claude Code's limit
@@ -113,18 +113,18 @@ no Local API (the bridge can be off), and it reaches the live UI.
   (`check_calendar`, while one is connected). Read only; never the dictation
   history. `RunHandle::allowed_tools` names them for `--allowedTools`, so a
   plan chat in `dontAsk` can use them.
-- **Jobs' tools from a plan chat** (`jobs.rs`, 2026-11-07): for a Chat run
-  registered with `RunSpec::jobs` (`with_jobs`: jobs on, Claude Code here,
-  not across the meetings), `start_job`, `job_status`, `message_job` and
-  `stop_job`, listed with the tool loop's own schemas and descriptions, and
-  each call run by the tool loop's own code (`chat/tools/jobs.rs` `execute`),
+- **Yap Code's tools from a plan chat** (`agents.rs`, 2026-11-07): for a Chat run
+  registered with `RunSpec::agents` (`with_agents`: agents on, Claude Code here,
+  not across the meetings), `start_agent`, `agent_status`, `message_agent` and
+  `stop_agent`, listed with the tool loop's own schemas and descriptions, and
+  each call run by the tool loop's own code (`chat/tools/agents.rs` `execute`),
   after the same safety rule and the evaluation's intercept. The list is read
   once per session, so a session made without them is started again to get
-  them. [jobs.md](./jobs.md#from-a-plan-chat).
+  them. [yap-code.md](./yap-code.md#from-a-plan-chat).
 - **The screen and the pages from a plan chat** (`eyes.rs`, 2026-11-07): for
   a Chat run registered with `RunSpec::eyes` (`with_eyes`: the screen look's
   gate and the pages' and pictures', as the tool loop's `Gates` has them;
-  never a Job's run), `look_at_screen`, `open_page`, `read_open_page`,
+  never an agent's run), `look_at_screen`, `open_page`, `read_open_page`,
   `switch_tab`, `snap_page`, `find_pictures`, `look_at_picture` and
   `show_picture`, listed with the tool loop's own schemas and descriptions
   (reads `readOnlyHint`; opening a page, switching tabs and showing a picture
@@ -145,19 +145,19 @@ no Local API (the bridge can be off), and it reaches the live UI.
   [chat-and-assistant.md](./chat-and-assistant.md#chat-on-your-claude-plan-2026-11-07).
 - **A Chat run's turn** (`turn.rs`): `RunHandle::begin_turn(Context, web)` gives
   the run its turn — the question, the answer before it, the conversation,
-  where it was asked (`JobsTurn`), web content from the start — and a `Turn`
-  whose stream carries what a call shows (the job's card, its tab) back to
+  where it was asked (`AgentsTurn`), web content from the start — and a `Turn`
+  whose stream carries what a call shows (the agent's card, its tab) back to
   the plan turn; dropping it ends the turn, and a call waiting on the person
   stops. A call with no turn open does nothing. **The web flag** comes from
   the turn's start, the plan turn's events (`Marks::web`: a `WebSearch` or
   `WebFetch` beginning; `Marks::began`: one of Yap's calls that brings the
-  screen's or a page's words in, `eyes::SEES`) and `job_status`, a look or a
+  screen's or a page's words in, `eyes::SEES`) and `agent_status`, a look or a
   page read (`Slot::set_web`). **One order for
   two paths**: a call that acts first waits, at most 5 s (`SEEN_WAIT`), for
   its own tool call to show in the turn's events (`Marks::began`,
   `Slot::seen`), since Claude Code writes a tool call's start before it runs
   it; not seen in time, it's refused as after the web.
-- **`approve`** (`approve.rs`), a Job's permission prompt tool
+- **`approve`** (`approve.rs`), an agent's permission prompt tool
   (`--permission-prompt-tool mcp__yap__approve`). When nothing else decides a
   tool call, Claude Code calls it with `{tool_name, input, tool_use_id}` and
   waits for `{"behavior":"allow","updatedInput":…}` or `{"behavior":"deny",
@@ -169,34 +169,34 @@ no Local API (the bridge can be off), and it reaches the live UI.
   No answer in 10 minutes, the run ended, or Claude Code cancelled the call:
   a no, said to Claude in words it can put in its report. Every card's end
   goes out as `yap-claude-approve-done`. `AskUserQuestion` is denied with no
-  card: "Yap can't show questions while a job runs…". Test mode can answer
+  card: "Yap can't show questions while an agent runs…". Test mode can answer
   every card at once (`e2e_claude_approve_auto`).
 - **The backup hook** (`backup.rs`): before Claude Code edits or writes a
   file, an http `PreToolUse` hook on `Edit|Write|MultiEdit|NotebookEdit`
   (`POST /hook/<run>/PreToolUse`, 60 s `timeout`) copies it into the run's
   backup folder once (the first copy wins), with a `manifest.json`; a file
   that didn't exist is noted as created; one over 50 MB as too big. It always
-  answers `{}` at once, never blocking or denying a tool. `restore` (Undo job)
+  answers `{}` at once, never blocking or denying a tool. `restore` (Undo the agent's changes)
   puts them back and deletes what the run created, touching only the paths
   the manifest names. A denied Write is still noted as created.
-  [jobs.md](./jobs.md#undo-and-backups).
+  [yap-code.md](./yap-code.md#undo-and-backups).
 - **Limits**: hooks can be turned off by a managed policy
   (`disableAllHooks`, `allowManagedHooksOnly`, `allowedHttpHookUrls`;
   `httpHookAllowedEnvVars` can keep the key out of the header) and never run
   under `--bare`. Then no
-  backups are made: the runner marks a job whose edits went through with an
+  backups are made: the runner marks an agent whose edits went through with an
   empty backup list (`noBackups`), its tab says "No backups were made, so
-  Undo can't put these files back.", and Settings → Jobs says Undo needs
-  Claude Code's hooks ([jobs.md](./jobs.md#undo-and-backups)). The
+  Undo can't put these files back.", and Settings → Yap Code says Undo needs
+  Claude Code's hooks ([yap-code.md](./yap-code.md#undo-and-backups)). The
   endpoint's requests aren't in the network receipts (they never leave this
   PC).
 - **The log** has ids, counts, tool names and outcomes, never a command, a
   file's path or contents, a prompt or a key.
 - Tested in `claude_live/tests.rs` (the listener's refusals, the MCP subset,
-  the reads, `approve`'s card and its ends, the hook, restore, the job tools
+  the reads, `approve`'s card and its ends, the hook, restore, the agent tools
   for a turn, the screen's and the pages' tools listed, allowed and refused,
-  the key named in the files and only in the run's environment) and through the stand-in in the Jobs and plan e2e specs
-  (`plan-jobs.spec.js` for the job tools over the endpoint, `plan-eyes.spec.js`
+  the key named in the files and only in the run's environment) and through the stand-in in the agents and plan e2e specs
+  (`plan-agents.spec.js` for the agent tools over the endpoint, `plan-eyes.spec.js`
   for the screen and the pages: the stand-in's `_mcp` `dump` says what it got,
   image content as type and size).
 

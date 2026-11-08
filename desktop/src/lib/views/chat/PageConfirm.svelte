@@ -8,11 +8,11 @@
   // (PageTab.svelte: the panel may cover the thread); either answers it. No
   // answer in two minutes is a no; each OK is for that one action. The
   // answer keeps its cards (ChatMessage.confirms), answered. Its own small
-  // chunk. A job about to start (act "job") has a card of its own,
-  // JobConfirm.svelte.
+  // chunk. An agent about to start (act "agent") has a card of its own,
+  // AgentConfirm.svelte.
   import { invoke } from '@tauri-apps/api/core';
   import { questionParts, whyOf, doneWords } from './pageConfirm.js';
-  import JobConfirm from './JobConfirm.svelte';
+  import AgentConfirm from './AgentConfirm.svelte';
 
   /** `confirms`: the turn's questions (`confirm` events: id, label, site, does, state, act, text). */
   let { confirms = [] } = $props();
@@ -35,8 +35,8 @@
 {#each confirms as c (c.id)}
   {@const st = stateOf(c)}
   {@const q = questionParts(c)}
-  {#if c.act === 'job'}
-    <JobConfirm card={c} />
+  {#if c.act === 'agent'}
+    <AgentConfirm card={c} />
   {:else}
   <div class="pconfirm" class:asking={st === 'asking'} role="group" aria-label="Yap asks before acting on the page" data-testid="chat-page-confirm" data-state={st}>
     <svg class="picon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3l8 3v6c0 4.5-3.4 8.2-8 9-4.6-.8-8-4.5-8-9V6z" /><path d="M12 8v5M12 16.5v.01" /></svg>

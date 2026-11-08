@@ -372,7 +372,7 @@ async fn click(turn: &mut crate::web::Turn, args: &Value, live: Option<crate::ch
     if let Some(kind) = rules::click_needs_ok(&d, &el) {
         asked = true;
         drop(_busy.take());
-        let answer = confirm::ask(live, confirm::Ask { act: "press", label: &label, site: &site, does: kind, text: "", key: &t.key, job: None }).await;
+        let answer = confirm::ask(live, confirm::Ask { act: "press", label: &label, site: &site, does: kind, text: "", key: &t.key, agent: None }).await;
         if let Some(r) = refusal(answer, &format!("pressing ‘{label}’"), &format!("click ‘{label}’")) {
             return r;
         }
@@ -469,7 +469,7 @@ async fn type_into(turn: &mut crate::web::Turn, args: &Value, live: Option<crate
             asked = true;
             let shown = rules::clip(&text, 120);
             drop(_busy.take());
-            let answer = confirm::ask(live, confirm::Ask { act: "type", label: &label, site: &site, does: "type", text: &shown, key: &t.key, job: None }).await;
+            let answer = confirm::ask(live, confirm::Ask { act: "type", label: &label, site: &site, does: "type", text: &shown, key: &t.key, agent: None }).await;
             if let Some(r) = refusal(answer, &format!("typing ‘{shown}’ into ‘{label}’ (those words aren't in what they said nor on the page)"), &format!("type in ‘{label}’")) {
                 return r;
             }
@@ -484,7 +484,7 @@ async fn type_into(turn: &mut crate::web::Turn, args: &Value, live: Option<crate
                 None => ("enter", format!("pressing Enter in ‘{label}’"), label.clone()),
             };
             drop(_busy.take());
-            let answer = confirm::ask(live, confirm::Ask { act, label: &shown, site: &site, does: kind, text: "", key: &t.key, job: None }).await;
+            let answer = confirm::ask(live, confirm::Ask { act, label: &shown, site: &site, does: kind, text: "", key: &t.key, agent: None }).await;
             let chip = if button.is_some() { format!("press ‘{shown}’") } else { format!("press Enter in ‘{shown}’") };
             if let Some(r) = refusal(answer, &what, &chip) {
                 return r;
@@ -624,7 +624,7 @@ async fn go(turn: &mut crate::web::Turn, args: &Value, live: Option<crate::chat:
         if let Some(kind) = rules::needs_ok(link.as_ref().map_or("", |l| l.label.as_str()), &url) {
             asked = true;
             let site = crate::web::site_of(&url);
-            let answer = confirm::ask(live, confirm::Ask { act: "open", label: &label, site: &site, does: kind, text: "", key: &t.key, job: None }).await;
+            let answer = confirm::ask(live, confirm::Ask { act: "open", label: &label, site: &site, does: kind, text: "", key: &t.key, agent: None }).await;
             if let Some(r) = refusal(answer, &format!("opening ‘{label}’"), &format!("open ‘{label}’")) {
                 return r;
             }

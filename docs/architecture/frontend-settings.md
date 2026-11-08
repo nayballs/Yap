@@ -17,7 +17,7 @@ search being typed is cleared first); the ✕ is 32 px in `--yap-fg-62`.
 
 `Settings.svelte` (~1,100 lines, from 3,829) is the modal shell: the nav,
 its search and the icon rail, `goto`, which page is shown, its own
-styles, and the wiring — at init it starts the window-lifetime jobs below
+styles, and the wiring — at init it starts the window-lifetime agents below
 (`syncConfig`, `followAttention`, `followLocalLlm`,
 `followHotkeyFallback`, `followDictionary`, `followOutsideChanges`) and at
 mount reads the config and sets it up in the same order as before
@@ -618,38 +618,38 @@ on an element that also has a `settings.css` class (`set-note`,
   Yap's own, picked or dropped, its review with what didn't fit —, Export,
   **Copy for Claude**, Clear all), the privacy line. With no AI model, a note
   at the top.
-- **Jobs** (`jobs`, `settings/JobsPage.svelte`, under Assistant, 2026-11-07;
-  [jobs.md](./jobs.md#around-the-tab)): "Hand a task to your own Claude Code
+- **Yap Code** (`agents`, `settings/YapCodePage.svelte`, under Assistant, 2026-11-07;
+  [yap-code.md](./yap-code.md#around-the-tab)): "Hand a task to your own Claude Code
   from Chat or the Voice Assistant. It works in a folder you chose, and tells
-  you what it did." **Jobs** (`jobsEnabled`, off); **Claude Code**
+  you what it did." **Yap Code** (`agentsEnabled`, off); **Claude Code**
   (`ClaudeCodeStatus.svelte`, on the plan card's store: found and its
   version, signed in and its plan, or **Sign in**; a key login is enough for
-  jobs paid by key); **Pay with** Your Claude plan / API key (`jobsPay`;
+  agents paid by key); **Pay with** Your Claude plan / API key (`agentsPay`;
   for the key, whether Language Models' Claude tab has one, with a link);
-  **Defaults**: Model (Opus, Sonnet or Haiku 5.5, `jobsModel`), Effort
-  (`jobsEffort`), Mode (the Mode a new chat starts in, `jobsMode`; Bypass
-  permissions asks once, as the chip does); under the Jobs switch, **Clean
-  up what you say in Code chats** (`jobsCleanSpeech`, `CleanSpeech.svelte`,
+  **Defaults**: Model (Opus, Sonnet or Haiku 5.5, `agentsModel`), Effort
+  (`agentsEffort`), Mode (the Mode a new chat starts in, `agentsMode`; Bypass
+  permissions asks once, as the chip does); under the Yap Code switch, **Clean
+  up what you say in Code chats** (`agentsCleanSpeech`, `CleanSpeech.svelte`,
   shared with Voice Assistant's "…in Chat", `chatCleanSpeech`: no cleanup
   model set up, `question_cleanup_status`, "Needs a cleanup model in Language
   Models → Dictation cleanup" with the way there); **Workspaces** (2026-11-07: the
-  UI's word for the job folders, `job_folders_*`: name, path, "Never above:"
+  UI's word for the workspaces, `workspaces_*`: name, path, "Never above:"
   a cap, Remove — its Code chats plain again, the toast says so —; **Add
   workspace…**, the folder picker; "A workspace's own Claude settings and MCP
   servers also run."; the Bypass warning on a folder with no cap once Bypass
-  is confirmed; "No workspaces yet…"; **Animate Code chats**, `jobsAnimate`,
-  jobs.md "Code chats"); **Ask before starting a job** (`jobsAsk`: When it
-  matters, the default — a workspace jobs haven't used yet, or after the chat
-  read the web —, Always, Never) and **Read job reports aloud** (`jobsSpeak`); the limits ("Backups of changed files are
-  kept 7 days. One job at a time per workspace, at most 3 at once.") and, small,
-  "Undo needs Claude Code's hooks, which back up each file before a job
+  is confirmed; "No workspaces yet…"; **Animate Code chats**, `agentsAnimate`,
+  yap-code.md "Code chats"); **Ask before sending an agent** (`agentsAsk`: When it
+  matters, the default — a workspace agents haven't used yet, or after the chat
+  read the web —, Always, Never) and **Read agent reports aloud** (`agentsSpeak`); the limits ("Backups of changed files are
+  kept 7 days. One agent at a time per workspace, at most 3 at once.") and, small,
+  "Undo needs Claude Code's hooks, which back up each file before an agent
   changes it. If a policy set by your organisation turns hooks off, no
-  backups are made, and the job's tab says so." (`jobs-backups-hooks`);
-  **History** (`job_list`: each job's status dot, folder, when and cost —
-  plan and key told apart, `core/jobs.js` `costLine` — Open (Chat on it) and
-  Undo, offered by `core/jobs.js` `canUndo` (never for a job with no backups made), 20 at
+  backups are made, and the agent's tab says so." (`yap-code-backups-hooks`);
+  **History** (`agent_list`: each agent's status dot, folder, when and cost —
+  plan and key told apart, `core/agents.js` `costLine` — Open (Chat on it) and
+  Undo, offered by `core/agents.js` `canUndo` (never for an agent with no backups made), 20 at
   first). Twelve search entries (`settingsIndex.js`), a nav entry
-  (`nav.js`), `PAGES.jobs`.
+  (`nav.js`), `PAGES.agents`.
 - **Speech-to-Text** (`models`, `ModelManager.svelte`): **Your model** first —
   a card with its name, size, languages and "In use", or "Not downloaded" +
   Download (never "Active" for a model that isn't on this PC), and Change

@@ -168,7 +168,7 @@ async function freshChat(main) {
   const closePanel = main.getByTestId('chat-page').getByRole('button', { name: 'Close the panel' });
   if (await closePanel.count()) await closePanel.click();
   const cfg = await main.evaluate(() => window.__TAURI_INTERNALS__.invoke('get_config'));
-  if (cfg?.jobsEnabled) await toSide(main, 'Chat');
+  if (cfg?.agentsEnabled) await toSide(main, 'Chat');
   await main.getByRole('button', { name: 'New chat' }).first().click();
 }
 
@@ -187,7 +187,7 @@ async function askCard(yap, main) {
 }
 
 test.beforeEach(async ({ yap, main }) => {
-  await setConfig(yap, main, { jobsEnabled: false, webSearch: true, assistantScreen: true });
+  await setConfig(yap, main, { agentsEnabled: false, webSearch: true, assistantScreen: true });
 });
 
 test('a plan chat asks to look at the screen: asked once, then the screenshots show with the question and Claude Code gets the pictures', async ({ yap, main, shot }) => {
@@ -297,9 +297,9 @@ test('a Code chat on the plan looks at the screen too: its session allows the to
   fs.rmSync(GARDEN, { recursive: true, force: true, maxRetries: 20, retryDelay: 250 });
   fs.mkdirSync(GARDEN, { recursive: true });
   fs.writeFileSync(path.join(GARDEN, 'style.css'), 'body { color: #333; }\n');
-  await setConfig(yap, main, { jobsEnabled: true, assistantScreenCloud: true });
-  if (!(await yap.invoke('job_folders_list')).some((f) => f.name === 'garden-planner')) {
-    await yap.invoke('job_folders_add', { path: GARDEN });
+  await setConfig(yap, main, { agentsEnabled: true, assistantScreenCloud: true });
+  if (!(await yap.invoke('workspaces_list')).some((f) => f.name === 'garden-planner')) {
+    await yap.invoke('workspaces_add', { path: GARDEN });
   }
   await yap.invoke('e2e_snip', { monitors: [MONITORS[0]], windows: [], start: false });
   const DUMP = fresh('code-look.jsonl');

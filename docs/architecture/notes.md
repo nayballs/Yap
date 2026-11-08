@@ -727,7 +727,7 @@ local API and search see the same text.
 
 ## Markdown files in Yap (`notes/md_file.rs`, 2026-11-07)
 
-A `.md` or `.markdown` file — a plan, a note, a write-up a job or an
+A `.md` or `.markdown` file — a plan, a note, a write-up an agent or an
 assistant made — opens in a Yap window of its own, as a page you can format
 or as its Markdown, saved back to the file as you type. The file stays the
 file: it's never copied into notes.json.
@@ -765,7 +765,7 @@ file: it's never copied into notes.json.
   (`config::atomic_write_bytes`) **only if the file is still what the page
   last read or wrote** (its stamp: modified time and size). Otherwise the
   page is told (`conflict`) and asks.
-- **Changes on disk** (a job or an assistant writing the file): the page asks
+- **Changes on disk** (an agent or an assistant writing the file): the page asks
   for the stamp every 1.5 s (`md_file_stat`). Nothing unsaved → reloaded in
   place, where it was scrolled to; unsaved edits → a quiet bar, **"Changed
   on disk · Reload · Keep mine"**; only its time changed → in step; moved or

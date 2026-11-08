@@ -11,6 +11,7 @@
 // desktop/e2e/settings-search.spec.js opens every entry and checks its row is
 // there, so the index can't drift from the pages.
 import { NAV_GROUPS, PAGE_LABELS } from './nav.js';
+import { FEATURE_NAME } from '../core/codeChats.js';
 
 /** @typedef {{ page: string, section: string, label: string, desc?: string, keywords?: string, anchor: string, fallback?: string, scope?: string, toggle?: string }} Entry */
 
@@ -169,7 +170,7 @@ export const SETTINGS_INDEX = [
   { page: 'memory', section: 'What Yap learns from', label: 'Learn from my chats', desc: 'Lasting facts about you, kept when a chat goes quiet', keywords: 'memory learn remember facts personal chats', anchor: 'memory-learn-chats', toggle: 'memoryLearnChats' },
   { page: 'memory', section: 'What Yap learns from', label: 'Learn from meetings', desc: "Attendees and projects, from meetings' action plans", keywords: 'memory learn meetings attendees colleagues', anchor: 'memory-learn-meetings', toggle: 'memoryLearnMeetings' },
   { page: 'memory', section: 'What Yap learns from', label: 'Include sensitive topics in memory', desc: 'Health, religion, politics and the like', keywords: 'memory sensitive private health religion politics privacy', anchor: 'memory-sensitive', toggle: 'memorySensitive' },
-  { page: 'memory', section: 'You', label: 'Profile', desc: 'Who you are: where you live, your work', keywords: 'memory about me profile personal facts job', anchor: 'memory-profile' },
+  { page: 'memory', section: 'You', label: 'Profile', desc: 'Who you are: where you live, your work', keywords: 'memory about me profile personal facts agent', anchor: 'memory-profile' },
   { page: 'memory', section: 'You', label: 'Preferences', desc: "How you want Yap's AI to answer you", keywords: 'memory preferences style answers tone custom instructions', anchor: 'memory-preferences' },
   { page: 'memory', section: 'People', label: 'People', desc: 'The people you mention, and who they are to you', keywords: 'memory people family friends colleagues names contacts', anchor: 'memory-people' },
   { page: 'memory', section: 'Projects', label: 'Projects', desc: "What you're working on", keywords: 'memory projects work', anchor: 'memory-projects' },
@@ -188,21 +189,21 @@ export const SETTINGS_INDEX = [
   { page: 'skills', section: 'More Skills', label: 'More Skills', desc: '/tickets, /risks, /coach and more, one switch away', keywords: 'skills more extra tickets prd product requirements risks coach weekly recap decision log open questions one-to-one project update', anchor: 'skills-more' },
   { page: 'skills', section: 'More Skills', label: 'Show in the / menu', desc: "Each Skill's switch: in the / menu and one-tap prompts, or not", keywords: 'skills slash menu show hide switch turn on off add remove list', anchor: 'skills-more' },
 
-  // Jobs (JobsPage.svelte, jobs.rs)
-  { page: 'jobs', section: 'Jobs', label: 'Jobs', desc: 'Let Chat and the Voice Assistant hand tasks to your own Claude Code', keywords: 'jobs claude code agent task background folder automate coding run', anchor: 'jobs-enabled', toggle: 'jobsEnabled' },
-  { page: 'jobs', section: 'Jobs', label: 'Claude Code', desc: 'Found on this PC and signed in, or Sign in', keywords: 'claude code sign in login installed version status plan', anchor: 'jobs-claude-code' },
-  { page: 'jobs', section: 'Jobs', label: 'Clean up what you say in Code chats', desc: 'Fillers and false starts taken out of spoken questions and requests, your words kept', keywords: 'clean up cleanup filler um uh false starts spoken questions requests voice dictated code chats jobs ai cleanup tidy', anchor: 'jobs-clean-speech', toggle: 'jobsCleanSpeech' },
-  { page: 'jobs', section: 'Paying for jobs', label: 'Pay with', desc: 'Your Claude plan, or an API key', keywords: 'jobs pay billing plan subscription api key anthropic cost price', anchor: 'jobs-pay' },
-  { page: 'jobs', section: 'Defaults', label: 'Model', desc: 'The Claude model a job runs on', keywords: 'jobs model opus sonnet haiku claude', anchor: 'jobs-model' },
-  { page: 'jobs', section: 'Defaults', label: 'Effort', desc: 'How hard a job thinks', keywords: 'jobs effort thinking reasoning low medium high extra max', anchor: 'jobs-effort' },
-  { page: 'jobs', section: 'Defaults', label: 'Mode', desc: 'The Mode a new chat starts in: Auto, Manual, Accept edits, Plan or Bypass permissions', keywords: 'jobs mode permissions auto manual accept edits plan bypass default', anchor: 'jobs-mode' },
-  { page: 'jobs', section: 'Workspaces', label: 'Workspaces', desc: 'Where jobs may work and Code chats are kept, and the most each may run in', keywords: 'jobs workspaces folders projects directory code chats cap limit never above remove', anchor: 'jobs-add-folder' },
-  { page: 'jobs', section: 'Workspaces', label: 'Add workspace…', desc: 'Pick a folder on this PC jobs may work in', keywords: 'jobs add workspace folder project directory picker', anchor: 'jobs-add-folder' },
-  { page: 'jobs', section: 'Workspaces', label: 'Animate Code chats', desc: "A slow light along a Code chat's message box while its job runs", keywords: 'code chat animation motion moving light border glow job running', anchor: 'jobs-animate', toggle: 'jobsAnimate' },
-  { page: 'jobs', section: 'Asking and reports', label: 'Ask before starting a job', desc: 'When it matters (a new workspace, or after the web), always, or never', keywords: 'jobs ask confirm before start card approve', anchor: 'jobs-ask' },
-  { page: 'jobs', section: 'Asking and reports', label: 'Read job reports aloud', desc: 'When you asked by voice, always, or never', keywords: 'jobs report read aloud speak voice spoken', anchor: 'jobs-speak' },
-  { page: 'jobs', section: 'Asking and reports', label: 'Backups and limits', desc: 'Backups kept 7 days; one job a folder, 3 at once', keywords: 'jobs backups undo limits at once concurrent', anchor: 'jobs-limits' },
-  { page: 'jobs', section: 'History', label: 'History', desc: 'Every job: its status, folder, when and cost', keywords: 'jobs history past list cost undo open', anchor: 'jobs-history' },
+  // Yap Code (YapCodePage.svelte, agents.rs). ("jobs" in its words: what it was called until 7 Nov 2026.)
+  { page: 'yap-code', section: FEATURE_NAME, label: FEATURE_NAME, desc: 'Let Chat and the Voice Assistant send agents, your own Claude Code, to work in your workspaces', keywords: 'yap code agents claude code agent task background folder automate coding run jobs', anchor: 'yap-code-enabled', toggle: 'agentsEnabled' },
+  { page: 'yap-code', section: FEATURE_NAME, label: 'Claude Code', desc: 'Found on this PC and signed in, or Sign in', keywords: 'claude code sign in login installed version status plan', anchor: 'yap-code-claude-code' },
+  { page: 'yap-code', section: FEATURE_NAME, label: 'Clean up what you say in Code chats', desc: 'Fillers and false starts taken out of spoken questions and requests, your words kept', keywords: 'clean up cleanup filler um uh false starts spoken questions requests voice dictated code chats agents ai cleanup tidy', anchor: 'yap-code-clean-speech', toggle: 'agentsCleanSpeech' },
+  { page: 'yap-code', section: 'Paying for agents', label: 'Pay with', desc: 'Your Claude plan, or an API key', keywords: 'agents pay billing plan subscription api key anthropic cost price', anchor: 'yap-code-pay' },
+  { page: 'yap-code', section: 'Defaults', label: 'Model', desc: 'The Claude model an agent runs on', keywords: 'agents model opus sonnet haiku claude', anchor: 'yap-code-model' },
+  { page: 'yap-code', section: 'Defaults', label: 'Effort', desc: 'How hard an agent thinks', keywords: 'agents effort thinking reasoning low medium high extra max', anchor: 'yap-code-effort' },
+  { page: 'yap-code', section: 'Defaults', label: 'Mode', desc: 'The Mode a new chat starts in: Auto, Manual, Accept edits, Plan or Bypass permissions', keywords: 'agents mode permissions auto manual accept edits plan bypass default', anchor: 'yap-code-mode' },
+  { page: 'yap-code', section: 'Workspaces', label: 'Workspaces', desc: 'Where agents may work and Code chats are kept, and the most each may run in', keywords: 'agents workspaces folders projects directory code chats cap limit never above remove', anchor: 'yap-code-add-workspace' },
+  { page: 'yap-code', section: 'Workspaces', label: 'Add workspace…', desc: 'Pick a folder on this PC agents may work in', keywords: 'agents add workspace folder project directory picker', anchor: 'yap-code-add-workspace' },
+  { page: 'yap-code', section: 'Workspaces', label: 'Animate Code chats', desc: "A slow light along a Code chat's message box while its agent runs", keywords: 'code chat animation motion moving light border glow agent running', anchor: 'yap-code-animate', toggle: 'agentsAnimate' },
+  { page: 'yap-code', section: 'Asking and reports', label: 'Ask before sending an agent', desc: 'When it matters (a new workspace, or after the web), always, or never', keywords: 'agents ask confirm before start send card approve', anchor: 'yap-code-ask' },
+  { page: 'yap-code', section: 'Asking and reports', label: 'Read agent reports aloud', desc: 'When you asked by voice, always, or never', keywords: 'agents report read aloud speak voice spoken', anchor: 'yap-code-speak' },
+  { page: 'yap-code', section: 'Asking and reports', label: 'Backups and limits', desc: 'Backups kept 7 days; one agent a workspace, 3 at once', keywords: 'agents backups undo limits at once concurrent', anchor: 'yap-code-limits' },
+  { page: 'yap-code', section: 'History', label: 'History', desc: 'Every agent: its status, folder, when and cost', keywords: 'agents history past list cost undo open', anchor: 'yap-code-history' },
 
   // ---- Speech-to-Text ----
   { page: 'models', section: 'Speech model', label: 'Speech model', desc: 'The model that turns your voice into text', keywords: 'speech to text transcription model parakeet whisper canary moonshine download', anchor: 'stt-model' },

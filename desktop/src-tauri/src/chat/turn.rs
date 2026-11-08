@@ -33,8 +33,8 @@ use crate::config::{self, YapConfig};
 
 pub(crate) use history::next_room;
 pub(crate) use prompt::stable_prompt;
-// A job's report, a turn Yap starts itself (report.rs).
-pub(crate) use report::{open_job, queue_job_report, JOB_REPORT, JOB_REPORT_PREFIX};
+// An agent's report, a turn Yap starts itself (report.rs).
+pub(crate) use report::{open_agent, queue_agent_report, AGENT_REPORT, AGENT_REPORT_PREFIX};
 
 /// Resolve the **Chat** scope's endpoint + persona (falling back to the global
 /// cleanup endpoint when the scope is off) and fail fast on keyless cloud
@@ -259,12 +259,12 @@ struct Opened {
     conv: crate::chat::chats::Conversation,
     user_index: usize,
     selection: Option<crate::chat::documents::Selection>,
-    /// **A Code chat's workspace** (`jobs/code_chat.rs`), read once the
+    /// **A Code chat's workspace** (`agents/code_chat.rs`), read once the
     /// question is saved (a new code chat is attached as it's made): no
     /// Yap memory in its turn, About you without its note, nothing found
     /// by itself (prompt.rs), never learned from (memory/learn.rs), and on
     /// the Claude plan a session in the workspace (plan.rs).
-    code: Option<crate::jobs::folders::Folder>,
+    code: Option<crate::agents::workspaces::Folder>,
 }
 
 /// **The answer as the model gave it** (`run.rs`, `small.rs`), before
@@ -336,12 +336,12 @@ async fn answer_turn(
     if let Some((s, said)) = skill.as_ref().and_then(|s| crate::chat::skills::ask_first(s, aloud).map(|a| (s, a))) {
         return fast::skill_asks_turn(conversation_id, &text, by_voice, asked, stop, &said, &s.skill.command);
     }
-    // Yap's spoken question before a job ("Should I start a job in …?"),
+    // Yap's spoken question before an agent ("Should I start an agent in …?"),
     // answered: a yes starts it, a no drops it — Yap's own answer, no model
-    // (jobs/voice.rs).
+    // (agents/voice.rs).
     if skill.is_none() {
-        if let Some(answer) = crate::jobs::voice::answered(conversation_id, &text) {
-            return fast::job_answer_turn(conversation_id, &text, by_voice, asked, answer, watcher, stop);
+        if let Some(answer) = crate::agents::voice::answered(conversation_id, &text) {
+            return fast::agent_answer_turn(conversation_id, &text, by_voice, asked, answer, watcher, stop);
         }
     }
     let meetings = scope == Some("meetings") || skill.is_some();
@@ -470,7 +470,7 @@ fn open(t: &Asked<'_>, conversation_id: Option<u64>, asked: impl FnOnce(u64, usi
     t.stop.answers(conv.id);
     asked(conv.id, user_index);
     // (After `asked`: a new code chat's conversation is attached there.)
-    let code = crate::jobs::code_chat::folder_of(Some(conv.id));
+    let code = crate::agents::code_chat::folder_of(Some(conv.id));
     Ok(Opened { conv, user_index, selection, code })
 }
 

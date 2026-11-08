@@ -3,7 +3,7 @@
 //! - **learning from a chat** that went quiet ([`learn_from_chat`]; the
 //!   scheduler: 5 minutes without a new message, another chat starting, or a
 //!   minute after the next start when Yap quit first) — never a Code chat
-//!   (`jobs/code_chat.rs`: its messages are marked read, nothing learned);
+//!   (`agents/code_chat.rs`: its messages are marked read, nothing learned);
 //! - **learning from a meeting** whose action plan is written
 //!   ([`learn_from_meeting`], "Learn from meetings");
 //! - **"Tell Yap what to change"** and **imports** ([`propose`]): changes
@@ -391,7 +391,7 @@ pub async fn learn_from_chat(conversation: u64, announce: bool) -> Result<Applie
     }
     let start = super::read_upto(conversation).min(len);
     let new = &conv.messages[start..];
-    // (A job's report in the chat is the job's words, never the person's.)
+    // (An agent's report in the chat is the agent's words, never the person's.)
     let user_texts: Vec<&str> = new.iter().filter(|m| m.role == "user" && m.kind.is_empty()).map(|m| m.text.as_str()).collect();
     let ep = endpoint(&cfg);
     let small = ep.as_ref().is_ok_and(|ep| chat_path(ep) == Path::Small);
@@ -609,12 +609,12 @@ fn scheduled() -> bool {
     !crate::shell::e2e::active() && !crate::ai::eval::active() && super::app().is_some()
 }
 
-/// **A Code chat is never learned from** (`jobs/code_chat.rs`, 7 Nov 2026):
+/// **A Code chat is never learned from** (`agents/code_chat.rs`, 7 Nov 2026):
 /// project knowledge lives with the project, and Yap's memory is personal
 /// — filled with a project's trivia, and its people's details could end up
-/// in a job's brief, a file or a commit.
+/// in an agent's brief, a file or a commit.
 fn never_learned(conversation: u64) -> bool {
-    crate::jobs::code_chat::folder_of(Some(conversation)).is_some()
+    crate::agents::code_chat::folder_of(Some(conversation)).is_some()
 }
 
 /// A chat turn was answered in `conversation`: it's read once it's been
@@ -1200,16 +1200,16 @@ mod tests {
     #[test]
     fn a_code_chat_is_never_learned_from() {
         // A workspace and two chats (this thread's own stores): one a Code chat.
-        let dir = std::env::temp_dir().join(format!("yap-learn-code-{}", crate::jobs::store::new_id()));
+        let dir = std::env::temp_dir().join(format!("yap-learn-code-{}", crate::agents::store::new_id()));
         std::fs::create_dir_all(&dir).unwrap();
-        let garden = crate::jobs::folders::add(&dir.to_string_lossy(), None, None).unwrap();
+        let garden = crate::agents::workspaces::add(&dir.to_string_lossy(), None, None).unwrap();
         let said = "My cousin Aoife lives in Galway, and I'm building a garden planner with her.";
         let code = crate::chat::chats::create("Watering");
         crate::chat::chats::append(code.id, "user", said, &[], None, false).unwrap();
         crate::chat::chats::append(code.id, "assistant", "The schedule is in src/water.ts.", &[], None, false).unwrap();
         let plain = crate::chat::chats::create("Trip");
         crate::chat::chats::append(plain.id, "user", said, &[], None, false).unwrap();
-        crate::jobs::code_chat::set(code.id, Some(&garden));
+        crate::agents::code_chat::set(code.id, Some(&garden));
         assert!(never_learned(code.id) && !never_learned(plain.id));
         // Read now (as a quiet chat would be): nothing, before any model is
         // looked for or asked.

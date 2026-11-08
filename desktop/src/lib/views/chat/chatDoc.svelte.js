@@ -33,10 +33,10 @@
 //   loaded here, or `picture`, a chat-images picture Chat found online:
 //   DocPanel's picture tab). A tab closed (`closeTab`) leaves the row until
 //   its pill opens it again; another conversation starts it afresh (`reset`).
-// - **A job's tab** (Jobs, 2026-11-07): a job Chat started (`job` event,
-//   its pill, the bar card's Open) shows in a `job:<id>` tab (JobTab.svelte):
+// - **An agent's tab** (Yap Code, 2026-11-07): an agent Chat started (`agent` event,
+//   its pill, the bar card's Open) shows in a `agent:<id>` tab (AgentTab.svelte):
 //   what it's doing as it does it, and Stop, Continue, Undo. Closing the tab
-//   never stops the job.
+//   never stops the agent.
 // - **Stream-in** (2026-10-31): each section on its way to the page is
 //   `live` (key → its text as it came); the panel lets it flow in at its
 //   own pace (DocPanel, docStream.js), so it reads line by line instead of
@@ -99,8 +99,8 @@ export function undoTarget(versions) {
 export const docKey = (id) => `doc:${id}`;
 export const picKey = (id) => `pic:${id}`;
 /** A page's: its address without its fragment or a trailing slash (one tab a page). */
-/** A job's tab (Jobs: JobTab.svelte). */
-export const jobKey = (id) => `job:${id}`;
+/** An agent's tab (Yap Code: AgentTab.svelte). */
+export const agentKey = (id) => `agent:${id}`;
 export const pageKey = (url) => `page:${String(url || '').trim().replace(/#.*$/, '').replace(/\/+$/, '')}`;
 /** A page tab's key: a new tab's own (`page:new:1`), else its page's. */
 export const tabKeyOf = (p) => p?.tabKey || pageKey(p?.url);
@@ -119,10 +119,10 @@ export function createDocPanel({ onopennote = () => null } = {}) {
   let picture = $state(null);
   // A live page beside the chat (chat/pages.rs `ShownPage`: its Page tab).
   let page = $state(null);
-  // A job beside the chat (jobs.rs `JobRef`: `{id, folder, status, mode,
-  // conversation, turn?}`; its Job tab).
-  let job = $state(null);
-  let jobSeq = 0;
+  // An agent beside the chat (agents.rs `AgentRef`: `{id, folder, status, mode,
+  // conversation, turn?}`; its Agent tab).
+  let agent = $state(null);
+  let agentSeq = 0;
   // Each page tab as it is now (tab key → { title, url, went }): its title
   // and address as Rust says, and where the address bar last took it (a
   // tab shown again opens there). New tabs are counted for their keys.
@@ -183,9 +183,9 @@ export function createDocPanel({ onopennote = () => null } = {}) {
           ? page
             ? tabKeyOf(page)
             : null
-          : showing === 'job'
-            ? job
-              ? jobKey(job.id)
+          : showing === 'agent'
+            ? agent
+              ? agentKey(agent.id)
               : null
           : id != null
             ? docKey(id)
@@ -340,22 +340,22 @@ export function createDocPanel({ onopennote = () => null } = {}) {
   }
 
   /**
-   * Show a job (`JobRef`: a turn's `job` event, its pill, its tab, the bar
-   * card's Open): its Job tab (JobTab.svelte follows it). The document
+   * Show an agent (`AgentRef`: a turn's `agent` event, its pill, its tab, the bar
+   * card's Open): its Agent tab (AgentTab.svelte follows it). The document
    * stays as it was behind it.
    */
-  function showJob(ref) {
+  function showAgent(ref) {
     if (!ref?.id) return;
     if (showing === 'doc') flushSave();
-    const known = extra.find((t) => t.key === jobKey(ref.id))?.job;
-    // One tab a job, whichever of its turns it opens at (`turn`: a pill's,
+    const known = extra.find((t) => t.key === agentKey(ref.id))?.agent;
+    // One tab an agent, whichever of its turns it opens at (`turn`: a pill's,
     // a report's; none: its newest). `seq` tells the tab it was asked again.
-    jobSeq += 1;
-    const j = { ...known, ...ref, turn: ref.turn ?? null, seq: jobSeq };
-    inRow({ key: jobKey(ref.id), kind: 'job', id: ref.id, job: j });
-    extra = extra.map((t) => (t.key === jobKey(ref.id) ? { ...t, job: j } : t));
-    job = j;
-    showing = 'job';
+    agentSeq += 1;
+    const j = { ...known, ...ref, turn: ref.turn ?? null, seq: agentSeq };
+    inRow({ key: agentKey(ref.id), kind: 'agent', id: ref.id, agent: j });
+    extra = extra.map((t) => (t.key === agentKey(ref.id) ? { ...t, agent: j } : t));
+    agent = j;
+    showing = 'agent';
     open = true;
   }
 
@@ -421,7 +421,7 @@ export function createDocPanel({ onopennote = () => null } = {}) {
   function openTab(t) {
     if (t?.kind === 'picture') showPicture(t.picture);
     else if (t?.kind === 'page') showPage(t.page);
-    else if (t?.kind === 'job') showJob(t.job);
+    else if (t?.kind === 'agent') showAgent(t.agent);
     else if (t?.kind === 'doc') show(t.id, { title: t.title });
   }
 
@@ -526,7 +526,7 @@ export function createDocPanel({ onopennote = () => null } = {}) {
     close();
     showing = 'doc';
     picture = null;
-    job = null;
+    agent = null;
     if (page || Object.keys(pageNow).length) closePages();
     page = null;
     pageNow = {};
@@ -651,7 +651,7 @@ export function createDocPanel({ onopennote = () => null } = {}) {
     get showing() { return showing; },
     get picture() { return picture; },
     get page() { return page; },
-    get job() { return job; },
+    get agent() { return agent; },
     get pageNow() { return pageNow; },
     get extra() { return extra; },
     get hidden() { return hidden; },
@@ -679,7 +679,7 @@ export function createDocPanel({ onopennote = () => null } = {}) {
     show,
     showPicture,
     showPage,
-    showJob,
+    showAgent,
     showTab,
     setActing,
     stopUsing,

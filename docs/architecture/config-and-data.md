@@ -332,24 +332,25 @@
   search_by_meaning ("Search my meetings by meaning", off; `search/`,
   Settings → Privacy & data: switched on by the model's download, off by its
   Delete; the index and model live in the data folder, below),
-  Jobs (2026-11-07, `jobs.rs`, Settings → Assistant → Jobs; the jobs, their
-  folders and each chat's Mode are in jobs.json and job_folders.json, never
-  here): jobs_enabled ("Let Chat start jobs", off) + jobs_pay ("plan" — the
+  Yap Code (2026-11-07, `agents.rs`, Settings → Assistant → Yap Code; the agents, the
+  workspaces and each chat's Mode are in agents.json and workspaces.json, never
+  here): agents_enabled (Yap Code, off) + agents_pay ("plan" — the
   person's Claude plan, through Claude Code's own sign-in — | "key", their
-  Anthropic key; "plan") + jobs_model (a full id, "claude-sonnet-5-5") +
-  jobs_effort (low | medium | high | xhigh | max, "medium") + jobs_mode (the
+  Anthropic key; "plan") + agents_model (a full id, "claude-sonnet-5-5") +
+  agents_effort (low | medium | high | xhigh | max, "medium") + agents_mode (the
   Mode a new chat starts in: "auto" | "manual" | "acceptEdits" | "plan" |
-  "bypassPermissions", Bypass only once confirmed; "auto") + jobs_ask ("Ask
-  before starting a job": "new-or-web" — a folder used for the first time,
+  "bypassPermissions", Bypass only once confirmed; "auto") + agents_ask ("Ask
+  before sending an agent": "new-or-web" — a folder used for the first time,
   or a chat that read the web —, "always" or "never"; "new-or-web") +
-  jobs_speak ("Read job reports aloud": "voice" — when the job was asked by
-  voice —, "always" or "never"; "voice") + jobs_max (at most this many jobs
-  at once, one per folder, 1 to 3; 3) + jobs_animate ("Animate Code chats":
-  a slow light round a Code chat's box while its job runs; on) +
-  jobs_clean_speech ("Clean up what you say in Code chats": chat_clean_speech's
-  twin for a Code chat's spoken questions, its own switch; on, 2026-11-07) — new fields only, no `migrate_once`
-  step; an older Yap sharing the folder drops them on its save (Jobs off
-  again),
+  agents_speak ("Read agent reports aloud": "voice" — when the agent was asked by
+  voice —, "always" or "never"; "voice") + agents_max (at most this many agents
+  at once, one per folder, 1 to 3; 3) + agents_animate ("Animate Code chats":
+  a slow light round a Code chat's box while its agent runs; on) +
+  agents_clean_speech ("Clean up what you say in Code chats": chat_clean_speech's
+  twin for a Code chat's spoken questions, its own switch; on, 2026-11-07) — `jobs_*` (`jobsEnabled`…) until the same day: each
+  field reads its old name as an alias, and `migrate_once` v8 saves them
+  once under the new ones, every value kept; an older Yap sharing the folder
+  drops them on its save (Yap Code off again),
   Commands' edit_hotkey (the rewrite shortcut)
   + agent_name + the `voiceAgent` scope (field and key names unchanged by
   the 2026-10-18 rename, so no setting resets). JSON
@@ -794,7 +795,7 @@
   delete the transcripts of the sessions `claude_sessions.json` names (and a
   session a conversation moved on from, as soon as it's replaced), only
   where Claude Code files Yap's own `claude\chat\` folder — never another
-  project's (a job's sessions are the person's own, in their folders).
+  project's (an agent's sessions are the person's own, in their folders).
   One-shot calls run with `--no-session-persistence`, so they leave none.
 - Your Claude plan's working folders: `<data>/claude/` — two empty folders
   the plan's runs work in, `claude\chat\` (Chat turns) and `claude\ask\`
@@ -802,8 +803,11 @@
   in them; Yap writes nothing into them. They stay through Delete some of
   your data and Reset app (Yap's own bookkeeping, `privacy/reset.rs`
   `STAYS`).
-- **Jobs** (2026-11-07, `jobs/store.rs`, [jobs.md](./jobs.md)):
-  `%APPDATA%/yap/jobs.json` — every job Chat started (its conversation and the
+- **Yap Code** (2026-11-07, `agents/store.rs`, [yap-code.md](./yap-code.md)):
+  `jobs.json`, `jobs/` and `job_folders.json` until the same day, moved to
+  these names once, before anything reads them, each only when its new name
+  isn't taken (`agents::moved`, [yap-code.md](./yap-code.md#names)).
+  `%APPDATA%/yap/agents.json` — every agent Chat started (its conversation and the
   message that asked, typed or by voice, the folder's name and path, the
   brief, model, effort, mode, how it pays, Claude Code's session id, status
   and times, the files it changed, the commands it ran, what it wasn't
@@ -811,18 +815,18 @@
   a problem, whether it was a plan or asks something, reported, undone,
   swept, and `noBackups` when it changed files with no backups made), each
   chat's Mode chip (`modes`), each Code chat's folder (`codeChats`:
-  conversation id → `{path, ts}`, jobs.md "Code chats") and the one-time Bypass OK
-  (`bypassConfirmed`); and `%APPDATA%/yap/jobs/`, a folder per job:
-  `log.jsonl` (its `yap-job` events, appended line by line, at most 5,000
+  conversation id → `{path, ts}`, yap-code.md "Code chats") and the one-time Bypass OK
+  (`bypassConfirmed`); and `%APPDATA%/yap/agents/`, a folder per agent:
+  `log.jsonl` (its `yap-agent` events, appended line by line, at most 5,000
   lines) and `backup/` (the files it changed as they were before it, as
   `0001-<name>`…, with `manifest.json`: the original paths, which were
-  created). A job's log and backups go 7 days after it ended (its record
-  stays, `swept`); a job still live when Yap starts is marked interrupted.
-  `%APPDATA%/yap/job_folders.json` (`jobs/folders.rs`) — the folders jobs may
+  created). An agent's log and backups go 7 days after it ended (its record
+  stays, `swept`); an agent still live when Yap starts is marked interrupted.
+  `%APPDATA%/yap/workspaces.json` (`agents/workspaces.rs`) — the folders agents may
   work in: name, path, an optional cap on the mode, when added. Files of
   their own, never fields in chats.json (an older Yap drops fields it doesn't
-  know). All three go with **Jobs** in Delete some of your data (running jobs
-  stopped first; the files the jobs changed stay) and come in Download your
+  know). All three go with **Yap Code** in Delete some of your data (running agents
+  stopped first; the files the agents changed stay) and come in Download your
   data (the backups never do). Nothing secret.
 - **Claude Code's run files**: `%TEMP%\yap-claude\<id>-<tag>\` — a run's
   `settings.json` (its hooks), `mcp.json` (Yap's run endpoint; the run's key
@@ -1113,7 +1117,7 @@
   for questions asked by voice, `speak_when`, and a dictated question is sent
   by itself, `talk_back_hands_free`) in **Kokoro's af_bella** at 1× once
   Kokoro is downloaded (`tts_engine` "kokoro"), Windows' default voice
-  until then; **Jobs off** (`jobs_enabled`), and once on: paid with the
+  until then; **Yap Code off** (`agents_enabled`), and once on: paid with the
   Claude plan, Sonnet 5.5 at medium effort, a new chat in Auto, asked first
   only for a new folder or after the web, reports read aloud when asked by
   voice, 3 at once (2026-11-07). **Settings' first save** writes any

@@ -68,7 +68,7 @@ export const BASE_CONFIG = {
   // clean-speech.spec.js turns them on), so a spec with a cleanup model
   // set up sees its questions' calls as before.
   chatCleanSpeech: false,
-  jobsCleanSpeech: false,
+  agentsCleanSpeech: false,
   configVersion: 1,
 };
 

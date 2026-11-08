@@ -1,9 +1,9 @@
 //! **A Chat run's turn** (2026-11-07): a plan chat's Claude Code session
 //! answers turn after turn (`chat/turn/plan.rs`), and Yap's tools that act
-//! — Jobs' (`chat/tools/jobs.rs`, [`super::jobs`]) — need to know whose turn
+//! — Yap Code's (`chat/tools/agents.rs`, [`super::agents`]) — need to know whose turn
 //! a call belongs to: the person's question this turn, the answer just
 //! before it, the conversation, where it was asked, and whether web content
-//! is in the turn. What they show (the card before a job starts, its tab)
+//! is in the turn. What they show (the card before an agent starts, its tab)
 //! goes to that turn's stream.
 //!
 //! - **The plan turn** opens one with [`super::RunHandle::begin_turn`]
@@ -15,7 +15,7 @@
 //!   app), once Claude Code begins a `WebSearch` or `WebFetch` in the turn
 //!   ([`Marks::web`], from the plan turn's events) or a call of Yap's that
 //!   brings the screen's or a page's words in (`eyes::SEES`,
-//!   [`Marks::began`]), or once `job_status` gave a job's own words, or a
+//!   [`Marks::began`]), or once `agent_status` gave an agent's own words, or a
 //!   look or a page read brought some in ([`Slot::set_web`]).
 //! - **The turn's web side** (`eyes.rs`): a `web::Turn` of its own for the
 //!   screen and page tools — the person's links, the pages shown, the
@@ -23,7 +23,7 @@
 //!   ([`Marks::found`]); what it showed is the answer's ([`Turn::shown`]).
 //! - **Two paths, one order**: Claude Code's events (its stdout, read by
 //!   the plan turn) and its MCP calls (HTTP, read here) arrive apart. A call
-//!   that acts (`start_job`, `message_job`) first waits for its own tool call
+//!   that acts (`start_agent`, `message_agent`) first waits for its own tool call
 //!   to show in the turn's events ([`Slot::seen`], at most [`SEEN_WAIT`]):
 //!   Claude Code writes a tool call's start (`content_block_start`, Yap runs
 //!   it with `--include-partial-messages`) before it runs it, and its stdout
@@ -42,7 +42,7 @@ use std::time::{Duration, Instant};
 use tokio::sync::mpsc::{self, UnboundedReceiver, UnboundedSender};
 
 use crate::chat::stream::Event;
-use crate::chat::tools::JobsTurn;
+use crate::chat::tools::AgentsTurn;
 
 use super::eyes::Eyes;
 
@@ -58,11 +58,11 @@ pub const SEEN_WAIT: Duration = Duration::from_secs(5);
 pub struct Context {
     /// The person's message this turn.
     pub question: String,
-    /// The answer just before it (a yes to its offer asks for a job).
+    /// The answer just before it (a yes to its offer asks for an agent).
     pub previous: Option<String>,
     pub conversation: Option<u64>,
-    /// Jobs' tools this turn, and where it was asked (`None`: not offered).
-    pub jobs: Option<JobsTurn>,
+    /// Yap Code's tools this turn, and where it was asked (`None`: not offered).
+    pub agents: Option<AgentsTurn>,
     /// Web content is in the turn from its start (text selected in another
     /// app, as the tool loop's `Extra::web_question`).
     pub web: bool,
@@ -169,7 +169,7 @@ impl Slot {
         self.with(n, |t| t.web).unwrap_or(true)
     }
 
-    /// Web content came into turn `n` (a job's own words).
+    /// Web content came into turn `n` (an agent's own words).
     pub fn set_web(&self, n: u64) {
         self.with(n, |t| t.web = true);
     }
@@ -222,7 +222,7 @@ impl Marks {
         self.slot.changed.notify_all();
     }
 
-    /// Claude Code began a call to Yap's tool `name` ("start_job"). One
+    /// Claude Code began a call to Yap's tool `name` ("start_agent"). One
     /// that brings the screen's or a page's words in (`eyes::SEES`): web
     /// content from now on, as a `WebSearch` beginning is.
     pub fn began(&self, name: &str) {
@@ -251,7 +251,7 @@ pub struct Shown {
 /// **A turn open on a run**: its calls belong to it until it's dropped.
 pub struct Turn {
     marks: Marks,
-    /// What its calls show (a card, a job's tab), for the turn's stream.
+    /// What its calls show (a card, an agent's tab), for the turn's stream.
     pub events: UnboundedReceiver<Event>,
     side: Option<WebSide>,
 }
@@ -301,16 +301,16 @@ mod tests {
     use super::*;
 
     fn ctx(q: &str) -> Context {
-        Context { question: q.into(), conversation: Some(3), jobs: Some(JobsTurn::default()), ..Default::default() }
+        Context { question: q.into(), conversation: Some(3), agents: Some(AgentsTurn::default()), ..Default::default() }
     }
 
     #[test]
     fn a_call_belongs_to_the_turn_open_now_and_none_between_turns() {
         let slot = Arc::new(Slot::default());
         assert!(slot.call().is_none(), "no turn yet");
-        let first = slot.begin(ctx("Start a job in garden-planner"), None);
+        let first = slot.begin(ctx("Send an agent to garden-planner"), None);
         let call = slot.call().unwrap();
-        assert_eq!((call.n, call.ctx.question.as_str(), call.ctx.conversation), (1, "Start a job in garden-planner", Some(3)));
+        assert_eq!((call.n, call.ctx.question.as_str(), call.ctx.conversation), (1, "Send an agent to garden-planner", Some(3)));
         assert!(!slot.web(1));
         // What a call shows reaches the turn's stream; once it ends, it's closed.
         let mut first = first;
@@ -330,7 +330,7 @@ mod tests {
     }
 
     #[test]
-    fn web_reads_and_a_jobs_words_mark_the_turn() {
+    fn web_reads_and_an_agents_words_mark_the_turn() {
         let slot = Arc::new(Slot::default());
         let turn = slot.begin(ctx("q"), None);
         assert!(!slot.web(turn.number()));
@@ -342,8 +342,8 @@ mod tests {
         assert!(slot.web(turn2.number()));
         // A mark for a turn that's over changes nothing now.
         turn.marks().web();
-        turn.marks().began("start_job");
-        assert!(!slot.seen(turn2.number(), "start_job", Duration::from_millis(1)));
+        turn.marks().began("start_agent");
+        assert!(!slot.seen(turn2.number(), "start_agent", Duration::from_millis(1)));
     }
 
     #[test]
@@ -352,30 +352,30 @@ mod tests {
         let turn = slot.begin(ctx("q"), None);
         let n = turn.number();
         // Not shown (yet): not in time.
-        assert!(!slot.seen(n, "start_job", Duration::from_millis(20)));
+        assert!(!slot.seen(n, "start_agent", Duration::from_millis(20)));
         // Shown first: taken at once, each call once.
-        turn.marks().began("start_job");
-        assert!(slot.seen(n, "start_job", Duration::ZERO));
-        assert!(!slot.seen(n, "start_job", Duration::from_millis(5)), "one call, one tool call");
-        assert!(!slot.seen(n, "message_job", Duration::from_millis(5)), "by name");
+        turn.marks().began("start_agent");
+        assert!(slot.seen(n, "start_agent", Duration::ZERO));
+        assert!(!slot.seen(n, "start_agent", Duration::from_millis(5)), "one call, one tool call");
+        assert!(!slot.seen(n, "message_agent", Duration::from_millis(5)), "by name");
         // Shown while the call waits (the events' path is a little behind):
         // the web read before it is counted by then.
         let waiting = {
             let slot = Arc::clone(&slot);
             std::thread::spawn(move || {
-                let seen = slot.seen(n, "start_job", Duration::from_secs(10));
+                let seen = slot.seen(n, "start_agent", Duration::from_secs(10));
                 (seen, slot.web(n))
             })
         };
         std::thread::sleep(Duration::from_millis(30));
         let marks = turn.marks();
         marks.web();
-        marks.began("start_job");
+        marks.began("start_agent");
         assert_eq!(waiting.join().unwrap(), (true, true));
         // The turn ends while a call waits: it stops waiting.
         let waiting = {
             let slot = Arc::clone(&slot);
-            std::thread::spawn(move || slot.seen(n, "message_job", Duration::from_secs(10)))
+            std::thread::spawn(move || slot.seen(n, "message_agent", Duration::from_secs(10)))
         };
         std::thread::sleep(Duration::from_millis(30));
         let started = Instant::now();

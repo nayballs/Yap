@@ -1,4 +1,4 @@
-//! **`approve`, a Job's permission prompt tool** (`--permission-prompt-tool
+//! **`approve`, an agent's permission prompt tool** (`--permission-prompt-tool
 //! mcp__yap__approve`). When nothing else decides a tool call (the
 //! permission mode, the rules), Claude Code calls it with `{tool_name,
 //! input, tool_use_id}` (2.1.296's own call, read on this PC) and waits for
@@ -21,10 +21,10 @@
 //! (`allowed`, `denied`, `timedOut`, `ended`, `cancelled`).
 //!
 //! **A plan** (2026-11-07): Plan mode's `ExitPlanMode` ([`EXIT_PLAN`]) is
-//! the job asking to go ahead with its plan, so its card says so — "The
+//! the agent asking to go ahead with its plan, so its card says so — "The
 //! plan is ready", the plan itself (its input's `plan`, markdown, up to
-//! [`PLAN_MAX`]), **Go ahead** / **Not yet**. Allowed, the job carries the
-//! plan out once its turn ends (`jobs::runner::plan_allowed`); Not yet, it
+//! [`PLAN_MAX`]), **Go ahead** / **Not yet**. Allowed, the agent carries the
+//! plan out once its turn ends (`agents::runner::plan_allowed`); Not yet, it
 //! stays a plan and Claude is told to change nothing.
 //!
 //! The log has the card's id, the tool's name and the outcome; never the
@@ -63,7 +63,7 @@ const PLAN_MAX: usize = 20_000;
 #[serde(rename_all = "camelCase")]
 pub struct Pending {
     pub id: u64,
-    /// The job's id ([`super::Approval::run`]), else the run's own.
+    /// The agent's id ([`super::Approval::run`]), else the run's own.
     pub run: String,
     pub conversation: Option<u64>,
     pub origin: Origin,
@@ -225,7 +225,7 @@ fn decision(tool: &str, outcome: Outcome, input: &Value, wait: Duration) -> Stri
         Outcome::Denied if tool == EXIT_PLAN => deny("Not yet: the user hasn't approved the plan. Stay in plan mode and change nothing: end your turn with the plan as it is, and they'll say when to go ahead.".into()),
         Outcome::Denied => deny("The user said no to this in Yap. Don't try to do the same thing another way: carry on without it, and say in your final summary what you couldn't do.".into()),
         Outcome::TimedOut => deny(format!("Nobody answered this permission request in Yap within {}, so it wasn't allowed. Carry on without it if you can, and say in your final summary that it needed the user's permission.", span(wait))),
-        Outcome::Ended => deny("The job was stopped in Yap before the user answered.".into()),
+        Outcome::Ended => deny("The agent was stopped in Yap before the user answered.".into()),
         Outcome::Cancelled => deny("This permission request was cancelled.".into()),
     }
 }
@@ -255,7 +255,7 @@ pub fn ask(ep: &Endpoint, run: &Run, args: &serde_json::Map<String, Value>, rpc:
     // A question for the person isn't a permission: Yap has no card for
     // one yet, so Claude decides and says so (the report asks the person).
     if tool == "AskUserQuestion" {
-        let text = json!({ "behavior": "deny", "message": "Yap can't show questions while a job runs. Make the most sensible choice yourself, carry on, and say in your final summary what you chose and what you'd have asked." }).to_string();
+        let text = json!({ "behavior": "deny", "message": "Yap can't show questions while an agent runs. Make the most sensible choice yourself, carry on, and say in your final summary what you chose and what you'd have asked." }).to_string();
         return (text, false);
     }
     let (summary, detail) = describe(tool, &input, run.spec.folder.as_deref());
@@ -291,9 +291,9 @@ pub fn ask(ep: &Endpoint, run: &Run, args: &serde_json::Map<String, Value>, rpc:
             }
         }
     };
-    // A plan allowed: the job carries it out once this turn ends.
+    // A plan allowed: the agent carries it out once this turn ends.
     if tool == EXIT_PLAN && outcome == Outcome::Allowed {
-        crate::jobs::runner::plan_allowed(&card.run);
+        crate::agents::runner::plan_allowed(&card.run);
     }
     (ep.emit)(EVENT_DONE, json!({ "id": id, "run": card.run, "outcome": outcome.word() }));
     tracing::info!(id, outcome = outcome.word(), "Claude Code: a permission prompt answered");
@@ -344,13 +344,13 @@ pub fn describe(tool: &str, input: &Value, folder: Option<&Path>) -> (String, St
     let file = |k: &str| shown(&s(k), folder);
     match tool {
         "Bash" | "PowerShell" => {
-            // The line as the job's steps say a command (its `cd` into the
+            // The line as the agent's steps say a command (its `cd` into the
             // run's folder gone, its paths relative; never the model's
             // description: a prompt says what would run), the command whole
             // below it.
             let cmd = s("command");
             let line = match folder {
-                Some(f) => crate::jobs::steps::command::relative(&crate::jobs::steps::command::strip_cd(&cmd, f).0, f),
+                Some(f) => crate::agents::steps::command::relative(&crate::agents::steps::command::strip_cd(&cmd, f).0, f),
                 None => cmd.clone(),
             };
             (format!("Run a command: {}", one_line(&line, SUMMARY_MAX)), clip(&cmd, DETAIL_MAX))

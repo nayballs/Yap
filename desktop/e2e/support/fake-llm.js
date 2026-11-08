@@ -1000,7 +1000,7 @@ export async function startFakeLlm() {
       // A step without tools offered takes one too when it says `plain`
       // (a model's answer without tools, the loop's last call) — never a long
       // chat's summary in the background (chat/compact.rs), which would take
-      // a job report's scripted words: it has its own reply.
+      // an agent report's scripted words: it has its own reply.
       const step =
         kind !== 'screenQuestion' && kind !== 'askOrEdit' && kind !== 'commandScreen' && kind !== 'chatSummary' && (offered.length > 0 || chatScript[0]?.plain)
           ? chatScript.shift()

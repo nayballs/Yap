@@ -4,7 +4,7 @@
   // teal on the Code side, Yap's accent on Chat), amber with a soft ring while
   // something waits on the person, blue when an answer came while it wasn't
   // on screen. Steady under reduced motion. Named for a screen reader and in
-  // its tooltip ("Needs you: a job waits for you to allow a step").
+  // its tooltip ("Needs you: an agent waits for you to allow a step").
   //
   // - `inline` (a row's, a folded group's): always there, so it grows in and
   //   fades out (its width and colour glide) and the row never jumps;

@@ -9,7 +9,7 @@
   //
   // It keeps its newest line in view while it grows (core/stickToBottom.js,
   // 2026-11-07): pinned at the bottom while you're there — streamed text,
-  // a card, a pill, a picture loading, the report of a job read in, the
+  // a card, a pill, a picture loading, the report of an agent read in, the
   // panel opening beside it —, left where you put it once you scroll up,
   // with "↓" (and "New messages" when something came meanwhile) to go back.
   import { untrack } from 'svelte';
@@ -27,19 +27,19 @@
   import ChatMessage from './ChatMessage.svelte';
   import ActivityLine from './ActivityLine.svelte';
   import CodeEmpty from './CodeEmpty.svelte';
-  // Jobs (desktop/src-tauri/src/jobs.rs): the pills of the jobs an answer
-  // started, a job's report as a job card (`kind: "jobReport"`), and a
-  // running job's permission prompts for this chat — each in a small chunk.
-  import { jobs, jobById } from '../../stores/jobs.svelte.js';
-  import { pillsByAnswer } from '../../core/jobs.js';
+  // Yap Code (desktop/src-tauri/src/agents.rs): the pills of the agents an answer
+  // started, an agent's report as an agent card (`kind: "agentReport"`), and a
+  // running agent's permission prompts for this chat — each in a small chunk.
+  import { agents, agentById } from '../../stores/agents.svelte.js';
+  import { pillsByAnswer } from '../../core/agents.js';
   import { chatStatus } from '../../stores/chatStatus.svelte.js';
 
-  const jobPills = $derived(pillsByAnswer(jobs.list, chat.activeId, chat.messages));
-  const asks = $derived(chat.activeId == null ? [] : jobs.approvals.filter((a) => a.conversation === chat.activeId));
-  const openJob = (j) => chat.doc.showJob(j);
+  const agentPills = $derived(pillsByAnswer(agents.list, chat.activeId, chat.messages));
+  const asks = $derived(chat.activeId == null ? [] : agents.approvals.filter((a) => a.conversation === chat.activeId));
+  const openAgent = (j) => chat.doc.showAgent(j);
   const openRun = (run) => {
-    const j = jobById(run);
-    if (j) chat.doc.showJob(j);
+    const j = agentById(run);
+    if (j) chat.doc.showAgent(j);
   };
 
   // The one-tap prompts (chat/skills.rs: the first three of Prepare for my
@@ -103,7 +103,7 @@
 
   // ---- Following the bottom (core/stickToBottom.js)
   // `pinned`: at the bottom, following it. `unseen`: something came (a
-  // message, more of the answer, a job's card) while you'd scrolled up.
+  // message, more of the answer, an agent's card) while you'd scrolled up.
   let contentEl = $state(null);
   let pinned = $state(true);
   let unseen = $state(false);
@@ -128,7 +128,7 @@
       if (chat.follow === follow) chat.follow = null;
     };
   });
-  // What's new at the thread's end: a message, the answer's words, a job's prompt.
+  // What's new at the thread's end: a message, the answer's words, an agent's prompt.
   const tail = $derived(`${chat.messages.length}:${chat.messages.at(-1)?.text?.length ?? 0}:${asks.length}`);
   let tailSeen = '';
   $effect(() => {
@@ -222,9 +222,9 @@
               <span class="rule"></span>
             </div>
           {/if}
-          {#if m.kind === 'jobReport'}
-            {#await import('./JobReportCard.svelte') then { default: JobReportCard }}
-              <JobReportCard {m} conversation={chat.activeId} onopen={openJob} />
+          {#if m.kind === 'agentReport'}
+            {#await import('./AgentReportCard.svelte') then { default: AgentReportCard }}
+              <AgentReportCard {m} conversation={chat.activeId} onopen={openAgent} />
             {/await}
           {:else}
             <ChatMessage
@@ -243,16 +243,16 @@
               onpage={(p) => chat.doc.showPage(p)}
             />
           {/if}
-          {#if jobPills.get(i)?.length}
-            {#await import('./JobPills.svelte') then { default: JobPills }}
-              <JobPills jobs={jobPills.get(i)} onopen={openJob} />
+          {#if agentPills.get(i)?.length}
+            {#await import('./AgentPills.svelte') then { default: AgentPills }}
+              <AgentPills agents={agentPills.get(i)} onopen={openAgent} />
             {/await}
           {/if}
         {/each}
         {#if asks.length}
-          <!-- A running job of this chat asks to take a step: Allow once / Deny. -->
-          {#await import('./JobApprove.svelte') then { default: JobApprove }}
-            <JobApprove approvals={asks} onopen={openRun} />
+          <!-- A running agent of this chat asks to take a step: Allow once / Deny. -->
+          {#await import('./AgentApprove.svelte') then { default: AgentApprove }}
+            <AgentApprove approvals={asks} onopen={openRun} />
           {/await}
         {/if}
         {#if chat.answeringHere}

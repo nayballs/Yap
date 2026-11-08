@@ -17,9 +17,9 @@
   import { showSaveError } from '../../notices/saveErrors.js';
   import { copyText, conversationMarkdown } from '../../core/itemMenus.js';
   import { createChatLibrary } from './chatLibrary.svelte.js';
-  // The jobs running now, above the list (Jobs).
-  import RunningJobs from './RunningJobs.svelte';
-  // Code chats (codeChats.svelte.js): with Jobs on, the Chat | Code switch;
+  // The agents running now, above the list (Yap Code).
+  import RunningAgents from './RunningAgents.svelte';
+  // Code chats (codeChats.svelte.js): with Yap Code on, the Chat | Code switch;
   // the Code side's chats grouped by workspace, "New code chat" its picker.
   import ChatSideSwitch from './ChatSideSwitch.svelte';
   import WorkspacePicker from './WorkspacePicker.svelte';
@@ -226,8 +226,8 @@
     </div>
   {/if}
 
-  <!-- (With Jobs on, on the Code side only: the Chat side has nothing job-like.) -->
-  {#if !code?.enabled || onCode}<RunningJobs {chat} />{/if}
+  <!-- (With Yap Code on, on the Code side only: the Chat side has nothing agent-like.) -->
+  {#if !code?.enabled || onCode}<RunningAgents {chat} />{/if}
 
   {#if chat.conversations.length || lib.archived.length}
     <div class="searchrow">

@@ -110,7 +110,7 @@ impl Endpoint {
         let id = random_hex(16)?;
         let key = random_hex(32)?;
         let tools = spec.tools;
-        let jobs = spec.jobs && tools == super::Tools::Chat;
+        let agents = spec.agents && tools == super::Tools::Chat;
         let memory = spec.memory;
         // The screen and the pages: a Chat run's only.
         let mut spec = spec;
@@ -126,8 +126,8 @@ impl Endpoint {
             runs.insert(id.clone(), run);
             runs.len()
         };
-        tracing::info!(run = %id, tools = ?tools, jobs, eyes = eyes.any(), backup = has_backup, runs = count, "Claude Code endpoint: a run registered");
-        Ok(RunHandle { endpoint: Arc::clone(self), id, key, tools, jobs, memory, eyes, has_backup, turn })
+        tracing::info!(run = %id, tools = ?tools, agents, eyes = eyes.any(), backup = has_backup, runs = count, "Claude Code endpoint: a run registered");
+        Ok(RunHandle { endpoint: Arc::clone(self), id, key, tools, agents, memory, eyes, has_backup, turn })
     }
 
     /// The run's URLs answer 404 from now on; its prompts still waiting

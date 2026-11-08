@@ -32,25 +32,25 @@
 //!   blocks, its `isError`). With `"dump":"<file>"`, a line appended to that
 //!   file with what the call gave (its content's blocks: text whole, an
 //!   image's type and size, never its data), for an e2e spec.
-//! - `{"_for":"chat"}` (or `"job"`, `"ask"`, `"all"`): the lines up to the
-//!   next `_for` play only in a process of that kind — `job` started with
-//!   `--permission-prompt-tool` (a Job's run), `chat` with an
+//! - `{"_for":"chat"}` (or `"agent"`, `"ask"`, `"all"`): the lines up to the
+//!   next `_for` play only in a process of that kind — `agent` started with
+//!   `--permission-prompt-tool` (an agent's run), `chat` with an
 //!   `--mcp-config` but no prompt tool (a plan chat's session), `ask` with
 //!   neither (one question, no tools) — so one script plays a plan chat,
-//!   the job it starts and the report's question. `all` (as from the top):
+//!   the agent it starts and the report's question. `all` (as from the top):
 //!   every kind.
 //! - `{"_dump_args":true}`: prints `{"type":"system","subtype":"fake_args",
 //!   "args":[…],"cwd":…,"pid":…,"user_text":…}` (its process id, and the
 //!   last user message's words: after a `_wait_user`, which process served
 //!   which call). `{"_dump_args":"<file>"}`: and appends that
-//!   line to the file (an e2e spec reads a plan chat's launch there, or a
-//!   job's turns' arguments: `--session-id`, then `--resume`).
+//!   line to the file (an e2e spec reads a plan chat's launch there, or an
+//!   agent's turns' arguments: `--session-id`, then `--resume`).
 //! - `{"_dump_env":["ANTHROPIC_API_KEY",…]}`: prints `{"type":"system",
 //!   "subtype":"fake_env","present":{"ANTHROPIC_API_KEY":false,…}}` (never a
 //!   value).
 //! - `{"_stderr":"text"}`: a line on stderr.
 //! - `{"_write_file":{"path":"notes.md","text":"…"}}`: write a file inside
-//!   the working folder (a job's edit, after its backup hook).
+//!   the working folder (an agent's edit, after its backup hook).
 //! - `{"_exit":N}`: exit with code N.
 //! - `{"_usage":{…}}`: from now on, a `get_usage` control request is
 //!   answered with this body (`control_response` / `success` / `response`:
@@ -243,11 +243,11 @@ impl Ctx {
         Some(std::path::Path::new(&config).join("projects").join(super::transcripts::project_dir_name(&self.cwd)).join(format!("{}.jsonl", self.session_id)))
     }
 
-    /// What kind of run this is, for `_for`: "job" (a permission prompt
+    /// What kind of run this is, for `_for`: "agent" (a permission prompt
     /// tool), "chat" (an MCP server, no prompt tool) or "ask" (neither).
     pub fn kind(&self) -> &'static str {
         if self.args.iter().any(|a| a == "--permission-prompt-tool") {
-            "job"
+            "agent"
         } else if self.args.iter().any(|a| a == "--mcp-config") {
             "chat"
         } else {
@@ -461,7 +461,7 @@ impl Player<'_> {
             }
             "_stderr" => eprintln!("{}", arg.as_str().unwrap_or("")),
             "_write_file" => {
-                // A job's edit, as Claude Code's Edit tool makes it: `path`
+                // An agent's edit, as Claude Code's Edit tool makes it: `path`
                 // relative to the working folder (never outside it).
                 let rel = arg["path"].as_str().unwrap_or("");
                 let safe = !rel.is_empty() && std::path::Path::new(rel).components().all(|c| matches!(c, std::path::Component::Normal(_)));
@@ -831,14 +831,14 @@ mod tests {
     }
 
     #[test]
-    fn one_script_plays_a_chat_its_job_and_a_question_each_its_own_part() {
-        let script = "{\"type\":\"result\",\"result\":\"every kind\"}\n{\"_for\":\"chat\"}\n{\"type\":\"result\",\"result\":\"chat\"}\n{\"_for\":\"job\"}\n{\"type\":\"result\",\"result\":\"job\"}\n{\"_for\":\"ask\"}\n{\"type\":\"result\",\"result\":\"ask\"}\n{\"_for\":\"all\"}\n{\"type\":\"result\",\"result\":\"all again\"}\n";
+    fn one_script_plays_a_chat_its_agent_and_a_question_each_its_own_part() {
+        let script = "{\"type\":\"result\",\"result\":\"every kind\"}\n{\"_for\":\"chat\"}\n{\"type\":\"result\",\"result\":\"chat\"}\n{\"_for\":\"agent\"}\n{\"type\":\"result\",\"result\":\"agent\"}\n{\"_for\":\"ask\"}\n{\"type\":\"result\",\"result\":\"ask\"}\n{\"_for\":\"all\"}\n{\"type\":\"result\",\"result\":\"all again\"}\n";
         let said = |args: &[&str]| -> Vec<String> {
             let c = ctx(args);
             run(script, &c, &[], true).1.iter().map(|v| v["result"].as_str().unwrap().to_string()).collect()
         };
         assert_eq!(said(&["-p", "--mcp-config", "{\"mcpServers\":{}}", "--strict-mcp-config"]), ["every kind", "chat", "all again"]);
-        assert_eq!(said(&["-p", "--mcp-config", "{\"mcpServers\":{}}", "--permission-prompt-tool", "mcp__yap__approve"]), ["every kind", "job", "all again"]);
+        assert_eq!(said(&["-p", "--mcp-config", "{\"mcpServers\":{}}", "--permission-prompt-tool", "mcp__yap__approve"]), ["every kind", "agent", "all again"]);
         assert_eq!(said(&["-p", "--tools", "", "--strict-mcp-config"]), ["every kind", "ask", "all again"]);
     }
 

@@ -16,9 +16,9 @@
 //! takes itself out). A model evaluation answers as its scenario says
 //! (`eval::confirm_answer`).
 //!
-//! **A job's card** too (act "job", `chat/tools/jobs.rs`): before a job
-//! starts in a folder new to jobs, or after the chat read the web — "Start a
-//! job in garden-planner?" with its folder, mode and brief ([`JobCard`]),
+//! **An agent's card** too (act "agent", `chat/tools/agents.rs`): before an agent
+//! starts in a workspace new to Yap Code, or after the chat read the web —
+//! "Send an agent to garden-planner?" with its folder, mode and brief ([`AgentCard`]),
 //! Allow once / Don't, answered the same way.
 //!
 //! The log has the question's id and the answer, never the button's words,
@@ -77,8 +77,9 @@ pub struct Card {
     pub state: String,
     /// What Yap would do: "press" (a button or a link; empty in an older
     /// card), "enter" (Enter in a field), "open" (go to a link's address),
-    /// "type" (typed words: `text`).
-    #[serde(skip_serializing_if = "String::is_empty")]
+    /// "type" (typed words: `text`), "agent" (an agent starting; "job" in a
+    /// card kept before the rename to Yap Code, read as "agent").
+    #[serde(skip_serializing_if = "String::is_empty", deserialize_with = "crate::agents::renamed")]
     pub act: String,
     /// The words Yap would type (`act` "type").
     #[serde(skip_serializing_if = "String::is_empty")]
@@ -87,16 +88,17 @@ pub struct Card {
     /// with the answer.
     #[serde(skip_serializing_if = "String::is_empty")]
     pub key: String,
-    /// A job's card (act "job"): what would start. An older Yap's save
-    /// drops it (the card stays, with its folder as its label).
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub job: Option<JobCard>,
+    /// An agent's card (act "agent"): what would start. An older Yap's save
+    /// drops it (the card stays, with its folder as its label). (`job` in
+    /// a card kept before the rename.)
+    #[serde(skip_serializing_if = "Option::is_none", alias = "job")]
+    pub agent: Option<AgentCard>,
 }
 
-/// **The job a card asks about** (act "job"): its folder, mode and brief.
+/// **The agent a card asks about** (act "agent"): its folder, mode and brief.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default, rename_all = "camelCase")]
-pub struct JobCard {
+pub struct AgentCard {
     /// The folder's name, and its path.
     pub folder: String,
     pub path: String,
@@ -106,12 +108,12 @@ pub struct JobCard {
     pub mode_label: String,
     /// What Claude Code would be asked.
     pub brief: String,
-    /// Not a job folder yet: allowing it lets jobs work there from now on.
+    /// Not a workspace yet: allowing it lets agents work there from now on.
     pub new_folder: bool,
     /// Asked because the chat read the web (a page could have slipped
     /// words into the brief).
     pub web: bool,
-    /// A follow-up for the chat's job (its next turn), not a new job.
+    /// A follow-up for the chat's agent (its next turn), not a new agent.
     pub continues: bool,
 }
 
@@ -137,8 +139,8 @@ pub struct Ask<'a> {
     pub does: &'a str,
     pub text: &'a str,
     pub key: &'a str,
-    /// A job's card (act "job").
-    pub job: Option<JobCard>,
+    /// An agent's card (act "agent").
+    pub agent: Option<AgentCard>,
 }
 
 /// A question waiting: taken out of the waiting list when dropped (answered,
@@ -207,7 +209,7 @@ pub async fn ask(live: Option<crate::chat::stream::Live<'_>>, what: Ask<'_>) -> 
             act: what.act.to_string(),
             text: what.text.to_string(),
             key: what.key.to_string(),
-            job: what.job.clone(),
+            agent: what.agent.clone(),
         })
     };
     live.sink.send(card("asking"));
@@ -236,7 +238,7 @@ mod tests {
     }
 
     fn book() -> Ask<'static> {
-        Ask { act: "press", label: "Book now", site: "rail.example.com", does: "book", text: "", key: "page:https://rail.example.com", job: None }
+        Ask { act: "press", label: "Book now", site: "rail.example.com", does: "book", text: "", key: "page:https://rail.example.com", agent: None }
     }
 
     #[tokio::test]

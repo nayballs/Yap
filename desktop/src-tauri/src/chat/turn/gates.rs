@@ -54,9 +54,9 @@ pub(super) struct Gates {
     /// The calendar (chat/tools/calendar.rs): a tool while one is connected
     /// (not across the meetings, whose passages are numbered on their own).
     pub calendar: bool,
-    /// Jobs (chat/tools/jobs.rs): with tools, jobs on and Claude Code on
+    /// Yap Code (chat/tools/agents.rs): with tools, agents on and Claude Code on
     /// this PC; not across the meetings (that's about the meetings).
-    pub jobs: bool,
+    pub agents: bool,
 }
 
 impl Gates {
@@ -77,8 +77,8 @@ impl Gates {
         let screen = if chat_in_view { crate::chat::see_screen::gate(cfg, tools, provider, model) } else { Gate::Off };
         let act = pictures != Gate::Off && scope.is_none() && !meetings && crate::chat::pages::act::can_act(provider, model);
         let calendar = !meetings && crate::calendar::connected();
-        let jobs = tools && !meetings && crate::jobs::offered(cfg);
-        let gates = Gates { tools, doc_tools, strong, claude_in_chat, own_search, web_lines, web_on, pictures, screen, act, calendar, jobs };
+        let agents = tools && !meetings && crate::agents::offered(cfg);
+        let gates = Gates { tools, doc_tools, strong, claude_in_chat, own_search, web_lines, web_on, pictures, screen, act, calendar, agents };
         if provider == crate::ai::claude_plan::PROVIDER {
             return gates.on_the_plan();
         }
@@ -93,8 +93,8 @@ impl Gates {
     /// tool loop has them here (7 Nov 2026): their tools go over Yap's run
     /// endpoint (`integrations/claude_live/eyes.rs`), the tool loop's own
     /// code — so the tabs open are told with the question, as for any
-    /// model. Jobs stay as they are too (on, not across the meetings,
-    /// `claude_live/jobs.rs`).
+    /// model. Agents stay as they are too (on, not across the meetings,
+    /// `claude_live/agents.rs`).
     fn on_the_plan(self) -> Gates {
         Gates {
             strong: false,
@@ -129,7 +129,7 @@ impl Gates {
             act: self.act,
             own_search: self.own_search,
             web_question: false,
-            jobs: self.jobs.then_some(crate::chat::tools::JobsTurn::default()),
+            agents: self.agents.then_some(crate::chat::tools::AgentsTurn::default()),
         };
         counter.count(&crate::chat::tools::offered_tools(cfg.open_apps, self.web_on && !self.claude_in_chat, extra).to_string()).await
     }
@@ -206,9 +206,9 @@ mod tests {
         // Across the meetings: none of them.
         let across = Gates::for_turn(&YapConfig { assistant_screen: true, ..cfg.clone() }, &plan_ep, Some("meetings"), true, false);
         assert_eq!((across.pictures, across.screen), (Gate::Off, Gate::Off));
-        // …and keeps jobs as the turn has them (over Yap's run endpoint).
-        assert!(Gates { jobs: true, ..plan }.on_the_plan().jobs);
-        assert!(!Gates { jobs: false, ..plan }.on_the_plan().jobs);
-        assert!(!Gates::for_turn(&YapConfig { jobs_enabled: true, ..cfg.clone() }, &endpoint(crate::ai::claude_plan::PROVIDER, "claude-opus-5-5"), Some("meetings"), true, false).jobs, "never across the meetings");
+        // …and keeps agents as the turn has them (over Yap's run endpoint).
+        assert!(Gates { agents: true, ..plan }.on_the_plan().agents);
+        assert!(!Gates { agents: false, ..plan }.on_the_plan().agents);
+        assert!(!Gates::for_turn(&YapConfig { agents_enabled: true, ..cfg.clone() }, &endpoint(crate::ai::claude_plan::PROVIDER, "claude-opus-5-5"), Some("meetings"), true, false).agents, "never across the meetings");
     }
 }

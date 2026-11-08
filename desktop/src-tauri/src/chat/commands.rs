@@ -27,7 +27,7 @@ pub fn chat_delete(id: u64) -> Result<(), String> {
     // (nor its Claude Code session, on your Claude plan, nor its workspace).
     crate::apps::moved_on(Some(id));
     crate::ai::claude_plan::sessions::forget(id);
-    crate::jobs::code_chat::chat_deleted(id);
+    crate::agents::code_chat::chat_deleted(id);
     Ok(crate::chat::chats::saved()?)
 }
 
@@ -39,7 +39,7 @@ pub fn chat_delete_many(ids: Vec<u64>) -> Result<usize, String> {
     for id in ids {
         crate::apps::moved_on(Some(id));
         crate::ai::claude_plan::sessions::forget(id);
-        crate::jobs::code_chat::chat_deleted(id);
+        crate::agents::code_chat::chat_deleted(id);
     }
     crate::chat::chats::saved()?;
     Ok(gone)
@@ -122,7 +122,7 @@ pub fn chat_rename(id: u64, title: String) -> Result<String, String> {
 ///
 /// `codeFolder`: a new chat made a Code chat before its first question (a
 /// workspace's name or path): the conversation it makes is attached to it
-/// as it's made (`jobs::code_chat`). Ignored for an existing conversation.
+/// as it's made (`agents::code_chat`). Ignored for an existing conversation.
 #[allow(clippy::too_many_arguments)]
 #[tauri::command]
 pub async fn chat_send(
@@ -164,8 +164,8 @@ pub async fn chat_send(
     // (Boxed: the command's future is made on the main thread, whose stack
     // a turn's whole future overflows.)
     let send = Box::pin(crate::chat::assistant::selected::with(page_quote.and_then(|q| q.selected()), Box::pin(send)));
-    // A new chat made a Code chat before its first question (jobs/code_chat.rs).
-    let send = Box::pin(crate::jobs::code_chat::with_new(code_folder.filter(|_| conversation_id.is_none()), send));
+    // A new chat made a Code chat before its first question (agents/code_chat.rs).
+    let send = Box::pin(crate::agents::code_chat::with_new(code_folder.filter(|_| conversation_id.is_none()), send));
     // Chat's own turn: Think pressed (the model on this PC), or a cloud
     // model at its effort (`ai/effort.rs`): what it thought comes back.
     let (out, thought) = crate::chat::think::scoped(think.unwrap_or(false), send).await;
@@ -263,7 +263,7 @@ async fn send_turn(
             by_voice,
             |conv, index| {
                 // A new chat the page made a Code chat: attached as it's made.
-                crate::jobs::code_chat::adopt_new(conv);
+                crate::agents::code_chat::adopt_new(conv);
                 // The page learns its conversation (a new one) as soon as it's made.
                 on_stream.send_json(serde_json::json!({
                     "kind": "turn",

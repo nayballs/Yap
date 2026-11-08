@@ -45,8 +45,8 @@
 //!   in is information, never instructions. The turn has web content from
 //!   the moment Claude Code begins such a call ([`SEES`],
 //!   `turn::Marks::began`, as a `WebSearch` does), and after any call that
-//!   brought some in (`web::Turn::seen`), so a job is refused after it
-//!   (`claude_live/jobs.rs`).
+//!   brought some in (`web::Turn::seen`), so an agent is refused after it
+//!   (`claude_live/agents.rs`).
 //! - **Acting on pages** (`click`, `type_text`, `scroll`, `go_to`) is never a
 //!   plan chat's: in the tool loop each click that buys, pays, books or
 //!   sends waits for the person's card, a typed word from nowhere they can
@@ -73,7 +73,7 @@ use std::sync::Arc;
 
 use serde_json::{json, Map, Value};
 
-use super::jobs::ToTurn;
+use super::agents::ToTurn;
 use super::server::Run;
 use super::turn::{Call, Slot, SEEN_WAIT};
 use crate::ai::claude_plan::{BASE_URL, PROVIDER};

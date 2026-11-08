@@ -43,7 +43,7 @@ export const STILL_WORKING_S = 8;
 
 // A turn's events for the panel beside the chat (chatState's `docEvent`):
 // its conversation's, so only while that one is open.
-const PANEL_EVENTS = new Set(['page', 'offer', 'picture', 'document', 'section', 'job']);
+const PANEL_EVENTS = new Set(['page', 'offer', 'picture', 'document', 'section', 'agent']);
 
 /** `have` with the pictures in `more` it hasn't got (by id); `have` itself when none are new. */
 function withImages(have, more) {
@@ -175,10 +175,10 @@ export function createChatState({ onopensettings = () => null, onopennote = () =
       doc.onSection(ev);
       return true;
     }
-    // A job this turn started (chat/tools/jobs.rs): its tab opens at once,
-    // as a page's does; its pill comes with the jobs list (stores/jobs.svelte.js).
-    if (ev?.kind === 'job') {
-      if (ev.job?.id) doc.showJob(ev.job);
+    // An agent this turn started (chat/tools/agents.rs): its tab opens at once,
+    // as a page's does; its pill comes with the agents list (stores/agents.svelte.js).
+    if (ev?.kind === 'agent') {
+      if (ev.agent?.id) doc.showAgent(ev.agent);
       return true;
     }
     if (ev?.kind === 'tool') doc.onTool(ev);
@@ -725,7 +725,7 @@ export function createChatState({ onopensettings = () => null, onopennote = () =
   }
 
   // The open conversation answered by a turn this view doesn't follow (one
-  // asked before Chat was last opened, a job's report): read again once
+  // asked before Chat was last opened, an agent's report): read again once
   // Rust says it's done (`yap-chat-answering`), so its answer shows.
   // (`{id, followed}`: the open conversation while Rust lists it answering,
   // and whether that's a turn this view follows — its own `Answer`.)
@@ -744,7 +744,7 @@ export function createChatState({ onopensettings = () => null, onopennote = () =
     });
   });
 
-  // Every chat screenshot deleted (Settings → Privacy & data), a job's
+  // Every chat screenshot deleted (Settings → Privacy & data), an agent's
   // report landing: the open conversation read again (not while its own
   // typed question is answered; another chat's answering never holds it up).
   async function reloadActive() {
@@ -1355,7 +1355,7 @@ export function createChatState({ onopensettings = () => null, onopennote = () =
         selection: about && !about.page ? { noteId: about.noteId, text: about.text, fromLine: about.fromLine ?? null, toLine: about.toLine ?? null } : null,
         // Words from a page beside the chat (chat/pages/view.rs `PageQuote`).
         pageQuote: about?.page ? { text: about.text, site: about.page.site || '' } : null,
-        // A new chat made a Code chat before its first question (jobs/code_chat.rs).
+        // A new chat made a Code chat before its first question (agents/code_chat.rs).
         codeFolder: activeId == null ? (newChatFolder?.() ?? null) : null,
       },
       onEvent

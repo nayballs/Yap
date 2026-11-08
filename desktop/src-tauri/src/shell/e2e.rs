@@ -694,7 +694,7 @@ pub fn e2e_claude_approve_auto(allow: Option<bool>) -> Result<(), String> {
 
 /// Test mode only: Claude Code is, from now on, this build's own stand-in
 /// replaying `script` (`yap.exe fake-claude <script>`, `ai/claude_code/
-/// fake.rs`) — a job's next turn runs it, so a spec can give each turn its
+/// fake.rs`) — an agent's next turn runs it, so a spec can give each turn its
 /// script. `None`: back to `YAP_CLAUDE_EXE`, or no Claude Code at all.
 #[cfg(debug_assertions)]
 #[tauri::command]

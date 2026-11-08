@@ -4,14 +4,14 @@ The AI Chat surface (conversations, the tool-calling loop and its note tools) an
 
 [Architecture index](./README.md) · [CLAUDE.md](../../CLAUDE.md)
 
-**Chat and Code** (2026-11-07). With Jobs on, Chat has two sides, switched at
+**Chat and Code** (2026-11-07). With Yap Code on, Chat has two sides, switched at
 the top of its conversation list: **Chat**, the plain conversations this file
 describes, and **Code**, conversations attached to a workspace (a folder on
-this PC) where a request can start a job: the person's own Claude Code working
-in that folder, followed in a Job tab beside the chat. A Code chat is a Chat
+this PC) where a request can send an agent: the person's own Claude Code working
+in that folder, followed in an agent tab beside the chat. A Code chat is a Chat
 conversation with a few differences (the workspace and Mode chips, one more
 line in its prompt, its look); what they are, and how a chat moves between
-the sides, is in [jobs.md](./jobs.md#chat-and-code). With Jobs off, Chat has
+the sides, is in [yap-code.md](./yap-code.md#chat-and-code). With Yap Code off, Chat has
 one side.
 
 ## Modules
@@ -243,12 +243,12 @@ one side.
   deleting the note deletes them. An older Yap on the same data drops
   `note` and `plain` when it saves: the thread is then an ordinary chat,
   its messages whole (unit-tested). **A message's `kind`** (2026-11-07):
-  empty for the person's and the model's; `"jobReport"` for a job's report
-  marker ([below](#jobs-in-chat-2026-11-07)), which the model reads with the
-  prefix "Report from the job you started (not from the person): "
+  empty for the person's and the model's; `"agentReport"` for an agent's report
+  marker ([below](#yap-code-in-chat-2026-11-07)), which the model reads with the
+  prefix "Report from the agent you started (not from the person): "
   (`sent_text`). Memory's learning and the question's id
   (`chat:<id>:<index>`) count only the person's own (kind empty); search by
-  meaning's passages say the report is the job's ("Job", never "You"). An
+  meaning's passages say the report is the agent's ("Agent", never "You"). An
   older Yap drops `kind` on its save.
 - **`chat/note_chats.rs`** — **a meeting's Ask thread, kept** (Wispr Flow's
   "New chat" / "Past chats"; the private roadmap's R15): what was asked about
@@ -329,12 +329,12 @@ one side.
   and its line in `prompt.rs`. **`plan.rs`** (2026-11-07) — a turn on the
   person's Claude plan, answered by their own Claude Code
   ([below](#chat-on-your-claude-plan-2026-11-07)); **`report.rs`** (2026-11-07)
-  — a job's report, a turn Yap starts itself ([below](#jobs-in-chat-2026-11-07)).
-- **`chat/tools/jobs.rs`** — **Jobs from Chat** (2026-11-07): `start_job`,
-  `job_status`, `message_job`, `stop_job`, a `Source` of their own
-  (`dispatch.rs` `Source::Jobs`, before the notes fallback) while jobs are
-  offered (`Gates::jobs`, `Extra::jobs`). [Below](#jobs-in-chat-2026-11-07)
-  and [jobs.md](./jobs.md).
+  — an agent's report, a turn Yap starts itself ([below](#yap-code-in-chat-2026-11-07)).
+- **`chat/tools/agents.rs`** — **Yap Code's agents from Chat** (2026-11-07): `start_agent`,
+  `agent_status`, `message_agent`, `stop_agent`, a `Source` of their own
+  (`dispatch.rs` `Source::Agents`, before the notes fallback) while agents are
+  offered (`Gates::agents`, `Extra::agents`). [Below](#yap-code-in-chat-2026-11-07)
+  and [yap-code.md](./yap-code.md).
 - **`chat/tools.rs`** — the AI Chat tool-calling agent loop: six tools ported
   near-verbatim from OpenWhispr's `services/tools/*` (`search_notes`,
   `get_note`, `create_note`, `update_note`, `list_folders`,
@@ -1243,7 +1243,7 @@ one side.
   cleanup only by its side's switch** (2026-11-07, the maintainer: questions
   landed full of "um"): "Clean up what you say in Chat" (Settings → Voice
   Assistant, `chat_clean_speech`) for a plain chat, "…in Code chats"
-  (Settings → Jobs, `jobs_clean_speech`) for a Code chat or a new code chat
+  (Settings → Yap Code, `agents_clean_speech`) for a Code chat or a new code chat
   waiting with its workspace (`shortcut_goes`, `into_code_chat`), both on,
   each apart from "AI cleanup": as an AI prompt, literally, on Dictation
   cleanup's model (`cleanup_styles::question_plan`; no model set up: as said,
@@ -1761,12 +1761,12 @@ screenshots and their prompts, +, the box, the mic, Send / ■, `ModelChip`).
 `followBottom`, made by `ChatThread` on `.msgs` and its content `.msgsin`):
 pinned at the bottom while you're there, a ResizeObserver on the content
 and the scroller keeps it there through everything that makes it grow —
-streamed text, the checked answer's glide, cards (ask-first, approve, a
-job's report), pills and pictures loading later, a report or a spoken
+streamed text, the checked answer's glide, cards (ask-first, approve, an
+agent's report), pills and pictures loading later, a report or a spoken
 answer read in, the panel opening beside it. A scroll up of yours (wheel,
 scrollbar, keys, a search hit) lets go at once and nothing moves after it;
 "↓" over the thread's foot ("↓ New messages" once a message, more of the
-answer or a job's prompt came) goes back down, smooth unless motion is
+answer or an agent's prompt came) goes back down, smooth unless motion is
 reduced; scrolling back to the bottom follows again. The person's own
 question (typed, dictated, a prompt, asked out loud) and a conversation
 opened go to the bottom (`chatState`'s `scrollThread` → `follow.toBottom()`);
@@ -2515,7 +2515,7 @@ action as plain markdown, the toolbar waiting while Chat writes, Chat's
 change landing with the person's words kept, Undo marked, find, dark).
 
 **The split** (`role="separator"`, "Resize the panel"; every tab kind,
-the Job tab's too): dragged — its grip on hover, the resize cursor over
+the Agent tab's too): dragged — its grip on hover, the resize cursor over
 the whole of Chat while it's held, Esc mid-drag putting it back —, or ←/→
 (Shift: further), Home/End on its handle, a double-click back to 460 px; at
 least 320 px, the thread keeps 340 (the composer's chips and the panel's
@@ -2553,21 +2553,21 @@ panel narrows to 450; it covers only below that.
 **The readable column** (2026-11-07): in a wide thread the messages and the
 composer sit on one centred column at most `--yap-thread-width` wide
 (app.css: 768 px, the Claude app's and ChatGPT's 48rem, × the Text size so
-a line keeps its length) — the activity line, cards, job pills and prompts
+a line keeps its length) — the activity line, cards, agent pills and prompts
 and the composer's Code label with them (ChatThread's `.msgsin`, Composer's
 `.composer`). The scroller stays the thread's whole width (its scrollbar at
 the thread's edge); the composer, the scope line and "↓" are moved by half
 the scrollbar (`chat.threadGutter`, measured) so all share one centre; the
 column keeps clear of the list's button only as far as it must
 (`--thread-clear`). Beside a panel the column just fills less of the room;
-a narrow thread is its own width, as before; documents, the Job tab and
+a narrow thread is its own width, as before; documents, the Agent tab and
 pages aren't touched. E2e `main-layout.spec.js`.
-**Opening calmly** (a job starting, 7 Nov 2026: the list vanished, the
+**Opening calmly** (an agent starting, 7 Nov 2026: the list vanished, the
 thread jumped 225 px and shrank, the composer grew 9 px a frame later, the
 panel's chunk popped into an empty gap): every box changes once, in one
 frame — the list aside, the panel at its remembered width, drawn whole
 (DocPanel's chunk fetched once Chat is idle) and faded in over 140 ms
-(never with reduced motion); with Jobs on every message box keeps room for
+(never with reduced motion); with Yap Code on every message box keeps room for
 a Code chat's label, so a chat turning into a Code chat never moves the
 thread; the list keeps its width on both sides; the thread keeps its newest line
 (`core/stickToBottom.js`). E2e `chat-layout.spec.js` (each frame measured).
@@ -2901,7 +2901,7 @@ and its Undo, Preview / Source, find, copy, light and dark).
   holds a question up, and a model on this PC's slow start says "…answering
   another chat too" (`chatStatus.answering`). ■ and Esc stop the open
   conversation's answer only (a spoken one: `assistant_stop` when it's the
-  assistant's own question, else `stream_stop_conversation`). A job's report
+  assistant's own question, else `stream_stop_conversation`). An agent's report
   written in another chat leaves the open one alone. A turn the view doesn't
   follow answering the open conversation (asked before Chat was last
   opened, a report) is read back once Rust lists it done
@@ -3495,7 +3495,7 @@ as for every other. Chat, the Voice Assistant on this PC and from the phone.
   stopped before it asks anything). **In a Code chat** instead: a Claude Code
   session in the workspace, with the person's own settings, Claude Code's
   prompt with Yap's added, read only (`Read`, `Grep`, `Glob`), no memory
-  ([jobs.md](./jobs.md#memory-and-the-plan-in-a-code-chat), [ai-models.md](./ai-models.md#a-chat-turn-chatturnplanrs)).
+  ([yap-code.md](./yap-code.md#memory-and-the-plan-in-a-code-chat), [ai-models.md](./ai-models.md#a-chat-turn-chatturnplanrs)).
 - **The question**: the turn's context and the question
   (`chats::with_context`), its screenshots as image blocks.
 - **Its events → Chat's stream** (`claude_plan/map.rs`, pure): text deltas as
@@ -3513,15 +3513,15 @@ as for every other. Chat, the Voice Assistant on this PC and from the phone.
 - **Stop, and a newer question**: the interrupt (`Session::interrupt`), and
   the turn read to its end (10 s at most, else the process is ended), so the
   next question's events are its own.
-- **Jobs** (while offered: `on_the_plan` keeps `jobs`): Yap's job tools over
-  the same endpoint, allowed and named in the prompt (`plan.rs` `JOBS`). Each
+- **Yap Code** (while offered: `on_the_plan` keeps `agents`): Yap's agent tools over
+  the same endpoint, allowed and named in the prompt (`plan.rs` `AGENTS`). Each
   turn opens on the session's run (`RunHandle::begin_turn`), and the turn's
   events tell the run of every web read and of each of Yap's tool calls as
   Claude Code begins it (`ToChat`, `Marks`); what the calls show comes back
-  into the turn's stream (`read_turn`): [jobs.md](./jobs.md#from-a-plan-chat).
+  into the turn's stream (`read_turn`): [yap-code.md](./yap-code.md#from-a-plan-chat).
 - **In a Code chat** a plan turn is a read-only Claude Code session in the
   chat's workspace, with the person's own settings and no Yap memory
-  ([jobs.md](./jobs.md#memory-and-the-plan-in-a-code-chat)).
+  ([yap-code.md](./yap-code.md#memory-and-the-plan-in-a-code-chat)).
 - **The screen and the pages beside the chat** (7 Nov 2026: in a Code chat
   on the plan the maintainer asked for a site's design and screenshots, and
   the model said it "can't open your browser or take screenshots"):
@@ -3542,7 +3542,7 @@ as for every other. Chat, the Voice Assistant on this PC and from the phone.
   left out; public http(s) pages from the turn's results (the pages Claude
   Code's `WebSearch` found: `Marks::found`), the person's links or a site
   they named; what a look, a page read or a shot brings in is web content
-  (a job is refused after it). The screenshots show with the question
+  (an agent is refused after it). The screenshots show with the question
   (`Event::Screen`, kept with it), a page's tab opens (`Event::Page`), a
   shot or a picture shows beside the chat (`Event::Picture`), all through
   the turn's stream; the pages and pictures shown are the answer's
@@ -3571,42 +3571,42 @@ as for every other. Chat, the Voice Assistant on this PC and from the phone.
   asked on its session once it's free.
 - E2E: `claude-plan*.spec.js` ([`docs/e2e-tests.md`](../e2e-tests.md)).
 
-## Jobs in Chat (2026-11-07)
+## Yap Code in Chat (2026-11-07)
 
-Jobs and Code chats are described whole in [jobs.md](./jobs.md); this is
+Yap Code (its agents) and Code chats are described whole in [yap-code.md](./yap-code.md); this is
 where they touch Chat's own code.
 
-- **The tools** (`chat/tools/jobs.rs`): `start_job`, `job_status`,
-  `message_job`, `stop_job`, a `Source` of their own (`dispatch.rs`
-  `Source::Jobs`) while jobs are offered (`Gates::jobs`: a model with tools,
-  not the Meetings view's Ask). `Extra::jobs` carries whether the turn was
-  asked out loud (a job that needs asking is asked in words) and by voice
-  (its report is read aloud: `JobsTurn::asked`). The same code answers a plan
-  chat's calls over Yap's run endpoint ([jobs.md](./jobs.md#from-a-plan-chat)).
-  Their rules: [jobs.md](./jobs.md#starting-a-job).
-- **The safety rule**: `start_job` and `message_job` are in `ACTION_TOOLS`
-  and `STRONG_LOCKED`; a job's own output is web content (the dispatch's
-  `job_seen`).
+- **The tools** (`chat/tools/agents.rs`): `start_agent`, `agent_status`,
+  `message_agent`, `stop_agent`, a `Source` of their own (`dispatch.rs`
+  `Source::Agents`) while agents are offered (`Gates::agents`: a model with tools,
+  not the Meetings view's Ask). `Extra::agents` carries whether the turn was
+  asked out loud (an agent that needs asking is asked in words) and by voice
+  (its report is read aloud: `AgentsTurn::asked`). The same code answers a plan
+  chat's calls over Yap's run endpoint ([yap-code.md](./yap-code.md#from-a-plan-chat)).
+  Their rules: [yap-code.md](./yap-code.md#starting-an-agent).
+- **The safety rule**: `start_agent` and `message_agent` are in `ACTION_TOOLS`
+  and `STRONG_LOCKED`; an agent's own output is web content (the dispatch's
+  `agent_seen`).
 - **A Code chat's prompt line** (`prompt.rs` `build`:
   `code_chat::prompt_line_for`), for the tool loop and a plan chat alike.
 - **No Yap memory in a Code chat** (any model): none of memory's passages,
   "You" or tools, About you without its note, no eager RAG or past chats,
   never learned from; meetings, notes and tasks read with the tools on
   request. On the Claude plan its session runs in the workspace, read only
-  ([jobs.md](./jobs.md#code-chats-and-workspaces),
+  ([yap-code.md](./yap-code.md#code-chats-and-workspaces),
   [memory.md](./memory.md#code-chats-keep-memory-out)).
 - **A new code chat's first question** carries its workspace (`chat_send`'s
   `codeFolder`; `chat_view_state`'s `codeFolder` for one asked out loud).
-- **`stream::Event::Job`**: a job started in this turn, or the Code chat's
-  job carried on (its next turn: [jobs.md](./jobs.md#turns-one-job-per-code-chat));
+- **`stream::Event::Agent`**: an agent started in this turn, or the Code chat's
+  agent carried on (its next turn: [yap-code.md](./yap-code.md#turns-one-agent-per-code-chat));
   the panel opens its tab at once, at that turn.
 - **The report** (`chat/turn/report.rs`), a turn Yap starts itself, and the
-  spoken yes or no before a job (`turn/fast.rs` `job_answer_turn`, checked in
-  `turn.rs` before any model): [jobs.md](./jobs.md#reports).
+  spoken yes or no before an agent (`turn/fast.rs` `agent_answer_turn`, checked in
+  `turn.rs` before any model): [yap-code.md](./yap-code.md#reports).
 - **On screen** (`views/chat/`): the Chat | Code switch and the Code side,
-  the workspace and Mode chips, the Job tab and its cards:
-  [jobs.md](./jobs.md#code-chats-and-workspaces) and
-  [jobs.md](./jobs.md#the-job-tab). A report reloads the open chat without
+  the workspace and Mode chips, the Agent tab and its cards:
+  [yap-code.md](./yap-code.md#code-chats-and-workspaces) and
+  [yap-code.md](./yap-code.md#the-agent-tab). A report reloads the open chat without
   switching to it.
 
 ## Status dots in Chat's list (2026-11-07)
@@ -3617,32 +3617,32 @@ rules pure in `core/chatStatus.js`, kept live for the whole main window by
 `stores/chatStatus.svelte.js`, started by ControlPanel).
 
 - **Working** (a soft pulse; the Code teal on the Code side, Yap's accent on
-  Chat): a job of the chat's queued or running, or an answer being written
-  there — typed, the Voice Assistant's, a phone's, a job's report. Rust
+  Chat): an agent of the chat's queued or running, or an answer being written
+  there — typed, the Voice Assistant's, a phone's, an agent's report. Rust
   lists the conversations answering (`chat/stream.rs`: every `Stoppable`
   that `answers` one; `chat_answering`, `yap-chat-answering {conversations,
-  seq}`). A spell under 300 ms never shows; two less than 300 ms apart (a
-  job ending, its report starting) are one. Steady under reduced motion.
-- **Needs you** (amber with a soft ring, steady; it outranks working): a
-  job's permission prompt or a job `asking`, an ask-first card waiting in a
+  seq}`). A spell under 300 ms never shows; two less than 300 ms apart (an
+  agent ending, its report starting) are one. Steady under reduced motion.
+- **Needs you** (amber with a soft ring, steady; it outranks working): an
+  agent's permission prompt or an agent `asking`, an ask-first card waiting in a
   turn's stream (`confirm`: told by chatState as it streams, even once Chat
-  is left), or a job's turn that ended with a question or a plan for "go
+  is left), or an agent's turn that ended with a question or a plan for "go
   ahead" — until the person writes there after its report (`chats_list`'s
   `askedAt`), it runs again, or a day has passed.
 - **New** (blue): its last answer (`chats_list`'s `answerAt`) is past the
   last one seen there, and it isn't on screen. Opening it clears it. Seen is
   kept per conversation in this window's storage (`yap.chat.seen`, the last
   answer's index; a first run counts everything there as seen), never
-  chats.json. "A job's report is in" when the answer follows a report marker.
+  chats.json. "An agent's report is in" when the answer follows a report marker.
 - **Also**: a folded workspace group shows the strongest of its chats'
   beside its name; the Chat | Code switch's side not shown shows the
   strongest of its side's (`chat-side-status`, said with the segment by
   `aria-describedby`); the menu rail's Chat icon is amber while anything
   needs you, from every view, and pulses while a chat works and another view
-  shows (frontend.md). The running jobs list above is as it was.
-- Each dot is named for a screen reader and in its tooltip ("Needs you: a
-  job waits for you to allow a step", "Working: writing an answer", "New: a
-  job's report is in").
+  shows (frontend.md). The running agents list above is as it was.
+- Each dot is named for a screen reader and in its tooltip ("Needs you: an
+  agent waits for you to allow a step", "Working: writing an answer", "New: an
+  agent's report is in").
 - Tests: `chat-status.spec.js` (the pure rules, then each state in the app,
   light and dark), `cargo test chat::stream` (the list of conversations
   answering) and `chat::chats` (`answerAt` / `askedAt`).

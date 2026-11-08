@@ -127,7 +127,7 @@
   import { createChatLayout } from './chatLayout.svelte.js';
   import { chatBrowser } from '../../stores/chatBrowser.svelte.js';
   import { memoryTakesDrops } from '../../stores/memory.svelte.js';
-  import { jobs, initJobs, jobById } from '../../stores/jobs.svelte.js';
+  import { agents, initAgents, agentById } from '../../stores/agents.svelte.js';
   import { initChatStatus, setShown, markSeen } from '../../stores/chatStatus.svelte.js';
   import { lastAnswerAt } from '../../core/chatStatus.js';
 
@@ -139,22 +139,22 @@
 
   const chat = createChatState({ onopensettings: () => onopensettings, onopennote: () => onopennote });
   const doc = chat.doc;
-  // **Code chats** (codeChats.svelte.js): with Jobs on, the list's Chat |
+  // **Code chats** (codeChats.svelte.js): with Yap Code on, the list's Chat |
   // Code switch, a Code chat's workspace and its look.
   const code = createCodeChats(chat, { opensettings: () => onopensettings });
 
-  // **Jobs** (stores/jobs.svelte.js): the bar card's or a notification's
-  // Open (`yap-job-open`) shows the job's chat and its tab; a report landing
-  // in the chat shown (`yap-job-report`) is read in, never switching chats.
-  initJobs();
+  // **Yap Code** (stores/agents.svelte.js): the bar card's or a notification's
+  // Open (`yap-agent-open`) shows the agent's chat and its tab; a report landing
+  // in the chat shown (`yap-agent-report`) is read in, never switching chats.
+  initAgents();
   $effect(() => {
-    const want = jobs.openWanted;
+    const want = agents.openWanted;
     if (!want?.id) return;
-    jobs.openWanted = null;
+    agents.openWanted = null;
     untrack(async () => {
       if (want.conversation != null && want.conversation !== chat.activeId) await chat.selectConversation(want.conversation);
-      const j = jobById(want.id);
-      doc.showJob(j ?? { id: want.id, conversation: want.conversation });
+      const j = agentById(want.id);
+      doc.showAgent(j ?? { id: want.id, conversation: want.conversation });
     });
   });
   // **The status dots** (stores/chatStatus.svelte.js): the conversation on
@@ -170,10 +170,10 @@
     if (id != null && at >= 0) untrack(() => markSeen(id, at));
   });
   onDestroy(() => setShown(null));
-  let reportsSeen = jobs.reports;
+  let reportsSeen = agents.reports;
   $effect(() => {
-    const n = jobs.reports;
-    const r = jobs.report;
+    const n = agents.reports;
+    const r = agents.report;
     untrack(() => {
       if (n === reportsSeen) return;
       reportsSeen = n;
@@ -234,9 +234,9 @@
     return () => ro.disconnect();
   });
 
-  // The panel's own chunk (DocPanel: documents, pictures, pages, jobs),
+  // The panel's own chunk (DocPanel: documents, pictures, pages, agents),
   // fetched once Chat is idle so a panel opens whole in its first frame —
-  // never an empty gap it then pops into (a job starting, 7 Nov 2026).
+  // never an empty gap it then pops into (an agent starting, 7 Nov 2026).
   let DocPanel = $state(null);
   let panelLoading = null;
   function loadPanel() {

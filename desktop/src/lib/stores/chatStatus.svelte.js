@@ -6,9 +6,9 @@
 //
 // What it follows:
 // - **the conversations answering** (Rust's list, `chat_answering` then
-//   `yap-chat-answering`: every turn, typed, by voice, a phone's or a job's
+//   `yap-chat-answering`: every turn, typed, by voice, a phone's or an agent's
 //   report);
-// - **the jobs and their prompts** (stores/jobs.svelte.js);
+// - **the agents and their prompts** (stores/agents.svelte.js);
 // - **the ask-first cards waiting** in a turn's stream (`kind: "confirm"`,
 //   told by Chat's state: `cardAsked`, `turnOver`);
 // - **Chat's list** (`chats_list`: each conversation's last answer and the
@@ -19,7 +19,7 @@
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import { untrack } from 'svelte';
-import { jobs } from './jobs.svelte.js';
+import { agents } from './agents.svelte.js';
 import {
   SEEN_KEY,
   WORKING_FLOOR_MS,
@@ -50,9 +50,9 @@ let answering = {};
 let answeringSeq = -1;
 /** conversation → the ask-first cards waiting there (ids). */
 let confirms = {};
-/** job id → when this window first saw it at work (ms). */
-let jobSince = {};
-let jobsRead = false;
+/** agent id → when this window first saw it at work (ms). */
+let agentSince = {};
+let agentsRead = false;
 let spells = {};
 let seen = null;
 let started = false;
@@ -80,29 +80,29 @@ function saveSeen() {
 /** Everything again, from the inputs as they are now; the clock's next change scheduled. */
 function update() {
   const now = Date.now();
-  // The jobs at work: since when this window saw them (already at work
+  // The agents at work: since when this window saw them (already at work
   // when it opened: since before the floor, so they show at once).
   const live = new Set();
-  for (const j of jobs.list) {
+  for (const j of agents.list) {
     if (j.status !== 'queued' && j.status !== 'running') continue;
     live.add(j.id);
-    if (!jobSince[j.id]) jobSince[j.id] = jobsRead ? now : now - WORKING_FLOOR_MS;
+    if (!agentSince[j.id]) agentSince[j.id] = agentsRead ? now : now - WORKING_FLOOR_MS;
   }
-  for (const id of Object.keys(jobSince)) if (!live.has(id)) delete jobSince[id];
-  if (jobs.loaded) jobsRead = true;
-  spells = trackWorking(spells, workingNow({ answering, jobs: jobs.list, jobSince, now }), now);
+  for (const id of Object.keys(agentSince)) if (!live.has(id)) delete agentSince[id];
+  if (agents.loaded) agentsRead = true;
+  spells = trackWorking(spells, workingNow({ answering, agents: agents.list, agentSince, now }), now);
   const counts = Object.fromEntries(Object.entries(confirms).map(([k, v]) => [k, v.length]));
   const next = chatStatuses({
     conversations: chatStatus.conversations,
-    jobs: jobs.list,
-    approvals: jobs.approvals,
+    agents: agents.list,
+    approvals: agents.approvals,
     confirms: counts,
     spells,
     seen: seen || {},
     shown: chatStatus.shown,
     now,
   });
-  // (A job's every step comes through here: the dots only hear a real change.)
+  // (An agent's every step comes through here: the dots only hear a real change.)
   const text = JSON.stringify(next);
   if (text !== shownText) {
     shownText = text;
@@ -231,16 +231,16 @@ export function initChatStatus() {
     .catch(() => {});
   readList();
   listen('yap-chat-answering', (e) => onAnswering(e.payload)).catch(() => {});
-  listen('yap-job-report', () => refreshListSoon()).catch(() => {});
+  listen('yap-agent-report', () => refreshListSoon()).catch(() => {});
   listen('yap-assistant-turn', (e) => {
     if (['answered', 'failed', 'superseded'].includes(e.payload?.phase)) refreshListSoon();
   }).catch(() => {});
-  // The jobs and their prompts as they change.
+  // The agents and their prompts as they change.
   $effect.root(() => {
     $effect(() => {
-      void jobs.list;
-      void jobs.approvals;
-      void jobs.loaded;
+      void agents.list;
+      void agents.approvals;
+      void agents.loaded;
       untrack(update);
     });
   });

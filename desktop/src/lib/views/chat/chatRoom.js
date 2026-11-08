@@ -1,7 +1,7 @@
 // **Chat's room** (2026-11-07): how Chat's width is shared between the app's
 // own rail (ControlPanel's navigation, core/navRail.js), the conversation
-// list, the thread and the panel beside it (a document, a picture, a page, a
-// job). Pure, no Svelte state: ChatView (with chatLayout.svelte.js) asks it
+// list, the thread and the panel beside it (a document, a picture, a page, an
+// agent). Pure, no Svelte state: ChatView (with chatLayout.svelte.js) asks it
 // every time a width or a choice changes, and the no-app specs check it.
 //
 // What gives way first, as the room runs out (predictable, one rule each):
@@ -24,7 +24,7 @@
 //    narrow window), ✕ or "Back beside the chat" going back.
 // The person's own choices (the rail collapsed, the list hidden, its width)
 // are theirs: remembered, never undone by Yap. Yap's own steps land in the
-// frame the panel opens in, nothing gliding (a job starting: one change).
+// frame the panel opens in, nothing gliding (an agent starting: one change).
 import { RAIL_WIDE, RAIL_NARROW } from '../../core/navRail.js';
 
 export { RAIL_WIDE, RAIL_NARROW };

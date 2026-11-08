@@ -13,16 +13,16 @@
 // - An answer being written in a chat you've left: its row pulses, then is
 //   blue once the answer's in; opening it clears it. Reduced motion: no
 //   pulse. Light and dark.
-// - A job running in a Code chat you've left: its row pulses in the Code
+// - An agent running in a Code chat you've left: its row pulses in the Code
 //   teal; a folded workspace shows it; the Chat | Code switch's Code shows it
 //   from the Chat side; the rail's Chat from another view.
 // - A permission prompt: amber in the row and on the rail (from every view),
 //   cleared on Allow once.
 // - An ask-first card: amber, cleared on Don't.
-// - A job's report landing while you're in another chat: blue ("a job's
+// - An agent's report landing while you're in another chat: blue ("an agent's
 //   report is in"), cleared on opening it.
-// Jobs are driven as jobs-ui.spec.js drives them: the scripted fake AI calls
-// the job tools, Claude Code is this build's own stand-in, the workspaces
+// Agents are driven as agents-ui.spec.js drives them: the scripted fake AI calls
+// the agent tools, Claude Code is this build's own stand-in, the workspaces
 // are in this run's own folder.
 import fs from 'node:fs';
 import path from 'node:path';
@@ -56,7 +56,7 @@ const HERE = path.join(RUNS, 'chat-status-spec');
 const SCRIPTS = path.join(HERE, 'scripts');
 const GARDEN = path.join(HERE, 'folders', 'garden-planner');
 const RECIPES = path.join(HERE, 'folders', 'recipe-box');
-const STARTED = "On it: I've started a job in garden-planner.";
+const STARTED = "On it: I've sent an agent to garden-planner.";
 
 // ---------------------------------------------------------------- no app
 
@@ -75,45 +75,45 @@ base.describe('core/chatStatus.js', () => {
     expect(s['3']).toEqual({ state: 'new', why: 'answer' });
     expect(s['4']).toBeUndefined();
 
-    // A job queued or running: working ("job").
-    const jobs = [{ id: 'j1', conversation: 4, status: 'running' }];
-    const jspells = trackWorking({}, workingNow({ jobs, jobSince: { j1: T - 5000 }, now: T }), T);
-    expect(chatStatuses({ conversations, jobs, spells: jspells, seen: { 4: 1 }, now: T })['4']).toEqual({ state: 'working', why: 'job' });
+    // An agent queued or running: working ("agent").
+    const agents = [{ id: 'j1', conversation: 4, status: 'running' }];
+    const jspells = trackWorking({}, workingNow({ agents, agentSince: { j1: T - 5000 }, now: T }), T);
+    expect(chatStatuses({ conversations, agents, spells: jspells, seen: { 4: 1 }, now: T })['4']).toEqual({ state: 'working', why: 'agent' });
     const queued = [{ id: 'j1', conversation: 4, status: 'queued' }];
-    expect(workingNow({ jobs: queued, jobSince: { j1: T - 5000 }, now: T })['4']).toEqual({ since: T - 5000, why: 'job' });
+    expect(workingNow({ agents: queued, agentSince: { j1: T - 5000 }, now: T })['4']).toEqual({ since: T - 5000, why: 'agent' });
 
-    // Needs you: a step to allow (the prompt, or the job asking), an ask-first card.
+    // Needs you: a step to allow (the prompt, or the agent asking), an ask-first card.
     const base = { conversations, seen: { 1: 1, 2: 3, 3: 5, 4: 1 }, now: T };
     expect(chatStatuses({ ...base, approvals: [{ id: 7, conversation: 2 }] })['2']).toEqual({ state: 'needs', why: 'approve' });
-    expect(chatStatuses({ ...base, jobs: [{ id: 'j', conversation: 2, status: 'asking' }] })['2']).toEqual({ state: 'needs', why: 'approve' });
+    expect(chatStatuses({ ...base, agents: [{ id: 'j', conversation: 2, status: 'asking' }] })['2']).toEqual({ state: 'needs', why: 'approve' });
     expect(chatStatuses({ ...base, confirms: { 3: 1 } })['3']).toEqual({ state: 'needs', why: 'confirm' });
     expect(chatStatuses({ ...base, confirms: { 3: 0 } })['3']).toBeUndefined();
 
-    // A job's turn ended with a question, or a plan waiting for "go ahead":
+    // An agent's turn ended with a question, or a plan waiting for "go ahead":
     // needs you until the person writes there after its report.
     const asks = { id: 'q', conversation: 3, status: 'done', asks: true, endedTs: T / 1000 - 60, turnList: [{ n: 1, messageId: 'chat:3:0', reportMessageId: 'chat:3:4' }] };
     const plan = { ...asks, id: 'p', asks: false, plan: true };
     const replied = [conv(1, 1, 0), conv(2, 3, 2), conv(3, 5, 6), conv(4, 1, 0)];
-    expect(chatStatuses({ ...base, conversations: [conv(3, 5, 2)], jobs: [asks] })['3']).toEqual({ state: 'needs', why: 'question' });
-    expect(chatStatuses({ ...base, conversations: [conv(3, 5, 2)], jobs: [plan] })['3']).toEqual({ state: 'needs', why: 'plan' });
-    expect(chatStatuses({ ...base, conversations: replied, jobs: [plan] })['3']).toBeUndefined();
+    expect(chatStatuses({ ...base, conversations: [conv(3, 5, 2)], agents: [asks] })['3']).toEqual({ state: 'needs', why: 'question' });
+    expect(chatStatuses({ ...base, conversations: [conv(3, 5, 2)], agents: [plan] })['3']).toEqual({ state: 'needs', why: 'plan' });
+    expect(chatStatuses({ ...base, conversations: replied, agents: [plan] })['3']).toBeUndefined();
     // Its report still being written: its request is the mark (the person's own message is no answer).
     const unreported = { ...plan, turnList: [{ n: 1, messageId: 'chat:3:2' }] };
-    expect(chatStatuses({ ...base, conversations: [conv(3, 1, 2)], jobs: [unreported] })['3']).toEqual({ state: 'needs', why: 'plan' });
-    // A day on, it's let go; a failed or running job never asks this way.
-    expect(chatStatuses({ ...base, conversations: [conv(3, 5, 2)], jobs: [{ ...plan, endedTs: (T - WAITS_FOR_MS - 1000) / 1000 }] })['3']).toBeUndefined();
-    expect(chatStatuses({ ...base, conversations: [conv(3, 5, 2)], jobs: [{ ...plan, status: 'failed' }] })['3']).toBeUndefined();
+    expect(chatStatuses({ ...base, conversations: [conv(3, 1, 2)], agents: [unreported] })['3']).toEqual({ state: 'needs', why: 'plan' });
+    // A day on, it's let go; a failed or running agent never asks this way.
+    expect(chatStatuses({ ...base, conversations: [conv(3, 5, 2)], agents: [{ ...plan, endedTs: (T - WAITS_FOR_MS - 1000) / 1000 }] })['3']).toBeUndefined();
+    expect(chatStatuses({ ...base, conversations: [conv(3, 5, 2)], agents: [{ ...plan, status: 'failed' }] })['3']).toBeUndefined();
 
-    // The answer right after a job's report marker: "a job's report is in".
+    // The answer right after an agent's report marker: "an agent's report is in".
     const reported = { id: 'r', conversation: 3, status: 'done', turnList: [{ n: 1, reportMessageId: 'chat:3:4' }] };
-    expect(chatStatuses({ ...base, seen: { 3: 3 }, jobs: [reported] })['3']).toEqual({ state: 'new', why: 'report' });
-    // (A job from before turns: its own marker.)
-    expect(chatStatuses({ ...base, seen: { 3: 3 }, jobs: [{ id: 'o', conversation: 3, status: 'done', reportMessageId: 'chat:3:4' }] })['3']).toEqual({ state: 'new', why: 'report' });
+    expect(chatStatuses({ ...base, seen: { 3: 3 }, agents: [reported] })['3']).toEqual({ state: 'new', why: 'report' });
+    // (An agent from before turns: its own marker.)
+    expect(chatStatuses({ ...base, seen: { 3: 3 }, agents: [{ id: 'o', conversation: 3, status: 'done', reportMessageId: 'chat:3:4' }] })['3']).toEqual({ state: 'new', why: 'report' });
   });
 
   base('which wins: needs you over working over new; a group’s and a side’s strongest', () => {
     const conversations = [conv(1, 3, 2), conv(2, 3, 2), conv(3, 3, 2)];
-    const spells = { 1: { from: T - 5000, to: null, why: 'answer' }, 2: { from: T - 5000, to: null, why: 'job' } };
+    const spells = { 1: { from: T - 5000, to: null, why: 'answer' }, 2: { from: T - 5000, to: null, why: 'agent' } };
     const s = chatStatuses({ conversations, spells, approvals: [{ conversation: 2 }], seen: {}, now: T });
     // 1: working and new → working; 2: working and needs → needs; 3: new.
     expect([s['1'].state, s['2'].state, s['3'].state]).toEqual(['working', 'needs', 'new']);
@@ -124,7 +124,7 @@ base.describe('core/chatStatus.js', () => {
     expect(strongest(s, [9])).toBeNull();
     expect(strongest(s, [])).toBeNull();
     expect([any(s, 'needs'), any(s, 'working'), any({}, 'needs')]).toEqual([true, true, false]);
-    // Before Chat's list is read: what the jobs and spells say, never "new".
+    // Before Chat's list is read: what the agents and spells say, never "new".
     const early = chatStatuses({ conversations: null, spells, approvals: [{ conversation: 2 }], now: T });
     expect(early).toEqual({ 1: { state: 'working', why: 'answer' }, 2: { state: 'needs', why: 'approve' } });
   });
@@ -190,8 +190,8 @@ base.describe('core/chatStatus.js', () => {
     expect(showsWorking(spells['1'], T + 2000 + WORKING_HOLD_MS + 1)).toBe(false);
     expect(nextChange(spells, T + 2000)).toBe(T + 2000 + WORKING_HOLD_MS + 1);
 
-    // A job ending and its report starting 100 ms later: one spell, never off between.
-    let joined = trackWorking({}, workingNow({ jobs: [{ id: 'j', conversation: 1, status: 'running' }], jobSince: { j: T }, now: T }), T);
+    // An agent ending and its report starting 100 ms later: one spell, never off between.
+    let joined = trackWorking({}, workingNow({ agents: [{ id: 'j', conversation: 1, status: 'running' }], agentSince: { j: T }, now: T }), T);
     joined = trackWorking(joined, {}, T + 5000);
     expect(showsWorking(joined['1'], T + 5100)).toBe(true);
     joined = trackWorking(joined, workingNow({ answering: { 1: T + 5100 }, now: T + 5100 }), T + 5100);
@@ -207,14 +207,14 @@ base.describe('core/chatStatus.js', () => {
   });
 
   base('what a dot says', () => {
-    expect(statusWords({ state: 'needs', why: 'approve' })).toBe('Needs you: a job waits for you to allow a step');
+    expect(statusWords({ state: 'needs', why: 'approve' })).toBe('Needs you: an agent waits for you to allow a step');
     expect(statusWords({ state: 'needs', why: 'confirm' })).toBe('Needs you: Yap is waiting for your OK');
-    expect(statusWords({ state: 'needs', why: 'plan' })).toBe('Needs you: a job’s plan waits for you to go ahead');
-    expect(statusWords({ state: 'needs', why: 'question' })).toBe('Needs you: a job has a question for you');
-    expect(statusWords({ state: 'working', why: 'job' })).toBe('Working: a job is running');
+    expect(statusWords({ state: 'needs', why: 'plan' })).toBe('Needs you: an agent’s plan waits for you to go ahead');
+    expect(statusWords({ state: 'needs', why: 'question' })).toBe('Needs you: an agent has a question for you');
+    expect(statusWords({ state: 'working', why: 'agent' })).toBe('Working: an agent is running');
     expect(statusWords({ state: 'working', why: 'answer' })).toBe('Working: writing an answer');
     expect(statusWords({ state: 'working', why: '' })).toBe('Working');
-    expect(statusWords({ state: 'new', why: 'report' })).toBe('New: a job’s report is in');
+    expect(statusWords({ state: 'new', why: 'report' })).toBe('New: an agent’s report is in');
     expect(statusWords({ state: 'new', why: 'answer' })).toBe('New: an answer you haven’t seen');
     expect(statusWords({ state: 'needs', why: 'approve' }, 2)).toBe('2 chats need you');
     expect(statusWords({ state: 'working' }, 3)).toBe('3 chats working');
@@ -329,9 +329,9 @@ const chatScope = (fakeLlm) => ({
 });
 const thread = (main) => main.locator('.msgs');
 const lastAnswer = (main) => thread(main).locator('.cbubble.assistant').last();
-const jobs = (yap) => yap.invoke('job_list');
+const agents = (yap) => yap.invoke('agent_list');
 const script = (yap, lines, name) => yap.invoke('e2e_claude_script', { script: writeScript(name, lines) });
-const tab = (main) => main.getByTestId('chat-job');
+const tab = (main) => main.getByTestId('chat-agent');
 const row = (main, id) => main.locator(`.convs [data-conv="${id}"]`);
 const dot = (main, id) => row(main, id).getByTestId('chat-status');
 const group = (main, name) => main.locator(`[data-testid="chat-workspace-group"][data-workspace="${name}"]`);
@@ -340,7 +340,7 @@ const railChat = (main) => sidebar(main).getByRole('button', { name: 'Chat', exa
 
 async function send(main, text) {
   await main.getByRole('textbox', { name: 'Message' }).fill(text);
-  await main.getByRole('button', { name: 'Send' }).click();
+  await main.getByRole('button', { name: 'Send', exact: true }).click();
 }
 
 async function closeTab(main) {
@@ -377,14 +377,14 @@ async function askAndWait(main, fakeLlm, question, answer) {
 
 async function ended(yap, id, timeout = 30_000) {
   await expect
-    .poll(async () => (await jobs(yap)).find((j) => j.id === id)?.status, { timeout, message: `job ${id} to end` })
+    .poll(async () => (await agents(yap)).find((j) => j.id === id)?.status, { timeout, message: `agent ${id} to end` })
     .toMatch(/^(done|failed|stopped)$/);
-  return (await jobs(yap)).find((j) => j.id === id);
+  return (await agents(yap)).find((j) => j.id === id);
 }
 
-async function newJob(yap, before) {
-  await expect.poll(async () => (await jobs(yap)).length, { timeout: 20_000, message: 'a job to start' }).toBe(before + 1);
-  return (await jobs(yap))[0];
+async function newAgent(yap, before) {
+  await expect.poll(async () => (await agents(yap)).length, { timeout: 20_000, message: 'an agent to start' }).toBe(before + 1);
+  return (await agents(yap))[0];
 }
 
 async function messagesOf(yap, id, n) {
@@ -416,21 +416,21 @@ test.describe('the dots', () => {
     freshFolder(RECIPES);
     await yap.invoke('e2e_claude_approve_auto', { allow: true });
     await setConfig(yap, main, {
-      jobsEnabled: true,
-      jobsAsk: 'new-or-web',
-      jobsSpeak: 'never',
-      jobsPay: 'plan',
-      jobsMode: 'auto',
-      jobsAnimate: true,
+      agentsEnabled: true,
+      agentsAsk: 'new-or-web',
+      agentsSpeak: 'never',
+      agentsPay: 'plan',
+      agentsMode: 'auto',
+      agentsAnimate: true,
       motion: 'system',
       theme: 'light',
       webSearch: false,
       speakReplies: false,
       llmScopes: chatScope(fakeLlm),
     });
-    const have = (await yap.invoke('job_folders_list')).map((f) => f.name);
-    if (!have.includes('garden-planner')) await yap.invoke('job_folders_add', { path: GARDEN });
-    if (!have.includes('recipe-box')) await yap.invoke('job_folders_add', { path: RECIPES });
+    const have = (await yap.invoke('workspaces_list')).map((f) => f.name);
+    if (!have.includes('garden-planner')) await yap.invoke('workspaces_add', { path: GARDEN });
+    if (!have.includes('recipe-box')) await yap.invoke('workspaces_add', { path: RECIPES });
   });
 
   test('an answer written in a chat you left: it pulses, then is new; opening it clears it; reduced motion keeps it still', async ({ yap, main, fakeLlm, shot }) => {
@@ -504,16 +504,16 @@ test.describe('the dots', () => {
     expect((await main.evaluate(() => JSON.parse(localStorage.getItem('yap.chat.seen')))).seen[String(garden)]).toBe(3);
   });
 
-  test('a job running in a Code chat you left: the Code teal, a folded workspace, the switch’s Code, the rail', async ({ yap, main, fakeLlm, shot }) => {
+  test('an agent running in a Code chat you left: the Code teal, a folded workspace, the switch’s Code, the rail', async ({ yap, main, fakeLlm, shot }) => {
     await codeChat(main, 'recipe-box');
     const recipes = await askAndWait(main, fakeLlm, 'What is in this folder?', 'Just notes.md.');
     await codeChat(main, 'garden-planner');
     await script(yap, SLOW, 'slow');
-    const before = (await jobs(yap)).length;
-    fakeLlm.scriptChat([{ tools: [{ name: 'start_job', args: { brief: 'Read notes.md slowly.' } }] }, { content: STARTED }]);
+    const before = (await agents(yap)).length;
+    fakeLlm.scriptChat([{ tools: [{ name: 'start_agent', args: { brief: 'Read notes.md slowly.' } }] }, { content: STARTED }]);
     await send(main, 'Read notes.md slowly.');
-    const job = await newJob(yap, before);
-    await expect.poll(async () => (await jobs(yap)).find((j) => j.id === job.id)?.status).toBe('running');
+    const agent = await newAgent(yap, before);
+    await expect.poll(async () => (await agents(yap)).find((j) => j.id === agent.id)?.status).toBe('running');
     const garden = await shownConversation(main);
     await closeTab(main);
     // On screen, it works too.
@@ -521,7 +521,7 @@ test.describe('the dots', () => {
     await row(main, recipes).click();
     await closeTab(main);
     await expect(dot(main, garden)).toHaveAttribute('data-state', 'working');
-    await expect(dot(main, garden)).toHaveAttribute('title', 'Working: a job is running');
+    await expect(dot(main, garden)).toHaveAttribute('title', 'Working: an agent is running');
     await expect.poll(() => dotColour(dot(main, garden))).toBe(await tokenColour(main, '--yap-code'));
     await shot(main, '05-code-row-working-light');
     await theme(yap, main, 'dark');
@@ -543,9 +543,9 @@ test.describe('the dots', () => {
     await toSide(main, 'Chat');
     const sideDot = sideSwitch(main).getByTestId('chat-side-status');
     await expect(sideDot).toHaveAttribute('data-state', 'working');
-    await expect(sideDot).toHaveAttribute('title', 'Working: a job is running');
+    await expect(sideDot).toHaveAttribute('title', 'Working: an agent is running');
     await expect(sideSwitch(main).getByRole('radio', { name: 'Code', exact: true })).toHaveAttribute('aria-describedby', 'chat-side-status-words');
-    await expect(main.locator('#chat-side-status-words')).toHaveText('Working: a job is running');
+    await expect(main.locator('#chat-side-status-words')).toHaveText('Working: an agent is running');
     await expect.poll(() => dotColour(sideDot)).toBe(await tokenColour(main, '--yap-code'));
     await shot(main, '08-switch-code-working-light');
     await theme(yap, main, 'dark');
@@ -563,8 +563,8 @@ test.describe('the dots', () => {
     await sidebar(main).getByTestId('nav-rail-toggle').click();
 
     // Stopped (no report for a stop): nothing more to say anywhere.
-    await yap.invoke('job_stop', { id: job.id });
-    await ended(yap, job.id);
+    await yap.invoke('agent_stop', { id: agent.id });
+    await ended(yap, agent.id);
     await expect(railDot(main)).toHaveCount(0);
     await openView(main, 'Chat');
     await toSide(main, 'Code');
@@ -575,15 +575,15 @@ test.describe('the dots', () => {
     await yap.invoke('e2e_claude_approve_auto', { allow: null });
     await codeChat(main, 'garden-planner');
     await script(yap, ASKS, 'asks');
-    const before = (await jobs(yap)).length;
-    fakeLlm.scriptChat([{ tools: [{ name: 'start_job', args: { brief: 'Run the tests.' } }] }, { content: STARTED }, { plain: true, content: 'Done: the tests pass.' }]);
+    const before = (await agents(yap)).length;
+    fakeLlm.scriptChat([{ tools: [{ name: 'start_agent', args: { brief: 'Run the tests.' } }] }, { content: STARTED }, { plain: true, content: 'Done: the tests pass.' }]);
     await send(main, 'Run the tests.');
-    const job = await newJob(yap, before);
-    await expect.poll(async () => (await jobs(yap)).find((j) => j.id === job.id)?.status, { timeout: 20_000 }).toBe('asking');
+    const agent = await newAgent(yap, before);
+    await expect.poll(async () => (await agents(yap)).find((j) => j.id === agent.id)?.status, { timeout: 20_000 }).toBe('asking');
     const garden = await shownConversation(main);
     await closeTab(main);
     await expect(dot(main, garden)).toHaveAttribute('data-state', 'needs');
-    await expect(dot(main, garden)).toHaveAttribute('title', 'Needs you: a job waits for you to allow a step');
+    await expect(dot(main, garden)).toHaveAttribute('title', 'Needs you: an agent waits for you to allow a step');
     await expect.poll(() => dotColour(dot(main, garden))).toBe(await tokenColour(main, '--yap-warning'));
     expect(await dotAnimation(dot(main, garden))).toBe('none');
     // On Chat too, the rail says it.
@@ -603,12 +603,12 @@ test.describe('the dots', () => {
     await toSide(main, 'Code');
     await row(main, garden).click();
     await closeTab(main);
-    const card = thread(main).getByTestId('chat-job-approve');
+    const card = thread(main).getByTestId('chat-agent-approve');
     await expect(card).toHaveCount(1);
     await card.getByRole('button', { name: 'Allow once' }).click();
     await expect(card).toHaveCount(0);
     await expect(dot(main, garden)).not.toHaveAttribute('data-state', 'needs');
-    await ended(yap, job.id);
+    await ended(yap, agent.id);
     await messagesOf(yap, garden, 4);
     // Its report landed here, on screen: seen, nothing to say.
     await expect(dot(main, garden)).toHaveAttribute('data-state', '');
@@ -616,12 +616,12 @@ test.describe('the dots', () => {
   });
 
   test('an ask-first card: amber while it waits, cleared on Don’t', async ({ yap, main, fakeLlm }) => {
-    await setConfig(yap, main, { jobsAsk: 'always' });
+    await setConfig(yap, main, { agentsAsk: 'always' });
     await codeChat(main, 'garden-planner');
     await script(yap, SLOW, 'slow-ask');
-    fakeLlm.scriptChat([{ tools: [{ name: 'start_job', args: { brief: 'Read notes.md slowly.' } }] }, { content: "Okay, I won't start it." }]);
+    fakeLlm.scriptChat([{ tools: [{ name: 'start_agent', args: { brief: 'Read notes.md slowly.' } }] }, { content: "Okay, I won't send it." }]);
     await send(main, 'Read notes.md slowly.');
-    const card = thread(main).getByTestId('chat-job-confirm');
+    const card = thread(main).getByTestId('chat-agent-confirm');
     await expect(card).toHaveAttribute('data-state', 'asking');
     const garden = Number(await main.locator('.convs .conv.active').getAttribute('data-conv'));
     await expect(dot(main, garden)).toHaveAttribute('data-state', 'needs');
@@ -629,30 +629,30 @@ test.describe('the dots', () => {
     await expect(railDot(main)).toHaveAttribute('data-state', 'needs');
     await card.getByRole('button', { name: 'Don’t' }).or(card.getByRole('button', { name: "Don't" })).click();
     await expect(card).toHaveAttribute('data-state', 'refused');
-    await expect(lastAnswer(main)).toContainText("Okay, I won't start it.");
+    await expect(lastAnswer(main)).toContainText("Okay, I won't send it.");
     await expect(dot(main, garden)).toHaveAttribute('data-state', '');
     await expect(railDot(main)).toHaveCount(0);
   });
 
-  test('a job’s report landing while you’re in another chat: new, cleared on opening it', async ({ yap, main, fakeLlm, shot }) => {
+  test('an agent’s report landing while you’re in another chat: new, cleared on opening it', async ({ yap, main, fakeLlm, shot }) => {
     await codeChat(main, 'recipe-box');
     const recipes = await askAndWait(main, fakeLlm, 'What is in this folder?', 'Just notes.md.');
     await codeChat(main, 'garden-planner');
     await script(yap, A_WHILE, 'a-while');
-    const before = (await jobs(yap)).length;
-    fakeLlm.scriptChat([{ tools: [{ name: 'start_job', args: { brief: 'Read notes.md.' } }] }, { content: STARTED }, { plain: true, content: 'Done: notes.md says Draft notes.' }]);
+    const before = (await agents(yap)).length;
+    fakeLlm.scriptChat([{ tools: [{ name: 'start_agent', args: { brief: 'Read notes.md.' } }] }, { content: STARTED }, { plain: true, content: 'Done: notes.md says Draft notes.' }]);
     await send(main, 'Read notes.md.');
-    const job = await newJob(yap, before);
+    const agent = await newAgent(yap, before);
     const garden = await shownConversation(main);
     // Over to the recipes while it works.
     await closeTab(main);
     await row(main, recipes).click();
     await expect(dot(main, garden)).toHaveAttribute('data-state', 'working');
-    await ended(yap, job.id);
+    await ended(yap, agent.id);
     await messagesOf(yap, garden, 4);
     await expect(dot(main, garden)).toHaveAttribute('data-state', 'new');
     await expect(dot(main, garden)).toHaveAttribute('data-why', 'report');
-    await expect(dot(main, garden)).toHaveAttribute('title', 'New: a job’s report is in');
+    await expect(dot(main, garden)).toHaveAttribute('title', 'New: an agent’s report is in');
     await shot(main, '14-report-new-light');
     // Folded: the workspace says it.
     await group(main, 'garden-planner').click();

@@ -6,7 +6,7 @@
 // view's mic — goes through AI cleanup as an AI prompt, word for word
 // (fillers and false starts out), on Dictation cleanup's model, whatever
 // "AI cleanup" itself says. Each side its own switch: Chat (Settings →
-// Voice Assistant) and Code chats (Settings → Jobs), both on by default.
+// Voice Assistant) and Code chats (Settings → Yap Code), both on by default.
 // - Chat's switch: a plain chat's question cleaned, the cleanup told it's a
 //   prompt for an AI and literal; the Chat view's mic too. Off: as said, even
 //   with AI cleanup on — while the Code chats' switch is on.
@@ -100,23 +100,23 @@ test.beforeEach(async ({ yap, main, fakeLlm }) => {
   fakeLlm.delay('cleanup', 0);
   await mainOnScreen(yap);
   await setConfig(yap, main, {
-    jobsEnabled: true,
-    jobsSpeak: 'never',
+    agentsEnabled: true,
+    agentsSpeak: 'never',
     webSearch: false,
     speakReplies: false,
     postProcessEnabled: false,
     chatCleanSpeech: true,
-    jobsCleanSpeech: true,
+    agentsCleanSpeech: true,
     llmScopes: chatScope(fakeLlm),
     ...cleanupModel(fakeLlm),
   });
-  const have = (await yap.invoke('job_folders_list')).map((f) => f.name);
-  if (!have.includes('garden-planner')) await yap.invoke('job_folders_add', { path: GARDEN });
+  const have = (await yap.invoke('workspaces_list')).map((f) => f.name);
+  if (!have.includes('garden-planner')) await yap.invoke('workspaces_add', { path: GARDEN });
 });
 
 test('Chat’s switch: a plain chat’s spoken question is cleaned word for word, AI cleanup off; off, it’s as said even with AI cleanup on', async ({ yap, main, fakeLlm }) => {
   // The Code chats' switch off: Chat's alone decides a plain chat's.
-  await setConfig(yap, main, { jobsCleanSpeech: false });
+  await setConfig(yap, main, { agentsCleanSpeech: false });
   await plainChat(main);
   const before = cleanups(fakeLlm).length;
   expect(await ask(yap, main, fakeLlm, SAID, 'Paris.')).toContain(CLEAN);
@@ -141,14 +141,14 @@ test('Chat’s switch: a plain chat’s spoken question is cleaned word for word
 
   // Chat's off (Code chats' on), AI cleanup on: a plain chat's question as
   // said, as before — no cleanup asked.
-  await setConfig(yap, main, { chatCleanSpeech: false, jobsCleanSpeech: true, postProcessEnabled: true });
+  await setConfig(yap, main, { chatCleanSpeech: false, agentsCleanSpeech: true, postProcessEnabled: true });
   const mark = cleanups(fakeLlm).length;
   expect(await ask(yap, main, fakeLlm, 'um and uh the capital of Spain', 'Madrid.')).toContain('um and uh the capital of Spain');
   expect(cleanups(fakeLlm).length).toBe(mark);
 });
 
 test('Code chats’ switch: a new code chat’s question and one in a Code chat are cleaned; off, as said there while Chat’s is on', async ({ yap, main, fakeLlm }) => {
-  await setConfig(yap, main, { chatCleanSpeech: false, jobsCleanSpeech: true });
+  await setConfig(yap, main, { chatCleanSpeech: false, agentsCleanSpeech: true });
   await openView(main, 'Chat');
   await newCodeChat(main, 'garden-planner');
   const before = cleanups(fakeLlm).length;
@@ -160,7 +160,7 @@ test('Code chats’ switch: a new code chat’s question and one in a Code chat 
   expect(await ask(yap, main, fakeLlm, 'uh how many are there', 'Twelve.')).toContain('How many are there?');
 
   // Code chats' off, Chat's on: as said in the Code chat…
-  await setConfig(yap, main, { chatCleanSpeech: true, jobsCleanSpeech: false });
+  await setConfig(yap, main, { chatCleanSpeech: true, agentsCleanSpeech: false });
   const mark = cleanups(fakeLlm).length;
   expect(await ask(yap, main, fakeLlm, 'um which ones uh need sun', 'The tomatoes.')).toContain('um which ones uh need sun');
   expect(cleanups(fakeLlm).length).toBe(mark);
@@ -230,7 +230,7 @@ test('no cleanup model: the words as said, and both Settings rows say what’s m
   const dialog = settingsDialog(main);
   const rows = [
     ['Voice Assistant', 'chat-clean-speech', 'Clean up what you say in Chat'],
-    ['Jobs', 'jobs-clean-speech', 'Clean up what you say in Code chats'],
+    ['Yap Code', 'yap-code-clean-speech', 'Clean up what you say in Code chats'],
   ];
   for (const [page, setting, label] of rows) {
     await openSettings(main, page);
@@ -247,7 +247,7 @@ test('no cleanup model: the words as said, and both Settings rows say what’s m
     await theme(yap, main, 'light');
   }
   // The way there: Language Models' Dictation cleanup.
-  await dialog.locator('[data-setting="jobs-clean-speech"]').getByRole('button', { name: 'Set up a cleanup model' }).click();
+  await dialog.locator('[data-setting="yap-code-clean-speech"]').getByRole('button', { name: 'Set up a cleanup model' }).click();
   await expect(dialog.locator('#settings-cleanup')).toBeVisible();
 
   // A model set up: the note goes, and the row stands alone (light and dark).
