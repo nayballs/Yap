@@ -6,10 +6,10 @@
 //! belongs to ([`super::turn`]), with every rule it has there:
 //!
 //! - **The safety rule first**, as the tool loop's gate: `start_agent` and
-//!   `message_agent` are refused once web content is in the turn
-//!   (`tools::refused_after_web`, its words) — a `WebSearch` or `WebFetch`
-//!   this turn, an agent's own words from `agent_status`, text selected in
-//!   another app. The call waits for its own tool call in the turn's events
+//!   `message_agent` are refused once outside content is in the turn
+//!   (`tools::refused_after_outside`, its words) — a `WebSearch` or
+//!   `WebFetch` this turn, an agent's own words from `agent_status`, text
+//!   selected in another app, a connector's result (`connectors.rs`). The call waits for its own tool call in the turn's events
 //!   first, so a web read before it is always counted; not seen in time, it
 //!   is refused as after the web (on doubt). Its one exception, as in the
 //!   tool loop (`agents::goes_ahead_after_web`): the person's message this
@@ -133,7 +133,9 @@ fn run_for(slot: &Slot, id: &str, turn: &Call, name: &str, args: Value, wait: Du
     if goes_ahead {
         tracing::info!(run = %id, tool = name, "Claude Code: an agent tool after the web, for the person's plain go-ahead");
     }
-    if let Some(refusal) = acts.then(|| crate::chat::tools::refused_after_web(name, web && !goes_ahead, true)).flatten() {
+    // (A connector's result is outside content too, and the refusal says so.)
+    let seen = crate::chat::tools::Seen { web: web && !goes_ahead, screen: false, connector: !goes_ahead && slot.connector(turn.n) };
+    if let Some(refusal) = acts.then(|| crate::chat::tools::refused_after_outside(name, seen, true)).flatten() {
         tracing::info!(run = %id, tool = name, "Claude Code: an agent tool refused after the web");
         return refusal;
     }
@@ -281,6 +283,23 @@ mod tests {
         // A turn that doesn't offer agents: off, whatever is asked.
         let (_turn, call) = turn_on(&slot, "Send an agent to garden-planner.", None);
         assert_eq!(run_for(&slot, "r1", &call, "start_agent", start, Duration::ZERO)["displayText"], "Yap Code is off");
+    }
+
+    #[test]
+    fn after_a_connectors_result_an_agent_is_refused_in_the_connectors_words() {
+        let slot = Arc::new(Slot::default());
+        let (turn, call) = turn_on(&slot, "Read the latest issue, then send an agent to garden-planner to fix it.", Some(AgentsTurn::default()));
+        // A connector's server answered this turn (claude_live/connectors.rs).
+        slot.set_connector(call.n);
+        assert!(slot.web(call.n), "outside content, as the web's");
+        turn.marks().began("start_agent");
+        let refused = run_for(&slot, "r1", &call, "start_agent", json!({ "folder": "garden-planner", "brief": "Fix the issue." }), Duration::ZERO);
+        assert_eq!(refused["displayText"], "Didn't send an agent: not after a connector's result");
+        let seen = crate::chat::tools::Seen { web: true, screen: false, connector: true };
+        assert_eq!(Some(refused), crate::chat::tools::refused_after_outside("start_agent", seen, true));
+        // A turn that's over: no connector's flag of its own.
+        drop(turn);
+        assert!(!slot.connector(call.n));
     }
 
     #[test]

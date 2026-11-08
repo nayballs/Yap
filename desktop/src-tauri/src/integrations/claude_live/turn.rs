@@ -16,7 +16,9 @@
 //!   ([`Marks::web`], from the plan turn's events) or a call of Yap's that
 //!   brings the screen's or a page's words in (`eyes::SEES`,
 //!   [`Marks::began`]), or once `agent_status` gave an agent's own words, or a
-//!   look or a page read brought some in ([`Slot::set_web`]).
+//!   look or a page read brought some in ([`Slot::set_web`]), or a
+//!   connector's server answered ([`Slot::set_connector`]: outside content
+//!   too, said as a connector's in a refusal; `connectors.rs`).
 //! - **The turn's web side** (`eyes.rs`): a `web::Turn` of its own for the
 //!   screen and page tools — the person's links, the pages shown, the
 //!   pictures — and the pages Claude Code's searches and reads found so far
@@ -54,7 +56,7 @@ pub type WebSide = Arc<tokio::sync::Mutex<crate::web::Turn>>;
 pub const SEEN_WAIT: Duration = Duration::from_secs(5);
 
 /// **A turn's context**, as the plan turn gives it.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Default)]
 pub struct Context {
     /// The person's message this turn.
     pub question: String,
@@ -70,6 +72,20 @@ pub struct Context {
     /// it was asked decides, as the tool loop's gates (never from another
     /// app or a phone). Off: refused.
     pub eyes: Eyes,
+    /// The connectors' tools this turn (`connectors.rs`: the plan's Chat
+    /// runs only, as wave 4's rules have them where it was asked; `None`:
+    /// none, refused).
+    pub connectors: Option<Arc<crate::chat::tools::connectors::Turn>>,
+    /// The person's earlier messages in the conversation (a connector's
+    /// arguments are their own words when they're in these or the question).
+    pub said: Vec<String>,
+    /// Someone watches the turn (Chat's thread, the Voice Assistant): a
+    /// connector's card can be shown. Not (an evaluation): what would ask
+    /// is refused.
+    pub watched: bool,
+    /// The turn's part of Yap in the network receipts (Chat, the Voice
+    /// Assistant): a connector's requests are counted as its.
+    pub feature: Option<crate::privacy::net::Feature>,
 }
 
 /// The turn open now.
@@ -80,6 +96,8 @@ struct Now {
     /// the turn ends).
     events: UnboundedSender<Event>,
     web: bool,
+    /// A connector's server answered this turn (outside content, said so).
+    connector: bool,
     /// Claude Code's calls to each of Yap's tools that this turn's events
     /// showed, and how many of them a call has taken ([`Slot::seen`]).
     began: HashMap<String, usize>,
@@ -128,6 +146,7 @@ impl Slot {
             s.now = Some(Now {
                 n,
                 web: ctx.web,
+                connector: false,
                 ctx: Arc::new(ctx),
                 events: tx,
                 began: HashMap::new(),
@@ -172,6 +191,22 @@ impl Slot {
     /// Web content came into turn `n` (an agent's own words).
     pub fn set_web(&self, n: u64) {
         self.with(n, |t| t.web = true);
+    }
+
+    /// **A connector's server answered in turn `n`**: outside content from
+    /// now on, as the web's ([`Slot::web`] says so too), and a refusal says
+    /// it was a connector's.
+    pub fn set_connector(&self, n: u64) {
+        self.with(n, |t| {
+            t.web = true;
+            t.connector = true;
+        });
+    }
+
+    /// Did a connector answer in turn `n`? A turn that's over: no (its
+    /// [`Slot::web`] is yes).
+    pub fn connector(&self, n: u64) -> bool {
+        self.with(n, |t| t.connector).unwrap_or(false)
     }
 
     /// **Wait for Claude Code's own call to `name`** to show in turn `n`'s

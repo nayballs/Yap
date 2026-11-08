@@ -40,8 +40,11 @@
 //!   (`consent.rs`). A server's own instructions never reach the prompt
 //!   (`manager.rs` never keeps them); only [`INSTRUCTIONS`], Yap's line.
 //!
-//! Plan chats (Connectors wave 7) will call the same [`Turn::execute`] from
-//! Yap's run endpoint.
+//! **Plan chats** (Connectors wave 7, `integrations/claude_live/connectors.rs`):
+//! the person's own Claude Code gets the same tools over Yap's run endpoint
+//! ([`offered_for_plan`]: `where.plan` too; [`Turn::for_plan`]: every tool
+//! listed, Claude Code's own tool search past its budget), and each call is
+//! this same [`Turn::execute`] — the same consent, card, chip and result.
 
 use serde_json::{json, Value};
 
@@ -96,10 +99,10 @@ impl Surface {
     }
 }
 
-/// **Whether a turn's model may get connectors at all**: the strong cloud
-/// models (`strong`: `documents::rich::strong`), never one on this PC nor
-/// the Claude plan's (its runs get them through Yap's endpoint, wave 7).
-/// Pure.
+/// **Whether a turn's model may get connectors in Chat's tool loop**: the
+/// strong cloud models (`strong`: `documents::rich::strong`), never one on
+/// this PC nor the Claude plan's (its runs get them through Yap's endpoint:
+/// `claude_live/connectors.rs`, [`offered_for_plan`]). Pure.
 pub fn may(provider: &str, strong: bool) -> bool {
     strong && provider != crate::ai::local_llm::PROVIDER_ONDEVICE && provider != "local" && provider != crate::ai::claude_plan::PROVIDER
 }
@@ -138,18 +141,18 @@ pub struct Offered {
 
 impl Offered {
     /// "Create page" (its title), else its name.
-    fn shown(&self) -> String {
+    pub(crate) fn shown(&self) -> String {
         self.title.clone().filter(|t| !t.trim().is_empty()).unwrap_or_else(|| self.tool.clone())
     }
 
     /// "Notion · Create page".
-    fn label(&self) -> String {
+    pub(crate) fn label(&self) -> String {
         format!("{} \u{b7} {}", self.connector, self.shown())
     }
 
     /// What it does, as the model reads it: the connector, the title, the
     /// server's description (capped by `cache.rs`), and whether Yap asks.
-    fn about(&self) -> String {
+    pub(crate) fn about(&self) -> String {
         let mut s = format!("{}: ", self.connector);
         if let Some(t) = self.title.as_deref().filter(|t| !t.trim().is_empty()) {
             s.push_str(t.trim());
@@ -186,6 +189,18 @@ impl Offered {
 /// the cache only (in memory after their first read); nothing while the
 /// preview is off.
 pub fn offered(surface: Surface, meeting: bool, allow_meetings: bool) -> Vec<Offered> {
+    offered_where(surface, meeting, allow_meetings, false)
+}
+
+/// **The tools a plan chat's turn may list** (`claude_live/connectors.rs`):
+/// [`offered`]'s, of the connectors allowed in plan chats too
+/// (`where.plan`). Nothing while the preview is off, nor on a phone.
+pub fn offered_for_plan(surface: Surface, meeting: bool, allow_meetings: bool) -> Vec<Offered> {
+    offered_where(surface, meeting, allow_meetings, true)
+}
+
+/// [`offered`], and with `plan` only the connectors whose `where.plan` is on.
+fn offered_where(surface: Surface, meeting: bool, allow_meetings: bool, plan: bool) -> Vec<Offered> {
     if surface == Surface::Phone || !connectors::enabled() {
         return Vec::new();
     }
@@ -197,7 +212,7 @@ pub fn offered(surface: Surface, meeting: bool, allow_meetings: bool) -> Vec<Off
             Surface::Voice => c.where_.voice,
             Surface::Phone => false,
         };
-        if !c.enabled || !here || (meeting && !allow_meetings && !c.where_.meetings) {
+        if !c.enabled || !here || (plan && !c.where_.plan) || (meeting && !allow_meetings && !c.where_.meetings) {
             continue;
         }
         let Some(listing) = connectors::cache::get(&c.id) else { continue };
@@ -268,6 +283,19 @@ impl Turn {
         let turn = Turn::of(tools, context, crate::chat::budget::rate_cap(provider), messages_api, surface, meeting, reads, provider)?;
         tracing::info!(tools = turn.tools.len(), mode = ?turn.mode, "Chat: connectors' tools offered");
         Some(turn)
+    }
+
+    /// **A plan chat's** (`claude_live/connectors.rs`): `tools` from
+    /// [`offered_for_plan`], every one listed as it is (Claude Code has its
+    /// own tool search past its budget, so never `find_tools`), a Claude
+    /// that reads images. `None` without any. Pure.
+    pub fn for_plan(tools: Vec<Offered>, surface: Surface, meeting: bool) -> Option<Turn> {
+        (!tools.is_empty()).then(|| Turn { tools, mode: budget::Mode::All, surface, meeting, reads_images: true, provider: crate::ai::claude_plan::PROVIDER.to_string() })
+    }
+
+    /// Its tools, as offered.
+    pub fn tools(&self) -> &[Offered] {
+        &self.tools
     }
 
     /// How its tools reach the model.

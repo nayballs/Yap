@@ -1967,7 +1967,10 @@ code · …" (`claude_plan/map.rs` `Tool::Code`), no chip.
 **What a plan chat can do** (7 Nov 2026), a Code chat's too: answer, with
 Claude Code's `WebSearch` and `WebFetch` (the web on); read Yap's meetings,
 notes, tasks, folders, memory (not a Code chat's) and the calendar; start and
-steer agents (Yap Code on); **look at the screen** (`look_at_screen`: "Let Yap's AI
+steer agents (Yap Code on); use **the person's connectors** (a plain plan
+chat, the preview on: their tools over the run endpoint, Yap's own settings
+and card deciding each call — [integrations.md](./integrations.md#connectors-in-plan-chats-wave-7));
+**look at the screen** (`look_at_screen`: "Let Yap's AI
 see your screen" on and, the plan being a cloud model, "…with cloud models
 too" — asked once, as for any cloud model; never during a meeting or a call);
 and **use the browser beside the chat** (the `browser_*` toolset: going, reading,
