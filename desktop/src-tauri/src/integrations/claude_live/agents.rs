@@ -135,7 +135,7 @@ fn run_for(slot: &Slot, id: &str, turn: &Call, name: &str, args: Value, wait: Du
         slot.web(turn.n)
     };
     if acts && outside {
-        tracing::info!(run = %id, tool = name, "Claude Code: an agent tool after outside content; it asks first");
+        tracing::info!(run = %id, tool = name, connector = slot.connector(turn.n), "Claude Code: an agent tool after outside content; it asks first");
     }
     // A model evaluation records it and never runs an agent (the gate's next guard).
     if let Some(recorded) = crate::ai::eval::intercept_tool(name, &args) {

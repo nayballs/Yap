@@ -1,6 +1,6 @@
 // An agent's plan and its go-ahead, after the maintainer's real use on 7 Nov
 // 2026 (desktop/src-tauri/src: chat/tools/agents.rs `pick_mode`,
-// `goes_ahead_after_web`; agents/consent.rs `asks_lower_mode`,
+// `fixed_go_ahead`; agents/consent.rs `asks_lower_mode`,
 // `plain_go_ahead`; agents/modes.rs `model_pick`; agents/runner.rs
 // `plan_allowed`, `go_ahead`; integrations/claude_live/approve.rs's
 // ExitPlanMode; agents/approve_card.rs; chat/turn/report.rs. Pages:

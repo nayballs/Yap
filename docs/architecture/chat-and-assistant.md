@@ -2448,7 +2448,9 @@ review (safely, for any user, in any language Yap speaks).
   then refused every action, "only for a question typed in Chat", though
   `browser_scroll` ran; a tester couldn't open a site's Stats tab, close a
   video ad or hover for a tooltip). Asked out loud, the same rules and the
-  same cards, each card also said and answerable by voice
+  same cards — the Chat view draws a spoken turn's card and its tab's "Yap
+  is using this page" as a typed turn's (`chatState.svelte.js`
+  `actingEvent`, both paths) —, each card also said and answerable by voice
   (`assistant/spoken_ok.rs`; deleting or paying a click only). Never across
   the meetings, from a phone or another app (no pages there), nor while a
   meeting records or a call is on (`assistant::is_off`). `tools::Extra::act`;

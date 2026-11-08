@@ -35,7 +35,7 @@
 //!   Notion: Create page?", its arguments readable and secrets masked,
 //!   **Allow once · Always allow · Deny**; asked out loud, Yap also says one
 //!   line and the Yap bar asks, a spoken yes or no answering it:
-//!   `assistant/connector_ask.rs`), or refused (Off; nobody to ask: the
+//!   `assistant/spoken_ok.rs`), or refused (Off; nobody to ask: the
 //!   phone's "needs your OK on the PC"). Its
 //!   chip ("Notion · Search (launch plan)", "Didn't use Notion · Create
 //!   page: you said no"), its result shaped (`results.rs`: text, a picture

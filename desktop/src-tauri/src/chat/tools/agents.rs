@@ -397,7 +397,7 @@ async fn start_agent(args: &Value, ctx: Ctx<'_>) -> Ran {
     };
     // Ask first: a folder new to agents, or the web in what led here — and
     // always after outside content this turn, whatever the setting.
-    match ask_first(&cfg.agents_ask, ctx.web_seen, new_folder, web, ctx.turn.aloud) {
+    let goes = match ask_first(&cfg.agents_ask, ctx.web_seen, new_folder, web, ctx.turn.aloud) {
         Some(AskFirst::InWords) => {
             let Some(conversation) = ctx.conversation else {
                 return Ran::of(tool_error("No agent was sent: there's nobody to ask.".into(), Value::Null, "Didn't send an agent".into()));
@@ -407,16 +407,15 @@ async fn start_agent(args: &Value, ctx: Ctx<'_>) -> Ran {
             tracing::info!(new_folder, web, "start_agent: asked out loud first");
             return asked_aloud(&q, &folder);
         }
-        Some(AskFirst::Card) => {
-            if !allowed(&ctx, &folder, mode, brief, new_folder, web, false).await {
-                return Ran::of(tool_error(
-                    "No agent was sent: the user didn't allow it. Tell them it didn't go, and don't try again unless they ask.".into(),
-                    Value::Null,
-                    format!("Didn't send an agent to {}: not allowed", folder.name),
-                ));
-            }
-        }
-        None => {}
+        Some(AskFirst::Card) => allowed(&ctx, &folder, mode, brief, new_folder, web, false).await,
+        None => true,
+    };
+    if !goes {
+        return Ran::of(tool_error(
+            "No agent was sent: the user didn't allow it. Tell them it didn't go, and don't try again unless they ask.".into(),
+            Value::Null,
+            format!("Didn't send an agent to {}: not allowed", folder.name),
+        ));
     }
     match begin(agent, new_folder) {
         Ok(agent) => started(agent, mode_note),
@@ -564,7 +563,7 @@ async fn allowed(ctx: &Ctx<'_>, folder: &Folder, mode: Mode, brief: &str, new_fo
 async fn carry_on(prev: Agent, ask: runner::Ask, folder: &Folder, mode: Mode, web: bool, fixed: bool, mode_note: Option<String>, ctx: Ctx<'_>) -> Ran {
     let cfg = crate::config::load();
     let first = if fixed { None } else { ask_first(&cfg.agents_ask, ctx.web_seen, false, web, ctx.turn.aloud) };
-    match first {
+    let goes = match first {
         Some(AskFirst::InWords) => {
             let Some(conversation) = ctx.conversation else {
                 return Ran::of(tool_error("Nothing was sent to the agent: there's nobody to ask.".into(), Value::Null, "Didn't tell an agent anything".into()));
@@ -574,16 +573,15 @@ async fn carry_on(prev: Agent, ask: runner::Ask, folder: &Folder, mode: Mode, we
             tracing::info!(web, "start_agent: a follow-up asked out loud first");
             return asked_aloud(&q, folder);
         }
-        Some(AskFirst::Card) => {
-            if !allowed(&ctx, folder, mode, &ask.text, false, web, true).await {
-                return Ran::of(tool_error(
-                    "Nothing was sent to the agent: the user didn't allow it. Tell them, and don't try again unless they ask.".into(),
-                    Value::Null,
-                    format!("Didn't carry on the agent in {}: not allowed", folder.name),
-                ));
-            }
-        }
-        None => {}
+        Some(AskFirst::Card) => allowed(&ctx, folder, mode, &ask.text, false, web, true).await,
+        None => true,
+    };
+    if !goes {
+        return Ran::of(tool_error(
+            "Nothing was sent to the agent: the user didn't allow it. Tell them, and don't try again unless they ask.".into(),
+            Value::Null,
+            format!("Didn't carry on the agent in {}: not allowed", folder.name),
+        ));
     }
     match follow(&prev.id, ask) {
         Ok(b) => {

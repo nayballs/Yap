@@ -47,7 +47,7 @@
 //! **The web** (Yap's own; `web.rs`): `web_search` and `read_page`,
 //! offered while "Look things up on the web" is on. Read-only, numbered
 //! sources the answer cites as `[1]`. **The safety rule**
-//! ([`refused_after_web`]): once web content is in a turn (a search's
+//! ([`refused_after_outside`]): once web content is in a turn (a search's
 //! results; a page read, acted on, switched to or named as it closed; the
 //! screen; text selected in another app or on a page and asked about —
 //! never text selected in Yap's own windows), the action tools
@@ -288,7 +288,7 @@ pub struct Extra<'a> {
     /// selected in another app or on a page beside the chat
     /// (`assistant::selected::Selected::web`; never one of Yap's own
     /// windows'). Web content from the turn's start — the safety rule
-    /// ([`refused_after_web`]) and the page actions' typed-words check, as
+    /// ([`refused_after_outside`]) and the page actions' typed-words check, as
     /// after a page read.
     pub web_question: bool,
     /// The agent tools (`tools/agents.rs`: agents on, Claude Code on this PC; not
@@ -390,7 +390,9 @@ impl Seen {
 /// a call to an action tool is refused, with the reason for the model and a
 /// chip for the person; `None` = go ahead. Every other tool (reading notes,
 /// searching, reading pages) still runs. A strong model (`strong`) is
-/// refused only [`STRONG_LOCKED`]. ([`refused_after_outside`] with the web.)
+/// refused only [`STRONG_LOCKED`]. ([`refused_after_outside`] with the web;
+/// the tests' shorthand since agents ask instead, 8 Nov 2026.)
+#[cfg(test)]
 pub fn refused_after_web(name: &str, web_seen: bool, strong: bool) -> Option<Value> {
     refused_after_outside(name, Seen { web: web_seen, ..Seen::default() }, strong)
 }

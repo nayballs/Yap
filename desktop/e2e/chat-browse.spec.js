@@ -316,7 +316,7 @@ test('asked out loud with Chat in view: a key press just runs, a click that buys
     const card = main.getByTestId('chat-page-confirm');
     await expect(card).toHaveAttribute('data-state', 'asking', { timeout: 20_000 });
     await expect(card).toContainText('Yap wants to press ‘Buy tickets’ on rail.example.com');
-    await expect.poll(spokenTexts, { timeout: 20_000 }).toContain('Press “Buy tickets” on rail.example.com? Say yes, or press Allow.');
+    await expect.poll(spokenTexts, { timeout: 20_000 }).toContain('Press “Buy tickets” on rail dot example dot com? Say yes, or press Allow.'); // (the voice says a site's dots)
     await shot(main, '08-asked-out-loud-before-buying');
     // The spoken yes: the next question answers it, and isn't a question of its own.
     await yap.invoke('e2e_assistant_ask', { text: 'Yes, go ahead', listenMs: 0 });
