@@ -681,6 +681,11 @@ fn ending(in_message: bool, profile: &crate::ai::about_you::Profile, about: &str
 /// persona, the instructions, the prompt's end, and (a model that calls
 /// tools) the clock in the question's context. What a question must fit
 /// beside (`chat_turn`'s check before it's sent, Chat's limits and ring).
+/// `code`: a Code chat's, as [`build`] writes it — none of memory's lines
+/// or its "You", About you without its note — so a question there is
+/// measured against what's sent (8 Nov 2026: counted as a plain chat's, an
+/// 8K model with the web and Yap Code on had no room left for any question
+/// in a Code chat, though its requests fit).
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn stable_prompt(
     cfg: &YapConfig,
@@ -694,12 +699,14 @@ pub(crate) fn stable_prompt(
     calendar_on: bool,
     profile: &crate::ai::about_you::Profile,
     now: chrono::DateTime<chrono::Utc>,
+    code: bool,
 ) -> String {
+    let profile = &code_profile(profile, code);
     let about = crate::ai::about_you::prompt_block(profile, now);
+    let memory_you = if code { String::new() } else { crate::memory::you_block() };
     let mut s = persona.trim().to_string();
-    // (As a plain chat has it: a Code chat's prompt is a little shorter.)
-    s.push_str(&instructions(cfg, tools_supported, doc_tools, web_lines, web_on, pictures, act, calendar_on, profile, true));
-    s.push_str(&ending(tools_supported, profile, &about, &crate::memory::you_block()));
+    s.push_str(&instructions(cfg, tools_supported, doc_tools, web_lines, web_on, pictures, act, calendar_on, profile, !code));
+    s.push_str(&ending(tools_supported, profile, &about, &memory_you));
     if tools_supported {
         s.push_str("\n\n");
         s.push_str(&crate::ai::about_you::clock_line(profile, now));
@@ -869,6 +876,39 @@ mod tests {
         assert!(!without.contains("Use remember") && !without.contains("search_chats"));
         // The note's the only part a Code chat drops.
         assert_eq!(code_profile(&t.profile, true), crate::ai::about_you::Profile { about: String::new(), ..imogen() });
+    }
+
+    #[test]
+    fn a_code_chats_question_is_measured_against_what_its_turn_sends() {
+        use crate::memory::ops::Section;
+        use crate::memory::{save_item, ItemInput};
+        // (8 Nov 2026: measured as a plain chat's, with memory's tools and
+        // lines, an 8K model with the web and Yap Code on had no room left
+        // for any question in a Code chat, though what it sends fits.)
+        save_item(ItemInput { id: None, section: Section::Preferences, title: String::new(), summary: String::new(), details: vec!["Likes answers as bullet points".into()], dictation: false }).unwrap();
+        let cfg = YapConfig { memory_search_chats: true, ..Default::default() };
+        let g = Gates { web_on: true, pictures: Gate::Show, ..tool_gates() };
+        let (persona, now) = ("You are a helpful assistant.", chrono::Utc::now());
+        // The stable prompt: a Code chat's as `build` writes it — no memory
+        // lines, no "You", About you without its note.
+        let plain = g.stable_prompt(&cfg, persona, &imogen(), now, false);
+        let code = g.stable_prompt(&cfg, persona, &imogen(), now, true);
+        for part in ["Use remember", "search_chats", "bullet points", "allotment"] {
+            assert!(plain.contains(part), "{part}: {plain}");
+            assert!(!code.contains(part), "{part}: {code}");
+        }
+        assert!(code.contains("Their name is Imogen.") && code.contains("browser_navigate"), "{code}");
+        // The tools' schemas: exactly the tools each turn offers (run.rs: a
+        // Code chat none of memory's).
+        let offered = |memory: bool| {
+            let extra = crate::chat::tools::Extra { memory, search_chats: memory, conversation: Some(7), doc_tools: g.doc_tools, pictures: g.pictures, ..Default::default() };
+            crate::chat::budget::estimate(&crate::chat::tools::offered_tools(cfg.open_apps, true, extra).to_string())
+        };
+        let counter = crate::chat::budget::Counter::estimate_only();
+        let rt = tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap();
+        let (plain_tools, code_tools) = rt.block_on(async { (g.schemas(&cfg, &counter, Some(7), false).await, g.schemas(&cfg, &counter, Some(7), true).await) });
+        assert_eq!((plain_tools, code_tools), (offered(true), offered(false)));
+        assert!(code_tools < plain_tools);
     }
 
     #[test]

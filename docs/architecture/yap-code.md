@@ -156,7 +156,11 @@ Decided 2026-11-07 (the maintainer and Claude), landed the same day.
   no "Remember that…" pass (`chat/turn.rs` `remembered`). The turn knows
   it's a Code chat once its question is saved (`Opened::code`, so a new
   code chat's first question too); `chat/turn/prompt.rs` `build` and
-  `run.rs` leave memory out ([memory.md](./memory.md#code-chats-keep-memory-out)).
+  `run.rs` leave memory out ([memory.md](./memory.md#code-chats-keep-memory-out)),
+  and the question is measured without it (`turn/history.rs`
+  `Sizing::measure`, once the conversation is one — a new code chat's
+  first question is measured as a plain chat's, a little more): the room a
+  small model has for it is the room the turn really leaves.
 - **About you** keeps the name and the region line (spelling, units, money,
   the clock), never the note ("Anything the AI should know about you":
   `about_you::Profile::without_note`).

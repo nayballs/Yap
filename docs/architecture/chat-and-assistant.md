@@ -3442,10 +3442,14 @@ a technical error.
    (2026-10-26; the e2e `polish.spec.js` test caught it).
 2. **The question alone** must fit: measured against the parts that stay
    (`turn::stable_prompt` — the persona, the instructions, the prompt's end,
-   the clock — and the tools' schemas, `tools::offered_tools`). Too long
-   (a huge paste): **not sent and not saved**, the plain sentence back —
-   "That's too long for Qwen3.5 4B (64K context)." The Chat view says so
-   before sending (below).
+   the clock — and the tools' schemas, `tools::offered_tools`), as this
+   conversation sends them: a Code chat's without memory's tools, lines
+   and "You", About you without its note (`Sizing::measure`, the ring
+   too; 8 Nov 2026: measured as a plain chat's, 300-odd tokens more, an 8K
+   model with the web and Yap Code on refused every question in a Code
+   chat). Too long (a huge paste): **not sent and not saved**, the plain
+   sentence back — "That's too long for Qwen3.5 4B (64K context)." The
+   Chat view says so before sending (below).
 3. **The budget** (`budget::budget`): the parts measured for this turn —
    the system prompt as built, the `<context>` block, the schemas — and
    room for the answer (an eighth of the context, 512 to 8K) and, for a
