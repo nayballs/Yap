@@ -948,11 +948,22 @@ one side.
   with its page (`PageRef {title, site, url}`; `url` "" for Tavily's image
   search, which names none) and that page's source number (`n`, 0: none).
   The model never gets an address to render: `read_page` and `web_search`
-  results carry `"pictures": [{picture, about, size}]` (`listed`: the best
-  five for the question — `rank`: its words, `web::keywords`, in the alt
+  results carry `"pictures": [{picture, about, size}]` (`listed`: **a
+  page's lead picture first**, then the best for the question, five in all
+  — `rank`: its words, `web::keywords`, in the alt
   text or caption 3 each, the heading above 2, the file's name 1, then
   size, an unknown one as 250 × 250; `about` "alt · caption · heading",
-  each once, else the file's name; `size` "1600×1200" or null).
+  each once, else the file's name; `size` "1600×1200" or null). **The lead
+  picture** (8 Nov 2026, Yap Lab: a wiki's infobox photo — lazy-loaded, no
+  alt text, its caption in an infobox cell — lost to five captioned
+  pictures on the question's words and was never listed; found on the page,
+  it wasn't filtered): `page_images` marks it (`PageImage::lead`,
+  `web/page.rs` `lead_of`) — the page's `og:image` matched by its file at
+  any size (`picture_file`: "330px-Ben.jpg" is "ben.jpg"), else its
+  infobox's first picture, else its first figure's, else the `og:image`
+  itself when it's not on the page (never a site's logo or share card:
+  `is_junk`), else its largest picture of 200 × 150 or more — and lists it
+  first; an infobox picture's caption is its `.infobox-caption`.
   **`show_picture {picture, caption}`** (`show`): only a candidate of this
   turn (an id as models write it, `normal_id`: "P3", "3"; else "\"p9\"
   isn't a picture from this turn. Pictures you can use: p1, p2." or, with
@@ -2285,18 +2296,25 @@ context every schema counts), `browser_batch` only for one that acts or
 sees, the acting ones only where `can_act` says. A model that can't see
 types by ref (`ref` required: it has one for every field); one that sees
 may type where it clicked. **Their weight** (every step sends them;
-`estimate_tokens`, with the line): ≈ 605 tokens for a model that only
-reads, ≈ 975 for one that sees, ≈ 1,200 acting without seeing (the
-on-device Qwen), ≈ 1,525 with both (8 Nov 2026: `browser_read`'s `offset`
-and "tables", and what a search is for, ≈ 35 more) — about 300 more than the page tools
+`estimate_tokens`, with the line): ≈ 607 tokens for a model that only
+reads, ≈ 1,011 for one that sees, ≈ 1,237 acting without seeing (the
+on-device Qwen), ≈ 1,596 with both (8 Nov 2026: `browser_read`'s `offset`
+and "tables", and what a search is for, ≈ 35 more; then `tab` on every
+tool, ≈ 15–80 more) — about 300 more than the page tools
 and the drive tier were for a model that acts, which a cloud model's
 context never notices; a strong model on a server on this PC that doesn't
 say its context (Yap assumes 8K) no longer fits its whole toolset (rich
 documents, web, browser) beside a question (the e2e's strong fakes say
 32K) — since 2026-11-08 such a turn goes without some families of tools
-instead ([fitted](#a-small-contexts-tools-fitted-2026-11-08)). `tab` is in the schemas only where a tab is chosen (navigate, read,
-screenshot, tabs: the others act on the tab in front, and every tool still
-takes it), what they share said once, in the line.
+instead ([fitted](#a-small-contexts-tools-fitted-2026-11-08)). **Every tool takes `tab`** in its schema (8 Nov 2026, Yap Lab:
+with it only where a tab was chosen, a model sent to tab 2 by
+`browser_navigate { tab: 2 }` then waited for its words on the tab in
+front); without it, the tab in front. **An action on a tab out of sight —
+a click, typing, a key, a hover, a field set, or `browser_navigate` (and
+back / forward) in it — brings that tab to the front first**
+(`act::to_front`: `view::bring_front`, `Event::SwitchTab`): the person sees
+what Yap acts on. Reading, finding, waiting, scrolling and shots stay out
+of sight. What they share is said once, in the line.
 - **`browser_navigate { url | search | "back" | "forward", tab? }`**: the
   tab in front (or tab n) goes there — the turn's results, the person's
   links, a link on a page read (`act::go`: always the address Yap holds,
@@ -2389,7 +2407,19 @@ takes it), what they share said once, in the line.
   couldn't give a listing's address from its text alone, 1 Nov 2026 — and
   `browser_navigate` may open one: `act::remember_page_links`, `checked`),
   the tabs open; a source of the turn (`Turn::read_open`: numbered, opened,
-  cited as [n]) and **web content** (the safety rule). Mode "elements" (any
+  cited as [n]) and **web content** (the safety rule). **Its links, the
+  article's own first** (8 Nov 2026, Yap Lab: a wiki's first 40 were all
+  its language menu's, in its `<main>`): links in the content, then hidden
+  ones (a closed menu), then the navigation's, header's, footer's and
+  asides', a language link (`hreflang`, or another `lang` than the page's)
+  last, each address once at its best place (`PAGE_TEXT_SCRIPT`, and the
+  stand-in's `rank_links`). **Its note** (`read::web_note`): "the page as
+  the user sees it now" only for the tab in front — another is "tab n as it
+  is now, behind the tab in front (the user isn't looking at it)"; and a
+  page the turn already numbered (a search found it, an earlier read) is
+  cited by that number, said so ("the number it already has in this turn")
+  — the Lab saw [31], [32], [33], then [1]: not a reset, the first search's
+  first result read. Mode "elements" (any
   model now: it changes nothing) lists the links, buttons and fields by ref
   instead (`rules::element_lines`, the text cut at 2,500). **Never a search
   engine's results page** (`search_page`: their terms forbid automated
@@ -2439,13 +2469,24 @@ takes it), what they share said once, in the line.
   Code's does; the scrolls for a model that sees): **`browser_scroll { direction: down | up | top | bottom,
   amount?: screens }`** — the page's own scroller, or the biggest scrolling
   part of an app-like page (`script.rs` `scroller`) — answers where it is
-  (`scroll {y, h, max, at_top, at_end}`) and the headings in view;
+  (`scroll {y, h, max, at_top, at_end}`) and the headings in view — **once
+  it has stopped** (8 Nov 2026, Yap Lab on a page with `scroll-behavior:
+  smooth`: "top" answered y 28244, "bottom" `at_end` false, and a zoom
+  straight after caught the page mid-scroll): every scroll Yap makes is
+  `behavior: "instant"`, which overrides the page's CSS (`script.rs`: its
+  scrolls, `scrollIntoView`s and the paging keys; a focus never scrolls,
+  `preventScroll`), and `backend::still` reads where the page is until it's
+  the same twice 40 ms apart (at most 1 s) — after a scroll, a scroll-to,
+  and before every shot and zoom — for a scroll the page makes itself;
   **`browser_scroll_to { ref | text }`** scrolls an element, or the best
   place the words appear (`see::best_match`: case, accents and curly quotes
   folded; a heading that is just those words first, then any heading, then
   the shortest block holding them, over the page's visible text blocks with
   refs, `script::blocks`), into the middle of the view, with what's around
-  it; nothing found, the nearest blocks by the words they share
+  it — **checked in view before it says so** (`script.rs` `where`; the Lab's
+  `{ref: 284}` said "Scrolled to…" at y 0): not in view (hidden in a closed
+  section or one of the page's own tabs, or in a part that scrolls apart),
+  it fails honestly, "Couldn't bring ‘…’ into view on …"; nothing found, the nearest blocks by the words they share
   (`near_matches`, "Didn't find ‘…’"); **`browser_find { query }`** lists the
   elements whose words match, then the text blocks holding them, each with
   its ref, kind and words (`see::matches`, at most 15: a heading's ref
@@ -2468,7 +2509,8 @@ takes it), what they share said once, in the line.
   so: `frame`, `see::Frame`), fitted for the provider; the person's copy is
   kept at the device's pixels. A zoom: top, middle, bottom, left, right, the
   corners, or `x,y,w,h` (fractions, percentages, or the latest screenshot's
-  pixels: `see::Region`), **at twice the page's CSS pixels** (8 Nov 2026;
+  pixels: `see::Region`; its description names them all, "middle
+  (center)… a corner (top-left…)"), **at twice the page's CSS pixels** (8 Nov 2026;
   "top" had come back 986×427, no sharper than the screenshot):
   - **a tab out of sight is drawn twice as finely** (`view::shot_in_view_at`:
     for a moment under Yap's own page, its controller's rasterization scale
@@ -2705,9 +2747,29 @@ review (safely, for any user, in any language Yap speaks).
   order: `act::keys_of`; each Enter or Space judged where it lands — on a
   link, a button or a box as its click, in a field as a submit or a send
   outside a form, a search box's free); **`browser_hover { ref }`** (pointer
-  events over it: a menu that opens on hover); **`browser_form_input { ref,
-  value }`** (a checkbox, radio or switch ticked as its click would be — "I
-  agree to the terms" asks first —, a select or a text field as typing it).
+  events over it: a menu that opens on hover; the element hovered before is
+  let go first — pointer out and leave events, the pointer over the page —,
+  and **Escape lets the hover go too**, so a hover's preview closes as it
+  would for a person: 8 Nov 2026, Yap Lab, Escape left a wiki's preview up);
+  **`browser_form_input { ref, value }`** (a checkbox, radio or switch
+  ticked as its click would be — "I agree to the terms" asks first —, a
+  text field as typing it). **A dropdown is chosen in, never typed in**
+  (8 Nov 2026, Yap Lab: "Edit date" in a sorting dropdown was asked about
+  as "typing ‘Edit date’", words from nowhere — its options were in a list
+  hidden until it opened): a `<select>`, a combobox or listbox that isn't a
+  text field (`rules::is_choice`; an `<input>` with suggestions is typed
+  in), or a radio button given its group's words — by `browser_form_input`
+  or `browser_type` — is checked against **the control's own options**
+  (`Element::options`: the select's, the `[role=option]`s in it or the list
+  its `aria-controls` / `aria-owns` names, the radio group's labels;
+  `rules::option_for`, folded, the exact words first): one of them is a
+  choice (`script.rs` `choose`: the option set, the radio ticked, a listbox
+  opened with a click first when its options aren't drawn, then its option
+  clicked), never the words-from-nowhere check; not one of them, "‘Price’
+  isn't one of ‘Sorting order’'s options (Relevance, Edit date…)". A choice
+  whose words would buy, pay, subscribe or send (`needs_ok`) still asks
+  ("press ‘Subscribe monthly’"). Chip "Chose ‘Edit date’ in ‘Sorting order’
+  on …".
   Never a password, card, bank or code field — typed into, nor clicked into
   by ref or by point (`act::off_limits`) — nor a sign-in form.
   `browser_navigate` in a tab (`act::go`, `act::history`): this turn's
@@ -2720,9 +2782,27 @@ review (safely, for any user, in any language Yap speaks).
   carried words out to a site. **A tab's number is its own for the
   session** (`view::OpenTab`): closing another, or the one closed to make
   room, never renumbers it. Each action answers with the page afterwards
-  (`act::after`: its title, address, `what_changed` — "went to …", "new on
-  the page: …" — and its first 600 characters when it went somewhere new):
-  web content, the safety rule's. So is a switched tab's answer (the tab's
+  (`act::after`: its title, address, `changed` — and its first 600
+  characters when it went somewhere new): web content, the safety rule's.
+  **`changed` says what actually changed** (8 Nov 2026, Yap Lab: a click
+  that opened a search box and its suggestions, a hover's preview and a
+  PageDown all said "nothing visible changed"): `act::before` starts a
+  watch (`script.rs` `watch`: a `MutationObserver` on the page, its scroll,
+  its address, the focus, what's open over it), `act::after` reads it once
+  the page has settled (`changes` → `rules::Changes`) and
+  `rules::what_changed` says, in order: "went to …"; else "a popup / a menu
+  / a list / a dialog opened: ‘…’" (an element with that role, or a newly
+  shown fixed or absolutely placed one, in view), "… closed" (one open
+  before, the last action's popups remembered: `R.pops`), "the focus moved
+  into ‘Search …’", "scrolled to y 1385", "went to #Map on the page", "new
+  on the page: …" / "some of the page's text went away", "part of the page
+  in view changed" — "nothing visible changed" only when none did. A key
+  press waits for its effect as a click does (`backend::settle`), a hover a
+  moment more (a preview's delay). **A ref that isn't there** is said as it
+  is (`act::no_element`, the page's highest ref from `describe`): a page not
+  read since it loaded ("refs from another page don't hold"), "There's no
+  element [99999]: refs on this page go up to 812", or one that changed or
+  went. So is a switched tab's answer (the tab's
   title and address), and a new tab's note naming the tab it closed to
   make room (`act::closed_note`; any model's) — both the page's words (3 Nov
   2026). 30 actions a turn. The line (1 Nov 2026,
@@ -2788,6 +2868,21 @@ review (safely, for any user, in any language Yap speaks).
   - **a link `browser_navigate` would open**: its words and its address, as its click
     (a plain GET to "unsubscribe" or "confirm booking"); an address from the
     results or the person, by its address;
+  - **sending what Yap typed, however it's sent** (8 Nov 2026, Yap Lab:
+    `browser_type { submit: true }` was judged as a submit, a type then a
+    separate `browser_key Enter` or a click as unrelated actions):
+    `TurnPages::typed` keeps the field Yap typed into until it's sent or
+    the page moves on, and whatever sends it — Enter in it or another field
+    of its form, its form's submit button clicked or pressed, or, outside a
+    form, a button pressed as the very next action (a chat's arrow with no
+    words: `rules::submits_typed`) — is **judged as `submit: true` is**
+    (`act::send_typed`): the field's words as they'll be sent, from nowhere
+    the person can see, asked about (`rules::submit_words`: what Yap typed
+    was checked then; a word the page put in after it is asked), then what
+    sending does — its form's rules; outside a form a send, unless it's a
+    search box ("Yap wants to press ‘➤’ … It may send something."). What's
+    allowed without asking is unchanged: a search box with words from the
+    person or the page goes ahead, by Enter or by its button;
   - **typing words from nowhere the person can see**: after web content, a
     word that's neither in what the person said in this conversation
     (`Turn::said`) nor on that page (its words, title, headings, the field's
@@ -2871,7 +2966,22 @@ review (safely, for any user, in any language Yap speaks).
   card fields and a sign-in refused, the page expanded over the thread and
   its strip's Allow once, Enter in a made-up chat's message box asked and
   refused and typing there kept after the draft, `browser_tabs` switch by the tab's
-  own number). **Not done**: trusted input events (CDP's
+  own number). Yap Lab's findings (8 Nov 2026): `rules`' pure tests (what
+  changed, a send of what was typed, a dropdown's options), the stand-in's
+  (`sim.rs`: a watch's changes, a hover let go on Escape, a combobox's and a
+  radio group's options and `choose`, the highest ref), `pages::tests` (a
+  tab named on every tool, an action bringing it to the front, a heading
+  that won't come into view, the article's links first), `act::tests` (the
+  arrow after typing asked, a search form's button not; a dropdown chosen
+  with no card, not one of its options said, a plan that subscribes
+  asked), `web::page`'s lead picture; in the real webview `chat-browse`
+  (a hover's popup opened and closed by Escape, PageDown, `[99999]`, a tab
+  behind brought up, a hidden-list dropdown chosen, the arrow's card),
+  `chat-pages` (a page with `scroll-behavior: smooth`: bottom and top where
+  they end, scroll-to by ref in view and the shot after it at the same
+  place; find, wait and read by tab, the read's links and note; navigate in
+  a tab brings it up) and `chat-pictures` (an infobox photo listed first).
+  **Not done**: trusted input events (CDP's
   `Input.dispatchMouseEvent`) for sites that ignore script clicks; a button
   with no name at all (an icon with no label) is judged by its form only;
   DNS rebinding (above); acting from the Voice Assistant.

@@ -143,16 +143,23 @@ export const CHAT_URL = 'https://chat.example.com/general';
 PAGES['chat.example.com/general'] = `<!doctype html><html><head><title>#general - Example Chat</title></head><body><main><h1>#general</h1>
   <ul id="sent"></ul>
   <div id="box" role="textbox" contenteditable="true" aria-label="Message #general">Hello</div>
+  <button type="button" id="send">➤</button>
   <div role="search"><input id="find" aria-label="Find in chat"></div>
   <script>
-    document.getElementById('box').addEventListener('keydown', function (e) {
+    var box = document.getElementById('box');
+    function send() {
+      var li = document.createElement('li');
+      li.textContent = box.innerText;
+      document.getElementById('sent').appendChild(li);
+      box.textContent = '';
+    }
+    box.addEventListener('keydown', function (e) {
       if (e.key !== 'Enter') return;
       e.preventDefault();
-      var li = document.createElement('li');
-      li.textContent = this.innerText;
-      document.getElementById('sent').appendChild(li);
-      this.textContent = '';
+      send();
     });
+    // Its send button: an arrow with no words, as chat apps have.
+    document.getElementById('send').addEventListener('click', send);
   </script></main></body></html>`;
 
 // A long wiki page for browsing it (chat/pages/see.rs, chat-pages.spec.js):
@@ -202,6 +209,63 @@ PAGES['maps.example.com/board'] = `<!doctype html><html><head><title>Field map -
   <p id="picked">Picked: nothing</p>
 </main></body></html>`;
 
+// A long article that scrolls smoothly (`scroll-behavior: smooth`, as many
+// sites do: Yap Lab's 8 Nov report found scrolls told from where they began
+// there): its language menu before the article (its links come last in a
+// read), a link whose preview pops up a moment after the pointer is over it
+// and closes once it leaves (the page's own script, as a wiki's previews),
+// and headings a screen and more apart.
+export const SMOOTH_URL = 'https://wiki.example.com/wiki/Lighthouse_keepers';
+PAGES['wiki.example.com/wiki/Lighthouse_keepers'] = `<!doctype html><html lang="en"><head><title>Lighthouse keepers - Example Wiki</title>
+  <style>html{scroll-behavior:smooth}body{margin:0;font:16px sans-serif}section{height:1500px;padding:16px;box-sizing:border-box}#pv{position:absolute;z-index:5;display:none;width:260px;padding:8px;background:#ffd;border:1px solid #997}</style></head><body><main>
+  <header><nav aria-label="Languages"><a href="https://de.wiki.example.com/wiki/Leuchtturmwaerter" hreflang="de" lang="de">Deutsch</a> <a href="https://fr.wiki.example.com/wiki/Gardiens_de_phare" hreflang="fr" lang="fr">Français</a></nav></header>
+  <section><h1>Lighthouse keepers</h1><p>Keepers lived at the light. The first at Saltmarsh was <a id="ek" href="Edda_Vane">Edda Vane</a>.</p></section>
+  <section><h2>Watches</h2><p>Keepers worked in watches of four hours.</p></section>
+  <section><h2>The rota and its columns</h2><p>The rota lists each keeper's watch.</p></section>
+  <div id="pv">Edda Vane kept the Saltmarsh light for thirty years.</div>
+  <script>
+    var ek = document.getElementById('ek'), pv = document.getElementById('pv'), tm;
+    ek.addEventListener('mouseover', function () { clearTimeout(tm); tm = setTimeout(function () { var r = ek.getBoundingClientRect(); pv.style.left = (r.left + window.scrollX) + 'px'; pv.style.top = (r.bottom + window.scrollY + 4) + 'px'; pv.style.display = 'block'; }, 150); });
+    ek.addEventListener('mouseout', function () { clearTimeout(tm); tm = setTimeout(function () { pv.style.display = 'none'; }, 100); });
+  </script>
+</main></body></html>`;
+
+// A wiki's search preferences (made up): a dropdown that isn't a select —
+// its options in a list it controls, hidden until it opens (the page's own
+// script), as Yap Lab met it — and a search form with its own button.
+export const PREFS_URL = 'https://wiki.example.com/prefs';
+PAGES['wiki.example.com/prefs'] = `<!doctype html><html><head><title>Search preferences - Example Wiki</title></head><body><main><h1>Search preferences</h1>
+  <div id="sort" role="combobox" tabindex="0" aria-label="Sorting order" aria-controls="sort-list" aria-expanded="false">Relevance</div>
+  <ul id="sort-list" role="listbox" hidden><li role="option" aria-selected="true">Relevance</li><li role="option" aria-selected="false">Edit date</li><li role="option" aria-selected="false">Creation date</li></ul>
+  <p id="sorted">Sorted by relevance.</p>
+  <form action="wiki/search"><label for="q">Search the wiki</label> <input id="q" name="q"> <button type="submit">Go</button></form>
+  <script>
+    var s = document.getElementById('sort'), l = document.getElementById('sort-list');
+    s.addEventListener('click', function () { l.hidden = !l.hidden; s.setAttribute('aria-expanded', String(!l.hidden)); });
+    [].forEach.call(l.querySelectorAll('[role=option]'), function (o) {
+      o.addEventListener('click', function () {
+        [].forEach.call(l.children, function (x) { x.setAttribute('aria-selected', 'false'); });
+        o.setAttribute('aria-selected', 'true'); s.textContent = o.textContent; l.hidden = true; s.setAttribute('aria-expanded', 'false');
+        document.getElementById('sorted').textContent = 'Sorted by ' + o.textContent.toLowerCase() + '.';
+      });
+    });
+  </script></main></body></html>`;
+PAGES['wiki.example.com/wiki/search'] = `<!doctype html><html><head><title>Search results - Example Wiki</title></head><body><main><h1>Search results</h1><p>2 pages about keepers.</p></main></body></html>`;
+
+// A mountain's article (made up) as a wiki lays one out: its photo in an
+// infobox, lazy-loaded, no alt text, its caption in the infobox's cell, and
+// the page's own og:image of it; captioned figures below whose words match
+// a question better (read_page's pictures: the lead one first).
+export const EMBER_URL = 'https://wiki.example.com/wiki/Mount_Ember';
+export const EMBER_PHOTO = 'https://wiki.example.com/images/thumb/Mount_Ember.jpg/600px-Mount_Ember.jpg';
+PAGES['wiki.example.com/wiki/Mount_Ember'] = `<!doctype html><html><head><title>Mount Ember - Example Wiki</title>
+  <meta property="og:image" content="https://wiki.example.com/images/thumb/Mount_Ember.jpg/1200px-Mount_Ember.jpg"></head><body><main>
+  <h1>Mount Ember</h1><p>Mount Ember is the highest hill on the island, above the Saltmarsh harbour.</p>
+  <table class="infobox"><tr><td class="infobox-image"><img src="/images/thumb/Mount_Ember.jpg/300px-Mount_Ember.jpg" srcset="/images/thumb/Mount_Ember.jpg/600px-Mount_Ember.jpg 2x" loading="lazy" width="300" height="200"><div class="infobox-caption">Mount Ember from the harbour</div></td></tr></table>
+  <h2>Paths</h2><figure><img src="/images/ember_path.png" width="400" height="300" alt="The path up Mount Ember"><figcaption>The tourist path up Mount Ember</figcaption></figure>
+  <h2>Weather</h2><figure><img src="/images/ember_weather.png" width="640" height="480" alt="The weather station on Mount Ember"><figcaption>The summit weather station on Mount Ember</figcaption></figure>
+</main></body></html>`;
+
 /** The rail site's results for the stations asked for (`from`, `to`). */
 function railResults(q) {
   const right = /^kellbrook$/i.test((q.get('from') || '').trim()) && /^port ellis$/i.test((q.get('to') || '').trim());
@@ -226,6 +290,9 @@ const PROBE_SW = `self.addEventListener('install', function (e) {
 const FILES = {
   'wiki.example.com/images/fort_joy_map.png': ['image/png', writePng(320, 240, [40, 120, 200])],
   'wiki.example.com/images/fort_joy_concept.png': ['image/png', writePng(400, 225, [200, 120, 40])],
+  'wiki.example.com/images/thumb/Mount_Ember.jpg/600px-Mount_Ember.jpg': ['image/png', writePng(600, 400, [90, 110, 70])],
+  'wiki.example.com/images/ember_path.png': ['image/png', writePng(400, 300, [150, 130, 90])],
+  'wiki.example.com/images/ember_weather.png': ['image/png', writePng(640, 480, [80, 90, 150])],
   'wiki.example.com/probe-sw.js': ['application/javascript', Buffer.from(PROBE_SW)],
 };
 

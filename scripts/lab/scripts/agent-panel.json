@@ -1,0 +1,25 @@
+{
+  "name": "agent-panel",
+  "about": "An agent at work in lab-sandbox from a Code chat, its cards allowed: shots of the Agent panel beside the chat and the thread's to-do card while it runs and once it's done, in both themes. Its `fake` steps play only in a --fake lab (the stand-in agent), so the script's own flow can be checked offline.",
+  "needs": { "yapCode": true },
+  "steps": [
+    { "fake": [{ "tools": [{ "name": "start_agent", "args": { "brief": "Add tablespoons to src/convert.js (1 tbsp = 15 ml) with a test, run the tests, then tick that item in TODO.md." } }] }, { "content": "On it: I've sent an agent to lab-sandbox." }] },
+    {
+      "ask": "Send an agent to do the first unticked item in TODO.md: add tablespoons to src/convert.js (1 tbsp = 15 ml) with a test, run the tests, then tick that item in TODO.md. Have it keep a short to-do list as it works.",
+      "chat": "code:lab-sandbox",
+      "cards": "allow",
+      "timeout": 300
+    },
+    { "expect": { "used": "start_agent", "refused": false } },
+    { "shot": "agent-running", "window": "panel", "note": "The Agent tab beside the chat while the agent works." },
+    { "shot": "todo-running", "window": "main", "selector": "[data-testid=\"chat-agent-todo-card\"]", "optional": true, "note": "The thread's to-do card, live (only when the agent keeps a to-do list)." },
+    { "shot": "thread-running", "window": "thread" },
+    { "wait": "agents", "cards": "allow", "timeout": 900 },
+    { "expect": { "agent": { "status": "done", "files": { "min": 1 } } } },
+    { "shot": "agent-done", "window": "panel" },
+    { "shot": "todo-done", "window": "main", "selector": "[data-testid=\"chat-agent-todo-card\"]", "optional": true },
+    { "shot": "thread-done", "window": "thread" },
+    { "expect": { "selector": [{ "window": "panel", "css": "[data-testid=\"chat-agent-panel\"]" }, { "window": "panel", "css": "[data-testid=\"chat-agent-row\"]", "count": { "min": 1 } }] } },
+    { "expect": { "selector": { "window": "thread", "css": "[data-testid=\"chat-agent-todo-card\"]" } }, "soft": true, "note": "The to-do card shows only when the agent kept a to-do list." }
+  ]
+}

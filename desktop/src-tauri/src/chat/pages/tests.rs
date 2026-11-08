@@ -84,8 +84,25 @@ fn web() -> Browser {
     p.insert("https://shop.example.com/kettles".into(), "<html><head><title>Kettles</title></head><body><main><h1>Kettles</h1></main></body></html>".into());
     p.insert(GUIDE.into(), guide());
     p.insert(GEAR.into(), gear());
+    p.insert(ARTICLE_URL.into(), ARTICLE.into());
     Browser::new(&p)
 }
+
+/// A wiki article laid out as a real one is (made up): its language menu
+/// and page tabs before the article, a link whose preview pops up on a
+/// hover, a search box in a form, and a heading that never comes into view
+/// (`data-sim-unseen`: inside a part of the page that scrolls apart).
+const ARTICLE_URL: &str = "https://emberwiki.example/wiki/Fort_Joy";
+const ARTICLE: &str = r#"<html lang="en"><head><title>Fort Joy - Emberwiki</title></head><body><main>
+  <header><nav aria-label="Languages"><a href="https://de.emberwiki.example/wiki/Fort_Joy" hreflang="de" lang="de">Deutsch</a> <a href="https://fr.emberwiki.example/wiki/Fort_Joy" hreflang="fr" lang="fr">Français</a></nav>
+  <nav><a href="/wiki/Talk:Fort_Joy">Talk</a></nav></header>
+  <article><h1>Fort Joy</h1>
+  <p>Fort Joy is the island prison. Its harbour is <a href="/wiki/Saltmarsh_Docks" data-sim-hover="preview">Saltmarsh Docks</a>.</p>
+  <div id="preview" role="tooltip" hidden>Saltmarsh Docks: the harbour south of Fort Joy.</div>
+  <form action="/search" role="search"><input type="search" name="q" aria-label="Search Emberwiki"><button>Search</button></form>
+  <h2 data-sim-y="3000" data-sim-unseen>Secrets</h2>
+  <p data-sim-y="3060">The cellars hold a key.</p>
+  </article></main></body></html>"#;
 
 /// A long guide (made up): three sections of about 4,000 characters each,
 /// links in the last.
@@ -181,8 +198,9 @@ fn one_toolset_for_every_model_with_pages_acting_and_shots_only_where_they_may()
     let all = est(&instructions(Gate::Look, true)) + est(&definitions(Gate::Look, true).to_string());
     let acting = est(&instructions(Gate::Show, true)) + est(&definitions(Gate::Show, true).to_string());
     println!("the browser tools: {small} tokens (no pictures), {seeing} (pictures), {acting} (acting, no pictures), {all} (acting too)");
-    // (8 Nov 2026: browser_read's offset and tables, and what a search is for: 593 / 1187 / 966 / 1515.)
-    assert!(small <= 610 && acting <= 1200 && seeing <= 1000 && all <= 1550, "{small} / {acting} / {seeing} / {all}");
+    // (8 Nov 2026: browser_read's offset and tables, and what a search is for: 593 / 1187 / 966 / 1515;
+    // then `tab` on every tool: 607 / 1237 / 1011 / 1596.)
+    assert!(small <= 615 && acting <= 1245 && seeing <= 1020 && all <= 1605, "{small} / {acting} / {seeing} / {all}");
     // Paging and tables, for every model that reads; a search is the person's.
     let defs = definitions(Gate::Show, false).to_string();
     assert!(defs.contains("\"offset\"") && defs.contains("\"tables\"") && defs.contains("results for the user: web search finds pages"), "{defs}");
@@ -719,6 +737,71 @@ async fn a_long_page_is_read_in_parts_each_saying_where_to_go_on() {
     let lines = on["data"]["elements"].as_str().unwrap();
     assert!(!lines.is_empty() && !lines.contains("more than"), "{lines}");
     assert_eq!((on["data"]["offset"].clone(), on["data"]["more"].clone()), (json!(act::rules::MAX_ELEMENTS), json!(false)), "{on}");
+    sim::install(None);
+}
+
+#[tokio::test]
+async fn every_tool_takes_a_tab_and_an_action_there_brings_it_to_the_front() {
+    // (8 Nov 2026, Yap Lab: browser_navigate {tab: 2} left tab 3 in front, and
+    // a browser_wait after it looked on tab 3.)
+    sim::install(Some(web()));
+    sim::with(|b| {
+        b.open(ARTICLE_URL);
+        b.open("https://emberwiki.example/wiki/Saltmarsh_Docks");
+    });
+    let mut t = turn("On the Fort Joy page, what's the harbour called? Show me its preview, then search the wiki for Saltmarsh Docks");
+    let log = Log::default();
+    // Every schema takes it (a batch's steps each their own).
+    for d in definitions(Gate::Look, true).as_array().unwrap().iter().filter(|d| d["function"]["name"] != BATCH) {
+        assert!(d["function"]["parameters"]["properties"]["tab"].is_object(), "{}", d["function"]["name"]);
+    }
+    // Looking around tab 1 from behind tab 2.
+    let r = call(&mut t, FIND, json!({ "query": "Saltmarsh Docks", "tab": 1 }), &log).await.result;
+    assert_eq!((r["data"]["tab"].clone(), r["displayText"].clone()), (json!(1), json!("Found 2 matches for ‘Saltmarsh Docks’ on emberwiki.example")), "{r}");
+    let r = call(&mut t, WAIT, json!({ "text": "island prison", "tab": 1, "seconds": 1 }), &log).await.result;
+    assert_eq!((r["success"].clone(), r["data"]["tab"].clone()), (json!(true), json!(1)), "{r}");
+    // A read of it: not "as the user sees it", it's out of their sight.
+    let r = call(&mut t, READ, json!({ "tab": 1 }), &log).await.result;
+    let note = r["note"].as_str().unwrap();
+    assert!(note.starts_with("This is tab 1 as it is now, behind the tab in front (the user isn't looking at it)"), "{note}");
+    // Its links: the article's first, then its page tabs, its language menu last.
+    let links: Vec<&str> = r["data"]["links"].as_array().unwrap().iter().map(|l| l["text"].as_str().unwrap()).collect();
+    assert_eq!(links, ["Saltmarsh Docks", "Talk", "Deutsch", "Français"], "{r}");
+    assert!(sim::with(|b| b.tabs()[1].front).unwrap(), "reading brings nothing to the front");
+    // Acting on it: in front first, and the Chat view told.
+    let els = call(&mut t, READ, json!({ "mode": "elements", "tab": 1 }), &log).await.result;
+    let lines = els["data"]["elements"].as_str().unwrap().to_string();
+    let r_of = |name: &str| -> u32 {
+        let line = lines.lines().find(|l| l.contains(&format!("\"{name}\""))).unwrap_or_else(|| panic!("{name}: {lines}"));
+        line[1..line.find(']').unwrap()].parse().unwrap()
+    };
+    let h = call(&mut t, act::HOVER, json!({ "ref": r_of("Saltmarsh Docks"), "tab": 1 }), &log).await.result;
+    assert!(sim::with(|b| b.tabs()[0].front).unwrap(), "{h}");
+    assert!(log.0.lock().unwrap().iter().any(|e| matches!(e, Event::SwitchTab { key } if key == "page:https://emberwiki.example/wiki/Fort_Joy")));
+    // What changed, as it did: the preview popped up…
+    assert!(h["data"]["changed"].as_str().unwrap().starts_with("a popup opened: ‘Saltmarsh Docks: the harbour south of Fort Joy.’"), "{h}");
+    // …and Escape closes it (the hover let go).
+    let k = call(&mut t, act::KEY, json!({ "keys": "Escape" }), &log).await.result;
+    assert!(k["data"]["changed"].as_str().unwrap().starts_with("a popup closed"), "{k}");
+    assert!(!call(&mut t, READ, json!({}), &log).await.result["data"]["text"].as_str().unwrap().contains("harbour south of Fort Joy"), "gone from the page");
+    // PageDown: where it went.
+    let k = call(&mut t, act::KEY, json!({ "keys": "PageDown" }), &log).await.result;
+    assert_eq!(k["data"]["changed"], "scrolled to y 680", "{k}");
+    // A click into the search box: the focus is there now.
+    let c = call(&mut t, act::CLICK, json!({ "ref": r_of("Search Emberwiki") }), &log).await.result;
+    assert_eq!(c["data"]["changed"], "the focus moved into ‘Search Emberwiki’", "{c}");
+    // A ref that never was.
+    let c = call(&mut t, act::CLICK, json!({ "ref": 99999 }), &log).await.result;
+    assert_eq!(c["displayText"], "Couldn't click: no element [99999] on this page", "{c}");
+    assert!(c["error"].as_str().unwrap().starts_with("There's no element [99999]: refs on this page go up to "), "{c}");
+    // A heading that won't come into view: said so, never "Scrolled to".
+    let s = call(&mut t, SCROLL_TO, json!({ "text": "Secrets" }), &log).await.result;
+    assert_eq!((s["success"].clone(), s["displayText"].clone()), (json!(false), json!("Couldn't bring ‘Secrets’ into view on emberwiki.example")), "{s}");
+    assert_eq!(s["data"]["seen"], false);
+    // Going somewhere in tab 2 brings it to the front too.
+    let g = call(&mut t, NAVIGATE, json!({ "tab": 2, "url": "https://emberwiki.example/wiki/Saltmarsh_Docks" }), &log).await.result;
+    assert_eq!(g["success"], true, "{g}");
+    assert!(sim::with(|b| b.tabs()[1].front).unwrap(), "{g}");
     sim::install(None);
 }
 

@@ -42,7 +42,9 @@ pub struct Element {
     pub href: String,
     pub disabled: bool,
     pub checked: Option<bool>,
-    /// A select's options (their words, the first 20).
+    /// A select's options (their words, the first 20); a combobox's or
+    /// listbox's (`[role=option]` in it or the list it controls); a radio
+    /// button's group's (its buttons' labels).
     pub options: Vec<String>,
     /// The form it's in (an index into [`Snapshot::forms`]; -1: none).
     pub form: i64,
@@ -117,6 +119,9 @@ pub struct Described {
     pub title: String,
     pub headings: Vec<String>,
     pub url: String,
+    /// The highest ref the page has given so far (0: none yet — it hasn't
+    /// been read since it loaded): a ref past it never existed.
+    pub refs: u32,
 }
 
 /// The most elements a read lists.
@@ -524,6 +529,7 @@ pub fn element_lines(snap: &Snapshot) -> String {
             title: snap.title.clone(),
             headings: snap.headings.clone(),
             url: snap.url.clone(),
+            refs: 0,
         };
         let mut line = format!("[{}] {} \"{}\"", e.r, if e.role.is_empty() { "element" } else { &e.role }, name_of(e).replace('"', "'"));
         if e.role == "link" && !e.href.is_empty() {
@@ -536,7 +542,7 @@ pub fn element_lines(snap: &Snapshot) -> String {
         if let Some(c) = e.checked {
             line.push_str(if c { " (checked)" } else { " (not checked)" });
         }
-        if !e.options.is_empty() {
+        if !e.options.is_empty() && e.role != "radio" {
             let shown: Vec<String> = e.options.iter().take(12).map(|o| clip(o, 30)).collect();
             line.push_str(&format!(" options: {}", shown.join(" | ")));
         }
@@ -561,20 +567,168 @@ pub fn element_lines(snap: &Snapshot) -> String {
     out.join("\n")
 }
 
-/// **What changed after an action**, briefly: the page went somewhere else
-/// (its address), or the lines of text that appeared, or nothing. Pure.
-pub fn what_changed(before_url: &str, before_text: &str, after_url: &str, after_text: &str) -> String {
+/// **Something that opened or closed over a page** during an action (a
+/// popup, a menu, a list of suggestions, a dialog), as the element script's
+/// watch saw it: its kind and its first words.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(default)]
+pub struct Overlay {
+    /// "dialog", "menu", "list" or "popup".
+    pub kind: String,
+    pub text: String,
+}
+
+/// **What an action changed on a page**, as the element script's watch saw
+/// it (`script.rs` `watch` / `changes`: a `MutationObserver` from just
+/// before the action until the page settled): where it was scrolled before
+/// and is now, its address before and now (a jump within the page), the
+/// field the focus moved into, what opened or closed over the page, and how
+/// many elements changed in view. `watched` false: nothing was watched (an
+/// older page, a script that failed) — only the address and the text say.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(default)]
+pub struct Changes {
+    pub watched: bool,
+    pub y0: i64,
+    pub scroll: Scroll,
+    pub url0: String,
+    pub url: String,
+    pub focus: Option<Element>,
+    pub opened: Vec<Overlay>,
+    pub closed: Vec<Overlay>,
+    #[serde(rename = "inView")]
+    pub in_view: u32,
+}
+
+/// **What changed after an action**, briefly and as it was: the page went
+/// somewhere else (its address); else what opened or closed over it, the
+/// field the focus moved into, where it scrolled to, a jump within it, the
+/// text that appeared or went, part of the view that changed — "nothing
+/// visible changed" only when none of those did (8 Nov 2026: a click that
+/// opened a search box and its suggestions, a hover's preview and a
+/// PageDown were all told "nothing visible changed"). Pure.
+pub fn what_changed(before_url: &str, before_text: &str, after_url: &str, after_text: &str, ch: &Changes) -> String {
     let same = |a: &str, b: &str| crate::web::normal_url(a) == crate::web::normal_url(b);
     if !same(before_url, after_url) {
         return format!("went to {}", crate::web::short_url(after_url));
     }
+    let mut parts: Vec<String> = Vec::new();
+    let said = |o: &Overlay| match o.kind.as_str() {
+        "dialog" => "a dialog",
+        "menu" => "a menu",
+        "list" => "a list",
+        _ => "a popup",
+    };
+    for o in ch.opened.iter().take(2) {
+        let words = clip(&o.text, 100);
+        parts.push(if words.is_empty() { format!("{} opened", said(o)) } else { format!("{} opened: ‘{}’", said(o), words.replace('’', "'")) });
+    }
+    if let Some(o) = ch.closed.first() {
+        parts.push(format!("{} closed", said(o)));
+    }
+    if let Some(f) = ch.focus.as_ref().filter(|f| takes_text(f) || f.editable) {
+        let name = name_of(f);
+        parts.push(if name.is_empty() { "the focus moved into a field".to_string() } else { format!("the focus moved into ‘{}’", name.replace('’', "'")) });
+    }
+    if ch.watched && (ch.scroll.y - ch.y0).abs() >= 2 {
+        parts.push(format!("scrolled to y {}", ch.scroll.y.max(0)));
+    }
+    // A jump within the page (its address but for the part after "#").
+    if ch.watched && !ch.url0.is_empty() && ch.url0 != ch.url && same(&ch.url0, &ch.url) {
+        if let Some((_, frag)) = ch.url.split_once('#').filter(|(_, f)| !f.is_empty()) {
+            parts.push(format!("went to #{} on the page", clip(frag, 60)));
+        }
+    }
     let had: std::collections::HashSet<&str> = sentences(before_text).into_iter().collect();
     let new: Vec<&str> = sentences(after_text).into_iter().filter(|s| !had.contains(s)).collect();
-    if new.is_empty() {
-        let gone = sentences(before_text).len().saturating_sub(sentences(after_text).len());
-        return if gone > 0 { "some of the page's text went away".to_string() } else { "nothing visible changed".to_string() };
+    if !new.is_empty() {
+        parts.push(format!("new on the page: {}", clip(&new.join(" "), 300)));
+    } else if sentences(before_text).len() > sentences(after_text).len() {
+        parts.push("some of the page's text went away".to_string());
     }
-    format!("new on the page: {}", clip(&new.join(" "), 300))
+    if parts.is_empty() && ch.in_view > 0 {
+        parts.push("part of the page in view changed".to_string());
+    }
+    if parts.is_empty() {
+        return "nothing visible changed".to_string();
+    }
+    parts.join("; ")
+}
+
+/// **What Yap typed into a field this turn**, until it's sent or the page
+/// moves on: the page (its tab's key), the field's ref and form, the words
+/// typed (their source checked or the person's OK given when they were),
+/// and the action it was (`TurnPages::acts` then). Whatever sends it — Enter
+/// in it, its form's submit button clicked or pressed, or (outside a form)
+/// the button pressed right after — is a submit of it, under the rules
+/// `browser_type { submit: true }` gets ([`submits_typed`]): typing then
+/// sending can never skip them (8 Nov 2026: typing, then a separate
+/// `browser_key Enter`, was judged as a key, apart from the typing).
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Typed {
+    pub key: String,
+    pub r: u32,
+    pub form: i64,
+    pub words: Vec<String>,
+    pub at: usize,
+}
+
+/// **Does an action on `e` (in page `key`) send what Yap typed?** Enter
+/// (`enter`) in the field itself or another field of its form, or on its
+/// form's submit button; a click on its form's submit button; outside a
+/// form, a button pressed as the very next action (`act`: this action's
+/// number, `TurnPages::acts`) — the send button beside a message box. A
+/// link, another form's button, another page: no. Pure.
+pub fn submits_typed(typed: &Typed, key: &str, e: &Element, enter: bool, act: usize) -> bool {
+    if typed.key != key {
+        return false;
+    }
+    if e.r == typed.r {
+        return enter;
+    }
+    if typed.form >= 0 {
+        return e.form == typed.form && (e.submit || (enter && takes_text(e)));
+    }
+    e.role == "button" && !e.submit && e.href.is_empty() && act == typed.at + 1
+}
+
+/// **The words of a field's value, as it's sent, from nowhere the person
+/// can see**: neither what they said nor on the page (`known`), nor what Yap
+/// typed there and was checked (or allowed) when it typed it — so a word a
+/// page put in the field after Yap typed is asked about at the send, as
+/// `submit: true` would have. Pure.
+pub fn submit_words(value: &str, known: &HashSet<String>, typed: &Typed) -> Vec<String> {
+    unknown_words(value, known).into_iter().filter(|w| !typed.words.contains(w)).collect()
+}
+
+/// **A control you choose in, not type in**: a `<select>`, or a combobox or
+/// listbox that isn't a text field (an `<input>` with suggestions is typed
+/// in). A radio button chooses too ([`browser_form_input`] with its group's
+/// option's words). Pure.
+pub fn is_choice(e: &Element) -> bool {
+    matches!(e.role.as_str(), "combobox" | "listbox") && e.kind.is_empty() && !e.editable
+}
+
+/// **The option `value` names among a control's `options`** (their words,
+/// folded): one that is those words, else the first holding them, as the
+/// element script picks it. `None`: none of them. Pure.
+pub fn option_for(value: &str, options: &[String]) -> Option<String> {
+    let want = super::super::see::fold(value);
+    if want.is_empty() {
+        return None;
+    }
+    let folded: Vec<String> = options.iter().map(|o| super::super::see::fold(o)).collect();
+    folded.iter().position(|o| *o == want).or_else(|| folded.iter().position(|o| o.contains(&want))).map(|i| options[i].clone())
+}
+
+/// A few of a control's options, for "isn't one of its options (…)". Pure.
+pub fn some_options(options: &[String]) -> String {
+    let shown: Vec<String> = options.iter().take(6).map(|o| clip(o, 40)).collect();
+    if options.len() > shown.len() {
+        format!("{}…", shown.join(", "))
+    } else {
+        shown.join(", ")
+    }
 }
 
 /// A text's sentences (and lines), for [`what_changed`]. Pure.
@@ -732,13 +886,99 @@ mod tests {
 
     #[test]
     fn what_changed_is_said_briefly() {
-        assert_eq!(what_changed("https://rail.example.com/", "a", "https://rail.example.com/results?from=A", "b"), "went to rail.example.com/results?from=A");
-        assert_eq!(what_changed("https://a.example/x", "Hello there. Pick a day.", "https://a.example/x/", "Hello there. Pick a day. No trains on Sunday."), "new on the page: No trains on Sunday");
-        assert_eq!(what_changed("https://a.example/x", "Same words.", "https://a.example/x", "Same words."), "nothing visible changed");
-        assert_eq!(what_changed("https://a.example/x", "One. We use cookies to track you.", "https://a.example/x", "One."), "some of the page's text went away");
+        let none = Changes::default();
+        assert_eq!(what_changed("https://rail.example.com/", "a", "https://rail.example.com/results?from=A", "b", &none), "went to rail.example.com/results?from=A");
+        assert_eq!(what_changed("https://a.example/x", "Hello there. Pick a day.", "https://a.example/x/", "Hello there. Pick a day. No trains on Sunday.", &none), "new on the page: No trains on Sunday");
+        assert_eq!(what_changed("https://a.example/x", "Same words.", "https://a.example/x", "Same words.", &none), "nothing visible changed");
+        assert_eq!(what_changed("https://a.example/x", "One. We use cookies to track you.", "https://a.example/x", "One.", &none), "some of the page's text went away");
         assert!(takes_text(&field("text", "x")) && !takes_text(&field("checkbox", "x")));
         assert!(!takes_text(&Element { role: "button".into(), ..Default::default() }));
         assert_eq!(name_of(&Element { placeholder: "  Search  the wiki ".into(), ..Default::default() }), "Search the wiki");
+    }
+
+    #[test]
+    fn what_changed_says_what_opened_moved_or_scrolled_and_nothing_only_when_nothing_did() {
+        // (8 Nov 2026's report: each of these was "nothing visible changed".)
+        let url = "https://wiki.example.com/wiki/Fort_Joy";
+        let same = |ch: Changes| what_changed(url, "Fort Joy. The island prison.", url, "Fort Joy. The island prison.", &ch);
+        let watched = |f: fn(&mut Changes)| {
+            let mut ch = Changes { watched: true, y0: 0, url0: url.into(), url: url.into(), ..Default::default() };
+            f(&mut ch);
+            ch
+        };
+        // A click that opened the search box and its suggestions.
+        let search = Element { r: 813, role: "combobox".into(), name: "Search the wiki".into(), kind: "search".into(), ..Default::default() };
+        let opened = watched(|c| c.opened = vec![Overlay { kind: "list".into(), text: "Fort Joy beach Fort Joy ghetto".into() }]);
+        assert_eq!(same(Changes { focus: Some(search.clone()), ..opened }), "a list opened: ‘Fort Joy beach Fort Joy ghetto’; the focus moved into ‘Search the wiki’");
+        // A hover's preview; Escape closing it.
+        assert_eq!(same(watched(|c| c.opened = vec![Overlay { kind: "popup".into(), text: "Saltmarsh Docks: the harbour south of Fort Joy.".into() }])), "a popup opened: ‘Saltmarsh Docks: the harbour south of Fort Joy.’");
+        assert_eq!(same(watched(|c| c.closed = vec![Overlay { kind: "popup".into(), text: String::new() }])), "a popup closed");
+        // PageDown: where it is now.
+        assert_eq!(same(watched(|c| c.scroll.y = 1385)), "scrolled to y 1385");
+        // A jump within the page; part of the view changing with no new words.
+        assert_eq!(same(watched(|c| c.url = "https://wiki.example.com/wiki/Fort_Joy#Map".into())), "went to #Map on the page");
+        assert_eq!(same(watched(|c| c.in_view = 3)), "part of the page in view changed");
+        // The focus on a button, a scroll of a pixel: not worth saying.
+        let button = Element { role: "button".into(), name: "Go".into(), ..Default::default() };
+        assert_eq!(same(watched(|c| c.scroll.y = 1)), "nothing visible changed");
+        assert_eq!(same(Changes { focus: Some(button), ..watched(|_| {}) }), "nothing visible changed");
+        // Going somewhere says only that.
+        assert_eq!(what_changed(url, "a", "https://wiki.example.com/wiki/Docks", "b", &watched(|c| c.scroll.y = 900)), "went to wiki.example.com/wiki/Docks");
+    }
+
+    #[test]
+    fn sending_what_yap_typed_is_a_submit_however_it_is_sent() {
+        let key = "page:https://chat.example.com/general";
+        // Typed into a search form's box (ref 4, form 0), as action 3.
+        let typed = Typed { key: key.into(), r: 4, form: 0, words: words("Fort Joy"), at: 3 };
+        let field = Element { r: 4, role: "searchbox".into(), form: 0, ..Default::default() };
+        let other_field = Element { r: 5, role: "textbox".into(), form: 0, ..Default::default() };
+        let submit = Element { r: 6, role: "button".into(), name: "Search".into(), form: 0, submit: true, ..Default::default() };
+        let other_form = Element { r: 9, role: "button".into(), name: "Subscribe".into(), form: 1, submit: true, ..Default::default() };
+        let link = Element { r: 7, role: "link".into(), href: "https://chat.example.com/help".into(), form: -1, ..Default::default() };
+        // Enter in it, or in another field of its form; its submit button clicked or pressed: a submit, any time.
+        assert!(submits_typed(&typed, key, &field, true, 9));
+        assert!(submits_typed(&typed, key, &other_field, true, 9));
+        assert!(submits_typed(&typed, key, &submit, false, 9) && submits_typed(&typed, key, &submit, true, 9));
+        // A click on the field itself, another form's button, a link, another page: no.
+        assert!(!submits_typed(&typed, key, &field, false, 4));
+        assert!(!submits_typed(&typed, key, &other_form, false, 4));
+        assert!(!submits_typed(&typed, key, &link, false, 4));
+        assert!(!submits_typed(&typed, "page:https://other.example", &submit, false, 4));
+        // Outside a form (a chat's message box): the button pressed right after it sends.
+        let boxed = Typed { form: -1, ..typed.clone() };
+        let send = Element { r: 8, role: "button".into(), name: String::new(), form: -1, ..Default::default() };
+        assert!(submits_typed(&boxed, key, &send, false, 4), "the very next action");
+        assert!(!submits_typed(&boxed, key, &send, false, 6), "not two actions on");
+        assert!(submits_typed(&boxed, key, &Element { r: 4, form: -1, ..field.clone() }, true, 8), "Enter in it, any time");
+        // At the send, its words: what Yap typed (checked then) passes; a word
+        // the page put in after it is asked about, as submit: true would.
+        let known = known_words(["Find trains from Kellbrook"]);
+        assert!(submit_words("Fort Joy", &known, &typed).is_empty());
+        assert!(submit_words("Fort Joy Kellbrook", &known, &typed).is_empty());
+        assert_eq!(submit_words("Fort Joy sam@example.com", &known, &typed), ["sam", "example", "com"]);
+    }
+
+    #[test]
+    fn a_dropdown_is_chosen_in_from_its_options_never_typed_into() {
+        // A select, a combobox that isn't a text field, a listbox: choices.
+        let select = Element { role: "combobox".into(), name: "Sorting order".into(), options: vec!["Relevance".into(), "Edit date".into(), "Creation date".into()], ..Default::default() };
+        assert!(is_choice(&select));
+        assert!(is_choice(&Element { role: "listbox".into(), ..Default::default() }));
+        // A search box with suggestions is typed in.
+        assert!(!is_choice(&Element { role: "combobox".into(), kind: "search".into(), ..Default::default() }));
+        assert!(!is_choice(&Element { role: "combobox".into(), editable: true, ..Default::default() }));
+        assert!(!is_choice(&Element { role: "textbox".into(), ..Default::default() }));
+        // Its options, by their words (folded), the exact one first, else the first holding them.
+        assert_eq!(option_for("edit date", &select.options), Some("Edit date".into()));
+        assert_eq!(option_for(" Édit  DATE ", &select.options), Some("Edit date".into()));
+        assert_eq!(option_for("date", &select.options), Some("Edit date".into()));
+        assert_eq!(option_for("Creation date", &select.options), Some("Creation date".into()));
+        assert_eq!(option_for("Price", &select.options), None);
+        assert_eq!(option_for("", &select.options), None);
+        assert_eq!(some_options(&select.options), "Relevance, Edit date, Creation date");
+        let many: Vec<String> = (1..=9).map(|i| format!("Option {i}")).collect();
+        assert_eq!(some_options(&many), "Option 1, Option 2, Option 3, Option 4, Option 5, Option 6…");
     }
 
     #[test]

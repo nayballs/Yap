@@ -1,0 +1,80 @@
+{
+  "name": "browser-tools",
+  "about": "Re-tests the browser tools' fixes of 8 Nov 2026 (the lab's browser report) in three questions, on Wikipedia, MDN and example.com: scroll's position after the scroll, scroll_to by ref, tab on the page tools, 'changed' after hover / PageDown / a click that opens a box, Escape closing a hover popup, Enter after typing, a dropdown choice, find_pictures' lead image, the bad-ref error. Each turn's shots (thread, panel, page; light and dark) show what the checks can't: the lead image, the preview, where each page ended up.",
+  "needs": { "web": true },
+  "steps": [
+    { "note": "1. Scrolling, scroll_to by ref, the lead picture (Wikipedia's Lighthouse: long, with an infobox picture)." },
+    {
+      "ask": "This is a test of your browser tools: use them exactly as asked, one step at a time, and keep your answer short. 1. Open https://en.wikipedia.org/wiki/Lighthouse beside the chat with browser_navigate. 2. Scroll it down two screens with browser_scroll (direction down, amount 2) and tell me the y position its result reports. 3. Read the page with browser_read in mode \"elements\", take the ref of the link to the article's History section (or its heading), and scroll to it with browser_scroll_to using that ref (not text); tell me the y position it reports. 4. Use find_pictures on this page and show me the article's lead image (the first picture, at the top of the article) with show_picture.",
+      "timeout": 540
+    },
+    {
+      "expect": {
+        "status": "answered",
+        "used": ["browser_navigate", "browser_scroll", "browser_scroll_to", "find_pictures"],
+        "refused": false,
+        "tool": [
+          { "name": "browser_scroll", "ok": true, "path": "data.scroll.y", "gte": 600 },
+          { "name": "browser_scroll", "path": "data.scroll.at_top", "equals": false },
+          { "name": "browser_scroll_to", "argsHas": ["ref"], "ok": true, "path": "data.scroll.y", "gt": 300 },
+          { "name": "find_pictures", "ok": true }
+        ],
+        "pictures": { "min": 1 }
+      },
+      "note": "Scroll reports where it ended (not where it started); scroll_to scrolls by ref; find_pictures offers a picture to show."
+    },
+    { "expect": { "used": "show_picture" }, "soft": true, "note": "Is the picture shown the article's lead image? The thread's shot says." },
+
+    { "note": "2. Hover, Escape, PageDown, a second tab, tab on find and scroll, a ref that isn't there." },
+    {
+      "ask": "Still testing, one step at a time, short answers. 1. On the Lighthouse page (tab 1), use browser_read in mode \"elements\", then browser_hover over the first link in the article's first paragraph (Wikipedia shows a preview of the linked article when you point at a link); tell me what the hover's result says changed. 2. Press Escape with browser_key; tell me what changed. 3. Press PageDown with browser_key; tell me what changed. 4. Open https://example.com/ in a new tab with browser_tabs (action new). 5. Without switching back, use browser_find with tab 1 to find the word \"lantern\" on the Lighthouse page, and browser_scroll with tab 1 to scroll that page down one screen. 6. On tab 2, click ref 9999 with browser_click (there's no such element) and copy its error word for word.",
+      "chat": "same",
+      "timeout": 540
+    },
+    {
+      "expect": {
+        "status": "answered",
+        "used": ["browser_hover", "browser_key", "browser_tabs", "browser_find", "browser_click"],
+        "tool": [
+          { "name": "browser_hover", "ok": true, "path": "data.changed", "notMatches": "/^nothing visible changed/i" },
+          { "name": "browser_key", "args": { "keys": "/page ?down/i" }, "ok": true, "path": "data.changed", "notMatches": "/^nothing visible changed/i" },
+          { "name": "browser_tabs", "args": { "action": "new" }, "ok": true },
+          { "name": "browser_find", "args": { "tab": 1 }, "ok": true },
+          { "name": "browser_scroll", "args": { "tab": 1 }, "ok": true, "path": "data.tab", "equals": 1 },
+          { "name": "browser_click", "args": { "ref": 9999 }, "ok": false, "resultNot": ["/it changed, or it went/i", "/the page changed/i"] }
+        ]
+      },
+      "note": "'changed' after a hover and PageDown says what changed; find and scroll take tab; a ref that was never there isn't blamed on the page changing."
+    },
+    {
+      "expect": { "tool": { "name": "browser_key", "args": { "keys": "/esc/i" }, "ok": true, "path": "data.changed", "notMatches": "/^nothing visible changed/i" } },
+      "soft": true,
+      "note": "Escape closes the hover preview (soft: it depends on Wikipedia's previews showing for a pointer that isn't a mouse)."
+    },
+
+    { "note": "3. A dropdown, a click that opens a box, typing then Enter (Wikipedia's Special:AllPages, MDN's search)." },
+    {
+      "ask": "Last part, one step at a time, short answers. 1. Open https://en.wikipedia.org/wiki/Special:AllPages beside the chat. With browser_form_input, set its Namespace dropdown to \"Help\", and tell me what the result says it did. 2. Open https://developer.mozilla.org/en-US/docs/Web/HTML/Element/table. Click its search button or box at the top with browser_click, and tell me what the click's result says changed. 3. Type table into that search box with browser_type (no submit), then press Enter with browser_key, and tell me where you ended up.",
+      "chat": "same",
+      "timeout": 540
+    },
+    {
+      "expect": {
+        "status": "answered",
+        "used": ["browser_form_input", "browser_click", "browser_type", "browser_key"],
+        "refused": false,
+        "card": false,
+        "tool": [
+          { "name": "browser_form_input", "ok": true, "path": "displayText", "notMatches": "/^typed/i" },
+          { "name": "browser_key", "args": { "keys": "/enter/i" }, "ok": true, "path": "data.changed", "matches": "/^went to/i" }
+        ]
+      },
+      "note": "A dropdown's choice isn't called typing; Enter after typing submits the search through the submit check (a search asks nothing)."
+    },
+    {
+      "expect": { "tool": { "name": "browser_click", "ok": true, "path": "data.changed", "notMatches": "/^nothing visible changed/i" } },
+      "soft": true,
+      "note": "The click that opens MDN's search box says something changed (soft: MDN's header at the panel's width decides whether there's a box to open)."
+    }
+  ]
+}

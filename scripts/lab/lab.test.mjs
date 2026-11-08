@@ -15,7 +15,11 @@ import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
-import { REPO, buildFresh, labConfig, onOff, parseArgs, parseModel } from './options.mjs';
+import { REPO, buildFresh, labConfig, onOff, parseArgs, parseModel, parseSize } from './options.mjs';
+import { coloursIn, drawPng, meanLuma, pngSize, readPng, stitch } from './png.mjs';
+import { checkTurn, kindOf, probePasses, resultObject, screenChecks } from './script.mjs';
+import { SEGMENT, TILE, parseTurns, placeShot, sheetHtml } from './sheet.mjs';
+import { shotNames, themesOf } from './shots.mjs';
 import { cardsOf, conversationOf, cut, endOf, summarize, toolsOf } from './turns.mjs';
 
 // ---------------------------------------------------------------- pure
@@ -130,17 +134,90 @@ describe('a turn’s record', () => {
   });
 });
 
+describe('shots, the sheet and scripts', () => {
+  test('themes, names, the window’s size, which turns', () => {
+    assert.deepEqual(themesOf(undefined), ['light', 'dark']);
+    assert.deepEqual(themesOf('dark'), ['dark']);
+    assert.throws(() => themesOf('sepia'), /light, dark or both/);
+    assert.deepEqual(shotNames(['thread', 'panel'], ['light', 'dark']).map((n) => n.file), ['01-thread-light.png', '02-thread-dark.png', '03-panel-light.png', '04-panel-dark.png']);
+    assert.equal(shotNames(['page'], ['light'], { prefix: 'card-confirm-1-' })[0].file, 'card-confirm-1-01-page-light.png');
+    assert.equal(parseSize(undefined), '1280x860');
+    assert.equal(parseSize('1600×900'), '1600x900');
+    assert.throws(() => parseSize('800x600'), /at least 860x600/);
+    const t = parseTurns('1-3,7');
+    assert.deepEqual([1, 2, 3, 4, 7].map(t), [true, true, true, false, true]);
+    assert.equal(parseTurns('5-')(99), true);
+    assert.equal(parseTurns(undefined)(1), true);
+    assert.throws(() => parseTurns('a-b'), /--turns/);
+  });
+
+  test('PNGs: a size from the header, pieces stitched, a made-up picture', () => {
+    const red = drawPng({ width: 40, height: 30, shape: 'square', color: '#ff0000', background: '#ff0000' });
+    const blue = drawPng({ width: 40, height: 50, shape: 'square', color: '#0000ff', background: '#0000ff' });
+    assert.deepEqual(pngSize(red), { width: 40, height: 30 });
+    const both = readPng(stitch([{ png: red, from: 10, to: 30 }, { png: blue }]));
+    assert.deepEqual([both.width, both.height], [40, 70]);
+    assert.deepEqual([...both.data.subarray(0, 3)], [255, 0, 0]);
+    assert.deepEqual([...both.data.subarray((69 * 40) * 4, (69 * 40) * 4 + 3)], [0, 0, 255]);
+    const circle = readPng(drawPng({ width: 100, height: 60 }));
+    assert.ok(coloursIn(circle) === 2 && meanLuma(circle) > 0);
+  });
+
+  test('the sheet: a column at its CSS size at most, a tall shot in even pieces, light beside dark', () => {
+    assert.deepEqual(placeShot({ width: 460, height: 800, dpr: 1 }), { w: 460, h: 800, pieces: [{ at: 0, h: 800 }] });
+    const tall = placeShot({ width: 1155, height: 4500, dpr: 1.5 });
+    assert.equal(tall.w, TILE);
+    assert.ok(tall.pieces.length === Math.ceil(tall.h / SEGMENT) && tall.pieces.every((p) => p.h <= SEGMENT && p.h > SEGMENT / 2), JSON.stringify(tall));
+    const dir = path.join(REPO, 'test-results', 'lab-test', 'sheets');
+    const shot = (window, theme, height) => ({ file: path.join(REPO, 'test-results', 'lab-test', 'shots', '002', `x-${window}-${theme}.png`), window, theme, set: 'end', width: 700, height, dpr: 1 });
+    const html = sheetHtml({ title: 'T', turns: [{ turn: 2, question: 'one two three four five six seven eight nine ten eleven twelve thirteen fourteen fifteen', status: 'answered', shots: [shot('thread', 'light', 3000), shot('thread', 'dark', 3000), shot('panel', 'light', 800)] }], dir });
+    assert.match(html, /Turn 2 <span class="st st-answered">answered<\/span>/);
+    assert.match(html, /“one two three four five six seven eight nine ten eleven twelve thirteen fourteen…”/);
+    assert.match(html, /src="\.\.\/shots\/002\/x-thread-light\.png"/);
+    // 3000 px: three pieces each, interleaved light / dark, then the panel.
+    const order = [...html.matchAll(/<b>(\w+)<\/b> · (\w+)( · \d\/\d)?/g)].map((m) => `${m[1]} ${m[2]}${m[3] ?? ''}`);
+    assert.deepEqual(order, ['thread light · 1/3', 'thread dark · 1/3', 'thread light · 2/3', 'thread dark · 2/3', 'thread light · 3/3', 'thread dark · 3/3', 'panel light']);
+  });
+
+  test('an expect: tools with their arguments and results, counts, cards, agents; the screen’s as probes', () => {
+    const calls = [
+      { via: 'yap', name: 'browser_scroll', args: { direction: 'down', tab: 1 }, result: { success: true, data: { tab: 1, scroll: { y: 1320, at_top: false } }, displayText: 'Scrolled down example.com' }, ok: true },
+      { via: 'claude', server: 'yap', name: 'browser_click', args: { ref: 9999 }, result: [{ type: 'text', text: '{"success":false,"error":"There is no element [9999]: the refs go up to 41."}' }], ok: false },
+    ];
+    const result = { status: 'answered', answer: 'Scrolled to 1320.', cards: [{ id: 'confirm:1', kind: 'page', does: 'buy', state: 'refused' }], pictures: [{}], files: [], documents: [], pagesShown: ['https://example.com/'], sources: [], tools: calls };
+    const passes = (expect) => checkTurn(expect, { result, calls }).every((c) => c.pass);
+    assert.equal(resultObject(calls[1]).error, 'There is no element [9999]: the refs go up to 41.');
+    assert.ok(passes({ status: 'answered', used: ['browser_scroll', '/click/'], notUsed: 'browser_type', pictures: 1, files: 0, pagesShown: { min: 1 }, answerContains: '1320', card: { kind: 'page', does: 'buy' } }));
+    assert.ok(passes({ tool: [{ name: 'browser_scroll', args: { tab: 1 }, path: 'data.scroll.y', gte: 600 }, { name: 'browser_click', args: { ref: 9999 }, ok: false, resultNot: '/page changed/i', path: 'error', matches: 'refs go up' }] }));
+    assert.ok(!passes({ tool: { name: 'browser_scroll', path: 'data.scroll.at_top', equals: true } }));
+    assert.ok(!passes({ refused: false, failed: false }) && passes({ failed: true }));
+    const missed = checkTurn({ used: 'browser_find', pictures: 2 }, { result, calls }).filter((c) => !c.pass);
+    assert.deepEqual(missed.map((c) => c.check), ['used browser_find', 'pictures 2']);
+    assert.match(missed[0].detail, /called: browser_scroll, browser_click/);
+    assert.equal(checkTurn({ used: 'x' }, { result: null })[0].detail, 'no turn yet: ask first');
+    const agents = { agents: [{ id: 'a1', status: 'done', files: ['notes.md'] }] };
+    assert.ok(checkTurn({ agent: { status: 'done', files: { min: 1 } } }, { result: null, agents }).every((c) => c.pass));
+    const screen = screenChecks({ selector: [{ window: 'panel', css: '.x' }, { css: '.y', present: false }], visible: 'THE END' });
+    assert.deepEqual(screen.map((s) => s.args.window), ['panel', 'main', 'thread']);
+    assert.equal(probePasses(screen[0].want, { visible: 2 }), true);
+    assert.equal(probePasses(screen[1].want, { visible: 1 }), false);
+    assert.equal(probePasses(screen[2].want, { has: true }), true);
+    assert.equal(kindOf({ shot: 'x', window: 'panel' }), 'shot');
+    assert.throws(() => kindOf({ click: 1 }), /A step is one of/);
+  });
+});
+
 // ---------------------------------------------------------------- a fake run
 
 const LAB = path.join(REPO, 'test-results', 'lab-test');
 const ENV = { ...process.env, YAP_LAB_DIR: LAB };
 
-/** `npm run lab -- <args>` in the test's own lab folder: its JSON. */
+/** `npm run lab -- <args>` in the test's own lab folder: its JSON (and its exit code, as `exit`). */
 function lab(...args) {
   const r = spawnSync(process.execPath, [path.join(REPO, 'scripts', 'lab', 'lab.mjs'), ...args], { cwd: REPO, env: ENV, encoding: 'utf8', timeout: 600_000 });
   const line = r.stdout.trim().split('\n').at(-1) ?? '';
   try {
-    return JSON.parse(line);
+    return Object.defineProperty(JSON.parse(line), 'exit', { value: r.status, enumerable: false });
   } catch {
     throw new Error(`lab ${args[0]} printed no JSON (exit ${r.status}): ${r.stdout}\n${r.stderr}`);
   }
@@ -172,6 +249,8 @@ describe('a --fake run, end to end', { timeout: 900_000 }, () => {
     assert.equal(out.workspace.name, 'lab-sandbox');
     assert.ok(fs.existsSync(path.join(out.workspace.path, 'src', 'convert.js')));
     assert.equal(out.claudeCode.standIn, true);
+    // The main window at the lab's fixed size (shell/lab.rs), so shots compare between runs.
+    assert.deepEqual([out.window.width, out.window.height], [1280, 860]);
     // One lab at a time.
     assert.match(lab('start', '--fake').error, /already running/);
   });
@@ -190,6 +269,39 @@ describe('a --fake run, end to end', { timeout: 900_000 }, () => {
     assert.ok(transcript.record.length > 0);
   });
 
+  test('shots after the turn: the thread’s turn whole (a long answer, stitched), the panel and the page, light and dark', () => {
+    const paragraphs = Array.from({ length: 60 }, (_, i) => `Paragraph ${i + 1}: the keeper wound the clockwork every four hours, and the lens turned on its bath of mercury.`);
+    script([{ tools: [{ name: 'browser_navigate', args: { url: RAIL } }] }, { content: [...paragraphs, 'THE END'].join('\n\n') }]);
+    const out = ok(lab('ask', `Tell me about lighthouses, at length, and open ${RAIL}`, '--timeout', '120'), 'ask');
+    assert.equal(out.status, 'answered');
+    assert.deepEqual(
+      out.shots.map((s) => path.basename(s.file)),
+      ['01-thread-light.png', '02-thread-dark.png', '03-panel-light.png', '04-panel-dark.png', '05-page-light.png', '06-page-dark.png']
+    );
+    for (const s of out.shots) {
+      assert.ok(s.file.startsWith(path.join(LAB, 'shots', String(out.turn).padStart(3, '0'))), s.file);
+      assert.deepEqual(pngSize(fs.readFileSync(s.file)), { width: s.width, height: s.height });
+    }
+    const [light, dark] = out.shots.slice(0, 2);
+    // Taller than the thread's view, so it took several screens; its height is the whole thread's.
+    assert.ok(light.scrollHeight > 1.5 * light.clientHeight && light.pieces >= 2, JSON.stringify(light));
+    assert.ok(Math.abs(light.height / light.dpr - light.scrollHeight) <= 40, `${light.height / light.dpr} px of a ${light.scrollHeight} px thread`);
+    assert.ok(Math.abs(light.height - Math.round(light.cssHeight * light.dpr)) <= light.pieces + 1, JSON.stringify(light));
+    // The question at the top and the answer's end at the bottom were drawn (not a blank band).
+    const img = readPng(fs.readFileSync(light.file));
+    assert.ok(coloursIn(img, 0, Math.round(80 * light.dpr)) > 4, 'the question at the top');
+    assert.ok(coloursIn(img, img.height - Math.round(160 * light.dpr), img.height) > 4, 'the answer’s end at the bottom');
+    // Light and dark really are.
+    assert.ok(meanLuma(img) > meanLuma(readPng(fs.readFileSync(dark.file))) + 80, 'the dark shot is darker');
+    assert.equal(light.height, dark.height);
+    // The theme put back after: the window is light again (the e2e base config's).
+    const after = ok(lab('probe', '--window', 'thread', '--text', 'THE END'), 'probe');
+    assert.deepEqual([after.theme, after.has], ['light', true]);
+    const index = JSON.parse(fs.readFileSync(path.join(path.dirname(light.file), 'index.json'), 'utf8'));
+    assert.equal(index.shots.length, 6);
+    assert.match(index.question, /^Tell me about lighthouses/);
+  });
+
   test('a card: the turn waits, the lab answers Don’t, the click is refused', () => {
     script([{ tools: [{ name: 'browser_navigate', args: { url: RAIL } }] }, { tools: [{ name: 'browser_read', args: { mode: 'elements' } }] }, { tools: [{ name: 'browser_click', args: { ref: 1 } }] }, { content: 'I didn’t buy it.' }]);
     const asked = ok(lab('ask', `Buy me a ticket for the 09:42: ${RAIL}`, '--timeout', '120'), 'ask');
@@ -197,6 +309,10 @@ describe('a --fake run, end to end', { timeout: 900_000 }, () => {
     const card = asked.cards.find((c) => c.state === 'asking');
     assert.deepEqual([card.kind, card.label, card.site, card.does], ['page', 'Buy tickets', 'rail.example.com', 'buy']);
     assert.deepEqual(asked.pending, [card.id]);
+    // Shots of the card waiting, taken before it was answered.
+    const cardShots = asked.shots.filter((s) => s.set === `card:${card.id}`);
+    assert.deepEqual([...new Set(cardShots.map((s) => s.window))], ['thread', 'panel', 'page']);
+    assert.ok(cardShots.every((s) => path.basename(s.file).startsWith(`card-${card.id.replace(':', '-')}-`)), JSON.stringify(cardShots));
     // A shot while it waits: the main window and the page itself.
     for (const window of ['main', 'panel', 'page']) {
       const shot = ok(lab('shot', '--window', window), `shot ${window}`);
@@ -249,7 +365,79 @@ describe('a --fake run, end to end', { timeout: 900_000 }, () => {
     assert.match(text, /## Summary\nThe web search works\./);
     assert.match(text, /\| web_search \| 1 \| 0 \| 0 \|/);
     assert.equal(JSON.parse(fs.readFileSync(out.transcript, 'utf8')).result.report, out.report);
+    // Its shots on a contact sheet beside it, linked from the Markdown with relative paths.
+    assert.ok(fs.existsSync(out.sheet.png) && fs.existsSync(out.sheet.html), JSON.stringify(out.sheet));
+    assert.match(text, /## Screenshots\n\n!\[The turn's contact sheet\]\([^)]+\.sheet\.png\)/);
+    assert.match(text, /- \[01-thread-light\.png\]\(\.\.\/shots\/\d{3}\/01-thread-light\.png\): thread, light/);
     assert.match(lab('report', 'no-such-prompt').error, /there are browser-tools, connectors, yap-code/);
+  });
+
+  test('set: a setting and files seeded into the scratch workspace (only there)', () => {
+    const out = ok(lab('set', JSON.stringify({ web: true, files: [{ path: 'pictures/sun.png', png: { width: 120, height: 80, shape: 'circle' } }, { path: 'notes.md', text: '# Notes\n' }] })), 'set');
+    assert.deepEqual(out.config, { webSearch: true });
+    assert.deepEqual(out.files, ['pictures/sun.png', 'notes.md']);
+    assert.match(lab('set', JSON.stringify({ files: [{ path: '../outside.txt', text: 'x' }] })).error, /isn't inside the workspace/);
+    assert.match(lab('set', JSON.stringify({ config: { ppApiKeys: {} } })).error, /doesn't change ppApiKeys/);
+  });
+
+  test('run: a feature script passes; a wrong expect fails it with exit 1', () => {
+    const file = path.join(LAB, 'check-run.json');
+    const steps = [
+      { fake: [{ tools: [{ name: 'browser_navigate', args: { url: RAIL } }] }, { tools: [{ name: 'browser_read', args: { mode: 'elements' } }] }, { content: 'The 09:42 leaves from platform 2.' }] },
+      { ask: `When does the 09:42 leave? ${RAIL}`, timeout: 120 },
+      {
+        expect: {
+          status: 'answered',
+          used: ['browser_navigate', 'browser_read'],
+          notUsed: 'browser_click',
+          refused: false,
+          card: false,
+          tool: { name: 'browser_read', args: { mode: 'elements' }, ok: true, result: 'Buy tickets' },
+          answerContains: 'platform 2',
+          pictures: 0,
+          files: 0,
+          visible: 'platform 2',
+          selector: { window: 'main', css: '[data-testid="chat-panel-slot"]' },
+        },
+      },
+      { shot: 'the page', window: 'page', theme: 'light' },
+      { fake: [{ content: 'Still platform 2.' }] },
+      { ask: 'And the 10:12?', chat: 'same', timeout: 60 },
+      { expect: { answerContains: 'Still platform 2', notVisible: 'no such words' } },
+      { expect: { used: 'browser_find' }, soft: true, note: 'A soft check only warns.' },
+    ];
+    fs.writeFileSync(file, JSON.stringify({ name: 'check-run', steps }));
+    const passed = lab('run', file);
+    assert.equal(passed.ok, true, JSON.stringify(passed.failures));
+    assert.equal(passed.exit, 0);
+    assert.equal(passed.failed, 0);
+    assert.equal(passed.warnings.length, 1);
+    assert.equal(passed.turns.length, 2);
+    assert.equal(passed.steps.find((s) => s.step === 'ask' && s.n === 6).conversation, passed.steps[1].conversation);
+    assert.ok(passed.steps[3].shots[0].endsWith('the-page-01-page-light.png'), JSON.stringify(passed.steps[3]));
+    assert.deepEqual(pngSize(fs.readFileSync(passed.sheet.png)).width, 1600);
+    // A wrong expect: the run fails, says which check and why, exits 1.
+    fs.writeFileSync(file, JSON.stringify({ name: 'check-run', steps: [steps[0], { ...steps[1], shots: false }, { expect: { used: 'browser_click', answerContains: 'platform 9' } }] }));
+    const failed = lab('run', file);
+    assert.equal(failed.ok, false);
+    assert.equal(failed.exit, 1);
+    assert.deepEqual(failed.failures.map((f) => f.check), ['used browser_click', 'answer has platform 9']);
+    assert.match(failed.failures[0].detail, /called: browser_navigate, browser_read/);
+    assert.equal(failed.sheet, null, 'no shots, no sheet');
+    // A script that needs what this lab wasn't started with says so.
+    fs.writeFileSync(file, JSON.stringify({ name: 'check-run', needs: { connectors: true }, steps: [{ note: 'x' }] }));
+    assert.match(lab('run', file).failures[0].error, /needs the lab started with --connectors on/);
+  });
+
+  test('sheet: one PNG 1600 wide of the turns asked for, and its page beside it', () => {
+    const out = ok(lab('sheet', '--turns', '2-3', '--out', path.join(LAB, 'sheets', 'test-sheet.png')), 'sheet');
+    assert.deepEqual(out.turns, [2, 3]);
+    assert.deepEqual(pngSize(fs.readFileSync(out.png)), { width: 1600, height: out.height });
+    assert.ok(out.height > 1000, String(out.height));
+    const html = fs.readFileSync(out.html, 'utf8');
+    assert.match(html, /<h2>Turn 2 /);
+    assert.match(html, /<img src="\.\.\/shots\/002\/01-thread-light\.png"/);
+    assert.match(lab('sheet', '--turns', '99').error, /No shots for turns 99/);
   });
 
   test('logs, and stop leaves the lab folder', () => {

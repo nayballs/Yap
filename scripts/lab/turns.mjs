@@ -256,6 +256,9 @@ export function summarize({ turn, items, conv, pages = [], approvals = [], agent
     pages: pages.map((p) => ({ url: p.url ?? p.address ?? '', onScreen: p.onScreen ?? p.on_screen ?? null, loaded: p.loaded ?? null })),
     pagesShown: [...new Set([...(message?.pages ?? []).map((p) => p.url), ...shownPages])],
     pictures: (message?.pictures ?? []).map((p) => ({ caption: cut(p.caption ?? '', 120), url: p.page?.url ?? p.url ?? '' })),
+    // Files Chat shared into the answer as cards (a share-files tool, landing
+    // Nov 2026). TODO once it's merged: check the answer's field name here.
+    files: (message?.files ?? message?.attachments ?? []).map((f) => ({ name: f.name ?? f.title ?? String(f.path ?? '').split(/[\\/]/).pop() ?? '', path: f.path ?? f.rel ?? '', kind: f.kind ?? f.mime ?? '' })),
     documents: (message?.documents ?? []).map((d) => d.title ?? d.noteId ?? d),
     sources: (message?.sources ?? sent?.reply?.sources ?? []).map((s) => s.url).filter(Boolean),
     error: turn.error ?? null,

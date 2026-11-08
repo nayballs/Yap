@@ -21,7 +21,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { test as base, expect, expectStore, setConfig, openView } from './support/fixtures.js';
 import { startFakeLlm } from './support/fake-llm.js';
-import { startFakeWeb, FORT_JOY_URL, FORT_JOY_MAP } from './support/fake-web.js';
+import { startFakeWeb, FORT_JOY_URL, FORT_JOY_MAP, EMBER_URL, EMBER_PHOTO } from './support/fake-web.js';
 import { readPng } from './support/png.js';
 
 const test = base.extend({
@@ -82,6 +82,30 @@ async function sendCollecting(main, text) {
 
 const chatCalls = (fakeLlm, from) => fakeLlm.requests.slice(from).filter((r) => r.tools?.length);
 const toolResult = (request) => JSON.parse(request.messages.filter((m) => m.role === 'tool').at(-1).content);
+
+test('a page’s lead picture is listed first: its infobox photo, lazy, no alt text, ahead of figures whose words match better', async ({ yap, main, fakeLlm, fakeWeb }) => {
+  // (8 Nov 2026, Yap Lab: a wiki's infobox photo never made the five a page's pictures listed.)
+  await setConfig(yap, main, { webSearch: true, llmScopes: { chat: { enabled: true, provider: 'custom', baseUrl: fakeLlm.base, model: 'fake-chat' } } });
+  const from = fakeLlm.requests.length;
+  const webFrom = fakeWeb.requests.length;
+  fakeLlm.scriptChat([
+    { tools: [{ name: 'read_page', args: { url: EMBER_URL } }] },
+    { tools: [{ name: 'show_picture', args: { picture: 'p1', caption: 'Mount Ember from the harbour' } }] },
+    { content: 'That’s Mount Ember [1].' },
+  ]);
+  // (The figures' captions have the question's words; the lead photo's caption doesn't say "path" or "station".)
+  const { res } = await sendCollecting(main, `Get me the best photo of Mount Ember from ${EMBER_URL}`);
+  expect(res.reply).toContain('Mount Ember');
+  const calls = chatCalls(fakeLlm, from);
+  const listed = toolResult(calls[1]).data.pictures;
+  // The lead photo first (its caption from the infobox's cell), then the rest by the question's words and size.
+  expect(listed[0]).toEqual({ picture: 'p1', about: 'Mount Ember from the harbour', size: '300×200' });
+  expect(listed.map((p) => p.picture)).toEqual(['p1', 'p3', 'p2']);
+  // Shown: the infobox photo, its sharper copy (the srcset's 2x).
+  expect(toolResult(calls[2])).toMatchObject({ success: true, shown: true, w: 600, h: 400 });
+  const asked = fakeWeb.requests.slice(webFrom).filter((r) => r.service === 'standin').map((r) => `https://${r.host}${r.path}`);
+  expect(asked).toContain(EMBER_PHOTO);
+});
 
 test('a page’s picture is shown: downloaded, stored, sent to the page, kept with the answer, in the receipts', async ({
   yap,
