@@ -38,14 +38,26 @@ export const workspaceMenu = (main) => main.getByTestId('chat-workspace-menu');
 /**
  * **An agent's whole timeline** (its tab's other view, AgentTab.svelte): the
  * tab opens on its panel (AgentPanel.svelte, 2026-11-08), and a row's Open
- * shows the timeline at that turn — `n`, else the panel's first row (the
- * newest turn there). Nothing when the timeline shows already.
+ * shows the timeline at that turn — `n`, else the newest turn of the first
+ * row's agent. Rows start folded: ▸ opens it first. Nothing when the
+ * timeline shows already.
  */
 export async function agentTimeline(main, n = null) {
   const panel = main.getByTestId('chat-agent-panel');
   await expect(main.getByTestId('chat-agent-panel').or(main.getByTestId('chat-agent-back'))).toBeVisible();
   if (!(await panel.count())) return;
-  const row = n == null ? panel.getByTestId('chat-agent-row').first() : panel.locator(`[data-testid="chat-agent-row"][data-turn="${n}"]`);
+  // With no `n`: the newest turn of the first row's agent, whichever group it's
+  // in yet (a turn just begun can still read as queued). Then that row by its
+  // key: the rows start folded, and one landing meanwhile mustn't take its place.
+  let key;
+  if (n == null) {
+    await expect(panel.getByTestId('chat-agent-row').first()).toBeVisible();
+    const rows = await panel.getByTestId('chat-agent-row').evaluateAll((els) => els.map((e) => ({ key: e.dataset.key, turn: Number(e.dataset.turn), agent: e.dataset.agent })));
+    key = rows.filter((r) => r.agent === rows[0].agent).sort((a, b) => b.turn - a.turn)[0].key;
+  } else {
+    key = await panel.locator(`[data-testid="chat-agent-row"][data-turn="${n}"]`).getAttribute('data-key');
+  }
+  const row = panel.locator(`[data-testid="chat-agent-row"][data-key="${key}"]`);
   if ((await row.getAttribute('data-open')) !== 'true') await row.locator('.rhead').click();
   await row.getByTestId('chat-agent-row-open').click();
   await expect(main.getByTestId('chat-agent-back')).toBeVisible();

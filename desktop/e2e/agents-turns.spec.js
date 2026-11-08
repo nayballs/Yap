@@ -461,7 +461,8 @@ test('two requests in a Code chat: one agent, one tab with two turns, two report
   await pills.nth(0).click();
   await expect(tab(main)).toBeVisible();
   await expect(rowAt(main, 1)).toHaveAttribute('data-open', 'true');
-  await expect(rowAt(main, 2)).toHaveAttribute('data-open', 'false');
+  // Turn 2's row was opened earlier (the timeline's Open): remembered while the window stays open.
+  await expect(rowAt(main, 2)).toHaveAttribute('data-open', 'true');
   await expect(main.getByTestId('chat-panel-tabs')).toHaveCount(0);
   const reports = thread(main).getByTestId('chat-agent-report');
   await expect(reports).toHaveCount(2);

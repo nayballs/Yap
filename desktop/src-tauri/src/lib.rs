@@ -830,6 +830,8 @@ pub fn run() {
             #[cfg(debug_assertions)]
             shell::e2e::e2e_claude_script,
             #[cfg(debug_assertions)]
+            shell::e2e::e2e_agents_seed,
+            #[cfg(debug_assertions)]
             ai::claude_plan::spare::e2e_claude_spares,
             #[cfg(debug_assertions)]
             shell::e2e::e2e_snip,

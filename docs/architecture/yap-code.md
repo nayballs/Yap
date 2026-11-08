@@ -640,24 +640,33 @@ terminal, "Tell the agent…") is the same under both.
 github.com/JohnnyVizz/claude-kit), ported into Yap's own Svelte and Rust:
 `AgentPanel.svelte`, its rows, groups and numbers in `core/agentPanel.js`
 (pure; the maths it adapts carry the MIT notice there and in
-`agents/usage.rs`). Never savvy's pixel-crab avatars.
+`agents/usage.rs`). The animated character a row follows savvy-progress's
+idea (a little pixel figure that walks while its agent works, a prop moving
+with it); the characters — **Yap's crew** — and every pixel of them are
+Yap's own: savvy's crabs (pixel versions of Anthropic's mascot) are never
+used. See [Yap's crew](#yaps-crew-the-rows-characters).
 
 - **The header**: the agent's Mode (coloured), model and effort, its
-  workspace's path, and three tiles — **Cost** ("≈ $0.13", "on the API" on
-  the plan; "$0.13", "API key" on a key, "≈" while any of it is estimated),
-  **Tokens** (every token its turns used, "80k"; "—" when none said) and
-  **Time** (its turns added up, "4:02"; the time between them left out).
-- **Groups**, each with its count, folding (▾ / ▸): **Needs you** (a turn
-  asking for a step, its plan waiting for Go ahead, or its question, for a
-  day), **Running**, **Finished**, **Queued** (a request not sent yet: behind
-  the turn working, or the agent stopped first), newest first in each.
+  workspace's path, and three compact tiles (40 px, as savvy's) — **Cost**
+  ("≈ $0.13", "on the API" on the plan beside its key; "$0.13", "API key" on
+  a key, "≈" while any of it is estimated), **Tokens** (every token its turns
+  used, "80k"; "—" when none said) and **Time** (its turns added up, "4:02";
+  the time between them left out).
+- **Groups**, each with its count ("Running · 3"), folding (▾ / ▸): **Needs
+  you** (a turn asking for a step, its plan waiting for Go ahead, or its
+  question, for a day), **Running**, **Finished** (its head across the row,
+  **Collapse** / **Expand** at its right), **Queued** (a request not sent
+  yet: behind the turn working, or the agent stopped first), newest first in
+  each.
 - **A row is one turn** of the Code chat's agent (and of any other agent the
   chat has — a fresh one —, grouped the same way; its Open goes to that
-  agent's own tab):
-  - **the model's logo** (`core/modelIcons.js`, `ProviderMark`) in a ring
-    that says how it stands: turning while it runs, amber when it needs you,
-    ✓ when done, grey stopped, red failed, dashed queued; still under
-    reduced motion;
+  agent's own tab), folded to savvy's density:
+  - **its model's character** (`CrewAvatar.svelte`): Haiku, Sonnet, Opus or
+    Fable by the turn's model id (Sonnet when it names none), holding its
+    Mode's prop, in a pose that says how it stands — walking while it works,
+    stopped and looking up with an amber "!" when it needs you, sitting with
+    a ✓ when done, grey when stopped, a red badge when it failed, faint while
+    queued; its label "Opus, working, Auto mode";
   - its **title** on one line, whole on a hover (`ui/overflowTip.js`);
   - **Mode · model · effort** ("Auto · Sonnet 5.5 · Medium"), the Mode in its
     colour (Auto the Code teal, Bypass amber as its chip, Accept edits the
@@ -672,14 +681,72 @@ github.com/JohnnyVizz/claude-kit), ported into Yap's own Svelte and Rust:
     estimate), how long it worked (savvy's `m:ss`);
   - a thin **bar**: its to-dos done out of all, in its Mode's colour; with no
     list, its context's fill in grey (a done one full).
-- **▸ opens a row in place**: its to-do list (✓, ●, ○), its latest steps
-  (the last 8, in the same words as the timeline), "1 command · 2 files
-  changed", and **Open**: the timeline at that turn. Enter or Space opens
-  and folds; ↑ ↓ (Home, End) move between rows.
+- **Rows start folded** (title, Mode · model · effort, "3/7 · step", the
+  stats and the bar), the running one too; **▸ opens a row in place**: its
+  to-do list (✓, ●, ○), its latest steps (the last 8, in the same words as
+  the timeline), "1 command · 2 files changed", and **Open**: the timeline
+  at that turn. Enter or Space opens and folds; ↑ ↓ (Home, End) move between
+  rows. Which rows are open and which groups folded is remembered per agent
+  while the window stays open (`agentPanelMemory.svelte.js`; never saved).
 - **A pill or a report card** opens the panel with its turn's row open and in
-  view; so does a turn's own start (the chat's agent event).
+  view. A turn's own start (the chat's agent event, `auto`) shows the panel
+  and opens no row.
 - **Live** from the events Yap already sends (`yap-agent`, its `usage` and
   `todos`): nothing is polled; the clock ticks once a second.
+
+### Yap's crew: the rows' characters
+
+2026-11-08. One original pixel character a model family, in Yap's tokens,
+drawn in code — never an image file, never a company's mascot or logo shape.
+The motion follows savvy-progress's agents panel (MIT, credited above): legs
+in two groups stepping out of phase on `steps(1)`, a bob, each prop in a
+group of its own with its own keyframes, stopped by reduced motion. The
+characters are Yap's own.
+
+- **Who** (`core/crew.js`, pure: `characterFor(provider, model)`, `propOf`,
+  `crewLabel`): the Claude models are **Yap's speech bubble** (its tail at the
+  lower left) in four builds — **Haiku** small and quick, a leaf on top, darting
+  as it walks; **Sonnet** the all-rounder, the base bubble; **Opus** bigger,
+  in round spectacles, a calm walk without a bob; **Fable** the storyteller,
+  in a knitted scarf whose end streams behind. They yap: their mouths open
+  and close while they work. Ready for wherever Yap shows a model's character
+  later (only the panel does today): **GPT** (and the o-series, GPT-OSS) a box
+  with a screen for a face, **Gemini** / Gemma a tall oval with two bobbles,
+  **Grok** square with a visor and a crest of spikes, **Llama** a woolly puff,
+  **Qwen** a drop, **Mistral** round with a curl of wind, **DeepSeek** round with
+  a periscope, **the on-device model** (provider "ondevice", whatever its family)
+  a chip with pins and a light, and a plain bubble for anything else. A
+  provider's own logo may only ever be a tiny badge on one, from the marks
+  Yap already ships (`core/modelIcons.js`).
+- **The Modes' props** (from the shoulder): **Plan** a magnifying glass,
+  swept, its glass glinting; **Auto** a racing flag, fluttering (two frames),
+  the character running (twice the pace, speed lines behind it); **Manual** a
+  wrench, turning from the shoulder; **Accept edits** a pencil, scribbling,
+  its lines coming and going; **Bypass permissions** a space helmet drawn
+  round the character, floating gently, puffs under its feet.
+- **Drawn** (`views/chat/crew/sprites.js`, pure): an 18 × 16 grid of letters
+  per character (body, highlight, shade, mouth, tail, eyes, accent…), merged
+  into `<rect>`s with classes, 2 CSS px a square (36 × 32; 4 px at size 2),
+  `shape-rendering: crispEdges`. The same markup string for the same
+  arguments, so a row redrawn every second never restarts the walk.
+- **Coloured and moved** (`crew/crew.css`, in the panel's chunk): each
+  character's colour and accent are tokens (`--yap-crew-*`, app.css, light and
+  dark), its highlight, shade, mouth and feet mixed from them. The poses:
+  needs you's eyes up a square, done's body down a square with its eyes shut,
+  stopped grey, queued faint; the badges are HTML (✓, ×, the "!" bubble).
+- **Only on screen**: the panel's `data-crew-paused` holds every animation
+  where it is while the window is hidden or minimised
+  (`stores/windowShown.svelte.js`: the window asked on its focus changes and
+  every 2 s while followed — WebView2 says "visible" for a hidden window) or
+  the panel is out of view (an IntersectionObserver). Reduced motion (Yap's
+  Motion setting or Windows') stops them: still frames.
+- **Tests**: `agents-panel.spec.js` — who a model is, the props and markup;
+  a seeded Code chat (`e2e_agents_seed`, test mode only) with a row in each
+  Mode and a Haiku, Sonnet, Opus and Fable in every pose; the walk running,
+  paused out of view, still under both reduced motions; screenshots light
+  and dark, the avatars at 2× (`12-crew-avatars-2x-*`), and the **crew sheet**
+  (`10-crew-sheet-*`: every character, prop and pose, a test-only overlay
+  drawn with the panel's own markup and CSS, never in the app).
 
 ### The timeline
 
@@ -1291,7 +1358,9 @@ the build's own stand-in replaying `script` from now on),
     under the pill; a step to allow → Needs you; Allow once → Finished, ✓,
     the result's totals and window kept in agents.json, the card folded to
     "7 to-dos · all done"; a follow-up's row; ▸, ↑ ↓, Enter, a group folding,
-    Open and Back, a pill at its row. Light, dark and narrow.
+    Open and Back, a pill at its row. Light, dark and narrow. Yap's crew: its
+    character a row, each Mode's prop and pose, rows folded and remembered,
+    moving only on screen, still under reduced motion, the crew sheet.
 - **Unit** for what a turn used (`agents::usage`): a call counted once, the
   context its latest call, a helper's call costed but not the context, a
   result settling the estimate and saying the window, a turn carried on, the

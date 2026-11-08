@@ -6,24 +6,35 @@
   //   path, and three tiles — Cost (≈ on the plan: what the API would
   //   charge), Tokens and Time (its turns added up).
   // - **Groups**, each with its count, folding: Needs you (a card waits on
-  //   the person), Running, Finished, Queued. A row is one turn of the Code
-  //   chat's agent (and of any other agent it has): its model's logo in a
-  //   ring that says how it stands (moving while it runs, amber when it
-  //   needs you, ✓ done, grey stopped, red failed), its title (whole on a
-  //   hover), Mode · model · effort, "3/7 · the to-do in progress" (else the
-  //   line it's on), ctx % · tokens · ≈ $ · time, and a thin bar: its to-dos
-  //   done, else its context's fill in grey.
-  // - **▸ opens a row** in place: its to-do list, its latest steps, how many
-  //   commands and files, and **Open** — the turn's whole timeline (the tab's
-  //   other view). Enter or Space opens and folds; ↑ ↓ move between rows.
+  //   the person), Running, Finished (its head says Collapse / Expand),
+  //   Queued. A row is one turn of the Code chat's agent (and of any other
+  //   agent it has): **its model's character** (Yap's crew,
+  //   CrewAvatar.svelte: Haiku, Sonnet, Opus or Fable, holding its Mode's
+  //   prop — walking while it works, looking up with an amber "!" when it
+  //   needs you, sitting with a ✓ done, grey stopped, a red badge failed),
+  //   its title (whole on a hover), Mode · model · effort, "3/7 · the to-do
+  //   in progress" (else the line it's on), ctx % · tokens · ≈ $ · time, and
+  //   a thin bar: its to-dos done, else its context's fill in grey.
+  // - **Rows start folded**, the running one too; **▸ opens a row** in
+  //   place: its to-do list, its latest steps, how many commands and files,
+  //   and **Open** — the turn's whole timeline (the tab's other view). Enter
+  //   or Space opens and folds; ↑ ↓ move between rows. Which rows are open
+  //   and which groups folded is remembered per agent while the window stays
+  //   open (agentPanelMemory.svelte.js); a pill or a report card opens its own.
+  // - **The crew moves only on screen**: paused while the window is hidden
+  //   or minimised (stores/windowShown.svelte.js) or the panel is out of
+  //   view; still under reduced motion (crew.css).
   // Live from the `yap-agent` events the tab and stores/agents.svelte.js
   // hear: nothing polled.
-  import { tick, untrack } from 'svelte';
+  import { onMount, tick, untrack } from 'svelte';
   import { panelRows, panelGroups, panelTotals, statsLine, fmtTokens, fmtClock, costWords, latestSteps, modeTone } from '../../core/agentPanel.js';
   import { modeLabel, modelLabel, costLine } from '../../core/agents.js';
   import { effortLabel } from '../../core/effort.js';
+  import { characterFor, crewLabel } from '../../core/crew.js';
   import { overflowTip } from '../../ui/overflowTip.js';
-  import ProviderMark from './ProviderMark.svelte';
+  import { windowShown, followWindowShown } from '../../stores/windowShown.svelte.js';
+  import { panelMemory } from './agentPanelMemory.svelte.js';
+  import CrewAvatar from './CrewAvatar.svelte';
 
   /**
    * `agent`: the tab's agent as it is now; `agents`: the Code chat's agents,
@@ -39,9 +50,24 @@
   const cost = $derived(costWords(totals.cost, { pay: agent?.pay, estimated: totals.approx && agent?.pay === 'key' }));
 
   let rootEl = $state(null);
-  /** Group id → folded; row key → open. */
-  let folded = $state({});
-  let open = $state({});
+  /** Row key → open, "<agent>:<group>" → folded: remembered while the window stays open. */
+  const open = $derived(panelMemory.open);
+  const groupKey = (g) => `${agent?.id ?? ''}:${g}`;
+  const isFolded = (g) => !!panelMemory.folded[groupKey(g)];
+  const setFolded = (g, v) => (panelMemory.folded = { ...panelMemory.folded, [groupKey(g)]: v });
+
+  // The crew moves only while it can be seen: the window on screen, the panel in view.
+  let inView = $state(true);
+  const paused = $derived(!(windowShown.shown && inView));
+  onMount(() => {
+    const stop = followWindowShown();
+    const seen = new IntersectionObserver((entries) => (inView = entries[entries.length - 1].isIntersecting));
+    if (rootEl) seen.observe(rootEl);
+    return () => {
+      stop();
+      seen.disconnect();
+    };
+  });
 
   // A pill's or a report card's turn: its row open, its group unfolded, in view.
   $effect(() => {
@@ -49,15 +75,17 @@
     want?.seq;
     if (!key) return;
     untrack(async () => {
-      open = { ...open, [key]: true };
+      panelMemory.open = { ...panelMemory.open, [key]: true };
       const g = rows.find((r) => r.key === key)?.state;
-      if (g && folded[g]) folded = { ...folded, [g]: false };
+      if (g && isFolded(g)) setFolded(g, false);
       await tick();
       rootEl?.querySelector(`[data-testid="chat-agent-row"][data-key="${CSS.escape(key)}"]`)?.scrollIntoView?.({ block: 'nearest' });
     });
   });
 
-  const toggle = (key) => (open = { ...open, [key]: !open[key] });
+  const toggle = (key) => (panelMemory.open = { ...panelMemory.open, [key]: !panelMemory.open[key] });
+  /** A row's character, from its model: Haiku, Sonnet, Opus or Fable (Sonnet when it says none). */
+  const crewOf = (r) => characterFor('claude-plan', r.model);
 
   /** ↑ ↓ (and Home, End) between the rows' heads. */
   function nav(e) {
@@ -76,7 +104,7 @@
   const plural = (n, one, many) => `${n} ${n === 1 ? one : many}`;
 </script>
 
-<div class="apanel" bind:this={rootEl} data-testid="chat-agent-panel">
+<div class="apanel" bind:this={rootEl} data-testid="chat-agent-panel" data-crew-paused={paused}>
   <header class="phead">
     <p class="pmeta" data-testid="chat-agent-panel-meta">
       <span class="mode tone-{modeTone(agent?.mode)}">{modeLabel(agent?.mode)}</span>
@@ -86,9 +114,8 @@
     {#if agent?.path}<p class="ppath" title={agent.path}>{agent.path}</p>{/if}
     <div class="tiles" role="group" aria-label="In all">
       <div class="tile" data-testid="chat-agent-total-cost" title={costLine(agent)}>
-        <span class="tk">Cost</span>
+        <span class="tk">Cost <span class="tc">{agent?.pay === 'key' ? 'API key' : 'on the API'}</span></span>
         <span class="tv">{cost || '—'}</span>
-        <span class="tc">{agent?.pay === 'key' ? 'API key' : 'on the API'}</span>
       </div>
       <div class="tile" data-testid="chat-agent-total-tokens">
         <span class="tk">Tokens</span>
@@ -102,9 +129,17 @@
   </header>
 
   {#each groups as g (g.id)}
-    {@const shut = !!folded[g.id]}
+    {@const shut = isFolded(g.id)}
     <section class="group" data-testid="chat-agent-group" data-group={g.id} aria-label={g.label}>
-      <button type="button" class="ghead" aria-expanded={!shut} onclick={() => (folded = { ...folded, [g.id]: !shut })} data-testid="chat-agent-group-head">
+      <button
+        type="button"
+        class="ghead"
+        class:wide={g.id === 'finished'}
+        data-act={g.id === 'finished' ? (shut ? 'Expand' : 'Collapse') : null}
+        aria-expanded={!shut}
+        onclick={() => setFolded(g.id, !shut)}
+        data-testid="chat-agent-group-head"
+      >
         <svg class="chev" class:down={!shut} viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m9 6 6 6-6 6" /></svg>
         <span>{g.label} · {g.rows.length}</span>
       </button>
@@ -124,10 +159,13 @@
                 onkeydown={nav}
                 use:overflowTip={{ text: r.title }}
               >
-                <span class="avatar ring-{r.ring}" data-testid="chat-agent-row-avatar" data-ring={r.ring} data-icon={r.icon}>
-                  <ProviderMark icon={r.icon} size={16} />
-                  {#if r.ring === 'done'}<span class="badge" aria-hidden="true">✓</span>{/if}
-                </span>
+                <CrewAvatar
+                  character={crewOf(r)}
+                  prop={r.modeTone}
+                  pose={r.pose}
+                  label={crewLabel(crewOf(r), r.pose, r.modeWord)}
+                  testid="chat-agent-row-avatar"
+                />
                 <span class="rmain">
                   <span class="rtop">
                     <span class="ctitle rtitle" data-testid="chat-agent-row-title">{r.title}</span>
@@ -244,18 +282,26 @@
     gap: 6px;
     margin-top: 8px;
   }
+  /* Compact tiles, as savvy's: the key over the value, 40 px tall. */
   .tile {
     display: flex;
     flex-direction: column;
+    justify-content: center;
     gap: 1px;
     min-width: 0;
-    padding: 7px 9px 8px;
+    height: 40px;
+    box-sizing: border-box;
+    padding: 0 9px;
     border-radius: 8px;
     background: var(--yap-paper-s1);
   }
   .tk {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
     color: var(--yap-paper-text-2);
     font-size: 11px;
+    line-height: 14px;
   }
   .tv {
     overflow: hidden;
@@ -264,14 +310,15 @@
     color: var(--yap-paper-ink);
     font-size: 15px;
     font-weight: 650;
+    line-height: 19px;
     font-variant-numeric: tabular-nums;
   }
   .tc {
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
     color: var(--yap-paper-muted);
     font-size: 10.5px;
+  }
+  .tc::before {
+    content: '· ';
   }
   .group {
     display: flex;
@@ -294,6 +341,16 @@
   }
   .ghead:hover {
     color: var(--yap-paper-ink);
+  }
+  /* Finished's head across the row, "Collapse" / "Expand" at its right (read
+     as the head's state, aria-expanded, not as more words). */
+  .ghead.wide {
+    align-self: stretch;
+  }
+  .ghead.wide::after {
+    content: attr(data-act) / '';
+    margin-left: auto;
+    font-weight: 500;
   }
   .ghead:focus-visible,
   .rhead:focus-visible,
@@ -330,7 +387,7 @@
     gap: 10px;
     width: 100%;
     box-sizing: border-box;
-    padding: 9px 4px 10px;
+    padding: 8px 4px 9px;
     border: none;
     border-radius: 8px;
     background: none;
@@ -342,81 +399,9 @@
   .rhead:hover {
     background: var(--yap-paper-s1);
   }
-  /* The model's logo in a ring that says how the turn stands. */
-  .avatar {
-    position: relative;
-    flex: 0 0 auto;
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    width: 30px;
-    height: 30px;
+  /* The row's character (CrewAvatar.svelte, crew.css): level with the title. */
+  .rhead > :global(.crew) {
     margin-top: 1px;
-    border-radius: 50%;
-    background: var(--yap-paper-s1);
-  }
-  .avatar::before {
-    content: '';
-    position: absolute;
-    inset: 0;
-    box-sizing: border-box;
-    border: 2px solid var(--ring, var(--yap-paper-rule));
-    border-radius: 50%;
-  }
-  .ring-running::before {
-    border-color: color-mix(in srgb, var(--yap-code) 22%, transparent);
-    border-top-color: var(--yap-code);
-  }
-  @media (prefers-reduced-motion: no-preference) {
-    .ring-running::before {
-      animation: spin 1.1s linear infinite;
-    }
-  }
-  :global(:root[data-motion='reduced']) .ring-running::before {
-    animation: none;
-    border-color: var(--yap-code);
-  }
-  .ring-asking::before {
-    border-color: var(--yap-warning);
-  }
-  .ring-done::before {
-    border-color: color-mix(in srgb, var(--yap-success) 55%, transparent);
-  }
-  .ring-stopped::before {
-    border-color: color-mix(in srgb, var(--yap-paper-muted) 55%, transparent);
-  }
-  .ring-failed::before {
-    border-color: var(--yap-danger);
-  }
-  .ring-queued::before {
-    border-style: dashed;
-    border-color: var(--yap-paper-muted);
-  }
-  .ring-stopped :global(.pmark),
-  .ring-queued :global(.pmark) {
-    opacity: 0.55;
-  }
-  @keyframes spin {
-    to {
-      transform: rotate(360deg);
-    }
-  }
-  .badge {
-    position: absolute;
-    right: -3px;
-    bottom: -3px;
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    width: 13px;
-    height: 13px;
-    border: 2px solid var(--yap-paper);
-    border-radius: 50%;
-    background: var(--yap-success);
-    color: var(--yap-paper);
-    font-size: 8px;
-    font-weight: 800;
-    line-height: 1;
   }
   .rmain {
     flex: 1 1 auto;
@@ -448,7 +433,7 @@
     text-overflow: ellipsis;
     white-space: nowrap;
     color: var(--yap-paper-text-2);
-    font-size: 11.5px;
+    font-size: 11px;
   }
   .rthird {
     display: flex;
@@ -456,7 +441,7 @@
     align-items: baseline;
     column-gap: 10px;
     min-width: 0;
-    font-size: 11.5px;
+    font-size: 11px;
   }
   .rline {
     flex: 1 1 120px;
@@ -477,8 +462,8 @@
   }
   .rbar {
     display: block;
-    height: 3px;
-    margin-top: 4px;
+    height: 4px;
+    margin-top: 5px;
     overflow: hidden;
     border-radius: 2px;
     background: var(--yap-paper-s2);
@@ -493,7 +478,7 @@
     background: var(--yap-paper-muted);
   }
   .rmore {
-    margin: 0 4px 10px 44px;
+    margin: 0 4px 10px 50px;
     font-size: 12px;
   }
   .todolist,

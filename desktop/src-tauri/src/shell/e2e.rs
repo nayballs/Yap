@@ -714,6 +714,31 @@ pub fn e2e_claude_script(script: Option<String>) -> Result<(), String> {
     Ok(())
 }
 
+/// Test mode only: `agents` put straight into Yap Code's store (each as
+/// `agents.json` keeps it), and every window told — so a spec can show the
+/// Agent panel's rows in every Mode, model and state at once (its crew,
+/// `agents-panel.spec.js`) without running Claude Code for each. Nothing is
+/// started: an agent seeded "running" only looks it.
+#[cfg(debug_assertions)]
+#[tauri::command]
+pub fn e2e_agents_seed(app: AppHandle, agents: Vec<crate::agents::store::Agent>) -> Result<usize, String> {
+    use tauri::Emitter;
+    if !active() {
+        return Err("Only in e2e test mode".to_string());
+    }
+    if let Some(bad) = agents.iter().find(|a| !crate::agents::store::valid_id(&a.id)) {
+        return Err(format!("Not an agent id: {:?}", bad.id));
+    }
+    let n = agents.len();
+    for agent in agents {
+        let (id, status) = (agent.id.clone(), agent.status);
+        crate::agents::store::insert(agent);
+        let _ = app.emit("yap-agent", serde_json::json!({ "id": id, "status": status }));
+    }
+    tracing::info!(n, "e2e: agents seeded");
+    Ok(n)
+}
+
 /// Test mode only: the next `count` saves of a store (`store`: its id,
 /// "notes", "history", "chats"…) fail as if the disk were full, so a spec
 /// sees what the person would (`saving.rs`). `count` 0: none.

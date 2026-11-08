@@ -38,7 +38,6 @@
 //   DEALINGS IN THE SOFTWARE.
 import { isLive, turnsOf, todosOf, timelineOf, statusWord, turnStatusWord, planWaits, money, modeLabel, modelLabel, titleOf } from './agents.js';
 import { effortLabel } from './effort.js';
-import { familyIcon } from './modelIcons.js';
 
 /** A question or a plan still waits on the person this long after its turn ended (as Chat's status dots: core/chatStatus.js). */
 export const WAITS_FOR_S = 24 * 3600;
@@ -131,13 +130,17 @@ export function modeTone(mode) {
   return 'auto';
 }
 
-/** The avatar ring's state: running (moving), asking (amber), done (✓), stopped (grey), failed (red), queued (dashed). */
-export function ringOf(status, started = true) {
-  if (status === 'running') return 'running';
-  if (status === 'asking') return 'asking';
+/**
+ * **The row's character's pose** (views/chat/crew/: Yap's crew): working
+ * (walks, its Mode's prop moving), needs (stops, looks up, an amber "!"),
+ * done (sits, ✓), stopped (grey, still), failed (a red badge), queued (faint).
+ */
+export function poseOf(status, started = true) {
+  if (status === 'running') return 'working';
+  if (status === 'asking') return 'needs';
   if (status === 'done') return 'done';
   if (status === 'failed') return 'failed';
-  if (status === 'queued' && started) return 'running';
+  if (status === 'queued' && started) return 'working';
   if (status === 'queued') return 'queued';
   return 'stopped';
 }
@@ -233,13 +236,12 @@ export function panelRows(agents, { logs = {}, steps = {}, now = Date.now() / 10
         state,
         status: t.status,
         statusWord: turnStatusWord(t),
-        ring: ringOf(t.status, Number(t.startedTs) > 0),
+        pose: poseOf(t.status, Number(t.startedTs) > 0),
         mode: t.mode || agent.mode || '',
         modeWord: modeLabel(t.mode || agent.mode),
         modeTone: modeTone(t.mode || agent.mode),
         model,
         modelWord: model ? shortModel(model) : '',
-        icon: familyIcon(model) || 'claude',
         effortWord: effortLabel(t.effort || agent.effort),
         todos,
         line: rowLine(agent, t, { todos, line, state }),

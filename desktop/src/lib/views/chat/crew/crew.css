@@ -1,0 +1,364 @@
+/* **Yap's crew** (sprites.js draws them, core/crew.js says who's who): the
+   colours, the poses and the motion, CSS only — the compositor runs it, no
+   timers, no redraws. Each character's colour is a token of its own
+   (`--yap-crew-*`, app.css, light and dark); its highlight, shade, mouth and
+   feet are mixed from it. Motion follows savvy-progress's agents panel
+   (MIT, github.com/JohnnyVizz/claude-kit): legs out of phase on steps(1),
+   a bob, each prop's own keyframes. Still under reduced motion (Yap's
+   Motion setting or Windows': app.css stops every animation), and paused
+   wherever `data-crew-paused="true"` (the Agent panel off screen). */
+
+.crew {
+  --t: var(--t0, 0.6s);
+  --cb: var(--yap-crew-generic);
+  --ca: var(--yap-crew-generic);
+  --ch: color-mix(in srgb, var(--cb) 58%, #fff);
+  --cd: color-mix(in srgb, var(--cb) 72%, #000);
+  --ce: var(--yap-crew-ink);
+  --cm: color-mix(in srgb, var(--cb) 38%, var(--yap-crew-ink));
+  --cf: color-mix(in srgb, var(--cb) var(--yap-crew-feet), var(--yap-crew-ink));
+  --cA: color-mix(in srgb, var(--ca) 70%, #000);
+  position: relative;
+  display: inline-block;
+  flex: 0 0 auto;
+  width: 36px;
+  height: 32px;
+  line-height: 0;
+  vertical-align: top;
+}
+.crew.size-2 {
+  width: 72px;
+  height: 64px;
+}
+.crew > svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+}
+.crew.pr-auto {
+  --t: calc(var(--t0, 0.6s) / 2);
+}
+
+/* ---- who: each character's colour and accent ---- */
+.crew.ch-haiku {
+  --cb: var(--yap-crew-haiku);
+  --ca: var(--yap-crew-haiku-accent);
+}
+.crew.ch-sonnet {
+  --cb: var(--yap-crew-sonnet);
+}
+.crew.ch-opus {
+  --cb: var(--yap-crew-opus);
+}
+.crew.ch-fable {
+  --cb: var(--yap-crew-fable);
+  --ca: var(--yap-crew-fable-accent);
+}
+.crew.ch-gpt {
+  --cb: var(--yap-crew-gpt);
+  --ca: var(--yap-crew-gpt-accent);
+  /* its eyes and mouth lit on its screen */
+  --ce: var(--ca);
+  --cm: color-mix(in srgb, var(--ca) 55%, var(--yap-crew-ink));
+}
+.crew.ch-gemini {
+  --cb: var(--yap-crew-gemini);
+  --ca: var(--yap-crew-gemini-accent);
+}
+.crew.ch-grok {
+  --cb: var(--yap-crew-grok);
+  --ca: var(--yap-crew-grok-accent);
+  --ce: var(--ca);
+}
+.crew.ch-llama {
+  --cb: var(--yap-crew-llama);
+  --ca: var(--yap-crew-llama-accent);
+  --ce: var(--yap-crew-white);
+  --cm: color-mix(in srgb, var(--ca) 55%, var(--yap-crew-ink));
+}
+.crew.ch-qwen {
+  --cb: var(--yap-crew-qwen);
+}
+.crew.ch-mistral {
+  --cb: var(--yap-crew-mistral);
+  --ca: var(--yap-crew-mistral-accent);
+}
+.crew.ch-deepseek {
+  --cb: var(--yap-crew-deepseek);
+}
+.crew.ch-local {
+  --cb: var(--yap-crew-local);
+  --ca: var(--yap-crew-local-accent);
+  /* its feet are pins */
+  --cf: var(--yap-crew-metal);
+}
+
+/* ---- the squares' colours (sprites.js's letters) ---- */
+.crew .pb {
+  fill: var(--cb);
+}
+.crew .ph {
+  fill: var(--ch);
+}
+.crew .pd {
+  fill: var(--cd);
+}
+.crew .pm {
+  fill: var(--cm);
+}
+.crew .pe {
+  fill: var(--ce);
+}
+.crew .pf {
+  fill: var(--cf);
+}
+.crew .pa {
+  fill: var(--ca);
+}
+.crew .pA {
+  fill: var(--cA);
+}
+.crew .pk {
+  fill: var(--yap-crew-ink);
+}
+.crew .pw {
+  fill: var(--yap-crew-white);
+}
+.crew .pg {
+  fill: var(--yap-crew-metal);
+}
+.crew .pG {
+  fill: var(--yap-crew-metal-dark);
+}
+.crew .pl {
+  fill: var(--yap-crew-glass);
+}
+.crew .pn {
+  fill: var(--yap-crew-wood);
+}
+.crew .py {
+  fill: var(--yap-crew-pencil);
+}
+.crew .pY {
+  fill: color-mix(in srgb, var(--yap-crew-pencil) 72%, #000);
+}
+.crew .pp {
+  fill: var(--yap-crew-eraser);
+}
+.crew .ps {
+  fill: var(--yap-paper-faint);
+}
+.crew .pv {
+  fill: var(--yap-crew-white);
+  opacity: 0.75;
+}
+
+/* Frames: f1 shows when still, f2 is its other frame; w1 / w2 only while working. */
+.crew .f2,
+.crew .w1,
+.crew .w2 {
+  opacity: 0;
+}
+
+/* ---- poses ---- */
+/* Needs you: stopped, looking up. */
+.crew.po-needs .c-eyes {
+  transform: translateY(-1px);
+}
+/* Done: sits down, eyes shut happily. */
+.crew.po-done .c-bod {
+  transform: translateY(1px);
+}
+.crew.po-done .c-eu {
+  opacity: 0;
+}
+/* Stopped: grey and still; queued: faint. */
+.crew.po-stopped > svg {
+  filter: grayscale(1);
+  opacity: 0.5;
+}
+.crew.po-queued > svg {
+  filter: grayscale(0.7);
+  opacity: 0.4;
+}
+
+/* ---- working: walks, its prop moving ---- */
+.crew.po-working:not(.pr-bypass) .c-fl {
+  animation: crew-step var(--t) steps(1) infinite;
+}
+.crew.po-working:not(.pr-bypass) .c-fr {
+  animation: crew-step var(--t) steps(1) infinite calc(var(--t) / -2);
+}
+.crew.po-working:not(.pr-bypass):not(.calm) .c-bod {
+  animation: crew-bob calc(var(--t) / 2) steps(1) infinite calc(var(--t) / -4);
+}
+/* Haiku darts about. */
+.crew.ch-haiku.po-working:not(.pr-bypass) .c-all {
+  animation: crew-dart calc(var(--t) * 4) steps(1) infinite;
+}
+/* Its frames: the character's own (a leaf, a scarf, a curl, a light) and its prop's. */
+.crew.po-working .f1,
+.crew.po-working .w1 {
+  animation: crew-f1 var(--fd, 0.8s) steps(1) infinite;
+}
+.crew.po-working .f2,
+.crew.po-working .w2 {
+  animation: crew-f2 var(--fd, 0.8s) steps(1) infinite;
+}
+/* Plan: the magnifying glass sweeps. */
+.crew.pr-plan.po-working .c-prop {
+  animation: crew-sweep 1.2s steps(1) infinite;
+}
+/* Manual: the wrench turns. */
+.crew.pr-manual.po-working .c-prop {
+  animation: crew-turn 0.9s ease-in-out infinite alternate;
+}
+/* Accept edits: the pencil scribbles. */
+.crew.pr-edits.po-working .c-prop {
+  animation: crew-scribble 0.48s steps(1) infinite;
+}
+/* Bypass permissions: floats gently in its helmet. */
+.crew.pr-bypass.po-working .c-all {
+  animation: crew-float 2.4s ease-in-out infinite;
+}
+
+@keyframes crew-step {
+  50% {
+    transform: translateY(-1px);
+  }
+}
+@keyframes crew-bob {
+  50% {
+    transform: translateY(1px);
+  }
+}
+@keyframes crew-dart {
+  25% {
+    transform: translateX(1px);
+  }
+  50% {
+    transform: none;
+  }
+  75% {
+    transform: translateX(-1px);
+  }
+}
+@keyframes crew-f1 {
+  0% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0;
+  }
+}
+@keyframes crew-f2 {
+  0% {
+    opacity: 0;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+@keyframes crew-sweep {
+  25% {
+    transform: translate(1px, 0);
+  }
+  50% {
+    transform: translate(1px, 1px);
+  }
+  75% {
+    transform: translate(0, 1px);
+  }
+}
+@keyframes crew-turn {
+  from {
+    transform: rotate(10deg);
+  }
+  to {
+    transform: rotate(-30deg);
+  }
+}
+@keyframes crew-scribble {
+  25% {
+    transform: translate(1px, 0);
+  }
+  50% {
+    transform: translate(0, 1px);
+  }
+  75% {
+    transform: translate(1px, 1px);
+  }
+}
+@keyframes crew-float {
+  50% {
+    transform: translateY(-1px);
+  }
+}
+
+/* Off screen (the window hidden, the panel out of view): held where it is. */
+[data-crew-paused='true'] .crew,
+[data-crew-paused='true'] .crew * {
+  animation-play-state: paused !important;
+}
+@media (prefers-reduced-motion: reduce) {
+  .crew,
+  .crew * {
+    animation: none !important;
+  }
+}
+
+/* ---- badges: done ✓, failed ×, and needs you's "!" bubble ---- */
+.crew .badge {
+  position: absolute;
+  right: -3px;
+  bottom: -3px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  box-sizing: content-box;
+  width: 11px;
+  height: 11px;
+  border: 2px solid var(--yap-paper);
+  border-radius: 50%;
+  color: var(--yap-paper);
+  font-size: 8px;
+  font-weight: 800;
+  line-height: 1;
+}
+.crew .badge.done {
+  background: var(--yap-success);
+}
+.crew .badge.failed {
+  background: var(--yap-danger);
+  font-size: 10px;
+}
+.crew.size-2 .badge {
+  width: 18px;
+  height: 18px;
+  font-size: 12px;
+}
+.crew .bubble {
+  position: absolute;
+  left: -4px;
+  top: -5px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  box-sizing: content-box;
+  width: 10px;
+  height: 11px;
+  border: 2px solid var(--yap-paper);
+  border-radius: 7px;
+  background: var(--yap-warning);
+  color: var(--yap-paper);
+  font-size: 9px;
+  font-weight: 800;
+  line-height: 1;
+}
+.crew.size-2 .bubble {
+  width: 16px;
+  height: 18px;
+  border-radius: 10px;
+  font-size: 13px;
+}
