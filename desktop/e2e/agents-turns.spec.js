@@ -189,7 +189,7 @@ const lastTool = (fakeLlm) => JSON.parse(fakeLlm.requests.filter((r) => r.messag
 
 async function send(main, text) {
   await main.getByRole('textbox', { name: 'Message' }).fill(text);
-  await main.getByRole('button', { name: 'Send' }).click();
+  await main.getByRole('button', { name: 'Send', exact: true }).click();
 }
 
 async function closeTab(main) {

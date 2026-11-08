@@ -173,7 +173,7 @@ const play = (yap, name, chatTurns, agent = AGENT) => yap.invoke('e2e_claude_scr
 
 async function send(main, text) {
   await main.getByRole('textbox', { name: 'Message' }).fill(text);
-  await main.getByRole('button', { name: 'Send' }).click();
+  await main.getByRole('button', { name: 'Send', exact: true }).click();
 }
 
 async function freshChat(main) {
@@ -235,7 +235,7 @@ test('typed on the plan: asked first in the thread, the agent runs in the named 
   await expect(card.getByTestId('chat-agent-brief')).toHaveText(brief.brief);
   expect((await agents(yap)).length).toBe(before);
   await shot(main, '01-plan-chat-asks-before-a-agent');
-  await card.getByRole('button', { name: 'Send' }).click();
+  await card.getByRole('button', { name: 'Send', exact: true }).click();
   await expect(card).toHaveAttribute('data-state', 'allowed');
   await expect(lastAnswer(main)).toHaveText(STARTED, { timeout: 20_000 });
   await expect(chipsOfLast(main)).toHaveText(['Sent an agent to garden-planner']);

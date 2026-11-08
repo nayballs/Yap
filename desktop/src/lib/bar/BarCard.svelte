@@ -23,6 +23,7 @@
   import { fadeTimer, countdownClock } from './cardTimers.svelte.js';
   import { fillHotkey } from '../core/hotkeys.js';
   import { renderMarkdown } from '../core/markdown.js';
+  import { FEATURE_NAME } from '../core/codeChats.js';
 
   /** @type {{ card: any, paused?: boolean, onaction: (action: string) => void }} */
   let { card, paused = false, onaction } = $props();
@@ -63,8 +64,9 @@
     language: 'Languages',
     // A save that failed (shell/saving.rs), or "Saved" after Try again.
     save: 'Saving',
-    // An agent done, or a running agent asking to take a step (agents/).
-    agent: 'Agent',
+    // An agent done, or a running agent asking to take a step (agents/):
+    // the feature's name, as the other chips name theirs.
+    agent: FEATURE_NAME,
   };
   const answer = $derived(card.style === 'answer');
   const chip = $derived(card.chip ?? CHIPS[card.icon] ?? null);

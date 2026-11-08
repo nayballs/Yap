@@ -340,7 +340,7 @@ const railChat = (main) => sidebar(main).getByRole('button', { name: 'Chat', exa
 
 async function send(main, text) {
   await main.getByRole('textbox', { name: 'Message' }).fill(text);
-  await main.getByRole('button', { name: 'Send' }).click();
+  await main.getByRole('button', { name: 'Send', exact: true }).click();
 }
 
 async function closeTab(main) {

@@ -162,7 +162,7 @@ const agentOf = async (yap, id) => (await agents(yap)).find((j) => j.id === id);
 
 async function send(main, text) {
   await main.getByRole('textbox', { name: 'Message' }).fill(text);
-  await main.getByRole('button', { name: 'Send' }).click();
+  await main.getByRole('button', { name: 'Send', exact: true }).click();
 }
 
 /** A new code chat in garden-planner. */

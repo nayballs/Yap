@@ -81,7 +81,7 @@ async function freshChat(main) {
 
 async function send(main, text) {
   await box(main).fill(text);
-  await main.getByRole('button', { name: 'Send' }).click();
+  await main.getByRole('button', { name: 'Send', exact: true }).click();
 }
 
 /** The wheel turned up over the thread (a real wheel event, as a mouse's). */
@@ -365,7 +365,7 @@ test("an agent while you're at the bottom: its ask-first card, its tab opening b
   await inView(main, [card]);
 
   // Started: its tab opens beside the chat (the thread narrower, its lines longer).
-  await card.getByRole('button', { name: 'Send' }).click();
+  await card.getByRole('button', { name: 'Send', exact: true }).click();
   await expect.poll(async () => (await agents(yap)).length, { message: 'an agent to start' }).toBe(before + 1);
   await expect(main.getByTestId('chat-agent')).toBeVisible();
   await expect(lastAnswer(main)).toContainText("I'll tell you when it's done.");

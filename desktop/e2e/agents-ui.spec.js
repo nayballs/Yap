@@ -310,7 +310,7 @@ async function openMode(main) {
 
 async function send(main, text) {
   await main.getByRole('textbox', { name: 'Message' }).fill(text);
-  await main.getByRole('button', { name: 'Send' }).click();
+  await main.getByRole('button', { name: 'Send', exact: true }).click();
 }
 
 async function freshChat(main, { agentsOn = true } = {}) {
@@ -1064,7 +1064,7 @@ test('the ask-first card reads as an agent: folder, path, mode, the whole brief,
   await expect(card.locator('.jwhy')).toHaveText('No agent has worked in this folder before. Only you can say yes.');
   expect((await agents(yap)).length).toBe(before);
   await shot(main, '10-agent-confirm');
-  await card.getByRole('button', { name: 'Send' }).click();
+  await card.getByRole('button', { name: 'Send', exact: true }).click();
   await expect(card).toHaveAttribute('data-state', 'allowed');
   await expect(card.locator('.jdone')).toHaveText('Sent.');
   const agent = await ended(yap, (await newAgent(yap, before)).id);
@@ -1165,7 +1165,7 @@ test('Settings → Yap Code: the switch, Claude Code, pay with, defaults, folder
 
   // The switch, with its one line.
   const enabled = dialog.locator('[data-setting="yap-code-enabled"]');
-  await expect(enabled).toContainText('Let Chat and the Voice Assistant hand tasks to your own Claude Code, in workspaces you choose.');
+  await expect(enabled).toContainText('Let Chat and the Voice Assistant send agents, your own Claude Code, to work in workspaces you choose.');
   await enabled.getByRole('button', { name: 'Yap Code' }).click();
   await expect.poll(async () => (await yap.invoke('get_config')).agentsEnabled).toBe(true);
 

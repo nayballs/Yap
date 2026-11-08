@@ -132,7 +132,7 @@ async function expectComposerInside(main) {
 
 async function send(main, text) {
   await box(main).fill(text);
-  await main.getByRole('button', { name: 'Send' }).click();
+  await main.getByRole('button', { name: 'Send', exact: true }).click();
 }
 
 async function theme(yap, main, which) {

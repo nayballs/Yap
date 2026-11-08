@@ -172,7 +172,7 @@ const script = (yap, lines, name) => yap.invoke('e2e_claude_script', { script: w
 
 async function send(main, text) {
   await main.getByRole('textbox', { name: 'Message' }).fill(text);
-  await main.getByRole('button', { name: 'Send' }).click();
+  await main.getByRole('button', { name: 'Send', exact: true }).click();
 }
 
 async function freshChat(main) {
@@ -424,7 +424,7 @@ test('a folder new to agents is asked first, and an agent never starts or is ste
   await expect(card).toContainText('No agent has worked in this folder before.');
   expect((await agents(yap)).length).toBe(before);
   await shot(main, '02-asked-before-a-new-folder');
-  await card.getByRole('button', { name: 'Send' }).click();
+  await card.getByRole('button', { name: 'Send', exact: true }).click();
   await expect(lastAnswer(main)).toHaveText("On it: I've sent an agent to recipe-box.");
   const agent = await ended(yap, (await newAgent(yap, before)).id);
   expect(agent).toMatchObject({ folder: 'recipe-box', path: RECIPES, status: 'done' });

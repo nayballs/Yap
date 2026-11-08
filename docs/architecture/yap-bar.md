@@ -283,7 +283,7 @@ The always-there pill above the taskbar: the `overlay` window's Rust side (regio
   `bar/BarCard.svelte` (notices: update, guard rails, "Taking notes", the
   call ending, errors) is Wispr's card in Yap's colours: 400 wide,
   the bar surface with a 1 px edge, radius 16, padding 20; a chip naming its
-  kind (Update, Meeting, Call, Tip, Error, Agent — icon `agent`, 2026-11-07; icon `tip` = a bulb, the coaching
+  kind (Update, Meeting, Call, Tip, Error, Yap Code — icon `agent`, 2026-11-07; icon `tip` = a bulb, the coaching
   hints, whose `{key}` the card names from its `hotkey`), the title 15 / 600, the body 15
   muted, a ghost button and a primary one (ink on light, cream on dark) at
   radius 8, the ✕ 24×24 at 30 % top-right; a `countdown` line with a ring
