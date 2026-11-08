@@ -9,6 +9,11 @@
 // desktop/e2e/agents-ui.spec.js.
 import { dollars } from './money.js';
 import { FEATURE_NAME } from './codeChats.js';
+// What the main window's chunk needs at start-up (stores/agents.svelte.js)
+// lives in agentNow.js, so the rest of this file loads with the views that
+// show agents (frontend.md, "One chunk per window").
+import { isLive, PLAN_WAITING, latestStep } from './agentNow.js';
+export { isLive, PLAN_WAITING, latestStep };
 
 /** An agent's status as the screens say it. */
 export const STATUS_WORDS = {
@@ -20,9 +25,6 @@ export const STATUS_WORDS = {
   stopped: 'Stopped',
   interrupted: 'Interrupted',
 };
-
-/** Not over yet: queued, running, or waiting for the person to allow a step. */
-export const isLive = (status) => status === 'queued' || status === 'running' || status === 'asking';
 
 /** The status in words ('' for none). */
 export const statusWord = (status) => STATUS_WORDS[status] || (status ? String(status) : '');
@@ -138,32 +140,6 @@ export function timelineOf(log, final = '') {
 
 /** Narration long enough to fold (its first lines shown, "Show more"). */
 export const longSaid = (text) => String(text || '').length > 280 || String(text || '').split('\n').length > 4;
-
-/** The line of an agent whose plan waits for the person's Go ahead (agents/runner.rs `on_tick`). */
-export const PLAN_WAITING = 'Waiting for you: its plan is ready';
-
-/**
- * **The line an agent is on now**, from its log: its latest step, or the line
- * it moved to without one (`now`: the to-do in progress once a call came
- * back, the line it was on before it asked). '' once it's over or before
- * any.
- */
-export function latestStep(log, status) {
-  if (!isLive(status)) return '';
-  // Waiting on the person's Allow / Deny: that, whatever line came after it
-  // (a to-do's update can land a moment after the wait began) — a plan's
-  // Go ahead / Not yet as its own line (agents/runner.rs).
-  if (status === 'asking') {
-    const asked = [...(log || [])].reverse().find((e) => typeof e?.step === 'string' && /^Waiting for you\b/.test(e.step));
-    return asked?.step === PLAN_WAITING ? PLAN_WAITING : 'Waiting for you to allow a step';
-  }
-  let line = '';
-  for (const e of log || []) {
-    if (typeof e?.now === 'string' && e.now.trim()) line = e.now.trim();
-    else if (typeof e?.step === 'string' && e.step.trim()) line = e.step.trim();
-  }
-  return line;
-}
 
 /** **Claude Code's to-do list**, as its latest `TodoWrite` left it: `[{content, status, activeForm}]` (status pending | in_progress | completed). */
 export function todosOf(log) {

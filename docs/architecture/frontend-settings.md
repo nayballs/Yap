@@ -186,7 +186,9 @@ on an element that also has a `settings.css` class (`set-note`,
 - **Search** (`settings/settingsIndex.js` + `SearchResults.svelte`): a static
   index of every setting — `{page, section, label, desc, keywords, anchor,
   fallback?, scope?, toggle?}`, ~110 entries — since only the open page is
-  mounted. Ctrl+F (or `/` outside a text field) focuses the box; while there's
+  mounted. A chunk of its own since 2026-11-08 (59 kB, out of the main
+  window's: frontend.md, "One chunk per window"), fetched once the window is
+  idle and when Settings opens or a query is typed (`needIndex`). Ctrl+F (or `/` outside a text field) focuses the box; while there's
   a query the page pane shows **Results for "…"**: grouped by page (pages in
   order of their best match; inside one, by section, its heading once:
   "Dictation › Typing into apps"), the words highlighted (`highlight`, every
