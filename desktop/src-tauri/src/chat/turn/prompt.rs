@@ -24,7 +24,6 @@ use super::gates::Gates;
 use super::history::Sizing;
 use super::{Asked, Opened};
 use crate::chat::tools::FirstStep;
-use crate::config::YapConfig;
 
 /// What the notes the eager RAG found ([`rag_context`]) come under, in the
 /// question's context (`chats::with_context`): OpenWhispr's framing line.
@@ -111,13 +110,7 @@ impl Prompt {
     /// in a Code chat).
     fn start(t: &Asked<'_>, memory: bool) -> Prompt {
         let g = t.gates;
-        let mut system = t.ep.persona.trim().to_string();
-        system.push_str(&instructions(&t.cfg, g.tools, g.doc_tools, g.web_lines, g.web_on, g.pictures, g.act, g.calendar, g.connectors, &t.profile, memory));
-        let screen_line = crate::chat::see_screen::instructions(g.screen);
-        if !screen_line.is_empty() {
-            system.push(' ');
-            system.push_str(screen_line);
-        }
+        let system = head(&t.ep.persona, &g, &t.profile, memory);
         // Where the line on earlier web answers goes for a model without tools
         // (it depends on the history sent, chosen below).
         let note_at = system.len();
@@ -573,35 +566,24 @@ fn first_step(text: &str, g: &Gates, here: bool, outline_first: bool, about_sele
 /// for one that can't act. The same from turn to turn. A strong model gets
 /// the web's lines that let it keep writing after the web, and a Claude
 /// searching in Chat's own request its own tools' (`web_lines`,
-/// `tools::web_tool_instructions`). `memory`: memory's tools and past
-/// chats' are offered (never in a Code chat). `connectors`: connectors'
-/// tools are (Yap's own line about them, never a server's instructions).
-#[allow(clippy::too_many_arguments)]
-fn instructions(
-    cfg: &YapConfig,
-    tools_supported: bool,
-    doc_tools: crate::chat::documents::ToolSet,
-    web_lines: crate::chat::tools::WebLines,
-    web_on: bool,
-    pictures: crate::chat::pictures::Gate,
-    act: bool,
-    calendar_on: bool,
-    connectors: bool,
-    profile: &crate::ai::about_you::Profile,
-    memory: bool,
-) -> String {
+/// `tools::web_tool_instructions`). Each family's lines only while the
+/// gates offer its tools (`g`: a turn fitted to a small context leaves
+/// some out, `fit.rs`). `memory`: memory's tools and past chats' are
+/// offered (never in a Code chat). Connectors: Yap's own line about them,
+/// never a server's instructions.
+fn instructions(g: &Gates, profile: &crate::ai::about_you::Profile, memory: bool) -> String {
     let mut s = String::new();
-    if tools_supported {
+    if g.tools {
         s.push_str("\n\nYou have access to tools. ");
         // (The documents' line is the set's: documents.rs `ToolSet`.)
-        s.push_str(&crate::chat::tools::tool_instructions(doc_tools));
-        if cfg.open_apps {
+        s.push_str(&crate::chat::tools::tool_instructions(g.doc_tools));
+        if g.apps {
             s.push(' ');
             s.push_str(&crate::chat::tools::APP_TOOL_INSTRUCTIONS.join(" "));
         }
-        if web_on {
+        if g.web_on {
             s.push(' ');
-            s.push_str(&crate::chat::tools::web_tool_instructions(web_lines));
+            s.push_str(&crate::chat::tools::web_tool_instructions(g.web_lines));
             s.push(' ');
             s.push_str(&crate::web::time_note(profile.region.time_zone_label.as_deref()));
             // Outside the US: prices from where they are, or one plain line
@@ -612,14 +594,16 @@ fn instructions(
             }
             // Pictures from the web (chat/pictures.rs): finding the right one,
             // looking before showing when the model can.
-            let lines = crate::chat::pictures::instructions(pictures, web_lines == crate::chat::tools::WebLines::Claude);
-            if !lines.is_empty() {
-                s.push(' ');
-                s.push_str(&lines);
+            if g.picture_tools {
+                let lines = crate::chat::pictures::instructions(g.pictures, g.web_lines == crate::chat::tools::WebLines::Claude);
+                if !lines.is_empty() {
+                    s.push(' ');
+                    s.push_str(&lines);
+                }
             }
             // Pages beside the chat (chat/pages.rs): opening a page or a
             // search there, reading the one open, shots for a model that sees.
-            let pages = crate::chat::pages::instructions(pictures, act);
+            let pages = crate::chat::pages::instructions(g.pictures, g.act);
             if !pages.is_empty() {
                 s.push(' ');
                 s.push_str(&pages);
@@ -628,23 +612,23 @@ fn instructions(
         if memory {
             s.push(' ');
             s.push_str(&crate::chat::tools::MEMORY_TOOL_INSTRUCTIONS.join(" "));
-            if cfg.memory_search_chats {
+            if g.past_chats {
                 s.push(' ');
                 s.push_str(&crate::chat::tools::CHATS_TOOL_INSTRUCTIONS.join(" "));
             }
         }
-        if calendar_on {
+        if g.calendar {
             s.push(' ');
             s.push_str(&crate::chat::tools::calendar::CALENDAR_TOOL_INSTRUCTIONS.join(" "));
         }
         // Yap Code (chat/tools/agents.rs): agents on and Claude Code on this PC.
-        if crate::agents::offered(cfg) {
+        if g.agent_line {
             s.push(' ');
             s.push_str(&crate::chat::tools::agents::AGENT_TOOL_INSTRUCTIONS.join(" "));
         }
         // Connectors (chat/tools/connectors.rs): Yap's own line, never a
         // server's instructions.
-        if connectors {
+        if g.connectors {
             s.push(' ');
             s.push_str(crate::chat::tools::connectors::INSTRUCTIONS);
         }
@@ -652,10 +636,24 @@ fn instructions(
         // No tools: it can't do anything on the PC, so it mustn't say so.
         s.push_str("\n\n");
         s.push_str(crate::apps::NO_TOOLS_NOTE);
-        if cfg.open_apps {
+        if g.apps {
             s.push(' ');
             s.push_str(crate::apps::NO_TOOLS_OPEN);
         }
+    }
+    s
+}
+
+/// **The system prompt's start**, as every turn writes it and as it's
+/// measured ([`stable_prompt`]): the persona, the instructions for what the
+/// model may do ([`instructions`]) and the screen's line.
+fn head(persona: &str, g: &Gates, profile: &crate::ai::about_you::Profile, memory: bool) -> String {
+    let mut s = persona.trim().to_string();
+    s.push_str(&instructions(g, profile, memory));
+    let screen_line = crate::chat::see_screen::instructions(g.screen);
+    if !screen_line.is_empty() {
+        s.push(' ');
+        s.push_str(screen_line);
     }
     s
 }
@@ -685,38 +683,24 @@ fn ending(in_message: bool, profile: &crate::ai::about_you::Profile, about: &str
     s
 }
 
-/// The part of a Chat request that's there whatever the question: the
-/// persona, the instructions, the prompt's end, and (a model that calls
-/// tools) the clock in the question's context. What a question must fit
-/// beside (`chat_turn`'s check before it's sent, Chat's limits and ring).
-/// `code`: a Code chat's, as [`build`] writes it — none of memory's lines
-/// or its "You", About you without its note — so a question there is
-/// measured against what's sent (8 Nov 2026: counted as a plain chat's, an
-/// 8K model with the web and Yap Code on had no room left for any question
-/// in a Code chat, though its requests fit).
-#[allow(clippy::too_many_arguments)]
-pub(crate) fn stable_prompt(
-    cfg: &YapConfig,
-    persona: &str,
-    tools_supported: bool,
-    doc_tools: crate::chat::documents::ToolSet,
-    web_lines: crate::chat::tools::WebLines,
-    web_on: bool,
-    pictures: crate::chat::pictures::Gate,
-    act: bool,
-    calendar_on: bool,
-    connectors: bool,
-    profile: &crate::ai::about_you::Profile,
-    now: chrono::DateTime<chrono::Utc>,
-    code: bool,
-) -> String {
+/// The part of a Chat request that's there whatever the question, for the
+/// turn's gates `g`: the system prompt's start as [`build`] writes it
+/// ([`head`]: the persona, the instructions, the screen's line), the
+/// prompt's end, and (a model that calls tools) the clock in the question's
+/// context. What a question must fit beside (`chat_turn`'s check before
+/// it's sent, Chat's limits and ring, the tools fitted to a small context:
+/// `fit.rs`). `code`: a Code chat's, as [`build`] writes it — none of
+/// memory's lines or its "You", About you without its note — so a question
+/// there is measured against what's sent (8 Nov 2026: counted as a plain
+/// chat's, an 8K model with the web and Yap Code on had no room left for
+/// any question in a Code chat, though its requests fit).
+pub(super) fn stable_prompt(persona: &str, g: &Gates, profile: &crate::ai::about_you::Profile, now: chrono::DateTime<chrono::Utc>, code: bool) -> String {
     let profile = &code_profile(profile, code);
     let about = crate::ai::about_you::prompt_block(profile, now);
     let memory_you = if code { String::new() } else { crate::memory::you_block() };
-    let mut s = persona.trim().to_string();
-    s.push_str(&instructions(cfg, tools_supported, doc_tools, web_lines, web_on, pictures, act, calendar_on, connectors, profile, !code));
-    s.push_str(&ending(tools_supported, profile, &about, &memory_you));
-    if tools_supported {
+    let mut s = head(persona, g, profile, !code);
+    s.push_str(&ending(g.tools, profile, &about, &memory_you));
+    if g.tools {
         s.push_str("\n\n");
         s.push_str(&crate::ai::about_you::clock_line(profile, now));
     }
@@ -760,6 +744,7 @@ fn first_search(question: &str) -> crate::chat::tools::FirstStep {
 mod tests {
     use super::*;
     use crate::chat::pictures::Gate;
+    use crate::config::YapConfig;
 
     fn prompt(in_message: bool) -> Prompt {
         Prompt { system: "Persona.".into(), context: vec!["The clock.".into()], note_at: "Persona.".len(), summary_at: "Persona.".len(), in_message }
@@ -814,6 +799,10 @@ mod tests {
             calendar: false,
             agents: false,
             connectors: false,
+            apps: true,
+            past_chats: true,
+            picture_tools: true,
+            agent_line: false,
         }
     }
 
@@ -880,9 +869,9 @@ mod tests {
         let plain = code_profile(&t.profile, false);
         let ending = ending(true, &plain, "", &you);
         assert!(ending.contains("bullet points") && ending.contains("They told Yap: \"I keep bees on an allotment\"") && ending.contains("Their name is Imogen."), "{ending}");
-        let with = instructions(&t.cfg, true, Default::default(), t.gates.web_lines, false, Gate::Off, false, false, false, &plain, true);
+        let with = instructions(&t.gates, &plain, true);
         assert!(with.contains("Use remember") && with.contains("search_chats"));
-        let without = instructions(&t.cfg, true, Default::default(), t.gates.web_lines, false, Gate::Off, false, false, false, &plain, false);
+        let without = instructions(&t.gates, &plain, false);
         assert!(!without.contains("Use remember") && !without.contains("search_chats"));
         // The note's the only part a Code chat drops.
         assert_eq!(code_profile(&t.profile, true), crate::ai::about_you::Profile { about: String::new(), ..imogen() });
@@ -901,8 +890,8 @@ mod tests {
         let (persona, now) = ("You are a helpful assistant.", chrono::Utc::now());
         // The stable prompt: a Code chat's as `build` writes it — no memory
         // lines, no "You", About you without its note.
-        let plain = g.stable_prompt(&cfg, persona, &imogen(), now, false);
-        let code = g.stable_prompt(&cfg, persona, &imogen(), now, true);
+        let plain = g.stable_prompt(persona, &imogen(), now, false);
+        let code = g.stable_prompt(persona, &imogen(), now, true);
         for part in ["Use remember", "search_chats", "bullet points", "allotment"] {
             assert!(plain.contains(part), "{part}: {plain}");
             assert!(!code.contains(part), "{part}: {code}");
@@ -914,18 +903,8 @@ mod tests {
             let extra = crate::chat::tools::Extra { memory, search_chats: memory, conversation: Some(7), doc_tools: g.doc_tools, pictures: g.pictures, ..Default::default() };
             crate::chat::budget::estimate(&crate::chat::tools::offered_tools(cfg.open_apps, true, extra).to_string())
         };
-        let counter = crate::chat::budget::Counter::estimate_only();
-        let rt = tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap();
-        let ep = super::super::Endpoint {
-            base_url: "https://api.example.com/v1".into(),
-            api_key: String::new(),
-            model: "fake-chat".into(),
-            provider: "custom".into(),
-            persona: persona.into(),
-            disable_thinking: false,
-        };
-        let (plain_tools, code_tools) =
-            rt.block_on(async { (g.schemas(&cfg, &ep, None, 8192, &counter, Some(7), false).await, g.schemas(&cfg, &ep, None, 8192, &counter, Some(7), true).await) });
+        let schemas = |code: bool| crate::chat::budget::estimate(&g.offered(None, Some(7), code).to_string());
+        let (plain_tools, code_tools) = (schemas(false), schemas(true));
         assert_eq!((plain_tools, code_tools), (offered(true), offered(false)));
         assert!(code_tools < plain_tools);
     }
@@ -946,6 +925,10 @@ mod tests {
             calendar: false,
             agents: false,
             connectors: false,
+            apps: true,
+            past_chats: true,
+            picture_tools: true,
+            agent_line: false,
         };
         let asks = "What's the latest version of Python?";
         assert!(crate::web::needs_web(asks), "the test's question needs the web");

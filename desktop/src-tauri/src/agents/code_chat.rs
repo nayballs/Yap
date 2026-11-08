@@ -239,10 +239,16 @@ pub async fn with_new<F: std::future::Future>(folder: Option<String>, f: F) -> F
 /// turn, or the Voice Assistant's, as it's made): attached to the workspace
 /// the page picked for it. That workspace, when it was attached.
 pub fn adopt_new(conversation: u64) -> Option<Folder> {
-    let wanted = NEW_CHAT.try_with(|f| f.clone()).ok().flatten();
-    let folder = wanted.as_deref().and_then(find)?;
+    let folder = new_chat_folder()?;
     set(conversation, Some(&folder));
     Some(folder)
+}
+
+/// **The workspace a new chat's first question goes to** (the page's pick,
+/// [`with_new`]), before its conversation is made: the turn measures that
+/// question as the Code chat's it will be (`chat/turn/history.rs`).
+pub fn new_chat_folder() -> Option<Folder> {
+    NEW_CHAT.try_with(|f| f.clone()).ok().flatten().as_deref().and_then(find)
 }
 
 #[cfg(test)]

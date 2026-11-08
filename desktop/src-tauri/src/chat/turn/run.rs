@@ -80,27 +80,21 @@ pub(super) async fn with_tools(
     // measured them, from the store and the cache (a turn never waits for a
     // server to offer them).
     let connectors = g.connectors.then(|| crate::chat::tools::connectors::Turn::for_turn(cfg, &ep.provider, &ep.model, t.scope, sizing.context_size)).flatten();
+    // The tools the gates offer (gates.rs `Gates::extra`: what the budget
+    // counted, fitted to the model's context by `fit.rs`), with this turn's
+    // calendar, agents and connectors.
+    let calendar = crate::chat::tools::CalendarTurn { log: &calendar_log, zone: built.calendar_zone, now: t.now.timestamp() };
+    // Yap Code (tools/agents.rs): asked out loud, an agent that needs asking is
+    // asked in words; asked by voice, its report is read aloud.
+    let agents = crate::chat::tools::AgentsTurn::asked(t.scope, t.by_voice);
     let extra = crate::chat::tools::Extra {
-        memory,
-        search_chats: memory && cfg.memory_search_chats,
-        conversation: Some(conv.id),
-        calendar: g.calendar.then_some(crate::chat::tools::CalendarTurn { log: &calendar_log, zone: built.calendar_zone, now: t.now.timestamp() }),
         // Each tool result within what the request has left.
         room: (sizing.mode != crate::chat::budget::Mode::Messages).then_some(fitted.budget.request),
         docs: Some(&built.doc_turn),
-        doc_tools: g.doc_tools,
-        strong: g.strong,
-        pictures: g.pictures,
-        screen: g.screen,
-        act: g.act,
-        own_search: g.own_search,
         // Words selected in another app or on a page beside the chat (never
         // one of Yap's own windows): web content.
         web_question: t.about_selection.as_ref().is_some_and(|s| s.web),
-        // Yap Code (tools/agents.rs): asked out loud, an agent that needs asking is
-        // asked in words; asked by voice, its report is read aloud.
-        agents: g.agents.then_some(crate::chat::tools::AgentsTurn::asked(t.scope, t.by_voice)),
-        connectors: connectors.as_ref(),
+        ..g.extra(memory, Some(conv.id), calendar, agents, connectors.as_ref())
     };
     let looped = crate::chat::tools::run_tool_loop_with(
         &built.prompt.system,
@@ -112,7 +106,7 @@ pub(super) async fn with_tools(
         &ep.model,
         &ep.provider,
         ep.disable_thinking,
-        cfg.open_apps,
+        g.apps,
         &notify,
         web.as_mut(),
         built.first.clone(),

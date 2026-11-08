@@ -24,9 +24,12 @@ pub fn offered_tools(open_apps: bool, web: bool, extra: Extra<'_>) -> Value {
     }
     // Pictures from the web (chat/pictures.rs): `find_pictures` where Yap's
     // `read_page` isn't offered (a Claude searching in Chat's own request,
-    // a cloud model on its provider's own search).
-    if let (Some(all), Some(pictures)) = (tools.as_array_mut(), crate::chat::pictures::definitions(extra.pictures, !web || extra.own_search).as_array()) {
-        all.extend(pictures.iter().cloned());
+    // a cloud model on its provider's own search). Not in a turn fitted to a
+    // small context without them (`turn/fit.rs`).
+    if !extra.without_pictures {
+        if let (Some(all), Some(pictures)) = (tools.as_array_mut(), crate::chat::pictures::definitions(extra.pictures, !web || extra.own_search).as_array()) {
+            all.extend(pictures.iter().cloned());
+        }
     }
     // Pages beside the chat (chat/pages.rs): for the same models; acting on
     // them (chat/pages/act.rs) for the ones that may.
