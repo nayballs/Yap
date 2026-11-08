@@ -43,7 +43,13 @@ notes. The PC's side of the conversation is the desktop app's
 | `picker.js` | Chat's model picker as a sheet ("Chat's picker", below): the rail with the logos, the panes, More models, the effort; its rows built by `core/chatPicker.js`; a PC from before gets its plain list. The chip's words and its effort (`chipWords`, `chipEffort`). | `text/javascript` |
 | `drawer.js` | The drawer of chats ("The drawer", below): Recents from the PC (`chats`), the search, the one this phone is in marked, + New chat. | `text/javascript` |
 | `photos.js` | A question's pictures ("Pictures", below): a photo made smaller (2,048 px, a JPEG of at most 3 MB, upright, on white) and sent in `0x03` frames. | `text/javascript` |
-| `core/*.js` | **Not in this folder**: Chat's own picker modules from `desktop/src/lib/core/` (`chatPicker`, `modelCatalog`, `latestModels`, `ppModels`, `localContext`, `modelIcons`, `providerIds`, `effort`), served as they are (`build.rs` `LINK_SHARED`). | `text/javascript` |
+| `code.js` | Remote Control's **Code side** ("The Code side", below): what the PC says of it (`code_list`, `code_status`), the status dots worked out by the desktop's own rules (`core/chatStatus.js`, with this phone's "seen"), the drawer's Code side (the agents working, the workspaces and their Code chats, + New code chat), the Mode and workspace sheets; the pure helpers a Code chat's thread uses (each message's chat index, an answer's pills, a report's agent). | `text/javascript` |
+| `cards.js` | The cards an agent waits on (Allow once / Deny, a plan's Go ahead / Not yet, Start / Don't) — each a fresh tap — and the Needs-you banner's words. | `text/javascript` |
+| `agent.js` | An agent's live view: the snapshot and live events merged by log line, its turns, steps, to-dos, files, commands, Stop / Continue / Go ahead / Undo, "Tell the agent…". | `text/javascript` |
+| `diff.js` | One file's diff in the live view (marked lines, Wrap) and a file's +N −M. | `text/javascript` |
+| `notify.js` | Notifications while the page is in the background, where the browser allows a page's own (asked on a tap only). | `text/javascript` |
+| `dom.js` | The Code side's small DOM builders (`h`, `fill`, `svg`): nodes and text, never HTML. | `text/javascript` |
+| `core/*.js` | **Not in this folder**: Chat's own picker modules from `desktop/src/lib/core/` (`chatPicker`, `modelCatalog`, `latestModels`, `ppModels`, `localContext`, `modelIcons`, `providerIds`, `effort`), and for Remote Control the wire (`codeWire`) and Yap Code's own rules (`agents`, `money`, `codeChats`, `chatStatus`, and `pageConfirm` from `views/chat/`), served as they are (`build.rs` `LINK_SHARED`). | `text/javascript` |
 | `providers/*.svg` | **Not in this folder**: the provider and model-family logos from `desktop/src/assets/providers/` the picker and the chip show (Yap's own assets; `build.rs` `LINK_SHARED`). | `image/svg+xml` |
 | `dsp.js` | The sound maths, with nothing of the page in it: the streaming resampler (windowed sinc, a polyphase table where the rates allow: the mic's rate down to 16 kHz, Yap's 24 kHz voice up to the phone's rate), the answer's ring and jitter buffer (`Playout`), the media player's pieces cut at the voice's pauses (`Segmenter`) and their WAV files (`wav`), Int16, the frame level, hands-free talk's energy voice detector and its waits, the times as Chat says them. Runs in the page, both worklets and Node's tests. | `text/javascript` |
 | `mic-worklet.js` | The mic's AudioWorklet: the mic at the phone's own rate, mixed to mono, resampled to 16 kHz Int16 (imports `dsp.js`), cut into 20 ms frames. | `text/javascript` |
@@ -378,6 +384,113 @@ after another — never dictation into the PC's apps. The Hands-free switch
 went, and a stored `yap.link.handsFree` is ignored (and removed, with
 `yap.link.media`).
 
+## The Code side (Remote Control, 2026-11-08)
+
+**Yap Code from the phone** (wave 2; the wire and the PC's side are wave 1,
+[link.md "Remote Control"](../../docs/architecture/link.md#remote-control-yap-code-from-the-phone-2026-11-08)).
+Shown only while the PC's `ready` says Remote Control is on for this phone
+(`can` has `"code"`, `code.on`: `core/codeWire.js` `codeOn`); off, or a PC
+from before, the page is Chat as it was. The PC checks every message
+anyway: nothing here is trusted there.
+
+- **The drawer: Chat | Code** (a segmented switch at its top, as the
+  desktop's). Chat lists the plain conversations, each with its status dot;
+  Code lists **the agents working** (each: its dot, workspace, the line it's
+  on — "Waiting for you to allow a step" while it asks —, how long), then a
+  group per workspace (its Code chats newest first, each with its dot; a +
+  to start one there), and at the foot **+ New code chat** (a sheet of the
+  workspaces, most recently used first; none: "Add a workspace in Yap on
+  Office PC first"). The side not shown carries its strongest dot. ☰ opens
+  on the Code side while a Code chat is open.
+- **The dots**: the desktop's own rules (`core/chatStatus.js`) on what the
+  PC sends (`code_status`: the chats answering, the agents in brief, the
+  cards waiting) — working (a teal pulse), needs you (amber with a ring),
+  new (blue: an agent's report came while this phone wasn't in that chat).
+  "Seen" is this phone's own (`localStorage` `yap.link.seen`, a first visit
+  counting everything there as seen). A chat's last answer is known from
+  its agents' report markers and from what this phone showed of it (the
+  wire's chats carry no answer index).
+- **A Code chat**: the composer card gets the Code teal edge and a row of
+  two chips — **the workspace** (its Environment sheet: the workspace and
+  folder, "Runs on Office PC", the Mode, the most a phone may pick, Remote
+  Control) and **the Mode** ("Auto ▾": a sheet of Auto (Recommended),
+  Manual, Accept edits and Plan with Claude Code's words; **never Bypass**;
+  above the workspace's cap greyed, "Never above Manual in recipe-box"; a
+  chat set to Bypass on the PC shows the chip amber and lets the phone
+  lower it; `set_mode`, the chip following the PC's `mode`). A new Code chat
+  shows "Code · <workspace>", what it's for and `CODE_PROMPTS` (each fills
+  the box, never sent by itself).
+- **Its thread**: the person's words as bubbles; under an answer, **its
+  agents' pills** (the dot, the workspace, the turn's title, its status; a
+  tap opens the live view at that turn) — `core/agents.js` `pillsByAnswer`,
+  each message's place in the chat worked out from the answers' ids (a
+  user message has none on the wire); an agent's report as **a quiet card**
+  ("Agent done · garden-planner", "Changed notes.md", **Open**; a plan
+  still waiting, **Go ahead** once); a report arriving while the chat is
+  open comes as `chat_message`s, its voice (a turn this phone asked) said
+  here. **Talk** and **hands-free talk** ask into the Code chat as into any
+  (`chat`).
+- **The cards** (`cards.js`), at the thread's end (or in the live view):
+  the workspace, what it would do ("Run a command: npm test") and the
+  command or edit whole (monospace, it scrolls), "Asked 2 min ago · Yap
+  says no in 8 min", **Deny** / **Allow once** (48 px each); a plan's card
+  with the plan folded to its first lines (Show more), **Not yet** / **Go
+  ahead**; the ask-first card with the folder, the Mode, the brief and why
+  Yap asks, **Don't** / **Start** (**Send** for a follow-up). Each answer is
+  **a fresh tap**: the buttons wake `MIN_SHOWN_MS` (400 ms) after the card is
+  actually on screen (an IntersectionObserver, the page in front),
+  `shownMs` goes with the answer, only a trusted click counts (a script's
+  never, a held key's repeat never) and nothing spoken answers one. Then
+  "Allowing…" until the PC says how it ended: "Allowed", "Allowed from
+  Kitchen tablet", "Denied on your PC", "No answer in time, so the agent was
+  told no."; a refusal shows on the card ("Tap it again: the card had only
+  just come." waits again; "Already allowed from …" ends it). A card's node
+  is kept and painted in place, and the thread's and the live view's
+  redraws wait for a finger to lift, so a streaming answer never takes a
+  button from under it.
+- **The Needs-you banner**: under the header on every screen while a card
+  waits ("A step in garden-planner needs you", "The plan in … is ready for
+  you", "Yap asks before sending an agent to …", "2 steps need you"); a tap
+  goes to the card, its chat opened first. The tab's title counts them
+  ("(1) Yap Link"), and a new one buzzes 200 ms on screen (Android).
+- **The agent's live view** (`agent.js`), in the thread's place with the
+  header and banner above it: ✕ back to the chat (the agent carries on), its
+  workspace and status; its Mode, model and how long; the cost line ("Your
+  Claude plan · ≈ $0.04 on the API"); a problem in words (signing in "on
+  Office PC"); the line it's on; its to-dos (✓ ● ○, "1 of 3 done"); its turns
+  (the newest open, a queued one a line), each with its steps and what it
+  said (long words folded to four lines), its files (+N −M; a tap opens that
+  file's diff — `diff.js`: marked lines, sideways inside the code only,
+  **Wrap**, "…more lines · see the rest on your PC" —, one at a time), its
+  commands (three, then Show N more), what wasn't allowed and its final
+  words; its cards at the live end; at the foot **Stop**, **Continue**, **Go
+  ahead**, **Undo all** (and **Undo this turn** in a turn), each Undo after
+  the phone's own confirm sheet listing the files. The composer is **"Tell
+  the agent…"** there (no pictures, model or hands-free talk): its words go
+  as `agent_message`, back in the box if the PC says no. It follows the live
+  end until you scroll up (↓ to follow again), keeps a diff's scroll as
+  events come, pages older steps (**Older steps**, `agent_log`), opens
+  again when a `seq` is missing or the PC says `agent_resync`, and reads the
+  agent again when its status turns.
+- **Notifications** (`notify.js`): ⋯ → **Notify me when an agent needs me**
+  (only with Remote Control on). The browser's permission is asked **only on
+  that tap**, never on load, and a first "Notifications are on" shows it
+  works. While the page is in the background, a card that needs you and a
+  finished agent show as notifications, with no buttons (a tap brings the
+  page back to the card). **What phones allow on this page** (a self-signed
+  certificate, 8 Nov 2026): **Chrome on Android** never shows a page's own
+  notification — `new Notification()` always throws there (MDN's
+  compatibility data; Chromium's choice since 2015), notifications come
+  only from a service worker, and Chrome won't register one on a page
+  whose certificate it accepted after a warning — so the switch says
+  "This browser shows notifications only from an installed web app…" and
+  the banner stays. **Firefox for Android** follows desktop Firefox (the
+  constructor works, the permission asked from a tap since Firefox 79), so
+  they show while Firefox keeps the page running; a locked phone may stop
+  it. Not yet tried on a real phone. Web Push (with the screen locked)
+  needs a service worker, so the page on a real certificate: the design's
+  phase 2.
+
 ## What it does where the protocol leaves a choice
 
 - **Pairing.** `#pair=<token>` in the address: hello with `pair: {token}`
@@ -654,6 +767,45 @@ npm run test:link
   words does: the fake mic's steady tone isn't speech for hands-free talk to
   end on), the answer's voice in sentences with pauses (`sentences`: where
   the media player cuts its pieces).
+  **The Code side** (Remote Control), against a PC mocked from
+  `core/codeWire.js`'s own examples (`support/code-pc.js`: every message the
+  PC sends is the wire's example of its type with the test's changes, and
+  every Code message the page sends is checked against the wire's example,
+  `wireErrors`): `code-drawer.spec.js` — Chat | Code, the agents working and
+  the workspaces with their chats, the dots (working after 300 ms, needs
+  you, new from a report, cleared once opened and kept in `yap.link.seen`,
+  the other side's strongest on its segment), + New code chat (the
+  workspaces most recent first, `code_new`, the prompts filling the box,
+  the first question with `chat: "new"`, the workspace's own +), a new one
+  told to the PC again after a reload, Remote Control off and a PC from
+  before showing Chat only (nothing of the Code side asked for), and turned
+  off mid-visit (the chips gone, why said); `code-thread.spec.js` — the
+  bubbles, the pill under the answer, the report card and its Open; a
+  request typed and by Talk into the chat (`ask`/`start` with its `chat`),
+  the report arriving as `chat_message`s and said; a plan's Go ahead once;
+  the Mode sheet (four rows, no Bypass, `set_mode`, the PC's `mode`), a
+  workspace's cap greying the rest, a Bypass chat amber and lowered; the
+  Environment; `agent-view.spec.js` — the snapshot's parts (status, Mode
+  and model, cost, the line, to-dos, steps and narration, files with +N
+  −M, commands; no pictures, model or hands-free talk in its composer), ✕
+  never stopping it, live events in order, a missing `seq` and
+  `agent_resync` opening it again with what came kept, a status turning,
+  older steps (`agent_log {before}`), a diff with its marks and Wrap,
+  nothing sideways, Stop and Continue, Undo's confirm (Cancel sends
+  nothing, then `sure: true`), "Tell the agent…" and its refusal (the words
+  back); `approve.spec.js` — a card asleep at first (a real tap there does
+  nothing), a script's click ignored, `shownMs` ≥ 400, "Allowing…" then
+  "Allowed", the banner and the title's count gone; answered from another
+  phone, on the PC, "Already allowed from …", "Tap it again…", timed out; a
+  plan's Not yet and Go ahead; the ask-first card's Start; the banner on a
+  plain chat and in the live view, a tap opening the card's chat; a card in
+  the live view answered there; notifications asked only on a tap, then a
+  card and a report in the background (one each), and Chrome on Android's
+  refusal said in the sheet (`fakeNotifications`); `code-screens.spec.js` —
+  screenshots light and dark at 360 × 780 and 390 × 844
+  (`code-drawer-*`, `code-thread-*`, `code-approve-*`, `code-mode-*`,
+  `agent-view-*`, `agent-diff-*`, `code-plan-*`), 44 px targets, nothing
+  sideways.
   `pairing.spec.js` — a phone's tabs, against a PC that judges hellos as
   Yap's does (the device first, a strike for each guess, five lock the
   address out): a saved device with an old `#pair=` sends both, connects,
@@ -713,7 +865,7 @@ npm run test:link
   build, no window on screen.
 - **In Firefox too** (the `firefox` project, when Playwright's own Firefox is
   installed: `npx playwright install firefox`; `YAP_LINK_FIREFOX=0` leaves it
-  out): `link-page`, `sound`, `mic-open`, `typing`, `picker`, `chats`, `pictures`, `words`, `pairing` and `handsfree`, with Firefox's fake mic
+  out): `link-page`, `sound`, `mic-open`, `typing`, `picker`, `chats`, `pictures`, `words`, `pairing`, `handsfree` and the Code side's (`code-drawer`, `code-thread`, `agent-view`, `approve`), with Firefox's fake mic
   (`media.navigator.streams.fake`, `media.navigator.permission.disabled`, its
   tone at 440 Hz) and its output muted (`media.volume_scale`); hands-free
   talk hears speech made in the page (`speechMic`: its quiet a room's, never

@@ -749,8 +749,10 @@ or not.
 
 ## Remote Control (the phone)
 
-2026-11-08, wave 1 (the wire and the PC's side; the phone's screens are wave
-2): a paired phone (Yap Link) may follow and steer Yap Code — the Code side's
+2026-11-08: wave 1 the wire and the PC's side, wave 2 the phone's screens
+(link.md "The phone's Code side"; `phone/web/page/` `code.js`, `cards.js`,
+`agent.js`, reading this side's own `core/agents.js` and `core/chatStatus.js`):
+a paired phone (Yap Link) may follow and steer Yap Code — the Code side's
 list, an agent's live view, its Allow once / Deny and plan cards, the ask-first
 card, Stop, Continue, "Tell the agent…", Go ahead, Undo (after the phone's
 confirm), the Mode up to Auto, a new Code chat in an existing workspace.
@@ -1223,8 +1225,8 @@ Code, Open in terminal's blank tab, Chat's thread following a report.
 
 - A question from Claude Code (`AskUserQuestion`) has no card: it's denied,
   and Claude is told to choose and say what it chose in its summary.
-- Remote Control's phone screens (wave 2): the PC's side and the wire are in
-  ([Remote Control](#remote-control-the-phone)).
+- Remote Control away from home, and notifications with the phone locked
+  (Web Push): the design's phase 2 ([Remote Control](#remote-control-the-phone)).
 - Codex as a second engine on the same runner: later.
 
 ## Open questions

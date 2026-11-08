@@ -65,7 +65,7 @@ if (withFirefox()) {
     name: 'firefox',
     // The screenshots are Chromium's. (Hands-free talk hears speechMic's
     // speech here: Firefox's fake mic is a steady tone.)
-    testMatch: /(link-page|sound|mic-open|typing|picker|chats|pictures|words|pairing|handsfree)\.spec\.js/,
+    testMatch: /(link-page|sound|mic-open|typing|picker|chats|pictures|words|pairing|handsfree|code-drawer|code-thread|agent-view|approve)\.spec\.js/,
     use: {
       browserName: 'firefox',
       // Firefox has no microphone permission to grant here: its prefs let

@@ -51,6 +51,21 @@
 // composer rides above it), reconnects with backoff, keep-alive pings and a
 // screen wake lock.
 //
+// **Remote Control** (Yap Code from the phone, wave 2; README.md "The Code
+// side"): while the PC says it's on for this phone (`ready.code.on`), the
+// drawer has Chat | Code (code.js: the workspaces and their Code chats with
+// their status dots, the agents working, + New code chat); a Code chat's
+// thread has its agents' pills under the answers, its reports as quiet
+// cards, and its cards (cards.js: Allow once / Deny, a plan's Go ahead,
+// Start / Don't — each a fresh tap, never by voice), with a Needs-you
+// banner on every screen while one waits; its composer has the workspace
+// and the Mode (up to Auto, never Bypass); a pill opens the agent's live
+// view (agent.js, diff.js), with "Tell the agent…" in the composer; and a
+// notification while the page is in the background, where the browser
+// allows one (notify.js). With it off, the page is Chat as before. This
+// file only routes the Code side's messages and draws its parts of the
+// thread and the composer.
+//
 // No service worker: on an origin whose certificate Chrome only accepted
 // after a warning, registration fails ("An SSL certificate error occurred
 // when fetching the script"). The page always comes from the PC, which is
@@ -82,6 +97,14 @@ import { createDrawer } from './drawer.js';
 import { labelFor } from './core/modelCatalog.js';
 import { PROVIDER_LABELS } from './core/providerIds.js';
 import { MAX_PICTURES, prepare as preparePicture, sendPictures } from './photos.js';
+import { createCode, chatIndexes, chatAgents, pillsOf, reportOf, dot, BYPASS, PHONE_MAX_WORDS } from './code.js';
+import { createCards, bannerWords } from './cards.js';
+import { createAgentView } from './agent.js';
+import { createNotify } from './notify.js';
+import { h } from './dom.js';
+import { CODE_INTRO, CODE_PROMPTS } from './core/codeChats.js';
+import { messageAt } from './core/chatStatus.js';
+import { statusTone, statusWord, modeLabel } from './core/agents.js';
 
 const KIND_UP = 0x01;
 const KIND_DOWN = 0x02;
@@ -114,6 +137,8 @@ const KEY = {
   thread: 'yap.link.thread',
   // The conversation this phone is in on the PC: its id, or "new".
   chat: 'yap.link.chat',
+  // A new Code chat waiting for its first question: its workspace (Remote Control).
+  codeNew: 'yap.link.codeNew',
 };
 /**
  * Settings that went on 4 Nov, ignored and tidied away: the Hands-free
@@ -200,6 +225,10 @@ function loadThread() {
         answerId: String(t.answerId || ''),
         pictures: Math.max(0, Number(t.pictures) || 0),
         pics: [],
+        // An agent's report (Yap Code) and where each part sits in its chat.
+        ...(t.report ? { report: true, marker: String(t.marker || t.q || '') } : {}),
+        qAt: Number.isInteger(t.qAt) ? t.qAt : -1,
+        aAt: Number.isInteger(t.aAt) ? t.aAt : -1,
       }))
       .filter((t) => t.q || t.a || t.pictures);
     return { turns: turns.slice(-KEEP_TURNS), id: Math.max(0, ...turns.map((t) => t.id)), more: !!v.more };
@@ -340,6 +369,15 @@ const S = {
   tick: 0,
   stopTimer: 0,
   gen: 0,
+  // Remote Control (the Code side): the open chat's Code part (`thread.code`:
+  // its workspace, Mode, cap, the phone's highest), its agents in brief
+  // (`thread.agents`), what "Tell the agent…" last sent (back in the box if
+  // the PC says no), a Mode on its way, and a new Code chat asked for.
+  code: null,
+  codeAgents: [],
+  told: '',
+  modeAt: 0,
+  codeNewAt: 0,
 };
 
 const FRAME_MS = (FRAME_SAMPLES / LINK_RATE) * 1000;
@@ -423,6 +461,30 @@ const el = {
   modelLabel: $('model-label'),
   modelWhere: $('model-where'),
   models: $('models'),
+  // Remote Control's parts.
+  needs: $('needs'),
+  needsText: $('needs-text'),
+  threadCards: $('thread-cards'),
+  emptyTitle: $('empty-title'),
+  emptySub: $('empty-sub'),
+  keepOpen: $('keep-open'),
+  codeIntro: $('code-intro'),
+  codePrompts: $('code-prompts'),
+  coderow: $('coderow'),
+  wsChip: $('ws-chip'),
+  wsChipLabel: $('ws-chip-label'),
+  modeChip: $('mode-chip'),
+  modeChipLabel: $('mode-chip-label'),
+  agentview: $('agentview'),
+  wsSheet: $('ws-sheet'),
+  wsList: $('ws-list'),
+  modeSheet: $('mode-sheet'),
+  modeList: $('mode-list'),
+  envSheet: $('env-sheet'),
+  envList: $('env-list'),
+  notifyRow: $('notify-row'),
+  notify: $('notify'),
+  notifyLine: $('notify-line'),
 };
 
 // Chat's model picker (picker.js); the chip shows a pick at once.
@@ -439,6 +501,50 @@ const picker = createPicker({
   onChanged: () => render(),
 });
 
+// Remote Control: the Code side (code.js), its cards (cards.js), an agent's
+// live view (agent.js) and the background notifications (notify.js).
+const code = createCode({
+  send,
+  onChange: () => codeChanged(),
+  shown: () => (typeof S.chat === 'number' ? S.chat : null),
+  openChat: (id, title) => openChat(id, title),
+  openAgent: (a) => openAgent(a),
+  newCodeChat: (ws) => newCodeChat(ws),
+  pcName: () => pcName(),
+});
+const notify = createNotify({ onChange: () => renderNotify() });
+const cards = createCards({
+  send,
+  onChange: () => codeChanged(),
+  onArrive: (card) => cardArrived(card),
+});
+const agentView = createAgentView({
+  els: {
+    root: el.agentview,
+    close: $('av-close'),
+    title: $('av-title'),
+    status: $('av-status'),
+    body: $('av-body'),
+    foot: $('av-foot'),
+    follow: $('av-follow'),
+    undoSheet: $('undo-sheet'),
+    undoTitle: $('undo-title'),
+    undoBody: $('undo-body'),
+    undoFiles: $('undo-files'),
+    undoGo: $('undo-go'),
+    undoCancel: $('undo-cancel'),
+  },
+  send,
+  cards,
+  onClose: () => {
+    el.thread.hidden = false;
+    renderConvo();
+    render();
+  },
+  onChange: () => render(),
+  pcName: () => pcName(),
+});
+
 // The drawer of chats (drawer.js).
 const drawer = createDrawer({
   dialog: $('drawer'),
@@ -447,11 +553,30 @@ const drawer = createDrawer({
   search: $('drawer-search'),
   pc: $('drawer-pc'),
   newChat: $('new-chat'),
+  newChatLabel: $('new-chat-label'),
   closeBtn: $('drawer-close'),
   send,
   onOpen: (item) => openChat(item.id, item.title),
   onNew: () => newChat(),
   current: () => (typeof S.chat === 'number' ? S.chat : null),
+  sides: {
+    root: $('sides'),
+    chat: $('side-chat'),
+    code: $('side-code'),
+    chatDot: $('side-chat-dot'),
+    codeDot: $('side-code-dot'),
+    chatSide: $('chat-side'),
+    codeSide: $('code-side'),
+  },
+  code: {
+    on: () => code.on,
+    refresh: () => code.refresh(),
+    statuses: () => code.statuses(),
+    sideDot: (side, plainIds) => code.sideDot(side, code.statuses(), plainIds),
+    dot,
+    render: (root, close) => code.renderList(root, close),
+    newChat: () => openSheet(el.wsSheet, () => code.renderWorkspaces(el.wsList, (ws) => (closeSheet(el.wsSheet), drawer.close(), newCodeChat(ws)))),
+  },
 });
 
 // The Yap bar's waveform: thin bars, the newest on the right (link.css .meter).
@@ -747,6 +872,24 @@ function onText(text) {
       S.picker = m.picker && typeof m.picker === 'object' ? m.picker : null;
       picker.update(m);
       drawer.setPc(S.pc);
+      // Remote Control: the Code side on or off for this phone (said again
+      // whenever that changes); back after a drop, the agent watched again.
+      {
+        const was = code.on;
+        code.setReady(m);
+        if (!code.on && was) offCode(typeof m.code?.why === 'string' ? m.code.why : '');
+        else if (code.on) {
+          if (was) refreshCode();
+          if (agentView.id) agentView.resync();
+          // A new Code chat still waiting for its first question (a reload,
+          // a reconnect): the PC's told again, or its question makes a plain chat.
+          const ws = S.chat === 'new' ? S.code?.workspace || load(KEY.codeNew) : '';
+          if (ws && typeof ws === 'string') {
+            if (!S.code) S.code = { workspace: ws, path: '', mode: 'auto', modeLabel: 'Auto', allowed: true, phoneMax: 'auto' };
+            send({ type: 'code_new', workspace: ws });
+          }
+        }
+      }
       if (S.error.startsWith('Lost the connection')) S.error = '';
       if (S.error === OLD_PC_TYPING && can('ask')) S.error = '';
       // Once a page is up: the conversation it was in, as the PC has it now
@@ -759,6 +902,8 @@ function onText(text) {
       break;
     case 'chats':
       drawer.update(m.items);
+      // (The plain chats' dots too: an answer being written there.)
+      code.setPlain(Array.isArray(m.items) ? m.items.filter((i) => i && typeof i.id === 'number' && !i.code).map((i) => i.id) : []);
       return;
     case 'thread':
       onThread(m);
@@ -770,6 +915,10 @@ function onText(text) {
         save(KEY.chat, S.chat);
         S.title = String(m.title || '');
         drawer.titled(m.id, S.title || 'New chat');
+        S.codeNewAt = 0;
+        save(KEY.codeNew, null);
+        // A new Code chat: on the Code side's list now.
+        if (S.code) refreshCode();
       }
       break;
     case 'title':
@@ -780,6 +929,57 @@ function onText(text) {
       break;
     case 'cant_read':
       onCantRead(String(m.message || ''));
+      break;
+    // ---- Remote Control: the Code side (core/codeWire.js) ----
+    case 'code_list':
+      code.onList(m);
+      break;
+    case 'code_status':
+      code.onStatus(m);
+      cards.prune(code.status);
+      break;
+    case 'chat_message':
+      onChatMessage(m);
+      break;
+    case 'agent_snapshot':
+      agentView.onSnapshot(m);
+      return;
+    case 'agent_event':
+      agentView.onEvent(m);
+      return;
+    case 'agent_log':
+      agentView.onLog(m);
+      return;
+    case 'agent_diff':
+      agentView.onDiff(m);
+      return;
+    case 'agent_resync':
+      if (m.id && m.id === agentView.id) agentView.resync();
+      return;
+    case 'approve_card':
+      cards.add('approve', m);
+      break;
+    case 'approve_done':
+      cards.done('approve', m);
+      break;
+    case 'confirm_card':
+      cards.add('confirm', m);
+      break;
+    case 'confirm_done':
+      cards.done('confirm', m);
+      break;
+    case 'mode':
+      onMode(m);
+      break;
+    case 'report':
+      onReport(m);
+      break;
+    case 'acted':
+      if (m.action === 'message') S.told = '';
+      if (!agentView.onActed(m)) {
+        S.error = '';
+        S.note = String(m.message || '');
+      }
       break;
     case 'state':
       onState(String(m.phase || 'idle'));
@@ -805,6 +1005,13 @@ function onText(text) {
         t.final = true;
         // Its id in Chat: ▶ under it asks the PC to read it.
         if (typeof m.id === 'string') t.answerId = m.id;
+        // Where it sits in the chat (a Code chat's pills go under it).
+        const at = messageAt(t.answerId);
+        if (at >= 0) {
+          t.aAt = at;
+          if (!(t.qAt >= 0)) t.qAt = at - 1;
+          if (S.code && typeof S.chat === 'number') code.sawThread(S.chat, { answerAt: at, askedAt: t.qAt });
+        }
         S.step = '';
         S.pending = null;
         saveThread();
@@ -827,6 +1034,9 @@ function onText(text) {
       player.end();
       break;
     case 'error': {
+      // A Code action's own refusal: said where it was asked (a card, the
+      // live view, the Mode), and nothing of a question disturbed.
+      if (codeError(String(m.message || ''))) break;
       S.error = String(m.message || 'Something went wrong on the PC.');
       S.step = '';
       const wasListening = S.local !== 'idle';
@@ -930,7 +1140,7 @@ function clearFragment() {
 function currentTurn(create, typed = false) {
   let t = S.turns[S.turns.length - 1];
   if ((!t || t.final) && create) {
-    t = { id: ++S.turnId, q: '', a: '', final: false, cancelled: false, typed, answerId: '', pictures: 0, pics: [] };
+    t = { id: ++S.turnId, q: '', a: '', final: false, cancelled: false, typed, answerId: '', pictures: 0, pics: [], qAt: -1, aAt: -1 };
     S.turns.push(t);
     if (S.turns.length > KEEP_TURNS) S.turns.shift();
   }
@@ -939,25 +1149,33 @@ function currentTurn(create, typed = false) {
 
 const can = (what) => S.can.includes(what);
 
-/** The PC's messages of a conversation (`thread`) as the page's turns. Pure. */
-function turnsOf(messages) {
+/**
+ * The PC's messages of a conversation (`thread`) as the page's turns, each
+ * with where its question and answer sit in the chat (`qAt`, `aAt`: a Code
+ * chat's pills and reports go by them). Pure.
+ */
+function turnsOf(messages, more = false) {
+  const list = Array.isArray(messages) ? messages : [];
+  const at = chatIndexes(list, more);
   const turns = [];
-  for (const m of Array.isArray(messages) ? messages : []) {
-    if (!m || typeof m.text !== 'string') continue;
-    const blank = { id: ++S.turnId, q: '', a: '', final: true, cancelled: false, typed: true, answerId: '', pictures: 0, pics: [] };
+  list.forEach((m, i) => {
+    if (!m || typeof m.text !== 'string') return;
+    const blank = { id: ++S.turnId, q: '', a: '', final: true, cancelled: false, typed: true, answerId: '', pictures: 0, pics: [], qAt: -1, aAt: -1 };
     if (m.role === 'user' && m.kind === 'agentReport') {
       // An agent's report (Yap Code): never the person's own bubble; its
-      // first line as a quiet note above the answer that follows it.
-      turns.push({ ...blank, q: String(m.text).split('\n')[0], report: true });
+      // first line as a quiet note above the answer that follows it (a
+      // report card in a Code chat, Remote Control on).
+      turns.push({ ...blank, q: String(m.text).split('\n')[0], report: true, marker: m.text, qAt: at[i] });
     } else if (m.role === 'user') {
-      turns.push({ ...blank, q: m.text, typed: !m.voice, pictures: Math.max(0, Number(m.pictures) || 0) });
+      turns.push({ ...blank, q: m.text, typed: !m.voice, pictures: Math.max(0, Number(m.pictures) || 0), qAt: at[i] });
     } else if (m.role === 'assistant') {
       let t = turns[turns.length - 1];
       if (!t || t.a) turns.push((t = blank));
       t.a = m.text;
       t.answerId = typeof m.id === 'string' ? m.id : '';
+      t.aAt = at[i];
     }
-  }
+  });
   return turns.slice(-KEEP_TURNS);
 }
 
@@ -973,13 +1191,36 @@ function onThread(m) {
   S.title = id ? String(m.title || '') : '';
   // Its pictures' thumbnails, while this page lives, where the same question's still there.
   const kept = new Map(S.turns.filter((t) => t.pics.length).map((t) => [`${t.q}|${t.answerId}`, t.pics]));
-  S.turns = turnsOf(m.messages);
+  S.turns = turnsOf(m.messages, !!m.more);
   for (const t of S.turns) t.pics = kept.get(`${t.q}|${t.answerId}`) || [];
   S.more = !!m.more;
   S.pending = null;
+  // Remote Control: a Code chat's workspace and Mode, its agents, its cards waiting.
+  S.code = code.on && m.code && typeof m.code === 'object' ? m.code : null;
+  S.codeAgents = S.code && Array.isArray(m.agents) ? m.agents.filter((a) => a && a.id) : [];
+  S.codeNewAt = 0;
+  if (id || !S.code) save(KEY.codeNew, null);
+  if (S.code) {
+    code.mergeAgents(S.codeAgents);
+    for (const c of Array.isArray(m.cards) ? m.cards : []) {
+      if (c?.kind === 'approve') cards.add('approve', c, { quiet: true });
+      else if (c?.kind === 'confirm') cards.add('confirm', c, { quiet: true });
+    }
+    if (id) {
+      const answerAt = Math.max(-1, ...S.turns.map((t) => t.aAt));
+      const askedAt = Math.max(-1, ...S.turns.filter((t) => !t.report).map((t) => t.qAt));
+      code.sawThread(id, { answerAt, askedAt });
+    }
+  }
   threadPinned = true;
   saveThread();
   renderConvo();
+  // The banner's card, once its chat is here.
+  if (cardToShow) {
+    const c = cardToShow;
+    cardToShow = null;
+    setTimeout(() => showCard(c), 50);
+  }
 }
 
 /** Chat's model can't read the question's pictures: the question back in the composer with them, and Chat's line. */
@@ -1096,6 +1337,7 @@ function letGo() {
 function openChat(id, title) {
   endCall();
   letGo();
+  if (agentView.id && agentView.agent?.conversation !== id) agentView.close();
   S.chat = id;
   save(KEY.chat, id);
   S.title = title || '';
@@ -1103,6 +1345,10 @@ function openChat(id, title) {
   S.more = false;
   S.error = '';
   S.cantRead = '';
+  // (A Code chat's parts come with its thread.)
+  S.code = null;
+  save(KEY.codeNew, null);
+  S.codeAgents = [];
   saveThread();
   send({ type: 'open_chat', id });
   renderConvo();
@@ -1113,6 +1359,7 @@ function openChat(id, title) {
 function newChat() {
   endCall();
   letGo();
+  if (agentView.id) agentView.close();
   S.chat = 'new';
   save(KEY.chat, 'new');
   S.title = '';
@@ -1121,10 +1368,373 @@ function newChat() {
   S.error = '';
   S.note = '';
   S.cantRead = '';
+  S.code = null;
+  S.codeAgents = [];
+  save(KEY.codeNew, null);
   saveThread();
   if (can('chats')) send({ type: 'new_chat' });
   renderConvo();
   render();
+}
+
+// ------------------------------------------------- Remote Control: the Code side
+
+/** Something of the Code side changed (the dots, a card): what shows it, again. */
+function codeChanged() {
+  drawer.refresh();
+  mountThreadCards();
+  renderNeeds();
+  if (agentView.id) agentView.render();
+}
+
+/** The Code side's list asked for again, once a burst of changes is over. */
+let codeListTimer = 0;
+function refreshCode() {
+  clearTimeout(codeListTimer);
+  codeListTimer = setTimeout(() => code.refresh(), 400);
+}
+
+/** Remote Control went off for this phone: the Code side goes (why, when a Code chat was open). */
+function offCode(why) {
+  cards.clear();
+  agentView.drop();
+  el.thread.hidden = false;
+  for (const d of [el.modeSheet, el.envSheet, el.wsSheet]) closeSheet(d);
+  if (S.code) {
+    S.code = null;
+    S.codeAgents = [];
+    S.note = why || `Remote Control is off on ${pcName()}.`;
+  }
+  renderConvo();
+}
+
+/**
+ * **A Code action the PC refused** (`error`): said where it was asked —
+ * its card ("Tap it again…", "Already allowed from …"), the live view, the
+ * Mode, a new Code chat — instead of as a question's error. True when it
+ * was one.
+ */
+function codeError(message) {
+  if (cards.onError(message)) return true;
+  if (agentView.busy) {
+    const told = agentView.busy === 'tell' ? S.told : '';
+    if (agentView.onError(message)) {
+      // "Tell the agent…"'s words back in the box, to try again.
+      if (told && !el.input.value.trim()) {
+        el.input.value = told;
+        S.typed = true;
+        fitInput();
+      }
+      S.told = '';
+      return true;
+    }
+  }
+  const recent = (at) => at > 0 && performance.now() - at < 6000;
+  if (recent(S.modeAt)) {
+    S.modeAt = 0;
+    S.note = '';
+    S.error = message;
+    return true;
+  }
+  if (recent(S.codeNewAt)) {
+    S.codeNewAt = 0;
+    S.code = null;
+    S.error = message;
+    renderConvo();
+    return true;
+  }
+  return false;
+}
+
+/**
+ * **A message added to the chat this phone has open** (`chat_message`):
+ * an agent's report marker and its answer, as they come.
+ */
+function onChatMessage(m) {
+  const msg = m.message;
+  if (!msg || typeof msg.text !== 'string' || m.conversation !== S.chat) return;
+  const at = messageAt(msg.id);
+  const last = Math.max(-1, ...S.turns.map((t) => Math.max(t.qAt ?? -1, t.aAt ?? -1)));
+  if (msg.role === 'user') {
+    const report = msg.kind === 'agentReport';
+    const t = {
+      id: ++S.turnId,
+      q: report ? msg.text.split('\n')[0] : msg.text,
+      a: '',
+      final: true,
+      cancelled: false,
+      typed: !msg.voice,
+      answerId: '',
+      pictures: Math.max(0, Number(msg.pictures) || 0),
+      pics: [],
+      qAt: last >= 0 ? last + 1 : -1,
+      aAt: -1,
+      ...(report ? { report: true, marker: msg.text } : {}),
+    };
+    // (Before a question of this phone's still being answered: that stays the latest.)
+    const cur = S.turns[S.turns.length - 1];
+    if (cur && !cur.final) S.turns.splice(S.turns.length - 1, 0, t);
+    else S.turns.push(t);
+    if (S.turns.length > KEEP_TURNS) S.turns.shift();
+  } else if (msg.role === 'assistant') {
+    let t = [...S.turns].reverse().find((x) => x.final && !x.a && x.q);
+    if (!t) {
+      t = { id: ++S.turnId, q: '', a: '', final: true, cancelled: false, typed: true, answerId: '', pictures: 0, pics: [], qAt: -1, aAt: -1 };
+      S.turns.push(t);
+    }
+    t.a = msg.text;
+    t.answerId = typeof msg.id === 'string' ? msg.id : '';
+    t.aAt = at;
+    if (!(t.qAt >= 0) && at >= 0) t.qAt = at - 1;
+    if (typeof S.chat === 'number') code.sawThread(S.chat, { answerAt: at });
+  }
+  saveThread();
+  renderConvo();
+}
+
+/** **A Code chat's Mode changed** (`mode`: here, on the PC or on another phone). */
+function onMode(m) {
+  if (!S.code || m.chat !== S.chat) return;
+  S.code = { ...S.code, mode: String(m.mode || 'auto'), modeLabel: String(m.label || modeLabel(m.mode)), cap: m.cap ?? S.code.cap };
+  S.modeAt = 0;
+  if (el.modeSheet.open) renderModeSheet();
+}
+
+/** **An agent's turn was reported** (`report`): the list again, and a notification in the background. */
+function onReport(m) {
+  refreshCode();
+  const a = code.agents.get(m.agent);
+  const folder = a?.folder || 'a workspace';
+  const title = m.status === 'failed' ? "Agent didn't finish" : m.status === 'stopped' ? 'Agent stopped' : 'Agent done';
+  notify.show(`${title} · ${folder}`, `Its report is in the chat on ${pcName()}.`, `report:${m.agent}:${m.turn}`, () => {
+    if (typeof m.conversation === 'number' && m.conversation !== S.chat) openChat(m.conversation, '');
+  });
+}
+
+/** **A card new to this phone**: a short buzz on screen, or a notification in the background. */
+function cardArrived(card) {
+  if (document.visibilityState === 'visible') {
+    try {
+      navigator.vibrate?.(200);
+    } catch {
+      /* not on this phone */
+    }
+  } else {
+    notify.show(bannerWords([card]), card.plan ? 'Open Yap Link to read it.' : 'Open Yap Link to answer it.', `card:${card.key}`, () => goToCard(card));
+  }
+  // The agent open in the live view: its card at the live end, in view.
+  if (card.run && card.run === agentView.id) agentView.follow();
+  // In hands-free talk: on the screen, never by voice.
+  if (S.call) S.note = `${bannerWords([card])}: it's on the screen, to tap.`;
+}
+
+/** The Needs-you banner and the page's title, while a card waits. */
+function renderNeeds() {
+  const list = code.on ? cards.waiting().filter((c) => c.state === 'waiting') : [];
+  const pairing = !el.pair.hidden;
+  el.needs.hidden = !list.length || pairing;
+  el.needsText.textContent = bannerWords(list);
+  el.needs.setAttribute('aria-label', `${bannerWords(list)}. Show it`);
+  document.title = list.length ? `(${list.length}) Yap Link` : 'Yap Link';
+}
+
+/** The banner, a notification: to the (first) card waiting, its chat or its agent first. */
+let cardToShow = null;
+function goToCard(card) {
+  if (!card) return;
+  drawer.close();
+  for (const d of [el.modeSheet, el.envSheet, el.wsSheet, el.settings]) closeSheet(d);
+  if (picker.isOpen) picker.close();
+  if (card.run && agentView.id === card.run) return showCard(card);
+  if (card.conversation == null && card.run) {
+    openAgent({ id: card.run, folder: card.label, status: 'asking' });
+    return;
+  }
+  if (agentView.id) agentView.close();
+  if (card.conversation != null && card.conversation !== S.chat) {
+    cardToShow = card;
+    openChat(card.conversation, '');
+    return;
+  }
+  showCard(card);
+}
+function showCard(card) {
+  const node = cards.nodeOf(card, agentView.id === card.run ? 'agent' : 'thread');
+  if (node) {
+    if (node.closest('#thread')) threadPinned = false;
+    node.scrollIntoView({ block: 'center', behavior: 'smooth' });
+  }
+}
+
+/** **An agent's live view** (a pill, a report's Open, the running list), over its chat. */
+function openAgent(a, opts = {}) {
+  if (!code.on || !a?.id) return;
+  drawer.close();
+  for (const d of [el.modeSheet, el.envSheet, el.wsSheet]) closeSheet(d);
+  endCall();
+  // Its chat underneath, when it has one and it isn't the one open.
+  if (typeof a.conversation === 'number' && a.conversation !== S.chat) openChat(a.conversation, '');
+  el.thread.hidden = true;
+  agentView.open(a, opts);
+  render();
+}
+
+/** **+ New code chat** in workspace `workspace`: its first question makes it (`code_new`, then `chat: "new"`). */
+function newCodeChat(workspace) {
+  if (!code.on || !workspace) return;
+  endCall();
+  letGo();
+  if (agentView.id) agentView.close();
+  S.chat = 'new';
+  save(KEY.chat, 'new');
+  S.title = '';
+  S.turns = [];
+  S.more = false;
+  S.error = '';
+  S.note = '';
+  S.cantRead = '';
+  // As the PC will say (its `thread`), until it does.
+  S.code = { workspace, path: code.workspaceOf(workspace)?.path || '', mode: 'auto', modeLabel: 'Auto', allowed: true, phoneMax: 'auto' };
+  S.codeAgents = [];
+  saveThread();
+  S.codeNewAt = performance.now();
+  save(KEY.codeNew, workspace);
+  send({ type: 'code_new', workspace });
+  renderConvo();
+  render();
+}
+
+/** Go ahead with a plan, from its report card: once (the PC's own words come back as `acted`). */
+const wentAhead = new Set();
+function goAhead(agent, turn, key) {
+  if (!agent?.id || wentAhead.has(key)) return;
+  wentAhead.add(key);
+  if (!send({ type: 'agent_go_ahead', id: agent.id })) wentAhead.delete(key);
+  renderConvo();
+}
+
+/** **A report's card** (AgentReportCard.svelte's): "Agent done · garden-planner", what it changed, Open; a waiting plan's Go ahead. */
+function reportCard(t, agents, conv) {
+  const r = reportOf(agents, conv, t);
+  const n = r.turn?.n ?? null;
+  const key = r.agent ? `${r.agent.id}:${n ?? 0}` : '';
+  const sent = !!key && wentAhead.has(key);
+  return h(
+    'div',
+    { class: 'agentreport', role: 'note', 'aria-label': `${r.title} · ${r.folder || 'a folder'}`, testid: 'report-card', data: { turn: n, tone: r.tone } },
+    h('span', { class: `adot tone-${r.tone}`, 'aria-hidden': 'true' }),
+    h(
+      'div',
+      { class: 'rtext' },
+      h('p', { class: 'rtitle', testid: 'report-title' }, `${r.title} · `, h('span', { class: 'rfolder', text: r.folder || 'a folder' })),
+      r.changed ? h('p', { class: 'rline', text: `Changed ${r.changed}` }) : null,
+    ),
+    r.agent && (r.waits || sent)
+      ? h('button', {
+          type: 'button',
+          class: 'repbtn primary',
+          testid: 'report-go-ahead',
+          disabled: sent,
+          'aria-label': sent ? `Going ahead with the plan in ${r.agent.folder}` : `Go ahead with the plan in ${r.agent.folder}`,
+          text: sent ? 'Going ahead' : 'Go ahead',
+          on: { click: () => goAhead(r.agent, n, key) },
+        })
+      : null,
+    r.agent
+      ? h('button', {
+          type: 'button',
+          class: 'repbtn',
+          testid: 'report-open',
+          'aria-label': `Open the agent in ${r.agent.folder}`,
+          text: 'Open',
+          on: { click: () => openAgent(r.agent, { turn: n }) },
+        })
+      : null,
+  );
+}
+
+/** **An answer's agent pills** (AgentPills.svelte's): each agent its turn started there, a tap its live view. */
+function pillsRow(list) {
+  return h(
+    'div',
+    { class: 'apills', testid: 'agent-pills' },
+    list.map((p) => {
+      const st = p.turnStatus || p.status;
+      return h(
+        'button',
+        {
+          type: 'button',
+          class: 'apill',
+          testid: 'agent-pill',
+          data: { id: p.id, turn: p.turn, status: st },
+          'aria-label': `Agent in ${p.folder}${p.turnTitle ? `: ${p.turnTitle}` : ''}, ${statusWord(st)}. Open it`,
+          on: { click: () => openAgent(p, { turn: p.turn }) },
+        },
+        h('span', { class: `adot tone-${statusTone(st)}`, 'aria-hidden': 'true' }),
+        h('span', { class: 'pfolder', text: p.folder }),
+        p.turnTitle ? h('span', { class: 'pturn', text: p.turnTitle }) : null,
+        h('span', { class: 'pstatus', text: statusWord(st) }),
+      );
+    }),
+  );
+}
+
+/** The cards waiting in the open chat, under its thread. */
+function mountThreadCards() {
+  const conv = typeof S.chat === 'number' ? S.chat : null;
+  cards.mount(el.threadCards, 'thread', (c) => code.on && conv != null && c.conversation === conv);
+}
+
+// ---- the sheets a Code chat's chips open ----
+
+function openSheet(dialog, fill) {
+  fill?.();
+  if (typeof dialog.showModal === 'function') {
+    if (!dialog.open) dialog.showModal();
+  } else dialog.setAttribute('open', '');
+}
+function closeSheet(dialog) {
+  if (!dialog) return;
+  if (typeof dialog.close === 'function' && dialog.open) dialog.close();
+  else dialog.removeAttribute('open');
+}
+
+/** The Mode sheet: up to Auto from the phone (the cap's lower), never Bypass; a new chat's set on the PC. */
+function renderModeSheet() {
+  const readOnly = typeof S.chat !== 'number' || !can('code_act');
+  code.renderModes(
+    el.modeList,
+    S.code,
+    (mode) => {
+      if (readOnly) return;
+      S.modeAt = performance.now();
+      code.sendMode(S.chat, mode);
+      closeSheet(el.modeSheet);
+    },
+    { readOnly },
+  );
+}
+
+/** The Environment sheet: the workspace and its path, where it runs, its Mode, Remote Control. */
+function renderEnvSheet() {
+  const c = S.code;
+  if (!c) return;
+  const row = (dt, dd, testid) => [h('dt', { text: dt }), h('dd', { text: dd, testid })];
+  el.envList.replaceChildren(
+    ...row('Workspace', c.workspace, 'env-workspace'),
+    ...(c.path ? row('Folder', c.path, 'env-path') : []),
+    ...row('Runs on', pcName(), 'env-pc'),
+    ...row('Mode', c.modeLabel || modeLabel(c.mode), 'env-mode'),
+    ...row('From this phone', c.mode === BYPASS || (c.phoneMax && c.phoneMax !== 'auto') ? `At most ${modeLabel(c.phoneMax || 'auto')}` : 'At most Auto', 'env-max'),
+    ...row('Remote Control', c.allowed === false ? 'Off for this workspace' : 'On', 'env-remote'),
+  );
+}
+
+/** The settings sheet's notifications row (Remote Control on only). */
+function renderNotify() {
+  el.notifyRow.hidden = !code.on;
+  el.notify.checked = notify.on;
+  el.notifyLine.textContent = notify.line();
 }
 
 const NS = 'http://www.w3.org/2000/svg';
@@ -1215,6 +1825,18 @@ const readingInThread = () => !!S.reading && S.turns.some((t) => t.answerId === 
  * place. One Stop at a time (the composer's for a spoken answer).
  */
 function renderConvo() {
+  // A finger on the thread (a pill, a report's Open) while an answer
+  // streams: it's drawn again once it lifts, so the tap lands.
+  if (threadHold) {
+    threadDirty = true;
+    return;
+  }
+  // A Code chat (Remote Control on): its agents' pills under the answers,
+  // its reports as cards.
+  const conv = typeof S.chat === 'number' ? S.chat : null;
+  const coding = code.on && !!S.code;
+  const agents = coding ? chatAgents(S.codeAgents, code.agents, conv) : [];
+  const pills = coding ? pillsOf(agents, conv, S.turns) : new Map();
   const frag = document.createDocumentFragment();
   for (const t of S.turns) {
     const li = document.createElement('li');
@@ -1241,7 +1863,9 @@ function renderConvo() {
       chip.append(icon('', PHOTO), document.createTextNode(t.pictures === 1 ? '1 picture' : `${t.pictures} pictures`));
       li.appendChild(chip);
     }
-    if (t.report) {
+    if (t.report && coding) {
+      li.appendChild(reportCard(t, agents, conv));
+    } else if (t.report) {
       // An agent's report (its marker): a note, not the person's bubble.
       const r = document.createElement('p');
       r.className = 'report';
@@ -1271,6 +1895,9 @@ function renderConvo() {
       else a.appendChild(renderAnswer(t.a.trim()));
       li.appendChild(a);
     }
+    // Its agents' pills (the agents this answer started, or passed work to).
+    const mine = coding && t.aAt >= 0 ? pills.get(t.aAt) : null;
+    if (mine?.length) li.appendChild(pillsRow(mine));
     const speaking = speakingNow(t);
     const done = t.final && !!t.a.trim();
     const readable = done && t.answerId && can('read_aloud');
@@ -1315,7 +1942,68 @@ function renderConvo() {
   el.convo.replaceChildren(frag);
   el.empty.hidden = S.turns.length > 0;
   el.older.hidden = !(S.more && S.turns.length > 0);
+  renderEmpty(coding);
+  mountThreadCards();
   if (threadPinned) toEnd();
+}
+
+/**
+ * The empty thread: "Ask Yap anything", or — a new Code chat — its
+ * workspace, what it's for, and the one-tap prompts (each fills the box,
+ * never sent by itself: a request here can send an agent).
+ */
+let emptyKey = '';
+function renderEmpty(coding) {
+  const key = coding ? `code:${S.code.workspace}` : 'chat';
+  if (key === emptyKey) return;
+  emptyKey = key;
+  el.emptyTitle.textContent = coding ? `Code · ${S.code.workspace}` : 'Ask Yap anything';
+  el.emptySub.hidden = coding;
+  el.keepOpen.hidden = coding;
+  el.codeIntro.hidden = !coding;
+  el.codePrompts.hidden = !coding;
+  el.empty.dataset.code = String(coding);
+  if (!coding) return;
+  el.codeIntro.textContent = `${CODE_INTRO.split('. ')[0]}. Agents run your own Claude Code on ${pcName()}, and you can follow each step from here.`;
+  el.codePrompts.replaceChildren(
+    ...CODE_PROMPTS.map((p) =>
+      h('button', {
+        type: 'button',
+        class: 'prompt',
+        testid: 'code-prompt',
+        text: p,
+        on: {
+          click: () => {
+            el.input.value = p;
+            S.typed = true;
+            S.said = false;
+            fitInput();
+            render();
+            el.input.focus({ preventScroll: true });
+          },
+        },
+      }),
+    ),
+  );
+}
+
+// A finger on the thread holds its redraw until it lifts (renderConvo).
+let threadHold = false;
+let threadDirty = false;
+el.thread.addEventListener('pointerdown', () => (threadHold = true), { capture: true });
+for (const type of ['pointerup', 'pointercancel']) {
+  document.addEventListener(
+    type,
+    () => {
+      if (!threadHold) return;
+      threadHold = false;
+      if (threadDirty) {
+        threadDirty = false;
+        setTimeout(renderConvo, 0);
+      }
+    },
+    { capture: true },
+  );
 }
 
 // The thread takes the room the composer leaves it, so it shrinks when the
@@ -2956,6 +3644,27 @@ function render() {
     );
   } else el.modelBtn.hidden = true;
 
+  // Remote Control: a Code chat's composer (the teal edge, its workspace
+  // and Mode chips), and the live view's "Tell the agent…" (no pictures,
+  // model or hands-free talk there: its words go to the agent).
+  const inAgent = !!agentView.id;
+  const coding = code.on && !!S.code;
+  el.composer.dataset.code = String(coding || inAgent);
+  el.composer.dataset.agent = String(inAgent);
+  el.input.placeholder = inAgent ? 'Tell the agent…' : coding ? 'Ask for a change, or hold to talk' : 'Ask Yap, or hold to talk';
+  el.input.setAttribute('aria-label', inAgent ? 'Tell the agent' : 'Ask Yap');
+  if (coding) {
+    el.wsChipLabel.textContent = S.code.workspace;
+    el.wsChip.setAttribute('aria-label', `Workspace: ${S.code.workspace}. Its environment`);
+    const bypass = S.code.mode === BYPASS;
+    const label = S.code.modeLabel || modeLabel(S.code.mode);
+    el.modeChipLabel.textContent = label;
+    el.modeChip.dataset.bypass = String(bypass);
+    el.modeChip.setAttribute('aria-label', `Mode: ${label}${bypass ? `. ${PHONE_MAX_WORDS}` : ''}. Change the Mode`);
+  }
+  if (inAgent) el.modelBtn.hidden = true;
+  if (el.notifyRow.hidden === code.on) renderNotify();
+
   const now = phaseNow();
   const call = S.call;
   document.body.dataset.phase = now;
@@ -3028,8 +3737,9 @@ function render() {
   el.meter.dataset.on = String(listening || (call && now === 'speaking'));
   syncVoiceMeter(call && now === 'speaking');
   // + for a picture, where the PC takes them.
-  el.plusWrap.hidden = capsule || call || !S.ready || !can('pictures');
+  el.plusWrap.hidden = capsule || call || !S.ready || !can('pictures') || inAgent;
   if (el.plusWrap.hidden) closePlusMenu();
+  el.coderow.hidden = !coding || inAgent || capsule || call;
   // One button where Send is: ↑ to send; ■ while Yap works the question out
   // (cancel) or says an answer (Stop) — unless there are words to send
   // instead, or ▶ on an answer in the thread is what's playing (then its own
@@ -3043,7 +3753,7 @@ function render() {
   el.stopBtn.setAttribute('aria-label', call && now === 'working' ? 'Stop the answer' : 'Stop');
   el.sendBtn.hidden = call || capsule || stopSpeaking || stopWorking || !S.typed;
   el.sendBtn.disabled = !S.typed || S.preparing > 0;
-  el.callBtn.hidden = !call && (capsule || stopSpeaking || stopWorking || S.typed);
+  el.callBtn.hidden = !call && (capsule || stopSpeaking || stopWorking || S.typed || inAgent);
   el.callBtn.disabled = !call && !S.ready;
   el.callBtn.setAttribute('aria-pressed', String(call));
   // ✕ while it listens (on the left, as the bar's capsule has it); ■ while
@@ -3070,6 +3780,7 @@ function render() {
   for (const r of el.wait.querySelectorAll('input[name=wait]')) r.checked = r.value === S.wait;
   el.clearer.checked = S.clearer;
   renderSound();
+  renderNeeds();
 }
 
 /**
@@ -3182,6 +3893,25 @@ function fitInput() {
 function sendTyped(how = {}) {
   const text = el.input.value.trim();
   if (!text) return;
+  // The live view's box: "Tell the agent…" — its next turn, queued while it works.
+  if (agentView.id) {
+    if (S.local !== 'idle' || S.transcribing) return;
+    if (!S.ready) {
+      S.error = `Not connected to ${pcName()} yet.`;
+      render();
+      return;
+    }
+    S.error = '';
+    if (agentView.tell(text)) {
+      S.told = text;
+      el.input.value = '';
+      S.typed = false;
+      S.said = false;
+      fitInput();
+    }
+    render();
+    return;
+  }
   const pics = how.without ? [] : S.attached.slice();
   // Pictures Chat's model can't read: its line says what can be done (the
   // send goes from one of its buttons).
@@ -3403,6 +4133,7 @@ function openSettings() {
     if (!el.settings.open) el.settings.showModal();
   } else el.settings.setAttribute('open', '');
   renderSound();
+  renderNotify();
 }
 
 function closeSettings() {
@@ -3538,7 +4269,26 @@ el.mic.addEventListener('change', () => {
   if (S.local === 'idle') closeMic();
 });
 el.modelBtn.addEventListener('click', () => picker.open());
-el.menuBtn.addEventListener('click', () => drawer.open());
+// ☰: on the Code side while a Code chat (or an agent) is open.
+el.menuBtn.addEventListener('click', () => drawer.open(code.on && (S.code || agentView.id) ? 'code' : null));
+// Remote Control: the banner to its card; a Code chat's chips to their sheets.
+el.needs.addEventListener('click', () => goToCard(cards.waiting().find((c) => c.state === 'waiting')));
+el.modeChip.addEventListener('click', () => S.code && openSheet(el.modeSheet, renderModeSheet));
+el.wsChip.addEventListener('click', () => S.code && openSheet(el.envSheet, renderEnvSheet));
+for (const [dialog, closeBtn] of [
+  [el.modeSheet, $('mode-sheet-close')],
+  [el.envSheet, $('env-sheet-close')],
+  [el.wsSheet, $('ws-sheet-close')],
+]) {
+  closeBtn.addEventListener('click', () => closeSheet(dialog));
+  dialog.addEventListener('click', (e) => e.target === dialog && closeSheet(dialog));
+}
+el.notify.addEventListener('change', async () => {
+  // Asked only here, on a tap: never on load.
+  if (el.notify.checked) await notify.enable();
+  else notify.disable();
+  renderNotify();
+});
 // +: Take photo (the camera) or Choose photos (the phone's pictures).
 el.plusBtn.addEventListener('click', () => {
   const open = el.plusMenu.hidden;
@@ -3766,6 +4516,18 @@ window.__yapLink = {
       // once the browser refused the media player (and why); the media
       // player readied within a tap, or refused there.
       voice: { via: voice.via, why: voice.why, unlocked: mediaVoice.unlocked, refused: mediaVoice.refused },
+      // Remote Control: the Code side on, the open chat's Code part, the
+      // cards (each one's state), the agent open, the drawer's side, the
+      // notifications' switch.
+      code: {
+        on: code.on,
+        chat: S.code ? { ...S.code } : null,
+        cards: cards.snapshot(),
+        agent: agentView.snapshot(),
+        side: drawer.side,
+        notify: { want: notify.want, on: notify.on },
+        turns: S.turns.map((t) => ({ q: t.q, report: !!t.report, qAt: t.qAt, aAt: t.aAt })),
+      },
     };
   },
 };

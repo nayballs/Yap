@@ -415,6 +415,40 @@ test('a request from the phone into a new Code chat runs its agent; the phone al
   phone.chat = chat.id;
 });
 
+test("the phone's own page (wave 2): its Code side lists the workspace and the Code chat, whose thread has the agent's pill and report card, and the pill opens its live view", async ({ yap, browser }) => {
+  test.setTimeout(60_000);
+  const { port } = await status(yap);
+  // The page as the PC serves it, on a phone-sized screen, paired as the client above.
+  const context = await browser.newContext({ ignoreHTTPSErrors: true, viewport: { width: 390, height: 844 } });
+  await context.addInitScript((d) => {
+    if (!sessionStorage.getItem('seeded')) {
+      localStorage.setItem('yap.link.device', JSON.stringify(d));
+      sessionStorage.setItem('seeded', '1');
+    }
+  }, device);
+  const page = await context.newPage();
+  await page.goto(`https://127.0.0.1:${port}/`);
+  await expect(page.getByTestId('conn')).toHaveText(/^Connected to /, { timeout: 15_000 });
+  await page.getByTestId('menu').click();
+  await page.getByTestId('side-code').click();
+  await expect(page.getByTestId('code-workspace').filter({ hasText: 'garden-planner' })).toBeVisible();
+  const row = page.locator(`[data-testid="code-chat"][data-id="${phone.chat}"]`);
+  await expect(row).toBeVisible();
+  await row.click();
+  await expect(page.getByTestId('workspace-chip')).toHaveText('garden-planner');
+  await expect(page.getByTestId('report-card').first().getByTestId('report-title')).toHaveText('Agent done · garden-planner');
+  await expect(page.getByTestId('heard').first()).toHaveText('Change Draft to Final in notes.md and run the tests');
+  await page.getByTestId('agent-pill').first().click();
+  await expect(page.getByTestId('agent-view')).toBeVisible();
+  await expect(page.getByTestId('agent-title')).toHaveText('garden-planner');
+  await expect(page.getByTestId('agent-status')).toHaveText('Done');
+  await expect(page.getByTestId('agent-file').first()).toContainText('notes.md');
+  await expect(page.getByTestId('agent-cost')).toContainText('Your Claude plan');
+  await page.getByTestId('agent-close').click();
+  await expect(page.getByTestId('agent-view')).toBeHidden();
+  await context.close();
+});
+
 test('a Bypass chat runs at Auto from the phone, which never picks Bypass; Stop from the phone', async ({ yap, main, fakeLlm }) => {
   test.setTimeout(90_000);
   const chat = phone.chat;

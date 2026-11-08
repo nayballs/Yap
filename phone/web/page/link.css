@@ -89,6 +89,23 @@
   /* the live waveform (--yap-live; the Yap bar's --bar-wave) */
   --yap-live: #c2690a;
 
+  /* Code chats (Remote Control's Code side): the calm teal, and an agent done */
+  --yap-code: #2a7684;
+  --yap-code-line: rgba(42, 118, 132, 0.55);
+  --yap-code-ring: rgba(42, 118, 132, 0.12);
+  --yap-code-wash: rgba(42, 118, 132, 0.08);
+  --yap-code-tint: rgba(42, 118, 132, 0.16);
+  --yap-code-label-bg: #eef5f6;
+  --yap-success: #1e8f4d;
+
+  /* Chat's status dots (core/chatStatus.js): working in the side's accent,
+     needs you the warning amber with a soft ring, new a calm blue */
+  --yap-status-working: var(--yap-primary);
+  --yap-status-working-code: var(--yap-code);
+  --yap-status-needs: var(--yap-warning);
+  --yap-status-needs-ring: rgba(176, 124, 16, 0.22);
+  --yap-status-new: #2f6fd8;
+
   --yap-font-ui: 'Figtree Variable', 'Segoe UI Variable Text', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto,
     'Noto Sans', sans-serif;
   --yap-font-display: 'EB Garamond Variable', Georgia, 'Palatino Linotype', 'Noto Serif', 'Times New Roman', serif;
@@ -153,6 +170,16 @@
     --yap-focus-ring: #f0b04a;
 
     --yap-live: #f0b04a;
+
+    --yap-code: #6cc0cc;
+    --yap-code-line: rgba(108, 192, 204, 0.5);
+    --yap-code-ring: rgba(108, 192, 204, 0.1);
+    --yap-code-wash: rgba(108, 192, 204, 0.08);
+    --yap-code-tint: rgba(108, 192, 204, 0.16);
+    --yap-code-label-bg: #1d2a2c;
+    --yap-success: #3dbb74;
+    --yap-status-needs-ring: rgba(220, 160, 60, 0.26);
+    --yap-status-new: #6ea6ff;
   }
 }
 
@@ -634,8 +661,8 @@ main {
   background: var(--yap-primary-wash);
   white-space: pre-wrap;
 }
-/* An agent's report (Yap Code, `kind: "agentReport"`): a quiet note, never
-   the person's own bubble (the Code side's report cards come in wave 2). */
+/* An agent's report (Yap Code, `kind: "agentReport"`) with Remote Control off: a quiet note, never
+   the person's own bubble (with it on, a report card: .agentreport). */
 .report {
   align-self: flex-start;
   margin: 0;
@@ -2775,6 +2802,1277 @@ select:focus-visible {
   .empty-title {
     font-size: 1.5rem;
   }
+}
+
+/* ------------------------------------------- Remote Control: the Code side */
+
+/* Yap Code from the phone (code.js, cards.js, agent.js, diff.js): the
+   desktop's Code side on a phone's terms — the Code teal (--yap-code*),
+   the status dots (StatusDot.svelte), the agent's cards and its live view
+   (AgentApprove, AgentReportCard, AgentTab), every target 44 px or more. */
+
+/* The Needs-you banner, under the header on every screen while a card waits. */
+.needs {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 2.75rem;
+  margin: 0 calc(var(--gutter) - 4px) 4px;
+  padding: 6px 12px 6px 14px;
+  border: 1px solid color-mix(in srgb, var(--yap-warning) 45%, var(--yap-border-subtle));
+  border-radius: var(--yap-r-full);
+  background: color-mix(in srgb, var(--yap-warning) 10%, var(--yap-s2));
+  color: var(--yap-fg);
+  font-size: 0.9375rem;
+  font-weight: 600;
+  text-align: left;
+  cursor: pointer;
+  touch-action: manipulation;
+}
+.needs-dot {
+  flex: 0 0 auto;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--yap-status-needs);
+  box-shadow: 0 0 0 3px var(--yap-status-needs-ring);
+}
+.needs-text {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.needs-go {
+  flex: 0 0 auto;
+  width: 1.125rem;
+  height: 1.125rem;
+  fill: none;
+  stroke: var(--yap-muted);
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+/* A status dot (core/chatStatus.js): working pulses, needs you amber with a ring, new blue. */
+.sdot {
+  flex: 0 0 auto;
+  box-sizing: border-box;
+  height: 8px;
+  border-radius: 50%;
+  background-color: transparent;
+}
+.sdot.inline {
+  width: 0;
+  margin: 0;
+  opacity: 0;
+}
+.sdot.inline:not([data-state='']) {
+  width: 8px;
+  margin: 0 2px 0 auto;
+  opacity: 1;
+}
+.sdot.badge {
+  position: absolute;
+  top: 8px;
+  right: 10px;
+  width: 7px;
+  height: 7px;
+  box-shadow: 0 0 0 1.5px var(--yap-s3);
+}
+.sdot[data-state='working'] {
+  background-color: var(--yap-status-working);
+}
+.sdot.teal[data-state='working'] {
+  background-color: var(--yap-status-working-code);
+}
+.sdot[data-state='needs'] {
+  background-color: var(--yap-status-needs);
+}
+.sdot.inline[data-state='needs'] {
+  box-shadow: 0 0 0 2.5px var(--yap-status-needs-ring);
+}
+.sdot[data-state='new'] {
+  background-color: var(--yap-status-new);
+}
+@media (prefers-reduced-motion: no-preference) {
+  .sdot[data-state='working'],
+  .adot.tone-live {
+    animation: status-pulse 1.6s ease-in-out infinite;
+  }
+}
+@keyframes status-pulse {
+  0%,
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.4;
+    transform: scale(0.8);
+  }
+}
+
+/* An agent's dot (core/agents.js statusTone): working teal, waiting amber, done green, failed red. */
+.adot {
+  flex: 0 0 auto;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--yap-muted-55);
+}
+.tone-live .adot,
+.adot.tone-live {
+  background: var(--yap-code);
+}
+.tone-ask .adot,
+.adot.tone-ask {
+  background: var(--yap-warning);
+}
+.tone-done .adot,
+.adot.tone-done {
+  background: var(--yap-success);
+}
+.tone-failed .adot,
+.adot.tone-failed {
+  background: var(--yap-danger);
+}
+
+/* ---- the drawer's Chat | Code ---- */
+
+.sides {
+  flex: 0 0 auto;
+  display: flex;
+  gap: 4px;
+  margin: 2px var(--gutter) 10px;
+  padding: 4px;
+  border-radius: var(--yap-r-full);
+  background: var(--yap-s3);
+}
+.side {
+  position: relative;
+  flex: 1 1 0;
+  min-height: 2.75rem;
+  border: 0;
+  border-radius: var(--yap-r-full);
+  background: transparent;
+  color: var(--yap-muted);
+  font-size: 1rem;
+  font-weight: 650;
+  cursor: pointer;
+  touch-action: manipulation;
+}
+.side[aria-selected='true'] {
+  background: var(--yap-s2);
+  color: var(--yap-fg);
+  box-shadow: var(--yap-shadow-sm);
+}
+.side[data-side='code'][aria-selected='true'] {
+  color: var(--yap-code);
+}
+.sidedot {
+  display: contents;
+}
+.drawer-side {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+.code-side {
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding-bottom: 8px;
+}
+.code-side .recents {
+  flex: none;
+  overflow: visible;
+  padding-bottom: 4px;
+}
+.code-side .recent svg {
+  stroke: var(--yap-code);
+}
+.wshead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  padding-right: 8px;
+}
+.wshead .recents-h {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.iconbtn.small {
+  width: 2.75rem;
+  height: 2.75rem;
+}
+.iconbtn.small svg {
+  width: 1.125rem;
+  height: 1.125rem;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2;
+  stroke-linecap: round;
+}
+/* The agents working (RunningAgents.svelte): a row each. */
+.running {
+  list-style: none;
+  margin: 0 8px 10px;
+  padding: 4px;
+  border: 1px solid var(--yap-border-subtle);
+  border-radius: 16px;
+  background: var(--yap-s2);
+}
+.runrow {
+  width: 100%;
+  min-height: 3.25rem;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 6px 10px;
+  border: 0;
+  border-radius: 12px;
+  background: transparent;
+  color: var(--yap-fg);
+  text-align: left;
+  cursor: pointer;
+  touch-action: manipulation;
+}
+.runrow:active {
+  background: var(--yap-s3);
+}
+.runtext {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+.runtop {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+}
+.runfolder {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 650;
+}
+.runtime {
+  flex: 0 0 auto;
+  font-size: 0.8125rem;
+  color: var(--yap-muted);
+  font-variant-numeric: tabular-nums;
+}
+.runline {
+  font-size: 0.875rem;
+  color: var(--yap-fg-80);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ---- a Code chat's thread ---- */
+
+/* An agent's report (AgentReportCard.svelte): a compact card, never the person's bubble. */
+.agentreport {
+  align-self: flex-start;
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px 10px;
+  box-sizing: border-box;
+  max-width: 100%;
+  padding: 8px 8px 8px 14px;
+  border: 1px solid var(--yap-border-subtle);
+  border-radius: 16px;
+  background: var(--yap-s2);
+  font-size: 0.9375rem;
+}
+.rtext {
+  flex: 1 1 10em;
+  min-width: 0;
+}
+.rtitle,
+.rline {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+.rtitle {
+  font-weight: 600;
+}
+.rfolder {
+  color: var(--yap-code);
+}
+.rline {
+  font-size: 0.875rem;
+  color: var(--yap-muted);
+}
+.repbtn,
+.pillbtn {
+  flex: 0 0 auto;
+  min-height: 2.75rem;
+  padding: 0 16px;
+  border: 1px solid var(--yap-border);
+  border-radius: var(--yap-r-full);
+  background: var(--yap-s2);
+  color: var(--yap-fg);
+  font-size: 0.9375rem;
+  font-weight: 650;
+  cursor: pointer;
+  touch-action: manipulation;
+}
+.repbtn.primary,
+.pillbtn.primary {
+  border-color: var(--yap-ink);
+  background: var(--yap-ink);
+  color: var(--yap-ink-fg);
+}
+.repbtn:active,
+.pillbtn:active {
+  background: var(--yap-s3);
+}
+.repbtn.primary:active,
+.pillbtn.primary:active {
+  background: var(--yap-ink-hover);
+}
+.repbtn:disabled,
+.pillbtn:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+/* Under an answer: its agents' pills (AgentPills.svelte), a tap the live view. */
+.apills {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: -2px;
+}
+.apill {
+  max-width: 100%;
+  min-height: 2.75rem;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 14px 0 12px;
+  border: 1px solid var(--yap-code-line);
+  border-radius: var(--yap-r-full);
+  background: var(--yap-code-wash);
+  color: var(--yap-fg);
+  font-size: 0.9375rem;
+  text-align: left;
+  cursor: pointer;
+  touch-action: manipulation;
+}
+.apill:active {
+  background: var(--yap-code-tint);
+}
+.pfolder {
+  flex: 0 0 auto;
+  font-weight: 650;
+  color: var(--yap-code);
+}
+.pturn {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.pstatus {
+  flex: 0 0 auto;
+  font-size: 0.8125rem;
+  color: var(--yap-muted);
+}
+/* A new Code chat's one-tap prompts: each fills the box. */
+.prompts {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: min(100%, 24em);
+  margin-top: 6px;
+}
+.prompt {
+  min-height: 2.75rem;
+  padding: 8px 16px;
+  border: 1px solid var(--yap-border);
+  border-radius: 16px;
+  background: var(--yap-s2);
+  color: var(--yap-fg);
+  font-size: 0.9375rem;
+  text-align: left;
+  cursor: pointer;
+  touch-action: manipulation;
+}
+.prompt:active {
+  background: var(--yap-s3);
+}
+.empty[data-code='true'] .empty-spark {
+  fill: var(--yap-code);
+}
+
+/* ---- the cards (Allow once / Deny, a plan's Go ahead, Start / Don't) ---- */
+
+.thread-cards,
+.avcards {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.ccard {
+  --ring-gap: var(--yap-s2);
+  display: flex;
+  gap: 10px;
+  box-sizing: border-box;
+  width: 100%;
+  padding: 12px 14px;
+  border: 1px solid color-mix(in srgb, var(--yap-warning) 45%, var(--yap-border-subtle));
+  border-radius: 18px;
+  background: var(--yap-s2);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--yap-warning) 14%, transparent);
+  font-size: 0.9375rem;
+}
+.ccard.plan,
+.ccard.kind-confirm {
+  border-color: var(--yap-primary-line);
+  box-shadow: 0 0 0 3px var(--yap-primary-wash);
+}
+.ccard[data-state='done'] {
+  border-color: var(--yap-border-subtle);
+  box-shadow: none;
+  background: var(--yap-s1);
+}
+.cicon {
+  flex: 0 0 auto;
+  width: 1.25rem;
+  height: 1.25rem;
+  margin-top: 1px;
+  fill: none;
+  stroke: var(--yap-warning);
+  stroke-width: 1.8;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.plan .cicon,
+.kind-confirm .cicon {
+  stroke: var(--yap-primary);
+}
+[data-state='done'] .cicon {
+  stroke: var(--yap-muted);
+}
+.cbody {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.cq,
+.csummary,
+.cpath,
+.clabel,
+.ctime,
+.cwhy,
+.cerror,
+.cstatus {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+.cws {
+  font-weight: 650;
+  color: var(--yap-code);
+}
+.csummary {
+  font-size: 1.0625rem;
+  font-weight: 650;
+}
+.cdetail {
+  margin: 0;
+  max-height: 12rem;
+  overflow: auto;
+  padding: 8px 10px;
+  border-radius: 10px;
+  background: var(--yap-s3);
+  font-family: ui-monospace, 'Cascadia Mono', Consolas, 'Roboto Mono', monospace;
+  font-size: 0.8125rem;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.cdetail.brief {
+  font-family: inherit;
+  font-size: 0.875rem;
+}
+.cplan {
+  max-height: none;
+  overflow: hidden;
+  font-size: 0.9375rem;
+}
+.cplan.folded {
+  max-height: 7.5em;
+  -webkit-mask-image: linear-gradient(to bottom, #000 60%, transparent);
+  mask-image: linear-gradient(to bottom, #000 60%, transparent);
+}
+.cfold,
+.showmore {
+  align-self: flex-start;
+  min-height: 2.75rem;
+  padding: 0 4px;
+  border: 0;
+  background: transparent;
+  color: var(--yap-link);
+  font-size: 0.875rem;
+  font-weight: 650;
+  cursor: pointer;
+}
+.cpath,
+.clabel,
+.ctime,
+.cwhy {
+  font-size: 0.8125rem;
+  color: var(--yap-muted);
+}
+.clabel {
+  font-weight: 650;
+}
+.cerror {
+  font-size: 0.875rem;
+  color: var(--yap-danger);
+  font-weight: 600;
+}
+.cbtns {
+  display: flex;
+  gap: 10px;
+  margin-top: 4px;
+}
+.cardbtn {
+  flex: 1 1 0;
+  min-height: 3rem;
+  border-radius: var(--yap-r-full);
+  font-size: 1rem;
+  font-weight: 650;
+  cursor: pointer;
+  touch-action: manipulation;
+}
+.cardbtn.no {
+  border: 1px solid var(--yap-border);
+  background: var(--yap-s2);
+  color: var(--yap-fg);
+}
+.cardbtn.yes {
+  border: 1px solid var(--yap-ink);
+  background: var(--yap-ink);
+  color: var(--yap-ink-fg);
+}
+/* Asleep for the first moment on screen: a tap then does nothing. */
+.cardbtn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+.cstatus {
+  font-weight: 650;
+}
+.cstatus[data-outcome='allowed'] {
+  color: var(--yap-success-text);
+}
+.cstatus[data-outcome='denied'],
+.cstatus[data-outcome='refused'],
+.cstatus[data-outcome='timedOut'] {
+  color: var(--yap-fg-80);
+}
+
+/* ---- a Code chat's composer ---- */
+
+/* The Code teal edge, as the desktop's box in a Code chat. */
+.composer[data-code='true'] {
+  border-color: var(--yap-code-line);
+  box-shadow:
+    0 0 0 3px var(--yap-code-ring),
+    var(--yap-shadow-sm);
+}
+.coderow {
+  display: flex;
+  gap: 6px;
+  min-width: 0;
+  padding: 0 2px 2px;
+}
+.codechip {
+  background: var(--yap-code-label-bg);
+  color: var(--yap-code);
+}
+.codechip .chip-label,
+.modechip .chip-label {
+  min-width: 0;
+}
+.cmark {
+  flex: 0 0 auto;
+  width: 1rem;
+  height: 1rem;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.8;
+  stroke-linejoin: round;
+}
+.modechip[data-bypass='true'] {
+  background: color-mix(in srgb, var(--yap-warning) 16%, var(--yap-s2));
+  color: var(--yap-warning);
+}
+
+/* ---- an agent's live view ---- */
+
+.agentview {
+  position: relative;
+  flex: 1 1 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+.avhead {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 var(--gutter) 6px 6px;
+  border-bottom: 1px solid var(--yap-rule);
+}
+.avicon {
+  flex: 0 0 auto;
+  width: 1.125rem;
+  height: 1.125rem;
+  fill: none;
+  stroke: var(--yap-code);
+  stroke-width: 1.8;
+  stroke-linejoin: round;
+}
+.avtitle {
+  flex: 0 1 auto;
+  min-width: 0;
+  margin: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 1.0625rem;
+  font-weight: 650;
+}
+.avstatus {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: auto;
+  padding: 2px 10px;
+  border-radius: var(--yap-r-full);
+  background: var(--yap-s3);
+  font-size: 0.8125rem;
+  font-weight: 650;
+  color: var(--yap-fg-80);
+}
+.avstatus.tone-ask {
+  color: var(--yap-warning);
+}
+.avbody {
+  flex: 1 1 0;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 12px var(--gutter) 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.avinfo {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.avmeta,
+.avpath,
+.avcost,
+.avloading,
+.avhint {
+  margin: 0;
+  font-size: 0.875rem;
+  color: var(--yap-muted);
+  overflow-wrap: anywhere;
+}
+.avcost {
+  color: var(--yap-fg-80);
+}
+.avproblem {
+  padding: 10px 12px;
+  border-radius: 12px;
+  border: 1px solid color-mix(in srgb, var(--yap-danger) 40%, transparent);
+  background: color-mix(in srgb, var(--yap-danger) 7%, var(--yap-s2));
+}
+.pline,
+.pcheck {
+  margin: 0;
+  font-size: 0.9375rem;
+}
+.pcheck {
+  color: var(--yap-fg-80);
+}
+.avolder {
+  align-self: center;
+  min-height: 2.75rem;
+  padding: 0 16px;
+  border: 1px solid var(--yap-border);
+  border-radius: var(--yap-r-full);
+  background: var(--yap-s2);
+  color: var(--yap-fg-80);
+  font-size: 0.875rem;
+  font-weight: 650;
+  cursor: pointer;
+}
+.avturns {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.avturn {
+  border: 1px solid var(--yap-border-subtle);
+  border-radius: 16px;
+  background: var(--yap-s2);
+  overflow: hidden;
+}
+.thead {
+  width: 100%;
+  min-height: 3rem;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0 8px;
+  padding: 6px 12px;
+  border: 0;
+  background: transparent;
+  color: var(--yap-fg);
+  text-align: left;
+  font-size: 0.9375rem;
+  cursor: pointer;
+}
+.tchev {
+  flex: 0 0 auto;
+  width: 1rem;
+  height: 1rem;
+  fill: none;
+  stroke: var(--yap-muted);
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  transition: transform var(--yap-dur);
+}
+.tchev.down {
+  transform: rotate(90deg);
+}
+.tdot {
+  flex: 0 0 auto;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--yap-muted-55);
+}
+.tdot.tone-live {
+  background: var(--yap-code);
+}
+.tdot.tone-ask {
+  background: var(--yap-warning);
+}
+.tdot.tone-done {
+  background: var(--yap-success);
+}
+.tdot.tone-failed {
+  background: var(--yap-danger);
+}
+.ttitle {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 650;
+}
+/* Its facts under its title (a phone is narrow): "Running · 4 min so far · ≈ $0.04". */
+.tfacts {
+  flex: 1 0 100%;
+  padding-left: calc(1rem + 24px);
+  font-size: 0.8125rem;
+  color: var(--yap-muted);
+}
+.tqueued {
+  margin: 0;
+  padding: 0 12px 10px 28px;
+  font-size: 0.875rem;
+  color: var(--yap-muted);
+}
+.tbody {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 0 12px 12px;
+}
+.avnow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  padding: 8px 10px;
+  border-radius: 10px;
+  background: var(--yap-code-wash);
+  font-weight: 650;
+  overflow-wrap: anywhere;
+}
+.spin {
+  flex: 0 0 auto;
+  width: 12px;
+  height: 12px;
+  border: 2px solid var(--yap-code-tint);
+  border-top-color: var(--yap-code);
+  border-radius: 50%;
+}
+@media (prefers-reduced-motion: no-preference) {
+  .spin {
+    animation: spin 0.9s linear infinite;
+  }
+}
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+.avsec h3 {
+  margin: 0 0 6px;
+  font-size: 0.875rem;
+  font-weight: 650;
+  color: var(--yap-fg-80);
+}
+.cnt {
+  margin-left: 2px;
+  font-weight: 500;
+  color: var(--yap-muted);
+}
+.todolist,
+.timeline,
+.files,
+.cmds,
+.plain {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.todo {
+  display: flex;
+  gap: 8px;
+  padding: 2px 0;
+  font-size: 0.9375rem;
+}
+.tmark {
+  flex: 0 0 auto;
+  width: 1rem;
+  text-align: center;
+  color: var(--yap-muted);
+}
+.todo.completed .ttext {
+  color: var(--yap-muted);
+  text-decoration: line-through;
+}
+.todo.in_progress .tmark,
+.todo.in_progress .ttext {
+  color: var(--yap-code);
+  font-weight: 600;
+}
+.timeline {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.step {
+  display: flex;
+  gap: 8px;
+  font-size: 0.9375rem;
+  overflow-wrap: anywhere;
+}
+.sdotline {
+  flex: 0 0 auto;
+  width: 6px;
+  height: 6px;
+  margin-top: 0.55em;
+  border-radius: 50%;
+  background: var(--yap-code-line);
+}
+.steptext {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+.stepabout {
+  font-size: 0.8125rem;
+  color: var(--yap-muted);
+}
+.said {
+  padding: 2px 0 2px 14px;
+  border-left: 2px solid var(--yap-rule);
+}
+.saidtext {
+  margin: 0;
+  font-size: 0.9375rem;
+  color: var(--yap-fg-80);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.saidtext.folded {
+  display: -webkit-box;
+  -webkit-line-clamp: 4;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.files {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.filerow {
+  width: 100%;
+  min-height: 2.75rem;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 10px;
+  border: 1px solid var(--yap-border-subtle);
+  border-radius: 12px;
+  background: var(--yap-s1);
+  color: var(--yap-fg);
+  text-align: left;
+  font-size: 0.875rem;
+  cursor: pointer;
+}
+.fileitem.open .filerow {
+  border-color: var(--yap-code-line);
+}
+.ficon {
+  flex: 0 0 auto;
+  width: 1rem;
+  height: 1rem;
+  fill: none;
+  stroke: var(--yap-muted);
+  stroke-width: 1.7;
+  stroke-linejoin: round;
+}
+.fname {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: ui-monospace, 'Cascadia Mono', Consolas, 'Roboto Mono', monospace;
+}
+.fkind {
+  flex: 0 0 auto;
+  font-size: 0.75rem;
+  color: var(--yap-muted);
+}
+.dcounts {
+  flex: 0 0 auto;
+  display: inline-flex;
+  gap: 6px;
+  font-variant-numeric: tabular-nums;
+  font-weight: 650;
+}
+.dadd {
+  color: var(--yap-success-text);
+}
+.ddel {
+  color: var(--yap-danger);
+}
+/* One file's diff: the code scrolls sideways inside itself, never the page. */
+.diff {
+  margin-top: 6px;
+  border: 1px solid var(--yap-border-subtle);
+  border-radius: 12px;
+  background: var(--yap-s1);
+  overflow: hidden;
+}
+.dbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 0 4px 0 10px;
+  border-bottom: 1px solid var(--yap-rule);
+}
+.dnote {
+  font-size: 0.8125rem;
+  color: var(--yap-muted);
+}
+.dwrap {
+  min-height: 2.75rem;
+  padding: 0 12px;
+  border: 0;
+  border-radius: var(--yap-r-full);
+  background: transparent;
+  color: var(--yap-fg-80);
+  font-size: 0.8125rem;
+  font-weight: 650;
+  cursor: pointer;
+}
+.dwrap[aria-pressed='true'] {
+  color: var(--yap-code);
+}
+.dcode {
+  margin: 0;
+  padding: 6px 0;
+  max-height: 60vh;
+  overflow: auto;
+  font-family: ui-monospace, 'Cascadia Mono', Consolas, 'Roboto Mono', monospace;
+  font-size: 0.75rem;
+  line-height: 1.55;
+}
+.dl {
+  display: block;
+  min-width: max-content;
+  padding: 0 10px 0 0;
+  white-space: pre;
+}
+.diff[data-wrap='true'] .dl {
+  min-width: 0;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.dm {
+  display: inline-block;
+  width: 1.5em;
+  text-align: center;
+  color: var(--yap-muted);
+  user-select: none;
+}
+.dl.del {
+  background: color-mix(in srgb, var(--yap-danger) 12%, transparent);
+}
+.dl.del .dm {
+  color: var(--yap-danger);
+}
+.dl.add {
+  background: color-mix(in srgb, var(--yap-success) 13%, transparent);
+}
+.dl.add .dm {
+  color: var(--yap-success-text);
+}
+.dl.gap {
+  color: var(--yap-muted);
+  background: var(--yap-s3);
+}
+.dmore {
+  margin: 0;
+  padding: 6px 10px 8px;
+  font-size: 0.8125rem;
+  color: var(--yap-muted);
+}
+.cmds {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.cabout {
+  margin: 0 0 2px;
+  font-size: 0.8125rem;
+  color: var(--yap-muted);
+}
+.cmd {
+  display: block;
+  padding: 6px 8px;
+  border-radius: 8px;
+  background: var(--yap-s3);
+  font-family: ui-monospace, 'Cascadia Mono', Consolas, 'Roboto Mono', monospace;
+  font-size: 0.8125rem;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.plain li {
+  font-size: 0.875rem;
+  overflow-wrap: anywhere;
+}
+.final .md {
+  font-size: 0.9375rem;
+  overflow-wrap: anywhere;
+}
+.avnote {
+  margin: 0;
+  font-size: 0.875rem;
+  color: var(--yap-fg-80);
+  text-align: center;
+}
+.avnote.bad {
+  color: var(--yap-danger);
+  font-weight: 600;
+}
+.avfollow {
+  position: absolute;
+  right: var(--gutter);
+  bottom: calc(var(--foot-h, 0px) + 12px);
+  width: 2.75rem;
+  height: 2.75rem;
+  display: grid;
+  place-items: center;
+  border: 1px solid var(--yap-border);
+  border-radius: 50%;
+  background: var(--yap-s2);
+  box-shadow: var(--yap-shadow-menu);
+  cursor: pointer;
+}
+.avfollow svg {
+  width: 1.125rem;
+  height: 1.125rem;
+  fill: none;
+  stroke: var(--yap-fg-80);
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.agentview:has(.avfoot:not([hidden])) .avfollow {
+  bottom: 4.5rem;
+}
+.avfoot {
+  flex: 0 0 auto;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 8px var(--gutter) 4px;
+  border-top: 1px solid var(--yap-rule);
+}
+
+/* ---- the sheets: a new Code chat's workspaces, the Mode, the Environment, Undo ---- */
+
+.sheet-list {
+  margin: 0 0 10px;
+}
+.wslist,
+.modelist,
+.undofiles {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.wsrow,
+.moderow {
+  width: 100%;
+  min-height: 3.5rem;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 12px;
+  border: 0;
+  border-radius: 14px;
+  background: transparent;
+  color: var(--yap-fg);
+  text-align: left;
+  cursor: pointer;
+  touch-action: manipulation;
+}
+.wsrow:active,
+.moderow:active {
+  background: var(--yap-s3);
+}
+.wsrow svg {
+  flex: 0 0 auto;
+  width: 1.25rem;
+  height: 1.25rem;
+  fill: none;
+  stroke: var(--yap-code);
+  stroke-width: 1.7;
+  stroke-linejoin: round;
+}
+.wstext,
+.modetext {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+.wsname,
+.modelabel {
+  font-weight: 650;
+}
+.wspath,
+.modesays {
+  font-size: 0.8125rem;
+  color: var(--yap-muted);
+  overflow-wrap: anywhere;
+}
+.modetag {
+  margin-left: 8px;
+  padding: 1px 8px;
+  border-radius: var(--yap-r-full);
+  background: var(--yap-code-wash);
+  color: var(--yap-code);
+  font-size: 0.75rem;
+  font-weight: 650;
+}
+.modecheck {
+  flex: 0 0 auto;
+  width: 1.5rem;
+  text-align: center;
+  color: var(--yap-code);
+  font-weight: 700;
+}
+.moderow[aria-checked='true'] {
+  background: var(--yap-code-wash);
+}
+.moderow:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+.modenote {
+  margin: 0 4px 10px;
+  font-size: 0.875rem;
+}
+.modenote.caution {
+  padding: 10px 12px;
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--yap-warning) 12%, var(--yap-s2));
+  color: var(--yap-fg);
+}
+.envlist {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 8px 14px;
+  margin: 0 4px 14px;
+  font-size: 0.9375rem;
+}
+.envlist dt {
+  color: var(--yap-muted);
+}
+.envlist dd {
+  margin: 0;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+.undofiles {
+  margin: 0 4px 12px;
+  font-family: ui-monospace, 'Cascadia Mono', Consolas, 'Roboto Mono', monospace;
+  font-size: 0.875rem;
+}
+.undofiles li {
+  padding: 2px 0;
+  overflow-wrap: anywhere;
+}
+.sheet-btns {
+  display: flex;
+  gap: 10px;
+}
+.sheet-btns .btn {
+  flex: 1 1 0;
+  min-width: 0;
+}
+.danger-btn {
+  background: var(--yap-danger);
+  color: var(--yap-s2);
+  box-shadow: var(--yap-shadow-sm);
+}
+.sheet .hint {
+  margin: 0 4px 12px;
 }
 
 /* --------------------------------------------------------------- motion */

@@ -317,11 +317,15 @@ isn't a Skill or an app to open.
 
 ## Remote Control (Yap Code from the phone, 2026-11-08)
 
-**Wave 1: the wire and the PC's side, home Wi-Fi only** (the private repo's
-`remote-control-research.md` is the design; away from home is its phase 2, a
-change of transport). The phone's page has no Code screens yet (wave 2): the
-PC answers every message below, and the page's one change is that an agent's
-report is no longer shown as the person's own bubble (`kind`, below).
+**Home Wi-Fi only** (the private repo's `remote-control-research.md` is the
+design; away from home is its phase 2, a change of transport). **Wave 1**
+(below to "The report on the phone"): the wire and the PC's side. **Wave 2**
+("The phone's Code side", below): the page's screens — Chat | Code in the
+drawer, a Code chat's thread with its pills and report cards, the cards
+(each a fresh tap), the agent's live view, the Mode up to Auto,
+notifications where the browser allows them. With Remote Control off the
+page is Chat as before, but an agent's report is a quiet note, never the
+person's own bubble (`kind`, below).
 
 ### The switches
 
@@ -457,7 +461,8 @@ the action is one a phone may take.
   card had only just come."), once; the first answer wins
   (`claude_live::answer_by`, `approve::By`), and a second says who ("Already
   allowed from Kitchen tablet."). The page answers only from a trusted
-  pointer event (wave 2). The ask-first card's `confirm` keeps the same rule.
+  click, its buttons asleep for the card's first 400 ms on screen (wave 2,
+  `cards.js`). The ask-first card's `confirm` keeps the same rule.
 - **Rate limits per phone** (`gates::Limits`): 30 Code actions a minute, Undo
   once every 10 s, 4 pages (`agent_open`, `agent_log`, `agent_diff`) a second:
   "Slow down a little: Yap on your PC is still doing the last one."
@@ -483,6 +488,86 @@ once Yap's voice and the phone are free, up to 5 minutes), **never on this
 PC's speakers**; that phone not connected: not said at all (it's in the chat).
 `agents_speak` still decides whether it's said. This applies whether or not
 Remote Control is on: it's who asked.
+
+### The phone's Code side (wave 2, 2026-11-08)
+
+The page's screens for it (`phone/web/page/`: `code.js`, `cards.js`,
+`agent.js`, `diff.js`, `notify.js`, `dom.js`; `link.js` only routes the
+messages and draws its parts of the thread and the composer; details and
+screenshots in [phone/web/README.md](../../phone/web/README.md#the-code-side-remote-control-2026-11-08)),
+shown only while `ready` says `code.on`. They read the desktop's own rules,
+served beside the page (`build.rs` `LINK_SHARED`, kept pure by
+`shared.spec.js` and `page.rs`'s test): `core/agents.js` (an agent's
+status, cost line, turns, steps, to-dos, diffs, pills, report title, plan
+waiting, problem words, Mode labels), `core/chatStatus.js` (the dots, with
+the phone's own "seen", `yap.link.seen`), `core/codeChats.js` (grouping by
+workspace, the prompts), `core/money.js`, `core/pageConfirm.js` (the
+ask-first card's words: `views/chat/pageConfirm.js`, served at `core/`) and
+`core/codeWire.js` (the wire's helpers: `codeOn`, `approve`, `confirm`,
+`setMode`, `MIN_SHOWN_MS`, `PHONE_MODES`).
+
+- **Chat | Code** in the drawer: Chat the plain conversations (each with its
+  dot), Code the agents working (folder, line, how long), then each
+  workspace's Code chats newest first with their dots, a + on each workspace
+  and **+ New code chat** (a sheet of workspaces; `code_new`, then the first
+  question with `chat: "new"`; told again after a reload or a reconnect,
+  `yap.link.codeNew`). The side not shown carries its strongest dot.
+- **A Code chat's thread**: the person's bubbles, under an answer its
+  agents' pills (`pillsByAnswer`, the messages' chat indexes worked out from
+  the answers' ids: a user message has none on the wire), a report as a
+  card ("Agent done · garden-planner", Changed …, Open; a waiting plan's Go
+  ahead, `agent_go_ahead`, once), the cards waiting in it at its end,
+  `chat_message`s added as they come. The composer: the Code teal edge, the
+  workspace chip (the Environment sheet) and the **Mode chip** (Auto,
+  Manual, Accept edits, Plan; above `phoneMax` greyed, "Never above Manual
+  in recipe-box"; no Bypass row; a Bypass chat amber, the phone may lower
+  it; `set_mode`, the chip following `mode`). Talk and hands-free talk ask
+  into the chat as before (`chat`), and the report of a turn the phone
+  asked is said there (wave 1's routing).
+- **The cards** (`cards.js`): Allow once / Deny, a plan's Go ahead / Not yet,
+  the ask-first Start (Send for a follow-up) / Don't. **A fresh tap**: the
+  buttons asleep until the card has been on screen `MIN_SHOWN_MS` (watched
+  with an IntersectionObserver, the page in front), `shownMs` from then, a
+  trusted click only (a script's never, a held key's repeat never), never
+  by voice; "Allowing…" until `approve_done` / `confirm_done` ("Allowed",
+  "Allowed from Kitchen tablet", "Denied on your PC", "No answer in time…");
+  the PC's refusal shown on the card ("Tap it again…" waits again, "Already
+  allowed from …" ends it). Kept as nodes painted in place, so a thread
+  redrawn while an answer streams never takes a button from under a finger
+  (the thread's and the live view's redraws also wait for a finger to
+  lift). A card the PC no longer lists in `code_status` has ended.
+  **The Needs-you banner** under the header on every screen ("A step in
+  garden-planner needs you", "2 steps need you"), a tap to the card (its
+  chat opened first); the title counts them ("(1) Yap Link"); a 200 ms
+  vibration as one comes on screen.
+- **The agent's live view** (`agent.js`) in the thread's place, from a pill,
+  a report's Open or the running list (its chat opened beneath): status,
+  Mode, model, how long, the cost line, a problem in words (its sign-in "on
+  your PC"), the line it's on, the to-dos, its turns (newest open), each
+  turn's timeline (long words folded), files with +N −M and one diff at a
+  time (`agent_diff`, `diff.js`: marked lines, scrolled inside the code,
+  Wrap, "see the rest on your PC" past 400 lines), commands (three, then
+  Show N more), what wasn't allowed, its final words; its cards at the live
+  end; Stop / Continue / Go ahead / Undo this turn / Undo all (the phone's
+  own confirm sheet listing the files, then `sure: true`); "Tell the
+  agent…" is the composer (`agent_message`; the words back in the box if the
+  PC says no). It follows the live end until scrolled up (↓), merges the
+  snapshot and live events by their log line, opens again on a missing
+  `seq` or `agent_resync`, pages older steps (`agent_log`), and is read
+  again when its status turns or a turn is new. ✕ (`agent_close`) never
+  stops it.
+- **Notifications** (`notify.js`): a switch in ⋯ (Remote Control on only),
+  the permission asked only on its tap, never on load; while the page is in
+  the background, a card or a finished agent's report as a notification
+  with no buttons (a tap brings the page to it). **What the phones allow**
+  (8 Nov): Chrome on Android never shows a page's own notification
+  (`new Notification()` always throws there; only a service worker may, and
+  Chrome won't register one on a page whose certificate it accepted after a
+  warning) — the sheet says so and the banner stays; Firefox for Android
+  follows desktop Firefox (the constructor, the permission from a tap), so
+  it works while Firefox keeps the page running (a locked phone may stop
+  it). Neither is checked on a real phone yet. A first "Notifications are
+  on" shows it works.
 
 ## Pairing
 
@@ -829,8 +914,11 @@ on the PC while the answer comes stops the voice, as it stops the PC's.
   private networks"); without that, phones can't reach it.
 - The Yap bar marks a connected phone only with Remote Control on (beside "1
   agent working"); otherwise Settings → Phone shows "connected now".
-- Remote Control's phone screens (the Code side, the cards, the agent's live
-  view) are wave 2; the PC side and the wire are in (above).
+- **Remote Control's notifications** come only while the browser keeps the
+  page running: none from Chrome on Android (a page's own aren't allowed
+  there), Firefox for Android's while it's in the background; a locked phone
+  may stop the page. Web Push (a service worker) needs the page on a real
+  certificate: the design's phase 2.
 
 ## Tests
 
@@ -921,7 +1009,33 @@ on the PC while the answer comes stops the voice, as it stops the PC's.
   its socket, recorded as said elsewhere, never on this PC); a Bypass chat:
   `set_mode` Bypass refused, the phone's follow-up run at Auto, a lower Mode
   allowed, Stop; the phone unticked, then Remote Control off: `ready.code`
-  says why and every Code message is refused; the Environment card.
+  says why and every Code message is refused; the Environment card. And
+  **the real page** (wave 2) against the same test Yap: paired, its drawer's
+  Code side listing the workspace and the Code chat, the chat opened with its
+  agent's pill and report card, and the pill opening the agent's live view
+  from the PC's own snapshot.
+- **The page's Code side** (`npm run test:link`, the PC mocked from
+  `core/codeWire.js`'s own examples by `phone/web/tests/support/code-pc.js`,
+  every Code message the page sends checked against the wire's example of
+  its type): `code-drawer.spec.js` (Chat | Code, the running agents and the
+  workspaces, the dots — working, needs you, new and seen —, + New code chat
+  and its prompts, a reload telling the PC again, Remote Control off or a PC
+  from before showing Chat only, turned off mid-visit), `code-thread.spec.js`
+  (the pill, the report card, a request typed and by Talk, the report coming
+  live and said, a plan's Go ahead, the Mode up to Auto with the cap and a
+  Bypass chat, the Environment), `agent-view.spec.js` (the snapshot's parts,
+  live events in order, a missing number and `agent_resync`, a status
+  turning, older steps, a diff with Wrap, Stop and Continue, Undo's confirm,
+  "Tell the agent…" and its refusal), `approve.spec.js` (asleep at first
+  and an early tap ignored, a script's click ignored, `shownMs`,
+  "Allowing…" then "Allowed", answered elsewhere, the PC's refusals, timed
+  out, a plan's Not yet / Go ahead, the ask-first card, the banner on every
+  screen to its card, a card in the live view, notifications asked on a tap
+  and shown in the background, and where the browser can't),
+  `code-screens.spec.js` (screenshots light and dark at 360 and 390 px:
+  `code-drawer-*`, `code-thread-*`, `code-approve-*`, `code-mode-*`,
+  `agent-view-*`, `agent-diff-*`, `code-plan-*`; 44 px targets, nothing
+  sideways).
 - The page on its own: `npm run test:link` (`phone/web/tests/`, the PC mocked): the
   sound maths in Node (the resampler both ways, the jitter buffer, the voice
   detector, the media player's pieces cut in the pauses and their WAV files),
