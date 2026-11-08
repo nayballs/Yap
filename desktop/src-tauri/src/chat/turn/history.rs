@@ -39,7 +39,12 @@ impl Sizing {
         let counter = crate::chat::budget::Counter::for_call(provider, base_url);
         let (context_size, context_known) = crate::chat::budget::context_window(cfg, provider, model, base_url).await;
         let label = crate::chat::budget::model_label(provider, model, &crate::ai::local_llm::active_model_display(cfg));
-        let schemas = t.gates.schemas(cfg, &t.ep, t.scope, context_size, &counter, conversation_id).await;
+        // A Code chat (agents/code_chat.rs) sends none of memory's tools or
+        // lines (prompt.rs `build`, run.rs): measured as it's sent. (A new
+        // chat isn't one until its question is saved: measured as a plain
+        // chat's, a little more.)
+        let code = crate::agents::code_chat::folder_of(conversation_id).is_some();
+        let schemas = t.gates.schemas(cfg, &t.ep, t.scope, context_size, &counter, conversation_id, code).await;
         // The question as sent: its text, and the screenshots it carries, each
         // by its size where it goes (`budget::image_tokens_at`).
         let question_tokens = counter.count(&t.text).await
@@ -48,11 +53,11 @@ impl Sizing {
         let rate_cap = crate::chat::budget::rate_cap(provider);
         let tools_supported = t.gates.tools;
         if mode != crate::chat::budget::Mode::Messages {
-            let stable = t.gates.stable_prompt(cfg, &t.ep.persona, &t.profile, t.now);
+            let stable = t.gates.stable_prompt(cfg, &t.ep.persona, &t.profile, t.now, code);
             let fixed_now = counter.count(&stable).await + schemas;
             let guess = crate::chat::budget::budget(context_size, context_known, fixed_now, kind, tools_supported, rate_cap);
             if question_tokens > guess.history {
-                tracing::info!(question_tokens, room = guess.history, context = context_size, "Chat: the question is too long for the model; not sent");
+                tracing::info!(question_tokens, room = guess.history, fixed = fixed_now, context = context_size, "Chat: the question is too long for the model; not sent");
                 // The plan's tokens a minute, not the model's context, when
                 // that's what's short (it read "too long for … (128K context)").
                 let roomy = crate::chat::budget::budget(context_size, context_known, fixed_now, kind, tools_supported, None);

@@ -121,8 +121,10 @@ impl Gates {
     /// beside. `conversation`: the one asking (`search_chats` leaves it out);
     /// `ep`, `scope` and `context` (the model's, in tokens): what the
     /// connectors' tools come to (`connectors::Turn::for_turn`, as the turn
-    /// builds them).
-    pub(super) async fn schemas(&self, cfg: &YapConfig, ep: &Endpoint, scope: Option<&str>, context: u64, counter: &crate::chat::budget::Counter, conversation: Option<u64>) -> u64 {
+    /// builds them). `code`: it's a Code chat, which offers none of memory's
+    /// tools (`run.rs`), so they aren't counted.
+    #[allow(clippy::too_many_arguments)]
+    pub(super) async fn schemas(&self, cfg: &YapConfig, ep: &Endpoint, scope: Option<&str>, context: u64, counter: &crate::chat::budget::Counter, conversation: Option<u64>, code: bool) -> u64 {
         if !self.tools {
             return 0;
         }
@@ -130,8 +132,8 @@ impl Gates {
         // (Only whether the calendar's offered matters to its schema.)
         let log = crate::chat::tools::calendar::Log::default();
         let extra = crate::chat::tools::Extra {
-            memory: true,
-            search_chats: cfg.memory_search_chats,
+            memory: !code,
+            search_chats: !code && cfg.memory_search_chats,
             conversation,
             calendar: self.calendar.then_some(crate::chat::tools::CalendarTurn { log: &log, zone: crate::chat::tools::calendar::Zone::of(None), now: 0 }),
             room: None,
@@ -152,9 +154,9 @@ impl Gates {
     }
 
     /// The part of the request that's there whatever the question, for these
-    /// gates ([`super::stable_prompt`]).
-    pub(super) fn stable_prompt(&self, cfg: &YapConfig, persona: &str, profile: &crate::ai::about_you::Profile, now: chrono::DateTime<chrono::Utc>) -> String {
-        super::stable_prompt(cfg, persona, self.tools, self.doc_tools, self.web_lines, self.web_on, self.pictures, self.act, self.calendar, self.connectors, profile, now)
+    /// gates ([`super::stable_prompt`]), in a Code chat (`code`) as it has it.
+    pub(super) fn stable_prompt(&self, cfg: &YapConfig, persona: &str, profile: &crate::ai::about_you::Profile, now: chrono::DateTime<chrono::Utc>, code: bool) -> String {
+        super::stable_prompt(cfg, persona, self.tools, self.doc_tools, self.web_lines, self.web_on, self.pictures, self.act, self.calendar, self.connectors, profile, now, code)
     }
 }
 

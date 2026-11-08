@@ -573,13 +573,13 @@ pub async fn chat_limits() -> Limits {
     let Ok(ep) = Endpoint::resolve(&cfg) else {
         return Limits::default();
     };
-    // As a question typed in Chat has them.
+    // As a question typed in a new chat has them (not a Code chat yet).
     let gates = gates::Gates::for_turn(&cfg, &ep, None, false, true);
     let counter = crate::chat::budget::Counter::for_call(&ep.provider, &ep.base_url);
     let (context, context_known) = crate::chat::budget::context_window(&cfg, &ep.provider, &ep.model, &ep.base_url).await;
     let profile = crate::ai::about_you::profile(&cfg);
-    let stable = gates.stable_prompt(&cfg, &ep.persona, &profile, crate::ai::eval::now());
-    let schemas = gates.schemas(&cfg, &ep, None, context, &counter, None).await;
+    let stable = gates.stable_prompt(&cfg, &ep.persona, &profile, crate::ai::eval::now(), false);
+    let schemas = gates.schemas(&cfg, &ep, None, context, &counter, None, false).await;
     let fixed = counter.count(&stable).await + schemas;
     let budget = crate::chat::budget::budget(context, context_known, fixed, crate::chat::budget::Kind::Chat, gates.tools, crate::chat::budget::rate_cap(&ep.provider));
     let label = crate::chat::budget::model_label(&ep.provider, &ep.model, &crate::ai::local_llm::active_model_display(&cfg));
@@ -631,7 +631,7 @@ mod tests {
         let now = chrono::Utc::now();
         for (scope, meetings, in_view) in [(None, false, true), (Some("assistant"), false, false), (Some("meetings"), true, false)] {
             let gates = gates::Gates::for_turn(&cfg, &ep, scope, meetings, in_view);
-            assert!(gates.stable_prompt(&cfg, &ep.persona, &profile, now).starts_with(start), "{scope:?}");
+            assert!(gates.stable_prompt(&cfg, &ep.persona, &profile, now, false).starts_with(start), "{scope:?}");
         }
         // A small model's web pipeline writes its own prompt from the persona.
         assert!(crate::web::grounded_prompt(&ep.persona, "<passage n=\"1\">…</passage>", "Tuesday 3 November 2026", true).starts_with(start));
