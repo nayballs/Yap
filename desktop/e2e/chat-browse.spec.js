@@ -31,7 +31,7 @@
 // `e2e_page_view_eval` / `e2e_page_views`. Fictional sites only.
 import { test as base, expect, expectStore, setConfig, openView } from './support/fixtures.js';
 import { startFakeLlm } from './support/fake-llm.js';
-import { startFakeWeb, RAIL_URL, RAIL_RESULTS_URL, RAIL_SIGNIN_URL, FORT_JOY_URL, CHAT_URL, BOARD_URL } from './support/fake-web.js';
+import { startFakeWeb, RAIL_URL, RAIL_RESULTS_URL, RAIL_SIGNIN_URL, FORT_JOY_URL, CHAT_URL, BOARD_URL, SMOOTH_URL, PREFS_URL } from './support/fake-web.js';
 
 const test = base.extend({
   fakeLlm: [
@@ -370,6 +370,99 @@ test('Enter in a chat page’s message box asks first; typing there keeps the dr
   expect(typed).toMatchObject({ success: true, data: { field: 'Hello see you at 6' } });
   expect(typed.note).toMatch(/^The words went in at the cursor/);
   expect(await inPage(yap, CHAT_URL, BOX_TEXT)).toBe('Hello see you at 6');
+  expect(await inPage(yap, CHAT_URL, "document.querySelectorAll('#sent li').length")).toBe(0);
+});
+
+test('what an action changed is said as it was: a hover’s popup, Escape closing it, PageDown; acting on a tab behind brings it to the front; a ref that never was', async ({ yap, main, fakeLlm }) => {
+  // (8 Nov 2026, Yap Lab: each of these said "nothing visible changed",
+  // Escape left the preview up, and [99999] was told "it changed, or it went".)
+  await setConfig(yap, main, chatConfig(fakeLlm));
+  const from = fakeLlm.requests.length;
+  const SAID = 'Edda Vane kept the light for thirty years.';
+  const keepersTab = (r) => toolResults(r).flatMap((x) => x?.data?.tabs || []).find((t) => t.url.includes('Lighthouse_keepers'))?.tab;
+  fakeLlm.scriptChat([
+    { tools: [{ name: 'browser_tabs', args: { action: 'new', url: SMOOTH_URL } }, { name: 'browser_tabs', args: { action: 'new', url: RAIL_URL } }] },
+    { tools: [{ name: 'browser_tabs', args: { action: 'list' } }] },
+    { tools: [{ name: 'browser_read', args: (r) => ({ mode: 'elements', tab: keepersTab(r) }) }] },
+    { tools: [{ name: 'browser_hover', args: (r) => ({ ref: refIn(r, 'Edda Vane'), tab: keepersTab(r) }) }] },
+    { tools: [{ name: 'browser_key', args: { keys: 'Escape' } }] },
+    { tools: [{ name: 'browser_key', args: { keys: 'PageDown' } }] },
+    { tools: [{ name: 'browser_click', args: { ref: 99999 } }] },
+    { content: SAID },
+  ]);
+  await ask(main, `Open ${SMOOTH_URL} and ${RAIL_URL}, then show me the preview of the first keeper on the keepers page`);
+  await expect(main.getByText(SAID)).toBeVisible({ timeout: 60_000 });
+  const calls = chatCalls(fakeLlm, from);
+  // The hover, on the keepers tab behind the rail site's: that tab in front first.
+  const hovered = lastResult(calls[4]);
+  expect(hovered).toMatchObject({ success: true, displayText: 'Hovered over ‘Edda Vane’ on wiki.example.com' });
+  expect(hovered.data.changed).toMatch(/^a popup opened: ‘Edda Vane kept the Saltmarsh light for thirty years\.’/);
+  await expect.poll(async () => (await views(yap)).find((v) => v.key === keyOf(SMOOTH_URL))?.onScreen, { timeout: 20_000 }).toBe(true);
+  await expect.poll(async () => (await views(yap)).find((v) => v.key === keyOf(RAIL_URL))?.onScreen).toBe(false);
+  // Escape: the hover let go, the preview closed — and said so.
+  const escaped = lastResult(calls[5]);
+  expect(escaped.data.changed).toMatch(/^a popup closed/);
+  expect(await inPage(yap, SMOOTH_URL, "getComputedStyle(document.getElementById('pv')).display")).toBe('none');
+  // PageDown: where it went.
+  const paged = lastResult(calls[6]);
+  expect(paged.data.changed).toMatch(/^scrolled to y \d+$/);
+  expect(Number(/\d+$/.exec(paged.data.changed)[0])).toBeGreaterThan(0);
+  // A ref the page never gave.
+  const none = lastResult(calls[7]);
+  expect(none).toMatchObject({ success: false, displayText: "Couldn't click: no element [99999] on this page" });
+  expect(none.error).toMatch(/^There's no element \[99999\]: refs on this page go up to \d+\./);
+});
+
+test('a dropdown is chosen in from its options with no card; a search form sent by its own button after typing needs none', async ({ yap, main, fakeLlm }) => {
+  await setConfig(yap, main, chatConfig(fakeLlm));
+  const from = fakeLlm.requests.length;
+  const SAID = 'Sorted by edit date, and searched for keepers.';
+  fakeLlm.scriptChat([
+    { tools: [{ name: 'browser_navigate', args: { url: PREFS_URL } }] },
+    { tools: [{ name: 'browser_read', args: { mode: 'elements' } }] },
+    { tools: [{ name: 'browser_form_input', args: (r) => ({ ref: refIn(r, 'Sorting order'), value: 'Edit date' }) }] },
+    { tools: [{ name: 'browser_type', args: (r) => ({ ref: refIn(r, 'Search the wiki'), text: 'keepers' }) }] },
+    { tools: [{ name: 'browser_click', args: (r) => ({ ref: refIn(r, 'Go') }) }] },
+    { content: SAID },
+  ]);
+  // (Its option's words aren't the person's, nor in the page's text: the list is closed.)
+  await ask(main, `On ${PREFS_URL}, sort my searches by when pages were last changed, then search the wiki for keepers`);
+  await expect(main.getByText(SAID)).toBeVisible({ timeout: 60_000 });
+  const calls = chatCalls(fakeLlm, from);
+  expect(lastResult(calls[2]).data.elements).toContain('combobox "Sorting order" = "Relevance" options: Relevance | Edit date | Creation date');
+  const chose = lastResult(calls[3]);
+  expect(chose).toMatchObject({ success: true, displayText: 'Chose ‘Edit date’ in ‘Sorting order’ on wiki.example.com', data: { chosen: 'Edit date' } });
+  expect(chose.data.asked).toBeUndefined();
+  // The page's own script took the choice (the page has gone on to the search since).
+  expect(chose.data.changed).toMatch(/^new on the page: .*Sorted by edit date/);
+  // Typed, then sent by its form's own button: a search, no card.
+  expect(lastResult(calls[4])).toMatchObject({ success: true, data: { field: 'keepers' } });
+  const went = lastResult(calls[5]);
+  expect(went.data.changed).toMatch(/^went to wiki\.example\.com\/wiki\/search\?q=keepers/);
+  expect(went.data.asked).toBeUndefined();
+  await expect(main.getByTestId('chat-page-confirm')).toHaveCount(0);
+});
+
+test('a message typed into a chat’s box, then its send button (an arrow, no words) pressed right after: a send, asked as Enter there is', async ({ yap, main, fakeLlm }) => {
+  await setConfig(yap, main, chatConfig(fakeLlm));
+  const from = fakeLlm.requests.length;
+  fakeLlm.scriptChat([
+    { tools: [{ name: 'browser_navigate', args: { url: CHAT_URL } }] },
+    { tools: [{ name: 'browser_read', args: { mode: 'elements' } }] },
+    { tools: [{ name: 'browser_type', args: (r) => ({ ref: refIn(r, 'Message #general'), text: 'see you at 6' }) }] },
+    { tools: [{ name: 'browser_click', args: (r) => ({ ref: refIn(r, '➤') }) }] },
+    { content: 'I didn’t send it: you said no.' },
+  ]);
+  await ask(main, `Tell #general see you at 6, on ${CHAT_URL}`);
+  const card = main.getByTestId('chat-page-confirm');
+  await expect(card).toHaveAttribute('data-state', 'asking', { timeout: 30_000 });
+  await expect(card).toContainText('Yap wants to press ‘➤’ on chat.example.com');
+  await expect(card).toContainText('It may send something.');
+  await card.getByRole('button', { name: "Don't" }).click();
+  await expect(main.getByText('I didn’t send it: you said no.')).toBeVisible({ timeout: 20_000 });
+  const calls = chatCalls(fakeLlm, from);
+  expect(lastResult(calls[3])).toMatchObject({ success: true, data: { field: 'Hello see you at 6' } });
+  expect(lastResult(calls[4])).toMatchObject({ success: false, displayText: "Didn't click ‘➤’: you said no", data: { asked: true, allowed: false } });
   expect(await inPage(yap, CHAT_URL, "document.querySelectorAll('#sent li').length")).toBe(0);
 });
 

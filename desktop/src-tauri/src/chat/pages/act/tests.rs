@@ -104,10 +104,10 @@ async fn a_form_is_filled_and_sent_and_the_page_after_is_told() {
     assert!(t.seen(), "the page after is web content");
     // The tab said it's acting.
     assert!(log.0.lock().unwrap().iter().any(|e| matches!(e, Event::Acting { key } if key == "page:https://rail.example.com")));
-    // An old ref on the new page: there's nothing there now.
+    // An old ref on the new page: there's nothing there now, and why.
     let r = run(&mut t, CLICK, json!({ "ref": 3 }), &log).await;
     assert_eq!(r["success"], false);
-    assert!(r["error"].as_str().unwrap().contains("Read it again"), "{r}");
+    assert!(r["error"].as_str().unwrap().contains("it hasn't been read since it loaded (refs from another page don't hold)"), "{r}");
     crate::chat::pages::sim::install(None);
 }
 
@@ -443,6 +443,123 @@ fn ref_named(read: &Value, name: &str) -> u32 {
     let lines = read["data"]["elements"].as_str().unwrap_or("");
     let line = lines.lines().find(|l| l.contains(&format!("\"{name}\""))).unwrap_or_else(|| panic!("no {name} in {lines}"));
     line.trim_start_matches('[').split(']').next().unwrap().parse().unwrap()
+}
+
+/// A team chat (made up): its message box outside any form, a send button
+/// with no words (an arrow), a search form; a page with a dropdown that
+/// isn't a select (its options in a list it controls, hidden until it
+/// opens), a select with a plan that subscribes, and radio buttons.
+const TEAM_CHAT: &str = r#"<html><head><title>#general - Example Chat</title></head><body><main><h1>#general</h1>
+  <p>Sam: are we still meeting at the harbour?</p>
+  <div id="box" role="textbox" contenteditable="true" aria-label="Message #general"></div>
+  <button type="button">➤</button>
+  <button type="button">Bold</button>
+  <form action="/search" role="search"><input type="search" name="q" aria-label="Search the chat"><button>Search</button></form>
+</main></body></html>"#;
+const SETTINGS: &str = r#"<html><head><title>Search settings - Example Wiki</title></head><body><main><h1>Search settings</h1>
+  <div role="combobox" aria-label="Sorting order" aria-controls="sort-list" tabindex="0">Relevance</div>
+  <ul id="sort-list" role="listbox" hidden><li role="option" aria-selected="true">Relevance</li><li role="option">Edit date</li><li role="option">Creation date</li></ul>
+  <select aria-label="Plan" name="plan"><option>Free</option><option>Subscribe monthly</option></select>
+  <form action="/prefs"><label><input type="radio" name="size" value="s" checked> Small</label><label><input type="radio" name="size" value="l"> Large</label></form>
+</main></body></html>"#;
+
+fn chat_pages() -> Browser {
+    let mut p = BTreeMap::new();
+    p.insert("https://chat.example.com/general".into(), TEAM_CHAT.into());
+    p.insert("https://chat.example.com/search?q=harbour".into(), "<html><head><title>Search</title></head><body><main><p>3 messages about the harbour.</p></main></body></html>".into());
+    p.insert("https://wiki.example.com/prefs".into(), SETTINGS.into());
+    Browser::new(&p)
+}
+
+/// **Typing, then sending it another way, is a submit** (8 Nov 2026, Yap
+/// Lab: `browser_type { submit: true }` asked, a type then a separate key
+/// or click was judged apart from the typing): a message box outside a form
+/// sent by the button pressed right after it asks as its Enter does; a
+/// search form's box sent by its button or Enter, with words from the
+/// person or the page, still goes ahead without asking.
+#[tokio::test]
+async fn typing_then_sending_it_another_way_is_judged_as_submit_is() {
+    crate::chat::pages::sim::install(Some(chat_pages()));
+    crate::chat::pages::backend::opened("https://chat.example.com/general", "").await;
+    let mut t = turn("Tell the team I'll see them at the harbour, then search the chat for harbour");
+    let log = Log::default();
+    let page = read(&mut t).await;
+    let (message, arrow, bold, search) = (ref_named(&page, "Message #general"), ref_named(&page, "➤"), ref_named(&page, "Bold"), ref_named(&page, "Search the chat"));
+    // Typed into the message box (the person's words): no card.
+    let typed = run(&mut t, TYPE, json!({ "ref": message, "text": "I'll see them at the harbour" }), &log).await;
+    assert_eq!(typed["success"], true, "{typed}");
+    assert!(t.pages.typed.is_some());
+    // The arrow pressed right after it sends it: asked, as Enter there is — a no stops it.
+    confirm::answer_in_test(Some(false));
+    let sent = run(&mut t, CLICK, json!({ "ref": arrow }), &log).await;
+    confirm::answer_in_test(None);
+    assert_eq!(sent["displayText"], "Didn't click ‘➤’: you said no", "{sent}");
+    assert!(sent["error"].as_str().unwrap().contains("it sends what's in ‘Message #general’"), "{sent}");
+    let clicked = crate::chat::pages::sim::with(|b| b.log.clicked.clone()).unwrap();
+    assert!(!clicked.iter().any(|c| c == "➤"), "nothing sent: {clicked:?}");
+    // …and Enter in it later asks too.
+    confirm::answer_in_test(Some(false));
+    let enter = run(&mut t, KEY, json!({ "ref": message, "keys": "Enter" }), &log).await;
+    confirm::answer_in_test(None);
+    assert_eq!(enter["displayText"], "Didn't press Enter in ‘Message #general’: you said no", "{enter}");
+    // A button two actions after the typing isn't its send.
+    let typed = run(&mut t, TYPE, json!({ "ref": message, "text": "harbour" }), &log).await;
+    assert_eq!(typed["success"], true, "{typed}");
+    run(&mut t, HOVER, json!({ "ref": bold }), &log).await;
+    let b = run(&mut t, CLICK, json!({ "ref": bold }), &log).await;
+    assert_eq!(b["displayText"], "Clicked ‘Bold’ on chat.example.com", "{b}");
+    // The search form: words from the person, sent by its button — no card.
+    run(&mut t, TYPE, json!({ "ref": search, "text": "harbour" }), &log).await;
+    let asked_before = log.0.lock().unwrap().iter().filter(|e| matches!(e, Event::Confirm(_))).count();
+    let page = read(&mut t).await;
+    let button = ref_named(&page, "Search");
+    let go = run(&mut t, CLICK, json!({ "ref": button }), &log).await;
+    assert!(go["data"]["changed"].as_str().unwrap().starts_with("went to chat.example.com/search?q=harbour"), "{go}");
+    assert_eq!(log.0.lock().unwrap().iter().filter(|e| matches!(e, Event::Confirm(_))).count(), asked_before, "nothing asked");
+    assert!(t.pages.typed.is_none(), "sent: let go");
+    crate::chat::pages::sim::install(None);
+}
+
+/// **A dropdown's choice is chosen, never typed** (8 Nov 2026, Yap Lab:
+/// "Edit date" in a sorting dropdown was asked about as words from
+/// nowhere): checked against its own options, even ones hidden until it
+/// opens; one that isn't there is said, with some that are; a choice that
+/// subscribes still asks; a radio button's group by its label.
+#[tokio::test]
+async fn a_dropdown_choice_is_checked_against_its_options_never_asked_about_as_typing() {
+    crate::chat::pages::sim::install(Some(chat_pages()));
+    crate::chat::pages::backend::opened("https://wiki.example.com/prefs", "").await;
+    let mut t = turn("Sort my searches by when they were edited, pick the large size and the paid plan");
+    let log = Log::default();
+    let page = read(&mut t).await;
+    let lines = page["data"]["elements"].as_str().unwrap();
+    assert!(lines.contains("combobox \"Sorting order\" = \"Relevance\" options: Relevance | Edit date | Creation date"), "{lines}");
+    let (sort, plan, small) = (ref_named(&page, "Sorting order"), ref_named(&page, "Plan"), ref_named(&page, "Small"));
+    let asked = |log: &Log| log.0.lock().unwrap().iter().filter(|e| matches!(e, Event::Confirm(_))).count();
+    // One of its options: chosen, no card (its words aren't the person's, nor in the page's text).
+    let r = run(&mut t, FORM_INPUT, json!({ "ref": sort, "value": "Edit date" }), &log).await;
+    assert_eq!(r["displayText"], "Chose ‘Edit date’ in ‘Sorting order’ on wiki.example.com", "{r}");
+    assert_eq!(r["data"]["chosen"], "Edit date");
+    assert_eq!(asked(&log), 0);
+    // Not one of them: said, with those that are.
+    let r = run(&mut t, FORM_INPUT, json!({ "ref": sort, "value": "Price" }), &log).await;
+    assert_eq!(r["displayText"], "Couldn't choose in ‘Sorting order’: ‘Price’ isn't one of its options", "{r}");
+    assert!(r["error"].as_str().unwrap().contains("(Relevance, Edit date, Creation date)"), "{r}");
+    // browser_type into a dropdown: chosen the same way.
+    let r = run(&mut t, TYPE, json!({ "ref": sort, "text": "creation" }), &log).await;
+    assert_eq!(r["displayText"], "Chose ‘Creation date’ in ‘Sorting order’ on wiki.example.com", "{r}");
+    // A choice that subscribes: asked first, as its click would be.
+    confirm::answer_in_test(Some(false));
+    let r = run(&mut t, FORM_INPUT, json!({ "ref": plan, "value": "Subscribe monthly" }), &log).await;
+    confirm::answer_in_test(None);
+    assert_eq!(r["displayText"], "Didn't choose ‘Subscribe monthly’: you said no", "{r}");
+    // A radio button given its group's words: that one ticked.
+    let r = run(&mut t, FORM_INPUT, json!({ "ref": small, "value": "Large" }), &log).await;
+    assert_eq!(r["displayText"], "Chose ‘Large’ on wiki.example.com", "{r}");
+    let page = read(&mut t).await;
+    let lines = page["data"]["elements"].as_str().unwrap();
+    assert!(lines.contains("radio \"Large\" (checked)") && lines.contains("radio \"Small\" (not checked)"), "{lines}");
+    crate::chat::pages::sim::install(None);
 }
 
 /// **Asked out loud** (the Voice Assistant with Chat in view, 8 Nov 2026:

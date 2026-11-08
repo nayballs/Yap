@@ -40,7 +40,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { test as base, expect, expectStore, setConfig, openView, openSettings, closeSettings, settingsDialog } from './support/fixtures.js';
 import { startFakeLlm } from './support/fake-llm.js';
-import { startFakeWeb, FORT_JOY_URL, DOCKS_URL, BAND, FOREVER_URL, GEAR_URL } from './support/fake-web.js';
+import { startFakeWeb, FORT_JOY_URL, DOCKS_URL, BAND, FOREVER_URL, GEAR_URL, SMOOTH_URL } from './support/fake-web.js';
 import { readPng, pixel, near } from './support/png.js';
 
 const BROWSERS = [
@@ -463,6 +463,66 @@ test('browser_read reads a long page in parts, each saying where to go on, and i
   expect(rest.data.tables[0].rows[19][1]).toBe('1200 g');
   expect(rest.data.next).toBeUndefined();
   expect(JSON.stringify(rest)).not.toContain('Hidden item');
+});
+
+test('a page that scrolls smoothly: each scroll is told once it has stopped, scroll_to by ref lands in view, and every tool takes a tab', async ({ yap, main, fakeLlm }) => {
+  // (8 Nov 2026, Yap Lab on a smooth-scrolling page: "top" said y 28244,
+  // "bottom" at_end false, scroll_to by ref came back at y 0; a wait after
+  // browser_navigate {tab: 2} looked on the tab in front.)
+  await setConfig(yap, main, { ...chatConfig(fakeLlm), llmScopes: { chat: { enabled: true, provider: 'custom', baseUrl: fakeLlm.base, model: 'fake-vision-chat' } } });
+  const from = fakeLlm.requests.length;
+  const SAID = 'The rota is the last part of the keepers page.';
+  const headingRef = (r, words) => Number(new RegExp(`\\[(\\d+)\\] heading "${words}"`).exec(toolResult(r).data.matches)?.[1] ?? 0);
+  const keepersTab = (r) => toolResults(r).find((x) => x?.displayText?.startsWith('Looked at the page'))?.data?.tab;
+  fakeLlm.scriptChat([
+    { tools: [{ name: 'browser_navigate', args: { url: SMOOTH_URL } }] },
+    { tools: [{ name: 'browser_scroll', args: { direction: 'bottom' } }] },
+    { tools: [{ name: 'browser_scroll', args: { direction: 'top' } }] },
+    { tools: [{ name: 'browser_find', args: { query: 'The rota and its columns' } }] },
+    { tools: [{ name: 'browser_scroll_to', args: (r) => ({ ref: headingRef(r, 'The rota and its columns') }) }] },
+    { tools: [{ name: 'browser_screenshot', args: {} }] },
+    // Another tab in front; the keepers page still the one each tool names.
+    { tools: [{ name: 'browser_tabs', args: { action: 'new', url: GEAR_URL } }] },
+    { tools: [{ name: 'browser_find', args: (r) => ({ query: 'Watches', tab: keepersTab(r) }) }] },
+    { tools: [{ name: 'browser_wait', args: (r) => ({ text: 'four hours', seconds: 3, tab: keepersTab(r) }) }] },
+    { tools: [{ name: 'browser_read', args: (r) => ({ tab: keepersTab(r) }) }] },
+    { tools: [{ name: 'browser_navigate', args: (r) => ({ url: SMOOTH_URL, tab: keepersTab(r) }) }] },
+    { tools: [{ name: 'browser_tabs', args: { action: 'list' } }] },
+    { content: SAID },
+  ]);
+  // (About the page: a model on this PC isn't made to search the web first.)
+  await ask(main, `Find the rota on the page ${SMOOTH_URL}, then open ${GEAR_URL} too`);
+  await expect(main.getByText(SAID)).toBeVisible({ timeout: 90_000 });
+  const calls = chatCalls(fakeLlm, from);
+  // To the bottom and back: where it ended up, never mid-way.
+  const bottom = toolResult(calls[2]);
+  expect(bottom).toMatchObject({ success: true, data: { scroll: { at_end: true } } });
+  expect(bottom.data.scroll.y).toBeGreaterThanOrEqual(bottom.data.scroll.max - 1);
+  expect(toolResult(calls[3]).data.scroll).toMatchObject({ y: 0, at_top: true });
+  // The heading by its ref: in view, and the shot after it at the same place.
+  const to = toolResult(calls[5]);
+  expect(to).toMatchObject({ success: true, displayText: 'Scrolled to ‘The rota and its columns’ on wiki.example.com' });
+  expect(to.data.scroll.y).toBeGreaterThan(2000);
+  expect(to.data.in_view).toContain('The rota and its columns');
+  const shot = toolResult(calls[6]);
+  expect(shot.data.scroll.y).toBe(to.data.scroll.y);
+  // (The page's own scroll-behavior is smooth: the scroll was Yap's, instant.)
+  expect(await yap.invoke('e2e_page_view_eval', { key: `page:${SMOOTH_URL}`, script: 'getComputedStyle(document.documentElement).scrollBehavior' }).then(JSON.parse)).toBe('smooth');
+  // With the gear list in front: find, wait and read on the keepers page by its tab.
+  const n = shot.data.tab;
+  const found = toolResult(calls[8]);
+  expect(found).toMatchObject({ success: true, data: { tab: n } });
+  expect(found.data.matches).toMatch(/heading "Watches"/);
+  expect(toolResult(calls[9])).toMatchObject({ success: true, data: { tab: n, found: true } });
+  const read = toolResult(calls[10]);
+  expect(read.note).toMatch(new RegExp(`^This is tab ${n} as it is now, behind the tab in front`));
+  // Its links: the article's first, the language menu after.
+  expect(read.data.links.map((l) => l.text)).toEqual(['Edda Vane', 'Deutsch', 'Français']);
+  // Going somewhere in that tab brings it to the front.
+  expect(toolResult(calls[11])).toMatchObject({ success: true });
+  const tabs = toolResult(calls[12]).data.tabs;
+  expect(tabs.find((t) => t.tab === n)).toMatchObject({ front: true });
+  await expect.poll(async () => (await views(yap)).find((v) => v.key === `page:${SMOOTH_URL}`)?.onScreen, { timeout: 20_000 }).toBe(true);
 });
 
 test("browser_zoom draws a tab out of sight at twice its pixels; on screen, the screen's own pixels enlarged, and says which", async ({ yap, main, fakeLlm }) => {

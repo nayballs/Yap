@@ -461,6 +461,7 @@ impl TurnPictures {
             fill(&mut c.image.heading, &image.heading);
             c.image.w = c.image.w.or(image.w);
             c.image.h = c.image.h.or(image.h);
+            c.image.lead |= image.lead;
             if c.n == 0 && n > 0 {
                 c.n = n;
                 c.page = page;
@@ -497,15 +498,19 @@ impl TurnPictures {
         self.candidates.iter().map(|c| c.id.clone()).collect()
     }
 
-    /// **What a result lists** of `ids`: the best [`LISTED`] for `question`
-    /// ([`rank`]), each `{picture, about, size}` (`size` null when the page
-    /// didn't say). Pure.
+    /// **What a result lists** of `ids`: a page's lead picture first
+    /// (`PageImage::lead`: the one a "show me X" wants, whatever the
+    /// question's words — 8 Nov 2026, a wiki's infobox photo never made the
+    /// five), then the best for `question` ([`rank`]), [`LISTED`] in all,
+    /// each `{picture, about, size}` (`size` null when the page didn't say).
+    /// Pure.
     pub fn listed(&self, ids: &[String], question: &str) -> Value {
         let picked: Vec<&Candidate> = self.candidates.iter().filter(|c| ids.contains(&c.id)).collect();
         let words = crate::web::keywords(question);
+        let (lead, rest): (Vec<&Candidate>, Vec<&Candidate>) = picked.into_iter().partition(|c| c.image.lead);
         Value::Array(
-            rank(&picked, &words)
-                .into_iter()
+            lead.into_iter()
+                .chain(rank(&rest, &words))
                 .take(LISTED)
                 .map(|c| json!({ "picture": c.id, "about": c.about(), "size": c.size() }))
                 .collect(),
@@ -958,7 +963,7 @@ mod tests {
     use crate::web::{Endpoints, Service, Settings, Turn};
 
     fn img(url: &str, alt: &str, caption: &str, heading: &str, size: Option<(u32, u32)>) -> PageImage {
-        PageImage { url: url.into(), alt: alt.into(), caption: caption.into(), heading: heading.into(), w: size.map(|s| s.0), h: size.map(|s| s.1) }
+        PageImage { url: url.into(), alt: alt.into(), caption: caption.into(), heading: heading.into(), w: size.map(|s| s.0), h: size.map(|s| s.1), lead: false }
     }
 
     fn wiki() -> PageRef {
@@ -1020,6 +1025,13 @@ mod tests {
         // No words to go by: the biggest first.
         let plain = p.listed(&ids, "show it");
         assert_eq!(plain[0]["picture"], "p1");
+        // A page's lead picture (its infobox photo: no alt, no words of the
+        // question) comes first all the same, then the question's.
+        let lead = p.add(PageImage { lead: true, ..img("https://w.example/Fort_Joy_aerial.jpg", "", "", "", Some((300, 200))) }, wiki(), 1);
+        let ids: Vec<String> = ids.into_iter().chain(std::iter::once(lead.clone())).collect();
+        let listed = p.listed(&ids, "Divinity Original Sin 2: get me a map of all the treasures in Fort Joy");
+        let order: Vec<&str> = listed.as_array().unwrap().iter().map(|x| x["picture"].as_str().unwrap()).collect();
+        assert_eq!(order, [lead.as_str(), "p4", "p1", "p3", "p2"], "{listed}");
     }
 
     #[test]
