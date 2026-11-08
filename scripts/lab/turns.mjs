@@ -231,6 +231,12 @@ export function answerOf(conv, fromIndex = 0) {
  * `conv`: the conversation now (`chat_get`); `pages`: the pages alive
  * (`e2e_page_views`); `approvals`, `agents`: as for [`cardsOf`]. Pure.
  */
+/** Every item an answer shared (`files`: shares, each with its `items`), the
+ * share's caption on each. Older shapes (a flat list) read as items. Pure. */
+export function sharedItems(message) {
+  return (message?.files ?? []).flatMap((s) => (Array.isArray(s?.items) ? s.items.map((i) => ({ ...i, caption: s.caption ?? '' })) : [s]));
+}
+
 export function summarize({ turn, items, conv, pages = [], approvals = [], agents = [], transcript = null, now = Date.now() }) {
   const found = answerOf(conv, turn.askedAt ?? 0);
   const message = found?.message ?? null;
@@ -255,10 +261,16 @@ export function summarize({ turn, items, conv, pages = [], approvals = [], agent
     pending: pending.map((c) => c.id),
     pages: pages.map((p) => ({ url: p.url ?? p.address ?? '', onScreen: p.onScreen ?? p.on_screen ?? null, loaded: p.loaded ?? null })),
     pagesShown: [...new Set([...(message?.pages ?? []).map((p) => p.url), ...shownPages])],
-    pictures: (message?.pictures ?? []).map((p) => ({ caption: cut(p.caption ?? '', 120), url: p.page?.url ?? p.url ?? '' })),
-    // Files Chat shared into the answer as cards (a share-files tool, landing
-    // Nov 2026). TODO once it's merged: check the answer's field name here.
-    files: (message?.files ?? message?.attachments ?? []).map((f) => ({ name: f.name ?? f.title ?? String(f.path ?? '').split(/[\\/]/).pop() ?? '', path: f.path ?? f.rel ?? '', kind: f.kind ?? f.mime ?? '' })),
+    // Pictures the answer shows: the web's (`pictures`, show_picture) and the
+    // ones `share_files` put inline (an answer's `files` are shares, each with
+    // `items`: chat/shares.rs; a picture item has its chat-images `id`).
+    pictures: [
+      ...(message?.pictures ?? []).map((p) => ({ caption: cut(p.caption ?? '', 120), url: p.page?.url ?? p.url ?? '' })),
+      ...sharedItems(message).filter((f) => f.kind === 'image' && f.id).map((f) => ({ caption: cut(f.caption ?? '', 120), url: f.imageUrl ?? '', name: f.name ?? '', shared: true })),
+    ],
+    // Files shared as cards (`share_files`, or an agent's report): every
+    // shared item that isn't a picture shown inline.
+    files: sharedItems(message).filter((f) => !(f.kind === 'image' && f.id)).map((f) => ({ name: f.name ?? String(f.path ?? '').split(/[\\/]/).pop() ?? '', path: f.path ?? '', kind: f.kind ?? '' })),
     documents: (message?.documents ?? []).map((d) => d.title ?? d.noteId ?? d),
     sources: (message?.sources ?? sent?.reply?.sources ?? []).map((s) => s.url).filter(Boolean),
     error: turn.error ?? null,

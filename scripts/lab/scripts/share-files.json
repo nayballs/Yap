@@ -1,7 +1,6 @@
 {
   "name": "share-files",
   "about": "Chat sharing files from a Code chat's workspace into the conversation: one picture, then three (inline), then a Markdown file (a card). The workspace's pictures are drawn by the lab (made-up shapes), its notes.md made up. The thread's shots in both themes show how they look.",
-  "todo": "The share-files tool wasn't on main when this was written (8 Nov 2026). Once it is: put its real name in the `used` checks (share_files here), and check where an answer keeps its file cards (scripts/lab/turns.mjs summarize → `files`).",
   "needs": { "yapCode": true },
   "steps": [
     {
