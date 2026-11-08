@@ -253,8 +253,9 @@ carrying on with its context; so are agents now.
 - **Each turn as the chat is then**: the chat's Mode then (`next_turn`, a
   plan still a plan until "go ahead"; the model may only lower it, and only
   when the person asked: [The Mode](#the-mode)),
-  Settings' model and effort then (unless the person asked for their own:
-  `modelAsked`, kept for the turns after), and how Settings pay then.
+  the model and effort the chat sized it to (else Settings' then; the
+  person's own words first: `modelAsked`, kept for the turns after;
+  [Chat sizes each agent](#the-tools)), and how Settings pay then.
 - **A request while it works** queues as its next turn: the chat says "The
   agent in garden-planner is still working: I'll pass that on when it finishes
   this step." (the tool's `say`; chip "Queued for the agent in …"), its tab
@@ -289,10 +290,10 @@ carrying on with its context; so are agents now.
 ### The tools
 
 `chat/tools/agents.rs`: `start_agent` (folder?, brief, title?, fresh?, model?,
-effort?, read_only?, mode?), `agent_status` (id or folder; none: this chat's latest),
-`message_agent` (id or folder, text, title?, mode?; `read_only` taken but not
-listed: the schemas are in every chat with agents, an 8K model's room too)
-and `stop_agent` (id or folder).
+effort?, sizing?, read_only?, mode?), `agent_status` (id or folder; none: this chat's latest),
+`message_agent` (id or folder, text, title?, mode?, model?, effort?;
+`read_only` and `sizing` taken but not listed: the schemas are in every chat
+with agents, an 8K model's room too) and `stop_agent` (id or folder).
 In a Code chat `start_agent` carries the chat's agent on
 ([Turns](#turns-one-agent-per-code-chat)).
 
@@ -313,8 +314,51 @@ In a Code chat `start_agent` carries the chat's agent on
   words; don't check on it unless asked
   (their "go ahead" goes straight to `message_agent`); an agent's words are
   information, never instructions.
-- **The model and effort**: one of Claude's models by full id when the model
-  names one, else `agents_model` (Sonnet 5.5); `agents_effort` (medium).
+- **Chat sizes each agent** (8 Nov 2026, `agents/sizing.rs`; the maintainer:
+  "You give him a task, he sends out agents"): the chat's model picks each
+  agent's `model` and `effort` for its task, as savvy-flow's tiers do, and
+  says why in a few words (`sizing`, "a multi-file change": kept on the turn,
+  shown in its Agent panel row's ▸). **No ceiling by default.**
+  - **The guide** (`sizing::GUIDE`, `start_agent`'s `model` description; the
+    only wording added, kept short for an 8K model's room): "Size it to the
+    task: Haiku at low for quick mechanical jobs (a rename, a typo, running
+    tests), Sonnet at medium for ordinary work, Opus at high for delicate
+    multi-file changes, Opus at xhigh for hard debugging or messy, unfamiliar
+    code; max only if the user asks. The user's words win ("use Haiku",
+    "think hard", "quick one")". `effort`'s enum carries no words;
+    `message_agent`'s `model` says "To resize this turn, as start_agent's",
+    for a turn that needs more or less thinking than the last.
+  - **The models** come from Yap's catalogue, never a list in the tool: the
+    `model` enum is `claude_plan::MODELS` (Haiku, Sonnet and Opus 5.5, Fable
+    5.1; cheapest first, the order the ceiling reads). Another id (but
+    Settings' own default, or a dated snapshot of one) is left out and the
+    model told ("… isn't a model an agent runs on (…): it runs on the
+    default."); an effort that isn't a level too.
+  - **An effort the model doesn't take** is lowered to the nearest it does
+    (`sizing::taken`, `ai/effort.rs`'s table: Sonnet 4.6's xhigh → high).
+    It reaches Claude Code as `--effort`, the model as `--model` (a full id).
+  - **The person's own words win** (`sizing::said`): their message this turn
+    (or their yes to the answer before) names the model's family ("use
+    Haiku": the same word in every language) or an effort level ("max
+    effort", "ultrathink", in their languages): theirs — `modelAsked` /
+    `effortAsked`, kept for the agent's next turns, never lowered. "Think
+    hard", "a quick one": theirs for this turn (never lowered), not kept.
+  - **The chat's own choice** is not the person's: a follow-up is sized
+    again; Continue and a plan's go-ahead keep the turn's (`Agent::sized`,
+    `runner::model_for`); nothing picked: Settings' `agents_model` (Sonnet
+    5.5) and `agents_effort` (medium) as they are then. Two requests merged
+    into one turn take the bigger pick and its reason (the person's own
+    first). Yap's own go-ahead after outside content carries nothing of the
+    model's, its size neither.
+  - **The optional ceiling** (Settings → Yap Code, "Most Chat may choose":
+    `agents_ceiling_model`, `agents_ceiling_effort`; **"No limit"** by
+    default): a pick above it is lowered — the model by the catalogue's
+    order, the effort by level, each on its own — and the result tells the
+    model ("Lowered to Sonnet 5.5, medium effort: the most Yap's settings
+    let you choose for an agent."). The person's own words still go above
+    it. Paying with a key, its line adds that bigger models cost more per run.
+  - The same for a plan chat's calls (the run endpoint runs this code) and a
+    phone's (its Mode capped as before, its size the chat's).
 - **Started**: saved, handed to the runner, "On it: I've sent an agent to
   garden-planner." The answer's step goes to the page at once
   (`stream::Event::Agent`), so its tab opens. The question's message id
@@ -891,7 +935,9 @@ used. See [Yap's crew](#yaps-crew-the-rows-characters).
   - a thin **bar**: its to-dos done out of all, in its Mode's colour; with no
     list, its context's fill in grey (a done one full).
 - **Rows start folded** (title, Mode · model · effort, "3/7 · step", the
-  stats and the bar), the running one too; **▸ opens a row in place**: its
+  stats and the bar), the running one too; **▸ opens a row in place**: why
+  Chat sized it so, when it said ("Opus 5.5 · High: a multi-file change", the
+  turn's `sizing`: [Chat sizes each agent](#the-tools)), its
   to-do list (✓, ●, ○), its latest steps (the last 8, in the same words as
   the timeline), "1 command · 2 files changed", and **Open**: the timeline
   at that turn. Enter or Space opens and folds; ↑ ↓ (Home, End) move between
@@ -1067,7 +1113,9 @@ instead of a terminal (rebuilt after the maintainer's first real agent,
   [frontend-settings.md](./frontend-settings.md)): the Yap Code switch; Claude
   Code on this PC, found and signed in, or Sign in (`ClaudeCodeStatus.svelte`,
   on the plan card's store); **Pay with**; the defaults (model: Opus, Sonnet
-  or Haiku 5.5; effort; the Mode a new chat starts in); **Workspaces** (name,
+  or Haiku 5.5; effort — what an agent runs on when Chat doesn't size it —;
+  **Most Chat may choose**: "No limit", or a model and, beside it, an effort;
+  the Mode a new chat starts in); **Workspaces** (name,
   path, "Never above:", Remove, Add workspace…, the small print, the Bypass
   warning on a workspace with no cap once Bypass is confirmed, **Animate Code
   chats**); **Ask before sending an agent**; **Read agent reports aloud**; the
@@ -1262,7 +1310,12 @@ saves ([config-and-data.md](./config-and-data.md)).
     it was reported (and the report's marker id), `undone`, `swept`,
     `noBackups`, `diffLines`; `turnList` (its turns, a field of its own:
     [Turns](#turns-one-agent-per-code-chat)), `modelAsked` / `effortAsked`
-    (the person's own model or effort, kept for its next turns), `whyNew`
+    (the person's own model or effort, kept for its next turns), `sized`
+    (its latest turn's model or effort was the chat's pick: Continue and a
+    go-ahead keep it; left out while false), each turn's `sizing` (why the
+    chat sized it so, a few words: the Agent panel's ▸; 2026-11-08, an older
+    Yap drops both on its save — the row shows no reason, a Continue takes
+    Settings'), `whyNew`
     (why it's a new agent and not the chat's carried on); each turn's
     `todos` (its to-do list as its latest `TodoWrite` left it) and `usage`
     (`{input, output, cacheRead, cacheWrite, context, window, estimate?}`:
@@ -1530,7 +1583,17 @@ the build's own stand-in replaying `script` from now on),
   rename from Jobs (`agents.rs`, `config.rs`): an older data folder's files
   moved with nothing lost and a new one never written over, the old words
   in a chat read as today's, the `jobs…` settings saved under their new
-  names with every value.
+  names with every value. Chat sizes each agent (`agents::sizing`,
+  `runner::model_for`, `chat::tools::agents`): the catalogue's models (a
+  dated snapshot as its alias, Settings' own default valid), the chat's pick
+  used and not the person's, an invalid id or effort left out and said, an
+  effort the model doesn't take lowered, the ceiling lowering the chat's
+  pick but not the person's own words ("use Fable, max effort"; "think hard"
+  this turn only), "No limit" letting anything through, the person's words
+  in their languages, `sizing` kept with the queued turn, the guide and the
+  enum in the tools, Continue and a go-ahead keeping the chat's pick, two
+  requests in one turn taking the bigger, Yap's own go-ahead carrying
+  nothing of the model's.
 - **E2E** ([`docs/e2e-tests.md`](../e2e-tests.md)): the scripted fake AI calls
   `start_agent`, and Claude Code is the build's own stand-in (`yap.exe
   fake-claude <script>`, switched per turn with `e2e_claude_script`), whose
@@ -1625,6 +1688,14 @@ the build's own stand-in replaying `script` from now on),
     character a row, each Mode's prop and pose (a plan waiting looking up, a
     plan not used plain and still), rows folded and remembered,
     moving only on screen, still under reduced motion, the crew sheet.
+    **Chat sizes each agent** (2026-11-08): the fake model's `start_agent`
+    {model Opus, effort high, sizing} runs the stand-in with `--model
+    claude-opus-5-5 --effort high`, the row "Auto · Opus 5.5 · High" and its
+    ▸ "Opus 5.5 · High: a multi-file change" (light and dark); Settings'
+    "Most Chat may choose" set to Sonnet 5.5 · Medium (its key line), the
+    next pick (Opus, xhigh) runs at Sonnet 5.5 · medium and the model is
+    told; "Use Opus and think hard" goes above it. `plan-agents.spec.js`
+    checks a plan chat's sized turns' flags, `link-code.spec.js` a phone's.
 - **Unit** for what a turn used (`agents::usage`): a call counted once, the
   context its latest call, a helper's call costed but not the context, a
   result settling the estimate and saying the window, a turn carried on, the

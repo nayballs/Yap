@@ -16,7 +16,8 @@
   //   in progress" (else the line it's on), ctx % · tokens · ≈ $ · time, and
   //   a thin bar: its to-dos done, else its context's fill in grey.
   // - **Rows start folded**, the running one too; **▸ opens a row** in
-  //   place: its to-do list, its latest steps, how many commands and files,
+  //   place: why Chat sized it so ("Opus 5.5 · High: a multi-file change",
+  //   the turn's `sizing`), its to-do list, its latest steps, how many commands and files,
   //   and **Open** — the turn's whole timeline (the tab's other view). Enter
   //   or Space opens and folds; ↑ ↓ move between rows. Which rows are open
   //   and which groups folded is remembered per agent while the window stays
@@ -356,6 +357,10 @@
               {/if}
               {#if isOpen && r.kind === 'turn'}
                 <div class="rmore" id="more-{r.key}" data-testid="chat-agent-row-more">
+                  {#if r.sizing}
+                    <!-- Why Chat sized it so: "Opus 5.5 · High: a multi-file change". -->
+                    <p class="rsizing" data-testid="chat-agent-row-sizing">{[r.modelWord, r.effortWord].filter(Boolean).join(' · ')}: {r.sizing}</p>
+                  {/if}
                   {#if r.todos.length}
                     <ul class="todolist" data-testid="chat-agent-row-todos" aria-label="To-dos">
                       {#each r.todos as t, i (i)}
@@ -848,6 +853,11 @@
     display: flex;
     align-items: center;
     gap: 8px;
+  }
+  .rsizing {
+    margin: 0 0 8px;
+    color: var(--yap-paper-muted);
+    font-size: 11.5px;
   }
   .counts {
     flex: 1 1 auto;

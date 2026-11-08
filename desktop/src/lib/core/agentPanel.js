@@ -272,6 +272,7 @@ export function panelRows(agents, { logs = {}, steps = {}, now = Date.now() / 10
       model: '',
       modelWord: '',
       effortWord: '',
+      sizing: '',
       todos: [],
       line: j.continues ? `Yap wants to tell the agent in ${card.label}` : `Yap wants to send an agent to ${card.label}`,
       progress: { value: 0, kind: 'context' },
@@ -329,6 +330,8 @@ export function panelRows(agents, { logs = {}, steps = {}, now = Date.now() / 10
         model,
         modelWord: model ? shortModel(model) : '',
         effortWord: effortLabel(t.effort || agent.effort),
+        // Why Chat sized it so (start_agent's `sizing`, agents/sizing.rs): its ▸ says it.
+        sizing: t.sizing || '',
         todos,
         line: rowLine(agent, t, { todos, line, state, unused }),
         // (A plan nobody used never reads as done: its context in grey.)

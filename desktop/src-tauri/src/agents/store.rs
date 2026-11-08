@@ -195,9 +195,17 @@ pub struct Agent {
     /// turn, [`Agent::turn_notes`]).
     pub turn_list: Vec<TurnNote>,
     /// Its model was the person's own ask (kept for its next turns), not
-    /// Settings' default (which its next turns take as it is then).
+    /// the chat's pick nor Settings' default (which its next turns take as
+    /// they are then).
     pub model_asked: bool,
     pub effort_asked: bool,
+    /// **Its latest turn's model or effort was the chat's pick** for the
+    /// task (8 Nov 2026, `agents/sizing.rs`): Continue and a plan's
+    /// go-ahead keep it; a new request is sized again. A flag left out while
+    /// false: an older Yap's save drops it (that turn's Continue then takes
+    /// Settings').
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub sized: bool,
     /// Why this is a new agent and not the chat's earlier one carried on (its
     /// session couldn't be resumed): the tab's first line.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -249,6 +257,12 @@ pub struct TurnNote {
     pub read_only: bool,
     pub model: String,
     pub effort: String,
+    /// **Why the chat sized it so**, in a few words ("a multi-file change":
+    /// `start_agent`'s `sizing`, 8 Nov 2026), shown in the Agent panel row's
+    /// ▸ with its model and effort. A field of the turn's own: an older Yap
+    /// drops it on its save (the row then shows no reason).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub sizing: Option<String>,
     /// Unix seconds (0: never ran).
     pub started_ts: u64,
     pub ended_ts: u64,

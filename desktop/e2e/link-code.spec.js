@@ -468,7 +468,8 @@ test('a Bypass chat runs at Auto from the phone, which never picks Bypass; Stop 
   await script(yap, SLOW, 'slow');
   const [agent] = (await agents(yap)).filter((a) => a.conversation === chat);
   fakeLlm.scriptChat([
-    { tools: [{ name: 'start_agent', args: { brief: 'Now add a watering schedule to notes.md.' } }] },
+    // Sized by the chat as on the PC (2026-11-08, agents/sizing.rs): its model and effort go; its Mode stays capped.
+    { tools: [{ name: 'start_agent', args: { brief: 'Now add a watering schedule to notes.md.', model: 'claude-haiku-5-5', effort: 'low', sizing: 'a small edit' } }] },
     { content: "On it: I've passed that to the agent in garden-planner." },
   ]);
   const asked = await phone.mark();
@@ -479,6 +480,7 @@ test('a Bypass chat runs at Auto from the phone, which never picks Bypass; Stop 
   const now = (await agents(yap)).find((a) => a.id === agent.id);
   expect(now.mode).toBe('auto');
   expect(now.turnList.at(-1).mode).toBe('auto');
+  expect(now.turnList.at(-1)).toMatchObject({ model: 'claude-haiku-5-5', effort: 'low', sizing: 'a small edit' });
   // Its turn is the phone's (the report goes there too).
   await expectStore(yap, 'remote_control.json', (store) => {
     expect(store.asked.some((m) => m.key === now.turnList.at(-1).messageId && m.device === device.id)).toBe(true);

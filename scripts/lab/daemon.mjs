@@ -792,7 +792,8 @@ async function agentsView() {
     });
   }
   return {
-    agents: list.map((x) => ({ id: x.id, folder: x.folder, status: x.status, conversation: x.conversation, mode: x.mode, plan: x.plan, readOnly: !!x.turnList?.at(-1)?.readOnly, text: cut(x.text ?? '', 600), files: x.files, commands: x.commands, denials: x.denials, error: x.error ?? null, cost: x.cost })),
+    // Its latest turn's model and effort, and why Chat sized it so (agents/sizing.rs).
+    agents: list.map((x) => ({ id: x.id, folder: x.folder, status: x.status, conversation: x.conversation, mode: x.mode, plan: x.plan, readOnly: !!x.turnList?.at(-1)?.readOnly, model: x.turnList?.at(-1)?.model || x.model || null, effort: x.turnList?.at(-1)?.effort || x.effort || null, sizing: x.turnList?.at(-1)?.sizing ?? null, text: cut(x.text ?? '', 600), files: x.files, commands: x.commands, denials: x.denials, error: x.error ?? null, cost: x.cost })),
     pending: cardsOf([], { approvals, agents: list }).filter((c) => c.state === 'asking'),
     reports,
   };

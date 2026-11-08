@@ -31,6 +31,8 @@
 //!   estimate of its cost while it works (the Agent panel's numbers, after
 //!   savvy-progress's agents panel).
 //! - [`consent`]: the person's own words ask for it (as opening an app).
+//! - [`sizing`]: the chat's model sizes each agent (its model, effort and
+//!   why); the person's own words win; Settings' optional ceiling.
 //! - [`voice`]: the Voice Assistant asks out loud before an agent that needs
 //!   asking; the next question is the answer.
 //! - [`code_chat`]: Code chats — a conversation attached to one workspace,
@@ -57,6 +59,7 @@ pub mod workspaces;
 pub mod modes;
 pub mod remote;
 pub mod runner;
+pub mod sizing;
 pub mod steps;
 pub mod store;
 pub mod usage;

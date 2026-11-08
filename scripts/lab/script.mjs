@@ -222,10 +222,13 @@ export function checkTurn(expect, { result: turnResult, calls = turnResult?.tool
       (want.folder === undefined || a.folder === want.folder) &&
       (want.mode === undefined || list(want.mode).includes(a.mode)) &&
       (want.plan === undefined || !!a.plan === !!want.plan) &&
-      (want.readOnly === undefined || !!a.readOnly === !!want.readOnly)
+      (want.readOnly === undefined || !!a.readOnly === !!want.readOnly) &&
+      // Its latest turn's model ("claude-haiku-5-5", or "/haiku|sonnet/") and effort (a list: any of them).
+      (want.model === undefined || list(want.model).some((m) => nameMatches(m, a.model))) &&
+      (want.effort === undefined || list(want.effort).includes(a.effort))
     );
-    const words = `an agent ${['status', 'folder', 'mode', 'plan', 'readOnly'].filter((k) => want[k] !== undefined).map((k) => `${k} ${list(want[k]).join('|')}`).concat(want.files !== undefined ? [`files ${countText(want.files)}`] : []).join(', ')}`;
-    add(words.trim(), countMatches(want.count ?? { min: 1 }, hit.length), all.length ? all.map((a) => `${a.id}: ${a.status}, ${a.mode ?? '?'}${a.readOnly ? ' read only' : ''}${a.plan ? ', a plan' : ''}, ${(a.files ?? []).length} files${a.error ? `, ${a.error}` : ''}`).join(' | ') : 'no agents');
+    const words = `an agent ${['status', 'folder', 'mode', 'plan', 'readOnly', 'model', 'effort'].filter((k) => want[k] !== undefined).map((k) => `${k} ${list(want[k]).join('|')}`).concat(want.files !== undefined ? [`files ${countText(want.files)}`] : []).join(', ')}`;
+    add(words.trim(), countMatches(want.count ?? { min: 1 }, hit.length), all.length ? all.map((a) => `${a.id}: ${a.status}, ${a.mode ?? '?'}${a.readOnly ? ' read only' : ''}${a.plan ? ', a plan' : ''}${a.model ? `, ${a.model}${a.effort ? ` at ${a.effort}` : ''}` : ''}${a.sizing ? ` (${a.sizing})` : ''}, ${(a.files ?? []).length} files${a.error ? `, ${a.error}` : ''}`).join(' | ') : 'no agents');
   }
   return out;
 }
