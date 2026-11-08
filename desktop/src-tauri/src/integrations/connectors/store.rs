@@ -115,7 +115,7 @@ impl Transport {
     }
 }
 
-/// How a connector signs in. Wave 3 adds `oauth` and its client.
+/// How a connector signs in.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum AuthKind {
@@ -125,8 +125,82 @@ pub enum AuthKind {
     Bearer,
     /// Request headers ([`Transport::Remote`]'s `headers`, values in the vault).
     Header,
-    /// Signed in through the browser (wave 3).
+    /// Signed in through the browser (`oauth.rs`; the tokens in the vault).
     Oauth,
+}
+
+/// Which client a browser sign-in used (`oauth/client.rs` picks).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ClientKind {
+    /// The person's own client id, entered by hand (its secret, if any, in
+    /// the vault).
+    Own,
+    /// Yap's own app with that vendor, from the catalogue.
+    Catalog,
+    /// Yap's client ID metadata document: its URL is the client id.
+    Cimd,
+    /// A registration Yap made with the server (RFC 7591), kept per issuer.
+    Dcr,
+}
+
+/// The client a sign-in used. Not a secret: a client id is public.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ClientRef {
+    pub kind: ClientKind,
+    pub client_id: String,
+}
+
+/// A registration Yap made with an authorization server (dynamic client
+/// registration), for that issuer only: never sent to another, dropped when
+/// the issuer changes. Its secret, if it was given one, is in the vault.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Registration {
+    pub issuer: String,
+    pub client_id: String,
+    /// How it authenticates at the token endpoint (`none`,
+    /// `client_secret_post`, `client_secret_basic`).
+    #[serde(default = "none_method")]
+    pub auth_method: String,
+    #[serde(default)]
+    pub redirect_uris: Vec<String>,
+    #[serde(default)]
+    pub registered: u64,
+}
+
+fn none_method() -> String {
+    "none".into()
+}
+
+/// The person's own client id (a secret for it is in the vault).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OwnClient {
+    pub client_id: String,
+}
+
+/// The authorization server's endpoints as discovered at the last sign-in
+/// (`oauth/discover.rs`, each checked): refreshes and sign-out use them
+/// without discovering again.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Endpoints {
+    pub issuer: String,
+    pub authorization_endpoint: String,
+    pub token_endpoint: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub revocation_endpoint: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub registration_endpoint: Option<String>,
+    /// RFC 9207: the server says it puts `iss` on its answers.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub iss_supported: bool,
+    /// `token_endpoint_auth_methods_supported` (none listed: RFC 8414's
+    /// default, `client_secret_basic`).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub auth_methods: Vec<String>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
@@ -134,6 +208,35 @@ pub enum AuthKind {
 pub struct Auth {
     #[serde(default)]
     pub kind: AuthKind,
+    /// A browser sign-in's authorization server (its issuer), as the
+    /// server's protected resource metadata named it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub issuer: Option<String>,
+    /// The resource the tokens are for (RFC 8707): the server's own address.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub resource: Option<String>,
+    /// The client the sign-in used.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub client: Option<ClientRef>,
+    /// The scopes granted (or asked for, when the server didn't say).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub scopes: Vec<String>,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub signed_in: bool,
+    /// The sign-in ended (a refresh turned down, the tokens refused):
+    /// "Sign in again".
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub expired: bool,
+    /// Scopes the server asked for since (`403 insufficient_scope`): the
+    /// next sign-in asks for them too ("step-up").
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub wants: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub server: Option<Endpoints>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub registration: Option<Registration>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub own: Option<OwnClient>,
     #[serde(flatten)]
     pub extra: Map<String, Value>,
 }
@@ -342,7 +445,7 @@ pub fn add(new: New) -> Result<Connector, String> {
             enabled: true,
             origin: Origin::default(),
             transport: new.transport,
-            auth: Auth { kind: new.auth, extra: Map::new() },
+            auth: Auth { kind: new.auth, ..Default::default() },
             where_: Where::default(),
             tools: BTreeMap::new(),
             added: now(),
@@ -450,5 +553,31 @@ mod tests {
         assert_eq!(back["connectors"][0]["catalogVersion"], 3);
         assert_eq!(back["connectors"][0]["auth"]["issuer"], "https://mcp.example.com");
         assert_eq!(back["connectors"][0]["transport"]["fallbackSse"], "https://mcp.example.com/sse");
+    }
+
+    #[test]
+    fn a_sign_in_keeps_what_it_found_and_chose_and_never_a_token() {
+        let file: File = serde_json::from_value(json!({ "connectors": [{
+            "id": "c3", "slug": "notion", "name": "Notion",
+            "transport": { "kind": "remote", "url": "https://mcp.example.com/mcp" },
+            "auth": {
+                "kind": "oauth", "issuer": "https://auth.example.com", "resource": "https://mcp.example.com/mcp",
+                "client": { "kind": "dcr", "clientId": "yap-123" }, "scopes": ["read", "offline_access"], "signedIn": true,
+                "server": { "issuer": "https://auth.example.com", "authorizationEndpoint": "https://auth.example.com/authorize", "tokenEndpoint": "https://auth.example.com/token", "issSupported": true },
+                "registration": { "issuer": "https://auth.example.com", "clientId": "yap-123", "redirectUris": ["http://127.0.0.1:51439/connectors/callback"] },
+                "account": "A workspace"
+            }
+        }]}))
+        .unwrap();
+        let a = &file.connectors[0].auth;
+        assert_eq!(a.client, Some(ClientRef { kind: ClientKind::Dcr, client_id: "yap-123".into() }));
+        assert!(a.signed_in && !a.expired && a.wants.is_empty());
+        assert_eq!(a.registration.as_ref().unwrap().auth_method, "none", "public unless it said");
+        assert!(a.server.as_ref().unwrap().iss_supported);
+        let back = serde_json::to_value(&file).unwrap();
+        assert_eq!(back["connectors"][0]["auth"]["account"], "A workspace", "a field this build doesn't know stays");
+        assert!(back["connectors"][0]["auth"].get("expired").is_none(), "false fields left out");
+        let text = back.to_string().to_ascii_lowercase();
+        assert!(!text.contains("token\":") && !text.contains("refresh") && !text.contains("secret"), "{text}");
     }
 }

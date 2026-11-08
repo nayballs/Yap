@@ -148,7 +148,20 @@ requests to Yap's own endpoint on 127.0.0.1 (`integrations/claude_live.rs`).
   Chat, the Voice Assistant (wave 4) — else "Connectors". Its host only,
   never the link's path, a token or a header. A connector that's a program
   on this PC makes its own requests, which Yap can't see: only its links
-  are here; [integrations.md](./integrations.md#connectors-preview))
+  are here; [integrations.md](./integrations.md#connectors-preview)),
+  **signing in to a connector** (2026-11-08: "Connector sign-in · A
+  connector", `Purpose::ConnectorSignIn(kind)`, kind "connector", feature
+  "Connectors": `integrations/connectors/oauth.rs`'s every request — the
+  server asked without a token (its challenge), its protected resource
+  metadata, the authorization server's metadata, a dynamic client
+  registration, the code's exchange, each token refresh, and a sign-out's or
+  a removal's revocation — through `send_for` on the connector's own place
+  rules, the hosts only (an authorization server is often another host: it
+  shows as its own row); never a code, a token, a client secret, the
+  authorize address or a body. The browser's visit to the sign-in page is
+  the browser's, not Yap's; the loopback it comes back to (`127.0.0.1:51439`)
+  is inbound and not a receipt. A server fetching Yap's client ID metadata
+  document fetches it from where it's hosted, never from Yap)
   and the page's one connection, the **account picture** (`<img>` from the
   sign-in provider in AccountSection, ControlPanel and Settings: `onload` →
   `connections_note {purpose: "account-picture", url}`, once per picture per

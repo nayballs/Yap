@@ -572,6 +572,10 @@ pub fn run() {
             integrations::connectors::connector_refresh_tools,
             integrations::connectors::connector_set_tool,
             integrations::connectors::connector_details,
+            integrations::connectors::connector_sign_in,
+            integrations::connectors::connector_sign_in_cancel,
+            integrations::connectors::connector_sign_out,
+            integrations::connectors::connector_set_client,
             #[cfg(debug_assertions)]
             integrations::connectors::connector_call_tool,
             auth::auth_status,

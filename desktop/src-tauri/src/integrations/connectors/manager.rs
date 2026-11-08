@@ -100,7 +100,8 @@ impl Live {
 /// Why a connection didn't start.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum StartError {
-    /// The server wants a browser sign-in (wave 3).
+    /// The server wants a browser sign-in (`oauth.rs`), or the one there was
+    /// can't be used any more.
     NeedsSignIn,
     /// Anything else, in plain words.
     Failed(String),
@@ -174,7 +175,7 @@ impl Status {
             Status::Starting => "Starting…".into(),
             Status::Connected { tools: 1 } => "Connected · 1 tool".into(),
             Status::Connected { tools } => format!("Connected · {tools} tools"),
-            Status::NeedsSignIn => "Needs sign-in. This server wants you to sign in in your browser, which Yap can't do yet: use a token if it offers one.".into(),
+            Status::NeedsSignIn => "Needs sign-in. Sign in in your browser, or use a token if it offers one.".into(),
             Status::Failed { why } => why.clone(),
             Status::Stopped => "Stopped by itself 3 times in 10 minutes. Try again when it's fixed.".into(),
         }
@@ -527,7 +528,17 @@ async fn start(c: Connector, stderr: Arc<Mutex<Ring>>) -> Result<Service, StartE
             let (u, place) = remote::check_url(url).map_err(StartError::Failed)?;
             let token = if c.auth.kind == AuthKind::Bearer { secrets.token.clone() } else { None };
             let sent: Vec<(String, String)> = headers.iter().filter_map(|h| secrets.headers.get(&h.name).map(|v| (h.name.clone(), v.clone()))).collect();
-            let http = Http::new(&u, place, c.kind(), token, &sent).map_err(StartError::Failed)?;
+            let mut http = Http::new(&u, place, c.kind(), token, &sent).map_err(StartError::Failed)?;
+            if c.auth.kind == AuthKind::Oauth {
+                // A browser sign-in's token, refreshed first if it's nearly
+                // out: none usable, no start ("Needs sign-in").
+                let source = Arc::new(super::oauth::Source::new(&c.id));
+                source.bearer().await.map_err(|t| match t {
+                    super::oauth::Trouble::SignIn => StartError::NeedsSignIn,
+                    super::oauth::Trouble::Failed(why) => StartError::Failed(format!("Couldn't connect: {why}")),
+                })?;
+                http = http.with_sign_in(source);
+            }
             let older = |to: url::Url| {
                 let http = http.clone();
                 async move {

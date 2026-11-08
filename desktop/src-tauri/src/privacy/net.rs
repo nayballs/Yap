@@ -272,6 +272,12 @@ pub enum Purpose {
     /// listing, its tools' calls. The connector's catalogue name, else "A
     /// connector": never a name the person typed.
     Connector(String),
+    /// Signing in to a connector in the browser
+    /// (`integrations/connectors/oauth.rs`): the server's challenge, its
+    /// protected resource and authorization server metadata, a client
+    /// registration, the code's exchange, token refreshes and a sign-out's
+    /// revocation. Named as [`Purpose::Connector`].
+    ConnectorSignIn(String),
 }
 
 /// The free sources a keyless web search asks (`web/sources.rs`), each its
@@ -370,6 +376,7 @@ impl Purpose {
             Purpose::LocalApi => ("localapi", "Local API · apps on this PC".into(), "AI apps (MCP)"),
             Purpose::Phone => ("phone", "Yap Link · your phone".into(), "Phone"),
             Purpose::Connector(k) => ("connector", format!("Connector · {k}"), f("Connectors")),
+            Purpose::ConnectorSignIn(k) => ("connector", format!("Connector sign-in · {k}"), f("Connectors")),
         };
         Described { kind, label, feature }
     }
@@ -1215,6 +1222,9 @@ mod tests {
         let d = Purpose::Connector("A connector".into()).describe(Some(Feature::Chat));
         assert_eq!((d.kind, d.label.as_str(), d.feature), ("connector", "Connector · A connector", "Chat"));
         assert_eq!(Purpose::Connector("A connector".into()).describe(None).feature, "Connectors");
+        // Signing in to one: discovery, registration, tokens, revocation.
+        let d = Purpose::ConnectorSignIn("A connector".into()).describe(None);
+        assert_eq!((d.kind, d.label.as_str(), d.feature), ("connector", "Connector sign-in · A connector", "Connectors"));
     }
 
     #[tokio::test]
