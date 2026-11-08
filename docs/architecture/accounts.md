@@ -34,7 +34,9 @@ Optional Yap accounts: sign-in routes (email codes, Google/GitHub/Discord, your 
   Windows Credential Manager (`yap-account.com.yap.dictation`, **Local**
   persistence — never config.json, logs or the webview; any non-production
   service URL gets its own entry, `yap-account@<host>`, so a dev build can't
-  touch the real session). Signed in, startup + every 24 h
+  touch the real session; written one at a time across Yaps and read back,
+  `shell/credentials.rs`: [config-and-data.md](./config-and-data.md#secrets-in-credential-manager-shellcredentialsrs)).
+  Signed in, startup + every 24 h
   `refresh` re-validates via `get-session` (server says no → signed out;
   unreachable → keep, flagged `offline`). `auth_sign_out` revokes best-effort
   then forgets locally; `auth_delete_account` returns `"reauth"` when the

@@ -325,8 +325,16 @@ and evaluations: [below](#connectors-and-your-data-wave-8)) are built.
   client secret), never in a file, the log or the page (`Secrets`' and
   `Grant`'s `Debug` name which there are); the uninstaller removes all 24 ×
   8 names ("Delete the application data", below). A test run keeps them in its data folder's
-  `connector-secrets.e2e.json`; unit tests in memory, and one test uses the
-  real store under names of its own and removes them.
+  `connector-secrets.e2e.json`; unit tests in memory, and two tests use the
+  real store under names of their own and remove them however they end, one
+  at a time across test binaries (a lock file in the temp folder): Credential
+  Manager loses a write when another thread or process writes at the same
+  moment (a part just saved read back as missing). So since 2026-11-08 the
+  vault goes through `shell/credentials.rs`
+  ([config-and-data.md](./config-and-data.md#secrets-in-credential-manager-shellcredentialsrs)):
+  a connector's whole save, load, delete or `update` is one turn across
+  Yaps, every part is read back after it's written, and a save that can't
+  remove a leftover part fails instead of leaving it to join the next read.
 - **Commands** (wave 5's Settings and wave 4's loop build on them):
   `connectors_list`, `connector_preview {spec}`, `connector_add {spec}` (a link —
   `url`, `token`, `headers`, `sse`, `fallbackSse` — or a program —

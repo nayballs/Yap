@@ -1616,6 +1616,7 @@ While signed in with the plan, the key store holds `PLAN_KEY` ("chatgpt-plan") f
 - **Where:** `yap-chatgpt`, split over `yap-chatgpt-2…6` when one credential can't hold it, with Local persistence.
   - A portable Yap's names carry a hash of its data folder.
   - A model evaluation uses the real names, as it uses the maintainer's keys.
+  - Through `shell/credentials.rs` (2026-11-08): the parts are written, read and removed whole in one turn at Credential Manager, shared by every Yap on the PC, and each write is read back ([config-and-data.md](./config-and-data.md#secrets-in-credential-manager-shellcredentialsrs)). The refresh lock below is separate and wider: it spans the network call.
 - **Never** in config.json, chatgpt.json, the logs or the webview.
 - **Lifetimes:** the access token lasts an hour. The refresh token lasts 30 days and **rotates on every refresh**.
 - **One refresh at a time:** `access_token()` refreshes one at a time in this process and **across Yaps** (the dev build beside the installed app, an evaluation), through a lock file in the temp folder (`UpgradeLock::take_named`).

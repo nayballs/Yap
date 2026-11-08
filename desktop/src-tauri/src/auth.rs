@@ -1876,32 +1876,24 @@ pub(crate) fn same_secret(a: &str, b: &str) -> bool {
 
 // ---- credential store ----
 
+/// Windows Credential Manager, through `shell/credentials.rs` (one write at
+/// a time across Yaps, read back to be sure).
 #[cfg(windows)]
 mod vault {
     use super::Stored;
-    use std::collections::HashMap;
-    use std::sync::Once;
+    use crate::shell::credentials;
 
     const SERVICE: &str = "com.yap.dictation";
     /// Credential Manager blobs top out at 2560 bytes (UTF-16, so ~1280 chars).
     const MAX_CHARS: usize = 1200;
 
-    fn entry() -> Result<keyring_core::Entry, keyring_core::Error> {
-        static STORE: Once = Once::new();
-        STORE.call_once(|| match windows_native_keyring_store::Store::new() {
-            Ok(store) => keyring_core::set_default_store(store),
-            Err(e) => tracing::error!("auth: credential store unavailable: {}", e),
-        });
-        let user = super::credential_user_for(&super::base_url());
-        // Local: a session token belongs to this PC. The default (Enterprise)
-        // would roam it with a domain user's profile.
-        keyring_core::Entry::new_with_modifiers(SERVICE, &user, &HashMap::from([("persistence", "Local")]))
+    fn user() -> String {
+        super::credential_user_for(&super::base_url())
     }
 
     pub fn load() -> Option<Stored> {
-        match entry().and_then(|e| e.get_password()) {
-            Ok(json) => serde_json::from_str(&json).ok(),
-            Err(keyring_core::Error::NoEntry) => None,
+        match credentials::read(SERVICE, &user()) {
+            Ok(json) => json.and_then(|json| serde_json::from_str(&json).ok()),
             Err(e) => {
                 tracing::error!("auth: couldn't read the stored session: {}", e);
                 None
@@ -1917,13 +1909,12 @@ mod vault {
             slim.user.image = None;
             json = serde_json::to_string(&slim).map_err(|e| e.to_string())?;
         }
-        entry().and_then(|e| e.set_password(&json)).map_err(|e| e.to_string())
+        credentials::write(SERVICE, &user(), &json).map_err(|e| e.to_string())
     }
 
     pub fn clear() {
-        match entry().and_then(|e| e.delete_credential()) {
-            Ok(()) | Err(keyring_core::Error::NoEntry) => {}
-            Err(e) => tracing::error!("auth: couldn't remove the stored session: {}", e),
+        if let Err(e) = credentials::delete(SERVICE, &user()) {
+            tracing::error!("auth: couldn't remove the stored session: {}", e);
         }
     }
 }

@@ -21,7 +21,8 @@ Connecting Google Calendar or an iCal link, sync, parsing, the reminder card, pr
   ("Outlook Calendar" = a guided publish-your-calendar ICS flow; "Other
   calendar"; HTTPS only, `webcal://` → https). Secrets (refresh token, link)
   in Credential Manager (`calendar/vault.rs`: `yap-calendar-<n>.com.yap.dictation`,
-  Local persistence; test mode: `calendar-secrets.e2e.json`; saved outside
+  Local persistence, written through `shell/credentials.rs`: one at a time
+  across Yaps, read back; test mode: `calendar-secrets.e2e.json`; saved outside
   the state lock, the slot held meanwhile — `Reserved`, from a link's first
   fetch until it's listed — so a link and a Google sign-in finishing at once
   never share one); `calendar.json`
