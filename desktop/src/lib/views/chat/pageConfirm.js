@@ -3,6 +3,7 @@
 // and its page tab's strip (PageTab.svelte), so the two always say the same.
 // `act`: press (a button or a link; an older card has none), enter (Enter
 // in a field), open (go to a link's address), type (typed words, `text`),
+// drag (what's dragged, onto `text`),
 // agent (an agent about to start, chat/tools/agents.rs: `agent` {folder, path, mode,
 // modeLabel, brief, newFolder, web}; Yap Code gives it a card of its own).
 
@@ -33,6 +34,9 @@ export function questionParts(c) {
       return { lead: 'Yap wants to open', quoted: c.label, then: '' };
     case 'enter':
       return { lead: 'Yap wants to press Enter in', quoted: c.label, then: '' };
+    case 'drag':
+      // What's dragged, onto what (`text`).
+      return { lead: 'Yap wants to drag', quoted: c.label, then: c.text ? ` onto ‘${c.text}’` : '' };
     case 'agent':
       // A follow-up for the chat's agent (its next turn), or a new agent.
       return { lead: c.agent?.continues ? 'Yap wants to tell the agent in' : 'Yap wants to send an agent to', quoted: c.label, then: c.agent?.modeLabel ? ` (${c.agent.modeLabel})` : '' };
@@ -57,7 +61,7 @@ export function whyOf(c) {
 
 /** What a card says once answered (`state`: allowed, refused, timedOut). */
 export function doneWords(c, state) {
-  const verb = c?.act === 'type' ? 'type' : c?.act === 'open' ? 'open' : c?.act === 'agent' ? 'send' : 'press';
+  const verb = c?.act === 'type' ? 'type' : c?.act === 'open' ? 'open' : c?.act === 'agent' ? 'send' : c?.act === 'drag' ? 'drag' : 'press';
   if (state === 'allowed') return 'Allowed once.';
   if (state === 'timedOut') return `No answer in time, so Yap didn’t ${verb} it.`;
   return `Yap didn’t ${verb} it.`;

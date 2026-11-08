@@ -40,7 +40,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { test as base, expect, expectStore, setConfig, openView, openSettings, closeSettings, settingsDialog } from './support/fixtures.js';
 import { startFakeLlm } from './support/fake-llm.js';
-import { startFakeWeb, FORT_JOY_URL, DOCKS_URL, BAND, FOREVER_URL, GEAR_URL, SMOOTH_URL } from './support/fake-web.js';
+import { startFakeWeb, FORT_JOY_URL, DOCKS_URL, BAND, FOREVER_URL, GEAR_URL, SMOOTH_URL, WIDE_URL } from './support/fake-web.js';
+import { SCREENSHOTS } from './support/yap.js';
 import { readPng, pixel, near } from './support/png.js';
 
 const BROWSERS = [
@@ -890,6 +891,97 @@ test('look_at_screen sees the page open beside the chat too, as its own picture 
   expect(texts).toContain('The page open beside the chat (wiki.example.com), as it is now.');
   // Both shown with the question, in the screenshot frame.
   await expect(main.getByRole('group', { name: 'Screenshots' }).last().getByRole('button', { name: /^Screenshot,/ })).toHaveCount(2);
+  const closePanel = main.getByTestId('chat-page').getByRole('button', { name: 'Close the panel' });
+  if (await closePanel.count()) await closePanel.click();
+});
+
+/** A PNG the model got in a request (an image part's data URL), decoded. */
+const sentPng = (request, nth = -1) => {
+  const parts = request.messages.filter((m) => Array.isArray(m.content)).flatMap((m) => m.content.filter((p) => p.type === 'image_url'));
+  const url = parts.at(nth)?.image_url?.url || '';
+  return Buffer.from(url.split(',')[1] || '', 'base64');
+};
+
+/** Saved beside the suite's named screenshots (test-results/app/screenshots/chat-pages/). */
+function keepPng(name, bytes) {
+  const file = path.join(SCREENSHOTS, 'chat-pages', `${name}.png`);
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  fs.writeFileSync(file, bytes);
+  return file;
+}
+
+test('a desktop width: the tab laid out 1280 px wide, read and seen as the desktop site, shown scaled to fit with its chip; × puts it back', async ({ yap, main, fakeLlm, shot }) => {
+  // (8 Nov 2026, Yap Lab: at the panel's width MDN's search is an icon.)
+  await setConfig(yap, main, { ...chatConfig(fakeLlm), llmScopes: { chat: { enabled: true, provider: 'custom', baseUrl: fakeLlm.base, model: 'fake-vision-chat' } } });
+  const key = `page:${WIDE_URL}`;
+  const here = async (script) => JSON.parse(await yap.invoke('e2e_page_view_eval', { key, script }));
+  const from = fakeLlm.requests.length;
+  const SAID = 'At a desktop width the guide has its search box.';
+  const OTHER = GEAR_URL;
+  fakeLlm.scriptChat([
+    { tools: [{ name: 'browser_navigate', args: { url: WIDE_URL } }] },
+    { tools: [{ name: 'browser_read', args: { mode: 'elements' } }] },
+    { tools: [{ name: 'browser_screenshot', args: {} }] },
+    { tools: [{ name: 'browser_tabs', args: { action: 'width', width: 1280 } }] },
+    { tools: [{ name: 'browser_read', args: { mode: 'elements' } }] },
+    { tools: [{ name: 'browser_screenshot', args: {} }] },
+    // Somewhere else in the tab and back: the width stays the tab's.
+    { tools: [{ name: 'browser_navigate', args: { url: OTHER } }] },
+    { tools: [{ name: 'browser_navigate', args: { url: 'back' } }] },
+    { content: SAID },
+  ]);
+  await ask(main, `I would like the field guide up beside the chat as on a desktop: ${WIDE_URL} (and then the gear list: ${OTHER})`);
+  await expect(main.getByText(SAID)).toBeVisible({ timeout: 90_000 });
+  const calls = chatCalls(fakeLlm, from);
+  // At the panel's width: its narrow layout — a search button — and the shot says so, with the way to a desktop's.
+  const narrow = toolResult(calls[2]);
+  expect(narrow.data.elements).toMatch(/\[\d+\] button "Open search"/);
+  expect(narrow.data.elements).not.toContain('Search the guide');
+  const first = toolResult(calls[3]);
+  expect(first.data.width).toBeLessThan(900);
+  expect(first.data.desktop).toBeUndefined();
+  expect(first.note).toContain('browser_tabs {"action": "width", "width": 1280} lays it out as on a desktop');
+  // Laid out 1280 px wide: read as the desktop site — its search box.
+  expect(toolResult(calls[4])).toMatchObject({ success: true, data: { width: 1280, laid_out: 1280 } });
+  expect(toolResult(calls[4]).displayText).toMatch(/^Set tab \d+ to a desktop width beside the chat$/);
+  expect(toolResult(calls[5]).data.elements).toMatch(/\[\d+\] searchbox "Search the guide"/);
+  const wide = toolResult(calls[6]);
+  expect(wide).toMatchObject({ success: true, data: { width: 1280, desktop: 1280 } });
+  expect(lookLines(calls[6]).join(' ')).toContain('laid out 1280 px wide (a desktop width the tab is set to, shown to the user scaled to fit the panel)');
+  // The picture the model got: the view at the panel's pixels, the desktop layout's two columns side by side.
+  const modelPng = sentPng(calls[6]);
+  keepPng('desktop-width-as-the-model-sees-it', modelPng);
+  const model = readPng(modelPng);
+  const cols = await here("(function(){var b=document.getElementById('birds').getBoundingClientRect(),t=document.getElementById('trees').getBoundingClientRect();return {w:innerWidth,by:(b.top+b.bottom)/2,bx:(b.left+b.right)/2,tx:(t.left+t.right)/2};})()");
+  expect(cols.w).toBe(1280);
+  const at = (png, x, y) => pixel(png, Math.floor((x * png.width) / cols.w), Math.floor((y * png.width) / cols.w));
+  expect(near(at(model, cols.bx, cols.by), [0xcc, 0xdd, 0xee], 12)).toBe(true);
+  expect(near(at(model, cols.tx, cols.by), [0xee, 0xdd, 0xcc], 12)).toBe(true);
+  // The navigation and back: still 1280 wide (WebView2 kept, or Yap put back, its zoom).
+  expect(toolResult(calls[7])).toMatchObject({ success: true });
+  expect(toolResult(calls[8])).toMatchObject({ success: true });
+  expect(toolResult(calls[8]).displayText).toMatch(/^Went back in tab \d+$/);
+  await expect.poll(() => here('[innerWidth, document.getElementById("layout").textContent]'), { timeout: 10_000 }).toEqual([1280, 'Wide layout']);
+  // What the person sees: the same layout, scaled to fit the panel (its own zoom), the chip saying so.
+  const view = (await views(yap)).find((v) => v.key === key);
+  expect(view).toMatchObject({ width: 1280, onScreen: true });
+  expect(view.zoom).toBeLessThan(1);
+  const chip = main.getByTestId('chat-page-width');
+  await expect(chip).toBeVisible();
+  await expect(chip).toContainText('Desktop width');
+  await shot(main, 'desktop-width-chip');
+  const seen = await yap.invoke('page_view_shot', { key, url: WIDE_URL, title: 'Field guide', conversationId: null });
+  const personPng = fs.readFileSync(path.join(yap.dataDir, 'chat-images', `${seen.id}.png`));
+  keepPng('desktop-width-as-the-person-sees-it', personPng);
+  const person = readPng(personPng);
+  expect(near(at(person, cols.bx, cols.by), [0xcc, 0xdd, 0xee], 12)).toBe(true);
+  expect(near(at(person, cols.tx, cols.by), [0xee, 0xdd, 0xcc], 12)).toBe(true);
+  // The chip's ×: the panel's own width again, the chip gone.
+  await main.getByTestId('chat-page-width-off').click();
+  await expect(chip).toHaveCount(0);
+  await expect.poll(() => here('document.getElementById("layout").textContent'), { timeout: 10_000 }).toBe('Narrow layout');
+  expect(await here('innerWidth')).toBeLessThan(900);
+  expect((await views(yap)).find((v) => v.key === key)).toMatchObject({ width: null, zoom: 1 });
   const closePanel = main.getByTestId('chat-page').getByRole('button', { name: 'Close the panel' });
   if (await closePanel.count()) await closePanel.click();
 });

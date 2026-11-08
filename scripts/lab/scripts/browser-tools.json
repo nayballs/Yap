@@ -1,6 +1,6 @@
 {
   "name": "browser-tools",
-  "about": "Re-tests the browser tools' fixes of 8 Nov 2026 (the lab's browser report) in three questions, on Wikipedia, MDN and example.com: scroll's position after the scroll, scroll_to by ref, tab on the page tools, 'changed' after hover / PageDown / a click that opens a box, Escape closing a hover popup, Enter after typing, a dropdown choice, find_pictures' lead image, the bad-ref error. Each turn's shots (thread, panel, page; light and dark) show what the checks can't: the lead image, the preview, where each page ended up.",
+  "about": "Re-tests the browser tools' fixes of 8 Nov 2026 (the lab's browser report) in three questions, on Wikipedia, MDN and example.com: scroll's position after the scroll, scroll_to by ref, tab on the page tools, 'changed' after hover / PageDown / a click that opens a box, Escape closing a hover popup, Enter after typing, a dropdown choice, find_pictures' lead image, the bad-ref error; then the gaps closed the same day, in two more: a double click (the word selected), a right-click, a tab at a desktop width (MDN's search a box, its shot saying the width), a frame from another site said as one, a same-origin frame read and a drag in it (jQuery UI's sortable demo). Turns 4 and 5 carry the fake AI's calls, so they run on a --fake --live-web lab too. Each turn's shots (thread, panel, page; light and dark) show what the checks can't: the lead image, the preview, where each page ended up.",
   "needs": { "web": true },
   "steps": [
     { "note": "1. Scrolling, scroll_to by ref, the lead picture (Wikipedia's Lighthouse: long, with an infobox picture)." },
@@ -75,6 +75,88 @@
       "expect": { "tool": { "name": "browser_click", "ok": true, "path": "data.changed", "notMatches": "/^nothing visible changed/i" } },
       "soft": true,
       "note": "The click that opens MDN's search box says something changed (soft: MDN's header at the panel's width decides whether there's a box to open)."
-    }
+    },
+
+    { "note": "4. A double click, a right-click and a desktop width (Wikipedia's Lighthouse; MDN's table page, whose live example is a frame from another site)." },
+    {
+      "fake": [
+        { "tools": [{ "name": "browser_navigate", "args": { "url": "https://en.wikipedia.org/wiki/Lighthouse" } }] },
+        { "tools": [{ "name": "browser_find", "args": { "query": "A lighthouse is a tower" } }] },
+        { "tools": [{ "name": "browser_click", "args": { "ref": "$ref:text:A lighthouse is a tower*", "count": 2 } }] },
+        { "tools": [{ "name": "browser_click", "args": { "ref": "$ref:text:A lighthouse is a tower*", "button": "right" } }] },
+        { "tools": [{ "name": "browser_tabs", "args": { "action": "new", "url": "https://developer.mozilla.org/en-US/docs/Web/HTML/Element/table" } }] },
+        { "tools": [{ "name": "browser_wait", "args": { "seconds": 2 } }] },
+        { "tools": [{ "name": "browser_read", "args": { "mode": "elements" } }] },
+        { "tools": [{ "name": "browser_screenshot", "args": {} }] },
+        { "tools": [{ "name": "browser_tabs", "args": { "action": "width", "width": 1280 } }] },
+        { "tools": [{ "name": "browser_read", "args": { "mode": "elements" } }] },
+        { "tools": [{ "name": "browser_screenshot", "args": {} }] },
+        { "tools": [{ "name": "browser_read", "args": {} }] },
+        { "content": "Double-clicked and right-clicked the title; read MDN at the panel's width and at a desktop width." }
+      ]
+    },
+    {
+      "ask": "Testing new browser tools, one step at a time, short answers. 1. Open https://en.wikipedia.org/wiki/Lighthouse beside the chat. 2. Find the article's first paragraph (\"A lighthouse is a tower…\") with browser_find, double-click it with browser_click (count 2) and tell me what its result says was selected. 3. Right-click that paragraph (button right) and tell me what changed. 4. Open https://developer.mozilla.org/en-US/docs/Web/HTML/Element/table in a new tab with browser_tabs (action new). 5. Read it in mode \"elements\" and take a browser_screenshot: is its search a box or a button? 6. Lay that tab out at a desktop width with browser_tabs (action width, width 1280), read it again in mode \"elements\" and take another browser_screenshot: is the search a box now? 7. Read it with browser_read: does it say it has a frame Yap can't read inside (its live example)?",
+      "timeout": 540
+    },
+    {
+      "expect": {
+        "status": "answered",
+        "used": ["browser_click", "browser_tabs", "browser_screenshot"],
+        "tool": [
+          { "name": "browser_click", "args": { "count": 2 }, "ok": true, "path": "data.selected", "matches": "/\\w/" },
+          { "name": "browser_click", "args": { "button": "right" }, "ok": true, "path": "data.changed", "notMatches": "/^nothing visible changed/i" },
+          { "name": "browser_tabs", "args": { "action": "width" }, "ok": true, "path": "data.laid_out", "gte": 1200 },
+          { "name": "browser_screenshot", "ok": true, "path": "data.desktop", "equals": 1280 }
+        ]
+      },
+      "note": "A double click selects the word there; a right-click says what it did (no menu of the page's own: said so); a tab laid out at a desktop width, its shot saying so."
+    },
+    {
+      "expect": { "tool": { "name": "browser_read", "args": { "mode": "elements" }, "result": "/\\] frame .{0,120}a frame from another site/" } },
+      "soft": true,
+      "note": "At 1280 px MDN draws its desktop layout (a search box in its header: the page shot shows it; the read lists it as MDN's own button, 'Search the site') and its live example, a frame from another site (mdnplay.dev), listed as one Yap can't reach inside (soft: MDN decides)."
+    },
+    {
+      "expect": { "tool": { "name": "browser_read", "path": "data.frames.0.site", "matches": "/./" } },
+      "soft": true,
+      "note": "A plain read says the page has a frame Yap can't read inside (soft: MDN's page decides)."
+    },
+    { "shot": "desktop-width", "window": "page", "optional": true },
+
+    { "note": "5. A same-origin frame read and a drag in it (jQuery UI's sortable demo: a list in a frame of the site's own)." },
+    {
+      "fake": [
+        { "tools": [{ "name": "browser_navigate", "args": { "url": "https://jqueryui.com/sortable/" } }] },
+        { "tools": [{ "name": "browser_read", "args": {} }] },
+        { "tools": [{ "name": "browser_find", "args": { "query": "Item 3" } }] },
+        { "tools": [{ "name": "browser_find", "args": { "query": "Item 1" } }] },
+        { "tools": [{ "name": "browser_drag", "args": { "from": { "ref": "$ref:item:Item 3" }, "to": { "ref": "$ref:item:Item 1" } } }] },
+        { "tools": [{ "name": "browser_screenshot", "args": {} }] },
+        { "content": "Item 3 is higher in the list now." }
+      ]
+    },
+    {
+      "ask": "Last one, step by step, short answers. 1. Open https://jqueryui.com/sortable/ beside the chat and read it with browser_read: its demo list is in a frame; which items does the read show? 2. Find \"Item 3\" and \"Item 1\" with browser_find, then drag Item 3 onto Item 1 with browser_drag (from and to by ref). 3. Tell me what the drag's result says changed, and take a browser_screenshot.",
+      "timeout": 540
+    },
+    {
+      "expect": {
+        "status": "answered",
+        "used": ["browser_read", "browser_drag"],
+        "refused": false,
+        "tool": [
+          { "name": "browser_read", "ok": true, "result": "/Item 1.*Item 2/s" },
+          { "name": "browser_drag", "ok": true }
+        ]
+      },
+      "note": "A same-origin frame's words are read with the page; a drag inside it goes through."
+    },
+    {
+      "expect": { "tool": { "name": "browser_drag", "ok": true, "path": "data.changed", "matches": "/moved ‘Item 3’/" } },
+      "soft": true,
+      "note": "The drag's 'changed' says where Item 3 went (soft: jQuery UI decides where an item lands)."
+    },
+    { "shot": "drag-in-a-frame", "window": "page", "optional": true }
   ]
 }

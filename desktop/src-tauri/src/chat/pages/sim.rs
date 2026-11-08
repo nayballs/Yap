@@ -68,6 +68,8 @@ pub struct Log {
     pub keys: Vec<String>,
     /// Every element hovered over: its words.
     pub hovered: Vec<String>,
+    /// Every drag: the dragged element's words and where it went.
+    pub dragged: Vec<(String, String)>,
 }
 
 /// The stand-in view's size (CSS pixels), and the room each block of text
@@ -110,6 +112,14 @@ struct Tab {
     /// The page as it was when an action began (`backend::watch`), for what
     /// it changed (`backend::changes`).
     watched: Option<Watched>,
+    /// The desktop width it's set to (`browser_tabs` width), and the width
+    /// it's laid out at now (that, or the panel's: [`Browser::panel_w`]) —
+    /// `data-sim-wide` / `data-sim-narrow` show at 900 and more / less.
+    width: Option<u32>,
+    laid: i64,
+    /// A drag under way (`dragStart` … `dragEnd`): from ref, to ref (0: a
+    /// point).
+    drag: Option<(u32, u32)>,
 }
 
 /// A tab as an action found it: its scroll, focus, what a hover showed, what
@@ -124,8 +134,11 @@ struct Watched {
 }
 
 impl Tab {
-    fn new(key: String, id: usize, used: u64, url: &str, html: String) -> Tab {
+    fn new(key: String, id: usize, used: u64, url: &str, html: String, laid: i64) -> Tab {
         Tab {
+            width: None,
+            laid,
+            drag: None,
             key,
             id,
             used,
@@ -156,8 +169,20 @@ pub struct Browser {
     /// The tab the last [`Browser::open`] closed to make room (its number
     /// and title).
     closed: Option<(usize, String)>,
+    /// The panel's width (CSS pixels): a tab's layout without a desktop
+    /// width — [`VIEW_W`] unless a test makes it narrow.
+    pub panel_w: i64,
     pub log: Log,
 }
+
+/// The width (CSS pixels) a responsive stand-in page switches layout at
+/// (`data-sim-wide`: shown at it and over; `data-sim-narrow`: under it).
+pub const WIDE_AT: i64 = 900;
+
+/// What a same-origin frame's content stands in: an element of its own in
+/// the frame's place, its document's body inside ([`Browser::inline_frames`]),
+/// its own ids and labels first, as a shadow root's are.
+const FRAME_ROOT: &str = "sim-frame";
 
 /// A page's address as pages are found by: its host (no `www.`), path (no
 /// trailing `/`), and its query's pairs sorted, words lower-cased, `+` as a
@@ -251,19 +276,78 @@ pub fn open_shadow_roots(html: &str) -> String {
     out
 }
 
-/// What makes an element one the model can act on.
-const CANDIDATE: &str = "a[href], button, input, select, textarea, summary, [role=button], [role=link], [role=checkbox], [role=radio], [role=tab], [role=menuitem], [role=switch], [role=combobox], [role=textbox], [role=searchbox], [role=option], [contenteditable]";
+/// What makes an element one the model can act on (an `<iframe>` left as
+/// one is a frame Yap can't reach inside: an element of its own).
+const CANDIDATE: &str = "a[href], button, input, select, textarea, summary, [role=button], [role=link], [role=checkbox], [role=radio], [role=tab], [role=menuitem], [role=switch], [role=combobox], [role=textbox], [role=searchbox], [role=option], [contenteditable], iframe";
 
 impl Browser {
     /// A browser over `pages` (address → HTML, or plain text), no tab open.
     pub fn new(pages: &BTreeMap<String, String>) -> Browser {
-        Browser { pages: pages.iter().map(|(u, h)| (u.clone(), h.clone())).collect(), tabs: Vec::new(), front: 0, next_id: 1, tick: 0, closed: None, log: Log::default() }
+        Browser {
+            pages: pages.iter().map(|(u, h)| (u.clone(), h.clone())).collect(),
+            tabs: Vec::new(),
+            front: 0,
+            next_id: 1,
+            tick: 0,
+            closed: None,
+            panel_w: VIEW_W,
+            log: Log::default(),
+        }
+    }
+
+    /// **Tab `key` laid out `width` CSS pixels wide** (`browser_tabs`
+    /// width), or the panel's own (`None`).
+    pub fn set_width(&mut self, key: &str, width: Option<u32>) -> Result<(), String> {
+        let panel = self.panel_w;
+        let t = self.tab_mut(key)?;
+        t.width = width;
+        t.laid = width.map_or(panel, i64::from);
+        Ok(())
+    }
+
+    /// The HTML for `url` (its same-origin frames inlined: [`Browser::inline_frames`]).
+    fn page_for(&self, url: &str) -> String {
+        let html = self.page_only(url);
+        self.inline_frames(url, html, 0)
+    }
+
+    /// **A page's same-origin frames as its own elements** (the element
+    /// script walks them: `pages.rs` `deep_js!`): an `<iframe src>` on the
+    /// page's own host, not sandboxed, becomes a [`FRAME_ROOT`] element with
+    /// its page's body in it (nested ones too, three deep); a frame from
+    /// another host, or sandboxed, stays an `<iframe>` — an element of its
+    /// own Yap can't reach inside. A page with none: as it was.
+    fn inline_frames(&self, url: &str, html: String, depth: u32) -> String {
+        if depth >= 3 || !html.to_ascii_lowercase().contains("<iframe") {
+            return html;
+        }
+        let host = |u: &str| reqwest::Url::parse(u).ok().and_then(|u| u.host_str().map(str::to_ascii_lowercase)).unwrap_or_default();
+        let here = host(url);
+        let doc = dom_query::Document::from(html.as_str());
+        let mut changed = false;
+        for f in doc.select("iframe[src]").nodes() {
+            let src = join(url, &f.attr("src").map(|s| s.to_string()).unwrap_or_default());
+            let sandboxed = f.attr("sandbox").is_some_and(|s| !s.to_ascii_lowercase().contains("allow-same-origin"));
+            if sandboxed || host(&src) != here {
+                continue;
+            }
+            let inner = self.inline_frames(&src, self.page_only(&src), depth + 1);
+            let body = dom_query::Document::from(inner.as_str()).select("body").inner_html().to_string();
+            let attr = src.replace('&', "&amp;").replace('"', "&quot;");
+            dom_query::Selection::from(*f).replace_with_html(format!("<{FRAME_ROOT} data-src=\"{attr}\">{body}</{FRAME_ROOT}>"));
+            changed = true;
+        }
+        if changed {
+            doc.html().to_string()
+        } else {
+            html
+        }
     }
 
     /// The HTML for `url`: the page whose address has its query's pairs (all
     /// of them in `url`'s, the most that match: a form's other fields don't
     /// matter), else the page without a query, else "not found".
-    fn page_for(&self, url: &str) -> String {
+    fn page_only(&self, url: &str) -> String {
         let bare = norm(url, false);
         let have = pairs(url);
         let with_query = self
@@ -312,7 +396,7 @@ impl Browser {
         self.log.visited.push(url.to_string());
         let id = self.next_id;
         self.next_id += 1;
-        self.tabs.push(Tab::new(key.clone(), id, now, url, html));
+        self.tabs.push(Tab::new(key.clone(), id, now, url, html, self.panel_w));
         self.front = self.tabs.len() - 1;
         key
     }
@@ -327,7 +411,7 @@ impl Browser {
         self.tabs
             .iter()
             .enumerate()
-            .map(|(i, t)| OpenTab { tab: t.id, key: t.key.clone(), title: title_of(&t.html), url: t.url.clone(), front: i == self.front })
+            .map(|(i, t)| OpenTab { tab: t.id, key: t.key.clone(), title: title_of(&t.html), url: t.url.clone(), front: i == self.front, width: t.width })
             .collect()
     }
 
@@ -427,6 +511,7 @@ impl Browser {
             opened: opened.into_iter().take(3).map(|id| overlay(id)).collect(),
             closed: closed.into_iter().take(3).map(|id| rules::Overlay { kind: overlay(id).kind, text: String::new() }).collect(),
             in_view,
+            frames: Vec::new(),
         }
     }
 
@@ -571,7 +656,9 @@ impl Browser {
             .filter(|e| e.role == "link" && !e.href.is_empty())
             .map(|e| super::view::PageLink { text: super::act::rules::name_of(e), href: e.href.clone() })
             .collect();
-        PageText { title: s.title, headings: s.headings, text: s.text, links }
+        // Its frames Yap can't read inside, as the page text script lists them.
+        let frames = s.elements.iter().filter(|e| e.foreign).take(5).map(|e| super::view::PageFrame { src: e.frame.clone(), sandboxed: e.sandboxed, title: e.name.clone() }).collect();
+        PageText { title: s.title, headings: s.headings, text: s.text, links, frames }
     }
 
     /// **What's in view of tab `key`, drawn `scale` times finer** (1–2):
@@ -752,6 +839,12 @@ impl Browser {
         if op == "scroll" {
             return self.scroll(key, a, r);
         }
+        if op == "dragMove" {
+            return Ok(json!({ "r": if self.tab(key)?.drag.is_some() { "ok" } else { "gone" } }));
+        }
+        if op == "dragEnd" {
+            return self.drag_end(key);
+        }
         if op == "key" {
             return self.keys(key, a, r);
         }
@@ -817,6 +910,30 @@ impl Browser {
         }
         if op == "choose" {
             return self.choose(key, a, r, &el);
+        }
+        if op == "press" {
+            return self.press(key, a, r, &el);
+        }
+        if op == "dragStart" {
+            if a["at"].as_bool() == Some(true) && self.at(key, a["x"].as_f64().unwrap_or(-1.0), a["y"].as_f64().unwrap_or(-1.0))?.el.map(|e| e.r) != Some(r) {
+                return Ok(json!({ "r": "changed" }));
+            }
+            let to = a["to"]["ref"].as_u64().unwrap_or(0) as u32;
+            if to > 0 {
+                let d = self.describe(key, to)?;
+                let Some(t) = d.el else { return Ok(json!({ "r": "gone" })) };
+                if t.role != a["to"]["role"].as_str().unwrap_or("") || t.name != a["to"]["name"].as_str().unwrap_or("") {
+                    return Ok(json!({ "r": "changed" }));
+                }
+            }
+            let html5 = {
+                let tab = self.tab(key)?;
+                let doc = dom_query::Document::from(tab.html.as_str());
+                let page = Page::read(&doc, tab);
+                page.node(r).is_some_and(|n| std::iter::once(n).chain(n.ancestors_it(None)).any(|x| x.attr("draggable").is_some_and(|v| v.eq_ignore_ascii_case("true"))))
+            };
+            self.tab_mut(key)?.drag = Some((r, to));
+            return Ok(json!({ "r": "ok", "html5": html5 }));
         }
         if op == "check" {
             let on = a["on"].as_bool().unwrap_or(true);
@@ -962,6 +1079,112 @@ impl Browser {
         t.focus = Some(r);
         self.log.typed.push((field_words(el), words.clone()));
         Ok(json!({ "r": "ok", "value": words }))
+    }
+
+    /// **A press of another button, or more than one click** (the element
+    /// script's `press`): a double click shows what `data-sim-dblclick-show`
+    /// names (an editor: the focus in its first field) or selects the
+    /// element's first word, a triple one its words; a right-click shows
+    /// what `data-sim-menu` names (the page's own menu: `menu` true), a
+    /// middle one does nothing of its own. At a point (`at`): still that
+    /// element there.
+    fn press(&mut self, key: &str, a: &Value, r: u32, el: &Element) -> Result<Value, String> {
+        if a["at"].as_bool() == Some(true) && self.at(key, a["x"].as_f64().unwrap_or(-1.0), a["y"].as_f64().unwrap_or(-1.0))?.el.map(|e| e.r) != Some(r) {
+            return Ok(json!({ "r": "changed" }));
+        }
+        let (button, count) = (a["button"].as_u64().unwrap_or(0), a["count"].as_u64().unwrap_or(1));
+        let (text, menu, editor) = {
+            let tab = self.tab(key)?;
+            let doc = dom_query::Document::from(tab.html.as_str());
+            let page = Page::read(&doc, tab);
+            let Some(node) = page.node(r) else { return Ok(json!({ "r": "gone" })) };
+            let shows = node.attr("data-sim-dblclick-show").map(|v| v.to_string());
+            // The editor a double click shows: its first field takes the focus.
+            let field = shows.as_ref().and_then(|id| {
+                let shown = doc.select("[id]").nodes().iter().find(|n| n.id_attr().is_some_and(|x| *x == **id)).copied()?;
+                page.candidates.iter().position(|c| c.ancestors_it(None).any(|x| x.id == shown.id)).map(|i| i as u32 + 1)
+            });
+            (Page::text_of(&node), node.attr("data-sim-menu").map(|v| v.to_string()), shows.map(|id| (id, field)))
+        };
+        let name = rules::name_of(el);
+        let mut out = json!({ "r": "ok" });
+        match button {
+            2 => {
+                self.log.clicked.push(format!("{name} (right)"));
+                out["menu"] = json!(menu.is_some());
+                if let Some(id) = menu {
+                    self.tab_mut(key)?.shown.insert(id);
+                }
+            }
+            1 => self.log.clicked.push(format!("{name} (middle)")),
+            _ => {
+                self.log.clicked.push(format!("{name} (×{count})"));
+                let t = self.tab_mut(key)?;
+                t.focus = Some(r);
+                match (count, editor) {
+                    (2, Some((id, field))) => {
+                        t.shown.insert(id);
+                        if let Some(f) = field {
+                            t.focus = Some(f);
+                        }
+                    }
+                    (2, None) => out["selected"] = json!(text.split_whitespace().next().unwrap_or("")),
+                    _ => out["selected"] = json!(text),
+                }
+            }
+        }
+        Ok(out)
+    }
+
+    /// **A drag ended** (the element script's `dragEnd`): a list item
+    /// dragged onto another in a `data-sim-sortable` list takes its place
+    /// (the page's HTML reordered: `moved`, as the script tells it); a drop
+    /// on an element with `data-sim-drop="<id>"` shows that element (`dropped`
+    /// for a `draggable` one).
+    fn drag_end(&mut self, key: &str) -> Result<Value, String> {
+        let Some((from, to)) = self.tab_mut(key)?.drag.take() else { return Ok(json!({ "r": "gone" })) };
+        let tab = self.tab(key)?;
+        let doc = dom_query::Document::from(tab.html.as_str());
+        let page = Page::read(&doc, tab);
+        let Some(fnode) = page.node(from) else { return Ok(json!({ "r": "gone" })) };
+        fn item(n: dom_query::NodeRef<'_>) -> Option<dom_query::NodeRef<'_>> {
+            std::iter::once(n).chain(n.ancestors_it(None)).find(|x| x.node_name().is_some_and(|t| t.eq_ignore_ascii_case("li")))
+        }
+        let html5 = std::iter::once(fnode).chain(fnode.ancestors_it(None)).any(|x| x.attr("draggable").is_some_and(|v| v.eq_ignore_ascii_case("true")));
+        let tnode = (to > 0).then(|| page.node(to)).flatten();
+        let words = rules::name_of(&page.describe(&fnode, from));
+        let target = tnode.map(|t| Page::text_of(&t)).unwrap_or_else(|| "a point".into());
+        let zone = tnode.and_then(|t| std::iter::once(t).chain(t.ancestors_it(None)).find_map(|x| x.attr("data-sim-drop").map(|v| v.to_string())));
+        let mut out = json!({ "r": "ok", "html5": html5, "dropped": html5 && zone.is_some(), "target": target.chars().take(80).collect::<String>() });
+        let mut html = None;
+        if let (Some(fi), Some(ti)) = (item(fnode), tnode.and_then(item)) {
+            let list = fi.parent().filter(|p| p.has_attr("data-sim-sortable") && ti.parent().is_some_and(|q| q.id == p.id));
+            if let (Some(list), true) = (list, fi.id != ti.id) {
+                let before = list.element_children();
+                let (i0, j0) = (before.iter().position(|k| k.id == fi.id).unwrap_or(0), before.iter().position(|k| k.id == ti.id).unwrap_or(0));
+                fi.remove_from_parent();
+                if i0 < j0 {
+                    ti.insert_after(&fi);
+                } else {
+                    ti.insert_before(&fi);
+                }
+                let now = list.element_children();
+                let j = now.iter().position(|k| k.id == fi.id).unwrap_or(0);
+                let t = |k: Option<&dom_query::NodeRef>| k.map(Page::text_of).unwrap_or_default();
+                out["moved"] = json!({ "text": Page::text_of(&fi), "from": i0 + 1, "to": j + 1, "of": now.len(), "before": t(now.get(j + 1)), "after": if j > 0 { t(now.get(j - 1)) } else { String::new() } });
+                html = Some(doc.html().to_string());
+            }
+        }
+        drop(page);
+        self.log.dragged.push((words, target));
+        let t = self.tab_mut(key)?;
+        if let Some(h) = html {
+            t.html = h;
+        }
+        if let Some(id) = zone {
+            t.shown.insert(id);
+        }
+        Ok(out)
     }
 
     /// **Keys** pressed in turn (the element script's `key`): in element
@@ -1180,7 +1403,9 @@ impl<'a> Page<'a> {
             .filter(|t| !t.is_empty())
             .take(8)
             .collect();
-        super::see::InView { scroll: super::see::View { x: 0, y, w: VIEW_W, h: VIEW_H, max, dpr: 1.0 }, in_view }
+        // Laid out at a desktop width: shown smaller, fewer device pixels a CSS pixel.
+        let dpr = if self.tab.laid > 0 && self.tab.width.is_some() { (VIEW_W as f64 / self.tab.laid as f64).min(1.0) } else { 1.0 };
+        super::see::InView { scroll: super::see::View { x: 0, y, w: self.tab.laid, h: VIEW_H, max, dpr }, in_view }
     }
 
     /// The visible blocks of text, each with its ref.
@@ -1231,6 +1456,9 @@ impl<'a> Page<'a> {
                 && !style.contains("visibility:hidden")
                 && (id.is_empty() || !self.tab.hidden.contains(&id))
                 && self.due(&n)
+                // A responsive page's two layouts: by the width it's laid out at.
+                && !(n.has_attr("data-sim-wide") && self.tab.laid < WIDE_AT)
+                && !(n.has_attr("data-sim-narrow") && self.tab.laid >= WIDE_AT)
         })
     }
 
@@ -1244,9 +1472,10 @@ impl<'a> Page<'a> {
         n.text().split_whitespace().collect::<Vec<_>>().join(" ")
     }
 
-    /// The open shadow root `node` is in ([`SHADOW_ROOT`]'s element), if any.
+    /// The open shadow root or same-origin frame `node` is in ([`SHADOW_ROOT`]'s
+    /// or [`FRAME_ROOT`]'s element), if any.
     fn root_of<'b>(node: &dom_query::NodeRef<'b>) -> Option<dom_query::NodeRef<'b>> {
-        node.ancestors_it(None).find(|a| a.node_name().is_some_and(|n| n.eq_ignore_ascii_case(SHADOW_ROOT)))
+        node.ancestors_it(None).find(|a| a.node_name().is_some_and(|n| n.eq_ignore_ascii_case(SHADOW_ROOT) || n.eq_ignore_ascii_case(FRAME_ROOT)))
     }
 
     /// The element with id `id` as `node` sees it: in its own shadow root
@@ -1399,6 +1628,14 @@ impl<'a> Page<'a> {
             editable: node.attr("contenteditable").is_some_and(|v| !v.eq_ignore_ascii_case("false")),
             ..Default::default()
         };
+        // A frame left as one: from another host, or sandboxed — Yap can't reach inside.
+        if tag == "iframe" {
+            e.role = "frame".into();
+            e.foreign = true;
+            e.frame = join(&self.tab.url, &attr("src"));
+            e.sandboxed = node.has_attr("sandbox") && !attr("sandbox").to_ascii_lowercase().contains("allow-same-origin");
+            return e;
+        }
         e.masked = rules::sensitive(&e).is_some();
         if matches!(kind.as_str(), "checkbox" | "radio") || matches!(role.as_str(), "checkbox" | "radio" | "switch") {
             e.checked = Some(self.tab.checked.get(&r).copied().unwrap_or_else(|| node.has_attr("checked") || attr("aria-checked") == "true"));

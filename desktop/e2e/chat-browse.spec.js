@@ -35,7 +35,7 @@
 // `e2e_page_view_eval` / `e2e_page_views`. Fictional sites only.
 import { test as base, expect, expectStore, setConfig, openView } from './support/fixtures.js';
 import { startFakeLlm } from './support/fake-llm.js';
-import { startFakeWeb, RAIL_URL, RAIL_RESULTS_URL, RAIL_SIGNIN_URL, FORT_JOY_URL, CHAT_URL, BOARD_URL, SMOOTH_URL, PREFS_URL, DOCS_URL } from './support/fake-web.js';
+import { startFakeWeb, RAIL_URL, RAIL_RESULTS_URL, RAIL_SIGNIN_URL, FORT_JOY_URL, CHAT_URL, BOARD_URL, SMOOTH_URL, PREFS_URL, DOCS_URL, WIDE_URL, WIDE_BOX, TASKS_URL, FRAMES_URL } from './support/fake-web.js';
 
 const test = base.extend({
   fakeLlm: [
@@ -586,6 +586,164 @@ test('web components: inside open shadow roots as in the light DOM — fields li
   expect(sent.data.asked).toBeUndefined();
   await expect(main.getByTestId('chat-page-confirm')).toHaveCount(0);
   expect(await inPage(yap, DOCS_URL, 'location.pathname')).toMatch(/\/docs\.example\.com\/search$/);
+});
+
+/** The ref of the match named `name` in any of the turn's finds so far (the latest first). */
+function anyFound(request, name) {
+  for (const r of toolResults(request).reverse()) {
+    const m = typeof r?.data?.matches === 'string' && new RegExp(`\\[(\\d+)\\] \\w+ "${name}"`).exec(r.data.matches);
+    if (m) return Number(m[1]);
+  }
+  return 0;
+}
+
+test('clicks that aren’t one and drags: a double click selects or edits, a right-click opens the page’s own menu or says it has none, drags reorder a list and move a puck, a drop on the trash asks first', async ({ yap, main, fakeLlm, shot }) => {
+  await setConfig(yap, main, chatConfig(fakeLlm));
+  const from = fakeLlm.requests.length;
+  const SAID = 'Renamed it, Card C is first and the puck is at the right; I left Card B.';
+  const find = (query) => ({ tools: [{ name: 'browser_find', args: { query } }] });
+  fakeLlm.scriptChat([
+    { tools: [{ name: 'browser_navigate', args: { url: TASKS_URL } }] },
+    find('lantern'),
+    { tools: [{ name: 'browser_click', args: (r) => ({ ref: foundRef(r, 'lantern'), count: 2 }) }] },
+    find('Spring plan'),
+    { tools: [{ name: 'browser_click', args: (r) => ({ ref: foundRef(r, 'Spring plan'), count: 2 }) }] },
+    { tools: [{ name: 'browser_type', args: { text: 'Summer plan' } }] },
+    find('Paint the shed'),
+    { tools: [{ name: 'browser_click', args: (r) => ({ ref: foundRef(r, 'Paint the shed'), button: 'right' }) }] },
+    { tools: [{ name: 'browser_key', args: { keys: 'Escape' } }] },
+    find('Plain notes'),
+    { tools: [{ name: 'browser_click', args: (r) => ({ ref: foundRef(r, 'Plain notes with no menu of their own.'), button: 'right' }) }] },
+    find('Card'),
+    { tools: [{ name: 'browser_drag', args: (r) => ({ from: { ref: foundRef(r, 'Card C') }, to: { ref: foundRef(r, 'Card A') } }) }] },
+    find('Puck'),
+    find('Right end'),
+    { tools: [{ name: 'browser_drag', args: (r) => ({ from: { ref: anyFound(r, 'Puck') }, to: { ref: anyFound(r, 'Right end') } }) }] },
+    find('Trash'),
+    { tools: [{ name: 'browser_drag', args: (r) => ({ from: { ref: anyFound(r, 'Card B') }, to: { ref: anyFound(r, 'Trash') } }) }] },
+    { content: SAID },
+  ]);
+  await ask(main, `On the task board, rename Spring plan to Summer plan, put Card C first and the puck at the right end, then bin Card B: ${TASKS_URL}`);
+  // The drop on the trash: Yap's card asks, in the thread.
+  const card = main.getByTestId('chat-page-confirm');
+  await expect(card).toBeVisible({ timeout: 90_000 });
+  await expect(card).toContainText('Yap wants to drag ‘Card B’ onto ‘Trash’');
+  await expect(card).toContainText('It may delete something.');
+  await shot(main, 'drag-onto-the-trash-asks');
+  await card.getByRole('button', { name: "Don't" }).click();
+  await expect(main.getByText(SAID)).toBeVisible({ timeout: 30_000 });
+  const calls = chatCalls(fakeLlm, from);
+  // A double click on a word: it's selected, as a person's selects it.
+  const word = lastResult(calls[3]);
+  expect(word).toMatchObject({ success: true, displayText: 'Double-clicked ‘lantern’ on board.example.com', data: { selected: 'lantern' } });
+  expect(word.data.changed).toMatch(/^selected ‘lantern’/);
+  // A double click the page edits on: its editor, the focus in it, the words typed there.
+  expect(lastResult(calls[5]).data.changed).toContain('the focus moved into ‘Title’');
+  expect(lastResult(calls[6])).toMatchObject({ success: true, displayText: 'Typed in ‘Title’ on board.example.com', data: { field: 'Summer plan' } });
+  expect(await inPage(yap, TASKS_URL, "document.getElementById('title-edit').value")).toBe('Summer plan');
+  // A right-click: the page's own menu, never a card; none of its own: said so.
+  const menu = lastResult(calls[8]);
+  expect(menu).toMatchObject({ success: true, displayText: 'Right-clicked ‘Paint the shed’ on board.example.com' });
+  expect(menu.data.changed).toMatch(/^a menu opened: ‘Rename Archive’/);
+  expect(menu.data.asked).toBeUndefined();
+  expect(lastResult(calls[11]).data.changed).toMatch(/^nothing opened: the page has no menu of its own there/);
+  // A drag in a list (HTML5): where it went, said as it is.
+  const moved = lastResult(calls[13]);
+  expect(moved).toMatchObject({ success: true, displayText: 'Dragged ‘Card C’ to ‘Card A’ on board.example.com', data: { dropped: true, moved: { to: 1, of: 3 } } });
+  expect(moved.data.changed).toMatch(/^moved ‘Card C’ from place 3 to place 1 of 3 \(before ‘Card A’\)/);
+  // The puck, by the pointer's own events: at the right.
+  const puck = lastResult(calls[16]);
+  expect(puck).toMatchObject({ success: true, displayText: 'Dragged ‘Puck’ to ‘Right end’ on board.example.com' });
+  expect(puck.data.changed).toContain('Puck at the right');
+  // The drop on the trash: asked and refused, nothing deleted.
+  expect(lastResult(calls[18])).toMatchObject({ success: false, displayText: "Didn't drag ‘Card B’: you said no", data: { asked: true, allowed: false } });
+  expect(await inPage(yap, TASKS_URL, "[].map.call(document.querySelectorAll('#order li'), function (l) { return l.textContent; })")).toEqual(['Card C', 'Card A', 'Card B']);
+  expect(await inPage(yap, TASKS_URL, "[document.getElementById('where').textContent, document.getElementById('bin').textContent]")).toEqual(['Puck at the right.', '']);
+  // Folded under the answer: the clicks and the drags counted.
+  await expect(main.getByTestId('chat-steps').last().locator('summary')).toContainText('dragged 2 times on the page');
+});
+
+test('a same-origin frame is the page’s: read, its fields listed, clicked at a point and typed in, its form sent; a sandboxed one is said as it is', async ({ yap, main, fakeLlm }) => {
+  await setConfig(yap, main, seeingConfig(fakeLlm));
+  const from = fakeLlm.requests.length;
+  const SAID = 'You are signed up as Edda Vane; the payment frame is yours to fill in.';
+  fakeLlm.scriptChat([
+    { tools: [{ name: 'browser_navigate', args: { url: FRAMES_URL } }] },
+    { tools: [{ name: 'browser_read', args: {} }] },
+    { tools: [{ name: 'browser_read', args: { mode: 'elements' } }] },
+    { tools: [{ name: 'browser_type', args: (r) => ({ ref: refIn(r, 'Frame password'), text: 'hunter2' }) }] },
+    { tools: [{ name: 'browser_screenshot', args: {} }] },
+    // The frame's name box (30–48 % of the view), then its Save (50–70 %).
+    { tools: [{ name: 'browser_click', args: (r) => ({ x: Math.round(shotSize(r)[0] * 0.5), y: Math.round(shotSize(r)[1] * 0.39) }) }] },
+    { tools: [{ name: 'browser_type', args: { text: 'Edda Vane' } }] },
+    { tools: [{ name: 'browser_click', args: (r) => ({ x: Math.round(shotSize(r)[0] * 0.5), y: Math.round(shotSize(r)[1] * 0.6) }) }] },
+    { tools: [{ name: 'browser_click', args: (r) => ({ ref: refIn(r, 'Payment') }) }] },
+    { content: SAID },
+  ]);
+  await ask(main, `Sign me up for the newsletter as Edda Vane, my password is hunter2: ${FRAMES_URL}`);
+  await expect(main.getByText(SAID)).toBeVisible({ timeout: 90_000 });
+  const calls = chatCalls(fakeLlm, from);
+  // Read: the frame's words with the page's; the sandboxed frame said as it is.
+  const read = lastResult(calls[2]);
+  expect(read.data.text).toContain('The form is in a frame below.');
+  expect(read.data.text).toContain('Tell us your name.');
+  expect(read.data.frames).toEqual([{ site: 'forms.example.com', sandboxed: true, title: 'Payment' }]);
+  expect(read.note).toContain("It has a frame Yap can't read inside (forms.example.com)");
+  const elements = lastResult(calls[3]).data.elements;
+  expect(elements).toMatch(/\[\d+\] textbox "Name"/);
+  expect(elements).toMatch(/\[\d+\] textbox "Frame password" \(Yap never types here: a password\)/);
+  expect(elements).toMatch(/\[\d+\] frame "Payment" \(a frame the page keeps apart \(sandboxed, forms\.example\.com\): Yap can't read or act inside it; a screenshot shows it\)/);
+  // Its password field: refused, as anywhere.
+  expect(lastResult(calls[4])).toMatchObject({ success: false, displayText: "Didn't type in ‘Frame password’: Yap never types a password", data: { refused: 'sensitive' } });
+  // A point of the shot inside the frame: its box (the frame's place taken off), the focus there; typed where it is.
+  const box = lastResult(calls[6]);
+  expect(box).toMatchObject({ success: true, displayText: 'Clicked ‘Name’ on forms.example.com', data: { at: { role: 'textbox' } } });
+  expect(box.data.changed).toContain('the focus moved into ‘Name’');
+  expect(lastResult(calls[7])).toMatchObject({ success: true, displayText: 'Typed in ‘Name’ on forms.example.com', data: { field: 'Edda Vane' } });
+  // Its Save: the frame's form sent, the frame gone somewhere new (no card: it saves).
+  const saved = lastResult(calls[8]);
+  expect(saved).toMatchObject({ success: true, displayText: 'Clicked ‘Save’ on forms.example.com', data: { at: { role: 'button' } } });
+  expect(saved.data.changed).toContain('a frame on the page went to forms.example.com/saved?name=Edda+Vane');
+  expect(saved.data.asked).toBeUndefined();
+  // The sandboxed frame: never reached inside.
+  expect(lastResult(calls[9])).toMatchObject({ success: false, displayText: "Couldn't click ‘Payment’: a frame Yap can't reach inside" });
+  expect(await inPage(yap, FRAMES_URL, "document.getElementById('f').contentDocument.body.innerText")).toContain('on the list');
+});
+
+test('a desktop width: a point of a shot from before the width changed is refused, one of a shot after lands on the wide layout’s search box', async ({ yap, main, fakeLlm }) => {
+  await setConfig(yap, main, seeingConfig(fakeLlm));
+  const from = fakeLlm.requests.length;
+  const SAID = 'I searched the guide for lantern.';
+  const boxY = (r) => {
+    const shotResult = toolResults(r).reverse().find((x) => typeof x?.data?.size === 'string' && x.frame);
+    return Math.round(((WIDE_BOX.top + WIDE_BOX.height / 2) / shotResult.data.scroll.h) * shotSize(r)[1]);
+  };
+  fakeLlm.scriptChat([
+    { tools: [{ name: 'browser_navigate', args: { url: WIDE_URL } }] },
+    { tools: [{ name: 'browser_screenshot', args: {} }] },
+    { tools: [{ name: 'browser_tabs', args: { action: 'width', width: 1280 } }] },
+    { tools: [{ name: 'browser_click', args: (r) => ({ x: Math.round(shotSize(r)[0] * 0.8), y: boxY(r) }) }] },
+    { tools: [{ name: 'browser_screenshot', args: {} }] },
+    { tools: [{ name: 'browser_click', args: (r) => ({ x: Math.round(shotSize(r)[0] * 0.8), y: boxY(r) }) }] },
+    { tools: [{ name: 'browser_type', args: { text: 'lantern', submit: true } }] },
+    { content: SAID },
+  ]);
+  await ask(main, `Search the field guide for lantern: ${WIDE_URL}`);
+  await expect(main.getByText(SAID)).toBeVisible({ timeout: 90_000 });
+  const calls = chatCalls(fakeLlm, from);
+  expect(lastResult(calls[2]).data.width).toBeLessThan(900);
+  // The shot from before is another layout now: its points refused, said why.
+  const stale = lastResult(calls[4]);
+  expect(stale).toMatchObject({ success: false, displayText: "Couldn't click: the page changed size since the screenshot" });
+  expect(stale.error).toMatch(/laid out 1280×\d+ px now, \d+×\d+ then/);
+  // A new shot at 1280: its point is the desktop layout's search box.
+  expect(lastResult(calls[5]).data).toMatchObject({ width: 1280, desktop: 1280 });
+  const clicked = lastResult(calls[6]);
+  expect(clicked).toMatchObject({ success: true, displayText: 'Clicked ‘Search the guide’ on docs.example.com', data: { at: { role: 'searchbox' } } });
+  const sent = lastResult(calls[7]);
+  expect(sent).toMatchObject({ success: true, displayText: 'Typed in ‘Search the guide’ on docs.example.com and sent it' });
+  expect(sent.data.changed).toMatch(/^went to docs\.example\.com\/search\?q=lantern/);
+  await expect(main.getByTestId('chat-page-width')).toBeVisible();
 });
 
 test('a batch runs its steps in order, its shots in the steps, and stops at a card said no to', async ({ yap, main, fakeLlm, shot }) => {

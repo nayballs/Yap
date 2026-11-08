@@ -234,7 +234,7 @@ pub struct Tables {
 /// headers from its `<thead>`, else a first row of header cells; its
 /// caption, `aria-label`, else the heading before it.
 pub const TABLES_SCRIPT: &str = concat!("(function(){", deep_js!(), r#"var sq=function(s){return (s||'').replace(/\s+/g,' ').trim();};
-function vis(el){if(!el||!el.isConnected)return false;if(!el.getClientRects().length)return false;var s=getComputedStyle(el);if(s.visibility==='hidden'||s.display==='none')return false;return !up(el,'[aria-hidden="true"],[hidden],[inert]');}
+function vis(el){if(!el||!el.isConnected)return false;if(!el.getClientRects().length)return false;var s=cs(el);if(s.visibility==='hidden'||s.display==='none')return false;return !up(el,'[aria-hidden="true"],[hidden],[inert]');}
 var MAXT=40,MAXR=3000,MAXC=30,MAXL=300,rows=0,out=[],more=false;
 var GRID='table,[role=table],[role=grid],[role=treegrid]',HQ='h1,h2,h3,h4,h5,h6,[role=heading]';
 // The tables, each with the visible heading before it in the page's order (shadow trees in place).
@@ -253,7 +253,7 @@ var isHead=function(c){return c.tagName==='TH'||(c.getAttribute('role')||'').toL
 var head=[],body=trs,th=native&&t.tHead&&t.tHead.rows.length?t.tHead.rows[t.tHead.rows.length-1]:null,first=cellsOf(trs[0]);
 if(th){head=cellsOf(th).map(text);body=trs.filter(function(r){return !t.tHead.contains(r);});}
 else if(first.length&&first.every(isHead)){head=first.map(text);body=trs.slice(1);}
-var rs=[];for(var j=0;j<body.length;j++){if(rows>=MAXR){more=true;break;}var cs=cellsOf(body[j]).slice(0,MAXC).map(cell);if(!cs.some(function(c){return c.t||c.h;}))continue;rs.push(cs);rows++;}
+var rs=[];for(var j=0;j<body.length;j++){if(rows>=MAXR){more=true;break;}var cz=cellsOf(body[j]).slice(0,MAXC).map(cell);if(!cz.some(function(c){return c.t||c.h;}))continue;rs.push(cz);rows++;}
 if(!rs.length)continue;
 var w=rs.reduce(function(m,r){return Math.max(m,r.length);},head.length);if(w<2)continue;
 var cap=native&&t.caption?sq(t.caption.innerText):'';

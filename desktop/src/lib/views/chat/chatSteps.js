@@ -11,7 +11,7 @@
 // A chip about the web (web.rs), a page beside the chat (chat/pages.rs, and
 // acting on one: chat/pages/act.rs) or the safety rule (chat/tools.rs).
 const WEB_CHIP =
-  /^(Searched the web|Couldn't search the web|Didn't search for|Didn't search the web for|Read [^"]|Couldn't read [^"]|Didn't read |Answered from |Brought up |Couldn't bring up |Didn't bring up |Took a shot of |Couldn't take a shot of |Didn't take a shot of |Offered to open |Didn't offer |Clicked |Typed in |Scrolled |Went to |Went (back|forward) in tab |Opened a search in tab |Showed tab |Closed tab |Listed the tabs |Looked at the page · |Zoomed in on the page · |Found (\d+ match(es)?|no match) for|Waited |Pressed |Hovered over |(Un)?[Tt]icked |Chose |Couldn't (click|type|scroll|go|switch|look at|zoom in|press|hover|set|open a tab|close tab|run|search|find|wait|act)|Didn't (click|type|press|go|open|act|switch|look|zoom|tick|run|use|see|find))/;
+  /^(Searched the web|Couldn't search the web|Didn't search for|Didn't search the web for|Read [^"]|Couldn't read [^"]|Didn't read |Answered from |Brought up |Couldn't bring up |Didn't bring up |Took a shot of |Couldn't take a shot of |Didn't take a shot of |Offered to open |Didn't offer |(Double-|Triple-|Right-|Middle-)?[Cc]licked |Dragged |Set tab \d+ (to a desktop width|back to the panel)|Typed in |Scrolled |Went to |Went (back|forward) in tab |Opened a search in tab |Showed tab |Closed tab |Listed the tabs |Looked at the page · |Zoomed in on the page · |Found (\d+ match(es)?|no match) for|Waited |Pressed |Hovered over |(Un)?[Tt]icked |Chose |Couldn't (click|type|scroll|go|switch|look at|zoom in|press|hover|set|open a tab|close tab|run|search|find|wait|act|drag)|Didn't (click|type|press|go|open|act|switch|look|zoom|tick|run|use|see|find|drag))/;
 // The calendar's (chat/tools/calendar.rs).
 const CALENDAR_CHIP = /^(Checked your calendar|Found \d+ meetings? with|No meetings with|Free |Busy |No calendar connected|Couldn't read the (day|time) )/;
 // A document's (chat/documents.rs, and the rich tools': documents/rich.rs).
@@ -52,7 +52,9 @@ const STEPS = [
   [/^Rewrote (?:(\d+) sections|"[^"]*") in "/, 'rewrote', (m) => (m[1] ? Number(m[1]) : 1)],
   [/^[Ww]rote (?:(\d+) sections|"[^"]*") in "/, 'wrote', (m) => (m[1] ? Number(m[1]) : 1)],
   [/^(Added "[^"]*" to "|Added to "|Changed (a table in|a part of) "|Took a part out of "|Moved a part of "|Made \d+ changes in "|Restored version \d+ of ")/, 'docEdit'],
-  [/^Clicked /, 'clicked'],
+  [/^(Double-|Triple-|Right-|Middle-)?[Cc]licked /, 'clicked'],
+  [/^Dragged /, 'dragged'],
+  [/^Set tab \d+ (to a desktop width|back to the panel)/, 'widths'],
   [/^Typed in /, 'typed'],
   [/^((Un)?[Tt]icked |Chose )/, 'set'],
   [/^Pressed /, 'pressed'],
@@ -103,6 +105,8 @@ const SAY = {
   docEdit: (n) => times(n, 'changed the document'),
   readBeside: (n) => n1(n, 'read the page beside the chat', 'read {n} pages beside the chat'),
   clicked: (n) => n1(n, 'clicked on the page', 'clicked {n} times on the page'),
+  dragged: (n) => n1(n, 'dragged on the page', 'dragged {n} times on the page'),
+  widths: () => 'set the page’s width',
   typed: (n) => n1(n, 'typed on the page', 'typed in {n} fields'),
   set: (n) => n1(n, 'set a field', 'set {n} fields'),
   pressed: (n) => n1(n, 'pressed keys', 'pressed keys {n} times'),

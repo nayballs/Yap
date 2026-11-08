@@ -20,6 +20,7 @@ import { coloursIn, drawPng, meanLuma, pngSize, readPng, stitch } from './png.mj
 import { checkTurn, kindOf, probePasses, resultObject, screenChecks } from './script.mjs';
 import { SEGMENT, TILE, parseTurns, placeShot, sheetHtml } from './sheet.mjs';
 import { shotNames, themesOf } from './shots.mjs';
+import { fillArgs, refIn, templated } from './fake.mjs';
 import { cardsOf, conversationOf, cut, endOf, summarize, toolsOf } from './turns.mjs';
 
 // ---------------------------------------------------------------- pure
@@ -229,6 +230,36 @@ function lab(...args) {
     throw new Error(`lab ${args[0]} printed no JSON (exit ${r.status}): ${r.stdout}\n${r.stderr}`);
   }
 }
+describe('the fake AI’s placeholders', () => {
+  // A request as the fake AI records it: the turn's tool results so far.
+  const request = {
+    messages: [
+      { role: 'user', content: 'Put Item 3 first' },
+      { role: 'tool', content: JSON.stringify({ data: { elements: '[4] link "Lighthouse"\n[9] textbox "Search"' } }) },
+      { role: 'tool', content: JSON.stringify({ data: { size: '459×601', width: 1280 }, frame: "browser_click's x, y are in this picture's pixels: 459×601, the page's view." }) },
+      { role: 'tool', content: JSON.stringify({ data: { matches: '[12] heading "Lighthouse"\n[31] item "Item 3"' } }) },
+    ],
+  };
+  test('a ref by its words (and kind), a point of the latest shot; anything else as it is', () => {
+    assert.equal(refIn(request, 'Lighthouse'), 12, 'the latest list that has it');
+    assert.equal(refIn(request, 'Lighthouse', 'link'), 4);
+    assert.equal(refIn(request, 'Search'), 9);
+    assert.equal(refIn(request, 'Nowhere'), 0);
+    assert.equal(refIn(request, 'Item*', 'item'), 31, 'words that start so');
+    assert.equal(refIn(request, 'Light*', 'link'), 4);
+    assert.deepEqual(fillArgs({ ref: '$ref:heading:Lighthouse', count: 2 }, request), { ref: 12, count: 2 });
+    assert.deepEqual(fillArgs({ from: { ref: '$ref:item:Item 3' }, to: { x: '$x:0.5', y: '$y:0.1' } }, request), { from: { ref: 31 }, to: { x: 230, y: 60 } });
+    assert.deepEqual(fillArgs({ url: 'https://example.com/$ref', keys: 'Enter' }, request), { url: 'https://example.com/$ref', keys: 'Enter' });
+  });
+  test('only calls with a placeholder become functions of the request', () => {
+    const steps = templated([{ tools: [{ name: 'browser_click', args: { ref: '$ref:Search' } }, { name: 'browser_read', args: { mode: 'elements' } }] }, { content: 'Done.' }]);
+    assert.equal(typeof steps[0].tools[0].args, 'function');
+    assert.deepEqual(steps[0].tools[0].args(request), { ref: 9 });
+    assert.deepEqual(steps[0].tools[1].args, { mode: 'elements' });
+    assert.deepEqual(steps[1], { content: 'Done.' });
+  });
+});
+
 const ok = (out, what) => {
   assert.equal(out.ok, true, `${what}: ${out.error ?? JSON.stringify(out)}`);
   return out;

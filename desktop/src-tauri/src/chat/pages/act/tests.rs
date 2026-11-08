@@ -717,3 +717,197 @@ fn a_web_component_closed_to_yap_and_a_ref_on_an_unread_page_are_said_as_they_ar
     );
     assert_eq!(no_element(9999, 812, "click")["error"], "There's no element [9999]: refs on this page go up to 812. Use one from browser_read with mode \"elements\" or browser_find.");
 }
+
+/// The ref of a block or element `browser_find` lists for `query` (its first
+/// line naming exactly those words).
+async fn found(t: &mut Turn, query: &str) -> u32 {
+    let r = crate::chat::pages::execute(t, crate::chat::pages::FIND, &json!({ "query": query }), &Ctx::quiet(Gate::Show, true)).await.result;
+    let lines = r["data"]["matches"].as_str().unwrap_or("").to_string();
+    let line = lines.lines().find(|l| l.contains(&format!("\"{query}\""))).unwrap_or_else(|| panic!("no {query} in {lines}"));
+    line.trim_start_matches('[').split(']').next().unwrap().parse().unwrap()
+}
+
+/// A task board (made up): a word to double-click, a title a double-click
+/// edits, a card with a menu of its own, plain words with none, a list in
+/// order by drag and drop, a trash, a link, a password field.
+const TASKS: &str = r#"<html><head><title>Tasks - Example Board</title></head><body><main><h1>Tasks</h1>
+  <p id="word">lantern</p>
+  <h2 id="title" data-sim-dblclick-show="edit">Spring plan</h2>
+  <div id="edit" hidden><input aria-label="Title" name="title"></div>
+  <p id="card" data-sim-menu="ctx">Paint the shed</p>
+  <ul id="ctx" role="menu" hidden><li role="menuitem">Rename</li><li role="menuitem">Archive</li></ul>
+  <p id="plain">Plain notes</p>
+  <ul data-sim-sortable aria-label="Priorities"><li draggable="true">Card A</li><li draggable="true">Card B</li><li draggable="true">Card C</li></ul>
+  <p id="trash" data-sim-drop="bin">Trash</p>
+  <p id="bin" hidden>Deleted it</p>
+  <a href="/notes">Team notes</a>
+  <form action="/session" method="post"><input type="password" name="pw" aria-label="Password"></form>
+</main></body></html>"#;
+
+fn board() -> Browser {
+    let mut p = BTreeMap::new();
+    p.insert("https://board.example.com/tasks".into(), TASKS.into());
+    p.insert("https://board.example.com/notes".into(), "<html><head><title>Team notes</title></head><body><main><p>Notes.</p></main></body></html>".into());
+    Browser::new(&p)
+}
+
+/// **More clicks than one, and other buttons** (8 Nov 2026): a double click
+/// selects the word there (said in `changed`) or opens what the page opens
+/// on one (an editor, the focus in it); a triple one a block's words; a
+/// right-click shows the page's own menu, or says it has none, and never
+/// asks; a middle click opens a link in a new tab; never a password field
+/// whatever the button.
+#[tokio::test]
+async fn a_double_triple_right_and_middle_click_do_what_a_persons_would() {
+    crate::chat::pages::sim::install(Some(board()));
+    crate::chat::pages::backend::opened("https://board.example.com/tasks", "").await;
+    let mut t = turn("On https://board.example.com/tasks rename Spring plan to Summer plan");
+    let log = Log::default();
+    let page = read(&mut t).await;
+    let word = found(&mut t, "lantern").await;
+    let r = run(&mut t, CLICK, json!({ "ref": word, "count": 2 }), &log).await;
+    assert_eq!(r["displayText"], "Double-clicked ‘lantern’ on board.example.com", "{r}");
+    assert_eq!(r["data"]["selected"], "lantern", "{r}");
+    assert!(r["data"]["changed"].as_str().unwrap().starts_with("selected ‘lantern’"), "{r}");
+    let plain_ref = found(&mut t, "Plain notes").await;
+    let r = run(&mut t, CLICK, json!({ "ref": plain_ref, "count": "triple" }), &log).await;
+    assert_eq!((r["displayText"].as_str(), r["data"]["selected"].as_str()), (Some("Triple-clicked ‘Plain notes’ on board.example.com"), Some("Plain notes")), "{r}");
+    // A double click the page edits on: its editor, the focus in it; typed where it is.
+    let title = found(&mut t, "Spring plan").await;
+    let r = run(&mut t, CLICK, json!({ "ref": title, "count": 2 }), &log).await;
+    assert!(r["data"]["changed"].as_str().unwrap().contains("the focus moved into ‘Title’"), "{r}");
+    assert!(r["data"]["selected"].is_null(), "{r}");
+    let r = run(&mut t, TYPE, json!({ "text": "Summer plan" }), &log).await;
+    assert_eq!(r["displayText"], "Typed in ‘Title’ on board.example.com", "{r}");
+    // A right-click: the page's own menu, said; nothing asked.
+    let card = found(&mut t, "Paint the shed").await;
+    let r = run(&mut t, CLICK, json!({ "ref": card, "button": "right" }), &log).await;
+    assert_eq!(r["displayText"], "Right-clicked ‘Paint the shed’ on board.example.com", "{r}");
+    // (The stand-in runs the menu's items' words together.)
+    assert!(r["data"]["changed"].as_str().unwrap().starts_with("a menu opened: ‘Rename"), "{r}");
+    assert!(r["data"]["asked"].is_null());
+    // None of its own: said so, not "nothing visible changed".
+    let r = run(&mut t, KEY, json!({ "keys": "Escape" }), &log).await;
+    assert_eq!(r["success"], true);
+    let r = run(&mut t, CLICK, json!({ "ref": plain_ref, "button": "right" }), &log).await;
+    assert!(r["data"]["changed"].as_str().unwrap().starts_with("nothing opened: the page has no menu of its own there"), "{r}");
+    // Never into a password field, whatever the button.
+    for args in [json!({ "ref": ref_named(&page, "Password"), "button": "right" }), json!({ "ref": ref_named(&page, "Password"), "count": 2 })] {
+        let r = run(&mut t, CLICK, args, &log).await;
+        assert_eq!(r["displayText"], "Didn't click ‘Password’: Yap never types a password", "{r}");
+    }
+    // A middle click on a link: a new tab, as a browser opens it.
+    let r = run(&mut t, CLICK, json!({ "ref": ref_named(&page, "Team notes"), "button": "middle" }), &log).await;
+    assert_eq!(r["displayText"], "Middle-clicked ‘Team notes’ on board.example.com: it opened in a new tab", "{r}");
+    let tabs = crate::chat::pages::sim::with(|b| b.tabs()).unwrap();
+    assert_eq!(tabs.len(), 2);
+    assert!(tabs[1].url.ends_with("/notes") && tabs[1].front, "{tabs:?}");
+    // Nonsense: said how.
+    for (args, why) in [(json!({ "ref": 1, "count": 5 }), "count is 1, 2"), (json!({ "ref": 1, "button": "fourth" }), "button is left, right or middle")] {
+        let r = run(&mut t, CLICK, args, &log).await;
+        assert!(r["error"].as_str().unwrap().starts_with(why), "{r}");
+    }
+    let clicked = crate::chat::pages::sim::with(|b| b.log.clicked.clone()).unwrap();
+    assert_eq!(clicked, ["lantern (×2)", "Plain notes (×3)", "Spring plan (×2)", "Paint the shed (right)", "Plain notes (right)"]);
+    crate::chat::pages::sim::install(None);
+}
+
+/// **A drag**, as a person's: a list item onto another takes its place
+/// (said: from where to where, before which), a drop onto a trash deletes so
+/// it asks first, and never from or onto a password field.
+#[tokio::test]
+async fn a_drag_reorders_a_list_says_where_and_a_drop_that_deletes_asks_first() {
+    crate::chat::pages::sim::install(Some(board()));
+    crate::chat::pages::backend::opened("https://board.example.com/tasks", "").await;
+    let mut t = turn("Put Card C first on https://board.example.com/tasks, then bin Card B");
+    let log = Log::default();
+    let page = read(&mut t).await;
+    let (c, a) = (found(&mut t, "Card C").await, found(&mut t, "Card A").await);
+    let r = run(&mut t, DRAG, json!({ "from": { "ref": c }, "to": { "ref": a } }), &log).await;
+    assert_eq!(r["displayText"], "Dragged ‘Card C’ to ‘Card A’ on board.example.com", "{r}");
+    assert!(r["data"]["changed"].as_str().unwrap().starts_with("moved ‘Card C’ from place 3 to place 1 of 3 (before ‘Card A’)"), "{r}");
+    assert_eq!((r["data"]["dropped"].clone(), r["data"]["moved"].clone()), (json!(false), json!({ "to": 1, "of": 3 })), "{r}");
+    let text = crate::chat::pages::sim::with(|b| b.text("page:https://board.example.com/tasks").unwrap().text).unwrap();
+    assert!(text.contains("Card C\nCard A\nCard B"), "{text}");
+    // Onto the trash: it would delete — asked, and a no stops it.
+    let (b, trash) = (found(&mut t, "Card B").await, found(&mut t, "Trash").await);
+    confirm::answer_in_test(Some(false));
+    let r = run(&mut t, DRAG, json!({ "from": b, "to": trash }), &log).await;
+    confirm::answer_in_test(None);
+    assert_eq!(r["displayText"], "Didn't drag ‘Card B’: you said no", "{r}");
+    assert!(r["error"].as_str().unwrap().starts_with("The user said no to dragging ‘Card B’ onto ‘Trash’"), "{r}");
+    assert_eq!(r["data"], json!({ "asked": true, "allowed": false }));
+    assert_eq!(crate::chat::pages::sim::with(|b| b.log.dragged.len()).unwrap(), 1, "only the first drag ran");
+    // Never from or onto a password field.
+    let pw = ref_named(&page, "Password");
+    let r = run(&mut t, DRAG, json!({ "from": { "ref": c }, "to": { "ref": pw } }), &log).await;
+    assert_eq!(r["displayText"], "Didn't drop onto ‘Password’: Yap never types a password", "{r}");
+    // Nothing to drag, or a point with no screenshot: said how.
+    let r = run(&mut t, DRAG, json!({ "from": { "ref": c } }), &log).await;
+    assert!(r["error"].as_str().unwrap().starts_with("from and to are required"), "{r}");
+    let r = run(&mut t, DRAG, json!({ "from": { "x": 10, "y": 10 }, "to": { "ref": a } }), &log).await;
+    assert_eq!(r["displayText"], "Couldn't drag: no screenshot of the page yet", "{r}");
+    crate::chat::pages::sim::install(None);
+}
+
+/// A sign-up page (made up) with its form in a same-origin frame, a frame
+/// from another site and a sandboxed one.
+const FRAMED: &str = r#"<html><head><title>Sign-up - Example Forms</title></head><body><main><h1>Newsletter</h1>
+  <iframe src="/inner" title="Newsletter form"></iframe>
+  <iframe src="https://pay.example.org/card" title="Payment"></iframe>
+  <iframe src="/pay" sandbox title="Card details"></iframe>
+</main></body></html>"#;
+const FRAME_INNER: &str = r#"<html><head><title>Newsletter form</title></head><body><p>Tell us your name.</p>
+  <form action="/saved"><label>Name <input name="name"></label><button>Save</button></form>
+  <form action="/login" method="post"><label>Frame password <input type="password" name="pw"></label></form></body></html>"#;
+
+/// **Same-origin frames are the page's; others are said as they are**: a
+/// frame's words are read with the page, its fields listed and typed in, its
+/// password field refused as anywhere; a frame from another site or a
+/// sandboxed one is an element of its own, never reached inside.
+#[tokio::test]
+async fn a_same_origin_frame_is_read_and_typed_in_and_another_sites_is_said_as_it_is() {
+    let mut p = BTreeMap::new();
+    p.insert("https://forms.example.com/host".to_string(), FRAMED.to_string());
+    p.insert("https://forms.example.com/inner".to_string(), FRAME_INNER.to_string());
+    crate::chat::pages::sim::install(Some(Browser::new(&p)));
+    crate::chat::pages::backend::opened("https://forms.example.com/host", "").await;
+    let mut t = turn("Sign me up on https://forms.example.com/host as Edda Vane, my password is hunter2");
+    let log = Log::default();
+    let text = plain(&mut t, READ, json!({})).await;
+    assert!(text["data"]["text"].as_str().unwrap().contains("Tell us your name."), "{text}");
+    assert_eq!(text["data"]["frames"].as_array().map(Vec::len), Some(2), "{text}");
+    assert!(text["note"].as_str().unwrap().contains("It has 2 frames Yap can't read inside (pay.example.org, forms.example.com)"), "{text}");
+    let page = read(&mut t).await;
+    let lines = page["data"]["elements"].as_str().unwrap().to_string();
+    assert!(lines.contains("textbox \"Name\""), "{lines}");
+    assert!(lines.contains("textbox \"Frame password\" (Yap never types here: a password)"), "{lines}");
+    assert!(lines.contains("frame \"Payment\" (a frame from another site (pay.example.org): Yap can't read or act inside it; a screenshot shows it)"), "{lines}");
+    assert!(lines.contains("frame \"Card details\" (a frame the page keeps apart (sandboxed, forms.example.com)"), "{lines}");
+    let r = run(&mut t, TYPE, json!({ "ref": ref_named(&page, "Name"), "text": "Edda Vane" }), &log).await;
+    assert_eq!((r["displayText"].as_str(), r["data"]["field"].as_str()), (Some("Typed in ‘Name’ on forms.example.com"), Some("Edda Vane")), "{r}");
+    let r = run(&mut t, TYPE, json!({ "ref": ref_named(&page, "Frame password"), "text": "hunter2" }), &log).await;
+    assert_eq!(r["displayText"], "Didn't type in ‘Frame password’: Yap never types a password", "{r}");
+    for (tool, args) in [(CLICK, json!({ "ref": ref_named(&page, "Payment") })), (TYPE, json!({ "ref": ref_named(&page, "Payment"), "text": "x" })), (HOVER, json!({ "ref": ref_named(&page, "Card details") }))] {
+        let r = run(&mut t, tool, args, &log).await;
+        assert_eq!(r["success"], false, "{r}");
+        assert!(r["displayText"].as_str().unwrap().ends_with("a frame Yap can't reach inside"), "{r}");
+        assert!(r["error"].as_str().unwrap().contains("Yap can't read or act inside it"), "{r}");
+    }
+    assert_eq!(crate::chat::pages::sim::with(|b| b.log.typed.clone()).unwrap(), [("Name".to_string(), "Edda Vane".to_string())]);
+    crate::chat::pages::sim::install(None);
+}
+
+#[test]
+fn a_button_a_count_and_a_drags_ends_are_read_as_models_send_them() {
+    assert_eq!([json!(null), json!("left"), json!("Right"), json!("middle"), json!(2)].iter().map(button_of).collect::<Vec<_>>(), [Some(0), Some(0), Some(2), Some(1), Some(2)]);
+    assert_eq!(button_of(&json!("fourth")), None);
+    assert_eq!([json!(null), json!(2), json!("double"), json!("3"), json!(3.0)].iter().map(count_of).collect::<Vec<_>>(), [Some(1), Some(2), Some(2), Some(3), Some(3)]);
+    assert_eq!([json!(0), json!(4), json!(1.5), json!("many")].iter().map(count_of).collect::<Vec<_>>(), [None, None, None, None]);
+    assert_eq!(end_of(&json!(12)), Some(End::Ref(12)));
+    assert_eq!(end_of(&json!("[7]")), Some(End::Ref(7)));
+    assert_eq!(end_of(&json!({ "ref": 3 })), Some(End::Ref(3)));
+    assert_eq!(end_of(&json!({ "x": 120, "y": "40" })), Some(End::Point(120.0, 40.0)));
+    assert_eq!(end_of(&json!({ "x": 120 })), None);
+    assert_eq!(end_of(&Value::Null), None);
+}

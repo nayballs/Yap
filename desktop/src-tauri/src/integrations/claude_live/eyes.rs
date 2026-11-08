@@ -16,8 +16,9 @@
 //!   `browser_read`, `browser_find`, `browser_scroll`, `browser_scroll_to`,
 //!   `browser_screenshot`, `browser_zoom`, `browser_tabs`, `browser_wait`,
 //!   `browser_batch`, and — a question asked in Chat, typed or out loud
-//!   ([`Eyes::act`]) — the acting ones: `browser_click`, `browser_type`,
-//!   `browser_key`, `browser_hover`, `browser_form_input`, each with its
+//!   ([`Eyes::act`]) — the acting ones: `browser_click` (a double, triple,
+//!   right or middle click too), `browser_type`, `browser_key`,
+//!   `browser_hover`, `browser_drag`, `browser_form_input`, each with its
 //!   card when it would buy, pay, book, send, delete or sign in
 //!   (`act/confirm.rs`: the card in the plan turn's thread through the
 //!   turn's stream, the call waiting for the answer, its two minutes well
@@ -224,6 +225,7 @@ fn title(name: &str) -> &'static str {
         act::TYPE => "Type on the page",
         act::KEY => "Press keys on the page",
         act::HOVER => "Point at the page",
+        act::DRAG => "Drag on the page",
         act::FORM_INPUT => "Set a field on the page",
         pictures::FIND => "List a page's pictures",
         pictures::LOOK => "Look at a picture",

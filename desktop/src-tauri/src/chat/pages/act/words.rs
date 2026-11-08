@@ -39,6 +39,9 @@ pub struct Lang {
     pub delete: &'static [&'static str],
     /// Agreeing to terms ("I agree"): never a cookie banner's "Accept all".
     pub agree: &'static [&'static str],
+    /// A trash or bin to drop something into (`rules::drag_needs_ok`: a drag
+    /// there deletes).
+    pub trash: &'static [&'static str],
     // ---- fields Yap never types into (rules::sensitive) ----
     pub password: &'static [&'static str],
     pub card: &'static [&'static str],
@@ -72,6 +75,7 @@ pub const EN: Lang = Lang {
     send: &["send", "submit", "post", "publish", "reply", "share", "tweet"],
     delete: &["delete", "remove", "erase", "discard", "close account", "close my account", "deactivate"],
     agree: &["i agree", "agree", "accept terms", "accept the terms", "i accept"],
+    trash: &["trash", "bin", "recycle bin", "rubbish", "wastebasket", "deleted items"],
     password: &["password", "passwd", "passcode", "passphrase"],
     card: &["card", "cardnumber", "ccnumber", "ccnum", "creditcard", "debitcard", "cvv", "cvv2", "cvc", "cvc2", "csc", "cardholder", "card number", "expiry date", "expiration date"],
     bank: &["iban", "bic", "swift", "routing", "sort code", "sortcode", "account number", "account no"],
@@ -94,6 +98,7 @@ pub const FR: Lang = Lang {
     send: &["envoyer", "publier", "repondre", "partager", "soumettre"],
     delete: &["supprimer", "effacer", "fermer mon compte", "fermer le compte", "cloturer"],
     agree: &["j accepte", "accepter les conditions", "je suis d accord"],
+    trash: &["corbeille", "poubelle"],
     password: &["mot de passe", "motdepasse", "mdp"],
     card: &["carte", "numero de carte", "carte bancaire", "titulaire", "cryptogramme", "date d expiration"],
     bank: &["rib", "numero de compte", "code banque"],
@@ -116,6 +121,7 @@ pub const DE: Lang = Lang {
     send: &["senden", "absenden", "abschicken", "schicken", "veroffentlichen", "posten", "antworten", "teilen"],
     delete: &["loschen", "entfernen", "konto schliessen", "konto loschen"],
     agree: &["ich stimme zu", "zustimmen", "einverstanden", "agb akzeptieren"],
+    trash: &["papierkorb", "*papierkorb", "mulleimer"],
     password: &["passwort", "*passwort", "kennwort", "*kennwort"],
     card: &["kartennummer", "*kartennummer", "kreditkarte", "*kreditkarte", "karteninhaber", "prufnummer", "*prufnummer", "prufziffer", "ablaufdatum", "gultig bis"],
     bank: &["kontonummer", "*kontonummer", "bankleitzahl", "blz", "bankverbindung"],
@@ -138,6 +144,7 @@ pub const ES: Lang = Lang {
     send: &["enviar", "publicar", "responder", "compartir"],
     delete: &["eliminar", "borrar", "cerrar cuenta", "cerrar mi cuenta"],
     agree: &["acepto", "aceptar las condiciones", "estoy de acuerdo"],
+    trash: &["papelera", "basura"],
     password: &["contrasena", "clave de acceso"],
     card: &["tarjeta", "numero de tarjeta", "titular de la tarjeta", "caducidad", "vencimiento"],
     bank: &["numero de cuenta", "cuenta bancaria"],
@@ -160,6 +167,7 @@ pub const IT: Lang = Lang {
     send: &["invia", "pubblica", "rispondi", "condividi"],
     delete: &["elimina", "cancella", "rimuovi", "chiudi account", "chiudi il conto"],
     agree: &["accetto", "accetta i termini", "sono d accordo"],
+    trash: &["cestino"],
     password: &["password", "parola d ordine"],
     card: &["carta", "numero della carta", "carta di credito", "titolare", "scadenza"],
     bank: &["numero di conto", "conto corrente"],
@@ -182,6 +190,7 @@ pub const PT: Lang = Lang {
     send: &["enviar", "publicar", "responder", "compartilhar", "partilhar"],
     delete: &["excluir", "apagar", "eliminar", "remover", "encerrar conta"],
     agree: &["aceito", "concordo", "aceitar os termos"],
+    trash: &["lixeira", "lixo"],
     password: &["senha", "palavra passe"],
     card: &["cartao", "numero do cartao", "titular do cartao", "validade"],
     bank: &["numero da conta", "conta bancaria", "nib"],
@@ -204,6 +213,7 @@ pub const NL: Lang = Lang {
     send: &["verzenden", "versturen", "verstuur", "plaatsen", "publiceren", "beantwoorden", "delen"],
     delete: &["verwijderen", "wissen", "account sluiten", "account opheffen"],
     agree: &["ik ga akkoord", "akkoord", "ga akkoord"],
+    trash: &["prullenbak", "*prullenbak"],
     password: &["wachtwoord", "*wachtwoord"],
     card: &["kaartnummer", "*kaartnummer", "creditcard", "pasnummer", "kaarthouder", "vervaldatum"],
     bank: &["rekeningnummer", "*rekeningnummer"],
@@ -305,7 +315,7 @@ mod tests {
     fn every_table_is_written_folded_and_lower_case() {
         for l in LANGS {
             let lists = [
-                l.sign_in, l.buy, l.pay, l.book, l.order, l.confirm, l.subscribe, l.cancel, l.send, l.delete, l.agree, l.password, l.card, l.bank, l.code_field, l.user,
+                l.sign_in, l.buy, l.pay, l.book, l.order, l.confirm, l.subscribe, l.cancel, l.send, l.delete, l.agree, l.trash, l.password, l.card, l.bank, l.code_field, l.user,
                 l.sign_in_page, l.search,
             ];
             for list in lists {

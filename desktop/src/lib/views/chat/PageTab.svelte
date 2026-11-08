@@ -57,7 +57,9 @@
   const browser = useBrowserName();
 
   // What Rust says the page is doing (`yap-page-view`).
-  let st = $state({ title: '', url: '', canGoBack: false, canGoForward: false, loading: true, error: null });
+  // `width`: the desktop width Chat laid the page out at (chat/pages.rs
+  // `browser_tabs` width), shown scaled to fit — its chip's × puts it back.
+  let st = $state({ title: '', url: '', canGoBack: false, canGoForward: false, loading: true, error: null, width: null });
   let stageEl = $state(null);
   let addrEl = $state(null);
   let shooting = $state(false);
@@ -139,7 +141,7 @@
     listen('yap-page-view', (e) => {
       const p = e.payload;
       if (p?.key !== key) return;
-      st = { title: p.title || '', url: p.url || '', canGoBack: !!p.canGoBack, canGoForward: !!p.canGoForward, loading: !!p.loading, error: p.error || null };
+      st = { title: p.title || '', url: p.url || '', canGoBack: !!p.canGoBack, canGoForward: !!p.canGoForward, loading: !!p.loading, error: p.error || null, width: p.width || null };
       if (p.url || p.title) doc.pageMoved(key, { title: p.title || '', url: p.url || '' });
     }).then((u) => (alive ? (un = u) : u()));
     let unDialog = null;
@@ -201,6 +203,12 @@
   function reload() {
     failed = '';
     invoke('page_view_reload', { key }).catch(() => {});
+  }
+
+  /** The chip's ×: the page back at the panel's own width. */
+  function panelWidth() {
+    st.width = null;
+    invoke('page_view_width', { key, width: null }).catch(() => {});
   }
 
   /** `text` (typed, or a page offered on a new tab) opened here: an address, or a search on the person's engine. */
@@ -306,6 +314,16 @@
         data-testid="chat-page-address"
       />
     </div>
+    {#if st.width && !blank}
+      <!-- Chat laid the page out at a desktop width (chat/pages.rs `browser_tabs`
+           width): shown scaled to fit, the layout Chat reads and clicks in. -->
+      <span class="widthchip" title={`Laid out ${st.width} px wide, as on a desktop, and shown scaled to fit the panel`} data-testid="chat-page-width">
+        Desktop width
+        <button type="button" class="widthoff" onclick={panelWidth} aria-label="Back to the panel's width" title="Back to the panel's width" data-testid="chat-page-width-off">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M7 7l10 10M17 7 7 17" /></svg>
+        </button>
+      </span>
+    {/if}
     <div class="pageactions">
       <button type="button" class="pagebtn" onclick={saveShot} disabled={blank || shooting || !!failed} aria-label="Save a shot of the page" title="Save a shot (a picture of the page as it is)" data-testid="chat-page-shot">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 8h3l2-3h6l2 3h3v11H4z" /><circle cx="12" cy="13" r="3.5" /></svg>
@@ -503,6 +521,43 @@
     font-size: 11px;
     font-weight: 600;
     color: var(--yap-paper-danger);
+  }
+  /* "Desktop width ×": the page laid out wide, shown scaled to fit. */
+  .widthchip {
+    flex: 0 0 auto;
+    display: inline-flex;
+    align-items: center;
+    gap: 2px;
+    height: 22px;
+    padding: 0 2px 0 8px;
+    border: 1px solid var(--yap-paper-rule);
+    border-radius: 999px;
+    background: var(--yap-paper-s1);
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--yap-paper-text-2);
+    white-space: nowrap;
+  }
+  .widthoff {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 18px;
+    height: 18px;
+    padding: 0;
+    border: none;
+    border-radius: 999px;
+    background: none;
+    color: inherit;
+    cursor: pointer;
+  }
+  .widthoff:hover {
+    background: var(--yap-paper-s2);
+    color: var(--yap-paper-ink);
+  }
+  .widthoff svg {
+    width: 12px;
+    height: 12px;
   }
   .addrerror {
     margin: 0;

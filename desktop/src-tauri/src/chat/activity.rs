@@ -206,6 +206,7 @@ pub fn describe(name: &str, args: &Value, title_of: &dyn Fn(u64) -> Option<Strin
         "browser_type" | "browser_form_input" => Activity::new("page", "Typing on the page beside the chat"),
         "browser_key" => Activity::new("page", with(text(&["keys"]), "Pressing", "Pressing keys on the page")),
         "browser_hover" => Activity::new("page", "Pointing at the page beside the chat"),
+        "browser_drag" => Activity::new("page", "Dragging on the page beside the chat"),
         "browser_tabs" => Activity::new("page", "Working the tabs beside the chat"),
         "browser_wait" => Activity::new("page", with(text(&["text"]).map(|t| quoted(&t)), "Waiting for", "Waiting for the page")),
         "browser_batch" => Activity::new("page", "Using the page beside the chat"),
