@@ -3704,6 +3704,18 @@ as for every other. Chat, the Voice Assistant on this PC and from the phone.
   waits for Allow once / Don't (its two minutes well inside the run's tool
   timeout); typed words only from the person's or the page's; never a
   password, card, bank or code field nor a sign-in form.
+- **The person's connectors** (Connectors wave 7, preview): a plain plan
+  chat's session lists the connector tools the turn may use over the same
+  endpoint (`plan.rs` `plan_connectors`, `claude_live/connectors.rs`: wave
+  4's offer with `where.plan`, where it was asked, the meeting rule; never a
+  Code chat's, an agent's, across the meetings or a phone's question), all
+  in `--allowedTools`, named in the prompt (`CONNECTORS`), their list's hash
+  in the fingerprint (one on or off, a tool's setting: a new session). Each
+  call is wave 4's own (`connectors::Turn::execute`) for its turn — Always
+  allow runs, Ask first holds the call while the card asks in the plan
+  turn's thread, a no is a refusal the model reads; the chip and line are
+  wave 4's; a server's answer is outside content (a later write asks, an
+  agent is refused): [integrations.md](./integrations.md#connectors-in-plan-chats-wave-7).
 - **What a plan turn doesn't do** (`gates.rs` `on_the_plan`): documents
   beside the chat, Think's budget (effort covers it). "Remember that…" goes through Yap's own memory
   pass, as for a model without tools (`turn.rs` `remembered`). Yap's own

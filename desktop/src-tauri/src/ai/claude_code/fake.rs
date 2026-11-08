@@ -31,7 +31,9 @@
 //!   `tool_result` (the answer's text blocks, its image content as image
 //!   blocks, its `isError`). With `"dump":"<file>"`, a line appended to that
 //!   file with what the call gave (its content's blocks: text whole, an
-//!   image's type and size, never its data), for an e2e spec.
+//!   image's type and size, never its data), for an e2e spec. With
+//!   `"list":true` in place of a tool, `tools/list` instead: the dump has
+//!   each tool's name and `readOnlyHint` (what a session was offered).
 //! - `{"_for":"chat"}` (or `"agent"`, `"ask"`, `"all"`): the lines up to the
 //!   next `_for` play only in a process of that kind — `agent` started with
 //!   `--permission-prompt-tool` (an agent's run), `chat` with an
@@ -561,7 +563,8 @@ impl Player<'_> {
 
     /// The call itself; the `fake_mcp` line.
     fn mcp_call(&self, arg: &Value) -> String {
-        let tool = arg["tool"].as_str().unwrap_or("");
+        let list = arg["list"].as_bool() == Some(true);
+        let tool = if list { "tools/list" } else { arg["tool"].as_str().unwrap_or("") };
         let named = arg["server"].as_str();
         let server = match named {
             Some(n) => self.ctx.mcp_servers.get(n).map(|s| (n.to_string(), s.clone())),
@@ -569,7 +572,11 @@ impl Player<'_> {
         };
         let (name, result) = match server {
             Some((name, config)) => {
-                let r = mcp_call(&config, tool, arg.get("arguments").cloned().unwrap_or(json!({})), |v| self.ctx.var(v));
+                let r = if list {
+                    mcp_request(&config, "tools/list", json!({}), |v| self.ctx.var(v))
+                } else {
+                    mcp_call(&config, tool, arg.get("arguments").cloned().unwrap_or(json!({})), |v| self.ctx.var(v))
+                };
                 (name, r)
             }
             None => (String::new(), Err("no such MCP server in --mcp-config".to_string())),
@@ -613,6 +620,11 @@ fn tool_result_content(content: &Value) -> Vec<Value> {
 /// and size in bytes (never its data). Pure.
 fn dumped(v: &Value) -> Value {
     let result = &v["response"]["result"];
+    // A `tools/list`: each tool's name and whether it only reads.
+    if let Some(tools) = result["tools"].as_array() {
+        let tools: Vec<Value> = tools.iter().map(|t| json!({ "name": t["name"], "readOnlyHint": t["annotations"]["readOnlyHint"] })).collect();
+        return json!({ "tool": v["tool"], "isError": false, "tools": tools, "error": v["error"] });
+    }
     let content: Vec<Value> = result["content"]
         .as_array()
         .into_iter()
@@ -676,6 +688,12 @@ fn expand(s: &str, lookup: impl Fn(&str) -> Option<String>, defaults: bool) -> S
 /// `initialize`, `notifications/initialized`, then `tools/call` on an http
 /// MCP server: the call's JSON-RPC response.
 fn mcp_call(config: &Value, tool: &str, arguments: Value, var: impl Fn(&str) -> Option<String>) -> Result<Value, String> {
+    mcp_request(config, "tools/call", json!({"name":tool,"arguments":arguments}), var)
+}
+
+/// `initialize`, `notifications/initialized`, then `method` with `params` on
+/// an http MCP server: its JSON-RPC response.
+fn mcp_request(config: &Value, method: &str, params: Value, var: impl Fn(&str) -> Option<String>) -> Result<Value, String> {
     let url = config["url"].as_str().ok_or("the MCP server has no url")?;
     let mut headers = header_list(&config["headers"], |s| expand(s, &var, true));
     let init = json!({"jsonrpc":"2.0","id":1,"method":"initialize","params":{
@@ -694,7 +712,7 @@ fn mcp_call(config: &Value, tool: &str, arguments: Value, var: impl Fn(&str) -> 
     if !(200..300).contains(&r.status) {
         return Err(format!("notifications/initialized: HTTP {}", r.status));
     }
-    let call = json!({"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":tool,"arguments":arguments}});
+    let call = json!({"jsonrpc":"2.0","id":2,"method":method,"params":params});
     Ok(rpc(url, &headers, &call, 2)?.0)
 }
 
@@ -1014,6 +1032,9 @@ mod tests {
         );
         // Text only: one block, as before.
         assert_eq!(tool_result_content(&json!([{ "type": "text", "text": "a" }, { "type": "text", "text": "b" }])), [json!({ "type": "text", "text": "ab" })]);
+        // A tools/list: its names and hints.
+        let listed = dumped(&json!({ "tool": "tools/list", "response": { "result": { "tools": [{ "name": "homelights__list_lights", "annotations": { "readOnlyHint": true } }] } }, "error": null }));
+        assert_eq!(listed["tools"], json!([{ "name": "homelights__list_lights", "readOnlyHint": true }]));
         let dump = dumped(&json!({ "tool": "look_at_screen", "response": { "result": { "content": content, "isError": false } }, "error": null }));
         assert_eq!(dump["tool"], "look_at_screen");
         assert_eq!(dump["content"][2], json!({ "type": "image", "mimeType": "image/png", "bytes": 8 }));

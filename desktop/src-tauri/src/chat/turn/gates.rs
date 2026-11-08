@@ -103,8 +103,10 @@ impl Gates {
     /// stay as they are too (on, not across the meetings,
     /// `claude_live/agents.rs`).
     ///
-    /// No connectors in this wave: a plan run gets them through Yap's run
-    /// endpoint later (Connectors wave 7), the same `connectors::Turn`.
+    /// No connectors in the tool loop's sense (its gate, its prompt line, its
+    /// budget): a plan run gets them through Yap's run endpoint instead
+    /// (Connectors wave 7: `plan.rs` `plan_connectors`,
+    /// `claude_live/connectors.rs`), the same `connectors::Turn`.
     fn on_the_plan(self) -> Gates {
         Gates {
             strong: false,
