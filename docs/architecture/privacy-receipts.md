@@ -147,7 +147,9 @@ requests to Yap's own endpoint on 127.0.0.1 (`integrations/claude_live.rs`).
   `Connector::kind`, from its `origin`), else "A connector", never
   the name the person typed; its feature the turn's that called the tool —
   Chat, the Voice Assistant (wave 4) — else "Connectors". Its host only,
-  never the link's path, a token or a header. A connector that's a program
+  never the link's path or query, a token or a header (a unit test adds one
+  with all of them and a name the person typed, and finds none in the
+  receipts: `a_links_receipts_hold_its_host_only`). A connector that's a program
   on this PC makes its own requests, which Yap can't see: only its links
   are here; [integrations.md](./integrations.md#connectors-preview)),
   **signing in to a connector** (2026-11-08: "Connector sign-in · A
@@ -241,7 +243,13 @@ Claude Code itself, so they aren't in Network connections."
   dictionary as counts of corrections and snippets; app rules, nicknames,
   blocked apps as counts; profiles as a count and their providers; a cloud
   voice's model, its voice chosen/default. **Anything else is left out**
-  and named under `leftOut`, so a new setting never slips in.
+  and named under `leftOut`, so a new setting never slips in. With the
+  connectors preview on, `connectors` counts them (Connectors wave 8,
+  `connectors::privacy::counts`: how many, links, programs, off, signing in
+  in the browser, signed in, ended, with a token or headers, from the
+  catalogue, failing) — numbers only, whatever is handed in
+  (`connector_counts`), never a name, an address, a command or a tool;
+  `connectorsPreview` and `connectorsInMeetings` are copied as switches.
 - **The log** (`filter_log`, pure): `INFO`, `WARN` and `ERROR` events only — a
   `DEBUG`/`TRACE` event (Debug logging's, which can hold what was said) and
   the lines it goes on over are dropped; each line scrubbed (`Scrub`): this
@@ -285,7 +293,9 @@ Claude Code itself, so they aren't in Network connections."
   masks, whole-word names, user folders with spaces, the connections'
   hosts, the bug form's fields (their ids, their encoding, what's left out,
   nothing personal from a system.txt seeded with a microphone, a user
-  folder and a PC name, the URL's length).
+  folder and a PC name, the URL's length); the connectors' counts, a name
+  and an address handed in with them left out, none with the preview off
+  (`the_connectors_are_counts_only`).
 
 ## Settings → About → Report a problem
 
@@ -333,6 +343,14 @@ stay on (`config.yml`): an older Yap still opens one with a `body=`.
   Dictionary's Export… writes (`dictionary_csv`: Heard, Written, Kind,
   Near-misses, Starred, a byte-order mark and Windows line ends; the rows
   writing one word together, as the view groups them; Import… reads it back);
+  `connectors/connectors.json` while the connectors preview is on
+  (Connectors wave 8, `connectors::privacy::export`: an allow-list of each
+  connector — its name, a link's address without its query, user name or
+  fragment, its header **names**, a program's command line and variables, a
+  secret one's value "(kept in Windows Credential Manager)", any value with
+  a key's shape left out, how it signs in, where Yap uses it, each tool's
+  setting —; the vault is never read, so no token, client secret or header
+  value can be in it: [integrations.md](./integrations.md#connectors-and-your-data-wave-8));
   `settings.json`.
 - **Settings without secrets** (`settings_export`, pure, over config.json as
   `YapConfig` serialises), three ways: by name — `SECRET_FIELDS` (`ppApiKey`,
@@ -414,7 +432,17 @@ a tick box per **kind** of data. "Clear everything and keep my settings"
     user data folder; cleared first, by WebView2's
     `ClearBrowsingDataAll` through an open page or one made out of sight for
     it, `chat/pages/view.rs` `clear_data`, so if it can't, nothing else has
-    gone; open pages stay open).
+    gone; open pages stay open), **Connector sign-ins** (Connectors wave 8,
+    listed only while the connectors preview is on: "1 sign-in"; each
+    browser sign-in ended as Sign out ends it, `connectors::privacy::sign_out_all`
+    — the refresh token revoked where the server offers it, all at once and
+    10 s at most, then the tokens gone from Credential Manager whatever the
+    server said, connectors.json's part saying signed out. The connectors,
+    their tools' settings, a pasted token, request headers, a program's
+    secret variables, Yap's registration and the person's own client stay:
+    settings and keys given on purpose, as config.json's API keys are; a
+    sign-in is a service's grant to Yap's tools, so it's data, as the pages'
+    sign-ins are. [integrations.md](./integrations.md#connectors-and-your-data-wave-8)).
   - *Dictionary* — **Dictionary suggestions** (`word_suggestions.json`:
     the words offered, the answers and the words removed from the
     dictionary — so one may be offered again —; snippet_suggestions.json's
@@ -448,7 +476,8 @@ a tick box per **kind** of data. "Clear everything and keep my settings"
   config.json (every setting, the dictionary, snippets, transforms, the
   keys) and `dictionary_usage.json`; the person's own Skills (`skills.json`)
   and meeting folder rules (setup, like folders and actions); the writing
-  samples; the models (`models/`, `llm/`); the account's sign-in, the
+  samples; the connectors (`connectors.json` but its sign-ins' part,
+  `connector_tools.json`, `connectors/`; listed with the preview on); the models (`models/`, `llm/`); the account's sign-in, the
   calendars (Credential Manager, `calendar.json`'s connections and
   meetings) and paired phones; Yap's own records — tips shown
   (`hints.json`, `mic_tips.json`, `onboarding.json`), answers to its offers
@@ -559,6 +588,17 @@ then says "Nothing kept" for chats, Chat and Notes show it at once;
 other notes keep theirs and their pin; **refused while a test meeting
 records** (the toast, no dialog; `data_delete` and `data_reset` both
 refuse).
+
+`desktop/e2e/your-data-connectors.spec.js` (Connectors wave 8, the preview
+on; seeded: a link signed in in the browser and a link with a header, their
+secrets in test mode's `connector-secrets.e2e.json`): Download your data's
+`connectors/connectors.json` (both, the address without its query, the
+header's name, each tool's setting) with no secret anywhere in the unpacked
+zip; Report a problem's counts with no name or address; Delete some of your
+data's **Connector sign-ins** ("1 sign-in") ending the sign-in — its tokens
+gone from the vault file, Yap's registration and the other's header kept,
+both connectors and their tools' settings kept, "needs sign-in" after —;
+Reset app listing it under what goes and the connectors under what stays.
 
 `desktop/e2e/network-receipts.spec.js`: two fake AI servers, one aliased to
 api.groq.com — a Chat answer from each shows as "Chat · Groq" (Internet,

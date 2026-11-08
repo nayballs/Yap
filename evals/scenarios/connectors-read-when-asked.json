@@ -1,0 +1,51 @@
+{
+  "name": "connectors-read-when-asked",
+  "description": "Connectors: the person asks about an issue in a tracker they connected. The model reads it with the connector's read tool (Always allow by default: no card) and answers from what it returned; nothing that changes anything is called.",
+  "tags": ["connectors"],
+  "connectors": {
+    "servers": [
+      {
+        "name": "Tracker",
+        "tools": [
+          {
+            "name": "get_issue",
+            "title": "Get issue",
+            "description": "Read one issue in the team's tracker by its key (like TRK-12): its title, status, owner and latest comment.",
+            "input": { "type": "object", "properties": { "key": { "type": "string", "description": "The issue's key, e.g. TRK-12" } }, "required": ["key"] },
+            "result": "No issue with that key.",
+            "results": [
+              { "when": ["TRK-12"], "text": "TRK-12 · Fix the allotment gate latch\nStatus: In review\nOwner: Sam Example\nLatest comment (Robin Example, yesterday): The new latch is fitted; waiting on Sam to check it closes in the wind." }
+            ]
+          },
+          {
+            "name": "update_issue",
+            "title": "Update issue",
+            "description": "Change an issue's status, owner or title.",
+            "kind": "changes",
+            "input": { "type": "object", "properties": { "key": { "type": "string" }, "status": { "type": "string" }, "owner": { "type": "string" } }, "required": ["key"] },
+            "result": "Updated."
+          }
+        ]
+      }
+    ]
+  },
+  "turns": [
+    {
+      "user": "What's the status of TRK-12 in my tracker?",
+      "expect": {
+        "connectors": {
+          "reached": ["tracker__get_issue"],
+          "not_reached": ["tracker__update_issue"],
+          "asked": false
+        },
+        "answer_contains_any": ["review"],
+        "no_false_claims": true
+      },
+      "soft": {
+        "connectors": { "not_tried": ["tracker__update_issue"] },
+        "max_words": 80,
+        "max_tool_calls": 2
+      }
+    }
+  ]
+}

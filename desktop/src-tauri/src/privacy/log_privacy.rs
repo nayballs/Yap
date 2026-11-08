@@ -13,6 +13,12 @@
 //! `error!` call that formats a variable named like user content (`text =
 //! %…`, `{transcript}`, `"…{}", answer`). A false alarm: rename the variable
 //! to say what it holds (`chars`, `len`, `id`).
+//!
+//! The connectors' modules are held to more (Connectors wave 8): no
+//! address, command line, variable, header, token or secret, nothing a
+//! server says about itself, no call's input or answer, and never the name
+//! the person gave a connector — its id, a tool's name, outcomes, counts,
+//! timings and lengths only.
 
 #[cfg(test)]
 mod tests {
@@ -124,6 +130,92 @@ mod tests {
         let calls = log_calls("fn f() {\n    tracing::info!(\"a (b) {}\", x);\n    debug!(text = %t);\n    warn!(\"c\")\n}");
         assert_eq!(calls.iter().map(|(l, _)| *l).collect::<Vec<_>>(), [2, 4]);
         assert_eq!(calls[0].1, "tracing::info!(\"a (b) {}\", x)");
+    }
+
+    /// What a connector's log line never formats (Connectors wave 8), on top
+    /// of [`CONTENT`]: its address or a sign-in's, a program's command line,
+    /// its folders and variables, a header's or a variable's value, a token,
+    /// a code or a secret, what a server says about itself (its name,
+    /// version, protocol, instructions, a tool's description or title), a
+    /// call's input or answer — and the name the person gave it. Ids, slugs,
+    /// a tool's name, outcomes, counts, timings and lengths only.
+    const CONNECTOR: &str = "url|urls|uri|link|address|endpoint|location|redirect|resolved|command|command_line|cmdline|program|path|cwd|env|vars|header|headers|value|values|token|tokens|access|refresh|refresh_token|grant|secret|secrets|code|verifier|instructions|description|result|results|structured|output|stdout|server|server_name|protocol|version|title|name|host|issuer|resource|body|json|payload|params|input|schema|spec";
+
+    /// Why a connectors module's log call formats something it mustn't, if
+    /// it does: a field, a variable or the last part of a path named like
+    /// one of [`CONNECTOR`] (`url = %c.url`, `{token}`, `%c.name`,
+    /// `protocol = %live.server.protocol`).
+    fn connector_leak(call: &str) -> Option<String> {
+        let rules = [
+            format!(r"\b({CONNECTOR})\s*=\s*[%?]"),
+            format!(r"[%?]({CONNECTOR})\b"),
+            format!(r"\{{({CONNECTOR})(:[^}}]*)?\}}"),
+            format!(r",\s*&?({CONNECTOR})(\.(as_str|trim|clone)\(\))?\s*[,)]"),
+            // The last part of a path, shown or passed as it is.
+            format!(r"[%?=,]\s*&?[A-Za-z_]\w*(?:\.[A-Za-z_]\w*)*\.({CONNECTOR}|{CONTENT})(\.(as_str|trim|clone|to_string)\(\))?\s*[,)]"),
+        ];
+        for rule in rules {
+            let re = regex::Regex::new(&rule).unwrap();
+            if let Some(c) = re.captures(call) {
+                return Some(c[1].to_string());
+            }
+        }
+        None
+    }
+
+    #[test]
+    fn the_connector_rules_catch_addresses_names_and_answers() {
+        for bad in [
+            r#"tracing::info!(connector = %c.id, url = %url, "connectors: connected")"#,
+            r#"tracing::info!(connector = %c.name, "connectors: added")"#,
+            r#"tracing::warn!("connectors: couldn't reach {address}")"#,
+            r#"tracing::info!(connector = id, protocol = %live.server.protocol, "connectors: connected")"#,
+            r#"tracing::info!("connectors: started {}", program.command_line)"#,
+            r#"tracing::error!(?grant, "connectors: refresh failed")"#,
+            r#"tracing::info!(tool, args = %args, "connectors: tool called")"#,
+            r#"tracing::info!("connectors: answered {}", shaped.text)"#,
+        ] {
+            assert!(connector_leak(bad).is_some() || content_in(bad).is_some(), "{bad}");
+        }
+        for ok in [
+            r#"tracing::info!(connector = %c.id, tool, ms, success = shaped.success, chars = shaped.text.len(), "connectors: tool called")"#,
+            r#"tracing::info!(connector = id, scopes = asked.len(), "connectors: sign-in opened in the browser")"#,
+            r#"tracing::info!(connector = %c.id, kind = if c.transport.is_local() { "local" } else { "remote" }, auth = ?c.auth.kind, "connectors: added")"#,
+            r#"tracing::warn!(status = a.status, refusal = %refusal, "connectors: the token endpoint said no")"#,
+            r#"tracing::info!(run = %run.id, tool = name, ok = true, "Claude Code: a connector's tool answered")"#,
+            r#"tracing::error!("connectors: couldn't store a connector's secret: {e}")"#,
+        ] {
+            assert_eq!(connector_leak(ok), None, "{ok}");
+        }
+    }
+
+    /// Every connectors module (`integrations/connectors*`,
+    /// `chat/tools/connectors*`, `integrations/claude_live/connectors*`):
+    /// no address, command line, argument, answer, server's words, name or
+    /// secret at `info` and above.
+    #[test]
+    fn connectors_log_ids_counts_and_outcomes_only() {
+        let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
+        let mut files = Vec::new();
+        rust_files(&root, &mut files);
+        let mut checked = 0;
+        let mut found = Vec::new();
+        for file in &files {
+            let rel = file.strip_prefix(&root).unwrap_or(file).to_string_lossy().replace('\\', "/");
+            let connectors = ["integrations/connectors", "chat/tools/connectors", "integrations/claude_live/connectors"].iter().any(|p| rel.starts_with(p));
+            if !connectors {
+                continue;
+            }
+            let src = std::fs::read_to_string(file).unwrap();
+            for (line, call) in log_calls(&src) {
+                checked += 1;
+                if let Some(what) = connector_leak(&call).or_else(|| content_in(&call)) {
+                    found.push(format!("{rel}:{line}: `{what}` in {}", call.split_whitespace().collect::<Vec<_>>().join(" ")));
+                }
+            }
+        }
+        assert!(checked >= 40, "found the connectors' log calls ({checked})");
+        assert!(found.is_empty(), "A connector's log line formats what it mustn't (log an id, a count or a length):\n{}", found.join("\n"));
     }
 
     #[test]

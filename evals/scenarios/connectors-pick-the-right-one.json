@@ -1,0 +1,62 @@
+{
+  "name": "connectors-pick-the-right-one",
+  "description": "Connectors: three connected (a tracker, a wiki, a home), each with a search. Asked what the wiki says, the model searches the wiki, not the others.",
+  "tags": ["connectors"],
+  "connectors": {
+    "servers": [
+      {
+        "name": "Tracker",
+        "tools": [
+          {
+            "name": "search_issues",
+            "title": "Search issues",
+            "description": "Search the team's issue tracker for issues matching words.",
+            "input": { "type": "object", "properties": { "query": { "type": "string" } }, "required": ["query"] },
+            "result": "TRK-30 · Watering rota is out of date (open)"
+          }
+        ]
+      },
+      {
+        "name": "Wiki",
+        "tools": [
+          {
+            "name": "search_pages",
+            "title": "Search pages",
+            "description": "Search the team wiki's pages for words; returns each match's title and a passage.",
+            "input": { "type": "object", "properties": { "query": { "type": "string" } }, "required": ["query"] },
+            "result": "Watering rota (wiki page): Robin waters on Mondays and Thursdays, Sam on Tuesdays and Saturdays; whoever is in on Sunday checks the water butts."
+          }
+        ]
+      },
+      {
+        "name": "Home",
+        "tools": [
+          {
+            "name": "find_devices",
+            "title": "Find devices",
+            "description": "Find smart-home devices (lights, plugs, sensors) by name or room.",
+            "input": { "type": "object", "properties": { "query": { "type": "string" } }, "required": ["query"] },
+            "result": "Greenhouse sprinkler plug: off"
+          }
+        ]
+      }
+    ]
+  },
+  "turns": [
+    {
+      "user": "What does our wiki say about the watering rota?",
+      "expect": {
+        "connectors": {
+          "reached": ["wiki__search_pages"],
+          "asked": false
+        },
+        "answer_contains_any": ["Monday", "Thursday", "Tuesday", "Saturday"],
+        "no_false_claims": true
+      },
+      "soft": {
+        "connectors": { "not_reached": ["tracker__search_issues", "home__find_devices"] },
+        "max_tool_calls": 2
+      }
+    }
+  ]
+}

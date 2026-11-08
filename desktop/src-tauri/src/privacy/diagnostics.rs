@@ -140,6 +140,8 @@ const COPY: &[&str] = &[
     "historyEnabled",
     "bridgeEnabled",
     "mcpAllowWrites",
+    "connectorsPreview",
+    "connectorsInMeetings",
     "meetingOpenNotepad",
     "meetingSplitScreen",
     "meetingLiveTranscript",
@@ -328,6 +330,12 @@ pub fn settings_summary(cfg: &Value) -> Value {
     left_out.sort();
     out.insert("leftOut".into(), json!(left_out));
     Value::Object(out)
+}
+
+/// The connectors' counts as they go in settings.json: numbers only, so
+/// whatever is handed in, a name or an address never is. Pure.
+fn connector_counts(v: &Value) -> Value {
+    Value::Object(v.as_object().into_iter().flatten().filter(|(_, n)| n.is_u64()).map(|(k, n)| (k.clone(), n.clone())).collect())
 }
 
 // ---- scrubbing the log --------------------------------------------------------------------
@@ -695,6 +703,10 @@ pub struct Inputs {
     pub entries: Vec<crate::privacy::net::Entry>,
     pub now: u64,
     pub made: String,
+    /// The connectors' counts (`connectors::privacy::counts`: by kind, off,
+    /// signed in, failing; never a name, an address or a command), under
+    /// settings.json's `connectors`; `None` while the preview is off.
+    pub connectors: Option<Value>,
 }
 
 /// The file's contents, in order.
@@ -713,7 +725,8 @@ What's in it\n\
 - system.txt: Windows' version, the processor, memory, the graphics card, Yap's version and channel.\n\
 - settings.json: which features, providers and models are on, switches and shortcuts. Not in it: API keys \
 (only which services have one), About you, names, your dictionary's words, prompts you wrote, device names, \
-your servers' addresses, memory, notes, chats, meetings and history. `leftOut` names the settings left out.\n\
+your servers' addresses, memory, notes, chats, meetings and history. `leftOut` names the settings left out. \
+With connectors on, `connectors` counts them (links, programs, signed in, failing), never their names, addresses or commands.\n\
 - connections.txt: the network connections Yap made in the last 7 days, by purpose (counts and sizes).\n\
 - errors.txt: the latest warnings and errors from Yap's log.\n\
 - logs/: Yap's log for the last {days} days, info and above. Debug lines (which can hold what you said) are \
@@ -721,7 +734,11 @@ left out; your user name, PC name, email addresses, keys and the details of link
 
 /// Build the file's contents from `inputs`. Pure.
 pub fn build(inputs: &Inputs, scrub: &Scrub) -> Bundle {
-    let settings = serde_json::to_string_pretty(&settings_summary(&inputs.config)).unwrap_or_default();
+    let mut summary = settings_summary(&inputs.config);
+    if let (Some(counts), Some(map)) = (&inputs.connectors, summary.as_object_mut()) {
+        map.insert("connectors".into(), connector_counts(counts));
+    }
+    let settings = serde_json::to_string_pretty(&summary).unwrap_or_default();
     let connections = connections_text(&inputs.entries, inputs.now);
     let mut errors: Vec<String> = Vec::new();
     let mut logs: Vec<(String, Vec<u8>)> = Vec::new();
@@ -837,6 +854,7 @@ fn make(app: &AppHandle) -> Bundle {
         entries: crate::privacy::net::entries(),
         now: std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_secs()),
         made: chrono::Local::now().format("%Y-%m-%d %H:%M").to_string(),
+        connectors: crate::integrations::connectors::privacy::counts(),
     };
     build(&inputs, &Scrub::this_pc())
 }
@@ -1124,8 +1142,28 @@ mod tests {
             entries: seeded_entries(),
             now: 1_800_000_100,
             made: "2026-10-24 21:05".into(),
+            // A name and an address handed in by mistake never reach the file.
+            connectors: Some(json!({ "count": 2, "links": 1, "programs": 1, "signedIn": 1, "failing": 0, "name": "Robin's allotment notes", "address": "https://notes.example.com/mcp" })),
         };
         build(&inputs, &scrub())
+    }
+
+    /// Report a problem's connectors: counts only, under settings.json's
+    /// `connectors` (with the preview on), and its switches copied.
+    #[test]
+    fn the_connectors_are_counts_only() {
+        let b = bundle();
+        let settings: Value = serde_json::from_str(&b.settings).unwrap();
+        assert_eq!(settings["connectors"], json!({ "count": 2, "links": 1, "programs": 1, "signedIn": 1, "failing": 0 }));
+        assert!(!b.settings.contains("Robin's allotment notes") && !b.settings.contains("notes.example.com"));
+        assert_eq!(settings["connectorsPreview"], false);
+        assert_eq!(settings["connectorsInMeetings"], false);
+        // The preview off: no `connectors` at all.
+        let off = build(
+            &Inputs { system: String::new(), config: seeded_config(), logs: vec![], entries: vec![], now: 0, made: "2026-10-24 21:05".into(), connectors: None },
+            &scrub(),
+        );
+        assert!(serde_json::from_str::<Value>(&off.settings).unwrap().get("connectors").is_none());
     }
 
     /// The test in the spirit of `log_privacy.rs`: a bundle made from a

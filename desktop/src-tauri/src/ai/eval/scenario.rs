@@ -30,6 +30,12 @@ pub struct Scenario {
     /// the person answers a click that asks first.
     #[serde(default)]
     pub browse: Option<BrowseSpec>,
+    /// **Connectors** (Connectors wave 8, `eval/connectors.rs`): made-up MCP
+    /// servers on this PC, added as the person would add them, their tools
+    /// offered to the model through Chat's own code; how the person answers
+    /// a card that asks first.
+    #[serde(default)]
+    pub connectors: Option<super::connectors::ConnectorsSpec>,
     /// Every turn is asked by voice (the Voice Assistant's path).
     #[serde(default)]
     pub voice: bool,
@@ -695,6 +701,9 @@ pub struct Expect {
     /// **Acting on pages** (`chat/pages/act.rs`): what the turn did with the
     /// stand-in browser (`--browse`).
     pub browse: Option<BrowseExpect>,
+    /// **Connectors** (`eval/connectors.rs`): what reached the made-up
+    /// servers, what the model tried, whether a card asked, tool search.
+    pub connectors: Option<super::connectors::ConnectorsExpect>,
 }
 
 /// What a turn did with documents (`Expect::document`).
@@ -1212,6 +1221,9 @@ pub struct Observed {
     pub memory_gained: Vec<String>,
     /// A browse scenario's stand-in browser so far (`Expect::browse`).
     pub browse: Option<BrowseSeen>,
+    /// A connectors scenario's: what reached its servers and the cards
+    /// asked this turn (`Expect::connectors`).
+    pub connectors: Option<super::connectors::ConnectorsSeen>,
 }
 
 impl Observed {
@@ -1234,6 +1246,9 @@ impl Observed {
             // (The browser's log is the scenario's so far: the last turn's.)
             if t.browse.is_some() {
                 all.browse = t.browse.clone();
+            }
+            if let Some(c) = &t.connectors {
+                all.connectors.get_or_insert_with(Default::default).extend(c);
             }
             let (a, b) = (&mut all.stats, &t.stats);
             a.requests += b.requests;
@@ -1978,6 +1993,9 @@ pub fn check(e: &Expect, o: &Observed) -> Vec<String> {
     if let Some(d) = &e.document {
         fails.extend(document_faults(d, o));
     }
+    if let Some(c) = &e.connectors {
+        fails.extend(super::connectors::faults(c, &o.stats.tool_calls, &o.connectors.clone().unwrap_or_default()));
+    }
     if let Some(b) = &e.browse {
         fails.extend(browse_faults(b, o));
     }
@@ -2100,6 +2118,7 @@ pub fn observed_json(o: &Observed) -> Value {
         "words": o.words(),
         "memory_done": o.memory_done,
         "memory_gained": o.memory_gained,
+        "connectors": o.connectors.as_ref().map(super::connectors::ConnectorsSeen::json),
         "stats": o.stats,
     })
 }

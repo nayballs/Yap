@@ -83,7 +83,10 @@ impl Gates {
         let act = pictures != Gate::Off && scope.is_none() && !meetings && crate::chat::pages::act::can_act(provider, model);
         let calendar = !meetings && crate::calendar::connected();
         let agents = tools && !meetings && crate::agents::offered(cfg);
-        let connectors = !meetings && crate::chat::tools::connectors::may(provider, strong) && crate::chat::tools::connectors::offers_any(cfg, scope);
+        // (An evaluation's connectors scenario gives any model that calls
+        // tools the connectors, to measure which may: `eval::connectors_forced`.)
+        let evaluated = tools && provider != crate::ai::claude_plan::PROVIDER && crate::ai::eval::connectors_forced();
+        let connectors = !meetings && (evaluated || crate::chat::tools::connectors::may(provider, strong)) && crate::chat::tools::connectors::offers_any(cfg, scope);
         let gates = Gates { tools, doc_tools, strong, claude_in_chat, own_search, web_lines, web_on, pictures, screen, act, calendar, agents, connectors };
         if provider == crate::ai::claude_plan::PROVIDER {
             return gates.on_the_plan();

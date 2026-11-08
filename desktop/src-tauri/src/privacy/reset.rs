@@ -63,6 +63,7 @@ pub enum Kind {
     Chats,
     Memory,
     Pages,
+    ConnectorSignIns,
     Agents,
     Suggestions,
     AiUsage,
@@ -193,6 +194,21 @@ pub const KINDS: &[About] = &[
         files: &[],
         stores: &[],
     },
+    // Connectors' browser sign-ins (Connectors wave 8): each ended as Sign
+    // out ends one (revoked where the server offers it, the tokens gone from
+    // Windows' Credential Manager), connectors.json saying signed out. The
+    // connectors and their settings stay (STAYS), and so do a pasted token,
+    // request headers and a program's secret variables: keys the person gave
+    // on purpose, as config.json's API keys are. Listed only while the
+    // connectors preview is on (`listed`).
+    About {
+        kind: Kind::ConnectorSignIns,
+        group: CHAT,
+        label: "Connector sign-ins",
+        says: "Your connectors' sign-ins in the browser, signed out where the service allows it. Your connectors, their settings and any token you pasted stay",
+        files: &["(connectors.json)"],
+        stores: &["connectors"],
+    },
     // Every agent Claude Code ran from Chat, its log and backups (its Undo
     // goes with them), each chat's Mode and the folders agents may work in.
     // Running agents are stopped first. The files the agents changed stay.
@@ -268,12 +284,20 @@ pub struct Part {
 /// snippet_suggestions.json its noted phrases.)
 pub const STAYS: &[Part] = &[
     // Skills and meeting folder rules are setup, like folders and actions: they stay.
-    // Connectors (preview) are settings too: the list stays (its sign-ins
-    // become a kind of their own when signing in lands, wave 8).
     Part {
         id: "settings",
         label: "Your settings, dictionary, snippets and transforms, your Skills and meeting folder rules",
-        files: &["config.json", "dictionary_usage.json", "skills.json", "meeting_folders.json", "connectors.json"],
+        files: &["config.json", "dictionary_usage.json", "skills.json", "meeting_folders.json"],
+    },
+    // Connectors (preview) are settings too: the list, each tool's setting,
+    // their tool lists (a cache) and their programs' folders stay; their
+    // browser sign-ins are a kind of their own (Connector sign-ins), which
+    // takes their part of connectors.json. Listed only while the preview is
+    // on (`listed`).
+    Part {
+        id: "connectors",
+        label: "Your connectors, their tools' settings and any token you pasted",
+        files: &["connectors.json", "connector_tools.json", "connectors/"],
     },
     // Set up on purpose, like the dictionary (Settings → Commands).
     Part { id: "samples", label: "Your writing samples", files: &["writing_samples.json"] },
@@ -305,9 +329,6 @@ pub const STAYS: &[Part] = &[
             "quieted_apps.json",
             "call_speakers.json",
             "icons/",
-            // Connectors' tool lists (a cache) and their programs' folders.
-            "connector_tools.json",
-            "connectors/",
             // Your Claude plan's empty working folders (claude/chat, claude/ask):
             // nothing of the person's is in them (Claude Code keeps its own
             // copy of a plan chat in its own folder; Chats deletes it).
@@ -447,6 +468,12 @@ impl Choice {
         Cut::of(self.has(Kind::Suggestions), false)
     }
 
+    /// connectors.json's sign-ins (signed in, the scopes granted): the
+    /// connectors themselves stay; their tokens are in Credential Manager.
+    pub fn connector_sign_ins(&self) -> Cut {
+        Cut::of(false, self.has(Kind::ConnectorSignIns))
+    }
+
     /// agents.json, agents/ and workspaces.json.
     pub fn agents(&self) -> Cut {
         Cut::of(self.has(Kind::Agents), false)
@@ -516,6 +543,7 @@ const STORES: &[(&str, Rule)] = &[
     ("calendar.json", Choice::briefs),
     ("word_suggestions.json", Choice::word_suggestions),
     ("snippet_suggestions.json", Choice::snippet_suggestions),
+    ("connectors.json", Choice::connector_sign_ins),
     ("agents.json", Choice::agents),
     ("agents/", Choice::agents),
     ("workspaces.json", Choice::agents),
@@ -666,6 +694,19 @@ fn dir_bytes(path: &Path) -> (usize, u64) {
     out
 }
 
+/// Whether the dialogs list `kind` (and Reset app's "What stays" its part):
+/// a connectors' one only while the connectors preview is on (off, nothing
+/// of theirs is read).
+fn listed(kind: Kind) -> bool {
+    kind != Kind::ConnectorSignIns || crate::integrations::connectors::enabled()
+}
+
+/// What stays, as the dialogs list it (the connectors' part only while the
+/// preview is on).
+fn stays_now() -> Vec<&'static str> {
+    STAYS.iter().filter(|p| p.id != "connectors" || listed(Kind::ConnectorSignIns)).map(|p| p.label).collect()
+}
+
 /// Each kind with how much there is of it now (counts and sizes only);
 /// `pages`: the pages' WebView2 profile folder, if it has one.
 fn measure(pages: Option<&Path>) -> Vec<Line> {
@@ -677,6 +718,7 @@ fn measure(pages: Option<&Path>) -> Vec<Line> {
     };
     KINDS
         .iter()
+        .filter(|a| listed(a.kind))
         .map(|a| {
             let (count, bytes, empty) = match a.kind {
                 Kind::History => {
@@ -713,6 +755,11 @@ fn measure(pages: Option<&Path>) -> Vec<Line> {
                 Kind::Pages => {
                     let (_, bytes) = pages.map(dir_bytes).unwrap_or((0, 0));
                     (None, bytes, bytes == 0)
+                }
+                // In Credential Manager: no bytes of the data folder's.
+                Kind::ConnectorSignIns => {
+                    let n = crate::integrations::connectors::privacy::sign_ins();
+                    (count(n, "sign-in", "sign-ins"), 0, n == 0)
                 }
                 Kind::Agents => {
                     let n = crate::agents::store::list().len();
@@ -753,7 +800,7 @@ fn measure(pages: Option<&Path>) -> Vec<Line> {
 pub async fn data_reset_plan(app: AppHandle) -> Plan {
     let blocked = busy(&app);
     let pages = crate::chat::pages::view::data_folder(&app).await;
-    tauri::async_runtime::spawn_blocking(move || Plan { goes: measure(pages.as_deref()), stays: STAYS.iter().map(|p| p.label).collect(), blocked })
+    tauri::async_runtime::spawn_blocking(move || Plan { goes: measure(pages.as_deref()), stays: stays_now(), blocked })
         .await
         .unwrap_or(Plan { goes: Vec::new(), stays: Vec::new(), blocked: Some("Yap couldn't look at its data.".into()) })
 }
@@ -780,6 +827,10 @@ pub struct Done {
     pub logs: usize,
     /// Agents that went (their logs and backups with them).
     pub agents: usize,
+    /// Connectors' browser sign-ins ended, and of them the ones their
+    /// server confirmed it revoked.
+    pub sign_ins: usize,
+    pub sign_ins_revoked: usize,
     pub set_aside: usize,
     /// Whether Yap needs a restart to finish (never so far: kept for the page).
     pub restart: bool,
@@ -998,9 +1049,10 @@ fn tell(app: &AppHandle, c: &Choice, gone: &Gone, done: &Done) {
     let _ = app.emit(EVENT, done);
 }
 
-/// Every kind in `c`, emptied in memory and on disk, store by store.
-fn run(app: &AppHandle, c: &Choice) -> Result<Done, String> {
-    let mut done = Done { kinds: c.kinds(), ..Done::default() };
+/// Every kind in `c`, emptied in memory and on disk, store by store
+/// (`signed`: the connectors' sign-ins already ended, `delete`'s).
+fn run(app: &AppHandle, c: &Choice, signed: crate::integrations::connectors::privacy::SignedOut) -> Result<Done, String> {
+    let mut done = Done { kinds: c.kinds(), sign_ins: signed.signed_out, sign_ins_revoked: signed.confirmed, ..Done::default() };
     let gone = clear_stores(c, &mut done);
     let index = clear_files(app, c, &mut done);
     tell(app, c, &gone, &done);
@@ -1035,6 +1087,9 @@ fn run(app: &AppHandle, c: &Choice) -> Result<Done, String> {
     if c.remote_control() != Cut::Keep {
         crate::agents::remote::saved()?;
     }
+    if c.connector_sign_ins() != Cut::Keep && crate::integrations::connectors::enabled() {
+        crate::integrations::connectors::store::SAVER.check()?;
+    }
     if let Err(e) = index {
         tracing::warn!("Deleting your data: the search index's folder wasn't deleted ({e})");
         return Err(e);
@@ -1063,11 +1118,15 @@ async fn delete(app: AppHandle, c: Choice) -> Result<Done, String> {
             c = Choice::of(c.kinds().into_iter().filter(|k| *k != Kind::Pages));
         }
     }
+    // The connectors' browser sign-ins: each ended as Sign out ends one,
+    // revoked where the server offers it (10 s at most in all), the tokens
+    // gone whatever it answered (nothing while the preview is off).
+    let signed = if c.has(Kind::ConnectorSignIns) { crate::integrations::connectors::privacy::sign_out_all().await } else { Default::default() };
     let handle = app.clone();
     let every = c == Choice::every();
     // The data folder's files it changes (names only).
     let files = c.touches().into_iter().collect::<Vec<_>>().join(" ");
-    let done = tauri::async_runtime::spawn_blocking(move || run(&handle, &c)).await.map_err(|e| e.to_string())??;
+    let done = tauri::async_runtime::spawn_blocking(move || run(&handle, &c, signed)).await.map_err(|e| e.to_string())??;
     tracing::info!(
         kinds = done.kinds.len(),
         every,
@@ -1083,6 +1142,8 @@ async fn delete(app: AppHandle, c: Choice) -> Result<Done, String> {
         briefs = done.briefs,
         logs = done.logs,
         agents = done.agents,
+        sign_ins = done.sign_ins,
+        sign_ins_revoked = done.sign_ins_revoked,
         set_aside = done.set_aside,
         "Deleting your data: done"
     );
@@ -1170,20 +1231,20 @@ mod tests {
     }
 
     /// Reset app is every kind: each store goes whole (calendar.json,
-    /// snippet_suggestions.json and remote_control.json lose only their
-    /// part: the calendars, the switch and the phones' ticks stay), and
-    /// nothing that stays is deleted.
+    /// snippet_suggestions.json, remote_control.json and connectors.json lose
+    /// only their part: the calendars, the switch, the phones' ticks and the
+    /// connectors stay), and nothing that stays is deleted.
     #[test]
     fn reset_app_is_every_kind_and_every_store_goes_whole() {
         let every = Choice::every();
         for (f, cut) in STORES {
-            let want = if matches!(*f, "calendar.json" | "snippet_suggestions.json" | "remote_control.json") { Cut::Part } else { Cut::Whole };
+            let want = if matches!(*f, "calendar.json" | "snippet_suggestions.json" | "remote_control.json" | "connectors.json") { Cut::Part } else { Cut::Whole };
             assert_eq!(cut(&every), want, "{f}");
         }
         for f in every.touches() {
             assert!(!stays(&f), "{f} stays: Reset app never deletes it");
         }
-        for f in ["config.json", "dictionary_usage.json", "skills.json", "writing_samples.json", "models/", "llm/", "link_devices.json"] {
+        for f in ["config.json", "dictionary_usage.json", "skills.json", "writing_samples.json", "models/", "llm/", "link_devices.json", "connectors.json", "connector_tools.json", "connectors/"] {
             assert!(stays(f), "{f} stays");
         }
         assert_eq!(every.set_aside_stems().len(), SET_ASIDE.len());
@@ -1212,6 +1273,27 @@ mod tests {
         assert!(Choice::of([Meetings, Notes]).set_aside_stems().contains(&"notes"));
         assert_eq!(Choice::of([History]).set_aside_stems(), ["history"]);
         assert!(Choice::of([Logs, SearchIndex, DictationAudio]).set_aside_stems().is_empty());
+    }
+
+    /// Connector sign-ins (Connectors wave 8): only connectors.json's part
+    /// (the connectors and their settings stay), listed, with what stays of
+    /// the connectors, only while the preview is on — off, nothing of theirs
+    /// is read to measure it.
+    #[test]
+    fn connector_sign_ins_change_only_their_part_and_show_only_with_the_preview() {
+        let c = Choice::of([Kind::ConnectorSignIns]);
+        assert_eq!(c.touches(), BTreeSet::from(["(connectors.json)".to_string()]));
+        assert_eq!(c.set_aside_stems(), Vec::<&str>::new(), "connectors.json never goes whole");
+        let connectors = STAYS.iter().find(|p| p.id == "connectors").unwrap();
+        crate::integrations::connectors::switch_for_test(false);
+        assert!(!listed(Kind::ConnectorSignIns) && listed(Kind::Chats));
+        assert!(!stays_now().contains(&connectors.label));
+        assert_eq!(crate::integrations::connectors::privacy::sign_ins(), 0);
+        assert!(!crate::integrations::connectors::store::touched(), "nothing of the connectors' read with the preview off");
+        crate::integrations::connectors::switch_for_test(true);
+        assert!(listed(Kind::ConnectorSignIns));
+        assert!(stays_now().contains(&connectors.label));
+        crate::integrations::connectors::switch_for_test(false);
     }
 
     #[test]

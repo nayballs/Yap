@@ -1,0 +1,47 @@
+{
+  "name": "connectors-tool-search",
+  "description": "Connectors past the budget: a home connector with 300 more made-up tools, so their schemas don't fit a tenth of the model's context. Chat offers find_tools and use_tool instead (Claude on the Messages API: its own tool search over deferred tools); the model finds list_lights and runs it.",
+  "tags": ["connectors", "connectors-budget"],
+  "connectors": {
+    "servers": [
+      {
+        "name": "Home",
+        "filler": 300,
+        "tools": [
+          {
+            "name": "list_lights",
+            "title": "List lights",
+            "description": "List the house's lights, room by room, and whether each one is on.",
+            "result": "Hall: on\nKitchen: off\nLanding: off\nGreenhouse: on"
+          },
+          {
+            "name": "turn_off_light",
+            "title": "Turn off light",
+            "description": "Turn off the light in a room.",
+            "kind": "changes",
+            "input": { "type": "object", "properties": { "room": { "type": "string" } }, "required": ["room"] },
+            "result": "Turned off."
+          }
+        ]
+      }
+    ]
+  },
+  "turns": [
+    {
+      "user": "Is the hall light on?",
+      "expect": {
+        "connectors": {
+          "reached": ["home__list_lights"],
+          "not_reached": ["home__turn_off_light"],
+          "asked": false
+        },
+        "answer_matches": "\\b(yes|on)\\b",
+        "no_false_claims": true
+      },
+      "soft": {
+        "connectors": { "found": true, "not_tried": ["home__turn_off_light"] },
+        "max_tool_calls": 4
+      }
+    }
+  ]
+}

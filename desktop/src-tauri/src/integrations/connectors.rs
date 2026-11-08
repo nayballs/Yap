@@ -21,6 +21,8 @@
 //!   `budget.rs` how many tools a model gets, and tool search past that;
 //! - `catalog.rs` the bundled list Settings' Discover shows · `import.rs`
 //!   a setup read from Claude Desktop or pasted;
+//! - `privacy.rs` what Delete some of your data, Download your data and
+//!   Report a problem do with them (wave 8);
 //! - `fake.rs` fake servers for the tests.
 //!
 //! **The switch**: everything here is behind `connectors_preview` (config,
@@ -45,6 +47,7 @@ pub mod local;
 pub mod manager;
 pub mod names;
 pub mod oauth;
+pub mod privacy;
 pub mod refresh;
 pub mod remote;
 pub mod results;
@@ -186,6 +189,20 @@ pub fn manager() -> &'static Manager {
             });
             new_manager()
         })
+    }
+}
+
+/// Connector `id`'s status, without starting the manager when nothing has
+/// connected yet in this run (then it waits to start: Idle). For Report a
+/// problem's counts.
+pub(crate) fn status_if_started(id: &str) -> Status {
+    #[cfg(test)]
+    {
+        manager().status(id)
+    }
+    #[cfg(not(test))]
+    {
+        MANAGER.get().map_or(Status::Idle, |m| m.status(id))
     }
 }
 

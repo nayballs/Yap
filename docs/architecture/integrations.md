@@ -71,7 +71,7 @@ The token-authenticated local API, Yap's MCP server (`yap.exe mcp`) and adding i
   engine"), and those runs reach this. Below.
 - **`integrations/connectors.rs`** (+ `connectors/`: `store`, `cache`, `vault`,
   `manager`, `local`, `remote` + `remote/legacy`, `names`, `schema`, `results`,
-  `call`, `catalog` + `catalog.json`, `import`, `fake`, `tests`) — **connectors
+  `call`, `catalog` + `catalog.json`, `import`, `privacy`, `fake`, `tests`) — **connectors
   (preview, 2026-11-08)**: the other direction, Yap as an MCP client of
   servers the person adds. Below.
 
@@ -82,8 +82,9 @@ this PC, and Yap keeps its tools for Chat, the Voice Assistant and plan chats
 to use. Waves 1 (the core and programs), 2 (links with tokens), 3 (signing
 in through the browser), 4 (the tools in Chat's loop,
 [below](#connectors-in-chat-wave-4)), 5 (Settings → Connectors and its
-catalogue, [below](#settings--connectors-wave-5-2026-11-08)) and 7 (plan
+catalogue, [below](#settings--connectors-wave-5-2026-11-08)), 7 (plan
 chats, through Yap's run endpoint: [below](#connectors-in-plan-chats-wave-7))
+and 8 (privacy and evaluations: [below](#connectors-and-your-data-wave-8))
 are built; the rest come after.
 
 - **The switch** (`connectors::enabled`): `connectors_preview` in config.json
@@ -320,7 +321,7 @@ are built; the rest come after.
   (1,100-character parts, at most 8 — room for a sign-in's two JWTs and a
   client secret), never in a file, the log or the page (`Secrets`' and
   `Grant`'s `Debug` name which there are); the uninstaller removes all 24 ×
-  8 names. A test run keeps them in its data folder's
+  8 names ("Delete the application data", below). A test run keeps them in its data folder's
   `connector-secrets.e2e.json`; unit tests in memory, and one test uses the
   real store under names of its own and removes them.
 - **Commands** (wave 5's Settings and wave 4's loop build on them):
@@ -356,8 +357,8 @@ are built; the rest come after.
   none.
 - **The log**: the connector's id, outcomes, timings, counts and the tool's
   name at `info`; never its name, a path, a command line, arguments, a
-  result, stderr or a secret (`log_privacy.rs` holds `args`, `arguments`,
-  `result_text` and `stderr` to it).
+  result, stderr or a secret (`log_privacy.rs` holds every connectors module
+  to it: wave 8, below).
 - **Tests**: unit tests per part (names, schemas, results, the store, the
   cache's defaults and rug pulls, the vault — and the real Credential
   Manager under test names —, a command line's quoting, fingerprint and
@@ -696,6 +697,100 @@ chips and result as wave 4's; Claude Code only asks.
   allowed; the card light and dark, Allow once, Deny; a write asking after a
   connector's result; ■ Stop telling the server; a tool and then the connector turned off, not listed,
   each a new session; a Code chat's session and an agent's run with none.
+
+### Connectors and your data (wave 8)
+
+What Yap's privacy features do with connectors (`connectors/privacy.rs`;
+[privacy-receipts.md](./privacy-receipts.md)). With the preview off none of
+them reads a connectors file, the vault or a status: the export has no
+connectors file, Report a problem no `connectors`, and the dialogs don't
+list them.
+
+- **Which kind of data they are.** A connector — its address or command
+  line, how it signs in, where Yap uses it, each tool's setting — is a
+  **setting**: the person set it up, as they set up a Skill or a folder
+  rule, so it stays through Delete some of your data and Reset app (`STAYS`'
+  "Your connectors, their tools' settings and any token you pasted":
+  connectors.json, connector_tools.json — a cache — and `connectors/`). So
+  do the keys the person gave on purpose — a pasted token, request headers,
+  a program's secret variables, their own client's secret —, as
+  config.json's API keys do. A **browser sign-in** is data: what a service
+  granted to Yap's AI tools. It's a kind of its own, **Connector sign-ins**
+  (`reset::Kind::ConnectorSignIns`, under "Chat and memory", listed only
+  with the preview on): each one ended as Sign out ends it
+  (`privacy::sign_out_all`: any sign-in under way cancelled, its connection
+  stopped, the refresh token revoked where the server has a
+  `revocation_endpoint`, all at once and 10 s at most in all, then its
+  tokens gone from the vault and connectors.json saying signed out whatever
+  the server answered — `oauth::forget`). It changes only connectors.json's
+  part (`(connectors.json)`: `signedIn`, the scopes, `wants`); the
+  connector, its tools' settings, Yap's registration and the person's own
+  client stay, so signing in again is one click. Reset app is every kind, so
+  it signs out of every connector too (and keeps the list). The account's
+  own sign-in, ChatGPT's and the calendars' stay, as before: Yap's own setup,
+  not a service's grant to tools.
+- **Download your data**: `connectors/connectors.json` (`privacy::export`),
+  an allow-list of each connector — its name, a link's address without its
+  query, user name or fragment (and the older HTTP+SSE one), its header
+  **names**, a program's command, resolved path, arguments and variables (a
+  plain one's value, a secret one's "(kept in Windows Credential Manager)";
+  any value with a key's shape left out), how it signs in (in the browser:
+  signed in or ended, its server, the scopes), where Yap uses it, each
+  tool's setting and kind, when it was added and last used. The export
+  never reads the vault: a test seeds a token, a header's value, a secret
+  variable, a sign-in's two tokens and both clients' secrets and finds none
+  in any file, and reads the export's code for the vault.
+- **Report a problem**: `settings.json`'s `connectors` (`privacy::counts`):
+  how many, links, programs, off, signing in in the browser, signed in,
+  ended, with a token or headers, from the catalogue, failing (Couldn't
+  connect or Stopped, as this run's manager has them — it isn't started to
+  ask). Numbers only (`diagnostics::connector_counts` drops anything else),
+  never a name, an address, a command or a tool. `connectorsPreview` and
+  `connectorsInMeetings` are copied as switches.
+- **The uninstaller** ("Delete the application data", the custom NSIS
+  installer: [updates-and-release.md](./updates-and-release.md)) removes
+  every name the vault can use, `yap-connector-c1-1` … `yap-connector-c24-8`
+  `.com.yap.dictation`, by `CredDeleteW` as it removes the account's, the
+  calendars' and ChatGPT's. A unit test holds the loop's bounds to the
+  vault's (`PARTS`, `store::MAX`) and another deletes, by the uninstaller's
+  very names and call, what the real Credential Manager keeps under names
+  of its own (`the_uninstallers_names_remove_what_the_vault_keeps`). A
+  portable Yap adds its data folder's hash to the names; it has no
+  uninstaller.
+- **The log** (`log_privacy.rs` `connectors_log_ids_counts_and_outcomes_only`):
+  every `info!`/`warn!`/`error!` in `integrations/connectors*`,
+  `chat/tools/connectors*` and `integrations/claude_live/connectors*` is
+  held to more than user content: no field, variable or last part of a path
+  named like an address, a command line, a variable, a header, a value, a
+  token, a code or a secret, what a server says about itself (its name,
+  version, protocol, instructions, a description or a title), a call's
+  input or answer, or the connector's name. The server's MCP revision is
+  logged only as a date, else "other" (`manager::revision`).
+- **Network receipts**: every request to a connector's server and every
+  sign-in request goes through `net.rs` (`Purpose::Connector`,
+  `Purpose::ConnectorSignIn`: "Connector · A connector", the catalogue's
+  name for one from it), the host only; a test adds a link with a path, a
+  query, a token, a header and a name the person typed, and finds none of
+  them in the receipts.
+- **Evaluations** (`ai/eval/connectors.rs`, `evals/scenarios/connectors-*.json`;
+  [model-evals.md](../model-evals.md#connectors---tag-connectors)): made-up
+  MCP servers on this PC, added through `connector_add` in the run's own
+  data folder and test mode's vault file, any model given them
+  (`eval::connectors_forced`, unless a scenario keeps Yap's rule), the
+  person's answer to a card the scenario's. Six scenarios: a read when
+  asked, no write nobody asked for, an injected result (and a server's
+  planted `instructions`) acted on in no way, the right one of three, tool
+  search past the budget, and a write that asks and is refused.
+- **Tests**: `connectors/privacy.rs`'s (the export without a vault value,
+  the counts, signing every connector out — the tokens gone, the
+  connectors, a pasted token, a secret variable, the registration and the
+  own client kept — and nothing read with the preview off), `reset.rs`'s
+  (the kind's part, listed only with the preview on), `diagnostics.rs`'s,
+  `export.rs`'s, `vault.rs`'s, `log_privacy.rs`'s, `tests.rs`'s receipts,
+  `eval/connectors.rs`'s (the stand-in, its checks, its servers added as the
+  person would) and `your-data-connectors.spec.js` (Download your data,
+  Report a problem, Connector sign-ins, Reset app, on a seeded browser
+  sign-in and a header connector).
 
 ## Claude Code runs' endpoint (`integrations/claude_live.rs`, 2026-11-07)
 

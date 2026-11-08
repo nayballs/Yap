@@ -55,6 +55,31 @@ tables, method and how anyone can run it and send theirs:
 
 ## What works
 
+**Connectors (preview, off by default, 2026-11-08,
+[integrations.md](./integrations.md#connectors-preview))**: Yap as an MCP
+client of servers the person adds — a link (a token, headers, or signed in
+in the browser) or a program on this PC —, their tools in Chat, the Voice
+Assistant and plan chats behind Yap's own consent and card, Settings →
+Connectors with its bundled catalogue, Import from Claude Desktop. **Wave 8
+(privacy and evals)**: their browser sign-ins a kind of their own in Delete
+some of your data and Reset app (the connectors stay), the export's
+`connectors/connectors.json` without a secret, Report a problem's counts,
+the uninstaller's vault names, the log and the receipts held to ids, hosts
+and counts. **How it was tested:** unit tests for every part (against
+`fake.rs`'s stdio, HTTP and OAuth fakes; the real Credential Manager under
+test names, and the uninstaller's `CredDeleteW` names on them); e2e
+`connectors-core`, `connectors-signin`, `connectors`, `connectors-discover`,
+`chat-connectors`, `plan-connectors` and `your-data-connectors.spec.js`
+against `fake-mcp.js` and `fake-mcp-oauth.js`; the evaluations' six
+`connectors-*` scenarios through Chat's own code on made-up servers, run
+only on a scripted fake model so far (the right path passes all six, an
+unsafe one fails all six). **Not yet tried**: any real sign-in (Notion,
+Linear, Atlassian…: the maintainer's), a real program connector (Node's
+`npx` Files server), a real model on the evaluations (Groq's free plan, the
+on-device model: commands in [model-evals.md](../model-evals.md#connectors---tag-connectors)),
+and Yap's client ID metadata document, which isn't hosted yet
+(`client::METADATA_URL` unset: Linear and Vercel wait for it).
+
 **Your Claude plan, Yap Code, Code chats and Markdown files** (2026-11-07,
 [ai-models.md](./ai-models.md#your-claude-plan-2026-11-07), [yap-code.md](./yap-code.md),
 [notes.md](./notes.md#markdown-files-in-yap-notesmd_filers-2026-11-07)). Yap
@@ -1531,6 +1556,14 @@ quote for a question asked out loud.
   chat can't be renamed from the Notes view (the notepad's Past chats only).
   The on-device Qwen3.5-4B shows another picture when the one asked for
   isn't there (Find and show's evaluation, 3/6, above).
+- **Connectors (preview)**: no real sign-in, program or model tried yet
+  (above); Yap's client ID metadata document not hosted (the maintainer
+  approves where); the uninstaller's removal of the vault's names checked in
+  a unit test against names of its own, not by running the installer; a
+  portable Yap's vault names (a hash of its data folder in them) aren't the
+  uninstaller's — a portable Yap isn't uninstalled; a revocation that takes
+  longer than 10 s during Delete some of your data or Reset app ends the
+  sign-in here only (the service's own page may still list Yap).
 - **Your Claude plan, Yap Code and Code chats** (2026-11-07): tried for real only
   as above (a plan chat, one agent, the usage limits, a spoken report).
   - **Not yet tried on a real run**: an agent paid by key; an agent's cost across

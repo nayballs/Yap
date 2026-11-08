@@ -783,15 +783,26 @@ pub async fn sign_out(id: &str) -> bool {
             _ => confirmed = false,
         }
     }
-    let _ = vault::update(id, |s| s.grant = None);
+    forget(id);
+    tracing::info!(connector = id, confirmed, "connectors: signed out");
+    confirmed
+}
+
+/// Connector `id`'s browser sign-in **forgotten here**: its tokens gone from
+/// the vault, connectors.json saying it's signed out. Its registration, the
+/// person's own client (and its secret) and a pasted token stay. What
+/// [`sign_out`] ends with, and what "Connector sign-ins" (Delete some of your
+/// data) makes sure of when a server's revocation is still waiting.
+pub fn forget(id: &str) {
+    if vault::load(id).grant.is_some() {
+        let _ = vault::update(id, |s| s.grant = None);
+    }
     let _ = store::update(id, |c| {
         c.auth.signed_in = false;
         c.auth.expired = false;
         c.auth.wants.clear();
         c.auth.scopes.clear();
     });
-    tracing::info!(connector = id, confirmed, "connectors: signed out");
-    confirmed
 }
 
 /// **The person's own client** for connector `id` (`client_id` empty:

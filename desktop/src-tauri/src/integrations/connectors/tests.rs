@@ -330,6 +330,31 @@ async fn a_link_lists_and_calls_with_its_headers_and_every_request_has_its_recei
     assert!(vault::load(&v.id).is_empty() && cache::get(&v.id).is_none());
 }
 
+/// The receipts name the host and "A connector", never the name the person
+/// typed, the link's path or query, a token or a header's value (wave 8).
+#[tokio::test]
+async fn a_links_receipts_hold_its_host_only() {
+    on();
+    let srv = fake::http(Mode::Answer);
+    let spec = Spec {
+        name: "Robin's private server".into(),
+        url: Some(srv.url("/mcp?workspace=FAKE-ws-7&key=FAKE-query-key")),
+        token: Some("tok-FAKE-receipt-1".into()),
+        headers: vec![Pair { name: "X-Api-Key".into(), value: "key-FAKE-receipt-2".into(), secret: None }],
+        ..Default::default()
+    };
+    let v = connector_add(spec).await.unwrap();
+    assert!(matches!(v.status.status, Status::Connected { .. }), "{:?}", v.status);
+    call_tool(&v.id, "list_lights", &json!({}), None).await.unwrap();
+    let entries = crate::privacy::net::entries();
+    assert!(entries.iter().any(|e| e.kind == "connector" && e.label == "Connector · A connector" && e.host == "127.0.0.1"), "{entries:?}");
+    let text = serde_json::to_string(&crate::privacy::net::entries()).unwrap();
+    for never in ["Robin", "/mcp", "workspace", "FAKE-ws-7", "FAKE-query-key", "tok-FAKE-receipt-1", "key-FAKE-receipt-2"] {
+        assert!(!text.contains(never), "{never} in the receipts: {text}");
+    }
+    connector_remove(v.id.clone()).await.unwrap();
+}
+
 #[tokio::test]
 async fn a_token_turned_down_says_so_and_no_token_means_a_sign_in() {
     on();
