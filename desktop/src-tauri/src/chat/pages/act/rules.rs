@@ -58,6 +58,11 @@ pub struct Element {
     pub search: bool,
     /// An editable region (`contenteditable`): typing goes in at its caret.
     pub editable: bool,
+    /// **A web component Yap can't see inside**: a custom element with no
+    /// open shadow root and nothing of its own, yet drawn — its inside in a
+    /// closed shadow root, most likely, which no script outside reaches
+    /// (`script.rs`; an open root's elements are listed as the page's).
+    pub closed: bool,
 }
 
 /// A form on the page: whether it has a password field (a sign-in form),
@@ -123,6 +128,9 @@ pub struct Described {
     /// been read since it loaded): a ref past it never existed.
     pub refs: u32,
 }
+
+/// How an element whose inside Yap can't see is told ([`Element::closed`]).
+pub const CLOSED: &str = "a web component whose inside the page keeps closed: Yap can't see or reach what's in it";
 
 /// The most elements a read lists.
 pub const MAX_ELEMENTS: usize = 150;
@@ -551,6 +559,9 @@ pub fn element_lines(snap: &Snapshot) -> String {
         }
         if e.submit {
             line.push_str(" (submits the form)");
+        }
+        if e.closed {
+            line.push_str(&format!(" ({CLOSED})"));
         }
         if let Some(w) = why {
             line.push_str(&format!(" (Yap never types here: {w})"));

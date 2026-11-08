@@ -196,13 +196,14 @@ async fn element(t: &OpenTab, r: Option<u32>, doing: &str) -> Result<(rules::Des
 }
 
 /// **No element `r`**, said as it is (`refs`: the highest ref the page has
-/// given): a page not read since it loaded (refs from another page don't
-/// hold), a ref past any it gave (8 Nov 2026: `[99999]` was told "it
-/// changed, or it went"), or one it gave that's gone. Pure.
+/// given): a page not read since it loaded — it has no refs at all, so that
+/// one never existed here (8 Nov 2026, Yap Lab: "it hasn't been read since
+/// it loaded" didn't say so) —, a ref past any it gave (`[99999]` was told
+/// "it changed, or it went"), or one it gave that's gone. Pure.
 pub fn no_element(r: u32, refs: u32, doing: &str) -> Value {
     if refs == 0 {
         failed(
-            format!("There's no element [{r}] on this page: it hasn't been read since it loaded (refs from another page don't hold). Read it: browser_read with mode \"elements\", or browser_find."),
+            format!("No element [{r}]: this page hasn't been read yet, so it has no refs — read it with browser_read mode \"elements\" (or browser_find) first."),
             format!("Couldn't {doing}: no element [{r}] on this page"),
         )
     } else if r > refs {
@@ -428,12 +429,20 @@ async fn click(turn: &mut crate::web::Turn, args: &Value, live: Option<crate::ch
     }
     backend::settle(&t.key, mark).await;
     let mut data = after(turn, &t, &was).await;
+    // A web component whose inside is closed: what changed in there can't
+    // be seen, so "nothing" would be a guess.
+    if el.closed && data["changed"] == "nothing visible changed" {
+        data["changed"] = json!(format!("nothing Yap can see changed — it's {}; read the page again, or look at it, to know what it did", rules::CLOSED));
+    }
     if asked {
         data["asked"] = json!(true);
         data["allowed"] = json!(true);
     }
     if at.is_some() {
         data["at"] = json!({ "x": args["x"], "y": args["y"], "ref": el.r, "role": el.role });
+        if el.closed {
+            data["at"]["closed"] = json!(true);
+        }
     }
     let display = if asked { format!("Clicked ‘{label}’ on {site} (you allowed it)") } else { format!("Clicked ‘{label}’ on {site}") };
     json!({ "success": true, "data": data, "note": NOTE, "displayText": display })
@@ -501,6 +510,14 @@ async fn type_into(turn: &mut crate::web::Turn, args: &Value, live: Option<crate
         );
     }
     if !rules::takes_text(&el) {
+        // (A web component with its inside closed: no field in it can be
+        // reached, by ref or by the focus — said so, not "click it".)
+        if el.closed {
+            return failed(
+                format!("[{}] ‘{label}’ is {}, so it can't type in a field inside it either. Tell the user to type there themselves in the panel beside the chat.", el.r, rules::CLOSED),
+                format!("Couldn't type in ‘{label}’: its inside is closed to Yap"),
+            );
+        }
         return failed(format!("[{}] ‘{label}’ isn't a field you can type in (it's a {}): click it instead.", el.r, el.role), format!("Couldn't type in ‘{label}’: not a field"));
     }
     if let Some(r) = off_limits(&d, &el, &label, "type in") {

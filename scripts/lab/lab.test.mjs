@@ -291,6 +291,12 @@ describe('a --fake run, end to end', { timeout: 900_000 }, () => {
     const img = readPng(fs.readFileSync(light.file));
     assert.ok(coloursIn(img, 0, Math.round(80 * light.dpr)) > 4, 'the question at the top');
     assert.ok(coloursIn(img, img.height - Math.round(160 * light.dpr), img.height) > 4, 'the answer’s end at the bottom');
+    // Nothing floats over its top-left corner (8 Nov 2026: the list's button
+    // sat there, half cut off, in every thread shot).
+    const corner = new Set();
+    const side = Math.round(24 * light.dpr);
+    for (let y = 0; y < side; y++) for (let x = 0; x < side; x++) corner.add(img.data.readUInt32BE((y * img.width + x) * 4));
+    assert.equal(corner.size, 1, `${corner.size} colours in the thread shot's top-left corner`);
     // Light and dark really are.
     assert.ok(meanLuma(img) > meanLuma(readPng(fs.readFileSync(dark.file))) + 80, 'the dark shot is darker');
     assert.equal(light.height, dark.height);

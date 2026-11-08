@@ -104,10 +104,13 @@ async fn a_form_is_filled_and_sent_and_the_page_after_is_told() {
     assert!(t.seen(), "the page after is web content");
     // The tab said it's acting.
     assert!(log.0.lock().unwrap().iter().any(|e| matches!(e, Event::Acting { key } if key == "page:https://rail.example.com")));
-    // An old ref on the new page: there's nothing there now, and why.
+    // An old ref on the new page: there's nothing there now, and why — a
+    // page not read yet has no refs at all (8 Nov 2026, Yap Lab: the old
+    // words didn't say the ref never existed there).
     let r = run(&mut t, CLICK, json!({ "ref": 3 }), &log).await;
     assert_eq!(r["success"], false);
-    assert!(r["error"].as_str().unwrap().contains("it hasn't been read since it loaded (refs from another page don't hold)"), "{r}");
+    assert_eq!(r["error"], "No element [3]: this page hasn't been read yet, so it has no refs — read it with browser_read mode \"elements\" (or browser_find) first.", "{r}");
+    assert_eq!(r["displayText"], "Couldn't click: no element [3] on this page", "{r}");
     crate::chat::pages::sim::install(None);
 }
 
@@ -634,4 +637,83 @@ async fn asked_out_loud_plain_actions_run_a_risky_click_takes_a_spoken_yes_and_a
     assert_eq!(r["displayText"], "Didn't type in ‘Password’: Yap never types a password");
     assert!(crate::chat::pages::sim::with(|b| b.log.typed.clone()).unwrap().is_empty(), "nothing typed");
     crate::chat::pages::sim::install(None);
+}
+
+/// A docs site built of web components (made up; 8 Nov 2026, Yap Lab on
+/// MDN's): the search button in an open shadow root opens a dialog whose
+/// box is in a nested root; a sign-in component's password field and a
+/// code field labelled from its own root (the page has another element
+/// with that id, "Nickname"); a closed root's field. The stand-in reads
+/// declarative open roots (`sim::open_shadow_roots`) as the element script
+/// walks open ones.
+const DOCS: &str = r#"<html><head><title>Tables - Example Docs</title></head><body>
+  <span id="code-l" hidden>Nickname</span>
+  <docs-search><template shadowrootmode="open"><button type="button" data-sim-show="dlg">Search</button>
+    <dialog id="dlg" hidden><docs-box><template shadowrootmode="open"><form action="/search" role="search"><label for="q">Search the docs</label><input id="q" type="search" name="q"></form></template></docs-box></dialog>
+  </template></docs-search>
+  <main><h1>Tables</h1><p>How to lay out a table of data.</p>
+  <docs-login><template shadowrootmode="open"><form action="/session" method="post"><label for="pw">Password</label><input id="pw" type="password" name="pw"><button>Sign in</button></form></template></docs-login>
+  <docs-verify><template shadowrootmode="open"><span id="code-l">Verification code</span><input name="v" aria-labelledby="code-l"></template></docs-verify>
+  <docs-closed><template shadowrootmode="closed"><input name="c" aria-label="Closed field"></template></docs-closed>
+  </main></body></html>"#;
+
+/// **Inside open shadow roots, as in the light DOM**: their fields are
+/// listed and found, a click there opens what it opens (said), typing goes
+/// in and Enter sends it through the submit check (a search: no card); a
+/// password field and a code field labelled in their own root are refused
+/// as they would be anywhere; nothing in a closed root is seen.
+#[tokio::test]
+async fn web_components_open_roots_are_read_and_acted_on_and_their_secret_fields_refused() {
+    let mut p = BTreeMap::new();
+    p.insert("https://docs.example.com/guide".to_string(), DOCS.to_string());
+    p.insert("https://docs.example.com/search?q=table".to_string(), "<html><head><title>Search - Example Docs</title></head><body><main><p>3 pages about tables.</p></main></body></html>".to_string());
+    crate::chat::pages::sim::install(Some(Browser::new(&p)));
+    crate::chat::pages::backend::opened("https://docs.example.com/guide", "").await;
+    let mut t = turn("Search the docs for table on https://docs.example.com/guide, and sign me in, my password is hunter2");
+    let log = Log::default();
+    let page = read(&mut t).await;
+    let lines = page["data"]["elements"].as_str().unwrap().to_string();
+    assert!(lines.contains("button \"Search\""), "{lines}");
+    assert!(lines.contains("textbox \"Password\" (Yap never types here: a password)"), "{lines}");
+    assert!(lines.contains("textbox \"Verification code\" (Yap never types here: a security code)"), "{lines}");
+    assert!(!lines.contains("Closed field") && !lines.contains("Nickname") && !lines.contains("Search the docs"), "a closed root, the other id, a closed dialog: {lines}");
+    // The secret fields: refused, nothing typed.
+    let r = run(&mut t, TYPE, json!({ "ref": ref_named(&page, "Password"), "text": "hunter2" }), &log).await;
+    assert_eq!(r["displayText"], "Didn't type in ‘Password’: Yap never types a password", "{r}");
+    let r = run(&mut t, TYPE, json!({ "ref": ref_named(&page, "Verification code"), "text": "123456" }), &log).await;
+    assert_eq!(r["displayText"], "Didn't type in ‘Verification code’: Yap never types a security code", "{r}");
+    assert!(crate::chat::pages::sim::with(|b| b.log.typed.clone()).unwrap().is_empty(), "nothing typed");
+    // The search button: its dialog opens, said so.
+    let r = run(&mut t, CLICK, json!({ "ref": ref_named(&page, "Search") }), &log).await;
+    assert_eq!(r["success"], true, "{r}");
+    assert!(r["data"]["changed"].as_str().unwrap().starts_with("a dialog opened"), "{r}");
+    // Its box, found; typed in; Enter sends it — a search, so no card.
+    let found = crate::chat::pages::execute(&mut t, crate::chat::pages::FIND, &json!({ "query": "Search the docs" }), &Ctx::quiet(Gate::Show, true)).await.result;
+    let line = found["data"]["matches"].as_str().unwrap().lines().find(|l| l.contains("searchbox \"Search the docs\"")).unwrap_or_else(|| panic!("{found}")).to_string();
+    let boxed: u32 = line.trim_start_matches('[').split(']').next().unwrap().parse().unwrap();
+    let r = run(&mut t, TYPE, json!({ "ref": boxed, "text": "table" }), &log).await;
+    assert_eq!(r["displayText"], "Typed in ‘Search the docs’ on docs.example.com", "{r}");
+    let r = run(&mut t, KEY, json!({ "keys": "Enter" }), &log).await;
+    assert_eq!(r["success"], true, "{r}");
+    assert!(r["data"]["changed"].as_str().unwrap().starts_with("went to docs.example.com/search?q=table"), "{r}");
+    assert!(r["data"]["asked"].is_null(), "a search asks nothing: {r}");
+    assert!(!log.0.lock().unwrap().iter().any(|e| matches!(e, Event::Confirm(_))), "no card");
+    crate::chat::pages::sim::install(None);
+}
+
+#[test]
+fn a_web_component_closed_to_yap_and_a_ref_on_an_unread_page_are_said_as_they_are() {
+    // (A custom element with nothing of its own and no open root: its
+    // inside is closed — its line says so.)
+    let snap = rules::Snapshot {
+        elements: vec![rules::Element { r: 4, role: "button".into(), name: "Search".into(), closed: true, form: -1, ..Default::default() }],
+        ..Default::default()
+    };
+    assert_eq!(rules::element_lines(&snap), format!("[4] button \"Search\" ({})", rules::CLOSED));
+    // A page not read yet has no refs at all; a read one says how far they go.
+    assert_eq!(
+        no_element(9999, 0, "click")["error"],
+        "No element [9999]: this page hasn't been read yet, so it has no refs — read it with browser_read mode \"elements\" (or browser_find) first."
+    );
+    assert_eq!(no_element(9999, 812, "click")["error"], "There's no element [9999]: refs on this page go up to 812. Use one from browser_read with mode \"elements\" or browser_find.");
 }

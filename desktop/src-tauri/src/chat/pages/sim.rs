@@ -26,9 +26,18 @@
 //! hidden ones too, so a banner going doesn't renumber the rest). What it
 //! does: a link goes to its address; a submit button or Enter in a field
 //! submits its form as a GET (its fields in the query); a checkbox toggles; a
-//! select takes the option with the words typed. Two attributes stand in for
-//! a page's own script: `data-sim-hide="<id>"` (clicking it hides that
-//! element: a cookie banner's button) and `data-sim-go="<address>"`.
+//! select takes the option with the words typed. Three attributes stand in
+//! for a page's own script: `data-sim-hide="<id>"` (clicking it hides that
+//! element: a cookie banner's button), `data-sim-show="<id>"` (clicking it
+//! shows that hidden element: a search dialog opening) and
+//! `data-sim-go="<address>"`.
+//!
+//! **Web components**: a declarative open shadow root (`<template
+//! shadowrootmode="open">`) is read as part of the page, in its host — as
+//! the element script walks open roots — its own ids first for
+//! `aria-labelledby` and `<label for>`, and a field's host's `aria-label`
+//! when it has no label; a closed one isn't seen at all
+//! ([`open_shadow_roots`]).
 //!
 //! A page's address finds its HTML by its query (`results?from=A&to=B`: those
 //! pairs among the address's, in any order, any case — a form's other fields
@@ -176,6 +185,72 @@ fn pairs(url: &str) -> Vec<(String, String)> {
 
 const NOT_FOUND: &str = "<!doctype html><html><head><title>Not found</title></head><body><main><h1>Not found</h1><p>There's no page at this address.</p></main></body></html>";
 
+/// What an open shadow root's content stands in: an element of its own,
+/// in its host, for the root's own ids and labels ([`open_shadow_roots`]).
+const SHADOW_ROOT: &str = "sim-shadow-root";
+
+/// **A page's open shadow roots as its own elements** (the element script
+/// walks them: `pages.rs` `deep_js!`): a declarative shadow root —
+/// `<template shadowrootmode="open">` (or the older `shadowroot`) — becomes
+/// a [`SHADOW_ROOT`] element around its content, in its host, nested ones
+/// too; a closed one stays a template, whose content no selector reaches,
+/// as no script outside a closed root does. Pure.
+pub fn open_shadow_roots(html: &str) -> String {
+    let lower = html.to_ascii_lowercase();
+    if !lower.contains("shadowroot") {
+        return html.to_string();
+    }
+    // Where a tag that starts at `p` ends (after its `>`, quotes respected).
+    let tag_end = |p: usize| -> Option<usize> {
+        let mut quote: Option<u8> = None;
+        for (k, b) in lower.as_bytes()[p..].iter().enumerate() {
+            match (quote, *b) {
+                (Some(q), c) if c == q => quote = None,
+                (None, b'"' | b'\'') => quote = Some(*b),
+                (None, b'>') => return Some(p + k + 1),
+                _ => {}
+            }
+        }
+        None
+    };
+    // A template tag's shadow root mode ("open", "closed"), if it makes one.
+    let mode = |tag: &str| -> Option<String> {
+        let at = tag.find("shadowrootmode").map(|i| i + "shadowrootmode".len()).or_else(|| tag.find("shadowroot").map(|i| i + "shadowroot".len()))?;
+        let rest = tag[at..].trim_start().strip_prefix('=')?.trim_start();
+        Some(rest.trim_start_matches(['"', '\'']).chars().take_while(|c| c.is_ascii_alphabetic()).collect())
+    };
+    let ends_name = |s: &str| s.starts_with(|c: char| c == '>' || c == '/' || c.is_ascii_whitespace());
+    let mut out = String::with_capacity(html.len() + 64);
+    let mut stack: Vec<bool> = Vec::new();
+    let (mut last, mut i) = (0usize, 0usize);
+    while let Some(p) = lower[i..].find('<').map(|p| p + i) {
+        let rest = &lower[p..];
+        if rest.strip_prefix("</template").is_some_and(ends_name) {
+            let Some(end) = tag_end(p) else { break };
+            if stack.pop() == Some(true) {
+                out.push_str(&html[last..p]);
+                out.push_str(&format!("</{SHADOW_ROOT}>"));
+                last = end;
+            }
+            i = end;
+        } else if rest.strip_prefix("<template").is_some_and(ends_name) {
+            let Some(end) = tag_end(p) else { break };
+            let open = mode(&lower[p..end]).as_deref() == Some("open");
+            stack.push(open);
+            if open {
+                out.push_str(&html[last..p]);
+                out.push_str(&format!("<{SHADOW_ROOT}>"));
+                last = end;
+            }
+            i = end;
+        } else {
+            i = p + 1;
+        }
+    }
+    out.push_str(&html[last..]);
+    out
+}
+
 /// What makes an element one the model can act on.
 const CANDIDATE: &str = "a[href], button, input, select, textarea, summary, [role=button], [role=link], [role=checkbox], [role=radio], [role=tab], [role=menuitem], [role=switch], [role=combobox], [role=textbox], [role=searchbox], [role=option], [contenteditable]";
 
@@ -201,7 +276,7 @@ impl Browser {
             .map(|(_, h)| h.clone());
         let body = with_query.or_else(|| self.pages.iter().find(|(u, _)| reqwest::Url::parse(u).is_ok_and(|p| p.query().is_none()) && norm(u, false) == bare).map(|(_, h)| h.clone()));
         match body {
-            Some(h) if h.trim_start().starts_with('<') => h,
+            Some(h) if h.trim_start().starts_with('<') => open_shadow_roots(&h),
             Some(text) => format!("<html><body><main><p>{}</p></main></body></html>", text.replace('&', "&amp;").replace('<', "&lt;")),
             None => NOT_FOUND.to_string(),
         }
@@ -322,7 +397,10 @@ impl Browser {
         let page = Page::read(&doc, tab);
         let overlay = |id: &str| {
             let n = doc.select("[id]").nodes().iter().find(|n| n.id_attr().is_some_and(|x| *x == *id)).copied();
+            // (A `<dialog>` is one whatever its role says.)
+            let dialog = n.and_then(|n| n.node_name()).is_some_and(|t| t.eq_ignore_ascii_case("dialog"));
             let kind = match n.and_then(|n| n.attr("role")).map(|r| r.to_ascii_lowercase()).as_deref() {
+                _ if dialog => "dialog",
                 Some("dialog" | "alertdialog") => "dialog",
                 Some("menu") => "menu",
                 Some("listbox" | "tree") => "list",
@@ -757,6 +835,7 @@ impl Browser {
         match op {
             "click" => {
                 let hide = attr("data-sim-hide");
+                let show = attr("data-sim-show");
                 let go = attr("data-sim-go");
                 let href = el.href.clone();
                 let submit = el.submit.then(|| page.submission(&node, None));
@@ -767,6 +846,9 @@ impl Browser {
                 self.tab_mut(key)?.focus = Some(r);
                 if !hide.is_empty() {
                     self.tab_mut(key)?.hidden.insert(hide);
+                }
+                if !show.is_empty() {
+                    self.tab_mut(key)?.shown.insert(show);
                 }
                 if el.role == "checkbox" || el.role == "radio" || kind == "checkbox" || kind == "radio" {
                     let t = self.tab_mut(key)?;
@@ -1162,22 +1244,58 @@ impl<'a> Page<'a> {
         n.text().split_whitespace().collect::<Vec<_>>().join(" ")
     }
 
-    /// The `<label>` words for `node`: `label[for=id]`, else the label it's in.
+    /// The open shadow root `node` is in ([`SHADOW_ROOT`]'s element), if any.
+    fn root_of<'b>(node: &dom_query::NodeRef<'b>) -> Option<dom_query::NodeRef<'b>> {
+        node.ancestors_it(None).find(|a| a.node_name().is_some_and(|n| n.eq_ignore_ascii_case(SHADOW_ROOT)))
+    }
+
+    /// The element with id `id` as `node` sees it: in its own shadow root
+    /// first (as `aria-labelledby` and `label[for]` point), else the page.
+    fn by_id(&self, node: &dom_query::NodeRef, id: &str) -> Option<dom_query::NodeRef<'a>> {
+        let all = self.doc.select("[id]").nodes().to_vec();
+        let root = Self::root_of(node).map(|r| r.id);
+        let has = |n: &dom_query::NodeRef| n.id_attr().is_some_and(|x| *x == *id);
+        all.iter().find(|n| has(n) && Self::root_of(n).map(|r| r.id) == root).or_else(|| all.iter().find(|n| has(n))).copied()
+    }
+
+    /// The `<label>` words for `node`: `label[for=id]` in its own root, else
+    /// the label it's in; a field in a shadow root with none: its host's
+    /// `aria-label` or `label` (as the element script reads them).
     fn label_of(&self, node: &dom_query::NodeRef) -> String {
+        let root = Self::root_of(node).map(|r| r.id);
         if let Some(id) = node.id_attr().filter(|i| !i.is_empty()) {
             for l in self.doc.select("label[for]").nodes() {
-                if l.attr("for").is_some_and(|f| *f == *id) {
+                if l.attr("for").is_some_and(|f| *f == *id) && Self::root_of(l).map(|r| r.id) == root {
                     return Self::text_of(l);
                 }
             }
         }
-        node.ancestors_it(None).find(|a| a.node_name().is_some_and(|n| n.eq_ignore_ascii_case("label"))).map(|l| Self::text_of(&l)).unwrap_or_default()
+        let wrapped = node.ancestors_it(None).find(|a| a.node_name().is_some_and(|n| n.eq_ignore_ascii_case("label"))).map(|l| Self::text_of(&l)).unwrap_or_default();
+        if !wrapped.is_empty() {
+            return wrapped;
+        }
+        let tag = node.node_name().map(|n| n.to_ascii_lowercase()).unwrap_or_default();
+        let field = matches!(tag.as_str(), "input" | "textarea" | "select") || node.has_attr("contenteditable");
+        match Self::root_of(node).and_then(|r| r.parent()).filter(|_| field) {
+            Some(host) => host.attr("aria-label").or_else(|| host.attr("label")).map(|v| v.split_whitespace().collect::<Vec<_>>().join(" ")).unwrap_or_default(),
+            None => String::new(),
+        }
+    }
+
+    /// The words `aria-labelledby` points at (ids in `node`'s own root first).
+    fn labelled_by(&self, node: &dom_query::NodeRef) -> String {
+        let Some(ids) = node.attr("aria-labelledby") else { return String::new() };
+        ids.split_whitespace().filter_map(|id| self.by_id(node, id)).map(|n| Self::text_of(&n)).filter(|t| !t.is_empty()).collect::<Vec<_>>().join(" ")
     }
 
     fn name_of(&self, node: &dom_query::NodeRef) -> String {
         let attr = |k: &str| node.attr(k).map(|v| v.split_whitespace().collect::<Vec<_>>().join(" ")).unwrap_or_default();
         if !attr("aria-label").is_empty() {
             return attr("aria-label");
+        }
+        let by = self.labelled_by(node);
+        if !by.is_empty() {
+            return by;
         }
         let tag = node.node_name().map(|n| n.to_ascii_lowercase()).unwrap_or_default();
         let kind = attr("type").to_ascii_lowercase();
@@ -1621,6 +1739,33 @@ mod tests {
         b.navigate(&key, "https://rail.example.com/results?from=Nowhere").unwrap();
         assert!(b.text(&key).unwrap().text.contains("No trains found"));
         assert_eq!(b.log.visited.len(), 4);
+    }
+
+    #[test]
+    fn open_shadow_roots_are_read_in_their_hosts_and_closed_ones_never() {
+        // (The element script walks open roots: `deep_js!`.) Nested, any
+        // case, either quote; a closed root's template stays one.
+        let html = r#"<x-a><template shadowrootmode="open"><b>A</b><x-b><TEMPLATE ShadowRootMode='open'><i>B</i></TEMPLATE></x-b></template></x-a><x-c><template shadowrootmode="closed"><u>C</u></template></x-c><template><p>plain</p></template>"#;
+        assert_eq!(
+            open_shadow_roots(html),
+            r#"<x-a><sim-shadow-root><b>A</b><x-b><sim-shadow-root><i>B</i></sim-shadow-root></x-b></sim-shadow-root></x-a><x-c><template shadowrootmode="closed"><u>C</u></template></x-c><template><p>plain</p></template>"#
+        );
+        // A page with none: as it was, byte for byte.
+        assert_eq!(open_shadow_roots(HOME), HOME);
+        // Read as the element script reads it: the open roots' fields with
+        // their labels from their own root (an id the page also has
+        // elsewhere), a field with none its host's; the closed one not at all.
+        let page = r#"<html><head><title>Docs</title></head><body><span id="l" hidden>Nickname</span><main>
+          <x-code><template shadowrootmode="open"><span id="l">Verification code</span><input name="v" aria-labelledby="l"></template></x-code>
+          <x-field aria-label="Card number"><template shadowrootmode="open"><input name="n"></template></x-field>
+          <x-shut><template shadowrootmode="closed"><input aria-label="Closed field"></template></x-shut></main></body></html>"#;
+        let mut pages = BTreeMap::new();
+        pages.insert("https://docs.example.com/".to_string(), page.to_string());
+        let mut b = Browser::new(&pages);
+        let key = b.open("https://docs.example.com/");
+        let s = b.snapshot(&key, 5000, 150).unwrap();
+        let named: Vec<(String, Option<&str>)> = s.elements.iter().map(|e| (rules::name_of(e), rules::sensitive(e))).collect();
+        assert_eq!(named, [("Verification code".to_string(), Some("a security code")), ("Card number".to_string(), Some("payment card details"))]);
     }
 
     #[test]

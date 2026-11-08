@@ -21,7 +21,8 @@
 //   pictures themselves (PNGs: `FORT_JOY_MAP` 320 × 240, the art 400 × 225).
 // - Acting on pages (chat/pages/act.rs): rail.example.com, a made-up rail
 //   site — a journey form, its results by the stations asked for, a payment
-//   page with card fields, a sign-in page.
+//   page with card fields, a sign-in page; docs.example.com, a docs page of
+//   web components (open shadow roots, nested, and a closed one).
 // - `/probe/…` (outside the stand-in): an address on this PC that a page
 //   beside the chat must never reach, its own or its workers' (recorded as
 //   service "probe"); `wiki.example.com/probe-sw.js`, a service worker that
@@ -251,6 +252,55 @@ PAGES['wiki.example.com/prefs'] = `<!doctype html><html><head><title>Search pref
     });
   </script></main></body></html>`;
 PAGES['wiki.example.com/wiki/search'] = `<!doctype html><html><head><title>Search results - Example Wiki</title></head><body><main><h1>Search results</h1><p>2 pages about keepers.</p></main></body></html>`;
+
+// A docs site built of web components (made up; Yap Lab met MDN's, 8 Nov
+// 2026): its header search is a custom element whose button is in an open
+// shadow root, opening a modal <dialog> there with the search box in a
+// nested component's own root (a search form, as the box's label says);
+// a sign-in component's password field in its root; a code field labelled
+// by an id in its own root while the page has another element with that id
+// ("Nickname", hidden) — read from the wrong root it would pass as a
+// nickname; a component whose root is closed, which nothing outside sees.
+// The search button sits at the top right (a quarter of the view wide), so
+// a point of the screenshot finds it.
+export const DOCS_URL = 'https://docs.example.com/guide';
+PAGES['docs.example.com/guide'] = `<!doctype html><html><head><title>Tables - Example Docs</title>
+  <style>html,body{margin:0;font:16px sans-serif}docs-search{position:fixed;top:0;right:0;width:25vw;height:12vh;display:block}main{padding:16vh 16px 0}</style></head><body>
+  <span id="code-l" hidden>Nickname</span>
+  <docs-search></docs-search>
+  <main><h1>Tables</h1><p>How to lay out a table of data.</p>
+  <docs-login></docs-login>
+  <docs-verify></docs-verify>
+  <docs-closed></docs-closed>
+  </main>
+  <script>
+    customElements.define('docs-box', class extends HTMLElement {
+      constructor() { super(); this.attachShadow({ mode: 'open' }).innerHTML = '<form action="search" role="search"><label for="q">Search the docs</label> <input id="q" type="search" name="q"></form>'; }
+    });
+    customElements.define('docs-search', class extends HTMLElement {
+      constructor() {
+        super();
+        var r = this.attachShadow({ mode: 'open' });
+        r.innerHTML = '<style>:host{display:block}button{width:100%;height:100%;font:inherit}</style><button type="button"><span>Search</span></button><dialog><docs-box></docs-box></dialog>';
+        // The button's own listener, as a component library's: a click on the host alone does nothing.
+        r.querySelector('button').addEventListener('click', function () {
+          var d = r.querySelector('dialog');
+          d.showModal();
+          d.querySelector('docs-box').shadowRoot.querySelector('input').focus();
+        });
+      }
+    });
+    customElements.define('docs-login', class extends HTMLElement {
+      constructor() { super(); this.attachShadow({ mode: 'open' }).innerHTML = '<form action="session" method="post"><label for="pw">Password</label> <input id="pw" type="password" name="pw"> <button>Sign in</button></form>'; }
+    });
+    customElements.define('docs-verify', class extends HTMLElement {
+      constructor() { super(); this.attachShadow({ mode: 'open' }).innerHTML = '<span id="code-l">Verification code</span> <input name="v" aria-labelledby="code-l">'; }
+    });
+    customElements.define('docs-closed', class extends HTMLElement {
+      constructor() { super(); this.attachShadow({ mode: 'closed' }).innerHTML = '<input name="c" aria-label="Closed field">'; }
+    });
+  </script></body></html>`;
+PAGES['docs.example.com/search'] = `<!doctype html><html><head><title>Search - Example Docs</title></head><body><main><h1>Search results</h1><p>3 pages about tables.</p></main></body></html>`;
 
 // A mountain's article (made up) as a wiki lays one out: its photo in an
 // infobox, lazy-loaded, no alt text, its caption in the infobox's cell, and

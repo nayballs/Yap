@@ -21,7 +21,11 @@
 //   the card's question too, with Allow once / Don't, in step with the card;
 // - Enter in a chat page's message box (an editable region outside any
 //   form) asks first, and typing there goes in after the draft;
-// - browser_tabs switches to a tab beside the chat (by its own number).
+// - browser_tabs switches to a tab beside the chat (by its own number);
+// - a page of web components (open shadow roots, nested; a closed one): its
+//   fields listed, its password and code fields refused as anywhere, a click
+//   at a point on its search button opening its dialog (said so), the box
+//   found, typed in and sent by Enter through the submit check.
 // A model that isn't strong ("fake-chat") gets none of it (chat-pages.spec.js).
 //
 // Nothing leaves the PC: the model is the scripted fake AI
@@ -31,7 +35,7 @@
 // `e2e_page_view_eval` / `e2e_page_views`. Fictional sites only.
 import { test as base, expect, expectStore, setConfig, openView } from './support/fixtures.js';
 import { startFakeLlm } from './support/fake-llm.js';
-import { startFakeWeb, RAIL_URL, RAIL_RESULTS_URL, RAIL_SIGNIN_URL, FORT_JOY_URL, CHAT_URL, BOARD_URL, SMOOTH_URL, PREFS_URL } from './support/fake-web.js';
+import { startFakeWeb, RAIL_URL, RAIL_RESULTS_URL, RAIL_SIGNIN_URL, FORT_JOY_URL, CHAT_URL, BOARD_URL, SMOOTH_URL, PREFS_URL, DOCS_URL } from './support/fake-web.js';
 
 const test = base.extend({
   fakeLlm: [
@@ -526,6 +530,62 @@ test('a click at a point of the screenshot: the element under it, judged as a re
   const refused = lastResult(calls[4]);
   expect(refused).toMatchObject({ success: false, displayText: "Didn't click ‘Password’: Yap never types a password", data: { refused: 'sensitive' } });
   expect(await inPage(yap, BOARD_URL, "document.activeElement ? document.activeElement.id : ''")).not.toBe('pw');
+});
+
+/** The ref of the match named `name` in the turn's latest find (its match lines). */
+function foundRef(request, name) {
+  const found = toolResults(request).reverse().find((r) => typeof r?.data?.matches === 'string');
+  const m = found && new RegExp(`\\[(\\d+)\\] \\w+ "${name}"`).exec(found.data.matches);
+  return m ? Number(m[1]) : 0;
+}
+
+test('web components: inside open shadow roots as in the light DOM — fields listed, secrets refused, a click opens their dialog, the box typed in and sent', async ({ yap, main, fakeLlm }) => {
+  // (8 Nov 2026, Yap Lab on MDN: its search is a web component — the click
+  // hit the host and "nothing visible changed", typing was "not a field", a
+  // find found nothing.)
+  await setConfig(yap, main, seeingConfig(fakeLlm));
+  const from = fakeLlm.requests.length;
+  const SAID = 'I searched the docs for table.';
+  fakeLlm.scriptChat([
+    { tools: [{ name: 'browser_navigate', args: { url: DOCS_URL } }] },
+    { tools: [{ name: 'browser_read', args: { mode: 'elements' } }] },
+    { tools: [{ name: 'browser_type', args: (r) => ({ ref: refIn(r, 'Password'), text: 'hunter2' }) }] },
+    { tools: [{ name: 'browser_type', args: (r) => ({ ref: refIn(r, 'Verification code'), text: '123456' }) }] },
+    { tools: [{ name: 'browser_screenshot', args: {} }] },
+    // The search button: the top right, a quarter of the view wide.
+    { tools: [{ name: 'browser_click', args: (r) => ({ x: Math.round(shotSize(r)[0] * 0.875), y: Math.round(shotSize(r)[1] * 0.06) }) }] },
+    { tools: [{ name: 'browser_find', args: { query: 'Search the docs' } }] },
+    { tools: [{ name: 'browser_type', args: (r) => ({ ref: foundRef(r, 'Search the docs'), text: 'table' }) }] },
+    { tools: [{ name: 'browser_key', args: { keys: 'Enter' } }] },
+    { content: SAID },
+  ]);
+  await ask(main, `Search the docs for table on ${DOCS_URL}, and sign me in: my password is hunter2`);
+  await expect(main.getByText(SAID)).toBeVisible({ timeout: 60_000 });
+  const calls = chatCalls(fakeLlm, from);
+  // Listed from inside the roots: the button, the sign-in form's fields.
+  const read = lastResult(calls[2]);
+  expect(read.data.elements).toMatch(/\[\d+\] button "Search"/);
+  expect(read.data.elements).toMatch(/\[\d+\] textbox "Password" \(Yap never types here: a password\)/);
+  // Labelled in its own root (the page's other "code-l" says "Nickname").
+  expect(read.data.elements).toMatch(/\[\d+\] textbox "Verification code" \(Yap never types here: a security code\)/);
+  expect(read.data.elements).not.toContain('Closed field');
+  expect(read.data.elements).not.toContain('Nickname');
+  // The secrets: refused as in the light DOM, nothing typed.
+  expect(lastResult(calls[3])).toMatchObject({ success: false, displayText: "Didn't type in ‘Password’: Yap never types a password", data: { refused: 'sensitive' } });
+  expect(lastResult(calls[4])).toMatchObject({ success: false, displayText: "Didn't type in ‘Verification code’: Yap never types a security code", data: { refused: 'sensitive' } });
+  // A point on the search button: the button inside its root, not the host; its dialog opened, the focus in its box.
+  const clicked = lastResult(calls[6]);
+  expect(clicked).toMatchObject({ success: true, displayText: 'Clicked ‘Search’ on docs.example.com', data: { at: { role: 'button' } } });
+  expect(clicked.data.changed).toMatch(/^a dialog opened: ‘Search the docs’; the focus moved into ‘Search the docs’/);
+  // Found, typed in, sent by Enter: a search, no card.
+  expect(lastResult(calls[7]).data.matches).toMatch(/\[\d+\] searchbox "Search the docs"/);
+  expect(lastResult(calls[8])).toMatchObject({ success: true, displayText: 'Typed in ‘Search the docs’ on docs.example.com', data: { field: 'table' } });
+  const sent = lastResult(calls[9]);
+  expect(sent).toMatchObject({ success: true, displayText: 'Pressed Enter on docs.example.com' });
+  expect(sent.data.changed).toMatch(/^went to docs\.example\.com\/search\?q=table/);
+  expect(sent.data.asked).toBeUndefined();
+  await expect(main.getByTestId('chat-page-confirm')).toHaveCount(0);
+  expect(await inPage(yap, DOCS_URL, 'location.pathname')).toMatch(/\/docs\.example\.com\/search$/);
 });
 
 test('a batch runs its steps in order, its shots in the steps, and stops at a card said no to', async ({ yap, main, fakeLlm, shot }) => {
