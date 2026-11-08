@@ -52,7 +52,7 @@ impl Source {
             Source::Connectors
         } else if web && crate::web::TOOL_NAMES.contains(&name) {
             Source::Web
-        } else if web && extra.pictures.offers(name, claude_web || extra.own_search) {
+        } else if web && !extra.without_pictures && extra.pictures.offers(name, claude_web || extra.own_search) {
             Source::Pictures
         } else if crate::chat::see_screen::offers(extra.screen, name) {
             Source::Screen

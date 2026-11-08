@@ -19,6 +19,7 @@
 
 mod fast;
 mod finish;
+mod fit;
 mod gates;
 mod history;
 mod plan;
@@ -32,7 +33,6 @@ use tauri::AppHandle;
 use crate::config::{self, YapConfig};
 
 pub(crate) use history::next_room;
-pub(crate) use prompt::stable_prompt;
 // An agent's report, a turn Yap starts itself (report.rs).
 pub(crate) use report::{open_agent, queue_agent_report, AGENT_REPORT, AGENT_REPORT_PREFIX, EVENT as AGENT_REPORT_EVENT};
 
@@ -401,11 +401,14 @@ async fn answer_turn(
     // question's context (it changes every minute).
     let profile = crate::ai::about_you::profile(&cfg);
     let now = crate::ai::eval::now();
-    let t = Asked { app, cfg, text, scope, by_voice, skill, meetings, about_selection, ep, answered_by, gates, profile, now, watcher, stop };
+    let mut t = Asked { app, cfg, text, scope, by_voice, skill, meetings, about_selection, ep, answered_by, gates, profile, now, watcher, stop };
 
     // **Sized to the model** (history.rs): a question too long for it is
-    // never sent (nor saved): it's said plainly.
-    let sizing = history::Sizing::measure(&t, conversation_id).await?;
+    // never sent (nor saved): it's said plainly. A model whose context is
+    // short goes without some of Yap's tools this turn (fit.rs): the gates
+    // the prompt and the tools follow from here on.
+    let (sizing, fitted) = history::Sizing::measure(&t, conversation_id).await?;
+    t.gates = fitted;
     let opened = open(&t, conversation_id, asked)?;
     if let Some(turn) = remembered(&t, &opened).await? {
         return Ok(turn);
@@ -563,6 +566,56 @@ pub(crate) fn more_room(view: &crate::ai::local_llm::context::ContextView) -> Op
     view.options.iter().find(|o| o.tokens > view.tokens && !o.over && o.estimate_mib.is_some()).map(|o| o.tokens)
 }
 
+/// **What Chat's next question sends besides itself and the history**, as
+/// its turn measures it (`fit.rs`, `history.rs`): the stable prompt and the
+/// tools' schemas a short question gets (`fixed`: Chat's ring), and the
+/// most a question may be (`question_max`: with every family of tools that
+/// may go gone, as a turn fits a long one).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub(crate) struct FixedParts {
+    pub fixed: u64,
+    pub question_max: u64,
+}
+
+/// [`FixedParts`] for a question typed in Chat to `ep`'s model of `context`
+/// tokens (`known`: it said so) in `conversation` (a Code chat's: no
+/// memory, its agents kept), each request held to `cap`.
+async fn fixed_parts(cfg: &YapConfig, ep: &Endpoint, conversation: Option<u64>, context: u64, known: bool, counter: &crate::chat::budget::Counter, cap: Option<u64>) -> FixedParts {
+    let gates = gates::Gates::for_turn(cfg, ep, None, false, true);
+    let code = crate::agents::code_chat::folder_of(conversation).is_some();
+    let profile = crate::ai::about_you::profile(cfg);
+    let connectors = gates.connectors.then(|| crate::chat::tools::connectors::Turn::for_turn(cfg, &ep.provider, &ep.model, None, context)).flatten();
+    let parts = fit::Parts { persona: &ep.persona, profile: &profile, now: crate::ai::eval::now(), code, connectors: connectors.as_ref(), conversation };
+    let room = fit::Room { context, known, kind: crate::chat::budget::Kind::Chat, tools: gates.tools, cap };
+    let keep = || fit::keeps("", None, code, &[]);
+    let fixed = fit::fit(gates, &parts, counter, room, 0, keep).await.fixed();
+    let roomiest = fit::fit(gates, &parts, counter, room, u64::MAX, keep).await.fixed();
+    FixedParts { fixed, question_max: room.history(roomiest) }
+}
+
+/// [`FixedParts`] for Chat's ring (`usage/context.rs`): the next question in
+/// `conversation` to the model the chip names (`target`), each request held
+/// to `cap`.
+pub(crate) async fn ring_parts(cfg: &YapConfig, target: &crate::ai::ai_model::Target, conversation: Option<u64>, context: u64, known: bool, counter: &crate::chat::budget::Counter, cap: Option<u64>) -> FixedParts {
+    let persona = cfg
+        .llm_scopes
+        .get("chat")
+        .map(|s| s.prompt.clone())
+        .filter(|p| !p.trim().is_empty())
+        .unwrap_or_else(|| "You are a helpful assistant. Answer concisely.".to_string());
+    // With the line naming the model, as a turn's ([`Endpoint`]).
+    let persona = crate::ai::ai_model::persona_with_answering(&persona, &target.chat_model());
+    let ep = Endpoint {
+        base_url: target.base_url.clone(),
+        api_key: cfg.provider_api_key(&target.provider, ""),
+        model: target.model.clone(),
+        provider: target.provider.clone(),
+        persona,
+        disable_thinking: false,
+    };
+    fixed_parts(cfg, &ep, conversation, context, known, counter, cap).await
+}
+
 /// Chat's limits for its model now ([`Limits`]): what a question may be,
 /// the model's context and, for the on-device model, more room it could
 /// get. The Chat view asks on opening and when the model or its context
@@ -573,19 +626,16 @@ pub async fn chat_limits() -> Limits {
     let Ok(ep) = Endpoint::resolve(&cfg) else {
         return Limits::default();
     };
-    // As a question typed in a new chat has them (not a Code chat yet).
-    let gates = gates::Gates::for_turn(&cfg, &ep, None, false, true);
     let counter = crate::chat::budget::Counter::for_call(&ep.provider, &ep.base_url);
     let (context, context_known) = crate::chat::budget::context_window(&cfg, &ep.provider, &ep.model, &ep.base_url).await;
-    let profile = crate::ai::about_you::profile(&cfg);
-    let stable = gates.stable_prompt(&cfg, &ep.persona, &profile, crate::ai::eval::now(), false);
-    let schemas = gates.schemas(&cfg, &ep, None, context, &counter, None, false).await;
-    let fixed = counter.count(&stable).await + schemas;
-    let budget = crate::chat::budget::budget(context, context_known, fixed, crate::chat::budget::Kind::Chat, gates.tools, crate::chat::budget::rate_cap(&ep.provider));
+    // As a question typed in a new chat has them (not a Code chat yet), the
+    // longest a turn would send: with every family of tools that may go
+    // gone (fit.rs).
+    let room = fixed_parts(&cfg, &ep, None, context, context_known, &counter, crate::chat::budget::rate_cap(&ep.provider)).await;
     let label = crate::chat::budget::model_label(&ep.provider, &ep.model, &crate::ai::local_llm::active_model_display(&cfg));
     let more = (ep.provider == crate::ai::local_llm::PROVIDER_ONDEVICE).then(|| more_room(&crate::ai::local_llm::context::context_view(&cfg))).flatten();
     Limits {
-        question_max: budget.history,
+        question_max: room.question_max,
         context,
         context_known,
         too_long: crate::chat::budget::too_long(&label, context),
@@ -631,7 +681,7 @@ mod tests {
         let now = chrono::Utc::now();
         for (scope, meetings, in_view) in [(None, false, true), (Some("assistant"), false, false), (Some("meetings"), true, false)] {
             let gates = gates::Gates::for_turn(&cfg, &ep, scope, meetings, in_view);
-            assert!(gates.stable_prompt(&cfg, &ep.persona, &profile, now, false).starts_with(start), "{scope:?}");
+            assert!(gates.stable_prompt(&ep.persona, &profile, now, false).starts_with(start), "{scope:?}");
         }
         // A small model's web pipeline writes its own prompt from the persona.
         assert!(crate::web::grounded_prompt(&ep.persona, "<passage n=\"1\">…</passage>", "Tuesday 3 November 2026", true).starts_with(start));

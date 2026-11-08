@@ -21,7 +21,8 @@ pub(super) struct Sizing {
     pub(super) context_known: bool,
     /// The model as a sentence names it ("Qwen3.5 4B").
     label: String,
-    /// The tools' schemas every step sends (`gates::Gates::schemas`).
+    /// The tools' schemas every step sends (`gates::Gates::offered`), as
+    /// fitted to the model (`fit.rs`).
     pub(super) schemas: u64,
     /// The question as sent: its text, and the screenshots it carries.
     pub(super) question_tokens: u64,
@@ -32,7 +33,14 @@ impl Sizing {
     /// the question alone within what's left — a paste too long for the
     /// model is never sent (nor saved): it's said plainly, the error.
     /// `conversation_id`: the one asked in, as the turn was given it.
-    pub(super) async fn measure(t: &Asked<'_>, conversation_id: Option<u64>) -> Result<Sizing, String> {
+    ///
+    /// **With the turn's tools fitted to it** (`fit.rs`): a fixed part that
+    /// leaves too little room for the question and a little history goes
+    /// without some families of tools, this turn only; the gates returned
+    /// are the turn's from here on (the prompt and the tools both follow
+    /// them), so what's measured is what's sent. Too long with every family
+    /// that may go gone: the question itself is.
+    pub(super) async fn measure(t: &Asked<'_>, conversation_id: Option<u64>) -> Result<(Sizing, super::gates::Gates), String> {
         let (cfg, provider, model, base_url) = (&t.cfg, t.ep.provider.as_str(), t.ep.model.as_str(), t.ep.base_url.as_str());
         let kind = crate::chat::budget::Kind::of_scope(t.scope);
         let mode = crate::chat::budget::mode();
@@ -40,34 +48,48 @@ impl Sizing {
         let (context_size, context_known) = crate::chat::budget::context_window(cfg, provider, model, base_url).await;
         let label = crate::chat::budget::model_label(provider, model, &crate::ai::local_llm::active_model_display(cfg));
         // A Code chat (agents/code_chat.rs) sends none of memory's tools or
-        // lines (prompt.rs `build`, run.rs): measured as it's sent. (A new
-        // chat isn't one until its question is saved: measured as a plain
-        // chat's, a little more.)
-        let code = crate::agents::code_chat::folder_of(conversation_id).is_some();
-        let schemas = t.gates.schemas(cfg, &t.ep, t.scope, context_size, &counter, conversation_id, code).await;
+        // lines (prompt.rs `build`, run.rs): measured as it's sent — a new
+        // chat made a Code chat as its first question is saved too
+        // (`code_chat::new_chat_folder`), and it keeps its agents.
+        let code = crate::agents::code_chat::folder_of(conversation_id).is_some() || (conversation_id.is_none() && crate::agents::code_chat::new_chat_folder().is_some());
         // The question as sent: its text, and the screenshots it carries, each
         // by its size where it goes (`budget::image_tokens_at`).
         let question_tokens = counter.count(&t.text).await
             + crate::chat::budget::MESSAGE_OVERHEAD
             + crate::snip::turn::images().iter().filter(|i| !i.as_text).map(|i| counter.picture(i.w, i.h)).sum::<u64>();
         let rate_cap = crate::chat::budget::rate_cap(provider);
-        let tools_supported = t.gates.tools;
+        let connectors = t.gates.connectors.then(|| crate::chat::tools::connectors::Turn::for_turn(cfg, provider, model, t.scope, context_size)).flatten();
+        let parts = super::fit::Parts { persona: &t.ep.persona, profile: &t.profile, now: t.now, code, connectors: connectors.as_ref(), conversation: conversation_id };
+        let room = super::fit::Room { context: context_size, known: context_known, kind, tools: t.gates.tools, cap: rate_cap };
+        // (A model evaluation sending the last messages by count: no budget.)
+        let fitted = if mode == crate::chat::budget::Mode::Messages {
+            super::fit::as_is(t.gates, &parts, &counter).await
+        } else {
+            // What the question asks for stays (read only when tools must go):
+            // its words, and the answer before it (a yes to "Shall I send an
+            // agent to…?").
+            let keep = || {
+                let previous = conversation_id.and_then(crate::chat::chats::get).and_then(|c| c.messages.iter().rev().find(|m| m.role == "assistant").map(|m| m.text.clone()));
+                super::fit::keeps(&t.text, previous.as_deref(), code, &crate::agents::workspaces::list())
+            };
+            super::fit::fit(t.gates, &parts, &counter, room, question_tokens, keep).await
+        };
         if mode != crate::chat::budget::Mode::Messages {
-            let stable = t.gates.stable_prompt(cfg, &t.ep.persona, &t.profile, t.now, code);
-            let fixed_now = counter.count(&stable).await + schemas;
-            let guess = crate::chat::budget::budget(context_size, context_known, fixed_now, kind, tools_supported, rate_cap);
-            if question_tokens > guess.history {
-                tracing::info!(question_tokens, room = guess.history, fixed = fixed_now, context = context_size, "Chat: the question is too long for the model; not sent");
+            let fixed_now = fitted.fixed();
+            let room_now = room.history(fixed_now);
+            if question_tokens > room_now {
+                tracing::info!(question_tokens, room = room_now, fixed = fixed_now, shed = fitted.shed.names().len(), context = context_size, "Chat: the question is too long for the model; not sent");
                 // The plan's tokens a minute, not the model's context, when
                 // that's what's short (it read "too long for … (128K context)").
-                let roomy = crate::chat::budget::budget(context_size, context_known, fixed_now, kind, tools_supported, None);
+                let roomy = crate::chat::budget::budget(context_size, context_known, fixed_now, kind, t.gates.tools, None);
                 if let Some(tpm) = crate::chat::budget::rate_limit(provider).filter(|_| question_tokens <= roomy.history) {
                     return Err(crate::chat::budget::too_much_a_minute(&label, provider, tpm));
                 }
                 return Err(crate::chat::budget::too_long(&label, context_size));
             }
         }
-        Ok(Sizing { kind, mode, counter, context_size, context_known, label, schemas, question_tokens })
+        let sizing = Sizing { kind, mode, counter, context_size, context_known, label, schemas: fitted.schemas, question_tokens };
+        Ok((sizing, fitted.gates))
     }
 
     /// "Too long for the model" said plainly, never the provider's JSON

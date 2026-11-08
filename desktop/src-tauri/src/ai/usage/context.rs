@@ -106,11 +106,13 @@ pub async fn chat_context(conversation_id: Option<u64>) -> ContextUse {
     let messages: &[ChatMessage] = conv.as_ref().map(|c| c.messages.as_slice()).unwrap_or_default();
     let counter = Counter::for_call(&target.provider, &target.base_url);
     let (context, context_known) = budget::context_window(&cfg, &target.provider, &target.model, &target.base_url).await;
-    // The parts every request carries, as a turn measures them (a Code
-    // chat's without memory's tools and lines: `turn/history.rs`).
-    let code = crate::agents::code_chat::folder_of(conversation_id).is_some();
-    let fixed = fixed_of(&cfg, &target, &counter, context, code).await;
-    let b = budget::budget(context, context_known, fixed, Kind::Chat, target.tools, budget::request_cap(&target.provider, &target.model));
+    // The parts every request carries, as a turn measures them (`turn/fit.rs`:
+    // a Code chat's without memory's tools and lines, and a small context's
+    // without the tools a short question there goes without).
+    let cap = budget::request_cap(&target.provider, &target.model);
+    let parts = crate::chat::turn::ring_parts(&cfg, &target, conversation_id, context, context_known, &counter, cap).await;
+    let fixed = parts.fixed;
+    let b = budget::budget(context, context_known, fixed, Kind::Chat, target.tools, cap);
     let replay = target.tools && cfg.web_search;
     let costs = budget::message_costs(&counter, messages, replay).await;
     let summary = conv.as_ref().and_then(|c| c.usable_summary());
@@ -127,58 +129,9 @@ pub async fn chat_context(conversation_id: Option<u64>) -> ContextUse {
         trimmed: plan.left_out > 0,
         summarised: plan.summary,
         messages: messages.len(),
-        question_max: b.history,
+        question_max: parts.question_max,
         model: Some(target.chat_model()),
     }
-}
-
-/// The parts of a Chat request that don't change with the question, for
-/// `target` (with `context` tokens): the stable prompt and the tools'
-/// schemas, the connectors' as a typed question gets them (`code`: a Code
-/// chat's, none of memory's).
-async fn fixed_of(cfg: &crate::config::YapConfig, target: &crate::ai::ai_model::Target, counter: &Counter, context: u64, code: bool) -> u64 {
-    let persona = cfg
-        .llm_scopes
-        .get("chat")
-        .map(|s| s.prompt.clone())
-        .filter(|p| !p.trim().is_empty())
-        .unwrap_or_else(|| "You are a helpful assistant. Answer concisely.".to_string());
-    // With the line naming the model, as a turn's (`turn::Endpoint`).
-    let persona = crate::ai::ai_model::persona_with_answering(&persona, &target.chat_model());
-    let calendar_on = crate::calendar::connected();
-    let profile = crate::ai::about_you::profile(cfg);
-    let doc_tools = crate::chat::documents::ToolSet::for_model(&target.provider, &target.model);
-    let strong = target.tools && crate::chat::documents::rich::strong(&target.provider, &target.model);
-    let key = cfg.provider_api_key(&target.provider, "");
-    let in_chat = crate::chat::turn::in_chat(cfg, &target.provider, &target.model, &target.base_url, &key);
-    let own_search = cfg.web_search && !in_chat && crate::web::Settings::for_chat(cfg, &target.provider, &target.model, &target.base_url, &key).native.is_some();
-    let lines = crate::chat::tools::WebLines::of(strong, in_chat, own_search);
-    let pictures = crate::chat::pictures::Gate::for_model(cfg.web_search && target.tools, &target.provider, &target.model);
-    let act = pictures != crate::chat::pictures::Gate::Off && crate::chat::pages::act::can_act(&target.provider, &target.model);
-    let connectors = crate::chat::tools::connectors::may(&target.provider, strong) && crate::chat::tools::connectors::offers_any(cfg, None);
-    let stable = crate::chat::turn::stable_prompt(cfg, &persona, target.tools, doc_tools, lines, cfg.web_search, pictures, act, calendar_on, connectors, &profile, crate::ai::eval::now(), code);
-    let connectors = connectors.then(|| crate::chat::tools::connectors::Turn::for_turn(cfg, &target.provider, &target.model, None, context)).flatten();
-    let log = crate::chat::tools::calendar::Log::default();
-    let extra = crate::chat::tools::Extra {
-        memory: !code,
-        search_chats: !code && cfg.memory_search_chats,
-        conversation: None,
-        calendar: calendar_on.then_some(crate::chat::tools::CalendarTurn { log: &log, zone: crate::chat::tools::calendar::Zone::of(None), now: 0 }),
-        room: None,
-        docs: None,
-        doc_tools,
-        strong,
-        pictures,
-        screen: crate::chat::see_screen::gate(cfg, target.tools, &target.provider, &target.model),
-        act,
-        own_search,
-        web_question: false,
-        agents: (target.tools && crate::agents::offered(cfg)).then_some(crate::chat::tools::AgentsTurn::default()),
-        connectors: connectors.as_ref(),
-    };
-    let offered = crate::chat::tools::offered_tools(cfg.open_apps, cfg.web_search && !in_chat, extra);
-    let schemas = if target.tools { counter.count(&crate::chat::budget::loaded_tools(&offered).to_string()).await } else { 0 };
-    counter.count(&stable).await + schemas
 }
 
 #[cfg(test)]

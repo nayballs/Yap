@@ -297,6 +297,11 @@ pub struct Extra<'a> {
     /// The connectors' tools (`tools/connectors.rs`: the preview on, a strong
     /// cloud model, Chat or the Voice Assistant; their consent and cards).
     pub connectors: Option<&'a connectors::Turn>,
+    /// The pictures' own tools (`find_pictures`, `look_at_picture`,
+    /// `show_picture`) left out though [`Extra::pictures`] is on: a turn
+    /// fitted to a small context (`turn/fit.rs`) keeps the pages beside the
+    /// chat without them.
+    pub without_pictures: bool,
 }
 
 /// The calendar tool in a turn ([`calendar::run`]).

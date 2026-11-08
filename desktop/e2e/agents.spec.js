@@ -26,6 +26,10 @@
 //   is spoken.
 // - A permission card makes it "asking"; Stop, Continue; a plan, then "go
 //   ahead" in the same session at the chat's Mode.
+// - On the stand-in's 8K context with the web on, a plain chat answers a
+//   short question without the agent tools (chat/turn/fit.rs: they're the
+//   first of Yap's tools to go when there's no room), and gets them back as
+//   soon as an agent is asked for.
 import fs from 'node:fs';
 import path from 'node:path';
 import { test as base, expect, openView, setConfig } from './support/fixtures.js';
@@ -401,6 +405,35 @@ test('an agent only starts on the person own words, in a folder they name, at th
   } finally {
     await yap.invoke('workspaces_set_cap', { name: 'garden-planner', cap: null });
     await yap.invoke('agent_mode_set', { conversation, mode: 'auto' });
+  }
+});
+
+test('on an 8K model with the web on, a plain chat answers a short question without the agent tools, and gets them back when an agent is asked for', async ({ yap, main, fakeLlm }) => {
+  // (8 Nov 2026: the stable prompt and every tool's schema left no room for
+  // any question on the stand-in's 8K: "hi" was "too long for the model".)
+  await script(yap, ECHO, 'echo');
+  await setConfig(yap, main, { webSearch: true, webSearchNative: true, webSearchService: 'exa', webSearchKeys: { exa: EXA_KEY } });
+  try {
+    await freshChat(main);
+    const offeredSince = (n) => fakeLlm.requests.slice(n).find((r) => r.tools?.length);
+    fakeLlm.scriptChat([{ content: 'Hi! What can I do for you?' }]);
+    const before = fakeLlm.requests.length;
+    await send(main, 'hi');
+    await expect(lastAnswer(main)).toHaveText('Hi! What can I do for you?');
+    const hi = offeredSince(before);
+    expect(hi.tools).toEqual(expect.arrayContaining(['web_search', 'read_page', 'browser_navigate', 'search_notes']));
+    expect(hi.tools).not.toContain('start_agent');
+    expect(hi.system).not.toContain('start_agent');
+    // An agent asked for, in a folder it names: Yap Code's tools are back.
+    fakeLlm.scriptChat([{ content: 'Which notes should it tidy?' }]);
+    const next = fakeLlm.requests.length;
+    await send(main, 'Send an agent to garden-planner to tidy the notes.');
+    await expect(lastAnswer(main)).toHaveText('Which notes should it tidy?');
+    const asked = offeredSince(next);
+    expect(asked.tools).toEqual(expect.arrayContaining(['start_agent', 'web_search']));
+    expect(asked.system).toContain('start_agent');
+  } finally {
+    await setConfig(yap, main, { webSearch: false });
   }
 });
 

@@ -62,6 +62,19 @@ pub(super) struct Gates {
     /// question in this wave), not across the meetings, and some connector's
     /// tool there to offer (during a meeting, only those allowed then).
     pub connectors: bool,
+    /// `open_app` and `list_apps` ("Open apps for me", `apps.rs`).
+    pub apps: bool,
+    /// `search_chats` where memory's tools are ("Search and reference past
+    /// chats"; never in a Code chat).
+    pub past_chats: bool,
+    /// The pictures' own tools (`find_pictures`, `look_at_picture`,
+    /// `show_picture`) where the pictures' gate is on; the pages beside the
+    /// chat go by the gate alone. Off only in a turn fitted to a small
+    /// context (`fit.rs`).
+    pub picture_tools: bool,
+    /// Yap Code's lines in the system prompt: agents on and Claude Code on
+    /// this PC, as before 8 Nov 2026 (the tools themselves: [`Gates::agents`]).
+    pub agent_line: bool,
 }
 
 impl Gates {
@@ -82,9 +95,11 @@ impl Gates {
         let screen = if chat_in_view { crate::chat::see_screen::gate(cfg, tools, provider, model) } else { Gate::Off };
         let act = pictures != Gate::Off && scope.is_none() && !meetings && crate::chat::pages::act::can_act(provider, model);
         let calendar = !meetings && crate::calendar::connected();
-        let agents = tools && !meetings && crate::agents::offered(cfg);
+        let agent_line = crate::agents::offered(cfg);
+        let agents = tools && !meetings && agent_line;
         let connectors = !meetings && crate::chat::tools::connectors::may(provider, strong) && crate::chat::tools::connectors::offers_any(cfg, scope);
-        let gates = Gates { tools, doc_tools, strong, claude_in_chat, own_search, web_lines, web_on, pictures, screen, act, calendar, agents, connectors };
+        let (apps, past_chats, picture_tools) = (cfg.open_apps, cfg.memory_search_chats, true);
+        let gates = Gates { tools, doc_tools, strong, claude_in_chat, own_search, web_lines, web_on, pictures, screen, act, calendar, agents, connectors, apps, past_chats, picture_tools, agent_line };
         if provider == crate::ai::claude_plan::PROVIDER {
             return gates.on_the_plan();
         }
@@ -118,26 +133,26 @@ impl Gates {
         }
     }
 
-    /// The tools' schemas every step sends, counted by `counter` (none for
-    /// a model without tools): what the prompt and the question must fit
-    /// beside. `conversation`: the one asking (`search_chats` leaves it out);
-    /// `ep`, `scope` and `context` (the model's, in tokens): what the
-    /// connectors' tools come to (`connectors::Turn::for_turn`, as the turn
-    /// builds them). `code`: it's a Code chat, which offers none of memory's
-    /// tools (`run.rs`), so they aren't counted.
-    #[allow(clippy::too_many_arguments)]
-    pub(super) async fn schemas(&self, cfg: &YapConfig, ep: &Endpoint, scope: Option<&str>, context: u64, counter: &crate::chat::budget::Counter, conversation: Option<u64>, code: bool) -> u64 {
-        if !self.tools {
-            return 0;
-        }
-        let connectors = self.connectors.then(|| crate::chat::tools::connectors::Turn::for_turn(cfg, &ep.provider, &ep.model, scope, context)).flatten();
-        // (Only whether the calendar's offered matters to its schema.)
-        let log = crate::chat::tools::calendar::Log::default();
-        let extra = crate::chat::tools::Extra {
-            memory: !code,
-            search_chats: !code && cfg.memory_search_chats,
+    /// **The tools these gates offer**, as the tool loop takes them
+    /// (`tools::Extra`): the turn's (`run.rs`, with its room, documents and
+    /// the question's words) and what the budget counts ([`Gates::offered`])
+    /// come from this one place. `memory`: memory's tools (not in a Code
+    /// chat); `conversation`: the one asking (`search_chats` leaves it out);
+    /// `calendar`, `agents`, `connectors`: what each is in this turn, offered
+    /// only while its gate is on.
+    pub(super) fn extra<'a>(
+        &self,
+        memory: bool,
+        conversation: Option<u64>,
+        calendar: crate::chat::tools::CalendarTurn<'a>,
+        agents: crate::chat::tools::AgentsTurn,
+        connectors: Option<&'a crate::chat::tools::connectors::Turn>,
+    ) -> crate::chat::tools::Extra<'a> {
+        crate::chat::tools::Extra {
+            memory,
+            search_chats: memory && self.past_chats,
             conversation,
-            calendar: self.calendar.then_some(crate::chat::tools::CalendarTurn { log: &log, zone: crate::chat::tools::calendar::Zone::of(None), now: 0 }),
+            calendar: self.calendar.then_some(calendar),
             room: None,
             docs: None,
             doc_tools: self.doc_tools,
@@ -147,18 +162,33 @@ impl Gates {
             act: self.act,
             own_search: self.own_search,
             web_question: false,
-            agents: self.agents.then_some(crate::chat::tools::AgentsTurn::default()),
-            connectors: connectors.as_ref(),
-        };
-        // (Tools deferred behind Claude's tool search cost nothing until found.)
-        let offered = crate::chat::tools::offered_tools(cfg.open_apps, self.web_on && !self.claude_in_chat, extra);
-        counter.count(&crate::chat::budget::loaded_tools(&offered).to_string()).await
+            agents: self.agents.then_some(agents),
+            connectors: connectors.filter(|_| self.connectors),
+            without_pictures: !self.picture_tools,
+        }
+    }
+
+    /// **The tools every step sends** for these gates (none for a model
+    /// without tools): [`Gates::extra`] offered as the tool loop offers it
+    /// (`tools::offered_tools`) — what the prompt and the question must fit
+    /// beside (`fit.rs` counts their schemas). `code`: a Code chat, which
+    /// offers none of memory's tools (`run.rs`); `connectors`: the turn's
+    /// (`connectors::Turn::for_turn`, as the turn builds them).
+    pub(super) fn offered(&self, connectors: Option<&crate::chat::tools::connectors::Turn>, conversation: Option<u64>, code: bool) -> serde_json::Value {
+        if !self.tools {
+            return serde_json::Value::Null;
+        }
+        // (Only whether the calendar's offered matters to its schema.)
+        let log = crate::chat::tools::calendar::Log::default();
+        let calendar = crate::chat::tools::CalendarTurn { log: &log, zone: crate::chat::tools::calendar::Zone::of(None), now: 0 };
+        let extra = self.extra(!code, conversation, calendar, crate::chat::tools::AgentsTurn::default(), connectors);
+        crate::chat::tools::offered_tools(self.apps, self.web_on && !self.claude_in_chat, extra)
     }
 
     /// The part of the request that's there whatever the question, for these
     /// gates ([`super::stable_prompt`]), in a Code chat (`code`) as it has it.
-    pub(super) fn stable_prompt(&self, cfg: &YapConfig, persona: &str, profile: &crate::ai::about_you::Profile, now: chrono::DateTime<chrono::Utc>, code: bool) -> String {
-        super::stable_prompt(cfg, persona, self.tools, self.doc_tools, self.web_lines, self.web_on, self.pictures, self.act, self.calendar, self.connectors, profile, now, code)
+    pub(super) fn stable_prompt(&self, persona: &str, profile: &crate::ai::about_you::Profile, now: chrono::DateTime<chrono::Utc>, code: bool) -> String {
+        super::prompt::stable_prompt(persona, self, profile, now, code)
     }
 }
 

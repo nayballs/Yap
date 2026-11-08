@@ -296,7 +296,7 @@ one side.
   model; the summariser's prompt (`prompt`), its input (`request`, `line`,
   `parts`) and what's kept (`tidy`); `yap-chat-summary {conversationId,
   upto}`. [Below](#long-chats-sized-to-the-model-2026-10-25).
-- **`chat/turn.rs`** (+ `turn/`: fast, gates, history, prompt, run, small,
+- **`chat/turn.rs`** (+ `turn/`: fast, gates, fit, history, prompt, run, small,
   finish; split into its steps 2026-11-03, nothing else changed) — **one
   chat turn** (`chat_turn`: `chat_send`, the Voice Assistant, the model
   evaluations). `answer_turn` is its steps in order, over what they share
@@ -308,11 +308,16 @@ one side.
   nothing can answer across the meetings); **`gates.rs`** —
   `Gates::for_turn`, what this model may do in this turn (tools, the
   documents' set, strong, Claude's own search or the provider's, the web's
-  lines, the web, pictures, the screen, acting on pages, the calendar) from
-  the settings, the model and where it was asked; `Gates::schemas` counts
-  the tools' schemas (`chat_limits` has the same gates, as a typed Chat
-  question); **`history.rs`** — the question measured before it's saved
-  (`Sizing::measure`, "too long" said plainly) and the history fitted to
+  lines, the web, pictures, the screen, acting on pages, the calendar, the
+  apps, past chats) from the settings, the model and where it was asked;
+  `Gates::extra` the tools they offer, the one place the tool loop's
+  (`run.rs`) and the budget's (`Gates::offered`) come from (`chat_limits`
+  has the same gates, as a typed Chat question); **`fit.rs`** (2026-11-08)
+  — **the tools fitted to a small context**: a fixed part that leaves too
+  little room goes without some families of tools, this turn only
+  ([below](#a-small-contexts-tools-fitted-2026-11-08)); **`history.rs`** —
+  the question measured before it's saved (`Sizing::measure`: the tools
+  fitted, "too long" said plainly; the gates the turn goes on with) and the history fitted to
   what's left (`fit`: every message, a summary and those after it, or the
   latest that fit; the notes on earlier answers), `next_room`;
   **`prompt.rs`** — the system prompt and the question's context
@@ -2039,7 +2044,8 @@ and the drive tier were for a model that acts, which a cloud model's
 context never notices; a strong model on a server on this PC that doesn't
 say its context (Yap assumes 8K) no longer fits its whole toolset (rich
 documents, web, browser) beside a question (the e2e's strong fakes say
-32K). `tab` is in the schemas only where a tab is chosen (navigate, read,
+32K) — since 2026-11-08 such a turn goes without some families of tools
+instead ([fitted](#a-small-contexts-tools-fitted-2026-11-08)). `tab` is in the schemas only where a tab is chosen (navigate, read,
 screenshot, tabs: the others act on the tab in front, and every tool still
 takes it), what they share said once, in the line.
 - **`browser_navigate { url | search | "back" | "forward", tab? }`**: the
@@ -3394,7 +3400,8 @@ open conversation uses up the Chat model's context.
   that doesn't say, an older Yap's save) — or **a summary written after
   it** (`ChatSummary.after`: the next request is smaller, so the ring
   drops) — **an estimate** of what the next question sends: the parts a
-  turn measures (`turn::stable_prompt`, the tools' schemas) and the
+  turn measures (`turn::stable_prompt`, the tools' schemas, as a short
+  question's turn fits them: `turn::ring_parts`, `turn/fit.rs`) and the
   history as the turn chooses it (`budget::plan`: the summary and the
   messages after it, or the latest that fit), with the same counter
   (`budget::Counter`). **The context** of the model the chip names
@@ -3474,9 +3481,13 @@ a technical error.
    and "You", About you without its note (`Sizing::measure`, the ring
    too; 8 Nov 2026: measured as a plain chat's, 300-odd tokens more, an 8K
    model with the web and Yap Code on refused every question in a Code
-   chat). Too long (a huge paste): **not sent and not saved**, the plain
-   sentence back — "That's too long for Qwen3.5 4B (64K context)." The
-   Chat view says so before sending (below).
+   chat). **A small context's tools are fitted first** (2026-11-08,
+   [below](#a-small-contexts-tools-fitted-2026-11-08)): parts that leave
+   too little room go without some families of tools for this turn, and
+   the turn goes on with those gates. Too long even then (a huge paste):
+   **not sent and not saved**, the plain sentence back — "That's too long
+   for Qwen3.5 4B (64K context)." The Chat view says so before sending
+   (below).
 3. **The budget** (`budget::budget`): the parts measured for this turn —
    the system prompt as built, the `<context>` block, the schemas — and
    room for the answer (an eighth of the context, 512 to 8K) and, for a
@@ -3608,6 +3619,68 @@ a technical error.
 E2e `chat-long.spec.js` and `chat-room.spec.js`
 ([e2e-tests.md](../e2e-tests.md)); the model evaluations' `chat-long-memory`
 ([model-evals.md](../model-evals.md#long-chats-the-window-and-the-summary-25-oct-2026)).
+
+### A small context's tools, fitted (2026-11-08)
+
+A plain chat on a self-hosted server that doesn't say its context (Yap
+assumes 8K), with the web and Yap Code on, measured ~6,440 tokens of
+stable prompt and schemas against the 6,272 an 8K budget has for them and
+the history together: every question, "hi" too, was "too long for the
+model". The browser toolset (`chat/pages/`) and Yap Code's agent tools
+(`chat/tools/agents.rs`) took the last of it. **`chat/turn/fit.rs`** now
+fits Yap's own tools to the model, for each turn:
+
+- **When**: the fixed part (`turn::stable_prompt` — persona, instructions,
+  the screen's line, the prompt's end, the clock — and the tools' schemas)
+  leaves less room than an eighth of the request (512 to 4,096 tokens:
+  896 at 8K, a short question and an exchange or two; `Room::least`), or
+  than the question itself when that's longer. A model with the room —
+  Claude, GPT-5, Gemini, the on-device model at a context with room —
+  is counted once and gets everything as before, byte for byte (the
+  prompt's start and the tools for five models in every scope, diffed
+  against the code before; `a_model_with_room_gets_every_tool_and_the_prompt_as_before`).
+- **What goes**: whole families, the fewest from the front of a fixed
+  order (`fit::ORDER`, the one pure decision: `choose`), each its tools
+  and its lines in the prompt together — its gate turned off
+  (`Family::off`), so the prompt and the tools, which both follow the
+  gates, never name a tool that isn't offered (unit-tested for every
+  family). The order, what costs most and matters least to a small model
+  first (measured with `budget::estimate`, schemas and lines): the
+  browser's acting tools (~580), seeing — the browser's view tools and
+  `look_at_picture`, Look to Show (~440) —, Yap Code's agents in a plain
+  chat (~1,560, the most), connectors (strong cloud models), the pictures'
+  own tools (~295), the documents' rich set for the simple one (~800),
+  the screen (~150), the calendar (~250), past chats (~115), the browser
+  beside the chat (~550; the web's `web_search` and `read_page` stay), and
+  apps last (~275: the browser's line says websites open there "never
+  with open_app"). Never the notes and documents' tools, the web's, or
+  memory's `remember` / `forget`.
+- **What the question asks for stays** (`keeps`, cheap checks on its
+  words): a Code chat's agents (a new chat made one as its first question
+  too: `code_chat::new_chat_folder`), and a plain chat's when the question
+  says "agent" or names a workspace, or answers an answer that asked
+  about one; the calendar for a question about it; past chats for one
+  pointing back; the browser (acting and seeing too) for one about the page
+  open beside the chat; the screen for one about it.
+- **One measure**: `Sizing::measure` fits them before the question is
+  saved and returns the gates the turn goes on with (`turn.rs`
+  `answer_turn`: the prompt, `Gates::extra`'s tools and the tool loop's
+  `open_apps` all from them); `chat_limits` and the ring
+  (`usage/context.rs` through `turn::ring_parts`) measure the same way —
+  the ring's estimate a short question's fixed part, `questionMax` the most
+  a question may be with every family that may go gone. Counted again
+  after the choice (a server's own `/tokenize` may differ from the
+  estimate), one more family at a time while still short.
+- **Still too long** with every family gone: the question itself is, and
+  it's refused as before. Logged at debug: the families left out, those
+  kept, the tokens before and after (names and counts only).
+- At 8K: the e2e's stand-in, a plain chat with the web and Yap Code on,
+  6,438 → 4,879 tokens (room 0 → 1,393) without the agents alone; the
+  on-device Qwen acting on pages, 7,016 → 4,879 (acting and agents); a
+  strong model that sees, 8,576 → 4,947 (acting, seeing, agents, pictures,
+  the rich set); a Code chat keeps its agents (6,058 → 5,063: pictures,
+  the screen, the browser). E2e: `agents.spec.js` ("on an 8K model with
+  the web on…").
 
 ## Chat on your Claude plan (2026-11-07)
 
