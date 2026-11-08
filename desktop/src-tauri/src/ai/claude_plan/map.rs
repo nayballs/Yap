@@ -20,7 +20,10 @@
 //! - **Results** (`user` tool results): a chip each, as the tool loop's
 //!   read ("Searched the web: \"…\"", "Read example.com/page"); a search's
 //!   links and a page read become the answer's [`Source`]s, numbered as
-//!   found ([`Out::chips`] after each).
+//!   found ([`Out::chips`] after each) — the page beside the chat that Yap's
+//!   `read_open_page` read too. One of Yap's that answers in the tool loop's
+//!   shape has its own chip (`displayText`), its pictures after it (MCP
+//!   image content, `claude_live/eyes.rs`) never in the way.
 //! - **The answer's citations** ([`cite`]): the plan's prompt asks for a
 //!   markdown link to the page ("[1](https://…)"); a link to one of the
 //!   turn's sources becomes Yap's own "[n]", so the Sources row, the pills
@@ -339,8 +342,24 @@ impl Mapper {
                 true
             }
             Tool::Yap(name) => {
-                // One that answers as the tool loop's tools do (Agents':
-                // `{"success", "displayText", …}`): its own chip, refusals too.
+                // The page beside the chat, read: a page the turn read, as
+                // a WebFetch's is (its own title, its text for the checks).
+                if name == crate::chat::pages::READ && !is_error {
+                    if let Some(read) = leading_json(text).filter(|v| v["success"] == serde_json::json!(true)) {
+                        let d = &read["data"];
+                        let url = d["url"].as_str().unwrap_or("").trim().to_string();
+                        if !url.is_empty() {
+                            self.looked = true;
+                            self.source(d["title"].as_str().unwrap_or(""), &url, true);
+                            if let Some(body) = d["text"].as_str().filter(|t| !t.trim().is_empty()) {
+                                self.pages.push(body.to_string());
+                            }
+                        }
+                    }
+                }
+                // One that answers as the tool loop's tools do (Agents',
+                // the screen's and the pages': `{"success", "displayText",
+                // …}`): its own chip, refusals too.
                 if let Some(chip) = display_text(text) {
                     self.chips.push(chip);
                     return true;
@@ -441,10 +460,18 @@ pub fn search_links(structured: Option<&Value>, text: &str) -> Vec<(String, Stri
     out
 }
 
+/// The JSON a result starts with (the tool loop's shape), whatever follows
+/// it: the screen's and the pages' calls put their pictures' lines after it
+/// (`claude_live/eyes.rs`), and Claude Code adds where it kept a picture.
+/// Pure.
+fn leading_json(text: &str) -> Option<Value> {
+    serde_json::Deserializer::from_str(text.trim_start()).into_iter::<Value>().next()?.ok().filter(Value::is_object)
+}
+
 /// A result in the tool loop's shape (`{"success", "displayText", …}`, the
-/// agent tools'): its chip. Pure.
+/// agent tools', the screen's and the pages'): its chip. Pure.
 fn display_text(text: &str) -> Option<String> {
-    let v: Value = serde_json::from_str(text.trim()).ok()?;
+    let v = leading_json(text)?;
     v.get("success")?;
     v["displayText"].as_str().map(str::trim).filter(|s| !s.is_empty()).map(str::to_string)
 }
@@ -771,7 +798,32 @@ mod tests {
         assert!(log.said.contains(&"call start_agent".to_string()), "{:?}", log.said);
         // Plain text from another of Yap's tools: its usual chip.
         assert_eq!(display_text("2 notes"), None);
+        // A result with its pictures' lines after it (the screen's): its own chip.
+        let looked = r#"{"success":true,"data":{"monitors":2},"displayText":"Looked at your screen (2 monitors)"}(From Yap, not the user.) Monitor 1 of 2 as it is now.[Image saved to tool-results/a.png]"#;
+        assert_eq!(display_text(looked).as_deref(), Some("Looked at your screen (2 monitors)"));
         assert_eq!(display_text(r#"{"displayText":"no success field"}"#), None);
+    }
+
+    #[test]
+    fn the_page_beside_the_chat_read_is_an_opened_source_and_a_screens_pictures_never_get_in_the_way() {
+        let read = r#"{\"success\":true,\"data\":{\"tab\":1,\"n\":1,\"title\":\"Fort Joy - Example Wiki\",\"url\":\"https://wiki.example.com/wiki/Fort_Joy\",\"text\":\"Every chest marked.\"},\"displayText\":\"Read wiki.example.com/wiki/Fort_Joy beside the chat\"}"#;
+        let looked = r#"{\"success\":true,\"data\":{\"monitors\":1},\"displayText\":\"Looked at your screen\"}"#;
+        let lines = [
+            r#"{"type":"assistant","message":{"id":"m1","content":[{"type":"tool_use","id":"r1","name":"mcp__yap__read_open_page","input":{}},{"type":"tool_use","id":"s1","name":"mcp__yap__look_at_screen","input":{}}]}}"#.to_string(),
+            format!(r#"{{"type":"user","message":{{"role":"user","content":[{{"type":"tool_result","tool_use_id":"r1","content":[{{"type":"text","text":"{read}"}}]}}]}}}}"#),
+            // Its picture as Claude Code hands it on: an image block, then where it kept it.
+            format!(
+                r#"{{"type":"user","message":{{"role":"user","content":[{{"type":"tool_result","tool_use_id":"s1","content":[{{"type":"text","text":"{looked}"}},{{"type":"text","text":"(From Yap, not the user.) Your screen as it is now."}},{{"type":"image","source":{{"type":"base64","media_type":"image/png","data":"iVBORw0KGgo="}}}},{{"type":"text","text":"[Image saved]"}}]}}]}}}}"#
+            ),
+        ];
+        let refs: Vec<&str> = lines.iter().map(String::as_str).collect();
+        let (m, _, _) = run(&refs);
+        assert_eq!(m.chips(), ["Read wiki.example.com/wiki/Fort_Joy beside the chat", "Looked at your screen"]);
+        assert_eq!(m.sources().len(), 1);
+        let s = &m.sources()[0];
+        assert_eq!((s.n, s.title.as_str(), s.url.as_str(), s.opened), (1, "Fort Joy - Example Wiki", "https://wiki.example.com/wiki/Fort_Joy", true));
+        assert_eq!(m.pages(), ["Every chest marked."]);
+        assert!(m.looked());
     }
 
     #[test]

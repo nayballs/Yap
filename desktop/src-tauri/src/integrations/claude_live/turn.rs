@@ -13,8 +13,14 @@
 //!   turn ends (the turn's stream closes: [`Call::events`]).
 //! - **The web flag**: set from the turn's start (text selected in another
 //!   app), once Claude Code begins a `WebSearch` or `WebFetch` in the turn
-//!   ([`Marks::web`], from the plan turn's events), or once `agent_status`
-//!   gave an agent's own words ([`Slot::set_web`]).
+//!   ([`Marks::web`], from the plan turn's events) or a call of Yap's that
+//!   brings the screen's or a page's words in (`eyes::SEES`,
+//!   [`Marks::began`]), or once `agent_status` gave an agent's own words, or a
+//!   look or a page read brought some in ([`Slot::set_web`]).
+//! - **The turn's web side** (`eyes.rs`): a `web::Turn` of its own for the
+//!   screen and page tools — the person's links, the pages shown, the
+//!   pictures — and the pages Claude Code's searches and reads found so far
+//!   ([`Marks::found`]); what it showed is the answer's ([`Turn::shown`]).
 //! - **Two paths, one order**: Claude Code's events (its stdout, read by
 //!   the plan turn) and its MCP calls (HTTP, read here) arrive apart. A call
 //!   that acts (`start_agent`, `message_agent`) first waits for its own tool call
@@ -38,6 +44,11 @@ use tokio::sync::mpsc::{self, UnboundedReceiver, UnboundedSender};
 use crate::chat::stream::Event;
 use crate::chat::tools::AgentsTurn;
 
+use super::eyes::Eyes;
+
+/// The turn's web side (`eyes.rs`), one call at a time.
+pub type WebSide = Arc<tokio::sync::Mutex<crate::web::Turn>>;
+
 /// How long a call that acts waits for its own tool call to show in the
 /// turn's events (a few milliseconds when all is well).
 pub const SEEN_WAIT: Duration = Duration::from_secs(5);
@@ -55,6 +66,10 @@ pub struct Context {
     /// Web content is in the turn from its start (text selected in another
     /// app, as the tool loop's `Extra::web_question`).
     pub web: bool,
+    /// The screen and the pages beside the chat this turn (`eyes.rs`): where
+    /// it was asked decides, as the tool loop's gates (never from another
+    /// app or a phone). Off: refused.
+    pub eyes: Eyes,
 }
 
 /// The turn open now.
@@ -69,6 +84,10 @@ struct Now {
     /// showed, and how many of them a call has taken ([`Slot::seen`]).
     began: HashMap<String, usize>,
     taken: HashMap<String, usize>,
+    /// Its web side (`eyes.rs`), with the pages beside the chat on.
+    side: Option<WebSide>,
+    /// The pages Claude Code's searches and reads found so far.
+    found: Vec<crate::chat::chats::Source>,
 }
 
 #[derive(Default)]
@@ -97,19 +116,30 @@ impl Slot {
         s.now.as_mut().filter(|t| t.n == n).map(f)
     }
 
-    /// **A turn begins** (one still open ends): its context, its stream.
-    pub(super) fn begin(self: &Arc<Self>, ctx: Context) -> Turn {
+    /// **A turn begins** (one still open ends): its context, its stream,
+    /// its web side (`web`: with the pages beside the chat on).
+    pub(super) fn begin(self: &Arc<Self>, ctx: Context, web: Option<crate::web::Turn>) -> Turn {
         let (tx, rx) = mpsc::unbounded_channel();
+        let side = web.map(|w| Arc::new(tokio::sync::Mutex::new(w)));
         let n = {
             let mut s = self.lock();
             s.turns += 1;
             let n = s.turns;
-            s.now = Some(Now { n, web: ctx.web, ctx: Arc::new(ctx), events: tx, began: HashMap::new(), taken: HashMap::new() });
+            s.now = Some(Now {
+                n,
+                web: ctx.web,
+                ctx: Arc::new(ctx),
+                events: tx,
+                began: HashMap::new(),
+                taken: HashMap::new(),
+                side: side.clone(),
+                found: Vec::new(),
+            });
             n
         };
         self.changed.notify_all();
         tracing::debug!(turn = n, "Claude Code endpoint: a chat turn began");
-        Turn { marks: Marks { slot: Arc::clone(self), n }, events: rx }
+        Turn { marks: Marks { slot: Arc::clone(self), n }, events: rx, side }
     }
 
     /// Turn `n` is over (a newer one may be open already: left alone).
@@ -126,7 +156,12 @@ impl Slot {
     /// **The turn a call belongs to**: the one open now (`None` between
     /// turns).
     pub fn call(&self) -> Option<Call> {
-        self.lock().now.as_ref().map(|t| Call { n: t.n, ctx: Arc::clone(&t.ctx), events: t.events.clone() })
+        self.lock().now.as_ref().map(|t| Call { n: t.n, ctx: Arc::clone(&t.ctx), events: t.events.clone(), web: t.side.clone() })
+    }
+
+    /// The pages Claude Code's searches and reads found in turn `n` so far.
+    pub fn found(&self, n: u64) -> Vec<crate::chat::chats::Source> {
+        self.with(n, |t| t.found.clone()).unwrap_or_default()
     }
 
     /// Is web content in turn `n`? A turn that's over: yes (on doubt).
@@ -169,6 +204,8 @@ pub struct Call {
     pub ctx: Arc<Context>,
     /// The turn's stream. Closed once the turn ends (`closed().await`).
     pub events: UnboundedSender<Event>,
+    /// Its web side (`eyes.rs`), if it has one.
+    pub web: Option<WebSide>,
 }
 
 /// **What the plan turn tells its run** as Claude Code's events come in.
@@ -185,11 +222,30 @@ impl Marks {
         self.slot.changed.notify_all();
     }
 
-    /// Claude Code began a call to Yap's tool `name` ("start_agent").
+    /// Claude Code began a call to Yap's tool `name` ("start_agent"). One
+    /// that brings the screen's or a page's words in (`eyes::SEES`): web
+    /// content from now on, as a `WebSearch` beginning is.
     pub fn began(&self, name: &str) {
-        self.slot.with(self.n, |t| *t.began.entry(name.to_string()).or_insert(0) += 1);
+        let sees = super::eyes::SEES.contains(&name);
+        self.slot.with(self.n, |t| {
+            *t.began.entry(name.to_string()).or_insert(0) += 1;
+            t.web |= sees;
+        });
         self.slot.changed.notify_all();
     }
+
+    /// The pages Claude Code's searches and reads found so far (the plan
+    /// turn's sources, numbered as found): a page tool may take them.
+    pub fn found(&self, sources: &[crate::chat::chats::Source]) {
+        self.slot.with(self.n, |t| t.found = sources.to_vec());
+    }
+}
+
+/// **What a turn showed beside the chat** (`eyes.rs`): the answer keeps it.
+#[derive(Debug, Default)]
+pub struct Shown {
+    pub pictures: Vec<crate::chat::pictures::ShownPicture>,
+    pub pages: Vec<crate::chat::pages::ShownPage>,
 }
 
 /// **A turn open on a run**: its calls belong to it until it's dropped.
@@ -197,12 +253,22 @@ pub struct Turn {
     marks: Marks,
     /// What its calls show (a card, an agent's tab), for the turn's stream.
     pub events: UnboundedReceiver<Event>,
+    side: Option<WebSide>,
 }
 
 impl Turn {
     /// What to tell the run as the turn's events come in.
     pub fn marks(&self) -> Marks {
         self.marks.clone()
+    }
+
+    /// **The pictures and pages it showed** beside the chat, for the
+    /// answer: none while a call still holds them (a turn stopped mid-call).
+    pub fn shown(&self) -> Shown {
+        match self.side.as_ref().map(|s| s.try_lock()) {
+            Some(Ok(w)) => Shown { pictures: w.pictures.shown.clone(), pages: w.pages.shown.clone() },
+            _ => Shown::default(),
+        }
     }
 
     /// Its number on the run.
@@ -221,7 +287,13 @@ impl Drop for Turn {
 /// A turn on a slot of a test's own (no run registered).
 #[cfg(test)]
 pub fn test_begin(slot: &Arc<Slot>, ctx: Context) -> Turn {
-    slot.begin(ctx)
+    slot.begin(ctx, None)
+}
+
+/// …with a web side.
+#[cfg(test)]
+pub fn test_begin_seeing(slot: &Arc<Slot>, ctx: Context, web: crate::web::Turn) -> Turn {
+    slot.begin(ctx, Some(web))
 }
 
 #[cfg(test)]
@@ -236,9 +308,9 @@ mod tests {
     fn a_call_belongs_to_the_turn_open_now_and_none_between_turns() {
         let slot = Arc::new(Slot::default());
         assert!(slot.call().is_none(), "no turn yet");
-        let first = slot.begin(ctx("Start an agent in garden-planner"));
+        let first = slot.begin(ctx("Send an agent to garden-planner"), None);
         let call = slot.call().unwrap();
-        assert_eq!((call.n, call.ctx.question.as_str(), call.ctx.conversation), (1, "Start an agent in garden-planner", Some(3)));
+        assert_eq!((call.n, call.ctx.question.as_str(), call.ctx.conversation), (1, "Send an agent to garden-planner", Some(3)));
         assert!(!slot.web(1));
         // What a call shows reaches the turn's stream; once it ends, it's closed.
         let mut first = first;
@@ -249,7 +321,7 @@ mod tests {
         assert!(slot.call().is_none(), "between turns");
         assert!(slot.web(1), "a turn that's over: web, on doubt");
         // The next turn of a warm session: its own context and number.
-        let second = slot.begin(Context { web: true, ..ctx("Look it up") });
+        let second = slot.begin(Context { web: true, ..ctx("Look it up") }, None);
         assert_eq!(second.number(), 2);
         assert!(slot.web(2), "web from its start (text selected in another app)");
         // An older turn's end leaves the newer one open.
@@ -260,11 +332,11 @@ mod tests {
     #[test]
     fn web_reads_and_an_agents_words_mark_the_turn() {
         let slot = Arc::new(Slot::default());
-        let turn = slot.begin(ctx("q"));
+        let turn = slot.begin(ctx("q"), None);
         assert!(!slot.web(turn.number()));
         turn.marks().web();
         assert!(slot.web(turn.number()));
-        let turn2 = slot.begin(ctx("q2"));
+        let turn2 = slot.begin(ctx("q2"), None);
         assert!(!slot.web(turn2.number()), "each turn starts clean");
         slot.set_web(turn2.number());
         assert!(slot.web(turn2.number()));
@@ -277,7 +349,7 @@ mod tests {
     #[test]
     fn a_call_that_acts_waits_for_its_own_tool_call_in_the_turns_events() {
         let slot = Arc::new(Slot::default());
-        let turn = slot.begin(ctx("q"));
+        let turn = slot.begin(ctx("q"), None);
         let n = turn.number();
         // Not shown (yet): not in time.
         assert!(!slot.seen(n, "start_agent", Duration::from_millis(20)));

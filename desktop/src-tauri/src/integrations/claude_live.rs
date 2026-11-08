@@ -44,6 +44,14 @@
 //!   turn's question, the answer before it, the conversation, where it was
 //!   asked, and its stream; the web flag; the order of Claude Code's events
 //!   and its calls).
+//! - **The screen and the pages beside the chat** ([`eyes`]), for a Chat run
+//!   offered them ([`RunSpec::eyes`]): `look_at_screen`, `open_page`,
+//!   `read_open_page`, `switch_tab`, `snap_page`, `find_pictures`,
+//!   `look_at_picture` and `show_picture`, the tool loop's own code and
+//!   rules for the turn the call belongs to; what they take of the screen
+//!   or a page goes back to the model as MCP image content, and what they
+//!   show to the turn's stream (the screenshots with the question, a page's
+//!   tab, a picture). Never acting on a page.
 //! - **`approve`** ([`approve`]), an agent's permission prompt tool: a card for
 //!   the person (`yap-claude-approve`), Allow once / Deny
 //!   ([`claude_approve_answer`]), no answer in 10 minutes a no. Claude Code
@@ -60,6 +68,7 @@
 
 mod approve;
 pub mod backup;
+pub mod eyes;
 mod agents;
 mod reads;
 mod rpc;
@@ -152,11 +161,15 @@ pub struct RunSpec {
     /// (`agents/code_chat.rs`: Yap's memory is personal, the project keeps
     /// its own). Meetings, notes, tasks, folders and the calendar stay.
     pub memory: bool,
+    /// A Chat run sees the screen and the pages beside the chat ([`eyes`]),
+    /// as far as these gates say. Listed for the whole session, as the agent
+    /// tools are; each turn says what it may use of them (`turn::Context`).
+    pub eyes: eyes::Eyes,
 }
 
 impl RunSpec {
     pub fn new(label: impl Into<String>, tools: Tools) -> RunSpec {
-        RunSpec { label: label.into(), tools, backup_dir: None, folder: None, approval: None, agents: false, memory: true }
+        RunSpec { label: label.into(), tools, backup_dir: None, folder: None, approval: None, agents: false, memory: true, eyes: eyes::Eyes::default() }
     }
 
     /// The same, offered Yap Code's tools (`on`).
@@ -168,6 +181,12 @@ impl RunSpec {
     /// The same, with Yap's memory read (`on`) or not (a Code chat's).
     pub fn with_memory(mut self, on: bool) -> RunSpec {
         self.memory = on;
+        self
+    }
+
+    /// The same, seeing the screen and the pages as `eyes` lets it.
+    pub fn with_eyes(mut self, eyes: eyes::Eyes) -> RunSpec {
+        self.eyes = eyes;
         self
     }
 }
@@ -184,6 +203,8 @@ pub struct RunHandle {
     agents: bool,
     /// Reads Yap's memory ([`RunSpec::memory`]).
     memory: bool,
+    /// Sees the screen and the pages ([`RunSpec::eyes`], a Chat run's).
+    eyes: eyes::Eyes,
     has_backup: bool,
     /// The chat turn its calls belong to ([`RunHandle::begin_turn`]).
     turn: Arc<turn::Slot>,
@@ -268,7 +289,7 @@ impl RunHandle {
     /// …), so a Chat run in `dontAsk` mode can use them. `approve` is never
     /// one: it's the permission prompt tool.
     pub fn allowed_tools(&self) -> Vec<String> {
-        rpc::tool_names(self.tools, true, self.agents, self.memory)
+        rpc::tool_names(self.tools, true, self.agents, self.memory, self.eyes)
             .into_iter()
             .filter(|n| *n != approve::NAME)
             .map(|n| format!("mcp__{SERVER}__{n}"))
@@ -280,9 +301,10 @@ impl RunHandle {
     /// Code makes from now on belong to it — its question, the answer
     /// before it, the conversation, where it was asked, web content from its
     /// start ([`turn::Context`]) — and what they show comes out of the
-    /// returned [`turn::Turn`]'s `events`. Dropping it ends the turn.
-    pub fn begin_turn(&self, ctx: turn::Context) -> turn::Turn {
-        self.turn.begin(ctx)
+    /// returned [`turn::Turn`]'s `events`. `web`: its web side, for the
+    /// screen and page tools ([`eyes`]). Dropping it ends the turn.
+    pub fn begin_turn(&self, ctx: turn::Context, web: Option<crate::web::Turn>) -> turn::Turn {
+        self.turn.begin(ctx, web)
     }
 }
 

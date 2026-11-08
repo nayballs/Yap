@@ -718,7 +718,7 @@ fn a_chat_run_offered_agents_lists_and_allows_their_tools_and_runs_them_for_its_
         conversation: Some(12),
         agents: Some(crate::chat::tools::AgentsTurn::default()),
         ..Default::default()
-    });
+    }, None);
     turn.marks().web();
     turn.marks().began("start_agent");
     let (err, text) = c.tool("start_agent", json!({ "folder": "garden-planner", "brief": "Write the tides into notes.md." }));
@@ -731,6 +731,56 @@ fn a_chat_run_offered_agents_lists_and_allows_their_tools_and_runs_them_for_its_
     assert_eq!(serde_json::from_str::<Value>(&text).unwrap()["displayText"], "Didn't use an agent tool");
     // An agent's run never gets them.
     let agent = ep.register(RunSpec::new("Tidy", Tools::Agent).with_agents(true)).unwrap();
+    assert_eq!(names(&Client::of(&agent).request("tools/list", json!({}))), ["approve"]);
+    assert!(agent.allowed_tools().is_empty());
+}
+
+// ---- The screen and the pages on a plan chat's run ----
+
+#[test]
+fn a_chat_run_offered_the_screen_and_pages_lists_and_allows_them_and_refuses_them_where_the_tool_loop_would() {
+    use crate::chat::pictures::Gate;
+    let (ep, _) = endpoint(Duration::from_secs(5), MAX_BACKUP_BYTES);
+    let sees = eyes::Eyes { screen: Gate::Look, pictures: Gate::Look };
+    let plain = ep.register(RunSpec::new("Plan chat", Tools::Chat)).unwrap();
+    let h = ep.register(RunSpec::new("Plan chat", Tools::Chat).with_eyes(sees)).unwrap();
+    // Not offered: neither listed, allowed nor run.
+    let mut p = Client::of(&plain);
+    assert!(!names(&p.request("tools/list", json!({}))).iter().any(|n| n == "look_at_screen" || n == "open_page"));
+    assert!(!plain.allowed_tools().iter().any(|t| t.ends_with("look_at_screen")));
+    assert_eq!(p.request("tools/call", json!({ "name": "look_at_screen", "arguments": {} }))["error"]["code"], -32602);
+    // Offered: after the read-only ones, the tool loop's own, the same
+    // schemas; allowed by Claude Code's names; the model told of them.
+    let mut c = Client::of(&h);
+    let init = c.request("initialize", json!({ "protocolVersion": "2025-11-25" }));
+    assert!(init["result"]["instructions"].as_str().unwrap().contains("look_at_screen takes a screenshot of their monitors"));
+    let list = c.request("tools/list", json!({}));
+    assert_eq!(names(&list)[9..], *eyes::NAMES);
+    let look = list["result"]["tools"].as_array().unwrap().iter().find(|t| t["name"] == "look_at_screen").unwrap().clone();
+    assert_eq!(look["inputSchema"], crate::chat::see_screen::definitions(Gate::Look)[0]["function"]["parameters"]);
+    for name in eyes::NAMES {
+        assert!(h.allowed_tools().contains(&format!("mcp__yap__{name}")), "{name}");
+    }
+    // Outside a chat turn: nothing done.
+    let (err, text) = c.tool("look_at_screen", json!({}));
+    assert!(err);
+    assert_eq!(serde_json::from_str::<Value>(&text).unwrap()["displayText"], "Didn't look: not part of a chat turn");
+    // A turn asked away from Chat (another app, a phone): refused, nothing taken.
+    let turn = h.begin_turn(turn::Context { question: "Have a look at my screen".into(), conversation: Some(14), ..Default::default() }, None);
+    let r = c.request("tools/call", json!({ "name": "look_at_screen", "arguments": {} }));
+    assert_eq!(r["result"]["isError"], true);
+    assert_eq!(r["result"]["content"].as_array().unwrap().len(), 1, "no pictures");
+    assert_eq!(serde_json::from_str::<Value>(r["result"]["content"][0]["text"].as_str().unwrap()).unwrap()["displayText"], "Didn't look at your screen: not asked in Chat");
+    let (err, text) = c.tool("open_page", json!({ "url": "https://wiki.example.com/" }));
+    assert!(err && text.contains("no panel beside the chat"), "{text}");
+    drop(turn);
+    // The plan is a cloud model: the screen goes only once "…with cloud
+    // models too" is on (see_screen::execute asks once until then).
+    let leaves = crate::chat::assistant::screen::leaves_pc(crate::ai::claude_plan::PROVIDER, crate::ai::claude_plan::BASE_URL);
+    assert!(leaves);
+    assert_eq!(crate::chat::assistant::screen::allowed(true, false, leaves), crate::chat::assistant::screen::Allowed::NotToTheCloud);
+    // An agent's run never gets them.
+    let agent = ep.register(RunSpec::new("Tidy", Tools::Agent).with_eyes(sees)).unwrap();
     assert_eq!(names(&Client::of(&agent).request("tools/list", json!({}))), ["approve"]);
     assert!(agent.allowed_tools().is_empty());
 }

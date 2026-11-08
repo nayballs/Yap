@@ -1947,7 +1947,11 @@ model looks itself; its pictures show with the spoken question
 (`followAssistantStream`). Never a phone's question, nor the Voice
 Assistant asked from another app (its own look at the window in front):
 `chat_in_view` in `turn.rs` (the maintainer asked out loud with Chat open,
-"have a look", and Haiku said it couldn't see — 1 Nov 2026). A screen shot in an earlier message is held
+"have a look", and Haiku said it couldn't see — 1 Nov 2026). **On your
+Claude plan** (7 Nov 2026) the same look, and the page tools below, go over
+Yap's run endpoint with the same code and rules, the pictures to Claude Code
+as MCP image content ([Chat on your Claude plan](#chat-on-your-claude-plan-2026-11-07),
+`claude_live/eyes.rs`). A screen shot in an earlier message is held
 back from a cloud model as a window shot is (`snip::turn::captured`: "window"
 or "screen", sent again only while `window_may_go`). The prompt line: "use it
 whenever they ask you to look at, see, check or screenshot something… Never
@@ -3518,10 +3522,36 @@ as for every other. Chat, the Voice Assistant on this PC and from the phone.
 - **In a Code chat** a plan turn is a read-only Claude Code session in the
   chat's workspace, with the person's own settings and no Yap memory
   ([yap-code.md](./yap-code.md#memory-and-the-plan-in-a-code-chat)).
-- **What a plan turn doesn't do in v1** (`gates.rs` `on_the_plan`): documents
-  beside the chat, pictures from the web, pages to open or act on, a look at
-  the screen (the Voice Assistant gets the window's picture instead), Think's
-  budget (effort covers it). "Remember that…" goes through Yap's own memory
+- **The screen and the pages beside the chat** (7 Nov 2026: in a Code chat
+  on the plan the maintainer asked for a site's design and screenshots, and
+  the model said it "can't open your browser or take screenshots"):
+  `on_the_plan` keeps `screen` and `pictures` as the tool loop has them, so
+  a plan chat (a Code chat too) gets `look_at_screen`, `open_page`,
+  `read_open_page`, `switch_tab`, `snap_page`, `find_pictures`,
+  `look_at_picture` and `show_picture` over the run endpoint
+  (`claude_live/eyes.rs`: [integrations.md](./integrations.md#claude-code-runs-endpoint-integrationsclaude_livers-2026-11-07)),
+  the tool loop's own code. Listed for the session (`plan.rs`
+  `session_eyes`, in the fingerprint) and named in its prompt (`eyes_lines`:
+  Claude Code's names, then the tool loop's own lines); each turn may use
+  them only where the tool loop would (`turn_eyes`: Chat, or the Voice
+  Assistant with Chat in view; a question from another app or a phone is
+  told so in its context and refused). The rules hold: the screen only with
+  "Let Yap's AI see your screen" and, the plan being a cloud model, "…with
+  cloud models too" (until then refused, the alert asking once, the model
+  saying it couldn't look); never during a meeting or a call; Yap's windows
+  left out; public http(s) pages from the turn's results (the pages Claude
+  Code's `WebSearch` found: `Marks::found`), the person's links or a site
+  they named; what a look, a page read or a shot brings in is web content
+  (an agent is refused after it). The screenshots show with the question
+  (`Event::Screen`, kept with it), a page's tab opens (`Event::Page`), a
+  shot or a picture shows beside the chat (`Event::Picture`), all through
+  the turn's stream; the pages and pictures shown are the answer's
+  (`shown_of`). The pictures go back to the model as MCP image content.
+  **Acting on pages stays out** (`act: false`): no `click`, `type_text`,
+  `scroll` or `go_to`, since in the tool loop each click that buys or sends
+  waits on the person's card and only evaluated models get it.
+- **What a plan turn doesn't do** (`gates.rs` `on_the_plan`): documents
+  beside the chat, acting on pages, Think's budget (effort covers it). "Remember that…" goes through Yap's own memory
   pass, as for a model without tools (`turn.rs` `remembered`). Yap's own
   summary of a long chat is skipped (`compact.rs`): Claude Code compacts its
   own session.

@@ -87,8 +87,9 @@ fn reply(result: &Value) -> (String, bool) {
     (result.to_string(), result["success"] != json!(true))
 }
 
-/// What a call shows, to its turn's stream.
-struct ToTurn(tokio::sync::mpsc::UnboundedSender<Event>);
+/// What a call shows, to its turn's stream (the screen's and the pages'
+/// calls too: `eyes.rs`).
+pub(super) struct ToTurn(pub(super) tokio::sync::mpsc::UnboundedSender<Event>);
 
 impl Sink for ToTurn {
     fn send(&self, ev: Event) {

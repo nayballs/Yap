@@ -1964,6 +1964,23 @@ fingerprint has the folder; `claude_sessions.json` keeps it as `cwd`). Its
 events' `Read`, `Grep` and `Glob` show as "Reading app.ts", "Searching the
 code · …" (`claude_plan/map.rs` `Tool::Code`), no chip.
 
+**What a plan chat can do** (7 Nov 2026), a Code chat's too: answer, with
+Claude Code's `WebSearch` and `WebFetch` (the web on); read Yap's meetings,
+notes, tasks, folders, memory (not a Code chat's) and the calendar; start and
+steer agents (Yap Code on); **look at the screen** (`look_at_screen`: "Let Yap's AI
+see your screen" on and, the plan being a cloud model, "…with cloud models
+too" — asked once, as for any cloud model; never during a meeting or a call);
+and **use the pages beside the chat** (`open_page`, `read_open_page`,
+`switch_tab`, `snap_page`) and pictures from them (`find_pictures`,
+`look_at_picture`, `show_picture`) — Yap's tool loop's own code over the run
+endpoint (`claude_live/eyes.rs`), the screenshots shown with the question, a
+page's tab and a shot or picture beside the chat, kept with the answer. Its
+pictures go to Claude Code as MCP image content, which 2.1.296's MCP client
+turns into image blocks the model reads (resized to its limits; read in its
+bundle, 7 Nov 2026). It never edits notes or documents beside the chat,
+never acts on a page (clicks, types), and never runs commands except through
+an agent ([chat-and-assistant.md](./chat-and-assistant.md#chat-on-your-claude-plan-2026-11-07)).
+
 **Claude Code's own copy of a plan chat.** A chat session has to be saved
 for `--resume`, so Claude Code keeps its transcript in its own config folder
 (`projects/<…-claude-chat>/<session>.jsonl`, `claude_code/transcripts.rs`),

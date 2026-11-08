@@ -589,6 +589,8 @@ async fn turn(id: &str, message: Option<String>) -> (Status, u32) {
         approval: Some(Approval { run: id.to_string(), conversation: agent.conversation, origin: agent.origin }),
         agents: false,
         memory: false,
+        // A job works with the person's own tools, never Yap's screen or pages.
+        eyes: Default::default(),
     }) {
         Ok(r) => r,
         Err(e) => return failed_early(id, n, format!("Couldn't start the agent: {e}"), None),
