@@ -278,7 +278,7 @@ pub fn page_part(text: &str, offset: usize, budget: usize) -> (String, Option<us
 /// when it was read in the last 10 minutes.
 pub async fn read_page(ep: &Endpoints, url: &str) -> Result<Page, String> {
     let checked = check_url(url)?;
-    let key = normal_url(checked.as_str());
+    let key = format!("{}|{}", ep.cache_scope(), normal_url(checked.as_str()));
     if let Some((at, page)) = PAGES.lock().unwrap_or_else(|p| p.into_inner()).get(&key) {
         if at.elapsed() < CACHE_FOR {
             return Ok(page.clone());

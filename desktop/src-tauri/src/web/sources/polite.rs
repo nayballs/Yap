@@ -167,7 +167,7 @@ pub struct Ask<'a> {
 /// rate-limit's 403 holds the host for as long as it said (a minute when it
 /// said nothing). The body as text (unzipped).
 pub async fn get(ep: &Endpoints, url: &Url, ask: Ask<'_>) -> Result<String, String> {
-    let key = url.as_str().to_string();
+    let key = format!("{}|{}", ep.cache_scope(), url.as_str());
     if let Some(body) = cached(&key) {
         return Ok(body);
     }
