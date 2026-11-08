@@ -3228,10 +3228,23 @@ double-click, right-click, drag or reach into a frame).
   search box, its live examples listed as frames from another site,
   `mdnplay.dev`), and jQuery UI's sortable demo — a list in a same-origin
   frame — was read and Item 3 dragged to the top.
-- **Not yet**: a `browser_tabs new` straight after which a read reads the tab
-  before it (the new tab is made out of sight and comes to the front when the
-  Chat view shows it: a read in between finds the old one in front — seen in
-  the Lab, older than this); the Lab's own page shot of a tab at a desktop
+- **The tab in front is Rust's** (8 Nov 2026; a `browser_tabs new` straight
+  after which a read read the tab before it, still on screen until the Chat
+  view showed the new one): `view::Front` (one per panel, the stand-in
+  browser's its own) holds the tab Rust put in front — a page brought up
+  (`browser_navigate` opening a tab, `browser_tabs new`, a middle click on a
+  link), a tab switched to or acted on (`bring_front`), the address bar's
+  page, the tab the view shows (the person's pick) — and it stays in front
+  while it's open, whatever is on screen; the view follows. A tab the view
+  shows while Rust's pick waits to be shown (`FOLLOW`, 3 s) is the view
+  catching up on an older event, never the person's pick. The one in front
+  closed: the one after it is (else the one before, as the row gives way), and
+  the view is told to show it (`Event::SwitchTab` after `CloseTab`). Without
+  a pick: the one on screen, else the one shown last. Tests: `pages/tests.rs`
+  (a new tab read with the view on the old tab, not showing, or catching up;
+  a switch and a close), `chat-browse.spec.js` (a new tab and a read in one
+  step).
+- **Not yet**: the Lab's own page shot of a tab at a desktop
   width comes out at its CSS size with the page in its top-left corner
   (Playwright's capture under a page zoom; Yap's own shots are right).
 

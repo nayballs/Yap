@@ -163,7 +163,11 @@ impl Tab {
 pub struct Browser {
     pages: Vec<(String, String)>,
     tabs: Vec<Tab>,
-    front: usize,
+    /// The tab in front, by the panel's own rule (`view::Front`).
+    front: super::view::Front,
+    /// The tab the Chat view has on screen (its Page tab placed): a test
+    /// plays the view with [`Browser::view_shows`] / [`Browser::view_places`].
+    on_screen: Option<String>,
     next_id: usize,
     tick: u64,
     /// The tab the last [`Browser::open`] closed to make room (its number
@@ -286,7 +290,8 @@ impl Browser {
         Browser {
             pages: pages.iter().map(|(u, h)| (u.clone(), h.clone())).collect(),
             tabs: Vec::new(),
-            front: 0,
+            front: super::view::Front::default(),
+            on_screen: None,
             next_id: 1,
             tick: 0,
             closed: None,
@@ -381,11 +386,12 @@ impl Browser {
         self.closed = None;
         let now = self.tick();
         if let Some(i) = self.tabs.iter().position(|t| t.key == key) {
-            self.front = i;
+            self.front.pick(&key, std::time::Instant::now());
             self.tabs[i].used = now;
             return key;
         }
-        let alive: Vec<(String, u64, bool)> = self.tabs.iter().enumerate().map(|(i, t)| (t.key.clone(), t.used, i == self.front)).collect();
+        let front = self.front_key();
+        let alive: Vec<(String, u64, bool)> = self.tabs.iter().map(|t| (t.key.clone(), t.used, front.as_deref() == Some(t.key.as_str()) || self.on_screen.as_deref() == Some(t.key.as_str()))).collect();
         if let Some(gone) = super::view::evict(&alive) {
             if let Some(i) = self.tabs.iter().position(|t| t.key == gone) {
                 let t = self.tabs.remove(i);
@@ -397,8 +403,34 @@ impl Browser {
         let id = self.next_id;
         self.next_id += 1;
         self.tabs.push(Tab::new(key.clone(), id, now, url, html, self.panel_w));
-        self.front = self.tabs.len() - 1;
+        self.front.pick(&key, std::time::Instant::now());
         key
+    }
+
+    /// The key of the tab in front (`view::Front::of`, as the panel's).
+    fn front_key(&self) -> Option<String> {
+        let order: Vec<(String, bool, u64)> = self.tabs.iter().map(|t| (t.key.clone(), self.on_screen.as_deref() == Some(t.key.as_str()), t.used)).collect();
+        self.front.of(&order)
+    }
+
+    /// **The Chat view shows tab `key`** (its Page tab made or shown:
+    /// `page_view_show`): on screen, and in front as the view's showing
+    /// makes it (`view::Front::shown`).
+    #[cfg(test)]
+    pub fn view_shows(&mut self, key: &str) {
+        self.front.shown(key, std::time::Instant::now());
+        self.on_screen = Some(key.to_string());
+        let now = self.tick();
+        if let Ok(t) = self.tab_mut(key) {
+            t.used = now;
+        }
+    }
+
+    /// **The Chat view places its page** (`page_view_place`: `None`, out of
+    /// sight — another view, Yap's window hidden, something over it).
+    #[cfg(test)]
+    pub fn view_places(&mut self, key: Option<&str>) {
+        self.on_screen = key.map(str::to_string);
     }
 
     /// The tab the last [`Browser::open`] closed to make room, once.
@@ -408,10 +440,10 @@ impl Browser {
 
     /// The tabs, as `view::open_tabs` tells them: each with its own number.
     pub fn tabs(&self) -> Vec<OpenTab> {
+        let front = self.front_key();
         self.tabs
             .iter()
-            .enumerate()
-            .map(|(i, t)| OpenTab { tab: t.id, key: t.key.clone(), title: title_of(&t.html), url: t.url.clone(), front: i == self.front, width: t.width })
+            .map(|t| OpenTab { tab: t.id, key: t.key.clone(), title: title_of(&t.html), url: t.url.clone(), front: front.as_deref() == Some(t.key.as_str()), width: t.width })
             .collect()
     }
 
@@ -426,7 +458,7 @@ impl Browser {
     /// The tab `key` in front.
     pub fn front(&mut self, key: &str) -> Result<(), String> {
         let i = self.tabs.iter().position(|t| t.key == key).ok_or("That page isn't open.")?;
-        self.front = i;
+        self.front.pick(key, std::time::Instant::now());
         self.tabs[i].used = self.tick();
         Ok(())
     }
@@ -529,12 +561,15 @@ impl Browser {
         self.load(key, &to)
     }
 
-    /// **Tab `key` closed**: the one before it in front.
+    /// **Tab `key` closed**: the one in front closing, the one after it is
+    /// in front, else the one before (`view::Front::closed`).
     pub fn close(&mut self, key: &str) -> Result<(), String> {
         let i = self.tabs.iter().position(|t| t.key == key).ok_or("That page isn't open.")?;
+        let keys: Vec<String> = self.tabs.iter().map(|t| t.key.clone()).collect();
+        self.front.closed(&keys, key);
         self.tabs.remove(i);
-        if self.front >= self.tabs.len() || self.front > i {
-            self.front = self.front.saturating_sub(1);
+        if self.on_screen.as_deref() == Some(key) {
+            self.on_screen = None;
         }
         Ok(())
     }
