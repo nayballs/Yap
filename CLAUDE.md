@@ -293,7 +293,7 @@ One folder per area (an area's `<area>.rs` lists its modules); a big module's pa
 - `config.rs` — `YapConfig`, saved one at a time (`config::update`), migrations.
 - `shell/saving.rs` — every JSON store's writes and reads: a failed write retried; an unreadable file never written over.
 - `shell/credentials.rs` — every secret in Windows Credential Manager (session, calendars, ChatGPT, connectors): writes one at a time across Yaps (`Local\YapCredentials`), each read back.
-- `shell/e2e.rs` / `shell/realtest.rs` / `shell/lab.rs` — test mode, robot mode, Yap Lab's record and live web ([`docs/lab.md`](./docs/lab.md)).
+- `shell/e2e.rs` / `shell/realtest.rs` / `shell/lab.rs` — test mode, robot mode, Yap Lab's record, live web and fixed window size ([`docs/lab.md`](./docs/lab.md)).
 - `privacy/log_privacy.rs` — a test: no user content in the log at `info` and above.
 
 ## Frontend index (`desktop/src/`)
@@ -393,7 +393,7 @@ upstream (`npm run pins:check`); `issue-labels.yml` labels bug reports by area
 - `npm run test:link` — Yap Link's phone page (`phone/web/page/`): its sound maths in Node, then the page in headless Chromium (or Edge) and Firefox when installed, against a mocked PC and a faked mic (~1–2 min, nothing on screen). Guide: [its README](./phone/web/README.md).
 - `npm run privacy:scan` / `npm run test:privacy` — the privacy guard over the whole tree, and its own tests ([build-and-test.md](./docs/architecture/build-and-test.md#the-privacy-guard-scriptsprivacy-guardmjs)).
 - `npm run eval` — model evaluations: real models through Yap's own Chat code, every request logged; run it before changing a prompt, a tool or the default local model. Guide: [`docs/model-evals.md`](./docs/model-evals.md).
-- `npm run -s lab -- <command>` — **Yap Lab**: a test Yap you question through its own Chat (typed or spoken) on the real web, reading back each turn's tools, cards and answer as JSON, and `report <prompt>` has it test a tool family and write up what fails. Real runs use the person's Claude plan: **ask first**; `npm run test:lab` is offline (`--fake`). Guide: [`docs/lab.md`](./docs/lab.md).
+- `npm run -s lab -- <command>` — **Yap Lab**: a test Yap you question through its own Chat (typed or spoken) on the real web, reading back each turn's tools, cards and answer as JSON, with screenshots of each turn in light and dark (`sheet`: one contact sheet to look at), and `report <prompt>` has it test a tool family and write up what fails; `run <script>` replays a feature script's steps and checks (`scripts/lab/scripts/`). Real runs use the person's Claude plan: **ask first**; `npm run test:lab` is offline (`--fake`). Guide: [`docs/lab.md`](./docs/lab.md).
 - `yap.exe dictation-check run <dir> --cleanup` (an engines debug build, e.g. `E:\Builds\t-real`) — the maintainer's own dictations against a baseline, before pushing any change to speech-to-text or cleanup. The set is private (`../yap-private/dictation-tests/`); never copy it here ([build-and-test.md](./docs/architecture/build-and-test.md#your-own-dictations-as-a-test-set-yapexe-dictation-check)).
 
 ### The dev → nightly → stable workflow (agreed 2026-10-05)

@@ -1,0 +1,39 @@
+{
+  "name": "share-files",
+  "about": "Chat sharing files from a Code chat's workspace into the conversation: one picture, then three (inline), then a Markdown file (a card). The workspace's pictures are drawn by the lab (made-up shapes), its notes.md made up. The thread's shots in both themes show how they look.",
+  "todo": "The share-files tool wasn't on main when this was written (8 Nov 2026). Once it is: put its real name in the `used` checks (share_files here), and check where an answer keeps its file cards (scripts/lab/turns.mjs summarize → `files`).",
+  "needs": { "yapCode": true },
+  "steps": [
+    {
+      "set": {
+        "files": [
+          { "path": "pictures/sunrise.png", "png": { "width": 480, "height": 320, "shape": "circle", "color": "#f4a261", "background": "#264653" } },
+          { "path": "pictures/forest.png", "png": { "width": 480, "height": 320, "shape": "triangle", "color": "#2a9d8f", "background": "#e9f5db" } },
+          { "path": "pictures/harbour.png", "png": { "width": 480, "height": 320, "shape": "stripes", "color": "#457b9d", "background": "#f1faee" } },
+          { "path": "notes.md", "text": "# Unit Shelf notes\n\n- Tablespoons next (1 tbsp = 15 ml).\n- Check what a cup is in other countries.\n- The flour test rounds to 133 g.\n" }
+        ]
+      }
+    },
+    {
+      "ask": "Show me the picture pictures/sunrise.png from this workspace, here in the chat. No agent needed: just share it.",
+      "chat": "code:lab-sandbox",
+      "cards": "allow",
+      "timeout": 300
+    },
+    { "expect": { "status": "answered", "used": "share_files", "notUsed": "start_agent", "refused": false, "pictures": 1, "files": 0 } },
+    {
+      "ask": "Now show me all three pictures in the pictures folder.",
+      "chat": "same",
+      "cards": "allow",
+      "timeout": 300
+    },
+    { "expect": { "status": "answered", "used": "share_files", "refused": false, "pictures": 3, "files": 0 } },
+    {
+      "ask": "And share notes.md here as a file.",
+      "chat": "same",
+      "cards": "allow",
+      "timeout": 300
+    },
+    { "expect": { "status": "answered", "used": "share_files", "refused": false, "files": 1, "pictures": 0, "visible": "notes.md" } }
+  ]
+}
