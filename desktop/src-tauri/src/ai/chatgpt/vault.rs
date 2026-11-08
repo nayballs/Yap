@@ -12,6 +12,11 @@
 //! their keys). The uninstaller's "Delete the application data" removes
 //! all [`PARTS`]. Test runs (`e2e::active`) keep it in a file in their own
 //! data folder.
+//!
+//! Its parts are written, read and removed whole within one turn at
+//! Credential Manager (`shell/credentials.rs`: one at a time across Yaps,
+//! each write read back), so a refresh in another Yap never leaves a read
+//! with half of one token and half of the next.
 
 /// Credentials one token may span (the uninstaller knows every name).
 pub const PARTS: usize = 6;
@@ -25,17 +30,20 @@ pub fn save(secret: &str) -> Result<(), String> {
     if parts.len() > PARTS {
         return Err("ChatGPT's sign-in is too long for Windows to store safely.".into());
     }
+    let _turn = turn();
     for (i, part) in parts.iter().enumerate() {
         put(i, part)?;
     }
     for i in parts.len()..PARTS {
-        remove(i);
+        // A part left over from a longer token would join this one's.
+        remove(i).map_err(|()| "Windows Credential Manager wouldn't keep ChatGPT's sign-in.".to_string())?;
     }
     Ok(())
 }
 
 /// The secret, if there is one.
 pub fn load() -> Option<String> {
+    let _turn = turn();
     let mut out = String::new();
     for i in 0..PARTS {
         match get(i) {
@@ -48,9 +56,16 @@ pub fn load() -> Option<String> {
 
 /// Forget it (no-op if there's none).
 pub fn delete() {
+    let _turn = turn();
     for i in 0..PARTS {
-        remove(i);
+        let _ = remove(i);
     }
+}
+
+/// A turn at Credential Manager for a whole read or write (none for a test
+/// run's file).
+fn turn() -> Option<crate::shell::credentials::Turn> {
+    (!test_store::active()).then(crate::shell::credentials::turn)
 }
 
 fn put(i: usize, part: &str) -> Result<(), String> {
@@ -67,11 +82,12 @@ fn get(i: usize) -> Option<String> {
     os::load(&user(i))
 }
 
-fn remove(i: usize) {
+fn remove(i: usize) -> Result<(), ()> {
     if test_store::active() {
         test_store::delete(i);
+        Ok(())
     } else {
-        os::delete(&user(i));
+        os::delete(&user(i))
     }
 }
 
@@ -90,72 +106,28 @@ pub(super) fn user(i: usize) -> String {
     }
 }
 
-#[cfg(windows)]
+/// Windows Credential Manager (in memory for one run off Windows).
 mod os {
-    use std::collections::HashMap;
-    use std::sync::Once;
+    use crate::shell::credentials;
 
     const SERVICE: &str = "com.yap.dictation";
 
-    fn entry(user: &str) -> Result<keyring_core::Entry, keyring_core::Error> {
-        static STORE: Once = Once::new();
-        STORE.call_once(|| {
-            // auth.rs or the calendar may have set it up already.
-            if keyring_core::get_default_store().is_none() {
-                match windows_native_keyring_store::Store::new() {
-                    Ok(store) => keyring_core::set_default_store(store),
-                    Err(e) => tracing::error!("chatgpt: credential store unavailable: {e}"),
-                }
-            }
-        });
-        keyring_core::Entry::new_with_modifiers(SERVICE, user, &HashMap::from([("persistence", "Local")]))
-    }
-
     pub fn save(user: &str, secret: &str) -> Result<(), String> {
-        entry(user).and_then(|e| e.set_password(secret)).map_err(|e| {
+        credentials::write(SERVICE, user, secret).map_err(|e| {
             tracing::error!("chatgpt: couldn't store the sign-in: {e}");
             "Windows Credential Manager wouldn't keep ChatGPT's sign-in.".to_string()
         })
     }
 
     pub fn load(user: &str) -> Option<String> {
-        match entry(user).and_then(|e| e.get_password()) {
-            Ok(secret) => Some(secret),
-            Err(keyring_core::Error::NoEntry) => None,
-            Err(e) => {
-                tracing::error!("chatgpt: couldn't read the sign-in: {e}");
-                None
-            }
-        }
+        credentials::read(SERVICE, user).unwrap_or_else(|e| {
+            tracing::error!("chatgpt: couldn't read the sign-in: {e}");
+            None
+        })
     }
 
-    pub fn delete(user: &str) {
-        match entry(user).and_then(|e| e.delete_credential()) {
-            Ok(()) | Err(keyring_core::Error::NoEntry) => {}
-            Err(e) => tracing::error!("chatgpt: couldn't remove the sign-in: {e}"),
-        }
-    }
-}
-
-/// No credential store wired up off Windows: the sign-in lasts one run.
-#[cfg(not(windows))]
-mod os {
-    use std::collections::HashMap;
-    use std::sync::Mutex;
-
-    static SECRETS: Mutex<Option<HashMap<String, String>>> = Mutex::new(None);
-
-    pub fn save(user: &str, secret: &str) -> Result<(), String> {
-        SECRETS.lock().unwrap_or_else(|p| p.into_inner()).get_or_insert_with(HashMap::new).insert(user.into(), secret.into());
-        Ok(())
-    }
-    pub fn load(user: &str) -> Option<String> {
-        SECRETS.lock().unwrap_or_else(|p| p.into_inner()).as_ref()?.get(user).cloned()
-    }
-    pub fn delete(user: &str) {
-        if let Some(map) = SECRETS.lock().unwrap_or_else(|p| p.into_inner()).as_mut() {
-            map.remove(user);
-        }
+    pub fn delete(user: &str) -> Result<(), ()> {
+        credentials::delete(SERVICE, user).map_err(|e| tracing::error!("chatgpt: couldn't remove the sign-in: {e}"))
     }
 }
 

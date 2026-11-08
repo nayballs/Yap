@@ -1229,6 +1229,58 @@
   (2026-11-07: until then it was filled in again every 400 ms,
   frontend-settings.md).
 
+## Secrets in Credential Manager (`shell/credentials.rs`)
+
+(2026-11-08.) Every secret Yap keeps in Windows Credential Manager goes
+through one module: the account session (`auth.rs`), the calendars'
+(`calendar/vault.rs`), the ChatGPT sign-in's (`ai/chatgpt/vault.rs`) and the
+connectors' (`integrations/connectors/vault.rs`). Each keeps its own names
+and format (generic credentials `<user>.com.yap.dictation`, Local
+persistence, keyring-core's UTF-16 value), so an installed Yap reads what it
+kept before exactly as it did.
+
+**Why writes take turns.** Credential Manager loses a write when another
+thread or process writes other names at the same moment: a value just
+written reads back as missing or as the one before. Measured with three
+processes writing names of their own at once, 60 writes each: up to half
+of each process's lost (0 to 37 a run); one process alone, none. Two token refreshes at once
+(a connector's and ChatGPT's), the session beside a calendar's token, or the
+installed Yap beside Yap - Dev could each drop a sign-in or store one half
+written. So:
+
+- **One at a time.** Every read, write and delete takes a `Turn`: a gate in this
+  process, then the named mutex `Local\YapCredentials`, which every Yap on
+  this Windows sign-in shares (the installed app, Yap - Dev, a test build).
+  It waits up to 5 s in all, then goes ahead and logs it at warn. A turn is
+  held only around Credential Manager's own calls, never across the network.
+  A thread that already holds one takes it again at no cost.
+- **Whole secrets in one turn.** A secret split into parts (the connectors'
+  and ChatGPT's `PARTS`) is read, written and removed within one turn, so a
+  read never sees half of a write. A connector's `update` (read, change,
+  write) is one turn too.
+- **Read back.** Every write is read back and compared, in memory only. A
+  write that differs, or is refused, is written once more, and then it's an
+  error, so the caller's "couldn't save" runs instead of the sign-in going
+  missing. A delete is checked the same way. A multi-part save whose
+  leftover part can't be removed fails too, since that part would join the
+  next read.
+- **Reads take turns too.** With only the writes in turns, a read beside
+  another Yap's write still came back wrong about once in 4,500 in the
+  stress test.
+- **Nothing logged but outcomes**: never a name or a value, keyring's
+  errors by kind only.
+- **Off Windows** there's no store wired up yet: secrets are kept in memory
+  for one run (the session not at all, as before).
+
+**Tests.** The fake store's tests cover the read-back, the second try, the
+error after two and a checked delete, plus the bounded waits on the gate and
+on the named mutex. `many_yaps_writing_at_once_lose_nothing` runs three
+processes on the real Credential Manager under test names of its own,
+removed however it ends. Each process writes and reads 60 times: with
+keyring's own calls (before), with the module's writes but reads without a
+turn (both printed), and through the module, where it asserts none lost. It takes turns with the
+connectors' real-store tests through the same lock file in the temp folder.
+
 ## A file Yap couldn't read
 
 (2026-10-30, `shell/saving.rs`.) Until then every store took **any** read

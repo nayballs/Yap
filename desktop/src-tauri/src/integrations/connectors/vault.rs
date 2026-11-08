@@ -10,9 +10,14 @@
 //! value split in [`PART_CHARS`]-character parts across `-1`…`-8`
 //! ([`PARTS`]), `c1`…`c24` (`store::MAX`), so the uninstaller's "Delete the
 //! application data" knows every name. A portable Yap adds a hash of its
-//! data folder to the names. Test runs (`e2e::active`) keep them in a file
-//! in their own data folder; unit tests in memory, and the two tests of the
-//! real store use names of their own ([`Vault::os`]), one at a time, and
+//! data folder to the names. Every read, write and delete of a connector's
+//! parts is one turn at Credential Manager (`shell/credentials.rs`: one at a
+//! time across Yaps, each write read back), so two refreshes at once — a
+//! connector's and ChatGPT's, or the installed Yap's and Yap - Dev's — never
+//! lose a part or leave one read half-written; [`Vault::update`]'s read,
+//! change and write are one turn too. Test runs (`e2e::active`) keep them in
+//! a file in their own data folder; unit tests in memory, and the tests of
+//! the real store use names of their own ([`Vault::os`]), one at a time, and
 //! remove them (`tests::RealStore`).
 //!
 //! [`Secrets`] never prints its values (`Debug` says which there are).
@@ -119,7 +124,11 @@ impl Secrets {
 trait Backend: Send + Sync {
     fn put(&self, user: &str, secret: &str) -> Result<(), String>;
     fn get(&self, user: &str) -> Option<String>;
-    fn remove(&self, user: &str);
+    fn remove(&self, user: &str) -> Result<(), String>;
+    /// A turn for a whole multi-part read or write (Credential Manager's).
+    fn turn(&self) -> Option<crate::shell::credentials::Turn> {
+        None
+    }
 }
 
 /// A vault: where, and its names' prefix.
@@ -170,11 +179,13 @@ impl Vault {
         if parts.len() > PARTS {
             return Err("That's too long for Windows to store safely.".into());
         }
+        let _turn = self.backend.turn();
         for (i, part) in parts.iter().enumerate() {
             self.backend.put(&self.user(id, i), part)?;
         }
         for i in parts.len()..PARTS {
-            self.backend.remove(&self.user(id, i));
+            // A part left over from a longer value would join this one's.
+            self.backend.remove(&self.user(id, i))?;
         }
         Ok(())
     }
@@ -184,6 +195,7 @@ impl Vault {
         if check_id(id).is_err() {
             return Secrets::default();
         }
+        let _turn = self.backend.turn();
         let mut blob = String::new();
         for i in 0..PARTS {
             match self.backend.get(&self.user(id, i)) {
@@ -202,6 +214,7 @@ impl Vault {
 
     /// Change connector `id`'s secrets: read, `f`, saved whole.
     pub fn update<R>(&self, id: &str, f: impl FnOnce(&mut Secrets) -> R) -> Result<R, String> {
+        let _turn = self.backend.turn();
         let mut s = self.load(id);
         let out = f(&mut s);
         self.save(id, &s)?;
@@ -213,8 +226,10 @@ impl Vault {
         if check_id(id).is_err() {
             return;
         }
-        for i in 0..PARTS {
-            self.backend.remove(&self.user(id, i));
+        let _turn = self.backend.turn();
+        let failed = (0..PARTS).filter(|&i| self.backend.remove(&self.user(id, i)).is_err()).count();
+        if failed > 0 {
+            tracing::error!(connector = id, failed, "connectors: some of a connector's secret parts couldn't be removed");
         }
     }
 }
@@ -261,81 +276,39 @@ pub fn update<R>(id: &str, f: impl FnOnce(&mut Secrets) -> R) -> Result<R, Strin
     Vault::this_run().update(id, f)
 }
 
-#[cfg(windows)]
+/// Windows Credential Manager (in memory for one run off Windows), through
+/// `shell/credentials.rs`.
 mod os {
-    use std::collections::HashMap;
-    use std::sync::Once;
+    use crate::shell::credentials;
 
     pub struct Os {
         pub service: String,
     }
 
-    fn entry(service: &str, user: &str) -> Result<keyring_core::Entry, keyring_core::Error> {
-        static STORE: Once = Once::new();
-        STORE.call_once(|| {
-            // auth.rs, the calendar or the ChatGPT sign-in may have set it up.
-            if keyring_core::get_default_store().is_none() {
-                match windows_native_keyring_store::Store::new() {
-                    Ok(store) => keyring_core::set_default_store(store),
-                    Err(e) => tracing::error!("connectors: credential store unavailable: {e}"),
-                }
-            }
-        });
-        keyring_core::Entry::new_with_modifiers(service, user, &HashMap::from([("persistence", "Local")]))
-    }
-
     impl super::Backend for Os {
         fn put(&self, user: &str, secret: &str) -> Result<(), String> {
-            entry(&self.service, user).and_then(|e| e.set_password(secret)).map_err(|e| {
+            credentials::write(&self.service, user, secret).map_err(|e| {
                 tracing::error!("connectors: couldn't store a connector's secret: {e}");
                 "Windows Credential Manager wouldn't keep the connector's sign-in.".to_string()
             })
         }
 
         fn get(&self, user: &str) -> Option<String> {
-            match entry(&self.service, user).and_then(|e| e.get_password()) {
-                Ok(secret) => Some(secret),
-                Err(keyring_core::Error::NoEntry) => None,
-                Err(e) => {
-                    tracing::error!("connectors: couldn't read a connector's secret: {e}");
-                    None
-                }
-            }
+            credentials::read(&self.service, user).unwrap_or_else(|e| {
+                tracing::error!("connectors: couldn't read a connector's secret: {e}");
+                None
+            })
         }
 
-        fn remove(&self, user: &str) {
-            match entry(&self.service, user).and_then(|e| e.delete_credential()) {
-                Ok(()) | Err(keyring_core::Error::NoEntry) => {}
-                Err(e) => tracing::error!("connectors: couldn't remove a connector's secret: {e}"),
-            }
+        fn remove(&self, user: &str) -> Result<(), String> {
+            credentials::delete(&self.service, user).map_err(|e| {
+                tracing::error!("connectors: couldn't remove a connector's secret: {e}");
+                "Windows Credential Manager wouldn't remove the connector's sign-in.".to_string()
+            })
         }
-    }
-}
 
-/// No credential store wired up off Windows: secrets last one run.
-#[cfg(not(windows))]
-mod os {
-    use std::collections::HashMap;
-    use std::sync::Mutex;
-
-    pub struct Os {
-        pub service: String,
-    }
-
-    static SECRETS: Mutex<Option<HashMap<String, String>>> = Mutex::new(None);
-
-    impl super::Backend for Os {
-        fn put(&self, user: &str, secret: &str) -> Result<(), String> {
-            SECRETS.lock().unwrap_or_else(|p| p.into_inner()).get_or_insert_with(HashMap::new).insert(format!("{user}.{}", self.service), secret.into());
-            Ok(())
-        }
-        fn get(&self, user: &str) -> Option<String> {
-            SECRETS.lock().unwrap_or_else(|p| p.into_inner()).as_ref()?.get(&format!("{user}.{}", self.service)).cloned()
-        }
-        fn remove(&self, user: &str) {
-            if let Some(map) = SECRETS.lock().unwrap_or_else(|p| p.into_inner()).as_mut() {
-                map.remove(&format!("{user}.{}", self.service));
-            }
+        fn turn(&self) -> Option<credentials::Turn> {
+            Some(credentials::turn())
         }
     }
 }
@@ -380,11 +353,12 @@ mod file {
             let _g = LOCK.lock().unwrap_or_else(|p| p.into_inner());
             self.read().get(user).cloned()
         }
-        fn remove(&self, user: &str) {
+        fn remove(&self, user: &str) -> Result<(), String> {
             let _g = LOCK.lock().unwrap_or_else(|p| p.into_inner());
             let mut map = self.read();
-            if map.remove(user).is_some() {
-                let _ = self.write(&map);
+            match map.remove(user).is_some() {
+                true => self.write(&map),
+                false => Ok(()),
             }
         }
     }
@@ -410,8 +384,9 @@ mod memory {
         fn get(&self, user: &str) -> Option<String> {
             MAP.with(|m| m.borrow().get(user).cloned())
         }
-        fn remove(&self, user: &str) {
+        fn remove(&self, user: &str) -> Result<(), String> {
             MAP.with(|m| m.borrow_mut().remove(user));
+            Ok(())
         }
     }
 }

@@ -329,7 +329,12 @@ and evaluations: [below](#connectors-and-your-data-wave-8)) are built.
   real store under names of their own and remove them however they end, one
   at a time across test binaries (a lock file in the temp folder): Credential
   Manager loses a write when another thread or process writes at the same
-  moment (a part just saved read back as missing).
+  moment (a part just saved read back as missing). So since 2026-11-08 the
+  vault goes through `shell/credentials.rs`
+  ([config-and-data.md](./config-and-data.md#secrets-in-credential-manager-shellcredentialsrs)):
+  a connector's whole save, load, delete or `update` is one turn across
+  Yaps, every part is read back after it's written, and a save that can't
+  remove a leftover part fails instead of leaving it to join the next read.
 - **Commands** (wave 5's Settings and wave 4's loop build on them):
   `connectors_list`, `connector_preview {spec}`, `connector_add {spec}` (a link —
   `url`, `token`, `headers`, `sse`, `fallbackSse` — or a program —
