@@ -1153,6 +1153,20 @@ export function createChatState({ onopensettings = () => null, onopennote = () =
     return buckets.filter((b) => b.items.length > 0);
   }
   const ordered = $derived(groups.flatMap((g) => g.items));
+  // **A selection is only ever rows the list shows** (its Archive and Delete
+  // act on it): a chat on the other side of Chat | Code, in a folded
+  // workspace, archived or deleted from elsewhere drops out of it, so nothing
+  // is deleted unseen. (ConversationList also lets it go while its search or
+  // Archived shows in the list's place.)
+  const shownPicked = $derived.by(() => {
+    if (!picked.length) return picked;
+    const shown = new Set(ordered.map((c) => c.id));
+    return picked.filter((id) => shown.has(id));
+  });
+  // …for good: back on that side (or the workspace unfolded) it isn't picked again.
+  $effect(() => {
+    if (shownPicked.length !== picked.length) picked = shownPicked;
+  });
 
   function clickConversation(e, c) {
     if (e.shiftKey) {
@@ -1161,13 +1175,13 @@ export function createChatState({ onopensettings = () => null, onopennote = () =
       const a = ids.indexOf(from);
       const b = ids.indexOf(c.id);
       const range = a < 0 ? [c.id] : ids.slice(Math.min(a, b), Math.max(a, b) + 1);
-      picked = e.ctrlKey || e.metaKey ? [...new Set([...picked, ...range])] : range;
+      picked = e.ctrlKey || e.metaKey ? [...new Set([...shownPicked, ...range])] : range;
       if (anchor == null) anchor = from;
       return;
     }
     if (e.ctrlKey || e.metaKey) {
       // The open conversation counts as picked when a selection starts.
-      const base = picked.length ? picked : activeId != null && activeId !== c.id ? [activeId] : [];
+      const base = shownPicked.length ? shownPicked : activeId != null && activeId !== c.id ? [activeId] : [];
       picked = base.includes(c.id) ? base.filter((id) => id !== c.id) : [...base, c.id];
       anchor = c.id;
       return;
@@ -1182,9 +1196,13 @@ export function createChatState({ onopensettings = () => null, onopennote = () =
     anchor = null;
   }
 
-  // `all`: "Delete all chats…" (every conversation the list shows).
+  // `all`: "Delete all chats…" (every conversation the list shows). Only rows
+  // the list shows are ever deleted here: never a Code chat from the Chat
+  // side (or a plain one from the Code side), a folded workspace's, an
+  // archived one or a meeting's Ask thread (those two never come in
+  // `conversations`: chats.rs `list`).
   function askDeleteMany(ids, { all = false } = {}) {
-    const convs = conversations.filter((c) => ids.includes(c.id));
+    const convs = ordered.filter((c) => ids.includes(c.id));
     if (!convs.length) return;
     if (convs.length === 1 && !all) return askDelete(convs[0]);
     const count = convs.reduce((n, c) => n + (c.messageCount || 0), 0);
@@ -1713,7 +1731,7 @@ export function createChatState({ onopensettings = () => null, onopennote = () =
     onSummary,
     giveMoreRoom,
     shortenPaste,
-    get picked() { return picked; },
+    get picked() { return shownPicked; },
     set picked(v) { picked = v; },
     get groups() { return groups; },
     get ordered() { return ordered; },

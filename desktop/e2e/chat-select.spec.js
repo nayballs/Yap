@@ -3,6 +3,9 @@
 // Shift+click selects a range, Ctrl+click adds or takes out one, the
 // "N selected" bar deletes them after asking; Delete, Esc and Ctrl+A from
 // the keyboard; the list's ⋯ menu has Select all and Delete all chats….
+// Only the rows the list shows are ever picked or deleted:
+// chat-select-shown.spec.js (the Chat | Code sides, search, Archived, the
+// bar's fit at every list width).
 import { test as base, expect, openView, expectStore } from './support/fixtures.js';
 
 const NOW = Math.floor(Date.now() / 1000);
@@ -40,6 +43,8 @@ const bar = (main) => main.getByRole('toolbar', { name: 'Selected chats' });
 const dialog = (main) => main.getByRole('alertdialog');
 const menu = (main) => main.getByRole('menu').first();
 const ids = (yap) => yap.readJson('chats.json').conversations.map((c) => c.id).sort();
+/** The chats left in the store (the tests share one Yap; a retry gets a fresh one). */
+const left = (yap) => yap.readJson('chats.json').conversations;
 
 test('Shift+click and Ctrl+click select chats; the bar deletes them after asking', async ({ yap, main, shot }) => {
   await openView(main, 'Chat');
@@ -75,11 +80,11 @@ test('Shift+click and Ctrl+click select chats; the bar deletes them after asking
   await expect(main.locator('.cbubble')).toHaveCount(0);
 });
 
-test('from the keyboard: Ctrl+A, Esc and Delete', async ({ main }) => {
+test('from the keyboard: Ctrl+A, Esc and Delete', async ({ yap, main }) => {
   await openView(main, 'Chat');
   await row(main, 'Echo').focus();
   await main.keyboard.press('Control+A');
-  await expect(bar(main)).toContainText('3 selected');
+  await expect(bar(main)).toContainText(`${left(yap).length} selected`);
   await main.keyboard.press('Escape');
   await expect(bar(main)).toHaveCount(0);
   await expect(picked(main)).toHaveCount(0);
@@ -93,16 +98,21 @@ test('from the keyboard: Ctrl+A, Esc and Delete', async ({ main }) => {
 
 test('the list menu: Select all, and Delete all chats… asked first', async ({ yap, main, shot }) => {
   await openView(main, 'Chat');
+  // Echo, Bravo and Alpha after the tests before (all six on a retry's own Yap).
+  const n = left(yap).length;
+  const said = left(yap).reduce((sum, c) => sum + c.messages.length, 0);
   await main.getByRole('button', { name: 'More for chats' }).click();
   await expect(menu(main).getByRole('menuitem')).toHaveText(['Select all', 'Delete all chats…']);
   await menu(main).getByRole('menuitem', { name: 'Select all' }).click();
-  await expect(bar(main)).toContainText('3 selected');
+  await expect(bar(main)).toContainText(`${n} selected`);
+  // (Cancel is the bar's ✕.)
   await bar(main).getByRole('button', { name: 'Cancel' }).click();
+  await expect(bar(main)).toHaveCount(0);
 
   await main.getByRole('button', { name: 'More for chats' }).click();
   await menu(main).getByRole('menuitem', { name: 'Delete all chats…' }).click();
-  await expect(dialog(main)).toHaveAccessibleName('Delete all 3 chats?');
-  await expect(dialog(main)).toContainText('Their 5 messages go for good. Your notes and meetings stay.');
+  await expect(dialog(main)).toHaveAccessibleName(`Delete all ${n} chats?`);
+  await expect(dialog(main)).toContainText(`Their ${said} messages go for good. Your notes and meetings stay.`);
   await shot(main, '03-delete-all-asks');
   await dialog(main).getByRole('button', { name: 'Delete' }).click();
   await expect(main.getByText('Start your first conversation')).toBeVisible();

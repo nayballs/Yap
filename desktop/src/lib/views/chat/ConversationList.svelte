@@ -57,6 +57,50 @@
   // Rename in place, like Notes' folders: `{ id, value }`.
   let renaming = $state(null);
 
+  // **The rows the list shows**, all that Select all, Ctrl+A and "Delete all
+  // chats…" ever act on: this side's (Chat | Code), its open workspaces'
+  // (chat.ordered); none while the search's results or Archived show in the
+  // list's place (their rows can't be picked, and an archived chat is never
+  // "all chats"), and a selection lets go then.
+  const listing = $derived(!lib.query.trim() && !lib.showArchived);
+  const rows = $derived(listing ? chat.ordered : []);
+  $effect(() => {
+    if (!listing && chat.picked.length) chat.clearPicked();
+  });
+
+  // **The bar's count**: "12 selected" while it fits beside the buttons;
+  // else the rows' ✓ and the number, "selected" wrapped out of sight (still
+  // read out: the bar says "12 selected"); else the number alone. By the room
+  // the count has, so any width and any number of digits (`data-fit`: full,
+  // short, num).
+  function countFits(node) {
+    const num = node.querySelector('.selnum');
+    const word = node.querySelector('.selword');
+    const mark = node.querySelector('.selcheck');
+    // `a` wrapped onto a line below `b`'s (the ✓ is shorter than the line).
+    const below = (a, b) => a.offsetTop >= b.offsetTop + b.offsetHeight / 2;
+    const fit = () => {
+      node.dataset.fit = 'full';
+      if (!below(word, num)) return;
+      node.dataset.fit = 'short';
+      if (!below(num, mark)) return;
+      node.dataset.fit = 'num';
+    };
+    const sized = new ResizeObserver(fit);
+    sized.observe(node);
+    // (A number growing a digit changes what fits, not the count's box.)
+    const counted = new MutationObserver(fit);
+    counted.observe(num, { characterData: true, childList: true, subtree: true });
+    document.fonts?.ready.then(fit);
+    fit();
+    return {
+      destroy() {
+        sized.disconnect();
+        counted.disconnect();
+      },
+    };
+  }
+
   // The list's own keys: Delete, Esc and Ctrl+A (Enter and the menu keys
   // stay with each row).
   function listKeydown(e) {
@@ -70,7 +114,7 @@
       chat.clearPicked();
     } else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'a') {
       e.preventDefault();
-      chat.picked = chat.ordered.map((c) => c.id);
+      chat.picked = rows.map((c) => c.id);
     }
   }
 
@@ -78,13 +122,13 @@
     openContextMenu(
       e,
       [
-        { label: 'Select all', icon: 'check', onselect: () => (chat.picked = chat.ordered.map((c) => c.id)) },
+        { label: 'Select all', icon: 'check', onselect: () => (chat.picked = rows.map((c) => c.id)) },
         { separator: true },
         {
           label: 'Delete all chats…',
           icon: 'trash',
           danger: true,
-          onselect: () => chat.askDeleteMany(chat.ordered.map((c) => c.id), { all: true }),
+          onselect: () => chat.askDeleteMany(rows.map((c) => c.id), { all: true }),
         },
       ],
       { label: 'Chats' }
@@ -184,7 +228,7 @@
     {/if}
     {#if code?.enabled}<ChatSideSwitch {chat} {code} />{/if}
     <span class="headgap"></span>
-    {#if chat.ordered.length && !chat.picked.length}
+    {#if rows.length && !chat.picked.length}
       <button class="listmore" title="More" aria-label="More for chats" aria-haspopup="menu" onclick={listMenu}>
         <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><circle cx="5" cy="12" r="1.7" /><circle cx="12" cy="12" r="1.7" /><circle cx="19" cy="12" r="1.7" /></svg>
       </button>
@@ -192,10 +236,15 @@
   </div>
   {#if chat.picked.length}
     <div class="tools selbar" role="toolbar" aria-label="Selected chats">
-      <span class="selcount" title="Shift+click selects a range, Ctrl+click adds or takes out one">{chat.picked.length} selected</span>
+      <span class="selcount" title="Shift+click selects a range, Ctrl+click adds or takes out one" use:countFits>
+        <span class="pickmark selcheck" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="m5 12.5 4.5 4.5L19 7.5" /></svg></span>
+        <span class="selnum">{chat.picked.length}</span>{' '}<span class="selword">selected</span>
+      </span>
       <button class="selbtn" onclick={() => lib.archive([...chat.picked])}>Archive</button>
       <button class="selbtn danger" onclick={() => chat.askDeleteMany(chat.picked)}>Delete</button>
-      <button class="selbtn" onclick={chat.clearPicked}>Cancel</button>
+      <button class="selbtn selx" title="Cancel · Esc" aria-label="Cancel" aria-keyshortcuts="Escape" onclick={chat.clearPicked}>
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18" /></svg>
+      </button>
     </div>
   {:else}
     <div class="tools">
@@ -431,22 +480,54 @@
     width: 14px;
     height: 14px;
   }
-  /* (As tall as New chat's row: picking never moves the list.) */
+  /* (As tall as New chat's row: picking never moves the list.) One row inside
+     the list at every width its edge allows (200–420 px), never past its
+     border: tight buttons, Cancel an ✕, and the count giving way when there's
+     no room for its words (`countFits`). Above the list's edge (ChatView
+     .listedge, z-index 3), so a button near the border is always the
+     button, never the edge's grab. */
   .selbar {
-    gap: 6px;
+    position: relative;
+    z-index: 4;
+    gap: 4px;
     min-height: 36px;
     box-sizing: border-box;
-    padding: 2px 10px 4px;
+    padding: 2px 8px 4px;
   }
+  /* One line tall: a part that wraps is out of sight (never cut mid-word),
+     still read out. */
   .selcount {
     flex: 1 1 auto;
+    min-width: 0;
+    height: 16px;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    overflow: hidden;
     font-size: 12px;
     font-weight: 600;
+    line-height: 16px;
     color: var(--yap-fg);
   }
+  .selnum,
+  .selword {
+    flex: 0 0 auto;
+    white-space: nowrap;
+  }
+  .selword {
+    margin-left: 0.3em;
+  }
+  .selcount .selcheck {
+    display: none;
+    margin-right: 5px;
+  }
+  .selcount:global([data-fit='short']) .selcheck {
+    display: grid;
+  }
   .selbtn {
+    flex: 0 0 auto;
     height: 26px;
-    padding: 0 10px;
+    padding: 0 8px;
     border: 1px solid var(--yap-border);
     border-radius: var(--yap-r);
     background: none;
@@ -460,6 +541,16 @@
   }
   .selbtn.danger {
     color: var(--yap-danger);
+  }
+  .selx {
+    width: 26px;
+    padding: 0;
+    display: grid;
+    place-items: center;
+  }
+  .selx svg {
+    width: 14px;
+    height: 14px;
   }
   .conv.picked,
   .conv.picked:hover,

@@ -84,10 +84,7 @@
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14.7 6.3a4.5 4.5 0 0 0 5.8 5.8L17 15.6a4.5 4.5 0 0 1-5.8-5.8z" transform="rotate(90 12 12)" /><path d="m3 21 6.5-6.5" /><path d="M14.7 6.3 21 3l-3.3 6.3" /></svg>
             {/if}
             {t}
-          </span>
-          {#if shot}
-            {@render frame(shot, 96, 64, false)}
-          {/if}
+          </span><!-- (No whitespace before the shot: the chip's text is its step's words, nothing after.) -->{#if shot}{@render frame(shot, 96, 64, false)}{/if}
         </span>
       {/each}
       {#if paired.rest.length}
