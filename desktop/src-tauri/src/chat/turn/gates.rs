@@ -55,7 +55,10 @@ pub(super) struct Gates {
     /// (not across the meetings, whose passages are numbered on their own).
     pub calendar: bool,
     /// Yap Code (chat/tools/agents.rs): with tools, agents on and Claude Code on
-    /// this PC; not across the meetings (that's about the meetings).
+    /// this PC; not across the meetings (that's about the meetings). Its tools
+    /// and its lines in the system prompt both follow it (8 Nov 2026: the
+    /// lines followed the switch alone, so a question across the meetings
+    /// was told of agent tools it wasn't offered).
     pub agents: bool,
     /// Connectors' tools (chat/tools/connectors.rs): the preview on, a strong
     /// cloud model, Chat or the Voice Assistant on this PC (never a phone's
@@ -72,9 +75,15 @@ pub(super) struct Gates {
     /// chat go by the gate alone. Off only in a turn fitted to a small
     /// context (`fit.rs`).
     pub picture_tools: bool,
-    /// Yap Code's lines in the system prompt: agents on and Claude Code on
-    /// this PC, as before 8 Nov 2026 (the tools themselves: [`Gates::agents`]).
-    pub agent_line: bool,
+}
+
+/// What [`Gates::for_turn`] reads of this PC: Yap Code offered
+/// (`agents::offered`: on, and Claude Code here), a calendar connected, a
+/// connector's tool to offer where the question was asked.
+struct Here<'a> {
+    yap_code: &'a dyn Fn() -> bool,
+    calendar: &'a dyn Fn() -> bool,
+    connectors: &'a dyn Fn() -> bool,
 }
 
 impl Gates {
@@ -83,6 +92,17 @@ impl Gates {
     /// (the Meetings view, a Skill); `chat_in_view`, Chat itself or the
     /// Voice Assistant asked with Chat in view.
     pub(super) fn for_turn(cfg: &YapConfig, ep: &Endpoint, scope: Option<&str>, meetings: bool, chat_in_view: bool) -> Gates {
+        let here = Here {
+            yap_code: &|| crate::agents::offered(cfg),
+            calendar: &crate::calendar::connected,
+            connectors: &|| crate::chat::tools::connectors::offers_any(cfg, scope),
+        };
+        Gates::for_turn_on(cfg, ep, scope, meetings, chat_in_view, &here)
+    }
+
+    /// [`Gates::for_turn`] with what it reads of this PC given (`here`, each
+    /// read only when the rest of its gate is on). Pure but for those.
+    fn for_turn_on(cfg: &YapConfig, ep: &Endpoint, scope: Option<&str>, meetings: bool, chat_in_view: bool, here: &Here<'_>) -> Gates {
         let (provider, model) = (ep.provider.as_str(), ep.model.as_str());
         let tools = crate::chat::tools::supports_tools(provider, model);
         let doc_tools = crate::chat::documents::ToolSet::for_model(provider, model);
@@ -94,15 +114,14 @@ impl Gates {
         let pictures = Gate::for_model(web_on && tools && (scope != Some("assistant") || chat_in_view), provider, model);
         let screen = if chat_in_view { crate::chat::see_screen::gate(cfg, tools, provider, model) } else { Gate::Off };
         let act = pictures != Gate::Off && scope.is_none() && !meetings && crate::chat::pages::act::can_act(provider, model);
-        let calendar = !meetings && crate::calendar::connected();
-        let agent_line = crate::agents::offered(cfg);
-        let agents = tools && !meetings && agent_line;
+        let calendar = !meetings && (here.calendar)();
+        let agents = tools && !meetings && (here.yap_code)();
         // (An evaluation's connectors scenario gives any model that calls
         // tools the connectors, to measure which may: `eval::connectors_forced`.)
         let evaluated = tools && provider != crate::ai::claude_plan::PROVIDER && crate::ai::eval::connectors_forced();
-        let connectors = !meetings && (evaluated || crate::chat::tools::connectors::may(provider, strong)) && crate::chat::tools::connectors::offers_any(cfg, scope);
+        let connectors = !meetings && (evaluated || crate::chat::tools::connectors::may(provider, strong)) && (here.connectors)();
         let (apps, past_chats, picture_tools) = (cfg.open_apps, cfg.memory_search_chats, true);
-        let gates = Gates { tools, doc_tools, strong, claude_in_chat, own_search, web_lines, web_on, pictures, screen, act, calendar, agents, connectors, apps, past_chats, picture_tools, agent_line };
+        let gates = Gates { tools, doc_tools, strong, claude_in_chat, own_search, web_lines, web_on, pictures, screen, act, calendar, agents, connectors, apps, past_chats, picture_tools };
         if provider == crate::ai::claude_plan::PROVIDER {
             return gates.on_the_plan();
         }
@@ -266,5 +285,162 @@ mod tests {
         assert!(Gates { agents: true, ..plan }.on_the_plan().agents);
         assert!(!Gates { agents: false, ..plan }.on_the_plan().agents);
         assert!(!Gates::for_turn(&YapConfig { agents_enabled: true, ..cfg.clone() }, &endpoint(crate::ai::claude_plan::PROVIDER, "claude-opus-5-5"), Some("meetings"), true, false).agents, "never across the meetings");
+    }
+    /// Every model a turn may have: the strong cloud ones, the on-device
+    /// one, the Claude plan's.
+    const MODELS: [(&str, &str, &str); 6] = [
+        ("anthropic", "claude-opus-5-5", "https://api.anthropic.com/v1"),
+        ("anthropic", "claude-haiku-5-5", "https://api.anthropic.com/v1"),
+        ("openai", "gpt-5", "https://api.openai.com/v1"),
+        ("gemini", "gemini-2.5-pro", "https://generativelanguage.googleapis.com/v1beta/openai"),
+        ("ondevice", "Qwen_Qwen3.5-4B-Q4_K_M", "http://127.0.0.1:8080/v1"),
+        (crate::ai::claude_plan::PROVIDER, "claude-opus-5-5", ""),
+    ];
+
+    /// Where a question is asked: `(scope, meetings, chat_in_view)` — typed in
+    /// Chat, the Voice Assistant with Chat in view and from another app,
+    /// across the meetings.
+    const SCOPES: [(Option<&str>, bool, bool); 4] = [(None, false, true), (Some("assistant"), false, true), (Some("assistant"), false, false), (Some("meetings"), true, false)];
+
+    fn keyed(provider: &str, model: &str, base: &str) -> Endpoint {
+        Endpoint { base_url: base.into(), api_key: "test-key".into(), model: model.into(), provider: provider.into(), persona: "You are a helpful assistant.".into(), disable_thinking: false }
+    }
+
+    /// One connector's tool, as a turn offers it (fictional).
+    fn a_connector() -> crate::chat::tools::connectors::Turn {
+        let tool = crate::chat::tools::connectors::Offered {
+            wire: "recipes__search".into(),
+            id: "recipes".into(),
+            connector: "Recipes".into(),
+            tool: "search".into(),
+            title: None,
+            description: "Search the recipes.".into(),
+            schema: serde_json::json!({ "type": "object", "properties": {} }),
+            kind: crate::integrations::connectors::cache::Kind::Reads,
+            setting: crate::integrations::connectors::store::Setting::Allow,
+            hash: "h".into(),
+            tokens: 20,
+        };
+        crate::chat::tools::connectors::Turn::of(vec![tool], 200_000, None, false, crate::chat::tools::connectors::Surface::Chat, false, true, "anthropic").unwrap()
+    }
+
+    /// `name` as a word of `text` (not part of a longer name).
+    fn names(text: &str, name: &str) -> bool {
+        text.match_indices(name).any(|(i, _)| {
+            let before = text[..i].chars().next_back();
+            let after = text[i + name.len()..].chars().next();
+            !before.is_some_and(|c| c.is_alphanumeric() || c == '_') && !after.is_some_and(|c| c.is_alphanumeric() || c == '_')
+        })
+    }
+
+    /// The stable prompt and the tools' names a turn with `g` sends.
+    fn sent(g: &Gates, persona: &str, code: bool) -> (String, Vec<String>) {
+        let now = chrono::DateTime::parse_from_rfc3339("2026-11-08T10:00:00Z").unwrap().with_timezone(&chrono::Utc);
+        let connectors = g.connectors.then(a_connector);
+        let prompt = g.stable_prompt(persona, &crate::ai::about_you::Profile::default(), now, code);
+        let tools = g.offered(connectors.as_ref(), Some(7), code);
+        let names = tools.as_array().map(|a| a.iter().filter_map(|t| t["function"]["name"].as_str().map(str::to_string)).collect()).unwrap_or_default();
+        (prompt, names)
+    }
+
+    #[test]
+    fn across_the_meetings_with_yap_code_on_no_agent_tool_is_named_or_offered() {
+        // 8 Nov 2026: the agent lines followed Yap Code's switch, the tools
+        // the gate (never across the meetings): the prompt named tools the
+        // turn didn't offer.
+        let cfg = YapConfig { agents_enabled: true, web_search: true, ..Default::default() };
+        let here = Here { yap_code: &|| true, calendar: &|| false, connectors: &|| false };
+        for (provider, model, base) in MODELS {
+            let ep = keyed(provider, model, base);
+            let across = Gates::for_turn_on(&cfg, &ep, Some("meetings"), true, false, &here);
+            assert!(!across.agents, "{provider} {model}");
+            for code in [false, true] {
+                let (prompt, offered) = sent(&across, &ep.persona, code);
+                for name in crate::chat::tools::agents::NAMES {
+                    assert!(!names(&prompt, name), "{provider} {model} (code: {code}): {name} named across the meetings");
+                    assert!(!offered.iter().any(|n| n == name), "{provider} {model}: {name} offered");
+                }
+                assert!(!prompt.contains(&crate::chat::tools::agents::AGENT_TOOL_INSTRUCTIONS.join(" ")));
+            }
+            // The same question typed in Chat: both, for a model that calls tools.
+            let chat = Gates::for_turn_on(&cfg, &ep, None, false, true, &here);
+            let (prompt, offered) = sent(&chat, &ep.persona, false);
+            assert_eq!(chat.agents, chat.tools, "{provider} {model}");
+            assert_eq!(names(&prompt, "start_agent"), chat.tools, "{provider} {model}");
+            assert_eq!(offered.iter().any(|n| n == "start_agent"), chat.tools, "{provider} {model}");
+        }
+    }
+
+    /// A family's line in the system prompt, for some gates.
+    type Line = Box<dyn Fn(&Gates) -> String>;
+
+    #[test]
+    fn a_familys_lines_are_in_the_prompt_exactly_when_its_tools_are_offered() {
+        use crate::chat::tools as t;
+        // Each family: its own line in the system prompt, and its tools.
+        let families: Vec<(&str, Line, Vec<&str>)> = vec![
+            ("agents", Box::new(|_| t::agents::AGENT_TOOL_INSTRUCTIONS.join(" ")), t::agents::NAMES.to_vec()),
+            ("calendar", Box::new(|_| t::calendar::CALENDAR_TOOL_INSTRUCTIONS.join(" ")), vec!["check_calendar"]),
+            ("apps", Box::new(|_| t::APP_TOOL_INSTRUCTIONS.join(" ")), vec!["open_app", "list_apps"]),
+            ("memory", Box::new(|_| t::MEMORY_TOOL_INSTRUCTIONS.join(" ")), vec!["remember", "forget"]),
+            ("past chats", Box::new(|_| t::CHATS_TOOL_INSTRUCTIONS.join(" ")), vec!["search_chats"]),
+            ("connectors", Box::new(|_| t::connectors::INSTRUCTIONS.to_string()), vec!["recipes__search"]),
+            ("documents", Box::new(|g| t::tool_instructions(g.doc_tools)), vec!["create_document"]),
+            ("screen", Box::new(|g| crate::chat::see_screen::instructions(g.screen).to_string()), vec!["look_at_screen"]),
+            ("pictures", Box::new(|g| crate::chat::pictures::instructions(g.pictures, g.web_lines == t::WebLines::Claude)), vec!["show_picture"]),
+            ("browser", Box::new(|g| crate::chat::pages::instructions(g.pictures, g.act)), vec!["browser_navigate", "browser_read"]),
+            ("acting", Box::new(|_| crate::chat::pages::act::INSTRUCTIONS.to_string()), vec!["browser_click"]),
+        ];
+        let mut checked = 0;
+        for (provider, model, base) in MODELS {
+            let ep = keyed(provider, model, base);
+            // Every configuration first, then every tool any of them offers.
+            let mut seen: Vec<(String, Gates, String, Vec<String>)> = Vec::new();
+            for (scope, meetings, in_view) in SCOPES {
+                for bits in 0..256u32 {
+                    let on = |i: u32| bits & (1 << i) != 0;
+                    let cfg = YapConfig { web_search: on(0), web_search_native: on(1), open_apps: on(2), memory_search_chats: on(3), assistant_screen: on(4), ..Default::default() };
+                    let (yap_code, calendar, connectors) = (on(5), on(6), on(7));
+                    let here = Here { yap_code: &|| yap_code, calendar: &|| calendar, connectors: &|| connectors };
+                    let g = Gates::for_turn_on(&cfg, &ep, scope, meetings, in_view, &here);
+                    for code in [false, true] {
+                        let (prompt, offered) = sent(&g, &ep.persona, code);
+                        // The agent lines as before 8 Nov 2026 (Yap Code on, a
+                        // model that calls tools) but across the meetings.
+                        let agent_line = prompt.contains(&t::agents::AGENT_TOOL_INSTRUCTIONS.join(" "));
+                        assert_eq!(agent_line, g.tools && yap_code && !meetings, "{provider} {model} {scope:?} {bits:08b} code: {code}");
+                        seen.push((format!("{provider} {model} {scope:?} in view: {in_view} {bits:08b} code: {code}"), g, prompt, offered));
+                    }
+                }
+            }
+            let every: std::collections::BTreeSet<String> = seen.iter().flat_map(|s| s.3.iter().cloned()).collect();
+            for (what, g, prompt, offered) in &seen {
+                if !g.tools {
+                    continue;
+                }
+                for (family, line, tools) in &families {
+                    let line = line(g);
+                    let has_line = !line.is_empty() && prompt.contains(&line);
+                    let has_tools = tools.iter().any(|n| offered.iter().any(|o| o == n));
+                    assert_eq!(has_line, has_tools, "{what}: {family}'s line {has_line}, its tools {has_tools}");
+                    checked += 1;
+                }
+                // No tool any turn offers is named in a prompt that doesn't
+                // offer it — but `open_app` in the browser's line ("Websites
+                // open here, never with open_app": telling it not to), and the
+                // web's when a Claude searches in Chat's own request (its own
+                // web_search, Anthropic's).
+                for name in every.iter().filter(|n| !offered.contains(n)) {
+                    if name == "open_app" && g.pictures != Gate::Off {
+                        continue;
+                    }
+                    if name == "web_search" && g.claude_in_chat && g.web_on {
+                        continue;
+                    }
+                    assert!(!names(prompt, name), "{what}: {name} named, not offered");
+                }
+            }
+        }
+        assert!(checked > 10_000, "{checked}");
     }
 }

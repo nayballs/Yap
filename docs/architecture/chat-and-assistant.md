@@ -312,7 +312,12 @@ one side.
   apps, past chats) from the settings, the model and where it was asked;
   `Gates::extra` the tools they offer, the one place the tool loop's
   (`run.rs`) and the budget's (`Gates::offered`) come from (`chat_limits`
-  has the same gates, as a typed Chat question); **`fit.rs`** (2026-11-08)
+  has the same gates, as a typed Chat question). **A family's lines in the
+  system prompt follow the same gate as its tools** (`prompt.rs`
+  `instructions`), so the prompt never names a family the turn doesn't
+  offer (8 Nov 2026: Yap Code's lines followed its switch alone, and a
+  question across the meetings was told of `start_agent` without it; the
+  gates' tests check every scope, model and family); **`fit.rs`** (2026-11-08)
   — **the tools fitted to a small context**: a fixed part that leaves too
   little room goes without some families of tools, this turn only
   ([below](#a-small-contexts-tools-fitted-2026-11-08)); **`history.rs`** —
