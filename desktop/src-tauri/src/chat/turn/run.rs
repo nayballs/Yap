@@ -76,6 +76,10 @@ pub(super) async fn with_tools(
     // A Code chat (agents/code_chat.rs): none of memory's tools, nor past
     // chats' (Yap's memory is personal; the project keeps its own).
     let memory = built.code.is_none();
+    // Connectors' tools (tools/connectors.rs): as the gates and the budget
+    // measured them, from the store and the cache (a turn never waits for a
+    // server to offer them).
+    let connectors = g.connectors.then(|| crate::chat::tools::connectors::Turn::for_turn(cfg, &ep.provider, &ep.model, t.scope, sizing.context_size)).flatten();
     let extra = crate::chat::tools::Extra {
         memory,
         search_chats: memory && cfg.memory_search_chats,
@@ -96,6 +100,7 @@ pub(super) async fn with_tools(
         // Yap Code (tools/agents.rs): asked out loud, an agent that needs asking is
         // asked in words; asked by voice, its report is read aloud.
         agents: g.agents.then_some(crate::chat::tools::AgentsTurn::asked(t.scope, t.by_voice)),
+        connectors: connectors.as_ref(),
     };
     let looped = crate::chat::tools::run_tool_loop_with(
         &built.prompt.system,

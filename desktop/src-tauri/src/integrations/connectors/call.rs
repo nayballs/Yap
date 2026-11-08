@@ -12,10 +12,12 @@
 //! Two turns at once (Chat and the Voice Assistant) share one connection:
 //! each call is its own request id. A call never retries: whether a write
 //! happened when the line broke can't be known ([`CallError::Lost`]), and
-//! wave 4 says so; a read's one retry is the tool loop's decision.
+//! Chat's tool loop says so ("It may or may not have done it"); it never
+//! calls again by itself.
 //!
-//! A release build calls nothing yet: only a debug build's
-//! `connector_call_tool` does, until Chat's tool loop (wave 4).
+//! Chat's tool loop calls through here (`chat/tools/connectors.rs`, after
+//! its consent, `connectors::call_for_chat`), and a debug build's
+//! `connector_call_tool`.
 #![cfg_attr(not(debug_assertions), allow(dead_code))]
 
 use std::time::Duration;

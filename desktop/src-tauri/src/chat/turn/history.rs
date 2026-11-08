@@ -39,7 +39,7 @@ impl Sizing {
         let counter = crate::chat::budget::Counter::for_call(provider, base_url);
         let (context_size, context_known) = crate::chat::budget::context_window(cfg, provider, model, base_url).await;
         let label = crate::chat::budget::model_label(provider, model, &crate::ai::local_llm::active_model_display(cfg));
-        let schemas = t.gates.schemas(cfg, &counter, conversation_id).await;
+        let schemas = t.gates.schemas(cfg, &t.ep, t.scope, context_size, &counter, conversation_id).await;
         // The question as sent: its text, and the screenshots it carries, each
         // by its size where it goes (`budget::image_tokens_at`).
         let question_tokens = counter.count(&t.text).await

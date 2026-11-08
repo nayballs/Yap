@@ -57,6 +57,11 @@ pub(super) struct Gates {
     /// Yap Code (chat/tools/agents.rs): with tools, agents on and Claude Code on
     /// this PC; not across the meetings (that's about the meetings).
     pub agents: bool,
+    /// Connectors' tools (chat/tools/connectors.rs): the preview on, a strong
+    /// cloud model, Chat or the Voice Assistant on this PC (never a phone's
+    /// question in this wave), not across the meetings, and some connector's
+    /// tool there to offer (during a meeting, only those allowed then).
+    pub connectors: bool,
 }
 
 impl Gates {
@@ -78,7 +83,8 @@ impl Gates {
         let act = pictures != Gate::Off && scope.is_none() && !meetings && crate::chat::pages::act::can_act(provider, model);
         let calendar = !meetings && crate::calendar::connected();
         let agents = tools && !meetings && crate::agents::offered(cfg);
-        let gates = Gates { tools, doc_tools, strong, claude_in_chat, own_search, web_lines, web_on, pictures, screen, act, calendar, agents };
+        let connectors = !meetings && crate::chat::tools::connectors::may(provider, strong) && crate::chat::tools::connectors::offers_any(cfg, scope);
+        let gates = Gates { tools, doc_tools, strong, claude_in_chat, own_search, web_lines, web_on, pictures, screen, act, calendar, agents, connectors };
         if provider == crate::ai::claude_plan::PROVIDER {
             return gates.on_the_plan();
         }
@@ -96,9 +102,13 @@ impl Gates {
     /// the tabs open are told with the question, as for any model. Agents
     /// stay as they are too (on, not across the meetings,
     /// `claude_live/agents.rs`).
+    ///
+    /// No connectors in this wave: a plan run gets them through Yap's run
+    /// endpoint later (Connectors wave 7), the same `connectors::Turn`.
     fn on_the_plan(self) -> Gates {
         Gates {
             strong: false,
+            connectors: false,
             claude_in_chat: false,
             own_search: false,
             web_lines: crate::chat::tools::WebLines::of(false, false, false),
@@ -108,11 +118,15 @@ impl Gates {
 
     /// The tools' schemas every step sends, counted by `counter` (none for
     /// a model without tools): what the prompt and the question must fit
-    /// beside. `conversation`: the one asking (`search_chats` leaves it out).
-    pub(super) async fn schemas(&self, cfg: &YapConfig, counter: &crate::chat::budget::Counter, conversation: Option<u64>) -> u64 {
+    /// beside. `conversation`: the one asking (`search_chats` leaves it out);
+    /// `ep`, `scope` and `context` (the model's, in tokens): what the
+    /// connectors' tools come to (`connectors::Turn::for_turn`, as the turn
+    /// builds them).
+    pub(super) async fn schemas(&self, cfg: &YapConfig, ep: &Endpoint, scope: Option<&str>, context: u64, counter: &crate::chat::budget::Counter, conversation: Option<u64>) -> u64 {
         if !self.tools {
             return 0;
         }
+        let connectors = self.connectors.then(|| crate::chat::tools::connectors::Turn::for_turn(cfg, &ep.provider, &ep.model, scope, context)).flatten();
         // (Only whether the calendar's offered matters to its schema.)
         let log = crate::chat::tools::calendar::Log::default();
         let extra = crate::chat::tools::Extra {
@@ -130,14 +144,17 @@ impl Gates {
             own_search: self.own_search,
             web_question: false,
             agents: self.agents.then_some(crate::chat::tools::AgentsTurn::default()),
+            connectors: connectors.as_ref(),
         };
-        counter.count(&crate::chat::tools::offered_tools(cfg.open_apps, self.web_on && !self.claude_in_chat, extra).to_string()).await
+        // (Tools deferred behind Claude's tool search cost nothing until found.)
+        let offered = crate::chat::tools::offered_tools(cfg.open_apps, self.web_on && !self.claude_in_chat, extra);
+        counter.count(&crate::chat::budget::loaded_tools(&offered).to_string()).await
     }
 
     /// The part of the request that's there whatever the question, for these
     /// gates ([`super::stable_prompt`]).
     pub(super) fn stable_prompt(&self, cfg: &YapConfig, persona: &str, profile: &crate::ai::about_you::Profile, now: chrono::DateTime<chrono::Utc>) -> String {
-        super::stable_prompt(cfg, persona, self.tools, self.doc_tools, self.web_lines, self.web_on, self.pictures, self.act, self.calendar, profile, now)
+        super::stable_prompt(cfg, persona, self.tools, self.doc_tools, self.web_lines, self.web_on, self.pictures, self.act, self.calendar, self.connectors, profile, now)
     }
 }
 

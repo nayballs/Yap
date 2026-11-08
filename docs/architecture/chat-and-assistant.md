@@ -335,6 +335,26 @@ one side.
   (`dispatch.rs` `Source::Agents`, before the notes fallback) while agents are
   offered (`Gates::agents`, `Extra::agents`). [Below](#yap-code-in-chat-2026-11-07)
   and [yap-code.md](./yap-code.md).
+- **`chat/tools/connectors.rs`** — **connectors' tools in Chat** (Connectors
+  wave 4, 2026-11-08, behind `connectors_preview`): a `Source` of its own
+  (`dispatch.rs` `Source::Connectors`, first: its `<slug>__<tool>` names are
+  never Yap's), offered last in `offer.rs` while `Gates::connectors` (a
+  strong cloud model, Chat or the Voice Assistant on this PC, never a phone
+  or across the meetings, a meeting only when allowed) and `Extra::connectors`
+  (the turn's `connectors::Turn`) have them — each tool as it is, or past
+  their budget `find_tools` / `use_tool`, or for Claude on the Messages API
+  deferred behind Anthropic's tool search (`step.rs`'s server tools). A
+  call: `consent::decide`, then **the card** when it asks — the confirm
+  card's machinery (`pages/act/confirm.rs`, act "connector",
+  `ConnectorCard`; `ConnectorConfirm.svelte` from `PageConfirm.svelte`):
+  "Use Notion: Create page?", its arguments (secrets masked), **Allow once ·
+  Always allow · Deny** (`chat_connector_confirm`; never Always allow for a
+  tool that can delete), the line "Waiting for your OK · …" (asked out loud:
+  "Your OK is waiting in Chat · …"); its line "Asking Notion · Search · …"
+  (`Turn::activity`, from `calls.rs`) and its chip; ■ Stop drops the call
+  and the server is told. Yap's one line in the system prompt
+  (`connectors::INSTRUCTIONS`), never a server's. How it all works:
+  [integrations.md](./integrations.md#connectors-in-chat-wave-4).
 - **`chat/tools.rs`** — the AI Chat tool-calling agent loop: six tools ported
   near-verbatim from OpenWhispr's `services/tools/*` (`search_notes`,
   `get_note`, `create_note`, `update_note`, `list_folders`,
@@ -456,7 +476,13 @@ one side.
   (`search_for_the_model`, once a turn; `YAP_EVAL_EMPTY_NOTES` = hint |
   search | none compares). **The safety rule**
   (`refused_after_web`, `ACTION_TOOLS` = open_app, create_note,
-  update_note, edit_note, copy_to_clipboard): once web content is in a turn
+  update_note, edit_note, copy_to_clipboard; since Connectors wave 4
+  `refused_after_outside(name, Seen { web, screen, connector }, strong)`, of
+  which `refused_after_web` is the web's case — **a connector's result is
+  outside content too**, whoever wrote it: Yap's action tools are refused
+  after it, "Didn't open an app: not after a connector's result", the page
+  tools' typed-words check holds, and the connectors' own writes ask even
+  when Always allow, `connectors/consent.rs`): once web content is in a turn
   (`Turn::seen`, or the loop's `screen_seen`: a search's results; a page
   read — `read_page`, `browser_read`, a find or a scroll, an action's page after,
   a switched tab, the tab a new one closed to make room, named —; a
@@ -491,7 +517,8 @@ one side.
   documents' own rules), **`dispatch.rs`** (where it runs: `Source::of`,
   pure, the first source that takes the name — the web, pictures, the
   screen, acting on pages, pages, memory, past chats, the notes search, the
-  calendar, apps, else the note tools — and one match runs it),
+  calendar, apps, else the note tools; a connector's tool before all of
+  them — and one match runs it),
   **`fold.rs`** (its result back: the hint, the log, the note it changed,
   its chip, the next tool message; then what follows the step) and
   **`room.rs`** (the budget each result and picture must fit). A new kind

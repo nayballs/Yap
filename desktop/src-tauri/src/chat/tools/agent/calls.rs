@@ -42,16 +42,20 @@ impl Loop<'_> {
             let ran_with = args.clone();
             // The page's line: what this call does, with what ("Searching the
             // web · …" — a provider's native search or Exa's alike —,
-            // "Reading …", "Writing ‘Gear’").
+            // "Reading …", "Writing ‘Gear’", "Asking Notion · Search").
             if let Some(live) = self.live {
-                crate::chat::activity::tell(live.sink, crate::chat::activity::of_call(name, &args));
+                let step = match self.extra.connectors.filter(|c| c.owns(name)) {
+                    Some(c) => c.activity(name, &args),
+                    None => crate::chat::activity::of_call(name, &args),
+                };
+                crate::chat::activity::tell(live.sink, step);
             }
-            let web_seen = self.web.as_deref().is_some_and(crate::web::Turn::seen) || self.screen_seen || self.agent_seen;
+            let seen = self.seen();
             // The safety rule's one exception: the person's plain go-ahead
             // to an agent (`message_agent` then sends Yap's own words, never the
             // model's: `tools/agents.rs`).
-            let goes_ahead = web_seen && crate::chat::tools::agents::goes_ahead_after_web(name, self.question);
-            let result = match gate(name, &args, hold_web, web_seen && !goes_ahead, &self.extra) {
+            let goes_ahead = seen.any() && crate::chat::tools::agents::goes_ahead_after_web(name, self.question);
+            let result = match gate(name, &args, hold_web, if goes_ahead { crate::chat::tools::Seen::default() } else { seen }, &self.extra) {
                 Some(refusal) => refusal,
                 None => {
                     let source = Source::of(name, self.web.is_some(), &self.extra, self.claude_web, self.open_apps);

@@ -112,7 +112,7 @@ impl Prompt {
     fn start(t: &Asked<'_>, memory: bool) -> Prompt {
         let g = t.gates;
         let mut system = t.ep.persona.trim().to_string();
-        system.push_str(&instructions(&t.cfg, g.tools, g.doc_tools, g.web_lines, g.web_on, g.pictures, g.act, g.calendar, &t.profile, memory));
+        system.push_str(&instructions(&t.cfg, g.tools, g.doc_tools, g.web_lines, g.web_on, g.pictures, g.act, g.calendar, g.connectors, &t.profile, memory));
         let screen_line = crate::chat::see_screen::instructions(g.screen);
         if !screen_line.is_empty() {
             system.push(' ');
@@ -574,7 +574,8 @@ fn first_step(text: &str, g: &Gates, here: bool, outline_first: bool, about_sele
 /// the web's lines that let it keep writing after the web, and a Claude
 /// searching in Chat's own request its own tools' (`web_lines`,
 /// `tools::web_tool_instructions`). `memory`: memory's tools and past
-/// chats' are offered (never in a Code chat).
+/// chats' are offered (never in a Code chat). `connectors`: connectors'
+/// tools are (Yap's own line about them, never a server's instructions).
 #[allow(clippy::too_many_arguments)]
 fn instructions(
     cfg: &YapConfig,
@@ -585,6 +586,7 @@ fn instructions(
     pictures: crate::chat::pictures::Gate,
     act: bool,
     calendar_on: bool,
+    connectors: bool,
     profile: &crate::ai::about_you::Profile,
     memory: bool,
 ) -> String {
@@ -640,6 +642,12 @@ fn instructions(
             s.push(' ');
             s.push_str(&crate::chat::tools::agents::AGENT_TOOL_INSTRUCTIONS.join(" "));
         }
+        // Connectors (chat/tools/connectors.rs): Yap's own line, never a
+        // server's instructions.
+        if connectors {
+            s.push(' ');
+            s.push_str(crate::chat::tools::connectors::INSTRUCTIONS);
+        }
     } else {
         // No tools: it can't do anything on the PC, so it mustn't say so.
         s.push_str("\n\n");
@@ -692,13 +700,14 @@ pub(crate) fn stable_prompt(
     pictures: crate::chat::pictures::Gate,
     act: bool,
     calendar_on: bool,
+    connectors: bool,
     profile: &crate::ai::about_you::Profile,
     now: chrono::DateTime<chrono::Utc>,
 ) -> String {
     let about = crate::ai::about_you::prompt_block(profile, now);
     let mut s = persona.trim().to_string();
     // (As a plain chat has it: a Code chat's prompt is a little shorter.)
-    s.push_str(&instructions(cfg, tools_supported, doc_tools, web_lines, web_on, pictures, act, calendar_on, profile, true));
+    s.push_str(&instructions(cfg, tools_supported, doc_tools, web_lines, web_on, pictures, act, calendar_on, connectors, profile, true));
     s.push_str(&ending(tools_supported, profile, &about, &crate::memory::you_block()));
     if tools_supported {
         s.push_str("\n\n");
@@ -797,6 +806,7 @@ mod tests {
             act: false,
             calendar: false,
             agents: false,
+            connectors: false,
         }
     }
 
@@ -863,9 +873,9 @@ mod tests {
         let plain = code_profile(&t.profile, false);
         let ending = ending(true, &plain, "", &you);
         assert!(ending.contains("bullet points") && ending.contains("They told Yap: \"I keep bees on an allotment\"") && ending.contains("Their name is Imogen."), "{ending}");
-        let with = instructions(&t.cfg, true, Default::default(), t.gates.web_lines, false, Gate::Off, false, false, &plain, true);
+        let with = instructions(&t.cfg, true, Default::default(), t.gates.web_lines, false, Gate::Off, false, false, false, &plain, true);
         assert!(with.contains("Use remember") && with.contains("search_chats"));
-        let without = instructions(&t.cfg, true, Default::default(), t.gates.web_lines, false, Gate::Off, false, false, &plain, false);
+        let without = instructions(&t.cfg, true, Default::default(), t.gates.web_lines, false, Gate::Off, false, false, false, &plain, false);
         assert!(!without.contains("Use remember") && !without.contains("search_chats"));
         // The note's the only part a Code chat drops.
         assert_eq!(code_profile(&t.profile, true), crate::ai::about_you::Profile { about: String::new(), ..imogen() });
@@ -886,6 +896,7 @@ mod tests {
             act: false,
             calendar: false,
             agents: false,
+            connectors: false,
         };
         let asks = "What's the latest version of Python?";
         assert!(crate::web::needs_web(asks), "the test's question needs the web");
