@@ -674,6 +674,20 @@ pub async fn shot_in_view(key: &str) -> Result<Vec<u8>, String> {
     imp::shot_in_view(app, key.to_string()).await
 }
 
+/// **What's in view of page `key` now, drawn `scale` times finer**
+/// (`browser_zoom`, 8 Nov 2026), where nobody can see it drawn: a page out
+/// of sight is drawn for a moment under Yap's own page at `scale` × its
+/// rasterization scale and bounds — the same layout in CSS pixels, `scale`
+/// times the pixels — then put back. A page on screen is the view as it is
+/// (scale 1): WebView2 draws a window at its own pixels, so drawing it finer
+/// would change what the person sees (a finer rasterization scale zooms the
+/// page in the window; DevTools' `Page.captureScreenshot` with a clip at a
+/// scale resizes the view while it draws). The PNG and the scale it has.
+pub async fn shot_in_view_at(key: &str, scale: f64) -> Result<(Vec<u8>, f64), String> {
+    let app = APP.get().cloned().ok_or("Yap's window isn't ready to take a shot.")?;
+    imp::shot_in_view_at(app, key.to_string(), scale).await
+}
+
 /// **Page `key` back or forward** in its own history (`browser_navigate`'s
 /// "back" / "forward").
 pub async fn history(key: &str, back: bool) -> Result<(), String> {
@@ -769,6 +783,9 @@ mod imp {
         Err(NO.into())
     }
     pub async fn shot_in_view(_: AppHandle, _: String) -> Result<Vec<u8>, String> {
+        Err(NO.into())
+    }
+    pub async fn shot_in_view_at(_: AppHandle, _: String, _: f64) -> Result<(Vec<u8>, f64), String> {
         Err(NO.into())
     }
     pub async fn eval(_: AppHandle, _: String, _: String) -> Result<String, String> {
@@ -2080,6 +2097,55 @@ mod win {
             .await;
         }
         shot
+    }
+
+    /// **The view drawn `scale` (1–2) times finer, out of sight** (see the
+    /// public `shot_in_view_at`): its controller's rasterization scale and
+    /// bounds both times `scale` under Yap's own page (the CSS layout the
+    /// same), a frame drawn, the shot, then its scale back and the page out
+    /// of sight again — or where the person brought its tab up meanwhile. On
+    /// screen, or where the scale can't be set: [`shot_in_view`], scale 1.
+    pub async fn shot_in_view_at(app: AppHandle, key: String, scale: f64) -> Result<(Vec<u8>, f64), String> {
+        let scale = if scale.is_finite() { scale.clamp(1.0, 2.0) } else { 1.0 };
+        let k = key.clone();
+        let finer = main_thread(&app, move |_| -> Result<Option<f64>, String> {
+            let Some((host, Some(controller), Some(_))) = handles(&k) else { return Err("That page isn't open (yet).".to_string()) };
+            let on_screen = VIEWS.with(|v| v.borrow().iter().find(|x| x.key == k).is_some_and(|x| x.bounds.is_some()));
+            if on_screen || scale <= 1.0 {
+                return Ok(None);
+            }
+            let Ok(c3) = controller.cast::<ICoreWebView2Controller3>() else { return Ok(None) };
+            let mut was = 0.0f64;
+            if unsafe { c3.RasterizationScale(&mut was) }.is_err() || !(was > 0.0 && was.is_finite()) {
+                return Ok(None);
+            }
+            if unsafe { c3.SetRasterizationScale(was * scale) }.is_err() {
+                return Ok(None);
+            }
+            let (w, h) = STAGE.with(Cell::get);
+            let finer = |n: i32| (f64::from(n) * scale).round() as i32;
+            put(host, Some(&controller), Some(Bounds { x: 0, y: 0, w: finer(w), h: finer(h) }), true);
+            Ok(Some(was))
+        })
+        .await??;
+        let Some(was) = finer else {
+            return shot_in_view(app, key).await.map(|png| (png, 1.0));
+        };
+        // A frame drawn at that scale first (laid out again for its new
+        // pixel ratio: a little longer than a plain shot's).
+        tokio::time::sleep(DRAW + std::time::Duration::from_millis(200)).await;
+        let shot = shot_of(app.clone(), key.clone()).await;
+        let _ = main_thread(&app, move |_| {
+            let Some((host, controller, _)) = handles(&key) else { return };
+            if let Some(c3) = controller.as_ref().and_then(|c| c.cast::<ICoreWebView2Controller3>().ok()) {
+                let _ = unsafe { c3.SetRasterizationScale(was) };
+            }
+            let bounds = VIEWS.with(|v| v.borrow().iter().find(|x| x.key == key).and_then(|x| x.bounds));
+            put(host, controller.as_ref(), bounds, false);
+        })
+        .await;
+        tracing::info!(scale, ok = shot.is_ok(), "Chat: a page out of sight drawn finer for a zoom");
+        shot.map(|png| (png, scale))
     }
 
     /// The page's menu: the safe items, and Yap's.

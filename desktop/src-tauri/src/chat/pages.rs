@@ -28,9 +28,11 @@
 //! - **`browser_batch {actions}`**: several of them in order in one call,
 //!   stopping at the first that fails (a card said no to is one).
 //!
-//! **Which pages** ([`checked`]): only a page from this turn's results, the
+//! **Which pages** ([`checked`]): before anything from outside came into
+//! the turn, any well-formed public `https://` address, the model's own too
+//! ([`written`]); after it, only a page from this turn's results, the
 //! person's messages, a site they named or a link on a page read, as
-//! `read_page`'s rule (`web::Turn::allowed`), and only public http(s)
+//! `read_page`'s rule (`web::Turn::allowed`) — and only public http(s)
 //! addresses (`web::check_url`); never a search engine's results read. What
 //! a read, a find, a shot or an action's answer brings in is web content
 //! (the safety rule). Every tool reaches the pages through [`backend`]: the
@@ -45,6 +47,7 @@
 
 pub mod act;
 pub mod backend;
+pub mod read;
 pub mod see;
 #[cfg(any(test, debug_assertions))]
 pub mod sim;
@@ -111,6 +114,10 @@ pub const TOOL_NAMES: &[&str] = &[NAVIGATE, READ, FIND, SCROLL, SCROLL_TO, SCREE
 pub const VIEW: &[&str] = &[SCROLL, SCROLL_TO, SCREENSHOT, ZOOM];
 /// Every browser tool, the acting ones too, in the order they're listed.
 pub const ALL: &[&str] = &[NAVIGATE, READ, FIND, SCROLL, SCROLL_TO, SCREENSHOT, ZOOM, act::CLICK, act::TYPE, act::KEY, act::HOVER, act::FORM_INPUT, TABS, WAIT, BATCH];
+/// The tools that may go to an address the model writes (an older name's
+/// too): only they need to know whether outside content came first
+/// ([`Ctx::outside`]).
+pub const NAVIGATES: &[&str] = &[NAVIGATE, TABS, BATCH, old::OPEN, old::SHOW, old::GO];
 
 /// The page tools' names until 8 Nov 2026 ([`renamed`]).
 pub mod old {
@@ -265,13 +272,16 @@ pub fn definitions(gate: Gate, act: bool) -> Value {
     // 2026: with "text" first and no word on it, the on-device Qwen read the
     // text before a click in two runs of three, then answered with the link).
     let mode = if act {
-        json!({ "type": "string", "enum": ["elements", "text"], "description": "elements: its links, buttons and fields by ref, to act on; text: all its words" })
+        json!({ "type": "string", "enum": ["elements", "text", "tables"], "description": "elements: its links, buttons and fields by ref, to act on; text: all its words" })
     } else {
-        json!({ "type": "string", "enum": ["text", "elements"] })
+        json!({ "type": "string", "enum": ["text", "elements", "tables"] })
     };
     let mut out = vec![
-        tool(NAVIGATE, "Open a page in the tab in front (a new tab if none): an address or search words; or \"back\"/\"forward\".", json!({ "url": s(), "search": s(), "tab": tab() }), &[]),
-        tool(READ, "Read the page: text and links; mode \"elements\": links, buttons and fields by ref.", json!({ "mode": mode, "tab": tab() }), &[]),
+        // (search: a results page for the person, never read — what finds
+        // pages to open is web search; every word here counts on a small
+        // context: turn/fit.rs.)
+        tool(NAVIGATE, "Open a page in the tab in front (a new tab if none): an address or search words (results for the user: web search finds pages); or \"back\"/\"forward\".", json!({ "url": s(), "search": s(), "tab": tab() }), &[]),
+        tool(READ, "Read the page: text and links; mode \"elements\": links, buttons and fields by ref.", json!({ "mode": mode, "offset": { "type": "integer" }, "tab": tab() }), &[]),
         tool(FIND, "Find words on the page: matches by ref.", json!({ "query": s() }), &["query"]),
     ];
     if look {
@@ -465,8 +475,10 @@ pub struct TurnPages {
 }
 
 /// **Where a call runs**: the model's picture gate, whether it may act, its
-/// provider (a shot is fitted for it) and who watches the turn (the page
-/// tab's strip, the cards, a shot in the steps, a tab opening).
+/// provider (a shot is fitted for it), who watches the turn (the page
+/// tab's strip, the cards, a shot in the steps, a tab opening), what outside
+/// content the turn has seen beyond its web side's own, and the web search
+/// the model has.
 #[derive(Clone, Copy)]
 pub struct Ctx<'a> {
     pub gate: Gate,
@@ -474,13 +486,32 @@ pub struct Ctx<'a> {
     pub provider: &'a str,
     pub base_url: &'a str,
     pub live: Option<Live<'a>>,
+    /// **Outside content beyond what `web::Turn` records itself** — an
+    /// agent's words, the screen, a connector's result; on the plan, Claude
+    /// Code's own searches and reads (`claude_live/turn.rs`'s web flag) —, or
+    /// the answer before the question came from the web
+    /// ([`after_web_answer`]). From then on an address the model writes
+    /// itself no longer opens ([`written`]).
+    pub outside: bool,
+    /// The web search the model has, by the name it knows it by
+    /// (`web_search`; on the plan Claude Code's `WebSearch`); `None`: none
+    /// this turn. A search engine's results are never read: this finds the
+    /// pages to open.
+    pub search: Option<&'a str>,
 }
 
 impl Ctx<'_> {
-    /// For a unit test or an evaluation's check: nobody watching.
+    /// For a unit test or an evaluation's check: nobody watching, nothing
+    /// from outside yet, Yap's web search.
     #[cfg(test)]
     pub fn quiet(gate: Gate, act: bool) -> Ctx<'static> {
-        Ctx { gate, act, provider: "anthropic", base_url: "https://api.anthropic.com/v1", live: None }
+        Ctx { gate, act, provider: "anthropic", base_url: "https://api.anthropic.com/v1", live: None, outside: false, search: Some(WEB_SEARCH) }
+    }
+
+    /// Outside content is in the turn: its web side's (a page, a search, a
+    /// picture, a closed tab's title…) or any other kind ([`Ctx::outside`]).
+    pub fn after_outside(&self, turn: &crate::web::Turn) -> bool {
+        self.outside || turn.seen()
     }
 
     /// The watcher told `ev`, if anyone watches.
@@ -549,6 +580,15 @@ pub(crate) async fn tab_for(turn: &crate::web::Turn, args: &Value, doing: &str) 
     }
 }
 
+/// How the model finds pages to open itself, after a search opened for the
+/// person (`search`: its web search, by name). Pure.
+pub(crate) fn find_pages(search: Option<&str>) -> String {
+    match search {
+        Some(s) => format!("To find pages to open yourself, search with {s}: its results' links open with browser_navigate."),
+        None => "This turn has no web search: the results are the user's to pick from.".to_string(),
+    }
+}
+
 /// A search engine's results: Yap doesn't read or use them (the person can).
 pub(crate) fn on_search_page(t: &OpenTab, doing: &str) -> Option<Value> {
     search_page(&t.url).then(|| {
@@ -559,11 +599,62 @@ pub(crate) fn on_search_page(t: &OpenTab, doing: &str) -> Option<Value> {
     })
 }
 
+/// Yap's web search tool, by its name in the tool loop.
+pub const WEB_SEARCH: &str = "web_search";
+
+/// **An address the model wrote itself** (8 Nov 2026: Chat's own test of
+/// the browser tools found a well-formed `https://www.example.com/forever`
+/// refused until a search had found it): before anything from outside came
+/// into the turn (`outside` false: no page, search result, connector's
+/// result, agent's words, screen or text selected elsewhere, and the answer
+/// before the question not from the web), any well-formed public `https://`
+/// address opens — an exact address it knows, a site's page. After it, only
+/// the turn's own links do ([`checked`], `act::go`): a page's words could
+/// have had the model carry the person's data out in an address. Plain
+/// `http://` only from those links, as before. Its address, or the refusal
+/// for the model: which rule, and what works instead (`search`: the model's
+/// web search, by name). Pure.
+pub fn written(url: &str, outside: bool, search: Option<&str>) -> Result<String, String> {
+    let url = url.trim();
+    let instead = match search {
+        Some(s) => format!("open a link from a page read (browser_read lists them) or find the page with {s}"),
+        None => "open a link from a page read (browser_read lists them), or ask the user for the address (this turn has no web search)".to_string(),
+    };
+    crate::web::check_url(url)?;
+    if outside {
+        return Err(format!(
+            "Something from outside came into this turn (a page, search results, a connector's or an agent's words), so browser_navigate now opens only a link from the user's message, this turn's search results or a page read, never an address you write (a page could have put the user's data in it). Instead, {instead}."
+        ));
+    }
+    let parsed = reqwest::Url::parse(url).map_err(|_| "That isn't a web address.".to_string())?;
+    if parsed.scheme() != "https" || parsed.host_str().is_none_or(|h| !h.contains('.')) {
+        return Err(format!("An address you write opens only as https:// on a site's name; a plain http:// one only from the user, a search or a page read. Write its https:// address, or {instead}."));
+    }
+    Ok(url.to_string())
+}
+
+/// **The answer before this question came from the web** (a search ran
+/// for it, or it has web sources): its pages' words are in what the model
+/// read before this question (a plan chat's session keeps them whole), so
+/// an address it writes is treated as after outside content ([`written`]),
+/// as Yap Code's agents count it (`tools/agents.rs`).
+pub fn after_web_answer(conversation: Option<u64>) -> bool {
+    conversation.and_then(crate::chat::chats::get).is_some_and(|c| answer_before_from_web(&c.messages))
+}
+
+/// [`after_web_answer`] over a conversation's messages: the answer before
+/// its latest question. Pure.
+pub fn answer_before_from_web(messages: &[crate::chat::chats::ChatMessage]) -> bool {
+    let q = messages.iter().rposition(|m| m.role == "user" && m.kind.is_empty()).unwrap_or(messages.len());
+    messages[..q].iter().rev().find(|m| m.role == "assistant").is_some_and(crate::chat::chats::from_the_web)
+}
+
 /// **The page a call names, checked**: its address (trimmed), or the error
 /// for the model and the chip — no address, not a public http(s) one, or
-/// not from this turn's results, the person's messages or a page read.
-/// `doing`: the chip's verb ("bring up"). Pure but for the turn it reads.
-pub fn checked(turn: &crate::web::Turn, name: &str, args: &Value, doing: &str) -> Result<String, Value> {
+/// not from this turn's results, the person's messages or a page read (nor,
+/// before outside content, one the model wrote: [`written`]). `doing`: the
+/// chip's verb ("bring up"). Pure but for the turn it reads.
+pub fn checked(turn: &crate::web::Turn, args: &Value, doing: &str, ctx: &Ctx<'_>) -> Result<String, Value> {
     let url = args["url"].as_str().unwrap_or("").trim().to_string();
     let shown = crate::web::short_url(&url);
     if url.is_empty() {
@@ -580,13 +671,26 @@ pub fn checked(turn: &crate::web::Turn, name: &str, args: &Value, doing: &str) -
     if let Some(link) = turn.pages.links.iter().find(|l| crate::web::normal_url(&l.url) == key) {
         return Ok(link.url.clone());
     }
-    if !turn.allowed(&url) {
-        return Err(failed(
-            format!("{name} only takes a page from this turn's search results, a page read, or one the user linked in their message. Search for it first."),
-            format!("Didn't {doing} {shown}: not a link from you or the search"),
-        ));
+    if turn.allowed(&url) {
+        return Ok(turn.stored(&url).unwrap_or(url));
     }
-    Ok(turn.stored(&url).unwrap_or(url))
+    written_or_refused(&url, turn, ctx, &format!("Didn't {doing} {shown}"))
+}
+
+/// [`written`] for a call, its refusal with the chip (`didnt`: "Didn't go
+/// to …"). Pure but for the turn it reads.
+pub(crate) fn written_or_refused(url: &str, turn: &crate::web::Turn, ctx: &Ctx<'_>, didnt: &str) -> Result<String, Value> {
+    let outside = ctx.after_outside(turn);
+    match written(url, outside, ctx.search) {
+        Ok(u) => {
+            tracing::info!("Chat: an address the model wrote opened (nothing from outside in the turn yet)");
+            Ok(u)
+        }
+        Err(e) => {
+            let why = if outside { "not a link from you, a search or the page" } else { "only https:// addresses on their own" };
+            Err(failed(e, format!("{didnt}: {why}")))
+        }
+    }
 }
 
 /// A page's title and site: the turn's source for it (a search result, a
@@ -637,7 +741,7 @@ async fn one(turn: &mut crate::web::Turn, name: &str, args: &Value, ctx: &Ctx<'_
     }
     match name {
         NAVIGATE => navigate(turn, args, ctx).await.into(),
-        READ => read(turn, args, ctx.act).await.into(),
+        READ => read(turn, args, ctx).await.into(),
         FIND => see::find(turn, args).await.into(),
         SCROLL => see::scroll(turn, args).await.into(),
         SCROLL_TO => see::scroll_to(turn, args).await.into(),
@@ -716,7 +820,7 @@ async fn navigate(turn: &mut crate::web::Turn, args: &Value, ctx: &Ctx<'_>) -> V
     if tabs.is_empty() && tab_of(&args["tab"]).is_none() {
         return open(turn, args, ctx).await;
     }
-    act::go(turn, args, ctx.live).await
+    act::go(turn, args, ctx).await
 }
 
 /// **A page in a new tab**: an address (this turn's results, the person's
@@ -741,7 +845,7 @@ async fn open(turn: &mut crate::web::Turn, args: &Value, ctx: &Ctx<'_>) -> Value
             let u = reqwest::Url::parse(&url_given).ok();
             (u.and_then(|u| Some(format!("{}://{}/", u.scheme(), u.host_str()?))).unwrap_or(url_given), None)
         }
-        _ => match checked(turn, NAVIGATE, args, "bring up") {
+        _ => match checked(turn, args, "bring up", ctx) {
             Ok(u) => (u, None),
             Err(result) => return result,
         },
@@ -749,9 +853,9 @@ async fn open(turn: &mut crate::web::Turn, args: &Value, ctx: &Ctx<'_>) -> Value
     let shown = searched.as_ref().map_or_else(|| crate::web::short_url(&url), |w| format!("a search for \"{w}\""));
     let key = crate::web::normal_url(&url);
     let note = if searched.is_some() {
-        "The search is open beside the chat for the user, on their own search engine. Yap doesn't read search engines' result pages: say it's open, and the user picks a result (or use web_search)."
+        format!("The search is open beside the chat for the user, on their own search engine. Yap doesn't read search engines' result pages: say it's open, and the user picks a result. {}", find_pages(ctx.search))
     } else {
-        "It's open beside the chat for the user to see and use. browser_read reads it if you need what it says; don't describe it beyond what you've read."
+        "It's open beside the chat for the user to see and use. browser_read reads it if you need what it says; don't describe it beyond what you've read.".to_string()
     };
     let ok = |display: String| json!({ "success": true, "shown": true, "note": note, "displayText": display });
     // Up already this turn: the one there is.
@@ -793,21 +897,32 @@ async fn open(turn: &mut crate::web::Turn, args: &Value, ctx: &Ctx<'_>) -> Value
 /// `tab`) says — its title, headings and text, cut at [`READ_MAX`], and its
 /// links — and the tabs open. Web content (the safety rule), and a source
 /// of the turn. Mode "elements": its links, buttons and fields by ref
-/// (`act::rules::element_lines`), its text shorter ([`act::ELEMENTS_TEXT`]).
-async fn read(turn: &mut crate::web::Turn, args: &Value, act: bool) -> Value {
+/// (`act::rules::element_lines`), its text shorter ([`act::ELEMENTS_TEXT`]);
+/// mode "tables": its tables as rows ([`read::tables`]). One that stops
+/// short says where to go on (`next`); `offset` goes on from there
+/// ([`read::text_from`], [`read::elements_from`]) — a read without it is
+/// what it always was, `next` apart.
+async fn read(turn: &mut crate::web::Turn, args: &Value, ctx: &Ctx<'_>) -> Value {
+    let act = ctx.act;
     let tabs = backend::tabs_soon(!turn.pages.shown.is_empty()).await;
     let mode = args["mode"].as_str().unwrap_or("").trim().to_ascii_lowercase();
     let elements = mode == "elements" || args["elements"].as_bool() == Some(true);
+    let offset = read::offset_of(&args["offset"]);
     let tab = match view::pick_tab(&tabs, tab_of(&args["tab"])) {
         Ok(t) => t.clone(),
         Err(e) => return failed(format!("{e} browser_navigate opens one first, if the user wants a page."), format!("Didn't read a page: {}", crate::web::short(&e))),
     };
     let shown = crate::web::short_url(&tab.url);
     if search_page(&tab.url) {
-        return failed(
-            "That tab is a search engine's results page: Yap doesn't read those (the user can). Ask which result they mean, or use web_search.".into(),
-            format!("Didn't read {shown}: a search engine's results"),
-        );
+        return failed(read::search_refusal(ctx.search), format!("Didn't read {shown}: a search engine's results"));
+    }
+    if mode == "tables" {
+        return read::tables(turn, &tab, offset.unwrap_or(0)).await;
+    }
+    match offset {
+        Some(at) if elements => return read::elements_from(turn, &tab, at, act).await,
+        Some(at) => return read::text_from(turn, &tab, at, act).await,
+        None => {}
     }
     // With its elements: one read for both (the page's words cut shorter).
     let snap = if elements {
@@ -852,6 +967,16 @@ async fn read(turn: &mut crate::web::Turn, args: &Value, act: bool) -> Value {
         "note": web,
         "displayText": format!("Read {shown} beside the chat"),
     });
+    // Where to go on (the arguments for the next read): its elements past
+    // the first ones, else its text past what's here.
+    let next = match &snap {
+        Some(s) if s.more => Some(json!({ "mode": "elements", "offset": act::rules::MAX_ELEMENTS })),
+        _ if more => Some(json!({ "offset": cap })),
+        _ => None,
+    };
+    if let Some(next) = next {
+        result["data"]["next"] = next;
+    }
     // Its links (a plain read's): their words and addresses, for a link the
     // user asks for ("send me the link to that one") or browser_navigate —
     // the page's own, never a search engine's (the person reads those).

