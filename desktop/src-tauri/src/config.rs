@@ -177,8 +177,9 @@ pub struct LlmScope {
     /// On your Claude plan: a call the plan can't answer goes once to the
     /// Anthropic API key instead (`pp_plan_fallback`'s, per scope; off by
     /// default, never offered for Chat, which keeps its own "Use my API key
-    /// for this chat").
-    #[serde(default)]
+    /// for this chat"). Only written when on: a scope the person never
+    /// touched is saved exactly as it was.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub plan_fallback: bool,
 }
 
