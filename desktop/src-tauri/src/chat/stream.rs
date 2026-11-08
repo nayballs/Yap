@@ -205,6 +205,10 @@ pub fn doing(name: &str) -> &'static str {
         // A Code chat's reads of its workspace (claude_plan/map.rs).
         "read_file" => "Reading the code…",
         "search_code" | "find_files" => "Searching the code…",
+        // Connectors (chat/tools/connectors.rs): tool search, and a
+        // connector's tool (`<slug>__<tool>`).
+        "find_tools" | "tool_search_tool_bm25" | "tool_search_tool_regex" => "Looking for a connector's tool…",
+        n if n.contains("__") || n == "use_tool" => "Asking a connector…",
         _ => "Working…",
     }
 }

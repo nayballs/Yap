@@ -12,6 +12,10 @@ use crate::chat::tools::{tool_error, tool_result, Extra};
 /// from (`offer.rs`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum Source {
+    /// A connector's tool, or tool search's `find_tools` / `use_tool`
+    /// (`tools/connectors.rs`): first, since its names (`<slug>__<tool>`)
+    /// are never Yap's own.
+    Connectors,
     /// `web_search`, `read_page` (`web.rs`'s per-turn `web::Turn`).
     Web,
     /// Pictures from the web looked at or shown (`chat/pictures.rs`).
@@ -44,7 +48,9 @@ impl Source {
     /// request; `open_apps`: the app tools are offered). The first that
     /// takes it, in this order. Pure.
     pub(super) fn of(name: &str, web: bool, extra: &Extra<'_>, claude_web: bool, open_apps: bool) -> Source {
-        if web && crate::web::TOOL_NAMES.contains(&name) {
+        if extra.connectors.is_some_and(|c| c.owns(name)) {
+            Source::Connectors
+        } else if web && crate::web::TOOL_NAMES.contains(&name) {
             Source::Web
         } else if web && extra.pictures.offers(name, claude_web || extra.own_search) {
             Source::Pictures
@@ -78,6 +84,38 @@ impl Loop<'_> {
     /// page brought up, the screen taken) goes to it as it happens.
     pub(super) async fn dispatch(&mut self, source: Source, name: &str, args: Value, looks: &mut Vec<crate::chat::pictures::Look>) -> Value {
         match source {
+            Source::Connectors => {
+                // (Named only while the turn offers connectors, `Source::of`.)
+                let Some(turn) = self.extra.connectors else { return execute(name, &args) };
+                let own = self.own;
+                let ctx = crate::chat::tools::connectors::Ctx { question: self.question, own, outside: self.seen().any(), live: self.live };
+                let ran = turn.execute(name, &args, ctx).await;
+                // What a server returned is outside content from here on:
+                // Yap's own actions lock, the page tools' typed words are
+                // checked, and the connectors' writes ask (consent.rs).
+                if ran.reached {
+                    self.connector_seen = true;
+                    if let Some(w) = self.web.as_deref_mut() {
+                        w.mark_seen();
+                    }
+                }
+                // Its pictures go with the next step while they fit, as a
+                // page's shot does.
+                let mut result = ran.result;
+                let mut left_out = 0;
+                for look in ran.looks {
+                    if self.room.takes_picture(&self.messages, looks, &look) {
+                        looks.push(look);
+                    } else {
+                        left_out += 1;
+                    }
+                }
+                if left_out > 0 {
+                    tracing::info!(provider = self.provider, left_out, "Chat: no room left in the model's context for a connector's picture");
+                    result["note"] = Value::String(crate::chat::budget::NO_ROOM_TO_LOOK.to_string());
+                }
+                result
+            }
             Source::Web | Source::Pictures | Source::Pages => {
                 // (Named only with the web on, `Source::of`; without it a
                 // name is the note tools', as any other.)
@@ -198,7 +236,7 @@ impl Loop<'_> {
             Source::Agents => {
                 // (Named only while agents are offered, `Source::of`.)
                 let Some(turn) = self.extra.agents else { return execute(name, &args) };
-                let web_seen = self.web.as_deref().is_some_and(crate::web::Turn::seen) || self.screen_seen || self.agent_seen;
+                let web_seen = self.seen().any();
                 let ctx = crate::chat::tools::agents::Ctx {
                     question: self.question,
                     previous: self.previous.as_deref(),
@@ -269,5 +307,36 @@ mod tests {
         // `find_pictures` only where Yap's own page reads aren't offered.
         assert_eq!(Source::of(crate::chat::pictures::FIND, true, &look, false, false), Source::Notes);
         assert_eq!(Source::of(crate::chat::pictures::FIND, true, &look, true, false), Source::Pictures);
+    }
+
+    #[test]
+    fn a_connectors_tool_runs_there_while_the_turn_offers_it() {
+        use crate::chat::tools::connectors::{Offered, Surface, Turn, FIND, USE};
+        let tool = |wire: &str, tokens: u64| Offered {
+            wire: wire.into(),
+            id: "c1".into(),
+            connector: "Home lights".into(),
+            tool: wire.split("__").nth(1).unwrap_or("").into(),
+            title: None,
+            description: "A tool.".into(),
+            schema: serde_json::json!({ "type": "object" }),
+            kind: crate::integrations::connectors::cache::Kind::Reads,
+            setting: crate::integrations::connectors::store::Setting::Allow,
+            hash: "h".into(),
+            tokens,
+        };
+        let all = Turn::of(vec![tool("homelights__list_lights", 40)], 32_768, None, false, Surface::Chat, false, false, "custom").unwrap();
+        let with = Extra { connectors: Some(&all), ..Default::default() };
+        assert_eq!(Source::of("homelights__list_lights", true, &with, false, true), Source::Connectors);
+        // Tool search's names only past the budget.
+        assert_eq!(Source::of(FIND, false, &with, false, false), Source::Notes);
+        let many = Turn::of((0..300).map(|i| tool(&format!("homelights__t{i}"), 40)).collect(), 32_768, None, false, Surface::Chat, false, false, "custom").unwrap();
+        let searched = Extra { connectors: Some(&many), ..Default::default() };
+        assert_eq!(Source::of(FIND, false, &searched, false, false), Source::Connectors);
+        assert_eq!(Source::of(USE, false, &searched, false, false), Source::Connectors);
+        // Not offered: the note tools say they don't know it; Yap's own names never go there.
+        assert_eq!(Source::of("homelights__list_lights", true, &Extra::default(), false, true), Source::Notes);
+        assert_eq!(Source::of("web_search", true, &with, false, false), Source::Web);
+        assert_eq!(Source::of("search_notes", true, &with, false, false), Source::NotesSearch);
     }
 }

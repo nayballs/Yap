@@ -1097,6 +1097,14 @@ pub struct YapConfig {
     /// again.
     #[serde(default)]
     pub connectors_preview: bool,
+    /// "Let connectors work during meetings" (Settings → Connectors, wave
+    /// 5): while a meeting records or a call is on, Chat's and the Voice
+    /// Assistant's turns get connectors' tools only with this on (or a
+    /// connector's own `where.meetings`), and every write asks with a click
+    /// (`chat/tools/connectors.rs`). Off by default; an older Yap drops it on
+    /// its save and it's off again.
+    #[serde(default)]
+    pub connectors_in_meetings: bool,
     /// "Use Yap from your phone (on your home Wi-Fi)" (Settings → Phone,
     /// `link.rs`): Yap serves HTTPS on port 51443 to paired phones on the
     /// home network. Off by default; an older Yap drops it on its save and
@@ -1692,6 +1700,7 @@ impl Default for YapConfig {
             bridge_enabled: true,
             mcp_allow_writes: false,
             connectors_preview: false,
+            connectors_in_meetings: false,
             link_enabled: false,
             link_remote_control: false,
             link_keep_awake: true,

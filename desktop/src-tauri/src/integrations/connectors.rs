@@ -2,17 +2,20 @@
 //! at a link (Streamable HTTP, or the older HTTP+SSE, with a token or
 //! headers) or a program on this PC (stdio, its exact command line shown
 //! first), and Yap keeps its tools, each Always allow / Ask first / Off,
-//! for Chat and the Voice Assistant to use (wave 4; nothing offers them to
-//! a model yet). How it works: docs/architecture/integrations.md,
-//! "Connectors (preview)".
+//! for Chat and the Voice Assistant to use (`chat/tools/connectors.rs`:
+//! offered to the strong cloud models, asked about by `consent.rs`, sized
+//! by `budget.rs`). How it works: docs/architecture/integrations.md,
+//! "Connectors (preview)" and "Connectors in Chat".
 //!
 //! - `store.rs` connectors.json · `cache.rs` connector_tools.json ·
 //!   `vault.rs` the secrets, in Credential Manager;
 //! - `manager.rs` one connection each: start, health, idle stop;
 //! - `local.rs` programs (their own kill-on-close job) · `remote.rs` links
 //!   (through `net.rs`, every request a receipt);
-//! - `names.rs` / `schema.rs` / `results.rs` what a model would see ·
+//! - `names.rs` / `schema.rs` / `results.rs` what a model sees ·
 //!   `call.rs` one call (timeout, progress, stop);
+//! - `consent.rs` whether a call runs, asks first or is refused ·
+//!   `budget.rs` how many tools a model gets, and tool search past that;
 //! - `fake.rs` fake servers for the tests.
 //!
 //! **The switch**: everything here is behind `connectors_preview` (config,
@@ -25,10 +28,12 @@
 //! wave 5); Chat has no tool for it, a page beside the chat has no Yap IPC,
 //! and the deep link takes none.
 
+pub mod budget;
 pub mod cache;
 pub mod call;
+pub mod consent;
 #[cfg(test)]
-mod fake;
+pub(crate) mod fake;
 pub mod local;
 pub mod manager;
 pub mod names;
@@ -518,9 +523,7 @@ pub async fn refresh(id: &str, fresh: bool) -> Result<Diff, String> {
 
 /// Connector `c`'s connection for a call: up already, or started — and
 /// then listed again first (a changed tool drops back to Ask first before
-/// any call: the rug-pull check). (Only a debug build calls tools until
-/// Chat's loop does, wave 4.)
-#[cfg_attr(not(debug_assertions), allow(dead_code))]
+/// any call: the rug-pull check).
 pub async fn ensure(c: &Connector) -> Result<Peer<RoleClient>, String> {
     let m = manager();
     if m.is_up(&c.id) {
@@ -681,9 +684,9 @@ pub async fn connector_call_tool(id: String, tool: String, args: Option<Value>, 
 }
 
 /// One call to connector `id`'s `tool` (Off and unknown tools refused),
-/// through the receipts as the connector's. Wave 4's tool loop puts its
-/// consent before this.
-#[cfg_attr(not(debug_assertions), allow(dead_code))]
+/// through the receipts as the connector's: the debug command's way.
+/// Chat's tool loop has its own ([`call_for_chat`], after its consent).
+#[cfg(debug_assertions)]
 pub async fn call_tool(id: &str, tool: &str, args: &Value, timeout: Option<Duration>) -> Result<Value, String> {
     let c = store::get(id).ok_or("There's no such connector.")?;
     let peer = ensure(&c).await?;
@@ -694,21 +697,86 @@ pub async fn call_tool(id: &str, tool: &str, args: &Value, timeout: Option<Durat
         Some(_) => {}
     }
     let timeout = timeout.unwrap_or_else(|| call::timeout_for(c.timeout_secs));
-    let started = std::time::Instant::now();
     let display = format!("{} · {tool}", c.kind());
-    let out = call::call(&peer, tool, args, timeout, &call::Stop::new()).await;
-    let ms = started.elapsed().as_millis() as u64;
-    match out {
-        Ok(shaped) => {
-            tracing::info!(connector = id, tool, ms, success = shaped.success, chars = shaped.text.len(), "connectors: tool called");
-            Ok(shaped.to_value(&display))
-        }
-        Err(e) => {
-            tracing::info!(connector = id, tool, ms, outcome = e.word(), "connectors: tool call failed");
-            if e == call::CallError::Lost {
-                manager().broke(id).await;
-            }
-            Ok(serde_json::json!({ "success": false, "error": e.words(&c.kind()), "data": Value::Null, "displayText": display }))
+    match call_logged(&c, &peer, tool, args, timeout).await {
+        Ok(shaped) => Ok(shaped.to_value(&display)),
+        Err(e) => Ok(serde_json::json!({ "success": false, "error": e, "data": Value::Null, "displayText": display })),
+    }
+}
+
+/// **A call from Chat's tool loop** (`chat/tools/connectors.rs`, after its
+/// consent): connector `c`'s `tool` on `peer`, within the connector's own
+/// timeout. Its answer shaped, or why there isn't one in plain words.
+pub async fn call_for_chat(c: &Connector, peer: &Peer<RoleClient>, tool: &str, args: &Value) -> Result<results::Shaped, String> {
+    call_logged(c, peer, tool, args, call::timeout_for(c.timeout_secs)).await
+}
+
+/// A call under way, for the log: dropped before it ends (■ Stop, a newer
+/// question) it says the call was stopped — the server is told by
+/// `call.rs` (`notifications/cancelled`).
+struct Calling<'a> {
+    id: &'a str,
+    tool: &'a str,
+    started: std::time::Instant,
+    done: bool,
+}
+
+impl Drop for Calling<'_> {
+    fn drop(&mut self) {
+        if !self.done {
+            let ms = self.started.elapsed().as_millis() as u64;
+            tracing::info!(connector = self.id, tool = self.tool, ms, outcome = "cancelled", "connectors: tool call stopped");
         }
     }
+}
+
+/// One call, logged ([`Calling`]): the connector's id, the tool's name, the
+/// outcome, the time and the answer's length — never its arguments or its
+/// answer. A lost connection is the manager's to start again.
+async fn call_logged(c: &Connector, peer: &Peer<RoleClient>, tool: &str, args: &Value, timeout: Duration) -> Result<results::Shaped, String> {
+    let mut calling = Calling { id: &c.id, tool, started: std::time::Instant::now(), done: false };
+    let out = call::call(peer, tool, args, timeout, &call::Stop::new()).await;
+    calling.done = true;
+    let ms = calling.started.elapsed().as_millis() as u64;
+    match out {
+        Ok(shaped) => {
+            tracing::info!(connector = %c.id, tool, ms, success = shaped.success, chars = shaped.text.len(), "connectors: tool called");
+            Ok(shaped)
+        }
+        Err(e) => {
+            tracing::info!(connector = %c.id, tool, ms, outcome = e.word(), "connectors: tool call failed");
+            if e == call::CallError::Lost {
+                manager().broke(&c.id).await;
+            }
+            Err(e.words(&c.kind()))
+        }
+    }
+}
+
+/// **Always allow, from Chat's card**: connector `id`'s `tool` set to
+/// Always allow, pinned to the definition it was shown for (`hash`) — never
+/// a tool that can delete, nor one whose definition changed since. Every
+/// window hears of it.
+pub fn allow_always(id: &str, tool: &str, hash: &str) -> Result<(), String> {
+    let listing = cache::get(id).ok_or("Its tools haven't been listed yet.")?;
+    let t = listing.tools.iter().find(|t| t.name == tool).ok_or("It has no such tool.")?;
+    if t.kind == Kind::Deletes {
+        return Err("A tool that can delete always asks first.".into());
+    }
+    if t.hash != hash {
+        return Err("The tool changed since Yap asked.".into());
+    }
+    store::update(id, |c| {
+        c.tools.insert(tool.to_string(), store::ToolSetting { setting: Setting::Allow, hash: hash.to_string() });
+    })?;
+    tracing::info!(connector = id, tool, "connectors: a tool set to Always allow from Chat");
+    changed();
+    Ok(())
+}
+
+/// The preview's switch for a unit test on this thread (and a fresh store).
+#[cfg(test)]
+pub(crate) fn switch_for_test(on: bool) {
+    tests::set_switch(on);
+    store::reset_for_test();
 }

@@ -49,7 +49,8 @@ pub struct Activity {
     /// What kind of step: "think", "answer", "search" (the web), "read" (a
     /// page), "picture" (a picture from the web looked at or shown), "page"
     /// (acting on the page beside the chat), "notes", "doc", "calendar",
-    /// "memory", "apps", "chats", "tool".
+    /// "memory", "apps", "chats", "connector" (a connector's tool:
+    /// `tools/connectors.rs` words its own), "tool".
     pub mark: &'static str,
     /// The line: "Searching the web · tidecaller build", "Reading
     /// emberfall.example/wiki/Talents", "Writing ‘Gear’".
@@ -204,6 +205,13 @@ pub fn describe(name: &str, args: &Value, title_of: &dyn Fn(u64) -> Option<Strin
         "agent_status" | "job_status" => Activity::new("tool", "Checking on the agent"),
         "message_agent" | "message_job" => Activity::new("tool", "Telling the agent"),
         "stop_agent" | "stop_job" => Activity::new("tool", "Stopping the agent"),
+        // Connectors (chat/tools/connectors.rs words a call with its
+        // connector's name; these are the stream's, before its arguments):
+        // tool search — Yap's, or Claude's own on the Messages API — and a
+        // connector's tool, named `<slug>__<tool>`.
+        "find_tools" | "tool_search_tool_bm25" | "tool_search_tool_regex" => Activity::new("connector", "Looking for a connector's tool"),
+        "use_tool" => Activity::new("connector", "Asking a connector"),
+        n if n.contains("__") => Activity::new("connector", "Asking a connector"),
         _ => Activity::new("tool", "Working"),
     }
 }

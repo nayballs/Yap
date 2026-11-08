@@ -21,6 +21,13 @@
 //! "Send an agent to garden-planner?" with its folder, mode and brief ([`AgentCard`]),
 //! Allow once / Don't, answered the same way.
 //!
+//! **A connector's card** (act "connector", `chat/tools/connectors.rs`): before
+//! a connector's tool that asks first — "Use Notion: Create page?" with its
+//! arguments as key: value lines, secrets masked ([`ConnectorCard`]) —
+//! **Allow once · Always allow · Deny** (no Always allow for a tool that can
+//! delete), answered with `chat_connector_confirm(id, answer)`; Always allow
+//! is [`Answer::AlwaysAllowed`] (state "always").
+//!
 //! The log has the question's id and the answer, never the button's words,
 //! the typed text or the page.
 
@@ -34,7 +41,18 @@ use serde::{Deserialize, Serialize};
 /// How long an action waits for the person's answer.
 pub const WAIT: Duration = Duration::from_secs(120);
 
-static PENDING: Mutex<Option<HashMap<u64, tokio::sync::oneshot::Sender<bool>>>> = Mutex::new(None);
+static PENDING: Mutex<Option<HashMap<u64, tokio::sync::oneshot::Sender<Reply>>>> = Mutex::new(None);
+
+/// What the person pressed.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Reply {
+    /// Allow once (or a page's and an agent's Allow / Send).
+    Once,
+    /// Always allow (a connector's card only).
+    Always,
+    /// Don't / Deny.
+    Deny,
+}
 static NEXT: AtomicU64 = AtomicU64::new(1);
 
 /// The person's answer.
@@ -42,6 +60,8 @@ static NEXT: AtomicU64 = AtomicU64::new(1);
 #[serde(rename_all = "camelCase")]
 pub enum Answer {
     Allowed,
+    /// Always allow (a connector's card): allowed, and from now on.
+    AlwaysAllowed,
     Refused,
     /// No answer in [`WAIT`].
     TimedOut,
@@ -54,6 +74,7 @@ impl Answer {
     pub fn state(self) -> &'static str {
         match self {
             Answer::Allowed => "allowed",
+            Answer::AlwaysAllowed => "always",
             Answer::Refused => "refused",
             Answer::TimedOut => "timedOut",
             Answer::NoOne => "refused",
@@ -73,12 +94,14 @@ pub struct Card {
     /// What it would do ("buy", "sign in", "send"…; "type": words from
     /// nowhere the person can see).
     pub does: String,
-    /// "asking", then "allowed", "refused" or "timedOut".
+    /// "asking", then "allowed", "always" (a connector's Always allow),
+    /// "refused" or "timedOut".
     pub state: String,
     /// What Yap would do: "press" (a button or a link; empty in an older
     /// card), "enter" (Enter in a field), "open" (go to a link's address),
     /// "type" (typed words: `text`), "agent" (an agent starting; "job" in a
-    /// card kept before the rename to Yap Code, read as "agent").
+    /// card kept before the rename to Yap Code, read as "agent"),
+    /// "connector" (a connector's tool: `connector`).
     #[serde(skip_serializing_if = "String::is_empty", deserialize_with = "crate::agents::renamed")]
     pub act: String,
     /// The words Yap would type (`act` "type").
@@ -93,6 +116,46 @@ pub struct Card {
     /// a card kept before the rename.)
     #[serde(skip_serializing_if = "Option::is_none", alias = "job")]
     pub agent: Option<AgentCard>,
+    /// A connector's card (act "connector"): the tool and its arguments. An
+    /// older Yap's save drops it (the card stays, with the tool as its label).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub connector: Option<Box<ConnectorCard>>,
+}
+
+/// **The connector's tool a card asks about** (act "connector"): "Use
+/// `connector`: `tool`?", its arguments, and why Yap asks.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default, rename_all = "camelCase")]
+pub struct ConnectorCard {
+    /// The person's name for the connector ("Notion").
+    pub connector: String,
+    /// The tool's title, else its name ("Create page").
+    pub tool: String,
+    /// Its arguments as the card shows them: secrets masked, long values cut.
+    pub args: Vec<CardArg>,
+    /// Always allow is on the card (not for a tool that can delete, nor one
+    /// that's Always allow already).
+    pub always: bool,
+    /// Why Yap asks: "ask" (set to Ask first), "delete" (it can delete),
+    /// "outside" (outside content is in the turn), "risky" (its name says it
+    /// sends, pays, unlocks…), "meeting" (a meeting is on).
+    pub why: String,
+    /// "changes" | "deletes" | "reads".
+    pub kind: String,
+    /// Asked out loud (the Voice Assistant): the card waits in Chat.
+    pub voice: bool,
+}
+
+/// One argument on a connector's card.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default, rename_all = "camelCase")]
+pub struct CardArg {
+    pub key: String,
+    /// As shown: its first lines, "••••" for a secret.
+    pub value: String,
+    /// Cut to fit: the card says there's more.
+    pub cut: bool,
+    pub secret: bool,
 }
 
 /// **The agent a card asks about** (act "agent"): its folder, mode and brief.
@@ -159,11 +222,34 @@ impl Drop for Pending {
 /// tab's strip): `true` if that question was still waiting.
 #[tauri::command]
 pub fn chat_page_confirm(id: u64, allow: bool) -> bool {
+    answered(id, if allow { Reply::Once } else { Reply::Deny })
+}
+
+/// **A connector's card's answer** (`answer`: "once", "always" or
+/// "deny"): `true` if that question was still waiting. ("always" on a card
+/// without it is "once".)
+#[tauri::command]
+pub fn chat_connector_confirm(id: u64, answer: String) -> bool {
+    let reply = match answer.as_str() {
+        "always" => Reply::Always,
+        "once" => Reply::Once,
+        _ => Reply::Deny,
+    };
+    answered(id, reply)
+}
+
+/// Question `id` answered `reply`, if it was still waiting.
+fn answered(id: u64, reply: Reply) -> bool {
     let tx = PENDING.lock().unwrap_or_else(|p| p.into_inner()).as_mut().and_then(|m| m.remove(&id));
     match tx {
         Some(tx) => {
-            tracing::info!(id, allow, "Chat: the user answered a page action's question");
-            tx.send(allow).is_ok()
+            let pressed = match reply {
+                Reply::Once => "once",
+                Reply::Always => "always",
+                Reply::Deny => "deny",
+            };
+            tracing::info!(id, pressed, "Chat: the user answered a question before an action");
+            tx.send(reply).is_ok()
         }
         None => false,
     }
@@ -172,22 +258,48 @@ pub fn chat_page_confirm(id: u64, allow: bool) -> bool {
 #[cfg(test)]
 thread_local! {
     /// A unit test's answer, given at once (`None`: as in the app).
-    static TEST_ANSWER: std::cell::Cell<Option<bool>> = const { std::cell::Cell::new(None) };
+    static TEST_ANSWER: std::cell::Cell<Option<Reply>> = const { std::cell::Cell::new(None) };
 }
 
 /// A unit test answers every question this way from now on (on its thread).
 #[cfg(test)]
 pub fn answer_in_test(allow: Option<bool>) {
-    TEST_ANSWER.with(|a| a.set(allow));
+    reply_in_test(allow.map(|a| if a { Reply::Once } else { Reply::Deny }));
+}
+
+/// [`answer_in_test`] with any of the replies (Always allow too).
+#[cfg(test)]
+pub fn reply_in_test(reply: Option<Reply>) {
+    TEST_ANSWER.with(|a| a.set(reply));
 }
 
 /// **Ask the person** (`what`), showing the card through `live`, and wait
 /// for the answer.
 pub async fn ask(live: Option<crate::chat::stream::Live<'_>>, what: Ask<'_>) -> Answer {
+    ask_with(live, what, None).await
+}
+
+/// **Ask before a connector's tool** ([`ConnectorCard`]): [`ask`]'s card
+/// with the tool and its arguments, and Always allow when `card.always`.
+pub async fn ask_connector(live: Option<crate::chat::stream::Live<'_>>, what: Ask<'_>, card: ConnectorCard) -> Answer {
+    ask_with(live, what, Some(card)).await
+}
+
+/// What a reply means on a card (`always`: it has Always allow).
+fn answer_of(reply: Reply, always: bool) -> Answer {
+    match reply {
+        Reply::Always if always => Answer::AlwaysAllowed,
+        Reply::Always | Reply::Once => Answer::Allowed,
+        Reply::Deny => Answer::Refused,
+    }
+}
+
+async fn ask_with(live: Option<crate::chat::stream::Live<'_>>, what: Ask<'_>, connector: Option<ConnectorCard>) -> Answer {
     let id = NEXT.fetch_add(1, Ordering::Relaxed);
+    let always = connector.as_ref().is_some_and(|c| c.always);
     #[cfg(test)]
-    if let Some(a) = TEST_ANSWER.with(|a| a.get()) {
-        return if a { Answer::Allowed } else { Answer::Refused };
+    if let Some(r) = TEST_ANSWER.with(|a| a.get()) {
+        return answer_of(r, always);
     }
     if let Some(a) = crate::ai::eval::confirm_answer(what.label, what.does) {
         return if a { Answer::Allowed } else { Answer::Refused };
@@ -210,13 +322,14 @@ pub async fn ask(live: Option<crate::chat::stream::Live<'_>>, what: Ask<'_>) -> 
             text: what.text.to_string(),
             key: what.key.to_string(),
             agent: what.agent.clone(),
+            connector: connector.clone().map(Box::new),
         })
     };
     live.sink.send(card("asking"));
     tracing::info!(id, "Chat: a page action waits for the user's OK");
     let answer = match tokio::time::timeout(WAIT, rx).await {
-        Ok(Ok(true)) => Answer::Allowed,
-        Ok(Ok(false)) | Ok(Err(_)) => Answer::Refused,
+        Ok(Ok(reply)) => answer_of(reply, always),
+        Ok(Err(_)) => Answer::Refused,
         Err(_) => Answer::TimedOut,
     };
     live.sink.send(card(answer.state()));
@@ -278,6 +391,46 @@ mod tests {
         assert!(stopped.is_err());
         let id = log2.0.lock().unwrap().iter().find_map(|e| match e { Event::Confirm(c) => Some(c.id), _ => None }).unwrap();
         assert!(!chat_page_confirm(id, true), "nothing waits after the turn stopped");
+    }
+
+    /// A connector's card, answered `reply` from the page: the answer, and
+    /// the card's states as the page heard them.
+    async fn connector_card(always: bool, reply: &str) -> (Answer, Vec<String>) {
+        let log = Log::default();
+        let live = Live { sink: &log, beside: None };
+        let card = ConnectorCard { connector: "Notion".into(), tool: "Create page".into(), always, why: "ask".into(), kind: "changes".into(), ..Default::default() };
+        let fut = ask_connector(Some(live), Ask { act: "connector", label: "Create page", site: "Notion", does: "connector", ..Default::default() }, card);
+        let answering = async {
+            loop {
+                let id = log.0.lock().unwrap().iter().find_map(|e| match e {
+                    Event::Confirm(c) if c.state == "asking" => Some(c.id),
+                    _ => None,
+                });
+                if let Some(id) = id {
+                    assert!(chat_connector_confirm(id, reply.into()));
+                    break;
+                }
+                tokio::task::yield_now().await;
+            }
+        };
+        let (answer, ()) = tokio::join!(fut, answering);
+        let states = log.0.lock().unwrap().iter().filter_map(|e| match e { Event::Confirm(c) => Some(c.state.clone()), _ => None }).collect();
+        (answer, states)
+    }
+
+    #[tokio::test]
+    async fn a_connectors_card_answers_allow_once_always_allow_or_deny() {
+        assert_eq!(connector_card(true, "once").await, (Answer::Allowed, vec!["asking".into(), "allowed".into()]));
+        assert_eq!(connector_card(true, "always").await, (Answer::AlwaysAllowed, vec!["asking".into(), "always".into()]));
+        assert_eq!(connector_card(true, "deny").await, (Answer::Refused, vec!["asking".into(), "refused".into()]));
+        // A card without Always allow (a tool that can delete): "always" is once.
+        assert_eq!(connector_card(false, "always").await.0, Answer::Allowed);
+        // The page hears the connector's part of the card.
+        let c = Card { act: "connector".into(), connector: Some(Box::new(ConnectorCard { connector: "Notion".into(), tool: "Create page".into(), always: true, ..Default::default() })), ..Default::default() };
+        let v = serde_json::to_value(Event::Confirm(c)).unwrap();
+        assert_eq!((v["kind"].as_str(), v["connector"]["connector"].as_str(), v["connector"]["always"].as_bool()), (Some("confirm"), Some("Notion"), Some(true)));
+        // A page's card never has one.
+        assert!(serde_json::to_value(Card::default()).unwrap().get("connector").is_none());
     }
 
     #[test]
