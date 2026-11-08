@@ -12,7 +12,6 @@
   import { account, displayName, initAccount, initials } from '../stores/account.svelte.js';
   import './settings.css';
   import { NAV_GROUPS, resolveTarget } from './nav.js';
-  import { searchSettings, groupResults, countByPage, visibleIndex } from './settingsIndex.js';
   import { hotkeyCapture } from './hotkeys.svelte.js';
   import { followHotkeyFallback } from './hotkeyFallback.svelte.js';
   import { followDictionary } from './dictionarySync.svelte.js';
@@ -59,6 +58,21 @@
     about: () => import('./AboutPage.svelte'),
     account: () => import('./AccountSection.svelte'),
   };
+  // The search's index (settingsIndex.js: every setting's entry, ~68 kB, the
+  // shell's biggest part) is a chunk of its own too: fetched with the pages
+  // once the window is idle, and the moment Settings opens or a search is
+  // typed (`needIndex`), so a search always has it. Until it's in, a query
+  // shows no results pane at all (never an empty "No results").
+  const loadIndex = () => import('./settingsIndex.js');
+  let searchIndex = $state.raw(null);
+  let indexAsked = false;
+  function needIndex() {
+    if (indexAsked) return;
+    indexAsked = true;
+    loadIndex()
+      .then((m) => (searchIndex = m))
+      .catch(() => (indexAsked = false));
+  }
 
   // Embedded mode: rendered inside the ControlPanel's Settings modal
   // (OpenWhispr SettingsModal-style) instead of filling the window. The parent
@@ -240,12 +254,15 @@
   let searchEl = $state(null);
   let railSearch = $state(false); // the icon rail's search box, open
   const searching = $derived(query.trim().length > 0);
+  $effect(() => {
+    if (open || searching) needIndex();
+  });
   // A preview's entries only while it's on (the connectors' page).
-  const index = $derived(visibleIndex({ connectors: connectorsOn }));
-  const results = $derived(searching ? searchSettings(query, index) : []);
-  const resultGroups = $derived(groupResults(results));
+  const index = $derived(searchIndex ? searchIndex.visibleIndex({ connectors: connectorsOn }) : []);
+  const results = $derived(searching && searchIndex ? searchIndex.searchSettings(query, index) : []);
+  const resultGroups = $derived(searchIndex ? searchIndex.groupResults(results) : []);
   const flatResults = $derived(resultGroups.flatMap((g) => g.results));
-  const counts = $derived(searching ? countByPage(results) : null);
+  const counts = $derived(searching && searchIndex ? searchIndex.countByPage(results) : null);
   $effect(() => {
     query;
     selected = 0;
@@ -317,7 +334,10 @@
   onMount(() => {
     // The pages' chunks (PAGES above), fetched once the window is idle.
     const idle = window.requestIdleCallback ?? ((f) => setTimeout(f, 2000));
-    idle(() => Object.values(PAGES).forEach((page) => page().catch(() => {})));
+    idle(() => {
+      Object.values(PAGES).forEach((page) => page().catch(() => {}));
+      needIndex();
+    });
     const mq = window.matchMedia?.('(max-width: 960px)');
     if (!mq) return;
     rail = mq.matches;
@@ -623,7 +643,7 @@
                heading are here. -->
           {#if searching}
             {#await PAGES.search() then { default: SearchResults }}
-              <SearchResults {query} groups={resultGroups} bind:selected {cfg} onopen={openResult} />
+              {#if searchIndex}<SearchResults {query} groups={resultGroups} bind:selected {cfg} onopen={openResult} />{/if}
             {/await}
           {:else if section === 'general'}
             {#await PAGES.general() then { default: GeneralPage }}

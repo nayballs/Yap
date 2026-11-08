@@ -69,7 +69,9 @@ changed. **`renderMarkdown(…, {lines: true})`** puts `data-line="a-b"` (the
 block's source lines) on each top-level block (DOMPurify keeps only that
 shape): the document panel maps a selection back to the markdown with it.
 
-**The main window's chunk** (`ControlPanel`) is 179 kB since 2026-11-01,
+**The main window's chunk** (`ControlPanel`) is 154 kB since 2026-11-08
+(179 kB on 2026-11-01; 222 kB by 2026-11-08, over its budget, before the
+search index and Yap Code's words left it: "One chunk per window", below),
 under a budget of its own (200 kB: `vite.config.js`' `mainChunkBudget`
 warns past it; Vite's `chunkSizeWarningLimit`, 450 kB, is every other
 chunk's, the page editor's the biggest): Chat, Notes and every Settings
@@ -609,8 +611,9 @@ Flow's dark mode of 19 Oct 2026), for every Yap window.
   the main window lost its CSS). The Yap bar loads ~150 KB of script
   instead of the whole ~1 MB app; the notepad ~310 KB. **How the main
   window loads (2026-11-01):** its chunk (`ControlPanel`, 179 kB, 57 kB
-  gzipped; 778 kB before) holds the window's frame and sidebar, Home,
-  Settings' shell (`Settings.svelte`: the nav and its search index, the
+  gzipped; 778 kB before; 154 kB, 52 kB gzipped, since 2026-11-08) holds
+  the window's frame and sidebar, Home,
+  Settings' shell (`Settings.svelte`: the nav and the search box, the
   config's copy and auto-save, the in-page hotkey fallback, the attention
   badge), the toasts and every `init…` a notice or store needs (each
   `listen` still made at start-up: no store or notice listens any later).
@@ -620,7 +623,8 @@ Flow's dark mode of 19 Oct 2026), for every Yap window.
   (`Settings.svelte`'s `PAGES`: Language Models 89 kB, Voice Assistant 51,
   Dictation 37, Privacy & data 36, Account 27, Memory 23, Commands 23,
   Shortcuts 21, Meetings 18, Speech-to-Text 17, About 13, General 13, Skills
-  11, Connectors 10, AI apps 10, Phone 9), each drawn with `{#await
+  11, Connectors 10, AI apps 10, Phone 9; the Connectors preview's page,
+  `connectors/ConnectorsPage.svelte`, 87), each drawn with `{#await
   VIEWS.chat() then …}` the first time it shows. Both lists are fetched as
   soon as the window is idle (`requestIdleCallback`, two of them: views,
   pages), so a view or a page is in memory before anyone opens it and
@@ -629,7 +633,19 @@ Flow's dark mode of 19 Oct 2026), for every Yap window.
   comes from the app's own files in a few ms. What a view or a page hands
   over meanwhile goes through a store, as before (`chatRequest`,
   `noteRequest`, the shell's bindable props); `goto`'s anchor waits up to
-  2 s for its row. Settings' General page is still mounted at start-up
+  2 s for its row. **Since 2026-11-08** two more parts of the shell load on
+  demand (the chunk had reached 222 kB, over its budget, with Connectors,
+  Yap Code and the status dots): Settings' search index
+  (`settings/settingsIndex.js`, 59 kB: every entry, its search and
+  highlight) is a chunk of its own, shared with `SearchResults`, fetched
+  with the pages once the window is idle and at once when Settings opens
+  or a query is typed (`Settings.svelte`'s `needIndex`; until it's in a
+  query shows no results pane, never an empty one); and Yap Code's words
+  (`core/agents.js`, 10 kB in its own chunk, loaded with Chat and Settings
+  → Yap Code) keep in the main chunk only what `stores/agents.svelte.js`
+  needs at start-up, `core/agentNow.js` (`isLive`, `latestStep`,
+  `PLAN_WAITING`; agents.js re-exports them). 222.4 → 154.4 kB (71.2 →
+  51.6 kB gzipped). Settings' General page is still mounted at start-up
   (hidden), once its chunk is in. The chunk itself mounts once Home's data
   is in (`App.svelte`'s `homeFirst`: "Home's first paint", below). The
   other windows load the same code as before, in more pieces: the notepad

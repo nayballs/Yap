@@ -12,7 +12,7 @@
 // (ControlPanel, Chat, Settings → Yap Code: `initAgents`).
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
-import { isLive, latestStep } from '../core/agents.js';
+import { isLive, latestStep } from '../core/agentNow.js';
 
 export const agents = $state({
   /** Every agent, newest first. */
