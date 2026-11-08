@@ -302,6 +302,19 @@ A failed check says what it wanted and what there was:
 Scripts the fake AI's next calls, as the e2e specs' `fakeLlm.scriptChat` does:
 `[{"tools":[{"name":"browser_navigate","args":{"url":"…"}}]},{"content":"The answer."}]`.
 
+An argument that depends on what the turn has seen — a ref on a live page
+(`--fake --live-web`), a point of its screenshot — is a **placeholder** the lab
+fills in as the call is made, from the request's tool results (`fake.mjs`, as an
+e2e spec's `args: (r) => …`): `"$ref:<words>"` the ref of the element or match
+named exactly so in the turn's latest `browser_read` (elements) or `browser_find`
+that lists it, `"$ref:<kind>:<words>"` only of that kind (`heading`, `link`,
+`button`, `item`, `text`, `textbox`, `frame`…), words ending in `*` any that
+start so (`"$ref:text:A lighthouse is a tower*"`: a paragraph); `"$x:0.5"`,
+`"$y:0.3"` that fraction of the latest `browser_screenshot`'s width or height.
+Not found: 0, which the tool refuses as it would a model's wrong ref.
+`{"tools":[{"name":"browser_drag","args":{"from":{"ref":"$ref:item:Item 3"},"to":{"ref":"$ref:item:Item 1"}}}]}`.
+The shots and zooms need a fake that reads images: `start --fake --model fake-gpt-5-vision`.
+
 ### `stop`
 
 Closes the test Yap and the control process; the lab folder stays for inspection.
@@ -323,7 +336,10 @@ the screen:
 - of **the panel beside the chat**, when it's open: its document, picture, page or
   Agent tab, as it shows (a page tab's own area is blank: the page is a webview of its
   own);
-- of **the live page tab** (that webview), when one is on screen;
+- of **the live page tab** (that webview), when one is on screen (a tab set to a
+  desktop width comes out at its CSS size, the page drawn small in its top-left
+  corner: Playwright's capture under the page's zoom — Yap's own shots of it, and
+  the person's view, are the panel's size);
 - each **in both themes**: Yap's windows marked `data-yap-theme="light"`, then
   `"dark"`, as Settings' Theme marks them (core/appearance.js), motion reduced while
   they're taken (no transition caught half way), then put back; the live page — a
@@ -398,7 +414,7 @@ warn).
 
 | Script | Start with | What it covers |
 |---|---|---|
-| `browser-tools` | the default `start` (web on) | The browser tools' fixes of 8 Nov 2026, in three questions on Wikipedia, MDN and example.com: `browser_scroll` reporting where it ended (`data.scroll.y`, not at the top), `browser_scroll_to` by ref scrolling, `tab` on `browser_find` and `browser_scroll`, "changed" after a hover, PageDown and a click that opens a box, Escape closing a hover preview (soft), Enter after typing submitting through the check (`went to`, no card), a dropdown's choice not called typing, `find_pictures` and the lead picture (the thread's shot shows which), the bad-ref error not blaming the page. |
+| `browser-tools` | the default `start` (web on) | The browser tools' fixes of 8 Nov 2026, in three questions on Wikipedia, MDN and example.com: `browser_scroll` reporting where it ended (`data.scroll.y`, not at the top), `browser_scroll_to` by ref scrolling, `tab` on `browser_find` and `browser_scroll`, "changed" after a hover, PageDown and a click that opens a box, Escape closing a hover preview (soft), Enter after typing submitting through the check (`went to`, no card), a dropdown's choice not called typing, `find_pictures` and the lead picture (the thread's shot shows which), the bad-ref error not blaming the page. Then, in two more, the gaps closed the same day: a double click selecting a word and a right-click on Wikipedia (no menu of its own: said so); MDN at a desktop width (`browser_tabs` width 1280: its shot saying so, its live examples listed as frames from another site; soft, MDN decides what it draws); jQuery UI's sortable demo, a list in a same-origin frame, read and an item dragged (`browser_drag`, what moved said: soft). Turns 4 and 5 carry the fake AI's calls (placeholders for the live pages' refs), so `start --fake --live-web --model fake-gpt-5-vision` runs them with no model's usage; turns 1–3 carry none. |
 | `share-files` | `start --yap-code on` | Chat sharing files from a Code chat's workspace: one picture, then three (inline), then `notes.md` (a card); the workspace seeded with three drawn pictures and a made-up `notes.md`. **Its `todo`**: written before the share-files tool reached main — put its real name in `used` and check where an answer keeps file cards (`turns.mjs` `files`) once it has. |
 | `agent-panel` | `start --yap-code on` | An agent at work in `lab-sandbox`, its cards allowed: the Agent panel and the thread's to-do card while it runs and once it's done (named shots, both themes), the agent done with a file changed. Its `fake` steps make it pass on `--fake` too (the stand-in agent). |
 
@@ -487,7 +503,8 @@ numbers start at 1 again); reports, sheets and `shot`'s own files stay.
   by a MutationObserver while they're taken. The main window's size is set by
   `shell/lab.rs` from `YAP_LAB_WINDOW`. The contact sheet (`sheet.mjs`) is an HTML page
   rendered in a headless browser of the lab's own. Scripts: `script.mjs` (the runner,
-  and the checks, pure).
+  and the checks, pure); `fake.mjs` (the fake AI's placeholders, filled in from each
+  request's tool results: `fake`, pure).
 
 ## What still works as in a test run, not as for a person
 

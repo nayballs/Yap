@@ -196,6 +196,7 @@ pub fn doing(name: &str) -> &'static str {
         "type_text" | "browser_type" | "browser_form_input" => "Typing on the page…",
         "browser_key" => "Pressing keys on the page…",
         "browser_hover" => "Pointing at the page…",
+        "browser_drag" => "Dragging on the page…",
         "scroll" | "browser_scroll" | "browser_scroll_to" => "Scrolling the page…",
         "go_to" | "browser_navigate" => "Going to a page…",
         "switch_tab" => "Switching tabs…",

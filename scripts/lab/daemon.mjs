@@ -16,6 +16,7 @@ import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { APP, labConfig, onOff, parseModel } from './options.mjs';
 import { drawPng, pngSize } from './png.mjs';
+import { templated } from './fake.mjs';
 import { captureElement, captureLivePage, capturePanel, captureThread, captureWindow, livePage, pinTheme, shotNames, slug, themeNow, themesOf } from './shots.mjs';
 import { makeSheet } from './sheet.mjs';
 import { conversationOf, endOf, cardsOf, pendingOf, summarize, toolsOf, cut } from './turns.mjs';
@@ -906,7 +907,8 @@ const COMMANDS = {
   },
   fake: async (a) => {
     if (!fakeLlm) throw new Error('Only with start --fake (and a model that isn’t the plan)');
-    if (a.script) fakeLlm.scriptChat(JSON.parse(a.script));
+    // (Placeholders — a ref on a live page, a point of a shot — filled in as each call is made: fake.mjs.)
+    if (a.script) fakeLlm.scriptChat(templated(JSON.parse(a.script)));
     return { requests: fakeLlm.requests.length, chatCalls: fakeLlm.requests.filter((r) => r.tools?.length).length };
   },
   stop: async () => {

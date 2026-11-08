@@ -105,12 +105,14 @@ pub struct Card {
     pub state: String,
     /// What Yap would do: "press" (a button or a link; empty in an older
     /// card), "enter" (Enter in a field), "open" (go to a link's address),
-    /// "type" (typed words: `text`), "agent" (an agent starting; "job" in a
+    /// "type" (typed words: `text`), "drag" (what's dragged, onto `text`),
+    /// "agent" (an agent starting; "job" in a
     /// card kept before the rename to Yap Code, read as "agent"),
     /// "connector" (a connector's tool: `connector`).
     #[serde(skip_serializing_if = "String::is_empty", deserialize_with = "crate::agents::renamed")]
     pub act: String,
-    /// The words Yap would type (`act` "type").
+    /// The words Yap would type (`act` "type"), or what a drag drops onto
+    /// (`act` "drag").
     #[serde(skip_serializing_if = "String::is_empty")]
     pub text: String,
     /// The page tab it's about (its key), so its strip asks too; never kept

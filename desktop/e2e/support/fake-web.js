@@ -22,7 +22,10 @@
 // - Acting on pages (chat/pages/act.rs): rail.example.com, a made-up rail
 //   site — a journey form, its results by the stations asked for, a payment
 //   page with card fields, a sign-in page; docs.example.com, a docs page of
-//   web components (open shadow roots, nested, and a closed one).
+//   web components (open shadow roots, nested, and a closed one), and a
+//   responsive one (a search button under 900 px, a box at and over it);
+//   board.example.com, a task board (double-click, right-click, drags);
+//   forms.example.com, a form in a same-origin frame and a sandboxed frame.
 // - `/probe/…` (outside the stand-in): an address on this PC that a page
 //   beside the chat must never reach, its own or its workers' (recorded as
 //   service "probe"); `wiki.example.com/probe-sw.js`, a service worker that
@@ -301,6 +304,97 @@ PAGES['docs.example.com/guide'] = `<!doctype html><html><head><title>Tables - Ex
     });
   </script></body></html>`;
 PAGES['docs.example.com/search'] = `<!doctype html><html><head><title>Search - Example Docs</title></head><body><main><h1>Search results</h1><p>3 pages about tables.</p></main></body></html>`;
+
+// A responsive docs page (made up; Yap Lab met MDN's, whose search is an
+// icon at the panel's width): under 900 CSS px a search button and one
+// column, at 900 and over a search box at the top right and two columns
+// (`browser_tabs` width: a desktop width). The layout says itself in
+// #layout, and the two columns' colours show it in a shot.
+export const WIDE_URL = 'https://docs.example.com/field-guide';
+export const WIDE_BOX = { top: 16, height: 48 };
+PAGES['docs.example.com/field-guide'] = `<!doctype html><html><head><title>Field guide - Example Docs</title>
+  <style>html,body{margin:0;font:16px sans-serif}header{position:relative;height:80px;background:#234}
+  #open{position:absolute;right:8px;top:8px;width:64px;height:64px;font-size:28px}#q{display:none}
+  main{padding:16px}#cols section{height:300px;margin-bottom:16px}#birds{background:#cde}#trees{background:#edc}
+  @media (min-width:900px){#open{display:none}#q{display:block;position:absolute;right:16px;top:16px;width:40%;height:48px;font-size:20px;box-sizing:border-box}#cols{display:grid;grid-template-columns:1fr 1fr;gap:16px}}</style></head><body>
+  <header><form action="search" role="search"><button type="button" id="open" aria-label="Open search">&#8981;</button><input id="q" name="q" type="search" aria-label="Search the guide"></form></header>
+  <main><h1>Field guide</h1><p id="layout">Narrow layout</p><div id="cols"><section id="birds"><h2>Birds</h2></section><section id="trees"><h2>Trees</h2></section></div></main>
+  <script>function lay(){document.getElementById('layout').textContent=innerWidth>=900?'Wide layout':'Narrow layout';}lay();addEventListener('resize',lay);</script>
+</body></html>`;
+
+// A task board (made up) for the clicks that aren't one and drags: a word
+// to double-click (it selects), a title a double-click edits (an input in
+// its place, Enter keeps it), a card with a right-click menu of its own,
+// plain words with none, a list in order by drag and drop (HTML5), a
+// trash that deletes what's dropped on it, a puck dragged with the pointer
+// along a track (its own pointer events).
+export const TASKS_URL = 'https://board.example.com/tasks';
+PAGES['board.example.com/tasks'] = `<!doctype html><html><head><title>Tasks - Example Board</title><style>
+  html,body{margin:0;font:16px sans-serif}main{padding:12px}
+  #word{display:inline-block;font-size:28px;margin:4px 0}#title{display:inline-block;font-size:22px;padding:4px;border:1px dashed #999;margin:4px 0}
+  #card{display:inline-block;padding:10px;background:#ffd;border:1px solid #cc9;margin:4px 0}
+  #ctx{position:absolute;z-index:9;margin:0;padding:6px 10px;list-style:none;background:#fff;border:1px solid #888}
+  #order{padding:0;list-style:none}#order li{padding:8px;margin:4px 0;background:#def;border:1px solid #9bd;width:200px}
+  #trash{display:inline-block;padding:12px 24px;background:#fdd;border:1px dashed #c66}
+  #track{position:relative;margin-top:12px;width:600px;height:60px;background:#eee}
+  #puck{position:absolute;left:0;top:0;width:60px;height:60px;background:#68c}
+  #right{position:absolute;right:0;top:0;margin:0;width:120px;height:60px;background:#cfc}</style></head><body><main><h1>Tasks</h1>
+  <p id="word">lantern</p><br>
+  <h2 id="title" title="Double-click to rename">Spring plan</h2>
+  <div><p id="card">Paint the shed</p></div>
+  <p id="plain">Plain notes with no menu of their own.</p>
+  <ul id="order" aria-label="Priorities"><li draggable="true">Card A</li><li draggable="true">Card B</li><li draggable="true">Card C</li></ul>
+  <p id="trash">Trash</p><p id="bin"></p>
+  <div id="track"><div id="puck" role="button" aria-label="Puck"></div><p id="right">Right end</p></div>
+  <p id="where">Puck at the left.</p>
+  <script>
+    var t = document.getElementById('title');
+    t.addEventListener('dblclick', function () {
+      var i = document.createElement('input'); i.id = 'title-edit'; i.setAttribute('aria-label', 'Title'); i.value = t.textContent;
+      t.replaceWith(i); i.focus(); i.select();
+      i.addEventListener('keydown', function (e) { if (e.key !== 'Enter') return; e.preventDefault(); t.textContent = i.value; i.replaceWith(t); });
+    });
+    document.getElementById('card').addEventListener('contextmenu', function (e) {
+      e.preventDefault();
+      var m = document.getElementById('ctx');
+      if (!m) { m = document.createElement('ul'); m.id = 'ctx'; m.setAttribute('role', 'menu'); m.innerHTML = '<li role="menuitem">Rename</li><li role="menuitem">Archive</li>'; document.body.appendChild(m); }
+      m.style.left = e.clientX + 'px'; m.style.top = e.clientY + 'px'; m.hidden = false;
+    });
+    document.addEventListener('keydown', function (e) { var m = document.getElementById('ctx'); if (e.key === 'Escape' && m) m.hidden = true; });
+    var dragged = null, list = document.getElementById('order');
+    list.addEventListener('dragstart', function (e) { dragged = e.target.closest('li'); e.dataTransfer.setData('text/plain', dragged.textContent); });
+    list.addEventListener('dragover', function (e) { e.preventDefault(); });
+    list.addEventListener('drop', function (e) { e.preventDefault(); var to = e.target.closest('li'); if (dragged && to && to !== dragged) list.insertBefore(dragged, to); });
+    var trash = document.getElementById('trash');
+    trash.addEventListener('dragover', function (e) { e.preventDefault(); });
+    trash.addEventListener('drop', function (e) { e.preventDefault(); if (dragged) { document.getElementById('bin').textContent = 'Deleted ' + dragged.textContent; dragged.remove(); } });
+    var puck = document.getElementById('puck'), track = document.getElementById('track'), down = false;
+    puck.addEventListener('pointerdown', function () { down = true; });
+    document.addEventListener('pointermove', function (e) { if (!down) return; var r = track.getBoundingClientRect(); puck.style.left = Math.max(0, Math.min(r.width - 60, e.clientX - r.left - 30)) + 'px'; });
+    document.addEventListener('pointerup', function (e) { if (!down) return; down = false; var r = track.getBoundingClientRect(); document.getElementById('where').textContent = e.clientX - r.left > r.width / 2 ? 'Puck at the right.' : 'Puck at the left.'; });
+  </script></main></body></html>`;
+
+// A newsletter sign-up (made up) with its form in a same-origin frame — a
+// name box over its Save button, a password field in another form — and a
+// sandboxed frame (no script outside reaches into it, as another site's: a
+// test run's pages all come from the stand-in, so a frame from another
+// site can't be had here). The form's frame sits at 30–70 % of the view
+// (its box at 30–48 %, Save at 50–70 %), so a point of a shot lands in it.
+export const FRAMES_URL = 'https://forms.example.com/host';
+PAGES['forms.example.com/host'] = `<!doctype html><html><head><title>Sign-up - Example Forms</title><style>html,body{margin:0;font:16px sans-serif}main{padding:12px}
+  #f{position:absolute;left:0;top:30vh;width:100vw;height:40vh;border:0}#pay{position:absolute;left:0;top:74vh;width:100vw;height:20vh;border:1px solid #999;box-sizing:border-box}</style></head><body>
+  <main><h1>Newsletter</h1><p>The form is in a frame below.</p>
+  <iframe id="f" src="inner" title="Newsletter form"></iframe>
+  <iframe id="pay" src="pay" sandbox title="Payment"></iframe></main>
+</body></html>`;
+PAGES['forms.example.com/inner'] = `<!doctype html><html><head><title>Newsletter form</title><style>html,body{margin:0;font:16px sans-serif}
+  #name{position:absolute;left:0;top:0;width:100%;height:45%;font-size:24px;box-sizing:border-box}#save{position:absolute;left:0;top:50%;width:100%;height:50%;font-size:24px}
+  #hint{position:absolute;left:8px;top:45%;margin:0;font-size:10px}#pw{position:absolute;left:0;top:-200px}</style></head><body>
+  <form action="saved"><input id="name" name="name" aria-label="Name"><p id="hint">Tell us your name.</p><button id="save" type="submit">Save</button></form>
+  <form action="login" method="post"><input id="pw" type="password" name="pw" aria-label="Frame password"></form>
+</body></html>`;
+PAGES['forms.example.com/saved'] = `<!doctype html><html><head><title>Saved</title></head><body><p>Thanks, you're on the list.</p></body></html>`;
+PAGES['forms.example.com/pay'] = `<!doctype html><html><head><title>Card details</title></head><body><p>Card details go here.</p></body></html>`;
 
 // A mountain's article (made up) as a wiki lays one out: its photo in an
 // infobox, lazy-loaded, no alt text, its caption in the infobox's cell, and

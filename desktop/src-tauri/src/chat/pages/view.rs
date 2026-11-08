@@ -152,6 +152,37 @@ pub struct ViewState {
     /// It didn't load: why, in a few words.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
+    /// The desktop width it's laid out at (CSS pixels), shown scaled to fit:
+    /// its tab's "Desktop width ×" chip, which puts it back ([`page_view_width`]).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub width: Option<u32>,
+}
+
+/// The least a page is zoomed out to fit a desktop width in the panel
+/// (WebView2's own floor): a panel too narrow for the width asked lays the
+/// page out as wide as this allows.
+pub const ZOOM_MIN: f64 = 0.25;
+
+/// **The zoom that lays a page out `width` CSS pixels wide** in a view
+/// `phys_w` device pixels wide at `raster` device pixels a CSS pixel (the
+/// monitor's scale): the panel shows the desktop layout scaled to fit —
+/// what the person sees is what the model reads, smaller. Never above 1 (a
+/// width under the panel's is the panel's own), never under [`ZOOM_MIN`].
+/// Pure.
+pub fn zoom_for(phys_w: i32, raster: f64, width: u32) -> f64 {
+    let raster = if raster.is_finite() && raster > 0.0 { raster } else { 1.0 };
+    if phys_w <= 0 || width == 0 {
+        return 1.0;
+    }
+    (f64::from(phys_w) / (raster * f64::from(width))).clamp(ZOOM_MIN, 1.0)
+}
+
+/// The width (CSS pixels) a view `phys_w` device pixels wide lays a page
+/// out at, at `raster` and `zoom` ([`zoom_for`]'s). Pure.
+#[cfg(test)]
+pub fn laid_out_width(phys_w: i32, raster: f64, zoom: f64) -> f64 {
+    let scale = raster.max(f64::MIN_POSITIVE) * zoom.max(f64::MIN_POSITIVE);
+    f64::from(phys_w.max(0)) / scale
 }
 
 /// Text selected on a page beside the chat and asked about (`chat_send`'s
@@ -486,6 +517,10 @@ pub struct OpenTab {
     pub title: String,
     pub url: String,
     pub front: bool,
+    /// The width it's laid out at for a desktop site's layout (CSS pixels,
+    /// shown scaled to fit the panel: [`set_width`]); `None`: the panel's.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub width: Option<u32>,
 }
 
 /// **The page tabs open beside the chat** now (none before Yap's window is
@@ -529,7 +564,7 @@ pub async fn run_script(key: &str, script: String) -> Result<String, String> {
 /// closed menu), then the page's navigation, header, footer and asides, a
 /// language link (`hreflang`, or another `lang` than the page's) last; each
 /// address once, at its best place. Read only.
-pub const PAGE_TEXT_SCRIPT: &str = concat!("(function(){", deep_js!(), r#"var t=function(s){return (s||'').replace(/\s+/g,' ').trim();};var m=mainEl();if(!m)return {title:document.title,headings:[],text:'',links:[]};var hs=[].slice.call(qa('h1,h2,h3',m)).slice(0,40).map(function(h){return t(h.innerText);}).filter(Boolean);var seen={};var dl=(document.documentElement.lang||'').toLowerCase().split('-')[0];var nav='nav,header,footer,aside,[role=navigation],[role=banner],[role=contentinfo],[role=complementary],[role=menu],[role=menubar],[role=tablist]';var rk=function(a){var lg=(a.getAttribute('lang')||'').toLowerCase().split('-')[0];if(a.getAttribute('hreflang')||(lg&&dl&&lg!==dl))return 3;if(up(a,nav))return 2;if(!a.getClientRects().length)return 1;return 0;};var ls=[].slice.call(qa('a[href]',m)).map(function(a,i){return {text:t(a.innerText||a.getAttribute('aria-label')||a.title).slice(0,100),href:a.href,k:rk(a),i:i};}).sort(function(x,y){return x.k-y.k||x.i-y.i;}).filter(function(l){if(!/^https?:/i.test(l.href)||!l.text||seen[l.href])return false;seen[l.href]=1;return true;}).map(function(l){return {text:l.text,href:l.href};}).slice(0,120);return {title:t(document.title),headings:hs,text:t(shownText(m)).slice(0,24000),links:ls};})()"#);
+pub const PAGE_TEXT_SCRIPT: &str = concat!("(function(){", deep_js!(), r#"var t=function(s){return (s||'').replace(/\s+/g,' ').trim();};var m=mainEl();if(!m)return {title:document.title,headings:[],text:'',links:[]};var hs=[].slice.call(qa('h1,h2,h3',m)).slice(0,40).map(function(h){return t(h.innerText);}).filter(Boolean);var seen={};var dl=(document.documentElement.lang||'').toLowerCase().split('-')[0];var nav='nav,header,footer,aside,[role=navigation],[role=banner],[role=contentinfo],[role=complementary],[role=menu],[role=menubar],[role=tablist]';var rk=function(a){var lg=(a.getAttribute('lang')||'').toLowerCase().split('-')[0];if(a.getAttribute('hreflang')||(lg&&dl&&lg!==dl))return 3;if(up(a,nav))return 2;if(!a.getClientRects().length)return 1;return 0;};var ls=[].slice.call(qa('a[href]',m)).map(function(a,i){return {text:t(a.innerText||a.getAttribute('aria-label')||a.title).slice(0,100),href:a.href,k:rk(a),i:i};}).sort(function(x,y){return x.k-y.k||x.i-y.i;}).filter(function(l){if(!/^https?:/i.test(l.href)||!l.text||seen[l.href])return false;seen[l.href]=1;return true;}).map(function(l){return {text:l.text,href:l.href};}).slice(0,120);return {title:t(document.title),headings:hs,text:t(shownText(m)).slice(0,24000),links:ls,frames:foreignFrames(m,5)};})()"#);
 
 /// A page's words, read by [`PAGE_TEXT_SCRIPT`].
 #[derive(Debug, Clone, Default, Deserialize)]
@@ -544,6 +579,24 @@ pub struct PageText {
     /// page's own, a test run's stand-in's not yet turned back).
     #[serde(default)]
     pub links: Vec<PageLink>,
+    /// Its frames no script outside them reaches (from another site, or
+    /// sandboxed), shown on the page: at most 5 (a same-origin frame's words
+    /// are read with the page's).
+    #[serde(default)]
+    pub frames: Vec<PageFrame>,
+}
+
+/// **A frame Yap can't read inside** ([`PageText::frames`]): its address
+/// (the page's own, a test run's stand-in's not yet turned back), whether
+/// it's sandboxed (kept apart from the page whatever its site), its title.
+#[derive(Debug, Clone, Default, Deserialize, PartialEq, Eq)]
+pub struct PageFrame {
+    #[serde(default)]
+    pub src: String,
+    #[serde(default)]
+    pub sandboxed: bool,
+    #[serde(default)]
+    pub title: String,
 }
 
 /// A link on a page read ([`PageText`]).
@@ -693,6 +746,30 @@ pub async fn shot_in_view_at(key: &str, scale: f64) -> Result<(Vec<u8>, f64), St
     imp::shot_in_view_at(app, key.to_string(), scale).await
 }
 
+/// **Page `key` laid out `width` CSS pixels wide** (`browser_tabs` width: a
+/// site's desktop layout), shown scaled to fit the panel — its controller's
+/// zoom ([`zoom_for`]) kept as the panel is resized and the page navigates —
+/// or (`None`) back to the panel's own width. The tab says so ("Desktop
+/// width ×", `ViewState::width`), and its × puts it back
+/// ([`page_view_width`]); a zoom the person makes themselves (Ctrl+wheel)
+/// takes it back too.
+pub async fn set_width(key: &str, width: Option<u32>) -> Result<(), String> {
+    let app = APP.get().cloned().ok_or("Yap's window isn't ready.")?;
+    imp::set_width(app, key.to_string(), width).await
+}
+
+/// **The tab's "Desktop width ×"**: page `key` back to the panel's own
+/// width (`width` none), or laid out that wide ([`set_width`]).
+#[tauri::command]
+pub async fn page_view_width(app: AppHandle, key: String, width: Option<u32>) -> Result<(), String> {
+    let width = width.filter(|w| *w > 0);
+    if width.is_some_and(|w| !(crate::chat::pages::see::WIDTH_MIN..=crate::chat::pages::see::WIDTH_MAX).contains(&w)) {
+        return Err("That isn't a width a page is laid out at.".into());
+    }
+    tracing::info!(desktop = width.is_some(), "Chat: the user set a page's width beside the chat");
+    imp::set_width(app, checked_key(&key)?, width).await
+}
+
 /// **Page `key` back or forward** in its own history (`browser_navigate`'s
 /// "back" / "forward").
 pub async fn history(key: &str, back: bool) -> Result<(), String> {
@@ -805,6 +882,9 @@ mod imp {
     pub async fn navigate(_: AppHandle, _: String, _: String) -> Result<(), String> {
         Err(NO.into())
     }
+    pub async fn set_width(_: AppHandle, _: String, _: Option<u32>) -> Result<(), String> {
+        Err(NO.into())
+    }
     pub async fn bring_front(_: AppHandle, _: String) -> Result<(), String> {
         Err(NO.into())
     }
@@ -833,7 +913,7 @@ mod win {
         take_pwstr, AcceleratorKeyPressedEventHandler, CapturePreviewCompletedHandler, ClearBrowsingDataCompletedHandler, ContextMenuRequestedEventHandler, CreateCoreWebView2ControllerCompletedHandler,
         CustomItemSelectedEventHandler, DocumentTitleChangedEventHandler, DownloadStartingEventHandler, ExecuteScriptCompletedHandler, FocusChangedEventHandler,
         HistoryChangedEventHandler, NavigationCompletedEventHandler, NavigationStartingEventHandler, NewWindowRequestedEventHandler,
-        PermissionRequestedEventHandler, ProcessFailedEventHandler, ScriptDialogOpeningEventHandler, WebResourceRequestedEventHandler,
+        PermissionRequestedEventHandler, ProcessFailedEventHandler, ScriptDialogOpeningEventHandler, WebResourceRequestedEventHandler, ZoomFactorChangedEventHandler,
     };
     use windows::core::{w, Interface, BOOL, HSTRING, PWSTR};
     use windows::Win32::Foundation::{HGLOBAL, HINSTANCE, HWND, LPARAM, LRESULT, RECT, WPARAM};
@@ -946,6 +1026,12 @@ mod win {
         /// when the latest ended: the page tools wait on them after an action.
         navs: u64,
         done: u64,
+        /// The desktop width it's laid out at (CSS pixels; `super::set_width`),
+        /// and the zoom Yap last set for it (`super::zoom_for`): a zoom
+        /// changed to anything else while the page is loaded is the
+        /// person's own (Ctrl+wheel), and the width is theirs again.
+        width: Option<u32>,
+        zoom: f64,
     }
 
     thread_local! {
@@ -1106,6 +1192,7 @@ mod win {
                     let _ = SetWindowPos(host, Some(z), b.x + ox, b.y + oy, w, h, SWP_NOACTIVATE | SWP_SHOWWINDOW);
                     if let Some(c) = controller {
                         let _ = c.SetBounds(RECT { left: 0, top: 0, right: w, bottom: h });
+                        fit_width(host, c, w);
                         let _ = c.SetIsVisible(true);
                     }
                 }
@@ -1114,11 +1201,84 @@ mod win {
                     if let Some(c) = controller {
                         let (w, h) = STAGE.with(Cell::get);
                         let _ = c.SetBounds(RECT { left: 0, top: 0, right: w, bottom: h });
+                        fit_width(host, c, w);
                         let _ = c.SetIsVisible(false);
                     }
                 }
             }
         }
+    }
+
+    /// The controller's device pixels a CSS pixel (the monitor's scale, or
+    /// a zoom's finer draw), 1 when it can't say.
+    fn raster_of(c: &ICoreWebView2Controller) -> f64 {
+        let Ok(c3) = c.cast::<ICoreWebView2Controller3>() else { return 1.0 };
+        let mut r = 0.0f64;
+        match unsafe { c3.RasterizationScale(&mut r) } {
+            Ok(()) if r.is_finite() && r > 0.0 => r,
+            _ => 1.0,
+        }
+    }
+
+    /// **A page with a desktop width, kept at it** in a view `phys_w` device
+    /// pixels wide (its host's): the zoom that lays it out that wide
+    /// ([`super::zoom_for`]), remembered so the person's own zoom is told from
+    /// Yap's. Nothing for a page at the panel's own width (its zoom is the
+    /// person's).
+    fn fit_width(host: HWND, c: &ICoreWebView2Controller, phys_w: i32) {
+        let Some(width) = VIEWS.with(|v| v.borrow().iter().find(|x| x.host == host).and_then(|x| x.width)) else { return };
+        let z = super::zoom_for(phys_w, raster_of(c), width);
+        VIEWS.with(|v| {
+            if let Some(x) = v.borrow_mut().iter_mut().find(|x| x.host == host) {
+                x.zoom = z;
+            }
+        });
+        let mut now = 0.0f64;
+        if unsafe { c.ZoomFactor(&mut now) }.is_ok() && (now - z).abs() < 0.0005 {
+            return;
+        }
+        let _ = unsafe { c.SetZoomFactor(z) };
+    }
+
+    /// The width of page `host`'s controller now (device pixels).
+    fn phys_width(c: &ICoreWebView2Controller) -> i32 {
+        let mut r = RECT::default();
+        match unsafe { c.Bounds(&mut r) } {
+            Ok(()) => r.right - r.left,
+            Err(_) => 0,
+        }
+    }
+
+    /// **Page `key` laid out `width` wide** (see `super::set_width`), or back
+    /// at the panel's own; its tab told (the chip).
+    pub async fn set_width(app: AppHandle, key: String, width: Option<u32>) -> Result<(), String> {
+        let a = app.clone();
+        main_thread(&app, move |_| {
+            let Some((host, Some(controller), _)) = handles(&key) else { return Err("That page isn't open (yet).".to_string()) };
+            let (was, loading) = VIEWS.with(|v| {
+                let mut v = v.borrow_mut();
+                let x = v.iter_mut().find(|x| x.key == key)?;
+                let was = x.width;
+                x.width = width;
+                if width.is_none() {
+                    x.zoom = 1.0;
+                }
+                Some((was, !x.loaded))
+            })
+            .ok_or("That page isn't open.")?;
+            match width {
+                Some(_) => fit_width(host, &controller, phys_width(&controller)),
+                // Back to the panel's own width: as the person had it before.
+                None if was.is_some() => {
+                    let _ = unsafe { controller.SetZoomFactor(1.0) };
+                }
+                None => {}
+            }
+            tracing::info!(desktop = width.is_some(), "Chat: a page beside the chat set to a width");
+            tell(&a, &key, loading, None);
+            Ok(())
+        })
+        .await?
     }
 
     /// The page `key`'s handles, if it's there.
@@ -1134,7 +1294,8 @@ mod win {
         let Some((_, _, core)) = handles(key) else { return };
         let Some(core) = core else { return };
         let (standin, _) = super::web_route();
-        let mut state = ViewState { key: key.to_string(), loading, error, ..Default::default() };
+        let width = VIEWS.with(|v| v.borrow().iter().find(|x| x.key == key).and_then(|x| x.width));
+        let mut state = ViewState { key: key.to_string(), loading, error, width, ..Default::default() };
         unsafe {
             let mut s = PWSTR::null();
             if core.Source(&mut s).is_ok() {
@@ -1250,6 +1411,8 @@ mod win {
                 snap,
                 navs: 0,
                 done: 0,
+                width: None,
+                zoom: 1.0,
             })
         });
         put(host, None, bounds, is_snap);
@@ -1581,6 +1744,40 @@ mod win {
                 })),
                 &mut token,
             )?;
+            // A desktop width kept (`set_width`): a navigation that put the
+            // zoom back gets the width again; a zoom the person made on a
+            // loaded page (Ctrl+wheel, Ctrl+±) is theirs — the width let go,
+            // the tab's chip gone.
+            if !snap {
+                let (a, k) = (app.clone(), key.to_string());
+                controller.add_ZoomFactorChanged(
+                    &ZoomFactorChangedEventHandler::create(Box::new(move |sender, _| {
+                        let Some(c) = sender else { return Ok(()) };
+                        let mut z = 0.0f64;
+                        c.ZoomFactor(&mut z)?;
+                        let Some((width, expected, loaded)) = VIEWS.with(|v| v.borrow().iter().find(|x| x.key == k).map(|x| (x.width, x.zoom, x.loaded))) else { return Ok(()) };
+                        if width.is_none() || expected <= 0.0 || (z / expected - 1.0).abs() < 0.01 {
+                            return Ok(());
+                        }
+                        if !loaded {
+                            if let Some((host, _, _)) = handles(&k) {
+                                fit_width(host, &c, phys_width(&c));
+                            }
+                            return Ok(());
+                        }
+                        VIEWS.with(|v| {
+                            if let Some(x) = v.borrow_mut().iter_mut().find(|x| x.key == k) {
+                                x.width = None;
+                                x.zoom = z;
+                            }
+                        });
+                        tracing::info!("Chat: the user zoomed a page beside the chat: its desktop width let go");
+                        tell(&a, &k, false, None);
+                        Ok(())
+                    })),
+                    &mut token,
+                )?;
+            }
             // Yap's shortcuts while the page has the focus: WebView2 runs
             // ahead of the keyboard hook (as in Yap's own windows), so its
             // function keys and Ctrl / Alt combos go to the main window's
@@ -1693,6 +1890,11 @@ mod win {
                 let _ = a.run_on_main_thread(move || shoot_snap(&b, &k));
             });
             return;
+        }
+        // A desktop width: kept through the navigation (WebView2 may have put
+        // the zoom back for the new page).
+        if let Some((host, Some(c), _)) = handles(key) {
+            fit_width(host, &c, phys_width(&c));
         }
         let error = (!ok && status != 0 && status != 15).then(|| error_words(status).to_string());
         tell(app, key, false, error);
@@ -1987,6 +2189,8 @@ mod win {
                     snap: None,
                     navs: 0,
                     done: 0,
+                    width: None,
+                    zoom: 1.0,
                 })
             });
             let opts = unsafe { env10.CreateCoreWebView2ControllerOptions() }.map_err(|e| e.message())?;
@@ -2293,18 +2497,19 @@ mod win {
     pub async fn tabs(app: AppHandle) -> Result<Vec<super::OpenTab>, String> {
         main_thread(&app, |_| {
             let (standin, _) = super::web_route();
-            let alive: Vec<(usize, String, String, Option<ICoreWebView2>, bool, u64)> = VIEWS.with(|v| {
+            type Alive = (usize, String, String, Option<ICoreWebView2>, bool, u64, Option<u32>);
+            let alive: Vec<Alive> = VIEWS.with(|v| {
                 v.borrow()
                     .iter()
                     .filter(|x| x.snap.is_none() && !x.key.starts_with("snap:") && !x.key.starts_with("clear:"))
-                    .map(|x| (x.id, x.key.clone(), x.url.clone(), x.core.clone(), x.bounds.is_some(), x.used))
+                    .map(|x| (x.id, x.key.clone(), x.url.clone(), x.core.clone(), x.bounds.is_some(), x.used, x.width))
                     .collect()
             });
-            let shown = alive.iter().any(|(_, _, _, _, on, _)| *on);
-            let last = alive.iter().map(|(_, _, _, _, _, used)| *used).max().unwrap_or(0);
+            let shown = alive.iter().any(|(_, _, _, _, on, _, _)| *on);
+            let last = alive.iter().map(|(_, _, _, _, _, used, _)| *used).max().unwrap_or(0);
             alive
                 .into_iter()
-                .map(|(id, key, url, core, on, used)| {
+                .map(|(id, key, url, core, on, used, width)| {
                     let (mut now, mut title) = (url, String::new());
                     if let Some(core) = core {
                         unsafe {
@@ -2321,7 +2526,7 @@ mod win {
                             }
                         }
                     }
-                    super::OpenTab { tab: id, key, title, url: now, front: if shown { on } else { used == last } }
+                    super::OpenTab { tab: id, key, title, url: now, front: if shown { on } else { used == last }, width }
                 })
                 .collect()
         })
@@ -2356,7 +2561,7 @@ mod win {
             serde_json::Value::Array(VIEWS.with(|v| {
                 v.borrow()
                     .iter()
-                    .map(|x| serde_json::json!({ "key": x.key, "tab": x.id, "url": x.url, "load": x.load, "onScreen": x.bounds.is_some(), "loaded": x.loaded, "made": x.controller.is_some() }))
+                    .map(|x| serde_json::json!({ "key": x.key, "tab": x.id, "url": x.url, "load": x.load, "onScreen": x.bounds.is_some(), "loaded": x.loaded, "made": x.controller.is_some(), "width": x.width, "zoom": x.zoom }))
                     .collect()
             }))
         })
@@ -2445,6 +2650,32 @@ mod tests {
         // Never the one on screen while another can go.
         assert_eq!(evict(&[v("a", 1, true), v("b", 2, false), v("c", 9, false), v("d", 3, false)]).as_deref(), Some("b"));
         assert_eq!(evict(&[v("a", 1, true), v("b", 2, true), v("c", 9, true), v("d", 3, true)]).as_deref(), Some("a"));
+    }
+
+    #[test]
+    fn a_desktop_width_is_laid_out_in_the_panel_by_zooming_it_to_fit() {
+        // Yap Lab's panel: 460 CSS px at 100 %, 690 device px at 150 %. A
+        // 1280 px layout in either is the same zoom of what fits.
+        let z = zoom_for(460, 1.0, 1280);
+        assert!((z - 460.0 / 1280.0).abs() < 1e-9, "{z}");
+        assert!((laid_out_width(460, 1.0, z) - 1280.0).abs() < 1e-6);
+        let z15 = zoom_for(690, 1.5, 1280);
+        assert!((z15 - z).abs() < 1e-9 && (laid_out_width(690, 1.5, z15) - 1280.0).abs() < 1e-6);
+        // Drawn twice as finely out of sight (bounds and scale doubled): the same layout.
+        assert!((zoom_for(1380, 3.0, 1280) - z15).abs() < 1e-9);
+        // Never zoomed in (a width the panel already has is its own) …
+        assert_eq!(zoom_for(1400, 1.0, 1280), 1.0);
+        // … nor past WebView2's floor: a panel too narrow lays it out as wide as that allows.
+        assert_eq!(zoom_for(240, 1.0, 1280), ZOOM_MIN);
+        assert!((laid_out_width(240, 1.0, ZOOM_MIN) - 960.0).abs() < 1e-6);
+        // Nonsense in, the page as it is.
+        assert_eq!(zoom_for(0, 1.0, 1280), 1.0);
+        assert_eq!(zoom_for(460, f64::NAN, 1280), zoom_for(460, 1.0, 1280));
+        assert_eq!(zoom_for(460, 1.0, 0), 1.0);
+        // The tab's state says it, for its chip; a page at the panel's width says nothing.
+        let s = serde_json::to_value(ViewState { key: "page:https://example.com".into(), width: Some(1280), ..Default::default() }).unwrap();
+        assert_eq!(s["width"], 1280);
+        assert!(serde_json::to_value(ViewState::default()).unwrap().get("width").is_none());
     }
 
     #[test]

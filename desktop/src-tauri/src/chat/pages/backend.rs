@@ -86,11 +86,28 @@ pub async fn busy(key: &str) -> Option<view::Busy> {
     Some(view::busy(key).await)
 }
 
-/// **A page's words** (`browser_read`).
+/// **A page's words** (`browser_read`), its frames Yap can't read inside
+/// at their own addresses.
 pub async fn text(key: &str) -> Result<PageText, String> {
     sim!(|b| b.text(key));
     wait_loaded(key).await;
-    view::page_text(key).await
+    let mut t = view::page_text(key).await?;
+    for f in &mut t.frames {
+        f.src = view::shown(&f.src);
+    }
+    Ok(t)
+}
+
+/// **Page `key` laid out `width` CSS pixels wide** (a desktop site's
+/// layout, shown scaled to fit: `view::set_width`), or the panel's own
+/// (`None`); where it is in view once it has laid itself out again.
+pub async fn width(key: &str, width: Option<u32>) -> Result<super::see::InView, String> {
+    sim!(|b| b.set_width(key, width).and_then(|()| b.in_view(key)));
+    wait_loaded(key).await;
+    view::set_width(key, width).await?;
+    // Its new layout a moment (a resize event, its own scripts), then where it is.
+    tokio::time::sleep(Duration::from_millis(250)).await;
+    still(key).await
 }
 
 /// **A long page's words** (`browser_read { offset }`): the same read, up to
@@ -131,6 +148,9 @@ pub async fn snapshot(key: &str, text_max: usize, max: usize) -> Result<Snapshot
         if !e.href.is_empty() {
             e.href = view::shown(&e.href);
         }
+        if !e.frame.is_empty() {
+            e.frame = view::shown(&e.frame);
+        }
     }
     for f in &mut s.forms {
         f.action = view::shown(&f.action);
@@ -147,6 +167,7 @@ fn described(raw: &str) -> Result<Described, String> {
     }
     if let Some(e) = d.el.as_mut() {
         e.href = if e.href.is_empty() { String::new() } else { view::shown(&e.href) };
+        e.frame = if e.frame.is_empty() { String::new() } else { view::shown(&e.frame) };
     }
     Ok(d)
 }
@@ -270,6 +291,9 @@ pub async fn changes(key: &str) -> super::act::rules::Changes {
             let mut ch: super::act::rules::Changes = serde_json::from_str(&raw).unwrap_or_default();
             ch.url = view::shown(&ch.url);
             ch.url0 = view::shown(&ch.url0);
+            for f in &mut ch.frames {
+                *f = view::shown(f);
+            }
             ch
         }
         Err(_) => super::act::rules::Changes::default(),
@@ -277,10 +301,11 @@ pub async fn changes(key: &str) -> super::act::rules::Changes {
 }
 
 /// **An action** on page `key`: `op` is `click`, `type`, `choose`,
-/// `scroll`, `where`, `clickAt`, `hover`, `check` or `key`, with `a` its
-/// arguments (`ref`, `role`, `name`, `text`, `submit`, `again`, `to`,
-/// `amount`, `x`, `y`, `on`, `keys`); the script's answer (`{"r": "ok" |
-/// "gone" | "changed" | …}`).
+/// `scroll`, `where`, `clickAt`, `press`, `hover`, `check`, `key`,
+/// `dragStart`, `dragMove` or `dragEnd`, with `a` its arguments (`ref`,
+/// `role`, `name`, `text`, `submit`, `again`, `to`, `amount`, `x`, `y`,
+/// `at`, `button`, `count`, `f`, `on`, `keys`); the script's answer (`{"r":
+/// "ok" | "gone" | "changed" | …}`).
 pub async fn act(key: &str, op: &str, a: &Value) -> Result<Value, String> {
     sim!(|b| b.act(key, op, a));
     // (A page just brought up: loaded first, as a read waits.)
@@ -295,6 +320,16 @@ pub async fn act(key: &str, op: &str, a: &Value) -> Result<Value, String> {
         "where" => super::act::script::where_is(r),
         "scroll" => super::act::script::scroll(a["to"].as_str().unwrap_or("down"), a["amount"].as_f64().unwrap_or(1.0), (r > 0).then_some(r)),
         "clickAt" => super::act::script::click_at(r, role, name, num("x"), num("y")),
+        "press" => {
+            let at = a["at"].as_bool().unwrap_or(false).then(|| (num("x"), num("y")));
+            super::act::script::press(r, role, name, at, a["button"].as_u64().unwrap_or(0) as u8, a["count"].as_u64().unwrap_or(1) as u8)
+        }
+        "dragStart" => {
+            let at = a["at"].as_bool().unwrap_or(false).then(|| (num("x"), num("y")));
+            super::act::script::drag_start(r, role, name, at, a["to"].clone())
+        }
+        "dragMove" => super::act::script::drag_move(num("f")),
+        "dragEnd" => super::act::script::drag_end(),
         "hover" => super::act::script::hover(r, role, name),
         "check" => super::act::script::check(r, role, name, a["on"].as_bool().unwrap_or(true)),
         "key" => {

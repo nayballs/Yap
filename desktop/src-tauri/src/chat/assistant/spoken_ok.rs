@@ -9,7 +9,7 @@
 //!
 //! - **A connector's tool** (act "connector"): "Use Notion to create page
 //!   “Launch notes”? Say yes, or press Allow." (`connector_ask.rs`).
-//! - **An action on a page** (act "press", "enter", "open", "type": a click
+//! - **An action on a page** (act "press", "enter", "open", "type", "drag": a click
 //!   or an Enter that buys, books, sends, signs in…, words from nowhere the
 //!   person can see): "Press “Buy tickets” on rail.example.com? Say yes, or
 //!   press Allow." ([`page_line`], [`page_card`]).
@@ -179,7 +179,7 @@ pub fn asking(card: &Card, meeting: bool) -> Option<Asking> {
             let spoken = !meeting && a.mode != "bypassPermissions";
             Some(Asking { line: agent_line(a, spoken), bar: agent_card(card.id, a, spoken), spoken })
         }
-        "" | "press" | "enter" | "open" | "type" => {
+        "" | "press" | "enter" | "open" | "type" | "drag" => {
             let spoken = !meeting && !CLICK_ONLY.contains(&card.does.as_str());
             Some(Asking { line: page_line(card, spoken), bar: page_card(card, spoken), spoken })
         }
@@ -231,6 +231,11 @@ fn page_doing(c: &Card, quote: (&str, &str)) -> String {
     match c.act.as_str() {
         "enter" => format!("Press Enter in {open}{label}{close}{on}"),
         "open" => format!("Open {open}{label}{close}{on}"),
+        // A drag: what's dragged, onto what (`text`).
+        "drag" => match sayable(&c.text, SAY_CHARS) {
+            Some(t) => format!("Drag {open}{label}{close} onto {open}{t}{close}{on}"),
+            None => format!("Drag {open}{label}{close}{on}"),
+        },
         "type" => match sayable(&c.text, SAY_CHARS) {
             Some(t) => format!("Type {open}{t}{close} into {open}{label}{close}{on}"),
             None => format!("Type into {open}{label}{close}{on}"),

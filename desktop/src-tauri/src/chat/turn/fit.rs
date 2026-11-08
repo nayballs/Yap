@@ -39,7 +39,8 @@ use crate::chat::pictures::Gate;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum Family {
     /// The browser's acting tools (`browser_click`, `browser_type`,
-    /// `browser_key`, `browser_hover`, `browser_form_input`, the batch) and
+    /// `browser_key`, `browser_hover`, `browser_drag`, `browser_form_input`,
+    /// the batch) and
     /// their line (`pages/act.rs`).
     Acting,
     /// Seeing (a model that reads images): the browser's view tools

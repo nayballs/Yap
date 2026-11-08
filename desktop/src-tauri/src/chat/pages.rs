@@ -12,7 +12,10 @@
 //!   and links, or its links, buttons and fields by ref), `browser_find
 //!   {query}`, `browser_scroll {direction, amount?}`, `browser_scroll_to
 //!   {ref | text}`, `browser_wait {seconds?, text?}`, `browser_tabs {action:
-//!   list | new | switch | close}` ([`see`] has the viewing ones).
+//!   list | new | switch | close | width}` ([`see`] has the viewing ones;
+//!   width: the tab laid out that many CSS pixels wide — a site's desktop
+//!   layout — and shown to the person scaled to fit the panel, so what they
+//!   see is what the model reads and clicks in: [`width`]).
 //! - **Looking** (a model that reads images): `browser_screenshot` — what's
 //!   in view now, in the tab's own webview at its scroll — and `browser_zoom
 //!   {region}`, a sharper crop of part of it. A shot is for the model: it
@@ -21,10 +24,11 @@
 //!   a thumbnail on its step (`stream::Event::Shot`, `ShownPicture::chip`),
 //!   never as a tab or a pill; `show_picture` of it shows it to the person.
 //! - **Acting** (the models that may, `act::can_act`): `browser_click {ref |
-//!   x, y}`, `browser_type`, `browser_key`, `browser_hover`,
-//!   `browser_form_input` — every rule in Rust (`act/rules.rs`), a click or
-//!   an Enter that would buy, pay, book, send, delete or sign in asked first
-//!   on the person's card.
+//!   x, y, button?, count?}` (a double, triple, right or middle click too),
+//!   `browser_type`, `browser_key`, `browser_hover`, `browser_drag {from,
+//!   to}`, `browser_form_input` — every rule in Rust (`act/rules.rs`), a
+//!   click, an Enter or a drop that would buy, pay, book, send, delete or
+//!   sign in asked first on the person's card.
 //! - **`browser_batch {actions}`**: several of them in order in one call,
 //!   stopping at the first that fails (a card said no to is one).
 //!
@@ -67,35 +71,54 @@
 ///   are none (`flat`); `shownText(m)`: `m`'s words as `innerText` gives
 ///   them, a host's shadow tree read in its place.
 ///
-/// Closed roots can't be reached (nothing outside sees in); same-origin
-/// frames aren't walked (another window: its own coordinates, styles and
-/// events).
+/// **Same-origin frames too** (8 Nov 2026): an `<iframe>` or `<frame>`
+/// whose document the page's script can reach (`fdoc`: its
+/// `contentDocument`, same origin) is walked as a shadow root is — its
+/// document one of the trees, the frame element its host (at most 40 frames,
+/// within the same bounds) — so every query, the element at a point (its
+/// coordinates moved by the frame's place: `fOff`), the focused field
+/// (through each frame's `activeElement`), `closest` past it and the text read
+/// go inside it; `cs(e)` and `win(e)` are an element's own window's styles
+/// and window (its events are made there). A frame from another site
+/// (or sandboxed) can't be reached by any script outside it: `fdoc` is null,
+/// and it's told as one (`act/script.rs` `desc`: `foreign`).
+///
+/// Closed roots can't be reached (nothing outside sees in).
 macro_rules! deep_js {
     () => {
         r#"var SH_=null;
-function shs(){if(SH_)return SH_;var s={trees:[document],hosts:new Map(),n:0};for(var i=0;i<s.trees.length;i++){var r=s.trees[i],hs=[],all=r.querySelectorAll('*');for(var j=0;j<all.length&&s.n<80000;j++){s.n++;var x=all[j].shadowRoot;if(x&&s.trees.length<400){hs.push(all[j]);s.trees.push(x);}}s.hosts.set(r,hs);}SH_=s;return s;}
+function fdoc(e){if(!e||(e.tagName!=='IFRAME'&&e.tagName!=='FRAME'))return null;try{var d=e.contentDocument;return d&&d.documentElement?d:null;}catch(x){return null;}}
+function shs(){if(SH_)return SH_;var s={trees:[document],hosts:new Map(),inner:new Map(),n:0,frames:0};for(var i=0;i<s.trees.length;i++){var r=s.trees[i],hs=[],all=r.querySelectorAll('*');for(var j=0;j<all.length&&s.n<80000;j++){s.n++;var el=all[j],x=el.shadowRoot;if(!x&&(el.tagName==='IFRAME'||el.tagName==='FRAME')&&s.frames<40){x=fdoc(el);if(x)s.frames++;}if(x&&s.trees.length<400){hs.push(el);s.trees.push(x);s.inner.set(el,x);}}s.hosts.set(r,hs);}SH_=s;return s;}
 function deep(){return shs().trees.length>1;}
+function inner(h){return shs().inner.get(h)||h.shadowRoot||null;}
+function cs(e){var v=e&&e.ownerDocument&&e.ownerDocument.defaultView;return (v||window).getComputedStyle(e);}
+function win(e){return (e&&e.ownerDocument&&e.ownerDocument.defaultView)||window;}
+function fOff(d){var x=0,y=0;for(var n=0;d&&d!==document&&n<16;n++){var fe=null;try{fe=d.defaultView&&d.defaultView.frameElement;}catch(e){}if(!fe)break;var b=fe.getBoundingClientRect(),c=cs(fe);x+=b.left+fe.clientLeft+(parseFloat(c.paddingLeft)||0);y+=b.top+fe.clientTop+(parseFloat(c.paddingTop)||0);d=fe.ownerDocument;}return {x:x,y:y};}
+function rr(el){var b=el.getBoundingClientRect();if(win(el)===window)return b;var o=fOff(el.ownerDocument);return {left:b.left+o.x,top:b.top+o.y,right:b.right+o.x,bottom:b.bottom+o.y,width:b.width,height:b.height};}
 function hostsIn(r){var t=r.nodeType===1?r.getRootNode():r,hs=shs().hosts.get(t)||[];return r.nodeType===1?hs.filter(function(h){return h!==r&&r.contains(h);}):hs;}
-function qwalk(r,sel,out,dp,lim){if(r.nodeType===1&&r.shadowRoot&&dp<32)qwalk(r.shadowRoot,sel,out,dp+1,lim);var hits=r.querySelectorAll(sel),hs=hostsIn(r),i=0;
+function qwalk(r,sel,out,dp,lim){var ir=r.nodeType===1?inner(r):null;if(ir&&dp<32)qwalk(ir,sel,out,dp+1,lim);var hits=r.querySelectorAll(sel),hs=hostsIn(r),i=0;
 for(var j=0;j<hs.length&&out.length<lim;j++){var lo=i,hi=hits.length;while(lo<hi){var md=(lo+hi)>>1,h=hits[md];if(h===hs[j]||(hs[j].compareDocumentPosition(h)&2))lo=md+1;else hi=md;}
-for(;i<lo&&out.length<lim;i++)out.push(hits[i]);if(dp<32)qwalk(hs[j].shadowRoot,sel,out,dp+1,lim);}
+for(;i<lo&&out.length<lim;i++)out.push(hits[i]);var hr=inner(hs[j]);if(hr&&dp<32)qwalk(hr,sel,out,dp+1,lim);}
 for(;i<hits.length&&out.length<lim;i++)out.push(hits[i]);}
 function qa(sel,r,lim){r=r||document;if(!deep())return r.querySelectorAll(sel);var out=[];qwalk(r,sel,out,0,lim||50000);return out;}
 function q1(sel,r){r=r||document;if(!deep())return r.querySelector(sel);return qa(sel,r,1)[0]||null;}
-function hostOf(el){var r=el&&el.getRootNode?el.getRootNode():null;return r&&r.host?r.host:null;}
+function hostOf(el){var r=el&&el.getRootNode?el.getRootNode():null;if(!r)return null;if(r.host)return r.host;if(r!==document&&r.nodeType===9){try{return (r.defaultView&&r.defaultView.frameElement)||null;}catch(x){return null;}}return null;}
 function up(el,sel){for(var n=0;el&&n<40;n++){var c=el.closest(sel);if(c)return c;el=hostOf(el);}return null;}
-function ptAt(x,y){var e=document.elementFromPoint(x,y);for(var n=0;e&&e.shadowRoot&&n<32;n++){var i=e.shadowRoot.elementFromPoint(x,y);if(!i||i===e)break;e=i;}return e;}
-function focusIn(){var a=document.activeElement;for(var n=0;a&&a.shadowRoot&&a.shadowRoot.activeElement&&n<32;n++)a=a.shadowRoot.activeElement;return a;}
+function ptAt(x,y){var lx=x,ly=y,e=document.elementFromPoint(x,y);for(var n=0;e&&n<32;n++){if(e.shadowRoot){var i=e.shadowRoot.elementFromPoint(lx,ly);if(!i||i===e)break;e=i;continue;}var fd=fdoc(e);if(!fd)break;var o=fOff(fd);lx=x-o.x;ly=y-o.y;var i2=fd.elementFromPoint(lx,ly);if(!i2)break;e=i2;}return e;}
+function focusIn(){var a=document.activeElement;for(var n=0;a&&n<32;n++){if(a.shadowRoot&&a.shadowRoot.activeElement){a=a.shadowRoot.activeElement;continue;}var fd=fdoc(a);if(!fd||!fd.activeElement)break;a=fd.activeElement;}return a;}
+function bare(e){return !e||!e.ownerDocument||e===e.ownerDocument.body||e===e.ownerDocument.documentElement;}
 function holds(a,b){for(var n=0;b&&n<40;n++){if(a===b||a.contains(b))return true;b=hostOf(b);}return false;}
 function byId(el,id){var r=el.getRootNode?el.getRootNode():null,x=r&&r!==document&&r.getElementById?r.getElementById(id):null;return x||document.getElementById(id);}
 function sqz(s){return (s||'').replace(/\s+/g,' ').trim();}
 function flat(e,b){b=b||{s:'',n:0};var kids=e.shadowRoot?e.shadowRoot.childNodes:(e.tagName==='SLOT'&&e.assignedNodes().length?e.assignedNodes():e.childNodes);
-for(var i=0;i<kids.length&&b.n<4000&&b.s.length<20000;i++){var k=kids[i];b.n++;if(k.nodeType===3){b.s+=k.data;continue;}if(k.nodeType!==1)continue;var tn=k.tagName;if(tn==='SCRIPT'||tn==='STYLE'||tn==='TEMPLATE'||tn==='NOSCRIPT')continue;var cs=getComputedStyle(k);if(cs.display==='none')continue;var bl=cs.display.indexOf('inline')!==0;if(bl)b.s+=' ';flat(k,b);if(bl)b.s+=' ';}return b.s;}
+for(var i=0;i<kids.length&&b.n<4000&&b.s.length<20000;i++){var k=kids[i];b.n++;if(k.nodeType===3){b.s+=k.data;continue;}if(k.nodeType!==1)continue;var tn=k.tagName;if(tn==='SCRIPT'||tn==='STYLE'||tn==='TEMPLATE'||tn==='NOSCRIPT')continue;var st=cs(k);if(st.display==='none')continue;var bl=st.display.indexOf('inline')!==0;if(bl)b.s+=' ';flat(k,b);if(bl)b.s+=' ';}return b.s;}
 function textOf(e){var s=sqz(e.innerText||e.textContent);if(!s&&deep()&&(e.shadowRoot||e.querySelector('slot')))s=sqz(flat(e));return s;}
 function shownText(m){if(!m)return '';if(!deep())return m.innerText||'';var on=new Set();shs().hosts.forEach(function(v){for(var i=0;i<v.length;i++){var e=v[i];for(var n=0;e&&n<200&&!on.has(e);n++){on.add(e);e=e.parentElement||hostOf(e);}}});
-var b={s:'',n:0};(function go(e){if(b.n>30000||b.s.length>260000)return;b.n++;var cs=getComputedStyle(e);if(cs.display==='none')return;if(!on.has(e)){b.s+=' '+(e.innerText||'')+' ';return;}
-var kids=e.shadowRoot?e.shadowRoot.childNodes:e.childNodes;for(var i=0;i<kids.length;i++){var k=kids[i];if(k.nodeType===3){if(cs.visibility!=='hidden')b.s+=k.data;}else if(k.nodeType===1){var tn=k.tagName;if(tn==='SLOT'){var as=k.assignedNodes();if(!as.length)as=k.childNodes;for(var j=0;j<as.length;j++){if(as[j].nodeType===3)b.s+=as[j].data;else if(as[j].nodeType===1)go(as[j]);}}else if(tn!=='SCRIPT'&&tn!=='STYLE'&&tn!=='TEMPLATE'&&tn!=='NOSCRIPT')go(k);}}})(m);return b.s;}
+var b={s:'',n:0};(function go(e){if(b.n>30000||b.s.length>260000)return;b.n++;var st=cs(e);if(st.display==='none')return;if(!on.has(e)){b.s+=' '+(e.innerText||'')+' ';return;}
+var ir=inner(e),kids=ir?(ir.nodeType===9?[ir.body||ir.documentElement]:ir.childNodes):e.childNodes;for(var i=0;i<kids.length;i++){var k=kids[i];if(!k)continue;if(k.nodeType===3){if(st.visibility!=='hidden')b.s+=k.data;}else if(k.nodeType===1){var tn=k.tagName;if(tn==='SLOT'){var as=k.assignedNodes();if(!as.length)as=k.childNodes;for(var j=0;j<as.length;j++){if(as[j].nodeType===3)b.s+=as[j].data;else if(as[j].nodeType===1)go(as[j]);}}else if(tn!=='SCRIPT'&&tn!=='STYLE'&&tn!=='TEMPLATE'&&tn!=='NOSCRIPT')go(k);}}})(m);return b.s;}
 function mainEl(){return document.querySelector('main,article,[role=main]')||(deep()?q1('main,[role=main]'):null)||document.body;}
+function frameOf(f){var sb=f.getAttribute('sandbox'),src='';try{src=new URL(f.getAttribute('src')||'about:blank',location.href).href;}catch(e){}return {src:src,sandboxed:sb!==null&&!/allow-same-origin/i.test(sb),title:sqz(f.getAttribute('title')||f.getAttribute('aria-label')||f.getAttribute('name')||'').slice(0,80)};}
+function foreignFrames(r,max){var out=[],fs=qa('iframe,frame',r);for(var i=0;i<fs.length&&out.length<max;i++){var f=fs[i];if(fdoc(f))continue;var b=f.getBoundingClientRect();if(b.width<20||b.height<20||cs(f).visibility==='hidden')continue;out.push(frameOf(f));}return out;}
 "#
     };
 }
@@ -168,7 +191,7 @@ pub const TOOL_NAMES: &[&str] = &[NAVIGATE, READ, FIND, SCROLL, SCROLL_TO, SCREE
 /// 8 Nov 2026's evals).
 pub const VIEW: &[&str] = &[SCROLL, SCROLL_TO, SCREENSHOT, ZOOM];
 /// Every browser tool, the acting ones too, in the order they're listed.
-pub const ALL: &[&str] = &[NAVIGATE, READ, FIND, SCROLL, SCROLL_TO, SCREENSHOT, ZOOM, act::CLICK, act::TYPE, act::KEY, act::HOVER, act::FORM_INPUT, TABS, WAIT, BATCH];
+pub const ALL: &[&str] = &[NAVIGATE, READ, FIND, SCROLL, SCROLL_TO, SCREENSHOT, ZOOM, act::CLICK, act::TYPE, act::KEY, act::HOVER, act::DRAG, act::FORM_INPUT, TABS, WAIT, BATCH];
 /// The tools that may go to an address the model writes (an older name's
 /// too): only they need to know whether outside content came first
 /// ([`Ctx::outside`]).
@@ -350,19 +373,31 @@ pub fn definitions(gate: Gate, act: bool) -> Value {
     if act {
         // A model that sees clicks at a point too, and types where it
         // clicked; one that doesn't has a ref for every field.
+        let button = || json!({ "type": "string", "enum": ["left", "right", "middle"] });
         let (click, click_props, typed) = if look {
-            ("Click a ref, or x, y in the latest browser_screenshot's pixels.", json!({ "ref": r(), "x": { "type": "number" }, "y": { "type": "number" }, "tab": tab() }), &["text"][..])
+            (
+                "Click a ref, or x, y in the latest browser_screenshot's pixels; count 2 or 3: a double or triple click.",
+                json!({ "ref": r(), "x": { "type": "number" }, "y": { "type": "number" }, "button": button(), "count": { "type": "integer" }, "tab": tab() }),
+                &["text"][..],
+            )
         } else {
-            ("Click a ref.", json!({ "ref": r(), "tab": tab() }), &["ref", "text"][..])
+            ("Click a ref; count 2 or 3: a double or triple click.", json!({ "ref": r(), "button": button(), "count": { "type": "integer" }, "tab": tab() }), &["ref", "text"][..])
         };
         out.push(tool(act::CLICK, click, click_props, &[]));
         let type_what = if look { "Type into a field (ref, else the focused one); submit: Enter after." } else { "Type into a field; submit: Enter after." };
         out.push(tool(act::TYPE, type_what, json!({ "ref": r(), "text": s(), "submit": { "type": "boolean" }, "tab": tab() }), typed));
         out.push(tool(act::KEY, "Press keys: Enter, Tab, Escape, arrows, PageDown…", json!({ "keys": s(), "tab": tab() }), &["keys"]));
         out.push(tool(act::HOVER, "Point at a ref (hover menus).", json!({ "ref": r(), "tab": tab() }), &["ref"]));
+        let drag = if look { "Drag from one {ref} or {x, y} to another (a list's order, a slider, a drop zone)." } else { "Drag from one {ref} to another (a list's order, a drop zone)." };
+        out.push(tool(act::DRAG, drag, json!({ "from": { "type": "object" }, "to": { "type": "object" }, "tab": tab() }), &["from", "to"]));
         out.push(tool(act::FORM_INPUT, "Set a select, checkbox (true/false) or text field.", json!({ "ref": r(), "value": s(), "tab": tab() }), &["ref", "value"]));
     }
-    out.push(tool(TABS, "List, open (url or search), switch to or close tabs.", json!({ "action": { "type": "string", "enum": ["list", "new", "switch", "close"] }, "tab": tab(), "url": s(), "search": s() }), &["action"]));
+    out.push(tool(
+        TABS,
+        "List, open (url or search), switch to or close tabs; width: lay a tab out that wide (1280: a desktop site), 0 the panel's.",
+        json!({ "action": { "type": "string", "enum": ["list", "new", "switch", "close", "width"] }, "tab": tab(), "url": s(), "search": s(), "width": { "type": "integer" } }),
+        &["action"],
+    ));
     out.push(tool(WAIT, "Wait for text to appear, or the page to settle (10 s at most).", json!({ "seconds": { "type": "number" }, "text": s(), "tab": tab() }), &[]));
     if act || look {
         out.push(tool(BATCH, "Run browser tools in order, each {tool, args}; stops at the first that fails.", json!({ "actions": { "type": "array", "items": { "type": "object" } } }), &["actions"]));
@@ -814,7 +849,7 @@ async fn one(turn: &mut crate::web::Turn, name: &str, args: &Value, ctx: &Ctx<'_
         ZOOM => see::zoom(turn, args, ctx).await,
         WAIT => see::wait(turn, args).await.into(),
         TABS => tabs(turn, args, ctx).await.into(),
-        _ => act::execute(turn, name, args, ctx.live).await.into(),
+        _ => act::execute(turn, name, args, ctx).await.into(),
     }
 }
 
@@ -999,7 +1034,7 @@ async fn read(turn: &mut crate::web::Turn, args: &Value, ctx: &Ctx<'_>) -> Value
         None
     };
     let text = match &snap {
-        Some(s) => view::PageText { title: s.title.clone(), headings: s.headings.clone(), text: s.text.clone(), links: Vec::new() },
+        Some(s) => view::PageText { title: s.title.clone(), headings: s.headings.clone(), text: s.text.clone(), links: Vec::new(), frames: Vec::new() },
         None => match backend::text(&tab.key).await {
             Ok(t) => t,
             Err(e) => return failed(e.clone(), format!("Couldn't read {shown}: {}", crate::web::short(&e))),
@@ -1060,6 +1095,21 @@ async fn read(turn: &mut crate::web::Turn, args: &Value, ctx: &Ctx<'_>) -> Value
             result["note"] = json!(format!("{web} Asked for a link: write its url from links in your answer, exactly as given (opening it isn't giving it); browser_navigate opens one."));
         }
     }
+    // Frames no script outside reaches (another site's, or sandboxed): said
+    // as they are — a same-origin frame's words are in the text already.
+    if !text.frames.is_empty() {
+        let n = text.frames.len();
+        let sites: Vec<String> = text.frames.iter().map(|f| crate::web::site_of(&f.src)).filter(|s| !s.is_empty()).collect();
+        result["data"]["frames"] = json!(text.frames.iter().map(|f| json!({ "site": crate::web::site_of(&f.src), "sandboxed": f.sandboxed, "title": clip(&f.title, 60) })).collect::<Vec<_>>());
+        let what = if n == 1 { "a frame".to_string() } else { format!("{n} frames") };
+        let from = if sites.is_empty() { String::new() } else { format!(" ({})", sites.join(", ")) };
+        let said = format!(
+            "{} It has {what} Yap can't read inside{from}: from another site, or sandboxed, so no script outside reaches in; a screenshot shows {}.",
+            result["note"].as_str().unwrap_or(""),
+            if n == 1 { "it" } else { "them" }
+        );
+        result["note"] = json!(said);
+    }
     if let Some(s) = &snap {
         // Its links: addresses browser_navigate may open this turn.
         act::remember_links(&mut turn.pages.links, s);
@@ -1119,17 +1169,73 @@ async fn tabs(turn: &mut crate::web::Turn, args: &Value, ctx: &Ctx<'_>) -> Value
                 "displayText": format!("Showed tab {} beside the chat", t.tab),
             })
         }
+        "width" => width(turn, args).await,
         _ => {
             let open_tabs = backend::tabs().await;
             if !open_tabs.is_empty() {
                 // Their titles are the pages' words.
                 turn.mark_seen();
             }
-            let listed: Vec<Value> = open_tabs.iter().map(|t| json!({ "tab": t.tab, "title": clip(&t.title, 80), "url": t.url, "front": t.front })).collect();
+            let listed: Vec<Value> = open_tabs
+                .iter()
+                .map(|t| {
+                    let mut x = json!({ "tab": t.tab, "title": clip(&t.title, 80), "url": t.url, "front": t.front });
+                    if let Some(w) = t.width {
+                        x["width"] = json!(w);
+                    }
+                    x
+                })
+                .collect();
             let note = if listed.is_empty() { "No tab is open beside the chat: browser_navigate opens one." } else { "Titles are the pages' own words: web content." };
             json!({ "success": true, "data": { "tabs": listed }, "note": note, "displayText": format!("Listed the tabs beside the chat ({})", open_tabs.len()) })
         }
     }
+}
+
+/// **`browser_tabs` width**: tab `tab` (else the one in front) laid out
+/// `width` CSS pixels wide — a site's desktop layout where the panel's width
+/// shows its phone one — and shown to the person scaled to fit the panel,
+/// so they see the layout the model reads and clicks in, smaller; its tab
+/// says "Desktop width" with a × that puts it back (`view::set_width`). 0:
+/// the panel's own width. A screenshot taken before no longer maps to the
+/// page (`see::Frame::moved`: a click at its point is refused until the
+/// next one).
+async fn width(turn: &mut crate::web::Turn, args: &Value) -> Value {
+    let width = match see::width_of(&args["width"]) {
+        Ok(w) => w,
+        Err(e) => return failed(e, "Couldn't set the tab's width: not a width".into()),
+    };
+    let t = match tab_for(turn, args, "set the tab's width").await {
+        Ok(t) => t,
+        Err(e) => return e,
+    };
+    if let Some(r) = on_search_page(&t, "set the tab's width") {
+        return r;
+    }
+    let v = match backend::width(&t.key, width).await {
+        Ok(v) => v,
+        Err(e) => return failed(e.clone(), format!("Couldn't set tab {}'s width: {}", t.tab, crate::web::short(&e))),
+    };
+    // The headings now in view are the page's words.
+    turn.mark_seen();
+    let laid = v.scroll.w;
+    tracing::info!(tab = t.tab, desktop = width.is_some(), laid, "Chat: a tab beside the chat laid out at a width");
+    let (note, display) = match width {
+        Some(w) => {
+            let short = if laid > 0 && (laid as f64) < f64::from(w) - 1.0 { format!(" (as wide as the panel allows: {laid} px)") } else { String::new() };
+            (
+                format!("Tab {} is laid out {w} CSS px wide{short}, as on a desktop, and the user sees it scaled to fit the panel. browser_read and browser_screenshot read it at that width; a screenshot from before no longer matches it (take another before clicking at a point). 0 puts it back.", t.tab),
+                format!("Set tab {} to a desktop width beside the chat", t.tab),
+            )
+        }
+        None => (format!("Tab {} is laid out at the panel's own width again ({laid} px).", t.tab), format!("Set tab {} back to the panel's width", t.tab)),
+    };
+    json!({
+        "success": true,
+        "data": { "tab": t.tab, "width": width, "laid_out": laid, "scroll": { "y": v.scroll.y, "h": v.scroll.h, "max": v.scroll.max }, "in_view": v.in_view },
+        "note": note,
+        "displayText": display,
+    })
 }
 
 #[cfg(test)]

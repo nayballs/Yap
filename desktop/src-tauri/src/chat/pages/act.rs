@@ -14,11 +14,16 @@
 //!   models never see these tools.
 //! - **The tools** ([`TOOL_NAMES`]; `browser_read { mode: "elements" }` and
 //!   `browser_find` give the refs, `rules::element_lines`):
-//!   `browser_click {ref | x, y}` (a point in the latest
+//!   `browser_click {ref | x, y, button?, count?}` (a point in the latest
 //!   `browser_screenshot`'s pixels: the element under it, judged as a ref
-//!   click is), `browser_type {ref?, text, submit?}` (no ref: the field with
-//!   the focus), `browser_key {keys}`, `browser_hover {ref}`,
-//!   `browser_form_input {ref, value}`; `browser_navigate` goes through
+//!   click is; `count` 2 or 3 a double or triple click — the words there
+//!   selected —, `button` right a right-click — the page's own menu, never a
+//!   card — or middle — a link opened in a new tab), `browser_type {ref?,
+//!   text, submit?}` (no ref: the field with the focus), `browser_key
+//!   {keys}`, `browser_hover {ref}`, `browser_drag {from, to}` (each a ref or
+//!   a point: real pointer events, HTML5 drag and drop where the page uses
+//!   it, a drop that deletes, sends or pays asked first: `rules::
+//!   drag_needs_ok`), `browser_form_input {ref, value}`; `browser_navigate` goes through
 //!   [`go`] and [`history`]. Each answers with the page afterwards: its
 //!   title, address, what changed, and its first words when it went
 //!   somewhere new — web content (the safety rule). A tab's number is its
@@ -65,9 +70,15 @@ pub const CLICK: &str = "browser_click";
 pub const TYPE: &str = "browser_type";
 pub const KEY: &str = "browser_key";
 pub const HOVER: &str = "browser_hover";
+pub const DRAG: &str = "browser_drag";
 pub const FORM_INPUT: &str = "browser_form_input";
 /// The acting tools.
-pub const TOOL_NAMES: &[&str] = &[CLICK, TYPE, KEY, HOVER, FORM_INPUT];
+pub const TOOL_NAMES: &[&str] = &[CLICK, TYPE, KEY, HOVER, DRAG, FORM_INPUT];
+/// The steps a drag's pointer takes from where it starts to where it ends,
+/// and the moment between them (a page's drag library sets itself up and
+/// draws in between, as it does for a person's).
+const DRAG_STEPS: u32 = 8;
+const DRAG_STEP: std::time::Duration = std::time::Duration::from_millis(30);
 /// Actions a turn may take.
 pub const MAX_ACTS: usize = 30;
 /// A page read with its elements: its text cut here (the elements say the rest).
@@ -160,9 +171,11 @@ pub fn closed_note(turn: &mut crate::web::Turn, result: &mut Value, closed: Opti
     }
 }
 
-/// **Run an acting tool** in this turn; `live`: the page watching (the
-/// confirmation card, the tab's "Yap is using this page").
-pub async fn execute(turn: &mut crate::web::Turn, name: &str, args: &Value, live: Option<crate::chat::stream::Live<'_>>) -> Value {
+/// **Run an acting tool** in this turn, where `ctx` says (`ctx.live`: the
+/// page watching — the confirmation card, the tab's "Yap is using this
+/// page"; a middle click on a link opens it as `browser_tabs` new does).
+pub async fn execute(turn: &mut crate::web::Turn, name: &str, args: &Value, ctx: &super::Ctx<'_>) -> Value {
+    let live = ctx.live;
     // Never while a meeting records or a call is on.
     if crate::chat::assistant::is_off() {
         return failed("Yap doesn't act on pages during a meeting or a call. Say so in a few words.".into(), "Didn't act on the page: a meeting or a call".into());
@@ -172,10 +185,11 @@ pub async fn execute(turn: &mut crate::web::Turn, name: &str, args: &Value, live
     }
     turn.pages.acts += 1;
     let result = match name {
-        CLICK => click(turn, args, live).await,
+        CLICK => click(turn, args, ctx).await,
         TYPE => type_into(turn, args, live).await,
         KEY => key(turn, args, live).await,
         HOVER => hover(turn, args, live).await,
+        DRAG => drag(turn, args, live).await,
         FORM_INPUT => form_input(turn, args, live).await,
         other => failed(format!("Unknown page action {other}"), format!("Unknown tool: {other}")),
     };
@@ -315,7 +329,9 @@ fn never(error: String, display: String, refused: &str) -> Value {
 /// code field, or a sign-in form's — its refusal (`doing`: the chip's verb,
 /// "type in" / "click"). Pure.
 fn off_limits(d: &rules::Described, el: &rules::Element, label: &str, doing: &str) -> Option<Value> {
-    if let Some(why) = rules::sensitive(el) {
+    // (A field's words say what it takes; a link or a list item named "Card
+    // A" or "Forgot password?" takes nothing.)
+    if let Some(why) = rules::is_field(el).then(|| rules::sensitive(el)).flatten() {
         tracing::info!(r = el.r, "Chat: a sensitive field on a page refused");
         return Some(never(
             format!("Yap never types {why} into a page, nor clicks into such a field: the user does that themselves in the panel beside the chat. Tell them which field (‘{label}’) and stop there."),
@@ -334,11 +350,107 @@ fn off_limits(d: &rules::Described, el: &rules::Element, label: &str, doing: &st
     None
 }
 
+/// **A frame Yap can't reach inside** (from another site, or sandboxed: no
+/// script outside it does) — its refusal, said as it is (`doing`: the
+/// chip's verb). Pure.
+fn unreachable(el: &rules::Element, label: &str, doing: &str) -> Option<Value> {
+    el.foreign.then(|| {
+        failed(
+            format!("‘{label}’ is {}. Say what you'd do there: the user can do it themselves in the panel beside the chat.", rules::foreign_words(&el.frame, el.sandboxed)),
+            format!("Couldn't {doing} ‘{label}’: a frame Yap can't reach inside"),
+        )
+    })
+}
+
+/// An element's name for a chip and the model ("the button" when it has
+/// none). Pure.
+fn label_of(el: &rules::Element) -> String {
+    let named = rules::name_of(el);
+    if named.is_empty() {
+        format!("the {}", if el.role.is_empty() { "page" } else { el.role.as_str() })
+    } else {
+        named
+    }
+}
+
+/// A mouse button as models send it: left (the default), middle, right —
+/// 0, 1, 2 as the page's events number them. `None`: not one. Pure.
+pub fn button_of(v: &Value) -> Option<u8> {
+    match v {
+        Value::Null => Some(0),
+        Value::Number(n) => n.as_u64().filter(|b| *b <= 2).map(|b| b as u8),
+        Value::String(s) => match s.trim().to_ascii_lowercase().as_str() {
+            "" | "left" | "primary" | "main" => Some(0),
+            "middle" | "wheel" | "auxiliary" => Some(1),
+            "right" | "secondary" | "context" => Some(2),
+            _ => None,
+        },
+        _ => None,
+    }
+}
+
+/// How many clicks, as models send it: 1–3 (2 a double-click, 3 a triple
+/// one; "double", "triple"). `None`: not one of those. Pure.
+pub fn count_of(v: &Value) -> Option<u8> {
+    let n = match v {
+        Value::Null => Some(1.0),
+        Value::String(s) => match s.trim().to_ascii_lowercase().as_str() {
+            "single" | "once" => Some(1.0),
+            "double" | "twice" => Some(2.0),
+            "triple" => Some(3.0),
+            _ => number_of(v),
+        },
+        _ => number_of(v),
+    }?;
+    (n.fract() == 0.0 && (1.0..=3.0).contains(&n)).then_some(n as u8)
+}
+
+/// **A point of the latest screenshot of tab `t`** (its pixels) as the
+/// view's CSS pixels — refused with no shot of this tab, off the shot, or
+/// once the page scrolled or its view changed size since it
+/// (`see::Frame::moved`: a desktop width set or taken off, the panel
+/// resized). `doing`: the verb ("click", "drag").
+async fn on_shot(turn: &crate::web::Turn, t: &OpenTab, x: f64, y: f64, doing: &str) -> Result<(f64, f64), Value> {
+    let Some(frame) = turn.pages.frame.clone().filter(|f| f.key == t.key) else {
+        return Err(failed(
+            format!("x, y are in the latest browser_screenshot's pixels: take one of this tab first (or {doing} by ref)."),
+            format!("Couldn't {doing}: no screenshot of the page yet"),
+        ));
+    };
+    let Some((cx, cy)) = frame.to_css(x, y) else {
+        return Err(failed(format!("That point is outside the latest screenshot ({}×{}).", frame.w, frame.h), format!("Couldn't {doing}: outside the screenshot")));
+    };
+    match backend::view_of(&t.key).await {
+        Ok(v) => {
+            if let Some((why, chip)) = frame.moved(&v.scroll, doing) {
+                return Err(failed(why, format!("Couldn't {doing}: {chip}")));
+            }
+        }
+        Err(e) => return Err(failed(e.clone(), format!("Couldn't {doing}: {}", crate::web::short(&e)))),
+    }
+    Ok((cx, cy))
+}
+
 /// **`browser_click`**: a link or button by its ref, or the element at a
 /// point of the latest screenshot (`x`, `y` in its pixels) — asking the
 /// person first when it would buy, pay, book, confirm, order, subscribe,
 /// send, delete or sign in; never into a password, card or sign-in field.
-async fn click(turn: &mut crate::web::Turn, args: &Value, live: Option<crate::chat::stream::Live<'_>>) -> Value {
+/// `count` 2 or 3: a double or triple click (judged as a click; the words
+/// there selected, said in `changed`); `button` "right": a right-click (the
+/// page's own menu: it activates nothing, so it never asks — but never a
+/// password, card or code field), "middle": a link opened in a new tab as a
+/// browser does (as `browser_tabs` new opens it, under its rules), else as
+/// a click.
+async fn click(turn: &mut crate::web::Turn, args: &Value, ctx: &super::Ctx<'_>) -> Value {
+    let live = ctx.live;
+    let Some(button) = button_of(&args["button"]) else {
+        return failed("button is left, right or middle.".into(), "Couldn't click: no such button".into());
+    };
+    let Some(count) = count_of(&args["count"]) else {
+        return failed("count is 1, 2 (a double-click) or 3 (a triple-click).".into(), "Couldn't click: no such count".into());
+    };
+    // (Only the left button clicks more than once.)
+    let count = if button == 0 { count } else { 1 };
     let mut t = match tab_for(turn, args, "click").await {
         Ok(t) => t,
         Err(e) => return e,
@@ -359,19 +471,10 @@ async fn click(turn: &mut crate::web::Turn, args: &Value, live: Option<crate::ch
     let (d, el, at) = match point {
         Some((x, y)) => {
             // The latest shot of this tab, its view as it was then.
-            let Some(frame) = turn.pages.frame.clone().filter(|f| f.key == t.key) else {
-                return failed("x, y are in the latest browser_screenshot's pixels: take one of this tab first (or click by ref).".into(), "Couldn't click: no screenshot of the page yet".into());
+            let (cx, cy) = match on_shot(turn, &t, x, y, "click").await {
+                Ok(p) => p,
+                Err(e) => return e,
             };
-            let Some((cx, cy)) = frame.to_css(x, y) else {
-                return failed(format!("That point is outside the latest screenshot ({}×{}).", frame.w, frame.h), "Couldn't click: outside the screenshot".into());
-            };
-            match backend::view_of(&t.key).await {
-                Ok(v) if v.scroll.y != frame.y => {
-                    return failed("The page scrolled since the latest screenshot: take browser_screenshot again, then click.".into(), "Couldn't click: the page moved since the screenshot".into())
-                }
-                Err(e) => return failed(e.clone(), format!("Couldn't click: {}", crate::web::short(&e))),
-                _ => {}
-            }
             let d = match backend::at(&t.key, cx, cy).await {
                 Ok(d) => d,
                 Err(e) => return failed(e.clone(), format!("Couldn't click: {}", crate::web::short(&e))),
@@ -386,39 +489,60 @@ async fn click(turn: &mut crate::web::Turn, args: &Value, live: Option<crate::ch
             Err(e) => return e,
         },
     };
-    let named = rules::name_of(&el);
-    let label = if named.is_empty() { format!("the {}", if el.role.is_empty() { "page" } else { el.role.as_str() }) } else { named };
+    let label = label_of(&el);
     let site = crate::web::site_of(&t.url);
     if el.disabled {
         return failed(format!("‘{label}’ is disabled on the page: it can't be clicked now."), format!("Couldn't click ‘{label}’: it's disabled"));
     }
-    if let Some(r) = off_limits(&d, &el, &label, "click") {
+    if let Some(r) = unreachable(&el, &label, "click").or_else(|| off_limits(&d, &el, &label, "click")) {
+        return r;
+    }
+    // A middle click on a link: a new tab, as a browser opens it — under
+    // `browser_tabs` new's rules (its words and address asked about, four
+    // pages a turn).
+    if button == 1 && el.role == "link" && crate::web::check_url(&el.href).is_ok() {
+        drop(_busy.take());
+        remember_page_links(&mut turn.pages.links, &[(el.href.clone(), rules::name_of(&el))]);
+        let mut r = super::open(turn, &json!({ "url": el.href }), ctx).await;
+        if r["success"] == json!(true) {
+            let display = format!("Middle-clicked ‘{label}’ on {site}: it opened in a new tab");
+            r["displayText"] = json!(display);
+        }
         return r;
     }
     acting(live, &t.key);
     let mut asked = false;
-    if let Some(kind) = rules::click_needs_ok(&d, &el) {
-        asked = true;
-        drop(_busy.take());
-        let answer = confirm::ask(live, confirm::Ask { act: "press", label: &label, site: &site, does: kind, text: "", key: &t.key, agent: None }).await;
-        if let Some(r) = refusal(answer, &format!("pressing ‘{label}’"), &format!("click ‘{label}’")) {
-            return r;
+    // A right-click activates nothing: its menu is the page's own.
+    if button != 2 {
+        if let Some(kind) = rules::click_needs_ok(&d, &el) {
+            asked = true;
+            drop(_busy.take());
+            let answer = confirm::ask(live, confirm::Ask { act: "press", label: &label, site: &site, does: kind, text: "", key: &t.key, agent: None }).await;
+            if let Some(r) = refusal(answer, &format!("pressing ‘{label}’"), &format!("click ‘{label}’")) {
+                return r;
+            }
+            _busy = backend::busy(&t.key).await;
         }
-        _busy = backend::busy(&t.key).await;
     }
     // A click that sends what Yap typed (its form's submit button; outside
     // a form, the button pressed right after): a submit, under submit's rules.
-    if let Some(r) = send_typed(turn, &t, &el, false, &site, live, &mut asked, &mut _busy).await {
-        return r;
+    if button == 0 {
+        if let Some(r) = send_typed(turn, &t, &el, false, &site, live, &mut asked, &mut _busy).await {
+            return r;
+        }
     }
     if _busy.is_none() {
         _busy = backend::busy(&t.key).await;
     }
     let was = before(&t).await;
     let mark = backend::mark(&t.key).await;
-    let done = match at {
-        Some((x, y)) => backend::act(&t.key, "clickAt", &json!({ "ref": el.r, "role": el.role, "name": el.name, "x": x, "y": y })).await,
-        None => backend::act(&t.key, "click", &json!({ "ref": el.r, "role": el.role, "name": el.name })).await,
+    let done = match (button, count, at) {
+        (0, 1, Some((x, y))) => backend::act(&t.key, "clickAt", &json!({ "ref": el.r, "role": el.role, "name": el.name, "x": x, "y": y })).await,
+        (0, 1, None) => backend::act(&t.key, "click", &json!({ "ref": el.r, "role": el.role, "name": el.name })).await,
+        (b, n, at) => {
+            let (x, y) = at.unwrap_or((0.0, 0.0));
+            backend::act(&t.key, "press", &json!({ "ref": el.r, "role": el.role, "name": el.name, "at": at.is_some(), "x": x, "y": y, "button": b, "count": n })).await
+        }
     };
     let done = match done {
         Ok(v) => v,
@@ -429,6 +553,20 @@ async fn click(turn: &mut crate::web::Turn, args: &Value, live: Option<crate::ch
     }
     backend::settle(&t.key, mark).await;
     let mut data = after(turn, &t, &was).await;
+    // What the click itself did: the words a double or triple click
+    // selected; a right-click the page took (or had no menu for).
+    let did: rules::Did = serde_json::from_value(done.clone()).unwrap_or_default();
+    let changed = data["changed"].as_str().unwrap_or("").to_string();
+    let mut said = rules::with_did(rules::did_words(&did, &label), &changed);
+    if button == 2 {
+        if let Some(w) = rules::right_click_words(did.menu == Some(true), &said) {
+            said = w;
+        }
+    }
+    data["changed"] = json!(said);
+    if !did.selected.trim().is_empty() {
+        data["selected"] = json!(did.selected);
+    }
     // A web component whose inside is closed: what changed in there can't
     // be seen, so "nothing" would be a guess.
     if el.closed && data["changed"] == "nothing visible changed" {
@@ -444,7 +582,162 @@ async fn click(turn: &mut crate::web::Turn, args: &Value, live: Option<crate::ch
             data["at"]["closed"] = json!(true);
         }
     }
-    let display = if asked { format!("Clicked ‘{label}’ on {site} (you allowed it)") } else { format!("Clicked ‘{label}’ on {site}") };
+    let verb = match (button, count) {
+        (2, _) => "Right-clicked",
+        (1, _) => "Middle-clicked",
+        (_, 2) => "Double-clicked",
+        (_, 3) => "Triple-clicked",
+        _ => "Clicked",
+    };
+    let display = if asked { format!("{verb} ‘{label}’ on {site} (you allowed it)") } else { format!("{verb} ‘{label}’ on {site}") };
+    json!({ "success": true, "data": data, "note": NOTE, "displayText": display })
+}
+
+/// **One end of a drag**, as models send it: a ref (`12`, `"12"`,
+/// `{"ref": 12}`) or a point of the latest screenshot (`{"x": 120, "y":
+/// 340}`). Pure.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum End {
+    Ref(u32),
+    Point(f64, f64),
+}
+
+/// [`End`] of a drag's `from` or `to`. `None`: neither. Pure.
+pub fn end_of(v: &Value) -> Option<End> {
+    if let Some(r) = ref_of(v).or_else(|| ref_of(&v["ref"])) {
+        return Some(End::Ref(r));
+    }
+    match (number_of(&v["x"]), number_of(&v["y"])) {
+        (Some(x), Some(y)) => Some(End::Point(x, y)),
+        _ => None,
+    }
+}
+
+/// A drag's end on tab `t` as it is now: the element there (described,
+/// with what the rules need around it) and its point in the view's CSS
+/// pixels when it's a point. `target`: the end it's dropped at, where an
+/// empty part of the page (no element: a map, a canvas) is a place too.
+async fn drag_end_of(turn: &crate::web::Turn, t: &OpenTab, end: End, target: bool) -> Result<(rules::Described, rules::Element, Option<(f64, f64)>), Value> {
+    match end {
+        End::Ref(r) => element(t, Some(r), "drag").await.map(|(d, el)| (d, el, None)),
+        End::Point(x, y) => {
+            let (cx, cy) = on_shot(turn, t, x, y, "drag").await?;
+            let d = backend::at(&t.key, cx, cy).await.map_err(|e| failed(e.clone(), format!("Couldn't drag: {}", crate::web::short(&e))))?;
+            match d.el.clone() {
+                Some(el) => Ok((d, el, Some((cx, cy)))),
+                None if target => Ok((d, rules::Element { name: "that point".into(), form: -1, ..Default::default() }, Some((cx, cy)))),
+                None => Err(failed("There's nothing at that point of the page to drag.".into(), "Couldn't drag: nothing there".into())),
+            }
+        }
+    }
+}
+
+/// **`browser_drag`**: from one ref or point to another, as a person drags —
+/// the pointer down, moving there a step at a time, up; or, where what's
+/// under it is draggable, HTML5 drag and drop (the page's `dragstart`,
+/// `dragover`, `drop`). Every rule a click has: never from or onto a
+/// password, card or code field, nor a sign-in form, nor inside a frame Yap
+/// can't reach; a drop that would delete (a trash or bin), send, pay or buy
+/// asks the person first (`rules::drag_needs_ok`). What changed says what
+/// moved where (a list item's place, a slider's value).
+async fn drag(turn: &mut crate::web::Turn, args: &Value, live: Option<crate::chat::stream::Live<'_>>) -> Value {
+    let (Some(from), Some(to)) = (end_of(&args["from"]), end_of(&args["to"])) else {
+        return failed(
+            "from and to are required: each a ref ({\"ref\": 12}) or a point of the latest browser_screenshot ({\"x\": 120, \"y\": 340}).".into(),
+            "Couldn't drag: no start or end given".into(),
+        );
+    };
+    let mut t = match tab_for(turn, args, "drag").await {
+        Ok(t) => t,
+        Err(e) => return e,
+    };
+    if let Some(r) = on_search_page(&t, "drag") {
+        return r;
+    }
+    if let Err(e) = to_front(&mut t, live).await {
+        return e;
+    }
+    let mut busy = backend::busy(&t.key).await;
+    let (fd, fel, fat) = match drag_end_of(turn, &t, from, false).await {
+        Ok(x) => x,
+        Err(e) => return e,
+    };
+    let (td, tel, tat) = match drag_end_of(turn, &t, to, true).await {
+        Ok(x) => x,
+        Err(e) => return e,
+    };
+    let (fl, tl) = (label_of(&fel), if tel.r == 0 { tel.name.clone() } else { label_of(&tel) });
+    let site = crate::web::site_of(&t.url);
+    if fel.disabled {
+        return failed(format!("‘{fl}’ is disabled on the page: it can't be dragged now."), format!("Couldn't drag ‘{fl}’: it's disabled"));
+    }
+    for (d, el, label, doing) in [(&fd, &fel, &fl, "drag"), (&td, &tel, &tl, "drop onto")] {
+        if el.r == 0 {
+            continue;
+        }
+        if let Some(r) = unreachable(el, label, doing).or_else(|| off_limits(d, el, label, doing)) {
+            return r;
+        }
+    }
+    acting(live, &t.key);
+    let mut asked = false;
+    if let Some(kind) = rules::drag_needs_ok(&fd, &fel, &td, &tel) {
+        asked = true;
+        drop(busy.take());
+        let answer = confirm::ask(live, confirm::Ask { act: "drag", label: &fl, site: &site, does: kind, text: &tl, key: &t.key, agent: None }).await;
+        if let Some(r) = refusal(answer, &format!("dragging ‘{fl}’ onto ‘{tl}’"), &format!("drag ‘{fl}’")) {
+            return r;
+        }
+        busy = backend::busy(&t.key).await;
+    }
+    if busy.is_none() {
+        busy = backend::busy(&t.key).await;
+    }
+    let was = before(&t).await;
+    let mark = backend::mark(&t.key).await;
+    let to_arg = match tat {
+        Some((x, y)) => json!({ "at": true, "x": x, "y": y }),
+        None => json!({ "ref": tel.r, "role": tel.role, "name": tel.name }),
+    };
+    let (fx, fy) = fat.unwrap_or((0.0, 0.0));
+    let start = backend::act(&t.key, "dragStart", &json!({ "ref": fel.r, "role": fel.role, "name": fel.name, "at": fat.is_some(), "x": fx, "y": fy, "to": to_arg })).await;
+    let start = match start {
+        Ok(v) => v,
+        Err(e) => return failed(e.clone(), format!("Couldn't drag ‘{fl}’: {}", crate::web::short(&e))),
+    };
+    if let Some(r) = not_done(&start, &fl, "drag") {
+        return r;
+    }
+    for i in 1..=DRAG_STEPS {
+        backend::pause(DRAG_STEP).await;
+        let _ = backend::act(&t.key, "dragMove", &json!({ "f": f64::from(i) / f64::from(DRAG_STEPS) })).await;
+    }
+    backend::pause(DRAG_STEP).await;
+    let done = match backend::act(&t.key, "dragEnd", &json!({})).await {
+        Ok(v) => v,
+        Err(e) => return failed(e.clone(), format!("Couldn't drag ‘{fl}’: {}", crate::web::short(&e))),
+    };
+    drop(busy);
+    if let Some(r) = not_done(&done, &fl, "drag") {
+        return r;
+    }
+    backend::settle(&t.key, mark).await;
+    let mut data = after(turn, &t, &was).await;
+    let did: rules::Did = serde_json::from_value(done.clone()).unwrap_or_default();
+    let changed = data["changed"].as_str().unwrap_or("").to_string();
+    data["changed"] = json!(rules::with_did(rules::did_words(&did, &fl), &changed));
+    if did.html5 {
+        data["dropped"] = json!(did.dropped);
+    }
+    if let Some(m) = &did.moved {
+        data["moved"] = json!({ "to": m.to, "of": m.of });
+    }
+    if asked {
+        data["asked"] = json!(true);
+        data["allowed"] = json!(true);
+    }
+    tracing::info!(html5 = did.html5, dropped = did.dropped, moved = did.moved.is_some(), "Chat: a drag on a page beside the chat");
+    let display = if asked { format!("Dragged ‘{fl}’ to ‘{tl}’ on {site} (you allowed it)") } else { format!("Dragged ‘{fl}’ to ‘{tl}’ on {site}") };
     json!({ "success": true, "data": data, "note": NOTE, "displayText": display })
 }
 
@@ -501,6 +794,10 @@ async fn type_into(turn: &mut crate::web::Turn, args: &Value, live: Option<crate
     };
     let label = rules::name_of(&el);
     let site = crate::web::site_of(&t.url);
+    // (The focus inside a frame Yap can't reach: its field is out of reach too.)
+    if let Some(r) = unreachable(&el, &label_of(&el), "type in") {
+        return r;
+    }
     if let Some(why) = rules::sensitive(&el).or_else(|| rules::typed_secret(&text, &d)) {
         tracing::info!(r = el.r, "Chat: typing into a sensitive field (or a card's or bank's number) refused");
         return never(
@@ -860,6 +1157,10 @@ async fn key(turn: &mut crate::web::Turn, args: &Value, live: Option<crate::chat
             Ok(d) => d,
             Err(e) => return failed(e.clone(), format!("Couldn't press {k}: {}", crate::web::short(&e))),
         };
+        // The focus inside a frame Yap can't reach: its keys never land there.
+        if let Some(r) = d.el.as_ref().and_then(|el| unreachable(el, &label_of(el), "press keys in")) {
+            return r;
+        }
         if let (true, Some(el)) = (matches!(*k, "Enter" | "Space"), d.el.as_ref()) {
             let label = rules::name_of(el);
             let field = rules::takes_text(el) && !matches!(el.role.as_str(), "button" | "link" | "checkbox" | "radio" | "switch");
@@ -949,6 +1250,9 @@ async fn hover(turn: &mut crate::web::Turn, args: &Value, live: Option<crate::ch
     };
     let label = rules::name_of(&el);
     let site = crate::web::site_of(&t.url);
+    if let Some(r) = unreachable(&el, &label_of(&el), "hover over") {
+        return r;
+    }
     acting(live, &t.key);
     let was = before(&t).await;
     let mark = backend::mark(&t.key).await;
@@ -1000,6 +1304,9 @@ async fn form_input(turn: &mut crate::web::Turn, args: &Value, live: Option<crat
         Ok(x) => x,
         Err(e) => return e,
     };
+    if let Some(r) = unreachable(&el, &label_of(&el), "set") {
+        return r;
+    }
     let text = match &args["value"] {
         Value::String(s) => s.clone(),
         Value::Null => String::new(),

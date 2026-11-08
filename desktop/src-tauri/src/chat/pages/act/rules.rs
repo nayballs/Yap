@@ -63,6 +63,16 @@ pub struct Element {
     /// closed shadow root, most likely, which no script outside reaches
     /// (`script.rs`; an open root's elements are listed as the page's).
     pub closed: bool,
+    /// **A frame** (`role` "frame"): its address — a same-origin frame's
+    /// elements are listed as the page's, so a frame listed is one Yap
+    /// can't reach inside ([`Element::foreign`]).
+    pub frame: String,
+    /// A frame no script outside it reaches: from another site, or
+    /// sandboxed ([`Element::sandboxed`]) — Yap can't read or act inside
+    /// it; a screenshot shows it ([`foreign_words`]).
+    pub foreign: bool,
+    /// Sandboxed: kept apart from the page whatever its site.
+    pub sandboxed: bool,
 }
 
 /// A form on the page: whether it has a password field (a sign-in form),
@@ -131,6 +141,21 @@ pub struct Described {
 
 /// How an element whose inside Yap can't see is told ([`Element::closed`]).
 pub const CLOSED: &str = "a web component whose inside the page keeps closed: Yap can't see or reach what's in it";
+
+/// **A frame Yap can't reach inside, as it's told** ([`Element::foreign`]):
+/// "a frame from another site (pay.example.com): Yap can't read or act
+/// inside it; a screenshot shows it" — or one the page keeps apart
+/// (sandboxed). Pure.
+pub fn foreign_words(src: &str, sandboxed: bool) -> String {
+    let site = crate::web::site_of(src);
+    let what = match (sandboxed, site.is_empty()) {
+        (true, true) => "a frame the page keeps apart (sandboxed)".to_string(),
+        (true, false) => format!("a frame the page keeps apart (sandboxed, {site})"),
+        (false, true) => "a frame from another site".to_string(),
+        (false, false) => format!("a frame from another site ({site})"),
+    };
+    format!("{what}: Yap can't read or act inside it; a screenshot shows it")
+}
 
 /// The most elements a read lists.
 pub const MAX_ELEMENTS: usize = 150;
@@ -252,6 +277,13 @@ pub fn takes_text(e: &Element) -> bool {
         return false;
     }
     matches!(e.role.as_str(), "textbox" | "searchbox" | "combobox" | "spinbutton" | "listbox")
+}
+
+/// **A field**: something that takes words ([`takes_text`]) or an editable
+/// region — what [`sensitive`]'s words are about (a link or a list item
+/// named "Card A" takes nothing). Pure.
+pub fn is_field(e: &Element) -> bool {
+    takes_text(e) || e.editable
 }
 
 /// **A search box**: Enter there searches, so it needs no asking — the page
@@ -540,6 +572,11 @@ pub fn element_lines(snap: &Snapshot) -> String {
             refs: 0,
         };
         let mut line = format!("[{}] {} \"{}\"", e.r, if e.role.is_empty() { "element" } else { &e.role }, name_of(e).replace('"', "'"));
+        if e.foreign {
+            line.push_str(&format!(" ({})", foreign_words(&e.frame, e.sandboxed)));
+            out.push(line);
+            continue;
+        }
         if e.role == "link" && !e.href.is_empty() {
             line.push_str(&format!(" → {}", crate::web::short_url(&e.href)));
         }
@@ -609,6 +646,128 @@ pub struct Changes {
     pub closed: Vec<Overlay>,
     #[serde(rename = "inView")]
     pub in_view: u32,
+    /// The page's same-origin frames that went somewhere new (their
+    /// addresses now: a link or a form in a frame takes the frame there,
+    /// not the tab).
+    pub frames: Vec<String>,
+}
+
+/// **What an action itself did**, as its own script says (`script.rs`
+/// `press`, `dragEnd`) — what a page's observer can't tell: the words a
+/// double or triple click selected, whether the page took a right-click
+/// for a menu of its own, the list item a drag moved and where, a slider a
+/// drag set.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(default)]
+pub struct Did {
+    pub selected: String,
+    /// A right-click: `Some(true)` the page took it (its own menu, if any),
+    /// `Some(false)` it didn't (only a browser's own menu would open).
+    pub menu: Option<bool>,
+    pub moved: Option<Moved>,
+    /// A slider's value after the drag.
+    pub value: Option<String>,
+    /// An HTML5 drag the target took (`drop`).
+    pub dropped: bool,
+    pub html5: bool,
+}
+
+/// **A list item a drag moved**: its words, its place before and after
+/// (from 1) of how many, its neighbours now — or the list it went into.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(default)]
+pub struct Moved {
+    pub text: String,
+    pub from: u32,
+    pub to: u32,
+    pub of: u32,
+    pub before: String,
+    pub after: String,
+    /// Another list's words (its label or heading): it went there.
+    pub into: String,
+}
+
+/// **What an action did, in words** ([`Did`], `label`: the element's name):
+/// "selected ‘harbour’", "moved ‘Card C’ to place 1 of 3 (before ‘Card
+/// A’)", "moved ‘Card A’ into ‘Done’", "set ‘Volume’ to 70". Pure.
+pub fn did_words(did: &Did, label: &str) -> Vec<String> {
+    let q = |s: &str, n: usize| clip(s, n).replace('’', "'");
+    let mut out = Vec::new();
+    if !did.selected.trim().is_empty() {
+        out.push(format!("selected ‘{}’", q(&did.selected, 100)));
+    }
+    if let Some(m) = &did.moved {
+        let what = if m.text.trim().is_empty() { "it".to_string() } else { format!("‘{}’", q(&m.text, 60)) };
+        if !m.into.trim().is_empty() {
+            out.push(format!("moved {what} into ‘{}’", q(&m.into, 60)));
+        } else if m.from == 0 {
+            out.push(format!("moved {what} into another list, at place {} of {}", m.to, m.of));
+        } else {
+            let near = if !m.before.trim().is_empty() {
+                format!(" (before ‘{}’)", q(&m.before, 60))
+            } else if !m.after.trim().is_empty() {
+                format!(" (after ‘{}’)", q(&m.after, 60))
+            } else {
+                String::new()
+            };
+            out.push(format!("moved {what} from place {} to place {} of {}{near}", m.from, m.to, m.of));
+        }
+    }
+    if let Some(v) = did.value.as_deref().filter(|v| !v.trim().is_empty()) {
+        let name = if label.trim().is_empty() { "the slider".to_string() } else { format!("‘{}’", q(label, 60)) };
+        out.push(format!("set {name} to {}", clip(v, 20)));
+    }
+    out
+}
+
+/// What an action changed, its own words ([`did_words`]) first, then the
+/// page's ([`what_changed`]: "nothing visible changed" left out when the
+/// action did something). Pure.
+pub fn with_did(did: Vec<String>, changed: &str) -> String {
+    if did.is_empty() {
+        return changed.to_string();
+    }
+    let mut parts = did;
+    if changed != "nothing visible changed" {
+        parts.push(changed.to_string());
+    }
+    parts.join("; ")
+}
+
+/// **A right-click's outcome when nothing opened over the page** (`took`:
+/// the page took the `contextmenu` for its own), said first, before what
+/// else changed (a scroll…). `None`: a menu, a popup or a dialog did open
+/// (`changed` says so). Pure.
+pub fn right_click_words(took: bool, changed: &str) -> Option<String> {
+    if changed.contains(" opened") {
+        return None;
+    }
+    let said = if took {
+        "the page took the right-click, but nothing Yap can see opened"
+    } else {
+        "nothing opened: the page has no menu of its own there (a browser's own menu, with Back and Copy, isn't one Yap opens)"
+    };
+    Some(if changed == "nothing visible changed" { said.to_string() } else { format!("{said}; {changed}") })
+}
+
+/// **What a drag would do that asks the person first**: what dropping on
+/// the target does, by its words ("Delete", "Send", "Pay", a trash or bin
+/// in any of Yap's languages: deleting) and a link's address; what the
+/// dragged thing says ("Slide to pay", "Swipe to send"); any drag on a page
+/// that takes a card. Never a password, card or code field (`act::off_limits`
+/// first). Pure.
+pub fn drag_needs_ok(from_d: &Described, from: &Element, to_d: &Described, to: &Element) -> Option<&'static str> {
+    let target = name_of(to);
+    if let Some(kind) = needs_ok(&target, &to.href) {
+        return Some(kind);
+    }
+    if words::in_any(&words(&target), |l| l.trash) {
+        return Some("delete");
+    }
+    if let Some(kind) = needs_ok(&name_of(from), "") {
+        return Some(kind);
+    }
+    (from_d.payment || to_d.payment).then_some("pay")
 }
 
 /// **What changed after an action**, briefly and as it was: the page went
@@ -649,6 +808,9 @@ pub fn what_changed(before_url: &str, before_text: &str, after_url: &str, after_
         if let Some((_, frag)) = ch.url.split_once('#').filter(|(_, f)| !f.is_empty()) {
             parts.push(format!("went to #{} on the page", clip(frag, 60)));
         }
+    }
+    for f in ch.frames.iter().take(2) {
+        parts.push(format!("a frame on the page went to {}", crate::web::short_url(f)));
     }
     let had: std::collections::HashSet<&str> = sentences(before_text).into_iter().collect();
     let new: Vec<&str> = sentences(after_text).into_iter().filter(|s| !had.contains(s)).collect();
@@ -1186,5 +1348,53 @@ mod tests {
         assert!(unknown_words("2026-11-02 09:42", &known).is_empty(), "a date and a time need no source");
         assert_eq!(unknown_words("sam@example.com", &known), ["sam", "example", "com"]);
         assert_eq!(unknown_words("Réserver Kellbrook", &known), ["reserver"]);
+    }
+
+    #[test]
+    fn a_drop_that_deletes_sends_or_pays_asks_and_a_list_item_moved_does_not() {
+        let el = |name: &str| Element { r: 1, role: "li".into(), name: name.into(), form: -1, ..Default::default() };
+        let d = Described::default();
+        // Reordering a list: nothing to ask.
+        assert_eq!(drag_needs_ok(&d, &el("Card C"), &d, &el("Card A")), None);
+        // A trash or bin, in any of Yap's languages: deleting.
+        for bin in ["Trash", "Recycle bin", "Corbeille", "Papierkorb", "Papelera", "Cestino", "Lixeira", "Prullenbak"] {
+            assert_eq!(drag_needs_ok(&d, &el("Invoice 12"), &d, &el(bin)), Some("delete"), "{bin}");
+        }
+        // The target's own words (send, pay), or the dragged thing's ("Slide to pay").
+        assert_eq!(drag_needs_ok(&d, &el("report.pdf"), &d, &el("Send to Sam")), Some("send"));
+        assert_eq!(drag_needs_ok(&d, &el("Slide to pay"), &d, &el("the end")), Some("pay"));
+        // A page that takes a card: any drag asks, as any button there does.
+        let paying = Described { payment: true, ..Default::default() };
+        assert_eq!(drag_needs_ok(&paying, &el("Card C"), &d, &el("Card A")), Some("pay"));
+        // A list item named after a card is no card field; a card number box is.
+        assert!(!is_field(&el("Card C")) && is_field(&field("text", "Card number")) && sensitive(&field("text", "Card number")).is_some());
+    }
+
+    #[test]
+    fn what_an_action_did_is_said_first_and_nothing_visible_only_when_nothing_was() {
+        let sel = Did { selected: "lantern".into(), ..Default::default() };
+        assert_eq!(did_words(&sel, "Plain notes"), ["selected ‘lantern’"]);
+        assert_eq!(with_did(did_words(&sel, ""), "nothing visible changed"), "selected ‘lantern’");
+        assert_eq!(with_did(did_words(&sel, ""), "the focus moved into ‘Title’"), "selected ‘lantern’; the focus moved into ‘Title’");
+        assert_eq!(with_did(Vec::new(), "nothing visible changed"), "nothing visible changed");
+        let moved = Did { moved: Some(Moved { text: "Card C".into(), from: 3, to: 1, of: 3, before: "Card A".into(), ..Default::default() }), html5: true, dropped: true, ..Default::default() };
+        assert_eq!(did_words(&moved, ""), ["moved ‘Card C’ from place 3 to place 1 of 3 (before ‘Card A’)"]);
+        let into = Did { moved: Some(Moved { text: "Card A".into(), to: 2, of: 2, into: "Done".into(), ..Default::default() }), ..Default::default() };
+        assert_eq!(did_words(&into, ""), ["moved ‘Card A’ into ‘Done’"]);
+        let slid = Did { value: Some("70".into()), ..Default::default() };
+        assert_eq!(did_words(&slid, "Volume"), ["set ‘Volume’ to 70"]);
+        assert_eq!(did_words(&slid, ""), ["set the slider to 70"]);
+        // A right-click with nothing seen: whether the page took it.
+        assert!(right_click_words(false, "nothing visible changed").unwrap().starts_with("nothing opened: the page has no menu of its own there"));
+        assert_eq!(right_click_words(true, "nothing visible changed").as_deref(), Some("the page took the right-click, but nothing Yap can see opened"));
+        assert_eq!(right_click_words(false, "a menu opened: ‘Rename’"), None);
+        assert!(right_click_words(false, "scrolled to y 741").unwrap().ends_with("isn't one Yap opens); scrolled to y 741"));
+        // A frame that went somewhere new, said; a frame Yap can't reach, its line.
+        let ch = Changes { watched: true, frames: vec!["https://forms.example.com/saved?name=Edda".into()], ..Default::default() };
+        assert_eq!(what_changed("https://forms.example.com/host", "", "https://forms.example.com/host", "", &ch), "a frame on the page went to forms.example.com/saved?name=Edda");
+        assert_eq!(foreign_words("https://pay.example.org/card", false), "a frame from another site (pay.example.org): Yap can't read or act inside it; a screenshot shows it");
+        assert_eq!(foreign_words("", true), "a frame the page keeps apart (sandboxed): Yap can't read or act inside it; a screenshot shows it");
+        let snap = Snapshot { elements: vec![Element { r: 9, role: "frame".into(), name: "Payment".into(), frame: "https://pay.example.org/card".into(), foreign: true, form: -1, ..Default::default() }], ..Default::default() };
+        assert_eq!(element_lines(&snap), "[9] frame \"Payment\" (a frame from another site (pay.example.org): Yap can't read or act inside it; a screenshot shows it)");
     }
 }

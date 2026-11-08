@@ -2280,7 +2280,9 @@ model with the pages** — the tool loop on a key or this PC, and plan chats
 over the run endpoint (`claude_live/eyes.rs`) —, one implementation behind it
 (`pages::execute`; `pages/see.rs` the viewing tools, `pages/act.rs` the
 acting ones), minus Claude Code's developer-only ones (running JS, the
-console, the network, resizing), right-click, double-click and drag.
+console, the network, resizing the window: a tab's own width is
+`browser_tabs` width instead, [below](#a-desktop-width-same-origin-frames-and-clicks-that-arent-one-2026-11-08));
+right-click, double and triple clicks and drags came the same day.
 Before it, a shot opened as a new tab ("A shot of example.com") and only
 ever showed the top of the page, and a plan chat couldn't scroll, so the
 model asked the person to snip the part it wanted. Older names (`open_page`,
@@ -2300,7 +2302,8 @@ may type where it clicked. **Their weight** (every step sends them;
 reads, ≈ 1,011 for one that sees, ≈ 1,237 acting without seeing (the
 on-device Qwen), ≈ 1,596 with both (8 Nov 2026: `browser_read`'s `offset`
 and "tables", and what a search is for, ≈ 35 more; then `tab` on every
-tool, ≈ 15–80 more) — about 300 more than the page tools
+tool, ≈ 15–80 more; then a tab's desktop width, a click's `button` and
+`count` and `browser_drag`: ≈ 637 / 1,041 / 1,382 / 1,747) — about 300 more than the page tools
 and the drive tier were for a model that acts, which a cloud model's
 context never notices; a strong model on a server on this PC that doesn't
 say its context (Yap assumes 8K) no longer fits its whole toolset (rich
@@ -2493,9 +2496,10 @@ of sight. What they share is said once, in the line.
   scrolls there, a button's clicks); **`browser_wait { seconds?, text? }`**
   waits for the words (folded) or, without them, until the page settles
   (loaded, its text still for 0.8 s), at most 10 s; **`browser_tabs {
-  action: list | new | switch | close, tab? }`** — the list's titles are web
-  content; switch shows the tab (`Event::SwitchTab`), close closes it
-  (`Event::CloseTab`, `view::close`). All of them web content from what they
+  action: list | new | switch | close | width, tab?, width? }`** — the list's titles are web
+  content (and a tab's desktop width, when it has one); switch shows the tab (`Event::SwitchTab`), close closes it
+  (`Event::CloseTab`, `view::close`); width lays it out that many CSS pixels
+  wide ([below](#a-desktop-width-same-origin-frames-and-clicks-that-arent-one-2026-11-08)). All of them web content from what they
   bring in (`Turn::mark_seen`).
 - **`browser_screenshot { tab? }`** and **`browser_zoom { region }`** —
   **only for a model that reads images** (`Gate::Look`): **what's in view
@@ -2728,7 +2732,9 @@ review (safely, for any user, in any language Yap speaks).
   textbox "Card number" (Yap never types here: payment card details)`), its
   text then cut at 2,500 characters, its links ones `browser_navigate` may
   open this turn (`TurnPages::links`: each one's address as the page has it
-  and its words, `act::Link`); **`browser_click { ref | x, y }`** — by ref,
+  and its words, `act::Link`); **`browser_click { ref | x, y, button?, count? }`** (a
+  double, triple, right or middle click too: [below](#a-desktop-width-same-origin-frames-and-clicks-that-arent-one-2026-11-08))
+  — by ref,
   or (a model that reads images) **at a point of the latest screenshot**,
   for pages with nothing to grab by ref (maps, canvases, game-style UIs): the
   point in its pixels (`see::Frame::to_css`; refused off the shot or once the
@@ -2882,8 +2888,8 @@ review (safely, for any user, in any language Yap speaks).
   whose inside the page keeps closed: Yap can't see or reach what's in it";
   typing in it says so and leaves it to the person, not "click it"; a click
   on it that changes nothing Yap can see says that, not "nothing visible
-  changed"). **Same-origin frames aren't walked** (another window: its own
-  coordinates, styles, events and refs).
+  changed"). **Same-origin frames are walked the same way** since the same
+  day ([below](#a-desktop-width-same-origin-frames-and-clicks-that-arent-one-2026-11-08)).
 - **What Yap never does, whatever it's told** (enforced in Rust,
   `act/rules.rs`, its words in **one table per language** — English, French,
   German, Spanish, Italian, Portuguese, Dutch, `act/words.rs`, every table
@@ -3059,7 +3065,175 @@ review (safely, for any user, in any language Yap speaks).
   **Not done**: trusted input events (CDP's
   `Input.dispatchMouseEvent`) for sites that ignore script clicks; a button
   with no name at all (an icon with no label) is judged by its form only;
-  DNS rebinding (above); acting from the Voice Assistant.
+  DNS rebinding (above); acting from the Voice Assistant; reaching inside a
+  frame from another site (below).
+
+### A desktop width, same-origin frames and clicks that aren't one (2026-11-08)
+
+The last gaps between Yap's browser tools and Claude Code's own, closed the
+day the toolset matched it elsewhere (the maintainer's ask; Yap Lab had
+found MDN's search an icon at the panel's width, and nothing could
+double-click, right-click, drag or reach into a frame).
+
+- **A desktop width** (`browser_tabs { action: "width", width }`, any model
+  with the pages: it changes how the page is laid out, nothing on it): the
+  panel beside the chat is about 460 CSS px wide in a 1280 px window, so many
+  sites show their phone layout. **The tab is laid out that wide and shown to
+  the person scaled to fit** (`view::set_width`): its controller's zoom,
+  `view::zoom_for` — the panel's device pixels ÷ (the monitor's scale × the
+  width), never above 1, never under WebView2's floor of 0.25 (a panel too
+  narrow lays it out as wide as that allows, said: `laid_out`) — kept as the
+  panel is resized (`put` → `fit_width`), through navigations (WebView2 may
+  put a page's zoom back: `loaded` sets it again) and out of sight (laid out
+  at the stage's size, the same zoom). **So the person sees exactly the layout
+  the model reads and clicks in, smaller**; the page's own `innerWidth` is the
+  width, its media queries the desktop's. Its tab says so — a **"Desktop
+  width ×"** chip in its bar (`PageTab.svelte`, `ViewState::width`) whose ×
+  puts the panel's own width back (`page_view_width`, zoom 1) — and a zoom
+  the person makes themselves on a loaded page (Ctrl+wheel, Ctrl+±:
+  `ZoomFactorChanged` away from the zoom Yap set) is theirs: the width let
+  go, the chip gone. 0 (or "panel") puts it back from the model's side;
+  480–2560 px ("desktop": 1280). The list of tabs says each one's width.
+  Option B (a wide render off screen for a shot only) was ruled out: a click
+  at a point of such a shot would land in another layout.
+- **Shots say the width they were laid out at** (`browser_screenshot`: "laid
+  out 1280 px wide (a desktop width the tab is set to, shown to the user
+  scaled to fit the panel)", `data.width`, `data.desktop`); a shot whose
+  picture has fewer pixels than the page's CSS width (a desktop width in the
+  panel: about 0.36 of a pixel a CSS pixel) says small text is hard to read
+  there — `browser_zoom` or `browser_read`. A shot of a view under 1,000 px
+  at the panel's width says a site may be showing its phone layout and how to
+  lay it out as a desktop's. **A point of a shot holds only while the view's
+  width is the shot's** (`see::Frame::moved`: a width set or taken off, the
+  panel made narrower or wider — "Couldn't click: the page changed size since
+  the screenshot", laid out N×M px now, then); the frame's `css_w` maps the
+  picture's pixels to that layout's, so a click at a point of a desktop
+  width's shot is that point of the desktop layout. Not its height alone:
+  the tab's "Yap is using this page" strip coming up with the first action
+  takes 35 px off the bottom of the view, and a page laid out from the top
+  keeps its place (found by `chat-browse`'s frame test, whose page sizes its
+  frame in `vh`).
+- **`browser_click { …, button?, count? }`** (`act::click`; the script's
+  `press`): `count` 2 or 3 — a double or triple click, with the pointer and
+  mouse events a person's sends (each `detail`, `dblclick` after the second;
+  a script's events alone never select, so the words there are selected as a
+  person's double click selects them: `pickWords`, a word from the caret at
+  that point, a block's words for three — unless the page held the mouse down
+  itself; a text field's word or all of it), said in `changed` ("selected
+  ‘serve’") and `data.selected`; a page that edits on a double click (its
+  editor, the focus in it) says that instead. `button` "right": `contextmenu`
+  — the page's own menu ("a menu opened: ‘Rename Archive’"), or, said as it
+  is, "nothing opened: the page has no menu of its own there (a browser's own
+  menu, with Back and Copy, isn't one Yap opens)" — WebView2's own menu never
+  opens for a script's event; it activates nothing, so it never asks; "middle":
+  a link opens in a new tab as a browser opens it (`pages::open`, under
+  `browser_tabs` new's rules: its words and address asked about, four pages a
+  turn), anything else gets `auxclick`. Every click, any button: never into a
+  password, card or code field nor a sign-in form's (`off_limits`); a left
+  click of any count judged as a click is (`click_needs_ok`, sending what Yap
+  typed). Chips "Double-clicked ‘…’", "Triple-clicked", "Right-clicked",
+  "Middle-clicked ‘…’ on …: it opened in a new tab".
+- **`browser_drag { from, to }`** (a model that acts; each end a ref or, for
+  one that sees, a point of the latest shot; `to` may be an empty part of the
+  page): as a person drags — the pointer down, moved there in eight steps
+  Rust paces 30 ms apart (a drag library sets itself up between them: jQuery
+  UI's sortable in a frame went through on the live site), up; where what's
+  under the pointer is draggable, **HTML5 drag and drop** (`dragstart`, then
+  `dragenter` / `dragover` / `dragleave` along the way, `drop` where the
+  target takes it, `dragend`, one `DataTransfer` throughout — a link's and a
+  picture's address in it as a browser puts them; `pointercancel` as a
+  browser sends). A slider (`input type=range`) follows the pointer. **What
+  changed says what moved** (`rules::Did`, `did_words`): "moved ‘Card C’ from
+  place 3 to place 1 of 3 (before ‘Card A’)" (its list item's place before and
+  after, by the element or, re-rendered, its words), "moved ‘Card A’ into
+  ‘Done’" (another list, by its label or heading), "set ‘Volume’ to 70".
+  **Its rules** (`rules::drag_needs_ok`): from or onto a password, card or
+  code field or a sign-in form, never; a drop onto something whose words
+  would delete, send, pay or buy — or a trash or bin in any of Yap's seven
+  languages (`words.rs` `trash`: trash, bin, corbeille, Papierkorb, papelera,
+  cestino, lixeira, prullenbak…) — asks first, as a risky click does, and so
+  does dragging something whose own words do ("Slide to pay"), and any drag
+  on a page that takes a card. The card: "Yap wants to drag ‘Card B’ onto
+  ‘Trash’ on board.example.com — It may delete something." (`act` "drag",
+  `text` the target; `pageConfirm.js`, said out loud too:
+  `assistant/spoken_ok.rs`). Chip "Dragged ‘…’ to ‘…’ on …", folded "dragged
+  on the page".
+- **A field's words are about fields**: what Yap never clicks into
+  (`off_limits`: a password, card, bank or code field) is judged only for an
+  element that takes words (`rules::is_field`) — until then a link named
+  "Forgot password?" or a list item "Card A" was refused as one.
+- **Same-origin frames are the page's** (`deep_js!`: `fdoc`, `inner`,
+  `fOff`, `cs`, `win`): an `<iframe>` or `<frame>` whose document the page's
+  script can reach is walked as an open shadow root is — its document one of
+  the trees, the frame its host, at most 40 frames within the same bounds
+  (80,000 elements, 400 trees) — so its words are read with the page's
+  (`shownText` reads the frame's body in its place), its links, buttons and
+  fields are listed and found, its tables read, `browser_scroll_to` reaches
+  it; **the element at a point** goes into the frame at the point less the
+  frame's place (`ptAt`, `fOff`: its rectangle, border and padding, nested
+  frames too), **the focused field** through each frame's `activeElement`
+  (`focusIn`); events are made in the element's own window (`mk`: its
+  `PointerEvent`, `MouseEvent`, `KeyboardEvent`, `DragEvent`, `Event`), at
+  its own coordinates (`loc`), a field's value set by its own window's
+  setter, words typed by its own document; "in view" is in the frame's view
+  and the page's. **Every rule as in the page**: a password, card or code
+  field in a frame refused, a sign-in form there too, a payment field in a
+  frame makes the page one that takes a card (`takesCard` walks frames), a
+  form's submit judged by its own form. **"changed"** observes each frame's
+  document, and a frame that went somewhere new says so ("a frame on the page
+  went to forms.example.com/saved?name=…": a form or a link in a frame takes
+  the frame there, not the tab). A page with no reachable frame and no shadow
+  root reads exactly as before.
+- **A frame from another site** — or a sandboxed one, kept apart whatever its
+  site — **can't be reached by any script outside it**, and is said so: it's
+  an element of its own in a read ("[170] frame "runner" (a frame from another
+  site (….mdnplay.dev): Yap can't read or act inside it; a screenshot shows
+  it)"; `rules::foreign_words`), a plain read lists them (`data.frames`, at
+  most 5, and the note: "It has a frame Yap can't read inside (…)"), and a
+  click, a key, typing (the focus inside one), a hover, a drag or a field set
+  on one is refused with those words. Reaching inside through WebView2's own
+  frame API (`ICoreWebView2Frame`'s scripts) wasn't done: refs, coordinates
+  and the safety rules would need a world per frame, and payment providers'
+  card fields live in exactly such frames.
+- **Plan chats** get the same: `browser_drag` and the new parameters come with
+  the tool loop's own definitions (`claude_live/eyes.rs`: "Drag on the
+  page"); the lists stay identical. `fit.rs`' acting family takes the drag.
+- **The stand-in** (`sim.rs`): `data-sim-wide` / `data-sim-narrow` (shown at
+  900 px and over / under, by the tab's width; `Browser::panel_w`, a test's
+  narrow panel), `data-sim-dblclick-show`, `data-sim-menu` (a right-click's
+  menu), `data-sim-sortable` (a list a drag reorders), `data-sim-drop` (a
+  drop zone), same-origin frames inlined as their own elements
+  (`sim-frame`, their ids and labels their own) and others left as frames.
+- Tested: `see`'s (`Frame::moved` by width only, `width_of`), `view`'s
+  (`zoom_for`, `laid_out_width`), `rules`' (`drag_needs_ok` in every
+  language, `did_words`, `right_click_words`, `foreign_words`, a frame that
+  went), `act::tests` (a double, triple, right and middle click on the
+  stand-in, a drag that reorders and one onto the trash refused, a frame's
+  field typed in and its password refused, another site's and a sandboxed
+  frame refused) and `pages::tests` (a desktop width read and seen, an older
+  shot's point refused, a new one's landing); `chat-pages` (a desktop width
+  in the real webview: the narrow layout read, then 1280 px — `innerWidth`
+  1280, the desktop layout's search box and two columns in the model's picture
+  and in the person's, saved as `desktop-width-as-the-model-sees-it.png` and
+  `…-person-sees-it.png`, kept through a navigation and back, the chip, its ×)
+  and `chat-browse` (double, right and drag clicks on a made-up task board — a
+  word selected, an editor, the page's own menu, none, an HTML5 list
+  reordered, a pointer-dragged puck, the trash's card refused; a form in a
+  same-origin frame read, clicked at points of a shot and sent, a sandboxed
+  frame refused; an older shot's point refused after the width changed).
+  Yap Lab with the fake AI on the live web (`browser-tools` turns 4 and 5,
+  `--fake --live-web --model fake-gpt-5-vision`, 8 Nov 2026): a double click
+  on Wikipedia's first paragraph selected ‘serve’, a right-click there said it
+  has no menu of its own, MDN at 1280 px drew its desktop layout (its header's
+  search box, its live examples listed as frames from another site,
+  `mdnplay.dev`), and jQuery UI's sortable demo — a list in a same-origin
+  frame — was read and Item 3 dragged to the top.
+- **Not yet**: a `browser_tabs new` straight after which a read reads the tab
+  before it (the new tab is made out of sight and comes to the front when the
+  Chat view shows it: a read in between finds the old one in front — seen in
+  the Lab, older than this); the Lab's own page shot of a tab at a desktop
+  width comes out at its CSS size with the page in its top-left corner
+  (Playwright's capture under a page zoom; Yap's own shots are right).
 
 **After Claude Code's markdown file view** (2026-10-31; measured from the
 Claude desktop app's file panel and its document page, `.epitaxy-*`, none
