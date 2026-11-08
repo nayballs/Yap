@@ -17,6 +17,8 @@
     "test:real:build": "npm run test:real:build -w desktop --",
     "test:link": "node --test phone/web/tests/dsp.test.mjs && playwright test -c phone/web/tests",
     "eval": "node scripts/eval.mjs",
+    "lab": "node scripts/lab/lab.mjs",
+    "test:lab": "node --test scripts/lab/lab.test.mjs",
     "hooks:install": "node scripts/install-hooks.mjs",
     "privacy:scan": "node scripts/privacy-guard.mjs --scan-tree",
     "test:privacy": "node --test scripts/privacy-guard.test.mjs",

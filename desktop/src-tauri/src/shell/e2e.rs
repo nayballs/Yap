@@ -1082,6 +1082,8 @@ pub fn start(app: &AppHandle) {
         return;
     }
     tracing::info!("e2e: test mode on");
+    // Yap Lab's run (YAP_LAB=1): its record of every turn (lab.rs).
+    crate::shell::lab::start(app);
     // The real-app tests' robot mode (YAP_REALTEST=1): real pastes, keys and
     // reads, only into the test's own windows (realtest.rs).
     crate::shell::realtest::start(app);

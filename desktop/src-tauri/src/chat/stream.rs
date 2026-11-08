@@ -962,6 +962,8 @@ impl<'de, R: tauri::Runtime> tauri::ipc::CommandArg<'de, R> for PageChannel {
 impl PageChannel {
     /// Send `v` down the channel, if there is one.
     pub fn send_json(&self, v: Value) {
+        // A Yap Lab run keeps what the turn showed (shell/lab.rs).
+        crate::shell::lab::stream(&v);
         if let Some(ch) = &self.0 {
             let _ = ch.send(v);
         }

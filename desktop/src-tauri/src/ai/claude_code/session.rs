@@ -913,6 +913,8 @@ fn read_events(shared: Arc<Shared>, stdout: std::process::ChildStdout, tx: Unbou
             Ok(_) => {}
         }
         let line = String::from_utf8_lossy(&buf);
+        // A Yap Lab run keeps its tool calls and results (shell/lab.rs).
+        crate::shell::lab::claude_line(shared.pid, &line);
         let Some(event) = events::parse_line(&line) else { continue };
         lines += 1;
         match &event {

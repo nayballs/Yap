@@ -200,6 +200,8 @@ pub async fn chat_send(
             crate::snip::waiting::put_back(&app, conversation_id, taken);
         }
     }
+    // A Yap Lab run keeps how the turn ended (shell/lab.rs).
+    crate::shell::lab::sent(conversation_id, &out);
     out
 }
 
