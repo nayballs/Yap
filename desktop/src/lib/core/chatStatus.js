@@ -6,12 +6,15 @@
 // inputs live and the list, its groups, the Chat | Code switch and the menu
 // rail draw what comes out (views/chat/StatusDot.svelte).
 //
-// - **Needs you** (amber, steady; outranks the rest): an agent's permission
-//   prompt (Allow once / Deny) or an agent asking (`asking`), an ask-first card
-//   in its thread (`confirm`, Start / Don't, Allow once / Don't), or an agent's
-//   turn that ended with a question for the person or a plan waiting for "go
-//   ahead" — until they write in that chat after its report (`askedAt`), it
-//   starts again, or a day has passed.
+// - **Needs you** (amber, steady; outranks the rest), only while something
+//   truly waits, live (2026-11-08, as the Agent panel's Needs you): an
+//   agent's permission prompt still waiting (Allow once / Deny: the prompts
+//   list, never an agent's status alone), an ask-first card in its thread
+//   (`confirm`, Send / Don't, Allow once / Don't), or an agent's plan waiting
+//   for "go ahead" on its latest turn while nothing newer has started there
+//   (core/agentNow.js `planWaitsNow`: not set aside as "Plan not used", not
+//   dismissed, within the day). A question an agent ended with is no card
+//   to answer: the chat's report says it, and it reads as "new".
 // - **Working** (a soft pulse): an agent of the chat's queued or running, or an
 //   answer being written there (any turn: typed, the Voice Assistant's, a
 //   phone's, an agent's report: Rust's list of the conversations answering).
@@ -22,12 +25,14 @@
 //   there (`seen`, this window's storage), and it isn't the one on screen.
 //   Opening it clears it.
 
+import { planWaitsNow, PLAN_WAITS_S } from './agentNow.js';
+
 /** A working spell this short never shows. */
 export const WORKING_FLOOR_MS = 300;
 /** A pause this short between two spells joins them (and a spell that ends shows this much longer). */
 export const WORKING_HOLD_MS = 300;
-/** An agent's question or plan still waits on the person for this long after its turn ended. */
-export const WAITS_FOR_MS = 24 * 3600 * 1000;
+/** An agent's plan still waits on the person for this long after its turn ended (core/agentNow.js `PLAN_WAITS_S`). */
+export const WAITS_FOR_MS = PLAN_WAITS_S * 1000;
 /** This window's storage: `{v: 1, seen: {conversation: index}}`. */
 export const SEEN_KEY = 'yap.chat.seen';
 
@@ -51,32 +56,18 @@ export function lastAnswerAt(messages) {
   return at;
 }
 
-/** The report marker (or else the request) of an agent's latest turn: its index in the chat, or -1. */
-function latestTurnAt(agent) {
-  const t = agent?.turnList?.length ? agent.turnList.at(-1) : null;
-  const report = messageAt(t?.reportMessageId ?? agent?.reportMessageId);
-  if (report >= 0) return report;
-  return messageAt(t?.messageId ?? agent?.messageId);
-}
-
 /**
- * **Why a conversation waits on the person**, or null: `approve` (an agent's
- * step to allow), `confirm` (an ask-first card), `question` (an agent asks
- * something), `plan` (an agent's plan waits for "go ahead").
- * `conv`: its summary (`askedAt`), `agents` and `approvals` its own.
+ * **Why a conversation waits on the person**, or null — only what truly
+ * waits, live (the Agent panel's Needs you agrees: core/agentPanel.js):
+ * `approve` (an agent's step to allow, its prompt still waiting), `confirm`
+ * (an ask-first card), `plan` (an agent's plan waits for "go ahead" on its
+ * latest turn, nothing newer begun: `planWaitsNow`). `agents` and
+ * `approvals` its own; `now` in ms.
  */
-function needsWhy({ conv, agents, approvals, confirms, now }) {
-  if (approvals.length || agents.some((j) => j.status === 'asking')) return 'approve';
+function needsWhy({ agents, approvals, confirms, now }) {
+  if (approvals.length) return 'approve';
   if (confirms > 0) return 'confirm';
-  for (const j of agents) {
-    if (j.status !== 'done' || !(j.plan || j.asks)) continue;
-    const ended = Number(j.endedTs) * 1000;
-    if (ended && now - ended > WAITS_FOR_MS) continue;
-    // The person wrote there after its report (or its request): answered.
-    const at = latestTurnAt(j);
-    if (conv && at >= 0 && Number(conv.askedAt ?? -1) > at) continue;
-    return j.plan ? 'plan' : 'question';
-  }
+  if (agents.some((j) => planWaitsNow(j, now / 1000))) return 'plan';
   return null;
 }
 
@@ -162,8 +153,8 @@ export function seenAt(seen, conv) {
  * - `spells` (`trackWorking`), `seen` (`{conv: index}`), `shown` (the
  *   conversation on screen, or null), `now`.
  *
- * `why`: needs → approve | confirm | question | plan; working → agent |
- * answer; new → report | answer.
+ * `why`: needs → approve | confirm | plan; working → agent | answer; new →
+ * report | answer.
  */
 export function chatStatuses({ conversations = null, agents = [], approvals = [], confirms = {}, spells = {}, seen = {}, shown = null, now = Date.now() } = {}) {
   const byConv = (list) => {
@@ -185,7 +176,7 @@ export function chatStatuses({ conversations = null, agents = [], approvals = []
   for (const conv of convs) {
     const id = String(conv.id);
     const mine = agentsOf.get(id) || [];
-    const needs = needsWhy({ conv: conversations ? conv : null, agents: mine, approvals: approvalsOf.get(id) || [], confirms: Number(confirms?.[id]) || 0, now });
+    const needs = needsWhy({ agents: mine, approvals: approvalsOf.get(id) || [], confirms: Number(confirms?.[id]) || 0, now });
     if (needs) {
       out[id] = { state: 'needs', why: needs };
       continue;

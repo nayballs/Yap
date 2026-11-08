@@ -542,6 +542,8 @@ pub fn run() {
             agents::commands::agent_continue,
             agents::commands::agent_message,
             agents::commands::agent_go_ahead,
+            agents::commands::agent_move_to_finished,
+            agents::commands::agent_dismiss,
             agents::commands::agent_undo,
             agents::commands::agent_undo_turn,
             agents::commands::agent_open_terminal,

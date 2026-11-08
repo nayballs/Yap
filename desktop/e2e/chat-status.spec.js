@@ -51,6 +51,7 @@ import {
   readSeen,
   writeSeen,
 } from '../src/lib/core/chatStatus.js';
+import { planWaitsNow } from '../src/lib/core/agentNow.js';
 
 const HERE = path.join(RUNS, 'chat-status-spec');
 const SCRIPTS = path.join(HERE, 'scripts');
@@ -82,27 +83,39 @@ base.describe('core/chatStatus.js', () => {
     const queued = [{ id: 'j1', conversation: 4, status: 'queued' }];
     expect(workingNow({ agents: queued, agentSince: { j1: T - 5000 }, now: T })['4']).toEqual({ since: T - 5000, why: 'agent' });
 
-    // Needs you: a step to allow (the prompt, or the agent asking), an ask-first card.
+    // Needs you, only while something truly waits (2026-11-08): a step to
+    // allow (its prompt still waiting — an agent's status alone isn't one),
+    // an ask-first card.
     const base = { conversations, seen: { 1: 1, 2: 3, 3: 5, 4: 1 }, now: T };
     expect(chatStatuses({ ...base, approvals: [{ id: 7, conversation: 2 }] })['2']).toEqual({ state: 'needs', why: 'approve' });
-    expect(chatStatuses({ ...base, agents: [{ id: 'j', conversation: 2, status: 'asking' }] })['2']).toEqual({ state: 'needs', why: 'approve' });
+    expect(chatStatuses({ ...base, agents: [{ id: 'j', conversation: 2, status: 'asking' }] })['2']).toBeUndefined();
     expect(chatStatuses({ ...base, confirms: { 3: 1 } })['3']).toEqual({ state: 'needs', why: 'confirm' });
     expect(chatStatuses({ ...base, confirms: { 3: 0 } })['3']).toBeUndefined();
 
-    // An agent's turn ended with a question, or a plan waiting for "go ahead":
-    // needs you until the person writes there after its report.
+    // A plan waiting for "go ahead" on the agent's latest turn, nothing newer
+    // begun: needs you, whatever the person wrote since (a question to Chat
+    // isn't a go-ahead).
     const asks = { id: 'q', conversation: 3, status: 'done', asks: true, endedTs: T / 1000 - 60, turnList: [{ n: 1, messageId: 'chat:3:0', reportMessageId: 'chat:3:4' }] };
     const plan = { ...asks, id: 'p', asks: false, plan: true };
     const replied = [conv(1, 1, 0), conv(2, 3, 2), conv(3, 5, 6), conv(4, 1, 0)];
-    expect(chatStatuses({ ...base, conversations: [conv(3, 5, 2)], agents: [asks] })['3']).toEqual({ state: 'needs', why: 'question' });
     expect(chatStatuses({ ...base, conversations: [conv(3, 5, 2)], agents: [plan] })['3']).toEqual({ state: 'needs', why: 'plan' });
-    expect(chatStatuses({ ...base, conversations: replied, agents: [plan] })['3']).toBeUndefined();
-    // Its report still being written: its request is the mark (the person's own message is no answer).
+    expect(chatStatuses({ ...base, conversations: replied, agents: [plan] })['3']).toEqual({ state: 'needs', why: 'plan' });
     const unreported = { ...plan, turnList: [{ n: 1, messageId: 'chat:3:2' }] };
     expect(chatStatuses({ ...base, conversations: [conv(3, 1, 2)], agents: [unreported] })['3']).toEqual({ state: 'needs', why: 'plan' });
-    // A day on, it's let go; a failed or running agent never asks this way.
+    // A question it ended with is no card to answer: not needs you (its report reads as new).
+    expect(chatStatuses({ ...base, conversations: [conv(3, 5, 2)], agents: [asks] })['3']).toBeUndefined();
+    // A plan nobody acted on — set aside once a newer turn began in its chat
+    // ("Plan not used", agents/store.rs), or dismissed — waits no more.
+    expect(chatStatuses({ ...base, conversations: [conv(3, 5, 2)], agents: [{ ...plan, planUnused: true }] })['3']).toBeUndefined();
+    expect(chatStatuses({ ...base, conversations: [conv(3, 5, 2)], agents: [{ ...plan, turnList: [{ ...plan.turnList[0], dismissed: true }] }] })['3']).toBeUndefined();
+    // Allowed already (carrying it out), a day on, failed or at work: never needs you this way.
+    expect(chatStatuses({ ...base, conversations: [conv(3, 5, 2)], agents: [{ ...plan, planAllowed: true }] })['3']).toBeUndefined();
     expect(chatStatuses({ ...base, conversations: [conv(3, 5, 2)], agents: [{ ...plan, endedTs: (T - WAITS_FOR_MS - 1000) / 1000 }] })['3']).toBeUndefined();
     expect(chatStatuses({ ...base, conversations: [conv(3, 5, 2)], agents: [{ ...plan, status: 'failed' }] })['3']).toBeUndefined();
+    expect(chatStatuses({ ...base, conversations: [conv(3, 5, 2)], agents: [{ ...plan, status: 'running' }] })['3']).toBeUndefined();
+    // The phone's agents in brief (link/code/view.rs) read the same.
+    expect(planWaitsNow({ status: 'done', plan: true, planAllowed: false, endedTs: T / 1000 - 60, turnList: [{ n: 1, title: 'Read only', status: 'done' }] }, T / 1000)).toBe(true);
+    expect(planWaitsNow({ status: 'done', plan: true, planUnused: true, endedTs: T / 1000 - 60, turnList: [{ n: 1, status: 'done' }] }, T / 1000)).toBe(false);
 
     // The answer right after an agent's report marker: "an agent's report is in".
     const reported = { id: 'r', conversation: 3, status: 'done', turnList: [{ n: 1, reportMessageId: 'chat:3:4' }] };

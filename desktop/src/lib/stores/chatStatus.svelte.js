@@ -43,6 +43,12 @@ export const chatStatus = $state({
   shown: null,
   /** The conversations answering now, as Rust lists them (ids as strings). */
   answering: [],
+  /**
+   * conversation id → the agent ask-first cards waiting there (`confirm`
+   * events with act "agent", whole: Send / Don't), so the Agent panel's
+   * Needs you shows them with their buttons; gone once answered anywhere.
+   */
+  agentCards: {},
 });
 
 /** conversation → when this window saw it start answering (ms). */
@@ -188,14 +194,31 @@ export function cardAsked(conversation, card) {
   const k = String(conversation);
   const have = confirms[k] || [];
   const waiting = card.state === 'asking';
+  keepAgentCard(k, card, waiting);
   if (waiting === have.includes(card.id)) return;
   confirms = { ...confirms, [k]: waiting ? [...have, card.id] : have.filter((c) => c !== card.id) };
   if (!confirms[k].length) delete confirms[k];
   update();
 }
 
+/** An agent's ask-first card, kept whole while it waits (the Agent panel's row). */
+function keepAgentCard(k, card, waiting) {
+  if (card.act !== 'agent' && !(card.agent && typeof card.agent === 'object')) return;
+  const have = chatStatus.agentCards[k] || [];
+  const rest = have.filter((c) => c.id !== card.id);
+  const next = waiting ? [...rest, card] : rest;
+  if (!waiting && rest.length === have.length) return;
+  const all = { ...chatStatus.agentCards, [k]: next };
+  if (!next.length) delete all[k];
+  chatStatus.agentCards = all;
+}
+
 /** A turn there is over: no card of its waits any more. */
 export function turnOver(conversation) {
+  if (conversation != null && chatStatus.agentCards[String(conversation)]) {
+    const { [String(conversation)]: _card, ...others } = chatStatus.agentCards;
+    chatStatus.agentCards = others;
+  }
   if (conversation == null || !confirms[String(conversation)]) return;
   const { [String(conversation)]: _gone, ...rest } = confirms;
   confirms = rest;

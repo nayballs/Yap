@@ -12,8 +12,11 @@ import { FEATURE_NAME } from './codeChats.js';
 // What the main window's chunk needs at start-up (stores/agents.svelte.js)
 // lives in agentNow.js, so the rest of this file loads with the views that
 // show agents (frontend.md, "One chunk per window").
-import { isLive, PLAN_WAITING, latestStep } from './agentNow.js';
-export { isLive, PLAN_WAITING, latestStep };
+import { isLive, PLAN_WAITING, PLAN_WAITS_S, planWaitsNow, latestStep } from './agentNow.js';
+export { isLive, PLAN_WAITING, PLAN_WAITS_S, planWaitsNow, latestStep };
+
+/** A plan nobody went ahead with before a newer turn began (or set aside by the person): its row's line. */
+export const PLAN_NOT_USED = 'Plan not used';
 
 /** An agent's status as the screens say it. */
 export const STATUS_WORDS = {
@@ -259,6 +262,8 @@ export function turnsOf(agent, log) {
           denials: agent.denials || [],
           text: agent.text || '',
           plan: agent.plan,
+          planAllowed: agent.planAllowed,
+          planUnused: agent.planUnused,
           asks: agent.asks,
           error: agent.error,
           undone: agent.undone,
@@ -409,15 +414,29 @@ export function reportTitle(agent, markerText = '') {
 
 /**
  * **A report's plan still waits for its go-ahead** (its card's Go ahead,
- * `agent_go_ahead`): the turn it reports is a plan, not allowed already, it's
- * the agent's latest turn, and the agent isn't working. An agent from before turns:
- * the agent itself, when this is its latest report.
+ * `agent_go_ahead`): the turn it reports is a plan, not allowed already, not
+ * set aside ("Plan not used": a newer turn began in its chat, or the person
+ * put it aside), it's the agent's latest turn, and the agent isn't working.
+ * An agent from before turns: the agent itself, when this is its latest
+ * report.
  */
 export function planWaits(agent, turn, latest = false) {
-  if (!agent || isLive(agent.status) || !agent.plan || agent.planAllowed) return false;
+  if (!agent || isLive(agent.status) || !agent.plan || agent.planAllowed || agent.planUnused) return false;
   const last = (agent.turnList || []).at(-1);
-  if (turn) return !!turn.plan && !turn.planAllowed && !!last && last.n === turn.n;
+  if (last?.readOnly) return false;
+  if (turn) return !!turn.plan && !turn.planAllowed && !turn.planUnused && !turn.readOnly && !!last && last.n === turn.n;
   return latest && !last;
+}
+
+/**
+ * **A turn's plan was set aside** ("Plan not used"): it ended as a plan,
+ * nobody went ahead with it, and it no longer waits — a newer turn began in
+ * its chat, the person put it aside, or a day went by (`waiting`: whether
+ * it waits now, the Agent panel's Needs you). Its Go ahead is still there,
+ * in its row's details. Pure.
+ */
+export function planNotUsed(turn, waiting = false) {
+  return !!turn && turn.status === 'done' && !!turn.plan && !turn.planAllowed && !turn.readOnly && !waiting;
 }
 
 /** The folder a report marker names ("The agent in garden-planner: …"; "The job in …" in a chat from before the rename to Yap Code). */

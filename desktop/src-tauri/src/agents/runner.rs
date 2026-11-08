@@ -164,6 +164,12 @@ pub struct AgentEvent {
     /// page only ([`emit_live`]), but for a result's and a turn's end.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub usage: Option<super::usage::TurnUsage>,
+    /// **Its record changed without a step** (2026-11-08): "planUnused" (a
+    /// plan nobody acted on, set aside: `store::set_plans_aside`),
+    /// "dismissed" / "shown" (its Agent panel row), "finished" (Move to
+    /// finished). The pages read the agent again.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub changed: Option<String>,
     /// Unix seconds.
     pub ts: u64,
 }
@@ -203,6 +209,10 @@ pub struct Ask {
     pub phone: Option<String>,
     /// A read-only turn (its editing tools off: [`READ_ONLY_OFF`]).
     pub read_only: bool,
+    /// The plan turn a go-ahead carries out (`go`; none: the agent's latest
+    /// turn's plan): marked allowed as the turn is asked for, so it never
+    /// reads as "Plan not used" ([`go_ahead_turn`]).
+    pub plan_turn: Option<u32>,
 }
 
 impl Ask {
@@ -239,6 +249,9 @@ impl Ask {
         }
         if more.phone.is_some() {
             self.phone = more.phone;
+        }
+        if more.plan_turn.is_some() {
+            self.plan_turn = more.plan_turn;
         }
     }
 }
@@ -403,8 +416,26 @@ fn max_now() -> usize {
 }
 
 /// **Start agent `id`** (saved already): now, or queued behind the others.
+/// A plan in its chat nobody acted on stops waiting (Plan not used).
 pub fn start(id: &str) {
+    plans_aside_told();
     schedule(id, None);
+}
+
+/// **Does the runner have agent `id` now** (working, starting, or waiting
+/// for a slot)? An agent whose record says it's at work but that isn't here
+/// died without saying so: the Agent panel offers Move to finished.
+pub fn active(id: &str) -> bool {
+    with_state(|s| s.live.contains_key(id) || s.queue.iter().any(|(q, _, _)| q == id))
+}
+
+/// **A turn began**: the plans in its chat nobody acted on set aside
+/// (`store::plans_aside`), and every page told ("planUnused").
+fn plans_aside_told() {
+    for agent in store::plans_aside() {
+        tracing::info!(id = %agent.id, "Agents: a plan nobody acted on, set aside (Plan not used)");
+        emit(&AgentEvent { changed: Some("planUnused".into()), ..AgentEvent::of(&agent) });
+    }
 }
 
 enum Placed {
@@ -737,6 +768,7 @@ async fn turn(id: &str, message: Option<String>) -> (Status, u32) {
         j.mode = mode.as_str().to_string();
         j.plan = false;
         j.plan_allowed = false;
+        j.plan_unused = false;
         j.asks = false;
         j.reported = false;
         j.error = None;
@@ -753,6 +785,7 @@ async fn turn(id: &str, message: Option<String>) -> (Status, u32) {
             t.effort = effort;
             t.plan = false;
             t.plan_allowed = false;
+            t.plan_unused = false;
             t.asks = false;
             t.error = None;
             t.undone = false;
@@ -796,6 +829,9 @@ struct Follow {
     /// This turn's backups.
     backup: PathBuf,
     mode: Mode,
+    /// A read-only turn: never a plan waiting for a go-ahead, whatever its
+    /// mode ([`after_plan`]'s caller).
+    read_only: bool,
     /// What the agent had cost before this process, and the turn.
     cost_before: f64,
     turn_cost_before: f64,
@@ -876,6 +912,7 @@ impl Follow {
             folder,
             backup,
             mode,
+            read_only: agent.turn_list.iter().find(|t| t.n == n).is_some_and(|t| t.read_only),
             cost_before: agent.cost,
             turn_cost_before: agent.turn_list.iter().find(|t| t.n == n).map_or(0.0, |t| t.cost),
             last_text: String::new(),
@@ -1220,8 +1257,10 @@ impl Follow {
         // Its plan allowed on ExitPlanMode's card (`plan_allowed`): carried
         // out next ([`run`]) — unless Claude Code carried it out in this turn
         // already (an edit went through after the go-ahead): then it's done.
+        // A read-only turn ("catch up", "have a look") reports what it found:
+        // never a plan waiting for a go-ahead, whatever its mode.
         let allowed = with_state(|s| s.live.get(&self.id).is_some_and(|l| l.plan_allowed));
-        let (plan, plan_allowed) = after_plan(self.mode == Mode::Plan && status == Status::Done, allowed, self.edited);
+        let (plan, plan_allowed) = after_plan(self.mode == Mode::Plan && status == Status::Done && !self.read_only, allowed, self.edited);
         let asks = status == Status::Done && !plan_allowed && super::consent::asks(&text);
         let n = self.n;
         let now = store::now_secs();
@@ -1234,6 +1273,7 @@ impl Follow {
             j.error = error.clone();
             j.plan = plan;
             j.plan_allowed = plan_allowed;
+            j.plan_unused = false;
             j.asks = asks;
             j.step.clear();
             if let Some(t) = j.turn_mut(n) {
@@ -1245,6 +1285,7 @@ impl Follow {
                 t.error = error.clone();
                 t.plan = plan;
                 t.plan_allowed = plan_allowed;
+                t.plan_unused = false;
                 t.asks = asks;
             }
         });
@@ -1352,21 +1393,133 @@ pub fn message(id: &str, text: &str, go: bool) -> Result<Agent, String> {
 /// Once only: refused while it works, or once its latest turn isn't a plan
 /// waiting for its go-ahead.
 pub fn go_ahead(id: &str) -> Result<Agent, String> {
-    go_ahead_from(id, None)
+    go_ahead_turn(id, None, None)
 }
 
 /// [`go_ahead`], from paired phone `phone` (Remote Control): the plan's
 /// turn is the phone's (at most Auto, reported there).
 pub fn go_ahead_from(id: &str, phone: Option<&str>) -> Result<Agent, String> {
+    go_ahead_turn(id, None, phone)
+}
+
+/// **Go ahead with turn `turn`'s plan** (none: the agent's latest turn's;
+/// the Agent panel's row, a report card, the bar, a phone). Its latest
+/// turn's plan — waiting, or set aside as "Plan not used" — goes as ever,
+/// Yap's own go-ahead ([`GO_AHEAD`]) on `--resume`. An earlier turn's plan
+/// (set aside: a newer turn came after it) starts now as a turn of its own
+/// that names it ([`earlier_go_ahead`]). Either at the chat's Mode, once:
+/// refused while the agent works, or once that plan went ahead.
+pub fn go_ahead_turn(id: &str, turn: Option<u32>, phone: Option<&str>) -> Result<Agent, String> {
     let agent = store::get(id).ok_or("There's no such agent.")?;
     if agent.status.live() {
         return Err("The agent is working on it already.".into());
     }
-    if !agent.plan || agent.plan_allowed {
-        return Err("There's no plan waiting for a go-ahead: the agent carried on already.".into());
+    let notes = agent.turn_notes();
+    let latest = notes.last().map(|t| t.n);
+    let phone = phone.map(str::to_string);
+    let ask = match turn.filter(|n| Some(*n) != latest) {
+        None => {
+            // (A read-only turn is never a plan to approve.)
+            if !agent.plan || agent.plan_allowed || notes.last().is_some_and(|t| t.read_only) {
+                return Err("There's no plan waiting for a go-ahead: the agent carried on already.".into());
+            }
+            Ask { phone, plan_turn: latest, ..Ask::go_ahead() }
+        }
+        Some(n) => {
+            let t = notes.iter().find(|t| t.n == n).ok_or("That turn isn't the agent's.")?;
+            if t.status != Status::Done || !t.plan || t.plan_allowed || t.read_only {
+                return Err("There's no plan there waiting for a go-ahead: the agent carried on already.".into());
+            }
+            Ask { text: earlier_go_ahead(&t.title), title: "Go ahead with the earlier plan".into(), go: true, phone, plan_turn: Some(n), ..Default::default() }
+        }
+    };
+    tracing::info!(id, turn = ask.plan_turn.unwrap_or(0), phone = ask.phone.is_some(), "Agents: its plan's go-ahead, from a card");
+    follow_up(id, ask).map(|(agent, _)| agent)
+}
+
+/// **A go-ahead's plan, used**: turn `plan_turn`'s (none: the agent's latest
+/// turn's, when it's a plan not allowed yet) marked allowed — so it never
+/// reads as "Plan not used" once the go-ahead's own turn comes after it —
+/// on the turn, and on the agent when it's its latest. Before the go-ahead's
+/// turn is added. Pure.
+pub fn mark_went_ahead(j: &mut Agent, plan_turn: Option<u32>) {
+    let latest = j.turn_list.last().map(|t| t.n);
+    let which = plan_turn.or_else(|| j.turn_list.last().filter(|t| t.plan && !t.plan_allowed).map(|t| t.n));
+    let mut was_latest = false;
+    if let Some(t) = which.and_then(|n| j.turn_mut(n)).filter(|t| t.plan) {
+        t.plan_allowed = true;
+        t.plan_unused = false;
+        was_latest = latest == Some(t.n);
     }
-    tracing::info!(id, phone = phone.is_some(), "Agents: its plan's go-ahead, from a card");
-    follow_up(id, Ask { phone: phone.map(str::to_string), ..Ask::go_ahead() }).map(|(agent, _)| agent)
+    if was_latest {
+        j.plan_allowed = true;
+        j.plan_unused = false;
+    }
+}
+
+/// **Yap's own go-ahead for an earlier turn's plan** (a newer turn came after
+/// it): it names the plan by its request's words (the person's own). Pure.
+pub fn earlier_go_ahead(title: &str) -> String {
+    let title = title.trim();
+    if title.is_empty() {
+        "Go ahead with the plan you made earlier, before my later requests.".to_string()
+    } else {
+        format!("Go ahead with the plan you made earlier, for “{title}”.")
+    }
+}
+
+/// **Move turn `n` of agent `id` to Finished** (the Agent panel's row menu): a
+/// row whose record says it's at work but that the runner doesn't have (it
+/// died without saying so) is marked interrupted — Continue picks it up —
+/// and a plan still waiting no longer does (Plan not used). Never stops or
+/// changes an agent's work: refused while the runner has it ([`active`]).
+pub fn move_to_finished(id: &str, n: u32) -> Result<Agent, String> {
+    if active(id) {
+        return Err("The agent is still working: stop it first.".into());
+    }
+    let now = store::now_secs();
+    let mut found = false;
+    let agent = store::update(id, |j| {
+        j.keep_turns();
+        let latest = j.turn_list.last().map(|t| t.n) == Some(n);
+        let mut unused = false;
+        if let Some(t) = j.turn_mut(n) {
+            found = true;
+            if t.status.live() {
+                t.status = Status::Interrupted;
+                if t.ran() && t.ended_ts == 0 {
+                    t.ended_ts = now;
+                }
+            } else if t.plan_waiting() {
+                t.plan_unused = true;
+                unused = latest;
+            }
+        }
+        if unused {
+            j.plan_unused = true;
+        }
+        // Nothing runs it: the agent itself isn't at work either.
+        if j.status.live() {
+            store::interrupt(j, now);
+        }
+    })
+    .ok_or("There's no such agent.")?;
+    if !found {
+        return Err("That turn isn't the agent's.".into());
+    }
+    tracing::info!(id, turn = n, "Agents: a row moved to Finished");
+    emit(&AgentEvent { changed: Some("finished".into()), ..AgentEvent::at(&agent, n) });
+    super::approve_card::sync();
+    Ok(agent)
+}
+
+/// **Dismiss turn `n` of agent `id`** from the Agent panel (`on`), or show it
+/// again: `store::dismiss`, and every page told.
+pub fn dismiss(id: &str, n: u32, on: bool) -> Result<Agent, String> {
+    let agent = store::dismiss(id, n, on)?;
+    tracing::info!(id, turn = n, on, "Agents: a row dismissed or shown again");
+    emit(&AgentEvent { changed: Some(if on { "dismissed" } else { "shown" }.into()), ..AgentEvent::at(&agent, n) });
+    Ok(agent)
 }
 
 /// **A follow-up for agent `id`** (its Code chat's next request, `message_agent`,
@@ -1560,6 +1713,10 @@ fn resume(id: &str, next: Next, ask: &Ask, new_turn: bool) {
     let title = ask.title();
     let agent = store::update(id, |j| {
         j.keep_turns();
+        // A go-ahead: the plan it carries out was used (never "Plan not used").
+        if go {
+            mark_went_ahead(j, ask.plan_turn);
+        }
         j.mode = mode.as_str().to_string();
         j.model = model.clone();
         j.effort = effort.clone();
@@ -1597,6 +1754,8 @@ fn resume(id: &str, next: Next, ask: &Ask, new_turn: bool) {
         let step = if new_turn || matches!(next, Next::Message(_)) { "Picking up your request" } else { "Picking up where it left off" };
         emit(&AgentEvent { step: Some(step.into()), ..AgentEvent::at(&agent, n) });
     }
+    // A newer turn in the chat: a plan there nobody acted on stops waiting.
+    plans_aside_told();
     schedule(id, ran.then_some(body));
 }
 
@@ -2213,5 +2372,80 @@ mod tests {
         assert_eq!((sent.text.as_str(), sent.go), (GO_AHEAD, true));
         assert_eq!(agent.turn_list.last().map(|t| t.title.as_str()), Some("Go ahead with the plan"));
         test_live(&id, None);
+    }
+
+    #[test]
+    fn a_plan_not_used_still_goes_ahead_and_an_earlier_one_starts_as_a_turn_of_its_own() {
+        let id = store::new_id();
+        let path = r"D:\Projects\garden-planner";
+        let plan = TurnNote { plan: true, plan_unused: true, ..turn(1, "Read only, don't change any files", &[]) };
+        let later = TurnNote { request: "Bolder bag markers".into(), ..turn(2, "Bolder bag markers", &["map.js"]) };
+        // Its latest turn's plan, set aside (another agent of the chat came after): Go ahead as ever.
+        store::insert(Agent { id: id.clone(), path: path.into(), status: Status::Done, mode: "plan".into(), plan: true, plan_unused: true, turn_list: vec![plan.clone()], ..Default::default() });
+        test_live(&id, Some(path));
+        go_ahead_turn(&id, Some(1), None).unwrap();
+        let sent = test_pending(&id).expect("its next turn");
+        assert_eq!((sent.text.as_str(), sent.go, sent.plan_turn), (GO_AHEAD, true, Some(1)));
+        test_live(&id, None);
+        // An earlier turn's plan (a newer turn came after it): a turn naming it.
+        store::update(&id, |j| {
+            j.plan = false;
+            j.plan_unused = false;
+            j.turn_list = vec![plan.clone(), later.clone()];
+        });
+        test_live(&id, Some(path));
+        go_ahead_turn(&id, Some(1), None).unwrap();
+        let sent = test_pending(&id).expect("its next turn");
+        assert_eq!(sent.text, "Go ahead with the plan you made earlier, for “Read only, don't change any files”.");
+        assert_eq!((sent.go, sent.plan_turn), (true, Some(1)));
+        test_live(&id, None);
+        assert!(go_ahead_turn(&id, Some(2), None).is_err(), "its latest turn is no plan");
+        assert!(go_ahead_turn(&id, Some(9), None).is_err(), "no such turn");
+        assert_eq!(earlier_go_ahead(""), "Go ahead with the plan you made earlier, before my later requests.");
+        // The go-ahead marks its plan used (allowed), never "Plan not used" again.
+        let mut j = store::get(&id).unwrap();
+        mark_went_ahead(&mut j, Some(1));
+        assert!(j.turn_list[0].plan_allowed && !j.turn_list[0].plan_unused);
+        assert!(!j.plan_allowed, "not the agent's: its latest turn is another");
+        let mut k = Agent { plan: true, plan_unused: true, turn_list: vec![plan.clone()], ..Default::default() };
+        mark_went_ahead(&mut k, None);
+        assert!(k.plan_allowed && !k.plan_unused && k.turn_list[0].plan_allowed);
+        let mut none = Agent { turn_list: vec![later.clone()], ..Default::default() };
+        mark_went_ahead(&mut none, None);
+        assert!(!none.turn_list[0].plan_allowed, "no plan to mark");
+    }
+
+    #[test]
+    fn move_to_finished_only_when_nothing_runs_it_and_never_stops_one() {
+        let id = store::new_id();
+        let path = r"D:\Projects\garden-planner";
+        // Its record says running; the runner doesn't have it (it died).
+        store::insert(Agent { id: id.clone(), path: path.into(), status: Status::Running, turn_list: vec![TurnNote { status: Status::Running, ended_ts: 0, ..turn(1, "Bolder bag markers", &[]) }], ..Default::default() });
+        // While the runner has it: refused, untouched.
+        test_live(&id, Some(path));
+        assert!(active(&id));
+        assert!(move_to_finished(&id, 1).unwrap_err().contains("stop it first"));
+        assert_eq!(store::get(&id).unwrap().status, Status::Running);
+        test_live(&id, None);
+        assert!(!active(&id));
+        let j = move_to_finished(&id, 1).unwrap();
+        assert_eq!((j.status, j.turn_list[0].status), (Status::Interrupted, Status::Interrupted));
+        assert!(j.turn_list[0].ended_ts > 0);
+        // A plan waiting: set aside (Plan not used), its agent too.
+        store::update(&id, |j| {
+            j.status = Status::Done;
+            j.plan = true;
+            j.turn_list = vec![TurnNote { plan: true, ..turn(1, "Read only", &[]) }];
+        });
+        let j = move_to_finished(&id, 1).unwrap();
+        assert!(j.turn_list[0].plan_unused && j.plan_unused && !j.plan_waits());
+        assert!(move_to_finished(&id, 7).is_err());
+        // Dismissed and shown again, kept.
+        assert!(dismiss(&id, 1, true).unwrap().turn_list[0].dismissed);
+        assert!(!dismiss(&id, 1, false).unwrap().turn_list[0].dismissed);
+        // Its event says the record changed.
+        let v = serde_json::to_value(AgentEvent { changed: Some("finished".into()), ..AgentEvent::at(&j, 1) }).unwrap();
+        assert_eq!(v["changed"], "finished");
+        assert!(serde_json::to_value(AgentEvent::at(&j, 1)).unwrap().get("changed").is_none());
     }
 }

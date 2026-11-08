@@ -554,13 +554,27 @@ turn simply ended: nothing carried on, though "yes" plainly meant go ahead.
   ready").
 - **Go ahead on the report** (`AgentReportCard.svelte`, `agent_go_ahead`,
   `runner::go_ahead`): a "The agent's plan is ready" card whose plan is still the
-  agent's latest turn has **Go ahead** beside Open. The person's click is their
+  agent's latest turn, and still waiting (not set aside as "Plan not used":
+  [The panel](#the-panel)), has **Go ahead** beside Open. The person's click is their
   consent: the go-ahead turn, as above. Once: the button is disabled from
   the click ("Going ahead", kept in `stores/agents.svelte.js` `wentAhead`), and
   `agent_go_ahead` refuses an agent that's working or has no plan waiting. The
   bar's "The agent's plan is ready" card has **Go ahead** too (then Open).
+  The Agent panel's row has it too: inline while the plan waits, in its
+  details once it's a plan not used (`agent_go_ahead {id, turn}`: an earlier
+  turn's plan as a turn of its own).
+- **A go-ahead marks its plan used** (`runner::mark_went_ahead`, 2026-11-08):
+  the plan turn a go-ahead carries out is marked allowed as the go-ahead's
+  turn is asked for (a typed "go ahead" too), so the turn after it never
+  makes it read as "Plan not used".
 - **A plain go-ahead to an agent already carrying it out** (`message_agent`, its
   turn not a plan): nothing more is sent ("The agent in … is on it already").
+- **What Chat's model hears** (`agent_status`): `plan`, `plan_waits`,
+  `plan_not_used` and `plan_note` in plain words ("Its plan is ready and waits
+  for the user's go-ahead.", "Its plan wasn't used: the user moved on to a
+  newer request before going ahead…", "Its plan was allowed: it's being
+  carried out."); "go ahead with that plan" still goes through
+  `message_agent` as ever.
 
 ### The safety rule
 
@@ -781,20 +795,87 @@ used. See [Yap's crew](#yaps-crew-the-rows-characters).
   used, "80k"; "—" when none said) and **Time** (its turns added up, "4:02";
   the time between them left out).
 - **Groups**, each with its count ("Running · 3"), folding (▾ / ▸): **Needs
-  you** (a turn asking for a step, its plan waiting for Go ahead, or its
-  question, for a day), **Running**, **Finished** (its head across the row,
-  **Collapse** / **Expand** at its right), **Queued** (a request not sent
-  yet: behind the turn working, or the agent stopped first), newest first in
-  each.
+  you**, **Running**, **Finished** (its head across the row, **Collapse** /
+  **Expand** at its right), **Queued** (a request not sent yet: behind the
+  turn working, or the agent stopped first), newest first in each.
+- **Needs you only while something truly waits, live** (2026-11-08, after
+  the maintainer's panel kept a plan from before the redesign — "Read only,
+  don't change any files" · Plan · "Its plan is ready", with a ✓ — in
+  Needs you below a newer turn already running, with nothing to act on). It
+  had counted any plan turn still awaiting its go-ahead, of whichever agent
+  of the chat, for a day; and a turn ending in a question. Now
+  (`core/agentPanel.js` `stateOf`, the same live state the cards use):
+  - **a permission prompt the agent is blocked on**, still waiting (the
+    prompts list, `stores/agents.svelte.js` `approvals`: a turn that says
+    "asking" with no prompt waiting reads as Running);
+  - **a plan's go-ahead on the agent's latest turn, nothing newer begun in
+    its chat** (`core/agentNow.js` `planWaitsNow`, within the day; a plan
+    set aside, below, never);
+  - **an ask-first card still waiting** in its chat (Send / Don't: a row of
+    its own, kept whole by `stores/chatStatus.svelte.js` `agentCards`).
+  A question an agent ended with is no card to answer: Finished, its line
+  "It has a question for you" (the chat's report says it). A read-only turn
+  ("catch up", "have a look") is never a plan waiting, whatever its mode
+  (`runner` ends it with no plan; `TurnNote::plan_waiting`, `planWaitsNow`
+  and the phone's brief say no too). Under Bypass permissions nothing waits
+  but an ask-first card after outside content: Claude Code's own prompts are
+  answered no with no card (`approve::UNATTENDED`), so none is pending, and
+  a Bypass turn never ends as a plan. Chat's status
+  dots, the rail and the switch agree (`core/chatStatus.js`, the same
+  `planWaitsNow`), and so does the phone (its agents in brief carry
+  `planUnused`); the Yap bar's "1 agent working" counts the agents at work,
+  as the panel's Running does.
+- **The answer, in the row**: a Needs you row has its card's own buttons
+  inline, through the same commands the thread's cards use, so whichever is
+  answered first, both close — **Allow once** / **Deny** with what it asks
+  ("Asks to: Run a command: npm test", the command whole when it differs:
+  `claude_approve_answer`); a plan's prompt **Go ahead** / **Not yet** (the
+  same answer); a plan its turn ended with **Go ahead** (`agent_go_ahead`,
+  the report card's; its button then used, `wentAhead`) / **Not yet** (set
+  aside: Plan not used); an ask-first card's brief in full and **Send** /
+  **Don't** (`chat_page_confirm`: the brief is seen before it goes). Bypass is
+  never raised; it's the PC, so a phone's fresh-tap rules don't apply.
+- **A plan nobody acted on stops waiting: "Plan not used"** (`store::set_plans_aside`,
+  `runner::plans_aside_told`): when a newer turn begins in its Code chat —
+  a later turn of the same agent, or another agent of the chat made or
+  started since the plan was ready (Continue counts) — a plan still awaiting
+  its go-ahead is marked `planUnused` (the turn's, and the agent's when it's
+  its latest), every page told (`yap-agent` `changed: "planUnused"`). A
+  go-ahead's own turn marks its plan allowed instead (`runner::mark_went_ahead`).
+  Its row moves to Finished, a neutral pose (standing still in its own
+  colours: neither ✓ nor failed, `unused`), its line "Plan not used"; its ▸
+  details keep **Go ahead**: its agent's latest turn's plan goes as ever
+  (Yap's "Go ahead with the plan." on `--resume`), an earlier turn's plan
+  starts now as a turn of its own naming it ("Go ahead with the plan you
+  made earlier, for “…”.", `runner::go_ahead_turn`, `earlier_go_ahead`). The
+  report card's Go ahead goes with the plan's waiting (a plan not used has
+  none there). Kept in agents.json; **at start** the same rule sets aside
+  every plan from before it that isn't its chat's latest turn
+  (`store::migrate`), so an older Yap's save, which drops the field, is
+  mended at the next start.
+- **A row's menu** (its ⋯ at the top right on a hover or a focus, a
+  right-click, the menu key): **Move to finished** for a row in Needs you
+  or Running whose agent nothing runs (`agent.active` is false: the runner
+  has no slot or queue place for it, e.g. after a crash), marking that turn
+  and its agent interrupted (Continue picks it up) or a waiting plan Plan
+  not used (`agent_move_to_finished`, refused while the runner has it);
+  **Dismiss** for a row not at work (`agent_dismiss`: hidden from the panel,
+  kept in its log and History; a plan waiting, dismissed, no longer waits),
+  with **Show dismissed · N** at the foot of Finished bringing them back
+  into view (remembered per agent while the window stays open) and
+  **Restore** on each; and for an agent at work, **Stop…** (asked first).
+  None of them stops or changes an agent's work but Stop.
 - **A row is one turn** of the Code chat's agent (and of any other agent the
   chat has — a fresh one —, grouped the same way; its Open goes to that
   agent's own tab), folded to savvy's density:
   - **its model's character** (`CrewAvatar.svelte`): Haiku, Sonnet, Opus or
     Fable by the turn's model id (Sonnet when it names none), holding its
-    Mode's prop, in a pose that says how it stands — walking while it works,
-    stopped and looking up with an amber "!" when it needs you, sitting with
-    a ✓ when done, grey when stopped, a red badge when it failed, faint while
-    queued; its label "Opus, working, Auto mode";
+    Mode's prop, in a pose that says how its row stands — walking while it
+    works, stopped and looking up with an amber "!" when it needs you (a
+    plan waiting too, never a ✓), sitting with a ✓ when done, grey when
+    stopped, a red badge when it failed, faint while queued, standing still
+    in its own colours with no badge for a plan not used (`unused`); its label
+    "Opus, working, Auto mode";
   - its **title** on one line, whole on a hover (`ui/overflowTip.js`);
   - **Mode · model · effort** ("Auto · Sonnet 5.5 · Medium"), the Mode in its
     colour (Auto the Code teal, Bypass amber as its chip, Accept edits the
@@ -802,8 +883,8 @@ used. See [Yap's crew](#yaps-crew-the-rows-characters).
   - **"3/7 · Writing the planting guide"**: its to-do list's count and the
     one in progress (as Claude Code's spinner says it); with no list, the
     line it's on; "Needs you"'s "Waiting for you to allow a step" or "Its plan
-    is ready"; a finished one "7/7 · All done", "Done", "Stopped" or "Didn't
-    finish · why";
+    is ready"; a finished one "7/7 · All done", "Done", "Stopped", "Didn't
+    finish · why", "Plan not used" or "It has a question for you";
   - at the right, small: **ctx % · tokens · ≈ $ · time** — its context's fill
     and size (its latest call), its cost (Claude Code's figure, else the
     estimate), how long it worked (savvy's `m:ss`);
@@ -861,7 +942,8 @@ characters are Yap's own.
   character's colour and accent are tokens (`--yap-crew-*`, app.css, light and
   dark), its highlight, shade, mouth and feet mixed from them. The poses:
   needs you's eyes up a square, done's body down a square with its eyes shut,
-  stopped grey, queued faint; the badges are HTML (✓, ×, the "!" bubble).
+  stopped grey, queued faint, unused (a plan not used, 2026-11-08) its still
+  frame as it is; the badges are HTML (✓, ×, the "!" bubble).
 - **Only on screen**: the panel's `data-crew-paused` holds every animation
   where it is while the window is hidden or minimised
   (`stores/windowShown.svelte.js`: the window asked on its focus changes and
@@ -1186,7 +1268,14 @@ saves ([config-and-data.md](./config-and-data.md)).
     (`{input, output, cacheRead, cacheWrite, context, window, estimate?}`:
     its tokens, its context's fill, an estimate while unpriced; 2026-11-08,
     `agents/usage.rs`) — fields of the turn's own, which an older Yap drops on
-    its save (the turn then shows its log's list and no numbers);
+    its save (the turn then shows its log's list and no numbers); each
+    turn's `planUnused` (its plan set aside: "Plan not used") and `dismissed`
+    (its Agent panel row hidden), and the agent's own `planUnused` (its
+    latest turn's, as `plan` is) — 2026-11-08, left out while false. An older
+    Yap's save drops them: the next start sets the plans aside again
+    (`store::migrate`: a plan waiting that isn't its chat's latest turn), and
+    a dismissed row shows again (harmless). The page's copies also carry
+    `active` (the runner has it now, for Move to finished), never saved;
   - `modes`: each chat's Mode (conversation id → mode);
   - `codeChats`: each Code chat's folder (conversation id → `{path, ts}`);
   - `bypassConfirmed`: the one-time OK for Bypass permissions.
@@ -1362,7 +1451,7 @@ Pages (`desktop/src/lib/`): `views/chat/` (`ChatSideSwitch`,
 
 | Event | Payload |
 |---|---|
-| `yap-agent` | `{id, status, folder, conversation?, step?, file?, command?, about?, said?, todos?, now?, diff?, text?, cost?, problem?, turn?, queued?, ts}` — `turn` the turn it's about (`TurnNote.n`), `queued` a request queued as that turn (its title); `status` queued \| running \| asking \| done \| failed \| stopped \| interrupted; `about` a command's description; `said` its words between tool calls; `todos` `[{content, status, activeForm?}]` (status pending \| in_progress \| completed); `now` the line it's on with no new step; `diff` `{file, kind, lines, added, removed, more?, all?}` — `kind` edit \| new \| rewrite \| write, each line its mark first (`-`, `+`, ` `; a lone `@` a gap); `text` its final words (an older Yap's words as it worked too); `problem` `{kind, message, resetsAt?}`, `kind` notSignedIn \| rateLimited \| billing \| account \| paysAnotherWay; `usage` what its turn has used (`{input, output, cacheRead, cacheWrite, context, window, estimate?}`, `agents/usage.rs`: live, never a line of its log, but for a result's and a turn's end) |
+| `yap-agent` | `{id, status, folder, conversation?, step?, file?, command?, about?, said?, todos?, now?, diff?, text?, cost?, problem?, turn?, queued?, ts}` — `turn` the turn it's about (`TurnNote.n`), `queued` a request queued as that turn (its title); `status` queued \| running \| asking \| done \| failed \| stopped \| interrupted; `about` a command's description; `said` its words between tool calls; `todos` `[{content, status, activeForm?}]` (status pending \| in_progress \| completed); `now` the line it's on with no new step; `diff` `{file, kind, lines, added, removed, more?, all?}` — `kind` edit \| new \| rewrite \| write, each line its mark first (`-`, `+`, ` `; a lone `@` a gap); `text` its final words (an older Yap's words as it worked too); `problem` `{kind, message, resetsAt?}`, `kind` notSignedIn \| rateLimited \| billing \| account \| paysAnotherWay; `usage` what its turn has used (`{input, output, cacheRead, cacheWrite, context, window, estimate?}`, `agents/usage.rs`: live, never a line of its log, but for a result's and a turn's end); `changed` its record changed with no step (2026-11-08: `planUnused` a plan set aside, `dismissed` / `shown` its panel row, `finished` Move to finished): the pages read it again |
 | `yap-agent-report` | `{agent, turn, conversation, messageId, markerId, status}` — the turn it reports, and its status; `messageId` null when a newer question came first |
 | `yap-agent-open` | `{id, conversation}` (with `yap-assistant-turn {phase: "open", conversationId, show: true}`) |
 | `yap-claude-approve` | `{id, run, conversation, origin, tool, summary, detail, label, askedTs}` — `run` is the agent's id; a plan's (`tool` "ExitPlanMode"): `summary` "The plan is ready", `detail` the plan |
@@ -1380,11 +1469,13 @@ modeLabel, brief, newFolder, web, continues}`, answered by `chat_page_confirm`.
 
 | Command | Does |
 |---|---|
-| `agent_list` | every agent, newest first |
-| `agent_get {id}` | `{agent, log}`: the agent and its `yap-agent` events (none once swept) |
+| `agent_list` | every agent, newest first (each with `active`: the runner has it now) |
+| `agent_get {id}` | `{agent, log}`: the agent (with `active`) and its `yap-agent` events (none once swept) |
 | `agent_stop {id}` / `agent_continue {id}` | Stop; Continue a stopped, interrupted or failed one |
 | `agent_message {id, text}` | the tab's "Tell the agent…": its next turn, queued while it works ("go ahead" after a plan carries it out) |
-| `agent_go_ahead {id}` | a report card's Go ahead: a plan waiting carried out (Yap's go-ahead at the chat's Mode), once; refused while it works or with no plan waiting |
+| `agent_go_ahead {id, turn?}` | a report card's or an Agent panel row's Go ahead: a plan waiting (or set aside: Plan not used) carried out (Yap's go-ahead at the chat's Mode), once; `turn` an earlier turn's plan, as a turn of its own naming it; refused while it works or with no plan there |
+| `agent_move_to_finished {id, turn}` | a panel row's Move to finished: a turn whose record says it's at work but that nothing runs marked interrupted (its agent too), a waiting plan Plan not used; refused while the runner has the agent |
+| `agent_dismiss {id, turn, dismissed?}` | a panel row's Dismiss (`dismissed` true, the default) or Restore (false): hidden from the panel, kept in the log and History; a waiting plan dismissed waits no more |
 | `agent_undo {id}` | Undo all: `{restored, deleted, skipped, refused, failed, error?}` |
 | `agent_undo_turn {id, turn}` | Undo this turn, the same; refused ("Undo the later change first…") while a later turn changed one of its files |
 | `agent_open_terminal {id}` | its session in Windows Terminal, once it isn't running |
@@ -1405,7 +1496,15 @@ the build's own stand-in replaying `script` from now on),
 ## Tests
 
 - **Unit** (`cargo test agents::`, `chat::tools::agents`, `chat::turn::report`):
-  the store (interrupted at start, the sweep, the log's trim and cap), the
+  the store (interrupted at start, the sweep, the log's trim and cap; plans
+  nobody acted on set aside — another agent of the chat made or started
+  since, a later turn of its own, a go-ahead's turn marking it allowed
+  instead, an agent from before turns —, the load migration, `planUnused`
+  and `dismissed` kept and an older file read without them, `active` never
+  read or saved, a row dismissed and shown again), the runner (a plan not
+  used still going ahead, an earlier turn's plan as a turn naming it, a
+  go-ahead marking its plan used, Move to finished only when nothing runs
+  the agent, the `changed` event), the phone's brief's `planUnused`, the
   person's words for a lower Mode in seven languages and the model's mode
   left out without them (`consent`, `modes::model_pick`), a plain go-ahead
   and Yap's own words after the web through both callers, after outside
@@ -1505,11 +1604,26 @@ the build's own stand-in replaying `script` from now on),
     third line, the groups, the totals); a Code chat's agent from the
     stand-in's TodoWrite calls and usage: Running with "3/7 · Writing the
     planting guide" and its bar at 3/7, the tiles growing, the card live
-    under the pill; a step to allow → Needs you; Allow once → Finished, ✓,
+    under the pill; a step to allow → Needs you, with what it asks and Allow
+    once / Deny in the row, the chat's dot amber; Allow once in the row →
+    the thread's card closes, Finished, ✓,
     the result's totals and window kept in agents.json, the card folded to
     "7 to-dos · all done"; a follow-up's row; ▸, ↑ ↓, Enter, a group folding,
-    Open and Back, a pill at its row. Light, dark and narrow. Yap's crew: its
-    character a row, each Mode's prop and pose, rows folded and remembered,
+    Open and Back, a pill at its row. Light, dark and narrow. **Needs you,
+    live** (2026-11-08): the rules (`stateOf` with a prompt waiting or not, a
+    question no longer Needs you, a plan not used, dismissed rows, a dead
+    row's menu, an ask-first card's row); a plan's prompt (Plan mode's
+    ExitPlanMode on the stand-in) Needs you with Go ahead / Not yet, Go
+    ahead in the row carrying it out and closing the thread's card; Not yet
+    in the row, the plan waiting (Needs you, the dot amber, looking up, no
+    ✓), then a fresh agent's newer turn running → the plan "Plan not used"
+    in Finished, `planUnused` in agents.json, the dot working and the bar's
+    count the agents at work; its Go ahead from its details (a new turn);
+    ⋯ Dismiss, Show dismissed, Restore (right-click), kept in agents.json;
+    a seeded "running" agent nothing runs → ⋯ Move to finished (no Stop),
+    interrupted, the dot and the bar no longer counting it. Yap's crew: its
+    character a row, each Mode's prop and pose (a plan waiting looking up, a
+    plan not used plain and still), rows folded and remembered,
     moving only on screen, still under reduced motion, the crew sheet.
 - **Unit** for what a turn used (`agents::usage`): a call counted once, the
   context its latest call, a helper's call costed but not the context, a

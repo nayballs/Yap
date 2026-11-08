@@ -54,6 +54,7 @@
   import { EFFORT_LABELS } from '../../core/effort.js';
   import { claudePlan, signInClaudePlan } from '../../stores/claudePlan.svelte.js';
   import { agents as agentsStore } from '../../stores/agents.svelte.js';
+  import { chatStatus } from '../../stores/chatStatus.svelte.js';
   import AgentTurn from './AgentTurn.svelte';
   import AgentPanel from './AgentPanel.svelte';
 
@@ -255,7 +256,9 @@
       }
       agent = next;
       const known = !Number.isInteger(ev.turn) || (agent.turnList || []).some((t) => t.n === ev.turn);
-      if (was !== next.status || !known || ev.queued) refreshSoon();
+      // (Its record changed with no step — a plan set aside, a row dismissed
+      // or moved to Finished: `changed` — read again too.)
+      if (was !== next.status || !known || ev.queued || ev.changed) refreshSoon();
     } else {
       refreshSoon();
     }
@@ -430,7 +433,17 @@
     <div class="agentbody" bind:this={bodyEl} data-view={view}>
       {#if view === 'panel'}
         {@render notices()}
-        <AgentPanel agent={shown} agents={panelAgents} logs={panelLogs} steps={agentsStore.steps} {now} {want} onopen={openRow} />
+        <AgentPanel
+          agent={shown}
+          agents={panelAgents}
+          logs={panelLogs}
+          steps={agentsStore.steps}
+          approvals={agentsStore.approvals}
+          cards={shown.conversation == null ? [] : chatStatus.agentCards[String(shown.conversation)] || []}
+          {now}
+          {want}
+          onopen={openRow}
+        />
         {#if undone}
           <p class="undone" aria-live="polite" data-testid={many ? 'chat-agent-undone-all' : 'chat-agent-undone'}>{undoneLine(undone)}</p>
         {/if}

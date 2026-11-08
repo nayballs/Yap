@@ -97,10 +97,15 @@ export function propOf(mode) {
   return 'auto';
 }
 
-/** The poses: working (walks, its prop moving), needs (stops, looks up, "!"), done (sits, ✓), stopped (grey), failed (a red badge), queued (faint). */
-export const POSES = ['working', 'needs', 'done', 'stopped', 'failed', 'queued'];
+/**
+ * The poses: working (walks, its prop moving), needs (stops, looks up,
+ * "!"), done (sits, ✓), stopped (grey), failed (a red badge), queued
+ * (faint), unused (a plan nobody went ahead with: stands still in its own
+ * colours, no badge — neither ✓ nor failed).
+ */
+export const POSES = ['working', 'needs', 'done', 'stopped', 'failed', 'queued', 'unused'];
 
-const POSE_WORDS = { working: 'working', needs: 'needs you', done: 'done', stopped: 'stopped', failed: "didn't finish", queued: 'queued' };
+const POSE_WORDS = { working: 'working', needs: 'needs you', done: 'done', stopped: 'stopped', failed: "didn't finish", queued: 'queued', unused: 'plan not used' };
 
 /** **An avatar's label**: "Opus, working, Auto mode". */
 export function crewLabel(character, pose, modeWord) {

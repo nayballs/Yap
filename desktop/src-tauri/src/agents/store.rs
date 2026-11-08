@@ -202,6 +202,18 @@ pub struct Agent {
     /// session couldn't be resumed): the tab's first line.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub why_new: Option<String>,
+    /// **Its latest turn's plan wasn't used** ([`TurnNote::plan_unused`],
+    /// mirrored here as `plan` and `plan_allowed` are). A new field: an
+    /// older Yap drops it on its save, and the next start sets it again
+    /// ([`set_plans_aside`]).
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub plan_unused: bool,
+    /// **The runner has it now** (working, or waiting for a slot): set on the
+    /// copies the page reads (`agent_list`, `agent_get`), so the Agent panel
+    /// knows a row whose record says "running" but that nothing runs (Move
+    /// to finished). Never saved: the store's own copy is always false.
+    #[serde(skip_deserializing, skip_serializing_if = "std::ops::Not::not")]
+    pub active: bool,
     /// The step it's on now (not kept: the tab's live line).
     #[serde(skip)]
     pub step: String,
@@ -270,12 +282,34 @@ pub struct TurnNote {
     /// works (`agents/usage.rs`).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub usage: Option<super::usage::TurnUsage>,
+    /// **Plan not used** (2026-11-08): a plan nobody went ahead with before a
+    /// newer turn began in its Code chat ([`set_plans_aside`]), or one the
+    /// person put aside (the Agent panel's Not yet, Move to finished,
+    /// Dismiss). It no longer waits on anyone: its row is in Finished, with
+    /// Go ahead still in its details (`runner::go_ahead_turn`). A new field
+    /// of the turn's own: an older Yap drops it on its save, and the next
+    /// start sets it again (the plan isn't its chat's latest turn).
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub plan_unused: bool,
+    /// **Dismissed** from the Agent panel (its row's Dismiss): hidden there
+    /// until "Show dismissed"; kept in the log and History. Never stops or
+    /// changes the agent's work. A new field (an older Yap's save drops it:
+    /// the row shows again).
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub dismissed: bool,
 }
 
 impl TurnNote {
     /// It ran (or runs) in a Claude Code process.
     pub fn ran(&self) -> bool {
         self.started_ts > 0
+    }
+
+    /// **Its plan still waits for a go-ahead**: it ended as a plan, not
+    /// allowed and not set aside. Pure.
+    pub fn plan_waiting(&self) -> bool {
+        // (A read-only turn reports what it found: never a plan to approve.)
+        self.status == Status::Done && self.plan && !self.plan_allowed && !self.plan_unused && !self.read_only
     }
 }
 
@@ -333,6 +367,7 @@ impl Agent {
             asks: self.asks,
             report_message_id: self.report_message_id.clone(),
             undone: self.undone,
+            plan_unused: self.plan_unused,
             ..Default::default()
         }]
     }
@@ -362,9 +397,16 @@ impl Agent {
             error: t.error,
             plan: t.plan,
             plan_allowed: t.plan_allowed,
+            plan_unused: t.plan_unused,
             asks: t.asks,
             ..self.clone()
         }
+    }
+
+    /// **Its plan waits for a go-ahead**: its latest turn ended as a plan, not
+    /// allowed, not set aside, and it isn't at work. Pure.
+    pub fn plan_waits(&self) -> bool {
+        !self.status.live() && self.plan && !self.plan_allowed && !self.plan_unused && !self.turn_list.last().is_some_and(|t| t.read_only)
     }
 }
 
@@ -528,6 +570,17 @@ pub fn now_secs() -> u64 {
 #[cfg(not(test))]
 static STATE: Mutex<Option<Store>> = Mutex::new(None);
 
+/// **agents.json as it's read**: the plans nobody acted on set aside
+/// ([`set_plans_aside`]: a plan waiting for its go-ahead that isn't its
+/// chat's latest turn is "Plan not used"). Whether anything changed. Pure.
+pub fn migrate(store: &mut Store) -> bool {
+    let n = set_plans_aside(&mut store.agents).len();
+    if n > 0 {
+        tracing::info!(n, "Agents: plans nobody acted on, set aside (Plan not used)");
+    }
+    n > 0
+}
+
 #[cfg(not(test))]
 fn save(store: &Store) {
     if crate::ai::eval::active() {
@@ -539,8 +592,17 @@ fn save(store: &Store) {
 #[cfg(not(test))]
 fn with_store<R>(f: impl FnOnce(&mut Store) -> R) -> R {
     let mut guard = STATE.lock().unwrap_or_else(|p| p.into_inner());
-    let store = guard.get_or_insert_with(|| SAVER.load(&path()));
+    let store = guard.get_or_insert_with(|| {
+        let mut s: Store = SAVER.load(&path());
+        // Plans nobody acted on, from before "Plan not used" (or an older
+        // Yap's save, which drops it): set aside once, as they're read.
+        if migrate(&mut s) {
+            save(&s);
+        }
+        s
+    });
     if SAVER.any_unread() && SAVER.refresh(&path(), store) {
+        migrate(store);
         save(store);
     }
     f(store)
@@ -653,6 +715,104 @@ pub fn detach(conversation: u64) -> usize {
         }
         n
     })
+}
+
+// ---- plans nobody acted on, and rows dismissed ----
+
+/// **Plans nobody acted on, set aside** ("Plan not used", 2026-11-08: the
+/// Agent panel kept an old plan in Needs you for ever, below a newer turn
+/// already running). A turn whose plan still waits for its go-ahead
+/// ([`TurnNote::plan_waiting`]) once a newer turn has begun in its chat — a
+/// later turn of the same agent, or another agent of the same conversation
+/// made or started since the plan was ready — is marked `plan_unused` (its
+/// agent too, when it's the agent's latest turn). A later turn that was the
+/// plan's own go-ahead ("Go ahead with the plan.", the person's "go ahead":
+/// `consent::go_ahead`) marks it allowed instead: it was carried out. Run
+/// at start (plans from before this rule, or saved by an older Yap, which
+/// drops the field) and whenever a turn begins ([`plans_aside`]). The ids
+/// of the agents changed. Pure.
+pub fn set_plans_aside(agents: &mut [Agent]) -> Vec<String> {
+    // Every agent's chat, when it was made, and when each turn started.
+    let all: Vec<(Option<u64>, String, u64, Vec<u64>)> =
+        agents.iter().map(|a| (a.conversation, a.id.clone(), a.created_ts, a.turn_notes().iter().map(|t| t.started_ts).collect())).collect();
+    let mut changed = Vec::new();
+    for a in agents.iter_mut() {
+        if !a.turn_notes().iter().any(TurnNote::plan_waiting) {
+            continue;
+        }
+        a.keep_turns();
+        let mut touched = false;
+        let count = a.turn_list.len();
+        for i in 0..count {
+            if !a.turn_list[i].plan_waiting() {
+                continue;
+            }
+            let ready = a.turn_list[i].ended_ts.max(a.turn_list[i].started_ts);
+            let next = a.turn_list.get(i + 1);
+            let went_ahead = next.is_some_and(|n| super::consent::go_ahead(&n.request));
+            let newer_here = next.is_some();
+            let newer_elsewhere = ready > 0
+                && a.conversation.is_some()
+                && all.iter().any(|(c, id, made, starts)| *c == a.conversation && *id != a.id && (*made >= ready || starts.iter().any(|s| *s > 0 && *s >= ready)));
+            let latest = i + 1 == count;
+            let t = &mut a.turn_list[i];
+            if went_ahead {
+                t.plan_allowed = true;
+            } else if newer_here || newer_elsewhere {
+                t.plan_unused = true;
+                if latest {
+                    a.plan_unused = true;
+                }
+            } else {
+                continue;
+            }
+            touched = true;
+        }
+        if touched {
+            changed.push(a.id.clone());
+        }
+    }
+    changed
+}
+
+/// **A turn began** (or a new agent was made): the plans in its chat nobody
+/// acted on set aside ([`set_plans_aside`]), saved. The agents changed, as
+/// they are now.
+pub fn plans_aside() -> Vec<Agent> {
+    with_store(|s| {
+        let ids = set_plans_aside(&mut s.agents);
+        if ids.is_empty() {
+            return Vec::new();
+        }
+        save(s);
+        s.agents.iter().filter(|a| ids.contains(&a.id)).cloned().collect()
+    })
+}
+
+/// **Turn `n` of agent `id` dismissed** from the Agent panel (`on`), or
+/// shown again: hidden there, kept in its log and History. A plan still
+/// waiting, dismissed, no longer waits (Plan not used). The agent as it is
+/// now.
+pub fn dismiss(id: &str, n: u32, on: bool) -> Result<Agent, String> {
+    let mut found = false;
+    let agent = update(id, |j| {
+        j.keep_turns();
+        let latest = j.turn_list.last().map(|t| t.n) == Some(n);
+        let Some(t) = j.turn_mut(n) else { return };
+        found = true;
+        t.dismissed = on;
+        if on && t.plan_waiting() {
+            t.plan_unused = true;
+            if latest {
+                j.plan_unused = true;
+            }
+        }
+    })
+    .ok_or("There's no such agent.")?;
+    if !found {
+        return Err("That turn isn't the agent's.".into());
+    }
+    Ok(agent)
 }
 
 // ---- each chat's Mode ----
@@ -1135,6 +1295,124 @@ mod tests {
         assert_eq!(j.status, Status::Interrupted);
         assert_eq!(j.turn_list.iter().map(|t| (t.status, t.ended_ts)).collect::<Vec<_>>(), [(Status::Interrupted, 50), (Status::Interrupted, 0)]);
         assert!(!j.turn_list[1].ran(), "never sent: Continue sends it");
+    }
+
+    /// A plan turn that ended at `ended` in conversation `conv`.
+    fn planned(id: &str, conv: u64, created: u64, ended: u64) -> Agent {
+        Agent {
+            id: id.into(),
+            conversation: Some(conv),
+            status: Status::Done,
+            plan: true,
+            created_ts: created,
+            ended_ts: ended,
+            turn_list: vec![TurnNote { n: 1, title: "Read only, don't change any files".into(), status: Status::Done, plan: true, started_ts: created + 1, ended_ts: ended, ..Default::default() }],
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn plan_not_used_and_dismissed_are_kept_and_an_older_file_reads_without_them() {
+        let mut j = planned("ab12", 3, 10, 20);
+        j.plan_unused = true;
+        j.turn_list[0].plan_unused = true;
+        j.turn_list[0].dismissed = true;
+        let v = serde_json::to_value(&j).unwrap();
+        assert_eq!((v["planUnused"].as_bool(), v["turnList"][0]["planUnused"].as_bool(), v["turnList"][0]["dismissed"].as_bool()), (Some(true), Some(true), Some(true)));
+        let back: Agent = serde_json::from_value(v).unwrap();
+        assert_eq!(back, j);
+        // Left out while false, so a file reads as before.
+        let plain = serde_json::to_value(planned("cd34", 3, 10, 20)).unwrap();
+        assert!(plain.get("planUnused").is_none() && plain["turnList"][0].get("planUnused").is_none() && plain["turnList"][0].get("dismissed").is_none());
+        // An older Yap's file (no such fields): read as waiting, not dismissed.
+        let old: Agent = serde_json::from_str(r#"{"id":"ef56","status":"done","plan":true,"turnList":[{"n":1,"status":"done","plan":true}]}"#).unwrap();
+        assert!(!old.plan_unused && !old.turn_list[0].plan_unused && !old.turn_list[0].dismissed);
+        assert!(old.plan_waits() && old.turn_list[0].plan_waiting());
+        // A read-only turn ("catch up", "have a look") is never a plan waiting for a go-ahead.
+        let mut looked = planned("rd01", 5, 10, 20);
+        looked.turn_list[0].read_only = true;
+        assert!(!looked.plan_waits() && !looked.turn_list[0].plan_waiting());
+        let later = Agent { id: "rd02".into(), conversation: Some(5), created_ts: 99, ..Default::default() };
+        assert!(set_plans_aside(&mut [looked.clone(), later.clone()]).is_empty(), "nothing to set aside");
+        assert_eq!(set_plans_aside(&mut [planned("rd03", 5, 10, 20), later]), ["rd03"], "(as a plan would be)");
+        // `active` is the runner's, for the page: never read from, nor written to, the file.
+        let read: Agent = serde_json::from_str(r#"{"id":"gh78","active":true}"#).unwrap();
+        assert!(!read.active);
+        assert!(serde_json::to_value(Agent { active: true, ..read.clone() }).unwrap()["active"] == true);
+        assert!(serde_json::to_value(&read).unwrap().get("active").is_none());
+    }
+
+    #[test]
+    fn a_plan_nobody_acted_on_is_set_aside_once_a_newer_turn_begins_in_its_chat() {
+        // The maintainer's panel (8 Nov): a plan in one agent, a newer agent
+        // in the same Code chat already running.
+        let stale = planned("aa11", 7, 100, 200);
+        let newer = Agent { id: "bb22".into(), conversation: Some(7), status: Status::Running, created_ts: 300, turn_list: vec![TurnNote { n: 1, status: Status::Running, started_ts: 301, ..Default::default() }], ..Default::default() };
+        // Another chat's plan, and a plan with nothing newer: both still wait.
+        let elsewhere = planned("cc33", 8, 100, 200);
+        let latest = planned("dd44", 9, 100, 200);
+        let mut agents = vec![stale, newer, elsewhere, latest];
+        assert_eq!(set_plans_aside(&mut agents), ["aa11"]);
+        assert!(agents[0].plan_unused && agents[0].turn_list[0].plan_unused, "set aside, the agent too (its latest turn)");
+        assert!(!agents[0].plan_waits() && agents[0].plan, "still a plan: Go ahead stays in its details");
+        assert!(agents[2].plan_waits() && agents[3].plan_waits());
+        assert!(set_plans_aside(&mut agents).is_empty(), "once");
+        // An agent of the chat made before the plan was ready, whose turn
+        // started after it: newer too.
+        let mut agents = vec![planned("ee55", 7, 100, 200), Agent { id: "ff66".into(), conversation: Some(7), created_ts: 50, turn_list: vec![TurnNote { n: 2, started_ts: 250, ..Default::default() }], ..Default::default() }];
+        assert_eq!(set_plans_aside(&mut agents), ["ee55"]);
+        // …but not one whose last turn started before (still at work on it).
+        let mut agents = vec![planned("gg77", 7, 100, 200), Agent { id: "hh88".into(), conversation: Some(7), status: Status::Running, created_ts: 50, turn_list: vec![TurnNote { n: 1, started_ts: 60, status: Status::Running, ..Default::default() }], ..Default::default() }];
+        assert!(set_plans_aside(&mut agents).is_empty());
+        assert!(agents[0].plan_waits());
+        // The same agent: a later turn came after its plan.
+        let mut one = planned("ii99", 7, 100, 200);
+        one.plan = false;
+        one.turn_list.push(TurnNote { n: 2, request: "Bolder bag markers on the map".into(), status: Status::Running, started_ts: 300, ..Default::default() });
+        one.status = Status::Running;
+        let mut agents = vec![one];
+        assert_eq!(set_plans_aside(&mut agents), ["ii99"]);
+        assert!(agents[0].turn_list[0].plan_unused && !agents[0].plan_unused, "the turn, not the agent (its latest is the newer one)");
+        // …unless the later turn was the plan's own go-ahead: used, allowed.
+        let mut went = planned("jj00", 7, 100, 200);
+        went.turn_list.push(TurnNote { n: 2, request: "Go ahead with the plan.".into(), status: Status::Done, started_ts: 300, ended_ts: 400, ..Default::default() });
+        let mut typed = planned("kk11", 8, 100, 200);
+        typed.turn_list.push(TurnNote { n: 2, request: "Yep, go ahead".into(), status: Status::Done, started_ts: 300, ended_ts: 400, ..Default::default() });
+        let mut agents = vec![went, typed];
+        assert_eq!(set_plans_aside(&mut agents), ["jj00", "kk11"]);
+        assert!(agents.iter().all(|a| a.turn_list[0].plan_allowed && !a.turn_list[0].plan_unused));
+        // An agent from before turns: its one turn kept, then set aside.
+        let mut older = Agent { id: "ll22".into(), conversation: Some(7), status: Status::Done, plan: true, created_ts: 100, ended_ts: 200, ..Default::default() };
+        older.turn_list.clear();
+        let mut agents = vec![older, Agent { id: "mm33".into(), conversation: Some(7), created_ts: 500, ..Default::default() }];
+        assert_eq!(set_plans_aside(&mut agents), ["ll22"]);
+        assert_eq!(agents[0].turn_list.len(), 1);
+        assert!(agents[0].plan_unused);
+        // The load migration: the same rule over the file.
+        let mut file = Store { agents: vec![planned("nn44", 7, 100, 200), Agent { id: "oo55".into(), conversation: Some(7), created_ts: 300, ..Default::default() }], ..Default::default() };
+        assert!(migrate(&mut file));
+        assert!(file.agents[0].plan_unused);
+        assert!(!migrate(&mut file), "once");
+    }
+
+    #[test]
+    fn a_row_dismissed_is_kept_and_a_waiting_plan_dismissed_stops_waiting() {
+        insert(planned("pp66", 7, 100, 200));
+        let j = dismiss("pp66", 1, true).unwrap();
+        assert!(j.turn_list[0].dismissed && j.turn_list[0].plan_unused && j.plan_unused);
+        assert!(!j.plan_waits());
+        let j = dismiss("pp66", 1, false).unwrap();
+        assert!(!j.turn_list[0].dismissed, "shown again");
+        assert!(j.turn_list[0].plan_unused, "a plan set aside stays set aside");
+        assert!(dismiss("pp66", 9, true).is_err());
+        assert!(dismiss("zz99", 1, true).is_err());
+        // Through the store: a turn beginning sets the chat's plans aside.
+        insert(planned("qq77", 12, 100, 200));
+        insert(Agent { id: "rr88".into(), conversation: Some(12), created_ts: 300, ..Default::default() });
+        let changed = plans_aside();
+        assert_eq!(changed.iter().map(|a| a.id.as_str()).collect::<Vec<_>>(), ["qq77"]);
+        assert!(get("qq77").unwrap().plan_unused);
+        assert!(plans_aside().is_empty());
     }
 
     #[test]

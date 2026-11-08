@@ -23,8 +23,10 @@ pub fn brief(agent: &Agent, line: Option<&str>) -> Brief {
         started_ts: agent.started_ts,
         ended_ts: agent.ended_ts,
         asks: agent.asks,
-        plan: agent.plan,
+        // (A read-only turn is never a plan waiting for a go-ahead.)
+        plan: agent.plan && !notes.last().is_some_and(|t| t.read_only),
         plan_allowed: agent.plan_allowed,
+        plan_unused: agent.plan_unused,
         message_id: agent.message_id.clone(),
         report_message_id: agent.report_message_id.clone(),
         turn_list: notes
@@ -206,6 +208,10 @@ mod tests {
         for k in ["turnList", "messageId", "startedTs", "endedTs", "planAllowed"] {
             assert!(v.get(k).is_some(), "{k}");
         }
+        // A plan set aside ("Plan not used") says so; one waiting says nothing more.
+        assert!(v.get("planUnused").is_none());
+        let aside = serde_json::to_value(brief(&Agent { plan_unused: true, ..done.clone() }, None)).unwrap();
+        assert_eq!(aside["planUnused"], true);
         // Not over, or over within the day, newest first.
         let old = Agent { id: "old1".into(), status: Status::Done, ended_ts: 10, updated_ts: 10, created_ts: 5, ..agent() };
         let recent = Agent { id: "new1".into(), status: Status::Done, ended_ts: 100_000, updated_ts: 100_000, created_ts: 99_000, ..agent() };
