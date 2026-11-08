@@ -6,13 +6,15 @@
 // `server/discover` with "method not found", as most servers do today, so
 // Yap's client falls back. No network beyond 127.0.0.1; fictional data only.
 //
-//   node fake-mcp.js [--log <file>] [--stderr] [--spawn-child --pid-file <file>] [--exit-after <n>]
+//   node fake-mcp.js [--log <file>] [--stderr] [--spawn-child --pid-file <file>] [--exit-after <n>] [--fail-if <file>]
 //   node fake-mcp.js --http <port|0> --port-file <file> [--token <t>] [--slow-ms <n>] [--hang] [--redirect]
 //
 // --log         every request and cancel as a JSON line ({ kind, method, tool, auth })
 // --stderr      a few lines on stderr (Show details)
 // --spawn-child a grandchild that runs until it's killed; its pid in --pid-file
 // --exit-after  exit after that many tool calls (a crash)
+// --fail-if     a stdio server that exits at once while that file is there (a
+//               program that won't start, until the test fixes it: Try again)
 // --http        Streamable HTTP on 127.0.0.1 (0: any port, written to --port-file)
 // --token       a request without `Authorization: Bearer <t>` is a 401 with a challenge
 // --slow-ms     every answer after that long
@@ -171,6 +173,11 @@ function startGrandchild() {
 // ---- stdio ------------------------------------------------------------------------------------
 
 function serveStdio() {
+  const failIf = option('--fail-if');
+  if (failIf && fs.existsSync(failIf)) {
+    process.stderr.write('fake-mcp: the settings file is broken\n', () => process.exit(4));
+    return;
+  }
   // Which of the variables a test cares about reached it (names only).
   log({ kind: 'env', names: Object.keys(process.env).filter((k) => /^(HOME_TOKEN|LOG_LEVEL|YAP_.*)$/i.test(k)).sort() });
   if (flag('--stderr')) {

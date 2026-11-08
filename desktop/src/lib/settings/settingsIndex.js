@@ -6,14 +6,16 @@
 // group's id without "settings-"); `fallback`, the row to land on when that
 // one only shows with something switched on (Prompt Studio, with cleanup
 // on). `scope` opens one of Language Models' tabs first. `toggle` = a plain
-// on/off config field the result can switch in place.
+// on/off config field the result can switch in place. `preview` = found only
+// while that preview is on (`visibleIndex`: the connectors preview's page).
 //
 // desktop/e2e/settings-search.spec.js opens every entry and checks its row is
-// there, so the index can't drift from the pages.
+// there, so the index can't drift from the pages (a preview's entries:
+// connectors.spec.js, with it on).
 import { NAV_GROUPS, PAGE_LABELS } from './nav.js';
 import { FEATURE_NAME } from '../core/codeChats.js';
 
-/** @typedef {{ page: string, section: string, label: string, desc?: string, keywords?: string, anchor: string, fallback?: string, scope?: string, toggle?: string }} Entry */
+/** @typedef {{ page: string, section: string, label: string, desc?: string, keywords?: string, anchor: string, fallback?: string, scope?: string, toggle?: string, preview?: string }} Entry */
 
 /** @type {Entry[]} */
 export const SETTINGS_INDEX = [
@@ -243,6 +245,14 @@ export const SETTINGS_INDEX = [
   { page: 'connectors', section: 'Connectors', label: 'Google Calendar', desc: 'Reminders for Google meetings', keywords: 'calendar google connect', anchor: 'google-calendar' },
   { page: 'connectors', section: 'Connectors', label: 'Outlook Calendar', desc: 'Reminders for Outlook meetings', keywords: 'calendar outlook microsoft office ics', anchor: 'outlook-calendar' },
   { page: 'connectors', section: 'Connectors', label: 'Other calendar', desc: 'iCloud, Fastmail or any iCal link', keywords: 'calendar icloud fastmail ical ics webcal', anchor: 'other-calendar' },
+  // The connectors preview's page (connectors/ConnectorsPage.svelte): found
+  // only while it's on (`preview`; visibleIndex below).
+  { page: 'connectors', section: 'Connectors', label: 'Your connectors', desc: 'The services and programs Chat and the Voice Assistant can use', keywords: 'connectors mcp servers tools yours sign in token tools permissions always allow ask first', anchor: 'your-connectors', preview: 'connectors' },
+  { page: 'connectors', section: 'Connectors', label: 'Discover connectors', desc: 'Notion, Linear, GitHub, Atlassian and more', keywords: 'discover browse directory catalogue catalog notion linear github atlassian supabase sentry cloudflare airtable stripe zapier home assistant granola fireflies intercom', anchor: 'connectors-tabs', preview: 'connectors' },
+  { page: 'connectors', section: 'Connectors', label: 'Add a custom connector', desc: 'A server at a link, with a token or a sign-in', keywords: 'add custom connector mcp server url link remote http token oauth', anchor: 'connector-add', preview: 'connectors' },
+  { page: 'connectors', section: 'Connectors', label: 'Add a program on this PC', desc: 'A local MCP server, its command shown before it runs', keywords: 'program local stdio npx uvx docker command mcp server', anchor: 'connector-add', preview: 'connectors' },
+  { page: 'connectors', section: 'Connectors', label: 'Import from Claude Desktop', desc: 'Its MCP servers, read from its settings', keywords: 'import claude desktop claude_desktop_config mcpservers json', anchor: 'connector-add', preview: 'connectors' },
+  { page: 'connectors', section: 'Connectors', label: 'Paste a connector setup', desc: 'An mcpServers block, a link or an npx line', keywords: 'paste json mcpservers setup config', anchor: 'connector-add', preview: 'connectors' },
 
   // ---- AI apps (MCP) ----
   { page: 'mcp', section: 'AI apps', label: 'Add Yap to your AI apps', desc: 'Claude, ChatGPT, Gemini, Cursor and more read your meetings and notes', keywords: 'mcp claude chatgpt codex gemini cursor claude code vs code windsurf ai apps', anchor: 'mcp-apps' },
@@ -335,12 +345,21 @@ function find(text, forms) {
 }
 
 /**
+ * The entries this Yap can show: a preview's (`preview: 'connectors'`) only
+ * while it's on (`on.connectors`: connectors_list's `enabled`).
+ * @param {{ connectors?: boolean }} [on]
+ */
+export function visibleIndex(on = {}) {
+  return SETTINGS_INDEX.filter((e) => !e.preview || !!on[e.preview]);
+}
+
+/**
  * Search the index. Every word must be found somewhere in the entry (its
  * label, line, section, page or keywords); a match in the label counts most,
  * one at a word's start more than one inside it.
  * @returns {(Entry & { score: number })[]} best first
  */
-export function searchSettings(query, index = SETTINGS_INDEX) {
+export function searchSettings(query, index = visibleIndex()) {
   const ts = terms(query);
   if (!ts.length) return [];
   const out = [];

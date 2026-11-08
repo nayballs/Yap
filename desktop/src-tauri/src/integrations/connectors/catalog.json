@@ -1,0 +1,244 @@
+{
+  "version": 1,
+  "_about": "Settings → Connectors → Discover: the connectors Yap can use today (8 Nov 2026), from the official servers' public addresses. Only ones that let any app sign in by itself (dynamic client registration), or take a pasted token, or run on this PC. `tested` is the date someone signed in and ran its tools with Yap (shown as Tested with Yap); null until then. catalog.rs reads it; docs/architecture/integrations.md, \"The catalogue\".",
+  "connectors": [
+    {
+      "id": "notion",
+      "name": "Notion",
+      "publisher": "Notion Labs",
+      "blurb": "Search, read and write the pages and databases in your Notion workspace.",
+      "logo": "notion",
+      "url": "https://mcp.notion.com/mcp",
+      "fallbackSse": "https://mcp.notion.com/sse",
+      "registryName": "com.notion/mcp",
+      "signIn": "oauth",
+      "tested": null,
+      "notes": "An Enterprise workspace's admin may allow only the apps they've approved.",
+      "docs": "https://www.notion.com/help/notion-mcp"
+    },
+    {
+      "id": "linear",
+      "name": "Linear",
+      "publisher": "Linear",
+      "blurb": "Find, create and update issues, projects and comments.",
+      "logo": "linear",
+      "url": "https://mcp.linear.app/mcp",
+      "registryName": "app.linear/linear",
+      "signIn": "oauth",
+      "token": { "help": "A personal API key from Linear's settings works too, instead of signing in." },
+      "tested": null,
+      "docs": "https://linear.app/docs/mcp"
+    },
+    {
+      "id": "atlassian",
+      "name": "Atlassian",
+      "publisher": "Atlassian",
+      "blurb": "Search and update Jira issues and Confluence pages.",
+      "logo": "atlassian",
+      "url": "https://mcp.atlassian.com/v2/mcp",
+      "registryName": "com.atlassian/atlassian-mcp-server",
+      "signIn": "oauth",
+      "tested": null,
+      "notes": "Your site's admin may need to allow it first.",
+      "docs": "https://github.com/atlassian/atlassian-mcp-server"
+    },
+    {
+      "id": "github",
+      "name": "GitHub",
+      "publisher": "GitHub",
+      "blurb": "Repositories, issues, pull requests and code search.",
+      "logo": "github",
+      "url": "https://api.githubcopilot.com/mcp/",
+      "registryName": "io.github.github/github-mcp-server",
+      "signIn": "token",
+      "token": {
+        "help": "Make a fine-grained personal access token with read access to the repositories you want, then paste it here.",
+        "url": "https://github.com/settings/tokens"
+      },
+      "tested": null,
+      "notes": "GitHub doesn't let other apps sign in to it this way yet, so it takes a token.",
+      "docs": "https://github.com/github/github-mcp-server"
+    },
+    {
+      "id": "supabase",
+      "name": "Supabase",
+      "publisher": "Supabase",
+      "blurb": "Look into your Supabase projects: tables, queries, logs and settings.",
+      "logo": "supabase",
+      "url": "https://mcp.supabase.com/mcp?read_only=true",
+      "signIn": "oauth",
+      "token": { "help": "A personal access token from your Supabase account works too, instead of signing in." },
+      "tested": null,
+      "notes": "Added read-only: Chat can look but not change anything. For changes, add it by hand without read_only=true.",
+      "docs": "https://supabase.com/docs/guides/getting-started/mcp"
+    },
+    {
+      "id": "sentry",
+      "name": "Sentry",
+      "publisher": "Sentry",
+      "blurb": "Errors, issues and releases, and what caused them.",
+      "logo": "sentry",
+      "url": "https://mcp.sentry.dev/mcp",
+      "signIn": "oauth",
+      "tested": null,
+      "docs": "https://mcp.sentry.dev/"
+    },
+    {
+      "id": "cloudflare",
+      "name": "Cloudflare",
+      "publisher": "Cloudflare",
+      "blurb": "Your Cloudflare account: Workers, DNS, logs and more.",
+      "logo": "cloudflare",
+      "url": "https://mcp.cloudflare.com/mcp",
+      "signIn": "oauth",
+      "token": { "help": "A Cloudflare API token works too, instead of signing in." },
+      "tested": null,
+      "docs": "https://developers.cloudflare.com/agents/model-context-protocol/cloudflare/servers-for-cloudflare/"
+    },
+    {
+      "id": "airtable",
+      "name": "Airtable",
+      "publisher": "Airtable",
+      "blurb": "Read and update the records in your Airtable bases.",
+      "logo": "airtable",
+      "url": "https://mcp.airtable.com/mcp",
+      "signIn": "oauth",
+      "token": { "help": "An Airtable personal access token works too, instead of signing in." },
+      "tested": null,
+      "docs": "https://airtable.com/developers/agents/mcp/getting-started"
+    },
+    {
+      "id": "intercom",
+      "name": "Intercom",
+      "publisher": "Intercom",
+      "blurb": "Search conversations, contacts and help articles.",
+      "logo": "intercom",
+      "url": "https://mcp.intercom.com/mcp",
+      "signIn": "oauth",
+      "tested": null,
+      "notes": "For workspaces hosted in the US. Intercom has another address for EU ones.",
+      "docs": "https://developers.intercom.com/docs/guides/mcp"
+    },
+    {
+      "id": "granola",
+      "name": "Granola",
+      "publisher": "Granola",
+      "blurb": "Your Granola meeting notes, for Chat to search and read.",
+      "logo": null,
+      "color": "#3d6b35",
+      "url": "https://mcp.granola.ai/mcp",
+      "signIn": "oauth",
+      "tested": null,
+      "notes": "Off by default on Granola's Enterprise plan: its admin turns it on.",
+      "docs": "https://docs.granola.ai/help-center/sharing/integrations/mcp"
+    },
+    {
+      "id": "fireflies",
+      "name": "Fireflies",
+      "publisher": "Fireflies.ai",
+      "blurb": "Your Fireflies meeting transcripts and summaries.",
+      "logo": null,
+      "color": "#7b3ff2",
+      "url": "https://api.fireflies.ai/mcp",
+      "signIn": "oauth",
+      "token": { "help": "A Fireflies API key works too, instead of signing in." },
+      "tested": null,
+      "docs": "https://docs.fireflies.ai/getting-started/mcp-configuration"
+    },
+    {
+      "id": "stripe",
+      "name": "Stripe",
+      "publisher": "Stripe",
+      "blurb": "Customers, payments, invoices and subscriptions, and Stripe's docs.",
+      "logo": "stripe",
+      "url": "https://mcp.stripe.com",
+      "registryName": "com.stripe/mcp",
+      "signIn": "oauth",
+      "token": { "help": "A restricted API key works too, instead of signing in. Start with a sandbox's." },
+      "tested": null,
+      "notes": "It can move money: try it with a sandbox account first. Its refund, payment link and invoice tools start Off.",
+      "defaults": {
+        "create_refund": "off",
+        "create_payment_link": "off",
+        "create_invoice": "off",
+        "finalize_invoice": "off",
+        "cancel_subscription": "off",
+        "update_subscription": "off"
+      },
+      "docs": "https://docs.stripe.com/mcp"
+    },
+    {
+      "id": "zapier",
+      "name": "Zapier",
+      "publisher": "Zapier",
+      "blurb": "The actions you set up in Zapier, across the apps it connects.",
+      "logo": "zapier",
+      "url": "https://mcp.zapier.com/api/v1/connect",
+      "signIn": "token",
+      "token": { "help": "Zapier gives apps it doesn't list a connection token: copy it from your Zapier MCP server's page, then paste it here." },
+      "tested": null,
+      "docs": "https://docs.zapier.com/mcp/overview/how-connections-work"
+    },
+    {
+      "id": "home-assistant",
+      "name": "Home Assistant",
+      "publisher": "Home Assistant",
+      "blurb": "The lights, switches and other devices in your home.",
+      "logo": "homeassistant",
+      "url": "http://homeassistant.local:8123/api/mcp",
+      "urlEditable": true,
+      "signIn": "token",
+      "token": { "help": "Make a long-lived access token: your Home Assistant profile → Security → Long-lived access tokens." },
+      "tested": null,
+      "notes": "Turn on Home Assistant's Model Context Protocol Server integration first. It's on your network, so nothing goes over the internet.",
+      "docs": "https://www.home-assistant.io/integrations/mcp_server/"
+    },
+    {
+      "id": "files",
+      "name": "Files",
+      "publisher": "Model Context Protocol",
+      "blurb": "Read and write the files in folders you choose, on this PC.",
+      "logo": null,
+      "color": "#5b6b7a",
+      "signIn": "local",
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-filesystem"],
+      "needs": "Node.js",
+      "tested": null,
+      "notes": "A program on this PC. Add each folder it may use after the other arguments.",
+      "docs": "https://github.com/modelcontextprotocol/servers/tree/main/src/filesystem"
+    }
+  ],
+  "later": [
+    {
+      "id": "google",
+      "name": "Google Workspace",
+      "blurb": "Gmail, Drive, Calendar, Docs and Sheets.",
+      "logo": "google",
+      "why": "Google's servers are a preview that needs an app Google has reviewed, and Gmail and Drive need its security review too. Your Google Calendar already works in Yap, above."
+    },
+    {
+      "id": "microsoft-365",
+      "name": "Microsoft 365",
+      "blurb": "Outlook, Teams, OneDrive and SharePoint.",
+      "logo": null,
+      "color": "#d83b01",
+      "why": "Microsoft's needs each organisation's admin to approve Yap, and a paid Copilot plan."
+    },
+    {
+      "id": "slack",
+      "name": "Slack",
+      "blurb": "Channels, messages and search.",
+      "logo": null,
+      "color": "#4a154b",
+      "why": "Slack lets only apps listed in its Marketplace sign in, and Yap isn't listed yet."
+    },
+    {
+      "id": "figma",
+      "name": "Figma",
+      "blurb": "Your designs and their details.",
+      "logo": "figma",
+      "why": "Figma lets only the apps on its own list sign in, and it isn't adding new ones for now."
+    }
+  ]
+}

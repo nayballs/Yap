@@ -25,7 +25,9 @@
   import openaiLogo from '../../assets/providers/openai.svg';
   import geminiLogo from '../../assets/providers/gemini.svg';
 
-  let { goto = null } = $props();
+  //   mcpLink: the AI apps (MCP) row at the foot (not in Connectors' Yours,
+  //   whose header links it already).
+  let { goto = null, mcpLink = true } = $props();
 
   // The link form that's open: 'outlook' | 'ics' | null.
   let form = $state(null);
@@ -296,6 +298,7 @@
   {/if}
 
   <!-- The way to the AI apps (MCP) page: one link row, as everywhere. -->
+  {#if mcpLink}
   <div class="mcprow">
     <LinkRow label="AI apps (MCP)" desc="Give your AI access to your meeting transcripts and notes" onclick={goMcp}>
       {#snippet extra()}
@@ -307,6 +310,7 @@
       {/snippet}
     </LinkRow>
   </div>
+  {/if}
 </div>
 
 <style>

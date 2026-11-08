@@ -8,7 +8,7 @@
 // modules. "every index entry points at a real row" opens each entry's page
 // in the app and finds its row, so the index can't drift from the pages.
 import { test, expect, openSettings, closeSettings, settingsDialog, expectStore } from './support/fixtures.js';
-import { SETTINGS_INDEX, searchSettings, groupResults, countByPage, highlight, stems } from '../src/lib/settings/settingsIndex.js';
+import { SETTINGS_INDEX, visibleIndex, searchSettings, groupResults, countByPage, highlight, stems } from '../src/lib/settings/settingsIndex.js';
 import { NAV_GROUPS, PAGE_IDS, PAGE_LABELS, ALIASES, resolveTarget } from '../src/lib/settings/nav.js';
 
 const SCOPES = ['cleanup', 'voiceAgent', 'noteFormatting', 'chat'];
@@ -101,7 +101,9 @@ test('every index entry points at a real row on its page', async ({ main }) => {
   await main.setViewportSize({ width: 1200, height: 800 });
   const dialog = await openSettings(main, 'General');
   const missing = [];
-  for (const e of SETTINGS_INDEX) {
+  // A preview's entries (the connectors page) only show with it on:
+  // connectors.spec.js opens those.
+  for (const e of visibleIndex()) {
     await goto(main, { page: e.page, anchor: e.anchor, scope: e.scope });
     if (e.page === 'account') await expect(dialog.getByRole('heading', { level: 1, name: 'Account' })).toBeVisible();
     else await expect(navItem(main, e.page)).toHaveAttribute('aria-current', 'page');
