@@ -147,6 +147,7 @@ pub mod connector_ask;
 pub mod screen;
 pub mod selected;
 pub mod skill;
+pub mod spoken_ok;
 
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Mutex, MutexGuard};
@@ -900,32 +901,34 @@ pub(crate) async fn ask_from_phone(app: AppHandle, question: String, phone: std:
     answer(app, Asker::Phone(phone), since, question, None).await;
 }
 
-/// **A spoken yes or no to a connector's question** waiting in
-/// `conversation` (connector_ask.rs): question `now` (the shortcut's, just
-/// heard) answers it — Allow once, Don't, or "That one needs a click…" —
+/// **A spoken yes or no to a question that asks first** waiting in
+/// `conversation` (spoken_ok.rs: a connector's tool, an action on a page, an
+/// agent): question `now` (the shortcut's, just heard) answers it — Allow
+/// once, Don't, or "That one needs a click…" —
 /// and goes no further: the capsule is back on the question that asked
 /// (its generation, so its answer is said and ■ stops it), whose dictations
 /// count now includes this recording. `false`: it isn't one (asked as
 /// usual).
-fn spoken_connector_answer(app: &AppHandle, now: u64, conversation: Option<u64>, question: &str, cfg: &crate::config::YapConfig) -> bool {
+fn spoken_ok_answer(app: &AppHandle, now: u64, conversation: Option<u64>, question: &str, cfg: &crate::config::YapConfig) -> bool {
     let langs = crate::dictation::languages::my_languages(cfg);
     let meeting = crate::chat::tools::connectors::in_meeting();
-    let Some((said, w)) = connector_ask::take(conversation, question, &langs, meeting) else { return false };
+    let Some((said, w)) = spoken_ok::take(conversation, question, &langs, meeting) else { return false };
     match said {
-        connector_ask::Spoken::Yes | connector_ask::Spoken::No => {
-            let yes = said == connector_ask::Spoken::Yes;
-            let took = crate::chat::pages::act::confirm::chat_connector_confirm(w.card, if yes { "once".into() } else { "deny".into() });
-            tracing::info!(question = w.card, yes, took, "Voice Assistant: a connector's question answered out loud");
+        spoken_ok::Spoken::Yes | spoken_ok::Spoken::No => {
+            let yes = said == spoken_ok::Spoken::Yes;
+            // Allow once (never Always allow by voice), whatever the card.
+            let took = crate::chat::pages::act::confirm::chat_page_confirm(w.card, yes);
+            tracing::info!(question = w.card, yes, took, "Voice Assistant: a question that asks first, answered out loud");
             if !took {
                 // Answered meanwhile (the bar, Chat) or ended: a question of its own.
                 return false;
             }
-            crate::bar::dismiss_card(app, connector_ask::CARD);
+            crate::bar::dismiss_card(app, spoken_ok::CARD);
         }
-        connector_ask::Spoken::NeedsClick => {
+        spoken_ok::Spoken::NeedsClick => {
             tracing::info!(question = w.card, "Voice Assistant: a spoken yes to a question that needs a click");
             if crate::voice::tts::meeting_quiet().is_none() {
-                let _ = crate::voice::tts::speak(connector_ask::NEEDS_CLICK, Some(format!("connector-ask:{}", w.card)));
+                let _ = crate::voice::tts::speak(spoken_ok::NEEDS_CLICK, Some(format!("ask-first:{}", w.card)));
             }
         }
     }
@@ -1023,8 +1026,8 @@ struct Streamed {
     /// when a spoken yes or no answers a connector's question meanwhile:
     /// that recording was the person answering, not moving on).
     since: std::sync::Arc<AtomicU64>,
-    /// Its turn, for a connector's question asked out loud
-    /// ([`connector_ask::Waiting::owner`]).
+    /// Its turn, for a question asked out loud before a call that asks
+    /// first ([`spoken_ok::Waiting::owner`]).
     owner: u64,
     question: String,
     voice_on: bool,
@@ -1071,39 +1074,39 @@ impl Streamed {
         self.since.load(Ordering::SeqCst)
     }
 
-    /// **A connector's tool asks first, asked out loud**
-    /// ([`connector_ask`]): Yap says its one line (when it may speak), the
-    /// Yap bar shows Allow once / Don't (unless the answer's in view in
-    /// Chat, where the thread's card is), and the next spoken question in
-    /// this conversation may answer it. Answered (or ended): the bar's card
-    /// goes. Only the shortcut's questions: a phone's never asks.
-    fn connector_asks(&self, card: &crate::chat::pages::act::confirm::Card) {
+    /// **A call asks first, asked out loud** ([`spoken_ok`]: a connector's
+    /// tool, an action on a page, an agent): Yap says its one line (when it
+    /// may speak), the Yap bar shows Allow once / Don't (unless the answer's
+    /// in view in Chat, where the thread's card is), and the next spoken
+    /// question in this conversation may answer it. Answered (or ended): the
+    /// bar's card goes. Only the shortcut's questions: a phone's never asks.
+    fn asks_first(&self, card: &crate::chat::pages::act::confirm::Card) {
         let Some(generation) = self.asker.shortcut() else { return };
-        let Some(c) = card.connector.as_deref().filter(|c| c.voice) else { return };
         if card.state != "asking" {
-            if connector_ask::answered(card.id) {
-                crate::bar::dismiss_card(&self.app, connector_ask::CARD);
+            if spoken_ok::answered(card.id) {
+                crate::bar::dismiss_card(&self.app, spoken_ok::CARD);
             }
             return;
         }
+        let Some(asking) = spoken_ok::asking(card, crate::chat::tools::connectors::in_meeting()) else { return };
         let Some(conversation) = self.lock().conversation else { return };
-        connector_ask::wait(connector_ask::Waiting {
+        spoken_ok::wait(spoken_ok::Waiting {
             conversation,
             card: card.id,
-            spoken: c.spoken,
+            spoken: asking.spoken,
             at: std::time::Instant::now(),
             generation,
             since: std::sync::Arc::clone(&self.since),
             owner: self.owner,
         });
-        tracing::info!(question = card.id, spoken = c.spoken, "Voice Assistant: a connector's tool asks; said, and on the bar");
+        tracing::info!(question = card.id, act = %card.act, spoken = asking.spoken, "Voice Assistant: a call asks first; said, and on the bar");
         if self.may_speak() {
-            if let Err(e) = crate::voice::tts::speak(&connector_ask::line(c, c.spoken), Some(format!("connector-ask:{}", card.id))) {
-                tracing::info!("Voice Assistant: couldn't say the connector's question ({e})");
+            if let Err(e) = crate::voice::tts::speak(&asking.line, Some(format!("ask-first:{}", card.id))) {
+                tracing::info!("Voice Assistant: couldn't say the question ({e})");
             }
         }
         if crate::bar::cards_available() && !answer_seen(&self.app, Some(conversation)) {
-            crate::bar::show_card(&self.app, connector_ask::card(card.id, c), Box::new(connector_card_action));
+            crate::bar::show_card(&self.app, asking.bar, Box::new(ask_first_action));
         }
     }
 
@@ -1238,22 +1241,21 @@ impl Streamed {
 
 impl Drop for Streamed {
     /// Its turn ended (answered, stopped, replaced by a newer question): a
-    /// connector's question it asked out loud no longer waits, and its bar
-    /// card goes.
+    /// question it asked out loud no longer waits, and its bar card goes.
     fn drop(&mut self) {
-        if connector_ask::ended(self.owner) {
-            crate::bar::dismiss_card(&self.app, connector_ask::CARD);
+        if spoken_ok::ended(self.owner) {
+            crate::bar::dismiss_card(&self.app, spoken_ok::CARD);
         }
     }
 }
 
-/// The bar card's Allow once / Don't ([`connector_ask::card`]): the
+/// The bar card's Allow once / Don't ([`spoken_ok::bar_card`]): the
 /// question's answer, as the thread's card gives it (✕ only hides it).
-fn connector_card_action(app: &AppHandle, action: &str) {
-    let Some((id, allow)) = connector_ask::action_of(action) else { return };
-    crate::chat::pages::act::confirm::chat_connector_confirm(id, if allow { "once".into() } else { "deny".into() });
-    if connector_ask::answered(id) {
-        crate::bar::dismiss_card(app, connector_ask::CARD);
+fn ask_first_action(app: &AppHandle, action: &str) {
+    let Some((id, allow)) = spoken_ok::action_of(action) else { return };
+    crate::chat::pages::act::confirm::chat_page_confirm(id, allow);
+    if spoken_ok::answered(id) {
+        crate::bar::dismiss_card(app, spoken_ok::CARD);
     }
 }
 
@@ -1266,11 +1268,9 @@ impl crate::chat::stream::Sink for Streamed {
         if let crate::chat::stream::Event::Chips { web, .. } = &ev {
             self.lock().web = *web;
         }
-        // A connector's tool asking first, or answered (connector_ask.rs).
+        // A call asking first, or answered (spoken_ok.rs).
         if let crate::chat::stream::Event::Confirm(card) = &ev {
-            if card.act == "connector" {
-                self.connector_asks(card);
-            }
+            self.asks_first(card);
         }
         // What it's doing, for the capsule (this question's, while it's
         // still the one asked).
@@ -1339,11 +1339,12 @@ async fn answer(app: AppHandle, asker: Asker, since: u64, question: String, abou
         Choice::Continue(id) => Some(id),
         Choice::New => None,
     };
-    // A spoken yes or no to a connector's tool waiting in this conversation
-    // (connector_ask.rs): its answer, and that question's turn goes on —
-    // nothing new is asked.
+    // A spoken yes or no to a call waiting for the person's OK in this
+    // conversation (spoken_ok.rs: a connector's tool, an action on a page,
+    // an agent): its answer, and that question's turn goes on — nothing new
+    // is asked.
     if let (Some(now), false) = (asker.shortcut(), about_selection) {
-        if spoken_connector_answer(&app, now, continued, &question, &cfg) {
+        if spoken_ok_answer(&app, now, continued, &question, &cfg) {
             return;
         }
     }
@@ -1468,10 +1469,12 @@ async fn answer(app: AppHandle, asker: Asker, since: u64, question: String, abou
     let mut window_picture: Option<(String, String)> = None;
     // With Yap's own window in front the window in front is Yap, which a
     // capture leaves out: a model that calls tools looks itself
-    // (`look_at_screen`: every monitor and the page beside the chat).
-    // (Your Claude plan has no `look_at_screen`: it gets the window's picture.)
-    let chat_looks = focused
-        && endpoint.as_ref().is_some_and(|(_, _, model, provider, _, _)| provider != crate::ai::claude_plan::PROVIDER && crate::chat::tools::supports_tools(provider, model));
+    // (`look_at_screen`: every monitor and the page beside the chat) — your
+    // Claude plan's too, over its run endpoint since 7 Nov (8 Nov 2026: left
+    // to the window's capture, which can't take Yap's own window, the plan
+    // was told "Yap couldn't take a screenshot" while its own look worked a
+    // minute later).
+    let chat_looks = focused && endpoint.as_ref().is_some_and(|(_, _, model, provider, _, _)| crate::chat::tools::supports_tools(provider, model));
     let mut took_window = false;
     if let (Some(generation), false, Some((base_url, api_key, model, provider, _persona, _thinking))) =
         (asker.shortcut(), shots_wait || quote.is_some() || about_selection || chat_looks || said.is_some(), &endpoint)
@@ -1510,7 +1513,7 @@ async fn answer(app: AppHandle, asker: Asker, since: u64, question: String, abou
         app: app.clone(),
         asker: asker.clone(),
         since: std::sync::Arc::new(AtomicU64::new(since)),
-        owner: connector_ask::owner(),
+        owner: spoken_ok::owner(),
         question: question.clone(),
         voice_on: asker.voiced(cfg.speak_replies),
         show_card: cfg.assistant_answer_card && pc,
@@ -1591,8 +1594,8 @@ async fn answer(app: AppHandle, asker: Asker, since: u64, question: String, abou
         crate::privacy::net::Feature::Assistant
     };
     let turn = crate::privacy::net::within(feature, turn).await;
-    // A spoken answer to a connector's question meanwhile was the person
-    // answering, not a dictation of their own (connector_ask.rs).
+    // A spoken answer to a question that asked first meanwhile was the
+    // person answering, not a dictation of their own (spoken_ok.rs).
     let since = streamed.since();
     let (feed, said, carded_early, question_id, answer_id) = {
         let st = streamed.lock();

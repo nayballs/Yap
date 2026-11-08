@@ -108,10 +108,15 @@ fn refused_in_a_meeting_and_away_from_chat_before_anything_runs() {
     let away = Eyes::default();
     assert_eq!(refused(see_screen::LOOK, away, false).unwrap()["displayText"], "Didn't look at your screen: not asked in Chat");
     assert_eq!(refused(pages::SCREENSHOT, away, false).unwrap()["displayText"], "Didn't use the panel beside the chat: not asked in Chat");
-    // Asked out loud with Chat in view: reading yes, acting no.
-    let spoken = Eyes { act: false, ..LOOK };
-    assert_eq!(refused(pages::READ, spoken, false), None);
-    assert_eq!(refused(act::TYPE, spoken, false).unwrap()["displayText"], "Didn't act on the page: not a question typed in Chat");
+    // Asked out loud with Chat in view: acting as a typed question does (its
+    // card says the question out loud too); clicks, hovers and keys alike.
+    for n in [act::CLICK, act::HOVER, act::KEY, act::TYPE, act::FORM_INPUT, pages::SCROLL] {
+        assert_eq!(refused(n, LOOK, false), None, "{n}");
+    }
+    // A turn that may not act (none asked so now, but its gate's word holds).
+    let reads = Eyes { act: false, ..LOOK };
+    assert_eq!(refused(pages::READ, reads, false), None);
+    assert_eq!(refused(act::TYPE, reads, false).unwrap()["displayText"], "Didn't act on the page: not for this question");
     // A shot for a model that can't see: not offered.
     assert!(refused(pages::SCREENSHOT, Eyes { screen: Gate::Show, pictures: Gate::Show, act: true, files: Gate::Off }, false).is_some());
     assert_eq!(refused(see_screen::LOOK, LOOK, false), None);

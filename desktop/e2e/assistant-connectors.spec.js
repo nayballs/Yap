@@ -103,7 +103,7 @@ const spoken = async (yap) => (await yap.invoke('tts_e2e_spoken')).map((s) => s.
 const said = (yap, text) => expect.poll(async () => (await spoken(yap)).join('\n'), { timeout: 20_000, message: `Yap to say “${text}”` }).toContain(text);
 const ask = (yap, text) => yap.invoke('e2e_assistant_ask', { text, listenMs: 0 });
 const barCards = async (yap) => (await yap.invoke('bar_status')).cards;
-const barCard = async (yap) => (await barCards(yap)).find((c) => c.id === 'connectorAsk') ?? null;
+const barCard = async (yap) => (await barCards(yap)).find((c) => c.id === 'askFirst') ?? null;
 const create = { name: 'homelights__create_page', args: { title: 'Launch notes' } };
 /** The conversations with a question that says `text`. */
 const chatsAsking = (yap, text) => (yap.readJson('chats.json')?.conversations ?? []).filter((c) => c.messages.some((m) => m.role === 'user' && m.text === text));
@@ -184,7 +184,7 @@ test("a spoken no says Don't; the bar's Allow once answers too, in the dark them
     await expect(yap.overlay.locator('.card').filter({ hasText: 'Use Home lights: Create page?' })).toBeVisible();
     await shot(yap.overlay, '02-bar-card-dark');
     const card = await barCard(yap);
-    await yap.invoke('bar_card_action', { id: 'connectorAsk', action: card.primary.id });
+    await yap.invoke('bar_card_action', { id: 'askFirst', action: card.primary.id });
     await said(yap, 'Made it from the bar.');
     expect(fake.called('create_page')).toHaveLength(1);
   } finally {
@@ -207,7 +207,7 @@ test('a tool that can delete takes a click: a spoken yes is told so and it still
     expect(fake.called('delete_all')).toHaveLength(0);
     expect(await barCard(yap)).not.toBeNull();
     const card = await barCard(yap);
-    await yap.invoke('bar_card_action', { id: 'connectorAsk', action: card.secondary.id });
+    await yap.invoke('bar_card_action', { id: 'askFirst', action: card.secondary.id });
     await said(yap, 'I left the automations alone.');
     expect(fake.called('delete_all')).toHaveLength(0);
   } finally {

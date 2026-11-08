@@ -15,12 +15,14 @@
 //! - **The browser** (`chat/pages.rs` `execute`): `browser_navigate`,
 //!   `browser_read`, `browser_find`, `browser_scroll`, `browser_scroll_to`,
 //!   `browser_screenshot`, `browser_zoom`, `browser_tabs`, `browser_wait`,
-//!   `browser_batch`, and — a question typed in Chat ([`Eyes::act`]) — the
-//!   acting ones: `browser_click`, `browser_type`, `browser_key`,
-//!   `browser_hover`, `browser_form_input`, each with its card when it would
-//!   buy, pay, book, send, delete or sign in (`act/confirm.rs`: the card in
-//!   the plan turn's thread through the turn's stream, the call waiting for
-//!   the answer, its two minutes well inside the run's tool timeout).
+//!   `browser_batch`, and — a question asked in Chat, typed or out loud
+//!   ([`Eyes::act`]) — the acting ones: `browser_click`, `browser_type`,
+//!   `browser_key`, `browser_hover`, `browser_form_input`, each with its
+//!   card when it would buy, pay, book, send, delete or sign in
+//!   (`act/confirm.rs`: the card in the plan turn's thread through the
+//!   turn's stream, the call waiting for the answer, its two minutes well
+//!   inside the run's tool timeout; asked out loud, also said and answered
+//!   by voice, `assistant/spoken_ok.rs`).
 //! - **`find_pictures`, `look_at_picture`, `show_picture`**
 //!   (`chat/pictures.rs`): as a Claude searching in Chat's own request gets
 //!   them — Claude Code's `WebFetch` lists no pictures either, so
@@ -52,7 +54,7 @@
 //! - **Pages**: public http(s) only, from this turn's results, the person's
 //!   messages, a site they named or a link on a page read
 //!   (`pages::checked`); never a search engine's results read. Acting only
-//!   for a question typed in Chat and never during a meeting or a call; every
+//!   for a question asked in Chat and never during a meeting or a call; every
 //!   rule of `act/rules.rs` — never a password, card, bank or code field, a
 //!   card number or an IBAN, nor a sign-in form; a buy, a send, a sign-in
 //!   on the person's card; typed words only from theirs or the page's.
@@ -95,7 +97,8 @@ use crate::chat::stream::{Event, Live};
 
 /// **What a run may see and do**: the screen look's gate, the pages' and
 /// pictures' (with the web on), as the tool loop's `Gates` has them, and
-/// whether it may act on the pages (a question typed in Chat).
+/// whether it may act on the pages (a question asked in Chat, typed or out
+/// loud).
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct Eyes {
     pub screen: Gate,
@@ -278,8 +281,8 @@ pub fn refused(name: &str, eyes: Eyes, meeting: bool) -> Option<Value> {
         }
         if !eyes.act {
             return Some(failed(
-                "Yap acts on a page only for a question typed in Chat: say what you'd do, and the user can do it in the panel.",
-                "Didn't act on the page: not a question typed in Chat",
+                "Yap doesn't act on a page for this question: say what you'd do, and the user can do it in the panel.",
+                "Didn't act on the page: not for this question",
             ));
         }
     }

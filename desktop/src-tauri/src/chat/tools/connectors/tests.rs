@@ -284,7 +284,7 @@ async fn asked_out_loud_the_card_says_so_and_a_spoken_yes_may_answer_it_but_neve
         let (r, ()) = tokio::join!(turn.execute("homelights__turn_off", &hall, ctx), answer_next(&log, "deny"));
         assert!(!r.reached);
         let c = log.cards()[0].connector.clone().unwrap();
-        // The Voice Assistant's sink says it and puts it on the bar (assistant/connector_ask.rs).
+        // The Voice Assistant's sink says it and puts it on the bar (assistant/spoken_ok.rs).
         assert!(c.voice);
         assert_eq!(c.spoken, spoken, "a spoken yes during a meeting: never (meeting {meeting})");
         assert!(log.steps().iter().any(|s| s == "Waiting for your OK · Home lights · turn_off"), "{:?}", log.steps());

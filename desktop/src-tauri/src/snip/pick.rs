@@ -38,14 +38,29 @@ const DESKTOP_CLASSES: &[&str] = &["Progman", "WorkerW"];
 
 /// Whether a window can be picked. Pure.
 pub fn pickable(c: &Candidate) -> bool {
-    c.visible
-        && !c.minimized
-        && !c.cloaked
-        && !c.click_through
-        && !c.own
-        && c.rect.w >= MIN_SIDE
-        && c.rect.h >= MIN_SIDE
-        && !DESKTOP_CLASSES.contains(&c.class.as_str())
+    why_not(c).is_none()
+}
+
+/// **Why a window can't be picked** (`None`: it can), in a few words for the
+/// log — never its title or contents. Pure.
+pub fn why_not(c: &Candidate) -> Option<&'static str> {
+    if !c.visible {
+        Some("hidden")
+    } else if c.minimized {
+        Some("minimised")
+    } else if c.cloaked {
+        Some("cloaked (another desktop, or a suspended app)")
+    } else if c.click_through {
+        Some("click-through")
+    } else if c.own {
+        Some("one of Yap's own")
+    } else if c.rect.w < MIN_SIDE || c.rect.h < MIN_SIDE {
+        Some("too small")
+    } else if DESKTOP_CLASSES.contains(&c.class.as_str()) {
+        Some("the desktop")
+    } else {
+        None
+    }
 }
 
 /// The windows on screen now, topmost first, clipped to `desktop`.
@@ -67,15 +82,36 @@ pub fn windows_on_screen(_desktop: &Rect) -> Vec<Rect> {
 /// **One window's visible frame**, by its handle (the Voice Assistant's
 /// "window in front", `chat/assistant/screen.rs`), when it could be picked
 /// ([`pickable`]: on screen, not minimised or cloaked, not Yap's own, not
-/// the desktop). Rects only, as ever.
+/// the desktop); else why not ([`why_not`], or none in front, or gone).
+/// Rects only, as ever.
 #[cfg(windows)]
-pub fn window_frame(hwnd: isize) -> Option<Rect> {
-    let c = win::candidate(hwnd)?;
-    pickable(&c).then_some(c.rect)
+pub fn window_frame(hwnd: isize) -> Result<Rect, &'static str> {
+    if hwnd == 0 {
+        return Err("no window in front at the press");
+    }
+    let c = win::candidate(hwnd).ok_or("gone or hidden since the press")?;
+    match why_not(&c) {
+        None => Ok(c.rect),
+        Some(why) => Err(why),
+    }
 }
 
 #[cfg(not(windows))]
-pub fn window_frame(_hwnd: isize) -> Option<Rect> {
+pub fn window_frame(_hwnd: isize) -> Result<Rect, &'static str> {
+    Err("not on this system")
+}
+
+/// **The monitor a window is on** (the nearest; a minimised one's where it
+/// was), else — no such window — the one under the pointer: its rect in
+/// physical pixels. What the Voice Assistant takes when the window in front
+/// itself can't be (`chat/assistant/screen.rs`).
+#[cfg(windows)]
+pub fn monitor_of(hwnd: isize) -> Option<Rect> {
+    win::monitor(hwnd)
+}
+
+#[cfg(not(windows))]
+pub fn monitor_of(_hwnd: isize) -> Option<Rect> {
     None
 }
 
@@ -146,6 +182,25 @@ mod win {
         out.pop()
     }
 
+    /// The monitor `hwnd` is on, else the one under the pointer.
+    pub fn monitor(hwnd: isize) -> Option<Rect> {
+        use windows::Win32::Foundation::POINT;
+        use windows::Win32::Graphics::Gdi::{GetMonitorInfoW, MonitorFromPoint, MonitorFromWindow, HMONITOR, MONITORINFO, MONITOR_DEFAULTTONEAREST, MONITOR_DEFAULTTONULL};
+        use windows::Win32::UI::WindowsAndMessaging::GetCursorPos;
+        let mut m = if hwnd == 0 { HMONITOR::default() } else { unsafe { MonitorFromWindow(HWND(hwnd as *mut _), MONITOR_DEFAULTTONULL) } };
+        if m.is_invalid() {
+            let mut p = POINT::default();
+            unsafe { GetCursorPos(&mut p) }.ok()?;
+            m = unsafe { MonitorFromPoint(p, MONITOR_DEFAULTTONEAREST) };
+        }
+        let mut info = MONITORINFO { cbSize: std::mem::size_of::<MONITORINFO>() as u32, ..Default::default() };
+        if !unsafe { GetMonitorInfoW(m, &mut info) }.as_bool() {
+            return None;
+        }
+        let r = info.rcMonitor;
+        Some(Rect::new(r.left, r.top, r.right - r.left, r.bottom - r.top))
+    }
+
     /// Every visible top-level window, top to bottom.
     pub fn candidates() -> Vec<Candidate> {
         let mut out: Vec<Candidate> = Vec::new();
@@ -179,7 +234,12 @@ mod tests {
             Candidate { rect: Rect::new(0, 0, 5, 300), ..w.clone() },
         ] {
             assert!(!pickable(&not), "{not:?}");
+            assert!(why_not(&not).is_some(), "{not:?}");
         }
+        // Why, for the log (the Voice Assistant's look then takes its monitor).
+        assert_eq!(why_not(&Candidate { own: true, ..w.clone() }), Some("one of Yap's own"));
+        assert_eq!(why_not(&Candidate { minimized: true, ..w.clone() }), Some("minimised"));
+        assert_eq!(why_not(&w), None);
         // The taskbar is a window you can pick.
         assert!(pickable(&Candidate { class: "Shell_TrayWnd".into(), ..w }));
     }

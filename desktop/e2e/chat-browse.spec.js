@@ -290,6 +290,47 @@ test('with the page covering the thread, its strip asks the card’s question to
   expect(lastResult(chatCalls(fakeLlm, from)[3])).toMatchObject({ success: true, displayText: 'Clicked ‘Buy tickets’ on rail.example.com (you allowed it)' });
 });
 
+test('asked out loud with Chat in view: a key press just runs, a click that buys asks out loud too, and a spoken yes lets it through', async ({ yap, main, fakeLlm, shot }) => {
+  // (8 Nov 2026: every page action was refused on a spoken turn, "only for a question typed in Chat".)
+  await setConfig(yap, main, { ...chatConfig(fakeLlm), speakReplies: true });
+  await yap.invoke('tts_e2e_spoken', { clear: true });
+  const spokenTexts = async () => (await yap.invoke('tts_e2e_spoken')).map((s) => s.text);
+  await openView(main, 'Chat');
+  await main.getByRole('button', { name: 'New chat' }).first().click();
+  const from = fakeLlm.requests.length;
+  fakeLlm.scriptChat([
+    { tools: [{ name: 'browser_navigate', args: { url: RAIL_RESULTS_URL } }] },
+    { tools: [{ name: 'browser_read', args: { mode: 'elements' } }] },
+    { tools: [{ name: 'browser_key', args: { keys: 'PageDown' } }] },
+    { tools: [{ name: 'browser_click', args: (r) => ({ ref: refIn(r, 'Buy tickets') }) }] },
+    { content: 'The payment page is open: enter your card details yourself.' },
+  ]);
+  try {
+    // Asked out loud with Yap's main window in front (the test's focus): Chat in view.
+    await yap.invoke('e2e_assistant_ask', { text: `Buy me a ticket for the 09:42 here: ${RAIL_RESULTS_URL}`, listenMs: 0 });
+    // The key: no card, as a scroll needs none.
+    await expect.poll(() => chatCalls(fakeLlm, from).length, { timeout: 30_000 }).toBeGreaterThanOrEqual(4);
+    expect(chatCalls(fakeLlm, from)[0].tools).toEqual(expect.arrayContaining(['browser_click', 'browser_type', 'browser_key', 'browser_hover', 'browser_form_input']));
+    expect(lastResult(chatCalls(fakeLlm, from)[3])).toMatchObject({ success: true, displayText: 'Pressed PageDown on rail.example.com' });
+    // The click that buys: the thread's card, and the same question said out loud.
+    const card = main.getByTestId('chat-page-confirm');
+    await expect(card).toHaveAttribute('data-state', 'asking', { timeout: 20_000 });
+    await expect(card).toContainText('Yap wants to press ‘Buy tickets’ on rail.example.com');
+    await expect.poll(spokenTexts, { timeout: 20_000 }).toContain('Press “Buy tickets” on rail dot example dot com? Say yes, or press Allow.'); // (the voice says a site's dots)
+    await shot(main, '08-asked-out-loud-before-buying');
+    // The spoken yes: the next question answers it, and isn't a question of its own.
+    await yap.invoke('e2e_assistant_ask', { text: 'Yes, go ahead', listenMs: 0 });
+    await expect(card).toHaveAttribute('data-state', 'allowed', { timeout: 20_000 });
+    await expect(main.getByText('enter your card details yourself')).toBeVisible({ timeout: 20_000 });
+    expect(lastResult(chatCalls(fakeLlm, from)[4])).toMatchObject({ success: true, displayText: 'Clicked ‘Buy tickets’ on rail.example.com (you allowed it)', data: { asked: true, allowed: true } });
+    expect(await inPage(yap, RAIL_RESULTS_URL, 'location.pathname')).toMatch(/\/buy$/);
+    const chats = yap.readJson('chats.json')?.conversations ?? [];
+    expect(chats.some((c) => c.messages.some((m) => m.role === 'user' && m.text === 'Yes, go ahead'))).toBe(false);
+  } finally {
+    await setConfig(yap, main, { speakReplies: false });
+  }
+});
+
 test('Enter in a chat page’s message box asks first; typing there keeps the draft', async ({ yap, main, fakeLlm }) => {
   await setConfig(yap, main, chatConfig(fakeLlm));
   let from = fakeLlm.requests.length;

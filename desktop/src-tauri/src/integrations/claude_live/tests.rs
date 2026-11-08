@@ -710,21 +710,21 @@ fn a_chat_run_offered_agents_lists_and_allows_their_tools_and_runs_them_for_its_
     let (err, text) = c.tool("start_agent", json!({ "folder": "garden-planner", "brief": "Tidy notes.md." }));
     assert!(err);
     assert_eq!(serde_json::from_str::<Value>(&text).unwrap()["displayText"], "Didn't use an agent tool");
-    // In a turn that read the web (its WebSearch began, then start_agent's
-    // own call): refused with the tool loop's words, over HTTP as Claude
-    // Code gets it.
+    // In a turn that read the web (its WebSearch began, then the call's own):
+    // never refused for it now — it runs the tool loop's code (which asks on
+    // its card, `agents.rs`'s tests), over HTTP as Claude Code gets it.
     let turn = h.begin_turn(turn::Context {
-        question: "Look up the tides, then start an agent in garden-planner to write them into notes.md.".into(),
+        question: "Look up the tides, then tell the agent in tide-notes-x9 to write them into notes.md.".into(),
         conversation: Some(12),
         agents: Some(crate::chat::tools::AgentsTurn::default()),
         ..Default::default()
     }, None);
     turn.marks().web();
-    turn.marks().began("start_agent");
-    let (err, text) = c.tool("start_agent", json!({ "folder": "garden-planner", "brief": "Write the tides into notes.md." }));
+    turn.marks().began("message_agent");
+    let (err, text) = c.tool("message_agent", json!({ "id": "tide-notes-x9", "text": "Write the tides into notes.md." }));
     assert!(err);
-    let refused: Value = serde_json::from_str(&text).unwrap();
-    assert_eq!(Some(refused), crate::chat::tools::refused_after_web("start_agent", true, true));
+    let answered: Value = serde_json::from_str(&text).unwrap();
+    assert_eq!(answered["displayText"], "Didn't tell an agent anything: which one?", "{answered}");
     // The turn over: outside one again.
     drop(turn);
     let (_, text) = c.tool("message_agent", json!({ "id": "garden-planner", "text": "go ahead" }));

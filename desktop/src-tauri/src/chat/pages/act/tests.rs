@@ -433,3 +433,84 @@ fn only_strong_cloud_models_and_the_allowlist_act() {
     assert_eq!(ref_of(&json!(0)), None);
     assert_eq!(ref_of(&json!(3.0)), Some(3));
 }
+
+/// The ref of the element named `name` in a read's element lines.
+fn ref_named(read: &Value, name: &str) -> u32 {
+    let lines = read["data"]["elements"].as_str().unwrap_or("");
+    let line = lines.lines().find(|l| l.contains(&format!("\"{name}\""))).unwrap_or_else(|| panic!("no {name} in {lines}"));
+    line.trim_start_matches('[').split(']').next().unwrap().parse().unwrap()
+}
+
+/// **Asked out loud** (the Voice Assistant with Chat in view, 8 Nov 2026:
+/// every page action was refused on a spoken turn): the same rules as a
+/// typed question's. A hover, a key and a plain link just run; a click that
+/// buys asks on its card — said out loud (`assistant/spoken_ok.rs`) — and a
+/// spoken yes lets it through; a card number and a password never go in.
+#[tokio::test]
+async fn asked_out_loud_plain_actions_run_a_risky_click_takes_a_spoken_yes_and_a_password_never_goes_in() {
+    use crate::chat::assistant::spoken_ok;
+    const RESULTS_URL: &str = "https://rail.example.com/results?from=Kellbrook&to=Port Ellis";
+    let mut p = BTreeMap::new();
+    p.insert(
+        RESULTS_URL.to_string(),
+        r#"<html><head><title>Kellbrook to Port Ellis</title></head><body><main><h1>Trains</h1><p>Next train: 09:42.</p><a href="/timetable">Timetable</a> <a href="buy?train=0942">Buy tickets</a></main></body></html>"#.to_string(),
+    );
+    p.insert("https://rail.example.com/timetable".into(), "<html><head><title>Timetable</title></head><body><p>Every half hour.</p></body></html>".into());
+    p.insert("https://rail.example.com/buy".into(), BUY.into());
+    p.insert("https://rail.example.com/signin".into(), SIGNIN.into());
+    crate::chat::pages::sim::install(Some(Browser::new(&p)));
+    crate::chat::pages::backend::opened(RESULTS_URL, "").await;
+    let mut t = turn(&format!("Buy me the 09:42 on {RESULTS_URL}, and sign me in, my password is hunter2"));
+    let log = Log::default();
+    let read_now = read(&mut t).await;
+    let (timetable, buy) = (ref_named(&read_now, "Timetable"), ref_named(&read_now, "Buy tickets"));
+    let asked = |log: &Log| log.0.lock().unwrap().iter().filter(|e| matches!(e, Event::Confirm(_))).count();
+    // A hover, a key press (as a scroll is) and a plain link: no card.
+    assert_eq!(run(&mut t, HOVER, json!({ "ref": buy }), &log).await["success"], true);
+    let key = run(&mut t, KEY, json!({ "keys": "PageDown" }), &log).await;
+    assert_eq!(key["displayText"], "Pressed PageDown on rail.example.com", "{key}");
+    let link = run(&mut t, CLICK, json!({ "ref": timetable }), &log).await;
+    assert_eq!(link["displayText"], "Clicked ‘Timetable’ on rail.example.com", "{link}");
+    assert_eq!(asked(&log), 0, "nothing asked");
+    // The click that buys: its card, said out loud; a spoken yes answers it
+    // (the results page again, in a browser of its own).
+    crate::chat::pages::sim::install(Some(Browser::new(&p)));
+    crate::chat::pages::backend::opened(RESULTS_URL, "").await;
+    let read_now = read(&mut t).await;
+    let buy = ref_named(&read_now, "Buy tickets");
+    let en = vec!["en".to_string()];
+    let clicking = run(&mut t, CLICK, json!({ "ref": buy }), &log);
+    let answering = async {
+        loop {
+            let card = log.0.lock().unwrap().iter().find_map(|e| match e {
+                Event::Confirm(c) if c.state == "asking" => Some(c.clone()),
+                _ => None,
+            });
+            if let Some(card) = card {
+                let said = spoken_ok::asking(&card, false).expect("asked out loud");
+                assert_eq!(said.line, "Press \u{201c}Buy tickets\u{201d} on rail.example.com? Say yes, or press Allow.");
+                assert!(said.spoken);
+                // The next spoken question: a clear yes, Allow once.
+                assert_eq!(spoken_ok::reply("Yes please", &en), Some(true));
+                assert!(confirm::chat_page_confirm(card.id, true));
+                return;
+            }
+            tokio::task::yield_now().await;
+        }
+    };
+    let (clicked, ()) = tokio::join!(clicking, answering);
+    assert_eq!(clicked["displayText"], "Clicked ‘Buy tickets’ on rail.example.com (you allowed it)", "{clicked}");
+    // The card fields and a password: never typed, by voice as typed.
+    let read_now = read(&mut t).await;
+    let card_field = ref_named(&read_now, "Card number");
+    let r = run(&mut t, TYPE, json!({ "ref": card_field, "text": "4111 1111 1111 1111" }), &log).await;
+    assert_eq!(r["displayText"], "Didn't type in ‘Card number’: Yap never types payment card details");
+    crate::chat::pages::sim::install(Some(Browser::new(&p)));
+    crate::chat::pages::backend::opened("https://rail.example.com/signin", "").await;
+    let read_now = read(&mut t).await;
+    let password = ref_named(&read_now, "Password");
+    let r = run(&mut t, TYPE, json!({ "ref": password, "text": "hunter2" }), &log).await;
+    assert_eq!(r["displayText"], "Didn't type in ‘Password’: Yap never types a password");
+    assert!(crate::chat::pages::sim::with(|b| b.log.typed.clone()).unwrap().is_empty(), "nothing typed");
+    crate::chat::pages::sim::install(None);
+}

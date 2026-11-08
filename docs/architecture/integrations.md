@@ -733,27 +733,29 @@ chips and result as wave 4's; Claude Code only asks.
   start clean), with its connector (`connector_remove` takes the id out of
   every chat), and whole with Chats and Reset app (`privacy/reset.rs`); no
   file at all when nothing's off. Read only while the preview is on.
-- **The Voice Assistant** (`chat/assistant/connector_ask.rs`): the same
-  tools as Chat on the same models (its turn is Chat's), gated by each
-  connector's `where.voice`. A call that asks first (`consent.rs`; the card
-  carries `voice` and `spoken`) gets, from the Voice Assistant's own
-  stream sink (`assistant.rs` `Streamed::connector_asks`, hearing the
+- **The Voice Assistant** (`chat/assistant/connector_ask.rs`, on
+  `assistant/spoken_ok.rs` — since 8 Nov 2026 the one spoken OK for every
+  card that asks: a page action's and an agent's too, chat-and-assistant.md):
+  the same tools as Chat on the same models (its turn is Chat's), gated by
+  each connector's `where.voice`. A call that asks first (`consent.rs`; the
+  card carries `voice` and `spoken`) gets, from the Voice Assistant's own
+  stream sink (`assistant.rs` `Streamed::asks_first`, hearing the
   card's `Confirm` event — the tool loop's and a plan turn's held call
   alike, one consent): **one spoken line** — "Use Notion to create page
   “Launch notes”? Say yes, or press Allow." (`connector_ask::line`: the
   tool's title in words, its main argument when short and no secret) — and
   **Allow once / Don't** on the Yap bar (`connector_ask::card`, card id
-  `connectorAsk`, the notice policy's `prompt`: at once, never dropped; the
+  `askFirst` — `connectorAsk` until 8 Nov —, the notice policy's `prompt`: at once, never dropped; the
   Voice Assistant's mark; its ✕ only hides it), unless the answer's in view
   in Chat, where the thread's card is. **The spoken answer**, as Yap Code's
   spoken yes (`agents/voice.rs`): the next Voice Assistant question in that
   conversation within the card's two minutes is the answer when it's a
-  clear yes or no (`connector_ask::reply`: a short reply made only of one
+  clear yes or no (`spoken_ok::reply`: a short reply made only of one
   language's yes or no words and fillers, in the person's languages — My
   languages, English always, all seven when none of them is Yap's) — a yes
   is Allow once, a no is Don't, through the same `chat_connector_confirm`;
   anything else is a question of its own. It's taken before anything else
-  in `assistant::answer` (`spoken_connector_answer`): nothing is saved for
+  in `assistant::answer` (`spoken_ok_answer`): nothing is saved for
   it, and the question that asked is the one under way again (its
   generation back on the capsule, so its answer is said and ■ stops it; its
   dictations count brought up to date, since that recording was the person
@@ -802,7 +804,7 @@ chips and result as wave 4's; Claude Code only asks.
   chat, the phone's `where`, the meeting's two switches; asked out loud the
   card's `voice` and `spoken`, never spoken in a meeting; the phone's read
   run and write refused with its line, a read that would ask refused),
-  `assistant/connector_ask.rs` (the line, the bar card and its answers, a
+  `assistant/connector_ask.rs` + `spoken_ok.rs` (the line, the bar card and its answers, a
   clear yes or no in the person's languages, the slot taken only in its
   conversation, a click only, answered or ended), `privacy/reset.rs`
   (connector_chats.json with Chats); `assistant-connectors.spec.js`

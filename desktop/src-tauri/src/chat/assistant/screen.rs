@@ -24,8 +24,13 @@
 //! right), with every Yap window left out for the moment of the capture
 //! (`calls/capture.rs` `for_snip`) — the bar's capsule included — and Yap's
 //! meeting windows kept out as the meeting setting wants (the Voice
-//! Assistant is off during meetings anyway). Not when the window in front
-//! is one of Yap's own, minimised or gone. Saved like a snip
+//! Assistant is off during meetings anyway). When the window in front can't
+//! be taken itself — one of Yap's own, minimised, cloaked, gone since the
+//! press — the monitor it's on (else the pointer's), Yap's windows still
+//! left out (`snip/pick.rs` `monitor_of`; why, at debug). With Yap's main
+//! window in front a model that calls tools — your Claude plan's too, over
+//! its run endpoint since 7 Nov — looks itself instead (`look_at_screen`:
+//! every monitor and the page beside the chat). Saved like a snip
 //! (`chat-images/`, source "window"): it shows on the question in Chat and
 //! is kept as Chat's screenshots are.
 //!
@@ -758,7 +763,18 @@ fn capture(app: &AppHandle, hwnd: isize) -> Result<ChatImage, String> {
         let rect = windows.first().copied().ok_or("no window in front")?;
         (frames, rect)
     } else {
-        let rect = crate::snip::pick::window_frame(hwnd).ok_or("no window in front Yap can take")?;
+        // The window in front at the press; when it can't be taken itself
+        // (Yap's own, minimised, cloaked, gone since the press…), the monitor
+        // it's on, Yap's windows still left out — never nothing (8 Nov 2026:
+        // "couldn't take a screenshot" while `look_at_screen` worked a minute
+        // later). Why, at debug: a few words, never a title.
+        let rect = match crate::snip::pick::window_frame(hwnd) {
+            Ok(rect) => rect,
+            Err(why) => {
+                tracing::debug!(why, "Voice Assistant: the window in front can't be taken itself; its monitor instead");
+                crate::snip::pick::monitor_of(hwnd).ok_or("no window in front Yap can take, nor its monitor")?
+            }
+        };
         let monitors = crate::snip::capture::monitors();
         if monitors.is_empty() {
             return Err("no monitors found".into());
