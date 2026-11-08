@@ -24,7 +24,10 @@ mod tests {
     /// And a microphone's or a headset's name: a Bluetooth one's can carry
     /// its owner's ("Sam's AirPods"). Mic modules log Bluetooth or not, the
     /// rate, the place in the order; the name at debug.
-    const CONTENT: &str = "text|transcript|raw|raw_text|corrected|cleaned|cleaned_text|final_text|content|contents|answer|reply|question|query|prompt|said|heard|spoken|clipboard|clip_text|about|about_me|note_text|fact|facts|selection|before|after|partial|partials|utterance|dictation|message_text|user_text|body_text|bgra|rgba|pixels|png|data_url|url_data|device|dev_name|device_name|mic_name";
+    /// And a connector tool's arguments and result, and a connector
+    /// program's stderr (integrations/connectors/): ids, tool names,
+    /// outcomes and lengths only.
+    const CONTENT: &str = "text|transcript|raw|raw_text|corrected|cleaned|cleaned_text|final_text|content|contents|answer|reply|question|query|prompt|said|heard|spoken|clipboard|clip_text|about|about_me|note_text|fact|facts|selection|before|after|partial|partials|utterance|dictation|message_text|user_text|body_text|bgra|rgba|pixels|png|data_url|url_data|device|dev_name|device_name|mic_name|args|arguments|result_text|stderr";
 
     fn rust_files(dir: &Path, out: &mut Vec<PathBuf>) {
         for entry in std::fs::read_dir(dir).unwrap().flatten() {

@@ -268,10 +268,12 @@ pub struct Part {
 /// snippet_suggestions.json its noted phrases.)
 pub const STAYS: &[Part] = &[
     // Skills and meeting folder rules are setup, like folders and actions: they stay.
+    // Connectors (preview) are settings too: the list stays (its sign-ins
+    // become a kind of their own when signing in lands, wave 8).
     Part {
         id: "settings",
         label: "Your settings, dictionary, snippets and transforms, your Skills and meeting folder rules",
-        files: &["config.json", "dictionary_usage.json", "skills.json", "meeting_folders.json"],
+        files: &["config.json", "dictionary_usage.json", "skills.json", "meeting_folders.json", "connectors.json"],
     },
     // Set up on purpose, like the dictionary (Settings → Commands).
     Part { id: "samples", label: "Your writing samples", files: &["writing_samples.json"] },
@@ -301,6 +303,9 @@ pub const STAYS: &[Part] = &[
             "quieted_apps.json",
             "call_speakers.json",
             "icons/",
+            // Connectors' tool lists (a cache) and their programs' folders.
+            "connector_tools.json",
+            "connectors/",
             // Your Claude plan's empty working folders (claude/chat, claude/ask):
             // nothing of the person's is in them (Claude Code keeps its own
             // copy of a plan chat in its own folder; Chats deletes it).

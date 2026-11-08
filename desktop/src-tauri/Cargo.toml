@@ -82,7 +82,18 @@ getrandom = "0.3"
 # per-request metadata). toml_edit adds Yap to Codex/ChatGPT's config.toml
 # without touching the rest of the file; chrono's clock shows meeting dates in
 # local time. Both were already in the dependency tree.
-rmcp = { version = "3.5", default-features = false, features = ["server", "transport-io"] }
+# Connectors (integrations/connectors/, preview): the same SDK as a client —
+# programs on this PC over stdio (`transport-child-process`, on process-wrap:
+# each in a kill-on-close job of its own) and remote servers over Streamable
+# HTTP, its transport only (no `…-reqwest`, no `auth`): Yap's own reqwest
+# 0.12 sends every request, through net.rs's receipts (connectors/remote.rs).
+# sse-stream (rmcp's own SSE parser) reads the legacy HTTP+SSE transport's
+# stream, which rmcp no longer has.
+rmcp = { version = "3.9", default-features = false, features = ["server", "transport-io", "client", "transport-child-process", "transport-streamable-http-client"] }
+process-wrap = { version = "10", features = ["tokio1"] }
+sse-stream = "0.2"
+# A call's stop (connectors/call.rs): the CancellationToken rmcp is built on.
+tokio-util = "0.7"
 toml_edit = "0.25"
 chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
 

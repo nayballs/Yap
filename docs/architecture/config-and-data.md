@@ -235,7 +235,12 @@
   meeting_hotkey (`kb:alt+win+77`), meeting_reminder (the calendar's card:
   "15s" | "1min" | "2min" | "never"), meeting_brief ("Prepare a brief before
   meetings", true; `calendar/brief.rs`), bridge_enabled, mcp_allow_writes (AI apps
-  may save notes over MCP; default off), link_enabled (Settings → Phone's "Use
+  may save notes over MCP; default off), connectors_preview (`connectorsPreview`,
+  2026-11-08: Connectors, Yap as an MCP client, `integrations/connectors.rs`;
+  default off, and nothing about connectors is read, started or sent while
+  it is; a debug build also takes `YAP_CONNECTORS=1`, as the e2e suite does;
+  not in Settings until the whole feature lands; an older Yap drops it on
+  its save, and it's off again), link_enabled (Settings → Phone's "Use
   Yap from your phone (on your home Wi-Fi)": Yap Link's HTTPS server on port
   51443, `link.rs`; default off), the Yap bar: bar_enabled (true) +
   bar_hide_fullscreen (true) + bar_theme ("app" — Match app, the theme of
@@ -1046,6 +1051,37 @@
 - AI apps' own config files (Settings → AI apps (MCP) → Add to …): Yap only adds or
   removes its `yap` entry, keeps the original as `<file>.bak` the first time,
   and never edits a file that isn't plain JSON (`integrations/mcp_clients.rs`).
+- Connectors (preview, 2026-11-08; [integrations.md](./integrations.md#connectors-preview)),
+  only while `connectors_preview` is on:
+  - `%APPDATA%/yap/connectors.json` (`integrations/connectors/store.rs`) —
+    `{version, connectors: [{id, slug, name, enabled, origin, transport, auth,
+    where, tools, added, timeoutSecs}]}`: each connector (`c1`…`c24`, the
+    lowest free id), how it's reached (`remote`: `url`, `fallbackSse`, `sse`,
+    header *names*; `local`: the command as given, its `resolved` full path,
+    `args`, variables — a plain one's value, a secret's name only — and
+    `approved`, the fingerprint of the command line the person saw), how it
+    signs in (`none` | `bearer` | `header`; wave 3 adds `oauth`), where Yap
+    may use it, and each tool's setting (`allow` | `ask` | `off`) with the
+    hash of the definition it was set for. Never a secret. Fields this build
+    doesn't know are kept on its save (a newer Yap's). Settings: it stays
+    through Delete some of your data and Reset app. Through `saving.rs`
+    ("your connectors").
+  - `%APPDATA%/yap/connector_tools.json` (`cache.rs`) — `{version, listings:
+    {c3: {listedAt, ttlMs, server, tools, truncated}}}`: each connector's tools
+    as last listed (name, title, the description capped at 1,000
+    characters, the input schema made safe for every provider, annotations,
+    kind, hash, tokens, a flag or the reason it's skipped). A cache: rebuilt at
+    the next listing, a failed save only logged (`Saver::quiet`).
+  - `%APPDATA%/yap/connectors/` — `c<N>/`, a program connector's working
+    folder (empty to start with; what the program writes there is its own).
+  - Its secrets — a link's token and header values, a program's secret
+    variables — are one JSON value per connector in Windows Credential
+    Manager, `yap-connector-c<N>-<part>.com.yap.dictation` (parts `-1`…`-4`,
+    1,100 characters each; a portable Yap adds a hash of its data folder),
+    never in a file; removed with the connector and by the uninstaller's
+    "Delete the application data" (all 24 × 4 names). A test run
+    (`YAP_E2E=1`) keeps them in `connector-secrets.e2e.json` in its own data
+    folder instead.
 - Account session: a Windows Credential Manager generic credential
   (`yap-account.com.yap.dictation`, Local persistence), not a file — see `auth.rs`.
   Uninstalling with "Delete the application data" removes it too (updates never do).
