@@ -462,6 +462,45 @@ test('a Code chat on the plan shows a picture an agent made in its workspace: a 
   await yap.invoke('chat_delete', { id: conversation });
 });
 
+test('with the web off, a Code chat on the plan still shows a picture from its workspace: show_picture by a path, nothing of the web', async ({ yap, main, shot }) => {
+  fs.rmSync(GARDEN, { recursive: true, force: true, maxRetries: 20, retryDelay: 250 });
+  const DOCS = path.join(GARDEN, 'docs');
+  fs.mkdirSync(DOCS, { recursive: true });
+  fs.writeFileSync(path.join(DOCS, 'concept.png'), conceptPng(480, 320));
+  await setConfig(yap, main, { agentsEnabled: true, webSearch: false, assistantScreen: false });
+  if (!(await yap.invoke('workspaces_list')).some((f) => f.name === 'garden-planner')) {
+    await yap.invoke('workspaces_add', { path: GARDEN });
+  }
+  const DUMP = fresh('code-picture-offline.jsonl');
+  const ARGS = fresh('code-picture-offline-args.jsonl');
+  const SAID = 'Here is the concept picture beside the chat.';
+  // A path inside the Code chat's workspace, as Claude Code working there writes it.
+  await play(yap, 'code-picture-offline', [
+    [{ _wait_user: true }, { _dump_args: ARGS }, CHAT_INIT, ...yapCall('m1', 'toolu_show', 'show_picture', { path: 'docs/concept.png', caption: 'Garden concept' }, DUMP), ...answers('m2', SAID)],
+  ]);
+  await openView(main, 'Chat');
+  await newCodeChat(main, 'garden-planner');
+  await send(main, 'Show me the concept picture you made');
+  await expect(lastAnswer(main)).toHaveText(SAID, { timeout: 30_000 });
+  await expect(chipsOfLast(main)).toHaveText(['Showed ‘concept.png’ from docs']);
+  const [showed] = linesOf(DUMP);
+  expect(showed).toMatchObject({ tool: 'show_picture', isError: false });
+  expect(resultOf(showed)).toMatchObject({ success: true, shown: true, w: 480, h: 320 });
+  // The session lists the picture files' tools, and nothing of the web's or the browser's.
+  const [launch] = linesOf(ARGS);
+  const allowed = launch.args[launch.args.indexOf('--allowedTools') + 1] ?? '';
+  for (const name of ['show_picture', 'look_at_picture']) expect(allowed).toContain(`mcp__yap__${name}`);
+  for (const name of ['find_pictures', 'browser_navigate', 'look_at_screen']) expect(allowed).not.toContain(`mcp__yap__${name}`);
+  await expect(main.getByTestId('chat-picture')).toBeVisible({ timeout: 20_000 });
+  await expect(main.getByTestId('chat-picture-caption')).toHaveText('concept.png');
+  await expect
+    .poll(() => main.getByTestId('chat-picture-img').evaluate((img) => img.complete && img.naturalWidth > 0), { timeout: 10_000 })
+    .toBe(true);
+  await shot(main, '10-code-chat-shows-a-picture-with-the-web-off');
+  const conversation = (await yap.invoke('chats_list'))[0].id;
+  await yap.invoke('chat_delete', { id: conversation });
+});
+
 test('during a call a plan chat never looks at the screen: refused before anything is asked or taken', async ({ yap, main, shot }) => {
   await setConfig(yap, main, { assistantScreenCloud: true });
   await yap.invoke('e2e_snip', { monitors: MONITORS, windows: [], start: false });

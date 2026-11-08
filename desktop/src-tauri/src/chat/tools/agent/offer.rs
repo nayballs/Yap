@@ -31,6 +31,11 @@ pub fn offered_tools(open_apps: bool, web: bool, extra: Extra<'_>) -> Value {
             all.extend(pictures.iter().cloned());
         }
     }
+    // Picture files on this PC without the web (chat/pictures/local.rs): a
+    // file's path only.
+    if let (Some(all), Some(files)) = (tools.as_array_mut(), crate::chat::pictures::file_definitions(extra.files).as_array()) {
+        all.extend(files.iter().cloned());
+    }
     // Pages beside the chat (chat/pages.rs): for the same models; acting on
     // them (chat/pages/act.rs) for the ones that may.
     if let (Some(all), Some(pages)) = (tools.as_array_mut(), crate::chat::pages::definitions(extra.pictures, extra.act).as_array()) {

@@ -609,6 +609,13 @@ fn instructions(g: &Gates, profile: &crate::ai::about_you::Profile, memory: bool
                 s.push_str(&pages);
             }
         }
+        // Picture files on this PC without the web (chat/pictures/local.rs):
+        // a file's path only (never on with the web).
+        let files = crate::chat::pictures::file_instructions(g.files);
+        if !files.is_empty() {
+            s.push(' ');
+            s.push_str(files);
+        }
         if memory {
             s.push(' ');
             s.push_str(&crate::chat::tools::MEMORY_TOOL_INSTRUCTIONS.join(" "));
@@ -803,6 +810,7 @@ mod tests {
             apps: true,
             past_chats: true,
             picture_tools: true,
+            files: Gate::Off,
         }
     }
 
@@ -928,6 +936,7 @@ mod tests {
             apps: true,
             past_chats: true,
             picture_tools: true,
+            files: Gate::Off,
         };
         let asks = "What's the latest version of Python?";
         assert!(crate::web::needs_web(asks), "the test's question needs the web");
