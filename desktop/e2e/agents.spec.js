@@ -188,6 +188,12 @@ async function freshChat(main) {
   await main.getByRole('button', { name: 'New chat' }).click();
 }
 
+/** The Agent tab closed, if it's open (beside it a narrow window hides the chats). */
+async function closePanel(main) {
+  const tab = main.getByTestId('chat-agent');
+  if (await tab.count()) await tab.getByRole('button', { name: 'Close the panel' }).click();
+}
+
 /** The agent `id` once it's over (done, failed or stopped). */
 async function ended(yap, id, timeout = 30_000) {
   await expect
@@ -484,7 +490,7 @@ test('a folder new to agents is asked first, and an agent never starts or is ste
   const webCard = thread(main).getByTestId('chat-agent-confirm').last();
   await expect(webCard).toHaveAttribute('data-state', 'asking', { timeout: 20_000 });
   await expect(webCard).toContainText('Yap wants to send an agent to ‘garden-planner’ (Auto)');
-  await expect(webCard).toContainText('This chat read the web, which could have put words in the agent’s brief.');
+  await expect(webCard).toContainText('This chat just read the web, which could have put words in the agent’s brief.');
   await expect(webCard.getByTestId('chat-agent-brief')).toHaveText(BRIEF);
   expect((await agents(yap)).length).toBe(beforeWeb);
   await shot(main, '03-asked-after-the-web-light');
@@ -685,4 +691,91 @@ test('a permission card makes an agent ask; Stop and Continue; a plan, then go a
   expect(plan.text).toContain('Go ahead: carry out the plan.');
   messages = await messagesOf(yap, conversation, 16);
   expect(messages.at(-1).text).toBe('Done: it carried out the plan.');
+});
+
+test('Bypass permissions: no card for a new folder or Settings’ “always”, no spoken question; after a web read the brief card still shows, and says why', async ({ yap, main, fakeLlm, shot }) => {
+  // (8 Nov 2026, the maintainer: "It shouldn't ask me to approve things when
+  // it's on bypass permissions for the agents." Last in this file: Bypass's
+  // one-time OK stays given.)
+  freshFolder(RECIPES);
+  await yap.invoke('workspaces_remove', { name: 'recipe-box' });
+  await script(yap, ECHO, 'echo');
+  await yap.invoke('agent_bypass_confirmed');
+  await setConfig(yap, main, { agentsMode: 'bypassPermissions', agentsAsk: 'always', speakReplies: true });
+  const theme = (await yap.invoke('get_config')).theme;
+  try {
+    // A folder no agent has worked in, typed: it just starts (Settings say
+    // "always" too), at Bypass; it's a workspace from now on.
+    let before = (await agents(yap)).length;
+    await freshChat(main);
+    fakeLlm.scriptChat([
+      { tools: [{ name: 'start_agent', args: { folder: RECIPES, brief: 'Tidy notes.md.' } }] },
+      { content: "On it: I've sent an agent to recipe-box." },
+      { plain: true, content: 'It tidied notes.md in recipe-box.' },
+    ]);
+    await send(main, `Send an agent to ${RECIPES} to tidy notes.md.`);
+    await expect(lastAnswer(main)).toHaveText("On it: I've sent an agent to recipe-box.", { timeout: 20_000 });
+    await expect(chipsOfLast(main)).toHaveText(['Sent an agent to recipe-box']);
+    await expect(thread(main).getByTestId('chat-agent-confirm')).toHaveCount(0);
+    const fresh = await ended(yap, (await newAgent(yap, before)).id);
+    expect(fresh).toMatchObject({ folder: 'recipe-box', path: RECIPES, status: 'done', mode: 'bypassPermissions' });
+    expect((await yap.invoke('workspaces_list')).map((f) => f.name)).toContain('recipe-box');
+    const typed = await messagesOf(yap, fresh.conversation, 4);
+    expect(typed[1].confirms ?? []).toEqual([]);
+
+    // Asked out loud: no "Should I send an agent…?" — it starts, and says so.
+    before = (await agents(yap)).length;
+    fakeLlm.scriptChat([
+      { tools: [{ name: 'start_agent', args: { folder: 'garden-planner', brief: 'Tidy notes.md.' } }] },
+      { content: "On it: I've sent an agent to garden-planner." },
+      { plain: true, content: 'It tidied notes.md in garden-planner.' },
+    ]);
+    await closePanel(main);
+    await freshChat(main);
+    await ask(yap, 'Send an agent to garden-planner to tidy notes.md.');
+    await expect.poll(() => spoken(yap), { timeout: 20_000 }).toEqual(expect.arrayContaining(["On it: I've sent an agent to garden-planner."]));
+    expect((await spoken(yap)).some((s) => /^Should I/.test(s))).toBe(false);
+    const aloud = await ended(yap, (await newAgent(yap, before)).id);
+    expect(aloud).toMatchObject({ folder: 'garden-planner', status: 'done', mode: 'bypassPermissions', origin: 'voice' });
+    const asked = JSON.parse(fakeLlm.requests.filter((r) => r.tools.includes('start_agent')).at(-1).messages.filter((m) => m.role === 'tool').at(-1).content);
+    expect(asked).toMatchObject({ success: true, data: { mode: 'Bypass permissions' } });
+    expect(asked.data.started).not.toBe(false);
+    await messagesOf(yap, aloud.conversation, 4);
+    await yap.invoke('tts_stop');
+    await setConfig(yap, main, { speakReplies: false });
+
+    // The one guard left: after a web read this turn, the brief is shown for
+    // the person's OK, with why in one line — and only then.
+    await setConfig(yap, main, { webSearch: true, webSearchNative: true, webSearchService: 'exa', webSearchKeys: { exa: EXA_KEY } });
+    const BRIEF = 'Save the calculator tips you found into notes.md.';
+    fakeLlm.scriptChat([
+      { tools: [{ name: 'web_search', args: { query: 'calculator tricks' } }] },
+      { tools: [{ name: 'start_agent', args: { folder: 'garden-planner', brief: BRIEF } }] },
+      { content: "On it: I've sent an agent to garden-planner." },
+      { plain: true, content: 'It saved the tips into notes.md in garden-planner.' },
+    ]);
+    before = (await agents(yap)).length;
+    await closePanel(main);
+    await freshChat(main);
+    await send(main, 'Look up some calculator tricks, then send an agent to garden-planner to save them into notes.md.');
+    const card = thread(main).getByTestId('chat-agent-confirm').last();
+    await expect(card).toHaveAttribute('data-state', 'asking', { timeout: 20_000 });
+    await expect(card).toContainText('Yap wants to send an agent to ‘garden-planner’ (Bypass permissions)');
+    await expect(card).toContainText('This chat just read the web, which could have put words in the agent’s brief.');
+    await expect(card.getByTestId('chat-agent-brief')).toHaveText(BRIEF);
+    expect((await agents(yap)).length).toBe(before);
+    await shot(main, '07-bypass-asked-after-the-web-light');
+    await setConfig(yap, main, { theme: 'dark' });
+    await expect(card).toHaveAttribute('data-state', 'asking');
+    await shot(main, '08-bypass-asked-after-the-web-dark');
+    await setConfig(yap, main, { theme });
+    await card.getByRole('button', { name: 'Send', exact: true }).click();
+    await expect(lastAnswer(main)).toHaveText("On it: I've sent an agent to garden-planner.");
+    const webAgent = await ended(yap, (await newAgent(yap, before)).id);
+    expect(webAgent).toMatchObject({ folder: 'garden-planner', brief: BRIEF, mode: 'bypassPermissions', status: 'done' });
+    const web = await messagesOf(yap, webAgent.conversation, 4);
+    expect(web[1].confirms?.map((c) => [c.act, c.state])).toEqual([['agent', 'allowed']]);
+  } finally {
+    await setConfig(yap, main, { theme, agentsMode: 'auto', agentsAsk: 'new-or-web', webSearch: false, speakReplies: false });
+  }
 });

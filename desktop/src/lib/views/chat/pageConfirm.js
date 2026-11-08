@@ -45,6 +45,9 @@ export function questionParts(c) {
 export function whyOf(c) {
   if (c?.act === 'type') return 'Those words aren’t in what you said, nor on the page.';
   if (c?.act === 'agent') {
+    // What this turn read from outside (chat/tools/agents.rs `outside`): the
+    // one card Bypass permissions still shows, so it says why first.
+    if (c.agent?.outside) return `This chat just read ${c.agent.outside}, which could have put words in the agent’s brief.`;
     if (c.agent?.newFolder) return 'No agent has worked in this folder before.';
     if (c.agent?.web) return 'This chat read the web, which could have put words in the agent’s brief.';
     return 'Claude Code would work on your files.';

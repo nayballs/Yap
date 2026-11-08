@@ -490,7 +490,8 @@ async function startTurn({ text, spoken = false, chat = 'new', autoCards = null,
     } else {
       const box = main().getByRole('textbox', { name: 'Message' });
       await box.fill(text, { timeout: 10_000 });
-      await main().getByRole('button', { name: 'Send' }).click({ timeout: 10_000 });
+      // (Exactly "Send": with an agent's tab beside the chat, other buttons' names have the word.)
+      await main().getByRole('button', { name: 'Send', exact: true }).click({ timeout: 10_000 });
     }
   } catch (e) {
     t.status = 'failed';
@@ -685,12 +686,19 @@ function seedFile(dir, { path: rel, text, png }) {
  * running test Yap (`config`: other keys, never a key, a sign-in or Chat's
  * model), and files seeded into the scratch workspace (`files`: `{ path,
  * text }` or `{ path, png: { width, height, shape, color, background } }`).
+ * `bypass`: new chats' Mode Bypass permissions (on: the test Yap's own
+ * one-time OK given, as the person gives it in the Mode menu) or Auto (off).
  */
 async function setThings(a) {
   const patch = {};
   const done = {};
   if (a.web !== undefined) patch.webSearch = onOff(a.web, true, 'web');
   if (a.connectors !== undefined) patch.connectorsPreview = onOff(a.connectors, false, 'connectors');
+  if (a.bypass !== undefined) {
+    const on = onOff(a.bypass, false, 'bypass');
+    if (on) await invoke('agent_bypass_confirmed');
+    patch.agentsMode = on ? 'bypassPermissions' : 'auto';
+  }
   if (a.config && typeof a.config === 'object') {
     for (const [k, v] of Object.entries(a.config)) {
       if (NEVER_SET.test(k)) throw new Error(`set doesn't change ${k} (start sets the model and keys)`);
@@ -730,7 +738,7 @@ async function setThings(a) {
     if (!path.resolve(workspace.path).startsWith(path.resolve(LAB) + path.sep)) throw new Error(`set only seeds the lab's scratch workspace, not ${workspace.path}`);
     done.files = files.map((f) => seedFile(workspace.path, f));
   }
-  if (!Object.keys(done).length) throw new Error('Nothing to set: --web, --yap-code, --connectors, config or files');
+  if (!Object.keys(done).length) throw new Error('Nothing to set: --web, --yap-code, --connectors, --bypass, config or files');
   return done;
 }
 
@@ -775,7 +783,7 @@ async function agentsView() {
     });
   }
   return {
-    agents: list.map((x) => ({ id: x.id, folder: x.folder, status: x.status, conversation: x.conversation, mode: x.mode, plan: x.plan, text: cut(x.text ?? '', 600), files: x.files, commands: x.commands, denials: x.denials, error: x.error ?? null, cost: x.cost })),
+    agents: list.map((x) => ({ id: x.id, folder: x.folder, status: x.status, conversation: x.conversation, mode: x.mode, plan: x.plan, readOnly: !!x.turnList?.at(-1)?.readOnly, text: cut(x.text ?? '', 600), files: x.files, commands: x.commands, denials: x.denials, error: x.error ?? null, cost: x.cost })),
     pending: cardsOf([], { approvals, agents: list }).filter((c) => c.state === 'asking'),
     reports,
   };

@@ -219,10 +219,13 @@ export function checkTurn(expect, { result: turnResult, calls = turnResult?.tool
       (want.status === undefined || list(want.status).map((s) => s.toLowerCase()).includes(String(a.status).toLowerCase())) &&
       (want.files === undefined || countMatches(want.files, (a.files ?? []).length)) &&
       (want.error === undefined || (want.error === null ? !a.error : textMatches(want.error, a.error ?? ''))) &&
-      (want.folder === undefined || a.folder === want.folder)
+      (want.folder === undefined || a.folder === want.folder) &&
+      (want.mode === undefined || list(want.mode).includes(a.mode)) &&
+      (want.plan === undefined || !!a.plan === !!want.plan) &&
+      (want.readOnly === undefined || !!a.readOnly === !!want.readOnly)
     );
-    const words = `an agent ${['status', 'folder'].filter((k) => want[k] !== undefined).map((k) => `${k} ${list(want[k]).join('|')}`).concat(want.files !== undefined ? [`files ${countText(want.files)}`] : []).join(', ')}`;
-    add(words.trim(), countMatches(want.count ?? { min: 1 }, hit.length), all.length ? all.map((a) => `${a.id}: ${a.status}, ${(a.files ?? []).length} files${a.error ? `, ${a.error}` : ''}`).join(' | ') : 'no agents');
+    const words = `an agent ${['status', 'folder', 'mode', 'plan', 'readOnly'].filter((k) => want[k] !== undefined).map((k) => `${k} ${list(want[k]).join('|')}`).concat(want.files !== undefined ? [`files ${countText(want.files)}`] : []).join(', ')}`;
+    add(words.trim(), countMatches(want.count ?? { min: 1 }, hit.length), all.length ? all.map((a) => `${a.id}: ${a.status}, ${a.mode ?? '?'}${a.readOnly ? ' read only' : ''}${a.plan ? ', a plan' : ''}, ${(a.files ?? []).length} files${a.error ? `, ${a.error}` : ''}`).join(' | ') : 'no agents');
   }
   return out;
 }

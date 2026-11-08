@@ -88,6 +88,18 @@ pub const CARRY_ON: &str = "Carry on with the task from where you stopped.";
 pub const GO_AHEAD: &str = "Go ahead with the plan.";
 /// Yap's own yes to an agent's question, after web content in the turn.
 pub const YES_GO_AHEAD: &str = "Yes, go ahead.";
+/// **A read-only turn's editing tools, off** (`--disallowedTools`, 8 Nov
+/// 2026): Claude Code 2.1.296's file-editing tools (`MultiEdit` is a name it
+/// still knows as one, `F1` in its own rules), and `EnterPlanMode`, so it
+/// never puts itself into a plan to approve. Bash and PowerShell stay, for
+/// reading (`ls`, `git log`, `grep`): they aren't sandboxed, so the brief
+/// says not to change anything too ([`READ_ONLY_LINE`]).
+pub const READ_ONLY_OFF: &[&str] = &["Edit", "Write", "MultiEdit", "NotebookEdit", ENTER_PLAN];
+/// Claude Code's own tool for going into Plan mode by itself: off in a
+/// Bypass run (nothing waits for an approval there) and a read-only one.
+pub const ENTER_PLAN: &str = "EnterPlanMode";
+/// What a read-only turn's message ends with, in place of [`SUMMARY_LINE`].
+pub const READ_ONLY_LINE: &str = "This is read only: don't change, create or delete any files (your file-editing tools are switched off for it). Read, search and run only commands that look (ls, git log, grep), never ones that change anything. Don't make a plan to approve either. When you're done, finish with a short summary of what you found.";
 /// How long a stopped agent gets to end its turn before it's ended.
 const STOP_GRACE: Duration = Duration::from_secs(8);
 /// How long an agent whose input is over gets to exit by itself.
@@ -189,6 +201,8 @@ pub struct Ask {
     /// A paired phone's action (Remote Control): the phone's id. Its turn
     /// runs at most at Auto, and is reported on that phone.
     pub phone: Option<String>,
+    /// A read-only turn (its editing tools off: [`READ_ONLY_OFF`]).
+    pub read_only: bool,
 }
 
 impl Ask {
@@ -208,10 +222,11 @@ impl Ask {
     }
 
     /// Another request for the same turn, added: its words after these, the
-    /// lower mode, a go-ahead in either.
+    /// lower mode, a go-ahead in either; read only when both are.
     fn merge(&mut self, more: Ask) {
         self.text = format!("{}\n\n{}", self.text.trim(), more.text.trim());
         self.go |= more.go;
+        self.read_only &= more.read_only;
         self.mode = match (self.mode, more.mode) {
             (Some(a), Some(b)) => Some(a.min(b)),
             (a, b) => a.or(b),
@@ -505,12 +520,40 @@ async fn run(id: String, message: Option<String>) {
     pump();
 }
 
-/// What a turn sends first: the brief (with [`SUMMARY_LINE`]) or `message`.
-fn opening(agent: &Agent, message: Option<&str>) -> String {
+/// What a turn sends first: the brief (with [`SUMMARY_LINE`], or a read-only
+/// turn's [`READ_ONLY_LINE`]) or `message`.
+fn opening(agent: &Agent, message: Option<&str>, read_only: bool) -> String {
     match message {
         Some(m) => m.to_string(),
-        None => format!("{}\n\n{SUMMARY_LINE}", agent.brief.trim()),
+        None => format!("{}\n\n{}", agent.brief.trim(), closing(read_only)),
     }
+}
+
+/// What a turn's message ends with: [`SUMMARY_LINE`], or a read-only turn's
+/// [`READ_ONLY_LINE`].
+fn closing(read_only: bool) -> &'static str {
+    if read_only {
+        READ_ONLY_LINE
+    } else {
+        SUMMARY_LINE
+    }
+}
+
+/// **The tools a turn at `mode` runs without** (`--disallowedTools`): a
+/// read-only turn's editing tools ([`READ_ONLY_OFF`]); a Bypass turn's
+/// `EnterPlanMode` (nothing waits for a plan's approval under Bypass). A turn
+/// in Plan mode (the person's own Plan chip or cap) keeps its plan. Pure.
+pub fn tools_off(mode: Mode, read_only: bool) -> Vec<String> {
+    if mode == Mode::Plan {
+        return Vec::new();
+    }
+    if read_only {
+        return READ_ONLY_OFF.iter().map(|t| t.to_string()).collect();
+    }
+    if modes::unattended(mode) {
+        return vec![ENTER_PLAN.to_string()];
+    }
+    Vec::new()
 }
 
 /// The agent's turn `n` failed before Claude Code did anything: said, and
@@ -562,14 +605,16 @@ fn pay_for(agent: &Agent, cfg: &crate::config::YapConfig, status: &cli::Status) 
 /// `--strict-mcp-config`, no `--setting-sources`, Claude Code's own tools)
 /// with Yap's endpoint added (the run's `mcp_config`, the backup hook's
 /// `settings`, and `env`: the run key both of them name), its permission
-/// prompts to Yap's `approve`, at `mode`, its model and effort, on
-/// `conversation`. Its session is kept (`--resume`, Open in terminal). Pure.
+/// prompts to Yap's `approve`, at `mode` (a read-only turn: its editing
+/// tools off, [`tools_off`]), its model and effort, on `conversation`. Its
+/// session is kept (`--resume`, Open in terminal). Pure.
 #[allow(clippy::too_many_arguments)]
 pub fn agent_spec(
     agent: &Agent,
     folder: &std::path::Path,
     pay: Pay,
     mode: Mode,
+    read_only: bool,
     conversation: Conversation,
     mcp_config: serde_json::Value,
     settings: serde_json::Value,
@@ -580,6 +625,7 @@ pub fn agent_spec(
     spec.model = Some(agent.model.clone()).filter(|m| !m.trim().is_empty());
     spec.effort = Effort::parse(&agent.effort);
     spec.permission_mode = mode.permission();
+    spec.disallowed_tools = tools_off(mode, read_only);
     spec.permission_prompt_tool = Some(claude_live::PERMISSION_TOOL.to_string());
     spec.mcp_config = Some(mcp_config);
     spec.strict_mcp_config = false;
@@ -619,22 +665,6 @@ async fn turn(id: &str, message: Option<String>) -> (Status, u32) {
     if let Err(e) = std::fs::create_dir_all(&backup) {
         return failed_early(id, n, format!("Couldn't make the agent's backup folder: {e}"), None);
     }
-    let run = match claude_live::register_run(RunSpec {
-        label: agent.folder.clone(),
-        tools: Tools::Agent,
-        backup_dir: Some(backup.clone()),
-        folder: Some(folder.clone()),
-        approval: Some(Approval { run: id.to_string(), conversation: agent.conversation, origin: agent.origin }),
-        agents: false,
-        memory: false,
-        // A job works with the person's own tools, never Yap's screen or pages,
-        // nor Yap's connectors (its own Claude Code setup has the person's).
-        eyes: Default::default(),
-        connectors: None,
-    }) {
-        Ok(r) => r,
-        Err(e) => return failed_early(id, n, format!("Couldn't start the agent: {e}"), None),
-    };
     let mode = modes::or_auto(&agent.mode);
     // **A phone's turn runs at most at Auto** (Remote Control, design §5.3),
     // whatever set its mode: its question asked for it, or the phone's own
@@ -647,10 +677,32 @@ async fn turn(id: &str, message: Option<String>) -> (Status, u32) {
         }
         _ => mode,
     };
+    // A read-only turn ("catch up", "have a look"): its editing tools off.
+    let read_only = agent.turn_list.iter().find(|t| t.n == n).is_some_and(|t| t.read_only);
+    let run = match claude_live::register_run(RunSpec {
+        label: agent.folder.clone(),
+        tools: Tools::Agent,
+        backup_dir: Some(backup.clone()),
+        folder: Some(folder.clone()),
+        // Bypass: nobody is asked while it runs (a prompt is answered no, no card).
+        approval: Some(Approval { run: id.to_string(), conversation: agent.conversation, origin: agent.origin, unattended: modes::unattended(mode) }),
+        agents: false,
+        memory: false,
+        // A job works with the person's own tools, never Yap's screen or pages,
+        // nor Yap's connectors (its own Claude Code setup has the person's).
+        eyes: Default::default(),
+        connectors: None,
+    }) {
+        Ok(r) => r,
+        Err(e) => return failed_early(id, n, format!("Couldn't start the agent: {e}"), None),
+    };
     let resuming = message.is_some() && agent.started_ts > 0 && !agent.session.is_empty();
     let session_id = if agent.session.is_empty() { session::new_session_id() } else { agent.session.clone() };
     let conversation = if resuming { Conversation::Resume(session_id) } else { Conversation::New(session_id) };
-    let spec = agent_spec(&agent, &folder, pay, mode, conversation, run.mcp_config(), run.settings(), run.env());
+    let spec = agent_spec(&agent, &folder, pay, mode, read_only, conversation, run.mcp_config(), run.settings(), run.env());
+    if read_only {
+        tracing::info!(id, turn = n, "Agents: a read-only turn (its editing tools off)");
+    }
     let (session, mut rx) = match Session::start_with(&program, spec) {
         Ok(s) => s,
         Err(e) => return failed_early(id, n, e, None),
@@ -667,7 +719,7 @@ async fn turn(id: &str, message: Option<String>) -> (Status, u32) {
         }
         None => (true, Vec::new()),
     });
-    let first = std::iter::once(opening(&agent, message.as_deref())).chain(extra.iter().map(|t| format!("Also: {t}"))).collect::<Vec<_>>().join("\n\n");
+    let first = std::iter::once(opening(&agent, message.as_deref(), read_only)).chain(extra.iter().map(|t| format!("Also: {t}"))).collect::<Vec<_>>().join("\n\n");
     if stopped_early {
         session.kill();
     } else if let Err(e) = session.send_user(&first, &[]) {
@@ -1400,9 +1452,13 @@ pub fn follow_up(id: &str, ask: Ask) -> Result<(Agent, FollowedUp), String> {
                 j.keep_turns();
                 if first {
                     let n = j.turn_list.last().map_or(0, |t| t.n) + 1;
-                    j.turn_list.push(store::TurnNote { n, title: title.clone(), request: text.clone(), message_id: ask.message_id.clone(), status: Status::Queued, ..Default::default() });
+                    j.turn_list.push(store::TurnNote { n, title: title.clone(), request: text.clone(), message_id: ask.message_id.clone(), status: Status::Queued, read_only: ask.read_only, ..Default::default() });
                 } else {
                     added(j);
+                    // Read only when every request it holds is (`Ask::merge`).
+                    if let Some(t) = j.turn_list.last_mut() {
+                        t.read_only &= ask.read_only;
+                    }
                 }
             })
             .ok_or("There's no such agent.")?;
@@ -1492,10 +1548,14 @@ fn resume(id: &str, next: Next, ask: &Ask, new_turn: bool) {
     let (model, effort, model_asked, effort_asked) = model_for(&agent, ask, &cfg.agents_model, &cfg.agents_effort);
     let pay = if cfg.agents_pay == "key" { "key" } else { "plan" };
     let ran = agent.started_ts > 0 && !agent.session.is_empty();
+    // A read-only turn: a new one as asked; the turn carried on (Continue, a
+    // request queued as it) as it was.
+    let read_only = if new_turn { ask.read_only } else { agent.turn_list.last().is_some_and(|t| t.read_only) };
+    let end = closing(read_only);
     let body = match &next {
-        Next::CarryOn => format!("{CARRY_ON}\n\n{SUMMARY_LINE}"),
+        Next::CarryOn => format!("{CARRY_ON}\n\n{end}"),
         Next::Message(t) if go && was_plan => format!("{t}\n\nGo ahead: carry out the plan. {SUMMARY_LINE}"),
-        Next::Message(t) => format!("{t}\n\n{SUMMARY_LINE}"),
+        Next::Message(t) => format!("{t}\n\n{end}"),
     };
     let title = ask.title();
     let agent = store::update(id, |j| {
@@ -1521,6 +1581,7 @@ fn resume(id: &str, next: Next, ask: &Ask, new_turn: bool) {
         }
         if let Some(t) = j.turn_list.last_mut() {
             t.status = Status::Queued;
+            t.read_only = read_only;
             t.mode = mode.as_str().to_string();
             t.model = model.clone();
             t.effort = effort.clone();
@@ -1740,7 +1801,7 @@ mod tests {
         let hooks = serde_json::json!({ "hooks": {} });
         let files = session::Files { mcp_config: Some("mcp.json".into()), settings: Some("settings.json".into()), system_prompt: None, own_prompt: None };
         let key = vec![(session::RUN_KEY_VAR.to_string(), "run-key".to_string())];
-        let spec = agent_spec(&agent, &folder, Pay::Plan, Mode::Plan, Conversation::New("4d7c1d2e-8a51-4c3b-9f0e-2b6a7e1c5d90".into()), mcp.clone(), hooks.clone(), key.clone());
+        let spec = agent_spec(&agent, &folder, Pay::Plan, Mode::Plan, false, Conversation::New("4d7c1d2e-8a51-4c3b-9f0e-2b6a7e1c5d90".into()), mcp.clone(), hooks.clone(), key.clone());
         let a = session::args(&spec, &files);
         let after = |flag: &str| a.iter().position(|x| x == flag).and_then(|i| a.get(i + 1)).map(String::as_str);
         assert_eq!(after("--permission-prompt-tool"), Some("mcp__yap__approve"));
@@ -1759,11 +1820,36 @@ mod tests {
         // The run key in its environment, which its files name.
         assert_eq!(spec.env, key);
         // A later turn resumes it, at the mode it runs at then.
-        let spec = agent_spec(&agent, &folder, Pay::Plan, Mode::Auto, Conversation::Resume("prev".into()), mcp, hooks, key);
+        let spec = agent_spec(&agent, &folder, Pay::Plan, Mode::Auto, false, Conversation::Resume("prev".into()), mcp.clone(), hooks.clone(), key.clone());
         let a = session::args(&spec, &files);
         let after = |flag: &str| a.iter().position(|x| x == flag).and_then(|i| a.get(i + 1)).map(String::as_str);
         assert_eq!((after("--resume"), after("--permission-mode")), (Some("prev"), Some("auto")));
         assert!(!a.iter().any(|x| x == "--session-id"));
+        // Auto, Manual, Accept edits: every tool as before.
+        assert!(!a.iter().any(|x| x == "--disallowedTools"), "{a:?}");
+        // **A read-only turn** under Bypass: the chat's Mode, its editing tools
+        // (and going into a plan by itself) off; Bash stays for reading.
+        let spec = agent_spec(&agent, &folder, Pay::Plan, Mode::Bypass, true, Conversation::Resume("prev".into()), mcp.clone(), hooks.clone(), key.clone());
+        let a = session::args(&spec, &files);
+        let after = |flag: &str| a.iter().position(|x| x == flag).and_then(|i| a.get(i + 1)).map(String::as_str);
+        assert_eq!(after("--permission-mode"), Some("bypassPermissions"));
+        assert_eq!(after("--disallowedTools"), Some("Edit,Write,MultiEdit,NotebookEdit,EnterPlanMode"));
+        assert!(!a.iter().any(|x| x == "--tools"), "its other tools, Bash among them, as the person has them");
+        assert!(!a.iter().any(|x| x == "--dangerously-skip-permissions"));
+        assert_eq!(after("--permission-prompt-tool"), Some("mcp__yap__approve"));
+        // A Bypass turn that changes things: never into a plan by itself.
+        let spec = agent_spec(&agent, &folder, Pay::Plan, Mode::Bypass, false, Conversation::Resume("prev".into()), mcp.clone(), hooks.clone(), key.clone());
+        let a = session::args(&spec, &files);
+        let after = |flag: &str| a.iter().position(|x| x == flag).and_then(|i| a.get(i + 1)).map(String::as_str);
+        assert_eq!(after("--disallowedTools"), Some("EnterPlanMode"));
+        // Read only at Auto: its editing tools off too.
+        assert_eq!(tools_off(Mode::Auto, true), READ_ONLY_OFF.iter().map(|t| t.to_string()).collect::<Vec<_>>());
+        // The person's own Plan chip: a plan, whatever else.
+        assert!(tools_off(Mode::Plan, true).is_empty());
+        for m in [Mode::Auto, Mode::Manual, Mode::AcceptEdits] {
+            assert!(tools_off(m, false).is_empty(), "{m:?}: as today");
+        }
+        let _ = (mcp, hooks, key);
     }
 
     #[test]
@@ -1784,9 +1870,33 @@ mod tests {
     #[test]
     fn a_turn_opens_with_the_brief_and_the_summary_line() {
         let agent = Agent { brief: "  Tidy the readme.  ".into(), ..Default::default() };
-        assert_eq!(opening(&agent, None), format!("Tidy the readme.\n\n{SUMMARY_LINE}"));
-        assert_eq!(opening(&agent, Some("Also the changelog.")), "Also the changelog.");
+        assert_eq!(opening(&agent, None, false), format!("Tidy the readme.\n\n{SUMMARY_LINE}"));
+        assert_eq!(opening(&agent, Some("Also the changelog."), false), "Also the changelog.");
         assert!(SUMMARY_LINE.starts_with("When you're done, finish with a short summary of what you changed and anything you couldn't do."));
+        // A read-only turn: the brief says it mustn't change files, and to report what it found.
+        let catch_up = Agent { brief: "Get caught up with the add-on in this folder.".into(), ..Default::default() };
+        let said = opening(&catch_up, None, true);
+        assert!(said.starts_with("Get caught up with the add-on in this folder.\n\nThis is read only: don't change, create or delete any files"), "{said}");
+        assert!(said.ends_with("finish with a short summary of what you found."));
+        assert!(!said.contains(SUMMARY_LINE));
+    }
+
+    #[test]
+    fn a_read_only_request_while_a_turn_works_waits_as_a_read_only_turn() {
+        let id = store::new_id();
+        let path = format!(r"D:\Projects\seed-tracker-{id}");
+        store::insert(Agent { id: id.clone(), folder: "seed-tracker".into(), path: path.clone(), status: Status::Running, started_ts: 5, turn_list: vec![store::TurnNote { n: 1, status: Status::Running, started_ts: 5, ..Default::default() }], ..Default::default() });
+        test_live(&id, Some(&path));
+        // "Have a look at the tests too, don't change anything": its next turn, read only.
+        let (agent, how) = follow_up(&id, Ask { read_only: true, ..Ask::of("Have a look at the tests too.", false) }).unwrap();
+        assert_eq!(how, FollowedUp::Queued);
+        assert!(agent.turn_list[1].read_only);
+        assert!(test_pending(&id).unwrap().read_only);
+        // A request to change something joins it: no longer read only.
+        let (agent, _) = follow_up(&id, Ask::of("Then fix the failing one.", false)).unwrap();
+        assert!(!agent.turn_list[1].read_only);
+        assert!(!test_pending(&id).unwrap().read_only);
+        test_live(&id, None);
     }
 
     #[test]
