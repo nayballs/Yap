@@ -14,7 +14,7 @@ fn the_tools_are_the_tool_loops_with_the_same_schemas() {
     assert_eq!(listed[1..=pages::ALL.len()], *pages::ALL);
     // The tool loop's own words and schemas, each one.
     let mut loop_defs: Vec<Value> = Vec::new();
-    for v in [see_screen::definitions(Gate::Look), pages::definitions(Gate::Look, true), pictures::definitions(Gate::Look, true), shares::definitions(Offer::Web)] {
+    for v in [see_screen::definitions(Gate::Look, see_screen::Takes::Screen), pages::definitions(Gate::Look, true), pictures::definitions(Gate::Look, true), shares::definitions(Offer::Web)] {
         loop_defs.extend(v.as_array().cloned().unwrap());
     }
     for d in &defs {
@@ -108,9 +108,9 @@ fn refused_in_a_meeting_and_away_from_chat_before_anything_runs() {
     // …the panel's pages still open and read (they're not the screen).
     assert_eq!(refused(pages::NAVIGATE, LOOK, true), None);
     assert_eq!(refused(pages::SCREENSHOT, LOOK, true), None);
-    // Asked away from Chat (another app, a phone): neither.
+    // A phone's question (or one from another app with no look allowed): neither.
     let away = Eyes::default();
-    assert_eq!(refused(see_screen::LOOK, away, false).unwrap()["displayText"], "Didn't look at your screen: not asked in Chat");
+    assert_eq!(refused(see_screen::LOOK, away, false).unwrap()["displayText"], "Didn't look at your screen: not for this question");
     assert_eq!(refused(pages::SCREENSHOT, away, false).unwrap()["displayText"], "Didn't use the panel beside the chat: not asked in Chat");
     // Asked out loud with Chat in view: acting as a typed question does (its
     // card says the question out loud too); clicks, hovers and keys alike.

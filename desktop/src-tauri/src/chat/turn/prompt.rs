@@ -658,7 +658,7 @@ fn instructions(g: &Gates, profile: &crate::ai::about_you::Profile, memory: bool
 fn head(persona: &str, g: &Gates, profile: &crate::ai::about_you::Profile, memory: bool) -> String {
     let mut s = persona.trim().to_string();
     s.push_str(&instructions(g, profile, memory));
-    let screen_line = crate::chat::see_screen::instructions(g.screen);
+    let screen_line = crate::chat::see_screen::instructions(g.screen, g.screen_takes);
     if !screen_line.is_empty() {
         s.push(' ');
         s.push_str(screen_line);
@@ -803,6 +803,7 @@ mod tests {
             web_on: false,
             pictures: Gate::Off,
             screen: Gate::Off,
+            screen_takes: Default::default(),
             act: false,
             calendar: false,
             agents: false,
@@ -930,6 +931,7 @@ mod tests {
             web_on: true,
             pictures: Gate::Show,
             screen: Gate::Off,
+            screen_takes: Default::default(),
             act: false,
             calendar: false,
             agents: false,

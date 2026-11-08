@@ -1000,7 +1000,7 @@ to **Run again** from Home.
   ("tell her", "let them know", "thank him", "say yes", "decline", "…about
   this" at the end; "dis-lui", "sag ihr", "dile", "digli", "diz-lhe", "zeg
   haar") → `model_says`: the Commands model (`ASK_PROMPT`, the instruction
-  only — never the screen; ≤ 8 s, on this PC 15 s; Chat's `says_yes`), any
+  only — never the screen; ≤ 8 s, on this PC 15 s; its own `says_yes`), any
   error a no. No: anything else. `replies_instead_of_rewriting` (pure):
   yes and not `ask_or_edit::rule`'s edit. `gate` (pure, on
   `assistant::screen::allowed`): Read / AskFirst / NotToTheCloud / Off.

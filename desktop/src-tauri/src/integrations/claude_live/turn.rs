@@ -69,9 +69,14 @@ pub struct Context {
     /// app, as the tool loop's `Extra::web_question`).
     pub web: bool,
     /// The screen and the pages beside the chat this turn (`eyes.rs`): where
-    /// it was asked decides, as the tool loop's gates (never from another
-    /// app or a phone). Off: refused.
+    /// it was asked decides, as the tool loop's gates (the pages never from
+    /// another app or a phone; the screen from another app the window in
+    /// front, [`Context::takes`]). Off: refused.
     pub eyes: Eyes,
+    /// What a look at the screen takes this turn (`see_screen::Takes`):
+    /// every monitor and the page beside the chat, or — asked out loud from
+    /// another app — the window in front at the shortcut's press.
+    pub takes: crate::chat::see_screen::Takes,
     /// The connectors' tools this turn (`connectors.rs`: the plan's Chat
     /// runs only, as wave 4's rules have them where it was asked; `None`:
     /// none, refused).

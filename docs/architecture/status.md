@@ -1352,17 +1352,23 @@ model.
 
 **The Voice Assistant sees the window in front** (2026-10-29,
 [chat-and-assistant.md](./chat-and-assistant.md), `chat/assistant/screen.rs`):
-a spoken question about the screen ("what's this error?") takes a
-screenshot of the window that was in front when the shortcut was pressed,
-by snip's capture with every Yap window left out; rules in the person's
-languages decide, Chat's model a lone "this"; on a model on this PC by
-default, a cloud model only with "With cloud models too" (asked once); a
-model that can't read images gets the window's text (Windows' OCR), named in
-the sources; the receipts say "Voice Assistant + the window in front".
+a spoken question whose words point at the screen ("what's this error?")
+takes a screenshot of the window that was in front when the shortcut was
+pressed, at once, by snip's capture with every Yap window left out; rules in
+the person's languages decide. Since 8 Nov 2026 nothing else is guessed (the
+yes/no request for a lone "this" or "that" is gone, after two spoken
+follow-ups about a convention each sent the game in front): asked from
+another app, the answering model is offered `look_at_screen` on that window
+and looks when the question needs it. On a model on this PC by default, a
+cloud model only with "With cloud models too" (asked once); a model that
+can't read images gets the window's text (Windows' OCR), named in the
+sources; the receipts say "Voice Assistant + the window in front".
 **Tested**: unit (the rules in seven languages, the person's languages, the
-yes/no request, where it may go), e2e (`desktop/e2e/assistant-screen.spec.js`, fake
-monitors and window), and on the real Qwen3.5-4B (the yes/no request: 14 of
-16 right, median 180 ms; `eval --vision --vision-path window`, model-evals.md).
+two follow-ups taking nothing, where it may go, the gates offering the
+window's look), e2e (`desktop/e2e/assistant-screen.spec.js`, fake monitors and
+window: the follow-ups with no screenshot and no request first, the model's
+own look getting the window), Yap Lab's `voice-screen` (`--fake`), and on the
+real Qwen3.5-4B (`eval --vision --vision-path window`, model-evals.md).
 **Not yet tried**: in the dev build with a real microphone and real windows
 (the capture of a real window, its HDR, a window moved over it while asking),
 a real cloud model (Groq, Claude) on a real screenshot.

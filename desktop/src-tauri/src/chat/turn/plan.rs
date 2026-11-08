@@ -199,7 +199,7 @@ fn eyes_lines(eyes: crate::integrations::claude_live::eyes::Eyes) -> String {
     }
     let mut out = EYES.replace("{tools}", &tools.join("; ")).replace("{acting}", if eyes.act { ACTS } else { NO_ACTS });
     for line in [
-        crate::chat::see_screen::instructions(eyes.screen).to_string(),
+        crate::chat::see_screen::instructions(eyes.screen, crate::chat::see_screen::Takes::Screen).to_string(),
         crate::chat::pages::instructions(eyes.pictures, eyes.act),
         crate::chat::pictures::instructions(eyes.pictures, true),
         if eyes.files_only() { crate::chat::pictures::file_instructions(eyes.files).to_string() } else { String::new() },
@@ -243,15 +243,22 @@ fn session_eyes(t: &Asked<'_>, code: bool) -> crate::integrations::claude_live::
 
 /// **What this turn may use of them**: the turn's own gates (`gates.rs`:
 /// Chat, or the Voice Assistant with Chat in view, acting on the pages too;
-/// never a phone's question or one from another app), never more than the
-/// session lists.
+/// the Voice Assistant from another app, the look at the window in front
+/// only — `t.gates.screen_takes`, the run's `Context::takes`; never a
+/// phone's question), never more than the session lists.
 fn turn_eyes(t: &Asked<'_>, session: crate::integrations::claude_live::eyes::Eyes) -> crate::integrations::claude_live::eyes::Eyes {
     crate::integrations::claude_live::eyes::Eyes { screen: t.gates.screen, pictures: t.gates.pictures, act: t.gates.act, files: t.gates.files }.within(session)
 }
 
 /// The question's line when the session sees but this turn can't (asked
-/// from another app or a phone). Pure.
-fn away_line(session: crate::integrations::claude_live::eyes::Eyes, turn: crate::integrations::claude_live::eyes::Eyes) -> Option<&'static str> {
+/// from a phone, or from another app with nothing to look at), or — asked
+/// out loud from another app (`takes`: the window in front) — only looks at
+/// the window in front, which the session's list doesn't say. Pure.
+fn away_line(session: crate::integrations::claude_live::eyes::Eyes, turn: crate::integrations::claude_live::eyes::Eyes, takes: crate::chat::see_screen::Takes) -> Option<&'static str> {
+    use crate::chat::pictures::Gate;
+    if takes == crate::chat::see_screen::Takes::Window && turn.screen != Gate::Off {
+        return Some("This question was asked out loud from another app: Yap's page tools don't work for it, and mcp__yap__look_at_screen sees only the window they had in front of them when they asked. Use it only when the question needs what's on their screen, never for \"it\" or \"that one\" from the conversation, and never to look something up.");
+    }
     (session.any() && !turn.any()).then_some("This question was asked away from Yap's Chat (from another app or a phone): Yap's screen and page tools don't work for it, so answer in words.")
 }
 
@@ -492,6 +499,9 @@ fn run_context(
         // web content, as the tool loop's `Extra::web_question`.
         web: t.about_selection.as_ref().is_some_and(|s| s.web),
         eyes,
+        // What a look takes this turn: the window in front, asked out loud
+        // from another app (`gates.rs`).
+        takes: t.gates.screen_takes,
     }
 }
 
@@ -736,7 +746,7 @@ pub(super) async fn answer(t: &Asked<'_>, opened: &Opened, built: &Built, fitted
     // The question, its context (a question asked away from Chat told it
     // has no screen or panel) and its screenshots.
     let mut context = built.prompt.context.clone();
-    context.extend(away_line(eyes, this_turn).map(str::to_string));
+    context.extend(away_line(eyes, this_turn, t.gates.screen_takes).map(str::to_string));
     let question = crate::chat::chats::with_context(&context, &t.text);
     let images = if crate::snip::vision::reads_images(plan::PROVIDER, &model) == Some(false) { Vec::new() } else { question_images() };
 
@@ -1102,7 +1112,7 @@ mod tests {
         assert!(all.contains("never say you can't see their screen or open a browser"));
         assert!(all.contains("waits for the user's OK on Yap's card") && !all.contains("never click or type"));
         // The tool loop's own lines after it, and how they name the web's tools.
-        assert!(all.contains(crate::chat::see_screen::instructions(Gate::Look)));
+        assert!(all.contains(crate::chat::see_screen::instructions(Gate::Look, crate::chat::see_screen::Takes::Screen)));
         assert!(all.contains(&crate::chat::pages::instructions(Gate::Look, true)));
         assert!(all.contains(&crate::chat::pictures::instructions(Gate::Look, true)));
         assert!(all.contains("web_search means your WebSearch"));
@@ -1128,10 +1138,19 @@ mod tests {
         let web = Eyes { screen: Gate::Look, pictures: Gate::Look, act: true, files: Gate::Off };
         assert_eq!(eyes_lines(Eyes { files: Gate::Look, ..web }), eyes_lines(web));
         // A question asked away from Chat, on a session that sees: told so.
+        use crate::chat::see_screen::Takes;
         let sees = Eyes { screen: Gate::Look, pictures: Gate::Look, act: true, files: Gate::Off };
-        assert!(away_line(sees, Eyes::default()).is_some_and(|l| l.contains("answer in words")));
-        assert_eq!(away_line(sees, sees), None);
-        assert_eq!(away_line(Eyes::default(), Eyes::default()), None);
+        assert!(away_line(sees, Eyes::default(), Takes::Screen).is_some_and(|l| l.contains("answer in words")));
+        assert_eq!(away_line(sees, sees, Takes::Screen), None);
+        assert_eq!(away_line(Eyes::default(), Eyes::default(), Takes::Screen), None);
+        // Asked out loud from another app (8 Nov 2026): the window in front
+        // only, and when to look at it — never the pages.
+        let window = Eyes { screen: Gate::Look, ..Eyes::default() };
+        let line = away_line(sees, window, Takes::Window).unwrap();
+        assert!(line.contains("sees only the window they had in front of them when they asked") && line.contains("never for \"it\" or \"that one\" from the conversation"), "{line}");
+        assert!(line.contains("page tools don't work"), "{line}");
+        // …and with the window's look off (a cloud model not allowed yet): as before.
+        assert!(away_line(sees, Eyes::default(), Takes::Window).is_some_and(|l| l.contains("answer in words")));
     }
 
     #[test]

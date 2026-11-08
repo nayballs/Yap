@@ -276,6 +276,9 @@ pub struct Extra<'a> {
     /// reads images, the screen's text for any other; none without tools or
     /// with "see the window in front" off. Not tied to the web.
     pub screen: crate::chat::pictures::Gate,
+    /// What that look takes: every monitor and the page beside the chat, or
+    /// the window in front (the Voice Assistant asked from another app).
+    pub screen_takes: crate::chat::see_screen::Takes,
     /// It may act on the pages beside the chat (`chat/pages/act.rs`
     /// `can_act`: the strong cloud models and the on-device ones the browse
     /// evaluation passed; a typed Chat turn with the web on).

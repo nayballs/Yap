@@ -407,9 +407,11 @@ const CHAT_SUMMARY = 'You keep the notes of a long chat';
 const SMART = 'You help someone say something sharp in a meeting';
 const SKILL = 'You carry out a Skill';
 const LONGER = "You rewrite a meeting's notes in more detail";
-// Is a spoken question about the screen? (desktop/src-tauri/src/chat/assistant/screen.rs
-// ASK_PROMPT, for a lone "this"): "no" unless a spec says otherwise
-// (`reply('screenQuestion', fn)`). Never takes a scripted chat step.
+// Is a spoken question about the screen? The Voice Assistant's old yes/no
+// request for a lone "this" (chat/assistant/screen.rs's ASK_PROMPT until
+// 8 Nov 2026): Yap never sends it now — the answering model looks itself —
+// and the kind stays so specs can check that ("no" if one ever came). Never
+// takes a scripted chat step.
 const SCREEN_QUESTION = 'You decide whether a question someone asked a voice assistant';
 // The rewrite shortcut's words about a selection, when Yap's rule can't
 // tell an edit from a question (desktop/src-tauri/src/dictation/ask_or_edit.rs

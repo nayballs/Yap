@@ -1,0 +1,37 @@
+{
+  "name": "voice-screen",
+  "about": "No guessing (8 Nov 2026): spoken follow-ups about something just said (\"that one\") send no screenshot of the window in front, and no model is asked first whether they're about the screen. A question about comic conventions near Kellbrook (made up), then, out loud, the two follow-ups that each sent a screenshot of the game in front. Its `fake` steps make it pass on `--fake`.",
+  "steps": [
+    { "fake": [{ "content": "Two this winter: Kellbrook Comic Con, from 5 to 8 February, and the Northfold Expo in March." }] },
+    { "ask": "Which comic conventions are on near Kellbrook this winter?", "timeout": 300 },
+    { "expect": { "status": "answered", "questionImages": 0 } },
+    { "fake": [{ "content": "It's at the Kellbrook Exhibition Centre, by the station." }] },
+    {
+      "ask": "The one that's on the 5th to the 8th of February, where is it and can you bring up the website in the browser for it?",
+      "spoken": true,
+      "chat": "same",
+      "cards": "deny",
+      "timeout": 300
+    },
+    {
+      "expect": { "status": "answered", "questionImages": 0 },
+      "note": "\"The one that's on…\" is the convention just named, never the screen: nothing taken with the question."
+    },
+    {
+      "expect": { "notUsed": "look_at_screen" },
+      "soft": true,
+      "note": "The answering model may look at the screen when a question needs it; this one doesn't."
+    },
+    { "fake": [{ "content": "Usually about 12,000 people over the four days." }] },
+    { "ask": "How many people usually attend that specific one? Can you look?", "spoken": true, "chat": "same", "cards": "deny", "timeout": 300 },
+    {
+      "expect": { "status": "answered", "questionImages": 0 },
+      "note": "\"Can you look?\" asks for a look-up, not at the screen: nothing taken with the question."
+    },
+    {
+      "expect": { "notUsed": "look_at_screen" },
+      "soft": true,
+      "note": "The answering model may look at the screen when a question needs it; this one doesn't."
+    }
+  ]
+}

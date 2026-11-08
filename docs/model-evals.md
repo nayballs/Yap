@@ -3017,7 +3017,8 @@ Assistant sends it, with `assistant/screen.rs`'s line saying what it is, asked o
 scope "assistant", short spoken answers): **11/11**, 0.9–2.4 s, ~3,250–3,450 prompt tokens.
 Run folder `20261029-180637-qwen-qwen3.5-4b-q4-k-m`.
 
-**A lone "this"**: the yes/no request (`screen::ASK_PROMPT`, `ask_messages`, 4 tokens,
+**A lone "this"** (that request was removed on 8 Nov 2026: the answering model looks
+itself, chat-and-assistant.md): the yes/no request (`screen::ASK_PROMPT`, `ask_messages`, 4 tokens,
 temperature 0), sent by hand to the same server with exactly that prompt and message:
 **14 of 16** right, median 180 ms, slowest 0.5 s. Ten without an earlier answer ("Is this
 right?", "How do I fix this?", "What does that error mean?", "¿Esto funciona?"…) should be

@@ -853,16 +853,19 @@ test('asked out loud with Chat in view: Yap opens the page itself and the model 
   expect(fakeLlm.requests.slice(from).some((r) => r.kind === 'screenQuestion')).toBe(false);
   // Its pictures show with the question asked out loud.
   await expect(main.getByRole('group', { name: 'Screenshots' }).last().getByRole('button', { name: /^Screenshot,/ })).toHaveCount(2);
-  // From another app: no page opened by Yap, and neither the page tools nor the screen look for the model.
+  // From another app: no page opened by Yap, and no page tools for the model;
+  // its look at the screen is the window in front's (8 Nov 2026), its line saying so.
   await yap.invoke('e2e_focus', { focused: false });
   try {
     const away = fakeLlm.requests.length;
     fakeLlm.scriptChat([{ content: 'You can open YouTube in your browser.' }]);
     await yap.invoke('e2e_assistant_ask', { text: 'Open YouTube', listenMs: 0 });
     await expect.poll(() => chatCalls(fakeLlm, away).length, { timeout: 20_000 }).toBeGreaterThanOrEqual(1);
-    const tools = chatCalls(fakeLlm, away)[0].tools;
-    expect(tools).not.toContain('browser_navigate');
-    expect(tools).not.toContain('look_at_screen');
+    const [call] = chatCalls(fakeLlm, away);
+    expect(call.tools).not.toContain('browser_navigate');
+    expect(call.tools).toContain('look_at_screen');
+    expect(call.system).toContain('look_at_screen sees the window the user had in front of them when they asked out loud');
+    expect(call.system).not.toContain('every monitor and the page open beside the chat');
   } finally {
     await yap.invoke('e2e_focus', { focused: true });
   }

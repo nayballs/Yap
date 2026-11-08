@@ -1,14 +1,17 @@
 // The Voice Assistant sees the window in front (desktop/src-tauri/src/chat/assistant/screen.rs):
-// a spoken question about the screen takes a screenshot of the window that
-// was in front when the shortcut was pressed — by the question's words, or
-// Chat's model for a lone "this" — and the model answers from it.
+// a spoken question whose words point at the screen takes a screenshot of the
+// window that was in front when the shortcut was pressed, at once, and the
+// model answers from it.
 // - On a model on this PC: the window's picture goes with the question (cut
 //   from the fake monitors exactly, as a snip is), the model is told what it
 //   is, the question shows in Chat with it, and the network receipts say
 //   "Voice Assistant + the window in front".
-// - A lone "this": the model says yes or no (the capsule says "Looking at
-//   the window…" meanwhile); a question with nothing about the screen is
-//   never even asked about.
+// - No guessing (8 Nov 2026): a lone "this" or "that" takes nothing and asks
+//   no model first — two spoken follow-ups about a convention once sent the
+//   game in front. The answering model is offered look_at_screen instead
+//   (chat/see_screen.rs, the window in front its look): when it calls it, the
+//   window goes to it and shows on the question in Chat ("Looking at the
+//   window…" on the capsule while the words' own look takes it).
 // - A model that can't read images: the window's text, read on this PC (a
 //   stand-in for Windows' OCR), after the question, named in the sources.
 // - A cloud model: not without asking — the model is told it can't see the
@@ -19,6 +22,7 @@
 // fake monitors and the window in front (the first fake window), as the snip
 // specs do. The questions are staged with `e2e_assistant_ask` (no
 // microphone), the model is a local fake (support/fake-llm.js).
+import fs from 'node:fs';
 import { test as base, expect, openSettings, closeSettings, expectStore, inAnotherApp, setConfig } from './support/fixtures.js';
 import { startFakeLlm } from './support/fake-llm.js';
 import { readDataUrl, worstError } from './support/png.js';
@@ -68,7 +72,7 @@ const ask = async (yap, text) => {
 };
 /** The fake monitors and the window in front, for the next look (never the real screen). */
 const windowInFront = (yap) => yap.invoke('e2e_snip', { monitors: MONITORS, windows: [WINDOW], start: false });
-const capsule = (yap) => yap.overlay.locator('.capsule');
+const log = (yap) => fs.readFileSync(yap.logPath, 'utf8');
 const chats = (yap) => yap.readJson('chats.json').conversations;
 const questionNamed = (yap, text) => chats(yap).flatMap((c) => c.messages).find((m) => m.role === 'user' && m.text.startsWith(text));
 /** The question's context as the model got it (its own message). */
@@ -118,37 +122,70 @@ test('a question about the screen, on a model on this PC: the window in front go
   await expect(bubble.locator('.shots img')).toBeVisible();
 });
 
-test('a lone "this" is the model\'s call; a question about nothing on screen is never even asked about', async ({ yap, fakeLlm, shot }) => {
+/** The chat requests (they offer tools) from `from` on. */
+const chatCalls = (fakeLlm, from) => fakeLlm.requests.slice(from).filter((r) => r.tools?.length);
+/** A request's latest tool result, parsed. */
+const toolResult = (request) => JSON.parse(request.messages.filter((m) => m.role === 'tool').at(-1).content);
+/** The look's own line in the system prompt, asked from another app (chat/see_screen.rs). */
+const WINDOW_LINE = 'look_at_screen sees the window the user had in front of them when they asked out loud';
+
+// The two spoken follow-ups of 8 Nov 2026 (each sent a screenshot of the game in front).
+const FOLLOW_UPS = [
+  "The one that's on the 5th to the 8th of February, where is it and can you bring up the website in the browser for it?",
+  'How many people usually attend that specific one? Can you look?',
+];
+
+test('no guessing: spoken follow-ups with "that" send no screenshot and ask no model first; the answering model may look itself', async ({ yap, fakeLlm }) => {
   await inAnotherApp(yap);
   try {
-    // The model says yes (slowly: the capsule says what Yap is doing).
+    // A question, then the two follow-ups about what was just said, in the same conversation.
     await windowInFront(yap);
-    fakeLlm.reply('screenQuestion', () => 'Yes.');
-    fakeLlm.delay('screenQuestion', 1500);
     let before = fakeLlm.requests.length;
-    fakeLlm.scriptChat([{ content: 'Yes, that looks right.' }]);
-    const asking = ask(yap, 'Is this right?');
-    await expect(capsule(yap)).toContainText('Looking at the window…', { timeout: 10_000 });
-    await shot(yap.overlay, '01-looking-at-the-window');
-    await asking;
-    await expect.poll(() => fakeLlm.requests.slice(before).filter((r) => r.images?.length).length, { timeout: 10_000 }).toBe(1);
-    const judged = fakeLlm.requests.slice(before).find((r) => r.kind === 'screenQuestion');
-    expect(judged.user).toContain('The question: "Is this right?"');
-    fakeLlm.delay('screenQuestion', 0);
+    fakeLlm.scriptChat([{ content: 'Two this winter: Kellbrook Comic Con, 5 to 8 February, and the Northfold Expo in March.' }]);
+    await ask(yap, 'Which comic conventions are on near Kellbrook this winter?');
+    await expect.poll(() => chatCalls(fakeLlm, before).length, { timeout: 10_000 }).toBeGreaterThan(0);
     await yap.invoke('assistant_stop');
+    const answers = ["It's at the Kellbrook Exhibition Centre; its website is kellbrookcomiccon.example.com.", 'Usually about 12,000 people over the four days.'];
+    for (const [i, q] of FOLLOW_UPS.entries()) {
+      before = fakeLlm.requests.length;
+      fakeLlm.scriptChat([{ content: answers[i] }]);
+      const started = Date.now();
+      await ask(yap, q);
+      await expect.poll(() => chatCalls(fakeLlm, before).some((r) => userOf(r).includes(q)), { timeout: 10_000 }).toBe(true);
+      const asked = fakeLlm.requests.slice(before);
+      // Nothing taken, no yes/no request first…
+      expect(asked.some((r) => r.images?.length), q).toBe(false);
+      expect(asked.some((r) => r.kind === 'screenQuestion'), q).toBe(false);
+      expect(userOf(chatCalls(fakeLlm, before)[0])).not.toContain('screenshot');
+      // …the model has the look itself, the window in front its look, with when to use it.
+      const call = chatCalls(fakeLlm, before)[0];
+      expect(call.tools).toContain('look_at_screen');
+      expect(call.tools).not.toContain('browser_navigate');
+      expect(call.system).toContain(WINDOW_LINE);
+      expect(call.system).toContain('never for "it" or "that one" from the conversation, and never to look something up');
+      expect(Date.now() - started).toBeLessThan(8_000);
+      await yap.invoke('assistant_stop');
+    }
+    // Kept with no screenshot, in one conversation.
+    await expectStore(yap, 'chats.json', (s) =>
+      s.conversations.some((c) => FOLLOW_UPS.every((q) => c.messages.some((m) => m.role === 'user' && m.text === q && m.voice && !(m.images?.length))))
+    );
+    expect(log(yap)).not.toContain('asking whether the question is about the screen');
 
-    // The model says no: no screenshot.
+    // Words that point at the screen still take the window at once: with the
+    // question itself, before the model says a word (no look to offer then).
     await windowInFront(yap);
-    fakeLlm.reply('screenQuestion', () => 'no');
     before = fakeLlm.requests.length;
-    fakeLlm.scriptChat([{ content: 'It depends what you mean.' }]);
-    await ask(yap, 'Is this right?');
-    await expect.poll(() => fakeLlm.requests.slice(before).some((r) => userOf(r).includes('Is this right?') && r.kind !== 'screenQuestion'), { timeout: 10_000 }).toBe(true);
-    expect(fakeLlm.requests.slice(before).filter((r) => r.kind === 'screenQuestion')).toHaveLength(1);
-    expect(fakeLlm.requests.slice(before).every((r) => !r.images?.length)).toBe(true);
+    fakeLlm.scriptChat([{ content: 'It says the file is read-only.' }]);
+    await ask(yap, "What's this error on my screen?");
+    await expect.poll(() => chatCalls(fakeLlm, before).length, { timeout: 10_000 }).toBeGreaterThan(0);
+    const first = chatCalls(fakeLlm, before)[0];
+    expect(first.images).toHaveLength(1);
+    expect(userOf(first)).toContain('a screenshot Yap took of the window the user had in front of them');
+    expect(first.tools).not.toContain('look_at_screen');
     await yap.invoke('assistant_stop');
 
-    // Nothing about the screen: not asked, not taken.
+    // Nothing about the screen: not taken either.
     before = fakeLlm.requests.length;
     fakeLlm.scriptChat([{ content: 'Six to seven minutes.' }]);
     await ask(yap, 'How long do I boil an egg?');
@@ -156,11 +193,8 @@ test('a lone "this" is the model\'s call; a question about nothing on screen is 
     expect(fakeLlm.requests.slice(before).some((r) => r.kind === 'screenQuestion' || r.images?.length)).toBe(false);
     await yap.invoke('assistant_stop');
 
-    // An ask for something to make: its "this" is the thing to make, never
-    // the screen — not asked about (it spent 2.9 s on it, 31 Oct 2026),
-    // even with the model ready to say yes.
+    // An ask for something to make: its "this" is the thing to make, never the screen.
     await windowInFront(yap);
-    fakeLlm.reply('screenQuestion', () => 'Yes.');
     before = fakeLlm.requests.length;
     fakeLlm.scriptChat([{ content: "It's in Chat." }]);
     const make = 'Can you build me this level by level, a solo mage for Emberfall, in a document?';
@@ -168,8 +202,46 @@ test('a lone "this" is the model\'s call; a question about nothing on screen is 
     await expect.poll(() => fakeLlm.requests.slice(before).some((r) => userOf(r).includes('solo mage for Emberfall')), { timeout: 10_000 }).toBe(true);
     expect(fakeLlm.requests.slice(before).some((r) => r.kind === 'screenQuestion' || r.images?.length)).toBe(false);
   } finally {
-    fakeLlm.reply('screenQuestion', () => 'no');
-    fakeLlm.delay('screenQuestion', 0);
+    await yap.invoke('assistant_stop');
+  }
+});
+
+test('the answering model looks at the window in front when it needs to: the window goes to it, its frame on the question in Chat', async ({ yap, main, fakeLlm, shot }) => {
+  await inAnotherApp(yap);
+  try {
+    await windowInFront(yap);
+    const before = fakeLlm.requests.length;
+    fakeLlm.scriptChat([{ tools: [{ name: 'look_at_screen', args: {} }] }, { content: 'Yes: the three amounts add up to the total shown.' }]);
+    await ask(yap, 'Is this right?');
+    await expect.poll(() => chatCalls(fakeLlm, before).length, { timeout: 15_000 }).toBeGreaterThanOrEqual(2);
+    const calls = chatCalls(fakeLlm, before);
+    // Asked with no picture: the model chose to look.
+    expect(calls[0].images ?? []).toHaveLength(0);
+    expect(calls[0].tools).toContain('look_at_screen');
+    expect(fakeLlm.requests.slice(before).some((r) => r.kind === 'screenQuestion')).toBe(false);
+    // The window in front, exactly as the clear words' look cuts it — not every monitor.
+    expect(toolResult(calls[1])).toMatchObject({ success: true, data: { window: true }, displayText: 'Looked at the window in front' });
+    expect(calls[1].images).toHaveLength(1);
+    const png = readDataUrl(calls[1].images[0]);
+    expect([png.width, png.height]).toEqual([WINDOW.w, WINDOW.h]);
+    expect(worstError(png, GREY)).toBeLessThanOrEqual(1);
+    const told = calls[1].messages.at(-1).content.filter((p) => p.type === 'text').map((p) => p.text).join(' ');
+    expect(told).toContain('The window the user had in front of them when they asked');
+    // Kept with the question, as the window's own look is.
+    await expectStore(yap, 'chats.json', (s) =>
+      s.conversations.some((c) => c.messages.some((m) => m.role === 'user' && m.text === 'Is this right?' && m.voice && m.images?.[0]?.source === 'window'))
+    );
+    await expectStore(yap, 'chats.json', (s) => s.conversations.some((c) => c.messages.some((m) => m.role === 'assistant' && m.text.includes('add up to the total'))));
+    // In Chat: the question with the window in its screenshot frame, and the look's chip.
+    await main.getByRole('navigation', { name: 'Main' }).getByRole('button', { name: 'Chat', exact: true }).click();
+    await main.locator('.conv').first().click();
+    const bubble = main.locator('.cbubble.user', { hasText: 'Is this right?' }).last();
+    await expect(bubble.locator('.shots img')).toBeVisible();
+    await expect(main.getByRole('group', { name: 'Screenshots' }).last().getByRole('button', { name: /^Screenshot,/ })).toHaveCount(1);
+    // (The look's chip, folded under the answer with its steps.)
+    await expectStore(yap, 'chats.json', (s) => s.conversations.some((c) => c.messages.some((m) => m.role === 'assistant' && m.tools?.includes('Looked at the window in front'))));
+    await shot(main, '01-the-model-looked-at-the-window-in-front');
+  } finally {
     await yap.invoke('assistant_stop');
   }
 });
@@ -283,6 +355,8 @@ test('Settings → Voice Assistant: the window in front, on by default, the clou
     await expect.poll(() => fakeLlm.requests.slice(before).some((r) => userOf(r).includes("What's this error?")), { timeout: 10_000 }).toBe(true);
     expect(fakeLlm.requests.slice(before).some((r) => r.images?.length || r.kind === 'screenQuestion')).toBe(false);
     expect(userOf(fakeLlm.requests.slice(before).find((r) => userOf(r).includes("What's this error?")))).not.toContain('screenshot');
+    // …nor may the model look itself.
+    expect(fakeLlm.requests.slice(before).some((r) => r.tools?.includes('look_at_screen'))).toBe(false);
   } finally {
     await yap.invoke('assistant_stop');
     await setConfig(yap, main, { assistantScreen: true });

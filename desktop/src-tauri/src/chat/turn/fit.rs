@@ -433,6 +433,7 @@ mod tests {
             web_on: true,
             pictures: Gate::Show,
             screen: Gate::Show,
+            screen_takes: Default::default(),
             act: false,
             calendar: false,
             agents: true,
@@ -589,7 +590,7 @@ mod tests {
             crate::chat::tools::CHATS_TOOL_INSTRUCTIONS.join(" "),
             crate::chat::tools::calendar::CALENDAR_TOOL_INSTRUCTIONS.join(" "),
             crate::chat::tools::agents::AGENT_TOOL_INSTRUCTIONS.join(" "),
-            crate::chat::see_screen::instructions(Gate::Look).to_string(),
+            crate::chat::see_screen::instructions(Gate::Look, crate::chat::see_screen::Takes::Screen).to_string(),
         ];
         let mut at = 0;
         for line in lines {

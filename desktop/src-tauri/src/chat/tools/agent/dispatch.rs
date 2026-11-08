@@ -233,7 +233,7 @@ impl Loop<'_> {
             Source::Screen => {
                 // The screen as it is now (chat/see_screen.rs): its pictures
                 // go with the next step while they fit, its text in the result.
-                let run = crate::chat::see_screen::execute(&args, self.extra.screen, self.provider, self.base_url).await;
+                let run = crate::chat::see_screen::execute(&args, self.extra.screen, self.extra.screen_takes, self.provider, self.base_url).await;
                 self.screen_seen |= run.seen;
                 // Shown with the question, as it was taken.
                 if !run.images.is_empty() {

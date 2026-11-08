@@ -43,10 +43,15 @@ pub(super) struct Gates {
     /// there to see them in.)
     pub pictures: Gate,
     /// The screen (chat/see_screen.rs): with tools and the switch on, web or
-    /// not — with Chat in view (a phone's question never captures the PC;
-    /// the Voice Assistant from another app has its own look at the window
-    /// in front).
+    /// not — with Chat in view; and since 8 Nov 2026 the Voice Assistant's
+    /// shortcut asked from another app too, the window in front its look
+    /// ([`Gates::screen_takes`]; a cloud model only once allowed). Never a
+    /// phone's question (it never captures the PC), nor across the meetings.
     pub screen: Gate,
+    /// What the screen's look takes: every monitor and the page beside the
+    /// chat (Chat in view), or the window in front at the shortcut's press
+    /// (the Voice Assistant from another app: `see_screen::Takes::Window`).
+    pub screen_takes: crate::chat::see_screen::Takes,
     /// Acting on the pages beside the chat (chat/pages/act.rs): the models
     /// proven good at it, wherever the pages are — typed in Chat, or the
     /// Voice Assistant asked with Chat in view (since 8 Nov 2026: a click
@@ -93,11 +98,15 @@ pub(super) struct Gates {
 
 /// What [`Gates::for_turn`] reads of this PC: Yap Code offered
 /// (`agents::offered`: on, and Claude Code here), a calendar connected, a
-/// connector's tool to offer where the question was asked.
+/// connector's tool to offer where the question was asked, and the window in
+/// front a look may take (`assistant::may_look_at_window`: the Voice
+/// Assistant's shortcut asked from another app, nothing else taken with it —
+/// never a phone's question).
 struct Here<'a> {
     yap_code: &'a dyn Fn() -> bool,
     calendar: &'a dyn Fn() -> bool,
     connectors: &'a dyn Fn() -> bool,
+    window: &'a dyn Fn() -> bool,
 }
 
 impl Gates {
@@ -110,6 +119,7 @@ impl Gates {
             yap_code: &|| crate::agents::offered(cfg),
             calendar: &crate::calendar::connected,
             connectors: &|| crate::chat::tools::connectors::offers_any(cfg, scope),
+            window: &crate::chat::assistant::may_look_at_window,
         };
         Gates::for_turn_on(cfg, ep, scope, meetings, chat_in_view, &here)
     }
@@ -126,7 +136,18 @@ impl Gates {
         let web_lines = crate::chat::tools::WebLines::of(strong, claude_in_chat, own_search);
         let web_on = cfg.web_search && !meetings;
         let pictures = Gate::for_model(web_on && tools && (scope != Some("assistant") || chat_in_view), provider, model);
-        let screen = if chat_in_view { crate::chat::see_screen::gate(cfg, tools, provider, model) } else { Gate::Off };
+        // The screen: what the person sees with Chat in view; asked out loud
+        // from another app, the window in front at the press — the answering
+        // model's to look at when the question needs it, never guessed from
+        // the words (8 Nov 2026).
+        let away = !chat_in_view && scope == Some("assistant") && !meetings && tools && (here.window)();
+        let (screen, screen_takes) = if chat_in_view {
+            (crate::chat::see_screen::gate(cfg, tools, provider, model), crate::chat::see_screen::Takes::Screen)
+        } else if away {
+            (crate::chat::see_screen::window_gate(cfg, tools, provider, model, &ep.base_url), crate::chat::see_screen::Takes::Window)
+        } else {
+            (Gate::Off, crate::chat::see_screen::Takes::Screen)
+        };
         let act = pictures != Gate::Off && matches!(scope, None | Some("assistant")) && !meetings && crate::chat::pages::act::can_act(provider, model);
         let calendar = !meetings && (here.calendar)();
         let agents = tools && !meetings && (here.yap_code)();
@@ -135,7 +156,7 @@ impl Gates {
         let evaluated = tools && provider != crate::ai::claude_plan::PROVIDER && crate::ai::eval::connectors_forced();
         let connectors = !meetings && (evaluated || crate::chat::tools::connectors::may(provider, strong)) && (here.connectors)();
         let (apps, past_chats, picture_tools) = (cfg.open_apps, cfg.memory_search_chats, true);
-        let gates = Gates { tools, doc_tools, strong, claude_in_chat, own_search, web_lines, web_on, pictures, screen, act, calendar, agents, connectors, apps, past_chats, picture_tools, files: Gate::Off, share_tools: true };
+        let gates = Gates { tools, doc_tools, strong, claude_in_chat, own_search, web_lines, web_on, pictures, screen, screen_takes, act, calendar, agents, connectors, apps, past_chats, picture_tools, files: Gate::Off, share_tools: true };
         if provider == crate::ai::claude_plan::PROVIDER {
             return gates.on_the_plan();
         }
@@ -195,6 +216,7 @@ impl Gates {
             strong: self.strong,
             pictures: self.pictures,
             screen: self.screen,
+            screen_takes: self.screen_takes,
             act: self.act,
             own_search: self.own_search,
             web_question: false,
@@ -322,6 +344,58 @@ mod tests {
         assert!(!Gates { agents: false, ..plan }.on_the_plan().agents);
         assert!(!Gates::for_turn(&YapConfig { agents_enabled: true, ..cfg.clone() }, &endpoint(crate::ai::claude_plan::PROVIDER, "claude-opus-5-5"), Some("meetings"), true, false).agents, "never across the meetings");
     }
+    /// **No guessing** (8 Nov 2026): a spoken question asked from another
+    /// app no longer has its words decide whether the window in front goes;
+    /// the answering model is offered `look_at_screen` — the window in front
+    /// at the press, never every monitor — and looks when the question needs
+    /// it. Only where the window may go (a cloud model once allowed), never
+    /// a phone's question, never across the meetings.
+    #[test]
+    fn asked_out_loud_from_another_app_the_model_may_look_at_the_window_in_front() {
+        use crate::chat::see_screen::Takes;
+        let cfg = YapConfig { assistant_screen: true, assistant_screen_cloud: false, web_search: true, ..Default::default() };
+        let from_pc = here(&|| false, &|| true);
+        let phone = here(&|| false, &|| false);
+        let local = keyed("custom", "qwen2.5-vl-7b", "http://127.0.0.1:8080/v1");
+        let cloud = keyed("anthropic", "claude-haiku-5-5", "https://api.anthropic.com/v1");
+        let plan = keyed(crate::ai::claude_plan::PROVIDER, "claude-opus-5-5", "");
+        let away = |cfg: &YapConfig, ep: &Endpoint, here: &Here<'_>| Gates::for_turn_on(cfg, ep, Some("assistant"), false, false, here);
+        // A model on this PC: offered, the window in front its look — and its tool says so.
+        let g = away(&cfg, &local, &from_pc);
+        assert_ne!(g.screen, Gate::Off);
+        assert_eq!(g.screen_takes, Takes::Window);
+        let (prompt, offered) = sent(&g, &local.persona, false);
+        assert!(offered.iter().any(|n| n == "look_at_screen"), "{offered:?}");
+        assert!(prompt.contains("the window the user had in front of them when they asked out loud"), "{prompt}");
+        assert!(!offered.iter().any(|n| n == "browser_navigate"), "no panel away from Chat");
+        let tools = g.offered(None, Some(7), false);
+        let look = tools.as_array().unwrap().iter().find(|t| t["function"]["name"] == "look_at_screen").unwrap();
+        assert!(look["function"]["description"].as_str().unwrap().contains("never for \"it\" or \"that one\" from the conversation"));
+        // A cloud model (and your Claude plan): only once "…with cloud models too" is on.
+        for ep in [&cloud, &plan] {
+            assert_eq!(away(&cfg, ep, &from_pc).screen, Gate::Off, "{}", ep.provider);
+            let allowed = away(&YapConfig { assistant_screen_cloud: true, ..cfg.clone() }, ep, &from_pc);
+            assert_eq!((allowed.screen, allowed.screen_takes), (Gate::Look, Takes::Window), "{}", ep.provider);
+        }
+        // "Let Yap's AI see your screen" off: never.
+        assert_eq!(away(&YapConfig { assistant_screen: false, assistant_screen_cloud: true, ..cfg.clone() }, &local, &from_pc).screen, Gate::Off);
+        // A phone's question (or one with something else taken already): never.
+        assert_eq!(away(&cfg, &local, &phone).screen, Gate::Off);
+        assert_eq!(away(&YapConfig { assistant_screen_cloud: true, ..cfg.clone() }, &cloud, &phone).screen, Gate::Off);
+        // Across the meetings (a Skill said aloud too): never.
+        assert_eq!(Gates::for_turn_on(&cfg, &local, Some("meetings"), true, false, &from_pc).screen, Gate::Off);
+        assert_eq!(Gates::for_turn_on(&cfg, &local, Some("assistant"), true, false, &from_pc).screen, Gate::Off);
+        // A model that doesn't call tools: nothing to look with.
+        assert_eq!(away(&cfg, &keyed("local", "qwen2.5-1.5b-instruct", "http://127.0.0.1:11434/v1"), &from_pc).screen, Gate::Off);
+        // With Chat in view: as it was, every monitor and the page beside the chat.
+        for ep in [&local, &cloud] {
+            let in_view = Gates::for_turn_on(&cfg, ep, Some("assistant"), false, true, &from_pc);
+            assert_eq!((in_view.screen_takes, in_view.screen != Gate::Off), (Takes::Screen, true), "{}", ep.provider);
+            let typed = Gates::for_turn_on(&cfg, ep, None, false, true, &phone);
+            assert_eq!(typed.screen_takes, Takes::Screen);
+        }
+    }
+
     /// Every model a turn may have: the strong cloud ones, the on-device
     /// one, the Claude plan's.
     const MODELS: [(&str, &str, &str); 6] = [
@@ -333,10 +407,18 @@ mod tests {
         (crate::ai::claude_plan::PROVIDER, "claude-opus-5-5", ""),
     ];
 
-    /// Where a question is asked: `(scope, meetings, chat_in_view)` — typed in
-    /// Chat, the Voice Assistant with Chat in view and from another app,
-    /// across the meetings.
-    const SCOPES: [(Option<&str>, bool, bool); 4] = [(None, false, true), (Some("assistant"), false, true), (Some("assistant"), false, false), (Some("meetings"), true, false)];
+    /// Where a question is asked: `(scope, meetings, chat_in_view, window)` —
+    /// typed in Chat, the Voice Assistant with Chat in view and from another
+    /// app (the window in front its look), a phone's question, across the
+    /// meetings.
+    const SCOPES: [(Option<&str>, bool, bool, bool); 5] =
+        [(None, false, true, false), (Some("assistant"), false, true, false), (Some("assistant"), false, false, true), (Some("assistant"), false, false, false), (Some("meetings"), true, false, false)];
+
+    /// What a turn reads of this PC: Yap Code, a calendar, connectors, and
+    /// the window in front (the Voice Assistant's shortcut from another app).
+    fn here<'a>(yap_code: &'a dyn Fn() -> bool, window: &'a dyn Fn() -> bool) -> Here<'a> {
+        Here { yap_code, calendar: &|| false, connectors: &|| false, window }
+    }
 
     fn keyed(provider: &str, model: &str, base: &str) -> Endpoint {
         Endpoint { base_url: base.into(), api_key: "test-key".into(), model: model.into(), provider: provider.into(), persona: "You are a helpful assistant.".into(), disable_thinking: false }
@@ -385,7 +467,7 @@ mod tests {
         // the gate (never across the meetings): the prompt named tools the
         // turn didn't offer.
         let cfg = YapConfig { agents_enabled: true, web_search: true, ..Default::default() };
-        let here = Here { yap_code: &|| true, calendar: &|| false, connectors: &|| false };
+        let here = here(&|| true, &|| false);
         for (provider, model, base) in MODELS {
             let ep = keyed(provider, model, base);
             let across = Gates::for_turn_on(&cfg, &ep, Some("meetings"), true, false, &here);
@@ -422,7 +504,7 @@ mod tests {
             ("past chats", Box::new(|_| t::CHATS_TOOL_INSTRUCTIONS.join(" ")), vec!["search_chats"]),
             ("connectors", Box::new(|_| t::connectors::INSTRUCTIONS.to_string()), vec!["recipes__search"]),
             ("documents", Box::new(|g| t::tool_instructions(g.doc_tools)), vec!["create_document"]),
-            ("screen", Box::new(|g| crate::chat::see_screen::instructions(g.screen).to_string()), vec!["look_at_screen"]),
+            ("screen", Box::new(|g| crate::chat::see_screen::instructions(g.screen, g.screen_takes).to_string()), vec!["look_at_screen"]),
             // (The web's pictures, else picture files by a path: show_picture either way.)
             ("pictures", Box::new(|g| if g.files != Gate::Off { crate::chat::pictures::file_instructions(g.files).to_string() } else { crate::chat::pictures::instructions(g.pictures, g.web_lines == t::WebLines::Claude) }), vec!["show_picture"]),
             ("browser", Box::new(|g| crate::chat::pages::instructions(g.pictures, g.act)), vec!["browser_navigate", "browser_read"]),
@@ -433,12 +515,13 @@ mod tests {
             let ep = keyed(provider, model, base);
             // Every configuration first, then every tool any of them offers.
             let mut seen: Vec<(String, Gates, String, Vec<String>)> = Vec::new();
-            for (scope, meetings, in_view) in SCOPES {
+            for (scope, meetings, in_view, window) in SCOPES {
                 for bits in 0..256u32 {
                     let on = |i: u32| bits & (1 << i) != 0;
-                    let cfg = YapConfig { web_search: on(0), web_search_native: on(1), open_apps: on(2), memory_search_chats: on(3), assistant_screen: on(4), ..Default::default() };
+                    // (The cloud's switch with the screen's: a cloud model's window look too.)
+                    let cfg = YapConfig { web_search: on(0), web_search_native: on(1), open_apps: on(2), memory_search_chats: on(3), assistant_screen: on(4), assistant_screen_cloud: on(4), ..Default::default() };
                     let (yap_code, calendar, connectors) = (on(5), on(6), on(7));
-                    let here = Here { yap_code: &|| yap_code, calendar: &|| calendar, connectors: &|| connectors };
+                    let here = Here { yap_code: &|| yap_code, calendar: &|| calendar, connectors: &|| connectors, window: &|| window };
                     let unfiled = Gates::for_turn_on(&cfg, &ep, scope, meetings, in_view, &here);
                     // Picture files without the web, wanted (a Code chat, a
                     // picture file named) or not.
@@ -495,7 +578,7 @@ mod tests {
         // show_picture — and look_at_picture for a model that reads images —
         // by a path only, and one line saying just that.
         let cfg = YapConfig { web_search: false, agents_enabled: true, assistant_screen: false, ..Default::default() };
-        let here = Here { yap_code: &|| true, calendar: &|| false, connectors: &|| false };
+        let here = here(&|| true, &|| false);
         for (provider, model, base) in MODELS {
             let ep = keyed(provider, model, base);
             let before = Gates::for_turn_on(&cfg, &ep, None, false, true, &here);

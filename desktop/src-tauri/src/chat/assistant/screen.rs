@@ -4,19 +4,22 @@
 //! that was in front when the assistant's shortcut was pressed, and the
 //! model answers from it.
 //!
-//! **Never for every question.** Cheap rules first ([`about`], pure, in the
-//! languages Yap's speech models know best: English, French, German,
-//! Spanish, Italian, Portuguese and Dutch): words that point at the screen
-//! ("on my screen", "this error", "summarise this", "qu'est-ce que c'est",
-//! "dieser Fehler") say yes; a demonstrative on its own ("is this right?",
-//! "how do I fix this?") is a maybe; anything else, no — "how long do I
-//! boil an egg" is never a screenshot. A maybe is the model's call
-//! ([`model_says`]: one short yes/no request to Chat's own model, with the
-//! last answer for context, so "what does this mean?" after an answer is
-//! about the answer). An ask for something to be made — "…in a document",
-//! "make me a guide to…", in the same languages ([`asks_to_make`]) — is no
-//! maybe: its "this" is the thing to make, and the model isn't asked
-//! (2026-10-31: 2.9 s spent on a spoken build "in a document").
+//! **Only when the words say so** ([`about_in`], pure, in the languages
+//! Yap's speech models know best: English, French, German, Spanish,
+//! Italian, Portuguese and Dutch): words that point at the screen ("on my
+//! screen", "this error", "summarise this", "qu'est-ce que c'est", "dieser
+//! Fehler") take the window at once; anything else never does here — "is
+//! this right?", "how many people go to that one?", "how long do I boil an
+//! egg". **No guessing** (the maintainer, 8 Nov 2026): a lone "this" or
+//! "that" was once put to Chat's model in a one-second yes/no request with a
+//! slice of the chat, and two spoken follow-ups about a convention just
+//! discussed each sent a screenshot of the game in front. Now the answering
+//! model, with the whole conversation, looks itself when it needs to
+//! (`look_at_screen`, `chat/see_screen.rs`: away from Chat it takes this
+//! window in front, [`take_in_front`]). An ask for something to be made —
+//! "…in a document", "make me a guide to…", in the same languages
+//! ([`asks_to_make`]) — has "this document" as the new one, never the
+//! screen's.
 //!
 //! **What's taken** ([`capture`]): the window's visible frame
 //! (`snip/pick.rs`, DWM's frame; the snip's window pick), cut from every
@@ -41,7 +44,9 @@
 //! a question about the screen meets one, Yap answers without it, the model
 //! is told so (it says it couldn't see the screen), and an alert asks once
 //! ([`ask_once`]: **Allow**). The network receipts name the upload ("Voice
-//! Assistant + the window in front · Groq", `privacy/net.rs`).
+//! Assistant + the window in front · Groq", `privacy/net.rs`). The model's
+//! own look away from Chat goes by the same rule ([`allowed`]: offered to a
+//! cloud model only once allowed).
 //!
 //! **A model that can't read images** (`snip/vision.rs`; the on-device model
 //! without its projector, or whose projector won't load): the window's text,
@@ -53,10 +58,9 @@
 //! what was on screen.
 
 use std::sync::atomic::{AtomicIsize, Ordering};
-use std::sync::{LazyLock, Mutex};
+use std::sync::LazyLock;
 
 use regex::Regex;
-use serde_json::{json, Value};
 use tauri::AppHandle;
 
 use crate::chat::chats::{ChatImage, Source};
@@ -79,9 +83,8 @@ pub fn window_in_front(hwnd: isize) {
 pub enum About {
     /// It points at the screen: take the window.
     Yes,
-    /// "this" with nothing saying what: the model decides.
-    Maybe,
-    /// Nothing about the screen.
+    /// Nothing that does — a "this" or "that" alone included: the answering
+    /// model looks itself if it needs to (`look_at_screen`).
     No,
 }
 
@@ -132,11 +135,10 @@ static SCREEN_PHRASES: LazyLock<Regex> = LazyLock::new(|| {
 /// "make me a document"), or a guide, a plan, a build to keep ("write me a
 /// guide to…", "fais-moi un plan…") — in each language: the answer comes
 /// from the model and the web, not the screen, so a "this" in it ("can you
-/// build me this level by level… in a document") is never the screen's. The
-/// Voice Assistant spent 2.9 s asking the model whether a spoken ask for a
-/// Divinity: Original Sin 2 build "in a document" was about the screen
-/// (2026-10-31). English's other asks for something to keep are
-/// `documents::asks_for_document`'s.
+/// build me this level by level… in a document") is never the screen's,
+/// and "make this a document" is the new one (2026-10-31: a spoken
+/// Divinity: Original Sin 2 build "in a document"). English's other asks for
+/// something to keep are `documents::asks_for_document`'s.
 static MAKES: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(concat!(
         r"(?x)",
@@ -171,11 +173,11 @@ static MAKES: LazyLock<Regex> = LazyLock::new(|| {
 const DOCUMENT_WORDS: &[&str] = &["document", "doc", "dokument", "documento"];
 
 /// "This" in each language (its code, as My languages has it): before a
-/// screen word, the question is about the screen; alone, it may be. Only
-/// the person's own languages count (English always): Dutch "dit" is
-/// French for "said".
+/// screen word, the question is about the screen ("that" never is: it's
+/// mostly something said earlier). Only the person's own languages count
+/// (English always): Dutch "dit" is French for "said".
 const DEMONSTRATIVES: &[(&str, &[&str])] = &[
-    ("en", &["this", "these"]), // ("that" is weaker: `THAT`)
+    ("en", &["this", "these"]),
     ("fr", &["ce", "cet", "cette", "ces", "ça", "ceci"]),
     ("de", &["dies", "diese", "dieser", "dieses", "diesen", "diesem"]),
     ("es", &["este", "esta", "esto", "estos", "estas"]),
@@ -193,10 +195,6 @@ fn demonstratives(langs: &[String]) -> Vec<&'static str> {
         .flat_map(|(_, words)| words.iter().copied())
         .collect()
 }
-
-/// "That", "those": a screen word after them may be the screen or an earlier
-/// answer (a maybe).
-const THAT: &[&str] = &["that", "those"];
 
 /// Asking for something done to "this": "summarise this", "explain these"
 /// (not "review this week": [`NOT_AFTER`]).
@@ -294,18 +292,25 @@ pub fn about(question: &str) -> About {
 
 /// Does a spoken question ask for something to be made — a document, or a
 /// guide, plan or build to keep ([`MAKES`], `documents::asks_for_document`)?
-/// Then a lone "this" in it is never the screen's ([`about_in`]). Pure.
+/// Then "this document" in it is the new one, never the screen's
+/// ([`about_in`]). Pure.
 pub fn asks_to_make(question: &str) -> bool {
     let text = normal(question);
     MAKES.is_match(&text) || crate::chat::documents::asks_for_document(question)
 }
 
 /// [`about`] in the person's own languages (My languages' codes; none: all
-/// of them). **An ask for something to be made** ([`asks_to_make`]: "…in a
-/// document", "make me a guide…") is answered from the model and the web:
-/// its "this" alone is no maybe, and "this document" in it is the new one —
-/// only words that point at the screen itself ("on my screen", "summarise
-/// this page into a document") take it. Pure.
+/// of them): **yes only when its words point at the screen** — a phrase
+/// ("on my screen", "what's this?", "summarise what's on…"), "this" before a
+/// screen word ("this error", "cette page", "dieser Fehler"), or a verb
+/// before "this" ("summarise this", "explain these"). Anything else is no: a
+/// lone "this" or "that" ("is this right?", "how many go to that one?") is
+/// the answering model's to look at if it needs to (`look_at_screen`), with
+/// the whole conversation in view. **An ask for something to be made**
+/// ([`asks_to_make`]: "…in a document", "make me a guide…"): "this
+/// document" in it is the new one — only words that point at the screen
+/// itself ("on my screen", "summarise this page into a document") take it.
+/// Pure.
 pub fn about_in(question: &str, langs: &[String]) -> About {
     let text = normal(question);
     let text = text.trim_end_matches(['?', '.', '!', ' ']);
@@ -315,11 +320,8 @@ pub fn about_in(question: &str, langs: &[String]) -> About {
     let making = asks_to_make(question);
     let demonstratives = demonstratives(langs);
     let w = words(text);
-    let mut maybe = false;
     for (i, word) in w.iter().enumerate() {
-        let this = demonstratives.contains(word);
-        let that = THAT.contains(word);
-        if !this && !that {
+        if !demonstratives.contains(word) {
             continue;
         }
         let next = w.get(i + 1).copied();
@@ -329,158 +331,15 @@ pub fn about_in(question: &str, langs: &[String]) -> About {
         // "this error", "this weird error", "cette page", "dieser Fehler"
         // (not "make this a document": that's the one to make).
         let screen_word = [w.get(i + 1), w.get(i + 2)].into_iter().flatten().any(|n| SCREEN_WORDS.contains(n) && !(making && DOCUMENT_WORDS.contains(n)));
-        if this && screen_word {
+        if screen_word {
             return About::Yes;
         }
         // "summarise this", "explain these".
         if (*word == "this" || *word == "these") && i > 0 && VERBS.contains(&w[i - 1]) {
             return About::Yes;
         }
-        // A French "ce" is mostly "ce que", "c'est" or a noun that isn't
-        // the screen: only before a screen word.
-        if *word == "ce" {
-            continue;
-        }
-        maybe = true;
     }
-    // Something to make: a "this" alone is never the screen's — no 2.9 s
-    // spent asking the model.
-    if maybe && !making {
-        About::Maybe
-    } else {
-        About::No
-    }
-}
-
-// ---- …or the model says it is -------------------------------------------------------------
-
-/// The yes/no request for a maybe (no editable body: Yap's own question).
-pub const ASK_PROMPT: &str = "You decide whether a question someone asked a voice assistant out loud is about something on their screen: the app, web page, email, document, error, chart or picture in front of them. Reply with one word: yes if answering it needs to see their screen, no if it doesn't (general knowledge, their notes or calendar, or something said earlier in the conversation, such as the assistant's last answer). The question may be in any language; reply in English.";
-
-/// The yes/no request's messages: the last answer (when there is one, so a
-/// question about it isn't taken for the screen), then the question. Pure.
-pub fn ask_messages(question: &str, last_answer: Option<&str>) -> Value {
-    let mut user = String::new();
-    if let Some(a) = last_answer.map(str::trim).filter(|a| !a.is_empty()) {
-        let a: String = a.chars().take(400).collect();
-        user.push_str(&format!("The assistant's last answer: \"{a}\"\n\n"));
-    }
-    user.push_str(&format!("The question: \"{}\"\n\nIs it about something on their screen? yes or no.", question.trim()));
-    json!([
-        { "role": "system", "content": ASK_PROMPT },
-        { "role": "user", "content": user },
-    ])
-}
-
-/// Did the model say yes? Its first word, in English or the languages
-/// above. Pure.
-pub fn says_yes(reply: &str) -> bool {
-    let first = reply
-        .trim()
-        .trim_start_matches(|c: char| !c.is_alphanumeric())
-        .split(|c: char| !c.is_alphanumeric())
-        .next()
-        .unwrap_or("")
-        .to_lowercase();
-    matches!(first.as_str(), "yes" | "y" | "oui" | "ja" | "sí" | "si" | "sim" | "true")
-}
-
-/// The yes/no request's own fields: a short reply (a model on this PC), and
-/// little thinking for gpt-oss (its reasoning would take the whole reply).
-/// Pure.
-pub fn ask_extra(model: &str) -> serde_json::Map<String, Value> {
-    crate::chat::compact::extra(model)
-}
-
-/// Chat's model decides a maybe: one short request, ≤ 8 s (a model on this
-/// PC: 15 s, it may be loading). Anything but a clear yes is a no.
-async fn model_says(question: &str, conversation: Option<u64>, ep: &Endpoint<'_>) -> bool {
-    let last = conversation
-        .and_then(crate::chat::chats::get)
-        .and_then(|c| c.messages.iter().rev().find(|m| m.role == "assistant").map(|m| m.text.clone()));
-    let here = crate::ai::ai_model::runs_here(ep.provider, ep.base_url);
-    let opts = crate::ai::llm::ChatOptions {
-        temperature: 0.0,
-        max_tokens: here.then_some(4),
-        timeout: std::time::Duration::from_secs(if here { 15 } else { 8 }),
-        disable_thinking: true,
-    };
-    let t = std::time::Instant::now();
-    let asked = crate::privacy::net::within(
-        crate::privacy::net::Feature::Assistant,
-        crate::ai::llm::chat_with(ep.base_url, ep.api_key, ep.model, ep.provider, ask_messages(question, last.as_deref()), &opts, ask_extra(ep.model)),
-    )
-    .await;
-    match asked {
-        Ok(reply) => {
-            let yes = says_yes(&reply);
-            tracing::info!(yes, ms = t.elapsed().as_millis() as u64, "Voice Assistant: the model said whether the question is about the screen");
-            yes
-        }
-        Err(e) => {
-            tracing::info!(ms = t.elapsed().as_millis() as u64, "Voice Assistant: couldn't ask whether the question is about the screen ({})", e.chars().take(120).collect::<String>());
-            false
-        }
-    }
-}
-
-// ---- …asked early, while the question is cleaned up ------------------------------------------
-
-/// The model's word on a maybe, asked while question `generation` was
-/// cleaned up ([`ask_early`]).
-struct Early {
-    generation: u64,
-    task: tauri::async_runtime::JoinHandle<bool>,
-}
-
-static EARLY: Mutex<Option<Early>> = Mutex::new(None);
-
-/// **Ask early whether a spoken question is about the screen** (2026-11-07):
-/// a question cleaned up first (its side's "Clean up what you say…" switch,
-/// `pipeline::ask_assistant`) would wait out the cleanup, then the model's
-/// yes or no on a maybe — up to 3 s on a model loading on this PC. So that
-/// yes or no is asked now, on its words as said (`said`: the dictionary's,
-/// fillers and all, which never decide it), beside the cleanup; [`look`]
-/// takes the word when the cleaned question is a maybe too, and throws it
-/// away otherwise. Only what the rules call a maybe, where the window may
-/// go (a cloud model only when allowed), with Chat's model set up, the
-/// assistant on, nothing waiting in Chat's box (screenshots go instead of
-/// the window), and Yap's own window not in front (a model that looks
-/// itself may look then): asked only when [`look`] would ask it. The capture
-/// still waits for the cleaned question. Nothing is taken or shown here.
-pub fn ask_early(app: &AppHandle, said: &str, cfg: &crate::config::YapConfig, conversation: Option<u64>) {
-    if about_in(said, &crate::dictation::languages::my_languages(cfg)) != About::Maybe || crate::chat::assistant::is_off() {
-        return;
-    }
-    let Ok((base_url, api_key, model, provider, _, _)) = crate::chat::turn::resolve_chat_endpoint(cfg) else { return };
-    if allowed(cfg.assistant_screen, cfg.assistant_screen_cloud, leaves_pc(&provider, &base_url)) != Allowed::Yes
-        || !crate::snip::waiting::now().images.is_empty()
-        || crate::notices::notice::window_seen(app) == crate::notices::notice::Seen::Front
-    {
-        return;
-    }
-    let generation = super::lock().generation;
-    let said = said.to_string();
-    tracing::info!("Voice Assistant: asking whether the question is about the screen while it's cleaned up");
-    let task = tauri::async_runtime::spawn(async move {
-        let ep = Endpoint { base_url: &base_url, api_key: &api_key, model: &model, provider: &provider };
-        model_says(&said, conversation, &ep).await
-    });
-    if let Some(old) = EARLY.lock().unwrap_or_else(|p| p.into_inner()).replace(Early { generation, task }) {
-        old.task.abort();
-    }
-}
-
-/// Question `generation`'s early word, if one was asked (taken; an older
-/// question's is dropped).
-fn take_early(generation: u64) -> Option<tauri::async_runtime::JoinHandle<bool>> {
-    let early = EARLY.lock().unwrap_or_else(|p| p.into_inner()).take()?;
-    if early.generation == generation {
-        Some(early.task)
-    } else {
-        early.task.abort();
-        None
-    }
+    About::No
 }
 
 // ---- may it go? -----------------------------------------------------------------------------
@@ -595,7 +454,6 @@ pub fn text_source() -> Source {
 /// Chat's model, for a look (`turn::resolve_chat_endpoint`'s parts).
 pub struct Endpoint<'a> {
     pub base_url: &'a str,
-    pub api_key: &'a str,
     pub model: &'a str,
     pub provider: &'a str,
 }
@@ -617,41 +475,19 @@ impl Look {
     }
 }
 
-/// **A spoken question, looked at**: `None` when it isn't about the screen
-/// (or the setting's off); else what goes with it. `looking(true)` while the
-/// window is taken and read (the capsule says so). `generation`: the
-/// question's, whose model's word may have been asked early ([`ask_early`]).
-pub async fn look(
-    app: &AppHandle,
-    question: &str,
-    cfg: &crate::config::YapConfig,
-    ep: Endpoint<'_>,
-    conversation: Option<u64>,
-    generation: u64,
-    looking: &(dyn Fn(bool) + Send + Sync),
-) -> Option<Look> {
-    let about = about_in(question, &crate::dictation::languages::my_languages(cfg));
-    // The word asked early is for a maybe only: the cleaned question isn't
-    // one, it isn't wanted.
-    let early = take_early(generation);
-    let early = match early {
-        Some(task) if about != About::Maybe => {
-            task.abort();
-            None
-        }
-        e => e,
-    };
-    if about == About::No {
+/// **A spoken question, looked at**: `None` when its words don't point at
+/// the screen ([`about_in`]), or the setting's off; else what goes with it.
+/// No model is asked first. `looking(true)` while the window is taken and
+/// read (the capsule says so).
+pub async fn look(app: &AppHandle, question: &str, cfg: &crate::config::YapConfig, ep: Endpoint<'_>, looking: &(dyn Fn(bool) + Send + Sync)) -> Option<Look> {
+    if about_in(question, &crate::dictation::languages::my_languages(cfg)) == About::No {
         return None;
     }
     let leaves = leaves_pc(ep.provider, ep.base_url);
     let may = allowed(cfg.assistant_screen, cfg.assistant_screen_cloud, leaves);
-    let rule = about;
-    tracing::info!(?rule, ?may, "Voice Assistant: a question that may be about the screen");
+    tracing::info!(?may, "Voice Assistant: a question about the screen");
     match may {
         Allowed::Off => return None,
-        // A maybe isn't worth asking about when it couldn't go.
-        Allowed::NotToTheCloud if about == About::Maybe => return None,
         Allowed::NotToTheCloud => {
             if !asked_before(cfg) {
                 ask_once(app, ep.provider);
@@ -665,46 +501,21 @@ pub async fn look(
         return None;
     }
     looking(true);
-    let out = take(app, question, &ep, about, conversation, early).await;
+    let out = take(app, question, &ep).await;
     looking(false);
     out
 }
 
-/// [`look`]'s work once the window may go: the model's word on a maybe
-/// (`early`: asked already, beside the question's cleanup), the capture,
-/// then its picture or its text.
-async fn take(
-    app: &AppHandle,
-    question: &str,
-    ep: &Endpoint<'_>,
-    about: About,
-    conversation: Option<u64>,
-    early: Option<tauri::async_runtime::JoinHandle<bool>>,
-) -> Option<Look> {
-    if about == About::Maybe {
-        let yes = match early {
-            Some(task) => task.await.unwrap_or(false),
-            None => model_says(question, conversation, ep).await,
-        };
-        if !yes {
-            return None;
-        }
-    }
-    let hwnd = WINDOW.load(Ordering::SeqCst);
-    let capture_app = app.clone();
-    let t = std::time::Instant::now();
-    let image = match tauri::async_runtime::spawn_blocking(move || capture(&capture_app, hwnd)).await {
-        Ok(Ok(image)) => image,
-        Ok(Err(e)) => {
+/// [`look`]'s work once the window may go: the capture, then its picture or
+/// its text.
+async fn take(app: &AppHandle, question: &str, ep: &Endpoint<'_>) -> Option<Look> {
+    let image = match take_in_front(app).await {
+        Ok((image, _png)) => image,
+        Err(e) => {
             tracing::info!("Voice Assistant: no screenshot of the window in front ({e})");
             return Some(Look::note(NO_WINDOW_NOTE.into()));
         }
-        Err(e) => {
-            tracing::warn!("Voice Assistant: the capture didn't finish ({e})");
-            return Some(Look::note(NO_WINDOW_NOTE.into()));
-        }
     };
-    tracing::info!(w = image.w, h = image.h, ms = t.elapsed().as_millis() as u64, "Voice Assistant: took the window in front");
     // A model that reads images gets the picture; the on-device model loads
     // its projector first (a failure: its text instead).
     let mut picture = crate::snip::vision::reads_images(ep.provider, ep.model) != Some(false);
@@ -744,19 +555,33 @@ fn from_the_window(images: Vec<ChatImage>) -> Vec<ChatImage> {
     images.into_iter().map(|i| ChatImage { source: "window".into(), ..i }).collect()
 }
 
+/// **The window that was in front at the shortcut's press, taken now**
+/// ([`capture`] off the async threads): its shot kept as a chat screenshot
+/// (source "window") and its PNG. The clear words' look here, and the
+/// model's own `look_at_screen` for a spoken question asked away from Chat
+/// (`chat/see_screen.rs`). The log has its size and time only.
+pub(crate) async fn take_in_front(app: &AppHandle) -> Result<(ChatImage, Vec<u8>), String> {
+    let hwnd = WINDOW.load(Ordering::SeqCst);
+    let capture_app = app.clone();
+    let t = std::time::Instant::now();
+    let taken = tauri::async_runtime::spawn_blocking(move || capture(&capture_app, hwnd)).await.map_err(|e| format!("the capture didn't finish ({e})"))??;
+    tracing::info!(w = taken.0.w, h = taken.0.h, ms = t.elapsed().as_millis() as u64, "Voice Assistant: took the window in front");
+    Ok(taken)
+}
+
 /// The window `hwnd`, captured as the Voice Assistant takes it ([`capture`]):
 /// a Command that reads the window in front and got next to no text from
 /// it (`dictation/command_screen.rs`), for a model that reads images. Saved
 /// as a chat screenshot; the caller deletes it once sent. Blocking.
 pub(crate) fn capture_window(app: &AppHandle, hwnd: isize) -> Result<ChatImage, String> {
-    capture(app, hwnd)
+    capture(app, hwnd).map(|(image, _png)| image)
 }
 
 /// **The window in front, captured** (blocking): its visible frame cut from
 /// every monitor captured at once, every Yap window left out; saved as a
-/// chat screenshot. A test run cuts the first of its fake windows from its
-/// fake monitors (`e2e_snip`), never the real screen.
-fn capture(app: &AppHandle, hwnd: isize) -> Result<ChatImage, String> {
+/// chat screenshot, with its PNG. A test run cuts the first of its fake
+/// windows from its fake monitors (`e2e_snip`), never the real screen.
+fn capture(app: &AppHandle, hwnd: isize) -> Result<(ChatImage, Vec<u8>), String> {
     use crate::snip::geom::Rect;
     let (frames, rect) = if crate::snip::faking() {
         let (frames, windows) = crate::snip::take_fake().ok_or("no fake monitors set (e2e_snip)")?;
@@ -791,8 +616,7 @@ fn capture(app: &AppHandle, hwnd: isize) -> Result<ChatImage, String> {
     let places: Vec<Rect> = frames.iter().map(|f| Rect::new(f.monitor.x, f.monitor.y, f.monitor.width as i32, f.monitor.height as i32)).collect();
     let rect = rect.intersect(&crate::snip::geom::desktop(&places));
     let (rgba, w, h) = crate::snip::cut_frames(&frames, &rect)?;
-    let (image, _png) = crate::snip::keep_as(&rgba, w, h, "window")?;
-    Ok(image)
+    crate::snip::keep_as(&rgba, w, h, "window")
 }
 
 #[cfg(test)]
@@ -801,9 +625,6 @@ mod tests {
 
     fn yes(q: &str) {
         assert_eq!(about(q), About::Yes, "{q}");
-    }
-    fn maybe(q: &str) {
-        assert_eq!(about(q), About::Maybe, "{q}");
     }
     fn no(q: &str) {
         assert_eq!(about(q), About::No, "{q}");
@@ -869,10 +690,33 @@ mod tests {
         }
     }
 
+    /// **No guessing** (the maintainer, 8 Nov 2026): a lone "this" or
+    /// "that" was a maybe, put to Chat's model in a one-second yes/no
+    /// request; two spoken follow-ups about a convention just discussed each
+    /// sent a screenshot of the game in front. Now they take nothing: the
+    /// answering model looks itself if it needs to (`look_at_screen`).
     #[test]
-    fn this_alone_is_the_models_call() {
-        for q in ["Is this right?", "how do I fix this", "will this fail", "Can you help with this one?", "what does that error mean", "Est-ce que ça marche ?", "Wie repariere ich diesen?", "¿Esto funciona?", "Klopt dit?"] {
-            maybe(q);
+    fn a_lone_this_or_that_takes_nothing_the_answering_model_looks_if_it_needs_to() {
+        for q in [
+            // The two follow-ups from 8 Nov 2026.
+            "The one that's on the 5th to the 8th of February, where is it and can you bring up the website in the browser for it?",
+            "How many people usually attend that specific one? Can you look?",
+            // What were maybes.
+            "Is this right?",
+            "how do I fix this",
+            "will this fail",
+            "Can you help with this one?",
+            "what does that error mean",
+            "Is that page still up?",
+            "Est-ce que ça marche ?",
+            "Wie repariere ich diesen?",
+            "¿Esto funciona?",
+            "Klopt dit?",
+            // A follow-up about something just discussed (fictional).
+            "Which of those is nearest to Kellbrook?",
+            "Can you look up when that one opens?",
+        ] {
+            no(q);
         }
     }
 
@@ -900,12 +744,12 @@ mod tests {
         }
     }
 
-    /// **An ask for something to be made** (2026-10-31): a spoken ask for a
-    /// build "in a document" spent 2.9 s while the model said whether it was
-    /// about the screen. Now its "this" is no maybe, in every language the
-    /// rules know; words that point at the screen itself still take it.
+    /// **An ask for something to be made** (2026-10-31: a spoken ask for a
+    /// build "in a document"): its "this", and "this document" in it, are
+    /// never the screen's, in every language the rules know; words that
+    /// point at the screen itself still take it.
     #[test]
-    fn an_ask_for_a_document_never_waits_on_the_screen_check() {
+    fn an_ask_for_a_document_never_takes_the_screen() {
         for q in [
             // English: the maintainer's ask, and its kind.
             "Hey, can you build me this level by level, a solo Lone Wolf Hydro Aero mage for Divinity Original Sin 2, with civil skills and the best Act 1 gear and where to get it, in a document?",
@@ -935,10 +779,9 @@ mod tests {
             assert!(asks_to_make(q), "{q}");
             no(q);
         }
-        // Without the ask, the same "this" is still the model's call…
-        maybe("Can you build me this level by level?");
-        maybe("Kannst du mir diesen Build Stufe für Stufe erklären?");
-        maybe("¿Puedes ponerme esto?");
+        // "Make this a document" is the one to make; "this document" in
+        // another question is the one on screen…
+        yes("Is there a typo in this document?");
         // …and words that point at the screen still take it.
         yes("Summarise this page into a document.");
         yes("Put what's on my screen in a document.");
@@ -956,41 +799,16 @@ mod tests {
         let said = "Ce que tu as dit tout à l'heure, c'est vrai ?";
         assert_eq!(about_in(said, &fr), About::No);
         assert_eq!(about_in(said, &en_fr), About::No);
-        assert_eq!(about_in("Klopt dit?", &nl), About::Maybe);
-        assert_eq!(about_in("Klopt dit?", &fr), About::No);
+        assert_eq!(about_in("Wat betekent deze foutmelding?", &nl), About::Yes);
+        assert_eq!(about_in("Klopt dit bericht?", &nl), About::Yes);
+        assert_eq!(about_in("Klopt dit bericht?", &fr), About::No);
         // English always counts; the words that point at the screen always do.
-        assert_eq!(about_in("Is this right?", &fr), About::Maybe);
+        assert_eq!(about_in("Is this error new?", &fr), About::Yes);
         assert_eq!(about_in("Wat betekent deze foutmelding?", &fr), About::No);
         assert_eq!(about_in("Wat is dit?", &fr), About::Yes);
         // None known: every language.
-        assert_eq!(about_in("Klopt dit?", &[]), About::Maybe);
-        assert_eq!(about_in("Klopt dit?", &["ja".to_string()]), About::Maybe);
-    }
-
-    #[test]
-    fn the_models_word_is_yes_or_no() {
-        for r in ["yes", "Yes.", "YES", " yes, it is", "\"yes\"", "Oui", "ja", "Sí"] {
-            assert!(says_yes(r), "{r}");
-        }
-        for r in ["no", "No.", "", "Not really", "I can't tell", "maybe"] {
-            assert!(!says_yes(r), "{r}");
-        }
-    }
-
-    #[test]
-    fn the_yes_or_no_request_carries_the_last_answer_and_little_thinking() {
-        let m = ask_messages("what does this mean", Some("Paris is the capital of France."));
-        assert_eq!(m[0]["content"], ASK_PROMPT);
-        let user = m[1]["content"].as_str().unwrap();
-        assert!(user.contains("last answer: \"Paris is the capital of France.\""), "{user}");
-        assert!(user.ends_with("Is it about something on their screen? yes or no."));
-        let first = ask_messages("what is this", None);
-        assert!(first[1]["content"].as_str().unwrap().starts_with("The question: \"what is this\""));
-        // A long answer: its start only.
-        let long = ask_messages("q", Some(&"word ".repeat(400)));
-        assert!(long[1]["content"].as_str().unwrap().len() < 600);
-        assert_eq!(ask_extra("openai/gpt-oss-20b").get("reasoning_effort"), Some(&json!("low")));
-        assert!(ask_extra("claude-haiku-5-5").is_empty());
+        assert_eq!(about_in("Klopt dit bericht?", &[]), About::Yes);
+        assert_eq!(about_in("Klopt dit bericht?", &["ja".to_string()]), About::Yes);
     }
 
     #[test]

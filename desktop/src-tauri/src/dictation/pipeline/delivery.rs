@@ -840,25 +840,16 @@ impl Shared {
     ///
     /// Before any cleanup, on the words as said: nothing heard, and "snip"
     /// said as the whole question (a screenshot never waits on a model).
-    /// While it's cleaned, a question that may be about the screen has Chat's
-    /// model asked about that already (`screen::ask_early`).
     pub(super) async fn ask_assistant(&self, transcript: &str) -> bool {
         let cfg = self.config.read().map(|c| c.clone()).unwrap_or_default();
         // Ask about the selection's question (its shortcut read it at the
         // press): about that text, never anything else.
         let about = self.ask_selection.lock().ok().and_then(|mut g| g.take());
         let selection = about.is_some();
-        let (conversation, code) = crate::chat::assistant::shortcut_goes(&cfg, selection);
-        // Its side's "Clean up what you say…" switch on: cleaned, with Chat's
-        // model asked meanwhile whether it may be about the screen (not one
-        // about a selection: that's what it's about).
+        let (_, code) = crate::chat::assistant::shortcut_goes(&cfg, selection);
+        // Its side's "Clean up what you say…" switch on: cleaned.
         let c = &cfg;
-        let clean = crate::ai::cleanup_styles::cleans_question(c, code).then_some(|raw: String, said: String| async move {
-            if !selection {
-                crate::chat::assistant::screen::ask_early(&self.app, &said, c, conversation);
-            }
-            self.clean_question(&raw, code, true).await
-        });
+        let clean = crate::ai::cleanup_styles::cleans_question(c, code).then_some(|raw: String, _said: String| async move { self.clean_question(&raw, code, true).await });
         let question = match question_words(transcript, c, selection, clean).await {
             Heard::Nothing => {
                 tracing::info!("Voice Assistant: nothing heard");

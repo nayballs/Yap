@@ -176,7 +176,7 @@ export function checkTurn(expect, { result: turnResult, calls = turnResult?.tool
   const out = [];
   const result = turnResult ?? {};
   const add = (check, pass, detail) => out.push({ check, pass: !!pass, ...(pass ? {} : { detail }) });
-  const needTurn = ['status', 'used', 'notUsed', 'refused', 'failed', 'card', 'answerContains', 'answerMatches', 'answerNotContains', 'pictures', 'files', 'documents', 'pagesShown', 'sources', 'tools', 'tool'];
+  const needTurn = ['status', 'used', 'notUsed', 'refused', 'failed', 'card', 'answerContains', 'answerMatches', 'answerNotContains', 'pictures', 'files', 'documents', 'pagesShown', 'sources', 'questionImages', 'tools', 'tool'];
   if (!turnResult && needTurn.some((k) => expect[k] !== undefined)) {
     add('a turn to check', false, 'no turn yet: ask first');
     return out;
@@ -206,7 +206,7 @@ export function checkTurn(expect, { result: turnResult, calls = turnResult?.tool
   for (const p of list(expect.answerContains)) add(`answer has ${p}`, textMatches(p, answer), `answer: ${answer.replace(/\s+/g, ' ').slice(0, 300)}`);
   for (const p of list(expect.answerMatches)) add(`answer ~ ${p}`, (regexOf(p) ?? new RegExp(p, 'i')).test(answer), `answer: ${answer.replace(/\s+/g, ' ').slice(0, 300)}`);
   for (const p of list(expect.answerNotContains)) add(`answer hasn't ${p}`, !textMatches(p, answer), `answer: ${answer.replace(/\s+/g, ' ').slice(0, 300)}`);
-  const counts = { pictures: result.pictures, files: result.files, documents: result.documents, pagesShown: result.pagesShown, sources: result.sources, tools: calls };
+  const counts = { pictures: result.pictures, files: result.files, documents: result.documents, pagesShown: result.pagesShown, sources: result.sources, questionImages: result.questionImages, tools: calls };
   for (const [k, items] of Object.entries(counts)) {
     if (expect[k] === undefined) continue;
     const n = (items ?? []).length;

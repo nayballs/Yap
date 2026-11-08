@@ -91,13 +91,17 @@
 //! in front looked at then: the passage is what it's about.
 //!
 //! **It sees the window in front** (2026-10-29, [`screen`]): a question
-//! about the screen ("what's this error?", "summarise this page") takes a
-//! screenshot of the window that was in front when the shortcut was
-//! pressed — by cheap rules in the question's language, and Chat's model
-//! for a lone "this" — every Yap window left out; on a model on this PC by
-//! default, a cloud one only when allowed (asked once). A model that can't
-//! read images gets the window's text, read on this PC. The capsule says
-//! "Looking at the window…" meanwhile.
+//! whose words point at the screen ("what's this error?", "summarise this
+//! page", by cheap rules in the question's language) takes a screenshot of
+//! the window that was in front when the shortcut was pressed at once,
+//! every Yap window left out; on a model on this PC by default, a cloud one
+//! only when allowed (asked once). A model that can't read images gets the
+//! window's text, read on this PC. The capsule says "Looking at the
+//! window…" meanwhile. **Nothing else is guessed** (8 Nov 2026: a lone
+//! "that" once went to a yes/no request and sent the game in front with a
+//! follow-up about a convention): asked from another app, the answering
+//! model may look at that window itself when the question needs it
+//! (`look_at_screen`, [`may_look_at_window`]), with the same switches.
 //!
 //! **About text selected in another app** (2026-10-31, [`selected`]; Wispr
 //! Flow's Command Mode, its "Lens"): the rewrite shortcut on a selection with
@@ -559,6 +563,21 @@ tokio::task_local! {
     /// main window in front: Chat comes up there with it, and a document
     /// opens beside it where the person is looking.
     static IN_CHAT: bool;
+    /// The Voice Assistant's question running here was asked with its
+    /// shortcut from another app, nothing else taken or quoted with it: its
+    /// model may look at the window that was in front ([`may_look_at_window`]).
+    static WINDOW_LOOK: bool;
+}
+
+/// **May the turn's model look at the window in front?** (8 Nov 2026: the
+/// words no longer guess.) Only for the shortcut's question asked from
+/// another app (not with Chat in view: there it looks at the screen as
+/// Chat does), with no screenshots waiting, window already taken, quote,
+/// selection or Skill going with it — never a phone's question. The turn's
+/// gates offer `look_at_screen` on it (`turn/gates.rs`, `see_screen::Takes::Window`).
+/// `false` outside one.
+pub fn may_look_at_window() -> bool {
+    WINDOW_LOOK.try_with(|b| *b).unwrap_or(false)
 }
 
 /// Was the Voice Assistant's question this turn answers asked with Chat in
@@ -1460,12 +1479,14 @@ async fn answer(app: AppHandle, asker: Asker, since: u64, question: String, abou
     // quoted in, as a typed or dictated question takes it
     // (`documents::quote_goes`); the box's quote goes.
     let quote = if opens_an_app || !pc || about_selection || said.is_some() { None } else { crate::chat::documents::take_waiting_quote(&app, in_chat, conversation_id) };
-    // A question about the screen (screen.rs): the window in front goes
-    // with it — its picture, or its text read on this PC — or a line tells
-    // the model why it can't see it. Not beside screenshots already waiting,
-    // a quoted passage or a selection (they're what it's about), nor when
-    // Yap opens an app (no model), nor for a Skill (its passages are what
-    // it reads).
+    // A question whose words point at the screen (screen.rs: "what's this
+    // error?", "summarise this page"): the window in front goes with it —
+    // its picture, or its text read on this PC — or a line tells the model
+    // why it can't see it. No model is asked first (8 Nov 2026): anything
+    // else is the answering model's to look at if it needs to (below). Not
+    // beside screenshots already waiting, a quoted passage or a selection
+    // (they're what it's about), nor when Yap opens an app (no model), nor
+    // for a Skill (its passages are what it reads).
     let mut window_picture: Option<(String, String)> = None;
     // With Yap's own window in front the window in front is Yap, which a
     // capture leaves out: a model that calls tools looks itself
@@ -1476,13 +1497,13 @@ async fn answer(app: AppHandle, asker: Asker, since: u64, question: String, abou
     // minute later).
     let chat_looks = focused && endpoint.as_ref().is_some_and(|(_, _, model, provider, _, _)| crate::chat::tools::supports_tools(provider, model));
     let mut took_window = false;
-    if let (Some(generation), false, Some((base_url, api_key, model, provider, _persona, _thinking))) =
+    if let (Some(generation), false, Some((base_url, _key, model, provider, _persona, _thinking))) =
         (asker.shortcut(), shots_wait || quote.is_some() || about_selection || chat_looks || said.is_some(), &endpoint)
     {
-        let ep = screen::Endpoint { base_url, api_key, model, provider };
+        let ep = screen::Endpoint { base_url, model, provider };
         let look_app = app.clone();
         let show = move |on: bool| looking(&look_app, generation, on);
-        if let Some(look) = screen::look(&app, &question, &cfg, ep, conversation_id, generation, &show).await {
+        if let Some(look) = screen::look(&app, &question, &cfg, ep, &show).await {
             took_window = look.took;
             if look.took && look.question.is_none() {
                 window_picture = Some((provider.clone(), model.clone()));
@@ -1493,7 +1514,12 @@ async fn answer(app: AppHandle, asker: Asker, since: u64, question: String, abou
             shots = look.images;
         }
     }
-    tracing::info!(phone = !pc, ?viewing, ?choice, ?seen, shots = shots.images.len(), window = took_window, quoted = quote.is_some(), selection = about_selection, skill = said.is_some(), "Voice Assistant: asking Chat");
+    // Asked from another app with nothing else going with it: the answering
+    // model may look at the window in front itself, when the question needs
+    // it (`look_at_screen`, the window its look: `may_look_at_window`) — the
+    // whole conversation in view, never a guess from the words.
+    let window_look = pc && !in_chat && !opens_an_app && !shots_wait && quote.is_none() && !about_selection && said.is_none() && shots.images.is_empty() && shots.note.is_none();
+    tracing::info!(phone = !pc, ?viewing, ?choice, ?seen, shots = shots.images.len(), window = took_window, window_look, quoted = quote.is_some(), selection = about_selection, skill = said.is_some(), "Voice Assistant: asking Chat");
     // A Skill with nothing to run on (`skills::ask_first`): Yap asks out loud,
     // and waits for the answer by voice (below).
     let asks = said.as_ref().and_then(|t| crate::chat::skills::ask_first(t, true));
@@ -1578,6 +1604,8 @@ async fn answer(app: AppHandle, asker: Asker, since: u64, question: String, abou
     let turn = selected::with(about, turn);
     // Asked with Chat in view: it shows the answer (`asked_in_chat`).
     let turn = IN_CHAT.scope(in_chat, turn);
+    // From another app: its model may look at the window in front.
+    let turn = WINDOW_LOOK.scope(window_look, turn);
     // A new code chat's: the conversation it makes is a Code chat in its workspace.
     let turn = crate::agents::code_chat::with_new(code_folder, turn);
     // Its AI calls and searches are the Voice Assistant's in the network
