@@ -394,6 +394,12 @@ pub(super) async fn fit(g: Gates, parts: &Parts<'_>, counter: &crate::chat::budg
             None => break,
         }
     }
+    // Only a real turn's shedding: the most-room estimate (`question` u64::MAX,
+    // for the ring's and the box's limits) sheds everything on every question,
+    // and logged as if a turn had (8 Nov 2026: read as a big model losing its tools).
+    if question == u64::MAX {
+        return fitted;
+    }
     tracing::debug!(
         shed = ?fitted.shed.names(),
         kept = ?keep.names(),
