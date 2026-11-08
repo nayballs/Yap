@@ -621,8 +621,9 @@ fn instructions(g: &Gates, profile: &crate::ai::about_you::Profile, memory: bool
             s.push(' ');
             s.push_str(&crate::chat::tools::calendar::CALENDAR_TOOL_INSTRUCTIONS.join(" "));
         }
-        // Yap Code (chat/tools/agents.rs): agents on and Claude Code on this PC.
-        if g.agent_line {
+        // Yap Code (chat/tools/agents.rs): agents on and Claude Code on this PC,
+        // as the turn offers them (never across the meetings).
+        if g.agents {
             s.push(' ');
             s.push_str(&crate::chat::tools::agents::AGENT_TOOL_INSTRUCTIONS.join(" "));
         }
@@ -802,7 +803,6 @@ mod tests {
             apps: true,
             past_chats: true,
             picture_tools: true,
-            agent_line: false,
         }
     }
 
@@ -928,7 +928,6 @@ mod tests {
             apps: true,
             past_chats: true,
             picture_tools: true,
-            agent_line: false,
         };
         let asks = "What's the latest version of Python?";
         assert!(crate::web::needs_web(asks), "the test's question needs the web");

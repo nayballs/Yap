@@ -139,7 +139,7 @@ impl Family {
             Family::Acting => Gates { act: false, ..g },
             Family::Seeing if g.pictures == Gate::Look => Gates { pictures: Gate::Show, ..g },
             Family::Seeing => g,
-            Family::Agents => Gates { agents: false, agent_line: false, ..g },
+            Family::Agents => Gates { agents: false, ..g },
             Family::Connectors => Gates { connectors: false, ..g },
             Family::Pictures => Gates { picture_tools: false, ..g },
             Family::RichDocuments => Gates { doc_tools: crate::chat::documents::ToolSet::Simple, ..g },
@@ -417,7 +417,6 @@ mod tests {
             apps: true,
             past_chats: true,
             picture_tools: true,
-            agent_line: true,
         }
     }
 
@@ -487,7 +486,7 @@ mod tests {
         // left out (the most any family costs, in a plain chat)…
         assert!(at_8k.history(fitted.fixed()) >= at_8k.least(), "room {} (fixed {})", at_8k.history(fitted.fixed()), fitted.fixed());
         assert_eq!(fitted.shed.names(), ["agents"]);
-        assert!(!fitted.gates.agents && !fitted.gates.agent_line);
+        assert!(!fitted.gates.agents);
         // …and only them: the web, the browser, pictures, apps, memory stay.
         let after = seen(&fitted.gates, &parts);
         for kept in ["web_search", "read_page", "browser_navigate", "browser_read", "show_picture", "look_at_screen", "open_app", "remember", "search_chats", "search_notes"] {
@@ -580,7 +579,7 @@ mod tests {
         let (counter, at_8k) = (Counter::estimate_only(), room(8_192));
         let question = estimate("Fix the failing test in the parser") + crate::chat::budget::MESSAGE_OVERHEAD;
         let fitted = run(fit(Gates { act: true, ..small_model() }, &parts, &counter, at_8k, question, || keeps("Fix the failing test in the parser", None, true, &[])));
-        assert!(fitted.gates.agents && fitted.gates.agent_line, "{:?}", fitted.shed.names());
+        assert!(fitted.gates.agents, "{:?}", fitted.shed.names());
         assert!(!fitted.shed.has(Family::Agents) && !fitted.shed.is_empty());
         assert!(at_8k.history(fitted.fixed()) >= at_8k.least(), "room {}", at_8k.history(fitted.fixed()));
         let after = seen(&fitted.gates, &parts);
