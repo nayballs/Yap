@@ -19,6 +19,8 @@
 //!   `call.rs` one call (timeout, progress, stop);
 //! - `consent.rs` whether a call runs, asks first or is refused ·
 //!   `budget.rs` how many tools a model gets, and tool search past that;
+//! - `catalog.rs` the bundled list Settings' Discover shows · `import.rs`
+//!   a setup read from Claude Desktop or pasted;
 //! - `fake.rs` fake servers for the tests.
 //!
 //! **The switch**: everything here is behind `connectors_preview` (config,
@@ -34,9 +36,11 @@
 pub mod budget;
 pub mod cache;
 pub mod call;
+pub mod catalog;
 pub mod consent;
 #[cfg(test)]
 pub(crate) mod fake;
+pub mod import;
 pub mod local;
 pub mod manager;
 pub mod names;
@@ -61,7 +65,7 @@ use tauri::{AppHandle, Emitter};
 
 use cache::{Diff, Kind, Listing, Server};
 use manager::{Manager, Status};
-use store::{AuthKind, Connector, EnvVar, Header, Setting, Transport};
+use store::{AuthKind, Connector, EnvVar, Header, Origin, Setting, Transport};
 
 /// Any change to the connectors (every window).
 pub const CHANGED: &str = "yap-connectors-changed";
@@ -251,6 +255,12 @@ pub struct View {
     #[serde(rename = "where")]
     pub where_: store::Where,
     pub added: u64,
+    /// When one of its tools was last called (unix seconds).
+    pub last_used: Option<u64>,
+    /// Where it came from: "custom" | "catalog" | "import".
+    pub origin: String,
+    /// The catalogue entry it was added from (Discover's ✓, its logo).
+    pub catalog: Option<String>,
     /// A link's browser sign-in (`None`: it doesn't sign in that way).
     pub sign_in: Option<oauth::SignInInfo>,
 }
@@ -304,7 +314,15 @@ fn view(c: &Connector) -> View {
         tools,
         where_: c.where_,
         added: c.added,
+        last_used: c.last_used,
+        origin: c.origin.kind.clone(),
+        catalog: catalog_id(&c.origin).map(str::to_string),
     }
+}
+
+/// The catalogue entry's id an origin names (`{kind: "catalog", catalog}`).
+fn catalog_id(origin: &Origin) -> Option<&str> {
+    (origin.kind == "catalog").then(|| origin.extra.get("catalog").and_then(Value::as_str)).flatten()
 }
 
 /// `connectors_list`'s answer.
@@ -357,6 +375,41 @@ pub struct Spec {
     /// A call's timeout (seconds).
     #[serde(default)]
     pub timeout_secs: Option<u64>,
+    /// Added from this catalogue entry (Discover): its address and transport
+    /// are the entry's (the person gives only the token, the name, and the
+    /// address where the entry lets them), and it's named by the entry in
+    /// the receipts.
+    #[serde(default)]
+    pub catalog: Option<String>,
+}
+
+/// `spec` as the catalogue entry it names adds it (the entry's address,
+/// transport and name; the person's token, their address only where the
+/// entry says so, a program's arguments as they edited them), or as it is.
+fn resolved(spec: &Spec) -> Result<(Spec, Option<&'static catalog::Entry>), String> {
+    let Some(id) = spec.catalog.as_deref() else { return Ok((spec.clone(), None)) };
+    let e = catalog::get().get(id).ok_or("That connector isn't in Yap's list any more.")?;
+    let name = Some(spec.name.trim()).filter(|n| !n.is_empty()).map_or_else(|| e.name.clone(), str::to_string);
+    let out = match e.sign_in {
+        catalog::SignIn::Local => Spec {
+            name,
+            command: Some(spec.command.clone().filter(|c| !c.trim().is_empty()).or_else(|| e.command.clone()).unwrap_or_default()),
+            args: if spec.args.is_empty() { e.args.clone() } else { spec.args.clone() },
+            env: spec.env.clone(),
+            approved: spec.approved.clone(),
+            catalog: spec.catalog.clone(),
+            ..Default::default()
+        },
+        catalog::SignIn::Oauth | catalog::SignIn::Token => {
+            let url = if e.url_editable { spec.url.clone().filter(|u| !u.trim().is_empty()).or_else(|| e.url.clone()) } else { e.url.clone() };
+            let token = spec.token.clone().filter(|t| !t.trim().is_empty());
+            if e.sign_in == catalog::SignIn::Token && token.is_none() {
+                return Err(format!("Paste your {} token first.", e.name));
+            }
+            Spec { name, url, token, fallback_sse: e.fallback_sse.clone(), catalog: spec.catalog.clone(), ..Default::default() }
+        }
+    };
+    Ok((out, Some(e)))
 }
 
 /// What the person is shown before adding: a program's command line and
@@ -409,6 +462,8 @@ fn check_name(name: &str) -> Result<String, String> {
 
 /// What adding `spec` would do ([`PreviewView`]).
 pub fn preview(spec: &Spec) -> Result<PreviewView, String> {
+    let (spec, _) = resolved(spec)?;
+    let spec = &spec;
     if let Some(command) = spec.command.as_deref().filter(|c| !c.trim().is_empty()) {
         let env: Vec<(String, Option<String>)> = env_pairs(&spec.env)?.into_iter().map(|(n, v, _)| (n, v)).collect();
         let p = local::preview(command, &spec.args, &env)?;
@@ -427,6 +482,23 @@ pub fn preview(spec: &Spec) -> Result<PreviewView, String> {
 /// Add `spec` (a program only with the fingerprint its preview gave), its
 /// secrets to the vault. Not connected yet.
 pub fn add(spec: &Spec) -> Result<Connector, String> {
+    add_as(spec, None)
+}
+
+/// [`add`], marked as coming from `origin` (an import); one from the
+/// catalogue is marked so by itself.
+pub fn add_as(spec: &Spec, origin: Option<Origin>) -> Result<Connector, String> {
+    let (spec, entry) = resolved(spec)?;
+    let spec = &spec;
+    let origin = match entry {
+        Some(e) => {
+            let mut extra = serde_json::Map::new();
+            extra.insert("catalog".into(), Value::from(e.id.clone()));
+            extra.insert("catalogVersion".into(), Value::from(catalog::get().version));
+            Some(Origin { kind: "catalog".into(), extra })
+        }
+        None => origin,
+    };
     let name = check_name(&spec.name)?;
     let mut secrets = vault::Secrets::default();
     let (transport, auth) = if let Some(command) = spec.command.as_deref().filter(|c| !c.trim().is_empty()) {
@@ -485,6 +557,12 @@ pub fn add(spec: &Spec) -> Result<Connector, String> {
         (Transport::Remote { url: u.to_string(), fallback_sse: spec.fallback_sse.clone(), sse: spec.sse, headers }, auth)
     };
     let mut c = store::add(store::New { name, transport, auth })?;
+    if let Some(o) = origin {
+        c = store::update(&c.id, |c| {
+            c.origin = o;
+            c.clone()
+        })?;
+    }
     if let Some(t) = spec.timeout_secs {
         c = store::update(&c.id, |c| {
             c.timeout_secs = Some(t.clamp(1, call::MAX_TIMEOUT.as_secs()));
@@ -540,7 +618,15 @@ pub async fn refresh(id: &str, fresh: bool) -> Result<Diff, String> {
         }
     };
     let offered = listing.tools.iter().filter(|t| t.skipped.is_none()).count();
-    let diff = store::update(id, |c| cache::apply(&mut c.tools, &listing))?;
+    let diff = store::update(id, |c| {
+        let diff = cache::apply(&mut c.tools, &listing);
+        // A catalogue entry's new tools may start stricter (Stripe's money
+        // tools Off).
+        if let Some(e) = catalog::of(&c.origin) {
+            catalog::start_settings(e, &diff.added, &mut c.tools);
+        }
+        diff
+    })?;
     cache::put(id, listing);
     m.listed(id, offered).await;
     tracing::info!(connector = id, tools = offered, added = diff.added.len(), changed = diff.changed.len(), removed = diff.removed.len(), "connectors: tools listed");
@@ -686,6 +772,102 @@ pub async fn connector_set_tool(id: String, tool: String, setting: String) -> Re
     Ok(view(&c))
 }
 
+/// Where a connector's tools may be used, as changed on its page: Chat, the
+/// Voice Assistant, during meetings (also behind `connectors_in_meetings`).
+/// The phone stays as it is (read only, wave 6), and plan chats too.
+#[derive(Debug, Clone, Copy, Default, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WherePatch {
+    #[serde(default)]
+    pub chat: Option<bool>,
+    #[serde(default)]
+    pub voice: Option<bool>,
+    #[serde(default)]
+    pub meetings: Option<bool>,
+}
+
+impl WherePatch {
+    /// `w` with this patch's changes. Pure.
+    pub fn apply(self, mut w: store::Where) -> store::Where {
+        if let Some(v) = self.chat {
+            w.chat = v;
+        }
+        if let Some(v) = self.voice {
+            w.voice = v;
+        }
+        if let Some(v) = self.meetings {
+            w.meetings = v;
+        }
+        w
+    }
+}
+
+/// **Where Yap uses it** (a connector's page): Chat, the Voice Assistant,
+/// during meetings. The phone isn't changed here yet.
+#[tauri::command]
+pub async fn connector_set_where(id: String, places: WherePatch) -> Result<View, String> {
+    require()?;
+    let c = store::update(&id, |c| {
+        c.where_ = places.apply(c.where_);
+        c.clone()
+    })?;
+    tracing::info!(connector = %id, chat = c.where_.chat, voice = c.where_.voice, meetings = c.where_.meetings, "connectors: where it's used changed");
+    changed();
+    Ok(view(&c))
+}
+
+/// How the Chat model gets the connectors' tools (Settings' line): every
+/// tool as it is, or tool search past its share of the context.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BudgetView {
+    /// The Chat model (none set up: `None`).
+    pub model: Option<crate::chat::chats::ChatModel>,
+    /// That model gets connectors at all (the strong cloud models).
+    pub gets: bool,
+    /// What the tools Chat may use cost each step, and the model's share.
+    pub tokens: u64,
+    pub cap: u64,
+    /// "all" | "search" (`find_tools` / `use_tool`) | "deferred"
+    /// (Anthropic's own tool search) | "none".
+    pub mode: &'static str,
+}
+
+/// The tokens of the tools Chat may use: each enabled connector's in Chat
+/// (`where.chat`), as its view counts them. Pure.
+pub fn chat_tokens(views: &[View]) -> u64 {
+    views.iter().filter(|v| v.enabled && v.where_.chat).map(|v| v.tokens as u64).sum()
+}
+
+/// **Which way the Chat model gets them**: its share (`budget::cap`, its
+/// context and a free plan's rate) against what the tools cost
+/// (`budget::mode`), as a Chat turn decides it.
+#[tauri::command]
+pub async fn connectors_budget() -> Result<BudgetView, String> {
+    require()?;
+    let cfg = crate::config::load();
+    let tokens = chat_tokens(&store::list().iter().map(view).collect::<Vec<_>>());
+    let on_device = crate::ai::ai_model::OnDevice::here(&cfg);
+    let Ok(target) = crate::ai::ai_model::target(&cfg, crate::ai::ai_model::Scope::Chat, &on_device) else {
+        return Ok(BudgetView { model: None, gets: false, tokens, cap: 0, mode: "none" });
+    };
+    let strong = target.tools && crate::chat::documents::rich::strong(&target.provider, &target.model);
+    let gets = crate::chat::tools::connectors::may(&target.provider, strong);
+    let (context, _) = crate::chat::budget::context_window(&cfg, &target.provider, &target.model, &target.base_url).await;
+    let cap = budget::cap(context, crate::chat::budget::rate_cap(&target.provider));
+    let messages_api = crate::ai::llm::anthropic::speaks_messages(&target.provider, &target.model);
+    let mode = if !gets {
+        "none"
+    } else {
+        match budget::mode(tokens, cap, messages_api) {
+            budget::Mode::All => "all",
+            budget::Mode::Search => "search",
+            budget::Mode::Deferred => "deferred",
+        }
+    };
+    Ok(BudgetView { model: Some(target.chat_model()), gets, tokens, cap, mode })
+}
+
 /// Show details: the server, the address, a program's last stderr lines
 /// (memory only).
 #[derive(Debug, Clone, Serialize)]
@@ -704,6 +886,96 @@ pub async fn connector_details(id: String) -> Result<Details, String> {
     let v = view(&c);
     let listing = cache::get(&id);
     Ok(Details { server: v.server, address: v.address, stderr: manager().stderr_tail(&id, 40), listed_at: listing.map(|l| l.listed_at) })
+}
+
+// ---- the catalogue and imports ------------------------------------------------------------------
+
+/// A catalogue entry for Discover, and the connector added from it.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CatalogEntryView {
+    #[serde(flatten)]
+    pub entry: catalog::Entry,
+    /// The person's connector added from it (Discover's ✓).
+    pub added: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CatalogView {
+    pub version: u32,
+    pub connectors: Vec<CatalogEntryView>,
+    pub later: Vec<catalog::Later>,
+}
+
+/// **Discover's list**: the bundled catalogue (nothing fetched), each entry
+/// with the connector added from it, and the "Coming later" cards.
+#[tauri::command]
+pub async fn connector_catalog() -> Result<CatalogView, String> {
+    require()?;
+    let c = catalog::get();
+    let have = store::list();
+    Ok(CatalogView {
+        version: c.version,
+        connectors: c
+            .connectors
+            .iter()
+            .map(|e| CatalogEntryView { added: have.iter().find(|x| catalog_id(&x.origin) == Some(e.id.as_str())).map(|x| x.id.clone()), entry: e.clone() })
+            .collect(),
+        later: c.later.clone(),
+    })
+}
+
+/// **Import from Claude Desktop / Paste a setup**, step one: each server in
+/// it shown whole (a program's command line and warnings, a link's host),
+/// no secret in it. Claude Desktop's files are only read.
+#[tauri::command]
+pub async fn connectors_import_scan(source: import::Source) -> Result<import::ScanView, String> {
+    require()?;
+    blocking(move || import::scan(&source)).await
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ImportFailed {
+    pub name: String,
+    pub why: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ImportView {
+    pub added: Vec<View>,
+    pub failed: Vec<ImportFailed>,
+}
+
+/// Step two: the servers the person ticked, read again from the setup and
+/// added (each program only with the fingerprint they saw; secrets from
+/// the setup straight to the vault), then connected and listed.
+#[tauri::command]
+pub async fn connectors_import(source: import::Source, picks: Vec<import::Pick>) -> Result<ImportView, String> {
+    require()?;
+    let from = source.word();
+    let (specs, missing) = blocking(move || import::specs_for(&source, &picks)).await?;
+    let mut added = Vec::new();
+    let mut failed: Vec<ImportFailed> = missing.into_iter().map(|name| ImportFailed { name, why: "It isn't in that setup any more.".into() }).collect();
+    for spec in specs {
+        let name = spec.name.clone();
+        let mut extra = serde_json::Map::new();
+        extra.insert("from".into(), Value::from(from));
+        let origin = Origin { kind: "import".into(), extra };
+        match blocking(move || add_as(&spec, Some(origin))).await {
+            Ok(c) => {
+                changed();
+                let _ = refresh(&c.id, true).await;
+                added.push(view(&store::get(&c.id).unwrap_or(c)));
+            }
+            Err(why) => failed.push(ImportFailed { name, why }),
+        }
+    }
+    tracing::info!(added = added.len(), failed = failed.len(), from, "connectors: imported");
+    changed();
+    Ok(ImportView { added, failed })
 }
 
 // ---- signing in ------------------------------------------------------------------------------------
@@ -895,6 +1167,10 @@ async fn call_logged(c: &Connector, peer: &Peer<RoleClient>, tool: &str, args: &
     let out = call::call(peer, tool, args, timeout, &call::Stop::new()).await;
     calling.done = true;
     let ms = calling.started.elapsed().as_millis() as u64;
+    // Settings' "Last used" (told when it changed: at most once a minute).
+    if store::used(&c.id) {
+        changed();
+    }
     match out {
         Ok(shaped) => {
             tracing::info!(connector = %c.id, tool, ms, success = shaped.success, chars = shaped.text.len(), "connectors: tool called");

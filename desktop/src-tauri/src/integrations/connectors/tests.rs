@@ -98,6 +98,100 @@ fn a_program_is_added_only_as_the_person_saw_it_and_its_secrets_go_to_the_vault(
 }
 
 #[test]
+fn one_from_the_catalogue_takes_its_address_and_its_name_in_the_receipts() {
+    on();
+    // The entry's own address, whatever the page sends; the person's token.
+    let s = Spec { name: String::new(), catalog: Some("notion".into()), url: Some("https://mcp.example.com/mcp".into()), ..Default::default() };
+    let p = preview(&s).unwrap();
+    assert_eq!(p.host.as_deref(), Some("mcp.notion.com"));
+    let c = add(&s).unwrap();
+    assert_eq!(c.name, "Notion");
+    let Transport::Remote { url, fallback_sse, .. } = &c.transport else { panic!("a link") };
+    assert_eq!(url, "https://mcp.notion.com/mcp");
+    assert_eq!(fallback_sse.as_deref(), Some("https://mcp.notion.com/sse"));
+    assert_eq!(c.origin.kind, "catalog");
+    assert_eq!(c.origin.extra.get("catalog").and_then(Value::as_str), Some("notion"));
+    assert_eq!(c.kind(), "Notion", "the receipts name the catalogue's entry, never what the person typed");
+    assert_eq!(view(&c).catalog.as_deref(), Some("notion"));
+    // A token entry needs its token; an address the person gives only where it may.
+    assert!(add(&Spec { catalog: Some("github".into()), ..Default::default() }).unwrap_err().contains("token first"));
+    let gh = add(&Spec { catalog: Some("github".into()), token: Some("ghp_FAKE_tok".into()), ..Default::default() }).unwrap();
+    assert_eq!(gh.auth.kind, AuthKind::Bearer);
+    assert_eq!(vault::load(&gh.id).token.as_deref(), Some("ghp_FAKE_tok"));
+    let ha = add(&Spec { catalog: Some("home-assistant".into()), url: Some("http://192.168.1.40:8123/api/mcp".into()), token: Some("ha_FAKE".into()), ..Default::default() }).unwrap();
+    let Transport::Remote { url, .. } = &ha.transport else { panic!("a link") };
+    assert_eq!(url, "http://192.168.1.40:8123/api/mcp");
+    assert!(add(&Spec { catalog: Some("not-in-the-list".into()), ..Default::default() }).unwrap_err().contains("isn't in Yap's list"));
+    // Its tools start as the entry says (only stricter).
+    let stripe = catalog::get().get("stripe").unwrap();
+    let mut settings = std::collections::BTreeMap::new();
+    settings.insert("create_refund".to_string(), store::ToolSetting { setting: Setting::Ask, hash: "h".into() });
+    catalog::start_settings(stripe, &["create_refund".to_string()], &mut settings);
+    assert_eq!(settings["create_refund"].setting, Setting::Off);
+    let stored = serde_json::to_string(&store::list()).unwrap();
+    assert!(!stored.contains("FAKE"), "{stored}");
+}
+
+#[tokio::test]
+async fn a_pasted_setup_is_shown_whole_without_its_secrets_and_added_as_seen() {
+    on();
+    let exe = std::env::current_exe().unwrap().to_string_lossy().into_owned();
+    let text = serde_json::json!({ "mcpServers": {
+        "files": { "command": exe, "args": ["--serve"], "env": { "FILES_API_KEY": "sek-FAKE-77", "LOG_LEVEL": "info" } },
+        "notes": { "url": "https://mcp.example.com/mcp", "headers": { "Authorization": "Bearer nt-FAKE-1", "X-Team": "t-FAKE-2" } },
+        "yap": { "command": "C:\\Program Files\\Yap\\yap.exe", "args": ["mcp"] }
+    }})
+    .to_string();
+    let source = import::Source::Paste { text };
+    let scan = connectors_import_scan(source.clone()).await.unwrap();
+    assert_eq!(scan.servers.len(), 2);
+    assert_eq!(scan.skipped, 1, "Yap's own entry");
+    let shown = serde_json::to_string(&scan).unwrap();
+    assert!(!shown.contains("FAKE"), "no secret on the page: {shown}");
+    let files = &scan.servers[0];
+    assert_eq!(files.kind, "local");
+    assert!(files.env.iter().any(|v| v.name == "FILES_API_KEY" && v.secret && v.value.is_none()));
+    assert!(files.env.iter().any(|v| v.name == "LOG_LEVEL" && v.value.as_deref() == Some("info")));
+    assert!(scan.servers[1].token && scan.servers[1].headers == ["X-Team"]);
+    let fp = files.preview.as_ref().and_then(|p| p.program.as_ref()).map(|p| p.fingerprint.clone()).unwrap();
+
+    // A program without the fingerprint seen isn't added; with it, it is,
+    // its secret in the vault. (Neither connects: no server here.)
+    let (specs, missing) = import::specs_for(&source, &[import::Pick { key: "files".into(), approved: None }, import::Pick { key: "gone".into(), approved: None }]).unwrap();
+    assert_eq!(missing, ["gone"]);
+    assert!(add_as(&specs[0], None).unwrap_err().contains("look at it again"));
+    let (specs, _) = import::specs_for(&source, &[import::Pick { key: "files".into(), approved: Some(fp) }, import::Pick { key: "notes".into(), approved: None }]).unwrap();
+    let mut extra = serde_json::Map::new();
+    extra.insert("from".into(), Value::from("paste"));
+    let a = add_as(&specs[0], Some(Origin { kind: "import".into(), extra: extra.clone() })).unwrap();
+    let b = add_as(&specs[1], Some(Origin { kind: "import".into(), extra })).unwrap();
+    assert_eq!(a.origin.kind, "import");
+    assert_eq!(vault::load(&a.id).env.get("FILES_API_KEY").map(String::as_str), Some("sek-FAKE-77"));
+    assert_eq!(b.auth.kind, AuthKind::Bearer);
+    assert_eq!(vault::load(&b.id).token.as_deref(), Some("nt-FAKE-1"));
+    assert_eq!(vault::load(&b.id).headers.get("X-Team").map(String::as_str), Some("t-FAKE-2"));
+    let stored = serde_json::to_string(&store::list()).unwrap();
+    assert!(!stored.contains("FAKE"), "{stored}");
+    // Read again, both are already added.
+    let again = import::scan(&source).unwrap();
+    assert!(again.servers.iter().all(|s| s.added), "{again:?}");
+}
+
+#[tokio::test]
+async fn where_it_is_used_changes_chat_voice_and_meetings_never_the_phone() {
+    on();
+    let c = add(&Spec { name: "Wiki".into(), url: Some("https://mcp.example.com/mcp".into()), ..Default::default() }).unwrap();
+    assert_eq!(c.where_, store::Where::default());
+    let v = connector_set_where(c.id.clone(), WherePatch { voice: Some(false), meetings: Some(true), ..Default::default() }).await.unwrap();
+    assert_eq!(v.where_, store::Where { chat: true, voice: false, phone: false, plan: true, meetings: true });
+    // The phone isn't one of its fields: a page can't turn it on yet.
+    let patch: WherePatch = serde_json::from_value(json!({ "chat": false, "phone": true })).unwrap();
+    let v = connector_set_where(c.id.clone(), patch).await.unwrap();
+    assert!(!v.where_.chat && !v.where_.phone);
+    assert!(connector_set_where("c99".into(), WherePatch::default()).await.is_err());
+}
+
+#[test]
 fn secret_names_are_locked_by_default() {
     for name in ["GITHUB_TOKEN", "API_KEY", "OPENAI_API_KEY", "CLIENT_SECRET", "DB_PASSWORD", "GITHUB_PAT", "HA_AUTH"] {
         assert!(secret_name(name), "{name}");

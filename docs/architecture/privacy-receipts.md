@@ -143,7 +143,8 @@ requests to Yap's own endpoint on 127.0.0.1 (`integrations/claude_live.rs`).
   every request to a connector's server at a link, `integrations/connectors/remote.rs`
   sending each Streamable HTTP POST, GET and DELETE, and the older HTTP+SSE
   stream and its POSTs, through `send_for`; `kind` is the catalogue's name
-  for a connector from the catalogue (wave 5b), else "A connector", never
+  for a connector added from Discover's catalogue ("Connector · Notion";
+  `Connector::kind`, from its `origin`), else "A connector", never
   the name the person typed; its feature the turn's that called the tool —
   Chat, the Voice Assistant (wave 4) — else "Connectors". Its host only,
   never the link's path, a token or a header. A connector that's a program

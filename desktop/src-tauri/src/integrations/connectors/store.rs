@@ -318,15 +318,19 @@ pub struct Connector {
     /// default, at most 600).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub timeout_secs: Option<u64>,
+    /// When one of its tools was last called (unix seconds; saved at most
+    /// once a minute: [`used`]).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_used: Option<u64>,
     #[serde(flatten)]
     pub extra: Map<String, Value>,
 }
 
 impl Connector {
     /// The receipts' and the logs' word for it: never the name the person
-    /// typed. The catalogue's name for one from the catalogue (wave 5b).
+    /// typed. The catalogue's name for one from the catalogue ("Notion").
     pub fn kind(&self) -> String {
-        "A connector".into()
+        super::catalog::of(&self.origin).map_or_else(|| "A connector".into(), |e| e.name.clone())
     }
 }
 
@@ -450,6 +454,7 @@ pub fn add(new: New) -> Result<Connector, String> {
             tools: BTreeMap::new(),
             added: now(),
             timeout_secs: None,
+            last_used: None,
             extra: Map::new(),
         };
         s.connectors.push(c.clone());
@@ -472,6 +477,15 @@ pub fn update<R>(id: &str, f: impl FnOnce(&mut Connector) -> R) -> Result<R, Str
     .ok_or_else(|| "There's no such connector.".to_string())?;
     SAVER.check()?;
     Ok(out)
+}
+
+/// Connector `id`'s tool was just called: `last_used` now, saved only when
+/// the one kept is a minute old or more (a burst of calls is one save).
+/// Whether it was saved.
+pub fn used(id: &str) -> bool {
+    let t = now();
+    let stale = with_store(|s| s.connectors.iter().find(|c| c.id == id).is_some_and(|c| c.last_used.is_none_or(|u| t.saturating_sub(u) >= 60)));
+    stale && update(id, |c| c.last_used = Some(t)).is_ok()
 }
 
 /// Remove connector `id`; what it was. Saved.

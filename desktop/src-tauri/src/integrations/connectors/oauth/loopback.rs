@@ -120,9 +120,28 @@ impl Drop for Listener {
     }
 }
 
+/// The port a listener tries first: [`PORT`]. A unit test's listener takes
+/// any free one instead (0), so `cargo test` never holds the fixed port a
+/// running Yap's sign-in or the e2e suite's needs — unless the test asks for
+/// the fixed one (`tests::the_real_listener_tries_the_fixed_port_first`,
+/// the only one, which copes with it being busy).
+fn first_port() -> u16 {
+    #[cfg(test)]
+    if !FIXED_IN_TEST.with(std::cell::Cell::get) {
+        return 0;
+    }
+    PORT
+}
+
+#[cfg(test)]
+thread_local! {
+    /// This test thread's listener tries [`PORT`] first, as the app's does.
+    static FIXED_IN_TEST: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
 /// Start listening: [`PORT`], else any free one.
 pub fn listen() -> Result<Listener, String> {
-    let server = Server::http(("127.0.0.1", PORT))
+    let server = Server::http(("127.0.0.1", first_port()))
         .or_else(|_| Server::http("127.0.0.1:0"))
         .map(Arc::new)
         .map_err(|_| "Yap couldn't start listening for the browser's sign-in.".to_string())?;
@@ -311,8 +330,31 @@ mod tests {
         assert!(page.starts_with("HTTP/1.1 200") && page.contains("Connection: close"), "{page}");
         assert!(page.contains("You're signed in to Lights."), "{page}");
         let port = l.port;
+        assert_ne!(port, PORT, "a unit test never holds the fixed port");
         drop(l);
         std::thread::sleep(Duration::from_millis(100));
-        assert!(std::net::TcpStream::connect(("127.0.0.1", port)).is_err() || port == PORT, "the listener is gone");
+        assert!(std::net::TcpStream::connect(("127.0.0.1", port)).is_err(), "the listener is gone");
+    }
+
+    /// The app's listener: the fixed port first, else any free one. The only
+    /// test that takes the fixed port, and only for a moment; something else
+    /// holding it (a running Yap's sign-in, the e2e suite's) is the other
+    /// half of the same rule, so it passes either way.
+    #[test]
+    fn the_real_listener_tries_the_fixed_port_first() {
+        let was_free = std::net::TcpListener::bind(("127.0.0.1", PORT)).map(drop).is_ok();
+        FIXED_IN_TEST.with(|f| f.set(true));
+        let l = listen();
+        FIXED_IN_TEST.with(|f| f.set(false));
+        let l = l.unwrap();
+        assert_ne!(l.port, 0);
+        if was_free {
+            // (Unless something took it in the moment between.)
+            assert!(l.port == PORT || std::net::TcpListener::bind(("127.0.0.1", PORT)).is_err(), "port {}", l.port);
+        } else {
+            assert_ne!(l.port, PORT, "busy: any free port instead");
+        }
+        assert_eq!(l.redirect_uri, redirect_uri(l.port));
+        drop(l);
     }
 }

@@ -269,6 +269,14 @@ fn targets(id: &str, b: &Bases) -> Vec<Target> {
     }
 }
 
+/// Claude Desktop's settings files that exist on this PC (both builds'
+/// copies), for connectors' Import (`connectors/import.rs`), which only
+/// reads them. A test run's stand-in profile, as for every edit here.
+pub fn claude_desktop_files() -> Vec<PathBuf> {
+    let Ok(b) = bases() else { return Vec::new() };
+    targets("claude", &b).into_iter().map(|t| t.path).filter(|p| p.is_file()).collect()
+}
+
 // ---- the entry ----
 
 /// Yap's entry for an app, as JSON (TOML is built from the same fields).

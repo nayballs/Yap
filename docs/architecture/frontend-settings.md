@@ -60,7 +60,8 @@ the speech models' `ModelManager`, `ModelRow`, `SpeakerModels`,
 `ScopeProviderConfig`, `ChatGptProvider` (+ `ChatGptSignIn`), `ChatConfig`,
 `NoteFormattingConfig`, `VoiceAgentConfig`, `PromptStudio`, `ModelPicker`,
 `EndpointModels`,
-`RegionSpelling` and `cleanupStyles.js`. What Settings shares with other
+`RegionSpelling` and `cleanupStyles.js` (the connectors preview's page and its
+parts in `settings/connectors/`, below). What Settings shares with other
 windows is in `components/`, `stores/` and `core/`
 ([frontend.md](./frontend.md#the-folder-layout-2026-10-24)).
 
@@ -813,7 +814,80 @@ on an element that also has a `settings.css` class (`set-note`,
   Google Calendar (the browser, "Finish in your browser…" + Cancel; a build
   without the client says so), Outlook Calendar (the guided ICS form), Other
   calendar (an iCal link) — each connection a row with ⋯ Sync now /
-  Disconnect; then the **AI apps (MCP)** link row.
+  Disconnect; then the **AI apps (MCP)** link row (`mcpLink`, left out
+  inside the preview's page). **With the connectors preview on**
+  (2026-11-08; [integrations.md](./integrations.md), "Settings →
+  Connectors"), the page is `settings/connectors/` instead, in the Claude
+  app's layout (its Settings → Customize → Connectors):
+  - **The shell** knows the preview from `connectors_list`'s `enabled`
+    (`connectorsOn`: asked at mount and whenever the page opens; off, Rust
+    reads nothing about connectors), loads `ConnectorsPage.svelte` as a
+    chunk of its own (`PAGES.connectorsPreview`), and counts visits
+    (`connectorsVisit`: each one — the nav item, a link, a search result —
+    comes back to Yours' list, since Settings is always mounted). The
+    search's preview entries (`preview: 'connectors'`: Your connectors,
+    Discover connectors, Add a custom connector / a program, Import from
+    Claude Desktop, Paste a connector setup) are found only while it's on
+    (`visibleIndex`); `settings-search.spec.js` opens the rest,
+    `connectors.spec.js` these.
+  - **`ConnectorsPage.svelte`**: "Connectors", one line (MCP once, a link to
+    AI apps (MCP)), **Yours | Discover** (`PillTabs`), a search box that
+    filters the tab shown, **+ Add ▾** (the app's menu: Custom connector… ·
+    Program on this PC… · Import from Claude Desktop… · Paste a setup…).
+    Yours: **Calendars** (`ConnectorsSection`, unchanged) then **Your
+    connectors** (`ConnectorRow.svelte`: mark or initial, name, the status
+    dot and Rust's line, the button it asks for — Sign in, Cancel, Try
+    again —, the switch, ⋯ and right-click: Open, Sign in (again), Sign
+    out, Refresh tools, Remove…), or "No connectors yet" with Discover
+    connectors; under it which way Chat's model gets the tools
+    (`connectors_budget`, `budgetLine`: every tool, or tool search past its
+    share) and "Let connectors work during meetings" (`cfg.connectorsInMeetings`,
+    Settings' config copy, passed in as `cfg`).
+  - **`ConnectorDetail.svelte`** (a connector's page, one level down,
+    "‹ Connectors"): the header (mark, name, "by …" and Tested with Yap from
+    its catalogue entry, status, Sign in / Sign in again / Cancel / Try
+    again, Sign out, the switch), what it reaches (the link, or the exact
+    command line in a mono box, variables by name), **Where Yap uses it**
+    (Chat, Voice Assistant, During meetings: `connector_set_where`; Your
+    phone shown off until wave 6), Tools — grouped Reads ·
+    Changes things · Can delete, each group's own three-way control and
+    each tool's (`ToolRow.svelte`: Always allow · Ask first · Off as radios,
+    no Always allow for one that can delete, only Off for one Yap can't
+    offer, why it starts off), what they cost a Chat step, Refresh tools
+    (a toast says what changed: new tools, ones asking again) —, the foot:
+    "Last used …", Advanced: your own client ID (and its secret: a password
+    field, sent and forgotten), Show details, the vendor's page, Remove… (the
+    app's confirm). Opening one that hasn't connected this run lists its
+    tools.
+  - **`AddDialog.svelte`** (+ Add's four ways in one dialog,
+    `Dialog.svelte`'s frame): a link (Name, Server address, Token, request
+    headers, "An older HTTP+SSE server"), a program (Name, Command,
+    Arguments — split as a command line splits them, `catalog.js`
+    `splitArgs` —, variables with 🔒 for secret ones; Review →
+    `CommandConsent.svelte`: "This runs a program on your PC with your
+    permissions", the exact command line, its warnings, then Approve and
+    run), Import from Claude Desktop and Paste a setup (each server with a
+    tick box, a program's consent panel inline, "Added already", what was
+    left out; Approve and add N). Done shows `AddedResult.svelte`: the
+    server's own name and tools, Sign in then "Finish signing in in your
+    browser" with Cancel, or why it didn't connect with Try again.
+  - **`DiscoverGrid.svelte`** + **`ConnectorSheet.svelte`**: the
+    catalogue's cards in a grid (`ConnectorLogo.svelte`: the vendor's mark on
+    a light tile in both themes, else the initial on its colour), + or ✓,
+    Coming later with Why?, "More coming"; the sheet's facts (Signing in,
+    Where your data goes, It runs), a token field or "Use a token instead",
+    "Make a token on … ↗", the vendor's page, Continue to sign in / Connect /
+    Continue (a program: AddDialog's form filled in).
+  - **State** (`connectors.svelte.js`): `conn` — `enabled`, the list (Rust's
+    views), the catalogue, the tab and the connector open, a failed
+    attempt's words per connector (shown only when the status line doesn't
+    say them) — and the actions (sign in / cancel / out, Try again, the
+    switch, a tool's setting, Remove) the rows and the page share. No
+    secret is ever kept there.
+  - e2e: `connectors.spec.js`, `connectors-discover.spec.js` (with
+    `e2e/support/connectors.js`); screenshots `yours`, `connector-page`,
+    `add-link`, `add-program`, `import`, `discover`, `discover-sheet` (and
+    `-dark`).
 - **AI apps (MCP)** (`McpSection.svelte`, Wispr's): a card each for Claude /
   ChatGPT / Gemini / Cursor ("Add to X" → Added ✓ · Remove), **All other
   apps** (Claude Code / VS Code / Windsurf + the command and JSON), "Let AI

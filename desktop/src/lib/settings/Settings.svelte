@@ -12,7 +12,7 @@
   import { account, displayName, initAccount, initials } from '../stores/account.svelte.js';
   import './settings.css';
   import { NAV_GROUPS, resolveTarget } from './nav.js';
-  import { searchSettings, groupResults, countByPage } from './settingsIndex.js';
+  import { searchSettings, groupResults, countByPage, visibleIndex } from './settingsIndex.js';
   import { hotkeyCapture } from './hotkeys.svelte.js';
   import { followHotkeyFallback } from './hotkeyFallback.svelte.js';
   import { followDictionary } from './dictionarySync.svelte.js';
@@ -50,6 +50,8 @@
     models: () => import('./SpeechPage.svelte'),
     cleanup: () => import('./LanguageModelsPage.svelte'),
     connectors: () => import('./ConnectorsSection.svelte'),
+    // The connectors preview's page (connectors/: Yours, Discover, + Add).
+    connectorsPreview: () => import('./connectors/ConnectorsPage.svelte'),
     mcp: () => import('./McpSection.svelte'),
     phone: () => import('./PhonePage.svelte'),
     privacy: () => import('./PrivacyPage.svelte'),
@@ -140,7 +142,26 @@
   // Real running version — read from Tauri, not hardcoded (was stuck at '0.1.0').
   let APP_VERSION = $state('');
 
+  // The connectors preview (integrations/connectors.rs): on, Connectors is
+  // its page (connectors/ConnectorsPage.svelte, its own chunk) and its
+  // search entries show; off, the calendars' page. Asked at mount and each
+  // time the page opens (the switch is config.json's); off, Rust reads
+  // nothing about connectors to answer.
+  let connectorsOn = $state(false);
+  let connectorsVisit = $state(0);
+  function checkConnectors() {
+    invoke('connectors_list')
+      .then((v) => (connectorsOn = !!v?.enabled))
+      .catch(() => (connectorsOn = false));
+  }
+  $effect(() => {
+    if (section === 'connectors') checkConnectors();
+  });
+
   onMount(async () => {
+    // Whether the connectors preview is on (its page and search entries).
+    // Off, Rust reads nothing about connectors.
+    checkConnectors();
     // The cleanup guardrails, for Prompt Studio's View (Language Models).
     await loadBasePrompt();
     try {
@@ -210,7 +231,9 @@
   let searchEl = $state(null);
   let railSearch = $state(false); // the icon rail's search box, open
   const searching = $derived(query.trim().length > 0);
-  const results = $derived(searching ? searchSettings(query) : []);
+  // A preview's entries only while it's on (the connectors' page).
+  const index = $derived(visibleIndex({ connectors: connectorsOn }));
+  const results = $derived(searching ? searchSettings(query, index) : []);
   const resultGroups = $derived(groupResults(results));
   const flatResults = $derived(resultGroups.flatMap((g) => g.results));
   const counts = $derived(searching ? countByPage(results) : null);
@@ -326,6 +349,9 @@
     meetingApps = to.page === 'meetings' && to.anchor === 'call-apps-list';
     privacyConnections = to.page === 'privacy' && to.anchor === 'connections-list';
     sideButtons = to.page === 'shortcuts' && to.anchor === 'side-buttons-setup';
+    // Connectors' page goes back to Yours' list on every visit (a search
+    // result lands on a row of it; the nav item leaves a connector's page).
+    if (to.page === 'connectors') connectorsVisit += 1;
     if (to.scope) lm.scope = to.scope;
     tick().then(() => {
       if (!to.anchor) {
@@ -637,6 +663,10 @@
           {:else if section === 'cleanup'}
             {#await PAGES.cleanup() then { default: LanguageModelsPage }}
               <LanguageModelsPage {cfg} {goto} />
+            {/await}
+          {:else if section === 'connectors' && connectorsOn}
+            {#await PAGES.connectorsPreview() then { default: ConnectorsPage }}
+              <ConnectorsPage {goto} {cfg} visit={connectorsVisit} />
             {/await}
           {:else if section === 'connectors'}
             <div class="page-h">
