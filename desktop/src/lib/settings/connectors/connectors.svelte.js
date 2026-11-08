@@ -209,6 +209,16 @@ export async function setEnabled(c, enabled) {
   }
 }
 
+/** Where Yap may use it: `{chat?, voice?, meetings?}` (never the phone here yet). */
+export async function setWhere(c, places) {
+  try {
+    putConnector(await invoke('connector_set_where', { id: c.id, places }));
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, why: words(e) };
+  }
+}
+
 export async function setTool(c, tool, setting) {
   try {
     putConnector(await invoke('connector_set_tool', { id: c.id, tool, setting }));

@@ -122,6 +122,13 @@ test('Yours: a link added with its token, its tools set one by one and by group,
   await expect(tool(dialog, 'needs_input').getByRole('radio')).toHaveText(['Off']);
   await expect(dialog.locator('[data-tool="inject"]')).toContainText('Its description reads like instructions to the model');
 
+  // Where Yap uses it: Chat, the Voice Assistant, meetings; the phone not yet.
+  await dialog.getByRole('button', { name: 'Use it with the Voice Assistant' }).click();
+  await expect.poll(() => stored(yap).find((c) => c.id === id).where).toMatchObject({ chat: true, voice: false, meetings: false, phone: false });
+  await dialog.getByRole('button', { name: 'Use it during meetings' }).click();
+  await expect.poll(() => stored(yap).find((c) => c.id === id).where.meetings).toBe(true);
+  await expect(dialog.getByRole('button', { name: 'Use it from your phone' })).toBeDisabled();
+
   // "Last used", from a call.
   await expect(dialog.getByTestId('connector-used')).toContainText('Not used yet');
   await yap.invoke('connector_call_tool', { id, tool: 'turn_off', args: { area: 'hall' } });

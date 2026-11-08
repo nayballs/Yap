@@ -575,6 +575,7 @@ pub fn run() {
             integrations::connectors::connector_sign_in_cancel,
             integrations::connectors::connector_sign_out,
             integrations::connectors::connector_set_client,
+            integrations::connectors::connector_set_where,
             integrations::connectors::connector_catalog,
             integrations::connectors::connectors_import_scan,
             integrations::connectors::connectors_import,

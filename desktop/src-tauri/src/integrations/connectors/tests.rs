@@ -172,6 +172,20 @@ async fn a_pasted_setup_is_shown_whole_without_its_secrets_and_added_as_seen() {
     assert!(again.servers.iter().all(|s| s.added), "{again:?}");
 }
 
+#[tokio::test]
+async fn where_it_is_used_changes_chat_voice_and_meetings_never_the_phone() {
+    on();
+    let c = add(&Spec { name: "Wiki".into(), url: Some("https://mcp.example.com/mcp".into()), ..Default::default() }).unwrap();
+    assert_eq!(c.where_, store::Where::default());
+    let v = connector_set_where(c.id.clone(), WherePatch { voice: Some(false), meetings: Some(true), ..Default::default() }).await.unwrap();
+    assert_eq!(v.where_, store::Where { chat: true, voice: false, phone: false, plan: true, meetings: true });
+    // The phone isn't one of its fields: a page can't turn it on yet.
+    let patch: WherePatch = serde_json::from_value(json!({ "chat": false, "phone": true })).unwrap();
+    let v = connector_set_where(c.id.clone(), patch).await.unwrap();
+    assert!(!v.where_.chat && !v.where_.phone);
+    assert!(connector_set_where("c99".into(), WherePatch::default()).await.is_err());
+}
+
 #[test]
 fn secret_names_are_locked_by_default() {
     for name in ["GITHUB_TOKEN", "API_KEY", "OPENAI_API_KEY", "CLIENT_SECRET", "DB_PASSWORD", "GITHUB_PAT", "HA_AUTH"] {

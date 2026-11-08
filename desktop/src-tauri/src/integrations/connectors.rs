@@ -769,6 +769,50 @@ pub async fn connector_set_tool(id: String, tool: String, setting: String) -> Re
     Ok(view(&c))
 }
 
+/// Where a connector's tools may be used, as changed on its page: Chat, the
+/// Voice Assistant, during meetings (also behind `connectors_in_meetings`).
+/// The phone stays as it is (read only, wave 6), and plan chats too.
+#[derive(Debug, Clone, Copy, Default, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WherePatch {
+    #[serde(default)]
+    pub chat: Option<bool>,
+    #[serde(default)]
+    pub voice: Option<bool>,
+    #[serde(default)]
+    pub meetings: Option<bool>,
+}
+
+impl WherePatch {
+    /// `w` with this patch's changes. Pure.
+    pub fn apply(self, mut w: store::Where) -> store::Where {
+        if let Some(v) = self.chat {
+            w.chat = v;
+        }
+        if let Some(v) = self.voice {
+            w.voice = v;
+        }
+        if let Some(v) = self.meetings {
+            w.meetings = v;
+        }
+        w
+    }
+}
+
+/// **Where Yap uses it** (a connector's page): Chat, the Voice Assistant,
+/// during meetings. The phone isn't changed here yet.
+#[tauri::command]
+pub async fn connector_set_where(id: String, places: WherePatch) -> Result<View, String> {
+    require()?;
+    let c = store::update(&id, |c| {
+        c.where_ = places.apply(c.where_);
+        c.clone()
+    })?;
+    tracing::info!(connector = %id, chat = c.where_.chat, voice = c.where_.voice, meetings = c.where_.meetings, "connectors: where it's used changed");
+    changed();
+    Ok(view(&c))
+}
+
 /// Show details: the server, the address, a program's last stderr lines
 /// (memory only).
 #[derive(Debug, Clone, Serialize)]

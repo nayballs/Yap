@@ -37,13 +37,15 @@
     retry,
     setEnabled,
     setTool,
+    setWhere,
     removeConnector,
     putConnector,
     ago,
     words,
   } from './connectors.svelte.js';
 
-  let { id, entry = null, onback } = $props();
+  //   meetingsOn: "Let connectors work during meetings" (connectors_in_meetings).
+  let { id, entry = null, onback, meetingsOn = false } = $props();
 
   const c = $derived(connectorById(id));
   const action = $derived(c ? statusAction(c) : null);
@@ -124,6 +126,11 @@
       }
     }
     saving = '';
+  }
+
+  async function place(patch) {
+    const r = await setWhere(c, patch);
+    if (!r.ok) toast({ title: "Couldn't change where Yap uses it", description: r.why, variant: 'destructive' });
   }
 
   async function doRetry() {
@@ -242,6 +249,29 @@
           <p class="fine">Signed in{c.signIn.host ? ` at ${c.signIn.host}` : ''}{c.signIn.scopes?.length ? ` · ${c.signIn.scopes.join(', ')}` : ''}.</p>
         {/if}
       {/if}
+    </section>
+
+    <section class="where" aria-labelledby="where-h-{c.id}" data-setting="connector-where">
+      <h2 id="where-h-{c.id}">Where Yap uses it</h2>
+      <div class="wrow">
+        <Toggle checked={c.where?.chat} label="Chat" ariaLabel="Use it in Chat" desc="When you ask in Chat" disabled={!c.enabled} onchange={(on) => place({ chat: on })} />
+      </div>
+      <div class="wrow">
+        <Toggle checked={c.where?.voice} label="Voice Assistant" ariaLabel="Use it with the Voice Assistant" desc="When you ask out loud" disabled={!c.enabled} onchange={(on) => place({ voice: on })} />
+      </div>
+      <div class="wrow">
+        <Toggle
+          checked={c.where?.meetings}
+          label="During meetings"
+          ariaLabel="Use it during meetings"
+          desc={meetingsOn ? 'While a meeting records or a call is on. Every change it makes asks with a click.' : 'Also needs "Let connectors work during meetings", on Connectors’ page.'}
+          disabled={!c.enabled}
+          onchange={(on) => place({ meetings: on })}
+        />
+      </div>
+      <div class="wrow">
+        <Toggle checked={false} label="Your phone" ariaLabel="Use it from your phone" desc="Its reads, from your phone: comes later" disabled />
+      </div>
     </section>
 
     <section class="tools" aria-labelledby="tools-h-{c.id}">
@@ -510,6 +540,20 @@
     display: flex;
     flex-direction: column;
     gap: 8px;
+  }
+  .where {
+    display: flex;
+    flex-direction: column;
+  }
+  .where h2 {
+    margin-bottom: 4px;
+  }
+  .wrow {
+    padding: 9px 0;
+    border-top: 1px solid var(--yap-rule);
+  }
+  .wrow:first-of-type {
+    border-top: none;
   }
   .toolshead {
     display: flex;
