@@ -811,6 +811,10 @@ pub(super) async fn go(turn: &mut crate::web::Turn, args: &Value, live: Option<c
         (true, None) => return failed("url or search is required.".into(), "Couldn't go anywhere: no address".into()),
         (true, Some(words)) => (crate::web::BrowserSearch::new(&super::engine(), &words).url, None),
         (false, _) => {
+            // A file on this PC is never a page here (chat/pictures/local.rs).
+            if let Some(e) = crate::chat::pictures::local::not_a_page(&given) {
+                return failed(e, format!("Didn't go to {}: a file on this PC", crate::chat::pictures::local::chip_name(&given)));
+            }
             if let Err(e) = crate::web::check_url(&given) {
                 return failed(e.clone(), format!("Didn't go to {}: {}", crate::web::short_url(&given), crate::web::short(&e)));
             }

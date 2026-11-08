@@ -47,6 +47,8 @@ pub(super) async fn with_tools(
         }
         let mut turn = crate::web::Turn::new(settings, crate::web::Endpoints::current(), &t.text, &earlier)
             .with_earlier_sources(conv.messages.iter().flat_map(|m| m.sources.iter().map(|s| s.url.as_str())));
+        // A picture file on this PC (pictures/local.rs): the chat's own.
+        turn.pictures.local = crate::chat::pictures::local::Context::of_chat(conv, &t.text);
         // A strong model looks further once it writes a document: now,
         // for a question that asks for one, else at its first document
         // call (`agent.rs`).

@@ -18,10 +18,13 @@
 // - The pages: a page Claude Code's WebSearch found opens in the panel's Page tab, and
 //   the model scrolls it and looks: its shots go back as image content and show in the turn's steps,
 //   kept with the answer. A click that buys waits on the person's card, as in the tool loop.
-// - A Code chat on the plan: the same look, its tools allowed in its session.
+// - A Code chat on the plan: the same look, its tools allowed in its session; a picture an agent
+//   made in its workspace shown in a picture tab by its path (a file is never loaded as a page).
 // - During a call: refused, nothing taken.
 import fs from 'node:fs';
 import path from 'node:path';
+import { pathToFileURL } from 'node:url';
+import utilsBundle from 'playwright-core/lib/utilsBundle';
 import { test as base, expect, expectStore, openView, setConfig } from './support/fixtures.js';
 import { fakeClaude, planConfig, SCRIPTS as PLAN_SCRIPTS } from './support/claude-plan.js';
 import { startFakeWeb, FORT_JOY_URL } from './support/fake-web.js';
@@ -372,6 +375,89 @@ test('a Code chat on the plan looks at the screen too: its session allows the to
   await shot(main, '06-code-chat-looked-at-the-screen');
   // Its warm session works in the workspace (Windows keeps a folder a process works in): the
   // chat deleted ends it, so a later fresh folder can go.
+  const conversation = (await yap.invoke('chats_list'))[0].id;
+  await yap.invoke('chat_delete', { id: conversation });
+});
+
+/** A `w` × `h` "concept" picture (a garden bed on a sky), as PNG bytes: Playwright's own pngjs. */
+function conceptPng(w, h) {
+  const p = new utilsBundle.PNG({ width: w, height: h });
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      const i = (y * w + x) * 4;
+      const bed = x > w * 0.15 && x < w * 0.85 && y > h * 0.55 && y < h * 0.85;
+      const row = bed && Math.floor((x - w * 0.15) / (w * 0.07)) % 2 === 0;
+      const [r, g, b] = bed ? (row ? [74, 128, 62] : [120, 86, 52]) : [150 + Math.round((60 * y) / h), 196, 232];
+      p.data.set([r, g, b, 255], i);
+    }
+  }
+  return utilsBundle.PNG.sync.write(p);
+}
+
+test('a Code chat on the plan shows a picture an agent made in its workspace: a file is never a page, show_picture opens it in a picture tab', async ({ yap, main, shot }) => {
+  fs.rmSync(GARDEN, { recursive: true, force: true, maxRetries: 20, retryDelay: 250 });
+  const DOCS = path.join(GARDEN, 'docs');
+  fs.mkdirSync(DOCS, { recursive: true });
+  const CONCEPT = path.join(DOCS, 'concept.png');
+  fs.writeFileSync(CONCEPT, conceptPng(480, 320));
+  fs.writeFileSync(path.join(DOCS, 'bed-layout.html'), '<!doctype html><title>Bed layout</title><p>Raised beds</p>\n');
+  await setConfig(yap, main, { agentsEnabled: true });
+  if (!(await yap.invoke('workspaces_list')).some((f) => f.name === 'garden-planner')) {
+    await yap.invoke('workspaces_add', { path: GARDEN });
+  }
+  const DUMP = fresh('code-picture.jsonl');
+  const SAID = 'Here is the concept picture beside the chat. The HTML version only opens in your own browser.';
+  await play(yap, 'code-picture', [
+    turn(
+      yapCall('m1', 'toolu_html', 'browser_navigate', { url: pathToFileURL(path.join(DOCS, 'bed-layout.html')).href }, DUMP),
+      yapCall('m2', 'toolu_file', 'browser_navigate', { url: pathToFileURL(CONCEPT).href }, DUMP),
+      yapCall('m3', 'toolu_show', 'show_picture', { picture: CONCEPT, caption: 'Garden concept' }, DUMP),
+      answers('m4', SAID)
+    ),
+  ]);
+  await openView(main, 'Chat');
+  await newCodeChat(main, 'garden-planner');
+  await send(main, 'Show me the concept pictures you made');
+  await expect(lastAnswer(main)).toHaveText(SAID, { timeout: 30_000 });
+  // A file is never loaded as a page: the model is told how to show a picture instead
+  // (a web page saved here isn't opened at all), then show_picture opens it.
+  await expect(chipsOfLast(main)).toHaveText([
+    /Didn't (bring up|go to) bed-layout\.html: a file on this PC$/,
+    /Didn't (bring up|go to) concept\.png: a file on this PC$/,
+    'Showed ‘concept.png’ from docs',
+  ]);
+  const [html, file, showed] = linesOf(DUMP);
+  expect(html).toMatchObject({ tool: 'browser_navigate', isError: true });
+  expect(resultOf(html).error).toContain('(HTML)');
+  expect(file).toMatchObject({ tool: 'browser_navigate', isError: true });
+  expect(resultOf(file).error).toContain('show_picture');
+  expect(showed).toMatchObject({ tool: 'show_picture', isError: false });
+  expect(resultOf(showed)).toMatchObject({ success: true, shown: true, w: 480, h: 320 });
+  expect((await yap.invoke('e2e_page_views')).some((v) => !String(v.url).startsWith('http'))).toBe(false);
+
+  // The picture tab: named by the file, its folder where it's from, the picture at its device pixels.
+  const tab = main.getByTestId('chat-picture');
+  await expect(tab).toBeVisible({ timeout: 20_000 });
+  await expect(main.getByTestId('chat-picture-caption')).toHaveText('concept.png');
+  await expect.poll(async () => (await main.getByTestId('chat-picture-source').textContent()).trim().toLowerCase()).toBe(`from ${DOCS}`.toLowerCase());
+  await expect(main.getByTestId('chat-picture-open')).toHaveCount(0);
+  await expect
+    .poll(() => main.getByTestId('chat-picture-img').evaluate((img) => img.complete && img.naturalWidth > 0), { timeout: 10_000 })
+    .toBe(true);
+  await expect(main.getByTestId('chat-picture-pill')).toHaveCount(1);
+  // Kept with the answer, stored like a pasted picture.
+  await expectStore(yap, 'chats.json', (s) =>
+    s.conversations.some((c) =>
+      c.messages.some((m) => m.role === 'assistant' && m.text === SAID && m.pictures?.length === 1 && m.pictures[0].caption === 'concept.png' && m.pictures[0].page?.site === 'docs' && !m.pictures[0].imageUrl)
+    )
+  );
+  const id = resultOf(showed).id;
+  expect(fs.existsSync(path.join(yap.dataDir, 'chat-images', `${id}.png`))).toBe(true);
+  await shot(main, '08-code-chat-shows-a-picture-from-its-workspace');
+  await theme(yap, main, 'dark');
+  await shot(main, '09-code-chat-shows-a-picture-from-its-workspace-dark');
+  await theme(yap, main, 'light');
+  // Its warm session works in the workspace: the chat deleted ends it.
   const conversation = (await yap.invoke('chats_list'))[0].id;
   await yap.invoke('chat_delete', { id: conversation });
 });

