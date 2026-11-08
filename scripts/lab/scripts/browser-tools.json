@@ -54,7 +54,7 @@
 
     { "note": "3. A dropdown, a click that opens a box, typing then Enter (Wikipedia's Special:AllPages, MDN's search)." },
     {
-      "ask": "Last part, one step at a time, short answers. 1. Open https://en.wikipedia.org/wiki/Special:AllPages beside the chat. With browser_form_input, set its Namespace dropdown to \"Help\", and tell me what the result says it did. 2. Open https://developer.mozilla.org/en-US/docs/Web/HTML/Element/table. Click its search button or box at the top with browser_click, and tell me what the click's result says changed. 3. Type table into that search box with browser_type (no submit), then press Enter with browser_key, and tell me where you ended up.",
+      "ask": "Last part, one step at a time, short answers. 1. Open https://en.wikipedia.org/wiki/Special:AllPages beside the chat. With browser_form_input, set its Namespace dropdown to \"Help\", and tell me what the result says it did. 2. Open https://developer.mozilla.org/en-US/docs/Web/HTML/Element/table. Click its search button or box at the top with browser_click, and tell me what the click's result says changed. 3. Type flexbox into that search box with browser_type (no submit), then press Enter with browser_key, and tell me where you ended up.",
       "chat": "same",
       "timeout": 540
     },
