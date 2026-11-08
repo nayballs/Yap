@@ -36,17 +36,26 @@ The full stack list, the app's entry and plumbing (`lib.rs`, the tray, context m
   misaki's lexicons + the eSpeak NG CLI, a separate program, for text →
   phonemes) or WinRT `Windows.Media.SpeechSynthesis` (Windows' own voices,
   `windows` crate) → PCM → rodio, sentence by sentence (`voice/tts.rs`,
-  `voice/tts/`).
+  `voice/tts/`); or ElevenLabs (cloud, the user's own key, streamed PCM), or
+  OpenAI, Gemini and Groq on the keys Language Models already has
+  ([spoken-replies.md](./spoken-replies.md)).
 - **STT:** [`transcribe-rs`](https://crates.io/crates/transcribe-rs) — one crate that
   wraps **whisper.cpp** (Vulkan) *and* a family of **ONNX** models (Parakeet, Moonshine,
   SenseVoice, GigaAM, Canary, Cohere) via `ort`/ONNX Runtime (DirectML). Behind the
-  `engines` feature flag (see below).
+  `engines` feature flag (see below). Vendored (`desktop/src-tauri/vendor/transcribe-rs`,
+  through `[patch.crates-io]`) with two DirectML fixes for Parakeet and its TDT
+  durations read (no "d d d d" runs); what changed is in its `YAP.md`
+  ([dictation.md](./dictation.md)).
 - **Language of a transcript's text:** [`whatlang`](https://crates.io/crates/whatlang) 0.16
   (trigram profiles, pure Rust, MIT, ~0.3 MB) with Yap's own function-word lists, for
   the "You spoke French" nudge with models that don't say what they heard
   (`dictation/languages/text_id.rs`, [dictation.md](./dictation.md)).
 - **AI cleanup:** `reqwest` → any **OpenAI-compatible** chat endpoint (Groq/OpenAI/
-  OpenRouter, or local Ollama/LM Studio). `desktop/src-tauri/src/ai/llm.rs`.
+  OpenRouter, or local Ollama/LM Studio). `desktop/src-tauri/src/ai/llm.rs`. Also the
+  person's ChatGPT plan (Sign in with ChatGPT: OpenAI's Responses API, `ai/chatgpt.rs`)
+  and the on-device sidecar: llama.cpp's own `llama-server` builds, kept up to date
+  (`ai/local_llm.rs`, `local_llm/engine.rs`; llamafile on an install that hasn't moved
+  yet) ([ai-models.md](./ai-models.md)).
 - **Text injection:** the Win32 clipboard (`windows` crate: private formats + a
   verified write) + Win32 `SendInput` (paste / Enter); UI Automation reads the text
   around the cursor (`pasting/selection.rs`). `arboard` remains for the chat's copy tool.
@@ -91,14 +100,17 @@ The full stack list, the app's entry and plumbing (`lib.rs`, the tray, context m
 - **MCP (AI apps):** [`rmcp`](https://crates.io/crates/rmcp), the official Rust MCP SDK
   (server + stdio, no macros): `yap.exe mcp` lets Claude, ChatGPT desktop, Gemini CLI,
   Cursor… read meetings and notes through the local API (`integrations/mcp.rs`); `toml_edit` adds Yap to
-  Codex/ChatGPT's `config.toml` (`integrations/mcp_clients.rs`).
+  Codex/ChatGPT's `config.toml` (`integrations/mcp_clients.rs`). `rmcp` 3.9 is also
+  Yap's client for connectors (preview): stdio on `process-wrap` jobs, Streamable HTTP
+  on Yap's reqwest (`integrations/connectors.rs`, [integrations.md](./integrations.md)).
 - **Claude Code** (2026-11-07): the person's own installed Claude Code CLI
   (at least 2.1.259), never shipped with Yap, run unmodified as a child
   process (`claude -p`, stream-json both ways) on their own sign-in or API
   key, for Chat on their Claude plan and Yap Code (`ai/claude_code.rs`,
   [ai-models.md](./ai-models.md#the-claude-code-engine-2026-11-07), [yap-code.md](./yap-code.md)).
   Its runs reach Yap over a loopback HTTP endpoint (`integrations/claude_live.rs`,
-  `tiny_http`, MCP's request/response subset by hand).
+  `tiny_http`, MCP's request/response subset by hand). Never "Claude Code" in a
+  feature's name ([yap-code.md](./yap-code.md#names)).
 - **Speaker diarization (beta):** NVIDIA's Nemotron-3-Diarization (q8_0 GGUF,
   OpenMDW-1.1) on NeMo-Speech.cpp 0.2.0 (Apache-2.0, ggml), run by `yap.exe
   diarize`, a child process that loads the runtime's C API DLLs from the data
