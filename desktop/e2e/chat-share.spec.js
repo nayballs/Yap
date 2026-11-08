@@ -192,7 +192,8 @@ test('one picture: copied, kept, large in the thread; a click opens the viewer, 
     { tools: [{ name: 'show_picture', args: { path: file('beds.png'), caption: 'The beds' } }] },
     { content: 'Here is the first concept, and the beds beside the chat.' },
   ]);
-  await ask(main, `Can you show me ${CONCEPT}?`);
+  // (Its folder named too: a file's path alone allows that file only, never its neighbours.)
+  await ask(main, `Can you show me ${CONCEPT}? The beds are in ${DOCS}`);
   const pic = sharedPictures(main);
   await expect(pic).toHaveCount(1, { timeout: 20_000 });
   await expect(main.getByTestId('chat-share-caption')).toHaveText(CAPTION);
@@ -205,6 +206,11 @@ test('one picture: copied, kept, large in the thread; a click opens the viewer, 
   expect(p.h).toBeLessThanOrEqual(480);
   expect(Math.abs(p.w / p.h - 640 / 400)).toBeLessThan(0.02);
   expect(Math.abs(p.w * p.dpr - p.nw)).toBeLessThan(0.6);
+  // Whole, never cropped: its frame is its own shape (no bars), the picture filling it.
+  const frame = await pic.evaluate((el) => el.closest('.sharedpic').getBoundingClientRect().toJSON());
+  expect(Math.abs(frame.width - p.w)).toBeLessThan(1);
+  expect(Math.abs(frame.height - p.h)).toBeLessThan(1);
+  expect(p.src).not.toContain('fit=cover');
 
   // The model was offered it (the web off: a picture file named), by a path only.
   const offered = fakeLlm.requests.slice(from).find((r) => r.tools?.length);
@@ -255,7 +261,7 @@ test('three pictures: a grid, each at its device pixels', async ({ yap, main, fa
     { tools: [{ name: 'share_files', args: { files: [CONCEPT, file('beds.png'), file('paths.png')], caption: 'Three ideas for the garden' } }] },
     { content: 'Three ideas.' },
   ]);
-  await ask(main, `Show me the pictures next to ${CONCEPT}`);
+  await ask(main, `Show me ${CONCEPT} and the others in ${DOCS}`);
   const grid = main.getByTestId('chat-shared-grid');
   await expect(grid).toBeVisible({ timeout: 20_000 });
   await expect(grid.getByTestId('chat-shared-picture')).toHaveCount(3);
@@ -268,11 +274,15 @@ test('three pictures: a grid, each at its device pixels', async ({ yap, main, fa
     await loaded(img);
     const p = await placement(img);
     expect(Math.abs(p.w * p.dpr - p.nw)).toBeLessThan(0.6);
+    // Filled: Rust's tile of the picture's middle at exactly its device pixels.
+    expect(p.src).toMatch(/\?w=\d+&h=\d+&fit=cover$/);
+    expect(Math.abs(p.h * p.dpr - p.nh)).toBeLessThan(0.6);
     boxes.push(await tiles.nth(i).evaluate((el) => el.closest('.sharedpic').getBoundingClientRect().toJSON()));
   }
   expect(Math.abs(boxes[0].y - boxes[1].y)).toBeLessThan(1);
   expect(boxes[2].y).toBeGreaterThan(boxes[0].y + boxes[0].height - 1);
-  expect(Math.abs(boxes[0].width - boxes[0].height)).toBeLessThan(1);
+  // 4:3 tiles, the picture filling each (no bars).
+  expect(Math.abs(boxes[0].width / boxes[0].height - 4 / 3)).toBeLessThan(0.02);
   await expectStore(yap, 'chats.json', (s) => s.conversations.some((c) => c.messages.some((m) => m.files?.[0]?.items?.length === 3)));
   await shot(main, '03-three-pictures-grid');
   await setConfig(yap, main, { theme: 'dark' });
@@ -283,7 +293,7 @@ test('three pictures: a grid, each at its device pixels', async ({ yap, main, fa
 
 test('a Markdown file and a text file: cards that open, show their folder and copy their path; one deleted says so', async ({ yap, main, fakeLlm, shot }) => {
   fakeLlm.scriptChat([{ tools: [{ name: 'share_files', args: { files: [NOTES, TODO], caption: 'Your garden notes' } }] }, { content: 'Here are your notes and the to-do list.' }]);
-  await ask(main, `Send me the notes beside ${CONCEPT}`);
+  await ask(main, `Send me the notes in ${DOCS} with ${CONCEPT}`);
   await expect(card(main, 'notes.md')).toBeVisible({ timeout: 20_000 });
   await expect(card(main, 'todo.txt')).toBeVisible();
   // Linked, never copied: no chat-images id, the path kept.
@@ -322,7 +332,7 @@ test('a Markdown file and a text file: cards that open, show their folder and co
   // Deleted since: the card says so, plainly, when the chat's opened again.
   fs.rmSync(TODO);
   await openConversation(main, 'Bed notes');
-  await openConversation(main, `Send me the notes beside`);
+  await openConversation(main, `Send me the notes in`);
   await expect(card(main, 'todo.txt').getByTestId('chat-file-gone')).toHaveText('Moved or deleted');
   await expect(card(main, 'todo.txt').getByTestId('chat-file-open')).toHaveCount(0);
   await expect(card(main, 'notes.md').getByTestId('chat-file-gone')).toHaveCount(0);
@@ -330,7 +340,7 @@ test('a Markdown file and a text file: cards that open, show their folder and co
   fs.writeFileSync(TODO, 'Buy seeds\n');
 });
 
-test('an agent’s report card shows the pictures its turn made, then +N more, and its new files', async ({ main, shot }) => {
+test('an agent’s report card shows the pictures its turn made, then +N more, and its new files', async ({ yap, main, shot }) => {
   await openConversation(main, 'Garden agent');
   const report = main.getByTestId('chat-agent-report');
   await expect(report).toBeVisible();
@@ -343,7 +353,18 @@ test('an agent’s report card shows the pictures its turn made, then +N more, a
   // Compact: no preview, no Copy path.
   await expect(card(main, 'plan.md').getByTestId('chat-file-preview')).toHaveCount(0);
   await expect(card(main, 'plan.md').getByTestId('chat-file-copy-path')).toHaveCount(0);
+  // Each tile filled with its picture (4:3, Rust's tile at its device pixels: no bars).
+  const tile = await grid.getByTestId('chat-shared-picture').first().evaluate((el) => {
+    const r = el.closest('.sharedpic').getBoundingClientRect();
+    return { ratio: r.width / r.height, src: el.querySelector('img').getAttribute('src') };
+  });
+  expect(Math.abs(tile.ratio - 4 / 3)).toBeLessThan(0.02);
+  expect(tile.src).toContain('fit=cover');
   await shot(main, '08-agent-report');
+  await setConfig(yap, main, { theme: 'dark' });
+  await expect.poll(() => main.evaluate(() => document.documentElement.dataset.yapTheme)).toBe('dark');
+  await shot(main, '09-agent-report-dark');
+  await setConfig(yap, main, { theme: 'light' });
 });
 
 test('an older Yap’s save dropped an answer’s files: chat_files.json put them back', async ({ main }) => {

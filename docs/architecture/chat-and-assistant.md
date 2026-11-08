@@ -1031,7 +1031,12 @@ one side.
   of the person's workspaces (`agents/workspaces.rs`, the Code chat's own
   too), a file an agent of this chat made or changed (`agents/store.rs`
   `files`), or a path the person wrote or said in the conversation (the
-  file or a folder holding it, never a drive's root; a `file:` address in
+  file itself, or a folder holding it written as a folder — since 8 Nov
+  2026 a file's path allows that file only, never its neighbours (naming
+  `…\Desktop\a.png` had allowed every file on the Desktop), and a folder's
+  path every file under it (`written_whole`: the path whole in their words,
+  not the start of a longer one — "docs" never in "docs.old\a.png"); never
+  a drive's root; a `file:` address in
   their words counts) — judged as written and again as the file system
   resolves it (a link out of a workspace refused; one the person named is
   theirs); else refused in plain words the model passes on ("…ask the
@@ -1110,7 +1115,8 @@ one side.
   turn fitted to a small context drops only with the files' family, last
   (`fit.rs` `Family::Files`). **Which files**: as a picture file's
   (`local::resolve`, `Noun::File`: a workspace's, an agent of this chat's, a
-  path the person wrote — as written and as resolved; "Yap only shares a
+  path the person wrote: the file itself, or any file under a folder they
+  wrote, never a named file's neighbours — as written and as resolved; "Yap only shares a
   file from this PC that's in…", `NOT_ALLOWED_FILE`), a folder refused; ≤ 8
   a call, ≤ 24 a turn. **A picture** (by its own bytes, ≤ 25 MB, not
   "attach") is copied into `chat-images/` as a pasted one is
@@ -2145,9 +2151,15 @@ and `shares.js`, pure; after the Claude app's look, in Yap's tokens, light
 and dark): each share under the answer that made it (above its folded
 steps). **One picture**: large, as wide as the readable column allows (the
 thread's `room`), at most 480 px tall, its shape kept, in the screenshot
-frame at exactly its device pixels (`chatImages.js` `placed`), its caption
-under it; **several**: a grid, 2 columns (3 from five), square tiles each
-at its device pixels. A click opens one in the panel's picture tab while the
+frame at exactly its device pixels (`chatImages.js` `placed`), whole and
+never cropped, its frame its own shape (no bars), its caption under it;
+**several**: a grid, 2 columns (3 from five), of 4:3 tiles each **filled**
+with its picture's middle (`shares.js` `coverPlaced`: Rust's tile at
+exactly its device pixels, `?w=&h=&fit=cover`, `snip/thumbs.rs`
+`get_cover`; a picture smaller than its tile is filled by the browser), a
+tile's ground the quiet `--yap-s2` while it loads (8 Nov 2026: square tiles
+letterboxed a landscape picture between white bars, which read as broken).
+A click opens the whole picture, one in the panel's picture tab while the
 panel's open, else the viewer (`ShotViewer`; ChatThread `openShared`, the
 picture as a `ShownPicture`: its file's name as caption, its folder as
 where it's from). A picture's **⋯** (on hover or focus; its right-click
@@ -2168,8 +2180,9 @@ then "+N more", and its new files as compact cards (Open and Show in folder,
 no preview), up to four then "+N more". Its step's chip: "Shared 2 pictures
 and notes.md" (folded: "shared files"); the line while it runs: "Sharing
 ‘concept.png’" / "Sharing 3 files". Tested in `desktop/e2e/chat-share.spec.js`:
-one picture copied, kept, drawn large, a click opening the panel's tab or
-the viewer, its ⋯; three pictures as a grid at their device pixels; a
+one picture copied, kept, drawn large and whole, a click opening the
+panel's tab or the viewer, its ⋯; three pictures as a grid of filled 4:3
+tiles at their device pixels; a
 Markdown file and a .txt as cards (Open: Yap's Markdown window, the text
 file kept for the suite; Show in folder; Copy path; the preview), then one
 deleted: "Moved or deleted"; a seeded agent's report card; the shares an

@@ -138,9 +138,15 @@ async fn only_the_places_a_picture_file_may_come_from_and_nothing_else() {
     assert_eq!(mixed.result["success"], true);
     assert_eq!(mixed.share.unwrap().items.len(), 1);
     assert_eq!(mixed.result["data"]["notShared"][0]["why"], local::NOT_ALLOWED_FILE);
-    // Its folder written by the person: theirs to share.
+    // Its folder written by the person: theirs to share, every file under it.
     let said = Files::new(local::Context { conversation: Some(63), said: vec![format!("share {} please", s(&elsewhere))] });
     assert_eq!(said.share(&json!({ "files": [s(&elsewhere.join("secret.txt"))] })).await.result["success"], true);
+    // A file's path: that file only, never its neighbours (8 Nov 2026).
+    std::fs::write(elsewhere.join("diary.txt"), "mine").unwrap();
+    let one = Files::new(local::Context { conversation: Some(63), said: vec![format!("share {} please", s(&elsewhere.join("secret.txt")))] });
+    assert_eq!(one.share(&json!({ "files": [s(&elsewhere.join("secret.txt"))] })).await.result["success"], true);
+    let next_to_it = one.share(&json!({ "files": [s(&elsewhere.join("diary.txt"))] })).await.result;
+    assert_eq!(next_to_it["error"], local::NOT_ALLOWED_FILE, "{next_to_it}");
     let _ = std::fs::remove_dir_all(garden.parent().unwrap());
     let _ = std::fs::remove_dir_all(elsewhere.parent().unwrap());
 }

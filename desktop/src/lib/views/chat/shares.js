@@ -11,6 +11,49 @@ export const GRID_GAP = 6;
 /** An agent's report card: pictures and other files it shows, at most. */
 export const REPORT_MAX = 4;
 
+/** A grid's tiles: this shape (width over height), each filled with its picture's middle. */
+export const TILE_ASPECT = 4 / 3;
+
+/** A tile `side` CSS px wide: its CSS size. */
+export function tileSize(side) {
+  return { w: side, h: Math.max(1, Math.round(side / TILE_ASPECT)) };
+}
+
+/**
+ * The part of a `iw` × `ih` picture a `w` × `h` tile filled with it shows
+ * (CSS's `object-fit: cover`): `[x, y, width, height]`, centred, in the
+ * picture's pixels (snip/thumbs.rs `cover_crop`, the same sum).
+ */
+export function coverCrop(iw, ih, w, h) {
+  if (!(iw > 0 && ih > 0 && w > 0 && h > 0)) return [0, 0, iw || 0, ih || 0];
+  if (iw * h > ih * w) {
+    const cw = Math.min(iw, Math.max(1, Math.round((ih * w) / h)));
+    return [Math.floor((iw - cw) / 2), 0, cw, ih];
+  }
+  const ch = Math.min(ih, Math.max(1, Math.round((iw * h) / w)));
+  return [0, Math.floor((ih - ch) / 2), iw, ch];
+}
+
+/**
+ * **A tile filled with picture `img`** ({ w, h }), `w` × `h` CSS px at
+ * `ratio` device pixels per CSS px, `url` the picture's address: the
+ * frame (CSS px, on whole device pixels) and its source — Rust's tile at
+ * exactly those device pixels (`?w=&h=&fit=cover`, snip/thumbs.rs) when
+ * the picture's middle is at least that big, else the picture itself, the
+ * browser filling the tile (`exact` false: a picture smaller than its tile).
+ */
+export function coverPlaced(img, w, h, ratio, url) {
+  const r = ratio > 0 ? ratio : 1;
+  const dw = Math.max(1, Math.round(w * r));
+  const dh = Math.max(1, Math.round(h * r));
+  const frame = { w: dw / r, h: dh / r };
+  if (!(img?.w > 0 && img?.h > 0)) return { frame, src: url, exact: false };
+  if (img.w === dw && img.h === dh) return { frame, src: url, exact: true };
+  const [, , cw, ch] = coverCrop(img.w, img.h, dw, dh);
+  const exact = dw <= cw && dh <= ch;
+  return { frame, src: exact ? `${url}?w=${dw}&h=${dh}&fit=cover` : url, exact };
+}
+
 /** A grid's columns for `n` pictures: 2, and 3 from 5. */
 export function gridColumns(n) {
   return n >= 5 ? 3 : 2;

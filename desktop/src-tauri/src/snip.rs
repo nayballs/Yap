@@ -726,13 +726,17 @@ pub fn chat_images_delete_all(app: AppHandle) -> usize {
 /// `/img/<id>` too): a chat screenshot's PNG, by id only — anything else
 /// is a 404. `?w=<px>&h=<px>`: its thumbnail at that size ([`thumbs`]: made
 /// the first time, then kept), or the PNG itself when that isn't one of its
-/// sizes. Answered off the main thread (`lib.rs`): a thumbnail can take a
-/// moment to make.
+/// sizes; with `&fit=cover`, a tile of that size filled with the picture's
+/// middle (`thumbs::get_cover`: a grid of pictures shared into a chat,
+/// `chat/shares.rs`), else the PNG. Answered off the main thread
+/// (`lib.rs`): a thumbnail can take a moment to make.
 pub fn serve(request: &tauri::http::Request<Vec<u8>>) -> tauri::http::Response<Vec<u8>> {
     let path = request.uri().path().trim_start_matches('/');
     let id = path.strip_prefix("img/").or_else(|| path.strip_prefix("img%2F")).unwrap_or(path);
     let size = request.uri().query().and_then(thumb_size);
-    let thumb = images::is_id(id).then(|| size.and_then(|(w, h)| thumbs::get(id, w, h).ok())).flatten();
+    let cover = request.uri().query().is_some_and(fills);
+    let make = |w, h| if cover { thumbs::get_cover(id, w, h) } else { thumbs::get(id, w, h) };
+    let thumb = images::is_id(id).then(|| size.and_then(|(w, h)| make(w, h).ok())).flatten();
     let found = thumb.or_else(|| images::is_id(id).then(|| images::read(id)).flatten());
     let builder = tauri::http::Response::builder().header("Access-Control-Allow-Origin", "*").header("Cache-Control", "no-store");
     match found {
@@ -740,6 +744,11 @@ pub fn serve(request: &tauri::http::Request<Vec<u8>>) -> tauri::http::Response<V
         None => builder.status(404).header("Content-Type", "text/plain").body(b"not found".to_vec()),
     }
     .unwrap_or_else(|_| tauri::http::Response::new(Vec::new()))
+}
+
+/// `…&fit=cover`: a tile filled with the picture, not the picture contained. Pure.
+fn fills(query: &str) -> bool {
+    query.split('&').any(|kv| kv == "fit=cover")
 }
 
 /// `w=180&h=101` → the thumbnail size asked for. Pure.
@@ -850,6 +859,8 @@ mod tests {
         assert_eq!(thumb_size("w=180&h=101"), Some((180, 101)));
         assert_eq!(thumb_size("h=101&w=180&v=2"), Some((180, 101)));
         assert_eq!(thumb_size("w=180"), None);
+        assert_eq!(thumb_size("w=200&h=150&fit=cover"), Some((200, 150)));
+        assert!(fills("w=200&h=150&fit=cover") && !fills("w=200&h=150") && !fills("fit=covers"));
         assert_eq!(thumb_size("w=-1&h=2"), None);
         assert_eq!(thumb_size(""), None);
     }

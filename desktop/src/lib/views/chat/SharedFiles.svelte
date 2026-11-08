@@ -2,10 +2,11 @@
   // **Files shared into the conversation** (`share_files`,
   // desktop/src-tauri/src/chat/shares.rs; after the Claude app's
   // SendUserFile): each share under the answer that made it — one picture
-  // large (the readable column's width, at most 480 px tall, its shape
-  // kept), several as a grid (2 columns, 3 from five), each at exactly its
-  // device pixels in the screenshot frame (chatImages.js `placed`, Rust's
-  // thumbnails), the caption under them; a click opens one in the panel's
+  // large and whole (the readable column's width, at most 480 px tall, its
+  // shape kept: chatImages.js `placed`), several as a grid (2 columns, 3
+  // from five) of 4:3 tiles each filled with its picture's middle
+  // (shares.js `coverPlaced`: Rust's tile at exactly its device pixels,
+  // `?fit=cover`), the caption under them; a click opens the whole picture in the panel's
   // picture tab, or the viewer while the panel is closed (ChatThread). A
   // picture's ⋯ (and its right-click): Copy / Save / Show in folder / Open
   // original. Any other file is a card: an icon by its kind, its name, its
@@ -17,13 +18,13 @@
   // four pictures, then "+N more", and its new files as compact cards. Its
   // own small chunk.
   import { invoke } from '@tauri-apps/api/core';
-  import { placed, shown, copyImage, saveImage } from './chatImages.js';
+  import { placed, shown, copyImage, saveImage, chatImageUrl } from './chatImages.js';
   import { screenPixels } from './chatShots.svelte.js';
   import { openContextMenu } from '../../ui/contextMenu.svelte.js';
   import { copyText } from '../../core/itemMenus.js';
   import { openExternalLink } from '../../core/externalLinks.js';
   import { toast } from '../../ui/toast.svelte.js';
-  import { shareParts, gridColumns, sizeLabel, shortFolder, kindLabel, hasPreview, asShownPicture, moreLabel, ONE_MAX_H, GRID_GAP } from './shares.js';
+  import { shareParts, gridColumns, sizeLabel, shortFolder, kindLabel, hasPreview, asShownPicture, moreLabel, tileSize, coverPlaced, ONE_MAX_H, GRID_GAP } from './shares.js';
 
   /**
    * `shares`: the message's `files` (or as they come, `liveFiles`);
@@ -114,9 +115,9 @@
   </svg>
 {/snippet}
 
-{#snippet picture(item, frame, caption, one)}
-  {@const p = placed(item, { ...frame, ratio: screenPixels.ratio })}
-  <div class="shotframe sharedpic" class:one style:width="{p.frame.w}px" style:aspect-ratio="{p.frame.w} / {p.frame.h}">
+{#snippet picture(item, p, caption, one)}
+  <!-- `p`: where it goes — the whole picture (chatImages.js `placed`), or a tile filled with its middle (`cover`). -->
+  <div class="shotframe sharedpic" class:one class:tile={p.cover} style:width="{p.frame.w}px" style:aspect-ratio="{p.frame.w} / {p.frame.h}">
     <button
       type="button"
       class="picbtn"
@@ -126,7 +127,11 @@
       onclick={() => onpicture?.(asShownPicture(item, caption))}
       oncontextmenu={(e) => pictureMenu(e, item)}
     >
-      <img src={p.src} alt={caption || item.name} draggable="false" decoding="async" use:shown style:left={p.pic.x} style:top={p.pic.y} style:width={p.pic.w} style:height={p.pic.h} />
+      {#if p.cover}
+        <img class="cover" src={p.src} alt={caption || item.name} draggable="false" decoding="async" use:shown />
+      {:else}
+        <img src={p.src} alt={caption || item.name} draggable="false" decoding="async" use:shown style:left={p.pic.x} style:top={p.pic.y} style:width={p.pic.w} style:height={p.pic.h} />
+      {/if}
     </button>
     {#if one}
       <button type="button" class="picmore" data-more data-testid="chat-shared-picture-more" aria-label={`More for ${item.name}`} title="More" onclick={(e) => pictureMenu(e, item)}>
@@ -188,16 +193,18 @@
   {#if parts.pictures.length || parts.cards.length || parts.morePictures || parts.moreFiles}
     <figure class="share" class:report style:--share-width="{width}px" data-testid="chat-share" aria-label={share.caption || 'Shared files'}>
       {#if parts.pictures.length === 1 && !report}
-        {@render picture(parts.pictures[0], { maxW: width, maxH: ONE_MAX_H, minW: 120, minH: 120 }, share.caption, true)}
+        <!-- One: whole, never cropped, its frame its own shape (no bars). -->
+        {@render picture(parts.pictures[0], placed(parts.pictures[0], { maxW: width, maxH: ONE_MAX_H, ratio: screenPixels.ratio }), share.caption, true)}
       {:else if parts.pictures.length || parts.morePictures}
         {@const n = parts.pictures.length + (parts.morePictures ? 1 : 0)}
-        {@const side = tile(n)}
-        <div class="grid" style:grid-template-columns="repeat({gridColumns(n)}, {side}px)" data-testid="chat-shared-grid">
+        {@const size = tileSize(tile(n))}
+        {@const frame = coverPlaced({ w: 0, h: 0 }, size.w, size.h, screenPixels.ratio, '').frame}
+        <div class="grid" style:grid-template-columns="repeat({gridColumns(n)}, {frame.w}px)" data-testid="chat-shared-grid">
           {#each parts.pictures as item, i (`${item.id}:${i}`)}
-            {@render picture(item, { maxW: side, maxH: side, minW: side, minH: side }, share.caption, false)}
+            {@render picture(item, { ...coverPlaced(item, size.w, size.h, screenPixels.ratio, chatImageUrl(item.id)), cover: true }, share.caption, false)}
           {/each}
           {#if parts.morePictures}
-            <span class="moretile" style:width="{side}px" style:height="{side}px" data-testid="chat-shared-more">{moreLabel(parts.morePictures)}</span>
+            <span class="moretile" style:width="{frame.w}px" style:height="{frame.h}px" data-testid="chat-shared-more">{moreLabel(parts.morePictures)}</span>
           {/if}
         </div>
       {/if}
@@ -241,6 +248,17 @@
   .sharedpic {
     max-width: 100%;
   }
+  /* A grid's tile: filled with its picture's middle; while it loads, the
+     quiet surface (never the frame's white or a bright block). */
+  .sharedpic.tile {
+    background: var(--yap-s2);
+  }
+  .sharedpic img.cover {
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+  }
   .picbtn {
     position: absolute;
     inset: 0;
@@ -277,8 +295,7 @@
     transition: opacity 120ms ease;
   }
   .sharedpic:hover .picmore,
-  .picmore:focus-visible,
-  .picmore[aria-expanded='true'] {
+  .picmore:focus-visible {
     opacity: 1;
   }
   .picmore:focus-visible {

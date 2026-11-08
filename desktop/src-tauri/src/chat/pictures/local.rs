@@ -17,7 +17,8 @@
 //!   workspaces (`agents/workspaces.rs`: any of them, the Code chat's own
 //!   too), a file an agent of this chat created or changed (`agents/store.rs`
 //!   `files`), or a path the person wrote or said in this conversation (the
-//!   file, or a folder holding it — never a drive's root). The path is judged
+//!   file itself, or a folder holding it written as a folder — never a
+//!   drive's root, nor a named file's neighbours: [`written_whole`]). The path is judged
 //!   as written (`.` and `..` worked out first) and again once the file
 //!   system has resolved it (a link or junction out of a workspace refused;
 //!   a link the person named themselves is theirs). Anything else is
@@ -36,7 +37,7 @@
 use std::io::Read;
 use std::path::{Component, Path, PathBuf};
 
-use crate::agents::workspaces::{is_absolute, norm, said_path};
+use crate::agents::workspaces::{is_absolute, norm};
 
 /// A picture file's most bytes.
 pub const MAX_BYTES: u64 = 25 * 1024 * 1024;
@@ -157,12 +158,44 @@ impl Places {
         self.said_by_person(path).then_some(Why::Said)
     }
 
-    /// The person wrote or said `path`, or a folder holding it (never a
-    /// drive's root). Pure.
+    /// **The person wrote or said `path`** — the file itself, whole — **or
+    /// a folder holding it, written as a folder** (its path whole, not the
+    /// start of a file's: never a drive's root). A file's path they wrote
+    /// allows that file only, never its neighbours (8 Nov 2026: naming
+    /// `…\Desktop\a.png` had allowed every file on the Desktop). Pure.
     fn said_by_person(&self, path: &str) -> bool {
         let texts: Vec<&str> = self.said.iter().map(String::as_str).collect();
-        Path::new(path).ancestors().filter(|a| !is_root(a)).any(|a| said_path(&texts, &a.to_string_lossy()))
+        Path::new(path).ancestors().filter(|a| !is_root(a)).any(|a| written_whole(&texts, &a.to_string_lossy()))
     }
+}
+
+/// **`path` written whole in one of `texts`** (slashes and case aside): not
+/// the start of a longer path — after it the text ends, or a space or a
+/// sentence's mark follows (a `.` only when no more letters do: "docs." but
+/// never "docs.old"), or one last separator does (`C:\Projects\garden\`, a
+/// folder) — and not the end of one. Pure.
+fn written_whole(texts: &[&str], path: &str) -> bool {
+    let want = crate::agents::workspaces::norm(path);
+    if want.is_empty() {
+        return false;
+    }
+    let ends = |c: Option<char>| c.is_none_or(|c| c.is_whitespace() || matches!(c, ',' | ';' | ':' | '!' | '?' | ')' | ']' | '>' | '"' | '\'' | '`' | '\u{201d}' | '\u{2019}'));
+    texts.iter().any(|t| {
+        let t = t.replace('/', "\\").to_lowercase();
+        t.match_indices(&want).any(|(at, _)| {
+            let before = t[..at].chars().next_back();
+            if before.is_some_and(|c| c.is_alphanumeric() || matches!(c, '\\' | '.' | '_' | '-')) {
+                return false;
+            }
+            let mut rest = t[at + want.len()..].chars();
+            match rest.next() {
+                // A sentence's full stop, or a folder's last separator: only
+                // when nothing of a path follows.
+                Some('.') | Some('\\') => ends(rest.next()),
+                c => ends(c),
+            }
+        })
+    })
 }
 
 /// A drive's root, a share's, or no path at all.
@@ -541,8 +574,26 @@ mod tests {
         // A path the person wrote (slashes and case aside), or its folder; a file: address too.
         let said = Places::new(Vec::new(), Vec::new(), &[format!("Can you show me {}?", s(&other).replace('\\', "/").to_uppercase())], None);
         assert_eq!(check(&s(&other), &said).unwrap().1, Why::Said);
+        // A file's path allows that file only, never its neighbours (8 Nov 2026).
+        std::fs::write(elsewhere.join("neighbour.png"), png(2, 2)).unwrap();
+        assert_eq!(check(&s(&elsewhere.join("neighbour.png")), &said).unwrap_err().error, NOT_ALLOWED);
+        // A folder's path allows the files under it, at any depth.
         let folder_said = Places::new(Vec::new(), Vec::new(), &[format!("the pictures in {} please", s(&elsewhere))], None);
         assert_eq!(check(&s(&other), &folder_said).unwrap().1, Why::Said);
+        assert_eq!(check(&s(&elsewhere.join("neighbour.png")), &folder_said).unwrap().1, Why::Said);
+        let deeper = elsewhere.join("2026").join("spring");
+        std::fs::create_dir_all(&deeper).unwrap();
+        std::fs::write(deeper.join("beds.png"), png(2, 2)).unwrap();
+        assert_eq!(check(&s(&deeper.join("beds.png")), &folder_said).unwrap().1, Why::Said);
+        // …written with its last separator, or at a sentence's end, too.
+        for written in [format!("everything in {}{}", s(&elsewhere), std::path::MAIN_SEPARATOR), format!("Look in {}.", s(&elsewhere))] {
+            let p = Places::new(Vec::new(), Vec::new(), std::slice::from_ref(&written), None);
+            assert_eq!(check(&s(&other), &p).unwrap().1, Why::Said, "{written}");
+        }
+        // Never the start of a longer path: a folder whose name only starts
+        // the same ("elsewhere.old", "elsewhere-2026"), nor a file in it.
+        let longer = Places::new(Vec::new(), Vec::new(), &[format!("see {}.old{}a.png and {}-2026", s(&elsewhere), std::path::MAIN_SEPARATOR, s(&elsewhere))], None);
+        assert_eq!(check(&s(&other), &longer).unwrap_err().error, NOT_ALLOWED);
         let url = reqwest::Url::from_file_path(&other).unwrap().to_string();
         let address_said = Places::new(Vec::new(), Vec::new(), &[format!("open {url}")], None);
         assert_eq!(check(&url, &address_said).unwrap().1, Why::Said);
