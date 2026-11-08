@@ -98,6 +98,20 @@ struct Tab {
     /// When its page loaded: an element with `data-sim-after="<ms>"` shows
     /// that long after (a page that loads as you go).
     loaded: std::time::Instant,
+    /// The page as it was when an action began (`backend::watch`), for what
+    /// it changed (`backend::changes`).
+    watched: Option<Watched>,
+}
+
+/// A tab as an action found it: its scroll, focus, what a hover showed, what
+/// a click hid.
+#[derive(Clone)]
+struct Watched {
+    url: String,
+    scroll: i64,
+    focus: Option<u32>,
+    shown: HashSet<String>,
+    hidden: HashSet<String>,
 }
 
 impl Tab {
@@ -118,6 +132,7 @@ impl Tab {
             back: Vec::new(),
             forward: Vec::new(),
             loaded: std::time::Instant::now(),
+            watched: None,
         }
     }
 }
@@ -281,8 +296,60 @@ impl Browser {
         tab.seen = false;
         tab.focus = None;
         tab.loaded = std::time::Instant::now();
+        tab.watched = None;
         self.log.visited.push(url.to_string());
         Ok(())
+    }
+
+    /// **Tab `key` watched** from now on for what an action changes (the
+    /// element script's `watch`).
+    pub fn watch(&mut self, key: &str) {
+        if let Ok(t) = self.tab_mut(key) {
+            t.watched = Some(Watched { url: t.url.clone(), scroll: t.scroll, focus: t.focus, shown: t.shown.clone(), hidden: t.hidden.clone() });
+        }
+    }
+
+    /// **What changed on tab `key` since [`Browser::watch`]**, as the
+    /// element script's `changes` says it: the scroll, the field the focus
+    /// moved into, what a hover showed (a popup opened) or Escape let go (it
+    /// closed), and the elements that changed (hidden, typed, ticked). Not
+    /// watched after it went elsewhere.
+    pub fn changes(&mut self, key: &str) -> rules::Changes {
+        let Ok(tab) = self.tab_mut(key) else { return rules::Changes::default() };
+        let Some(w) = tab.watched.take() else { return rules::Changes::default() };
+        let tab = self.tab(key).expect("open");
+        let doc = dom_query::Document::from(tab.html.as_str());
+        let page = Page::read(&doc, tab);
+        let overlay = |id: &str| {
+            let n = doc.select("[id]").nodes().iter().find(|n| n.id_attr().is_some_and(|x| *x == *id)).copied();
+            let kind = match n.and_then(|n| n.attr("role")).map(|r| r.to_ascii_lowercase()).as_deref() {
+                Some("dialog" | "alertdialog") => "dialog",
+                Some("menu") => "menu",
+                Some("listbox" | "tree") => "list",
+                _ => "popup",
+            };
+            rules::Overlay { kind: kind.into(), text: n.map(|n| Page::text_of(&n).chars().take(160).collect()).unwrap_or_default() }
+        };
+        let mut opened: Vec<&String> = tab.shown.difference(&w.shown).collect();
+        opened.sort();
+        let mut closed: Vec<&String> = w.shown.difference(&tab.shown).collect();
+        closed.sort();
+        let focus = (tab.focus != w.focus).then_some(tab.focus).flatten().and_then(|r| page.node(r).map(|n| page.describe(&n, r)));
+        // (What's typed or ticked is a field's own state, which a page's
+        // observer doesn't see either: only what a click hid or showed.)
+        let in_view = tab.hidden.symmetric_difference(&w.hidden).count() as u32;
+        let v = page.in_view();
+        rules::Changes {
+            watched: true,
+            y0: w.scroll,
+            scroll: Scroll { y: v.scroll.y, h: v.scroll.h, max: v.scroll.max },
+            url0: w.url,
+            url: tab.url.clone(),
+            focus,
+            opened: opened.into_iter().take(3).map(|id| overlay(id)).collect(),
+            closed: closed.into_iter().take(3).map(|id| rules::Overlay { kind: overlay(id).kind, text: String::new() }).collect(),
+            in_view,
+        }
     }
 
     /// **Tab `key` back or forward** in its history (nowhere to go: it stays).
@@ -370,10 +437,40 @@ impl Browser {
         crate::snip::images::encode_png(&rgba, w, h, true)
     }
 
-    /// A page's words and links (`read_open_page` without elements).
+    /// A page's words and links (`read_open_page` without elements), the
+    /// article's links first as the page text script ranks them.
     pub fn text(&self, key: &str) -> Result<PageText, String> {
         let s = self.read(key, 24_000, 200)?;
-        Ok(Self::text_of_snapshot(s))
+        let mut t = Self::text_of_snapshot(s);
+        self.rank_links(key, &mut t.links)?;
+        Ok(t)
+    }
+
+    /// **Links in the page text script's order**: the content's first, then
+    /// the navigation's, header's, footer's and asides', a language link
+    /// (`hreflang`, or another `lang` than the page's) last; else as found.
+    fn rank_links(&self, key: &str, links: &mut [super::view::PageLink]) -> Result<(), String> {
+        let tab = self.tab(key)?;
+        let doc = dom_query::Document::from(tab.html.as_str());
+        let page = Page::read(&doc, tab);
+        let lang = doc.select("html").attr("lang").map(|l| l.to_ascii_lowercase()).unwrap_or_default();
+        let lang = lang.split('-').next().unwrap_or("").to_string();
+        let mut rank: HashMap<String, u8> = HashMap::new();
+        for n in page.candidates.iter().filter(|n| n.is("a[href]")) {
+            let href = join(&tab.url, &n.attr("href").map(|h| h.to_string()).unwrap_or_default());
+            let own = n.attr("lang").map(|l| l.to_ascii_lowercase().split('-').next().unwrap_or("").to_string()).unwrap_or_default();
+            let r = if n.has_attr("hreflang") || (!own.is_empty() && !lang.is_empty() && own != lang) {
+                3
+            } else if n.ancestors_it(None).any(|a| a.is("nav, header, footer, aside, [role=navigation], [role=banner], [role=contentinfo], [role=complementary], [role=menu], [role=menubar], [role=tablist]")) {
+                2
+            } else {
+                0
+            };
+            let e = rank.entry(href).or_insert(r);
+            *e = (*e).min(r);
+        }
+        links.sort_by_key(|l| rank.get(&l.href).copied().unwrap_or(0));
+        Ok(())
     }
 
     /// **A long page's words** (`backend::text_long`): up to `max`
@@ -384,7 +481,9 @@ impl Browser {
         let tab = self.tab(key)?;
         let doc = dom_query::Document::from(tab.html.as_str());
         s.headings = Page::read(&doc, tab).headings_up_to(400);
-        Ok(Self::text_of_snapshot(s))
+        let mut t = Self::text_of_snapshot(s);
+        self.rank_links(key, &mut t.links)?;
+        Ok(t)
     }
 
     fn text_of_snapshot(s: Snapshot) -> PageText {
@@ -528,7 +627,9 @@ impl Browser {
         // (No read has numbered this page's elements yet: no ref is one.)
         let el = page.node(r).filter(|_| tab.seen).filter(|n| page.visible(n)).map(|n| page.describe(&n, r));
         let form = el.as_ref().filter(|e| e.form >= 0).and_then(|e| page.forms_info().into_iter().find(|f| f.form == e.form));
-        Ok(Described { el, form, password: page.password(), payment: page.payment(), title: title_of(&tab.html), headings: page.headings(), url: tab.url.clone() })
+        // The highest ref given: every candidate and block once a read numbered them.
+        let refs = if tab.seen { (page.candidates.len() + page.extra.len()) as u32 } else { 0 };
+        Ok(Described { el, form, password: page.password(), payment: page.payment(), title: title_of(&tab.html), headings: page.headings(), url: tab.url.clone(), refs })
     }
 
     /// Where tab `key` is now, as the element script answers it.
@@ -576,6 +677,22 @@ impl Browser {
         if op == "key" {
             return self.keys(key, a, r);
         }
+        if op == "where" {
+            // In view: its line within the view, unless it never comes into
+            // view (`data-sim-unseen`: inside a part that scrolls apart).
+            let seen = {
+                let tab = self.tab(key)?;
+                let doc = dom_query::Document::from(tab.html.as_str());
+                let page = Page::read(&doc, tab);
+                let Some(node) = page.node(r).filter(|n| tab.seen && page.visible(n)) else { return Ok(json!({ "r": "gone" })) };
+                let y = page.layout().into_iter().find(|(x, _)| *x == r).map(|(_, y)| y);
+                let s = page.in_view().scroll;
+                !node.has_attr("data-sim-unseen") && y.is_some_and(|y| (s.y..s.y + VIEW_H).contains(&y))
+            };
+            let mut out = self.scrolled(key)?;
+            out["seen"] = json!(seen);
+            return Ok(out);
+        }
         let d = self.describe(key, r)?;
         let Some(el) = d.el.clone() else { return Ok(json!({ "r": "gone" })) };
         if el.role != a["role"].as_str().unwrap_or("") || el.name != a["name"].as_str().unwrap_or("") {
@@ -601,13 +718,27 @@ impl Browser {
             let tab = self.tab(key)?;
             let doc = dom_query::Document::from(tab.html.as_str());
             let page = Page::read(&doc, tab);
-            let shows = page.node(r).and_then(|n| n.attr("data-sim-hover").map(|v| v.to_string()));
+            let node = page.node(r);
+            let shows = node.and_then(|n| n.attr("data-sim-hover").map(|v| v.to_string()));
+            // The pointer moves on: what an earlier hover showed closes, unless
+            // the pointer is still inside it (a menu's own item).
+            let keep: HashSet<String> = tab
+                .shown
+                .iter()
+                .filter(|id| node.is_some_and(|n| n.ancestors_it(None).any(|a| a.id_attr().is_some_and(|x| *x == ***id))))
+                .cloned()
+                .collect();
             drop(page);
             self.log.hovered.push(rules::name_of(&el));
+            let t = self.tab_mut(key)?;
+            t.shown = keep;
             if let Some(id) = shows {
-                self.tab_mut(key)?.shown.insert(id);
+                t.shown.insert(id);
             }
             return Ok(json!({ "r": "ok" }));
+        }
+        if op == "choose" {
+            return self.choose(key, a, r, &el);
         }
         if op == "check" {
             let on = a["on"].as_bool().unwrap_or(true);
@@ -678,12 +809,9 @@ impl Browser {
                 } else {
                     return Ok(json!({ "r": "not-a-field" }));
                 };
-                let words = format!("{} {} {} {}", el.name, el.label, el.field, el.id);
                 drop(page);
                 { let t = self.tab_mut(key)?; t.values.insert(r, value.clone()); t.focus = Some(r); }
-                let mut seen: Vec<String> = Vec::new();
-                let words: Vec<&str> = words.split_whitespace().filter(|w| !seen.contains(&w.to_lowercase()) && { seen.push(w.to_lowercase()); true }).collect();
-                self.log.typed.push((words.join(" "), value.clone()));
+                self.log.typed.push((field_words(&el), value.clone()));
                 if submit {
                     let tab = self.tab(key)?;
                     let doc = dom_query::Document::from(tab.html.as_str());
@@ -700,6 +828,58 @@ impl Browser {
             }
             other => Err(format!("Unknown action {other}")),
         }
+    }
+
+    /// **An option chosen** (the element script's `choose`): a select's by
+    /// its words (or value), a radio button of the group by its label, a
+    /// combobox's or listbox's `[role=option]` — the exact words first, else
+    /// the first holding them; logged as typing into the field is.
+    fn choose(&mut self, key: &str, a: &Value, r: u32, el: &Element) -> Result<Value, String> {
+        let want = a["text"].as_str().unwrap_or("").split_whitespace().collect::<Vec<_>>().join(" ").to_lowercase();
+        let pick = |list: &[(u32, String, String)]| -> Option<(u32, String)> {
+            let exact = list.iter().find(|(_, t, v)| t.to_lowercase() == want || v.to_lowercase() == want);
+            exact.or_else(|| list.iter().find(|(_, t, _)| t.to_lowercase().contains(&want))).map(|(r, t, _)| (*r, t.clone()))
+        };
+        let (radio, picked) = {
+            let tab = self.tab(key)?;
+            let doc = dom_query::Document::from(tab.html.as_str());
+            let page = Page::read(&doc, tab);
+            let Some(node) = page.node(r) else { return Ok(json!({ "r": "gone" })) };
+            let tag = node.node_name().map(|n| n.to_ascii_lowercase()).unwrap_or_default();
+            if tag == "select" {
+                let list: Vec<(u32, String, String)> = page.options(&node).into_iter().map(|(t, v)| (r, t, v)).collect();
+                (false, pick(&list))
+            } else if el.kind == "radio" {
+                let list: Vec<(u32, String, String)> = page.radio_group(&node).into_iter().map(|(x, l)| (x, l.clone(), l)).collect();
+                let list = if list.is_empty() { vec![(r, rules::name_of(el), rules::name_of(el))] } else { list };
+                (true, pick(&list))
+            } else {
+                let list: Vec<(u32, String, String)> = page.aria_options(&node).into_iter().map(|(t, _)| (r, t.clone(), t)).collect();
+                (false, pick(&list))
+            }
+        };
+        let Some((at, words)) = picked else { return Ok(json!({ "r": "no-option" })) };
+        if radio {
+            let group: Vec<u32> = {
+                let tab = self.tab(key)?;
+                let doc = dom_query::Document::from(tab.html.as_str());
+                let page = Page::read(&doc, tab);
+                page.node(r).map(|n| page.radio_group(&n).into_iter().map(|(x, _)| x).collect()).unwrap_or_default()
+            };
+            let t = self.tab_mut(key)?;
+            for x in group {
+                t.checked.insert(x, x == at);
+            }
+            t.checked.insert(at, true);
+            t.focus = Some(at);
+            self.log.clicked.push(words.clone());
+            return Ok(json!({ "r": "ok", "value": words, "checked": true }));
+        }
+        let t = self.tab_mut(key)?;
+        t.values.insert(r, words.clone());
+        t.focus = Some(r);
+        self.log.typed.push((field_words(el), words.clone()));
+        Ok(json!({ "r": "ok", "value": words }))
     }
 
     /// **Keys** pressed in turn (the element script's `key`): in element
@@ -756,6 +936,10 @@ impl Browser {
                 ("Enter" | "Space", Some(e)) if matches!(e.role.as_str(), "link" | "button" | "checkbox" | "radio" | "switch") => {
                     self.act(key, "click", &json!({ "ref": e.r, "role": e.role, "name": e.name }))?;
                 }
+                // Escape: what a hover showed closes (the pointer let go).
+                ("Escape", _) => {
+                    self.tab_mut(key)?.shown.clear();
+                }
                 ("ArrowDown" | "ArrowUp", Some(e)) if !e.options.is_empty() => {
                     let i = e.options.iter().position(|o| *o == e.value).unwrap_or(0);
                     let j = if k == "ArrowDown" { (i + 1).min(e.options.len() - 1) } else { i.saturating_sub(1) };
@@ -792,6 +976,15 @@ pub fn payment_frame(src: &str) -> bool {
     ["stripe.com", "adyen.com", "braintreegateway.com", "paypal.com", "checkout.com", "mollie.com", "squareup.com", "klarna.com", "worldpay.com"]
         .iter()
         .any(|p| host == *p || host.ends_with(&format!(".{p}")))
+}
+
+/// A field's words for the log (its name, label, `name` and id, each word
+/// once). Pure.
+fn field_words(el: &Element) -> String {
+    let words = format!("{} {} {} {}", el.name, el.label, el.field, el.id);
+    let mut seen: Vec<String> = Vec::new();
+    let words: Vec<&str> = words.split_whitespace().filter(|w| !seen.contains(&w.to_lowercase()) && { seen.push(w.to_lowercase()); true }).collect();
+    words.join(" ")
 }
 
 /// `href` made absolute against `base`. Pure.
@@ -1100,7 +1293,62 @@ impl<'a> Page<'a> {
             let default = if tag == "textarea" || e.editable { Self::text_of(node) } else { attr("value") };
             e.value = self.tab.values.get(&r).cloned().unwrap_or(default).chars().take(200).collect();
         }
+        // A combobox or listbox that isn't a select: its `[role=option]`s
+        // (in it or the list it controls), the chosen one its value.
+        if tag != "select" && matches!(role.as_str(), "combobox" | "listbox") {
+            let options = self.aria_options(node);
+            e.options = options.iter().take(20).map(|(t, _)| t.clone()).collect();
+            if tag != "input" && tag != "textarea" && !e.editable {
+                let chosen = options.iter().find(|(_, selected)| *selected).map(|(t, _)| t.clone());
+                e.value = self.tab.values.get(&r).cloned().or(chosen).unwrap_or_else(|| Self::text_of(node).chars().take(200).collect());
+            }
+        }
+        // A radio button: its group's labels.
+        if kind == "radio" {
+            let group = self.radio_group(node);
+            if group.len() > 1 {
+                e.options = group.iter().take(20).map(|(_, l)| l.clone()).collect();
+            }
+        }
         e
+    }
+
+    /// A combobox's or listbox's options: each `[role=option]` in it or the
+    /// element it controls / owns, its words and whether it's selected.
+    fn aria_options(&self, node: &dom_query::NodeRef) -> Vec<(String, bool)> {
+        let ids: Vec<String> = [node.attr("aria-controls"), node.attr("aria-owns")].into_iter().flatten().flat_map(|v| v.split_whitespace().map(str::to_string).collect::<Vec<_>>()).collect();
+        let mut roots: Vec<dom_query::NodeRef> = vec![*node];
+        for id in &ids {
+            if let Some(n) = self.doc.select("[id]").nodes().iter().find(|n| n.id_attr().is_some_and(|x| *x == **id)) {
+                roots.push(*n);
+            }
+        }
+        let mut out: Vec<(String, bool)> = Vec::new();
+        for root in roots {
+            for o in dom_query::Selection::from(root).select("[role=option]").nodes() {
+                let t = Self::text_of(o);
+                if !t.is_empty() && !out.iter().any(|(x, _)| *x == t) {
+                    out.push((t, o.attr("aria-selected").is_some_and(|v| v.eq_ignore_ascii_case("true"))));
+                }
+            }
+        }
+        out
+    }
+
+    /// A radio button's group: the radios with its `name` in its form (or the
+    /// page), each its ref and label (else its value).
+    fn radio_group(&self, node: &dom_query::NodeRef) -> Vec<(u32, String)> {
+        let Some(name) = node.attr("name").map(|n| n.to_string()).filter(|n| !n.is_empty()) else { return Vec::new() };
+        let form = self.form_of(node);
+        self.candidates
+            .iter()
+            .enumerate()
+            .filter(|(_, c)| c.attr("type").is_some_and(|t| t.eq_ignore_ascii_case("radio")) && c.attr("name").is_some_and(|n| *n == *name) && self.form_of(c) == form)
+            .map(|(i, c)| {
+                let label = self.label_of(c);
+                (i as u32 + 1, if label.is_empty() { c.attr("value").map(|v| v.to_string()).unwrap_or_default() } else { label })
+            })
+            .collect()
     }
 
     /// The page marks `node` a search box: `enterkeyhint` / `inputmode`

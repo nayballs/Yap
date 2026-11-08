@@ -420,7 +420,8 @@ pub fn enlarge(rgba: &[u8], w: u32, h: u32, k: f64) -> (Vec<u8>, u32, u32) {
 /// Where a page is, for a result: its scroll, the most it scrolls, at its
 /// top or end. Pure.
 fn place(v: &View) -> Value {
-    json!({ "y": v.y, "h": v.h, "max": v.max, "at_top": v.y <= 0, "at_end": v.y >= v.max })
+    // (A pixel short of the end, from rounding a fractional scroll, is the end.)
+    json!({ "y": v.y, "h": v.h, "max": v.max, "at_top": v.y <= 0, "at_end": v.y + 1 >= v.max })
 }
 
 /// **`browser_scroll`**: down or up a screen (or `amount` screens), to the
@@ -439,11 +440,16 @@ pub async fn scroll(turn: &mut crate::web::Turn, args: &Value) -> Value {
     if let Some(r) = on_search_page(&t, "scroll") {
         return r;
     }
-    let done = match backend::act(&t.key, "scroll", &json!({ "to": to, "amount": amount })).await {
+    if let Err(e) = backend::act(&t.key, "scroll", &json!({ "to": to, "amount": amount })).await {
+        return failed(e.clone(), format!("Couldn't scroll: {}", crate::web::short(&e)));
+    }
+    // Where it is once it has stopped (8 Nov 2026: a smooth-scrolling page
+    // was told from where it began — "top" said y 28244, "bottom" at_end
+    // false).
+    let v = match backend::still(&t.key).await {
         Ok(v) => v,
         Err(e) => return failed(e.clone(), format!("Couldn't scroll: {}", crate::web::short(&e))),
     };
-    let v: InView = serde_json::from_value(done.clone()).unwrap_or_default();
     // The headings in view are the page's words.
     turn.mark_seen();
     let site = crate::web::site_of(&t.url);
@@ -508,7 +514,16 @@ pub async fn scroll_to(turn: &mut crate::web::Turn, args: &Value) -> Value {
     if done["r"] != "ok" {
         return failed("That element isn't on the page any more: read it again.".into(), format!("Couldn't scroll {site}: the page changed"));
     }
-    let v: InView = serde_json::from_value(done).unwrap_or_default();
+    // Once it has stopped, is it in view? Said only when it is (8 Nov 2026:
+    // a ref's "Scrolled to…" came back at y 0, the heading nowhere in view).
+    let v = match backend::still(&t.key).await {
+        Ok(v) => v,
+        Err(e) => return failed(e.clone(), format!("Couldn't scroll {site}: {}", crate::web::short(&e))),
+    };
+    let seen = match backend::act(&t.key, "where", &json!({ "ref": target })).await {
+        Ok(w) if w["r"] == "ok" => w["seen"].as_bool().unwrap_or(true),
+        _ => false,
+    };
     let shown = found.map(|i| {
         let b = &blocks[i];
         let before = i.checked_sub(1).map(|j| clip(&blocks[j].text, 120));
@@ -520,7 +535,15 @@ pub async fn scroll_to(turn: &mut crate::web::Turn, args: &Value) -> Value {
         (None, Some((b, _))) => format!("‘{}’", clip(&b.text, 60)),
         (None, None) => format!("element [{target}]"),
     };
-    tracing::info!(tab = t.tab, y = v.scroll.y, "Chat: a page beside the chat scrolled to a part of it");
+    tracing::info!(tab = t.tab, y = v.scroll.y, seen, "Chat: a page beside the chat scrolled to a part of it");
+    if !seen {
+        let mut out = failed(
+            format!("Yap scrolled toward {what}, but it isn't in view: it may be hidden (in a closed section, a menu or one of the page's own tabs) or in a part of the page that scrolls on its own. browser_screenshot shows what is in view."),
+            format!("Couldn't bring {what} into view on {site}"),
+        );
+        out["data"] = json!({ "tab": t.tab, "ref": target, "scroll": place(&v.scroll), "in_view": v.in_view, "seen": false });
+        return out;
+    }
     json!({
         "success": true,
         "data": {
@@ -593,7 +616,8 @@ async fn take(turn: &mut crate::web::Turn, t: &crate::chat::pages::view::OpenTab
     if turn.pages.shots >= MAX_SHOTS {
         return Err(failed(format!("You've taken {MAX_SHOTS} shots this turn: answer the user now."), format!("Didn't {doing} {shown}: {MAX_SHOTS} shots a turn")));
     }
-    let view = backend::view_of(&t.key).await.map_err(|e| failed(e.clone(), format!("Couldn't {doing} {shown}: {}", crate::web::short(&e))))?;
+    // Once it has stopped scrolling: never a frame mid-scroll.
+    let view = backend::still(&t.key).await.map_err(|e| failed(e.clone(), format!("Couldn't {doing} {shown}: {}", crate::web::short(&e))))?;
     let shot = if finer > 1.0 { backend::shot_at(&t.key, finer).await } else { backend::shot(&t.key).await.map(|png| (png, 1.0)) };
     let (png, scale) = shot.map_err(|e| {
         tracing::info!("Chat: a page's shot wasn't taken");

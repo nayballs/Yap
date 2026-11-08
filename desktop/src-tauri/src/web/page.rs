@@ -372,6 +372,10 @@ pub struct PageImage {
     pub heading: String,
     pub w: Option<u32>,
     pub h: Option<u32>,
+    /// **The page's lead picture** (its `og:image`, its infobox's or first
+    /// figure's, else its largest): listed first (`pictures::listed`).
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub lead: bool,
 }
 
 /// The most pictures kept from one page.
@@ -477,6 +481,9 @@ fn caption_of(img: &dom_query::NodeRef) -> String {
             ".gallerytext"
         } else if a.has_class("wp-caption") {
             ".wp-caption-text"
+        } else if a.has_class("infobox-image") || a.has_class("infobox-full-data") {
+            // A wiki's infobox: the caption under its picture.
+            ".infobox-caption"
         } else {
             continue;
         };
@@ -494,11 +501,25 @@ fn caption_of(img: &dom_query::NodeRef) -> String {
 /// absolute against `base` (or the page's `<base href>`), with its alt text,
 /// its figure's caption, the nearest heading above it and its size; page
 /// furniture left out ([`is_junk`]), and the site's navigation, header and
-/// footer. Each address once, public ones only, at most 60. Pure.
+/// footer. Each address once, public ones only, at most 60. **Its lead
+/// picture first** ([`lead_of`], marked `lead`): 8 Nov 2026, Yap Lab — a
+/// wiki's infobox photo, with no alt text and its caption in an infobox
+/// cell, was ranked below five captioned ones by the question's words and
+/// never listed. Pure.
 pub fn page_images(html: &str, base: &str) -> Vec<PageImage> {
     let Ok(page_url) = Url::parse(base) else { return Vec::new() };
     let doc = dom_query::Document::from(html);
     let base_url = doc.select("base[href]").attr("href").and_then(|h| page_url.join(h.trim()).ok()).unwrap_or(page_url);
+    // The picture the page names as its own (`og:image`), before the head goes.
+    let og = |k: &str| doc.select(&format!("meta[property=\"{k}\"], meta[name=\"{k}\"]")).attr("content").map(|v| v.trim().to_string()).filter(|v| !v.is_empty());
+    let declared = og("og:image").and_then(|u| base_url.join(&u).ok()).map(|u| PageImage {
+        url: u.to_string(),
+        alt: tidy(og("og:image:alt").as_deref().unwrap_or(""), 200),
+        w: size_attr(og("og:image:width").as_deref()),
+        h: size_attr(og("og:image:height").as_deref()),
+        lead: true,
+        ..Default::default()
+    });
     doc.select("script, style, noscript, template, nav, footer, form, [role=navigation], [role=contentinfo], [aria-hidden=true]")
         .remove();
     // A site's header (its logo, its menu); an article's own stays.
@@ -511,6 +532,8 @@ pub fn page_images(html: &str, base: &str) -> Vec<PageImage> {
         }
     }
     let mut out: Vec<PageImage> = Vec::new();
+    // Each one's place: in an infobox (2), a figure (1), else (0).
+    let mut places: Vec<u8> = Vec::new();
     let mut seen: Vec<String> = Vec::new();
     let mut heading = String::new();
     for node in doc.root().descendants_it() {
@@ -558,9 +581,84 @@ pub fn page_images(html: &str, base: &str) -> Vec<PageImage> {
             continue;
         }
         seen.push(key);
-        out.push(PageImage { caption: caption_of(&node), heading: heading.clone(), url, alt, w, h });
+        let classes = |a: &dom_query::NodeRef| a.attr("class").map(|c| c.to_ascii_lowercase()).unwrap_or_default();
+        let place = if node.ancestors_it(Some(12)).any(|a| classes(&a).split_whitespace().any(|c| c.starts_with("infobox"))) {
+            2
+        } else if node.ancestors_it(Some(6)).any(|a| a.node_name().is_some_and(|n| n.eq_ignore_ascii_case("figure")) || a.has_class("thumb") || a.has_class("thumbinner")) {
+            1
+        } else {
+            0
+        };
+        places.push(place);
+        out.push(PageImage { caption: caption_of(&node), heading: heading.clone(), url, alt, w, h, lead: false });
+    }
+    match lead_of(&out, &places, declared.as_ref()) {
+        Some(Lead::Found(i)) => {
+            let mut lead = out.remove(i);
+            lead.lead = true;
+            out.insert(0, lead);
+        }
+        Some(Lead::Declared) => {
+            if let Some(d) = declared {
+                out.insert(0, d);
+                out.truncate(PAGE_IMAGES);
+            }
+        }
+        None => {}
     }
     out
+}
+
+/// Where a page's lead picture is ([`lead_of`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Lead {
+    /// One of its pictures (an index into them).
+    Found(usize),
+    /// The one it declares (`og:image`), not among them.
+    Declared,
+}
+
+/// A picture's file as pages of one site name it at any size: its last
+/// part, lower-cased, without a size before it ("330px-Ben.jpg" → "ben.jpg").
+/// Pure.
+pub fn picture_file(url: &str) -> String {
+    let path = Url::parse(url).map(|u| u.path().to_string()).unwrap_or_default();
+    let last = path.rsplit('/').next().unwrap_or("").to_ascii_lowercase();
+    match last.split_once("px-") {
+        Some((n, rest)) if !n.is_empty() && n.chars().all(|c| c.is_ascii_digit()) => rest.to_string(),
+        _ => last,
+    }
+}
+
+/// **The page's lead picture**: the one it declares as its own (`og:image`,
+/// matched by its file at any size), else its infobox's first, else its
+/// first figure's, else the declared one (not on the page itself, unless
+/// it's furniture: a site's logo or share card), else its largest picture
+/// with a known size of at least 200 × 150. `places`: each picture's (2 in
+/// an infobox, 1 in a figure). Pure.
+pub fn lead_of(images: &[PageImage], places: &[u8], declared: Option<&PageImage>) -> Option<Lead> {
+    let declared = declared.filter(|d| check_url(&d.url).is_ok() && !is_junk(&d.url, &d.alt, "", d.w, d.h));
+    if let Some(d) = declared {
+        let file = picture_file(&d.url);
+        if let Some(i) = images.iter().position(|p| !file.is_empty() && picture_file(&p.url) == file) {
+            return Some(Lead::Found(i));
+        }
+    }
+    for want in [2u8, 1] {
+        if let Some(i) = places.iter().position(|p| *p == want) {
+            return Some(Lead::Found(i));
+        }
+    }
+    if declared.is_some() {
+        return Some(Lead::Declared);
+    }
+    images
+        .iter()
+        .enumerate()
+        .filter_map(|(i, p)| Some((i, u64::from(p.w?) * u64::from(p.h?))))
+        .filter(|(_, area)| *area >= 200 * 150)
+        .max_by(|a, b| a.1.cmp(&b.1).then(b.0.cmp(&a.0)))
+        .map(|(i, _)| Lead::Found(i))
 }
 
 #[cfg(test)]
@@ -710,6 +808,50 @@ mod tests {
         for no in ["site-logo", "menu-banner", "fire.png", "diagram.svg", "tracker", "avatars", "192.168", "footer-art"] {
             assert!(!urls.iter().any(|u| u.contains(no)), "{no}: {urls:?}");
         }
+    }
+
+    /// A made-up wiki article as real ones are made (8 Nov 2026, Yap Lab: a
+    /// wiki's infobox photo never made `find_pictures`' five): its photo in an
+    /// infobox, lazy-loaded, no alt text, a `2x` srcset, its caption in the
+    /// infobox's cell; the page's own `og:image` of that photo at another
+    /// size; captioned figures and a lazy picture further down.
+    const INFOBOX_PAGE: &str = r#"<!doctype html><html><head><title>Mount Ember - Example Wiki</title>
+      <meta property="og:image" content="https://img.example.org/thumb/a/ab/Mount_Ember.jpg/1280px-Mount_Ember.jpg"></head><body><main>
+      <header><h1>Mount Ember</h1></header>
+      <table class="infobox ib-mountain"><tr><th>Mount Ember</th></tr><tr><td class="infobox-image"><a href="/wiki/File:Mount_Ember.jpg"><img src="//img.example.org/thumb/a/ab/Mount_Ember.jpg/330px-Mount_Ember.jpg" srcset="//img.example.org/thumb/a/ab/Mount_Ember.jpg/960px-Mount_Ember.jpg 2x" loading="lazy" decoding="async" width="288" height="216"></a><div class="infobox-caption">Mount Ember from the harbour at dawn</div></td></tr></table>
+      <h2>Climbing</h2>
+      <figure><img src="https://img.example.org/path.jpg" width="400" height="300" alt="The tourist path up Mount Ember"><figcaption>The tourist path up Mount Ember, climbed by thousands a year</figcaption></figure>
+      <h2>Weather</h2>
+      <img src="data:image/gif;base64,R0lGOD" data-src="https://img.example.org/summit-weather.jpg" width="640" height="480" alt="The summit weather station on Mount Ember">
+    </main></body></html>"#;
+
+    #[test]
+    fn a_pages_lead_picture_comes_first_whatever_its_words() {
+        let found = page_images(INFOBOX_PAGE, "https://wiki.example.org/wiki/Mount_Ember");
+        let urls: Vec<&str> = found.iter().map(|p| p.url.as_str()).collect();
+        assert_eq!(urls, ["https://img.example.org/thumb/a/ab/Mount_Ember.jpg/960px-Mount_Ember.jpg", "https://img.example.org/path.jpg", "https://img.example.org/summit-weather.jpg"], "{found:#?}");
+        let lead = &found[0];
+        assert!(lead.lead && !found[1].lead && !found[2].lead);
+        // Its caption from the infobox's cell; its size the page's.
+        assert_eq!((lead.caption.as_str(), lead.alt.as_str(), lead.w, lead.h), ("Mount Ember from the harbour at dawn", "", Some(288), Some(216)));
+        // og:image matched by its file at any size; else the infobox's, the first figure's.
+        assert_eq!(picture_file("https://img.example.org/thumb/a/ab/Mount_Ember.jpg/1280px-Mount_Ember.jpg"), "mount_ember.jpg");
+        assert_eq!(picture_file("https://img.example.org/2026/px-chart.png"), "px-chart.png");
+        let img = |url: &str, w: u32, h: u32| PageImage { url: url.into(), w: Some(w), h: Some(h), ..Default::default() };
+        let pics = [img("https://a.example/one.jpg", 300, 200), img("https://a.example/two.jpg", 1200, 800), img("https://a.example/three.jpg", 500, 400)];
+        assert_eq!(lead_of(&pics, &[0, 1, 2], None), Some(Lead::Found(2)), "the infobox's");
+        assert_eq!(lead_of(&pics, &[0, 1, 0], None), Some(Lead::Found(1)), "the first figure's");
+        assert_eq!(lead_of(&pics, &[0, 0, 0], None), Some(Lead::Found(1)), "else the largest");
+        let declared = PageImage { url: "https://cdn.example/1280px-three.jpg".into(), ..Default::default() };
+        assert_eq!(lead_of(&pics, &[0, 1, 0], Some(&declared)), Some(Lead::Found(2)), "og:image first, by its file");
+        let elsewhere = PageImage { url: "https://cdn.example/cover.jpg".into(), ..Default::default() };
+        assert_eq!(lead_of(&pics, &[0, 0, 0], Some(&elsewhere)), Some(Lead::Declared), "not on the page: itself");
+        let logo = PageImage { url: "https://cdn.example/site-logo.png".into(), ..Default::default() };
+        assert_eq!(lead_of(&pics, &[0, 0, 0], Some(&logo)), Some(Lead::Found(1)), "never a site's logo");
+        assert_eq!(lead_of(&[img("https://a.example/small.jpg", 150, 120)], &[0], None), None, "nothing big enough");
+        // A page with only its declared picture: that one, listed.
+        let only = page_images(r#"<html><head><meta property="og:image" content="/media/cover.jpg"><meta property="og:image:width" content="1200"><meta property="og:image:height" content="630"></head><body><main><p>Words.</p></main></body></html>"#, "https://news.example/story");
+        assert_eq!((only.len(), only[0].url.as_str(), only[0].w, only[0].lead), (1, "https://news.example/media/cover.jpg", Some(1200), true));
     }
 
     #[test]

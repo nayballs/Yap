@@ -523,8 +523,13 @@ pub async fn run_script(key: &str, script: String) -> Result<String, String> {
 
 /// What a page says, for the model (`read_open_page`): its title, its
 /// headings, its main text (the `main` / `article` element's, else the
-/// whole page's), whitespace folded. Read only.
-pub const PAGE_TEXT_SCRIPT: &str = r#"(function(){var t=function(s){return (s||'').replace(/\s+/g,' ').trim();};var m=document.querySelector('main,article,[role=main]')||document.body;if(!m)return {title:document.title,headings:[],text:'',links:[]};var hs=[].slice.call(m.querySelectorAll('h1,h2,h3')).slice(0,40).map(function(h){return t(h.innerText);}).filter(Boolean);var seen={};var ls=[].slice.call(m.querySelectorAll('a[href]')).map(function(a){return {text:t(a.innerText||a.getAttribute('aria-label')||a.title).slice(0,100),href:a.href};}).filter(function(l){if(!/^https?:/i.test(l.href)||!l.text||seen[l.href])return false;seen[l.href]=1;return true;}).slice(0,120);return {title:t(document.title),headings:hs,text:t(m.innerText).slice(0,24000),links:ls};})()"#;
+/// whole page's), whitespace folded, and its links — **the article's own
+/// first** (8 Nov 2026, Yap Lab: a wiki's first 40 links were all its
+/// language menu's): links in view in the content, then hidden ones (a
+/// closed menu), then the page's navigation, header, footer and asides, a
+/// language link (`hreflang`, or another `lang` than the page's) last; each
+/// address once, at its best place. Read only.
+pub const PAGE_TEXT_SCRIPT: &str = r#"(function(){var t=function(s){return (s||'').replace(/\s+/g,' ').trim();};var m=document.querySelector('main,article,[role=main]')||document.body;if(!m)return {title:document.title,headings:[],text:'',links:[]};var hs=[].slice.call(m.querySelectorAll('h1,h2,h3')).slice(0,40).map(function(h){return t(h.innerText);}).filter(Boolean);var seen={};var dl=(document.documentElement.lang||'').toLowerCase().split('-')[0];var nav='nav,header,footer,aside,[role=navigation],[role=banner],[role=contentinfo],[role=complementary],[role=menu],[role=menubar],[role=tablist]';var rk=function(a){var lg=(a.getAttribute('lang')||'').toLowerCase().split('-')[0];if(a.getAttribute('hreflang')||(lg&&dl&&lg!==dl))return 3;if(a.closest(nav))return 2;if(!a.getClientRects().length)return 1;return 0;};var ls=[].slice.call(m.querySelectorAll('a[href]')).map(function(a,i){return {text:t(a.innerText||a.getAttribute('aria-label')||a.title).slice(0,100),href:a.href,k:rk(a),i:i};}).sort(function(x,y){return x.k-y.k||x.i-y.i;}).filter(function(l){if(!/^https?:/i.test(l.href)||!l.text||seen[l.href])return false;seen[l.href]=1;return true;}).map(function(l){return {text:l.text,href:l.href};}).slice(0,120);return {title:t(document.title),headings:hs,text:t(m.innerText).slice(0,24000),links:ls};})()"#;
 
 /// A page's words, read by [`PAGE_TEXT_SCRIPT`].
 #[derive(Debug, Clone, Default, Deserialize)]

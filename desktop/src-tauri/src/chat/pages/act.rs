@@ -191,11 +191,48 @@ async fn element(t: &OpenTab, r: Option<u32>, doing: &str) -> Result<(rules::Des
     let d = backend::describe(&t.key, r).await.map_err(|e| failed(e.clone(), format!("Couldn't {doing}: {}", crate::web::short(&e))))?;
     match d.el.clone() {
         Some(e) => Ok((d, e)),
-        None => Err(failed(
+        None => Err(no_element(r, d.refs, doing)),
+    }
+}
+
+/// **No element `r`**, said as it is (`refs`: the highest ref the page has
+/// given): a page not read since it loaded (refs from another page don't
+/// hold), a ref past any it gave (8 Nov 2026: `[99999]` was told "it
+/// changed, or it went"), or one it gave that's gone. Pure.
+pub fn no_element(r: u32, refs: u32, doing: &str) -> Value {
+    if refs == 0 {
+        failed(
+            format!("There's no element [{r}] on this page: it hasn't been read since it loaded (refs from another page don't hold). Read it: browser_read with mode \"elements\", or browser_find."),
+            format!("Couldn't {doing}: no element [{r}] on this page"),
+        )
+    } else if r > refs {
+        failed(
+            format!("There's no element [{r}]: refs on this page go up to {refs}. Use one from browser_read with mode \"elements\" or browser_find."),
+            format!("Couldn't {doing}: no element [{r}] on this page"),
+        )
+    } else {
+        failed(
             format!("There's no element [{r}] on the page now (it changed, or it went). Read it again: browser_read with mode \"elements\"."),
             format!("Couldn't {doing}: the page changed"),
-        )),
+        )
     }
+}
+
+/// **The tab an action works in, brought to the front** first: the person
+/// sees what Yap acts on (8 Nov 2026: a tab named by its number was acted on
+/// out of sight, behind the one in front). The Chat view shows its tab
+/// (`Event::SwitchTab`).
+pub(super) async fn to_front(t: &mut OpenTab, live: Option<crate::chat::stream::Live<'_>>) -> Result<(), Value> {
+    if t.front {
+        return Ok(());
+    }
+    backend::front(&t.key).await.map_err(|e| failed(e.clone(), format!("Couldn't show tab {}: {}", t.tab, crate::web::short(&e))))?;
+    if let Some(l) = live {
+        l.sink.send(crate::chat::stream::Event::SwitchTab { key: t.key.clone() });
+    }
+    t.front = true;
+    tracing::info!(tab = t.tab, "Chat: a tab beside the chat brought to the front to act on it");
+    Ok(())
 }
 
 /// The page tells the person Yap is acting on it (its tab, until the turn ends).
@@ -209,12 +246,25 @@ pub(super) fn acting(live: Option<crate::chat::stream::Live<'_>>, key: &str) {
 /// its address and words before), and its first words when it went
 /// somewhere new. Web content: the turn has seen the web.
 pub(super) async fn after(turn: &mut crate::web::Turn, t: &OpenTab, before: &(String, String)) -> Value {
+    after_on(turn, t, before, 0).await
+}
+
+/// [`after`] for an action on element `aimed` (its ref; 0: none): the focus
+/// it took itself (a field clicked or typed in) isn't news.
+pub(super) async fn after_on(turn: &mut crate::web::Turn, t: &OpenTab, before: &(String, String), aimed: u32) -> Value {
     let tabs = backend::tabs().await;
     let now = tabs.iter().find(|x| x.key == t.key).cloned().unwrap_or_else(|| t.clone());
     let search = super::search_page(&now.url);
     let text = if search { String::new() } else { backend::text(&t.key).await.map(|p| p.text).unwrap_or_default() };
-    let changed = rules::what_changed(&before.0, &before.1, &now.url, &text);
+    let mut ch = backend::changes(&t.key).await;
+    if aimed > 0 && ch.focus.as_ref().is_some_and(|f| f.r == aimed) {
+        ch.focus = None;
+    }
+    let changed = rules::what_changed(&before.0, &before.1, &now.url, &text, &ch);
     let went = crate::web::normal_url(&before.0) != crate::web::normal_url(&now.url);
+    if went && turn.pages.typed.as_ref().is_some_and(|ty| ty.key == t.key) {
+        turn.pages.typed = None;
+    }
     turn.mark_seen();
     let mut data = json!({ "tab": now.tab, "title": rules::clip(&now.title, 120), "url": now.url, "changed": changed });
     if went && !search {
@@ -224,9 +274,11 @@ pub(super) async fn after(turn: &mut crate::web::Turn, t: &OpenTab, before: &(St
 }
 
 /// The page's address and words before an action (for [`after`], and the
-/// words a typed text may come from).
+/// words a typed text may come from) — and the page watched from now on
+/// for what the action changes (`backend::watch`).
 pub(super) async fn before(t: &OpenTab) -> (String, String) {
     let text = if super::search_page(&t.url) { String::new() } else { backend::text(&t.key).await.map(|p| p.text).unwrap_or_default() };
+    backend::watch(&t.key).await;
     (t.url.clone(), text)
 }
 
@@ -286,12 +338,15 @@ fn off_limits(d: &rules::Described, el: &rules::Element, label: &str, doing: &st
 /// person first when it would buy, pay, book, confirm, order, subscribe,
 /// send, delete or sign in; never into a password, card or sign-in field.
 async fn click(turn: &mut crate::web::Turn, args: &Value, live: Option<crate::chat::stream::Live<'_>>) -> Value {
-    let t = match tab_for(turn, args, "click").await {
+    let mut t = match tab_for(turn, args, "click").await {
         Ok(t) => t,
         Err(e) => return e,
     };
     if let Some(r) = on_search_page(&t, "click") {
         return r;
+    }
+    if let Err(e) = to_front(&mut t, live).await {
+        return e;
     }
     // Yap acts on the page from here: its dialogs dismissed (one waiting
     // would stall Yap's script), but not while the person decides.
@@ -350,6 +405,14 @@ async fn click(turn: &mut crate::web::Turn, args: &Value, live: Option<crate::ch
         }
         _busy = backend::busy(&t.key).await;
     }
+    // A click that sends what Yap typed (its form's submit button; outside
+    // a form, the button pressed right after): a submit, under submit's rules.
+    if let Some(r) = send_typed(turn, &t, &el, false, &site, live, &mut asked, &mut _busy).await {
+        return r;
+    }
+    if _busy.is_none() {
+        _busy = backend::busy(&t.key).await;
+    }
     let was = before(&t).await;
     let mark = backend::mark(&t.key).await;
     let done = match at {
@@ -402,12 +465,15 @@ async fn type_into(turn: &mut crate::web::Turn, args: &Value, live: Option<crate
     if text.chars().count() > rules::MAX_TYPED {
         return failed(format!("That's more than Yap types into a page at once ({} characters).", rules::MAX_TYPED), "Didn't type: too long".into());
     }
-    let t = match tab_for(turn, args, "type").await {
+    let mut t = match tab_for(turn, args, "type").await {
         Ok(t) => t,
         Err(e) => return e,
     };
     if let Some(r) = on_search_page(&t, "type") {
         return r;
+    }
+    if let Err(e) = to_front(&mut t, live).await {
+        return e;
     }
     let mut busy = backend::busy(&t.key).await;
     let (d, el) = match ref_of(&args["ref"]) {
@@ -440,6 +506,12 @@ async fn type_into(turn: &mut crate::web::Turn, args: &Value, live: Option<crate
     if let Some(r) = off_limits(&d, &el, &label, "type in") {
         return r;
     }
+    // A dropdown: one of its options is chosen, never typed (8 Nov 2026: a
+    // select's choice was asked about as words from nowhere).
+    if rules::is_choice(&el) {
+        drop(busy);
+        return choose(turn, &t, &el, &text, live).await;
+    }
     acting(live, &t.key);
     let was = before(&t).await;
     let mut asked = false;
@@ -468,6 +540,7 @@ async fn type_into(turn: &mut crate::web::Turn, args: &Value, live: Option<crate
         busy = backend::busy(&t.key).await;
     }
     let mark = backend::mark(&t.key).await;
+    let at = turn.pages.acts;
     let done = match backend::act(&t.key, "type", &json!({ "ref": el.r, "role": el.role, "name": el.name, "text": text, "submit": submit })).await {
         Ok(v) => v,
         Err(e) => return failed(e.clone(), format!("Couldn't type in ‘{label}’: {}", crate::web::short(&e))),
@@ -479,7 +552,10 @@ async fn type_into(turn: &mut crate::web::Turn, args: &Value, live: Option<crate
     if submit {
         backend::settle(&t.key, mark).await;
     }
-    let mut data = after(turn, &t, &was).await;
+    // What it typed, until it's sent: however it's sent (Enter, its form's
+    // button…), the send is judged as `submit` is here (`send_typed`).
+    turn.pages.typed = (!submit).then(|| rules::Typed { key: t.key.clone(), r: el.r, form: el.form, words: rules::words(&text), at });
+    let mut data = after_on(turn, &t, &was, el.r).await;
     let now = done["value"].as_str().unwrap_or("").to_string();
     data["field"] = json!(now);
     let mut note = NOTE.to_string();
@@ -528,6 +604,154 @@ async fn ask_enter(
     let answer = confirm::ask(live, confirm::Ask { act, label: &shown, site, does: kind, text: "", key, agent: None }).await;
     let chip = if button.is_some() { format!("press ‘{shown}’") } else { format!("press Enter in ‘{shown}’") };
     refusal(answer, &what, &chip)
+}
+
+/// **An action that sends what Yap typed** (`by`: the element it lands on,
+/// `enter`: an Enter key): Enter in the field or its form, its form's
+/// submit button, or — outside a form — the button pressed right after it
+/// (`rules::submits_typed`). Judged as `browser_type { submit: true }` is:
+/// the field's words as they'll be sent, from nowhere the person can see,
+/// asked about (`rules::submit_words`), and what sending it would do — its
+/// form's own rules; outside a form, a send unless it's a search box
+/// (`ask_enter`; not asked again when this action asked already: `asked`).
+/// The refusal, if the person said no; else it's sent from here (`typed`
+/// let go). Not a send of it: nothing.
+#[allow(clippy::too_many_arguments)]
+async fn send_typed(
+    turn: &mut crate::web::Turn,
+    t: &OpenTab,
+    by: &rules::Element,
+    enter: bool,
+    site: &str,
+    live: Option<crate::chat::stream::Live<'_>>,
+    asked: &mut bool,
+    busy: &mut Option<super::view::Busy>,
+) -> Option<Value> {
+    let typed = turn.pages.typed.clone()?;
+    if !rules::submits_typed(&typed, &t.key, by, enter, turn.pages.acts) {
+        return None;
+    }
+    // The field as it is now (gone: the action's own rules alone).
+    let d = backend::describe(&t.key, typed.r).await.ok()?;
+    let field = d.el.clone()?;
+    let label = rules::name_of(&field);
+    tracing::info!(r = field.r, enter, "Chat: an action sends what Yap typed: judged as a submit");
+    let page = if super::search_page(&t.url) { String::new() } else { backend::text(&t.key).await.map(|p| p.text).unwrap_or_default() };
+    let options = field.options.join(" ");
+    let known = rules::known_words([turn.said(), page.as_str(), d.title.as_str(), options.as_str()].into_iter().chain(d.headings.iter().map(String::as_str)));
+    let value = if field.masked { String::new() } else { field.value.clone() };
+    if turn.seen() && !rules::submit_words(&value, &known, &typed).is_empty() {
+        *asked = true;
+        let shown = rules::clip(&value, 120);
+        drop(busy.take());
+        let answer = confirm::ask(live, confirm::Ask { act: "type", label: &label, site, does: "type", text: &shown, key: &t.key, agent: None }).await;
+        if let Some(r) = refusal(answer, &format!("sending ‘{shown}’ from ‘{label}’ (those words aren't in what they said nor on the page)"), &format!("send ‘{label}’")) {
+            return Some(r);
+        }
+    }
+    if !*asked {
+        if enter {
+            if let Some(r) = ask_enter(&d, &field, &label, site, &t.key, live, asked, busy).await {
+                return Some(r);
+            }
+        } else if let Some(kind) = rules::enter_needs_ok(&d, &field) {
+            // A click that sends it: asked as that button, for what sending does.
+            *asked = true;
+            let named = rules::name_of(by);
+            let button = if named.is_empty() { "the button".to_string() } else { named };
+            drop(busy.take());
+            let answer = confirm::ask(live, confirm::Ask { act: "press", label: &button, site, does: kind, text: "", key: &t.key, agent: None }).await;
+            if let Some(r) = refusal(answer, &format!("pressing ‘{button}’ (it sends what's in ‘{label}’)"), &format!("click ‘{button}’")) {
+                return Some(r);
+            }
+        }
+    }
+    turn.pages.typed = None;
+    None
+}
+
+/// **One of a dropdown's options chosen** (a select, a combobox or listbox
+/// that isn't a text field, a radio button's group): by its words, checked
+/// against the control's own options — one of them is choosing, never
+/// typing, so never words from nowhere (8 Nov 2026: "Edit date" in a
+/// sorting dropdown was asked about as typing); not one of them is said,
+/// with some that are. A choice that would buy, pay, send… (its words) asks
+/// first, as a click would. Options the page hasn't drawn yet (a list that
+/// opens on a click): the page picks among them, or says there's none.
+async fn choose(turn: &mut crate::web::Turn, t: &OpenTab, el: &rules::Element, value: &str, live: Option<crate::chat::stream::Live<'_>>) -> Value {
+    let label = rules::name_of(el);
+    let site = crate::web::site_of(&t.url);
+    let value = value.trim();
+    if value.is_empty() {
+        let some = if el.options.is_empty() { String::new() } else { format!(": one of its options ({})", rules::some_options(&el.options)) };
+        return failed(format!("value is required{some}."), format!("Couldn't choose in ‘{label}’: no option given"));
+    }
+    if el.disabled {
+        return failed(format!("‘{label}’ is disabled on the page."), format!("Couldn't choose in ‘{label}’: it's disabled"));
+    }
+    let pick = match (el.options.is_empty(), rules::option_for(value, &el.options)) {
+        (true, _) => None,
+        (false, Some(o)) => Some(o),
+        (false, None) => {
+            return failed(
+                format!("‘{}’ isn't one of ‘{label}’'s options ({}): choose one of them.", rules::clip(value, 60), rules::some_options(&el.options)),
+                format!("Couldn't choose in ‘{label}’: ‘{}’ isn't one of its options", rules::clip(value, 40)),
+            )
+        }
+    };
+    let shown = pick.clone().unwrap_or_else(|| rules::clip(value, 80));
+    let mut busy = backend::busy(&t.key).await;
+    acting(live, &t.key);
+    let mut asked = false;
+    if let Some(kind) = rules::needs_ok(&shown, "") {
+        asked = true;
+        drop(busy.take());
+        let answer = confirm::ask(live, confirm::Ask { act: "press", label: &shown, site: &site, does: kind, text: "", key: &t.key, agent: None }).await;
+        if let Some(r) = refusal(answer, &format!("choosing ‘{shown}’ in ‘{label}’"), &format!("choose ‘{shown}’")) {
+            return r;
+        }
+        busy = backend::busy(&t.key).await;
+    }
+    let was = before(t).await;
+    let mark = backend::mark(&t.key).await;
+    let a = json!({ "ref": el.r, "role": el.role, "name": el.name, "text": pick.as_deref().unwrap_or(value) });
+    let mut done = backend::act(&t.key, "choose", &a).await;
+    // Opened, its options not drawn yet: a moment, then from the list now open.
+    if matches!(&done, Ok(v) if v["r"] == "opening") {
+        backend::pause(std::time::Duration::from_millis(400)).await;
+        let mut again = a.clone();
+        again["again"] = json!(true);
+        done = backend::act(&t.key, "choose", &again).await;
+    }
+    drop(busy);
+    let done = match done {
+        Ok(v) => v,
+        Err(e) => return failed(e.clone(), format!("Couldn't choose in ‘{label}’: {}", crate::web::short(&e))),
+    };
+    // Options the page drew only once it opened (a list made on its first
+    // opening): not one of those either, said with them.
+    let drawn: Vec<String> = done["options"].as_array().map(|o| o.iter().filter_map(|x| x.as_str().map(str::to_string)).collect()).unwrap_or_default();
+    if done["r"] == "no-option" && !drawn.is_empty() {
+        return failed(
+            format!("‘{}’ isn't one of ‘{label}’'s options ({}): choose one of them.", rules::clip(value, 60), rules::some_options(&drawn)),
+            format!("Couldn't choose in ‘{label}’: ‘{}’ isn't one of its options", rules::clip(value, 40)),
+        );
+    }
+    if let Some(r) = not_done(&done, &label, "choose in") {
+        return r;
+    }
+    backend::settle(&t.key, mark).await;
+    let mut data = after_on(turn, t, &was, el.r).await;
+    let chosen = done["value"].as_str().map(str::to_string).filter(|v| !v.trim().is_empty()).unwrap_or_else(|| shown.clone());
+    data["chosen"] = json!(chosen);
+    if asked {
+        data["asked"] = json!(true);
+        data["allowed"] = json!(true);
+    }
+    tracing::info!(r = el.r, options = el.options.len(), "Chat: an option chosen on a page beside the chat");
+    // (A radio button's label is one option's, not the group's.)
+    let display = if el.role == "radio" || el.kind == "radio" { format!("Chose ‘{}’ on {site}", rules::clip(&chosen, 60)) } else { format!("Chose ‘{}’ in ‘{label}’ on {site}", rules::clip(&chosen, 60)) };
+    json!({ "success": true, "data": data, "note": NOTE, "displayText": display })
 }
 
 /// A key as models write it ("enter", "esc", "down", "shift+tab", "page
@@ -583,16 +807,20 @@ async fn key(turn: &mut crate::web::Turn, args: &Value, live: Option<crate::chat
         Ok(k) => k,
         Err(e) => return failed(e, "Couldn't press keys: none Yap presses".into()),
     };
-    let t = match tab_for(turn, args, "press keys").await {
+    let mut t = match tab_for(turn, args, "press keys").await {
         Ok(t) => t,
         Err(e) => return e,
     };
     if let Some(r) = on_search_page(&t, "press keys") {
         return r;
     }
+    if let Err(e) = to_front(&mut t, live).await {
+        return e;
+    }
     let mut busy = backend::busy(&t.key).await;
     let site = crate::web::site_of(&t.url);
-    // In `ref`'s element first (the focus put there).
+    // In `ref`'s element first (the focus put there: no news after).
+    let aimed = ref_of(&args["ref"]).unwrap_or(0);
     let mut target = match ref_of(&args["ref"]) {
         Some(r) => match element(&t, Some(r), "press keys").await {
             Ok((_, el)) => Some(el),
@@ -618,22 +846,38 @@ async fn key(turn: &mut crate::web::Turn, args: &Value, live: Option<crate::chat
         if let (true, Some(el)) = (matches!(*k, "Enter" | "Space"), d.el.as_ref()) {
             let label = rules::name_of(el);
             let field = rules::takes_text(el) && !matches!(el.role.as_str(), "button" | "link" | "checkbox" | "radio" | "switch");
+            // This key's own question, apart from an earlier key's.
+            let mut this_asked = false;
             if !field {
                 // On a link, a button, a box: as its click.
                 if let Some(kind) = rules::click_needs_ok(&d, el) {
-                    asked = true;
+                    this_asked = true;
                     drop(busy.take());
                     let answer = confirm::ask(live, confirm::Ask { act: "press", label: &label, site: &site, does: kind, text: "", key: &t.key, agent: None }).await;
                     if let Some(r) = refusal(answer, &format!("pressing ‘{label}’"), &format!("press {k} on ‘{label}’")) {
                         return r;
                     }
                 }
+                // …and if it sends what Yap typed (its form's button; outside
+                // a form, the one right after), as a submit of it.
+                if let Some(r) = send_typed(turn, &t, el, *k == "Enter", &site, live, &mut this_asked, &mut busy).await {
+                    return r;
+                }
             } else if *k == "Enter" {
-                // In a field: as a submit (in a form) or a send (outside one, but a search box).
-                if let Some(r) = ask_enter(&d, el, &label, &site, &t.key, live, &mut asked, &mut busy).await {
+                // In a field: what Yap typed, sent — a submit under submit's
+                // rules (its words as they go, then what sending does) —
+                // else as a submit (in a form) or a send (outside one, but a
+                // search box).
+                let sends = turn.pages.typed.as_ref().is_some_and(|ty| rules::submits_typed(ty, &t.key, el, true, turn.pages.acts));
+                if sends {
+                    if let Some(r) = send_typed(turn, &t, el, true, &site, live, &mut this_asked, &mut busy).await {
+                        return r;
+                    }
+                } else if let Some(r) = ask_enter(&d, el, &label, &site, &t.key, live, &mut this_asked, &mut busy).await {
                     return r;
                 }
             }
+            asked |= this_asked;
         }
         if busy.is_none() {
             busy = backend::busy(&t.key).await;
@@ -652,10 +896,10 @@ async fn key(turn: &mut crate::web::Turn, args: &Value, live: Option<crate::chat
         pressed.push(k);
     }
     drop(busy);
-    if pressed.iter().any(|k| matches!(*k, "Enter" | "Space")) {
-        backend::settle(&t.key, mark).await;
-    }
-    let mut data = after(turn, &t, &was).await;
+    // Whatever the keys did (a submit, a scroll, a popup closing on Escape),
+    // a moment for it before the page after is told.
+    backend::settle(&t.key, mark).await;
+    let mut data = after_on(turn, &t, &was, aimed).await;
     if let Ok(d) = backend::active(&t.key).await {
         if let Some(el) = d.el {
             data["focused"] = json!(format!("[{}] {} \"{}\"", el.r, el.role, rules::name_of(&el).replace('"', "'")));
@@ -671,12 +915,15 @@ async fn key(turn: &mut crate::web::Turn, args: &Value, live: Option<crate::chat
 /// **`browser_hover`**: the pointer over an element (a menu that opens on
 /// hover); what changed after.
 async fn hover(turn: &mut crate::web::Turn, args: &Value, live: Option<crate::chat::stream::Live<'_>>) -> Value {
-    let t = match tab_for(turn, args, "hover").await {
+    let mut t = match tab_for(turn, args, "hover").await {
         Ok(t) => t,
         Err(e) => return e,
     };
     if let Some(r) = on_search_page(&t, "hover") {
         return r;
+    }
+    if let Err(e) = to_front(&mut t, live).await {
+        return e;
     }
     let busy = backend::busy(&t.key).await;
     let (_, el) = match element(&t, ref_of(&args["ref"]), "hover").await {
@@ -696,6 +943,8 @@ async fn hover(turn: &mut crate::web::Turn, args: &Value, live: Option<crate::ch
         return r;
     }
     backend::settle(&t.key, mark).await;
+    // A hover's preview or menu often opens after a delay of its own.
+    backend::pause(std::time::Duration::from_millis(350)).await;
     drop(busy);
     let data = after(turn, &t, &was).await;
     json!({ "success": true, "data": data, "note": NOTE, "displayText": format!("Hovered over ‘{label}’ on {site}") })
@@ -720,27 +969,36 @@ fn on_off(v: &Value) -> Option<bool> {
 /// asks first), a select's option or a text field's words (as typing them:
 /// every rule of `browser_type`).
 async fn form_input(turn: &mut crate::web::Turn, args: &Value, live: Option<crate::chat::stream::Live<'_>>) -> Value {
-    let t = match tab_for(turn, args, "set a field").await {
+    let mut t = match tab_for(turn, args, "set a field").await {
         Ok(t) => t,
         Err(e) => return e,
     };
     if let Some(r) = on_search_page(&t, "set a field") {
         return r;
     }
+    if let Err(e) = to_front(&mut t, live).await {
+        return e;
+    }
     let (d, el) = match element(&t, ref_of(&args["ref"]), "set a field").await {
         Ok(x) => x,
         Err(e) => return e,
     };
+    let text = match &args["value"] {
+        Value::String(s) => s.clone(),
+        Value::Null => String::new(),
+        v => v.to_string(),
+    };
     let tickable = el.checked.is_some() || matches!(el.role.as_str(), "checkbox" | "radio" | "switch") || matches!(el.kind.as_str(), "checkbox" | "radio");
     if !tickable {
-        let text = match &args["value"] {
-            Value::String(s) => s.clone(),
-            Value::Null => String::new(),
-            v => v.to_string(),
-        };
-        return type_into(turn, &json!({ "tab": args["tab"], "ref": el.r, "text": text }), live).await;
+        // (A dropdown is chosen in there: `choose`.)
+        return type_into(turn, &json!({ "tab": t.tab, "ref": el.r, "text": text }), live).await;
     }
+    let radio = el.role == "radio" || el.kind == "radio";
     let Some(on) = on_off(&args["value"]) else {
+        // A radio button given words: the one of its group they name.
+        if radio {
+            return choose(turn, &t, &el, &text, live).await;
+        }
         return failed("A checkbox's value is true or false.".into(), "Couldn't set a field: value isn't true or false".into());
     };
     let label = rules::name_of(&el);
@@ -772,7 +1030,7 @@ async fn form_input(turn: &mut crate::web::Turn, args: &Value, live: Option<crat
     if let Some(r) = not_done(&done, &label, "set") {
         return r;
     }
-    let mut data = after(turn, &t, &was).await;
+    let mut data = after_on(turn, &t, &was, el.r).await;
     data["checked"] = done["checked"].clone();
     if asked {
         data["asked"] = json!(true);
@@ -832,10 +1090,14 @@ pub(super) async fn go(turn: &mut crate::web::Turn, args: &Value, ctx: &super::C
             }
         }
     };
-    let t = match tab_for(turn, args, "go anywhere").await {
+    let mut t = match tab_for(turn, args, "go anywhere").await {
         Ok(t) => t,
         Err(e) => return e,
     };
+    // The tab it goes in, in front: the person sees where it went.
+    if let Err(e) = to_front(&mut t, live).await {
+        return e;
+    }
     acting(live, &t.key);
     // A link that would buy, pay, unsubscribe, confirm… asks first, as its
     // click would (its words, its address); an address from the results, by
@@ -886,10 +1148,13 @@ pub(super) async fn go(turn: &mut crate::web::Turn, args: &Value, ctx: &super::C
 /// it was on already.
 pub(super) async fn history(turn: &mut crate::web::Turn, args: &Value, back: bool, live: Option<crate::chat::stream::Live<'_>>) -> Value {
     let doing = if back { "go back" } else { "go forward" };
-    let t = match tab_for(turn, args, doing).await {
+    let mut t = match tab_for(turn, args, doing).await {
         Ok(t) => t,
         Err(e) => return e,
     };
+    if let Err(e) = to_front(&mut t, live).await {
+        return e;
+    }
     acting(live, &t.key);
     let busy = backend::busy(&t.key).await;
     let was = before(&t).await;

@@ -227,10 +227,60 @@ pub async fn close(key: &str) -> Result<(), String> {
     view::close(key).await
 }
 
-/// **An action** on page `key`: `op` is `click`, `type`, `scroll`,
-/// `clickAt`, `hover`, `check` or `key`, with `a` its arguments (`ref`,
-/// `role`, `name`, `text`, `submit`, `to`, `amount`, `x`, `y`, `on`,
-/// `keys`); the script's answer (`{"r": "ok" | "gone" | "changed" | …}`).
+/// **Where page `key` is in view once it has stopped scrolling** (8 Nov
+/// 2026: a scroll on a page with `scroll-behavior: smooth` was told from
+/// where it began, and a zoom straight after caught it mid-way): its scroll
+/// read until it's the same twice in a row a frame or more apart, at most
+/// [`STILL_MAX`]. Yap's own scrolls are instant (`act/script.rs`); this
+/// waits out one the page makes itself (a link to a part of the page, a
+/// script's smooth scroll).
+pub async fn still(key: &str) -> Result<super::see::InView, String> {
+    sim!(|b| b.in_view(key));
+    let started = Instant::now();
+    let mut last = view_of(key).await?;
+    loop {
+        tokio::time::sleep(STILL_STEP).await;
+        let now = view_of(key).await?;
+        if (now.scroll.y == last.scroll.y && now.scroll.x == last.scroll.x) || started.elapsed() >= STILL_MAX {
+            return Ok(now);
+        }
+        last = now;
+    }
+}
+
+/// How long [`still`] waits for a page to stop scrolling, at most, and how
+/// far apart it reads where it is (more than two frames at 60 Hz).
+pub const STILL_MAX: Duration = Duration::from_millis(1000);
+const STILL_STEP: Duration = Duration::from_millis(40);
+
+/// **Start watching page `key`** for what an action changes (`script.rs`
+/// `watch`): read back with [`changes`]. Nothing if the page can't be
+/// reached (then the address and the text alone say what changed).
+pub async fn watch(key: &str) {
+    sim!(|b| b.watch(key));
+    let _ = view::run_script(key, super::act::script::watch()).await;
+}
+
+/// **What changed on page `key` since [`watch`]** (`rules::Changes`); not
+/// watched (`watched` false) when the page went elsewhere or couldn't say.
+pub async fn changes(key: &str) -> super::act::rules::Changes {
+    sim!(|b| b.changes(key));
+    match view::run_script(key, super::act::script::changes()).await {
+        Ok(raw) => {
+            let mut ch: super::act::rules::Changes = serde_json::from_str(&raw).unwrap_or_default();
+            ch.url = view::shown(&ch.url);
+            ch.url0 = view::shown(&ch.url0);
+            ch
+        }
+        Err(_) => super::act::rules::Changes::default(),
+    }
+}
+
+/// **An action** on page `key`: `op` is `click`, `type`, `choose`,
+/// `scroll`, `where`, `clickAt`, `hover`, `check` or `key`, with `a` its
+/// arguments (`ref`, `role`, `name`, `text`, `submit`, `again`, `to`,
+/// `amount`, `x`, `y`, `on`, `keys`); the script's answer (`{"r": "ok" |
+/// "gone" | "changed" | …}`).
 pub async fn act(key: &str, op: &str, a: &Value) -> Result<Value, String> {
     sim!(|b| b.act(key, op, a));
     // (A page just brought up: loaded first, as a read waits.)
@@ -241,6 +291,8 @@ pub async fn act(key: &str, op: &str, a: &Value) -> Result<Value, String> {
     let script = match op {
         "click" => super::act::script::click(r, role, name),
         "type" => super::act::script::type_text(r, role, name, a["text"].as_str().unwrap_or(""), a["submit"].as_bool().unwrap_or(false)),
+        "choose" => super::act::script::choose(r, role, name, a["text"].as_str().unwrap_or(""), a["again"].as_bool().unwrap_or(false)),
+        "where" => super::act::script::where_is(r),
         "scroll" => super::act::script::scroll(a["to"].as_str().unwrap_or("down"), a["amount"].as_f64().unwrap_or(1.0), (r > 0).then_some(r)),
         "clickAt" => super::act::script::click_at(r, role, name, num("x"), num("y")),
         "hover" => super::act::script::hover(r, role, name),
@@ -313,6 +365,18 @@ pub async fn settle(key: &str, before: Mark) {
             return;
         }
     }
+}
+
+/// **A moment more** after an action whose effect a page draws late (a
+/// hover's preview, shown after a delay); nothing for the stand-in browser.
+pub async fn pause(d: Duration) {
+    #[cfg(any(test, debug_assertions))]
+    {
+        if super::sim::with(|_| ()).is_some() {
+            return;
+        }
+    }
+    tokio::time::sleep(d).await;
 }
 
 /// Page `key` loaded before it's read (a page just brought up; at most 10 s).
