@@ -11,8 +11,9 @@
 //! ([`PARTS`]), `c1`…`c24` (`store::MAX`), so the uninstaller's "Delete the
 //! application data" knows every name. A portable Yap adds a hash of its
 //! data folder to the names. Test runs (`e2e::active`) keep them in a file
-//! in their own data folder; unit tests in memory, and the one test of the
-//! real store uses names of its own ([`Vault::os`]) and removes them.
+//! in their own data folder; unit tests in memory, and the two tests of the
+//! real store use names of their own ([`Vault::os`]), one at a time, and
+//! remove them (`tests::RealStore`).
 //!
 //! [`Secrets`] never prints its values (`Debug` says which there are).
 
@@ -479,6 +480,43 @@ mod tests {
         assert_eq!(bounds, [PARTS, super::super::store::MAX]);
     }
 
+    /// The real Credential Manager, for one test at a time. It loses a write
+    /// when another thread or process writes other names at the same moment
+    /// (seen: a part just saved read back as missing, `load` empty), so the
+    /// tests that use it take turns, across test binaries too (a lock file in
+    /// the temp folder, let go with the guard or the process), and their
+    /// names are removed however the test ends.
+    struct RealStore {
+        vault: Vault,
+        id: &'static str,
+        _turn: std::fs::File,
+    }
+
+    impl RealStore {
+        fn take(service: &str, prefix: &str, id: &'static str) -> RealStore {
+            let path = std::env::temp_dir().join("yap-unit-tests-credential-manager.lock");
+            let turn = std::fs::OpenOptions::new().create(true).truncate(false).write(true).open(&path).expect("the lock file");
+            turn.lock().expect("a turn at the credential store");
+            let vault = Vault::os(service, &format!("{prefix}-{}", std::process::id()));
+            vault.delete(id);
+            RealStore { vault, id, _turn: turn }
+        }
+    }
+
+    impl std::ops::Deref for RealStore {
+        type Target = Vault;
+        fn deref(&self) -> &Vault {
+            &self.vault
+        }
+    }
+
+    impl Drop for RealStore {
+        fn drop(&mut self) {
+            // Before the turn is let go (fields drop after this).
+            self.vault.delete(self.id);
+        }
+    }
+
     /// **The uninstaller's way** (`installer.nsi`, "Delete the application
     /// data"): `CredDeleteW` on `yap-connector-c<N>-<part>.com.yap.dictation`,
     /// a generic credential (type 1), for every connector and part. Here on
@@ -495,8 +533,7 @@ mod tests {
         assert!(nsi.contains(&format!("yap-connector-c$1-$2.{SERVICE}")), "the uninstaller deletes the vault's names");
         assert!(nsi.contains("CredDeleteW(w \"yap-connector-c$1-$2.com.yap.dictation\", i 1, i 0)"), "as generic credentials");
         let service = "com.yap.test-uninstall";
-        let prefix = format!("yap-connector-uninstalltest-{}", std::process::id());
-        let v = Vault::os(service, &prefix);
+        let v = RealStore::take(service, "yap-connector-uninstalltest", "c24");
         let long = Secrets { token: Some("u".repeat(PART_CHARS * 2 + 5)), ..some() };
         v.save("c24", &long).unwrap();
         assert_eq!(v.load("c24"), long);
@@ -516,9 +553,7 @@ mod tests {
     /// this test's own (never Yap's), removed at the end.
     #[test]
     fn the_real_credential_store_keeps_and_forgets_them() {
-        let prefix = format!("yap-connector-unittest-{}", std::process::id());
-        let v = Vault::os("com.yap.test-connectors", &prefix);
-        v.delete("c1");
+        let v = RealStore::take("com.yap.test-connectors", "yap-connector-unittest", "c1");
         assert!(v.load("c1").is_empty());
         let long = Secrets { token: Some("x".repeat(PART_CHARS + 10)), ..some() };
         v.save("c1", &long).unwrap();
