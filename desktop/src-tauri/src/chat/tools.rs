@@ -311,6 +311,11 @@ pub struct Extra<'a> {
     /// Where those pictures are kept for the turn (the answer keeps the ones
     /// shown).
     pub file_pictures: Option<&'a crate::chat::pictures::Files>,
+    /// **`share_files`** (`chat/shares.rs`): files shared into the
+    /// conversation, wherever `show_picture` takes a path — with the web on
+    /// (a path, or one of the turn's pictures: the web turn's), or the
+    /// picture files' gate without it (a path: [`Extra::file_pictures`]').
+    pub share: crate::chat::shares::Offer,
 }
 
 /// The calendar tool in a turn ([`calendar::run`]).

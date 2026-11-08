@@ -307,11 +307,39 @@ pub fn check(given: &str, places: &Places) -> Result<(PathBuf, Why), Refused> {
     if PAGE_ENDINGS.contains(&ending(&path).as_str()) {
         return Err(refused(NOT_A_LOCAL_PAGE, "a web page on this PC"));
     }
-    let written = plain(&path);
-    let Some(why) = places.allows(&written) else {
-        return Err(refused(NOT_ALLOWED, "not a place Yap shows pictures from"));
+    let (real, why, meta) = resolve(&path, places, Noun::Picture)?;
+    if meta.len() > MAX_BYTES {
+        return Err(refused(format!("That file is bigger than {} MB: too big to show.", MAX_BYTES / (1024 * 1024)), "too big"));
+    }
+    Ok((real, why))
+}
+
+/// What a refusal calls the file: a picture (`show_picture`,
+/// `look_at_picture`) or any file (`share_files`, `chat/shares.rs`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Noun {
+    Picture,
+    File,
+}
+
+/// What a share's refusal says when the place isn't one Yap shares from.
+pub const NOT_ALLOWED_FILE: &str = "Yap only shares a file from this PC that's in one of the user's workspaces, that an agent of this chat made or changed, or whose path the user wrote or said in this chat. This one is none of those: ask the user for its path, or to add its folder as a workspace in Settings → Yap Code.";
+
+/// **The file `path` (worked out: [`path_of`]) in one of `places`**, as
+/// written and again as the file system resolves it (a link or junction out
+/// of a workspace refused; one the person named themselves is theirs), and
+/// a file, not a folder: its real path, why, and its metadata. No size cap
+/// (a picture's is [`check`]'s). Reads the file system only.
+pub fn resolve(path: &Path, places: &Places, noun: Noun) -> Result<(PathBuf, Why, std::fs::Metadata), Refused> {
+    let (not_allowed, chip) = match noun {
+        Noun::Picture => (NOT_ALLOWED, "not a place Yap shows pictures from"),
+        Noun::File => (NOT_ALLOWED_FILE, "not a place Yap shares files from"),
     };
-    let real = match std::fs::canonicalize(&path) {
+    let written = plain(path);
+    let Some(why) = places.allows(&written) else {
+        return Err(refused(not_allowed, chip));
+    };
+    let real = match std::fs::canonicalize(path) {
         Ok(r) => r,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Err(refused("That file isn't there: check its path (the agent's own list of the files it made, or ask the user).", "not there")),
         Err(_) => return Err(refused("Yap couldn't open that file.", "couldn't open it")),
@@ -321,16 +349,17 @@ pub fn check(given: &str, places: &Places) -> Result<(PathBuf, Why), Refused> {
     let why = match places.allows(&plain(&real)) {
         Some(w) => w,
         None if why == Why::Said => why,
-        None => return Err(refused(NOT_ALLOWED, "not a place Yap shows pictures from")),
+        None => return Err(refused(not_allowed, chip)),
     };
     let meta = std::fs::metadata(&real).map_err(|_| refused("Yap couldn't open that file.", "couldn't open it"))?;
     if !meta.is_file() {
-        return Err(refused("That's a folder, not a picture file: give the picture's own path.", "a folder"));
+        let error = match noun {
+            Noun::Picture => "That's a folder, not a picture file: give the picture's own path.",
+            Noun::File => "That's a folder, not a file: give a file's own path.",
+        };
+        return Err(refused(error, "a folder"));
     }
-    if meta.len() > MAX_BYTES {
-        return Err(refused(format!("That file is bigger than {} MB: too big to show.", MAX_BYTES / (1024 * 1024)), "too big"));
-    }
-    Ok((real, why))
+    Ok((real, why, meta))
 }
 
 /// **A picture's kind by its own bytes**: PNG, JPEG, GIF, WebP or BMP, else

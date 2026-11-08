@@ -36,6 +36,11 @@ pub fn offered_tools(open_apps: bool, web: bool, extra: Extra<'_>) -> Value {
     if let (Some(all), Some(files)) = (tools.as_array_mut(), crate::chat::pictures::file_definitions(extra.files).as_array()) {
         all.extend(files.iter().cloned());
     }
+    // Files shared into the conversation (chat/shares.rs): where show_picture
+    // takes a path.
+    if let (Some(all), Some(share)) = (tools.as_array_mut(), crate::chat::shares::definitions(extra.share).as_array()) {
+        all.extend(share.iter().cloned());
+    }
     // Pages beside the chat (chat/pages.rs): for the same models; acting on
     // them (chat/pages/act.rs) for the ones that may.
     if let (Some(all), Some(pages)) = (tools.as_array_mut(), crate::chat::pages::definitions(extra.pictures, extra.act).as_array()) {

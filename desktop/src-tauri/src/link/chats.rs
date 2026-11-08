@@ -53,10 +53,19 @@ fn capped(text: &str) -> String {
     out
 }
 
+/// The most shared files' names one message lists on the phone.
+pub const MAX_FILES: usize = 24;
+
+/// The names of the files a message shared (`chat/shares.rs`), at most
+/// [`MAX_FILES`]. Pure.
+fn shared_names(m: &crate::chat::chats::ChatMessage) -> Vec<String> {
+    m.files.iter().flat_map(|s| s.items.iter()).map(|i| i.name.trim().to_string()).filter(|n| !n.is_empty()).take(MAX_FILES).collect()
+}
+
 /// **Message `index` of `c` as the phone shows it**: a question's own words
 /// (an agent's report marker keeps its `kind`, so it's never shown as the
-/// person's bubble: 2026-11-08), an answer's with its id in Chat for ▶.
-/// Pure.
+/// person's bubble: 2026-11-08), an answer's with its id in Chat for ▶; the
+/// names of the files either shared (the files stay on the PC). Pure.
 pub fn message(c: &Conversation, index: usize) -> Option<ThreadMessage> {
     let m = c.messages.get(index)?;
     match m.role.as_str() {
@@ -67,8 +76,9 @@ pub fn message(c: &Conversation, index: usize) -> Option<ThreadMessage> {
             voice: m.voice,
             pictures: m.images.len(),
             kind: m.kind.clone(),
+            files: shared_names(m),
         }),
-        "assistant" => Some(ThreadMessage { role: "assistant", text: capped(m.text.trim()), id: Some(format!("chat:{}:{index}", c.id)), ..Default::default() }),
+        "assistant" => Some(ThreadMessage { role: "assistant", text: capped(m.text.trim()), id: Some(format!("chat:{}:{index}", c.id)), files: shared_names(m), ..Default::default() }),
         _ => None,
     }
 }
@@ -132,7 +142,7 @@ mod tests {
         assert_eq!(title, "Garden plan");
         assert!(!more);
         assert_eq!(messages.len(), 4, "only questions and answers");
-        assert_eq!(messages[0], ThreadMessage { role: "user", text: "What grows in shade?".into(), id: None, voice: true, pictures: 2, kind: String::new() });
+        assert_eq!(messages[0], ThreadMessage { role: "user", text: "What grows in shade?".into(), id: None, voice: true, pictures: 2, kind: String::new(), files: Vec::new() });
         assert_eq!(messages[1].id.as_deref(), Some("chat:7:1"), "its place in Chat");
         assert_eq!(messages[3].id.as_deref(), Some("chat:7:4"));
         // The latest only, each message capped.

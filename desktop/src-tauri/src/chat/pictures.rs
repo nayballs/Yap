@@ -432,6 +432,9 @@ pub struct TurnPictures {
     /// The picture files shown this turn: each one's key ([`local::key`])
     /// and its `chat-images` id (shown once).
     files_shown: Vec<(String, String)>,
+    /// **The files shared into the conversation** this turn (`share_files`,
+    /// `chat/shares.rs`), a share a call: the answer keeps them.
+    pub shared: Vec<crate::chat::shares::Share>,
 }
 
 /// A picture id as models write it ("p3", "P3", "3", " p3 ") → "p3". Pure.
@@ -938,6 +941,32 @@ impl Files {
     pub fn shown(&self) -> Vec<ShownPicture> {
         self.0.try_lock().map(|p| p.shown.clone()).unwrap_or_default()
     }
+
+    /// **`share_files`** on them (`chat/shares.rs`): files' paths only.
+    pub async fn share(&self, args: &Value) -> crate::chat::shares::Run {
+        crate::chat::shares::execute(&mut *self.0.lock().await, None, args, crate::chat::shares::Offer::Files).await
+    }
+
+    /// The files shared so far (the answer keeps them).
+    pub fn shared(&self) -> Vec<crate::chat::shares::Share> {
+        self.0.try_lock().map(|p| p.shared.clone()).unwrap_or_default()
+    }
+}
+
+/// **A candidate's bytes for a share** (`share_files` of "p2",
+/// `chat/shares.rs`): downloaded once a turn through `endpoints`, as for a
+/// show (a failure remembered too).
+pub async fn candidate_bytes(p: &mut TurnPictures, endpoints: &crate::web::Endpoints, c: &Candidate) -> Result<Arc<Vec<u8>>, String> {
+    if let Some(done) = p.fetched.get(&c.id) {
+        return done.clone().map(|b| b.0);
+    }
+    let got = crate::web::fetch_picture(endpoints, &c.image.url).await.map(|(_, b)| Bytes(Arc::new(b)));
+    match &got {
+        Ok(b) => tracing::info!(picture = %c.id, kb = b.0.len() / 1024, "Chat: a picture downloaded to share"),
+        Err(_) => tracing::info!(picture = %c.id, "Chat: a picture to share didn't download"),
+    }
+    p.fetched.insert(c.id.clone(), got.clone());
+    got.map(|b| b.0)
 }
 
 /// The user message that carries the pictures a step looked at (after its

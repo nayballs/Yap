@@ -85,6 +85,10 @@ pub(super) struct Gates {
     /// Off by default, and whenever the web is on (the pictures' own tools
     /// take paths there), so a turn with the web is as it was.
     pub files: Gate,
+    /// **`share_files`** (chat/shares.rs) wherever `show_picture` takes a
+    /// path — the web's pictures' gate, or the picture files' —: off only in
+    /// a turn fitted to a small context without the files' family (`fit.rs`).
+    pub share_tools: bool,
 }
 
 /// What [`Gates::for_turn`] reads of this PC: Yap Code offered
@@ -131,7 +135,7 @@ impl Gates {
         let evaluated = tools && provider != crate::ai::claude_plan::PROVIDER && crate::ai::eval::connectors_forced();
         let connectors = !meetings && (evaluated || crate::chat::tools::connectors::may(provider, strong)) && (here.connectors)();
         let (apps, past_chats, picture_tools) = (cfg.open_apps, cfg.memory_search_chats, true);
-        let gates = Gates { tools, doc_tools, strong, claude_in_chat, own_search, web_lines, web_on, pictures, screen, act, calendar, agents, connectors, apps, past_chats, picture_tools, files: Gate::Off };
+        let gates = Gates { tools, doc_tools, strong, claude_in_chat, own_search, web_lines, web_on, pictures, screen, act, calendar, agents, connectors, apps, past_chats, picture_tools, files: Gate::Off, share_tools: true };
         if provider == crate::ai::claude_plan::PROVIDER {
             return gates.on_the_plan();
         }
@@ -199,6 +203,7 @@ impl Gates {
             without_pictures: !self.picture_tools,
             files: self.files,
             file_pictures: None,
+            share: crate::chat::shares::Offer::of(self.pictures, self.files, self.share_tools && self.tools),
         }
     }
 
@@ -503,8 +508,10 @@ mod tests {
             assert_eq!(after.files, if reads { Gate::Look } else { Gate::Show }, "{provider} {model}");
             assert!(t1.iter().any(|n| n == "show_picture"), "{provider} {model}");
             assert_eq!(t1.iter().any(|n| n == "look_at_picture"), reads, "{provider} {model}");
+            // …and share_files (chat/shares.rs, 8 Nov 2026: files into the conversation), by a path too.
+            assert!(t1.iter().any(|n| n == crate::chat::shares::NAME), "{provider} {model}");
             // Nothing else changed: the same tools and the same prompt but the line.
-            assert_eq!(t1.iter().filter(|n| *n != "show_picture" && *n != "look_at_picture").collect::<Vec<_>>(), t0.iter().collect::<Vec<_>>());
+            assert_eq!(t1.iter().filter(|n| *n != "show_picture" && *n != "look_at_picture" && *n != crate::chat::shares::NAME).collect::<Vec<_>>(), t0.iter().collect::<Vec<_>>());
             let line = crate::chat::pictures::file_instructions(after.files);
             assert_eq!(p1.replacen(&format!(" {line}"), "", 1), p0, "{provider} {model}");
             // The path only: no "p3", no word of the web.
@@ -514,6 +521,8 @@ mod tests {
                 assert!(props["path"].is_object() && props["picture"].is_null(), "{t}");
                 assert!(!t.to_string().contains("p3") && !t.to_string().contains("web"), "{t}");
             }
+            let share = tools.as_array().unwrap().iter().find(|t| t["function"]["name"] == crate::chat::shares::NAME).unwrap().to_string();
+            assert!(!share.contains("p2") && !share.contains("web") && !share.contains("this turn"), "{share}");
             assert!(!line.contains("web") && !line.contains("p3"));
             // Never across the meetings, nor from another app (no panel).
             assert_eq!(before.files_gate(&ep, Some("meetings"), true, false, true), Gate::Off);

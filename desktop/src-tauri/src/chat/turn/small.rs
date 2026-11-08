@@ -81,6 +81,7 @@ pub(super) async fn answer(
         pages,
         stopped,
         pictures: Vec::new(),
+        files: Vec::new(),
         shown_pages: Vec::new(),
         offers: Vec::new(),
         browser,

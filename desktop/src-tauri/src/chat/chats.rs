@@ -80,6 +80,16 @@ pub struct ChatMessage {
     /// the pictures with the sweep a day later.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub pictures: Vec<crate::chat::pictures::ShownPicture>,
+    /// **The files an answer shared into the conversation** (`share_files`,
+    /// `chat/shares.rs`), a share a call: pictures copied into
+    /// `<data>/chat-images/` (shown inline, kept and deleted like a
+    /// screenshot), other files linked by their path (a card); an agent's
+    /// report marker's, the pictures and new files its turn made. Only written
+    /// when there are some. An older Yap's save drops the field; the copy in
+    /// `chat_files.json` puts it back at the next start
+    /// (`shares::restore_from_disk`).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub files: Vec<crate::chat::shares::Share>,
     /// The live pages an answer brought up beside the chat (`show_page`,
     /// `chat/pages.rs`): their address, title, site and section — the
     /// panel's Page tabs, back when the chat is opened again. Only written
@@ -216,18 +226,19 @@ pub fn add_question_images(id: u64, images: &[ChatImage]) {
     });
 }
 
-/// Every image id a conversation refers to — a question's screenshots and
-/// the pictures an answer showed (`pictures`) — (the screenshots sweep keeps
+/// Every image id a conversation refers to — a question's screenshots, the
+/// pictures an answer showed (`pictures`) and the ones it shared (`files`) —
+/// (the screenshots sweep keeps
 /// these for their time; anything else goes after a day).
 pub fn image_ids() -> std::collections::HashSet<String> {
     with_store(|s| s.conversations.iter().flat_map(|c| c.messages.iter()).flat_map(ChatMessage::image_ids).collect())
 }
 
 impl ChatMessage {
-    /// The chat-images ids this message refers to: its screenshots and the
-    /// pictures it showed.
+    /// The chat-images ids this message refers to: its screenshots, the
+    /// pictures it showed and the ones it shared.
     pub fn image_ids(&self) -> impl Iterator<Item = String> + '_ {
-        self.images.iter().map(|i| i.id.clone()).chain(self.pictures.iter().map(|p| p.id.clone()))
+        self.images.iter().map(|i| i.id.clone()).chain(self.pictures.iter().map(|p| p.id.clone())).chain(crate::chat::shares::image_ids(&self.files))
     }
 }
 
@@ -394,7 +405,10 @@ fn chats_path() -> PathBuf {
 /// chats added meanwhile kept with it).
 #[cfg(not(test))]
 fn load_from_disk() -> Store {
-    SAVER.load(&chats_path())
+    let mut store: Store = SAVER.load(&chats_path());
+    // The shares an older Yap's save dropped (chat/shares.rs), put back.
+    crate::chat::shares::restore_from_disk(&mut store.conversations);
+    store
 }
 
 /// chats.json's saves (`saving.rs`): a failed one keeps the chats in
@@ -421,7 +435,10 @@ fn save_now() -> Result<(), crate::shell::saving::SaveError> {
 
 #[cfg(not(test))]
 fn save_to_disk(store: &Store) {
-    let _ = SAVER.write_json(&chats_path(), store, false);
+    if SAVER.write_json(&chats_path(), store, false).is_ok() {
+        // The shares' copy for an older Yap's save (chat/shares.rs).
+        crate::chat::shares::mirror_to_disk(&store.conversations);
+    }
     // Search by meaning reads what changed, in the background.
     crate::search::changed();
 }
@@ -434,6 +451,7 @@ fn with_store<R>(f: impl FnOnce(&mut Store) -> R) -> R {
     };
     let store = guard.get_or_insert_with(load_from_disk);
     if SAVER.any_unread() && SAVER.refresh(&chats_path(), store) {
+        crate::chat::shares::restore_from_disk(&mut store.conversations);
         save_to_disk(store);
     }
     f(store)
@@ -726,6 +744,22 @@ pub fn set_pictures(id: u64, index: usize, pictures: &[crate::chat::pictures::Sh
     });
 }
 
+/// Keep the files an answer shared into the conversation with it
+/// (`chat/shares.rs`): conversation `id`'s message `index`, when it's an
+/// answer.
+pub fn set_files(id: u64, index: usize, files: &[crate::chat::shares::Share]) {
+    if files.is_empty() {
+        return;
+    }
+    with_store(|s| {
+        let Some(m) = s.conversations.iter_mut().find(|c| c.id == id).and_then(|c| c.messages.get_mut(index)) else { return };
+        if m.role == "assistant" {
+            m.files = files.to_vec();
+            save_to_disk(s);
+        }
+    });
+}
+
 /// Keep "Search in your browser" with an answer (conversation `id`'s message
 /// `index`), when it offers one.
 pub fn set_browser_search(id: u64, index: usize, search: Option<&crate::web::BrowserSearch>) {
@@ -899,6 +933,7 @@ pub fn append_message(
             thinking: None,
             documents: Vec::new(),
             pictures: Vec::new(),
+            files: Vec::new(),
             pages: Vec::new(),
             offers: Vec::new(),
             quote: None,
@@ -981,12 +1016,14 @@ pub fn delete_many(ids: &[u64]) -> usize {
 }
 
 /// A conversation as a page gets it: each screenshot whose file is gone
-/// (kept past "Keep chat screenshots") says so (`gone`).
+/// (kept past "Keep chat screenshots") says so (`gone`), and each shared
+/// file whether it's still there and what Open does (`shares::for_page`).
 pub fn for_page(mut conv: Conversation) -> Conversation {
     for m in conv.messages.iter_mut() {
         for img in m.images.iter_mut() {
             img.gone = !crate::snip::images::exists(&img.id);
         }
+        crate::chat::shares::for_page(&mut m.files);
     }
     conv
 }
@@ -1651,6 +1688,7 @@ mod tests {
             thinking: None,
             documents: vec![],
             pictures: vec![],
+            files: vec![],
             pages: vec![],
             offers: vec![],
             quote: None,

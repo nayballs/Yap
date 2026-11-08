@@ -135,6 +135,7 @@ pub const KINDS: &[About] = &[
             "(note_pins.json)",
             "(tasks.json)",
             "(chats.json)",
+            "(chat_files.json)",
             "(memory.json)",
             "(search-index/)",
             "(calendar.json)",
@@ -154,6 +155,7 @@ pub const KINDS: &[About] = &[
             "quick_note_tabs.json",
             "(tasks.json)",
             "(chats.json)",
+            "(chat_files.json)",
             "(memory.json)",
             "(search-index/)",
             "(calendar.json)",
@@ -173,7 +175,7 @@ pub const KINDS: &[About] = &[
         group: CHAT,
         label: "Chats",
         says: "Every chat, archived ones too, with its screenshots. Documents Chat wrote stay in Notes",
-        files: &["(chats.json)", "chat-images/", "claude_sessions.json", "connector_chats.json", "(memory.json)", "(search-index/)"],
+        files: &["(chats.json)", "(chat_files.json)", "chat-images/", "claude_sessions.json", "connector_chats.json", "(memory.json)", "(search-index/)"],
         stores: &["chats", "claudeSessions", "memory"],
     },
     About {
@@ -543,6 +545,8 @@ const STORES: &[(&str, Rule)] = &[
     ("quick_note_tabs.json", Choice::quick_note_tabs),
     ("tasks.json", Choice::tasks),
     ("chats.json", Choice::chats),
+    // (The shares' copy for an older Yap's save: rewritten with chats.json, chat/shares.rs.)
+    ("chat_files.json", Choice::chats),
     ("chat-images/", Choice::chat_images),
     ("claude_sessions.json", Choice::claude_sessions),
     ("connector_chats.json", Choice::connector_chats),

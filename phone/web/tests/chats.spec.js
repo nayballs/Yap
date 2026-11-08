@@ -113,6 +113,27 @@ test("an agent's report in a chat is a note, never the person's own bubble", asy
   await expect(page.getByTestId('answer').last()).toHaveText('Done: I added a watering schedule to notes.md.');
 });
 
+test('the files an answer shared on the PC are listed by name under it', async ({ page }) => {
+  // share_files on the PC (chat/shares.rs): the pictures and files stay
+  // there; the phone gets their names (link/chats.rs), an agent's report's too.
+  const threads = {
+    45: {
+      title: 'Garden concepts',
+      messages: [
+        { role: 'user', text: 'Show me the concept pictures' },
+        { role: 'assistant', text: 'Here they are.', id: 'chat:45:1', files: ['concept.png', 'beds.png', 'notes.md'] },
+      ],
+    },
+  };
+  const pc = await mockPc(page, { threads, recents: [{ id: 45, title: 'Garden concepts', ts: 1_730_000_000 }] });
+  await open(page);
+  await ready(page, pc);
+  await page.getByTestId('menu').click();
+  await recents(page).filter({ hasText: 'Garden concepts' }).click();
+  await expect(page.getByTestId('answer')).toHaveText('Here they are.');
+  await expect(page.getByTestId('answer-files')).toHaveText('Shared on your PC: concept.png, beds.png, notes.md');
+});
+
 test('+ New chat: the thread empties, the next question starts one, and the PC says which', async ({ page }) => {
   const pc = await mockPc(page);
   await open(page);

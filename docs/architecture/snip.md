@@ -741,6 +741,12 @@ doesn't show it (a screenshot never goes there).
   it, an image no conversation refers to (a snip never sent) after a day,
   and leftover temp files — and the thumbnails of every image gone
   (`thumbs::sweep_in`; `images::delete` takes an image's with it). **A
+  picture shared into the conversation** (`share_files`, `chat/shares.rs`,
+  2026-11-08: a file's on this PC, source "file", or one of a turn's from
+  the web, "web"; an agent's report's pictures too) is stored the same way
+  and referred to by its answer's (or report marker's) `files`, so the sweep
+  keeps it and its chat takes it (`ChatMessage::image_ids`); its thumbnails
+  as any picture's (a grid's tiles, the large one at the thread's width). **A
   picture Chat showed from the web** (`chat/pictures.rs`, 2026-10-31) is
   stored the same way (`attach::keep`, source "web") and referred to by its
   answer's `pictures` (`chats::image_ids` counts those too), so it's kept,

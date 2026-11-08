@@ -434,6 +434,7 @@ mod tests {
             past_chats: true,
             picture_tools: true,
             files: Gate::Off,
+            share_tools: true,
         }
     }
 
@@ -563,6 +564,8 @@ mod tests {
                 act: g.act,
                 own_search: g.own_search,
                 agents: g.agents.then_some(crate::chat::tools::AgentsTurn::default()),
+                // (Since 8 Nov 2026 share_files too, where show_picture takes a path.)
+                share: crate::chat::shares::Offer::of(g.pictures, g.files, true),
                 ..Default::default()
             };
             assert_eq!(g.offered(None, Some(7), code), crate::chat::tools::offered_tools(cfg.open_apps, true, before), "code: {code}");

@@ -29,6 +29,11 @@
 //!   `find_pictures` lists a page's; `show_picture` shows one of the turn's
 //!   candidates (a page's pictures, a shot); `look_at_picture` hands it to
 //!   the model first.
+//! - **`share_files`** (`chat/shares.rs`, 8 Nov 2026): files shared into
+//!   the conversation — a picture inline, other files as cards — wherever
+//!   `show_picture` takes a path (the web's pictures, or the picture files'
+//!   without the web); each share goes to the turn's stream at once and the
+//!   answer keeps it (`turn::Shown::files`).
 //! - **Picture files without the web** ([`Eyes::files`], 8 Nov 2026,
 //!   `chat/pictures/local.rs`): a Code chat on the plan, or a question
 //!   naming a picture file, with the web off — `show_picture` and
@@ -93,6 +98,7 @@ use crate::ai::claude_plan::{BASE_URL, PROVIDER};
 use crate::chat::pages::{self, act};
 use crate::chat::pictures::{self, Gate, Look};
 use crate::chat::see_screen;
+use crate::chat::shares::{self, Offer};
 use crate::chat::stream::{Event, Live};
 
 /// **What a run may see and do**: the screen look's gate, the pages' and
@@ -134,14 +140,20 @@ impl Eyes {
 const PICTURES: &[&str] = &[pictures::FIND, pictures::LOOK, pictures::SHOW];
 
 /// Every tool here, in the order they're listed: the screen, the browser,
-/// the pictures.
+/// the pictures, then sharing files into the conversation.
 pub fn all_names() -> Vec<&'static str> {
-    std::iter::once(see_screen::LOOK).chain(pages::ALL.iter().copied()).chain(PICTURES.iter().copied()).collect()
+    std::iter::once(see_screen::LOOK).chain(pages::ALL.iter().copied()).chain(PICTURES.iter().copied()).chain(std::iter::once(shares::NAME)).collect()
 }
 
 /// Whether `name` is one of the tools here.
 pub fn is_one(name: &str) -> bool {
-    name == see_screen::LOOK || pages::ALL.contains(&name) || PICTURES.contains(&name)
+    name == see_screen::LOOK || pages::ALL.contains(&name) || PICTURES.contains(&name) || name == shares::NAME
+}
+
+/// Where `share_files` is offered with `eyes`: as `show_picture` takes a
+/// path (the web's pictures, else the picture files'). Pure.
+pub fn share_offer(eyes: Eyes) -> Offer {
+    Offer::of(eyes.pictures, eyes.files, true)
 }
 
 /// **The calls that bring the screen's or a page's words or pictures in**:
@@ -165,6 +177,7 @@ pub fn offers(eyes: Eyes, name: &str) -> bool {
         see_screen::LOOK => see_screen::offers(eyes.screen, name),
         n if pages::ALL.contains(&n) => pages::offers(eyes.pictures, eyes.act, n),
         n if PICTURES.contains(&n) => eyes.pictures.offers(n, true) || (eyes.pictures == Gate::Off && pictures::file_offers(eyes.files, n)),
+        shares::NAME => share_offer(eyes) != Offer::Off,
         _ => false,
     }
 }
@@ -185,6 +198,7 @@ fn loop_definitions(eyes: Eyes) -> Vec<Value> {
     if eyes.pictures == Gate::Off {
         all.extend(each(pictures::file_definitions(eyes.files)));
     }
+    all.extend(each(shares::definitions(share_offer(eyes))));
     let name = |d: &Value| d["function"]["name"].as_str().unwrap_or("").to_string();
     let order = all_names();
     let mut out: Vec<Value> = all.into_iter().filter(|d| offers(eyes, &name(d))).collect();
@@ -213,6 +227,7 @@ fn title(name: &str) -> &'static str {
         act::FORM_INPUT => "Set a field on the page",
         pictures::FIND => "List a page's pictures",
         pictures::LOOK => "Look at a picture",
+        shares::NAME => "Share files in the chat",
         _ => "Show a picture beside the chat",
     }
 }
@@ -267,7 +282,7 @@ pub fn refused(name: &str, eyes: Eyes, meeting: bool) -> Option<Value> {
     }
     // The web off: picture files by a path only, nothing else of the panel's.
     if eyes.files_only() {
-        return (!pictures::file_offers(eyes.files, name)).then(|| failed(&format!("{name} isn't offered for this model."), &format!("Unknown tool: {name}")));
+        return (!pictures::file_offers(eyes.files, name) && name != shares::NAME).then(|| failed(&format!("{name} isn't offered for this model."), &format!("Unknown tool: {name}")));
     }
     if eyes.pictures == Gate::Off {
         return Some(failed(
@@ -411,6 +426,16 @@ async fn run_for(slot: &Slot, turn: &Call, name: &str, args: &Value, wait: std::
             result["note"] = json!(SHOT_NOTE);
         }
         (result, run.looks)
+    } else if name == shares::NAME {
+        // Files shared into the conversation (chat/shares.rs): its stream
+        // hears each share at once; nothing comes to the model but names.
+        let offer = share_offer(turn.ctx.eyes);
+        let endpoints = w.endpoints().clone();
+        let run = shares::execute(&mut w.pictures, (offer == Offer::Web).then_some(&endpoints), args, offer).await;
+        if let Some(share) = run.share {
+            send(Event::Share { share });
+        }
+        (run.result, Vec::new())
     } else {
         let run = if turn.ctx.eyes.files_only() {
             // The web off: a picture file by its path (pictures/local.rs);

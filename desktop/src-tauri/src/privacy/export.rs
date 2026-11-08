@@ -324,6 +324,12 @@ pub fn chat_markdown(c: &crate::chat::chats::Conversation, when: &dyn Fn(u64) ->
         };
         let model = m.model.as_ref().filter(|x| !x.id.trim().is_empty()).map(|x| format!(" · {}", x.id)).unwrap_or_default();
         out.push_str(&format!("\n**{who}** · {}{model}\n\n{}\n", when(m.ts), m.text.trim()));
+        // The files it shared into the conversation (chat/shares.rs): their
+        // paths only, as chats.json keeps them (the files stay where they are).
+        let shared: Vec<&str> = m.files.iter().flat_map(|s| s.items.iter()).map(|i| i.path.as_str()).filter(|p| !p.is_empty()).collect();
+        if !shared.is_empty() {
+            out.push_str(&format!("\nShared files: {}\n", shared.join(", ")));
+        }
     }
     out
 }
@@ -1105,6 +1111,20 @@ mod tests {
         let lines: Vec<&str> = csv.trim_start_matches('\u{feff}').split("\r\n").collect();
         assert_eq!(lines[0], "When,App,Words,Text,As said,Heard,Status,Model");
         assert_eq!(lines[1], "2026-10-02 09:00:00,chrome.exe,2,\"So, hello.\",um so hello,\"um so, hello\",not pasted: The window was gone,parakeet");
+    }
+
+    #[test]
+    fn a_chat_lists_the_files_its_answers_shared_by_their_paths_only() {
+        use crate::chat::shares::{Share, SharedFile};
+        let picture = SharedFile { name: "concept.png".into(), path: "C:\\Projects\\garden-planner\\docs\\concept.png".into(), id: "img_0123456789abcdef".into(), kind: "image".into(), ..Default::default() };
+        let notes = SharedFile { name: "notes.md".into(), path: "C:\\Projects\\garden-planner\\notes.md".into(), kind: "markdown".into(), ..Default::default() };
+        let web = SharedFile { name: "Fort Joy map".into(), id: "img_fedcba9876543210".into(), image_url: "https://wiki.example.com/map.png".into(), ..Default::default() };
+        let answer = crate::chat::chats::ChatMessage { role: "assistant".into(), text: "Here they are.".into(), ts: 1, files: vec![Share { caption: "Garden".into(), items: vec![picture, notes, web], ..Default::default() }], ..Default::default() };
+        let conv = crate::chat::chats::Conversation { id: 3, title: "Garden".into(), created_ts: 1, updated_ts: 1, messages: vec![answer], scope: String::new(), note: None, archived_ts: 0, summary: None };
+        let md = chat_markdown(&conv, &when);
+        assert!(md.contains("\nShared files: C:\\Projects\\garden-planner\\docs\\concept.png, C:\\Projects\\garden-planner\\notes.md\n"), "{md}");
+        // Never a picture's copy, nor a web address: paths on this PC only.
+        assert!(!md.contains("img_") && !md.contains("wiki.example.com"), "{md}");
     }
 
     #[test]

@@ -778,7 +778,23 @@
   ordinary note in Notes (folder "Chat documents", `source` "chat"). Nothing
   about documents goes in notes.json beyond the note itself; what the model
   last saw of each is kept in memory (after a restart, the newest Chat
-  version in `note-versions/`).
+  version in `note-versions/`). An answer that **shared files into the
+  conversation** (2026-11-08, `share_files`, `chat/shares.rs`) keeps `files`
+  — a share a call, `[{caption?, items: [{name, path, folder, kind, bytes,
+  id?, w?, h?, pages?, imageUrl?, page?}], morePictures?, moreFiles?}]`: a
+  picture's copy in `chat-images/` by its `id` (kept and deleted like a
+  screenshot), any other file only its path and facts, never its contents
+  (a card's preview is read from the file when it's unfolded) —, and so does
+  an agent's report marker (the pictures and new files its turn made),
+  written only when there are some. **New field**: an older Yap's save
+  drops it, so every save of chats.json also writes the shares to
+  `%APPDATA%/yap/chat_files.json` (`{version, messages: [{conversation,
+  index, ts, files}]}`, removed when there are none), which no older Yap
+  touches; the next start puts back any share a message lost
+  (`shares::restore_from_disk`: the same conversation, place and time).
+  Rewritten with chats.json, it goes with the chats in Delete some of your
+  data and Reset app. Its picture a sweep took (an older Yap's, which
+  doesn't know them) shows as its file's card.
 - The Chat document panel's width: the main window's `localStorage`
   (`yapChatDocWidth`, px), a convenience of that window, never config.json.
 - Model lists: `%APPDATA%/yap/model_catalog.json` — each keyed AI provider's
