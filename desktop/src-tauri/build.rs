@@ -19,6 +19,8 @@ const LINK_SHARED: &[(&str, &str)] = &[
     // grouping; the status dots; an ask-first card's words — read as the
     // desktop reads them.
     ("core/agents.js", "../src/lib/core/agents.js"),
+    // (What an agent is doing now, split out of agents.js for the main chunk.)
+    ("core/agentNow.js", "../src/lib/core/agentNow.js"),
     ("core/money.js", "../src/lib/core/money.js"),
     ("core/codeChats.js", "../src/lib/core/codeChats.js"),
     ("core/chatStatus.js", "../src/lib/core/chatStatus.js"),
