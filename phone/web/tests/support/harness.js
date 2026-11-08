@@ -277,6 +277,10 @@ export async function mockPc(page, opts = {}) {
     autoReady: opts.autoReady !== false,
     autoPong: opts.autoPong !== false,
     onHello: opts.onHello || null,
+    // Remote Control (support/code-pc.js): `ready.code` (`{on}` or `{on: false, why}`),
+    // and every other text message handed to `onText` too.
+    code: opts.code || null,
+    onText: opts.onText || null,
     models: opts.models || MODELS,
     model: opts.model || MODELS[0],
     // A PC from before typed questions and Chat's picker (`old`): v1's `ready` only.
@@ -298,6 +302,7 @@ export async function mockPc(page, opts = {}) {
       models: pc.models,
       ...(pc.can ? { can: pc.can } : {}),
       ...(pc.picker ? { picker: pc.picker } : {}),
+      ...(pc.code ? { code: pc.code } : {}),
     });
   pc.last = () => pc.conns[pc.conns.length - 1];
   pc.sendTo = (conn, msg) => conn.ws.send(JSON.stringify(msg));
@@ -324,7 +329,16 @@ export async function mockPc(page, opts = {}) {
         else if (pc.autoChats && msg.type === 'chats') pc.sendTo(conn, { type: 'chats', items: pc.recents });
         else if (pc.autoChats && msg.type === 'open_chat') {
           const t = pc.threads[msg.id];
-          if (t) pc.sendTo(conn, { type: 'thread', id: msg.id, title: t.title, messages: t.messages, more: false });
+          // (A Code chat's thread carries its `code`, `agents` and `cards`, as the PC's.)
+          if (t)
+            pc.sendTo(conn, {
+              type: 'thread',
+              id: msg.id,
+              title: t.title,
+              messages: t.messages,
+              more: !!t.more,
+              ...(t.code ? { code: t.code, agents: t.agents || [], cards: t.cards || [] } : {}),
+            });
           else {
             pc.sendTo(conn, { type: 'error', message: "That chat isn't in Chat on your PC any more. Your next question starts a new one." });
             pc.sendTo(conn, { type: 'thread', id: null, title: '', messages: [], more: false });
@@ -332,6 +346,7 @@ export async function mockPc(page, opts = {}) {
         } else if (pc.autoChats && msg.type === 'new_chat') {
           pc.sendTo(conn, { type: 'thread', id: null, title: '', messages: [], more: false });
         }
+        if (pc.onText && msg.type !== 'hello' && msg.type !== 'ping') pc.onText(msg, conn, pc);
       } else if (Buffer.from(m)[0] === 0x03) {
         // A piece of the picture announced last.
         const b = Buffer.from(m);

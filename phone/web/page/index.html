@@ -50,6 +50,14 @@
         </button>
       </header>
 
+      <!-- Remote Control (code.js, cards.js): while an agent waits on you, on
+           every screen; a tap goes to its card. -->
+      <button id="needs" class="needs" type="button" data-testid="needs" hidden>
+        <span class="needs-dot" aria-hidden="true"></span>
+        <span id="needs-text" class="needs-text"></span>
+        <svg class="needs-go" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="m9 6 6 6-6 6" /></svg>
+      </button>
+
       <main>
         <!-- Pairing: the code to check on the PC, or how to pair. -->
         <section id="pair" class="pair" aria-labelledby="pair-title" hidden>
@@ -79,18 +87,42 @@
           <div id="thread" class="thread" data-testid="thread">
             <div id="empty" class="empty">
               <svg class="empty-spark" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M12 2.5c.5 3.9 1.6 6.4 3.1 7.9 1.5 1.5 4 2.6 6.4 3.1-2.4.5-4.9 1.6-6.4 3.1-1.5 1.5-2.6 4-3.1 6.9-.5-2.9-1.6-5.4-3.1-6.9-1.5-1.5-4-2.6-6.9-3.1 2.9-.5 5.4-1.6 6.9-3.1 1.5-1.5 2.6-4 3.1-7.9z" /></svg>
-              <h1 class="empty-title">Ask Yap anything</h1>
-              <p class="empty-sub">Type a question, or tap the <strong>mic</strong> and say it. To talk it through out loud, tap the <strong>waveform</strong>: Yap answers, then listens again.</p>
+              <h1 id="empty-title" class="empty-title">Ask Yap anything</h1>
+              <p id="empty-sub" class="empty-sub">Type a question, or tap the <strong>mic</strong> and say it. To talk it through out loud, tap the <strong>waveform</strong>: Yap answers, then listens again.</p>
+              <!-- A new Code chat: what it's for, and one-tap prompts that fill the box (never sent by themselves). -->
+              <p id="code-intro" class="empty-sub" data-testid="code-intro" hidden></p>
+              <div id="code-prompts" class="prompts" data-testid="code-prompts" hidden></div>
               <p id="keep-open" class="keep-open">Keep this page open. Your headset works as the mic and speaker.</p>
             </div>
             <p id="older" class="older" data-testid="older" hidden>Earlier messages are in Chat on your PC.</p>
             <ol id="convo" class="convo" aria-label="Conversation" aria-live="polite" data-testid="convo"></ol>
+            <!-- The cards waiting in a Code chat (cards.js): Allow once / Deny, a plan's Go ahead, Start / Don't. -->
+            <div id="thread-cards" class="thread-cards" data-testid="thread-cards" hidden></div>
             <!-- What Yap is doing, as Chat's activity line: three amber dots, the step, its time. -->
             <p id="step" class="activity" data-testid="step" hidden>
               <span class="dots" aria-hidden="true"><i></i><i></i><i></i></span>
               <span id="step-line" class="step-line"></span><span id="step-time" class="step-time"></span>
             </p>
           </div>
+
+          <!-- An agent's live view (agent.js): in the thread's place; ✕ goes
+               back to the chat and never stops the agent. The composer under
+               it is "Tell the agent…". -->
+          <section id="agentview" class="agentview" aria-label="Agent" data-testid="agent-view" hidden>
+            <div class="avhead">
+              <button id="av-close" class="iconbtn" type="button" aria-label="Back to the chat (the agent carries on)" data-testid="agent-close">
+                <svg class="lines" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M6.5 6.5l11 11M17.5 6.5l-11 11" /></svg>
+              </button>
+              <svg class="avicon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" /></svg>
+              <h2 id="av-title" class="avtitle" data-testid="agent-title">Agent</h2>
+              <span id="av-status" class="avstatus" data-testid="agent-status"></span>
+            </div>
+            <div id="av-body" class="avbody" data-testid="agent-body"></div>
+            <button id="av-follow" class="avfollow" type="button" aria-label="Follow the latest step" data-testid="agent-follow" hidden>
+              <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M12 5v14M6 13l6 6 6-6" /></svg>
+            </button>
+            <div id="av-foot" class="avfoot" data-testid="agent-foot" hidden></div>
+          </section>
 
           <div class="dock">
             <p id="note" class="note" data-testid="note" role="status" hidden></p>
@@ -118,6 +150,18 @@
               <ul id="shots" class="shots" aria-label="Pictures to send" data-testid="shots" hidden></ul>
               <div class="field">
                 <textarea id="input" rows="1" placeholder="Ask Yap, or hold to talk" aria-label="Ask Yap" enterkeyhint="send" data-testid="input"></textarea>
+              </div>
+              <!-- A Code chat's chips: its workspace (the Environment sheet) and
+                   its Mode (up to Auto from the phone, never Bypass). -->
+              <div id="coderow" class="coderow" data-testid="coderow" hidden>
+                <button id="ws-chip" class="chip codechip" type="button" aria-haspopup="dialog" data-testid="workspace-chip">
+                  <svg class="cmark" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" /></svg>
+                  <span id="ws-chip-label" class="chip-label"></span>
+                </button>
+                <button id="mode-chip" class="chip modechip" type="button" aria-haspopup="dialog" data-testid="mode-chip">
+                  <span id="mode-chip-label" class="chip-label"></span>
+                  <svg class="chev" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M7 10l5 5 5-5" /></svg>
+                </button>
               </div>
               <div class="row">
                 <button id="cancel-btn" class="cbtn cancel" type="button" data-testid="cancel" aria-label="Cancel" hidden>
@@ -203,13 +247,22 @@
           <svg class="lines" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M6.5 6.5l11 11M17.5 6.5l-11 11" /></svg>
         </button>
       </div>
-      <label class="search">
-        <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><circle cx="11" cy="11" r="6.5" /><path d="M16 16l4 4" /></svg>
-        <input id="drawer-search" type="search" placeholder="Search chats" aria-label="Search chats" enterkeyhint="search" data-testid="drawer-search" />
-      </label>
-      <h3 class="recents-h">Recents</h3>
-      <ul id="recents" class="recents" aria-labelledby="drawer-title" data-testid="recents"></ul>
-      <p id="recents-empty" class="recents-empty" data-testid="recents-empty" hidden></p>
+      <!-- Chat | Code (Remote Control on): each side's strongest dot on its segment. -->
+      <div id="sides" class="sides" role="tablist" aria-label="Chat or Code" data-testid="sides" hidden>
+        <button id="side-chat" class="side" type="button" role="tab" aria-selected="true" data-side="chat" data-testid="side-chat">Chat<span id="side-chat-dot" class="sidedot"></span></button>
+        <button id="side-code" class="side" type="button" role="tab" aria-selected="false" data-side="code" data-testid="side-code">Code<span id="side-code-dot" class="sidedot"></span></button>
+      </div>
+      <div id="chat-side" class="drawer-side">
+        <label class="search">
+          <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><circle cx="11" cy="11" r="6.5" /><path d="M16 16l4 4" /></svg>
+          <input id="drawer-search" type="search" placeholder="Search chats" aria-label="Search chats" enterkeyhint="search" data-testid="drawer-search" />
+        </label>
+        <h3 class="recents-h">Recents</h3>
+        <ul id="recents" class="recents" aria-labelledby="drawer-title" data-testid="recents"></ul>
+        <p id="recents-empty" class="recents-empty" data-testid="recents-empty" hidden></p>
+      </div>
+      <!-- The Code side (code.js): the agents working, then each workspace's Code chats. -->
+      <div id="code-side" class="drawer-side code-side" data-testid="code-side" hidden></div>
       <div class="drawer-foot">
         <span class="drawer-pc">
           <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><rect x="3" y="4" width="18" height="12" rx="2" /><path d="M8 20h8M12 16v4" /></svg>
@@ -217,8 +270,45 @@
         </span>
         <button id="new-chat" class="newchat" type="button" data-testid="new-chat">
           <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M12 5v14M5 12h14" /></svg>
-          New chat
+          <span id="new-chat-label">New chat</span>
         </button>
+      </div>
+    </dialog>
+
+    <!-- + New code chat: the workspaces, most recently used first (code.js). -->
+    <dialog id="ws-sheet" class="sheet" aria-labelledby="ws-sheet-title" data-testid="workspace-sheet">
+      <div class="grab" aria-hidden="true"></div>
+      <h2 id="ws-sheet-title">New code chat</h2>
+      <p class="hint">Pick a workspace: its agents run your own Claude Code there, on your PC.</p>
+      <div id="ws-list" class="sheet-list"></div>
+      <button id="ws-sheet-close" class="btn secondary-btn sheet-close" type="button">Cancel</button>
+    </dialog>
+
+    <!-- A Code chat's Mode: Auto, Manual, Accept edits, Plan; never Bypass from the phone. -->
+    <dialog id="mode-sheet" class="sheet" aria-labelledby="mode-sheet-title" data-testid="mode-sheet">
+      <div class="grab" aria-hidden="true"></div>
+      <h2 id="mode-sheet-title">Mode</h2>
+      <div id="mode-list" class="sheet-list"></div>
+      <button id="mode-sheet-close" class="btn secondary-btn sheet-close" type="button">Done</button>
+    </dialog>
+
+    <!-- A Code chat's Environment: its workspace, where it runs, its Mode, Remote Control. -->
+    <dialog id="env-sheet" class="sheet" aria-labelledby="env-sheet-title" data-testid="env-sheet">
+      <div class="grab" aria-hidden="true"></div>
+      <h2 id="env-sheet-title">Environment</h2>
+      <dl id="env-list" class="envlist"></dl>
+      <button id="env-sheet-close" class="btn secondary-btn sheet-close" type="button">Done</button>
+    </dialog>
+
+    <!-- Undo from the phone: its own confirm first (agent.js), then `agent_undo {sure: true}`. -->
+    <dialog id="undo-sheet" class="sheet" aria-labelledby="undo-title" data-testid="undo-sheet">
+      <div class="grab" aria-hidden="true"></div>
+      <h2 id="undo-title"></h2>
+      <p id="undo-body" class="hint"></p>
+      <ul id="undo-files" class="undofiles" data-testid="undo-files"></ul>
+      <div class="sheet-btns">
+        <button id="undo-cancel" class="btn secondary-btn" type="button" data-testid="undo-cancel">Cancel</button>
+        <button id="undo-go" class="btn danger-btn" type="button" data-testid="undo-go">Undo</button>
       </div>
     </dialog>
 
@@ -242,6 +332,15 @@
             <span id="clearer-hint" class="hint">A headset's call mode can crackle, so this closes the mic while Yap talks and the headset uses its music mode. You can't talk over Yap by voice; Stop still works.</span>
           </span>
           <input id="clearer" type="checkbox" role="switch" data-testid="clearer" aria-describedby="clearer-hint" />
+          <span class="track" aria-hidden="true"></span>
+        </label>
+        <!-- Remote Control: a notification while this page is in the background (notify.js). -->
+        <label id="notify-row" class="switch" data-testid="notify-row" hidden>
+          <span class="switch-text">
+            <span class="switch-label">Notify me when an agent needs me</span>
+            <span id="notify-line" class="hint" data-testid="notify-line"></span>
+          </span>
+          <input id="notify" type="checkbox" role="switch" data-testid="notify" aria-describedby="notify-line" />
           <span class="track" aria-hidden="true"></span>
         </label>
         <div class="field-row">

@@ -1,5 +1,6 @@
 // The desktop's own files the phone's page loads as they are (build.rs
-// `LINK_SHARED`: Chat's picker code at core/, the logos at providers/) stay
+// `LINK_SHARED`: Chat's picker code, Remote Control's wire and Yap Code's
+// own rules at core/, the logos at providers/) stay
 // loadable on a phone: each module imports only others the PC serves,
 // never Tauri, Svelte or an asset; and the marks the picker draws are the
 // ones served. No browser.
@@ -24,7 +25,7 @@ test('every shared module imports only the others the PC serves, and nothing of 
 });
 
 test("the page's own modules import only what's served", () => {
-  for (const f of ['link.js', 'picker.js']) {
+  for (const f of ['link.js', 'picker.js', 'drawer.js', 'code.js', 'cards.js', 'agent.js', 'diff.js', 'notify.js', 'dom.js']) {
     const src = fs.readFileSync(path.join(PAGE_DIR, f), 'utf8');
     for (const spec of imports(src)) {
       const rel = path.posix.normalize(spec.replace(/^\.\//, ''));
