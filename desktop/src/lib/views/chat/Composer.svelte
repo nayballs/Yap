@@ -311,7 +311,7 @@
     </div>
   {/if}
   <div class="inputbar">
-    <CodeEdge {code} />
+    <CodeEdge {code} conversation={chat.activeId} />
     <div class="pluswrap" bind:this={plusEl}>
       <button
         class="plusbtn"

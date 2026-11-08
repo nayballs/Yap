@@ -40,7 +40,7 @@ pub fn title(c: &Conversation) -> String {
 pub fn recents(all: &[Conversation]) -> Vec<ChatItem> {
     let mut list: Vec<&Conversation> = all.iter().filter(|c| usable(c)).collect();
     list.sort_by_key(|c| (std::cmp::Reverse(c.updated_ts), std::cmp::Reverse(c.id)));
-    list.into_iter().take(MAX_RECENTS).map(|c| ChatItem { id: c.id, title: title(c), ts: c.updated_ts }).collect()
+    list.into_iter().take(MAX_RECENTS).map(|c| ChatItem { id: c.id, title: title(c), ts: c.updated_ts, code: None }).collect()
 }
 
 /// `text`, at most [`MAX_CHARS`] of it (then "…"). Pure.
@@ -53,35 +53,31 @@ fn capped(text: &str) -> String {
     out
 }
 
+/// **Message `index` of `c` as the phone shows it**: a question's own words
+/// (an agent's report marker keeps its `kind`, so it's never shown as the
+/// person's bubble: 2026-11-08), an answer's with its id in Chat for ▶.
+/// Pure.
+pub fn message(c: &Conversation, index: usize) -> Option<ThreadMessage> {
+    let m = c.messages.get(index)?;
+    match m.role.as_str() {
+        "user" => Some(ThreadMessage {
+            role: "user",
+            text: capped(crate::snip::ocr::question_of(&m.text).trim()),
+            id: None,
+            voice: m.voice,
+            pictures: m.images.len(),
+            kind: m.kind.clone(),
+        }),
+        "assistant" => Some(ThreadMessage { role: "assistant", text: capped(m.text.trim()), id: Some(format!("chat:{}:{index}", c.id)), ..Default::default() }),
+        _ => None,
+    }
+}
+
 /// **A conversation as the phone shows it**: its title, its latest
-/// messages' words (a question's own words, an answer's with its id in
-/// Chat for ▶) and whether older ones were left out. Pure.
+/// messages' words ([`message`]) and whether older ones were left out. Pure.
 pub fn thread(c: &Conversation) -> (String, Vec<ThreadMessage>, bool) {
     let start = c.messages.len().saturating_sub(KEEP_MESSAGES);
-    let messages = c.messages[start..]
-        .iter()
-        .enumerate()
-        .filter_map(|(i, m)| {
-            let index = start + i;
-            match m.role.as_str() {
-                "user" => Some(ThreadMessage {
-                    role: "user",
-                    text: capped(crate::snip::ocr::question_of(&m.text).trim()),
-                    id: None,
-                    voice: m.voice,
-                    pictures: m.images.len(),
-                }),
-                "assistant" => Some(ThreadMessage {
-                    role: "assistant",
-                    text: capped(m.text.trim()),
-                    id: Some(format!("chat:{}:{index}", c.id)),
-                    voice: false,
-                    pictures: 0,
-                }),
-                _ => None,
-            }
-        })
-        .collect();
+    let messages = (start..c.messages.len()).filter_map(|i| message(c, i)).collect();
     (title(c), messages, start > 0)
 }
 
@@ -118,7 +114,7 @@ mod tests {
         let items = recents(&all);
         assert_eq!(items.iter().map(|i| i.id).collect::<Vec<_>>(), vec![2, 3, 1], "newest first; archived and meeting threads left out");
         assert_eq!(items[0].title, UNTITLED, "an empty title");
-        assert_eq!(items[1], ChatItem { id: 3, title: "Bike repair".into(), ts: 300 });
+        assert_eq!(items[1], ChatItem { id: 3, title: "Bike repair".into(), ts: 300, code: None });
         // Bounded.
         let many: Vec<Conversation> = (1..=MAX_RECENTS as u64 + 20).map(|i| conv(i, "Chat", i)).collect();
         assert_eq!(recents(&many).len(), MAX_RECENTS);
@@ -136,7 +132,7 @@ mod tests {
         assert_eq!(title, "Garden plan");
         assert!(!more);
         assert_eq!(messages.len(), 4, "only questions and answers");
-        assert_eq!(messages[0], ThreadMessage { role: "user", text: "What grows in shade?".into(), id: None, voice: true, pictures: 2 });
+        assert_eq!(messages[0], ThreadMessage { role: "user", text: "What grows in shade?".into(), id: None, voice: true, pictures: 2, kind: String::new() });
         assert_eq!(messages[1].id.as_deref(), Some("chat:7:1"), "its place in Chat");
         assert_eq!(messages[3].id.as_deref(), Some("chat:7:4"));
         // The latest only, each message capped.
@@ -150,6 +146,22 @@ mod tests {
         assert_eq!(last.text.chars().count(), MAX_CHARS + 1);
         assert!(last.text.ends_with('…'));
         assert_eq!(last.id.as_deref(), Some(format!("chat:7:{}", KEEP_MESSAGES + 6).as_str()));
+    }
+
+    #[test]
+    fn an_agents_report_is_marked_as_one_never_the_persons_own_bubble() {
+        let mut c = conv(12, "Watering schedule", 100);
+        let marker = ChatMessage { role: "user".into(), text: "The agent in garden-planner: it's done.".into(), kind: crate::chat::turn::AGENT_REPORT.into(), ..Default::default() };
+        c.messages = vec![said("user", "Add a watering schedule"), said("assistant", "On it."), marker, said("assistant", "Done: I added it.")];
+        let (_, messages, _) = thread(&c);
+        assert_eq!(messages.iter().map(|m| (m.role, m.kind.as_str())).collect::<Vec<_>>(), [("user", ""), ("assistant", ""), ("user", "agentReport"), ("assistant", "")]);
+        let v = serde_json::to_value(&messages[2]).unwrap();
+        assert_eq!(v["kind"], "agentReport");
+        assert!(serde_json::to_value(&messages[0]).unwrap().get("kind").is_none(), "the person's own: no kind");
+        // One message alone, as a watched chat hears it.
+        assert_eq!(message(&c, 2), Some(messages[2].clone()));
+        assert_eq!(message(&c, 3).and_then(|m| m.id).as_deref(), Some("chat:12:3"));
+        assert_eq!(message(&c, 9), None);
     }
 
     #[test]

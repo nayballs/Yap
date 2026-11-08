@@ -300,6 +300,11 @@ async fn start_agent(args: &Value, ctx: Ctx<'_>) -> Ran {
             return Ran::of(tool_error(r.for_model(), Value::Null, r.chip()));
         }
     };
+    // **A phone's question** (Yap Link, Remote Control): its agent runs at
+    // most at Auto, never Bypass, whatever the chat's Mode on the PC.
+    let phone = question_id(ctx.conversation).and_then(|m| crate::agents::remote::phone_of_message(&m));
+    let mode = if phone.is_some() { crate::agents::remote::phone_mode(mode) } else { mode };
+    let phone_cap = |m: Option<Mode>| if phone.is_some() { Some(crate::agents::remote::phone_mode(m.unwrap_or(crate::agents::remote::PHONE_MAX))) } else { m };
     let asked_model = match arg(args, &["model"]) {
         m if m.starts_with("claude-") && m.len() <= 60 && m.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '.' | '[' | ']')) => Some(m.to_string()),
         _ => None,
@@ -319,9 +324,10 @@ async fn start_agent(args: &Value, ctx: Ctx<'_>) -> Ran {
                 title: title.to_string(),
                 message_id: question_id(ctx.conversation),
                 go: consent::go_ahead(brief) || (prev.plan && crate::apps::is_affirmative(ctx.question)),
-                mode: asked_mode,
+                mode: phone_cap(asked_mode),
                 model: asked_model,
                 effort: asked_effort.map(|e| e.as_str().to_string()),
+                phone: phone.clone(),
             };
             return carry_on(prev, ask, &folder, mode, web, mode_note, ctx).await;
         }
@@ -487,8 +493,11 @@ async fn allowed(ctx: &Ctx<'_>, folder: &Folder, mode: Mode, brief: &str, new_fo
         web,
         continues,
     };
+    // The card goes to the phones with Remote Control too (`link/code.rs`),
+    // as it goes to the thread.
+    let tee = crate::link::code::ConfirmTee::new(ctx.live, ctx.conversation);
     let answer = confirm::ask(
-        ctx.live,
+        tee.live(),
         confirm::Ask { act: "agent", label: &folder.name, site: &folder.path, does: if continues { "tell the agent" } else { "send an agent" }, text: brief, key: "", agent: Some(card) },
     )
     .await;
@@ -783,7 +792,12 @@ fn message_agent(args: &Value, ctx: &Ctx<'_>) -> Ran {
     let pick = pick_mode(chip, raw_mode, ctx, &cfg);
     let mode_note = pick.note(chip);
     let title = if fixed.is_some() { store::title_of(text) } else { arg(args, &["title"]).to_string() };
-    let ask = runner::Ask { text: text.to_string(), title, message_id: question_id(ctx.conversation), go, mode: pick.asked.filter(|m| *m < chip), ..Default::default() };
+    // A phone's question: its turn at most at Auto (Remote Control).
+    let message_id = question_id(ctx.conversation);
+    let phone = message_id.as_deref().and_then(crate::agents::remote::phone_of_message);
+    let mode = pick.asked.filter(|m| *m < chip);
+    let mode = if phone.is_some() { Some(crate::agents::remote::phone_mode(mode.unwrap_or(crate::agents::remote::PHONE_MAX))) } else { mode };
+    let ask = runner::Ask { text: text.to_string(), title, message_id, go, mode, phone, ..Default::default() };
     match runner::follow_up(&agent.id, ask) {
         Ok((j, how)) => {
             let queued = how == runner::FollowedUp::Queued;

@@ -87,6 +87,32 @@ test('a chat opened from the drawer: its messages, its title, and the next quest
   await expect(drawer(page).locator('[aria-current="true"]')).toHaveText('Trip packing list');
 });
 
+test("an agent's report in a chat is a note, never the person's own bubble", async ({ page }) => {
+  // A Code chat on the PC: the request, Yap's answer, the agent's report
+  // marker (role user, `kind: "agentReport"`) and its answer.
+  const threads = {
+    44: {
+      title: 'Watering schedule',
+      messages: [
+        { role: 'user', text: 'Add a watering schedule to notes.md' },
+        { role: 'assistant', text: "On it: I've sent an agent to garden-planner.", id: 'chat:44:1' },
+        { role: 'user', text: "The agent in garden-planner: it's done.\nFiles it changed: notes.md (backed up first).", kind: 'agentReport' },
+        { role: 'assistant', text: 'Done: I added a watering schedule to notes.md.', id: 'chat:44:3' },
+      ],
+    },
+  };
+  const pc = await mockPc(page, { threads, recents: [{ id: 44, title: 'Watering schedule', ts: 1_730_000_000 }] });
+  await open(page);
+  await ready(page, pc);
+  await page.getByTestId('menu').click();
+  await recents(page).filter({ hasText: 'Watering schedule' }).click();
+  await expect(page.getByTestId('turn')).toHaveCount(2);
+  // Only the person's own words are a bubble.
+  await expect(page.getByTestId('heard')).toHaveText(['Add a watering schedule to notes.md']);
+  await expect(page.getByTestId('report')).toHaveText("The agent in garden-planner: it's done.");
+  await expect(page.getByTestId('answer').last()).toHaveText('Done: I added a watering schedule to notes.md.');
+});
+
 test('+ New chat: the thread empties, the next question starts one, and the PC says which', async ({ page }) => {
   const pc = await mockPc(page);
   await open(page);

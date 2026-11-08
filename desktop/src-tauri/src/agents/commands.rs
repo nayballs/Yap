@@ -208,6 +208,11 @@ pub async fn agent_mode_set(conversation: u64, mode: String) -> Result<ModeView,
     }
     store::set_mode(conversation, m.as_str());
     tracing::info!(mode = m.as_str(), "Agents: a chat's Mode set");
+    // The phones following this chat (Remote Control) hear it.
+    if let Some(app) = super::runner::app() {
+        use tauri::Emitter;
+        let _ = app.emit(crate::link::code::MODE_EVENT, serde_json::json!({ "conversation": conversation, "mode": m.as_str() }));
+    }
     Ok(mode_view(m))
 }
 

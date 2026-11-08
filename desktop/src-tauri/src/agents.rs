@@ -36,6 +36,9 @@
 //! - [`commands`]: the page's commands (Yap Code's screens).
 //! - [`approve_card`]: a running agent's permission prompt on the Yap bar
 //!   when no Yap window is in front (Allow once / Deny).
+//! - [`remote`]: Remote Control's records (`remote_control.json`, 2026-11-08):
+//!   which phones and workspaces allow it, the turns a phone asked for (run
+//!   at most at Auto, reported on that phone), the audit trail.
 //!
 //! Chat's side: `chat/tools/agents.rs` (`start_agent`, `agent_status`,
 //! `message_agent`, `stop_agent`), `chat/turn/report.rs` (the report turn).
@@ -49,6 +52,7 @@ pub mod consent;
 pub mod diff;
 pub mod workspaces;
 pub mod modes;
+pub mod remote;
 pub mod runner;
 pub mod steps;
 pub mod store;

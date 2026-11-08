@@ -103,6 +103,16 @@
     }
   }
 
+  // Remote Control (link/code.rs): a phone ticked for it may use Yap Code.
+  async function setRemote(phone, on) {
+    try {
+      await invoke('link_phone_remote', { id: phone.id, on });
+    } catch (e) {
+      toast({ title: "Couldn't change it", description: String(e?.message ?? e), variant: 'destructive' });
+    }
+    load();
+  }
+
   async function remove(phone) {
     try {
       await invoke('link_remove', { id: phone.id });
@@ -133,7 +143,14 @@
     if (days < 14) return `last used ${days} days ago`;
     return `last used ${shortDate(ms)}`;
   }
-  const phoneMeta = (p) => (p.connected ? `Paired ${shortDate(p.paired)} · connected now` : `Paired ${shortDate(p.paired)} · ${used(p.lastSeen)}`);
+  const phoneMeta = (p) =>
+    (p.connected ? `Paired ${shortDate(p.paired)} · connected now` : `Paired ${shortDate(p.paired)} · ${used(p.lastSeen)}`) +
+    (cfg.linkRemoteControl && p.remote ? ' · Remote Control' : '');
+  const clock = (secs) => new Date(secs * 1000).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' });
+  // Its last remote action: "Allowed a step in garden-planner · 21:04".
+  const lastAction = (p) => (p.lastAction ? `${p.lastAction} · ${clock(p.lastActionTs)}` : '');
+  // What Remote Control needs that's off.
+  const remoteNeeds = $derived(!cfg.linkEnabled ? 'Turn on Use Yap from your phone above first.' : !cfg.agentsEnabled ? 'It needs Yap Code: turn it on in Settings → Assistant → Yap Code.' : '');
 </script>
 
 <div class="page-h">
@@ -231,12 +248,22 @@
     {#if status?.phones?.length}
       <ul aria-label="Paired phones">
         {#each status.phones as p (p.id)}
-          <li class="phone">
+          <li class="phone" data-testid="link-phone">
             <span class="dot" class:on={p.connected} aria-hidden="true"></span>
             <span class="who">
               <span class="name">{p.name}</span>
               <span class="meta">{phoneMeta(p)}</span>
+              {#if cfg.linkRemoteControl && lastAction(p)}
+                <span class="meta last" data-testid="link-phone-last">{lastAction(p)}</span>
+              {/if}
             </span>
+            {#if cfg.linkRemoteControl}
+              <!-- Remote Control for this phone: off for phones paired before it was on. -->
+              <label class="rc">
+                <input type="checkbox" checked={p.remote} aria-label="Remote Control for {p.name}" onchange={(e) => setRemote(p, e.currentTarget.checked)} />
+                Remote Control
+              </label>
+            {/if}
             <Button variant="ghost" size="sm" title="Remove {p.name}" onclick={() => remove(p)}>Remove</Button>
           </li>
         {/each}
@@ -245,6 +272,32 @@
       <p class="set-note">No phones paired yet.</p>
     {/if}
   </div>
+</Group>
+
+<Group title="Remote Control" id="settings-phone-remote">
+  <Row setting="link-remote">
+    <Toggle
+      bind:checked={cfg.linkRemoteControl}
+      label="Remote Control"
+      desc="Use Yap Code from your paired phones: follow agents, allow their steps and send them work"
+      hint="Only the phones ticked above, in workspaces that allow it. From a phone, agents run at most at Auto, never Bypass permissions, and every step allowed there is recorded."
+    />
+  </Row>
+  {#if cfg.linkRemoteControl && remoteNeeds}
+    <Row>
+      <p class="set-note warn" role="alert" data-testid="link-remote-needs">{remoteNeeds}</p>
+    </Row>
+  {/if}
+  {#if cfg.linkRemoteControl}
+    <Row setting="link-keep-awake">
+      <Toggle
+        bind:checked={cfg.linkKeepAwake}
+        label="Keep this PC awake while agents work"
+        desc="While an agent is working, waiting or asking, and for 5 minutes after"
+        hint="Only when it would sleep by itself: closing the lid, or choosing Sleep, still puts it to sleep."
+      />
+    </Row>
+  {/if}
 </Group>
 
 <Group title="Good to know" id="settings-phone-notes">
@@ -389,6 +442,18 @@
   .meta {
     font-size: 12.5px;
     color: var(--yap-muted);
+  }
+  .rc {
+    flex: none;
+    display: inline-flex;
+    gap: 6px;
+    align-items: center;
+    font-size: 12.5px;
+    color: var(--yap-fg-80);
+    cursor: pointer;
+  }
+  .rc input {
+    accent-color: var(--yap-primary);
   }
   .notes {
     margin: 8px 0 0;

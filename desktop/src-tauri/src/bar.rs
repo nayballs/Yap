@@ -614,6 +614,9 @@ pub struct Status {
     /// "1 agent working" while it's idle, and a click opens the newest one
     /// (`bar_action "agents"`).
     agents: usize,
+    /// A phone connected with Remote Control on (its name): the bar's small
+    /// phone mark beside "1 agent working" (`link.rs` `remote_phone`).
+    phone: Option<String>,
 }
 
 pub fn status() -> Status {
@@ -622,6 +625,7 @@ pub fn status() -> Status {
     let call = crate::calls::meeting_detect::tray_item().map(|(_, label)| label);
     let first_use = pointer::status();
     let agents = crate::agents::store::live_ids().len();
+    let phone = crate::link::remote_phone();
     let now = now_ms();
     let s = lock();
     Status {
@@ -652,6 +656,7 @@ pub fn status() -> Status {
             .collect(),
         first_use,
         agents,
+        phone,
     }
 }
 

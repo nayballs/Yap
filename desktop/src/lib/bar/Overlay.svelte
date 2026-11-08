@@ -84,6 +84,9 @@
     firstUse: null,
     // Agents not over yet (agents/): "1 agent working" while the bar is idle.
     agents: 0,
+    // A phone connected with Remote Control on (its name, link/code.rs): a
+    // small phone mark beside "1 agent working".
+    phone: null,
   });
   // The --bar-* colours (app.css): `data-bar-theme`, Match app resolved with
   // the theme of Yap's windows (lib/core/appearance.js, which also follows it as
@@ -450,10 +453,10 @@
         class="agentsline"
         data-region="agents"
         data-testid="bar-agents"
-        aria-label={`${agentsLine}: open in Chat`}
+        aria-label={`${agentsLine}: open in Chat${bar.phone ? `. ${bar.phone} is connected` : ''}`}
         onclick={openAgents}
         transition:fade={{ duration: motionMs(140) }}
-      ><span class="jdot" aria-hidden="true"></span>{agentsLine}</button>
+      ><span class="jdot" aria-hidden="true"></span>{agentsLine}{#if bar.phone}<span class="phonemark" title={`${bar.phone} is connected`} data-testid="bar-phone" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="7" y="2.5" width="10" height="19" rx="2.2" /><path d="M11 18h2" /></svg></span>{/if}</button>
     {/if}
     {#if pointerText}
       <!-- First-use pointer (bar/pointer.rs): words only, click-through. -->
@@ -771,6 +774,18 @@
   .stage.top .agentsline {
     margin-bottom: 0;
     margin-top: -6px;
+  }
+  /* A phone with Remote Control is connected (link/code.rs). */
+  .phonemark {
+    display: inline-flex;
+    width: 13px;
+    height: 13px;
+    margin-left: -1px;
+    color: var(--bar-text-soft);
+  }
+  .phonemark svg {
+    width: 100%;
+    height: 100%;
   }
   .jdot {
     width: 7px;

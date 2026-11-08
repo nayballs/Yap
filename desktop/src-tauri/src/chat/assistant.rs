@@ -292,7 +292,8 @@ pub(crate) fn chat_box_in_code_chat(cfg: &crate::config::YapConfig) -> bool {
 
 /// Is a phone's question (`wanted`: the conversation it said, Yap Link)
 /// going into a Code chat, as [`answer`] chooses its conversation
-/// ([`phone_conversation`])? A phone never makes a new code chat.
+/// ([`phone_conversation`])? (A new Code chat a phone made with Remote
+/// Control's `code_new` is its session's to say: `link/session.rs`.)
 pub(crate) fn phone_in_code_chat(cfg: &crate::config::YapConfig, wanted: crate::link::wire::ChatRef) -> bool {
     let viewing = view();
     let open_exists = matches!(viewing, Viewing::Conversation(id) if crate::chat::chats::get(id).is_some());
@@ -788,6 +789,16 @@ pub trait Phone: Send + Sync {
     fn cant_read(&self, message: &str) {
         self.failed(message);
     }
+    /// Its question was saved as message `index` of `conversation`
+    /// (Remote Control: an agent it asks for is the phone's, `agents/remote.rs`).
+    fn question_saved(&self, conversation: u64, index: usize) {
+        let _ = (conversation, index);
+    }
+    /// The workspace a new Code chat waits on (Remote Control's `code_new`):
+    /// its question makes a Code chat there. Taken once.
+    fn new_code_folder(&self) -> Option<String> {
+        None
+    }
 }
 
 /// **The conversation a phone's question goes to** (Yap Link, 2026-11-03,
@@ -1215,8 +1226,12 @@ async fn answer(app: AppHandle, asker: Asker, since: u64, question: String, abou
     let shots_wait = pc && !about_selection && said.is_none() && !waiting.images.is_empty();
     let conversation_id = if shots_wait { waiting.conversation_id } else { continued };
     // A new code chat on screen, its workspace picked: the new conversation
-    // is a Code chat there (agents/code_chat.rs).
-    let code_folder = new_code_chat(pc, conversation_id, code_chat_shown());
+    // is a Code chat there (agents/code_chat.rs). From a phone with Remote
+    // Control: the workspace its `code_new` named, for a new chat.
+    let code_folder = match &asker {
+        Asker::Phone(p) => p.new_code_folder().filter(|_| conversation_id.is_none()),
+        Asker::Shortcut(_) => new_code_chat(pc, conversation_id, code_chat_shown()),
+    };
     // "Open Teams" needs no model, nor a "yes" to Yap's "Did you mean …?":
     // Yap opens it and says so (apps.rs). Never a question about a selection
     // or a Skill.
@@ -1379,6 +1394,8 @@ async fn answer(app: AppHandle, asker: Asker, since: u64, question: String, abou
             lock().conversation = Some(conv);
         }
         if let Some(p) = &asked_phone {
+            // The phone's question, saved (before any tool runs).
+            p.question_saved(conv, index);
             if p.current() {
                 p.asked(conv);
             }

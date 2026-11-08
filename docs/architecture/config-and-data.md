@@ -237,7 +237,11 @@
   meetings", true; `calendar/brief.rs`), bridge_enabled, mcp_allow_writes (AI apps
   may save notes over MCP; default off), link_enabled (Settings → Phone's "Use
   Yap from your phone (on your home Wi-Fi)": Yap Link's HTTPS server on port
-  51443, `link.rs`; default off), the Yap bar: bar_enabled (true) +
+  51443, `link.rs`; default off), link_remote_control (Settings → Phone →
+  Remote Control: Yap Code from the paired phones ticked for it,
+  `link/code.rs`; default off — an older Yap drops it on its save, which turns
+  it off) + link_keep_awake ("Keep this PC awake while agents work",
+  `shell/awake.rs`; default on), the Yap bar: bar_enabled (true) +
   bar_hide_fullscreen (true) + bar_theme ("app" — Match app, the theme of
   Yap's windows — | "light" | "dark", app) +
   bar_dictation_buttons (the capsule's ✕ / ✓: "off" | "hover" | "always",
@@ -669,6 +673,20 @@
   one more forgets the one used longest ago). Remove takes a phone out and cuts
   it off. Kept by Reset app, like an account sign-in; not in Download your
   data. Through `saving.rs` ("your paired phones").
+- Remote Control (Yap Link's Code side, 2026-11-08): `%APPDATA%/yap/remote_control.json`
+  — `{phones: {<device>: {on, since}}, workspaces: {<name>: false}, turns:
+  [{key, device}], asked: [{key, device}], recent: [audit…]}` (`agents/remote.rs`):
+  each phone's Remote Control tick (off for a phone paired before the switch
+  was on), each workspace's switch (on unless `false`), the agent turns a
+  phone asked for (`<agent>:<turn>`, and the phone's questions by message id:
+  run at most at Auto, reported on that phone; 500 each) and the audit trail
+  (the last 200 remote actions: who, what, which agent, turn, conversation and
+  workspace, when, the outcome — never a command, a file, a brief or words). A
+  file of its own, never fields in agents.json, workspaces.json or
+  link_devices.json (an older Yap drops fields it doesn't know). Delete some of
+  your data → Yap Code clears the turns, questions and trail; the ticks and
+  switches stay (Reset app too), as the pairing does; a phone removed takes its
+  tick and marks with it. Through `saving.rs` ("Remote Control's settings").
 - Yap Link's certificate: `%APPDATA%/yap/link/` — `cert.der` and `key.der`
   (the self-signed ECDSA P-256 certificate the phone's page is served on, and
   its private key; `link/cert.rs`) and `cert.json` (the addresses and names it's

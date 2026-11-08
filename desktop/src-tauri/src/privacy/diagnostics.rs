@@ -122,6 +122,8 @@ const COPY: &[&str] = &[
     "assistantScreenCloud",
     "chatCleanSpeech",
     "linkEnabled",
+    "linkRemoteControl",
+    "linkKeepAwake",
     "openApps",
     "webSearch",
     "webSearchNative",

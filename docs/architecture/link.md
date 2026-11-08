@@ -87,7 +87,9 @@ messages: moving there is a change of transport only.
 | `link/chats.rs` | Chat's conversations for the phone's drawer (`recents`: Chat's list, not archived, not a meeting's Ask thread, newest first, 200 at most) and a conversation opened (`thread`: its last 40 messages' words, 6,000 characters each at most, an answer's id for ▶, a question's screenshot text left out), pure. |
 | `link/pictures.rs` | A question's pictures as they come (`picture` and its `0x03` frames): in order, whole, 4 at most, 3 MB each; the question takes them all or none, and says why. Pure. |
 | `link/lan.rs` | This PC's addresses (IP Helper), which peers may connect, Windows' Public networks (Network List Manager). |
-| `link/wire.rs` | The protocol (below), pure. |
+| `link/wire.rs` | The protocol (below), pure. Its Code side's part is defined once in `desktop/src/lib/core/codeWire.js` (the page imports it; `wire.rs`'s tests hold the two together). |
+| `link/code.rs` (+ `code/gates.rs`, `code/view.rs`) | **Remote Control** (2026-11-08, below): the Code side's messages for one phone, through every gate; what every phone with it hears (the Hub's listeners: the cards, their ends, reports, the Mode, the dots); the ask-first card's way to the phones (`ConfirmTee`). `gates.rs`: the gates in order, the fresh-tap book (`Shown`), the rate limits; pure. `view.rs`: an agent in brief, its snapshot and pages, a file's diff, a card cut to fit; pure. |
+| `link/lanes.rs` | A phone's way out in two lanes: the control lane (never dropped, capped at 8 MiB: past it the phone is cut off and comes back to a fresh state) and the watched agent's lane (coalesced, bounded, `agent_resync` when full). The agent lane's core is pure. |
 | `link/page.rs` | The page's files, embedded at build time from `phone/web/page/` (`build.rs` lists them; its README.md left out) and the desktop's own Chat picker modules and logos beside them (`build.rs` `LINK_SHARED`: `core/`, `providers/`), their content types and the Content-Security-Policy. |
 
 The phone's page itself (`phone/web/page/`: plain HTML, CSS and JS
@@ -312,6 +314,175 @@ turns them down makes that model a "no" (`snip::vision::refused`) and gets
 after the question instead (`snip::ocr`). The question keeps its pictures in
 Chat, as a typed question's screenshots are kept. A question with pictures
 isn't a Skill or an app to open.
+
+## Remote Control (Yap Code from the phone, 2026-11-08)
+
+**Wave 1: the wire and the PC's side, home Wi-Fi only** (the private repo's
+`remote-control-research.md` is the design; away from home is its phase 2, a
+change of transport). The phone's page has no Code screens yet (wave 2): the
+PC answers every message below, and the page's one change is that an agent's
+report is no longer shown as the person's own bubble (`kind`, below).
+
+### The switches
+
+- **Settings → Phone → Remote Control** (`link_remote_control`, **off**): "Use
+  Yap Code from your paired phones: follow agents, allow their steps and send
+  them work." Needs Use Yap from your phone and Yap Code on (the row says which
+  is off). While on: **Keep this PC awake while agents work**
+  (`link_keep_awake`, on; `shell/awake.rs`: `SetThreadExecutionState` while an
+  agent is queued, running or asking, let go 5 minutes after the last; idle
+  sleep only, a closed lid still sleeps; nothing elsewhere than Windows).
+- **Per phone**, a **Remote Control** tick in the paired phones' list: on for a
+  phone paired while the switch is on (`agents::remote::paired`), **off for
+  phones paired before**, so turning the switch on never widens an old pairing.
+  Each phone's row says its last remote action ("Allowed a step in
+  garden-planner · 21:04").
+- **Per workspace**, on unless switched off: the **Environment card**
+  (`views/chat/CodeEnvironment.svelte`), opened from a Code chat's "Code ·
+  garden-planner" label: the workspace and its path, "Runs on this PC", its
+  Remote Control switch (with the master off it turns that on too, asked once
+  with what it allows), the phones with it ("Kitchen tablet is connected" or
+  "No phone connected", Turn off for this phone), the chat's Mode and that
+  from a phone agents run at most at Auto. A workspace's "Never above:" cap
+  holds from the phone too.
+- **Kept** in `remote_control.json` (`agents/remote.rs`; config-and-data.md),
+  never in `link_devices.json` or `agents.json`. An older Yap drops
+  `link_remote_control` on its save, which turns Remote Control off.
+- **The bar** shows a small phone mark beside "1 agent working" while a phone
+  with Remote Control is connected (its name in the tooltip).
+
+### The wire's additions
+
+`hello.v` stays 1; `ready.can` gains **`"code"`, `"code_act"`, `"approve"`**,
+and `ready` gains **`code: {on}`** or **`{on: false, why}`** — why in words:
+the switch off, Yap Code off, Claude Code not on this PC, this phone not
+ticked (in that order). `ready` is sent again whenever one of them changes.
+A page offers the Code side only with `"code"` in `can` and `code.on`; a PC
+from before sends neither. **The PC checks every Code message as it arrives**
+(the page's view is never trusted): refused, `error {message}` and nothing
+done. The messages, one example of each, are in
+**`desktop/src/lib/core/codeWire.js`** (served to the page at
+`core/codeWire.js`; `wire.rs`'s tests parse the phone's examples and write the
+PC's exactly as there).
+
+Phone → PC:
+
+| Message | Does |
+|---|---|
+| `code_list` | the Code side (`code_list` back) |
+| `code_new {workspace}` | the next `ask` / `start` with `chat: "new"` makes a Code chat there (answered with an empty `thread` carrying its `code`) |
+| `agent_open {id}` | its snapshot (`agent_snapshot`), then its live events (`agent_event`), on the agent lane; one watched agent a phone |
+| `agent_close` | no more live events |
+| `agent_log {id, before}` | an older page (events before log line `before`; 0 the newest) |
+| `agent_diff {id, file, turn?}` | one file's diff lines (400 at most, then `more`) |
+| `agent_stop {id}` / `agent_continue {id}` | Stop / Continue (`acted` back) |
+| `agent_message {id, text}` | "Tell the agent…" (4,000 characters at most): its next turn, queued while it works |
+| `agent_go_ahead {id}` | a report card's Go ahead |
+| `agent_undo {id, turn?, sure: true}` | Undo this turn / Undo all, after the phone's own confirm (`sure`, else refused) |
+| `approve {id, allow, shownMs}` | Allow once / Deny (Go ahead / Not yet on a plan) on a card this phone was sent |
+| `confirm {id, yes, shownMs}` | Start / Don't on an ask-first card this phone was sent (the same fresh-tap rule) |
+| `set_mode {chat, mode}` | a Code chat's Mode: Plan, Manual, Accept edits or Auto, under its workspace's cap |
+
+And as before: `ask` / `start` into a Code chat, `chats` (items gain
+`code: "<workspace>"`), `open_chat` (below).
+
+PC → phone:
+
+| Message | Meaning |
+|---|---|
+| `code_list {workspaces:[{name, path, allowed, usedTs, cap?}], chats:[{id, title, ts, workspace}], agents:[Brief]}` | the workspaces that allow it (most recently used first), their Code chats (newest first), their agents (not over, or ended within the day) |
+| `code_status {seq, answering:[conv], agents:[Brief], approvals:[{id, conversation, agent}], confirms:[{id, conversation}]}` | what the status dots are made from: on connect, then on change, 300 ms apart at most (the page runs `core/chatStatus.js` itself) |
+| `thread` (extended) | a Code chat's: `code: {workspace, path, mode, modeLabel, cap?, allowed, phoneMax}`, `agents:[Brief]` (for the pills), `cards` (the prompts and ask-first cards waiting in it); messages gain `kind` (`"agentReport"`: the report marker, never the person's own words) |
+| `chat_message {conversation, message}` | an agent's report marker and its answer, to a phone with that chat open |
+| `agent_snapshot {agent, events:[{line, event}], more, seq: 0}` | the agent's record and its last 200 events, diff lines left out (counts kept), within 64 KiB |
+| `agent_event {id, seq, line, event}` | a live `yap-agent` event, numbered from 1 after the snapshot (`line`: its line in the agent's log; one the snapshot had is left out); diff lines past 40 left out (`more`) |
+| `agent_log {id, events, more}`, `agent_diff {id, file, lines, more, added, removed}` | the pages asked for |
+| `agent_resync {id}` | the agent lane was full: open it again |
+| `approve_card {card, expiresTs}` | a permission prompt (or a plan) as the PC's card has it |
+| `approve_done {id, outcome, by, name?}` | its end: `by` `"pc"`, `"you"` (this phone), `"phone"` (another, named) or `null` (it timed out) |
+| `confirm_card {id, conversation, agent, expiresTs}`, `confirm_done {id, outcome, by, name?}` | an ask-first card, and its end |
+| `mode {chat, mode, label, cap?}` | a Code chat's Mode changed (here or on the PC) |
+| `report {conversation, agent, turn, status}` | an agent's turn was reported |
+| `acted {action, id, message}` | a Code action done, in the PC's words ("Stopping the agent in garden-planner.") |
+
+`Brief` is an agent in the names `agents.json` uses (`{id, conversation,
+folder, status, now?, turnTitle?, startedTs, endedTs, asks, plan,
+planAllowed, messageId?, reportMessageId?, turnList:[{n, title, status,
+messageId?, reportMessageId?}]}`), so the desktop's own `core/agents.js` and
+`core/chatStatus.js` read it as they read an agent.
+
+**Back-pressure** (`lanes.rs`): two lanes per phone. The control lane — `ready`,
+a question's flow and voice, the cards and their ends, errors — always goes
+first and is never dropped; past 8 MiB waiting the phone isn't reading, its
+connection is closed, and it comes back to a fresh `ready`, `code_status` and
+every card still waiting. The agent lane carries the watched agent's events
+only: a run of state-only changes (`status`, `now`, `todos`, `cost`,
+`problem`) is one message (the latest wins, 250 ms); a step, words, a file, a
+diff or a command is kept in order (the state before it first); full (256
+messages or 1 MiB) it's emptied and says `agent_resync`. Snapshots and pages
+are cut to 64 KiB; diffs only on request.
+
+**Every agent's event reaches the phones from `runner::emit`** with its log
+line (`store::log_append` returns it); the cards, their ends, reports, a Mode
+changing (`yap-agent-mode`) and the chats answering reach them from the app
+events the PC already sends (the Hub listens, as it listens to
+`yap-chat-model-changed`), each filtered by the phone's gates and the
+workspace.
+
+### Security
+
+**The gates, in order, on every message** (`code/gates.rs`, pure): 1. pairing
+(as before); 2. Remote Control on (and Yap Code, and Claude Code on this
+PC); 3. this phone ticked; 4. the workspace allows it, and its cap holds; 5.
+the action is one a phone may take.
+
+- **Never from the phone**: Bypass permissions (`set_mode` refused: "From your
+  phone, agents run at most at Auto…") and its one-time OK; anything above
+  Auto; adding, removing or capping a workspace; Settings → Yap Code; turning
+  Remote Control on, pairing, removing a phone; any answer by voice. None of
+  them has a message.
+- **A phone's turn runs at most at Auto**, even in a chat set to Bypass on the
+  PC: its question (remembered as the phone's when it's saved:
+  `Phone::question_saved` → `agents::remote::asked`) or its own action
+  (Continue, Go ahead, "Tell the agent…": `runner::Ask::phone` →
+  `remote::mark_turn`) makes the turn the phone's, and the runner holds every
+  such turn at Auto when it starts (`runner::turn`, the last gate; the tool
+  and the follow-up lower it there too, so the chip, the card and the record
+  say so). A phone's words never join a turn already starting above Auto:
+  they wait for a turn of their own.
+- **Approvals need a fresh tap** (`gates::Shown`): `approve` only for a card
+  the PC sent that phone (at connect, as it was asked, or in a `thread`),
+  still waiting, at least **700 ms** after it was sent and **400 ms** after the
+  page showed it (`shownMs`; missing reads as 0: refused, "Tap it again: the
+  card had only just come."), once; the first answer wins
+  (`claude_live::answer_by`, `approve::By`), and a second says who ("Already
+  allowed from Kitchen tablet."). The page answers only from a trusted
+  pointer event (wave 2). The ask-first card's `confirm` keeps the same rule.
+- **Rate limits per phone** (`gates::Limits`): 30 Code actions a minute, Undo
+  once every 10 s, 4 pages (`agent_open`, `agent_log`, `agent_diff`) a second:
+  "Slow down a little: Yap on your PC is still doing the last one."
+- **The audit trail**: every remote action in `remote_control.json`'s last 200
+  (who — the phone's name and id —, what — approved, denied, plan go ahead,
+  plan not yet, started, not started, stopped, continued, undid, undid turn,
+  go ahead, message, mode with from and to —, which agent, turn,
+  conversation and workspace, when, the outcome: never a command, a file, a
+  brief or words), and in the agent's own log where it happened (an event
+  with `remote: {device, name, action}` and its line, "Allowed from Kitchen
+  tablet · Run a command: npm test", which its tab shows). The PC's card
+  closes "Allowed from Kitchen tablet · Run a command: npm test"
+  (`yap-claude-approve-done` gains `by`, `byName`, `byDevice`). No toast for a
+  remote action.
+- **The log** (`info`): kinds, outcomes, counts and ids only.
+
+### The report on the phone
+
+A turn asked from a phone (`remote::phone_of_turn`) has its report said **on
+that phone** (`chat/turn/report.rs` `said_where` → `link::say_report` → the
+session's `Cmd::Say`: Yap's voice down its socket as ▶'s, `speak_streamed_to`,
+once Yap's voice and the phone are free, up to 5 minutes), **never on this
+PC's speakers**; that phone not connected: not said at all (it's in the chat).
+`agents_speak` still decides whether it's said. This applies whether or not
+Remote Control is on: it's who asked.
 
 ## Pairing
 
@@ -656,8 +827,10 @@ on the PC while the answer comes stops the voice, as it stops the PC's.
   app, design §6.2). Press Talk on the screen, or talk hands-free.
 - **Windows Firewall** may ask the first time Yap listens ("Allow Yap on
   private networks"); without that, phones can't reach it.
-- No Yap bar indicator for a connected phone yet: Settings → Phone shows
-  "connected now".
+- The Yap bar marks a connected phone only with Remote Control on (beside "1
+  agent working"); otherwise Settings → Phone shows "connected now".
+- Remote Control's phone screens (the Code side, the cards, the agent's live
+  view) are wave 2; the PC side and the wire are in (above).
 
 ## Tests
 
@@ -692,8 +865,21 @@ on the PC while the answer comes stops the voice, as it stops the PC's.
   `start {mode:"words"}` (`Talk::of`: exactly "words", else a question),
   `words` written, `"words"` in `can` (`wire.rs`) — and what the box gets:
   the words trimmed, or why there are none (`session.rs` `words_out`);
-  `ask {speak}` read (only a true one), `"speak"` last in `can`, a hello
-  with both `device` and `pair` (`wire.rs`).
+  `ask {speak}` read (only a true one), `"speak"` after the first seven in
+  `can`, a hello with both `device` and `pair` (`wire.rs`). **Remote
+  Control**: the Code side's messages both ways held to the shared
+  `core/codeWire.js` (its type lists, its limits, each example parsed or
+  written exactly), `ready.code`, a thread's `code` part and `kind`
+  (`wire.rs`); a report marker never the person's own (`chats.rs`); the gates
+  in their order, Bypass and above-the-cap refused, the fresh tap (sent to
+  that phone, 700 ms, 400 ms, once), the rate limits (`code/gates.rs`); the
+  agent lane's coalescing, order, caps and resync, the control lane first and
+  capped (`lanes.rs`); an agent in brief, snapshots and pages within a frame,
+  a file's diff, a card cut to fit (`code/view.rs`); `by` on a card's end and
+  the first answer winning (`claude_live/approve.rs`); the ticks, workspace
+  switches, a phone's turns and the audit trail (`agents/remote.rs`); the
+  report said on the phone that asked, never the PC's
+  (`chat/turn/report.rs`); the keep-awake hold (`shell/awake.rs`).
 - **E2E** `desktop/e2e/link.spec.js`: a test run listens on a free port of 127.0.0.1
   (`YAP_E2E_LINK_PORT=0`, the port in `link_status`); a headless Chromium
   (Playwright's, else Edge) with a fake microphone (quiet, a second of a
@@ -721,6 +907,21 @@ on the PC while the answer comes stops the voice, as it stops the PC's.
   sixth told "Try again in 10 minutes.", the paired phone still connecting
   from that address, the live code still pairing the new one, and its
   refused tabs coming back with its device.
+- **E2E** `desktop/e2e/link-code.spec.js` (Remote Control): a headless client
+  speaking the wire itself (a WebSocket from a page of the PC's origin)
+  against a test Yap with the fake AI and Claude Code's stand-in — paired
+  while Remote Control is on (ticked, `ready.code.on`, Settings' tick);
+  `code_new` and a typed request making a Code chat whose agent runs there,
+  `code_list`, `agent_open`'s snapshot and live events; the agent's card on
+  the phone, a stale tap refused (the card still waiting), a fresh tap
+  allowing it (`approve_done` "you", the PC's card closed "Allowed from
+  Kitchen tablet · Run a command: npm test", the agent's log line, the trail
+  without the command, Settings' last action), a second answer told who came
+  first; the report said on the phone (`speak_start` and Yap's voice down
+  its socket, recorded as said elsewhere, never on this PC); a Bypass chat:
+  `set_mode` Bypass refused, the phone's follow-up run at Auto, a lower Mode
+  allowed, Stop; the phone unticked, then Remote Control off: `ready.code`
+  says why and every Code message is refused; the Environment card.
 - The page on its own: `npm run test:link` (`phone/web/tests/`, the PC mocked): the
   sound maths in Node (the resampler both ways, the jitter buffer, the voice
   detector, the media player's pieces cut in the pauses and their WAV files),

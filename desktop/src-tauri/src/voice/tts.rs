@@ -924,6 +924,9 @@ pub struct Spoken {
     pub fallback: Option<String>,
     /// Said as the answer was written ([`speak_streamed`]).
     pub streamed: bool,
+    /// Said somewhere other than this PC's speakers: a phone (Yap Link,
+    /// [`speak_streamed_to`]).
+    pub elsewhere: bool,
 }
 
 #[cfg(debug_assertions)]

@@ -201,7 +201,7 @@ pub const KINDS: &[About] = &[
         group: CHAT,
         label: crate::agents::FEATURE,
         says: "Every agent Chat sent, with its log and the backups Undo uses, each chat's Mode and your workspaces. The files the agents changed stay as they are",
-        files: &["agents.json", "agents/", "workspaces.json"],
+        files: &["agents.json", "agents/", "workspaces.json", "(remote_control.json)"],
         stores: &["agents", "workspaces"],
     },
     About {
@@ -280,7 +280,9 @@ pub const STAYS: &[Part] = &[
     Part {
         id: "account",
         label: "Your account sign-in, your ChatGPT sign-in, your calendars and paired phones",
-        files: &["calendar.json", "chatgpt.json", "link_devices.json", "link/"],
+        // remote_control.json: which phones may use Remote Control and which
+        // workspaces allow it (its turns and trail go with Yap Code).
+        files: &["calendar.json", "chatgpt.json", "link_devices.json", "link/", "remote_control.json"],
     },
     Part {
         id: "bookkeeping",
@@ -445,6 +447,12 @@ impl Choice {
         Cut::of(self.has(Kind::Agents), false)
     }
 
+    /// remote_control.json's turns and trail (Yap Code's): its ticks and
+    /// switches stay with the paired phones.
+    pub fn remote_control(&self) -> Cut {
+        Cut::of(false, self.has(Kind::Agents))
+    }
+
     /// snippet_suggestions.json's noted phrases (its switch stays).
     pub fn snippet_suggestions(&self) -> Cut {
         Cut::of(false, self.has(Kind::Suggestions))
@@ -506,6 +514,7 @@ const STORES: &[(&str, Rule)] = &[
     ("agents.json", Choice::agents),
     ("agents/", Choice::agents),
     ("workspaces.json", Choice::agents),
+    ("remote_control.json", Choice::remote_control),
     ("ai_usage.json", Choice::ai_usage),
     ("groq_usage.json", Choice::ai_usage),
     ("connections.json", Choice::receipts),
@@ -922,6 +931,11 @@ fn clear_files(app: &AppHandle, c: &Choice, done: &mut Done) -> Result<(), Strin
         done.agents = crate::agents::store::reset();
         crate::agents::workspaces::reset();
     }
+    // Remote Control's turns and its trail go with them; its ticks and
+    // workspace switches stay, as the pairing does (agents/remote.rs).
+    if c.remote_control() != Cut::Keep {
+        crate::agents::remote::forget_activity();
+    }
     if c.snippet_suggestions() != Cut::Keep {
         crate::dictionary::snippet_offer::forget_noted();
     }
@@ -1012,6 +1026,9 @@ fn run(app: &AppHandle, c: &Choice) -> Result<Done, String> {
     if c.agents() != Cut::Keep {
         crate::agents::store::saved()?;
         crate::agents::workspaces::saved()?;
+    }
+    if c.remote_control() != Cut::Keep {
+        crate::agents::remote::saved()?;
     }
     if let Err(e) = index {
         tracing::warn!("Deleting your data: the search index's folder wasn't deleted ({e})");
@@ -1147,14 +1164,15 @@ mod tests {
         }
     }
 
-    /// Reset app is every kind: each store goes whole (calendar.json and
-    /// snippet_suggestions.json lose only their part: the calendars and the
-    /// switch stay), and nothing that stays is deleted.
+    /// Reset app is every kind: each store goes whole (calendar.json,
+    /// snippet_suggestions.json and remote_control.json lose only their
+    /// part: the calendars, the switch and the phones' ticks stay), and
+    /// nothing that stays is deleted.
     #[test]
     fn reset_app_is_every_kind_and_every_store_goes_whole() {
         let every = Choice::every();
         for (f, cut) in STORES {
-            let want = if matches!(*f, "calendar.json" | "snippet_suggestions.json") { Cut::Part } else { Cut::Whole };
+            let want = if matches!(*f, "calendar.json" | "snippet_suggestions.json" | "remote_control.json") { Cut::Part } else { Cut::Whole };
             assert_eq!(cut(&every), want, "{f}");
         }
         for f in every.touches() {

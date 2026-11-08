@@ -83,7 +83,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use tauri::{AppHandle, Emitter};
 
-pub use approve::{Pending, EXIT_PLAN};
+pub use approve::{By, Pending, EVENT as APPROVE_EVENT, EVENT_DONE as APPROVE_DONE_EVENT, EXIT_PLAN};
 #[cfg(debug_assertions)]
 pub use approve::set_auto_answer;
 
@@ -375,6 +375,18 @@ pub fn claude_approve_answer(id: u64, allow: bool) -> bool {
     let answered = started().is_some_and(|ep| ep.approvals.answer(id, allow));
     tracing::info!(id, allow, answered, "Claude Code: the user answered a permission prompt");
     answered
+}
+
+/// **An answer from somewhere other than this PC's card** (Remote Control:
+/// a paired phone, `link/code.rs`, once its own checks passed): `true` if
+/// that prompt was still waiting — the first answer wins.
+pub fn answer_by(id: u64, allow: bool, by: By) -> bool {
+    started().is_some_and(|ep| ep.approvals.answer_by(id, allow, by))
+}
+
+/// Prompt `id`, while it's waiting.
+pub fn waiting(id: u64) -> Option<Pending> {
+    started().and_then(|ep| ep.approvals.waiting(id))
 }
 
 /// The permission prompts waiting, oldest first (a window opened later

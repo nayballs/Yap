@@ -185,6 +185,72 @@ pub enum In {
     /// [`PICTURE`] frames that follow.
     Picture { n: u32, size: u64 },
     Ping,
+    // ---- Remote Control (2026-11-08, `link/code.rs`): each checked by the
+    // PC's gates on arrival (`code/gates.rs`), never trusted from the page.
+    /// The Code side: workspaces, their Code chats, the running agents
+    /// ([`Out::CodeList`]).
+    CodeList,
+    /// The next `ask` / `start` with `chat: "new"` makes a Code chat in
+    /// `workspace` (one of the workspaces, by name).
+    CodeNew {
+        #[serde(default)]
+        workspace: String,
+    },
+    /// Watch agent `id`: its snapshot ([`Out::AgentSnapshot`]), then its live
+    /// events ([`Out::AgentEvent`]); one watched agent a phone.
+    AgentOpen { id: String },
+    /// Stop watching.
+    AgentClose,
+    /// An older page of agent `id`'s events: those before log line `before`.
+    AgentLog {
+        id: String,
+        #[serde(default)]
+        before: u64,
+    },
+    /// One file's diff lines (in turn `turn`, else every turn).
+    AgentDiff {
+        id: String,
+        file: String,
+        #[serde(default)]
+        turn: Option<u32>,
+    },
+    AgentStop { id: String },
+    AgentContinue { id: String },
+    /// "Tell the agent…" (at most [`MAX_CODE_TEXT`] characters).
+    AgentMessage {
+        id: String,
+        #[serde(default)]
+        text: String,
+    },
+    /// A report card's Go ahead.
+    AgentGoAhead { id: String },
+    /// Undo this turn (`turn`) or Undo all, after the phone's own confirm
+    /// (`sure`).
+    AgentUndo {
+        id: String,
+        #[serde(default)]
+        turn: Option<u32>,
+        #[serde(default)]
+        sure: bool,
+    },
+    /// Allow once / Deny (Go ahead / Not yet on a plan) on a card this phone
+    /// was sent, `shownMs` after the page showed it.
+    Approve {
+        id: u64,
+        allow: bool,
+        #[serde(default, rename = "shownMs")]
+        shown_ms: u64,
+    },
+    /// Start / Don't (Send / Don't) on an ask-first card this phone was
+    /// sent, as fresh a tap as an approval.
+    Confirm {
+        id: u64,
+        yes: bool,
+        #[serde(default, rename = "shownMs")]
+        shown_ms: u64,
+    },
+    /// A Code chat's Mode: up to Auto, under its workspace's cap.
+    SetMode { chat: u64, mode: String },
 }
 
 /// **Which conversation a phone's question goes to**: one it chose (an
@@ -235,19 +301,149 @@ impl Talk {
 /// its PC says so, and says plainly when it doesn't; `"words"`: Talk's
 /// words can go in the phone's box to check first ([`Talk::Words`]);
 /// `"speak"`: an `ask` with `speak` is answered out loud ([`In::Ask`]).
-pub const CAN: &[&str] = &["ask", "read_aloud", "picker", "effort", "chats", "pictures", "words", "speak"];
+/// `"code"`, `"code_act"`, `"approve"` (Remote Control, 2026-11-08): the PC
+/// answers the Code side's messages — read, act, answer cards — and says
+/// in `ready.code` whether this phone may use them now ([`CodeReady`]).
+pub const CAN: &[&str] = &["ask", "read_aloud", "picker", "effort", "chats", "pictures", "words", "speak", "code", "code_act", "approve"];
+
+/// The longest "Tell the agent…" (characters), as a typed question.
+pub const MAX_CODE_TEXT: usize = 4_000;
+/// The longest Code page the PC sends (a snapshot, a page of events or of
+/// a diff): cut to fit.
+pub const MAX_CODE_FRAME: usize = 64 * 1024;
+/// An agent's snapshot: its last this many events.
+pub const SNAPSHOT_EVENTS: usize = 200;
+/// A page of a file's diff.
+pub const DIFF_LINES: usize = 400;
+/// A live event's diff lines past this are left out (`more`), asked for
+/// with `agent_diff`.
+pub const LIVE_DIFF_LINES: usize = 40;
+
+/// **Is Remote Control on for this phone** (`ready.code`), or why not.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct CodeReady {
+    pub on: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub why: Option<String>,
+}
+
+/// A workspace on the Code side.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CodeWorkspace {
+    pub name: String,
+    pub path: String,
+    /// Its Remote Control switch (only allowed ones are listed).
+    pub allowed: bool,
+    pub used_ts: u64,
+    /// "Never above:" (`Mode::as_str`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cap: Option<String>,
+}
+
+/// A Code chat on the Code side.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct CodeChat {
+    pub id: u64,
+    pub title: String,
+    pub ts: u64,
+    pub workspace: String,
+}
+
+/// One of an agent's turns, as its pills and the status dots read it.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BriefTurn {
+    pub n: u32,
+    pub title: String,
+    pub status: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub message_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub report_message_id: Option<String>,
+}
+
+/// **An agent in brief**: what the list, the pills and the status dots need
+/// (the same names as `agents.json`'s, so `core/chatStatus.js` and
+/// `core/agents.js` read it as they read an agent).
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Brief {
+    pub id: String,
+    pub conversation: Option<u64>,
+    pub folder: String,
+    pub status: String,
+    /// The line it's on.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub now: Option<String>,
+    /// Its latest turn's request in a few words.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub turn_title: Option<String>,
+    pub started_ts: u64,
+    pub ended_ts: u64,
+    pub asks: bool,
+    pub plan: bool,
+    pub plan_allowed: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub message_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub report_message_id: Option<String>,
+    pub turn_list: Vec<BriefTurn>,
+}
+
+/// A permission prompt waiting, for the status dots.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct ApprovalRef {
+    pub id: u64,
+    pub conversation: Option<u64>,
+    pub agent: String,
+}
+
+/// An ask-first card waiting, for the status dots.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct ConfirmRef {
+    pub id: u64,
+    pub conversation: u64,
+}
+
+/// An agent's event with its line in the agent's log.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct Logged {
+    pub line: u64,
+    pub event: serde_json::Value,
+}
+
+/// A Code chat's own part of its `thread`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ThreadCode {
+    pub workspace: String,
+    pub path: String,
+    /// The chat's Mode on the PC (`Mode::as_str`), and as the chip says it.
+    pub mode: String,
+    pub mode_label: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cap: Option<String>,
+    /// Its workspace allows Remote Control.
+    pub allowed: bool,
+    /// The highest a phone's turn runs at here ("auto", or the cap's).
+    pub phone_max: String,
+}
 
 /// A conversation in the phone's drawer.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
 pub struct ChatItem {
     pub id: u64,
     pub title: String,
     /// Last updated (unix seconds).
     pub ts: u64,
+    /// A Code chat's workspace (Remote Control on for the phone).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub code: Option<String>,
 }
 
 /// A message of a conversation the phone opened (its words only).
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
 pub struct ThreadMessage {
     /// "user" | "assistant"
     pub role: &'static str,
@@ -261,6 +457,11 @@ pub struct ThreadMessage {
     /// How many pictures a question carried (they stay on the PC).
     #[serde(skip_serializing_if = "is_zero")]
     pub pictures: usize,
+    /// Its kind in Chat (`ChatMessage::kind`): `"agentReport"` for an agent's
+    /// report marker (role "user", but never the person's words: a page shows
+    /// it as a report, not their bubble).
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub kind: String,
 }
 
 fn is_zero(n: &usize) -> bool {
@@ -307,6 +508,10 @@ pub enum Out {
         can: Vec<&'static str>,
         #[serde(skip_serializing_if = "Option::is_none")]
         picker: Option<serde_json::Value>,
+        /// Remote Control for this phone, now ([`CodeReady`]; `None`: a hello's
+        /// test double).
+        #[serde(skip_serializing_if = "Option::is_none")]
+        code: Option<CodeReady>,
     },
     State { phase: Phase },
     /// The question, transcribed and corrected (a typed one: as it came).
@@ -330,7 +535,21 @@ pub enum Out {
     Chats { items: Vec<ChatItem> },
     /// A conversation's latest messages (`open_chat`), `more` when older
     /// ones were left out; `id` none: a new chat (`new_chat`, or one gone).
-    Thread { id: Option<u64>, title: String, messages: Vec<ThreadMessage>, more: bool },
+    /// A Code chat's adds `code` (its workspace, Mode, the phone's highest),
+    /// `agents` (its agents in brief, for the pills) and `cards` (the
+    /// prompts and ask-first cards waiting in it): Remote Control on.
+    Thread {
+        id: Option<u64>,
+        title: String,
+        messages: Vec<ThreadMessage>,
+        more: bool,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        code: Option<ThreadCode>,
+        #[serde(skip_serializing_if = "Vec::is_empty")]
+        agents: Vec<Brief>,
+        #[serde(skip_serializing_if = "Vec::is_empty")]
+        cards: Vec<serde_json::Value>,
+    },
     /// This phone's question went to conversation `id` (a new chat's, or the
     /// one the Voice Assistant chose): its questions go there from now on.
     Chat { id: u64, title: String },
@@ -344,6 +563,81 @@ pub enum Out {
     /// `start {mode: "words"}`): nothing was asked.
     Words { text: String },
     Pong,
+    // ---- Remote Control (2026-11-08) ----
+    /// The Code side: the workspaces that allow it (most recently used
+    /// first), their Code chats (newest first), the agents in them.
+    CodeList { workspaces: Vec<CodeWorkspace>, chats: Vec<CodeChat>, agents: Vec<Brief> },
+    /// What the status dots are made from (on connect, then on change, 300 ms
+    /// apart at most); `seq` grows with each.
+    CodeStatus { seq: u64, answering: Vec<u64>, agents: Vec<Brief>, approvals: Vec<ApprovalRef>, confirms: Vec<ConfirmRef> },
+    /// A message added to a chat this phone has open (an agent's report and
+    /// its answer).
+    ChatMessage { conversation: u64, message: ThreadMessage },
+    /// On `agent_open`: the agent (its `agents.json` record) and its last
+    /// [`SNAPSHOT_EVENTS`] events, diff lines left out (counts kept); `more`:
+    /// older ones; `seq` 0 (its live events go on from 1).
+    AgentSnapshot { agent: serde_json::Value, events: Vec<Logged>, more: bool, seq: u64 },
+    /// A live `yap-agent` event of the agent watched, numbered (`seq`), its
+    /// log `line`; diff lines past [`LIVE_DIFF_LINES`] left out.
+    AgentEvent {
+        id: String,
+        seq: u64,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        line: Option<u64>,
+        event: serde_json::Value,
+    },
+    /// An older page of its events (`agent_log`).
+    AgentLog { id: String, events: Vec<Logged>, more: bool },
+    /// One file's diff (`agent_diff`): at most [`DIFF_LINES`], `more` past them.
+    AgentDiff { id: String, file: String, lines: Vec<String>, more: bool, added: u32, removed: u32 },
+    /// This phone fell behind: ask `agent_open` again.
+    AgentResync { id: String },
+    /// A permission prompt (or a plan) for a workspace this phone may see:
+    /// `yap-claude-approve`'s card as is, and when Yap says no by itself.
+    ApproveCard {
+        card: serde_json::Value,
+        #[serde(rename = "expiresTs")]
+        expires_ts: u64,
+    },
+    /// A card's end: `outcome` allowed | denied | timedOut | ended |
+    /// cancelled; `by` "pc", "you" (this phone), "phone" (another, `name`d)
+    /// or none (it timed out, the agent ended).
+    ApproveDone {
+        id: u64,
+        outcome: String,
+        by: Option<&'static str>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        name: Option<String>,
+    },
+    /// An ask-first card: the agent it would start or carry on.
+    ConfirmCard {
+        id: u64,
+        conversation: u64,
+        agent: serde_json::Value,
+        #[serde(rename = "expiresTs")]
+        expires_ts: u64,
+    },
+    /// Its end: `outcome` allowed | refused | timedOut, `by` as for approvals.
+    ConfirmDone {
+        id: u64,
+        outcome: String,
+        by: Option<&'static str>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        name: Option<String>,
+    },
+    /// A Code chat's Mode changed (anywhere): its mode, as the chip says it,
+    /// the workspace's cap.
+    Mode {
+        chat: u64,
+        mode: String,
+        label: String,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        cap: Option<String>,
+    },
+    /// An agent's turn was reported in a chat (`yap-agent-report`).
+    Report { conversation: u64, agent: String, turn: u32, status: String },
+    /// A Code action done (Stop, Continue, Undo…): what the PC says of it.
+    Acted { action: String, id: String, message: String },
 }
 
 impl Out {
@@ -370,6 +664,60 @@ const KNOWN: &[&str] = &[
     "new_chat",
     "picture",
     "ping",
+    "code_list",
+    "code_new",
+    "agent_open",
+    "agent_close",
+    "agent_log",
+    "agent_diff",
+    "agent_stop",
+    "agent_continue",
+    "agent_message",
+    "agent_go_ahead",
+    "agent_undo",
+    "approve",
+    "confirm",
+    "set_mode",
+];
+
+/// The Code side's messages, phone → PC (Remote Control), as the shared
+/// definition the page imports lists them (`desktop/src/lib/core/codeWire.js`,
+/// served at `core/codeWire.js`; the tests hold the two together).
+#[cfg_attr(not(test), allow(dead_code))]
+pub const CODE_IN: &[&str] = &[
+    "code_list",
+    "code_new",
+    "agent_open",
+    "agent_close",
+    "agent_log",
+    "agent_diff",
+    "agent_stop",
+    "agent_continue",
+    "agent_message",
+    "agent_go_ahead",
+    "agent_undo",
+    "approve",
+    "confirm",
+    "set_mode",
+];
+/// …and PC → phone.
+#[cfg_attr(not(test), allow(dead_code))]
+pub const CODE_OUT: &[&str] = &[
+    "code_list",
+    "code_status",
+    "chat_message",
+    "agent_snapshot",
+    "agent_event",
+    "agent_log",
+    "agent_diff",
+    "agent_resync",
+    "approve_card",
+    "approve_done",
+    "confirm_card",
+    "confirm_done",
+    "mode",
+    "report",
+    "acted",
 ];
 
 /// A message this PC can't read.
@@ -552,11 +900,11 @@ mod tests {
         assert_eq!(j(Out::Denied { reason: "No".into() }), serde_json::json!({"type":"denied","reason":"No"}));
         let m = Model { id: "ondevice|".into(), label: "Qwen".into(), on_this_pc: true };
         assert_eq!(
-            j(Out::Ready { pc: "DESK".into(), model: Some(m.clone()), models: vec![m.clone()], can: vec!["ask"], picker: None }),
+            j(Out::Ready { pc: "DESK".into(), model: Some(m.clone()), models: vec![m.clone()], can: vec!["ask"], picker: None, code: None }),
             serde_json::json!({"type":"ready","pc":"DESK","model":{"id":"ondevice|","label":"Qwen","onThisPc":true},"models":[{"id":"ondevice|","label":"Qwen","onThisPc":true}],"can":["ask"]})
         );
         assert_eq!(
-            j(Out::Ready { pc: "DESK".into(), model: None, models: vec![], can: vec![], picker: Some(serde_json::json!({"status":{}})) })["picker"],
+            j(Out::Ready { pc: "DESK".into(), model: None, models: vec![], can: vec![], picker: Some(serde_json::json!({"status":{}})), code: None })["picker"],
             serde_json::json!({"status":{}})
         );
         assert_eq!(j(Out::State { phase: Phase::Transcribing }), serde_json::json!({"type":"state","phase":"transcribing"}));
@@ -612,17 +960,20 @@ mod tests {
         // What the PC says.
         let j = |o: Out| serde_json::from_str::<serde_json::Value>(&o.json()).unwrap();
         assert_eq!(
-            j(Out::Chats { items: vec![ChatItem { id: 3, title: "Trip packing list".into(), ts: 1_700_000_000 }] }),
+            j(Out::Chats { items: vec![ChatItem { id: 3, title: "Trip packing list".into(), ts: 1_700_000_000, code: None }] }),
             serde_json::json!({"type":"chats","items":[{"id":3,"title":"Trip packing list","ts":1_700_000_000u64}]})
         );
         let thread = Out::Thread {
             id: Some(3),
             title: "Trip packing list".into(),
             messages: vec![
-                ThreadMessage { role: "user", text: "What to pack?".into(), id: None, voice: true, pictures: 2 },
-                ThreadMessage { role: "assistant", text: "A coat.".into(), id: Some("chat:3:1".into()), voice: false, pictures: 0 },
+                ThreadMessage { role: "user", text: "What to pack?".into(), id: None, voice: true, pictures: 2, ..Default::default() },
+                ThreadMessage { role: "assistant", text: "A coat.".into(), id: Some("chat:3:1".into()), ..Default::default() },
             ],
             more: false,
+            code: None,
+            agents: vec![],
+            cards: vec![],
         };
         assert_eq!(
             j(thread),
@@ -632,7 +983,7 @@ mod tests {
             ]})
         );
         assert_eq!(
-            j(Out::Thread { id: None, title: String::new(), messages: vec![], more: false }),
+            j(Out::Thread { id: None, title: String::new(), messages: vec![], more: false, code: None, agents: vec![], cards: vec![] }),
             serde_json::json!({"type":"thread","id":null,"title":"","messages":[],"more":false})
         );
         assert_eq!(j(Out::Chat { id: 9, title: "Bread".into() }), serde_json::json!({"type":"chat","id":9,"title":"Bread"}));
@@ -675,7 +1026,7 @@ mod tests {
         assert!(parse(r#"{"type":"ask","text":"Hi","speak":"yes"}"#).is_err());
         assert!(matches!(parse(r#"{"type":"ask","text":"Hi","speak":false}"#).unwrap(), In::Ask { speak: false, .. }));
         // Said in `ready.can`, after what was there before.
-        assert_eq!(CAN.last(), Some(&"speak"));
+        assert_eq!(CAN[7], "speak");
         assert_eq!(&CAN[..7], &["ask", "read_aloud", "picker", "effort", "chats", "pictures", "words"]);
         // A hello with both the phone's device and the QR's token.
         let both = parse(r#"{"type":"hello","v":1,"name":"Pixel","nonce":"n","device":{"id":"d1","secret":"s"},"pair":{"token":"t0k"}}"#).unwrap();
@@ -689,5 +1040,183 @@ mod tests {
                 pair: Some(PairToken { token: "t0k".into() })
             }
         );
+    }
+
+    // ---- Remote Control (2026-11-08) ----
+
+    /// The shared definition the page imports (`core/codeWire.js`).
+    const SHARED: &str = include_str!("../../../src/lib/core/codeWire.js");
+
+    /// One of its `export const NAME = [...]` lists of words.
+    fn shared_list(name: &str) -> Vec<String> {
+        let start = SHARED.find(&format!("export const {name} = [")).unwrap_or_else(|| panic!("{name} in codeWire.js"));
+        let rest = &SHARED[start..];
+        let body = &rest[rest.find('[').unwrap() + 1..rest.find("];").unwrap()];
+        body.split(',').map(|w| w.trim().trim_matches('\'').to_string()).filter(|w| !w.is_empty()).collect()
+    }
+
+    /// Its examples, as JSON.
+    fn examples() -> serde_json::Value {
+        let start = SHARED.find("/* wire:begin */").unwrap() + "/* wire:begin */".len();
+        let end = SHARED.find("/* wire:end */").unwrap();
+        serde_json::from_str(&SHARED[start..end]).expect("codeWire.js's examples are strict JSON")
+    }
+
+    #[test]
+    fn the_code_sides_messages_are_the_shared_definitions_both_ways() {
+        // Every type both ways, as the page's own file lists them.
+        assert_eq!(shared_list("PHONE_TO_PC"), CODE_IN);
+        assert_eq!(shared_list("PC_TO_PHONE"), CODE_OUT);
+        assert_eq!(shared_list("CODE_CAN"), ["code", "code_act", "approve"]);
+        assert_eq!(&CAN[8..], &["code", "code_act", "approve"], "after what was there before");
+        for t in CODE_IN {
+            assert!(KNOWN.contains(t), "{t}");
+        }
+        // The limits and the Modes a phone may pick.
+        let num = |name: &str| -> u64 {
+            let at = SHARED.find(name).unwrap_or_else(|| panic!("{name}"));
+            SHARED[at..].split(|c: char| !c.is_ascii_digit()).find(|s| !s.is_empty()).unwrap().parse().unwrap()
+        };
+        assert_eq!(num("MIN_SHOWN_MS = "), crate::link::code::gates::MIN_SHOWN_MS);
+        assert_eq!(num("text: "), MAX_CODE_TEXT as u64);
+        assert_eq!(num("snapshotEvents: "), SNAPSHOT_EVENTS as u64);
+        assert_eq!(num("diffLines: "), DIFF_LINES as u64);
+        assert_eq!(num("liveDiffLines: "), LIVE_DIFF_LINES as u64);
+        assert_eq!(num("frame: "), MAX_CODE_FRAME as u64);
+        let modes = shared_list("PHONE_MODES");
+        let parsed: Vec<crate::agents::modes::Mode> = modes.iter().map(|m| crate::agents::modes::Mode::parse(m).unwrap()).collect();
+        assert!(parsed.iter().all(|m| *m <= crate::link::code::gates::PHONE_MAX), "{modes:?}");
+        assert_eq!(parsed.last(), Some(&crate::link::code::gates::PHONE_MAX));
+        assert!(SHARED.contains(&format!("PHONE_MAX_MODE = '{}'", crate::link::code::gates::PHONE_MAX.as_str())));
+    }
+
+    #[test]
+    fn every_example_the_page_has_parses_or_is_written_exactly_here() {
+        let ex = examples();
+        // Phone → PC: each parses, as its own message.
+        let ins = ex["in"].as_object().unwrap();
+        assert_eq!(ins.keys().map(String::as_str).collect::<std::collections::BTreeSet<_>>(), CODE_IN.iter().copied().collect());
+        for (t, m) in ins {
+            assert_eq!(m["type"], t.as_str());
+            let parsed = parse(&m.to_string()).unwrap_or_else(|e| panic!("{t}: {e}"));
+            let again = format!("{parsed:?}");
+            let snake: String = again.split([' ', '{']).next().unwrap().chars().flat_map(|c| if c.is_uppercase() { vec!['_', c.to_ascii_lowercase()] } else { vec![c] }).collect();
+            assert_eq!(snake.trim_start_matches('_'), t, "{again}");
+        }
+        assert_eq!(parse(&ins["approve"].to_string()).unwrap(), In::Approve { id: 7, allow: true, shown_ms: 2_300 });
+        assert_eq!(parse(&ins["agent_undo"].to_string()).unwrap(), In::AgentUndo { id: "1a2b3c4d".into(), turn: Some(2), sure: true });
+        assert_eq!(parse(&ins["set_mode"].to_string()).unwrap(), In::SetMode { chat: 12, mode: "plan".into() });
+        // An approval without its time shown reads as shown for no time (refused by the gates).
+        assert_eq!(parse(r#"{"type":"approve","id":7,"allow":false}"#).unwrap(), In::Approve { id: 7, allow: false, shown_ms: 0 });
+        // PC → phone: each written exactly as the page's example.
+        let outs = ex["out"].as_object().unwrap();
+        assert_eq!(outs.keys().map(String::as_str).collect::<std::collections::BTreeSet<_>>(), CODE_OUT.iter().copied().collect());
+        let j = |o: Out| serde_json::from_str::<serde_json::Value>(&o.json()).unwrap();
+        let running = Brief {
+            id: "1a2b3c4d".into(),
+            conversation: Some(12),
+            folder: "garden-planner".into(),
+            status: "running".into(),
+            now: Some("Adding a watering schedule".into()),
+            turn_title: Some("Add a watering schedule".into()),
+            started_ts: 1_730_000_110,
+            message_id: Some("chat:12:0".into()),
+            turn_list: vec![BriefTurn { n: 1, title: "Add a watering schedule".into(), status: "running".into(), message_id: Some("chat:12:0".into()), report_message_id: None }],
+            ..Default::default()
+        };
+        let path = r"D:\Projects\garden-planner".to_string();
+        let written = [
+            Out::CodeList {
+                workspaces: vec![CodeWorkspace { name: "garden-planner".into(), path: path.clone(), allowed: true, used_ts: 1_730_000_000, cap: None }],
+                chats: vec![CodeChat { id: 12, title: "Watering schedule".into(), ts: 1_730_000_100, workspace: "garden-planner".into() }],
+                agents: vec![running],
+            },
+            Out::CodeStatus {
+                seq: 4,
+                answering: vec![12],
+                agents: vec![],
+                approvals: vec![ApprovalRef { id: 7, conversation: Some(12), agent: "1a2b3c4d".into() }],
+                confirms: vec![ConfirmRef { id: 3, conversation: 12 }],
+            },
+            Out::ChatMessage {
+                conversation: 12,
+                message: ThreadMessage { role: "user", text: "The agent in garden-planner: it's done.".into(), kind: "agentReport".into(), ..Default::default() },
+            },
+            Out::AgentSnapshot {
+                agent: serde_json::json!({"id": "1a2b3c4d", "folder": "garden-planner", "status": "running"}),
+                events: vec![Logged { line: 1, event: serde_json::json!({"id": "1a2b3c4d", "status": "running", "folder": "garden-planner", "step": "Reading notes.md", "ts": 1_730_000_111u64}) }],
+                more: false,
+                seq: 0,
+            },
+            Out::AgentEvent {
+                id: "1a2b3c4d".into(),
+                seq: 1,
+                line: Some(2),
+                event: serde_json::json!({"id": "1a2b3c4d", "status": "running", "folder": "garden-planner", "now": "Adding a watering schedule", "ts": 1_730_000_112u64}),
+            },
+            Out::AgentLog { id: "1a2b3c4d".into(), events: vec![], more: false },
+            Out::AgentDiff { id: "1a2b3c4d".into(), file: "notes.md".into(), lines: vec!["-Draft".into(), "+Final".into()], more: false, added: 1, removed: 1 },
+            Out::AgentResync { id: "1a2b3c4d".into() },
+            Out::ApproveCard {
+                card: serde_json::json!({"id": 7, "run": "1a2b3c4d", "conversation": 12, "origin": "typed", "tool": "Bash", "summary": "Run a command: npm test", "detail": "npm test", "label": "garden-planner", "askedTs": 1_730_000_120u64}),
+                expires_ts: 1_730_000_720,
+            },
+            Out::ApproveDone { id: 7, outcome: "allowed".into(), by: Some("phone"), name: Some("Kitchen tablet".into()) },
+            Out::ConfirmCard {
+                id: 3,
+                conversation: 12,
+                agent: serde_json::json!({"folder": "garden-planner", "path": path, "mode": "auto", "modeLabel": "Auto", "brief": "Add a watering schedule", "newFolder": false, "web": true, "continues": false}),
+                expires_ts: 1_730_000_240,
+            },
+            Out::ConfirmDone { id: 3, outcome: "allowed".into(), by: Some("you"), name: None },
+            Out::Mode { chat: 12, mode: "plan".into(), label: "Plan".into(), cap: Some("manual".into()) },
+            Out::Report { conversation: 12, agent: "1a2b3c4d".into(), turn: 1, status: "done".into() },
+            Out::Acted { action: "stop".into(), id: "1a2b3c4d".into(), message: "Stopping the agent in garden-planner.".into() },
+        ];
+        assert_eq!(written.len(), CODE_OUT.len());
+        for out in written {
+            let v = j(out);
+            let t = v["type"].as_str().unwrap().to_string();
+            assert_eq!(v, outs[&t], "{t}");
+        }
+    }
+
+    #[test]
+    fn ready_says_whether_remote_control_is_on_and_a_thread_carries_its_code_part() {
+        let j = |o: Out| serde_json::from_str::<serde_json::Value>(&o.json()).unwrap();
+        let on = Out::Ready { pc: "Office PC".into(), model: None, models: vec![], can: CAN.to_vec(), picker: None, code: Some(CodeReady { on: true, why: None }) };
+        assert_eq!(j(on)["code"], serde_json::json!({"on": true}));
+        let off = Out::Ready { pc: "Office PC".into(), model: None, models: vec![], can: CAN.to_vec(), picker: None, code: Some(CodeReady { on: false, why: Some("Remote Control is off on Office PC. Turn it on in Settings → Phone.".into()) }) };
+        assert_eq!(j(off)["code"]["why"], "Remote Control is off on Office PC. Turn it on in Settings → Phone.");
+        // A Code chat's thread: its workspace and Mode, the phone's highest, a report marked as one.
+        let thread = Out::Thread {
+            id: Some(12),
+            title: "Watering schedule".into(),
+            messages: vec![
+                ThreadMessage { role: "user", text: "Add a watering schedule".into(), ..Default::default() },
+                ThreadMessage { role: "user", text: "The agent in garden-planner: it's done.".into(), kind: "agentReport".into(), ..Default::default() },
+            ],
+            more: false,
+            code: Some(ThreadCode {
+                workspace: "garden-planner".into(),
+                path: r"D:\Projects\garden-planner".into(),
+                mode: "bypassPermissions".into(),
+                mode_label: "Bypass permissions".into(),
+                cap: None,
+                allowed: true,
+                phone_max: "auto".into(),
+            }),
+            agents: vec![],
+            cards: vec![serde_json::json!({"kind": "approve", "id": 7})],
+        };
+        let v = j(thread);
+        assert_eq!(v["code"]["phoneMax"], "auto");
+        assert_eq!(v["code"]["modeLabel"], "Bypass permissions");
+        assert_eq!(v["messages"][1]["kind"], "agentReport");
+        assert!(v["messages"][0].get("kind").is_none());
+        assert_eq!(v["cards"][0]["id"], 7);
+        assert!(v.get("agents").is_none(), "none: left out");
+        // A drawer item names a Code chat's workspace.
+        assert_eq!(j(Out::Chats { items: vec![ChatItem { id: 12, title: "x".into(), ts: 1, code: Some("garden-planner".into()) }] })["items"][0]["code"], "garden-planner");
     }
 }

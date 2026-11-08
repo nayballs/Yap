@@ -1095,6 +1095,17 @@ pub struct YapConfig {
     /// it's off again.
     #[serde(default)]
     pub link_enabled: bool,
+    /// **Remote Control** (Settings → Phone, 2026-11-08: `link/code.rs`):
+    /// paired phones ticked for it may follow Yap Code's agents, allow their
+    /// steps and send them work. Off by default; needs Yap Link and Yap Code
+    /// on. An older Yap drops it on its save, which turns it off: the safe way.
+    #[serde(default)]
+    pub link_remote_control: bool,
+    /// "Keep this PC awake while agents work" (under Remote Control,
+    /// `shell/awake.rs`): idle sleep held off while an agent is queued,
+    /// running or asking, let go 5 minutes after the last one ends. On.
+    #[serde(default = "default_true")]
+    pub link_keep_awake: bool,
 
     /// Open the meeting notepad when a meeting recording starts (Settings →
     /// Meetings → Notepad; `notepad.rs`): docked to the right edge of the
@@ -1673,6 +1684,8 @@ impl Default for YapConfig {
             bridge_enabled: true,
             mcp_allow_writes: false,
             link_enabled: false,
+            link_remote_control: false,
+            link_keep_awake: true,
             meeting_open_notepad: true,
             meeting_split_screen: false,
             meeting_live_transcript: true,

@@ -554,6 +554,9 @@ pub fn run() {
             link::link_pair_answer,
             link::link_remove,
             link::link_network_settings,
+            link::link_remote_status,
+            link::link_phone_remote,
+            link::link_workspace_remote,
             integrations::mcp_clients::mcp_clients_status,
             integrations::mcp_clients::mcp_client_add,
             integrations::mcp_clients::mcp_client_remove,
@@ -1173,6 +1176,10 @@ pub fn run() {
             ai::claude_plan::init(&handle);
             // Yap Link (Settings → Phone): HTTPS for paired phones on the home Wi-Fi.
             link::sync(&handle, cfg.link_enabled);
+            // Remote Control (link/code.rs): its switches read, and the PC kept
+            // awake while agents work with it on (shell/awake.rs).
+            link::code::refresh(&cfg);
+            shell::awake::poke();
 
             // Yap accounts: sign-in deep links + restore the stored session.
             auth::init(&handle);
