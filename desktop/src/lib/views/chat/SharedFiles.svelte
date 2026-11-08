@@ -152,8 +152,9 @@
         {#if gone}
           <span class="fmeta fgone" data-testid="chat-file-gone">Moved or deleted</span>
         {:else}
+          <!-- The folder gives way first: the size and kind always show whole. -->
           <span class="fmeta">
-            {#if item.folder}<span class="ffolder" title={item.folder}>{shortFolder(item.folder)}</span>{' · '}{/if}{sizeLabel(item.bytes)}{' · '}{kindLabel(item)}
+            {#if item.folder}<span class="ffolder" title={item.folder}>{shortFolder(item.folder)}</span><span class="fkeep">{' · '}</span>{/if}<span class="fkeep">{sizeLabel(item.bytes)}{' · '}{kindLabel(item)}</span>
           </span>
         {/if}
       </div>
@@ -218,7 +219,8 @@
           {/if}
         </div>
       {/if}
-      {#if share.caption}
+      <!-- A caption that only repeats the one file's name says nothing new. -->
+      {#if share.caption && !(share.items.length === 1 && share.caption.trim() === share.items[0].name)}
         <figcaption class="caption" data-testid="chat-share-caption">{share.caption}</figcaption>
       {/if}
     </figure>
@@ -391,11 +393,20 @@
     white-space: nowrap;
   }
   .fmeta {
+    display: flex;
+    min-width: 0;
     font-size: 11px;
     color: var(--yap-muted);
+    white-space: pre;
+  }
+  .ffolder {
+    flex: 0 1 auto;
+    min-width: 0;
     overflow: hidden;
     text-overflow: ellipsis;
-    white-space: nowrap;
+  }
+  .fkeep {
+    flex: 0 0 auto;
   }
   .fgone {
     color: var(--yap-muted);
