@@ -15,7 +15,8 @@
 //   Esc; kept per conversation, a new chat's pick applied once its
 //   conversation exists; Bypass permissions asks once, then the chip is
 //   amber and switches freely. Light and dark.
-// - An agent's tab opening at once, its log, files, commands, what it wasn't
+// - An agent's tab opening at once (on its panel: agents-panel.spec.js; a
+//   row's Open its whole timeline, below), its log, files, commands, what it wasn't
 //   allowed, its words and cost; the pill under the answer; the report as an
 //   agent card; Undo the agent's changes. Light and dark. An agent whose edits went through with
 //   no backup made (Claude Code's hooks didn't run): its tab says Undo can't
@@ -41,7 +42,7 @@ import path from 'node:path';
 import { test as base, expect, openView, openSettings, closeSettings, setConfig, inAnotherApp, settingsDialog } from './support/fixtures.js';
 import { startFakeLlm } from './support/fake-llm.js';
 import { RUNS } from './support/yap.js';
-import { toSide, newCodeChat } from './support/code-chats.js';
+import { toSide, newCodeChat, agentTimeline } from './support/code-chats.js';
 import {
   statusWord,
   statusTone,
@@ -721,6 +722,7 @@ test('an agent: its tab opens at once and follows it, the pill, the report card,
 
   await expect(tab(main)).toHaveAttribute('data-status', 'done');
   await expect(main.getByTestId('chat-agent-status')).toHaveText('Done');
+  await agentTimeline(main);
   await expect(main.getByTestId('chat-agent-meta')).toContainText('Auto');
   await expect(main.getByTestId('chat-agent-meta')).toContainText('Claude Sonnet 5.5 Medium');
   await expect(main.getByTestId('chat-agent-elapsed')).toContainText('ran');
@@ -791,6 +793,7 @@ test('an agent whose edits made no backup (hooks off): its tab says Undo can’t
   expect(fs.readFileSync(path.join(GARDEN, 'notes.md'), 'utf8')).toBe('Final notes\n');
   expect(agent.noBackups).toBe(true);
   await expect(tab(main)).toHaveAttribute('data-status', 'done');
+  await agentTimeline(main);
   await expect(main.getByTestId('chat-agent-files').locator('.fname')).toHaveText(['notes.md']);
   await expect(main.getByTestId('chat-agent-no-backups')).toHaveText(NO_BACKUPS);
   await expect(tab(main).getByRole('button', { name: "Undo the agent's changes" })).toHaveCount(0);
@@ -807,6 +810,7 @@ test('an agent whose edits made no backup (hooks off): its tab says Undo can’t
 test('a slow agent: its live line, the running list, “1 agent working” on the bar, Stop and Continue', async ({ yap, main, fakeLlm, shot }) => {
   const started = await startAgent(yap, main, fakeLlm, { lines: SLOW, name: 'slow', brief: 'Read notes.md slowly.', report: null });
   await expect(tab(main)).toBeVisible();
+  await agentTimeline(main);
   await expect(main.getByTestId('chat-agent-now')).toHaveText('Reading notes.md', { timeout: 20_000 });
   await expect(main.getByTestId('chat-agent-status')).toHaveText('Running');
   await expect(main.getByTestId('chat-agent-elapsed')).toContainText('so far');
@@ -860,6 +864,7 @@ test('a slow agent: its live line, the running list, “1 agent working” on th
   const carried = await ended(yap, started.id);
   expect(carried).toMatchObject({ status: 'done', turns: 2, session: stopped.session });
   await expect(main.getByTestId('chat-agent-status')).toHaveText('Done');
+  await agentTimeline(main);
   await expect(main.getByTestId('chat-agent-text')).toContainText('Got: Carry on with the task from where you stopped.');
   await expect(main.getByTestId('chat-running-agent')).toHaveCount(0);
   await messagesOf(yap, carried.conversation, 4);
@@ -877,6 +882,7 @@ test('Tell the agent…: the person’s words go to the agent, its next turn', a
   await expect.poll(async () => (await agents(yap)).find((j) => j.id === agent.id).turns, { timeout: 20_000 }).toBe(2);
   const told = await ended(yap, agent.id);
   expect(told.text).toContain('Got: Also sort the list.');
+  await agentTimeline(main);
   await expect(main.getByTestId('chat-agent-text')).toContainText('Got: Also sort the list.');
   await messagesOf(yap, agent.conversation, 6);
 });
@@ -891,6 +897,7 @@ test('an agent reads like Claude Code: its to-do list, what it says, commands by
   const started = await startAgent(yap, main, fakeLlm, { lines: looking(GARDEN), name: 'looking', brief: 'Add a watering schedule to the planner and write a planting guide.', report: null });
   await expect(tab(main)).toBeVisible();
   await expect.poll(async () => (await agents(yap)).find((j) => j.id === started.id).status, { timeout: 20_000 }).toBe('asking');
+  await agentTimeline(main);
 
   const box = main.getByTestId('chat-agent-steps');
   const stepTexts = box.locator('.step .stext');
@@ -958,6 +965,7 @@ test('an agent reads like Claude Code: its to-do list, what it says, commands by
   const agent = await ended(yap, started.id);
   expect(agent.status).toBe('done');
   await expect(tab(main)).toHaveAttribute('data-status', 'done');
+  await agentTimeline(main);
   await expect(main.getByTestId('chat-agent-now')).toHaveCount(0);
 
   // The list ticked off.
@@ -1026,6 +1034,7 @@ test('an agent reads like Claude Code: its to-do list, what it says, commands by
   await tab(main).getByRole('button', { name: 'Close the panel' }).click();
   await messagesOf(yap, agent.conversation, 4);
   await thread(main).getByTestId('chat-agent-pill').click();
+  await agentTimeline(main);
   await expect(main.getByTestId('chat-agent-said')).toHaveCount(3);
   await expect(main.getByTestId('chat-agent-todos').locator('h3 .count')).toHaveText('3 of 3 done');
   await file('src\\planner.js').locator('.frow').click();
@@ -1136,6 +1145,10 @@ test('an agent paid by the API key says so, and History tells plan and key apart
   const started = await startAgent(yap, main, fakeLlm, { lines: ECHO_KEY, name: 'echo-key', brief: 'Tidy notes.md.' });
   const agent = await ended(yap, started.id);
   expect(agent).toMatchObject({ status: 'done', pay: 'key' });
+  // The panel's Cost: what it cost (no "≈"), paid by the key.
+  await expect(main.getByTestId('chat-agent-total-cost').locator('.tv')).toHaveText('$0.002');
+  await expect(main.getByTestId('chat-agent-total-cost').locator('.tc')).toHaveText('API key');
+  await agentTimeline(main);
   await expect(main.getByTestId('chat-agent-cost')).toHaveText('API key · $0.002');
   await expect(main.getByTestId('chat-agent-cost')).toHaveAttribute('data-pay', 'key');
   await shot(main, '14-agent-tab-key');

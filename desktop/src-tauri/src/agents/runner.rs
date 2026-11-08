@@ -147,6 +147,11 @@ pub struct AgentEvent {
     /// its line in `step` ("Allowed from Office phone · Run a command: …").
     #[serde(skip_serializing_if = "Option::is_none")]
     pub remote: Option<super::remote::RemoteNote>,
+    /// What its turn has used so far (`usage.rs`): its tokens, its context's
+    /// fill, an estimate of its cost while it works. Many a turn: sent to the
+    /// page only ([`emit_live`]), but for a result's and a turn's end.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub usage: Option<super::usage::TurnUsage>,
     /// Unix seconds.
     pub ts: u64,
 }
@@ -356,6 +361,15 @@ pub fn emit(ev: &AgentEvent) {
     // A phone watching it (Remote Control): its log line numbers it there.
     if let Some(v) = v {
         crate::link::agent_event(&ev.id, line, v);
+    }
+}
+
+/// **Send `ev` to the page only**: what a turn has used so far (`usage`), many
+/// times a turn — never into its log (the turn's note keeps it, saved with
+/// the agent) nor to a phone.
+fn emit_live(ev: &AgentEvent) {
+    if let Some(app) = APP.get() {
+        let _ = app.emit(EVENT, ev);
     }
 }
 
@@ -698,7 +712,14 @@ async fn turn(id: &str, message: Option<String>) -> (Status, u32) {
     tracing::info!(id, mode = mode.as_str(), pay = %agent.pay, resuming, turn = n, runs = agent.turns, "Agents: started");
     emit(&AgentEvent { step: Some("Starting Claude Code".into()), ..AgentEvent::at(&agent, n) });
 
-    let mut follow = Follow::new(&agent, n, folder, backup, mode);
+    // The model's context window: as Claude Code said it for this turn (a
+    // turn carried on) or an earlier one on the same model, else Yap's
+    // catalog (a plan chat's ring does the same: `chat/turn/plan.rs`).
+    let window = match super::usage::window_before(agent.turn_list.iter().map(|t| (t.model.as_str(), t.usage.as_ref())), &agent.model) {
+        0 => crate::chat::budget::context_window(&cfg, "anthropic", &agent.model, "").await.0,
+        w => w,
+    };
+    let mut follow = Follow::new(&agent, n, folder, backup, mode, window);
     let mut tick = tokio::time::interval(Duration::from_millis(500));
     loop {
         tokio::select! {
@@ -750,6 +771,8 @@ struct Follow {
     changes: HashMap<String, Change>,
     /// Diff lines the agent's log has (across its turns; `diff::AGENT_MAX`).
     diff_used: usize,
+    /// What the turn has used (`usage.rs`).
+    meter: super::usage::Meter,
 }
 
 /// An Edit, MultiEdit or Write call waiting for its result: its diff goes
@@ -793,7 +816,8 @@ fn no_backups(edited: bool, backed_up: usize) -> bool {
 }
 
 impl Follow {
-    fn new(agent: &Agent, n: u32, folder: PathBuf, backup: PathBuf, mode: Mode) -> Follow {
+    fn new(agent: &Agent, n: u32, folder: PathBuf, backup: PathBuf, mode: Mode, window: u64) -> Follow {
+        let before = agent.turn_list.iter().find(|t| t.n == n).and_then(|t| t.usage.clone());
         Follow {
             id: agent.id.clone(),
             n,
@@ -815,6 +839,7 @@ impl Follow {
             line: String::new(),
             changes: HashMap::new(),
             diff_used: agent.diff_lines as usize,
+            meter: super::usage::Meter::new(before, &agent.model, window),
         }
     }
 
@@ -846,7 +871,13 @@ impl Follow {
             self.todos = todos.clone();
             let line = steps::doing_now(&todos).unwrap_or_else(|| self.line.clone());
             self.line = line.clone();
-            if let Some(agent) = store::touch(&self.id, |j| j.step = line.clone()) {
+            let n = self.n;
+            if let Some(agent) = store::touch(&self.id, |j| {
+                j.step = line.clone();
+                if let Some(t) = j.turn_mut(n) {
+                    t.todos = todos.clone();
+                }
+            }) {
                 emit(&AgentEvent { todos: Some(todos), now: Some(line).filter(|l| !l.is_empty()), ..self.event(&agent) });
             }
             return;
@@ -915,6 +946,20 @@ impl Follow {
         }
     }
 
+    /// What the turn has used changed: kept on its note (saved with the next
+    /// flush) and told to the page.
+    fn used(&mut self) {
+        let usage = self.meter.now();
+        let n = self.n;
+        if let Some(agent) = store::touch(&self.id, |j| {
+            if let Some(t) = j.turn_mut(n) {
+                t.usage = Some(usage.clone());
+            }
+        }) {
+            emit_live(&AgentEvent { usage: Some(usage), ..self.event(&agent) });
+        }
+    }
+
     /// One event of Claude Code's.
     fn on(&mut self, ev: Event, session: &Session) {
         match ev {
@@ -922,8 +967,15 @@ impl Follow {
                 if !init.session_id.is_empty() {
                     store::touch(&self.id, |j| j.session = init.session_id.clone());
                 }
+                self.meter.model(&init.model);
             }
             Event::Assistant(a) => {
+                // What its call used (a helper's too: it's spent), first.
+                if let Some(u) = &a.usage {
+                    if self.meter.call(a.message_id.as_deref(), a.model.as_deref(), u, a.parent_tool_use_id.is_none()) {
+                        self.used();
+                    }
+                }
                 for block in &a.blocks {
                     match block {
                         Block::ToolUse { id, name, input } => self.on_tool(id, name, input),
@@ -997,6 +1049,11 @@ impl Follow {
             .collect();
         let cost = self.cost_before + r.cost_usd.max(0.0);
         let turn_cost = self.turn_cost_before + r.cost_usd.max(0.0);
+        // What it used, Claude Code's own sums and window now; its cost is
+        // Claude Code's figure from here (`usage.rs`).
+        let said = self.meter.said() || r.usage.input_tokens + r.usage.output_tokens > 0;
+        let usage = self.meter.at_result(r);
+        let usage = said.then_some(usage);
         let unbacked = no_backups(self.edited, manifest.len());
         if unbacked {
             tracing::info!(id = %self.id, "Agents: files changed with no backups (Claude Code's hooks didn't run)");
@@ -1009,6 +1066,9 @@ impl Follow {
             }
             if let Some(t) = j.turn_mut(n) {
                 t.cost = turn_cost;
+                if usage.is_some() {
+                    t.usage.clone_from(&usage);
+                }
                 for f in &manifest {
                     if !t.files.contains(f) {
                         t.files.push(f.clone());
@@ -1045,7 +1105,7 @@ impl Follow {
         });
         tracing::info!(id = %self.id, outcome = outcome.word(), last = done, "Agents: a turn's result");
         if let Some(agent) = agent {
-            emit(&AgentEvent { text: Some(text), cost: Some(cost), ..self.event(&agent) });
+            emit(&AgentEvent { text: Some(text), cost: Some(cost), usage, ..self.event(&agent) });
         }
         if done {
             session.end();
@@ -1139,8 +1199,10 @@ impl Follow {
         tracing::info!(id = %self.id, turn = n, status = status.word(), plan, plan_allowed, asks, "Agents: ended");
         if let Some(agent) = agent {
             // Its turn's own words (never an earlier turn's).
-            let said = agent.turn_list.iter().find(|t| t.n == n).map(|t| t.text.clone()).unwrap_or_else(|| agent.text.clone());
-            emit(&AgentEvent { text: Some(said).filter(|t| !t.is_empty()).or(error), cost: Some(agent.cost), problem: agent.problem.clone(), ..AgentEvent::at(&agent, n) });
+            let note = agent.turn_list.iter().find(|t| t.n == n);
+            let said = note.map(|t| t.text.clone()).unwrap_or_else(|| agent.text.clone());
+            let usage = note.and_then(|t| t.usage.clone());
+            emit(&AgentEvent { text: Some(said).filter(|t| !t.is_empty()).or(error), cost: Some(agent.cost), problem: agent.problem.clone(), usage, ..AgentEvent::at(&agent, n) });
         }
         // Its prompts ended with its run: their card on the bar goes.
         super::approve_card::sync();

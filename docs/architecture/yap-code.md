@@ -567,6 +567,25 @@ and each call runs the tool loop's own code and rules.
   `total_cost_usd`, the outcome). Each change goes out as the app event
   **`yap-agent`** and into the agent's log; saved at most every 2 s while it
   works, and at every turn's end.
+- **What each turn used** (2026-11-08, `agents/usage.rs`, the Agent panel's
+  numbers): each model call's `usage` from its `assistant` messages (Claude
+  Code sends a message a block at a time, each with the call's usage as it
+  stands: kept by message id, the latest of each, so a call counts once; a
+  helper's call under a Task counts too) — tokens read new, written, read
+  from the cache and written into it; **the context**, the latest call of
+  the agent's own conversation (its prompt and answer) against the model's
+  window (Claude Code's own `modelUsage` `contextWindow` at a result, else an
+  earlier turn's on the same model, else Yap's catalog,
+  `chat::budget::context_window`, as a plan chat's ring); and, while it
+  works, **an estimate of its cost** from its tokens at the model's list
+  prices for input, output, cache reads and cache writes (`usage::PRICES`,
+  savvy-progress's table, its input and output held to Yap's own
+  `ai/usage/prices.rs` by a test). Claude Code's own `total_cost_usd` replaces
+  the estimate at the result, and the result's sums count where they say more
+  than the calls seen. Kept on the turn (`TurnNote::usage`), so a restart
+  shows the same; the to-do list too (`TurnNote::todos`). Live as
+  `yap-agent`'s `usage`, sent to the page only (never a line of the log,
+  nor to a phone), but for a result's and a turn's end.
 - **Asking**: a permission card waiting for the person
   (`claude_live::pending`) makes the agent `asking` ("Waiting for you to allow
   a step").
@@ -611,11 +630,62 @@ and each call runs the tool loop's own code and rules.
 pill or the bar's Open, and is fed by `agent_get` (the agent and its log, to
 replay) and `yap-agent` (live). **Closing the tab never stops the agent.**
 
-### What it shows
+Two views: **the panel**, what it opens on, and **the timeline**, a row's
+Open (Back returns to the panel). The footer (Stop, Continue, Undo, Open in
+terminal, "Tell the agent…") is the same under both.
+
+### The panel
+
+2026-11-08, after savvy-progress's agents panel (a Claude Code mod; MIT,
+github.com/JohnnyVizz/claude-kit), ported into Yap's own Svelte and Rust:
+`AgentPanel.svelte`, its rows, groups and numbers in `core/agentPanel.js`
+(pure; the maths it adapts carry the MIT notice there and in
+`agents/usage.rs`). Never savvy's pixel-crab avatars.
+
+- **The header**: the agent's Mode (coloured), model and effort, its
+  workspace's path, and three tiles — **Cost** ("≈ $0.13", "on the API" on
+  the plan; "$0.13", "API key" on a key, "≈" while any of it is estimated),
+  **Tokens** (every token its turns used, "80k"; "—" when none said) and
+  **Time** (its turns added up, "4:02"; the time between them left out).
+- **Groups**, each with its count, folding (▾ / ▸): **Needs you** (a turn
+  asking for a step, its plan waiting for Go ahead, or its question, for a
+  day), **Running**, **Finished**, **Queued** (a request not sent yet: behind
+  the turn working, or the agent stopped first), newest first in each.
+- **A row is one turn** of the Code chat's agent (and of any other agent the
+  chat has — a fresh one —, grouped the same way; its Open goes to that
+  agent's own tab):
+  - **the model's logo** (`core/modelIcons.js`, `ProviderMark`) in a ring
+    that says how it stands: turning while it runs, amber when it needs you,
+    ✓ when done, grey stopped, red failed, dashed queued; still under
+    reduced motion;
+  - its **title** on one line, whole on a hover (`ui/overflowTip.js`);
+  - **Mode · model · effort** ("Auto · Sonnet 5.5 · Medium"), the Mode in its
+    colour (Auto the Code teal, Bypass amber as its chip, Accept edits the
+    primary, Plan green, Manual plain);
+  - **"3/7 · Writing the planting guide"**: its to-do list's count and the
+    one in progress (as Claude Code's spinner says it); with no list, the
+    line it's on; "Needs you"'s "Waiting for you to allow a step" or "Its plan
+    is ready"; a finished one "7/7 · All done", "Done", "Stopped" or "Didn't
+    finish · why";
+  - at the right, small: **ctx % · tokens · ≈ $ · time** — its context's fill
+    and size (its latest call), its cost (Claude Code's figure, else the
+    estimate), how long it worked (savvy's `m:ss`);
+  - a thin **bar**: its to-dos done out of all, in its Mode's colour; with no
+    list, its context's fill in grey (a done one full).
+- **▸ opens a row in place**: its to-do list (✓, ●, ○), its latest steps
+  (the last 8, in the same words as the timeline), "1 command · 2 files
+  changed", and **Open**: the timeline at that turn. Enter or Space opens
+  and folds; ↑ ↓ (Home, End) move between rows.
+- **A pill or a report card** opens the panel with its turn's row open and in
+  view; so does a turn's own start (the chat's agent event).
+- **Live** from the events Yap already sends (`yap-agent`, its `usage` and
+  `todos`): nothing is polled; the clock ticks once a second.
+
+### The timeline
 
 It reads like Claude Code itself, so an agent can be followed from the panel
 instead of a terminal (rebuilt after the maintainer's first real agent,
-2026-11-07).
+2026-11-07). Open on a row of the panel shows it, at that turn.
 
 - **The header**: the folder and status, mode and model, how long it has run,
   its cost ([Paying](#paying-your-plan-or-a-key); "in all" once it has
@@ -672,7 +742,17 @@ instead of a terminal (rebuilt after the maintainer's first real agent,
 - **Pills** (`AgentPills.svelte`) under each answer that started an agent or
   carried it on (by each turn's `messageId`): the folder, the turn's request
   once there are several, and a status dot; a click opens its tab at that
-  turn.
+  turn's row.
+- **The to-do card** (`AgentTodoCard.svelte`, 2026-11-08, after the Claude
+  Code app's plan card; a small chunk of its own), in a Code chat only: under
+  the pill of each turn with a to-do list, that list in a rounded card — a ✓
+  in a filled circle for done (dimmed), a turning circle for the one in
+  progress (bright; a "⋯" once the turn is over), with the line the agent is
+  on in small type under it, an empty dashed circle for the rest — and "3 of
+  7 done". Live while the turn works (`stores/agents.svelte.js` keeps each
+  turn's `todos` from `yap-agent`); once it ends it stays as its record,
+  folded to "7 to-dos · all done" ("5 done", "none done yet") with ▸ to
+  open. No list, no card; a plain chat's thread is as it was.
 - **The report card** (`AgentReportCard.svelte`): the `agentReport` marker as "Agent
   done · garden-planner" (or didn't finish, has a question, its plan is
   ready, is carrying out its plan: as its turn ended), what it changed in a
@@ -817,7 +897,9 @@ Settings → Yap Code' **Pay with** says (`agents_pay`), never ambiguously
 - **The cost** is Claude Code's estimate of the API's price
   (`total_cost_usd`), added up across the agent's turns (each process's taken as
   its whole turn's). On a plan it's what the API would have charged, never a
-  charge.
+  charge. While a turn works, before its result, the panel shows Yap's own
+  estimate from its tokens (`agents/usage.rs`, "≈" even on a key), replaced by
+  Claude Code's figure at the result.
 - **The plan's limits** are the account's, shared by plan chats, agents and the
   person's own Claude Code. Chat shows them while its model is on the plan:
   the usage ring beside the model chip and "Plan usage limits"
@@ -895,7 +977,12 @@ saves ([config-and-data.md](./config-and-data.md)).
     `noBackups`, `diffLines`; `turnList` (its turns, a field of its own:
     [Turns](#turns-one-agent-per-code-chat)), `modelAsked` / `effortAsked`
     (the person's own model or effort, kept for its next turns), `whyNew`
-    (why it's a new agent and not the chat's carried on);
+    (why it's a new agent and not the chat's carried on); each turn's
+    `todos` (its to-do list as its latest `TodoWrite` left it) and `usage`
+    (`{input, output, cacheRead, cacheWrite, context, window, estimate?}`:
+    its tokens, its context's fill, an estimate while unpriced; 2026-11-08,
+    `agents/usage.rs`) — fields of the turn's own, which an older Yap drops on
+    its save (the turn then shows its log's list and no numbers);
   - `modes`: each chat's Mode (conversation id → mode);
   - `codeChats`: each Code chat's folder (conversation id → `{path, ts}`);
   - `bypassConfirmed`: the one-time OK for Bypass permissions.
@@ -1042,7 +1129,8 @@ Rust (`desktop/src-tauri/src/`):
   workspaces, which folder an agent means) · `modes.rs` (the Mode; pure) ·
   `runner.rs` (the runs) · `steps.rs` + `steps/command.rs` (each step in
   plain words, the to-do list; pure) · `diff.rs` (an edit's diff; pure) ·
-  `consent.rs` (whose idea an agent is; pure) · `code_chat.rs` (Code chats) ·
+  `consent.rs` (whose idea an agent is; pure) · `usage.rs` (what each turn
+  used: tokens, the context, the cost estimated; pure) · `code_chat.rs` (Code chats) ·
   `voice.rs` (the spoken yes or no) · `approve_card.rs` (a permission prompt
   on the Yap bar) · `remote.rs` (Remote Control's records: the phones'
   ticks, the workspaces' switches, a phone's turns, the audit trail;
@@ -1058,9 +1146,9 @@ Rust (`desktop/src-tauri/src/`):
 
 Pages (`desktop/src/lib/`): `views/chat/` (`ChatSideSwitch`,
 `codeChats.svelte.js`, `WorkspacePicker`, `CodeChips`, `CodeEdge`,
-`codeChat.css`, `CodeEmpty`, `ModeChip`, `AgentTab`, `AgentTimeline`, `AgentFiles`,
-`AgentPills`, `AgentReportCard`, `AgentConfirm`, `AgentApprove`, `RunningAgents`),
-`core/codeChats.js`, `core/agents.js`, `core/money.js`, `ui/followEnd.js`,
+`codeChat.css`, `CodeEmpty`, `ModeChip`, `AgentTab`, `AgentPanel`, `AgentTimeline`, `AgentFiles`,
+`AgentPills`, `AgentTodoCard`, `AgentReportCard`, `AgentConfirm`, `AgentApprove`, `RunningAgents`),
+`core/codeChats.js`, `core/agents.js`, `core/agentPanel.js`, `core/money.js`, `ui/followEnd.js`,
 `stores/agents.svelte.js`, `settings/YapCodePage.svelte`,
 `settings/ClaudeCodeStatus.svelte`.
 
@@ -1070,7 +1158,7 @@ Pages (`desktop/src/lib/`): `views/chat/` (`ChatSideSwitch`,
 
 | Event | Payload |
 |---|---|
-| `yap-agent` | `{id, status, folder, conversation?, step?, file?, command?, about?, said?, todos?, now?, diff?, text?, cost?, problem?, turn?, queued?, ts}` — `turn` the turn it's about (`TurnNote.n`), `queued` a request queued as that turn (its title); `status` queued \| running \| asking \| done \| failed \| stopped \| interrupted; `about` a command's description; `said` its words between tool calls; `todos` `[{content, status, activeForm?}]` (status pending \| in_progress \| completed); `now` the line it's on with no new step; `diff` `{file, kind, lines, added, removed, more?, all?}` — `kind` edit \| new \| rewrite \| write, each line its mark first (`-`, `+`, ` `; a lone `@` a gap); `text` its final words (an older Yap's words as it worked too); `problem` `{kind, message, resetsAt?}`, `kind` notSignedIn \| rateLimited \| billing \| account \| paysAnotherWay |
+| `yap-agent` | `{id, status, folder, conversation?, step?, file?, command?, about?, said?, todos?, now?, diff?, text?, cost?, problem?, turn?, queued?, ts}` — `turn` the turn it's about (`TurnNote.n`), `queued` a request queued as that turn (its title); `status` queued \| running \| asking \| done \| failed \| stopped \| interrupted; `about` a command's description; `said` its words between tool calls; `todos` `[{content, status, activeForm?}]` (status pending \| in_progress \| completed); `now` the line it's on with no new step; `diff` `{file, kind, lines, added, removed, more?, all?}` — `kind` edit \| new \| rewrite \| write, each line its mark first (`-`, `+`, ` `; a lone `@` a gap); `text` its final words (an older Yap's words as it worked too); `problem` `{kind, message, resetsAt?}`, `kind` notSignedIn \| rateLimited \| billing \| account \| paysAnotherWay; `usage` what its turn has used (`{input, output, cacheRead, cacheWrite, context, window, estimate?}`, `agents/usage.rs`: live, never a line of its log, but for a result's and a turn's end) |
 | `yap-agent-report` | `{agent, turn, conversation, messageId, markerId, status}` — the turn it reports, and its status; `messageId` null when a newer question came first |
 | `yap-agent-open` | `{id, conversation}` (with `yap-assistant-turn {phase: "open", conversationId, show: true}`) |
 | `yap-claude-approve` | `{id, run, conversation, origin, tool, summary, detail, label, askedTs}` — `run` is the agent's id; a plan's (`tool` "ExitPlanMode"): `summary` "The plan is ready", `detail` the plan |
@@ -1195,6 +1283,21 @@ the build's own stand-in replaying `script` from now on),
   `claude_plan::sessions` (the transcript under the workspace by its ids),
   `claude_live` (a run without memory), `memory::learn` (never learned).
   - `chat-scroll.spec.js` covers an agent's cards and report in Chat's thread.
+  - `agents-panel.spec.js`: the Agent panel and the to-do card —
+    `core/agentPanel.js`'s maths (tokens, time, the context, a row's bar and
+    third line, the groups, the totals); a Code chat's agent from the
+    stand-in's TodoWrite calls and usage: Running with "3/7 · Writing the
+    planting guide" and its bar at 3/7, the tiles growing, the card live
+    under the pill; a step to allow → Needs you; Allow once → Finished, ✓,
+    the result's totals and window kept in agents.json, the card folded to
+    "7 to-dos · all done"; a follow-up's row; ▸, ↑ ↓, Enter, a group folding,
+    Open and Back, a pill at its row. Light, dark and narrow.
+- **Unit** for what a turn used (`agents::usage`): a call counted once, the
+  context its latest call, a helper's call costed but not the context, a
+  result settling the estimate and saying the window, a turn carried on, the
+  price table (a release above its family, Haiku 5.5's long prompts) and its
+  agreement with `ai/usage/prices.rs`; an `assistant` message's `usage`
+  (`claude_code::events`).
   - `chat-status.spec.js`: Chat's status dots for agents — an agent running in a
     Code chat you left, a folded workspace, the switch's Code, the rail; a
     permission prompt and an ask-first card (needs you); a report landing

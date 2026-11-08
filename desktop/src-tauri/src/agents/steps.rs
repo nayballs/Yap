@@ -9,7 +9,7 @@
 
 use std::path::Path;
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 pub mod command;
@@ -41,8 +41,8 @@ pub struct Seen {
 }
 
 /// **One of Claude Code's to-dos** (`TodoWrite`'s `todos[]`).
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
-#[serde(rename_all = "camelCase")]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default, rename_all = "camelCase")]
 pub struct Todo {
     pub content: String,
     /// "pending", "in_progress" or "completed" (Claude Code's own words).

@@ -253,6 +253,16 @@ pub struct TurnNote {
     pub report_message_id: Option<String>,
     /// Undo this turn put its files back.
     pub undone: bool,
+    /// **Its to-do list**, as its latest `TodoWrite` left it (the Agent
+    /// panel's row, the thread's to-do card). New fields of the turn's own
+    /// (2026-11-08), as `usage`: an older Yap drops them on its save, and the
+    /// turn then shows its log's list, or none.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub todos: Vec<super::steps::Todo>,
+    /// **What it used**: its tokens, its context's fill, an estimate while it
+    /// works (`agents/usage.rs`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub usage: Option<super::usage::TurnUsage>,
 }
 
 impl TurnNote {
@@ -316,6 +326,7 @@ impl Agent {
             asks: self.asks,
             report_message_id: self.report_message_id.clone(),
             undone: self.undone,
+            ..Default::default()
         }]
     }
 

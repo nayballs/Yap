@@ -203,6 +203,10 @@ pub struct Assistant {
     /// (`authentication_failed`, `rate_limit`, `billing_error`, …).
     pub error: Option<String>,
     pub stop_reason: Option<String>,
+    /// Its `message.usage`: what this model call read (new, from the cache,
+    /// into it) and wrote so far. Claude Code sends a message a block at a
+    /// time, each with the call's usage as it stands (`None`: it didn't say).
+    pub usage: Option<Usage>,
 }
 
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -465,6 +469,7 @@ pub fn from_value(v: Value) -> Event {
                 parent_tool_use_id: opt_str(&v, "parent_tool_use_id"),
                 error: opt_str(&v, "error"),
                 stop_reason: opt_str(m, "stop_reason"),
+                usage: m.get("usage").filter(|u| u.is_object()).map(usage_of),
             })
         }),
         "user" => v.get("message").filter(|m| m.is_object()).map(|m| {
@@ -537,9 +542,21 @@ fn init(v: &Value) -> Init {
     }
 }
 
+/// A `usage` object's counts (missing ones 0).
+fn usage_of(usage: &Value) -> Usage {
+    let server = usage.get("server_tool_use").cloned().unwrap_or(Value::Null);
+    Usage {
+        input_tokens: u64_of(usage, "input_tokens"),
+        output_tokens: u64_of(usage, "output_tokens"),
+        cache_creation_input_tokens: u64_of(usage, "cache_creation_input_tokens"),
+        cache_read_input_tokens: u64_of(usage, "cache_read_input_tokens"),
+        web_search_requests: u64_of(&server, "web_search_requests"),
+        web_fetch_requests: u64_of(&server, "web_fetch_requests"),
+    }
+}
+
 fn result(v: &Value) -> TurnResult {
     let usage = v.get("usage").cloned().unwrap_or(Value::Null);
-    let server = usage.get("server_tool_use").cloned().unwrap_or(Value::Null);
     TurnResult {
         subtype: str_of(v, "subtype").to_string(),
         is_error: v.get("is_error").and_then(Value::as_bool).unwrap_or(false),
@@ -549,14 +566,7 @@ fn result(v: &Value) -> TurnResult {
         stop_reason: opt_str(v, "stop_reason"),
         api_error_status: v.get("api_error_status").and_then(Value::as_u64).and_then(|s| u16::try_from(s).ok()),
         cost_usd: v.get("total_cost_usd").and_then(Value::as_f64).unwrap_or(0.0),
-        usage: Usage {
-            input_tokens: u64_of(&usage, "input_tokens"),
-            output_tokens: u64_of(&usage, "output_tokens"),
-            cache_creation_input_tokens: u64_of(&usage, "cache_creation_input_tokens"),
-            cache_read_input_tokens: u64_of(&usage, "cache_read_input_tokens"),
-            web_search_requests: u64_of(&server, "web_search_requests"),
-            web_fetch_requests: u64_of(&server, "web_fetch_requests"),
-        },
+        usage: usage_of(&usage),
         num_turns: u64_of(v, "num_turns"),
         duration_ms: u64_of(v, "duration_ms"),
         permission_denials: v
@@ -1162,5 +1172,21 @@ pub(crate) mod tests {
         assert_eq!(pays_another_way("ANTHROPIC_API_KEY", Paying::ApiKey), None);
         assert!(pays_another_way("/login managed key", Paying::Plan).is_some());
         assert!(pays_another_way("apiKeyHelper", Paying::ApiKey).is_some());
+    }
+
+    #[test]
+    fn an_assistant_message_says_its_calls_usage() {
+        let e = parse_line(
+            r#"{"type":"assistant","message":{"id":"m1","model":"claude-sonnet-5-5","content":[{"type":"text","text":"Hi"}],"usage":{"input_tokens":12,"cache_creation_input_tokens":300,"cache_read_input_tokens":41000,"output_tokens":9}},"parent_tool_use_id":null}"#,
+        )
+        .unwrap();
+        let Event::Assistant(a) = e else { panic!("{e:?}") };
+        let u = a.usage.unwrap();
+        assert_eq!((u.input_tokens, u.cache_creation_input_tokens, u.cache_read_input_tokens, u.output_tokens), (12, 300, 41_000, 9));
+        // None said: none (never zeros taken for a call that read nothing).
+        let Event::Assistant(a) = parse_line(r#"{"type":"assistant","message":{"id":"m2","content":[]}}"#).unwrap() else { panic!() };
+        assert_eq!(a.usage, None);
+        let Event::Assistant(a) = parse_line(r#"{"type":"assistant","message":{"id":"m3","content":[],"usage":7}}"#).unwrap() else { panic!() };
+        assert_eq!(a.usage, None);
     }
 }

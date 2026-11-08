@@ -3,7 +3,13 @@
   // chatDoc.svelte.js `agent`): what the person's own Claude Code is doing in
   // their folder, as it does it — fed by `agent_get` (the agent and its log, to
   // replay) and the app-wide `yap-agent` event (live). One tab an agent; closing
-  // it never stops the agent.
+  // it never stops the agent. Two views:
+  // - **The panel** (AgentPanel.svelte, 2026-11-08, after savvy-progress's
+  //   agents panel): its totals, and its turns as rows in groups (Needs you,
+  //   Running, Finished, Queued), each opening in place. What the tab opens
+  //   on — a pill's or a report card's turn opened, in view.
+  // - **The timeline** (a row's Open; Back to the panel), as it read
+  //   before:
   // - The folder and its status; the mode and model; how long it has run.
   // - **Its turns** (2026-11-07: one agent per Code chat, each follow-up a turn
   //   of its own on the same Claude Code session): a section each, its
@@ -47,7 +53,9 @@
   } from '../../core/agents.js';
   import { EFFORT_LABELS } from '../../core/effort.js';
   import { claudePlan, signInClaudePlan } from '../../stores/claudePlan.svelte.js';
+  import { agents as agentsStore } from '../../stores/agents.svelte.js';
   import AgentTurn from './AgentTurn.svelte';
+  import AgentPanel from './AgentPanel.svelte';
 
   /** `doc`: the panel's state (its `agent`, a AgentRef, `turn` the one asked for); `narrow`: no room beside the chat (no expand). */
   let { doc, narrow = false } = $props();
@@ -68,6 +76,13 @@
   let turnUndone = $state({});
   let turnRefused = $state({});
   let bodyEl = $state(null);
+  // Which view: 'panel' (its rows) or 'timeline' (a row's Open); the row a
+  // pill or a report card asked for (`{key, seq}`).
+  let view = $state('panel');
+  let want = $state(null);
+  // The Code chat's other agents (a fresh one beside its first): their logs,
+  // read once each and followed (id → events).
+  let otherLogs = $state({});
 
   // The agent as it is now: its saved record, else what the tab was opened with.
   const shown = $derived(agent ?? (ref ? { ...ref, files: [], commands: [], denials: [] } : null));
@@ -91,6 +106,10 @@
   const canUndo = $derived(undoable(shown));
 
   const isOpen = (t) => (folded[t.n] ?? t.n !== current) === false;
+  /** The Code chat's agents for the panel: this one first, then the chat's others. */
+  const others = $derived(shown?.conversation == null ? [] : agentsStore.list.filter((j) => j.conversation === shown.conversation && j.id !== shown.id));
+  const panelAgents = $derived(shown ? [shown, ...others] : []);
+  const panelLogs = $derived({ ...otherLogs, ...(shown ? { [shown.id]: log } : {}) });
   const turnLive = (t) => live && t.n === current;
 
   // Events heard while the log is read: kept, unless the log has them already.
@@ -130,7 +149,22 @@
       folded = {};
       turnUndone = {};
       turnRefused = {};
+      otherLogs = {};
       load(id);
+    });
+  });
+
+  // The chat's other agents: each one's log read once (live events add to it).
+  $effect(() => {
+    const ids = others.map((j) => j.id);
+    untrack(() => {
+      for (const id of ids) {
+        if (otherLogs[id]) continue;
+        otherLogs = { ...otherLogs, [id]: [] };
+        invoke('agent_get', { id })
+          .then((r) => (otherLogs = { ...otherLogs, [id]: [...(r?.log || []), ...(otherLogs[id] || [])] }))
+          .catch(() => {});
+      }
     });
   });
 
@@ -150,25 +184,57 @@
     });
   });
 
-  // A pill's or a report card's turn (or a turn's own start): open, in view
-  // (asked again: again); the others as they'd be — the newest open.
+  // Shown again (a pill, a report card, a turn's own start, the bar's Open):
+  // the panel, with that turn's row open and in view — or, from a row's
+  // Open on another agent of the chat (`view: 'timeline'`), its timeline.
   $effect(() => {
-    const want = ref?.turn;
+    const turn = ref?.turn;
     const seq = ref?.seq;
-    if (want == null) return;
-    untrack(async () => {
-      folded = { [want]: false };
-      await tick();
-      const el = bodyEl?.querySelector(`[data-testid="chat-agent-turn"][data-turn="${want}"]`);
-      if (el && seq != null) el.scrollIntoView?.({ block: 'start' });
+    const id = ref?.id;
+    const at = ref?.view;
+    untrack(() => {
+      if (at === 'timeline') {
+        showTimeline(turn);
+        return;
+      }
+      view = 'panel';
+      if (turn != null && id) want = { key: `${id}:${turn}`, seq };
     });
   });
 
+  /** **A row's Open**: the timeline at its turn (another agent of the chat: its own tab, there). */
+  function openRow(r) {
+    if (r.agentId !== shown?.id) {
+      const j = agentsStore.list.find((a) => a.id === r.agentId);
+      doc.showAgent({ ...(j ? { id: j.id, folder: j.folder, status: j.status, mode: j.mode, conversation: j.conversation } : { id: r.agentId }), turn: r.n, view: 'timeline' });
+      return;
+    }
+    showTimeline(r.n);
+  }
+
+  /** The timeline, turn `n` open and in view (the newest, with none). */
+  async function showTimeline(n) {
+    view = 'timeline';
+    if (n != null) folded = { [n]: false };
+    await tick();
+    const el = n != null ? bodyEl?.querySelector(`[data-testid="chat-agent-turn"][data-turn="${n}"]`) : null;
+    el?.scrollIntoView?.({ block: 'start' });
+  }
+
   /** One `yap-agent` event: into the log; the agent as it is now (read again when its status turns, or a turn is new to it). */
   function onAgent(ev) {
-    if (!ev?.id || ev.id !== doc.agent?.id) return;
-    if (loading) heard.push(ev);
-    log = [...log, ev];
+    if (!ev?.id) return;
+    // What a turn has used so far (agents/usage.rs): on its note, never a line of the log.
+    const usageOnly = !!ev.usage && !ev.step && !ev.now && !ev.text && !ev.todos && !ev.said && typeof ev.cost !== 'number';
+    if (ev.id !== doc.agent?.id) {
+      // Another agent of the chat (the panel's rows): its log, as it goes.
+      if (otherLogs[ev.id] && !usageOnly) otherLogs = { ...otherLogs, [ev.id]: [...otherLogs[ev.id], ev] };
+      return;
+    }
+    if (!usageOnly) {
+      if (loading) heard.push(ev);
+      log = [...log, ev];
+    }
     if (agent) {
       const was = agent.status;
       const next = { ...agent, status: ev.status ?? agent.status };
@@ -179,6 +245,10 @@
       // This turn's files as they come (its note says them once read again).
       if (ev.file && Number.isInteger(ev.turn) && next.turnList?.length) {
         next.turnList = next.turnList.map((t) => (t.n === ev.turn && !(t.files || []).includes(ev.file) ? { ...t, files: [...(t.files || []), ev.file] } : t));
+      }
+      // Its turn's to-do list and what it has used, as they come.
+      if ((ev.todos || ev.usage) && Number.isInteger(ev.turn) && next.turnList?.length) {
+        next.turnList = next.turnList.map((t) => (t.n === ev.turn ? { ...t, ...(ev.todos ? { todos: ev.todos } : {}), ...(ev.usage ? { usage: ev.usage } : {}) } : t));
       }
       agent = next;
       const known = !Number.isInteger(ev.turn) || (agent.turnList || []).some((t) => t.n === ev.turn);
@@ -336,80 +406,78 @@
   {#if gone}
     <p class="jgone">This agent isn't in Yap any more.</p>
   {:else if shown}
-    <div class="agentbody" bind:this={bodyEl}>
-      <p class="meta" data-testid="chat-agent-meta">
-        <span>{modeLabel(shown.mode)}</span>
-        {#if shown.model}<span>· {modelLabel(shown.model)}{shown.effort ? ` ${effortWord(shown.effort)}` : ''}</span>{/if}
-        {#if ran}<span data-testid="chat-agent-elapsed">· {live ? `${ran} so far` : `ran ${ran}`}</span>{/if}
-        {#if many}<span data-testid="chat-agent-turn-count">· {turns.length} turns</span>{/if}
-      </p>
-      {#if shown.path}<p class="path" title={shown.path}>{shown.path}</p>{/if}
-      {#if shown.whyNew}<p class="whynew" data-testid="chat-agent-why-new">{shown.whyNew}</p>{/if}
+    <div class="agentbody" bind:this={bodyEl} data-view={view}>
+      {#if view === 'panel'}
+        {@render notices()}
+        <AgentPanel agent={shown} agents={panelAgents} logs={panelLogs} steps={agentsStore.steps} {now} {want} onopen={openRow} />
+        {#if undone}
+          <p class="undone" aria-live="polite" data-testid={many ? 'chat-agent-undone-all' : 'chat-agent-undone'}>{undoneLine(undone)}</p>
+        {/if}
+      {:else}
+        <button type="button" class="back" data-testid="chat-agent-back" onclick={() => (view = 'panel')} aria-label="Back to the agent's turns">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m15 18-6-6 6-6" /></svg>
+          Back
+        </button>
+        <p class="meta" data-testid="chat-agent-meta">
+          <span>{modeLabel(shown.mode)}</span>
+          {#if shown.model}<span>· {modelLabel(shown.model)}{shown.effort ? ` ${effortWord(shown.effort)}` : ''}</span>{/if}
+          {#if ran}<span data-testid="chat-agent-elapsed">· {live ? `${ran} so far` : `ran ${ran}`}</span>{/if}
+          {#if many}<span data-testid="chat-agent-turn-count">· {turns.length} turns</span>{/if}
+        </p>
+        {#if shown.path}<p class="path" title={shown.path}>{shown.path}</p>{/if}
+        <div class="tnotices">{@render notices()}</div>
 
-      {#if problem}
-        <div class="problem" role="alert" data-testid="chat-agent-problem" data-kind={shown.problem.kind}>
-          <p class="pline">{problem.line}</p>
-          {#if problem.check}<p class="pcheck">{problem.check}</p>{/if}
-          {#if problem.action === 'signIn'}
-            <button type="button" class="pill primary" onclick={signIn}>Sign in</button>
-          {/if}
-        </div>
-      {:else if shown.status === 'failed' && shown.error}
-        <div class="problem" role="alert" data-testid="chat-agent-problem">
-          <p class="pline">{shown.error}</p>
-        </div>
-      {/if}
-
-      <!-- Its turns: each request and what came of it, the newest open. -->
-      {#each turns as t (t.n)}
-        {@const open = isOpen(t)}
-        {@const queued = waiting(t)}
-        <section class="turn" class:open class:queued data-testid="chat-agent-turn" data-turn={t.n} data-status={t.status ?? ''} data-open={open}>
-          {#if queued}
-            <div class="thead" data-testid="chat-agent-turn-head">
-              <span class="tdot tone-idle" aria-hidden="true"></span>
-              <span class="ttitle" title={t.request || t.title}>{t.title || 'Your next request'}</span>
-              <span class="tfacts">{turnStatusWord(t)}</span>
-            </div>
-            <p class="tqueued">{t.status === 'queued' ? 'It goes to the agent once it finishes this step.' : 'Not sent: the agent stopped first. Continue sends it.'}</p>
-          {:else}
-            <button
-              type="button"
-              class="thead"
-              aria-expanded={open}
-              data-testid="chat-agent-turn-head"
-              title={t.request || t.title}
-              onclick={() => (folded = { ...folded, [t.n]: open })}
-            >
-              <svg class="tchev" class:down={open} viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m9 6 6 6-6 6" /></svg>
-              <span class="tdot tone-{statusTone(t.status)}" aria-hidden="true"></span>
-              <span class="ttitle">{t.title || shown.folder}</span>
-              <span class="tfacts" data-testid="chat-agent-turn-facts">{turnFacts(t)}</span>
-            </button>
-            {#if open}
-              <div class="tbody">
-                <AgentTurn
-                  agent={shown}
-                  turn={t}
-                  live={turnLive(t)}
-                  single={!many}
-                  undoable={many && canUndoTurn(shown, t)}
-                  undone={turnUndone[t.n] || (!many && undone ? undoneLine(undone) : '')}
-                  refused={turnRefused[t.n] || ''}
-                  busy={!!busy}
-                  onundo={() => undoTurn(t)}
-                />
+        <!-- Its turns: each request and what came of it, the newest open. -->
+        {#each turns as t (t.n)}
+          {@const open = isOpen(t)}
+          {@const queued = waiting(t)}
+          <section class="turn" class:open class:queued data-testid="chat-agent-turn" data-turn={t.n} data-status={t.status ?? ''} data-open={open}>
+            {#if queued}
+              <div class="thead" data-testid="chat-agent-turn-head">
+                <span class="tdot tone-idle" aria-hidden="true"></span>
+                <span class="ttitle" title={t.request || t.title}>{t.title || 'Your next request'}</span>
+                <span class="tfacts">{turnStatusWord(t)}</span>
               </div>
+              <p class="tqueued">{t.status === 'queued' ? 'It goes to the agent once it finishes this step.' : 'Not sent: the agent stopped first. Continue sends it.'}</p>
+            {:else}
+              <button
+                type="button"
+                class="thead"
+                aria-expanded={open}
+                data-testid="chat-agent-turn-head"
+                title={t.request || t.title}
+                onclick={() => (folded = { ...folded, [t.n]: open })}
+              >
+                <svg class="tchev" class:down={open} viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m9 6 6 6-6 6" /></svg>
+                <span class="tdot tone-{statusTone(t.status)}" aria-hidden="true"></span>
+                <span class="ttitle">{t.title || shown.folder}</span>
+                <span class="tfacts" data-testid="chat-agent-turn-facts">{turnFacts(t)}</span>
+              </button>
+              {#if open}
+                <div class="tbody">
+                  <AgentTurn
+                    agent={shown}
+                    turn={t}
+                    live={turnLive(t)}
+                    single={!many}
+                    undoable={many && canUndoTurn(shown, t)}
+                    undone={turnUndone[t.n] || (!many && undone ? undoneLine(undone) : '')}
+                    refused={turnRefused[t.n] || ''}
+                    busy={!!busy}
+                    onundo={() => undoTurn(t)}
+                  />
+                </div>
+              {/if}
             {/if}
-          {/if}
-        </section>
-      {/each}
+          </section>
+        {/each}
 
-      {#if many && undone}
-        <p class="undone" aria-live="polite" data-testid="chat-agent-undone-all">{undoneLine(undone)}</p>
+        {#if many && undone}
+          <p class="undone" aria-live="polite" data-testid="chat-agent-undone-all">{undoneLine(undone)}</p>
+        {/if}
+
+        <p class="cost" data-testid="chat-agent-cost" data-pay={shown.pay || 'plan'}>{costLine(shown)}{many && Number(shown.cost) > 0 ? ' in all' : ''}</p>
       {/if}
-
-      <p class="cost" data-testid="chat-agent-cost" data-pay={shown.pay || 'plan'}>{costLine(shown)}{many && Number(shown.cost) > 0 ? ' in all' : ''}</p>
     </div>
 
     <footer class="agentfoot">
@@ -442,6 +510,24 @@
     </footer>
   {/if}
 </section>
+
+{#snippet notices()}
+  <!-- Why it's a new agent, and a problem with Claude Code: in both views. -->
+  {#if shown.whyNew}<p class="whynew" data-testid="chat-agent-why-new">{shown.whyNew}</p>{/if}
+  {#if problem}
+    <div class="problem" role="alert" data-testid="chat-agent-problem" data-kind={shown.problem.kind}>
+      <p class="pline">{problem.line}</p>
+      {#if problem.check}<p class="pcheck">{problem.check}</p>{/if}
+      {#if problem.action === 'signIn'}
+        <button type="button" class="pill primary" onclick={signIn}>Sign in</button>
+      {/if}
+    </div>
+  {:else if shown.status === 'failed' && shown.error}
+    <div class="problem" role="alert" data-testid="chat-agent-problem">
+      <p class="pline">{shown.error}</p>
+    </div>
+  {/if}
+{/snippet}
 
 <ConfirmDialog
   bind:open={confirmUndo}
@@ -583,6 +669,36 @@
     font-size: 13px;
     line-height: 1.5;
   }
+  .tnotices > :global(:first-child) {
+    margin-top: 10px;
+  }
+  .back {
+    display: inline-flex;
+    align-items: center;
+    gap: 3px;
+    margin: -4px 0 8px -6px;
+    padding: 2px 8px 2px 4px;
+    border: none;
+    border-radius: 6px;
+    background: none;
+    color: var(--yap-paper-text-2);
+    font: inherit;
+    font-size: 12px;
+    font-weight: 600;
+    cursor: pointer;
+  }
+  .back:hover {
+    background: var(--yap-paper-s1);
+    color: var(--yap-paper-ink);
+  }
+  .back:focus-visible {
+    outline: 2px solid var(--yap-focus-ring);
+    outline-offset: 1px;
+  }
+  .back svg {
+    width: 13px;
+    height: 13px;
+  }
   .meta {
     display: flex;
     flex-wrap: wrap;
@@ -600,7 +716,7 @@
     font-size: 11.5px;
   }
   .problem {
-    margin: 12px 0 0;
+    margin: 0 0 12px;
     padding: 10px 12px;
     border: 1px solid color-mix(in srgb, var(--yap-danger) 35%, var(--yap-paper-rule));
     border-radius: 10px;
@@ -622,7 +738,7 @@
     margin-top: 8px;
   }
   .whynew {
-    margin: 10px 0 0;
+    margin: 0 0 10px;
     padding: 7px 10px;
     border-radius: 9px;
     background: var(--yap-paper-s1);

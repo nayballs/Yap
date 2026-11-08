@@ -260,6 +260,7 @@ One folder per area (an area's `<area>.rs` lists its modules); a big module's pa
 
 **Yap Code** — [yap-code.md](./docs/architecture/yap-code.md)
 - `agents.rs` (+ `agents/`, `agents/remote.rs`) — Yap Code (off by default): the person's own Claude Code sent to work in a workspace; its name one constant (`agents::FEATURE`).
+- `agents/usage.rs` — what each agent turn used: tokens, the context's fill, its cost estimated (the Agent panel's numbers).
 
 **Yap Link (the phone)** — [link.md](./docs/architecture/link.md)
 - `link.rs` (+ `link/`) — Yap's AI from a paired phone on the home Wi-Fi (off by default); never on a Public network.
@@ -308,7 +309,7 @@ One folder per area (an area's `<area>.rs` lists its modules); a big module's pa
 - `components/richtext/` — the rich editor for Chat's documents and notes (`richEditor.js`, `richMarkdown.js`, `RichNote.svelte`); the note stays markdown exactly ([notes.md](./docs/architecture/notes.md#notes-as-pages-you-can-format-componentsrichtext-2026-10-31)).
 - `core/markdown.js` — every rendered answer and note: markdown-it + DOMPurify ([notes.md](./docs/architecture/notes.md#the-markdown-renderer)).
 - `views/chat/` — Chat ([chat-and-assistant.md](./docs/architecture/chat-and-assistant.md)): `ChatView.svelte` + `chatState.svelte.js`, `ConversationList`, `ChatThread`, `Composer`, the model picker over `core/chatPicker.js` (shared with the phone), the panel (`DocPanel`, `PageTab`); screenshots: [snip.md](./docs/architecture/snip.md#how-a-screenshot-looks-2026-10-31-after-the-claude-apps).
-- `views/chat/` Code side — `ChatSideSwitch`, `codeChats.svelte.js`, `ModeChip`, `AgentTab`; `stores/agents.svelte.js` ([yap-code.md](./docs/architecture/yap-code.md)).
+- `views/chat/` Code side — `ChatSideSwitch`, `codeChats.svelte.js`, `ModeChip`, `AgentTab` (its panel `AgentPanel` + `core/agentPanel.js`), `AgentTodoCard`; `stores/agents.svelte.js` ([yap-code.md](./docs/architecture/yap-code.md)).
 - `views/help/` + `views/MeetingSetup.svelte` — the title bar's Help and the "Set up meeting notes" checklist.
 - `views/MeetingsView.svelte` and `notepad/` — meetings and the notepad (`Notepad.svelte`, `stores/meetingAudio.svelte.js`; [meetings.md](./docs/architecture/meetings.md)); `components/BriefView.svelte` ([briefs](./docs/architecture/calendar.md#pre-meeting-briefs)); `components/SpeakerMenu` / `SpeakerCard`.
 - `components/ConnectCalendarDialog.svelte` — "Connect your calendar" ([calendar.md](./docs/architecture/calendar.md)).
