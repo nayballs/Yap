@@ -423,12 +423,24 @@ pub fn title_of(text: &str) -> String {
             matches!(c, '.' | '!' | '?' | ':' | ';') && (rest.is_empty() || rest.starts_with(char::is_whitespace))
         })
         .map_or(line.len(), |(i, _)| i);
-    let sentence = line[..end].trim();
+    capped(line[..end].trim())
+}
+
+/// **A title given as one** (the model's `title` for a turn: "Plan: teaspoons
+/// in convert.js"): its first line, whole — a colon or a full stop in it is
+/// part of the title, not its end — cut at a word under 60 characters. Pure.
+pub fn given_title(text: &str) -> String {
+    let line = text.trim().lines().map(str::trim).find(|l| !l.is_empty()).unwrap_or("");
+    capped(line.trim_start_matches(['#', '-', '*', '>', ' ']).trim_end_matches(['.', ' ']))
+}
+
+/// `text` cut at a word under 60 characters, with an ellipsis. Pure.
+fn capped(text: &str) -> String {
     const MAX: usize = 60;
-    if sentence.chars().count() <= MAX {
-        return sentence.to_string();
+    if text.chars().count() <= MAX {
+        return text.to_string();
     }
-    let cut: String = sentence.chars().take(MAX).collect();
+    let cut: String = text.chars().take(MAX).collect();
     let at = cut.rfind(' ').filter(|&i| i > MAX / 2).unwrap_or(cut.len());
     format!("{}…", cut[..at].trim_end_matches([',', ' ', '-']))
 }
@@ -1279,6 +1291,10 @@ mod tests {
         assert!(long.ends_with('…') && long.chars().count() <= 61, "{long}");
         assert!(long.starts_with("Rework the watering schedule so that every bed"), "{long}");
         assert_eq!(title_of(""), "");
+        // A title given as one keeps its colon (Yap Lab, 8 Nov: a plan's row read just "Plan").
+        assert_eq!(given_title("Plan: teaspoons in convert.js"), "Plan: teaspoons in convert.js");
+        assert_eq!(given_title("  # Add a legend to the map.\nmore"), "Add a legend to the map");
+        assert!(given_title(&"Plan: ".repeat(20)).ends_with('…'));
     }
 
     #[test]

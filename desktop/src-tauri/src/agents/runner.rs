@@ -228,7 +228,9 @@ impl Ask {
     }
 
     fn title(&self) -> String {
-        if self.title.trim().is_empty() { store::title_of(&self.text) } else { store::title_of(&self.title) }
+        // A title the model gave is kept whole ("Plan: teaspoons in convert.js"
+        // was cut to "Plan" at its colon); a request's words, to their first sentence.
+        if self.title.trim().is_empty() { store::title_of(&self.text) } else { store::given_title(&self.title) }
     }
 
     /// Another request for the same turn, added: its words after these, the
