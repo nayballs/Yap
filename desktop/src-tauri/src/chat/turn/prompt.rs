@@ -154,7 +154,7 @@ impl Prompt {
     }
 
     /// The pages open beside the chat (chat/pages.rs): "this page" is the one
-    /// in front, and read_open_page reads it. Whether any is open.
+    /// in front, and browser_read reads it. Whether any is open.
     async fn tabs(&mut self, t: &Asked<'_>) -> bool {
         let mut tabs_open = false;
         if t.gates.pictures != crate::chat::pictures::Gate::Off {

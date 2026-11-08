@@ -1,6 +1,6 @@
 {
   "name": "browse-follow-link",
-  "description": "Acting on pages: follow a link on the open page (a click, or go_to its address) and answer from the page it leads to.",
+  "description": "Acting on pages: follow a link on the open page (a click, or browser_navigate to its address) and answer from the page it leads to.",
   "tags": [
     "browse",
     "web"

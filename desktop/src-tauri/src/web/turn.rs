@@ -243,7 +243,7 @@ impl Turn {
         &self.question
     }
 
-    /// **The page open beside the chat, read** (`read_open_page`): a page the
+    /// **The page open beside the chat, read** (`browser_read`): a page the
     /// turn read — its number, marked opened, its text for the checks on the
     /// answer — and web content (the safety rule).
     pub fn read_open(&mut self, title: &str, url: &str, text: &str) -> usize {
@@ -538,6 +538,13 @@ impl Turn {
     pub fn allowed(&self, url: &str) -> bool {
         let key = normal_url(url);
         self.linked.iter().any(|l| normal_url(l) == key) || self.sources.iter().any(|s| normal_url(&s.url) == key)
+    }
+
+    /// Whether `url` is a link the person gave in their own message (not a
+    /// result's): opening it is what they asked for. Pure.
+    pub fn linked_by_person(&self, url: &str) -> bool {
+        let key = normal_url(url);
+        self.linked.iter().any(|l| normal_url(l) == key)
     }
 
     /// **The address as the turn has it** for `url`, an address it may open

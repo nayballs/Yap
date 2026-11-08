@@ -1970,11 +1970,11 @@ notes, tasks, folders, memory (not a Code chat's) and the calendar; start and
 steer agents (Yap Code on); **look at the screen** (`look_at_screen`: "Let Yap's AI
 see your screen" on and, the plan being a cloud model, "…with cloud models
 too" — asked once, as for any cloud model; never during a meeting or a call);
-and **use the pages beside the chat** (`open_page`, `read_open_page`,
-`switch_tab`, `snap_page`) and pictures from them (`find_pictures`,
+and **use the browser beside the chat** (the `browser_*` toolset: going, reading,
+scrolling, finding, screenshots and zooms, tabs, and — typed in Chat — acting, each buy or send on the person's card) and pictures from them (`find_pictures`,
 `look_at_picture`, `show_picture`) — Yap's tool loop's own code over the run
 endpoint (`claude_live/eyes.rs`), the screenshots shown with the question, a
-page's tab and a shot or picture beside the chat, kept with the answer. Its
+page's tab, its shots in the turn's steps and a picture beside the chat, kept with the answer. Its
 pictures go to Claude Code as MCP image content, which 2.1.296's MCP client
 turns into image blocks the model reads (resized to its limits; read in its
 bundle, 7 Nov 2026). It never edits notes or documents beside the chat,

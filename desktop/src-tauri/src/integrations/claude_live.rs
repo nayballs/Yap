@@ -45,13 +45,15 @@
 //!   asked, and its stream; the web flag; the order of Claude Code's events
 //!   and its calls).
 //! - **The screen and the pages beside the chat** ([`eyes`]), for a Chat run
-//!   offered them ([`RunSpec::eyes`]): `look_at_screen`, `open_page`,
-//!   `read_open_page`, `switch_tab`, `snap_page`, `find_pictures`,
-//!   `look_at_picture` and `show_picture`, the tool loop's own code and
-//!   rules for the turn the call belongs to; what they take of the screen
-//!   or a page goes back to the model as MCP image content, and what they
-//!   show to the turn's stream (the screenshots with the question, a page's
-//!   tab, a picture). Never acting on a page.
+//!   offered them ([`RunSpec::eyes`]): `look_at_screen`, the `browser_*`
+//!   tools (going, reading, scrolling, finding, shots and zooms, tabs,
+//!   waiting, batches; for a question typed in Chat clicking, typing, keys,
+//!   hovering and fields too, each buy, send or sign-in on the person's
+//!   card), `find_pictures`, `look_at_picture` and `show_picture` — the tool
+//!   loop's own code and rules for the turn the call belongs to; what they
+//!   take of the screen or a page goes back to the model as MCP image
+//!   content, and what they show to the turn's stream (the screenshots with
+//!   the question, a page's tab, a shot in the steps, a card, a picture).
 //! - **`approve`** ([`approve`]), an agent's permission prompt tool: a card for
 //!   the person (`yap-claude-approve`), Allow once / Deny
 //!   ([`claude_approve_answer`]), no answer in 10 minutes a no. Claude Code
