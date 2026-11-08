@@ -69,6 +69,169 @@ The token-authenticated local API, Yap's MCP server (`yap.exe mcp`) and adding i
   to** (2026-11-07): Yap starts the person's own Claude Code for Chat on
   their Claude plan and for [Yap Code](./yap-code.md) (ai-models.md, "The Claude Code
   engine"), and those runs reach this. Below.
+- **`integrations/connectors.rs`** (+ `connectors/`: `store`, `cache`, `vault`,
+  `manager`, `local`, `remote` + `remote/legacy`, `names`, `schema`, `results`,
+  `call`, `fake`, `tests`) — **connectors (preview, 2026-11-08)**: the other
+  direction, Yap as an MCP client of servers the person adds. Below.
+
+## Connectors (preview)
+
+Yap as an **MCP client**: the person adds a server at a link or a program on
+this PC, and Yap keeps its tools for Chat, the Voice Assistant and plan chats
+to use. Waves 1 (the core and programs) and 2 (links with tokens) are built;
+signing in through the browser (3), the tools in Chat's loop (4), Settings →
+Connectors (5) and the rest come after. **Nothing offers a connector's tools
+to a model yet.**
+
+- **The switch** (`connectors::enabled`): `connectors_preview` in config.json
+  (off by default), or `YAP_CONNECTORS=1` in a debug build (the e2e suite
+  sets it per spec). Off, no command reads or writes a connectors file,
+  starts a program or makes a request: `connectors_list` answers `{enabled:
+  false, connectors: []}` and the rest refuse ("Connectors aren't switched on
+  in this Yap yet."). Unit tests check that nothing is read.
+- **The SDK**: `rmcp` 3.9 as a client too (`client`,
+  `transport-child-process`, `transport-streamable-http-client`; never its
+  `…-reqwest` or `auth` features, so Yap's own reqwest 0.12 makes every
+  request). Both MCP eras through `ClientLifecycleMode::Auto`
+  (`server/discover`, else `initialize` at 2025-11-25). Yap declares no
+  sampling, roots or elicitation (`manager::Handler`); a server's
+  `instructions` are never kept.
+- **The store** (`store.rs`, `connectors.json`): connectors `c1`…`c24` (the
+  lowest free id, so the vault's names are bounded), a slug each
+  (`names::slug`: `[a-z0-9]`, a letter first, at most 12, unique), the
+  transport (a `remote` link, or a `local` program with its resolved path
+  and the fingerprint the person allowed), the auth kind, where Yap may use
+  it (chat, voice, plan on; phone, meetings off), and **each tool's setting**
+  — `allow` (Always allow), `ask` (Ask first) or `off` — pinned to the hash
+  of the definition it was set for. Fields this build doesn't know are kept.
+  [config-and-data.md](./config-and-data.md).
+- **The tools** (`cache.rs`, `connector_tools.json`): each connector's tools as
+  last listed (all pages; at most 500), each with its **kind** from the
+  annotations — `readOnlyHint` → Reads, `destructiveHint: false` → Changes,
+  anything else (none at all too) → Deletes —, its **hash** (name, title,
+  description, schema and annotations as sent, keys in order), its cost in
+  tokens, a **flag** when its description reads like orders to the model
+  (ignore the rules, keep it from the user, `<important>`, `.ssh`, the
+  system prompt) and a **skip** reason when its schema can't be made safe.
+  **Defaults** (`cache::apply`): Reads → Always allow, Changes and Deletes →
+  Ask first, flagged or skipped → Off. A **changed** tool (another hash: a
+  rug pull) that was Always allow drops to Ask first; a removed one goes; a
+  tool that can delete is never Always allow. Listed when it's added, on Try
+  again, and before the first call of a new connection (`connectors::ensure`).
+- **Names** (`names.rs`): a model would see `<slug>__<tool>`, the tool's
+  name with anything but `[A-Za-z0-9_-]` made `_`, cut to 64 with a
+  4-character hash when longer or when two come out alike: what OpenAI,
+  Anthropic, Gemini and Groq all take. Yap's own tools never have `__`, so a
+  server can't shadow one; the way back is `names::Map`, never the text.
+- **Schemas** (`schema.rs`): local `$ref`s resolved (a remote one refused, a
+  recursive one cut), `type: object` ensured, type arrays → one type +
+  `nullable`, `const` → a one-string `enum`, `oneOf` → `anyOf`, `allOf`
+  merged, only the keywords every provider reads kept (Gemini's subset: no
+  `additionalProperties`, `examples`, `$schema`, `if`…), `required` only of
+  properties there are, an array given `items`, depth 10 and 16 KB at most.
+- **Results** (`results.rs`): Yap's tool-result shape (`{success, data:
+  {text, structured?, pictures?}, displayText}` or `{success: false,
+  error}`): text joined, `structuredContent` when there's no text, an
+  embedded text resource read, a binary one and a `resource_link` named, a
+  picture kept aside (for a model that reads images, wave 4) and named
+  ("[a picture, 640×480]"), audio dropped, `isError` → failure, cut at 1 MB.
+- **A call** (`call.rs`): 60 s by default (a connector's own up to 10 min), a
+  progress notification starting the clock again (never past 30 min), a
+  `Stop` (■ Stop, a newer question) or a dropped future ending it, and the
+  server told either way (`notifications/cancelled`: rmcp for its own
+  timeout, `call::Abandon` for the rest). Never retried: a broken connection
+  is "Didn't hear back from … It may or may not have done it." Two turns
+  share one connection, each call its own request.
+- **The manager** (`manager.rs`): one connection per connector, made when
+  needed (at most 30 s for a program, 15 s for a link — a test run's
+  `YAP_E2E_CONNECTOR_START_MS` shortens a link's), shared by callers, let go
+  after 10 idle minutes (a sweep every 30 s: a program's stdin closed, 3 s,
+  then its job ended), **three failures in 10 minutes** (a failed start, a
+  connection that ended by itself) → Stopped until Try again. Every
+  connection stops at Quit (`shutdown_cleanup`, within 3 s). Statuses in
+  plain words — "Connected · 9 tools", "Starts when Chat needs it",
+  "Starting…", "Needs sign-in…", "Couldn't connect: …", "Couldn't start: …",
+  "Stopped by itself 3 times in 10 minutes…" —, each change emitted. Its
+  clock and its way to connect are passed in, so its lifecycle is tested on
+  a fake clock against `fake.rs`.
+- **Programs** (`local.rs`): found on `PATH` with `PATHEXT` (`npx` →
+  `npx.cmd`) or as given; **its exact command line shown before it first
+  runs** — `connector_preview` gives it resolved and whole, with warnings
+  (your permissions; `npx -y`/`uvx` fetching the latest version each start;
+  a shell's `-c`; downloads; deletes; folders outside yours) and a
+  fingerprint, and `connector_add` takes a program only with that
+  fingerprint; one whose command line no longer matches never starts. Yap's
+  own exe with `mcp` is refused. **Started** by rmcp's child-process
+  transport on process-wrap: a **job object of its own** (the child started
+  suspended, assigned, resumed, so a `node.exe` that `npx.cmd` starts can't
+  slip out), `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE` (Quit, a crash or End task
+  end the whole tree), no window (`CREATE_NO_WINDOW`). A `.cmd` goes
+  through Rust's batch escaping. Its environment is the person's minus
+  `YAP_*`, plus its own variables (a secret one's from the vault; names
+  with TOKEN, KEY, SECRET, PASSWORD, PAT… are secret by default); its
+  folder `<data>/connectors/c<N>/`; its last 64 KB of stderr in memory only
+  (Show details), never logged. No sandbox: the preview says so.
+- **Links** (`remote.rs`): rmcp's Streamable HTTP transport on **Yap's own
+  reqwest, every request through `net.rs`** ("Connector · A connector"; the
+  catalogue's name later, never one the person typed;
+  [privacy-receipts.md](./privacy-receipts.md)). The rules: `https://`, or
+  `http://` only to this PC or the person's network; no credentials in the
+  address; never a cloud metadata address; **private addresses only when
+  the person typed one** — a link to a name on the internet is resolved by
+  a guard that refuses it when any address it gets is on this PC or a
+  network (checked as the connection is made, so a DNS answer that changes
+  can't slip one in; `web::is_public`, MCP's SSRF advice), while a link to
+  `localhost`, a private address or a `.local` name reaches it, straight
+  (no proxy); **redirects** only `307`/`308` to the same origin, at most 5,
+  anything off the server's host refused ("… sent Yap on to …"); a JSON
+  answer or one event over 1 MB refused. **Auth**: a bearer token
+  (`Authorization: Bearer`) or request headers, their values in the vault,
+  only ever sent to that server; a 401 to a token or a header is "turned
+  the token down", never a sign-in; a 401 with a challenge and nothing sent
+  is "Needs sign-in" (wave 3 starts there). A `server/discover` a 2025
+  server refuses with a 4xx comes back as a JSON-RPC error so Auto falls
+  back. **The older HTTP+SSE** (`remote/legacy.rs`, which rmcp no longer
+  has): for a link marked so, or when the first POST answers 404 or 405 —
+  `GET` the stream, its `endpoint` event (same origin only), each message
+  `POST`ed there, answers read off the stream; the same receipts and rules.
+- **The vault** (`vault.rs`): one connector's secrets as one JSON value in
+  Windows Credential Manager, `yap-connector-c<N>-<part>.com.yap.dictation`
+  (1,100-character parts, at most 4), never in a file, the log or the page
+  (`Secrets`' `Debug` names which there are); the uninstaller removes all
+  24 × 4 names. A test run keeps them in its data folder's
+  `connector-secrets.e2e.json`; unit tests in memory, and one test uses the
+  real store under names of its own and removes them.
+- **Commands** (wave 5's Settings and wave 4's loop build on them):
+  `connectors_list`, `connector_preview {spec}`, `connector_add {spec}` (a link —
+  `url`, `token`, `headers`, `sse`, `fallbackSse` — or a program —
+  `command`, `args`, `env`, `approved` —; then connected and listed, kept
+  with its status if that fails), `connector_remove {id}` (stopped, its
+  tools and secrets gone), `connector_set_enabled {id, enabled}`,
+  `connector_refresh_tools {id}` (Try again: a fresh connection, listed;
+  what changed), `connector_set_tool {id, tool, setting}`,
+  `connector_details {id}` (server, address, stderr), and in debug builds
+  only `connector_call_tool {id, tool, args, timeoutMs}` (a tool called
+  directly, Off and unknown ones refused: the tests' and a debug check's).
+  **Events**: `yap-connectors-changed` (any change) and
+  `yap-connector-status` (`{id, state, line, …}`).
+- **Never another way in**: only those commands add a connector; Chat has
+  no tool for it, a page beside the chat has no Yap IPC, the deep link takes
+  none.
+- **The log**: the connector's id, outcomes, timings, counts and the tool's
+  name at `info`; never its name, a path, a command line, arguments, a
+  result, stderr or a secret (`log_privacy.rs` holds `args`, `arguments`,
+  `result_text` and `stderr` to it).
+- **Tests**: unit tests per part (names, schemas, results, the store, the
+  cache's defaults and rug pulls, the vault — and the real Credential
+  Manager under test names —, a command line's quoting, fingerprint and
+  warnings, **a grandchild ended with the program's job**, the lifecycle on
+  a fake clock, calls' timeouts, progress, stops and dropped futures against
+  `fake.rs`'s server, links against its HTTP fake — headers, a token turned
+  down, a sign-in wanted, a redirect off the host, no answer, slow, the
+  older HTTP+SSE, a name that resolves to this PC —, the receipts' purpose,
+  and the switch off reading nothing); and `connectors-core.spec.js` with
+  `desktop/e2e/support/fake-mcp.js` (stdio, and `--http` with `--token`,
+  `--redirect`, `--hang`, `--slow-ms`) through the commands.
 
 ## Claude Code runs' endpoint (`integrations/claude_live.rs`, 2026-11-07)
 

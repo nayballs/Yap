@@ -251,6 +251,14 @@ re-exported by the module, except `local_llm`'s, which callers name
   only; `main.rs` runs it before the app, as `mcp` and `diarize`:
   `run_fake_claude`) is the tests' stand-in for Claude Code
   ([ai-models.md](./ai-models.md#the-stand-in-fakers-debug-builds)).
+- **Connectors' programs** (preview, 2026-11-08, `integrations/connectors/local.rs`):
+  each in a kill-on-close job **of its own** (process-wrap's `JobObject`
+  under rmcp's child-process transport: started suspended, assigned,
+  resumed, no window), not Yap's shared one — so stopping one connector
+  ends its whole tree (an `npx.cmd`'s `node.exe` and what that starts), and
+  Yap's own handle closing (Quit, a crash, End task) ends every one.
+  `shutdown_cleanup` stops them politely first (within 3 s).
+  [integrations.md](./integrations.md#connectors-preview).
 - **`shell/tray.rs`** — state-aware tray icon (runtime-generated coloured dot) + right-click
   menu (model submenu w/ checkmark, Cancel while recording — kept for Undo —, Settings/Quit, Check for
   updates → Settings → About + a manual check); left-click opens Settings. A ready
