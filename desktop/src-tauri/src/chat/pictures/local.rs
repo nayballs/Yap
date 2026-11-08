@@ -9,7 +9,10 @@
 //!   where they take a picture's id (`picture`, or `path`): a full path, a
 //!   `file:` address, or a path inside the Code chat's workspace
 //!   ([`path_of`]). The pages never load a file: `browser_navigate` given
-//!   one says how to show a picture instead ([`not_a_page`]).
+//!   one says how to show a picture instead ([`not_a_page`]). **Without the
+//!   web** (`turn/gates.rs` `files`): a Code chat, or a question naming a
+//!   picture file ([`names_a_picture`]), still gets the two, by a path only
+//!   (`pictures::file_definitions`, `pictures::execute_files`).
 //! - **Which files** ([`Places`], [`check`]): inside one of the person's
 //!   workspaces (`agents/workspaces.rs`: any of them, the Code chat's own
 //!   too), a file an agent of this chat created or changed (`agents/store.rs`
@@ -196,6 +199,32 @@ pub fn is_path(given: &str) -> bool {
         return false;
     }
     g.get(..5).is_some_and(|s| s.eq_ignore_ascii_case("file:")) || is_absolute(g) || g.contains(['/', '\\']) || Path::new(g).extension().is_some()
+}
+
+/// The picture files' endings [`kind`] takes.
+const PICTURE_ENDINGS: &[&str] = &["png", "jpg", "jpeg", "gif", "webp", "bmp"];
+
+/// **Words naming a picture file on this PC**: a full path (`C:\…`, `\\…`)
+/// or a `file:` address ending in a picture's ending, on one line ("can you
+/// show me C:\Projects\garden-planner\docs\concept.png?"). Never a web
+/// picture's address. Pure.
+pub fn names_a_picture(text: &str) -> bool {
+    let lower = text.to_ascii_lowercase();
+    PICTURE_ENDINGS.iter().any(|end| {
+        let dotted = format!(".{end}");
+        lower.match_indices(&dotted).any(|(at, _)| {
+            if lower[at + dotted.len()..].chars().next().is_some_and(|c| c.is_alphanumeric()) {
+                return false;
+            }
+            let start = lower[..at].rfind('\n').map_or(0, |i| i + 1);
+            let line = &lower.as_bytes()[start..at];
+            let drive = line.windows(3).enumerate().any(|(i, w)| {
+                w[0].is_ascii_alphabetic() && w[1] == b':' && matches!(w[2], b'\\' | b'/') && (i == 0 || !line[i - 1].is_ascii_alphanumeric())
+            });
+            let address = line.windows(5).enumerate().any(|(i, w)| w == b"file:" && (i == 0 || !line[i - 1].is_ascii_alphanumeric()));
+            drive || address || line.windows(2).any(|w| w == b"\\\\")
+        })
+    })
 }
 
 /// `p` with `.` and `..` worked out, without the file system. Pure.
@@ -542,6 +571,30 @@ mod tests {
         // The Code chat's workspace is where a relative path is from.
         crate::agents::store::set_code_chat(42, Some(&s(&garden)));
         assert_eq!(Context { conversation: Some(42), said: Vec::new() }.places().base.as_deref(), Some(s(&garden).as_str()));
+    }
+
+    #[test]
+    fn a_question_naming_a_picture_file_is_told_from_a_web_pictures_address() {
+        for yes in [
+            "Can you show me C:\\Projects\\garden-planner\\docs\\concept.png?",
+            "show d:/Garden Planner/art/bed layout.JPG please",
+            "here: file:///C:/Projects/garden-planner/docs/concept.webp",
+            "\\\\nas\\share\\photos\\plot.jpeg",
+            "(C:\\a\\b.gif)",
+        ] {
+            assert!(names_a_picture(yes), "{yes}");
+        }
+        for no in [
+            "Show me https://wiki.example.com/images/map.png",
+            "What's a good tomato feed?",
+            "Open C:\\Projects\\garden-planner\\docs\\notes.txt",
+            "the concept.png the agent made",
+            "C:\\Projects\\garden-planner\\docs\\concept.pngx",
+            "my profile: see https://example.com/a.png",
+            "C:\\Projects\\garden-planner\nconcept.png",
+        ] {
+            assert!(!names_a_picture(no), "{no}");
+        }
     }
 
     #[test]
