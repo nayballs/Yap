@@ -7,8 +7,11 @@
   //   Code chats** (`agentsCleanSpeech`, CleanSpeech).
   // - **Pay with**: Your Claude plan / API key (`agentsPay`), saying which is
   //   in use, and for the key whether Language Models' Claude tab has one.
-  // - **Defaults**: model and effort (`agentsModel`, `agentsEffort`), the Mode a
-  //   new chat starts in (`agentsMode`; Bypass permissions asks once).
+  // - **Defaults**: model and effort (`agentsModel`, `agentsEffort`: what an
+  //   agent runs on when Chat doesn't size it for the task, agents/sizing.rs),
+  //   **Most Chat may choose** (`agentsCeilingModel`, `agentsCeilingEffort`:
+  //   "No limit" by default; the person's own words still go above it), the
+  //   Mode a new chat starts in (`agentsMode`; Bypass permissions asks once).
   // - **Workspaces** (the workspaces, `workspaces_*`): name, path and a
   //   cap ("Never above:"), Add workspace… (the folder picker), Remove (its
   //   Code chats are plain chats again, said here); their own Claude
@@ -51,6 +54,8 @@
     [...MODELS, ...(cfg.agentsModel && !MODELS.includes(cfg.agentsModel) ? [cfg.agentsModel] : [])].map((m) => ({ value: m, label: modelLabel(m) }))
   );
   const EFFORTS = ['low', 'medium', 'high', 'xhigh', 'max'].map((e) => ({ value: e, label: EFFORT_LABELS[e] }));
+  // "Most Chat may choose": No limit, or a model (then the most effort beside it).
+  const CEILINGS = [{ value: '', label: 'No limit' }, ...MODELS.map((m) => ({ value: m, label: modelLabel(m) }))];
   const MODES = ['auto', 'manual', 'acceptEdits', 'plan', BYPASS].map((m) => ({ value: m, label: MODE_LABELS[m] + (m === 'auto' ? ' (Recommended)' : '') }));
   const CAPS = [
     { value: '', label: 'No limit' },
@@ -90,6 +95,10 @@
         ? "Agents are charged to the API key on Language Models' Claude tab."
         : "There's no Claude API key in Language Models yet: add one on its Claude tab, or agents can't start."
       : "Agents use your Claude plan's limits, through Claude Code's own sign-in. Each agent shows what it would have cost on the API."
+  );
+  const ceilingLine = $derived(
+    `Chat picks each agent's model and effort for its task, never above this. Your own words ("use Opus", "think hard") still go higher.` +
+      (cfg.agentsPay === 'key' ? ' On an API key, bigger models cost more per run.' : '')
   );
   const history = $derived(showAll ? agents.list : agents.list.slice(0, 20));
 
@@ -243,12 +252,20 @@
   {/if}
 </Group>
 
-<Group title="Defaults" desc="What an agent runs on unless you ask for something else." id="settings-yap-code-defaults">
+<Group title="Defaults" desc="Chat sizes each agent to its task; these are what an agent runs on when it doesn't, unless you ask for something else." id="settings-yap-code-defaults">
   <Row label="Model" desc="The Claude model an agent runs on" setting="yap-code-model">
     <Select bind:value={cfg.agentsModel} options={modelOptions} ariaLabel="Model" />
   </Row>
   <Row label="Effort" desc="Higher effort thinks longer: more thorough, slower, and it uses more of your plan" setting="yap-code-effort">
     <Select bind:value={cfg.agentsEffort} options={EFFORTS} ariaLabel="Effort" />
+  </Row>
+  <Row label="Most Chat may choose" desc={ceilingLine} setting="yap-code-ceiling">
+    <div class="frow" data-testid="yap-code-ceiling">
+      <Select bind:value={cfg.agentsCeilingModel} options={CEILINGS} ariaLabel="Most Chat may choose" />
+      {#if cfg.agentsCeilingModel}
+        <Select bind:value={cfg.agentsCeilingEffort} options={EFFORTS} ariaLabel="Most effort Chat may choose" />
+      {/if}
+    </div>
   </Row>
   <Row label="Mode" desc="The Mode a new code chat starts in. Change it for one chat beside Chat's message box." setting="yap-code-mode">
     <Select bind:value={cfg.agentsMode} options={MODES} ariaLabel="Mode" onchange={onMode} wide />

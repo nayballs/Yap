@@ -346,7 +346,12 @@
   here): agents_enabled (Yap Code, off) + agents_pay ("plan" — the
   person's Claude plan, through Claude Code's own sign-in — | "key", their
   Anthropic key; "plan") + agents_model (a full id, "claude-sonnet-5-5") +
-  agents_effort (low | medium | high | xhigh | max, "medium") + agents_mode (the
+  agents_effort (low | medium | high | xhigh | max, "medium"; the two are what
+  an agent runs on when Chat doesn't size it for the task) +
+  agents_ceiling_model / agents_ceiling_effort ("Most Chat may choose",
+  2026-11-08, `agents/sizing.rs`: the biggest model and most effort Chat may
+  size an agent to; "" = "No limit", the default, and "high" — new fields an
+  older Yap drops on its save: No limit again) + agents_mode (the
   Mode a new chat starts in: "auto" | "manual" | "acceptEdits" | "plan" |
   "bypassPermissions", Bypass only once confirmed; "auto") + agents_ask ("Ask
   before sending an agent": "new-or-web" — a folder used for the first time,
@@ -857,7 +862,11 @@
   context's fill against the model's window, an estimate of its cost while
   Claude Code hasn't priced it: 2026-11-08, `agents/usage.rs`, new fields of
   the turn's own that an older Yap drops on its save, so the turn then shows
-  no numbers and its log's list); a plan nobody acted on, set aside once a
+  no numbers and its log's list); why Chat sized each turn so (`sizing`, a
+  few words, the Agent panel's ▸) and whether the agent's latest model or
+  effort was Chat's pick (`sized`, left out while false: Continue keeps it)
+  — 2026-11-08, `agents/sizing.rs`, harmless to lose on an older Yap's save
+  (no reason shown; a Continue then takes Settings'); a plan nobody acted on, set aside once a
   newer turn began in its chat (`planUnused`, "Plan not used": the turn's,
   and the agent's for its latest turn) and an Agent panel row dismissed
   (`dismissed`, the turn's) — 2026-11-08, flags left out while false, whose

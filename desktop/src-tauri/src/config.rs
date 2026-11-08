@@ -1282,7 +1282,8 @@ pub struct YapConfig {
     #[serde(default = "default_agents_pay")]
     #[serde(alias = "jobsPay")]
     pub agents_pay: String,
-    /// The model an agent runs on unless the chat's model names one (a full id).
+    /// The model an agent runs on when the chat's model picks none for the
+    /// task (a full id; `agents/sizing.rs`).
     #[serde(default = "default_agents_model")]
     #[serde(alias = "jobsModel")]
     pub agents_model: String,
@@ -1290,6 +1291,15 @@ pub struct YapConfig {
     #[serde(default = "default_agents_effort")]
     #[serde(alias = "jobsEffort")]
     pub agents_effort: String,
+    /// **"Most Chat may choose"** (8 Nov 2026, `agents/sizing.rs`): the
+    /// biggest model the chat's model may size an agent to (a full id; ""
+    /// = "No limit", the default) and, with it, the most effort. The
+    /// person's own words still go above it. New fields: an older Yap drops
+    /// them on its save (No limit again).
+    #[serde(default)]
+    pub agents_ceiling_model: String,
+    #[serde(default = "default_agents_ceiling_effort")]
+    pub agents_ceiling_effort: String,
     /// The Mode chip's default for a chat: auto | manual | acceptEdits |
     /// plan | bypassPermissions (Bypass only once confirmed).
     #[serde(default = "default_agents_mode")]
@@ -1533,6 +1543,9 @@ fn default_agents_model() -> String {
 fn default_agents_effort() -> String {
     "medium".into()
 }
+fn default_agents_ceiling_effort() -> String {
+    "high".into()
+}
 fn default_agents_mode() -> String {
     "auto".into()
 }
@@ -1733,6 +1746,8 @@ impl Default for YapConfig {
             agents_pay: default_agents_pay(),
             agents_model: default_agents_model(),
             agents_effort: default_agents_effort(),
+            agents_ceiling_model: String::new(),
+            agents_ceiling_effort: default_agents_ceiling_effort(),
             agents_mode: default_agents_mode(),
             agents_ask: default_agents_ask(),
             agents_speak: default_agents_speak(),

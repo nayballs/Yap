@@ -240,6 +240,14 @@ describe('shots, the sheet and scripts', () => {
     assert.ok(!notRead[0].pass);
     assert.match(notRead[0].check, /mode auto, readOnly true/);
     assert.match(notRead[0].detail, /a2: done, bypassPermissions read only/);
+    // Its latest turn's model and effort (agent-sizing: Chat sizes each agent).
+    const sized = { agents: [{ id: 'a3', status: 'done', mode: 'auto', model: 'claude-opus-5-5', effort: 'xhigh', sizing: 'hard debugging', files: [] }] };
+    assert.ok(checkTurn({ agent: { model: 'claude-opus-5-5', effort: ['high', 'xhigh'] } }, { result: null, agents: sized }).every((c) => c.pass));
+    assert.ok(checkTurn({ agent: { model: '/opus|fable/' } }, { result: null, agents: sized }).every((c) => c.pass));
+    const small = checkTurn({ agent: { model: ['claude-haiku-5-5', 'claude-sonnet-5-5'], effort: 'low' } }, { result: null, agents: sized });
+    assert.ok(!small[0].pass);
+    assert.match(small[0].check, /model claude-haiku-5-5\|claude-sonnet-5-5, effort low/);
+    assert.match(small[0].detail, /a3: done, auto, claude-opus-5-5 at xhigh \(hard debugging\)/);
     const screen = screenChecks({ selector: [{ window: 'panel', css: '.x' }, { css: '.y', present: false }], visible: 'THE END' });
     assert.deepEqual(screen.map((s) => s.args.window), ['panel', 'main', 'thread']);
     assert.equal(probePasses(screen[0].want, { visible: 2 }), true);

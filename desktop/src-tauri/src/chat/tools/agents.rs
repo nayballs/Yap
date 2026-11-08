@@ -80,7 +80,7 @@ use crate::integrations::claude_live::Origin;
 use crate::agents::workspaces::{self, Folder, Resolved};
 use crate::agents::modes::{self, Mode};
 use crate::agents::store::{self, Agent, AgentRef, Status};
-use crate::agents::{consent, runner, voice, FEATURE};
+use crate::agents::{consent, runner, sizing, voice, FEATURE};
 
 /// The tools this module runs.
 pub const NAMES: &[&str] = &["start_agent", "agent_status", "message_agent", "stop_agent"];
@@ -122,9 +122,12 @@ impl AgentsTurn {
     }
 }
 
-/// The tools' definitions, the person's workspaces named in `start_agent`'s.
+/// The tools' definitions, the person's workspaces named in `start_agent`'s,
+/// the models an agent runs on from Yap's catalogue (`agents::sizing`).
 pub fn definitions() -> Value {
     let listing = workspaces::listing(&workspaces::list());
+    let models = crate::agents::sizing::models();
+    let efforts: Vec<&str> = crate::ai::effort::Level::ALL.iter().map(|l| l.id()).collect();
     json!([
         {
             "type": "function",
@@ -138,8 +141,9 @@ pub fn definitions() -> Value {
                         "brief": { "type": "string", "description": "The whole task in plain words, complete on its own: what to do, where, and what done looks like (a follow-up in a Code chat: what to do next)" },
                         "title": { "type": "string", "description": "The request in a few words, as a heading (\"Add a minimap button\")" },
                         "fresh": { "type": "boolean", "description": "true only when the user asks for a new agent, a fresh start or a new session: a new Claude Code session, not the chat's agent carried on" },
-                        "model": { "type": "string", "description": "A Claude model id (claude-opus-5-5, claude-sonnet-5-5, claude-haiku-5-5), only if the user asked for one" },
-                        "effort": { "type": "string", "enum": ["low", "medium", "high", "xhigh", "max"], "description": "Only if the user asked" },
+                        "model": { "type": "string", "enum": models, "description": crate::agents::sizing::GUIDE },
+                        "effort": { "type": "string", "enum": efforts },
+                        "sizing": { "type": "string", "description": "Why, in a few words (\"a multi-file change\")" },
                         "read_only": { "type": "boolean", "description": READ_ONLY_DESCRIPTION },
                         "mode": { "type": "string", "enum": ["plan", "manual", "acceptEdits", "auto"], "description": MODE_DESCRIPTION }
                     },
@@ -171,7 +175,9 @@ pub fn definitions() -> Value {
                         "id": { "type": "string", "description": "The agent's id, or its folder's name. Leave it out for this chat's latest agent" },
                         "text": { "type": "string", "description": "What to tell it, in the user's words" },
                         "title": { "type": "string", "description": "It in a few words, as a heading (\"Add a minimap button\")" },
-                        "mode": { "type": "string", "enum": ["plan", "manual", "acceptEdits", "auto"], "description": MODE_DESCRIPTION }
+                        "mode": { "type": "string", "enum": ["plan", "manual", "acceptEdits", "auto"], "description": MODE_DESCRIPTION },
+                        "model": { "type": "string", "enum": models, "description": "To resize this turn, as start_agent's" },
+                        "effort": { "type": "string", "enum": efforts }
                     },
                     "required": ["text"],
                     "additionalProperties": false
@@ -347,11 +353,9 @@ async fn start_agent(args: &Value, ctx: Ctx<'_>) -> Ran {
     let phone = question_id(ctx.conversation).and_then(|m| crate::agents::remote::phone_of_message(&m));
     let mode = if phone.is_some() { crate::agents::remote::phone_mode(mode) } else { mode };
     let phone_cap = |m: Option<Mode>| if phone.is_some() { Some(crate::agents::remote::phone_mode(m.unwrap_or(crate::agents::remote::PHONE_MAX))) } else { m };
-    let asked_model = match arg(args, &["model"]) {
-        m if m.starts_with("claude-") && m.len() <= 60 && m.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '.' | '[' | ']')) => Some(m.to_string()),
-        _ => None,
-    };
-    let asked_effort = Effort::parse(arg(args, &["effort"]));
+    // **Its size** (8 Nov 2026): the chat's pick for the task, lowered to
+    // Settings' ceiling; the person's own words win (`agents::sizing`).
+    let size = agent_size(args, &ctx, &cfg);
     let title = arg(args, &["title"]);
     let web = ctx.web_seen || previous_from_web(ctx.conversation);
     // **Bypass permissions: nobody is asked** but after outside content this
@@ -379,13 +383,14 @@ async fn start_agent(args: &Value, ctx: Ctx<'_>) -> Ran {
                 message_id: question_id(ctx.conversation),
                 go: fixed.is_some() || consent::go_ahead(brief) || (prev.plan && crate::apps::is_affirmative(ctx.question)),
                 mode: phone_cap(asked_mode.filter(|_| fixed.is_none())),
-                model: asked_model,
-                effort: asked_effort.map(|e| e.as_str().to_string()),
                 phone: phone.clone(),
                 read_only: read_only && fixed.is_none(),
                 plan_turn: None,
+                // Yap's own go-ahead: nothing of the model's (the plan's size stays).
+                ..if fixed.is_some() { runner::Ask::default() } else { size.ask() }
             };
-            return carry_on(prev, ask, &folder, mode, web, fixed.is_some(), mode_note, ctx).await;
+            let note = join_notes(mode_note, size.note.filter(|_| fixed.is_none()));
+            return carry_on(prev, ask, &folder, mode, web, fixed.is_some(), note, ctx).await;
         }
         Decided::New(why) => {
             if why.is_some() {
@@ -394,8 +399,11 @@ async fn start_agent(args: &Value, ctx: Ctx<'_>) -> Ran {
             why
         }
     };
-    let model = asked_model.clone().unwrap_or_else(|| cfg.agents_model.clone());
-    let effort = asked_effort.or_else(|| Effort::parse(&cfg.agents_effort)).unwrap_or(Effort::Medium);
+    // What it runs on: theirs, else the chat's pick, else Settings' defaults.
+    let size_ask = size.ask();
+    let runs = runner::model_for(&Agent::default(), &size_ask, false, &cfg.agents_model, &cfg.agents_effort);
+    let model = runs.model.clone();
+    let effort = Effort::parse(&runs.effort).unwrap_or(Effort::Medium);
     let now = store::now_secs();
     let message_id = question_id(ctx.conversation);
     let agent = Agent {
@@ -408,8 +416,9 @@ async fn start_agent(args: &Value, ctx: Ctx<'_>) -> Ran {
         brief: brief.to_string(),
         model: model.clone(),
         effort: effort.as_str().to_string(),
-        model_asked: asked_model.is_some(),
-        effort_asked: asked_effort.is_some(),
+        model_asked: runs.model_asked,
+        effort_asked: runs.effort_asked,
+        sized: runs.sized,
         mode: mode.as_str().to_string(),
         pay: if cfg.agents_pay == "key" { "key".into() } else { "plan".into() },
         session: session::new_session_id(),
@@ -426,6 +435,7 @@ async fn start_agent(args: &Value, ctx: Ctx<'_>) -> Ran {
             read_only,
             model,
             effort: effort.as_str().to_string(),
+            sizing: size_ask.sizing.clone().filter(|_| runs.sized),
             ..Default::default()
         }],
         why_new,
@@ -455,7 +465,7 @@ async fn start_agent(args: &Value, ctx: Ctx<'_>) -> Ran {
         ));
     }
     match begin(agent, new_folder) {
-        Ok(agent) => started(agent, mode_note),
+        Ok(agent) => started(agent, join_notes(mode_note, size.note)),
         Err(e) => Ran::of(tool_error(format!("The agent couldn't start: {e}. Tell the user."), Value::Null, "Didn't send an agent".into())),
     }
 }
@@ -477,6 +487,43 @@ fn pick_mode(chip: Mode, raw: Option<Mode>, read_only: bool, ctx: &Ctx<'_>, cfg:
         tracing::info!(chip = chip.as_str(), bypass = why == modes::NoPlan::Bypass, "Agents: the model's plan turned into a read-only run at the chat's Mode");
     }
     pick
+}
+
+/// **The agent's size, as the call asks it** (`agents::sizing::pick`): the
+/// chat's `model`, `effort` and `sizing` for the task — lowered to Settings'
+/// "Most Chat may choose" — unless the person's own words this turn (or
+/// their yes to the answer before) named them, in their languages.
+fn agent_size(args: &Value, ctx: &Ctx<'_>, cfg: &crate::config::YapConfig) -> sizing::Picked {
+    let langs = crate::dictation::languages::my_languages(cfg);
+    let ceiling = sizing::Ceiling::of(cfg);
+    let picked = sizing::pick(
+        arg(args, &["model"]),
+        arg(args, &["effort"]),
+        arg(args, &["sizing", "why"]),
+        |model| sizing::said(ctx.question, ctx.previous, model, &langs),
+        ceiling.as_ref(),
+        &cfg.agents_model,
+    );
+    if picked.model.is_some() || picked.effort.is_some() {
+        tracing::info!(
+            model = picked.model.as_deref().unwrap_or(""),
+            effort = picked.effort.map_or("", |l| l.id()),
+            model_asked = picked.model_asked,
+            effort_asked = picked.effort_asked,
+            ceiling = ceiling.is_some(),
+            note = picked.note.is_some(),
+            "Agents: sized by the chat"
+        );
+    }
+    picked
+}
+
+/// Two notes for the model, one after the other.
+fn join_notes(a: Option<String>, b: Option<String>) -> Option<String> {
+    match (a, b) {
+        (Some(a), Some(b)) => Some(format!("{a} {b}")),
+        (a, b) => a.or(b),
+    }
 }
 
 /// A `true` / `false` argument (`fresh`, `read_only`): a boolean, or its
@@ -926,7 +973,11 @@ async fn message_agent(args: &Value, ctx: &Ctx<'_>) -> Ran {
             ));
         }
     }
-    let ask = runner::Ask { text: text.to_string(), title, message_id, go, mode, phone, read_only, ..Default::default() };
+    // Resized for this turn when the chat says so (more or less thinking than
+    // the last); Yap's own go-ahead: nothing of the model's.
+    let size = if fixed.is_some() { sizing::Picked::default() } else { agent_size(args, ctx, &cfg) };
+    let mode_note = join_notes(mode_note, size.note.clone());
+    let ask = runner::Ask { text: text.to_string(), title, message_id, go, mode, phone, read_only, ..size.ask() };
     match runner::follow_up(&agent.id, ask) {
         Ok((j, how)) => {
             let queued = how == runner::FollowedUp::Queued;
@@ -1300,6 +1351,52 @@ mod tests {
         let ran = tauri::async_runtime::block_on(execute("message_agent", &json!({ "text": "go ahead" }), ctx("Go ahead.", None, false, Some(63))));
         assert_eq!(ran.result["displayText"], "The agent in garden-planner is on it already");
         assert_eq!(runner::test_pending(&id), None);
+        runner::test_live(&id, None);
+    }
+
+    #[test]
+    fn the_chat_sizes_each_agent_from_the_catalogue_and_its_turn_keeps_why() {
+        // The tools: the catalogue's models, the guide, the reason; message_agent resizes a turn.
+        let defs = definitions();
+        let start = &defs[0]["function"]["parameters"]["properties"];
+        let models: Vec<&str> = start["model"]["enum"].as_array().unwrap().iter().map(|m| m.as_str().unwrap()).collect();
+        assert_eq!(models, sizing::models());
+        assert!(models.contains(&"claude-haiku-5-5") && models.contains(&"claude-opus-5-5"));
+        assert_eq!(start["model"]["description"], sizing::GUIDE);
+        assert!(sizing::GUIDE.contains("max only if the user asks") && sizing::GUIDE.contains("The user's words win"));
+        assert_eq!(start["effort"]["enum"], json!(["low", "medium", "high", "xhigh", "max"]));
+        assert!(start["sizing"]["description"].as_str().unwrap().contains("a multi-file change"));
+        let message = &defs[2]["function"]["parameters"]["properties"];
+        assert_eq!(message["model"]["enum"], start["model"]["enum"]);
+        assert!(message["effort"].is_object() && message["sizing"].is_null(), "sizing taken but not listed there");
+
+        // The chat's pick for a turn of its own (message_agent): used, with its reason, not the person's.
+        let id = planning(71);
+        let text = "Find the root cause of the flaky upload test";
+        let ran = tauri::async_runtime::block_on(execute("message_agent", &json!({ "text": text, "model": "claude-opus-5-5", "effort": "xhigh", "sizing": "hard debugging" }), ctx(text, None, false, Some(71))));
+        assert_eq!(ran.result["success"], true, "{}", ran.result);
+        let sent = runner::test_pending(&id).expect("queued as its next turn");
+        assert_eq!((sent.model.as_deref(), sent.effort.as_deref(), sent.sizing.as_deref()), (Some("claude-opus-5-5"), Some("xhigh"), Some("hard debugging")));
+        assert!(!sent.model_asked && !sent.effort_asked, "the chat's own: resized next turn");
+        runner::test_live(&id, None);
+        // An id that isn't one: left out (the default runs), the model told.
+        let id = planning(72);
+        let ran = tauri::async_runtime::block_on(execute("message_agent", &json!({ "text": text, "model": "claude-opus-9" }), ctx(text, None, false, Some(72))));
+        assert!(ran.result["data"]["note"].as_str().unwrap().starts_with("\"claude-opus-9\" isn't a model an agent runs on"), "{}", ran.result);
+        assert_eq!(runner::test_pending(&id).and_then(|a| a.model), None);
+        runner::test_live(&id, None);
+        // The person's own words: theirs, kept for the turns after.
+        let id = planning(73);
+        let theirs = "Use Haiku for this one: rename x to count in convert.js";
+        let _ = tauri::async_runtime::block_on(execute("message_agent", &json!({ "text": theirs, "model": "claude-haiku-5-5", "effort": "low" }), ctx(theirs, None, false, Some(73))));
+        let sent = runner::test_pending(&id).unwrap();
+        assert_eq!((sent.model.as_deref(), sent.model_asked, sent.effort_asked), (Some("claude-haiku-5-5"), true, false));
+        runner::test_live(&id, None);
+        // Yap's own go-ahead after the web: nothing of the model's goes, its size neither.
+        let id = planning(74);
+        let _ = tauri::async_runtime::block_on(execute("message_agent", &json!({ "text": "go ahead", "model": "claude-fable-5-1", "effort": "max" }), ctx("Go ahead", None, true, Some(74))));
+        let sent = runner::test_pending(&id).unwrap();
+        assert_eq!((sent.text.as_str(), sent.model, sent.effort), (runner::GO_AHEAD, None, None));
         runner::test_live(&id, None);
     }
 

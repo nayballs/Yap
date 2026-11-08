@@ -1,0 +1,32 @@
+{
+  "name": "agent-sizing",
+  "about": "Chat sizes each agent to its task (8 Nov 2026, agents/sizing.rs): in a Code chat on lab-sandbox, a trivial change (rename a variable), then a hard one (find why the tests fail now and then, and fix it). Soft checks on the agents' model and effort, since they're the model's judgement: the trivial one small (Haiku or Sonnet, at low or medium), the hard one big (Opus or Fable, at high or above). Its `fake` steps size them as the guide says, so a --fake lab checks the plumbing: the chat's pick reaches the agent's turn, with why.",
+  "needs": { "yapCode": true },
+  "steps": [
+    { "set": { "config": { "agentsAsk": "never", "agentsCeilingModel": "" } }, "note": "No ask-first card, and no ceiling (\"No limit\", the default)." },
+    { "fake": [{ "tools": [{ "name": "start_agent", "args": { "brief": "Rename the variable x to count in src/convert.js, then run the tests.", "title": "Rename x to count", "model": "claude-haiku-5-5", "effort": "low", "sizing": "a one-line rename" } }] }, { "content": "On it: I've sent an agent to lab-sandbox." }] },
+    { "ask": "rename the variable x to count in convert.js", "chat": "code:lab-sandbox", "cards": "allow", "timeout": 300 },
+    { "expect": { "used": "start_agent", "refused": false } },
+    { "expect": { "tool": { "name": "start_agent", "argsHas": ["model", "effort"] } }, "soft": true, "note": "The chat sized it: a model and an effort in its call." },
+    { "wait": "agents", "cards": "allow", "timeout": 900 },
+    {
+      "expect": { "agent": { "model": ["claude-haiku-5-5", "claude-sonnet-5-5"], "effort": ["low", "medium"] } },
+      "soft": true,
+      "note": "A trivial, mechanical change: a small agent (Haiku or low effort; Sonnet at medium at most)."
+    },
+    { "shot": "sizing-trivial", "window": "panel", "note": "Its row: Mode · model · effort." },
+
+    { "fake": [{ "tools": [{ "name": "start_agent", "args": { "brief": "The tests in src/ fail intermittently. Find the root cause and fix it, then run the tests several times to show it's fixed.", "title": "Fix the flaky tests", "model": "claude-opus-5-5", "effort": "xhigh", "sizing": "root-cause debugging" } }] }, { "content": "On it: I've passed that to the agent in lab-sandbox." }] },
+    { "ask": "the tests fail intermittently, find the root cause and fix it", "chat": "same", "cards": "allow", "timeout": 300 },
+    { "expect": { "used": "start_agent", "refused": false } },
+    { "expect": { "tool": { "name": "start_agent", "argsHas": ["model", "effort"] } }, "soft": true, "note": "Sized again for this turn." },
+    { "wait": "agents", "cards": "allow", "timeout": 900 },
+    {
+      "expect": { "agent": { "model": ["claude-opus-5-5", "claude-fable-5-1"], "effort": ["high", "xhigh", "max"] } },
+      "soft": true,
+      "note": "Hard debugging: a big agent (Opus, at high or above)."
+    },
+    { "expect": { "agent": { "status": "done" } } },
+    { "shot": "sizing-hard", "window": "panel", "note": "Both turns' rows: the second sized bigger." }
+  ]
+}

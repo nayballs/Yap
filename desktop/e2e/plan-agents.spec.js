@@ -401,8 +401,9 @@ test('a Code chat on the plan: its follow-up carries the chat’s agent on, its 
     yap,
     'code-chat-turns',
     [
-      turn(yapCall('m1', 'toolu_agent', 'start_agent', { brief: 'Change Draft to Final in notes.md.', title: 'Change Draft to Final' }), answers('m2', STARTED)),
-      turn(yapCall('m3', 'toolu_more', 'start_agent', { brief: 'Add a minimap button for the beds.', title: 'Add a minimap button' }), answers('m4', "On it: I've passed that to the agent in garden-planner.")),
+      // Each sized by the plan's model for its task (2026-11-08, agents/sizing.rs), over the run endpoint.
+      turn(yapCall('m1', 'toolu_agent', 'start_agent', { brief: 'Change Draft to Final in notes.md.', title: 'Change Draft to Final', model: 'claude-haiku-5-5', effort: 'low', sizing: 'a one-word edit' }), answers('m2', STARTED)),
+      turn(yapCall('m3', 'toolu_more', 'start_agent', { brief: 'Add a minimap button for the beds.', title: 'Add a minimap button', model: 'claude-opus-5-5', effort: 'high', sizing: 'a feature across files' }), answers('m4', "On it: I've passed that to the agent in garden-planner.")),
     ],
     agentDumping(ARGS)
   );
@@ -428,6 +429,10 @@ test('a Code chat on the plan: its follow-up carries the chat’s agent on, its 
   expect(args).toHaveLength(2);
   expect(flagValue(args[0], '--session-id')).toBe(agent.session);
   expect(flagValue(args[1], '--resume')).toBe(agent.session);
+  // Each turn on the model and effort the plan's model sized it to, with why.
+  expect([flagValue(args[0], '--model'), flagValue(args[0], '--effort')]).toEqual(['claude-haiku-5-5', 'low']);
+  expect([flagValue(args[1], '--model'), flagValue(args[1], '--effort')]).toEqual(['claude-opus-5-5', 'high']);
+  expect(again.turnList.map((t) => t.sizing)).toEqual(['a one-word edit', 'a feature across files']);
   // A report a turn, the plan's way.
   const messages = await messagesOf(yap, agent.conversation, 8);
   expect(messages.map((m) => m.kind ?? '')).toEqual(['', '', 'agentReport', '', '', '', 'agentReport', '']);

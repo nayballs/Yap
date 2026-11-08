@@ -65,6 +65,7 @@ use tauri::{AppHandle, Emitter};
 use crate::ai::claude_code::cli;
 use crate::ai::claude_code::events::{Block, Event, Problem, TurnResult};
 use crate::ai::claude_code::session::{self, ApiKey, Conversation, Effort, Pay, Session, Spec};
+use crate::ai::effort::Level;
 use crate::integrations::claude_live::{self, Approval, RunSpec, Tools};
 
 use super::diff;
@@ -201,9 +202,16 @@ pub struct Ask {
     pub go: bool,
     /// Lower than the chat's Mode (the model may only lower it).
     pub mode: Option<Mode>,
-    /// The person's own model and effort for it (else Settings' then).
+    /// Its model and effort (8 Nov 2026, `agents/sizing.rs`): the person's
+    /// own (`model_asked`, `effort_asked`: kept for the turns after), else
+    /// the chat's pick for the task (lowered to Settings' ceiling already),
+    /// else — [`model_for`] — Settings' then.
     pub model: Option<String>,
     pub effort: Option<String>,
+    pub model_asked: bool,
+    pub effort_asked: bool,
+    /// Why the chat picked them, in a few words (the turn's `sizing`).
+    pub sizing: Option<String>,
     /// A paired phone's action (Remote Control): the phone's id. Its turn
     /// runs at most at Auto, and is reported on that phone.
     pub phone: Option<String>,
@@ -243,11 +251,20 @@ impl Ask {
             (Some(a), Some(b)) => Some(a.min(b)),
             (a, b) => a.or(b),
         };
-        if more.model.is_some() {
+        // Its size: the person's own first; else the bigger of the chat's two
+        // picks (the turn does both), with its reason.
+        let size = |a: &Ask| (a.model.as_deref().and_then(super::sizing::rank), a.effort.as_deref().and_then(Level::parse));
+        let bigger = size(&more) > size(self);
+        if more.model.is_some() && (more.model_asked || (!self.model_asked && (bigger || self.model.is_none()))) {
             self.model = more.model;
+            self.model_asked = more.model_asked;
         }
-        if more.effort.is_some() {
+        if more.effort.is_some() && (more.effort_asked || (!self.effort_asked && (bigger || self.effort.is_none()))) {
             self.effort = more.effort;
+            self.effort_asked = more.effort_asked;
+        }
+        if more.sizing.is_some() && (bigger || self.sizing.is_none()) {
+            self.sizing = more.sizing;
         }
         if more.phone.is_some() {
             self.phone = more.phone;
@@ -1669,15 +1686,40 @@ pub fn continue_from(id: &str, phone: Option<&str>) -> Result<Agent, String> {
     store::get(id).ok_or_else(|| "There's no such agent.".into())
 }
 
-/// The model and effort an agent's next turn runs at: `ask`'s (the person's
-/// own), else the agent's when the person asked for it before, else Settings'
-/// as they are now. Pure.
-pub fn model_for(agent: &Agent, ask: &Ask, cfg_model: &str, cfg_effort: &str) -> (String, String, bool, bool) {
-    let model_asked = ask.model.is_some() || agent.model_asked;
-    let effort_asked = ask.effort.is_some() || agent.effort_asked;
-    let model = ask.model.clone().unwrap_or_else(|| if agent.model_asked { agent.model.clone() } else { cfg_model.to_string() });
-    let effort = ask.effort.clone().unwrap_or_else(|| if agent.effort_asked { agent.effort.clone() } else { cfg_effort.to_string() });
-    (model, effort, model_asked, effort_asked)
+/// What an agent's turn runs on ([`model_for`]).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Runs {
+    pub model: String,
+    pub effort: String,
+    /// The person's own (kept for the turns after).
+    pub model_asked: bool,
+    pub effort_asked: bool,
+    /// The chat's pick decided its model or effort (`Agent::sized`).
+    pub sized: bool,
+}
+
+/// **The model and effort an agent's turn runs at** (8 Nov 2026, the chat
+/// sizes each agent: `agents/sizing.rs`), each: the person's own this turn
+/// (`ask`'s, asked), else theirs from before (the agent's, asked), else the
+/// chat's pick this turn, else — `keeps`: Continue or a plan's go-ahead,
+/// the same task — the chat's earlier pick, else Settings' as they are now.
+/// The effort lowered to the nearest the model takes (`sizing::taken`).
+/// Pure, but for the provider's list of efforts.
+pub fn model_for(agent: &Agent, ask: &Ask, keeps: bool, cfg_model: &str, cfg_effort: &str) -> Runs {
+    let earlier = keeps && agent.sized;
+    let one = |now: &Option<String>, now_asked: bool, before: &str, before_asked: bool, default: &str| -> (String, bool, bool) {
+        match now {
+            Some(v) if now_asked => (v.clone(), true, false),
+            _ if before_asked => (before.to_string(), true, false),
+            Some(v) => (v.clone(), false, true),
+            None if earlier => (before.to_string(), false, true),
+            None => (default.to_string(), false, false),
+        }
+    };
+    let (model, model_asked, model_sized) = one(&ask.model, ask.model_asked, &agent.model, agent.model_asked, cfg_model);
+    let (effort, effort_asked, effort_sized) = one(&ask.effort, ask.effort_asked, &agent.effort, agent.effort_asked, cfg_effort);
+    let effort = Level::parse(&effort).map_or(effort, |l| super::sizing::taken(&model, l).id().to_string());
+    Runs { model, effort, model_asked, effort_asked, sized: model_sized || effort_sized }
 }
 
 /// Agent `id`'s next turn (`next`, as `ask` asks it), at the mode it runs at
@@ -1700,7 +1742,17 @@ fn resume(id: &str, next: Next, ask: &Ask, new_turn: bool) {
     if ask.phone.is_some() || ask.message_id.as_deref().and_then(super::remote::phone_of_message).is_some() {
         mode = super::remote::phone_mode(mode);
     }
-    let (model, effort, model_asked, effort_asked) = model_for(&agent, ask, &cfg.agents_model, &cfg.agents_effort);
+    // Continue and a plan's go-ahead carry the same task on: the chat's
+    // earlier pick stays; a new request is sized again (else Settings').
+    let keeps = matches!(next, Next::CarryOn) || go;
+    let runs = model_for(&agent, ask, keeps, &cfg.agents_model, &cfg.agents_effort);
+    let (model, effort) = (runs.model.clone(), runs.effort.clone());
+    // Why, for the turn: this request's reason, or — the earlier pick kept — its turn's.
+    let sizing = match (runs.sized, ask.model.is_some() || ask.effort.is_some()) {
+        (false, _) => None,
+        (true, true) => ask.sizing.clone(),
+        (true, false) => agent.turn_list.last().and_then(|t| t.sizing.clone()),
+    };
     let pay = if cfg.agents_pay == "key" { "key" } else { "plan" };
     let ran = agent.started_ts > 0 && !agent.session.is_empty();
     // A read-only turn: a new one as asked; the turn carried on (Continue, a
@@ -1722,8 +1774,9 @@ fn resume(id: &str, next: Next, ask: &Ask, new_turn: bool) {
         j.mode = mode.as_str().to_string();
         j.model = model.clone();
         j.effort = effort.clone();
-        j.model_asked = model_asked;
-        j.effort_asked = effort_asked;
+        j.model_asked = runs.model_asked;
+        j.effort_asked = runs.effort_asked;
+        j.sized = runs.sized;
         j.pay = pay.to_string();
         j.status = Status::Queued;
         j.undone = false;
@@ -1744,6 +1797,7 @@ fn resume(id: &str, next: Next, ask: &Ask, new_turn: bool) {
             t.mode = mode.as_str().to_string();
             t.model = model.clone();
             t.effort = effort.clone();
+            t.sizing = sizing.clone();
         }
     });
     if let Some(agent) = agent {
@@ -1752,7 +1806,7 @@ fn resume(id: &str, next: Next, ask: &Ask, new_turn: bool) {
         if let Some(device) = &ask.phone {
             super::remote::mark_turn(id, n, device);
         }
-        tracing::info!(id, turn = n, mode = mode.as_str(), go, new_turn, "Agents: its next turn");
+        tracing::info!(id, turn = n, mode = mode.as_str(), model = %model, effort = %effort, sized = runs.sized, go, new_turn, "Agents: its next turn");
         let step = if new_turn || matches!(next, Next::Message(_)) { "Picking up your request" } else { "Picking up where it left off" };
         emit(&AgentEvent { step: Some(step.into()), ..AgentEvent::at(&agent, n) });
     }
@@ -2191,15 +2245,36 @@ mod tests {
         a.merge(Ask { text: "Go ahead.".into(), go: true, mode: Some(Mode::Plan), model: Some("claude-opus-5-5".into()), ..Default::default() });
         assert_eq!((a.text.as_str(), a.go, a.mode, a.model.as_deref()), ("Add a minimap.\n\nGo ahead.", true, Some(Mode::Plan), Some("claude-opus-5-5")));
         assert_eq!(Ask::of("Add a minimap button to the map view. It shows the beds.", false).title(), "Add a minimap button to the map view");
+        let runs = |model: &str, effort: &str, model_asked: bool, effort_asked: bool, sized: bool| Runs { model: model.into(), effort: effort.into(), model_asked, effort_asked, sized };
         // Settings' model and effort as they are now…
         let agent = Agent { model: "claude-sonnet-5-5".into(), effort: "medium".into(), ..Default::default() };
-        assert_eq!(model_for(&agent, &Ask::default(), "claude-haiku-5-5", "high"), ("claude-haiku-5-5".into(), "high".into(), false, false));
+        assert_eq!(model_for(&agent, &Ask::default(), false, "claude-haiku-5-5", "high"), runs("claude-haiku-5-5", "high", false, false, false));
+        // …the chat's pick for the task (8 Nov 2026): used, not the person's (resized next turn)…
+        let opus = Ask { model: Some("claude-opus-5-5".into()), effort: Some("xhigh".into()), sizing: Some("hard debugging".into()), ..Default::default() };
+        assert_eq!(model_for(&agent, &opus, false, "claude-haiku-5-5", "high"), runs("claude-opus-5-5", "xhigh", false, false, true));
+        // …kept by Continue and a plan's go-ahead, not by a new request.
+        let sized = Agent { model: "claude-opus-5-5".into(), effort: "xhigh".into(), sized: true, ..agent.clone() };
+        assert_eq!(model_for(&sized, &Ask::default(), true, "claude-haiku-5-5", "high"), runs("claude-opus-5-5", "xhigh", false, false, true));
+        assert_eq!(model_for(&sized, &Ask::default(), false, "claude-haiku-5-5", "high"), runs("claude-haiku-5-5", "high", false, false, false));
         // …the person's own for this turn…
-        let opus = Ask { model: Some("claude-opus-5-5".into()), ..Default::default() };
-        assert_eq!(model_for(&agent, &opus, "claude-haiku-5-5", "high"), ("claude-opus-5-5".into(), "high".into(), true, false));
-        // …and kept for the turns after, once they asked.
+        let theirs = Ask { model: Some("claude-opus-5-5".into()), model_asked: true, ..Default::default() };
+        assert_eq!(model_for(&agent, &theirs, false, "claude-haiku-5-5", "high"), runs("claude-opus-5-5", "high", true, false, false));
+        // …and kept for the turns after, once they asked, over the chat's later pick.
         let asked = Agent { model: "claude-opus-5-5".into(), model_asked: true, ..agent };
-        assert_eq!(model_for(&asked, &Ask::default(), "claude-haiku-5-5", "high").0, "claude-opus-5-5");
+        assert_eq!(model_for(&asked, &Ask::default(), false, "claude-haiku-5-5", "high").model, "claude-opus-5-5");
+        let haiku = Ask { model: Some("claude-haiku-5-5".into()), ..Default::default() };
+        assert_eq!(model_for(&asked, &haiku, false, "claude-sonnet-5-5", "high").model, "claude-opus-5-5");
+        // An effort the model doesn't take: the nearest it does (Sonnet 4.6 has no xhigh).
+        let old = Ask { model: Some("claude-sonnet-4-6".into()), effort: Some("xhigh".into()), ..Default::default() };
+        assert_eq!(model_for(&Agent::default(), &old, false, "claude-sonnet-4-6", "medium").effort, "high");
+        // Two requests in one turn: the person's own first, else the bigger pick and its reason.
+        let mut a = Ask { model: Some("claude-haiku-5-5".into()), effort: Some("low".into()), sizing: Some("a rename".into()), ..Default::default() };
+        a.merge(Ask { model: Some("claude-opus-5-5".into()), effort: Some("high".into()), sizing: Some("a multi-file change".into()), ..Default::default() });
+        assert_eq!((a.model.as_deref(), a.effort.as_deref(), a.sizing.as_deref()), (Some("claude-opus-5-5"), Some("high"), Some("a multi-file change")));
+        a.merge(Ask { model: Some("claude-haiku-5-5".into()), effort: Some("low".into()), sizing: Some("a typo".into()), ..Default::default() });
+        assert_eq!((a.model.as_deref(), a.sizing.as_deref()), (Some("claude-opus-5-5"), Some("a multi-file change")), "the smaller pick doesn't shrink it");
+        a.merge(Ask { model: Some("claude-haiku-5-5".into()), model_asked: true, ..Default::default() });
+        assert_eq!((a.model.as_deref(), a.model_asked), (Some("claude-haiku-5-5"), true), "the person's own wins");
     }
 
     #[test]

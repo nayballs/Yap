@@ -110,6 +110,9 @@ export const FIELD_DEFAULTS = {
   agentsPay: 'plan',
   agentsModel: 'claude-sonnet-5-5',
   agentsEffort: 'medium',
+  // "Most Chat may choose" (agents/sizing.rs): '' = No limit; with a model, the most effort too.
+  agentsCeilingModel: '',
+  agentsCeilingEffort: 'high',
   agentsMode: 'auto',
   agentsAsk: 'new-or-web',
   agentsSpeak: 'voice',

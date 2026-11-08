@@ -632,8 +632,16 @@ on an element that also has a `settings.css` class (`set-note`,
   version, signed in and its plan, or **Sign in**; a key login is enough for
   agents paid by key); **Pay with** Your Claude plan / API key (`agentsPay`;
   for the key, whether Language Models' Claude tab has one, with a link);
-  **Defaults**: Model (Opus, Sonnet or Haiku 5.5, `agentsModel`), Effort
-  (`agentsEffort`), Mode (the Mode a new chat starts in, `agentsMode`; Bypass
+  **Defaults** ("Chat sizes each agent to its task; these are what an agent
+  runs on when it doesn't, unless you ask for something else."): Model (Opus,
+  Sonnet or Haiku 5.5, `agentsModel`), Effort
+  (`agentsEffort`), **Most Chat may choose** (2026-11-08, `agents/sizing.rs`,
+  `data-setting="yap-code-ceiling"`: "No limit", the default, or a model —
+  then, beside it, the most effort, `agentsCeilingModel` /
+  `agentsCeilingEffort`; "Chat picks each agent's model and effort for its
+  task, never above this. Your own words ("use Opus", "think hard") still go
+  higher.", and paying with an API key "On an API key, bigger models cost
+  more per run."; its settings-search entry beside Effort's), Mode (the Mode a new chat starts in, `agentsMode`; Bypass
   permissions asks once, as the chip does); under the Yap Code switch, **Clean
   up what you say in Code chats** (`agentsCleanSpeech`, `CleanSpeech.svelte`,
   shared with Voice Assistant's "…in Chat", `chatCleanSpeech`: no cleanup

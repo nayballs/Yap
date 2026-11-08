@@ -34,10 +34,15 @@
 //   screen and out of view, still under reduced motion; screenshots light
 //   and dark, the avatars at 2×, and the whole crew's sheet (a test-only
 //   overlay drawn with the very markup the panel uses).
+// - **Chat sizes each agent** (2026-11-08, agents/sizing.rs): the fake
+//   model's start_agent {model, effort, sizing} runs the stand-in with that
+//   `--model` and `--effort`; the row says "Auto · Opus 5.5 · High" and its ▸
+//   why; Settings' "Most Chat may choose" lowers the next pick (the model
+//   told), but never the person's own words ("use Opus… think hard").
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { test as base, expect, openView, setConfig, expectStore } from './support/fixtures.js';
+import { test as base, expect, openView, openSettings, closeSettings, setConfig, expectStore } from './support/fixtures.js';
 import { startFakeLlm } from './support/fake-llm.js';
 import { RUNS, SCREENSHOTS } from './support/yap.js';
 import { newCodeChat } from './support/code-chats.js';
@@ -363,6 +368,10 @@ test('core/agentPanel.js: tokens and time, the context, progress, the third line
   expect(rowActions({ ...unusedRow, agent: { ...aside, active: false } })).toMatchObject({ goAhead: true, dismiss: true, finish: false, stop: false });
   expect(panelRows([{ ...aside, turnList: [{ ...aside.turnList[0], dismissed: true }] }], { now })).toEqual([]);
   expect(panelRows([{ ...aside, turnList: [{ ...aside.turnList[0], dismissed: true }] }], { now, dismissed: true })[0]).toMatchObject({ dismissed: true });
+  // Why Chat sized a turn so (start_agent's `sizing`): the row carries it for its ▸; none, none.
+  const sized = { ...agent, status: 'done', turnList: [{ ...t1, model: 'claude-opus-5-5', effort: 'high', sizing: 'a multi-file change' }] };
+  expect(panelRows([sized], { now })[0]).toMatchObject({ modelWord: 'Opus 5.5', effortWord: 'High', sizing: 'a multi-file change' });
+  expect(panelRows([{ ...sized, turnList: [t1] }], { now })[0].sizing).toBe('');
   // A read-only turn ("catch up", "have a look") is never a plan waiting, nor a plan not used.
   const looked = { ...planned, turnList: [{ ...t1, plan: true, readOnly: true }] };
   expect(stateOf(looked, looked.turnList[0], now)).toBe('finished');
@@ -932,6 +941,134 @@ test('Move to finished: a row whose record says running, but nothing runs it; th
   await theme(yap, main, 'light');
   // A real agent at work is never moved: refused while the runner has it.
   await expect(yap.invoke('agent_move_to_finished', { id: 'nosuchagent', turn: 1 })).rejects.toThrow(/no such agent/i);
+  await tab(main).getByRole('button', { name: 'Close the panel' }).click();
+});
+
+// ---------------------------------------------------------------- Chat sizes each agent
+
+/** Each turn's Claude Code arguments, as the stand-in's `_dump_args` wrote them. */
+const SIZING_ARGS = path.join(HERE, 'sizing-args.jsonl');
+const ECHO_ARGS = [
+  { _wait_user: true },
+  { _dump_args: SIZING_ARGS },
+  init(),
+  said('e1', [{ type: 'text', text: 'Got: {{user_text}}' }], ECHO_USE, 'end_turn'),
+  result('Got: {{user_text}}', 0.002, ECHO_USE),
+  { _wait_user: true },
+];
+const argsSeen = () => (fs.existsSync(SIZING_ARGS) ? fs.readFileSync(SIZING_ARGS, 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l).args) : []);
+const flagOf = (args, flag) => (args.includes(flag) ? args[args.indexOf(flag) + 1] : undefined);
+/** The notes of every start_agent result the fake model read. */
+const notesTold = (fakeLlm) =>
+  fakeLlm.requests.flatMap((q) => q.messages.filter((m) => m.role === 'tool').map((m) => {
+    try {
+      return JSON.parse(m.content)?.data?.note || '';
+    } catch {
+      return '';
+    }
+  }));
+
+test('Chat sizes each agent: its model and effort reach Claude Code, the row says them and ▸ why; the ceiling in Settings lowers the next, never the person’s own words', async ({ yap, main, fakeLlm, shot }) => {
+  test.setTimeout(180_000);
+  fs.rmSync(SIZING_ARGS, { force: true });
+  await setConfig(yap, main, { agentsModel: 'claude-sonnet-5-5', agentsEffort: 'medium', agentsCeilingModel: '', agentsCeilingEffort: 'high' });
+  await script(yap, ECHO_ARGS, 'sizing');
+  await openView(main, 'Chat');
+  if (await tab(main).count()) await tab(main).getByRole('button', { name: 'Close the panel' }).click();
+  await newCodeChat(main, 'garden-planner');
+  const before = (await agents(yap)).length;
+  fakeLlm.scriptChat([
+    { tools: [{ name: 'start_agent', args: { brief: 'Move the watering maths into its own module and update every caller.', title: 'Move the watering maths', model: 'claude-opus-5-5', effort: 'high', sizing: 'a multi-file change' } }] },
+    { content: STARTED },
+    { plain: true, content: 'Done: the watering maths has a module of its own.' },
+  ]);
+  await send(main, 'Move the watering maths into its own module and update every caller.');
+  await expect.poll(async () => (await agents(yap)).length, { timeout: 20_000 }).toBe(before + 1);
+  const id = (await agents(yap))[0].id;
+  let agent = await ended(yap, id);
+  await expect.poll(async () => (await agents(yap)).find((j) => j.id === id).turnList[0].status, { timeout: 30_000 }).toBe('done');
+  // Claude Code ran on that model, at that effort (`--model`, `--effort`).
+  await expect.poll(() => argsSeen().length, { timeout: 15_000 }).toBe(1);
+  expect(flagOf(argsSeen()[0], '--model')).toBe('claude-opus-5-5');
+  expect(flagOf(argsSeen()[0], '--effort')).toBe('high');
+  // Kept with the turn, with why; the chat's own choice, not the person's (a follow-up is sized again).
+  agent = (await agents(yap)).find((j) => j.id === id);
+  expect(agent.turnList[0]).toMatchObject({ model: 'claude-opus-5-5', effort: 'high', sizing: 'a multi-file change' });
+  expect(agent.modelAsked ?? false).toBe(false);
+  await expectStore(yap, 'agents.json', (j) => j.agents.find((a) => a.id === id)?.turnList?.[0]?.sizing === 'a multi-file change');
+  // The row: Opus, at High; ▸ says why.
+  await expect(panel(main)).toBeVisible();
+  await expect(row(main, 1).getByTestId('chat-agent-row-sub')).toHaveText('Auto · Opus 5.5 · High');
+  await expect(row(main, 1).getByTestId('chat-agent-row-avatar')).toHaveAttribute('data-character', 'opus');
+  if ((await row(main, 1).getAttribute('data-open')) !== 'true') await row(main, 1).locator('.rhead').click();
+  await expect(row(main, 1).getByTestId('chat-agent-row-sizing')).toHaveText('Opus 5.5 · High: a multi-file change');
+  await shot(main, '30-sizing-row-light');
+  await theme(yap, main, 'dark');
+  await shot(main, '31-sizing-row-dark');
+  await theme(yap, main, 'light');
+  await messagesOf(yap, agent.conversation, 4);
+
+  // Settings → Yap Code: "Most Chat may choose", No limit by default; Sonnet 5.5 at Medium.
+  const dialog = await openSettings(main, 'Yap Code');
+  const ceiling = dialog.locator('[data-setting="yap-code-ceiling"]');
+  await expect(ceiling).toContainText('Most Chat may choose');
+  await expect(ceiling).toContainText('Your own words ("use Opus", "think hard") still go higher.');
+  const most = ceiling.getByRole('combobox', { name: 'Most Chat may choose' });
+  await expect(most).toHaveValue('');
+  await expect(ceiling.getByRole('combobox', { name: 'Most effort Chat may choose' })).toHaveCount(0);
+  await most.selectOption('claude-sonnet-5-5');
+  await ceiling.getByRole('combobox', { name: 'Most effort Chat may choose' }).selectOption('medium');
+  await expect
+    .poll(async () => {
+      const c = await yap.invoke('get_config');
+      return [c.agentsCeilingModel, c.agentsCeilingEffort];
+    })
+    .toEqual(['claude-sonnet-5-5', 'medium']);
+  // On an API key, the line says bigger models cost more per run.
+  await dialog.locator('[data-setting="yap-code-pay"]').getByRole('tab', { name: 'API key' }).click();
+  await expect(ceiling).toContainText('On an API key, bigger models cost more per run.');
+  await ceiling.scrollIntoViewIfNeeded();
+  await shot(main, '32-sizing-ceiling-light');
+  await theme(yap, main, 'dark');
+  await shot(main, '33-sizing-ceiling-dark');
+  await theme(yap, main, 'light');
+  await dialog.locator('[data-setting="yap-code-pay"]').getByRole('tab', { name: 'Your Claude plan' }).click();
+  await expect.poll(async () => (await yap.invoke('get_config')).agentsPay).toBe('plan');
+  await closeSettings(main);
+
+  // A follow-up the chat sizes Opus at xhigh: lowered to Sonnet 5.5 at medium, and the model told.
+  await script(yap, ECHO_ARGS, 'sizing-2');
+  fakeLlm.scriptChat([
+    { tools: [{ name: 'start_agent', args: { brief: 'Find why the watering test fails now and then, and fix it.', title: 'Fix the flaky watering test', model: 'claude-opus-5-5', effort: 'xhigh', sizing: 'hard debugging' } }] },
+    { content: PASSED },
+    { plain: true, content: 'Done: the flaky test is fixed.' },
+  ]);
+  await send(main, 'the watering test fails now and then: find the root cause and fix it');
+  await expect.poll(async () => (await agents(yap)).find((j) => j.id === id).turnList?.length, { timeout: 20_000 }).toBe(2);
+  await expect.poll(async () => (await agents(yap)).find((j) => j.id === id).turnList[1].status, { timeout: 30_000 }).toBe('done');
+  await expect.poll(() => argsSeen().length, { timeout: 15_000 }).toBe(2);
+  expect(flagOf(argsSeen()[1], '--model')).toBe('claude-sonnet-5-5');
+  expect(flagOf(argsSeen()[1], '--effort')).toBe('medium');
+  expect(notesTold(fakeLlm).some((n) => n.startsWith('Lowered to Sonnet 5.5, medium effort: the most Yap'))).toBe(true);
+  await expect(row(main, 2).getByTestId('chat-agent-row-sub')).toHaveText('Auto · Sonnet 5.5 · Medium');
+  await messagesOf(yap, agent.conversation, 8);
+
+  // The person's own words go above it: "use Opus… think hard".
+  await script(yap, ECHO_ARGS, 'sizing-3');
+  fakeLlm.scriptChat([
+    { tools: [{ name: 'start_agent', args: { brief: 'Tidy the planner tests.', title: 'Tidy the tests', model: 'claude-opus-5-5', effort: 'xhigh', sizing: 'the user asked for Opus' } }] },
+    { content: PASSED },
+    { plain: true, content: 'Done: the tests are tidy.' },
+  ]);
+  await send(main, 'Use Opus and think hard about it: tidy the planner tests.');
+  await expect.poll(async () => (await agents(yap)).find((j) => j.id === id).turnList?.length, { timeout: 20_000 }).toBe(3);
+  await expect.poll(async () => (await agents(yap)).find((j) => j.id === id).turnList[2].status, { timeout: 30_000 }).toBe('done');
+  await expect.poll(() => argsSeen().length, { timeout: 15_000 }).toBe(3);
+  expect(flagOf(argsSeen()[2], '--model')).toBe('claude-opus-5-5');
+  expect(flagOf(argsSeen()[2], '--effort')).toBe('xhigh');
+  expect((await agents(yap)).find((j) => j.id === id).modelAsked).toBe(true);
+  await messagesOf(yap, agent.conversation, 12);
+  await setConfig(yap, main, { agentsCeilingModel: '', agentsCeilingEffort: 'high' });
   await tab(main).getByRole('button', { name: 'Close the panel' }).click();
 });
 
