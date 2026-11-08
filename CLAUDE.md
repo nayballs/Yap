@@ -187,6 +187,7 @@ One folder per area (an area's `<area>.rs` lists its modules); a big module's pa
 - `chat/think.rs` — Think it through, on the on-device model.
 - `chat/documents.rs` (+ `documents/rich.rs`, `blocks.rs`) — documents beside the chat; the person's edits win (`merge3`).
 - `chat/pictures.rs` (+ `pictures/local.rs`: a picture file on this PC, by its path) — find and show pictures.
+- `chat/shares.rs` — `share_files`: files shared into the conversation (a picture inline, other files as cards to open), an agent's report showing its turn's pictures.
 
 **Snip to Chat** — [snip.md](./docs/architecture/snip.md)
 - `snip.rs` — drag a box over any screen into Chat; never sent by itself; the `yapsnip` scheme.

@@ -13,8 +13,13 @@
   import { reportTitle, reportFolder, agentOfReport, turnOfReport, statusTone, planWaits } from '../../core/agents.js';
   import { agents, goAheadWithPlan } from '../../stores/agents.svelte.js';
 
-  /** `m`: the marker message (its `id` "chat:<conv>:<i>", its `text`); `conversation`: the chat's id; `onopen(agent)`. */
-  let { m, conversation = null, onopen = null } = $props();
+  /**
+   * `m`: the marker message (its `id` "chat:<conv>:<i>", its `text`, the
+   * pictures and new files its turn made: `files`, chat/shares.rs);
+   * `conversation`: the chat's id; `onopen(agent)`; `room`: the thread's
+   * width (CSS px) and `onpicture(p)` for those pictures.
+   */
+  let { m, conversation = null, onopen = null, room = 0, onpicture = null } = $props();
 
   const folder = $derived(reportFolder(m.text));
   const agent = $derived(agentOfReport(agents.list, m.id, conversation, folder));
@@ -60,6 +65,13 @@
     <button type="button" class="jopen" onclick={() => onopen?.({ ...agent, turn: turn?.n ?? null })} aria-label={`Open the agent in ${agent.folder}`}>Open</button>
   {/if}
 </div>
+{#if m.files?.length}
+  <!-- Its turn's work, shown: the pictures it made or changed (up to four,
+       then "+N more"), its new files as compact cards (chat/shares.rs). -->
+  {#await import('./SharedFiles.svelte') then { default: SharedFiles }}
+    <SharedFiles shares={m.files} {conversation} {room} {onpicture} report />
+  {/await}
+{/if}
 
 <style>
   .agentreport {

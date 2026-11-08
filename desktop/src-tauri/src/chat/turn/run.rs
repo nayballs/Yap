@@ -144,6 +144,9 @@ pub(super) async fn with_tools(
     // source of the answer too, so its number means something.
     let mut shown = web.as_ref().map(|w| w.pictures.shown.clone()).unwrap_or_default();
     shown.extend(files.as_ref().map(crate::chat::pictures::Files::shown).unwrap_or_default());
+    // The files it shared into the conversation (chat/shares.rs).
+    let mut shared = web.as_ref().map(|w| w.pictures.shared.clone()).unwrap_or_default();
+    shared.extend(files.as_ref().map(crate::chat::pictures::Files::shared).unwrap_or_default());
     if let Some(w) = web.as_ref() {
         for p in shown.iter().filter(|p| p.n > 0) {
             if !sources.iter().any(|s| s.n == p.n) {
@@ -159,5 +162,5 @@ pub(super) async fn with_tools(
     // The pages it brought up and the buttons it offered (chat/pages.rs).
     let (shown_pages, offers) = web.as_ref().map(|w| (w.pages.shown.clone(), w.pages.offers.clone())).unwrap_or_default();
     let pages = web.map(|w| w.texts).unwrap_or_default();
-    Ok(Answer { reply, tools_used, sources, looked, pages, stopped, pictures: shown, shown_pages, offers, browser })
+    Ok(Answer { reply, tools_used, sources, looked, pages, stopped, pictures: shown, files: shared, shown_pages, offers, browser })
 }

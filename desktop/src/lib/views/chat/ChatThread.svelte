@@ -40,6 +40,9 @@
   // Answered from a paired phone (Remote Control): "Allowed from Office phone".
   const answeredRemote = $derived(chat.activeId == null ? [] : agents.remoteAnswers.filter((a) => a.conversation === chat.activeId));
   const openAgent = (j) => chat.doc.showAgent(j);
+  // A picture shared into the conversation (chat/shares.rs): in the panel's
+  // picture tab while the panel's open, else the viewer.
+  const openShared = (p) => (chat.doc.open ? chat.doc.showPicture(p) : (chat.viewing = { id: p.id, w: p.w, h: p.h }));
   const openRun = (run) => {
     const j = agentById(run);
     if (j) chat.doc.showAgent(j);
@@ -229,7 +232,7 @@
           {/if}
           {#if m.kind === 'agentReport'}
             {#await import('./AgentReportCard.svelte') then { default: AgentReportCard }}
-              <AgentReportCard {m} conversation={chat.activeId} onopen={openAgent} />
+              <AgentReportCard {m} conversation={chat.activeId} onopen={openAgent} {room} onpicture={openShared} />
             {/await}
           {:else}
             <ChatMessage
@@ -246,6 +249,8 @@
               ondoc={(d) => chat.doc.show(d.id, { title: d.title })}
               onpicture={(p) => chat.doc.showPicture(p)}
               onpage={(p) => chat.doc.showPage(p)}
+              conversation={chat.activeId}
+              onshared={openShared}
             />
           {/if}
           {#if agentPills.get(i)?.length}

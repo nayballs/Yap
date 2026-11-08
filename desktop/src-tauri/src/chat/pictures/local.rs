@@ -17,7 +17,8 @@
 //!   workspaces (`agents/workspaces.rs`: any of them, the Code chat's own
 //!   too), a file an agent of this chat created or changed (`agents/store.rs`
 //!   `files`), or a path the person wrote or said in this conversation (the
-//!   file, or a folder holding it — never a drive's root). The path is judged
+//!   file itself, or a folder holding it written as a folder — never a
+//!   drive's root, nor a named file's neighbours: [`written_whole`]). The path is judged
 //!   as written (`.` and `..` worked out first) and again once the file
 //!   system has resolved it (a link or junction out of a workspace refused;
 //!   a link the person named themselves is theirs). Anything else is
@@ -36,7 +37,7 @@
 use std::io::Read;
 use std::path::{Component, Path, PathBuf};
 
-use crate::agents::workspaces::{is_absolute, norm, said_path};
+use crate::agents::workspaces::{is_absolute, norm};
 
 /// A picture file's most bytes.
 pub const MAX_BYTES: u64 = 25 * 1024 * 1024;
@@ -157,12 +158,44 @@ impl Places {
         self.said_by_person(path).then_some(Why::Said)
     }
 
-    /// The person wrote or said `path`, or a folder holding it (never a
-    /// drive's root). Pure.
+    /// **The person wrote or said `path`** — the file itself, whole — **or
+    /// a folder holding it, written as a folder** (its path whole, not the
+    /// start of a file's: never a drive's root). A file's path they wrote
+    /// allows that file only, never its neighbours (8 Nov 2026: naming
+    /// `…\Desktop\a.png` had allowed every file on the Desktop). Pure.
     fn said_by_person(&self, path: &str) -> bool {
         let texts: Vec<&str> = self.said.iter().map(String::as_str).collect();
-        Path::new(path).ancestors().filter(|a| !is_root(a)).any(|a| said_path(&texts, &a.to_string_lossy()))
+        Path::new(path).ancestors().filter(|a| !is_root(a)).any(|a| written_whole(&texts, &a.to_string_lossy()))
     }
+}
+
+/// **`path` written whole in one of `texts`** (slashes and case aside): not
+/// the start of a longer path — after it the text ends, or a space or a
+/// sentence's mark follows (a `.` only when no more letters do: "docs." but
+/// never "docs.old"), or one last separator does (`C:\Projects\garden\`, a
+/// folder) — and not the end of one. Pure.
+fn written_whole(texts: &[&str], path: &str) -> bool {
+    let want = crate::agents::workspaces::norm(path);
+    if want.is_empty() {
+        return false;
+    }
+    let ends = |c: Option<char>| c.is_none_or(|c| c.is_whitespace() || matches!(c, ',' | ';' | ':' | '!' | '?' | ')' | ']' | '>' | '"' | '\'' | '`' | '\u{201d}' | '\u{2019}'));
+    texts.iter().any(|t| {
+        let t = t.replace('/', "\\").to_lowercase();
+        t.match_indices(&want).any(|(at, _)| {
+            let before = t[..at].chars().next_back();
+            if before.is_some_and(|c| c.is_alphanumeric() || matches!(c, '\\' | '.' | '_' | '-')) {
+                return false;
+            }
+            let mut rest = t[at + want.len()..].chars();
+            match rest.next() {
+                // A sentence's full stop, or a folder's last separator: only
+                // when nothing of a path follows.
+                Some('.') | Some('\\') => ends(rest.next()),
+                c => ends(c),
+            }
+        })
+    })
 }
 
 /// A drive's root, a share's, or no path at all.
@@ -307,11 +340,39 @@ pub fn check(given: &str, places: &Places) -> Result<(PathBuf, Why), Refused> {
     if PAGE_ENDINGS.contains(&ending(&path).as_str()) {
         return Err(refused(NOT_A_LOCAL_PAGE, "a web page on this PC"));
     }
-    let written = plain(&path);
-    let Some(why) = places.allows(&written) else {
-        return Err(refused(NOT_ALLOWED, "not a place Yap shows pictures from"));
+    let (real, why, meta) = resolve(&path, places, Noun::Picture)?;
+    if meta.len() > MAX_BYTES {
+        return Err(refused(format!("That file is bigger than {} MB: too big to show.", MAX_BYTES / (1024 * 1024)), "too big"));
+    }
+    Ok((real, why))
+}
+
+/// What a refusal calls the file: a picture (`show_picture`,
+/// `look_at_picture`) or any file (`share_files`, `chat/shares.rs`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Noun {
+    Picture,
+    File,
+}
+
+/// What a share's refusal says when the place isn't one Yap shares from.
+pub const NOT_ALLOWED_FILE: &str = "Yap only shares a file from this PC that's in one of the user's workspaces, that an agent of this chat made or changed, or whose path the user wrote or said in this chat. This one is none of those: ask the user for its path, or to add its folder as a workspace in Settings → Yap Code.";
+
+/// **The file `path` (worked out: [`path_of`]) in one of `places`**, as
+/// written and again as the file system resolves it (a link or junction out
+/// of a workspace refused; one the person named themselves is theirs), and
+/// a file, not a folder: its real path, why, and its metadata. No size cap
+/// (a picture's is [`check`]'s). Reads the file system only.
+pub fn resolve(path: &Path, places: &Places, noun: Noun) -> Result<(PathBuf, Why, std::fs::Metadata), Refused> {
+    let (not_allowed, chip) = match noun {
+        Noun::Picture => (NOT_ALLOWED, "not a place Yap shows pictures from"),
+        Noun::File => (NOT_ALLOWED_FILE, "not a place Yap shares files from"),
     };
-    let real = match std::fs::canonicalize(&path) {
+    let written = plain(path);
+    let Some(why) = places.allows(&written) else {
+        return Err(refused(not_allowed, chip));
+    };
+    let real = match std::fs::canonicalize(path) {
         Ok(r) => r,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Err(refused("That file isn't there: check its path (the agent's own list of the files it made, or ask the user).", "not there")),
         Err(_) => return Err(refused("Yap couldn't open that file.", "couldn't open it")),
@@ -321,16 +382,17 @@ pub fn check(given: &str, places: &Places) -> Result<(PathBuf, Why), Refused> {
     let why = match places.allows(&plain(&real)) {
         Some(w) => w,
         None if why == Why::Said => why,
-        None => return Err(refused(NOT_ALLOWED, "not a place Yap shows pictures from")),
+        None => return Err(refused(not_allowed, chip)),
     };
     let meta = std::fs::metadata(&real).map_err(|_| refused("Yap couldn't open that file.", "couldn't open it"))?;
     if !meta.is_file() {
-        return Err(refused("That's a folder, not a picture file: give the picture's own path.", "a folder"));
+        let error = match noun {
+            Noun::Picture => "That's a folder, not a picture file: give the picture's own path.",
+            Noun::File => "That's a folder, not a file: give a file's own path.",
+        };
+        return Err(refused(error, "a folder"));
     }
-    if meta.len() > MAX_BYTES {
-        return Err(refused(format!("That file is bigger than {} MB: too big to show.", MAX_BYTES / (1024 * 1024)), "too big"));
-    }
-    Ok((real, why))
+    Ok((real, why, meta))
 }
 
 /// **A picture's kind by its own bytes**: PNG, JPEG, GIF, WebP or BMP, else
@@ -512,8 +574,26 @@ mod tests {
         // A path the person wrote (slashes and case aside), or its folder; a file: address too.
         let said = Places::new(Vec::new(), Vec::new(), &[format!("Can you show me {}?", s(&other).replace('\\', "/").to_uppercase())], None);
         assert_eq!(check(&s(&other), &said).unwrap().1, Why::Said);
+        // A file's path allows that file only, never its neighbours (8 Nov 2026).
+        std::fs::write(elsewhere.join("neighbour.png"), png(2, 2)).unwrap();
+        assert_eq!(check(&s(&elsewhere.join("neighbour.png")), &said).unwrap_err().error, NOT_ALLOWED);
+        // A folder's path allows the files under it, at any depth.
         let folder_said = Places::new(Vec::new(), Vec::new(), &[format!("the pictures in {} please", s(&elsewhere))], None);
         assert_eq!(check(&s(&other), &folder_said).unwrap().1, Why::Said);
+        assert_eq!(check(&s(&elsewhere.join("neighbour.png")), &folder_said).unwrap().1, Why::Said);
+        let deeper = elsewhere.join("2026").join("spring");
+        std::fs::create_dir_all(&deeper).unwrap();
+        std::fs::write(deeper.join("beds.png"), png(2, 2)).unwrap();
+        assert_eq!(check(&s(&deeper.join("beds.png")), &folder_said).unwrap().1, Why::Said);
+        // …written with its last separator, or at a sentence's end, too.
+        for written in [format!("everything in {}{}", s(&elsewhere), std::path::MAIN_SEPARATOR), format!("Look in {}.", s(&elsewhere))] {
+            let p = Places::new(Vec::new(), Vec::new(), std::slice::from_ref(&written), None);
+            assert_eq!(check(&s(&other), &p).unwrap().1, Why::Said, "{written}");
+        }
+        // Never the start of a longer path: a folder whose name only starts
+        // the same ("elsewhere.old", "elsewhere-2026"), nor a file in it.
+        let longer = Places::new(Vec::new(), Vec::new(), &[format!("see {}.old{}a.png and {}-2026", s(&elsewhere), std::path::MAIN_SEPARATOR, s(&elsewhere))], None);
+        assert_eq!(check(&s(&other), &longer).unwrap_err().error, NOT_ALLOWED);
         let url = reqwest::Url::from_file_path(&other).unwrap().to_string();
         let address_said = Places::new(Vec::new(), Vec::new(), &[format!("open {url}")], None);
         assert_eq!(check(&url, &address_said).unwrap().1, Why::Said);

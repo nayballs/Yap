@@ -281,6 +281,8 @@ impl Marks {
 pub struct Shown {
     pub pictures: Vec<crate::chat::pictures::ShownPicture>,
     pub pages: Vec<crate::chat::pages::ShownPage>,
+    /// The files it shared into the conversation (`share_files`, `chat/shares.rs`).
+    pub files: Vec<crate::chat::shares::Share>,
 }
 
 /// **A turn open on a run**: its calls belong to it until it's dropped.
@@ -301,7 +303,7 @@ impl Turn {
     /// answer: none while a call still holds them (a turn stopped mid-call).
     pub fn shown(&self) -> Shown {
         match self.side.as_ref().map(|s| s.try_lock()) {
-            Some(Ok(w)) => Shown { pictures: w.pictures.shown.clone(), pages: w.pages.shown.clone() },
+            Some(Ok(w)) => Shown { pictures: w.pictures.shown.clone(), pages: w.pages.shown.clone(), files: w.pictures.shared.clone() },
             _ => Shown::default(),
         }
     }

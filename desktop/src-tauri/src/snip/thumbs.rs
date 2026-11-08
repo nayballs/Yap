@@ -134,6 +134,100 @@ pub fn get(id: &str, w: u32, h: u32) -> Result<Vec<u8>, String> {
     get_in(&images::dir(), id, w, h)
 }
 
+// ---- a tile filled (cover) ----------------------------------------------------------------------
+
+/// **The part of a `iw` × `ih` picture a `w` × `h` tile filled with it
+/// shows** (CSS's `object-fit: cover`): the largest rectangle of the tile's
+/// shape, centred — `(x, y, width, height)` in the picture's pixels. Pure
+/// (`shares.js` `coverCrop` is the same sum).
+pub fn cover_crop(iw: u32, ih: u32, w: u32, h: u32) -> (u32, u32, u32, u32) {
+    if iw == 0 || ih == 0 || w == 0 || h == 0 {
+        return (0, 0, iw, ih);
+    }
+    // Wider than the tile: its sides cut; taller: its top and bottom.
+    if iw as u64 * h as u64 > ih as u64 * w as u64 {
+        let cw = ((ih as f64 * w as f64 / h as f64).round() as u32).clamp(1, iw);
+        ((iw - cw) / 2, 0, cw, ih)
+    } else {
+        let ch = ((iw as f64 * h as f64 / w as f64).round() as u32).clamp(1, ih);
+        (0, (ih - ch) / 2, iw, ch)
+    }
+}
+
+/// Whether a `w` × `h` tile can be filled from a `iw` × `ih` picture at
+/// exactly its pixels: its cropped part at least as big (never enlarged),
+/// not absurd. Pure.
+pub fn valid_cover(w: u32, h: u32, iw: u32, ih: u32) -> bool {
+    if w == 0 || h == 0 || iw == 0 || ih == 0 || w.max(h) > MAX_EDGE {
+        return false;
+    }
+    let (_, _, cw, ch) = cover_crop(iw, ih, w, h);
+    w <= cw && h <= ch
+}
+
+/// A tile's thumbnail's file: `<id>-<w>x<h>c.png` (kept, pruned and swept
+/// with the image's others).
+fn cover_file_in(images_dir: &Path, id: &str, w: u32, h: u32) -> Option<PathBuf> {
+    images::is_id(id).then(|| dir_in(images_dir).join(format!("{id}-{w}x{h}c.png")))
+}
+
+/// `rgba` (`iw` wide) cut to `(x, y, cw, ch)`. Pure.
+fn crop(rgba: &[u8], iw: u32, (x, y, cw, ch): (u32, u32, u32, u32)) -> Vec<u8> {
+    let (iw, x, y, cw, ch) = (iw as usize, x as usize, y as usize, cw as usize, ch as usize);
+    let mut out = Vec::with_capacity(cw * ch * 4);
+    for row in y..y + ch {
+        let at = (row * iw + x) * 4;
+        out.extend_from_slice(&rgba[at..at + cw * 4]);
+    }
+    out
+}
+
+/// **A tile filled with the picture** (`?w=&h=&fit=cover`: a grid's tile of
+/// shared pictures, `chat/shares.rs`): its middle part of the tile's shape
+/// ([`cover_crop`]), area-averaged to exactly `w` × `h`, made (and kept)
+/// the first time. `Err` as [`get_in`], or a tile it would have to enlarge
+/// the picture for ([`valid_cover`]).
+pub fn get_cover_in(images_dir: &Path, id: &str, w: u32, h: u32) -> Result<Vec<u8>, String> {
+    if !images::is_id(id) {
+        return Err("not an image id".into());
+    }
+    let original = images_dir.join(format!("{id}.png"));
+    let (iw, ih) = size_of(&original).ok_or("no such image")?;
+    if (w, h) == (iw, ih) {
+        return std::fs::read(&original).map_err(|e| e.to_string());
+    }
+    if !valid_cover(w, h, iw, ih) {
+        return Err(format!("a {w}x{h} tile can't be filled from a {iw}x{ih} picture without enlarging it"));
+    }
+    let file = cover_file_in(images_dir, id, w, h).ok_or("not an image id")?;
+    if let Some(bytes) = kept(&file) {
+        return Ok(bytes);
+    }
+    let _one = MAKING.lock().unwrap_or_else(|e| e.into_inner());
+    if let Some(bytes) = kept(&file) {
+        return Ok(bytes);
+    }
+    let png = std::fs::read(&original).map_err(|e| e.to_string())?;
+    let (rgba, iw, ih) = images::decode_png(&png)?;
+    let part = cover_crop(iw, ih, w, h);
+    let cut = crop(&rgba, iw, part);
+    let small = images::shrink(&cut, part.2, part.3, w, h);
+    let bytes = images::encode_png(&small, w, h, true)?;
+    let dir = dir_in(images_dir);
+    std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    let tmp = dir.join(format!("{id}-{w}x{h}c.tmp"));
+    std::fs::write(&tmp, &bytes).map_err(|e| e.to_string())?;
+    std::fs::rename(&tmp, &file).map_err(|e| e.to_string())?;
+    prune(&dir, id, &file);
+    tracing::debug!(w, h, from_w = iw, from_h = ih, bytes = bytes.len(), "snip: a tile's thumbnail made");
+    Ok(bytes)
+}
+
+/// [`get_cover_in`] the images folder.
+pub fn get_cover(id: &str, w: u32, h: u32) -> Result<Vec<u8>, String> {
+    get_cover_in(&images::dir(), id, w, h)
+}
+
 /// A PNG file's size, from its header.
 fn size_of(file: &Path) -> Option<(u32, u32)> {
     use std::io::Read;
@@ -285,6 +379,36 @@ mod tests {
         assert!(!valid(3840, 2160, 1920, 1080), "bigger");
         assert!(!valid(0, 10, 1920, 1080));
         assert!(!valid(10, 10, 0, 0));
+    }
+
+    #[test]
+    fn a_tile_filled_shows_the_pictures_middle_at_exactly_its_pixels() {
+        // The part of the shape a 4:3 tile shows: a wide picture's middle,
+        // its sides cut; a tall one's middle, its top and bottom cut.
+        assert_eq!(cover_crop(1600, 600, 400, 300), (400, 0, 800, 600));
+        assert_eq!(cover_crop(300, 900, 400, 300), (0, 337, 300, 225));
+        assert_eq!(cover_crop(800, 600, 400, 300), (0, 0, 800, 600), "already its shape");
+        // Never enlarged: a tile bigger than the part it'd show isn't one.
+        assert!(valid_cover(400, 300, 1600, 600));
+        assert!(!valid_cover(400, 300, 320, 200), "320 x 200's 4:3 part is 267 x 200");
+        assert!(!valid_cover(0, 300, 1600, 600) && !valid_cover(400, 300, 0, 0));
+        // Made from that part, area-averaged, kept beside the others, swept with them.
+        let dir = fresh_dir();
+        let px = ramp(600, 200);
+        let saved = images::save_in(&dir, &images::encode_png(&px, 600, 200, true).unwrap(), 600, 200).unwrap();
+        let tile = get_cover_in(&dir, &saved.id, 200, 150).unwrap();
+        let (rgba, w, h) = images::decode_png(&tile).unwrap();
+        assert_eq!((w, h), (200, 150));
+        let part = cover_crop(600, 200, 200, 150);
+        assert_eq!(part, (166, 0, 267, 200));
+        assert_eq!(rgba, images::shrink(&crop(&px, 600, part), 267, 200, 200, 150));
+        let file = cover_file_in(&dir, &saved.id, 200, 150).unwrap();
+        assert!(file.is_file() && file.to_string_lossy().ends_with("-200x150c.png"));
+        assert_eq!(get_cover_in(&dir, &saved.id, 200, 150).unwrap(), tile, "kept");
+        assert!(get_cover_in(&dir, &saved.id, 400, 300).is_err(), "would enlarge it");
+        assert!(get_cover_in(&dir, "../config", 10, 10).is_err());
+        assert_eq!(remove_in(&dir, &saved.id), 1);
+        let _ = std::fs::remove_dir_all(dir.parent().unwrap_or(&dir));
     }
 
     #[test]

@@ -115,6 +115,10 @@ pub enum Event {
     /// `chat/pictures.rs`), the moment it lands: the panel opens on it, as
     /// for a document.
     Picture { picture: crate::chat::pictures::ShownPicture },
+    /// **Files shared into the conversation** (`share_files`,
+    /// `chat/shares.rs`), a call's: the answer shows them as they land — a
+    /// picture large, several as a grid, other files as cards.
+    Share { share: crate::chat::shares::Share },
     /// A live page brought up beside the chat in a new tab
     /// (`browser_navigate`, `browser_tabs`: `chat/pages.rs`), the moment
     /// it's asked for: the panel opens a Page tab on it. (An older answer's
@@ -177,6 +181,7 @@ pub fn doing(name: &str) -> &'static str {
         "write_section" | "rewrite_section" => "Writing the document…",
         "look_at_picture" => "Looking at a picture…",
         "show_picture" => "Showing a picture…",
+        "share_files" => "Sharing files…",
         "find_pictures" => "Looking for pictures…",
         "show_page" | "open_page" => "Bringing up a page…",
         "read_open_page" | "browser_read" => "Reading the page…",

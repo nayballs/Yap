@@ -154,6 +154,17 @@ pub fn describe(name: &str, args: &Value, title_of: &dyn Fn(u64) -> Option<Strin
         "find_pictures" => {
             Activity::new("picture", with(text(&["url"]).map(|u| crate::web::short_url(&u)), "Looking for pictures on", "Looking for pictures"))
         }
+        // Files shared into the conversation (chat/shares.rs): one by its
+        // name, several by how many.
+        crate::chat::shares::NAME => {
+            let files: Vec<&str> = args["files"].as_array().map(|a| a.iter().filter_map(Value::as_str).collect()).unwrap_or_default();
+            let line = match files.as_slice() {
+                [one] => format!("Sharing {}", quoted(&crate::chat::pictures::local::chip_name(one))),
+                [] => "Sharing files".to_string(),
+                many => format!("Sharing {} files", many.len()),
+            };
+            Activity::new("picture", line)
+        }
         // Pages beside the chat (chat/pages.rs): the page's address, or the
         // search's words (show_page: open_page's earlier name).
         "open_page" | "show_page" => match text(&["search"]) {

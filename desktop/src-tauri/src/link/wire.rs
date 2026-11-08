@@ -462,6 +462,11 @@ pub struct ThreadMessage {
     /// it as a report, not their bubble).
     #[serde(skip_serializing_if = "String::is_empty")]
     pub kind: String,
+    /// **The files an answer shared into the conversation** (`share_files`,
+    /// `chat/shares.rs`; an agent's report marker's too): their names only —
+    /// the files and pictures stay on the PC. The page lists them under it.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub files: Vec<String>,
 }
 
 fn is_zero(n: &usize) -> bool {

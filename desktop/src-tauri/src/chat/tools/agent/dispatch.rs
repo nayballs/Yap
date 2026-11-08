@@ -22,6 +22,8 @@ pub(super) enum Source {
     Pictures,
     /// Picture files on this PC without the web (`chat/pictures/local.rs`).
     Files,
+    /// `share_files`: files shared into the conversation (`chat/shares.rs`).
+    Share,
     /// `look_at_screen` (`chat/see_screen.rs`).
     Screen,
     /// The browser beside the chat (`chat/pages.rs`: going, reading,
@@ -58,6 +60,8 @@ impl Source {
             Source::Pictures
         } else if !web && crate::chat::pictures::file_offers(extra.files, name) {
             Source::Files
+        } else if extra.share.offers(name) {
+            Source::Share
         } else if crate::chat::see_screen::offers(extra.screen, name) {
             Source::Screen
         } else if web && crate::chat::pages::offers(extra.pictures, extra.act, name) {
@@ -208,6 +212,24 @@ impl Loop<'_> {
                     None => run.result,
                 }
             }
+            Source::Share => {
+                // Files shared into the conversation (chat/shares.rs): the
+                // web turn's (a path, or one of its pictures), else the
+                // picture files' (a path); the page hears each share at once.
+                use crate::chat::shares::Offer;
+                let run = match (self.extra.share, self.web.as_deref_mut(), self.extra.file_pictures) {
+                    (Offer::Web, Some(turn), _) => {
+                        let endpoints = turn.endpoints().clone();
+                        crate::chat::shares::execute(&mut turn.pictures, Some(&endpoints), &args, Offer::Web).await
+                    }
+                    (Offer::Files, _, Some(files)) => files.share(&args).await,
+                    _ => return execute(name, &args),
+                };
+                if let (Some(share), Some(live)) = (run.share, self.live) {
+                    live.sink.send(crate::chat::stream::Event::Share { share });
+                }
+                run.result
+            }
             Source::Screen => {
                 // The screen as it is now (chat/see_screen.rs): its pictures
                 // go with the next step while they fit, its text in the result.
@@ -341,6 +363,11 @@ mod tests {
         assert_eq!(Source::of(crate::chat::pictures::FIND, false, &files, false, false), Source::Notes);
         assert_eq!(Source::of(crate::chat::pictures::LOOK, false, &Extra { files: crate::chat::pictures::Gate::Show, ..files }, false, false), Source::Notes);
         assert_eq!(Source::of(crate::chat::pictures::SHOW, true, &files, false, false), Source::Notes, "never with the web");
+        // Files shared into the conversation (chat/shares.rs): while offered, with the web or without.
+        use crate::chat::shares::{Offer, NAME as SHARE};
+        assert_eq!(Source::of(SHARE, true, &Extra { share: Offer::Web, ..look }, false, false), Source::Share);
+        assert_eq!(Source::of(SHARE, false, &Extra { share: Offer::Files, ..files }, false, false), Source::Share);
+        assert_eq!(Source::of(SHARE, true, &look, false, false), Source::Notes);
         // The browser: every tool of it with the pages; acting only for a model that may.
         for name in crate::chat::pages::ALL {
             assert_eq!(Source::of(name, true, &look, false, false), Source::Pages, "{name}");

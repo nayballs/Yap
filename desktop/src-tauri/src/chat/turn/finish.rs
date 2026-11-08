@@ -14,7 +14,7 @@ use super::{Answer, Asked, ChatTurn, Opened};
 /// where the person is, another money's sign, dollars without saying
 /// whose). Stopped before any of it showed: nothing to save (the error).
 pub(super) fn check(t: &Asked<'_>, answer: Answer, conv: &crate::chat::chats::Conversation, built: &Built) -> Result<Answer, String> {
-    let Answer { reply, tools_used, sources, looked, pages, stopped, pictures, shown_pages, offers, browser } = answer;
+    let Answer { reply, tools_used, sources, looked, pages, stopped, pictures, files, shown_pages, offers, browser } = answer;
     // Stopped before any of the answer showed: nothing to save.
     if stopped && reply.trim().is_empty() {
         return Err(crate::chat::stream::STOPPED.to_string());
@@ -111,7 +111,7 @@ pub(super) fn check(t: &Asked<'_>, answer: Answer, conv: &crate::chat::chats::Co
     // A source of the turn's own (the window's text, read on this PC):
     // named after the answer's.
     let sources = crate::snip::turn::with_source(sources);
-    Ok(Answer { reply, tools_used, sources, looked, pages, stopped, pictures, shown_pages, offers, browser })
+    Ok(Answer { reply, tools_used, sources, looked, pages, stopped, pictures, files, shown_pages, offers, browser })
 }
 
 /// **The answer saved** in its conversation (`opened`) with its chips, who
@@ -129,7 +129,7 @@ pub(super) async fn save(
     watch: Option<&crate::chat::stream::Watch<'_>>,
 ) -> Result<ChatTurn, String> {
     let conv_id = opened.conv.id;
-    let Answer { reply, tools_used, sources, stopped, pictures, shown_pages, offers, browser, .. } = answer;
+    let Answer { reply, tools_used, sources, stopped, pictures, files, shown_pages, offers, browser, .. } = answer;
     // The last model call's tokens: the conversation's context use (a
     // stopped answer's call never finished, so it has none to say).
     let tokens = if stopped { None } else { crate::ai::usage::last_call().as_ref().and_then(crate::chat::chats::MessageTokens::of) };
@@ -139,6 +139,8 @@ pub(super) async fn save(
     crate::chat::chats::set_documents(conv_id, index, &documents);
     // The pictures it showed beside the chat: its pills, and the panel's tabs.
     crate::chat::chats::set_pictures(conv_id, index, &pictures);
+    // The files it shared into the conversation: in its bubble.
+    crate::chat::chats::set_files(conv_id, index, &files);
     // "Search in your browser", when the free sources couldn't answer.
     crate::chat::chats::set_browser_search(conv_id, index, browser.as_ref());
     // The pages it brought up (their tabs come back with the chat) and the
@@ -172,6 +174,7 @@ pub(super) async fn save(
         tokens,
         documents,
         pictures,
+        files,
         pages: shown_pages,
         offers,
     })

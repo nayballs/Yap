@@ -1042,7 +1042,12 @@ one side.
   of the person's workspaces (`agents/workspaces.rs`, the Code chat's own
   too), a file an agent of this chat made or changed (`agents/store.rs`
   `files`), or a path the person wrote or said in the conversation (the
-  file or a folder holding it, never a drive's root; a `file:` address in
+  file itself, or a folder holding it written as a folder — since 8 Nov
+  2026 a file's path allows that file only, never its neighbours (naming
+  `…\Desktop\a.png` had allowed every file on the Desktop), and a folder's
+  path every file under it (`written_whole`: the path whole in their words,
+  not the start of a longer one — "docs" never in "docs.old\a.png"); never
+  a drive's root; a `file:` address in
   their words counts) — judged as written and again as the file system
   resolves it (a link out of a workspace refused; one the person named is
   theirs); else refused in plain words the model passes on ("…ask the
@@ -1100,6 +1105,79 @@ one side.
   `a_code_chat_with_the_web_off_shows_a_picture_file_by_its_path` (before
   and after for every model), the families' lines and tools with the
   files' gate, `eyes/tests.rs`, `fit.rs`.
+- **`chat/shares.rs`** — **files shared into the conversation** (8 Nov
+  2026; the maintainer loves how the Claude app's `SendUserFile`, display
+  "render", puts a picture straight into the conversation, large, with a
+  caption, and other files as cards; Yap's Chat could only put a picture
+  beside the chat). **`share_files {files: [path | "p2"] (1–8), caption?,
+  display?: "render" | "attach"}`** (`NAME`, `definitions`: two sentences,
+  "Show the user files in the conversation itself: pictures appear large in
+  the chat, other files as cards they can open. Use it for files on this PC
+  (or this turn's pictures) they should see or keep."; no line in the
+  prompt). **Where** (`Offer::of`): wherever `show_picture` takes a path —
+  the web's pictures' gate (`Offer::Web`: a path, or one of the turn's
+  pictures, downloaded once a turn as for a show, `pictures::candidate_bytes`)
+  or the picture files' gate without the web (`Offer::Files`: a Code chat,
+  a question naming a picture file; a path only, no word of the web) —, in
+  the tool loop (`Extra::share`, `offer.rs`, `dispatch.rs` `Source::Share`)
+  and for a plan chat over the run endpoint (`claude_live/eyes.rs`
+  `share_offer`, listed last, "Share files in the chat"; `plan.rs`'s eyes
+  lines and `rpc.rs`'s instructions name it); `Gates::share_tools`, which a
+  turn fitted to a small context drops only with the files' family, last
+  (`fit.rs` `Family::Files`). **Which files**: as a picture file's
+  (`local::resolve`, `Noun::File`: a workspace's, an agent of this chat's, a
+  path the person wrote: the file itself, or any file under a folder they
+  wrote, never a named file's neighbours — as written and as resolved; "Yap only shares a
+  file from this PC that's in…", `NOT_ALLOWED_FILE`), a folder refused; ≤ 8
+  a call, ≤ 24 a turn. **A picture** (by its own bytes, ≤ 25 MB, not
+  "attach") is copied into `chat-images/` as a pasted one is
+  (`snip::attach::keep`, source "file" or "web"; its thumbnails at exact
+  device pixels); the same file again that turn is the copy there is. **Any
+  other file** — and a picture with "attach", or over 25 MB — is linked by
+  its path at any size, never copied or read but for its facts: name,
+  folder, kind by its ending (`kind_of`: markdown, text, code, pdf, image,
+  file), size, a PDF's pages when easy (`pdf_pages`: the root `/Type /Pages`
+  `/Count`, else the `/Page` objects; none for compressed objects). **Its
+  preview** (`chat_file_preview`, read when the card's ▸ is unfolded, never
+  kept): the first ≤ 40 lines, ≤ 4 KB, of a text, Markdown or code file,
+  UTF-8 only (a NUL or not UTF-8: none), plain text. **The result**:
+  `{success, data: {shared: "Shared 2 pictures and notes.md in the chat",
+  files: [{name, kind, shown}], notShared?}, note, displayText: "Shared 2
+  pictures and notes.md"}` (`summary`); some refused, the rest shared and
+  why not each; all refused, the reason ("Didn't share ‘secret.txt’: not a
+  place Yap shares files from"). **Kept**: a `Share {caption, items:
+  [SharedFile]}` a call in `TurnPictures::shared` → `Answer::files` →
+  `ChatMessage::files` (`chats::set_files`), `chat_send`'s `files`, a plan
+  turn's `turn::Shown::files`; the page hears each share at once
+  (`stream::Event::Share`, `{kind: "share", share}`); deleted with the chat
+  (its pictures' ids in `ChatMessage::image_ids`). **An older Yap's save**
+  drops the field: every chats.json save also writes the shares to
+  `chat_files.json` (`mirror_to_disk`, only when they changed; removed with
+  none), and the next start puts back a share a message lost
+  (`restore_from_disk`: the same conversation, place and time). **The
+  page's copy** (`for_page`, `chat_get` and `chat_send`'s reply): `missing`
+  (the file's gone), `gone` (its picture's copy swept: shown as its card),
+  `opens` — what Open does (`opens`): a Markdown file in Yap's own window
+  (`md_file::open`), any other in the person's default app, never one that
+  runs a program, a script or a web page (Windows' risky types, scripts,
+  `.html`, `.svg`; the last ending counts: "report.pdf.exe"). **Open, Show
+  in folder** (`chat_file_open`, `chat_file_reveal`): only a file shared in
+  that conversation, still there, judged again as the file system has it;
+  a test run keeps what it would open (`e2e_kept`: "open:…", "reveal:…").
+  **An agent's report** (`of_agent_turn`, `chat/turn/report.rs`): the turn's
+  changed files that are pictures by their bytes (the first 4 copied, the
+  rest `morePictures`) and its other files the turn created (its backups'
+  manifest, `Created`; 4, then `moreFiles`), checked as a share (an agent of
+  this chat's), on the marker message (`files`) — no tool call. The phone
+  (Yap Link) lists an answer's shared files by name (`link/chats.rs`
+  `files`; the pictures stay on the PC). Logs: counts, kinds and sizes,
+  never a path or a name. Tests: unit (`shares/tests.rs`: a picture copied
+  and shown inline, once; files linked with their kind and size, whatever
+  it is; refused paths; the preview's bounds; a PDF's pages; kinds and
+  Open; the offer and the schema's weight; an older Yap's save; an agent's
+  report), `eyes/tests.rs` (listed with the web's pictures and with picture
+  files alone, refused away from Chat), `gates.rs` and `fit.rs` (offered
+  with show_picture, kept last); e2e `chat-share.spec.js` (below).
 - **`chat/activity.rs`** — **what Chat is doing now** (2026-10-31): while
   a turn runs, the thread shows one line — a small moving mark, the step
   under way and the turn's time — as the Claude Code app does:
@@ -2077,6 +2155,50 @@ turn's events). Tested in `desktop/e2e/chat-picture-panel.spec.js` (the live eve
 on `yap-assistant-stream`). A picture's "Open page" / "Open original" say
 the browser now (2026-11-01): "Open in Brave", "Open page in your browser"
 (`stores/browserName.svelte.js`, below).
+
+**Files shared into the conversation** (2026-11-08, `chat/shares.rs`,
+`SharedFiles.svelte` — its own chunk, loaded for an answer that has some —
+and `shares.js`, pure; after the Claude app's look, in Yap's tokens, light
+and dark): each share under the answer that made it (above its folded
+steps). **One picture**: large, as wide as the readable column allows (the
+thread's `room`), at most 480 px tall, its shape kept, in the screenshot
+frame at exactly its device pixels (`chatImages.js` `placed`), whole and
+never cropped, its frame its own shape (no bars), its caption under it;
+**several**: a grid, 2 columns (3 from five), of 4:3 tiles each **filled**
+with its picture's middle (`shares.js` `coverPlaced`: Rust's tile at
+exactly its device pixels, `?w=&h=&fit=cover`, `snip/thumbs.rs`
+`get_cover`; a picture smaller than its tile is filled by the browser), a
+tile's ground the quiet `--yap-s2` while it loads (8 Nov 2026: square tiles
+letterboxed a landscape picture between white bars, which read as broken).
+A click opens the whole picture, one in the panel's picture tab while the
+panel's open, else the viewer (`ShotViewer`; ChatThread `openShared`, the
+picture as a `ShownPicture`: its file's name as caption, its folder as
+where it's from). A picture's **⋯** (on hover or focus; its right-click
+too): Copy image, Save image as… (the screenshots' own), Show in folder,
+Open original (its file in its app; a web picture's address in the
+browser). **A card** for any other file: an icon by its kind, the name
+(the whole path on hover), the folder shortened ("…\garden-planner\docs",
+the whole on hover), size and kind ("PDF · 3 pages"), **Open** (a Markdown
+file in Yap's own window; any other in its app — none for one that would
+run something), **Show in folder**, **Copy path**, and the first lines
+folded under **▸ Preview** (read when unfolded); a file no longer at its
+path says **"Moved or deleted"** (Copy path only). **Live**: a turn's
+`{kind: "share", share}` (as `share_files` lands) goes in the answer's
+bubble as it comes (`liveFiles`, chatState's `Answer.shares`); the saved
+answer takes `chat_send`'s `files`. **An agent's report card**
+(`AgentReportCard.svelte`, `report`): its turn's pictures as a grid, four
+then "+N more", and its new files as compact cards (Open and Show in folder,
+no preview), up to four then "+N more". Its step's chip: "Shared 2 pictures
+and notes.md" (folded: "shared files"); the line while it runs: "Sharing
+‘concept.png’" / "Sharing 3 files". Tested in `desktop/e2e/chat-share.spec.js`:
+one picture copied, kept, drawn large and whole, a click opening the
+panel's tab or the viewer, its ⋯; three pictures as a grid of filled 4:3
+tiles at their device pixels; a
+Markdown file and a .txt as cards (Open: Yap's Markdown window, the text
+file kept for the suite; Show in folder; Copy path; the preview), then one
+deleted: "Moved or deleted"; a seeded agent's report card; the shares an
+older Yap's save dropped, put back from `chat_files.json`. Screenshots light
+and dark.
 
 **Chat looks at the screen** (2026-11-01, `chat/see_screen.rs`): asked
 "here are the speakers, can you have a look?" with the page open in another

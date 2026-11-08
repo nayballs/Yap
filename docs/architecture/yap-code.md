@@ -848,7 +848,15 @@ instead of a terminal (rebuilt after the maintainer's first real agent,
   done · garden-planner" (or didn't finish, has a question, its plan is
   ready, is carrying out its plan: as its turn ended), what it changed in a
   line, Open (the tab at that turn) — and a waiting plan's **Go ahead**
-  ([Plans and the go-ahead](#plans-and-the-go-ahead)).
+  ([Plans and the go-ahead](#plans-and-the-go-ahead)). **The turn's work,
+  shown** (2026-11-08, `chat/shares.rs` `of_agent_turn`): under the card,
+  the pictures its turn created or changed — by their own bytes, copied into
+  `chat-images/` as a picture shared into the chat is — as a grid, four
+  then "+N more", and the other files it created (its backups' manifest,
+  `Created`) as compact cards (Open, Show in folder), four then "+N more";
+  checked as any share (`pictures/local.rs`: an agent of this chat's files),
+  kept on the marker (`files`), no tool call ([chat-and-assistant.md,
+  `chat/shares.rs`](./chat-and-assistant.md)).
 - **The ask-first card** (`AgentConfirm.svelte`, in PageConfirm's chunk): Start
   / Don't ([Asking first](#asking-first)); for a follow-up, "Yap wants to
   carry on the agent in …", Send / Don't.

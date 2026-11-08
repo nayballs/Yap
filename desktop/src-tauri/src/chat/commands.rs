@@ -315,6 +315,8 @@ async fn send_turn(
         // A meeting recording or a call: quiet (`tts::meeting_quiet`).
         crate::voice::tts::meeting_quiet().is_some(),
     );
+    let mut shared = turn.files.clone();
+    crate::chat::shares::for_page(&mut shared);
     Ok(serde_json::json!({
         "conversationId": turn.conversation_id,
         "reply": turn.reply,
@@ -334,6 +336,8 @@ async fn send_turn(
         "documents": turn.documents,
         // The pictures it showed beside the chat (pictures.rs): their pills.
         "pictures": turn.pictures,
+        // The files it shared into the conversation (shares.rs), as the page has them.
+        "files": shared,
         // "Search in your browser", when Yap's free web sources couldn't
         // answer it (web/sources.rs), as saved with the answer.
         "browserSearch": crate::chat::chats::browser_search_of(turn.conversation_id, turn.index),

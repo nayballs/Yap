@@ -34,9 +34,12 @@
    * document it made or changed in the panel beside the chat
    * (chat/documents.rs); `onpicture(p)` a picture it showed (a
    * `ShownPicture`, chat/pictures.rs) there; `onpage(p)` a live page it
-   * brought up (a `ShownPage`, chat/pages.rs).
+   * brought up (a `ShownPage`, chat/pages.rs). The files it shared into the
+   * conversation (`files`, chat/shares.rs) show under it (SharedFiles, its
+   * own chunk): `conversation` the chat's id, `onshared(p)` a shared picture
+   * opened (a `ShownPicture`).
    */
-  let { m, last, sources, reading, keepDays, room = 0, onview, onmenu, onread, onsource = null, ondoc = null, onpicture = null, onpage = null } = $props();
+  let { m, last, sources, reading, keepDays, room = 0, onview, onmenu, onread, onsource = null, ondoc = null, onpicture = null, onpage = null, conversation = null, onshared = null } = $props();
 
   // The documents it made or changed: saved with it, or (while it's
   // written) as they come.
@@ -48,6 +51,8 @@
   // person's browser (chat/pages.rs): the same.
   const pages = $derived(m.role === 'assistant' ? (m.pages?.length ? m.pages : m.livePages || []) : []);
   const offers = $derived(m.role === 'assistant' ? (m.offers?.length ? m.offers : m.liveOffers || []) : []);
+  // The files it shared into the conversation (chat/shares.rs): the same.
+  const shared = $derived(m.role === 'assistant' ? (m.files?.length ? m.files : m.liveFiles || []) : []);
 
   // A question whose screenshot went as its text (snip/ocr.rs): its own
   // words, and the text read from the picture, folded under them.
@@ -190,6 +195,13 @@
     {/if}
   {/if}
 </div>
+{/if}
+{#if shared.length}
+  <!-- The files it shared into the conversation (share_files): a picture
+       large, several as a grid, other files as cards (their own chunk). -->
+  {#await import('./SharedFiles.svelte') then { default: SharedFiles }}
+    <SharedFiles shares={shared} {conversation} {room} onpicture={onshared} />
+  {/await}
 {/if}
 {#if m.role === 'assistant' && m.tools?.length}
   <!-- What its tools did, folded under it (chat/activity.rs). -->

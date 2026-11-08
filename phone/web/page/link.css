@@ -699,6 +699,21 @@ main {
   font-size: 0.875rem;
   color: var(--yap-muted);
 }
+/* The files an answer shared on the PC (chat/shares.rs): their names under it. */
+.afiles {
+  align-self: flex-start;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0;
+  padding: 4px 12px;
+  border-radius: var(--yap-r-full);
+  border: 1px solid var(--yap-border-subtle);
+  font-size: 0.875rem;
+  color: var(--yap-muted);
+  overflow-wrap: anywhere;
+}
+.afiles svg,
 .qpics-n svg {
   width: 1rem;
   height: 1rem;

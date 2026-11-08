@@ -96,6 +96,8 @@ class Answer {
     this.shots = [];
     this.pages = [];
     this.offers = [];
+    // The files it shared into the conversation (chat/shares.rs), a share a call.
+    this.shares = [];
     this.screens = [];
     this.pagesShown = new Set();
     // Its ■ and its "a newer question replaces it" (streamCall's), a typed one's.
@@ -109,6 +111,7 @@ class Answer {
     if (ev?.kind === 'shot' && ev.picture?.id && !this.shots.some((p) => p.id === ev.picture.id)) this.shots = [...this.shots, ev.picture];
     if (ev?.kind === 'page' && ev.page?.url && !this.pages.some((p) => p.url === ev.page.url)) this.pages = [...this.pages, ev.page];
     if (ev?.kind === 'offer' && ev.offer?.url && !this.offers.some((o) => o.url === ev.offer.url)) this.offers = [...this.offers, ev.offer];
+    if (ev?.kind === 'share' && ev.share?.items?.length) this.shares = [...this.shares, ev.share];
     if (ev?.kind === 'document' && ev.noteId != null) {
       const d = { id: ev.noteId, title: ev.title };
       this.docs = this.docs.some((x) => x.id === d.id) ? this.docs.map((x) => (x.id === d.id ? d : x)) : [...this.docs, d];
@@ -477,6 +480,7 @@ export function createChatState({ onopensettings = () => null, onopennote = () =
     if (rec.shots.length) b.liveShots = rec.shots;
     if (rec.pages.length) b.livePages = rec.pages;
     if (rec.offers.length) b.liveOffers = rec.offers;
+    if (rec.shares.length) b.liveFiles = rec.shares;
     return b;
   }
   /** Its conversation open: its bubble drawn as the answer is now (made once there's something to show). */
@@ -500,6 +504,7 @@ export function createChatState({ onopensettings = () => null, onopennote = () =
       m.liveThinking = l.thinking;
       if (rec.confirms) m.confirms = rec.confirms;
       if (rec.shots.length) m.liveShots = rec.shots;
+      if (rec.shares.length) m.liveFiles = rec.shares;
     }
     followThread();
   }
@@ -1457,6 +1462,8 @@ export function createChatState({ onopensettings = () => null, onopennote = () =
         documents: res.documents || [],
         // The pictures it showed beside the chat (chat/pictures.rs): their pills.
         pictures: res.pictures ?? [...rec.pictures, ...rec.shots],
+        // The files it shared into the conversation (chat/shares.rs): under it.
+        files: res.files ?? rec.shares,
         // "Search in your browser", when Yap's free web sources couldn't give it.
         browserSearch: res.browserSearch ?? null,
         // The pages it brought up (their tabs) and its buttons (chat/pages.rs).

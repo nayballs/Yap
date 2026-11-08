@@ -14,7 +14,7 @@ fn the_tools_are_the_tool_loops_with_the_same_schemas() {
     assert_eq!(listed[1..=pages::ALL.len()], *pages::ALL);
     // The tool loop's own words and schemas, each one.
     let mut loop_defs: Vec<Value> = Vec::new();
-    for v in [see_screen::definitions(Gate::Look), pages::definitions(Gate::Look, true), pictures::definitions(Gate::Look, true)] {
+    for v in [see_screen::definitions(Gate::Look), pages::definitions(Gate::Look, true), pictures::definitions(Gate::Look, true), shares::definitions(Offer::Web)] {
         loop_defs.extend(v.as_array().cloned().unwrap());
     }
     for d in &defs {
@@ -71,13 +71,17 @@ fn without_the_web_picture_files_alone_are_offered_by_a_path() {
     // the path only (no "p3", no find_pictures, no browser).
     let files = Eyes { files: Gate::Look, ..Eyes::default() };
     assert!(files.any() && files.files_only());
-    assert_eq!(names(files), [pictures::LOOK, pictures::SHOW]);
+    assert_eq!(names(files), [pictures::LOOK, pictures::SHOW, shares::NAME]);
     let defs = definitions(files);
     for d in &defs {
+        assert!(!d.to_string().contains("p3") && !d.to_string().contains("p2") && !d.to_string().contains("this turn"), "{d}");
+        if d["name"] == shares::NAME {
+            continue;
+        }
         assert!(d["inputSchema"]["properties"]["path"].is_object() && d["inputSchema"]["properties"]["picture"].is_null(), "{d}");
-        assert!(!d.to_string().contains("p3") && !d.to_string().contains("this turn"), "{d}");
     }
-    assert_eq!(names(Eyes { files: Gate::Show, ..Eyes::default() }), [pictures::SHOW]);
+    assert_eq!(names(Eyes { files: Gate::Show, ..Eyes::default() }), [pictures::SHOW, shares::NAME]);
+    assert_eq!(refused(shares::NAME, files, false), None);
     // Everything else of the panel's: not offered (never "no panel": there is one).
     assert_eq!(refused(pictures::SHOW, files, false), None);
     assert_eq!(refused(pictures::LOOK, files, false), None);
@@ -255,4 +259,29 @@ fn a_plan_chat_scrolls_looks_in_its_steps_and_a_click_that_buys_waits_on_the_car
     assert!(crate::chat::pages::sim::with(|b| b.log.clicked.is_empty()).unwrap());
     crate::snip::images::delete(&shots.iter().map(|s| s.id.clone()).collect::<Vec<_>>());
     crate::chat::pages::sim::install(None);
+}
+
+#[test]
+fn share_files_is_listed_wherever_show_picture_takes_a_path() {
+    // 8 Nov 2026: files shared into the conversation (chat/shares.rs), over
+    // the run endpoint as in the tool loop — with the web's pictures (a path,
+    // or a turn's "p2") and with picture files alone (a path only).
+    assert_eq!(share_offer(LOOK), Offer::Web);
+    assert_eq!(share_offer(Eyes { files: Gate::Show, ..Eyes::default() }), Offer::Files);
+    assert_eq!(share_offer(Eyes { screen: Gate::Look, ..Eyes::default() }), Offer::Off);
+    assert!(names(LOOK).contains(&shares::NAME));
+    assert!(!names(Eyes { screen: Gate::Look, ..Eyes::default() }).contains(&shares::NAME), "the screen alone: nothing to share");
+    assert!(is_one(shares::NAME) && all_names().last() == Some(&shares::NAME));
+    let web = definitions(LOOK).into_iter().find(|d| d["name"] == shares::NAME).unwrap();
+    assert_eq!(web["title"], "Share files in the chat");
+    assert_eq!(web["annotations"]["readOnlyHint"], json!(false));
+    assert!(web["inputSchema"]["properties"]["files"]["items"]["description"].as_str().unwrap().contains("\"p2\""));
+    assert_eq!(web["inputSchema"]["required"], json!(["files"]));
+    let files = definitions(Eyes { files: Gate::Look, ..Eyes::default() }).into_iter().find(|d| d["name"] == shares::NAME).unwrap();
+    assert_eq!(files["inputSchema"]["properties"]["files"]["items"]["description"], "A file's full path");
+    // Nothing comes to the model: it never marks the turn as having seen the web.
+    assert!(!sees(shares::NAME));
+    // Asked away from Chat: no panel, so refused as the pictures are.
+    assert!(refused(shares::NAME, Eyes::default(), false).is_some());
+    assert_eq!(refused(shares::NAME, LOOK, false), None);
 }

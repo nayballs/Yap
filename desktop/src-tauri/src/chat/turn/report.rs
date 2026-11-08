@@ -96,6 +96,14 @@ pub fn marker_text(agent: &Agent) -> String {
     lines.join("\n")
 }
 
+/// **What agent `agent`'s turn `n` shows on its report card**
+/// (`shares::of_agent_turn`), off the async runtime: the pictures it created
+/// or changed, and its other new files.
+async fn turn_files(agent: &Agent, n: u32) -> Vec<crate::chat::shares::Share> {
+    let agent = agent.clone();
+    tauri::async_runtime::spawn_blocking(move || crate::chat::shares::of_agent_turn(&agent, n)).await.ok().flatten().into_iter().collect()
+}
+
 /// What's said when the model can't: the agent's own summary (or what went
 /// wrong). Pure.
 pub fn fallback(agent: &Agent) -> String {
@@ -146,7 +154,10 @@ async fn report(id: &str, n: u32) {
     }
     // Read again: what that turn did by now.
     let Some(agent) = store::get(id).map(|j| j.as_of_turn(n)) else { return };
-    let marker = ChatMessage { role: "user".into(), text: marker_text(&agent), kind: AGENT_REPORT.into(), ..Default::default() };
+    // The pictures its turn made or changed and its new files, on its card
+    // (chat/shares.rs): checked as a share is, no tool call.
+    let files = turn_files(&agent, n).await;
+    let marker = ChatMessage { role: "user".into(), text: marker_text(&agent), kind: AGENT_REPORT.into(), files, ..Default::default() };
     let Ok(marker_index) = chats::append_whole(conv, marker) else { return };
     let marker_id = format!("chat:{conv}:{marker_index}");
     store::update(id, |j| {

@@ -811,6 +811,7 @@ mod tests {
             past_chats: true,
             picture_tools: true,
             files: Gate::Off,
+            share_tools: true,
         }
     }
 
@@ -908,7 +909,7 @@ mod tests {
         // The tools' schemas: exactly the tools each turn offers (run.rs: a
         // Code chat none of memory's).
         let offered = |memory: bool| {
-            let extra = crate::chat::tools::Extra { memory, search_chats: memory, conversation: Some(7), doc_tools: g.doc_tools, pictures: g.pictures, ..Default::default() };
+            let extra = crate::chat::tools::Extra { memory, search_chats: memory, conversation: Some(7), doc_tools: g.doc_tools, pictures: g.pictures, share: crate::chat::shares::Offer::of(g.pictures, g.files, true), ..Default::default() };
             crate::chat::budget::estimate(&crate::chat::tools::offered_tools(cfg.open_apps, true, extra).to_string())
         };
         let schemas = |code: bool| crate::chat::budget::estimate(&g.offered(None, Some(7), code).to_string());
@@ -937,6 +938,7 @@ mod tests {
             past_chats: true,
             picture_tools: true,
             files: Gate::Off,
+            share_tools: true,
         };
         let asks = "What's the latest version of Python?";
         assert!(crate::web::needs_web(asks), "the test's question needs the web");

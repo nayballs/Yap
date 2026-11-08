@@ -332,7 +332,9 @@ stay on (`config.yml`): an older Yap still opens one with a `body=`.
   names made safe and unique, `file_stem`), `notes/notes.json` (the whole
   store, folders and actions too) and `notes/versions.json` (each note's
   earlier versions, newest first: `notes::versions::export_all`); each chat as `chats/<date> <title>.md`
-  (who and when, the model) and `chats/chats.json` (and
+  (who and when, the model; the files an answer shared into the chat as
+  "Shared files: <paths>", 2026-11-08 — paths only, the files stay where they
+  are, as `chats.json`'s `files` carries them, `chat/shares.rs`) and `chats/chats.json` (and
   `chats/claude_sessions.json`, each chat's Claude Code session on the
   person's Claude plan, when there are any, 2026-11-07, and
   `chats/connector_chats.json`, the connectors each chat switched off in
@@ -417,7 +419,10 @@ a tick box per **kind** of data. "Clear everything and keep my settings"
     added** (tasks.json's tasks with no note; a note's go with it).
   - *Chat and memory* — **Chats** (Chat's conversations, archived ones too,
     not notes' Ask threads, and every screenshot in `chat-images/`, the ones
-    waiting in Chat's box too, and each chat's Claude Code session on the
+    waiting in Chat's box too — the pictures shared into a chat among them;
+    the links to its shared files go with the chat and the copy of them
+    for an older Yap's save, `chat_files.json`, with chats.json's save, the
+    files themselves staying where they are (`chat/shares.rs`) —, and each chat's Claude Code session on the
     plan, `claude_sessions.json`, with Claude Code's own copy of it: the
     session's transcript in Claude Code's config folder, deleted only under
     Yap's own `claude\chat\` folder there, never another project's

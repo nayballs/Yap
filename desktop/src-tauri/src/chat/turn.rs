@@ -140,6 +140,8 @@ pub(crate) struct ChatTurn {
     pub documents: Vec<crate::chat::documents::DocRef>,
     /// The pictures it showed beside the chat (`chat/pictures.rs`): their pills.
     pub pictures: Vec<crate::chat::pictures::ShownPicture>,
+    /// The files it shared into the conversation (`chat/shares.rs`).
+    pub files: Vec<crate::chat::shares::Share>,
     /// The pages it brought up beside the chat (`chat/pages.rs`): their tabs.
     pub pages: Vec<crate::chat::pages::ShownPage>,
     /// The buttons it offered for the person's browser (`chat/pages.rs`).
@@ -283,6 +285,8 @@ struct Answer {
     stopped: bool,
     /// The pictures it showed beside the chat (`chat/pictures.rs`).
     pictures: Vec<crate::chat::pictures::ShownPicture>,
+    /// The files it shared into the conversation (`chat/shares.rs`).
+    files: Vec<crate::chat::shares::Share>,
     /// The pages it brought up beside the chat, and the buttons it offered
     /// for the person's browser (`chat/pages.rs`).
     shown_pages: Vec<crate::chat::pages::ShownPage>,
@@ -512,6 +516,7 @@ async fn remembered(t: &Asked<'_>, opened: &Opened) -> Result<Option<ChatTurn>, 
         tokens: None,
         documents: Vec::new(),
         pictures: Vec::new(),
+        files: Vec::new(),
         pages: Vec::new(),
         offers: Vec::new(),
     }))
