@@ -14,6 +14,7 @@ pub mod context_menu;
 pub mod e2e;
 pub mod guide;
 pub mod help;
+pub mod lab;
 pub mod logging;
 pub mod portable;
 pub mod procs;
