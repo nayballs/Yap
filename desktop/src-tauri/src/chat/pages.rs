@@ -45,6 +45,61 @@
 //! **Privacy**: the log never has an address, a title, a section or a
 //! page's words — counts and ids only.
 
+/// **Yap's page scripts see inside open shadow roots** (8 Nov 2026, Yap
+/// Lab: MDN's header search is a web component, `<mdn-search-button>`, its
+/// button, dialog and box inside its shadow root — a click hit the host and
+/// "nothing visible changed", typing in it was "not a field", a find found
+/// nothing). The JavaScript every page script starts with (`act/script.rs`'s
+/// library, `view::PAGE_TEXT_SCRIPT`, `read::TABLES_SCRIPT`), a literal for
+/// `concat!`: the page's open shadow roots found once a run (`shs`: every
+/// element looked at once, nested roots too, at most 80,000 elements and 400
+/// roots), and the light DOM's ways through them —
+/// - `qa(sel, root?, lim?)` / `q1`: `querySelectorAll` / `querySelector`
+///   through the roots, in the page's order (a host's shadow tree right after
+///   it); a page with none: the plain query, exactly as before;
+/// - `up(el, sel)`: `closest` past each host; `hostOf(el)`;
+/// - `ptAt(x, y)`: `elementFromPoint`, down through each
+///   `shadowRoot.elementFromPoint` (it stops at the host);
+/// - `focusIn()`: `activeElement`, down through each `shadowRoot.activeElement`;
+/// - `holds(a, b)`: `contains` across roots; `byId(el, id)`: an id in `el`'s
+///   own root first (`aria-labelledby` and `aria-controls` point there);
+/// - `textOf(el)`: its words, through its shadow tree and slots when its own
+///   are none (`flat`); `shownText(m)`: `m`'s words as `innerText` gives
+///   them, a host's shadow tree read in its place.
+///
+/// Closed roots can't be reached (nothing outside sees in); same-origin
+/// frames aren't walked (another window: its own coordinates, styles and
+/// events).
+macro_rules! deep_js {
+    () => {
+        r#"var SH_=null;
+function shs(){if(SH_)return SH_;var s={trees:[document],hosts:new Map(),n:0};for(var i=0;i<s.trees.length;i++){var r=s.trees[i],hs=[],all=r.querySelectorAll('*');for(var j=0;j<all.length&&s.n<80000;j++){s.n++;var x=all[j].shadowRoot;if(x&&s.trees.length<400){hs.push(all[j]);s.trees.push(x);}}s.hosts.set(r,hs);}SH_=s;return s;}
+function deep(){return shs().trees.length>1;}
+function hostsIn(r){var t=r.nodeType===1?r.getRootNode():r,hs=shs().hosts.get(t)||[];return r.nodeType===1?hs.filter(function(h){return h!==r&&r.contains(h);}):hs;}
+function qwalk(r,sel,out,dp,lim){if(r.nodeType===1&&r.shadowRoot&&dp<32)qwalk(r.shadowRoot,sel,out,dp+1,lim);var hits=r.querySelectorAll(sel),hs=hostsIn(r),i=0;
+for(var j=0;j<hs.length&&out.length<lim;j++){var lo=i,hi=hits.length;while(lo<hi){var md=(lo+hi)>>1,h=hits[md];if(h===hs[j]||(hs[j].compareDocumentPosition(h)&2))lo=md+1;else hi=md;}
+for(;i<lo&&out.length<lim;i++)out.push(hits[i]);if(dp<32)qwalk(hs[j].shadowRoot,sel,out,dp+1,lim);}
+for(;i<hits.length&&out.length<lim;i++)out.push(hits[i]);}
+function qa(sel,r,lim){r=r||document;if(!deep())return r.querySelectorAll(sel);var out=[];qwalk(r,sel,out,0,lim||50000);return out;}
+function q1(sel,r){r=r||document;if(!deep())return r.querySelector(sel);return qa(sel,r,1)[0]||null;}
+function hostOf(el){var r=el&&el.getRootNode?el.getRootNode():null;return r&&r.host?r.host:null;}
+function up(el,sel){for(var n=0;el&&n<40;n++){var c=el.closest(sel);if(c)return c;el=hostOf(el);}return null;}
+function ptAt(x,y){var e=document.elementFromPoint(x,y);for(var n=0;e&&e.shadowRoot&&n<32;n++){var i=e.shadowRoot.elementFromPoint(x,y);if(!i||i===e)break;e=i;}return e;}
+function focusIn(){var a=document.activeElement;for(var n=0;a&&a.shadowRoot&&a.shadowRoot.activeElement&&n<32;n++)a=a.shadowRoot.activeElement;return a;}
+function holds(a,b){for(var n=0;b&&n<40;n++){if(a===b||a.contains(b))return true;b=hostOf(b);}return false;}
+function byId(el,id){var r=el.getRootNode?el.getRootNode():null,x=r&&r!==document&&r.getElementById?r.getElementById(id):null;return x||document.getElementById(id);}
+function sqz(s){return (s||'').replace(/\s+/g,' ').trim();}
+function flat(e,b){b=b||{s:'',n:0};var kids=e.shadowRoot?e.shadowRoot.childNodes:(e.tagName==='SLOT'&&e.assignedNodes().length?e.assignedNodes():e.childNodes);
+for(var i=0;i<kids.length&&b.n<4000&&b.s.length<20000;i++){var k=kids[i];b.n++;if(k.nodeType===3){b.s+=k.data;continue;}if(k.nodeType!==1)continue;var tn=k.tagName;if(tn==='SCRIPT'||tn==='STYLE'||tn==='TEMPLATE'||tn==='NOSCRIPT')continue;var cs=getComputedStyle(k);if(cs.display==='none')continue;var bl=cs.display.indexOf('inline')!==0;if(bl)b.s+=' ';flat(k,b);if(bl)b.s+=' ';}return b.s;}
+function textOf(e){var s=sqz(e.innerText||e.textContent);if(!s&&deep()&&(e.shadowRoot||e.querySelector('slot')))s=sqz(flat(e));return s;}
+function shownText(m){if(!m)return '';if(!deep())return m.innerText||'';var on=new Set();shs().hosts.forEach(function(v){for(var i=0;i<v.length;i++){var e=v[i];for(var n=0;e&&n<200&&!on.has(e);n++){on.add(e);e=e.parentElement||hostOf(e);}}});
+var b={s:'',n:0};(function go(e){if(b.n>30000||b.s.length>260000)return;b.n++;var cs=getComputedStyle(e);if(cs.display==='none')return;if(!on.has(e)){b.s+=' '+(e.innerText||'')+' ';return;}
+var kids=e.shadowRoot?e.shadowRoot.childNodes:e.childNodes;for(var i=0;i<kids.length;i++){var k=kids[i];if(k.nodeType===3){if(cs.visibility!=='hidden')b.s+=k.data;}else if(k.nodeType===1){var tn=k.tagName;if(tn==='SLOT'){var as=k.assignedNodes();if(!as.length)as=k.childNodes;for(var j=0;j<as.length;j++){if(as[j].nodeType===3)b.s+=as[j].data;else if(as[j].nodeType===1)go(as[j]);}}else if(tn!=='SCRIPT'&&tn!=='STYLE'&&tn!=='TEMPLATE'&&tn!=='NOSCRIPT')go(k);}}})(m);return b.s;}
+function mainEl(){return document.querySelector('main,article,[role=main]')||(deep()?q1('main,[role=main]'):null)||document.body;}
+"#
+    };
+}
+
 pub mod act;
 pub mod backend;
 pub mod read;

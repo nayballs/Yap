@@ -2800,9 +2800,12 @@ review (safely, for any user, in any language Yap speaks).
   press waits for its effect as a click does (`backend::settle`), a hover a
   moment more (a preview's delay). **A ref that isn't there** is said as it
   is (`act::no_element`, the page's highest ref from `describe`): a page not
-  read since it loaded ("refs from another page don't hold"), "There's no
-  element [99999]: refs on this page go up to 812", or one that changed or
-  went. So is a switched tab's answer (the tab's
+  read since it loaded has no refs at all, so that one never existed there
+  ("No element [9999]: this page hasn't been read yet, so it has no refs —
+  read it with browser_read mode "elements" (or browser_find) first."; 8 Nov
+  2026, Yap Lab: Yap's own Chat noticed the earlier words didn't say so),
+  "There's no element [99999]: refs on this page go up to 812", or one that
+  changed or went. So is a switched tab's answer (the tab's
   title and address), and a new tab's note naming the tab it closed to
   make room (`act::closed_note`; any model's) — both the page's words (3 Nov
   2026). 30 actions a turn. The line (1 Nov 2026,
@@ -2822,6 +2825,65 @@ review (safely, for any user, in any language Yap speaks).
   A link with a `target` (a new window: a script's click has no user
   gesture, so the new-window rule would drop it as a pop-up) goes to its
   address in the same tab instead.
+- **Web components: inside open shadow roots as in the light DOM** (8 Nov
+  2026; Yap Lab on MDN, whose header search is `<mdn-search-button>` with its
+  button, dialog and box in its shadow root: a click at the button's point hit
+  the host and "nothing visible changed", typing in it was "not a field (it's
+  a mdn-search-button)", `browser_find "Search MDN"` found nothing — the
+  scripts only queried the document, and `elementFromPoint` /
+  `activeElement` stop at a host). Every page script now starts with the
+  same JavaScript (`pages.rs` `deep_js!`, `concat!`ed into `act/script.rs`'s
+  library, `view::PAGE_TEXT_SCRIPT` and `read::TABLES_SCRIPT`): the page's
+  open shadow roots found once a run, nested ones too (every element looked
+  at once: at most 80,000 elements, 400 roots), and the light DOM's ways
+  through them —
+  - the elements (`browser_read` "elements", `browser_find`), the text
+    blocks (`browser_find`, `browser_scroll_to {text | ref}`), the forms,
+    headings, tables and overlays are queried through the roots **in the
+    page's order** (a host's tree right after the host: a binary search per
+    host among each tree's own matches — measured on a 60,000-element page
+    with 300 hosts: a read with elements 42 ms, the text blocks 14 ms, where
+    a merge element by element took over a second; finding the roots adds
+    about 3 ms to every script on such a page); the main text reads a host's
+    shadow tree in its place (`shownText`: `innerText` wherever no root is
+    below, slots' assigned nodes where they're drawn); **a page with no
+    shadow root reads exactly as before** (the plain queries, the same
+    answers);
+  - **the element at a point** descends through each `shadowRoot.
+    elementFromPoint` (the real button, not the host), its nearest link,
+    button or field found past each host; **the focused field**
+    (`browser_type` without a ref, a key's target) follows each
+    `shadowRoot.activeElement` down; a point click checks the element still
+    holds the point across roots;
+  - **labels from the element's own root**: `aria-labelledby` and
+    `aria-controls` ids there first, `<label for>` (the browser's own
+    `labels`, which stay in a root), the `<label>` around it — for a field
+    also one around its host — and a field with no label at all takes its
+    host's `aria-label` / `label`; so **the safety rules see the real
+    element** (its `type`, `autocomplete`, name, label): a password, card or
+    code field in a shadow root is refused exactly as in the light DOM, the
+    page's password and card checks and a form's own fields look inside its
+    roots too, and a field labelled by an id its root shares with the page
+    is named from its root (a "Verification code" whose page also had a
+    hidden "Nickname" with that id); the words that keep a secret's value
+    from ever leaving the page (`masked`) take `aria-labelledby`'s too, in
+    the light DOM as well;
+  - **events that cross a boundary for a person cross it for Yap**:
+    `input`, the keys, the pointer's bubbling events (`composed`), so a
+    component's listener on its inner button or box hears them;
+  - **"changed"** observes every open root at the watch, and roots that
+    come in after the action (a component added, its root observed as it
+    arrives; one found at the end that wasn't there counts as new): a
+    dialog a component opens says "a dialog opened: ‘Search the docs’; the
+    focus moved into ‘Search the docs’".
+  **Closed roots can't be reached** (no script outside sees in): a custom
+  element with no open root and nothing of its own, yet drawn, is told as
+  one (`Element::closed`, `rules::CLOSED`: its line says "a web component
+  whose inside the page keeps closed: Yap can't see or reach what's in it";
+  typing in it says so and leaves it to the person, not "click it"; a click
+  on it that changes nothing Yap can see says that, not "nothing visible
+  changed"). **Same-origin frames aren't walked** (another window: its own
+  coordinates, styles, events and refs).
 - **What Yap never does, whatever it's told** (enforced in Rust,
   `act/rules.rs`, its words in **one table per language** — English, French,
   German, Spanish, Italian, Portuguese, Dutch, `act/words.rs`, every table
@@ -2938,7 +3000,8 @@ review (safely, for any user, in any language Yap speaks).
   its address, a form submits as a GET, a select takes an option, a
   checkbox toggles, an editable region takes words after its own; its tabs
   numbered and closed to make room as the panel's; `data-sim-hide` /
-  `data-sim-go` stand in for a page's script) — so the evaluation measures
+  `data-sim-show` / `data-sim-go` stand in for a page's script; declarative
+  open shadow roots read in their hosts, closed ones never) — so the evaluation measures
   the code the app runs.
 - Wording: `activity.rs` ("Clicking on the page beside the chat", "Going to
   rail.example.com/…"), the chips ("Clicked ‘Find trains’ on
@@ -2981,6 +3044,18 @@ review (safely, for any user, in any language Yap speaks).
   they end, scroll-to by ref in view and the shot after it at the same
   place; find, wait and read by tab, the read's links and note; navigate in
   a tab brings it up) and `chat-pictures` (an infobox photo listed first).
+  Web components (8 Nov 2026): the stand-in reads declarative open roots
+  (`sim::open_shadow_roots`: `<template shadowrootmode="open">` read in its
+  host, a closed one never; ids and labels from the field's own root, a
+  field's host's `aria-label`; `data-sim-show` for a dialog a click opens) —
+  `sim`'s and `act::tests`' (a docs page's search button in a root, its
+  dialog's box in a nested one found, typed in and sent by Enter with no
+  card; its password and root-labelled code fields refused; nothing of the
+  closed root; a closed component's line; the unread page's ref);
+  `chat-browse`'s web-components test in the real webview (a made-up docs
+  site of custom elements: the same, with the click at a point of the
+  screenshot reaching the button inside the root); and Yap Lab with the
+  fake AI on live MDN (`--fake --live-web`).
   **Not done**: trusted input events (CDP's
   `Input.dispatchMouseEvent`) for sites that ignore script clicks; a button
   with no name at all (an icon with no label) is judged by its form only;

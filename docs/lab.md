@@ -315,8 +315,10 @@ the screen:
   once a card; `wait --agents --cards` does the same for an agent's cards);
 - of **the thread's turn, whole**: from the turn's question to the end of the thread,
   however long — the thread scrolled a screen at a time, each screen captured at the
-  device's pixels, the pieces stitched into one tall PNG (the "↓" button hidden, the
-  list's button only at the top; the thread's scroll put back after). Its entry says
+  device's pixels, the pieces stitched into one tall PNG (from just above the question,
+  never into the turn before it; the "↓" button and the list's button hidden — the
+  list's button sat over every capture's top-left corner, half cut off, 8 Nov 2026; the
+  thread's scroll put back after). Its entry says
   how many `pieces`, its `cssHeight` and the thread's `scrollHeight`;
 - of **the panel beside the chat**, when it's open: its document, picture, page or
   Agent tab, as it shows (a page tab's own area is blank: the page is a webview of its

@@ -89,8 +89,10 @@ const SHOT = { scale: 'device', animations: 'disabled', caret: 'hide', timeout: 
  * thread's questions that starts with `question`'s words, else the last
  * one) to the end of the thread, however long — the thread scrolled a
  * screen at a time, each screen captured at the device's pixels, and the
- * pieces stitched into one tall PNG. The thread's "↓" button is hidden
- * while it's done; the thread's scroll is put back after. Null when Chat's
+ * pieces stitched into one tall PNG, from a little above the question but
+ * never into the turn before it. The thread's "↓" button and the list's
+ * button over its corner are hidden while it's done; the thread's scroll is
+ * put back after. Null when Chat's
  * thread isn't showing. `{ png, cssHeight, scrollHeight, clientHeight,
  * pieces, dpr, found }` (`found`: the question was in the thread).
  */
@@ -104,9 +106,13 @@ export async function captureThread(main, { question = '' } = {}) {
     for (const img of imgs) if (img.loading === 'lazy') img.loading = 'eager';
     const deadline = Date.now() + 4000;
     while (Date.now() < deadline && imgs.some((i) => !i.complete)) await new Promise((r) => setTimeout(r, 100));
+    // What floats over the thread without being the turn's: the "↓" button,
+    // and the list's button over its top-left corner ("Show your chats",
+    // when the list is hidden: in every capture's corner, half cut off, a
+    // stray square — 8 Nov 2026).
     const hide = document.createElement('style');
     hide.id = '__yap_lab_shot';
-    hide.textContent = '[data-testid="chat-to-bottom"]{visibility:hidden!important}';
+    hide.textContent = '[data-testid="chat-to-bottom"],[data-testid="chat-list-show"]{visibility:hidden!important}';
     document.head.appendChild(hide);
     const was = { top: sc.scrollTop, bottom: sc.scrollHeight - sc.clientHeight - sc.scrollTop < 4, behavior: sc.style.scrollBehavior };
     sc.style.scrollBehavior = 'auto';
@@ -117,7 +123,22 @@ export async function captureThread(main, { question = '' } = {}) {
     const ask = (want && [...asks].reverse().find((b) => norm(b.innerText).includes(want))) || asks.at(-1) || null;
     const box = sc.getBoundingClientRect();
     const at = (el) => el.getBoundingClientRect().top - box.top + sc.scrollTop;
-    const from = ask ? Math.max(0, at(ask) - 12) : 0;
+    // A margin above the question, but never into the turn before it: its
+    // last line (a byline's round button) showed as a sliver at the top.
+    const before = (() => {
+      let row = ask;
+      while (row && row.parentElement && row.parentElement !== col) row = row.parentElement;
+      const prev = row?.parentElement === col ? row.previousElementSibling : null;
+      if (!prev) return 0;
+      let bottom = prev.getBoundingClientRect().bottom;
+      const inside = prev.querySelectorAll('*');
+      for (let i = 0; i < inside.length && i < 4000; i++) {
+        const r = inside[i].getBoundingClientRect();
+        if (r.height > 0 && r.bottom > bottom) bottom = r.bottom;
+      }
+      return Math.ceil(bottom - box.top + sc.scrollTop) + 1;
+    })();
+    const from = ask ? Math.max(0, Math.min(at(ask), Math.max(at(ask) - 12, before))) : 0;
     const to = Math.min(sc.scrollHeight, at(col) + col.offsetHeight + 12);
     return {
       from,
@@ -151,13 +172,6 @@ export async function captureThread(main, { question = '' } = {}) {
       );
       const keepTo = Math.min(s + prep.h, prep.to);
       if (keepTo <= covered + 0.5) break;
-      if (pieces.length === 1) {
-        // What floats over the thread's corner (the list's button) once, at the top: not at every seam.
-        await main.evaluate(() => {
-          const style = document.getElementById('__yap_lab_shot');
-          if (style) style.textContent += '[data-testid="chat-list-show"]{visibility:hidden!important}';
-        });
-      }
       const png = await main.screenshot({ ...SHOT, clip: { x: prep.x, y: prep.y, width: prep.w, height: prep.h } });
       const { height } = pngSize(png);
       const dpr = height / prep.h;

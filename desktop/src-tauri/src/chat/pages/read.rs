@@ -233,15 +233,16 @@ pub struct Tables {
 /// tables, 3,000 rows, 30 cells a row, 300 characters a cell; a table's
 /// headers from its `<thead>`, else a first row of header cells; its
 /// caption, `aria-label`, else the heading before it.
-pub const TABLES_SCRIPT: &str = r#"(function(){var sq=function(s){return (s||'').replace(/\s+/g,' ').trim();};
-function vis(el){if(!el||!el.isConnected)return false;if(!el.getClientRects().length)return false;var s=getComputedStyle(el);if(s.visibility==='hidden'||s.display==='none')return false;return !el.closest('[aria-hidden="true"],[hidden],[inert]');}
+pub const TABLES_SCRIPT: &str = concat!("(function(){", deep_js!(), r#"var sq=function(s){return (s||'').replace(/\s+/g,' ').trim();};
+function vis(el){if(!el||!el.isConnected)return false;if(!el.getClientRects().length)return false;var s=getComputedStyle(el);if(s.visibility==='hidden'||s.display==='none')return false;return !up(el,'[aria-hidden="true"],[hidden],[inert]');}
 var MAXT=40,MAXR=3000,MAXC=30,MAXL=300,rows=0,out=[],more=false;
-var hs=[].slice.call(document.querySelectorAll('h1,h2,h3,h4,h5,h6,[role=heading]'));
-function before(el){var h='';for(var i=0;i<hs.length;i++){if(hs[i].compareDocumentPosition(el)&4){if(!hs[i].contains(el)&&vis(hs[i]))h=sq(hs[i].innerText);}else break;}return h;}
-function text(c){return sq(c.innerText).slice(0,MAXL);}
-function cell(c){var a=c.querySelector('a[href]');var u=a&&/^https?:/i.test(a.href)?a.href:'';return u?{t:text(c),h:u}:{t:text(c)};}
-var GRID='table,[role=table],[role=grid],[role=treegrid]';
-var all=[].slice.call(document.querySelectorAll(GRID));
+var GRID='table,[role=table],[role=grid],[role=treegrid]',HQ='h1,h2,h3,h4,h5,h6,[role=heading]';
+// The tables, each with the visible heading before it in the page's order (shadow trees in place).
+var seq=qa(GRID+','+HQ),all=[],near=new Map(),hs=[];
+for(var k=0;k<seq.length;k++){var e=seq[k];if(e.matches(GRID)){var h='';for(var q=hs.length-1;q>=0;q--){if(!hs[q].contains(e)){h=hs[q];break;}}all.push(e);near.set(e,h?sq(h.innerText):'');}else if(vis(e))hs.push(e);}
+function before(el){return near.get(el)||'';}
+function text(c){var x=sq(c.innerText);if(!x&&deep()&&(c.shadowRoot||c.querySelector('slot')))x=sq(flat(c));return x.slice(0,MAXL);}
+function cell(c){var a=q1('a[href]',c);var u=a&&/^https?:/i.test(a.href)?a.href:'';return u?{t:text(c),h:u}:{t:text(c)};}
 for(var i=0;i<all.length&&out.length<MAXT;i++){var t=all[i];if(!vis(t))continue;var native=t.tagName==='TABLE';
 if(native&&t.querySelector('table'))continue;
 var trs,cellsOf;
@@ -258,7 +259,7 @@ var w=rs.reduce(function(m,r){return Math.max(m,r.length);},head.length);if(w<2)
 var cap=native&&t.caption?sq(t.caption.innerText):'';
 out.push({caption:(cap||sq(t.getAttribute('aria-label'))||before(t)).slice(0,120),headers:head.slice(0,MAXC),rows:rs});
 if(rows>=MAXR){more=true;break;}}
-return {title:sq(document.title),url:location.href,tables:out,more:more};})()"#;
+return {title:sq(document.title),url:location.href,tables:out,more:more};})()"#);
 
 /// **A part of a page's tables**: from row `offset` on (rows counted across
 /// the tables in their order), at most [`TABLE_ROWS`] rows and about
