@@ -311,6 +311,15 @@ impl Endpoints {
 
     /// The address a request for `url` goes to: itself, or the test run's
     /// stand-in (`<standin>/<host><path>?<query>`).
+    /// **Where a cached answer came from**, part of every cache key (pages,
+    /// searches, free sources): the real services' always the same; each
+    /// stand-in web its own, so two tests running side by side, each with
+    /// its own stand-in answering the same address differently, never read
+    /// each other's answers. Pure.
+    pub(crate) fn cache_scope(&self) -> String {
+        format!("{}|{}|{}|{}", self.exa, self.tavily, self.standin.as_deref().unwrap_or(""), self.offline)
+    }
+
     fn route(&self, url: &Url) -> Result<Url, String> {
         match &self.standin {
             Some(base) => {
@@ -728,7 +737,8 @@ pub async fn search(s: &Settings, ep: &Endpoints, query: &str, context: &str) ->
     // A deeper search (a document's) says more and opens more pages: kept apart.
     let deep = s.native.as_ref().is_some_and(|n| n.deep);
     let key = format!(
-        "{:?}|{model}|{deep}|{}|{}|{}|{}",
+        "{}|{:?}|{model}|{deep}|{}|{}|{}|{}",
+        ep.cache_scope(),
         backend(s),
         s.lang,
         s.country.as_deref().unwrap_or(""),
@@ -1056,6 +1066,18 @@ mod tests {
             }
         });
         Fake { base: format!("http://127.0.0.1:{port}"), requests }
+    }
+
+    /// Two stand-in webs (tests side by side) keep their cached pages,
+    /// searches and free sources' answers apart; the real services' scope
+    /// never changes.
+    #[test]
+    fn each_standin_web_has_its_own_caches() {
+        let at = |port: u16| Endpoints { exa: String::new(), tavily: String::new(), standin: Some(format!("http://127.0.0.1:{port}/standin")), offline: false };
+        assert_ne!(at(4001).cache_scope(), at(4002).cache_scope());
+        assert_eq!(at(4001).cache_scope(), at(4001).cache_scope());
+        let real = || Endpoints { exa: "https://api.exa.ai".into(), tavily: "https://api.tavily.com".into(), standin: None, offline: false };
+        assert_eq!(real().cache_scope(), real().cache_scope());
     }
 
     pub(super) fn endpoints_of(f: &Fake) -> Endpoints {
