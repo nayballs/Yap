@@ -1101,7 +1101,9 @@ The language-model side: the OpenAI-compatible client and its prompts, the on-de
   `models::verify_into`; then `local_vision` on), offered by Settings →
   Language Models (the on-device models, "Read screenshots on this PC") and
   by Chat's "can't read images" line (`ai_model_status().imagesLocal`,
-  `snip::vision::local_offer`); `remove`, and a model's Uninstall takes its
+  `snip::vision::local_offer`; the download under way, with its progress, is
+  one frontend store both places share, `stores/localVision.svelte.js`, so it
+  carries on when you leave either); `remove`, and a model's Uninstall takes its
   projector too (`remove_with_model`). Never listed as a model
   (`local_llm::is_model_file`: no `mmproj-…`). **Loaded only while it's
   needed** (`ensure`, from `chat_send` and the Voice Assistant's question
@@ -2232,7 +2234,10 @@ cleanup is on the plan and Claude Code isn't ready.
   AM", the percent, a thin bar), extra usage ("Extra usage · £0.00 of
   £37.50"), last how full this chat is ("This chat · 16% of context"), and
   **See all →** to `USAGE_URL`. No numbers: no ring at all
-  ([frontend.md](./frontend.md)).
+  ([frontend.md](./frontend.md)). Its words — a limit's label, when it resets
+  in the person's local time, the ring's fill and colour, extra usage in the
+  answer's currency — come from `core/planUsage.js` (pure; Settings' plan
+  card uses it too).
 - **Chat's picker**: Claude is one entry with "Your plan | API key", as
   ChatGPT is (`TAB_WAYS`, `waysState`). The chip says "Using Claude plan" or
   "Anthropic API key".

@@ -312,6 +312,9 @@ on an element that also has a `settings.css` class (`set-note`,
   (`notifySuggestions`), Feature tips (`notifyFeatureTips`, off with Show
   tips), Milestones (`notifyMilestones`), News (`notifyNews`: "Updated to
   …" after an update).
+  **Links** (2026-11-01, `settings/OpenLinksIn.svelte`, its own chunk;
+  `shell/browsers.rs`, [app-shell.md](./app-shell.md#stack)): "Open links in"
+  — Windows' default or a registered browser, with their icons.
   **Markdown files** (2026-11-07, `settings/MarkdownFiles.svelte`, its own
   chunk; `notes/md_file.rs`, [notes.md](./notes.md#markdown-files-in-yap-notesmd_filers-2026-11-07)):
   **Open Markdown files with Yap** (`#open-markdown-with`) — the installer
