@@ -187,18 +187,21 @@
   // Shown again (a pill, a report card, a turn's own start, the bar's Open):
   // the panel, with that turn's row open and in view — or, from a row's
   // Open on another agent of the chat (`view: 'timeline'`), its timeline.
+  // A turn's own start (`auto`) opens no row: rows stay folded until the
+  // person opens one.
   $effect(() => {
     const turn = ref?.turn;
     const seq = ref?.seq;
     const id = ref?.id;
     const at = ref?.view;
+    const auto = ref?.auto;
     untrack(() => {
       if (at === 'timeline') {
         showTimeline(turn);
         return;
       }
       view = 'panel';
-      if (turn != null && id) want = { key: `${id}:${turn}`, seq };
+      if (turn != null && id && !auto) want = { key: `${id}:${turn}`, seq };
     });
   });
 
@@ -258,6 +261,24 @@
     }
   }
 
+  /**
+   * The agent read again, keeping what this tab heard meanwhile: a turn's
+   * usage only grows, so a read sent before the latest call's `usage` event
+   * came in never puts the panel's numbers back (Claude Code's calls come
+   * quickly, then can be quiet for a while).
+   */
+  const used = (u) => (u ? (Number(u.input) || 0) + (Number(u.output) || 0) + (Number(u.cacheRead) || 0) + (Number(u.cacheWrite) || 0) : 0);
+  function fresher(read, had) {
+    if (!read?.turnList?.length || !had?.turnList?.length || read.id !== had.id) return read;
+    return {
+      ...read,
+      turnList: read.turnList.map((t) => {
+        const h = had.turnList.find((x) => x.n === t.n);
+        return h?.usage && used(h.usage) > used(t.usage) ? { ...t, usage: h.usage } : t;
+      }),
+    };
+  }
+
   let refreshTimer = null;
   function refreshSoon() {
     clearTimeout(refreshTimer);
@@ -266,7 +287,7 @@
       if (!id) return;
       try {
         const r = await invoke('agent_get', { id });
-        if (doc.agent?.id === id) agent = r.agent;
+        if (doc.agent?.id === id) agent = fresher(r.agent, agent);
       } catch {
         /* keep */
       }

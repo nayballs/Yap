@@ -882,7 +882,7 @@ test('Tell the agent…: the person’s words go to the agent, its next turn', a
   await expect.poll(async () => (await agents(yap)).find((j) => j.id === agent.id).turns, { timeout: 20_000 }).toBe(2);
   const told = await ended(yap, agent.id);
   expect(told.text).toContain('Got: Also sort the list.');
-  await agentTimeline(main);
+  await agentTimeline(main, 2);
   await expect(main.getByTestId('chat-agent-text')).toContainText('Got: Also sort the list.');
   await messagesOf(yap, agent.conversation, 6);
 });

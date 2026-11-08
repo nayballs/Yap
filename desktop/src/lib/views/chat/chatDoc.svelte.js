@@ -351,9 +351,10 @@ export function createDocPanel({ onopennote = () => null } = {}) {
     // One tab an agent, whichever of its turns it opens at (`turn`: a pill's,
     // a report's; none: its newest). `seq` tells the tab it was asked again;
     // `view: 'timeline'` (the Agent panel's Open on another agent of the
-    // chat) opens its timeline, this once.
+    // chat) opens its timeline, this once. `auto`: opened by itself (a turn's
+    // own start), not by the person — its panel opens no row.
     agentSeq += 1;
-    const j = { ...known, ...ref, turn: ref.turn ?? null, view: ref.view ?? null, seq: agentSeq };
+    const j = { ...known, ...ref, turn: ref.turn ?? null, view: ref.view ?? null, auto: !!ref.auto, seq: agentSeq };
     inRow({ key: agentKey(ref.id), kind: 'agent', id: ref.id, agent: j });
     extra = extra.map((t) => (t.key === agentKey(ref.id) ? { ...t, agent: j } : t));
     agent = j;

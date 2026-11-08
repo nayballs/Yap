@@ -209,6 +209,11 @@ unchanged).
   `data-keep-motion`. The Yap bar's Svelte transitions (`fade`, `scale`,
   `flip`, which run as Web Animations that CSS can't stop) take
   `motionMs(ms)` = 0 while reduced. `desktop/e2e/appearance.spec.js`.
+  A page that animates only while it's seen asks
+  `stores/windowShown.svelte.js` (the window shown and not minimised, asked
+  on focus changes and every 2 s while followed: WebView2 says "visible" for
+  a hidden window) — the Agent panel's crew (`views/chat/crew/`, its colours
+  the `--yap-crew-*` tokens in app.css, light and dark) pauses with it.
 - **Custom window chrome (2026-07-09)** — the settings window is **undecorated**
   (`decorations: false` in tauri.conf.json): ControlPanel draws a 40px
   `data-tauri-drag-region` title bar (brand left; min / max-restore / close

@@ -183,8 +183,9 @@ export function createChatState({ onopensettings = () => null, onopennote = () =
     }
     // An agent this turn started (chat/tools/agents.rs): its tab opens at once,
     // as a page's does; its pill comes with the agents list (stores/agents.svelte.js).
+    // Opened by itself (`auto`): its panel's rows stay as the person left them.
     if (ev?.kind === 'agent') {
-      if (ev.agent?.id) doc.showAgent(ev.agent);
+      if (ev.agent?.id) doc.showAgent({ ...ev.agent, auto: true });
       return true;
     }
     if (ev?.kind === 'tool') doc.onTool(ev);

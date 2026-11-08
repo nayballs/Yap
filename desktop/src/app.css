@@ -144,6 +144,43 @@ body {
   --yap-status-needs-ring: rgba(176, 124, 16, 0.22);
   --yap-status-new: #2f6fd8;
 
+  /* Yap's crew (views/chat/crew/: the Agent panel's pixel characters, one a
+     model family; core/crew.js): each one's body colour and accent, and
+     what they share — ink for eyes, a white, metal, glass, the pencil's
+     wood, yellow and eraser, and how much of the body is in the feet (the
+     rest ink). The Claude models are Yap's own ambers, the others colours
+     of their own, never a company's */
+  --yap-crew-ink: #2a2118;
+  --yap-crew-white: #fffaf0;
+  --yap-crew-metal: #9aa0a8;
+  --yap-crew-metal-dark: #646a72;
+  --yap-crew-glass: rgba(140, 200, 238, 0.3);
+  --yap-crew-wood: #a8743c;
+  --yap-crew-pencil: #f0c232;
+  --yap-crew-eraser: #e8899b;
+  --yap-crew-feet: 45%;
+  --yap-crew-haiku: #f0b23e;
+  --yap-crew-haiku-accent: #5e9e3c;
+  --yap-crew-sonnet: #e2862a;
+  --yap-crew-opus: #c4661a;
+  --yap-crew-fable: #d9a03e;
+  --yap-crew-fable-accent: #2a7684;
+  --yap-crew-gpt: #4f9a7c;
+  --yap-crew-gpt-accent: #c9f2dc;
+  --yap-crew-gemini: #6b7fd6;
+  --yap-crew-gemini-accent: #f2c94c;
+  --yap-crew-grok: #4c515b;
+  --yap-crew-grok-accent: #e6ebf2;
+  --yap-crew-llama: #cfb48a;
+  --yap-crew-llama-accent: #7a5a3c;
+  --yap-crew-qwen: #a85bbf;
+  --yap-crew-mistral: #4aa3c9;
+  --yap-crew-mistral-accent: #8fd0ea;
+  --yap-crew-deepseek: #3f5fa3;
+  --yap-crew-local: #6a9a3c;
+  --yap-crew-local-accent: #ffd257;
+  --yap-crew-generic: #9a9488;
+
   /* display face — EB Garamond, Wispr's exact serif (stat numerals, hero
      headlines, settings titles; bundled in main.js) */
   --yap-font-display: 'EB Garamond Variable', Georgia, 'Palatino Linotype', 'Times New Roman', serif;
@@ -524,6 +561,28 @@ body {
   /* Chat's status dots: the warning's ring and a blue for the dark surfaces */
   --yap-status-needs-ring: rgba(220, 160, 60, 0.26);
   --yap-status-new: #6ea6ff;
+  /* the crew, a step brighter on the dark paper; its metal lighter, so a
+     magnifying glass's rim and a wrench still show */
+  --yap-crew-metal: #b4bac2;
+  --yap-crew-metal-dark: #8c929a;
+  --yap-crew-glass: rgba(150, 210, 245, 0.26);
+  --yap-crew-feet: 58%;
+  --yap-crew-haiku: #f6c255;
+  --yap-crew-haiku-accent: #7cc257;
+  --yap-crew-sonnet: #f09a42;
+  --yap-crew-opus: #de7f2e;
+  --yap-crew-fable: #e8b65a;
+  --yap-crew-fable-accent: #5fb8c6;
+  --yap-crew-gpt: #6cbf9c;
+  --yap-crew-gemini: #8f9ff0;
+  --yap-crew-grok: #8e95a3;
+  --yap-crew-llama: #dcc49c;
+  --yap-crew-llama-accent: #8a6845;
+  --yap-crew-qwen: #c47ad8;
+  --yap-crew-mistral: #6ec0e2;
+  --yap-crew-deepseek: #6f8fd6;
+  --yap-crew-local: #8bbd5a;
+  --yap-crew-generic: #aaa498;
 
   --yap-rule: #2c2822;
   --yap-link: #f0b04a;
