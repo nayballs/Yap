@@ -82,13 +82,17 @@ this PC, and Yap keeps its tools for Chat, the Voice Assistant and plan chats
 to use. Waves 1 (the core and programs), 2 (links with tokens), 3 (signing
 in through the browser), 4 (the tools in Chat's loop,
 [below](#connectors-in-chat-wave-4)), 5 (Settings → Connectors and its
-catalogue, [below](#settings--connectors-wave-5-2026-11-08)) and 7 (plan
-chats, through Yap's run endpoint: [below](#connectors-in-plan-chats-wave-7))
-are built; the rest come after.
+catalogue, [below](#settings--connectors-wave-5-2026-11-08)), 6 (everywhere
+else in Chat: the composer's per-chat switches, the Voice Assistant's spoken
+ask, the phone's reads, the meeting rule, and the preview's own switch in
+Settings: [below](#everywhere-else-in-chat-wave-6)) and 7 (plan chats,
+through Yap's run endpoint: [below](#connectors-in-plan-chats-wave-7)) are
+built; wave 8 (evaluations, and the privacy finish) comes after.
 
 - **The switch** (`connectors::enabled`): `connectors_preview` in config.json
-  (off by default), or `YAP_CONNECTORS=1` in a debug build (the e2e suite
-  sets it per spec). Off, no command reads or writes a connectors file,
+  (off by default; shown as **Connectors (preview)** on Settings →
+  Connectors since wave 6), or `YAP_CONNECTORS=1` in a debug build (the e2e
+  suite sets it per spec). Off, no command reads or writes a connectors file,
   starts a program or makes a request: `connectors_list` answers `{enabled:
   false, connectors: []}` and the rest refuse ("Connectors aren't switched on
   in this Yap yet."). Unit tests check that nothing is read.
@@ -405,12 +409,13 @@ each call through `consent.rs` and, when it asks, a card in the thread.
   a **strong cloud model** (`documents::rich::strong`; never a model on this
   PC until an evaluation, nor the Claude plan's runs, which get them through
   Yap's endpoint — the same `Turn::execute`: [below](#connectors-in-plan-chats-wave-7)), in
-  Chat or the Voice Assistant asked on this PC (`where.chat`, `where.voice`);
-  **never a phone's question** in this wave, never across the meetings, and
+  Chat or the Voice Assistant asked on this PC (`where.chat`, `where.voice`),
+  a paired phone's question its reads only (wave 6, `where.phone`), the
+  connectors **on in that chat** (wave 6), never across the meetings, and
   while a meeting records or a call is on only with
   `connectors_in_meetings` (config.json, off; wave 5's "Let connectors work
-  during meetings") or the connector's own `where.meetings` — then every
-  write asks.
+  during meetings") **and** the connector's own `where.meetings` (both since
+  wave 6; wave 4 took either) — then every write asks with a click.
 - **What's offered** (`connectors::offered`): each enabled connector's tools
   as last listed (a turn never waits for a server), not Off, schema made
   safe, by the wire names Settings shows (`names::Map`), in the connectors'
@@ -453,9 +458,9 @@ each call through `consent.rs` and, when it asks, a card in the thread.
   that can't delete and isn't Always allow already). Always allow sets the
   tool to Always allow pinned to the definition's hash
   (`connectors::allow_always`, `yap-connectors-changed`). Two minutes, then
-  a no; kept with the answer. Asked out loud, the card waits in Chat and the
-  bar's line says "Your OK is waiting in Chat · …" (the spoken yes/no is
-  wave 6).
+  a no; kept with the answer. Asked out loud, Yap also says one line, the
+  Yap bar asks and a spoken yes or no answers it (wave 6,
+  [below](#everywhere-else-in-chat-wave-6)).
 - **A call** (`connectors::call_for_chat`): the connector's own timeout, the
   turn's feature in the receipts (`net::within`: Chat's, or the Voice
   Assistant's), logged with the connector's id, the tool, the outcome, the
@@ -472,7 +477,7 @@ each call through `consent.rs` and, when it asks, a card in the thread.
   tools' typed-words check holds, and the connectors' writes ask.
 - **For wave 5 (Settings)**: `connector_set_tool {id, tool, setting}` (the
   card's Always allow uses `allow_always`, the same store), `where` per
-  connector (`chat`, `voice`, `meetings`; `phone` read in wave 6),
+  connector (`chat`, `voice`, `meetings`; `phone` since wave 6),
   `connectors_in_meetings` in config.json, and what each connector costs
   (`View::tokens`) against the cap (`budget::cap`) to say which way a model
   gets them.
@@ -509,8 +514,9 @@ aren't found). The page and its parts:
 - **A connector's page**: what it reaches (the link, or the program's exact
   command line as approved, its variables by name, a secret one 🔒), sign in
   / out, **Where Yap uses it** (`connector_set_where {id, places: {chat?,
-  voice?, meetings?}}`: Chat, the Voice Assistant, during meetings; the
-  phone shown off and not changeable until wave 6), its tools grouped Reads · Changes things · Can delete with Always
+  voice?, meetings?, phone?}}`: Chat, the Voice Assistant, during meetings,
+  and your phone — its reads set to Always allow, off by default, settable
+  since wave 6), its tools grouped Reads · Changes things · Can delete with Always
   allow / Ask first / Off each and a group's own control (a tool that can
   delete never offers Always allow; one Yap can't offer offers only Off; a
   group's control leaves one whose description reads like orders alone),
@@ -623,9 +629,12 @@ chips and result as wave 4's; Claude Code only asks.
   agent is a later opt-in) nor a one-shot scope call (cleanup, Commands,
   notes: they register no run). Wave 4's offer where the turn was asked
   (`connectors::offered_for_plan`): each connector's `where.plan` and
-  `where.chat` (`where.voice` asked out loud), **never a phone's question**,
-  never across the meetings, during a meeting or a call only those allowed
-  then (and every write asks).
+  `where.chat` (`where.voice` asked out loud; a phone's question `where.phone`'s reads
+  set to Always allow, wave 6), on in the chat (wave 6: its + menu's
+  switches, `connector_chats.json` — the list's hash is in the session's
+  fingerprint, so a switch starts a new session), never across the
+  meetings, during a meeting or a call only those allowed then (and every
+  write asks).
 - **The list** (`Listed`, read once per session: `tools/list`): every
   offered tool that isn't Off, by Yap's own names (`<slug>__<tool>`: Claude
   Code shows `mcp__yap__notion__search`; one too long for a model's 64
@@ -696,6 +705,122 @@ chips and result as wave 4's; Claude Code only asks.
   allowed; the card light and dark, Allow once, Deny; a write asking after a
   connector's result; ■ Stop telling the server; a tool and then the connector turned off, not listed,
   each a new session; a Code chat's session and an agent's run with none.
+
+### Everywhere else in Chat (wave 6)
+
+- **The composer's quick toggle** (`connectors/chats.rs`,
+  `connector_chats.json`; `views/chat/chatConnectors.svelte.js`,
+  `Composer.svelte`): Chat's + menu has **Connectors ▸** (the preview on, a
+  Chat model that gets connectors and one connector at least allowed in
+  Chat: `connector_chat_list`'s `shown`), as Claude's composer has — a
+  switch per enabled connector for this chat, its mark and name, then
+  **Manage connectors…** (Settings → Connectors). A chat has every enabled
+  connector on unless it switched one off, so the file keeps only what's
+  **off**, by conversation id (`{chats: {"12": {off: ["c2"]}}}`), ids only,
+  never a field in chats.json: a connector added later is on everywhere.
+  An open chat's switch is saved as it's flipped (`connector_chat_set
+  {conversationId, id, on}`); a new chat's stay in the page until its first
+  question, which takes them (`chat_send`'s `connectorsOff`: the turn runs
+  in `chats::with_new`, so the gates, the budget and the offer all leave
+  them out, and `chats::adopt_new` keeps them for the conversation it
+  makes — or clears what a deleted chat with that id left); a new chat
+  starts with all on again. The turn offers only the chat's connectors
+  that are on (`connectors::offered`'s `off`; `offers_any_in` for the
+  turn's gate, so a chat with none on has no connector tools nor Yap's line
+  about them), in Chat, out loud and on the plan (`plan_connectors`).
+  Gone with the chat (`chat_delete`, `chat_delete_many`, Delete some of your
+  data's Chats — taken out even with the preview off, a reused id must
+  start clean), with its connector (`connector_remove` takes the id out of
+  every chat), and whole with Chats and Reset app (`privacy/reset.rs`); no
+  file at all when nothing's off. Read only while the preview is on.
+- **The Voice Assistant** (`chat/assistant/connector_ask.rs`): the same
+  tools as Chat on the same models (its turn is Chat's), gated by each
+  connector's `where.voice`. A call that asks first (`consent.rs`; the card
+  carries `voice` and `spoken`) gets, from the Voice Assistant's own
+  stream sink (`assistant.rs` `Streamed::connector_asks`, hearing the
+  card's `Confirm` event — the tool loop's and a plan turn's held call
+  alike, one consent): **one spoken line** — "Use Notion to create page
+  “Launch notes”? Say yes, or press Allow." (`connector_ask::line`: the
+  tool's title in words, its main argument when short and no secret) — and
+  **Allow once / Don't** on the Yap bar (`connector_ask::card`, card id
+  `connectorAsk`, the notice policy's `prompt`: at once, never dropped; the
+  Voice Assistant's mark; its ✕ only hides it), unless the answer's in view
+  in Chat, where the thread's card is. **The spoken answer**, as Yap Code's
+  spoken yes (`agents/voice.rs`): the next Voice Assistant question in that
+  conversation within the card's two minutes is the answer when it's a
+  clear yes or no (`connector_ask::reply`: a short reply made only of one
+  language's yes or no words and fillers, in the person's languages — My
+  languages, English always, all seven when none of them is Yap's) — a yes
+  is Allow once, a no is Don't, through the same `chat_connector_confirm`;
+  anything else is a question of its own. It's taken before anything else
+  in `assistant::answer` (`spoken_connector_answer`): nothing is saved for
+  it, and the question that asked is the one under way again (its
+  generation back on the capsule, so its answer is said and ■ stops it; its
+  dictations count brought up to date, since that recording was the person
+  answering). **Never Always allow by voice**; **a click only** for a tool
+  that can delete and during a meeting (`spoken` false: a spoken yes is
+  answered "That one needs a click: press Allow on the Yap bar." and the
+  card still waits; a spoken no still says Don't) — and the Voice Assistant
+  is off during meetings anyway, so a meeting's audio never answers. The
+  activity line is "Waiting for your OK · …" (wave 4's "Your OK is waiting
+  in Chat" stand-in is gone: the line and the bar ask now); the thread's
+  card says "You asked out loud: say yes or no, or answer here." (or "this
+  one needs a click"). Spoken answers stay short (`SPOKEN_ANSWER_NOTE`, as
+  before). The question's turn ending (answered, stopped, replaced) takes
+  the bar's card down (`Drop for Streamed`).
+- **The phone** (Yap Link, reads only): `where.phone` is settable on a
+  connector's page now ("Your phone": its reads set to Always allow, off by
+  default; `connector_set_where`'s `phone`). A phone's question
+  (`Surface::Phone`, the turn's `Feature::AssistantPhone`) is offered only
+  that connector's **reads set to Always allow** (`connectors::phone_may`);
+  its other tools are known by name (`Turn::held`) and refused, and a read
+  that would ask (words that aren't the person's after outside content) is
+  refused too — no card can show on the phone (`watching` false there) —
+  with the phone's step line "That needs your OK on the PC · Notion ·
+  Create page" (`Out::Step`, as any step) and the chip "Didn't use … : it
+  needs your OK on the PC", the model told to say so. Plan chats asked from
+  the phone the same (`Turn::for_plan` keeps the reads). The wire is
+  unchanged: no new message, no card on the phone in v1.
+- **The meeting rule**: while a meeting records or a call is on,
+  connectors are off unless "Let connectors work during meetings"
+  (`connectors_in_meetings`) **and** the connector's own `where.meetings`
+  are on (wave 5's page already said "Also needs…"). Then reads go as set
+  and **every write asks with a click** — the design's table (a meeting is
+  other people's words: a write never runs by itself, never by a spoken
+  yes, but the person at the PC may still allow it), not refused outright.
+  Where nobody can click it's refused: the phone (and its questions are off
+  during meetings anyway) and the Voice Assistant (off during meetings).
+- **Connectors (preview)** (`settings/connectors/ConnectorsPreview.svelte`):
+  the feature's own switch on Settings → Connectors — on the calendars'
+  page while it's off, at the foot of the connectors' page while it's on —,
+  `connectors_preview`, **off by default**; Settings asks Rust again once
+  the config is saved (`yap-config-saved`). Found by Settings' search.
+- **Tests**: unit tests — `connectors/chats.rs` (a chat's switches, a new
+  chat's adopted and a stale entry cleared, deletion, a connector removed,
+  reset, nothing read with the preview off), `connectors::chat_menu`, the
+  `where` patch's phone, `chat/tools/connectors/tests.rs` (the offer by
+  chat, the phone's `where`, the meeting's two switches; asked out loud the
+  card's `voice` and `spoken`, never spoken in a meeting; the phone's read
+  run and write refused with its line, a read that would ask refused),
+  `assistant/connector_ask.rs` (the line, the bar card and its answers, a
+  clear yes or no in the person's languages, the slot taken only in its
+  conversation, a click only, answered or ended), `privacy/reset.rs`
+  (connector_chats.json with Chats); `assistant-connectors.spec.js`
+  (`e2e_assistant_ask` with a read; a write's spoken line and bar card, a
+  spoken yes and its answer said, a spoken no, the bar's Allow once; a tool
+  that can delete taking a click; `where.voice` off not offered; a paired
+  phone's client — `where.phone` off, then a read run and a write refused
+  with its step; a simulated call — nothing without both switches, then a
+  read and a write waiting for a click, the Voice Assistant off),
+  `chat-connectors.spec.js` (Connectors ▸: one off in a new chat not
+  offered, kept by id, still off on its next question, a new chat all on,
+  gone with the chat, Manage connectors…), `connectors.spec.js` (Your
+  phone's switch; Connectors (preview) on and off).
+- **Left for wave 8**: evaluations (`evals/scenarios/connectors-*.json`);
+  privacy — Download your data's export (connector_chats.json and the
+  connectors' settings), Report a problem's counts, the uninstaller's vault
+  names, `log_privacy`'s fields for the new log lines (they log ids,
+  counts and outcomes only).
 
 ## Claude Code runs' endpoint (`integrations/claude_live.rs`, 2026-11-07)
 

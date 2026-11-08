@@ -395,7 +395,11 @@ async fn answer_turn(
     // A summary being written on this PC steps aside for the question.
     crate::chat::compact::turn_started();
     // What this model may do in this turn (gates.rs).
-    let gates = gates::Gates::for_turn(&cfg, &ep, scope, meetings, chat_in_view);
+    let mut gates = gates::Gates::for_turn(&cfg, &ep, scope, meetings, chat_in_view);
+    // The connectors this chat switched off in its + menu (Connectors ▸,
+    // `connectors/chats.rs`): none left on, none offered — nor Yap's line
+    // about them in the prompt.
+    gates.connectors = gates.connectors && crate::chat::tools::connectors::offers_any_in(&cfg, scope, conversation_id);
     // About you (about_you.rs): where the person is, their money and units,
     // name and note — last in the system prompt, below; their clock in the
     // question's context (it changes every minute).
@@ -584,7 +588,7 @@ async fn fixed_parts(cfg: &YapConfig, ep: &Endpoint, conversation: Option<u64>, 
     let gates = gates::Gates::for_turn(cfg, ep, None, false, true);
     let code = crate::agents::code_chat::folder_of(conversation).is_some();
     let profile = crate::ai::about_you::profile(cfg);
-    let connectors = gates.connectors.then(|| crate::chat::tools::connectors::Turn::for_turn(cfg, &ep.provider, &ep.model, None, context)).flatten();
+    let connectors = gates.connectors.then(|| crate::chat::tools::connectors::Turn::for_turn(cfg, &ep.provider, &ep.model, None, context, conversation)).flatten();
     let parts = fit::Parts { persona: &ep.persona, profile: &profile, now: crate::ai::eval::now(), code, connectors: connectors.as_ref(), conversation };
     let room = fit::Room { context, known, kind: crate::chat::budget::Kind::Chat, tools: gates.tools, cap };
     let keep = || fit::keeps("", None, code, &[]);

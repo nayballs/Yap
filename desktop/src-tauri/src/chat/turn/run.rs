@@ -79,7 +79,7 @@ pub(super) async fn with_tools(
     // Connectors' tools (tools/connectors.rs): as the gates and the budget
     // measured them, from the store and the cache (a turn never waits for a
     // server to offer them).
-    let connectors = g.connectors.then(|| crate::chat::tools::connectors::Turn::for_turn(cfg, &ep.provider, &ep.model, t.scope, sizing.context_size)).flatten();
+    let connectors = g.connectors.then(|| crate::chat::tools::connectors::Turn::for_turn(cfg, &ep.provider, &ep.model, t.scope, sizing.context_size, Some(conv.id))).flatten();
     // The tools the gates offer (gates.rs `Gates::extra`: what the budget
     // counted, fitted to the model's context by `fit.rs`), with this turn's
     // calendar, agents and connectors.

@@ -844,14 +844,20 @@ on an element that also has a `settings.css` class (`set-note`,
     connectors; under it which way Chat's model gets the tools
     (`connectors_budget`, `budgetLine`: every tool, or tool search past its
     share) and "Let connectors work during meetings" (`cfg.connectorsInMeetings`,
-    Settings' config copy, passed in as `cfg`).
+    Settings' config copy, passed in as `cfg`), then **Connectors
+    (preview)** (`ConnectorsPreview.svelte`, wave 6: `cfg.connectorsPreview`,
+    off by default, with a Preview badge; also on the calendars' page while
+    it's off, its own chunk there, `PAGES.connectorsPreviewSwitch`; the shell
+    asks `connectors_list` again on `yap-config-saved`, so switching it
+    swaps the page; a search entry, "Connectors (preview)", found either
+    way).
   - **`ConnectorDetail.svelte`** (a connector's page, one level down,
     "‹ Connectors"): the header (mark, name, "by …" and Tested with Yap from
     its catalogue entry, status, Sign in / Sign in again / Cancel / Try
     again, Sign out, the switch), what it reaches (the link, or the exact
     command line in a mono box, variables by name), **Where Yap uses it**
-    (Chat, Voice Assistant, During meetings: `connector_set_where`; Your
-    phone shown off until wave 6), Tools — grouped Reads ·
+    (Chat, Voice Assistant, During meetings, Your phone — its reads set to
+    Always allow, wave 6: `connector_set_where`), Tools — grouped Reads ·
     Changes things · Can delete, each group's own three-way control and
     each tool's (`ToolRow.svelte`: Always allow · Ask first · Off as radios,
     no Always allow for one that can delete, only Off for one Yap can't

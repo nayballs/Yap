@@ -272,7 +272,14 @@
         />
       </div>
       <div class="wrow">
-        <Toggle checked={false} label="Your phone" ariaLabel="Use it from your phone" desc="Its reads, from your phone: comes later" disabled />
+        <Toggle
+          checked={c.where?.phone}
+          label="Your phone"
+          ariaLabel="Use it from your phone"
+          desc="Its reads set to Always allow, when you ask from your paired phone. Anything else needs your OK on the PC."
+          disabled={!c.enabled}
+          onchange={(on) => place({ phone: on })}
+        />
       </div>
     </section>
 

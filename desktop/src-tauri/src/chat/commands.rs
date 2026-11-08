@@ -28,6 +28,8 @@ pub fn chat_delete(id: u64) -> Result<(), String> {
     crate::apps::moved_on(Some(id));
     crate::ai::claude_plan::sessions::forget(id);
     crate::agents::code_chat::chat_deleted(id);
+    // Its own connectors' switches (the + menu's Connectors ▸) go with it.
+    crate::integrations::connectors::chats::chat_deleted(id);
     Ok(crate::chat::chats::saved()?)
 }
 
@@ -36,6 +38,7 @@ pub fn chat_delete(id: u64) -> Result<(), String> {
 #[tauri::command]
 pub fn chat_delete_many(ids: Vec<u64>) -> Result<usize, String> {
     let gone = crate::chat::chats::delete_many(&ids);
+    crate::integrations::connectors::chats::chats_deleted(&ids);
     for id in ids {
         crate::apps::moved_on(Some(id));
         crate::ai::claude_plan::sessions::forget(id);
@@ -123,6 +126,12 @@ pub fn chat_rename(id: u64, title: String) -> Result<String, String> {
 /// `codeFolder`: a new chat made a Code chat before its first question (a
 /// workspace's name or path): the conversation it makes is attached to it
 /// as it's made (`agents::code_chat`). Ignored for an existing conversation.
+///
+/// `connectorsOff`: the connectors a new chat's + menu switched off before
+/// its first question (Connectors ▸, `connectors/chats.rs`): this turn
+/// offers none of theirs, and the conversation it makes keeps them off.
+/// Ignored for an existing conversation (its own switches are saved as
+/// they're flipped, `connector_chat_set`).
 #[allow(clippy::too_many_arguments)]
 #[tauri::command]
 pub async fn chat_send(
@@ -140,6 +149,7 @@ pub async fn chat_send(
     selection: Option<crate::chat::documents::Selection>,
     page_quote: Option<crate::chat::pages::view::PageQuote>,
     code_folder: Option<String>,
+    connectors_off: Option<Vec<String>>,
 ) -> Result<serde_json::Value, String> {
     // A Skill (`/decisions`, a one-tap prompt): asked across the meetings,
     // its own passages and instructions (chat/skills.rs).
@@ -166,6 +176,9 @@ pub async fn chat_send(
     let send = Box::pin(crate::chat::assistant::selected::with(page_quote.and_then(|q| q.selected()), Box::pin(send)));
     // A new chat made a Code chat before its first question (agents/code_chat.rs).
     let send = Box::pin(crate::agents::code_chat::with_new(code_folder.filter(|_| conversation_id.is_none()), send));
+    // A new chat's connectors switched off in its + menu (connectors/chats.rs).
+    let new_off = conversation_id.is_none().then(|| connectors_off.unwrap_or_default().into_iter().collect());
+    let send = Box::pin(crate::integrations::connectors::chats::with_new(new_off, send));
     // Chat's own turn: Think pressed (the model on this PC), or a cloud
     // model at its effort (`ai/effort.rs`): what it thought comes back.
     let (out, thought) = crate::chat::think::scoped(think.unwrap_or(false), send).await;
@@ -264,6 +277,8 @@ async fn send_turn(
             |conv, index| {
                 // A new chat the page made a Code chat: attached as it's made.
                 crate::agents::code_chat::adopt_new(conv);
+                // …and its connectors' switches, kept for it.
+                crate::integrations::connectors::chats::adopt_new(conv);
                 // The page learns its conversation (a new one) as soon as it's made.
                 on_stream.send_json(serde_json::json!({
                     "kind": "turn",

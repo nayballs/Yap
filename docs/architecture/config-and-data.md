@@ -1105,6 +1105,16 @@
     characters, the input schema made safe for every provider, annotations,
     kind, hash, tokens, a flag or the reason it's skipped). A cache: rebuilt at
     the next listing, a failed save only logged (`Saver::quiet`).
+  - `%APPDATA%/yap/connector_chats.json` (`integrations/connectors/chats.rs`,
+    wave 6) — `{version, chats: {"12": {off: ["c2"]}}}`: the connectors each
+    Chat conversation switched off in its + menu (Connectors ▸), by its id;
+    a chat that switched none off has no entry, so a connector added later
+    is on everywhere. Ids only, never a name, and never a field in
+    chats.json. Gone with its chat (`chat_delete`, Delete some of your
+    data's Chats — even with the preview off), with its connector (the id
+    taken out of every chat), and whole with Chats and Reset app; no file
+    when nothing's off. Fields this build doesn't know are kept. Through
+    `saving.rs` ("your chats' connectors").
   - `%APPDATA%/yap/connectors/` — `c<N>/`, a program connector's working
     folder (empty to start with; what the program writes there is its own),
     and `c<N>.refresh.lock` while a sign-in's refresh (or sign-out) runs: one

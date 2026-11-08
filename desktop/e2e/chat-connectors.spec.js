@@ -14,12 +14,16 @@
 // - a tool that can delete never has Always allow;
 // - ■ Stop ends a slow call and the server is told (logged as cancelled);
 // - past the budget, find_tools and use_tool instead of every schema;
-// - with the preview off, nothing about connectors is offered.
+// - with the preview off, nothing about connectors is offered;
+// - the composer's + menu → Connectors ▸ (wave 6, connectors/chats.rs): a switch per connector for this
+//   chat — one switched off in a new chat isn't offered to its questions, kept in connector_chats.json
+//   by the conversation's id, and gone when the chat is deleted; a new chat has every connector on;
+//   Manage connectors… opens Settings → Connectors.
 // Fictional data only; nothing leaves the PC.
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { test as base, expect, setConfig, openView } from './support/fixtures.js';
+import { test as base, expect, setConfig, openView, expectStore, settingsDialog } from './support/fixtures.js';
 import { startFakeLlm } from './support/fake-llm.js';
 import { RUNS } from './support/yap.js';
 import { stepsSummary, chipKind } from '../src/lib/views/chat/chatSteps.js';
@@ -320,6 +324,92 @@ test("with the preview off, nothing about connectors is offered", async ({ yap, 
     expect(fake.called()).toHaveLength(0);
   } finally {
     await setConfig(yap, main, { connectorsPreview: true });
+    await yap.invoke('connector_remove', { id: fake.id });
+  }
+});
+
+test("the + menu's Connectors ▸: one switched off in a new chat isn't offered, kept by the chat's id, gone with the chat; a new chat has all on", async ({ yap, main, fakeLlm, shot }) => {
+  const fake = await addFake(yap, 'composer');
+  const theme = (await yap.invoke('get_config')).theme;
+  const plus = () => main.getByRole('button', { name: 'Chat options' });
+  const row = () => main.getByTestId('chat-connectors-row');
+  const menu = () => main.getByTestId('chat-connectors-menu');
+  const lights = () => menu().getByRole('button', { name: 'Home lights' });
+  const send = async (text) => {
+    await main.getByRole('textbox', { name: 'Message' }).fill(text);
+    await main.getByRole('button', { name: 'Send' }).click();
+  };
+  try {
+    await openView(main, 'Chat');
+    await main.getByRole('button', { name: 'New chat' }).first().click();
+    await plus().click();
+    await expect(row()).toContainText('1 of 1 on in this chat');
+    await row().click();
+    await expect(lights()).toHaveAttribute('aria-pressed', 'true');
+    await expect(menu().getByRole('button', { name: 'Manage connectors…' })).toBeVisible();
+    await shot(main, '06-connectors-menu-light');
+    // Off for this new chat: its first question offers none of its tools (nor Yap's line about them).
+    await lights().click();
+    await expect(lights()).toHaveAttribute('aria-pressed', 'false');
+    await expect(row()).toContainText('0 of 1 on in this chat');
+    await setConfig(yap, main, { theme: 'dark' });
+    await expect.poll(() => main.evaluate(() => document.documentElement.dataset.yapTheme)).toBe('dark');
+    if (!(await menu().isVisible())) {
+      if (!(await row().isVisible())) await plus().click();
+      await row().click();
+    }
+    await expect(lights()).toHaveAttribute('aria-pressed', 'false');
+    await shot(main, '07-connectors-menu-dark');
+    await setConfig(yap, main, { theme });
+    await main.getByRole('textbox', { name: 'Message' }).click();
+    await expect(row()).toHaveCount(0);
+    let from = fakeLlm.requests.length;
+    fakeLlm.scriptChat([{ content: 'No connectors in this chat.' }]);
+    await send('Which of my lights are on?');
+    await expect(main.getByText('No connectors in this chat.')).toBeVisible({ timeout: 15_000 });
+    let [call] = chatCalls(fakeLlm, from);
+    expect(call.tools.some((t) => t.startsWith('homelights__'))).toBe(false);
+    expect(call.system).not.toContain(LINE);
+    // Kept for that conversation, by its id (never in chats.json).
+    // (The newest conversation asking it: earlier tests asked the same.)
+    const asked = (text) =>
+      (yap.readJson('chats.json')?.conversations ?? []).filter((c) => c.messages.some((m) => m.role === 'user' && m.text === text)).sort((a, b) => b.id - a.id)[0];
+    const conv = asked('Which of my lights are on?').id;
+    await expectStore(yap, 'connector_chats.json', (f) => JSON.stringify(f.chats[String(conv)]?.off) === JSON.stringify([fake.id]));
+    expect(JSON.stringify(yap.readJson('chats.json'))).not.toContain('"off"');
+    // Its next question: still off.
+    from = fakeLlm.requests.length;
+    fakeLlm.scriptChat([{ content: 'Still none here.' }]);
+    await send('And now?');
+    await expect(main.getByText('Still none here.')).toBeVisible({ timeout: 15_000 });
+    [call] = chatCalls(fakeLlm, from);
+    expect(call.tools.some((t) => t.startsWith('homelights__'))).toBe(false);
+
+    // A new chat: every connector on again, and offered.
+    await main.getByRole('button', { name: 'New chat' }).first().click();
+    await plus().click();
+    await expect(row()).toContainText('1 of 1 on in this chat');
+    await main.getByRole('textbox', { name: 'Message' }).click();
+    from = fakeLlm.requests.length;
+    fakeLlm.scriptChat([{ content: 'Your lights are within reach.' }]);
+    await send('Can you see my lights?');
+    await expect(main.getByText('Your lights are within reach.')).toBeVisible({ timeout: 15_000 });
+    [call] = chatCalls(fakeLlm, from);
+    expect(call.tools).toEqual(expect.arrayContaining(['homelights__list_lights']));
+    expect(yap.readJson('connector_chats.json').chats[String(asked('Can you see my lights?').id)]).toBeUndefined();
+
+    // Deleted with its chat.
+    await yap.invoke('chat_delete', { id: conv });
+    await expectStore(yap, 'connector_chats.json', (f) => f === null || !f.chats?.[String(conv)]);
+
+    // Manage connectors… opens Settings → Connectors.
+    await plus().click();
+    await row().click();
+    await menu().getByRole('button', { name: 'Manage connectors…' }).click();
+    await expect(settingsDialog(main).getByRole('heading', { name: 'Connectors', level: 1 })).toBeVisible();
+    await main.keyboard.press('Escape');
+  } finally {
+    await setConfig(yap, main, { theme });
     await yap.invoke('connector_remove', { id: fake.id });
   }
 });

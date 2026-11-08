@@ -134,12 +134,18 @@ test('Yours: a link added with its token, its tools set one by one and by group,
   await expect(tool(dialog, 'needs_input').getByRole('radio')).toHaveText(['Off']);
   await expect(dialog.locator('[data-tool="inject"]')).toContainText('Its description reads like instructions to the model');
 
-  // Where Yap uses it: Chat, the Voice Assistant, meetings; the phone not yet.
+  // Where Yap uses it: Chat, the Voice Assistant, meetings, and the phone (its reads only, wave 6: off by default).
   await dialog.getByRole('button', { name: 'Use it with the Voice Assistant' }).click();
   await expect.poll(() => stored(yap).find((c) => c.id === id).where).toMatchObject({ chat: true, voice: false, meetings: false, phone: false });
   await dialog.getByRole('button', { name: 'Use it during meetings' }).click();
   await expect.poll(() => stored(yap).find((c) => c.id === id).where.meetings).toBe(true);
-  await expect(dialog.getByRole('button', { name: 'Use it from your phone' })).toBeDisabled();
+  const phone = dialog.getByRole('button', { name: 'Use it from your phone' });
+  await expect(phone).toBeEnabled();
+  await expect(dialog.locator('[data-setting="connector-where"]')).toContainText('Its reads set to Always allow, when you ask from your paired phone.');
+  await phone.click();
+  await expect.poll(() => stored(yap).find((c) => c.id === id).where.phone).toBe(true);
+  await phone.click();
+  await expect.poll(() => stored(yap).find((c) => c.id === id).where.phone).toBe(false);
 
   // "Last used", from a call.
   await expect(dialog.getByTestId('connector-used')).toContainText('Not used yet');
@@ -455,6 +461,16 @@ test('with the preview switched off, Connectors is the calendars page alone', as
     await expect(dialog.getByRole('listbox', { name: 'Settings found' })).not.toContainText('Discover connectors');
     await box.fill('');
     expect(fs.existsSync(path.join(off.dataDir, 'connectors.json'))).toBe(false);
+    // "Connectors (preview)" (wave 6): shown, off by default; on, the connectors' page; off again, the calendars'.
+    const preview = dialog.getByRole('button', { name: 'Connectors (preview)' });
+    await expect(preview).toBeVisible();
+    await expect(preview).toHaveAttribute('aria-pressed', 'false');
+    await preview.click();
+    await expect.poll(() => off.readConfig()?.connectorsPreview).toBe(true);
+    await expect(dialog.getByRole('tab', { name: 'Discover' })).toBeVisible({ timeout: 10_000 });
+    await dialog.getByRole('button', { name: 'Connectors (preview)' }).click();
+    await expect.poll(() => off.readConfig()?.connectorsPreview).toBe(false);
+    await expect(dialog.getByRole('tab', { name: 'Discover' })).toHaveCount(0, { timeout: 10_000 });
   } finally {
     await off.stop();
   }

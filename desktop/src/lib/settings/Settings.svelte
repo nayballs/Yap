@@ -51,6 +51,7 @@
     connectors: () => import('./ConnectorsSection.svelte'),
     // The connectors preview's page (connectors/: Yours, Discover, + Add).
     connectorsPreview: () => import('./connectors/ConnectorsPage.svelte'),
+    connectorsPreviewSwitch: () => import('./connectors/ConnectorsPreview.svelte'),
     mcp: () => import('./McpSection.svelte'),
     phone: () => import('./PhonePage.svelte'),
     privacy: () => import('./PrivacyPage.svelte'),
@@ -170,6 +171,14 @@
   }
   $effect(() => {
     if (section === 'connectors') checkConnectors();
+  });
+  // "Connectors (preview)" switched (ConnectorsPreview.svelte): asked again
+  // once config.json has it.
+  onMount(() => {
+    const un = listen('yap-config-saved', () => {
+      if (section === 'connectors') checkConnectors();
+    });
+    return () => un.then((f) => f());
   });
 
   onMount(async () => {
@@ -695,6 +704,9 @@
             </div>
             {#await PAGES.connectors() then { default: ConnectorsSection }}
               <ConnectorsSection {goto} />
+            {/await}
+            {#await PAGES.connectorsPreviewSwitch() then { default: ConnectorsPreview }}
+              <ConnectorsPreview {cfg} />
             {/await}
           {:else if section === 'mcp'}
             <div class="page-h">

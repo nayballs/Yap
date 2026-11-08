@@ -172,7 +172,7 @@ pub const KINDS: &[About] = &[
         group: CHAT,
         label: "Chats",
         says: "Every chat, archived ones too, with its screenshots. Documents Chat wrote stay in Notes",
-        files: &["(chats.json)", "chat-images/", "claude_sessions.json", "(memory.json)", "(search-index/)"],
+        files: &["(chats.json)", "chat-images/", "claude_sessions.json", "connector_chats.json", "(memory.json)", "(search-index/)"],
         stores: &["chats", "claudeSessions", "memory"],
     },
     About {
@@ -427,6 +427,12 @@ impl Choice {
         Cut::of(self.has(Kind::Chats), false)
     }
 
+    /// connector_chats.json: each Chat conversation's connectors switched
+    /// off (its + menu's Connectors ▸; Ask threads have none).
+    pub fn connector_chats(&self) -> Cut {
+        Cut::of(self.has(Kind::Chats), false)
+    }
+
     /// memory.json: what's remembered, or what the passes read of chats and
     /// meetings that went.
     pub fn memory(&self) -> Cut {
@@ -511,6 +517,7 @@ const STORES: &[(&str, Rule)] = &[
     ("chats.json", Choice::chats),
     ("chat-images/", Choice::chat_images),
     ("claude_sessions.json", Choice::claude_sessions),
+    ("connector_chats.json", Choice::connector_chats),
     ("memory.json", Choice::memory),
     ("search-index/", Choice::search_index),
     ("calendar.json", Choice::briefs),
@@ -536,6 +543,7 @@ const SET_ASIDE: &[(&str, Rule)] = &[
     ("note_pins", Choice::notes),
     ("chats", Choice::chats),
     ("claude_sessions", Choice::claude_sessions),
+    ("connector_chats", Choice::connector_chats),
     ("memory", Choice::memory),
     ("tasks", Choice::tasks),
     ("dictation_stats", Choice::stats),
@@ -874,6 +882,13 @@ fn clear_stores(c: &Choice, done: &mut Done) -> Gone {
     if c.claude_sessions() == Cut::Whole {
         crate::ai::claude_plan::sessions::reset();
     }
+    // Their connectors' switches (connectors/chats.rs): all of them, or the
+    // chats' that went (a later conversation may get one's id).
+    if c.connector_chats() == Cut::Whole {
+        crate::integrations::connectors::chats::reset();
+    } else {
+        crate::integrations::connectors::chats::chats_deleted(&gone.chats);
+    }
     // Memory: all of it (Undo's copies too), or what it read of what went.
     match c.memory() {
         Cut::Whole => done.memory = crate::memory::reset(),
@@ -1018,6 +1033,9 @@ fn run(app: &AppHandle, c: &Choice) -> Result<Done, String> {
     }
     if c.claude_sessions() != Cut::Keep {
         crate::ai::claude_plan::sessions::saved()?;
+    }
+    if c.connector_chats() != Cut::Keep {
+        crate::integrations::connectors::chats::saved()?;
     }
     if c.memory() != Cut::Keep {
         crate::memory::saved()?;

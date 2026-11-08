@@ -344,8 +344,10 @@ one side.
   wave 4, 2026-11-08, behind `connectors_preview`): a `Source` of its own
   (`dispatch.rs` `Source::Connectors`, first: its `<slug>__<tool>` names are
   never Yap's), offered last in `offer.rs` while `Gates::connectors` (a
-  strong cloud model, Chat or the Voice Assistant on this PC, never a phone
-  or across the meetings, a meeting only when allowed) and `Extra::connectors`
+  strong cloud model, Chat or the Voice Assistant on this PC — a paired
+  phone its reads set to Always allow only —, the connectors on in that chat
+  (its + menu's Connectors ▸, `connectors/chats.rs`), never across the
+  meetings, a meeting only when both its switches allow it) and `Extra::connectors`
   (the turn's `connectors::Turn`) have them — each tool as it is, or past
   their budget `find_tools` / `use_tool`, or for Claude on the Messages API
   deferred behind Anthropic's tool search (`step.rs`'s server tools). A
@@ -354,8 +356,10 @@ one side.
   `ConnectorCard`; `ConnectorConfirm.svelte` from `PageConfirm.svelte`):
   "Use Notion: Create page?", its arguments (secrets masked), **Allow once ·
   Always allow · Deny** (`chat_connector_confirm`; never Always allow for a
-  tool that can delete), the line "Waiting for your OK · …" (asked out loud:
-  "Your OK is waiting in Chat · …"); its line "Asking Notion · Search · …"
+  tool that can delete), the line "Waiting for your OK · …" (asked out loud,
+  also one spoken line, the Yap bar's Allow once / Don't and a spoken yes or
+  no: `assistant/connector_ask.rs`; from a phone, anything that would ask is
+  refused, "That needs your OK on the PC"); its line "Asking Notion · Search · …"
   (`Turn::activity`, from `calls.rs`) and its chip; ■ Stop drops the call
   and the server is told. Yap's one line in the system prompt
   (`connectors::INSTRUCTIONS`), never a server's. How it all works:
@@ -1556,6 +1560,22 @@ one side.
   pure, against the Skills there are; `said`, `turn`); Yap's question when
   it has nothing to run on is answered by voice (`wait_for_answer`,
   `answer_words`).
+- **`chat/assistant/connector_ask.rs`** — **a connector's tool asked about
+  out loud** (Connectors wave 6, [integrations.md](./integrations.md#everywhere-else-in-chat-wave-6)):
+  the Voice Assistant's stream sink hears a connector's card asking
+  (`Streamed::connector_asks`, the tool loop's or a plan turn's held call)
+  and says one line ("Use Notion to create page “Launch notes”? Say yes, or
+  press Allow.", `line`), puts Allow once / Don't on the Yap bar (`card`,
+  id `connectorAsk`, unless the answer's in view in Chat) and waits for a
+  spoken answer (`wait`, one at a time). The next Voice Assistant question
+  in that conversation within the card's two minutes, a clear yes or no in
+  the person's languages (`reply`: seven tables, My languages' codes,
+  English always), is the answer (`take`; `assistant::spoken_connector_answer`
+  before anything else in `answer`: nothing saved, the asking question's
+  generation and dictations count restored so its answer is said); never
+  Always allow by voice, a click only for a tool that can delete or during
+  a meeting ("That one needs a click: press Allow on the Yap bar.").
+  A spoken answer stays short as every Voice Assistant answer does.
 
 ## Questions about selected text (2026-10-31)
 

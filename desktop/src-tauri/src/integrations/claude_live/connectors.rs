@@ -7,8 +7,9 @@
 //! - **The list** ([`Listed`]): every tool the turn may use that isn't Off
 //!   (`chat/tools/connectors.rs` `offered_for_plan`: the preview on, the
 //!   connector on, `where.plan` and `where.chat` — or `where.voice` asked
-//!   out loud —, never a phone's question, during a meeting only those
-//!   allowed then), by Yap's own names (`<slug>__<tool>`, so Claude Code
+//!   out loud; a phone's question only `where.phone`'s reads set to Always
+//!   allow (wave 6) —, on in the chat (its + menu's Connectors ▸), during a
+//!   meeting only those allowed then), by Yap's own names (`<slug>__<tool>`, so Claude Code
 //!   shows `mcp__yap__notion__search`; one too long for a model's 64
 //!   characters with that in front is cut with a tag of its name), with
 //!   `readOnlyHint` for the reads and Yap's words for what each does
@@ -20,6 +21,9 @@
 //!   allow runs; Ask first, a tool that can delete, a write after outside
 //!   content or a risky name asks; Off is refused), its card in the plan
 //!   turn's thread (`ConnectorConfirm.svelte`, through the turn's stream)
+//!   — asked out loud, also Yap's spoken line, the Yap bar's Allow once /
+//!   Don't and a spoken yes or no (wave 6: the Voice Assistant's sink hears
+//!   the card, `chat/assistant/connector_ask.rs`) —
 //!   while **the HTTP call is held** for the person's answer, as `approve`
 //!   holds an agent's prompt (the card's two minutes and the call, within
 //!   [`CALL_LIMIT`], inside the run's 11-minute tool timeout); a no, no
