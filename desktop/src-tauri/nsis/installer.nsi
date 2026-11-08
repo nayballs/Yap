@@ -1169,9 +1169,10 @@ Section Uninstall
         IntOp $1 $1 + 1
       ${LoopWhile} $1 <= 6
       ; --- YAP DATA --- Connectors' secrets (integrations/connectors/vault.rs:
-      ; a link's token and headers, a program's secret variables):
-      ; yap-connector-c1-1 … yap-connector-c24-4, connectors c1…c24
-      ; (store::MAX) in up to 4 parts each (vault::PARTS). They go with
+      ; a link's token and headers, a program's secret variables, a
+      ; browser sign-in's tokens and a client's secret):
+      ; yap-connector-c1-1 … yap-connector-c24-8, connectors c1…c24
+      ; (store::MAX) in up to 8 parts each (vault::PARTS). They go with
       ; %APPDATA%\yap's connectors.json, which names them.
       StrCpy $1 1
       ${Do}
@@ -1179,7 +1180,7 @@ Section Uninstall
         ${Do}
           System::Call 'advapi32::CredDeleteW(w "yap-connector-c$1-$2.com.yap.dictation", i 1, i 0) i .r0'
           IntOp $2 $2 + 1
-        ${LoopWhile} $2 <= 4
+        ${LoopWhile} $2 <= 8
         IntOp $1 $1 + 1
       ${LoopWhile} $1 <= 24
     ${EndIf}

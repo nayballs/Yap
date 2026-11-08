@@ -1078,12 +1078,22 @@
     header *names*; `local`: the command as given, its `resolved` full path,
     `args`, variables — a plain one's value, a secret's name only — and
     `approved`, the fingerprint of the command line the person saw), how it
-    signs in (`none` | `bearer` | `header`; wave 3 adds `oauth`), where Yap
+    signs in (`auth.kind`: `none` | `bearer` | `header` | `oauth`), where Yap
     may use it, and each tool's setting (`allow` | `ask` | `off`) with the
-    hash of the definition it was set for. Never a secret. Fields this build
-    doesn't know are kept on its save (a newer Yap's). Settings: it stays
-    through Delete some of your data and Reset app. Through `saving.rs`
-    ("your connectors").
+    hash of the definition it was set for. A browser sign-in (`oauth.rs`,
+    2026-11-08) adds to `auth`: `issuer` (the authorization server the
+    resource named), `resource` (what the tokens are for), `client` (`{kind:
+    own | catalog | cimd | dcr, clientId}`: the client it used), `scopes`
+    (asked for and granted), `signedIn`, `expired`, `wants` (scopes a server
+    asked for since: the next sign-in's step-up), `server` (the authorization
+    server's endpoints as discovered: authorize, token, revocation,
+    registration, whether it sends `iss`, its client-authentication methods),
+    `registration` (the dynamic registration Yap made, for that issuer only:
+    `{issuer, clientId, authMethod, redirectUris, registered}`) and `own`
+    (`{clientId}`: the person's own client). Never a token or a secret.
+    Fields this build doesn't know are kept on its save (a newer Yap's).
+    Settings: it stays through Delete some of your data and Reset app.
+    Through `saving.rs` ("your connectors").
   - `%APPDATA%/yap/connector_tools.json` (`cache.rs`) — `{version, listings:
     {c3: {listedAt, ttlMs, server, tools, truncated}}}`: each connector's tools
     as last listed (name, title, the description capped at 1,000
@@ -1091,13 +1101,21 @@
     kind, hash, tokens, a flag or the reason it's skipped). A cache: rebuilt at
     the next listing, a failed save only logged (`Saver::quiet`).
   - `%APPDATA%/yap/connectors/` — `c<N>/`, a program connector's working
-    folder (empty to start with; what the program writes there is its own).
+    folder (empty to start with; what the program writes there is its own),
+    and `c<N>.refresh.lock` while a sign-in's refresh (or sign-out) runs: one
+    at a time across the Yaps that share this folder (`refresh.rs`; it holds
+    the owner's pid, and a gone Yap's is taken back).
   - Its secrets — a link's token and header values, a program's secret
-    variables — are one JSON value per connector in Windows Credential
-    Manager, `yap-connector-c<N>-<part>.com.yap.dictation` (parts `-1`…`-4`,
-    1,100 characters each; a portable Yap adds a hash of its data folder),
-    never in a file; removed with the connector and by the uninstaller's
-    "Delete the application data" (all 24 × 4 names). A test run
+    variables, a browser sign-in's tokens (`grant`: the access and refresh
+    tokens, when they run out and were issued, the scopes granted, and the
+    issuer, resource and client they're bound to) and a client's secret (a
+    registration's, the person's own client's) — are one JSON value per
+    connector in Windows Credential Manager,
+    `yap-connector-c<N>-<part>.com.yap.dictation` (parts `-1`…`-8`, 1,100
+    characters each; a portable Yap adds a hash of its data folder), never in
+    a file; removed with the connector (a sign-in revoked first) and by the
+    uninstaller's "Delete the application data" (all 24 × 8 names). Signing
+    out removes the tokens and keeps the client's secret. A test run
     (`YAP_E2E=1`) keeps them in `connector-secrets.e2e.json` in its own data
     folder instead.
 - Account session: a Windows Credential Manager generic credential

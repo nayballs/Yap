@@ -304,3 +304,215 @@ async fn a_name_on_the_internet_that_points_at_this_pc_is_refused() {
     assert_eq!(manager::http_error_of(&err), Some(remote::HttpError::Private { host: format!("rebind.example:{}", srv.port) }));
     assert!(srv.said().is_empty(), "nothing reached it");
 }
+
+// ---- signing in, against the OAuth fake --------------------------------------------------------------
+
+/// The person's browser: the fake's consent page approved at once, then
+/// Yap's loopback (on a thread of its own, as a browser is).
+fn browser(link: &str) -> Result<(), String> {
+    let link = link.to_string();
+    std::thread::spawn(move || fake::browse(&link));
+    Ok(())
+}
+
+/// A link to the OAuth fake, signed in: its id.
+async fn signed_in(srv: &fake::OauthFake) -> String {
+    let v = connector_add(link(&srv.url("/mcp"))).await.unwrap();
+    assert_eq!(v.status.status, Status::NeedsSignIn);
+    assert_eq!(v.status.sign_in, Some(oauth::SignInState::NeedsSignIn));
+    let done = sign_in_with(&v.id, &browser).await.unwrap();
+    assert_eq!(done.outcome, Outcome::SignedIn);
+    v.id
+}
+
+#[tokio::test]
+async fn signing_in_registers_once_keeps_the_tokens_in_the_vault_connects_and_signing_out_revokes() {
+    on();
+    let srv = fake::oauth(fake::OauthSetup::default());
+    let id = signed_in(&srv).await;
+    let v = view(&store::get(&id).unwrap());
+    assert!(matches!(v.status.status, Status::Connected { tools: 2 }), "{:?}", v.status);
+    assert_eq!(v.status.sign_in, Some(oauth::SignInState::SignedIn));
+    let info = v.sign_in.unwrap();
+    assert_eq!(info.client, Some(store::ClientKind::Dcr));
+    assert!(info.host.as_deref().is_some_and(|h| h.starts_with("127.0.0.1")), "{:?}", info.host);
+    assert_eq!(srv.count("register native none"), 1, "a native public client: {:?}", srv.said());
+    assert_eq!(srv.count("token code ok"), 1, "PKCE, the redirect and the resource checked: {:?}", srv.said());
+    assert!(srv.said().iter().any(|l| l == &format!("authorize read offline_access resource=http://127.0.0.1:{}/mcp", srv.port)), "{:?}", srv.said());
+    // The tokens in the vault, bound to their issuer and resource; none in the file.
+    let grant = vault::load(&id).grant.unwrap();
+    assert!(grant.access.starts_with("at-") && grant.refresh.as_deref().is_some_and(|r| r.starts_with("rt-")));
+    assert_eq!(grant.resource, srv.url("/mcp"));
+    let file = serde_json::to_string(&store::list()).unwrap();
+    assert!(!file.contains(&grant.access) && !file.contains("rt-"), "{file}");
+    // Calls carry it.
+    let r = call_tool(&id, "list_lights", &json!({}), None).await.unwrap();
+    assert_eq!(r["data"]["text"], "Kitchen: on");
+    assert!(srv.said().iter().any(|l| l == &format!("mcp tools/call {}", grant.access)));
+    // Every request in the receipts, by purpose.
+    let entries = crate::privacy::net::entries();
+    assert!(entries.iter().any(|e| e.label == "Connector sign-in · A connector"));
+    assert!(!serde_json::to_string(&entries).unwrap().contains(&grant.access));
+
+    // Signed in again: the registration reused, never made twice.
+    assert_eq!(sign_in_with(&id, &browser).await.unwrap().outcome, Outcome::SignedIn);
+    assert_eq!(srv.count("register"), 1);
+
+    // Signed out: the refresh token revoked, the tokens gone, the registration kept.
+    let refresh = vault::load(&id).grant.unwrap().refresh.unwrap();
+    let out = connector_sign_out(id.clone()).await.unwrap();
+    assert!(out.confirmed);
+    assert_eq!(out.connector.status.sign_in, Some(oauth::SignInState::NeedsSignIn));
+    assert!(srv.said().contains(&format!("revoke refresh_token {refresh} client=dcr-1")), "{:?}", srv.said());
+    assert!(vault::load(&id).grant.is_none());
+    assert_eq!(store::get(&id).unwrap().auth.registration.map(|r| r.client_id).as_deref(), Some("dcr-1"));
+    let before = srv.said().len();
+    let r = call_tool(&id, "list_lights", &json!({}), None).await;
+    assert!(r.is_err(), "no sign-in: no call");
+    assert!(srv.said()[before..].iter().all(|l| !l.contains("at-")), "no token sent after sign-out");
+}
+
+#[tokio::test]
+async fn one_refresh_at_a_time_and_another_yaps_newer_tokens_are_used() {
+    on();
+    let srv = fake::oauth(fake::OauthSetup::default());
+    let id = signed_in(&srv).await;
+    assert_eq!(srv.count("token refresh"), 0, "a fresh token isn't refreshed: {:?}", srv.said());
+    // It runs out: two callers at once, one refresh, both get its token.
+    let ran_out = |s: &mut vault::Secrets| {
+        if let Some(g) = &mut s.grant {
+            g.expires = 1;
+            g.received = 0;
+        }
+    };
+    vault::update(&id, ran_out).unwrap();
+    let (a, b) = tokio::join!(oauth::access_token(&id, None), oauth::access_token(&id, None));
+    let (a, b) = (a.unwrap(), b.unwrap());
+    assert_eq!(srv.count("token refresh"), 1, "{:?}", srv.said());
+    assert_eq!(a.0, b.0, "the second used the first's refresh");
+    assert!(!srv.said().contains(&"replay".to_string()), "a spent refresh token never sent: {:?}", srv.said());
+    vault::update(&id, ran_out).unwrap();
+
+    // Another Yap refreshes while this one waits for the guard: its tokens
+    // are read back and used, with no refresh of this Yap's own.
+    let held = refresh::acquire(&id).await.unwrap();
+    let waiting = tokio::spawn({
+        let id = id.clone();
+        async move { oauth::access_token(&id, None).await }
+    });
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    let count = srv.count("token refresh");
+    vault::update(&id, |s| {
+        if let Some(g) = &mut s.grant {
+            g.access = "at-another-yap".into();
+            g.expires = 4_000_000_000;
+            g.received = 3_000_000_000;
+        }
+    })
+    .unwrap();
+    drop(held);
+    let (t, _) = waiting.await.unwrap().unwrap();
+    assert_eq!(t, "at-another-yap");
+    assert_eq!(srv.count("token refresh"), count, "nothing refreshed here");
+}
+
+#[tokio::test]
+async fn a_refreshed_token_rotates_and_a_revoked_grant_ends_the_sign_in() {
+    on();
+    let srv = fake::oauth(fake::OauthSetup::default());
+    let id = signed_in(&srv).await;
+    let first = vault::load(&id).grant.unwrap();
+    // The server turns the access token down (a 401): one refresh, the call sent again.
+    srv.state.lock().unwrap().access.remove(&first.access);
+    let r = call_tool(&id, "list_lights", &json!({}), None).await.unwrap();
+    assert_eq!(r["data"]["text"], "Kitchen: on", "{r}");
+    let second = vault::load(&id).grant.unwrap();
+    assert_ne!(second.access, first.access);
+    assert_ne!(second.refresh, first.refresh, "the refresh token rotated and was kept at once");
+    assert!(srv.said().contains(&format!("token refresh {}", first.refresh.unwrap())));
+    // The server revokes everything: the refresh is turned down, the sign-in ends.
+    srv.revoke_all();
+    let r = call_tool(&id, "list_lights", &json!({}), None).await.unwrap();
+    assert_eq!(r["success"], false);
+    assert!(r["error"].as_str().unwrap().contains("has ended. Sign in again."), "{r}");
+    let v = view(&store::get(&id).unwrap());
+    assert_eq!(v.status.sign_in, Some(oauth::SignInState::Expired));
+    assert!(v.status.line.contains("has ended"), "{}", v.status.line);
+    assert!(vault::load(&id).grant.is_none(), "dead tokens aren't kept");
+    // Signing in again brings it back.
+    assert_eq!(sign_in_with(&id, &browser).await.unwrap().connector.status.sign_in, Some(oauth::SignInState::SignedIn));
+}
+
+#[tokio::test]
+async fn a_server_wanting_more_access_asks_to_sign_in_again_with_more_scopes() {
+    on();
+    let srv = fake::oauth(fake::OauthSetup::default());
+    let id = signed_in(&srv).await;
+    let r = call_tool(&id, "turn_off", &json!({ "area": "hall" }), None).await.unwrap();
+    assert_eq!(r["success"], false);
+    assert!(r["error"].as_str().unwrap().contains("needs more access for this. Sign in again."), "{r}");
+    let c = store::get(&id).unwrap();
+    assert_eq!(c.auth.wants, ["write"]);
+    assert_eq!(view(&c).status.sign_in, Some(oauth::SignInState::NeedsSignIn));
+    // The next sign-in asks for the old scopes and the new one.
+    sign_in_with(&id, &browser).await.unwrap();
+    assert!(srv.said().iter().any(|l| l.starts_with("authorize read offline_access write")), "{:?}", srv.said());
+    let r = call_tool(&id, "turn_off", &json!({ "area": "hall" }), None).await.unwrap();
+    assert_eq!(r["data"]["text"], "Turned off the hall lights.", "{r}");
+}
+
+#[tokio::test]
+async fn an_answer_from_another_issuer_is_never_used() {
+    on();
+    let srv = fake::oauth(fake::OauthSetup { wrong_iss: true, ..Default::default() });
+    let v = connector_add(link(&srv.url("/mcp"))).await.unwrap();
+    let err = sign_in_with(&v.id, &browser).await.unwrap_err();
+    assert!(err.contains("didn't come from the sign-in server Yap asked"), "{err}");
+    assert_eq!(srv.count("token"), 0, "the code was never used: {:?}", srv.said());
+    assert!(vault::load(&v.id).grant.is_none());
+    assert_eq!(view(&store::get(&v.id).unwrap()).status.sign_in, Some(oauth::SignInState::NeedsSignIn));
+}
+
+#[tokio::test]
+async fn a_sign_in_can_be_cancelled_and_a_grant_goes_only_to_its_own_server() {
+    on();
+    let srv = fake::oauth(fake::OauthSetup::default());
+    let v = connector_add(link(&srv.url("/mcp"))).await.unwrap();
+    // The browser is opened and never comes back; Cancel.
+    let nobody = |_: &str| Ok(());
+    let id = v.id.clone();
+    let (out, ()) = tokio::join!(sign_in_with(&v.id, &nobody), async {
+        tokio::time::sleep(Duration::from_millis(400)).await;
+        assert!(oauth::signing_in(&id));
+        assert_eq!(view(&store::get(&id).unwrap()).status.line, "Signing in… Finish in your browser.");
+        assert!(oauth::cancel(&id));
+    });
+    assert_eq!(out.unwrap().outcome, Outcome::Cancelled);
+    assert!(!oauth::signing_in(&v.id));
+
+    // Signed in, then the connector's address changes: its grant isn't sent there.
+    let id = signed_in(&srv).await;
+    let other = fake::http(Mode::Answer);
+    store::update(&id, |c| c.transport = Transport::Remote { url: other.url("/mcp"), fallback_sse: None, sse: false, headers: vec![] }).unwrap();
+    assert_eq!(oauth::access_token(&id, None).await.unwrap_err(), oauth::Trouble::SignIn);
+    // A program or a token connector doesn't sign in in the browser.
+    let tok = connector_add(Spec { token: Some("t-FAKE".into()), ..link(&srv.url("/mcp")) }).await.unwrap();
+    assert!(sign_in_with(&tok.id, &browser).await.unwrap_err().contains("uses a token"));
+}
+
+#[tokio::test]
+async fn the_persons_own_client_is_kept_its_secret_in_the_vault() {
+    on();
+    let srv = fake::oauth(fake::OauthSetup::default());
+    let v = connector_add(link(&srv.url("/mcp"))).await.unwrap();
+    let after = connector_set_client(v.id.clone(), "my-client".into(), Some("cs-FAKE-own".into())).await.unwrap();
+    let info = after.sign_in.unwrap();
+    assert_eq!((info.own_client_id.as_deref(), info.has_own_secret), (Some("my-client"), true));
+    assert_eq!(info.redirect_uri, "http://127.0.0.1:51439/connectors/callback");
+    assert!(!serde_json::to_string(&store::list()).unwrap().contains("cs-FAKE"));
+    assert_eq!(vault::load(&v.id).own_secret.as_deref(), Some("cs-FAKE-own"));
+    assert!(connector_set_client(v.id.clone(), "has space".into(), None).await.is_err());
+    // Cleared: the id and its secret both go.
+    connector_set_client(v.id.clone(), String::new(), None).await.unwrap();
+    assert!(store::get(&v.id).unwrap().auth.own.is_none() && vault::load(&v.id).own_secret.is_none());
+}

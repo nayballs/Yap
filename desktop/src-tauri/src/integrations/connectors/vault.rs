@@ -1,12 +1,13 @@
 //! **Connectors' secrets** — a link's token and its secret headers, a
-//! program's secret environment variables (wave 3: OAuth tokens and a
-//! client secret) — as one JSON value per connector, never in
-//! connectors.json, connector_tools.json, the logs or the webview.
+//! program's secret environment variables, a browser sign-in's tokens
+//! ([`Grant`]) and a client's secret (a registration's, or the person's own
+//! client's) — as one JSON value per connector, never in connectors.json,
+//! connector_tools.json, the logs or the webview.
 //!
 //! Windows Credential Manager, as the calendars' and the ChatGPT sign-in's
 //! (`calendar/vault.rs`, `ai/chatgpt/vault.rs`): generic credentials named
 //! `yap-connector-c<N>-<part>.com.yap.dictation` (Local persistence), the
-//! value split in [`PART_CHARS`]-character parts across `-1`…`-4`
+//! value split in [`PART_CHARS`]-character parts across `-1`…`-8`
 //! ([`PARTS`]), `c1`…`c24` (`store::MAX`), so the uninstaller's "Delete the
 //! application data" knows every name. A portable Yap adds a hash of its
 //! data folder to the names. Test runs (`e2e::active`) keep them in a file
@@ -19,8 +20,9 @@ use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
 
-/// Credentials one connector's secrets may span.
-pub const PARTS: usize = 4;
+/// Credentials one connector's secrets may span: room for a sign-in's two
+/// tokens (JWTs of 2–3,000 characters each are common) and a client secret.
+pub const PARTS: usize = 8;
 /// Credential Manager blobs top out at 2,560 bytes of UTF-16.
 pub const PART_CHARS: usize = 1_100;
 /// Yap's own credentials' service (`<user>.com.yap.dictation`).
@@ -40,6 +42,52 @@ pub struct Secrets {
     /// A program's secret environment variables, by name.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub env: BTreeMap<String, String>,
+    /// A browser sign-in's tokens (`oauth.rs`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub grant: Option<Grant>,
+    /// The secret of the client Yap registered with the server (dynamic
+    /// registration), when it was given one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub registered_secret: Option<String>,
+    /// The secret of the person's own client, entered with its id.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub own_secret: Option<String>,
+}
+
+/// A browser sign-in's tokens, with what they're bound to: the
+/// authorization server that issued them, the resource they're for and the
+/// client they were issued to. Only ever sent to that resource (the access
+/// token) and that server (the refresh token).
+#[derive(Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Grant {
+    pub access: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub refresh: Option<String>,
+    /// When the access token stops working (Unix seconds); 0: the server
+    /// didn't say (used until it's refused).
+    #[serde(default)]
+    pub expires: i64,
+    /// When it was issued (Unix seconds).
+    #[serde(default)]
+    pub received: i64,
+    #[serde(default)]
+    pub scopes: Vec<String>,
+    pub issuer: String,
+    pub resource: String,
+    pub client_id: String,
+}
+
+impl std::fmt::Debug for Grant {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Grant")
+            .field("access", &"…")
+            .field("refresh", &self.refresh.as_ref().map(|_| "…"))
+            .field("expires", &self.expires)
+            .field("scopes", &self.scopes)
+            .field("issuer", &self.issuer)
+            .finish()
+    }
 }
 
 impl std::fmt::Debug for Secrets {
@@ -48,13 +96,21 @@ impl std::fmt::Debug for Secrets {
             .field("token", &self.token.as_ref().map(|_| "…"))
             .field("headers", &self.headers.keys().collect::<Vec<_>>())
             .field("env", &self.env.keys().collect::<Vec<_>>())
+            .field("grant", &self.grant)
+            .field("registered_secret", &self.registered_secret.as_ref().map(|_| "…"))
+            .field("own_secret", &self.own_secret.as_ref().map(|_| "…"))
             .finish()
     }
 }
 
 impl Secrets {
     pub fn is_empty(&self) -> bool {
-        self.token.is_none() && self.headers.is_empty() && self.env.is_empty()
+        self.token.is_none()
+            && self.headers.is_empty()
+            && self.env.is_empty()
+            && self.grant.is_none()
+            && self.registered_secret.is_none()
+            && self.own_secret.is_none()
     }
 }
 
@@ -143,6 +199,14 @@ impl Vault {
         })
     }
 
+    /// Change connector `id`'s secrets: read, `f`, saved whole.
+    pub fn update<R>(&self, id: &str, f: impl FnOnce(&mut Secrets) -> R) -> Result<R, String> {
+        let mut s = self.load(id);
+        let out = f(&mut s);
+        self.save(id, &s)?;
+        Ok(out)
+    }
+
     /// Forget connector `id`'s secrets (no-op if there are none).
     pub fn delete(&self, id: &str) {
         if check_id(id).is_err() {
@@ -190,6 +254,10 @@ pub fn save(id: &str, secrets: &Secrets) -> Result<(), String> {
 
 pub fn delete(id: &str) {
     Vault::this_run().delete(id)
+}
+
+pub fn update<R>(id: &str, f: impl FnOnce(&mut Secrets) -> R) -> Result<R, String> {
+    Vault::this_run().update(id, f)
 }
 
 #[cfg(windows)]
@@ -356,6 +424,18 @@ mod tests {
             token: Some("ghp_FAKE_0123456789".into()),
             headers: BTreeMap::from([("X-Api-Key".into(), "key-FAKE".into())]),
             env: BTreeMap::from([("GITHUB_TOKEN".into(), "ghp_FAKE_env".into())]),
+            grant: Some(Grant {
+                access: "at-FAKE-1".into(),
+                refresh: Some("rt-FAKE-1".into()),
+                expires: 4_000,
+                received: 400,
+                scopes: vec!["read".into()],
+                issuer: "https://auth.example.com".into(),
+                resource: "https://mcp.example.com/mcp".into(),
+                client_id: "yap-FAKE-client".into(),
+            }),
+            registered_secret: Some("cs-FAKE-dcr".into()),
+            own_secret: Some("cs-FAKE-own".into()),
         }
     }
 

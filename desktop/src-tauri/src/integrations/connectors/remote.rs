@@ -28,7 +28,13 @@
 //!   server; never in a URL, a log or an error.
 //! - **401**: with a token or a header sent, the server turned it down
 //!   ([`HttpError::TokenRefused`]); without, it wants a browser sign-in
-//!   (rmcp's `AuthRequired`, which wave 3's sign-in starts from).
+//!   (rmcp's `AuthRequired`, which the sign-in starts from, `oauth.rs`).
+//! - **A browser sign-in** ([`Http::with_sign_in`]): every request carries
+//!   the sign-in's access token, refreshed 30 s before it runs out
+//!   (`oauth::Source`); a 401 to it refreshes once and sends the request
+//!   again (the server did nothing with a request it refused), and a second
+//!   401 ends the sign-in ("Sign in again"). A `403 insufficient_scope`
+//!   records the scopes the server wants for the next sign-in (step-up).
 //!
 //! The older HTTP+SSE transport (`legacy.rs`) for a link that says so, or
 //! after a `404`/`405` to the first POST ([`HttpError::NotStreamable`]).
@@ -66,7 +72,7 @@ const EVENTS: &str = "text/event-stream";
 const JSON: &str = "application/json";
 
 /// Cloud metadata services: never a connector, whoever typed them.
-const METADATA: &[&str] = &["169.254.169.254", "metadata.google.internal", "metadata", "[fd00:ec2::254]", "100.100.100.200"];
+pub const METADATA: &[&str] =&["169.254.169.254", "metadata.google.internal", "metadata", "[fd00:ec2::254]", "100.100.100.200"];
 
 /// Why a request to a connector's server failed, in plain words
 /// ([`std::fmt::Display`]); the host only, never a path or a secret.
@@ -91,6 +97,8 @@ pub enum HttpError {
     Status { host: String, status: u16 },
     /// A same-origin redirect that would turn the POST into a GET.
     Redirected { host: String },
+    /// A browser sign-in that can't be used any more.
+    SignInEnded { host: String },
     /// Something else, said as it is (Yap's own words).
     Other(String),
 }
@@ -107,6 +115,7 @@ impl std::fmt::Display for HttpError {
             HttpError::NotStreamable { host, status } => write!(f, "{host} doesn't speak MCP at that address ({status})."),
             HttpError::Status { host, status } => write!(f, "{host} answered HTTP {status}."),
             HttpError::Redirected { host } => write!(f, "{host} redirected the request in a way MCP can't follow."),
+            HttpError::SignInEnded { host } => write!(f, "Your sign-in to {host} has ended. Sign in again."),
             HttpError::Other(s) => f.write_str(s),
         }
     }
@@ -195,6 +204,7 @@ impl std::fmt::Display for OffHost {
 
 impl std::error::Error for OffHost {}
 
+#[derive(Clone)]
 struct Inner {
     client: reqwest::Client,
     host: String,
@@ -202,12 +212,41 @@ struct Inner {
     kind: String,
     token: Option<String>,
     headers: Vec<(HeaderName, HeaderValue)>,
+    /// A browser sign-in's tokens ([`Http::with_sign_in`]).
+    sign_in: Option<Arc<super::oauth::Source>>,
 }
 
 /// A connector's HTTP side: Yap's reqwest, its rules, its secrets.
 #[derive(Clone)]
 pub struct Http {
     inner: Arc<Inner>,
+}
+
+/// A client for a connector whose server is at `place`: names on the
+/// internet resolved by the guard (never to this PC or the network), this
+/// PC and the network reached straight (no proxy); Yap's user agent and
+/// connect timeout. The sign-in's requests use it too (`oauth/tokens.rs`).
+pub fn client_builder(place: Place) -> reqwest::ClientBuilder {
+    let builder = reqwest::Client::builder().connect_timeout(CONNECT_TIMEOUT).user_agent(concat!("Yap/", env!("CARGO_PKG_VERSION")));
+    if place == Place::Internet {
+        builder.dns_resolver(Arc::new(Guard))
+    } else {
+        // This PC or the network: straight there, never through a proxy.
+        builder.no_proxy()
+    }
+}
+
+/// Whether reqwest's error `e` came from the guard: a name on the internet
+/// that resolved to this PC or the network.
+pub fn was_private(e: &reqwest::Error) -> bool {
+    let mut source: Option<&(dyn std::error::Error + 'static)> = std::error::Error::source(e);
+    while let Some(s) = source {
+        if s.downcast_ref::<PrivateAnswer>().is_some() {
+            return true;
+        }
+        source = s.source();
+    }
+    false
 }
 
 impl Http {
@@ -230,17 +269,7 @@ impl Http {
                 attempt.stop()
             }
         });
-        let mut builder = reqwest::Client::builder()
-            .redirect(policy)
-            .connect_timeout(CONNECT_TIMEOUT)
-            .user_agent(concat!("Yap/", env!("CARGO_PKG_VERSION")));
-        if place == Place::Internet {
-            builder = builder.dns_resolver(Arc::new(Guard));
-        } else {
-            // This PC or the network: straight there, never through a proxy.
-            builder = builder.no_proxy();
-        }
-        let client = builder.build().map_err(|_| "Yap couldn't set up the connection.".to_string())?;
+        let client = client_builder(place).redirect(policy).build().map_err(|_| "Yap couldn't set up the connection.".to_string())?;
         let mut parsed = Vec::new();
         for (name, value) in headers {
             let n = HeaderName::from_bytes(name.trim().as_bytes()).map_err(|_| format!("{name} isn't a header name."))?;
@@ -251,11 +280,20 @@ impl Http {
             v.set_sensitive(true);
             parsed.push((n, v));
         }
-        Ok(Http { inner: Arc::new(Inner { client, host, kind, token: token.filter(|t| !t.trim().is_empty()), headers: parsed }) })
+        Ok(Http { inner: Arc::new(Inner { client, host, kind, token: token.filter(|t| !t.trim().is_empty()), headers: parsed, sign_in: None }) })
     }
 
-    /// Whether a token or a header is sent (a 401 then means it was turned
-    /// down, never a browser sign-in).
+    /// The same, sending a browser sign-in's access token ([module
+    /// docs](self)) instead of a pasted one.
+    pub fn with_sign_in(mut self, source: Arc<super::oauth::Source>) -> Http {
+        let inner = Arc::make_mut(&mut self.inner);
+        inner.token = None;
+        inner.sign_in = Some(source);
+        self
+    }
+
+    /// Whether a pasted token or a header is sent (a 401 then means it was
+    /// turned down, never a browser sign-in).
     pub fn sends_credentials(&self) -> bool {
         self.inner.token.is_some() || !self.inner.headers.is_empty()
     }
@@ -268,10 +306,31 @@ impl Http {
         net::Purpose::Connector(self.inner.kind.clone())
     }
 
-    /// The token and the secret headers on `req` (rmcp's own `auth`, if it
-    /// gives one, first: wave 3's sign-in).
-    fn credentials(&self, mut req: reqwest::RequestBuilder, auth: Option<String>) -> reqwest::RequestBuilder {
-        if let Some(token) = auth.or_else(|| self.inner.token.clone()) {
+    /// The bearer token a request carries: rmcp's own `auth` if it gives one,
+    /// else the sign-in's (refreshed first when it's nearly out), else the
+    /// pasted one. A sign-in with no usable tokens: rmcp's `AuthRequired`
+    /// (the manager says "Needs sign-in").
+    async fn bearer(&self, auth: Option<String>) -> Result<Option<String>> {
+        if auth.is_some() {
+            return Ok(auth);
+        }
+        match &self.inner.sign_in {
+            Some(source) => source.bearer().await.map(Some).map_err(|t| self.trouble(t)),
+            None => Ok(self.inner.token.clone()),
+        }
+    }
+
+    /// A sign-in's trouble as rmcp's error.
+    fn trouble(&self, t: super::oauth::Trouble) -> StreamableHttpError<HttpError> {
+        match t {
+            super::oauth::Trouble::SignIn => StreamableHttpError::AuthRequired(AuthRequiredError::new("Bearer".into())),
+            super::oauth::Trouble::Failed(why) => StreamableHttpError::Client(HttpError::Other(why)),
+        }
+    }
+
+    /// The token and the secret headers on `req`.
+    fn credentials(&self, mut req: reqwest::RequestBuilder, token: Option<&str>) -> reqwest::RequestBuilder {
+        if let Some(token) = token {
             if let Ok(mut v) = HeaderValue::from_str(&format!("Bearer {}", token.trim())) {
                 v.set_sensitive(true);
                 req = req.header(reqwest::header::AUTHORIZATION, v);
@@ -281,6 +340,23 @@ impl Http {
             req = req.header(n.clone(), v.clone());
         }
         req
+    }
+
+    /// `make(token)` sent; a 401 to a sign-in's token refreshes it once and
+    /// sends again ([module docs](self)).
+    async fn send_signed(&self, auth: Option<String>, make: impl Fn(Option<&str>) -> Result<reqwest::RequestBuilder>) -> Result<reqwest::Response> {
+        let token = self.bearer(auth).await?;
+        let resp = self.send(make(token.as_deref())?).await.map_err(StreamableHttpError::Client)?;
+        let (Some(source), Some(used)) = (&self.inner.sign_in, token.as_deref()) else { return Ok(resp) };
+        if resp.status().as_u16() != 401 {
+            return Ok(resp);
+        }
+        let fresh = source.refused(used).await.map_err(|t| self.trouble(t))?;
+        let again = self.send(make(Some(&fresh))?).await.map_err(StreamableHttpError::Client)?;
+        if again.status().as_u16() == 401 {
+            source.ended().await;
+        }
+        Ok(again)
     }
 
     /// rmcp's protocol headers (`MCP-Protocol-Version`, `Mcp-Method`…).
@@ -326,6 +402,8 @@ impl Http {
         let challenge = headers.get(WWW_AUTHENTICATE).and_then(|v| v.to_str().ok()).map(str::to_string);
         match status {
             401 if self.sends_credentials() => Some(StreamableHttpError::Client(HttpError::TokenRefused { host: self.inner.host.clone(), status })),
+            // A sign-in's token refused after its refresh: sign in again.
+            401 if self.inner.sign_in.is_some() => Some(StreamableHttpError::AuthRequired(AuthRequiredError::new(challenge.unwrap_or_else(|| "Bearer".into())))),
             401 => Some(match challenge {
                 Some(c) => StreamableHttpError::AuthRequired(AuthRequiredError::new(c)),
                 None => StreamableHttpError::Client(HttpError::TokenRefused { host: self.inner.host.clone(), status }),
@@ -333,6 +411,9 @@ impl Http {
             403 => Some(match challenge.filter(|c| c.to_ascii_lowercase().contains("insufficient_scope")) {
                 Some(c) => {
                     let scope = scope_of(&c);
+                    if let Some(source) = &self.inner.sign_in {
+                        source.step_up(scope.as_deref());
+                    }
                     StreamableHttpError::InsufficientScope(InsufficientScopeError::new(c, scope))
                 }
                 None => StreamableHttpError::Client(HttpError::TokenRefused { host: self.inner.host.clone(), status }),
@@ -381,16 +462,19 @@ impl Http {
         headers: HashMap<HeaderName, HeaderValue>,
         max: usize,
     ) -> Result<BoxStream<'static, std::result::Result<Sse, SseError>>> {
-        let mut req = self.inner.client.get(uri).header(ACCEPT, format!("{EVENTS}, {JSON}"));
-        if let Some(s) = session {
-            req = req.header(SESSION_HEADER, s);
-        }
-        if let Some(id) = last_event {
-            req = req.header(LAST_EVENT_HEADER, id);
-        }
-        req = self.credentials(req, auth);
-        req = self.protocol(req, headers)?;
-        let resp = self.send(req).await.map_err(StreamableHttpError::Client)?;
+        let resp = self
+            .send_signed(auth, |token| {
+                let mut req = self.inner.client.get(uri).header(ACCEPT, format!("{EVENTS}, {JSON}"));
+                if let Some(s) = session {
+                    req = req.header(SESSION_HEADER, s);
+                }
+                if let Some(id) = &last_event {
+                    req = req.header(LAST_EVENT_HEADER, id.clone());
+                }
+                req = self.credentials(req, token);
+                self.protocol(req, headers.clone())
+            })
+            .await?;
         let status = resp.status().as_u16();
         if status == 405 {
             return Err(StreamableHttpError::ServerDoesNotSupportSse);
@@ -530,14 +614,18 @@ impl StreamableHttpClient for Http {
     ) -> Result<StreamableHttpPostResponse> {
         let max = max_sse_event_size.min(MAX_BODY);
         let body = serde_json::to_vec(&message)?;
-        let mut req = self.inner.client.post(uri.as_ref()).header(ACCEPT, format!("{EVENTS}, {JSON}")).header(CONTENT_TYPE, JSON);
-        req = self.credentials(req, auth);
-        req = self.protocol(req, headers)?;
         let session = session_id.is_some();
-        if let Some(s) = &session_id {
-            req = req.header(SESSION_HEADER, s.as_ref());
-        }
-        let resp = self.send(req.body(body)).await.map_err(StreamableHttpError::Client)?;
+        let resp = self
+            .send_signed(auth, |token| {
+                let mut req = self.inner.client.post(uri.as_ref()).header(ACCEPT, format!("{EVENTS}, {JSON}")).header(CONTENT_TYPE, JSON);
+                req = self.credentials(req, token);
+                req = self.protocol(req, headers.clone())?;
+                if let Some(s) = &session_id {
+                    req = req.header(SESSION_HEADER, s.as_ref());
+                }
+                Ok(req.body(body.clone()))
+            })
+            .await?;
         let status = resp.status().as_u16();
         if let Some(e) = self.refused(status, resp.headers()) {
             return Err(e);
@@ -596,8 +684,9 @@ impl StreamableHttpClient for Http {
     }
 
     async fn delete_session(&self, uri: Arc<str>, session: Arc<str>, auth: Option<String>, headers: HashMap<HeaderName, HeaderValue>) -> Result<()> {
+        let token = self.bearer(auth).await?;
         let mut req = self.inner.client.delete(uri.as_ref()).header(SESSION_HEADER, session.as_ref());
-        req = self.credentials(req, auth);
+        req = self.credentials(req, token.as_deref());
         req = self.protocol(req, headers)?;
         let resp = self.send(req).await.map_err(StreamableHttpError::Client)?;
         let status = resp.status().as_u16();

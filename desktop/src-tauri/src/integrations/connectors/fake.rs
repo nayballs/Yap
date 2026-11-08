@@ -10,6 +10,10 @@
 //! - [`http`]: a tiny HTTP server playing an MCP server at a link, in a
 //!   [`Mode`]: answering, turning a token down (401), redirecting off its
 //!   host, never answering, slow, or speaking the older HTTP+SSE.
+//! - [`oauth`]: an MCP server that signs in, with its own authorization
+//!   server (metadata, registration, an authorize page that approves at
+//!   once, PKCE-checked codes, rotating refresh tokens, revocation, a tool
+//!   that needs more scope); [`browse`] plays the person's browser.
 
 use std::io::{BufRead, BufReader, Read, Write};
 use std::net::{TcpListener, TcpStream};
@@ -348,4 +352,245 @@ fn older(stream: TcpStream, req: &Request, msg: &Value, events: &Mutex<Option<Tc
         }
         _ => respond(&stream, "405 Method Not Allowed", &[], ""),
     }
+}
+
+// ---- a server that signs in (OAuth) -------------------------------------------------------------
+
+/// How the OAuth fake behaves.
+#[derive(Debug, Clone, Default)]
+pub struct OauthSetup {
+    /// Access tokens last this long (seconds; 0: an hour).
+    pub lasts: i64,
+    /// Its answers name another issuer (`iss`).
+    pub wrong_iss: bool,
+}
+
+/// The OAuth fake's state, shared with the test.
+#[derive(Default)]
+pub struct OauthState {
+    pub setup: OauthSetup,
+    /// "register", "token code", "token refresh rt-1", "revoke refresh_token rt-2",
+    /// "mcp tools/call at-2", "authorize read offline_access"…
+    pub log: Vec<String>,
+    /// code → (its challenge, its redirect, its scope)
+    codes: std::collections::HashMap<String, (String, String, String)>,
+    /// Live access tokens → their scopes.
+    pub access: std::collections::HashMap<String, String>,
+    /// Live refresh tokens → their scopes.
+    pub refresh: std::collections::HashMap<String, String>,
+    spent: std::collections::HashSet<String>,
+    n: u32,
+}
+
+/// A running OAuth fake: an MCP server at `/mcp` that wants a bearer token,
+/// its protected resource and authorization server metadata, `/authorize`
+/// (approved at once: a 302 back to the redirect), `/token` (PKCE checked,
+/// refresh tokens rotating, a reused one ending the grant), `/revoke` and
+/// `/register`. Its `turn_off` needs the `write` scope (else a `403
+/// insufficient_scope`).
+pub struct OauthFake {
+    pub port: u16,
+    pub state: Arc<Mutex<OauthState>>,
+}
+
+impl OauthFake {
+    pub fn url(&self, path: &str) -> String {
+        format!("http://127.0.0.1:{}{path}", self.port)
+    }
+
+    pub fn said(&self) -> Vec<String> {
+        self.state.lock().unwrap().log.clone()
+    }
+
+    pub fn count(&self, prefix: &str) -> usize {
+        self.said().iter().filter(|l| l.starts_with(prefix)).count()
+    }
+
+    /// The server revokes every token it gave out.
+    pub fn revoke_all(&self) {
+        let mut s = self.state.lock().unwrap();
+        s.access.clear();
+        s.refresh.clear();
+    }
+}
+
+pub fn oauth(setup: OauthSetup) -> OauthFake {
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let port = listener.local_addr().unwrap().port();
+    let state = Arc::new(Mutex::new(OauthState { setup, ..Default::default() }));
+    let s = state.clone();
+    std::thread::spawn(move || {
+        for stream in listener.incoming().flatten() {
+            let s = s.clone();
+            std::thread::spawn(move || oauth_one(stream, port, &s));
+        }
+    });
+    OauthFake { port, state }
+}
+
+fn form_of(body: &[u8]) -> std::collections::HashMap<String, String> {
+    url::form_urlencoded::parse(body).into_owned().collect()
+}
+
+fn json_reply(stream: &TcpStream, status: &str, v: &Value) {
+    respond(stream, status, &[("Content-Type", "application/json".into())], &v.to_string());
+}
+
+fn oauth_one(stream: TcpStream, port: u16, state: &Mutex<OauthState>) {
+    let Some(req) = read_request(&stream) else { return };
+    let base = format!("http://127.0.0.1:{port}");
+    let (path, query) = req.path.split_once('?').map(|(p, q)| (p.to_string(), q.to_string())).unwrap_or((req.path.clone(), String::new()));
+    let bearer = req.headers.iter().find(|(k, _)| k == "authorization").and_then(|(_, v)| v.strip_prefix("Bearer ").map(str::to_string));
+    match (req.method.as_str(), path.as_str()) {
+        ("POST", "/mcp") => {
+            let msg: Value = serde_json::from_slice(&req.body).unwrap_or(Value::Null);
+            let method = msg.get("method").and_then(Value::as_str).unwrap_or("-").to_string();
+            let scopes = bearer.as_ref().and_then(|b| state.lock().unwrap().access.get(b).cloned());
+            let Some(scopes) = scopes else {
+                state.lock().unwrap().log.push(format!("mcp {method} refused"));
+                let challenge = format!("Bearer resource_metadata=\"{base}/.well-known/oauth-protected-resource/mcp\", scope=\"read\"");
+                return respond(&stream, "401 Unauthorized", &[("WWW-Authenticate", challenge)], "");
+            };
+            state.lock().unwrap().log.push(format!("mcp {method} {}", bearer.unwrap_or_default()));
+            if method == "tools/call" && msg["params"]["name"] == "turn_off" && !scopes.split_whitespace().any(|s| s == "write") {
+                let challenge = "Bearer error=\"insufficient_scope\", scope=\"read write\"".to_string();
+                return respond(&stream, "403 Forbidden", &[("WWW-Authenticate", challenge)], "");
+            }
+            match answer(&msg) {
+                None => respond(&stream, "202 Accepted", &[], ""),
+                Some(a) => json_reply(&stream, "200 OK", &a),
+            }
+        }
+        ("GET", "/.well-known/oauth-protected-resource/mcp") => {
+            json_reply(&stream, "200 OK", &json!({ "resource": format!("{base}/mcp"), "authorization_servers": [base], "scopes_supported": ["read", "write"] }))
+        }
+        ("GET", "/.well-known/oauth-authorization-server") => json_reply(
+            &stream,
+            "200 OK",
+            &json!({
+                "issuer": base,
+                "authorization_endpoint": format!("{base}/authorize"),
+                "token_endpoint": format!("{base}/token"),
+                "revocation_endpoint": format!("{base}/revoke"),
+                "registration_endpoint": format!("{base}/register"),
+                "code_challenge_methods_supported": ["S256"],
+                "response_types_supported": ["code"],
+                "scopes_supported": ["read", "write", "offline_access"],
+                "authorization_response_iss_parameter_supported": true,
+                "token_endpoint_auth_methods_supported": ["none"]
+            }),
+        ),
+        ("GET", "/authorize") => {
+            // The person approves at once.
+            let q = form_of(query.as_bytes());
+            let mut s = state.lock().unwrap();
+            s.n += 1;
+            let code = format!("code-{}", s.n);
+            let scope = q.get("scope").cloned().unwrap_or_default();
+            s.log.push(format!("authorize {scope} resource={}", q.get("resource").cloned().unwrap_or_default()));
+            s.codes.insert(code.clone(), (q.get("code_challenge").cloned().unwrap_or_default(), q.get("redirect_uri").cloned().unwrap_or_default(), scope));
+            let iss = if s.setup.wrong_iss { "http://127.0.0.1:1".to_string() } else { base.clone() };
+            let mut back = url::Url::parse(q.get("redirect_uri").map(String::as_str).unwrap_or("http://127.0.0.1:1/")).unwrap();
+            back.query_pairs_mut().append_pair("code", &code).append_pair("state", q.get("state").map(String::as_str).unwrap_or("")).append_pair("iss", &iss);
+            drop(s);
+            respond(&stream, "302 Found", &[("Location", back.to_string())], "");
+        }
+        ("POST", "/token") => {
+            let f = form_of(&req.body);
+            let mut s = state.lock().unwrap();
+            let lasts = if s.setup.lasts > 0 { s.setup.lasts } else { 3600 };
+            let issue = |s: &mut OauthState, scope: &str| {
+                s.n += 1;
+                let (at, rt) = (format!("at-{}", s.n), format!("rt-{}", s.n));
+                s.access.insert(at.clone(), scope.to_string());
+                s.refresh.insert(rt.clone(), scope.to_string());
+                json!({ "access_token": at, "token_type": "Bearer", "expires_in": lasts, "refresh_token": rt, "scope": scope })
+            };
+            match f.get("grant_type").map(String::as_str) {
+                Some("authorization_code") => {
+                    let code = f.get("code").cloned().unwrap_or_default();
+                    let Some((challenge, redirect, scope)) = s.codes.remove(&code) else {
+                        s.log.push("token code refused".into());
+                        return json_reply(&stream, "400 Bad Request", &json!({ "error": "invalid_grant" }));
+                    };
+                    let pkce = super::oauth::loopback::challenge_of(f.get("code_verifier").map(String::as_str).unwrap_or(""));
+                    let ok = pkce == challenge && f.get("redirect_uri") == Some(&redirect) && f.get("resource") == Some(&format!("{base}/mcp"));
+                    s.log.push(format!("token code {}", if ok { "ok" } else { "bad" }));
+                    if !ok {
+                        return json_reply(&stream, "400 Bad Request", &json!({ "error": "invalid_grant" }));
+                    }
+                    let body = issue(&mut s, &scope);
+                    json_reply(&stream, "200 OK", &body)
+                }
+                Some("refresh_token") => {
+                    let rt = f.get("refresh_token").cloned().unwrap_or_default();
+                    s.log.push(format!("token refresh {rt}"));
+                    if s.spent.contains(&rt) {
+                        // A reused refresh token: the whole grant ends (replay detection).
+                        s.access.clear();
+                        s.refresh.clear();
+                        s.log.push("replay".into());
+                        return json_reply(&stream, "400 Bad Request", &json!({ "error": "invalid_grant" }));
+                    }
+                    let Some(scope) = s.refresh.remove(&rt) else {
+                        return json_reply(&stream, "400 Bad Request", &json!({ "error": "invalid_grant" }));
+                    };
+                    s.spent.insert(rt);
+                    let body = issue(&mut s, &scope);
+                    json_reply(&stream, "200 OK", &body)
+                }
+                _ => json_reply(&stream, "400 Bad Request", &json!({ "error": "unsupported_grant_type" })),
+            }
+        }
+        ("POST", "/revoke") => {
+            let f = form_of(&req.body);
+            let mut s = state.lock().unwrap();
+            let token = f.get("token").cloned().unwrap_or_default();
+            s.log.push(format!("revoke {} {token} client={}", f.get("token_type_hint").cloned().unwrap_or_default(), f.get("client_id").cloned().unwrap_or_default()));
+            s.access.remove(&token);
+            s.refresh.remove(&token);
+            respond(&stream, "200 OK", &[], "");
+        }
+        ("POST", "/register") => {
+            let body: Value = serde_json::from_slice(&req.body).unwrap_or(Value::Null);
+            let mut s = state.lock().unwrap();
+            s.log.push(format!("register {} {}", body["application_type"].as_str().unwrap_or("-"), body["token_endpoint_auth_method"].as_str().unwrap_or("-")));
+            json_reply(&stream, "201 Created", &json!({ "client_id": "dcr-1", "redirect_uris": body["redirect_uris"], "token_endpoint_auth_method": "none" }))
+        }
+        _ => respond(&stream, "404 Not Found", &[], ""),
+    }
+}
+
+/// A browser's `GET` of `url`, as raw HTTP (`host`: the `Host` it sends).
+pub fn raw_get(url: &str, host: Option<&str>) -> String {
+    let u = url::Url::parse(url).unwrap();
+    let addr = format!("{}:{}", u.host_str().unwrap(), u.port().unwrap());
+    let mut s = TcpStream::connect(&addr).unwrap();
+    s.set_read_timeout(Some(Duration::from_secs(10))).unwrap();
+    let path = match u.query() {
+        Some(q) => format!("{}?{q}", u.path()),
+        None => u.path().to_string(),
+    };
+    write!(s, "GET {path} HTTP/1.1\r\nHost: {}\r\nConnection: keep-alive\r\n\r\n", host.unwrap_or(&addr)).unwrap();
+    let mut out = Vec::new();
+    let mut buf = [0u8; 4096];
+    while let Ok(n) = s.read(&mut buf) {
+        if n == 0 {
+            break;
+        }
+        out.extend_from_slice(&buf[..n]);
+        let text = String::from_utf8_lossy(&out);
+        if text.contains("</html>") {
+            break;
+        }
+    }
+    String::from_utf8_lossy(&out).into_owned()
+}
+
+/// The person's browser: the authorize page (the fake approves at once),
+/// then where it sends the browser — Yap's loopback — whose page comes back.
+pub fn browse(link: &str) -> String {
+    let consent = raw_get(link, None);
+    let back = consent.lines().find_map(|l| l.strip_prefix("Location: ")).expect("a redirect back").trim().to_string();
+    raw_get(&back, None)
 }
