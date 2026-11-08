@@ -1,6 +1,11 @@
 //! **Connectors and the person's data** (Connectors wave 8): what Yap's
-//! privacy features do with them. Nothing here reads a connectors file, the
-//! vault or a status while the preview is off.
+//! privacy features do with them. They describe and clear **what's
+//! stored, whatever the preview's switch says**: someone who tried the
+//! preview and turned it off still gets their sign-ins ended by Reset app,
+//! and their connectors in Download your data. With the switch off they
+//! read connectors.json and the vault's names only to find what's there,
+//! start nothing, and make a request only to revoke a sign-in that's
+//! stored; with nothing stored they add nothing (no file, no line).
 //!
 //! - **Delete some of your data / Reset app** (`privacy/reset.rs`'s
 //!   "Connector sign-ins"): [`sign_ins`] counts the browser sign-ins,
@@ -38,13 +43,27 @@ fn holds_sign_in(c: &Connector) -> bool {
     c.auth.kind == AuthKind::Oauth && (c.auth.signed_in || vault::load(&c.id).grant.is_some())
 }
 
-/// How many connectors hold a browser sign-in now (Delete some of your
-/// data's count). 0 with the preview off: nothing read.
+/// The browser sign-ins stored now: the connectors in `all` that hold one,
+/// and sign-ins left in the vault under an id no connector has (its
+/// connectors.json lost or set aside): `(connectors', left)`.
+fn sign_ins_in(all: &[Connector]) -> (Vec<String>, Vec<String>) {
+    let held: Vec<String> = all.iter().filter(|c| holds_sign_in(c)).map(|c| c.id.clone()).collect();
+    let left: Vec<String> =
+        (1..=store::MAX).map(|n| format!("c{n}")).filter(|id| !all.iter().any(|c| &c.id == id) && vault::load(id).grant.is_some()).collect();
+    (held, left)
+}
+
+/// How many browser sign-ins are stored now (Delete some of your data's
+/// count), whatever the preview says.
 pub fn sign_ins() -> usize {
-    if !enabled() {
-        return 0;
-    }
-    store::list().iter().filter(|c| holds_sign_in(c)).count()
+    let (held, left) = sign_ins_in(&store::list());
+    held.len() + left.len()
+}
+
+/// Whether any connector is kept (connectors.json lists one), whatever the
+/// preview says: what stays of them is then worth saying.
+pub fn any_kept() -> bool {
+    !store::list().is_empty()
 }
 
 /// What [`sign_out_all`] did (counts only).
@@ -57,23 +76,22 @@ pub struct SignedOut {
     pub confirmed: usize,
 }
 
-/// **Every browser sign-in ended** ("Connector sign-ins", Reset app): any
-/// sign-in under way cancelled, each connection with one stopped, its grant
-/// revoked where the server offers it (all at once, [`REVOKE_LIMIT`] in
-/// all), its tokens gone from the vault and connectors.json saying it's
-/// signed out — also for one whose server didn't answer in time. Nothing
-/// else changes. Nothing at all with the preview off.
+/// **Every browser sign-in ended** ("Connector sign-ins", Reset app),
+/// whatever the preview says: any sign-in under way cancelled, each
+/// connection with one stopped (if any was started), its grant revoked
+/// where the server offers it (all at once, [`REVOKE_LIMIT`] in all), its
+/// tokens gone from the vault and connectors.json saying it's signed out —
+/// also for one whose server didn't answer in time; and a sign-in left in
+/// the vault for a connector that's gone, its tokens deleted (there's no
+/// server to tell). Nothing else changes.
 pub async fn sign_out_all() -> SignedOut {
-    if !enabled() {
-        return SignedOut::default();
-    }
     let all = store::list();
     for c in &all {
         oauth::cancel(&c.id);
     }
-    let ids: Vec<String> = all.iter().filter(|c| holds_sign_in(c)).map(|c| c.id.clone()).collect();
+    let (ids, left) = sign_ins_in(&all);
     for id in &ids {
-        super::manager().stop(id, false).await;
+        super::stop_if_started(id).await;
     }
     let revoked = futures_util::future::join_all(ids.iter().map(|id| oauth::sign_out(id)));
     let confirmed = match tokio::time::timeout(REVOKE_LIMIT, revoked).await {
@@ -85,11 +103,15 @@ pub async fn sign_out_all() -> SignedOut {
         oauth::forget(id);
         super::tell(id);
     }
-    if !ids.is_empty() {
+    for id in &left {
+        let _ = vault::update(id, |s| s.grant = None);
+    }
+    if !ids.is_empty() || !left.is_empty() {
         super::changed();
     }
-    tracing::info!(signed_out = ids.len(), confirmed, "connectors: every sign-in ended");
-    SignedOut { signed_out: ids.len(), confirmed }
+    let signed_out = ids.len() + left.len();
+    tracing::info!(signed_out, left = left.len(), confirmed, "connectors: every sign-in ended");
+    SignedOut { signed_out, confirmed }
 }
 
 /// A link without what can carry a secret: its user name and password, its
@@ -184,12 +206,14 @@ pub fn export_one(c: &Connector) -> Value {
 }
 
 /// **Download your data's** `connectors/connectors.json`: every connector
-/// ([`export_one`]); `None` with the preview off (nothing read).
+/// ([`export_one`]) — while the preview is on, or while any is kept with it
+/// off (what's stored, not what's switched on); else `None` (no file).
 pub fn export() -> Option<Value> {
-    if !enabled() {
+    let all = store::list();
+    if !enabled() && all.is_empty() {
         return None;
     }
-    let list: Vec<Value> = store::list().iter().map(export_one).collect();
+    let list: Vec<Value> = all.iter().map(export_one).collect();
     Some(json!({
         "note": "Your connectors and their tools' settings. Tokens, secrets and header values stay in Windows Credential Manager and aren't in this file.",
         "connectors": list,
@@ -218,13 +242,14 @@ pub fn counts_of(list: &[Connector], status: &dyn Fn(&str) -> Status) -> Value {
     })
 }
 
-/// **Report a problem's** connectors: [`counts_of`] this run's; `None` with
-/// the preview off (nothing read).
+/// **Report a problem's** connectors: [`counts_of`] this run's — while the
+/// preview is on, or while any is kept with it off; else `None`.
 pub fn counts() -> Option<Value> {
-    if !enabled() {
+    let all = store::list();
+    if !enabled() && all.is_empty() {
         return None;
     }
-    Some(counts_of(&store::list(), &super::status_if_started))
+    Some(counts_of(&all, &super::status_if_started))
 }
 
 #[cfg(test)]
@@ -365,12 +390,43 @@ mod tests {
         for word in ["Issue tracker", "Robin", "Files", "example.com", "npx", "X-Api-Key", "GITHUB_TOKEN", "search"] {
             assert!(!text.contains(word), "{word} in {text}");
         }
-        // Off: nothing read.
+        // The preview off: what's stored is still counted (and exported).
+        super::super::tests::set_switch(false);
+        assert_eq!(counts().unwrap()["count"], 3);
+        assert_eq!(export().unwrap()["connectors"].as_array().unwrap().len(), 3);
+        // Nothing stored and the preview off: nothing at all.
+        for c in &list {
+            vault::delete(&c.id);
+        }
         super::super::switch_for_test(false);
         assert_eq!(counts(), None);
         assert_eq!(export(), None);
         assert_eq!(sign_ins(), 0);
-        assert!(!store::touched());
+        assert!(!any_kept());
+    }
+
+    /// Someone tried the preview and turned it off: Reset app still ends
+    /// their sign-ins (and Delete some of your data counts them) — also one
+    /// left in the vault for a connector that's gone.
+    #[tokio::test]
+    async fn with_the_preview_off_a_stored_sign_in_is_still_counted_and_ended() {
+        let list = seeded();
+        super::super::tests::set_switch(false);
+        assert!(!enabled());
+        assert_eq!(sign_ins(), 1);
+        assert!(any_kept());
+        // A sign-in left behind by a connector that's gone (its file lost).
+        let gone = Secrets { grant: Some(Grant { access: "at-FAKE-left-7777".into(), issuer: "https://auth.example.com".into(), ..Default::default() }), ..Default::default() };
+        vault::save("c9", &gone).unwrap();
+        assert_eq!(sign_ins(), 2);
+        let done = sign_out_all().await;
+        assert_eq!(done, SignedOut { signed_out: 2, confirmed: 0 });
+        assert_eq!(sign_ins(), 0);
+        assert!(vault::load(&list[1].id).grant.is_none() && vault::load("c9").grant.is_none(), "both sign-ins' tokens gone");
+        assert_eq!(vault::load(&list[0].id).token.as_deref(), Some(SECRETS[0]), "a pasted token stays");
+        assert!(!store::get(&list[1].id).unwrap().auth.signed_in);
+        assert_eq!(store::list().len(), 3, "the connectors stay");
+        vault::delete("c9");
     }
 
     #[tokio::test]
@@ -394,10 +450,10 @@ mod tests {
         assert_eq!(vault::load(&list[2].id).env.get("GITHUB_TOKEN").map(String::as_str), Some(SECRETS[2]), "a program's secret variable stays");
         // Again: nothing to do.
         assert_eq!(sign_out_all().await, SignedOut::default());
-        // Off: nothing read or changed.
+        // The preview off and no sign-in stored: nothing changes either.
         super::super::switch_for_test(false);
         assert_eq!(sign_out_all().await, SignedOut::default());
-        assert!(!store::touched());
+        assert_eq!(vault::load(&list[0].id).token.as_deref(), Some(SECRETS[0]));
     }
 
     #[test]

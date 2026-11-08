@@ -701,10 +701,14 @@ chips and result as wave 4's; Claude Code only asks.
 ### Connectors and your data (wave 8)
 
 What Yap's privacy features do with connectors (`connectors/privacy.rs`;
-[privacy-receipts.md](./privacy-receipts.md)). With the preview off none of
-them reads a connectors file, the vault or a status: the export has no
-connectors file, Report a problem no `connectors`, and the dialogs don't
-list them.
+[privacy-receipts.md](./privacy-receipts.md)). They describe and clear
+**what's stored, whatever `connectors_preview` says**: someone who tried
+the preview and turned it off still has their sign-ins ended by Reset app
+and their connectors in Download your data. With the switch off they read
+connectors.json and the vault's names only to find what's there, start no
+connection, and make a request only to revoke a sign-in that's stored; with
+nothing stored there's no connectors file in the export, no `connectors` in
+Report a problem, and no Connector sign-ins in the dialogs.
 
 - **Which kind of data they are.** A connector — its address or command
   line, how it signs in, where Yap uses it, each tool's setting — is a
@@ -716,21 +720,24 @@ list them.
   a program's secret variables, their own client's secret —, as
   config.json's API keys do. A **browser sign-in** is data: what a service
   granted to Yap's AI tools. It's a kind of its own, **Connector sign-ins**
-  (`reset::Kind::ConnectorSignIns`, under "Chat and memory", listed only
-  with the preview on): each one ended as Sign out ends it
+  (`reset::Kind::ConnectorSignIns`, under "Chat and memory", listed while
+  the preview is on or whenever a sign-in is stored — with the count —, and
+  always part of Reset app): each one ended as Sign out ends it
   (`privacy::sign_out_all`: any sign-in under way cancelled, its connection
-  stopped, the refresh token revoked where the server has a
-  `revocation_endpoint`, all at once and 10 s at most in all, then its
+  stopped if one was started, the refresh token revoked where the server
+  has a `revocation_endpoint`, all at once and 10 s at most in all, then its
   tokens gone from the vault and connectors.json saying signed out whatever
-  the server answered — `oauth::forget`). It changes only connectors.json's
+  the server answered — `oauth::forget`; a sign-in left in the vault under
+  an id no connector has, its connectors.json lost, deleted too). It changes only connectors.json's
   part (`(connectors.json)`: `signedIn`, the scopes, `wants`); the
   connector, its tools' settings, Yap's registration and the person's own
   client stay, so signing in again is one click. Reset app is every kind, so
   it signs out of every connector too (and keeps the list). The account's
   own sign-in, ChatGPT's and the calendars' stay, as before: Yap's own setup,
   not a service's grant to tools.
-- **Download your data**: `connectors/connectors.json` (`privacy::export`),
-  an allow-list of each connector — its name, a link's address without its
+- **Download your data**: `connectors/connectors.json` (`privacy::export`,
+  while the preview is on or any connector is kept), an allow-list of each
+  connector — its name, a link's address without its
   query, user name or fragment (and the older HTTP+SSE one), its header
   **names**, a program's command, resolved path, arguments and variables (a
   plain one's value, a secret one's "(kept in Windows Credential Manager)";
@@ -740,8 +747,9 @@ list them.
   never reads the vault: a test seeds a token, a header's value, a secret
   variable, a sign-in's two tokens and both clients' secrets and finds none
   in any file, and reads the export's code for the vault.
-- **Report a problem**: `settings.json`'s `connectors` (`privacy::counts`):
-  how many, links, programs, off, signing in in the browser, signed in,
+- **Report a problem**: `settings.json`'s `connectors` (`privacy::counts`,
+  while the preview is on or any connector is kept): how many, links,
+  programs, off, signing in in the browser, signed in,
   ended, with a token or headers, from the catalogue, failing (Couldn't
   connect or Stopped, as this run's manager has them — it isn't started to
   ask). Numbers only (`diagnostics::connector_counts` drops anything else),
@@ -784,13 +792,17 @@ list them.
 - **Tests**: `connectors/privacy.rs`'s (the export without a vault value,
   the counts, signing every connector out — the tokens gone, the
   connectors, a pasted token, a secret variable, the registration and the
-  own client kept — and nothing read with the preview off), `reset.rs`'s
-  (the kind's part, listed only with the preview on), `diagnostics.rs`'s,
+  own client kept —; with the preview off a stored sign-in, and one left
+  for a gone connector, still counted and ended, the connectors still
+  exported and counted, and nothing at all with nothing stored),
+  `reset.rs`'s (the kind's part, listed with the preview on or a sign-in
+  stored, always in Reset app), `diagnostics.rs`'s,
   `export.rs`'s, `vault.rs`'s, `log_privacy.rs`'s, `tests.rs`'s receipts,
   `eval/connectors.rs`'s (the stand-in, its checks, its servers added as the
   person would) and `your-data-connectors.spec.js` (Download your data,
   Report a problem, Connector sign-ins, Reset app, on a seeded browser
-  sign-in and a header connector).
+  sign-in and a header connector; and again on an instance with the preview
+  off and the sign-in still stored, the kind hiding once none is left).
 
 ## Claude Code runs' endpoint (`integrations/claude_live.rs`, 2026-11-07)
 

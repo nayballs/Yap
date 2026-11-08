@@ -19,7 +19,7 @@
 //!   of the person's own files);
 //! - `dictionary/dictionary.csv` — corrections and snippets, the CSV the
 //!   Dictionary view's Export… writes ([`dictionary_csv`]);
-//! - `connectors/connectors.json` — while the connectors preview is on, the
+//! - `connectors/connectors.json` — whenever a connector is kept (the preview on or off), the
 //!   connectors and each tool's setting (`connectors::privacy::export`: an
 //!   allow-list, header and variable names only; the tokens and secrets stay
 //!   in Credential Manager, which this never reads);
@@ -361,7 +361,7 @@ pub struct Inputs {
     /// The writing samples (`ai/writing_samples.rs`).
     pub writing_samples: Vec<crate::ai::writing_samples::Sample>,
     /// The connectors and their tools' settings, without a secret
-    /// (`connectors::privacy::export`); `None` while the preview is off.
+    /// (`connectors::privacy::export`); `None` when none is kept and the preview is off.
     pub connectors: Option<Value>,
     /// config.json as `YapConfig` serialises.
     pub config: Value,
@@ -397,7 +397,7 @@ Not in it: the speech and AI models, Yap's log, its caches and anything kept by 
 const README_CONNECTORS: &str = "- connectors/connectors.json: your connectors (preview), how each is reached and signs in, where Yap \
 uses it and each tool's setting. Never a token, a secret or a header's value: those stay in Windows' Credential Manager.\n";
 
-/// The connectors' file (`connectors::privacy::export`'s), when the preview
+/// The connectors' file (`connectors::privacy::export`'s), when it
 /// gave one. Pure.
 pub fn connectors_files(connectors: Option<&Value>) -> Vec<(String, Vec<u8>)> {
     connectors.map(|v| ("connectors/connectors.json".to_string(), serde_json::to_string_pretty(v).unwrap_or_default().into_bytes())).into_iter().collect()
@@ -984,7 +984,7 @@ mod tests {
         }
         let readme = String::from_utf8_lossy(&files[0].1).to_string();
         assert!(readme.contains("connectors/connectors.json") && readme.contains("- settings.json"), "{readme}");
-        // The connectors preview off: no file, no line.
+        // No connector kept (and the preview off): no file, no line.
         let off = text_files(&Inputs { connectors: None, ..inputs_with(&cfg) }, &when);
         assert!(!off.iter().any(|(n, _)| n.starts_with("connectors/")));
         assert!(!String::from_utf8_lossy(&off[0].1).contains("connectors/"));

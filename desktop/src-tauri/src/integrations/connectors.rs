@@ -149,7 +149,7 @@ impl StatusView {
 /// Tell every window connector `id`'s status now (its sign-in changed).
 pub(crate) fn tell(id: &str) {
     if let Some(app) = APP.get() {
-        let _ = app.emit(STATUS, StatusView::of(id, manager().status(id)));
+        let _ = app.emit(STATUS, StatusView::of(id, status_if_started(id)));
     }
 }
 
@@ -194,7 +194,7 @@ pub fn manager() -> &'static Manager {
 
 /// Connector `id`'s status, without starting the manager when nothing has
 /// connected yet in this run (then it waits to start: Idle). For Report a
-/// problem's counts.
+/// problem's counts and the status event.
 pub(crate) fn status_if_started(id: &str) -> Status {
     #[cfg(test)]
     {
@@ -203,6 +203,21 @@ pub(crate) fn status_if_started(id: &str) -> Status {
     #[cfg(not(test))]
     {
         MANAGER.get().map_or(Status::Idle, |m| m.status(id))
+    }
+}
+
+/// Stop connector `id`'s connection, if this run's manager has started at
+/// all (with the preview off it never has: nothing to stop, nothing started).
+pub(crate) async fn stop_if_started(id: &str) {
+    #[cfg(test)]
+    {
+        manager().stop(id, false).await;
+    }
+    #[cfg(not(test))]
+    {
+        if let Some(m) = MANAGER.get() {
+            m.stop(id, false).await;
+        }
     }
 }
 

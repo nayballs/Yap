@@ -705,7 +705,7 @@ pub struct Inputs {
     pub made: String,
     /// The connectors' counts (`connectors::privacy::counts`: by kind, off,
     /// signed in, failing; never a name, an address or a command), under
-    /// settings.json's `connectors`; `None` while the preview is off.
+    /// settings.json's `connectors`; `None` when the preview is off and none is kept.
     pub connectors: Option<Value>,
 }
 
@@ -726,7 +726,7 @@ What's in it\n\
 - settings.json: which features, providers and models are on, switches and shortcuts. Not in it: API keys \
 (only which services have one), About you, names, your dictionary's words, prompts you wrote, device names, \
 your servers' addresses, memory, notes, chats, meetings and history. `leftOut` names the settings left out. \
-With connectors on, `connectors` counts them (links, programs, signed in, failing), never their names, addresses or commands.\n\
+With connectors kept, `connectors` counts them (links, programs, signed in, failing), never their names, addresses or commands.\n\
 - connections.txt: the network connections Yap made in the last 7 days, by purpose (counts and sizes).\n\
 - errors.txt: the latest warnings and errors from Yap's log.\n\
 - logs/: Yap's log for the last {days} days, info and above. Debug lines (which can hold what you said) are \
@@ -1149,7 +1149,7 @@ mod tests {
     }
 
     /// Report a problem's connectors: counts only, under settings.json's
-    /// `connectors` (with the preview on), and its switches copied.
+    /// `connectors` (the preview on, or any kept), and its switches copied.
     #[test]
     fn the_connectors_are_counts_only() {
         let b = bundle();
@@ -1158,7 +1158,7 @@ mod tests {
         assert!(!b.settings.contains("Robin's allotment notes") && !b.settings.contains("notes.example.com"));
         assert_eq!(settings["connectorsPreview"], false);
         assert_eq!(settings["connectorsInMeetings"], false);
-        // The preview off: no `connectors` at all.
+        // Nothing kept and the preview off: no `connectors` at all.
         let off = build(
             &Inputs { system: String::new(), config: seeded_config(), logs: vec![], entries: vec![], now: 0, made: "2026-10-24 21:05".into(), connectors: None },
             &scrub(),

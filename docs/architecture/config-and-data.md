@@ -1102,7 +1102,9 @@
     goes with **Connector sign-ins** (`privacy/reset.rs`, Connectors wave 8:
     the registration and the person's own client stay). Download your data
     has an allow-list of it as `connectors/connectors.json`, Report a
-    problem only counts. Through `saving.rs` ("your connectors").
+    problem only counts. Those three go by what's stored, whatever
+    `connectors_preview` says now (the preview tried, then turned off:
+    Reset app still ends the sign-ins). Through `saving.rs` ("your connectors").
   - `%APPDATA%/yap/connector_tools.json` (`cache.rs`) — `{version, listings:
     {c3: {listedAt, ttlMs, server, tools, truncated}}}`: each connector's tools
     as last listed (name, title, the description capped at 1,000

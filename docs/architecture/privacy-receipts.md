@@ -244,7 +244,8 @@ Claude Code itself, so they aren't in Network connections."
   blocked apps as counts; profiles as a count and their providers; a cloud
   voice's model, its voice chosen/default. **Anything else is left out**
   and named under `leftOut`, so a new setting never slips in. With the
-  connectors preview on, `connectors` counts them (Connectors wave 8,
+  connectors preview on, or any connector kept with it off (what's stored,
+  not what's switched on), `connectors` counts them (Connectors wave 8,
   `connectors::privacy::counts`: how many, links, programs, off, signing in
   in the browser, signed in, ended, with a token or headers, from the
   catalogue, failing) — numbers only, whatever is handed in
@@ -343,7 +344,8 @@ stay on (`config.yml`): an older Yap still opens one with a `body=`.
   Dictionary's Export… writes (`dictionary_csv`: Heard, Written, Kind,
   Near-misses, Starred, a byte-order mark and Windows line ends; the rows
   writing one word together, as the view groups them; Import… reads it back);
-  `connectors/connectors.json` while the connectors preview is on
+  `connectors/connectors.json` while the connectors preview is on, or any
+  connector is kept with it off
   (Connectors wave 8, `connectors::privacy::export`: an allow-list of each
   connector — its name, a link's address without its query, user name or
   fragment, its header **names**, a program's command line and variables, a
@@ -433,7 +435,9 @@ a tick box per **kind** of data. "Clear everything and keep my settings"
     `ClearBrowsingDataAll` through an open page or one made out of sight for
     it, `chat/pages/view.rs` `clear_data`, so if it can't, nothing else has
     gone; open pages stay open), **Connector sign-ins** (Connectors wave 8,
-    listed only while the connectors preview is on: "1 sign-in"; each
+    listed while the connectors preview is on or whenever a sign-in is
+    stored, whatever the switch says, and always part of Reset app: "1
+    sign-in"; each
     browser sign-in ended as Sign out ends it, `connectors::privacy::sign_out_all`
     — the refresh token revoked where the server offers it, all at once and
     10 s at most, then the tokens gone from Credential Manager whatever the
@@ -477,7 +481,7 @@ a tick box per **kind** of data. "Clear everything and keep my settings"
   keys) and `dictionary_usage.json`; the person's own Skills (`skills.json`)
   and meeting folder rules (setup, like folders and actions); the writing
   samples; the connectors (`connectors.json` but its sign-ins' part,
-  `connector_tools.json`, `connectors/`; listed with the preview on); the models (`models/`, `llm/`); the account's sign-in, the
+  `connector_tools.json`, `connectors/`; listed with the preview on or one kept); the models (`models/`, `llm/`); the account's sign-in, the
   calendars (Credential Manager, `calendar.json`'s connections and
   meetings) and paired phones; Yap's own records — tips shown
   (`hints.json`, `mic_tips.json`, `onboarding.json`), answers to its offers
@@ -598,7 +602,12 @@ zip; Report a problem's counts with no name or address; Delete some of your
 data's **Connector sign-ins** ("1 sign-in") ending the sign-in — its tokens
 gone from the vault file, Yap's registration and the other's header kept,
 both connectors and their tools' settings kept, "needs sign-in" after —;
-Reset app listing it under what goes and the connectors under what stays.
+Reset app listing it under what goes and the connectors under what stays;
+then an instance with the preview **off** on the same seed: the plan still
+lists "1 sign-in" and the connectors as staying, Report a problem counts
+them, Download your data has them (no secret), Reset app ends the sign-in
+(tokens gone, registration and header kept, both connectors kept), and with
+no sign-in left the kind hides again.
 
 `desktop/e2e/network-receipts.spec.js`: two fake AI servers, one aliased to
 api.groq.com — a Chat answer from each shows as "Chat · Groq" (Internet,

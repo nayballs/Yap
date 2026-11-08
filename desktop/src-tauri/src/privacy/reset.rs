@@ -199,8 +199,9 @@ pub const KINDS: &[About] = &[
     // Windows' Credential Manager), connectors.json saying signed out. The
     // connectors and their settings stay (STAYS), and so do a pasted token,
     // request headers and a program's secret variables: keys the person gave
-    // on purpose, as config.json's API keys are. Listed only while the
-    // connectors preview is on (`listed`).
+    // on purpose, as config.json's API keys are. Listed while the connectors
+    // preview is on or a sign-in is stored, and always cleared by Reset app
+    // (`listed`: turning the preview off never keeps tokens from a reset).
     About {
         kind: Kind::ConnectorSignIns,
         group: CHAT,
@@ -292,8 +293,8 @@ pub const STAYS: &[Part] = &[
     // Connectors (preview) are settings too: the list, each tool's setting,
     // their tool lists (a cache) and their programs' folders stay; their
     // browser sign-ins are a kind of their own (Connector sign-ins), which
-    // takes their part of connectors.json. Listed only while the preview is
-    // on (`listed`).
+    // takes their part of connectors.json. Listed while the preview is on or
+    // any connector is kept (`stays_now`).
     Part {
         id: "connectors",
         label: "Your connectors, their tools' settings and any token you pasted",
@@ -694,17 +695,19 @@ fn dir_bytes(path: &Path) -> (usize, u64) {
     out
 }
 
-/// Whether the dialogs list `kind` (and Reset app's "What stays" its part):
-/// a connectors' one only while the connectors preview is on (off, nothing
-/// of theirs is read).
-fn listed(kind: Kind) -> bool {
-    kind != Kind::ConnectorSignIns || crate::integrations::connectors::enabled()
+/// Whether the dialogs list `kind`, with `sign_ins` connector sign-ins
+/// stored: Connector sign-ins while the connectors preview is on, or
+/// whenever one is stored — someone who tried the preview and turned it off
+/// still sees (and Reset app still ends) theirs. Pure but for the switch.
+fn listed(kind: Kind, sign_ins: usize) -> bool {
+    kind != Kind::ConnectorSignIns || sign_ins > 0 || crate::integrations::connectors::enabled()
 }
 
-/// What stays, as the dialogs list it (the connectors' part only while the
-/// preview is on).
+/// What stays, as the dialogs list it: the connectors' part while the
+/// preview is on, or while any connector is kept.
 fn stays_now() -> Vec<&'static str> {
-    STAYS.iter().filter(|p| p.id != "connectors" || listed(Kind::ConnectorSignIns)).map(|p| p.label).collect()
+    let connectors = crate::integrations::connectors::enabled() || crate::integrations::connectors::privacy::any_kept();
+    STAYS.iter().filter(|p| p.id != "connectors" || connectors).map(|p| p.label).collect()
 }
 
 /// Each kind with how much there is of it now (counts and sizes only);
@@ -716,9 +719,11 @@ fn measure(pages: Option<&Path>) -> Vec<Line> {
     let versions = |list: &[&crate::notes::Note]| -> u64 {
         list.iter().filter_map(|n| crate::notes::versions::path(n.id)).map(|p| file_bytes(&p)).sum()
     };
+    // Whatever the preview says (`listed`).
+    let sign_ins = crate::integrations::connectors::privacy::sign_ins();
     KINDS
         .iter()
-        .filter(|a| listed(a.kind))
+        .filter(|a| listed(a.kind, sign_ins))
         .map(|a| {
             let (count, bytes, empty) = match a.kind {
                 Kind::History => {
@@ -757,10 +762,7 @@ fn measure(pages: Option<&Path>) -> Vec<Line> {
                     (None, bytes, bytes == 0)
                 }
                 // In Credential Manager: no bytes of the data folder's.
-                Kind::ConnectorSignIns => {
-                    let n = crate::integrations::connectors::privacy::sign_ins();
-                    (count(n, "sign-in", "sign-ins"), 0, n == 0)
-                }
+                Kind::ConnectorSignIns => (count(sign_ins, "sign-in", "sign-ins"), 0, sign_ins == 0),
                 Kind::Agents => {
                     let n = crate::agents::store::list().len();
                     let folders = crate::agents::workspaces::list().len();
@@ -1087,7 +1089,7 @@ fn run(app: &AppHandle, c: &Choice, signed: crate::integrations::connectors::pri
     if c.remote_control() != Cut::Keep {
         crate::agents::remote::saved()?;
     }
-    if c.connector_sign_ins() != Cut::Keep && crate::integrations::connectors::enabled() {
+    if c.connector_sign_ins() != Cut::Keep {
         crate::integrations::connectors::store::SAVER.check()?;
     }
     if let Err(e) = index {
@@ -1120,7 +1122,8 @@ async fn delete(app: AppHandle, c: Choice) -> Result<Done, String> {
     }
     // The connectors' browser sign-ins: each ended as Sign out ends one,
     // revoked where the server offers it (10 s at most in all), the tokens
-    // gone whatever it answered (nothing while the preview is off).
+    // gone whatever it answered — whatever the preview says (Reset app is
+    // every kind, so it always ends them).
     let signed = if c.has(Kind::ConnectorSignIns) { crate::integrations::connectors::privacy::sign_out_all().await } else { Default::default() };
     let handle = app.clone();
     let every = c == Choice::every();
@@ -1276,24 +1279,33 @@ mod tests {
     }
 
     /// Connector sign-ins (Connectors wave 8): only connectors.json's part
-    /// (the connectors and their settings stay), listed, with what stays of
-    /// the connectors, only while the preview is on — off, nothing of theirs
-    /// is read to measure it.
+    /// (the connectors and their settings stay); listed while the preview is
+    /// on **or a sign-in is stored** (the preview turned off never hides
+    /// tokens from a reset), and Reset app always has it; what stays of the
+    /// connectors said while the preview is on or one is kept.
     #[test]
-    fn connector_sign_ins_change_only_their_part_and_show_only_with_the_preview() {
+    fn connector_sign_ins_change_only_their_part_and_show_whenever_one_is_stored() {
+        use crate::integrations::connectors::{store, switch_for_test};
         let c = Choice::of([Kind::ConnectorSignIns]);
         assert_eq!(c.touches(), BTreeSet::from(["(connectors.json)".to_string()]));
         assert_eq!(c.set_aside_stems(), Vec::<&str>::new(), "connectors.json never goes whole");
+        assert!(Choice::every().has(Kind::ConnectorSignIns), "Reset app always ends them");
         let connectors = STAYS.iter().find(|p| p.id == "connectors").unwrap();
-        crate::integrations::connectors::switch_for_test(false);
-        assert!(!listed(Kind::ConnectorSignIns) && listed(Kind::Chats));
+        // The preview off, nothing stored: hidden.
+        switch_for_test(false);
+        assert!(!listed(Kind::ConnectorSignIns, 0) && listed(Kind::Chats, 0));
         assert!(!stays_now().contains(&connectors.label));
         assert_eq!(crate::integrations::connectors::privacy::sign_ins(), 0);
-        assert!(!crate::integrations::connectors::store::touched(), "nothing of the connectors' read with the preview off");
-        crate::integrations::connectors::switch_for_test(true);
-        assert!(listed(Kind::ConnectorSignIns));
+        // The preview off, a sign-in stored: listed, its connector said to stay.
+        assert!(listed(Kind::ConnectorSignIns, 1));
+        let link = store::Transport::Remote { url: "https://notes.example.com/mcp".into(), fallback_sse: None, sse: false, headers: vec![] };
+        store::add(store::New { name: "Allotment notes".into(), transport: link, auth: store::AuthKind::Oauth }).unwrap();
         assert!(stays_now().contains(&connectors.label));
-        crate::integrations::connectors::switch_for_test(false);
+        // The preview on: listed whatever is stored.
+        switch_for_test(true);
+        assert!(listed(Kind::ConnectorSignIns, 0));
+        assert!(stays_now().contains(&connectors.label));
+        switch_for_test(false);
     }
 
     #[test]

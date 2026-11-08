@@ -9,7 +9,9 @@
 // - Delete some of your data → "Connector sign-ins": the browser sign-in ends (its tokens
 //   gone from the vault: test mode's connector-secrets.e2e.json), the connectors, their
 //   tools' settings, Yap's registration and a pasted header stay;
-// - Reset app: the same, listed under what goes, the connectors under what stays.
+// - Reset app: the same, listed under what goes, the connectors under what stays;
+// - the preview turned off with a sign-in still stored: all of it the same (what's
+//   stored, not what's switched on), and once no sign-in is left the kind hides again.
 // Seeded straight into the data folder: a link signed in in the browser (no server is
 // ever contacted: it has no revocation endpoint, so Yap ends the sign-in here) and a link
 // with a header. Fictional names, made-up secrets.
@@ -17,6 +19,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import zlib from 'node:zlib';
 import { test as base, expect, openSettings, settingsDialog, closeSettings, expectStore } from './support/fixtures.js';
+import { launchYap } from './support/yap.js';
 
 const NOW = Math.floor(Date.now() / 1000);
 const ACCESS = 'at-FAKE-yourdata-access-0001';
@@ -194,4 +197,43 @@ test('Reset app: connector sign-ins go, the connectors stay', async ({ yap, main
   await expect.poll(() => secretsOf(yap, 'c1').grant ?? null).toBe(null);
   expect(secretsOf(yap, 'c2').headers).toEqual({ 'X-Api-Key': HEADER });
   await expectStore(yap, 'connectors.json', (s) => s.connectors.map((c) => c.name).join() === 'Allotment notes,Garden tracker');
+});
+
+test('the preview turned off, a sign-in still stored: counted, exported and ended all the same', async ({}, testInfo) => {
+  // An instance of its own without YAP_CONNECTORS (connectorsPreview off), on the same seed:
+  // someone who tried the preview, then turned it off.
+  const off = await launchYap({ name: 'your-data-connectors-off', data: SEED });
+  try {
+    expect((await off.invoke('connectors_list')).enabled).toBe(false);
+    // Delete some of your data and Reset app list the sign-in, and the connectors as staying.
+    const plan = await off.invoke('data_reset_plan');
+    expect(plan.goes.find((l) => l.kind === 'connectorSignIns')?.count).toBe('1 sign-in');
+    expect(plan.stays).toContain("Your connectors, their tools' settings and any token you pasted");
+    // Report a problem counts what's stored.
+    const preview = await off.invoke('diagnostics_preview');
+    expect(JSON.parse(preview.settings).connectors).toMatchObject({ count: 2, links: 2, signedIn: 1 });
+    for (const never of ['Allotment notes', 'notes.example.com', ...SECRETS]) expect(preview.settings.includes(never), never).toBe(false);
+    // Download your data has them, and no secret.
+    const file = testInfo.outputPath('preview-off.zip');
+    await off.invoke('e2e_save_path', { path: file });
+    expect((await off.invoke('data_export_save', { audio: false })).path).toBeTruthy();
+    const files = unzip(file);
+    expect(JSON.parse(files['connectors/connectors.json'].toString('utf8')).connectors.map((c) => c.name)).toEqual(['Allotment notes', 'Garden tracker']);
+    const all = Object.values(files).map((b) => b.toString('utf8')).join('\n');
+    for (const s of SECRETS) expect(all.includes(s), s).toBe(false);
+    // Reset app ends the sign-in: its tokens gone from the vault; the rest stays.
+    const done = await off.invoke('data_reset');
+    expect(done.signIns).toBe(1);
+    expect(secretsOf(off, 'c1').grant ?? null).toBe(null);
+    expect(secretsOf(off, 'c1').registeredSecret).toBe(DCR_SECRET);
+    expect(secretsOf(off, 'c2').headers).toEqual({ 'X-Api-Key': HEADER });
+    await expect
+      .poll(() => off.readJson('connectors.json').connectors.map((c) => `${c.name}:${!!c.auth.signedIn}`).join())
+      .toBe('Allotment notes:false,Garden tracker:false');
+    // No sign-in left and the preview off: the kind hides again.
+    const after = await off.invoke('data_reset_plan');
+    expect(after.goes.some((l) => l.kind === 'connectorSignIns')).toBe(false);
+  } finally {
+    await off.stop();
+  }
 });
