@@ -77,7 +77,9 @@
     images = false,
     scopeName = 'Chat',
     compare = false,
-    fallback = $bindable(false),
+    // (No default: a scope saved before the switch existed has none, and
+    // Svelte refuses to bind `undefined` to a prop with a fallback value.)
+    fallback = $bindable(),
     fallbackOffered = false,
   } = $props();
 
@@ -275,7 +277,8 @@
     <!-- Off by default: it spends money. -->
     <div class="fallback" data-setting="claude-plan-fallback">
       <Toggle
-        bind:checked={fallback}
+        checked={!!fallback}
+        onchange={(on) => (fallback = on)}
         {disabled}
         label="If your plan can't answer, use my API key"
         desc="When Claude Code is signed out, at your plan's limit or won't start, that call goes to your Anthropic API key once, billed per use."
