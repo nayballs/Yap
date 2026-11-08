@@ -11,6 +11,9 @@
 //! - `manager.rs` one connection each: start, health, idle stop;
 //! - `local.rs` programs (their own kill-on-close job) · `remote.rs` links
 //!   (through `net.rs`, every request a receipt);
+//! - `oauth.rs` signing in to a link in the browser (the MCP authorization
+//!   spec: discovery, the client, PKCE on the loopback, tokens in the
+//!   vault) · `refresh.rs` one refresh at a time across Yaps;
 //! - `names.rs` / `schema.rs` / `results.rs` what a model would see ·
 //!   `call.rs` one call (timeout, progress, stop);
 //! - `fake.rs` fake servers for the tests.
@@ -32,6 +35,8 @@ mod fake;
 pub mod local;
 pub mod manager;
 pub mod names;
+pub mod oauth;
+pub mod refresh;
 pub mod remote;
 pub mod results;
 pub mod schema;
@@ -102,7 +107,9 @@ fn changed() {
     }
 }
 
-/// The status event's payload.
+/// The status event's payload: the connection's state, its line, and for a
+/// link that signs in in the browser its sign-in (`signIn`:
+/// "needs-sign-in" | "signing-in" | "signed-in" | "expired").
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct StatusView {
@@ -110,11 +117,27 @@ pub struct StatusView {
     #[serde(flatten)]
     pub status: Status,
     pub line: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub sign_in: Option<oauth::SignInState>,
 }
 
 impl StatusView {
     fn of(id: &str, status: Status) -> StatusView {
-        StatusView { id: id.to_string(), line: status.line(), status }
+        let c = store::get(id);
+        StatusView::with(id, c.as_ref(), status)
+    }
+
+    fn with(id: &str, c: Option<&Connector>, status: Status) -> StatusView {
+        let sign_in = c.and_then(|c| oauth::state_of(c, &status));
+        let line = c.zip(sign_in).and_then(|(c, s)| oauth::line_of(c, s)).unwrap_or_else(|| status.line());
+        StatusView { id: id.to_string(), line, status, sign_in }
+    }
+}
+
+/// Tell every window connector `id`'s status now (its sign-in changed).
+pub(crate) fn tell(id: &str) {
+    if let Some(app) = APP.get() {
+        let _ = app.emit(STATUS, StatusView::of(id, manager().status(id)));
     }
 }
 
@@ -223,6 +246,8 @@ pub struct View {
     #[serde(rename = "where")]
     pub where_: store::Where,
     pub added: u64,
+    /// A link's browser sign-in (`None`: it doesn't sign in that way).
+    pub sign_in: Option<oauth::SignInInfo>,
 }
 
 fn view(c: &Connector) -> View {
@@ -251,6 +276,7 @@ fn view(c: &Connector) -> View {
         Transport::Local { resolved, args, env, .. } => ("local", local::command_line(std::path::Path::new(resolved), args), Vec::new(), env.clone()),
     };
     let status = if c.enabled { manager().status(&c.id) } else { Status::Off };
+    let secrets = vault::load(&c.id);
     View {
         id: c.id.clone(),
         name: c.name.clone(),
@@ -261,8 +287,9 @@ fn view(c: &Connector) -> View {
         auth: c.auth.kind,
         headers,
         env,
-        has_secrets: !vault::load(&c.id).is_empty(),
-        status: StatusView::of(&c.id, match status {
+        has_secrets: !secrets.is_empty(),
+        sign_in: oauth::info(c, &status, &secrets),
+        status: StatusView::with(&c.id, Some(c), match status {
             // The tool count is the listing's.
             Status::Connected { .. } => Status::Connected { tools: tools.iter().filter(|t| t.skipped.is_none()).count() },
             s => s,
@@ -576,11 +603,16 @@ pub async fn connector_add(spec: Spec) -> Result<View, String> {
     Ok(view(&store::get(&c.id).unwrap_or(c)))
 }
 
-/// Remove a connector: its connection stopped, its tools and secrets gone.
+/// Remove a connector: its connection stopped, a browser sign-in revoked
+/// (as signing out does, for at most 10 s), its tools and secrets gone.
 #[tauri::command]
 pub async fn connector_remove(id: String) -> Result<(), String> {
     require()?;
+    oauth::cancel(&id);
     manager().forget(&id).await;
+    if vault::load(&id).grant.is_some() {
+        let _ = tokio::time::timeout(Duration::from_secs(10), oauth::sign_out(&id)).await;
+    }
     if store::remove(&id)?.is_none() {
         return Err("There's no such connector.".into());
     }
@@ -602,6 +634,7 @@ pub async fn connector_set_enabled(id: String, enabled: bool) -> Result<View, St
     if enabled {
         manager().reset(&id).await;
     } else {
+        oauth::cancel(&id);
         manager().stop(&id, true).await;
     }
     changed();
@@ -670,6 +703,129 @@ pub async fn connector_details(id: String) -> Result<Details, String> {
     Ok(Details { server: v.server, address: v.address, stderr: manager().stderr_tail(&id, 40), listed_at: listing.map(|l| l.listed_at) })
 }
 
+// ---- signing in ------------------------------------------------------------------------------------
+
+/// How `connector_sign_in` ended (a failure is its `Err`, in plain words).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum Outcome {
+    SignedIn,
+    Cancelled,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SignInView {
+    pub outcome: Outcome,
+    pub connector: View,
+}
+
+/// The person's browser on `link` (`shell/browsers.rs`, as every link
+/// button: a test run keeps it for the suite instead).
+fn open_in_browser(link: &str) -> Result<(), String> {
+    let app = APP.get().ok_or("Yap isn't ready to open your browser yet.")?;
+    crate::shell::commands::open_link(app, link)
+}
+
+/// Sign connector `id` in, opening the browser with `open`: the states told
+/// as it goes; signed in, a fresh connection and its tools listed.
+pub async fn sign_in_with(id: &str, open: oauth::Open<'_>) -> Result<SignInView, String> {
+    let c = store::get(id).ok_or("There's no such connector.")?;
+    oauth::can_sign_in(&c)?;
+    let (ticket, before) = oauth::begin(id);
+    if let Some(other) = before.filter(|o| o != id) {
+        tell(&other);
+    }
+    tell(id);
+    let out = oauth::sign_in(&c, &ticket, open).await;
+    oauth::end(&ticket);
+    let outcome = match out {
+        Ok(()) => {
+            manager().reset(id).await;
+            if refresh(id, true).await.is_err() {
+                tracing::info!(connector = id, "connectors: signed in, but its tools didn't list yet");
+            }
+            Outcome::SignedIn
+        }
+        Err(oauth::Stop::Cancelled) => {
+            tracing::info!(connector = id, "connectors: sign-in cancelled");
+            Outcome::Cancelled
+        }
+        Err(oauth::Stop::Failed(why)) => {
+            tracing::info!(connector = id, "connectors: sign-in didn't finish");
+            tell(id);
+            changed();
+            return Err(why);
+        }
+    };
+    tell(id);
+    changed();
+    let c = store::get(id).ok_or("There's no such connector.")?;
+    Ok(SignInView { outcome, connector: view(&c) })
+}
+
+/// **Sign in in the browser**: the server's sign-in found, Yap's client
+/// picked (or registered), the person's browser opened on it; answers once
+/// it's done (`signed-in`), cancelled (`cancelled`) or failed (`Err`, in
+/// plain words). `yap-connector-status` says "signing-in" meanwhile.
+#[tauri::command]
+pub async fn connector_sign_in(id: String) -> Result<SignInView, String> {
+    require()?;
+    sign_in_with(&id, &open_in_browser).await
+}
+
+/// Stop waiting for connector `id`'s sign-in in the browser.
+#[tauri::command]
+pub async fn connector_sign_in_cancel(id: String) -> Result<bool, String> {
+    require()?;
+    let was = oauth::cancel(&id);
+    tell(&id);
+    Ok(was)
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SignedOutView {
+    /// The server confirmed the grant is revoked (else: disconnect Yap on
+    /// the service's own page too).
+    pub confirmed: bool,
+    pub connector: View,
+}
+
+/// **Sign out**: the connection stopped, the grant revoked where the server
+/// offers it, the tokens gone; "needs-sign-in" after.
+#[tauri::command]
+pub async fn connector_sign_out(id: String) -> Result<SignedOutView, String> {
+    require()?;
+    let c = store::get(&id).ok_or("There's no such connector.")?;
+    if c.auth.kind != AuthKind::Oauth {
+        return Err("This connector isn't signed in through the browser.".into());
+    }
+    oauth::cancel(&id);
+    manager().stop(&id, false).await;
+    let confirmed = oauth::sign_out(&id).await;
+    tell(&id);
+    changed();
+    let c = store::get(&id).ok_or("There's no such connector.")?;
+    Ok(SignedOutView { confirmed, connector: view(&c) })
+}
+
+/// **The person's own client** for a server Yap has no registration with:
+/// its id (in connectors.json) and secret (in the vault); an empty id
+/// forgets it. Used at the next sign-in, first.
+#[tauri::command]
+pub async fn connector_set_client(id: String, client_id: String, secret: Option<String>) -> Result<View, String> {
+    require()?;
+    blocking({
+        let id = id.clone();
+        move || oauth::set_client(&id, &client_id, secret.as_deref())
+    })
+    .await?;
+    changed();
+    let c = store::get(&id).ok_or("There's no such connector.")?;
+    Ok(view(&c))
+}
+
 /// A tool called directly, for the tests and a debug check (debug builds
 /// only: in a release build only Chat calls tools, through its consent).
 /// Yap's tool-result JSON.
@@ -696,6 +852,7 @@ pub async fn call_tool(id: &str, tool: &str, args: &Value, timeout: Option<Durat
     let timeout = timeout.unwrap_or_else(|| call::timeout_for(c.timeout_secs));
     let started = std::time::Instant::now();
     let display = format!("{} · {tool}", c.kind());
+    let signed = oauth::state_of(&c, &manager().status(id));
     let out = call::call(&peer, tool, args, timeout, &call::Stop::new()).await;
     let ms = started.elapsed().as_millis() as u64;
     match out {
@@ -705,10 +862,30 @@ pub async fn call_tool(id: &str, tool: &str, args: &Value, timeout: Option<Durat
         }
         Err(e) => {
             tracing::info!(connector = id, tool, ms, outcome = e.word(), "connectors: tool call failed");
+            // The server refused the sign-in on this call (it ended, or it
+            // wants more access): said so; not the connection's failure.
+            let now = store::get(id);
+            if let Some(words) = now.as_ref().and_then(|n| sign_in_trouble(n, signed)) {
+                if now.as_ref().is_some_and(|n| n.auth.expired) {
+                    manager().stop(id, false).await;
+                }
+                return Ok(serde_json::json!({ "success": false, "error": words, "data": Value::Null, "displayText": display }));
+            }
             if e == call::CallError::Lost {
                 manager().broke(id).await;
             }
             Ok(serde_json::json!({ "success": false, "error": e.words(&c.kind()), "data": Value::Null, "displayText": display }))
         }
     }
+}
+
+/// A call failed because of its sign-in, judged by the state before it
+/// (`was`) and now: what to say. Pure but for the one sign-in in flight.
+#[cfg_attr(not(debug_assertions), allow(dead_code))]
+fn sign_in_trouble(now: &Connector, was: Option<oauth::SignInState>) -> Option<String> {
+    let state = oauth::state_of(now, &Status::Idle)?;
+    if Some(state) == was || state == oauth::SignInState::SignedIn {
+        return None;
+    }
+    oauth::line_of(now, state)
 }

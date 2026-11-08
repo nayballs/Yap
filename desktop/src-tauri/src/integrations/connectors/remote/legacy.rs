@@ -15,6 +15,7 @@ use futures_util::stream::StreamExt;
 use reqwest::header::{ACCEPT, CONTENT_TYPE};
 use rmcp::model::{ClientJsonRpcMessage, ServerJsonRpcMessage};
 use rmcp::service::RoleClient;
+use rmcp::transport::streamable_http_client::StreamableHttpError;
 use url::Url;
 
 use super::{Http, HttpError};
@@ -87,8 +88,12 @@ impl Http {
     /// comes on the stream).
     async fn post_legacy(&self, endpoint: &str, message: &ClientJsonRpcMessage) -> Result<(), HttpError> {
         let body = serde_json::to_vec(message).map_err(|_| HttpError::Other("Yap couldn't write the message.".into()))?;
+        let token = self.bearer(None).await.map_err(|e| match e {
+            StreamableHttpError::Client(h) => h,
+            _ => HttpError::SignInEnded { host: self.host().to_string() },
+        })?;
         let req = self.inner.client.post(endpoint).header(ACCEPT, super::JSON).header(CONTENT_TYPE, super::JSON).body(body);
-        let req = self.credentials(req, None);
+        let req = self.credentials(req, token.as_deref());
         let resp = self.send(req).await?;
         let status = resp.status().as_u16();
         if resp.status().is_success() {

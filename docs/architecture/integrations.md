@@ -78,10 +78,10 @@ The token-authenticated local API, Yap's MCP server (`yap.exe mcp`) and adding i
 
 Yap as an **MCP client**: the person adds a server at a link or a program on
 this PC, and Yap keeps its tools for Chat, the Voice Assistant and plan chats
-to use. Waves 1 (the core and programs) and 2 (links with tokens) are built;
-signing in through the browser (3), the tools in Chat's loop (4), Settings →
-Connectors (5) and the rest come after. **Nothing offers a connector's tools
-to a model yet.**
+to use. Waves 1 (the core and programs), 2 (links with tokens) and 3
+(signing in through the browser) are built; the tools in Chat's loop (4),
+Settings → Connectors (5) and the rest come after. **Nothing offers a
+connector's tools to a model yet.**
 
 - **The switch** (`connectors::enabled`): `connectors_preview` in config.json
   (off by default), or `YAP_CONNECTORS=1` in a debug build (the e2e suite
@@ -188,17 +188,133 @@ to a model yet.**
   (`Authorization: Bearer`) or request headers, their values in the vault,
   only ever sent to that server; a 401 to a token or a header is "turned
   the token down", never a sign-in; a 401 with a challenge and nothing sent
-  is "Needs sign-in" (wave 3 starts there). A `server/discover` a 2025
+  is "Needs sign-in" (the browser sign-in starts there, below). A `server/discover` a 2025
   server refuses with a 4xx comes back as a JSON-RPC error so Auto falls
   back. **The older HTTP+SSE** (`remote/legacy.rs`, which rmcp no longer
   has): for a link marked so, or when the first POST answers 404 or 405 —
   `GET` the stream, its `endpoint` event (same origin only), each message
   `POST`ed there, answers read off the stream; the same receipts and rules.
+- **Signing in through the browser** (`oauth.rs` + `oauth/`, `refresh.rs`;
+  wave 3, 2026-11-08): the MCP authorization spec (revision 2026-07-28) in
+  Yap's own code on its own reqwest — not rmcp's `auth` feature, which
+  brings another reqwest and its own HTTP —, every request through `net.rs`
+  as "Connector sign-in · A connector"
+  ([privacy-receipts.md](./privacy-receipts.md)) on the connector's own
+  place rules (a server on the internet signs in over `https://` on the
+  internet only, a name resolving to this PC or the network refused as the
+  connection is made; one on this PC or the network may use `http://`
+  there), no redirects followed, answers read to 256 KB, 20 s each.
+  - **Discovery** (`oauth/discover.rs`): the server asked without a token
+    (an `initialize` POST); its `401`'s `WWW-Authenticate: Bearer
+    resource_metadata=…, scope=…` (a Bearer challenge among others, quoted
+    or bare); its **protected resource metadata** (RFC 9728) from the
+    challenge's address, else `/.well-known/oauth-protected-resource/<path>`,
+    then the root one — its `resource` must be this server (the same origin,
+    the server's path or a parent of it), or Yap stops ("…'s sign-in is for
+    another server (…), so Yap stopped there"); the **authorization
+    server** must be one it names, and its metadata (RFC 8414 with the
+    issuer's path inserted, OpenID with it inserted, then appended) must
+    name that same issuer (a trailing slash aside), offer PKCE with **S256**
+    (without `code_challenge_methods_supported`, refused: "doesn't meet the
+    MCP security rules"), and point only at endpoints a sign-in may use (an
+    endpoint on another host is fine: some issuers' token endpoints are).
+  - **The client** (`oauth/client.rs`), in the spec's order: a
+    **pre-registered** one — the person's own, entered by hand
+    (`connector_set_client`: their explicit choice, so first; its secret in
+    the vault), else Yap's own app with that vendor from the catalogue (the
+    hook, `client::catalog_client`, with an empty list until wave 5b) —;
+    **Yap's client ID metadata document** (CIMD) when the server says
+    `client_id_metadata_document_supported` — its URL is the client id,
+    nothing registered; `client::METADATA_URL` is unset until the maintainer
+    approves where it's hosted (skipped while unset; a test run's
+    `YAP_E2E_CIMD_URL`), and `client::metadata_document` is the file —;
+    **dynamic client registration** (RFC 7591) at the server's
+    `registration_endpoint`: `client_name` "Yap", `application_type:
+    "native"`, `token_endpoint_auth_method: "none"`, the code and refresh
+    grants, the loopback's redirects (`http://127.0.0.1:51439/connectors/callback`,
+    the port this sign-in listens on if it's another, and the port-less
+    `http://127.0.0.1/connectors/callback` for servers that allow any port);
+    kept in connectors.json **for that issuer only**, before the sign-in
+    goes on (never registered twice), reused, dropped when the issuer
+    changes or the server no longer knows it (`invalid_client`); else
+    **ask**: "… needs an app registration Yap doesn't have. Ask its admin for
+    a client ID (with http://127.0.0.1:51439/connectors/callback as its
+    redirect)…". A pasted token (`Spec::token`) never comes here.
+  - **The browser** (`oauth/loopback.rs`): the authorize address with
+    `response_type=code`, the client id, the redirect, a 32-character
+    `state`, PKCE (a 32-byte verifier, its S256 challenge), the `resource`
+    (RFC 8707: the protected resource metadata's) and the **scopes** — the
+    challenge's, else the resource's `scopes_supported`; on a step-up those
+    asked for before and the ones the server asked for since; plus
+    `offline_access` when the authorization server lists it and there's
+    anything to ask for —, opened with `shell::commands::open_link` (the
+    person's chosen browser, `shell/browsers.rs`; a test run keeps it for
+    `e2e_opened_urls`), never in a Yap webview. **The loopback**:
+    `127.0.0.1` on the fixed port **51439** (beside Vite's 51437 and Link's
+    51443), else any free port; only a `GET` from this PC with this
+    listener's `Host` at `/connectors/callback` carrying this attempt's
+    `state` once (one code, one `iss`) — anything else a 404 —; one answer,
+    then it closes; 10 minutes at most, or Cancel; each answer's connection
+    closed (the ChatGPT sign-in's lesson). **`iss`** (RFC 9207): another
+    issuer's, or none when the server says it always sends one, and the
+    code is never used and nothing from the answer is shown ("The browser's
+    answer didn't come from the sign-in server Yap asked…"); a denial says
+    Yap's words for its error code (`access_denied`: "You didn't allow Yap
+    to use …"), never the server's text. The page: "Signed in · You're
+    signed in to <name>. You can close this tab and go back to Yap.", or
+    "Not signed in" and why.
+  - **Tokens** (`oauth/tokens.rs`): the code swapped with the verifier,
+    the redirect and the resource; a public client sends its id, one with a
+    secret authenticates as it was registered or as the server lists first
+    (`client_secret_basic`, `client_secret_post`). Only a Bearer token is
+    taken. The **grant** goes to the vault (`vault::Grant`: the access and
+    refresh tokens, when they run out and were issued, the scopes, and the
+    issuer, resource and client they're bound to), the sign-in to
+    connectors.json (`auth`: issuer, resource, client, scopes, `signedIn`,
+    the endpoints); `auth.kind` becomes `oauth`. Then the connection starts
+    afresh and the tools are listed.
+  - **Using them** (`oauth::access_token`, `oauth::Source`): every request
+    of an `oauth` connector's connection carries its access token
+    (`remote::Http::with_sign_in`) — only if the grant was issued for this
+    server's resource, so a changed address never gets it —, refreshed **30
+    s before it runs out** (half its life for one that lasts under a
+    minute; one that says no expiry, when it's refused). **One refresh at a
+    time across Yaps** (`refresh.rs`: a mutex per connector, then
+    `<data>/connectors/c<N>.refresh.lock`, waited for up to 15 s), and the
+    vault read again once it's held: another Yap's newer tokens are used as
+    they are, so a rotating refresh token is never spent twice; the next
+    one is kept at once. A **401** to the token: one refresh, the request
+    sent again (the server did nothing with it), a second 401 ends the
+    sign-in. A refresh turned down (`invalid_grant`, `invalid_client`) ends
+    it too: the tokens leave the vault, the state is **expired** ("Your
+    sign-in to … has ended. Sign in again."), the call says so. A **`403
+    insufficient_scope`** keeps the scopes the server wants (`auth.wants`):
+    "… needs more access for this. Sign in again.", and the next sign-in
+    asks for them with the ones before; once per scope (asked for already:
+    given up, the call just fails).
+  - **Signing out** (`oauth::sign_out`): under the refresh guard, the
+    refresh token revoked (RFC 7009, the access token when there's none)
+    where the server has a `revocation_endpoint` — `confirmed: false` when
+    it hasn't or refused, so the person is told to disconnect Yap on the
+    service's page too —, the tokens gone from the vault; the registration
+    and the person's own client stay, so signing in again is one click.
+    Removing a connector revokes first (10 s at most).
+  - **The states** (`oauth::SignInState`, `signIn` on `yap-connector-status`
+    and in the view): `needs-sign-in` (a link whose server wants a sign-in,
+    an `oauth` one without tokens, or wanting more access), `signing-in`
+    ("Signing in… Finish in your browser."), `signed-in`, `expired`. **One
+    sign-in at a time**: a new one cancels the one before. A program, a
+    token or a header connector doesn't sign in in the browser.
+  - **Nothing secret logged at any level**: the connector's id, outcomes,
+    counts and an error code only; `oauth::tests::the_sign_in_never_logs_a_secret`
+    reads the sign-in's files and fails on a log call formatting a token, a
+    code, a verifier, a secret, the state or an address.
 - **The vault** (`vault.rs`): one connector's secrets as one JSON value in
   Windows Credential Manager, `yap-connector-c<N>-<part>.com.yap.dictation`
-  (1,100-character parts, at most 4), never in a file, the log or the page
-  (`Secrets`' `Debug` names which there are); the uninstaller removes all
-  24 × 4 names. A test run keeps them in its data folder's
+  (1,100-character parts, at most 8 — room for a sign-in's two JWTs and a
+  client secret), never in a file, the log or the page (`Secrets`' and
+  `Grant`'s `Debug` name which there are); the uninstaller removes all 24 ×
+  8 names. A test run keeps them in its data folder's
   `connector-secrets.e2e.json`; unit tests in memory, and one test uses the
   real store under names of its own and removes them.
 - **Commands** (wave 5's Settings and wave 4's loop build on them):
@@ -209,11 +325,22 @@ to a model yet.**
   tools and secrets gone), `connector_set_enabled {id, enabled}`,
   `connector_refresh_tools {id}` (Try again: a fresh connection, listed;
   what changed), `connector_set_tool {id, tool, setting}`,
-  `connector_details {id}` (server, address, stderr), and in debug builds
+  `connector_details {id}` (server, address, stderr), the sign-in's —
+  `connector_sign_in {id}` (answers once it's over: `{outcome: "signed-in" |
+  "cancelled", connector}`, a failure its error in plain words),
+  `connector_sign_in_cancel {id}`, `connector_sign_out {id}` (`{confirmed,
+  connector}`), `connector_set_client {id, clientId, secret?}` (the person's
+  own client; an empty id forgets it) —, and in debug builds
   only `connector_call_tool {id, tool, args, timeoutMs}` (a tool called
   directly, Off and unknown ones refused: the tests' and a debug check's).
+  A view has `signIn` for a link that signs in in the browser (`{state,
+  host, client, ownClientId, hasOwnSecret, scopes, redirectUri}`: the
+  sign-in server's host the browser opens, the client the last sign-in used,
+  the redirect a hand-entered client registers).
   **Events**: `yap-connectors-changed` (any change) and
-  `yap-connector-status` (`{id, state, line, …}`).
+  `yap-connector-status` (`{id, state, line, signIn?, …}`: `signIn`
+  "needs-sign-in" | "signing-in" | "signed-in" | "expired", and the line
+  saying it).
 - **Never another way in**: only those commands add a connector; Chat has
   no tool for it, a page beside the chat has no Yap IPC, the deep link takes
   none.
@@ -231,7 +358,29 @@ to a model yet.**
   older HTTP+SSE, a name that resolves to this PC —, the receipts' purpose,
   and the switch off reading nothing); and `connectors-core.spec.js` with
   `desktop/e2e/support/fake-mcp.js` (stdio, and `--http` with `--token`,
-  `--redirect`, `--hang`, `--slow-ms`) through the commands.
+  `--redirect`, `--hang`, `--slow-ms`) through the commands. **The sign-in**:
+  unit tests of the challenge, the metadata addresses' order, the resource
+  and issuer checks, S256, the endpoints' place rules, the order of client
+  choice, Yap's metadata document and its registration, PKCE (RFC 7636's
+  vector), the authorize address, `state` and `iss`, the loopback's one
+  answer, token responses and client authentication, the refresh margin,
+  the scopes, one sign-in at a time and the refresh guard; and against
+  `fake.rs`'s OAuth fake (an MCP server with its own authorization server)
+  the whole sign-in — registered once and reused, PKCE checked, the tokens
+  in the vault and in no file, calls carrying them, the receipts —, two
+  refreshes at once becoming one, another Yap's newer tokens used, a 401
+  refreshed and rotated, a revoked grant ending the sign-in, step-up, an
+  answer with another `iss` never used, Cancel, a grant never sent to
+  another address, sign-out revoking, and the person's own client. And
+  `connectors-signin.spec.js` with `desktop/e2e/support/fake-mcp-oauth.js`
+  (in every mode: dynamic registration, Yap's metadata document, a
+  hand-entered client with its secret, a short-lived token refreshed with
+  its refresh token rotating, a revoked token and a revoked grant, step-up,
+  another `iss`, metadata naming another issuer, a resource for another
+  server, no S256, a decline, Cancel, metadata only where the challenge
+  says, OpenID for an issuer with a path, a slow server, the fixed port
+  busy), the browser played by the test: the address Yap would open, the
+  fake's consent approved, the loopback opened.
 
 ## Claude Code runs' endpoint (`integrations/claude_live.rs`, 2026-11-07)
 
