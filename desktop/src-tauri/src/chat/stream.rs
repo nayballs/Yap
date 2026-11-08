@@ -893,6 +893,36 @@ pub fn stream_stop(id: String, superseded: Option<bool>) -> bool {
     stopped
 }
 
+/// Stop the turn answering `conversation`, whoever asked it (`why`, as
+/// [`stop`]). `true` if one was.
+pub fn stop_answering(conversation: u64, why: Halt) -> bool {
+    let signal = ANSWERING
+        .lock()
+        .unwrap_or_else(|p| p.into_inner())
+        .as_ref()
+        .and_then(|m| m.get(&conversation).map(|(_, s)| Arc::clone(s)));
+    match signal {
+        Some(s) => {
+            s.fire(why);
+            true
+        }
+        None => false,
+    }
+}
+
+/// **■ on the answer being written in a conversation** (Chat's composer, its
+/// Esc), whatever surface asked it: a question asked out loud that the Voice
+/// Assistant has moved on from, or a phone's. What was shown is kept, as
+/// [`stream_stop`] keeps it. (The page's own typed question stops by its id;
+/// the Voice Assistant's current one by `assistant_stop`, which stops its
+/// voice too.)
+#[tauri::command]
+pub fn stream_stop_conversation(conversation: u64) -> bool {
+    let stopped = stop_answering(conversation, Halt::Stopped);
+    tracing::info!(stopped, "The answer in a conversation was stopped");
+    stopped
+}
+
 /// The page's channel for a streamed answer, when it sent one (a command
 /// argument; a call without one — the e2e suite's direct invokes — gets
 /// its answer whole, as before). Tauri's own `Channel` argument can't be
@@ -1982,5 +2012,25 @@ mod tests {
         assert!(listed(chat));
         drop(report);
         assert!(!listed(chat));
+    }
+
+    // Chat's ■ stops the open conversation's answer, whoever asked it (an
+    // older spoken question, a phone's): only that conversation's turn.
+    #[test]
+    fn a_stop_by_conversation_reaches_only_its_turn() {
+        let rt = tokio::runtime::Builder::new_current_thread().enable_time().build().unwrap();
+        rt.block_on(async {
+            let (here, there) = (90_031, 90_032);
+            let answering = Stoppable::new(None);
+            answering.answers(here);
+            let elsewhere = Stoppable::new(None);
+            elsewhere.answers(there);
+            assert!(!stop_answering(90_033, Halt::Stopped), "nothing answers there");
+            assert!(stop_answering(here, Halt::Stopped));
+            assert_eq!(tokio::time::timeout(Duration::from_secs(1), answering.halted()).await, Ok(Halt::Stopped));
+            assert!(tokio::time::timeout(Duration::from_millis(30), elsewhere.halted()).await.is_err(), "another chat's goes on");
+            drop(answering);
+            assert!(!stop_answering(here, Halt::Stopped), "gone once its turn ends");
+        });
     }
 }

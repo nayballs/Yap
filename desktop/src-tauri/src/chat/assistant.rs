@@ -1918,11 +1918,15 @@ pub fn assistant_stop(app: AppHandle) {
     stop(&app);
 }
 
-/// Where the Voice Assistant is now (`yap-assistant`'s phase), for a Chat
-/// view that opened after it was said: its ■ shows while it thinks or speaks.
+/// Where the Voice Assistant is now (`yap-assistant`'s payload: the phase and
+/// the conversation its question went to), for a Chat view that opened after
+/// it was said: its ■ shows while it thinks or speaks, in that conversation
+/// only; and for Chat's ■, which stops it (voice and all) only when it's
+/// that conversation's.
 #[tauri::command]
-pub fn assistant_phase() -> Phase {
-    lock().phase
+pub fn assistant_phase() -> PhaseEvent {
+    let s = lock();
+    snapshot(&s)
 }
 
 /// Debug-only, test mode: a spoken question without a microphone — the

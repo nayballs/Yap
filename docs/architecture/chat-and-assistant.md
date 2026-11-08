@@ -1114,7 +1114,10 @@ one side.
   (llama.cpp stops generating on a closed connection); `chat_turn` keeps
   what was shown (`Watch`), checks it like any answer and saves it with
   `stopped: true` (`chats::append_message`); nothing shown yet → the error
-  `stream::STOPPED`, the question kept (as after a failure). **An answer
+  `stream::STOPPED`, the question kept (as after a failure).
+  `stream_stop_conversation {conversation}` (2026-11-07, `stop_answering`)
+  stops whichever turn answers a conversation (Chat's ■ on a spoken
+  answer it didn't send). **An answer
   that starts repeating itself stops there** (`Assembler`'s loop guard,
   `repeating_from`, 2026-10-26: a small on-device model answered a
   spoken question with the same paragraphs over and over for half a
@@ -1374,7 +1377,11 @@ one side.
   and a model on this PC went on writing) — what was written stays in
   Chat, as after Chat's own ■; stopped before anything came, the question
   stays and no alert shows. `assistant_phase` tells a Chat view opened
-  after the question where the assistant is, so its ■ shows.
+  after the question where the assistant is and its question's
+  conversation (`PhaseEvent`, as `yap-assistant` says it), so its ■ shows
+  there only; Chat's ■ asks it too, and stops a spoken answer the assistant
+  has moved on from (or a phone's) by its conversation instead
+  (`stream_stop_conversation`).
   The bar's capsule shows while `phase != Idle`, the bar on or off.
   Debug-only `e2e_assistant_ask {text, listenMs}` (`Robot::ask_assistant`:
   the press's own steps — barge-in, the target, "recording" for
@@ -2867,7 +2874,35 @@ and its Undo, Preview / Source, find, copy, light and dark).
   an older spoken question (`userMessageId` ≠ the one followed) are left
   alone, so they never land in the newer one's bubble or end its
   "Thinking…". A typed Enter still waits while an answer comes (type
-  ahead), as before. **A snip** ([snip.md](./snip.md), 2026-10-23) lands in
+  ahead), as before. **An answer belongs to its conversation** (2026-11-07,
+  `chatState`'s `Answer`; before, an answer in progress showed in whichever
+  chat was open — B said A's "Thinking…" with a ■ that stopped A): each
+  answer being written — a typed question's, a spoken or a phone's the view
+  follows — is kept by its conversation id (a new chat's under its new chat
+  until its `turn` event names it), with its question, the answer so far,
+  its line, since when and its ■. The thread draws the open conversation's
+  only (`here`): the activity line, the streaming bubble, its steps; the
+  composer's ■ and Send held back too (`sending`, `assistantAnswering`: the
+  Voice Assistant's phase counts only in its question's conversation,
+  `yap-assistant`'s `conversationId`). Another chat opened meanwhile, the
+  answer goes on (nothing stops it) and lands in its own conversation — the
+  view never switches back for it, a spoken one's "answered" included; its
+  row is Working, then New. Opened again mid-answer (`withLive`: the saved
+  messages, its question marked, the bubble from the answer so far), it
+  picks up where it is, the line's time from when it was asked. Several
+  conversations answer at once: Rust ends a turn only for a newer question
+  in its own conversation (`stream::Stoppable::answers`), a cloud model
+  answers each in its own request, and llama.cpp's server takes the on-device
+  model's in its slots (or queues them) — so another chat answering never
+  holds a question up, and a model on this PC's slow start says "…answering
+  another chat too" (`chatStatus.answering`). ■ and Esc stop the open
+  conversation's answer only (a spoken one: `assistant_stop` when it's the
+  assistant's own question, else `stream_stop_conversation`). An agent's report
+  written in another chat leaves the open one alone. A turn the view doesn't
+  follow answering the open conversation (asked before Chat was last
+  opened, a report) is read back once Rust lists it done
+  (`yap-chat-answering`), so its answer shows. E2E:
+  `chat-answering.spec.js`. **A snip** ([snip.md](./snip.md), 2026-10-23) lands in
   the box (`yap-snip`, or ControlPanel's `chatRequest {snip}`): the
   conversation Rust chose — the one open here when the window was on screen
   on it, else a new chat —, its 120 px tile (its size and ✕ on hover; how
@@ -3474,7 +3509,7 @@ as for every other. Chat, the Voice Assistant on this PC and from the phone.
 - **Stop, and a newer question**: the interrupt (`Session::interrupt`), and
   the turn read to its end (10 s at most, else the process is ended), so the
   next question's events are its own.
-- **Yap Code** (while offered: `on_the_plan` keeps `agents`): Yap's job tools over
+- **Yap Code** (while offered: `on_the_plan` keeps `agents`): Yap's agent tools over
   the same endpoint, allowed and named in the prompt (`plan.rs` `AGENTS`). Each
   turn opens on the session's run (`RunHandle::begin_turn`), and the turn's
   events tell the run of every web read and of each of Yap's tool calls as
