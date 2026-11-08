@@ -204,7 +204,7 @@ uses it.
 
 Changes the running test Yap as another surface would (`save_config`, Settings told,
 checked after): `web`, `yapCode` (with it: Claude Code checked, the scratch workspace
-made and added), `connectors`, `config: {…}` (other settings; never a key, a sign-in
+made and added), `connectors`, `bypass` (new chats' Mode Bypass permissions, the test Yap's own one-time OK given; off: Auto), `config: {…}` (other settings; never a key, a sign-in
 or Chat's model — `start` sets those), and `files: [{path, text} | {path, png: {width,
 height, shape, color, background}}]` seeded into **the lab's scratch workspace only**
 (`shape`: circle, square, triangle, stripes; drawn by the lab, nothing from outside).
@@ -390,7 +390,7 @@ warn).
 | `answerContains` / `answerNotContains` / `answerMatches` | the answer has the words (any case) / hasn't / matches the regex. |
 | `pictures`, `files`, `documents`, `pagesShown`, `sources`, `tools` | how many: a number, or `{ "min": 1, "max": 3 }`. |
 | `tool` | some call matches all of it (a list: each one does): `name`, `via`, `ok`, `refused`, `args` (`{ "tab": 1, "keys": "/enter/i", "ref": "*" }`: equal, a regex, or there at all), `argsHas` / `argsLack`, `result` / `resultNot` (words or a regex on the whole result), and `path` into the result's JSON (`"data.scroll.y"`) with `equals`, `gt`, `gte`, `lt`, `matches` or `notMatches`. The whole arguments and results: the turn's transcript. |
-| `agent` | an agent (from the last `wait agents`, else now) has `status`, `files` (a count), `folder`, `error` (`null`: none); `count` how many must (one by default). |
+| `agent` | an agent (from the last `wait agents`, else now) has `status`, `files` (a count), `folder`, `error` (`null`: none), `mode` (`bypassPermissions`…), `plan`, `readOnly` (its latest turn read only); `count` how many must (one by default). |
 | `selector` | `{ "window": "main", "css": "…" }` shows (`present: false`: doesn't; `count`: how many show), over CDP (`probe`). |
 | `visible` / `notVisible` | the thread's visible words have / haven't these. |
 
@@ -400,7 +400,7 @@ warn).
 |---|---|---|
 | `browser-tools` | the default `start` (web on) | The browser tools' fixes of 8 Nov 2026, in three questions on Wikipedia, MDN and example.com: `browser_scroll` reporting where it ended (`data.scroll.y`, not at the top), `browser_scroll_to` by ref scrolling, `tab` on `browser_find` and `browser_scroll`, "changed" after a hover, PageDown and a click that opens a box, Escape closing a hover preview (soft), Enter after typing submitting through the check (`went to`, no card), a dropdown's choice not called typing, `find_pictures` and the lead picture (the thread's shot shows which), the bad-ref error not blaming the page. |
 | `share-files` | `start --yap-code on` | Chat sharing files from a Code chat's workspace: one picture, then three (inline), then `notes.md` (a card); the workspace seeded with three drawn pictures and a made-up `notes.md`. **Its `todo`**: written before the share-files tool reached main — put its real name in `used` and check where an answer keeps file cards (`turns.mjs` `files`) once it has. |
-| `agent-panel` | `start --yap-code on` | An agent at work in `lab-sandbox`, its cards allowed: the Agent panel and the thread's to-do card while it runs and once it's done (named shots, both themes), the agent done with a file changed. Then a plan nobody acts on (8 Nov 2026): a fresh agent in Plan mode ("Read only, don't change any files"), its cards answered no, its plan in Needs you with its buttons in the row (`plan-waiting`); a newer fresh agent at work in the same Code chat (`newer-turn-running`), and once it's done the plan is "Plan not used" in Finished, not Needs you (`plan-not-used`). Its `fake` steps make it pass on `--fake` too (the stand-in agent). |
+| `agent-panel` | `start --yap-code on` | An agent at work in `lab-sandbox`, its cards allowed: the Agent panel and the thread's to-do card while it runs and once it's done (named shots, both themes), the agent done with a file changed. Then a plan nobody acts on (8 Nov 2026): a fresh agent asked for a plan first, its prompt answered no (`answer next deny`), its plan in Needs you with its buttons in the row (`plan-waiting`); a newer fresh agent at work in the same Code chat (`newer-turn-running`), and once it's done the plan is "Plan not used" in Finished, not Needs you (`plan-not-used`). Then a Bypass permissions Code chat asked to catch up on the workspace (`set` `bypass`): no card, the agent read only at Bypass, never a plan, done, nothing in Needs you. Its `fake` steps make it pass on `--fake` too (the stand-in agent). |
 
 ## Checking that it looks right
 

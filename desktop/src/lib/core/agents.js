@@ -423,7 +423,8 @@ export function reportTitle(agent, markerText = '') {
 export function planWaits(agent, turn, latest = false) {
   if (!agent || isLive(agent.status) || !agent.plan || agent.planAllowed || agent.planUnused) return false;
   const last = (agent.turnList || []).at(-1);
-  if (turn) return !!turn.plan && !turn.planAllowed && !turn.planUnused && !!last && last.n === turn.n;
+  if (last?.readOnly) return false;
+  if (turn) return !!turn.plan && !turn.planAllowed && !turn.planUnused && !turn.readOnly && !!last && last.n === turn.n;
   return latest && !last;
 }
 
@@ -435,7 +436,7 @@ export function planWaits(agent, turn, latest = false) {
  * in its row's details. Pure.
  */
 export function planNotUsed(turn, waiting = false) {
-  return !!turn && turn.status === 'done' && !!turn.plan && !turn.planAllowed && !waiting;
+  return !!turn && turn.status === 'done' && !!turn.plan && !turn.planAllowed && !turn.readOnly && !waiting;
 }
 
 /** The folder a report marker names ("The agent in garden-planner: …"; "The job in …" in a chat from before the rename to Yap Code). */

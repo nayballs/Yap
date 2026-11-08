@@ -23,7 +23,8 @@ pub fn brief(agent: &Agent, line: Option<&str>) -> Brief {
         started_ts: agent.started_ts,
         ended_ts: agent.ended_ts,
         asks: agent.asks,
-        plan: agent.plan,
+        // (A read-only turn is never a plan waiting for a go-ahead.)
+        plan: agent.plan && !notes.last().is_some_and(|t| t.read_only),
         plan_allowed: agent.plan_allowed,
         plan_unused: agent.plan_unused,
         message_id: agent.message_id.clone(),

@@ -20,6 +20,11 @@
 //! card's end goes out as `yap-claude-approve-done` `{id, run, outcome}`
 //! (`allowed`, `denied`, `timedOut`, `ended`, `cancelled`).
 //!
+//! **Bypass permissions** (8 Nov 2026, [`super::Approval::unattended`]):
+//! nobody is asked. Claude Code sends few prompts in that mode (its own
+//! safety checks, the person's own `ask` rules); each is answered no at once
+//! ([`UNATTENDED`]), with no card, and the agent says so in its report.
+//!
 //! **A plan** (2026-11-07): Plan mode's `ExitPlanMode` ([`EXIT_PLAN`]) is
 //! the agent asking to go ahead with its plan, so its card says so — "The
 //! plan is ready", the plan itself (its input's `plan`, markdown, up to
@@ -57,6 +62,8 @@ const SUMMARY_MAX: usize = 80;
 pub const EXIT_PLAN: &str = "ExitPlanMode";
 /// How much of a plan its card shows (folded in the thread).
 const PLAN_MAX: usize = 20_000;
+/// What Claude Code is told when it asks during a Bypass permissions run.
+pub const UNATTENDED: &str = "This agent runs in Bypass permissions in Yap, so nobody is asked while it works, and this step needed asking (one of Claude Code's own safety checks, or one of the user's rules), so it wasn't done. Don't try it another way: carry on without it, and say in your final summary what you couldn't do.";
 
 /// **A permission prompt waiting for the person**, as the card shows it.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -288,6 +295,13 @@ pub fn ask(ep: &Endpoint, run: &Run, args: &serde_json::Map<String, Value>, rpc:
     if tool == "AskUserQuestion" {
         let text = json!({ "behavior": "deny", "message": "Yap can't show questions while an agent runs. Make the most sensible choice yourself, carry on, and say in your final summary what you chose and what you'd have asked." }).to_string();
         return (text, false);
+    }
+    // **Bypass permissions: nobody is asked** (8 Nov 2026). What Claude Code
+    // still asks in that mode (its own safety checks, the person's own `ask`
+    // rules) is answered no at once, with no card: never a wait.
+    if run.spec.approval.as_ref().is_some_and(|a| a.unattended) {
+        tracing::info!(run = %run.id, tool = %tool_kind(tool), "Claude Code: a permission prompt in Bypass permissions; answered no, nobody asked");
+        return (json!({ "behavior": "deny", "message": UNATTENDED }).to_string(), false);
     }
     let (summary, detail) = describe(tool, &input, run.spec.folder.as_deref());
     let id = ep.approvals.next.fetch_add(1, Ordering::Relaxed) + 1;

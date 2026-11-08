@@ -22,6 +22,10 @@
 //!   ask for it — a plan first, no changes yet, or to be asked first — in
 //!   their languages (My languages' codes, English always; none of theirs
 //!   known: all seven), as `dictation/command_screen.rs` reads them.
+//! - **A plan, and only a plan** ([`asks_for_plan`], 8 Nov 2026): Plan mode
+//!   only when the person's words ask for a plan ("make a plan first",
+//!   "show me the plan before you change anything"); "don't change
+//!   anything" or "read only" is a read-only run, not a plan.
 //!
 //! Pure.
 
@@ -127,94 +131,128 @@ pub fn plain_go_ahead(text: &str) -> bool {
     !w.is_empty() && w.len() <= 10 && w.iter().all(|x| GO_WORDS.contains(&x.as_str())) && go_ahead(t)
 }
 
-/// One language's words for wanting less than the chat's Mode: a plan, no
-/// changes yet, being asked first (the text lower-cased, apostrophes
-/// straight, one space between words).
+/// One language's words for wanting less than the chat's Mode (the text
+/// lower-cased, apostrophes straight, one space between words): a plan
+/// (`plan`), no changes yet (`hold`), being asked first (`ask`). Only `plan`
+/// asks for a plan (8 Nov 2026): "don't change anything" or "read only" is a
+/// read-only run, never Plan mode.
 struct Lang {
     code: &'static str,
-    words: &'static str,
+    plan: &'static str,
+    hold: &'static str,
+    ask: &'static str,
 }
 
 const LANGS: &[Lang] = &[
     Lang {
         code: "en",
-        words: concat!(
-            // A plan: "make a plan first", "plan it", "just plan".
+        // "make a plan first", "plan it", "just plan", "show me the plan before…".
+        plan: concat!(
             r"\bplan (it|this|first|out|ahead|before)\b|\b(just|only) (a )?plan\b|\bplan(ning)? mode\b",
             r"|\b(a|the|your|its) plan (first|before)\b|\bfirst,? (make )?a plan\b",
             r"|\b(make|write|draw up|come up with|draft|put together|give me|show me|need|want|prepare) (me |us )?(a|your) plan\b",
-            // No changes yet: "don't change anything", "look but don't touch", "read only", "just research".
-            r"|\b(don't|do not|dont) (change|edit|touch|modify|alter) (anything|a thing|any files?|the files?|the code|any code|it)\b",
+        ),
+        // "don't change anything", "look but don't touch", "read only", "just research".
+        hold: concat!(
+            r"\b(don't|do not|dont) (change|edit|touch|modify|alter) (anything|a thing|any files?|the files?|the code|any code|it)\b",
             r"|\b(don't|do not|dont) make (any )?changes\b|\bno changes\b|\bwithout (changing|editing|touching|modifying) (anything|any files?|the code|it)\b",
             r"|\blook,? but (don't|do not|dont) touch\b|\bread[- ]only\b|\b(just|only) (research|investigate|explore)\b|\bresearch only\b",
-            // Asked first: "ask me before…", "check with me".
-            r"|\bask me (first|before)\b|\bask (for )?my (permission|ok|okay|approval)\b|\bask before\b",
+        ),
+        // "ask me before…", "check with me".
+        ask: concat!(
+            r"\bask me (first|before)\b|\bask (for )?my (permission|ok|okay|approval)\b|\bask before\b",
             r"|\b(check|confirm) with me\b|\bwait for my (ok|okay|approval|go-ahead|go ahead)\b",
         ),
     },
     Lang {
         code: "fr",
-        words: concat!(
+        plan: concat!(
             r"\b(fais|faites|fais-moi|faites-moi|prépare|préparez|propose|proposez|établis|rédige|rédigez|écris|écrivez) (d'abord )?(un|le|ton|votre) plan\b",
             r"|\b(un|le) plan d'abord\b|\bd'abord un plan\b|\b(juste|seulement) (un )?plan\b|\bplanifie(z)?\b|\bmode plan\b",
-            r"|\bne (change|changez|modifie|modifiez|touche|touchez) (à )?rien\b|\bsans (rien )?(changer|modifier|toucher)\b",
-            r"|\baucun(e)? (changement|modification)\b|\blecture seule\b|\b(juste|seulement) (des )?recherches?\b|\brecherche seulement\b",
-            r"|\bdemande(z)?(-moi| moi)? (d'abord|avant)\b|\b(vérifie|vérifiez|vois|voyez) avec moi\b",
         ),
+        hold: concat!(
+            r"\bne (change|changez|modifie|modifiez|touche|touchez) (à )?rien\b|\bsans (rien )?(changer|modifier|toucher)\b",
+            r"|\baucun(e)? (changement|modification)\b|\blecture seule\b|\b(juste|seulement) (des )?recherches?\b|\brecherche seulement\b",
+        ),
+        ask: r"\bdemande(z)?(-moi| moi)? (d'abord|avant)\b|\b(vérifie|vérifiez|vois|voyez) avec moi\b",
     },
     Lang {
         code: "de",
-        words: concat!(
+        plan: concat!(
             r"\b(mach|mache|macht|erstelle|erstell|erstellt|schreib|schreibe|schreibt) (mir |uns )?(zuerst |erst |erstmal |vorher )?(einen|den|nur einen) plan\b",
             r"|\b(erst|zuerst|erstmal) (einen |ein )?plan\b|\bnur (einen )?plan\b|\bnur planen\b|\bplane (es|das|erst|zuerst)\b|\bplan(ungs)?modus\b",
-            r"|\b(ändere|änder|ändert|verändere) (noch )?nichts\b|\bnichts (ändern|verändern|anfassen|anrühren)\b|\bfass(e)? nichts an\b",
-            r"|\bkeine änderungen\b|\bohne (etwas )?zu ändern\b|\bnur lesen\b|\bschreibgeschützt\b|\bnur recherch\w*\b",
-            r"|\bfrag(e)? mich (zuerst|vorher|erst)\b|\b(sprich|stimm) dich (vorher |zuerst )?mit mir ab\b|\bfrag (vorher|zuerst) nach\b",
         ),
+        hold: concat!(
+            r"\b(ändere|änder|ändert|verändere) (noch )?nichts\b|\bnichts (ändern|verändern|anfassen|anrühren)\b|\bfass(e)? nichts an\b",
+            r"|\bkeine änderungen\b|\bohne (etwas )?zu ändern\b|\bnur lesen\b|\bschreibgeschützt\b|\bnur recherch\w*\b",
+        ),
+        ask: r"\bfrag(e)? mich (zuerst|vorher|erst)\b|\b(sprich|stimm) dich (vorher |zuerst )?mit mir ab\b|\bfrag (vorher|zuerst) nach\b",
     },
     Lang {
         code: "es",
-        words: concat!(
+        plan: concat!(
             r"\b(haz|hazme|prepara|prepárame|preparame|escribe|escríbeme|propón|proponme|elabora) (primero )?(un|el) plan\b",
             r"|\bun plan primero\b|\bprimero un plan\b|\bs[oó]lo (un )?plan\b|\bplanifica(lo)?\b|\bmodo plan\b",
-            r"|\bno (cambies|modifiques|toques|cambie|modifique|toque) nada\b|\bsin (cambiar|modificar|tocar) nada\b|\bningún cambio\b|\bsin cambios\b",
-            r"|\bs[oó]lo lectura\b|\bmira pero no toques\b|\bs[oó]lo (investiga|investigar|investigación|explora)\b",
-            r"|\bpreg[uú]ntame (antes|primero)\b|\bcons[uú]ltame\b|\bconsulta conmigo\b",
         ),
+        hold: concat!(
+            r"\bno (cambies|modifiques|toques|cambie|modifique|toque) nada\b|\bsin (cambiar|modificar|tocar) nada\b|\bningún cambio\b|\bsin cambios\b",
+            r"|\bs[oó]lo lectura\b|\bmira pero no toques\b|\bs[oó]lo (investiga|investigar|investigación|explora)\b",
+        ),
+        ask: r"\bpreg[uú]ntame (antes|primero)\b|\bcons[uú]ltame\b|\bconsulta conmigo\b",
     },
     Lang {
         code: "it",
-        words: concat!(
+        plan: concat!(
             r"\b(fai|fammi|prepara|preparami|scrivi|scrivimi|proponi|proponimi) (prima )?(un|il) piano\b",
             r"|\bprima un piano\b|\bun piano prima\b|\bsolo (un )?piano\b|\bpianifica\b|\bmodalità piano\b",
-            r"|\bnon (cambiare|modificare|toccare) (niente|nulla)\b|\bsenza (cambiare|modificare|toccare) (niente|nulla)\b|\bnessuna modifica\b",
-            r"|\bsola lettura\b|\bguarda ma non toccare\b|\bsolo (ricerca|ricercare|indagare|esplorare)\b",
-            r"|\bchiedimi (prima|il permesso)\b|\bchiedi prima\b|\bconsultami\b|\bverifica con me\b",
         ),
+        hold: concat!(
+            r"\bnon (cambiare|modificare|toccare) (niente|nulla)\b|\bsenza (cambiare|modificare|toccare) (niente|nulla)\b|\bnessuna modifica\b",
+            r"|\bsola lettura\b|\bguarda ma non toccare\b|\bsolo (ricerca|ricercare|indagare|esplorare)\b",
+        ),
+        ask: r"\bchiedimi (prima|il permesso)\b|\bchiedi prima\b|\bconsultami\b|\bverifica con me\b",
     },
     Lang {
         code: "pt",
-        words: concat!(
+        plan: concat!(
             r"\b(faz|faça|faca|prepara|prepare|escreve|escreva|propõe|proponha|monta|monte) (primeiro )?(um|o) plano\b",
             r"|\bum plano primeiro\b|\bprimeiro um plano\b|\b(só|apenas) (um )?plano\b|\bplaneja\b|\bplaneje\b|\bmodo plano\b",
-            r"|\bnão (mudes|mude|alteres|altere|toques|toque|modifiques|modifique) nada\b|\bsem (mudar|alterar|tocar|modificar) nada\b",
-            r"|\bnenhuma (mudança|alteração)\b|\b(somente|só|apenas) leitura\b|\b(só|apenas) (pesquisa|pesquisar|investiga|investigar)\b",
-            r"|\b(pergunta-me|pergunte-me|me pergunte|me pergunta) (antes|primeiro)\b|\bconsulte?-me\b|\bfala comigo antes\b|\bverifique? comigo\b",
         ),
+        hold: concat!(
+            r"\bnão (mudes|mude|alteres|altere|toques|toque|modifiques|modifique) nada\b|\bsem (mudar|alterar|tocar|modificar) nada\b",
+            r"|\bnenhuma (mudança|alteração)\b|\b(somente|só|apenas) leitura\b|\b(só|apenas) (pesquisa|pesquisar|investiga|investigar)\b",
+        ),
+        ask: r"\b(pergunta-me|pergunte-me|me pergunte|me pergunta) (antes|primeiro)\b|\bconsulte?-me\b|\bfala comigo antes\b|\bverifique? comigo\b",
     },
     Lang {
         code: "nl",
-        words: concat!(
-            r"\b(maak|schrijf|stel) (eerst )?(een|het) plan\b|\beerst een plan\b|\balleen (een )?plan\b|\balleen plannen\b|\bplan het\b|\bplanmodus\b",
-            r"|\b(verander|wijzig) (nog )?niets\b|\bniets (veranderen|wijzigen|aanraken|aanpassen)\b|\braak niets aan\b",
+        plan: r"\b(maak|schrijf|stel) (eerst )?(een|het) plan\b|\beerst een plan\b|\balleen (een )?plan\b|\balleen plannen\b|\bplan het\b|\bplanmodus\b",
+        hold: concat!(
+            r"\b(verander|wijzig) (nog )?niets\b|\bniets (veranderen|wijzigen|aanraken|aanpassen)\b|\braak niets aan\b",
             r"|\bgeen (wijzigingen|veranderingen)\b|\bzonder (iets )?te (veranderen|wijzigen)\b|\balleen[- ]lezen\b|\balleen (onderzoek|onderzoeken|uitzoeken)\b",
-            r"|\bvraag (het )?(mij|me) (eerst|vooraf)\b|\bvraag eerst\b|\b(overleg|check) (eerst )?met (mij|me)\b",
         ),
+        ask: r"\bvraag (het )?(mij|me) (eerst|vooraf)\b|\bvraag eerst\b|\b(overleg|check) (eerst )?met (mij|me)\b",
     },
 ];
 
-/// Each language's rule, compiled once.
-static RULES: LazyLock<Vec<(&'static str, Regex)>> = LazyLock::new(|| LANGS.iter().map(|l| (l.code, Regex::new(l.words).expect("static regex"))).collect());
+/// Each language's rules, compiled once: its plan words, and all its words
+/// for less (a plan, no changes yet, asked first).
+struct Rule {
+    code: &'static str,
+    plan: Regex,
+    lower: Regex,
+}
+
+static RULES: LazyLock<Vec<Rule>> = LazyLock::new(|| {
+    LANGS
+        .iter()
+        .map(|l| Rule {
+            code: l.code,
+            plan: Regex::new(l.plan).expect("static regex"),
+            lower: Regex::new(&format!("{}|{}|{}", l.plan, l.hold, l.ask)).expect("static regex"),
+        })
+        .collect()
+});
 
 /// The text as the rule reads it: lower case, straight apostrophes, one
 /// space between words.
@@ -222,16 +260,26 @@ fn normal(text: &str) -> String {
     text.to_lowercase().replace(['\u{2019}', '\u{2018}', '`'], "'").split_whitespace().collect::<Vec<_>>().join(" ")
 }
 
-/// Do `text`'s words ask for less than the chat's Mode, in `langs` (My
-/// languages' codes; English always; none of theirs known: all)?
-fn wants_lower(text: &str, langs: &[String]) -> bool {
+/// Do `text`'s words match `rule` (a language's plan words, or all its words
+/// for less) in `langs` (My languages' codes; English always; none of theirs
+/// known: all)?
+fn says(text: &str, langs: &[String], rule: impl Fn(&Rule) -> &Regex) -> bool {
     let text = normal(text);
     if text.is_empty() {
         return false;
     }
     let all = langs.iter().all(|c| !LANGS.iter().any(|l| c.to_ascii_lowercase().starts_with(l.code)));
     let mine = |code: &str| all || code == "en" || langs.iter().any(|c| c.to_ascii_lowercase().starts_with(code));
-    RULES.iter().filter(|(code, _)| mine(code)).any(|(_, rule)| rule.is_match(&text))
+    RULES.iter().filter(|r| mine(r.code)).any(|r| rule(r).is_match(&text))
+}
+
+/// The person's `question` this turn says so, or it's a plain yes to
+/// `previous` (the answer just before), which asked a question that did.
+fn asked(question: &str, previous: Option<&str>, langs: &[String], rule: impl Fn(&Rule) -> &Regex + Copy) -> bool {
+    if says(question, langs, rule) {
+        return true;
+    }
+    previous.is_some_and(|p| crate::apps::is_affirmative(question) && p.contains('?') && says(p, langs, rule))
 }
 
 /// **Did the person ask for less than the chat's Mode** — a plan ("make a
@@ -243,10 +291,16 @@ fn wants_lower(text: &str, langs: &[String]) -> bool {
 /// model lower an agent's mode (`modes::model_pick`); "look into this and make
 /// our own version" never does.
 pub fn asks_lower_mode(question: &str, previous: Option<&str>, langs: &[String]) -> bool {
-    if wants_lower(question, langs) {
-        return true;
-    }
-    previous.is_some_and(|p| crate::apps::is_affirmative(question) && p.contains('?') && wants_lower(p, langs))
+    asked(question, previous, langs, |r| &r.lower)
+}
+
+/// **Did the person ask for a plan** — "make a plan first", "plan it",
+/// "show me the plan before you change anything" — this turn (or say yes to
+/// an offer of one)? Only then may the model lower an agent to Plan mode
+/// (`modes::model_pick`, 8 Nov 2026). "Don't change anything", "read only"
+/// or "just research" is not a plan: that's a read-only run.
+pub fn asks_for_plan(question: &str, previous: Option<&str>, langs: &[String]) -> bool {
+    asked(question, previous, langs, |r| &r.plan)
 }
 
 #[cfg(test)]
@@ -413,5 +467,40 @@ mod tests {
         // A request in another language that asks for no plan: none.
         assert!(!asks_lower_mode("Corrige les tests qui échouent", None, &all));
         assert!(!asks_lower_mode("Füge einen Minimap-Knopf hinzu", None, &all));
+    }
+
+    #[test]
+    fn only_a_plan_asked_for_is_a_plan_and_no_changes_is_read_only() {
+        let en: Vec<String> = vec!["en".into()];
+        let all: Vec<String> = Vec::new();
+        // A plan, in so many words.
+        for plan in ["Make a plan first: add a watering schedule", "plan it first", "show me the plan before you change anything", "just plan, I'll decide", "use plan mode"] {
+            assert!(asks_for_plan(plan, None, &en), "{plan}");
+            assert!(asks_lower_mode(plan, None, &en), "{plan}");
+        }
+        // No changes yet, asked first, or nothing at all: not a plan.
+        for not in [
+            "don't change anything, just look",
+            "read only for now",
+            "just research how the seed tracker works",
+            "look but don't touch",
+            "check with me before you commit",
+            "Hey Claude, can you get yourself caught up with this add-on? When you get to speed with it, let me know.",
+            "catch up on this folder",
+            "update the plan section in the readme",
+        ] {
+            assert!(!asks_for_plan(not, None, &en), "{not}");
+        }
+        // A yes to an offer of a plan is one; to an offer of a look, not.
+        assert!(asks_for_plan("Yes.", Some("Shall I have it make a plan first?"), &en));
+        assert!(!asks_for_plan("Yes.", Some("Shall I have it look but not change anything?"), &en));
+        // In the person's languages: a plan's words only.
+        for plan in ["Fais d'abord un plan", "Mach zuerst einen Plan", "Haz primero un plan", "Fammi prima un piano", "Faz primeiro um plano", "Maak eerst een plan"] {
+            assert!(asks_for_plan(plan, None, &all), "{plan}");
+        }
+        for hold in ["ne change rien", "ändere nichts", "no toques nada", "non toccare niente", "não mudes nada", "verander niets"] {
+            assert!(!asks_for_plan(hold, None, &all), "{hold}");
+            assert!(asks_lower_mode(hold, None, &all), "{hold}");
+        }
     }
 }

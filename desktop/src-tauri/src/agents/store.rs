@@ -240,6 +240,13 @@ pub struct TurnNote {
     pub status: Status,
     /// What it ran at.
     pub mode: String,
+    /// **A read-only turn** (8 Nov 2026): "catch up", "have a look", "don't
+    /// change anything" — at its mode, Claude Code's editing tools off
+    /// (`runner::READ_ONLY_OFF`), never a plan to approve. A field of the
+    /// turn's own: an older Yap drops it on its save (a Continue then runs
+    /// it with its tools).
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub read_only: bool,
     pub model: String,
     pub effort: String,
     /// Unix seconds (0: never ran).
@@ -301,7 +308,8 @@ impl TurnNote {
     /// **Its plan still waits for a go-ahead**: it ended as a plan, not
     /// allowed and not set aside. Pure.
     pub fn plan_waiting(&self) -> bool {
-        self.status == Status::Done && self.plan && !self.plan_allowed && !self.plan_unused
+        // (A read-only turn reports what it found: never a plan to approve.)
+        self.status == Status::Done && self.plan && !self.plan_allowed && !self.plan_unused && !self.read_only
     }
 }
 
@@ -398,7 +406,7 @@ impl Agent {
     /// **Its plan waits for a go-ahead**: its latest turn ended as a plan, not
     /// allowed, not set aside, and it isn't at work. Pure.
     pub fn plan_waits(&self) -> bool {
-        !self.status.live() && self.plan && !self.plan_allowed && !self.plan_unused
+        !self.status.live() && self.plan && !self.plan_allowed && !self.plan_unused && !self.turn_list.last().is_some_and(|t| t.read_only)
     }
 }
 
@@ -1320,6 +1328,13 @@ mod tests {
         let old: Agent = serde_json::from_str(r#"{"id":"ef56","status":"done","plan":true,"turnList":[{"n":1,"status":"done","plan":true}]}"#).unwrap();
         assert!(!old.plan_unused && !old.turn_list[0].plan_unused && !old.turn_list[0].dismissed);
         assert!(old.plan_waits() && old.turn_list[0].plan_waiting());
+        // A read-only turn ("catch up", "have a look") is never a plan waiting for a go-ahead.
+        let mut looked = planned("rd01", 5, 10, 20);
+        looked.turn_list[0].read_only = true;
+        assert!(!looked.plan_waits() && !looked.turn_list[0].plan_waiting());
+        let later = Agent { id: "rd02".into(), conversation: Some(5), created_ts: 99, ..Default::default() };
+        assert!(set_plans_aside(&mut [looked.clone(), later.clone()]).is_empty(), "nothing to set aside");
+        assert_eq!(set_plans_aside(&mut [planned("rd03", 5, 10, 20), later]), ["rd03"], "(as a plan would be)");
         // `active` is the runner's, for the page: never read from, nor written to, the file.
         let read: Agent = serde_json::from_str(r#"{"id":"gh78","active":true}"#).unwrap();
         assert!(!read.active);

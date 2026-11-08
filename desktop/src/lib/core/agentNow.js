@@ -27,7 +27,8 @@ export const PLAN_WAITS_S = 24 * 3600;
 export function planWaitsNow(agent, now = Date.now() / 1000) {
   if (!agent || agent.status !== 'done' || !agent.plan || agent.planAllowed || agent.planUnused) return false;
   const last = agent.turnList?.length ? agent.turnList.at(-1) : null;
-  if (last?.dismissed || last?.planUnused) return false;
+  // (A read-only turn — "catch up", "have a look" — reports what it found: never a plan to approve.)
+  if (last?.dismissed || last?.planUnused || last?.readOnly) return false;
   const ended = Number(agent.endedTs) || Number(last?.endedTs) || 0;
   return !ended || now - ended <= PLAN_WAITS_S;
 }

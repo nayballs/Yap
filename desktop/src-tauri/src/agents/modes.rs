@@ -11,6 +11,12 @@
 //!   the person's own words this turn asked for it (`consent::
 //!   asks_lower_mode`: a plan, no changes yet, being asked first); else the
 //!   chip's mode runs, and the tool's result says so ([`Pick::note`]).
+//! - **Plan only on a plan asked for, never under Bypass** (8 Nov 2026):
+//!   the model's Plan takes effect only when the person asked for a plan,
+//!   and never when the chat's Mode is Bypass; otherwise it's a read-only
+//!   run at the chip's mode ([`Pick::read_only`]: Claude Code's editing tools
+//!   off), never a plan to approve. Under Bypass nothing waits for the person
+//!   ([`unattended`]) but the one guard after outside content.
 //! - **A folder's cap** lowers it further (a folder that never runs
 //!   unattended: capped at Manual).
 //! - **Bypass permissions** only once the person has confirmed its warning
@@ -153,46 +159,118 @@ pub fn effective(chip: Mode, asked: Option<Mode>, cap: Option<Mode>, bypass_ok: 
     Ok(mode)
 }
 
-/// What the chat's model's `mode` comes to ([`model_pick`]).
+/// **Nobody is asked while an agent runs at `mode`** (8 Nov 2026, the
+/// maintainer: "if I have bypass permissions, I shouldn't be accepting
+/// plans"): Bypass permissions. Then Yap adds no card or question of its own
+/// — not Settings' "asked first", not a new folder's, not a spoken "Shall
+/// I…?", no plan, no permission prompt — but the one guard: after outside
+/// content in the turn, the brief is shown for the person's OK
+/// (`chat/tools/agents.rs` `ask_first`). Pure.
+pub fn unattended(mode: Mode) -> bool {
+    mode == Mode::Bypass
+}
+
+/// What the person's own words this turn asked for (`agents::consent`).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct Asked {
+    /// A plan, in so many words (`consent::asks_for_plan`).
+    pub plan: bool,
+    /// Anything less than the chat's Mode: a plan, no changes yet, being
+    /// asked first (`consent::asks_lower_mode`).
+    pub lower: bool,
+}
+
+/// Why the model's Plan became a read-only run ([`model_pick`]).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum NoPlan {
+    /// The chat's Mode is Bypass permissions: an agent never stops for a plan.
+    Bypass,
+    /// The person didn't ask for a plan.
+    NotAsked,
+}
+
+/// What the chat's model's `mode` comes to ([`model_pick`]).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct Pick {
     /// The mode asked, as [`effective`] takes it (`None`: the chip's).
     pub asked: Option<Mode>,
     /// A lower mode the model asked for on its own, left out.
     pub ignored: Option<Mode>,
+    /// **A read-only run**: the model's own `read_only`, or a Plan it may not
+    /// have, turned into one ([`Pick::no_plan`]) — at the chip's mode, its
+    /// editing tools off (`runner::READ_ONLY_OFF`).
+    pub read_only: bool,
+    /// The model asked for Plan, and it became a read-only run: why.
+    pub no_plan: Option<NoPlan>,
 }
 
 impl Pick {
-    /// What the tool's result tells the model when its mode was left out.
+    /// What the tool's result tells the model when its mode was left out, or
+    /// its Plan became a read-only run.
     pub fn note(&self, chip: Mode) -> Option<String> {
+        match self.no_plan {
+            Some(NoPlan::Bypass) => {
+                return Some(format!(
+                    "No plan mode: this chat's Mode is {}, so an agent never stops for a plan. It runs read-only instead (it reads and reports back, changes nothing), and its report is the plan; the user's go-ahead then has it make the changes.",
+                    chip.label()
+                ))
+            }
+            Some(NoPlan::NotAsked) => {
+                return Some(format!(
+                    "No plan mode: the user didn't ask for a plan. The agent runs read-only at the chat's Mode ({}): it reads and reports back, changes nothing. For a request to look into something, use read_only, never mode plan.",
+                    chip.label()
+                ))
+            }
+            None => {}
+        }
         let ignored = self.ignored?;
         let why = if ignored == Mode::Plan { "the user didn't ask for a plan" } else { "the user didn't ask for a lower one" };
         Some(format!("The agent runs at the chat's Mode ({}): {why}.", chip.label()))
     }
 }
 
-/// **The model's `mode`, as the person's words allow it** (2026-11-07,
-/// after the maintainer's "look into this and make our own version" ran as
-/// a plan under a Bypass chip): a mode lower than the chat's (`chip`) takes
-/// effect only when the person asked for less (`person_asked`:
-/// `consent::asks_lower_mode`); otherwise it's left out and the chip's
-/// mode runs. One above the chip stays asked, so [`effective`] still
-/// refuses it. Pure.
-pub fn model_pick(chip: Mode, asked: Option<Mode>, person_asked: bool) -> Pick {
+/// **The model's `mode` and `read_only`, as the person's words allow them**
+/// (2026-11-07, after the maintainer's "look into this and make our own
+/// version" ran as a plan under a Bypass chip; 8 Nov, after "get yourself
+/// caught up with this add-on" became a plan to approve under Bypass):
+///
+/// - `read_only` (the model's) always holds: it only takes away.
+/// - **Plan only when the person asked for a plan** (`person.plan`), and
+///   **never when the chat's Mode is Bypass**: a Plan that breaks either
+///   rule becomes a read-only run at the chip's mode (`no_plan` says why),
+///   not a refusal, so nothing is lost.
+/// - Another mode lower than the chat's (`chip`) takes effect only when the
+///   person asked for less (`person.lower`); otherwise it's left out and the
+///   chip's mode runs.
+/// - One above the chip stays asked, so [`effective`] still refuses it.
+///
+/// Pure.
+pub fn model_pick(chip: Mode, asked: Option<Mode>, read_only: bool, person: Asked) -> Pick {
+    let base = Pick { read_only, ..Pick::default() };
     match asked {
-        Some(m) if m < chip && !person_asked => Pick { asked: None, ignored: Some(m) },
-        Some(m) if m == chip => Pick { asked: None, ignored: None },
-        a => Pick { asked: a, ignored: None },
+        Some(Mode::Plan) if Mode::Plan < chip => {
+            if chip == Mode::Bypass {
+                Pick { read_only: true, no_plan: Some(NoPlan::Bypass), ..base }
+            } else if person.plan {
+                Pick { asked: Some(Mode::Plan), ..base }
+            } else {
+                Pick { read_only: true, no_plan: Some(NoPlan::NotAsked), ..base }
+            }
+        }
+        Some(m) if m < chip && !person.lower => Pick { ignored: Some(m), ..base },
+        Some(m) if m == chip => base,
+        a => Pick { asked: a, ..base },
     }
 }
 
 /// The mode an agent's next turn runs at: the chat's Mode now (`chip`, which
 /// the person may have moved since), capped by the folder — except a plan
-/// waiting for its go-ahead, which stays a plan until "go ahead". Bypass
+/// waiting for its go-ahead, which stays a plan until "go ahead" (but not
+/// under a Bypass chip: nothing waits for an approval there). Bypass
 /// unconfirmed falls back to Auto (the person's own chip can't be Bypass
 /// unconfirmed; a hand-edited file can). Pure.
 pub fn next_turn(agent_mode: Mode, chip: Mode, cap: Option<Mode>, go_ahead: bool, bypass_ok: bool) -> Mode {
-    let mode = if agent_mode == Mode::Plan && !go_ahead {
+    let mode = if agent_mode == Mode::Plan && !go_ahead && chip != Mode::Bypass {
         Mode::Plan
     } else if go_ahead && chip == Mode::Plan {
         // The chip says plan first, and the person approved the plan: it's
@@ -257,29 +335,63 @@ mod tests {
         assert_eq!(effective(Mode::Bypass, Some(Mode::Bypass), None, true), Ok(Mode::Bypass));
     }
 
+    const NOTHING: Asked = Asked { plan: false, lower: false };
+    const A_PLAN: Asked = Asked { plan: true, lower: true };
+    const NO_CHANGES: Asked = Asked { plan: false, lower: true };
+
     #[test]
     fn a_lower_mode_takes_effect_only_when_the_person_asked_for_it() {
-        // A Bypass chip, and the model chose Plan on its own: left out, the chip's mode runs.
-        let pick = model_pick(Mode::Bypass, Some(Mode::Plan), false);
-        assert_eq!(pick, Pick { asked: None, ignored: Some(Mode::Plan) });
-        assert_eq!(effective(Mode::Bypass, pick.asked, None, true), Ok(Mode::Bypass));
-        assert_eq!(pick.note(Mode::Bypass).as_deref(), Some("The agent runs at the chat's Mode (Bypass permissions): the user didn't ask for a plan."));
-        assert_eq!(model_pick(Mode::Auto, Some(Mode::Manual), false).note(Mode::Auto).as_deref(), Some("The agent runs at the chat's Mode (Auto): the user didn't ask for a lower one."));
-        // The person asked ("make a plan first"): Plan.
-        let pick = model_pick(Mode::Bypass, Some(Mode::Plan), true);
-        assert_eq!(pick, Pick { asked: Some(Mode::Plan), ignored: None });
-        assert_eq!(effective(Mode::Bypass, pick.asked, None, true), Ok(Mode::Plan));
-        assert_eq!(pick.note(Mode::Bypass), None);
+        // Another lower mode the model chose on its own: left out, the chip's mode runs.
+        let pick = model_pick(Mode::Auto, Some(Mode::Manual), false, NOTHING);
+        assert_eq!(pick, Pick { ignored: Some(Mode::Manual), ..Pick::default() });
+        assert_eq!(pick.note(Mode::Auto).as_deref(), Some("The agent runs at the chat's Mode (Auto): the user didn't ask for a lower one."));
+        // "Ask me before…": Manual.
+        assert_eq!(model_pick(Mode::Auto, Some(Mode::Manual), false, NO_CHANGES).asked, Some(Mode::Manual));
+        assert_eq!(model_pick(Mode::Bypass, Some(Mode::Manual), false, NO_CHANGES).asked, Some(Mode::Manual), "the person's own words, under Bypass too");
         // Nothing asked, or the chip's own: the chip's, nothing said.
-        assert_eq!(model_pick(Mode::Auto, None, false), Pick { asked: None, ignored: None });
-        assert_eq!(model_pick(Mode::Auto, Some(Mode::Auto), false), Pick { asked: None, ignored: None });
+        assert_eq!(model_pick(Mode::Auto, None, false, NOTHING), Pick::default());
+        assert_eq!(model_pick(Mode::Auto, Some(Mode::Auto), false, NOTHING), Pick::default());
         // Above the chip: still asked, so still refused — whatever the person said.
-        for said in [false, true] {
-            let pick = model_pick(Mode::Manual, Some(Mode::Auto), said);
+        for said in [NOTHING, A_PLAN] {
+            let pick = model_pick(Mode::Manual, Some(Mode::Auto), false, said);
             assert_eq!(effective(Mode::Manual, pick.asked, None, true), Err(Refused::Raised { asked: Mode::Auto, chip: Mode::Manual }));
         }
+    }
+
+    #[test]
+    fn a_plan_only_when_the_person_asked_for_one_and_never_under_bypass() {
+        // Auto, "make a plan first": Plan.
+        let pick = model_pick(Mode::Auto, Some(Mode::Plan), false, A_PLAN);
+        assert_eq!(pick, Pick { asked: Some(Mode::Plan), ..Pick::default() });
+        assert_eq!(effective(Mode::Auto, pick.asked, None, false), Ok(Mode::Plan));
+        assert_eq!(pick.note(Mode::Auto), None);
+        // Auto, "don't change anything" with the model's Plan: read-only at Auto, said.
+        let pick = model_pick(Mode::Auto, Some(Mode::Plan), false, NO_CHANGES);
+        assert_eq!(pick, Pick { read_only: true, no_plan: Some(NoPlan::NotAsked), ..Pick::default() });
+        assert_eq!(effective(Mode::Auto, pick.asked, None, false), Ok(Mode::Auto));
+        assert!(pick.note(Mode::Auto).unwrap().starts_with("No plan mode: the user didn't ask for a plan. The agent runs read-only at the chat's Mode (Auto)"));
+        // Auto, nothing asked, the model's Plan: read-only too (never a plan to approve).
+        assert_eq!(model_pick(Mode::Auto, Some(Mode::Plan), false, NOTHING).no_plan, Some(NoPlan::NotAsked));
+        // Bypass: never Plan, even asked for in so many words — read-only at Bypass.
+        for said in [NOTHING, NO_CHANGES, A_PLAN] {
+            let pick = model_pick(Mode::Bypass, Some(Mode::Plan), false, said);
+            assert_eq!(pick, Pick { read_only: true, no_plan: Some(NoPlan::Bypass), ..Pick::default() }, "{said:?}");
+            assert_eq!(effective(Mode::Bypass, pick.asked, None, true), Ok(Mode::Bypass));
+            assert!(pick.note(Mode::Bypass).unwrap().starts_with("No plan mode: this chat's Mode is Bypass permissions, so an agent never stops for a plan."));
+        }
+        // The person's own Plan chip: a plan, as ever.
+        assert_eq!(model_pick(Mode::Plan, Some(Mode::Plan), false, NOTHING), Pick::default());
+        assert_eq!(effective(Mode::Plan, None, None, false), Ok(Mode::Plan));
+        // The model's read_only always holds, at the chip's mode.
+        assert_eq!(model_pick(Mode::Bypass, None, true, NOTHING), Pick { read_only: true, ..Pick::default() });
+        assert_eq!(model_pick(Mode::Manual, None, true, NOTHING).note(Mode::Manual), None);
         // A folder's cap still lowers the chip's mode.
-        assert_eq!(effective(Mode::Bypass, model_pick(Mode::Bypass, Some(Mode::Plan), false).asked, Some(Mode::Manual), true), Ok(Mode::Manual));
+        assert_eq!(effective(Mode::Bypass, model_pick(Mode::Bypass, Some(Mode::Plan), false, NOTHING).asked, Some(Mode::Manual), true), Ok(Mode::Manual));
+        // Only Bypass runs unattended.
+        assert!(unattended(Mode::Bypass));
+        for m in [Mode::Auto, Mode::Manual, Mode::AcceptEdits, Mode::Plan] {
+            assert!(!unattended(m), "{m:?}");
+        }
     }
 
     #[test]
@@ -296,6 +408,10 @@ mod tests {
         // Otherwise the chip, as it is now (the person moved it).
         assert_eq!(next_turn(Mode::Auto, Mode::Manual, None, false, false), Mode::Manual);
         assert_eq!(next_turn(Mode::AcceptEdits, Mode::Auto, None, false, false), Mode::Auto);
+        // A plan with the chip moved to Bypass since: nothing waits for an
+        // approval there, so its next turn runs at Bypass.
+        assert_eq!(next_turn(Mode::Plan, Mode::Bypass, None, false, true), Mode::Bypass);
+        assert_eq!(next_turn(Mode::Plan, Mode::Bypass, Some(Mode::Plan), false, true), Mode::Plan, "a folder capped at Plan keeps it one");
         // Bypass unconfirmed: Auto (under the cap).
         assert_eq!(next_turn(Mode::Auto, Mode::Bypass, None, false, false), Mode::Auto);
         assert_eq!(next_turn(Mode::Auto, Mode::Bypass, None, false, true), Mode::Bypass);

@@ -363,6 +363,10 @@ test('core/agentPanel.js: tokens and time, the context, progress, the third line
   expect(rowActions({ ...unusedRow, agent: { ...aside, active: false } })).toMatchObject({ goAhead: true, dismiss: true, finish: false, stop: false });
   expect(panelRows([{ ...aside, turnList: [{ ...aside.turnList[0], dismissed: true }] }], { now })).toEqual([]);
   expect(panelRows([{ ...aside, turnList: [{ ...aside.turnList[0], dismissed: true }] }], { now, dismissed: true })[0]).toMatchObject({ dismissed: true });
+  // A read-only turn ("catch up", "have a look") is never a plan waiting, nor a plan not used.
+  const looked = { ...planned, turnList: [{ ...t1, plan: true, readOnly: true }] };
+  expect(stateOf(looked, looked.turnList[0], now)).toBe('finished');
+  expect(panelRows([looked], { now })[0]).toMatchObject({ unused: false, needs: null, pose: 'done' });
   // A question it ended with: no card to answer, so not Needs you (the chat's report says it).
   const asked = { ...agent, status: 'done', turnList: [{ ...t1, asks: true, todos: [] }] };
   expect(stateOf(asked, asked.turnList[0], now)).toBe('finished');
@@ -695,9 +699,9 @@ const convDot = (main, conversation) => main.locator(`.convs [data-conv="${conve
 const planCard = (main) => thread(main).locator('[data-testid="chat-agent-approve"][data-kind="plan"]');
 
 /**
- * A plan agent in a new Code chat ("Read only, don't change any files": Plan
- * mode), waiting on its plan card. `reports`: the chat model's words for the
- * reports to come.
+ * A plan agent in a new Code chat (the person asks for a plan first: Plan
+ * mode — "read only" alone is a read-only run, never a plan), waiting on its
+ * plan card. `reports`: the chat model's words for the reports to come.
  */
 async function planAgent(yap, main, fakeLlm, reports) {
   await script(yap, PLANNING, 'planning');
@@ -706,11 +710,11 @@ async function planAgent(yap, main, fakeLlm, reports) {
   await newCodeChat(main, 'garden-planner');
   const before = (await agents(yap)).length;
   fakeLlm.scriptChat([
-    { tools: [{ name: 'start_agent', args: { brief: 'Plan bolder bag markers on the map. Read only: change no files.', title: "Read only, don't change any files", mode: 'plan' } }] },
+    { tools: [{ name: 'start_agent', args: { brief: 'Plan bolder bag markers on the map; change nothing until the plan is approved.', title: 'Plan bolder bag markers', mode: 'plan' } }] },
     { content: STARTED },
     ...reports.map((content) => ({ plain: true, content })),
   ]);
-  await send(main, "Read only, don't change any files: plan bolder bag markers on the map.");
+  await send(main, 'Make a plan first: bolder bag markers on the map.');
   await expect.poll(async () => (await agents(yap)).length, { timeout: 20_000 }).toBe(before + 1);
   const agent = (await agents(yap))[0];
   await expect.poll(async () => (await agents(yap)).find((j) => j.id === agent.id).status, { timeout: 30_000 }).toBe('asking');
@@ -1035,7 +1039,7 @@ test('the crew: a character a row in each Mode and pose; rows folded, ▸ rememb
         // A plan nobody went ahead with ("Plan not used"): Finished, neither ✓ nor failed.
         ...base,
         id: C,
-        brief: "Read only, don't change any files.",
+        brief: 'Plan the bag markers.',
         model: 'claude-opus-5-5',
         mode: 'plan',
         status: 'done',
@@ -1045,7 +1049,7 @@ test('the crew: a character a row in each Mode and pose; rows folded, ▸ rememb
         startedTs: now - 780,
         endedTs: now - 720,
         turns: 1,
-        turnList: [seedTurn(now, 1, "Read only, don't change any files", 'plan', 'claude-opus-5-5', 'done', { plan: true, planUnused: true })],
+        turnList: [seedTurn(now, 1, 'Plan the bag markers', 'plan', 'claude-opus-5-5', 'done', { plan: true, planUnused: true })],
       },
     ],
   });
