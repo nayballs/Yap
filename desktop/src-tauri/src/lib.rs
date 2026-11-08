@@ -578,6 +578,8 @@ pub fn run() {
             integrations::connectors::connector_set_client,
             integrations::connectors::connector_set_where,
             integrations::connectors::connectors_budget,
+            integrations::connectors::connector_chat_list,
+            integrations::connectors::connector_chat_set,
             integrations::connectors::connector_catalog,
             integrations::connectors::connectors_import_scan,
             integrations::connectors::connectors_import,

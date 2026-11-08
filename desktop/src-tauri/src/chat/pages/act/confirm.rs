@@ -26,7 +26,9 @@
 //! arguments as key: value lines, secrets masked ([`ConnectorCard`]) —
 //! **Allow once · Always allow · Deny** (no Always allow for a tool that can
 //! delete), answered with `chat_connector_confirm(id, answer)`; Always allow
-//! is [`Answer::AlwaysAllowed`] (state "always").
+//! is [`Answer::AlwaysAllowed`] (state "always"). Asked out loud (the Voice
+//! Assistant, `chat/assistant/connector_ask.rs`), the same question also
+//! has the Yap bar's Allow once / Don't and a spoken yes or no.
 //!
 //! The log has the question's id and the answer, never the button's words,
 //! the typed text or the page.
@@ -142,8 +144,12 @@ pub struct ConnectorCard {
     pub why: String,
     /// "changes" | "deletes" | "reads".
     pub kind: String,
-    /// Asked out loud (the Voice Assistant): the card waits in Chat.
+    /// Asked out loud (the Voice Assistant): Yap says one line and the Yap
+    /// bar asks too (`assistant/connector_ask.rs`), beside this card.
     pub voice: bool,
+    /// A spoken yes may answer it (asked out loud, a tool that can't
+    /// delete, no meeting on); else a click only.
+    pub spoken: bool,
 }
 
 /// One argument on a connector's card.

@@ -21,6 +21,8 @@
 //!   `budget.rs` how many tools a model gets, and tool search past that;
 //! - `catalog.rs` the bundled list Settings' Discover shows · `import.rs`
 //!   a setup read from Claude Desktop or pasted;
+//! - `chats.rs` each chat's own switches (the composer's Connectors ▸,
+//!   `connector_chats.json`);
 //! - `fake.rs` fake servers for the tests.
 //!
 //! **The switch**: everything here is behind `connectors_preview` (config,
@@ -37,6 +39,7 @@ pub mod budget;
 pub mod cache;
 pub mod call;
 pub mod catalog;
+pub mod chats;
 pub mod consent;
 #[cfg(test)]
 pub(crate) mod fake;
@@ -707,6 +710,8 @@ pub async fn connector_remove(id: String) -> Result<(), String> {
     }
     cache::forget(&id);
     vault::delete(&id);
+    // No chat keeps it switched off: a later connector may get its id.
+    chats::connector_removed(&id);
     tracing::info!(connector = %id, "connectors: removed");
     changed();
     Ok(())
@@ -784,6 +789,9 @@ pub struct WherePatch {
     pub voice: Option<bool>,
     #[serde(default)]
     pub meetings: Option<bool>,
+    /// From the phone (Yap Link): its reads only (wave 6).
+    #[serde(default)]
+    pub phone: Option<bool>,
 }
 
 impl WherePatch {
@@ -798,12 +806,15 @@ impl WherePatch {
         if let Some(v) = self.meetings {
             w.meetings = v;
         }
+        if let Some(v) = self.phone {
+            w.phone = v;
+        }
         w
     }
 }
 
 /// **Where Yap uses it** (a connector's page): Chat, the Voice Assistant,
-/// during meetings. The phone isn't changed here yet.
+/// during meetings, and from the phone (its reads only, wave 6).
 #[tauri::command]
 pub async fn connector_set_where(id: String, places: WherePatch) -> Result<View, String> {
     require()?;
@@ -811,7 +822,7 @@ pub async fn connector_set_where(id: String, places: WherePatch) -> Result<View,
         c.where_ = places.apply(c.where_);
         c.clone()
     })?;
-    tracing::info!(connector = %id, chat = c.where_.chat, voice = c.where_.voice, meetings = c.where_.meetings, "connectors: where it's used changed");
+    tracing::info!(connector = %id, chat = c.where_.chat, voice = c.where_.voice, meetings = c.where_.meetings, phone = c.where_.phone, "connectors: where it's used changed");
     changed();
     Ok(view(&c))
 }
@@ -866,6 +877,82 @@ pub async fn connectors_budget() -> Result<BudgetView, String> {
         }
     };
     Ok(BudgetView { model: Some(target.chat_model()), gets, tokens, cap, mode })
+}
+
+/// **One connector in a chat's + menu** (Connectors ▸, wave 6): its name,
+/// its mark (the catalogue entry's logo and colour; none: its initial) and
+/// whether it's on in that chat.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ChatConnector {
+    pub id: String,
+    pub name: String,
+    pub on: bool,
+    pub logo: Option<String>,
+    pub color: Option<String>,
+}
+
+/// A chat's connectors, for its + menu.
+#[derive(Debug, Clone, Default, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ChatConnectors {
+    /// Connectors ▸ shows: the preview on, Chat's model gets connectors,
+    /// and one at least is on and allowed in Chat.
+    pub shown: bool,
+    pub connectors: Vec<ChatConnector>,
+}
+
+/// The connectors a chat's + menu lists: each enabled one allowed in Chat
+/// (`where.chat`), in the order they were added, on unless `off` says.
+/// Pure.
+pub fn chat_menu(list: &[Connector], off: &std::collections::BTreeSet<String>, gets: bool) -> ChatConnectors {
+    let connectors: Vec<ChatConnector> = list
+        .iter()
+        .filter(|c| c.enabled && c.where_.chat)
+        .map(|c| {
+            let entry = catalog::of(&c.origin);
+            ChatConnector {
+                id: c.id.clone(),
+                name: c.name.clone(),
+                on: !off.contains(&c.id),
+                logo: entry.and_then(|e| e.logo.clone()),
+                color: entry.and_then(|e| e.color.clone()),
+            }
+        })
+        .collect();
+    ChatConnectors { shown: gets && !connectors.is_empty(), connectors }
+}
+
+/// **A chat's connectors** (its + menu's Connectors ▸): `conversationId`'s
+/// switches (none: a new chat, every one on — its page keeps what it
+/// switches until its first question). With the preview off, nothing is
+/// read and nothing shows.
+#[tauri::command]
+pub async fn connector_chat_list(conversation_id: Option<u64>) -> ChatConnectors {
+    if !enabled() {
+        return ChatConnectors::default();
+    }
+    let cfg = crate::config::load();
+    let on_device = crate::ai::ai_model::OnDevice::here(&cfg);
+    let gets = crate::ai::ai_model::target(&cfg, crate::ai::ai_model::Scope::Chat, &on_device).is_ok_and(|t| {
+        let strong = t.tools && crate::chat::documents::rich::strong(&t.provider, &t.model);
+        crate::chat::tools::connectors::may(&t.provider, strong)
+    });
+    chat_menu(&store::list(), &chats::off(conversation_id), gets)
+}
+
+/// **Switch a connector on or off in one chat** (its + menu): kept in
+/// connector_chats.json by the conversation's id. A new chat's switches go
+/// with its first question instead (`chat_send`'s `connectorsOff`).
+#[tauri::command]
+pub async fn connector_chat_set(conversation_id: u64, id: String, on: bool) -> Result<ChatConnectors, String> {
+    require()?;
+    if store::get(&id).is_none() {
+        return Err("There's no such connector.".into());
+    }
+    chats::set(conversation_id, &id, on)?;
+    tracing::info!(conversation = conversation_id, connector = %id, on, "connectors: switched in one chat");
+    Ok(connector_chat_list(Some(conversation_id)).await)
 }
 
 /// Show details: the server, the address, a program's last stderr lines
