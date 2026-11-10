@@ -19,7 +19,7 @@ import {
 } from './support/fixtures.js';
 import { COPILOT_KEY, isCopilotKey, hotkeyParts, formatHotkeySpec, fillHotkey } from '../src/lib/core/hotkeys.js';
 import { appLabel } from '../src/lib/core/appNames.js';
-import { aiError, CUT_OFF } from '../src/lib/core/aiErrors.js';
+import { aiError, CUT_OFF, DECLINED } from '../src/lib/core/aiErrors.js';
 
 /** A local port nothing listens on: the "AI server that isn't running". */
 function closedPort() {
@@ -79,6 +79,8 @@ test('the Copilot key, aiErrors and app names on their own', () => {
     "Couldn't reach api.groq.com. Check your internet connection, then try again.",
   );
   expect(aiError('HTTP 401: {"error":{"message":"Invalid API Key"}}').text).toMatch(/didn't accept the API key/);
+  // Claude declined (ai/llm/anthropic.rs `DECLINED`): Rust's own sentence, known.
+  expect(aiError("Claude declined to answer that: Anthropic's safety check stopped it. Try wording it another way, or pick another model.")).toEqual({ text: DECLINED, settings: false, known: true });
   expect(aiError('HTTP 404: {"error":{"message":"The model `x` does not exist"}}').settings).toBe(true);
   expect(aiError('HTTP 503: upstream busy').text).toMatch(/problem on its side/);
   expect(aiError('No groq API key — add one in Settings → Language Models')).toMatchObject({ settings: true, known: true });

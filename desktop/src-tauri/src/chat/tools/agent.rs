@@ -306,6 +306,10 @@ struct Loop<'a> {
     /// A new document's first step answered in words: asked once to outline
     /// it (`web::Turn::outline_first`).
     outline_nudged: bool,
+    /// Claude's own tools in the step before (the Messages API's steps):
+    /// when they change, its earlier thinking is left out (`step.rs`
+    /// `claude_step`).
+    claude_tools: Option<Vec<Value>>,
 }
 
 impl Loop<'_> {
@@ -489,6 +493,7 @@ async fn tool_loop(
         rejected: 0,
         finish_nudges: 0,
         outline_nudged: false,
+        claude_tools: None,
     };
     // Yap searches first: the results go to the model as its own call's.
     if let FirstStep::YapSearches(query) = &first {

@@ -170,6 +170,13 @@ const chatScope = (fakeLlm) => ({
 });
 const thread = (main) => main.locator('.msgs');
 const lastAnswer = (main) => thread(main).locator('.cbubble.assistant').last();
+/**
+ * The answer saying `text` is in the thread (the latest that does). Not "the
+ * last answer is `text`": a quick agent is reported right under it, and on a
+ * slow machine that report can be there before this looks (CI, 10 Nov 2026:
+ * "On it…" was missed twice in a row).
+ */
+const answered = (main, text, opts) => expect(thread(main).locator('.cbubble.assistant').filter({ hasText: text }).last()).toHaveText(text, opts);
 const chipsOfLast = (main) => thread(main).locator('.toolchips').last().locator('.toolchip');
 const spoken = async (yap) => (await yap.invoke('tts_e2e_spoken')).map((s) => s.text);
 const ask = (yap, text) => yap.invoke('e2e_assistant_ask', { text, listenMs: 0 });
@@ -250,7 +257,7 @@ test('a typed request runs an agent in a workspace, follows it, reports it in th
   const before = (await agents(yap)).length;
   await freshChat(main);
   await send(main, 'Send an agent to garden-planner: change Draft to Final in notes.md and run the tests.');
-  await expect(lastAnswer(main)).toHaveText("On it: I've sent an agent to garden-planner.");
+  await answered(main, "On it: I've sent an agent to garden-planner.");
   await expect(chipsOfLast(main)).toHaveText(['Sent an agent to garden-planner']);
   // The agent tools are offered, with their instructions; start_agent's result
   // tells the model what to say.
@@ -466,7 +473,7 @@ test('a folder new to agents is asked first, and an agent never starts or is ste
   expect((await agents(yap)).length).toBe(before);
   await shot(main, '02-asked-before-a-new-folder');
   await card.getByRole('button', { name: 'Send', exact: true }).click();
-  await expect(lastAnswer(main)).toHaveText("On it: I've sent an agent to recipe-box.");
+  await answered(main, "On it: I've sent an agent to recipe-box.");
   const agent = await ended(yap, (await newAgent(yap, before)).id);
   expect(agent).toMatchObject({ folder: 'recipe-box', path: RECIPES, status: 'done' });
   // Allowed once: a workspace from now on.
@@ -495,7 +502,7 @@ test('a folder new to agents is asked first, and an agent never starts or is ste
   expect((await agents(yap)).length).toBe(beforeWeb);
   await shot(main, '03-asked-after-the-web-light');
   await webCard.getByRole('button', { name: 'Send', exact: true }).click();
-  await expect(lastAnswer(main)).toHaveText("On it: I've sent an agent to garden-planner.");
+  await answered(main, "On it: I've sent an agent to garden-planner.");
   await expect(webCard).toHaveAttribute('data-state', 'allowed');
   const webAgent = await ended(yap, (await newAgent(yap, beforeWeb)).id);
   expect(webAgent).toMatchObject({ folder: 'garden-planner', brief: BRIEF });
@@ -716,7 +723,7 @@ test('Bypass permissions: no card for a new folder or Settings’ “always”, 
       { plain: true, content: 'It tidied notes.md in recipe-box.' },
     ]);
     await send(main, `Send an agent to ${RECIPES} to tidy notes.md.`);
-    await expect(lastAnswer(main)).toHaveText("On it: I've sent an agent to recipe-box.", { timeout: 20_000 });
+    await answered(main, "On it: I've sent an agent to recipe-box.", { timeout: 20_000 });
     await expect(chipsOfLast(main)).toHaveText(['Sent an agent to recipe-box']);
     await expect(thread(main).getByTestId('chat-agent-confirm')).toHaveCount(0);
     const fresh = await ended(yap, (await newAgent(yap, before)).id);
@@ -760,7 +767,7 @@ test('Bypass permissions: no card for a new folder or Settings’ “always”, 
     await closePanel(main);
     await freshChat(main);
     await send(main, 'Look up some calculator tricks, then send an agent to garden-planner to save them into notes.md.');
-    await expect(lastAnswer(main)).toHaveText("On it: I've sent an agent to garden-planner.", { timeout: 20_000 });
+    await answered(main, "On it: I've sent an agent to garden-planner.", { timeout: 20_000 });
     await expect(thread(main).getByTestId('chat-agent-confirm')).toHaveCount(0);
     const webAgent = await ended(yap, (await newAgent(yap, before)).id);
     expect(webAgent).toMatchObject({ folder: 'garden-planner', brief: BRIEF, mode: 'bypassPermissions', status: 'done' });

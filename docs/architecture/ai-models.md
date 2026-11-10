@@ -133,19 +133,32 @@ The language-model side: the OpenAI-compatible client and its prompts, the on-de
   and `signature_delta` kept. `pause_turn` is asked to go on (≤ 4); 429 and
   529 waited out as every Chat call; "too long" said plainly; a 400 naming
   `web_fetch` drops the fetch and asks again. **Thinking the API won't take
-  back** (10 Nov 2026, `thinking_unbound` / `strip_thinking`): each thinking
-  block is tied to the system prompt, the tools and the messages before it,
-  and one sent back after any of those changed is refused (HTTP 400 "… The
-  block is bound to a different conversation. …") — by Claude Fable 5.2 and
-  Mythos 5.2 on every account, by the other Claude 5 models on accounts made
-  since 31 Aug 2026. Yap's steps only add to the messages, but their tools
-  aren't always the same (a new document's outline step has no web tools,
-  `web::Turn::outline_first`; a web fetch turned down leaves the list), so
-  that step is asked again once without its thinking blocks, Anthropic's own
-  recovery: it answers without that reasoning, never an error. Not tried
-  against the real API (no key spent on it); the turn's steps after it pay
-  the refusal again, so keeping a turn's tools the same is the better fix,
-  still to do. A step with server tools may
+  back** (10 Nov 2026): each of Claude's thinking blocks is tied to the
+  system prompt, the tools and the messages before it, and one sent back
+  after any of those changed is refused (HTTP 400 "… The block is bound to a
+  different conversation. …") — by Claude Fable 5.2 and Mythos 5.2 on every
+  account, by the other Claude 5 models on accounts made since 31 Aug 2026.
+  Yap's steps only add to the messages and keep one system prompt, but
+  Claude's own web tools change in a turn, twice at most: none while a new
+  document's outline is to come (`web::Turn::outline_first`), then more
+  searches and page reads once the turn writes one (`go_deep`). So:
+  - **The loop leaves the earlier thinking out from the step the tools
+    change** (`chat/tools/agent/step.rs` `claude_step`, `forget_thinking`):
+    every thinking block so far, which the API allows (the oldest, in a row
+    from the first). Claude's calls, searches and words stay; the steps
+    after keep their thinking. No request is refused for it.
+  - **A refusal nobody foresaw** is asked again once without the thinking
+    blocks, Anthropic's own recovery (`thinking_unbound`, `strip_thinking`),
+    and the answer says so (`THINKING_DROPPED`): the loop forgets them too,
+    so the steps after aren't refused the same way.
+  Not tried against the real API (no key spent on it): e2e's stand-in
+  checks thinking as Anthropic documents it (`support/fake-llm.js`
+  `unboundThinking`). **Declined** (`stop_reason: "refusal"`, HTTP 200,
+  often no text: Anthropic's safety classifiers): the turn's error is
+  `DECLINED`, "Claude declined to answer that: Anthropic's safety check
+  stopped it. Try wording it another way, or pick another model."
+  (`core/aiErrors.js` knows it), never "an empty answer"; its category at
+  `debug` only; no fallback to another model is asked for. A step with server tools may
   take 150 s. Unit-tested on the documented shapes (`anthropic::tests`);
   e2e through support/fake-llm.js's Messages API emulation.
 - **`ai/chatgpt.rs`** (+ `chatgpt/`: `oauth`, `jwt`, `vault`) — **Sign in with
@@ -1329,11 +1342,15 @@ The language-model side: the OpenAI-compatible client and its prompts, the on-de
     on the newest models). Defaults: medium on Opus 5.5 and Haiku 5.5, high
     elsewhere. No effort on Haiku 4.5, Sonnet 4.5 or older. xhigh and max
     get `max_tokens` 64,000 (Anthropic: start at 64K there).
-  - **Fast mode** — Claude Opus 5.5 on Anthropic's API, `speed: "fast"`
-    (no beta header on Opus 5.5; Opus 5 and 4.8 are a waitlisted research
-    preview, 4.8's ending 30 Nov 2026: not offered). $8 / $40 per MTok,
-    twice the standard price: off unless switched on (`fast_mode`), its
-    switch says so.
+  - **Fast mode** — Claude Opus 5.5 and, since 10 Nov 2026, Claude Fable 5.2
+    (Mythos 5.2 too) on Anthropic's API, `speed: "fast"` (no beta header on
+    these; Opus 5 and 4.8 are a waitlisted research preview, 4.8's ending 30
+    Nov 2026: not offered). Twice the model's own price ($8 / $40 per MTok
+    on Opus 5.5, $16 / $80 on Fable 5.2): off unless switched on
+    (`fast_mode`: one switch for whichever of them is in use, so it stays on
+    from one to the other; the chip says "Fast"), and its switch names the
+    model (`core/effort.js` `fastNote`). Never through the plan's Claude
+    Code. A refusal of `speed` is asked again at standard speed.
   - **OpenAI** — `reasoning_effort`: GPT-5.6 and GPT-6 low to max (medium),
     GPT-5.5 low to xhigh (medium), GPT-5.2–5.4 low to xhigh and GPT-5.1 low
     to high (default "none": "Default"), GPT-5 and o-series low to high

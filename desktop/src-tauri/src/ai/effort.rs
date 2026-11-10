@@ -26,10 +26,12 @@
 //!   `budget_tokens` is refused by the newest models, so it's never sent;
 //!   Haiku 4.5, Sonnet 4.5 and older have no effort. At xhigh and max the
 //!   answer may use up to 64K tokens, as Anthropic advises.
-//! - **Fast mode**: Claude Opus 5.5 on Anthropic's own API, `speed:
-//!   "fast"` (no beta header on Opus 5.5; Opus 5 and 4.8 are a research
+//! - **Fast mode**: Claude Opus 5.5 and Claude Fable 5.2 (Mythos 5.2 too)
+//!   on Anthropic's own API, `speed: "fast"` (no beta header on these;
+//!   Opus 5 and 4.8 are a research
 //!   preview behind a waitlist, and 4.8's ends on 30 Nov 2026, so not
-//!   offered). Twice the price: off unless switched on (`fast_mode`).
+//!   offered). Twice the model's own price: off unless switched on
+//!   (`fast_mode`, one switch for whichever of them is in use).
 //! - **OpenAI**: `reasoning_effort`. GPT-5.6 and GPT-6 low to max; GPT-5.5
 //!   low to xhigh; GPT-5.2–5.4 low to xhigh and GPT-5.1 low to high, their
 //!   default "none" (no reasoning: the "Default" choice); GPT-5 and the
@@ -100,7 +102,7 @@ pub struct Caps {
     /// What it runs at when none is sent; `None`: not one of these (OpenAI's
     /// "none", Groq's "default"), so "Default" sends nothing.
     pub default: Option<Level>,
-    /// Fast mode (Claude Opus 5.5 on Anthropic).
+    /// Fast mode (Claude Opus 5.5 and Fable 5.2 on Anthropic).
     pub fast: bool,
 }
 
@@ -145,9 +147,11 @@ fn claude_adaptive(model: &str) -> bool {
     claude_alias(model) != "claude-opus-4-5"
 }
 
-/// Fast mode: Claude Opus 5.5 on Anthropic's own API. Pure.
+/// Fast mode: Claude Opus 5.5, and since 10 Nov 2026 Claude Fable 5.2 and
+/// Mythos 5.2, on Anthropic's own API (`speed: "fast"`, no beta header on
+/// any of them; twice each one's price). Pure.
 fn claude_fast(provider: &str, model: &str) -> bool {
-    provider == "anthropic" && claude_alias(model) == "claude-opus-5-5"
+    provider == "anthropic" && matches!(claude_alias(model).as_str(), "claude-opus-5-5" | "claude-fable-5-2" | "claude-mythos-5-2")
 }
 
 /// OpenAI's table (a bare id: "gpt-5.6-luna", "o4-mini"). Pure.
@@ -455,7 +459,7 @@ pub fn chat_set_effort(
     Ok(crate::ai::ai_model::status(&cfg, crate::ai::ai_model::Scope::Chat, &crate::ai::ai_model::OnDevice::here(&cfg)))
 }
 
-/// The model menu's Fast mode (Claude Opus 5.5).
+/// The model menu's Fast mode (Claude Opus 5.5, Claude Fable 5.2).
 #[tauri::command]
 pub fn chat_set_fast(app: tauri::AppHandle, on: bool) -> Result<crate::ai::ai_model::Status, String> {
     let cfg = crate::shell::settings::change_config(&app, |cfg| {
@@ -479,13 +483,16 @@ mod tests {
         let c = caps("anthropic", "claude-opus-5-5").unwrap();
         assert_eq!(ids(&c), ["low", "medium", "high", "xhigh", "max"]);
         assert_eq!(c.default, Some(Medium));
-        assert!(c.fast, "fast mode: Opus 5.5 only");
+        assert!(c.fast, "fast mode: Opus 5.5 and Fable 5.2");
         assert_eq!(caps("anthropic", "claude-haiku-5-5").unwrap().default, Some(Medium));
         let sonnet = caps("anthropic", "claude-sonnet-5-5").unwrap();
         assert_eq!((sonnet.levels.len(), sonnet.default, sonnet.fast), (5, Some(High), false));
         assert_eq!(caps("anthropic", "claude-fable-5-1").unwrap().levels.len(), 5);
         let fable = caps("anthropic", "claude-fable-5-2").unwrap();
-        assert_eq!((fable.levels.len(), fable.default, fable.fast), (5, Some(High), false));
+        assert_eq!((fable.levels.len(), fable.default, fable.fast), (5, Some(High), true));
+        // Never through the plan's Claude Code, nor on the Fable before it.
+        assert!(!caps(crate::ai::claude_plan::PROVIDER, "claude-fable-5-2").unwrap().fast);
+        assert!(!caps("anthropic", "claude-fable-5-1").unwrap().fast);
         assert_eq!(ids(&caps("anthropic", "claude-opus-4-6").unwrap()), ["low", "medium", "high", "max"]);
         assert_eq!(ids(&caps("anthropic", "claude-sonnet-4-6").unwrap()), ["low", "medium", "high", "max"]);
         assert_eq!(ids(&caps("anthropic", "claude-opus-4-5-20251101").unwrap()), ["low", "medium", "high"], "a dated id by its alias");
@@ -584,8 +591,10 @@ mod tests {
         // Opus 4.5: the effort alone (it thinks to a budget, never sent).
         let old = fields("anthropic", "claude-opus-4-5", High, false, false);
         assert_eq!(Value::Object(old), json!({ "output_config": { "effort": "high" } }));
-        // Fast mode: Opus 5.5 only, when on.
+        // Fast mode: Opus 5.5 and Fable 5.2, when on.
         assert_eq!(fields("anthropic", "claude-opus-5-5", Medium, true, false)["speed"], "fast");
+        assert_eq!(fields("anthropic", "claude-fable-5-2", High, true, false)["speed"], "fast");
+        assert!(!fields("anthropic", "claude-fable-5-2", High, false, false).contains_key("speed"));
         assert!(!fields("anthropic", "claude-sonnet-5-5", Medium, true, false).contains_key("speed"));
         // The GPT-6 family with tools: reasoning off, as Chat Completions wants.
         assert_eq!(fields("openai", "gpt-6-luna", High, false, true)["reasoning_effort"], "none");
@@ -621,7 +630,7 @@ mod tests {
         assert_eq!(for_call("anthropic", "claude-opus-5-5"), Some((Medium, false)));
         set_for_test("anthropic", "claude-opus-5-5", Some(Max), true);
         assert_eq!(for_call("anthropic", "claude-opus-5-5"), Some((Max, true)));
-        assert_eq!(for_call("anthropic", "claude-sonnet-5-5"), Some((High, false)), "fast mode: Opus 5.5 only");
+        assert_eq!(for_call("anthropic", "claude-sonnet-5-5"), Some((High, false)), "fast mode: not Sonnet's");
         // "Default" where the default isn't a level: nothing sent.
         assert_eq!(for_call("openai", "gpt-5.4-mini"), None);
         set_for_test("openai", "gpt-5.4-mini", Some(Low), false);

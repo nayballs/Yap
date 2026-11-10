@@ -201,7 +201,7 @@ pub fn set_effort(app: &tauri::AppHandle, level: Option<&str>) -> Result<(), Str
     crate::ai::effort::chat_set_effort(app.clone(), m.provider, m.id, level.map(str::to_string)).map(|_| ())
 }
 
-/// Fast mode (Claude Opus 5.5), as the picker sets it.
+/// Fast mode (Claude Opus 5.5, Claude Fable 5.2), as the picker sets it.
 pub fn set_fast(app: &tauri::AppHandle, on: bool) -> Result<(), String> {
     crate::ai::effort::chat_set_fast(app.clone(), on).map(|_| ())
 }

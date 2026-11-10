@@ -396,6 +396,8 @@ pub struct Stream {
     /// Each block's tool input so far (`input_json_delta`), by index.
     json: Vec<String>,
     stop_reason: Option<String>,
+    /// Why it declined, when it did (`stop_reason: "refusal"`).
+    stop_details: Value,
     usage: Map<String, Value>,
     error: Option<String>,
     done: bool,
@@ -481,6 +483,9 @@ impl Stream {
                 if let Some(r) = e["delta"]["stop_reason"].as_str() {
                     self.stop_reason = Some(r.to_string());
                 }
+                if e["delta"]["stop_details"].is_object() {
+                    self.stop_details = e["delta"]["stop_details"].clone();
+                }
                 if let Some(u) = e["usage"].as_object() {
                     self.usage.extend(u.clone());
                 }
@@ -494,7 +499,7 @@ impl Stream {
     /// The answer, whole, as the API would have sent it.
     pub fn whole(&self) -> Value {
         let blocks: Vec<Value> = self.blocks.iter().filter(|b| !b.is_null()).cloned().collect();
-        json!({ "type": "message", "role": "assistant", "content": blocks, "stop_reason": self.stop_reason, "usage": self.usage })
+        json!({ "type": "message", "role": "assistant", "content": blocks, "stop_reason": self.stop_reason, "stop_details": self.stop_details, "usage": self.usage })
     }
 }
 
@@ -513,12 +518,51 @@ fn said(detail: &str) -> String {
 /// conversation. …" — the same body fails the same way again. Claude Fable
 /// 5.2 and Mythos 5.2 check it on every account; the other Claude 5 models
 /// on accounts made since 31 Aug 2026. Yap's steps only add to the messages,
-/// but their tools aren't always the same (a new document's outline step
-/// has no web tools: `web::Turn::outline_first`; a web fetch turned down
-/// leaves the list). Pure.
+/// but Claude's own web tools aren't the same all turn (none in a new
+/// document's outline step, `web::Turn::outline_first`; more searches and
+/// page reads once the turn writes a document, `web::Turn::go_deep`), so
+/// the tool loop leaves the earlier thinking out from the step they change
+/// ([`forget_thinking`]), and this refusal is only what's left: a cause
+/// nobody knew. Pure.
 fn thinking_unbound(status: u16, detail: &str) -> bool {
     status == 400 && detail.contains("bound to a different conversation")
 }
+
+/// A thinking block, of either kind.
+fn is_thinking(block: &Value) -> bool {
+    matches!(block["type"].as_str(), Some("thinking" | "redacted_thinking"))
+}
+
+/// **The tool loop's messages without Claude's thinking so far** (its own
+/// blocks, `yap_anthropic`, on each answer of this turn): how many blocks
+/// went. For the step where Claude's tools change — its earlier thinking
+/// was tied to the tools it had — and after a step [`post`] had to ask
+/// again without it ([`THINKING_DROPPED`]). Every block so far goes, which
+/// the API allows (the oldest ones, in a row from the first), so the
+/// thinking of the steps after stays good; each answer's text, tool calls
+/// and searches stay. Pure.
+pub fn forget_thinking(messages: &mut [Value]) -> usize {
+    let mut gone = 0;
+    for m in messages.iter_mut() {
+        if let Some(own) = m["yap_anthropic"].as_array_mut() {
+            let before = own.len();
+            own.retain(|b| !is_thinking(b));
+            gone += before - own.len();
+        }
+    }
+    gone
+}
+
+/// On an answer [`post`] got only by leaving the thinking out of its
+/// request ([`thinking_unbound`]): the loop forgets it too
+/// ([`forget_thinking`]), so the next step isn't refused again.
+pub const THINKING_DROPPED: &str = "yap_thinking_dropped";
+
+/// **Claude declined** (its safety classifiers: HTTP 200 with `stop_reason:
+/// "refusal"`, often with no text at all), said plainly — never "The model
+/// returned an empty answer". `desktop/src/lib/core/aiErrors.js` knows it
+/// word for word.
+pub const DECLINED: &str = "Claude declined to answer that: Anthropic's safety check stopped it. Try wording it another way, or pick another model.";
 
 /// **`body`'s messages without Claude's thinking** (Anthropic's recovery for
 /// [`thinking_unbound`]: every `thinking` and `redacted_thinking` block out,
@@ -530,7 +574,7 @@ fn strip_thinking(body: &mut Value) -> usize {
         for m in messages.iter_mut() {
             if let Some(blocks) = m["content"].as_array_mut() {
                 let before = blocks.len();
-                blocks.retain(|b| !matches!(b["type"].as_str(), Some("thinking" | "redacted_thinking")));
+                blocks.retain(|b| !is_thinking(b));
                 gone += before - blocks.len();
             }
         }
@@ -559,6 +603,8 @@ pub(super) async fn post(req: &ChatRequest, native: &Native, mut on: Option<OnDe
     let mut before: Vec<Value> = Vec::new();
     // A stream cut off before any of the answer came was asked again.
     let mut cut_asked_again = false;
+    // The step was asked again without its thinking ([`thinking_unbound`]).
+    let mut thinking_dropped = false;
     let mut pause = 0;
     while pause <= PAUSES {
         let call = crate::ai::eval::Call::start(&req.provider, &endpoint, &body).await;
@@ -625,6 +671,7 @@ pub(super) async fn post(req: &ChatRequest, native: &Native, mut on: Option<OnDe
                 let gone = strip_thinking(&mut body);
                 if gone > 0 {
                     tracing::info!(blocks = gone, "Chat: Claude's earlier thinking no longer fits this step; asking again without it");
+                    thinking_dropped = true;
                     continue;
                 }
             }
@@ -700,6 +747,12 @@ pub(super) async fn post(req: &ChatRequest, native: &Native, mut on: Option<OnDe
         };
         call.answered(&limits, &value);
         crate::ai::usage::record_response(&counted, &value, None, None);
+        // Declined by Anthropic's safety check: said so, whatever it wrote first.
+        if value["stop_reason"] == "refusal" {
+            tracing::info!("Chat: Claude declined the request (stop_reason refusal)");
+            tracing::debug!(category = value["stop_details"]["category"].as_str().unwrap_or(""), "Chat: the decline's category");
+            return Err(DECLINED.to_string());
+        }
         let blocks = value["content"].as_array().cloned().unwrap_or_default();
         // Its server tools paused their loop: asked to go on, from where it stopped.
         if value["stop_reason"] == "pause_turn" && pause < PAUSES {
@@ -713,7 +766,10 @@ pub(super) async fn post(req: &ChatRequest, native: &Native, mut on: Option<OnDe
         }
         before.extend(blocks);
         let whole = json!({ "content": before, "stop_reason": value["stop_reason"], "usage": value["usage"] });
-        let message = crate::chat::think::tidy_message(message_of(&whole));
+        let mut message = crate::chat::think::tidy_message(message_of(&whole));
+        if thinking_dropped {
+            message[THINKING_DROPPED] = json!(true);
+        }
         // A whole answer's watcher hears it all at once (as a whole Chat
         // answer is): its tool calls, so its text is never taken for the
         // answer, then its text.
@@ -775,6 +831,50 @@ mod tests {
         assert_eq!((m[2]["content"][0]["type"].as_str(), m[3]["content"].as_str()), (Some("tool_result"), Some("Go on.")));
         // Nothing to leave out: nothing changes, and the step isn't asked again.
         assert_eq!(strip_thinking(&mut body), 0);
+    }
+
+    #[test]
+    fn the_loop_forgets_claudes_thinking_and_keeps_what_it_did() {
+        // The loop's own messages: Claude's blocks beside each answer.
+        let mut messages = vec![
+            json!({ "role": "system", "content": "You are Yap." }),
+            json!({ "role": "user", "content": "Write me a guide." }),
+            json!({ "role": "assistant", "content": null, "tool_calls": [{ "id": "t1", "function": { "name": "create_document", "arguments": "{}" } }], "yap_anthropic": [
+                { "type": "thinking", "thinking": "Outline first.", "signature": "sig-1" },
+                { "type": "tool_use", "id": "t1", "name": "create_document", "input": {} },
+            ] }),
+            json!({ "role": "tool", "tool_call_id": "t1", "content": "ok" }),
+            json!({ "role": "assistant", "content": "Looking it up.", "yap_anthropic": [
+                { "type": "redacted_thinking", "data": "x" },
+                { "type": "server_tool_use", "id": "s1", "name": "web_search", "input": { "query": "tidecaller" } },
+                { "type": "text", "text": "Looking it up." },
+            ] }),
+        ];
+        assert_eq!(forget_thinking(&mut messages), 2);
+        let kinds = |m: &Value| m["yap_anthropic"].as_array().unwrap().iter().map(|b| b["type"].as_str().unwrap().to_string()).collect::<Vec<_>>();
+        assert_eq!(kinds(&messages[2]), ["tool_use"]);
+        assert_eq!(kinds(&messages[4]), ["server_tool_use", "text"]);
+        assert_eq!(messages.len(), 5);
+        assert_eq!(forget_thinking(&mut messages), 0);
+        // The request made from them carries no thinking, and every call and result.
+        let req = ChatRequest::chat("https://api.anthropic.com/v1", "k", "claude-fable-5-2", "anthropic", 0.5, Value::Array(messages), None, None);
+        let b = body(&req, &[], false);
+        assert!(!b["messages"].to_string().contains("thinking"), "{}", b["messages"]);
+        assert_eq!(b["messages"].as_array().unwrap().len(), 4);
+    }
+
+    #[test]
+    fn a_streamed_decline_keeps_its_stop_reason_and_why() {
+        let mut s = Stream::default();
+        let mut hear = |_: Delta<'_>| {};
+        s.push(r#"{"type":"message_start","message":{"id":"m","type":"message","role":"assistant","content":[],"usage":{"input_tokens":10,"output_tokens":1}}}"#, &mut hear);
+        s.push(r#"{"type":"message_delta","delta":{"stop_reason":"refusal","stop_details":{"type":"refusal","category":"cyber","explanation":"…"}},"usage":{"output_tokens":1}}"#, &mut hear);
+        s.push(r#"{"type":"message_stop"}"#, &mut hear);
+        let whole = s.whole();
+        assert_eq!((whole["stop_reason"].as_str(), whole["stop_details"]["category"].as_str()), (Some("refusal"), Some("cyber")));
+        assert!(whole["content"].as_array().unwrap().is_empty());
+        // Said in plain words, as aiErrors.js knows them.
+        assert!(DECLINED.starts_with("Claude declined to answer that"));
     }
 
     #[test]

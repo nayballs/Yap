@@ -225,7 +225,7 @@ is at most 32,005 bytes (a second of audio); a text frame at most 16 KiB.
 | `set_model {id}` | Switch Chat's model (one of `ready.models`). |
 | `set_model {provider, model, baseUrl?, file?}` ⁺ | Switch Chat's model to a row of Chat's picker, as the desktop picker does (`chat_set_model`'s own checks: a provider with a key, a server Settings knows, an on-device model on this PC). |
 | `set_effort {level}` ⁺ | The effort Chat's model answers at (`null`: its default). |
-| `set_fast {on}` ⁺ | Fast mode (Claude Opus 5.5). |
+| `set_fast {on}` ⁺ | Fast mode (Claude Opus 5.5, Claude Fable 5.2). |
 | `ping` | Every 15 s; answered at once, mid-answer too. |
 
 **PC → phone**

@@ -9,6 +9,9 @@ export const CUT_OFF = 'The answer was cut off before it finished. Try again.';
 const UNREACHABLE =
   /error sending request|connection refused|dns error|failed to lookup|timed out|tcp connect|connect error|network is unreachable/;
 
+/** Claude declined the request (ai/llm/anthropic.rs `DECLINED`, word for word). */
+export const DECLINED = "Claude declined to answer that: Anthropic's safety check stopped it. Try wording it another way, or pick another model.";
+
 /** Where the person sees their Claude plan's usage. */
 export const CLAUDE_USAGE_URL = 'https://claude.ai/settings/usage';
 
@@ -71,6 +74,8 @@ export function aiError(err) {
   if (/answer was cut off|error decoding response body|the connection dropped/.test(lower)) {
     return said(CUT_OFF, false);
   }
+  // Claude declined (Anthropic's safety check): Rust says it so already.
+  if (/claude declined to answer/.test(lower)) return said(DECLINED, false);
   // Yap's own words already ("No groq API key — add one in Settings → …").
   if (/api key|settings → language models/.test(lower)) return said(raw, true);
   return { text: raw || 'Something went wrong. Try again.', settings: false, known: false };
