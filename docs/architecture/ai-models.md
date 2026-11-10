@@ -1933,9 +1933,17 @@ person's own sign-in.
   model set up"): nothing is ever sent to it.
 - **Its models** (`MODELS`, cheapest first, the newest of each family):
   `claude-haiku-5-5`, `claude-sonnet-5-5`, `claude-opus-5-5`,
-  `claude-fable-5-2` (in Fable 5.1's place since 10 Nov 2026; a choice of
-  5.1 saved before still runs, and Settings → Yap Code's default model now
-  offers Fable too). Full ids, never
+  `claude-fable-5-2` (in Fable 5.1's place since 10 Nov 2026; Settings →
+  Yap Code's default model now offers Fable too). **A list of Yap's own is
+  never a day behind**: the pickers read each provider's list from
+  `model_catalog.json`, kept a day, and the plan's was kept the same way —
+  so the build with Fable 5.2 went on listing 5.1 on the plan while the
+  Anthropic key's own list had 5.2. Every reader of the lists now replaces
+  a stored plan list that isn't this build's on the spot
+  (`model_catalog::keep_own_lists`, `with_lists`). And a choice saved on
+  the plan of a model its list moved on from follows its family, its effort
+  with it (`config::migrate_plan_models`, on every load; an Anthropic
+  key's choice of 5.1 stays). Full ids, never
   aliases, so every rule keyed on a model id reads them as Anthropic's
   (`as_api`): effort (as `--effort`; no Fast mode through Claude Code),
   images, context sizes, the strong models, Latest. `model_catalog.rs` lists

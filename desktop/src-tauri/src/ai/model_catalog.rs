@@ -309,7 +309,7 @@ fn end(provider: &str) {
 /// tools away from it, and the chip says "no note tools"). `None` = it
 /// didn't say, or there's no good list.
 pub fn tools_for(provider: &str, model: &str) -> Option<bool> {
-    with_store(|c| {
+    with_lists(|c| {
         let list = c.providers.get(provider)?;
         if list.error.is_some() {
             return None;
@@ -334,7 +334,7 @@ pub fn vision_for(provider: &str, model: &str) -> Option<bool> {
 
 /// `model` in the provider's good list, if it's there.
 pub fn listed_model(provider: &str, model: &str) -> Option<CatalogModel> {
-    with_store(|c| {
+    with_lists(|c| {
         let list = c.providers.get(provider)?;
         if list.error.is_some() && list.models.is_empty() {
             return None;
@@ -349,7 +349,7 @@ pub fn listed_model(provider: &str, model: &str) -> Option<CatalogModel> {
 
 /// A provider's good list (`None`: never fetched, or it's empty).
 pub fn models_of(provider: &str) -> Option<Vec<CatalogModel>> {
-    with_store(|c| c.providers.get(provider).filter(|l| !l.models.is_empty()).map(|l| l.models.clone())).flatten()
+    with_lists(|c| c.providers.get(provider).filter(|l| !l.models.is_empty()).map(|l| l.models.clone())).flatten()
 }
 
 /// Debug and test: a provider's list as if it had been fetched.
@@ -1202,6 +1202,41 @@ fn carry_first_seen(
     models
 }
 
+/// **A list that's Yap's own is never a day behind** (10 Nov 2026). Your
+/// Claude plan's models are Yap's list (`claude_plan::catalog`, asked of
+/// nobody), yet it was kept for a day like a provider's: the build that
+/// put Claude Fable 5.2 in it went on showing Fable 5.1 on the plan until
+/// the day was up, while the Anthropic key's own list had 5.2 already. A
+/// stored one that isn't today's list is replaced on the spot (each model's
+/// `firstSeen` kept): `true` when it was. A plan never listed yet is left
+/// for its first check.
+fn keep_own_lists(c: &mut Catalog, now: u64) -> bool {
+    let plan = crate::ai::claude_plan::PROVIDER;
+    let Some(stored) = c.providers.get(plan).filter(|l| l.fetched_at > 0) else { return false };
+    let own = crate::ai::claude_plan::catalog();
+    let same = stored.error.is_none() && stored.models.len() == own.len() && stored.models.iter().zip(&own).all(|(m, (id, name))| m.id == *id && m.name == *name);
+    if same {
+        return false;
+    }
+    let models = own.into_iter().map(|(id, name)| CatalogModel { id, name, ..Default::default() }).collect();
+    let models = carry_first_seen(Some(stored), models, now);
+    c.providers.insert(plan.to_string(), ProviderList { fetched_at: now, checked_at: now, error: None, models });
+    true
+}
+
+/// **The store for a reader** (the pickers' snapshot, a model looked up in
+/// its provider's list): Yap's own lists as this build has them first
+/// ([`keep_own_lists`]), saved when that changed them.
+fn with_lists<R>(f: impl FnOnce(&mut Catalog) -> R) -> Option<R> {
+    with_store(|c| {
+        if keep_own_lists(c, now_secs()) {
+            tracing::info!("Model list of your Claude plan: brought up to this build's");
+            save(c);
+        }
+        f(c)
+    })
+}
+
 /// Record a check's result in the store (and the file).
 fn record(provider: &str, result: Result<Vec<CatalogModel>, String>, now: u64) {
     with_store(|c| {
@@ -1238,11 +1273,12 @@ fn view(provider: &str, list: Option<&ProviderList>) -> ListView {
     }
 }
 
-/// Every keyed provider's list as Yap has it now.
+/// Every keyed provider's list as Yap has it now (Yap's own lists as this
+/// build has them: [`with_lists`]).
 pub fn snapshot(cfg: &YapConfig) -> Snapshot {
     let keyed = keyed(cfg);
     // The rev is taken under the store's lock, with the read.
-    let (providers, rev) = with_store(|c| {
+    let (providers, rev) = with_lists(|c| {
         let providers = keyed
             .iter()
             .map(|p| (p.to_string(), view(p, c.providers.get(*p))))
@@ -2073,6 +2109,45 @@ mod tests {
         assert_eq!(clean_name("OpenAI: GPT-5 Mini"), "GPT-5 Mini");
         assert_eq!(clean_name("Qwen/Qwen3.8-27B"), "Qwen3.8-27B");
         assert_eq!(clean_name("Gemini 3.8 Flash"), "Gemini 3.8 Flash");
+    }
+
+    #[test]
+    fn the_plans_own_list_is_this_builds_however_fresh_the_stored_one() {
+        let plan = crate::ai::claude_plan::PROVIDER;
+        let now = 2_000_000_000;
+        let own: Vec<String> = crate::ai::claude_plan::catalog().into_iter().map(|(id, _)| id).collect();
+        let stored = |ids: &[&str], at: u64| ProviderList {
+            fetched_at: at,
+            checked_at: at,
+            error: None,
+            models: ids.iter().map(|id| CatalogModel { id: id.to_string(), name: derive_name(id), first_seen: 1_900_000_000, ..Default::default() }).collect(),
+        };
+        // An hour old, with the Fable before this build's (10 Nov 2026: the
+        // plan's picker went on listing Fable 5.1): replaced at once.
+        let mut c = Catalog::default();
+        c.providers.insert(plan.to_string(), stored(&["claude-haiku-5-5", "claude-sonnet-5-5", "claude-opus-5-5", "claude-fable-5-1"], now - 3600));
+        assert!(!due(c.providers.get(plan), now), "fresh for a day, as a provider's list is");
+        assert!(keep_own_lists(&mut c, now));
+        let list = &c.providers[plan];
+        assert_eq!(list.models.iter().map(|m| m.id.clone()).collect::<Vec<_>>(), own);
+        assert!(list.models.iter().any(|m| m.id == "claude-fable-5-2"));
+        assert_eq!((list.fetched_at, list.error.clone()), (now, None));
+        // The models it had keep when they were first seen; the new one is seen now.
+        let seen = |id: &str| list.models.iter().find(|m| m.id == id).unwrap().first_seen;
+        assert_eq!((seen("claude-opus-5-5"), seen("claude-fable-5-2")), (1_900_000_000, now));
+        // Already this build's: left alone. Another provider's list: never touched.
+        assert!(!keep_own_lists(&mut c, now + 10));
+        c.providers.insert("anthropic".into(), stored(&["claude-fable-5-1"], now - 3600));
+        assert!(!keep_own_lists(&mut c, now + 10));
+        assert_eq!(c.providers["anthropic"].models[0].id, "claude-fable-5-1");
+        // Never listed yet (no plan on this PC): left for its first check.
+        let mut none = Catalog::default();
+        assert!(!keep_own_lists(&mut none, now) && none.providers.is_empty());
+
+        // Through the store, as a picker and a lookup read it.
+        set_models_for_test(plan, stored(&["claude-opus-5-5", "claude-fable-5-1"], 1).models);
+        assert!(listed_model(plan, "claude-fable-5-2").is_some());
+        assert_eq!(models_of(plan).unwrap().into_iter().map(|m| m.id).collect::<Vec<_>>(), own);
     }
 
     #[test]

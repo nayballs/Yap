@@ -221,7 +221,9 @@ pub fn fallback_key(cfg: &crate::config::YapConfig, scope: Scope) -> Option<Stri
 /// The models a plan chat offers, by their full ids (never aliases: the
 /// effort, images and strong-model rules key on full ids), cheapest first:
 /// the newest of each family. Fable 5.2 took Fable 5.1's place on 10 Nov
-/// 2026 (a choice of 5.1 saved before still runs: Claude Code takes the id).
+/// 2026: a choice of 5.1 saved on the plan follows it (`config::
+/// migrate_plan_models`), and the pickers' stored list is replaced by this
+/// one at once, never a day late (`model_catalog::keep_own_lists`).
 pub const MODELS: &[(&str, &str)] = &[
     ("claude-haiku-5-5", "Claude Haiku 5.5"),
     ("claude-sonnet-5-5", "Claude Sonnet 5.5"),
