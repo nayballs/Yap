@@ -57,6 +57,7 @@ const fn row(provider: &'static str, model: &'static str, from: &'static str, up
 /// a change announced for a date is its own row (`from`).
 const TABLE: &[Row] = &[
     // Anthropic (first-party API rates).
+    row("anthropic", "claude-fable-5-2", "", 0, 8.0, 40.0),
     row("anthropic", "claude-fable-5-1", "", 0, 10.0, 50.0),
     row("anthropic", "claude-fable-5", "", 0, 10.0, 50.0),
     row("anthropic", "claude-opus-5-5", "", 0, 4.0, 20.0),

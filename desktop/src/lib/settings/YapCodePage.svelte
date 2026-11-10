@@ -41,21 +41,24 @@
   import { sharedKey } from '../core/providers.js';
   import { EFFORT_LABELS } from '../core/effort.js';
   import { agents, initAgents, refreshAgents } from '../stores/agents.svelte.js';
-  import { statusWord, statusTone, costLine, MODE_LABELS, modelLabel, canUndo } from '../core/agents.js';
+  import { statusWord, statusTone, costLine, MODE_LABELS, modelLabel, canUndo, BYPASS_WARNING } from '../core/agents.js';
   import { FEATURE_NAME, CODE_NAME, WORKSPACES, samePath } from '../core/codeChats.js';
 
   let { cfg, goto = null, onshowview = null } = $props();
 
   const BYPASS = 'bypassPermissions';
-  const WARNING = 'Claude Code can run anything on your PC without asking. Use it only in folders you trust.';
+  const WARNING = BYPASS_WARNING;
 
-  const MODELS = ['claude-opus-5-5', 'claude-sonnet-5-5', 'claude-haiku-5-5'];
+  // What an agent runs on by default: the plan's models (ai/claude_plan.rs
+  // `MODELS`), the most capable first.
+  const MODELS = ['claude-fable-5-2', 'claude-opus-5-5', 'claude-sonnet-5-5', 'claude-haiku-5-5'];
   const modelOptions = $derived(
     [...MODELS, ...(cfg.agentsModel && !MODELS.includes(cfg.agentsModel) ? [cfg.agentsModel] : [])].map((m) => ({ value: m, label: modelLabel(m) }))
   );
   const EFFORTS = ['low', 'medium', 'high', 'xhigh', 'max'].map((e) => ({ value: e, label: EFFORT_LABELS[e] }));
   // "Most Chat may choose": No limit, or a model (then the most effort beside it).
-  const CEILINGS = [{ value: '', label: 'No limit' }, ...MODELS.map((m) => ({ value: m, label: modelLabel(m) }))];
+  // (The top model as a ceiling is no limit at all, so it isn't listed.)
+  const CEILINGS = [{ value: '', label: 'No limit' }, ...MODELS.slice(1).map((m) => ({ value: m, label: modelLabel(m) }))];
   const MODES = ['auto', 'manual', 'acceptEdits', 'plan', BYPASS].map((m) => ({ value: m, label: MODE_LABELS[m] + (m === 'auto' ? ' (Recommended)' : '') }));
   const CAPS = [
     { value: '', label: 'No limit' },
@@ -304,7 +307,7 @@
 </Group>
 
 <Group title="Asking and reports" id="settings-yap-code-asking">
-  <Row label="Ask before sending an agent" desc="A card in Chat, or a question out loud, before an agent starts. When it matters: in a workspace no agent has used yet, or after the chat read the web." setting="yap-code-ask" stack>
+  <Row label="Ask before sending an agent" desc="A card in Chat, or a question out loud, before an agent starts. When it matters: in a workspace no agent has used yet, or after the chat read the web. Never in Bypass permissions." setting="yap-code-ask" stack>
     <Select bind:value={cfg.agentsAsk} options={ASK} ariaLabel="Ask before sending an agent" wide />
   </Row>
   <Row label="Read agent reports aloud" desc="When an agent ends, its report in the chat's own voice" setting="yap-code-speak">

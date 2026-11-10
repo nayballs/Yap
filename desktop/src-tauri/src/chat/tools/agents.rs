@@ -22,8 +22,8 @@
 //!   "catch up", "have a look", "don't change anything" (`runner::
 //!   READ_ONLY_OFF`: Claude Code's editing tools off, never a plan to approve).
 //! - **Bypass permissions: nothing asks** (`modes::unattended`): not
-//!   Settings' "asked first", not a new folder, not a spoken "Shall I…?" —
-//!   only the card after outside content below.
+//!   Settings' "asked first", not a new folder, not a spoken "Shall I…?",
+//!   and (10 Nov 2026) not the card after outside content below either.
 //! - **Asking first** (`agents_ask`: "new-or-web" by default): a folder used
 //!   for the first time, or a chat that read the web (this turn, or the
 //!   answer the person is replying to: a page could have slipped words into
@@ -37,7 +37,8 @@
 //!   connector's result or an agent's own words (`agent_status`'s
 //!   [`Ran::output_seen`]: an agent's output can carry web content),
 //!   `start_agent` and `message_agent` always ask — whatever `agents_ask`
-//!   says — on the card, with the brief or the message in full, the folder
+//!   says, in every Mode but Bypass permissions — on the card, with the
+//!   brief or the message in full, the folder
 //!   and the Mode; the call waits for the person's Allow once (two minutes:
 //!   no answer is a no). Asked out loud, the same card is said and put on
 //!   the Yap bar, and a spoken yes or no answers it
@@ -208,10 +209,11 @@ pub struct Ctx<'a> {
     pub previous: Option<&'a str>,
     pub conversation: Option<u64>,
     pub turn: AgentsTurn,
-    /// Outside content is in this turn — the web, a page, a connector's
-    /// result, an agent's output, another app's text: `start_agent` and
-    /// `message_agent` ask on their card first (`tools::ASKS_AFTER_OUTSIDE`),
-    /// in Bypass permissions too: the one guard that's never skipped.
+    /// Outside content is in this turn — the web, a page, the screen, a
+    /// connector's result, an agent's output, another app's text:
+    /// `start_agent` and `message_agent` ask on their card first
+    /// (`tools::ASKS_AFTER_OUTSIDE`) — in every Mode but Bypass permissions,
+    /// where nothing asks ([`ask_first`]).
     pub web_seen: bool,
     /// What that was, as the card says it ("the web", "a connector's
     /// result"): "This chat just read {outside}, which could have put words
@@ -358,8 +360,8 @@ async fn start_agent(args: &Value, ctx: Ctx<'_>) -> Ran {
     let size = agent_size(args, &ctx, &cfg);
     let title = arg(args, &["title"]);
     let web = ctx.web_seen || previous_from_web(ctx.conversation);
-    // **Bypass permissions: nobody is asked** but after outside content this
-    // turn (`ask_first`).
+    // **Bypass permissions: nobody is asked**, after outside content this
+    // turn either (`ask_first`).
     let unattended = modes::unattended(mode);
     // **One agent per Code chat**: a request after the chat's agent in this
     // folder carries it on (its next turn, the same session), unless the
@@ -443,7 +445,10 @@ async fn start_agent(args: &Value, ctx: Ctx<'_>) -> Ran {
     };
     // Ask first: a folder new to agents, or the web in what led here — and
     // always after outside content this turn, whatever the setting. In
-    // Bypass permissions only that last.
+    // Bypass permissions none of it.
+    if unattended && ctx.web_seen {
+        tracing::info!("start_agent: after outside content, sent without asking (Bypass permissions)");
+    }
     let goes = match ask_first(&cfg.agents_ask, ctx.web_seen, new_folder, web, ctx.turn.aloud, unattended) {
         Some(AskFirst::InWords) => {
             let Some(conversation) = ctx.conversation else {
@@ -598,18 +603,27 @@ pub enum AskFirst {
 /// in what led here — `new_folder`, `web`), and always after outside content
 /// this turn (`outside`), whatever the setting — then on the card, out loud
 /// too (`aloud`): what would go must be seen before it goes. **In Bypass
-/// permissions** (`unattended`, 8 Nov 2026) only that last: no "asked
-/// first", no new folder's card, no spoken "Shall I…?" — the agent just
-/// starts; the card after outside content is the one guard left, since a
-/// page could write an unrestricted agent's brief. `None`: it goes. Pure.
+/// permissions** (`unattended`) **nothing asks**: no "asked first", no new
+/// folder's card, no spoken "Shall I…?" (8 Nov 2026) and no card after
+/// outside content (10 Nov 2026, the maintainer, after his own screen made
+/// it ask twice: "I already set this in the chat to bypass permissions; I
+/// shouldn't have to then get another click") — the agent just starts.
+/// Bypass is the person's own choice for the chat, confirmed once with its
+/// warning, and an agent at Bypass reads the web and acts on it with nobody
+/// asked anyway; every other Mode keeps the card. What still holds there:
+/// the request is the person's own this turn (`agents::consent`), never a
+/// phone's turn (at most Auto) nor above a workspace's cap, and the brief
+/// shows in the thread as it goes. `None`: it goes. Pure.
 pub fn ask_first(setting: &str, outside: bool, new_folder: bool, web: bool, aloud: bool, unattended: bool) -> Option<AskFirst> {
+    if unattended {
+        return None;
+    }
     let asks = outside
-        || (!unattended
-            && match setting {
-                "always" => true,
-                "never" => false,
-                _ => new_folder || web,
-            });
+        || match setting {
+            "always" => true,
+            "never" => false,
+            _ => new_folder || web,
+        };
     asks.then_some(if aloud && !outside { AskFirst::InWords } else { AskFirst::Card })
 }
 
@@ -630,7 +644,7 @@ fn asked_aloud(q: &str, folder: &Folder) -> Ran {
 async fn allowed(ctx: &Ctx<'_>, folder: &Folder, mode: Mode, brief: &str, new_folder: bool, web: bool, continues: bool) -> bool {
     use crate::chat::pages::act::confirm;
     // After outside content this turn, the card says what was read: why it
-    // asks, even in Bypass permissions.
+    // asks.
     let outside = match (ctx.web_seen, ctx.outside) {
         (false, _) => String::new(),
         (true, "") => OUTSIDE_SOMETHING.to_string(),
@@ -664,8 +678,8 @@ async fn allowed(ctx: &Ctx<'_>, folder: &Folder, mode: Mode, brief: &str, new_fo
 /// **`start_agent` in a Code chat whose agent is in that folder**: the request
 /// is the agent's next turn (`runner::follow_up`), asked first as a new agent
 /// would be (Settings' "always", or the web in what led here: never a new
-/// folder; always after outside content this turn), its tab opening at that
-/// turn. `fixed`: the request is Yap's own words for the person's plain
+/// folder; always after outside content this turn; never in Bypass
+/// permissions), its tab opening at that turn. `fixed`: the request is Yap's own words for the person's plain
 /// go-ahead ([`fixed_go_ahead`]), theirs already: no card.
 #[allow(clippy::too_many_arguments)]
 async fn carry_on(prev: Agent, ask: runner::Ask, folder: &Folder, mode: Mode, web: bool, fixed: bool, mode_note: Option<String>, ctx: Ctx<'_>) -> Ran {
@@ -907,7 +921,8 @@ pub fn fixed_go_ahead(agent: &Agent) -> Option<&'static str> {
 /// **`message_agent`**: the agent's next turn (`runner::follow_up`: queued
 /// while it works), its tab opening at that turn — after outside content,
 /// on the person's Allow once (the card: the message, the folder, the
-/// Mode), unless it's their plain go-ahead in Yap's own words.
+/// Mode), unless it's their plain go-ahead in Yap's own words, or the turn
+/// runs at Bypass permissions (nothing asks there: [`ask_first`]).
 async fn message_agent(args: &Value, ctx: &Ctx<'_>) -> Ran {
     let Some(agent) = find(arg(args, &["id", "agent", "folder"]), ctx.conversation) else {
         return Ran::of(tool_error("There's no such agent. Use agent_status to find it.".into(), Value::Null, "Didn't tell an agent anything: which one?".into()));
@@ -963,9 +978,17 @@ async fn message_agent(args: &Value, ctx: &Ctx<'_>) -> Ran {
     // After outside content, anything but the person's plain go-ahead: their
     // Allow once on the card first — the message in full, the folder, the
     // Mode it would run at — said and on the Yap bar too when asked out loud.
-    if ctx.web_seen && fixed.is_none() {
+    // Never when that turn runs at Bypass permissions (`ask_first`: nothing
+    // asks there), worked out as the runner will (`runner::next_mode`: the
+    // chat's Mode, the folder's cap, a phone's Auto).
+    let runs_at = runner::next_mode(&agent, &runner::Ask { go, mode, phone: phone.clone(), message_id: message_id.clone(), ..Default::default() }, &cfg.agents_mode);
+    let asks = ctx.web_seen && fixed.is_none() && ask_first(&cfg.agents_ask, true, false, true, ctx.turn.aloud, modes::unattended(runs_at)).is_some();
+    if ctx.web_seen && fixed.is_none() && !asks {
+        tracing::info!(id = %agent.id, "message_agent: after outside content, sent without asking (Bypass permissions)");
+    }
+    if asks {
         let folder = Folder { name: agent.folder.clone(), path: agent.path.clone(), cap: None, added_ts: 0 };
-        if !allowed(ctx, &folder, mode.unwrap_or(chip), text, false, true, true).await {
+        if !allowed(ctx, &folder, runs_at, text, false, true, true).await {
             return Ran::of(tool_error(
                 "Nothing was sent to the agent: the user didn't allow it. Tell them, and don't try again unless they ask.".into(),
                 Value::Null,
@@ -1223,18 +1246,19 @@ mod tests {
     }
 
     #[test]
-    fn in_bypass_permissions_an_agent_is_never_asked_first_but_after_outside_content() {
-        use AskFirst::Card;
+    fn in_bypass_permissions_an_agent_is_never_asked_first_after_outside_content_either() {
         // Settings' "asked first", a folder new to agents, the web in the answer
-        // before, a spoken request: none of them asks under Bypass.
+        // before, a spoken request, and outside content this turn (the web, the
+        // screen, an agent's own words): none of them asks under Bypass.
         for setting in ["never", "new-or-web", "always"] {
-            for (new_folder, web, aloud) in [(false, false, false), (true, false, false), (false, true, false), (true, true, true), (false, false, true)] {
-                assert_eq!(ask_first(setting, false, new_folder, web, aloud, true), None, "{setting} {new_folder} {web} {aloud}");
+            for outside in [false, true] {
+                for (new_folder, web, aloud) in [(false, false, false), (true, false, false), (false, true, false), (true, true, true), (false, false, true)] {
+                    assert_eq!(ask_first(setting, outside, new_folder, web, aloud, true), None, "{setting} {outside} {new_folder} {web} {aloud}");
+                }
             }
         }
-        // The one guard: outside content this turn — the card, typed or out loud.
-        assert_eq!(ask_first("never", true, false, false, false, true), Some(Card));
-        assert_eq!(ask_first("new-or-web", true, true, false, true, true), Some(Card));
+        // Every other Mode keeps the card after outside content.
+        assert_eq!(ask_first("never", true, false, false, false, false), Some(AskFirst::Card));
     }
 
     /// `allowed`'s card through a watcher, answered `allow` from the page: the
@@ -1394,7 +1418,7 @@ mod tests {
         runner::test_live(&id, None);
         // Yap's own go-ahead after the web: nothing of the model's goes, its size neither.
         let id = planning(74);
-        let _ = tauri::async_runtime::block_on(execute("message_agent", &json!({ "text": "go ahead", "model": "claude-fable-5-1", "effort": "max" }), ctx("Go ahead", None, true, Some(74))));
+        let _ = tauri::async_runtime::block_on(execute("message_agent", &json!({ "text": "go ahead", "model": "claude-fable-5-2", "effort": "max" }), ctx("Go ahead", None, true, Some(74))));
         let sent = runner::test_pending(&id).unwrap();
         assert_eq!((sent.text.as_str(), sent.model, sent.effort), (runner::GO_AHEAD, None, None));
         runner::test_live(&id, None);

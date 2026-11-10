@@ -28,8 +28,8 @@ const split = (p, rows = curated(p)) => {
 
 test('Anthropic: the newest Opus, Fable, Sonnet and Haiku; the older ones under More, newest first', () => {
   expect(split('anthropic')).toEqual({
-    latest: ['Claude Opus 5.5', 'Claude Fable 5.1', 'Claude Sonnet 5.5', 'Claude Haiku 5.5'],
-    older: ['Claude Opus 4.8', 'Claude Opus 4.7', 'Claude Sonnet 4.6', 'Claude Opus 4.6', 'Claude Haiku 4.5', 'Claude Opus 4.5'],
+    latest: ['Claude Opus 5.5', 'Claude Fable 5.2', 'Claude Sonnet 5.5', 'Claude Haiku 5.5'],
+    older: ['Claude Fable 5.1', 'Claude Opus 4.8', 'Claude Opus 4.7', 'Claude Sonnet 4.6', 'Claude Opus 4.6', 'Claude Haiku 4.5', 'Claude Opus 4.5'],
   });
 });
 
@@ -70,14 +70,15 @@ test('a newer model in the live list takes its family’s place; one being retir
     row('anthropic', 'claude-haiku-6', 'Claude Haiku 6', { created: now, deprecated: true }),
   ];
   const s = split('anthropic', rows);
-  expect(s.latest).toEqual(['Claude Opus 6', 'Claude Fable 5.1', 'Claude Sonnet 6', 'Claude Haiku 5.5']);
+  expect(s.latest).toEqual(['Claude Opus 6', 'Claude Fable 5.2', 'Claude Sonnet 6', 'Claude Haiku 5.5']);
   // Opus and Sonnet 5.5 move to More, the newest there first (Haiku 6
   // too: it can still be picked there).
-  expect(s.older.slice(0, 4)).toEqual(['Claude Haiku 6', 'Claude Sonnet 5.5', 'Claude Opus 5.5', 'Claude Opus 4.8']);
-  // No longer offered (the provider's live list dropped it): not a latest one, but still listed.
-  const gone = curated('anthropic').map((r) => (r.model === 'claude-fable-5-1' ? { ...r, missing: true } : r));
-  expect(split('anthropic', gone).latest).toEqual(['Claude Opus 5.5', 'Claude Sonnet 5.5', 'Claude Haiku 5.5']);
-  expect(split('anthropic', gone).older).toContain('Claude Fable 5.1');
+  expect(s.older.slice(0, 5)).toEqual(['Claude Haiku 6', 'Claude Sonnet 5.5', 'Claude Opus 5.5', 'Claude Fable 5.1', 'Claude Opus 4.8']);
+  // No longer offered (the provider's live list dropped it): not a latest
+  // one, but still listed; the Fable before it takes the family's place.
+  const gone = curated('anthropic').map((r) => (r.model === 'claude-fable-5-2' ? { ...r, missing: true } : r));
+  expect(split('anthropic', gone).latest).toEqual(['Claude Opus 5.5', 'Claude Fable 5.1', 'Claude Sonnet 5.5', 'Claude Haiku 5.5']);
+  expect(split('anthropic', gone).older).toContain('Claude Fable 5.2');
   // Every row once, in one list or the other.
   const all = latestModels('anthropic', rows);
   expect([...all.latest, ...all.older].map((r) => r.key).sort()).toEqual(rows.map((r) => r.key).sort());
@@ -86,7 +87,7 @@ test('a newer model in the live list takes its family’s place; one being retir
 test('the model in use stays where it is: in Latest, or under More models', () => {
   const inUse = (model) => curated('anthropic').map((r) => (r.model === model ? { ...r, current: true } : r));
   const older = latestModels('anthropic', inUse('claude-opus-4-8'));
-  expect(names(older.latest)).toEqual(['Claude Opus 5.5', 'Claude Fable 5.1', 'Claude Sonnet 5.5', 'Claude Haiku 5.5']);
+  expect(names(older.latest)).toEqual(['Claude Opus 5.5', 'Claude Fable 5.2', 'Claude Sonnet 5.5', 'Claude Haiku 5.5']);
   expect(older.older.find((r) => r.current)?.name).toBe('Claude Opus 4.8');
   const latest = latestModels('anthropic', inUse('claude-sonnet-5-5'));
   expect(latest.latest.find((r) => r.current)?.name).toBe('Claude Sonnet 5.5');

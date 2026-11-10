@@ -19,7 +19,7 @@
 //!   endpoint ignores `reasoning_effort` and refuses adaptive thinking, so a
 //!   Claude call with an effort goes to `/messages`, `llm/anthropic.rs`):
 //!   `output_config.effort` with adaptive thinking, its summary shown. All
-//!   five on Fable 5/5.1, Mythos 5/5.1, Opus 5.5/5/4.8/4.7, Sonnet 5.5/5,
+//!   five on Fable 5/5.1/5.2, Mythos 5/5.1/5.2, Opus 5.5/5/4.8/4.7, Sonnet 5.5/5,
 //!   Haiku 5.5; no xhigh on Opus 4.6, Sonnet 4.6 and Mythos Preview; low to
 //!   high on Opus 4.5 (no adaptive thinking there: the effort alone). The
 //!   default is medium on Opus 5.5 and Haiku 5.5, high on the rest.
@@ -113,7 +113,9 @@ fn claude_alias(model: &str) -> String {
 
 /// Anthropic's table: the levels and the default. Pure.
 fn claude(alias: &str) -> Option<(&'static [Level], Level)> {
-    const FIVE: [&str; 11] = [
+    const FIVE: [&str; 13] = [
+        "claude-fable-5-2",
+        "claude-mythos-5-2",
         "claude-fable-5-1",
         "claude-mythos-5-1",
         "claude-fable-5",
@@ -482,6 +484,8 @@ mod tests {
         let sonnet = caps("anthropic", "claude-sonnet-5-5").unwrap();
         assert_eq!((sonnet.levels.len(), sonnet.default, sonnet.fast), (5, Some(High), false));
         assert_eq!(caps("anthropic", "claude-fable-5-1").unwrap().levels.len(), 5);
+        let fable = caps("anthropic", "claude-fable-5-2").unwrap();
+        assert_eq!((fable.levels.len(), fable.default, fable.fast), (5, Some(High), false));
         assert_eq!(ids(&caps("anthropic", "claude-opus-4-6").unwrap()), ["low", "medium", "high", "max"]);
         assert_eq!(ids(&caps("anthropic", "claude-sonnet-4-6").unwrap()), ["low", "medium", "high", "max"]);
         assert_eq!(ids(&caps("anthropic", "claude-opus-4-5-20251101").unwrap()), ["low", "medium", "high"], "a dated id by its alias");

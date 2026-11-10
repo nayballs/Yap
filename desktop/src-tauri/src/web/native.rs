@@ -42,7 +42,7 @@
 //!   with the basic `web_search_20250305` tool (every model with web search
 //!   takes it; the newer versions add code-execution filtering Yap doesn't
 //!   need), `max_uses: 2`. No `tool_choice` forcing (a 400 on Opus 5.5,
-//!   Sonnet 5.5, Fable 5.1), no temperature, no thinking settings.
+//!   Sonnet 5.5, Fable 5.2), no temperature, no thinking settings.
 //!   `web_search_tool_result` → `web_search_result {url, title, page_age}`;
 //!   text blocks carry `citations[] {url, title, cited_text}`. Errors arrive
 //!   as HTTP 200 with `{type: "web_search_tool_result_error", error_code}`.
@@ -1711,7 +1711,7 @@ mod tests {
 
     #[test]
     fn which_claude_takes_the_web_fetch() {
-        for m in ["claude-haiku-4-5", "claude-sonnet-4-5", "claude-opus-4-5-20251101", "claude-opus-4-8", "claude-haiku-5-5", "claude-opus-5-5", "claude-fable-5-1", "claude-sonnet-5"] {
+        for m in ["claude-haiku-4-5", "claude-sonnet-4-5", "claude-opus-4-5-20251101", "claude-opus-4-8", "claude-haiku-5-5", "claude-opus-5-5", "claude-fable-5-1", "claude-fable-5-2", "claude-sonnet-5"] {
             assert!(fetches(m), "{m}");
         }
         for m in ["claude-3-7-sonnet-latest", "claude-3-5-haiku-20241022", "claude-opus-4-1", "claude-opus-4", "claude-sonnet-4-20250514", "gpt-5", ""] {
@@ -1743,7 +1743,7 @@ mod tests {
             let t = NativeSearch::new(Provider::Anthropic, m, "https://api.anthropic.com/v1", "k").server_tools();
             assert_eq!((t[0]["type"].as_str(), t[1]["type"].as_str()), (Some("web_search_20250305"), Some("web_fetch_20250910")), "{m}");
         }
-        for m in ["claude-opus-4-6", "claude-sonnet-4-6", "claude-sonnet-5-5", "claude-opus-4-8", "claude-fable-5-1"] {
+        for m in ["claude-opus-4-6", "claude-sonnet-4-6", "claude-sonnet-5-5", "claude-opus-4-8", "claude-fable-5-1", "claude-fable-5-2"] {
             assert!(filters(m), "{m}");
         }
         for m in ["claude-haiku-5-5", "claude-opus-4-5", "claude-sonnet-4-5-20250929", "claude-haiku-4-5", "gpt-5"] {

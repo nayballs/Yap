@@ -110,7 +110,7 @@ export function onOff(v, fallback, name) {
 /** The plan's model when none is named (`--model claude-plan`). */
 export const PLAN_DEFAULT = 'claude-sonnet-5-5';
 /** Short names: the plan's models (ai/claude_plan.rs MODELS). */
-const SHORT = { haiku: 'claude-haiku-5-5', sonnet: 'claude-sonnet-5-5', opus: 'claude-opus-5-5', fable: 'claude-fable-5-1' };
+const SHORT = { haiku: 'claude-haiku-5-5', sonnet: 'claude-sonnet-5-5', opus: 'claude-opus-5-5', fable: 'claude-fable-5-2' };
 /** The fake AI's strong model (desktop/e2e/support/fake-llm.js: every tool, the browser's too). */
 export const FAKE_MODEL = 'fake-gpt-5';
 export const EFFORTS = ['low', 'medium', 'high', 'xhigh', 'max'];

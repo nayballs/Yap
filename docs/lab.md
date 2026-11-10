@@ -76,7 +76,7 @@ token in `control.json`). Returns once the test Yap is ready.
 
 | Option | |
 |---|---|
-| `--model <m>` | `claude-plan` (the default: the plan's Claude Sonnet 5.5), `claude-plan:<model id>`, or `haiku` / `sonnet` / `opus` / `fable` — all on the person's Claude plan. `anthropic:<model id>`: the Anthropic API on `YAP_LAB_ANTHROPIC_KEY` (money; refused without it). |
+| `--model <m>` | `claude-plan` (the default: the plan's Claude Sonnet 5.5), `claude-plan:<model id>`, or `haiku` / `sonnet` / `opus` / `fable` (Claude Fable 5.2) — all on the person's Claude plan. `anthropic:<model id>`: the Anthropic API on `YAP_LAB_ANTHROPIC_KEY` (money; refused without it). |
 | `--effort <e>` | `low`, `medium`, `high`, `xhigh`, `max`: Chat's effort for that model. |
 | `--web on\|off` | Web search and the pages beside the chat (default on). |
 | `--yap-code on\|off` | Yap Code: agents, Code chats (default off). With it, the scratch workspace `lab-sandbox` is made (a tiny made-up project) and added, unless `--workspace <dir>` names another; `--keep-workspace` keeps the scratch one's changes from last time. |

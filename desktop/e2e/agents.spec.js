@@ -693,10 +693,12 @@ test('a permission card makes an agent ask; Stop and Continue; a plan, then go a
   expect(messages.at(-1).text).toBe('Done: it carried out the plan.');
 });
 
-test('Bypass permissions: no card for a new folder or Settings’ “always”, no spoken question; after a web read the brief card still shows, and says why', async ({ yap, main, fakeLlm, shot }) => {
+test('Bypass permissions: no card for a new folder or Settings’ “always”, no spoken question, and none after a web read either', async ({ yap, main, fakeLlm, shot }) => {
   // (8 Nov 2026, the maintainer: "It shouldn't ask me to approve things when
-  // it's on bypass permissions for the agents." Last in this file: Bypass's
-  // one-time OK stays given.)
+  // it's on bypass permissions for the agents." And 10 Nov, after the card
+  // that was left asked twice: "I already set this in the chat to bypass
+  // permissions; I shouldn't have to then get another click." Last in this
+  // file: Bypass's one-time OK stays given.)
   freshFolder(RECIPES);
   await yap.invoke('workspaces_remove', { name: 'recipe-box' });
   await script(yap, ECHO, 'echo');
@@ -744,8 +746,8 @@ test('Bypass permissions: no card for a new folder or Settings’ “always”, 
     await yap.invoke('tts_stop');
     await setConfig(yap, main, { speakReplies: false });
 
-    // The one guard left: after a web read this turn, the brief is shown for
-    // the person's OK, with why in one line — and only then.
+    // After a web read this turn too: no card, the agent starts with the
+    // brief (every other Mode still asks: the tests above).
     await setConfig(yap, main, { webSearch: true, webSearchNative: true, webSearchService: 'exa', webSearchKeys: { exa: EXA_KEY } });
     const BRIEF = 'Save the calculator tips you found into notes.md.';
     fakeLlm.scriptChat([
@@ -758,23 +760,13 @@ test('Bypass permissions: no card for a new folder or Settings’ “always”, 
     await closePanel(main);
     await freshChat(main);
     await send(main, 'Look up some calculator tricks, then send an agent to garden-planner to save them into notes.md.');
-    const card = thread(main).getByTestId('chat-agent-confirm').last();
-    await expect(card).toHaveAttribute('data-state', 'asking', { timeout: 20_000 });
-    await expect(card).toContainText('Yap wants to send an agent to ‘garden-planner’ (Bypass permissions)');
-    await expect(card).toContainText('This chat just read the web, which could have put words in the agent’s brief.');
-    await expect(card.getByTestId('chat-agent-brief')).toHaveText(BRIEF);
-    expect((await agents(yap)).length).toBe(before);
-    await shot(main, '07-bypass-asked-after-the-web-light');
-    await setConfig(yap, main, { theme: 'dark' });
-    await expect(card).toHaveAttribute('data-state', 'asking');
-    await shot(main, '08-bypass-asked-after-the-web-dark');
-    await setConfig(yap, main, { theme });
-    await card.getByRole('button', { name: 'Send', exact: true }).click();
-    await expect(lastAnswer(main)).toHaveText("On it: I've sent an agent to garden-planner.");
+    await expect(lastAnswer(main)).toHaveText("On it: I've sent an agent to garden-planner.", { timeout: 20_000 });
+    await expect(thread(main).getByTestId('chat-agent-confirm')).toHaveCount(0);
     const webAgent = await ended(yap, (await newAgent(yap, before)).id);
     expect(webAgent).toMatchObject({ folder: 'garden-planner', brief: BRIEF, mode: 'bypassPermissions', status: 'done' });
     const web = await messagesOf(yap, webAgent.conversation, 4);
-    expect(web[1].confirms?.map((c) => [c.act, c.state])).toEqual([['agent', 'allowed']]);
+    expect(web[1].confirms ?? []).toEqual([]);
+    await shot(main, '07-bypass-sent-after-the-web');
   } finally {
     await setConfig(yap, main, { theme, agentsMode: 'auto', agentsAsk: 'new-or-web', webSearch: false, speakReplies: false });
   }
