@@ -1578,7 +1578,7 @@ quote for a question asked out loud.
     interrupt; real `permission_denied` events and Plan mode's output; Open
     in terminal since its fix; `claude auth status`'s exit code when signed
     in; real rate-limit events during a turn and their reset; the
-    pays-another-way check; whether the plan takes `claude-fable-5-1`;
+    pays-another-way check; whether the plan takes `claude-fable-5-2`;
     screenshots as image blocks (no e2e either); WebSearch / WebFetch
     results' exact shapes.
   - **Agents from a plan chat**: whether Claude Code writes a tool call's start

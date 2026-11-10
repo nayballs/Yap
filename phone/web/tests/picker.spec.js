@@ -62,23 +62,23 @@ test("the rail with its logos, Latest, More models in place, and a switch", asyn
   // A curated model not downloaded: the PC's to download.
   await expect(page.getByTestId('picker-pane')).toContainText("Another model to download in Chat's model picker on your PC.");
 
-  // Claude: Latest — the newest of each family, in Chat's order — then More models (6), closed.
+  // Claude: Latest — the newest of each family, in Chat's order — then More models (7), closed.
   await rail.getByRole('tab', { name: /^Claude/ }).click();
   const pane = page.getByTestId('picker-pane');
   await expect(pane.locator('.ptitle')).toHaveText('Anthropic');
   await expect(pane.getByRole('group', { name: 'Latest' })).toBeVisible();
-  expect(await names(pane.getByRole('group', { name: 'Latest' }))).toEqual(['Claude Opus 5.5', 'Claude Fable 5.1', 'Claude Sonnet 5.5', 'Claude Haiku 5.5']);
+  expect(await names(pane.getByRole('group', { name: 'Latest' }))).toEqual(['Claude Opus 5.5', 'Claude Fable 5.2', 'Claude Sonnet 5.5', 'Claude Haiku 5.5']);
   await expect(pane.getByRole('group', { name: 'Latest' }).getByText('Reads images').first()).toBeVisible();
   const more = page.getByTestId('picker-more');
-  await expect(more).toHaveText('More models (6)');
+  await expect(more).toHaveText('More models (7)');
   await expect(more).toHaveAttribute('aria-expanded', 'false');
   await expect(rows(page)).toHaveCount(4);
   // More models opens in place, newest first.
   await more.click();
   await expect(page.getByTestId('picker-more')).toHaveAttribute('aria-expanded', 'true');
-  await expect(rows(page)).toHaveCount(10);
+  await expect(rows(page)).toHaveCount(11);
   const older = (await names(rows(page))).slice(4);
-  expect(older[0]).toBe('Claude Opus 4.8');
+  expect(older.slice(0, 2)).toEqual(['Claude Fable 5.1', 'Claude Opus 4.8']);
   expect(older).toContain('Claude Haiku 4.5');
 
   // Picked: the PC told as the desktop picker tells it; the chip at once.

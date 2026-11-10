@@ -354,7 +354,7 @@ mod tests {
     fn the_ceiling_lowers_the_chats_pick_but_never_the_persons_own() {
         let top = opus_high();
         // Fable at max, the chat's: Opus at high, said.
-        let p = pick("claude-fable-5-1", "max", "", none, Some(&top), "claude-sonnet-5-5");
+        let p = pick("claude-fable-5-2", "max", "", none, Some(&top), "claude-sonnet-5-5");
         assert_eq!((p.model.as_deref(), p.effort), (Some("claude-opus-5-5"), Some(Level::High)));
         assert_eq!(p.note.as_deref(), Some("Lowered to Opus 5.5, high effort: the most Yap's settings let you choose for an agent."));
         // Under it: untouched, nothing said.
@@ -365,9 +365,9 @@ mod tests {
         assert_eq!(pick("claude-opus-5-5", "xhigh", "", none, Some(&sonnet), "").model.as_deref(), Some("claude-sonnet-5-5"));
         assert_eq!(pick("claude-haiku-5-5", "low", "", none, Some(&sonnet), "").model.as_deref(), Some("claude-haiku-5-5"));
         // The person's own words go above it, since they asked: "use Fable, max effort".
-        let theirs = |m: Option<&str>| Said { model: m == Some("claude-fable-5-1"), level: true, effort: false };
-        let p = pick("claude-fable-5-1", "max", "", theirs, Some(&top), "");
-        assert_eq!((p.model.as_deref(), p.effort, p.model_asked, p.effort_asked, p.note), (Some("claude-fable-5-1"), Some(Level::Max), true, true, None));
+        let theirs = |m: Option<&str>| Said { model: m == Some("claude-fable-5-2"), level: true, effort: false };
+        let p = pick("claude-fable-5-2", "max", "", theirs, Some(&top), "");
+        assert_eq!((p.model.as_deref(), p.effort, p.model_asked, p.effort_asked, p.note), (Some("claude-fable-5-2"), Some(Level::Max), true, true, None));
         // "Think hard": their effort this turn (not lowered), not kept.
         let hard = |_: Option<&str>| Said { effort: true, ..Default::default() };
         let p = pick("claude-sonnet-5-5", "xhigh", "", hard, Some(&top), "");
@@ -379,8 +379,8 @@ mod tests {
         let cfg = crate::config::YapConfig::default();
         assert_eq!(cfg.agents_ceiling_model, "", "No limit by default");
         assert_eq!(Ceiling::of(&cfg), None);
-        let p = pick("claude-fable-5-1", "max", "hard debugging", none, Ceiling::of(&cfg).as_ref(), &cfg.agents_model);
-        assert_eq!((p.model.as_deref(), p.effort, p.note), (Some("claude-fable-5-1"), Some(Level::Max), None));
+        let p = pick("claude-fable-5-2", "max", "hard debugging", none, Ceiling::of(&cfg).as_ref(), &cfg.agents_model);
+        assert_eq!((p.model.as_deref(), p.effort, p.note), (Some("claude-fable-5-2"), Some(Level::Max), None));
         // A ceiling set: read from Settings; a model that isn't one there is: no limit.
         let set = crate::config::YapConfig { agents_ceiling_model: "claude-opus-5-5".into(), agents_ceiling_effort: "high".into(), ..Default::default() };
         assert_eq!(Ceiling::of(&set), Some(opus_high()));

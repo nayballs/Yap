@@ -506,10 +506,45 @@ fn said(detail: &str) -> String {
     v["error"]["message"].as_str().unwrap_or(detail).chars().take(300).collect()
 }
 
+/// **Thinking the API won't take back** (10 Nov 2026). Each of Claude's
+/// thinking blocks is tied to the system prompt, the tools and the messages
+/// that came before it, and a step that sends one back after any of those
+/// changed is answered HTTP 400 "… The block is bound to a different
+/// conversation. …" — the same body fails the same way again. Claude Fable
+/// 5.2 and Mythos 5.2 check it on every account; the other Claude 5 models
+/// on accounts made since 31 Aug 2026. Yap's steps only add to the messages,
+/// but their tools aren't always the same (a new document's outline step
+/// has no web tools: `web::Turn::outline_first`; a web fetch turned down
+/// leaves the list). Pure.
+fn thinking_unbound(status: u16, detail: &str) -> bool {
+    status == 400 && detail.contains("bound to a different conversation")
+}
+
+/// **`body`'s messages without Claude's thinking** (Anthropic's recovery for
+/// [`thinking_unbound`]: every `thinking` and `redacted_thinking` block out,
+/// each turn's text and tool calls kept; a turn left empty goes too): how
+/// many blocks went. The step is answered without that reasoning. Pure.
+fn strip_thinking(body: &mut Value) -> usize {
+    let mut gone = 0;
+    if let Some(messages) = body["messages"].as_array_mut() {
+        for m in messages.iter_mut() {
+            if let Some(blocks) = m["content"].as_array_mut() {
+                let before = blocks.len();
+                blocks.retain(|b| !matches!(b["type"].as_str(), Some("thinking" | "redacted_thinking")));
+                gone += before - blocks.len();
+            }
+        }
+        messages.retain(|m| m["content"].as_array().is_none_or(|b| !b.is_empty()));
+    }
+    gone
+}
+
 /// **One Chat step on the Messages API** (`req`, with `native`'s server
 /// tools), whole or streamed to `on`: the same rate-limit waits, receipts,
 /// usage and evaluation log as every Chat call; a paused server-tool loop
-/// asked to go on. The answer comes back as [`message_of`] makes it.
+/// asked to go on; thinking the API won't take back left out and asked
+/// again ([`thinking_unbound`]). The answer comes back as [`message_of`]
+/// makes it.
 pub(super) async fn post(req: &ChatRequest, native: &Native, mut on: Option<OnDelta<'_>>) -> Result<Value, String> {
     let endpoint = format!("{}/messages", req.base_url.trim_end_matches('/'));
     let streaming = on.is_some();
@@ -583,6 +618,15 @@ pub(super) async fn post(req: &ChatRequest, native: &Native, mut on: Option<OnDe
             if status == 400 && said(&detail).to_ascii_lowercase().contains("speed") && body.as_object_mut().and_then(|b| b.remove("speed")).is_some() {
                 tracing::info!("Chat: Anthropic refused fast mode; asking again at standard speed");
                 continue;
+            }
+            // Thinking tied to an earlier shape of this turn (its tools
+            // changed since): the same step without the thinking blocks.
+            if thinking_unbound(status, &detail) {
+                let gone = strip_thinking(&mut body);
+                if gone > 0 {
+                    tracing::info!(blocks = gone, "Chat: Claude's earlier thinking no longer fits this step; asking again without it");
+                    continue;
+                }
             }
             return Err(call.failed(format!("HTTP {status}: {}", said(&detail))));
         };
@@ -701,6 +745,37 @@ pub(super) async fn post(req: &ChatRequest, native: &Native, mut on: Option<OnDe
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn thinking_the_api_wont_take_back_is_left_out_and_the_rest_kept() {
+        // Anthropic's own words for it (its Messages API docs, preserved thinking).
+        let refused = r#"{"type":"error","error":{"type":"invalid_request_error","message":"messages.1.content.0: Invalid `signature` in `thinking` block. The block is bound to a different conversation. Remove the block, or set `thinking.block_binding.prefix_mismatch_behavior` to \"drop_block\"."}}"#;
+        assert!(thinking_unbound(400, refused));
+        // Any other refusal, and a signature that's simply wrong: the turn's error.
+        assert!(!thinking_unbound(400, r#"{"error":{"message":"messages.1.content.0: Invalid `signature` in `thinking` block."}}"#));
+        assert!(!thinking_unbound(400, r#"{"error":{"message":"max_tokens: must be greater than 0"}}"#));
+        assert!(!thinking_unbound(529, refused));
+
+        let mut body = json!({ "messages": [
+            { "role": "user", "content": [{ "type": "text", "text": "Write me a guide." }] },
+            { "role": "assistant", "content": [
+                { "type": "thinking", "thinking": "", "signature": "sig-1" },
+                { "type": "text", "text": "Outlining it." },
+                { "type": "tool_use", "id": "t1", "name": "create_document", "input": {} },
+            ] },
+            { "role": "user", "content": [{ "type": "tool_result", "tool_use_id": "t1", "content": "ok" }] },
+            // Nothing but thinking: the turn goes with it.
+            { "role": "assistant", "content": [{ "type": "redacted_thinking", "data": "x" }] },
+            { "role": "user", "content": "Go on." },
+        ] });
+        assert_eq!(strip_thinking(&mut body), 2);
+        let m = body["messages"].as_array().unwrap();
+        assert_eq!(m.len(), 4);
+        assert_eq!(m[1]["content"].as_array().unwrap().iter().map(|b| b["type"].as_str().unwrap()).collect::<Vec<_>>(), ["text", "tool_use"]);
+        assert_eq!((m[2]["content"][0]["type"].as_str(), m[3]["content"].as_str()), (Some("tool_result"), Some("Go on.")));
+        // Nothing to leave out: nothing changes, and the step isn't asked again.
+        assert_eq!(strip_thinking(&mut body), 0);
+    }
 
     #[test]
     fn its_searchs_cite_markup_never_reaches_a_note_or_an_answer() {

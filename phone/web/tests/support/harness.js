@@ -176,7 +176,7 @@ export function pickerData({ model = 'ondevice', effort = null } = {}) {
     },
     images: {
       groq: ['qwen/qwen3.8-27b'],
-      anthropic: ['claude-opus-5-5', 'claude-sonnet-5-5', 'claude-haiku-5-5', 'claude-fable-5-1', 'claude-opus-4-8'],
+      anthropic: ['claude-opus-5-5', 'claude-sonnet-5-5', 'claude-haiku-5-5', 'claude-fable-5-2', 'claude-fable-5-1', 'claude-opus-4-8'],
     },
   };
 }

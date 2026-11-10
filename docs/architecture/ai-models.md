@@ -132,7 +132,20 @@ The language-model side: the OpenAI-compatible client and its prompts, the on-de
   "Reading a page…"; what came before it isn't the answer), `citations_delta`
   and `signature_delta` kept. `pause_turn` is asked to go on (≤ 4); 429 and
   529 waited out as every Chat call; "too long" said plainly; a 400 naming
-  `web_fetch` drops the fetch and asks again. A step with server tools may
+  `web_fetch` drops the fetch and asks again. **Thinking the API won't take
+  back** (10 Nov 2026, `thinking_unbound` / `strip_thinking`): each thinking
+  block is tied to the system prompt, the tools and the messages before it,
+  and one sent back after any of those changed is refused (HTTP 400 "… The
+  block is bound to a different conversation. …") — by Claude Fable 5.2 and
+  Mythos 5.2 on every account, by the other Claude 5 models on accounts made
+  since 31 Aug 2026. Yap's steps only add to the messages, but their tools
+  aren't always the same (a new document's outline step has no web tools,
+  `web::Turn::outline_first`; a web fetch turned down leaves the list), so
+  that step is asked again once without its thinking blocks, Anthropic's own
+  recovery: it answers without that reasoning, never an error. Not tried
+  against the real API (no key spent on it); the turn's steps after it pay
+  the refusal again, so keeping a turn's tools the same is the better fix,
+  still to do. A step with server tools may
   take 150 s. Unit-tested on the documented shapes (`anthropic::tests`);
   e2e through support/fake-llm.js's Messages API emulation.
 - **`ai/chatgpt.rs`** (+ `chatgpt/`: `oauth`, `jwt`, `vault`) — **Sign in with
@@ -1309,8 +1322,8 @@ The language-model side: the OpenAI-compatible client and its prompts, the on-de
   - **Claude** — `output_config.effort` with `thinking: {type:
     "adaptive"}` (its summary shown), on the Messages API only (the
     compatible endpoint ignores an effort and 400s adaptive thinking:
-    `apply` sets `ChatRequest::native`). All five on Fable 5/5.1, Mythos
-    5/5.1, Opus 5.5/5/4.8/4.7, Sonnet 5.5/5, Haiku 5.5; low/medium/high/max
+    `apply` sets `ChatRequest::native`). All five on Fable 5/5.1/5.2, Mythos
+    5/5.1/5.2, Opus 5.5/5/4.8/4.7, Sonnet 5.5/5, Haiku 5.5; low/medium/high/max
     on Opus 4.6, Sonnet 4.6, Mythos Preview; low to high on Opus 4.5 (the
     effort alone: it thinks to a budget, never sent — `budget_tokens` 400s
     on the newest models). Defaults: medium on Opus 5.5 and Haiku 5.5, high
@@ -1901,8 +1914,11 @@ person's own sign-in.
   nothing else for it. It's never a credential.
 - **A placeholder base URL**, `claude-code://plan` (an empty one means "no
   model set up"): nothing is ever sent to it.
-- **Its models** (`MODELS`, cheapest first): `claude-haiku-5-5`,
-  `claude-sonnet-5-5`, `claude-opus-5-5`, `claude-fable-5-1`. Full ids, never
+- **Its models** (`MODELS`, cheapest first, the newest of each family):
+  `claude-haiku-5-5`, `claude-sonnet-5-5`, `claude-opus-5-5`,
+  `claude-fable-5-2` (in Fable 5.1's place since 10 Nov 2026; a choice of
+  5.1 saved before still runs, and Settings → Yap Code's default model now
+  offers Fable too). Full ids, never
   aliases, so every rule keyed on a model id reads them as Anthropic's
   (`as_api`): effort (as `--effort`; no Fast mode through Claude Code),
   images, context sizes, the strong models, Latest. `model_catalog.rs` lists
@@ -2292,7 +2308,7 @@ cleanup is on the plan and Claude Code isn't ready.
   `--resume` after a warm session ended and a mid-turn interrupt, real
   rate-limit events during a turn and their reset (`utilization` read as a
   fraction from the recordings; `unifiedWindows`' shape unseen), the
-  pays-another-way check, whether the plan takes `claude-fable-5-1`,
+  pays-another-way check, whether the plan takes `claude-fable-5-2`,
   screenshots as image blocks (no e2e either), and `limits[]`' kind for the
   five-hour session (only weekly kinds were seen; the `five_hour` window
   stands in).

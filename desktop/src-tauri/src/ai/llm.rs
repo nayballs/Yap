@@ -2135,6 +2135,7 @@ mod temperature_tests {
             "claude-haiku-5-5",
             "claude-opus-5-5",
             "claude-fable-5-1",
+            "claude-fable-5-2",
             "anthropic/claude-sonnet-5.5",
             "claude-latest",
         ] {

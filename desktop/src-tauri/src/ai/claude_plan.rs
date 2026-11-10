@@ -219,12 +219,14 @@ pub fn fallback_key(cfg: &crate::config::YapConfig, scope: Scope) -> Option<Stri
 }
 
 /// The models a plan chat offers, by their full ids (never aliases: the
-/// effort, images and strong-model rules key on full ids), cheapest first.
+/// effort, images and strong-model rules key on full ids), cheapest first:
+/// the newest of each family. Fable 5.2 took Fable 5.1's place on 10 Nov
+/// 2026 (a choice of 5.1 saved before still runs: Claude Code takes the id).
 pub const MODELS: &[(&str, &str)] = &[
     ("claude-haiku-5-5", "Claude Haiku 5.5"),
     ("claude-sonnet-5-5", "Claude Sonnet 5.5"),
     ("claude-opus-5-5", "Claude Opus 5.5"),
-    ("claude-fable-5-1", "Claude Fable 5.1"),
+    ("claude-fable-5-2", "Claude Fable 5.2"),
 ];
 
 /// **The plan's models are Anthropic's, the ChatGPT plan's OpenAI's**:
@@ -373,6 +375,8 @@ mod tests {
         assert!(MODELS.iter().all(|(id, _)| id.starts_with("claude-") && id.matches('-').count() >= 3));
         // Effort, images and the strong models read them as Anthropic's.
         assert!(crate::ai::effort::caps(PROVIDER, "claude-opus-5-5").is_some());
+        // Every model it offers has its effort levels (a new one isn't left out of the table).
+        assert!(MODELS.iter().all(|(id, _)| crate::ai::effort::caps(PROVIDER, id).is_some()));
         assert_eq!(crate::snip::vision::reads_images(PROVIDER, "claude-sonnet-5-5"), Some(true));
         assert!(crate::chat::documents::rich::strong(PROVIDER, "claude-haiku-5-5"));
         assert!(crate::chat::tools::supports_tools(PROVIDER, "claude-haiku-5-5"));

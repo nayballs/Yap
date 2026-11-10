@@ -5,7 +5,7 @@
 //   a dot (connected or not), and On this PC; a cloud provider's rows are
 //   its Latest (the newest of each family: core/latestModels.js) and "More
 //   models (N)", the older ones in place below it, newest first (with "New");
-// - Claude with a stand-in list of eleven: its four latest, More models (7);
+// - Claude with a stand-in list of twelve: its four latest, More models (8);
 //   the keyboard reaching More models (aria-expanded); an older one picked
 //   (the effort strip follows it), opened again with More models open;
 //   closed by hand, the one in use stays on show under it; search finds an
@@ -70,10 +70,11 @@ const GROQ_LIST = [
 ];
 /** As Anthropic's /v1/models lists one. */
 const claudeModel = (id, display_name, created_at) => ({ id, type: 'model', display_name, created_at, max_input_tokens: 200000 });
-// A stand-in Anthropic list: the four latest, seven older (dated snapshots
+// A stand-in Anthropic list: the four latest, eight older (dated snapshots
 // among them, and one Yap's own list doesn't have).
 const ANTHROPIC_LIST = [
   claudeModel('claude-opus-5-5', 'Claude Opus 5.5', '2026-08-01T00:00:00Z'),
+  claudeModel('claude-fable-5-2', 'Claude Fable 5.2', '2026-11-04T00:00:00Z'),
   claudeModel('claude-fable-5-1', 'Claude Fable 5.1', '2026-09-15T00:00:00Z'),
   claudeModel('claude-sonnet-5-5', 'Claude Sonnet 5.5', '2026-08-01T00:00:00Z'),
   claudeModel('claude-haiku-5-5', 'Claude Haiku 5.5', '2026-08-20T00:00:00Z'),
@@ -85,13 +86,14 @@ const ANTHROPIC_LIST = [
   claudeModel('claude-haiku-4-5-20251001', 'Claude Haiku 4.5', '2025-10-01T00:00:00Z'),
   claudeModel('claude-sonnet-4-5-20250929', 'Claude Sonnet 4.5', '2025-09-29T00:00:00Z'),
 ];
-const CLAUDE_LATEST = ['Claude Opus 5.5', 'Claude Fable 5.1', 'Claude Sonnet 5.5', 'Claude Haiku 5.5'];
+const CLAUDE_LATEST = ['Claude Opus 5.5', 'Claude Fable 5.2', 'Claude Sonnet 5.5', 'Claude Haiku 5.5'];
 const OPENAI_KEY = 'sk-proj-e2e-fake-0000004321';
 /** As OpenAI's /v1/models lists one: Yap's own nine, nothing new. */
 const OPENAI_LIST = ['gpt-5.6-luna', 'gpt-5-mini', 'gpt-5.6-terra', 'gpt-5.6-sol', 'gpt-6-luna', 'gpt-6.1-sol', 'gpt-6-astra', 'gpt-5.5', 'gpt-5.4-mini'].map(
   (id) => ({ id, object: 'model', created: 1760000000, owned_by: 'openai' })
 );
 const CLAUDE_OLDER = [
+  'Claude Fable 5.1',
   'Claude Opus 4.8',
   'Claude Opus 4.7',
   'Claude Sonnet 4.6',
@@ -288,11 +290,11 @@ test('a provider without a key connects right in the picker', async ({ yap, main
   const box = pop.locator('.connect');
   await expect(box).toContainText('Connect Claude');
   // Its curated models, greyed until there's a key: the four latest, the
-  // older six under More models.
+  // older seven under More models.
   const locked = pane(main).locator('.mrow.locked');
   await expect(locked).toHaveCount(4);
   await expect(latest(main).locator('.nm')).toHaveText(CLAUDE_LATEST);
-  await expect(moreButton(main)).toHaveText('More models (6)');
+  await expect(moreButton(main)).toHaveText('More models (7)');
   await expect(locked.first().locator('.tag.key')).toHaveText('Add key');
   await expect(locked.first().locator('.mark')).toHaveAttribute('data-icon', 'claude');
   await shot(main, '02-picker-connect-claude');
@@ -314,7 +316,7 @@ test('a provider without a key connects right in the picker', async ({ yap, main
   // Its live models, pickable; the key masked, never in full.
   await expect(head).toContainText('Connected · checked just now');
   await expect(latest(main).locator('.nm')).toHaveText(CLAUDE_LATEST);
-  await expect(moreButton(main)).toHaveText('More models (7)');
+  await expect(moreButton(main)).toHaveText('More models (8)');
   await expect(pane(main).locator('.mrow.locked')).toHaveCount(0);
   await expect(head.locator('.keymask')).toHaveText('sk-…7890');
   await expect(tab(main, 'Claude')).toHaveText('Claude, connected');
@@ -354,10 +356,10 @@ test('Claude: Latest has the four newest, More models the older ones, which can 
     await tab(main, 'Claude').click();
     await expect(pop.locator('.phead')).toContainText('Connected · checked');
 
-    // Latest: the newest Opus, Fable, Sonnet and Haiku; More models (7) closed under it.
+    // Latest: the newest Opus, Fable, Sonnet and Haiku; More models (8) closed under it.
     await expect(latest(main).locator('.nm')).toHaveText(CLAUDE_LATEST);
     await expect(latest(main).locator('.mrow .mark').first()).toHaveAttribute('data-icon', 'claude');
-    await expect(moreButton(main)).toHaveText('More models (7)');
+    await expect(moreButton(main)).toHaveText('More models (8)');
     await setMore(main, false);
     await expect(pane(main).locator('.mrow')).toHaveCount(4);
     await shot(main, '10-picker-latest-light');
@@ -376,7 +378,7 @@ test('Claude: Latest has the four newest, More models the older ones, which can 
     await expect(more.locator('.mrow').first().locator('.mark')).toHaveAttribute('data-icon', 'claude');
     await expect(more.locator('.mrow').first().locator('.tag.img')).toHaveText('Reads images');
     await main.keyboard.press('ArrowDown');
-    await expect(more.getByRole('button', { name: /^Claude Opus 4\.8/ })).toBeFocused();
+    await expect(more.getByRole('button', { name: /^Claude Fable 5\.1/ })).toBeFocused();
     await main.keyboard.press('ArrowUp');
     await expect(moreButton(main)).toBeFocused();
     await shot(main, '11-picker-more-models-light');
@@ -407,7 +409,7 @@ test('Claude: Latest has the four newest, More models the older ones, which can 
     await expect(older(main, 'Claude')).toHaveCount(0);
     await expect(pane(main).locator('.mrow .nm')).toHaveText([...CLAUDE_LATEST, 'Claude Opus 4.6']);
     await expect(pane(main).getByRole('button', { name: /^Claude Opus 4\.6/ })).toHaveAttribute('aria-pressed', 'true');
-    await expect(moreButton(main)).toHaveText('More models (7)');
+    await expect(moreButton(main)).toHaveText('More models (8)');
     await shot(main, '13-picker-latest-dark');
     const search = picker(main).getByRole('searchbox', { name: 'Search models and providers' });
     await search.fill('opus 4.7');

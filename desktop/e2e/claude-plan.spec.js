@@ -119,7 +119,7 @@ test('the picker has one Claude entry, "Your plan | API key", and the chip says 
   await expect(ways.getByRole('tab', { name: 'Your plan' })).toHaveAttribute('aria-selected', 'true');
   await expect(pane(main).locator('.phead')).toContainText('Claude');
   await expect(pane(main).locator('.phead')).toContainText('Using Claude plan');
-  await expect(pane(main).locator('.mrow .nm')).toHaveText(['Claude Opus 5.5', 'Claude Fable 5.1', 'Claude Sonnet 5.5', 'Claude Haiku 5.5']);
+  await expect(pane(main).locator('.mrow .nm')).toHaveText(['Claude Opus 5.5', 'Claude Fable 5.2', 'Claude Sonnet 5.5', 'Claude Haiku 5.5']);
   await expect(pane(main).getByRole('button', { name: /^Claude Haiku 5\.5/ })).toHaveAttribute('aria-pressed', 'true');
   await shot(main, '01-claude-picker-your-plan');
 

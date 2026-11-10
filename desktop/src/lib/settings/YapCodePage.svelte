@@ -49,13 +49,16 @@
   const BYPASS = 'bypassPermissions';
   const WARNING = BYPASS_WARNING;
 
-  const MODELS = ['claude-opus-5-5', 'claude-sonnet-5-5', 'claude-haiku-5-5'];
+  // What an agent runs on by default: the plan's models (ai/claude_plan.rs
+  // `MODELS`), the most capable first.
+  const MODELS = ['claude-fable-5-2', 'claude-opus-5-5', 'claude-sonnet-5-5', 'claude-haiku-5-5'];
   const modelOptions = $derived(
     [...MODELS, ...(cfg.agentsModel && !MODELS.includes(cfg.agentsModel) ? [cfg.agentsModel] : [])].map((m) => ({ value: m, label: modelLabel(m) }))
   );
   const EFFORTS = ['low', 'medium', 'high', 'xhigh', 'max'].map((e) => ({ value: e, label: EFFORT_LABELS[e] }));
   // "Most Chat may choose": No limit, or a model (then the most effort beside it).
-  const CEILINGS = [{ value: '', label: 'No limit' }, ...MODELS.map((m) => ({ value: m, label: modelLabel(m) }))];
+  // (The top model as a ceiling is no limit at all, so it isn't listed.)
+  const CEILINGS = [{ value: '', label: 'No limit' }, ...MODELS.slice(1).map((m) => ({ value: m, label: modelLabel(m) }))];
   const MODES = ['auto', 'manual', 'acceptEdits', 'plan', BYPASS].map((m) => ({ value: m, label: MODE_LABELS[m] + (m === 'auto' ? ' (Recommended)' : '') }));
   const CAPS = [
     { value: '', label: 'No limit' },

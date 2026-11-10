@@ -40,7 +40,8 @@ export const PP_CLOUD_MODELS = {
       { value: 'claude-haiku-5-5', label: 'Claude Haiku 5.5', desc: 'Newest Haiku: fastest and lowest-cost Claude' },
       { value: 'claude-sonnet-5-5', label: 'Claude Sonnet 5.5', desc: 'Newest Sonnet: balanced speed and intelligence' },
       { value: 'claude-opus-5-5', label: 'Claude Opus 5.5', desc: 'Newest Opus: the most capable Claude for most work' },
-      { value: 'claude-fable-5-1', label: 'Claude Fable 5.1', desc: 'For the hardest reasoning and long tasks; slower' },
+      { value: 'claude-fable-5-2', label: 'Claude Fable 5.2', desc: 'Newest Fable: for the hardest reasoning and long tasks; slower' },
+      { value: 'claude-fable-5-1', label: 'Claude Fable 5.1', desc: 'Previous Fable' },
       { value: 'claude-sonnet-4-6', label: 'Claude Sonnet 4.6', desc: 'Balanced performance' },
       { value: 'claude-opus-4-8', label: 'Claude Opus 4.8', desc: 'Previous Opus generation, 1M context' },
       { value: 'claude-opus-4-7', label: 'Claude Opus 4.7', desc: 'Powerful Opus model, 1M context' },
@@ -111,7 +112,7 @@ export const PP_CLOUD_MODELS = {
       { value: 'claude-haiku-5-5', label: 'Claude Haiku 5.5', desc: 'Fastest Claude, lightest on your plan’s limits' },
       { value: 'claude-sonnet-5-5', label: 'Claude Sonnet 5.5', desc: 'Balanced speed and intelligence' },
       { value: 'claude-opus-5-5', label: 'Claude Opus 5.5', desc: 'The most capable Claude for most work' },
-      { value: 'claude-fable-5-1', label: 'Claude Fable 5.1', desc: 'For the hardest reasoning; uses your limits fastest' },
+      { value: 'claude-fable-5-2', label: 'Claude Fable 5.2', desc: 'For the hardest reasoning; uses your limits fastest' },
     ],
   },
   openrouter: {

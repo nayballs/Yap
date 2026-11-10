@@ -112,6 +112,8 @@ const fn p(input: f64, output: f64, cache_read: f64, cache_write: f64) -> Price 
 /// writes are at the 1-hour rate (2× input), which Claude Code writes on a
 /// subscription.
 pub const PRICES: &[(&[&str], Price)] = &[
+    // Fable 5.2 (10 Nov 2026): $8 / $40, cache reads $0.20, 1-hour writes $16.
+    (&["fable-5-2", "mythos-5-2"], p(8.0, 40.0, 0.2, 16.0)),
     (&["fable-5-1", "mythos-5-1"], p(10.0, 50.0, 0.25, 20.0)),
     (&["fable", "mythos"], p(10.0, 50.0, 1.0, 20.0)),
     (&["opus-5-5"], p(4.0, 20.0, 0.2, 8.0)),
@@ -308,6 +310,7 @@ mod tests {
         assert_eq!(price_of("claude-opus-4-8", 0), p(5.0, 25.0, 0.5, 10.0));
         assert_eq!(price_of("claude-sonnet-4-5-20250929", 0), p(3.0, 15.0, 0.3, 6.0));
         assert_eq!(price_of("claude-fable-5-1", 0).cache_read, 0.25);
+        assert_eq!(price_of("claude-fable-5-2", 0), p(8.0, 40.0, 0.2, 16.0));
         // Haiku 5.5 over 100K of prompt: its long-prompt prices.
         assert_eq!(price_of("claude-haiku-5-5", 100_000), p(0.1, 0.5, 0.01, 0.2));
         assert_eq!(price_of("claude-haiku-5-5", 100_001), HAIKU_LONG);
@@ -320,6 +323,7 @@ mod tests {
     fn the_table_agrees_with_yaps_own_on_input_and_output() {
         use crate::ai::usage::prices;
         for (model, prompt) in [
+            ("claude-fable-5-2", 0),
             ("claude-fable-5-1", 0),
             ("claude-fable-5", 0),
             ("claude-opus-5-5", 0),
