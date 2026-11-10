@@ -1387,7 +1387,7 @@ the model on this PC only: a cloud model has its **effort** (below).
 model picker (and Settings → Language Models → Chat) chooses how hard each
 cloud model reasons — the levels it takes, the chip saying it ("Claude Opus
 5.5 Extra") — sent its provider's way wherever it answers a question, and
-Fast mode for Claude Opus 5.5. **Tested**: unit (every provider's body at
+Fast mode for Claude Opus 5.5 and Claude Fable 5.2. **Tested**: unit (every provider's body at
 every level, the table, the providers' lists, the Messages API's body with
 fast mode), e2e (`desktop/e2e/chat-effort.spec.js`, `chat-think.spec.js`,
 `chat-documents-research.spec.js`) against the fake. **Not yet tried**: a

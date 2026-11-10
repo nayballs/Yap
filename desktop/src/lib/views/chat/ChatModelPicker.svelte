@@ -48,7 +48,7 @@
   import Segmented from '../../ui/Segmented.svelte';
   import Toggle from '../../ui/Toggle.svelte';
   import { providerIcon, modelName } from '../../core/aiModel.js';
-  import { effortNow, effortOptions, effortHint, FAST_NOTE } from '../../core/effort.js';
+  import { effortNow, effortOptions, effortHint, fastNote } from '../../core/effort.js';
   import { PROVIDER_LABELS, CHATGPT, GPT_TAB, GPT_WAYS, CLAUDE_PLAN, CLAUDE_TAB, CLAUDE_WAYS } from '../../core/providers.js';
   import { loadCatalog } from '../../stores/modelCatalog.svelte.js';
   import { forgetVisionTags } from '../../stores/visionTags.svelte.js';
@@ -1032,8 +1032,8 @@
       </div>
       <p class="ehint" data-testid="chat-effort-hint">{effortHint(eff)}</p>
       {#if typeof eff.fast === 'boolean'}
-        <div class="fast" title={FAST_NOTE}>
-          <Toggle checked={eff.fast} label="Fast mode" desc={FAST_NOTE} onchange={setFast} />
+        <div class="fast" title={fastNote(name)}>
+          <Toggle checked={eff.fast} label="Fast mode" desc={fastNote(name)} onchange={setFast} />
         </div>
       {/if}
     </div>

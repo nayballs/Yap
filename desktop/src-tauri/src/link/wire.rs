@@ -172,7 +172,7 @@ pub enum In {
         #[serde(default)]
         level: Option<String>,
     },
-    /// Fast mode (Claude Opus 5.5), as the picker sets it.
+    /// Fast mode (Claude Opus 5.5, Claude Fable 5.2), as the picker sets it.
     SetFast { on: bool },
     /// Chat's conversations, for the phone's drawer ([`Out::Chats`]).
     Chats,

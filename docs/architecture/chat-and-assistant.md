@@ -1931,7 +1931,7 @@ for the on-device model and small ones, which make things up more readily:
   `web::Turn::outline_first`: until its first step is done
   (`outline_settled`, at the step's end) nothing is looked up — **Claude's own
   web search and fetch stay out of that step's request** (`server_tools` →
-  none; they're back from the next, the prompt cache missing once), and **the
+  none; they're back from the next, the prompt cache missing once, and Claude's thinking from before left out of the requests after, since the API ties it to the tools it had: ai-models.md, `llm/anthropic.rs`), and **the
   loop refuses Yap's `web_search` / `read_page`** unless the same step calls
   `create_document` (`documents::OUTLINE_FIRST`, a tool result with no chip;
   the other providers' search sub-call runs through `web_search`, so it waits
@@ -3717,9 +3717,9 @@ and its Undo, Preview / Source, find, copy, light and dark).
   does ("Extra: thinks longer, for hard problems."; "The model's default."
   on its default) — `chat_set_effort` keeps it for that model alone
   (ai-models.md `ai/effort.rs`), the chip follows at once, the picker stays
-  open; and **Fast mode** for Claude Opus 5.5 (a switch, "Faster answers
-  from Claude Opus 5.5, at twice the price per token. Off unless you switch
-  it on.", `chat_set_fast`). None of it for a model without a reasoning
+  open; and **Fast mode** for Claude Opus 5.5 and Claude Fable 5.2 (a switch
+  naming the model in use, "Faster answers from Claude Opus 5.5, at twice
+  the price per token. Off unless you switch it on.", `chat_set_fast`). None of it for a model without a reasoning
   control or the one on this PC (its Think button). The picker keeps its
   provider rail rather than Claude Code's short menu (tried and reverted
   on 2026-10-31: "no logos"): Yap's models come from five providers and

@@ -322,6 +322,7 @@ test('Claude searches and reads pages itself in Chat’s request, thinks at its 
       {
         // Held while the spec looks at the outline, before its search.
         gate: searching.promise,
+        reasoning: 'Find the levels, then write them down.',
         before: "I'll look this up.",
         server: [
           { search: 'Emberfall tidecaller levels', results: found },
@@ -417,11 +418,18 @@ test('Claude searches and reads pages itself in Chat’s request, thinks at its 
     // Cached: the tools and system prompt, and the conversation.
     expect(one.systemCache).toEqual({ type: 'ephemeral' });
     expect(one.cacheControl).toEqual({ type: 'ephemeral' });
-    // Its own blocks went back each next step: the thinking and its call,
-    // then the search, the pages and its call.
+    // Its own blocks went back each next step: its call, then the search,
+    // the pages and its call. Its thinking too — but not the outline step's:
+    // Claude's web tools joined the request after it, and the API refuses
+    // thinking sent back beside other tools (Claude Fable 5.2 on every
+    // account; the stand-in checks it as Anthropic does). The second step's
+    // thinking went back with the third, its tools the same. Nothing was
+    // refused: three requests, none asked twice.
     const sentOf = (step) => step.body.messages.filter((m) => m.role === 'assistant').flatMap((m) => m.content.map((b) => b.type));
-    expect(sentOf(two)).toEqual(expect.arrayContaining(['thinking', 'tool_use']));
-    expect(sentOf(three)).toEqual(expect.arrayContaining(['server_tool_use', 'web_search_tool_result', 'web_fetch_tool_result', 'tool_use']));
+    expect(sentOf(two)).toEqual(['tool_use']);
+    expect(sentOf(three)).toEqual(expect.arrayContaining(['thinking', 'server_tool_use', 'web_search_tool_result', 'web_fetch_tool_result', 'tool_use']));
+    expect(sentOf(three).filter((t) => t === 'thinking').length).toBe(1);
+    expect(steps.some((s) => s.unboundThinking)).toBe(false);
     expect(one.system).toContain('Use web_fetch to open a page');
     await expectStore(yap, 'chats.json', (s) => s.conversations.some((c) => c.messages.some((m) => m.role === 'assistant' && m.thinking?.text?.includes('Outline first: levels, then the gear.'))));
 

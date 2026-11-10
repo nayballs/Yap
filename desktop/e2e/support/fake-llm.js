@@ -65,6 +65,7 @@
 // context it's loaded with) and `POST /api/show` (`show`: model → `{ max,
 // numCtx }`), which Yap reads for the context a self-hosted model runs
 // with; `serveOllama(null)` stops.
+import crypto from 'node:crypto';
 import http from 'node:http';
 
 export const GALE_URL = 'https://bg3.wiki/wiki/Gale';
@@ -199,17 +200,88 @@ function fromMessagesApi(body) {
   return out;
 }
 
+const isThinking = (b) => b?.type === 'thinking' || b?.type === 'redacted_thinking';
+
+/**
+ * **What one of Claude's thinking blocks is tied to** (Anthropic's
+ * "preserved thinking", which Claude Fable 5.2 checks on every account):
+ * the system prompt, the tools as a set sorted by name, every message
+ * before the block (`before`) and the blocks before it in its own answer
+ * (`ahead`) — the earlier thinking blocks and the cache markers left out,
+ * as the API leaves them. A short hash of those. Each block also records
+ * the thinking block before it ([`linkOf`]): the oldest ones may be left
+ * out later, in a row from the first, but never one from the middle, nor
+ * one put back in front.
+ */
+function thinkingKey(body, before, ahead) {
+  const system = Array.isArray(body.system) ? body.system.map((b) => b.text ?? '').join('\n\n') : body.system ?? '';
+  const tools = [...(body.tools ?? [])].sort((a, b) => String(a.name).localeCompare(String(b.name)));
+  const said = (m) => ({ role: m.role, content: Array.isArray(m.content) ? m.content.filter((b) => !isThinking(b)) : m.content });
+  const prefix = { system, tools, messages: [...before.map(said), { role: 'assistant', content: ahead.filter((b) => !isThinking(b)) }] };
+  const plain = JSON.stringify(prefix, (k, v) => (k === 'cache_control' ? undefined : v));
+  return crypto.createHash('sha256').update(plain).digest('hex').slice(0, 16);
+}
+
+const SIGNED = 'fake-signature:';
+/** A thinking block as the next one records it ("0": none before). */
+const linkOf = (block) => (block ? crypto.createHash('sha256').update(String(block.signature ?? '')).digest('hex').slice(0, 8) : '0');
+
+/** The last thinking block before block `j` of message `i` (null: none). */
+function thinkingBefore(messages, i, j) {
+  let last = null;
+  for (const [mi, m] of messages.entries()) {
+    if (mi > i) break;
+    if (m.role !== 'assistant' || !Array.isArray(m.content)) continue;
+    for (const [bi, b] of m.content.entries()) {
+      if (mi === i && bi >= j) break;
+      if (isThinking(b)) last = b;
+    }
+  }
+  return last;
+}
+
+/** A thinking block's signature for the request `body` it answers. */
+function signThinking(body) {
+  const messages = body.messages ?? [];
+  return `${SIGNED}${thinkingKey(body, messages, [])}:${linkOf(thinkingBefore(messages, messages.length, 0))}`;
+}
+
+/**
+ * The first thinking block in `body`'s messages that no longer fits where
+ * it's sent back ("messages.3.content.0"), or null: the system prompt, the
+ * tools or an earlier message changed since Claude thought it, or the
+ * thinking block before it isn't the one it followed.
+ */
+function unboundThinking(body) {
+  const messages = body.messages ?? [];
+  for (const [i, m] of messages.entries()) {
+    if (m.role !== 'assistant' || !Array.isArray(m.content)) continue;
+    for (const [j, b] of m.content.entries()) {
+      if (b.type !== 'thinking' || !String(b.signature ?? '').startsWith(SIGNED)) continue;
+      const [key, link] = b.signature.slice(SIGNED.length).split(':');
+      const before = thinkingBefore(messages, i, j);
+      const fits = key === thinkingKey(body, messages.slice(0, i), m.content.slice(0, j)) && (!before || linkOf(before) === link);
+      if (!fits) return `messages.${i}.content.${j}`;
+    }
+  }
+  return null;
+}
+
 /**
  * A scripted step as Claude's content blocks: its thinking (`reasoning`),
  * its own searches and page reads (`server`: `{ search, results: [{url,
  * title}] }`, `{ fetch, title }`, `{ fetch, error }`, or a search's
  * `error`), its answer (`content`, citing `cite: [{url, title}]`) and its
- * tool calls (`tools`) — in the shapes Anthropic's docs give.
+ * tool calls (`tools`) — in the shapes Anthropic's docs give. Its thinking
+ * is signed for the request it answers (`record.body`: [`thinkingKey`]).
  */
 function messagesBlocks(step, record) {
   const blocks = [];
   let n = 0;
-  if (step.reasoning) blocks.push({ type: 'thinking', thinking: step.reasoning, signature: 'fake-signature' });
+  if (step.reasoning) {
+    const signature = record?.body ? signThinking(record.body) : 'fake-signature';
+    blocks.push({ type: 'thinking', thinking: step.reasoning, signature });
+  }
   if (step.before) blocks.push({ type: 'text', text: step.before });
   for (const s of step.server ?? []) {
     const id = `srvtoolu_fake_${++n}`;
@@ -251,7 +323,7 @@ function messagesBlocks(step, record) {
 let callSeq = 0;
 
 /** Claude's answer streamed as the Messages API's server-sent events. */
-async function streamMessages(res, model, blocks, stopReason, gapMs = 0) {
+async function streamMessages(res, model, blocks, stopReason, gapMs = 0, stopDetails = null) {
   res.writeHead(200, { 'content-type': 'text/event-stream' });
   const send = (type, data) => res.write(`event: ${type}\ndata: ${JSON.stringify({ type, ...data })}\n\n`);
   const pause = () => (gapMs > 0 ? new Promise((r) => setTimeout(r, gapMs)) : Promise.resolve());
@@ -277,7 +349,7 @@ async function streamMessages(res, model, blocks, stopReason, gapMs = 0) {
     send('content_block_stop', { index });
     await pause();
   }
-  send('message_delta', { delta: { stop_reason: stopReason }, usage: { output_tokens: 120 } });
+  send('message_delta', { delta: { stop_reason: stopReason, ...(stopDetails ? { stop_details: stopDetails } : {}) }, usage: { output_tokens: 120 } });
   send('message_stop', {});
   res.end();
 }
@@ -685,6 +757,14 @@ function actionPlanReply(user) {
  * back (0 = no delay). `scriptChat(steps)` queues the replies to the next
  * calls that offer tools: `{ tools: [{ name, args }] }` calls those tools,
  * `{ content }` answers; with the queue empty they answer "OK".
+ *
+ * As Anthropic's Messages API, two things more (10 Nov 2026): a step's
+ * thinking (`reasoning`) is signed for the request it answers, and a later
+ * request that sends it back after the system prompt, the tools or an
+ * earlier message changed is refused with HTTP 400 in Anthropic's own words
+ * (`unboundThinking`: what Claude Fable 5.2 checks on every account; the
+ * request's record says where, `unboundThinking`); and `{ declined: 'cyber' }`
+ * answers HTTP 200 with `stop_reason: "refusal"`.
  */
 export async function startFakeLlm() {
   const requests = [];
@@ -832,6 +912,22 @@ export async function startFakeLlm() {
           reply(failing.status, failing.body ?? { type: 'error', error: { type: 'api_error', message: 'fake failure: the model is down' } });
           return;
         }
+        // Claude's thinking sent back after the system prompt, the tools or an
+        // earlier message changed: refused in Anthropic's words, as Claude
+        // Fable 5.2 refuses it on every account (`record.unboundThinking`:
+        // the block's place).
+        const unbound = unboundThinking(body);
+        if (unbound) {
+          record.unboundThinking = unbound;
+          reply(400, {
+            type: 'error',
+            error: {
+              type: 'invalid_request_error',
+              message: `${unbound}: Invalid \`signature\` in \`thinking\` block. The block is bound to a different conversation. Remove the block, or set \`thinking.block_binding.prefix_mismatch_behavior\` to "drop_block". That setting requires the \`thinking-binding-controls-2026-08-01\` value in the \`anthropic-beta\` header.`,
+            },
+          });
+          return;
+        }
         // (A long chat's summary in the background never takes a scripted step.)
         const step = kind !== 'chatSummary' && (offered.length > 0 || chatScript[0]?.plain) ? chatScript.shift() : undefined;
         if (step?.gate) {
@@ -839,12 +935,15 @@ export async function startFakeLlm() {
           await step.gate;
         }
         const blocks = step ? messagesBlocks(step, record) : [{ type: 'text', text: (replies.get(kind) ?? (() => 'OK'))(user, system) }];
-        const stop = blocks.some((b) => b.type === 'tool_use') ? 'tool_use' : 'end_turn';
+        // A step Claude declines (`declined`: its category): HTTP 200 with
+        // `stop_reason: "refusal"`, whatever it wrote first.
+        const refusal = step?.declined ? { type: 'refusal', category: step.declined, explanation: 'This request was declined by a safety classifier.' } : null;
+        const stop = refusal ? 'refusal' : blocks.some((b) => b.type === 'tool_use') ? 'tool_use' : 'end_turn';
         if (body.stream && streaming) {
-          await streamMessages(res, body.model, blocks, stop, step?.stream?.gapMs ?? 0);
+          await streamMessages(res, body.model, blocks, stop, step?.stream?.gapMs ?? 0, refusal);
           return;
         }
-        reply(200, { id: 'msg_fake', type: 'message', role: 'assistant', model: body.model, content: blocks, stop_reason: stop, usage: { input_tokens: 1000, output_tokens: 120 } });
+        reply(200, { id: 'msg_fake', type: 'message', role: 'assistant', model: body.model, content: blocks, stop_reason: stop, ...(refusal ? { stop_details: refusal } : {}), usage: { input_tokens: 1000, output_tokens: 120 } });
         return;
       }
       const gemini = req.url.endsWith(':generateContent');

@@ -205,6 +205,8 @@ test('the effort of the model in use, and Fast mode', async ({ page }) => {
   await box.getByRole('radio', { name: 'Extra' }).check();
   await expect.poll(() => pc.of('set_effort')).toEqual([{ type: 'set_effort', level: 'xhigh' }]);
   await expect(page.getByTestId('picker-effort').getByRole('radio', { name: 'Extra' })).toBeChecked();
+  // Fast mode's line names the model in use (Opus 5.5 and Fable 5.2 have it).
+  await expect(page.getByTestId('picker-effort')).toContainText('Faster answers from Claude Opus 5.5, at twice the price per token.');
   await page.getByTestId('picker-effort').getByText('Fast mode').click();
   await expect.poll(() => pc.of('set_fast')).toEqual([{ type: 'set_fast', on: true }]);
   // The on-device model has no effort: none shown.

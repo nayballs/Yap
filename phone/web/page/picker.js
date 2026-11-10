@@ -41,7 +41,7 @@ import {
 import { ICON_FILES, MONOCHROME_PROVIDERS, ICON_TINTS, familyIcon, providerIcon } from './core/modelIcons.js';
 import { labelFor } from './core/modelCatalog.js';
 import { CHATGPT, GPT_TAB, CLAUDE_PLAN, CLAUDE_TAB, TAB_WAYS, PROVIDER_LABELS } from './core/providerIds.js';
-import { effortNow, effortOptions, effortHint, effortLabel, FAST_NOTE } from './core/effort.js';
+import { effortNow, effortOptions, effortHint, effortLabel, fastNote } from './core/effort.js';
 
 /** The marks the PC serves (desktop/src-tauri/build.rs LINK_SHARED). */
 const SERVED = new Set(['openai', 'openai-oss', 'claude', 'gemini', 'gemma', 'groq', 'llama', 'mistral', 'openrouter', 'qwen', 'xai']);
@@ -535,7 +535,7 @@ export function createPicker({ dialog, send, onPicked, onChanged }) {
       const sw = h('label', 'switch');
       const t = h('span', 'switch-text');
       t.appendChild(h('span', 'switch-label', 'Fast mode'));
-      t.appendChild(h('span', 'hint', FAST_NOTE));
+      t.appendChild(h('span', 'hint', fastNote(name)));
       const i = h('input');
       i.type = 'checkbox';
       i.setAttribute('role', 'switch');

@@ -32,6 +32,31 @@ fn native(web: Option<&crate::web::Turn>, connectors: Option<&crate::chat::tools
 }
 
 impl Loop<'_> {
+    /// **Claude's own tools for this step** (a step on the Messages API:
+    /// [`native`]; else `None`) — and **its earlier thinking left out when
+    /// they aren't the ones the step before had** (10 Nov 2026). Each of
+    /// Claude's thinking blocks is tied to the tools it thought with, and
+    /// the API refuses one sent back beside other tools
+    /// (`llm::anthropic::thinking_unbound`: Claude Fable 5.2 on every
+    /// account, the other Claude 5 models on newer ones). They change twice
+    /// in a turn at most: none while a new document's outline is to come,
+    /// then more searches and page reads once the turn writes one
+    /// (`web::Turn::server_tools`). Everything Claude did stays in the
+    /// messages (its calls, its searches, its words); only the reasoning
+    /// before the change isn't sent back, and the steps after keep theirs.
+    fn claude_step(&mut self) -> Option<crate::ai::llm::anthropic::Native> {
+        if !self.native_chat {
+            return None;
+        }
+        let native = native(self.web.as_deref(), self.extra.connectors);
+        if self.claude_tools.as_ref().is_some_and(|before| *before != native.server_tools) {
+            let gone = crate::ai::llm::anthropic::forget_thinking(&mut self.messages);
+            tracing::info!(blocks = gone, "Chat: Claude's own tools changed this turn; its earlier thinking is left out from here");
+        }
+        self.claude_tools = Some(native.server_tools.clone());
+        Some(native)
+    }
+
     /// **One model call of the loop**, over the messages so far and the
     /// tools every step offers: what it came to ([`Step`]). The step made
     /// to search (`must_search`) offers the same tools with
@@ -39,6 +64,7 @@ impl Loop<'_> {
     /// server that won't be made to search gets Yap's search instead.
     pub(super) async fn step(&mut self) -> Result<Step, String> {
         let forced = self.must_search;
+        let native = self.claude_step();
         let mut req = crate::ai::llm::ChatRequest::chat(
             self.base_url,
             self.api_key,
@@ -60,9 +86,7 @@ impl Loop<'_> {
         if forced {
             req.max_tokens = Some(MUST_SEARCH_TOKENS);
         }
-        if self.native_chat {
-            req.native = Some(native(self.web.as_deref(), self.extra.connectors));
-        }
+        req.native = native;
         let answer = ask(step_live, &req, true).await;
         // A server that won't be made to search (it refuses `tool_choice`,
         // answers in words, or calls another tool): Yap searches for the
@@ -83,6 +107,12 @@ impl Loop<'_> {
             Ok(msg) => msg,
             Err(e) => return self.refused(e),
         };
+        // The step was asked again without Claude's thinking (a refusal
+        // nobody foresaw: `llm::anthropic::post`): the loop forgets it too,
+        // so the next step isn't refused the same way.
+        if msg.as_object_mut().and_then(|o| o.remove(crate::ai::llm::anthropic::THINKING_DROPPED)).is_some() {
+            crate::ai::llm::anthropic::forget_thinking(&mut self.messages);
+        }
         self.took_server_web(&mut msg);
         let calls = msg["tool_calls"].as_array().cloned().unwrap_or_default();
         if calls.is_empty() {
@@ -197,6 +227,7 @@ impl Loop<'_> {
     /// turn's chips.
     pub(super) async fn answer_now(mut self) -> Result<(String, Vec<String>), String> {
         self.messages.push(json!({ "role": "user", "content": ANSWER_NOW_NOTE }));
+        let native = self.claude_step();
         // (Claude on the Messages API keeps its tools, told to call none: its
         // earlier calls in the messages need them defined.)
         let mut req = if self.native_chat {
@@ -204,9 +235,7 @@ impl Loop<'_> {
         } else {
             crate::ai::llm::ChatRequest::chat(self.base_url, self.api_key, self.model, self.provider, 0.5, Value::Array(self.messages), None, None)
         };
-        if self.native_chat {
-            req.native = Some(native(self.web.as_deref(), self.extra.connectors));
-        }
+        req.native = native;
         let msg = ask(self.live, &req, false).await?;
         let content = msg["content"].as_str().unwrap_or("").trim().to_string();
         let content = crate::chat::think::answer_without_inline(&content, self.disable_thinking);

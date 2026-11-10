@@ -19,8 +19,14 @@ const WHAT = {
 /** The picker's and Settings' one line on what effort is. */
 export const EFFORT_NOTE = 'Higher effort thinks longer: more thorough answers, but slower, and it uses more of your plan.';
 
-/** Fast mode's line (Claude Opus 5.5): it costs more, so it's off unless switched on. */
-export const FAST_NOTE = 'Faster answers from Claude Opus 5.5, at twice the price per token. Off unless you switch it on.';
+/**
+ * Fast mode's line for the model in use (`name`: Claude Opus 5.5, Claude
+ * Fable 5.2 — ai/effort.rs `claude_fast`): it costs twice that model's own
+ * price, so it's off unless switched on.
+ */
+export function fastNote(name) {
+  return `Faster answers from ${name || 'this model'}, at twice the price per token. Off unless you switch it on.`;
+}
 
 /** "Extra" for "xhigh"; '' for none. */
 export function effortLabel(id) {
