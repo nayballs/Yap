@@ -41,13 +41,13 @@
   import { sharedKey } from '../core/providers.js';
   import { EFFORT_LABELS } from '../core/effort.js';
   import { agents, initAgents, refreshAgents } from '../stores/agents.svelte.js';
-  import { statusWord, statusTone, costLine, MODE_LABELS, modelLabel, canUndo } from '../core/agents.js';
+  import { statusWord, statusTone, costLine, MODE_LABELS, modelLabel, canUndo, BYPASS_WARNING } from '../core/agents.js';
   import { FEATURE_NAME, CODE_NAME, WORKSPACES, samePath } from '../core/codeChats.js';
 
   let { cfg, goto = null, onshowview = null } = $props();
 
   const BYPASS = 'bypassPermissions';
-  const WARNING = 'Claude Code can run anything on your PC without asking. Use it only in folders you trust.';
+  const WARNING = BYPASS_WARNING;
 
   const MODELS = ['claude-opus-5-5', 'claude-sonnet-5-5', 'claude-haiku-5-5'];
   const modelOptions = $derived(
@@ -304,7 +304,7 @@
 </Group>
 
 <Group title="Asking and reports" id="settings-yap-code-asking">
-  <Row label="Ask before sending an agent" desc="A card in Chat, or a question out loud, before an agent starts. When it matters: in a workspace no agent has used yet, or after the chat read the web." setting="yap-code-ask" stack>
+  <Row label="Ask before sending an agent" desc="A card in Chat, or a question out loud, before an agent starts. When it matters: in a workspace no agent has used yet, or after the chat read the web. Never in Bypass permissions." setting="yap-code-ask" stack>
     <Select bind:value={cfg.agentsAsk} options={ASK} ariaLabel="Ask before sending an agent" wide />
   </Row>
   <Row label="Read agent reports aloud" desc="When an agent ends, its report in the chat's own voice" setting="yap-code-speak">

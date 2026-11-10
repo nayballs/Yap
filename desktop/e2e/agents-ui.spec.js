@@ -660,7 +660,9 @@ test('Bypass permissions asks once, then the chip is amber and switches freely',
   await main.keyboard.press('5');
   const dialog = main.getByRole('alertdialog', { name: 'Use Bypass permissions?' });
   await expect(dialog).toBeVisible();
-  await expect(dialog).toContainText('Claude Code can run anything on your PC without asking. Use it only in folders you trust.');
+  await expect(dialog).toContainText(
+    'Claude Code can run anything on your PC without asking. Yap won’t ask before it sends an agent either, even after the chat read the web or looked at your screen. Use it only in folders you trust.'
+  );
   await dialog.getByRole('button', { name: 'Cancel' }).click();
   await expect(dialog).toHaveCount(0);
   await expect(chip(main)).toHaveText('Auto');

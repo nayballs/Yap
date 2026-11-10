@@ -16,7 +16,7 @@
 //!   and never when the chat's Mode is Bypass; otherwise it's a read-only
 //!   run at the chip's mode ([`Pick::read_only`]: Claude Code's editing tools
 //!   off), never a plan to approve. Under Bypass nothing waits for the person
-//!   ([`unattended`]) but the one guard after outside content.
+//!   ([`unattended`]).
 //! - **A folder's cap** lowers it further (a folder that never runs
 //!   unattended: capped at Manual).
 //! - **Bypass permissions** only once the person has confirmed its warning
@@ -163,9 +163,9 @@ pub fn effective(chip: Mode, asked: Option<Mode>, cap: Option<Mode>, bypass_ok: 
 /// maintainer: "if I have bypass permissions, I shouldn't be accepting
 /// plans"): Bypass permissions. Then Yap adds no card or question of its own
 /// — not Settings' "asked first", not a new folder's, not a spoken "Shall
-/// I…?", no plan, no permission prompt — but the one guard: after outside
-/// content in the turn, the brief is shown for the person's OK
-/// (`chat/tools/agents.rs` `ask_first`). Pure.
+/// I…?", no plan, no permission prompt, and (10 Nov 2026) no card after
+/// outside content in the turn either (`chat/tools/agents.rs` `ask_first`).
+/// Pure.
 pub fn unattended(mode: Mode) -> bool {
     mode == Mode::Bypass
 }

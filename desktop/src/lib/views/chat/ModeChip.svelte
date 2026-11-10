@@ -16,7 +16,7 @@
   import { onMount, tick, untrack } from 'svelte';
   import ConfirmDialog from '../../ui/ConfirmDialog.svelte';
   import { toast } from '../../ui/toast.svelte.js';
-  import { modeForKey, MODE_KEYS } from '../../core/agents.js';
+  import { modeForKey, MODE_KEYS, BYPASS_WARNING } from '../../core/agents.js';
 
   /**
    * `chat`: the Chat view's state (its conversation, and whether a question
@@ -26,7 +26,7 @@
   let { chat, shown: visible = true } = $props();
 
   const BYPASS = 'bypassPermissions';
-  const WARNING = 'Claude Code can run anything on your PC without asking. Use it only in folders you trust.';
+  const WARNING = BYPASS_WARNING;
 
   let enabled = $state(false);
   let view = $state(null); // { mode, label, bypassConfirmed, modes: [{mode, label, says}] }

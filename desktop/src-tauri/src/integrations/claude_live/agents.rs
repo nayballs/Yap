@@ -10,7 +10,7 @@
 //!   — a `WebSearch` or `WebFetch` this turn, a page or the screen through
 //!   `eyes.rs`, an agent's own words from `agent_status`, text selected in
 //!   another app, a connector's result (`connectors.rs`) — `start_agent` and
-//!   `message_agent` show their card (the brief or the message, the folder,
+//!   `message_agent` show their card (in every Mode but Bypass permissions, where nothing asks) (the brief or the message, the folder,
 //!   the Mode) and **the HTTP call is held** for the person's Allow once, as
 //!   a connector's held call is (the card's two minutes well inside the
 //!   run's tool timeout; asked out loud, also said, on the Yap bar and
@@ -150,7 +150,7 @@ fn run_for(slot: &Slot, id: &str, turn: &Call, name: &str, args: Value, wait: Du
         ""
     };
     if acts && outside {
-        tracing::info!(run = %id, tool = name, connector = slot.connector(turn.n), "Claude Code: an agent tool after outside content; it asks first");
+        tracing::info!(run = %id, tool = name, connector = slot.connector(turn.n), "Claude Code: an agent tool after outside content; it asks first unless its agent runs at Bypass permissions");
     }
     // A model evaluation records it and never runs an agent (the gate's next guard).
     if let Some(recorded) = crate::ai::eval::intercept_tool(name, &args) {

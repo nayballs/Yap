@@ -1722,19 +1722,16 @@ pub fn model_for(agent: &Agent, ask: &Ask, keeps: bool, cfg_model: &str, cfg_eff
     Runs { model, effort, model_asked, effort_asked, sized: model_sized || effort_sized }
 }
 
-/// Agent `id`'s next turn (`next`, as `ask` asks it), at the mode it runs at
-/// now ([`modes::next_turn`], lowered to `ask.mode`), the model and effort
-/// [`model_for`] says and the way Settings pay now; `new_turn`: a turn of
-/// its own (else the newest carries on). One that never ran starts from its
-/// brief (with the message added).
-fn resume(id: &str, next: Next, ask: &Ask, new_turn: bool) {
-    let cfg = crate::config::load();
-    let Some(agent) = store::get(id) else { return };
-    let chip = modes::or_auto(&store::mode_of(agent.conversation, &cfg.agents_mode));
+/// **The mode `agent`'s next turn runs at**, as `ask` asks it: the chat's
+/// Mode now (`agents_mode`: Settings' default for a chat with none), its
+/// folder's cap and a plan waiting for its go-ahead ([`modes::next_turn`]),
+/// lowered to `ask.mode`, and a phone's at most Auto. The one place it's
+/// worked out: [`resume`] runs the turn at it, and `message_agent` asks
+/// first or not by it (`modes::unattended`).
+pub fn next_mode(agent: &Agent, ask: &Ask, agents_mode: &str) -> Mode {
+    let chip = modes::or_auto(&store::mode_of(agent.conversation, agents_mode));
     let cap = workspaces::list().into_iter().find(|f| workspaces::norm(&f.path) == workspaces::norm(&agent.path)).and_then(|f| f.cap_mode());
-    let was_plan = modes::or_auto(&agent.mode) == Mode::Plan;
-    let go = ask.go;
-    let mut mode = modes::next_turn(modes::or_auto(&agent.mode), chip, cap, go, store::bypass_confirmed());
+    let mut mode = modes::next_turn(modes::or_auto(&agent.mode), chip, cap, ask.go, store::bypass_confirmed());
     if let Some(lower) = ask.mode {
         mode = mode.min(lower);
     }
@@ -1742,6 +1739,20 @@ fn resume(id: &str, next: Next, ask: &Ask, new_turn: bool) {
     if ask.phone.is_some() || ask.message_id.as_deref().and_then(super::remote::phone_of_message).is_some() {
         mode = super::remote::phone_mode(mode);
     }
+    mode
+}
+
+/// Agent `id`'s next turn (`next`, as `ask` asks it), at the mode it runs at
+/// now ([`next_mode`]), the model and effort
+/// [`model_for`] says and the way Settings pay now; `new_turn`: a turn of
+/// its own (else the newest carries on). One that never ran starts from its
+/// brief (with the message added).
+fn resume(id: &str, next: Next, ask: &Ask, new_turn: bool) {
+    let cfg = crate::config::load();
+    let Some(agent) = store::get(id) else { return };
+    let was_plan = modes::or_auto(&agent.mode) == Mode::Plan;
+    let go = ask.go;
+    let mode = next_mode(&agent, ask, &cfg.agents_mode);
     // Continue and a plan's go-ahead carry the same task on: the chat's
     // earlier pick stays; a new request is sized again (else Settings').
     let keeps = matches!(next, Next::CarryOn) || go;

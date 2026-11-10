@@ -268,8 +268,8 @@ carrying on with its context; so are agents now.
   own output (but for the person's plain go-ahead, Yap's own words with no
   card: [The safety rule](#the-safety-rule)),
   the Mode only lowered and only on the person's word, the caps, Bypass's OK. Asked first as `start_agent`
-  is (Settings' "always", or the web in what led here; under Bypass only
-  after outside content this turn), never as a new workspace: the card says "Yap wants to carry on the agent in …" (`AgentCard`
+  is (Settings' "always", or the web in what led here, or outside content
+  this turn; never under Bypass), never as a new workspace: the card says "Yap wants to carry on the agent in …" (`AgentCard`
   `continues`, **Send** / **Don't**); out loud, "Should I pass that to the
   agent in garden-planner, in Auto mode? Say yes to send it."
 - **The tab**: one an agent (`agent:<id>`), each turn a section (`AgentTurn.svelte`)
@@ -330,7 +330,7 @@ In a Code chat `start_agent` carries the chat's agent on
     for a turn that needs more or less thinking than the last.
   - **The models** come from Yap's catalogue, never a list in the tool: the
     `model` enum is `claude_plan::MODELS` (Haiku, Sonnet and Opus 5.5, Fable
-    5.1; cheapest first, the order the ceiling reads). Another id (but
+    5.2; cheapest first, the order the ceiling reads). Another id (but
     Settings' own default, or a dated snapshot of one) is left out and the
     model told ("… isn't a model an agent runs on (…): it runs on the
     default."); an effort that isn't a level too.
@@ -391,8 +391,9 @@ haven't used yet, or after the chat read the web, since a page could have
 slipped words into the brief), **Always** or **Never**. **In Bypass
 permissions none of this asks** (8 Nov 2026, `ask_first`'s `unattended`):
 not Settings' "always", not a new folder's card, not the spoken "Should
-I…?" — only the card after outside content this turn ([Bypass permissions:
-no approvals](#bypass-permissions-no-approvals)).
+I…?", and since 10 Nov 2026 not the card after outside content this turn
+either ([Bypass permissions: no
+approvals](#bypass-permissions-no-approvals)).
 
 - **Typed**: a card in the thread (`AgentConfirm.svelte`; `chat/pages/act/confirm.rs`,
   act "agent"): the folder and its path, the mode, the brief in full, and why
@@ -406,9 +407,10 @@ no approvals](#bypass-permissions-no-approvals)).
   `agent_answer_turn`): a plain yes starts it, a no drops it ("Okay, I won't
   start it."), anything else drops it and is asked as usual.
 - **After outside content, always, and on the card** (8 Nov 2026, whatever
-  `agents_ask` says: `tools::agents::ask_first`): once the turn has read the
-  web, a page, a connector's result or an agent's own words, `start_agent`
-  and `message_agent` show the card — the brief or the message in full, the
+  `agents_ask` says, in every Mode but Bypass permissions:
+  `tools::agents::ask_first`): once the turn has read the
+  web, a page, the screen, a connector's result or an agent's own words,
+  `start_agent` and `message_agent` show the card — the brief or the message in full, the
   folder, the Mode, and why in one line: "This chat just read the web, which
   could have put words in the agent's brief." (what it read: the web, a
   connector's result, an agent's own words, text selected outside this chat,
@@ -420,8 +422,9 @@ no approvals](#bypass-permissions-no-approvals)).
   the start of its brief; Allow once / Don't, unless Chat shows the answer)
   and answered by a spoken yes or no (`chat/assistant/spoken_ok.rs`, as a
   connector's tool or a page action asks): the brief must be seen or heard
-  before it goes. A click only for an agent in Bypass permissions, and
-  during a meeting. Never automatic, and the card never raises the Mode.
+  before it goes. A click only during a meeting. Never automatic, and the
+  card never raises the Mode. (An agent at Bypass permissions has no card
+  to answer.)
 
 ### The Mode
 
@@ -497,7 +500,9 @@ Claude Code's own permission modes, in the words of its Shift+Tab menu
 - **A workspace's cap** lowers it further.
 - **Bypass permissions needs its one-time OK** (`agent_bypass_confirmed`, asked
   by the chip or Settings: "Claude Code can run anything on your PC without
-  asking. Use it only in folders you trust."), whoever asks for it. The chip
+  asking. Yap won't ask before it sends an agent either, even after the chat
+  read the web or looked at your screen. Use it only in folders you trust.":
+  `core/agents.js` `BYPASS_WARNING`), whoever asks for it. The chip
   is amber (`--yap-warning`) while it's on.
 - **The next turn** (`modes::next_turn`): a message or Continue runs at the
   chat's Mode as it is then, capped by the workspace. A plan stays a plan
@@ -545,8 +550,13 @@ ahead nobody wanted.
 2026-11-08, the maintainer: "It shouldn't ask me to approve things when it's
 on bypass permissions for the agents. The agents should go and work." When an
 agent runs at Bypass (`modes::unattended`: the mode it runs at, after a
-folder's cap and a phone's Auto), Yap adds no card or question of its own,
-**but one guard**. What each one does under Bypass:
+folder's cap and a phone's Auto), Yap adds no card or question of its own.
+Until 10 Nov 2026 one guard was left, the card after outside content; that
+day it asked the maintainer twice in a row after Chat had looked at his own
+screen (`look_at_screen`, outside content for the safety rule): "I already
+set this in the chat to bypass permissions; I shouldn't have to then get
+another click for it to tell an agent." It's gone too. What each one does
+under Bypass:
 
 | What would ask | Under Bypass | Why |
 |---|---|---|
@@ -555,13 +565,25 @@ folder's cap and a phone's Auto), Yap adds no card or question of its own,
 | Asked out loud first ("Should I send an agent…?", "Should I pass that to the agent…?", `agents/voice.rs`) | Skipped | The same `ask_first`. |
 | A plan's go-ahead (ExitPlanMode's card, the plan report's Go ahead) | Never reached | The model's Plan is a read-only run; a plan doesn't stay a plan under a Bypass chip (`next_turn`); `EnterPlanMode` is off in every Bypass turn (`tools_off`). Only the person's own Plan chip or cap makes a plan, and then it isn't Bypass. |
 | Claude Code's permission prompts (Allow / Deny, `approve`) | Answered no at once, no card | In `bypassPermissions` Claude Code still asks for its own safety checks and the person's own `ask` rules; with `Approval::unattended` the run's `approve` says no without a card (`approve::UNATTENDED`: carry on without it, say so in the summary), never a wait. `--permission-prompt-tool` stays (the run's endpoint, and every other mode). `AskUserQuestion` is answered without a card in every mode. Never `--dangerously-skip-permissions`. |
-| **After outside content this turn** — the web, a page, the screen, a connector's result, another app's selected text, an agent's own output — `start_agent` / `message_agent` show the brief | **Kept** | The one protection against a page writing instructions into an unrestricted agent. Its line says why: "This chat just read the web, which could have put words in the agent's brief." Never for a request with no outside content in that turn. A plan chat's call whose own tool call didn't show in its turn's events within 5 s is asked the same way, on doubt. |
+| **After outside content this turn** — the web, a page, the screen, a connector's result, another app's selected text, an agent's own output — `start_agent` / `message_agent` show the brief | Skipped (10 Nov 2026) | `ask_first` returns nothing when `unattended`; `message_agent` works the turn's mode out as the runner will (`runner::next_mode`). An agent at Bypass already reads the web and acts on it with nobody asked, so the card guarded only the hop from Chat; the person chose that for this chat and confirmed its warning, which now says so. The log has "sent without asking (Bypass permissions)". Every other Mode keeps the card. |
 | The person's plain go-ahead after outside content | As ever: no card | Yap's own fixed words. |
-| Bypass permissions' one-time OK ("Claude Code can run anything on your PC…") | Kept | It's how Bypass becomes the person's confirmed choice. |
+| Bypass permissions' one-time OK ("Claude Code can run anything on your PC… Yap won't ask before it sends an agent either, even after the chat read the web or looked at your screen…", `core/agents.js` `BYPASS_WARNING`) | Kept | It's how Bypass becomes the person's confirmed choice, and where they're told nothing asks. |
 | A phone's question or action (Remote Control) | Not Bypass | A phone's turn runs at most at Auto, so today's rules ask there. |
 | Undo this turn / Undo all's confirm (`AgentTab.svelte`) | Kept | The person's own click putting files back, not an approval of the agent's work. Continue has no confirm. |
 
 Under Auto, Manual and Accept edits everything asks as before.
+
+**What still holds under Bypass** (none of it a click): the request is the
+person's own this turn (`agents::consent`: a folder they named or the Code
+chat's own, a message that carries their words); the Mode is never raised
+by a model, a page or a card; a workspace's cap and a phone's Auto lower it
+(then it isn't Bypass, and the card is back); after outside content the
+person's plain "go ahead" still goes in Yap's own words, never the model's;
+the brief shows in the thread as it goes ("Sent to the agent"), with Stop
+and Undo beside it. **What's given up**: a page, a screenshot or a
+connector's result that fooled Chat's model could word the brief of an
+agent that asks nothing. Someone who wants that check keeps the chat on
+Auto.
 
 ### Plans and the go-ahead
 
@@ -626,15 +648,17 @@ turn simply ended: nothing carried on, though "yes" plainly meant go ahead.
 `tools::ASKS_AFTER_OUTSIDE`: never in `ACTION_TOOLS` or `STRONG_LOCKED`, never
 refused by the safety rule. Once outside content is in the turn — the web, a
 page, the screen, a connector's result, text selected in another app — each
-asks on its card first ([Asking first](#asking-first)), for every model.
+asks on its card first ([Asking first](#asking-first)), for every model
+(but not in Bypass permissions, below).
 **An agent's own output is web content** (`agent_status`'s result,
 `Ran::output_seen`: an agent's output can carry a page's words), so a status or
 a report never starts or steers an agent by itself: the person sees the brief
 or the message on the card and says yes. `agent_status` and `stop_agent` run
 as ever. Until 8 Nov both were refused for the rest of the turn: a tester's
 "go ahead" was lost, and a chat that had researched couldn't hand its report to
-an agent to save. **In Bypass permissions this card is the one thing left that
-asks** ([Bypass permissions: no approvals](#bypass-permissions-no-approvals)).
+an agent to save. **In Bypass permissions this card doesn't show either**
+(10 Nov 2026: [Bypass permissions: no
+approvals](#bypass-permissions-no-approvals)).
 
 **The person's own go-ahead goes without a card** (2026-11-07: "Yep, that's
 fine. Go ahead." was refused because the model checked the agent first). After
@@ -682,9 +706,11 @@ and each call runs the tool loop's own code and rules.
   Code writes a tool call's start before it runs it, and its stdout is in
   order, so every web read before it has been counted by then. Not seen in
   time: asked first as after the web ("didn't show in its turn's events" in
-  the log).
-- **Then the same guards**: after outside content (the web, an agent's words
-  or a connector's result, `Slot::connector`) the call asks on its card and
+  the log; not in Bypass permissions, where nothing asks).
+- **Then the same guards**: after outside content (the web, the screen or
+  a page through `eyes.rs`, an agent's words or a connector's result,
+  `Slot::connector`) the call asks on its card (unless its agent runs at
+  Bypass permissions) and
   **the HTTP call is held** for the answer, as a connector's held call is
   (8 Nov 2026; refused outright before); the evaluation's intercept,
   consent, the folder, the mode.
@@ -861,8 +887,8 @@ used. See [Yap's crew](#yaps-crew-the-rows-characters).
   "It has a question for you" (the chat's report says it). A read-only turn
   ("catch up", "have a look") is never a plan waiting, whatever its mode
   (`runner` ends it with no plan; `TurnNote::plan_waiting`, `planWaitsNow`
-  and the phone's brief say no too). Under Bypass permissions nothing waits
-  but an ask-first card after outside content: Claude Code's own prompts are
+  and the phone's brief say no too). Under Bypass permissions nothing
+  waits: Claude Code's own prompts are
   answered no with no card (`approve::UNATTENDED`), so none is pending, and
   a Bypass turn never ends as a plan. Chat's status
   dots, the rail and the switch agree (`core/chatStatus.js`, the same
@@ -1277,7 +1303,8 @@ Each rule is in full above; together:
   agent's ([The person's own words](#the-persons-own-words)).
 - **Asked first** in a new workspace and after the web ([Asking first](#asking-first)).
 - **Always asked on the card after outside content** in the turn, an agent's
-  own output included — never by itself ([The safety rule](#the-safety-rule));
+  own output included — never by itself, except in Bypass permissions, the
+  person's own choice for the chat ([The safety rule](#the-safety-rule));
   on the plan, a call not yet seen in the turn's events asks on doubt ([From
   a plan chat](#from-a-plan-chat)).
 - **The Mode only lowered** by a model, and only when the person's words ask
@@ -1609,8 +1636,8 @@ the build's own stand-in replaying `script` from now on),
     Don't), by voice (asked out loud after a web read: said, on the bar, a
     spoken yes), a permission card, Stop, Continue, a plan then "go ahead";
     Bypass permissions (a new folder and Settings' "always" with no card, a
-    spoken request with no "Should I…?", the card after a web read only, with
-    its line of why; light and dark).
+    spoken request with no "Should I…?", and no card after a web read
+    either: the agent starts with its brief).
   - `agents-ui.spec.js`: the Mode chip, the Agent tab read like Claude Code, the
     pill, the report card, Undo, the cards in the thread and on the bar, an agent
     not signed in and one paid by key, no backups, Settings → Yap Code, the Network

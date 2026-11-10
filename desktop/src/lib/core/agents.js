@@ -494,6 +494,16 @@ export const MODE_LABELS = {
 
 export const modeLabel = (mode) => MODE_LABELS[mode] || (mode ? String(mode) : 'Auto');
 
+/**
+ * What Bypass permissions means, said wherever it's chosen (its one-time
+ * OK, the Mode chip's tooltip, a workspace that lets it run): Claude Code
+ * asks nothing, and nor does Yap before it sends an agent
+ * (chat/tools/agents.rs `ask_first`: no card in Bypass, after outside
+ * content either).
+ */
+export const BYPASS_WARNING =
+  'Claude Code can run anything on your PC without asking. Yap won’t ask before it sends an agent either, even after the chat read the web or looked at your screen. Use it only in folders you trust.';
+
 /** A Claude model id as people say it: "claude-sonnet-5-5" → "Claude Sonnet 5.5". */
 export function modelLabel(id) {
   const s = String(id || '').trim();
