@@ -1821,6 +1821,7 @@ pub fn load() -> YapConfig {
     // built-in styles' profiles there to edit.
     crate::ai::cleanup_styles::on_load(&mut cfg);
     migrate_retired_groq_models(&mut cfg);
+    migrate_plan_models(&mut cfg);
     // More shortcuts per action: tidied (`input_hook::tidy_more`).
     crate::dictation::input_hook::tidy_more(&mut cfg);
     // The GPU switch from before "Runs on" (2026-10-22): off meant the
@@ -1879,6 +1880,38 @@ fn migrate_retired_groq_models(cfg: &mut YapConfig) {
     }
     for p in &mut cfg.cleanup_profiles {
         migrate_groq_model(&p.provider, &mut p.model);
+    }
+}
+
+/// **A model the Claude plan's list has moved on from → the one in its
+/// place** (`claude_plan::MODELS`: the newest of each family). Claude Fable
+/// 5.2 took Fable 5.1's place on 10 Nov 2026.
+const PLAN_MODELS_MOVED: [(&str, &str); 1] = [("claude-fable-5-1", "claude-fable-5-2")];
+
+/// Migration: a saved choice on the Claude plan (cleanup, the scopes, the
+/// cleanup profiles) of a model its list no longer offers follows its
+/// family to the one in its place, and the effort chosen for it goes with
+/// it (unless the new one has its own). On every load, as the retired Groq
+/// models: an older Yap sharing this config may write the old id back. An
+/// Anthropic key's choice is left alone: its list still has the older model.
+fn migrate_plan_models(cfg: &mut YapConfig) {
+    let plan = crate::ai::claude_plan::PROVIDER;
+    fn follow(on_plan: bool, model: &mut String) {
+        if let Some((_, new)) = PLAN_MODELS_MOVED.iter().find(|(old, _)| on_plan && *old == model.as_str()) {
+            *model = (*new).to_string();
+        }
+    }
+    follow(cfg.pp_provider == plan, &mut cfg.pp_model);
+    for s in cfg.llm_scopes.values_mut() {
+        follow(s.provider == plan, &mut s.model);
+    }
+    for p in &mut cfg.cleanup_profiles {
+        follow(p.provider == plan, &mut p.model);
+    }
+    for (old, new) in PLAN_MODELS_MOVED {
+        if let Some(level) = cfg.chat_effort.remove(&crate::ai::effort::key(plan, old)) {
+            cfg.chat_effort.entry(crate::ai::effort::key(plan, new)).or_insert(level);
+        }
     }
 }
 
@@ -3518,6 +3551,39 @@ mod tests {
         assert_eq!(cfg.llm_scopes["notes"].model, "llama-3.1-8b-instant");
         // already current → untouched
         assert_eq!(cfg.llm_scopes["agent"].model, "openai/gpt-oss-120b");
+    }
+
+    #[test]
+    fn a_plan_model_the_list_moved_on_from_follows_its_family_only_on_the_plan() {
+        let plan = crate::ai::claude_plan::PROVIDER;
+        let scope = |provider: &str, model: &str| LlmScope { provider: provider.into(), model: model.into(), ..Default::default() };
+        let mut cfg = YapConfig { pp_provider: plan.into(), pp_model: "claude-fable-5-1".into(), ..Default::default() };
+        cfg.llm_scopes.insert("chat".into(), scope(plan, "claude-fable-5-1"));
+        cfg.llm_scopes.insert("notes".into(), scope("anthropic", "claude-fable-5-1"));
+        cfg.llm_scopes.insert("agent".into(), scope(plan, "claude-opus-5-5"));
+        cfg.chat_effort.insert(crate::ai::effort::key(plan, "claude-fable-5-1"), "xhigh".into());
+        cfg.chat_effort.insert(crate::ai::effort::key("anthropic", "claude-fable-5-1"), "low".into());
+
+        migrate_plan_models(&mut cfg);
+
+        assert_eq!(cfg.pp_model, "claude-fable-5-2");
+        assert_eq!(cfg.llm_scopes["chat"].model, "claude-fable-5-2");
+        // An Anthropic key's choice stays: its list still has Fable 5.1.
+        assert_eq!(cfg.llm_scopes["notes"].model, "claude-fable-5-1");
+        assert_eq!(cfg.llm_scopes["agent"].model, "claude-opus-5-5");
+        // Its effort goes with it; the key's own stays.
+        assert_eq!(cfg.chat_effort.get(&crate::ai::effort::key(plan, "claude-fable-5-2")).map(String::as_str), Some("xhigh"));
+        assert!(!cfg.chat_effort.contains_key(&crate::ai::effort::key(plan, "claude-fable-5-1")));
+        assert_eq!(cfg.chat_effort.get(&crate::ai::effort::key("anthropic", "claude-fable-5-1")).map(String::as_str), Some("low"));
+        // An effort already chosen for the new one wins.
+        cfg.chat_effort.insert(crate::ai::effort::key(plan, "claude-fable-5-1"), "low".into());
+        migrate_plan_models(&mut cfg);
+        assert_eq!(cfg.chat_effort.get(&crate::ai::effort::key(plan, "claude-fable-5-2")).map(String::as_str), Some("xhigh"));
+        // Every model moved to is one the plan's list offers, and none moved from is.
+        let offered: Vec<&str> = crate::ai::claude_plan::MODELS.iter().map(|(id, _)| *id).collect();
+        for (old, new) in PLAN_MODELS_MOVED {
+            assert!(offered.contains(&new) && !offered.contains(&old), "{old} → {new}");
+        }
     }
 
     #[test]
