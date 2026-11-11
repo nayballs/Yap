@@ -17,6 +17,11 @@ The full stack list, the app's entry and plumbing (`lib.rs`, the tray, context m
   **`doc-<hash>`** (2026-11-07: a Markdown file's window, one per file, made
   on demand: `notes/md_file.rs`, [notes.md](./notes.md#markdown-files-in-yap-notesmd_filers-2026-11-07)). The old
   pill window was retired 2026-07-09.
+- **Code colours:** [`highlight.js`](https://github.com/highlightjs/highlight.js)
+  11.12.0 (BSD-3-Clause, pinned exact), its core and 29 languages, in a chunk
+  of its own loaded when a row of a Code chat's thread is first opened
+  (`core/codeColours.js`; [yap-code.md](./yap-code.md#an-opened-stretch-a-row-a-step)).
+  Its output is read into tokens and drawn as text, never set as HTML.
 - **Markdown:** [`markdown-it`](https://github.com/markdown-it/markdown-it) 15.0.3
   (MIT) parses answers and notes, [`DOMPurify`](https://github.com/cure53/DOMPurify)
   3.4.17 (MPL-2.0 or Apache-2.0) sanitises the HTML; both pinned exact, used only by

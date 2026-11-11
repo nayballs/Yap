@@ -124,6 +124,19 @@ body {
      edge and its soft ring, the workspace chip's wash and hover, the label
      on the box's edge, and the light that travels round it while an agent
      runs (its width and one turn's time) */
+  /* Code colours (core/codeColours.js: an edit's diff and a command in a
+     Code chat's rows): keywords, strings, comments, numbers, a function's
+     name, types and built-ins, attributes and variables, regular
+     expressions and meta. Chosen to read on the row's surface and on a
+     diff's red and green lines alike. */
+  --yap-syn-keyword: #a8522a;
+  --yap-syn-string: #2b7a4b;
+  --yap-syn-comment: #8a8478;
+  --yap-syn-number: #8650ad;
+  --yap-syn-function: #2463ae;
+  --yap-syn-type: #17757d;
+  --yap-syn-attr: #86600f;
+  --yap-syn-meta: #a86a1c;
   --yap-code: #2a7684;
   --yap-code-line: rgba(42, 118, 132, 0.55);
   --yap-code-ring: rgba(42, 118, 132, 0.12);
@@ -551,6 +564,14 @@ body {
   --yap-shot-drop: 0 1px 2px rgba(0, 0, 0, 0.28);
   --yap-shot-scrim: rgba(4, 3, 2, 0.74);
   /* Code chats: the same teal, brighter on the dark surfaces */
+  --yap-syn-keyword: #e39b6c;
+  --yap-syn-string: #9dcf8f;
+  --yap-syn-comment: #8e887c;
+  --yap-syn-number: #c9a2e8;
+  --yap-syn-function: #86b7f2;
+  --yap-syn-type: #74cdd2;
+  --yap-syn-attr: #dcc089;
+  --yap-syn-meta: #e2b36e;
   --yap-code: #6cc0cc;
   --yap-code-line: rgba(108, 192, 204, 0.5);
   --yap-code-ring: rgba(108, 192, 204, 0.1);
