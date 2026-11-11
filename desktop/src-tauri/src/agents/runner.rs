@@ -84,6 +84,7 @@ use crate::integrations::claude_live::{self, Approval, RunSpec, Tools};
 use super::diff;
 use super::workspaces;
 use super::modes::{self, Mode};
+use super::pictures;
 use super::steps;
 use super::store::{self, Denial, Agent, ProblemNote, Status};
 
@@ -155,6 +156,14 @@ pub struct AgentEvent {
     /// What an edit or a write changed in a file (`diff.rs`).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub diff: Option<diff::FileDiff>,
+    /// The tool call a step is (Claude Code's id for it), or the one a
+    /// `picture` came back from.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub call: Option<String>,
+    /// A picture a tool call's answer carried (`pictures.rs`): its step
+    /// (`call`) shows it.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub picture: Option<super::pictures::StepPicture>,
     /// Its final words (and, from an older Yap, its words as it worked).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub text: Option<String>,
@@ -1046,6 +1055,8 @@ struct Follow {
     changes: HashMap<String, Change>,
     /// Diff lines the agent's log has (across its turns; `diff::AGENT_MAX`).
     diff_used: usize,
+    /// Pictures kept this turn (`pictures::PER_TURN`).
+    pictures: usize,
     /// What the turn has used (`usage.rs`).
     meter: super::usage::Meter,
 }
@@ -1120,6 +1131,7 @@ impl Follow {
             line: String::new(),
             changes: HashMap::new(),
             diff_used: agent.diff_lines as usize,
+            pictures: 0,
             meter: super::usage::Meter::new(before, &agent.model, window),
         }
     }
@@ -1186,7 +1198,30 @@ impl Follow {
             self.changes.insert(id.to_string(), Change { tool: name.to_string(), input: input.clone(), file: file.clone(), known });
         }
         self.line = seen.step.clone();
-        emit(&AgentEvent { step: Some(seen.step), file: seen.file, command: seen.command, about: seen.about, ..self.event(&agent) });
+        let call = Some(id.to_string()).filter(|c| !c.is_empty());
+        emit(&AgentEvent { step: Some(seen.step), file: seen.file, command: seen.command, about: seen.about, call, ..self.event(&agent) });
+    }
+
+    /// **A tool call's answer carried pictures** (a picture file read, a
+    /// screenshot a tool took): each kept with the agent (`pictures.rs`,
+    /// [`pictures::PER_TURN`] a turn) and said with its call, whose step
+    /// shows it. One that can't be kept (not a picture, too big) is left out.
+    fn on_pictures(&mut self, call: &str, handed: &[crate::ai::claude_code::events::Picture]) {
+        for p in handed {
+            if self.pictures >= pictures::PER_TURN {
+                tracing::debug!(id = %self.id, "Agents: a turn's pictures are at their most, the rest left out");
+                return;
+            }
+            match pictures::keep(&self.id, p) {
+                Ok(kept) => {
+                    self.pictures += 1;
+                    if let Some(agent) = store::get(&self.id) {
+                        emit(&AgentEvent { picture: Some(kept), call: Some(call.to_string()), ..self.event(&agent) });
+                    }
+                }
+                Err(why) => tracing::debug!(id = %self.id, why, chars = p.data.len(), "Agents: a step's picture wasn't kept"),
+            }
+        }
     }
 
     /// A tool call came back: an edit's diff once it went through; with
@@ -1283,8 +1318,9 @@ impl Follow {
                     self.on_taken(&text);
                 }
                 for block in &u.blocks {
-                    if let Block::ToolResult { tool_use_id, is_error, .. } = block {
+                    if let Block::ToolResult { tool_use_id, is_error, pictures, .. } = block {
                         self.on_tool_result(tool_use_id, *is_error);
+                        self.on_pictures(tool_use_id, pictures);
                     }
                 }
             }
@@ -2478,6 +2514,44 @@ mod tests {
         test_live(&id, None);
     }
 
+    /// A picture file read, a screenshot a tool took: the tool result's own
+    /// picture, kept with the agent and said with its call.
+    #[test]
+    fn a_picture_a_tool_call_came_back_with_is_kept_and_said_with_its_call() {
+        use base64::Engine as _;
+        let id = store::new_id();
+        let folder = PathBuf::from(format!(r"D:\Projects\seed-tracker-{id}"));
+        store::insert(Agent { id: id.clone(), folder: "seed-tracker".into(), path: folder.to_string_lossy().into_owned(), status: Status::Running, started_ts: 5, turn_list: vec![store::TurnNote { n: 1, status: Status::Running, started_ts: 5, ..Default::default() }], ..Default::default() });
+        let agent = store::get(&id).unwrap();
+        let backup = store::turn_backup_dir(&id, 1).unwrap();
+        let mut follow = Follow::new(&agent, 1, folder.clone(), backup, Mode::Auto, 200_000, None);
+        let picture = |w: u32, h: u32| {
+            let rgba: Vec<u8> = (0..w * h).flat_map(|i| [(i % 200) as u8, 80, 120, 255]).collect();
+            let png = crate::snip::images::encode_png(&rgba, w, h, true).unwrap();
+            crate::ai::claude_code::events::Picture { media_type: "image/png".into(), data: base64::engine::general_purpose::STANDARD.encode(png) }
+        };
+        follow.on_tool("toolu_read_1", "Read", &serde_json::json!({ "file_path": folder.join("shot.png").to_string_lossy() }));
+        follow.on_tool_result("toolu_read_1", false);
+        follow.on_pictures("toolu_read_1", &[picture(64, 40)]);
+        let log = store::log_read(&id);
+        let step = log.iter().find(|e| e["step"] == "Reading shot.png").expect("its step");
+        assert_eq!(step["call"], "toolu_read_1");
+        let said = log.iter().find(|e| e.get("picture").is_some()).expect("its picture");
+        assert_eq!((said["call"].as_str(), said["turn"].as_u64(), said.get("step")), (Some("toolu_read_1"), Some(1), None));
+        assert_eq!((said["picture"]["w"].as_u64(), said["picture"]["h"].as_u64()), (Some(64), Some(40)));
+        // Kept in the agent's own folder, read back by its address.
+        let at = pictures::address(&id, said["picture"]["id"].as_str().unwrap());
+        assert_eq!(crate::snip::images::png_size(&pictures::read(&at).unwrap()), Some((64, 40)));
+        // What isn't a picture is left out, the step as it was.
+        follow.on_pictures("toolu_read_1", &[crate::ai::claude_code::events::Picture { media_type: "image/png".into(), data: "bm90IGEgcGljdHVyZQ==".into() }]);
+        assert_eq!(store::log_read(&id).iter().filter(|e| e.get("picture").is_some()).count(), 1);
+        // No more than a turn's share.
+        let many: Vec<_> = (0..pictures::PER_TURN + 3).map(|_| picture(8, 8)).collect();
+        follow.on_pictures("toolu_shots", &many);
+        assert_eq!(store::log_read(&id).iter().filter(|e| e.get("picture").is_some()).count(), pictures::PER_TURN);
+        assert_eq!(pictures::kept_in(&pictures::dir(&id).unwrap()), pictures::PER_TURN);
+    }
+
     #[test]
     fn the_event_says_only_what_changed() {
         let agent = Agent { id: "ab12".into(), folder: "garden-planner".into(), status: Status::Running, conversation: Some(3), ..Default::default() };
@@ -2487,7 +2561,7 @@ mod tests {
         assert_eq!(v["status"], "running");
         assert_eq!(v["conversation"], 3);
         assert_eq!(v["step"], "Reading notes.md");
-        for absent in ["file", "command", "about", "said", "todos", "now", "diff", "text", "cost", "problem"] {
+        for absent in ["file", "command", "about", "said", "todos", "now", "diff", "call", "picture", "text", "cost", "problem"] {
             assert!(v.get(absent).is_none(), "{absent}");
         }
         // A diff and a to-do list, as the tab reads them.

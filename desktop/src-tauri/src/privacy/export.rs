@@ -16,8 +16,8 @@
 //!   `chats/connector_chats.json`, the connectors each chat switched off, by id, when any), and
 //!   `memory/` — Memory's own export (`memory::export`) and `memory.json`;
 //! - `agents/` — Yap Code's agents, the tasks Chat handed to Claude Code
-//!   (`agents.json`), the workspaces (`workspaces.json`) and each agent's log (never its backups: copies
-//!   of the person's own files);
+//!   (`agents.json`), the workspaces (`workspaces.json`), each agent's log and the pictures its
+//!   steps came back with (never its backups: copies of the person's own files);
 //! - `dictionary/dictionary.csv` — corrections and snippets, the CSV the
 //!   Dictionary view's Export… writes ([`dictionary_csv`]);
 //! - `connectors/connectors.json` — whenever a connector is kept (the preview on or off), the
@@ -392,7 +392,8 @@ notes/versions.json, each note's earlier versions (Version history), newest firs
 - skills.json: the Skills you made (your own instructions, run with /name).\n\
 - memory/: what Yap remembers about you, as Markdown, and memory.json.\n\
 - agents/: Yap Code's agents, the tasks Chat handed to Claude Code (agents.json), the workspaces they may work in (workspaces.json) \
-and each agent's log (<id>.log.jsonl). Not the backups: they're copies of your own files.\n\
+and each agent's log (<id>.log.jsonl), with the pictures its steps read or took (<id>.pictures/). \
+Not the backups: they're copies of your own files.\n\
 - dictionary/dictionary.csv: your corrections and snippets, as the Dictionary's Export writes them \
 (Import reads it back).\n\
 - writing_samples.json: the writing samples you gave Yap (Settings → Commands).\n\
@@ -531,7 +532,8 @@ fn files_in(dir: &Path, ext: &str) -> Vec<(PathBuf, u64)> {
 
 /// The audio and screenshots Yap keeps, as they'd go in: each meeting's
 /// FLAC under its note's name, the dictation audio by when it was said,
-/// Chat's screenshots by their id. `notes`: (id, file stem) to name the
+/// Chat's screenshots by their id, the pictures agents' steps came back
+/// with by their agent's. `notes`: (id, file stem) to name the
 /// meetings' folders.
 pub fn disk_files(data: &Path, notes: &[(u64, String)], when: &dyn Fn(u64) -> String) -> Vec<DiskFile> {
     let mut out = Vec::new();
@@ -571,6 +573,17 @@ pub fn disk_files(data: &Path, notes: &[(u64, String)], when: &dyn Fn(u64) -> St
     for (p, bytes) in files_in(&data.join("chat-images"), "png") {
         let file = p.file_name().and_then(|n| n.to_str()).unwrap_or("screenshot.png").to_string();
         out.push(DiskFile { name: format!("screenshots/{file}"), path: p, bytes });
+    }
+    // The pictures agents' steps came back with (agents/pictures.rs):
+    // agents/<id>/pictures/*.png, beside each agent's log. Never its backups.
+    let mut agents: Vec<PathBuf> = std::fs::read_dir(data.join("agents")).into_iter().flatten().flatten().map(|e| e.path()).filter(|p| p.is_dir()).collect();
+    agents.sort();
+    for d in agents {
+        let id = file_stem(d.file_name().and_then(|n| n.to_str()).unwrap_or("agent"));
+        for (p, bytes) in files_in(&d.join(crate::agents::pictures::FOLDER), "png") {
+            let file = p.file_name().and_then(|n| n.to_str()).unwrap_or("picture.png").to_string();
+            out.push(DiskFile { name: format!("agents/{id}.pictures/{file}"), path: p, bytes });
+        }
     }
     out
 }
@@ -1150,9 +1163,16 @@ mod tests {
         std::fs::write(data.join("recent-audio/1790000000000.wav"), vec![2u8; 2000]).unwrap();
         std::fs::write(data.join("recent-audio/kept/1790000001000.wav"), vec![3u8; 1000]).unwrap();
         std::fs::write(data.join("chat-images/img_0123456789abcdef.png"), vec![4u8; 500]).unwrap();
+        // An agent's folder: the pictures its steps came back with go in, never its backups or their thumbnails.
+        std::fs::create_dir_all(data.join("agents/ab12/pictures/thumbs")).unwrap();
+        std::fs::create_dir_all(data.join("agents/ab12/backup/1")).unwrap();
+        std::fs::write(data.join("agents/ab12/pictures/img_fedcba9876543210.png"), vec![5u8; 300]).unwrap();
+        std::fs::write(data.join("agents/ab12/pictures/thumbs/img_fedcba9876543210-30x20.png"), vec![6u8; 40]).unwrap();
+        std::fs::write(data.join("agents/ab12/backup/1/0001-notes.md"), b"Draft notes").unwrap();
         let disk = disk_files(&data, &[(8, "2026-10-29 Weekly sync".into())], &when);
         let names: Vec<&str> = disk.iter().map(|f| f.name.as_str()).collect();
-        assert_eq!(names.len(), 4, "{names:?}");
+        assert_eq!(names.len(), 5, "{names:?}");
+        assert!(names.contains(&"agents/ab12.pictures/img_fedcba9876543210.png"));
         assert!(names.contains(&"audio/meetings/2026-10-29 Weekly sync/1-you.flac"));
         assert!(names.contains(&"screenshots/img_0123456789abcdef.png"));
         assert_eq!(names.iter().filter(|n| n.starts_with("audio/dictations/")).count(), 2);
@@ -1162,9 +1182,9 @@ mod tests {
         let mut seen = Vec::new();
         let ok = write_zip(&out, &text, &disk, &AtomicBool::new(false), &mut |d, t| seen.push((d, t))).unwrap();
         assert!(ok);
-        assert_eq!(seen.last(), Some(&(6502, 6502)));
+        assert_eq!(seen.last(), Some(&(6802, 6802)));
         let mut z = zip::ZipArchive::new(std::fs::File::open(&out).unwrap()).unwrap();
-        assert_eq!(z.len(), 5);
+        assert_eq!(z.len(), 6);
         let mut flac = Vec::new();
         z.by_name("audio/meetings/2026-10-29 Weekly sync/1-you.flac").unwrap().read_to_end(&mut flac).unwrap();
         assert_eq!(flac, vec![1u8; 3000]);

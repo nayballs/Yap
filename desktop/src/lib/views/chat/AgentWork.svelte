@@ -9,17 +9,30 @@
   // - Its log comes from stores/agentLogs.svelte.js (read once, then live);
   //   the turn's events are `turnsOf`'s, grouped by core/agents.js `workOf`.
   // - While it works, the last line is the step it's on, with a spinner.
+  // - A step whose tool call came back with a picture (a picture file read,
+  //   a screenshot a tool took: agents/pictures.rs) ends its line with it,
+  //   small (StepPictures), as Claude Code's transcript does; opened, the
+  //   step shows it larger. A click opens it (`onview`).
   // - Its final words aren't here: its report tells them, right below.
   // - Nothing to show (no log yet, a turn that never ran): nothing drawn.
   //
   // Its own small chunk (ChatThread imports it lazily, as the to-do card).
-  import { workOf, workSummary, turnsOf, stepKind } from '../../core/agents.js';
+  import { workOf, workSummary, turnsOf, stepKind, groupPictures, shownStepPicture } from '../../core/agents.js';
   import { isLive } from '../../core/agentNow.js';
   import { renderMarkdown } from '../../core/markdown.js';
   import { agentLogs, watchAgentLog } from '../../stores/agentLogs.svelte.js';
+  import { placed, shown } from './chatImages.js';
+  import { screenPixels } from './chatShots.svelte.js';
+  import StepPictures from './StepPictures.svelte';
 
-  /** `agent`: the pill's (its record, as the store has it); `turn`: which of its turns; `line`: the line it's on now. */
-  let { agent, turn = 1, line = '' } = $props();
+  /** A step's picture, opened: at most this big (CSS px). */
+  const STEP_PIC_W = 280;
+  const STEP_PIC_H = 180;
+
+  /** `agent`: the pill's (its record, as the store has it); `turn`: which of its turns; `line`: the line it's on now; `onview(picture)`: open a step's picture (a `ShownPicture`). */
+  let { agent, turn = 1, line = '', onview = null } = $props();
+  const view = (p) => onview?.(shownStepPicture(p, agent?.folder));
+  let gone = $state({});
 
   $effect(() => {
     if (agent?.id) watchAgentLog(agent.id);
@@ -43,19 +56,42 @@
         {@const parts = busy && line ? [{ text: line }] : workSummary(it, busy)}
         {@const open = !!opened[i]}
         <div class="wgroup" data-testid="chat-agent-work-steps" data-open={open ? 'true' : 'false'} data-busy={busy ? 'true' : 'false'}>
-          <button type="button" class="wline" aria-expanded={open} onclick={() => toggle(i)} title={open ? 'Hide the steps' : 'Show the steps'}>
-            {#if busy}<span class="spin" aria-hidden="true"></span>{/if}
-            <span class="wtext">
-              {#each parts as p, k (k)}{k ? ', ' : ''}{p.text}{#if p.added}<span class="plus">+{p.added}</span>{/if}{#if p.removed}<span class="minus">−{p.removed}</span>{/if}{/each}
-            </span>
-            <svg class="chev" class:down={open} viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 6l6 6-6 6" /></svg>
-          </button>
+          <div class="wrow">
+            <button type="button" class="wline" aria-expanded={open} onclick={() => toggle(i)} title={open ? 'Hide the steps' : 'Show the steps'}>
+              {#if busy}<span class="spin" aria-hidden="true"></span>{/if}
+              <span class="wtext">
+                {#each parts as p, k (k)}{k ? ', ' : ''}{p.text}{#if p.added}<span class="plus">+{p.added}</span>{/if}{#if p.removed}<span class="minus">−{p.removed}</span>{/if}{/each}
+              </span>
+              <svg class="chev" class:down={open} viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 6l6 6-6 6" /></svg>
+            </button>
+            <!-- The pictures its steps came back with, at the end of the line (opened: each by its step). -->
+            {#if !open}<StepPictures pictures={groupPictures(it)} onview={view} />{/if}
+          </div>
           {#if open}
             <ol class="wsteps">
               {#each it.steps as s, k (k)}
                 <li class="wstep k-{stepKind(s)}">
                   <span class="stext">{s.step}</span>
                   {#if s.command}<code class="scmd">{s.command}</code>{/if}
+                  {#each (s.pictures || []).filter((p) => !gone[p.id]) as p (p.id)}
+                    {@const q = placed(p, { maxW: STEP_PIC_W, maxH: STEP_PIC_H, ratio: screenPixels.ratio })}
+                    <span class="shotframe spic" style:width="{q.frame.w}px" style:aspect-ratio="{q.frame.w} / {q.frame.h}">
+                      <button type="button" class="spicbtn" data-testid="chat-agent-work-step-picture" title="Open the picture" aria-label="Open the picture: {p.caption || 'Picture'}" onclick={() => view(p)}>
+                        <img
+                          src={q.src}
+                          alt=""
+                          draggable="false"
+                          decoding="async"
+                          use:shown
+                          style:left={q.pic.x}
+                          style:top={q.pic.y}
+                          style:width={q.pic.w}
+                          style:height={q.pic.h}
+                          onerror={() => (gone = { ...gone, [p.id]: true })}
+                        />
+                      </button>
+                    </span>
+                  {/each}
                 </li>
               {/each}
             </ol>
@@ -109,14 +145,21 @@
     background: var(--yap-s2);
     overflow-x: auto;
   }
-  /* A stretch of steps: one quiet line. */
+  /* A stretch of steps: one quiet line, its pictures at its end. */
   .wgroup {
+    min-width: 0;
+  }
+  .wrow {
+    display: flex;
+    align-items: center;
+    gap: 8px;
     min-width: 0;
   }
   .wline {
     display: inline-flex;
     align-items: center;
     gap: 6px;
+    min-width: 0;
     max-width: 100%;
     margin: 0;
     padding: 1px 4px 1px 0;
@@ -203,6 +246,29 @@
   }
   .stext {
     overflow-wrap: anywhere;
+  }
+  /* A step's picture, opened: in a screenshot's frame (app.css .shotframe), smaller. */
+  .spic {
+    display: block;
+    margin: 4px 0 4px;
+    border-radius: 6px;
+  }
+  .spicbtn {
+    position: absolute;
+    inset: 0;
+    display: block;
+    padding: 0;
+    border: none;
+    border-radius: inherit;
+    overflow: hidden;
+    background: none;
+    cursor: zoom-in;
+  }
+  .spicbtn:focus-visible {
+    outline: none;
+  }
+  .spic:has(.spicbtn:focus-visible) {
+    box-shadow: var(--yap-focus);
   }
   .scmd {
     align-self: flex-start;

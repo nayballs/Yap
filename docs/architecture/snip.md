@@ -106,6 +106,8 @@ the PNG (`snip/attach.rs`).
   `chat_images_usage`, `chat_images_prepare`), the `yapsnip` URI scheme
   (`serve`: a chat screenshot's PNG by id only, `http://yapsnip.localhost/<id>`
   in WebView2, `?w=&h=` its thumbnail at that size, anything else a 404;
+  `agent/<agent id>/<img id>` a picture an agent's step came back with,
+  the same way, from that agent's own folder: `agents/pictures.rs`;
   answered off the main thread since 2026-10-31, `lib.rs`
   `register_asynchronous_uri_scheme_protocol`) and `init` (the capture device
   warmed 8 s after launch when the shortcut is bound; the retention sweep

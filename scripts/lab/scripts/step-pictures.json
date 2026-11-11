@@ -1,0 +1,32 @@
+{
+  "name": "step-pictures",
+  "about": "A step that read a picture ends its line with it (11 Nov 2026, agents/pictures.rs), as Claude Code's own transcript shows one: in a Bypass Code chat on lab-sandbox that works directly, the session is asked to look at a made-up picture in the workspace. Claude Code hands the picture back in the Read call's own result; Yap keeps a copy with the agent and the stretch's line in the thread ends with it, small. Needs the real Claude Code (a --fake lab's Chat isn't on the plan, so nothing goes directly there).",
+  "needs": { "yapCode": true },
+  "steps": [
+    {
+      "set": {
+        "bypass": true,
+        "config": { "agentsDirect": true },
+        "files": [{ "path": "docs/label.png", "png": { "width": 640, "height": 400, "shape": "triangle", "color": "#2a9d8f", "background": "#f4f1de" } }]
+      },
+      "note": "A made-up picture in the scratch workspace: a green triangle on cream."
+    },
+
+    { "ask": "Look at docs/label.png (read the file itself, it's a picture) and tell me in one sentence what it shows.", "chat": "code:lab-sandbox", "timeout": 300 },
+    { "expect": { "status": "answered", "notUsed": "/^(start_agent|message_agent)$/", "tools": 0, "card": false }, "note": "Straight to its session." },
+    { "wait": "agents", "timeout": 600 },
+    { "expect": { "agent": { "status": "done", "error": null } } },
+    {
+      "expect": {
+        "selector": [
+          { "window": "main", "css": "[data-testid=\"chat-agent-work\"]", "count": 1 },
+          { "window": "main", "css": "[data-testid=\"chat-agent-work\"] [data-testid=\"agent-step-picture\"]", "count": { "min": 1, "max": 3 } }
+        ],
+        "visible": "Agent done"
+      },
+      "note": "The picture it read, at the end of its line."
+    },
+    { "expect": { "visible": "triangle" }, "soft": true, "note": "It saw what the picture is (its own words: soft)." },
+    { "shot": "a-picture-at-the-end-of-its-line", "window": "main" }
+  ]
+}

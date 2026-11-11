@@ -186,10 +186,31 @@ pub enum Block {
     Text(String),
     Thinking(String),
     ToolUse { id: String, name: String, input: Value },
-    ToolResult { tool_use_id: String, text: String, is_error: bool },
+    /// A tool call's answer: its text, and the pictures it carries (a picture
+    /// file read, a screenshot a tool took: at most [`RESULT_PICTURES`]).
+    ToolResult { tool_use_id: String, text: String, is_error: bool, pictures: Vec<Picture> },
     /// An image (its type only: the data is never kept here).
     Image { media_type: String },
     Other(Value),
+}
+
+/// The pictures of one tool result kept, at most.
+pub const RESULT_PICTURES: usize = 4;
+/// A picture's most base64 characters (a bigger one is left out).
+pub const PICTURE_CHARS: usize = 16 * 1024 * 1024;
+
+/// **A picture in a tool's result**, as Claude Code hands it to the model:
+/// its type and its base64 data. Never printed (its length only).
+#[derive(Clone, Default, PartialEq)]
+pub struct Picture {
+    pub media_type: String,
+    pub data: String,
+}
+
+impl std::fmt::Debug for Picture {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Picture").field("media_type", &self.media_type).field("chars", &self.data.len()).finish()
+    }
 }
 
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -798,12 +819,27 @@ fn block(b: &Value) -> Block {
                 _ => String::new(),
             },
             is_error: b.get("is_error").and_then(Value::as_bool).unwrap_or(false),
+            pictures: match b.get("content") {
+                Some(Value::Array(a)) => a.iter().filter_map(picture).take(RESULT_PICTURES).collect(),
+                _ => Vec::new(),
+            },
         },
         "image" => Block::Image {
             media_type: b.get("source").map(|s| str_of(s, "media_type").to_string()).unwrap_or_default(),
         },
         _ => Block::Other(b.clone()),
     }
+}
+
+/// An `image` block's picture (base64, within [`PICTURE_CHARS`]); anything
+/// else, or a picture by its address, is none.
+fn picture(b: &Value) -> Option<Picture> {
+    if str_of(b, "type") != "image" {
+        return None;
+    }
+    let source = b.get("source")?;
+    let data = str_of(source, "data");
+    (str_of(source, "type") == "base64" && !data.is_empty() && data.len() <= PICTURE_CHARS).then(|| Picture { media_type: str_of(source, "media_type").to_string(), data: data.to_string() })
 }
 
 fn join_text(blocks: &[Block]) -> String {
@@ -1274,7 +1310,7 @@ pub(crate) mod tests {
             .collect();
         assert_eq!(serde_json::from_str::<Value>(&input).unwrap()["query"], "tide times example bay");
         let u = events.iter().find_map(|e| if let Event::User(u) = e { Some(u.clone()) } else { None }).unwrap();
-        assert!(matches!(&u.blocks[0], Block::ToolResult { tool_use_id, text, is_error: false } if tool_use_id == "toolu_search_1" && text.contains("example.com")));
+        assert!(matches!(&u.blocks[0], Block::ToolResult { tool_use_id, text, is_error: false, pictures } if tool_use_id == "toolu_search_1" && text.contains("example.com") && pictures.is_empty()));
         assert!(u.tool_use_result.is_some());
         let progress = events.iter().find_map(|e| if let Event::ToolProgress(p) = e { Some(p.clone()) } else { None }).unwrap();
         assert!(progress.heartbeat);
@@ -1372,5 +1408,30 @@ pub(crate) mod tests {
         assert_eq!(a.usage, None);
         let Event::Assistant(a) = parse_line(r#"{"type":"assistant","message":{"id":"m3","content":[],"usage":7}}"#).unwrap() else { panic!() };
         assert_eq!(a.usage, None);
+    }
+
+    /// As Claude Code 2.1.296 hands back a picture file it read: an image
+    /// block in the tool result's content (checked on the real one, 11 Nov
+    /// 2026).
+    #[test]
+    fn a_tool_result_keeps_the_pictures_it_carries() {
+        let line = r#"{"type":"user","message":{"role":"user","content":[{"tool_use_id":"toolu_read_1","type":"tool_result","content":[{"type":"text","text":"Read it."},{"type":"image","source":{"type":"base64","data":"iVBORw0KGgo=","media_type":"image/png"}},{"type":"image","source":{"type":"url","url":"https://example.com/a.png"}},{"type":"image","source":{"type":"base64","data":"","media_type":"image/png"}}]}]},"parent_tool_use_id":null}"#;
+        let Event::User(u) = parse_line(line).unwrap() else { panic!() };
+        let Block::ToolResult { tool_use_id, text, is_error, pictures } = &u.blocks[0] else { panic!("{:?}", u.blocks) };
+        assert_eq!((tool_use_id.as_str(), text.as_str(), *is_error), ("toolu_read_1", "Read it.", false));
+        // The one with data: one by its address, or empty, is none.
+        assert_eq!(pictures, &[Picture { media_type: "image/png".into(), data: "iVBORw0KGgo=".into() }]);
+        // Its data is never printed.
+        let shown = format!("{:?}", u.blocks[0]);
+        assert!(shown.contains("chars: 12") && !shown.contains("iVBOR"), "{shown}");
+        // No more than a few a result, none past the size kept.
+        let many: Vec<Value> = (0..RESULT_PICTURES + 3).map(|_| serde_json::json!({ "type": "image", "source": { "type": "base64", "data": "AAAA", "media_type": "image/jpeg" } })).collect();
+        let Block::ToolResult { pictures, .. } = block(&serde_json::json!({ "type": "tool_result", "tool_use_id": "t", "content": many })) else { panic!() };
+        assert_eq!(pictures.len(), RESULT_PICTURES);
+        let big = serde_json::json!({ "type": "image", "source": { "type": "base64", "data": "A".repeat(PICTURE_CHARS + 1), "media_type": "image/png" } });
+        assert_eq!(picture(&big), None);
+        // A result that is plain words has none.
+        let Block::ToolResult { pictures, .. } = block(&serde_json::json!({ "type": "tool_result", "tool_use_id": "t", "content": "Done" })) else { panic!() };
+        assert!(pictures.is_empty());
     }
 }

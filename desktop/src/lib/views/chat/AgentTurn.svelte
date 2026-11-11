@@ -17,9 +17,10 @@
    * `live`: this turn is working now; `single`: the agent's only turn (an
    * older agent's commands from the agent); `undoable`: Undo this turn offered;
    * `undone`: what Undo this turn put back (its line); `refused`: why it
-   * couldn't; `busy`; `onundo()`.
+   * couldn't; `busy`; `onundo()`; `onpicture(picture)`: open a picture one
+   * of its steps came back with.
    */
-  let { agent, turn, live = false, single = false, undoable = false, undone = '', refused = '', busy = false, onundo = null } = $props();
+  let { agent, turn, live = false, single = false, undoable = false, undone = '', refused = '', busy = false, onundo = null, onpicture = null } = $props();
 
   let allCommands = $state(false);
   /** Commands shown before "Show N more". */
@@ -67,7 +68,7 @@
 {#if timeline.length}
   <details class="section" open>
     <summary>Steps <span class="count">{stepCount}</span></summary>
-    <AgentTimeline items={timeline} {live} />
+    <AgentTimeline items={timeline} {live} onview={onpicture} />
   </details>
 {/if}
 

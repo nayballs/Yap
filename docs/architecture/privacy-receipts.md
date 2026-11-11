@@ -344,7 +344,8 @@ stay on (`config.yml`): an older Yap still opens one with a `body=`.
   — Memory's own export's Markdown (`memory::export::files`, About you on
   You.md) and `memory.json`; `agents/` (2026-11-07, [yap-code.md](./yap-code.md)) —
   `agents/agents.json` (every agent, each chat's Mode), `agents/folders.json` (the
-  folders agents may work in) and each agent's log as `agents/<id>.log.jsonl`, never
+  folders agents may work in), each agent's log as `agents/<id>.log.jsonl` and the
+  pictures its steps came back with in `agents/<id>.pictures/`, never
   its backups (copies of the person's own files); `dictionary/dictionary.csv` — the CSV the
   Dictionary's Export… writes (`dictionary_csv`: Heard, Written, Kind,
   Near-misses, Starred, a byte-order mark and Windows line ends; the rows
