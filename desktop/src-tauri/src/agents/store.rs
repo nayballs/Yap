@@ -105,6 +105,7 @@ impl ProblemNote {
         use crate::ai::claude_code::events::Problem as P;
         let (kind, resets_at) = match p {
             P::NotSignedIn => ("notSignedIn", None),
+            P::SignInBusy => ("signInBusy", None),
             P::RateLimited { resets_at, .. } => ("rateLimited", *resets_at),
             P::Billing => ("billing", None),
             P::Account { .. } => ("account", None),
@@ -157,9 +158,16 @@ pub struct Agent {
     pub denials: Vec<Denial>,
     /// Its latest turn's final words (its summary, its plan, its question).
     pub text: String,
-    /// Claude Code's estimate of the API's price for the agent so far
-    /// (`total_cost_usd`): on a plan what it would have cost, not a charge.
+    /// Claude Code's estimate of the API's price for the agent so far: on a
+    /// plan what it would have cost, not a charge. Each turn's own cost
+    /// added up (`TurnResult::cost_since`).
     pub cost: f64,
+    /// **Claude Code's own running total for its session**, as its latest
+    /// result said it (`total_cost_usd`): what its next turn's total goes on
+    /// from, on `--resume` (11 Nov 2026). 0: nothing kept (an agent from
+    /// before, or saved by an older Yap, which drops the field: its next
+    /// turn's cost is its share by its tokens).
+    pub session_total: f64,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub problem: Option<ProblemNote>,
     /// What else went wrong, in plain words.

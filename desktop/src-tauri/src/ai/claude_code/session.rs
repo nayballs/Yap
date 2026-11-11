@@ -971,6 +971,7 @@ fn read_events(shared: Arc<Shared>, stdout: std::process::ChildStdout, tx: Unbou
 fn problem_kind(p: &Problem) -> &'static str {
     match p {
         Problem::NotSignedIn => "not signed in",
+        Problem::SignInBusy => "sign-in busy",
         Problem::RateLimited { .. } => "rate limited",
         Problem::Billing => "billing",
         Problem::Account { .. } => "account",

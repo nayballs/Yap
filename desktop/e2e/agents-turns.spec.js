@@ -25,6 +25,10 @@
 //   one report. One it never reads (its turn ended first) waits as its next
 //   turn, on `--resume`, and the two are told in one report, never one each
 //   (the chat spoke twice in a row with nobody asking in between).
+// - Its work in the thread (11 Nov 2026, after Claude Code's own transcript):
+//   what the agent says as it goes, and a line for each stretch of steps
+//   ("Edited notes.md +1") that opens into them (views/chat/AgentWork.svelte,
+//   core/agents.js `workOf`, `workSummary`).
 // - "Start fresh" (`fresh: true`): a second agent, its tab named apart.
 // - Undo this turn (refused while a later turn changed the same file:
 //   "Undo the later change first"), and Undo all, asked first.
@@ -34,7 +38,7 @@ import { test as base, expect, openView, setConfig } from './support/fixtures.js
 import { startFakeLlm } from './support/fake-llm.js';
 import { RUNS } from './support/yap.js';
 import { newCodeChat, agentTimeline } from './support/code-chats.js';
-import { turnsOf, titleOf, turnStatusWord, canUndoTurn, pillsByAnswer, agentOfReport, turnOfReport, agentTabName, workedFor, turnNow } from '../src/lib/core/agents.js';
+import { turnsOf, titleOf, turnStatusWord, canUndoTurn, pillsByAnswer, agentOfReport, turnOfReport, agentTabName, workedFor, turnNow, workOf, workSummary } from '../src/lib/core/agents.js';
 
 const HERE = path.join(RUNS, 'agents-turns-spec');
 const SCRIPTS = path.join(HERE, 'scripts');
@@ -348,6 +352,49 @@ test('core/agents.js: an agent’s turns from its log, their words, the pills a 
   expect(turnOfReport(together, 'chat:9:7')?.n).toBe(2);
   expect(agentOfReport([together], 'chat:9:7', 9)?.id).toBe('c');
   expect(turnOfReport(old, 'chat:5:2')).toBeNull();
+  // Its work as the thread tells it: what it said, and a line for each
+  // stretch of steps between its words.
+  const itsLog = [
+    { turn: 1, step: 'Starting Claude Code', ts: 1 },
+    { turn: 1, said: "I'll look at the notes first.", ts: 2 },
+    { turn: 1, step: 'Reading notes.md', ts: 3 },
+    { turn: 1, step: 'Running npm test', command: 'npm test', about: 'Run the tests', ts: 4 },
+    { turn: 1, step: 'Running npm run lint', command: 'npm run lint', ts: 5 },
+    { turn: 1, step: 'Editing notes.md', file: 'notes.md', ts: 6 },
+    { turn: 1, diff: { file: 'notes.md', lines: ['+Watering: twice a week'], added: 4, removed: 1, kind: 'edit' }, ts: 7 },
+    { turn: 1, said: 'Now the legend.', ts: 8 },
+    { turn: 1, step: 'Writing legend.md', file: 'legend.md', ts: 9 },
+    { turn: 1, diff: { file: 'legend.md', lines: ['+Legend'], added: 12, removed: 0, kind: 'new' }, ts: 10 },
+    { turn: 1, said: 'Done. The legend is in.', ts: 11 },
+  ];
+  const work = workOf(itsLog, 'Done. The legend is in.');
+  // (Housekeeping before its first words isn't a stretch of work; its final words are its report's.)
+  expect(work.map((w) => [w.kind, w.text ?? w.steps.length])).toEqual([
+    ['said', "I'll look at the notes first."],
+    ['work', 4],
+    ['said', 'Now the legend.'],
+    ['work', 1],
+  ]);
+  expect(workSummary(work[1])).toEqual([{ text: 'Ran 2 commands' }, { text: 'read a file' }, { text: 'edited notes.md', added: 4, removed: 1 }]);
+  // One step: its own line, as done, with what it changed.
+  expect(workSummary(work[3])).toEqual([{ text: 'Wrote legend.md', added: 12, removed: 0 }]);
+  // The stretch it's on now: the step it's on, as it is.
+  expect(workSummary(work[1], true)).toEqual([{ text: 'Editing notes.md' }]);
+  // Still working: its words so far all show, and housekeeping alone is what it's on.
+  expect(workOf(itsLog).at(-1)).toMatchObject({ kind: 'said', text: 'Done. The legend is in.' });
+  expect(workOf([{ step: 'Starting Claude Code' }], '', true).map((w) => workSummary(w, true))).toEqual([[{ text: 'Starting Claude Code' }]]);
+  expect(workOf([{ step: 'Starting Claude Code' }])).toEqual([]);
+  // Several files: counted, their lines added up; searches and the web in words.
+  const many = workOf([
+    { step: 'Editing a.js', file: 'a.js' },
+    { diff: { file: 'a.js', lines: [], added: 2, removed: 2, kind: 'edit' } },
+    { step: 'Editing b.js', file: 'b.js' },
+    { diff: { file: 'b.js', lines: [], added: 5, removed: 0, kind: 'edit' } },
+    { step: 'Searching the files for "legend"' },
+    { step: 'Searching the web for bed spacing' },
+  ]);
+  expect(workSummary(many[0])).toEqual([{ text: 'Searched the files' }, { text: 'looked on the web' }, { text: 'edited 2 files', added: 7, removed: 2 }]);
+  expect(workOf([])).toEqual([]);
   // Two agent tabs in one folder are named apart: their first requests, else a number.
   const a = { kind: 'agent', agent: { id: 'j1', folder: 'garden-planner', turnList: [{ title: 'Add a watering schedule' }] } };
   const b = { kind: 'agent', agent: { id: 'j2', folder: 'garden-planner', turnList: [{ title: 'Start over on the planner' }] } };
@@ -484,6 +531,22 @@ test('two requests in a Code chat: one agent, one tab with two turns, two report
   await expect(reports).toHaveCount(2);
   await expect(reports.nth(1)).toHaveAttribute('data-turn', '2');
   await expect(reports.nth(1).locator('.jtitle')).toHaveText('Agent done · garden-planner');
+  // Its work, in the thread, under the answer that sent each turn: what it
+  // said as it went (never its final words: the report tells those), and a
+  // line for each stretch of steps, which opens into them.
+  const works = thread(main).getByTestId('chat-agent-work');
+  await expect(works).toHaveCount(2);
+  await expect(works.nth(0)).toHaveAttribute('data-turn', '1');
+  await expect(works.nth(0).getByTestId('chat-agent-work-said')).toHaveText(["I'll add the watering schedule to notes.md."]);
+  await expect(works.nth(0).getByTestId('chat-agent-work-steps').locator('.wtext')).toHaveText([/^Edited notes\.md\s*\+1$/]);
+  await expect(works.nth(1).getByTestId('chat-agent-work-said')).toHaveText(['Now the minimap button.']);
+  await expect(works.nth(1).getByTestId('chat-agent-work-steps').locator('.wtext')).toHaveText([/^Edited 2 files\s*\+2$/]);
+  await expect(works.nth(1).locator('.wstep')).toHaveCount(0);
+  await works.nth(1).getByRole('button', { name: /Edited 2 files/ }).click();
+  await expect(works.nth(1).locator('.wstep .stext')).toHaveText(['Editing notes.md', 'Writing minimap.js']);
+  await shot(main, '10-its-work-in-the-thread');
+  await works.nth(1).getByRole('button', { name: /Edited 2 files/ }).click();
+  await expect(works.nth(1).locator('.wstep')).toHaveCount(0);
   await expect(reports.nth(1).locator('.jline')).toHaveText('Changed notes.md, minimap.js');
   await closeTab(main);
   await reports.nth(1).getByRole('button', { name: 'Open the agent in garden-planner' }).click();
@@ -523,6 +586,10 @@ test('a note while the agent works goes to it now: said so, read at its next ste
   await expect(tab(main).getByTestId('chat-agent-row')).toHaveCount(1);
   await expect(rowAt(main, 1)).toHaveAttribute('data-state', 'running');
   await expect(rowAt(main, 1).getByTestId('chat-agent-row-line')).toHaveText('Your note is with the agent: it reads it at its next step');
+  // …and in the thread: the line it's on, live.
+  const working = thread(main).getByTestId('chat-agent-work');
+  await expect(working).toHaveAttribute('data-live', 'true');
+  await expect(working.locator('[data-busy="true"] .wtext')).toHaveText('Your note is with the agent: it reads it at its next step');
   await shot(main, '03-agent-tab-a-note-with-the-agent');
   // Its tool call ends: it reads the note, and answers once for both.
   const done = await ended(yap, agent.id, 40_000);
@@ -542,6 +609,8 @@ test('a note while the agent works goes to it now: said so, read at its next ste
   await expect(thread(main).getByTestId('chat-agent-report')).toHaveCount(1);
   await expect(lastAnswer(main)).toHaveText('Done. It read notes.md and kept the headings.');
   // Its tab: the note read, in the turn's steps.
+  await expect(thread(main).getByTestId('chat-agent-work')).toHaveAttribute('data-live', 'false');
+  await expect(thread(main).getByTestId('chat-agent-work').locator('.wtext')).toHaveText(['Read notes.md']);
   await agentTimeline(main, 1);
   await expect(turnAt(main, 1)).toContainText('Read your note');
   await shot(main, '06-a-note-read-one-report');

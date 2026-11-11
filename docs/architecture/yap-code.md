@@ -262,9 +262,11 @@ carrying on with its context; so are agents now.
   (checked on the real 2.1.296: [ai-models.md](./ai-models.md#a-session-sessionrs));
   its own app does the same with a message sent while it works. Until then Yap
   kept the note until the turn ended and ran it as a turn of its own: a new
-  process that read the whole conversation again (in a Lab run on the real
-  Claude Code, an 11-second note cost as much as the 27-second turn before
-  it: $0.34 against $0.32) and a second report.
+  process and a second report. (Its cost looked as big as the turn before
+  it, $0.34 against $0.32 in a Lab run: that was the session's running
+  total shown as the turn's own, put right the same day — [What a turn
+  cost](#what-a-turn-cost). A follow-up on the same model reads the
+  conversation from Claude Code's cache, a cent or two.)
   - **Handed over**: written to the running Claude Code's stdin with a line
     of Yap's own after it (`NOTE_LINE`: take it into account, carry on,
     cover it in the summary). The chat says "Passed that on: the agent in
@@ -1138,6 +1140,39 @@ instead of a terminal (rebuilt after the maintainer's first real agent,
   turn's `todos` from `yap-agent`); once it ends it stays as its record,
   folded to "7 to-dos · all done" ("5 done", "none done yet") with ▸ to
   open. No list, no card; a plain chat's thread is as it was.
+- **Its work, in the thread** (`AgentWork.svelte`, 2026-11-11, after Claude
+  Code's own transcript; a small chunk of its own), in a Code chat only. The
+  thread used to say "On it" and then nothing until the report: what the
+  agent said and did was only in its tab. Now, under the pill and the to-do
+  card of each turn:
+  - **what it says as it goes**, as plain words with no bubble (its `said`
+    events, rendered as Markdown);
+  - **one quiet line for each stretch of steps between its words**, as Claude
+    Code writes one: "Ran 2 commands, read a file, edited notes.md +4 −1 ›"
+    (`core/agents.js` `workOf` groups the turn's events; `workSummary` words
+    a group: commands, files read, searches, the web, then the files it
+    edited with the lines added in green and removed in red; a stretch of one
+    step is that step's own line, as done: "Read notes.md", "Wrote
+    legend.md +12"). A click opens it into its steps, each command under its
+    line;
+  - **while it works**, the last line is the step it's on, with a spinner
+    (`agents.steps`), and becomes its summary once the agent speaks or ends;
+  - **never its final words**: its report tells those, right below.
+    Housekeeping alone ("Starting Claude Code") is a line only while it's
+    what the agent is on.
+  - The log: `stores/agentLogs.svelte.js` reads a shown agent's once
+    (`agent_get`, as its tab does) and keeps it in step with `yap-agent`.
+    The agents store still keeps no log.
+  - A note handed to the agent mid-work has no turn of its own, so the
+    stream stays under the answer that sent the turn, above the note.
+- **No boxes in a Code chat's thread** (2026-11-11, the maintainer: "we
+  don't need all this open stuff in the chat, you don't do that in Claude
+  Code"). There the pill and the report card are quiet lines of the thread
+  (`quiet` on `AgentPills` and `AgentReportCard`): the folder and the
+  turn's title in muted type with no border and no "Open" word; "Agent done ·
+  garden-planner · Changed notes.md" with a small chevron. A click still
+  opens the agent's tab at that turn, and a plan's Go ahead is still a
+  button. A plain chat's pills and cards are as they were.
 - **The report card** (`AgentReportCard.svelte`): the `agentReport` marker as "Agent
   done · garden-planner" (or didn't finish, has a question, its plan is
   ready, is carrying out its plan: as its turn ended), what it changed in a
@@ -1190,6 +1225,40 @@ instead of a terminal (rebuilt after the maintainer's first real agent,
   once per window by ControlPanel); `core/agents.js` (the words they share:
   status, cost lines, lengths of time, steps from a log, the pills, problems,
   the Mode's keys; pure); `core/money.js` `dollars`.
+
+## What a turn cost
+
+Claude Code's `total_cost_usd` is **its session's running total**, not the
+turn's (checked on 2.1.296, 11 Nov 2026, in a Yap Lab run's record): every
+result of a process says more than the one before, and the first result of a
+process started with `--resume` goes on from what the session had cost — its
+`modelUsage` lists the earlier turn's model with its tokens and cost, while
+`usage` is the turn's own.
+
+Yap read it as the turn's cost. So a follow-up showed the whole session's
+dollars (in a Lab run an 11-second follow-up read "≈ $0.34" when its own
+cost was two cents; in a long session, many dollars), an agent's total
+counted every earlier turn again with each new one, and a plan chat's
+answers were each counted at the total so far (its "≈ $ on the API" and the
+usage totals).
+
+- **A turn's own cost** is what the running total went up by
+  (`TurnResult::cost_since`): since the process's previous result, or — a
+  resumed session — since what was kept of it (`Agent.sessionTotal`; a plan
+  chat's `Kept.totalMicros` and `Warm::total`). A new session starts from
+  nothing.
+- **Nothing kept** (an agent from before, a file an older Yap saved): the
+  turn's share of its model's running cost, by its tokens weighed as the API
+  prices them. A total that started again (nothing of earlier turns in
+  `modelUsage`) is all the turn's.
+- **Agents from before keep the numbers they had**: their turns' costs were
+  saved as the totals then, and nothing says which were.
+- **What a follow-up really costs**: on the same model, a cent or two — the
+  conversation comes from Claude Code's cache (an hour's). **On another
+  model it's read afresh**: in the Lab a one-line follow-up the chat sized to
+  another model wrote 49,000 tokens (the session's tools and prompt) into
+  that model's cache, $0.22. The chat sizes each turn, so it can switch
+  models between turns without knowing that.
 
 ## Reports
 
@@ -1777,7 +1846,9 @@ the build's own stand-in replaying `script` from now on),
     answer); a question sent just before a report is answered (its card
     still shows, above the question, and that answer tells the report
     first, once); asked how it's getting on just as it finishes (that
-    answer tells the result, the report adds its card alone); "start fresh" a
+    answer tells the result, the report adds its card alone); its work in
+    the thread (what it said, a line for each stretch of steps that opens
+    into them, the step it's on while it works); "start fresh" a
     second agent, its tab named apart; Undo this turn (refused while a later
     turn changed the same file), Undo all asked first. Light and dark.
   - `agents-plans.spec.js`: plans and the go-ahead — a Bypass chip never stops

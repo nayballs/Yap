@@ -232,7 +232,7 @@
           {/if}
           {#if m.kind === 'agentReport'}
             {#await import('./AgentReportCard.svelte') then { default: AgentReportCard }}
-              <AgentReportCard {m} conversation={chat.activeId} onopen={openAgent} {room} onpicture={openShared} />
+              <AgentReportCard {m} conversation={chat.activeId} onopen={openAgent} {room} onpicture={openShared} quiet={!!code?.current} />
             {/await}
           {:else}
             <ChatMessage
@@ -255,13 +255,19 @@
           {/if}
           {#if agentPills.get(i)?.length}
             {#await import('./AgentPills.svelte') then { default: AgentPills }}
-              <AgentPills agents={agentPills.get(i)} onopen={openAgent} />
+              <AgentPills agents={agentPills.get(i)} onopen={openAgent} quiet={!!code?.current} />
             {/await}
             {#if code?.current}
               <!-- In a Code chat: each turn's to-do list under its pill, live while it works, then folded as its record. -->
               {#each agentPills.get(i).filter(hasTodos) as p (`${p.id}:${p.turn ?? 1}`)}
                 {#await import('./AgentTodoCard.svelte') then { default: AgentTodoCard }}
                   <AgentTodoCard agent={p} turn={p.turn ?? 1} line={agents.steps[p.id] || ''} />
+                {/await}
+              {/each}
+              <!-- …and its work as it goes, as Claude Code's own transcript tells it: what it says, and a line for each stretch of steps. -->
+              {#each agentPills.get(i) as p (`work:${p.id}:${p.turn ?? 1}`)}
+                {#await import('./AgentWork.svelte') then { default: AgentWork }}
+                  <AgentWork agent={p} turn={p.turn ?? 1} line={agents.steps[p.id] || ''} />
                 {/await}
               {/each}
             {/if}

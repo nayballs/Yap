@@ -20,7 +20,8 @@
    * `conversation`: the chat's id; `onopen(agent)`; `room`: the thread's
    * width (CSS px) and `onpicture(p)` for those pictures.
    */
-  let { m, conversation = null, onopen = null, room = 0, onpicture = null } = $props();
+  /** `quiet`: a Code chat's thread — a plain line that opens the agent's tab, no box and no "Open" (11 Nov 2026, as Claude Code's transcript). */
+  let { m, conversation = null, onopen = null, room = 0, onpicture = null, quiet = false } = $props();
 
   const folder = $derived(reportFolder(m.text));
   const agent = $derived(agentOfReport(agents.list, m.id, conversation, folder));
@@ -51,7 +52,7 @@
   }
 </script>
 
-<div class="agentreport" role="note" aria-label={`${title} · ${agent?.folder || folder}`} data-testid="chat-agent-report" data-msg-id={m.id || undefined} data-turn={turn?.n ?? undefined}>
+<div class="agentreport" class:quiet role="note" aria-label={`${title} · ${agent?.folder || folder}`} data-testid="chat-agent-report" data-msg-id={m.id || undefined} data-turn={turn?.n ?? undefined}>
   <span class="jdot tone-{tone}" aria-hidden="true"></span>
   <div class="jtext">
     <p class="jtitle">{title} · <span class="jfolder">{agent?.folder || folder || 'a folder'}</span></p>
@@ -64,7 +65,9 @@
     </button>
   {/if}
   {#if agent}
-    <button type="button" class="jopen" onclick={() => onopen?.({ ...agent, turn: turn?.n ?? null })} aria-label={`Open the agent in ${agent.folder}`}>Open</button>
+    <button type="button" class="jopen" onclick={() => onopen?.({ ...agent, turn: turn?.n ?? null })} aria-label={`Open the agent in ${agent.folder}`} title={quiet ? 'Open the agent' : undefined}>
+      {#if quiet}<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 6l6 6-6 6" /></svg>{:else}Open{/if}
+    </button>
   {/if}
 </div>
 {#if m.files?.length}
@@ -146,6 +149,52 @@
   }
   .jopen:hover {
     border-color: var(--yap-border-hover);
+  }
+  /* A Code chat's: a quiet line of the thread. */
+  .agentreport.quiet {
+    gap: 7px;
+    max-width: 86%;
+    padding: 1px 2px 1px 13px;
+    border: 0;
+    border-radius: 0;
+    background: none;
+    color: var(--yap-muted);
+    font-size: 12px;
+  }
+  .agentreport.quiet .jdot {
+    width: 6px;
+    height: 6px;
+  }
+  .agentreport.quiet .jtext {
+    display: flex;
+    flex: 0 1 auto;
+    align-items: baseline;
+    gap: 6px;
+  }
+  .agentreport.quiet .jtitle,
+  .agentreport.quiet .jfolder {
+    font-weight: 500;
+    color: var(--yap-muted);
+    white-space: nowrap;
+  }
+  .agentreport.quiet .jline::before {
+    content: '· ';
+  }
+  .agentreport.quiet .jopen {
+    display: inline-flex;
+    align-items: center;
+    height: auto;
+    padding: 2px;
+    border: 0;
+    background: none;
+    color: var(--yap-muted);
+  }
+  .agentreport.quiet .jopen:hover {
+    color: var(--yap-fg-80);
+  }
+  .agentreport.quiet .jopen svg {
+    width: 12px;
+    height: 12px;
   }
   .jopen:focus-visible,
   .jgo:focus-visible {
