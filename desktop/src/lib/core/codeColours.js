@@ -20,6 +20,9 @@
 //   with the lines round them as they were before, so a comment or a string
 //   that runs over several lines is still one.
 //
+// Chat's answers use the same highlighter for their fenced code
+// (ui/colourCode.js, `fenceLanguage`).
+//
 // Pure but for `loadColours`. Never used by the phone's page.
 
 /** A file's ending → its highlight.js language. */
@@ -94,6 +97,20 @@ export function languageOf(file) {
   if (BY_NAME[name]) return BY_NAME[name];
   const dot = name.lastIndexOf('.');
   return dot > 0 ? (BY_ENDING[name.slice(dot + 1)] ?? null) : null;
+}
+
+/** A fence's names for a language the highlighter calls something else (its own short names — js, ts, py, rs, sh, yml, html, md… — it knows itself). */
+const FENCE = { shell: 'bash', console: 'bash', terminal: 'bash', svelte: 'xml', vue: 'xml', jsonc: 'json', jsonl: 'json', ps: 'powershell', pwsh: 'powershell', bat: 'dos', cmd: 'dos', toml: 'ini', 'c++': 'cpp', 'c#': 'csharp' };
+
+/**
+ * The language a rendered code block names (core/markdown.js: a class on its
+ * `code`, `lang-js`), as the highlighter is asked for it; `null` for none.
+ * Whether the highlighter has it is `colourLines`' to say.
+ */
+export function fenceLanguage(className) {
+  const name = String(className || '').split(/\s+/).find((c) => c.startsWith('lang-'))?.slice(5).toLowerCase();
+  if (!name) return null;
+  return FENCE[name] ?? name;
 }
 
 /** A command's language by how it's written: PowerShell's (a cmdlet, `$env:`, `$_`, `-ErrorAction`), else bash. */

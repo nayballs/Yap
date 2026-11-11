@@ -194,7 +194,7 @@ test('raw HTML from a model shows as text, never as markup', () => {
   expect(renderMarkdown('<style>body{display:none}</style>')).not.toContain('<style');
   // In a code block too.
   expect(renderMarkdown('```html\n<script>alert(1)</script>\n```')).toBe(
-    '<pre class="md-code"><code>&lt;script&gt;alert(1)&lt;/script&gt;</code></pre>'
+    '<pre class="md-code"><code class="lang-html">&lt;script&gt;alert(1)&lt;/script&gt;</code></pre>'
   );
 });
 
@@ -236,14 +236,22 @@ test('whatever the input, only the elements and attributes Yap makes come out', 
 
 test('code: fences, indented blocks and inline code; a cut-off fence still shows', () => {
   expect(renderMarkdown('Run:\n\n```js\nconsole.log("<hi>");\n```\n\nDone.')).toBe(
-    '<p>Run:</p>\n<pre class="md-code"><code>console.log("&lt;hi&gt;");</code></pre>\n<p>Done.</p>'
+    '<p>Run:</p>\n<pre class="md-code"><code class="lang-js">console.log("&lt;hi&gt;");</code></pre>\n<p>Done.</p>'
   );
   expect(renderMarkdown('Then:\n\n    npm run build\n')).toBe('<p>Then:</p>\n<pre class="md-code"><code>npm run build</code></pre>');
   expect(renderMarkdown('Use `**not bold**` here')).toBe('<p>Use <code>**not bold**</code> here</p>');
   // An answer cut off mid-block (a limit, a stop) still shows its code.
   expect(renderMarkdown('Here:\n\n```python\ndef f():\n    return 1')).toBe(
-    '<p>Here:</p>\n<pre class="md-code"><code>def f():\n    return 1</code></pre>'
+    '<p>Here:</p>\n<pre class="md-code"><code class="lang-python">def f():\n    return 1</code></pre>'
   );
+  // A fence's language is a class on its code (its first word, lower-cased), for the view to colour it
+  // afterwards from the text (ui/colourCode.js): the HTML itself never has colours in it.
+  expect(renderMarkdown('```TypeScript title="a.ts"\nlet a = 1;\n```')).toBe('<pre class="md-code"><code class="lang-typescript">let a = 1;</code></pre>');
+  expect(renderMarkdown('```c++\nint a;\n```')).toBe('<pre class="md-code"><code class="lang-c++">int a;</code></pre>');
+  // No language, or a name that isn't a short plain one: no class, and nothing of it gets through as HTML.
+  expect(renderMarkdown('```\nplain\n```')).toBe('<pre class="md-code"><code>plain</code></pre>');
+  expect(renderMarkdown('```"><img/src=x>\nx\n```')).toBe('<pre class="md-code"><code>x</code></pre>');
+  expect(renderMarkdown(`\`\`\`${'a'.repeat(40)}\nx\n\`\`\``)).toBe('<pre class="md-code"><code>x</code></pre>');
 });
 
 const SOURCES = [

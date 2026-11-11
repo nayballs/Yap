@@ -8,6 +8,7 @@
   // do, and its final words (markdown). An agent is one Claude Code session per
   // Code chat: each follow-up is a turn of its own (agents/runner.rs).
   import { renderMarkdown } from '../../core/markdown.js';
+  import { colourCode } from '../../ui/colourCode.js';
   import { timelineOf, latestStep, todosOf, todoCount, diffsOf, commandsOf, NO_BACKUPS } from '../../core/agents.js';
   import AgentTimeline from './AgentTimeline.svelte';
   import AgentFiles from './AgentFiles.svelte';
@@ -118,7 +119,7 @@
   <div class="section final" data-testid="chat-agent-text">
     <h3>{turn.plan ? 'Its plan' : 'What it said'}</h3>
     <!-- eslint-disable-next-line svelte/no-at-html-tags — renderMarkdown sanitises its output -->
-    <div class="md">{@html renderMarkdown(turn.text)}</div>
+    <div class="md" use:colourCode>{@html renderMarkdown(turn.text)}</div>
   </div>
 {/if}
 

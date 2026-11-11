@@ -743,6 +743,39 @@ li.md-loose > p:last-child {
 .md-table .r {
   text-align: right;
 }
+/* Code colours (core/codeColours.js gives each token its kind): the rows of
+   a Code chat's thread (views/chat/StepRows.svelte) and an answer's fenced
+   code (ui/colourCode.js). */
+.syn-k {
+  color: var(--yap-syn-keyword);
+}
+.syn-s {
+  color: var(--yap-syn-string);
+}
+.syn-c {
+  color: var(--yap-syn-comment);
+}
+.syn-n {
+  color: var(--yap-syn-number);
+}
+.syn-f {
+  color: var(--yap-syn-function);
+}
+.syn-t {
+  color: var(--yap-syn-type);
+}
+.syn-a {
+  color: var(--yap-syn-attr);
+}
+.syn-r {
+  color: var(--yap-syn-meta);
+}
+.syn-b {
+  font-weight: 600;
+}
+.syn-i {
+  font-style: italic;
+}
 pre.md-code {
   margin: 6px 0;
   padding: 8px 10px;

@@ -10,6 +10,7 @@
   // read, "↓" to go back down. A step whose tool call came back with a
   // picture ends its line with it, small (StepPictures; `onview` opens it).
   import { renderMarkdown } from '../../core/markdown.js';
+  import { colourCode } from '../../ui/colourCode.js';
   import { stepKind, longSaid } from '../../core/agents.js';
   import { followEnd, jumpToEnd } from '../../ui/followEnd.js';
   import StepPictures from './StepPictures.svelte';
@@ -33,7 +34,7 @@
           {@const folds = longSaid(t.text)}
           <li class="said" class:folded={folds && !unfolded[i]} data-testid="chat-agent-said">
             <!-- eslint-disable-next-line svelte/no-at-html-tags — renderMarkdown sanitises its output -->
-            <div class="md">{@html renderMarkdown(t.text)}</div>
+            <div class="md" use:colourCode>{@html renderMarkdown(t.text)}</div>
             {#if folds}
               <button type="button" class="fold" aria-expanded={!!unfolded[i]} onclick={() => (unfolded = { ...unfolded, [i]: !unfolded[i] })}>
                 {unfolded[i] ? 'Show less' : 'Show more'}

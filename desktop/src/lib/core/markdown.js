@@ -27,7 +27,9 @@
 //   the rule line's alignment as classes `c` / `r`, and end at a line
 //   without a pipe;
 // - fenced and indented code is `pre.md-code > code`; a fence an answer cut
-//   off still shows;
+//   off still shows; a fence that names its language has it as a class on
+//   its code (`lang-js`), for ui/colourCode.js to colour it afterwards (the
+//   HTML made here never has colours in it);
 // - a list item holding one paragraph renders tight even when the items
 //   have blank lines between them (models write "1. …\n\n2. …"); one with
 //   several is `li.md-loose`; a change of bullet mark doesn't end a list;
@@ -304,9 +306,18 @@ rules.yap_task = (tokens, idx) => {
   return `<input type="checkbox" disabled${checked ? ' checked' : ''} aria-label="${escapeHtml(label || 'Task')}"> `;
 };
 
-// Code: monospace, kept verbatim (escaped), no highlighting.
+// Code: monospace, kept verbatim (escaped). No colours here: a fence's
+// language, when it names one, goes on its code as a class (`lang-js`), and
+// the view colours it afterwards (ui/colourCode.js), from the text.
+/** A language class's shape: a short name in letters, digits and `+ # . -`. */
+const LANG_CLASS = /^lang-[a-z0-9+#.-]{1,20}$/;
+function fenceClass(token) {
+  if (token.type !== 'fence') return '';
+  const name = `lang-${String(token.info || '').trim().split(/\s+/)[0].toLowerCase()}`;
+  return LANG_CLASS.test(name) ? ` class="${name}"` : '';
+}
 rules.fence = rules.code_block = (tokens, idx) =>
-  `<pre class="md-code"${lineAttr(tokens[idx])}><code>${escapeHtml(tokens[idx].content.replace(/\n$/, ''))}</code></pre>\n`;
+  `<pre class="md-code"${lineAttr(tokens[idx])}><code${fenceClass(tokens[idx])}>${escapeHtml(tokens[idx].content.replace(/\n$/, ''))}</code></pre>\n`;
 
 // Tables: in a sideways-scrolling wrapper, alignment as classes, compact.
 const ALIGN = { center: ' class="c"', right: ' class="r"' };
@@ -369,7 +380,11 @@ function purify() {
     // A block's source lines (`lines`): two numbers, nothing else.
     if (node.hasAttribute('data-line') && !/^\d+-\d+$/.test(node.getAttribute('data-line'))) node.removeAttribute('data-line');
     if (node.hasAttribute('class')) {
-      const kept = node.getAttribute('class').split(/\s+/).filter((c) => CLASSES.has(c));
+      // (A code block's language is the one class that isn't a fixed word: its shape is checked, on `code` only.)
+      const kept = node
+        .getAttribute('class')
+        .split(/\s+/)
+        .filter((c) => CLASSES.has(c) || (node.nodeName === 'CODE' && LANG_CLASS.test(c)));
       if (kept.length) node.setAttribute('class', kept.join(' '));
       else node.removeAttribute('class');
     }

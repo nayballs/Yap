@@ -13,6 +13,7 @@
   // right-click menu: Copy / Copy as Markdown / Read aloud, a question's
   // Copy.
   import { renderMarkdown } from '../../core/markdown.js';
+  import { colourCode } from '../../ui/colourCode.js';
   import { paidLine, whereItRuns } from '../../core/aiModel.js';
   import { closePartial, settle } from '../../core/streaming.js';
   import { menuKey, openContextMenu } from '../../ui/contextMenu.svelte.js';
@@ -124,7 +125,7 @@
     <!-- (Its passage pills are links: Enter on one clicks it.) -->
     <!-- eslint-disable-next-line svelte/no-at-html-tags — renderMarkdown sanitises its output -->
     <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
-    <div class="cbody" onclick={clickAnswer}>{@html renderMarkdown(m.streaming ? closePartial(m.text) : m.text, { sources })}</div>
+    <div class="cbody" onclick={clickAnswer} use:colourCode>{@html renderMarkdown(m.streaming ? closePartial(m.text) : m.text, { sources })}</div>
     {#if m.streaming && m.waiting}
       <p class="cwait" aria-live="polite">Waiting for your dictation to finish…</p>
     {/if}

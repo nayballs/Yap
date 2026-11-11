@@ -84,7 +84,7 @@ import {
   groupPictures,
   shownStepPicture,
 } from '../src/lib/core/agents.js';
-import { LANGUAGES, languageOf, shellOf, kindOf, tokensOf, lineTokens, colourLines, colourDiff } from '../src/lib/core/codeColours.js';
+import { LANGUAGES, languageOf, fenceLanguage, shellOf, kindOf, tokensOf, lineTokens, colourLines, colourDiff } from '../src/lib/core/codeColours.js';
 import hljs from '../src/lib/core/codeColours.hljs.js';
 
 const HERE = path.join(RUNS, 'agents-turns-spec');
@@ -739,6 +739,11 @@ test('core/codeColours.js: a file’s language, a command’s shell, the highlig
     'powershell',
   ]);
   expect(['notes.txt', '.gitignore', 'README', 'beds.png', '', null].map(languageOf)).toEqual([null, null, null, null, null, null]);
+  // A rendered code block's language (core/markdown.js: a class on its code), as the highlighter is asked for
+  // it: its own short names as they are, a few it calls something else; whether it has one is colourLines' to say.
+  expect(['lang-js', 'md lang-svelte', 'lang-shell', 'lang-c++', 'lang-PS', 'lang-klingon', 'md-code', '', null].map(fenceLanguage)).toEqual(['js', 'xml', 'bash', 'cpp', 'powershell', 'klingon', null, null, null]);
+  expect(colourLines(hljs, 'let a = 1;', fenceLanguage('lang-js'))[0].map((t) => t.kind)).toEqual(['k', '', 'n', '']);
+  expect(colourLines(hljs, 'x', fenceLanguage('lang-klingon'))).toBeNull();
   // A command's shell by how it's written.
   expect(['npm test', 'git log --oneline -5', 'Get-ChildItem src | Select-Object Name', 'echo $env:PATH', 'ls | ForEach-Object { $_ }'].map(shellOf)).toEqual(['bash', 'bash', 'powershell', 'powershell', 'powershell']);
   // The highlighter's HTML read into tokens: its text unescaped, never markup; the innermost span that has a colour wins.
