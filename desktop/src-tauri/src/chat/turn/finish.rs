@@ -177,5 +177,6 @@ pub(super) async fn save(
         files,
         pages: shown_pages,
         offers,
+        direct: None,
     })
 }

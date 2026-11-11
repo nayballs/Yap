@@ -32,10 +32,13 @@
   // Code chat each turn's to-do card under its pill (AgentTodoCard), and a
   // running agent's permission prompts for this chat — each in a small chunk.
   import { agents, agentById } from '../../stores/agents.svelte.js';
-  import { pillsByAnswer } from '../../core/agents.js';
+  import { pillsByAnswer, pillsByQuestion } from '../../core/agents.js';
   import { chatStatus } from '../../stores/chatStatus.svelte.js';
 
   const agentPills = $derived(pillsByAnswer(agents.list, chat.activeId, chat.messages));
+  // …and under the person's own message, in a Code chat that works directly
+  // (agents/direct.rs): its session's work, with no answer of Chat's between.
+  const directPills = $derived(pillsByQuestion(agents.list, chat.activeId, chat.messages));
   const asks = $derived(chat.activeId == null ? [] : agents.approvals.filter((a) => a.conversation === chat.activeId));
   // Answered from a paired phone (Remote Control): "Allowed from Office phone".
   const answeredRemote = $derived(chat.activeId == null ? [] : agents.remoteAnswers.filter((a) => a.conversation === chat.activeId));
@@ -252,6 +255,22 @@
               conversation={chat.activeId}
               onshared={openShared}
             />
+          {/if}
+          {#if directPills.get(i)?.length}
+            <!-- A Code chat that works directly: what its session says and does, under the message that asked. -->
+            {#await import('./AgentPills.svelte') then { default: AgentPills }}
+              <AgentPills agents={directPills.get(i)} onopen={openAgent} quiet />
+            {/await}
+            {#each directPills.get(i).filter(hasTodos) as p (`${p.id}:${p.turn ?? 1}`)}
+              {#await import('./AgentTodoCard.svelte') then { default: AgentTodoCard }}
+                <AgentTodoCard agent={p} turn={p.turn ?? 1} line={agents.steps[p.id] || ''} />
+              {/await}
+            {/each}
+            {#each directPills.get(i) as p (`work:${p.id}:${p.turn ?? 1}`)}
+              {#await import('./AgentWork.svelte') then { default: AgentWork }}
+                <AgentWork agent={p} turn={p.turn ?? 1} line={agents.steps[p.id] || ''} />
+              {/await}
+            {/each}
           {/if}
           {#if agentPills.get(i)?.length}
             {#await import('./AgentPills.svelte') then { default: AgentPills }}

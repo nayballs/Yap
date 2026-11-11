@@ -323,7 +323,7 @@ async fn send_turn(
         "toolsUsed": turn.tools_used,
         "model": turn.model,
         "sources": turn.sources,
-        "messageId": turn.message_id(),
+        "messageId": turn.direct.is_none().then(|| turn.message_id()),
         "userMessageId": format!("chat:{}:{}", turn.conversation_id, turn.user_index),
         "speak": speak && !turn.stopped,
         // What's said: as much as "Read aloud" says (`assistant::SpokenLength`).
@@ -344,5 +344,9 @@ async fn send_turn(
         // The pages it brought up (pages.rs): their tabs; its buttons.
         "pages": turn.pages,
         "offers": turn.offers,
+        // Sent straight to the Code chat's session (agents/direct.rs): no
+        // answer here — its work shows under the question, and its own
+        // words come as its report.
+        "direct": turn.direct,
     }))
 }

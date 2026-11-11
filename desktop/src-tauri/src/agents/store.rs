@@ -310,6 +310,14 @@ pub struct TurnNote {
     /// report then says it as it always did.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub told_at: Option<u64>,
+    /// **The person's own message, sent straight to the Code chat's
+    /// session** (`agents/direct.rs`, 11 Nov 2026), not a brief Chat's model
+    /// worded: its final words are the chat's answer as they are, and the
+    /// thread shows its work under that message. A new field of the turn's
+    /// own: an older Yap drops it on its save, and the turn then reads as
+    /// one Chat sent (its report worded by Chat's model).
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub direct: bool,
     /// Undo this turn put its files back.
     pub undone: bool,
     /// **Its to-do list**, as its latest `TodoWrite` left it (the Agent

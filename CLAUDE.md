@@ -261,6 +261,7 @@ One folder per area (an area's `<area>.rs` lists its modules); a big module's pa
 
 **Yap Code** — [yap-code.md](./docs/architecture/yap-code.md)
 - `agents.rs` (+ `agents/`, `agents/remote.rs`) — Yap Code (off by default): the person's own Claude Code sent to work in a workspace, at the chat's Mode (Bypass: nothing asks, after outside content either; read-only runs for "catch up"), on the model and effort Chat sizes it to (`agents/sizing.rs`: the person's words win; Settings' optional "Most Chat may choose"); its name one constant (`agents::FEATURE`).
+- `agents/direct.rs` — a Code chat that works directly (on the Claude plan, on by default): what's typed goes straight to the chat's Claude Code session, its own words the answer; never for a spoken or phone question, nor a chat off the plan (Chat's model hands those over).
 - `agents/usage.rs` — what each agent turn used: tokens, the context's fill, its cost estimated (the Agent panel's numbers).
 
 **Yap Link (the phone)** — [link.md](./docs/architecture/link.md)

@@ -446,15 +446,32 @@ function answerAfter(messages, q) {
  * index to its pills, oldest first.
  */
 export function pillsByAnswer(agents, conversation, messages) {
+  return pillsAt(agents, conversation, messages, false);
+}
+
+/**
+ * **The agent pills under a question** (11 Nov 2026): the turns the person's
+ * own message started in a Code chat that works directly (a turn's
+ * `direct`: agents/direct.rs). There's no answer of Chat's to put them
+ * under — its session's work shows under the message itself, and its own
+ * words come after. A Map from the question's index to its pills, as
+ * `pillsByAnswer`'s.
+ */
+export function pillsByQuestion(agents, conversation, messages) {
+  return pillsAt(agents, conversation, messages, true);
+}
+
+function pillsAt(agents, conversation, messages, direct) {
   const out = new Map();
   if (conversation == null || !messages?.length) return out;
   const mine = (agents || []).filter((j) => j?.conversation === conversation).sort((a, b) => (a.createdTs || 0) - (b.createdTs || 0));
   for (const j of mine) {
     const turns = j.turnList?.length ? j.turnList : [{ n: 1, messageId: j.messageId, status: j.status, title: '' }];
     for (const t of turns) {
+      if (!!t.direct !== direct) continue;
       const q = messageIndex(t.messageId, conversation);
       if (q < 0) continue;
-      const at = answerAfter(messages, q);
+      const at = direct ? (q < messages.length ? q : -1) : answerAfter(messages, q);
       if (at < 0) continue;
       const pill = { ...j, turn: t.n, turnStatus: t.status, turnStarted: Number(t.startedTs) || 0, turnTitle: t.title || '' };
       const list = out.get(at) || [];

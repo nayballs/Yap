@@ -571,13 +571,13 @@ pub fn decide(code_chat: bool, new_folder: bool, fresh: bool, prev: Option<&Agen
 
 /// **This chat's agent in `folder`**: its latest there (the one a follow-up
 /// carries on).
-fn chats_agent_in(conversation: Option<u64>, folder: &Folder) -> Option<Agent> {
+pub(crate) fn chats_agent_in(conversation: Option<u64>, folder: &Folder) -> Option<Agent> {
     store::of_conversation(conversation?).into_iter().find(|j| workspaces::norm(&j.path) == workspaces::norm(&folder.path))
 }
 
 /// **Why `agent`'s session can't be carried on** (`None`: it can). One that
 /// never ran has none yet: it runs from its brief, the request added.
-fn cant_resume(agent: &Agent) -> Option<String> {
+pub(crate) fn cant_resume(agent: &Agent) -> Option<String> {
     if agent.started_ts == 0 || agent.session.is_empty() {
         return None;
     }
@@ -784,7 +784,7 @@ impl Begun {
 }
 
 /// The agent saved and started (a new folder added first).
-fn begin(mut agent: Agent, new_folder: bool) -> Result<Agent, String> {
+pub(crate) fn begin(mut agent: Agent, new_folder: bool) -> Result<Agent, String> {
     if new_folder {
         let added = workspaces::add(&agent.path, None, None)?;
         agent.folder = added.name;

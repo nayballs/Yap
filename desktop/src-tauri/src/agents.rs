@@ -55,6 +55,7 @@ pub mod code_chat;
 pub mod commands;
 pub mod consent;
 pub mod diff;
+pub mod direct;
 pub mod workspaces;
 pub mod modes;
 pub mod remote;
