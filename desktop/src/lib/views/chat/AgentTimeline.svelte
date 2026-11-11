@@ -6,13 +6,15 @@
   // folded to its first lines ("Show more"). The box follows the live end
   // as a terminal does (ui/followEnd.js): pinned to the newest line while
   // the person is at the bottom, never moved while they've scrolled up to
-  // read, "↓" to go back down.
+  // read, "↓" to go back down. A step whose tool call came back with a
+  // picture ends its line with it, small (StepPictures; `onview` opens it).
   import { renderMarkdown } from '../../core/markdown.js';
   import { stepKind, longSaid } from '../../core/agents.js';
   import { followEnd, jumpToEnd } from '../../ui/followEnd.js';
+  import StepPictures from './StepPictures.svelte';
 
-  /** `items`: the timeline (`timelineOf`); `live`: the agent is working (its latest step marked). */
-  let { items = [], live = false } = $props();
+  /** `items`: the timeline (`timelineOf`); `live`: the agent is working (its latest step marked); `onview(picture)`: open a step's picture. */
+  let { items = [], live = false, onview = null } = $props();
 
   let box = $state(null);
   let pinned = $state(true);
@@ -56,6 +58,7 @@
               {/if}
             </span>
             <span class="stext" title={t.command || undefined}>{t.step}</span>
+            {#if t.pictures?.length}<StepPictures pictures={t.pictures} max={2} {onview} />{/if}
           </li>
         {/if}
       {/each}

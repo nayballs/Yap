@@ -107,16 +107,58 @@ function saidOf(e) {
   return '';
 }
 
+/** A step's line once it's done: "Editing notes.md" → "Edited notes.md". */
+const DONE = [
+  [/^Editing\b/, 'Edited'],
+  [/^Writing\b/, 'Wrote'],
+  [/^Running\b/, 'Ran'],
+  [/^Reading\b/, 'Read'],
+  [/^Looking\b/, 'Looked'],
+  [/^Searching\b/, 'Searched'],
+  [/^Starting\b/, 'Started'],
+  [/^Picking up\b/, 'Picked up'],
+  [/^Waiting\b/, 'Waited'],
+  [/^Using\b/, 'Used'],
+];
+const doneLine = (step) => DONE.reduce((s, [was, now]) => (was.test(s) ? s.replace(was, now) : s), String(step || ''));
+
+/**
+ * **A picture a step's tool call came back with** (the log's `picture`
+ * event, agents/pictures.rs: a picture file read, a screenshot a tool took):
+ * `{ id, w, h }` as Chat's pictures are, its id the address the `yapsnip`
+ * scheme serves it by (`agent/<agent id>/<img id>`: chatImages.js
+ * `chatImageUrl`). `null`: the event isn't one.
+ */
+export function stepPicture(e) {
+  const p = e?.picture;
+  if (!p?.id || !e?.id) return null;
+  return { id: `agent/${e.id}/${p.id}`, w: Number(p.w) || 0, h: Number(p.h) || 0 };
+}
+
+/** A step as the lists keep it: its line, its file or command, the tool calls it stands for (`calls`: the same line twice in a row is one step) and their pictures. */
+const stepOf = (e, step) => ({ kind: 'step', step, file: e.file || null, command: e.command || null, about: e.about || null, calls: e.call ? [e.call] : [], pictures: [], ts: Number(e.ts) || 0 });
+
+/** `pic` (an event's, `stepPicture`) on its step among `steps`: the newest that stands for its call, else the newest; once. Its caption is that step's line, as done. */
+function addPicture(steps, call, pic) {
+  const at = (call && steps.findLast((x) => x.calls.includes(call))) || steps.at(-1);
+  if (at && !at.pictures.some((p) => p.id === pic.id)) at.pictures.push({ ...pic, caption: doneLine(at.step) });
+}
+
 /**
  * **An agent's timeline** from its log, oldest first: its steps (each line
  * once in a row) and what it said between them, in order —
- * `{kind: 'step', step, file, command, about, ts}` or `{kind: 'said', text,
- * ts}`. `final`: its final words, shown apart, so the same words at the
- * end aren't said twice.
+ * `{kind: 'step', step, file, command, about, calls, pictures, ts}` or
+ * `{kind: 'said', text, ts}`. `final`: its final words, shown apart, so the
+ * same words at the end aren't said twice.
  */
 export function timelineOf(log, final = '') {
   const out = [];
   for (const e of log || []) {
+    const pic = stepPicture(e);
+    if (pic) {
+      addPicture(out.filter((x) => x.kind === 'step'), e.call, pic);
+      continue;
+    }
     const said = saidOf(e);
     if (said) {
       out.push({ kind: 'said', text: said, ts: Number(e.ts) || 0 });
@@ -125,8 +167,11 @@ export function timelineOf(log, final = '') {
     const step = typeof e?.step === 'string' ? e.step.trim() : '';
     if (!step) continue;
     const last = out[out.length - 1];
-    if (last?.kind === 'step' && last.step === step && !e.file && !e.command) continue;
-    out.push({ kind: 'step', step, file: e.file || null, command: e.command || null, about: e.about || null, ts: Number(e.ts) || 0 });
+    if (last?.kind === 'step' && last.step === step && !e.file && !e.command) {
+      if (e.call) last.calls.push(e.call);
+      continue;
+    }
+    out.push(stepOf(e, step));
   }
   const end = String(final || '').trim();
   if (end) {
@@ -145,10 +190,12 @@ export function timelineOf(log, final = '') {
  * **An agent's work as the thread tells it** (11 Nov 2026, after Claude
  * Code's own transcript): what it said, in order, and between its words one
  * group for each stretch of steps — `{kind: 'said', text, ts}` or `{kind:
- * 'work', steps: [{step, file, command, about, ts}], edits: [{file, added,
- * removed, made}], ts}` — so a long run of tool calls reads as one line
- * ("Ran 3 commands, edited convert.js +4 −1", `workSummary`) that opens into
- * its steps. `final`: its final words, left out (its report tells them), as
+ * 'work', steps: [{step, file, command, about, calls, pictures, ts}], edits:
+ * [{file, added, removed, made}], ts}` — so a long run of tool calls reads
+ * as one line ("Ran 3 commands, edited convert.js +4 −1", `workSummary`)
+ * that opens into its steps; a step's `pictures` are the ones its tool call
+ * came back with (`groupPictures`: its line's). `final`: its final words,
+ * left out (its report tells them), as
  * `timelineOf` leaves them. A group of housekeeping alone ("Starting Claude
  * Code") is kept only at the end of a turn still working (`live`), where
  * it's what the agent is on.
@@ -157,6 +204,12 @@ export function workOf(log, final = '', live = false) {
   const out = [];
   let group = null;
   for (const e of log || []) {
+    // A picture its call came back with: on that step, in whichever stretch.
+    const pic = stepPicture(e);
+    if (pic) {
+      addPicture(out.flatMap((x) => (x.kind === 'work' ? x.steps : [])), e.call, pic);
+      continue;
+    }
     const said = saidOf(e);
     if (said) {
       group = null;
@@ -170,8 +223,10 @@ export function workOf(log, final = '', live = false) {
         out.push(group);
       }
       const last = group.steps[group.steps.length - 1];
-      if (!(last && last.step === step && !e.file && !e.command)) {
-        group.steps.push({ kind: 'step', step, file: e.file || null, command: e.command || null, about: e.about || null, ts: Number(e.ts) || 0 });
+      if (last && last.step === step && !e.file && !e.command) {
+        if (e.call) last.calls.push(e.call);
+      } else {
+        group.steps.push(stepOf(e, step));
       }
     }
     // What an edit changed, once it went through: its stretch's.
@@ -194,23 +249,11 @@ export function workOf(log, final = '', live = false) {
       break;
     }
   }
-  const real = (g) => g.steps.some((s) => !['other', 'ask'].includes(stepKind(s)));
+  // (A stretch that is another tool's call alone is housekeeping to the thread, unless it came back with a picture: a screenshot a tool took.)
+  const real = (g) => g.steps.some((s) => s.pictures.length > 0 || !['other', 'ask'].includes(stepKind(s)));
   return out.filter((x, i) => x.kind === 'said' || real(x) || (live && i === out.length - 1));
 }
 
-/** A step's line once it's done: "Editing notes.md" → "Edited notes.md". */
-const DONE = [
-  [/^Editing\b/, 'Edited'],
-  [/^Writing\b/, 'Wrote'],
-  [/^Running\b/, 'Ran'],
-  [/^Reading\b/, 'Read'],
-  [/^Looking\b/, 'Looked'],
-  [/^Searching\b/, 'Searched'],
-  [/^Starting\b/, 'Started'],
-  [/^Picking up\b/, 'Picked up'],
-  [/^Waiting\b/, 'Waited'],
-];
-const doneLine = (step) => DONE.reduce((s, [was, now]) => (was.test(s) ? s.replace(was, now) : s), String(step || ''));
 const fileName = (f) => String(f || '').split(/[\\/]/).pop();
 const some = (n, one, many) => (n === 1 ? one : `${n} ${many}`);
 
@@ -255,6 +298,18 @@ export function workSummary(group, busy = false) {
     add(`made ${some(edited, 'an edit', 'edits')}`);
   }
   return parts;
+}
+
+/** **A stretch's pictures** (`workOf`'s group): its steps', in order — the small ones at the end of its line. */
+export const groupPictures = (group) => (group?.steps || []).flatMap((x) => x.pictures || []);
+
+/**
+ * A step's picture as the panel's picture tab and the viewer take it (a
+ * `ShownPicture`, as shares.js `asShownPicture`): its step's line as its
+ * caption ("Read shot.png"), the agent's workspace as where it's from.
+ */
+export function shownStepPicture(pic, folder = '') {
+  return { id: pic?.id, w: pic?.w || 0, h: pic?.h || 0, caption: pic?.caption || 'Picture', alt: '', imageUrl: '', page: { title: folder || '', site: folder || '', url: '' }, n: 0 };
 }
 
 /** Narration long enough to fold (its first lines shown, "Show more"). */

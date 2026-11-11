@@ -29,6 +29,12 @@
 //   what the agent says as it goes, and a line for each stretch of steps
 //   ("Edited notes.md +1") that opens into them (views/chat/AgentWork.svelte,
 //   core/agents.js `workOf`, `workSummary`).
+// - A step that came back with a picture (a picture file read: the tool
+//   result's own image, as Claude Code hands it over) ends its line with it,
+//   small, as Claude Code's transcript does (views/chat/StepPictures.svelte;
+//   kept by agents/pictures.rs in the agent's own folder): larger by its
+//   step once the line is opened, opened in the viewer or the panel's
+//   picture tab, on its step in the Agent tab too. Light and dark.
 // - "Start fresh" (`fresh: true`): a second agent, its tab named apart.
 // - Undo this turn (refused while a later turn changed the same file:
 //   "Undo the later change first"), and Undo all, asked first.
@@ -38,7 +44,25 @@ import { test as base, expect, openView, setConfig } from './support/fixtures.js
 import { startFakeLlm } from './support/fake-llm.js';
 import { RUNS } from './support/yap.js';
 import { newCodeChat, agentTimeline } from './support/code-chats.js';
-import { turnsOf, titleOf, turnStatusWord, canUndoTurn, pillsByAnswer, agentOfReport, turnOfReport, agentTabName, workedFor, turnNow, workOf, workSummary } from '../src/lib/core/agents.js';
+import { readPng, writePng } from './support/png.js';
+import {
+  turnsOf,
+  titleOf,
+  turnStatusWord,
+  canUndoTurn,
+  pillsByAnswer,
+  agentOfReport,
+  turnOfReport,
+  agentTabName,
+  workedFor,
+  turnNow,
+  workOf,
+  workSummary,
+  timelineOf,
+  stepPicture,
+  groupPictures,
+  shownStepPicture,
+} from '../src/lib/core/agents.js';
 
 const HERE = path.join(RUNS, 'agents-turns-spec');
 const SCRIPTS = path.join(HERE, 'scripts');
@@ -147,6 +171,33 @@ const SLOWISH = [
  * with its result: the note is never read (it goes back to Yap).
  */
 const NEVER_READS = [{ _wait_user: true }, { _dump_args: ARGS }, init(), said('n1', [{ type: 'text', text: 'Reading the notes.' }], 'end_turn'), { _sleep_ms: 6000 }, result('Read notes.md.', 0.01)];
+/** A made-up bed plan, as a picture file's bytes: 320 × 200, one green. */
+const PLAN = { w: 320, h: 200, colour: [86, 142, 96] };
+const PLAN_PNG = writePng(PLAN.w, PLAN.h, PLAN.colour);
+const LOOKED = 'Looked at the bed plan: four beds, the herbs nearest the door.';
+/**
+ * A turn that reads a picture file and lists the folder: the picture comes
+ * back in the tool's own result, as Claude Code 2.1.296 hands one to the
+ * model (an image block, base64).
+ */
+const LOOKS_AT_THE_PLAN = [
+  { _wait_user: true },
+  { _dump_args: ARGS },
+  init(),
+  said('p1', [{ type: 'text', text: "I'll look at the bed plan." }], 'tool_use'),
+  said('p2', [{ type: 'tool_use', id: 'toolu_ls', name: 'Bash', input: { command: 'ls', description: 'List the folder' } }]),
+  toolResult('toolu_ls', 'beds.png\nnotes.md'),
+  said('p3', [{ type: 'tool_use', id: 'toolu_plan', name: 'Read', input: { file_path: '{{cwd}}\\beds.png' } }]),
+  {
+    type: 'user',
+    message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: 'toolu_plan', content: [{ type: 'image', source: { type: 'base64', media_type: 'image/png', data: PLAN_PNG.toString('base64') } }] }] },
+    parent_tool_use_id: null,
+    session_id: '{{session_id}}',
+  },
+  said('p4', [{ type: 'text', text: LOOKED }], 'end_turn'),
+  result(LOOKED, 0.01),
+  { _wait_user: true },
+];
 /** Says what it was told. */
 const ECHO = [{ _wait_user: true }, { _dump_args: ARGS }, init(), result('Got: {{user_text}}', 0.002), { _wait_user: true }];
 
@@ -395,6 +446,58 @@ test('core/agents.js: an agent’s turns from its log, their words, the pills a 
   ]);
   expect(workSummary(many[0])).toEqual([{ text: 'Searched the files' }, { text: 'looked on the web' }, { text: 'edited 2 files', added: 7, removed: 2 }]);
   expect(workOf([])).toEqual([]);
+  // A picture a tool call came back with is on that call's step, in whichever
+  // stretch it is, its address the scheme's (the agent's id, then the picture's).
+  const seen = [
+    { id: 'ab12', turn: 1, step: 'Reading beds.png', call: 'toolu_a', ts: 1 },
+    { id: 'ab12', turn: 1, step: 'Running ls', command: 'ls', call: 'toolu_b', ts: 2 },
+    { id: 'ab12', turn: 1, picture: { id: 'img_0123456789abcdef', w: 320, h: 200 }, call: 'toolu_a', ts: 3 },
+    { id: 'ab12', turn: 1, said: 'Four beds.', ts: 4 },
+    { id: 'ab12', turn: 1, step: 'Using shots · take screenshot', call: 'toolu_c', ts: 5 },
+    // (Its picture came after the next words: still its step's.)
+    { id: 'ab12', turn: 1, said: 'And the screen.', ts: 6 },
+    { id: 'ab12', turn: 1, picture: { id: 'img_fedcba9876543210', w: 1600, h: 900 }, call: 'toolu_c', ts: 7 },
+    { id: 'ab12', turn: 1, picture: { id: 'img_fedcba9876543210', w: 1600, h: 900 }, call: 'toolu_c', ts: 7 },
+  ];
+  expect(stepPicture(seen[2])).toEqual({ id: 'agent/ab12/img_0123456789abcdef', w: 320, h: 200 });
+  expect(stepPicture(seen[0])).toBeNull();
+  expect(stepPicture({ picture: { id: 'img_0123456789abcdef' } })).toBeNull();
+  const looked = workOf(seen);
+  expect(looked.map((w) => [w.kind, w.text ?? w.steps.map((x) => x.pictures.length)])).toEqual([
+    ['work', [1, 0]],
+    ['said', 'Four beds.'],
+    ['work', [1]],
+    ['said', 'And the screen.'],
+  ]);
+  expect(groupPictures(looked[0])).toEqual([{ id: 'agent/ab12/img_0123456789abcdef', w: 320, h: 200, caption: 'Read beds.png' }]);
+  expect(groupPictures(looked[2]).map((p) => p.caption)).toEqual(['Used shots · take screenshot']);
+  // A stretch that is another tool's call alone is housekeeping to the thread, unless it came back with a picture.
+  expect(workSummary(looked[2])).toEqual([{ text: 'Used shots · take screenshot' }]);
+  expect(workOf(seen.filter((e) => !e.picture)).map((w) => w.kind)).toEqual(['work', 'said', 'said']);
+  expect(workSummary(looked[0])).toEqual([{ text: 'Ran a command' }, { text: 'read a file' }]);
+  // The Agent tab's timeline keeps them on their steps too.
+  expect(timelineOf(seen).filter((t) => t.kind === 'step').map((t) => t.pictures.length)).toEqual([1, 0, 1]);
+  // The same line twice in a row is one step: both calls' pictures are its.
+  const twice = workOf([
+    { id: 'ab12', step: 'Using shots · take screenshot', call: 'toolu_1' },
+    { id: 'ab12', step: 'Using shots · take screenshot', call: 'toolu_2' },
+    { id: 'ab12', picture: { id: 'img_1111111111111111', w: 8, h: 8 }, call: 'toolu_1' },
+    { id: 'ab12', picture: { id: 'img_2222222222222222', w: 8, h: 8 }, call: 'toolu_2' },
+  ]);
+  expect(twice[0].steps.map((x) => x.pictures.map((p) => p.id))).toEqual([['agent/ab12/img_1111111111111111', 'agent/ab12/img_2222222222222222']]);
+  // One with no call (an older log's): its newest step's.
+  expect(groupPictures(workOf([{ id: 'ab12', step: 'Reading beds.png' }, { id: 'ab12', picture: { id: 'img_3333333333333333', w: 8, h: 8 } }])[0]).length).toBe(1);
+  // As the panel's picture tab and the viewer take one.
+  expect(shownStepPicture(groupPictures(looked[0])[0], 'garden-planner')).toEqual({
+    id: 'agent/ab12/img_0123456789abcdef',
+    w: 320,
+    h: 200,
+    caption: 'Read beds.png',
+    alt: '',
+    imageUrl: '',
+    page: { title: 'garden-planner', site: 'garden-planner', url: '' },
+    n: 0,
+  });
   // Two agent tabs in one folder are named apart: their first requests, else a number.
   const a = { kind: 'agent', agent: { id: 'j1', folder: 'garden-planner', turnList: [{ title: 'Add a watering schedule' }] } };
   const b = { kind: 'agent', agent: { id: 'j2', folder: 'garden-planner', turnList: [{ title: 'Start over on the planner' }] } };
@@ -793,6 +896,103 @@ test('asked how it is getting on just as the agent finishes: that answer tells t
   } finally {
     fakeLlm.delay('other', 0);
   }
+});
+
+test('a step that read a picture ends its line with it: small on the line, larger by its step, opened large, on its step in the tab', async ({ yap, main, fakeLlm, shot }) => {
+  fs.writeFileSync(path.join(GARDEN, 'beds.png'), PLAN_PNG);
+  await script(yap, LOOKS_AT_THE_PLAN, 'plan');
+  const before = (await agents(yap)).length;
+  await codeChat(main);
+  fakeLlm.scriptChat([
+    { tools: [{ name: 'start_agent', args: { brief: 'Look at beds.png and say how the beds are laid out.', title: 'Look at the bed plan' } }] },
+    { content: STARTED },
+    { plain: true, content: 'It looked: four beds, the herbs nearest the door.' },
+  ]);
+  await send(main, 'Have a look at beds.png and tell me how the beds are laid out.');
+  const agent = await ended(yap, (await newAgent(yap, before)).id);
+  await messagesOf(yap, agent.conversation, 4);
+  await closeTab(main);
+
+  // Its log: the step with its call, then the picture that call came back with.
+  const log = (await yap.invoke('agent_get', { id: agent.id })).log;
+  const read = log.find((e) => e.step === 'Reading beds.png');
+  expect(read.call).toBe('toolu_plan');
+  const pictures = log.filter((e) => e.picture);
+  expect(pictures.map((e) => [e.call, e.picture.w, e.picture.h, e.turn, e.step ?? null])).toEqual([['toolu_plan', PLAN.w, PLAN.h, 1, null]]);
+  // Kept in the agent's own folder (gone with its log), never in chat-images.
+  const kept = path.join(yap.dataDir, 'agents', agent.id, 'pictures', `${pictures[0].picture.id}.png`);
+  const png = readPng(fs.readFileSync(kept));
+  expect([png.width, png.height]).toEqual([PLAN.w, PLAN.h]);
+  const chatImages = path.join(yap.dataDir, 'chat-images');
+  expect(fs.existsSync(chatImages) ? fs.readdirSync(chatImages).filter((n) => n.includes(pictures[0].picture.id)) : []).toEqual([]);
+
+  // In the thread: one quiet line for the stretch, its picture at its end.
+  const work = thread(main).getByTestId('chat-agent-work');
+  await expect(work).toHaveCount(1);
+  await expect(work.locator('.wtext')).toHaveText(['Ran a command, read a file']);
+  const small = work.getByTestId('agent-step-picture');
+  await expect(small).toHaveCount(1);
+  await expect(small).toHaveAttribute('title', 'Read beds.png: open the picture');
+  const loaded = (img) => img.evaluate((el) => ({ w: el.naturalWidth, h: el.naturalHeight, done: el.complete, src: el.getAttribute('src') }));
+  await expect.poll(async () => (await loaded(small.locator('img'))).w, { message: 'the small picture to load' }).toBeGreaterThan(0);
+  const ratio = await main.evaluate(() => window.devicePixelRatio);
+  const tile = await loaded(small.locator('img'));
+  // A tile filled with its middle, Rust's at exactly its device pixels; by the agent's id and the picture's, nothing else.
+  expect([tile.w, tile.h]).toEqual([Math.round(30 * ratio), Math.round(20 * ratio)]);
+  expect(decodeURIComponent(tile.src)).toContain(`/agent/${agent.id}/${pictures[0].picture.id}?w=${tile.w}&h=${tile.h}&fit=cover`);
+  const box = await small.boundingBox();
+  expect([Math.round(box.width), Math.round(box.height)]).toEqual([30, 20]);
+  // On the line, after its words.
+  const line = await work.locator('.wline').boundingBox();
+  expect(box.x).toBeGreaterThan(line.x + line.width - 1);
+  expect(Math.abs(box.y + box.height / 2 - (line.y + line.height / 2))).toBeLessThan(3);
+  await shot(main, '20-a-picture-at-the-end-of-its-line');
+  await theme(yap, main, 'dark');
+  await shot(main, '21-a-picture-at-the-end-of-its-line-dark');
+  await theme(yap, main, 'light');
+
+  // A click opens it large (the panel closed: the viewer), its own pixels.
+  await small.click();
+  const viewer = main.locator('.shotview');
+  await expect(viewer).toBeVisible();
+  await expect.poll(async () => (await loaded(viewer.locator('img'))).w).toBe(PLAN.w);
+  await shot(main, '22-opened-large');
+  await viewer.click();
+  await expect(viewer).toHaveCount(0);
+
+  // The line opened: each step, the picture by the one that read it; the line's small one gives way.
+  await work.getByRole('button', { name: /Ran a command, read a file/ }).click();
+  await expect(work.locator('.wstep .stext')).toHaveText(['Listing the folder', 'Reading beds.png']);
+  await expect(work.getByTestId('agent-step-picture')).toHaveCount(0);
+  const byStep = work.locator('.wstep').nth(1).getByTestId('chat-agent-work-step-picture');
+  await expect(byStep).toHaveCount(1);
+  await expect(work.locator('.wstep').nth(0).getByTestId('chat-agent-work-step-picture')).toHaveCount(0);
+  await expect.poll(async () => (await loaded(byStep.locator('img'))).w, { message: 'the step’s picture to load' }).toBeGreaterThan(0);
+  const frame = await byStep.boundingBox();
+  expect(frame.width).toBeLessThanOrEqual(281);
+  expect(frame.height).toBeLessThanOrEqual(181);
+  expect(Math.abs(frame.width / frame.height - PLAN.w / PLAN.h)).toBeLessThan(0.03);
+  await shot(main, '23-by-its-step-once-opened');
+  await work.getByRole('button', { name: /Ran a command, read a file/ }).click();
+  await expect(work.getByTestId('agent-step-picture')).toHaveCount(1);
+
+  // Copy image takes the same address (ids only).
+  await yap.invoke('chat_image_copy', { id: `agent/${agent.id}/${pictures[0].picture.id}` });
+  await expect(yap.invoke('chat_image_copy', { id: `agent/${agent.id}/../log.jsonl` })).rejects.toThrow(/isn't there any more/);
+
+  // In the Agent tab: on its step; a click there opens the panel's picture tab, captioned with its step.
+  await thread(main).getByTestId('chat-agent-pill').first().click();
+  await expect(tab(main)).toBeVisible();
+  await agentTimeline(main, 1);
+  const inTab = tab(main).getByTestId('agent-step-picture');
+  await expect(inTab).toHaveCount(1);
+  await expect.poll(async () => (await loaded(inTab.locator('img'))).w).toBeGreaterThan(0);
+  await shot(main, '24-on-its-step-in-the-tab');
+  await inTab.click();
+  await expect(main.getByTestId('chat-picture-stage')).toBeVisible();
+  await expect(main.getByTestId('chat-picture-caption')).toHaveText('Read beds.png');
+  await expect(main.getByTestId('chat-picture-source')).toContainText('garden-planner');
+  await shot(main, '25-in-the-picture-tab');
 });
 
 test('“start fresh”: a second agent in the workspace, its tab named apart from the first', async ({ yap, main, fakeLlm }) => {

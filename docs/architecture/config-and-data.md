@@ -883,9 +883,10 @@
   conversation id → `{path, ts}`, yap-code.md "Code chats") and the one-time Bypass OK
   (`bypassConfirmed`); and `%APPDATA%/yap/agents/`, a folder per agent:
   `log.jsonl` (its `yap-agent` events, appended line by line, at most 5,000
-  lines) and `backup/` (the files it changed as they were before it, as
+  lines), `pictures/` (the pictures its steps came back with, as PNGs, at
+  most 120; yap-code.md "A step's pictures") and `backup/` (the files it changed as they were before it, as
   `0001-<name>`…, with `manifest.json`: the original paths, which were
-  created). An agent's log and backups go 7 days after it ended (its record
+  created). An agent's log, pictures and backups go 7 days after it ended (its record
   stays, `swept`); an agent still live when Yap starts is marked interrupted.
   `%APPDATA%/yap/workspaces.json` (`agents/workspaces.rs`) — the folders agents may
   work in: name, path, an optional cap on the mode, when added. Files of

@@ -642,21 +642,30 @@ pub fn chat_images_prepare(ids: Vec<String>) {
     }
 }
 
+/// **A stored picture's PNG by its id**: a chat screenshot's
+/// (`chat-images/<id>.png`), or one an agent's step was handed
+/// (`agent/<agent id>/<img id>`: `agents/pictures.rs`) — ids only, never a
+/// path. `None`: neither, or it's gone.
+pub fn stored_png(id: &str) -> Option<Vec<u8>> {
+    if images::is_id(id) {
+        images::read(id)
+    } else {
+        crate::agents::pictures::read(id)
+    }
+}
+
 /// A chat screenshot's "Copy image" (its right-click menu): onto the
 /// clipboard, out of Win+V history.
 #[tauri::command]
 pub async fn chat_image_copy(id: String) -> Result<(), String> {
-    if !images::is_id(&id) {
-        return Err("That isn't a screenshot".into());
-    }
-    tauri::async_runtime::spawn_blocking(move || copy_save::copy_stored(&id)).await.map_err(|e| e.to_string())?
+    tauri::async_runtime::spawn_blocking(move || copy_save::copy_png(&stored_png(&id).ok_or("That screenshot isn't there any more")?)).await.map_err(|e| e.to_string())?
 }
 
 /// A chat screenshot's "Save image as…": Windows' Save dialog, in the
 /// folder used last. `true` when it was saved (not cancelled).
 #[tauri::command]
 pub async fn chat_image_save(app: AppHandle, id: String) -> Result<bool, String> {
-    let png = images::is_id(&id).then(|| images::read(&id)).flatten().ok_or("That screenshot isn't there any more")?;
+    let png = stored_png(&id).ok_or("That screenshot isn't there any more")?;
     let parent = app.get_webview_window("settings");
     let saved = tauri::async_runtime::spawn_blocking(move || copy_save::save(&app, &png, parent.as_ref())).await.map_err(|e| e.to_string())??;
     Ok(saved.is_some())
@@ -728,22 +737,35 @@ pub fn chat_images_delete_all(app: AppHandle) -> usize {
 /// the first time, then kept), or the PNG itself when that isn't one of its
 /// sizes; with `&fit=cover`, a tile of that size filled with the picture's
 /// middle (`thumbs::get_cover`: a grid of pictures shared into a chat,
-/// `chat/shares.rs`), else the PNG. Answered off the main thread
-/// (`lib.rs`): a thumbnail can take a moment to make.
+/// `chat/shares.rs`), else the PNG. `agent/<agent id>/<img id>`: a
+/// picture an agent's step was handed (`agents/pictures.rs`), the same way.
+/// Answered off the main thread (`lib.rs`): a thumbnail can take a moment
+/// to make.
 pub fn serve(request: &tauri::http::Request<Vec<u8>>) -> tauri::http::Response<Vec<u8>> {
-    let path = request.uri().path().trim_start_matches('/');
-    let id = path.strip_prefix("img/").or_else(|| path.strip_prefix("img%2F")).unwrap_or(path);
+    let path = served_id(request.uri().path());
+    let id = path.as_str();
     let size = request.uri().query().and_then(thumb_size);
     let cover = request.uri().query().is_some_and(fills);
-    let make = |w, h| if cover { thumbs::get_cover(id, w, h) } else { thumbs::get(id, w, h) };
-    let thumb = images::is_id(id).then(|| size.and_then(|(w, h)| make(w, h).ok())).flatten();
-    let found = thumb.or_else(|| images::is_id(id).then(|| images::read(id)).flatten());
+    let found = if crate::agents::pictures::parse(id).is_some() {
+        size.and_then(|(w, h)| crate::agents::pictures::thumb(id, w, h, cover)).or_else(|| crate::agents::pictures::read(id))
+    } else {
+        let make = |w, h| if cover { thumbs::get_cover(id, w, h) } else { thumbs::get(id, w, h) };
+        let thumb = images::is_id(id).then(|| size.and_then(|(w, h)| make(w, h).ok())).flatten();
+        thumb.or_else(|| images::is_id(id).then(|| images::read(id)).flatten())
+    };
     let builder = tauri::http::Response::builder().header("Access-Control-Allow-Origin", "*").header("Cache-Control", "no-store");
     match found {
         Some(png) => builder.status(200).header("Content-Type", "image/png").body(png),
         None => builder.status(404).header("Content-Type", "text/plain").body(b"not found".to_vec()),
     }
     .unwrap_or_else(|_| tauri::http::Response::new(Vec::new()))
+}
+
+/// The id a request's path names: its `/`s as the page wrote them
+/// (`convertFileSrc` sends `agent%2F…`), a leading `img/` gone. Pure.
+fn served_id(path: &str) -> String {
+    let plain = path.trim_start_matches('/').replace("%2F", "/").replace("%2f", "/");
+    plain.strip_prefix("img/").map(str::to_string).unwrap_or(plain)
 }
 
 /// `…&fit=cover`: a tile filled with the picture, not the picture contained. Pure.
@@ -792,6 +814,34 @@ pub fn init(app: &AppHandle) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_scheme_serves_a_steps_picture_by_its_two_ids() {
+        use base64::Engine as _;
+        // The id, however the page's address wrote its slashes.
+        assert_eq!(served_id("/img_0123456789abcdef"), "img_0123456789abcdef");
+        assert_eq!(served_id("/img/img_0123456789abcdef"), "img_0123456789abcdef");
+        assert_eq!(served_id("/img%2Fimg_0123456789abcdef"), "img_0123456789abcdef");
+        assert_eq!(served_id("/agent%2Fab12%2Fimg_0123456789abcdef"), "agent/ab12/img_0123456789abcdef");
+        // A picture an agent's step was handed: itself, its thumbnail, a tile; nothing else.
+        let agent = crate::agents::store::new_id();
+        let rgba: Vec<u8> = (0..64u32 * 40).flat_map(|i| [(i % 200) as u8, 80, 120, 255]).collect();
+        let handed = crate::ai::claude_code::events::Picture { media_type: "image/png".into(), data: base64::engine::general_purpose::STANDARD.encode(images::encode_png(&rgba, 64, 40, true).unwrap()) };
+        let kept = crate::agents::pictures::keep(&agent, &handed).unwrap();
+        let get = |tail: &str| serve(&tauri::http::Request::builder().uri(format!("http://yapsnip.localhost/agent%2F{agent}%2F{}{tail}", kept.id)).body(Vec::new()).unwrap());
+        let whole = get("");
+        assert_eq!((whole.status().as_u16(), images::png_size(whole.body())), (200, Some((64, 40))));
+        assert_eq!(whole.headers()["Content-Type"], "image/png");
+        assert_eq!(images::png_size(get("?w=32&h=20").body()), Some((32, 20)));
+        assert_eq!(images::png_size(get("?w=30&h=20&fit=cover").body()), Some((30, 20)));
+        assert_eq!(images::png_size(get("?w=999&h=999").body()), Some((64, 40)), "not one of its sizes: the picture itself");
+        assert_eq!(stored_png(&crate::agents::pictures::address(&agent, &kept.id)).as_deref(), Some(whole.body().as_slice()));
+        let missing = serve(&tauri::http::Request::builder().uri(format!("http://yapsnip.localhost/agent%2F{agent}%2Fimg_0123456789abcdef")).body(Vec::new()).unwrap());
+        assert_eq!(missing.status().as_u16(), 404);
+        let path = serve(&tauri::http::Request::builder().uri(format!("http://yapsnip.localhost/agent%2F{agent}%2F..%2Flog.jsonl")).body(Vec::new()).unwrap());
+        assert_eq!(path.status().as_u16(), 404);
+        assert_eq!(stored_png("agent/../config.json"), None);
+    }
 
     #[test]
     fn saying_snip_takes_one() {

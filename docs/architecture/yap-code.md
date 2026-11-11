@@ -1220,6 +1220,9 @@ instead of a terminal (rebuilt after the maintainer's first real agent,
   - **never its final words**: its report tells those, right below.
     Housekeeping alone ("Starting Claude Code") is a line only while it's
     what the agent is on.
+  - **a picture at the end of the line** when one of its steps came back
+    with one, as Claude Code's transcript shows it
+    ([A step's pictures](#a-steps-pictures)).
   - The log: `stores/agentLogs.svelte.js` reads a shown agent's once
     (`agent_get`, as its tab does) and keeps it in step with `yap-agent`.
     The agents store still keeps no log.
@@ -1285,6 +1288,62 @@ instead of a terminal (rebuilt after the maintainer's first real agent,
   once per window by ControlPanel); `core/agents.js` (the words they share:
   status, cost lines, lengths of time, steps from a log, the pills, problems,
   the Mode's keys; pure); `core/money.js` `dollars`.
+
+## A step's pictures
+
+In Claude Code's own transcript a step that read or made a picture ends its
+line with it, small ("Ran a command" and the picture beside it). Yap does the
+same (2026-11-11, the maintainer: "you see Ran a command and there's a
+picture of it, do we have that in Yap now too?").
+
+- **Which pictures**: the ones in the tool call's own answer, as Claude Code
+  hands them to the model — an image block in the `tool_result` (base64). On
+  the real 2.1.296 (checked 11 Nov 2026) that is what `Read` on a picture
+  file gives; a tool that takes a screenshot answers the same way.
+  `events::Block::ToolResult` keeps them (`pictures`: at most 4 a result,
+  each at most 16 MB of base64, never printed). Yap never goes and reads a
+  file itself to show one: the line shows what the model saw.
+- **Kept with the agent** (`agents/pictures.rs` `keep`): a picture by its own
+  bytes (PNG, JPEG, GIF, WebP or BMP; never by its type's word), decoded
+  here, its long side at most 1,600 px, saved as a PNG in
+  `agents/<id>/pictures/<img id>.png` with the ids and files a chat
+  screenshot has, so its thumbnails are made the same way
+  (`snip/thumbs.rs`, in `pictures/thumbs/`). At most 24 a turn and 120 an
+  agent; past them a step keeps its line and no picture. None in a model
+  evaluation.
+- **Never in `chat-images/`**: an older Yap sharing the data folder sweeps
+  what no conversation names there after a day. In the agent's own folder
+  they go when its log goes: 7 days after it ended, and with Delete some of
+  your data → Yap Code.
+- **Said in its log**: the step's event has `call` (Claude Code's id for the
+  tool call), and the picture's own event `{picture: {id, w, h}, call}` (no
+  step). `core/agents.js` `stepPicture` gives it the address the page asks
+  by; `workOf` and `timelineOf` put it on the step that stands for that
+  call (the same line twice in a row is one step, with both calls), in
+  whichever stretch that step is. A stretch that is another tool's call
+  alone ("Using shots · take screenshot") is housekeeping to the thread and
+  not a line, unless it came back with a picture: then it is one ("Used
+  shots · take screenshot", and the picture).
+- **Shown** (`views/chat/StepPictures.svelte`): at the end of the stretch's
+  line in the thread, 30 × 20 px, a tile filled with the picture's middle at
+  exactly its device pixels (the first three, then "+N"); on its step in
+  the Agent tab's timeline too. The line opened, each step shows its own
+  larger (at most 280 × 180), and the line's small ones give way. A click
+  opens it: the panel's picture tab while the panel is open, else the
+  viewer, captioned with its step ("Read beds.png") and the workspace.
+  Right-click: Open, Copy image, Save image as…. One that is gone isn't
+  drawn.
+- **Served** by the `yapsnip` scheme as a chat screenshot is, by two ids and
+  nothing else: `agent/<agent id>/<img id>` (`pictures::parse`,
+  `snip::serve`, `?w=&h=` its thumbnail). Copy image and Save image as…
+  take the same address (`snip::stored_png`).
+- **A phone** (Remote Control) is sent the event and draws nothing for it:
+  its page has no way to ask for the picture.
+- **Download your data** has them beside each agent's log
+  (`agents/<id>.pictures/`).
+- **Not done**: a picture a command wrote to a file and never read back
+  (the report's "Agent done" still shows the pictures a turn created or
+  changed); a picture in the session's own words.
 
 ## What a turn cost
 
@@ -1596,6 +1655,9 @@ saves ([config-and-data.md](./config-and-data.md)).
 - **`agents/<id>/log.jsonl`**: every `yap-agent` event the agent sent, one a line,
   appended as it goes (the file is never written whole again); texts over
   4,000 characters trimmed, at most 5,000 lines. The tab replays it.
+- **`agents/<id>/pictures/`**: the pictures its steps came back with, as
+  PNGs by id, and their thumbnails in `thumbs/`
+  ([A step's pictures](#a-steps-pictures)).
 - **`agents/<id>/backup/<turn>/`**: the files each turn changed, as they were
   before it (`manifest.json` and `0001-<name>`…). An agent from before turns
   has one right in `backup/`, read as its turn 1's (`store::backup_dirs`).
@@ -1605,14 +1667,15 @@ saves ([config-and-data.md](./config-and-data.md)).
 - **Interrupted at start**: an agent still queued, running or asking when Yap
   starts died with the last Yap. `store::at_start` marks it interrupted;
   Continue picks it up.
-- **The sweep**: an agent's backups and log go 7 days after it ended
+- **The sweep**: an agent's backups, log and pictures go 7 days after it ended
   (`KEEP_SECS`, at start and then daily); its record stays in History, marked
   `swept`. An `agents/<id>/` folder no agent names goes once it's as old.
 - **Delete some of your data → Yap Code** stops every agent, then deletes every agent,
   its log and backups, each chat's Mode and Code chat folder, the Bypass OK
   and the workspaces. The files the agents changed stay as they are. **Download
-  your data** has `agents/agents.json`, `agents/folders.json` and each agent's log,
-  never its backups (copies of the person's own files):
+  your data** has `agents/agents.json`, `agents/folders.json`, each agent's log
+  and the pictures its steps came back with, never its backups (copies of
+  the person's own files):
   [privacy-receipts.md](./privacy-receipts.md).
 
 ### Undo and backups
@@ -1736,6 +1799,7 @@ Rust (`desktop/src-tauri/src/`):
   workspaces, which folder an agent means) · `modes.rs` (the Mode; pure) ·
   `runner.rs` (the runs) · `steps.rs` + `steps/command.rs` (each step in
   plain words, the to-do list; pure) · `diff.rs` (an edit's diff; pure) ·
+  `pictures.rs` (a picture a step's answer carried, kept with the agent) ·
   `consent.rs` (whose idea an agent is; pure) · `usage.rs` (what each turn
   used: tokens, the context, the cost estimated; pure) · `code_chat.rs` (Code chats) ·
   `voice.rs` (the spoken yes or no) · `approve_card.rs` (a permission prompt
@@ -1754,7 +1818,7 @@ Rust (`desktop/src-tauri/src/`):
 Pages (`desktop/src/lib/`): `views/chat/` (`ChatSideSwitch`,
 `codeChats.svelte.js`, `WorkspacePicker`, `CodeChips`, `CodeEdge`,
 `codeChat.css`, `CodeEmpty`, `ModeChip`, `AgentTab`, `AgentPanel`, `AgentTimeline`, `AgentFiles`,
-`AgentPills`, `AgentTodoCard`, `AgentReportCard`, `AgentConfirm`, `AgentApprove`, `RunningAgents`),
+`AgentPills`, `AgentTodoCard`, `AgentWork`, `StepPictures`, `AgentReportCard`, `AgentConfirm`, `AgentApprove`, `RunningAgents`),
 `core/codeChats.js`, `core/agents.js`, `core/agentPanel.js`, `core/money.js`, `ui/followEnd.js`,
 `stores/agents.svelte.js`, `settings/YapCodePage.svelte`,
 `settings/ClaudeCodeStatus.svelte`.
@@ -1765,7 +1829,7 @@ Pages (`desktop/src/lib/`): `views/chat/` (`ChatSideSwitch`,
 
 | Event | Payload |
 |---|---|
-| `yap-agent` | `{id, status, folder, conversation?, step?, file?, command?, about?, said?, todos?, now?, diff?, text?, cost?, problem?, turn?, queued?, ts}` — `turn` the turn it's about (`TurnNote.n`), `queued` a request queued as that turn (its title); `status` queued \| running \| asking \| done \| failed \| stopped \| interrupted; `about` a command's description; `said` its words between tool calls; `todos` `[{content, status, activeForm?}]` (status pending \| in_progress \| completed); `now` the line it's on with no new step; `diff` `{file, kind, lines, added, removed, more?, all?}` — `kind` edit \| new \| rewrite \| write, each line its mark first (`-`, `+`, ` `; a lone `@` a gap); `text` its final words (an older Yap's words as it worked too); `problem` `{kind, message, resetsAt?}`, `kind` notSignedIn \| rateLimited \| billing \| account \| paysAnotherWay; `usage` what its turn has used (`{input, output, cacheRead, cacheWrite, context, window, estimate?}`, `agents/usage.rs`: live, never a line of its log, but for a result's and a turn's end); `changed` its record changed with no step (2026-11-08: `planUnused` a plan set aside, `dismissed` / `shown` its panel row, `finished` Move to finished): the pages read it again |
+| `yap-agent` | `{id, status, folder, conversation?, step?, file?, command?, about?, said?, todos?, now?, diff?, call?, picture?, text?, cost?, problem?, turn?, queued?, ts}` — `call` the tool call a step is (Claude Code's id), or the one a `picture` came back from; `picture` `{id, w, h}`, a picture that call's answer carried (`agents/pictures.rs`); `turn` the turn it's about (`TurnNote.n`), `queued` a request queued as that turn (its title); `status` queued \| running \| asking \| done \| failed \| stopped \| interrupted; `about` a command's description; `said` its words between tool calls; `todos` `[{content, status, activeForm?}]` (status pending \| in_progress \| completed); `now` the line it's on with no new step; `diff` `{file, kind, lines, added, removed, more?, all?}` — `kind` edit \| new \| rewrite \| write, each line its mark first (`-`, `+`, ` `; a lone `@` a gap); `text` its final words (an older Yap's words as it worked too); `problem` `{kind, message, resetsAt?}`, `kind` notSignedIn \| rateLimited \| billing \| account \| paysAnotherWay; `usage` what its turn has used (`{input, output, cacheRead, cacheWrite, context, window, estimate?}`, `agents/usage.rs`: live, never a line of its log, but for a result's and a turn's end); `changed` its record changed with no step (2026-11-08: `planUnused` a plan set aside, `dismissed` / `shown` its panel row, `finished` Move to finished): the pages read it again |
 | `yap-agent-report` | `{agent, turn, conversation, messageId, markerId, status}` — the turn it reports, and its status; `messageId` null when a newer question came first |
 | `yap-agent-open` | `{id, conversation}` (with `yap-assistant-turn {phase: "open", conversationId, show: true}`) |
 | `yap-claude-approve` | `{id, run, conversation, origin, tool, summary, detail, label, askedTs}` — `run` is the agent's id; a plan's (`tool` "ExitPlanMode"): `summary` "The plan is ready", `detail` the plan |
@@ -1909,7 +1973,10 @@ the build's own stand-in replaying `script` from now on),
     answer); a question sent just before a report is answered (its card
     still shows, above the question, and that answer tells the report
     first, once); asked how it's getting on just as it finishes (that
-    answer tells the result, the report adds its card alone); its work in
+    answer tells the result, the report adds its card alone); a step that
+    read a picture ends its line with it (kept in the agent's own folder,
+    a tile at its device pixels, larger by its step, opened in the viewer
+    and the picture tab, on its step in the Agent tab); its work in
     the thread (what it said, a line for each stretch of steps that opens
     into them, the step it's on while it works); "start fresh" a
     second agent, its tab named apart; Undo this turn (refused while a later
@@ -1987,6 +2054,8 @@ Code, Open in terminal's blank tab, Chat's thread following a report.
 
 **Not yet tried on a real run:**
 
+- A step's picture from a tool that takes a screenshot, or from a command
+  that prints one (a picture file read is checked, on 2.1.296).
 - An agent paid by key; an agent's cost across several turns (`total_cost_usd`,
   assumed whole per process); `--resume` after Yap was killed mid-job; real
   `permission_denied` events and Plan mode's output; Open in terminal since

@@ -51,6 +51,7 @@
     modelLabel,
     canUndo as undoable,
     canUndoTurn,
+    shownStepPicture,
   } from '../../core/agents.js';
   import { EFFORT_LABELS } from '../../core/effort.js';
   import { claudePlan, signInClaudePlan } from '../../stores/claudePlan.svelte.js';
@@ -500,6 +501,7 @@
                     refused={turnRefused[t.n] || ''}
                     busy={!!busy}
                     onundo={() => undoTurn(t)}
+                    onpicture={(p) => doc.showPicture(shownStepPicture(p, shown.folder))}
                   />
                 </div>
               {/if}

@@ -114,11 +114,11 @@ pub fn copy(rgba: &[u8], w: u32, h: u32, png: &[u8]) -> Result<(), String> {
     Ok(())
 }
 
-/// Copy a stored chat screenshot.
-pub fn copy_stored(id: &str) -> Result<(), String> {
-    let png = super::images::read(id).ok_or("That screenshot isn't there any more")?;
-    let (rgba, w, h) = super::images::decode_png(&png)?;
-    copy(&rgba, w, h, &png)
+/// Copy a stored picture (a chat screenshot's PNG, or one an agent's step
+/// was handed: `snip::stored_png`).
+pub fn copy_png(png: &[u8]) -> Result<(), String> {
+    let (rgba, w, h) = super::images::decode_png(png)?;
+    copy(&rgba, w, h, png)
 }
 
 /// The file name a save suggests: "Snip 2026-10-25 at 14.03.12.png". Pure.

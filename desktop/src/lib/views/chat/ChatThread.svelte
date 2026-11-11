@@ -268,7 +268,7 @@
             {/each}
             {#each directPills.get(i) as p (`work:${p.id}:${p.turn ?? 1}`)}
               {#await import('./AgentWork.svelte') then { default: AgentWork }}
-                <AgentWork agent={p} turn={p.turn ?? 1} line={agents.steps[p.id] || ''} />
+                <AgentWork agent={p} turn={p.turn ?? 1} line={agents.steps[p.id] || ''} onview={openShared} />
               {/await}
             {/each}
           {/if}
@@ -286,7 +286,7 @@
               <!-- …and its work as it goes, as Claude Code's own transcript tells it: what it says, and a line for each stretch of steps. -->
               {#each agentPills.get(i) as p (`work:${p.id}:${p.turn ?? 1}`)}
                 {#await import('./AgentWork.svelte') then { default: AgentWork }}
-                  <AgentWork agent={p} turn={p.turn ?? 1} line={agents.steps[p.id] || ''} />
+                  <AgentWork agent={p} turn={p.turn ?? 1} line={agents.steps[p.id] || ''} onview={openShared} />
                 {/await}
               {/each}
             {/if}

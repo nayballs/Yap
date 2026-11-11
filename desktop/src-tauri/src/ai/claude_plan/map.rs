@@ -213,7 +213,7 @@ impl Mapper {
             Event::User(u) if u.parent_tool_use_id.is_none() && !u.is_replay => {
                 let mut changed = false;
                 for b in &u.blocks {
-                    if let Block::ToolResult { tool_use_id, text, is_error } = b {
+                    if let Block::ToolResult { tool_use_id, text, is_error, .. } = b {
                         if let Some((tool, input)) = self.calls.get(tool_use_id).cloned() {
                             changed |= self.result(&tool, &input, text, *is_error, u.tool_use_result.as_ref());
                         }
