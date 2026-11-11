@@ -1003,7 +1003,22 @@ dates). [frontend.md](./frontend.md#the-folder-layout-2026-10-24).
   `div.md-table` (scrolls sideways) with the rule line's `:--:` / `--:` as
   classes `c` / `r`, ending at a line without a pipe (GitHub's spec would
   make the next sentence a row); fenced and indented code → `pre.md-code >
-  code` (no highlighting), a fence an answer cut off still shows;
+  code`, a fence an answer cut off still shows. The HTML never has colours
+  in it: a fence that names its language has it as a class on its code
+  (`lang-js`: its first word, lower-cased, a short plain name or none; the
+  sanitiser lets that one class shape through, on `code` only), and
+  **Chat's answers colour it afterwards** (2026-11-11, `ui/colourCode.js`,
+  a Svelte action on the rendered element): the highlighter of a Code
+  chat's rows (`core/codeColours.js`: highlight.js in a chunk of its own),
+  loaded the first time such a block shows; the block's own text read,
+  coloured into tokens and put back as text nodes in spans (`.syn-*`,
+  `app.css`), so its text is as written and nothing is set as markup. A
+  fence with no language, or one the highlighter doesn't know, stays plain;
+  an answer still being written is coloured again with each piece, in the
+  same step (a MutationObserver, before the page is drawn). In Chat's
+  thread, the agent's words in it and the Agent tab; a note's summary, a
+  meeting's Ask thread and a document beside the chat still show code
+  plain;
   `blockquote.md-quote` and `hr.md-rule`; single line breaks kept
   (`breaks: true`); "• " lines are bullets; a change of bullet mark ("- " then
   "* ") doesn't end a list; an ordered list keeps its start (`start="3"`);

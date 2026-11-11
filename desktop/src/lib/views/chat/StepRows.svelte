@@ -343,37 +343,7 @@
     font-size: 10.5px;
     line-height: 1.2;
   }
-  /* The code's colours (core/codeColours.js gives each token its kind). */
-  .rows :global(.syn-k) {
-    color: var(--yap-syn-keyword);
-  }
-  .rows :global(.syn-s) {
-    color: var(--yap-syn-string);
-  }
-  .rows :global(.syn-c) {
-    color: var(--yap-syn-comment);
-  }
-  .rows :global(.syn-n) {
-    color: var(--yap-syn-number);
-  }
-  .rows :global(.syn-f) {
-    color: var(--yap-syn-function);
-  }
-  .rows :global(.syn-t) {
-    color: var(--yap-syn-type);
-  }
-  .rows :global(.syn-a) {
-    color: var(--yap-syn-attr);
-  }
-  .rows :global(.syn-r) {
-    color: var(--yap-syn-meta);
-  }
-  .rows :global(.syn-b) {
-    font-weight: 600;
-  }
-  .rows :global(.syn-i) {
-    font-style: italic;
-  }
+  /* (The code's colours are app.css's `.syn-*`, shared with an answer's code.) */
   /* Its command, and what it printed. */
   .cbox {
     position: relative;

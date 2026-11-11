@@ -248,6 +248,63 @@ test('Enter sends and the caret stays in the box for the next message', async ({
   await expect(box).toHaveValue('');
 });
 
+// An answer's fenced code is in colour when it names its language (11 Nov
+// 2026, ui/colourCode.js: the rows' highlighter, loaded the first time such a
+// block shows): coloured from its text into spans that hold text only, the
+// text itself as written. A fence with no language, or one the highlighter
+// doesn't know, stays plain.
+test('an answer’s code is in colour when its fence names a language, and plain when it doesn’t', async ({ yap, main, fakeLlm, shot }) => {
+  await setConfig(yap, main, {
+    ppApiKeys: { groq: TEST_KEY },
+    theme: 'light',
+    llmScopes: { ...(await yap.invoke('get_config')).llmScopes, chat: groqChat(fakeLlm, 'openai/gpt-oss-20b') },
+  });
+  await openView(main, 'Chat');
+  await main.getByRole('button', { name: 'New chat' }).click();
+  const CODE = '// twice a week\nexport function water(bed) {\n  return bed.litres * 2;\n}';
+  fakeLlm.scriptChat([
+    {
+      content: `In JavaScript:\n\n\`\`\`js\n${CODE}\n\`\`\`\n\nAs plain text:\n\n\`\`\`\nwater the beds\n\`\`\`\n\nIn a language Yap has no colours for:\n\n\`\`\`klingon\nnuqneH <b>\n\`\`\``,
+    },
+  ]);
+  await send(main, 'How do I water a bed?');
+  const answer = main.locator('.cbubble.assistant').last();
+  const blocks = answer.locator('pre.md-code code');
+  await expect(blocks).toHaveCount(3);
+  // The first: coloured once the highlighter has loaded; each token a span holding text only; its text as written.
+  await expect(blocks.nth(0)).toHaveAttribute('data-coloured', 'true');
+  await expect(blocks.nth(0).locator('.syn-k')).toHaveText(['export', 'function', 'return']);
+  await expect(blocks.nth(0).locator('.syn-c')).toHaveText(['// twice a week']);
+  await expect(blocks.nth(0).locator('.syn-f')).toHaveText(['water']);
+  await expect(blocks.nth(0).locator('.syn-n')).toHaveText(['2']);
+  expect(await blocks.nth(0).evaluate((el) => el.textContent)).toBe(CODE);
+  expect(await blocks.nth(0).locator('*').evaluateAll((els) => els.every((e) => e.tagName === 'SPAN' && e.children.length === 0))).toBe(true);
+  // No language: never looked at. One the highlighter doesn't know: plain, its text as written, never markup.
+  expect(await blocks.nth(1).evaluate((el) => [el.dataset.coloured ?? null, el.children.length, el.textContent])).toEqual([null, 0, 'water the beds']);
+  await expect(blocks.nth(2)).toHaveAttribute('data-coloured', 'plain');
+  expect(await blocks.nth(2).evaluate((el) => [el.children.length, el.textContent])).toEqual([0, 'nuqneH <b>']);
+  // The colours are Yap's own: a keyword's, a comment's and the code's plain text all differ, and the dark theme has its own.
+  const colourOf = (loc) => loc.first().evaluate((el) => getComputedStyle(el).color);
+  const light = { keyword: await colourOf(blocks.nth(0).locator('.syn-k')), comment: await colourOf(blocks.nth(0).locator('.syn-c')), plain: await colourOf(blocks.nth(0)) };
+  expect(new Set(Object.values(light)).size).toBe(3);
+  await shot(main, '08-answer-code-in-colour');
+  await setConfig(yap, main, { theme: 'dark' });
+  await expect.poll(() => main.evaluate(() => document.documentElement.dataset.yapTheme)).toBe('dark');
+  expect(await colourOf(blocks.nth(0).locator('.syn-k'))).not.toBe(light.keyword);
+  await shot(main, '09-answer-code-in-colour-dark');
+  await setConfig(yap, main, { theme: 'light' });
+  await expect.poll(() => main.evaluate(() => document.documentElement.dataset.yapTheme)).toBe('light');
+  // Rendered again (another answer below it), it is still in colour, and the new answer's code too.
+  fakeLlm.scriptChat([{ content: 'And in Python:\n\n```python\ndef water(bed):\n    return bed.litres * 2\n```' }]);
+  await send(main, 'And in Python?');
+  await expect(main.locator('.cbubble.assistant')).toHaveCount(2);
+  const second = main.locator('.cbubble.assistant').nth(1).locator('pre.md-code code');
+  await expect(second).toHaveAttribute('data-coloured', 'true');
+  await expect(second.locator('.syn-k')).toHaveText(['def', 'return']);
+  await expect(blocks.nth(0)).toHaveAttribute('data-coloured', 'true');
+  await expect(main.locator('.cbubble.assistant pre.md-code code[data-coloured="true"]')).toHaveCount(2);
+});
+
 // Chat answers show fenced code as a code block and links as links, and a
 // link opens in the browser (the opener plugin), never in Yap's window. Seen
 // in the Voice Agent screenshots (2026-10-18): ``` and [text](url) showed raw.

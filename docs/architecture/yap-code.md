@@ -1378,8 +1378,11 @@ something that matches that?").
   - **The colours are Yap's own**: `--yap-syn-*` in `app.css`, light and
     dark, chosen to read on the row's surface and on a diff's red and green
     lines.
-  - Only here so far: Chat's own answers and notes still show code plain
-    (`core/markdown.js`).
+  - **Chat's answers too** (the same day; the maintainer: "Yes, colour
+    them"): a fenced block that names its language, in Chat's thread, in
+    the agent's words there and in its tab
+    ([notes.md](./notes.md#the-markdown-renderer): `ui/colourCode.js`).
+    The styles are one set, `.syn-*` in `app.css`.
 - **Not done**: a read's row opening to what was read; the output of a
   command still running.
 

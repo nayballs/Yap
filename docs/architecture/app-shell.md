@@ -19,8 +19,9 @@ The full stack list, the app's entry and plumbing (`lib.rs`, the tray, context m
   pill window was retired 2026-07-09.
 - **Code colours:** [`highlight.js`](https://github.com/highlightjs/highlight.js)
   11.12.0 (BSD-3-Clause, pinned exact), its core and 29 languages, in a chunk
-  of its own loaded when a row of a Code chat's thread is first opened
-  (`core/codeColours.js`; [yap-code.md](./yap-code.md#an-opened-stretch-a-row-a-step)).
+  of its own loaded when a row of a Code chat's thread is first opened, or an
+  answer's fenced code that names its language first shows
+  (`core/codeColours.js`, `ui/colourCode.js`; [yap-code.md](./yap-code.md#an-opened-stretch-a-row-a-step)).
   Its output is read into tokens and drawn as text, never set as HTML.
 - **Markdown:** [`markdown-it`](https://github.com/markdown-it/markdown-it) 15.0.3
   (MIT) parses answers and notes, [`DOMPurify`](https://github.com/cure53/DOMPurify)
