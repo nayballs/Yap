@@ -1210,16 +1210,28 @@ instead of a terminal (rebuilt after the maintainer's first real agent,
   - **one quiet line for each stretch of steps between its words**, as Claude
     Code writes one: "Ran 2 commands, read a file, edited notes.md +4 −1 ›"
     (`core/agents.js` `workOf` groups the turn's events; `workSummary` words
-    a group: commands, files read, searches, the web, then the files it
-    edited with the lines added in green and removed in red; a stretch of one
-    step is that step's own line, as done: "Read notes.md", "Wrote
-    legend.md +12"). A click opens it into its steps, each command under its
-    line;
+    a group: commands, files read, searches, the web, other tools' calls,
+    helpers, then the files it edited with the lines added in green and
+    removed in red; a stretch of one step is that step's own line, as done:
+    "Read notes.md", "Wrote legend.md +12"). A click opens it into its
+    steps, each command under its line;
+  - **other tools' calls are steps of the work too** (2026-11-11, the
+    maintainer: "Yes, show them"): an MCP server's or a connector's ("Using
+    github · create issue"), a skill, a tool Yap has no words for, a part
+    handed to a helper (`stepKind`: `tool`, `helper`). Before, a stretch of
+    them alone was taken for housekeeping, so a turn that only used other
+    tools showed no line between the message and the answer. One alone is
+    its own line ("Used github · create issue"); several are named when
+    they're all one's ("used github 3 times", "used a skill"), counted
+    otherwise ("used 3 tools"); helpers read "handed part of it to a
+    helper". The Agent tab's timeline gives each its icon;
   - **while it works**, the last line is the step it's on, with a spinner
     (`agents.steps`), and becomes its summary once the agent speaks or ends;
   - **never its final words**: its report tells those, right below.
-    Housekeeping alone ("Starting Claude Code") is a line only while it's
-    what the agent is on.
+    Housekeeping alone ("Starting Claude Code", a note read, a denial,
+    Yap's permission prompts' own tool, Claude Code looking a tool up:
+    "Finding a tool", its `ToolSearch`) is a line only while it's what the
+    agent is on.
   - **a picture at the end of the line** when one of its steps came back
     with one, as Claude Code's transcript shows it
     ([A step's pictures](#a-steps-pictures)).
@@ -1320,10 +1332,9 @@ picture of it, do we have that in Yap now too?").
   step). `core/agents.js` `stepPicture` gives it the address the page asks
   by; `workOf` and `timelineOf` put it on the step that stands for that
   call (the same line twice in a row is one step, with both calls), in
-  whichever stretch that step is. A stretch that is another tool's call
-  alone ("Using shots · take screenshot") is housekeeping to the thread and
-  not a line, unless it came back with a picture: then it is one ("Used
-  shots · take screenshot", and the picture).
+  whichever stretch that step is. A stretch of Yap's own housekeeping
+  alone is not a line of the thread, unless a step of it came back with a
+  picture: then it is one, with the picture.
 - **Shown** (`views/chat/StepPictures.svelte`): at the end of the stretch's
   line in the thread, 30 × 20 px, a tile filled with the picture's middle at
   exactly its device pixels (the first three, then "+N"); on its step in
@@ -1976,7 +1987,9 @@ the build's own stand-in replaying `script` from now on),
     answer tells the result, the report adds its card alone); a step that
     read a picture ends its line with it (kept in the agent's own folder,
     a tile at its device pixels, larger by its step, opened in the viewer
-    and the picture tab, on its step in the Agent tab); its work in
+    and the picture tab, on its step in the Agent tab); another tool's
+    call as a line (one alone as itself, several counted, each with its icon
+    in the tab); its work in
     the thread (what it said, a line for each stretch of steps that opens
     into them, the step it's on while it works); "start fresh" a
     second agent, its tab named apart; Undo this turn (refused while a later

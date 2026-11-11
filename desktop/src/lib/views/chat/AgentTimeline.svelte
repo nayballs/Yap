@@ -1,7 +1,8 @@
 <script>
   // **An agent's timeline** in its tab (AgentTab.svelte; core/agents.js
   // `timelineOf`): every step in plain words with its icon (reading,
-  // searching, editing, running a command, the web, waiting for you), and
+  // searching, editing, running a command, the web, another tool's call, a
+  // part handed to a helper, waiting for you), and
   // what Claude Code said between them, in order — in markdown, a long one
   // folded to its first lines ("Show more"). The box follows the live end
   // as a terminal does (ui/followEnd.js): pinned to the newest line while
@@ -51,6 +52,10 @@
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9" /><path d="M3 12h18M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18" /></svg>
               {:else if kind === 'read' || kind === 'search'}
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z" /><path d="M14 3v5h5" /></svg>
+              {:else if kind === 'tool'}
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M9 3v5M15 3v5" /><path d="M6 8h12v3a6 6 0 0 1-12 0z" /><path d="M12 17v4" /></svg>
+              {:else if kind === 'helper'}
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="6" cy="6" r="2.5" /><circle cx="18" cy="18" r="2.5" /><path d="M6 8.5V12a4 4 0 0 0 4 4h5.5" /></svg>
               {:else if kind === 'ask'}
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l8 3v6c0 4.5-3.4 8.2-8 9-4.6-.8-8-4.5-8-9V6z" /></svg>
               {:else}
