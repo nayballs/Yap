@@ -157,9 +157,20 @@ pub struct AgentEvent {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub diff: Option<diff::FileDiff>,
     /// The tool call a step is (Claude Code's id for it), or the one a
-    /// `picture` came back from.
+    /// `diff`, an `output` or a `picture` came back from.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub call: Option<String>,
+    /// A command's line once it's done ("Listed the add-on folders":
+    /// `steps::command::did`), with its step.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub done: Option<String>,
+    /// The lines a Read asked for ("424–503"), with its step.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub range: Option<String>,
+    /// What a command printed (`output.rs`): its row in the thread opens
+    /// to it.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub output: Option<super::output::Output>,
     /// A picture a tool call's answer carried (`pictures.rs`): its step
     /// (`call`) shows it.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -1057,6 +1068,10 @@ struct Follow {
     diff_used: usize,
     /// Pictures kept this turn (`pictures::PER_TURN`).
     pictures: usize,
+    /// The commands' calls not back yet, by id (their output is said).
+    commands: HashSet<String>,
+    /// Characters of output kept this turn (`output::TURN_MAX`).
+    output_used: usize,
     /// What the turn has used (`usage.rs`).
     meter: super::usage::Meter,
 }
@@ -1132,6 +1147,8 @@ impl Follow {
             changes: HashMap::new(),
             diff_used: agent.diff_lines as usize,
             pictures: 0,
+            commands: HashSet::new(),
+            output_used: 0,
             meter: super::usage::Meter::new(before, &agent.model, window),
         }
     }
@@ -1199,7 +1216,10 @@ impl Follow {
         }
         self.line = seen.step.clone();
         let call = Some(id.to_string()).filter(|c| !c.is_empty());
-        emit(&AgentEvent { step: Some(seen.step), file: seen.file, command: seen.command, about: seen.about, call, ..self.event(&agent) });
+        if seen.command.is_some() {
+            self.commands.insert(id.to_string());
+        }
+        emit(&AgentEvent { step: Some(seen.step), file: seen.file, command: seen.command, about: seen.about, done: seen.done, range: seen.range, call, ..self.event(&agent) });
     }
 
     /// **A tool call's answer carried pictures** (a picture file read, a
@@ -1224,15 +1244,20 @@ impl Follow {
         }
     }
 
-    /// A tool call came back: an edit's diff once it went through; with
-    /// nothing else out, the line is the to-do in progress.
-    fn on_tool_result(&mut self, id: &str, is_error: bool) {
+    /// A tool call came back (`text`: its answer's words; `result`: Claude
+    /// Code's own record of it, `tool_use_result`, when the message had
+    /// one): an edit's diff once it went through, what a command printed;
+    /// with nothing else out, the line is the to-do in progress.
+    fn on_tool_result(&mut self, id: &str, is_error: bool, text: &str, result: Option<&serde_json::Value>) {
         if !is_error && self.edits.contains(id) {
             self.edited = true;
         }
         self.open.remove(id);
         if let Some(change) = self.changes.remove(id).filter(|_| !is_error) {
-            self.diff_of(change);
+            self.diff_of(change, id, result);
+        }
+        if self.commands.remove(id) {
+            self.output_of(id, text, is_error);
         }
         if self.open.is_empty() {
             if let Some(line) = steps::doing_now(&self.todos) {
@@ -1241,24 +1266,42 @@ impl Follow {
         }
     }
 
-    /// What `change` did to its file, within the caps, said and logged.
-    fn diff_of(&mut self, change: Change) {
+    /// **What a command printed**, said with its call (its row in the
+    /// thread opens to it), within the turn's share (`output::TURN_MAX`).
+    /// One that printed nothing says nothing.
+    fn output_of(&mut self, call: &str, text: &str, failed: bool) {
+        let Some(out) = super::output::of(text, failed) else { return };
+        if self.output_used + out.chars() > super::output::TURN_MAX {
+            return;
+        }
+        self.output_used += out.chars();
+        if let Some(agent) = store::get(&self.id) {
+            emit(&AgentEvent { output: Some(out), call: Some(call.to_string()), ..self.event(&agent) });
+        }
+    }
+
+    /// What `change` (call `call`) did to its file, within the caps, said
+    /// and logged: from Claude Code's own patch when its `result` has one
+    /// (each part's place in the file), else from the call's input.
+    fn diff_of(&mut self, change: Change, call: &str, result: Option<&serde_json::Value>) {
         let d = if change.tool == "Write" {
             let content = change.input.get("content").and_then(serde_json::Value::as_str).unwrap_or("");
             let state = claude_live::backup::read_manifest(&self.backup)
                 .ok()
                 .and_then(|m| m.files.into_iter().find(|e| steps::shown_path(&e.original.to_string_lossy(), &self.folder) == change.file))
                 .map(|e| e.state);
-            Some(diff::of_write(&change.file, content, write_kind(change.known, state)))
+            let kind = write_kind(change.known, state);
+            // (A file written over: what changed in it, when Claude Code said; a new one: its lines.)
+            result.and_then(|r| diff::of_patch(&change.file, kind, r)).or_else(|| Some(diff::of_write(&change.file, content, kind)))
         } else {
-            diff::of_edit(&change.tool, &change.input, &change.file)
+            result.and_then(|r| diff::of_patch(&change.file, "edit", r)).or_else(|| diff::of_edit(&change.tool, &change.input, &change.file))
         };
         let Some(d) = d else { return };
         let (d, kept) = diff::capped(d, diff::AGENT_MAX.saturating_sub(self.diff_used));
         self.diff_used += kept;
         let used = self.diff_used as u32;
         if let Some(agent) = store::touch(&self.id, |j| j.diff_lines = used) {
-            emit(&AgentEvent { diff: Some(d), ..self.event(&agent) });
+            emit(&AgentEvent { diff: Some(d), call: Some(call.to_string()).filter(|c| !c.is_empty()), ..self.event(&agent) });
         }
     }
 
@@ -1317,9 +1360,12 @@ impl Follow {
                     let text: String = u.blocks.iter().filter_map(|b| if let Block::Text(t) = b { Some(t.as_str()) } else { None }).collect();
                     self.on_taken(&text);
                 }
+                // (Claude Code's own record of a call is its message's: one result a message.)
+                let results = u.blocks.iter().filter(|b| matches!(b, Block::ToolResult { .. })).count();
+                let record = u.tool_use_result.as_ref().filter(|_| results == 1);
                 for block in &u.blocks {
-                    if let Block::ToolResult { tool_use_id, is_error, pictures, .. } = block {
-                        self.on_tool_result(tool_use_id, *is_error);
+                    if let Block::ToolResult { tool_use_id, is_error, text, pictures } = block {
+                        self.on_tool_result(tool_use_id, *is_error, text, record);
                         self.on_pictures(tool_use_id, pictures);
                     }
                 }
@@ -2531,7 +2577,7 @@ mod tests {
             crate::ai::claude_code::events::Picture { media_type: "image/png".into(), data: base64::engine::general_purpose::STANDARD.encode(png) }
         };
         follow.on_tool("toolu_read_1", "Read", &serde_json::json!({ "file_path": folder.join("shot.png").to_string_lossy() }));
-        follow.on_tool_result("toolu_read_1", false);
+        follow.on_tool_result("toolu_read_1", false, "", None);
         follow.on_pictures("toolu_read_1", &[picture(64, 40)]);
         let log = store::log_read(&id);
         let step = log.iter().find(|e| e["step"] == "Reading shot.png").expect("its step");
@@ -2552,6 +2598,60 @@ mod tests {
         assert_eq!(pictures::kept_in(&pictures::dir(&id).unwrap()), pictures::PER_TURN);
     }
 
+    /// For its row in the thread: an edit's diff with its place in the file
+    /// (Claude Code's own patch), a command as done and what it printed, a
+    /// Read's lines — each said with its call.
+    #[test]
+    fn a_steps_own_diff_and_what_its_command_printed_are_said_with_its_call() {
+        use serde_json::json;
+        let id = store::new_id();
+        let folder = PathBuf::from(format!(r"D:\Projects\seed-tracker-{id}"));
+        store::insert(Agent { id: id.clone(), folder: "seed-tracker".into(), path: folder.to_string_lossy().into_owned(), status: Status::Running, started_ts: 5, turn_list: vec![store::TurnNote { n: 1, status: Status::Running, started_ts: 5, ..Default::default() }], ..Default::default() });
+        let agent = store::get(&id).unwrap();
+        let backup = store::turn_backup_dir(&id, 1).unwrap();
+        let mut follow = Follow::new(&agent, 1, folder.clone(), backup, Mode::Auto, 200_000, None);
+        let notes = folder.join("notes.txt").to_string_lossy().into_owned();
+        // An edit: Claude Code's own record of it says where in the file.
+        follow.on_tool("toolu_edit_1", "Edit", &json!({ "file_path": notes, "old_string": "line five", "new_string": "line 5" }));
+        let record = json!({ "structuredPatch": [{ "oldStart": 4, "oldLines": 3, "newStart": 4, "newLines": 3, "lines": [" line four", "-line five", "+line 5", " line six"] }] });
+        follow.on_tool_result("toolu_edit_1", false, "The file has been updated.", Some(&record));
+        // A command Claude Code described: its line as done, then what it printed (its colour codes gone).
+        follow.on_tool("toolu_run_1", "Bash", &json!({ "command": "npm test", "description": "Run the tests" }));
+        follow.on_tool_result("toolu_run_1", true, "\u{1b}[31mFAIL\u{1b}[0m 1 failed\r\n2 passed\n", None);
+        // One that printed nothing says nothing more; a part of a file read says which lines.
+        follow.on_tool("toolu_run_2", "Bash", &json!({ "command": "mkdir out" }));
+        follow.on_tool_result("toolu_run_2", false, "", None);
+        follow.on_tool("toolu_read_1", "Read", &json!({ "file_path": notes, "offset": 10, "limit": 5 }));
+        follow.on_tool_result("toolu_read_1", false, "10\tline ten", None);
+        let log = store::log_read(&id);
+        let diff = log.iter().find(|e| e.get("diff").is_some()).expect("its diff");
+        assert_eq!(diff["call"], "toolu_edit_1");
+        assert_eq!(diff["diff"]["lines"], json!(["@@ -4,3 +4,3 @@", " line four", "-line five", "+line 5", " line six"]));
+        assert_eq!((diff["diff"]["added"].as_u64(), diff["diff"]["removed"].as_u64()), (Some(1), Some(1)));
+        let run = log.iter().find(|e| e["step"] == "Running the tests").expect("its command");
+        assert_eq!((run["done"].as_str(), run["call"].as_str()), (Some("Ran the tests"), Some("toolu_run_1")));
+        let printed: Vec<&serde_json::Value> = log.iter().filter(|e| e.get("output").is_some()).collect();
+        assert_eq!(printed.len(), 1, "a command that printed nothing says nothing");
+        assert_eq!((printed[0]["call"].as_str(), printed[0].get("step")), (Some("toolu_run_1"), None));
+        assert_eq!(printed[0]["output"], json!({ "text": "FAIL 1 failed\n2 passed", "failed": true }));
+        let read = log.iter().find(|e| e["step"] == "Reading notes.txt").expect("its read");
+        assert_eq!(read["range"], "10–14");
+        // Without Claude Code's own record (an older one, the tests' stand-in): the lines from the call's input.
+        follow.on_tool("toolu_edit_2", "Edit", &json!({ "file_path": notes, "old_string": "a", "new_string": "b" }));
+        follow.on_tool_result("toolu_edit_2", false, "The file has been updated.", None);
+        let second = store::log_read(&id).into_iter().filter(|e| e.get("diff").is_some()).nth(1).expect("the second diff");
+        assert_eq!((second["call"].as_str(), &second["diff"]["lines"]), (Some("toolu_edit_2"), &json!(["-a", "+b"])));
+        // No more than a turn's share of output.
+        let big = "x".repeat(250) + "\n";
+        for i in 0..40 {
+            let call = format!("toolu_big_{i}");
+            follow.on_tool(&call, "Bash", &json!({ "command": format!("cat big{i}.log") }));
+            follow.on_tool_result(&call, false, &big.repeat(60), None);
+        }
+        let kept: usize = store::log_read(&id).iter().filter_map(|e| e.get("output")).map(|o| o["text"].as_str().unwrap_or("").chars().count() + o["tail"].as_str().unwrap_or("").chars().count()).sum();
+        assert!(kept <= super::super::output::TURN_MAX && kept > super::super::output::TURN_MAX / 2, "{kept}");
+    }
+
     #[test]
     fn the_event_says_only_what_changed() {
         let agent = Agent { id: "ab12".into(), folder: "garden-planner".into(), status: Status::Running, conversation: Some(3), ..Default::default() };
@@ -2561,7 +2661,7 @@ mod tests {
         assert_eq!(v["status"], "running");
         assert_eq!(v["conversation"], 3);
         assert_eq!(v["step"], "Reading notes.md");
-        for absent in ["file", "command", "about", "said", "todos", "now", "diff", "call", "picture", "text", "cost", "problem"] {
+        for absent in ["file", "command", "about", "said", "todos", "now", "diff", "call", "done", "range", "output", "picture", "text", "cost", "problem"] {
             assert!(v.get(absent).is_none(), "{absent}");
         }
         // A diff and a to-do list, as the tab reads them.

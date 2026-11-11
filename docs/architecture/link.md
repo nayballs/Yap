@@ -398,7 +398,7 @@ PC → phone:
 | `code_status {seq, answering:[conv], agents:[Brief], approvals:[{id, conversation, agent}], confirms:[{id, conversation}]}` | what the status dots are made from: on connect, then on change, 300 ms apart at most (the page runs `core/chatStatus.js` itself) |
 | `thread` (extended) | a Code chat's: `code: {workspace, path, mode, modeLabel, cap?, allowed, phoneMax}`, `agents:[Brief]` (for the pills), `cards` (the prompts and ask-first cards waiting in it); messages gain `kind` (`"agentReport"`: the report marker, never the person's own words) |
 | `chat_message {conversation, message}` | an agent's report marker and its answer, to a phone with that chat open |
-| `agent_snapshot {agent, events:[{line, event}], more, seq: 0}` | the agent's record and its last 200 events, diff lines left out (counts kept), within 64 KiB |
+| `agent_snapshot {agent, events:[{line, event}], more, seq: 0}` | the agent's record and its last 200 events, diff lines left out (counts kept) and what a command printed never sent (`output` null, in a live event too), within 64 KiB |
 | `agent_event {id, seq, line, event}` | a live `yap-agent` event, numbered from 1 after the snapshot (`line`: its line in the agent's log; one the snapshot had is left out); diff lines past 40 left out (`more`) |
 | `agent_log {id, events, more}`, `agent_diff {id, file, lines, more, added, removed}` | the pages asked for |
 | `agent_resync {id}` | the agent lane was full: open it again |

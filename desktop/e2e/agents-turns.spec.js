@@ -40,6 +40,13 @@
 //   line ("Used homelights · list lights"), several are named when they're
 //   all one's and counted otherwise ("Ran a command, used 2 tools"). Yap's
 //   own housekeeping still isn't.
+// - A stretch opened is a row a step, as done (11 Nov 2026, after Claude
+//   Code's transcript: views/chat/StepRows.svelte): "Read notes.md (1–20)",
+//   "Edited notes.md +1", "Ran the tests · failed", "Created legend.md +3".
+//   An edit's row opens to its path and its diff, each line with its number
+//   in the file (Claude Code's own patch says where); a command's to the
+//   command, with Copy, and what it printed; a row with nothing more
+//   doesn't open. Light and dark.
 // - "Start fresh" (`fresh: true`): a second agent, its tab named apart.
 // - Undo this turn (refused while a later turn changed the same file:
 //   "Undo the later change first"), and Undo all, asked first.
@@ -64,6 +71,10 @@ import {
   workOf,
   workSummary,
   stepKind,
+  stepRow,
+  rowSteps,
+  stepOpens,
+  diffRows,
   timelineOf,
   stepPicture,
   groupPictures,
@@ -227,6 +238,46 @@ const USES_OTHER_TOOLS = [
   result(LIT, 0.01),
   { _wait_user: true },
 ];
+const LEGEND = '# Legend\n\nB: a bed\n';
+const TESTED = 'Added the watering line and a legend. One test still fails: watering is twice a week.';
+const TEST_OUTPUT = '> garden-planner@1.0.0 test\n> node --test\n\n✔ beds are sorted (1.2ms)\n✖ watering is twice a week (0.4ms)\n\ntests 2\npass 1\nfail 1';
+/**
+ * A turn of four steps for its rows: a part of a file read, an edit with
+ * Claude Code's own record of it (its patch says where in the file, as
+ * 2.1.296 gives one), a command Claude Code described that prints and
+ * fails, and a new file.
+ */
+const FOUR_STEPS = [
+  { _wait_user: true },
+  { _dump_args: ARGS },
+  init(),
+  said('r1', [{ type: 'tool_use', id: 'toolu_r', name: 'Read', input: { file_path: '{{cwd}}\\notes.md', offset: 1, limit: 20 } }]),
+  toolResult('toolu_r', '1\tDraft notes'),
+  said('r2', [{ type: 'tool_use', id: 'toolu_e', name: 'Edit', input: { file_path: '{{cwd}}\\notes.md', old_string: 'Draft notes', new_string: 'Draft notes\nWatering: twice a week' } }]),
+  { _hook: { event: 'PreToolUse', input: { tool_name: 'Edit', tool_use_id: 'toolu_e', tool_input: { file_path: 'notes.md' } } } },
+  { _write_file: { path: 'notes.md', text: NOTES1 } },
+  {
+    type: 'user',
+    message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: 'toolu_e', content: 'The file notes.md has been updated.' }] },
+    tool_use_result: { filePath: 'notes.md', structuredPatch: [{ oldStart: 1, oldLines: 1, newStart: 1, newLines: 2, lines: [' Draft notes', '+Watering: twice a week'] }], userModified: false, replaceAll: false },
+    parent_tool_use_id: null,
+    session_id: '{{session_id}}',
+  },
+  said('r3', [{ type: 'tool_use', id: 'toolu_t', name: 'Bash', input: { command: 'npm test', description: 'Run the tests' } }]),
+  {
+    type: 'user',
+    message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: 'toolu_t', content: TEST_OUTPUT, is_error: true }] },
+    parent_tool_use_id: null,
+    session_id: '{{session_id}}',
+  },
+  said('r4', [{ type: 'tool_use', id: 'toolu_w', name: 'Write', input: { file_path: '{{cwd}}\\legend.md', content: LEGEND } }]),
+  { _hook: { event: 'PreToolUse', input: { tool_name: 'Write', tool_use_id: 'toolu_w', tool_input: { file_path: 'legend.md' } } } },
+  { _write_file: { path: 'legend.md', text: LEGEND } },
+  toolResult('toolu_w', 'File created successfully at: legend.md'),
+  said('r5', [{ type: 'text', text: TESTED }], 'end_turn'),
+  result(TESTED, 0.02),
+  { _wait_user: true },
+];
 /** Says what it was told. */
 const ECHO = [{ _wait_user: true }, { _dump_args: ARGS }, init(), result('Got: {{user_text}}', 0.002), { _wait_user: true }];
 
@@ -274,6 +325,8 @@ const chatScope = (fakeLlm) => ({
   chat: { enabled: true, provider: 'custom', baseUrl: fakeLlm.base, model: 'fake-chat', apiKey: '', apiKeys: {}, prompt: '', disableThinking: false },
 });
 const thread = (main) => main.locator('.msgs');
+/** The rows of an opened stretch (StepRows.svelte), in `work` (the thread's AgentWork). */
+const rowsIn = (work) => work.getByTestId('chat-agent-work-row');
 const lastAnswer = (main) => thread(main).locator('.cbubble.assistant').last();
 const chipsOfLast = (main) => thread(main).locator('.toolchips').last().locator('.toolchip');
 const agents = (yap) => yap.invoke('agent_list');
@@ -539,6 +592,59 @@ test('core/agents.js: an agent’s turns from its log, their words, the pills a 
   ]);
   expect(workSummary(mixed[0])).toEqual([{ text: 'Used 3 tools' }, { text: 'handed parts of it to 2 helpers' }, { text: 'edited notes.md' }]);
   expect(workSummary(workOf([{ step: 'Reading notes.md' }, { step: 'Handing part of it to a helper · Check the docs' }])[0])).toEqual([{ text: 'Read a file' }, { text: 'handed part of it to a helper' }]);
+  // A step as its row says it, with its own diff and what its command printed (each by its call).
+  const fourSteps = workOf([
+    { id: 'ab12', step: 'Reading src\\app.ts', range: '424–503', call: 'c1' },
+    { id: 'ab12', step: 'Editing notes.md', file: 'notes.md', call: 'c2' },
+    { id: 'ab12', step: 'Editing notes.md', file: 'notes.md', call: 'c3' },
+    { id: 'ab12', diff: { file: 'notes.md', kind: 'edit', lines: ['@@ -4,3 +4,3 @@', ' line four', '-line five', '+line 5', ' line six', '@@ -40,1 +40,2 @@', ' last', '+added'], added: 2, removed: 1 }, call: 'c2' },
+    { id: 'ab12', diff: { file: 'notes.md', kind: 'edit', lines: ['-a', '+b'], added: 1, removed: 1 }, call: 'c3' },
+    { id: 'ab12', step: 'Checking the edits parse', command: 'node --check notes.js', about: 'Check the edits parse', done: 'Checked the edits parse', call: 'c4' },
+    { id: 'ab12', output: { text: 'SyntaxError: nope', failed: true }, call: 'c4' },
+    { id: 'ab12', step: 'Running ls', command: 'ls', call: 'c5' },
+    { id: 'ab12', step: 'Writing legend.md', file: 'legend.md', call: 'c6' },
+    { id: 'ab12', diff: { file: 'legend.md', kind: 'new', lines: ['+# Legend', '+', '+B: a bed'], added: 3, removed: 0 }, call: 'c6' },
+    { id: 'ab12', step: 'Using homelights · list lights', call: 'c7' },
+  ])[0];
+  expect(fourSteps.steps.map((x) => stepRow(x))).toEqual([
+    { text: 'Read', name: 'app.ts', tail: '(424–503)' },
+    { text: 'Edited', name: 'notes.md', added: 2, removed: 1 },
+    { text: 'Edited', name: 'notes.md', added: 1, removed: 1 },
+    { text: 'Checked the edits parse', failed: true },
+    { text: 'Ran ls' },
+    { text: 'Created', name: 'legend.md', added: 3, removed: 0 },
+    { text: 'Used homelights · list lights' },
+  ]);
+  // Plumbing is no row once it's past: only while it's what the agent is on, or when it came back with a picture.
+  const plumbed = [{ step: 'Starting Claude Code', pictures: [] }, { step: 'Finding a tool', pictures: [] }, { step: 'Reading notes.md', pictures: [] }, { step: 'Not allowed: Bash', pictures: [] }, { step: 'Finding a tool', pictures: [] }];
+  expect(rowSteps(plumbed).map((r) => [r.step.step, r.i, r.now])).toEqual([['Reading notes.md', 2, false], ['Not allowed: Bash', 3, false]]);
+  expect(rowSteps(plumbed, true).map((r) => [r.step.step, r.i, r.now])).toEqual([['Reading notes.md', 2, false], ['Not allowed: Bash', 3, false], ['Finding a tool', 4, true]]);
+  expect(rowSteps([{ step: 'Finding a tool', pictures: [{ id: 'p' }] }]).length).toBe(1);
+  expect(rowSteps(null)).toEqual([]);
+  // Which rows open: an edit to its diff, a command to itself; a read and another tool's call have nothing more.
+  expect(fourSteps.steps.map(stepOpens)).toEqual([false, true, true, true, true, true, false]);
+  // The step it's on now: as it is.
+  expect(stepRow(fourSteps.steps[3], true)).toEqual({ text: 'Checking the edits parse' });
+  // The stretch's own line says how many failed, as Claude Code's does.
+  expect(workSummary(fourSteps).map((p) => p.text)).toEqual(['Ran 2 commands', 'read a file', 'used homelights', 'edited 2 files', '1 failed']);
+  // A diff's lines numbered: a removed line by its number before, the others after; a gap between its parts, none before the first.
+  expect(diffRows(fourSteps.steps[1].diff).map((x) => [x.mark, x.no, x.text])).toEqual([
+    ['ctx', 4, 'line four'],
+    ['del', 5, 'line five'],
+    ['add', 5, 'line 5'],
+    ['ctx', 6, 'line six'],
+    ['gap', null, ''],
+    ['ctx', 40, 'last'],
+    ['add', 41, 'added'],
+  ]);
+  // No place said (an older log, the stand-in): no numbers; a file written whole: from 1.
+  expect(diffRows(fourSteps.steps[2].diff).map((x) => [x.mark, x.no])).toEqual([['del', null], ['add', null]]);
+  expect(diffRows(fourSteps.steps[5].diff).map((x) => [x.mark, x.no, x.text])).toEqual([['add', 1, '# Legend'], ['add', 2, ''], ['add', 3, 'B: a bed']]);
+  expect(diffRows({ kind: 'edit', lines: ['-a', '@', '+b'] }).map((x) => x.mark)).toEqual(['del', 'gap', 'add']);
+  expect(diffRows(null)).toEqual([]);
+  // A diff with no call (an older log's): the earliest step that changes that file and has none yet.
+  const olderLog = workOf([{ step: 'Editing a.js', file: 'a.js' }, { step: 'Editing a.js', file: 'a.js' }, { diff: { file: 'a.js', kind: 'edit', lines: ['+1'], added: 1, removed: 0 } }, { diff: { file: 'a.js', kind: 'edit', lines: ['+2'], added: 1, removed: 0 } }])[0];
+  expect(olderLog.steps.map((x) => x.diff?.lines)).toEqual([['+1'], ['+2']]);
   // The Agent tab's timeline keeps them on their steps too.
   expect(timelineOf(seen).filter((t) => t.kind === 'step').map((t) => t.pictures.length)).toEqual([1, 0, 1]);
   // The same line twice in a row is one step: both calls' pictures are its.
@@ -708,12 +814,12 @@ test('two requests in a Code chat: one agent, one tab with two turns, two report
   await expect(works.nth(0).getByTestId('chat-agent-work-steps').locator('.wtext')).toHaveText([/^Edited notes\.md\s*\+1$/]);
   await expect(works.nth(1).getByTestId('chat-agent-work-said')).toHaveText(['Now the minimap button.']);
   await expect(works.nth(1).getByTestId('chat-agent-work-steps').locator('.wtext')).toHaveText([/^Edited 2 files\s*\+2$/]);
-  await expect(works.nth(1).locator('.wstep')).toHaveCount(0);
+  await expect(rowsIn(works.nth(1))).toHaveCount(0);
   await works.nth(1).getByRole('button', { name: /Edited 2 files/ }).click();
-  await expect(works.nth(1).locator('.wstep .stext')).toHaveText(['Editing notes.md', 'Writing minimap.js']);
+  await expect(rowsIn(works.nth(1)).locator('.rtext')).toHaveText(['Edited notes.md', 'Created minimap.js']);
   await shot(main, '10-its-work-in-the-thread');
   await works.nth(1).getByRole('button', { name: /Edited 2 files/ }).click();
-  await expect(works.nth(1).locator('.wstep')).toHaveCount(0);
+  await expect(rowsIn(works.nth(1))).toHaveCount(0);
   await expect(reports.nth(1).locator('.jline')).toHaveText('Changed notes.md, minimap.js');
   await closeTab(main);
   await reports.nth(1).getByRole('button', { name: 'Open the agent in garden-planner' }).click();
@@ -1024,13 +1130,17 @@ test('a step that read a picture ends its line with it: small on the line, large
   await viewer.click();
   await expect(viewer).toHaveCount(0);
 
-  // The line opened: each step, the picture by the one that read it; the line's small one gives way.
+  // The line opened: a row a step, the small picture at the end of the row that read it
+  // (the line's own gives way); that row opened: the picture larger.
   await work.getByRole('button', { name: /Ran a command, read a file/ }).click();
-  await expect(work.locator('.wstep .stext')).toHaveText(['Listing the folder', 'Reading beds.png']);
-  await expect(work.getByTestId('agent-step-picture')).toHaveCount(0);
-  const byStep = work.locator('.wstep').nth(1).getByTestId('chat-agent-work-step-picture');
+  await expect(rowsIn(work).locator('.rtext')).toHaveText(['Listed the folder', 'Read beds.png']);
+  await expect(work.locator('.wrow').getByTestId('agent-step-picture')).toHaveCount(0);
+  await expect(rowsIn(work).nth(0).getByTestId('agent-step-picture')).toHaveCount(0);
+  await expect(rowsIn(work).nth(1).getByTestId('agent-step-picture')).toHaveCount(1);
+  await rowsIn(work).nth(1).locator('button.rhead').click();
+  const byStep = rowsIn(work).nth(1).getByTestId('chat-agent-work-step-picture');
   await expect(byStep).toHaveCount(1);
-  await expect(work.locator('.wstep').nth(0).getByTestId('chat-agent-work-step-picture')).toHaveCount(0);
+  await expect(rowsIn(work).nth(1).getByTestId('agent-step-picture')).toHaveCount(0);
   await expect.poll(async () => (await loaded(byStep.locator('img'))).w, { message: 'the step’s picture to load' }).toBeGreaterThan(0);
   const frame = await byStep.boundingBox();
   expect(frame.width).toBeLessThanOrEqual(281);
@@ -1038,6 +1148,7 @@ test('a step that read a picture ends its line with it: small on the line, large
   expect(Math.abs(frame.width / frame.height - PLAN.w / PLAN.h)).toBeLessThan(0.03);
   await shot(main, '23-by-its-step-once-opened');
   await work.getByRole('button', { name: /Ran a command, read a file/ }).click();
+  await expect(rowsIn(work)).toHaveCount(0);
   await expect(work.getByTestId('agent-step-picture')).toHaveCount(1);
 
   // Copy image takes the same address (ids only).
@@ -1084,7 +1195,7 @@ test('another tool’s call is a line in the thread: one alone as itself, severa
   await shot(main, '31-other-tools-calls-in-the-thread-dark');
   await theme(yap, main, 'light');
   await work.getByRole('button', { name: /Ran a command, used 2 tools/ }).click();
-  await expect(work.locator('.wstep .stext')).toHaveText(['Using homelights · set light', 'Using tides · next high tide', 'Listing the folder']);
+  await expect(rowsIn(work).locator('.rtext')).toHaveText(['Used homelights · set light', 'Used tides · next high tide', 'Listed the folder']);
   await shot(main, '32-the-stretch-opened');
 
   // In the Agent tab: each on its step, with a tool's icon.
@@ -1094,6 +1205,89 @@ test('another tool’s call is a line in the thread: one alone as itself, severa
   await expect(tab(main).locator('.step.k-tool .stext')).toHaveText(['Using homelights · list lights', 'Using homelights · set light', 'Using tides · next high tide']);
   await expect(tab(main).locator('.step.k-tool .sicon svg')).toHaveCount(3);
   await expect(tab(main).locator('.step.k-command .stext')).toHaveText(['Listing the folder']);
+});
+
+test('a stretch opened is a row a step: an edit opens to its numbered diff, a command to itself and what it printed', async ({ yap, main, fakeLlm, shot }) => {
+  await script(yap, FOUR_STEPS, 'rows');
+  const before = (await agents(yap)).length;
+  await codeChat(main);
+  fakeLlm.scriptChat([
+    { tools: [{ name: 'start_agent', args: { brief: 'Add a watering line to notes.md, run the tests and write a legend.', title: 'Watering line and a legend' } }] },
+    { content: STARTED },
+    { plain: true, content: 'It added the watering line and a legend; one test still fails.' },
+  ]);
+  await send(main, 'Add a watering line to notes.md, run the tests and write a legend.');
+  const agent = await ended(yap, (await newAgent(yap, before)).id);
+  await messagesOf(yap, agent.conversation, 4);
+  await closeTab(main);
+
+  // Its log: the edit's diff with its place in the file and its call, the command as done, what it printed.
+  const log = (await yap.invoke('agent_get', { id: agent.id })).log;
+  const edited = log.find((e) => e.diff?.file === 'notes.md');
+  expect([edited.call, edited.diff.lines]).toEqual(['toolu_e', ['@@ -1,1 +1,2 @@', ' Draft notes', '+Watering: twice a week']]);
+  expect(log.find((e) => e.command === 'npm test')).toMatchObject({ step: 'Running the tests', done: 'Ran the tests', call: 'toolu_t' });
+  expect(log.find((e) => e.output)).toMatchObject({ call: 'toolu_t', output: { text: TEST_OUTPUT, failed: true } });
+  expect(log.find((e) => e.step === 'Reading notes.md').range).toBe('1–20');
+
+  // The stretch's line, then its rows: each step as done, a file's name set apart, its lines added.
+  const work = thread(main).getByTestId('chat-agent-work');
+  await expect(work.locator('.wtext')).toHaveText([/^Ran a command, read a file, edited 2 files\s*\+4, 1 failed$/]);
+  await work.getByRole('button', { name: /Ran a command, read a file/ }).click();
+  const rows = rowsIn(work);
+  await expect(rows.locator('.rtext')).toHaveText(['Read notes.md (1–20)', 'Edited notes.md', 'Ran the tests', 'Created legend.md']);
+  await expect(rows.locator('.rname')).toHaveText(['notes.md', 'notes.md', 'legend.md']);
+  await expect(rows.nth(1).locator('.plus')).toHaveText('+1');
+  await expect(rows.nth(3).locator('.plus')).toHaveText('+3');
+  await expect(rows.nth(2).locator('.rfailed')).toHaveText('failed');
+  // A row with nothing more to show doesn't open; the others do.
+  await expect(rows.nth(0).getByRole('button')).toHaveCount(0);
+  await expect(rows.locator('button.rhead')).toHaveCount(3);
+  // No command or diff until its row is opened.
+  await expect(work.getByTestId('chat-agent-work-command')).toHaveCount(0);
+  await expect(work.getByTestId('chat-agent-work-diff')).toHaveCount(0);
+  await shot(main, '40-a-row-a-step');
+
+  // The edit: its path, and its lines with their numbers in the file.
+  await rows.nth(1).getByRole('button', { name: /Edited notes\.md/ }).click();
+  await expect(rows.nth(1)).toHaveAttribute('data-open', 'true');
+  await expect(rows.nth(1).locator('.rpath')).toHaveText('notes.md');
+  const lines = rows.nth(1).getByTestId('chat-agent-work-diff').locator('.dl');
+  await expect(lines).toHaveCount(2);
+  expect(await lines.evaluateAll((els) => els.map((e) => [['ctx', 'add', 'del'].find((m) => e.classList.contains(m)), e.querySelector('.dno').textContent, e.querySelector('.dt').textContent]))).toEqual([
+    ['ctx', '1', 'Draft notes'],
+    ['add', '2', 'Watering: twice a week'],
+  ]);
+  // The command: itself, and what it printed.
+  await rows.nth(2).getByRole('button', { name: /Ran the tests/ }).click();
+  await expect(rows.nth(2).getByTestId('chat-agent-work-command').locator('.ccmd')).toHaveText('$ npm test');
+  const printed = rows.nth(2).getByTestId('chat-agent-work-output');
+  await expect(printed).toContainText('✖ watering is twice a week (0.4ms)');
+  await expect(printed).toHaveClass(/failed/);
+  expect(await printed.locator('pre').first().evaluate((el) => el.textContent)).toBe(TEST_OUTPUT);
+  await expect(rows.nth(2).getByRole('button', { name: 'Copy the command' })).toBeVisible();
+  // The new file: every line added, numbered from 1.
+  await rows.nth(3).getByRole('button', { name: /Created legend\.md/ }).click();
+  const made = rows.nth(3).getByTestId('chat-agent-work-diff').locator('.dl');
+  expect(await made.evaluateAll((els) => els.map((e) => [e.querySelector('.dno').textContent, e.querySelector('.dt').textContent.trim()]))).toEqual([
+    ['1', '# Legend'],
+    ['2', ''],
+    ['3', 'B: a bed'],
+  ]);
+  await shot(main, '41-rows-opened');
+  await theme(yap, main, 'dark');
+  await shot(main, '42-rows-opened-dark');
+  await theme(yap, main, 'light');
+  // A row closes again; the stretch closed takes its rows with it.
+  await rows.nth(2).getByRole('button', { name: /Ran the tests/ }).click();
+  await expect(rows.nth(2).getByTestId('chat-agent-work-command')).toHaveCount(0);
+  await work.getByRole('button', { name: /Ran a command, read a file/ }).click();
+  await expect(rowsIn(work)).toHaveCount(0);
+  // The tab's Files changed still reads the same diff (its place line is no line of its own there).
+  await thread(main).getByTestId('chat-agent-pill').first().click();
+  await expect(tab(main)).toBeVisible();
+  await agentTimeline(main, 1);
+  await tab(main).getByTestId('chat-agent-files').getByRole('button', { name: /notes\.md/ }).click();
+  await expect(tab(main).getByTestId('chat-agent-diff').first().locator('.dl')).toHaveText([/Draft notes/, /Watering: twice a week/]);
 });
 
 test('“start fresh”: a second agent in the workspace, its tab named apart from the first', async ({ yap, main, fakeLlm }) => {

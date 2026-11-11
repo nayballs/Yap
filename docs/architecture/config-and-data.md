@@ -882,7 +882,7 @@
   chat's Mode chip (`modes`), each Code chat's folder (`codeChats`:
   conversation id → `{path, ts}`, yap-code.md "Code chats") and the one-time Bypass OK
   (`bypassConfirmed`); and `%APPDATA%/yap/agents/`, a folder per agent:
-  `log.jsonl` (its `yap-agent` events, appended line by line, at most 5,000
+  `log.jsonl` (its `yap-agent` events: its steps, words, diffs and what its commands printed; appended line by line, at most 5,000
   lines), `pictures/` (the pictures its steps came back with, as PNGs, at
   most 120; yap-code.md "A step's pictures") and `backup/` (the files it changed as they were before it, as
   `0001-<name>`…, with `manifest.json`: the original paths, which were
