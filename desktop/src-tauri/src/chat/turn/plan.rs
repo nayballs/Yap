@@ -596,7 +596,7 @@ fn start(
 
 /// The messages `conv` holds from `from` on, as the history gives them.
 fn messages_from(conv: &crate::chat::chats::Conversation, from: usize) -> Vec<(String, String)> {
-    conv.messages.iter().skip(from).map(|m| (m.role.clone(), m.sent_text())).collect()
+    (from..conv.messages.len()).map(|i| (conv.messages[i].role.clone(), crate::chat::chats::sent_text_at(&conv.messages, i))).collect()
 }
 
 /// The question's screenshots (Snip to Chat), as image blocks.

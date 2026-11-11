@@ -47,6 +47,15 @@ use crate::agents::store::{self, Agent, Status, TurnNote};
 pub const AGENT_REPORT: &str = "agentReport";
 /// How the model reads a report in the history.
 pub const AGENT_REPORT_PREFIX: &str = "Report from the agent you started (not from the person): ";
+/// How the model reads a report nobody has answered yet: the person's next
+/// message came before Yap's own answer to it (11 Nov 2026, seen in a Yap Lab
+/// run on the real Claude Code: a question sent in the seconds after an agent
+/// finished was answered with no word of what the agent had done). So that
+/// message's answer says it first (`chats::sent_text_at`).
+pub const AGENT_REPORT_UNTOLD_PREFIX: &str = "Report from the agent you started (not from the person). The user hasn't been told about it yet: before anything else, tell them in a sentence or two what the agent did (if it changed files, that a backup was kept and Undo puts them back), then answer their message. The report: ";
+/// The last line of a report's marker that Chat's own answer told already
+/// (`TurnNote::told_at`): the model reads it as said, never as news.
+pub const TOLD_ALREADY: &str = "(You told the user this in your answer just before it.)";
 /// The page's event once a report is in its chat.
 pub const EVENT: &str = "yap-agent-report";
 /// The notice's kind (its rule in `notices/notice.rs`, the bar card's id).
@@ -154,6 +163,14 @@ pub fn marker_text(agent: &Agent, covered: &[TurnNote]) -> String {
     lines.join("\n")
 }
 
+/// **Chat's own answer told a turn's end already**: its model read it with
+/// `agent_status` when the chat had `told_at` messages, and an answer has
+/// been saved since (the chat is longer, and ends with the model's words).
+/// A turn that failed or was stopped saves none: the report speaks. Pure.
+pub fn told_by_chat(told_at: Option<u64>, messages: &[ChatMessage]) -> bool {
+    told_at.is_some_and(|at| messages.len() as u64 > at && messages.last().is_some_and(|m| m.role == "assistant" && m.kind.is_empty()))
+}
+
 /// **What agent `agent`'s turn `n` shows on its report card**
 /// (`shares::of_agent_turn`), off the async runtime: the pictures it created
 /// or changed, and its other new files.
@@ -229,11 +246,25 @@ async fn report(id: &str, n: u32, held: bool) {
     for t in &covered {
         files.extend(turn_files(&agent, t.n).await);
     }
-    let marker = ChatMessage { role: "user".into(), text: marker_text(&agent, &covered), kind: AGENT_REPORT.into(), files, ..Default::default() };
+    // Chat's own answer told it already (it read the agent's end with
+    // `agent_status` before this report could speak): the card, alone.
+    let chat_told = covered.len() == 1 && told_by_chat(covered[0].told_at, chats::get(conv).as_ref().map(|c| c.messages.as_slice()).unwrap_or_default());
+    let mut text = marker_text(&agent, &covered);
+    if chat_told {
+        text = format!("{text}\n{TOLD_ALREADY}");
+    }
+    let marker = ChatMessage { role: "user".into(), text, kind: AGENT_REPORT.into(), files, ..Default::default() };
     let Ok(marker_index) = chats::append_whole(conv, marker) else { return };
     let marker_id = format!("chat:{conv}:{marker_index}");
     // (Its report's message, and that of every turn that waited for it.)
     store::update(id, |j| j.told(n, Some(&marker_id)));
+    if chat_told {
+        tracing::info!(id, turn = n, "Agents: the chat's own answer told it already; its card alone");
+        drop(stop);
+        emit(&agent, n, conv, None, &marker_id);
+        notice(&agent, &fallback(&agent, &covered));
+        return;
+    }
     let asked = ask_model(&agent, covered.len(), conv);
     let answered = tokio::select! {
         a = asked => Some(a),
@@ -570,6 +601,27 @@ Its own words: Done.");
         crate::agents::remote::asked("chat:4:2", "p-office");
         assert_eq!(said_where(crate::agents::remote::phone_of_turn("ab12", 1, Some("chat:4:2")), |_| true), Said::Phone("p-office".into()));
         assert_eq!(said_where(crate::agents::remote::phone_of_turn("ab12", 1, Some("chat:4:5")), |_| true), Said::Pc);
+    }
+
+    #[test]
+    fn a_turn_the_chats_own_answer_told_gets_its_card_alone() {
+        let said = |role: &str, text: &str| ChatMessage { role: role.into(), text: text.into(), ..Default::default() };
+        // Asked how it's going just as it finished: Chat's model looked
+        // (agent_status, the chat two messages long then, or three with the
+        // question saved) and its answer told the result.
+        let told = [said("user", "Add a legend."), said("assistant", "On it."), said("user", "How is it going?"), said("assistant", "It has just finished: the legend is in.")];
+        assert!(told_by_chat(Some(2), &told));
+        assert!(told_by_chat(Some(3), &told));
+        // Never looked: the report speaks.
+        assert!(!told_by_chat(None, &told));
+        // Looked, but that turn saved no answer (stopped, or it failed and
+        // its question went back to the box): the report speaks.
+        assert!(!told_by_chat(Some(3), &told[..3]));
+        assert!(!told_by_chat(Some(2), &told[..2]));
+        // The chat ends with another agent's card, not the model's words.
+        let card = ChatMessage { kind: AGENT_REPORT.into(), ..said("user", "The agent in recipe-box: it's done.") };
+        assert!(!told_by_chat(Some(3), &[&told[..], &[card]].concat()));
+        assert!(TOLD_ALREADY.starts_with("(You told the user this"));
     }
 
     #[test]

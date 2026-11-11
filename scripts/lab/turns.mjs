@@ -155,7 +155,11 @@ function claudeContent(content) {
  * Every tool call of the turn, in order: Yap's tool loop's (`via: "yap"`)
  * and Claude Code's (`via: "claude"`: its own tools, and Yap's MCP tools as
  * `server: "yap"` with Yap's name), each `{ name, args, result, ok, refused }`
- * — trimmed (`full`: whole, for the transcript). Pure.
+ * — trimmed (`full`: whole, for the transcript). An agent at work while
+ * the turn ran has its own Claude Code, whose calls land in the same stretch
+ * of the record: those are `via: "agent"` (the record's `agent`), never
+ * the Chat turn's (11 Nov 2026: a note to a working agent listed the agent's
+ * Read and Edit as Chat's). Pure.
  */
 export function toolsOf(items, { full = false } = {}) {
   const max = full ? Infinity : FIELD_MAX;
@@ -182,7 +186,7 @@ export function toolsOf(items, { full = false } = {}) {
         if (b?.type !== 'tool_use' && b?.type !== 'server_tool_use') continue;
         const mcp = /^mcp__([^_]+(?:_[^_]+)*)__(.+)$/.exec(b.name ?? '');
         const call = {
-          via: 'claude',
+          via: it.agent ? 'agent' : 'claude',
           ...(mcp ? { server: mcp[1] } : {}),
           name: mcp ? mcp[2] : b.name,
           args: full ? b.input : brief(b.input, max),
@@ -211,7 +215,7 @@ export function toolsOf(items, { full = false } = {}) {
         }
       }
     } else if (line.type === 'system' && line.subtype === 'permission_denied') {
-      out.push({ via: 'claude', name: line.tool_name ?? line.tool ?? 'tool', args: brief(line.tool_input ?? line.input, max), result: brief(line.message ?? line.reason ?? 'permission denied'), ok: false, refused: true, seq: it.seq, pid: it.pid });
+      out.push({ via: it.agent ? 'agent' : 'claude', name: line.tool_name ?? line.tool ?? 'tool', args: brief(line.tool_input ?? line.input, max), result: brief(line.message ?? line.reason ?? 'permission denied'), ok: false, refused: true, seq: it.seq, pid: it.pid });
     }
   }
   return out;
@@ -272,7 +276,9 @@ export function summarize({ turn, items, conv, pages = [], approvals = [], agent
     answer: cut(answer, ANSWER_MAX),
     model: message?.model ?? sent?.reply?.model ?? null,
     steps,
-    tools: toolsOf(items).map(({ seq, pid, ...t }) => t),
+    // The turn's own calls; an agent's at work meanwhile, by name only.
+    tools: toolsOf(items).filter((t) => t.via !== 'agent').map(({ seq, pid, ...t }) => t),
+    agentTools: toolsOf(items).filter((t) => t.via === 'agent').map((t) => t.name),
     cards,
     pending: pending.map((c) => c.id),
     pages: pages.map((p) => ({ url: p.url ?? p.address ?? '', onScreen: p.onScreen ?? p.on_screen ?? null, loaded: p.loaded ?? null })),

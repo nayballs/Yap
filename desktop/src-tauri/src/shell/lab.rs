@@ -98,14 +98,15 @@ pub fn tool(name: &str, args: &Value, result: &Value) {
 }
 
 /// A line Claude Code wrote on its stdout (a run Yap started, process
-/// `pid`): its whole messages, results and turn ends are kept, never the
-/// deltas.
-pub fn claude_line(pid: u32, line: &str) {
+/// `pid`; `agent`: an agent's run, not a plan chat's or a one-off
+/// question's): its whole messages, results and turn ends are kept, never
+/// the deltas.
+pub fn claude_line(pid: u32, agent: bool, line: &str) {
     #[cfg(debug_assertions)]
     if on() {
-        imp::claude_line(pid, line);
+        imp::claude_line(pid, agent, line);
     }
-    let _ = (pid, line);
+    let _ = (pid, agent, line);
 }
 
 /// At the end of setup, in a lab run: follow the app-wide events a turn
@@ -189,7 +190,7 @@ mod imp {
         event.clone()
     }
 
-    pub(super) fn claude_line(pid: u32, line: &str) {
+    pub(super) fn claude_line(pid: u32, agent: bool, line: &str) {
         let Ok(value) = serde_json::from_str::<Value>(line.trim()) else { return };
         let kind = value.get("type").and_then(Value::as_str).unwrap_or("");
         if !CLAUDE_TYPES.contains(&kind) {
@@ -199,7 +200,7 @@ mod imp {
         if kind == "system" && !matches!(value.get("subtype").and_then(Value::as_str), Some("init" | "permission_denied" | "api_retry")) {
             return;
         }
-        record("claude", json!({ "pid": pid, "line": value }));
+        record("claude", json!({ "pid": pid, "agent": agent, "line": value }));
     }
 
     pub(super) fn start(app: &AppHandle) {

@@ -122,6 +122,18 @@ describe('a turn’s record', () => {
     assert.match(tools[2].result, /Example Domain\n\[1 picture\]/);
     assert.match(tools[3].args, /\[\+\d+ chars, \d+ in all\]$/);
     assert.deepEqual(toolsOf(items, { full: true })[3].args, { query: 'x'.repeat(900) });
+    // An agent at work while the turn ran: its own Claude Code's calls are
+    // the agent's, never the turn's (the summary names them apart).
+    const busy = [
+      ...items,
+      { seq: 11, ts: 11, kind: 'claude', pid: 9, agent: true, line: { type: 'assistant', message: { content: [{ type: 'tool_use', id: 'toolu_9', name: 'Edit', input: { file_path: 'src/convert.js' } }] } } },
+      { seq: 12, ts: 12, kind: 'claude', pid: 9, agent: true, line: { type: 'user', message: { content: [{ type: 'tool_result', tool_use_id: 'toolu_9', content: 'The file has been updated.' }] } } },
+    ];
+    assert.deepEqual(toolsOf(busy).at(-1), { via: 'agent', name: 'Edit', args: toolsOf(busy).at(-1).args, result: 'The file has been updated.', ok: true, seq: 11, pid: 9 });
+    const conv = { id: 4, messages: [{ role: 'user', text: 'Q' }, { role: 'assistant', text: 'A' }] };
+    const out = summarize({ turn: { n: 1, question: 'Q', spoken: false, startedAt: 0, status: 'answered', askedAt: 0 }, items: busy, conv, now: 1000 });
+    assert.deepEqual(out.tools.map((t) => t.name), ['browser_navigate', 'browser_click', 'browser_read', 'WebSearch']);
+    assert.deepEqual(out.agentTools, ['Edit']);
   });
 
   test('cards: each as it is now, a connector’s with Always allow; Claude Code’s prompts and plans', () => {

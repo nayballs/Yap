@@ -28,7 +28,7 @@
       title={j.path || j.folder}
     >
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" /></svg>
-      <span class="jname">{j.folder}</span>
+      <span class="jname" class:alone={!(several && j.turnTitle)}>{j.folder}</span>
       {#if several && j.turnTitle}<span class="jturn">· {j.turnTitle}</span>{/if}
       <span class="jstate tone-{statusTone(status)}"><span class="dot" aria-hidden="true"></span>{word}</span>
       <span class="jopen" aria-hidden="true">· Open</span>
@@ -76,21 +76,24 @@
     height: 15px;
     color: var(--yap-primary);
   }
+  /* Beside a turn's title the folder's name never gives way (up to most of
+     the pill): the title does ("lab-san… · Add tablespoons line to RE…",
+     11 Nov 2026, cut both — and a name shrunk by a fraction of a pixel
+     still loses its last letters to the ellipsis). Alone, it has the pill. */
   .jname {
+    flex: 0 0 auto;
+    max-width: 60%;
     min-width: 0;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
   }
-  .jturn {
-    min-width: 0;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-    font-weight: 500;
-    color: var(--yap-fg-80);
+  .jname.alone {
+    flex: 0 1 auto;
+    max-width: none;
   }
   .jturn {
+    flex: 0 1 auto;
     min-width: 0;
     overflow: hidden;
     text-overflow: ellipsis;

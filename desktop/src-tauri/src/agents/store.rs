@@ -292,6 +292,16 @@ pub struct TurnNote {
     /// report (its words stay in its tab).
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     pub report_held: bool,
+    /// **Chat's own answer read its end before its report** (11 Nov 2026):
+    /// asked about the agent just as it finished, Chat's model looked with
+    /// `agent_status` and its answer told the result — then the report said
+    /// it all again. The chat's length when it looked: an answer saved since
+    /// means the person has been told, and the report adds its card alone
+    /// (`chat/turn/report.rs`). Cleared as the turn starts again. A new
+    /// field of the turn's own: an older Yap drops it on its save, and the
+    /// report then says it as it always did.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub told_at: Option<u64>,
     /// Undo this turn put its files back.
     pub undone: bool,
     /// **Its to-do list**, as its latest `TodoWrite` left it (the Agent
@@ -436,6 +446,15 @@ impl Agent {
     /// Pure.
     pub fn held_last(&self) -> Option<u32> {
         self.turn_list.iter().rev().find(|t| t.report_held && t.report_message_id.is_none()).map(|t| t.n)
+    }
+
+    /// **Its latest turn has ended and its chat hasn't been told**: done or
+    /// failed, no report yet (it waits for the chat to be free). The turn.
+    /// Pure.
+    pub fn unreported_end(&self) -> Option<u32> {
+        let t = self.turn_list.last()?;
+        let ended = !self.status.live() && matches!(t.status, Status::Done | Status::Failed) && t.ran();
+        (ended && !self.reported && self.conversation.is_some()).then_some(t.n)
     }
 
     /// **The agent as its report of turn `n` tells it** (one report when it
@@ -1358,6 +1377,29 @@ mod tests {
         assert_eq!(old.turn_notes().len(), 1);
         assert_eq!(old.reference().turn, None);
         assert_eq!(j.reference().turn, Some(2));
+    }
+
+    #[test]
+    fn an_agent_that_has_ended_and_not_told_its_chat_yet() {
+        let turn = |n: u32, status: Status| TurnNote { n, status, started_ts: 1, ..Default::default() };
+        let j = Agent { id: "ab12".into(), conversation: Some(4), status: Status::Done, turn_list: vec![TurnNote { report_message_id: Some("chat:4:2".into()), ..turn(1, Status::Done) }, turn(2, Status::Done)], ..Default::default() };
+        // Its latest turn is done and its report is still to come.
+        assert_eq!(j.unreported_end(), Some(2));
+        assert_eq!(Agent { status: Status::Failed, turn_list: vec![turn(1, Status::Failed)], ..j.clone() }.unreported_end(), Some(1));
+        // Reported, at work, stopped, never ran, or with no chat: none.
+        assert_eq!(Agent { reported: true, ..j.clone() }.unreported_end(), None);
+        assert_eq!(Agent { status: Status::Running, turn_list: vec![turn(1, Status::Running)], ..j.clone() }.unreported_end(), None);
+        assert_eq!(Agent { status: Status::Stopped, turn_list: vec![turn(1, Status::Stopped)], ..j.clone() }.unreported_end(), None);
+        assert_eq!(Agent { turn_list: vec![TurnNote { started_ts: 0, ..turn(1, Status::Done) }], ..j.clone() }.unreported_end(), None);
+        assert_eq!(Agent { conversation: None, ..j.clone() }.unreported_end(), None);
+        assert_eq!(Agent { turn_list: Vec::new(), ..j.clone() }.unreported_end(), None);
+        // When Chat's answer read it: kept with the turn, left out while unset.
+        let mut told = j.clone();
+        told.turn_list[1].told_at = Some(3);
+        let v = serde_json::to_value(&told).unwrap();
+        assert_eq!(v["turnList"][1]["toldAt"], 3);
+        assert!(v["turnList"][0].get("toldAt").is_none());
+        assert_eq!(serde_json::from_value::<Agent>(v).unwrap().turn_list[1].told_at, Some(3));
     }
 
     #[test]

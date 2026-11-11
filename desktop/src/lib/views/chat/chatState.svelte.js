@@ -762,8 +762,28 @@ export function createChatState({ onopensettings = () => null, onopennote = () =
   // Every chat screenshot deleted (Settings → Privacy & data), an agent's
   // report landing: the open conversation read again (not while its own
   // typed question is answered; another chat's answering never holds it up).
+  // Asked for while its own question was being answered: done once that
+  // answer is in (`reloadWanted`: the conversation). An agent's report that
+  // landed just then was never read in otherwise (11 Nov 2026, seen in a Yap
+  // Lab run on the real Claude Code: a question sent in the seconds between
+  // an agent finishing and its report — no "Agent done" card, and no pill
+  // under the next answer, until the chat was opened again).
+  let reloadWanted = null;
+  $effect(() => {
+    const busy = sending;
+    untrack(() => {
+      if (busy || reloadWanted == null) return;
+      const id = reloadWanted;
+      reloadWanted = null;
+      if (id === activeId && alive) reloadActive();
+    });
+  });
   async function reloadActive() {
-    if (activeId == null || sending) return;
+    if (activeId == null) return;
+    if (sending) {
+      reloadWanted = activeId;
+      return;
+    }
     const id = activeId;
     try {
       const conv = await invoke('chat_get', { id });

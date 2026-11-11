@@ -567,7 +567,7 @@ function writeReport(t, result, conv, sheet = null) {
     counts.set(tool.name, c);
   }
   const rows = [...counts.entries()].map(([name, c]) => `| ${name} | ${c.calls} | ${c.failed} | ${c.refused} |`);
-  const calls = toolsOf(t.items).map((tool, i) => `${i + 1}. \`${tool.name}\`${tool.via === 'claude' && tool.server ? ` (${tool.server})` : ''} ${tool.ok === false ? (tool.refused ? '**refused**' : '**failed**') : 'ok'}: ${cut(String(tool.args ?? ''), 160).replace(/\n/g, ' ')} → ${cut(String(tool.result ?? ''), 240).replace(/\n/g, ' ')}`);
+  const calls = toolsOf(t.items).map((tool, i) => `${i + 1}. \`${tool.name}\`${tool.via === 'claude' && tool.server ? ` (${tool.server})` : ''}${tool.via === 'agent' ? ' (an agent at work, not this turn)' : ''} ${tool.ok === false ? (tool.refused ? '**refused**' : '**failed**') : 'ok'}: ${cut(String(tool.args ?? ''), 160).replace(/\n/g, ' ')} → ${cut(String(tool.result ?? ''), 240).replace(/\n/g, ' ')}`);
   const model = result.model ? `${result.model.provider ?? ''} ${result.model.id ?? ''}`.trim() : START.model?.model ?? '';
   const text = [
     `# Yap Lab report: ${t.report.name}`,
@@ -782,9 +782,15 @@ async function agentsView() {
   const list = await agentsNow();
   const approvals = (await tryInvoke('claude_approve_pending', {}, [])) ?? [];
   const reports = [];
+  // Every agent that ended has told its chat: its latest turn's report is in,
+  // and answered (the chat's last message isn't a report still waiting for
+  // its answer).
+  let reportsIn = true;
   for (const conv of [...new Set(list.map((x) => x.conversation).filter((c) => c != null))]) {
     const c = await tryInvoke('chat_get', { id: conv });
     const messages = c?.messages ?? [];
+    const ended = list.filter((x) => x.conversation === conv && ['done', 'failed'].includes(String(x.status).toLowerCase()));
+    if (ended.some((x) => !(x.turnList?.length ? x.turnList.at(-1).reportMessageId : x.reportMessageId)) || (ended.length && messages.at(-1)?.kind === 'agentReport')) reportsIn = false;
     messages.forEach((m, i) => {
       if (m.kind !== 'agentReport') return;
       const reply = messages.slice(i + 1).find((n) => n.role === 'assistant' && n.kind !== 'agentReport');
@@ -796,6 +802,7 @@ async function agentsView() {
     agents: list.map((x) => ({ id: x.id, folder: x.folder, status: x.status, conversation: x.conversation, mode: x.mode, plan: x.plan, readOnly: !!x.turnList?.at(-1)?.readOnly, model: x.turnList?.at(-1)?.model || x.model || null, effort: x.turnList?.at(-1)?.effort || x.effort || null, sizing: x.turnList?.at(-1)?.sizing ?? null, text: cut(x.text ?? '', 600), files: x.files, commands: x.commands, denials: x.denials, error: x.error ?? null, cost: x.cost })),
     pending: cardsOf([], { approvals, agents: list }).filter((c) => c.state === 'asking'),
     reports,
+    reportsIn,
   };
 }
 
@@ -808,9 +815,17 @@ async function waitAgents(secs) {
     if (!busy) break;
     await sleep(1000);
   }
-  // The report a finished agent puts in its chat comes a moment after.
-  await sleep(1500);
-  const view = await agentsView();
+  // The report a finished agent puts in its chat comes after: the chat's own
+  // model words it, a few seconds on a real plan (11 Nov 2026: a script that
+  // looked for the report card right away never found it, and its next
+  // question got in ahead of the report). Up to 45 s more for it.
+  await sleep(1000);
+  let view = await agentsView();
+  const reportBy = Date.now() + 45_000;
+  while (!view.reportsIn && !view.pending.length && Date.now() < reportBy && !view.agents.some((x) => ['queued', 'running'].includes(String(x.status).toLowerCase()))) {
+    await sleep(1000);
+    view = await agentsView();
+  }
   const still = view.agents.some((x) => ['queued', 'running'].includes(String(x.status).toLowerCase()));
   return { ...view, ...(still ? { hint: 'Agents are still working: npm run lab -- wait --agents' } : view.pending.length ? { hint: `An agent is waiting: npm run lab -- answer ${view.pending[0].id} allow|deny` } : {}) };
 }

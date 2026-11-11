@@ -433,6 +433,7 @@ fn agent_message(cx: &Ctx<'_>, g: &Gate, id: &str, text: &str) {
         // The phone's words: its turn at most at Auto (the runner holds it there too).
         let ask = runner::Ask { phone: Some(device), mode: Some(remote::PHONE_MAX), ..runner::Ask::of(&text, go) };
         runner::follow_up(&a.id, ask).map(|(j, how)| match how {
+            runner::FollowedUp::Passed => crate::chat::tools::agents::passed_words(&j.folder),
             runner::FollowedUp::Queued => format!("The agent in {} is still working: it gets that when it finishes this step.", j.folder),
             _ => format!("Passed that to the agent in {}.", j.folder),
         })

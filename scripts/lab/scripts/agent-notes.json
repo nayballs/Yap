@@ -1,0 +1,45 @@
+{
+  "name": "agent-notes",
+  "about": "A note while an agent works (11 Nov 2026, agents/runner.rs passes_now): in a Bypass Code chat on lab-sandbox, an agent is sent on a task of several steps, and while it works a note for it is put to Chat. The note goes to the agent's Claude Code at once (said so: \"at its next step\"), it's read there, and the agent answers once: one row in its panel, one report card, one answer. Then a second request once it's done: its next turn, reported by itself. The timing is the real agent's, so the checks that need the note to land mid-work are soft; on a --fake lab the stand-in agent is done at once and the note is simply its next turn (the plumbing still runs).",
+  "needs": { "yapCode": true },
+  "steps": [
+    { "set": { "bypass": true, "config": { "agentsAsk": "never" } }, "note": "Bypass permissions, as in the report that led here: no cards." },
+
+    { "fake": [{ "tools": [{ "name": "start_agent", "args": { "brief": "Add a tablespoons-to-millilitres function to src/convert.js (1 tbsp = 15 ml), add a test for it, run the tests, then tick the item off in TODO.md.", "title": "Add tablespoons" } }] }, { "content": "On it: I've sent an agent to lab-sandbox." }] },
+    { "ask": "Add tablespoons to convert.js (1 tbsp = 15 ml), add a test for it, run the tests, and tick it off in TODO.md. Take it one step at a time, and read each file before you change it.", "chat": "code:lab-sandbox", "timeout": 300 },
+    { "expect": { "status": "answered", "used": "start_agent", "refused": false, "card": false } },
+
+    { "fake": [{ "tools": [{ "name": "message_agent", "args": { "text": "Keep the existing function names as they are: that's on purpose." } }] }, { "content": "Passed that on: the agent in lab-sandbox takes it in at its next step." }, { "content": "Done. The agent added tablespoons with a test and kept the function names." }] },
+    { "ask": "Tell the agent to keep the existing function names as they are: that's on purpose.", "chat": "same", "timeout": 300 },
+    { "expect": { "status": "answered", "used": "/^(message_agent|start_agent)$/", "refused": false, "card": false } },
+    {
+      "expect": { "tool": { "name": "/^(message_agent|start_agent)$/", "result": "at its next step" }, "answerMatches": "next step|passed" },
+      "soft": true,
+      "note": "The note reached the agent while it worked: handed to it now. Soft: an agent that had finished already takes it as its next turn instead."
+    },
+    { "shot": "note-with-the-agent", "window": "main", "note": "The chat's answer, and the agent's row with the note on its way or read." },
+    { "wait": "agents", "timeout": 900 },
+    { "expect": { "agent": { "status": "done", "error": null } } },
+    {
+      "expect": { "selector": { "window": "main", "css": "[data-testid=\"chat-agent-report\"]", "count": 1 }, "visible": "Agent done" },
+      "note": "One report card for the work and the note, never one each."
+    },
+    {
+      "expect": { "selector": { "window": "main", "css": "[data-testid=\"chat-agent-row\"]", "count": 1 } },
+      "soft": true,
+      "note": "The note joined the turn working: one row. Soft: an agent that had finished already has a second row for it."
+    },
+    { "shot": "one-report", "window": "main", "note": "One Agent done card and one answer under it." },
+
+    { "fake": [{ "tools": [{ "name": "start_agent", "args": { "brief": "Add a line about tablespoons to README.md.", "title": "Mention tablespoons in the README" } }] }, { "content": "On it: I've passed that to the agent in lab-sandbox." }, { "content": "Done. README.md mentions tablespoons now." }] },
+    { "ask": "Now add a line about tablespoons to the README.", "chat": "same", "timeout": 300 },
+    { "expect": { "status": "answered", "used": "/^(message_agent|start_agent)$/", "refused": false } },
+    { "wait": "agents", "timeout": 900 },
+    { "expect": { "agent": { "status": "done", "error": null } } },
+    {
+      "expect": { "selector": { "window": "main", "css": "[data-testid=\"chat-agent-report\"]", "count": 2 } },
+      "note": "A request once it's done is its next turn, with a report of its own: two cards now."
+    },
+    { "shot": "next-turn-reported", "window": "main" }
+  ]
+}

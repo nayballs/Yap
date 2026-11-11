@@ -1773,9 +1773,27 @@ name.
 
 One process holds one conversation: `claude -p --input-format stream-json
 --output-format stream-json --verbose --include-partial-messages`, then what
-the `Spec` asks for. Every user message on stdin is a turn, and every turn ends
-with a `result` (checked on 2.1.296: two messages, two results, one
-`session_id`).
+the `Spec` asks for. A user message on stdin while it's idle is a turn, and
+every turn ends with a `result` (checked on 2.1.296: two messages, two
+results, one `session_id`).
+
+**A message written while a turn works** (checked on the real 2.1.296, 11 Nov
+2026, three small Haiku runs):
+
+- It's **taken into that turn at its next tool call's end**: the model reads
+  it then, carries on, and the turn's one `result` covers both. A message
+  written as the first of five file reads began was read after that read, and
+  the answer followed both instructions.
+- **With no tool call left** (the final answer is being written), it's a turn
+  of its own right after, in the same process: `result`, then `system/init`
+  again, its own work, and a second `result`. `total_cost_usd` runs on (the
+  second is the process's total); `usage` is each turn's own.
+- **`--replay-user-messages`** (`Spec::replay_user_messages`): each user
+  message is echoed back (`"isReplay": true`) at the moment it's taken in,
+  not when it's written: the turn's first as the turn starts, a mid-turn one
+  right after that tool call's result, a late one after the next
+  `system/init`. So a run that writes notes mid-turn knows which have been
+  read (agents: [yap-code.md](./yap-code.md#turns-one-agent-per-code-chat)).
 
 - **The `Spec`**: the folder, model (a full id), `--effort`, `--permission-mode`
   (always set: from 2.1.302 a `-p` run starts in manual mode when nothing sets
@@ -1882,7 +1900,8 @@ from `message_start`'s `usage` (the prompt, the cache's included) and
 `yap.exe fake-claude <script.jsonl> [Claude Code's arguments…]` replays a
 script as Claude Code would (main.rs runs it before the app). A script line is
 printed as it is, with `{{session_id}}`, `{{user_text}}` and `{{cwd}}` filled
-in; a line whose first key starts with `_` is an instruction: wait for the
+in (`{{notes}}`: the messages taken in while the turn worked); a line whose
+first key starts with `_` is an instruction: wait for the
 next user message, sleep, call an http hook from its `--settings`, call a tool
 of its `--mcp-config`'s server (`_mcp`; with `result_for`, the answer also
 handed back as that tool call's `tool_result`, as Claude Code gives it to the
@@ -1894,7 +1913,11 @@ older Claude Code). `{"_for":"chat"}` (or `"agent"`,
 `"ask"`, `"all"`) plays the lines up to the next `_for` only in that kind of
 process — an agent's run (`--permission-prompt-tool`), a plan chat's session (an
 `--mcp-config`, no prompt tool), one question (neither) — so one script plays
-a plan chat, the agent it starts and the report's question. An interrupt is
+a plan chat, the agent it starts and the report's question. A user message
+that comes while a turn plays joins it after the next line that hands a
+`tool_result` back, as 2.1.296 takes one (none left: it waits for the next
+`_wait_user`, a turn of its own), and with `--replay-user-messages` each is
+echoed back as it's taken in. An interrupt is
 answered as 2.1.296 does. Headers expand `${VAR}` as Claude Code does (an
 MCP server's from the environment, an http hook's only for the variables in
 its `allowedEnvVars`), so a run's key reaches Yap's endpoint only through the
