@@ -254,8 +254,11 @@ pub struct TurnResult {
     pub terminal_reason: Option<String>,
     pub stop_reason: Option<String>,
     pub api_error_status: Option<u16>,
-    /// Claude Code's estimate of what the turn cost on the API, even on a
-    /// plan (where it's what the plan saved, not a charge).
+    /// Claude Code's estimate of the API's price (`total_cost_usd`), even
+    /// on a plan (where it's what the plan saved, not a charge) — **of its
+    /// session so far, not of this turn**: every result of a process adds
+    /// to it, and a process started with `--resume` goes on from what the
+    /// session had cost before. A turn's own: [`TurnResult::cost_since`].
     pub cost_usd: f64,
     pub usage: Usage,
     pub num_turns: u64,
@@ -266,12 +269,89 @@ pub struct TurnResult {
     /// `modelUsage`'s `contextWindow` by model: how big each model's
     /// context is, as Claude Code runs it.
     pub context_windows: Vec<(String, u64)>,
+    /// `modelUsage`: what each model has used and cost **in the session so
+    /// far** (the span `total_cost_usd` covers), while `usage` is this
+    /// turn's own.
+    pub model_usage: Vec<ModelUse>,
+}
+
+/// One model's line of a result's `modelUsage`.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct ModelUse {
+    pub model: String,
+    pub input: u64,
+    pub output: u64,
+    pub cache_read: u64,
+    pub cache_write: u64,
+    pub cost_usd: f64,
+}
+
+impl ModelUse {
+    fn tokens(&self) -> u64 {
+        self.input + self.output + self.cache_read + self.cache_write
+    }
+}
+
+/// Tokens weighed as the API prices them against each other: an output
+/// token five times an input one, a cache read a tenth, a cache write (an
+/// hour's, as Claude Code writes them) twice.
+fn weighed(input: u64, output: u64, cache_read: u64, cache_write: u64) -> f64 {
+    input as f64 + 5.0 * output as f64 + 0.1 * cache_read as f64 + 2.0 * cache_write as f64
 }
 
 impl TurnResult {
     /// Stopped by an interrupt, not finished.
     pub fn interrupted(&self) -> bool {
         self.terminal_reason.as_deref().is_some_and(|r| r.starts_with("aborted"))
+    }
+
+    /// Its `modelUsage` covers more than this turn: earlier turns of the
+    /// session are in it (well beyond a helper model's few calls).
+    pub fn covers_earlier_turns(&self) -> bool {
+        let all: u64 = self.model_usage.iter().map(ModelUse::tokens).sum();
+        let own = self.usage.input_tokens + self.usage.output_tokens + self.usage.cache_read_input_tokens + self.usage.cache_creation_input_tokens;
+        all > own + own / 20 + 1_000
+    }
+
+    /// **What the session has cost since `before`**: this result's own
+    /// cost, when `before` is the running total as its last result said it.
+    ///
+    /// `total_cost_usd` is Claude Code's running total for its session
+    /// (checked on 2.1.296, 11 Nov 2026: a second result of one process said
+    /// more than the first, and the first result of a process started with
+    /// `--resume` listed the earlier turn's model, tokens and cost in its
+    /// `modelUsage`). Read as one turn's cost, a 21-second follow-up showed
+    /// the whole session's dollars, an agent's total counted every earlier
+    /// turn again with each new one, and so did a plan chat's answers.
+    ///
+    /// - `before` known and the total went on from it: the difference;
+    /// - `before` nothing (a new session), or the total started again
+    ///   (nothing of earlier turns in `modelUsage`): all of it;
+    /// - `before` not known (`None`: a resumed session nothing was kept
+    ///   of) and earlier turns are in it: this turn's share of `model`'s
+    ///   running cost, by its tokens.
+    ///
+    /// Pure.
+    pub fn cost_since(&self, before: Option<f64>, model: &str) -> f64 {
+        let total = self.cost_usd.max(0.0);
+        let more = self.covers_earlier_turns();
+        match before {
+            Some(b) if b > 0.0 && more && total + 1e-9 >= b => total - b,
+            Some(_) => total,
+            None if more => self.own_share(model).unwrap_or(total),
+            None => total,
+        }
+    }
+
+    /// This turn's share of `model`'s running cost: its own tokens against
+    /// all of that model's, weighed as the API prices them (the entry whose
+    /// id starts as `model` does, else the busiest). Pure.
+    fn own_share(&self, model: &str) -> Option<f64> {
+        let named = |m: &&ModelUse| !model.is_empty() && (m.model.starts_with(model) || model.starts_with(m.model.as_str()));
+        let entry = self.model_usage.iter().find(named).or_else(|| self.model_usage.iter().max_by_key(|m| m.tokens()))?;
+        let all = weighed(entry.input, entry.output, entry.cache_read, entry.cache_write);
+        let own = weighed(self.usage.input_tokens, self.usage.output_tokens, self.usage.cache_read_input_tokens, self.usage.cache_creation_input_tokens);
+        (all > 0.0).then(|| entry.cost_usd.max(0.0) * (own / all).min(1.0))
     }
 
     /// `model`'s context window, as `modelUsage` says it.
@@ -587,6 +667,22 @@ fn result(v: &Value) -> TurnResult {
             .get("modelUsage")
             .and_then(Value::as_object)
             .map(|m| m.iter().filter_map(|(model, u)| Some((model.clone(), u.get("contextWindow").and_then(Value::as_u64)?))).collect())
+            .unwrap_or_default(),
+        model_usage: v
+            .get("modelUsage")
+            .and_then(Value::as_object)
+            .map(|m| {
+                m.iter()
+                    .map(|(model, u)| ModelUse {
+                        model: model.clone(),
+                        input: u64_of(u, "inputTokens"),
+                        output: u64_of(u, "outputTokens"),
+                        cache_read: u64_of(u, "cacheReadInputTokens"),
+                        cache_write: u64_of(u, "cacheCreationInputTokens"),
+                        cost_usd: u.get("costUSD").and_then(Value::as_f64).unwrap_or(0.0),
+                    })
+                    .collect()
+            })
             .unwrap_or_default(),
     }
 }
@@ -907,6 +1003,64 @@ pub(crate) mod tests {
             let last = parse_line(lines.last().unwrap()).unwrap();
             assert!(matches!(last, Event::Result(_)), "{version}/{name} ends with a result");
         }
+    }
+
+    // The numbers of real results (2.1.296, a Yap Lab run, 11 Nov 2026):
+    // `total_cost_usd` is the session's running total, `modelUsage` what
+    // each model has used in it so far, `usage` this turn's own.
+    fn real_result(total: f64, usage: [u64; 4], models: &[(&str, [u64; 4], f64)]) -> TurnResult {
+        let line = serde_json::json!({
+            "type": "result", "subtype": "success", "is_error": false, "result": "Done.", "session_id": "5c6d7e8f-9a0b-4c1d-8e2f-3a4b5c6d7e8f",
+            "total_cost_usd": total,
+            "usage": { "input_tokens": usage[0], "output_tokens": usage[1], "cache_creation_input_tokens": usage[2], "cache_read_input_tokens": usage[3] },
+            "modelUsage": models.iter().map(|(m, t, cost)| (m.to_string(), serde_json::json!({ "inputTokens": t[0], "outputTokens": t[1], "cacheCreationInputTokens": t[2], "cacheReadInputTokens": t[3], "costUSD": cost, "contextWindow": 1_000_000 }))).collect::<serde_json::Map<String, Value>>(),
+        });
+        let Some(Event::Result(r)) = parse_line(&line.to_string()) else { panic!("a result") };
+        r
+    }
+
+    #[test]
+    fn a_turns_own_cost_is_what_the_sessions_running_total_went_up_by() {
+        let near = |a: f64, b: f64| (a - b).abs() < 1e-9;
+        // A plan chat's process, three answers: each result says the total so far.
+        let first = real_result(0.1294579, [4, 549, 29_516, 58_959], &[("claude-sonnet-5-5", [4, 549, 29_516, 58_959], 0.1294579)]);
+        let second = real_result(0.1437812, [6, 178, 891, 89_673], &[("claude-sonnet-5-5", [10, 727, 30_407, 148_632], 0.1437812)]);
+        let third = real_result(0.1624425, [6, 280, 1_659, 92_133], &[("claude-sonnet-5-5", [16, 1_007, 32_066, 240_765], 0.1624425)]);
+        assert_eq!(second.model_usage, [ModelUse { model: "claude-sonnet-5-5".into(), input: 10, output: 727, cache_read: 148_632, cache_write: 30_407, cost_usd: 0.1437812 }]);
+        assert!(!first.covers_earlier_turns() && second.covers_earlier_turns() && third.covers_earlier_turns());
+        // A new session starts from nothing: its first answer's cost is the total.
+        assert!(near(first.cost_since(Some(0.0), "claude-sonnet-5-5"), 0.1294579));
+        // The next two: what the total went up by — a cent or two, never the
+        // 14 and 16 cents the answers were counted at.
+        assert!(near(second.cost_since(Some(first.cost_usd), "claude-sonnet-5-5"), 0.0143233));
+        assert!(near(third.cost_since(Some(second.cost_usd), "claude-sonnet-5-5"), 0.0186613));
+
+        // An agent's second turn, a new process on `--resume`, on another
+        // model: its first result's total goes on from the first turn's, and
+        // `modelUsage` still lists that turn's model with its tokens and cost.
+        let turn_one = real_result(0.01395236, [12, 1_977, 47_728, 341_706], &[("claude-haiku-5-5", [12, 1_977, 47_728, 341_706], 0.01395236)]);
+        let resumed = real_result(0.23419546, [6, 832, 49_153, 152_991], &[("claude-haiku-5-5", [12, 1_977, 47_728, 341_706], 0.01395236), ("claude-sonnet-5-5", [6, 832, 49_153, 152_991], 0.2202431)]);
+        assert!(resumed.covers_earlier_turns());
+        assert!(near(resumed.cost_since(Some(turn_one.cost_usd), "claude-sonnet-5-5"), 0.2202431));
+        // Nothing kept of the session (an agent from before, a file an older
+        // Yap saved): this turn's share of its model's running cost.
+        assert!(near(resumed.cost_since(None, "claude-sonnet-5-5"), 0.2202431));
+        let share = second.cost_since(None, "claude-sonnet-5-5");
+        assert!(share > 0.005 && share < 0.04, "about its own {share}, never the whole 0.14");
+        // The model's id with a date or a window after it; one not listed: the busiest entry's.
+        assert!(near(resumed.cost_since(None, "claude-sonnet-5-5[1m]"), 0.2202431));
+        assert!(resumed.cost_since(None, "claude-opus-5-5") < 0.02);
+
+        // A total that started again (a Claude Code that keeps none across
+        // `--resume`: nothing of earlier turns in it): all of it is this turn's.
+        let again = real_result(0.05, [10, 400, 2_000, 60_000], &[("claude-sonnet-5-5", [10, 400, 2_000, 60_000], 0.05)]);
+        assert!(near(again.cost_since(Some(0.30), "claude-sonnet-5-5"), 0.05));
+        assert!(near(again.cost_since(None, "claude-sonnet-5-5"), 0.05));
+        // No `modelUsage` at all (the stand-in's results): as it says.
+        let plain = TurnResult { cost_usd: 0.03, ..Default::default() };
+        assert!(near(plain.cost_since(Some(0.02), ""), 0.03) && near(plain.cost_since(None, ""), 0.03));
+        // Never below nothing.
+        assert_eq!(TurnResult { cost_usd: -1.0, ..Default::default() }.cost_since(Some(0.0), ""), 0.0);
     }
 
     #[test]

@@ -67,9 +67,25 @@ pub struct Kept {
     /// (every plain plan chat, and a file from before Code chats).
     #[serde(skip_serializing_if = "String::is_empty")]
     pub cwd: String,
+    /// **Claude Code's running total for the session**, as its latest result
+    /// said it (`total_cost_usd`, in millionths of a dollar): what the next
+    /// answer's total goes on from once the session is resumed, so each
+    /// answer is counted at its own cost (`TurnResult::cost_since`, 11 Nov
+    /// 2026). 0: nothing kept.
+    #[serde(skip_serializing_if = "is_zero")]
+    pub total_micros: u64,
+}
+
+fn is_zero(n: &u64) -> bool {
+    *n == 0
 }
 
 impl Kept {
+    /// [`Kept::total_micros`] in dollars; none kept: not known.
+    pub fn total(&self) -> Option<f64> {
+        (self.total_micros > 0).then(|| self.total_micros as f64 / 1_000_000.0)
+    }
+
     /// Where Claude Code filed this session ([`Kept::cwd`], else Yap's own
     /// chat folder).
     pub fn ran_in(&self) -> std::path::PathBuf {
@@ -332,6 +348,10 @@ pub struct Warm {
     pub prompt: u64,
     used: Mutex<Instant>,
     busy: AtomicBool,
+    /// Claude Code's running total for the session as last said: its latest
+    /// result's, or — before its first — what it goes on from (0 for a new
+    /// session, what was kept for a resumed one; `None`: not known).
+    total: Mutex<Option<f64>>,
     /// Its registration with Yap's run endpoint: unregistered with it.
     _run: Option<crate::integrations::claude_live::RunHandle>,
 }
@@ -355,8 +375,18 @@ impl Warm {
             prompt,
             used: Mutex::new(Instant::now()),
             busy: AtomicBool::new(false),
+            total: Mutex::new(Some(0.0)),
             _run: run,
         }
+    }
+
+    /// The session's running total as last said ([`Warm::total`]).
+    pub fn total(&self) -> Option<f64> {
+        *self.total.lock().unwrap_or_else(|p| p.into_inner())
+    }
+
+    pub fn set_total(&self, total: Option<f64>) {
+        *self.total.lock().unwrap_or_else(|p| p.into_inner()) = total;
     }
 
     /// A turn is on it (the sweep leaves it), or done (its 10 minutes start).

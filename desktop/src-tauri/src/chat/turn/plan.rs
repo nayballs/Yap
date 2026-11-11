@@ -579,6 +579,8 @@ fn start(
     code: Option<&std::path::Path>,
     print: u64,
     resume: Option<&str>,
+    // What the session's running total goes on from (`Warm::total`).
+    total_before: Option<f64>,
 ) -> Result<(Arc<sessions::Warm>, bool), String> {
     use crate::integrations::claude_live::{register_run, RunSpec, Tools};
     let run = register_run(RunSpec::new("Chat", Tools::Chat).with_agents(agents).with_memory(code.is_none()).with_eyes(eyes).with_connectors(connectors))?;
@@ -589,6 +591,7 @@ fn start(
     let resumed = resume.is_some();
     let (session, rx) = Session::start(spec(model, effort, system, web, code, conversation, &run)?)?;
     let warm = Arc::new(sessions::Warm::new(session, rx, conv, model.to_string(), effort, print, Some(run)));
+    warm.set_total(total_before);
     sessions::keep(warm.clone());
     tracing::info!(resumed, code = code.is_some(), warm = sessions::warm_count(), "Claude plan: a session started for a conversation");
     Ok((warm, resumed))
@@ -775,7 +778,14 @@ pub(super) async fn answer(t: &Asked<'_>, opened: &Opened, built: &Built, fitted
                     sessions::Start::Resume { id, .. } if !no_resume => Some(id),
                     _ => None,
                 };
-                start(conv.id, &model, effort, &system, web, agents, eyes, connectors.clone(), workspace.as_deref(), print, resume.as_deref())?
+                // A new session starts from nothing; a resumed one goes on
+                // from what was kept of it.
+                let total_before = match (&resume, kept.as_ref()) {
+                    (Some(_), Some(k)) => k.total(),
+                    (Some(_), None) => None,
+                    (None, _) => Some(0.0),
+                };
+                start(conv.id, &model, effort, &system, web, agents, eyes, connectors.clone(), workspace.as_deref(), print, resume.as_deref(), total_before)?
             }
         };
         // One turn at a time on it: a turn still answering (stopped, or
@@ -819,7 +829,8 @@ pub(super) async fn answer(t: &Asked<'_>, opened: &Opened, built: &Built, fitted
         let shown = close_turn(run_turn.take(), &out);
         let session_id = w.session.session_id();
         let keep = |seen: usize| {
-            sessions::put(conv.id, sessions::Kept { session: session_id.clone(), created: conv.created_ts, seen, model: model.clone(), ts: 0, cwd: cwd.clone() });
+            let total_micros = w.total().map_or(0, |t| (t * 1_000_000.0).round() as u64);
+            sessions::put(conv.id, sessions::Kept { session: session_id.clone(), created: conv.created_ts, seen, model: model.clone(), ts: 0, cwd: cwd.clone(), total_micros });
         };
         let result = match ended {
             Ended::Done(r) => r,
@@ -923,12 +934,15 @@ pub(super) async fn answer(t: &Asked<'_>, opened: &Opened, built: &Built, fitted
             tracing::info!(reason = result.terminal_reason.as_deref().unwrap_or(""), "Claude plan: the turn ended with an error");
             return Err(if why.trim().is_empty() { "Claude Code couldn't answer. Try again.".to_string() } else { format!("Claude Code couldn't answer: {}", why.trim()) });
         }
-        keep(opened.user_index + 2);
         // Its counts, with Claude Code's estimate of the API price (on a
-        // plan: what it saved).
+        // plan: what it saved) — this answer's own: its figure is the
+        // session's running total (`TurnResult::cost_since`).
         let answered = if mapper.model().is_empty() { model.as_str() } else { mapper.model() };
+        let own_cost = result.cost_since(w.total(), answered);
+        w.set_total(Some(result.cost_usd.max(0.0)));
+        keep(opened.user_index + 2);
         let counted = crate::ai::usage::Call { provider: plan::PROVIDER, model: answered, base_url: plan::BASE_URL, turn: true, feature: None };
-        crate::ai::usage::record_response(&counted, &oneshot::usage_value(&result.usage, result.cost_usd), None, None);
+        crate::ai::usage::record_response(&counted, &oneshot::usage_value(&result.usage, own_cost), None, None);
         // The answer: the result's words (else what was shown).
         let said = if result.text.trim().is_empty() { watch.map(|w| w.seen().text).unwrap_or_default() } else { result.text.clone() };
         let (reply, sources) = cited(&said, mapper.sources());

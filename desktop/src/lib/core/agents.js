@@ -141,6 +141,121 @@ export function timelineOf(log, final = '') {
   return out;
 }
 
+/**
+ * **An agent's work as the thread tells it** (11 Nov 2026, after Claude
+ * Code's own transcript): what it said, in order, and between its words one
+ * group for each stretch of steps — `{kind: 'said', text, ts}` or `{kind:
+ * 'work', steps: [{step, file, command, about, ts}], edits: [{file, added,
+ * removed, made}], ts}` — so a long run of tool calls reads as one line
+ * ("Ran 3 commands, edited convert.js +4 −1", `workSummary`) that opens into
+ * its steps. `final`: its final words, left out (its report tells them), as
+ * `timelineOf` leaves them. A group of housekeeping alone ("Starting Claude
+ * Code") is kept only at the end, where it's what the agent is on.
+ */
+export function workOf(log, final = '') {
+  const out = [];
+  let group = null;
+  for (const e of log || []) {
+    const said = saidOf(e);
+    if (said) {
+      group = null;
+      out.push({ kind: 'said', text: said, ts: Number(e.ts) || 0 });
+      continue;
+    }
+    const step = typeof e?.step === 'string' ? e.step.trim() : '';
+    if (step) {
+      if (!group) {
+        group = { kind: 'work', steps: [], edits: [], ts: Number(e.ts) || 0 };
+        out.push(group);
+      }
+      const last = group.steps[group.steps.length - 1];
+      if (!(last && last.step === step && !e.file && !e.command)) {
+        group.steps.push({ kind: 'step', step, file: e.file || null, command: e.command || null, about: e.about || null, ts: Number(e.ts) || 0 });
+      }
+    }
+    // What an edit changed, once it went through: its stretch's.
+    const d = e?.diff;
+    if (d?.file) {
+      const g = group ?? out.filter((x) => x.kind === 'work').at(-1);
+      if (g) {
+        let f = g.edits.find((x) => x.file === d.file);
+        if (!f) g.edits.push((f = { file: d.file, added: 0, removed: 0, made: d.kind === 'new' ? 'new' : null }));
+        f.added += Number(d.added) || 0;
+        f.removed += Number(d.removed) || 0;
+      }
+    }
+  }
+  const end = String(final || '').trim();
+  if (end) {
+    for (let i = out.length - 1; i >= 0; i--) {
+      if (out[i].kind !== 'said') continue;
+      if (out[i].text === end) out.splice(i, 1);
+      break;
+    }
+  }
+  const real = (g) => g.steps.some((s) => !['other', 'ask'].includes(stepKind(s)));
+  return out.filter((x, i) => x.kind === 'said' || real(x) || i === out.length - 1);
+}
+
+/** A step's line once it's done: "Editing notes.md" → "Edited notes.md". */
+const DONE = [
+  [/^Editing\b/, 'Edited'],
+  [/^Writing\b/, 'Wrote'],
+  [/^Running\b/, 'Ran'],
+  [/^Reading\b/, 'Read'],
+  [/^Looking\b/, 'Looked'],
+  [/^Searching\b/, 'Searched'],
+  [/^Starting\b/, 'Started'],
+  [/^Picking up\b/, 'Picked up'],
+  [/^Waiting\b/, 'Waited'],
+];
+const doneLine = (step) => DONE.reduce((s, [was, now]) => (was.test(s) ? s.replace(was, now) : s), String(step || ''));
+const fileName = (f) => String(f || '').split(/[\\/]/).pop();
+const some = (n, one, many) => (n === 1 ? one : `${n} ${many}`);
+
+/**
+ * **A stretch of work in a line** (`workOf`'s group), as Claude Code's
+ * transcript says one: `[{text, added?, removed?}]`, read with ", " between
+ * ("Ran 3 commands", "read a file", "edited convert.js" +4 −1). One real step:
+ * that step's own line, as done ("Read notes.md"). `busy`: the agent is on
+ * it now — its latest step, as it is ("Running npm test").
+ */
+export function workSummary(group, busy = false) {
+  const steps = group?.steps || [];
+  const edits = group?.edits || [];
+  if (!steps.length) return [];
+  if (busy) return [{ text: steps[steps.length - 1].step }];
+  const kinds = steps.map(stepKind);
+  const real = steps.filter((_, i) => !['other', 'ask'].includes(kinds[i]));
+  if (real.length <= 1) {
+    const s = real[0] ?? steps[steps.length - 1];
+    const e = s.file ? edits.find((x) => x.file === s.file) : edits.length === 1 && stepKind(s) === 'edit' ? edits[0] : null;
+    return [{ text: doneLine(s.step), ...(e ? { added: e.added, removed: e.removed } : {}) }];
+  }
+  const count = (k) => kinds.filter((x) => x === k).length;
+  const parts = [];
+  const add = (text, counts = null) => parts.push({ text: parts.length ? text : text[0].toUpperCase() + text.slice(1), ...(counts ? { added: counts.added, removed: counts.removed } : {}) });
+  const ran = count('command');
+  if (ran) add(`ran ${some(ran, 'a command', 'commands')}`);
+  const read = count('read');
+  if (read) add(`read ${some(read, 'a file', 'files')}`);
+  const searched = count('search');
+  if (searched) add(searched === 1 ? 'searched the files' : `searched the files ${searched} times`);
+  const web = count('web');
+  if (web) add(web === 1 ? 'looked on the web' : `looked on the web ${web} times`);
+  const files = [...new Set([...steps.filter((s, i) => kinds[i] === 'edit' && s.file).map((s) => s.file), ...edits.map((e) => e.file)])];
+  const edited = count('edit');
+  if (files.length === 1) {
+    const e = edits.find((x) => x.file === files[0]);
+    add(`${e?.made === 'new' ? 'created' : 'edited'} ${fileName(files[0])}`, e);
+  } else if (files.length > 1) {
+    add(`edited ${files.length} files`, { added: edits.reduce((n, e) => n + e.added, 0), removed: edits.reduce((n, e) => n + e.removed, 0) });
+  } else if (edited) {
+    add(`made ${some(edited, 'an edit', 'edits')}`);
+  }
+  return parts;
+}
+
 /** Narration long enough to fold (its first lines shown, "Show more"). */
 export const longSaid = (text) => String(text || '').length > 280 || String(text || '').split('\n').length > 4;
 

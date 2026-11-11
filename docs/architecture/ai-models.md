@@ -1788,6 +1788,13 @@ results, one `session_id`).
   of its own right after, in the same process: `result`, then `system/init`
   again, its own work, and a second `result`. `total_cost_usd` runs on (the
   second is the process's total); `usage` is each turn's own.
+- **`total_cost_usd` is the session's running total** — across `--resume`
+  too: a resumed process's first result goes on from what the session had
+  cost, and `modelUsage` (per model: tokens and `costUSD`) covers the
+  same span. A turn's own cost is the difference
+  (`events::TurnResult::cost_since`): agents
+  ([yap-code.md](./yap-code.md#what-a-turn-cost)) and a plan chat's answers
+  ([Usage and cost](#usage-and-cost)) are counted so.
 - **`--replay-user-messages`** (`Spec::replay_user_messages`): each user
   message is echoed back (`"isReplay": true`) at the moment it's taken in,
   not when it's written: the turn's first as the turn starts, a mid-turn one
@@ -2190,7 +2197,14 @@ instead, unchanged).
 - Every call is counted (`usage::record_response`) from the result's `usage`,
   as "claude-plan", with Claude Code's own estimate of the API price
   (`total_cost_usd`; else Anthropic's list price): on a plan, what the API
-  would have charged, never spend.
+  would have charged, never spend. **A Chat answer is counted at its own
+  cost** (2026-11-11): Claude Code's figure is its session's running total,
+  so each answer of a conversation's session was counted at the total so
+  far (13, 14, 16 cents for answers that cost 13, 1.4 and 1.9). Now it's what
+  the total went up by since the answer before (`TurnResult::cost_since`:
+  the process's last total in `sessions::Warm`, and across a resume
+  `Kept.totalMicros` in `claude_sessions.json`). The one-off calls are a
+  session each: their figure is their own.
 - **AI usage keeps it apart**: the plan's tokens and their "API value"
   (`plan_tokens`, `plan_value_micros`), never in the month's spend.
 - **An answer's byline** says which way paid: "Your Claude plan · ≈ $0.0042

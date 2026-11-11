@@ -959,7 +959,10 @@ async fn turn(id: &str, message: Option<String>) -> (Status, u32) {
         0 => crate::chat::budget::context_window(&cfg, "anthropic", &agent.model, "").await.0,
         w => w,
     };
-    let mut follow = Follow::new(&agent, n, folder, backup, mode, window);
+    // What its session's running total goes on from: nothing (a new
+    // session), or what was kept of it (none kept: not known).
+    let total_before = if resuming { Some(agent.session_total).filter(|t| *t > 0.0) } else { Some(0.0) };
+    let mut follow = Follow::new(&agent, n, folder, backup, mode, window, total_before);
     let mut tick = tokio::time::interval(Duration::from_millis(500));
     loop {
         tokio::select! {
@@ -990,6 +993,16 @@ struct Follow {
     /// What the agent had cost before this process, and the turn.
     cost_before: f64,
     turn_cost_before: f64,
+    /// What this process has cost so far: each result's own cost
+    /// (`TurnResult::cost_since`), added up.
+    spent: f64,
+    /// Claude Code's running total for the session, as last said (its
+    /// previous result, or what was kept before this process; `None`: a
+    /// resumed session nothing was kept of).
+    total_seen: Option<f64>,
+    /// The model it runs on (whose share a turn's cost is, when nothing
+    /// was kept).
+    model: String,
     /// Its latest words.
     last_text: String,
     /// The latest result's outcome, and the words of every result so far
@@ -1065,7 +1078,7 @@ fn no_backups(edited: bool, backed_up: usize) -> bool {
 }
 
 impl Follow {
-    fn new(agent: &Agent, n: u32, folder: PathBuf, backup: PathBuf, mode: Mode, window: u64) -> Follow {
+    fn new(agent: &Agent, n: u32, folder: PathBuf, backup: PathBuf, mode: Mode, window: u64, total_before: Option<f64>) -> Follow {
         let before = agent.turn_list.iter().find(|t| t.n == n).and_then(|t| t.usage.clone());
         Follow {
             id: agent.id.clone(),
@@ -1076,6 +1089,9 @@ impl Follow {
             read_only: agent.turn_list.iter().find(|t| t.n == n).is_some_and(|t| t.read_only),
             cost_before: agent.cost,
             turn_cost_before: agent.turn_list.iter().find(|t| t.n == n).map_or(0.0, |t| t.cost),
+            spent: 0.0,
+            total_seen: total_before,
+            model: agent.model.clone(),
             last_text: String::new(),
             outcome: None,
             said: Vec::new(),
@@ -1333,8 +1349,13 @@ impl Follow {
             .iter()
             .map(|d| Denial { tool: d.tool_name.clone(), detail: steps::denied(&d.tool_name, &d.tool_input, &self.folder) })
             .collect();
-        let cost = self.cost_before + r.cost_usd.max(0.0);
-        let turn_cost = self.turn_cost_before + r.cost_usd.max(0.0);
+        // Its own cost: Claude Code's figure is its session's running
+        // total, earlier turns and all (`TurnResult::cost_since`).
+        self.spent += r.cost_since(self.total_seen, &self.model);
+        let session_total = r.cost_usd.max(0.0);
+        self.total_seen = Some(session_total);
+        let cost = self.cost_before + self.spent;
+        let turn_cost = self.turn_cost_before + self.spent;
         // What it used, Claude Code's own sums and window now; its cost is
         // Claude Code's figure from here (`usage.rs`).
         let said = self.meter.said() || r.usage.input_tokens + r.usage.output_tokens > 0;
@@ -1347,6 +1368,9 @@ impl Follow {
         let n = self.n;
         let agent = store::update(&self.id, |j| {
             j.cost = cost;
+            if session_total > 0.0 {
+                j.session_total = session_total;
+            }
             if unbacked {
                 j.no_backups = true;
             }
