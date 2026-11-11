@@ -46,8 +46,10 @@
 //!   turn starts at once, at the chat's Mode with Yap's go-ahead
 //!   ([`GO_AHEAD`]), as "go ahead" in the chat would. Not yet: it stays a
 //!   plan, and the report card's Go ahead ([`go_ahead`]) carries it out.
-//! - **Done or failed**: each turn reported in its chat
-//!   (`chat/turn/report.rs`) — never one the person stopped.
+//! - **Done or failed**: reported in its chat once it stops working
+//!   (`chat/turn/report.rs`; [`reports`]: a turn it goes straight on from,
+//!   a request having come while it worked, is in the next one's report)
+//!   — never one the person stopped.
 //! - **Agents die with Yap** (the kill-on-close job): quitting marks them
 //!   interrupted ([`shutdown`]); `store::at_start` does after a crash.
 //!
@@ -518,23 +520,77 @@ fn pump() {
     }
 }
 
+/// **What becomes of a turn's report as the turn ends** ([`run`]). Pure.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Reports {
+    /// Told in its chat now: the agent has stopped working.
+    Now,
+    /// Kept for the next turn's: a request came while it worked, so the
+    /// agent goes straight on, and one report at the end covers both.
+    Held,
+    /// Not this turn (never one the person stopped) — but what it finished
+    /// before, held for this turn, is told now: it has stopped working.
+    Earlier,
+    /// Nothing now (interrupted as Yap quits): Continue carries the turn
+    /// on, and its report covers what waited for it.
+    Not,
+}
+
+/// **One report when the agent stops working** (11 Nov 2026, from the
+/// maintainer's real use: a note sent while the agent worked ran as its
+/// next turn, and the chat spoke twice in a row, what it had changed and
+/// then that the note needed no change, with nobody asking in between).
+/// `status`: how the
+/// turn ended; `waiting`: a request came while it worked; `plan_allowed`:
+/// its plan was allowed on ExitPlanMode's card (reported as before: "it's
+/// building from the plan now", then how that went). Pure.
+pub fn reports(status: Status, waiting: bool, plan_allowed: bool) -> Reports {
+    match status {
+        Status::Done | Status::Failed if waiting && !plan_allowed => Reports::Held,
+        Status::Done | Status::Failed => Reports::Now,
+        Status::Stopped => Reports::Earlier,
+        _ => Reports::Not,
+    }
+}
+
+/// What agent `id` finished and nobody was told (a turn whose report waited
+/// for the next, which then never ended: stopped): told now, as the latest
+/// of those turns.
+fn report_held(id: &str) {
+    if let Some(n) = store::get(id).filter(|j| !j.status.live()).and_then(|j| j.held_last()) {
+        tracing::info!(id, turn = n, "Agents: the turn after it stopped; what it finished before is reported now");
+        crate::chat::turn::queue_held_report(id, n);
+    }
+}
+
 /// One turn of agent `id`, from start to the process gone; then its slot goes
 /// to the next, and it's reported — and a request that came while it
-/// worked runs as its next turn.
+/// worked runs as its next turn, the two reported as one ([`reports`]).
 async fn run(id: String, message: Option<String>) {
     let (status, n) = turn(&id, message).await;
     // A request that came while it worked: its next turn.
     let pending = with_state(|s| s.live.remove(&id).and_then(|l| l.pending));
     store::flush();
     let ended = matches!(status, Status::Done | Status::Failed);
-    // Every turn is reported, a turn waiting behind it or not.
-    if ended && n > 0 {
-        crate::chat::turn::queue_agent_report(&id, n);
-    }
     // Its plan allowed on ExitPlanMode's card: carried out now, at the
     // chat's Mode, as a "go ahead" in the chat would (a request that came
     // meanwhile goes with it, as the go-ahead).
     let go_on = status == Status::Done && store::get(&id).is_some_and(|j| j.turn_list.iter().any(|t| t.n == n && t.plan_allowed));
+    // One report when it stops working: a turn it goes straight on from
+    // waits for the next one's.
+    match reports(status, pending.is_some(), go_on) {
+        Reports::Now if n > 0 => crate::chat::turn::queue_agent_report(&id, n),
+        Reports::Held if n > 0 => {
+            store::update(&id, |j| {
+                if let Some(t) = j.turn_mut(n) {
+                    t.report_held = true;
+                }
+            });
+            tracing::info!(id = %id, turn = n, "Agents: a request waits, so this turn's report waits for the next one's");
+        }
+        Reports::Earlier => report_held(&id),
+        _ => {}
+    }
     match pending {
         _ if go_on => {
             tracing::info!(id = %id, turn = n, "Agents: its plan was allowed; carrying it out");
@@ -1384,6 +1440,8 @@ pub fn stop(id: &str) -> Result<Agent, String> {
             .ok_or("There's no such agent.")?;
             tracing::info!(id, "Agents: stopped before it ran");
             emit(&AgentEvent::at(&agent, agent.turn_list.last().map_or(0, |t| t.n)));
+            // (A turn before it whose report waited for this one: told now.)
+            report_held(id);
             Ok(agent)
         }
         Was::Live(Some(session)) => {
@@ -2200,6 +2258,26 @@ mod tests {
         let folder = std::env::temp_dir().join(format!("yap-agent-turns-{}", store::new_id()));
         std::fs::create_dir_all(&folder).unwrap();
         folder
+    }
+
+    #[test]
+    fn one_report_when_the_agent_stops_working() {
+        // Done or failed with nothing waiting: told now.
+        assert_eq!(reports(Status::Done, false, false), Reports::Now);
+        assert_eq!(reports(Status::Failed, false, false), Reports::Now);
+        // A request came while it worked: it goes straight on, and this
+        // turn's report waits for that one's — a failed turn's too.
+        assert_eq!(reports(Status::Done, true, false), Reports::Held);
+        assert_eq!(reports(Status::Failed, true, false), Reports::Held);
+        // A plan allowed on its card: said now ("building from the plan"),
+        // a request waiting or not.
+        assert_eq!(reports(Status::Done, false, true), Reports::Now);
+        assert_eq!(reports(Status::Done, true, true), Reports::Now);
+        // Stopped by the person: never that turn — what waited for it is told.
+        assert_eq!(reports(Status::Stopped, false, false), Reports::Earlier);
+        assert_eq!(reports(Status::Stopped, true, false), Reports::Earlier);
+        // Yap quitting: nothing now (Continue's report covers what waited).
+        assert_eq!(reports(Status::Interrupted, true, false), Reports::Not);
     }
 
     #[test]

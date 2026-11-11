@@ -1,7 +1,7 @@
 // One agent per Code chat, its follow-ups as its turns (2026-11-07):
 // desktop/src-tauri/src/agents/runner.rs (`follow_up`, `undo_turn`, per-turn
 // backups), chat/tools/agents.rs (`decide`: start_agent in a Code chat carries
-// the chat's agent on), chat/turn/report.rs (a report a turn), and the tab
+// the chat's agent on), chat/turn/report.rs (a report when it stops working), and the tab
 // (views/chat/AgentTab.svelte + AgentTurn.svelte; core/agents.js `turnsOf`,
 // `pillsByAnswer`, `agentTabName`). As Claude Code itself is one session per
 // conversation, each follow-up in a Code chat ("could you add a minimap
@@ -20,7 +20,9 @@
 //   each answer and a report card each, all opening the same tab at their
 //   turn's row. Light and dark.
 // - A request while the agent works: queued as its next turn (said so, shown
-//   so), sent once the turn ends, never a second agent.
+//   so), sent once the turn ends, never a second agent — and the two told in
+//   one report once the agent stops working, never one each (11 Nov 2026: the
+//   chat spoke twice in a row with nobody asking in between).
 // - "Start fresh" (`fresh: true`): a second agent, its tab named apart.
 // - Undo this turn (refused while a later turn changed the same file:
 //   "Undo the later change first"), and Undo all, asked first.
@@ -331,6 +333,10 @@ test('core/agents.js: an agent’s turns from its log, their words, the pills a 
   expect(agentOfReport([reported], 'chat:9:2', 9)?.id).toBe('c');
   expect(turnOfReport(reported, 'chat:9:2')?.n).toBe(1);
   expect(turnOfReport(reported, 'chat:9:7')?.n).toBe(2);
+  // One report for two turns (the second asked while the first worked): its latest.
+  const together = { ...reported, turnList: reported.turnList.map((t) => ({ ...t, reportMessageId: 'chat:9:7' })) };
+  expect(turnOfReport(together, 'chat:9:7')?.n).toBe(2);
+  expect(agentOfReport([together], 'chat:9:7', 9)?.id).toBe('c');
   expect(turnOfReport(old, 'chat:5:2')).toBeNull();
   // Two agent tabs in one folder are named apart: their first requests, else a number.
   const a = { kind: 'agent', agent: { id: 'j1', folder: 'garden-planner', turnList: [{ title: 'Add a watering schedule' }] } };
@@ -481,7 +487,7 @@ test('two requests in a Code chat: one agent, one tab with two turns, two report
   expect(JSON.stringify(asked.messages)).toContain(`This chat's agent there (id ${agent.id}) is done, after 1 turn: the user's next request there continues it.`);
 });
 
-test('a request while the agent works queues as its next turn: said so, shown so, sent once the turn ends', async ({ yap, main, fakeLlm, shot }) => {
+test('a request while the agent works queues as its next turn: said so, shown so, sent once the turn ends, and both told in one report', async ({ yap, main, fakeLlm, shot }) => {
   fs.rmSync(ARGS, { force: true });
   await script(yap, SLOWISH, 'slowish');
   const before = (await agents(yap)).length;
@@ -498,8 +504,7 @@ test('a request while the agent works queues as its next turn: said so, shown so
   fakeLlm.scriptChat([
     { tools: [{ name: 'start_agent', args: { brief: 'Add a legend to the minimap.', title: 'Add a legend' } }] },
     { content: QUEUED },
-    { plain: true, content: 'It read notes.md.' },
-    { plain: true, content: 'It added the legend.' },
+    { plain: true, content: 'Done. It read notes.md, and the legend is in.' },
   ]);
   await send(main, 'Add a legend to the minimap too.');
   await expect(chipsOfLast(main)).toHaveText(['Queued for the agent in garden-planner']);
@@ -516,7 +521,8 @@ test('a request while the agent works queues as its next turn: said so, shown so
   await expect(turnAt(main, 1).getByTestId('chat-agent-now')).toBeVisible();
   await shot(main, '03-agent-tab-a-turn-queued');
   expect((await agents(yap)).length).toBe(before + 1);
-  // The turn ends: reported, and the request goes as the next turn, on --resume.
+  // The turn ends: the request goes as the next turn, on --resume.
+  const reportsSoFar = () => thread(main).getByTestId('chat-agent-report');
   const done = await (async () => {
     await expect.poll(async () => (await agents(yap)).find((j) => j.id === agent.id).turnList?.[1]?.status, { timeout: 40_000 }).toBe('done');
     return ended(yap, agent.id);
@@ -530,8 +536,30 @@ test('a request while the agent works queues as its next turn: said so, shown so
   expect(args).toHaveLength(2);
   expect(after(args[1], '--resume')).toBe(done.session);
   expect((await agents(yap)).length).toBe(before + 1);
-  const messages = await messagesOf(yap, done.conversation, 8);
-  expect(messages.filter((m) => m.kind === 'agentReport')).toHaveLength(2);
+  // One report once it stops working, for both requests: one card, one answer.
+  const messages = await messagesOf(yap, done.conversation, 6);
+  expect(messages.map((m) => m.kind || m.role)).toEqual(['user', 'assistant', 'user', 'assistant', 'agentReport', 'assistant']);
+  const marker = messages[4].text;
+  expect(marker).toContain('This report covers 2 requests it worked through one after the other');
+  expect(marker).toContain('Request 1, "Read the notes". Its own words: Read notes.md.');
+  expect(marker).toContain('Request 2, "Add a legend". Its own words: Got: Add a legend to the minimap.');
+  expect(messages[5].text).toBe('Done. It read notes.md, and the legend is in.');
+  // The chat's model was told to answer for both in one message.
+  const told = fakeLlm.requests.filter((r) => JSON.stringify(r.messages).includes('This report covers 2 requests')).at(-1);
+  expect(JSON.stringify(told.messages)).toContain('This one report covers 2 requests');
+  expect(told.tools).toEqual([]);
+  // Both turns are that report's: its card reads as the latest, and opens there.
+  const after2 = (await agents(yap)).find((j) => j.id === agent.id);
+  const markerId = `chat:${done.conversation}:4`;
+  expect(after2.turnList.map((t) => [t.reportMessageId, !!t.reportHeld])).toEqual([
+    [markerId, false],
+    [markerId, false],
+  ]);
+  await expect(reportsSoFar()).toHaveCount(1);
+  await expect(reportsSoFar()).toHaveAttribute('data-turn', '2');
+  await expect(reportsSoFar().locator('.jtitle')).toHaveText('Agent done · garden-planner');
+  await expect(lastAnswer(main)).toHaveText('Done. It read notes.md, and the legend is in.');
+  await shot(main, '06-one-report-for-both-requests');
   await expect(turnAt(main, 2)).toHaveAttribute('data-open', 'true');
   await expect(turnAt(main, 1)).toHaveAttribute('data-open', 'false');
 });

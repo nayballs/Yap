@@ -5,8 +5,9 @@
   // and answers in its own words right after. Drawn as a compact agent card,
   // not a question: "Agent done · garden-planner" (or didn't finish, has a
   // question, its plan is ready), what it changed in a line, and Open, the
-  // agent's tab at that report's turn (an agent reports each turn: one tab an
-  // agent). A plan waiting for its go-ahead has **Go ahead** too: the
+  // agent's tab at that report's turn (an agent reports when it stops working:
+  // one tab an agent, and a request asked while it worked is in the same
+  // report as the turn before it). A plan waiting for its go-ahead has **Go ahead** too: the
   // person's click carries it out (`agent_go_ahead`, Yap's own words at the
   // chat's Mode), once — disabled as soon as it's pressed. Its own small
   // chunk.
@@ -23,8 +24,9 @@
 
   const folder = $derived(reportFolder(m.text));
   const agent = $derived(agentOfReport(agents.list, m.id, conversation, folder));
-  // The turn it reports: said as that turn is (each has its own report);
-  // an agent from before turns, its latest report as the agent is.
+  // The turn it reports (the latest of them, when it covers several): said
+  // as that turn is; an agent from before turns, its latest report as the
+  // agent is.
   const turn = $derived(turnOfReport(agent, m.id));
   const latest = $derived(!!agent && agent.reportMessageId === m.id);
   const as = $derived(turn ?? (latest ? agent : null));

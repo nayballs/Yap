@@ -259,8 +259,10 @@ carrying on with its context; so are agents now.
 - **A request while it works** queues as its next turn: the chat says "The
   agent in garden-planner is still working: I'll pass that on when it finishes
   this step." (the tool's `say`; chip "Queued for the agent in …"), its tab
-  shows it waiting ("Queued"), and it's sent once the turn ends (that turn
-  reported first). Two while it works: one next turn. Never two agents (nor
+  shows it waiting ("Queued"), and it's sent once the turn ends. The turn
+  before it isn't reported by itself: the agent goes straight on, and one
+  report once it stops working covers both ([Reports](#reports)). Two while
+  it works: one next turn. Never two agents (nor
   two turns) in a folder at once. Stopped first: not sent ("Not sent yet");
   Continue sends it.
 - **Consent and safety, unchanged**: the person's own words this turn
@@ -280,9 +282,10 @@ carrying on with its context; so are agents now.
   beside the chat's earlier one) are named apart by their first request
   (`core/agents.js` `agentTabName`), else a number: the only way two tabs could
   read the same.
-- **Reports**: one a turn, through the same report path
-  (`queue_agent_report(id, turn)`: that turn's facts, `Agent::as_of_turn`), each
-  spoken per `agents_speak`.
+- **Reports**: one when the agent stops working, through the same report
+  path (`queue_agent_report(id, turn)`: that turn's facts, with those of the
+  turns it went straight on from, `Agent::as_of_report`), each spoken per
+  `agents_speak`.
 - **Undo this turn** and **Undo all**: [Undo and backups](#undo-and-backups).
 
 ## Starting an agent
@@ -1158,9 +1161,37 @@ instead of a terminal (rebuilt after the maintainer's first real agent,
 ## Reports
 
 `chat/turn/report.rs`: a turn Yap starts itself when an agent's turn is done,
-failed, or done with a question — one a turn, with that turn's facts
-(`queue_agent_report(id, turn)`, `Agent::as_of_turn`), a turn queued behind it
-or not.
+failed, or done with a question, with that turn's facts
+(`queue_agent_report(id, turn)`, `Agent::as_of_report`).
+
+- **One report when it stops working** (2026-11-11, `runner::reports`). From
+  the maintainer's real use: a note sent while the agent worked ran as its
+  next turn, and the chat spoke twice in a row, first what the agent had
+  changed and then, 21 seconds later, that the note needed no change, with
+  nobody asking in between: it read as the chat talking to itself. Claude Code itself answers once, when
+  it has worked through what was sent. So:
+  - A turn that ends (done or failed) with a request waiting behind it is
+    **held** (`TurnNote.reportHeld`): the agent goes straight on, and nothing
+    is said yet. Its tab shows that turn done, with its own words.
+  - The report at the end **covers every turn held for it**: one card, one
+    answer. The marker says so ("This report covers 2 requests it worked
+    through one after the other…"), lists the files of all of them once,
+    and gives each request with what came of it ("Request 1, \"…\". Its own
+    words: …"; one that didn't finish says so, with why). The model is told
+    to answer for all of them in that one message, in order, and to say
+    plainly when one needed no change. Every covered turn keeps that
+    report's marker (`reportMessageId`), and the card reads as the latest.
+  - **The next turn stopped by the person** (never reported itself): what
+    was held is told now, as the latest held turn (`runner::report_held`,
+    `queue_held_report`), unless a later report has told it by the time the
+    chat is free. Yap quitting mid-turn tells nothing: Continue carries the
+    turn on, and its report covers what waited.
+  - **A plan allowed on ExitPlanMode's card** is reported as before ("it's
+    building from the plan now", then how that went): the person acted in
+    between, and the plan is worth summing up before minutes of building.
+  - `reportHeld` is a field of the turn's own: an older Yap drops it on its
+    save, and that turn is then left out of the report (its words stay in
+    its tab).
 
 - **Never over an answer**: it waits while the chat is answering
   (`Stoppable::answers_if_idle`, up to 30 minutes), then answers there. A
@@ -1354,7 +1385,10 @@ saves ([config-and-data.md](./config-and-data.md)).
     latest turn's, as `plan` is) — 2026-11-08, left out while false. An older
     Yap's save drops them: the next start sets the plans aside again
     (`store::migrate`: a plan waiting that isn't its chat's latest turn), and
-    a dismissed row shows again (harmless). The page's copies also carry
+    a dismissed row shows again (harmless). Each turn's `reportHeld`
+    (2026-11-11: its report waits for the next turn's, [Reports](#reports);
+    left out while false; dropped by an older Yap's save, that turn is left
+    out of the report). The page's copies also carry
     `active` (the runner has it now, for Move to finished), never saved;
   - `modes`: each chat's Mode (conversation id → mode);
   - `codeChats`: each Code chat's folder (conversation id → `{path, ts}`);
@@ -1669,7 +1703,8 @@ the build's own stand-in replaying `script` from now on),
     one tab with two turns (the newest open, the earlier folded), two
     reports, the second turn on `--resume` (the stand-in's `_dump_args` to a
     file), a pill and a report card a turn opening the same tab at their
-    turn; a request while it works queued as the next turn; "start fresh" a
+    turn; a request while it works queued as the next turn, the two told in
+    one report (one card, one answer); "start fresh" a
     second agent, its tab named apart; Undo this turn (refused while a later
     turn changed the same file), Undo all asked first. Light and dark.
   - `agents-plans.spec.js`: plans and the go-ahead — a Bypass chip never stops

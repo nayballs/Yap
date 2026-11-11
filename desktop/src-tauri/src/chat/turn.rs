@@ -34,7 +34,7 @@ use crate::config::{self, YapConfig};
 
 pub(crate) use history::next_room;
 // An agent's report, a turn Yap starts itself (report.rs).
-pub(crate) use report::{open_agent, queue_agent_report, AGENT_REPORT, AGENT_REPORT_PREFIX, EVENT as AGENT_REPORT_EVENT};
+pub(crate) use report::{open_agent, queue_agent_report, queue_held_report, AGENT_REPORT, AGENT_REPORT_PREFIX, EVENT as AGENT_REPORT_EVENT};
 
 /// Resolve the **Chat** scope's endpoint + persona (falling back to the global
 /// cleanup endpoint when the scope is off) and fail fast on keyless cloud

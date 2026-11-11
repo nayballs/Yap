@@ -872,7 +872,11 @@
   (`dismissed`, the turn's) — 2026-11-08, flags left out while false, whose
   loss on an older Yap's save is harmless: at the next start
   `store::migrate` sets aside again every plan still waiting that isn't its
-  chat's latest turn, and a dismissed row just shows again; each
+  chat's latest turn, and a dismissed row just shows again; a turn whose
+  report waits for the next one's (`reportHeld`, the turn's, 2026-11-11: a
+  request came while it worked, so one report covers both; left out while
+  false, and lost on an older Yap's save that turn is just left out of the
+  report); each
   chat's Mode chip (`modes`), each Code chat's folder (`codeChats`:
   conversation id → `{path, ts}`, yap-code.md "Code chats") and the one-time Bypass OK
   (`bypassConfirmed`); and `%APPDATA%/yap/agents/`, a folder per agent:
