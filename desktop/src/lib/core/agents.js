@@ -119,6 +119,7 @@ const DONE = [
   [/^Picking up\b/, 'Picked up'],
   [/^Waiting\b/, 'Waited'],
   [/^Using\b/, 'Used'],
+  [/^Handing\b/, 'Handed'],
 ];
 const doneLine = (step) => DONE.reduce((s, [was, now]) => (was.test(s) ? s.replace(was, now) : s), String(step || ''));
 
@@ -249,7 +250,7 @@ export function workOf(log, final = '', live = false) {
       break;
     }
   }
-  // (A stretch that is another tool's call alone is housekeeping to the thread, unless it came back with a picture: a screenshot a tool took.)
+  // (Yap's own housekeeping alone — "Starting Claude Code", a note read, a denial — isn't a stretch of work, unless a step of it came back with a picture.)
   const real = (g) => g.steps.some((s) => s.pictures.length > 0 || !['other', 'ask'].includes(stepKind(s)));
   return out.filter((x, i) => x.kind === 'said' || real(x) || (live && i === out.length - 1));
 }
@@ -260,9 +261,13 @@ const some = (n, one, many) => (n === 1 ? one : `${n} ${many}`);
 /**
  * **A stretch of work in a line** (`workOf`'s group), as Claude Code's
  * transcript says one: `[{text, added?, removed?}]`, read with ", " between
- * ("Ran 3 commands", "read a file", "edited convert.js" +4 −1). One real step:
- * that step's own line, as done ("Read notes.md"). `busy`: the agent is on
- * it now — its latest step, as it is ("Running npm test").
+ * ("Ran 3 commands", "read a file", "used github 2 times", "edited
+ * convert.js" +4 −1). Other tools' calls (an MCP server's, a connector's, a
+ * skill) are named when they're all one's, else counted ("used 3 tools"); a
+ * part handed to a subagent is "handed part of it to a helper". One real
+ * step: that step's own line, as done ("Read notes.md", "Used github ·
+ * create issue"). `busy`: the agent is on it now — its latest step, as it is
+ * ("Running npm test").
  */
 export function workSummary(group, busy = false) {
   const steps = group?.steps || [];
@@ -287,6 +292,14 @@ export function workSummary(group, busy = false) {
   if (searched) add(searched === 1 ? 'searched the files' : `searched the files ${searched} times`);
   const web = count('web');
   if (web) add(web === 1 ? 'looked on the web' : `looked on the web ${web} times`);
+  // Other tools' calls: whose, when they're all one's ("used github 3 times"), else how many.
+  const used = steps.filter((_, i) => kinds[i] === 'tool').map(toolOwner);
+  if (used.length) {
+    const one = used.every((u) => u && u === used[0]) ? used[0] : '';
+    add(one ? (used.length === 1 ? `used ${one}` : `used ${one} ${used.length} times`) : `used ${used.length} tools`);
+  }
+  const helpers = count('helper');
+  if (helpers) add(helpers === 1 ? 'handed part of it to a helper' : `handed parts of it to ${helpers} helpers`);
   const files = [...new Set([...steps.filter((s, i) => kinds[i] === 'edit' && s.file).map((s) => s.file), ...edits.map((e) => e.file)])];
   const edited = count('edit');
   if (files.length === 1) {
@@ -708,9 +721,16 @@ export function modelLabel(id) {
   return `Claude ${family} ${m[2]}${m[3] ? `.${m[3]}` : ''}${m[4] || ''}`;
 }
 
+/** Yap's own tool in an agent's session (its permission prompts': `mcp__yap__approve`): never a step to tell. */
+const OWN_TOOL = /^Using yap · approve$/;
+
 /**
  * What kind of step a line is (its icon): 'read', 'edit', 'command',
- * 'web', 'search', 'ask' (waiting for you), 'other'.
+ * 'web', 'search', 'tool' (another tool's call: an MCP server's or a
+ * connector's "Using github · create issue", a skill, a tool Yap has no
+ * words for), 'helper' (part of it handed to a subagent), 'ask' (waiting
+ * for you), 'other' (housekeeping: "Starting Claude Code", a note read, a
+ * denial, Claude Code looking a tool up or checking on a command).
  */
 export function stepKind(s) {
   if (s?.command) return 'command';
@@ -721,9 +741,14 @@ export function stepKind(s) {
   if (/^Searching the web\b/.test(t) || /^Reading [a-z0-9-]+(\.[a-z0-9-]+)+\//i.test(t)) return 'web';
   if (/^(Reading|Looking)\b/.test(t)) return 'read';
   if (/^Searching the files\b/.test(t)) return 'search';
+  if (/^Handing part of it to a helper\b/.test(t)) return 'helper';
+  if (/^Using\b/.test(t) && !OWN_TOOL.test(t)) return 'tool';
   if (/^Waiting for you\b/.test(t)) return 'ask';
   return 'other';
 }
+
+/** Whose tool a 'tool' step used, as its line says it: "Using github · create issue" → "github", "Using a skill · tidy" → "a skill", "Using Frobnicate" → "Frobnicate". */
+const toolOwner = (s) => String(s?.step || '').replace(/^Using\s+/, '').split(' · ')[0].trim();
 
 /** The Mode chip's menu: Claude Code's own keys, 1 to 5, in its order. */
 export const MODE_KEYS = ['1', '2', '3', '4', '5'];

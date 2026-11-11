@@ -1,0 +1,19 @@
+{
+  "name": "tool-lines",
+  "about": "Another tool's call is a line in the thread (11 Nov 2026, core/agents.js stepKind 'tool' and 'helper'): in a Bypass Code chat on lab-sandbox that works directly, the session is asked to hand a small look-up to a subagent. The stretch's line under the message says so (\"handed part of it to a helper\", or the hand-off's own line when it's the only step). Whether the model really uses a subagent is its own choice, so that check is soft; that its work shows as a line, and that it answers, are not. Needs the real Claude Code (a --fake lab's Chat isn't on the plan, so nothing goes directly there).",
+  "needs": { "yapCode": true },
+  "steps": [
+    { "set": { "bypass": true, "config": { "agentsDirect": true } } },
+
+    { "ask": "Use a subagent (your Task tool) to count how many test() calls there are in src/convert.test.js, then tell me the number in one sentence. Don't change anything.", "chat": "code:lab-sandbox", "timeout": 300 },
+    { "expect": { "status": "answered", "notUsed": "/^(start_agent|message_agent)$/", "tools": 0, "card": false }, "note": "Straight to its session." },
+    { "wait": "agents", "timeout": 600 },
+    { "expect": { "agent": { "status": "done", "error": null } } },
+    {
+      "expect": { "selector": [{ "window": "main", "css": "[data-testid=\"chat-agent-work\"] [data-testid=\"chat-agent-work-steps\"]", "count": { "min": 1 } }], "visible": "Agent done" },
+      "note": "Its work as a line under the message."
+    },
+    { "expect": { "visible": "a helper" }, "soft": true, "note": "The hand-off said in the line (the model's own choice to use one: soft)." },
+    { "shot": "a-helper-in-its-line", "window": "main" }
+  ]
+}

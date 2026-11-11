@@ -126,7 +126,11 @@ pub fn of_tool(name: &str, input: &Value, folder: &Path) -> Seen {
         "TodoWrite" => Seen { step: "Planning the steps".into(), todos: todos(input), ..Default::default() },
         "Skill" => Seen { step: dotted("Using a skill", text(&["skill", "name", "command"])), ..Default::default() },
         "ExitPlanMode" => Seen { step: "Writing the plan".into(), ..Default::default() },
-        "BashOutput" | "KillShell" | "KillBash" => Seen { step: "Checking a command".into(), ..Default::default() },
+        "BashOutput" | "KillShell" | "KillBash" | "TaskOutput" | "TaskStop" => Seen { step: "Checking a command".into(), ..Default::default() },
+        // Claude Code looking one of its tools up (an MCP server's load when
+        // first needed): its own plumbing, never a step of the work — the
+        // call that follows is ("Using github · create issue").
+        "ToolSearch" => Seen { step: "Finding a tool".into(), ..Default::default() },
         other => match other.strip_prefix("mcp__").and_then(|r| r.split_once("__")) {
             Some((server, tool)) => Seen { step: format!("Using {server} · {}", tool.replace('_', " ")), ..Default::default() },
             None => Seen { step: format!("Using {}", one_line(other, 40)), ..Default::default() },
@@ -218,6 +222,10 @@ mod tests {
         assert_eq!(of_tool("TodoWrite", &json!({}), &f).step, "Planning the steps");
         assert_eq!(of_tool("mcp__github__create_issue", &json!({}), &f).step, "Using github · create issue");
         assert_eq!(of_tool("Frobnicate", &json!({}), &f).step, "Using Frobnicate");
+        // Claude Code's own plumbing has its own words (the thread never counts these as work).
+        assert_eq!(of_tool("ToolSearch", &json!({ "query": "select:mcp__github__create_issue" }), &f).step, "Finding a tool");
+        assert_eq!(of_tool("TaskOutput", &json!({ "task_id": "b1" }), &f).step, "Checking a command");
+        assert_eq!(of_tool("TaskStop", &json!({ "task_id": "b1" }), &f).step, "Checking a command");
         // No arguments yet: still a line.
         assert_eq!(of_tool("Edit", &Value::Null, &f).step, "Editing a file");
         assert_eq!(of_tool("Bash", &Value::Null, &f).step, "Running a command");

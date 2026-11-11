@@ -35,6 +35,11 @@
 //   kept by agents/pictures.rs in the agent's own folder): larger by its
 //   step once the line is opened, opened in the viewer or the panel's
 //   picture tab, on its step in the Agent tab too. Light and dark.
+// - Another tool's call (an MCP server's, a connector's, a skill, a helper)
+//   is a step of the work too (11 Nov 2026): a stretch of them alone is a
+//   line ("Used homelights · list lights"), several are named when they're
+//   all one's and counted otherwise ("Ran a command, used 2 tools"). Yap's
+//   own housekeeping still isn't.
 // - "Start fresh" (`fresh: true`): a second agent, its tab named apart.
 // - Undo this turn (refused while a later turn changed the same file:
 //   "Undo the later change first"), and Undo all, asked first.
@@ -58,6 +63,7 @@ import {
   turnNow,
   workOf,
   workSummary,
+  stepKind,
   timelineOf,
   stepPicture,
   groupPictures,
@@ -196,6 +202,29 @@ const LOOKS_AT_THE_PLAN = [
   },
   said('p4', [{ type: 'text', text: LOOKED }], 'end_turn'),
   result(LOOKED, 0.01),
+  { _wait_user: true },
+];
+const LIT = 'Both lights are on now, and high tide is at 14:05.';
+/**
+ * A turn that works with other tools (made-up MCP servers: the lights, the
+ * tides): one call alone, then its words, then a stretch of two servers'
+ * calls and a command.
+ */
+const USES_OTHER_TOOLS = [
+  { _wait_user: true },
+  { _dump_args: ARGS },
+  init(),
+  said('t1', [{ type: 'tool_use', id: 'toolu_lights', name: 'mcp__homelights__list_lights', input: {} }]),
+  toolResult('toolu_lights', 'Porch: on. Shed: off.'),
+  said('t2', [{ type: 'text', text: 'The porch light is on. Turning the shed light on too.' }], 'tool_use'),
+  said('t3', [{ type: 'tool_use', id: 'toolu_set', name: 'mcp__homelights__set_light', input: { light: 'Shed', on: true } }]),
+  toolResult('toolu_set', 'Shed: on.'),
+  said('t4', [{ type: 'tool_use', id: 'toolu_tide', name: 'mcp__tides__next_high_tide', input: {} }]),
+  toolResult('toolu_tide', '14:05'),
+  said('t5', [{ type: 'tool_use', id: 'toolu_ls', name: 'Bash', input: { command: 'ls', description: 'List the folder' } }]),
+  toolResult('toolu_ls', 'notes.md'),
+  said('t6', [{ type: 'text', text: LIT }], 'end_turn'),
+  result(LIT, 0.01),
   { _wait_user: true },
 ];
 /** Says what it was told. */
@@ -471,10 +500,45 @@ test('core/agents.js: an agent’s turns from its log, their words, the pills a 
   ]);
   expect(groupPictures(looked[0])).toEqual([{ id: 'agent/ab12/img_0123456789abcdef', w: 320, h: 200, caption: 'Read beds.png' }]);
   expect(groupPictures(looked[2]).map((p) => p.caption)).toEqual(['Used shots · take screenshot']);
-  // A stretch that is another tool's call alone is housekeeping to the thread, unless it came back with a picture.
   expect(workSummary(looked[2])).toEqual([{ text: 'Used shots · take screenshot' }]);
-  expect(workOf(seen.filter((e) => !e.picture)).map((w) => w.kind)).toEqual(['work', 'said', 'said']);
+  // Yap's own housekeeping alone isn't a line, unless a step of it came back with a picture.
+  expect(workOf([{ id: 'ab12', step: 'Checking a command', call: 'toolu_d' }])).toEqual([]);
+  expect(
+    workOf([
+      { id: 'ab12', step: 'Checking a command', call: 'toolu_d' },
+      { id: 'ab12', picture: { id: 'img_4444444444444444', w: 8, h: 8 }, call: 'toolu_d' },
+    ]).map((w) => workSummary(w))
+  ).toEqual([[{ text: 'Checking a command' }]]);
   expect(workSummary(looked[0])).toEqual([{ text: 'Ran a command' }, { text: 'read a file' }]);
+  // Other tools' calls are steps of the work too: an MCP server's or a connector's, a skill, a tool Yap has no
+  // words for, a part handed to a helper. Yap's own housekeeping isn't (its permission prompts' tool, a note read…).
+  const kindOf = (step) => stepKind({ step });
+  expect(['Using homelights · list lights', 'Using a skill · tidy-notes', 'Using Frobnicate', 'Handing part of it to a helper · Check the docs'].map(kindOf)).toEqual(['tool', 'tool', 'tool', 'helper']);
+  expect(['Using yap · approve', 'Starting Claude Code', 'Read your note', 'Not allowed: Bash', 'Checking a command', 'Finding a tool'].map(kindOf)).toEqual(['other', 'other', 'other', 'other', 'other', 'other']);
+  // (Claude Code looking a tool up before it uses it is plumbing: the call that follows is the step.)
+  expect(workSummary(workOf([{ step: 'Finding a tool' }, { step: 'Using homelights · list lights' }])[0])).toEqual([{ text: 'Used homelights · list lights' }]);
+  expect(stepKind({ step: 'Using the linter', command: 'npm run lint' })).toBe('command');
+  // A stretch of one: its own line, as done. (Before, a turn that only used other tools showed no line at all.)
+  const alone = (step) => workOf([{ step }]).map((w) => workSummary(w));
+  expect(alone('Using homelights · list lights')).toEqual([[{ text: 'Used homelights · list lights' }]]);
+  expect(alone('Using a skill · tidy-notes')).toEqual([[{ text: 'Used a skill · tidy-notes' }]]);
+  expect(alone('Handing part of it to a helper · Check the docs')).toEqual([[{ text: 'Handed part of it to a helper · Check the docs' }]]);
+  expect(workOf(seen.filter((e) => !e.picture)).map((w) => w.kind)).toEqual(['work', 'said', 'work', 'said']);
+  expect(workOf([{ step: 'Using yap · approve' }, { step: 'Starting Claude Code' }, { step: 'Not allowed: Bash' }])).toEqual([]);
+  // Several: named when they're all one's, counted otherwise; a helper in words.
+  const sameTool = workOf([{ step: 'Running npm test', command: 'npm test' }, { step: 'Using homelights · list lights' }, { step: 'Using homelights · set light' }, { step: 'Reading notes.md' }]);
+  expect(workSummary(sameTool[0])).toEqual([{ text: 'Ran a command' }, { text: 'read a file' }, { text: 'used homelights 2 times' }]);
+  expect(workSummary(workOf([{ step: 'Running ls', command: 'ls' }, { step: 'Using a skill · tidy-notes' }])[0])).toEqual([{ text: 'Ran a command' }, { text: 'used a skill' }]);
+  const mixed = workOf([
+    { step: 'Using homelights · list lights' },
+    { step: 'Using tides · next high tide' },
+    { step: 'Using a skill · tidy-notes' },
+    { step: 'Handing part of it to a helper · Check the docs' },
+    { step: 'Handing part of it to a helper · Check the tests' },
+    { step: 'Editing notes.md', file: 'notes.md' },
+  ]);
+  expect(workSummary(mixed[0])).toEqual([{ text: 'Used 3 tools' }, { text: 'handed parts of it to 2 helpers' }, { text: 'edited notes.md' }]);
+  expect(workSummary(workOf([{ step: 'Reading notes.md' }, { step: 'Handing part of it to a helper · Check the docs' }])[0])).toEqual([{ text: 'Read a file' }, { text: 'handed part of it to a helper' }]);
   // The Agent tab's timeline keeps them on their steps too.
   expect(timelineOf(seen).filter((t) => t.kind === 'step').map((t) => t.pictures.length)).toEqual([1, 0, 1]);
   // The same line twice in a row is one step: both calls' pictures are its.
@@ -993,6 +1057,43 @@ test('a step that read a picture ends its line with it: small on the line, large
   await expect(main.getByTestId('chat-picture-caption')).toHaveText('Read beds.png');
   await expect(main.getByTestId('chat-picture-source')).toContainText('garden-planner');
   await shot(main, '25-in-the-picture-tab');
+});
+
+test('another tool’s call is a line in the thread: one alone as itself, several counted, each with its icon in the tab', async ({ yap, main, fakeLlm, shot }) => {
+  await script(yap, USES_OTHER_TOOLS, 'tools');
+  const before = (await agents(yap)).length;
+  await codeChat(main);
+  fakeLlm.scriptChat([
+    { tools: [{ name: 'start_agent', args: { brief: 'See which lights are on, turn the shed light on, and say when high tide is.', title: 'Check the lights and the tide' } }] },
+    { content: STARTED },
+    { plain: true, content: 'Both lights are on, and high tide is at 14:05.' },
+  ]);
+  await send(main, 'See which lights are on, turn the shed light on, and tell me when high tide is.');
+  const agent = await ended(yap, (await newAgent(yap, before)).id);
+  await messagesOf(yap, agent.conversation, 4);
+  await closeTab(main);
+
+  // In the thread: the lone call is a line of its own (it used to show nothing),
+  // then its words, then the stretch of three as one line.
+  const work = thread(main).getByTestId('chat-agent-work');
+  await expect(work).toHaveCount(1);
+  await expect(work.locator('.wtext')).toHaveText(['Used homelights · list lights', 'Ran a command, used 2 tools']);
+  await expect(work.getByTestId('chat-agent-work-said')).toHaveText(['The porch light is on. Turning the shed light on too.']);
+  await shot(main, '30-other-tools-calls-in-the-thread');
+  await theme(yap, main, 'dark');
+  await shot(main, '31-other-tools-calls-in-the-thread-dark');
+  await theme(yap, main, 'light');
+  await work.getByRole('button', { name: /Ran a command, used 2 tools/ }).click();
+  await expect(work.locator('.wstep .stext')).toHaveText(['Using homelights · set light', 'Using tides · next high tide', 'Listing the folder']);
+  await shot(main, '32-the-stretch-opened');
+
+  // In the Agent tab: each on its step, with a tool's icon.
+  await thread(main).getByTestId('chat-agent-pill').first().click();
+  await expect(tab(main)).toBeVisible();
+  await agentTimeline(main, 1);
+  await expect(tab(main).locator('.step.k-tool .stext')).toHaveText(['Using homelights · list lights', 'Using homelights · set light', 'Using tides · next high tide']);
+  await expect(tab(main).locator('.step.k-tool .sicon svg')).toHaveCount(3);
+  await expect(tab(main).locator('.step.k-command .stext')).toHaveText(['Listing the folder']);
 });
 
 test('“start fresh”: a second agent in the workspace, its tab named apart from the first', async ({ yap, main, fakeLlm }) => {
