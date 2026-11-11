@@ -252,7 +252,7 @@ export function createAgentView({ els, send, cards, onClose, onChange, pcName })
     onChange?.();
   }
 
-  /** "Tell the agent…": its next turn (queued while it works). False when it can't go. */
+  /** "Tell the agent…": its next turn (while it works: handed to it now, read at its next step). False when it can't go. */
   function tell(text) {
     const t = String(text || '').trim();
     if (!t || !V.agent) return false;

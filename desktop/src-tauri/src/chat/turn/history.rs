@@ -188,7 +188,7 @@ pub(super) async fn fit(t: &Asked<'_>, sizing: &Sizing, conv: &crate::chat::chat
     if let Some(note) = crate::chat::chats::other_models_note(&conv.messages, &t.answered_by, plan.summary) {
         built.prompt.add_early(note);
     }
-    let history: Vec<(String, String)> = earlier.iter().map(|m| (m.role.clone(), m.sent_text())).collect();
+    let history: Vec<(String, String)> = earlier.iter().enumerate().map(|(i, m)| (m.role.clone(), crate::chat::chats::sent_text_at(earlier, i))).collect();
     Fitted { budget, start: plan.start, history }
 }
 

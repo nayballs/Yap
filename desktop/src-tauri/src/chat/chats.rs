@@ -130,6 +130,21 @@ pub struct ChatMessage {
     pub kind: String,
 }
 
+/// **Message `i` of `messages` as a model reads it** ([`ChatMessage::sent_text`])
+/// — an agent's report nobody has answered yet (no answer after it: the
+/// person's next message came before Yap's own answer to the report,
+/// `chat/turn/report.rs`) says so, and to tell the person first
+/// (`AGENT_REPORT_UNTOLD_PREFIX`). Once an answer follows it, it reads as any
+/// report. Pure.
+pub fn sent_text_at(messages: &[ChatMessage], i: usize) -> String {
+    let Some(m) = messages.get(i) else { return String::new() };
+    let untold = m.kind == crate::chat::turn::AGENT_REPORT && !messages[i + 1..].iter().any(|later| later.role == "assistant");
+    if untold {
+        return format!("{}{}", crate::chat::turn::AGENT_REPORT_UNTOLD_PREFIX, m.text);
+    }
+    m.sent_text()
+}
+
 impl ChatMessage {
     /// The message as a model reads it in the history: its text, after the
     /// passage a question was asked about (`quote`), so "Make this
@@ -1224,7 +1239,7 @@ pub fn history_message(messages: &[ChatMessage], i: usize) -> Vec<Value> {
                 }).to_string(),
             }));
         }
-        out.push(json!({ "role": role, "content": m.sent_text() }));
+        out.push(json!({ "role": role, "content": sent_text_at(messages, i) }));
     }
     out
 }
@@ -1722,6 +1737,32 @@ mod tests {
         assert_eq!(last_answer_and_question(&thread), (3, 0));
         let replied = [&thread[..], &[said("user", "Thanks")]].concat();
         assert_eq!(last_answer_and_question(&replied), (3, 4));
+    }
+
+    // An agent's report the person's next message got in ahead of: nobody
+    // has answered it, so that message's answer tells it first — once.
+    #[test]
+    fn a_report_nobody_answered_yet_is_told_with_the_next_answer() {
+        let marker = ChatMessage { kind: "agentReport".into(), ..said("user", "The agent in garden-planner: it's done.") };
+        let usual = "Report from the agent you started (not from the person): The agent in garden-planner: it's done.";
+        // Answered by Yap's own report: as any report.
+        let answered = [said("user", "Fix the tests"), said("assistant", "On it."), marker.clone(), said("assistant", "Done."), said("user", "Thanks")];
+        assert_eq!(sent_text_at(&answered, 2), usual);
+        assert_eq!(history_messages(&answered)[2]["content"], usual);
+        // The person's next question came first: said so, with what to do.
+        let overtaken = [said("user", "Fix the tests"), said("assistant", "On it."), marker.clone(), said("user", "And the footer?")];
+        let told = sent_text_at(&overtaken, 2);
+        assert!(told.starts_with("Report from the agent you started (not from the person). The user hasn't been told about it yet:"), "{told}");
+        assert!(told.contains("tell them in a sentence or two what the agent did") && told.ends_with("The report: The agent in garden-planner: it's done."), "{told}");
+        assert_eq!(history_messages(&overtaken)[2]["content"], told.as_str());
+        // The marker last (the history before the question): the same.
+        assert_eq!(sent_text_at(&overtaken[..3], 2), told);
+        // That question answered: the report reads as any other from then on.
+        let after = [&overtaken[..], &[said("assistant", "The agent fixed them. The footer is fine.")]].concat();
+        assert_eq!(sent_text_at(&after, 2), usual);
+        // Any other message: as it always reads; past the end: nothing.
+        assert_eq!(sent_text_at(&overtaken, 3), "And the footer?");
+        assert_eq!(sent_text_at(&overtaken, 9), "");
     }
 
     fn web_answer(text: &str, query: &str) -> ChatMessage {

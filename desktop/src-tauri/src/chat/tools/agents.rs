@@ -714,12 +714,18 @@ async fn carry_on(prev: Agent, ask: runner::Ask, folder: &Folder, mode: Mode, we
     }
 }
 
+/// What the chat says of a note handed to an agent at work (`FollowedUp::Passed`).
+pub fn passed_words(folder: &str) -> String {
+    format!("Passed that on: the agent in {folder} takes it in at its next step.")
+}
+
 /// **A request for an agent's next turn, sent** (`runner::follow_up`): what
 /// the chat says of it.
 fn follow(id: &str, ask: runner::Ask) -> Result<Begun, String> {
     let (agent, how) = runner::follow_up(id, ask)?;
-    tracing::info!(id = %agent.id, queued = how == runner::FollowedUp::Queued, "start_agent: the chat's agent carries on");
+    tracing::info!(id = %agent.id, queued = how == runner::FollowedUp::Queued, passed = how == runner::FollowedUp::Passed, "start_agent: the chat's agent carries on");
     let (say, chip) = match how {
+        runner::FollowedUp::Passed => (passed_words(&agent.folder), format!("Told the agent in {}", agent.folder)),
         runner::FollowedUp::Queued => (format!("The agent in {} is still working: I'll pass that on when it finishes this step.", agent.folder), format!("Queued for the agent in {}", agent.folder)),
         _ => (format!("On it: I've passed that to the agent in {}.", agent.folder), format!("Continued the agent in {}", agent.folder)),
     };
@@ -760,6 +766,7 @@ impl Begun {
         let turn = agent.turn_list.last().map_or(1, |t| t.n);
         let read_only = agent.turn_list.last().is_some_and(|t| t.read_only);
         let note = match self.how {
+            Some(runner::FollowedUp::Passed) => format!("It's still working: your words are with it now, and it takes them into the work in hand at its next step (no turn of its own, one report at the end). Tell the user in a few words (\"{}\"); Yap tells them when it's done.", self.say),
             Some(runner::FollowedUp::Queued) => format!("It's still working on its last request: this waits as its next turn. Tell the user in a few words (\"{}\"); Yap tells them when it's done.", self.say),
             Some(_) => format!("The same agent carries on with this as its next turn, with what it did so far. Tell the user in a few words (\"{}\"). Yap tells them when it's done: don't check on it now.", self.say),
             None => format!("Tell the user in a few words that the agent is on it (\"{}\"). Yap tells them when it's done: don't check on it now.", self.say),
@@ -1004,7 +1011,10 @@ async fn message_agent(args: &Value, ctx: &Ctx<'_>) -> Ran {
     match runner::follow_up(&agent.id, ask) {
         Ok((j, how)) => {
             let queued = how == runner::FollowedUp::Queued;
-            let note = if queued {
+            let passed = how == runner::FollowedUp::Passed;
+            let note = if passed {
+                format!("It's still working: your words are with it now, and it takes them into the work in hand at its next step (no turn of its own, one report at the end). Tell the user in a few words (\"{}\"); Yap tells them when it's done.", passed_words(&j.folder))
+            } else if queued {
                 format!("It's still working: this waits as its next turn. Tell the user in a few words (\"The agent in {} is still working: I'll pass that on when it finishes this step.\"); Yap tells them when it's done.", j.folder)
             } else {
                 "Sent. Tell the user in a few words; Yap tells them when it's done.".to_string()
@@ -1022,7 +1032,7 @@ async fn message_agent(args: &Value, ctx: &Ctx<'_>) -> Ran {
                 format!("Told the agent in {}", agent.folder)
             };
             Ran {
-                result: tool_result(true, json!({ "id": j.id, "folder": j.folder, "status": j.status, "mode": modes::or_auto(&j.mode).label(), "read_only": read_only, "queued": queued, "note": note }), chip),
+                result: tool_result(true, json!({ "id": j.id, "folder": j.folder, "status": j.status, "mode": modes::or_auto(&j.mode).label(), "read_only": read_only, "queued": queued, "passed": passed, "note": note }), chip),
                 started: Some(j.reference()),
                 output_seen: false,
             }

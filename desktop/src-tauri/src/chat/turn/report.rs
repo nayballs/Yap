@@ -47,6 +47,12 @@ use crate::agents::store::{self, Agent, Status, TurnNote};
 pub const AGENT_REPORT: &str = "agentReport";
 /// How the model reads a report in the history.
 pub const AGENT_REPORT_PREFIX: &str = "Report from the agent you started (not from the person): ";
+/// How the model reads a report nobody has answered yet: the person's next
+/// message came before Yap's own answer to it (11 Nov 2026, seen in a Yap Lab
+/// run on the real Claude Code: a question sent in the seconds after an agent
+/// finished was answered with no word of what the agent had done). So that
+/// message's answer says it first (`chats::sent_text_at`).
+pub const AGENT_REPORT_UNTOLD_PREFIX: &str = "Report from the agent you started (not from the person). The user hasn't been told about it yet: before anything else, tell them in a sentence or two what the agent did (if it changed files, that a backup was kept and Undo puts them back), then answer their message. The report: ";
 /// The page's event once a report is in its chat.
 pub const EVENT: &str = "yap-agent-report";
 /// The notice's kind (its rule in `notices/notice.rs`, the bar card's id).

@@ -6,8 +6,10 @@
 //!
 //! **The script**, one JSON object a line (blank lines and `//` comments
 //! skipped). A line is printed as it is, with `{{session_id}}` (from
-//! `--session-id` / `--resume`, else a new one), `{{user_text}}` (the last
-//! user message's words) and `{{cwd}}` filled in, JSON-escaped. A line whose
+//! `--session-id` / `--resume`, else a new one), `{{user_text}}` (the words
+//! of the user message the turn started with), `{{notes}}` (those of the
+//! messages taken in while it worked, joined with "; ") and `{{cwd}}`
+//! filled in, JSON-escaped. A line whose
 //! first key starts with `_` is an instruction:
 //!
 //! - `{"_wait_user":true}`: wait for the next user message on stdin (one
@@ -59,8 +61,17 @@
 //!   it, as 2.1.296 answers; `claude_code/usage.rs`). `{"_usage":null}`:
 //!   refused again, as before any `_usage` (an older Claude Code).
 //!
-//! **stdin** is read the whole time: user messages queue for `_wait_user`;
-//! an interrupt control request is answered at once
+//! **stdin** is read the whole time: user messages queue for `_wait_user`.
+//! **One that comes while a turn works is taken into that turn at its next
+//! tool call's end**, as 2.1.296 does (checked on the real one, 11 Nov
+//! 2026: one `result` for both): after a script line that hands a
+//! `tool_result` back, each message waiting joins the turn (`{{notes}}`).
+//! With no tool call left it waits for the next `_wait_user`, a turn of its
+//! own in the same process — Claude Code's too. Started with
+//! `--replay-user-messages`, every user message is echoed back
+//! (`"isReplay": true`) as it's taken in: the turn's first at its
+//! `_wait_user`, a note at that tool call's end.
+//! An interrupt control request is answered at once
 //! (`control_response` / `success` / `{"still_queued":[]}`, as 2.1.296
 //! does) and, mid-turn, ends the turn with the fake's own aborted result
 //! (`subtype: "error_during_execution"`, `terminal_reason:
@@ -184,6 +195,9 @@ pub struct Ctx {
     /// Started without `--no-session-persistence`: a transcript is kept
     /// (when the test asks for one: [`Ctx::transcript`]).
     pub persist: bool,
+    /// Started with `--replay-user-messages`: each user message echoed
+    /// back as it's taken in.
+    pub replay: bool,
 }
 
 impl Ctx {
@@ -192,6 +206,7 @@ impl Ctx {
             args: args.to_vec(),
             cwd: std::env::current_dir().map(|d| d.display().to_string()).unwrap_or_default(),
             persist: !args.iter().any(|a| a == "--no-session-persistence"),
+            replay: args.iter().any(|a| a == "--replay-user-messages"),
             ..Default::default()
         };
         let mut i = 0;
@@ -270,7 +285,7 @@ fn json_or_file(v: &str) -> Result<Value, String> {
 /// Play `script`: `input` is stdin's lines (closed: stdin closed). The exit
 /// code.
 pub fn play(script: &str, ctx: &Ctx, input: Receiver<String>, out: &mut dyn Write) -> Result<i32, String> {
-    let mut p = Player { ctx, input, out, queue: VecDeque::new(), user_text: String::new(), in_turn: false, skipping: false, closed: false, hooks: 0, usage: None };
+    let mut p = Player { ctx, input, out, queue: VecDeque::new(), user_text: String::new(), notes: Vec::new(), in_turn: false, skipping: false, closed: false, hooks: 0, usage: None };
     // `_for`: the kind of run the lines play in (`None`: every kind).
     let kind = ctx.kind();
     let mut part: Option<String> = None;
@@ -303,6 +318,8 @@ pub fn play(script: &str, ctx: &Ctx, input: Receiver<String>, out: &mut dyn Writ
                 p.print(&text)?;
                 if v["type"] == "result" {
                     p.in_turn = false;
+                } else if hands_a_tool_result_back(&v) {
+                    p.tool_call_ended()?;
                 }
             }
         }
@@ -316,7 +333,10 @@ struct Player<'a> {
     out: &'a mut dyn Write,
     /// User messages not yet waited for.
     queue: VecDeque<String>,
+    /// The user message the turn started with.
     user_text: String,
+    /// The ones taken in while it worked.
+    notes: Vec<String>,
     in_turn: bool,
     /// Interrupted: skip to the next `_wait_user`.
     skipping: bool,
@@ -334,7 +354,30 @@ impl Player<'_> {
     fn fill(&self, line: &str) -> String {
         line.replace("{{session_id}}", &self.ctx.session_id)
             .replace("{{user_text}}", &json_inner(&self.user_text))
+            .replace("{{notes}}", &json_inner(&self.notes.join("; ")))
             .replace("{{cwd}}", &json_inner(&self.ctx.cwd))
+    }
+
+    /// A user message echoed back as it's taken in (`--replay-user-messages`).
+    fn replay(&mut self, text: &str) -> Result<(), String> {
+        if !self.ctx.replay {
+            return Ok(());
+        }
+        let line = json!({"type":"user","message":{"role":"user","content":[{"type":"text","text":text}]},"parent_tool_use_id":null,"session_id":self.ctx.session_id,"isReplay":true});
+        self.print(&line.to_string())
+    }
+
+    /// **A tool call's end**: the user messages that came while the turn
+    /// worked join it now, as 2.1.296 takes them — never a turn of their own.
+    fn tool_call_ended(&mut self) -> Result<(), String> {
+        self.drain()?;
+        while self.in_turn {
+            let Some(text) = self.queue.pop_front() else { break };
+            self.record(&text);
+            self.replay(&text)?;
+            self.notes.push(text);
+        }
+        Ok(())
     }
 
     /// Answer whatever stdin has sent, without waiting.
@@ -394,7 +437,9 @@ impl Player<'_> {
                 loop {
                     if let Some(text) = self.queue.pop_front() {
                         self.record(&text);
+                        self.replay(&text)?;
                         self.user_text = text;
+                        self.notes.clear();
                         self.in_turn = true;
                         return Ok(None);
                     }
@@ -432,8 +477,13 @@ impl Player<'_> {
                 }
             }
             "_mcp" => {
+                let mut handed_back = false;
                 for line in self.mcp(arg) {
                     self.print(&line)?;
+                    handed_back |= serde_json::from_str::<Value>(&line).is_ok_and(|v| hands_a_tool_result_back(&v));
+                }
+                if handed_back {
+                    self.tool_call_ended()?;
                 }
             }
             "_dump_args" => {
@@ -641,6 +691,11 @@ fn dumped(v: &Value) -> Value {
     json!({ "tool": v["tool"], "isError": result["isError"].as_bool().unwrap_or(v["error"].is_string()), "content": content, "error": v["error"] })
 }
 
+/// A line that hands a tool's result back to the model: a tool call's end.
+fn hands_a_tool_result_back(v: &Value) -> bool {
+    v["type"] == "user" && v["message"]["content"].as_array().is_some_and(|blocks| blocks.iter().any(|b| b["type"] == "tool_result"))
+}
+
 /// A user message's words (its text blocks, joined).
 fn user_words(v: &Value) -> String {
     match &v["message"]["content"] {
@@ -829,6 +884,49 @@ mod tests {
         assert_eq!(out[2]["session_id"], "s1");
         assert_eq!(out[3]["response"]["subtype"], "error");
         assert_eq!(out[4]["result"], "second: again");
+    }
+
+    #[test]
+    fn a_message_while_a_turn_works_joins_it_at_its_next_tool_calls_end() {
+        // As 2.1.296 (checked on the real one): written while the first tool
+        // call runs, taken in when it ends, one result for both.
+        let c = ctx(&["--session-id", "s1", "--replay-user-messages"]);
+        assert!(c.replay);
+        let script = [
+            r#"{"_wait_user":true}"#,
+            r#"{"type":"assistant","message":{"content":[{"type":"tool_use","id":"t1","name":"Read","input":{}}]}}"#,
+            r#"{"_sleep_ms":600}"#,
+            r#"{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"t1","content":"Draft notes"}]}}"#,
+            r#"{"type":"result","result":"Asked: {{user_text}} Noted: {{notes}}"}"#,
+            r#"{"_wait_user":true}"#,
+            r#"{"type":"result","result":"never"}"#,
+        ]
+        .join("\n");
+        let note = r#"{"type":"user","message":{"role":"user","content":[{"type":"text","text":"Keep the headings."}]}}"#;
+        let kinds = |out: &[Value]| out.iter().map(|v| (v["type"].as_str().unwrap().to_string(), v["isReplay"] == true)).collect::<Vec<_>>();
+        let (user, assistant, result) = (|replay: bool| ("user".to_string(), replay), ("assistant".to_string(), false), ("result".to_string(), false));
+        let (code, out) = run_timed(&script, &c, vec![(0, USER), (200, note)]);
+        assert_eq!(code, 0, "stdin closed at the second wait: nothing waits for a turn of its own");
+        assert_eq!(kinds(&out), [user(true), assistant.clone(), user(false), user(true), result.clone()]);
+        assert_eq!(out[3]["message"]["content"][0]["text"], "Keep the headings.");
+        assert_eq!(out[4]["result"], r#"Asked: Is "Priya" in? Noted: Keep the headings."#);
+        // Without the flag nothing is echoed; the note still joins the turn.
+        let (_, out) = run_timed(&script, &ctx(&["--session-id", "s1"]), vec![(0, USER), (200, note)]);
+        assert_eq!(kinds(&out), [assistant, user(false), result.clone()]);
+        assert!(out[2]["result"].as_str().unwrap().ends_with("Noted: Keep the headings."));
+        // No tool call left when it comes: a turn of its own, right after.
+        let late = [
+            r#"{"_wait_user":true}"#,
+            r#"{"_sleep_ms":600}"#,
+            r#"{"type":"result","result":"first: {{user_text}} [{{notes}}]"}"#,
+            r#"{"_wait_user":true}"#,
+            r#"{"type":"result","result":"second: {{user_text}}"}"#,
+            r#"{"_wait_user":true}"#,
+        ]
+        .join("\n");
+        let (_, out) = run_timed(&late, &c, vec![(0, USER), (200, note)]);
+        assert_eq!(kinds(&out), [user(true), result.clone(), user(true), result]);
+        assert_eq!((out[1]["result"].as_str(), out[3]["result"].as_str()), (Some(r#"first: Is "Priya" in? []"#), Some("second: Keep the headings.")));
     }
 
     #[test]

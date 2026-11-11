@@ -380,7 +380,7 @@ Phone → PC:
 | `agent_log {id, before}` | an older page (events before log line `before`; 0 the newest) |
 | `agent_diff {id, file, turn?}` | one file's diff lines (400 at most, then `more`) |
 | `agent_stop {id}` / `agent_continue {id}` | Stop / Continue (`acted` back) |
-| `agent_message {id, text}` | "Tell the agent…" (4,000 characters at most): its next turn, queued while it works |
+| `agent_message {id, text}` | "Tell the agent…" (4,000 characters at most): its next turn; while it works, handed to it now and read at its next step (a turn at Auto or below: the phone's words never join one above it, and wait for a turn of their own) |
 | `agent_go_ahead {id}` | a report card's Go ahead |
 | `agent_undo {id, turn?, sure: true}` | Undo this turn / Undo all, after the phone's own confirm (`sure`, else refused) |
 | `approve {id, allow, shownMs}` | Allow once / Deny (Go ahead / Not yet on a plan) on a card this phone was sent |

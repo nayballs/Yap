@@ -19,10 +19,12 @@
 //   reports, the second turn on `--resume` of the same session; a pill under
 //   each answer and a report card each, all opening the same tab at their
 //   turn's row. Light and dark.
-// - A request while the agent works: queued as its next turn (said so, shown
-//   so), sent once the turn ends, never a second agent — and the two told in
-//   one report once the agent stops working, never one each (11 Nov 2026: the
-//   chat spoke twice in a row with nobody asking in between).
+// - A note while the agent works goes to it now (11 Nov 2026: Claude Code
+//   takes a message written mid-work at its next tool call's end): said so,
+//   shown in its tab, read at its next step, the same turn, the same process,
+//   one report. One it never reads (its turn ended first) waits as its next
+//   turn, on `--resume`, and the two are told in one report, never one each
+//   (the chat spoke twice in a row with nobody asking in between).
 // - "Start fresh" (`fresh: true`): a second agent, its tab named apart.
 // - Undo this turn (refused while a later turn changed the same file:
 //   "Undo the later change first"), and Undo all, asked first.
@@ -41,7 +43,7 @@ const ARGS = path.join(HERE, 'args.jsonl');
 
 const STARTED = "On it: I've sent an agent to garden-planner.";
 const PASSED = "On it: I've passed that to the agent in garden-planner.";
-const QUEUED = "The agent in garden-planner is still working: I'll pass that on when it finishes this step.";
+const NOTED = 'Passed that on: the agent in garden-planner takes it in at its next step.';
 const DONE1 = 'Done. notes.md has a watering schedule now.';
 const DONE2 = 'Done. There is a minimap button for the beds, and notes.md says so.';
 const NOTES0 = 'Draft notes\n';
@@ -122,7 +124,10 @@ const MINIMAP_TURN = [
   result(DONE2, 0.02),
   { _wait_user: true },
 ];
-/** A turn that takes its time (a request comes while it works). */
+/**
+ * A turn that takes its time (a note comes while it works): the note is with
+ * it at its tool call's end, as Claude Code takes one (`{{notes}}`).
+ */
 const SLOWISH = [
   { _wait_user: true },
   { _dump_args: ARGS },
@@ -130,9 +135,14 @@ const SLOWISH = [
   said('s1', [{ type: 'tool_use', id: 'toolu_read', name: 'Read', input: { file_path: '{{cwd}}\\notes.md' } }]),
   { _sleep_ms: 6000 },
   toolResult('toolu_read', 'Draft notes'),
-  result('Read notes.md.', 0.01),
+  result('Read notes.md. Noted: {{notes}}', 0.01),
   { _wait_user: true },
 ];
+/**
+ * A turn with no tool call left when the note comes, whose Claude Code ends
+ * with its result: the note is never read (it goes back to Yap).
+ */
+const NEVER_READS = [{ _wait_user: true }, { _dump_args: ARGS }, init(), said('n1', [{ type: 'text', text: 'Reading the notes.' }], 'end_turn'), { _sleep_ms: 6000 }, result('Read notes.md.', 0.01)];
 /** Says what it was told. */
 const ECHO = [{ _wait_user: true }, { _dump_args: ARGS }, init(), result('Got: {{user_text}}', 0.002), { _wait_user: true }];
 
@@ -487,9 +497,59 @@ test('two requests in a Code chat: one agent, one tab with two turns, two report
   expect(JSON.stringify(asked.messages)).toContain(`This chat's agent there (id ${agent.id}) is done, after 1 turn: the user's next request there continues it.`);
 });
 
-test('a request while the agent works queues as its next turn: said so, shown so, sent once the turn ends, and both told in one report', async ({ yap, main, fakeLlm, shot }) => {
+test('a note while the agent works goes to it now: said so, read at its next step, the same turn, one report', async ({ yap, main, fakeLlm, shot }) => {
   fs.rmSync(ARGS, { force: true });
   await script(yap, SLOWISH, 'slowish');
+  const before = (await agents(yap)).length;
+  await codeChat(main);
+  fakeLlm.scriptChat([
+    { tools: [{ name: 'start_agent', args: { brief: 'Read notes.md.', title: 'Read the notes' } }] },
+    { content: STARTED },
+  ]);
+  await send(main, 'Read notes.md.');
+  const agent = await newAgent(yap, before);
+  await expect.poll(async () => (await agents(yap)).find((j) => j.id === agent.id).status, { timeout: 20_000 }).toBe('running');
+  fakeLlm.scriptChat([
+    { tools: [{ name: 'start_agent', args: { brief: 'Keep the headings as they are.', title: 'Keep the headings' } }] },
+    { content: NOTED },
+    { plain: true, content: 'Done. It read notes.md and kept the headings.' },
+  ]);
+  await send(main, 'Keep the headings as they are.');
+  await expect(chipsOfLast(main)).toHaveText(['Told the agent in garden-planner']);
+  // Handed over: the turn working's, never a turn of its own.
+  expect(lastTool(fakeLlm)).toMatchObject({ success: true, data: { id: agent.id, turn: 1, say: NOTED } });
+  expect(lastTool(fakeLlm).data.note).toContain('it takes them into the work in hand at its next step');
+  await expect(tab(main).locator('[data-testid="chat-agent-group"][data-group="queued"]')).toHaveCount(0);
+  await expect(tab(main).getByTestId('chat-agent-row')).toHaveCount(1);
+  await expect(rowAt(main, 1)).toHaveAttribute('data-state', 'running');
+  await expect(rowAt(main, 1).getByTestId('chat-agent-row-line')).toHaveText('Your note is with the agent: it reads it at its next step');
+  await shot(main, '03-agent-tab-a-note-with-the-agent');
+  // Its tool call ends: it reads the note, and answers once for both.
+  const done = await ended(yap, agent.id, 40_000);
+  expect(done.turnList.map((t) => [t.n, t.status])).toEqual([[1, 'done']]);
+  expect(done.turnList[0].request).toBe('Read notes.md.\n\nKeep the headings as they are.');
+  expect(done.turnList[0].text).toContain('Read notes.md. Noted: Keep the headings as they are.');
+  // One Claude Code process, started so it says what it has read.
+  const args = argsSeen();
+  expect(args).toHaveLength(1);
+  expect(args[0]).toContain('--replay-user-messages');
+  expect((await agents(yap)).length).toBe(before + 1);
+  // One report, of one turn.
+  const messages = await messagesOf(yap, done.conversation, 6);
+  expect(messages.map((m) => m.kind || m.role)).toEqual(['user', 'assistant', 'user', 'assistant', 'agentReport', 'assistant']);
+  expect(messages[4].text).not.toContain('This report covers');
+  expect(messages[4].text).toContain('Its own words: Read notes.md. Noted: Keep the headings as they are.');
+  await expect(thread(main).getByTestId('chat-agent-report')).toHaveCount(1);
+  await expect(lastAnswer(main)).toHaveText('Done. It read notes.md and kept the headings.');
+  // Its tab: the note read, in the turn's steps.
+  await agentTimeline(main, 1);
+  await expect(turnAt(main, 1)).toContainText('Read your note');
+  await shot(main, '06-a-note-read-one-report');
+});
+
+test('a note the agent never reads waits as its next turn, and both are told in one report', async ({ yap, main, fakeLlm, shot }) => {
+  fs.rmSync(ARGS, { force: true });
+  await script(yap, NEVER_READS, 'never-reads');
   const before = (await agents(yap)).length;
   await codeChat(main);
   fakeLlm.scriptChat([
@@ -503,40 +563,29 @@ test('a request while the agent works queues as its next turn: said so, shown so
   await script(yap, ECHO, 'echo-next');
   fakeLlm.scriptChat([
     { tools: [{ name: 'start_agent', args: { brief: 'Add a legend to the minimap.', title: 'Add a legend' } }] },
-    { content: QUEUED },
+    { content: NOTED },
     { plain: true, content: 'Done. It read notes.md, and the legend is in.' },
   ]);
   await send(main, 'Add a legend to the minimap too.');
-  await expect(chipsOfLast(main)).toHaveText(['Queued for the agent in garden-planner']);
-  expect(lastTool(fakeLlm)).toMatchObject({ success: true, data: { id: agent.id, turn: 2, say: QUEUED } });
-  // Waiting in the tab, behind the turn working; still one agent.
-  await expect(tab(main).locator('[data-testid="chat-agent-group"][data-group="queued"] [data-testid="chat-agent-row"]')).toHaveCount(1);
-  await expect(rowAt(main, 2).getByTestId('chat-agent-row-line')).toHaveText('Goes to the agent once it finishes this step.');
-  await expect(rowAt(main, 1)).toHaveAttribute('data-state', 'running');
-  await agentTimeline(main, 1);
-  await expect(turnAt(main, 2)).toHaveAttribute('data-status', 'queued');
-  await expect(turnAt(main, 2).locator('.ttitle')).toHaveText('Add a legend');
-  await expect(turnAt(main, 2).locator('.tfacts')).toHaveText('Queued');
-  await expect(turnAt(main, 1)).toHaveAttribute('data-open', 'true');
-  await expect(turnAt(main, 1).getByTestId('chat-agent-now')).toBeVisible();
-  await shot(main, '03-agent-tab-a-turn-queued');
-  expect((await agents(yap)).length).toBe(before + 1);
-  // The turn ends: the request goes as the next turn, on --resume.
-  const reportsSoFar = () => thread(main).getByTestId('chat-agent-report');
+  await expect(chipsOfLast(main)).toHaveText(['Told the agent in garden-planner']);
+  expect(lastTool(fakeLlm)).toMatchObject({ success: true, data: { id: agent.id, turn: 1, say: NOTED } });
+  // The turn ends with the note unread: it goes as the next turn, on --resume.
   const done = await (async () => {
     await expect.poll(async () => (await agents(yap)).find((j) => j.id === agent.id).turnList?.[1]?.status, { timeout: 40_000 }).toBe('done');
     return ended(yap, agent.id);
   })();
-  expect(done.turnList.map((t) => [t.n, t.status])).toEqual([
-    [1, 'done'],
-    [2, 'done'],
+  expect(done.turnList.map((t) => [t.n, t.status, t.title])).toEqual([
+    [1, 'done', 'Read the notes'],
+    [2, 'done', 'Add a legend'],
   ]);
+  expect(done.turnList[0].request).toBe('Read notes.md.');
   expect(done.turnList[1].text).toContain('Got: Add a legend to the minimap.');
   const args = argsSeen();
   expect(args).toHaveLength(2);
   expect(after(args[1], '--resume')).toBe(done.session);
   expect((await agents(yap)).length).toBe(before + 1);
   // One report once it stops working, for both requests: one card, one answer.
+  const reports = () => thread(main).getByTestId('chat-agent-report');
   const messages = await messagesOf(yap, done.conversation, 6);
   expect(messages.map((m) => m.kind || m.role)).toEqual(['user', 'assistant', 'user', 'assistant', 'agentReport', 'assistant']);
   const marker = messages[4].text;
@@ -555,13 +604,71 @@ test('a request while the agent works queues as its next turn: said so, shown so
     [markerId, false],
     [markerId, false],
   ]);
-  await expect(reportsSoFar()).toHaveCount(1);
-  await expect(reportsSoFar()).toHaveAttribute('data-turn', '2');
-  await expect(reportsSoFar().locator('.jtitle')).toHaveText('Agent done · garden-planner');
+  await expect(reports()).toHaveCount(1);
+  await expect(reports()).toHaveAttribute('data-turn', '2');
+  await expect(reports().locator('.jtitle')).toHaveText('Agent done · garden-planner');
   await expect(lastAnswer(main)).toHaveText('Done. It read notes.md, and the legend is in.');
-  await shot(main, '06-one-report-for-both-requests');
+  await shot(main, '07-one-report-for-both-requests');
+  await agentTimeline(main, 2);
   await expect(turnAt(main, 2)).toHaveAttribute('data-open', 'true');
   await expect(turnAt(main, 1)).toHaveAttribute('data-open', 'false');
+});
+
+test('a question sent just before an agent’s report is answered: its card still shows, and that answer tells what the agent did', async ({ yap, main, fakeLlm, shot }) => {
+  // 11 Nov 2026, a Yap Lab run on the real Claude Code: a question sent in
+  // the seconds between an agent finishing and its report. The report's own
+  // answer gives way to it (as to any newer question) — but its card never
+  // showed (the view skipped reading the chat again while its own question
+  // was answered), and nobody said what the agent had done.
+  fs.rmSync(ARGS, { force: true });
+  // (An agent that takes a few seconds: Chat's own answer is in before it ends.)
+  await script(yap, SLOWISH, 'slowish-overtaken');
+  const before = (await agents(yap)).length;
+  await codeChat(main);
+  fakeLlm.scriptChat([
+    { tools: [{ name: 'start_agent', args: { brief: 'Read notes.md.', title: 'Read the notes' } }] },
+    { content: STARTED },
+    // The report's own answer: held back (below), and never said.
+    { plain: true, content: 'Never said: a question came first.' },
+    { content: 'The agent read notes.md and changed nothing. The footer is fine as it is.' },
+  ]);
+  await send(main, 'Read notes.md.');
+  const agent = await newAgent(yap, before);
+  await expect(lastAnswer(main)).toHaveText(STARTED);
+  // Every answer takes a while from here: the report's is still on its way
+  // when the next question is sent.
+  fakeLlm.delay('other', 4000);
+  try {
+    const done = await ended(yap, agent.id, 40_000);
+    await expect.poll(async () => (await yap.invoke('chat_get', { id: done.conversation })).messages.some((m) => m.kind === 'agentReport'), { timeout: 20_000, message: 'the report’s marker in the chat' }).toBe(true);
+    await send(main, 'And is the footer fine?');
+    // Answered: the report's card is in the thread, above the question, and
+    // the answer is the question's — which told the report first.
+    await expect(lastAnswer(main)).toHaveText('The agent read notes.md and changed nothing. The footer is fine as it is.', { timeout: 30_000 });
+    const messages = await messagesOf(yap, done.conversation, 5);
+    expect(messages.map((m) => m.kind || m.role)).toEqual(['user', 'assistant', 'agentReport', 'user', 'assistant']);
+    const reports = thread(main).getByTestId('chat-agent-report');
+    await expect(reports).toHaveCount(1);
+    await expect(reports.locator('.jtitle')).toHaveText('Agent done · garden-planner');
+    const order = await thread(main).locator('[data-testid="chat-agent-report"], .cbubble.user').evaluateAll((els) => els.map((e) => (e.dataset.testid === 'chat-agent-report' ? 'report' : e.textContent.trim())));
+    expect(order).toEqual(['Read notes.md.', 'report', 'And is the footer fine?']);
+    const asked = fakeLlm.requests.filter((r) => JSON.stringify(r.messages).includes('And is the footer fine?')).at(-1);
+    expect(JSON.stringify(asked.messages)).toContain("The user hasn't been told about it yet");
+    expect(JSON.stringify(asked.messages)).not.toContain('Never said');
+    // The pill of its turn is under the first answer again (the thread's ids are the saved ones).
+    await expect(thread(main).getByTestId('chat-agent-pill')).toHaveCount(1);
+    await shot(main, '08-a-question-overtook-the-report');
+    // Once answered, the report reads as any other: nothing to tell twice.
+    fakeLlm.delay('other', 0);
+    fakeLlm.scriptChat([{ content: 'Yes.' }]);
+    await send(main, 'Thanks. Anything else?');
+    await expect(lastAnswer(main)).toHaveText('Yes.');
+    const later = fakeLlm.requests.filter((r) => JSON.stringify(r.messages).includes('Anything else?')).at(-1);
+    expect(JSON.stringify(later.messages)).not.toContain("hasn't been told about it yet");
+    expect(JSON.stringify(later.messages)).toContain('Report from the agent you started (not from the person): ');
+  } finally {
+    fakeLlm.delay('other', 0);
+  }
 });
 
 test('“start fresh”: a second agent in the workspace, its tab named apart from the first', async ({ yap, main, fakeLlm }) => {

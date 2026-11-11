@@ -145,7 +145,11 @@ Puts a question to Chat and waits until the turn ends (answered, stopped or fail
   Code's own stream (a plan chat: its own tools such as `WebSearch`, and Yap's MCP
   tools as `server: "yap"` under Yap's names). `ok: false` is what the tool said;
   `refused: true` is the lab's guess that it was one of Yap's rules rather than a
-  failure. Pictures are counted, never inlined.
+  failure. Pictures are counted, never inlined. `agentTools`: the names of the
+  calls an agent at work made meanwhile, in its own Claude Code (a note sent to
+  a working agent: its Read and Edit are the agent's, never this turn's — the
+  record says which process is an agent's run, and a script's checks leave
+  them out; the transcript has them whole as `via: "agent"`).
 - Long fields are cut with their full length said (`… [+1234 chars, 1634 in all]`);
   the **transcript** file has everything: the result, every tool call whole, the
   conversation as Chat saved it, the pages, and the turn's part of the record.
@@ -154,8 +158,10 @@ Puts a question to Chat and waits until the turn ends (answered, stopped or fail
 
 Waits on the current turn again (after `running`), and returns `ask`'s JSON.
 `--agents`: waits until no Yap Code agent is queued or running (one asking counts as
-stopped), and returns the agents, the cards they wait on and the reports they put in
-their chats. With `--cards`, it answers each card the agents ask on the way (a
+stopped), **then for their reports** (each ended agent's latest turn reported in its
+chat and answered, up to 45 s more: the chat's own model words a report, a few seconds
+on a real plan; `reportsIn` says whether they are), and returns the agents, the cards
+they wait on and the reports they put in their chats. With `--cards`, it answers each card the agents ask on the way (a
 permission prompt, a plan's Go ahead) — shots of it first, into the last turn's folder
 — and goes on waiting; `autoAnswered` lists them. `agents` returns the same view at
 once, without waiting.
@@ -425,6 +431,7 @@ warn).
 | `share-files` | `start --yap-code on` | Chat sharing files from a Code chat's workspace: one picture, then three (inline), then `notes.md` (a card); the workspace seeded with three drawn pictures and a made-up `notes.md`. **Its `todo`**: written before the share-files tool reached main — put its real name in `used` and check where an answer keeps file cards (`turns.mjs` `files`) once it has. |
 | `voice-screen` | the default `start` (`--fake` passes) | No guessing about the screen (8 Nov 2026): a typed question about comic conventions near Kellbrook (made up), then, `spoken`, the two follow-ups that each sent a screenshot of the game in front ("The one that's on the 5th to the 8th of February, where is it…", "How many people usually attend that specific one? Can you look?"): each answered with no screenshot kept with it (`questionImages: 0`), and — soft, a real model's call — no `look_at_screen`. |
 | `agent-panel` | `start --yap-code on` | An agent at work in `lab-sandbox`, its cards allowed: the Agent panel and the thread's to-do card while it runs and once it's done (named shots, both themes), the agent done with a file changed. Then a plan nobody acts on (8 Nov 2026): a fresh agent asked for a plan first, its prompt answered no (`answer next deny`), its plan in Needs you with its buttons in the row (`plan-waiting`); a newer fresh agent at work in the same Code chat (`newer-turn-running`), and once it's done the plan is "Plan not used" in Finished, not Needs you (`plan-not-used`). Then a Bypass permissions Code chat asked to catch up on the workspace (`set` `bypass`): no card, the agent read only at Bypass, never a plan, done, nothing in Needs you. Its `fake` steps make it pass on `--fake` too (the stand-in agent). |
+| `agent-notes` | `start --yap-code on` | A note while an agent works (11 Nov 2026, `runner::passes_now`): in a Bypass Code chat on `lab-sandbox`, an agent sent on a task of several steps, then "tell the agent to keep the function names" while it works. The note goes to its Claude Code at once ("at its next step"), one row in its panel, one report card, one answer (the checks that need the note to land mid-work are soft: the timing is the real agent's). Then a request once it's done: its next turn, with a report of its own. On `--fake` the stand-in agent is done at once, so the note is its next turn: the plumbing only. |
 | `agent-sizing` | `start --yap-code on` | Chat sizes each agent (8 Nov 2026, `agents/sizing.rs`): in a Code chat on `lab-sandbox`, a trivial change ("rename the variable x to count in convert.js"), then a hard one ("the tests fail intermittently, find the root cause and fix it"). Soft checks on each turn's `model` and `effort` (the model's judgement): the first small (Haiku or Sonnet, low or medium), the second big (Opus or Fable, high or above); the panel's rows shot. Its `fake` steps size them as the guide says, so `--fake` checks the plumbing. |
 
 ## Checking that it looks right

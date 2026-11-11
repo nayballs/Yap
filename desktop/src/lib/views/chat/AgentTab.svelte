@@ -29,7 +29,8 @@
   //   confirm, then what was put back; never when no backups were made:
   //   Claude Code's hooks didn't run, and the tab says so), Open in terminal
   //   (once it isn't running), and "Tell the agent…": the person's own words,
-  //   its next turn (queued while it works: `agent_message`).
+  //   its next turn (`agent_message`) — while it works, handed to it now:
+  //   it reads it at its next step (agents/runner.rs `passes_now`).
   import { invoke } from '@tauri-apps/api/core';
   import { listen } from '@tauri-apps/api/event';
   import { onMount, tick, untrack } from 'svelte';
@@ -535,7 +536,7 @@
           send();
         }}
       >
-        <input type="text" bind:value={message} placeholder={live ? 'Tell the agent (it goes next)…' : 'Tell the agent…'} aria-label="Tell the agent" maxlength="4000" autocomplete="off" />
+        <input type="text" bind:value={message} placeholder={live ? 'Tell the agent (it reads it at its next step)…' : 'Tell the agent…'} aria-label="Tell the agent" maxlength="4000" autocomplete="off" />
         <!-- Named apart from Chat's own Send (the message box's). -->
         <button type="submit" class="tsend" disabled={!message.trim() || !!busy} aria-label="Tell the agent" title="Tell the agent (Enter)">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12h14M13 6l6 6-6 6" /></svg>

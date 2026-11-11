@@ -15,7 +15,7 @@ A tiny made-up library that converts kitchen units (cups, grams, millilitres).
 It exists for Yap Lab: agents may read and change anything here.
 
 - \`src/convert.js\`: the conversions.
-- \`src/convert.test.js\`: its tests (\`node --test src\`).
+- \`src/convert.test.js\`: its tests (\`npm test\`).
 - \`TODO.md\`: what's left to do.
 `,
   'TODO.md': `# To do
@@ -24,7 +24,7 @@ It exists for Yap Lab: agents may read and change anything here.
 - [ ] \`toGrams\` should refuse an unknown ingredient instead of returning NaN.
 - [x] Cups to millilitres.
 `,
-  'package.json': `${JSON.stringify({ name: 'unit-shelf', version: '0.1.0', private: true, type: 'module', scripts: { test: 'node --test src' } }, null, 2)}\n`,
+  'package.json': `${JSON.stringify({ name: 'unit-shelf', version: '0.1.0', private: true, type: 'module', scripts: { test: 'node --test' } }, null, 2)}\n`,
   'src/convert.js': `// Kitchen conversions. Densities in grams per millilitre.
 const DENSITY = { water: 1, flour: 0.53, sugar: 0.85, butter: 0.96 };
 

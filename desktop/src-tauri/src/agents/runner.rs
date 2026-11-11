@@ -37,9 +37,20 @@
 //!   plan stays a plan until "go ahead"), Settings' model and effort then
 //!   (unless the person asked for their own), each with its own backups
 //!   (`agents/<id>/backup/<n>/`) and its own report. Continue carries on the
-//!   same turn. A request while a turn works **queues as the next turn**
-//!   ([`follow_up`]): sent once this one ends, never into it.
-//! - **A turn ends**: the process is told its input is over and exits.
+//!   same turn.
+//! - **A note while a turn works goes to it now** (2026-11-11,
+//!   [`follow_up`], [`passes_now`]): written to its Claude Code, which takes
+//!   it into the work in hand at its next tool call's end and answers once
+//!   for both — as Claude Code's own app does with a message sent mid-work.
+//!   Started with `--replay-user-messages`, it echoes each message back as
+//!   it takes it in ([`Follow::on_taken`]): the note joins the turn's
+//!   request then. One it never reads (it ended first: [`notes_unread`]), or
+//!   a request that needs a turn of its own (a go-ahead, another mode, a
+//!   phone's words above Auto), **queues as the next turn**: sent once this
+//!   one ends.
+//! - **A turn ends** once every message written to it has been taken in
+//!   and answered ([`Live::unread`]): the process is told its input is over
+//!   and exits.
 //! - **Allowing a plan means go ahead** (2026-11-07): a Plan-mode turn whose
 //!   ExitPlanMode prompt the person allowed ([`plan_allowed`]: the card's
 //!   Go ahead, in the thread or on the bar) ends as a plan and its next
@@ -280,7 +291,11 @@ impl Ask {
 /// Where a follow-up went ([`follow_up`]).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FollowedUp {
-    /// The agent was working: its next turn, once this one ends.
+    /// The agent was working: handed to its Claude Code now, which takes
+    /// it into the work in hand at its next tool call's end ([`passes_now`]).
+    Passed,
+    /// The agent was working, and this needs a turn of its own: its next
+    /// turn, once this one ends.
     Queued,
     /// Its next turn is on its way now.
     Started,
@@ -295,6 +310,14 @@ struct Live {
     /// User messages sent, and results back: its input ends when they meet.
     sent: u32,
     results: u32,
+    /// **What was written to it, in order**: its first message, then each
+    /// note handed over while it worked ([`FollowedUp::Passed`]).
+    written: Vec<String>,
+    /// How many of them Claude Code has echoed back (`--replay-user-messages`):
+    /// taken in. 0 throughout: a Claude Code that echoes nothing.
+    taken: usize,
+    /// The notes handed over, as asked (`written[1..]`'s).
+    notes: Vec<Ask>,
     /// Its input is over (it's finishing).
     input_over: bool,
     /// Its first message is sent: words for it from now on wait for its
@@ -315,8 +338,53 @@ struct Live {
 
 impl Live {
     fn new(folder: String) -> Live {
-        Live { session: None, sent: 0, results: 0, input_over: false, started: false, extra: Vec::new(), pending: None, stopping: None, plan_allowed: false, folder }
+        Live { session: None, sent: 0, results: 0, written: Vec::new(), taken: 0, notes: Vec::new(), input_over: false, started: false, extra: Vec::new(), pending: None, stopping: None, plan_allowed: false, folder }
     }
+
+    /// How many messages written to it Claude Code hasn't taken in yet:
+    /// by its echoes, or — it echoes nothing — a result a message.
+    fn unread(&self) -> usize {
+        match self.taken {
+            0 => (self.sent as usize).saturating_sub(self.results as usize),
+            taken => self.written.len().saturating_sub(taken),
+        }
+    }
+
+    /// The notes it never took in (it ended first), taken back: they wait
+    /// for its next turn instead.
+    fn take_unread_notes(&mut self) -> Vec<Ask> {
+        let unread = self.unread().min(self.notes.len());
+        let read = self.notes.len() - unread;
+        self.notes.drain(..).skip(read).collect()
+    }
+}
+
+/// What a note handed to a working agent ends with.
+pub const NOTE_LINE: &str = "(Sent while you work: take this into account, carry on, and cover it in your summary when you're done.)";
+/// The tab's lines for a note: handed over, then read.
+const NOTE_PASSED: &str = "Your note is with the agent: it reads it at its next step";
+const NOTE_READ: &str = "Read your note";
+/// How long Claude Code gets to start on a note it hadn't read when its
+/// turn ended, before the note goes back to Yap (its next turn).
+const NOTE_GRACE: Duration = Duration::from_secs(20);
+
+/// **Does a note for a working agent go to it now?** (11 Nov 2026.) Claude
+/// Code takes a message written while it works into that work, at its next
+/// tool call's end, and answers once for both (checked on 2.1.296) — as its
+/// own app does with a message sent mid-work. So Yap hands the note over
+/// at once rather than keeping it until the turn ends, which made it a turn
+/// of its own: a new process that read the whole conversation again, and a
+/// second report.
+///
+/// Not when it needs a turn of its own, each of which is set as a turn
+/// starts: a plan's go-ahead, a lower mode, the person's own model or
+/// effort, a change asked of a turn that is read only (`turn_read_only`),
+/// a phone's words for a turn above Auto (`joins`: `follow_up`'s rule) —
+/// or a request already waiting (`waiting`: this one keeps its place
+/// behind it). `turn_mode`: the mode the turn working runs at (a mode asked
+/// that is no lower changes nothing: a phone's cap). Pure.
+pub fn passes_now(ask: &Ask, turn_mode: Mode, turn_read_only: bool, joins: bool, waiting: bool) -> bool {
+    joins && !waiting && !ask.go && ask.mode.is_none_or(|m| m >= turn_mode) && !ask.model_asked && !ask.effort_asked && (ask.read_only || !turn_read_only)
 }
 
 /// **The person allowed agent `id`'s plan** (Claude Code's ExitPlanMode
@@ -568,6 +636,8 @@ fn report_held(id: &str) {
 /// worked runs as its next turn, the two reported as one ([`reports`]).
 async fn run(id: String, message: Option<String>) {
     let (status, n) = turn(&id, message).await;
+    // Notes handed to it that it never read: waiting for its next turn too.
+    notes_unread(&id);
     // A request that came while it worked: its next turn.
     let pending = with_state(|s| s.live.remove(&id).and_then(|l| l.pending));
     store::flush();
@@ -739,6 +809,8 @@ pub fn agent_spec(
     spec.tools = None;
     spec.settings = Some(settings);
     spec.conversation = conversation;
+    // Each message echoed back as it's taken in: which notes it has read.
+    spec.replay_user_messages = true;
     spec
 }
 
@@ -831,6 +903,13 @@ async fn turn(id: &str, message: Option<String>) -> (Status, u32) {
     } else if let Err(e) = session.send_user(&first, &[]) {
         session.kill();
         return failed_early(id, n, e, None);
+    } else {
+        // Its first message is written: a note may follow it from now on.
+        with_state(|s| {
+            if let Some(l) = s.live.get_mut(id) {
+                l.written = vec![first.clone()];
+            }
+        });
     }
     let now = store::now_secs();
     let Some(agent) = store::update(id, |j| {
@@ -912,12 +991,18 @@ struct Follow {
     turn_cost_before: f64,
     /// Its latest words.
     last_text: String,
-    /// The latest result's outcome and words.
+    /// The latest result's outcome, and the words of every result so far
+    /// (a note it hadn't read when a turn of Claude Code's ended is a turn
+    /// of its own right after, in this process: its words join these).
     outcome: Option<(Status, String)>,
+    said: Vec<String>,
     problem: Option<ProblemNote>,
     asking: bool,
     /// When its input ended (its last result came).
     input_over_at: Option<Instant>,
+    /// A result came with a note still unread (since when): Claude Code
+    /// starts on it now — or, [`NOTE_GRACE`] on, the note goes back to Yap.
+    unread_since: Option<Instant>,
     last_flush: Instant,
     /// The edit tools' calls this turn (the backup hook's tools), by id.
     edits: HashSet<String>,
@@ -992,9 +1077,11 @@ impl Follow {
             turn_cost_before: agent.turn_list.iter().find(|t| t.n == n).map_or(0.0, |t| t.cost),
             last_text: String::new(),
             outcome: None,
+            said: Vec::new(),
             problem: None,
             asking: false,
             input_over_at: None,
+            unread_since: None,
             last_flush: Instant::now(),
             edits: HashSet::new(),
             edited: false,
@@ -1158,8 +1245,13 @@ impl Follow {
                     }
                 }
             }
-            // A call back: an edit went through, after the hooks.
+            // A call back: an edit went through, after the hooks. Or a
+            // message of Yap's echoed back: Claude Code has taken it in.
             Event::User(u) => {
+                if u.is_replay && u.parent_tool_use_id.is_none() {
+                    let text: String = u.blocks.iter().filter_map(|b| if let Block::Text(t) = b { Some(t.as_str()) } else { None }).collect();
+                    self.on_taken(&text);
+                }
                 for block in &u.blocks {
                     if let Block::ToolResult { tool_use_id, is_error, .. } = block {
                         self.on_tool_result(tool_use_id, *is_error);
@@ -1197,8 +1289,37 @@ impl Follow {
         }
     }
 
+    /// **Claude Code echoed a message back** (`--replay-user-messages`): it
+    /// has taken it in — the turn's first as it starts, a note at its next
+    /// tool call's end (or, none left, as a turn of its own right after).
+    /// The next one written and not yet read, by its words; anything else
+    /// echoed is nothing of Yap's. A note read: in the turn's request from
+    /// now on, and said in its tab.
+    fn on_taken(&mut self, text: &str) {
+        let note = with_state(|s| {
+            let l = s.live.get_mut(&self.id)?;
+            if l.written.get(l.taken).is_none_or(|w| w.trim() != text.trim()) {
+                return None;
+            }
+            l.taken += 1;
+            // (`written[0]` is its first message: note `taken - 2`.)
+            l.taken.checked_sub(2).and_then(|i| l.notes.get(i).cloned())
+        });
+        let Some(note) = note else { return };
+        self.unread_since = None;
+        let n = self.n;
+        if let Some(agent) = store::update(&self.id, |j| {
+            if let Some(t) = j.turn_mut(n) {
+                t.request = format!("{}\n\n{}", t.request.trim(), note.text.trim());
+            }
+        }) {
+            tracing::info!(id = %self.id, turn = n, "Agents: it took a note in");
+            emit(&AgentEvent { step: Some(NOTE_READ.into()), ..self.event(&agent) });
+        }
+    }
+
     /// A turn's result: its words, cost and denials kept; once every message
-    /// sent has had one, its input ends.
+    /// written has been taken in, its input ends.
     fn on_result(&mut self, r: &TurnResult, session: &Session) {
         let stopping = with_state(|s| s.live.get(&self.id).is_some_and(|l| l.stopping.is_some()));
         let text = if r.text.trim().is_empty() { self.last_text.clone() } else { r.text.trim().to_string() };
@@ -1255,25 +1376,41 @@ impl Follow {
                 }
             }
         });
-        self.outcome = Some((outcome, text.clone()));
-        let done = with_state(|s| match s.live.get_mut(&self.id) {
+        // Its words so far: this result's after any before it.
+        if !text.is_empty() && self.said.last() != Some(&text) {
+            self.said.push(text.clone());
+        }
+        self.outcome = Some((outcome, self.said.join("\n\n")));
+        // Over once every message written has been taken in (this result
+        // covers them) — or the person stopped it. A note still unread:
+        // Claude Code starts on it now, a turn of its own in this process.
+        let (done, unread) = with_state(|s| match s.live.get_mut(&self.id) {
             Some(l) => {
                 l.results += 1;
-                let done = l.results >= l.sent;
+                let unread = l.unread();
+                let done = unread == 0 || l.stopping.is_some();
                 if done {
                     l.input_over = true;
                 }
-                done
+                (done, unread)
             }
-            None => true,
+            None => (true, 0),
         });
-        tracing::info!(id = %self.id, outcome = outcome.word(), last = done, "Agents: a turn's result");
+        tracing::info!(id = %self.id, outcome = outcome.word(), last = done, unread, "Agents: a turn's result");
         if let Some(agent) = agent {
             emit(&AgentEvent { text: Some(text), cost: Some(cost), usage, ..self.event(&agent) });
         }
         if done {
-            session.end();
+            // Stopped with a note unread: never let it start on that note
+            // (Continue sends it).
+            if unread > 0 {
+                session.kill();
+            } else {
+                session.end();
+            }
             self.input_over_at = Some(Instant::now());
+        } else {
+            self.unread_since = Some(Instant::now());
         }
     }
 
@@ -1305,6 +1442,20 @@ impl Follow {
         let stopping = with_state(|s| s.live.get(&self.id).and_then(|l| l.stopping));
         if stopping.is_some_and(|at| at.elapsed() > STOP_GRACE) || self.input_over_at.is_some_and(|at| at.elapsed() > EXIT_GRACE) {
             session.kill();
+        }
+        // A note it hadn't read when its turn ended, and no sign of it
+        // starting on it: its input ends, and the note goes back to Yap
+        // (its next turn: `notes_unread`).
+        if self.unread_since.is_some_and(|at| at.elapsed() > NOTE_GRACE) {
+            tracing::info!(id = %self.id, "Agents: it never started on a note it hadn't read; ending its input");
+            self.unread_since = None;
+            with_state(|s| {
+                if let Some(l) = s.live.get_mut(&self.id) {
+                    l.input_over = true;
+                }
+            });
+            session.end();
+            self.input_over_at = Some(Instant::now());
         }
         if self.last_flush.elapsed() > Duration::from_secs(2) {
             store::flush();
@@ -1599,12 +1750,88 @@ pub fn dismiss(id: &str, n: u32, on: bool) -> Result<Agent, String> {
     Ok(agent)
 }
 
+/// A request for agent `id`'s next turn, kept until the turn working ends
+/// (`Live::pending`; another already waiting: one next turn for both).
+/// Whether it's the first waiting; none: the agent isn't at work.
+fn wait_for_next_turn(id: &str, ask: &Ask) -> Option<bool> {
+    with_state(|s| {
+        let l = s.live.get_mut(id)?;
+        let first = l.pending.is_none();
+        match &mut l.pending {
+            Some(p) => p.merge(ask.clone()),
+            None => l.pending = Some(ask.clone()),
+        }
+        Some(first)
+    })
+}
+
+/// A request that waits for agent `id`'s next turn ([`wait_for_next_turn`]),
+/// on its record: a turn of its own, queued (`first`), or added to the one
+/// queued already — and every page told.
+fn queued_turn(id: &str, ask: &Ask, first: bool) -> Result<(Agent, FollowedUp), String> {
+    let (title, text) = (ask.title(), ask.text.clone());
+    let agent = store::update(id, |j| {
+        j.keep_turns();
+        if first {
+            let n = j.turn_list.last().map_or(0, |t| t.n) + 1;
+            j.turn_list.push(store::TurnNote { n, title: title.clone(), request: text.clone(), message_id: ask.message_id.clone(), status: Status::Queued, read_only: ask.read_only, ..Default::default() });
+        } else if let Some(t) = j.turn_list.last_mut() {
+            t.request = format!("{}\n\n{}", t.request.trim(), text);
+            // Read only when every request it holds is (`Ask::merge`).
+            t.read_only &= ask.read_only;
+        }
+    })
+    .ok_or("There's no such agent.")?;
+    let n = agent.turn_list.last().map_or(0, |t| t.n);
+    if let Some(device) = &ask.phone {
+        super::remote::mark_turn(id, n, device);
+    }
+    tracing::info!(id, turn = n, "Agents: a follow-up queued behind the turn working");
+    emit(&AgentEvent { queued: Some(title), ..AgentEvent::at(&agent, n) });
+    Ok((agent, FollowedUp::Queued))
+}
+
+/// **Notes handed to agent `id`'s Claude Code that it never took in** (its
+/// turn ended first, or the person stopped it): back with Yap, waiting as
+/// its next turn, ahead of a request that came after them — as a request
+/// that came while it worked always did. Called as its process is gone.
+fn notes_unread(id: &str) {
+    let unread = with_state(|s| {
+        let l = s.live.get_mut(id)?;
+        let notes = l.take_unread_notes();
+        if notes.is_empty() {
+            return None;
+        }
+        // In the order asked: the notes, then what came after them.
+        let later = l.pending.take();
+        let mut all = notes.clone();
+        all.extend(later.clone());
+        let mut next = all.remove(0);
+        for more in all {
+            next.merge(more);
+        }
+        l.pending = Some(next);
+        Some((notes, later.is_some()))
+    });
+    let Some((notes, mut waiting)) = unread else { return };
+    tracing::info!(id, notes = notes.len(), "Agents: notes it never read wait for its next turn");
+    for note in &notes {
+        let _ = queued_turn(id, note, !waiting);
+        waiting = true;
+    }
+}
+
 /// **A follow-up for agent `id`** (its Code chat's next request, `message_agent`,
-/// "Tell the agent…"): a turn of its own on the same session —
+/// "Tell the agent…") —
 ///
-/// - while a turn works, **queued as its next turn** (sent once this one
-///   ends: never two agents, nor two turns, in the folder at once), its tab
-///   showing it waiting ([`FollowedUp::Queued`]);
+/// - while a turn works, **handed to its Claude Code now** ([`passes_now`]):
+///   taken into the work in hand at its next tool call's end, one answer
+///   for both ([`FollowedUp::Passed`]). One it never takes in (the turn
+///   ended first) waits as its next turn ([`notes_unread`]);
+/// - while a turn works and it needs a turn of its own (a go-ahead, another
+///   mode, a phone's words above Auto…), **queued as its next turn** (sent
+///   once this one ends: never two agents, nor two turns, in the folder at
+///   once), its tab showing it waiting ([`FollowedUp::Queued`]);
 /// - a turn about to start, or waiting for a slot, takes it too
 ///   ([`FollowedUp::Added`]);
 /// - else its next turn now, on `--resume` ([`FollowedUp::Started`]).
@@ -1617,21 +1844,36 @@ pub fn follow_up(id: &str, ask: Ask) -> Result<(Agent, FollowedUp), String> {
     // A phone's words never join a turn that runs above Auto: they wait for
     // a turn of their own (at most Auto), as a request while it works does.
     let joins = ask.phone.is_none() || modes::or_auto(&current.mode) <= super::remote::PHONE_MAX;
+    let turn_read_only = current.turn_list.last().is_some_and(|t| t.read_only);
+    let turn_mode = modes::or_auto(&current.mode);
     enum At {
         /// Its process is starting: with its first message.
         Starting,
         /// Waiting for a slot (its first turn: `true`).
         InQueue(bool),
+        /// Working: handed to its Claude Code now.
+        Passing(Arc<Session>),
         /// Working: its next turn (the first request waiting: `true`).
         Working(bool),
         Not,
     }
     let text = ask.text.clone();
+    let note = format!("{text}\n\n{NOTE_LINE}");
     let at = with_state(|s| {
         if let Some(l) = s.live.get_mut(id) {
             if !l.started && l.stopping.is_none() && joins {
                 l.extra.push(text.clone());
                 return At::Starting;
+            }
+            // Its first message written, its input still open, nobody
+            // stopping it: the note goes to it now, counted before it's
+            // written (a result that comes meanwhile waits for it).
+            let open = !l.written.is_empty() && !l.input_over && l.stopping.is_none();
+            if let Some(session) = l.session.clone().filter(|_| open && passes_now(&ask, turn_mode, turn_read_only, joins, l.pending.is_some())) {
+                l.sent += 1;
+                l.written.push(note.clone());
+                l.notes.push(ask.clone());
+                return At::Passing(session);
             }
             let first = l.pending.is_none();
             match &mut l.pending {
@@ -1676,30 +1918,45 @@ pub fn follow_up(id: &str, ask: Ask) -> Result<(Agent, FollowedUp), String> {
             tracing::info!(id, "Agents: a follow-up for the turn waiting for a slot");
             Ok((agent, FollowedUp::Added))
         }
-        At::Working(first) => {
-            let title = ask.title();
-            let agent = store::update(id, |j| {
-                j.keep_turns();
-                if first {
-                    let n = j.turn_list.last().map_or(0, |t| t.n) + 1;
-                    j.turn_list.push(store::TurnNote { n, title: title.clone(), request: text.clone(), message_id: ask.message_id.clone(), status: Status::Queued, read_only: ask.read_only, ..Default::default() });
-                } else {
-                    added(j);
-                    // Read only when every request it holds is (`Ask::merge`).
-                    if let Some(t) = j.turn_list.last_mut() {
-                        t.read_only &= ask.read_only;
+        At::Passing(session) => {
+            if let Err(e) = session.send_user(&note, &[]) {
+                // Its input closed under us (it's ending): not handed over
+                // after all — the note waits for its next turn.
+                tracing::info!(id, "Agents: a note couldn't be handed to the turn working ({e}); it waits for its next turn");
+                let first = with_state(|s| {
+                    let l = s.live.get_mut(id)?;
+                    if let Some(i) = l.written.iter().rposition(|w| *w == note) {
+                        l.written.remove(i);
+                        l.sent = l.sent.saturating_sub(1);
+                        // (`written[0]` is its first message: `notes[i - 1]`.)
+                        if i >= 1 && i <= l.notes.len() {
+                            l.notes.remove(i - 1);
+                        }
                     }
-                }
-            })
-            .ok_or("There's no such agent.")?;
-            let n = agent.turn_list.last().map_or(0, |t| t.n);
+                    Some(())
+                })
+                .and_then(|()| wait_for_next_turn(id, &ask));
+                return match first {
+                    Some(first) => queued_turn(id, &ask, first),
+                    // Gone meanwhile: its next turn now.
+                    None => {
+                        resume(id, Next::Message(text.clone()), &ask, true);
+                        Ok((store::get(id).ok_or("There's no such agent.")?, FollowedUp::Started))
+                    }
+                };
+            }
+            let n = current.turn_list.last().map_or(0, |t| t.n);
+            // A phone's words in the turn working (at most Auto: `joins`):
+            // it's the phone's too.
             if let Some(device) = &ask.phone {
                 super::remote::mark_turn(id, n, device);
             }
-            tracing::info!(id, turn = n, "Agents: a follow-up queued behind the turn working");
-            emit(&AgentEvent { queued: Some(title), ..AgentEvent::at(&agent, n) });
-            Ok((agent, FollowedUp::Queued))
+            tracing::info!(id, turn = n, "Agents: a note handed to the turn working");
+            let agent = store::get(id).ok_or("There's no such agent.")?;
+            emit(&AgentEvent { step: Some(NOTE_PASSED.into()), ..AgentEvent::at(&agent, n) });
+            Ok((agent, FollowedUp::Passed))
         }
+        At::Working(first) => queued_turn(id, &ask, first),
         At::Not => {
             let text = ask.text.clone();
             resume(id, Next::Message(text), &ask, true);
@@ -2278,6 +2535,96 @@ mod tests {
         assert_eq!(reports(Status::Stopped, true, false), Reports::Earlier);
         // Yap quitting: nothing now (Continue's report covers what waited).
         assert_eq!(reports(Status::Interrupted, true, false), Reports::Not);
+    }
+
+    #[test]
+    fn a_note_for_a_working_agent_goes_to_it_now_unless_it_needs_a_turn_of_its_own() {
+        let note = || Ask::of("Keep the headings as they are.", false);
+        // A plain note: now, whatever the turn's mode.
+        assert!(passes_now(&note(), Mode::Bypass, false, true, false));
+        assert!(passes_now(&note(), Mode::Plan, false, true, false));
+        // A go-ahead, a lower mode, the person's own model or effort: each
+        // is set as a turn starts — a turn of its own.
+        assert!(!passes_now(&Ask::of("Go ahead.", true), Mode::Plan, false, true, false));
+        assert!(!passes_now(&Ask { mode: Some(Mode::Plan), ..note() }, Mode::Auto, false, true, false));
+        assert!(!passes_now(&Ask { model: Some("claude-opus-5-5".into()), model_asked: true, ..note() }, Mode::Auto, false, true, false));
+        assert!(!passes_now(&Ask { effort: Some("high".into()), effort_asked: true, ..note() }, Mode::Auto, false, true, false));
+        // A mode no lower than the turn's changes nothing (a phone's cap),
+        // and the chat's own pick of a size is the next turn's business.
+        assert!(passes_now(&Ask { mode: Some(Mode::Auto), ..note() }, Mode::Auto, false, true, false));
+        assert!(passes_now(&Ask { mode: Some(Mode::Auto), ..note() }, Mode::Plan, false, true, false));
+        assert!(passes_now(&Ask { model: Some("claude-haiku-5-5".into()), ..note() }, Mode::Auto, false, true, false));
+        // A change asked of a turn that is read only: its own turn; a
+        // read-only note joins either.
+        assert!(!passes_now(&note(), Mode::Auto, true, true, false));
+        assert!(passes_now(&Ask { read_only: true, ..note() }, Mode::Auto, true, true, false));
+        // A phone's words for a turn above Auto, and a request already
+        // waiting (this one keeps its place behind it).
+        assert!(!passes_now(&note(), Mode::Bypass, false, false, false));
+        assert!(!passes_now(&note(), Mode::Auto, false, true, true));
+        assert!(NOTE_LINE.contains("carry on") && NOTE_LINE.contains("summary"));
+    }
+
+    #[test]
+    fn a_note_claude_code_never_read_waits_for_the_next_turn() {
+        // What was written, and what it echoed back.
+        let mut l = Live::new("x".into());
+        l.sent = 1;
+        l.written = vec!["Brief.".into()];
+        assert_eq!(l.unread(), 1, "its first message, not echoed yet");
+        l.taken = 1;
+        assert_eq!(l.unread(), 0);
+        for (i, words) in ["Keep the headings.", "And the footer."].iter().enumerate() {
+            l.sent += 1;
+            l.written.push(format!("{words}\n\n{NOTE_LINE}"));
+            l.notes.push(Ask::of(words, false));
+            assert_eq!(l.unread(), i + 1);
+        }
+        // It read the first note; the turn ended before the second.
+        l.taken = 2;
+        assert_eq!(l.unread(), 1);
+        let back = l.take_unread_notes();
+        assert_eq!(back.iter().map(|a| a.text.as_str()).collect::<Vec<_>>(), ["And the footer."]);
+        assert!(l.notes.is_empty());
+        // A Claude Code that echoes nothing: a result a message.
+        let mut quiet = Live::new("x".into());
+        quiet.sent = 2;
+        quiet.written = vec!["Brief.".into(), "Note.".into()];
+        quiet.notes = vec![Ask::of("Note.", false)];
+        quiet.results = 1;
+        assert_eq!(quiet.unread(), 1);
+        quiet.results = 2;
+        assert_eq!((quiet.unread(), quiet.take_unread_notes().len()), (0, 0));
+
+        // Back with Yap as the process goes: its next turn, queued on its
+        // record — ahead of a request that came after it.
+        let id = store::new_id();
+        store::insert(Agent { id: id.clone(), folder: "garden-planner".into(), status: Status::Running, started_ts: 5, turn_list: vec![TurnNote { status: Status::Running, ..turn(1, "Add a watering schedule", &[]) }], ..Default::default() });
+        with_state(|s| {
+            let mut l = Live::new("x".into());
+            l.started = true;
+            l.sent = 2;
+            l.taken = 1;
+            l.written = vec!["Brief.".into(), "Keep the headings.".into()];
+            l.notes = vec![Ask { message_id: Some("chat:4:2".into()), ..Ask::of("Keep the headings.", false) }];
+            l.pending = Some(Ask::of("Go ahead.", true));
+            s.live.insert(id.clone(), l);
+        });
+        notes_unread(&id);
+        let next = with_state(|s| s.live.remove(&id).and_then(|l| l.pending)).unwrap();
+        assert_eq!(next.text, "Keep the headings.\n\nGo ahead.");
+        assert!(next.go, "the go-ahead that came after it goes with it");
+        assert_eq!(next.message_id.as_deref(), Some("chat:4:2"));
+        // Nothing unread: nothing changes.
+        with_state(|s| {
+            let mut l = Live::new("x".into());
+            l.sent = 1;
+            l.taken = 1;
+            l.written = vec!["Brief.".into()];
+            s.live.insert(id.clone(), l);
+        });
+        notes_unread(&id);
+        assert!(with_state(|s| s.live.remove(&id).and_then(|l| l.pending)).is_none());
     }
 
     #[test]

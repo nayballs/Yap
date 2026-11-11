@@ -256,15 +256,48 @@ carrying on with its context; so are agents now.
   the model and effort the chat sized it to (else Settings' then; the
   person's own words first: `modelAsked`, kept for the turns after;
   [Chat sizes each agent](#the-tools)), and how Settings pay then.
-- **A request while it works** queues as its next turn: the chat says "The
-  agent in garden-planner is still working: I'll pass that on when it finishes
-  this step." (the tool's `say`; chip "Queued for the agent in …"), its tab
-  shows it waiting ("Queued"), and it's sent once the turn ends. The turn
-  before it isn't reported by itself: the agent goes straight on, and one
-  report once it stops working covers both ([Reports](#reports)). Two while
-  it works: one next turn. Never two agents (nor
-  two turns) in a folder at once. Stopped first: not sent ("Not sent yet");
-  Continue sends it.
+- **A note while it works goes to it now** (2026-11-11, `runner::passes_now`,
+  `FollowedUp::Passed`). Claude Code takes a message written to it mid-work
+  into that work, at its next tool call's end, and answers once for both
+  (checked on the real 2.1.296: [ai-models.md](./ai-models.md#a-session-sessionrs));
+  its own app does the same with a message sent while it works. Until then Yap
+  kept the note until the turn ended and ran it as a turn of its own: a new
+  process that read the whole conversation again (in a Lab run on the real
+  Claude Code, an 11-second note cost as much as the 27-second turn before
+  it: $0.34 against $0.32) and a second report.
+  - **Handed over**: written to the running Claude Code's stdin with a line
+    of Yap's own after it (`NOTE_LINE`: take it into account, carry on,
+    cover it in the summary). The chat says "Passed that on: the agent in
+    garden-planner takes it in at its next step." (chip "Told the agent in
+    …"), and its tab's line reads "Your note is with the agent: it reads it
+    at its next step". No turn of its own: no row, no second process.
+  - **Read**: agent runs start with `--replay-user-messages`, so Claude Code
+    echoes each message back as it takes it in (`Follow::on_taken`, matched
+    by its words, in the order written). The note joins the turn's request
+    then, and the tab says "Read your note".
+  - **Its turn ends when every message written has been taken in**
+    (`Live::unread`), not at the first result. A note that came with no tool
+    call left is a turn of Claude Code's own right after, in the same process
+    (seen on the real one): still the same turn of Yap's, its words after the
+    first result's, one report.
+  - **Never read** (Claude Code ended first, the person stopped it, or it
+    didn't start on it within 20 seconds, `NOTE_GRACE`): the note goes back
+    to Yap and waits as the agent's next turn, as below (`notes_unread`),
+    ahead of anything asked after it. Stopped with a note unread, the process
+    is ended at once, so it never starts on that note; Continue sends it.
+  - **A turn of its own instead** (queued, below) when the request is set as
+    a turn starts: a plan's go-ahead, a lower mode, the person's own model or
+    effort, a change asked of a read-only turn, a phone's words for a turn
+    above Auto, or a request already waiting (it keeps its place behind it).
+- **A request that needs a turn of its own while it works** queues as its
+  next turn: the chat says "The agent in garden-planner is still working: I'll
+  pass that on when it finishes this step." (the tool's `say`; chip "Queued
+  for the agent in …"), its tab shows it waiting ("Queued"), and it's sent
+  once the turn ends. The turn before it isn't reported by itself: the agent
+  goes straight on, and one report once it stops working covers both
+  ([Reports](#reports)). Two while it works: one next turn. Never two agents
+  (nor two turns) in a folder at once. Stopped first: not sent ("Not sent
+  yet"); Continue sends it.
 - **Consent and safety, unchanged**: the person's own words this turn
   (`consent::start_in`), asked on the card after web content or an agent's
   own output (but for the person's plain go-ahead, Yap's own words with no
@@ -1586,7 +1619,7 @@ modeLabel, brief, newFolder, web, continues}`, answered by `chat_page_confirm`.
 | `agent_list` | every agent, newest first (each with `active`: the runner has it now) |
 | `agent_get {id}` | `{agent, log}`: the agent (with `active`) and its `yap-agent` events (none once swept) |
 | `agent_stop {id}` / `agent_continue {id}` | Stop; Continue a stopped, interrupted or failed one |
-| `agent_message {id, text}` | the tab's "Tell the agent…": its next turn, queued while it works ("go ahead" after a plan carries it out) |
+| `agent_message {id, text}` | the tab's "Tell the agent…": its next turn; while it works, handed to it now and read at its next step ("go ahead" after a plan carries it out, as a turn of its own) |
 | `agent_go_ahead {id, turn?}` | a report card's or an Agent panel row's Go ahead: a plan waiting (or set aside: Plan not used) carried out (Yap's go-ahead at the chat's Mode), once; `turn` an earlier turn's plan, as a turn of its own naming it; refused while it works or with no plan there |
 | `agent_move_to_finished {id, turn}` | a panel row's Move to finished: a turn whose record says it's at work but that nothing runs marked interrupted (its agent too), a waiting plan Plan not used; refused while the runner has the agent |
 | `agent_dismiss {id, turn, dismissed?}` | a panel row's Dismiss (`dismissed` true, the default) or Restore (false): hidden from the panel, kept in the log and History; a waiting plan dismissed waits no more |
@@ -1703,8 +1736,10 @@ the build's own stand-in replaying `script` from now on),
     one tab with two turns (the newest open, the earlier folded), two
     reports, the second turn on `--resume` (the stand-in's `_dump_args` to a
     file), a pill and a report card a turn opening the same tab at their
-    turn; a request while it works queued as the next turn, the two told in
-    one report (one card, one answer); "start fresh" a
+    turn; a note while it works handed to it at once (the same turn, the
+    same process, read at its tool call's end, one report), and one it never
+    reads waiting as its next turn, the two told in one report (one card, one
+    answer); "start fresh" a
     second agent, its tab named apart; Undo this turn (refused while a later
     turn changed the same file), Undo all asked first. Light and dark.
   - `agents-plans.spec.js`: plans and the go-ahead — a Bypass chip never stops

@@ -273,6 +273,12 @@ pub struct Spec {
     /// a message never runs one of the person's own commands or skills (a
     /// Code chat's session, which loads their settings: read only).
     pub disable_slash_commands: bool,
+    /// `--replay-user-messages`: Claude Code echoes each user message back
+    /// (`isReplay`) as it takes it in — the first as its turn starts, one
+    /// written while it works at its next tool call's end. So a run that
+    /// writes notes mid-turn knows which it has read (an agent's:
+    /// `agents::runner`).
+    pub replay_user_messages: bool,
 }
 
 impl Spec {
@@ -300,6 +306,7 @@ impl Spec {
             fallback_model: None,
             persist: true,
             disable_slash_commands: false,
+            replay_user_messages: false,
         }
     }
 }
@@ -424,6 +431,9 @@ pub fn args(spec: &Spec, files: &Files) -> Vec<String> {
     }
     if spec.disable_slash_commands {
         a.push("--disable-slash-commands".into());
+    }
+    if spec.replay_user_messages {
+        a.push("--replay-user-messages".into());
     }
     a
 }
@@ -680,6 +690,9 @@ struct Shared {
     stdin: Mutex<Option<ChildStdin>>,
     state: Mutex<State>,
     pid: u32,
+    /// An agent's run (a permission prompt tool): what Yap Lab's record
+    /// says of its lines, so an agent's tool calls aren't taken for Chat's.
+    agent: bool,
     /// When it started (a FILETIME): its family is what started after.
     #[cfg_attr(not(windows), allow(dead_code))]
     since: u64,
@@ -781,6 +794,7 @@ impl Session {
                 exit: None,
             }),
             pid,
+            agent: spec.permission_prompt_tool.is_some(),
             since,
         });
         let (tx, rx) = unbounded_channel();
@@ -810,7 +824,9 @@ impl Session {
         lock(&self.shared.state).exit.is_none() && self.shared.wait_exit(Duration::ZERO).is_none()
     }
 
-    /// A user message: a new turn (or, mid-turn, the next one queued).
+    /// A user message: a new turn — or, while a turn works, taken into that
+    /// turn at its next tool call's end (one `result` for both; checked on
+    /// 2.1.296), or a turn of its own right after when no tool call is left.
     pub fn send_user(&self, text: &str, images: &[Image]) -> Result<(), String> {
         tracing::debug!(chars = text.chars().count(), images = images.len(), "claude code: user message");
         self.write_line(&user_message(text, images))
@@ -914,7 +930,7 @@ fn read_events(shared: Arc<Shared>, stdout: std::process::ChildStdout, tx: Unbou
         }
         let line = String::from_utf8_lossy(&buf);
         // A Yap Lab run keeps its tool calls and results (shell/lab.rs).
-        crate::shell::lab::claude_line(shared.pid, &line);
+        crate::shell::lab::claude_line(shared.pid, shared.agent, &line);
         let Some(event) = events::parse_line(&line) else { continue };
         lines += 1;
         match &event {

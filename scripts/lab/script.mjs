@@ -258,10 +258,14 @@ export function probePasses(want, got) {
 /** The steps that the rest depend on: when one fails, the script stops. */
 const STOPS = new Set(['ask', 'answer', 'wait', 'set', 'fake']);
 
-/** A turn's tool calls whole (its transcript), else as `ask` summed them up. */
+/**
+ * A turn's tool calls whole (its transcript), else as `ask` summed them up —
+ * never those of an agent at work meanwhile (`via: "agent"`: its own Claude
+ * Code's, not the turn's).
+ */
 function callsOf(result) {
   try {
-    if (result?.transcript && fs.existsSync(result.transcript)) return JSON.parse(fs.readFileSync(result.transcript, 'utf8')).tools ?? result.tools ?? [];
+    if (result?.transcript && fs.existsSync(result.transcript)) return (JSON.parse(fs.readFileSync(result.transcript, 'utf8')).tools ?? result.tools ?? []).filter((c) => c.via !== 'agent');
   } catch {
     /* being written: the summed-up ones */
   }
