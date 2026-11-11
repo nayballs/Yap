@@ -27,7 +27,7 @@
   const log = $derived(agentLogs.by[agent?.id] || []);
   const note = $derived(turnsOf(agent, log).find((t) => t.n === turn) ?? null);
   const live = $derived(isLive(note?.status));
-  const items = $derived(note?.startedTs || live ? workOf(note?.events || [], live ? '' : note?.text) : []);
+  const items = $derived(note?.startedTs || live ? workOf(note?.events || [], live ? '' : note?.text, live) : []);
   /** The stretches the person opened (by where they start: a stretch keeps its place as more come). */
   let opened = $state({});
   const toggle = (key) => (opened = { ...opened, [key]: !opened[key] });

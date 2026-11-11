@@ -150,9 +150,10 @@ export function timelineOf(log, final = '') {
  * ("Ran 3 commands, edited convert.js +4 −1", `workSummary`) that opens into
  * its steps. `final`: its final words, left out (its report tells them), as
  * `timelineOf` leaves them. A group of housekeeping alone ("Starting Claude
- * Code") is kept only at the end, where it's what the agent is on.
+ * Code") is kept only at the end of a turn still working (`live`), where
+ * it's what the agent is on.
  */
-export function workOf(log, final = '') {
+export function workOf(log, final = '', live = false) {
   const out = [];
   let group = null;
   for (const e of log || []) {
@@ -194,7 +195,7 @@ export function workOf(log, final = '') {
     }
   }
   const real = (g) => g.steps.some((s) => !['other', 'ask'].includes(stepKind(s)));
-  return out.filter((x, i) => x.kind === 'said' || real(x) || i === out.length - 1);
+  return out.filter((x, i) => x.kind === 'said' || real(x) || (live && i === out.length - 1));
 }
 
 /** A step's line once it's done: "Editing notes.md" → "Edited notes.md". */

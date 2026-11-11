@@ -232,7 +232,7 @@
           {/if}
           {#if m.kind === 'agentReport'}
             {#await import('./AgentReportCard.svelte') then { default: AgentReportCard }}
-              <AgentReportCard {m} conversation={chat.activeId} onopen={openAgent} {room} onpicture={openShared} />
+              <AgentReportCard {m} conversation={chat.activeId} onopen={openAgent} {room} onpicture={openShared} quiet={!!code?.current} />
             {/await}
           {:else}
             <ChatMessage
@@ -255,7 +255,7 @@
           {/if}
           {#if agentPills.get(i)?.length}
             {#await import('./AgentPills.svelte') then { default: AgentPills }}
-              <AgentPills agents={agentPills.get(i)} onopen={openAgent} />
+              <AgentPills agents={agentPills.get(i)} onopen={openAgent} quiet={!!code?.current} />
             {/await}
             {#if code?.current}
               <!-- In a Code chat: each turn's to-do list under its pill, live while it works, then folded as its record. -->

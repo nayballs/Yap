@@ -9,7 +9,8 @@
   import { statusWord, statusTone, turnStatusWord } from '../../core/agents.js';
 
   /** `agents`: the answer's agents; `onopen(agent)` opens one's tab. */
-  let { agents = [], onopen = null } = $props();
+  /** `quiet`: a Code chat's thread — a plain line, no box and no "Open" (as Claude Code's transcript has none: 11 Nov 2026). */
+  let { agents = [], onopen = null, quiet = false } = $props();
 </script>
 
 <div class="agentpills" role="group" aria-label="Agents">
@@ -20,6 +21,7 @@
     <button
       type="button"
       class="agentpill"
+      class:quiet
       data-testid="chat-agent-pill"
       data-status={status}
       data-turn={j.turn ?? 1}
@@ -65,6 +67,29 @@
   .agentpill:hover {
     border-color: var(--yap-border-hover);
     background: var(--yap-s2);
+  }
+  /* A Code chat's: a quiet line of the thread. */
+  .agentpill.quiet {
+    height: auto;
+    /* (In line with a bubble's words.) */
+    padding: 1px 4px 1px 13px;
+    border: 0;
+    border-radius: 6px;
+    background: none;
+    color: var(--yap-muted);
+    font-weight: 500;
+  }
+  .agentpill.quiet:hover {
+    background: none;
+    color: var(--yap-fg-80);
+  }
+  .agentpill.quiet svg {
+    width: 13px;
+    height: 13px;
+    color: var(--yap-muted);
+  }
+  .agentpill.quiet .jopen {
+    display: none;
   }
   .agentpill:focus-visible {
     outline: 2px solid var(--yap-primary-line);

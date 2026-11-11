@@ -424,6 +424,13 @@ pub enum Problem {
     /// Claude Code isn't signed in, its sign-in expired, or the API key
     /// was refused.
     NotSignedIn,
+    /// **Its sign-in couldn't be renewed just now**: another Claude Code
+    /// process on this PC was renewing it (or ended half way). Claude Code's
+    /// own words: "Failed to refresh OAuth token: another Claude Code
+    /// process is refreshing it or exited mid-refresh. This is usually
+    /// transient; retry in a minute…". Never "isn't signed in" (11 Nov 2026,
+    /// a Yap Lab run: the person was signed in, and was told to sign in).
+    SignInBusy,
     /// The plan's limit (or the API's rate limit) was reached.
     #[serde(rename_all = "camelCase")]
     RateLimited {
@@ -450,6 +457,7 @@ impl Problem {
     pub fn message(&self) -> String {
         match self {
             Problem::NotSignedIn => "Claude Code isn't signed in on this PC. Sign in to Claude Code, then try again.".into(),
+            Problem::SignInBusy => SIGN_IN_BUSY.into(),
             Problem::RateLimited { credits_required: true, .. } => {
                 "You've reached your Claude plan's limit: its included usage is used up. It continues once you add usage credits.".into()
             }
@@ -468,6 +476,10 @@ impl Problem {
         }
     }
 }
+
+/// [`Problem::SignInBusy`]'s words (the page knows them by their start:
+/// `core/aiErrors.js`).
+pub const SIGN_IN_BUSY: &str = "Claude Code couldn't renew its sign-in just now: another Claude Code on this PC was doing the same. You're still signed in. Try again in a minute; if it keeps happening, close your other Claude Code windows.";
 
 /// When a limit resets (Unix seconds), as the person reads it: "4:00 pm"
 /// today, "Sun 9:00 am" within the week, else "20 Nov, 4:00 pm". Pure but
@@ -922,6 +934,10 @@ fn in_result(r: &TurnResult) -> Option<Problem> {
         return None;
     }
     let text = r.text.trim().to_lowercase();
+    // Its sign-in couldn't be renewed for a moment: not signed out.
+    if text.contains("failed to refresh oauth token") && ["another claude code process", "mid-refresh", "transient", "retry in a minute"].iter().any(|w| text.contains(w)) {
+        return Some(Problem::SignInBusy);
+    }
     let auth_words = ["not logged in", "failed to authenticate", "invalid api key", "please run /login", "oauth token"];
     if matches!(r.api_error_status, Some(401 | 403)) || auth_words.iter().any(|w| text.contains(w)) {
         return Some(Problem::NotSignedIn);
@@ -1061,6 +1077,20 @@ pub(crate) mod tests {
         assert!(near(plain.cost_since(Some(0.02), ""), 0.03) && near(plain.cost_since(None, ""), 0.03));
         // Never below nothing.
         assert_eq!(TurnResult { cost_usd: -1.0, ..Default::default() }.cost_since(Some(0.0), ""), 0.0);
+    }
+
+    #[test]
+    fn a_sign_in_that_couldnt_be_renewed_for_a_moment_is_never_not_signed_in() {
+        // Claude Code 2.1.296's own result, as a Yap Lab run got it.
+        let said = "Failed to refresh OAuth token: another Claude Code process is refreshing it or exited mid-refresh. This is usually transient; retry in a minute, and if it persists close other Claude Code processes or sign in again";
+        let r = TurnResult { is_error: true, terminal_reason: Some("api_error".into()), text: said.into(), ..Default::default() };
+        assert_eq!(problem_in(&Event::Result(r)), Some(Problem::SignInBusy));
+        let words = Problem::SignInBusy.message();
+        assert!(words.starts_with("Claude Code couldn't renew its sign-in just now") && words.contains("still signed in") && words.contains("Try again in a minute"), "{words}");
+        assert_eq!(serde_json::to_value(Problem::SignInBusy).unwrap(), serde_json::json!({"kind":"signInBusy"}));
+        // A token that was refused is still a sign-in problem.
+        let refused = TurnResult { is_error: true, terminal_reason: Some("api_error".into()), text: "OAuth token has expired. Please run /login".into(), ..Default::default() };
+        assert_eq!(problem_in(&Event::Result(refused)), Some(Problem::NotSignedIn));
     }
 
     #[test]

@@ -105,6 +105,7 @@ impl ProblemNote {
         use crate::ai::claude_code::events::Problem as P;
         let (kind, resets_at) = match p {
             P::NotSignedIn => ("notSignedIn", None),
+            P::SignInBusy => ("signInBusy", None),
             P::RateLimited { resets_at, .. } => ("rateLimited", *resets_at),
             P::Billing => ("billing", None),
             P::Account { .. } => ("account", None),

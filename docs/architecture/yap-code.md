@@ -1165,6 +1165,14 @@ instead of a terminal (rebuilt after the maintainer's first real agent,
     The agents store still keeps no log.
   - A note handed to the agent mid-work has no turn of its own, so the
     stream stays under the answer that sent the turn, above the note.
+- **No boxes in a Code chat's thread** (2026-11-11, the maintainer: "we
+  don't need all this open stuff in the chat, you don't do that in Claude
+  Code"). There the pill and the report card are quiet lines of the thread
+  (`quiet` on `AgentPills` and `AgentReportCard`): the folder and the
+  turn's title in muted type with no border and no "Open" word; "Agent done ·
+  garden-planner · Changed notes.md" with a small chevron. A click still
+  opens the agent's tab at that turn, and a plan's Go ahead is still a
+  button. A plain chat's pills and cards are as they were.
 - **The report card** (`AgentReportCard.svelte`): the `agentReport` marker as "Agent
   done · garden-planner" (or didn't finish, has a question, its plan is
   ready, is carrying out its plan: as its turn ended), what it changed in a

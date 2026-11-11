@@ -46,6 +46,10 @@ export function aiError(err) {
   // Your Claude plan's problems: said as Rust says them (the buttons that
   // help go with them, Chat's toast).
   if (claudePlanProblem(raw)) return said(raw, false);
+  // Claude Code couldn't renew its sign-in for a moment (events.rs
+  // `SIGN_IN_BUSY`): a sentence to read, nothing to press — the person is
+  // signed in.
+  if (/^Claude Code couldn't renew its sign-in just now/i.test(raw)) return said(raw, false);
   if (UNREACHABLE.test(lower)) {
     if (LOCAL_HOST.test(host)) {
       return said(

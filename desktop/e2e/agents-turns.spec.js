@@ -382,7 +382,8 @@ test('core/agents.js: an agent’s turns from its log, their words, the pills a 
   expect(workSummary(work[1], true)).toEqual([{ text: 'Editing notes.md' }]);
   // Still working: its words so far all show, and housekeeping alone is what it's on.
   expect(workOf(itsLog).at(-1)).toMatchObject({ kind: 'said', text: 'Done. The legend is in.' });
-  expect(workOf([{ step: 'Starting Claude Code' }]).map((w) => workSummary(w))).toEqual([[{ text: 'Started Claude Code' }]]);
+  expect(workOf([{ step: 'Starting Claude Code' }], '', true).map((w) => workSummary(w, true))).toEqual([[{ text: 'Starting Claude Code' }]]);
+  expect(workOf([{ step: 'Starting Claude Code' }])).toEqual([]);
   // Several files: counted, their lines added up; searches and the web in words.
   const many = workOf([
     { step: 'Editing a.js', file: 'a.js' },

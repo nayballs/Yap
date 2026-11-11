@@ -1893,6 +1893,16 @@ from `message_start`'s `usage` (the prompt, the cache's included) and
   PC. Sign in to Claude Code, then try again.", "You've reached your Claude
   plan's limit (resets at 4:00 pm).") — the page matches them for its buttons
   (`core/aiErrors.js` `claudePlanProblem`).
+- **A sign-in that couldn't be renewed for a moment is never "not signed
+  in"** (2026-11-11, a Yap Lab run): with several Claude Code processes on
+  the PC, one answered "Failed to refresh OAuth token: another Claude Code
+  process is refreshing it or exited mid-refresh. This is usually transient;
+  retry in a minute…". The words "oauth token" made it `NotSignedIn`, and the
+  person, who was signed in, was told to sign in. It's `SignInBusy` now:
+  "Claude Code couldn't renew its sign-in just now: another Claude Code on
+  this PC was doing the same. You're still signed in. Try again in a
+  minute…" (a sentence, no button). A token that was refused is still
+  `NotSignedIn`.
 - **Checked on 2.1.296, signed out**: a turn that can't reach Claude still
   ends with a `result`, `subtype: "success"` but `is_error: true`,
   `terminal_reason: "api_error"` and the words "Not logged in · Please run
