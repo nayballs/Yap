@@ -47,6 +47,10 @@
 //   in the file (Claude Code's own patch says where); a command's to the
 //   command, with Copy, and what it printed; a row with nothing more
 //   doesn't open. Light and dark.
+// - The rows' code is in colour (core/codeColours.js: highlight.js, loaded
+//   when a row is first opened; Yap's own colours, light and dark): a
+//   diff's lines by the file's language, a command as a shell's, what it
+//   printed plain; each token a text node, never markup.
 // - "Start fresh" (`fresh: true`): a second agent, its tab named apart.
 // - Undo this turn (refused while a later turn changed the same file:
 //   "Undo the later change first"), and Undo all, asked first.
@@ -80,6 +84,8 @@ import {
   groupPictures,
   shownStepPicture,
 } from '../src/lib/core/agents.js';
+import { LANGUAGES, languageOf, shellOf, kindOf, tokensOf, lineTokens, colourLines, colourDiff } from '../src/lib/core/codeColours.js';
+import hljs from '../src/lib/core/codeColours.hljs.js';
 
 const HERE = path.join(RUNS, 'agents-turns-spec');
 const SCRIPTS = path.join(HERE, 'scripts');
@@ -239,6 +245,7 @@ const USES_OTHER_TOOLS = [
   { _wait_user: true },
 ];
 const LEGEND = '# Legend\n\nB: a bed\n';
+const WATER_JS = '// How much a bed drinks.\nexport function water(bed) {\n  return bed.litres * 2;\n}\n';
 const TESTED = 'Added the watering line and a legend. One test still fails: watering is twice a week.';
 const TEST_OUTPUT = '> garden-planner@1.0.0 test\n> node --test\n\n✔ beds are sorted (1.2ms)\n✖ watering is twice a week (0.4ms)\n\ntests 2\npass 1\nfail 1';
 /**
@@ -270,6 +277,10 @@ const FOUR_STEPS = [
     parent_tool_use_id: null,
     session_id: '{{session_id}}',
   },
+  said('r3b', [{ type: 'tool_use', id: 'toolu_j', name: 'Write', input: { file_path: '{{cwd}}\\water.js', content: WATER_JS } }]),
+  { _hook: { event: 'PreToolUse', input: { tool_name: 'Write', tool_use_id: 'toolu_j', tool_input: { file_path: 'water.js' } } } },
+  { _write_file: { path: 'water.js', text: WATER_JS } },
+  toolResult('toolu_j', 'File created successfully at: water.js'),
   said('r4', [{ type: 'tool_use', id: 'toolu_w', name: 'Write', input: { file_path: '{{cwd}}\\legend.md', content: LEGEND } }]),
   { _hook: { event: 'PreToolUse', input: { tool_name: 'Write', tool_use_id: 'toolu_w', tool_input: { file_path: 'legend.md' } } } },
   { _write_file: { path: 'legend.md', text: LEGEND } },
@@ -327,6 +338,25 @@ const chatScope = (fakeLlm) => ({
 const thread = (main) => main.locator('.msgs');
 /** The rows of an opened stretch (StepRows.svelte), in `work` (the thread's AgentWork). */
 const rowsIn = (work) => work.getByTestId('chat-agent-work-row');
+/** Wait until the thread has stopped scrolling (a theme change or new lines leave it following its end for a moment). */
+async function threadStill(main) {
+  let last = null;
+  await expect
+    .poll(
+      async () => {
+        const now = await thread(main).evaluate((el) => {
+          let n = el;
+          while (n && n.scrollHeight <= n.clientHeight + 1) n = n.parentElement;
+          return n ? Math.round(n.scrollTop) : 0;
+        });
+        const same = now === last;
+        last = now;
+        return same;
+      },
+      { intervals: [250], timeout: 10_000, message: 'the thread to stop scrolling' }
+    )
+    .toBe(true);
+}
 const lastAnswer = (main) => thread(main).locator('.cbubble.assistant').last();
 const chipsOfLast = (main) => thread(main).locator('.toolchips').last().locator('.toolchip');
 const agents = (yap) => yap.invoke('agent_list');
@@ -692,6 +722,68 @@ test('core/agents.js: an agent’s turns from its log, their words, the pills a 
 });
 
 // ---------------------------------------------------------------- one agent, its turns
+
+test('core/codeColours.js: a file’s language, a command’s shell, the highlighter’s HTML as tokens, a diff coloured across its lines', () => {
+  // The highlighter's chunk has exactly the languages the rows may ask for.
+  expect(hljs.listLanguages().sort()).toEqual(LANGUAGES);
+  // A file's language by its name; one Yap has no language for stays plain (nothing is guessed).
+  expect(['src\\lib\\core\\agents.js', 'app.TSX', 'StepRows.svelte', 'beds/plan.json', 'Bar.lua', 'steps.rs', 'Dockerfile', 'notes.md', 'deploy.ps1'].map(languageOf)).toEqual([
+    'javascript',
+    'typescript',
+    'xml',
+    'json',
+    'lua',
+    'rust',
+    'dockerfile',
+    'markdown',
+    'powershell',
+  ]);
+  expect(['notes.txt', '.gitignore', 'README', 'beds.png', '', null].map(languageOf)).toEqual([null, null, null, null, null, null]);
+  // A command's shell by how it's written.
+  expect(['npm test', 'git log --oneline -5', 'Get-ChildItem src | Select-Object Name', 'echo $env:PATH', 'ls | ForEach-Object { $_ }'].map(shellOf)).toEqual(['bash', 'bash', 'powershell', 'powershell', 'powershell']);
+  // The highlighter's HTML read into tokens: its text unescaped, never markup; the innermost span that has a colour wins.
+  expect(tokensOf('a &lt; b <span class="hljs-string">&quot;x&#x27;&quot;</span> &amp; <span class="hljs-tag">&lt;<span class="hljs-name">b</span>&gt;</span>')).toEqual([
+    { text: 'a < b ', kind: '' },
+    { text: '"x\'"', kind: 's' },
+    { text: ' & <', kind: '' },
+    { text: 'b', kind: 'a' },
+    { text: '>', kind: '' },
+  ]);
+  expect(tokensOf('1 < 2')).toEqual([{ text: '1 < 2', kind: '' }]);
+  expect([kindOf(['hljs-title function_']), kindOf(['hljs-string', 'hljs-subst']), kindOf(['language-javascript']), kindOf([])]).toEqual(['f', '', '', '']);
+  // …as lines: a token that runs over a line end is cut there.
+  expect(lineTokens([{ text: 'a\n\nb', kind: 'c' }, { text: 'c', kind: '' }])).toEqual([[{ text: 'a', kind: 'c' }], [], [{ text: 'b', kind: 'c' }, { text: 'c', kind: '' }]]);
+  // Code coloured line by line.
+  const js = colourLines(hljs, "export function water(bed) {\n  return bed.litres * 2; // twice\n}", 'javascript');
+  expect(js.map((l) => l.filter((t) => t.kind).map((t) => [t.kind, t.text]))).toEqual([
+    [['k', 'export'], ['k', 'function'], ['f', 'water']],
+    [['k', 'return'], ['a', 'litres'], ['n', '2'], ['c', '// twice']],
+    [],
+  ]);
+  expect(js.map((l) => l.map((t) => t.text).join(''))).toEqual(['export function water(bed) {', '  return bed.litres * 2; // twice', '}']);
+  expect(colourLines(hljs, 'npm test -- --watch "beds spec"', 'bash').flat().filter((t) => t.kind)).toEqual([
+    { text: 'test', kind: 't' },
+    { text: '"beds spec"', kind: 's' },
+  ]);
+  // No language, one the highlighter wasn't given, or no highlighter yet: plain.
+  expect([colourLines(hljs, 'x', null), colourLines(hljs, 'x', 'klingon'), colourLines(null, 'x', 'javascript')]).toEqual([null, null, null]);
+  // A diff keeps its sense across lines: a comment that starts above the change is still one on the added
+  // lines, and the removed line is coloured as it was before.
+  const rows = [
+    { mark: 'ctx', text: '/* a comment that', no: 1 },
+    { mark: 'del', text: '   ends here */ const old = 1;', no: 2 },
+    { mark: 'add', text: '   goes on', no: 2 },
+    { mark: 'add', text: '   and ends */ const now = "two";', no: 3 },
+    { mark: 'gap', text: '', no: null },
+    { mark: 'ctx', text: 'return now;', no: 40 },
+  ];
+  const coloured = colourDiff(hljs, rows, 'javascript');
+  expect(coloured.map((r) => (r.tokens || []).map((t) => t.kind || '-').join(''))).toEqual(['c', 'c-k-n-', 'c', 'c-k-s-', '', 'k-']);
+  expect(coloured.map((r) => [r.mark, r.no, r.text])).toEqual(rows.map((r) => [r.mark, r.no, r.text]));
+  // No language: the same rows, plain.
+  expect(colourDiff(hljs, rows, null).every((r) => r.tokens === undefined)).toBe(true);
+  expect(colourDiff(null, rows, 'javascript').every((r) => r.tokens === undefined)).toBe(true);
+});
 
 test('two requests in a Code chat: one agent, one tab with two turns, two reports, the second on --resume', async ({ yap, main, fakeLlm, shot }) => {
   const { agent, conversation, before, first } = await twoTurns(yap, main, fakeLlm);
@@ -1231,17 +1323,19 @@ test('a stretch opened is a row a step: an edit opens to its numbered diff, a co
 
   // The stretch's line, then its rows: each step as done, a file's name set apart, its lines added.
   const work = thread(main).getByTestId('chat-agent-work');
-  await expect(work.locator('.wtext')).toHaveText([/^Ran a command, read a file, edited 2 files\s*\+4, 1 failed$/]);
+  await expect(work.locator('.wtext')).toHaveText([/^Ran a command, read a file, edited 3 files\s*\+8, 1 failed$/]);
   await work.getByRole('button', { name: /Ran a command, read a file/ }).click();
   const rows = rowsIn(work);
-  await expect(rows.locator('.rtext')).toHaveText(['Read notes.md (1–20)', 'Edited notes.md', 'Ran the tests', 'Created legend.md']);
-  await expect(rows.locator('.rname')).toHaveText(['notes.md', 'notes.md', 'legend.md']);
+  await expect(rows.locator('.rtext')).toHaveText(['Read notes.md (1–20)', 'Edited notes.md', 'Ran the tests', 'Created water.js', 'Created legend.md']);
+  await expect(rows.locator('.rname')).toHaveText(['notes.md', 'notes.md', 'water.js', 'legend.md']);
   await expect(rows.nth(1).locator('.plus')).toHaveText('+1');
-  await expect(rows.nth(3).locator('.plus')).toHaveText('+3');
+  await expect(rows.nth(4).locator('.plus')).toHaveText('+3');
   await expect(rows.nth(2).locator('.rfailed')).toHaveText('failed');
   // A row with nothing more to show doesn't open; the others do.
   await expect(rows.nth(0).getByRole('button')).toHaveCount(0);
-  await expect(rows.locator('button.rhead')).toHaveCount(3);
+  await expect(rows.locator('button.rhead')).toHaveCount(4);
+  // The highlighter isn't loaded until a row is opened.
+  await expect(work.getByTestId('chat-agent-work-rows')).toHaveAttribute('data-colours', 'false');
   // No command or diff until its row is opened.
   await expect(work.getByTestId('chat-agent-work-command')).toHaveCount(0);
   await expect(work.getByTestId('chat-agent-work-diff')).toHaveCount(0);
@@ -1266,8 +1360,29 @@ test('a stretch opened is a row a step: an edit opens to its numbered diff, a co
   expect(await printed.locator('pre').first().evaluate((el) => el.textContent)).toBe(TEST_OUTPUT);
   await expect(rows.nth(2).getByRole('button', { name: 'Copy the command' })).toBeVisible();
   // The new file: every line added, numbered from 1.
-  await rows.nth(3).getByRole('button', { name: /Created legend\.md/ }).click();
-  const made = rows.nth(3).getByTestId('chat-agent-work-diff').locator('.dl');
+  // Its code in colour: the highlighter loaded with the first row opened; a script's diff by its language,
+  // each token a text node in a span (never markup), the line's own text unchanged.
+  await expect(work.getByTestId('chat-agent-work-rows')).toHaveAttribute('data-colours', 'true');
+  await rows.nth(3).getByRole('button', { name: /Created water\.js/ }).click();
+  const jsDiff = rows.nth(3).getByTestId('chat-agent-work-diff');
+  await expect(jsDiff.locator('.dl')).toHaveCount(4);
+  await expect(jsDiff.locator('.syn-k')).toHaveText(['export', 'function', 'return']);
+  await expect(jsDiff.locator('.syn-c')).toHaveText(['// How much a bed drinks.']);
+  await expect(jsDiff.locator('.syn-f')).toHaveText(['water']);
+  await expect(jsDiff.locator('.syn-n')).toHaveText(['2']);
+  expect(await jsDiff.locator('.dl .dt').evaluateAll((els) => els.map((e) => e.textContent))).toEqual(WATER_JS.trimEnd().split('\n'));
+  expect(await jsDiff.locator('.dt *').evaluateAll((els) => els.every((e) => e.tagName === 'SPAN' && e.children.length === 0))).toBe(true);
+  // The colours are Yap's own, and not the text's: a keyword's, a comment's and plain text's all differ.
+  const colourOf = (loc) => loc.first().evaluate((el) => getComputedStyle(el).color);
+  const light = { keyword: await colourOf(jsDiff.locator('.syn-k')), comment: await colourOf(jsDiff.locator('.syn-c')), plain: await colourOf(jsDiff.locator('.dl .dt')) };
+  expect(new Set(Object.values(light)).size).toBe(3);
+  // The command as a shell's; what it printed stays plain; a Markdown file's heading too.
+  await expect(rows.nth(2).getByTestId('chat-agent-work-command')).toHaveAttribute('data-coloured', 'true');
+  await expect(rows.nth(2).getByTestId('chat-agent-work-command').locator('.ccmd')).toHaveText('$ npm test');
+  await expect(rows.nth(2).getByTestId('chat-agent-work-output').locator('[class*="syn-"]')).toHaveCount(0);
+  await rows.nth(4).getByRole('button', { name: /Created legend\.md/ }).click();
+  await expect(rows.nth(4).getByTestId('chat-agent-work-diff').locator('.syn-f')).toHaveText(['# Legend']);
+  const made = rows.nth(4).getByTestId('chat-agent-work-diff').locator('.dl');
   expect(await made.evaluateAll((els) => els.map((e) => [e.querySelector('.dno').textContent, e.querySelector('.dt').textContent.trim()]))).toEqual([
     ['1', '# Legend'],
     ['2', ''],
@@ -1275,10 +1390,18 @@ test('a stretch opened is a row a step: an edit opens to its numbered diff, a co
   ]);
   await shot(main, '41-rows-opened');
   await theme(yap, main, 'dark');
+  // The dark theme has its own colours for the same tokens.
+  expect(await colourOf(jsDiff.locator('.syn-k'))).not.toBe(light.keyword);
   await shot(main, '42-rows-opened-dark');
   await theme(yap, main, 'light');
+  // Scrolled up to a row, the thread stays there (it never jumps back to its end under the pointer).
+  await threadStill(main);
+  const head = rows.nth(2).locator('button.rhead');
+  await head.scrollIntoViewIfNeeded();
+  await main.waitForTimeout(500);
+  expect((await head.boundingBox()).y).toBeGreaterThanOrEqual(0);
   // A row closes again; the stretch closed takes its rows with it.
-  await rows.nth(2).getByRole('button', { name: /Ran the tests/ }).click();
+  await head.click();
   await expect(rows.nth(2).getByTestId('chat-agent-work-command')).toHaveCount(0);
   await work.getByRole('button', { name: /Ran a command, read a file/ }).click();
   await expect(rowsIn(work)).toHaveCount(0);

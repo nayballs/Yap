@@ -8,9 +8,10 @@
   //
   // - **an edit**: the file's path and its diff, each line with its number
   //   in the file (core/agents.js `diffRows`: Claude Code's own patch says
-  //   where each part is), removed lines red, added ones green;
-  // - **a command**: the command itself (`$ …`, with Copy) and what it
-  //   printed, its start and its end (agents/output.rs);
+  //   where each part is), removed lines red, added ones green, its code in
+  //   colour by the file's language;
+  // - **a command**: the command itself (`$ …`, with Copy), in colour, and
+  //   what it printed, plain, its start and its end (agents/output.rs);
   // - **a picture** its call came back with, larger (small at the row's end).
   //
   // Before, an opened stretch was every step's line with each command dumped
@@ -18,7 +19,13 @@
   // the agent is on now is the last row, as it is, with a spinner. Plumbing
   // ("Starting Claude Code", "Finding a tool") is no row once it's past
   // (`rowSteps`).
+  //
+  // **Code colours** (core/codeColours.js): the highlighter loads the first
+  // time a row is opened; until it has, and for a file with no language Yap
+  // knows, the text is plain. Each token is a text node in a span
+  // (`.syn-k`…, app.css `--yap-syn-*`): nothing of a file is set as markup.
   import { rowSteps, stepRow, stepOpens, stepKind, diffRows, moreLines } from '../../core/agents.js';
+  import { languageOf, shellOf, colourDiff, colourLines, loadColours } from '../../core/codeColours.js';
   import { copyText } from '../../core/itemMenus.js';
   import { placed, shown } from './chatImages.js';
   import { screenPixels } from './chatShots.svelte.js';
@@ -33,7 +40,16 @@
 
   /** The rows the person opened (by their place: a row keeps it as more come). */
   let open = $state({});
-  const toggle = (k) => (open = { ...open, [k]: !open[k] });
+  /** The highlighter, once it has loaded (never made reactive inside: it's a library's object). */
+  let colours = $state.raw(null);
+  function toggle(k) {
+    open = { ...open, [k]: !open[k] };
+    if (!colours) {
+      loadColours()
+        .then((h) => (colours = h))
+        .catch(() => {});
+    }
+  }
   let gone = $state({});
   const lineWord = (n) => `${Number(n).toLocaleString('en-GB')} more ${Number(n) === 1 ? 'line' : 'lines'}`;
 </script>
@@ -48,7 +64,7 @@
   {#if r.failed}<span class="rfailed">failed</span>{/if}
 {/snippet}
 
-<ol class="rows" data-testid="chat-agent-work-rows">
+<ol class="rows" data-testid="chat-agent-work-rows" data-colours={colours ? 'true' : 'false'}>
   {#each rowSteps(steps, busy) as { step: s, i: k, now } (k)}
     {@const r = stepRow(s, now)}
     {@const can = stepOpens(s)}
@@ -69,16 +85,19 @@
       {#if isOpen}
         <div class="rbody">
           {#if s.diff?.lines?.length}
-            {@const rows = diffRows(s.diff)}
+            {@const rows = colourDiff(colours, diffRows(s.diff), languageOf(s.file))}
             {@const digits = Math.max(1, ...rows.map((x) => String(x.no ?? '').length))}
             <p class="rpath">{s.file}{#if s.diff.all}<span class="rnote"> · every match replaced</span>{/if}</p>
+            <!-- (A box that scrolls takes the keyboard's focus, so its arrows can scroll it.) -->
+            <!-- svelte-ignore a11y_no_noninteractive_tabindex -->
             <div class="dbox" role="group" aria-label={`Changes to ${s.file}`} tabindex="0" data-testid="chat-agent-work-diff" style:--digits={digits}>
               {#each rows as x, n (n)}
                 {#if x.mark === 'gap'}
                   <div class="dl gap" aria-hidden="true">⋯</div>
                 {:else}
                   <div class="dl {x.mark}" data-no={x.no ?? ''}>
-                    <span class="dno" aria-hidden="true">{x.no ?? (x.mark === 'del' ? '−' : x.mark === 'add' ? '+' : '')}</span><span class="dt">{x.text || ' '}</span
+                    <span class="dno" aria-hidden="true">{x.no ?? (x.mark === 'del' ? '−' : x.mark === 'add' ? '+' : '')}</span><span class="dt"
+                      >{#if x.tokens?.length}{#each x.tokens as t, m (m)}<span class={t.kind ? `syn-${t.kind}` : undefined}>{t.text}</span>{/each}{:else}{x.text || ' '}{/if}</span
                     >{#if x.mark !== 'ctx'}<span class="sr-only">{x.mark === 'del' ? ' (removed)' : ' (added)'}</span>{/if}
                   </div>
                 {/if}
@@ -87,13 +106,19 @@
             {#if s.diff.more}<p class="rmore">{moreLines(s.diff.more)}</p>{/if}
           {/if}
           {#if s.command}
-            <div class="cbox" data-testid="chat-agent-work-command">
-              <pre class="ccmd" tabindex="0" aria-label="The command"><span class="cprompt" aria-hidden="true">$ </span>{s.command}</pre>
+            {@const typed = colourLines(colours, s.command, shellOf(s.command))}
+            <div class="cbox" data-testid="chat-agent-work-command" data-coloured={typed ? 'true' : 'false'}>
+              <!-- (A box that scrolls takes the keyboard's focus, so its arrows can scroll it.) -->
+              <!-- svelte-ignore a11y_no_noninteractive_tabindex -->
+              <pre class="ccmd" tabindex="0" aria-label="The command"><span class="cprompt" aria-hidden="true">$ </span
+                >{#if typed}{#each typed as words, n (n)}{n ? '\n' : ''}{#each words as t, m (m)}<span class={t.kind ? `syn-${t.kind}` : undefined}>{t.text}</span>{/each}{/each}{:else}{s.command}{/if}</pre>
               <button type="button" class="ccopy" title="Copy the command" aria-label="Copy the command" onclick={() => copyText(s.command, 'Command copied')}>
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2" /><path d="M5 15V6a2 2 0 0 1 2-2h9" /></svg>
               </button>
             </div>
             {#if s.output}
+              <!-- (A box that scrolls takes the keyboard's focus, so its arrows can scroll it.) -->
+              <!-- svelte-ignore a11y_no_noninteractive_tabindex -->
               <div class="cout" class:failed={s.output.failed} tabindex="0" role="group" aria-label="What it printed" data-testid="chat-agent-work-output">
                 <pre>{s.output.text}</pre>
                 {#if s.output.more}
@@ -317,6 +342,37 @@
     color: var(--yap-muted);
     font-size: 10.5px;
     line-height: 1.2;
+  }
+  /* The code's colours (core/codeColours.js gives each token its kind). */
+  .rows :global(.syn-k) {
+    color: var(--yap-syn-keyword);
+  }
+  .rows :global(.syn-s) {
+    color: var(--yap-syn-string);
+  }
+  .rows :global(.syn-c) {
+    color: var(--yap-syn-comment);
+  }
+  .rows :global(.syn-n) {
+    color: var(--yap-syn-number);
+  }
+  .rows :global(.syn-f) {
+    color: var(--yap-syn-function);
+  }
+  .rows :global(.syn-t) {
+    color: var(--yap-syn-type);
+  }
+  .rows :global(.syn-a) {
+    color: var(--yap-syn-attr);
+  }
+  .rows :global(.syn-r) {
+    color: var(--yap-syn-meta);
+  }
+  .rows :global(.syn-b) {
+    font-weight: 600;
+  }
+  .rows :global(.syn-i) {
+    font-style: italic;
   }
   /* Its command, and what it printed. */
   .cbox {

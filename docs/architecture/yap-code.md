@@ -1355,9 +1355,33 @@ something that matches that?").
   `range`, from the call's `offset` and `limit`).
 - **A picture's row** has it small at its end and larger once opened
   ([A step's pictures](#a-steps-pictures)).
-- **Not done**: colours for the code itself (Yap highlights no code
-  anywhere); a read's row opening to what was read; the output of a command
-  still running.
+- **Its code in colour** (`core/codeColours.js`, 2026-11-11, the
+  maintainer: "Yes, add them"), as Claude Code's transcript has it: keywords,
+  strings, comments, numbers, names.
+  - **The highlighter** is [highlight.js](https://github.com/highlightjs/highlight.js)
+    11.12.0 (BSD-3-Clause, pinned exact): its core and 29 languages
+    (`core/codeColours.hljs.js`), never its themes. It is a chunk of its own
+    (about 47 kB gzipped) loaded the first time a row is opened: Chat never
+    waits for it, and a row is plain until it's there.
+  - **Which language**: a diff's by its file's name (`languageOf`: `.js`,
+    `.ts`, `.svelte`, `.rs`, `.lua`, `.md`, `Dockerfile`…); a command's
+    by how it's written (`shellOf`: PowerShell's cmdlets, else bash). A
+    file with no language Yap knows stays plain: nothing is guessed. What a
+    command printed is never coloured.
+  - **A diff keeps its sense across lines** (`colourDiff`): each part's
+    lines as they are after the edit are coloured together, and its removed
+    lines with the lines round them as they were before, so a comment or a
+    string over several lines is still one.
+  - **Never markup**: highlight.js gives HTML; `tokensOf` reads it into
+    `[{ text, kind }]` and the row draws each as a text node in a span.
+    Nothing of a file or a command is set as HTML.
+  - **The colours are Yap's own**: `--yap-syn-*` in `app.css`, light and
+    dark, chosen to read on the row's surface and on a diff's red and green
+    lines.
+  - Only here so far: Chat's own answers and notes still show code plain
+    (`core/markdown.js`).
+- **Not done**: a read's row opening to what was read; the output of a
+  command still running.
 
 ## A step's pictures
 
@@ -1890,7 +1914,7 @@ Pages (`desktop/src/lib/`): `views/chat/` (`ChatSideSwitch`,
 `codeChats.svelte.js`, `WorkspacePicker`, `CodeChips`, `CodeEdge`,
 `codeChat.css`, `CodeEmpty`, `ModeChip`, `AgentTab`, `AgentPanel`, `AgentTimeline`, `AgentFiles`,
 `AgentPills`, `AgentTodoCard`, `AgentWork`, `StepRows`, `StepPictures`, `AgentReportCard`, `AgentConfirm`, `AgentApprove`, `RunningAgents`),
-`core/codeChats.js`, `core/agents.js`, `core/agentPanel.js`, `core/money.js`, `ui/followEnd.js`,
+`core/codeChats.js`, `core/agents.js`, `core/codeColours.js` (+ `codeColours.hljs.js`), `core/agentPanel.js`, `core/money.js`, `ui/followEnd.js`,
 `stores/agents.svelte.js`, `settings/YapCodePage.svelte`,
 `settings/ClaudeCodeStatus.svelte`.
 
@@ -2051,7 +2075,8 @@ the build's own stand-in replaying `script` from now on),
     call as a line (one alone as itself, several counted, each with its icon
     in the tab); a stretch opened as a row a step (an edit to its numbered
     diff, a command to itself and what it printed, a read that doesn't
-    open); its work in
+    open; its code in colour once a row is opened, by the file's language,
+    each token a text node, with the theme's own colours); its work in
     the thread (what it said, a line for each stretch of steps that opens
     into them, the step it's on while it works); "start fresh" a
     second agent, its tab named apart; Undo this turn (refused while a later
