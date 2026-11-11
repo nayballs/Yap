@@ -354,7 +354,7 @@ export function pillsByAnswer(agents, conversation, messages) {
 /**
  * The agent a report marker message is about: the one whose `reportMessageId`
  * it is, or one of whose turns' it is (an agent keeps its latest report's, each
- * turn its own), else — an earlier report from before turns were kept — the
+ * turn the report that told it), else — an earlier report from before turns were kept — the
  * newest agent in that chat and folder. null when its agent is gone (the card
  * still says what the marker says).
  */
@@ -366,8 +366,15 @@ export function agentOfReport(agents, markerId, conversation, folder = '') {
   return list.filter((j) => j?.conversation === conversation && j.folder === folder).sort((a, b) => (b.createdTs || 0) - (a.createdTs || 0))[0] ?? null;
 }
 
-/** The turn of `agent` a report marker is about (`null`: not known, an older agent's). */
-export const turnOfReport = (agent, markerId) => (agent?.turnList || []).find((t) => t?.reportMessageId === markerId) ?? null;
+/**
+ * The turn of `agent` a report marker is about (`null`: not known, an older
+ * agent's): the latest of the turns it covers — a request asked while the
+ * agent worked is in the same report as the turn before it (one report when
+ * it stops working, agents/runner.rs `reports`), and the card reads as the
+ * agent's latest turn then.
+ */
+export const turnOfReport = (agent, markerId) =>
+  (agent?.turnList || []).filter((t) => t?.reportMessageId === markerId).at(-1) ?? null;
 
 /**
  * **An agent tab's name** in the panel's row: "Agent · garden-planner" — and,

@@ -284,6 +284,14 @@ pub struct TurnNote {
     /// Its report's marker ("chat:<conversation>:<index>").
     #[serde(skip_serializing_if = "Option::is_none")]
     pub report_message_id: Option<String>,
+    /// **Its report waits for the next turn's** (11 Nov 2026): a request
+    /// came while it worked, so the agent went straight on and this turn
+    /// isn't reported by itself — the report once the agent stops covers it
+    /// ([`Agent::as_of_report`]). A new field of the turn's own: an older
+    /// Yap drops it on its save, and that turn is then left out of the
+    /// report (its words stay in its tab).
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub report_held: bool,
     /// Undo this turn put its files back.
     pub undone: bool,
     /// **Its to-do list**, as its latest `TodoWrite` left it (the Agent
@@ -414,6 +422,57 @@ impl Agent {
             plan_unused: t.plan_unused,
             asks: t.asks,
             ..self.clone()
+        }
+    }
+
+    /// **The turns whose reports wait for turn `n`'s** ([`TurnNote::report_held`]),
+    /// oldest first: the ones before it the agent went straight on from. Pure.
+    pub fn held_before(&self, n: u32) -> Vec<TurnNote> {
+        self.turn_list.iter().filter(|t| t.n < n && t.report_held && t.report_message_id.is_none()).cloned().collect()
+    }
+
+    /// **The latest turn whose report still waits**, when there is one: what
+    /// the agent finished and nobody was told (the turn after it was stopped).
+    /// Pure.
+    pub fn held_last(&self) -> Option<u32> {
+        self.turn_list.iter().rev().find(|t| t.report_held && t.report_message_id.is_none()).map(|t| t.n)
+    }
+
+    /// **The agent as its report of turn `n` tells it** (one report when it
+    /// stops working): turn `n`'s status, words and errors
+    /// ([`Agent::as_of_turn`]), with the files and denials of the turns held
+    /// for it first — and the turns it covers, oldest first, turn `n` last
+    /// (one: a report of that turn alone). Pure.
+    pub fn as_of_report(&self, n: u32) -> (Agent, Vec<TurnNote>) {
+        let mut covered = self.held_before(n);
+        let mut agent = self.as_of_turn(n);
+        if !covered.is_empty() {
+            let mut files: Vec<String> = Vec::new();
+            for f in covered.iter().flat_map(|t| t.files.iter()).chain(agent.files.iter()) {
+                if !files.contains(f) {
+                    files.push(f.clone());
+                }
+            }
+            agent.files = files;
+            agent.denials = covered.iter().flat_map(|t| t.denials.iter().cloned()).chain(agent.denials).collect();
+        }
+        covered.extend(self.turn_notes().into_iter().find(|t| t.n == n));
+        (agent, covered)
+    }
+
+    /// **Turn `n` was reported** (`marker`: its report's message; none: told
+    /// without one, its chat gone): its report's, and the report of every
+    /// turn that waited for it.
+    pub fn told(&mut self, n: u32, marker: Option<&str>) {
+        self.reported = true;
+        if marker.is_some() {
+            self.report_message_id = marker.map(str::to_string);
+        }
+        for t in self.turn_list.iter_mut().filter(|t| t.n == n || (t.n < n && t.report_held)) {
+            t.report_held = false;
+            if marker.is_some() {
+                t.report_message_id = marker.map(str::to_string);
+            }
         }
     }
 
@@ -733,6 +792,8 @@ pub fn detach(conversation: u64) -> usize {
             for t in j.turn_list.iter_mut() {
                 t.message_id = None;
                 t.report_message_id = None;
+                // (No chat to report in: nothing waits for a report.)
+                t.report_held = false;
             }
             n += 1;
         }
@@ -1287,12 +1348,55 @@ mod tests {
         let second = j.as_of_turn(2);
         assert_eq!((second.status, second.text.as_str(), second.files.clone(), second.error.as_deref()), (Status::Failed, "It broke.", vec!["map.js".to_string()], Some("Claude Code stopped.")));
         assert_eq!(j.as_of_turn(1).files, ["notes.md"]);
+        // A report of one turn: that turn's facts, nothing held for it.
+        let (alone, covered) = j.as_of_report(2);
+        assert_eq!((alone.files.clone(), covered.iter().map(|t| t.n).collect::<Vec<_>>()), (vec!["map.js".to_string()], vec![2]));
+        assert!(!serde_json::to_string(&j).unwrap().contains("reportHeld"), "left out while false");
         // An older Yap's file (no turnList): read, and its agent one turn.
         let old: Agent = serde_json::from_str(r#"{"id":"cd34","brief":"Tidy it","status":"done","turns":3}"#).unwrap();
         assert!(old.turn_list.is_empty());
         assert_eq!(old.turn_notes().len(), 1);
         assert_eq!(old.reference().turn, None);
         assert_eq!(j.reference().turn, Some(2));
+    }
+
+    #[test]
+    fn a_turn_the_agent_went_straight_on_from_is_in_the_next_report() {
+        let turn = |n: u32, files: &[&str], text: &str| TurnNote { n, title: format!("Request {n}"), status: Status::Done, started_ts: 1, text: text.into(), files: files.iter().map(|f| f.to_string()).collect(), ..Default::default() };
+        let mut j = Agent {
+            id: "ab12".into(),
+            status: Status::Done,
+            turn_list: vec![
+                TurnNote { report_message_id: Some("chat:3:2".into()), ..turn(1, &["old.md"], "First.") },
+                TurnNote { report_held: true, denials: vec![Denial { tool: "Bash".into(), detail: "Run a command: npm publish".into() }], ..turn(2, &["beds.js", "notes.md"], "Lined the beds up.") },
+                turn(3, &["notes.md", "legend.md"], "That needed no change."),
+            ],
+            ..Default::default()
+        };
+        // Turn 3's report: its own facts, and turn 2's before them — never
+        // turn 1's, reported already.
+        assert_eq!(j.held_last(), Some(2));
+        let (agent, covered) = j.as_of_report(3);
+        assert_eq!(covered.iter().map(|t| t.n).collect::<Vec<_>>(), [2, 3]);
+        assert_eq!((agent.status, agent.text.as_str()), (Status::Done, "That needed no change."));
+        assert_eq!(agent.files, ["beds.js", "notes.md", "legend.md"], "each file once, in the order they changed");
+        assert_eq!(agent.denials.len(), 1);
+        // Kept, and read back.
+        let back: Agent = serde_json::from_value(serde_json::to_value(&j).unwrap()).unwrap();
+        assert!(back.turn_list[1].report_held && !back.turn_list[2].report_held);
+        // Told: one report's message for both, and nothing waits any more.
+        j.told(3, Some("chat:3:6"));
+        assert_eq!(j.turn_list.iter().map(|t| (t.report_held, t.report_message_id.as_deref())).collect::<Vec<_>>(), [(false, Some("chat:3:2")), (false, Some("chat:3:6")), (false, Some("chat:3:6"))]);
+        assert_eq!((j.reported, j.report_message_id.as_deref(), j.held_last()), (true, Some("chat:3:6"), None));
+        assert_eq!(j.as_of_report(3).1.len(), 1, "a report of that turn alone from now on");
+        // The turn after a held one stopped: the held one is reported itself.
+        let mut stopped = Agent { turn_list: vec![TurnNote { report_held: true, ..turn(1, &["a.md"], "Done.") }, TurnNote { status: Status::Stopped, ..turn(2, &[], "") }], ..Default::default() };
+        assert_eq!(stopped.held_last(), Some(1));
+        let (agent, covered) = stopped.as_of_report(1);
+        assert_eq!((agent.files.clone(), covered.len()), (vec!["a.md".to_string()], 1));
+        // Told with its chat gone: nothing waits, no message kept.
+        stopped.told(1, None);
+        assert_eq!((stopped.held_last(), stopped.turn_list[0].report_message_id.clone()), (None, None));
     }
 
     #[test]
