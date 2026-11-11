@@ -138,7 +138,8 @@ pub struct ChatMessage {
 /// report. Pure.
 pub fn sent_text_at(messages: &[ChatMessage], i: usize) -> String {
     let Some(m) = messages.get(i) else { return String::new() };
-    let untold = m.kind == crate::chat::turn::AGENT_REPORT && !messages[i + 1..].iter().any(|later| later.role == "assistant");
+    // (One Chat's own answer told before it came says so in its last line.)
+    let untold = m.kind == crate::chat::turn::AGENT_REPORT && !m.text.trim_end().ends_with(crate::chat::turn::TOLD_ALREADY) && !messages[i + 1..].iter().any(|later| later.role == "assistant");
     if untold {
         return format!("{}{}", crate::chat::turn::AGENT_REPORT_UNTOLD_PREFIX, m.text);
     }
@@ -1760,6 +1761,11 @@ mod tests {
         // That question answered: the report reads as any other from then on.
         let after = [&overtaken[..], &[said("assistant", "The agent fixed them. The footer is fine.")]].concat();
         assert_eq!(sent_text_at(&after, 2), usual);
+        // A report Chat's own answer told before it came (its card alone):
+        // as any report, with that said — never "hasn't been told".
+        let card = ChatMessage { kind: "agentReport".into(), ..said("user", &format!("The agent in garden-planner: it's done.\n{}", crate::chat::turn::TOLD_ALREADY)) };
+        let told_first = [said("user", "How is it going?"), said("assistant", "It has just finished: the tests pass."), card, said("user", "Thanks")];
+        assert!(sent_text_at(&told_first, 2).starts_with("Report from the agent you started (not from the person): The agent in garden-planner: it's done.\n(You told the user this"));
         // Any other message: as it always reads; past the end: nothing.
         assert_eq!(sent_text_at(&overtaken, 3), "And the footer?");
         assert_eq!(sent_text_at(&overtaken, 9), "");

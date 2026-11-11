@@ -1229,6 +1229,21 @@ failed, or done with a question, with that turn's facts
 - **Never over an answer**: it waits while the chat is answering
   (`Stoppable::answers_if_idle`, up to 30 minutes), then answers there. A
   question asked meanwhile replaces it, as any newer question does.
+- **Chat's own answer told it already** (2026-11-11, seen in a Yap Lab run
+  on the real Claude Code: "Stop the agent." sent as it finished). The
+  report waits for the chat to be free; meanwhile Chat's model looked with
+  `agent_status`, found the agent done, and its answer told the whole
+  result — then the report said it all again. Now `agent_status` marks an
+  agent of that chat whose latest turn has ended with no report yet
+  (`Agent::unreported_end`): the result says `just_finished` and tells the
+  model to say what it did in this answer (`JUST_FINISHED_NOTE`), and the
+  turn keeps the chat's length then (`TurnNote.toldAt`). When the report
+  comes and an answer has been saved since (`report::told_by_chat`), it adds
+  **its card alone**: the marker (ending "(You told the user this in your
+  answer just before it.)", `TOLD_ALREADY`, so no later answer takes it for
+  news), the notice when no Yap window is in front, no second answer and no
+  model call. A turn that saved no answer (stopped, failed): the report
+  speaks as usual. Only for a report of one turn.
 - **A question that gets in ahead of the report's answer** (2026-11-11, seen
   in a Yap Lab run on the real Claude Code: a question sent in the seconds
   between an agent finishing and its report). The marker is in the chat
@@ -1435,7 +1450,10 @@ saves ([config-and-data.md](./config-and-data.md)).
     latest turn's, as `plan` is) — 2026-11-08, left out while false. An older
     Yap's save drops them: the next start sets the plans aside again
     (`store::migrate`: a plan waiting that isn't its chat's latest turn), and
-    a dismissed row shows again (harmless). Each turn's `reportHeld`
+    a dismissed row shows again (harmless). Each turn's `toldAt`
+    (2026-11-11: Chat's own answer read its end before its report, the
+    chat's length then; [Reports](#reports); dropped by an older Yap's save,
+    the report then says it as usual). Each turn's `reportHeld`
     (2026-11-11: its report waits for the next turn's, [Reports](#reports);
     left out while false; dropped by an older Yap's save, that turn is left
     out of the report). The page's copies also carry
@@ -1758,7 +1776,8 @@ the build's own stand-in replaying `script` from now on),
     reads waiting as its next turn, the two told in one report (one card, one
     answer); a question sent just before a report is answered (its card
     still shows, above the question, and that answer tells the report
-    first, once); "start fresh" a
+    first, once); asked how it's getting on just as it finishes (that
+    answer tells the result, the report adds its card alone); "start fresh" a
     second agent, its tab named apart; Undo this turn (refused while a later
     turn changed the same file), Undo all asked first. Light and dark.
   - `agents-plans.spec.js`: plans and the go-ahead — a Bypass chip never stops

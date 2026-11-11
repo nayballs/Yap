@@ -77,20 +77,17 @@
     color: var(--yap-primary);
   }
   .jname {
+    flex: 0 1 auto;
     min-width: 0;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
   }
+  /* The turn's title gives way first: the folder's name stays whole while
+     there's any room ("lab-san… · Add tablespoons line to RE…", 11 Nov 2026,
+     cut both in a pill with room to spare for the name). */
   .jturn {
-    min-width: 0;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-    font-weight: 500;
-    color: var(--yap-fg-80);
-  }
-  .jturn {
+    flex: 0 100 auto;
     min-width: 0;
     overflow: hidden;
     text-overflow: ellipsis;

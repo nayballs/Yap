@@ -943,6 +943,7 @@ async fn turn(id: &str, message: Option<String>) -> (Status, u32) {
             t.asks = false;
             t.error = None;
             t.undone = false;
+            t.told_at = None;
         }
     }) else {
         session.kill();

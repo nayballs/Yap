@@ -671,6 +671,61 @@ test('a question sent just before an agent’s report is answered: its card stil
   }
 });
 
+test('asked how it is getting on just as the agent finishes: that answer tells the result, and the report adds its card alone', async ({ yap, main, fakeLlm, shot }) => {
+  // 11 Nov 2026, a Yap Lab run on the real Claude Code: "Stop the agent." as
+  // it finished. Chat's model looked (agent_status), its answer told the
+  // whole result — and then the report said it all again.
+  fs.rmSync(ARGS, { force: true });
+  await script(yap, SLOWISH, 'slowish-asked');
+  const before = (await agents(yap)).length;
+  const reportsAsked = () => fakeLlm.requests.filter((r) => JSON.stringify(r.messages).includes('An agent you sent earlier')).length;
+  const askedBefore = reportsAsked();
+  await codeChat(main);
+  fakeLlm.scriptChat([
+    { tools: [{ name: 'start_agent', args: { brief: 'Read notes.md.', title: 'Read the notes' } }] },
+    { content: STARTED },
+  ]);
+  await send(main, 'Read notes.md.');
+  const agent = await newAgent(yap, before);
+  await expect(lastAnswer(main)).toHaveText(STARTED);
+  await expect.poll(async () => (await agents(yap)).find((j) => j.id === agent.id).status, { timeout: 20_000 }).toBe('running');
+  // The model takes its time: when it looks, the agent has ended, and its
+  // report is waiting for this answer.
+  fakeLlm.delay('other', 7000);
+  try {
+    fakeLlm.scriptChat([{ tools: [{ name: 'agent_status', args: {} }] }, { content: 'It has just finished: it read notes.md and changed nothing.' }]);
+    await send(main, 'How is it getting on?');
+    await expect(lastAnswer(main)).toHaveText('It has just finished: it read notes.md and changed nothing.', { timeout: 40_000 });
+    // It was told the agent had just finished, and to say so itself.
+    const looked = lastTool(fakeLlm);
+    expect(looked.data.agents[0]).toMatchObject({ id: agent.id, status: 'done', just_finished: true });
+    expect(looked.data.note).toContain('Yap shows its card under your answer and says nothing more.');
+    // The report: its card, under that answer, and no second answer.
+    const done = await ended(yap, agent.id);
+    const messages = await messagesOf(yap, done.conversation, 5);
+    expect(messages.map((m) => m.kind || m.role)).toEqual(['user', 'assistant', 'user', 'assistant', 'agentReport']);
+    expect(messages[4].text.endsWith('(You told the user this in your answer just before it.)')).toBe(true);
+    await expect(thread(main).getByTestId('chat-agent-report')).toHaveCount(1);
+    await expect(thread(main).getByTestId('chat-agent-report').locator('.jtitle')).toHaveText('Agent done · garden-planner');
+    await expect(lastAnswer(main)).toHaveText('It has just finished: it read notes.md and changed nothing.');
+    await shot(main, '09-the-answer-told-it-the-card-alone');
+    // The next question: nothing more was said meanwhile, the report's own
+    // model was never asked, and that card isn't news to tell.
+    fakeLlm.delay('other', 0);
+    fakeLlm.scriptChat([{ content: 'Yes.' }]);
+    await send(main, 'Thanks. All good?');
+    await expect(lastAnswer(main)).toHaveText('Yes.');
+    const after = await messagesOf(yap, done.conversation, 7);
+    expect(after.map((m) => m.kind || m.role)).toEqual(['user', 'assistant', 'user', 'assistant', 'agentReport', 'user', 'assistant']);
+    expect(reportsAsked()).toBe(askedBefore);
+    const next = fakeLlm.requests.filter((r) => JSON.stringify(r.messages).includes('All good?')).at(-1);
+    expect(JSON.stringify(next.messages)).toContain('(You told the user this in your answer just before it.)');
+    expect(JSON.stringify(next.messages)).not.toContain("hasn't been told about it yet");
+  } finally {
+    fakeLlm.delay('other', 0);
+  }
+});
+
 test('“start fresh”: a second agent in the workspace, its tab named apart from the first', async ({ yap, main, fakeLlm }) => {
   const { agent, conversation } = await twoTurns(yap, main, fakeLlm);
   const before = (await agents(yap)).length;
