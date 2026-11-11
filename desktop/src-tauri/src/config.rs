@@ -1332,6 +1332,13 @@ pub struct YapConfig {
     #[serde(default = "default_true")]
     #[serde(alias = "jobsCleanSpeech")]
     pub agents_clean_speech: bool,
+    /// "Work directly in Code chats" (Settings → Yap Code, 11 Nov 2026): a
+    /// message typed in a Code chat on the person's Claude plan goes
+    /// straight to the chat's Claude Code session, which does the work
+    /// itself, as Claude Code's own app does (`agents/direct.rs`). Off:
+    /// Chat's model hands each request to an agent, as before.
+    #[serde(default = "default_true")]
+    pub agents_direct: bool,
 
     // ---- Memory (Settings → Memory; `memory.rs`) ----
     // The switches only: what Yap remembers lives in memory.json, never
@@ -1754,6 +1761,7 @@ impl Default for YapConfig {
             agents_max: default_agents_max(),
             agents_animate: true,
             agents_clean_speech: true,
+            agents_direct: true,
             memory_search_chats: true,
             memory_learn_chats: true,
             memory_learn_meetings: false,
@@ -3799,7 +3807,7 @@ mod tests {
         assert!(back.agents_enabled && back.agents_pay == "key" && back.agents_max == 1);
         // A new install: Yap Code's defaults, off.
         let fresh: YapConfig = serde_json::from_str("{}").unwrap();
-        assert!(!fresh.agents_enabled && fresh.agents_animate && fresh.agents_clean_speech);
+        assert!(!fresh.agents_enabled && fresh.agents_animate && fresh.agents_clean_speech && fresh.agents_direct);
     }
 
     #[test]

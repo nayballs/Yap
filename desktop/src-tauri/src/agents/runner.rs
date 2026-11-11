@@ -230,6 +230,9 @@ pub struct Ask {
     pub phone: Option<String>,
     /// A read-only turn (its editing tools off: [`READ_ONLY_OFF`]).
     pub read_only: bool,
+    /// The person's own message from a Code chat that works directly
+    /// (`agents/direct.rs`): the turn it makes is marked so.
+    pub direct: bool,
     /// The plan turn a go-ahead carries out (`go`; none: the agent's latest
     /// turn's plan): marked allowed as the turn is asked for, so it never
     /// reads as "Plan not used" ([`go_ahead_turn`]).
@@ -381,10 +384,20 @@ const NOTE_GRACE: Duration = Duration::from_secs(20);
 /// effort, a change asked of a turn that is read only (`turn_read_only`),
 /// a phone's words for a turn above Auto (`joins`: `follow_up`'s rule) —
 /// or a request already waiting (`waiting`: this one keeps its place
-/// behind it). `turn_mode`: the mode the turn working runs at (a mode asked
-/// that is no lower changes nothing: a phone's cap). Pure.
-pub fn passes_now(ask: &Ask, turn_mode: Mode, turn_read_only: bool, joins: bool, waiting: bool) -> bool {
-    joins && !waiting && !ask.go && ask.mode.is_none_or(|m| m >= turn_mode) && !ask.model_asked && !ask.effort_asked && (ask.read_only || !turn_read_only)
+/// behind it). `turn`: what the turn working runs at — its mode (a mode
+/// asked that is no lower changes nothing: a phone's cap), its model and its
+/// effort (the person's own that are the same change nothing either: a Code
+/// chat that works directly always says its chip's). Pure.
+pub fn passes_now(ask: &Ask, turn: (Mode, &str, &str), turn_read_only: bool, joins: bool, waiting: bool) -> bool {
+    let (mode, model, effort) = turn;
+    let same = |asked: bool, now: &Option<String>, runs: &str| !asked || now.as_deref().is_none_or(|v| v == runs);
+    joins
+        && !waiting
+        && !ask.go
+        && ask.mode.is_none_or(|m| m >= mode)
+        && same(ask.model_asked, &ask.model, model)
+        && same(ask.effort_asked, &ask.effort, effort)
+        && (ask.read_only || !turn_read_only)
 }
 
 /// **The person allowed agent `id`'s plan** (Claude Code's ExitPlanMode
@@ -1799,7 +1812,7 @@ fn queued_turn(id: &str, ask: &Ask, first: bool) -> Result<(Agent, FollowedUp), 
         j.keep_turns();
         if first {
             let n = j.turn_list.last().map_or(0, |t| t.n) + 1;
-            j.turn_list.push(store::TurnNote { n, title: title.clone(), request: text.clone(), message_id: ask.message_id.clone(), status: Status::Queued, read_only: ask.read_only, ..Default::default() });
+            j.turn_list.push(store::TurnNote { n, title: title.clone(), request: text.clone(), message_id: ask.message_id.clone(), status: Status::Queued, read_only: ask.read_only, direct: ask.direct, ..Default::default() });
         } else if let Some(t) = j.turn_list.last_mut() {
             t.request = format!("{}\n\n{}", t.request.trim(), text);
             // Read only when every request it holds is (`Ask::merge`).
@@ -1894,7 +1907,7 @@ pub fn follow_up(id: &str, ask: Ask) -> Result<(Agent, FollowedUp), String> {
             // stopping it: the note goes to it now, counted before it's
             // written (a result that comes meanwhile waits for it).
             let open = !l.written.is_empty() && !l.input_over && l.stopping.is_none();
-            if let Some(session) = l.session.clone().filter(|_| open && passes_now(&ask, turn_mode, turn_read_only, joins, l.pending.is_some())) {
+            if let Some(session) = l.session.clone().filter(|_| open && passes_now(&ask, (turn_mode, current.model.as_str(), current.effort.as_str()), turn_read_only, joins, l.pending.is_some())) {
                 l.sent += 1;
                 l.written.push(note.clone());
                 l.notes.push(ask.clone());
@@ -2140,7 +2153,7 @@ fn resume(id: &str, next: Next, ask: &Ask, new_turn: bool) {
                 Next::Message(t) => t.clone(),
                 Next::CarryOn => CARRY_ON.to_string(),
             };
-            j.turn_list.push(store::TurnNote { n, title: title.clone(), request: text, message_id: ask.message_id.clone(), ..Default::default() });
+            j.turn_list.push(store::TurnNote { n, title: title.clone(), request: text, message_id: ask.message_id.clone(), direct: ask.direct, ..Default::default() });
         }
         if let Some(t) = j.turn_list.last_mut() {
             t.status = Status::Queued;
@@ -2565,28 +2578,35 @@ mod tests {
     #[test]
     fn a_note_for_a_working_agent_goes_to_it_now_unless_it_needs_a_turn_of_its_own() {
         let note = || Ask::of("Keep the headings as they are.", false);
+        // (What the turn working runs on.)
+        const M: &str = "claude-sonnet-5-5";
+        const E: &str = "medium";
         // A plain note: now, whatever the turn's mode.
-        assert!(passes_now(&note(), Mode::Bypass, false, true, false));
-        assert!(passes_now(&note(), Mode::Plan, false, true, false));
+        assert!(passes_now(&note(), (Mode::Bypass, M, E), false, true, false));
+        assert!(passes_now(&note(), (Mode::Plan, M, E), false, true, false));
         // A go-ahead, a lower mode, the person's own model or effort: each
         // is set as a turn starts — a turn of its own.
-        assert!(!passes_now(&Ask::of("Go ahead.", true), Mode::Plan, false, true, false));
-        assert!(!passes_now(&Ask { mode: Some(Mode::Plan), ..note() }, Mode::Auto, false, true, false));
-        assert!(!passes_now(&Ask { model: Some("claude-opus-5-5".into()), model_asked: true, ..note() }, Mode::Auto, false, true, false));
-        assert!(!passes_now(&Ask { effort: Some("high".into()), effort_asked: true, ..note() }, Mode::Auto, false, true, false));
+        assert!(!passes_now(&Ask::of("Go ahead.", true), (Mode::Plan, M, E), false, true, false));
+        assert!(!passes_now(&Ask { mode: Some(Mode::Plan), ..note() }, (Mode::Auto, M, E), false, true, false));
+        assert!(!passes_now(&Ask { model: Some("claude-opus-5-5".into()), model_asked: true, ..note() }, (Mode::Auto, M, E), false, true, false));
+        assert!(!passes_now(&Ask { effort: Some("high".into()), effort_asked: true, ..note() }, (Mode::Auto, M, E), false, true, false));
         // A mode no lower than the turn's changes nothing (a phone's cap),
         // and the chat's own pick of a size is the next turn's business.
-        assert!(passes_now(&Ask { mode: Some(Mode::Auto), ..note() }, Mode::Auto, false, true, false));
-        assert!(passes_now(&Ask { mode: Some(Mode::Auto), ..note() }, Mode::Plan, false, true, false));
-        assert!(passes_now(&Ask { model: Some("claude-haiku-5-5".into()), ..note() }, Mode::Auto, false, true, false));
+        assert!(passes_now(&Ask { mode: Some(Mode::Auto), ..note() }, (Mode::Auto, M, E), false, true, false));
+        assert!(passes_now(&Ask { mode: Some(Mode::Auto), ..note() }, (Mode::Plan, M, E), false, true, false));
+        assert!(passes_now(&Ask { model: Some("claude-haiku-5-5".into()), ..note() }, (Mode::Auto, M, E), false, true, false));
         // A change asked of a turn that is read only: its own turn; a
         // read-only note joins either.
-        assert!(!passes_now(&note(), Mode::Auto, true, true, false));
-        assert!(passes_now(&Ask { read_only: true, ..note() }, Mode::Auto, true, true, false));
+        assert!(!passes_now(&note(), (Mode::Auto, M, E), true, true, false));
+        assert!(passes_now(&Ask { read_only: true, ..note() }, (Mode::Auto, M, E), true, true, false));
         // A phone's words for a turn above Auto, and a request already
         // waiting (this one keeps its place behind it).
-        assert!(!passes_now(&note(), Mode::Bypass, false, false, false));
-        assert!(!passes_now(&note(), Mode::Auto, false, true, true));
+        assert!(!passes_now(&note(), (Mode::Bypass, M, E), false, false, false));
+        assert!(!passes_now(&note(), (Mode::Auto, M, E), false, true, true));
+        // The person's own model and effort that are what it runs on already
+        // (a Code chat that works directly says its chip's each time): now.
+        assert!(passes_now(&Ask { model: Some(M.into()), model_asked: true, effort: Some(E.into()), effort_asked: true, ..note() }, (Mode::Auto, M, E), false, true, false));
+        assert!(!passes_now(&Ask { model: Some(M.into()), model_asked: true, effort: Some("high".into()), effort_asked: true, ..note() }, (Mode::Auto, M, E), false, true, false));
         assert!(NOTE_LINE.contains("carry on") && NOTE_LINE.contains("summary"));
     }
 

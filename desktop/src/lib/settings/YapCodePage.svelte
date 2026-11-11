@@ -229,6 +229,15 @@
     <Toggle bind:checked={cfg.agentsEnabled} label={FEATURE_NAME} desc="Let Chat and the Voice Assistant send agents, your own Claude Code, to work in workspaces you choose." />
   </Row>
   <ClaudeCodeStatus />
+  <!-- A Code chat that works directly (agents/direct.rs, 11 Nov 2026): as
+       Claude Code's own app, with no model of Chat's wording a brief. -->
+  <Row setting="yap-code-direct">
+    <Toggle
+      bind:checked={cfg.agentsDirect}
+      label="Work directly in {CODE_NAME} chats"
+      desc="On your Claude plan, what you type in a {CODE_NAME} chat goes straight to Claude Code in that workspace. It does the work itself and answers in its own words, as Claude Code's own app does. Off: Chat hands each request to an agent and tells you what came of it."
+    />
+  </Row>
   <!-- What's said into a Code chat, cleaned up as an AI prompt, word for
        word (ai/cleanup_styles.rs `cleans_question`); plain chats have their
        own switch in Settings → Voice Assistant. -->

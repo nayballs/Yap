@@ -220,6 +220,66 @@ Decided 2026-11-07 (the maintainer and Claude), landed the same day.
     app.ts", "Searching the code · …": `claude_plan/map.rs` `Tool::Code`),
     no chip.
 
+## A Code chat that works directly
+
+2026-11-11 (`agents/direct.rs`), from the maintainer comparing Yap with
+Claude Code's own app: "We only need to send out agents if Claude thinks we
+need to, it doesn't have to." In a Code chat Chat's model couldn't touch
+files, so every request took three hops: Chat worded a brief
+(`start_agent`), an agent did the work, and Chat was asked again to tell
+what the agent had said. Claude Code's own app has one: you type, it works,
+it answers.
+
+**Now the agent is the chat.** On the person's Claude plan, a message typed
+in a Code chat goes straight to the chat's Claude Code session in its
+workspace, word for word, and no model of Chat's is asked.
+
+- **The session is what an agent always was** (`runner.rs`), so nothing
+  about safety is new: the chat's Mode is its permission mode, its prompts
+  are Yap's cards below Bypass permissions (where nothing asks), each file
+  is backed up before it's changed (Undo), one session a Code chat and
+  workspace with each message its next turn on `--resume`, a message while
+  it works handed over at once, a phone's turn at most at Auto.
+- **The person's words** (`direct::send`): the first message is its brief,
+  each later one its next turn (`runner::Ask.direct`, the turn's `direct`).
+  A plain "go ahead" to a plan waiting carries it out, as ever.
+- **Its own answer** (`report.rs` `own_words`): when it stops, its final
+  words are the chat's answer as they are — whole, each turn's when the
+  report covers several, with "It didn't finish: …" when it didn't — after
+  the quiet "Agent done · changed …" line (a plan's Go ahead is there). No
+  model is asked to word it.
+- **On the chat's own model**: the plan model and effort its chip shows,
+  kept as the person's choice, so it's the same from turn to turn (a session
+  read afresh on another model costs its whole context again: [What a turn
+  cost](#what-a-turn-cost)). Chat no longer sizes these turns.
+- **Agents when it decides**: Claude Code's own subagents. Yap's
+  `start_agent` isn't offered to the session.
+- **The rule after outside content has nothing to guard here**: it's about
+  a model wording a brief from what it read ([The safety
+  rule](#the-safety-rule)). The instruction is the person's own typed words;
+  what the session may do is the Mode's business.
+- **In the thread** (`core/agents.js` `pillsByQuestion`): its quiet line,
+  its to-do card and its work ([Around the tab](#around-the-tab)) hang under
+  the person's message, with no bubble of Chat's between, then the report
+  line and the answer. The page keeps the question as saved when
+  `chat_send` answers `direct` (the session's tab opens beside it).
+- **When** (`direct::applies`, pure): "Work directly in Code chats" on
+  (Settings → Yap Code, `agentsDirect`, on by default), Yap Code on with
+  Claude Code on the PC, a Code chat whose model is on the plan, a message
+  typed or dictated in the Chat view, with no screenshot, selection, page
+  passage, Skill or "think it through". **Everything else is handed over as
+  before** by Chat's model: a Code chat on an API key or an on-device model,
+  the Voice Assistant's spoken question, a question from the phone, a
+  message with a screenshot.
+- **Not yet**: Stop in the composer (its panel has it), screenshots to the
+  session, Yap's own chat tools inside a direct Code chat (the browser
+  panel, memory, connectors, documents), the phone and the Voice Assistant
+  going direct, its final words shown as they stream.
+- **Tests**: `agents-direct.spec.js` (the first message, the next on
+  `--resume`, a message mid-work, the switch off). The e2e base config has
+  `agentsDirect: false`, so every older spec still tests the hand-off; Yap
+  Lab's `code-chat-direct` script runs it on the real Claude Code.
+
 ## Turns: one agent per Code chat
 
 2026-11-07, after the maintainer's real use: a follow-up on the same project
@@ -1519,7 +1579,10 @@ saves ([config-and-data.md](./config-and-data.md)).
     latest turn's, as `plan` is) — 2026-11-08, left out while false. An older
     Yap's save drops them: the next start sets the plans aside again
     (`store::migrate`: a plan waiting that isn't its chat's latest turn), and
-    a dismissed row shows again (harmless). Each turn's `toldAt`
+    a dismissed row shows again (harmless). Each turn's `direct`
+    (2026-11-11: the person's own message, sent straight to the Code chat's
+    session; left out while false; dropped by an older Yap's save, the turn
+    reads as one Chat sent). Each turn's `toldAt`
     (2026-11-11: Chat's own answer read its end before its report, the
     chat's length then; [Reports](#reports); dropped by an older Yap's save,
     the report then says it as usual). Each turn's `reportHeld`

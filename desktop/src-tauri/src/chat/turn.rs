@@ -146,6 +146,10 @@ pub(crate) struct ChatTurn {
     pub pages: Vec<crate::chat::pages::ShownPage>,
     /// The buttons it offered for the person's browser (`chat/pages.rs`).
     pub offers: Vec<crate::chat::pages::BrowserOffer>,
+    /// **Sent straight to the Code chat's session** (`agents/direct.rs`):
+    /// no answer of Chat's — `reply` is empty and nothing was saved after
+    /// the question. The session's own words come as its report.
+    pub direct: Option<crate::agents::store::AgentRef>,
 }
 
 impl ChatTurn {
@@ -422,6 +426,11 @@ async fn answer_turn(
     let (sizing, fitted) = history::Sizing::measure(&t, conversation_id).await?;
     t.gates = fitted;
     let opened = open(&t, conversation_id, asked)?;
+    // A Code chat that works directly: the person's message goes straight
+    // to its session, and Chat's model isn't asked (agents/direct.rs).
+    if let Some(turn) = sent_directly(&t, &opened)? {
+        return Ok(turn);
+    }
     if let Some(turn) = remembered(&t, &opened).await? {
         return Ok(turn);
     }
@@ -453,6 +462,46 @@ async fn answer_turn(
     };
     let answer = finish::check(&t, answer, &opened.conv, &built)?;
     finish::save(&t, &opened, answer, &built, &fitted, &sizing, watch.as_ref()).await
+}
+
+/// **A message typed in a Code chat that works directly**
+/// (`agents::direct::applies`): sent to the chat's session as its next turn
+/// (its brief, when it's the first), on the chat's own model and effort —
+/// the turn it is, with no answer. `None`: Chat's model answers, as ever.
+fn sent_directly(t: &Asked<'_>, opened: &Opened) -> Result<Option<ChatTurn>, String> {
+    let Some(folder) = opened.code.as_ref() else { return Ok(None) };
+    let message = crate::agents::direct::Message {
+        setting: t.cfg.agents_direct,
+        offered: crate::agents::offered(&t.cfg),
+        code_chat: true,
+        on_plan: t.ep.provider == crate::ai::claude_plan::PROVIDER,
+        assistant: t.scope == Some("assistant"),
+        with_more: t.skill.is_some() || t.meetings || t.about_selection.is_some() || opened.selection.is_some() || !crate::snip::turn::images().is_empty() || crate::chat::think::wanted(),
+    };
+    if !crate::agents::direct::applies(message) {
+        return Ok(None);
+    }
+    // (Its effort: the one chosen for that model in the picker, else its own.)
+    let effort = crate::ai::effort::info(&t.cfg, &t.ep.provider, &t.ep.model).and_then(|i| i.chosen.or(i.default)).map(str::to_string);
+    let message_id = format!("chat:{}:{}", opened.conv.id, opened.user_index);
+    let sent = crate::agents::direct::send(opened.conv.id, folder, &t.text, message_id, t.by_voice, &t.ep.model, effort.as_deref())?;
+    Ok(Some(ChatTurn {
+        conversation_id: opened.conv.id,
+        user_index: opened.user_index,
+        index: opened.user_index,
+        reply: String::new(),
+        tools_used: Vec::new(),
+        model: None,
+        sources: Vec::new(),
+        stopped: false,
+        tokens: None,
+        documents: Vec::new(),
+        pictures: Vec::new(),
+        files: Vec::new(),
+        pages: Vec::new(),
+        offers: Vec::new(),
+        direct: Some(sent.reference()),
+    }))
 }
 
 /// **The question saved** in its conversation (`conversation_id`'s, or a
@@ -519,6 +568,7 @@ async fn remembered(t: &Asked<'_>, opened: &Opened) -> Result<Option<ChatTurn>, 
         files: Vec::new(),
         pages: Vec::new(),
         offers: Vec::new(),
+        direct: None,
     }))
 }
 

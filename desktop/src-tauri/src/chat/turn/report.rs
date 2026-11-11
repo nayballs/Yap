@@ -195,6 +195,35 @@ pub fn fallback(agent: &Agent, covered: &[TurnNote]) -> String {
     }
 }
 
+/// **A direct turn's answer**: the session's own final words, whole (each
+/// turn's the report covers) — and, when it didn't finish, that and why.
+/// Pure.
+pub fn own_words(agent: &Agent, covered: &[TurnNote]) -> String {
+    let each: Vec<&str> = if covered.len() > 1 { covered.iter().map(|t| t.text.trim()).collect() } else { vec![agent.text.trim()] };
+    let said = each.into_iter().filter(|t| !t.is_empty()).collect::<Vec<_>>().join("
+
+");
+    let said = crate::agents::steps::clip(&said, 20_000);
+    if agent.status != Status::Failed {
+        return said;
+    }
+    let why = agent.error.as_deref().map(str::trim).filter(|e| !e.is_empty()).unwrap_or("it stopped before it finished");
+    if said.is_empty() || said == why {
+        format!("It didn't finish: {why}")
+    } else {
+        format!("{said}
+
+It didn't finish: {why}")
+    }
+}
+
+/// Who answered a direct turn: the session's model, on the person's plan
+/// (or their key, when agents pay with it).
+fn session_model(agent: &Agent) -> crate::chat::chats::ChatModel {
+    let (provider, base_url) = if agent.pay == "key" { ("anthropic", "https://api.anthropic.com") } else { (crate::ai::claude_plan::PROVIDER, crate::ai::claude_plan::BASE_URL) };
+    crate::ai::ai_model::describe(provider, &agent.model, base_url, "").chat_model()
+}
+
 /// The rule for this report's kind (`requests`: how many it covers).
 fn rules(agent: &Agent, requests: usize) -> String {
     let more = if agent.status == Status::Failed {
@@ -265,10 +294,17 @@ async fn report(id: &str, n: u32, held: bool) {
         notice(&agent, &fallback(&agent, &covered));
         return;
     }
-    let asked = ask_model(&agent, covered.len(), conv);
-    let answered = tokio::select! {
-        a = asked => Some(a),
-        _ = stop.halted() => None,
+    // A Code chat that works directly (agents/direct.rs): the session's own
+    // words are the chat's answer, as they are. Else Chat's model words it.
+    let direct = !covered.is_empty() && covered.iter().all(|t| t.direct);
+    let answered = if direct {
+        Some(Ok((own_words(&agent, &covered), session_model(&agent))))
+    } else {
+        let asked = ask_model(&agent, covered.len(), conv);
+        tokio::select! {
+            a = asked => Some(a),
+            _ = stop.halted() => None,
+        }
     };
     let Some(answered) = answered else {
         // A question came first: it reads the report itself.
@@ -622,6 +658,29 @@ Its own words: Done.");
         let card = ChatMessage { kind: AGENT_REPORT.into(), ..said("user", "The agent in recipe-box: it's done.") };
         assert!(!told_by_chat(Some(3), &[&told[..], &[card]].concat()));
         assert!(TOLD_ALREADY.starts_with("(You told the user this"));
+    }
+
+    #[test]
+    fn a_direct_turns_answer_is_the_sessions_own_words() {
+        let turn = |n: u32, text: &str| TurnNote { n, status: Status::Done, started_ts: 1, text: text.into(), direct: true, ..Default::default() };
+        let done = Agent { status: Status::Done, text: "I added the watering schedule to notes.md. The tests pass.".into(), ..agent() };
+        // One turn: its final words, as they are.
+        assert_eq!(own_words(&done, &[turn(1, "I added the watering schedule to notes.md. The tests pass.")]), "I added the watering schedule to notes.md. The tests pass.");
+        // A note it never read ran as its next turn: both turns' words.
+        let two = [turn(1, "I added the schedule."), turn(2, "The headings are as they were.")];
+        assert_eq!(own_words(&Agent { text: "The headings are as they were.".into(), ..done.clone() }, &two), "I added the schedule.
+
+The headings are as they were.");
+        // It didn't finish: said, with why — once.
+        let failed = Agent { status: Status::Failed, error: Some("Claude Code stopped before it finished.".into()), text: "I got as far as the tests.".into(), ..agent() };
+        assert_eq!(own_words(&failed, &[]), "I got as far as the tests.
+
+It didn't finish: Claude Code stopped before it finished.");
+        let same = Agent { text: "Claude Code stopped before it finished.".into(), ..failed.clone() };
+        assert_eq!(own_words(&same, &[]), "It didn't finish: Claude Code stopped before it finished.");
+        assert_eq!(own_words(&Agent { text: String::new(), error: None, ..failed }, &[]), "It didn't finish: it stopped before it finished");
+        // Nothing said: nothing (the report then says the agent is done).
+        assert_eq!(own_words(&Agent { text: String::new(), ..done }, &[]), "");
     }
 
     #[test]

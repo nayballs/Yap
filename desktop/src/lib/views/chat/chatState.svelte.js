@@ -1453,6 +1453,20 @@ export function createChatState({ onopensettings = () => null, onopennote = () =
         if (res.speak && res.messageId) speakReply(res.spokenText || res.reply, res.messageId);
         return;
       }
+      // A Code chat that works directly (agents/direct.rs): the message
+      // went straight to its session — no answer of Chat's. The question
+      // stays as saved (its id is what its session's work hangs under), the
+      // agent's tab opens beside it, and its own words come as its report.
+      if (res.direct) {
+        messages = messages
+          .filter((m) => !(m.role === 'assistant' && m.streaming && m.turn === turn))
+          .map((m) => (m.role === 'user' && m.turn === turn && m.id == null ? { ...m, id: res.userMessageId ?? rec.askedId ?? null } : m));
+        refreshList();
+        followThread();
+        contextStamp += 1;
+        doc.showAgent({ ...res.direct, auto: true });
+        return;
+      }
       const qi = questionAt(rec);
       if (qi < 0) {
         // (Read back without its question: the conversation as saved.)

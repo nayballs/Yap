@@ -121,6 +121,7 @@ export const FIELD_DEFAULTS = {
   agentsAnimate: true,
   // "Clean up what you say in Code chats" (ai/cleanup_styles.rs `cleans_question`).
   agentsCleanSpeech: true,
+  agentsDirect: true,
   // Memory (MemorySection.svelte, memory.rs): the switches only.
   memorySearchChats: true,
   memoryLearnChats: true,

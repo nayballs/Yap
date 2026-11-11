@@ -69,6 +69,11 @@ export const BASE_CONFIG = {
   // set up sees its questions' calls as before.
   chatCleanSpeech: false,
   agentsCleanSpeech: false,
+  // A Code chat on the plan hands its requests to an agent through Chat's
+  // model unless a spec asks otherwise (on by default: agents-direct.spec.js
+  // turns it on), so the specs of that hand-off see it as before. Yap Lab's
+  // test Yap starts from this too: its scripts say which they test.
+  agentsDirect: false,
   configVersion: 1,
 };
 

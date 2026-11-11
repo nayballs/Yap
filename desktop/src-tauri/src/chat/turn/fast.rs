@@ -106,6 +106,7 @@ pub(super) fn page_turn(
         files: Vec::new(),
         pages: vec![opened.page],
         offers: Vec::new(),
+        direct: None,
     })
 }
 
@@ -157,6 +158,7 @@ pub(super) fn agent_answer_turn(
         files: Vec::new(),
         pages: Vec::new(),
         offers: Vec::new(),
+        direct: None,
     })
 }
 
@@ -199,6 +201,7 @@ pub(super) async fn app_turn(
         files: Vec::new(),
         pages: Vec::new(),
         offers: Vec::new(),
+        direct: None,
     })
 }
 
@@ -240,6 +243,7 @@ pub(super) fn skill_asks_turn(
         files: Vec::new(),
         pages: Vec::new(),
         offers: Vec::new(),
+        direct: None,
     })
 }
 
@@ -293,6 +297,7 @@ pub(super) async fn passages_turn(
         files: Vec::new(),
         pages: Vec::new(),
         offers: Vec::new(),
+        direct: None,
     })
 }
 

@@ -1,0 +1,31 @@
+{
+  "name": "code-chat-direct",
+  "about": "A Code chat that works directly (11 Nov 2026, agents/direct.rs), as Claude Code's own app does: in a Bypass Code chat on lab-sandbox, a typed request goes straight to the chat's Claude Code session. Chat's model isn't asked (the turn has no tool calls and no answer of its own), the session's words and steps show under the message, and its final words are the answer. Then a second message: the same session's next turn. Needs the real Claude Code (a --fake lab's Chat isn't on the plan, so nothing goes directly there).",
+  "needs": { "yapCode": true },
+  "steps": [
+    { "set": { "bypass": true, "config": { "agentsDirect": true } }, "note": "The lab's test Yap starts with the hand-off (the e2e suite's base config): this script turns working directly on." },
+
+    { "ask": "Add tablespoons to convert.js (1 tbsp = 15 ml), add a test for it, run the tests, and tick it off in TODO.md. Read each file before you change it.", "chat": "code:lab-sandbox", "timeout": 300 },
+    {
+      "expect": { "status": "answered", "notUsed": "/^(start_agent|message_agent)$/", "tools": 0, "card": false },
+      "note": "Straight to its session: Chat's model made no call (an agent's own calls aren't the turn's)."
+    },
+    { "shot": "working", "window": "main", "note": "Its words and steps, live, under the message." },
+    { "wait": "agents", "timeout": 900 },
+    { "expect": { "agent": { "status": "done", "error": null, "mode": "bypassPermissions" } } },
+    {
+      "expect": { "selector": { "window": "main", "css": "[data-testid=\"chat-agent-work\"]", "count": 1 }, "visible": "Agent done" },
+      "note": "Its work under the message, and its report line."
+    },
+    { "expect": { "selector": { "window": "main", "css": ".msgs .cbubble.assistant", "count": 1 } }, "note": "One answer: its own final words. No \"On it\" of Chat's before it." },
+    { "shot": "first-answer", "window": "main" },
+
+    { "ask": "Now add a line about tablespoons to the README.", "chat": "same", "timeout": 300 },
+    { "expect": { "status": "answered", "tools": 0, "card": false } },
+    { "wait": "agents", "timeout": 900 },
+    { "expect": { "agent": { "status": "done", "error": null } } },
+    { "expect": { "selector": { "window": "main", "css": "[data-testid=\"chat-agent-report\"]", "count": 2 } }, "note": "Its next turn, with its own report line." },
+    { "expect": { "selector": { "window": "main", "css": "[data-testid=\"chat-agent-row\"]", "count": 2 } }, "note": "The same session: two rows in its panel, never a second agent." },
+    { "shot": "next-turn", "window": "main" }
+  ]
+}

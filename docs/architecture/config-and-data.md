@@ -872,7 +872,9 @@
   (`dismissed`, the turn's) — 2026-11-08, flags left out while false, whose
   loss on an older Yap's save is harmless: at the next start
   `store::migrate` sets aside again every plan still waiting that isn't its
-  chat's latest turn, and a dismissed row just shows again; a turn whose
+  chat's latest turn, and a dismissed row just shows again; a turn the person's own message started in a Code chat that works
+  directly (`direct`, the turn's, 2026-11-11, left out while false); a turn
+  whose
   report waits for the next one's (`reportHeld`, the turn's, 2026-11-11: a
   request came while it worked, so one report covers both; left out while
   false, and lost on an older Yap's save that turn is just left out of the
