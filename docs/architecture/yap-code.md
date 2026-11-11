@@ -1229,6 +1229,23 @@ failed, or done with a question, with that turn's facts
 - **Never over an answer**: it waits while the chat is answering
   (`Stoppable::answers_if_idle`, up to 30 minutes), then answers there. A
   question asked meanwhile replaces it, as any newer question does.
+- **A question that gets in ahead of the report's answer** (2026-11-11, seen
+  in a Yap Lab run on the real Claude Code: a question sent in the seconds
+  between an agent finishing and its report). The marker is in the chat
+  already, with no answer of its own, so:
+  - **that question's answer tells the report first**: a marker with no
+    answer after it reads to the model as "Report from the agent you
+    started (not from the person). The user hasn't been told about it yet:
+    before anything else, tell them in a sentence or two what the agent
+    did…" (`AGENT_REPORT_UNTOLD_PREFIX`, `chats::sent_text_at`: the tool
+    loop's history, the fitted history and a plan chat's "earlier in this
+    chat" block). Once an answer follows it, it reads as any report;
+  - **its card shows**: the Chat view reads the open chat again when a
+    report lands, but never while its own question is being answered, and
+    that one was skipped for good — no "Agent done" card, and the thread's
+    message ids one off (no pill under the next answer) until the chat was
+    opened again. Now a reload asked for meanwhile is done once the answer
+    is in (`chatState.svelte.js` `reloadWanted`).
 - **The marker**: a message of kind `agentReport` (`ChatMessage.kind`) with the
   agent's facts ("The agent in garden-planner: it's done.", the files it changed
   and that they were backed up — or that no backups were made —, how many
@@ -1739,7 +1756,9 @@ the build's own stand-in replaying `script` from now on),
     turn; a note while it works handed to it at once (the same turn, the
     same process, read at its tool call's end, one report), and one it never
     reads waiting as its next turn, the two told in one report (one card, one
-    answer); "start fresh" a
+    answer); a question sent just before a report is answered (its card
+    still shows, above the question, and that answer tells the report
+    first, once); "start fresh" a
     second agent, its tab named apart; Undo this turn (refused while a later
     turn changed the same file), Undo all asked first. Light and dark.
   - `agents-plans.spec.js`: plans and the go-ahead — a Bypass chip never stops
