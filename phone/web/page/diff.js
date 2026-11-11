@@ -52,6 +52,8 @@ export function renderDiff({ lines = [], more = false, wrap = false, loading = f
     const code = h('pre', { class: 'dcode', tabindex: '0', 'aria-label': 'The changes' });
     for (const raw of lines) {
       const l = diffLine(raw);
+      // (A part's place in the file, `@@ -a,b +c,d @@`, reads as a gap: none before the first part.)
+      if (String(raw).startsWith('@@ ') && !code.childNodes.length) continue;
       code.append(
         h(
           'span',

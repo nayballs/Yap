@@ -52,10 +52,19 @@ pub fn worth_listing(agents: &[Agent], now: u64) -> Vec<&Agent> {
     out
 }
 
+/// What a command printed is for its row in the PC's thread: a phone's view
+/// has no such row, so its text never goes (`output` null). Pure.
+fn without_output(event: &mut Value) {
+    if event.get("output").is_some_and(|o| !o.is_null()) {
+        event["output"] = Value::Null;
+    }
+}
+
 /// A live event as the phone gets it: an edit's lines past
 /// [`wire::LIVE_DIFF_LINES`] left out (`lines` null, `more`), asked for
-/// with `agent_diff`. Pure.
+/// with `agent_diff`; a command's output never. Pure.
 pub fn live(mut event: Value) -> Value {
+    without_output(&mut event);
     if let Some(d) = event.get_mut("diff").and_then(Value::as_object_mut) {
         if d.get("lines").and_then(Value::as_array).is_some_and(|l| l.len() > wire::LIVE_DIFF_LINES) {
             d.insert("lines".into(), Value::Null);
@@ -66,8 +75,9 @@ pub fn live(mut event: Value) -> Value {
 }
 
 /// An event in a snapshot or a page: its diff's lines left out, its counts
-/// kept. Pure.
+/// kept; a command's output never. Pure.
 pub fn stripped(mut event: Value) -> Value {
+    without_output(&mut event);
     if let Some(d) = event.get_mut("diff").and_then(Value::as_object_mut) {
         if d.get("lines").is_some_and(|l| !l.is_null()) {
             d.insert("lines".into(), Value::Null);
@@ -232,6 +242,10 @@ mod tests {
         let s = stripped(small);
         assert_eq!((s["diff"]["lines"].is_null(), s["diff"]["removed"].as_u64()), (true, Some(1)));
         assert_eq!(stripped(json!({ "step": "x" })), json!({ "step": "x" }));
+        // What a command printed never goes to a phone, live or in a snapshot.
+        let printed = json!({ "id": "ab12", "call": "toolu_1", "output": { "text": "3 passed" } });
+        assert_eq!(live(printed.clone()), json!({ "id": "ab12", "call": "toolu_1", "output": null }));
+        assert_eq!(stripped(printed), json!({ "id": "ab12", "call": "toolu_1", "output": null }));
     }
 
     #[test]

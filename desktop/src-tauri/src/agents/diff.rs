@@ -4,6 +4,12 @@
 //! - **Edit / MultiEdit**: their `old_string` and `new_string` (MultiEdit's
 //!   `edits[]`), lines removed and added with a few unchanged ones around
 //!   them; MultiEdit's edits one after another.
+//! - **Where in the file** ([`of_patch`], 11 Nov 2026): Claude Code's own
+//!   patch for the edit, when its result has one (`structuredPatch`: each
+//!   part with the number of its first line before and after) — the same
+//!   lines, each part under a `@@ -a,b +c,d @@` line, so the thread's row
+//!   can number them as Claude Code's transcript does. Without one (an
+//!   older Claude Code, the tests' stand-in), the lines from the input.
 //! - **Write**: "New file · N lines", "Rewritten · N lines" when the file
 //!   was there before (the backup manifest knows), or "Written" when Yap
 //!   can't tell (no backups were made): its first lines.
@@ -40,7 +46,9 @@ pub struct FileDiff {
     /// before isn't known).
     pub kind: String,
     /// The lines, each with its mark first: `-` removed, `+` added, ` `
-    /// unchanged; a lone `@` is a gap between two parts.
+    /// unchanged; a lone `@` is a gap between two parts, and `@@ -a,b +c,d
+    /// @@` a part's place in the file (its first line's number before and
+    /// after, and how many lines), when Claude Code said it.
     pub lines: Vec<String>,
     /// Lines added and removed in all (shown or not).
     pub added: usize,
@@ -180,6 +188,41 @@ pub fn of_edit(tool: &str, input: &Value, file: &str) -> Option<FileDiff> {
     (!d.lines.is_empty()).then_some(d)
 }
 
+/// **An edit's diff from Claude Code's own patch** (its tool result's
+/// `structuredPatch`: `[{oldStart, oldLines, newStart, newLines, lines}]`,
+/// each line with its mark first, as Claude Code 2.1.296 gives one): every
+/// part under its `@@ -a,b +c,d @@` line. `kind` "edit", or a Write's.
+/// `None` with no patch, or one that changes nothing.
+pub fn of_patch(file: &str, kind: &str, result: &Value) -> Option<FileDiff> {
+    let hunks = result.get("structuredPatch")?.as_array()?;
+    let mut d = FileDiff { file: file.to_string(), kind: kind.to_string(), all: result.get("replaceAll").and_then(Value::as_bool).unwrap_or(false), ..Default::default() };
+    for h in hunks {
+        let n = |k: &str| h.get(k).and_then(Value::as_u64).unwrap_or(0);
+        let lines: Vec<&str> = h.get("lines").and_then(Value::as_array).into_iter().flatten().filter_map(Value::as_str).collect();
+        if lines.is_empty() {
+            continue;
+        }
+        d.lines.push(format!("@@ -{},{} +{},{} @@", n("oldStart"), n("oldLines"), n("newStart"), n("newLines")));
+        for l in lines {
+            let mut chars = l.chars();
+            let op = match chars.next() {
+                Some('+') => Op::Added,
+                Some('-') => Op::Removed,
+                Some(' ') => Op::Same,
+                // (Git's "no newline at end of file" line, an empty one.)
+                _ => continue,
+            };
+            match op {
+                Op::Added => d.added += 1,
+                Op::Removed => d.removed += 1,
+                Op::Same => {}
+            }
+            d.lines.push(marked(op, chars.as_str()));
+        }
+    }
+    (d.added + d.removed > 0).then_some(d)
+}
+
 /// **A Write's diff** of `file`: its `content`'s lines, all added; `kind`
 /// "new", "rewrite" or "write".
 pub fn of_write(file: &str, content: &str, kind: &str) -> FileDiff {
@@ -187,18 +230,23 @@ pub fn of_write(file: &str, content: &str, kind: &str) -> FileDiff {
     FileDiff { file: file.to_string(), kind: kind.to_string(), added: lines.len(), lines, ..Default::default() }
 }
 
-/// `d` cut to [`EDIT_MAX`] lines and the `left` the agent has (gaps not
-/// counted); the lines it keeps.
+/// A gap, or a part's place in the file: not one of its lines.
+fn between(l: &str) -> bool {
+    l.starts_with('@')
+}
+
+/// `d` cut to [`EDIT_MAX`] lines and the `left` the agent has (gaps and
+/// places not counted); the lines it keeps.
 pub fn capped(mut d: FileDiff, left: usize) -> (FileDiff, usize) {
     let max = EDIT_MAX.min(left);
-    let total = d.lines.iter().filter(|l| *l != "@").count();
+    let total = d.lines.iter().filter(|l| !between(l)).count();
     if total <= max {
         return (d, total);
     }
     let mut kept = 0;
     let mut end = 0;
     for (i, l) in d.lines.iter().enumerate() {
-        if l != "@" {
+        if !between(l) {
             if kept == max {
                 break;
             }
@@ -207,7 +255,7 @@ pub fn capped(mut d: FileDiff, left: usize) -> (FileDiff, usize) {
         end = i + 1;
     }
     d.lines.truncate(end);
-    while d.lines.last().is_some_and(|l| l == "@") {
+    while d.lines.last().is_some_and(|l| between(l)) {
         d.lines.pop();
     }
     d.more += total - kept;
@@ -298,5 +346,36 @@ mod tests {
         let d = of_edit("Edit", &json!({ "old_string": old, "new_string": new }), "x").unwrap();
         assert_eq!((d.added, d.removed), (1_200, 1_200));
         assert_eq!((d.lines[0].as_str(), d.lines[1_200].as_str()), ("-old 0", "+new 0"));
+    }
+
+    /// As Claude Code 2.1.296's Edit result has it (`tool_use_result`,
+    /// checked on the real one, 11 Nov 2026).
+    #[test]
+    fn claude_codes_own_patch_says_where_in_the_file_each_part_is() {
+        let result = json!({
+            "filePath": "notes.txt",
+            "oldString": "line five",
+            "newString": "line 5",
+            "structuredPatch": [
+                { "oldStart": 2, "oldLines": 7, "newStart": 2, "newLines": 7, "lines": [" line two", " line three", " line four", "-line five", "+line 5", " line six", " line seven", " line eight"] },
+                { "oldStart": 40, "oldLines": 1, "newStart": 40, "newLines": 2, "lines": [" last", "+added", "\\ No newline at end of file"] }
+            ],
+            "userModified": false,
+            "replaceAll": true
+        });
+        let d = of_patch("notes.txt", "edit", &result).unwrap();
+        assert_eq!(
+            d.lines,
+            ["@@ -2,7 +2,7 @@", " line two", " line three", " line four", "-line five", "+line 5", " line six", " line seven", " line eight", "@@ -40,1 +40,2 @@", " last", "+added"]
+        );
+        assert_eq!((d.added, d.removed, d.kind.as_str(), d.all), (2, 1, "edit", true));
+        // A place isn't one of its lines: the caps count the lines, and never end on one.
+        let (cut, kept) = capped(d.clone(), 8);
+        assert_eq!((cut.lines.len(), cut.lines.last().map(String::as_str), kept, cut.more), (9, Some(" line eight"), 8, 2));
+        // No patch, an empty one (a new file's), or one that changes nothing: none.
+        assert_eq!(of_patch("a", "edit", &json!({ "filePath": "a" })), None);
+        assert_eq!(of_patch("a", "new", &json!({ "type": "create", "structuredPatch": [] })), None);
+        assert_eq!(of_patch("a", "edit", &json!({ "structuredPatch": [{ "oldStart": 1, "oldLines": 1, "newStart": 1, "newLines": 1, "lines": [" same"] }] })), None);
+        assert_eq!(of_patch("a", "edit", &json!("Error: the file has changed")), None);
     }
 }

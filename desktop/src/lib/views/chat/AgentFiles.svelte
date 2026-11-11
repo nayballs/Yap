@@ -40,7 +40,8 @@
                     {#each d.lines as l, k (k)}
                       {@const x = diffLine(l)}
                       {#if x.mark === 'gap'}
-                        <div class="dl gap" aria-hidden="true">⋯</div>
+                        <!-- (A part's place in the file reads as a gap: none before the first part.) -->
+                        {#if k > 0 || l === '@'}<div class="dl gap" aria-hidden="true">⋯</div>{/if}
                       {:else}
                         <div class="dl {x.mark}"><span class="dm" aria-hidden="true">{x.mark === 'del' ? '−' : x.mark === 'add' ? '+' : ' '}</span><span class="dt">{x.text || ' '}</span>{#if x.mark !== 'ctx'}<span class="sr-only">{x.mark === 'del' ? ' (removed)' : ' (added)'}</span>{/if}</div>
                       {/if}

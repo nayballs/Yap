@@ -27,6 +27,8 @@
 //!   description, else tidied); Claude Code's to-do list.
 //! - [`diff`]: an edit's lines removed and added, a written file's lines,
 //!   within their caps, for the tab's "Files changed".
+//! - [`output`]: what a command printed, its start and its end, for its
+//!   row in the thread.
 //! - [`pictures`]: a picture a step's answer carried (a picture file read, a
 //!   screenshot), kept in `agents/<id>/pictures/` and shown on its line.
 //! - [`usage`]: what each turn used — its tokens, its context's fill, an
@@ -60,6 +62,7 @@ pub mod diff;
 pub mod direct;
 pub mod workspaces;
 pub mod modes;
+pub mod output;
 pub mod pictures;
 pub mod remote;
 pub mod runner;

@@ -3,36 +3,31 @@
   // transcript): under the answer that sent it, in a Code chat, what the agent
   // says as it goes — plain words, no bubble — and between them one quiet line
   // for each stretch of steps ("Ran 3 commands, edited convert.js +4 −1 ›"),
-  // which opens into those steps. Before, the thread said "On it" and then
-  // nothing until the report: all of this was only in the Agent tab.
+  // which opens into a row for each step, each opening to its diff or its
+  // command and what it printed (StepRows). Before, the thread said "On it"
+  // and then nothing until the report: all of this was only in the Agent tab.
   //
   // - Its log comes from stores/agentLogs.svelte.js (read once, then live);
   //   the turn's events are `turnsOf`'s, grouped by core/agents.js `workOf`.
   // - While it works, the last line is the step it's on, with a spinner.
   // - A step whose tool call came back with a picture (a picture file read,
   //   a screenshot a tool took: agents/pictures.rs) ends its line with it,
-  //   small (StepPictures), as Claude Code's transcript does; opened, the
-  //   step shows it larger. A click opens it (`onview`).
+  //   small (StepPictures), as Claude Code's transcript does; opened, its
+  //   row has it. A click opens it (`onview`).
   // - Its final words aren't here: its report tells them, right below.
   // - Nothing to show (no log yet, a turn that never ran): nothing drawn.
   //
   // Its own small chunk (ChatThread imports it lazily, as the to-do card).
-  import { workOf, workSummary, turnsOf, stepKind, groupPictures, shownStepPicture } from '../../core/agents.js';
+  import { workOf, workSummary, turnsOf, groupPictures, shownStepPicture } from '../../core/agents.js';
   import { isLive } from '../../core/agentNow.js';
   import { renderMarkdown } from '../../core/markdown.js';
   import { agentLogs, watchAgentLog } from '../../stores/agentLogs.svelte.js';
-  import { placed, shown } from './chatImages.js';
-  import { screenPixels } from './chatShots.svelte.js';
   import StepPictures from './StepPictures.svelte';
-
-  /** A step's picture, opened: at most this big (CSS px). */
-  const STEP_PIC_W = 280;
-  const STEP_PIC_H = 180;
+  import StepRows from './StepRows.svelte';
 
   /** `agent`: the pill's (its record, as the store has it); `turn`: which of its turns; `line`: the line it's on now; `onview(picture)`: open a step's picture (a `ShownPicture`). */
   let { agent, turn = 1, line = '', onview = null } = $props();
   const view = (p) => onview?.(shownStepPicture(p, agent?.folder));
-  let gone = $state({});
 
   $effect(() => {
     if (agent?.id) watchAgentLog(agent.id);
@@ -67,35 +62,7 @@
             <!-- The pictures its steps came back with, at the end of the line (opened: each by its step). -->
             {#if !open}<StepPictures pictures={groupPictures(it)} onview={view} />{/if}
           </div>
-          {#if open}
-            <ol class="wsteps">
-              {#each it.steps as s, k (k)}
-                <li class="wstep k-{stepKind(s)}">
-                  <span class="stext">{s.step}</span>
-                  {#if s.command}<code class="scmd">{s.command}</code>{/if}
-                  {#each (s.pictures || []).filter((p) => !gone[p.id]) as p (p.id)}
-                    {@const q = placed(p, { maxW: STEP_PIC_W, maxH: STEP_PIC_H, ratio: screenPixels.ratio })}
-                    <span class="shotframe spic" style:width="{q.frame.w}px" style:aspect-ratio="{q.frame.w} / {q.frame.h}">
-                      <button type="button" class="spicbtn" data-testid="chat-agent-work-step-picture" title="Open the picture" aria-label="Open the picture: {p.caption || 'Picture'}" onclick={() => view(p)}>
-                        <img
-                          src={q.src}
-                          alt=""
-                          draggable="false"
-                          decoding="async"
-                          use:shown
-                          style:left={q.pic.x}
-                          style:top={q.pic.y}
-                          style:width={q.pic.w}
-                          style:height={q.pic.h}
-                          onerror={() => (gone = { ...gone, [p.id]: true })}
-                        />
-                      </button>
-                    </span>
-                  {/each}
-                </li>
-              {/each}
-            </ol>
-          {/if}
+          {#if open}<StepRows steps={it.steps} {busy} onview={view} />{/if}
         </div>
       {/if}
     {/each}
@@ -226,59 +193,5 @@
   }
   :global(:root[data-motion='reduced']) .chev {
     transition: none;
-  }
-  /* Its steps, opened. */
-  .wsteps {
-    display: flex;
-    flex-direction: column;
-    gap: 2px;
-    margin: 4px 0 2px 4px;
-    padding: 0 0 0 10px;
-    border-left: 2px solid var(--yap-border-subtle);
-    list-style: none;
-    color: var(--yap-fg-80);
-    font-size: 12px;
-  }
-  .wstep {
-    display: flex;
-    flex-direction: column;
-    min-width: 0;
-  }
-  .stext {
-    overflow-wrap: anywhere;
-  }
-  /* A step's picture, opened: in a screenshot's frame (app.css .shotframe), smaller. */
-  .spic {
-    display: block;
-    margin: 4px 0 4px;
-    border-radius: 6px;
-  }
-  .spicbtn {
-    position: absolute;
-    inset: 0;
-    display: block;
-    padding: 0;
-    border: none;
-    border-radius: inherit;
-    overflow: hidden;
-    background: none;
-    cursor: zoom-in;
-  }
-  .spicbtn:focus-visible {
-    outline: none;
-  }
-  .spic:has(.spicbtn:focus-visible) {
-    box-shadow: var(--yap-focus);
-  }
-  .scmd {
-    align-self: flex-start;
-    max-width: 100%;
-    padding: 1px 5px;
-    border-radius: 4px;
-    background: var(--yap-s2);
-    color: var(--yap-muted);
-    font-size: 11px;
-    white-space: pre-wrap;
-    overflow-wrap: anywhere;
   }
 </style>

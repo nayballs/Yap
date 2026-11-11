@@ -36,6 +36,12 @@ pub struct Seen {
     pub command: Option<String>,
     /// What Claude Code said the command does (Bash's `description`).
     pub about: Option<String>,
+    /// A command's line once it's done, when its description starts with a
+    /// verb Yap knows ("Listed the add-on folders": `command::did`).
+    pub done: Option<String>,
+    /// The lines a Read asked for ("424–503", "from 424"), when it asked
+    /// for a part.
+    pub range: Option<String>,
     /// Claude Code's to-do list, as a `TodoWrite` leaves it.
     pub todos: Option<Vec<Todo>>,
 }
@@ -89,7 +95,7 @@ pub fn of_tool(name: &str, input: &Value, folder: &Path) -> Seen {
     // Where a search looks: said only when it isn't the agent's folder itself.
     let place = || text(&["path"]).map(|p| shown_path(&p, folder)).filter(|p| !p.is_empty() && p != ".");
     match name {
-        "Read" => Seen { step: with("Reading", path(&["file_path", "path"]), "Reading a file"), ..Default::default() },
+        "Read" => Seen { step: with("Reading", path(&["file_path", "path"]), "Reading a file"), range: read_range(input), ..Default::default() },
         "Edit" | "MultiEdit" => {
             let file = path(&["file_path", "path"]);
             Seen { step: with("Editing", file.clone(), "Editing a file"), file, ..Default::default() }
@@ -107,7 +113,8 @@ pub fn of_tool(name: &str, input: &Value, folder: &Path) -> Seen {
             let about = text(&["description"]).map(|d| one_line(&d, ABOUT_MAX));
             let step = command::line(&raw, about.as_deref(), folder, WHAT_MAX + 8);
             let command = (!raw.is_empty()).then(|| clip(&command::strip_cd(&raw, folder).0, COMMAND_MAX));
-            Seen { step, command, about, ..Default::default() }
+            let done = command::done_line(about.as_deref(), WHAT_MAX + 8);
+            Seen { step, command, about, done, ..Default::default() }
         }
         "Glob" => {
             // A pattern written from the folder down said from it.
@@ -135,6 +142,19 @@ pub fn of_tool(name: &str, input: &Value, folder: &Path) -> Seen {
             Some((server, tool)) => Seen { step: format!("Using {server} · {}", tool.replace('_', " ")), ..Default::default() },
             None => Seen { step: format!("Using {}", one_line(other, 40)), ..Default::default() },
         },
+    }
+}
+
+/// **The lines a Read asked for**, as its row says them: "424–503" (its
+/// `offset` and `limit`), "from 424" (an offset alone), none for the whole
+/// file from its top. Pure.
+fn read_range(input: &Value) -> Option<String> {
+    let n = |k: &str| input.get(k).and_then(Value::as_u64).filter(|n| *n > 0);
+    match (n("offset"), n("limit")) {
+        (Some(from), Some(count)) => Some(format!("{from}–{}", from + count - 1)),
+        (Some(from), None) if from > 1 => Some(format!("from {from}")),
+        (None, Some(count)) => Some(format!("1–{count}")),
+        _ => None,
     }
 }
 
@@ -201,6 +221,15 @@ mod tests {
         assert_eq!(s.step, "Running the tests");
         assert_eq!(s.command.as_deref(), Some("npm test\n  --watch=false"));
         assert_eq!(s.about.as_deref(), Some("Run the tests"));
+        // …and as done, for its row once it has run.
+        assert_eq!(s.done.as_deref(), Some("Ran the tests"));
+        assert_eq!(of_tool("Bash", &json!({ "command": "git status", "description": "Git status for the repo" }), &f).done, None);
+        // A part of a file read says which lines.
+        let part = of_tool("Read", &json!({ "file_path": r"D:\Projects\garden-planner\src\app.ts", "offset": 424, "limit": 80 }), &f);
+        assert_eq!((part.step.as_str(), part.range.as_deref()), (r"Reading src\app.ts", Some("424–503")));
+        assert_eq!(of_tool("Read", &json!({ "file_path": "notes.md", "offset": 40 }), &f).range.as_deref(), Some("from 40"));
+        assert_eq!(of_tool("Read", &json!({ "file_path": "notes.md", "limit": 30 }), &f).range.as_deref(), Some("1–30"));
+        assert_eq!(of_tool("Read", &json!({ "file_path": "notes.md" }), &f).range, None);
         // No description: the command, its cd into the folder gone, its paths relative.
         let s = of_tool("Bash", &json!({ "command": "cd \"/d/Projects/garden-planner\" && ls \"/d/Projects/garden-planner/beds\" | grep -i tomato" }), &f);
         assert_eq!(s.step, "Running ls beds | grep -i tomato");

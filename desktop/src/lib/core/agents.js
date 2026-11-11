@@ -136,8 +136,39 @@ export function stepPicture(e) {
   return { id: `agent/${e.id}/${p.id}`, w: Number(p.w) || 0, h: Number(p.h) || 0 };
 }
 
-/** A step as the lists keep it: its line, its file or command, the tool calls it stands for (`calls`: the same line twice in a row is one step) and their pictures. */
-const stepOf = (e, step) => ({ kind: 'step', step, file: e.file || null, command: e.command || null, about: e.about || null, calls: e.call ? [e.call] : [], pictures: [], ts: Number(e.ts) || 0 });
+/**
+ * A step as the lists keep it: its line, its file or command, the tool calls
+ * it stands for (`calls`: the same line twice in a row is one step) and
+ * their pictures; a command's line once done (`done`), the lines a Read
+ * asked for (`range`); then, as they come back, what its edit changed
+ * (`diff`) and what its command printed (`output`).
+ */
+const stepOf = (e, step) => ({
+  kind: 'step',
+  step,
+  file: e.file || null,
+  command: e.command || null,
+  about: e.about || null,
+  done: e.done || null,
+  range: e.range || null,
+  calls: e.call ? [e.call] : [],
+  pictures: [],
+  diff: null,
+  output: null,
+  ts: Number(e.ts) || 0,
+});
+
+/** `diff` (an event's) on its step among `steps`: the one that stands for its call, else (an older log's) the earliest that changes that file and has none yet. */
+function addDiff(steps, call, diff) {
+  const at = (call && steps.findLast((x) => x.calls.includes(call))) || steps.find((x) => x.file === diff.file && !x.diff);
+  if (at && !at.diff) at.diff = diff;
+}
+
+/** What a command printed (an event's `output`) on its step: the one that stands for its call. */
+function addOutput(steps, call, output) {
+  const at = call && steps.findLast((x) => x.calls.includes(call));
+  if (at && !at.output) at.output = output;
+}
 
 /** `pic` (an event's, `stepPicture`) on its step among `steps`: the newest that stands for its call, else the newest; once. Its caption is that step's line, as done. */
 function addPicture(steps, call, pic) {
@@ -211,6 +242,11 @@ export function workOf(log, final = '', live = false) {
       addPicture(out.flatMap((x) => (x.kind === 'work' ? x.steps : [])), e.call, pic);
       continue;
     }
+    // What its command printed: on that step too.
+    if (e?.output && typeof e.output.text === 'string') {
+      addOutput(out.flatMap((x) => (x.kind === 'work' ? x.steps : [])), e.call, e.output);
+      continue;
+    }
     const said = saidOf(e);
     if (said) {
       group = null;
@@ -230,9 +266,10 @@ export function workOf(log, final = '', live = false) {
         group.steps.push(stepOf(e, step));
       }
     }
-    // What an edit changed, once it went through: its stretch's.
+    // What an edit changed, once it went through: its step's, and its stretch's.
     const d = e?.diff;
     if (d?.file) {
+      addDiff(out.flatMap((x) => (x.kind === 'work' ? x.steps : [])), e.call, d);
       const g = group ?? out.filter((x) => x.kind === 'work').at(-1);
       if (g) {
         let f = g.edits.find((x) => x.file === d.file);
@@ -310,7 +347,85 @@ export function workSummary(group, busy = false) {
   } else if (edited) {
     add(`made ${some(edited, 'an edit', 'edits')}`);
   }
+  // Commands that failed, as Claude Code's own line says them ("ran 5 commands, …, 2 failed").
+  const failed = steps.filter((x) => x.output?.failed).length;
+  if (failed) add(`${failed} failed`);
   return parts;
+}
+
+/**
+ * **A step as its row says it** (a stretch opened, after Claude Code's own
+ * transcript): `{ text, name?, tail?, added?, removed?, failed? }` — its
+ * words, the file's name set apart ("Edited" + "agents.js", "Created" +
+ * "notes.md", "Read" + "app.ts" + "(424–503)"), an edit's lines added and
+ * removed, a command as done ("Checked the edits parse": Rust's `done`, else
+ * its line) and whether it failed. `live`: the step the agent is on now, as
+ * it is ("Running npm test").
+ */
+export function stepRow(s, live = false) {
+  if (live) return { text: String(s?.step || '') };
+  const kind = stepKind(s);
+  if (kind === 'edit' && s.file) {
+    const verb = s.diff?.kind === 'new' ? 'Created' : /^Writing\b/.test(s.step) ? 'Wrote' : 'Edited';
+    return { text: verb, name: fileName(s.file), ...(s.diff ? { added: s.diff.added, removed: s.diff.removed } : {}) };
+  }
+  const read = kind === 'read' ? /^Reading (.+)$/.exec(s.step) : null;
+  if (read && read[1] !== 'a file') return { text: 'Read', name: fileName(read[1]), ...(s.range ? { tail: `(${s.range})` } : {}) };
+  if (kind === 'command') return { text: s.done || doneLine(s.step), ...(s.output?.failed ? { failed: true } : {}) };
+  return { text: doneLine(s.step) };
+}
+
+/** Yap's and Claude Code's own plumbing among a stretch's steps: no row of its own once it's past. */
+const PLUMBING = /^(Starting Claude Code|Picking up your request|Picking up where it left off|Finding a tool|Using yap · approve)$/;
+
+/**
+ * **The rows of a stretch opened**: `[{ step, i, now }]` — its steps in
+ * order (`i`: its place among them), plumbing left out ("Starting Claude
+ * Code", "Finding a tool") unless it's the one the agent is on (`now`: the
+ * last, while `busy`) or it came back with a picture.
+ */
+export function rowSteps(steps, busy = false) {
+  const list = steps || [];
+  return list.map((step, i) => ({ step, i, now: busy && i === list.length - 1 })).filter((r) => r.now || r.step.pictures?.length > 0 || !PLUMBING.test(String(r.step.step || '')));
+}
+
+/** Whether a step's row opens: it has a diff, a command (and what it printed) or a picture to show. */
+export const stepOpens = (s) => !!(s?.diff?.lines?.length || s?.command || s?.pictures?.length);
+
+/**
+ * **A diff's lines as numbered rows** (the thread's row, as Claude Code's
+ * transcript numbers them): `[{ mark: 'del' | 'add' | 'ctx' | 'gap', text,
+ * no }]` — `no` a removed line's number in the file before, any other
+ * line's after, when its place is known: under a `@@ -a,b +c,d @@` line
+ * (agents/diff.rs `of_patch`: Claude Code's own patch), or a file written
+ * whole (from 1). A place line itself is a gap between two parts, none
+ * before the first.
+ */
+export function diffRows(diff) {
+  const lines = diff?.lines || [];
+  const out = [];
+  let before = null;
+  let after = null;
+  if (['new', 'rewrite', 'write'].includes(diff?.kind) && !lines.some((l) => String(l).startsWith('@'))) before = after = 1;
+  for (const l of lines) {
+    const s = String(l ?? '');
+    const at = /^@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@/.exec(s);
+    if (at || s === '@') {
+      if (out.length) out.push({ mark: 'gap', text: '', no: null });
+      before = at ? Number(at[1]) : null;
+      after = at ? Number(at[2]) : null;
+      continue;
+    }
+    const x = diffLine(s);
+    if (x.mark === 'del') out.push({ ...x, no: before == null ? null : before++ });
+    else if (x.mark === 'add') out.push({ ...x, no: after == null ? null : after++ });
+    else {
+      out.push({ ...x, no: after });
+      if (before != null) before++;
+      if (after != null) after++;
+    }
+  }
+  return out;
 }
 
 /** **A stretch's pictures** (`workOf`'s group): its steps', in order — the small ones at the end of its line. */
@@ -378,10 +493,10 @@ export function diffTitle(d) {
 /** "…12 more lines" past a diff's caps ('' for none). */
 export const moreLines = (n) => (Number(n) > 0 ? `…${Number(n).toLocaleString('en-GB')} more ${Number(n) === 1 ? 'line' : 'lines'}` : '');
 
-/** A diff line's mark and text: `{mark: 'del' | 'add' | 'ctx' | 'gap', text}`. */
+/** A diff line's mark and text: `{mark: 'del' | 'add' | 'ctx' | 'gap', text}` (a part's place in the file, `@@ -a,b +c,d @@`, is a gap too: `diffRows` numbers from it). */
 export function diffLine(l) {
   const s = String(l ?? '');
-  if (s === '@') return { mark: 'gap', text: '' };
+  if (s === '@' || s.startsWith('@@ ')) return { mark: 'gap', text: '' };
   const m = s.charAt(0);
   return { mark: m === '-' ? 'del' : m === '+' ? 'add' : 'ctx', text: s.slice(1) };
 }

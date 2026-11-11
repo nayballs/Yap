@@ -1213,8 +1213,9 @@ instead of a terminal (rebuilt after the maintainer's first real agent,
     a group: commands, files read, searches, the web, other tools' calls,
     helpers, then the files it edited with the lines added in green and
     removed in red; a stretch of one step is that step's own line, as done:
-    "Read notes.md", "Wrote legend.md +12"). A click opens it into its
-    steps, each command under its line;
+    "Read notes.md", "Wrote legend.md +12"; with ", 2 failed" when
+    commands of it failed). A click opens it into a row for each step
+    ([An opened stretch](#an-opened-stretch-a-row-a-step));
   - **other tools' calls are steps of the work too** (2026-11-11, the
     maintainer: "Yes, show them"): an MCP server's or a connector's ("Using
     github · create issue"), a skill, a tool Yap has no words for, a part
@@ -1301,6 +1302,63 @@ instead of a terminal (rebuilt after the maintainer's first real agent,
   status, cost lines, lengths of time, steps from a log, the pills, problems,
   the Mode's keys; pure); `core/money.js` `dollars`.
 
+## An opened stretch: a row a step
+
+In Claude Code's own transcript a stretch's line opens into a quiet box with
+a row for each step, and a row opens to what the step did: an edit to its
+diff with line numbers, a command to itself and its output. Yap's opened
+stretch was every step's line with each command dumped whole under it
+(2026-11-11, the maintainer, with screenshots of both: "can you build
+something that matches that?").
+
+- **The rows** (`views/chat/StepRows.svelte`; `core/agents.js` `stepRow`):
+  each step as done, the file's name set apart — "Edited agents.js +24 −3",
+  "Created notes.md +12", "Read app.ts (424–503)", "Checked the edits
+  parse" — with a hairline between. The step the agent is on now is the last
+  row, as it is, with a spinner. A row with nothing more to show (a read,
+  another tool's call) doesn't open (`stepOpens`).
+- **An edit's row** opens to the file's path and its diff, each line with its
+  number in the file, removed lines red and added ones green, in a box that
+  scrolls (`diffRows`).
+  - **Where the numbers come from**: Claude Code's own record of the edit,
+    its message's `tool_use_result.structuredPatch` (each part with the
+    number of its first line before and after; checked on the real 2.1.296).
+    `agents/diff.rs` `of_patch` keeps each part under a `@@ -a,b +c,d @@`
+    line of the diff; `diffRows` numbers from it (a removed line by its
+    number before, any other by its number after). A file written whole is
+    numbered from 1. Without a record (an older Claude Code, the tests'
+    stand-in) the lines come from the call's input, as before, with no
+    numbers.
+  - **Each row its own diff**: a diff's event names its call, so two edits
+    of one file are two rows with their own lines (an older log's diff goes
+    to the earliest step of that file with none yet).
+  - The tab's Files changed and the phone read the same lines; a place line
+    is a gap between two parts there, none before the first.
+- **A command's row** opens to the command (`$ …`, Copy) and what it
+  printed.
+  - **Its words**: Claude Code's description of it with the first word as
+    done ("Check the edits parse" → "Checked the edits parse":
+    `steps/command.rs` `did`, the same verbs `doing` knows, the step's
+    `done`); a verb Yap doesn't know, or no description, keeps the step's
+    own line ("Ran npm test").
+  - **What it printed** (`agents/output.rs`): the result's text as Claude
+    Code hands it to the model, its first 40 lines and its last 20 (the
+    lines between counted), each at most 300 characters, colour codes gone;
+    at most 120,000 characters a turn, then a command keeps its row and no
+    output. One that printed nothing shows its command alone. One Claude
+    Code marked an error says "failed" on its row, and its stretch's line
+    counts it.
+  - **Kept** in the agent's own log with its commands and diffs (gone with
+    it after 7 days), never in Yap's log, and **never sent to a phone**
+    (`link/code/view.rs`: `output` null in a live event and a snapshot).
+- **A read's row** says which lines it asked for ("(424–503)": the step's
+  `range`, from the call's `offset` and `limit`).
+- **A picture's row** has it small at its end and larger once opened
+  ([A step's pictures](#a-steps-pictures)).
+- **Not done**: colours for the code itself (Yap highlights no code
+  anywhere); a read's row opening to what was read; the output of a command
+  still running.
+
 ## A step's pictures
 
 In Claude Code's own transcript a step that read or made a picture ends its
@@ -1338,8 +1396,9 @@ picture of it, do we have that in Yap now too?").
 - **Shown** (`views/chat/StepPictures.svelte`): at the end of the stretch's
   line in the thread, 30 × 20 px, a tile filled with the picture's middle at
   exactly its device pixels (the first three, then "+N"); on its step in
-  the Agent tab's timeline too. The line opened, each step shows its own
-  larger (at most 280 × 180), and the line's small ones give way. A click
+  the Agent tab's timeline too. The line opened, the row of the step that
+  came back with it has it small at its end, and that row opened shows it
+  larger (at most 280 × 180). A click
   opens it: the panel's picture tab while the panel is open, else the
   viewer, captioned with its step ("Read beds.png") and the workspace.
   Right-click: Open, Copy image, Save image as…. One that is gone isn't
@@ -1663,7 +1722,7 @@ saves ([config-and-data.md](./config-and-data.md)).
   - `modes`: each chat's Mode (conversation id → mode);
   - `codeChats`: each Code chat's folder (conversation id → `{path, ts}`);
   - `bypassConfirmed`: the one-time OK for Bypass permissions.
-- **`agents/<id>/log.jsonl`**: every `yap-agent` event the agent sent, one a line,
+- **`agents/<id>/log.jsonl`**: every `yap-agent` event the agent sent (its steps, words, diffs and what its commands printed), one a line,
   appended as it goes (the file is never written whole again); texts over
   4,000 characters trimmed, at most 5,000 lines. The tab replays it.
 - **`agents/<id>/pictures/`**: the pictures its steps came back with, as
@@ -1810,6 +1869,7 @@ Rust (`desktop/src-tauri/src/`):
   workspaces, which folder an agent means) · `modes.rs` (the Mode; pure) ·
   `runner.rs` (the runs) · `steps.rs` + `steps/command.rs` (each step in
   plain words, the to-do list; pure) · `diff.rs` (an edit's diff; pure) ·
+  `output.rs` (what a command printed, its start and its end; pure) ·
   `pictures.rs` (a picture a step's answer carried, kept with the agent) ·
   `consent.rs` (whose idea an agent is; pure) · `usage.rs` (what each turn
   used: tokens, the context, the cost estimated; pure) · `code_chat.rs` (Code chats) ·
@@ -1829,7 +1889,7 @@ Rust (`desktop/src-tauri/src/`):
 Pages (`desktop/src/lib/`): `views/chat/` (`ChatSideSwitch`,
 `codeChats.svelte.js`, `WorkspacePicker`, `CodeChips`, `CodeEdge`,
 `codeChat.css`, `CodeEmpty`, `ModeChip`, `AgentTab`, `AgentPanel`, `AgentTimeline`, `AgentFiles`,
-`AgentPills`, `AgentTodoCard`, `AgentWork`, `StepPictures`, `AgentReportCard`, `AgentConfirm`, `AgentApprove`, `RunningAgents`),
+`AgentPills`, `AgentTodoCard`, `AgentWork`, `StepRows`, `StepPictures`, `AgentReportCard`, `AgentConfirm`, `AgentApprove`, `RunningAgents`),
 `core/codeChats.js`, `core/agents.js`, `core/agentPanel.js`, `core/money.js`, `ui/followEnd.js`,
 `stores/agents.svelte.js`, `settings/YapCodePage.svelte`,
 `settings/ClaudeCodeStatus.svelte`.
@@ -1840,7 +1900,7 @@ Pages (`desktop/src/lib/`): `views/chat/` (`ChatSideSwitch`,
 
 | Event | Payload |
 |---|---|
-| `yap-agent` | `{id, status, folder, conversation?, step?, file?, command?, about?, said?, todos?, now?, diff?, call?, picture?, text?, cost?, problem?, turn?, queued?, ts}` — `call` the tool call a step is (Claude Code's id), or the one a `picture` came back from; `picture` `{id, w, h}`, a picture that call's answer carried (`agents/pictures.rs`); `turn` the turn it's about (`TurnNote.n`), `queued` a request queued as that turn (its title); `status` queued \| running \| asking \| done \| failed \| stopped \| interrupted; `about` a command's description; `said` its words between tool calls; `todos` `[{content, status, activeForm?}]` (status pending \| in_progress \| completed); `now` the line it's on with no new step; `diff` `{file, kind, lines, added, removed, more?, all?}` — `kind` edit \| new \| rewrite \| write, each line its mark first (`-`, `+`, ` `; a lone `@` a gap); `text` its final words (an older Yap's words as it worked too); `problem` `{kind, message, resetsAt?}`, `kind` notSignedIn \| rateLimited \| billing \| account \| paysAnotherWay; `usage` what its turn has used (`{input, output, cacheRead, cacheWrite, context, window, estimate?}`, `agents/usage.rs`: live, never a line of its log, but for a result's and a turn's end); `changed` its record changed with no step (2026-11-08: `planUnused` a plan set aside, `dismissed` / `shown` its panel row, `finished` Move to finished): the pages read it again |
+| `yap-agent` | `{id, status, folder, conversation?, step?, file?, command?, about?, said?, todos?, now?, diff?, call?, picture?, text?, cost?, problem?, turn?, queued?, ts}` — `call` the tool call a step is (Claude Code's id), or the one a `diff`, an `output` or a `picture` came back from; `done` a command's line once done ("Listed the folder"), `range` the lines a Read asked for ("424–503"), with their step; `output` `{text, tail?, more?, failed?}`, what a command printed (`agents/output.rs`; never to a phone); `picture` `{id, w, h}`, a picture that call's answer carried (`agents/pictures.rs`); `turn` the turn it's about (`TurnNote.n`), `queued` a request queued as that turn (its title); `status` queued \| running \| asking \| done \| failed \| stopped \| interrupted; `about` a command's description; `said` its words between tool calls; `todos` `[{content, status, activeForm?}]` (status pending \| in_progress \| completed); `now` the line it's on with no new step; `diff` `{file, kind, lines, added, removed, more?, all?}` — `kind` edit \| new \| rewrite \| write, each line its mark first (`-`, `+`, ` `; a lone `@` a gap; `@@ -a,b +c,d @@` a part's place in the file); `text` its final words (an older Yap's words as it worked too); `problem` `{kind, message, resetsAt?}`, `kind` notSignedIn \| rateLimited \| billing \| account \| paysAnotherWay; `usage` what its turn has used (`{input, output, cacheRead, cacheWrite, context, window, estimate?}`, `agents/usage.rs`: live, never a line of its log, but for a result's and a turn's end); `changed` its record changed with no step (2026-11-08: `planUnused` a plan set aside, `dismissed` / `shown` its panel row, `finished` Move to finished): the pages read it again |
 | `yap-agent-report` | `{agent, turn, conversation, messageId, markerId, status}` — the turn it reports, and its status; `messageId` null when a newer question came first |
 | `yap-agent-open` | `{id, conversation}` (with `yap-assistant-turn {phase: "open", conversationId, show: true}`) |
 | `yap-claude-approve` | `{id, run, conversation, origin, tool, summary, detail, label, askedTs}` — `run` is the agent's id; a plan's (`tool` "ExitPlanMode"): `summary` "The plan is ready", `detail` the plan |
@@ -1989,7 +2049,9 @@ the build's own stand-in replaying `script` from now on),
     a tile at its device pixels, larger by its step, opened in the viewer
     and the picture tab, on its step in the Agent tab); another tool's
     call as a line (one alone as itself, several counted, each with its icon
-    in the tab); its work in
+    in the tab); a stretch opened as a row a step (an edit to its numbered
+    diff, a command to itself and what it printed, a read that doesn't
+    open); its work in
     the thread (what it said, a line for each stretch of steps that opens
     into them, the step it's on while it works); "start fresh" a
     second agent, its tab named apart; Undo this turn (refused while a later
@@ -2067,6 +2129,8 @@ Code, Open in terminal's blank tab, Chat's thread following a report.
 
 **Not yet tried on a real run:**
 
+- An opened row for a `MultiEdit` or a file written over (a `Write` on one
+  that was there): their records are read as an Edit's.
 - A step's picture from a tool that takes a screenshot, or from a command
   that prints one (a picture file read is checked, on 2.1.296).
 - An agent paid by key; an agent's cost across several turns (`total_cost_usd`,

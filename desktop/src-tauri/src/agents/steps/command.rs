@@ -396,6 +396,61 @@ pub fn doing(description: &str) -> String {
     }
 }
 
+/// The verbs of [`DOING`] whose done word isn't the verb with "ed" (or "d"
+/// after an "e").
+const DID: &[(&str, &str)] = &[
+    ("apply", "applied"),
+    ("build", "built"),
+    ("commit", "committed"),
+    ("copy", "copied"),
+    ("find", "found"),
+    ("format", "formatted"),
+    ("get", "got"),
+    ("make", "made"),
+    ("query", "queried"),
+    ("read", "read"),
+    ("rebuild", "rebuilt"),
+    ("rerun", "reran"),
+    ("reset", "reset"),
+    ("retry", "retried"),
+    ("run", "ran"),
+    ("scan", "scanned"),
+    ("see", "saw"),
+    ("set", "set"),
+    ("stop", "stopped"),
+    ("try", "tried"),
+    ("verify", "verified"),
+    ("write", "wrote"),
+];
+
+/// **A description as what was done** ("List the add-on folders" → "Listed
+/// the add-on folders"; only its first word changes, as Claude Code's own
+/// transcript says a finished command), its full stop gone. `None` for one
+/// that doesn't start with a verb Yap knows ([`DOING`]'s).
+pub fn did(description: &str) -> Option<String> {
+    let d = description.trim().trim_end_matches('.').trim_end();
+    let (first, rest) = d.split_once(' ').unwrap_or((d, ""));
+    let (verb, _) = DOING.iter().find(|(v, _)| v.eq_ignore_ascii_case(first))?;
+    let mut word = match DID.iter().find(|(v, _)| v == verb) {
+        Some((_, done)) => done.to_string(),
+        None if verb.ends_with('e') => format!("{verb}d"),
+        None => format!("{verb}ed"),
+    };
+    if first.chars().next().is_some_and(char::is_uppercase) {
+        let mut c = word.chars();
+        word = c.next().map(|f| f.to_uppercase().chain(c).collect()).unwrap_or_default();
+    }
+    Some(if rest.is_empty() { word } else { format!("{word} {rest}") })
+}
+
+/// A finished command's line: [`did`] of what Claude Code said it does, on
+/// one line of at most `max` characters. `None` with no description, or one
+/// whose verb Yap doesn't know (its step's own line stays).
+pub fn done_line(description: Option<&str>, max: usize) -> Option<String> {
+    let d = description.map(str::trim).filter(|d| !d.is_empty())?;
+    did(d).map(|done| cut(&done, max))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -486,5 +541,29 @@ mod tests {
         assert_eq!(doing("Frobnicate the beds"), "Frobnicate the beds");
         assert_eq!(cut("a b c", 10), "a b c");
         assert_eq!(cut("abcdefghijklmnop", 6), "abcde…");
+    }
+
+    /// As Claude Code's own transcript says a finished command: its
+    /// description with the first word as done ("Checked the edits parse").
+    #[test]
+    fn a_finished_commands_line_is_its_description_as_done() {
+        assert_eq!(did("List the add-on folders").as_deref(), Some("Listed the add-on folders"));
+        assert_eq!(did("Check the edits parse and read the remaining comments.").as_deref(), Some("Checked the edits parse and read the remaining comments"));
+        assert_eq!(did("find tests that mention tool steps").as_deref(), Some("found tests that mention tool steps"));
+        assert_eq!(did("Build").as_deref(), Some("Built"));
+        // A verb Yap doesn't know: none (the step's own line stays).
+        assert_eq!(did("Frobnicate the beds"), None);
+        assert_eq!(did("Git status for the repo"), None);
+        assert_eq!(done_line(Some("Run the tests"), 90).as_deref(), Some("Ran the tests"));
+        assert_eq!(done_line(Some("   "), 90), None);
+        assert_eq!(done_line(None, 90), None);
+        assert!(done_line(Some(&format!("Apply {}", "the doc edits ".repeat(20))), 40).is_some_and(|l| l.starts_with("Applied the doc edits") && l.ends_with('…') && l.chars().count() <= 40));
+        // Every verb Yap knows, as done: the ones that aren't "+ed" spelled out.
+        let all: Vec<String> = DOING.iter().map(|(v, _)| did(v).unwrap()).collect();
+        assert_eq!(
+            all.join(" "),
+            "added analysed analyzed appended applied built bumped calculated changed checked cleaned cleared cloned committed compared compiled configured confirmed converted copied counted created deleted displayed downloaded dumped edited ensured executed explored exported extracted fetched found fixed formatted generated got inspected installed killed launched linted listed loaded located looked made measured merged moved opened parsed previewed printed pulled pushed queried read rebuilt removed renamed rendered replaced reran reset restarted restored retried reviewed ran saved scanned searched saw set showed sorted staged started stopped synced tested tried updated upgraded uploaded validated verified viewed waited watched wrote"
+        );
+        assert!(DID.iter().all(|(v, _)| DOING.iter().any(|(d, _)| d == v)), "every exception is a verb Yap knows");
     }
 }
