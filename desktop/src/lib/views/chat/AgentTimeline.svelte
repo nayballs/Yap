@@ -43,7 +43,8 @@
           </li>
         {:else}
           {@const kind = stepKind(t)}
-          <li class="step k-{kind}" class:latest={i === lastStep}>
+          <!-- (A helper's own step sits in from the edge, under the step that handed it the work.) -->
+          <li class="step k-{kind}" class:latest={i === lastStep} class:helpers={!!t.under} data-helper={t.under ? 'true' : undefined}>
             <span class="sicon" aria-hidden="true">
               {#if kind === 'edit'}
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9" /><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z" /></svg>
@@ -98,6 +99,9 @@
     padding: 3px 0;
     color: var(--yap-paper-text-2);
     font-size: 12.5px;
+  }
+  .step.helpers {
+    padding-left: 22px;
   }
   .step.latest {
     color: var(--yap-paper-ink);

@@ -155,8 +155,15 @@ const stepOf = (e, step) => ({
   pictures: [],
   diff: null,
   output: null,
+  // A helper's own step: the call that handed it the work (`AgentEvent::under`).
+  under: e.under || null,
+  // A helper's own steps, when this step handed part of the work over (`workOf`).
+  helped: [],
   ts: Number(e.ts) || 0,
 });
+
+/** Every step of a work list, a helper's own after the step that sent it. */
+const everyStep = (out) => out.flatMap((x) => (x.kind === 'work' ? x.steps.flatMap((st) => [st, ...st.helped]) : []));
 
 /** `diff` (an event's) on its step among `steps`: the one that stands for its call, else (an older log's) the earliest that changes that file and has none yet. */
 function addDiff(steps, call, diff) {
@@ -226,7 +233,9 @@ export function timelineOf(log, final = '') {
  * [{file, added, removed, made}], ts}` — so a long run of tool calls reads
  * as one line ("Ran 3 commands, edited convert.js +4 −1", `workSummary`)
  * that opens into its steps; a step's `pictures` are the ones its tool call
- * came back with (`groupPictures`: its line's). `final`: its final words,
+ * came back with (`groupPictures`: its line's), and its `helped` the steps of
+ * a helper it handed part of the work to (folded behind its row, never
+ * counted in the line). `final`: its final words,
  * left out (its report tells them), as
  * `timelineOf` leaves them. A group of housekeeping alone ("Starting Claude
  * Code") is kept only at the end of a turn still working (`live`), where
@@ -239,12 +248,12 @@ export function workOf(log, final = '', live = false) {
     // A picture its call came back with: on that step, in whichever stretch.
     const pic = stepPicture(e);
     if (pic) {
-      addPicture(out.flatMap((x) => (x.kind === 'work' ? x.steps : [])), e.call, pic);
+      addPicture(everyStep(out), e.call, pic);
       continue;
     }
     // What its command printed: on that step too.
     if (e?.output && typeof e.output.text === 'string') {
-      addOutput(out.flatMap((x) => (x.kind === 'work' ? x.steps : [])), e.call, e.output);
+      addOutput(everyStep(out), e.call, e.output);
       continue;
     }
     const said = saidOf(e);
@@ -254,7 +263,18 @@ export function workOf(log, final = '', live = false) {
       continue;
     }
     const step = typeof e?.step === 'string' ? e.step.trim() : '';
-    if (step) {
+    // A helper's own step (`under`: the call that handed it the work, agents/runner.rs): folded behind
+    // that call's row, never a step of the session's own stretch — as Claude Code's transcript keeps a
+    // subagent's work out of the session's. (No such row here — an older log —: a step like any other.)
+    const sender = step && e.under ? everyStep(out).findLast((x) => x.calls.includes(e.under)) : null;
+    if (sender) {
+      const last = sender.helped[sender.helped.length - 1];
+      if (last && last.step === step && !e.file && !e.command) {
+        if (e.call) last.calls.push(e.call);
+      } else {
+        sender.helped.push(stepOf(e, step));
+      }
+    } else if (step) {
       if (!group) {
         group = { kind: 'work', steps: [], edits: [], ts: Number(e.ts) || 0 };
         out.push(group);
@@ -266,11 +286,14 @@ export function workOf(log, final = '', live = false) {
         group.steps.push(stepOf(e, step));
       }
     }
-    // What an edit changed, once it went through: its step's, and its stretch's.
+    // What an edit changed, once it went through: its step's, and its stretch's (a helper's edit is its
+    // row's alone: the stretch's line counts the session's own).
     const d = e?.diff;
     if (d?.file) {
-      addDiff(out.flatMap((x) => (x.kind === 'work' ? x.steps : [])), e.call, d);
-      const g = group ?? out.filter((x) => x.kind === 'work').at(-1);
+      addDiff(everyStep(out), e.call, d);
+      const owner = e.call ? everyStep(out).findLast((x) => x.calls.includes(e.call)) : null;
+      const helpers = !!owner && !out.some((x) => x.kind === 'work' && x.steps.includes(owner));
+      const g = helpers ? null : (group ?? out.filter((x) => x.kind === 'work').at(-1));
       if (g) {
         let f = g.edits.find((x) => x.file === d.file);
         if (!f) g.edits.push((f = { file: d.file, added: 0, removed: 0, made: d.kind === 'new' ? 'new' : null }));
@@ -389,8 +412,8 @@ export function rowSteps(steps, busy = false) {
   return list.map((step, i) => ({ step, i, now: busy && i === list.length - 1 })).filter((r) => r.now || r.step.pictures?.length > 0 || !PLUMBING.test(String(r.step.step || '')));
 }
 
-/** Whether a step's row opens: it has a diff, a command (and what it printed) or a picture to show. */
-export const stepOpens = (s) => !!(s?.diff?.lines?.length || s?.command || s?.pictures?.length);
+/** Whether a step's row opens: it has a diff, a command (and what it printed), a picture, or a helper's own steps to show. */
+export const stepOpens = (s) => !!(s?.diff?.lines?.length || s?.command || s?.pictures?.length || s?.helped?.length);
 
 /**
  * **A diff's lines as numbered rows** (the thread's row, as Claude Code's

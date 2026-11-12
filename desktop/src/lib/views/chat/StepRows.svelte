@@ -15,7 +15,11 @@
   //   what replaced it in a stronger green (core/diffWords.js);
   // - **a command**: the command itself (`$ …`, with Copy), in colour, and
   //   what it printed, plain, its start and its end (agents/output.rs);
-  // - **a picture** its call came back with, larger (small at the row's end).
+  // - **a picture** its call came back with, larger (small at the row's end);
+  // - **a part handed to a helper** ("Handed part of it to a helper · Check
+  //   the docs"): the helper's own steps, as rows of their own inside it
+  //   (12 Nov 2026: folded there, never among the session's own steps, as
+  //   Claude Code's transcript keeps a subagent's work out of it).
   //
   // Before, an opened stretch was every step's line with each command dumped
   // whole under it. A row with nothing more to show doesn't open. The step
@@ -34,6 +38,8 @@
   import { placed, shown } from './chatImages.js';
   import { screenPixels } from './chatShots.svelte.js';
   import StepPictures from './StepPictures.svelte';
+  // (A helper's steps are rows too: this component inside itself.)
+  import StepRows from './StepRows.svelte';
 
   /** A row's picture, opened: at most this big (CSS px). */
   const PIC_W = 280;
@@ -133,6 +139,12 @@
                 {/if}
               </div>
             {/if}
+          {/if}
+          {#if s.helped?.length}
+            <div class="helped" data-testid="chat-agent-work-helper">
+              <!-- (While the session waits on its helper, the helper's last step is the one being done.) -->
+              <StepRows steps={s.helped} busy={now} {onview} />
+            </div>
           {/if}
           {#each pics as p (p.id)}
             {@const q = placed(p, { maxW: PIC_W, maxH: PIC_H, ratio: screenPixels.ratio })}
@@ -427,6 +439,10 @@
     color: var(--yap-muted);
     font-family: var(--yap-font, inherit);
     font-size: 11px;
+  }
+  /* A helper's own steps, inside the row that sent it (their box has its own margin: none above). */
+  .helped :global(.rows) {
+    margin: 0;
   }
   /* A row's picture, opened: in a screenshot's frame (app.css .shotframe), smaller. */
   .spic {
