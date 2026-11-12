@@ -17,7 +17,15 @@
   // - Its final words aren't here: its report tells them, right below.
   // - Nothing to show (no log yet, a turn that never ran): nothing drawn.
   //
-  // Its own small chunk (ChatThread imports it lazily, as the to-do card).
+  // **Whose work shows where** (12 Nov 2026, the maintainer: "if you send out
+  // an agent I don't think I see the work the agent does in the main chat
+  // window, only if you yourself do it"): in the thread, only a Code chat
+  // that works directly (its own session's work, under the message that
+  // asked). An agent Chat sent out shows this same work in its row of the
+  // Agent panel (`events`: that turn's, handed in; `wide`: the row's width),
+  // with its last words too, since no report follows it there.
+  //
+  // Its own small chunk (ChatThread and AgentPanel import it lazily).
   import { workOf, workSummary, turnsOf, groupPictures, shownStepPicture } from '../../core/agents.js';
   import { isLive } from '../../core/agentNow.js';
   import { renderMarkdown } from '../../core/markdown.js';
@@ -26,24 +34,30 @@
   import StepPictures from './StepPictures.svelte';
   import StepRows from './StepRows.svelte';
 
-  /** `agent`: the pill's (its record, as the store has it); `turn`: which of its turns; `line`: the line it's on now; `onview(picture)`: open a step's picture (a `ShownPicture`). */
-  let { agent, turn = 1, line = '', onview = null } = $props();
+  /**
+   * `agent`: the pill's (its record, as the store has it); `turn`: which of
+   * its turns; `line`: the line it's on now; `onview(picture)`: open a step's
+   * picture (a `ShownPicture`). In the Agent panel's row: `events` (the
+   * turn's own, so its log isn't read again), `status` (the turn's) and
+   * `wide`.
+   */
+  let { agent, turn = 1, line = '', onview = null, events = null, status = null, wide = false } = $props();
   const view = (p) => onview?.(shownStepPicture(p, agent?.folder));
 
   $effect(() => {
-    if (agent?.id) watchAgentLog(agent.id);
+    if (events == null && agent?.id) watchAgentLog(agent.id);
   });
-  const log = $derived(agentLogs.by[agent?.id] || []);
-  const note = $derived(turnsOf(agent, log).find((t) => t.n === turn) ?? null);
-  const live = $derived(isLive(note?.status));
-  const items = $derived(note?.startedTs || live ? workOf(note?.events || [], live ? '' : note?.text, live) : []);
+  const log = $derived(events == null ? agentLogs.by[agent?.id] || [] : []);
+  const note = $derived(events == null ? (turnsOf(agent, log).find((t) => t.n === turn) ?? null) : null);
+  const live = $derived(isLive(events == null ? note?.status : status));
+  const items = $derived(events != null ? workOf(events, '', live) : note?.startedTs || live ? workOf(note?.events || [], live ? '' : note?.text, live) : []);
   /** The stretches the person opened (by where they start: a stretch keeps its place as more come). */
   let opened = $state({});
   const toggle = (key) => (opened = { ...opened, [key]: !opened[key] });
 </script>
 
 {#if items.length}
-  <div class="agentwork" data-testid="chat-agent-work" data-agent={agent?.id} data-turn={turn} data-live={live ? 'true' : 'false'}>
+  <div class="agentwork" class:wide data-testid="chat-agent-work" data-agent={agent?.id} data-turn={turn} data-live={live ? 'true' : 'false'}>
     {#each items as it, i (i)}
       {#if it.kind === 'said'}
         <div class="wsaid" data-testid="chat-agent-work-said" use:colourCode>{@html renderMarkdown(it.text)}</div>
@@ -83,6 +97,12 @@
     color: var(--yap-fg);
     font-size: calc(12.5px * var(--yap-reading-scale, 1));
     line-height: 1.5;
+  }
+  /* In the Agent panel's row: the row's own width, no bubble to line up with. */
+  .agentwork.wide {
+    align-self: stretch;
+    width: 100%;
+    padding: 0;
   }
   /* What it said: plain words, the thread's own text, no bubble. */
   .wsaid {

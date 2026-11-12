@@ -36,14 +36,11 @@
 //   LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
 //   FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 //   DEALINGS IN THE SOFTWARE.
-import { isLive, turnsOf, todosOf, timelineOf, statusWord, turnStatusWord, planWaitsNow, planNotUsed, PLAN_NOT_USED, PLAN_WAITS_S, money, modeLabel, modelLabel, titleOf } from './agents.js';
+import { isLive, turnsOf, todosOf, statusWord, turnStatusWord, planWaitsNow, planNotUsed, PLAN_NOT_USED, PLAN_WAITS_S, money, modeLabel, modelLabel, titleOf } from './agents.js';
 import { effortLabel } from './effort.js';
 
 /** A plan still waits on the person this long after its turn ended (as Chat's status dots: core/chatStatus.js). */
 export const WAITS_FOR_S = PLAN_WAITS_S;
-/** The latest steps a row opens to. */
-export const LATEST_STEPS = 8;
-
 /** Tokens as the panel says them: "980", "12k", "1.2M". */
 export function fmtTokens(n) {
   const v = Math.max(0, Number(n) || 0);
@@ -210,13 +207,6 @@ export function rowLine(agent, turn, { todos = [], line = '', state = '', unused
   if (live && status !== 'asking') return `${count} · ${c.current || line || statusWord(status)}`;
   if (words) return `${count} · ${words}`;
   return `${count} · ${c.done === c.total ? 'All done' : c.current || 'Done'}`;
-}
-
-/** A turn's latest steps (its own events), newest last: `[{step, file, command, ts}]`. */
-export function latestSteps(events, n = LATEST_STEPS) {
-  return timelineOf(events)
-    .filter((t) => t.kind === 'step')
-    .slice(-n);
 }
 
 /** The commands a turn ran (its events). */

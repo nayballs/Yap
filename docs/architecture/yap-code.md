@@ -1062,9 +1062,12 @@ used. See [Yap's crew](#yaps-crew-the-rows-characters).
   stats and the bar), the running one too; **▸ opens a row in place**: why
   Chat sized it so, when it said ("Opus 5.5 · High: a multi-file change", the
   turn's `sizing`: [Chat sizes each agent](#the-tools)), its
-  to-do list (✓, ●, ○), its latest steps (the last 8, in the same words as
-  the timeline), "1 command · 2 files changed", and **Open**: the timeline
-  at that turn. Enter or Space opens and folds; ↑ ↓ (Home, End) move between
+  to-do list (✓, ●, ○), **its work** (2026-11-12, `AgentWork` on the turn's
+  own events: what it said, a line for each stretch of steps that opens
+  into a row a step, an edit's to its diff and a command's to itself and
+  what it printed; a picture opens in the panel's picture tab; until then
+  its last 8 steps as a list), "1 command · 2 files changed", and **Open**:
+  the timeline at that turn. Enter or Space opens and folds; ↑ ↓ (Home, End) move between
   rows. Which rows are open and which groups folded is remembered per agent
   while the window stays open (`agentPanelMemory.svelte.js`; never saved).
 - **A pill or a report card** opens the panel with its turn's row open and in
@@ -1200,11 +1203,24 @@ instead of a terminal (rebuilt after the maintainer's first real agent,
   turn's `todos` from `yap-agent`); once it ends it stays as its record,
   folded to "7 to-dos · all done" ("5 done", "none done yet") with ▸ to
   open. No list, no card; a plain chat's thread is as it was.
-- **Its work, in the thread** (`AgentWork.svelte`, 2026-11-11, after Claude
-  Code's own transcript; a small chunk of its own), in a Code chat only. The
-  thread used to say "On it" and then nothing until the report: what the
-  agent said and did was only in its tab. Now, under the pill and the to-do
-  card of each turn:
+- **Whose work shows where** (2026-11-12, the maintainer, on a chat whose
+  model had sent an agent: "if you send out an agent I don't think I see the
+  work the agent does in the main chat window, only if you yourself do
+  it"). As in Claude Code, where a subagent's work is in its own panel and
+  the transcript has the main session's alone:
+  - **A Code chat that works directly** (its own session:
+    [A Code chat that works directly](#a-code-chat-that-works-directly))
+    shows its work in the thread, under the message that asked.
+  - **An agent Chat sent out** (`start_agent`: a chat off the plan, a
+    message with a screenshot, a spoken or a phone's question) shows it in
+    its row of the Agent panel ([The panel](#the-panel): its ▸), never in
+    the thread. The thread keeps its quiet line (the workspace, the turn's
+    title, its status), its to-do card and its report line.
+  - From 2026-11-11 until then every agent's work was in the thread.
+- **Its work** (`AgentWork.svelte`, 2026-11-11, after Claude Code's own
+  transcript; a small chunk of its own), in a Code chat's thread or its
+  panel row. Before it, the thread said "On it" and then nothing until the
+  report, and the panel's row had its last 8 steps as a list. In it:
   - **what it says as it goes**, as plain words with no bubble (its `said`
     events, rendered as Markdown);
   - **one quiet line for each stretch of steps between its words**, as Claude
@@ -1228,7 +1244,9 @@ instead of a terminal (rebuilt after the maintainer's first real agent,
     helper". The Agent tab's timeline gives each its icon;
   - **while it works**, the last line is the step it's on, with a spinner
     (`agents.steps`), and becomes its summary once the agent speaks or ends;
-  - **never its final words**: its report tells those, right below.
+  - **never its final words** in the thread: its report tells those, right
+    below. In its panel row they are its last lines, since no report
+    follows them there.
     Housekeeping alone ("Starting Claude Code", a note read, a denial,
     Yap's permission prompts' own tool, Claude Code looking a tool up:
     "Finding a tool", its `ToolSearch`) is a line only while it's what the
@@ -1318,8 +1336,9 @@ something that matches that?").
   row, as it is, with a spinner. A row with nothing more to show (a read,
   another tool's call) doesn't open (`stepOpens`).
 - **An edit's row** opens to the file's path and its diff, each line with its
-  number in the file, removed lines red and added ones green, in a box that
-  scrolls (`diffRows`).
+  number in the file, removed lines red and added ones green (`diffRows`).
+  A long line wraps under itself beside its number (2026-11-12, as Claude
+  Code's does), so the box scrolls down a long diff and never sideways.
   - **Where the numbers come from**: Claude Code's own record of the edit,
     its message's `tool_use_result.structuredPatch` (each part with the
     number of its first line before and after; checked on the real 2.1.296).
@@ -2100,8 +2119,9 @@ the build's own stand-in replaying `script` from now on),
     open; a changed line's replaced part marked on both lines; its code in
     colour once a row is opened, by the file's language,
     each token a text node, with the theme's own colours); its work in
-    the thread (what it said, a line for each stretch of steps that opens
-    into them, the step it's on while it works); "start fresh" a
+    its panel row and never in the thread (what it said, its last words
+    too, a line for each stretch of steps that opens into them, the step
+    it's on while it works); "start fresh" a
     second agent, its tab named apart; Undo this turn (refused while a later
     turn changed the same file), Undo all asked first. Light and dark.
   - `agents-plans.spec.js`: plans and the go-ahead — a Bypass chip never stops

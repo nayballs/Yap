@@ -445,6 +445,7 @@
           {now}
           {want}
           onopen={openRow}
+          onpicture={(p) => doc.showPicture(p)}
         />
         {#if undone}
           <p class="undone" aria-live="polite" data-testid={many ? 'chat-agent-undone-all' : 'chat-agent-undone'}>{undoneLine(undone)}</p>
