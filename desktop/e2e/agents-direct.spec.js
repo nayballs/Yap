@@ -26,6 +26,10 @@
 //   own words, or "Let it decide". The stand-in asks the run's permission
 //   prompt as Claude Code does (`_mcp approve`) and its answer is read back
 //   from a file. Before, every question was refused at once.
+// - Asked out loud with the Code chat in view (the Voice Assistant, 12 Nov
+//   2026): straight to its session too. Yap says "On it." (its own words,
+//   no model's), and the session's answer is read aloud when it's done.
+//   Before, a spoken question was handed over by Chat's model.
 // - "Work directly in Code chats" off: nothing goes to a session by itself
 //   (Chat's model answers; plan-agents.spec.js covers its hand-off).
 //
@@ -229,6 +233,10 @@ const test = base.extend({
 
 const thread = (main) => main.locator('.msgs');
 const agents = (yap) => yap.invoke('agent_list');
+/** A question asked out loud (the Voice Assistant's shortcut, its words given). */
+const askAloud = (yap, text) => yap.invoke('e2e_assistant_ask', { text, listenMs: 0 });
+/** What Yap has said out loud so far. */
+const spoken = async (yap) => (await yap.invoke('tts_e2e_spoken')).map((s) => s.text);
 const script = (yap, lines, name) => yap.invoke('e2e_claude_script', { script: writeScript(name, lines) });
 const tab = (main) => main.getByTestId('chat-agent');
 
@@ -527,6 +535,42 @@ test('Claude Code’s own question is a card: an option answers it, several are 
   const log = (await yap.invoke('agent_get', { id: agent.id })).log;
   expect(log.filter((e) => e.step === 'Asking you a question')).toHaveLength(3);
   expect(log.some((e) => e.step === 'Waiting for you: it has a question')).toBe(true);
+});
+
+test('asked out loud with the Code chat in view: straight to its session, “On it.” said, its own answer read aloud', async ({ yap, main }) => {
+  await script(yap, WATERING, 'watering');
+  await setConfig(yap, main, { speakReplies: true, agentsSpeak: 'voice' });
+  await yap.invoke('tts_e2e_spoken', { clear: true });
+  const before = (await agents(yap)).length;
+  await codeChat(main);
+  // A typed message first, so the Code chat exists and is the one in view.
+  await send(main, 'Add a watering schedule to notes.md.');
+  const agent = await newAgent(yap, before);
+  const first = await ended(yap, agent.id);
+  await messagesOf(yap, first.conversation, 3);
+  // Typed: its answer isn't read aloud ("Read agent reports aloud": when asked by voice).
+  expect(await spoken(yap)).toEqual([]);
+
+  // Asked out loud, the chat in view: its session's next turn — no model of Chat's, and Yap's own "On it.".
+  await script(yap, MINIMAP_TURN, 'minimap');
+  await askAloud(yap, 'Could you add a minimap button for it as well?');
+  await expect.poll(async () => (await agents(yap)).find((j) => j.id === agent.id).turnList.length, { timeout: 20_000 }).toBe(2);
+  await expect.poll(() => spoken(yap), { timeout: 20_000 }).toEqual(expect.arrayContaining(['On it.']));
+  expect((await agents(yap)).length).toBe(before + 1);
+  await expect.poll(async () => (await agents(yap)).find((j) => j.id === agent.id).turnList[1].status, { timeout: 30_000 }).toBe('done');
+  const again = (await agents(yap)).find((j) => j.id === agent.id);
+  expect(again.turnList[1]).toMatchObject({ n: 2, direct: true });
+  expect(again.turnList[1].request.toLowerCase()).toContain('minimap button');
+  expect(after(argsSeen()[1], '--resume')).toBe(again.session);
+  // Its own words are the chat's answer, and — this turn was asked out loud — read aloud.
+  const then = await messagesOf(yap, first.conversation, 6);
+  expect(then.map((m) => m.kind || m.role)).toEqual(['user', 'agentReport', 'assistant', 'user', 'agentReport', 'assistant']);
+  expect(then[3].voice).toBe(true);
+  expect(then[5].text).toBe(DONE2);
+  await expect.poll(() => spoken(yap), { timeout: 30_000 }).toEqual(expect.arrayContaining([DONE2]));
+  // The thread: the spoken question, its session's work under it, the answer.
+  await expect(thread(main).locator('.cbubble.assistant')).toHaveText([DONE1, DONE2]);
+  await expect.poll(() => laidOut(main)).toEqual(['you', 'work', 'report', 'answer', 'you', 'work', 'report', 'answer']);
 });
 
 test('core/agents.js: the Code chat’s own session at work is what the message box’s ■ stops', () => {

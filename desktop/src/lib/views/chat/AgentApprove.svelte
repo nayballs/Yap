@@ -25,7 +25,7 @@
   // pick's place, or join the picks where several are allowed). Before, a question was
   // refused at once and Claude chose for itself. Never under Bypass
   // permissions, where nothing asks.
-  import { answerApproval, replyToQuestion } from '../../stores/agents.svelte.js';
+  import { agents, answerApproval, replyToQuestion } from '../../stores/agents.svelte.js';
   import { questionAnswers, questionsAnswered } from '../../core/agentNow.js';
   import { renderMarkdown } from '../../core/markdown.js';
   import { longSaid } from '../../core/agents.js';
@@ -53,12 +53,13 @@
   const isQuestion = (a) => a?.tool === 'AskUserQuestion' && a.questions?.length > 0;
   /** One question with one answer: a click on its option answers it. */
   const quick = (a) => a.questions.length === 1 && !a.questions[0].multiSelect;
-  // What's picked so far: card id → question index → {labels, other, own}.
-  let picks = $state({});
+  // What's picked so far: card id → question index → {labels, other, own} — kept in the store
+  // (`agents.questionPicks`), so a card drawn again mid-answer still has it.
+  const picks = $derived(agents.questionPicks);
   // Cards whose answer is on its way (their buttons wait).
   let sending = $state({});
   const pickOf = (a, i) => picks[a.id]?.[i] || { labels: [], other: '', own: false };
-  const setPick = (a, i, next) => (picks = { ...picks, [a.id]: { ...(picks[a.id] || {}), [i]: { ...pickOf(a, i), ...next } } });
+  const setPick = (a, i, next) => (agents.questionPicks = { ...agents.questionPicks, [a.id]: { ...(agents.questionPicks[a.id] || {}), [i]: { ...pickOf(a, i), ...next } } });
   async function send(a, answers) {
     if (sending[a.id] || !Object.keys(answers).length) return;
     sending = { ...sending, [a.id]: true };

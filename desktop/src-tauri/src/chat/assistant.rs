@@ -1744,6 +1744,47 @@ async fn answer(app: AppHandle, asker: Asker, since: u64, question: String, abou
             skill::wait_for_answer(turn.conversation_id, skill);
         }
     }
+    // **Straight to its Code chat's session** (12 Nov 2026,
+    // `agents/direct.rs`): no model of Chat's answered. The page keeps the
+    // question and shows its session beside it; Yap says "On it" (a phone
+    // reads so); and the session's own words are read aloud when it's done
+    // (`chat/turn/report.rs`).
+    if let Some(agent) = &turn.direct {
+        if let Some(feed) = &feed {
+            feed.close();
+        }
+        let _ = app.emit(
+            TURN,
+            serde_json::json!({
+                "phase": "answered",
+                "conversationId": turn.conversation_id,
+                "userMessageId": format!("chat:{}:{}", turn.conversation_id, turn.user_index),
+                "messageId": null,
+                "show": focused,
+                "direct": agent,
+            }),
+        );
+        match &asker {
+            Asker::Phone(p) => {
+                if p.current() {
+                    p.answer(crate::agents::direct::SENT_SHOWN, true);
+                }
+            }
+            Asker::Shortcut(_) => {
+                // Said only where an answer would be: replies spoken, no
+                // meeting or call, no dictation begun meanwhile.
+                let quiet = crate::voice::tts::meeting_quiet().is_some() || crate::dictation::pipeline::dictation_state().0 != since;
+                if asker.current() && asker.voiced(crate::config::load().speak_replies) && !quiet {
+                    if let Err(e) = crate::voice::tts::speak(crate::agents::direct::SENT_SAID, None) {
+                        tracing::info!("Voice Assistant: couldn't say it went to the session ({e})");
+                    }
+                }
+                asker.give_up(&app);
+            }
+        }
+        tracing::info!(phone = !pc, "Voice Assistant: the question went straight to its Code chat's session");
+        return;
+    }
     let message_id = turn.message_id();
     let _ = app.emit(
         TURN,
