@@ -715,8 +715,8 @@ test('core/agents.js: the Code chat’s own session at work is what the message 
   expect(directLine({ id: 'a1', turn: 9, turnList: [] })).toBe(false);
   // Its report's marker: nothing to say when the turn was a plain reply — unless the marker names a file or carries one.
   const told = { id: 'a1', turnList: [{ ...reply, reportMessageId: 'chat:4:3' }, { n: 3, direct: true, status: 'done', files: ['notes.md'], reportMessageId: 'chat:4:6' }] };
-  expect(plainReport({ id: 'chat:4:3', text: 'Agent done · AddOns' }, told)).toBe(true);
-  expect(plainReport({ id: 'chat:4:6', text: 'Agent done · AddOns\nFiles it changed: notes.md' }, told)).toBe(false);
+  expect(plainReport({ id: 'chat:4:3', text: 'Agent done · garden-planner' }, told)).toBe(true);
+  expect(plainReport({ id: 'chat:4:6', text: 'Agent done · garden-planner\nFiles it changed: notes.md' }, told)).toBe(false);
   expect(plainReport({ id: 'chat:4:3', text: 'Agent done\nFiles it changed: a.md (backed up first).' }, told)).toBe(false);
   expect(plainReport({ id: 'chat:4:3', text: 'Agent done', files: [{ path: 'shot.png' }] }, told)).toBe(false);
   // An agent Chat sent out, or one Yap no longer knows: its line stays.

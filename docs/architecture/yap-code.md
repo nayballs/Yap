@@ -248,8 +248,8 @@ workspace, word for word, and no model of Chat's is asked.
   done, finish with a short summary of what you changed and anything you
   couldn't do."), which is for a brief Chat's model worded: its final words
   are relayed as a report. Added to the person's own words it made a
-  spoken "just testing the app's working" come back as "I didn't change
-  anything this time. Quest XP Bar is still at 1.4.0…". A direct turn has
+  spoken "just testing the app's working" come back as a report of what
+  it hadn't changed ("I didn't change anything this time…"). A direct turn has
   none (`runner::closing`), and a message sent while it works goes without
   the note line too (`note_text`): in Claude Code's own app a message is
   what was typed. (A read-only turn still says it's read only.)
@@ -264,7 +264,7 @@ workspace, word for word, and no model of Chat's is asked.
   words — no file changed, nothing refused, no plan or question waiting
   (`core/agents.js` `plainReply`) — shows as the message and the answer,
   as a reply in Claude Code's own app does:
-  - **no line of its own** ("AddOns · Hey Claude, just testing… ● Done"):
+  - **no line of its own** ("garden-planner · Hey, just testing… ● Done"):
     a direct turn has one only once it ended with something to report
     (`directLine`). While it works its work says what it's on, and the
     message box has ■;
@@ -272,8 +272,8 @@ workspace, word for word, and no model of Chat's is asked.
     report's record, a phone's), and the thread leaves it out
     (`plainReport`: unless it names a file changed or carries one);
   - a turn that changed files, was refused something, didn't finish or has
-    a plan waiting keeps both, as before ("Agent done · AddOns · Changed
-    notes.md ›", its Go ahead).
+    a plan waiting keeps both, as before ("Agent done · garden-planner ·
+    Changed notes.md ›", its Go ahead).
 - **On the chat's own model**: the plan model and effort its chip shows,
   kept as the person's choice, so it's the same from turn to turn (a session
   read afresh on another model costs its whole context again: [What a turn
