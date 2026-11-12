@@ -28,6 +28,14 @@ export const agents = $state({
    * the thread's card closes saying so ("Allowed from Office phone").
    */
   remoteAnswers: [],
+  /**
+   * What's picked so far on a question card (Claude Code's AskUserQuestion):
+   * card id → question index → `{labels, other, own}`. Kept here, not in
+   * the card: the thread may draw its card again while the person is
+   * answering (the agent's status changing a moment after it asks), and
+   * what they picked must still be there. Let go with the card.
+   */
+  questionPicks: {},
   /** `{id, conversation}`: an agent to show (its chat and tab), from the bar's or a notification's Open. */
   openWanted: null,
   /** agent id → the turn whose plan a report card's Go ahead sent on (its button stays used). */
@@ -194,5 +202,6 @@ export function initAgents() {
       agents.remoteAnswers = [...agents.remoteAnswers.filter((a) => a.id !== id), done].slice(-20);
     }
     agents.approvals = agents.approvals.filter((a) => a.id !== id);
+    if (agents.questionPicks[id]) delete agents.questionPicks[id];
   }).catch(() => {});
 }

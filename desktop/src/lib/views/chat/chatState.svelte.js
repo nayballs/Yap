@@ -1147,6 +1147,10 @@ export function createChatState({ onopensettings = () => null, onopennote = () =
         const answer = messages.at(-1);
         if (answer?.role === 'assistant') for (const pg of answer.pages || []) if (pg?.url && !pagesShown.has(pg.url)) doc.showPage(pg);
       }
+      // Asked out loud in a Code chat that works directly (agents/direct.rs):
+      // it went straight to its session — no answer of Chat's; its session's
+      // tab opens beside it, as a typed message's does.
+      if (phase === 'answered' && p.direct) doc.showAgent({ ...p.direct, auto: true });
       refreshList();
       // The question asked out loud (the person's own), another conversation
       // brought up, the bar's Open in Chat: at its newest. Its answer

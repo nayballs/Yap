@@ -296,23 +296,49 @@ workspace, word for word, and no model of Chat's is asked.
   (`ChatView`). With something typed it's Send, as ever: the message goes
   to it at once, as a note. An agent Chat sent out is stopped from its
   tab, as before.
+- **Asked out loud, or from a phone** (2026-11-12; the maintainer:
+  "please do all of this"): the Voice Assistant's question asked **with
+  Chat in view**, and a paired phone's question in a Code chat, go straight
+  to the session too. Before, both were handed over by Chat's model, so
+  that the spoken answer stayed short.
+  - **Yap says "On it."** (`direct::SENT_SAID`: its own words, no model's;
+    said where an answer would be — replies spoken, no meeting or call, no
+    dictation begun meanwhile); a phone reads "On it. Its answer comes when
+    it's done." (`SENT_SHOWN`). The page keeps the question and shows its
+    session beside it (`yap-assistant-turn`'s "answered" with `direct`).
+  - **Its own answer is read aloud when it's done**, as much of it as a
+    spoken answer is (Settings' "Read aloud": `assistant::spoken_answer`,
+    then "The rest is in Chat."): the session's own words can be long,
+    where a report Chat's model words is short already.
+  - **Which turns are read aloud** (`report.rs` `asked_by_voice`): the
+    turn's own question says — a later turn asked out loud of a session
+    first typed to is read aloud, and a typed one of a session first asked
+    out loud isn't. Before, every turn went by how the agent's first came.
+    A phone's turn is said on that phone, typed there or spoken, as ever.
+  - **A phone's turn runs at most at Auto**, never Bypass, whatever the
+    chat's Mode on the PC (`direct::send`'s `phone`, from
+    `remote::phone_of_message`; the runner checks again as the turn
+    starts), and is reported on that phone. A question Yap can't tie to a
+    phone never goes this way as one: it's the Voice Assistant's, below.
+  - **Asked out loud from another app** stays Chat's model's: it may look
+    at the window in front and answers there (`Message.away`).
 - **When** (`direct::applies`, pure): "Work directly in Code chats" on
   (Settings → Yap Code, `agentsDirect`, on by default), Yap Code on with
   Claude Code on the PC, a Code chat whose model is on the plan, a message
-  typed or dictated in the Chat view, with no selection, page
-  passage, Skill or "think it through". **Everything else is handed over as
-  before** by Chat's model: a Code chat on an API key or an on-device model,
-  the Voice Assistant's spoken question, a question from the phone.
+  typed, dictated or asked out loud with Chat in view, or a paired phone's,
+  with no selection, page passage, Skill or "think it through".
+  **Everything else is handed over as before** by Chat's model: a Code chat
+  on an API key or an on-device model, the Voice Assistant's question asked
+  from another app.
 - **Its words as it writes them** (2026-11-12): the message it's writing
   shows in its work as it grows, its final words too
   ([Around the tab](#around-the-tab), "its words as it writes them").
-- **Not yet**: Yap's own chat tools inside a direct Code chat (the browser
-  panel, memory, connectors, documents), the phone and the Voice Assistant
-  going direct.
+- **Not yet**: the screen, the pages beside the chat and connectors inside
+  a direct Code chat (a plan Code chat's own session has them).
 - **Tests**: `agents-direct.spec.js` (the first message, the next on
   `--resume`, a message mid-work, a message with a screenshot — the first,
-  the next turn's own, a note's —, its words as it writes them, ■ Stop and
-  Esc, the switch off). The e2e base config has
+  the next turn's own, a note's —, its words as it writes them, asked out
+  loud with the chat in view, ■ Stop and Esc, the switch off). The e2e base config has
   `agentsDirect: false`, so every older spec still tests the hand-off; Yap
   Lab's `code-chat-direct` script runs it on the real Claude Code.
 
@@ -1750,8 +1776,10 @@ failed, or done with a question, with that turn's facts
   plan the person allowed: that it's building from it, no question); its
   question put to the person. The model failing: the agent's own summary, as it
   is.
-- **Read aloud** (`agents_speak`): "voice" (the default: when the agent was asked
-  out loud or dictated into Chat), "always" or "never". Once the speaker and
+- **Read aloud** (`agents_speak`): "voice" (the default: when that turn was asked
+  out loud or dictated into Chat — its own question says, `asked_by_voice`,
+  2026-11-12 — or from a phone), "always" or "never". A direct turn's own
+  words: as much as a spoken answer is. Once the speaker and
   the mic are free (up to 5 minutes); never in a meeting or a call. **Where**
   follows who asked (2026-11-08, `said_where`): a turn asked from a paired
   phone (`agents::remote::phone_of_turn`) is said on that phone (Yap Link's

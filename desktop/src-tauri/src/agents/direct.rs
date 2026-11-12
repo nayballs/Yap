@@ -29,8 +29,17 @@
 //!   person's Claude plan, a message typed (or dictated) in the Chat view
 //!   with no selection or Skill. Everything else is handed over
 //!   as before, by Chat's model with `start_agent`: a chat on an API key or
-//!   an on-device model, the Voice Assistant's spoken question (its answer
-//!   is said, so it's kept short), a question from the phone.
+//!   an on-device model, the Voice Assistant's question asked from another
+//!   app (its model may look at the window in front, and answers there).
+//! - **Asked out loud, or from a phone** (12 Nov 2026): the Voice
+//!   Assistant's question asked with Chat in view, and a paired phone's
+//!   question in a Code chat, go straight to the session too. Yap says "On
+//!   it" ([`SENT_SAID`]; a phone reads [`SENT_SHOWN`]) — nothing of a
+//!   model's — and the session's own final words are read aloud when it's
+//!   done, as much of them as a spoken answer is (`chat/turn/report.rs`).
+//!   A phone's turn runs at most at Auto, as ever ([`send`]'s `phone`).
+//!   Before, both were handed over by Chat's model so that the spoken
+//!   answer stayed short.
 //! - **With its screenshots** (12 Nov 2026): the ones the person put in the
 //!   box (snipped, pasted, dropped) go with their words, as Claude Code's
 //!   own app sends a pasted picture — the turn keeps their ids
@@ -48,6 +57,12 @@ use crate::agents::workspaces::Folder;
 use crate::ai::claude_code::session::{self, Effort};
 use crate::integrations::claude_live::Origin;
 
+/// What Yap says out loud when a spoken question went straight to its
+/// Code chat's session: Yap's own two words, never a model's.
+pub const SENT_SAID: &str = "On it.";
+/// What a phone reads in the answer's place then.
+pub const SENT_SHOWN: &str = "On it. Its answer comes when it's done.";
+
 /// What a turn is, as far as going directly is concerned.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct Message {
@@ -59,8 +74,11 @@ pub struct Message {
     pub code_chat: bool,
     /// Chat's model is on the person's Claude plan.
     pub on_plan: bool,
-    /// Asked through the Voice Assistant's path (its shortcut, a phone).
-    pub assistant: bool,
+    /// The Voice Assistant's question asked from another app (its shortcut,
+    /// with Chat not in view): its model may look at the window in front
+    /// and answers there, so Chat's model takes it. Asked with Chat in
+    /// view, or from a phone, it goes straight to the session.
+    pub away: bool,
     /// It carries a selection, a page's passage, a Skill, or a picture Yap
     /// took of the screen by itself: Chat's own business. (The person's own
     /// screenshots go with their words.)
@@ -69,7 +87,7 @@ pub struct Message {
 
 /// **Does this message go straight to the Code chat's session?** Pure.
 pub fn applies(m: Message) -> bool {
-    m.setting && m.offered && m.code_chat && m.on_plan && !m.assistant && !m.with_more
+    m.setting && m.offered && m.code_chat && m.on_plan && !m.away && !m.with_more
 }
 
 /// A message sent directly: its session.
@@ -91,8 +109,12 @@ impl Sent {
 /// session Claude Code no longer has — a new one with it as its brief. On
 /// `model` and `effort`, the chat's own; `shots` the screenshots it came
 /// with (their ids in `chat-images/`), written to the session with it.
+/// `phone`: the paired phone that asked (Yap Link) — its turn runs at most
+/// at Auto, never Bypass, whatever the chat's Mode on the PC, and is
+/// reported on that phone (`agents/remote.rs`; the runner checks again as
+/// the turn starts).
 #[allow(clippy::too_many_arguments)]
-pub fn send(conversation: u64, folder: &Folder, text: &str, shots: &[String], message_id: String, by_voice: bool, model: &str, effort: Option<&str>) -> Result<Sent, String> {
+pub fn send(conversation: u64, folder: &Folder, text: &str, shots: &[String], message_id: String, by_voice: bool, phone: Option<String>, model: &str, effort: Option<&str>) -> Result<Sent, String> {
     use crate::chat::tools::agents as tools;
     let cfg = crate::config::load();
     let effort = effort.map(str::to_string).filter(|e| Effort::parse(e).is_some());
@@ -110,6 +132,9 @@ pub fn send(conversation: u64, folder: &Folder, text: &str, shots: &[String], me
             effort,
             direct: true,
             shots: shots.to_vec(),
+            // A phone's words: a turn at most at Auto, the phone's.
+            mode: phone.as_ref().map(|_| crate::agents::remote::phone_mode(crate::agents::remote::PHONE_MAX)),
+            phone,
             ..Default::default()
         };
         let (agent, how) = runner::follow_up(&prev.id, ask)?;
@@ -118,6 +143,8 @@ pub fn send(conversation: u64, folder: &Folder, text: &str, shots: &[String], me
     }
     let chip = modes::or_auto(&store::mode_of(Some(conversation), &cfg.agents_mode));
     let mode = modes::effective(chip, None, folder.cap_mode(), store::bypass_confirmed()).map_err(|r| r.for_model())?;
+    // A phone's question: at most Auto, never Bypass.
+    let mode = if phone.is_some() { crate::agents::remote::phone_mode(mode) } else { mode };
     let model = if model.trim().is_empty() { cfg.agents_model.clone() } else { model.to_string() };
     let effort = effort.and_then(|e| Effort::parse(&e)).or_else(|| Effort::parse(&cfg.agents_effort)).unwrap_or(Effort::Medium);
     let now = store::now_secs();
@@ -166,7 +193,7 @@ mod tests {
 
     #[test]
     fn a_typed_message_in_a_code_chat_on_the_plan_goes_straight_to_its_session() {
-        let typed = Message { setting: true, offered: true, code_chat: true, on_plan: true, assistant: false, with_more: false };
+        let typed = Message { setting: true, offered: true, code_chat: true, on_plan: true, away: false, with_more: false };
         assert!(applies(typed));
         // The switch off, Yap Code off (or no Claude Code here): handed over as before.
         assert!(!applies(Message { setting: false, ..typed }));
@@ -174,8 +201,9 @@ mod tests {
         // A plain chat, or a Code chat on a key or an on-device model: Chat's own model answers.
         assert!(!applies(Message { code_chat: false, ..typed }));
         assert!(!applies(Message { on_plan: false, ..typed }));
-        // Asked out loud or from the phone: its answer is said, so Chat keeps it short.
-        assert!(!applies(Message { assistant: true, ..typed }));
+        // Asked out loud from another app: Chat's model takes it (it may look at the window in front).
+        // (Asked with Chat in view, or from a phone, it's `typed`: straight to the session.)
+        assert!(!applies(Message { away: true, ..typed }));
         // With a selection, a Skill or a picture Yap took by itself: Chat's own business.
         assert!(!applies(Message { with_more: true, ..typed }));
         assert!(!applies(Message::default()));

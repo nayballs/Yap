@@ -326,12 +326,16 @@ async fn report(id: &str, n: u32, held: bool) {
     let message_id = format!("chat:{conv}:{index}");
     tracing::info!(id, turn = n, turns = covered.len(), by_model, "Agents: reported in its chat");
     emit(&agent, n, conv, Some(&message_id), &marker_id);
-    if speaks(&agent) {
+    if speaks(&agent, n) {
         // Where it's said follows who asked (Remote Control, 2026-11-08): a
         // turn asked from a phone on that phone, never this PC's speakers.
         let asked = agent.turn_list.iter().find(|t| t.n == n).and_then(|t| t.message_id.clone()).or_else(|| agent.message_id.clone());
         let by = crate::agents::remote::phone_of_turn(&agent.id, n, asked.as_deref());
-        let (reply, message_id) = (reply.clone(), message_id.clone());
+        // The session's own words (a Code chat that works directly) can be
+        // long: as much of them is said as a spoken answer is ("Read aloud"),
+        // the rest is in Chat. A report Chat's model worded is short already.
+        let said = if by_model { reply.clone() } else { crate::chat::assistant::spoken_answer(&reply, 0, crate::chat::assistant::SpokenLength::configured(&crate::config::load())).0 };
+        let (reply, message_id) = (said, message_id.clone());
         match said_where(by, crate::link::phone_connected) {
             Said::Pc => {
                 tauri::async_runtime::spawn(async move { say(&reply, &message_id).await });
@@ -397,13 +401,39 @@ async fn ask_model(agent: &Agent, requests: usize, conv: u64) -> Result<(String,
     Ok((reply, answered_by))
 }
 
-/// Is this agent's report read aloud (`agents_speak`)?
-fn speaks(agent: &Agent) -> bool {
+/// Is turn `n`'s report read aloud (`agents_speak`: asked by voice,
+/// always, never)?
+fn speaks(agent: &Agent, n: u32) -> bool {
     match crate::config::load().agents_speak.as_str() {
         "always" => true,
         "never" => false,
-        _ => agent.origin == crate::integrations::claude_live::Origin::Voice,
+        _ => {
+            // A phone's turn is said (on that phone), typed there or spoken, as ever.
+            let asked = agent.turn_list.iter().find(|t| t.n == n).and_then(|t| t.message_id.clone()).or_else(|| agent.message_id.clone());
+            let phone = crate::agents::remote::phone_of_turn(&agent.id, n, asked.as_deref()).is_some();
+            asked_by_voice(agent, n, phone, |conversation, index| chats::get(conversation).and_then(|c| c.messages.get(index).map(|m| m.voice)))
+        }
     }
+}
+
+/// **Was turn `n` asked out loud?** Its own question in the chat says
+/// (`voice_of(conversation, index)`: that message's): a later turn of an
+/// agent first typed to may be spoken, and the other way round (12 Nov
+/// 2026: before, every turn went by how the agent's first came). A paired
+/// phone's turn (`phone`) counts as asked out loud, typed there or spoken:
+/// its report is said on that phone, as ever. A turn with no question
+/// known: how the agent came. Pure.
+pub fn asked_by_voice(agent: &Agent, n: u32, phone: bool, voice_of: impl Fn(u64, usize) -> Option<bool>) -> bool {
+    if phone {
+        return true;
+    }
+    let asked = agent.turn_list.iter().find(|t| t.n == n).and_then(|t| t.message_id.as_deref()).or(if n <= 1 { agent.message_id.as_deref() } else { None });
+    let said = asked.and_then(|id| {
+        let mut parts = id.strip_prefix("chat:")?.split(':');
+        let (conversation, index) = (parts.next()?.parse().ok()?, parts.next()?.parse().ok()?);
+        voice_of(conversation, index)
+    });
+    said.unwrap_or(agent.origin == crate::integrations::claude_live::Origin::Voice)
 }
 
 /// Say `reply` once the speaker is free and nobody's dictating — never in
@@ -658,6 +688,30 @@ Its own words: Done.");
         let card = ChatMessage { kind: AGENT_REPORT.into(), ..said("user", "The agent in recipe-box: it's done.") };
         assert!(!told_by_chat(Some(3), &[&told[..], &[card]].concat()));
         assert!(TOLD_ALREADY.starts_with("(You told the user this"));
+    }
+
+    #[test]
+    fn a_turns_report_is_said_when_that_turn_was_asked_out_loud() {
+        use crate::integrations::claude_live::Origin;
+        let turn = |n: u32, message: &str| TurnNote { n, message_id: Some(message.into()), ..Default::default() };
+        // Typed first, then asked out loud: the second turn's is said, the first's isn't.
+        let typed_first = Agent { origin: Origin::Typed, conversation: Some(4), message_id: Some("chat:4:0".into()), turn_list: vec![turn(1, "chat:4:0"), turn(2, "chat:4:3")], ..agent() };
+        let voice_of = |conversation: u64, index: usize| (conversation == 4).then_some(index == 3);
+        assert!(!asked_by_voice(&typed_first, 1, false, voice_of));
+        assert!(asked_by_voice(&typed_first, 2, false, voice_of));
+        // Asked out loud first, then typed: the other way round.
+        let spoken_first = Agent { origin: Origin::Voice, ..typed_first.clone() };
+        let voice_of = |_: u64, index: usize| Some(index == 0);
+        assert!(asked_by_voice(&spoken_first, 1, false, voice_of));
+        assert!(!asked_by_voice(&spoken_first, 2, false, voice_of));
+        // Its question not known (the chat's message gone, an agent from before turns): how the agent came.
+        assert!(asked_by_voice(&spoken_first, 2, false, |_, _| None));
+        assert!(!asked_by_voice(&typed_first, 2, false, |_, _| None));
+        let old = Agent { origin: Origin::Voice, turn_list: Vec::new(), message_id: Some("chat:4:0".into()), ..agent() };
+        assert!(asked_by_voice(&old, 1, false, |_, _| None));
+        assert!(!asked_by_voice(&old, 1, false, |_, _| Some(false)));
+        // A paired phone's turn: said (on that phone), typed there or spoken.
+        assert!(asked_by_voice(&typed_first, 1, true, |_, _| Some(false)));
     }
 
     #[test]
