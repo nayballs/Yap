@@ -188,7 +188,8 @@ function countByConv(list) {
 }
 
 /** An agent's line in the running list (RunningAgents.svelte's). */
-export const runningLineOf = (a) => (a.status === 'asking' ? 'Waiting for you to allow a step' : a.now || a.turnTitle || statusWord(a.status));
+// (Asking: what for, when its line says — a question of its own is answered at the PC.)
+export const runningLineOf = (a) => (a.status === 'asking' ? (/^Waiting for you\b/.test(a.now || '') ? a.now : 'Waiting for you to allow a step') : a.now || a.turnTitle || statusWord(a.status));
 
 /** How long it has been at its request now (its turn's time). */
 export function tookOf(a, now = Date.now() / 1000) {

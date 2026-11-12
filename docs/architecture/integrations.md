@@ -1056,9 +1056,18 @@ no Local API (the bridge can be off), and it reaches the live UI.
   (`claude_approve_answer`; `claude_approve_pending` lists the waiting ones).
   No answer in 10 minutes, the run ended, or Claude Code cancelled the call:
   a no, said to Claude in words it can put in its report. Every card's end
-  goes out as `yap-claude-approve-done`. `AskUserQuestion` is denied with no
-  card: "Yap can't show questions while an agent runs…". Test mode can answer
-  every card at once (`e2e_claude_approve_auto`).
+  goes out as `yap-claude-approve-done`. **A question of Claude Code's own**
+  (`AskUserQuestion`, 2026-11-12) comes the same way and has a card of its
+  own: its `questions` (one to four, each `{question, header, options:
+  [{label, description}], multiSelect}`), answered by `claude_approve_reply
+  {id, answers}` — each question's text → the label picked, a list of them,
+  or the person's own words — which goes back as `updatedInput`
+  `{questions, answers}` (code.claude.com's "Handle clarifying questions").
+  "Let it decide" (`claude_approve_answer`'s no), no answer in time, or
+  Bypass permissions (nobody is asked): Claude is told to choose for itself
+  and say what it chose. Before, every question was refused at once. Test
+  mode can answer every card at once (`e2e_claude_approve_auto`: its allow
+  picks each question's first option).
 - **The backup hook** (`backup.rs`): before Claude Code edits or writes a
   file, an http `PreToolUse` hook on `Edit|Write|MultiEdit|NotebookEdit`
   (`POST /hook/<run>/PreToolUse`, 60 s `timeout`) copies it into the run's

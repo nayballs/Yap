@@ -32,8 +32,21 @@
 //! plan out once its turn ends (`agents::runner::plan_allowed`); Not yet, it
 //! stays a plan and Claude is told to change nothing.
 //!
+//! **A question** (12 Nov 2026): Claude Code's `AskUserQuestion` ([`ASK`])
+//! comes the same way — its input `{questions: [{question, header, options:
+//! [{label, description}], multiSelect}]}`, one to four questions of two to
+//! four options each — and is answered with `updatedInput` `{questions,
+//! answers}`, `answers` each question's text → the label picked (several:
+//! joined with ", "; the person's own words when none fits), as
+//! code.claude.com's "Handle clarifying questions" says. Its card has the
+//! questions and their options ([`Pending::questions`]), answered by
+//! `claude_approve_reply` ([`Book::reply`]) — or left to Claude ("Let it
+//! decide", no answer in time): told to choose for itself and say what it
+//! chose. Before, there was no card: every question was refused at once.
+//! Under Bypass permissions nothing asks, a question neither.
+//!
 //! The log has the card's id, the tool's name and the outcome; never the
-//! command, the file or the text.
+//! command, the file, the question or the text.
 
 use std::collections::HashMap;
 use std::path::Path;
@@ -62,6 +75,82 @@ const SUMMARY_MAX: usize = 80;
 pub const EXIT_PLAN: &str = "ExitPlanMode";
 /// How much of a plan its card shows (folded in the thread).
 const PLAN_MAX: usize = 20_000;
+/// Claude Code's tool for a question to the person.
+pub const ASK: &str = "AskUserQuestion";
+/// The most questions a card has, and options a question (Claude Code's own
+/// limits).
+const QUESTIONS_MAX: usize = 4;
+const OPTIONS_MAX: usize = 4;
+/// How long an answer in the person's own words may be.
+const ANSWER_MAX: usize = 2_000;
+/// What Claude Code is told when its question goes unanswered.
+const CHOOSE: &str = "Make the most sensible choice yourself, carry on, and say in your final summary what you chose and what you'd have asked.";
+
+/// **One of Claude Code's questions**, as the card shows it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Question {
+    /// The question, whole: the answer goes back under these very words.
+    pub question: String,
+    /// A word or two for it ("Format").
+    pub header: String,
+    pub options: Vec<Choice>,
+    /// Several of them may be picked.
+    pub multi_select: bool,
+}
+
+/// One answer a question offers.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct Choice {
+    pub label: String,
+    pub description: String,
+}
+
+/// **The questions of an `AskUserQuestion` call**: each with its text and at
+/// least one option with a label, at most [`QUESTIONS_MAX`] of
+/// [`OPTIONS_MAX`] options. Pure.
+pub fn questions_of(input: &Value) -> Vec<Question> {
+    let text = |v: &Value, k: &str| v.get(k).and_then(Value::as_str).unwrap_or("").trim().to_string();
+    input
+        .get("questions")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(|q| {
+            let question = text(q, "question");
+            let options: Vec<Choice> = q
+                .get("options")
+                .and_then(Value::as_array)
+                .into_iter()
+                .flatten()
+                .map(|o| Choice { label: text(o, "label"), description: one_line(&text(o, "description"), 200) })
+                .filter(|o| !o.label.is_empty())
+                .take(OPTIONS_MAX)
+                .collect();
+            (!question.is_empty() && !options.is_empty()).then(|| Question { question, header: one_line(&text(q, "header"), 24), options, multi_select: q.get("multiSelect").and_then(Value::as_bool).unwrap_or(false) })
+        })
+        .take(QUESTIONS_MAX)
+        .collect()
+}
+
+/// **The person's answers as Claude Code takes them**: `given` (each
+/// question's text → a label, their own words, or a list of labels) kept
+/// for the card's own questions only, a list joined with ", ", their own
+/// words at most [`ANSWER_MAX`]. None: nothing was answered. Pure.
+pub fn answers_for(questions: &[Question], given: &Value) -> Option<Value> {
+    let mut out = serde_json::Map::new();
+    for q in questions {
+        let said = match given.get(&q.question) {
+            Some(Value::String(s)) => s.trim().to_string(),
+            Some(Value::Array(list)) => list.iter().filter_map(Value::as_str).map(str::trim).filter(|s| !s.is_empty()).collect::<Vec<_>>().join(", "),
+            _ => String::new(),
+        };
+        if !said.is_empty() {
+            out.insert(q.question.clone(), Value::String(clip(&said, ANSWER_MAX)));
+        }
+    }
+    (!out.is_empty()).then_some(Value::Object(out))
+}
 /// What Claude Code is told when it asks during a Bypass permissions run.
 pub const UNATTENDED: &str = "This agent runs in Bypass permissions in Yap, so nobody is asked while it works, and this step needed asking (one of Claude Code's own safety checks, or one of the user's rules), so it wasn't done. Don't try it another way: carry on without it, and say in your final summary what you couldn't do.";
 
@@ -84,6 +173,10 @@ pub struct Pending {
     pub label: String,
     /// When it was asked (unix seconds).
     pub asked_ts: u64,
+    /// **A question's card** ([`ASK`]): Claude Code's questions and their
+    /// options. Empty for a permission prompt or a plan.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub questions: Vec<Question>,
 }
 
 /// How a prompt ended.
@@ -136,7 +229,8 @@ struct Waiting {
     live: String,
     /// The JSON-RPC request's id, for a cancel.
     rpc: String,
-    tx: mpsc::Sender<(Outcome, Option<By>)>,
+    /// How it ended, who answered, and a question's answers.
+    tx: mpsc::Sender<(Outcome, Option<By>, Option<Value>)>,
 }
 
 /// **The prompts waiting**, one book per endpoint.
@@ -160,7 +254,18 @@ impl Book {
     /// waiting — the first answer wins, from wherever it came.
     pub fn answer_by(&self, id: u64, allow: bool, by: By) -> bool {
         let Some(w) = self.lock().remove(&id) else { return false };
-        w.tx.send((if allow { Outcome::Allowed } else { Outcome::Denied }, Some(by))).is_ok()
+        w.tx.send((if allow { Outcome::Allowed } else { Outcome::Denied }, Some(by), None)).is_ok()
+    }
+
+    /// **A question's answers** (its card's own: `given`, each question's
+    /// text → what was picked or typed): `true` if that question was still
+    /// waiting and something of it was answered. Nothing answered leaves it
+    /// waiting (the card's "Let it decide" is [`Book::answer`]'s no).
+    pub fn reply(&self, id: u64, given: &Value, by: By) -> bool {
+        let mut map = self.lock();
+        let Some(answers) = map.get(&id).and_then(|w| answers_for(&w.card.questions, given)) else { return false };
+        let Some(w) = map.remove(&id) else { return false };
+        w.tx.send((Outcome::Allowed, Some(by), Some(answers))).is_ok()
     }
 
     /// Prompt `id`, if it's still waiting.
@@ -186,7 +291,7 @@ impl Book {
             ids.into_iter().filter_map(|id| map.remove(&id)).collect()
         };
         for w in &closed {
-            let _ = w.tx.send((outcome, None));
+            let _ = w.tx.send((outcome, None, None));
         }
         closed.len()
     }
@@ -254,9 +359,19 @@ pub fn definition() -> Value {
     })
 }
 
-/// The answer Claude Code reads for `tool`.
-fn decision(tool: &str, outcome: Outcome, input: &Value, wait: Duration) -> String {
+/// The answer Claude Code reads for `tool` (`answers`: a question's).
+fn decision(tool: &str, outcome: Outcome, input: &Value, answers: Option<&Value>, wait: Duration) -> String {
     let deny = |message: String| json!({ "behavior": "deny", "message": message }).to_string();
+    if tool == ASK {
+        return match (outcome, answers) {
+            // Answered: the questions as asked, and what the person picked.
+            (Outcome::Allowed, Some(answers)) => json!({ "behavior": "allow", "updatedInput": { "questions": input.get("questions").cloned().unwrap_or_else(|| json!([])), "answers": answers } }).to_string(),
+            (Outcome::Allowed | Outcome::Denied, _) => deny(format!("The user left this one to you in Yap. {CHOOSE}")),
+            (Outcome::TimedOut, _) => deny(format!("Nobody answered this question in Yap within {}. {CHOOSE}", span(wait))),
+            (Outcome::Ended, _) => deny("The agent was stopped in Yap before the user answered.".into()),
+            (Outcome::Cancelled, _) => deny("This question was cancelled.".into()),
+        };
+    }
     match outcome {
         Outcome::Allowed => json!({ "behavior": "allow", "updatedInput": input }).to_string(),
         // A plan's Not yet: still a plan, nothing changed.
@@ -290,20 +405,30 @@ pub fn ask(ep: &Endpoint, run: &Run, args: &serde_json::Map<String, Value>, rpc:
         return ("approve is Claude Code's permission prompt: it takes tool_name and input.".into(), true);
     };
     let input = args.get("input").cloned().unwrap_or_else(|| json!({}));
-    // A question for the person isn't a permission: Yap has no card for
-    // one yet, so Claude decides and says so (the report asks the person).
-    if tool == "AskUserQuestion" {
-        let text = json!({ "behavior": "deny", "message": "Yap can't show questions while an agent runs. Make the most sensible choice yourself, carry on, and say in your final summary what you chose and what you'd have asked." }).to_string();
-        return (text, false);
+    // **A question for the person** (12 Nov 2026): its own card, with the
+    // questions and their options. One with nothing to show (no question
+    // with an option) is left to Claude, as every question was before.
+    let questions = if tool == ASK { questions_of(&input) } else { Vec::new() };
+    let unattended = run.spec.approval.as_ref().is_some_and(|a| a.unattended);
+    if tool == ASK && (questions.is_empty() || unattended) {
+        // (Bypass permissions: nobody is asked, a question neither.)
+        tracing::info!(run = %run.id, unattended, "Claude Code: a question with no card; left to Claude");
+        let why = if unattended { "This agent runs in Bypass permissions in Yap, so nobody is asked while it works." } else { "Yap couldn't show this question." };
+        return (json!({ "behavior": "deny", "message": format!("{why} {CHOOSE}") }).to_string(), false);
     }
     // **Bypass permissions: nobody is asked** (8 Nov 2026). What Claude Code
     // still asks in that mode (its own safety checks, the person's own `ask`
     // rules) is answered no at once, with no card: never a wait.
-    if run.spec.approval.as_ref().is_some_and(|a| a.unattended) {
+    if unattended {
         tracing::info!(run = %run.id, tool = %tool_kind(tool), "Claude Code: a permission prompt in Bypass permissions; answered no, nobody asked");
         return (json!({ "behavior": "deny", "message": UNATTENDED }).to_string(), false);
     }
-    let (summary, detail) = describe(tool, &input, run.spec.folder.as_deref());
+    let (summary, detail) = if tool == ASK {
+        // The first question is its line; the card has them all.
+        (one_line(&questions[0].question, SUMMARY_MAX * 2), String::new())
+    } else {
+        describe(tool, &input, run.spec.folder.as_deref())
+    };
     let id = ep.approvals.next.fetch_add(1, Ordering::Relaxed) + 1;
     let approval = run.spec.approval.clone().unwrap_or_default();
     let card = Pending {
@@ -316,23 +441,30 @@ pub fn ask(ep: &Endpoint, run: &Run, args: &serde_json::Map<String, Value>, rpc:
         detail,
         label: run.spec.label.clone(),
         asked_ts: now_secs(),
+        questions,
     };
     let (tx, rx) = mpsc::channel();
     ep.approvals.lock().insert(id, Waiting { card: card.clone(), live: run.id.clone(), rpc: rpc.to_string(), tx });
     (ep.emit)(EVENT, serde_json::to_value(&card).unwrap_or(Value::Null));
     tracing::info!(id, run = %run.id, tool = %tool_kind(tool), "Claude Code: a permission prompt waits for the user");
     if let Some(allow) = auto_answer() {
-        ep.approvals.answer(id, allow);
+        // (Test mode's "allow" answers a question with each one's first option.)
+        let first: serde_json::Map<String, Value> = card.questions.iter().map(|q| (q.question.clone(), Value::String(q.options[0].label.clone()))).collect();
+        if allow && !first.is_empty() {
+            ep.approvals.reply(id, &Value::Object(first), By::Pc);
+        } else {
+            ep.approvals.answer(id, allow);
+        }
     }
-    let (outcome, by) = match rx.recv_timeout(ep.wait) {
+    let (outcome, by, answers) = match rx.recv_timeout(ep.wait) {
         Ok(o) => o,
         Err(_) => {
             // Taken out unless an answer got there first.
             let gone = ep.approvals.lock().remove(&id).is_none();
             if gone {
-                rx.try_recv().unwrap_or((Outcome::TimedOut, None))
+                rx.try_recv().unwrap_or((Outcome::TimedOut, None, None))
             } else {
-                (Outcome::TimedOut, None)
+                (Outcome::TimedOut, None, None)
             }
         }
     };
@@ -342,7 +474,7 @@ pub fn ask(ep: &Endpoint, run: &Run, args: &serde_json::Map<String, Value>, rpc:
     }
     (ep.emit)(EVENT_DONE, done_payload(id, &card.run, outcome, by.as_ref()));
     tracing::info!(id, outcome = outcome.word(), by = by.as_ref().map(By::word), "Claude Code: a permission prompt answered");
-    (decision(tool, outcome, &input, ep.wait), false)
+    (decision(tool, outcome, &input, answers.as_ref(), ep.wait), false)
 }
 
 /// **A card's end** (`yap-claude-approve-done`): `{id, run, outcome, by}`,
@@ -493,11 +625,11 @@ mod tests {
         assert_eq!(span(Duration::from_secs(90)), "90 seconds");
         assert_eq!(span(Duration::from_millis(300)), "1 second");
         let input = json!({ "command": "ls" });
-        let allow: Value = serde_json::from_str(&decision("Bash", Outcome::Allowed, &input, super::super::APPROVE_WAIT)).unwrap();
+        let allow: Value = serde_json::from_str(&decision("Bash", Outcome::Allowed, &input, None, super::super::APPROVE_WAIT)).unwrap();
         assert_eq!(allow, json!({ "behavior": "allow", "updatedInput": { "command": "ls" } }));
-        let late: Value = serde_json::from_str(&decision("Bash", Outcome::TimedOut, &input, super::super::APPROVE_WAIT)).unwrap();
+        let late: Value = serde_json::from_str(&decision("Bash", Outcome::TimedOut, &input, None, super::super::APPROVE_WAIT)).unwrap();
         assert!(late["message"].as_str().unwrap().contains("within 10 minutes"));
-        let no: Value = serde_json::from_str(&decision("Bash", Outcome::Denied, &input, super::super::APPROVE_WAIT)).unwrap();
+        let no: Value = serde_json::from_str(&decision("Bash", Outcome::Denied, &input, None, super::super::APPROVE_WAIT)).unwrap();
         assert!(no["message"].as_str().unwrap().starts_with("The user said no to this in Yap."));
         assert_eq!(tool_kind("mcp__tracker__create_issue"), "mcp", "another server's name stays out of the log");
         assert_eq!(tool_kind("Bash"), "Bash");
@@ -515,13 +647,13 @@ mod tests {
         // The book: the first answer wins, whoever gives it.
         let book = Book::default();
         let (tx, rx) = mpsc::channel();
-        let card = Pending { id: 3, run: "ab12".into(), conversation: Some(4), origin: Origin::Typed, tool: "Bash".into(), summary: "Run a command: npm test".into(), detail: "npm test".into(), label: "garden-planner".into(), asked_ts: 1 };
+        let card = Pending { id: 3, run: "ab12".into(), conversation: Some(4), origin: Origin::Typed, tool: "Bash".into(), summary: "Run a command: npm test".into(), detail: "npm test".into(), label: "garden-planner".into(), asked_ts: 1, questions: Vec::new() };
         book.lock().insert(3, Waiting { card: card.clone(), live: "run-1".into(), rpc: "1".into(), tx });
         assert_eq!(book.waiting(3), Some(card));
         assert!(book.answer_by(3, true, phone.clone()));
         assert!(!book.answer(3, false), "the PC came second");
         assert!(book.waiting(3).is_none());
-        assert_eq!(rx.try_recv().unwrap(), (Outcome::Allowed, Some(phone)));
+        assert_eq!(rx.try_recv().unwrap(), (Outcome::Allowed, Some(phone), None));
     }
 
     #[test]
@@ -535,9 +667,9 @@ mod tests {
         let long = "Step. ".repeat(1_000);
         assert!(describe(EXIT_PLAN, &json!({ "plan": long }), None).1.chars().count() > DETAIL_MAX);
         // Go ahead: allowed as asked. Not yet: still a plan, nothing changed.
-        let allow: Value = serde_json::from_str(&decision(EXIT_PLAN, Outcome::Allowed, &input, super::super::APPROVE_WAIT)).unwrap();
+        let allow: Value = serde_json::from_str(&decision(EXIT_PLAN, Outcome::Allowed, &input, None, super::super::APPROVE_WAIT)).unwrap();
         assert_eq!(allow, json!({ "behavior": "allow", "updatedInput": { "plan": plan } }));
-        let not_yet: Value = serde_json::from_str(&decision(EXIT_PLAN, Outcome::Denied, &input, super::super::APPROVE_WAIT)).unwrap();
+        let not_yet: Value = serde_json::from_str(&decision(EXIT_PLAN, Outcome::Denied, &input, None, super::super::APPROVE_WAIT)).unwrap();
         assert_eq!(not_yet["behavior"], "deny");
         assert!(not_yet["message"].as_str().unwrap().contains("Stay in plan mode and change nothing"));
     }
