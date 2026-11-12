@@ -49,6 +49,16 @@ ships with the GPU driver), ONNX → **DirectML** (any DX12 GPU). Same approach 
 from https://vulkan.lunarg.com locally; CI uses `humbletim/install-vulkan-sdk`. No nvcc /
 CUDA arch list. One small installer, GPU on every GPU.
 
+`ort` is built **without its `copy-dylibs` feature** (2026-11-12; `Cargo.toml` and the
+vendored transcribe-rs's, which must list the same features). ort-sys's build script
+copies `DirectML.dll` beside the executable by counting folders up from `OUT_DIR`, and
+Cargo 1.100's new build layout made that a folder that isn't there: an `engines` build
+failed at `ort-sys` on any PC where Windows allows symlinks (Developer Mode), and
+elsewhere the DLL landed in the wrong folder. Yap loads Windows' own DirectML either way
+(`stt::fix_directml_stub`), so the copy was never wanted. A new dependency that pulls in
+`ort` with its default features brings it back: `cargo tree -i ort-sys -e features`
+shows `copy-dylibs` when it has.
+
 ### Run in dev (what we use)
 Use **`scripts/dev.bat`** ("yap.dev") — it runs `npm run tauri dev -- --features engines`
 (the **real** GPU pipeline; needs the Vulkan SDK installed), or the fast no-GPU stub by itself

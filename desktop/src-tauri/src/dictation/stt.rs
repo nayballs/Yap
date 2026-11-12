@@ -1465,6 +1465,10 @@ pub fn set_gpu_adapter(adapter: Option<u32>) {
 /// fail to run. Delete the stub on startup (before any model loads) so the
 /// loader falls back to the real system DirectML. No-op in the stub build or
 /// off Windows.
+///
+/// Since 12 Nov 2026 `ort` is built without its `copy-dylibs` feature
+/// (Cargo.toml), so a new build has no such file; this stays for a build
+/// folder or an install from before.
 #[cfg(all(feature = "engines", target_os = "windows"))]
 pub fn fix_directml_stub() {
     let Ok(exe) = std::env::current_exe() else {

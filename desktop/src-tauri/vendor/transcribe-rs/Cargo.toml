@@ -150,6 +150,16 @@ optional = true
 [dependencies.ort]
 version = "=2.0.0-rc.12"
 optional = true
+# Yap: ort's default features but `copy-dylibs` (YAP.md, 2026-11-12).
+default-features = false
+features = [
+    "std",
+    "ndarray",
+    "tracing",
+    "download-binaries",
+    "tls-native",
+    "api-24",
+]
 
 [dependencies.regex]
 version = "1.11.2"

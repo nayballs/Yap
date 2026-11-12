@@ -165,7 +165,13 @@ transcribe-rs = { version = "0.3", optional = true, default-features = false }
 # Kokoro, the natural voice of spoken replies (tts/kokoro.rs), runs on the
 # same ONNX Runtime transcribe-rs links (pinned to its exact version, so
 # Cargo unifies one ort-sys): no second runtime, no sidecar. CPU only.
-ort = { version = "=2.0.0-rc.12", optional = true }
+# Its default features but `copy-dylibs` (12 Nov 2026): that step of ort-sys's
+# build script puts DirectML.dll beside the exe by counting folders up from
+# OUT_DIR, and Cargo 1.100's new build layout made that a folder that isn't
+# there (the build failed wherever Windows lets it make symlinks). Yap uses
+# Windows' own DirectML anyway (`stt::fix_directml_stub`). The vendored
+# transcribe-rs lists the same features: any one default would bring it back.
+ort = { version = "=2.0.0-rc.12", optional = true, default-features = false, features = ["std", "ndarray", "tracing", "download-binaries", "tls-native", "api-24"] }
 
 # Auto-update via GitHub Releases, driven from Rust (updates.rs: background
 # checks + download, install on request; relaunch is the installer's /R).
