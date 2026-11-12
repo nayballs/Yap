@@ -30,6 +30,9 @@
 //   2026): straight to its session too. Yap says "On it." (its own words,
 //   no model's), and the session's answer is read aloud when it's done.
 //   Before, a spoken question was handed over by Chat's model.
+// - Its session reads Yap's own data (12 Nov 2026): meetings, notes, tasks
+//   and the calendar over Yap's endpoint, allowed with no prompt — never
+//   Yap's memory. (An agent Chat sent out has none: agents-turns.spec.js.)
 // - "Work directly in Code chats" off: nothing goes to a session by itself
 //   (Chat's model answers; plan-agents.spec.js covers its hand-off).
 //
@@ -52,6 +55,7 @@ const SCRIPTS = path.join(HERE, 'scripts');
 const GARDEN = path.join(HERE, 'folders', 'garden-planner');
 const ARGS = path.join(HERE, 'args.jsonl');
 const ANSWERS = path.join(HERE, 'answers.jsonl');
+const TOOLS = path.join(HERE, 'tools.jsonl');
 
 const DONE1 = 'Done. notes.md has a watering schedule now.';
 const DONE2 = 'Done. There is a minimap button for the beds.';
@@ -195,6 +199,21 @@ const asks = (questions) => [
 ];
 /** What Claude Code was told for each question so far (the permission prompt's own answers). */
 const decisions = () => (fs.existsSync(ANSWERS) ? fs.readFileSync(ANSWERS, 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(JSON.parse(l).content[0].text)) : []);
+
+/** A turn that lists what Yap's endpoint offers it, and reads the person's tasks with one of them. */
+const READS_YAP = [
+  { _wait_user: true },
+  { _dump_args: ARGS },
+  init(),
+  { _mcp: { list: true, dump: TOOLS } },
+  said('y1', [{ type: 'tool_use', id: 'toolu_tasks', name: 'mcp__yap__list_tasks', input: {} }]),
+  { _mcp: { tool: 'list_tasks', arguments: {}, result_for: 'toolu_tasks', dump: TOOLS } },
+  said('y2', [{ type: 'text', text: 'Read your tasks.' }], 'end_turn'),
+  result('Read your tasks.', 0.01),
+  { _wait_user: true },
+];
+/** What Yap's endpoint gave the stand-in so far: a list of its tools, then each call's answer. */
+const toolDumps = () => (fs.existsSync(TOOLS) ? fs.readFileSync(TOOLS, 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l)) : []);
 
 function writeScript(name, lines) {
   fs.mkdirSync(SCRIPTS, { recursive: true });
@@ -571,6 +590,31 @@ test('asked out loud with the Code chat in view: straight to its session, “On 
   // The thread: the spoken question, its session's work under it, the answer.
   await expect(thread(main).locator('.cbubble.assistant')).toHaveText([DONE1, DONE2]);
   await expect.poll(() => laidOut(main)).toEqual(['you', 'work', 'report', 'answer', 'you', 'work', 'report', 'answer']);
+});
+
+test('its session reads Yap’s own data on request: meetings, notes, tasks and the calendar, never its memory', async ({ yap, main }) => {
+  fs.rmSync(TOOLS, { force: true });
+  await script(yap, READS_YAP, 'reads-yap');
+  const before = (await agents(yap)).length;
+  await codeChat(main);
+  await send(main, 'Build what is on my task list.');
+  const agent = await ended(yap, (await newAgent(yap, before)).id);
+  expect(agent.status).toBe('done');
+  // What its session was offered: Yap's reads beside its permission prompt — no memory, nothing that acts.
+  const [listed, read] = toolDumps();
+  const names = listed.tools.map((t) => t.name);
+  expect(names).toEqual(expect.arrayContaining(['approve', 'list_meetings', 'search_meetings', 'get_meeting', 'search_notes', 'get_note', 'list_tasks', 'list_folders']));
+  expect(names.filter((n) => /memory|agent|browser|screen|picture|create|remember/.test(n))).toEqual([]);
+  expect(listed.tools.filter((t) => t.name !== 'approve').every((t) => t.readOnlyHint === true)).toBe(true);
+  // Allowed with no prompt, by Claude Code's names for them; and the call answered.
+  const allowed = after(argsSeen()[0], '--allowedTools').split(',');
+  expect(allowed).toEqual(expect.arrayContaining(['mcp__yap__list_tasks', 'mcp__yap__get_meeting']));
+  expect(allowed).not.toContain('mcp__yap__approve');
+  expect(read).toMatchObject({ tool: 'list_tasks', isError: false });
+  expect(read.content[0].text.length).toBeGreaterThan(0);
+  // Its work says it: a step like any other tool's.
+  const log = (await yap.invoke('agent_get', { id: agent.id })).log;
+  expect(log.some((e) => e.step === 'Using yap · list tasks')).toBe(true);
 });
 
 test('core/agents.js: the Code chat’s own session at work is what the message box’s ■ stops', () => {

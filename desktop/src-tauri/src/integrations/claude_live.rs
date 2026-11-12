@@ -186,11 +186,19 @@ pub struct RunSpec {
     /// session (its hash in the session's fingerprint, `chat/turn/plan.rs`),
     /// each call for the turn it belongs to. Never an agent's run.
     pub connectors: Option<connectors::Listed>,
+    /// **An agent's run that reads Yap's own data** (12 Nov 2026): the
+    /// session of a Code chat that works directly (`agents/direct.rs`) —
+    /// meetings, notes, tasks, folders and the calendar, read only, as a
+    /// plan Code chat's own session always had them ("build what we decided
+    /// in yesterday's meeting"). Never Yap's memory (a Code chat's never),
+    /// the screen, the pages or connectors; never an agent Chat sent out
+    /// (Chat's model reads for its brief).
+    pub reads: bool,
 }
 
 impl RunSpec {
     pub fn new(label: impl Into<String>, tools: Tools) -> RunSpec {
-        RunSpec { label: label.into(), tools, backup_dir: None, folder: None, approval: None, agents: false, memory: true, eyes: eyes::Eyes::default(), connectors: None }
+        RunSpec { label: label.into(), tools, backup_dir: None, folder: None, approval: None, agents: false, memory: true, eyes: eyes::Eyes::default(), connectors: None, reads: false }
     }
 
     /// The same, offered Yap Code's tools (`on`).
@@ -234,6 +242,8 @@ pub struct RunHandle {
     eyes: eyes::Eyes,
     /// Its connector tools' names ([`RunSpec::connectors`], a Chat run's).
     connectors: Vec<String>,
+    /// Reads Yap's own data ([`RunSpec::reads`], an agent's run).
+    reads: bool,
     has_backup: bool,
     /// The chat turn its calls belong to ([`RunHandle::begin_turn`]).
     turn: Arc<turn::Slot>,
@@ -319,7 +329,7 @@ impl RunHandle {
     /// too, whose calls Yap's own settings decide ([`connectors`]). `approve`
     /// is never one: it's the permission prompt tool.
     pub fn allowed_tools(&self) -> Vec<String> {
-        rpc::tool_names(self.tools, true, self.agents, self.memory, self.eyes)
+        rpc::tool_names(self.tools, true, self.agents, self.memory, self.eyes, self.reads)
             .into_iter()
             .filter(|n| *n != approve::NAME)
             .map(str::to_string)

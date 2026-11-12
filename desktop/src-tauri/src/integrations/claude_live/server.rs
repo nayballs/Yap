@@ -119,6 +119,9 @@ impl Endpoint {
             spec.connectors = None;
         }
         let eyes = spec.eyes;
+        // Yap's own data read by an agent's run: its session's only (a Chat run reads it anyway).
+        let reads = spec.reads && tools == super::Tools::Agent;
+        spec.reads = reads;
         let connectors: Vec<String> = spec.connectors.as_ref().map(|l| l.names().map(str::to_string).collect()).unwrap_or_default();
         let has_backup = spec.backup_dir.is_some();
         let turn = Arc::new(super::turn::Slot::default());
@@ -129,7 +132,7 @@ impl Endpoint {
             runs.len()
         };
         tracing::info!(run = %id, tools = ?tools, agents, eyes = eyes.any(), connectors = connectors.len(), backup = has_backup, runs = count, "Claude Code endpoint: a run registered");
-        Ok(RunHandle { endpoint: Arc::clone(self), id, key, tools, agents, memory, eyes, connectors, has_backup, turn })
+        Ok(RunHandle { endpoint: Arc::clone(self), id, key, tools, agents, memory, eyes, connectors, reads, has_backup, turn })
     }
 
     /// The run's URLs answer 404 from now on; its prompts still waiting
