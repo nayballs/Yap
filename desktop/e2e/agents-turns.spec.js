@@ -25,10 +25,15 @@
 //   one report. One it never reads (its turn ended first) waits as its next
 //   turn, on `--resume`, and the two are told in one report, never one each
 //   (the chat spoke twice in a row with nobody asking in between).
-// - Its work in the thread (11 Nov 2026, after Claude Code's own transcript):
-//   what the agent says as it goes, and a line for each stretch of steps
-//   ("Edited notes.md +1") that opens into them (views/chat/AgentWork.svelte,
-//   core/agents.js `workOf`, `workSummary`).
+// - Its work (11 Nov 2026, after Claude Code's own transcript): what the
+//   agent says as it goes, and a line for each stretch of steps ("Edited
+//   notes.md +1") that opens into them (views/chat/AgentWork.svelte,
+//   core/agents.js `workOf`, `workSummary`). **Where it shows** (12 Nov 2026,
+//   the maintainer: "if you send out an agent I don't think I see the work
+//   the agent does in the main chat window, only if you yourself do it"):
+//   an agent Chat sent out — every agent of this spec — shows it in its row
+//   of the Agent panel, never in the thread; a Code chat that works directly
+//   shows its own in the thread (agents-direct.spec.js).
 // - A step that came back with a picture (a picture file read: the tool
 //   result's own image, as Claude Code hands it over) ends its line with it,
 //   small, as Claude Code's transcript does (views/chat/StepPictures.svelte;
@@ -352,13 +357,28 @@ const chatScope = (fakeLlm) => ({
 const thread = (main) => main.locator('.msgs');
 /** The rows of an opened stretch (StepRows.svelte), in `work` (the thread's AgentWork). */
 const rowsIn = (work) => work.getByTestId('chat-agent-work-row');
-/** Wait until the thread has stopped scrolling (a theme change or new lines leave it following its end for a moment). */
-async function threadStill(main) {
+/**
+ * **A sent-out agent's work**: in its row of the Agent panel, never the thread. Turn `n`'s row opened (its
+ * tab opened by its pill when it's closed, back from the timeline when that's showing), and its work in it.
+ */
+async function panelWork(main, n = 1) {
+  if (!(await tab(main).count())) await thread(main).getByTestId('chat-agent-pill').first().click();
+  await expect(tab(main)).toBeVisible();
+  const back = tab(main).getByTestId('chat-agent-back');
+  if (await back.count()) await back.click();
+  const row = rowAt(main, n);
+  await expect(row).toBeVisible();
+  if ((await row.getAttribute('data-open')) !== 'true') await row.locator('.rhead').click();
+  return row.getByTestId('chat-agent-row-steps').getByTestId('chat-agent-work');
+}
+
+/** Wait until what `inside` scrolls in has stopped scrolling (a theme change or new lines leave a box following its end for a moment). */
+async function scrollStill(inside) {
   let last = null;
   await expect
     .poll(
       async () => {
-        const now = await thread(main).evaluate((el) => {
+        const now = await inside.evaluate((el) => {
           let n = el;
           while (n && n.scrollHeight <= n.clientHeight + 1) n = n.parentElement;
           return n ? Math.round(n.scrollTop) : 0;
@@ -367,7 +387,7 @@ async function threadStill(main) {
         last = now;
         return same;
       },
-      { intervals: [250], timeout: 10_000, message: 'the thread to stop scrolling' }
+      { intervals: [250], timeout: 10_000, message: 'the box to stop scrolling' }
     )
     .toBe(true);
 }
@@ -983,22 +1003,23 @@ test('two requests in a Code chat: one agent, one tab with two turns, two report
   await expect(reports).toHaveCount(2);
   await expect(reports.nth(1)).toHaveAttribute('data-turn', '2');
   await expect(reports.nth(1).locator('.jtitle')).toHaveText('Agent done · garden-planner');
-  // Its work, in the thread, under the answer that sent each turn: what it
-  // said as it went (never its final words: the report tells those), and a
-  // line for each stretch of steps, which opens into them.
-  const works = thread(main).getByTestId('chat-agent-work');
-  await expect(works).toHaveCount(2);
-  await expect(works.nth(0)).toHaveAttribute('data-turn', '1');
-  await expect(works.nth(0).getByTestId('chat-agent-work-said')).toHaveText(["I'll add the watering schedule to notes.md."]);
-  await expect(works.nth(0).getByTestId('chat-agent-work-steps').locator('.wtext')).toHaveText([/^Edited notes\.md\s*\+1$/]);
-  await expect(works.nth(1).getByTestId('chat-agent-work-said')).toHaveText(['Now the minimap button.']);
-  await expect(works.nth(1).getByTestId('chat-agent-work-steps').locator('.wtext')).toHaveText([/^Edited 2 files\s*\+2$/]);
-  await expect(rowsIn(works.nth(1))).toHaveCount(0);
-  await works.nth(1).getByRole('button', { name: /Edited 2 files/ }).click();
-  await expect(rowsIn(works.nth(1)).locator('.rtext')).toHaveText(['Edited notes.md', 'Created minimap.js']);
-  await shot(main, '10-its-work-in-the-thread');
-  await works.nth(1).getByRole('button', { name: /Edited 2 files/ }).click();
-  await expect(rowsIn(works.nth(1))).toHaveCount(0);
+  // Its work is never in the thread (Chat sent this agent out: it works in its own panel, as a subagent
+  // does in Claude Code). Each turn's is in its row there: what it said as it went, its last words too
+  // (no report follows them there), and a line for each stretch of steps, which opens into them.
+  await expect(thread(main).getByTestId('chat-agent-work')).toHaveCount(0);
+  const turnOne = await panelWork(main, 1);
+  await expect(turnOne).toHaveAttribute('data-turn', '1');
+  await expect(turnOne.getByTestId('chat-agent-work-said')).toHaveText(["I'll add the watering schedule to notes.md.", DONE1]);
+  await expect(turnOne.getByTestId('chat-agent-work-steps').locator('.wtext')).toHaveText([/^Edited notes\.md\s*\+1$/]);
+  const second = await panelWork(main, 2);
+  await expect(second.getByTestId('chat-agent-work-said')).toHaveText(['Now the minimap button.', DONE2]);
+  await expect(second.getByTestId('chat-agent-work-steps').locator('.wtext')).toHaveText([/^Edited 2 files\s*\+2$/]);
+  await expect(rowsIn(second)).toHaveCount(0);
+  await second.getByRole('button', { name: /Edited 2 files/ }).click();
+  await expect(rowsIn(second).locator('.rtext')).toHaveText(['Edited notes.md', 'Created minimap.js']);
+  await shot(main, '10-its-work-in-its-panel-row');
+  await second.getByRole('button', { name: /Edited 2 files/ }).click();
+  await expect(rowsIn(second)).toHaveCount(0);
   await expect(reports.nth(1).locator('.jline')).toHaveText('Changed notes.md, minimap.js');
   await closeTab(main);
   await reports.nth(1).getByRole('button', { name: 'Open the agent in garden-planner' }).click();
@@ -1038,8 +1059,9 @@ test('a note while the agent works goes to it now: said so, read at its next ste
   await expect(tab(main).getByTestId('chat-agent-row')).toHaveCount(1);
   await expect(rowAt(main, 1)).toHaveAttribute('data-state', 'running');
   await expect(rowAt(main, 1).getByTestId('chat-agent-row-line')).toHaveText('Your note is with the agent: it reads it at its next step');
-  // …and in the thread: the line it's on, live.
-  const working = thread(main).getByTestId('chat-agent-work');
+  // …and in its row's work, live: the line it's on (never in the thread: Chat sent this agent out).
+  await expect(thread(main).getByTestId('chat-agent-work')).toHaveCount(0);
+  const working = await panelWork(main, 1);
   await expect(working).toHaveAttribute('data-live', 'true');
   await expect(working.locator('[data-busy="true"] .wtext')).toHaveText('Your note is with the agent: it reads it at its next step');
   await shot(main, '03-agent-tab-a-note-with-the-agent');
@@ -1061,8 +1083,10 @@ test('a note while the agent works goes to it now: said so, read at its next ste
   await expect(thread(main).getByTestId('chat-agent-report')).toHaveCount(1);
   await expect(lastAnswer(main)).toHaveText('Done. It read notes.md and kept the headings.');
   // Its tab: the note read, in the turn's steps.
-  await expect(thread(main).getByTestId('chat-agent-work')).toHaveAttribute('data-live', 'false');
-  await expect(thread(main).getByTestId('chat-agent-work').locator('.wtext')).toHaveText(['Read notes.md']);
+  const itsWork = await panelWork(main, 1);
+  await expect(itsWork).toHaveAttribute('data-live', 'false');
+  await expect(itsWork.locator('.wtext')).toHaveText(['Read notes.md']);
+  await expect(thread(main).getByTestId('chat-agent-work')).toHaveCount(0);
   await agentTimeline(main, 1);
   await expect(turnAt(main, 1)).toContainText('Read your note');
   await shot(main, '06-a-note-read-one-report');
@@ -1247,7 +1271,7 @@ test('asked how it is getting on just as the agent finishes: that answer tells t
   }
 });
 
-test('a step that read a picture ends its line with it: small on the line, larger by its step, opened large, on its step in the tab', async ({ yap, main, fakeLlm, shot }) => {
+test('a step that read a picture ends its line with it: small on the line, larger by its step, on its step in the timeline, opened in the picture tab', async ({ yap, main, fakeLlm, shot }) => {
   fs.writeFileSync(path.join(GARDEN, 'beds.png'), PLAN_PNG);
   await script(yap, LOOKS_AT_THE_PLAN, 'plan');
   const before = (await agents(yap)).length;
@@ -1275,8 +1299,9 @@ test('a step that read a picture ends its line with it: small on the line, large
   const chatImages = path.join(yap.dataDir, 'chat-images');
   expect(fs.existsSync(chatImages) ? fs.readdirSync(chatImages).filter((n) => n.includes(pictures[0].picture.id)) : []).toEqual([]);
 
-  // In the thread: one quiet line for the stretch, its picture at its end.
-  const work = thread(main).getByTestId('chat-agent-work');
+  // In its row's work (never the thread): one quiet line for the stretch, its picture at its end.
+  await expect(thread(main).getByTestId('chat-agent-work')).toHaveCount(0);
+  const work = await panelWork(main, 1);
   await expect(work).toHaveCount(1);
   await expect(work.locator('.wtext')).toHaveText(['Ran a command, read a file']);
   const small = work.getByTestId('agent-step-picture');
@@ -1299,15 +1324,6 @@ test('a step that read a picture ends its line with it: small on the line, large
   await theme(yap, main, 'dark');
   await shot(main, '21-a-picture-at-the-end-of-its-line-dark');
   await theme(yap, main, 'light');
-
-  // A click opens it large (the panel closed: the viewer), its own pixels.
-  await small.click();
-  const viewer = main.locator('.shotview');
-  await expect(viewer).toBeVisible();
-  await expect.poll(async () => (await loaded(viewer.locator('img'))).w).toBe(PLAN.w);
-  await shot(main, '22-opened-large');
-  await viewer.click();
-  await expect(viewer).toHaveCount(0);
 
   // The line opened: a row a step, the small picture at the end of the row that read it
   // (the line's own gives way); that row opened: the picture larger.
@@ -1334,22 +1350,21 @@ test('a step that read a picture ends its line with it: small on the line, large
   await yap.invoke('chat_image_copy', { id: `agent/${agent.id}/${pictures[0].picture.id}` });
   await expect(yap.invoke('chat_image_copy', { id: `agent/${agent.id}/../log.jsonl` })).rejects.toThrow(/isn't there any more/);
 
-  // In the Agent tab: on its step; a click there opens the panel's picture tab, captioned with its step.
-  await thread(main).getByTestId('chat-agent-pill').first().click();
-  await expect(tab(main)).toBeVisible();
+  // In its timeline: on its step.
   await agentTimeline(main, 1);
   const inTab = tab(main).getByTestId('agent-step-picture');
   await expect(inTab).toHaveCount(1);
   await expect.poll(async () => (await loaded(inTab.locator('img'))).w).toBeGreaterThan(0);
   await shot(main, '24-on-its-step-in-the-tab');
-  await inTab.click();
+  // A click on the one in its row's work opens the panel's picture tab, captioned with its step.
+  await (await panelWork(main, 1)).getByTestId('agent-step-picture').click();
   await expect(main.getByTestId('chat-picture-stage')).toBeVisible();
   await expect(main.getByTestId('chat-picture-caption')).toHaveText('Read beds.png');
   await expect(main.getByTestId('chat-picture-source')).toContainText('garden-planner');
   await shot(main, '25-in-the-picture-tab');
 });
 
-test('another tool’s call is a line in the thread: one alone as itself, several counted, each with its icon in the tab', async ({ yap, main, fakeLlm, shot }) => {
+test('another tool’s call is a line of the agent’s work: one alone as itself, several counted, each with its icon in the timeline', async ({ yap, main, fakeLlm, shot }) => {
   await script(yap, USES_OTHER_TOOLS, 'tools');
   const before = (await agents(yap)).length;
   await codeChat(main);
@@ -1361,25 +1376,22 @@ test('another tool’s call is a line in the thread: one alone as itself, severa
   await send(main, 'See which lights are on, turn the shed light on, and tell me when high tide is.');
   const agent = await ended(yap, (await newAgent(yap, before)).id);
   await messagesOf(yap, agent.conversation, 4);
-  await closeTab(main);
 
-  // In the thread: the lone call is a line of its own (it used to show nothing),
-  // then its words, then the stretch of three as one line.
-  const work = thread(main).getByTestId('chat-agent-work');
+  // In its row's work: the lone call is a line of its own (it used to show nothing), then its words, then the
+  // stretch of three as one line, then its last words.
+  const work = await panelWork(main, 1);
   await expect(work).toHaveCount(1);
   await expect(work.locator('.wtext')).toHaveText(['Used homelights · list lights', 'Ran a command, used 2 tools']);
-  await expect(work.getByTestId('chat-agent-work-said')).toHaveText(['The porch light is on. Turning the shed light on too.']);
-  await shot(main, '30-other-tools-calls-in-the-thread');
+  await expect(work.getByTestId('chat-agent-work-said')).toHaveText(['The porch light is on. Turning the shed light on too.', LIT]);
+  await shot(main, '30-other-tools-calls-as-lines');
   await theme(yap, main, 'dark');
-  await shot(main, '31-other-tools-calls-in-the-thread-dark');
+  await shot(main, '31-other-tools-calls-as-lines-dark');
   await theme(yap, main, 'light');
   await work.getByRole('button', { name: /Ran a command, used 2 tools/ }).click();
   await expect(rowsIn(work).locator('.rtext')).toHaveText(['Used homelights · set light', 'Used tides · next high tide', 'Listed the folder']);
   await shot(main, '32-the-stretch-opened');
 
-  // In the Agent tab: each on its step, with a tool's icon.
-  await thread(main).getByTestId('chat-agent-pill').first().click();
-  await expect(tab(main)).toBeVisible();
+  // In its timeline: each on its step, with a tool's icon.
   await agentTimeline(main, 1);
   await expect(tab(main).locator('.step.k-tool .stext')).toHaveText(['Using homelights · list lights', 'Using homelights · set light', 'Using tides · next high tide']);
   await expect(tab(main).locator('.step.k-tool .sicon svg')).toHaveCount(3);
@@ -1409,7 +1421,9 @@ test('a stretch opened is a row a step: an edit opens to its numbered diff, a co
   expect(log.find((e) => e.step === 'Reading notes.md').range).toBe('1–20');
 
   // The stretch's line, then its rows: each step as done, a file's name set apart, its lines added.
-  const work = thread(main).getByTestId('chat-agent-work');
+  // (In its row of the Agent panel: Chat sent this agent out.)
+  await expect(thread(main).getByTestId('chat-agent-work')).toHaveCount(0);
+  const work = await panelWork(main, 1);
   await expect(work.locator('.wtext')).toHaveText([/^Ran a command, read a file, edited 3 files\s*\+9\s*−1, 1 failed$/]);
   await work.getByRole('button', { name: /Ran a command, read a file/ }).click();
   const rows = rowsIn(work);
@@ -1496,8 +1510,11 @@ test('a stretch opened is a row a step: an edit opens to its numbered diff, a co
   expect(await colourOf(jsDiff.locator('.syn-k'))).not.toBe(light.keyword);
   await shot(main, '42-rows-opened-dark');
   await theme(yap, main, 'light');
-  // Scrolled up to a row, the thread stays there (it never jumps back to its end under the pointer).
-  await threadStill(main);
+  // A long line would wrap under itself: the diff's box never scrolls sideways.
+  expect(await jsDiff.locator('.dl').first().evaluate((el) => getComputedStyle(el).whiteSpace)).toBe('pre-wrap');
+  expect(await jsDiff.evaluate((el) => el.scrollWidth <= el.clientWidth + 1)).toBe(true);
+  // Scrolled up to a row, its box stays there (it never jumps back to its end under the pointer).
+  await scrollStill(work);
   const head = rows.nth(2).locator('button.rhead');
   await head.scrollIntoViewIfNeeded();
   await main.waitForTimeout(500);
@@ -1507,9 +1524,7 @@ test('a stretch opened is a row a step: an edit opens to its numbered diff, a co
   await expect(rows.nth(2).getByTestId('chat-agent-work-command')).toHaveCount(0);
   await work.getByRole('button', { name: /Ran a command, read a file/ }).click();
   await expect(rowsIn(work)).toHaveCount(0);
-  // The tab's Files changed still reads the same diff (its place line is no line of its own there).
-  await thread(main).getByTestId('chat-agent-pill').first().click();
-  await expect(tab(main)).toBeVisible();
+  // The timeline's Files changed still reads the same diff (its place line is no line of its own there).
   await agentTimeline(main, 1);
   await tab(main).getByTestId('chat-agent-files').getByRole('button', { name: /notes\.md/ }).click();
   await expect(tab(main).getByTestId('chat-agent-diff').first().locator('.dl')).toHaveText([/Draft notes/, /Watering: twice a week/]);

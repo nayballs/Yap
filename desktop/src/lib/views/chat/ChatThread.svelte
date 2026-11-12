@@ -257,7 +257,8 @@
             />
           {/if}
           {#if directPills.get(i)?.length}
-            <!-- A Code chat that works directly: what its session says and does, under the message that asked. -->
+            <!-- A Code chat that works directly: what its session says and does, under the message that asked
+                 (the chat's own work, as Claude Code's transcript shows its own). -->
             {#await import('./AgentPills.svelte') then { default: AgentPills }}
               <AgentPills agents={directPills.get(i)} onopen={openAgent} quiet />
             {/await}
@@ -283,12 +284,8 @@
                   <AgentTodoCard agent={p} turn={p.turn ?? 1} line={agents.steps[p.id] || ''} />
                 {/await}
               {/each}
-              <!-- …and its work as it goes, as Claude Code's own transcript tells it: what it says, and a line for each stretch of steps. -->
-              {#each agentPills.get(i) as p (`work:${p.id}:${p.turn ?? 1}`)}
-                {#await import('./AgentWork.svelte') then { default: AgentWork }}
-                  <AgentWork agent={p} turn={p.turn ?? 1} line={agents.steps[p.id] || ''} onview={openShared} />
-                {/await}
-              {/each}
+              <!-- (An agent Chat sent out works in its own panel, as a subagent does in Claude Code: its work is
+                   in its row there (AgentPanel), never here. Only the chat's own work, above, shows in the thread.) -->
             {/if}
           {/if}
         {/each}

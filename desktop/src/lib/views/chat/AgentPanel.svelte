@@ -17,7 +17,7 @@
   //   a thin bar: its to-dos done, else its context's fill in grey.
   // - **Rows start folded**, the running one too; **▸ opens a row** in
   //   place: why Chat sized it so ("Opus 5.5 · High: a multi-file change",
-  //   the turn's `sizing`), its to-do list, its latest steps, how many commands and files,
+  //   the turn's `sizing`), its to-do list, its work (what it said and did, as AgentWork shows it: a line a stretch, rows that open to a diff or a command), how many commands and files,
   //   and **Open** — the turn's whole timeline (the tab's other view). Enter
   //   or Space opens and folds; ↑ ↓ move between rows. Which rows are open
   //   and which groups folded is remembered per agent while the window stays
@@ -39,7 +39,7 @@
   // hear: nothing polled.
   import { invoke } from '@tauri-apps/api/core';
   import { onMount, tick, untrack } from 'svelte';
-  import { panelRows, panelGroups, panelTotals, statsLine, fmtTokens, fmtClock, costWords, latestSteps, modeTone, rowActions } from '../../core/agentPanel.js';
+  import { panelRows, panelGroups, panelTotals, statsLine, fmtTokens, fmtClock, costWords, modeTone, rowActions } from '../../core/agentPanel.js';
   import { modeLabel, modelLabel, costLine } from '../../core/agents.js';
   import { effortLabel } from '../../core/effort.js';
   import { characterFor, crewLabel } from '../../core/crew.js';
@@ -60,7 +60,7 @@
    * seq}`, a row to open and show (a pill's, a report card's);
    * `onopen(row)`: Open.
    */
-  let { agent, agents = [], logs = {}, steps = {}, approvals = [], cards = [], now = Date.now() / 1000, want = null, onopen = null } = $props();
+  let { agent, agents = [], logs = {}, steps = {}, approvals = [], cards = [], now = Date.now() / 1000, want = null, onopen = null, onpicture = null } = $props();
 
   /** Every row, the dismissed ones too (the totals count them); the ones shown. */
   const every = $derived(panelRows(agents, { logs, steps, now, approvals, cards, dismissed: true }));
@@ -241,7 +241,6 @@
         <ul class="rows">
           {#each g.rows as r (r.key)}
             {@const isOpen = !!open[r.key]}
-            {@const steps8 = isOpen ? latestSteps(r.events) : []}
             {@const menu = hasMenu(r)}
             <!-- svelte-ignore a11y_no_noninteractive_element_interactions (its right-click menu: the ⋯ button and the menu key are the keyboard's way) -->
             <li
@@ -372,10 +371,15 @@
                       {/each}
                     </ul>
                   {/if}
-                  {#if steps8.length}
-                    <ol class="steps" data-testid="chat-agent-row-steps" aria-label="Latest steps">
-                      {#each steps8 as s, i (i)}<li>{s.step}</li>{/each}
-                    </ol>
+                  {#if r.events.length}
+                    <!-- Its work (12 Nov 2026): what it said, and a line for each stretch of steps that opens into
+                         rows, an edit's to its diff, a command's to itself and what it printed — as the thread shows
+                         a chat's own. An agent Chat sent out shows it here, never in the thread. -->
+                    <div class="rwork" data-testid="chat-agent-row-steps">
+                      {#await import('./AgentWork.svelte') then { default: AgentWork }}
+                        <AgentWork agent={agents.find((a) => a.id === r.agentId) ?? agent} turn={r.n} events={r.events} status={r.status} line={steps[r.agentId] || ''} wide onview={onpicture} />
+                      {/await}
+                    </div>
                   {/if}
                   <div class="rfoot">
                     <span class="counts" data-testid="chat-agent-row-counts">{plural(r.commands, 'command', 'commands')} · {plural(r.files, 'file', 'files')} changed</span>
@@ -795,11 +799,13 @@
     margin: 0 4px 10px 50px;
     font-size: 12px;
   }
-  .todolist,
-  .steps {
+  .todolist {
     margin: 0 0 8px;
     padding: 0;
     list-style: none;
+  }
+  .rwork {
+    margin: 0 0 8px;
   }
   .todo {
     display: flex;
@@ -832,22 +838,6 @@
   .ttext {
     min-width: 0;
     overflow-wrap: anywhere;
-  }
-  .steps li {
-    position: relative;
-    padding: 1px 0 1px 13px;
-    color: var(--yap-paper-text-2);
-    overflow-wrap: anywhere;
-  }
-  .steps li::before {
-    content: '';
-    position: absolute;
-    left: 3px;
-    top: 8px;
-    width: 4px;
-    height: 4px;
-    border-radius: 50%;
-    background: var(--yap-paper-muted);
   }
   .rfoot {
     display: flex;

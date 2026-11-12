@@ -655,11 +655,16 @@ test('the Agent panel: a Code chat’s agent live, needing you, finished; the to
   await expect(row(main, 2)).toHaveAttribute('data-open', was === 'true' ? 'false' : 'true');
   await main.keyboard.press('Space');
   await expect(row(main, 2)).toHaveAttribute('data-open', String(was === 'true'));
-  // ▸ opens a row in place: its to-dos, its latest steps, how many commands and files.
+  // ▸ opens a row in place: its to-dos, its work (what it said, a line for each stretch of steps that opens
+  // into a row a step), how many commands and files.
   if ((await row(main, 1).getAttribute('data-open')) !== 'true') await head1.click();
   const more = row(main, 1).getByTestId('chat-agent-row-more');
   await expect(more.getByTestId('chat-agent-row-todos').locator('.todo')).toHaveCount(7);
-  await expect(more.getByTestId('chat-agent-row-steps').locator('li')).toContainText(['Reading beds.json', 'Running the tests']);
+  const work = more.getByTestId('chat-agent-row-steps').getByTestId('chat-agent-work');
+  await expect(work.locator('.wtext')).toHaveText(['Ran a command, read a file']);
+  await work.getByRole('button', { name: /Ran a command, read a file/ }).click();
+  await expect(work.getByTestId('chat-agent-work-row').locator('.rtext')).toHaveText(['Read beds.json', 'Ran the tests', 'Waited for you to allow a step']);
+  await work.getByRole('button', { name: /Ran a command, read a file/ }).click();
   await expect(more.getByTestId('chat-agent-row-counts')).toHaveText('1 command · 0 files changed');
   // A group folds.
   await group(main, 'finished').getByTestId('chat-agent-group-head').click();

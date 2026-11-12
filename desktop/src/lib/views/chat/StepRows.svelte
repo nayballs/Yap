@@ -9,7 +9,8 @@
   // - **an edit**: the file's path and its diff, each line with its number
   //   in the file (core/agents.js `diffRows`: Claude Code's own patch says
   //   where each part is), removed lines red, added ones green, its code in
-  //   colour by the file's language; where a line was changed rather than
+  //   colour by the file's language, a long line wrapped under itself;
+  //   where a line was changed rather than
   //   taken out, the part that was replaced is marked in a stronger red and
   //   what replaced it in a stronger green (core/diffWords.js);
   // - **a command**: the command itself (`$ …`, with Copy), in colour, and
@@ -310,11 +311,12 @@
     outline: 2px solid var(--yap-primary-line);
     outline-offset: 1px;
   }
+  /* A long line wraps under itself, beside its number (12 Nov 2026, as Claude Code's does): never a
+     box to scroll sideways. */
   .dl {
     display: flex;
-    width: max-content;
-    min-width: 100%;
-    white-space: pre;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
     color: var(--yap-fg-80);
     /* A bar down its left edge says which it is, as its colour does. */
     box-shadow: inset 2px 0 0 transparent;
@@ -330,6 +332,8 @@
     font-variant-numeric: tabular-nums;
   }
   .dt {
+    flex: 1 1 auto;
+    min-width: 0;
     padding-right: 10px;
   }
   .dl.del {
