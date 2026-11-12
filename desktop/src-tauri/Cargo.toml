@@ -65,7 +65,7 @@ whatlang = "0.18"
 # `device_name`) and finds a mic by its endpoint id (`input_device`).
 # rodio's playback only: Yap plays the PCM it makes, never a file, so none
 # of its decoders, its microphone or its dither.
-cpal = "0.17"
+cpal = "0.18"
 rodio = { version = "0.22", default-features = false, features = ["playback"] }
 
 # Clipboard for text injection
