@@ -28,6 +28,6 @@
     "test:issue-labels": "node --test scripts/issue-labels.test.mjs"
   },
   "devDependencies": {
-    "@playwright/test": "^1.64.1"
+    "@playwright/test": "^1.65.0"
   }
 }
