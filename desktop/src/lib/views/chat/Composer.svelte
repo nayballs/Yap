@@ -29,6 +29,8 @@
   import { SNIP_PROMPTS, sizeLine, imageItems, tilePlaced, shown } from './chatImages.js';
   import { screenPixels } from './chatShots.svelte.js';
   import { tooLongLine } from './chatBudget.js';
+  import { agents } from '../../stores/agents.svelte.js';
+  import { workingDirectly } from '../../core/agents.js';
   import SkillMenu from '../../components/SkillMenu.svelte';
   import ModelChip from './ModelChip.svelte';
   // A Code chat's workspace chip and Yap Code's Mode chip, before it, and its
@@ -45,6 +47,25 @@
    * See all). `code`: the view's Code chats (codeChats.svelte.js).
    */
   let { chat, code = null, onopensettings = null, onopenusage = null } = $props();
+
+  // **■ while the Code chat's own session works** (12 Nov 2026, as Claude
+  // Code's own app has Stop where Send was): with nothing typed, the button
+  // stops its work (Esc in the empty box too: ChatView). With something
+  // typed it's Send as ever — the message goes to it at once, as a note.
+  const working = $derived(workingDirectly(agents.list, chat.activeId));
+  let stoppingWork = $state(null);
+  async function stopWork() {
+    const id = working?.id;
+    if (!id || stoppingWork === id) return;
+    stoppingWork = id;
+    try {
+      await invoke('agent_stop', { id });
+    } catch (e) {
+      toast.error(String(e));
+    } finally {
+      stoppingWork = null;
+    }
+  }
 
   // The model chip (its picker opens for "Choose another model…").
   let chipRef = $state(null);
@@ -485,6 +506,11 @@
         title={chat.visionBlocked ? "This model can't read images" : chat.inputTooLong ? 'Too long for this model' : 'Send (Enter)'}
       >
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 10 4 15l5 5" /><path d="M20 4v7a4 4 0 0 1-4 4H4" /></svg>
+      </button>
+    {:else if working}
+      <!-- ■: stop the Code chat's own session, at work (Esc in the empty box too). -->
+      <button class="sendbtn stopbtn" data-testid="chat-stop-work" disabled={stoppingWork === working.id} onclick={stopWork} aria-label="Stop the work" title="Stop the work (Esc)">
+        <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><rect x="7" y="7" width="10" height="10" rx="2" /></svg>
       </button>
     {/if}
   </div>

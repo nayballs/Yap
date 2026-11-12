@@ -27,10 +27,17 @@
 //! - **When** ([`applies`]): Yap Code on with "Work directly in Code chats"
 //!   (`agents_direct`, on by default), a Code chat whose model is on the
 //!   person's Claude plan, a message typed (or dictated) in the Chat view
-//!   with no screenshot, selection or Skill. Everything else is handed over
+//!   with no selection or Skill. Everything else is handed over
 //!   as before, by Chat's model with `start_agent`: a chat on an API key or
 //!   an on-device model, the Voice Assistant's spoken question (its answer
 //!   is said, so it's kept short), a question from the phone.
+//! - **With its screenshots** (12 Nov 2026): the ones the person put in the
+//!   box (snipped, pasted, dropped) go with their words, as Claude Code's
+//!   own app sends a pasted picture — the turn keeps their ids
+//!   (`TurnNote::shots`) and the runner writes the pictures with its
+//!   message (`runner::shots_of`). Before, a message with a screenshot was
+//!   Chat's own business: Chat's model read it and worded a brief for an
+//!   agent, so a chat worked directly until a screenshot came, then didn't.
 //!
 //! The log has ids and outcomes, never the words.
 
@@ -54,8 +61,9 @@ pub struct Message {
     pub on_plan: bool,
     /// Asked through the Voice Assistant's path (its shortcut, a phone).
     pub assistant: bool,
-    /// It carries a screenshot, a selection, a page's passage or a Skill:
-    /// Chat's own business.
+    /// It carries a selection, a page's passage, a Skill, or a picture Yap
+    /// took of the screen by itself: Chat's own business. (The person's own
+    /// screenshots go with their words.)
     pub with_more: bool,
 }
 
@@ -81,8 +89,10 @@ impl Sent {
 /// sent to its session in `folder`**: its next turn (handed over at once
 /// while it works: `runner::follow_up`), or — the chat's first there, or a
 /// session Claude Code no longer has — a new one with it as its brief. On
-/// `model` and `effort`, the chat's own.
-pub fn send(conversation: u64, folder: &Folder, text: &str, message_id: String, by_voice: bool, model: &str, effort: Option<&str>) -> Result<Sent, String> {
+/// `model` and `effort`, the chat's own; `shots` the screenshots it came
+/// with (their ids in `chat-images/`), written to the session with it.
+#[allow(clippy::too_many_arguments)]
+pub fn send(conversation: u64, folder: &Folder, text: &str, shots: &[String], message_id: String, by_voice: bool, model: &str, effort: Option<&str>) -> Result<Sent, String> {
     use crate::chat::tools::agents as tools;
     let cfg = crate::config::load();
     let effort = effort.map(str::to_string).filter(|e| Effort::parse(e).is_some());
@@ -99,6 +109,7 @@ pub fn send(conversation: u64, folder: &Folder, text: &str, message_id: String, 
             effort_asked: effort.is_some(),
             effort,
             direct: true,
+            shots: shots.to_vec(),
             ..Default::default()
         };
         let (agent, how) = runner::follow_up(&prev.id, ask)?;
@@ -139,6 +150,7 @@ pub fn send(conversation: u64, folder: &Folder, text: &str, message_id: String, 
             model,
             effort: effort.as_str().to_string(),
             direct: true,
+            shots: shots.to_vec(),
             ..Default::default()
         }],
         ..Default::default()
@@ -164,7 +176,7 @@ mod tests {
         assert!(!applies(Message { on_plan: false, ..typed }));
         // Asked out loud or from the phone: its answer is said, so Chat keeps it short.
         assert!(!applies(Message { assistant: true, ..typed }));
-        // With a screenshot, a selection or a Skill: Chat's own business.
+        // With a selection, a Skill or a picture Yap took by itself: Chat's own business.
         assert!(!applies(Message { with_more: true, ..typed }));
         assert!(!applies(Message::default()));
     }

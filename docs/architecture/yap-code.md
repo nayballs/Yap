@@ -263,20 +263,52 @@ workspace, word for word, and no model of Chat's is asked.
   the person's message, with no bubble of Chat's between, then the report
   line and the answer. The page keeps the question as saved when
   `chat_send` answers `direct` (the session's tab opens beside it).
+- **With its screenshots** (2026-11-12): the ones the person put in the
+  box (snipped, pasted, dropped) go to the session with their words, as
+  Claude Code's own app sends a pasted picture. Before, a screenshot made
+  the message Chat's own business (Chat's model read it and worded a brief
+  for an agent), so a chat worked directly until a screenshot came and then
+  didn't — which is how the maintainer's own Code chat kept sending agents.
+  - **Ids, then the pictures**: the turn keeps their ids in `chat-images/`
+    (`TurnNote.shots`, `runner::Ask.shots`; the pictures stay the
+    chat's). As the turn's message is written to Claude Code, each is made
+    as Chat's own model on the plan would get it (`runner::shots_of` over
+    `snip::images::fitted`: usually made already when the message was
+    sent) and goes as an image block before the words
+    (`session::user_message`).
+  - **Wherever its words go** (`runner::follow_up`): a note to the turn
+    working goes with its pictures at once; words that came while the turn
+    started go with its first message; a request that waits is the next
+    turn's. Each turn sends its own pictures only: the session has the
+    earlier ones. **Continue** sends its words alone
+    (`runner::with_shots`).
+  - **One gone since** (kept past "Keep chat screenshots") is said in the
+    turn's message: "(A screenshot that came with this is no longer on
+    this PC.)".
+  - **Not these**: a picture Yap took of the screen by itself (the Voice
+    Assistant's window, `look_at_screen`) keeps Chat's rules and never goes
+    this way; one sent as its text ("Send its text instead") is in the
+    words already.
+- **■ Stop where Send was** (2026-11-12, `Composer.svelte`,
+  `core/agents.js` `workingDirectly`), as Claude Code's own app has it:
+  while the chat's session works and nothing is typed, the message box's
+  button stops its work (`agent_stop`); Esc in the empty box too
+  (`ChatView`). With something typed it's Send, as ever: the message goes
+  to it at once, as a note. An agent Chat sent out is stopped from its
+  tab, as before.
 - **When** (`direct::applies`, pure): "Work directly in Code chats" on
   (Settings → Yap Code, `agentsDirect`, on by default), Yap Code on with
   Claude Code on the PC, a Code chat whose model is on the plan, a message
-  typed or dictated in the Chat view, with no screenshot, selection, page
+  typed or dictated in the Chat view, with no selection, page
   passage, Skill or "think it through". **Everything else is handed over as
   before** by Chat's model: a Code chat on an API key or an on-device model,
-  the Voice Assistant's spoken question, a question from the phone, a
-  message with a screenshot.
-- **Not yet**: Stop in the composer (its panel has it), screenshots to the
-  session, Yap's own chat tools inside a direct Code chat (the browser
+  the Voice Assistant's spoken question, a question from the phone.
+- **Not yet**: Yap's own chat tools inside a direct Code chat (the browser
   panel, memory, connectors, documents), the phone and the Voice Assistant
   going direct, its final words shown as they stream.
 - **Tests**: `agents-direct.spec.js` (the first message, the next on
-  `--resume`, a message mid-work, the switch off). The e2e base config has
+  `--resume`, a message mid-work, a message with a screenshot — the first,
+  the next turn's own, a note's —, ■ Stop and Esc, the switch off). The e2e base config has
   `agentsDirect: false`, so every older spec still tests the hand-off; Yap
   Lab's `code-chat-direct` script runs it on the real Claude Code.
 
@@ -2228,16 +2260,28 @@ checked against Anthropic's own figures for the account. What those runs
 turned up was fixed the same day: the Agent tab rebuilt to read like Claude
 Code, Open in terminal's blank tab, Chat's thread following a report.
 
+**Checked through Yap Lab on the real Claude Code 2.1.296 (Haiku),
+2026-11-12:**
+
+- **A screenshot straight to a Code chat's session** (`direct-screenshot`):
+  a made-up red triangle in the message box, "what shape is in this
+  picture?" — no tool of Chat's was used, and the session's own words were
+  "A red equilateral triangle, pointing up, on a white background."
+- **A helper's steps say their call** (`tool-lines`): the session's `Task`
+  call and, under it (`under`: that call's id), the helper's three steps;
+  the thread showed the one line "Handed part of it to a helper · Count
+  test() calls in convert.test.js".
+
 **Not yet tried on a real run:**
 
 - An opened row for a `MultiEdit` or a file written over (a `Write` on one
   that was there): their records are read as an Edit's.
 - A step's picture from a tool that takes a screenshot, or from a command
   that prints one (a picture file read is checked, on 2.1.296).
-- A helper's steps folded behind its row: on the stand-in only. That the
-  real Claude Code writes a helper's messages into its stream with
-  `parent_tool_use_id` set to the call's id is from its documentation, not
-  from a run of ours.
+- A screenshot handed to a session already working (a note's), and one
+  gone before its turn started.
+- Several helpers sent at once, and a helper's row opened on a real run
+  (the Lab has no click).
 - An agent paid by key; an agent's cost across several turns (`total_cost_usd`,
   assumed whole per process); `--resume` after Yap was killed mid-job; real
   `permission_denied` events and Plan mode's output; Open in terminal since

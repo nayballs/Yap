@@ -12,6 +12,11 @@
 //   as they are (chat/turn/report.rs `own_words`). No "On it" bubble.
 // - The next message: the same session's next turn, on `--resume`.
 // - A message while it works: handed to it at once, the same turn.
+// - A message with a screenshot (12 Nov 2026): straight to its session too,
+//   the picture with its words, as Claude Code's own app sends a pasted
+//   one — the first message, the next one (that turn's own picture only),
+//   and a note while it works. Before, a screenshot made the message
+//   Chat's own business: Chat's model read it and sent an agent.
 // - "Work directly in Code chats" off: nothing goes to a session by itself
 //   (Chat's model answers; plan-agents.spec.js covers its hand-off).
 //
@@ -25,6 +30,8 @@ import { test as base, expect, openView, setConfig } from './support/fixtures.js
 import { fakeClaude, planConfig } from './support/claude-plan.js';
 import { RUNS } from './support/yap.js';
 import { newCodeChat } from './support/code-chats.js';
+import { writePng } from './support/png.js';
+import { workingDirectly } from '../src/lib/core/agents.js';
 
 const HERE = path.join(RUNS, 'agents-direct-spec');
 const SCRIPTS = path.join(HERE, 'scripts');
@@ -111,6 +118,20 @@ const SLOWISH = [
   { _wait_user: true },
 ];
 
+/** Says how many pictures its message came with (the stand-in's `{{user_pictures}}`). */
+const SEES = [{ _wait_user: true }, { _dump_args: ARGS }, init(), said('p1', [{ type: 'text', text: 'Pictures with it: {{user_pictures}}.' }], 'end_turn'), result('Pictures with it: {{user_pictures}}.', 0.01), { _wait_user: true }];
+/** A turn that takes its time, then says how many pictures its messages came with: its first, and a note's meanwhile. */
+const SEES_LATER = [
+  { _wait_user: true },
+  init(),
+  said('l1', [{ type: 'tool_use', id: 'toolu_read', name: 'Read', input: { file_path: '{{cwd}}\\notes.md' } }]),
+  { _sleep_ms: 6000 },
+  toolResult('toolu_read', 'Draft notes'),
+  { _dump_args: ARGS },
+  result('Pictures with it: {{user_pictures}}. Noted: {{notes}}', 0.01),
+  { _wait_user: true },
+];
+
 function writeScript(name, lines) {
   fs.mkdirSync(SCRIPTS, { recursive: true });
   const file = path.join(SCRIPTS, `${name}.jsonl`);
@@ -123,6 +144,8 @@ function freshFolder(dir) {
   fs.writeFileSync(path.join(dir, 'notes.md'), NOTES0);
 }
 const argsSeen = () => (fs.existsSync(ARGS) ? fs.readFileSync(ARGS, 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l).args) : []);
+/** The pictures each turn's messages came with, as the stand-in saw them (each its type and size, never its data). */
+const picturesSeen = () => (fs.existsSync(ARGS) ? fs.readFileSync(ARGS, 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l).user_pictures) : []);
 const after = (args, flag) => {
   const i = args.indexOf(flag);
   return i >= 0 ? args[i + 1] : undefined;
@@ -152,6 +175,16 @@ const tab = (main) => main.getByTestId('chat-agent');
 async function send(main, text) {
   await main.getByRole('textbox', { name: 'Message' }).fill(text);
   await main.getByRole('button', { name: 'Send', exact: true }).click();
+}
+const attachments = (main) => main.getByTestId('chat-attachments');
+/** A picture file dropped on Chat: it waits in the box, as a snip does (`count` of them there now). */
+async function dropPicture(yap, main, name, colour, count = 1) {
+  const dir = path.join(HERE, 'to-drop');
+  fs.mkdirSync(dir, { recursive: true });
+  const file = path.join(dir, name);
+  fs.writeFileSync(file, writePng(96, 60, colour));
+  await yap.invoke('e2e_drag_drop', { paths: [file] });
+  await expect(attachments(main).locator('.shotchip')).toHaveCount(count);
 }
 async function codeChat(main) {
   await openView(main, 'Chat');
@@ -257,6 +290,116 @@ test('a message while it works is handed to it at once: the same turn, one answe
   expect(messages.map((m) => m.kind || m.role)).toEqual(['user', 'user', 'agentReport', 'assistant']);
   expect(messages[3].text).toContain('Read notes.md. Noted: Keep the headings as they are.');
   await expect.poll(() => laidOut(main)).toEqual(['you', 'work', 'you', 'report', 'answer']);
+});
+
+test('a message with a screenshot goes straight to its session too: the picture with its words, each turn its own', async ({ yap, main, shot }) => {
+  await script(yap, SEES, 'sees');
+  const before = (await agents(yap)).length;
+  await codeChat(main);
+  await dropPicture(yap, main, 'beds.png', [40, 120, 200]);
+  await send(main, 'Make the beds look like this.');
+  // Its session, their words its brief: no model of Chat's read the picture and worded one.
+  const agent = await newAgent(yap, before);
+  expect(agent).toMatchObject({ folder: 'garden-planner', brief: 'Make the beds look like this.' });
+  expect(agent.turnList[0]).toMatchObject({ n: 1, direct: true, request: 'Make the beds look like this.' });
+  expect(agent.turnList[0].shots).toHaveLength(1);
+  const done = await ended(yap, agent.id);
+  // Claude Code got the picture itself, with the words.
+  expect(picturesSeen()).toHaveLength(1);
+  expect(picturesSeen()[0]).toHaveLength(1);
+  expect(picturesSeen()[0][0].type).toBe('image/png');
+  expect(picturesSeen()[0][0].bytes).toBeGreaterThan(50);
+  const messages = await messagesOf(yap, done.conversation, 3);
+  expect(messages.map((m) => m.kind || m.role)).toEqual(['user', 'agentReport', 'assistant']);
+  expect(messages[0].images.map((i) => i.id)).toEqual(agent.turnList[0].shots);
+  expect(messages[2].text).toBe('Pictures with it: 1.');
+  // The thread: their message with its screenshot, its session's own answer.
+  await expect(thread(main).locator('.cbubble.user img')).toHaveCount(1);
+  await expect(thread(main).locator('.cbubble.assistant')).toHaveText(['Pictures with it: 1.']);
+  await expect(attachments(main)).toBeHidden();
+  await shot(main, '10-a-screenshot-goes-straight-to-its-session');
+
+  // The next message, with two: its next turn on --resume, with its own pictures — never the first turn's again.
+  await dropPicture(yap, main, 'legend.png', [200, 120, 40]);
+  await dropPicture(yap, main, 'path.png', [90, 160, 90], 2);
+  await send(main, 'And the legend and the path like these.');
+  await expect.poll(async () => (await agents(yap)).find((j) => j.id === agent.id).turnList.length, { timeout: 20_000 }).toBe(2);
+  await expect.poll(async () => (await agents(yap)).find((j) => j.id === agent.id).turnList[1].status, { timeout: 30_000 }).toBe('done');
+  const again = await ended(yap, agent.id);
+  expect((await agents(yap)).length).toBe(before + 1);
+  expect(again.turnList[1]).toMatchObject({ n: 2, direct: true, request: 'And the legend and the path like these.' });
+  expect(again.turnList[1].shots).toHaveLength(2);
+  expect(after(argsSeen()[1], '--resume')).toBe(again.session);
+  expect(picturesSeen()[1].map((p) => p.type)).toEqual(['image/png', 'image/png']);
+  const then = await messagesOf(yap, done.conversation, 6);
+  expect(then[5].text).toBe('Pictures with it: 2.');
+
+  await expect(thread(main).locator('.cbubble.assistant')).toHaveText(['Pictures with it: 1.', 'Pictures with it: 2.']);
+});
+
+test('a note with a screenshot while it works is handed to it at once, the picture with it', async ({ yap, main }) => {
+  await script(yap, SEES_LATER, 'sees-later');
+  const before = (await agents(yap)).length;
+  await codeChat(main);
+  await send(main, 'Read notes.md.');
+  const agent = await newAgent(yap, before);
+  await expect.poll(async () => (await agents(yap)).find((j) => j.id === agent.id).status, { timeout: 20_000 }).toBe('running');
+  await dropPicture(yap, main, 'headings.png', [120, 40, 160]);
+  await send(main, 'Keep the headings like this.');
+  const done = await ended(yap, agent.id, 40_000);
+  // The same turn, one process; the note's picture reached it with the note.
+  expect(done.turnList.map((t) => [t.n, t.status, !!t.direct])).toEqual([[1, 'done', true]]);
+  expect(picturesSeen()).toHaveLength(1);
+  expect(picturesSeen()[0].map((p) => p.type)).toEqual(['image/png']);
+  const messages = await messagesOf(yap, done.conversation, 4);
+  expect(messages.map((m) => m.kind || m.role)).toEqual(['user', 'user', 'agentReport', 'assistant']);
+  expect(messages[1].images).toHaveLength(1);
+  expect(messages[3].text).toContain('Pictures with it: 1. Noted: Keep the headings like this.');
+});
+
+test('core/agents.js: the Code chat’s own session at work is what the message box’s ■ stops', () => {
+  const own = (status, conversation = 4) => ({ id: 'a1', conversation, status, turnList: [{ n: 1, direct: true }] });
+  for (const status of ['queued', 'running', 'asking']) expect(workingDirectly([own(status)], 4)?.id).toBe('a1');
+  for (const status of ['done', 'failed', 'stopped', 'interrupted']) expect(workingDirectly([own(status)], 4)).toBeNull();
+  // Another chat's; an agent Chat sent out (its latest turn isn't the person's own message); no chat open.
+  expect(workingDirectly([own('running', 5)], 4)).toBeNull();
+  expect(workingDirectly([{ id: 'a2', conversation: 4, status: 'running', turnList: [{ n: 1, direct: true }, { n: 2 }] }], 4)).toBeNull();
+  expect(workingDirectly([{ id: 'a3', conversation: 4, status: 'running' }], 4)).toBeNull();
+  expect(workingDirectly([own('running')], null)).toBeNull();
+  expect(workingDirectly(null, 4)).toBeNull();
+});
+
+test('while its session works the message box has ■ Stop where Send was; Esc in the empty box stops it too', async ({ yap, main, shot }) => {
+  await script(yap, SLOWISH, 'slowish');
+  const before = (await agents(yap)).length;
+  await codeChat(main);
+  const box = main.getByRole('textbox', { name: 'Message' });
+  const stop = main.getByTestId('chat-stop-work');
+  // Nothing at work: no ■.
+  await expect(stop).toHaveCount(0);
+  await send(main, 'Read notes.md.');
+  const agent = await newAgent(yap, before);
+  await expect.poll(async () => (await agents(yap)).find((j) => j.id === agent.id).status, { timeout: 20_000 }).toBe('running');
+  await expect(stop).toBeVisible();
+  await expect(stop).toHaveAccessibleName('Stop the work');
+  // Something typed: Send, as ever (it would go to the session as a note).
+  await box.fill('Keep the headings.');
+  await expect(stop).toHaveCount(0);
+  await expect(main.getByRole('button', { name: 'Send', exact: true })).toBeVisible();
+  await box.fill('');
+  await shot(main, '20-stop-where-send-was');
+  await stop.click();
+  expect((await ended(yap, agent.id)).status).toBe('stopped');
+  await expect(stop).toHaveCount(0);
+
+  // Its next message carries it on; Esc in the empty box stops that too.
+  await send(main, 'Read it again.');
+  await expect.poll(async () => (await agents(yap)).find((j) => j.id === agent.id).status, { timeout: 20_000 }).toBe('running');
+  await expect(stop).toBeVisible();
+  await box.focus();
+  await box.press('Escape');
+  expect((await ended(yap, agent.id)).status).toBe('stopped');
+  expect((await agents(yap)).length).toBe(before + 1);
 });
 
 test('“Work directly in Code chats” off: the message goes to Chat, never to a session by itself', async ({ yap, main }) => {

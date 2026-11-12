@@ -470,13 +470,17 @@ async fn answer_turn(
 /// the turn it is, with no answer. `None`: Chat's model answers, as ever.
 fn sent_directly(t: &Asked<'_>, opened: &Opened) -> Result<Option<ChatTurn>, String> {
     let Some(folder) = opened.code.as_ref() else { return Ok(None) };
+    // The person's own screenshots go with their words; a picture Yap took
+    // of the screen by itself never does (that's Chat's, with its rules).
+    let images = crate::snip::turn::images();
+    let taken_by_yap = images.iter().any(|i| crate::snip::turn::captured(&i.source));
     let message = crate::agents::direct::Message {
         setting: t.cfg.agents_direct,
         offered: crate::agents::offered(&t.cfg),
         code_chat: true,
         on_plan: t.ep.provider == crate::ai::claude_plan::PROVIDER,
         assistant: t.scope == Some("assistant"),
-        with_more: t.skill.is_some() || t.meetings || t.about_selection.is_some() || opened.selection.is_some() || !crate::snip::turn::images().is_empty() || crate::chat::think::wanted(),
+        with_more: t.skill.is_some() || t.meetings || t.about_selection.is_some() || opened.selection.is_some() || taken_by_yap || crate::chat::think::wanted(),
     };
     if !crate::agents::direct::applies(message) {
         return Ok(None);
@@ -484,7 +488,9 @@ fn sent_directly(t: &Asked<'_>, opened: &Opened) -> Result<Option<ChatTurn>, Str
     // (Its effort: the one chosen for that model in the picker, else its own.)
     let effort = crate::ai::effort::info(&t.cfg, &t.ep.provider, &t.ep.model).and_then(|i| i.chosen.or(i.default)).map(str::to_string);
     let message_id = format!("chat:{}:{}", opened.conv.id, opened.user_index);
-    let sent = crate::agents::direct::send(opened.conv.id, folder, &t.text, message_id, t.by_voice, &t.ep.model, effort.as_deref())?;
+    // (One sent as its text — "Send its text instead" — is in the words already.)
+    let shots: Vec<String> = images.iter().filter(|i| !i.as_text).map(|i| i.id.clone()).collect();
+    let sent = crate::agents::direct::send(opened.conv.id, folder, &t.text, &shots, message_id, t.by_voice, &t.ep.model, effort.as_deref())?;
     Ok(Some(ChatTurn {
         conversation_id: opened.conv.id,
         user_index: opened.user_index,
