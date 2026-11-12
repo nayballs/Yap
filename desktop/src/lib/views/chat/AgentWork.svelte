@@ -10,11 +10,21 @@
   // - Its log comes from stores/agentLogs.svelte.js (read once, then live);
   //   the turn's events are `turnsOf`'s, grouped by core/agents.js `workOf`.
   // - While it works, the last line is the step it's on, with a spinner.
+  // - **Its words as it writes them** (12 Nov 2026, as Claude Code's own
+  //   transcript shows them): the message it's writing now is the last
+  //   paragraph, growing (`agentLogs.saying`, live only); once it's whole
+  //   it's the `said` line that was coming, or its final words (the
+  //   chat's answer, below). Before, each message appeared at once when it
+  //   was finished.
   // - A step whose tool call came back with a picture (a picture file read,
   //   a screenshot a tool took: agents/pictures.rs) ends its line with it,
   //   small (StepPictures), as Claude Code's transcript does; opened, its
   //   row has it. A click opens it (`onview`).
-  // - Its final words aren't here: its report tells them, right below.
+  // - Its final words aren't here once they're the chat's answer, right
+  //   below (`answered`: the thread has it). Until then they stay where
+  //   they were written: never shown twice, never gone for a moment.
+  // - A turn's end is its own last event's (core/agents.js `turnEnd`): the
+  //   store's record follows a moment later.
   // - Nothing to show (no log yet, a turn that never ran): nothing drawn.
   //
   // **Whose work shows where** (12 Nov 2026, the maintainer: "if you send out
@@ -26,22 +36,23 @@
   // with its last words too, since no report follows it there.
   //
   // Its own small chunk (ChatThread and AgentPanel import it lazily).
-  import { workOf, workSummary, turnsOf, groupPictures, shownStepPicture } from '../../core/agents.js';
+  import { workOf, workSummary, turnsOf, turnEnd, groupPictures, shownStepPicture } from '../../core/agents.js';
   import { isLive } from '../../core/agentNow.js';
   import { renderMarkdown } from '../../core/markdown.js';
   import { colourCode } from '../../ui/colourCode.js';
-  import { agentLogs, watchAgentLog } from '../../stores/agentLogs.svelte.js';
+  import { agentLogs, watchAgentLog, watchSaying } from '../../stores/agentLogs.svelte.js';
   import StepPictures from './StepPictures.svelte';
   import StepRows from './StepRows.svelte';
 
   /**
    * `agent`: the pill's (its record, as the store has it); `turn`: which of
    * its turns; `line`: the line it's on now; `onview(picture)`: open a step's
-   * picture (a `ShownPicture`). In the Agent panel's row: `events` (the
-   * turn's own, so its log isn't read again), `status` (the turn's) and
-   * `wide`.
+   * picture (a `ShownPicture`); `answered`: its final words are the
+   * chat's answer in the thread now (null: go by the turn's end). In the
+   * Agent panel's row: `events` (the turn's own, so its log isn't read
+   * again), `status` (the turn's) and `wide`.
    */
-  let { agent, turn = 1, line = '', onview = null, events = null, status = null, wide = false } = $props();
+  let { agent, turn = 1, line = '', onview = null, events = null, status = null, wide = false, answered = null } = $props();
   const view = (p) => onview?.(shownStepPicture(p, agent?.folder));
 
   $effect(() => {
@@ -49,20 +60,33 @@
   });
   const log = $derived(events == null ? agentLogs.by[agent?.id] || [] : []);
   const note = $derived(events == null ? (turnsOf(agent, log).find((t) => t.n === turn) ?? null) : null);
-  const live = $derived(isLive(events == null ? note?.status : status));
-  const items = $derived(events != null ? workOf(events, '', live) : note?.startedTs || live ? workOf(note?.events || [], live ? '' : note?.text, live) : []);
+  const end = $derived(turnEnd(events == null ? note?.events : null));
+  const live = $derived(events == null ? isLive(note?.status) && !end.over : isLive(status));
+  /** Its final words, left out of its work: once the turn is over, or — in the thread — once they're the answer there. */
+  const final = $derived((answered ?? !live) ? note?.text || end.text : '');
+  $effect(() => {
+    watchSaying();
+  });
+  /** The message it's writing now, so far (this turn's, while it works). */
+  const saying = $derived.by(() => {
+    const now = live && agent?.id ? agentLogs.saying[agent.id] : null;
+    return now && now.turn === turn ? now.text : '';
+  });
+  // (Housekeeping alone — "Starting Claude Code" — is a line only while it's what the agent is on: not once it writes.)
+  const onStep = $derived(live && !saying);
+  const items = $derived(events != null ? workOf(events, '', onStep) : note?.startedTs || live ? workOf(note?.events || [], final, onStep) : []);
   /** The stretches the person opened (by where they start: a stretch keeps its place as more come). */
   let opened = $state({});
   const toggle = (key) => (opened = { ...opened, [key]: !opened[key] });
 </script>
 
-{#if items.length}
+{#if items.length || saying}
   <div class="agentwork" class:wide data-testid="chat-agent-work" data-agent={agent?.id} data-turn={turn} data-live={live ? 'true' : 'false'}>
     {#each items as it, i (i)}
       {#if it.kind === 'said'}
         <div class="wsaid" data-testid="chat-agent-work-said" use:colourCode>{@html renderMarkdown(it.text)}</div>
       {:else}
-        {@const busy = live && i === items.length - 1}
+        {@const busy = onStep && i === items.length - 1}
         {@const parts = busy && line ? [{ text: line }] : workSummary(it, busy)}
         {@const open = !!opened[i]}
         <div class="wgroup" data-testid="chat-agent-work-steps" data-open={open ? 'true' : 'false'} data-busy={busy ? 'true' : 'false'}>
@@ -81,6 +105,10 @@
         </div>
       {/if}
     {/each}
+    {#if saying}
+      <!-- (Its code is coloured once the message is whole: not at every piece.) -->
+      <div class="wsaid" data-testid="chat-agent-work-saying" aria-live="off">{@html renderMarkdown(saying)}</div>
+    {/if}
   </div>
 {/if}
 

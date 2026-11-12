@@ -17,6 +17,9 @@
 //   one — the first message, the next one (that turn's own picture only),
 //   and a note while it works. Before, a screenshot made the message
 //   Chat's own business: Chat's model read it and sent an agent.
+// - Its words as it writes them (12 Nov 2026): the message being written is
+//   the last paragraph of its work, growing; whole, it's the line that was
+//   coming (or the chat's answer). Never a line of its log.
 // - "Work directly in Code chats" off: nothing goes to a session by itself
 //   (Chat's model answers; plan-agents.spec.js covers its hand-off).
 //
@@ -31,7 +34,8 @@ import { fakeClaude, planConfig } from './support/claude-plan.js';
 import { RUNS } from './support/yap.js';
 import { newCodeChat } from './support/code-chats.js';
 import { writePng } from './support/png.js';
-import { workingDirectly } from '../src/lib/core/agents.js';
+import { workingDirectly, turnEnd, answeredAfter } from '../src/lib/core/agents.js';
+import { sayingOver } from '../src/lib/core/agentNow.js';
 
 const HERE = path.join(RUNS, 'agents-direct-spec');
 const SCRIPTS = path.join(HERE, 'scripts');
@@ -129,6 +133,37 @@ const SEES_LATER = [
   toolResult('toolu_read', 'Draft notes'),
   { _dump_args: ARGS },
   result('Pictures with it: {{user_pictures}}. Noted: {{notes}}', 0.01),
+  { _wait_user: true },
+];
+
+/** A piece of Claude Code's stream (`--include-partial-messages`). */
+const piece = (event) => ({ type: 'stream_event', event, parent_tool_use_id: null, session_id: '{{session_id}}' });
+const starts = (id) => piece({ type: 'message_start', message: { id, type: 'message', role: 'assistant', model: 'claude-haiku-5-5', content: [] } });
+const writes = (text) => piece({ type: 'content_block_delta', index: 0, delta: { type: 'text_delta', text } });
+const FIRST_WORDS = "I'll read the notes first, then add the schedule.";
+const LAST_WORDS = 'Done: nothing needed changing.';
+/** A turn whose words come a piece at a time: a message before a step, then its final words. */
+const WRITES_AS_IT_GOES = [
+  { _wait_user: true },
+  init(),
+  starts('msg_1'),
+  piece({ type: 'content_block_start', index: 0, content_block: { type: 'text', text: '' } }),
+  writes("I'll read the notes "),
+  { _sleep_ms: 300 },
+  writes('first, then'),
+  { _sleep_ms: 4000 },
+  writes(' add the schedule.'),
+  piece({ type: 'content_block_stop', index: 0 }),
+  said('w1', [{ type: 'text', text: FIRST_WORDS }]),
+  said('w1a', [{ type: 'tool_use', id: 'toolu_read', name: 'Read', input: { file_path: '{{cwd}}\\notes.md' } }]),
+  { _sleep_ms: 1200 },
+  toolResult('toolu_read', 'Draft notes'),
+  starts('msg_2'),
+  writes('Done: nothing'),
+  { _sleep_ms: 4000 },
+  writes(' needed changing.'),
+  said('w2', [{ type: 'text', text: LAST_WORDS }], 'end_turn'),
+  result(LAST_WORDS, 0.01),
   { _wait_user: true },
 ];
 
@@ -357,6 +392,39 @@ test('a note with a screenshot while it works is handed to it at once, the pictu
   expect(messages[3].text).toContain('Pictures with it: 1. Noted: Keep the headings like this.');
 });
 
+test('its words show as it writes them: the message so far, then the whole line; its final words become the answer', async ({ yap, main, shot }) => {
+  await script(yap, WRITES_AS_IT_GOES, 'writes');
+  const before = (await agents(yap)).length;
+  await codeChat(main);
+  await send(main, 'Add a watering schedule to notes.md.');
+  const agent = await newAgent(yap, before);
+  const work = thread(main).getByTestId('chat-agent-work');
+  const writing = work.getByTestId('chat-agent-work-saying');
+  // The message it's writing, so far: under their message before any step, no line of steps yet.
+  await expect(writing).toHaveText("I'll read the notes first, then", { timeout: 20_000 });
+  await expect(work.getByTestId('chat-agent-work-said')).toHaveCount(0);
+  // (Its start-up line was only what it was on until it wrote.)
+  await expect(work.getByTestId('chat-agent-work-steps')).toHaveCount(0);
+  await shot(main, '30-its-words-as-it-writes-them');
+  // Whole: the line that was coming, and what was being written is let go.
+  await expect(work.getByTestId('chat-agent-work-said')).toHaveText([FIRST_WORDS], { timeout: 20_000 });
+  await expect(writing).toHaveCount(0);
+  // Its final words come the same way, after its step…
+  await expect(writing).toHaveText('Done: nothing', { timeout: 20_000 });
+  await expect(work.getByTestId('chat-agent-work-steps').locator('.wtext')).toHaveText(['Read notes.md']);
+  await expect(work.locator('[data-busy="true"]')).toHaveCount(0);
+  // …and are the chat's answer once it's done: never left behind in its work.
+  const done = await ended(yap, agent.id, 40_000);
+  await expect(thread(main).locator('.cbubble.assistant')).toHaveText([LAST_WORDS]);
+  await expect(writing).toHaveCount(0);
+  await expect(work.getByTestId('chat-agent-work-said')).toHaveText([FIRST_WORDS]);
+  // Nothing half-written is a line of its log: its words are there whole, once.
+  const log = (await yap.invoke('agent_get', { id: done.id })).log;
+  expect(log.filter((e) => e.said).map((e) => e.said)).toEqual([FIRST_WORDS, LAST_WORDS]);
+  expect(JSON.stringify(log)).not.toContain('first, then"');
+  expect(log.some((e) => 'saying' in e)).toBe(false);
+});
+
 test('core/agents.js: the Code chat’s own session at work is what the message box’s ■ stops', () => {
   const own = (status, conversation = 4) => ({ id: 'a1', conversation, status, turnList: [{ n: 1, direct: true }] });
   for (const status of ['queued', 'running', 'asking']) expect(workingDirectly([own(status)], 4)?.id).toBe('a1');
@@ -367,6 +435,41 @@ test('core/agents.js: the Code chat’s own session at work is what the message 
   expect(workingDirectly([{ id: 'a3', conversation: 4, status: 'running' }], 4)).toBeNull();
   expect(workingDirectly([own('running')], null)).toBeNull();
   expect(workingDirectly(null, 4)).toBeNull();
+  // What it was writing is let go when the message is whole, it moves on to a step, or it's over —
+  // never for what a turn has used, its to-do list or the line it's on.
+  expect(sayingOver({ id: 'a1', status: 'running', said: 'Done.' })).toBe(true);
+  expect(sayingOver({ id: 'a1', status: 'running', text: 'Done.' })).toBe(true);
+  expect(sayingOver({ id: 'a1', status: 'running', step: 'Reading notes.md' })).toBe(true);
+  expect(sayingOver({ id: 'a1', status: 'done' })).toBe(true);
+  expect(sayingOver({ id: 'a1', status: 'running', usage: { input: 10 } })).toBe(false);
+  expect(sayingOver({ id: 'a1', status: 'running', todos: [] })).toBe(false);
+  expect(sayingOver({ id: 'a1', status: 'asking', now: 'Waiting for you to allow a step' })).toBe(false);
+
+  // A turn's end is its own last event's: over, and its final words, before the store's record says so.
+  const going = [{ status: 'running', step: 'Reading notes.md' }, { status: 'running', said: 'Done.' }];
+  expect(turnEnd(going)).toEqual({ over: false, text: '' });
+  expect(turnEnd([...going, { status: 'done', text: ' Done. ', cost: 0.01 }])).toEqual({ over: true, text: 'Done.' });
+  expect(turnEnd([...going, { status: 'done', text: 'Done.' }, { status: 'done', changed: 'finished' }])).toEqual({ over: true, text: 'Done.' });
+  expect(turnEnd([...going, { status: 'stopped' }])).toEqual({ over: true, text: '' });
+  // Carried on after it ended: at work again.
+  expect(turnEnd([...going, { status: 'stopped' }, { status: 'queued', step: 'Picking up where it left off' }])).toEqual({ over: false, text: '' });
+  expect(turnEnd([])).toEqual({ over: false, text: '' });
+  expect(turnEnd(null)).toEqual({ over: false, text: '' });
+
+  // Its final words are the answer's alone once the answer is in the thread: an assistant message after
+  // the question, before the next message that started a turn (a note while it worked started none).
+  const you = { role: 'user' };
+  const report = { role: 'assistant', kind: 'agentReport' };
+  const answer = { role: 'assistant', text: 'Done.' };
+  expect(answeredAfter([you], 0)).toBe(false);
+  expect(answeredAfter([you, report], 0)).toBe(false);
+  expect(answeredAfter([you, report, answer], 0)).toBe(true);
+  expect(answeredAfter([you, you, report, answer], 0)).toBe(true);
+  expect(answeredAfter([you, report, { ...answer, streaming: true }], 0)).toBe(false);
+  // The next question's answer isn't this one's.
+  expect(answeredAfter([you, you, report, answer], 0, (k) => k === 1)).toBe(false);
+  expect(answeredAfter([you, report, answer, you, report, answer], 3)).toBe(true);
+  expect(answeredAfter(null, 0)).toBe(false);
 });
 
 test('while its session works the message box has ■ Stop where Send was; Esc in the empty box stops it too', async ({ yap, main, shot }) => {
