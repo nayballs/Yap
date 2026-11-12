@@ -8,9 +8,23 @@ and `src/` are kept; the `[[example]]` and `[[test]]` targets were taken out of
 except the two DirectML fixes below (2026-10-22), measured with `stt_speed.rs`'s
 `--ignored` `profile_parakeet` and `bench_this_pc` on an RTX 5070 Ti; threads
 and the DirectML adapter (2026-10-24); Whisper's language probabilities
-(2026-10-25); and Parakeet TDT's durations, read at last (2026-10-27).
+(2026-10-25); Parakeet TDT's durations, read at last (2026-10-27); and
+`ort` built without its `copy-dylibs` feature (2026-11-12, below).
 
 ## What changed
+
+`Cargo.toml`
+- `[dependencies.ort]`: `default-features = false` with ort's default
+  features listed but `copy-dylibs` (2026-11-12). That step of ort-sys's
+  build script puts `DirectML.dll` beside the executable by counting three
+  folders up from `OUT_DIR`; Cargo 1.100's new build layout has one folder
+  more, so it wrote into `<target>/debug/build` and then failed on
+  `build/examples` ("The system cannot find the path specified") wherever
+  Windows lets it make symlinks (Developer Mode: the maintainer's PC). Yap
+  uses Windows' own DirectML anyway (`dictation/stt.rs`
+  `fix_directml_stub`), so nothing is lost. Yap's own `ort` dependency
+  lists the same features: either one left at its defaults turns the copy
+  back on.
 
 `src/onnx/session.rs`
 - `build_session_on(…, cpu_only)`: `build_session` with an option to put a
