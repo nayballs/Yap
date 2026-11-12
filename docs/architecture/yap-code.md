@@ -1112,6 +1112,29 @@ used. See [Yap's crew](#yaps-crew-the-rows-characters).
   the timeline at that turn. Enter or Space opens and folds; ↑ ↓ (Home, End) move between
   rows. Which rows are open and which groups folded is remembered per agent
   while the window stays open (`agentPanelMemory.svelte.js`; never saved).
+- **Its helpers are entries of their own** (2026-11-12; the maintainer:
+  "please do all of this"), as Claude Code's own app lists a session's
+  subagents: under a turn's row, always in view, one for each part its
+  session handed over (`core/agents.js` `helpersOf`, the row's
+  `helpers`).
+  - **An entry**: what the helper was asked ("Check the docs": the
+    hand-over's own words; "A helper" when it gave none), and under it the
+    step it's on while it works, with a spinner; back, ✓ and how many steps
+    it took ("4 steps"); ✕ "Didn't finish · 2 steps" when Claude Code
+    marked its result an error.
+  - **It opens to the helper's own steps** (`StepRows`, as in the thread:
+    an edit to its diff, a command to what it printed). Which are open is
+    remembered with the rows.
+  - **When it's back** is said by the runner: the session's `Task` /
+    `Agent` call coming back is an event with its `call` and `helper`
+    ("back", "failed"). A turn that's over has none at work, whatever its
+    log says (an older log has no "back").
+  - **Several out at once** each have their entry, each working until its
+    own call is back; in the thread's opened stretch each such row keeps
+    its spinner too (`StepRows`).
+  - Before, a helper was only the row behind the stretch's line
+    ([An opened stretch](#an-opened-stretch-a-row-a-step)): nothing in the
+    panel said one was out, or what it was doing.
 - **A pill or a report card** opens the panel with its turn's row open and in
   view. A turn's own start (the chat's agent event, `auto`) shows the panel
   and opens no row.
@@ -2092,7 +2115,7 @@ Pages (`desktop/src/lib/`): `views/chat/` (`ChatSideSwitch`,
 
 | Event | Payload |
 |---|---|
-| `yap-agent` | `{id, status, folder, conversation?, step?, file?, command?, about?, said?, todos?, now?, diff?, call?, under?, picture?, text?, cost?, problem?, turn?, queued?, ts}` — `call` the tool call a step is (Claude Code's id), or the one a `diff`, an `output` or a `picture` came back from; `under` on a helper's own step, the session's call that handed it the work (its `Task`'s id); `done` a command's line once done ("Listed the folder"), `range` the lines a Read asked for ("424–503"), with their step; `output` `{text, tail?, more?, failed?}`, what a command printed (`agents/output.rs`; never to a phone); `picture` `{id, w, h}`, a picture that call's answer carried (`agents/pictures.rs`); `turn` the turn it's about (`TurnNote.n`), `queued` a request queued as that turn (its title); `status` queued \| running \| asking \| done \| failed \| stopped \| interrupted; `about` a command's description; `said` its words between tool calls; `todos` `[{content, status, activeForm?}]` (status pending \| in_progress \| completed); `now` the line it's on with no new step; `diff` `{file, kind, lines, added, removed, more?, all?}` — `kind` edit \| new \| rewrite \| write, each line its mark first (`-`, `+`, ` `; a lone `@` a gap; `@@ -a,b +c,d @@` a part's place in the file); `text` its final words (an older Yap's words as it worked too); `problem` `{kind, message, resetsAt?}`, `kind` notSignedIn \| rateLimited \| billing \| account \| paysAnotherWay; `usage` what its turn has used (`{input, output, cacheRead, cacheWrite, context, window, estimate?}`, `agents/usage.rs`: live, never a line of its log, but for a result's and a turn's end); `changed` its record changed with no step (2026-11-08: `planUnused` a plan set aside, `dismissed` / `shown` its panel row, `finished` Move to finished): the pages read it again |
+| `yap-agent` | `{id, status, folder, conversation?, step?, file?, command?, about?, said?, todos?, now?, diff?, call?, under?, helper?, picture?, text?, cost?, problem?, turn?, queued?, ts}` — `call` the tool call a step is (Claude Code's id), or the one a `diff`, an `output` or a `picture` came back from; `under` on a helper's own step, the session's call that handed it the work (its `Task`'s id); `helper` ("back", "failed") with the `call` of a hand-over whose helper has come back (an event of its own, no step); `done` a command's line once done ("Listed the folder"), `range` the lines a Read asked for ("424–503"), with their step; `output` `{text, tail?, more?, failed?}`, what a command printed (`agents/output.rs`; never to a phone); `picture` `{id, w, h}`, a picture that call's answer carried (`agents/pictures.rs`); `turn` the turn it's about (`TurnNote.n`), `queued` a request queued as that turn (its title); `status` queued \| running \| asking \| done \| failed \| stopped \| interrupted; `about` a command's description; `said` its words between tool calls; `todos` `[{content, status, activeForm?}]` (status pending \| in_progress \| completed); `now` the line it's on with no new step; `diff` `{file, kind, lines, added, removed, more?, all?}` — `kind` edit \| new \| rewrite \| write, each line its mark first (`-`, `+`, ` `; a lone `@` a gap; `@@ -a,b +c,d @@` a part's place in the file); `text` its final words (an older Yap's words as it worked too); `problem` `{kind, message, resetsAt?}`, `kind` notSignedIn \| rateLimited \| billing \| account \| paysAnotherWay; `usage` what its turn has used (`{input, output, cacheRead, cacheWrite, context, window, estimate?}`, `agents/usage.rs`: live, never a line of its log, but for a result's and a turn's end); `changed` its record changed with no step (2026-11-08: `planUnused` a plan set aside, `dismissed` / `shown` its panel row, `finished` Move to finished): the pages read it again |
 | `yap-agent-saying` | `{id, turn, text}` — the message agent `id`'s turn is writing now, all of it so far: many times a second, to the page only (never logged, never to a phone); let go when a `yap-agent` event has its `said`, its `text`, a `step`, or a status that's over |
 | `yap-agent-report` | `{agent, turn, conversation, messageId, markerId, status}` — the turn it reports, and its status; `messageId` null when a newer question came first |
 | `yap-agent-open` | `{id, conversation}` (with `yap-assistant-turn {phase: "open", conversationId, show: true}`) |
@@ -2252,7 +2275,9 @@ the build's own stand-in replaying `script` from now on),
     too, a line for each stretch of steps that opens into them, the step
     it's on while it works); a part handed to a helper (the helper's steps
     behind its row, rows of their own, never counted in the stretch's line;
-    in from the edge in the timeline); "start fresh" a
+    in from the edge in the timeline; its entry in the Agent panel under
+    the turn's row: working with the step it's on, then done with how many
+    steps, opening to them); "start fresh" a
     second agent, its tab named apart; Undo this turn (refused while a later
     turn changed the same file), Undo all asked first. Light and dark.
   - `agents-plans.spec.js`: plans and the go-ahead — a Bypass chip never stops
@@ -2336,7 +2361,9 @@ Code, Open in terminal's blank tab, Chat's thread following a report.
 - **A helper's steps say their call** (`tool-lines`): the session's `Task`
   call and, under it (`under`: that call's id), the helper's three steps;
   the thread showed the one line "Handed part of it to a helper · Count
-  test() calls in convert.test.js".
+  test() calls in convert.test.js". Run again for the panel's entries: the
+  helper's coming back was said (`helper`: "back", its call's id) and the
+  Agent panel had its entry.
 
 - **Its words as it writes them**: asked for some 300 words with no
   tools, the thread showed the answer growing mid-sentence under the

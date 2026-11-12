@@ -78,7 +78,10 @@
 
 <ol class="rows" data-testid="chat-agent-work-rows" data-colours={colours ? 'true' : 'false'}>
   {#each rowSteps(steps, busy) as { step: s, i: k, now } (k)}
-    {@const r = stepRow(s, now)}
+    <!-- (A helper still out is being worked on, whichever row it is: several may be out at once.) -->
+    {@const out = busy && stepKind(s) === 'helper' && !s.back && !!s.helped}
+    {@const going = now || out}
+    {@const r = stepRow(s, going)}
     {@const can = stepOpens(s)}
     {@const isOpen = can && !!open[k]}
     {@const pics = (s.pictures || []).filter((p) => !gone[p.id])}
@@ -86,11 +89,11 @@
       <div class="rline">
         {#if can}
           <button type="button" class="rhead" aria-expanded={isOpen} title={isOpen ? 'Hide what it did' : 'Show what it did'} onclick={() => toggle(k)}>
-            {@render words(r, now)}
+            {@render words(r, going)}
             <svg class="chev" class:down={isOpen} viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 6l6 6-6 6" /></svg>
           </button>
         {:else}
-          <div class="rhead still">{@render words(r, now)}</div>
+          <div class="rhead still">{@render words(r, going)}</div>
         {/if}
         {#if pics.length && !isOpen}<StepPictures pictures={pics} max={2} {onview} />{/if}
       </div>
@@ -143,7 +146,7 @@
           {#if s.helped?.length}
             <div class="helped" data-testid="chat-agent-work-helper">
               <!-- (While the session waits on its helper, the helper's last step is the one being done.) -->
-              <StepRows steps={s.helped} busy={now} {onview} />
+              <StepRows steps={s.helped} busy={out || (now && !s.back)} {onview} />
             </div>
           {/if}
           {#each pics as p (p.id)}

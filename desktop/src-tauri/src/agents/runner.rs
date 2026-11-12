@@ -187,6 +187,12 @@ pub struct AgentEvent {
     /// session's.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub under: Option<String>,
+    /// **A helper is back** (12 Nov 2026): the session's `Task` (or `Agent`)
+    /// call `call` has come back — `"back"`, or `"failed"` when Claude Code
+    /// marked its result an error. The Agent panel's entry for that helper
+    /// stops working then, while the turn carries on.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub helper: Option<String>,
     /// A picture a tool call's answer carried (`pictures.rs`): its step
     /// (`call`) shows it.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -1162,6 +1168,9 @@ struct Follow {
     /// The helper's call the message being read was made under (its
     /// `parent_tool_use_id`): its steps say so (`AgentEvent::under`).
     under: Option<String>,
+    /// The helpers out now: the session's own `Task` / `Agent` calls not
+    /// back yet (`AgentEvent::helper` says when each is).
+    helpers: HashSet<String>,
     /// Pictures kept this turn (`pictures::PER_TURN`).
     pictures: usize,
     /// The message it's writing now, so far, and when the page was last
@@ -1247,6 +1256,7 @@ impl Follow {
             changes: HashMap::new(),
             diff_used: agent.diff_lines as usize,
             under: None,
+            helpers: HashSet::new(),
             pictures: 0,
             saying: String::new(),
             saying_told: None,
@@ -1278,6 +1288,10 @@ impl Follow {
             self.edits.insert(id.to_string());
         }
         self.open.insert(id.to_string());
+        // Part of the work handed to a helper (the session's own call).
+        if matches!(name, "Task" | "Agent") && self.under.is_none() {
+            self.helpers.insert(id.to_string());
+        }
         let seen = steps::of_tool(name, input, &self.folder);
         // The to-do list: shown as a list, the line the one in progress.
         // (A helper's own list is its own business: the agent's stays.)
@@ -1365,6 +1379,12 @@ impl Follow {
         }
         if self.commands.remove(id) {
             self.output_of(id, text, is_error);
+        }
+        // A helper is back: said, so its entry in the Agent panel stops working.
+        if self.helpers.remove(id) {
+            if let Some(agent) = store::get(&self.id) {
+                emit(&AgentEvent { call: Some(id.to_string()), helper: Some(if is_error { "failed" } else { "back" }.to_string()), ..self.event(&agent) });
+            }
         }
         if self.open.is_empty() {
             if let Some(line) = steps::doing_now(&self.todos) {
@@ -2888,6 +2908,16 @@ mod tests {
         assert_eq!(under("Handing part of it to a helper · Check the docs"), Some(None));
         assert_eq!(under("Reading notes.txt"), Some(Some("toolu_task".into())));
         assert_eq!(under("Running ls"), Some(None));
+        // The helper back: said with its call, once — a result of the helper's own call says nothing.
+        follow.on_tool_result("toolu_h1", false, "Draft notes", None);
+        follow.on_tool_result("toolu_task", false, "The docs are in order.", None);
+        follow.on_tool_result("toolu_task", false, "again", None);
+        let back: Vec<(String, String)> = store::log_read(&id).iter().filter_map(|e| Some((e.get("helper")?.as_str()?.to_string(), e.get("call")?.as_str()?.to_string()))).collect();
+        assert_eq!(back, [("back".to_string(), "toolu_task".to_string())]);
+        // One that failed says so.
+        follow.on_tool("toolu_task2", "Agent", &json!({ "description": "Check the links" }));
+        follow.on_tool_result("toolu_task2", true, "It couldn't.", None);
+        assert_eq!(store::log_read(&id).iter().filter_map(|e| e.get("helper").and_then(|h| h.as_str()).map(str::to_string)).collect::<Vec<_>>(), ["back", "failed"]);
         // The agent's to-do list is still the session's own.
         let lists: Vec<&serde_json::Value> = log.iter().filter_map(|e| e.get("todos")).collect();
         assert_eq!(lists.len(), 1);
@@ -2904,7 +2934,7 @@ mod tests {
         assert_eq!(v["status"], "running");
         assert_eq!(v["conversation"], 3);
         assert_eq!(v["step"], "Reading notes.md");
-        for absent in ["file", "command", "about", "said", "todos", "now", "diff", "call", "under", "done", "range", "output", "picture", "text", "cost", "problem"] {
+        for absent in ["file", "command", "about", "said", "todos", "now", "diff", "call", "under", "helper", "done", "range", "output", "picture", "text", "cost", "problem"] {
             assert!(v.get(absent).is_none(), "{absent}");
         }
         // A diff and a to-do list, as the tab reads them.

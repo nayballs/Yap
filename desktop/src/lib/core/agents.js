@@ -158,6 +158,8 @@ const stepOf = (e, step) => ({
   output: null,
   // A helper's own step: the call that handed it the work (`AgentEvent::under`).
   under: e.under || null,
+  // A hand-over's helper is back ("back", "failed": `AgentEvent::helper`); null: still out.
+  back: null,
   // A helper's own steps, when this step handed part of the work over (`workOf`).
   helped: [],
   ts: Number(e.ts) || 0,
@@ -261,6 +263,12 @@ export function workOf(log, final = '', live = false) {
     if (said) {
       group = null;
       out.push({ kind: 'said', text: said, ts: Number(e.ts) || 0 });
+      continue;
+    }
+    // A helper is back: its hand-over's step says so (its entry in the Agent panel stops working).
+    if (e?.helper && e.call) {
+      const sent = everyStep(out).findLast((x) => x.calls.includes(e.call));
+      if (sent) sent.back = e.helper;
       continue;
     }
     const step = typeof e?.step === 'string' ? e.step.trim() : '';
@@ -654,6 +662,34 @@ function answerAfter(messages, q) {
  */
 export function pillsByAnswer(agents, conversation, messages) {
   return pillsAt(agents, conversation, messages, false);
+}
+
+/** "No steps yet", "1 step", "4 steps". */
+const stepsWord = (n) => (n === 1 ? '1 step' : n > 0 ? `${n} steps` : 'No steps');
+
+/**
+ * **A turn's helpers** (12 Nov 2026): Claude Code's own subagents, one for
+ * each part its session handed over — the Agent panel's entries under the
+ * turn's row, as Claude Code's own app lists a session's subagents. Each
+ * `{key, title, steps, status, line}`: its hand-over's words ("Check the
+ * docs"), its own steps (`workOf`'s `helped`), `status` working (not back
+ * yet, the turn still going: `live`), done or failed, and the line it's on
+ * while it works, else how many steps it took. Pure.
+ */
+export function helpersOf(events, live = false) {
+  const out = [];
+  for (const item of workOf(events, '', false)) {
+    if (item.kind !== 'work') continue;
+    for (const st of item.steps) {
+      if (stepKind(st) !== 'helper') continue;
+      const steps = st.helped || [];
+      const status = st.back === 'failed' ? 'failed' : st.back || !live ? 'done' : 'working';
+      const title = String(st.step || '').replace(/^Handing part of it to a helper(?: · )?/, '').trim() || 'A helper';
+      const line = status === 'working' ? steps.at(-1)?.step || 'Starting' : status === 'failed' ? `Didn't finish · ${stepsWord(steps.length).toLowerCase()}` : stepsWord(steps.length);
+      out.push({ key: st.calls[0] || `helper-${out.length + 1}`, title, steps, status, line });
+    }
+  }
+  return out;
 }
 
 /**
