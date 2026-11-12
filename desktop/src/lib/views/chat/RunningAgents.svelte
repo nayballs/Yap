@@ -23,7 +23,8 @@
     chat.doc.showAgent(j);
   }
 
-  const lineOf = (j) => (j.status === 'asking' ? 'Waiting for you to allow a step' : agents.steps[j.id] || statusWord(j.status));
+  // (Asking: what for — a step, its plan, a question of its own — when its line says.)
+  const lineOf = (j) => (j.status === 'asking' ? (/^Waiting for you\b/.test(agents.steps[j.id] || '') ? agents.steps[j.id] : 'Waiting for you to allow a step') : agents.steps[j.id] || statusWord(j.status));
   // How long it has been at its request now: its turn's time (a follow-up's, not the agent's first).
   const tookOf = (j, at) => {
     const t = turnNow(j);

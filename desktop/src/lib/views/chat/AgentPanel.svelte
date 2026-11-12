@@ -331,6 +331,13 @@
                       <button type="button" class="nbtn primary" disabled={busyRow} onclick={() => answer(r, true)}>Allow once</button>
                       <button type="button" class="nbtn" disabled={busyRow} onclick={() => answer(r, false)}>Deny</button>
                     </div>
+                  {:else if r.needs.kind === 'question'}
+                    <!-- Its own question (Claude Code's AskUserQuestion): answered on its card in the chat, or left to it. -->
+                    <p class="nwhat">Asks you: <strong data-testid="chat-agent-row-asks">{r.needs.approval.summary}</strong></p>
+                    <p class="nwhat">Its options are on its card in the chat.</p>
+                    <div class="nbtns">
+                      <button type="button" class="nbtn" disabled={busyRow} onclick={() => answer(r, false)}>Let it decide</button>
+                    </div>
                   {:else if r.needs.kind === 'plan'}
                     <div class="nbtns">
                       <button type="button" class="nbtn primary" disabled={busyRow} onclick={() => answer(r, true)}>Go ahead</button>

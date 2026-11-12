@@ -7,6 +7,11 @@
 //! A plan (Plan mode's ExitPlanMode, 2026-11-07) reads as one: "The plan is
 //! ready in garden-planner", its first line, **Go ahead** / **Not yet**
 //! (the plan itself is in the thread's card).
+//! A question of Claude Code's (`AskUserQuestion`, 12 Nov 2026) reads as
+//! one too: "The agent has a question in garden-planner", the question, and
+//! — one question of two options — the two options as its buttons;
+//! otherwise **Answer in Yap** (the chat, where its card has every option)
+//! / **Let it decide**.
 //!
 //! One card at a time (`agentApprove`, a question in `notices/notice.rs`
 //! that waits out a dictation): the oldest prompt waiting. Answered here or
@@ -78,6 +83,19 @@ pub fn card(p: &Pending) -> crate::bar::Card {
             timeout_ms: None,
             ..Default::default()
         };
+    }
+    if p.tool == claude_live::ASK {
+        let body = super::steps::clip(p.summary.trim(), BODY_MAX);
+        // One question, one answer of two: the bar's two buttons are them.
+        let two = match p.questions.as_slice() {
+            [q] if !q.multi_select && q.options.len() == 2 => Some((&q.options[0].label, &q.options[1].label)),
+            _ => None,
+        };
+        let (primary, secondary) = match two {
+            Some((a, b)) => (crate::bar::CardAction::new(format!("pick:{}:0", p.id), super::steps::clip(a, 28)), crate::bar::CardAction::new(format!("pick:{}:1", p.id), super::steps::clip(b, 28))),
+            None => (crate::bar::CardAction::new(format!("open:{}", p.id), "Answer in Yap"), crate::bar::CardAction::new(format!("deny:{}", p.id), "Let it decide")),
+        };
+        return crate::bar::Card { id: CARD.into(), icon: "agent", title: format!("The agent has a question{at}"), body, primary: Some(primary), secondary: Some(secondary), timeout_ms: None, ..Default::default() };
     }
     crate::bar::Card {
         id: CARD.into(),
@@ -165,8 +183,43 @@ pub fn sync() {
     }
 }
 
-/// The card's Allow once / Deny.
-fn on_action(_app: &tauri::AppHandle, action: &str) {
+/// A question's own buttons: `pick:<id>:<n>` (its option `n`) and
+/// `open:<id>` (answer it in Yap). Pure.
+pub fn question_action(action: &str) -> Option<(u64, Option<usize>)> {
+    if let Some(id) = action.strip_prefix("open:") {
+        return id.parse().ok().map(|id| (id, None));
+    }
+    let (id, n) = action.strip_prefix("pick:")?.split_once(':')?;
+    Some((id.parse().ok()?, Some(n.parse().ok()?)))
+}
+
+/// The card's Allow once / Deny (a question's: one of its two options,
+/// Answer in Yap, Let it decide).
+fn on_action(app: &tauri::AppHandle, action: &str) {
+    if let Some((id, picked)) = question_action(action) {
+        let Some(p) = claude_live::waiting(id) else { return };
+        match picked {
+            // One of its two options: its answer.
+            Some(n) => {
+                if let Some((q, o)) = p.questions.first().and_then(|q| q.options.get(n).map(|o| (q, o))) {
+                    claude_live::claude_approve_reply(id, serde_json::json!({ q.question.clone(): o.label.clone() }));
+                }
+            }
+            // Answer in Yap: its chat, where the card has every option.
+            None => {
+                crate::chat::turn::open_agent(app, &p.run);
+                return;
+            }
+        }
+        {
+            let mut st = lock();
+            if st.shown == Some(id) {
+                st.shown = None;
+            }
+        }
+        sync();
+        return;
+    }
     let Some((id, allow)) = answer_of(action) else {
         // ✕: hidden; the prompt still waits in Chat.
         return;
@@ -186,6 +239,30 @@ mod tests {
     use super::*;
     use crate::integrations::claude_live::Origin;
 
+    #[test]
+    fn a_question_reads_as_one_with_its_two_options_as_the_buttons_or_answered_in_yap() {
+        use crate::integrations::claude_live::{Choice, Question};
+        let option = |label: &str| Choice { label: label.into(), description: String::new() };
+        let question = |options: &[&str], multi_select: bool| Question { question: "Which bed should get the watering line first?".into(), header: "Bed".into(), options: options.iter().map(|o| option(o)).collect(), multi_select };
+        let asks = |questions: Vec<Question>| Pending { tool: "AskUserQuestion".into(), summary: "Which bed should get the watering line first?".into(), detail: String::new(), questions, ..pending(7, "agent1") };
+        // One question of two options: they're the bar's two buttons.
+        let two = card(&asks(vec![question(&["North bed", "South bed"], false)]));
+        assert_eq!((two.id.as_str(), two.title.as_str(), two.body.as_str()), (CARD, "The agent has a question in garden-planner", "Which bed should get the watering line first?"));
+        assert_eq!(two.primary.as_ref().map(|a| (a.id.as_str(), a.label.as_str())), Some(("pick:7:0", "North bed")));
+        assert_eq!(two.secondary.as_ref().map(|a| (a.id.as_str(), a.label.as_str())), Some(("pick:7:1", "South bed")));
+        // More options, several to pick, or several questions: answered in Yap, or left to it.
+        for many in [asks(vec![question(&["North bed", "South bed", "Both"], false)]), asks(vec![question(&["North bed", "South bed"], true)]), asks(vec![question(&["A", "B"], false), question(&["C", "D"], false)])] {
+            let c = card(&many);
+            assert_eq!(c.primary.as_ref().map(|a| (a.id.as_str(), a.label.as_str())), Some(("open:7", "Answer in Yap")));
+            assert_eq!(c.secondary.as_ref().map(|a| (a.id.as_str(), a.label.as_str())), Some(("deny:7", "Let it decide")));
+        }
+        assert_eq!(question_action("pick:7:1"), Some((7, Some(1))));
+        assert_eq!(question_action("open:7"), Some((7, None)));
+        assert_eq!(question_action("allow:7"), None);
+        assert_eq!(question_action("pick:7"), None);
+        assert_eq!(answer_of("deny:7"), Some((7, false)), "Let it decide is the card's no");
+    }
+
     fn pending(id: u64, run: &str) -> Pending {
         Pending {
             id,
@@ -197,6 +274,7 @@ mod tests {
             detail: "npm test".into(),
             label: "garden-planner".into(),
             asked_ts: 0,
+            questions: Vec::new(),
         }
     }
 

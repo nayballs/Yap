@@ -1694,8 +1694,10 @@ impl Follow {
     fn on_tick(&mut self, session: &Session) {
         let waiting = claude_live::pending();
         let asking = waiting.iter().any(|p| p.run == self.id);
-        // Its plan waiting for the person's go-ahead (ExitPlanMode's card).
+        // Its plan waiting for the person's go-ahead (ExitPlanMode's card),
+        // or a question of its own (AskUserQuestion's).
         let plan = waiting.iter().any(|p| p.run == self.id && p.tool == claude_live::EXIT_PLAN);
+        let question = waiting.iter().any(|p| p.run == self.id && p.tool == claude_live::ASK);
         if asking != self.asking {
             self.asking = asking;
             let status = if asking { Status::Asking } else { Status::Running };
@@ -1709,7 +1711,16 @@ impl Follow {
                 }
             }) {
                 // Asking: a step of its own; answered, the line it was on.
-                let step = asking.then(|| if plan { "Waiting for you: its plan is ready" } else { "Waiting for you to allow a step" }.to_string());
+                let step = asking.then(|| {
+                    if plan {
+                        "Waiting for you: its plan is ready"
+                    } else if question {
+                        "Waiting for you: it has a question"
+                    } else {
+                        "Waiting for you to allow a step"
+                    }
+                    .to_string()
+                });
                 let now = (!asking).then(|| self.line.clone()).filter(|l| !l.is_empty());
                 emit(&AgentEvent { step, now, ..self.event(&agent) });
             }

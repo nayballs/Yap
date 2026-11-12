@@ -18,6 +18,35 @@ export const sayingOver = (ev) => !!(ev?.said || ev?.text || ev?.step || !isLive
 /** The line of an agent whose plan waits for the person's Go ahead (agents/runner.rs `on_tick`). */
 export const PLAN_WAITING = 'Waiting for you: its plan is ready';
 
+/** The line of an agent with a question of its own for the person (Claude Code's AskUserQuestion: agents/runner.rs `on_tick`). */
+export const QUESTION_WAITING = 'Waiting for you: it has a question';
+
+/**
+ * **A question card's answers, as they're sent** (`claude_approve_reply`):
+ * `picks` — by question index, `{labels: [...], other: ''}` — as each
+ * question's text → the one label picked, or the person's own words when
+ * they wrote some ("Something else…" wins over the pick: it's what they
+ * meant); where several may be picked, the list picked with their own
+ * words after it. A question with neither is left out. Pure.
+ */
+export function questionAnswers(questions, picks) {
+  const out = {};
+  (questions || []).forEach((q, i) => {
+    const p = picks?.[i] || {};
+    const own = String(p.other ?? '').trim();
+    const labels = (p.labels || []).filter((l) => (q.options || []).some((o) => o.label === l));
+    if (q.multiSelect) {
+      const all = own ? [...labels, own] : labels;
+      if (all.length) out[q.question] = all;
+    } else if (own) out[q.question] = own;
+    else if (labels.length) out[q.question] = labels[0];
+  });
+  return out;
+}
+
+/** Whether every question of a card has an answer in `picks`. Pure. */
+export const questionsAnswered = (questions, picks) => !!questions?.length && Object.keys(questionAnswers(questions, picks)).length === questions.length;
+
 /** A plan still waits on the person this long after its turn ended (seconds). */
 export const PLAN_WAITS_S = 24 * 3600;
 
@@ -54,7 +83,7 @@ export function latestStep(log, status) {
   // Go ahead / Not yet as its own line (agents/runner.rs).
   if (status === 'asking') {
     const asked = [...(log || [])].reverse().find((e) => typeof e?.step === 'string' && /^Waiting for you\b/.test(e.step));
-    return asked?.step === PLAN_WAITING ? PLAN_WAITING : 'Waiting for you to allow a step';
+    return asked?.step === PLAN_WAITING || asked?.step === QUESTION_WAITING ? asked.step : 'Waiting for you to allow a step';
   }
   let line = '';
   for (const e of log || []) {

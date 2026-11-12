@@ -535,6 +535,7 @@ pub fn run() {
             voice::tts::tts_cloud_preview,
             integrations::bridge::bridge_status,
             integrations::claude_live::claude_approve_answer,
+            integrations::claude_live::claude_approve_reply,
             integrations::claude_live::claude_approve_pending,
             agents::commands::agent_list,
             agents::commands::agent_get,

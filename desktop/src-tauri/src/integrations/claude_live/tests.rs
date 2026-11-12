@@ -405,11 +405,58 @@ fn approve_asks_the_person_and_says_allow_deny_or_no_answer() {
     assert!(quick.approvals.pending().is_empty());
     assert_eq!(outcomes(&quick_events), ["timedOut"]);
 
-    // A question isn't a permission: Claude decides, no card.
+    // A question with nothing to show: Claude decides, no card.
     let before = events.lock().unwrap().len();
     let decision = approving(&c, json!({ "tool_name": "AskUserQuestion", "input": { "questions": [] } })).join().unwrap();
     assert_eq!(decision["behavior"], "deny");
+    assert!(decision["message"].as_str().unwrap().contains("Make the most sensible choice yourself"), "{decision}");
     assert_eq!(events.lock().unwrap().len(), before);
+
+    // **A question**: its card has the questions and their options; the answer goes back under each question's own words.
+    let questions = json!([
+        { "question": "How should I format the output?", "header": "Format", "options": [{ "label": "Summary", "description": "Brief overview" }, { "label": "Detailed", "description": "Full explanation" }], "multiSelect": false },
+        { "question": "Which sections should I include?", "header": "Sections", "options": [{ "label": "Introduction", "description": "" }, { "label": "Conclusion", "description": "" }, { "label": "Sources", "description": "" }], "multiSelect": true },
+    ]);
+    let call = approving(&c, json!({ "tool_name": "AskUserQuestion", "input": { "questions": questions }, "tool_use_id": "toolu_q" }));
+    let card = waiting(&ep);
+    assert_eq!((card.tool.as_str(), card.summary.as_str(), card.detail.as_str()), ("AskUserQuestion", "How should I format the output?", ""));
+    assert_eq!(card.questions.len(), 2);
+    assert_eq!(card.questions[0].options.iter().map(|o| o.label.as_str()).collect::<Vec<_>>(), ["Summary", "Detailed"]);
+    assert!(card.questions[1].multi_select && !card.questions[0].multi_select);
+    let shown = events.lock().unwrap().iter().rev().find(|(n, _)| n == "yap-claude-approve").map(|(_, v)| v.clone()).unwrap();
+    assert_eq!(shown["questions"][1]["multiSelect"], true);
+    assert_eq!(shown["questions"][0]["options"][0], json!({ "label": "Summary", "description": "Brief overview" }));
+    // Nothing of it answered: still waiting. Another card's question: never its answer.
+    assert!(!ep.approvals.reply(card.id, &json!({}), By::Pc));
+    assert!(!ep.approvals.reply(card.id, &json!({ "Some other question?": "Yes" }), By::Pc));
+    assert_eq!(ep.approvals.pending().len(), 1);
+    // One picked, several picked, in their own words too.
+    assert!(ep.approvals.reply(card.id, &json!({ "How should I format the output?": "Summary", "Which sections should I include?": ["Introduction", " Sources "] }), By::Pc));
+    let decision = call.join().unwrap();
+    assert_eq!(decision["behavior"], "allow");
+    assert_eq!(decision["updatedInput"]["questions"], questions, "the questions as asked");
+    assert_eq!(decision["updatedInput"]["answers"], json!({ "How should I format the output?": "Summary", "Which sections should I include?": "Introduction, Sources" }));
+    assert!(!ep.approvals.reply(card.id, &json!({ "How should I format the output?": "Detailed" }), By::Pc), "answered once");
+    assert_eq!(outcomes(&events).last().map(String::as_str), Some("allowed"));
+
+    // "Let it decide": Claude chooses, and says what it chose.
+    let call = approving(&c, json!({ "tool_name": "AskUserQuestion", "input": { "questions": questions } }));
+    let card = waiting(&ep);
+    assert!(ep.approvals.answer(card.id, false));
+    let decision = call.join().unwrap();
+    assert_eq!(decision["behavior"], "deny");
+    assert!(decision["message"].as_str().unwrap().starts_with("The user left this one to you in Yap."), "{decision}");
+    // A plain yes with no answer is no answer either.
+    let call = approving(&c, json!({ "tool_name": "AskUserQuestion", "input": { "questions": questions } }));
+    let card = waiting(&ep);
+    assert!(ep.approvals.answer(card.id, true));
+    assert_eq!(call.join().unwrap()["behavior"], "deny");
+
+    // Nobody answers a question: Claude chooses.
+    let call = approving(&Client::of(&unanswered), json!({ "tool_name": "AskUserQuestion", "input": { "questions": questions } }));
+    let decision = call.join().unwrap();
+    assert_eq!(decision["behavior"], "deny");
+    assert!(decision["message"].as_str().unwrap().starts_with("Nobody answered this question in Yap within 1 second."), "{decision}");
     // Not a permission prompt at all: a tool error.
     let (err, text) = c.tool("approve", json!({}));
     assert!(err && text.contains("tool_name"));
@@ -429,6 +476,12 @@ fn in_bypass_permissions_a_prompt_is_answered_no_at_once_with_no_card() {
     assert!(started.elapsed() < Duration::from_secs(10), "never a wait for a card");
     assert_eq!(decision["behavior"], "deny");
     assert_eq!(decision["message"], super::approve::UNATTENDED);
+    // A question of its own: nobody is asked either; Claude chooses, and says what it chose.
+    let question = json!({ "questions": [{ "question": "Which bed first?", "header": "Bed", "options": [{ "label": "North", "description": "" }, { "label": "South", "description": "" }], "multiSelect": false }] });
+    let decision = approving(&c, json!({ "tool_name": "AskUserQuestion", "input": question })).join().unwrap();
+    assert_eq!(decision["behavior"], "deny");
+    let message = decision["message"].as_str().unwrap();
+    assert!(message.starts_with("This agent runs in Bypass permissions in Yap") && message.contains("Make the most sensible choice yourself"), "{decision}");
     assert!(ep.approvals.pending().is_empty());
     assert!(!events.lock().unwrap().iter().any(|(n, _)| n == "yap-claude-approve" || n == "yap-claude-approve-done"), "no card at all");
 }

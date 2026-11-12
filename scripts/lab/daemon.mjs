@@ -537,6 +537,10 @@ async function answerCard(card, how) {
     answered = card.kind === 'connector'
       ? await invoke('chat_connector_confirm', { id: Number(raw), answer: how === 'always' ? 'always' : allow ? 'once' : 'deny' })
       : await invoke('chat_page_confirm', { id: Number(raw), allow });
+  } else if (kind === 'approve' && allow && card.questions?.length) {
+    // A question of Claude Code's own (AskUserQuestion): "allow" picks each question's first option; "deny" lets it decide.
+    const answers = Object.fromEntries(card.questions.map((q) => [q.question, q.options?.[0]?.label ?? '']));
+    answered = await invoke('claude_approve_reply', { id: Number(raw), answers });
   } else if (kind === 'approve') {
     answered = await invoke('claude_approve_answer', { id: Number(raw), allow });
   } else if (kind === 'plan') {

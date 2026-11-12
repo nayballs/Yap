@@ -178,7 +178,8 @@ export function stateOf(agent, turn, now = Date.now() / 1000, { approval = null 
  */
 export function needsOf(state, turn, approval) {
   if (state !== 'needs') return null;
-  if (turn?.status === 'asking' && approval) return { kind: approval.tool === 'ExitPlanMode' ? 'plan' : 'approve', approval };
+  // (A question of Claude Code's own — AskUserQuestion — has its options on its card in the chat.)
+  if (turn?.status === 'asking' && approval) return { kind: approval.tool === 'ExitPlanMode' ? 'plan' : approval.tool === 'AskUserQuestion' ? 'question' : 'approve', approval };
   return { kind: 'goahead' };
 }
 
@@ -375,7 +376,7 @@ export function rowActions(r) {
   const active = !!r.agent?.active;
   return {
     stop: live && active,
-    finish: (r.state === 'needs' || r.state === 'running') && !active && r.needs?.kind !== 'approve' && r.needs?.kind !== 'plan',
+    finish: (r.state === 'needs' || r.state === 'running') && !active && r.needs?.kind !== 'approve' && r.needs?.kind !== 'plan' && r.needs?.kind !== 'question',
     dismiss: !live && !r.dismissed,
     restore: r.dismissed,
     goAhead: r.unused && !isLive(r.agent?.status),

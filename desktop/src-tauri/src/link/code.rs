@@ -315,7 +315,7 @@ pub fn thread_parts(hub: &Hub, device: &str, id: u64) -> (Option<ThreadCode>, Ve
     let agents: Vec<wire::Brief> = store::of_conversation(id).iter().map(|a| view::brief(a, None)).collect();
     let mut cards = Vec::new();
     let now = Instant::now();
-    for p in crate::integrations::claude_live::pending().into_iter().filter(|p| p.conversation == Some(id)) {
+    for p in crate::integrations::claude_live::pending().into_iter().filter(|p| p.conversation == Some(id) && phone_card(p)) {
         locked(&hub.code.shown).sent(Card::Approve, p.id, device, now);
         cards.push(json!({ "kind": "approve", "card": view::card(serde_json::to_value(&p).unwrap_or(Value::Null)), "expiresTs": p.asked_ts + crate::integrations::claude_live::APPROVE_WAIT.as_secs() }));
     }
@@ -505,10 +505,18 @@ fn already(hub: &Hub, card: Card, id: u64) -> String {
     }
 }
 
+/// **A card a phone gets**: a permission prompt or a plan. A question of
+/// Claude Code's (`AskUserQuestion`, 12 Nov 2026) has its options on the
+/// PC's card only, for now: a phone sees the agent waiting ("it has a
+/// question"), never a card whose Allow / Deny wouldn't answer it. Pure.
+pub fn phone_card(p: &crate::integrations::claude_live::Pending) -> bool {
+    p.tool != crate::integrations::claude_live::ASK
+}
+
 /// **Allow once / Deny on a phone**: the card waiting, in a workspace the
 /// phone may answer for, sent to that phone, a fresh tap, the first answer.
 fn approve(cx: &Ctx<'_>, g: &Gate, id: u64, allow: bool, shown_ms: u64) {
-    let Some(card) = crate::integrations::claude_live::waiting(id) else {
+    let Some(card) = crate::integrations::claude_live::waiting(id).filter(phone_card) else {
         locked(&cx.hub.code.shown).close(Card::Approve, id);
         tracing::info!(why = "not waiting", "Remote Control: a phone's answer refused");
         return say(cx.tx, Out::Error { message: already(cx.hub, Card::Approve, id) });
@@ -635,7 +643,7 @@ fn agents_now() -> Vec<wire::Brief> {
 pub fn status_now(hub: &Hub) -> Out {
     let approvals = crate::integrations::claude_live::pending()
         .into_iter()
-        .filter(|p| store::get(&p.run).is_some_and(|a| allowed(&a.folder)))
+        .filter(|p| phone_card(p) && store::get(&p.run).is_some_and(|a| allowed(&a.folder)))
         .map(|p| ApprovalRef { id: p.id, conversation: p.conversation, agent: p.run })
         .collect();
     let confirms = locked(&hub.code.confirms).iter().filter(|(_, w)| allowed(&w.folder)).map(|(id, w)| ConfirmRef { id: *id, conversation: w.conversation }).collect();
@@ -680,7 +688,7 @@ pub fn welcome(hub: &Hub, tx: &Tx, device: &str) {
     say(tx, status_now(hub));
     let now = Instant::now();
     for p in crate::integrations::claude_live::pending() {
-        if store::get(&p.run).is_some_and(|a| allowed(&a.folder)) {
+        if phone_card(&p) && store::get(&p.run).is_some_and(|a| allowed(&a.folder)) {
             send_card(hub, tx, device, &p, now);
         }
     }
@@ -752,7 +760,7 @@ pub fn on_approve(hub: &Arc<Hub>, payload: &Value) {
     let Some(folder) = store::get(&p.run).map(|a| a.folder) else { return };
     if allowed(&folder) {
         let now = Instant::now();
-        let pending = crate::integrations::claude_live::waiting(p.id);
+        let pending = crate::integrations::claude_live::waiting(p.id).filter(phone_card);
         for (tx, device, _) in phones_on(hub) {
             if let Some(card) = &pending {
                 send_card(hub, &tx, &device, card, now);

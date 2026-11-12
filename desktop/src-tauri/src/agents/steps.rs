@@ -133,6 +133,8 @@ pub fn of_tool(name: &str, input: &Value, folder: &Path) -> Seen {
         "TodoWrite" => Seen { step: "Planning the steps".into(), todos: todos(input), ..Default::default() },
         "Skill" => Seen { step: dotted("Using a skill", text(&["skill", "name", "command"])), ..Default::default() },
         "ExitPlanMode" => Seen { step: "Writing the plan".into(), ..Default::default() },
+        // Its own question for the person (its card: `claude_live/approve.rs`).
+        "AskUserQuestion" => Seen { step: "Asking you a question".into(), ..Default::default() },
         "BashOutput" | "KillShell" | "KillBash" | "TaskOutput" | "TaskStop" => Seen { step: "Checking a command".into(), ..Default::default() },
         // Claude Code looking one of its tools up (an MCP server's load when
         // first needed): its own plumbing, never a step of the work — the

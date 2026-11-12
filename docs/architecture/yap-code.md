@@ -698,6 +698,7 @@ under Bypass:
 | A folder new to agents ("No agent has worked in this folder before") | Skipped | The folder becomes a workspace as it starts. |
 | Asked out loud first ("Should I send an agent…?", "Should I pass that to the agent…?", `agents/voice.rs`) | Skipped | The same `ask_first`. |
 | A plan's go-ahead (ExitPlanMode's card, the plan report's Go ahead) | Never reached | The model's Plan is a read-only run; a plan doesn't stay a plan under a Bypass chip (`next_turn`); `EnterPlanMode` is off in every Bypass turn (`tools_off`). Only the person's own Plan chip or cap makes a plan, and then it isn't Bypass. |
+| A question of Claude Code's own (`AskUserQuestion`) | Left to Claude at once, no card | Nobody is asked: the run's `approve` tells Claude to make the most sensible choice itself and say what it chose (2026-11-12, when the other Modes got a card for it). |
 | Claude Code's permission prompts (Allow / Deny, `approve`) | Answered no at once, no card | In `bypassPermissions` Claude Code still asks for its own safety checks and the person's own `ask` rules; with `Approval::unattended` the run's `approve` says no without a card (`approve::UNATTENDED`: carry on without it, say so in the summary), never a wait. `--permission-prompt-tool` stays (the run's endpoint, and every other mode). `AskUserQuestion` is answered without a card in every mode. Never `--dangerously-skip-permissions`. |
 | **After outside content this turn** — the web, a page, the screen, a connector's result, another app's selected text, an agent's own output — `start_agent` / `message_agent` show the brief | Skipped (10 Nov 2026) | `ask_first` returns nothing when `unattended`; `message_agent` works the turn's mode out as the runner will (`runner::next_mode`). An agent at Bypass already reads the web and acts on it with nobody asked, so the card guarded only the hop from Chat; the person chose that for this chat and confirmed its warning, which now says so. The log has "sent without asking (Bypass permissions)". Every other Mode keeps the card. |
 | The person's plain go-ahead after outside content | As ever: no card | Yap's own fixed words. |
@@ -1361,6 +1362,39 @@ instead of a terminal (rebuilt after the maintainer's first real agent,
   command (whole) or the edit, **Allow once** / **Deny**
   (`claude_approve_answer`). Never answered by voice. A plan's (ExitPlanMode)
   is the plan card: "The plan is ready", the plan, **Go ahead** / **Not yet**.
+- **A question of Claude Code's own** (`AskUserQuestion`, 2026-11-12; the
+  maintainer: "please do all of this"), as Claude Code's own app asks one:
+  the same card, "The agent has a question", each question with its short
+  header, its options as buttons with their descriptions, **Something
+  else…** for the person's own words, and **Let it decide**.
+  - **One question with one answer** is answered by the click on its
+    option. **Several questions, or one where several options may be
+    picked**: each answered, then **Send** (`core/agentNow.js`
+    `questionAnswers`, `questionsAnswered`). Their own words take a
+    pick's place (it's what they meant), or join the picks where several
+    are allowed.
+  - **What Claude Code gets** (`claude_approve_reply`,
+    `claude_live/approve.rs` `Book::reply`, `answers_for`): the questions
+    as asked and `answers`, each question's own text → the label, several
+    labels joined with ", ", or their words (at most 2,000 characters).
+    Only the card's own questions are ever answered.
+  - **Let it decide**, or nobody answering in 10 minutes: Claude is told to
+    make the most sensible choice itself, carry on, and say in its summary
+    what it chose and what it would have asked. That is what every
+    question got before there was a card.
+  - **While it waits**: the agent is `asking`, its line "Waiting for you:
+    it has a question"; its step reads "Asked you a question".
+  - **On the Yap bar** when no Yap window is in front
+    (`agents/approve_card.rs`): "The agent has a question in
+    garden-planner" and the question; one question of two options has the
+    two options as its buttons, any other **Answer in Yap** (the chat,
+    where its card has every option) / **Let it decide**.
+  - **Never under Bypass permissions**: nothing asks there, a question
+    neither ([Bypass permissions](#bypass-permissions-no-approvals)).
+  - **Not on a phone yet** (`link/code.rs` `phone_card`): a paired phone
+    sees the agent waiting ("it has a question") and no card, since its
+    Allow / Deny wouldn't answer one. Claude Code's helpers can't ask
+    (its own limit).
 - **Running agents** (`RunningAgents.svelte`) above the Code side's list: the
   folder, the line it's on (or "Waiting for you"), how long; a click opens its
   chat and tab.
@@ -2062,7 +2096,7 @@ Pages (`desktop/src/lib/`): `views/chat/` (`ChatSideSwitch`,
 | `yap-agent-saying` | `{id, turn, text}` — the message agent `id`'s turn is writing now, all of it so far: many times a second, to the page only (never logged, never to a phone); let go when a `yap-agent` event has its `said`, its `text`, a `step`, or a status that's over |
 | `yap-agent-report` | `{agent, turn, conversation, messageId, markerId, status}` — the turn it reports, and its status; `messageId` null when a newer question came first |
 | `yap-agent-open` | `{id, conversation}` (with `yap-assistant-turn {phase: "open", conversationId, show: true}`) |
-| `yap-claude-approve` | `{id, run, conversation, origin, tool, summary, detail, label, askedTs}` — `run` is the agent's id; a plan's (`tool` "ExitPlanMode"): `summary` "The plan is ready", `detail` the plan |
+| `yap-claude-approve` | `{id, run, conversation, origin, tool, summary, detail, label, askedTs, questions?}` (`questions`: a question card's, `tool` "AskUserQuestion": `[{question, header, options: [{label, description}], multiSelect}]`, its `summary` the first question) — `run` is the agent's id; a plan's (`tool` "ExitPlanMode"): `summary` "The plan is ready", `detail` the plan |
 | `yap-claude-approve-done` | `{id, run, outcome, by, byName?, byDevice?}` — outcome allowed \| denied \| timedOut \| ended \| cancelled; `by` "pc", "phone" (a paired phone: its name and id, Remote Control) or null |
 | `yap-agent-mode` | `{conversation, mode}` — a chat's Mode changed (the chip, or a phone) |
 | `yap-code-chat` | `{conversations, folder, removed?}` — those chats are Code chats in `folder` now (`null`: plain); `removed`: a workspace removed in Settings, its name; no conversations: the workspaces changed |
@@ -2094,6 +2128,7 @@ modeLabel, brief, newFolder, web, continues}`, answered by `chat_page_confirm`.
 | `code_chats_list` | `{chats: {id: folder}, workspaces: [folder + usedTs]}`: every Code chat, and the workspaces most recently used first |
 | `chat_send {…, codeFolder?}` | (Chat's) a new chat's first question, made a Code chat in that workspace |
 | `claude_approve_answer {id, allow}` / `claude_approve_pending` | a permission prompt's answer; the prompts waiting (`integrations/claude_live.rs`) |
+| `claude_approve_reply {id, answers}` | a question card's answers (`AskUserQuestion`): each question's text → the label picked, a list of labels, or the person's own words; `true` when it was still waiting and something was answered |
 | `claude_code_status {refresh?}` / `claude_code_sign_in` | Claude Code on this PC; its sign-in terminal (`ai/claude_code.rs`) |
 
 Debug builds, test mode only: `e2e_claude_script {script?}` (Claude Code is
@@ -2308,6 +2343,14 @@ Code, Open in terminal's blank tab, Chat's thread following a report.
   message, with ■ Stop in the message box; at its end the work had none of
   it left and the thread one answer.
 
+- **A question of Claude Code's own** (`question-card`, at Auto): asked to
+  put a two-option question to the person, Claude Code sent its
+  `AskUserQuestion` to the run's permission prompt; the thread showed its
+  card (the header, the question, both options with their descriptions),
+  the agent `asking` with "Waiting for you: it has a question"; answered
+  with the first option, the session carried on: "You picked Teal for the
+  garden map's markers."
+
 **Not yet tried on a real run:**
 
 - An opened row for a `MultiEdit` or a file written over (a `Write` on one
@@ -2341,8 +2384,8 @@ Code, Open in terminal's blank tab, Chat's thread following a report.
 
 **Not built:**
 
-- A question from Claude Code (`AskUserQuestion`) has no card: it's denied,
-  and Claude is told to choose and say what it chose in its summary.
+- A question of Claude Code's own answered from a paired phone (its card is
+  the PC's: [Around the tab](#around-the-tab)).
 - Remote Control away from home, and notifications with the phone locked
   (Web Push): the design's phase 2 ([Remote Control](#remote-control-the-phone)).
 - Codex as a second engine on the same runner: later.

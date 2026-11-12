@@ -120,6 +120,7 @@ const DONE = [
   [/^Waiting\b/, 'Waited'],
   [/^Using\b/, 'Used'],
   [/^Handing\b/, 'Handed'],
+  [/^Asking\b/, 'Asked'],
 ];
 const doneLine = (step) => DONE.reduce((s, [was, now]) => (was.test(s) ? s.replace(was, now) : s), String(step || ''));
 
@@ -927,7 +928,7 @@ export function stepKind(s) {
   if (/^Searching the files\b/.test(t)) return 'search';
   if (/^Handing part of it to a helper\b/.test(t)) return 'helper';
   if (/^Using\b/.test(t) && !OWN_TOOL.test(t)) return 'tool';
-  if (/^Waiting for you\b/.test(t)) return 'ask';
+  if (/^Waiting for you\b/.test(t) || /^Asking you\b/.test(t)) return 'ask';
   return 'other';
 }
 

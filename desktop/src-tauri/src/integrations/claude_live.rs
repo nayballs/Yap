@@ -93,7 +93,9 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use tauri::{AppHandle, Emitter};
 
-pub use approve::{By, Pending, EVENT as APPROVE_EVENT, EVENT_DONE as APPROVE_DONE_EVENT, EXIT_PLAN};
+pub use approve::{By, Pending, ASK, EVENT as APPROVE_EVENT, EVENT_DONE as APPROVE_DONE_EVENT, EXIT_PLAN};
+#[cfg(test)]
+pub use approve::{Choice, Question};
 #[cfg(debug_assertions)]
 pub use approve::set_auto_answer;
 
@@ -404,6 +406,17 @@ pub fn pending() -> Vec<Pending> {
 pub fn claude_approve_answer(id: u64, allow: bool) -> bool {
     let answered = started().is_some_and(|ep| ep.approvals.answer(id, allow));
     tracing::info!(id, allow, answered, "Claude Code: the user answered a permission prompt");
+    answered
+}
+
+/// **A question's answers** (`AskUserQuestion`'s card: `answers`, each
+/// question's text → the option picked, the person's own words, or a list
+/// of options): `true` if that question was still waiting and something of
+/// it was answered. "Let it decide" is [`claude_approve_answer`]'s no.
+#[tauri::command]
+pub fn claude_approve_reply(id: u64, answers: serde_json::Value) -> bool {
+    let answered = started().is_some_and(|ep| ep.approvals.reply(id, &answers, By::Pc));
+    tracing::info!(id, answered, "Claude Code: the user answered a question");
     answered
 }
 

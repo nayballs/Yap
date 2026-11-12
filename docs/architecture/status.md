@@ -1587,9 +1587,10 @@ quote for a question asked out loud.
     spoken question back.
   - **In the dev build**: the bar's cards while another app is in front, the
     real folder picker, "1 agent working" beside the idle and meeting pills.
-  - **Not built**: a card for Claude Code's own questions (`AskUserQuestion`
-    is denied); a phone agent's report spoken on the phone (it's spoken on this
-    PC); Codex as a second engine.
+  - **Not built**: a question of Claude Code's own (`AskUserQuestion`)
+    answered from a phone (its card, 2026-11-12, is the PC's); a phone
+    agent's report spoken on the phone (it's spoken on this PC); Codex as a
+    second engine.
   - **Landed 7 Nov, unit- and e2e-tested, not tried for real**: Code chats
     without Yap's memory, and a Code chat on the plan as a read-only session
     in its workspace ([yap-code.md](./yap-code.md#memory-and-the-plan-in-a-code-chat)).

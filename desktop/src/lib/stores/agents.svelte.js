@@ -119,6 +119,22 @@ export async function answerApproval(id, allow) {
 }
 
 /**
+ * **A question card's answers** (Claude Code's AskUserQuestion:
+ * `claude_approve_reply`, each question's text → what was picked or
+ * written): gone once they're taken; still there when they weren't (the
+ * question had lapsed, or nothing of it was answered).
+ */
+export async function replyToQuestion(id, answers) {
+  try {
+    const taken = await invoke('claude_approve_reply', { id, answers });
+    if (taken) agents.approvals = agents.approvals.filter((a) => a.id !== id);
+    return !!taken;
+  } catch {
+    return false;
+  }
+}
+
+/**
  * **Go ahead with an agent's plan** (its report card's button, the Agent
  * panel's row: the person's click): its next turn now. `turn`: the plan's
  * (an earlier turn's, a Plan not used row's, starts as a turn of its own),

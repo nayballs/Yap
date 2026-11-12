@@ -20,6 +20,12 @@
 // - Its words as it writes them (12 Nov 2026): the message being written is
 //   the last paragraph of its work, growing; whole, it's the line that was
 //   coming (or the chat's answer). Never a line of its log.
+// - Claude Code's own question (AskUserQuestion, 12 Nov 2026) is a card in
+//   the thread: its options as buttons (one question with one answer is
+//   answered by the click), several questions sent together, the person's
+//   own words, or "Let it decide". The stand-in asks the run's permission
+//   prompt as Claude Code does (`_mcp approve`) and its answer is read back
+//   from a file. Before, every question was refused at once.
 // - "Work directly in Code chats" off: nothing goes to a session by itself
 //   (Chat's model answers; plan-agents.spec.js covers its hand-off).
 //
@@ -35,12 +41,13 @@ import { RUNS } from './support/yap.js';
 import { newCodeChat } from './support/code-chats.js';
 import { writePng } from './support/png.js';
 import { workingDirectly, turnEnd, answeredAfter } from '../src/lib/core/agents.js';
-import { sayingOver } from '../src/lib/core/agentNow.js';
+import { sayingOver, questionAnswers, questionsAnswered } from '../src/lib/core/agentNow.js';
 
 const HERE = path.join(RUNS, 'agents-direct-spec');
 const SCRIPTS = path.join(HERE, 'scripts');
 const GARDEN = path.join(HERE, 'folders', 'garden-planner');
 const ARGS = path.join(HERE, 'args.jsonl');
+const ANSWERS = path.join(HERE, 'answers.jsonl');
 
 const DONE1 = 'Done. notes.md has a watering schedule now.';
 const DONE2 = 'Done. There is a minimap button for the beds.';
@@ -166,6 +173,24 @@ const WRITES_AS_IT_GOES = [
   result(LAST_WORDS, 0.01),
   { _wait_user: true },
 ];
+
+const ONE_QUESTION = [{ question: 'Which bed should get the watering line first?', header: 'Bed', options: [{ label: 'North bed', description: 'The tomatoes' }, { label: 'South bed', description: 'The herbs' }], multiSelect: false }];
+const TWO_QUESTIONS = [
+  { question: 'How often should it say to water?', header: 'How often', options: [{ label: 'Twice a week', description: '' }, { label: 'Every day', description: 'In hot weather' }], multiSelect: false },
+  { question: 'Which sections should the notes have?', header: 'Sections', options: [{ label: 'Watering', description: '' }, { label: 'Feeding', description: '' }, { label: 'Pests', description: '' }], multiSelect: true },
+];
+/** A turn that asks the person (Claude Code's AskUserQuestion, through the run's permission prompt as Claude Code sends it), then carries on. */
+const asks = (questions) => [
+  { _wait_user: true },
+  init(),
+  said('q1', [{ type: 'tool_use', id: 'toolu_q', name: 'AskUserQuestion', input: { questions } }]),
+  { _mcp: { tool: 'approve', arguments: { tool_name: 'AskUserQuestion', input: { questions }, tool_use_id: 'toolu_q' }, result_for: 'toolu_q', dump: ANSWERS } },
+  said('q2', [{ type: 'text', text: 'Thanks: carrying on.' }], 'end_turn'),
+  result('Thanks: carrying on.', 0.01),
+  { _wait_user: true },
+];
+/** What Claude Code was told for each question so far (the permission prompt's own answers). */
+const decisions = () => (fs.existsSync(ANSWERS) ? fs.readFileSync(ANSWERS, 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(JSON.parse(l).content[0].text)) : []);
 
 function writeScript(name, lines) {
   fs.mkdirSync(SCRIPTS, { recursive: true });
@@ -425,7 +450,104 @@ test('its words show as it writes them: the message so far, then the whole line;
   expect(log.some((e) => 'saying' in e)).toBe(false);
 });
 
+test('Claude Code’s own question is a card: an option answers it, several are sent together, or it is left to decide', async ({ yap, main, shot }) => {
+  fs.rmSync(ANSWERS, { force: true });
+  // (Asked as in the app: nothing answers for the person.)
+  await yap.invoke('e2e_claude_approve_auto', { allow: null });
+  await script(yap, asks(ONE_QUESTION), 'asks-one');
+  const before = (await agents(yap)).length;
+  await codeChat(main);
+  await send(main, 'Add a watering line.');
+  const agent = await newAgent(yap, before);
+  const statusNow = async () => (await agents(yap)).find((j) => j.id === agent.id).status;
+  const card = thread(main).locator('[data-testid="chat-agent-approve"][data-kind="question"]');
+  await expect(card).toBeVisible({ timeout: 20_000 });
+  await expect(card).toContainText('The agent has a question');
+  await expect(card.getByTestId('chat-agent-question')).toHaveCount(1);
+  await expect(card.getByTestId('chat-agent-question').locator('.qtext')).toContainText('Which bed should get the watering line first?');
+  await expect(card.getByTestId('chat-agent-question').locator('.qhead')).toHaveText('Bed');
+  await expect(card.getByTestId('chat-agent-question-option').locator('.qlabel')).toHaveText(['North bed', 'South bed']);
+  await expect(card.getByTestId('chat-agent-question-option').locator('.qdesc')).toHaveText(['The tomatoes', 'The herbs']);
+  // One question, one answer: no Send; it waits on the person, and says what for.
+  await expect(card.getByRole('button', { name: 'Send', exact: true })).toHaveCount(0);
+  await expect.poll(statusNow, { timeout: 20_000 }).toBe('asking');
+  await expect(thread(main).getByTestId('chat-agent-work').locator('[data-busy="true"] .wtext')).toHaveText('Waiting for you: it has a question');
+  await shot(main, '40-a-question-from-claude-code');
+  // The click on an option is the answer, under the question's own words.
+  await card.getByRole('button', { name: /South bed/ }).click();
+  await expect(card).toHaveCount(0);
+  await expect.poll(() => decisions().length, { timeout: 20_000 }).toBe(1);
+  expect(decisions()[0]).toEqual({ behavior: 'allow', updatedInput: { questions: ONE_QUESTION, answers: { [ONE_QUESTION[0].question]: 'South bed' } } });
+  await ended(yap, agent.id);
+  await expect(thread(main).locator('.cbubble.assistant')).toHaveText(['Thanks: carrying on.']);
+
+  // Several questions: each answered, then sent together — one option, several options, or their own words.
+  await script(yap, asks(TWO_QUESTIONS), 'asks-two');
+  await send(main, 'And tidy the notes.');
+  await expect(card).toBeVisible({ timeout: 20_000 });
+  const sets = card.getByTestId('chat-agent-question');
+  const sendAnswers = card.getByRole('button', { name: 'Send', exact: true });
+  await expect(sets).toHaveCount(2);
+  await expect(sets.nth(1)).toContainText('Pick any that fit.');
+  await expect(sendAnswers).toBeDisabled();
+  await sets.nth(0).getByRole('button', { name: /Every day/ }).click();
+  await expect(sets.nth(0).getByRole('button', { name: /Every day/ })).toHaveAttribute('aria-pressed', 'true');
+  await expect(sendAnswers).toBeDisabled();
+  await sets.nth(1).getByRole('button', { name: 'Watering', exact: true }).click();
+  await sets.nth(1).getByRole('button', { name: 'Feeding', exact: true }).click();
+  await sets.nth(1).getByRole('button', { name: 'Pests', exact: true }).click();
+  // (Picked again: put back.)
+  await sets.nth(1).getByRole('button', { name: 'Feeding', exact: true }).click();
+  await expect(sets.nth(1).getByRole('button', { name: 'Feeding', exact: true })).toHaveAttribute('aria-pressed', 'false');
+  await expect(sendAnswers).toBeEnabled();
+  // Their own words for the first: what they meant, whatever was picked.
+  await sets.nth(0).getByRole('button', { name: 'Something else…' }).click();
+  await sets.nth(0).getByRole('textbox', { name: 'Your own answer' }).fill('Every other day');
+  await expect(sets.nth(0).getByRole('button', { name: /Every day/ })).toHaveAttribute('aria-pressed', 'false');
+  await shot(main, '41-several-questions-answered-together');
+  await sendAnswers.click();
+  await expect(card).toHaveCount(0);
+  await expect.poll(() => decisions().length, { timeout: 20_000 }).toBe(2);
+  expect(decisions()[1].behavior).toBe('allow');
+  expect(decisions()[1].updatedInput.questions).toEqual(TWO_QUESTIONS);
+  expect(decisions()[1].updatedInput.answers).toEqual({ [TWO_QUESTIONS[0].question]: 'Every other day', [TWO_QUESTIONS[1].question]: 'Watering, Pests' });
+  await expect.poll(async () => (await agents(yap)).find((j) => j.id === agent.id).turnList[1]?.status, { timeout: 30_000 }).toBe('done');
+
+  // "Let it decide": Claude chooses for itself, and is told to say what it chose.
+  await script(yap, asks(ONE_QUESTION), 'asks-again');
+  await send(main, 'One more thing.');
+  await expect(card).toBeVisible({ timeout: 20_000 });
+  await card.getByRole('button', { name: 'Let it decide' }).click();
+  await expect(card).toHaveCount(0);
+  await expect.poll(() => decisions().length, { timeout: 20_000 }).toBe(3);
+  expect(decisions()[2].behavior).toBe('deny');
+  expect(decisions()[2].message).toContain('The user left this one to you in Yap.');
+  await expect.poll(async () => (await agents(yap)).find((j) => j.id === agent.id).turnList[2]?.status, { timeout: 30_000 }).toBe('done');
+  // Its work says it asked: a step like any other.
+  const log = (await yap.invoke('agent_get', { id: agent.id })).log;
+  expect(log.filter((e) => e.step === 'Asking you a question')).toHaveLength(3);
+  expect(log.some((e) => e.step === 'Waiting for you: it has a question')).toBe(true);
+});
+
 test('core/agents.js: the Code chat’s own session at work is what the message box’s ■ stops', () => {
+  // A question card's answers: each question's own words → the one label, the list picked, or the person's own words.
+  const qs = [
+    { question: 'How often?', options: [{ label: 'Twice a week' }, { label: 'Every day' }], multiSelect: false },
+    { question: 'Which sections?', options: [{ label: 'Watering' }, { label: 'Pests' }], multiSelect: true },
+  ];
+  expect(questionAnswers(qs, {})).toEqual({});
+  expect(questionsAnswered(qs, {})).toBe(false);
+  expect(questionAnswers(qs, { 0: { labels: ['Every day'] } })).toEqual({ 'How often?': 'Every day' });
+  expect(questionsAnswered(qs, { 0: { labels: ['Every day'] } })).toBe(false);
+  expect(questionAnswers(qs, { 0: { labels: ['Every day'], other: ' Every other day ' }, 1: { labels: ['Watering', 'Pests'] } })).toEqual({ 'How often?': 'Every other day', 'Which sections?': ['Watering', 'Pests'] });
+  // Where several may be picked, their own words join the picks.
+  expect(questionAnswers(qs, { 1: { labels: ['Pests'], other: 'Pruning' } })).toEqual({ 'Which sections?': ['Pests', 'Pruning'] });
+  expect(questionAnswers(qs, { 1: { other: 'Pruning' } })).toEqual({ 'Which sections?': ['Pruning'] });
+  expect(questionsAnswered(qs, { 0: { other: 'Daily' }, 1: { labels: ['Pests'] } })).toBe(true);
+  // Never a label the question doesn't have; blank words are no answer.
+  expect(questionAnswers(qs, { 0: { labels: ['Hourly'], other: '   ' } })).toEqual({});
+  expect(questionsAnswered([], {})).toBe(false);
+
   const own = (status, conversation = 4) => ({ id: 'a1', conversation, status, turnList: [{ n: 1, direct: true }] });
   for (const status of ['queued', 'running', 'asking']) expect(workingDirectly([own(status)], 4)?.id).toBe('a1');
   for (const status of ['done', 'failed', 'stopped', 'interrupted']) expect(workingDirectly([own(status)], 4)).toBeNull();

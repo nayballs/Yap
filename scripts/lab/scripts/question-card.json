@@ -1,0 +1,20 @@
+{
+  "name": "question-card",
+  "about": "Claude Code's own question is a card (12 Nov 2026, integrations/claude_live/approve.rs), as Claude Code's own app asks one: in a Code chat on lab-sandbox at Auto that works directly, the session is asked to put a two-option question to the person with its AskUserQuestion tool. Claude Code sends the question to the run's permission prompt; Yap shows its card, the Lab answers it with the first option (cards: allow), and the session carries on with that answer. Before, every question was refused and Claude chose for itself. Needs the real Claude Code (a --fake lab's Chat isn't on the plan, so nothing goes directly there). Never under Bypass permissions: nothing asks there.",
+  "needs": { "yapCode": true },
+  "steps": [
+    { "set": { "bypass": false, "config": { "agentsDirect": true } } },
+
+    {
+      "ask": "Before anything else, use your AskUserQuestion tool to ask me one question: which colour the garden map's markers should be, with exactly two options, 'Teal' first and 'Amber' second. Then tell me in one short sentence which one I picked. Don't use any other tool and don't change anything.",
+      "chat": "code:lab-sandbox",
+      "timeout": 300
+    },
+    { "expect": { "status": "answered", "notUsed": "/^(start_agent|message_agent)$/", "tools": 0 }, "note": "Straight to its session." },
+    { "wait": "agents", "cards": "allow", "timeout": 600, "note": "Its question's card answered with its first option." },
+    { "expect": { "agent": { "status": "done", "error": null } } },
+    { "expect": { "visible": "Agent done" } },
+    { "expect": { "visible": "Teal" }, "soft": true, "note": "It carried on with the answer (its own words: soft)." },
+    { "shot": "after-its-question", "window": "main" }
+  ]
+}

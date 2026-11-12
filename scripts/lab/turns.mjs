@@ -103,7 +103,7 @@ export function cardsOf(items, { approvals = [], agents = [] } = {}) {
     cards.set(card.id, card);
   }
   for (const p of approvals) {
-    cards.set(`approve:${p.id}`, { id: `approve:${p.id}`, kind: 'approve', act: 'approve', tool: p.tool, label: p.summary ?? '', detail: cut(p.detail ?? '', 300), run: p.run, state: 'asking', answers: ['allow', 'deny'] });
+    cards.set(`approve:${p.id}`, { id: `approve:${p.id}`, kind: 'approve', act: 'approve', tool: p.tool, label: p.summary ?? '', detail: cut(p.detail ?? '', 300), run: p.run, state: 'asking', answers: ['allow', 'deny'], ...(p.questions?.length ? { questions: p.questions } : {}) });
   }
   for (const a of agents) {
     // (A plan set aside — "Plan not used": a newer turn began in its chat, or
