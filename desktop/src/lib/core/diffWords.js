@@ -6,8 +6,8 @@
 // A diff says a line went and a line came. When the two are the same line
 // with a part changed, this finds the part: what the two lines share at
 // their start and at their end is the same, and what lies between is what
-// was replaced (one stretch a line, as Claude Code marks it; never a
-// scatter of single characters).
+// was replaced (one stretch a line, as the one in Claude Code's transcript
+// that this was built from; never a scatter of single characters).
 //
 // - **Whole words** (`wordChanges`): the shared start and end are counted in
 //   words, numbers, runs of space and single marks, so a mark never stops
