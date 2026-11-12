@@ -51,6 +51,9 @@
 //   when a row is first opened; Yap's own colours, light and dark): a
 //   diff's lines by the file's language, a command as a shell's, what it
 //   printed plain; each token a text node, never markup.
+// - Where a line was changed rather than taken out, the part that was
+//   replaced is marked in a stronger red and what replaced it in a stronger
+//   green (core/diffWords.js), as Claude Code's transcript marks them.
 // - "Start fresh" (`fresh: true`): a second agent, its tab named apart.
 // - Undo this turn (refused while a later turn changed the same file:
 //   "Undo the later change first"), and Undo all, asked first.
@@ -86,6 +89,7 @@ import {
 } from '../src/lib/core/agents.js';
 import { LANGUAGES, languageOf, fenceLanguage, shellOf, kindOf, tokensOf, lineTokens, colourLines, colourDiff } from '../src/lib/core/codeColours.js';
 import hljs from '../src/lib/core/codeColours.hljs.js';
+import { wordChanges, pairChanges, linePieces } from '../src/lib/core/diffWords.js';
 
 const HERE = path.join(RUNS, 'agents-turns-spec');
 const SCRIPTS = path.join(HERE, 'scripts');
@@ -285,6 +289,16 @@ const FOUR_STEPS = [
   { _hook: { event: 'PreToolUse', input: { tool_name: 'Write', tool_use_id: 'toolu_w', tool_input: { file_path: 'legend.md' } } } },
   { _write_file: { path: 'legend.md', text: LEGEND } },
   toolResult('toolu_w', 'File created successfully at: legend.md'),
+  said('r4b', [{ type: 'tool_use', id: 'toolu_k', name: 'Edit', input: { file_path: '{{cwd}}\\water.js', old_string: 'bed.litres * 2', new_string: 'bed.litres * 3' } }]),
+  { _hook: { event: 'PreToolUse', input: { tool_name: 'Edit', tool_use_id: 'toolu_k', tool_input: { file_path: 'water.js' } } } },
+  { _write_file: { path: 'water.js', text: WATER_JS.replace('* 2', '* 3') } },
+  {
+    type: 'user',
+    message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: 'toolu_k', content: 'The file water.js has been updated.' }] },
+    tool_use_result: { filePath: 'water.js', structuredPatch: [{ oldStart: 2, oldLines: 3, newStart: 2, newLines: 3, lines: [' export function water(bed) {', '-  return bed.litres * 2;', '+  return bed.litres * 3;', ' }'] }], userModified: false, replaceAll: false },
+    parent_tool_use_id: null,
+    session_id: '{{session_id}}',
+  },
   said('r5', [{ type: 'text', text: TESTED }], 'end_turn'),
   result(TESTED, 0.02),
   { _wait_user: true },
@@ -788,6 +802,74 @@ test('core/codeColours.js: a file’s language, a command’s shell, the highlig
   // No language: the same rows, plain.
   expect(colourDiff(hljs, rows, null).every((r) => r.tokens === undefined)).toBe(true);
   expect(colourDiff(null, rows, 'javascript').every((r) => r.tokens === undefined)).toBe(true);
+});
+
+test('core/diffWords.js: the part of a line that was replaced, which lines go together, a line as pieces', () => {
+  const show = (t, r) => (r ? `${t.slice(0, r[0])}[${t.slice(r[0], r[1])}]${t.slice(r[1])}` : t);
+  const marked = (a, b) => {
+    const c = wordChanges(a, b);
+    return c ? [show(a, c.before), show(b, c.after)] : null;
+  };
+  // What two lines share at their start and their end is the same; what lies between was replaced.
+  expect(marked('  return bed.litres * 2;', '  return bed.litres * 3;')).toEqual(['  return bed.litres * [2];', '  return bed.litres * [3];']);
+  // Whole words: a mark never stops in the middle of a name.
+  expect(marked('const beds1 = sort(all);', 'const beds2 = sort(all);')).toEqual(['const [beds1] = sort(all);', 'const [beds2] = sort(all);']);
+  // Text only added, or only taken out: the other line has no mark.
+  expect(marked('water(bed)', 'water(bed, days)')).toEqual(['water(bed)', 'water(bed[, days])']);
+  expect(marked('const total = count + 1;', 'const total = count;')).toEqual(['const total = count[ + 1];', 'const total = count;']);
+  // A bracket opened inside both stretches closes inside them.
+  expect(marked('rows.map((e) => [e.className.trim(), e.id])', "rows.map((e) => [['a', 'b'].find((m) => e.has(m)), e.id])")).toEqual([
+    'rows.map((e) => [[e.className.trim()], e.id])',
+    "rows.map((e) => [[['a', 'b'].find((m) => e.has(m))], e.id])",
+  ]);
+  // Lines with little in common are a line removed and a line added: no mark. The same line, or an empty one: none.
+  expect([marked('return a;', 'throw new Error("no");'), marked('same', 'same'), marked('', 'new line')]).toEqual([null, null, null]);
+  // Which lines go together: in a run of removed lines followed at once by added ones. A different number of
+  // each: every removed line with the most alike added line after the last one taken.
+  const texts = (rows) => rows.map((r) => show(r.text, r.changed?.[0]));
+  expect(
+    texts(
+      pairChanges([
+        { mark: 'ctx', text: 'function water(bed) {' },
+        { mark: 'del', text: '  const days = 2;' },
+        { mark: 'del', text: '  return bed.litres * days;' },
+        { mark: 'add', text: '  // how often' },
+        { mark: 'add', text: '  const days = 3;' },
+        { mark: 'add', text: '  return bed.litres * days * 2;' },
+        { mark: 'ctx', text: '}' },
+        { mark: 'gap', text: '' },
+        // (Not one run: an unchanged line between them.)
+        { mark: 'del', text: 'const a = 1;' },
+        { mark: 'ctx', text: 'between' },
+        { mark: 'add', text: 'const a = 2;' },
+      ])
+    )
+  ).toEqual(['function water(bed) {', '  const days = [2];', '  return bed.litres * days;', '  // how often', '  const days = [3];', '  return bed.litres * days[ * 2];', '}', '', 'const a = 1;', 'between', 'const a = 2;']);
+  // The same number of each: each with the one at its place.
+  expect(texts(pairChanges([{ mark: 'del', text: 'let a = 1;' }, { mark: 'del', text: 'let b = 2;' }, { mark: 'add', text: 'let a = 10;' }, { mark: 'add', text: 'let b = 20;' }]))).toEqual([
+    'let a = [1];',
+    'let b = [2];',
+    'let a = [10];',
+    'let b = [20];',
+  ]);
+  expect(pairChanges(null)).toEqual([]);
+  // A line as pieces to draw: its coloured tokens cut where the marked stretch starts and ends.
+  const tokens = [{ text: 'return', kind: 'k' }, { text: ' bed.', kind: '' }, { text: 'litres', kind: 'a' }, { text: ' * ', kind: '' }, { text: '31', kind: 'n' }, { text: ';', kind: '' }];
+  expect(linePieces({ text: 'return bed.litres * 31;', tokens, changed: [[18, 22]] }).map((p) => [p.text, p.kind, p.changed])).toEqual([
+    ['return', 'k', false],
+    [' bed.', '', false],
+    ['litres', 'a', false],
+    [' ', '', false],
+    ['* ', '', true],
+    ['31', 'n', true],
+    [';', '', false],
+  ]);
+  // No colours yet: its plain text, cut the same way. No mark: the tokens as they are. An empty line: nothing.
+  expect(linePieces({ text: 'abcdef', changed: [[2, 4]] }).map((p) => [p.text, p.changed])).toEqual([['ab', false], ['cd', true], ['ef', false]]);
+  expect(linePieces({ text: 'plain' })).toEqual([{ text: 'plain', kind: '', changed: false }]);
+  expect(linePieces({ text: '' })).toEqual([]);
+  // The pieces always spell the line.
+  expect(linePieces({ text: 'return bed.litres * 31;', tokens, changed: [[18, 22]] }).map((p) => p.text).join('')).toBe('return bed.litres * 31;');
 });
 
 test('two requests in a Code chat: one agent, one tab with two turns, two reports, the second on --resume', async ({ yap, main, fakeLlm, shot }) => {
@@ -1328,17 +1410,17 @@ test('a stretch opened is a row a step: an edit opens to its numbered diff, a co
 
   // The stretch's line, then its rows: each step as done, a file's name set apart, its lines added.
   const work = thread(main).getByTestId('chat-agent-work');
-  await expect(work.locator('.wtext')).toHaveText([/^Ran a command, read a file, edited 3 files\s*\+8, 1 failed$/]);
+  await expect(work.locator('.wtext')).toHaveText([/^Ran a command, read a file, edited 3 files\s*\+9\s*−1, 1 failed$/]);
   await work.getByRole('button', { name: /Ran a command, read a file/ }).click();
   const rows = rowsIn(work);
-  await expect(rows.locator('.rtext')).toHaveText(['Read notes.md (1–20)', 'Edited notes.md', 'Ran the tests', 'Created water.js', 'Created legend.md']);
-  await expect(rows.locator('.rname')).toHaveText(['notes.md', 'notes.md', 'water.js', 'legend.md']);
+  await expect(rows.locator('.rtext')).toHaveText(['Read notes.md (1–20)', 'Edited notes.md', 'Ran the tests', 'Created water.js', 'Created legend.md', 'Edited water.js']);
+  await expect(rows.locator('.rname')).toHaveText(['notes.md', 'notes.md', 'water.js', 'legend.md', 'water.js']);
   await expect(rows.nth(1).locator('.plus')).toHaveText('+1');
   await expect(rows.nth(4).locator('.plus')).toHaveText('+3');
   await expect(rows.nth(2).locator('.rfailed')).toHaveText('failed');
   // A row with nothing more to show doesn't open; the others do.
   await expect(rows.nth(0).getByRole('button')).toHaveCount(0);
-  await expect(rows.locator('button.rhead')).toHaveCount(4);
+  await expect(rows.locator('button.rhead')).toHaveCount(5);
   // The highlighter isn't loaded until a row is opened.
   await expect(work.getByTestId('chat-agent-work-rows')).toHaveAttribute('data-colours', 'false');
   // No command or diff until its row is opened.
@@ -1393,6 +1475,21 @@ test('a stretch opened is a row a step: an edit opens to its numbered diff, a co
     ['2', ''],
     ['3', 'B: a bed'],
   ]);
+  // A line changed rather than taken out: the part that was replaced is marked on the removed line and what
+  // replaced it on the added one, stronger than the line's own tint, over the code's own colours.
+  await rows.nth(5).getByRole('button', { name: /Edited water\.js/ }).click();
+  const changed = rows.nth(5).getByTestId('chat-agent-work-diff');
+  await expect(changed.locator('.dl')).toHaveCount(4);
+  await expect(changed.locator('.dl.del .chg')).toHaveText(['2']);
+  await expect(changed.locator('.dl.add .chg')).toHaveText(['3']);
+  await expect(changed.locator('.dl.ctx .chg')).toHaveCount(0);
+  expect(await changed.locator('.dl .dt').evaluateAll((els) => els.map((e) => e.textContent))).toEqual(['export function water(bed) {', '  return bed.litres * 2;', '  return bed.litres * 3;', '}']);
+  expect(await changed.locator('.dl .dno').evaluateAll((els) => els.map((e) => e.textContent))).toEqual(['2', '3', '3', '4']);
+  const tint = (loc) => loc.first().evaluate((el) => getComputedStyle(el).backgroundColor);
+  expect(await tint(changed.locator('.dl.del .chg'))).not.toBe(await tint(changed.locator('.dl.del')));
+  expect(await tint(changed.locator('.dl.add .chg'))).not.toBe(await tint(changed.locator('.dl.add')));
+  expect(await tint(changed.locator('.dl.del .chg'))).not.toBe(await tint(changed.locator('.dl.add .chg')));
+  await expect(changed.locator('.dl.add .chg')).toHaveClass(/syn-n/);
   await shot(main, '41-rows-opened');
   await theme(yap, main, 'dark');
   // The dark theme has its own colours for the same tokens.

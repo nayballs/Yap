@@ -9,7 +9,9 @@
   // - **an edit**: the file's path and its diff, each line with its number
   //   in the file (core/agents.js `diffRows`: Claude Code's own patch says
   //   where each part is), removed lines red, added ones green, its code in
-  //   colour by the file's language;
+  //   colour by the file's language; where a line was changed rather than
+  //   taken out, the part that was replaced is marked in a stronger red and
+  //   what replaced it in a stronger green (core/diffWords.js);
   // - **a command**: the command itself (`$ …`, with Copy), in colour, and
   //   what it printed, plain, its start and its end (agents/output.rs);
   // - **a picture** its call came back with, larger (small at the row's end).
@@ -26,6 +28,7 @@
   // (`.syn-k`…, app.css `--yap-syn-*`): nothing of a file is set as markup.
   import { rowSteps, stepRow, stepOpens, stepKind, diffRows, moreLines } from '../../core/agents.js';
   import { languageOf, shellOf, colourDiff, colourLines, loadColours } from '../../core/codeColours.js';
+  import { pairChanges, linePieces } from '../../core/diffWords.js';
   import { copyText } from '../../core/itemMenus.js';
   import { placed, shown } from './chatImages.js';
   import { screenPixels } from './chatShots.svelte.js';
@@ -51,6 +54,8 @@
     }
   }
   let gone = $state({});
+  /** A piece's classes: its colour's, and "chg" on the part that was replaced. */
+  const pieceClass = (p) => [p.kind ? `syn-${p.kind}` : '', p.changed ? 'chg' : ''].filter(Boolean).join(' ') || undefined;
   const lineWord = (n) => `${Number(n).toLocaleString('en-GB')} more ${Number(n) === 1 ? 'line' : 'lines'}`;
 </script>
 
@@ -85,7 +90,7 @@
       {#if isOpen}
         <div class="rbody">
           {#if s.diff?.lines?.length}
-            {@const rows = colourDiff(colours, diffRows(s.diff), languageOf(s.file))}
+            {@const rows = colourDiff(colours, pairChanges(diffRows(s.diff)), languageOf(s.file))}
             {@const digits = Math.max(1, ...rows.map((x) => String(x.no ?? '').length))}
             <p class="rpath">{s.file}{#if s.diff.all}<span class="rnote"> · every match replaced</span>{/if}</p>
             <!-- (A box that scrolls takes the keyboard's focus, so its arrows can scroll it.) -->
@@ -97,7 +102,7 @@
                 {:else}
                   <div class="dl {x.mark}" data-no={x.no ?? ''}>
                     <span class="dno" aria-hidden="true">{x.no ?? (x.mark === 'del' ? '−' : x.mark === 'add' ? '+' : '')}</span><span class="dt"
-                      >{#if x.tokens?.length}{#each x.tokens as t, m (m)}<span class={t.kind ? `syn-${t.kind}` : undefined}>{t.text}</span>{/each}{:else}{x.text || ' '}{/if}</span
+                      >{#each linePieces(x) as p, m (m)}<span class={pieceClass(p)}>{p.text}</span>{:else}{' '}{/each}</span
                     >{#if x.mark !== 'ctx'}<span class="sr-only">{x.mark === 'del' ? ' (removed)' : ' (added)'}</span>{/if}
                   </div>
                 {/if}
@@ -336,6 +341,13 @@
     background: color-mix(in srgb, var(--yap-success) 14%, transparent);
     box-shadow: inset 2px 0 0 var(--yap-success);
     color: var(--yap-fg);
+  }
+  /* What was replaced inside a changed line, and what replaced it: stronger than the line's own tint. */
+  .dl.del :global(.chg) {
+    background: color-mix(in srgb, var(--yap-danger) 34%, transparent);
+  }
+  .dl.add :global(.chg) {
+    background: color-mix(in srgb, var(--yap-success) 36%, transparent);
   }
   .dl.gap {
     justify-content: center;
