@@ -1329,6 +1329,25 @@ something that matches that?").
     numbered from 1. Without a record (an older Claude Code, the tests'
     stand-in) the lines come from the call's input, as before, with no
     numbers.
+  - **What was replaced inside a line** (`core/diffWords.js`, 2026-11-12,
+    as Claude Code's transcript marks it; the maintainer: "it highlights it
+    in green then shows… what was replaced? can we have that as well?"):
+    where a line was changed rather than taken out, the part that was
+    replaced is marked in a stronger red on the removed line, and what
+    replaced it in a stronger green on the added one.
+    - **Which part** (`wordChanges`): what the two lines share at their start
+      and their end is the same, and what lies between was replaced: one
+      stretch a line, in whole words (a mark never stops in the middle of a
+      name), a bracket opened inside it closed inside it. Text only added
+      or only taken out marks one line alone.
+    - **Only when it helps**: two lines that share under 30% of the longer
+      one (spaces aside) are a line removed and a line added, with no mark.
+    - **Which lines go together** (`pairChanges`): in a run of removed lines
+      followed at once by added ones — the same number, each with the one at
+      its place; a different number, each removed line with the most alike
+      added line after the last one taken.
+    - **With the code's colours** (`linePieces`): a line's coloured tokens
+      are cut where the mark starts and ends, so a piece has both.
   - **Each row its own diff**: a diff's event names its call, so two edits
     of one file are two rows with their own lines (an older log's diff goes
     to the earliest step of that file with none yet).
@@ -1917,7 +1936,7 @@ Pages (`desktop/src/lib/`): `views/chat/` (`ChatSideSwitch`,
 `codeChats.svelte.js`, `WorkspacePicker`, `CodeChips`, `CodeEdge`,
 `codeChat.css`, `CodeEmpty`, `ModeChip`, `AgentTab`, `AgentPanel`, `AgentTimeline`, `AgentFiles`,
 `AgentPills`, `AgentTodoCard`, `AgentWork`, `StepRows`, `StepPictures`, `AgentReportCard`, `AgentConfirm`, `AgentApprove`, `RunningAgents`),
-`core/codeChats.js`, `core/agents.js`, `core/codeColours.js` (+ `codeColours.hljs.js`), `core/agentPanel.js`, `core/money.js`, `ui/followEnd.js`,
+`core/codeChats.js`, `core/agents.js`, `core/codeColours.js` (+ `codeColours.hljs.js`), `core/diffWords.js`, `core/agentPanel.js`, `core/money.js`, `ui/followEnd.js`,
 `stores/agents.svelte.js`, `settings/YapCodePage.svelte`,
 `settings/ClaudeCodeStatus.svelte`.
 
@@ -2078,7 +2097,8 @@ the build's own stand-in replaying `script` from now on),
     call as a line (one alone as itself, several counted, each with its icon
     in the tab); a stretch opened as a row a step (an edit to its numbered
     diff, a command to itself and what it printed, a read that doesn't
-    open; its code in colour once a row is opened, by the file's language,
+    open; a changed line's replaced part marked on both lines; its code in
+    colour once a row is opened, by the file's language,
     each token a text node, with the theme's own colours); its work in
     the thread (what it said, a line for each stretch of steps that opens
     into them, the step it's on while it works); "start fresh" a
