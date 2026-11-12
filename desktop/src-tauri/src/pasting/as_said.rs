@@ -396,14 +396,18 @@ pub(crate) fn rewrite_target(on: bool, target: Option<isize>) -> Option<Pasted> 
 
 /// A normal run, robot mode's own windows, or a test run's stand-in.
 fn may_rewrite_in(hwnd: Option<isize>) -> bool {
-    if crate::shell::realtest::permits(hwnd) {
-        return true;
-    }
-    #[cfg(debug_assertions)]
-    {
-        hwnd.is_some() && hwnd == crate::dictation::pipeline::test_target()
-    }
-    #[cfg(not(debug_assertions))]
+    crate::shell::realtest::permits(hwnd) || is_test_target(hwnd)
+}
+
+/// A test run's stand-in window (a debug build's only).
+#[cfg(debug_assertions)]
+fn is_test_target(hwnd: Option<isize>) -> bool {
+    hwnd.is_some() && hwnd == crate::dictation::pipeline::test_target()
+}
+
+/// A release build has no test runs.
+#[cfg(not(debug_assertions))]
+fn is_test_target(_hwnd: Option<isize>) -> bool {
     false
 }
 
