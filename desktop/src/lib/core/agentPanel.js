@@ -36,7 +36,7 @@
 //   LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
 //   FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 //   DEALINGS IN THE SOFTWARE.
-import { isLive, turnsOf, todosOf, statusWord, turnStatusWord, planWaitsNow, planNotUsed, PLAN_NOT_USED, PLAN_WAITS_S, money, modeLabel, modelLabel, titleOf } from './agents.js';
+import { isLive, turnsOf, todosOf, helpersOf, statusWord, turnStatusWord, planWaitsNow, planNotUsed, PLAN_NOT_USED, PLAN_WAITS_S, money, modeLabel, modelLabel, titleOf } from './agents.js';
 import { effortLabel } from './effort.js';
 
 /** A plan still waits on the person this long after its turn ended (as Chat's status dots: core/chatStatus.js). */
@@ -275,6 +275,7 @@ export function panelRows(agents, { logs = {}, steps = {}, now = Date.now() / 10
       pay: 'plan',
       secs: 0,
       events: [],
+      helpers: [],
       files: 0,
       commands: 0,
       createdTs: Number.MAX_SAFE_INTEGER,
@@ -335,6 +336,8 @@ export function panelRows(agents, { logs = {}, steps = {}, now = Date.now() / 10
         pay: agent.pay || 'plan',
         secs: turnSecs(t, now),
         events: t.events || [],
+        // Its helpers (Claude Code's own subagents): entries of their own under its row.
+        helpers: helpersOf(t.events, live),
         files: t.files?.length ?? 0,
         commands: commandCount(t.events),
         createdTs: Number(agent.createdTs) || 0,

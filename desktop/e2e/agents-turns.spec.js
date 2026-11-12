@@ -95,6 +95,7 @@ import {
   stepPicture,
   groupPictures,
   shownStepPicture,
+  helpersOf,
 } from '../src/lib/core/agents.js';
 import { LANGUAGES, languageOf, fenceLanguage, shellOf, kindOf, tokensOf, lineTokens, colourLines, colourDiff } from '../src/lib/core/codeColours.js';
 import hljs from '../src/lib/core/codeColours.hljs.js';
@@ -325,6 +326,8 @@ const HANDS_PART_OVER = [
   init(),
   said('h1', [{ type: 'tool_use', id: 'toolu_task', name: 'Task', input: { description: 'Check the notes', prompt: 'Read notes.md and add a line.' } }]),
   under('toolu_task', said('h2', [{ type: 'tool_use', id: 'toolu_hr', name: 'Read', input: { file_path: '{{cwd}}\\notes.md' } }])),
+  // (It takes a moment over its first step: its entry in the Agent panel is seen at work.)
+  { _sleep_ms: 5000 },
   under('toolu_task', toolResult('toolu_hr', '1\tDraft notes')),
   under('toolu_task', said('h3', [{ type: 'tool_use', id: 'toolu_he', name: 'Edit', input: { file_path: '{{cwd}}\\notes.md', old_string: 'Draft notes', new_string: 'Draft notes\nChecked' } }])),
   { _hook: { event: 'PreToolUse', input: { tool_name: 'Edit', tool_use_id: 'toolu_he', tool_input: { file_path: 'notes.md' } } } },
@@ -765,6 +768,40 @@ test('core/agents.js: an agent’s turns from its log, their words, the pills a 
   expect(handed[0].steps[1].helped.map((h) => stepRow(h))).toEqual([{ text: 'Read', name: 'guide.md' }, { text: 'Edited', name: 'guide.md', added: 1, removed: 1 }]);
   // The timeline keeps every step in order, a helper's own saying so (it sits in from the edge).
   expect(timelineOf([{ id: 'ab12', step: 'Handing part of it to a helper · Check the docs', call: 't1' }, { id: 'ab12', step: 'Reading x.md', call: 'h1', under: 't1' }]).map((t) => t.under)).toEqual([null, 't1']);
+  // **A turn's helpers**, as the Agent panel lists them: an entry for each part handed over — what it was
+  // asked, its own steps, working until it's back (while the turn is live), then done with how many steps.
+  const handedEvents = [
+    { id: 'ab12', step: 'Reading notes.md', call: 'c1' },
+    { id: 'ab12', step: 'Handing part of it to a helper · Check the docs', call: 't1' },
+    { id: 'ab12', step: 'Reading docs\\guide.md', call: 'h1', under: 't1' },
+    { id: 'ab12', step: 'Editing docs\\guide.md', file: 'docs\\guide.md', call: 'h2', under: 't1' },
+  ];
+  const brief = (list) => list.map((h) => [h.key, h.title, h.status, h.line, h.steps.map((x) => x.step)]);
+  expect(brief(helpersOf(handedEvents, true))).toEqual([['t1', 'Check the docs', 'working', 'Editing docs\\guide.md', ['Reading docs\\guide.md', 'Editing docs\\guide.md']]]);
+  expect(brief(helpersOf([...handedEvents, { id: 'ab12', helper: 'back', call: 't1' }], true))).toEqual([['t1', 'Check the docs', 'done', '2 steps', ['Reading docs\\guide.md', 'Editing docs\\guide.md']]]);
+  expect(helpersOf([...handedEvents, { id: 'ab12', helper: 'failed', call: 't1' }], true).map((h) => [h.status, h.line])).toEqual([['failed', "Didn't finish · 2 steps"]]);
+  // The turn over: none still at work, whatever its log says (an older log has no "back").
+  expect(helpersOf(handedEvents, false).map((h) => [h.status, h.line])).toEqual([['done', '2 steps']]);
+  // Several at once, each its own; one with no words of its own, one that hasn't started.
+  const several = helpersOf(
+    [
+      { id: 'ab12', step: 'Handing part of it to a helper · Check the docs', call: 't1' },
+      { id: 'ab12', step: 'Handing part of it to a helper', call: 't2' },
+      { id: 'ab12', step: 'Reading a.md', call: 'h1', under: 't2' },
+      { id: 'ab12', helper: 'back', call: 't2' },
+    ],
+    true
+  );
+  expect(several.map((h) => [h.key, h.title, h.status, h.line])).toEqual([
+    ['t1', 'Check the docs', 'working', 'Starting'],
+    ['t2', 'A helper', 'done', '1 step'],
+  ]);
+  expect(helpersOf([{ id: 'ab12', step: 'Reading notes.md', call: 'c1' }], true)).toEqual([]);
+  expect(helpersOf(null, true)).toEqual([]);
+  // The hand-over's step knows its helper is back; a "back" is never a step of the work.
+  const backed = workOf([...handedEvents, { id: 'ab12', helper: 'back', call: 't1' }]);
+  expect(backed[0].steps.map((x) => [x.step, x.back])).toEqual([['Reading notes.md', null], ['Handing part of it to a helper · Check the docs', 'back']]);
+  expect(timelineOf([...handedEvents, { id: 'ab12', helper: 'back', call: 't1' }])).toHaveLength(4);
   // No such row (an older log, a call Yap never heard of): a step like any other.
   expect(workOf([{ id: 'ab12', step: 'Reading x.md', call: 'h9', under: 'gone' }]).map((w) => w.steps.map((x) => x.step))).toEqual([['Reading x.md']]);
   // The Agent tab's timeline keeps them on their steps too.
@@ -1598,8 +1635,35 @@ test('a part handed to a helper: the helper’s steps fold behind its row, never
     { plain: true, content: 'The notes are in order.' },
   ]);
   await send(main, 'Check the notes and list the folder.');
-  const agent = await ended(yap, (await newAgent(yap, before)).id);
+  const started = await newAgent(yap, before);
+
+  // **In the Agent panel, the helper is an entry of its own** under the turn's row, as Claude Code's own
+  // app lists a session's subagents: what it was asked, and the step it's on while it works.
+  await thread(main).getByTestId('chat-agent-pill').first().click();
+  await expect(tab(main)).toBeVisible();
+  const entry = rowAt(main, 1).getByTestId('chat-agent-helper');
+  await expect(entry).toHaveCount(1, { timeout: 20_000 });
+  await expect(entry).toHaveAttribute('data-status', 'working');
+  await expect(entry.getByTestId('chat-agent-helper-title')).toHaveText('Check the notes');
+  await expect(entry.getByTestId('chat-agent-helper-line')).toHaveText('Reading notes.md');
+  await expect(entry.locator('.hspin')).toHaveCount(1);
+  await shot(main, '49-a-helper-at-work-in-the-panel');
+  const agent = await ended(yap, started.id);
   await messagesOf(yap, agent.conversation, 4);
+  // Back: done, with how many steps it took; it opens to them, an edit of its to its diff.
+  await expect(entry).toHaveAttribute('data-status', 'done');
+  await expect(entry.getByTestId('chat-agent-helper-line')).toHaveText('2 steps');
+  await expect(entry.locator('.hspin')).toHaveCount(0);
+  await expect(entry.getByTestId('chat-agent-helper-steps')).toHaveCount(0);
+  await entry.locator('button.hhead').click();
+  const own = entry.getByTestId('chat-agent-helper-steps');
+  await expect(own.getByTestId('chat-agent-work-row').locator('.rtext')).toHaveText(['Read notes.md', 'Edited notes.md']);
+  await own.getByRole('button', { name: /Edited notes\.md/ }).click();
+  await expect(own.getByTestId('chat-agent-work-diff').locator('.dl.add .dt')).toHaveText(['Checked']);
+  await shot(main, '49b-a-helper-done-opened');
+  await entry.locator('button.hhead').click();
+  await expect(entry.getByTestId('chat-agent-helper-steps')).toHaveCount(0);
+  expect((await yap.invoke('agent_get', { id: agent.id })).log.filter((e) => e.helper).map((e) => [e.helper, e.call])).toEqual([['back', 'toolu_task']]);
 
   // Its log: the helper's own steps say the call they were made under; the session's own don't.
   const log = (await yap.invoke('agent_get', { id: agent.id })).log;

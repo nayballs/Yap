@@ -35,6 +35,13 @@
   // - **A row's menu** (⋯, right-click, the menu key): Move to finished (a
   //   row whose agent nothing runs), Dismiss / Restore ("Show dismissed" at
   //   Finished's foot), Stop (asked first) for an agent at work.
+  // - **Its helpers** (12 Nov 2026, as Claude Code's own app lists a
+  //   session's subagents): under a turn's row, an entry for each part its
+  //   session handed to a helper — what it was asked ("Check the docs"),
+  //   the step it's on while it works (a spinner), then ✓ and how many
+  //   steps it took (✕: it didn't finish). An entry opens to the helper's
+  //   own steps, rows as the thread's (StepRows: an edit to its diff, a
+  //   command to what it printed). core/agents.js `helpersOf`.
   // Live from the `yap-agent` events the tab and stores/agents.svelte.js
   // hear: nothing polled.
   import { invoke } from '@tauri-apps/api/core';
@@ -106,6 +113,8 @@
   });
 
   const toggle = (key) => (panelMemory.open = { ...panelMemory.open, [key]: !panelMemory.open[key] });
+  /** A helper's entry, opened to its steps ("<row>|<helper>": kept with the rows opened). */
+  const helperKey = (r, h) => `${r.key}|${h.key}`;
   /** A row's character, from its model: Haiku, Sonnet, Opus or Fable (Sonnet when it says none). */
   const crewOf = (r) => characterFor('claude-plan', r.model);
 
@@ -361,6 +370,37 @@
                   {/if}
                 </div>
               {/if}
+              {#if r.helpers?.length}
+                <!-- Its helpers (Claude Code's own subagents): an entry each, as Claude Code's app lists them. -->
+                <ul class="helpers" aria-label={`${r.title}: its helpers`} data-testid="chat-agent-row-helpers">
+                  {#each r.helpers as h (h.key)}
+                    {@const hk = helperKey(r, h)}
+                    {@const hOpen = !!panelMemory.open[hk] && h.steps.length > 0}
+                    <li class="helper" data-testid="chat-agent-helper" data-status={h.status} data-open={hOpen ? 'true' : 'false'}>
+                      <button type="button" class="hhead" aria-expanded={h.steps.length ? hOpen : undefined} disabled={!h.steps.length} title={h.steps.length ? (hOpen ? 'Hide its steps' : 'Show its steps') : undefined} onclick={() => toggle(hk)}>
+                        <span class="hmark" aria-hidden="true">
+                          {#if h.status === 'working'}<span class="hspin"></span>{:else if h.status === 'failed'}✕{:else}✓{/if}
+                        </span>
+                        <span class="hmain">
+                          <span class="htitle" data-testid="chat-agent-helper-title">{h.title}</span>
+                          <span class="hline" data-testid="chat-agent-helper-line">{h.line}</span>
+                        </span>
+                        <span class="sr-only">, a helper, {h.status === 'working' ? 'working' : h.status === 'failed' ? "didn't finish" : 'done'}</span>
+                        {#if h.steps.length}
+                          <svg class="chev hchev" class:down={hOpen} viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 6l6 6-6 6" /></svg>
+                        {/if}
+                      </button>
+                      {#if hOpen}
+                        <div class="hsteps" data-testid="chat-agent-helper-steps">
+                          {#await import('./StepRows.svelte') then { default: StepRows }}
+                            <StepRows steps={h.steps} busy={h.status === 'working'} onview={onpicture} />
+                          {/await}
+                        </div>
+                      {/if}
+                    </li>
+                  {/each}
+                </ul>
+              {/if}
               {#if isOpen && r.kind === 'turn'}
                 <div class="rmore" id="more-{r.key}" data-testid="chat-agent-row-more">
                   {#if r.sizing}
@@ -614,6 +654,101 @@
     opacity: 1;
     outline: 2px solid var(--yap-focus-ring);
     outline-offset: 1px;
+  }
+  /* Its helpers: an entry each under the row's head, in line with its words. */
+  .helpers {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    margin: -4px 4px 8px 50px;
+    padding: 0;
+    list-style: none;
+  }
+  .helper {
+    min-width: 0;
+  }
+  .hhead {
+    display: flex;
+    align-items: flex-start;
+    gap: 7px;
+    box-sizing: border-box;
+    width: 100%;
+    margin: 0;
+    padding: 3px 6px 3px 4px;
+    border: 0;
+    border-radius: 7px;
+    background: none;
+    color: var(--yap-paper-ink);
+    font: inherit;
+    font-size: 12px;
+    text-align: left;
+    cursor: pointer;
+  }
+  .hhead:disabled {
+    cursor: default;
+  }
+  .hhead:hover:not(:disabled) {
+    background: var(--yap-paper-s1);
+  }
+  .hhead:focus-visible {
+    outline: 2px solid var(--yap-focus-ring);
+    outline-offset: 1px;
+  }
+  .hmark {
+    flex: 0 0 auto;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 13px;
+    height: 18px;
+    color: var(--yap-success-text);
+    font-size: 10.5px;
+    font-weight: 700;
+  }
+  .helper[data-status='failed'] .hmark {
+    color: var(--yap-danger);
+  }
+  .hspin {
+    width: 9px;
+    height: 9px;
+    border: 1.5px solid color-mix(in srgb, var(--yap-code) 30%, transparent);
+    border-top-color: var(--yap-code);
+    border-radius: 50%;
+    animation: helper-spin 0.9s linear infinite;
+  }
+  @keyframes helper-spin {
+    to {
+      transform: rotate(360deg);
+    }
+  }
+  :global(:root[data-motion='reduced']) .hspin {
+    animation: none;
+  }
+  .hmain {
+    display: flex;
+    flex: 1 1 auto;
+    flex-direction: column;
+    min-width: 0;
+  }
+  .htitle {
+    font-weight: 600;
+    overflow-wrap: anywhere;
+  }
+  .hline {
+    overflow: hidden;
+    color: var(--yap-paper-muted);
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .hchev {
+    flex: 0 0 auto;
+    width: 12px;
+    height: 12px;
+    margin-top: 3px;
+    opacity: 0.7;
+  }
+  .hsteps {
+    margin: 2px 0 6px 20px;
   }
   /* What waits on the person, with its card's own buttons, under the row's head. */
   .rneeds {
