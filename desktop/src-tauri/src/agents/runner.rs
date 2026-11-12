@@ -77,7 +77,7 @@ use tauri::{AppHandle, Emitter};
 
 use crate::ai::claude_code::cli;
 use crate::ai::claude_code::events::{Block, Event, Problem, TurnResult};
-use crate::ai::claude_code::session::{self, ApiKey, Conversation, Effort, Pay, Session, Spec};
+use crate::ai::claude_code::session::{self, ApiKey, Conversation, Effort, Image, Pay, Session, Spec};
 use crate::ai::effort::Level;
 use crate::integrations::claude_live::{self, Approval, RunSpec, Tools};
 
@@ -265,6 +265,12 @@ pub struct Ask {
     /// turn's plan): marked allowed as the turn is asked for, so it never
     /// reads as "Plan not used" ([`go_ahead_turn`]).
     pub plan_turn: Option<u32>,
+    /// **The screenshots it came with** (12 Nov 2026): the person's own,
+    /// attached to a message that went straight to a Code chat's session
+    /// (`agents/direct.rs`) — their ids in `chat-images/`. Written to
+    /// Claude Code with its words ([`shots_of`]), wherever they go: a note
+    /// to the turn working, the turn starting, its next turn.
+    pub shots: Vec<String>,
 }
 
 impl Ask {
@@ -316,6 +322,53 @@ impl Ask {
         if more.plan_turn.is_some() {
             self.plan_turn = more.plan_turn;
         }
+        add_shots(&mut self.shots, &more.shots);
+    }
+}
+
+/// `more` after `shots`, each once.
+fn add_shots(shots: &mut Vec<String>, more: &[String]) {
+    for id in more {
+        if !shots.contains(id) {
+            shots.push(id.clone());
+        }
+    }
+}
+
+/// **A request's screenshots as Claude Code takes them** (`ids` in
+/// `chat-images/`): each as Chat's own model on the plan would get it
+/// (`snip::images::fitted`: made already when the message was sent, so
+/// this is usually a look-up), and how many couldn't be read (gone since:
+/// "Keep chat screenshots"). Slow when a copy has to be made: off the
+/// async runtime where there is one.
+fn shots_of(ids: &[String]) -> (Vec<Image>, usize) {
+    let fit = crate::snip::images::fit_for(crate::ai::claude_plan::PROVIDER, false);
+    let cap = fit.cap_for(ids.len());
+    let made: Vec<Image> = ids
+        .iter()
+        .filter_map(|id| crate::snip::images::fitted(id, fit.edge, cap).ok())
+        .filter_map(|f| {
+            let (head, data) = f.url.split_once(',')?;
+            let media = head.strip_prefix("data:")?.strip_suffix(";base64")?;
+            Some(Image { media_type: media.to_string(), base64: data.to_string() })
+        })
+        .collect();
+    let lost = ids.len() - made.len();
+    (made, lost)
+}
+
+/// **Does a turn's first message go with the turn's screenshots?** Not a
+/// Continue of a session that has run ("Carry on…": it has them already,
+/// and sending them again would be paid for again). Pure.
+fn with_shots(resuming: bool, message: Option<&str>) -> bool {
+    !(resuming && message.is_some_and(|m| m.starts_with(CARRY_ON)))
+}
+
+/// A line for Claude Code when screenshots of a request couldn't be read.
+fn lost_line(lost: usize) -> String {
+    match lost {
+        1 => "(A screenshot that came with this is no longer on this PC.)".into(),
+        n => format!("({n} screenshots that came with this are no longer on this PC.)"),
     }
 }
 
@@ -354,8 +407,10 @@ struct Live {
     /// Its first message is sent: words for it from now on wait for its
     /// next turn.
     started: bool,
-    /// Words for this turn that came while it started (sent with its first).
+    /// Words for this turn that came while it started (sent with its first),
+    /// and their screenshots.
     extra: Vec<String>,
+    extra_shots: Vec<String>,
     /// A request for its next turn, waiting for this one to end.
     pending: Option<Ask>,
     /// The person stopped it (when).
@@ -369,7 +424,7 @@ struct Live {
 
 impl Live {
     fn new(folder: String) -> Live {
-        Live { session: None, sent: 0, results: 0, written: Vec::new(), taken: 0, notes: Vec::new(), input_over: false, started: false, extra: Vec::new(), pending: None, stopping: None, plan_allowed: false, folder }
+        Live { session: None, sent: 0, results: 0, written: Vec::new(), taken: 0, notes: Vec::new(), input_over: false, started: false, extra: Vec::new(), extra_shots: Vec::new(), pending: None, stopping: None, plan_allowed: false, folder }
     }
 
     /// How many messages written to it Claude Code hasn't taken in yet:
@@ -929,19 +984,34 @@ async fn turn(id: &str, message: Option<String>) -> (Status, u32) {
     let session = Arc::new(session);
     // The person stopped it while it started: ended now. Words for this
     // turn that came meanwhile go with its first message.
-    let (stopped_early, extra) = with_state(|s| match s.live.get_mut(id) {
+    let (stopped_early, extra, extra_shots) = with_state(|s| match s.live.get_mut(id) {
         Some(l) => {
             l.session = Some(Arc::clone(&session));
             l.started = true;
             l.sent = 1;
-            (l.stopping.is_some(), std::mem::take(&mut l.extra))
+            (l.stopping.is_some(), std::mem::take(&mut l.extra), std::mem::take(&mut l.extra_shots))
         }
-        None => (true, Vec::new()),
+        None => (true, Vec::new(), Vec::new()),
     });
-    let first = std::iter::once(opening(&agent, message.as_deref(), read_only)).chain(extra.iter().map(|t| format!("Also: {t}"))).collect::<Vec<_>>().join("\n\n");
+    let mut first = std::iter::once(opening(&agent, message.as_deref(), read_only)).chain(extra.iter().map(|t| format!("Also: {t}"))).collect::<Vec<_>>().join("\n\n");
+    // **The screenshots its request came with** (the turn's own, and those
+    // of words that came while it started), as Claude Code's own app sends
+    // a pasted picture. Never again with a Continue: its session has them.
+    let mut shots = if !with_shots(resuming, message.as_deref()) { Vec::new() } else { store::get(id).and_then(|j| j.turn_list.iter().find(|t| t.n == n).map(|t| t.shots.clone())).unwrap_or_default() };
+    add_shots(&mut shots, &extra_shots);
+    let pictures = if shots.is_empty() || stopped_early {
+        Vec::new()
+    } else {
+        let (pictures, lost) = tauri::async_runtime::spawn_blocking(move || shots_of(&shots)).await.unwrap_or_default();
+        if lost > 0 {
+            first = format!("{first}\n\n{}", lost_line(lost));
+        }
+        tracing::info!(id, turn = n, pictures = pictures.len(), lost, "Agents: its message goes with its screenshots");
+        pictures
+    };
     if stopped_early {
         session.kill();
-    } else if let Err(e) = session.send_user(&first, &[]) {
+    } else if let Err(e) = session.send_user(&first, &pictures) {
         session.kill();
         return failed_early(id, n, e, None);
     } else {
@@ -1912,9 +1982,10 @@ fn queued_turn(id: &str, ask: &Ask, first: bool) -> Result<(Agent, FollowedUp), 
         j.keep_turns();
         if first {
             let n = j.turn_list.last().map_or(0, |t| t.n) + 1;
-            j.turn_list.push(store::TurnNote { n, title: title.clone(), request: text.clone(), message_id: ask.message_id.clone(), status: Status::Queued, read_only: ask.read_only, direct: ask.direct, ..Default::default() });
+            j.turn_list.push(store::TurnNote { n, title: title.clone(), request: text.clone(), message_id: ask.message_id.clone(), status: Status::Queued, read_only: ask.read_only, direct: ask.direct, shots: ask.shots.clone(), ..Default::default() });
         } else if let Some(t) = j.turn_list.last_mut() {
             t.request = format!("{}\n\n{}", t.request.trim(), text);
+            add_shots(&mut t.shots, &ask.shots);
             // Read only when every request it holds is (`Ask::merge`).
             t.read_only &= ask.read_only;
         }
@@ -2001,6 +2072,7 @@ pub fn follow_up(id: &str, ask: Ask) -> Result<(Agent, FollowedUp), String> {
         if let Some(l) = s.live.get_mut(id) {
             if !l.started && l.stopping.is_none() && joins {
                 l.extra.push(text.clone());
+                add_shots(&mut l.extra_shots, &ask.shots);
                 return At::Starting;
             }
             // Its first message written, its input still open, nobody
@@ -2032,6 +2104,7 @@ pub fn follow_up(id: &str, ask: Ask) -> Result<(Agent, FollowedUp), String> {
     let added = |j: &mut Agent| {
         if let Some(t) = j.turn_list.last_mut() {
             t.request = format!("{}\n\n{}", t.request.trim(), text);
+            add_shots(&mut t.shots, &ask.shots);
         }
     };
     match at {
@@ -2057,7 +2130,14 @@ pub fn follow_up(id: &str, ask: Ask) -> Result<(Agent, FollowedUp), String> {
             Ok((agent, FollowedUp::Added))
         }
         At::Passing(session) => {
-            if let Err(e) = session.send_user(&note, &[]) {
+            // Its screenshots with it. (The note's words stay exactly as
+            // counted above: Claude Code's echo of them is how Yap knows
+            // it took the note in — so one gone since isn't said here.)
+            let (pictures, lost) = if ask.shots.is_empty() { (Vec::new(), 0) } else { shots_of(&ask.shots) };
+            if !ask.shots.is_empty() {
+                tracing::info!(id, pictures = pictures.len(), lost, "Agents: a note goes with its screenshots");
+            }
+            if let Err(e) = session.send_user(&note, &pictures) {
                 // Its input closed under us (it's ending): not handed over
                 // after all — the note waits for its next turn.
                 tracing::info!(id, "Agents: a note couldn't be handed to the turn working ({e}); it waits for its next turn");
@@ -2253,7 +2333,7 @@ fn resume(id: &str, next: Next, ask: &Ask, new_turn: bool) {
                 Next::Message(t) => t.clone(),
                 Next::CarryOn => CARRY_ON.to_string(),
             };
-            j.turn_list.push(store::TurnNote { n, title: title.clone(), request: text, message_id: ask.message_id.clone(), direct: ask.direct, ..Default::default() });
+            j.turn_list.push(store::TurnNote { n, title: title.clone(), request: text, message_id: ask.message_id.clone(), direct: ask.direct, shots: ask.shots.clone(), ..Default::default() });
         }
         if let Some(t) = j.turn_list.last_mut() {
             t.status = Status::Queued;
@@ -2945,6 +3025,65 @@ mod tests {
         assert_eq!(agent.turn_list.len(), 1);
         assert_eq!(agent.turn_list[0].request, "Tidy notes.md.\n\nKeep the headings.");
         assert_eq!(with_state(|s| s.live.remove(&starting).map(|l| l.extra)), Some(vec!["Keep the headings.".to_string()]));
+    }
+
+    /// A request's screenshots (their ids) go wherever its words go: its
+    /// next turn's record, the turn waiting already, the turn starting.
+    #[test]
+    fn a_requests_screenshots_go_wherever_its_words_go() {
+        let shots = |ids: &[&str]| ids.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+        let id = store::new_id();
+        store::insert(Agent {
+            id: id.clone(),
+            folder: "garden-planner".into(),
+            path: r"D:\Projects\garden-planner".into(),
+            status: Status::Running,
+            started_ts: 5,
+            session: "4d7c1d2e-8a51-4c3b-9f0e-2b6a7e1c5d90".into(),
+            turn_list: vec![TurnNote { status: Status::Running, ..turn(1, "Add a watering schedule", &[]) }],
+            ..Default::default()
+        });
+        with_state(|s| {
+            let mut l = Live::new(workspaces::norm(r"D:\Projects\garden-planner"));
+            l.started = true;
+            s.live.insert(id.clone(), l);
+        });
+        // A request while it works (at another mode, so it waits): its next turn has them.
+        let (agent, how) = follow_up(&id, Ask { text: "Make the beds look like this.".into(), mode: Some(Mode::Plan), shots: shots(&["shot-a"]), ..Default::default() }).unwrap();
+        assert_eq!(how, FollowedUp::Queued);
+        assert_eq!(agent.turn_list[1].shots, shots(&["shot-a"]));
+        assert!(agent.turn_list[0].shots.is_empty(), "never the turn working's");
+        // Another for the same turn: added, each once.
+        let (agent, _) = follow_up(&id, Ask { text: "And the legend like this.".into(), mode: Some(Mode::Plan), shots: shots(&["shot-a", "shot-b"]), ..Default::default() }).unwrap();
+        assert_eq!(agent.turn_list[1].shots, shots(&["shot-a", "shot-b"]));
+        assert_eq!(with_state(|s| s.live.get(&id).and_then(|l| l.pending.clone())).unwrap().shots, shots(&["shot-a", "shot-b"]));
+        with_state(|s| s.live.remove(&id));
+
+        // Words while its process starts: with its first message, and on its turn.
+        let starting = store::new_id();
+        store::insert(Agent { id: starting.clone(), status: Status::Queued, turn_list: vec![TurnNote { status: Status::Queued, request: "Tidy notes.md.".into(), shots: shots(&["shot-c"]), ..turn(1, "Tidy notes.md", &[]) }], ..Default::default() });
+        with_state(|s| s.live.insert(starting.clone(), Live::new("x".into())));
+        let (agent, how) = follow_up(&starting, Ask { text: "Like this one.".into(), shots: shots(&["shot-d"]), ..Default::default() }).unwrap();
+        assert_eq!(how, FollowedUp::Added);
+        assert_eq!(agent.turn_list[0].shots, shots(&["shot-c", "shot-d"]));
+        assert_eq!(with_state(|s| s.live.remove(&starting).map(|l| l.extra_shots)), Some(shots(&["shot-d"])));
+
+        // One that's gone since (kept past "Keep chat screenshots") is counted, and said.
+        let (pictures, lost) = shots_of(&shots(&["not-a-screenshot-of-yaps"]));
+        assert!(pictures.is_empty());
+        assert_eq!(lost, 1);
+        assert_eq!(lost_line(1), "(A screenshot that came with this is no longer on this PC.)");
+        assert_eq!(lost_line(2), "(2 screenshots that came with this are no longer on this PC.)");
+        // With a turn's first message — its brief, its request on --resume — never with a Continue of a session that ran.
+        assert!(with_shots(false, None));
+        let carry_on = format!("{CARRY_ON}\n\n{SUMMARY_LINE}");
+        assert!(with_shots(true, Some("And the legend like this.")));
+        assert!(!with_shots(true, Some(&carry_on)));
+        assert!(with_shots(false, Some(&carry_on)), "a session that never ran has nothing yet");
+        // A turn's record says them only when it has some (an older Yap reads the rest as ever).
+        let said = serde_json::to_value(&agent.turn_list[0]).unwrap();
+        assert_eq!(said["shots"], serde_json::json!(["shot-c", "shot-d"]));
+        assert!(serde_json::to_value(turn(1, "x", &[])).unwrap().get("shots").is_none());
     }
 
     #[test]

@@ -479,7 +479,25 @@ function shotsFor(a) {
   return { shots: on, themes: themesOf(a.theme ?? START.theme) };
 }
 
-async function startTurn({ text, spoken = false, chat = 'new', autoCards = null, report = null, shots = true, themes }) {
+/**
+ * Made-up pictures (`drawPng`'s options each) dropped on Chat, as a person
+ * drops a picture file: they wait in the message box and go with the next
+ * message. Nothing from outside: each is drawn here.
+ */
+async function dropPictures(pictures) {
+  const dir = path.join(LAB, 'to-drop');
+  fs.mkdirSync(dir, { recursive: true });
+  const stamp = Date.now();
+  const paths = pictures.map((p, i) => {
+    const file = path.join(dir, `${stamp}-${i + 1}.png`);
+    fs.writeFileSync(file, drawPng(p ?? {}));
+    return file;
+  });
+  await invoke('e2e_drag_drop', { paths });
+  await main().locator('[data-testid="chat-attachments"] .shotchip').nth(paths.length - 1).waitFor({ state: 'visible', timeout: 15_000 });
+}
+
+async function startTurn({ text, spoken = false, chat = 'new', autoCards = null, report = null, shots = true, themes, pictures = null }) {
   if (!text?.trim()) throw new Error('Nothing to ask');
   if (turn && !turn.finalized) throw new Error(`Turn ${turn.n} is still going (${turn.status}): wait for it, answer its card, or cancel it`);
   readRecord();
@@ -493,6 +511,7 @@ async function startTurn({ text, spoken = false, chat = 'new', autoCards = null,
     if (spoken) {
       await invoke('e2e_assistant_ask', { text, listenMs: 300 });
     } else {
+      if (pictures?.length) await dropPictures(pictures);
       const box = main().getByRole('textbox', { name: 'Message' });
       await box.fill(text, { timeout: 10_000 });
       // (Exactly "Send": with an agent's tab beside the chat, other buttons' names have the word.)
@@ -881,7 +900,7 @@ async function shutdown(why, end = 'stopped') {
 const COMMANDS = {
   ping: async () => ({ pong: true }),
   ask: async (a) => {
-    const t = await startTurn({ text: a.text, spoken: !!a.spoken, chat: a.chat ?? 'new', autoCards: ['allow', 'deny'].includes(a.cards) ? a.cards : null, ...shotsFor(a) });
+    const t = await startTurn({ text: a.text, spoken: !!a.spoken, chat: a.chat ?? 'new', autoCards: ['allow', 'deny'].includes(a.cards) ? a.cards : null, pictures: Array.isArray(a.pictures) ? a.pictures : null, ...shotsFor(a) });
     return a['no-wait'] ? snapshot(t) : settle(t, Number(a.timeout ?? 600));
   },
   wait: async (a) => {

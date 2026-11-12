@@ -128,6 +128,7 @@
   import { chatBrowser } from '../../stores/chatBrowser.svelte.js';
   import { memoryTakesDrops } from '../../stores/memory.svelte.js';
   import { agents, initAgents, agentById } from '../../stores/agents.svelte.js';
+  import { workingDirectly } from '../../core/agents.js';
   import { initChatStatus, setShown, markSeen } from '../../stores/chatStatus.svelte.js';
   import { lastAnswerAt } from '../../core/chatStatus.js';
 
@@ -385,6 +386,14 @@
     } else if (e.key === 'Escape' && ((chat.sending && chat.streaming) || chat.assistantAnswering) && !e.defaultPrevented) {
       e.preventDefault();
       chat.stopAnswer();
+    } else if (e.key === 'Escape' && !e.defaultPrevented && e.target === chat.inputEl && !chat.input.trim() && !chat.attached.length) {
+      // In the empty message box while the Code chat's own session works:
+      // Stop, as the box's ■ (Composer.svelte) and Claude Code's own Esc.
+      const working = workingDirectly(agents.list, chat.activeId);
+      if (working) {
+        e.preventDefault();
+        invoke('agent_stop', { id: working.id }).catch(() => {});
+      }
     }
   }
 

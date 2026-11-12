@@ -318,6 +318,15 @@ pub struct TurnNote {
     /// one Chat sent (its report worded by Chat's model).
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     pub direct: bool,
+    /// **The screenshots its request came with** (12 Nov 2026): the person's
+    /// own, attached to a message that went straight to the Code chat's
+    /// session — their ids in `chat-images/`, written to Claude Code with
+    /// the turn's message as Claude Code's own app sends a pasted picture
+    /// (`runner::shots_of`). Ids only: the pictures stay the chat's. A new
+    /// field of the turn's own: an older Yap drops it on its save, and a
+    /// turn still waiting then starts without its pictures.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub shots: Vec<String>,
     /// Undo this turn put its files back.
     pub undone: bool,
     /// **Its to-do list**, as its latest `TodoWrite` left it (the Agent

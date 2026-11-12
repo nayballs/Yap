@@ -656,6 +656,18 @@ export function pillsByAnswer(agents, conversation, messages) {
 }
 
 /**
+ * **The Code chat's own session, at work** (12 Nov 2026): the agent of
+ * `conversation` still going whose latest turn is the person's own message
+ * (`direct`: a Code chat that works directly) — what the message box's ■
+ * stops, as Claude Code's own app has Stop where Send was while it works.
+ * Null: none (an agent Chat sent out is stopped from its tab, as ever).
+ */
+export function workingDirectly(agents, conversation) {
+  if (conversation == null) return null;
+  return (agents || []).find((a) => a.conversation === conversation && isLive(a.status) && !!a.turnList?.at(-1)?.direct) ?? null;
+}
+
+/**
  * **The agent pills under a question** (11 Nov 2026): the turns the person's
  * own message started in a Code chat that works directly (a turn's
  * `direct`: agents/direct.rs). There's no answer of Chat's to put them

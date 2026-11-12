@@ -8,7 +8,9 @@
 //! skipped). A line is printed as it is, with `{{session_id}}` (from
 //! `--session-id` / `--resume`, else a new one), `{{user_text}}` (the words
 //! of the user message the turn started with), `{{notes}}` (those of the
-//! messages taken in while it worked, joined with "; ") and `{{cwd}}`
+//! messages taken in while it worked, joined with "; "), `{{user_pictures}}`
+//! (how many pictures the turn's messages came with: its first and each
+//! one taken in since) and `{{cwd}}`
 //! filled in, JSON-escaped. A line whose
 //! first key starts with `_` is an instruction:
 //!
@@ -44,9 +46,11 @@
 //!   the agent it starts and the report's question. `all` (as from the top):
 //!   every kind.
 //! - `{"_dump_args":true}`: prints `{"type":"system","subtype":"fake_args",
-//!   "args":[…],"cwd":…,"pid":…,"user_text":…}` (its process id, and the
-//!   last user message's words: after a `_wait_user`, which process served
-//!   which call). `{"_dump_args":"<file>"}`: and appends that
+//!   "args":[…],"cwd":…,"pid":…,"user_text":…,"user_pictures":[…]}` (its
+//!   process id, and the last user message's words: after a `_wait_user`,
+//!   which process served which call; the pictures the turn's messages came
+//!   with, each its type and size, never its data).
+//!   `{"_dump_args":"<file>"}`: and appends that
 //!   line to the file (an e2e spec reads a plan chat's launch there, or an
 //!   agent's turns' arguments: `--session-id`, then `--resume`).
 //! - `{"_dump_env":["ANTHROPIC_API_KEY",…]}`: prints `{"type":"system",
@@ -285,7 +289,7 @@ fn json_or_file(v: &str) -> Result<Value, String> {
 /// Play `script`: `input` is stdin's lines (closed: stdin closed). The exit
 /// code.
 pub fn play(script: &str, ctx: &Ctx, input: Receiver<String>, out: &mut dyn Write) -> Result<i32, String> {
-    let mut p = Player { ctx, input, out, queue: VecDeque::new(), user_text: String::new(), notes: Vec::new(), in_turn: false, skipping: false, closed: false, hooks: 0, usage: None };
+    let mut p = Player { ctx, input, out, queue: VecDeque::new(), user_text: String::new(), notes: Vec::new(), pictures: Vec::new(), in_turn: false, skipping: false, closed: false, hooks: 0, usage: None };
     // `_for`: the kind of run the lines play in (`None`: every kind).
     let kind = ctx.kind();
     let mut part: Option<String> = None;
@@ -331,12 +335,16 @@ struct Player<'a> {
     ctx: &'a Ctx,
     input: Receiver<String>,
     out: &'a mut dyn Write,
-    /// User messages not yet waited for.
-    queue: VecDeque<String>,
+    /// User messages not yet waited for: their words, and their pictures
+    /// (each its type and size).
+    queue: VecDeque<(String, Vec<Value>)>,
     /// The user message the turn started with.
     user_text: String,
     /// The ones taken in while it worked.
     notes: Vec<String>,
+    /// The pictures the turn's messages came with (its first, then each
+    /// note's): `{"type","bytes"}`.
+    pictures: Vec<Value>,
     in_turn: bool,
     /// Interrupted: skip to the next `_wait_user`.
     skipping: bool,
@@ -355,6 +363,7 @@ impl Player<'_> {
         line.replace("{{session_id}}", &self.ctx.session_id)
             .replace("{{user_text}}", &json_inner(&self.user_text))
             .replace("{{notes}}", &json_inner(&self.notes.join("; ")))
+            .replace("{{user_pictures}}", &self.pictures.len().to_string())
             .replace("{{cwd}}", &json_inner(&self.ctx.cwd))
     }
 
@@ -372,10 +381,11 @@ impl Player<'_> {
     fn tool_call_ended(&mut self) -> Result<(), String> {
         self.drain()?;
         while self.in_turn {
-            let Some(text) = self.queue.pop_front() else { break };
+            let Some((text, pictures)) = self.queue.pop_front() else { break };
             self.record(&text);
             self.replay(&text)?;
             self.notes.push(text);
+            self.pictures.extend(pictures);
         }
         Ok(())
     }
@@ -398,7 +408,7 @@ impl Player<'_> {
     fn take(&mut self, line: &str) -> Result<(), String> {
         let Ok(v) = serde_json::from_str::<Value>(line) else { return Ok(()) };
         match v["type"].as_str() {
-            Some("user") => self.queue.push_back(user_words(&v)),
+            Some("user") => self.queue.push_back((user_words(&v), user_pictures(&v))),
             Some("control_request") => {
                 let id = v["request_id"].clone();
                 if v["request"]["subtype"] == "interrupt" {
@@ -435,10 +445,11 @@ impl Player<'_> {
             "_wait_user" => {
                 self.skipping = false;
                 loop {
-                    if let Some(text) = self.queue.pop_front() {
+                    if let Some((text, pictures)) = self.queue.pop_front() {
                         self.record(&text);
                         self.replay(&text)?;
                         self.user_text = text;
+                        self.pictures = pictures;
                         self.notes.clear();
                         self.in_turn = true;
                         return Ok(None);
@@ -489,7 +500,7 @@ impl Player<'_> {
             "_dump_args" => {
                 // Its process id too: which process served which call (a
                 // plan scope's spares, one call each).
-                let line = json!({"type":"system","subtype":"fake_args","args":self.ctx.args,"cwd":self.ctx.cwd,"session_id":self.ctx.session_id,"pid":std::process::id(),"user_text":self.user_text});
+                let line = json!({"type":"system","subtype":"fake_args","args":self.ctx.args,"cwd":self.ctx.cwd,"session_id":self.ctx.session_id,"pid":std::process::id(),"user_text":self.user_text,"user_pictures":self.pictures});
                 // A path: the line appended to that file too, for a test
                 // that can't read the run's stdout (an e2e spec).
                 if let Some(file) = arg.as_str().filter(|f| !f.trim().is_empty()) {
@@ -703,6 +714,21 @@ fn user_words(v: &Value) -> String {
         Value::Array(blocks) => blocks.iter().filter(|b| b["type"] == "text").filter_map(|b| b["text"].as_str()).collect::<Vec<_>>().join(""),
         _ => String::new(),
     }
+}
+
+/// The pictures a user message came with (its image blocks): each its type
+/// and how many bytes it is, never its data.
+fn user_pictures(v: &Value) -> Vec<Value> {
+    use base64::Engine as _;
+    let Value::Array(blocks) = &v["message"]["content"] else { return Vec::new() };
+    blocks
+        .iter()
+        .filter(|b| b["type"] == "image")
+        .map(|b| {
+            let bytes = base64::engine::general_purpose::STANDARD.decode(b["source"]["data"].as_str().unwrap_or("")).map(|d| d.len()).unwrap_or(0);
+            json!({ "type": b["source"]["media_type"], "bytes": bytes })
+        })
+        .collect()
 }
 
 /// `s` escaped for the inside of a JSON string.
@@ -956,6 +982,32 @@ mod tests {
         assert_eq!(said(&["-p", "--mcp-config", "{\"mcpServers\":{}}", "--strict-mcp-config"]), ["every kind", "chat", "all again"]);
         assert_eq!(said(&["-p", "--mcp-config", "{\"mcpServers\":{}}", "--permission-prompt-tool", "mcp__yap__approve"]), ["every kind", "agent", "all again"]);
         assert_eq!(said(&["-p", "--tools", "", "--strict-mcp-config"]), ["every kind", "ask", "all again"]);
+    }
+
+    #[test]
+    fn it_says_which_pictures_a_turns_messages_came_with_never_their_data() {
+        // A message with a picture, then a note with another while it works.
+        let c = ctx(&["--session-id", "s1"]);
+        let script = [
+            r#"{"_wait_user":true}"#,
+            r#"{"type":"assistant","message":{"content":[{"type":"tool_use","id":"t1","name":"Read","input":{}}]}}"#,
+            r#"{"_sleep_ms":600}"#,
+            r#"{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"t1","content":"Draft notes"}]}}"#,
+            r#"{"_dump_args":true}"#,
+            r#"{"type":"result","result":"Saw {{user_pictures}}: {{user_text}}"}"#,
+            r#"{"_wait_user":true}"#,
+        ]
+        .join("\n");
+        let first = r#"{"type":"user","message":{"role":"user","content":[{"type":"image","source":{"type":"base64","media_type":"image/png","data":"iVBORw0KGgo="}},{"type":"text","text":"What is this?"}]}}"#;
+        let note = r#"{"type":"user","message":{"role":"user","content":[{"type":"image","source":{"type":"base64","media_type":"image/jpeg","data":"/9j/4AAQ"}},{"type":"text","text":"And this."}]}}"#;
+        let (code, out) = run_timed(&script, &c, vec![(0, first), (200, note)]);
+        assert_eq!(code, 0);
+        let dump = out.iter().find(|v| v["subtype"] == "fake_args").unwrap();
+        assert_eq!(dump["user_pictures"], json!([{ "type": "image/png", "bytes": 8 }, { "type": "image/jpeg", "bytes": 6 }]));
+        assert_eq!(out.last().unwrap()["result"], "Saw 2: What is this?");
+        // A message of words alone: none.
+        let (_, out) = run("{\"_wait_user\":true}\n{\"type\":\"result\",\"result\":\"Saw {{user_pictures}}\"}\n{\"_wait_user\":true}\n", &c, &[USER], true);
+        assert_eq!(out.last().unwrap()["result"], "Saw 0");
     }
 
     #[test]

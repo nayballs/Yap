@@ -1,0 +1,24 @@
+{
+  "name": "direct-screenshot",
+  "about": "A screenshot goes straight to a Code chat's session (12 Nov 2026, agents/direct.rs), as Claude Code's own app sends a pasted picture: a made-up picture (a red triangle on white) is put in the message box of a Bypass Code chat on lab-sandbox that works directly, and the session is asked what it shows. Before, a message with a screenshot was Chat's own business: Chat's model read it and sent an agent. Needs the real Claude Code (a --fake lab's Chat isn't on the plan, so nothing goes directly there).",
+  "needs": { "yapCode": true },
+  "steps": [
+    { "set": { "bypass": true, "config": { "agentsDirect": true } } },
+
+    {
+      "ask": "What shape is in this picture, and what colour is it? Answer in one short sentence. Don't use any tools and don't change anything.",
+      "pictures": [{ "width": 480, "height": 320, "shape": "triangle", "color": "#d62828", "background": "#ffffff" }],
+      "chat": "code:lab-sandbox",
+      "timeout": 300
+    },
+    { "expect": { "status": "answered", "notUsed": "/^(start_agent|message_agent)$/", "tools": 0, "card": false }, "note": "Straight to its session: no model of Chat's read the picture and sent an agent." },
+    { "wait": "agents", "timeout": 600 },
+    { "expect": { "agent": { "status": "done", "error": null } } },
+    {
+      "expect": { "selector": [{ "window": "main", "css": ".cbubble.user img", "count": { "min": 1 } }], "visible": "Agent done" },
+      "note": "The message keeps its screenshot in the thread."
+    },
+    { "expect": { "visible": "triangle" }, "soft": true, "note": "The session saw the picture itself (its own words: soft)." },
+    { "shot": "a-screenshot-straight-to-its-session", "window": "main" }
+  ]
+}

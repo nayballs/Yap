@@ -320,6 +320,8 @@ export async function runScript(script, { send, state, options = {} }) {
             chat: step.chat ?? 'new',
             timeout: step.timeout ?? 600,
             ...(step.cards ? { cards: step.cards } : {}),
+            // Made-up pictures in the message box with the question (drawPng's options each).
+            ...(Array.isArray(step.pictures) && step.pictures.length ? { pictures: step.pictures } : {}),
             ...(shots === false ? { 'no-shots': true } : {}),
             ...((step.theme ?? options.theme) ? { theme: step.theme ?? options.theme } : {}),
           })

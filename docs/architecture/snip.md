@@ -95,6 +95,10 @@ PNG → <data>/chat-images/ → waiting in the box (snip/waiting.rs,
 Pictures pasted into Chat's box or dropped on Chat join the same path at
 the PNG (`snip/attach.rs`).
 
+In a Code chat that works directly a sent screenshot goes to the chat's
+Claude Code session with the message, not to a model of Chat's
+([yap-code.md](./yap-code.md#a-code-chat-that-works-directly), 2026-11-12).
+
 ## Modules
 
 - **`snip.rs`** — the feature's root: [`start`] (its own thread), the
