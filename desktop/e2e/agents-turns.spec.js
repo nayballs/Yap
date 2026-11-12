@@ -59,6 +59,10 @@
 // - Where a line was changed rather than taken out, the part that was
 //   replaced is marked in a stronger red and what replaced it in a stronger
 //   green (core/diffWords.js), as Claude Code's transcript marks them.
+// - A part handed to a helper (Claude Code's own subagent): the helper's
+//   steps fold behind its row ("Handed part of it to a helper · Check the
+//   docs") as rows of their own, never among the session's own steps, and
+//   the stretch's line counts the session's alone (12 Nov 2026).
 // - "Start fresh" (`fresh: true`): a second agent, its tab named apart.
 // - Undo this turn (refused while a later turn changed the same file:
 //   "Undo the later change first"), and Undo all, asked first.
@@ -306,6 +310,31 @@ const FOUR_STEPS = [
   },
   said('r5', [{ type: 'text', text: TESTED }], 'end_turn'),
   result(TESTED, 0.02),
+  { _wait_user: true },
+];
+const HELPED = 'The docs are in order; the folder has two files.';
+/** A helper's own message or result: under the call that sent it. */
+const under = (call, line) => ({ ...line, parent_tool_use_id: call });
+/**
+ * A turn that hands part of its work to a helper (Claude Code's `Task`): the helper reads a file and
+ * edits one, under that call; then the session runs a command of its own.
+ */
+const HANDS_PART_OVER = [
+  { _wait_user: true },
+  { _dump_args: ARGS },
+  init(),
+  said('h1', [{ type: 'tool_use', id: 'toolu_task', name: 'Task', input: { description: 'Check the notes', prompt: 'Read notes.md and add a line.' } }]),
+  under('toolu_task', said('h2', [{ type: 'tool_use', id: 'toolu_hr', name: 'Read', input: { file_path: '{{cwd}}\\notes.md' } }])),
+  under('toolu_task', toolResult('toolu_hr', '1\tDraft notes')),
+  under('toolu_task', said('h3', [{ type: 'tool_use', id: 'toolu_he', name: 'Edit', input: { file_path: '{{cwd}}\\notes.md', old_string: 'Draft notes', new_string: 'Draft notes\nChecked' } }])),
+  { _hook: { event: 'PreToolUse', input: { tool_name: 'Edit', tool_use_id: 'toolu_he', tool_input: { file_path: 'notes.md' } } } },
+  { _write_file: { path: 'notes.md', text: 'Draft notes\nChecked\n' } },
+  under('toolu_task', toolResult('toolu_he', 'The file notes.md has been updated.')),
+  toolResult('toolu_task', 'The notes are in order.'),
+  said('h4', [{ type: 'tool_use', id: 'toolu_ls', name: 'Bash', input: { command: 'ls', description: 'List the folder' } }]),
+  toolResult('toolu_ls', 'notes.md'),
+  said('h5', [{ type: 'text', text: HELPED }], 'end_turn'),
+  result(HELPED, 0.02),
   { _wait_user: true },
 ];
 /** Says what it was told. */
@@ -709,6 +738,35 @@ test('core/agents.js: an agent’s turns from its log, their words, the pills a 
   // A diff with no call (an older log's): the earliest step that changes that file and has none yet.
   const olderLog = workOf([{ step: 'Editing a.js', file: 'a.js' }, { step: 'Editing a.js', file: 'a.js' }, { diff: { file: 'a.js', kind: 'edit', lines: ['+1'], added: 1, removed: 0 } }, { diff: { file: 'a.js', kind: 'edit', lines: ['+2'], added: 1, removed: 0 } }])[0];
   expect(olderLog.steps.map((x) => x.diff?.lines)).toEqual([['+1'], ['+2']]);
+  // A helper's own steps (`under`: the call that handed it the work) fold behind that call's row: never
+  // steps of the session's own stretch, never counted in its line; its edit is its row's alone.
+  const handed = workOf([
+    { id: 'ab12', step: 'Reading notes.md', call: 'c1' },
+    { id: 'ab12', step: 'Handing part of it to a helper · Check the docs', call: 't1' },
+    { id: 'ab12', step: 'Reading docs\\guide.md', call: 'h1', under: 't1' },
+    { id: 'ab12', step: 'Editing docs\\guide.md', file: 'docs\\guide.md', call: 'h2', under: 't1' },
+    { id: 'ab12', diff: { file: 'docs\\guide.md', kind: 'edit', lines: ['-a', '+b'], added: 1, removed: 1 }, call: 'h2' },
+    { id: 'ab12', step: 'Running ls', command: 'ls', call: 'c2' },
+    { id: 'ab12', step: 'Editing notes.md', file: 'notes.md', call: 'c3' },
+    { id: 'ab12', diff: { file: 'notes.md', kind: 'edit', lines: ['+x'], added: 1, removed: 0 }, call: 'c3' },
+  ]);
+  expect(handed).toHaveLength(1);
+  expect(handed[0].steps.map((x) => [x.step, x.helped.map((h) => h.step)])).toEqual([
+    ['Reading notes.md', []],
+    ['Handing part of it to a helper · Check the docs', ['Reading docs\\guide.md', 'Editing docs\\guide.md']],
+    ['Running ls', []],
+    ['Editing notes.md', []],
+  ]);
+  expect(workSummary(handed[0])).toEqual([{ text: 'Ran a command' }, { text: 'read a file' }, { text: 'handed part of it to a helper' }, { text: 'edited notes.md', added: 1, removed: 0 }]);
+  expect(handed[0].edits).toEqual([{ file: 'notes.md', added: 1, removed: 0, made: null }]);
+  expect(handed[0].steps[1].helped[1].diff.lines).toEqual(['-a', '+b']);
+  // Its row opens to them; a step of theirs is a row like any other.
+  expect(handed[0].steps.map(stepOpens)).toEqual([false, true, true, true]);
+  expect(handed[0].steps[1].helped.map((h) => stepRow(h))).toEqual([{ text: 'Read', name: 'guide.md' }, { text: 'Edited', name: 'guide.md', added: 1, removed: 1 }]);
+  // The timeline keeps every step in order, a helper's own saying so (it sits in from the edge).
+  expect(timelineOf([{ id: 'ab12', step: 'Handing part of it to a helper · Check the docs', call: 't1' }, { id: 'ab12', step: 'Reading x.md', call: 'h1', under: 't1' }]).map((t) => t.under)).toEqual([null, 't1']);
+  // No such row (an older log, a call Yap never heard of): a step like any other.
+  expect(workOf([{ id: 'ab12', step: 'Reading x.md', call: 'h9', under: 'gone' }]).map((w) => w.steps.map((x) => x.step))).toEqual([['Reading x.md']]);
   // The Agent tab's timeline keeps them on their steps too.
   expect(timelineOf(seen).filter((t) => t.kind === 'step').map((t) => t.pictures.length)).toEqual([1, 0, 1]);
   // The same line twice in a row is one step: both calls' pictures are its.
@@ -1528,6 +1586,56 @@ test('a stretch opened is a row a step: an edit opens to its numbered diff, a co
   await agentTimeline(main, 1);
   await tab(main).getByTestId('chat-agent-files').getByRole('button', { name: /notes\.md/ }).click();
   await expect(tab(main).getByTestId('chat-agent-diff').first().locator('.dl')).toHaveText([/Draft notes/, /Watering: twice a week/]);
+});
+
+test('a part handed to a helper: the helper’s steps fold behind its row, never among the session’s own', async ({ yap, main, fakeLlm, shot }) => {
+  await script(yap, HANDS_PART_OVER, 'helper');
+  const before = (await agents(yap)).length;
+  await codeChat(main);
+  fakeLlm.scriptChat([
+    { tools: [{ name: 'start_agent', args: { brief: 'Check the notes and list the folder.', title: 'Check the notes' } }] },
+    { content: STARTED },
+    { plain: true, content: 'The notes are in order.' },
+  ]);
+  await send(main, 'Check the notes and list the folder.');
+  const agent = await ended(yap, (await newAgent(yap, before)).id);
+  await messagesOf(yap, agent.conversation, 4);
+
+  // Its log: the helper's own steps say the call they were made under; the session's own don't.
+  const log = (await yap.invoke('agent_get', { id: agent.id })).log;
+  expect(log.filter((e) => e.step && e.call).map((e) => [e.step, e.under ?? null])).toEqual([
+    ['Handing part of it to a helper · Check the notes', null],
+    ['Reading notes.md', 'toolu_task'],
+    ['Editing notes.md', 'toolu_task'],
+    ['Listing the folder', null],
+  ]);
+
+  // Its work: the stretch's line counts the session's own steps (the helper's edit isn't its own), and its
+  // rows are the hand-over and the command — the helper's steps aren't among them.
+  const work = await panelWork(main, 1);
+  await expect(work.locator('.wtext')).toHaveText(['Ran a command, handed part of it to a helper']);
+  await work.getByRole('button', { name: /Ran a command, handed part of it to a helper/ }).click();
+  const rows = work.getByTestId('chat-agent-work-rows').first().locator('> li');
+  await expect(rows.locator('> .rline .rtext')).toHaveText(['Handed part of it to a helper · Check the notes', 'Listed the folder']);
+  await expect(work.getByTestId('chat-agent-work-helper')).toHaveCount(0);
+  await shot(main, '50-a-helper-folded');
+  // The hand-over's row opens to the helper's own steps, rows of their own: an edit of its still opens to its diff.
+  await rows.nth(0).locator('> .rline button.rhead').click();
+  const helper = rows.nth(0).getByTestId('chat-agent-work-helper');
+  await expect(helper.getByTestId('chat-agent-work-row').locator('.rtext')).toHaveText(['Read notes.md', 'Edited notes.md']);
+  await helper.getByRole('button', { name: /Edited notes\.md/ }).click();
+  await expect(helper.getByTestId('chat-agent-work-diff').locator('.dl.add .dt')).toHaveText(['Checked']);
+  await shot(main, '51-the-helpers-own-steps');
+  await theme(yap, main, 'dark');
+  await shot(main, '52-the-helpers-own-steps-dark');
+  await theme(yap, main, 'light');
+  // The file it changed is still the agent's (its report, Undo).
+  expect((await agents(yap)).find((j) => j.id === agent.id).files).toEqual(['notes.md']);
+  // Its timeline lists every step in order, the helper's own in from the edge.
+  await agentTimeline(main, 1);
+  await expect(tab(main).locator('.step .stext')).toContainText(['Handing part of it to a helper · Check the notes', 'Reading notes.md', 'Editing notes.md', 'Listing the folder']);
+  await expect(tab(main).locator('.step[data-helper="true"] .stext')).toContainText(['Reading notes.md', 'Editing notes.md']);
+  await expect(tab(main).locator('.step[data-helper="true"]')).toHaveCount(2);
 });
 
 test('“start fresh”: a second agent in the workspace, its tab named apart from the first', async ({ yap, main, fakeLlm }) => {

@@ -171,6 +171,14 @@ pub struct AgentEvent {
     /// to it.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub output: Option<super::output::Output>,
+    /// **A helper's own step** (12 Nov 2026): the call it was made under,
+    /// Claude Code's `parent_tool_use_id` — the `Task` (or `Agent`) call of
+    /// the session that handed part of its work over. The page folds such a
+    /// step behind that call's row ("Handed part of it to a helper"), as
+    /// Claude Code's own transcript keeps a subagent's work out of the
+    /// session's.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub under: Option<String>,
     /// A picture a tool call's answer carried (`pictures.rs`): its step
     /// (`call`) shows it.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -1066,6 +1074,9 @@ struct Follow {
     changes: HashMap<String, Change>,
     /// Diff lines the agent's log has (across its turns; `diff::AGENT_MAX`).
     diff_used: usize,
+    /// The helper's call the message being read was made under (its
+    /// `parent_tool_use_id`): its steps say so (`AgentEvent::under`).
+    under: Option<String>,
     /// Pictures kept this turn (`pictures::PER_TURN`).
     pictures: usize,
     /// The commands' calls not back yet, by id (their output is said).
@@ -1146,6 +1157,7 @@ impl Follow {
             line: String::new(),
             changes: HashMap::new(),
             diff_used: agent.diff_lines as usize,
+            under: None,
             pictures: 0,
             commands: HashSet::new(),
             output_used: 0,
@@ -1177,6 +1189,10 @@ impl Follow {
         self.open.insert(id.to_string());
         let seen = steps::of_tool(name, input, &self.folder);
         // The to-do list: shown as a list, the line the one in progress.
+        // (A helper's own list is its own business: the agent's stays.)
+        if seen.todos.is_some() && self.under.is_some() {
+            return;
+        }
         if let Some(todos) = seen.todos {
             self.todos = todos.clone();
             let line = steps::doing_now(&todos).unwrap_or_else(|| self.line.clone());
@@ -1219,7 +1235,7 @@ impl Follow {
         if seen.command.is_some() {
             self.commands.insert(id.to_string());
         }
-        emit(&AgentEvent { step: Some(seen.step), file: seen.file, command: seen.command, about: seen.about, done: seen.done, range: seen.range, call, ..self.event(&agent) });
+        emit(&AgentEvent { step: Some(seen.step), file: seen.file, command: seen.command, about: seen.about, done: seen.done, range: seen.range, call, under: self.under.clone(), ..self.event(&agent) });
     }
 
     /// **A tool call's answer carried pictures** (a picture file read, a
@@ -1335,6 +1351,8 @@ impl Follow {
                         self.used();
                     }
                 }
+                // (A helper's message: its tool calls are its own steps, under the call that sent it.)
+                self.under = a.parent_tool_use_id.clone().filter(|p| !p.is_empty());
                 for block in &a.blocks {
                     match block {
                         Block::ToolUse { id, name, input } => self.on_tool(id, name, input),
@@ -2652,6 +2670,41 @@ mod tests {
         assert!(kept <= super::super::output::TURN_MAX && kept > super::super::output::TURN_MAX / 2, "{kept}");
     }
 
+    /// A session that hands part of its work to a helper (Claude Code's
+    /// `Task`): the helper's own tool calls say the call they were made
+    /// under, and its to-do list never replaces the agent's.
+    #[test]
+    fn a_helpers_own_steps_say_the_call_they_were_made_under() {
+        use serde_json::json;
+        let id = store::new_id();
+        let folder = PathBuf::from(format!(r"D:\Projects\seed-tracker-{id}"));
+        store::insert(Agent { id: id.clone(), folder: "seed-tracker".into(), path: folder.to_string_lossy().into_owned(), status: Status::Running, started_ts: 5, turn_list: vec![store::TurnNote { n: 1, status: Status::Running, started_ts: 5, ..Default::default() }], ..Default::default() });
+        let agent = store::get(&id).unwrap();
+        let backup = store::turn_backup_dir(&id, 1).unwrap();
+        let mut follow = Follow::new(&agent, 1, folder.clone(), backup, Mode::Auto, 200_000, None);
+        let notes = folder.join("notes.txt").to_string_lossy().into_owned();
+        // The session's own list, then its hand-over.
+        follow.on_tool("toolu_todo", "TodoWrite", &json!({ "todos": [{ "content": "Check the docs", "status": "in_progress", "activeForm": "Checking the docs" }] }));
+        follow.on_tool("toolu_task", "Task", &json!({ "description": "Check the docs", "prompt": "Read the docs and report." }));
+        // The helper's own calls (its messages name the call that sent it).
+        follow.under = Some("toolu_task".into());
+        follow.on_tool("toolu_h1", "Read", &json!({ "file_path": notes }));
+        follow.on_tool("toolu_h2", "TodoWrite", &json!({ "todos": [{ "content": "A helper's own to-do", "status": "pending" }] }));
+        follow.under = None;
+        // The session's own again.
+        follow.on_tool("toolu_ls", "Bash", &json!({ "command": "ls" }));
+        let log = store::log_read(&id);
+        let under = |step: &str| log.iter().find(|e| e["step"] == step).map(|e| e.get("under").and_then(|u| u.as_str()).map(str::to_string));
+        assert_eq!(under("Handing part of it to a helper · Check the docs"), Some(None));
+        assert_eq!(under("Reading notes.txt"), Some(Some("toolu_task".into())));
+        assert_eq!(under("Running ls"), Some(None));
+        // The agent's to-do list is still the session's own.
+        let lists: Vec<&serde_json::Value> = log.iter().filter_map(|e| e.get("todos")).collect();
+        assert_eq!(lists.len(), 1);
+        assert_eq!(lists[0][0]["content"], "Check the docs");
+        assert_eq!(store::get(&id).unwrap().turn_list[0].todos.len(), 1);
+    }
+
     #[test]
     fn the_event_says_only_what_changed() {
         let agent = Agent { id: "ab12".into(), folder: "garden-planner".into(), status: Status::Running, conversation: Some(3), ..Default::default() };
@@ -2661,7 +2714,7 @@ mod tests {
         assert_eq!(v["status"], "running");
         assert_eq!(v["conversation"], 3);
         assert_eq!(v["step"], "Reading notes.md");
-        for absent in ["file", "command", "about", "said", "todos", "now", "diff", "call", "done", "range", "output", "picture", "text", "cost", "problem"] {
+        for absent in ["file", "command", "about", "said", "todos", "now", "diff", "call", "under", "done", "range", "output", "picture", "text", "cost", "problem"] {
             assert!(v.get(absent).is_none(), "{absent}");
         }
         // A diff and a to-do list, as the tab reads them.
