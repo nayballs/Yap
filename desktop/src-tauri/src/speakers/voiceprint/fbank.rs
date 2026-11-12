@@ -85,8 +85,7 @@ impl Fbank {
 
     /// In-place radix-2 FFT of `re` + i·`im` (both `FFT` long).
     fn fft(&self, re: &mut [f32], im: &mut [f32]) {
-        for i in 0..FFT {
-            let j = self.bitrev[i];
+        for (i, &j) in self.bitrev.iter().enumerate().take(FFT) {
             if j > i {
                 re.swap(i, j);
                 im.swap(i, j);

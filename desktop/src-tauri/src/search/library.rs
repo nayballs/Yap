@@ -547,11 +547,8 @@ pub fn memory_relevant(keyword: &[usize], passages: &[Option<&Prepared>], simila
 /// notes by keyword count, `search_chats` and memory by their keyword rules.
 /// Never in a release build.
 pub fn keyword_only() -> bool {
-    #[cfg(debug_assertions)]
-    if std::env::var("YAP_EVAL_SEARCH").as_deref() == Ok("keyword") {
-        return true;
-    }
-    false
+    // (A release build never reads the variable: `false &&` stops there.)
+    cfg!(debug_assertions) && std::env::var("YAP_EVAL_SEARCH").as_deref() == Ok("keyword")
 }
 
 /// How long a search box waits for the search model (started if need be)
