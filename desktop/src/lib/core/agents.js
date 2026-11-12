@@ -699,8 +699,8 @@ export function helpersOf(events, live = false) {
  * refused, no plan or question waiting, not failed, stopped or undone. Its
  * answer is all there is, as a reply in Claude Code's own app: the thread
  * draws no line for it. (Before, a spoken "just testing" read as an agent
- * sent out: "AddOns · Hey Claude, just testing… ● Done", "Agent done ·
- * AddOns".) Pure.
+ * sent out: "garden-planner · Hey, just testing… ● Done", "Agent done ·
+ * garden-planner".) Pure.
  */
 export const plainReply = (turn) =>
   !!turn?.direct && turn.status === 'done' && !turn.files?.length && !turn.denials?.length && !turn.plan && !turn.asks && !turn.error && !turn.undone;
