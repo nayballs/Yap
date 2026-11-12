@@ -32,13 +32,17 @@
   // Code chat each turn's to-do card under its pill (AgentTodoCard), and a
   // running agent's permission prompts for this chat — each in a small chunk.
   import { agents, agentById } from '../../stores/agents.svelte.js';
-  import { pillsByAnswer, pillsByQuestion, answeredAfter } from '../../core/agents.js';
+  import { pillsByAnswer, pillsByQuestion, answeredAfter, directLine, plainReport, agentOfReport, reportFolder } from '../../core/agents.js';
   import { chatStatus } from '../../stores/chatStatus.svelte.js';
 
   const agentPills = $derived(pillsByAnswer(agents.list, chat.activeId, chat.messages));
   // …and under the person's own message, in a Code chat that works directly
   // (agents/direct.rs): its session's work, with no answer of Chat's between.
   const directPills = $derived(pillsByQuestion(agents.list, chat.activeId, chat.messages));
+  // **A plain reply is a plain reply** (12 Nov 2026): a direct turn that ended with nothing to report but its
+  // words has no line of its own and no "Agent done" line — its answer is all there is, as in Claude Code's app.
+  /** A report's marker with nothing to say (its turn a plain reply). */
+  const quietReport = (m) => plainReport(m, agentOfReport(agents.list, m.id, chat.activeId, reportFolder(m.text)));
   const asks = $derived(chat.activeId == null ? [] : agents.approvals.filter((a) => a.conversation === chat.activeId));
   // Answered from a paired phone (Remote Control): "Allowed from Office phone".
   const answeredRemote = $derived(chat.activeId == null ? [] : agents.remoteAnswers.filter((a) => a.conversation === chat.activeId));
@@ -234,9 +238,11 @@
             </div>
           {/if}
           {#if m.kind === 'agentReport'}
-            {#await import('./AgentReportCard.svelte') then { default: AgentReportCard }}
-              <AgentReportCard {m} conversation={chat.activeId} onopen={openAgent} {room} onpicture={openShared} quiet={!!code?.current} />
-            {/await}
+            {#if !quietReport(m)}
+              {#await import('./AgentReportCard.svelte') then { default: AgentReportCard }}
+                <AgentReportCard {m} conversation={chat.activeId} onopen={openAgent} {room} onpicture={openShared} quiet={!!code?.current} />
+              {/await}
+            {/if}
           {:else}
             <ChatMessage
               {m}
@@ -259,9 +265,13 @@
           {#if directPills.get(i)?.length}
             <!-- A Code chat that works directly: what its session says and does, under the message that asked
                  (the chat's own work, as Claude Code's transcript shows its own). -->
-            {#await import('./AgentPills.svelte') then { default: AgentPills }}
-              <AgentPills agents={directPills.get(i)} onopen={openAgent} quiet />
-            {/await}
+            <!-- (Its own line only once it ended with something to report: while it works its work says so, and a plain reply has none.) -->
+            {@const lines = directPills.get(i).filter(directLine)}
+            {#if lines.length}
+              {#await import('./AgentPills.svelte') then { default: AgentPills }}
+                <AgentPills agents={lines} onopen={openAgent} quiet />
+              {/await}
+            {/if}
             {#each directPills.get(i).filter(hasTodos) as p (`${p.id}:${p.turn ?? 1}`)}
               {#await import('./AgentTodoCard.svelte') then { default: AgentTodoCard }}
                 <AgentTodoCard agent={p} turn={p.turn ?? 1} line={agents.steps[p.id] || ''} />

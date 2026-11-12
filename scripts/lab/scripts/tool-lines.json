@@ -10,7 +10,7 @@
     { "wait": "agents", "timeout": 600 },
     { "expect": { "agent": { "status": "done", "error": null } } },
     {
-      "expect": { "selector": [{ "window": "main", "css": "[data-testid=\"chat-agent-work\"] [data-testid=\"chat-agent-work-steps\"]", "count": { "min": 1 } }], "visible": "Agent done" },
+      "expect": { "selector": [{ "window": "main", "css": "[data-testid=\"chat-agent-work\"] [data-testid=\"chat-agent-work-steps\"]", "count": { "min": 1 } }, { "window": "main", "css": ".msgs .cbubble.assistant", "count": { "min": 1 } }] },
       "note": "Its work as a line under the message."
     },
     { "expect": { "visible": "a helper" }, "soft": true, "note": "The hand-off said in the line (the model's own choice to use one: soft)." },

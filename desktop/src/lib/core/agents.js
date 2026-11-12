@@ -693,6 +693,41 @@ export function helpersOf(events, live = false) {
 }
 
 /**
+ * **A plain reply** (12 Nov 2026): a turn of a Code chat that works
+ * directly (the person's own message, straight to its session) that ended
+ * well with nothing to report beyond its words — no file changed, nothing
+ * refused, no plan or question waiting, not failed, stopped or undone. Its
+ * answer is all there is, as a reply in Claude Code's own app: the thread
+ * draws no line for it. (Before, a spoken "just testing" read as an agent
+ * sent out: "AddOns · Hey Claude, just testing… ● Done", "Agent done ·
+ * AddOns".) Pure.
+ */
+export const plainReply = (turn) =>
+  !!turn?.direct && turn.status === 'done' && !turn.files?.length && !turn.denials?.length && !turn.plan && !turn.asks && !turn.error && !turn.undone;
+
+/**
+ * **Does a direct turn have a line of its own in the thread** (its title
+ * and how it ended, which opens its tab)? Only once it has ended with
+ * something to report. While it works, its work says what it's on (and the
+ * message box has ■); a plain reply needs none. `pill`: `pillsByQuestion`'s.
+ * Pure.
+ */
+export function directLine(pill) {
+  const turn = (pill?.turnList || []).find((t) => t.n === (pill.turn ?? 1));
+  return !!turn && !isLive(turn.status) && !plainReply(turn);
+}
+
+/**
+ * **A report line with nothing to say**: a plain reply's marker message —
+ * its turn changed nothing, and the marker says no file and carries none.
+ * The answer right after it is the whole of it. Pure.
+ */
+export function plainReport(m, agent) {
+  if (m?.files?.length || /^Files it changed:/m.test(m?.text || '')) return false;
+  return plainReply(turnOfReport(agent, m?.id));
+}
+
+/**
  * **A turn's end, from its own events** (12 Nov 2026): `{over, text}` —
  * whether its latest event says it's over, and then its final words (its
  * latest event with `text`). The thread hears a turn's last event at once;

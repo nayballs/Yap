@@ -33,10 +33,11 @@
 //!   app (its model may look at the window in front, and answers there).
 //! - **Asked out loud, or from a phone** (12 Nov 2026): the Voice
 //!   Assistant's question asked with Chat in view, and a paired phone's
-//!   question in a Code chat, go straight to the session too. Yap says "On
-//!   it" ([`SENT_SAID`]; a phone reads [`SENT_SHOWN`]) — nothing of a
-//!   model's — and the session's own final words are read aloud when it's
-//!   done, as much of them as a spoken answer is (`chat/turn/report.rs`).
+//!   question in a Code chat, go straight to the session too. Nothing is
+//!   said first (a phone reads [`SENT_SHOWN`] where its answer will be):
+//!   the session's own final words are read aloud when it's done, as much
+//!   of them as a spoken answer is (`chat/turn/report.rs`). (For half a
+//!   day Yap said "On it." first — to a "just testing", too.)
 //!   A phone's turn runs at most at Auto, as ever ([`send`]'s `phone`).
 //!   Before, both were handed over by Chat's model so that the spoken
 //!   answer stayed short.
@@ -57,11 +58,10 @@ use crate::agents::workspaces::Folder;
 use crate::ai::claude_code::session::{self, Effort};
 use crate::integrations::claude_live::Origin;
 
-/// What Yap says out loud when a spoken question went straight to its
-/// Code chat's session: Yap's own two words, never a model's.
-pub const SENT_SAID: &str = "On it.";
-/// What a phone reads in the answer's place then.
-pub const SENT_SHOWN: &str = "On it. Its answer comes when it's done.";
+/// What a phone reads where its answer will be, when its question went
+/// straight to a Code chat's session (the session's own words follow as the
+/// chat's next message, and are said there). Yap's own words, no model's.
+pub const SENT_SHOWN: &str = "Sent to this chat's Claude Code. Its reply comes here.";
 
 /// What a turn is, as far as going directly is concerned.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
