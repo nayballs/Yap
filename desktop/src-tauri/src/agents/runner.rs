@@ -76,7 +76,7 @@ use serde::Serialize;
 use tauri::{AppHandle, Emitter};
 
 use crate::ai::claude_code::cli;
-use crate::ai::claude_code::events::{Block, Event, Problem, TurnResult};
+use crate::ai::claude_code::events::{Block, Event, Problem, StreamKind, TurnResult};
 use crate::ai::claude_code::session::{self, ApiKey, Conversation, Effort, Image, Pay, Session, Spec};
 use crate::ai::effort::Level;
 use crate::integrations::claude_live::{self, Approval, RunSpec, Tools};
@@ -90,6 +90,14 @@ use super::store::{self, Denial, Agent, ProblemNote, Status};
 
 /// The app event every change of an agent goes out as.
 pub const EVENT: &str = "yap-agent";
+/// **Its words as they're written** (12 Nov 2026): `{id, turn, text}`, the
+/// message it's writing so far, to the page only and many times a second —
+/// an event of its own so nothing that follows [`EVENT`] hears it. Never
+/// in its log, nor to a phone: once the message is whole it's a `said`
+/// line (or its final words), and the page lets this go.
+pub const SAYING_EVENT: &str = "yap-agent-saying";
+/// At most this often ([`SAYING_EVENT`]).
+const SAYING_EVERY: Duration = Duration::from_millis(70);
 /// The most agents at once.
 pub const MAX: usize = 3;
 /// What every brief ends with: the report is ready to say.
@@ -583,6 +591,13 @@ pub fn emit(ev: &AgentEvent) {
 fn emit_live(ev: &AgentEvent) {
     if let Some(app) = APP.get() {
         let _ = app.emit(EVENT, ev);
+    }
+}
+
+/// The message agent `id`'s turn `n` is writing, so far ([`SAYING_EVENT`]).
+fn emit_saying(id: &str, n: u32, text: &str) {
+    if let Some(app) = APP.get() {
+        let _ = app.emit(SAYING_EVENT, serde_json::json!({ "id": id, "turn": n, "text": text }));
     }
 }
 
@@ -1149,6 +1164,10 @@ struct Follow {
     under: Option<String>,
     /// Pictures kept this turn (`pictures::PER_TURN`).
     pictures: usize,
+    /// The message it's writing now, so far, and when the page was last
+    /// told ([`SAYING_EVENT`]).
+    saying: String,
+    saying_told: Option<Instant>,
     /// The commands' calls not back yet, by id (their output is said).
     commands: HashSet<String>,
     /// Characters of output kept this turn (`output::TURN_MAX`).
@@ -1229,6 +1248,8 @@ impl Follow {
             diff_used: agent.diff_lines as usize,
             under: None,
             pictures: 0,
+            saying: String::new(),
+            saying_told: None,
             commands: HashSet::new(),
             output_used: 0,
             meter: super::usage::Meter::new(before, &agent.model, window),
@@ -1405,6 +1426,41 @@ impl Follow {
         }
     }
 
+    /// **More of the message it's writing** (`saying`: all of it so far).
+    /// Whether the page is due another look ([`SAYING_EVERY`]; the first
+    /// piece at once): what isn't told now is in the next one, or in the
+    /// whole message.
+    fn on_saying(&mut self, more: &str) -> bool {
+        if more.is_empty() {
+            return false;
+        }
+        self.saying.push_str(more);
+        if self.saying_told.is_some_and(|t| t.elapsed() < SAYING_EVERY) {
+            return false;
+        }
+        self.saying_told = Some(Instant::now());
+        true
+    }
+
+    /// **A piece of Claude Code's stream**: a new message of its own starting
+    /// lets go of what was being written; a piece of its text is more of it
+    /// ([`Follow::on_saying`]: whether to tell the page). A helper's words
+    /// aren't its own.
+    fn on_stream(&mut self, s: &crate::ai::claude_code::events::Stream) -> bool {
+        if s.parent_tool_use_id.as_deref().is_some_and(|p| !p.is_empty()) {
+            return false;
+        }
+        match &s.kind {
+            StreamKind::MessageStart { .. } => {
+                self.saying.clear();
+                self.saying_told = None;
+                false
+            }
+            StreamKind::Text { text, .. } => self.on_saying(text),
+            _ => false,
+        }
+    }
+
     /// One event of Claude Code's.
     fn on(&mut self, ev: Event, session: &Session) {
         match ev {
@@ -1423,6 +1479,11 @@ impl Follow {
                 }
                 // (A helper's message: its tool calls are its own steps, under the call that sent it.)
                 self.under = a.parent_tool_use_id.clone().filter(|p| !p.is_empty());
+                // Its own message, whole now: what was being written is this.
+                if self.under.is_none() {
+                    self.saying.clear();
+                    self.saying_told = None;
+                }
                 for block in &a.blocks {
                     match block {
                         Block::ToolUse { id, name, input } => self.on_tool(id, name, input),
@@ -1456,6 +1517,12 @@ impl Follow {
                         self.on_tool_result(tool_use_id, *is_error, text, record);
                         self.on_pictures(tool_use_id, pictures);
                     }
+                }
+            }
+            // Its words as they're written.
+            Event::Stream(s) => {
+                if self.on_stream(&s) {
+                    emit_saying(&self.id, self.n, &self.saying);
                 }
             }
             Event::PermissionDenied(d) => {
@@ -2748,6 +2815,38 @@ mod tests {
         }
         let kept: usize = store::log_read(&id).iter().filter_map(|e| e.get("output")).map(|o| o["text"].as_str().unwrap_or("").chars().count() + o["tail"].as_str().unwrap_or("").chars().count()).sum();
         assert!(kept <= super::super::output::TURN_MAX && kept > super::super::output::TURN_MAX / 2, "{kept}");
+    }
+
+    /// Its words as they're written: the message so far, told at once, then
+    /// at most every [`SAYING_EVERY`]; a helper's are never its own; the
+    /// whole message (or a new one starting) ends what was being written.
+    #[test]
+    fn its_words_are_told_as_they_are_written_never_into_its_log() {
+        use crate::ai::claude_code::events::{Stream, StreamKind};
+        let id = store::new_id();
+        let folder = PathBuf::from(format!(r"D:\Projects\seed-tracker-{id}"));
+        store::insert(Agent { id: id.clone(), folder: "seed-tracker".into(), path: folder.to_string_lossy().into_owned(), status: Status::Running, started_ts: 5, turn_list: vec![store::TurnNote { n: 1, status: Status::Running, started_ts: 5, ..Default::default() }], ..Default::default() });
+        let agent = store::get(&id).unwrap();
+        let backup = store::turn_backup_dir(&id, 1).unwrap();
+        let mut follow = Follow::new(&agent, 1, folder, backup, Mode::Auto, 200_000, None);
+        // The first piece at once; the next within the pause is kept for the one after.
+        assert!(follow.on_saying("I'll add "));
+        assert!(!follow.on_saying("the watering "));
+        assert!(!follow.on_saying(""));
+        assert_eq!(follow.saying, "I'll add the watering ");
+        follow.saying_told = Some(Instant::now() - SAYING_EVERY);
+        assert!(follow.on_saying("schedule."));
+        assert_eq!(follow.saying, "I'll add the watering schedule.");
+        // Nothing of it is a line of its log.
+        assert!(store::log_read(&id).is_empty());
+        // A new message starting lets it go.
+        assert!(!follow.on_stream(&Stream { parent_tool_use_id: None, kind: StreamKind::MessageStart { id: None, model: None, prompt: None } }));
+        assert_eq!(follow.saying, "");
+        // A helper's words aren't its own.
+        assert!(!follow.on_stream(&Stream { parent_tool_use_id: Some("toolu_task".into()), kind: StreamKind::Text { index: 0, text: "Checking the docs.".into() } }));
+        assert_eq!(follow.saying, "");
+        assert!(follow.on_stream(&Stream { parent_tool_use_id: None, kind: StreamKind::Text { index: 0, text: "Done.".into() } }));
+        assert_eq!(follow.saying, "Done.");
     }
 
     /// A session that hands part of its work to a helper (Claude Code's

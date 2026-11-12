@@ -303,12 +303,16 @@ workspace, word for word, and no model of Chat's is asked.
   passage, Skill or "think it through". **Everything else is handed over as
   before** by Chat's model: a Code chat on an API key or an on-device model,
   the Voice Assistant's spoken question, a question from the phone.
+- **Its words as it writes them** (2026-11-12): the message it's writing
+  shows in its work as it grows, its final words too
+  ([Around the tab](#around-the-tab), "its words as it writes them").
 - **Not yet**: Yap's own chat tools inside a direct Code chat (the browser
   panel, memory, connectors, documents), the phone and the Voice Assistant
-  going direct, its final words shown as they stream.
+  going direct.
 - **Tests**: `agents-direct.spec.js` (the first message, the next on
   `--resume`, a message mid-work, a message with a screenshot — the first,
-  the next turn's own, a note's —, ■ Stop and Esc, the switch off). The e2e base config has
+  the next turn's own, a note's —, its words as it writes them, ■ Stop and
+  Esc, the switch off). The e2e base config has
   `agentsDirect: false`, so every older spec still tests the hand-off; Yap
   Lab's `code-chat-direct` script runs it on the real Claude Code.
 
@@ -1285,11 +1289,37 @@ instead of a terminal (rebuilt after the maintainer's first real agent,
     they're all one's ("used github 3 times", "used a skill"), counted
     otherwise ("used 3 tools"); helpers read "handed part of it to a
     helper". The Agent tab's timeline gives each its icon;
+  - **its words as it writes them** (2026-11-12, as Claude Code's own
+    transcript shows them): the message it's writing now is the last
+    paragraph, growing. Before, each message appeared at once when it was
+    finished, so a long answer was a long wait with nothing to read.
+    - **From Claude Code's stream** (`--include-partial-messages`, always
+      on): the runner keeps the text of the message being written
+      (`Follow::on_stream`: a piece of its text more of it, a new message
+      starting or the whole one arriving lets it go; a helper's words are
+      never its own) and tells the page all of it so far, the first piece
+      at once and then at most every 70 ms.
+    - **An event of its own, to the page only**: `yap-agent-saying`
+      `{id, turn, text}`. Never a line of its log, never to a phone, and
+      nothing that follows `yap-agent` hears it.
+    - **The page** (`stores/agentLogs.svelte.js` `saying`, `AgentWork`):
+      the paragraph is drawn as Markdown at each piece (its code coloured
+      once the message is whole), and let go when the message is whole —
+      its `said` line takes its place, or the chat's answer — or the
+      agent moves on to a step or is over (`sayingOver`). While it
+      writes, no line of steps has the spinner.
+    - In a Code chat's thread and in an agent's row of the Agent panel. Not
+      in the tab's timeline.
   - **while it works**, the last line is the step it's on, with a spinner
     (`agents.steps`), and becomes its summary once the agent speaks or ends;
-  - **never its final words** in the thread: its report tells those, right
-    below. In its panel row they are its last lines, since no report
-    follows them there.
+  - **its final words are the chat's answer**, right below — and its
+    work's until the answer is there (`AgentWork`'s `answered`,
+    `core/agents.js` `answeredAfter`): they stay where they were written
+    and leave as the answer's bubble arrives, never shown twice nor gone
+    for a moment (2026-11-12: a real run showed them in both places for an
+    instant, the store's record of the turn being a moment behind its last
+    event; a turn's end is now its own last event's, `turnEnd`). In its
+    panel row they are its last lines, since no report follows them there.
     Housekeeping alone ("Starting Claude Code", a note read, a denial,
     Yap's permission prompts' own tool, Claude Code looking a tool up:
     "Finding a tool", its `ToolSearch`) is a line only while it's what the
@@ -2029,6 +2059,7 @@ Pages (`desktop/src/lib/`): `views/chat/` (`ChatSideSwitch`,
 | Event | Payload |
 |---|---|
 | `yap-agent` | `{id, status, folder, conversation?, step?, file?, command?, about?, said?, todos?, now?, diff?, call?, under?, picture?, text?, cost?, problem?, turn?, queued?, ts}` — `call` the tool call a step is (Claude Code's id), or the one a `diff`, an `output` or a `picture` came back from; `under` on a helper's own step, the session's call that handed it the work (its `Task`'s id); `done` a command's line once done ("Listed the folder"), `range` the lines a Read asked for ("424–503"), with their step; `output` `{text, tail?, more?, failed?}`, what a command printed (`agents/output.rs`; never to a phone); `picture` `{id, w, h}`, a picture that call's answer carried (`agents/pictures.rs`); `turn` the turn it's about (`TurnNote.n`), `queued` a request queued as that turn (its title); `status` queued \| running \| asking \| done \| failed \| stopped \| interrupted; `about` a command's description; `said` its words between tool calls; `todos` `[{content, status, activeForm?}]` (status pending \| in_progress \| completed); `now` the line it's on with no new step; `diff` `{file, kind, lines, added, removed, more?, all?}` — `kind` edit \| new \| rewrite \| write, each line its mark first (`-`, `+`, ` `; a lone `@` a gap; `@@ -a,b +c,d @@` a part's place in the file); `text` its final words (an older Yap's words as it worked too); `problem` `{kind, message, resetsAt?}`, `kind` notSignedIn \| rateLimited \| billing \| account \| paysAnotherWay; `usage` what its turn has used (`{input, output, cacheRead, cacheWrite, context, window, estimate?}`, `agents/usage.rs`: live, never a line of its log, but for a result's and a turn's end); `changed` its record changed with no step (2026-11-08: `planUnused` a plan set aside, `dismissed` / `shown` its panel row, `finished` Move to finished): the pages read it again |
+| `yap-agent-saying` | `{id, turn, text}` — the message agent `id`'s turn is writing now, all of it so far: many times a second, to the page only (never logged, never to a phone); let go when a `yap-agent` event has its `said`, its `text`, a `step`, or a status that's over |
 | `yap-agent-report` | `{agent, turn, conversation, messageId, markerId, status}` — the turn it reports, and its status; `messageId` null when a newer question came first |
 | `yap-agent-open` | `{id, conversation}` (with `yap-assistant-turn {phase: "open", conversationId, show: true}`) |
 | `yap-claude-approve` | `{id, run, conversation, origin, tool, summary, detail, label, askedTs}` — `run` is the agent's id; a plan's (`tool` "ExitPlanMode"): `summary` "The plan is ready", `detail` the plan |
@@ -2271,6 +2302,11 @@ Code, Open in terminal's blank tab, Chat's thread following a report.
   call and, under it (`under`: that call's id), the helper's three steps;
   the thread showed the one line "Handed part of it to a helper · Count
   test() calls in convert.test.js".
+
+- **Its words as it writes them**: asked for some 300 words with no
+  tools, the thread showed the answer growing mid-sentence under the
+  message, with ■ Stop in the message box; at its end the work had none of
+  it left and the thread one answer.
 
 **Not yet tried on a real run:**
 

@@ -656,6 +656,40 @@ export function pillsByAnswer(agents, conversation, messages) {
 }
 
 /**
+ * **A turn's end, from its own events** (12 Nov 2026): `{over, text}` —
+ * whether its latest event says it's over, and then its final words (its
+ * latest event with `text`). The thread hears a turn's last event at once;
+ * the store's record of the turn follows a moment later (it's read again),
+ * so a turn's work goes by this meanwhile: no spinner on a turn that has
+ * ended, and its final words known as soon as they're said.
+ */
+export function turnEnd(events) {
+  const list = events || [];
+  const last = list.length ? list[list.length - 1] : null;
+  const over = !!last && !isLive(last.status);
+  const said = over ? list.findLast((e) => typeof e?.text === 'string' && e.text.trim()) : null;
+  return { over, text: said ? said.text.trim() : '' };
+}
+
+/**
+ * **Is the answer to the question at `i` in the thread?** In a Code chat
+ * that works directly the session's final words become the chat's answer:
+ * an assistant message after the question, before the next message that
+ * started a turn of its own (`startsTurn(k)`). Until it's there the words
+ * stay where they were written, in its work; from then they're the
+ * answer's alone — never shown twice, never gone for a moment. Pure.
+ */
+export function answeredAfter(messages, i, startsTurn = () => false) {
+  const list = messages || [];
+  for (let k = i + 1; k < list.length; k++) {
+    if (startsTurn(k)) return false;
+    const m = list[k];
+    if (m?.role === 'assistant' && !m.kind && !m.streaming) return true;
+  }
+  return false;
+}
+
+/**
  * **The Code chat's own session, at work** (12 Nov 2026): the agent of
  * `conversation` still going whose latest turn is the person's own message
  * (`direct`: a Code chat that works directly) — what the message box's ■

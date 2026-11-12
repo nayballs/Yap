@@ -32,7 +32,7 @@
   // Code chat each turn's to-do card under its pill (AgentTodoCard), and a
   // running agent's permission prompts for this chat — each in a small chunk.
   import { agents, agentById } from '../../stores/agents.svelte.js';
-  import { pillsByAnswer, pillsByQuestion } from '../../core/agents.js';
+  import { pillsByAnswer, pillsByQuestion, answeredAfter } from '../../core/agents.js';
   import { chatStatus } from '../../stores/chatStatus.svelte.js';
 
   const agentPills = $derived(pillsByAnswer(agents.list, chat.activeId, chat.messages));
@@ -269,7 +269,7 @@
             {/each}
             {#each directPills.get(i) as p (`work:${p.id}:${p.turn ?? 1}`)}
               {#await import('./AgentWork.svelte') then { default: AgentWork }}
-                <AgentWork agent={p} turn={p.turn ?? 1} line={agents.steps[p.id] || ''} onview={openShared} />
+                <AgentWork agent={p} turn={p.turn ?? 1} line={agents.steps[p.id] || ''} onview={openShared} answered={answeredAfter(chat.messages, i, (k) => directPills.has(k))} />
               {/await}
             {/each}
           {/if}

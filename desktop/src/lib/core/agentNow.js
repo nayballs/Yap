@@ -2,10 +2,18 @@
 // part of core/agents.js the main window's chunk needs at start-up
 // (stores/agents.svelte.js), kept apart so the rest of agents.js loads with
 // the views that show agents (frontend.md, "One chunk per window").
-// core/agents.js re-exports all three. No Svelte state: pure.
+// core/agents.js re-exports the first three. No Svelte state: pure.
 
 /** Not over yet: queued, running, or waiting for the person to allow a step. */
 export const isLive = (status) => status === 'queued' || status === 'running' || status === 'asking';
+
+/**
+ * **An event that ends the message an agent was writing** (its words as
+ * it writes them: `yap-agent-saying`, stores/agentLogs.svelte.js): the
+ * message whole (its `said` line, its final `text`), a step it moved on
+ * to, or the agent over. Pure.
+ */
+export const sayingOver = (ev) => !!(ev?.said || ev?.text || ev?.step || !isLive(ev?.status));
 
 /** The line of an agent whose plan waits for the person's Go ahead (agents/runner.rs `on_tick`). */
 export const PLAN_WAITING = 'Waiting for you: its plan is ready';
