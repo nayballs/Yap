@@ -243,11 +243,37 @@ workspace, word for word, and no model of Chat's is asked.
 - **The person's words** (`direct::send`): the first message is its brief,
   each later one its next turn (`runner::Ask.direct`, the turn's `direct`).
   A plain "go ahead" to a plan waiting carries it out, as ever.
+- **As they are** (2026-11-12): nothing of Yap's is added to them. Every
+  other turn's message ends with the runner's summary line ("When you're
+  done, finish with a short summary of what you changed and anything you
+  couldn't do."), which is for a brief Chat's model worded: its final words
+  are relayed as a report. Added to the person's own words it made a
+  spoken "just testing the app's working" come back as "I didn't change
+  anything this time. Quest XP Bar is still at 1.4.0…". A direct turn has
+  none (`runner::closing`), and a message sent while it works goes without
+  the note line too (`note_text`): in Claude Code's own app a message is
+  what was typed. (A read-only turn still says it's read only.)
 - **Its own answer** (`report.rs` `own_words`): when it stops, its final
   words are the chat's answer as they are — whole, each turn's when the
-  report covers several, with "It didn't finish: …" when it didn't — after
-  the quiet "Agent done · changed …" line (a plan's Go ahead is there). No
+  report covers several, with "It didn't finish: …" when it didn't. No
   model is asked to word it.
+- **A plain reply is a plain reply** (2026-11-12; the maintainer, after
+  saying hello out loud: "it always said On it, then would send an agent to
+  do something then report back with that… all I was doing was just testing
+  yap"). A direct turn that ended well with nothing to report beyond its
+  words — no file changed, nothing refused, no plan or question waiting
+  (`core/agents.js` `plainReply`) — shows as the message and the answer,
+  as a reply in Claude Code's own app does:
+  - **no line of its own** ("AddOns · Hey Claude, just testing… ● Done"):
+    a direct turn has one only once it ended with something to report
+    (`directLine`). While it works its work says what it's on, and the
+    message box has ■;
+  - **no "Agent done" line**: its marker message is still saved (the
+    report's record, a phone's), and the thread leaves it out
+    (`plainReport`: unless it names a file changed or carries one);
+  - a turn that changed files, was refused something, didn't finish or has
+    a plan waiting keeps both, as before ("Agent done · AddOns · Changed
+    notes.md ›", its Go ahead).
 - **On the chat's own model**: the plan model and effort its chip shows,
   kept as the person's choice, so it's the same from turn to turn (a session
   read afresh on another model costs its whole context again: [What a turn
@@ -258,10 +284,10 @@ workspace, word for word, and no model of Chat's is asked.
   a model wording a brief from what it read ([The safety
   rule](#the-safety-rule)). The instruction is the person's own typed words;
   what the session may do is the Mode's business.
-- **In the thread** (`core/agents.js` `pillsByQuestion`): its quiet line,
-  its to-do card and its work ([Around the tab](#around-the-tab)) hang under
-  the person's message, with no bubble of Chat's between, then the report
-  line and the answer. The page keeps the question as saved when
+- **In the thread** (`core/agents.js` `pillsByQuestion`): its to-do card
+  and its work ([Around the tab](#around-the-tab)) hang under the person's
+  message, with no bubble of Chat's between, then — when there's something
+  to report — its quiet line and report line, and the answer. The page keeps the question as saved when
   `chat_send` answers `direct` (the session's tab opens beside it).
 - **With its screenshots** (2026-11-12): the ones the person put in the
   box (snipped, pasted, dropped) go to the session with their words, as
@@ -301,11 +327,13 @@ workspace, word for word, and no model of Chat's is asked.
   Chat in view**, and a paired phone's question in a Code chat, go straight
   to the session too. Before, both were handed over by Chat's model, so
   that the spoken answer stayed short.
-  - **Yap says "On it."** (`direct::SENT_SAID`: its own words, no model's;
-    said where an answer would be — replies spoken, no meeting or call, no
-    dictation begun meanwhile); a phone reads "On it. Its answer comes when
-    it's done." (`SENT_SHOWN`). The page keeps the question and shows its
-    session beside it (`yap-assistant-turn`'s "answered" with `direct`).
+  - **Nothing is said first.** The bar goes back to idle (its "agent
+    working" pill says the rest), the page keeps the question and shows its
+    session beside it (`yap-assistant-turn`'s "answered" with `direct`),
+    and a phone reads "Sent to this chat's Claude Code. Its reply comes
+    here." where its answer will be (`direct::SENT_SHOWN`). (For half a day
+    Yap said "On it." out loud first, to a hello too: taken out the same
+    evening.)
   - **Its own answer is read aloud when it's done**, as much of it as a
     spoken answer is (Settings' "Read aloud": `assistant::spoken_answer`,
     then "The rest is in Chat."): the session's own words can be long,
@@ -360,8 +388,9 @@ workspace, word for word, and no model of Chat's is asked.
 - **Tests**: `agents-direct.spec.js` (the first message, the next on
   `--resume`, a message mid-work, a message with a screenshot — the first,
   the next turn's own, a note's —, its words as it writes them, asked out
-  loud with the chat in view, its session reading Yap's own data, ■ Stop
-  and Esc, the switch off). The e2e base config has
+  loud with the chat in view, just chatting (the words as they are, the
+  thread the message and the answer, nothing said but the answer), its
+  session reading Yap's own data, ■ Stop and Esc, the switch off). The e2e base config has
   `agentsDirect: false`, so every older spec still tests the hand-off; Yap
   Lab's `code-chat-direct` script runs it on the real Claude Code.
 

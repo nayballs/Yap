@@ -813,23 +813,46 @@ async fn run(id: String, message: Option<String>) {
     pump();
 }
 
-/// What a turn sends first: the brief (with [`SUMMARY_LINE`], or a read-only
-/// turn's [`READ_ONLY_LINE`]) or `message`.
-fn opening(agent: &Agent, message: Option<&str>, read_only: bool) -> String {
+/// What a turn sends first: the brief (with [`closing`]'s line) or `message`.
+fn opening(agent: &Agent, message: Option<&str>, read_only: bool, direct: bool) -> String {
     match message {
         Some(m) => m.to_string(),
-        None => format!("{}\n\n{}", agent.brief.trim(), closing(read_only)),
+        None => ended(&agent.brief, closing(read_only, direct)),
     }
 }
 
-/// What a turn's message ends with: [`SUMMARY_LINE`], or a read-only turn's
-/// [`READ_ONLY_LINE`].
-fn closing(read_only: bool) -> &'static str {
+/// **What a turn's message ends with**: [`SUMMARY_LINE`], or a read-only
+/// turn's [`READ_ONLY_LINE`] — and nothing at all for the person's own
+/// message in a Code chat that works directly (`direct`, 12 Nov 2026).
+/// The summary line is for a brief Chat's model worded, whose final words
+/// are relayed as a report. Added to the person's own words it made a plain
+/// "just testing" come back as "I didn't change anything this time…": in
+/// Claude Code's own app a message is what was typed, nothing more.
+fn closing(read_only: bool, direct: bool) -> &'static str {
     if read_only {
         READ_ONLY_LINE
+    } else if direct {
+        ""
     } else {
         SUMMARY_LINE
     }
+}
+
+/// `text`, then `end` after a blank line when there is one.
+fn ended(text: &str, end: &str) -> String {
+    if end.is_empty() {
+        text.trim().to_string()
+    } else {
+        format!("{}\n\n{end}", text.trim())
+    }
+}
+
+/// **A note handed to the turn working**, as it's written to it: with
+/// [`NOTE_LINE`] — or, the person's own message in a Code chat that works
+/// directly, as they wrote it (Claude Code takes a message sent mid-work
+/// into its work by itself).
+fn note_text(ask: &Ask) -> String {
+    ended(&ask.text, if ask.direct { "" } else { NOTE_LINE })
 }
 
 /// **The tools a turn at `mode` runs without** (`--disallowedTools`): a
@@ -1024,7 +1047,7 @@ async fn turn(id: &str, message: Option<String>) -> (Status, u32) {
         }
         None => (true, Vec::new(), Vec::new()),
     });
-    let mut first = std::iter::once(opening(&agent, message.as_deref(), read_only)).chain(extra.iter().map(|t| format!("Also: {t}"))).collect::<Vec<_>>().join("\n\n");
+    let mut first = std::iter::once(opening(&agent, message.as_deref(), read_only, direct)).chain(extra.iter().map(|t| format!("Also: {t}"))).collect::<Vec<_>>().join("\n\n");
     // **The screenshots its request came with** (the turn's own, and those
     // of words that came while it started), as Claude Code's own app sends
     // a pasted picture. Never again with a Continue: its session has them.
@@ -2175,7 +2198,7 @@ pub fn follow_up(id: &str, ask: Ask) -> Result<(Agent, FollowedUp), String> {
         Not,
     }
     let text = ask.text.clone();
-    let note = format!("{text}\n\n{NOTE_LINE}");
+    let note = note_text(&ask);
     let at = with_state(|s| {
         if let Some(l) = s.live.get_mut(id) {
             if !l.started && l.stopping.is_none() && joins {
@@ -2410,11 +2433,13 @@ fn resume(id: &str, next: Next, ask: &Ask, new_turn: bool) {
     // A read-only turn: a new one as asked; the turn carried on (Continue, a
     // request queued as it) as it was.
     let read_only = if new_turn { ask.read_only } else { agent.turn_list.last().is_some_and(|t| t.read_only) };
-    let end = closing(read_only);
+    // The person's own message (a Code chat that works directly): as it is.
+    let direct = if new_turn { ask.direct } else { agent.turn_list.last().is_some_and(|t| t.direct) };
+    let end = closing(read_only, direct);
     let body = match &next {
-        Next::CarryOn => format!("{CARRY_ON}\n\n{end}"),
-        Next::Message(t) if go && was_plan => format!("{t}\n\nGo ahead: carry out the plan. {SUMMARY_LINE}"),
-        Next::Message(t) => format!("{t}\n\n{end}"),
+        Next::CarryOn => ended(CARRY_ON, end),
+        Next::Message(t) if go && was_plan => ended(&format!("{}\n\nGo ahead: carry out the plan.", t.trim()), if direct { "" } else { SUMMARY_LINE }),
+        Next::Message(t) => ended(t, end),
     };
     let title = ask.title();
     let agent = store::update(id, |j| {
@@ -2737,12 +2762,21 @@ mod tests {
     #[test]
     fn a_turn_opens_with_the_brief_and_the_summary_line() {
         let agent = Agent { brief: "  Tidy the readme.  ".into(), ..Default::default() };
-        assert_eq!(opening(&agent, None, false), format!("Tidy the readme.\n\n{SUMMARY_LINE}"));
-        assert_eq!(opening(&agent, Some("Also the changelog."), false), "Also the changelog.");
+        assert_eq!(opening(&agent, None, false, false), format!("Tidy the readme.\n\n{SUMMARY_LINE}"));
+        assert_eq!(opening(&agent, Some("Also the changelog."), false, false), "Also the changelog.");
+        // **The person's own message, straight to a Code chat's session: as they wrote it.** No summary
+        // line (a plain "just testing" came back as "I didn't change anything this time…"), no note line.
+        let hello = Agent { brief: "Hey, just testing the app's working.".into(), ..Default::default() };
+        assert_eq!(opening(&hello, None, false, true), "Hey, just testing the app's working.");
+        assert_eq!((closing(false, true), closing(false, false)), ("", SUMMARY_LINE));
+        assert_eq!(closing(true, true), READ_ONLY_LINE, "a read-only turn still says so");
+        assert_eq!(ended("  Carry on.  ", ""), "Carry on.");
+        assert_eq!(note_text(&Ask { text: "Keep the headings.".into(), direct: true, ..Default::default() }), "Keep the headings.");
+        assert_eq!(note_text(&Ask::of("Keep the headings.", false)), format!("Keep the headings.\n\n{NOTE_LINE}"));
         assert!(SUMMARY_LINE.starts_with("When you're done, finish with a short summary of what you changed and anything you couldn't do."));
         // A read-only turn: the brief says it mustn't change files, and to report what it found.
         let catch_up = Agent { brief: "Get caught up with the add-on in this folder.".into(), ..Default::default() };
-        let said = opening(&catch_up, None, true);
+        let said = opening(&catch_up, None, true, false);
         assert!(said.starts_with("Get caught up with the add-on in this folder.\n\nThis is read only: don't change, create or delete any files"), "{said}");
         assert!(said.ends_with("finish with a short summary of what you found."));
         assert!(!said.contains(SUMMARY_LINE));

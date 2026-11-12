@@ -15,7 +15,7 @@
     { "wait": "agents", "timeout": 600 },
     { "expect": { "agent": { "status": "done", "error": null } } },
     {
-      "expect": { "selector": [{ "window": "main", "css": ".cbubble.user img", "count": { "min": 1 } }], "visible": "Agent done" },
+      "expect": { "selector": [{ "window": "main", "css": ".cbubble.user img", "count": { "min": 1 } }, { "window": "main", "css": ".msgs .cbubble.assistant", "count": { "min": 1 } }] },
       "note": "The message keeps its screenshot in the thread."
     },
     { "expect": { "visible": "triangle" }, "soft": true, "note": "The session saw the picture itself (its own words: soft)." },

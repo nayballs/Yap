@@ -27,9 +27,15 @@
 //   prompt as Claude Code does (`_mcp approve`) and its answer is read back
 //   from a file. Before, every question was refused at once.
 // - Asked out loud with the Code chat in view (the Voice Assistant, 12 Nov
-//   2026): straight to its session too. Yap says "On it." (its own words,
-//   no model's), and the session's answer is read aloud when it's done.
-//   Before, a spoken question was handed over by Chat's model.
+//   2026): straight to its session too; its answer is read aloud when it's
+//   done, and nothing is said before it. Before, a spoken question was
+//   handed over by Chat's model.
+// - A plain reply is a plain reply (12 Nov 2026, the maintainer, on a spoken
+//   "just testing": "it always said On it, then would send an agent to do
+//   something then report back"): Claude Code gets the person's words as
+//   they are (no "finish with a summary" line of Yap's), and a turn that
+//   ended with nothing to report has no line of its own and no "Agent
+//   done" line in the thread: the message, then the answer.
 // - Its session reads Yap's own data (12 Nov 2026): meetings, notes, tasks
 //   and the calendar over Yap's endpoint, allowed with no prompt — never
 //   Yap's memory. (An agent Chat sent out has none: agents-turns.spec.js.)
@@ -47,7 +53,7 @@ import { fakeClaude, planConfig } from './support/claude-plan.js';
 import { RUNS } from './support/yap.js';
 import { newCodeChat } from './support/code-chats.js';
 import { writePng } from './support/png.js';
-import { workingDirectly, turnEnd, answeredAfter } from '../src/lib/core/agents.js';
+import { workingDirectly, turnEnd, answeredAfter, plainReply, directLine, plainReport } from '../src/lib/core/agents.js';
 import { sayingOver, questionAnswers, questionsAnswered } from '../src/lib/core/agentNow.js';
 
 const HERE = path.join(RUNS, 'agents-direct-spec');
@@ -215,6 +221,9 @@ const READS_YAP = [
 /** What Yap's endpoint gave the stand-in so far: a list of its tools, then each call's answer. */
 const toolDumps = () => (fs.existsSync(TOOLS) ? fs.readFileSync(TOOLS, 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l)) : []);
 
+/** Says back the words it was given, exactly (the stand-in's `{{user_text}}`): a reply, no work. */
+const SAYS_BACK = [{ _wait_user: true }, { _dump_args: ARGS }, init(), said('b1', [{ type: 'text', text: 'Got: {{user_text}}' }], 'end_turn'), result('Got: {{user_text}}', 0.001), { _wait_user: true }];
+
 function writeScript(name, lines) {
   fs.mkdirSync(SCRIPTS, { recursive: true });
   const file = path.join(SCRIPTS, `${name}.jsonl`);
@@ -376,7 +385,8 @@ test('a message while it works is handed to it at once: the same turn, one answe
   const messages = await messagesOf(yap, done.conversation, 4);
   expect(messages.map((m) => m.kind || m.role)).toEqual(['user', 'user', 'agentReport', 'assistant']);
   expect(messages[3].text).toContain('Read notes.md. Noted: Keep the headings as they are.');
-  await expect.poll(() => laidOut(main)).toEqual(['you', 'work', 'you', 'report', 'answer']);
+  // (It changed nothing: its answer is all there is, with no "Agent done" line.)
+  await expect.poll(() => laidOut(main)).toEqual(['you', 'work', 'you', 'answer']);
 });
 
 test('a message with a screenshot goes straight to its session too: the picture with its words, each turn its own', async ({ yap, main, shot }) => {
@@ -498,7 +508,11 @@ test('Claude Code’s own question is a card: an option answers it, several are 
   // One question, one answer: no Send; it waits on the person, and says what for.
   await expect(card.getByRole('button', { name: 'Send', exact: true })).toHaveCount(0);
   await expect.poll(statusNow, { timeout: 20_000 }).toBe('asking');
-  await expect(thread(main).getByTestId('chat-agent-work').locator('[data-busy="true"] .wtext')).toHaveText('Waiting for you: it has a question');
+  // Its turn's work is above the card by now, saying what it waits for. (The stand-in asks the instant its turn
+  // starts, so the card can be up a moment before that line is, and moves down a line when it comes: a click
+  // made meanwhile lands beside its button. A real session asks seconds in. Every card below waits for this.)
+  const settled = () => expect(thread(main).getByTestId('chat-agent-work').locator('[data-busy="true"] .wtext')).toHaveText('Waiting for you: it has a question', { timeout: 20_000 });
+  await settled();
   await shot(main, '40-a-question-from-claude-code');
   // The click on an option is the answer, under the question's own words.
   await card.getByRole('button', { name: /South bed/ }).click();
@@ -512,6 +526,7 @@ test('Claude Code’s own question is a card: an option answers it, several are 
   await script(yap, asks(TWO_QUESTIONS), 'asks-two');
   await send(main, 'And tidy the notes.');
   await expect(card).toBeVisible({ timeout: 20_000 });
+  await settled();
   const sets = card.getByTestId('chat-agent-question');
   const sendAnswers = card.getByRole('button', { name: 'Send', exact: true });
   await expect(sets).toHaveCount(2);
@@ -544,6 +559,7 @@ test('Claude Code’s own question is a card: an option answers it, several are 
   await script(yap, asks(ONE_QUESTION), 'asks-again');
   await send(main, 'One more thing.');
   await expect(card).toBeVisible({ timeout: 20_000 });
+  await settled();
   await card.getByRole('button', { name: 'Let it decide' }).click();
   await expect(card).toHaveCount(0);
   await expect.poll(() => decisions().length, { timeout: 20_000 }).toBe(3);
@@ -556,7 +572,43 @@ test('Claude Code’s own question is a card: an option answers it, several are 
   expect(log.some((e) => e.step === 'Waiting for you: it has a question')).toBe(true);
 });
 
-test('asked out loud with the Code chat in view: straight to its session, “On it.” said, its own answer read aloud', async ({ yap, main }) => {
+test('just chatting: Claude Code gets the words as they are, and the thread is the message and the answer — typed or out loud', async ({ yap, main, shot }) => {
+  await script(yap, SAYS_BACK, 'says-back');
+  await setConfig(yap, main, { speakReplies: true, agentsSpeak: 'voice' });
+  await yap.invoke('tts_e2e_spoken', { clear: true });
+  const before = (await agents(yap)).length;
+  await codeChat(main);
+  const HELLO = "Hey, just testing the app's working.";
+  await send(main, HELLO);
+  const agent = await ended(yap, (await newAgent(yap, before)).id);
+  // The words as they were typed: nothing of Yap's added (it used to end "When you're done, finish with a
+  // short summary of what you changed…", and a hello came back as "I didn't change anything this time").
+  const wordsSeen = () => fs.readFileSync(ARGS, 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l).user_text);
+  expect(wordsSeen()).toEqual([HELLO]);
+  const messages = await messagesOf(yap, agent.conversation, 3);
+  expect(messages[2].text).toBe(`Got: ${HELLO}`);
+  // The thread: the message and the answer. No line of its own, no "Agent done", no work to show.
+  await expect(thread(main).locator('.cbubble.assistant')).toHaveText([`Got: ${HELLO}`]);
+  await expect.poll(() => laidOut(main)).toEqual(['you', 'answer']);
+  await expect(thread(main).getByTestId('chat-agent-pill')).toHaveCount(0);
+  await expect(thread(main).getByTestId('chat-agent-report')).toHaveCount(0);
+  await shot(main, '50-a-plain-reply');
+
+  // Out loud, the chat in view: the same — and the only thing said is the answer.
+  const THANKS = 'Thanks, that was all.';
+  await askAloud(yap, THANKS);
+  await expect.poll(async () => (await agents(yap)).find((j) => j.id === agent.id).turnList[1]?.status, { timeout: 30_000 }).toBe('done');
+  expect(wordsSeen()).toEqual([HELLO, THANKS]);
+  const then = await messagesOf(yap, agent.conversation, 6);
+  expect(then[5].text).toBe(`Got: ${THANKS}`);
+  await expect.poll(() => spoken(yap), { timeout: 30_000 }).toEqual([`Got: ${THANKS}`]);
+  await expect.poll(() => laidOut(main)).toEqual(['you', 'answer', 'you', 'answer']);
+  await expect(thread(main).getByTestId('chat-agent-pill')).toHaveCount(0);
+  await expect(thread(main).getByTestId('chat-agent-report')).toHaveCount(0);
+  expect((await agents(yap)).length).toBe(before + 1);
+});
+
+test('asked out loud with the Code chat in view: straight to its session, nothing said first, its own answer read aloud', async ({ yap, main }) => {
   await script(yap, WATERING, 'watering');
   await setConfig(yap, main, { speakReplies: true, agentsSpeak: 'voice' });
   await yap.invoke('tts_e2e_spoken', { clear: true });
@@ -570,11 +622,10 @@ test('asked out loud with the Code chat in view: straight to its session, “On 
   // Typed: its answer isn't read aloud ("Read agent reports aloud": when asked by voice).
   expect(await spoken(yap)).toEqual([]);
 
-  // Asked out loud, the chat in view: its session's next turn — no model of Chat's, and Yap's own "On it.".
+  // Asked out loud, the chat in view: its session's next turn — no model of Chat's, and nothing said first.
   await script(yap, MINIMAP_TURN, 'minimap');
   await askAloud(yap, 'Could you add a minimap button for it as well?');
   await expect.poll(async () => (await agents(yap)).find((j) => j.id === agent.id).turnList.length, { timeout: 20_000 }).toBe(2);
-  await expect.poll(() => spoken(yap), { timeout: 20_000 }).toEqual(expect.arrayContaining(['On it.']));
   expect((await agents(yap)).length).toBe(before + 1);
   await expect.poll(async () => (await agents(yap)).find((j) => j.id === agent.id).turnList[1].status, { timeout: 30_000 }).toBe('done');
   const again = (await agents(yap)).find((j) => j.id === agent.id);
@@ -586,7 +637,7 @@ test('asked out loud with the Code chat in view: straight to its session, “On 
   expect(then.map((m) => m.kind || m.role)).toEqual(['user', 'agentReport', 'assistant', 'user', 'agentReport', 'assistant']);
   expect(then[3].voice).toBe(true);
   expect(then[5].text).toBe(DONE2);
-  await expect.poll(() => spoken(yap), { timeout: 30_000 }).toEqual(expect.arrayContaining([DONE2]));
+  await expect.poll(() => spoken(yap), { timeout: 30_000 }).toEqual([DONE2]);
   // The thread: the spoken question, its session's work under it, the answer.
   await expect(thread(main).locator('.cbubble.assistant')).toHaveText([DONE1, DONE2]);
   await expect.poll(() => laidOut(main)).toEqual(['you', 'work', 'report', 'answer', 'you', 'work', 'report', 'answer']);
@@ -645,6 +696,32 @@ test('core/agents.js: the Code chat’s own session at work is what the message 
   expect(workingDirectly([{ id: 'a3', conversation: 4, status: 'running' }], 4)).toBeNull();
   expect(workingDirectly([own('running')], null)).toBeNull();
   expect(workingDirectly(null, 4)).toBeNull();
+
+  // **A plain reply**: a direct turn that ended well with nothing to report but its words — no line in the thread.
+  const reply = { n: 2, direct: true, status: 'done', files: [], denials: [] };
+  expect(plainReply(reply)).toBe(true);
+  expect(plainReply({ ...reply, files: ['notes.md'] })).toBe(false);
+  expect(plainReply({ ...reply, denials: [{ tool: 'Bash' }] })).toBe(false);
+  for (const more of [{ plan: true }, { asks: true }, { error: 'It stopped.' }, { undone: true }, { direct: false }]) expect(plainReply({ ...reply, ...more })).toBe(false);
+  for (const status of ['running', 'queued', 'asking', 'failed', 'stopped', 'interrupted']) expect(plainReply({ ...reply, status })).toBe(false);
+  expect(plainReply(null)).toBe(false);
+  // Its own line (title and how it ended): only once it ended with something to report.
+  const pill = (turn) => ({ id: 'a1', turn: turn.n, turnList: [{ n: 1, direct: true, status: 'done', files: ['a.md'] }, turn] });
+  expect(directLine(pill(reply))).toBe(false);
+  expect(directLine(pill({ ...reply, status: 'running' }))).toBe(false);
+  expect(directLine(pill({ ...reply, files: ['notes.md'] }))).toBe(true);
+  expect(directLine(pill({ ...reply, status: 'stopped' }))).toBe(true);
+  expect(directLine({ id: 'a1', turn: 1, turnList: [{ n: 1, direct: true, status: 'done', files: ['a.md'] }] })).toBe(true);
+  expect(directLine({ id: 'a1', turn: 9, turnList: [] })).toBe(false);
+  // Its report's marker: nothing to say when the turn was a plain reply — unless the marker names a file or carries one.
+  const told = { id: 'a1', turnList: [{ ...reply, reportMessageId: 'chat:4:3' }, { n: 3, direct: true, status: 'done', files: ['notes.md'], reportMessageId: 'chat:4:6' }] };
+  expect(plainReport({ id: 'chat:4:3', text: 'Agent done · AddOns' }, told)).toBe(true);
+  expect(plainReport({ id: 'chat:4:6', text: 'Agent done · AddOns\nFiles it changed: notes.md' }, told)).toBe(false);
+  expect(plainReport({ id: 'chat:4:3', text: 'Agent done\nFiles it changed: a.md (backed up first).' }, told)).toBe(false);
+  expect(plainReport({ id: 'chat:4:3', text: 'Agent done', files: [{ path: 'shot.png' }] }, told)).toBe(false);
+  // An agent Chat sent out, or one Yap no longer knows: its line stays.
+  expect(plainReport({ id: 'chat:4:3', text: 'Agent done' }, { id: 'a2', turnList: [{ ...reply, direct: false, reportMessageId: 'chat:4:3' }] })).toBe(false);
+  expect(plainReport({ id: 'chat:4:3', text: 'Agent done' }, null)).toBe(false);
   // What it was writing is let go when the message is whole, it moves on to a step, or it's over —
   // never for what a turn has used, its to-do list or the line it's on.
   expect(sayingOver({ id: 'a1', status: 'running', said: 'Done.' })).toBe(true);

@@ -13,7 +13,7 @@
     { "expect": { "status": "answered", "notUsed": "/^(start_agent|message_agent)$/", "tools": 0 }, "note": "Straight to its session." },
     { "wait": "agents", "cards": "allow", "timeout": 600, "note": "Its question's card answered with its first option." },
     { "expect": { "agent": { "status": "done", "error": null } } },
-    { "expect": { "visible": "Agent done" } },
+    { "expect": { "selector": { "window": "main", "css": ".msgs .cbubble.assistant", "count": { "min": 1 } } }, "note": "Its answer (a turn that changed nothing is a plain reply: no line of its own)." },
     { "expect": { "visible": "Teal" }, "soft": true, "note": "It carried on with the answer (its own words: soft)." },
     { "shot": "after-its-question", "window": "main" }
   ]
