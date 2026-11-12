@@ -321,6 +321,51 @@ fn requests_without_the_run_s_key_or_from_another_site_are_refused() {
     assert_eq!(http(o.port, "POST", &o.path, &[("Authorization", o.auth.clone())], &ping).0, 200);
 }
 
+#[test]
+fn an_agents_run_with_reads_lists_yaps_own_data_never_its_memory() {
+    let (ep, _) = endpoint(Duration::from_secs(5), MAX_BACKUP_BYTES);
+    // A Code chat's own session: approve, and the reads — never memory, whatever the spec says.
+    let mut spec = RunSpec::new("garden-planner", Tools::Agent);
+    spec.reads = true;
+    spec.memory = true;
+    let h = ep.register(spec).unwrap();
+    let mut c = Client::of(&h);
+    let list = c.request("tools/list", json!({}));
+    assert_eq!(names(&list), ["approve", "list_meetings", "search_meetings", "get_meeting", "search_notes", "get_note", "list_tasks", "list_folders", "check_calendar"]);
+    for t in list["result"]["tools"].as_array().unwrap().iter().filter(|t| t["name"] != "approve") {
+        assert_eq!(t["annotations"]["readOnlyHint"], true, "{}", t["name"]);
+    }
+    // Allowed without a prompt (a read of the person's own data); approve is never one.
+    assert_eq!(h.allowed_tools(), ["mcp__yap__list_meetings", "mcp__yap__search_meetings", "mcp__yap__get_meeting", "mcp__yap__search_notes", "mcp__yap__get_note", "mcp__yap__list_tasks", "mcp__yap__list_folders", "mcp__yap__check_calendar"]);
+    let init = c.request("initialize", json!({ "protocolVersion": "2025-11-25" }));
+    let told = init["result"]["instructions"].as_str().unwrap();
+    assert!(told.contains("approve tool") && told.contains("read, never change") && told.contains("only when the user's request refers to one of those"), "{told}");
+    // The same views as a Chat run's.
+    let (err, text) = c.tool("list_meetings", json!({}));
+    assert!(!err && text.contains("**Planning sync**"), "{text}");
+    let (err, text) = c.tool("get_meeting", json!({ "id": 5 }));
+    assert!(!err && text.contains("The beta goes out on Friday."), "{text}");
+    // Never Yap's memory, nor anything a Chat run acts with.
+    for name in ["search_memory", "start_agent", "look_at_screen", "browser_navigate", "create_note"] {
+        let r = c.request("tools/call", json!({ "name": name, "arguments": { "query": "Alex" } }));
+        assert_eq!(r["error"]["code"], -32602, "{name}: {r}");
+    }
+
+    // An agent Chat sent out: approve alone, as ever.
+    let sent = ep.register(RunSpec::new("garden-planner", Tools::Agent)).unwrap();
+    let mut c = Client::of(&sent);
+    assert_eq!(names(&c.request("tools/list", json!({}))), ["approve"]);
+    assert!(sent.allowed_tools().is_empty());
+    let r = c.request("tools/call", json!({ "name": "list_meetings", "arguments": {} }));
+    assert_eq!(r["error"]["code"], -32602, "{r}");
+    assert!(!c.request("initialize", json!({ "protocolVersion": "2025-11-25" }))["result"]["instructions"].as_str().unwrap().contains("read, never change"));
+    // A Chat run reads anyway: the flag is an agent's run's.
+    let mut chat = RunSpec::new("Plan chat", Tools::Chat);
+    chat.reads = true;
+    let chat = ep.register(chat).unwrap();
+    assert!(!names(&Client::of(&chat).request("tools/list", json!({}))).contains(&"approve".to_string()));
+}
+
 // ---- approve ----
 
 /// Call `approve` on its own thread (it waits for the person) and return

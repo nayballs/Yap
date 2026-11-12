@@ -974,6 +974,8 @@ async fn turn(id: &str, message: Option<String>) -> (Status, u32) {
     };
     // A read-only turn ("catch up", "have a look"): its editing tools off.
     let read_only = agent.turn_list.iter().find(|t| t.n == n).is_some_and(|t| t.read_only);
+    // The person's own message, straight to the Code chat's session.
+    let direct = agent.turn_list.iter().find(|t| t.n == n).is_some_and(|t| t.direct);
     let run = match claude_live::register_run(RunSpec {
         label: agent.folder.clone(),
         tools: Tools::Agent,
@@ -987,6 +989,11 @@ async fn turn(id: &str, message: Option<String>) -> (Status, u32) {
         // nor Yap's connectors (its own Claude Code setup has the person's).
         eyes: Default::default(),
         connectors: None,
+        // A Code chat's own session (the person's message went straight to
+        // it) reads Yap's meetings, notes, tasks and calendar on request, as
+        // a plan Code chat's session always could; an agent Chat sent out
+        // doesn't (Chat's model reads for its brief).
+        reads: direct,
     }) {
         Ok(r) => r,
         Err(e) => return failed_early(id, n, format!("Couldn't start the agent: {e}"), None),
@@ -994,7 +1001,10 @@ async fn turn(id: &str, message: Option<String>) -> (Status, u32) {
     let resuming = message.is_some() && agent.started_ts > 0 && !agent.session.is_empty();
     let session_id = if agent.session.is_empty() { session::new_session_id() } else { agent.session.clone() };
     let conversation = if resuming { Conversation::Resume(session_id) } else { Conversation::New(session_id) };
-    let spec = agent_spec(&agent, &folder, pay, mode, read_only, conversation, run.mcp_config(), run.settings(), run.env());
+    let mut spec = agent_spec(&agent, &folder, pay, mode, read_only, conversation, run.mcp_config(), run.settings(), run.env());
+    // Yap's read tools, where the run has them: no prompt for a read of the
+    // person's own data (none for any other run: its list is empty).
+    spec.allowed_tools = run.allowed_tools();
     if read_only {
         tracing::info!(id, turn = n, "Agents: a read-only turn (its editing tools off)");
     }

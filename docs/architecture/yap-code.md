@@ -333,12 +333,35 @@ workspace, word for word, and no model of Chat's is asked.
 - **Its words as it writes them** (2026-11-12): the message it's writing
   shows in its work as it grows, its final words too
   ([Around the tab](#around-the-tab), "its words as it writes them").
-- **Not yet**: the screen, the pages beside the chat and connectors inside
-  a direct Code chat (a plan Code chat's own session has them).
+- **It reads Yap's own data on request** (2026-11-12): the person's
+  meetings (summaries, notes, transcripts), notes, tasks, folders and
+  calendar, over Yap's endpoint, read only ("build what we decided in
+  yesterday's meeting") — what a plan Code chat's own session always had
+  ([Memory and the plan in a Code chat](#memory-and-the-plan-in-a-code-chat)),
+  and a session lost when messages began going straight to it.
+  - **How** (`claude_live`'s `RunSpec::reads`, set by the runner for a
+    turn that is the person's own message): the run's endpoint lists the
+    read tools beside `approve`, tells the session to use them only when
+    the request refers to one of those and to put into files, commits or
+    commands only what the task needs, and they go in `--allowedTools`:
+    a read of the person's own data asks nothing, in any Mode.
+  - **Never Yap's memory** (a Code chat's never: the 7 Nov decision), nor
+    anything that acts; **never an agent Chat sent out** (Chat's model
+    reads for its brief; its run lists `approve` alone, as ever).
+  - In its work a read is a step like any other tool's ("Used yap · list
+    tasks").
+- **Not in a direct Code chat**: the screen and the pages beside the chat,
+  and connectors. A plan Code chat's own session has the screen and the
+  pages; a session that also edits files and runs commands would need
+  their per-turn rules (what the turn may see, the cards, the web's
+  content counted) worked through for it first. Yap's memory stays out of
+  every Code chat by the 7 Nov decision. Documents beside the chat aren't
+  on the Claude plan's path at all.
 - **Tests**: `agents-direct.spec.js` (the first message, the next on
   `--resume`, a message mid-work, a message with a screenshot — the first,
   the next turn's own, a note's —, its words as it writes them, asked out
-  loud with the chat in view, ■ Stop and Esc, the switch off). The e2e base config has
+  loud with the chat in view, its session reading Yap's own data, ■ Stop
+  and Esc, the switch off). The e2e base config has
   `agentsDirect: false`, so every older spec still tests the hand-off; Yap
   Lab's `code-chat-direct` script runs it on the real Claude Code.
 
@@ -2405,6 +2428,10 @@ Code, Open in terminal's blank tab, Chat's thread following a report.
   the agent `asking` with "Waiting for you: it has a question"; answered
   with the first option, the session carried on: "You picked Teal for the
   garden map's markers."
+
+- **Its session reads Yap's own data**: at Auto, asked to look at the task
+  list with Yap's tool, the session called it ("Using yap · list tasks")
+  with no prompt and answered from what it gave.
 
 **Not yet tried on a real run:**
 

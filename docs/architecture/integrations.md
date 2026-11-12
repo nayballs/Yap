@@ -1068,6 +1068,12 @@ no Local API (the bridge can be off), and it reaches the live UI.
   and say what it chose. Before, every question was refused at once. Test
   mode can answer every card at once (`e2e_claude_approve_auto`: its allow
   picks each question's first option).
+- **An agent's run that reads** (`RunSpec::reads`, 2026-11-12): the session
+  of a Code chat that works directly is listed Yap's read tools beside
+  `approve` — meetings, notes, tasks, folders, the calendar — never
+  `search_memory`, the screen's, the pages' or connectors'; an agent Chat
+  sent out lists `approve` alone
+  ([yap-code.md](./yap-code.md#a-code-chat-that-works-directly)).
 - **The backup hook** (`backup.rs`): before Claude Code edits or writes a
   file, an http `PreToolUse` hook on `Edit|Write|MultiEdit|NotebookEdit`
   (`POST /hook/<run>/PreToolUse`, 60 s `timeout`) copies it into the run's
