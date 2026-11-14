@@ -836,7 +836,7 @@ impl Browser {
     fn scrolled(&self, key: &str) -> Result<Value, String> {
         let v = self.in_view(key)?;
         let s = v.scroll;
-        Ok(json!({ "r": "ok", "scroll": { "x": s.x, "y": s.y, "w": s.w, "h": s.h, "max": s.max, "dpr": s.dpr }, "inView": v.in_view }))
+        Ok(json!({ "r": "ok", "scroll": { "x": s.x, "y": s.y, "w": s.w, "h": s.h, "max": s.max, "dpr": s.dpr, "mx": s.max_x }, "inView": v.in_view }))
     }
 
     /// **Scroll** tab `key`: `to` down / up (`amount` screens), top, bottom,
@@ -851,18 +851,81 @@ impl Browser {
         };
         let step = (VIEW_H as f64 * 0.85 * a["amount"].as_f64().unwrap_or(1.0).clamp(0.1, 10.0)).round() as i64;
         let tab = self.tab_mut(key)?;
+        let was = tab.scroll;
         tab.scroll = match at {
             Some(None) => return Ok(json!({ "r": "gone" })),
             Some(Some(y)) => y - VIEW_H / 2 + LINE / 2,
             None => match a["to"].as_str().unwrap_or("down") {
                 "up" => tab.scroll - step,
+                // (The simulator lays pages out in one column: nothing sideways.)
+                "left" | "right" => tab.scroll,
                 "top" => 0,
                 "bottom" => max,
                 _ => tab.scroll + step,
             },
         }
         .clamp(0, max);
-        self.scrolled(key)
+        let moved = self.tab(key)?.scroll != was;
+        let mut out = self.scrolled(key)?;
+        if r == 0 {
+            out["moved"] = json!(moved);
+        }
+        Ok(out)
+    }
+
+    /// **The page's structure** (`script.rs`'s `tree`, the same lines): a
+    /// node a line, `- role "name" [ref]`, indented by depth; generic boxes
+    /// with nothing to say folded into their parent; `filter` "interactive"
+    /// the controls alone; `within` one element's inside.
+    fn tree(&mut self, key: &str, a: &Value) -> Result<Value, String> {
+        let out = self.tree_of(key, a)?;
+        // Its nodes have refs now, as the element script's numbering gives them.
+        if out["r"] == "ok" {
+            self.tab_mut(key)?.seen = true;
+        }
+        Ok(out)
+    }
+
+    fn tree_of(&self, key: &str, a: &Value) -> Result<Value, String> {
+        let tab = self.tab(key)?;
+        let doc = dom_query::Document::from(tab.html.as_str());
+        let page = Page::read(&doc, tab);
+        let only = a["filter"].as_str() == Some("interactive");
+        let depth = a["depth"].as_u64().unwrap_or(15).clamp(1, 40) as usize;
+        let root = match a["within"].as_u64() {
+            Some(w) => match page.node(w as u32).filter(|n| tab.seen && page.visible(n)) {
+                Some(n) => n,
+                None => return Ok(json!({ "r": "gone" })),
+            },
+            None => doc.select("body").nodes().first().copied().unwrap_or_else(|| doc.root()),
+        };
+        let mut lines = Vec::new();
+        if let Some(role) = a["role"].as_str() {
+            let words = a["words"].as_str().unwrap_or("").to_lowercase();
+            let limit = a["limit"].as_u64().unwrap_or(20) as usize;
+            for c in root.descendants_it().filter(|n| n.is_element() && page.visible(n)) {
+                let Some((r, name, own)) = page.tree_node(&c) else { continue };
+                let said = if name.is_empty() { if own.is_empty() { Page::text_of(&c).chars().take(100).collect() } else { own } } else { name };
+                if r == role && (words.is_empty() || Page::text_of(&c).to_lowercase().contains(&words)) && lines.len() < limit {
+                    // (Only what the simulator numbers: a node with no ref can't be acted on.)
+                    let Some(rf) = page.ref_of(&c) else { continue };
+                    lines.push(format!("[{rf}] {r}{}", if said.is_empty() { String::new() } else { format!(" \"{}\"", said.replace('"', "'")) }));
+                }
+            }
+            return Ok(json!({ "r": "ok", "text": lines.join("\n"), "more": false, "lines": lines.len() }));
+        }
+        page.tree_lines(&root, 0, depth, only, false, &mut lines);
+        let all: Vec<char> = lines.join("\n").chars().collect();
+        let (from, max) = (a["offset"].as_u64().unwrap_or(0) as usize, a["max"].as_u64().unwrap_or(5000) as usize);
+        // (Cut at a line's end, as the element script's.)
+        let mut end = (from + max).min(all.len());
+        if end < all.len() {
+            if let Some(nl) = all[from.min(end)..end].iter().rposition(|c| *c == '\n') {
+                end = from + nl + 1;
+            }
+        }
+        let text: String = all[from.min(end)..end].iter().collect();
+        Ok(json!({ "r": "ok", "text": text, "more": end < all.len(), "end": end, "lines": lines.len() }))
     }
 
     /// **An action** (`script.rs`'s, the same answers): `click`, `type`
@@ -907,6 +970,9 @@ impl Browser {
             let text: String = all.chars().skip(from).take(max).collect();
             let heading = if lv > 0 { Page::text_of(&node) } else { String::new() };
             return Ok(json!({ "r": "ok", "heading": heading, "level": lv, "text": text, "more": all.chars().count() > from + max }));
+        }
+        if op == "tree" {
+            return self.tree(key, a);
         }
         if op == "where" {
             // In view: its line within the view, unless it never comes into
@@ -1363,6 +1429,11 @@ fn title_of(html: &str) -> String {
     doc.select("title").text().split_whitespace().collect::<Vec<_>>().join(" ")
 }
 
+/// The tree's controls (a line of their own in the interactive filter) and
+/// the roles whose words are their name (`script.rs`'s `INTER` and `NAMED`).
+const TREE_INTER: &[&str] = &["link", "button", "textbox", "searchbox", "combobox", "checkbox", "radio", "slider", "spinbutton", "switch", "tab", "menuitem", "option"];
+const TREE_NAMED: &[&str] = &["heading", "listitem", "cell", "columnheader", "paragraph", "option"];
+
 /// One page as read for an operation: its document, the tab's state, its
 /// candidates in order.
 struct Page<'a> {
@@ -1465,7 +1536,7 @@ impl<'a> Page<'a> {
             .collect();
         // Laid out at a desktop width: shown smaller, fewer device pixels a CSS pixel.
         let dpr = if self.tab.laid > 0 && self.tab.width.is_some() { (VIEW_W as f64 / self.tab.laid as f64).min(1.0) } else { 1.0 };
-        super::see::InView { scroll: super::see::View { x: 0, y, w: self.tab.laid, h: VIEW_H, max, dpr }, in_view }
+        super::see::InView { scroll: super::see::View { x: 0, y, w: self.tab.laid, h: VIEW_H, max, dpr, max_x: 0 }, in_view }
     }
 
     /// The visible blocks of text, each with its ref.
@@ -1526,6 +1597,72 @@ impl<'a> Page<'a> {
     /// page loaded.
     fn due(&self, n: &dom_query::NodeRef) -> bool {
         n.attr("data-sim-after").and_then(|ms| ms.trim().parse::<u64>().ok()).is_none_or(|ms| self.tab.loaded.elapsed() >= std::time::Duration::from_millis(ms))
+    }
+
+    /// A node's role in the tree (empty: a box with nothing to say), its
+    /// name and its own words; `None` for what the tree leaves out.
+    fn tree_node(&self, c: &dom_query::NodeRef) -> Option<(String, String, String)> {
+        let tag = c.node_name().map(|n| n.to_ascii_lowercase()).unwrap_or_default();
+        if matches!(tag.as_str(), "script" | "style" | "noscript" | "template" | "head") {
+            return None;
+        }
+        let role = match Self::role_of(c).as_str() {
+            "h1" | "h2" | "h3" | "h4" | "h5" | "h6" => "heading".to_string(),
+            "ul" | "ol" => "list".to_string(),
+            "li" => "listitem".to_string(),
+            "nav" => "navigation".to_string(),
+            "header" => "banner".to_string(),
+            "footer" => "contentinfo".to_string(),
+            "p" => "paragraph".to_string(),
+            "img" => "img".to_string(),
+            "table" => "table".to_string(),
+            "tr" => "row".to_string(),
+            "figure" => "figure".to_string(),
+            "main" | "dialog" | "form" | "article" => tag.clone(),
+            r if TREE_INTER.contains(&r) => r.to_string(),
+            r if c.has_attr("role") => r.to_string(),
+            _ => String::new(),
+        };
+        let inter = TREE_INTER.contains(&role.as_str());
+        let named = TREE_NAMED.contains(&role.as_str());
+        let name: String = if inter || named { self.name_of(c) } else { c.attr("aria-label").or_else(|| c.attr("alt")).map(|v| v.to_string()).unwrap_or_default() }.chars().take(100).collect();
+        let own: String = if name.is_empty() && !inter { c.children_it(false).filter(|n| n.is_text()).map(|n| n.text().to_string()).collect::<String>().split_whitespace().collect::<Vec<_>>().join(" ").chars().take(100).collect() } else { String::new() };
+        Some((role, name, own))
+    }
+
+    /// [`Browser::tree`]'s lines under `node`, as `script.rs`'s `tree` walks.
+    fn tree_lines(&self, node: &dom_query::NodeRef, d: usize, depth: usize, only: bool, quiet: bool, out: &mut Vec<String>) {
+        for c in node.children_it(false).filter(|n| n.is_element()) {
+            let tag = c.node_name().map(|n| n.to_ascii_lowercase()).unwrap_or_default();
+            if !self.visible(&c) {
+                continue;
+            }
+            let Some((role, name, own)) = self.tree_node(&c) else { continue };
+            let inter = TREE_INTER.contains(&role.as_str());
+            let named = TREE_NAMED.contains(&role.as_str());
+            let show = if only { inter } else { inter || !role.is_empty() || (!quiet && (!name.is_empty() || !own.is_empty())) };
+            if !show {
+                self.tree_lines(&c, d, depth, only, quiet, out);
+                continue;
+            }
+            let mut line = format!("{}- {}", "  ".repeat(d), if role.is_empty() { if own.is_empty() { "generic" } else { "text" } } else { role.as_str() });
+            if role == "heading" {
+                if let Some(l) = tag.strip_prefix('h').and_then(|l| l.parse::<u8>().ok()) {
+                    line.push_str(&format!(" (level {l})"));
+                }
+            }
+            let said = if name.is_empty() { &own } else { &name };
+            if !said.is_empty() {
+                line.push_str(&format!(" \"{}\"", said.replace('"', "'")));
+            }
+            if let Some(r) = self.ref_of(&c) {
+                line.push_str(&format!(" [{r}]"));
+            }
+            out.push(line);
+            if d + 1 < depth && !(inter && role != "option" && !name.is_empty()) {
+                self.tree_lines(&c, d + 1, depth, only, quiet || (!name.is_empty() && (named || inter)), out);
+            }
+        }
     }
 
     fn text_of(n: &dom_query::NodeRef) -> String {

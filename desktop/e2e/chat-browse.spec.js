@@ -813,7 +813,8 @@ test('a batch runs its steps in order, its shots in the steps, and stops at a ca
   expect(batch).toMatchObject({ success: false, data: { ran: 5, of: 6 } });
   expect(batch.displayTexts).toEqual([
     expect.stringMatching(/^Found \d+ matches for ‘Buy tickets’ on rail\.example\.com$/),
-    'Scrolled down rail.example.com',
+    // (The page is shorter than the view: the scroll moved nothing, and says so.)
+    "Didn't scroll down on rail.example.com: it's already at the bottom",
     'Looked at the page · rail.example.com',
     'Zoomed in on the page · rail.example.com',
     "Didn't click ‘Buy tickets’: you said no",

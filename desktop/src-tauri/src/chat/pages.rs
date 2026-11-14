@@ -9,8 +9,10 @@
 //!   `browser_navigate {url | search | "back" | "forward", tab?}` (the tab
 //!   in front, or a new one when none is open: a Page tab, `stream::Event::
 //!   Page`, kept with the answer), `browser_read {mode?, tab?}` (its text
-//!   and links, or its links, buttons and fields by ref), `browser_find
-//!   {query}`, `browser_scroll {direction, amount?}`, `browser_scroll_to
+//!   and links, its links, buttons and fields by ref, or its structure as
+//!   an accessibility tree: `read::tree`), `browser_find {query}` (words or
+//!   a role), `browser_scroll {direction, amount?}` (sideways too),
+//!   `browser_scroll_to
 //!   {ref | text}`, `browser_wait {seconds?, text?}`, `browser_tabs {action:
 //!   list | new | switch | close | width}` ([`see`] has the viewing ones;
 //!   width: the tab laid out that many CSS pixels wide — a site's desktop
@@ -369,9 +371,9 @@ pub fn definitions(gate: Gate, act: bool) -> Value {
     // 2026: with "text" first and no word on it, the on-device Qwen read the
     // text before a click in two runs of three, then answered with the link).
     let mode = if act {
-        json!({ "type": "string", "enum": ["elements", "text", "tables"], "description": "elements: its links, buttons and fields by ref, to act on; text: all its words" })
+        json!({ "type": "string", "enum": ["elements", "text", "tables", "tree"], "description": "elements: its links, buttons and fields by ref, to act on; text: all its words" })
     } else {
-        json!({ "type": "string", "enum": ["text", "elements", "tables"] })
+        json!({ "type": "string", "enum": ["text", "elements", "tables", "tree"] })
     };
     let mut out = vec![
         // (search: a results page for the person, never read — what finds
@@ -379,11 +381,11 @@ pub fn definitions(gate: Gate, act: bool) -> Value {
         // context: turn/fit.rs.)
         tool(NAVIGATE, "Open a page in the tab in front (a new tab if none): an address or search words (results for the user: web search finds pages); or \"back\"/\"forward\".", json!({ "url": s(), "search": s(), "tab": tab() }), &[]),
         // (ref: one part — 14 Nov 2026, so a model needn't page through a long page to find one section.)
-        tool(READ, "Read the page: text and links; mode \"elements\": links, buttons and fields by ref; ref: one part (a heading: its section).", json!({ "mode": mode, "ref": r(), "offset": { "type": "integer" }, "tab": tab() }), &[]),
-        tool(FIND, "Find words on the page: matches by ref.", json!({ "query": s(), "tab": tab() }), &["query"]),
+        tool(READ, "Read the page: text and links; mode \"elements\": links, buttons and fields by ref; \"tree\": its structure; ref: one part (a heading: its section).", json!({ "mode": mode, "ref": r(), "offset": { "type": "integer" }, "depth": { "type": "integer" }, "filter": { "type": "string", "enum": ["all", "interactive"] }, "tab": tab() }), &[]),
+        tool(FIND, "Find words or roles on the page: matches by ref.", json!({ "query": s(), "tab": tab() }), &["query"]),
     ];
     if look {
-        out.push(tool(SCROLL, "Scroll the page, or the part at x, y of the latest shot; amount in screens.", json!({ "direction": { "type": "string", "enum": ["down", "up", "top", "bottom"] }, "amount": { "type": "number" }, "x": { "type": "number" }, "y": { "type": "number" }, "tab": tab() }), &["direction"]));
+        out.push(tool(SCROLL, "Scroll the page, or the part at x, y of the latest shot; amount in screens.", json!({ "direction": { "type": "string", "enum": ["down", "up", "top", "bottom", "left", "right"] }, "amount": { "type": "number" }, "x": { "type": "number" }, "y": { "type": "number" }, "tab": tab() }), &["direction"]));
         out.push(tool(SCROLL_TO, "Scroll a ref or text into view.", json!({ "ref": r(), "text": s(), "tab": tab() }), &[]));
         out.push(tool(SCREENSHOT, "Look at what's in view now.", json!({ "tab": tab() }), &[]));
         out.push(tool(ZOOM, "A sharper look at part of the view: top, middle (center), bottom, left, right, a corner (top-left…), or \"x,y,w,h\" fractions or the latest shot's pixels.", json!({ "region": s(), "tab": tab() }), &["region"]));
@@ -404,7 +406,7 @@ pub fn definitions(gate: Gate, act: bool) -> Value {
         out.push(tool(act::CLICK, click, click_props, &[]));
         let type_what = if look { "Type into a field (ref, else the focused one); submit: Enter after." } else { "Type into a field; submit: Enter after." };
         out.push(tool(act::TYPE, type_what, json!({ "ref": r(), "text": s(), "submit": { "type": "boolean" }, "tab": tab() }), typed));
-        out.push(tool(act::KEY, "Press keys: Enter, Tab, Escape, arrows, PageDown…, letters or combinations (ctrl+a).", json!({ "keys": s(), "tab": tab() }), &["keys"]));
+        out.push(tool(act::KEY, "Press keys: Enter, Tab, Escape, arrows, PageDown…, letters or combinations (ctrl+a).", json!({ "keys": s(), "repeat": { "type": "integer" }, "tab": tab() }), &["keys"]));
         if look {
             out.push(tool(act::HOVER, "Point at a ref, or x, y of the latest shot (hover menus).", json!({ "ref": r(), "x": { "type": "number" }, "y": { "type": "number" }, "tab": tab() }), &[]));
         } else {
@@ -1040,6 +1042,11 @@ async fn read(turn: &mut crate::web::Turn, args: &Value, ctx: &Ctx<'_>) -> Value
     let shown = crate::web::short_url(&tab.url);
     if search_page(&tab.url) {
         return failed(read::search_refusal(ctx.search), format!("Didn't read {shown}: a search engine's results"));
+    }
+    // The page's structure (as Claude Code's own browser's read_page), a ref its one part.
+    if mode == "tree" {
+        let interactive = args["filter"].as_str().is_some_and(|f| f.eq_ignore_ascii_case("interactive"));
+        return read::tree(turn, &tab, ref_of(&args["ref"]), args["depth"].as_u64(), interactive, offset.unwrap_or(0)).await;
     }
     // One part of it: a heading's section, or one element (its ref from browser_find or the elements).
     if let Some(r) = ref_of(&args["ref"]) {

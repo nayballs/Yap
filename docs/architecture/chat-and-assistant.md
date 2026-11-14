@@ -2350,7 +2350,8 @@ on-device Qwen), ≈ 1,596 with both (8 Nov 2026: `browser_read`'s `offset`
 and "tables", and what a search is for, ≈ 35 more; then `tab` on every
 tool, ≈ 15–80 more; then a tab's desktop width, a click's `button` and
 `count` and `browser_drag`: ≈ 637 / 1,041 / 1,382 / 1,747; 14 Nov, `browser_read`'s
-`ref`: ≈ 656 / 1,060 / 1,401 / 1,765) — about 300 more than the page tools
+`ref`: ≈ 656 / 1,060 / 1,401 / 1,765; then real input, a point for the scroll and
+the hover, the tree, a find by role, sideways and a key's repeat: ≈ 691 / 1,132 / 1,473 / 1,889) — about 300 more than the page tools
 and the drive tier were for a model that acts, which a cloud model's
 context never notices; a strong model on a server on this PC that doesn't
 say its context (Yap assumes 8K) no longer fits its whole toolset (rich
@@ -2446,15 +2447,16 @@ of sight. What they share is said once, in the line.
   refuses a website (`apps::plan::for_the_web`: the request's phrase asks
   for the web or names a site, and no app has exactly that name). English
   only so far: in another language the model opens it (`browser_navigate`).
-- **`browser_read { mode?: "text" | "elements" | "tables", ref?, offset?, tab? }`**: the page in front
+- **`browser_read { mode?: "text" | "elements" | "tables" | "tree", ref?, offset?, depth?, filter?, tab? }`**: the page in front
   beside the chat (or tab n, `view::pick_tab`), read in place
   (`view::PAGE_TEXT_SCRIPT`, Yap's own read-only script through
   `view::run_script`: the title, the `main` / `article` element's headings
   and text, else the page's) — its text cut at `READ_MAX` (5,000
-  characters, `more` when there's more; **20,000 in a Claude Code session's
+  characters, `more` when there's more; **50,000 in a Claude Code session's
   turn**, `SESSION_READ_MAX`, `pages::read_max`: 14 Nov 2026, Yap's Claude
   paged through a long guide 5,000 at a time guessing which part held the
-  section, where Claude Code's own browser reads 50,000), its headings, **its links** (the
+  section, where Claude Code's own browser reads 50,000 — 20,000 first, then
+  50,000 the same night), its headings, **its links** (the
   main part's, once each, their words and address, at most `LINKS_MAX` = 40,
   never a search engine's: for "send me the link to that one" — Haiku
   couldn't give a listing's address from its text alone, 1 Nov 2026 — and
@@ -2531,10 +2533,42 @@ of sight. What they share is said once, in the line.
     rows or about 8,000 characters a read, a table's headers again where it
     goes on), `count`, `rows` (all of them), `more`, `next`. None: "Found no
     tables on …". Web content and a source of the turn, as any read.
+  - **Mode "tree"** (`read::tree`, `script.rs` `tree`; 14 Nov 2026, as
+    Claude Code's own browser's `read_page`, the last of what set the two
+    apart): the page's structure as an accessibility tree, a line a node —
+    `- role "name" [ref]`, a heading's level, a link's address, its state
+    (checked, expanded, selected, disabled) — indented by depth, at most
+    `depth` deep (15 by default, 40 at most); a box with nothing to say
+    folded into its parent, a paragraph's or a button's words said once
+    (what's inside it adds only its controls); hidden nodes (`display:
+    none`, `aria-hidden`, a script, a style) left out, open shadow roots
+    walked. `filter: "interactive"`: the links, buttons, fields, tabs and
+    options alone; `ref`: one element's inside. Every node gets a ref, so
+    its line's ref clicks, reads and scrolls to as any. Paged as the text
+    (`read_max` from `offset`, `next`), **cut at a line's end**, never inside
+    one: the script says where it stopped (`end`), the next read's offset
+    (Yap Lab, Opus: the last line's ref had been cut off). A name comes from
+    `aria-label`, `alt`, `aria-labelledby`, a table's caption, or a
+    control's or a heading's words.
 - **Looking around a page** (`pages/see.rs`, read only: nothing on the page
   changes and nothing leaves it; a scroll shows on the live tab, as Claude
-  Code's does; the scrolls for a model that sees): **`browser_scroll { direction: down | up | top | bottom,
-  amount?: screens }`** — the page's own scroller, or the biggest scrolling
+  Code's does; the scrolls for a model that sees): **`browser_scroll { direction: down | up | left | right | top | bottom,
+  amount?: screens }`** (left and right since 14 Nov 2026: the page, or its
+  scroller when that's wider than it shows; a page wider than its view says
+  `x`, `max_x`, `at_left` and `at_right`, the view measured without its
+  scrollbar; at a point, the wheel's `deltaX`, a screen being the width or
+  height of the part under the pointer, so no column goes by unseen).
+  **Nothing moved, said so** (Yap Lab, Opus: a scroll at the end said
+  "Scrolled"): the script compares where it was (`moved`), and "Didn't
+  scroll right on …: it's already at its right edge"; at a point, the
+  page script notes what under the pointer scrolls before the wheel
+  (`wheelAim`) and after (`wheeled`, looked at again for a wheel's glide):
+  "a table" (its ref, and `part_scroll`: where its contents are now, how
+  far they go, and whether they're at that edge), "a code block", "the
+  page", or "Didn't scroll right at that point on …: nothing there goes
+  further". A `browser_scroll_to` of something taller than the view lines up
+  its top (8 px below the view's), not its middle, and of something wider
+  its left edge, not a jump sideways — the page's own scroller, or the biggest scrolling
   part of an app-like page (`script.rs` `scroller`) — answers where it is
   (`scroll {y, h, max, at_top, at_end}`) and the headings in view — **once
   it has stopped** (8 Nov 2026, Yap Lab on a page with `scroll-behavior:
@@ -2556,8 +2590,14 @@ of sight. What they share is said once, in the line.
   it fails honestly, "Couldn't bring ‘…’ into view on …"; nothing found, the nearest blocks by the words they share
   (`near_matches`, "Didn't find ‘…’"); **`browser_find { query }`** lists the
   elements whose words match, then the text blocks holding them, each with
-  its ref, kind and words (`see::matches`, at most 15: a heading's ref
-  scrolls there, a button's clicks); **`browser_wait { seconds?, text? }`**
+  its ref, kind and words (`see::matches`, at most 20, `more` when there are
+  others: a heading's ref scrolls there, a button's clicks) — **its role too**
+  (14 Nov 2026, as Claude Code's own browser's `find` matches role, name and
+  text: "button", "tab", "heading Harbour"), and **a role no control or text
+  block has** ("table", "figure", "region", "list", "dialog", "tablist"…:
+  `see::node_role`), the page's nodes of that role from the tree
+  (`script::roles`: each named by its words, "table Ferry times" the
+  tables holding them); **`browser_wait { seconds?, text? }`**
   waits for the words (folded) or, without them, until the page settles
   (loaded, its text still for 0.8 s), at most 10 s; **`browser_tabs {
   action: list | new | switch | close | width, tab?, width? }`** — the list's titles are web
@@ -2938,10 +2978,15 @@ review (safely, for any user, in any language Yap speaks).
   judged as Enter), and **`browser_scroll`** and **`browser_hover`** take a
   point of the latest shot (`x`, `y`): the mouse wheel there, so a part that
   scrolls by itself (a list, a panel, a map) scrolls, and the pointer there.
-  What's still apart from Claude Code's own browser: its accessibility tree
-  with a depth (Yap lists the links, buttons and fields by ref — for one
-  part too, with a ref — and reads a heading's section), and a zoom by
-  pixel rectangle (Yap's takes a named part or fractions).
+  Later that night the rest of what Opus named: **the accessibility tree**
+  (`browser_read` mode "tree", with `depth`, `filter: "interactive"` and a
+  ref), **`browser_find` by role** (20 matches), and **scrolling left and
+  right**, then what Opus found trying them on Wikipedia (`find "table"`
+  missing the tables, a tree cut mid-line, a scroll at its end saying it
+  scrolled, `max_x` counting the scrollbar, a wheel step wider than the
+  view) and `browser_key`'s `repeat` ("Pressed Tab ×3"). Still apart: Claude Code's app's `find` by a description (it
+  runs a model over the page; Yap's, as the app's own built-in browser's,
+  matches role, name and text).
 - **The developer's tools** (14 Nov 2026, `pages/dev.rs`; a Claude Code
   session's only — a plan chat's turn, a Code chat's own session: listed by
   `claude_live/eyes.rs`, never Chat's own loop): `browser_console` (what

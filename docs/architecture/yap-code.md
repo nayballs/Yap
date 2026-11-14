@@ -480,10 +480,15 @@ workspace, word for word, and no model of Chat's is asked.
     button clipped in a box of its own into view first; `browser_find` says
     when there are more matches than it lists; a hover on an icon with no
     words names what it was; `browser_zoom` says it takes the shot's pixels.
-    What stays apart: `find` by a description (the app's runs a model),
-    the accessibility tree with its depth (Yap lists links, buttons and
-    fields by ref, and reads a heading's section), scrolling sideways, and
-    a script asked first outside Bypass.
+    Then the rest of what it named, later that night: the accessibility tree
+    (`browser_read` mode "tree": `depth`, `filter: "interactive"`, a ref for
+    one part), `browser_find` by role as well as words (20 matches, a
+    table or a figure too), scrolling left and right (saying where its edges
+    are, and when nothing moved), and `browser_key`'s `repeat` — tried by
+    Opus in Yap Lab on Wikipedia and fixed where it fell short. What stays apart: `find` by a description
+    (Claude Code's app runs a model for it; its built-in browser's own
+    `find` matches role, name and text, as Yap's does), and a script asked
+    first outside Bypass, on purpose.
     A heading's words never ask (`rules::click_needs_ok`: "Build Order"
     opens, it doesn't order). Its lines say "Clicking on the page beside the
     chat" and the like, never what it types; a stretch of them is said

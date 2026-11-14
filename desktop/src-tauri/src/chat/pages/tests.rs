@@ -205,8 +205,10 @@ fn one_toolset_for_every_model_with_pages_acting_and_shots_only_where_they_may()
     // page, a heading's section, so a small model needn't page through a long one: 656 / 1401 / 1060 / 1765;
     // then browser_click's modifiers, as Claude Code's own browser takes them: 656 / 1419 / 1060 / 1784; then
     // browser_scroll and browser_hover at a point, browser_key's letters and combinations: 656 / 1429 / 1084 / 1833;
-    // then browser_zoom saying it takes the shot's pixels too: 656 / 1429 / 1092 / 1841.)
-    assert!(small <= 660 && acting <= 1435 && seeing <= 1095 && all <= 1845, "{small} / {acting} / {seeing} / {all}");
+    // then browser_zoom saying it takes the shot's pixels too: 656 / 1429 / 1092 / 1841; then browser_read's
+    // tree (depth, filter), browser_find by role and browser_scroll left and right, the last of what set Claude
+    // Code's own browser apart, and browser_key's repeat: 691 / 1473 / 1132 / 1889.)
+    assert!(small <= 695 && acting <= 1475 && seeing <= 1135 && all <= 1890, "{small} / {acting} / {seeing} / {all}");
     // The new parameters: a width for every model, the clicks and the drag where they act.
     assert!(defs_has(Gate::Show, false, "\"width\"") && defs_has(Gate::Show, true, "\"count\"") && defs_has(Gate::Show, true, "browser_drag"));
     assert!(!defs_has(Gate::Show, false, "browser_drag") && !defs_has(Gate::Show, true, "{x, y}") && defs_has(Gate::Look, true, "{x, y}"));
@@ -549,7 +551,8 @@ async fn a_batch_runs_in_order_and_stops_at_a_card_said_no_to() {
     confirm::answer_in_test(None);
     assert_eq!(r.result["success"], false);
     assert_eq!(r.result["data"]["ran"], 2, "stopped at the card");
-    assert_eq!(r.result["displayTexts"], json!(["Scrolled down shop.example.com", "Didn't click ‘Buy now’: you said no"]));
+    // (The shop's page is shorter than the view: its scroll moved nothing, and says so.)
+    assert_eq!(r.result["displayTexts"], json!(["Didn't scroll down on shop.example.com: it's already at the bottom", "Didn't click ‘Buy now’: you said no"]));
     assert!(r.result["note"].as_str().unwrap().starts_with("Stopped at step 2 of 3"), "{}", r.result);
     assert!(r.looks.is_empty(), "the shot after it never ran");
     // Allowed: it carries on.
@@ -746,6 +749,64 @@ async fn a_long_page_is_read_in_parts_each_saying_where_to_go_on() {
     let lines = on["data"]["elements"].as_str().unwrap();
     assert!(!lines.is_empty() && !lines.contains("more than"), "{lines}");
     assert_eq!((on["data"]["offset"].clone(), on["data"]["more"].clone()), (json!(act::rules::MAX_ELEMENTS), json!(false)), "{on}");
+    sim::install(None);
+}
+
+#[tokio::test]
+async fn the_pages_structure_reads_as_a_tree_its_controls_alone_or_one_part() {
+    // (14 Nov 2026: Claude Code's own browser's read_page, the last of what set the two apart.)
+    sim::install(Some(web()));
+    sim::with(|b| b.open(ARTICLE_URL));
+    let mut t = turn("What's on the Fort Joy page? Show me the harbour's preview");
+    let log = Log::default();
+    let r = call(&mut t, READ, json!({ "mode": "tree" }), &log).await.result;
+    assert!(r["displayText"].as_str().unwrap().starts_with("Read the structure of emberwiki.example"), "{r}");
+    let tree = r["data"]["tree"].as_str().unwrap().to_string();
+    // A node a line, indented by depth: the landmarks, headings by level, every control with its ref.
+    for want in ["- main", "  - banner", "    - navigation \"Languages\"", "      - link \"Deutsch\" [", "    - heading (level 1) \"Fort Joy\" [", "- searchbox \"Search Emberwiki\" [", "- button \"Search\" [", "- heading (level 2) \"Secrets\" ["] {
+        assert!(tree.contains(want), "{want}: {tree}");
+    }
+    // What's hidden isn't there; a paragraph's words once, its link under it.
+    assert!(!tree.contains("harbour south"), "{tree}");
+    assert_eq!(tree.matches("Its harbour is").count(), 1, "{tree}");
+    let r_of = |tree: &str, name: &str| -> u32 {
+        let line = tree.lines().find(|l| l.contains(&format!("\"{name}"))).unwrap_or_else(|| panic!("{name}: {tree}"));
+        line[line.rfind('[').unwrap() + 1..line.rfind(']').unwrap()].parse().unwrap()
+    };
+    // The controls alone.
+    let only = call(&mut t, READ, json!({ "mode": "tree", "filter": "interactive" }), &log).await.result;
+    let controls = only["data"]["tree"].as_str().unwrap();
+    assert!(controls.contains("- link \"Talk\"") && controls.contains("- button \"Search\"") && !controls.contains("heading") && !controls.contains("main"), "{controls}");
+    // Two levels down at most.
+    let top = call(&mut t, READ, json!({ "mode": "tree", "depth": 2 }), &log).await.result;
+    let top = top["data"]["tree"].as_str().unwrap();
+    assert!(top.contains("  - banner") && !top.contains("navigation"), "{top}");
+    // One part, by its ref: the paragraph's link alone.
+    let p = r_of(&tree, "Fort Joy is the island prison");
+    let part = call(&mut t, READ, json!({ "mode": "tree", "ref": p }), &log).await.result;
+    assert_eq!(part["data"]["tree"].as_str().unwrap().trim_end().split(" [").next().unwrap(), "- link \"Saltmarsh Docks\"", "{part}");
+    // Its refs act, as every ref does.
+    let h = call(&mut t, act::HOVER, json!({ "ref": r_of(&tree, "Saltmarsh Docks") }), &log).await.result;
+    assert!(h["data"]["changed"].as_str().unwrap().starts_with("a popup opened"), "{h}");
+    // browser_find by role, as Claude Code's own browser's find.
+    let f = call(&mut t, FIND, json!({ "query": "searchbox" }), &log).await.result;
+    assert_eq!(f["data"]["matches"].as_str().unwrap().split("] ").nth(1).unwrap(), "searchbox \"Search Emberwiki\"", "{f}");
+    // Sideways where nothing goes further (the stand-in lays pages out in one column): said so, not "Scrolled".
+    let s = call(&mut t, SCROLL, json!({ "direction": "right" }), &log).await.result;
+    assert_eq!((s["displayText"].clone(), s["data"]["moved"].clone()), (json!("Didn't scroll right on emberwiki.example: it's already at its right edge"), json!(false)), "{s}");
+    let s = call(&mut t, SCROLL, json!({ "direction": "down" }), &log).await.result;
+    assert_eq!(s["displayText"], "Scrolled down emberwiki.example", "{s}");
+    // A long tree: cut at a line's end, never inside one; where it stopped is where the next read starts.
+    let cut = sim::with(|b| {
+        let k = b.tabs()[0].key.clone();
+        b.act(&k, "tree", &json!({ "max": 70 })).unwrap()
+    })
+    .unwrap();
+    let text = cut["text"].as_str().unwrap();
+    assert!(cut["more"] == true && text.ends_with('\n') && text.chars().count() <= 70 && cut["end"] == text.chars().count(), "{cut}");
+    // A key over and over (`repeat`, as Claude Code's own browser's key), said once with its count.
+    let k = call(&mut t, act::KEY, json!({ "keys": "Tab", "repeat": 3 }), &log).await.result;
+    assert_eq!(k["displayText"], "Pressed Tab ×3 on emberwiki.example", "{k}");
     sim::install(None);
 }
 

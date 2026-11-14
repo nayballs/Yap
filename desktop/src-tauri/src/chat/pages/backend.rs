@@ -344,6 +344,16 @@ pub async fn act(key: &str, op: &str, a: &Value) -> Result<Value, String> {
         }
         "aimed" => super::act::script::aimed(r, a["id"].as_str().unwrap_or(""), a["count"].as_u64().unwrap_or(1) as u8, a["hover"].as_bool().unwrap_or(false)),
         "unhover" => super::act::script::unhover(),
+        "tree" if a["role"].is_string() => super::act::script::roles(&super::clip(a["role"].as_str().unwrap_or(""), 30), &super::clip(a["words"].as_str().unwrap_or(""), 100), a["limit"].as_u64().unwrap_or(20) as usize),
+        "wheelAim" => super::act::script::wheel_aim(a["x"].as_f64().unwrap_or(-1.0), a["y"].as_f64().unwrap_or(-1.0)),
+        "wheeled" => super::act::script::wheeled(),
+        "tree" => super::act::script::tree(
+            a["within"].as_u64().map(|w| w as u32),
+            a["depth"].as_u64().unwrap_or(15),
+            a["filter"].as_str().unwrap_or("all"),
+            a["offset"].as_u64().unwrap_or(0) as usize,
+            a["max"].as_u64().unwrap_or(super::READ_MAX as u64) as usize,
+        ),
         "listen" => {
             let kinds: Vec<&str> = a["kinds"].as_array().map(|k| k.iter().filter_map(Value::as_str).collect()).unwrap_or_default();
             super::act::script::listen((r > 0).then_some((r, role, name)), &kinds)
