@@ -113,13 +113,13 @@ impl Endpoint {
         let agents = spec.agents && tools == super::Tools::Chat;
         let memory = spec.memory;
         // The screen, the pages and the connectors: a Chat run's — and the
-        // pages a Code chat's own session's (an agent's run that reads Yap's
-        // data, 14 Nov 2026: its browser beside the chat), never the screen
-        // nor acting on a page there, whatever the spec says.
+        // screen and the pages a Code chat's own session's (an agent's run
+        // that reads Yap's data, 14 Nov 2026: its browser beside the chat and
+        // the look), never acting on a page there, whatever the spec says.
         let mut spec = spec;
         if tools != super::Tools::Chat {
             spec.eyes = if spec.reads && tools == super::Tools::Agent {
-                super::eyes::Eyes { screen: crate::chat::pictures::Gate::Off, act: false, ..spec.eyes }
+                super::eyes::Eyes { act: false, ..spec.eyes }
             } else {
                 super::eyes::Eyes::default()
             };

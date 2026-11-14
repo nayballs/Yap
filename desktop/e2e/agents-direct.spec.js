@@ -242,6 +242,25 @@ const OPENS_A_PAGE = [
   result(OPENED, 0.01),
   { _wait_user: true },
 ];
+const LOOKED = 'Those are two monitors, both blank.';
+/** The chat's own Claude looks at the screen when asked (Yap's look_at_screen). */
+const LOOKS_AT_THE_SCREEN = [
+  { _wait_user: true },
+  { _dump_args: ARGS },
+  init(),
+  { _mcp: { list: true, dump: TOOLS } },
+  begins('toolu_look', 'mcp__yap__look_at_screen'),
+  said('s1', [{ type: 'tool_use', id: 'toolu_look', name: 'mcp__yap__look_at_screen', input: {} }]),
+  { _mcp: { tool: 'look_at_screen', arguments: {}, result_for: 'toolu_look', dump: TOOLS } },
+  said('s2', [{ type: 'text', text: LOOKED }], 'end_turn'),
+  result(LOOKED, 0.01),
+  { _wait_user: true },
+];
+/** Two fake monitors (test mode never reads the real screen: `e2e_snip`). */
+const MONITORS = [
+  { x: 0, y: 0, width: 1280, height: 720, scale: 1, hdr: false, whiteNits: 80 },
+  { x: 1280, y: 0, width: 1280, height: 720, scale: 1, hdr: false, whiteNits: 80 },
+];
 /** A line Claude Code's own helper (`Task`) says, under the call that sent it. */
 const under = (call, line) => ({ ...line, parent_tool_use_id: call });
 const HELPED = 'The notes are checked.';
@@ -363,7 +382,7 @@ test.beforeEach(async ({ yap, main }) => {
   freshFolder(GARDEN);
   fs.rmSync(ARGS, { force: true });
   await yap.invoke('e2e_claude_approve_auto', { allow: true });
-  await setConfig(yap, main, { agentsEnabled: true, agentsDirect: true, agentsAsk: 'new-or-web', agentsSpeak: 'never', agentsMode: 'auto', webSearch: false, speakReplies: false });
+  await setConfig(yap, main, { agentsEnabled: true, agentsDirect: true, agentsAsk: 'new-or-web', agentsSpeak: 'never', agentsMode: 'auto', webSearch: false, speakReplies: false, assistantScreen: false });
   if (!(await yap.invoke('workspaces_list')).some((f) => f.name === 'garden-planner')) await yap.invoke('workspaces_add', { path: GARDEN });
 });
 
@@ -799,6 +818,40 @@ test('its session opens pages in Yap’s browser beside the chat, as Claude Code
   expect((await agents(yap)).find((j) => j.id === agent.id).turnList[0].beside?.pages?.length).toBe(1);
   await shot(main, '70-a-page-opened-beside-the-chat');
   await main.getByTestId('chat-page').getByRole('button', { name: 'Close the panel' }).click();
+});
+
+test('its session looks at the screen when asked, as Chat’s own does: the screenshots with the message, the pictures to Claude Code', async ({ yap, main, shot }) => {
+  fs.rmSync(TOOLS, { force: true });
+  // "Let Yap's AI see your screen" on, with cloud models too (the plan is one; until then the look is refused and
+  // the alert asks once: plan-eyes.spec.js tests that for the same code).
+  await setConfig(yap, main, { assistantScreen: true, assistantScreenCloud: true, assistantScreenAsked: true });
+  await yap.invoke('e2e_snip', { monitors: MONITORS, windows: [], start: false });
+  await script(yap, LOOKS_AT_THE_SCREEN, 'looks-at-the-screen');
+  const before = (await agents(yap)).length;
+  await codeChat(main);
+  await send(main, 'Can you have a look at my screen?');
+  const agent = await newAgent(yap, before);
+  const done = await ended(yap, agent.id);
+  // Its session was offered the look (never acting on a page) and took both monitors, as pictures it reads.
+  const [listed, looked] = toolDumps();
+  const names = listed.tools.map((t) => t.name);
+  expect(names).toContain('look_at_screen');
+  expect(names.filter((n) => /click|type|form/.test(n))).toEqual([]);
+  expect(looked).toMatchObject({ tool: 'look_at_screen', isError: false });
+  expect(JSON.parse(looked.content[0].text)).toMatchObject({ success: true, data: { monitors: 2 } });
+  expect(looked.content.filter((b) => b.type === 'image')).toHaveLength(2);
+  // Kept with the person's message, and shown with it in the screenshot frame.
+  const messages = await messagesOf(yap, done.conversation, 3);
+  expect(messages[0].images?.filter((i) => i.source === 'screen')).toHaveLength(2);
+  expect(messages[2].text).toBe(LOOKED);
+  await expect(thread(main).getByRole('group', { name: 'Screenshots' }).first().getByRole('button', { name: /^Screenshot,/ })).toHaveCount(2);
+  // Its work says it in words.
+  const log = (await yap.invoke('agent_get', { id: agent.id })).log;
+  expect(log.some((e) => e.step === 'Looking at your screen')).toBe(true);
+  // The thread, settled: the message (its screenshots), its work's line, the answer — no report line (nothing changed).
+  await expect.poll(() => laidOut(main), { timeout: 20_000 }).toEqual(['you', 'work', 'answer']);
+  await expect(thread(main).getByTestId('chat-agent-work')).toContainText('Looked at your screen');
+  await shot(main, '71-it-looked-at-the-screen');
 });
 
 test('its session reads Yap’s own data on request: meetings, notes, tasks and the calendar, never its memory', async ({ yap, main }) => {

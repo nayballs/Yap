@@ -1071,10 +1071,12 @@ no Local API (the bridge can be off), and it reaches the live UI.
 - **An agent's run that reads** (`RunSpec::reads`, 2026-11-12): the session
   of a Code chat that works directly is listed Yap's read tools beside
   `approve` — meetings, notes, tasks, folders, the calendar — and, since
-  2026-11-14, Yap's browser beside the chat (`RunSpec::eyes`: the pages and
-  the web's pictures with the web on, else picture files; never the screen
-  or acting on a page — `server.rs` clears them for any agent's run — and
-  each call for the browser turn its runner opened, `eyes::call`); never
+  2026-11-14, Yap's browser beside the chat and the screen look
+  (`RunSpec::eyes`: the pages and the web's pictures with the web on, else
+  picture files; `look_at_screen` with the screen switch on; never acting
+  on a page — `server.rs` clears it for any agent's run, and everything
+  for one Chat sent — each call for the browser turn its runner opened,
+  `eyes::call`); never
   `search_memory` or connectors'; an agent Chat sent out lists `approve`
   alone
   ([yap-code.md](./yap-code.md#a-code-chat-that-works-directly)).

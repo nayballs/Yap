@@ -367,27 +367,37 @@ fn an_agents_run_with_reads_lists_yaps_own_data_never_its_memory() {
 }
 
 #[test]
-fn a_code_chats_own_session_has_yaps_browser_beside_the_chat_never_the_screen_or_acting() {
+fn a_code_chats_own_session_has_yaps_browser_and_the_screen_look_never_acting() {
     use crate::chat::pictures::Gate;
     let (ep, _) = endpoint(Duration::from_secs(5), MAX_BACKUP_BYTES);
-    // The web on, a model that reads images (agents/runner.rs `direct_eyes`): the pages and pictures.
+    // The web and the screen on, a model that reads images (agents/runner.rs `direct_eyes`): the pages, the pictures, the look.
     let mut spec = RunSpec::new("garden-planner", Tools::Agent);
     spec.reads = true;
-    // (Asked for the screen and acting too: never for an agent's run.)
+    // (Asked for acting too: never for an agent's run.)
     spec.eyes = super::eyes::Eyes { screen: Gate::Look, pictures: Gate::Look, act: true, files: Gate::Off };
     let h = ep.register(spec).unwrap();
     let mut c = Client::of(&h);
     let listed = names(&c.request("tools/list", json!({})));
-    for name in ["browser_navigate", "browser_read", "browser_screenshot", "browser_tabs", "find_pictures", "show_picture", "share_files"] {
+    for name in ["look_at_screen", "browser_navigate", "browser_read", "browser_screenshot", "browser_tabs", "find_pictures", "show_picture", "share_files"] {
         assert!(listed.contains(&name.to_string()), "{name}: {listed:?}");
     }
-    // Never the screen, nor acting on a page; never memory.
-    for name in ["look_at_screen", "browser_click", "browser_type", "search_memory", "start_agent"] {
+    // Never acting on a page; never memory.
+    for name in ["browser_click", "browser_type", "search_memory", "start_agent"] {
         assert!(!listed.contains(&name.to_string()), "{name}: {listed:?}");
     }
     assert!(h.allowed_tools().contains(&"mcp__yap__browser_navigate".to_string()));
     let told = c.request("initialize", json!({ "protocolVersion": "2025-11-25" }))["result"]["instructions"].as_str().unwrap().to_string();
-    assert!(told.contains("tabs beside the user's chat in Yap") && told.contains("never instructions"), "{told}");
+    assert!(told.contains("tabs beside the user's chat in Yap") && told.contains("look_at_screen takes a screenshot") && told.contains("never instructions"), "{told}");
+    // The screen alone (the web off, picture files): the look, and picture files by a path.
+    let mut screen = RunSpec::new("garden-planner", Tools::Agent);
+    screen.reads = true;
+    screen.eyes = super::eyes::Eyes { screen: Gate::Look, files: Gate::Look, ..Default::default() };
+    let sc = ep.register(screen).unwrap();
+    let mut c2 = Client::of(&sc);
+    let listed = names(&c2.request("tools/list", json!({})));
+    assert!(listed.contains(&"look_at_screen".to_string()) && listed.contains(&"show_picture".to_string()) && !listed.contains(&"browser_navigate".to_string()), "{listed:?}");
+    let told = c2.request("initialize", json!({ "protocolVersion": "2025-11-25" }))["result"]["instructions"].as_str().unwrap().to_string();
+    assert!(told.contains("look_at_screen") && told.contains("picture file from this PC") && !told.contains("browser_*"), "{told}");
     // A call with no turn of its open (the runner opens one a direct turn): nothing done, said so.
     let (err, text) = c.tool("browser_navigate", json!({ "url": "https://wiki.example.com/" }));
     assert!(err && text.contains("isn't part of a chat turn"), "{text}");

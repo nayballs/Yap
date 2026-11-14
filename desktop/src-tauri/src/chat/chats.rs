@@ -232,7 +232,8 @@ pub fn add_question_images(id: u64, images: &[ChatImage]) {
         return;
     }
     with_store(|s| {
-        let Some(m) = s.conversations.iter_mut().find(|c| c.id == id).and_then(|c| c.messages.iter_mut().rev().find(|m| m.role == "user")) else { return };
+        // (The person's own last message: never an agent's report line, which a report may have put after it.)
+        let Some(m) = s.conversations.iter_mut().find(|c| c.id == id).and_then(|c| c.messages.iter_mut().rev().find(|m| m.role == "user" && m.kind.is_empty())) else { return };
         for image in images {
             if !m.images.iter().any(|i| i.id == image.id) {
                 m.images.push(image.clone());
