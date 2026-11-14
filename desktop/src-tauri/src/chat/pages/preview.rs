@@ -4,7 +4,8 @@
 //! `.claude/launch.json` servers (`agents/servers.rs`), as Claude Code's
 //! desktop app's own preview tools offer them —
 //!
-//! - **`preview_start {name}`**: start it (running already: that one) and
+//! - **`preview_start {name}`**: start it (running already: that one; its
+//!   page still open from before a restart: loaded again) and
 //!   open its page in a new tab beside the chat;
 //! - **`preview_list`**: the servers in `launch.json`, and those running;
 //! - **`preview_stop {serverId}`**;
@@ -81,14 +82,26 @@ pub async fn execute(turn: &mut crate::web::Turn, name: &str, args: &Value, ctx:
                 Err(e) => return failed(e.clone(), format!("Couldn't start ‘{}’", clip(want, 40))),
             };
             // Its page beside the chat, in a tab of its own.
+            let same = |u: &str| u == info.url || u.trim_end_matches('/') == info.url.trim_end_matches('/');
+            let shown_before: Vec<String> = super::backend::tabs().await.into_iter().filter(|t| same(&t.url)).map(|t| t.key).collect();
             let opened = super::execute(turn, super::TABS, &json!({ "action": "new", "url": info.url }), ctx).await;
+            // Started again with its page still open (a restart): that page
+            // loaded again, never the old server's left on screen (Yap Lab,
+            // 14 Nov 2026: the tab was reused as it was).
+            if !already {
+                for key in &shown_before {
+                    if let Err(e) = super::backend::navigate(key, &info.url).await {
+                        tracing::info!("Chat: a dev server's open page didn't load again ({e})");
+                    }
+                }
+            }
             let mut data = json!({ "serverId": info.id, "name": info.name, "port": info.port, "url": info.url, "state": info.state });
             if let Some(from) = info.moved_from {
                 data["movedFrom"] = json!(from);
             }
             // Its tab's number, as the browser tools take it (Yap Lab, 14 Nov 2026: it said null).
             let tabs = super::backend::tabs().await;
-            let tab = tabs.iter().rev().find(|t| t.url == info.url || t.url.trim_end_matches('/') == info.url.trim_end_matches('/')).or_else(|| tabs.iter().find(|t| t.front)).map(|t| json!(t.tab)).unwrap_or(Value::Null);
+            let tab = tabs.iter().rev().find(|t| same(&t.url)).or_else(|| tabs.iter().find(|t| t.front)).map(|t| json!(t.tab)).unwrap_or(Value::Null);
             let note = if opened.result["success"] == true {
                 data["tab"] = tab.clone();
                 format!("Its page is open beside the chat (tab {tab}): browser_* tools read, look at and act on it. preview_logs reads its output; it runs until preview_stop or Yap quits.")

@@ -2755,10 +2755,14 @@ of sight. What they share is said once, in the line.
   browser" uses —, never another scheme ("file:", "javascript:"…: said
   under the bar), and `load_url` still holds it to public web pages; the
   view keeps the address as its own, so the tab shown again opens there),
-  then **Save a shot** (`page_view_shot`: kept with the answer that
-  brought the page up, `chats::add_shot`, and shown as a picture tab), Open
-  in <browser>, expand, ✕; under it "From <site> · <section> · Open in
-  <browser>". The page's title is its tab's name (`chatDoc.svelte.js`
+  and its buttons — since 14 Nov 2026 in the panel's tab row after its +, as
+  the Claude Code app has them: a Code chat's Dev servers, Open in
+  <browser>, expand, ✕ (**Save a shot**, `page_view_shot`, kept with the
+  answer as a picture tab, left the bar the same day: Claude never used it,
+  and annotating puts a picture in the message instead); no footer under it
+  since the same day (its "From <site> · Open in <browser>" and the
+  right-click hint: the maintainer, "not needed" — a page's own error is a
+  line under the address, `chat-page-error`). The page's title is its tab's name (`chatDoc.svelte.js`
   `pageNow`: each page tab's title and address as Rust says, and where the
   address bar took it). **A new tab**: with a page showing, the row of tabs
   is there even alone, with a **+** at its end (Ctrl+T in the panel;
@@ -3005,6 +3009,49 @@ review (safely, for any user, in any language Yap speaks).
   view) and `browser_key`'s `repeat` ("Pressed Tab ×3"). Still apart: Claude Code's app's `find` by a description (it
   runs a model over the page; Yap's, as the app's own built-in browser's,
   matches role, name and text).
+- **Select an element or annotate** (14 Nov 2026, `pages/pick.rs`,
+  `PageTab.svelte`, `PageAnnotate.svelte`; the maintainer, showing the Claude
+  Code app's browser pane — its arrow at the end of the address bar, Ctrl+Shift+S,
+  "Sends Claude a screenshot plus the element's HTML, styles, selector…"; built
+  from what he showed and Anthropic's public docs, never the app's files): the
+  address row's arrow opens a compact toolbar at the page's foot (under the
+  page, never over it: anything over the stage hides the live page) — Select,
+  the pen, a shape (rectangle, ellipse, arrow: its ▾), T, and ×; Esc or the
+  arrow again closes it, from the page too (`yap-page-key`).
+  - **Select** (on when the toolbar opens): DevTools' own inspect mode on the
+    live page (`Overlay.setInspectMode` "searchForNode", its highlight with the
+    tag, classes and size, as the browser's developer tools pick); a click
+    picks (`Overlay.inspectNodeRequested`, heard by `view.rs`
+    `watch_devtools`) — one pick, then the page clicks as ever. Yap reads it in
+    the page (`pick::DESCRIBE` over `Runtime.callFunctionOn`: tag, id,
+    classes, its words, its ancestors as a path, 17 key computed styles, its
+    HTML and its neighbours', clipped), crops its picture from a shot of the
+    view (`crop_to`) into Chat's box (source "element": no tile — its chip
+    shows it; the sent question keeps each picture's source from the box,
+    `commands.rs` `keep_sources`, the stored copy alone saying "snip"), and the page tab adds a **chip** to the message box
+    (`stores/pickedElements.svelte.js`, `ElementChip.svelte`:
+    `<div class="…">`; its card on hover, "Included with your message", its
+    picture, Element, Text, "Show N more details": path, page, styles, HTML,
+    neighbours; × removes it and its picture).
+  - **Sent**: `chat_send`'s `elements` → `pick::with_elements`: a
+    `<selected-element page tag id class picture>` block each (<text>,
+    <path>, <styles>, <html>, <siblings>) after the person's words, its
+    picture with the question's (a model that can't read images: the words
+    alone, never stuck). Web content: a message carrying one is a web turn
+    from its start (`has_element`: Chat's `web_question`, a plan chat's and a
+    Code chat's session's `web`), as text selected on a page is; a direct Code
+    chat's message still goes straight to its session. The question shows
+    the person's words and a chip each, never the block
+    (`core/selectedElements.js` `splitElements`).
+  - **Annotate**: the pen, a shape or T take a still of the page as it's in
+    view (`page_still`) and show it in the page's place (the live page out of
+    sight: `measure()`), drawn on in Yap's own page — strokes, a rectangle,
+    an ellipse or an arrow by dragging, words where you click (Enter), Ctrl+Z
+    the last mark back; **Add to message** lays the marks on the still at its
+    own pixels and puts it in Chat's box (`page_annotated`, source
+    "annotation"), as a screenshot.
+  - Yap Lab picks too (`lab pick "<words>"`: the tools, the element clicked
+    through the real overlay, its chip awaited; docs/lab.md).
 - **The developer's tools** (14 Nov 2026, `pages/dev.rs`; a Claude Code
   session's only — a plan chat's turn, a Code chat's own session: listed by
   `claude_live/eyes.rs`, never Chat's own loop): `browser_console` (what
