@@ -194,6 +194,14 @@ pub fn browser_line(tool: &str, input: &Value) -> Option<String> {
         pages::dev::NETWORK => beside("Reading the page's network requests"),
         pages::dev::JAVASCRIPT => beside("Running a script on the page"),
         pages::dev::VIEW => beside("Resizing the page"),
+        // Its workspace's dev servers (14 Nov 2026, `chat/pages/preview.rs`).
+        pages::preview::START => match text("name") {
+            Some(n) => format!("Starting the dev server ‘{}’", one_line(&n, 40)),
+            None => "Starting a dev server".to_string(),
+        },
+        pages::preview::LIST => "Listing the dev servers".to_string(),
+        pages::preview::STOP => "Stopping a dev server".to_string(),
+        pages::preview::LOGS => "Reading a dev server's output".to_string(),
         pictures::FIND => beside("Looking for pictures"),
         pictures::LOOK => beside("Looking at a picture"),
         pictures::SHOW => beside("Showing a picture"),

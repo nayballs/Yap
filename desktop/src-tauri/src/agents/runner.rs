@@ -882,7 +882,9 @@ fn beside_context(agent: &Agent, n: u32, eyes: claude_live::eyes::Eyes, unattend
         .and_then(crate::chat::chats::get)
         .map(|c| c.messages.iter().filter(|m| m.role == "user" && m.kind.is_empty()).map(|m| m.text.clone()).collect())
         .unwrap_or_default();
-    claude_live::turn::Context { question, conversation: agent.conversation, eyes, said, watched: true, unattended, ..Default::default() }
+    // (Its workspace: the dev servers its Claude starts, `chat/pages/preview.rs`.)
+    let workspace = (!agent.path.trim().is_empty()).then(|| agent.path.clone());
+    claude_live::turn::Context { question, conversation: agent.conversation, eyes, said, watched: true, unattended, workspace, ..Default::default() }
 }
 
 /// **Its browser turn's web side**, as a plan chat's (`plan.rs` `web_side`):

@@ -69,7 +69,7 @@
    * and pictures are the row of tabs); `conversationId`: the chat a page's
    * shot is kept in.
    */
-  let { doc, cover = false, narrow = false, onquote = null, messages = [], conversationId = null } = $props();
+  let { doc, cover = false, narrow = false, onquote = null, messages = [], conversationId = null, workspace = null } = $props();
 
   let box = $state(null);
   let bodyEl = $state(null);
@@ -671,7 +671,7 @@
   {:else if doc.showing === 'page' && doc.page}
     <!-- One per page tab: each its own webview, its place kept while another tab shows. -->
     {#key tabKeyOf(doc.page)}
-      <PageTab {doc} {narrow} {conversationId} recent={recentPages} />
+      <PageTab {doc} {narrow} {conversationId} recent={recentPages} {workspace} />
     {/key}
   {:else if doc.showing === 'agent' && doc.agent}
     <!-- An agent Chat started: what it's doing, live (closing it never stops it). -->

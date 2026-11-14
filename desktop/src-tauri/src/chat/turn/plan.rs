@@ -507,6 +507,8 @@ fn run_context(
         takes: t.gates.screen_takes,
         // A plan chat has no Mode: its page actions' cards ask, as Chat's own.
         unattended: false,
+        // Nor a workspace: no dev servers (a Code chat's own session has them, `agents/runner.rs`).
+        workspace: None,
     }
 }
 

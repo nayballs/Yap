@@ -212,6 +212,10 @@ impl PageQuote {
 /// (`standin`: `<standin>/host/path?query`; none: never the internet,
 /// `offline`). Pure.
 pub fn load_url(url: &str, standin: Option<&str>, offline: bool) -> Result<String, String> {
+    // A Code chat's dev server running now: its page, from this PC as it is (`agents/servers.rs`).
+    if crate::agents::servers::running_origin(url) {
+        return Ok(url.trim().to_string());
+    }
     let u = crate::web::check_url(url)?;
     match standin {
         Some(base) => {
@@ -226,6 +230,9 @@ pub fn load_url(url: &str, standin: Option<&str>, offline: bool) -> Result<Strin
 /// **May a page go to `uri`** (a link, a redirect, a frame): a public
 /// http(s) address — in a test run, only the stand-in's. Pure.
 pub fn may_navigate(uri: &str, standin: Option<&str>, offline: bool) -> bool {
+    if crate::agents::servers::running_origin(uri) {
+        return true;
+    }
     match standin {
         Some(base) => uri.starts_with(&format!("{base}/")),
         None => !offline && crate::web::check_url(uri).is_ok(),
@@ -243,6 +250,10 @@ pub fn may_navigate(uri: &str, standin: Option<&str>, offline: bool) -> bool {
 /// rebinding) isn't caught here. Pure.
 pub fn refused_request(uri: &str, standin: Option<&str>) -> bool {
     if standin.is_some_and(|base| uri.starts_with(&format!("{base}/"))) {
+        return false;
+    }
+    // A running dev server's own files, its live-reload socket too (`agents/servers.rs`).
+    if crate::agents::servers::running_origin(uri) {
         return false;
     }
     let Ok(u) = reqwest::Url::parse(uri.trim()) else { return false };
@@ -310,6 +321,11 @@ pub fn address(typed: &str, engine: &str) -> Result<String, String> {
     let lower = t.to_ascii_lowercase();
     if lower.starts_with("http://") || lower.starts_with("https://") {
         return Ok(t.to_string());
+    }
+    // "localhost:5173": a Code chat's dev server running now (`agents/servers.rs`), over plain http.
+    let local = format!("http://{t}");
+    if crate::agents::servers::running_origin(&local) {
+        return Ok(local);
     }
     let spaced = t.contains(char::is_whitespace);
     // "javascript:…", "file:…", "about:…": a scheme, not a site ("site.com:8080" is one).

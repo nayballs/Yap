@@ -66,6 +66,7 @@ pub mod output;
 pub mod pictures;
 pub mod remote;
 pub mod runner;
+pub mod servers;
 pub mod sizing;
 pub mod steps;
 pub mod store;

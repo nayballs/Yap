@@ -43,13 +43,15 @@
   import { useBrowserName, openInLabel } from '../../stores/browserName.svelte.js';
   import { tabKeyOf } from './chatDoc.svelte.js';
   import { questionParts, whyOf } from './pageConfirm.js';
+  import ServersMenu from './ServersMenu.svelte';
 
   /**
    * `doc`: the panel's state (its `page`); `narrow`: no room beside the chat
    * (no expand); `conversationId`: the chat a shot is kept in; `recent`: the
-   * pages this conversation read ({url, title}), for a new tab.
+   * pages this conversation read ({url, title}), for a new tab; `workspace`: a
+   * Code chat's folder (its Dev servers, ServersMenu.svelte), else null.
    */
-  let { doc, narrow = false, conversationId = null, recent = [] } = $props();
+  let { doc, narrow = false, conversationId = null, recent = [], workspace = null } = $props();
 
   // (DocPanel makes one of these per page tab: its key never changes.)
   const page = untrack(() => doc.page);
@@ -89,7 +91,8 @@
   const here = $derived(st.url || went || page?.url || '');
   const title = $derived(st.title || page?.title || page?.site || hostOf(here) || 'Page');
   const site = $derived(hostOf(here) || page?.site || '');
-  const insecure = $derived(/^http:\/\//i.test(here));
+  // (A dev server on this PC — localhost — is a secure context, as browsers count it: no warning.)
+  const insecure = $derived(/^http:\/\//i.test(here) && !/^http:\/\/(localhost|[^/]*\.localhost|127\.\d+\.\d+\.\d+|\[::1\])(:\d+)?(\/|$)/i.test(here));
 
   // ---- where the page sits: over the stage, unless something covers it -------------------
 
@@ -325,6 +328,10 @@
       </span>
     {/if}
     <div class="pageactions">
+      {#if workspace}
+        <!-- A Code chat's dev servers (.claude/launch.json): its page opens here when this tab has none, else in a new tab. -->
+        <ServersMenu {workspace} onopen={(url, name) => (blank ? go(url) : doc.showPage({ url, title: name }))} />
+      {/if}
       <button type="button" class="pagebtn" onclick={saveShot} disabled={blank || shooting || !!failed} aria-label="Save a shot of the page" title="Save a shot (a picture of the page as it is)" data-testid="chat-page-shot">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 8h3l2-3h6l2 3h3v11H4z" /><circle cx="12" cy="13" r="3.5" /></svg>
       </button>

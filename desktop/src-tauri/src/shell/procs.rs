@@ -190,6 +190,19 @@ pub fn end_with_yap(child: &std::process::Child) {
 #[cfg(not(windows))]
 pub fn end_with_yap(_child: &std::process::Child) {}
 
+/// [`end_with_yap`] for a helper started with tokio's `Command` (a Code
+/// chat's dev server, `agents/servers.rs`).
+#[cfg(windows)]
+pub fn end_with_yap_tokio(child: &tokio::process::Child) {
+    let Some(job) = imp::yap_job() else { return };
+    let Some(handle) = child.raw_handle() else { return };
+    if let Err(e) = imp::assign(job, handle) {
+        tracing::warn!("couldn't tie helper process {:?} to Yap: {e}", child.id());
+    }
+}
+#[cfg(not(windows))]
+pub fn end_with_yap_tokio(_child: &tokio::process::Child) {}
+
 #[cfg(windows)]
 mod imp {
     use windows::Win32::Foundation::{CloseHandle, STILL_ACTIVE};

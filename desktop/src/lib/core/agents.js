@@ -386,6 +386,10 @@ const BROWSER_DONE = [
   [/^Reading the page's network requests beside the chat$/, 'read the network', 'read the network {n} times'],
   [/^Running a script on the page beside the chat$/, 'ran a script', 'ran {n} scripts'],
   [/^Resizing the page beside the chat$/, 'resized the page', 'resized the page {n} times'],
+  [/^Starting (the|a) dev server/, 'started a dev server', 'started {n} dev servers'],
+  [/^Listing the dev servers$/, 'listed the dev servers', 'listed the dev servers {n} times'],
+  [/^Stopping a dev server$/, 'stopped a dev server', 'stopped {n} dev servers'],
+  [/^Reading a dev server's output$/, "read a server's output", "read servers' output {n} times"],
 ];
 
 export function workSummary(group, busy = false) {

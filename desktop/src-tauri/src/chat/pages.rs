@@ -39,7 +39,9 @@
 //! ([`written`]); after it, only a page from this turn's results, the
 //! person's messages, a site they named or a link on a page read, as
 //! `read_page`'s rule (`web::Turn::allowed`) — and only public http(s)
-//! addresses (`web::check_url`); never a search engine's results read. What
+//! addresses (`web::check_url`), but for a Code chat's dev server running
+//! now (its localhost page: `agents/servers.rs` `running_origin`); never a
+//! search engine's results read. What
 //! a read, a find, a shot or an action's answer brings in is web content
 //! (the safety rule). Every tool reaches the pages through [`backend`]: the
 //! panel's own webviews, or a model evaluation's stand-in browser (`sim.rs`).
@@ -128,6 +130,7 @@ function foreignFrames(r,max){var out=[],fs=qa('iframe,frame',r);for(var i=0;i<f
 pub mod act;
 pub mod backend;
 pub mod dev;
+pub mod preview;
 pub mod read;
 pub mod see;
 #[cfg(any(test, debug_assertions))]
@@ -789,6 +792,10 @@ pub fn checked(turn: &crate::web::Turn, args: &Value, doing: &str, ctx: &Ctx<'_>
     // with show_picture (chat/pictures/local.rs).
     if let Some(e) = crate::chat::pictures::local::not_a_page(&url) {
         return Err(failed(e, format!("Didn't {doing} {}: a file on this PC", crate::chat::pictures::local::chip_name(&url))));
+    }
+    // A Code chat's dev server running now (`agents/servers.rs`): its own page, on this PC.
+    if crate::agents::servers::running_origin(&url) {
+        return Ok(url);
     }
     if let Err(e) = crate::web::check_url(&url) {
         return Err(failed(e.clone(), format!("Didn't {doing} {shown}: {}", crate::web::short(&e))));

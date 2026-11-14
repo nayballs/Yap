@@ -95,6 +95,9 @@ pub struct Context {
     /// The turn's part of Yap in the network receipts (Chat, the Voice
     /// Assistant): a connector's requests are counted as its.
     pub feature: Option<crate::privacy::net::Feature>,
+    /// **A Code chat's workspace** (its own session's turns): where its dev
+    /// servers are (`preview_*`, `agents/servers.rs`). `None`: none offered.
+    pub workspace: Option<String>,
 }
 
 /// The turn open now.

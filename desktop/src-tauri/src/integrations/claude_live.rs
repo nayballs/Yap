@@ -247,6 +247,8 @@ pub struct RunHandle {
     connectors: Vec<String>,
     /// Reads Yap's own data ([`RunSpec::reads`], an agent's run).
     reads: bool,
+    /// Its workspace's dev servers offered (`preview_*`, `rpc::servers_offered`).
+    servers: bool,
     has_backup: bool,
     /// The chat turn its calls belong to ([`RunHandle::begin_turn`]).
     turn: Arc<turn::Slot>,
@@ -335,6 +337,7 @@ impl RunHandle {
         rpc::tool_names(self.tools, true, self.agents, self.memory, self.eyes, self.reads)
             .into_iter()
             .filter(|n| *n != approve::NAME)
+            .chain(if self.servers { crate::chat::pages::preview::NAMES } else { &[] }.iter().copied())
             .map(str::to_string)
             .chain(self.connectors.iter().cloned())
             .map(|n| format!("mcp__{SERVER}__{n}"))

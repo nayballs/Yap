@@ -542,6 +542,46 @@ workspace, word for word, and no model of Chat's is asked.
   `agentsDirect: false`, so every older spec still tests the hand-off; Yap
   Lab's `code-chat-direct` script runs it on the real Claude Code.
 
+## Dev servers
+
+A Code chat's workspace runs its **dev servers** from Yap's browser panel (14 Nov 2026; the maintainer, on the Claude Code app's Dev servers menu in its browser pane: "Can we add this to Yap, please? And an ability to do this"). Built from Anthropic's public docs for the app ("Configure preview servers") and the preview tools as Claude Code's own session is given them, never from the app's files (Anthropic's terms forbid taking it apart).
+
+- **`.claude/launch.json`** in the workspace, the same file and format as the Claude Code app reads, so one file serves both (`agents/servers.rs`):
+  - `name`, `runtimeExecutable` and `runtimeArgs`, or `program` and `args` (run with `node`);
+  - `port` (3000 by default), `cwd` (from the workspace's root), `env`, `autoPort`;
+  - `url`: where the page opens; alone, with no command, it attaches to a server already running;
+  - comments and trailing commas are allowed (`strip_jsonc`). An entry Yap can't use is skipped and the menu says why.
+- **A port in use** (`port_plan`, as the docs say):
+  - `autoPort: true`: the next free port, with `PORT` set and a `--port` / `-p` in the arguments rewritten;
+  - `false`: an error;
+  - not set: the next free port when the arguments name the port or the command isn't a package manager's script; else it stays stopped and says why.
+- **Starting one** (`start`):
+  - It runs in the workspace with no window, `PORT` and `BROWSER=none` set (it never opens the person's own browser).
+  - Its output is kept (1,000 lines, in memory, colours taken out).
+  - It's tied to Yap's kill-on-close job (`shell/procs.rs` `end_with_yap_tokio`: it never outlives Yap).
+  - It's ready once its port answers (90 s at most) and failed when it exits first: the error says why, with its last lines.
+  - Started twice: the running one.
+  - Stopping ends the process and those it started (`kill_tree`).
+- **Its page**: `http://localhost:<port>` of a server running now (also `127.0.0.1`, `[::1]`, a `*.localhost` name, and its live-reload socket) is the one exception to the browser's "never this PC" (`servers::running_origin`). It applies in four places:
+  - the panel's loads, navigations and requests (`view.rs` `load_url`, `may_navigate`, `refused_request`);
+  - the address bar (`localhost:5173` opens it);
+  - Claude's own navigation (`pages::checked`).
+  Never another port of this PC, and never once it stops. "Not secure" isn't shown for a localhost page, as browsers count it a secure context.
+- **The Dev servers menu** (`ServersMenu.svelte`, in the page tab's bar of a Code chat; the browser opens with Ctrl+Shift+B):
+  - each server with its state (a dot) and ▶ start / ■ stop;
+  - a running one's name opens its page;
+  - Stop all;
+  - **Add server** (a name, a command line and a port, written to launch.json; refused when the file has comments, which rewriting would lose: Claude adds it then).
+  - The person's own click asks nothing.
+- **Claude's tools** (`chat/pages/preview.rs`; a Code chat's own session with the pages on: its run's folder is the workspace, `rpc.rs` `servers_offered`, listed and in `--allowedTools`):
+  - `preview_start {name}`: started, and its page opened in a new tab beside the chat;
+  - `preview_list`;
+  - `preview_stop` and `preview_logs {level, lines, search}`, each by `serverId` or name.
+  - Its instructions: write launch.json if it's missing, never run a dev server with Bash, and look at the page after changing what it shows.
+  - Starting one asks nobody, as the app's local preview doesn't: the command is the workspace's own.
+  - Its lines: "Starting the dev server ‘web’", "Reading a dev server's output".
+- **Not yet**: the app's auto-verify setting (`autoVerify`), a card in the chat with Open for a server Claude started, and a server picked by the app from `package.json` by itself.
+
 ## Turns: one agent per Code chat
 
 2026-11-07, after the maintainer's real use: a follow-up on the same project
