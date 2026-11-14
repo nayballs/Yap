@@ -844,6 +844,86 @@ fn closing(read_only: bool, direct: bool) -> &'static str {
     }
 }
 
+/// **What a Code chat's own Claude may use of Yap's browser** (14 Nov 2026,
+/// the maintainer: "claude-code doesn't have browser tools? It should have
+/// shouldn't it?" — as Claude Code's own app has its browser pane): the
+/// pages beside the chat and the web's pictures with the web on ("Look
+/// things up on the web", `web`), else picture files by a path — as a plan
+/// Code chat's session has them (`chat/turn/plan.rs` `session_eyes`). Never
+/// the screen, nor acting on a page (clicks and typing: Chat's browser
+/// stays at open, read and look). Pure but for the model's image reading.
+fn direct_eyes(web: bool, model: &str) -> claude_live::eyes::Eyes {
+    use crate::chat::pictures::Gate;
+    let provider = crate::ai::claude_plan::PROVIDER;
+    let pictures = Gate::for_model(web, provider, model);
+    let files = if pictures == Gate::Off { Gate::for_model(true, provider, model) } else { Gate::Off };
+    claude_live::eyes::Eyes { screen: Gate::Off, pictures, act: false, files }
+}
+
+/// **Its browser turn's context**: the person's message this turn, their
+/// earlier ones in the chat (an address they gave opens), the chat itself.
+fn beside_context(agent: &Agent, n: u32, eyes: claude_live::eyes::Eyes) -> claude_live::turn::Context {
+    let question = agent.turn_list.iter().find(|t| t.n == n).map(|t| t.request.clone()).filter(|q| !q.trim().is_empty()).unwrap_or_else(|| agent.brief.clone());
+    let said = agent
+        .conversation
+        .and_then(crate::chat::chats::get)
+        .map(|c| c.messages.iter().filter(|m| m.role == "user" && m.kind.is_empty()).map(|m| m.text.clone()).collect())
+        .unwrap_or_default();
+    claude_live::turn::Context { question, conversation: agent.conversation, eyes, said, watched: true, ..Default::default() }
+}
+
+/// **Its browser turn's web side**, as a plan chat's (`plan.rs` `web_side`):
+/// the person's links (this message, their earlier ones, the sources of
+/// earlier answers), the per-turn caps, the pictures and pages it shows.
+fn beside_web(cfg: &crate::config::YapConfig, agent: &Agent, ctx: &claude_live::turn::Context) -> Option<crate::web::Turn> {
+    use crate::chat::pictures::Gate;
+    if ctx.eyes.pictures == Gate::Off && ctx.eyes.files == Gate::Off {
+        return None;
+    }
+    let settings = crate::web::Settings::for_chat(cfg, crate::ai::claude_plan::PROVIDER, &agent.model, crate::ai::claude_plan::BASE_URL, "");
+    let earlier: Vec<&str> = ctx.said.iter().map(String::as_str).collect();
+    let mut turn = crate::web::Turn::new(settings, crate::web::Endpoints::current(), &ctx.question, &earlier);
+    if let Some(conv) = agent.conversation.and_then(crate::chat::chats::get) {
+        turn = turn.with_earlier_sources(conv.messages.iter().flat_map(|m| m.sources.iter().map(|s| s.url.as_str())));
+        turn.pictures.local = crate::chat::pictures::local::Context::of_chat(&conv, &ctx.question);
+    }
+    Some(turn)
+}
+
+/// The next thing its browser showed (never, without one).
+async fn next_shown(beside: &mut Option<claude_live::turn::Turn>) -> Option<crate::chat::stream::Event> {
+    match beside {
+        Some(t) => t.events.recv().await,
+        None => std::future::pending().await,
+    }
+}
+
+/// **What its browser shows, to the chat** (`yap-agent-shown`: a page
+/// opened beside it, a picture shown, files shared): the panel opens on it
+/// as on a plan chat's (`chatState` `agentShown`).
+fn shown_beside(agent: &Agent, n: u32, ev: crate::chat::stream::Event) {
+    if let Some(app) = APP.get() {
+        let _ = app.emit(SHOWN_EVENT, serde_json::json!({ "id": agent.id, "turn": n, "conversation": agent.conversation, "event": ev }));
+    }
+}
+
+/// The page's event for what a Code chat's own Claude showed beside the chat.
+pub const SHOWN_EVENT: &str = "yap-agent-shown";
+
+/// What turn `n` showed beside the chat, kept for its answer (`TurnNote::beside`).
+fn keep_beside(id: &str, n: u32, shown: claude_live::turn::Shown) {
+    let beside = store::Beside { pages: shown.pages, pictures: shown.pictures, files: shown.files };
+    if beside.is_empty() {
+        return;
+    }
+    tracing::info!(id, turn = n, pages = beside.pages.len(), pictures = beside.pictures.len(), files = beside.files.len(), "Agents: what its browser showed, kept for its answer");
+    store::touch(id, |j| {
+        if let Some(t) = j.turn_mut(n) {
+            t.beside.add(&beside);
+        }
+    });
+}
+
 /// **The line a turn starts on** (its first step): "Starting Claude Code"
 /// for an agent sent out, and "Thinking" — as Chat's own turn says it
 /// (`chat/activity.rs`) — for the person's own message in a Code chat that
@@ -1028,9 +1108,11 @@ async fn turn(id: &str, message: Option<String>) -> (Status, u32) {
         approval: Some(Approval { run: id.to_string(), conversation: agent.conversation, origin: agent.origin, unattended: modes::unattended(mode) }),
         agents: false,
         memory: false,
-        // A job works with the person's own tools, never Yap's screen or pages,
-        // nor Yap's connectors (its own Claude Code setup has the person's).
-        eyes: Default::default(),
+        // An agent Chat sent works with the person's own tools, never Yap's
+        // screen or pages, nor Yap's connectors (its own Claude Code setup
+        // has the person's). A Code chat's own session has Yap's browser
+        // beside the chat (14 Nov 2026): the pages, never the screen.
+        eyes: if direct { direct_eyes(cfg.web_search, &agent.model) } else { Default::default() },
         connectors: None,
         // A Code chat's own session (the person's message went straight to
         // it) reads Yap's meetings, notes, tasks and calendar on request, as
@@ -1041,6 +1123,16 @@ async fn turn(id: &str, message: Option<String>) -> (Status, u32) {
         Ok(r) => r,
         Err(e) => return failed_early(id, n, format!("Couldn't start the agent: {e}"), None),
     };
+    // **Its browser beside the chat** (a Code chat's own session, 14 Nov
+    // 2026): this turn's calls belong to it — the person's message and their
+    // earlier ones (the pages it may open), the chat — and what they show
+    // goes to the chat's panel (`yap-agent-shown`), its answer keeping it.
+    let eyes = if direct { direct_eyes(cfg.web_search, &agent.model) } else { Default::default() };
+    let mut beside = (direct && eyes.any()).then(|| {
+        let ctx = beside_context(&agent, n, eyes);
+        let web = beside_web(&cfg, &agent, &ctx);
+        run.begin_turn(ctx, web)
+    });
     let resuming = message.is_some() && agent.started_ts > 0 && !agent.session.is_empty();
     let session_id = if agent.session.is_empty() { session::new_session_id() } else { agent.session.clone() };
     let conversation = if resuming { Conversation::Resume(session_id) } else { Conversation::New(session_id) };
@@ -1148,15 +1240,29 @@ async fn turn(id: &str, message: Option<String>) -> (Status, u32) {
     // session), or what was kept of it (none kept: not known).
     let total_before = if resuming { Some(agent.session_total).filter(|t| *t > 0.0) } else { Some(0.0) };
     let mut follow = Follow::new(&agent, n, folder, backup, mode, window, total_before);
+    follow.marks = beside.as_ref().map(|t| t.marks());
     let mut tick = tokio::time::interval(Duration::from_millis(500));
+    let mut shows = beside.is_some();
     loop {
         tokio::select! {
             ev = rx.recv() => match ev {
                 Some(Event::Exited(_)) | None => break,
                 Some(ev) => follow.on(ev, &session),
             },
+            shown = next_shown(&mut beside), if shows => match shown {
+                Some(ev) => shown_beside(&agent, n, ev),
+                None => shows = false,
+            },
             _ = tick.tick() => follow.on_tick(&session),
         }
+    }
+    // What its browser showed: the rest passed on, then kept for its answer
+    // (its turn over, a call still waiting stops).
+    if let Some(mut t) = beside.take() {
+        while let Ok(ev) = t.events.try_recv() {
+            shown_beside(&agent, n, ev);
+        }
+        keep_beside(&agent.id, n, t.shown());
     }
     // Unregistered: a permission card still waiting is a no.
     drop(run);
@@ -1241,6 +1347,17 @@ struct Follow {
     output_used: usize,
     /// What the turn has used (`usage.rs`).
     meter: super::usage::Meter,
+    /// **Its browser turn** (a Code chat's own session): told as Claude Code
+    /// begins a call to one of Yap's tools or a web read of its own, and the
+    /// pages its searches and reads found, as a plan turn tells its run
+    /// (`claude_live/turn.rs` `Marks`): the safety rule, and a search's
+    /// result that may open beside the chat.
+    marks: Option<claude_live::turn::Marks>,
+    /// Its own `WebSearch` (None) and `WebFetch` (its address) calls not
+    /// back yet, by id.
+    web_calls: HashMap<String, Option<String>>,
+    /// The pages they found, numbered as found.
+    found: Vec<crate::chat::chats::Source>,
 }
 
 /// An Edit, MultiEdit or Write call waiting for its result: its diff goes
@@ -1266,6 +1383,27 @@ fn write_kind(known: bool, state: Option<claude_live::backup::State>) -> &'stati
         (false, Some(_)) => "rewrite",
         (false, None) => "write",
     }
+}
+
+/// The names Claude Code gives Yap's own tools: `mcp__yap__browser_navigate`.
+const YAP_TOOLS: &str = "mcp__yap__";
+
+/// **A page found** (a search's result, a page fetched), numbered as found,
+/// each once — as a plan turn numbers its sources (`claude_plan/map.rs`).
+/// Only http(s). Pure.
+fn add_found(found: &mut Vec<crate::chat::chats::Source>, title: &str, url: &str) {
+    let url = url.trim();
+    if !(url.starts_with("http://") || url.starts_with("https://")) || found.iter().any(|s| crate::web::normal_url(&s.url) == crate::web::normal_url(url)) {
+        return;
+    }
+    let title = title.trim();
+    found.push(crate::chat::chats::Source {
+        n: found.len() + 1,
+        title: if title.is_empty() { crate::web::short_url(url) } else { steps::one_line(title, 120) },
+        url: url.to_string(),
+        site: crate::web::site_of(url),
+        ..Default::default()
+    });
 }
 
 /// Whether `tool` is one the backup hook runs before (`Edit`, `Write`,
@@ -1322,6 +1460,41 @@ impl Follow {
             commands: HashSet::new(),
             output_used: 0,
             meter: super::usage::Meter::new(before, &agent.model, window),
+            marks: None,
+            web_calls: HashMap::new(),
+            found: Vec::new(),
+        }
+    }
+
+    /// **Claude Code began a call** (its stream's `content_block_start`):
+    /// its browser turn hears of one to Yap's tools (`mcp__yap__…`) and of
+    /// its own web reads, before they run.
+    fn began(&self, name: &str) {
+        let Some(m) = &self.marks else { return };
+        if let Some(yap) = name.strip_prefix(YAP_TOOLS) {
+            m.began(yap);
+        } else if matches!(name, "WebSearch" | "WebFetch") {
+            m.web();
+        }
+    }
+
+    /// **A web read of its own came back** (`id`'s): the pages it found go to
+    /// its browser turn — a search's results, a fetch's address — so one may
+    /// open beside the chat, as in a plan chat.
+    fn web_back(&mut self, id: &str, is_error: bool, text: &str, record: Option<&serde_json::Value>) {
+        let Some(call) = self.web_calls.remove(id) else { return };
+        if is_error {
+            return;
+        }
+        let links = match call {
+            None => crate::ai::claude_plan::map::search_links(record, text),
+            Some(url) => vec![(String::new(), url)],
+        };
+        for (title, url) in links {
+            add_found(&mut self.found, &title, &url);
+        }
+        if let Some(m) = &self.marks {
+            m.found(&self.found);
         }
     }
 
@@ -1345,6 +1518,21 @@ impl Follow {
     fn on_tool(&mut self, id: &str, name: &str, input: &serde_json::Value) {
         if backed_up_tool(name) {
             self.edits.insert(id.to_string());
+        }
+        // Its own web reads, with a browser turn: what they find may open beside the chat.
+        if self.marks.is_some() && self.under.is_none() {
+            match name {
+                "WebSearch" => {
+                    self.web_calls.insert(id.to_string(), None);
+                }
+                "WebFetch" => {
+                    let url = input["url"].as_str().unwrap_or("").trim().to_string();
+                    if !url.is_empty() {
+                        self.web_calls.insert(id.to_string(), Some(url));
+                    }
+                }
+                _ => {}
+            }
         }
         self.open.insert(id.to_string());
         // Part of the work handed to a helper (the session's own call).
@@ -1535,6 +1723,10 @@ impl Follow {
                 self.saying_told = None;
                 false
             }
+            StreamKind::BlockStart { block: crate::ai::claude_code::events::BlockStart::ToolUse { name, .. }, .. } => {
+                self.began(name);
+                false
+            }
             StreamKind::Text { text, .. } => self.on_saying(text),
             _ => false,
         }
@@ -1595,6 +1787,7 @@ impl Follow {
                     if let Block::ToolResult { tool_use_id, is_error, text, pictures } = block {
                         self.on_tool_result(tool_use_id, *is_error, text, record);
                         self.on_pictures(tool_use_id, pictures);
+                        self.web_back(tool_use_id, *is_error, text, record);
                     }
                 }
             }
@@ -2808,6 +3001,21 @@ mod tests {
         assert!(!said.contains(SUMMARY_LINE));
         // Its first line: the chat thinking, for the person's own message; an agent sent out starts Claude Code.
         assert_eq!((start_line(true), start_line(false)), ("Thinking", "Starting Claude Code"));
+        // Its browser beside the chat (a Code chat's own session): the pages with the web on, else picture files.
+        use crate::chat::pictures::Gate;
+        let on = direct_eyes(true, "claude-haiku-5-5");
+        assert_eq!((on.screen, on.act, on.files), (Gate::Off, false, Gate::Off), "never the screen nor acting");
+        assert_ne!(on.pictures, Gate::Off);
+        let off = direct_eyes(false, "claude-haiku-5-5");
+        assert_eq!(off.pictures, Gate::Off);
+        assert_ne!(off.files, Gate::Off);
+        // The pages its own searches found, numbered as found, each once, http(s) only.
+        let mut found = Vec::new();
+        add_found(&mut found, "Tide tables", "https://tides.example.com/bay");
+        add_found(&mut found, "", "https://tides.example.com/bay#top");
+        add_found(&mut found, "", "ftp://files.example.com/x");
+        add_found(&mut found, "", "https://www.example.com/beds");
+        assert_eq!(found.iter().map(|s| (s.n, s.title.as_str())).collect::<Vec<_>>(), [(1, "Tide tables"), (2, "example.com/beds")]);
         // The bar hears either count change: an agent sent out, or the chat's own Claude at work.
         assert_ne!(told((1, 0)), told((0, 1)));
         assert_eq!(told((0, 0)), 0);

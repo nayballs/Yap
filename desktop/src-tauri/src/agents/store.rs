@@ -235,6 +235,45 @@ pub struct Agent {
     pub step: String,
 }
 
+/// **What a Code chat's own Claude showed beside the chat in a turn**
+/// ([`TurnNote::beside`]), in the shapes Chat's answers keep
+/// (`chats.json`): its answer keeps them.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default, rename_all = "camelCase")]
+pub struct Beside {
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub pages: Vec<crate::chat::pages::ShownPage>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub pictures: Vec<crate::chat::pictures::ShownPicture>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub files: Vec<crate::chat::shares::Share>,
+}
+
+impl Beside {
+    pub fn is_empty(&self) -> bool {
+        self.pages.is_empty() && self.pictures.is_empty() && self.files.is_empty()
+    }
+
+    /// Another turn's, after these (a report covering several turns): each once.
+    pub fn add(&mut self, more: &Beside) {
+        for p in &more.pages {
+            if !self.pages.iter().any(|q| q.url == p.url) {
+                self.pages.push(p.clone());
+            }
+        }
+        for p in &more.pictures {
+            if !self.pictures.iter().any(|q| q.id == p.id) {
+                self.pictures.push(p.clone());
+            }
+        }
+        for f in &more.files {
+            if !self.files.contains(f) {
+                self.files.push(f.clone());
+            }
+        }
+    }
+}
+
 /// **One turn of an agent**: one request to it (its brief, a follow-up, a
 /// plan's go-ahead) and what came of it. Continue carries on the same turn.
 /// Its backups are `agents/<id>/backup/<n>/` ([`turn_backup_dir`]).
@@ -327,6 +366,14 @@ pub struct TurnNote {
     /// turn still waiting then starts without its pictures.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub shots: Vec<String>,
+    /// **What it showed beside the chat** (14 Nov 2026, Yap's browser in a
+    /// Code chat that works directly: `claude_live/eyes.rs`): the pages it
+    /// opened, the pictures it showed, the files it shared. Its answer keeps
+    /// them, as a plan chat's answer does (`chat/turn/report.rs`), so they
+    /// come back with the chat. A new field of the turn's own: an older
+    /// Yap drops it on its save, and the answer then comes without them.
+    #[serde(skip_serializing_if = "Beside::is_empty")]
+    pub beside: Beside,
     /// Undo this turn put its files back.
     pub undone: bool,
     /// **Its to-do list**, as its latest `TodoWrite` left it (the Agent

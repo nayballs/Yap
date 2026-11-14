@@ -412,19 +412,58 @@ workspace, word for word, and no model of Chat's is asked.
     reads for its brief; its run lists `approve` alone, as ever).
   - In its work a read is a step like any other tool's ("Used yap · list
     tasks").
-- **Not in a direct Code chat**: the screen and the pages beside the chat,
-  and connectors. A plan Code chat's own session has the screen and the
-  pages; a session that also edits files and runs commands would need
-  their per-turn rules (what the turn may see, the cards, the web's
-  content counted) worked through for it first. Yap's memory stays out of
-  every Code chat by the 7 Nov decision. Documents beside the chat aren't
-  on the Claude plan's path at all.
+- **Yap's browser beside the chat** (2026-11-14; the maintainer, after
+  his Code chat's Claude said it couldn't open a page in Yap's browser:
+  "claude-code doesn't have browser tools? It should have shouldn't it?" —
+  as Claude Code's own app has its browser pane). Its session opens, reads,
+  scrolls and looks at pages in the tabs beside the chat, and finds and
+  shows pictures, with Chat's own code and rules:
+  - **What it has** (`runner::direct_eyes`): with "Look things up on the
+    web" on, the browser's open/read/look tools and the web's pictures
+    (`browser_navigate`, `browser_read`, `browser_find`, `browser_scroll`,
+    `browser_screenshot`, `browser_zoom`, `browser_tabs`, `browser_wait`,
+    `browser_batch`, `find_pictures`, `look_at_picture`, `show_picture`,
+    `share_files`); with the web off, picture files by a path only — as a
+    plan Code chat's session has them. **Never the screen, nor acting on a
+    page** (no clicks or typing: Chat's browser stays at open, read and
+    look, 1 Nov), whatever a spec asks (`claude_live/server.rs` holds an
+    agent's run to it); never an agent Chat sent out. In `--allowedTools`:
+    nothing asks, in any Mode.
+  - **How**: each turn opens a browser turn on its run (`run.begin_turn`,
+    `runner::beside_context` / `beside_web`) before Claude Code can call
+    it — the person's message and their earlier ones (an address they gave
+    opens), the chat's earlier sources, the per-turn caps — as a plan
+    chat's turn does (`chat/turn/plan.rs`). The runner tells it as Claude
+    Code begins a call to Yap's tools or a web read of its own (its
+    stream's `content_block_start`: `Follow::began`, the safety rule's
+    order), and the pages its own `WebSearch` and `WebFetch` found
+    (`Follow::web_back`: a search result may then open). Every rule of
+    `pages::checked` holds: public http(s), from the person's words, a
+    site they named, a search's result or a link on a page read; after
+    outside content an address the model writes doesn't open.
+  - **What it shows** goes to the chat at once (`yap-agent-shown`:
+    `chatState` `agentShown` opens the panel on the page or picture), and
+    its answer keeps it — the turn's `beside` (`store::Beside`), then the
+    answer's `pages`, `pictures` and `files` (`report.rs`) — so its pills
+    are under the answer and its tabs come back with the chat. In its
+    work: "Opened wiki.example.com/wiki/Fort_Joy beside the chat",
+    "Read the page beside the chat" (`steps::browser_line`; the web's mark).
+  - **Yap's own shortcuts don't come first** (`chat/turn.rs`
+    `to_its_session`): in a Code chat that works directly, a message that
+    names a site or an app ("bring up <address>", "open Spotify") goes to
+    its session like any other, as in Claude Code's own app — before, Yap
+    opened the page or app itself and the session was never told.
+- **Not in a direct Code chat**: the screen and connectors. Yap's memory
+  stays out of every Code chat by the 7 Nov decision. Documents beside the
+  chat aren't on the Claude plan's path at all.
 - **Tests**: `agents-direct.spec.js` (the first message, the next on
   `--resume`, a message mid-work, a message with a screenshot — the first,
   the next turn's own, a note's —, its words as it writes them, asked out
   loud with the chat in view, just chatting (the words as they are, the
   thread the message and the answer, nothing said but the answer), its
-  session reading Yap's own data, ■ Stop and Esc, the switch off). The e2e base config has
+  session reading Yap's own data, opening a page in Yap's browser beside
+  the chat (the panel on it, the answer keeping it), ■ Stop and Esc, the
+  switch off). The e2e base config has
   `agentsDirect: false`, so every older spec still tests the hand-off; Yap
   Lab's `code-chat-direct` script runs it on the real Claude Code.
 

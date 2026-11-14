@@ -3847,9 +3847,9 @@ and its Undo, Preview / Source, find, copy, light and dark).
   the box (`yap-snip`, or ControlPanel's `chatRequest {snip}`): the
   conversation Rust chose — the one open here when the window was on screen
   on it, else a new chat —, its 120 px tile (its size and ✕ on hover; how
-  a screenshot looks: snip.md, 2026-10-31), the three
-  one-tap prompts (What's this? · Explain this error · Summarise), "Ask about
-  this screenshot…", the caret there; Enter on an empty box asks "What's
+  a screenshot looks: snip.md, 2026-10-31), "Ask about
+  this screenshot…", the caret there (no one-tap prompts beside it since
+  2026-11-14, the maintainer: "It's not needed"); Enter on an empty box asks "What's
   this?"; never sent by itself; it waits while another view shows
   (`chatShots.svelte.js`). A model that can't read images: one amber line
   with "Use <model> on <provider>" (`chat_set_model`), "Choose another

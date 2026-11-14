@@ -1029,6 +1029,20 @@ export function createChatState({ onopensettings = () => null, onopennote = () =
     return false;
   }
 
+  /**
+   * **What a Code chat's own Claude showed beside the chat** (`yap-agent-shown`,
+   * agents/runner.rs: Yap's browser in its session, 14 Nov 2026): a page it
+   * opened, a picture it showed — the panel opens on it, as on a plan chat's.
+   * Its answer keeps them (`pages`, `pictures`), so they come back with the
+   * chat. Another conversation's: nothing here (its answer has them).
+   */
+  function agentShown(p) {
+    if (p?.conversation == null || p.conversation !== activeId) return;
+    const ev = p.event;
+    if (ev?.kind === 'page' && (ev.page?.url || ev.page?.tabKey)) doc.showPage(ev.page);
+    else if (ev?.kind === 'picture' && ev.picture?.id) doc.showPicture(ev.picture);
+  }
+
   function followAssistantStream(p) {
     const id = p?.conversationId;
     // An ask-first card in a spoken question's turn waits on the person (the status dots).
@@ -1760,6 +1774,7 @@ export function createChatState({ onopensettings = () => null, onopennote = () =
     // loud): the line at the thread's foot shows (never another chat's).
     get answeringHere() { return here != null; },
     get assistantAnswering() { return assistantAnswering; },
+    agentShown,
     // `yap-assistant`'s payload, or `assistant_phase`'s.
     set assistantPhase(v) {
       phaseHeard += 1;

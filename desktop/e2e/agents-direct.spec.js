@@ -53,6 +53,7 @@ import { fakeClaude, planConfig } from './support/claude-plan.js';
 import { RUNS } from './support/yap.js';
 import { newCodeChat } from './support/code-chats.js';
 import { writePng } from './support/png.js';
+import { startFakeWeb, FORT_JOY_URL } from './support/fake-web.js';
 import { workingDirectly, worksDirectly, turnEnd, answeredAfter, plainReply, directLine, plainReport, runningLine } from '../src/lib/core/agents.js';
 import { panelRows, panelGroups, panelTotals } from '../src/lib/core/agentPanel.js';
 import { workingLine } from '../src/lib/core/working.js';
@@ -225,6 +226,22 @@ const toolDumps = () => (fs.existsSync(TOOLS) ? fs.readFileSync(TOOLS, 'utf8').s
 
 /** Says back the words it was given, exactly (the stand-in's `{{user_text}}`): a reply, no work. */
 const SAYS_BACK = [{ _wait_user: true }, { _dump_args: ARGS }, init(), said('b1', [{ type: 'text', text: 'Got: {{user_text}}' }], 'end_turn'), result('Got: {{user_text}}', 0.001), { _wait_user: true }];
+/** Claude Code beginning a tool call (its stream's `content_block_start`, before the call runs). */
+const begins = (id, name) => piece({ type: 'content_block_start', index: 0, content_block: { type: 'tool_use', id, name, input: {} } });
+const OPENED = 'It is open beside the chat.';
+/** The chat's own Claude opens a page in Yap's browser beside the chat (the address the person gave). */
+const OPENS_A_PAGE = [
+  { _wait_user: true },
+  { _dump_args: ARGS },
+  init(),
+  { _mcp: { list: true, dump: TOOLS } },
+  begins('toolu_nav', 'mcp__yap__browser_navigate'),
+  said('p1', [{ type: 'tool_use', id: 'toolu_nav', name: 'mcp__yap__browser_navigate', input: { url: FORT_JOY_URL } }]),
+  { _mcp: { tool: 'browser_navigate', arguments: { url: FORT_JOY_URL }, result_for: 'toolu_nav', dump: TOOLS } },
+  said('p2', [{ type: 'text', text: OPENED }], 'end_turn'),
+  result(OPENED, 0.01),
+  { _wait_user: true },
+];
 /** A line Claude Code's own helper (`Task`) says, under the call that sent it. */
 const under = (call, line) => ({ ...line, parent_tool_use_id: call });
 const HELPED = 'The notes are checked.';
@@ -274,12 +291,21 @@ const after = (args, flag) => {
 // ---- the app ----
 
 const test = base.extend({
-  yapOptions: [
+  // The web Yap's browser beside the chat reaches (wiki.example.com, as chat-pages.spec.js has it).
+  fakeWeb: [
     async ({}, use) => {
+      const fake = await startFakeWeb();
+      await use(fake);
+      await fake.close();
+    },
+    { scope: 'worker' },
+  ],
+  yapOptions: [
+    async ({ fakeWeb }, use) => {
       await use({
         name: 'agents-direct',
         // (Each test loads the script it needs: e2e_claude_script.)
-        env: fakeClaude(writeScript('idle', [{ _wait_user: true }])),
+        env: { ...fakeClaude(writeScript('idle', [{ _wait_user: true }])), ...fakeWeb.env, YAP_E2E_NET_ALIASES: `${new URL(fakeWeb.base).host}=wiki.example.com` },
         config: planConfig({ 'claude-plan': 'claude-plan' }, { memoryLearnChats: false }),
       });
     },
@@ -743,6 +769,38 @@ test('asked out loud with the Code chat in view: straight to its session, nothin
   await expect.poll(() => laidOut(main)).toEqual(['you', 'work', 'report', 'answer', 'you', 'work', 'report', 'answer']);
 });
 
+test('its session opens pages in Yap’s browser beside the chat, as Claude Code’s own app has its browser pane; its answer keeps them', async ({ yap, main, shot }) => {
+  fs.rmSync(TOOLS, { force: true });
+  await setConfig(yap, main, { webSearch: true });
+  await script(yap, OPENS_A_PAGE, 'opens-a-page');
+  const before = (await agents(yap)).length;
+  await codeChat(main);
+  await send(main, `Bring up ${FORT_JOY_URL} beside the chat please.`);
+  const agent = await newAgent(yap, before);
+  // Its session lists Yap's browser (never the screen, nor acting on a page) and may use it without a prompt.
+  await expect.poll(() => toolDumps().length, { timeout: 20_000 }).toBeGreaterThan(0);
+  const listed = toolDumps()[0].tools.map((t) => t.name);
+  expect(listed).toEqual(expect.arrayContaining(['browser_navigate', 'browser_read', 'browser_screenshot', 'show_picture']));
+  for (const name of ['look_at_screen', 'browser_click', 'browser_type', 'search_memory']) expect(listed).not.toContain(name);
+  expect(after(argsSeen()[0], '--allowedTools')).toContain('mcp__yap__browser_navigate');
+  // The page opens beside the chat, in its own tab, as a plan chat's does.
+  await expect(main.getByTestId('chat-page')).toBeVisible({ timeout: 30_000 });
+  await expect.poll(async () => (await yap.invoke('e2e_page_views')).some((v) => v.key === `page:${FORT_JOY_URL}` && v.loaded), { timeout: 20_000 }).toBe(true);
+  const done = await ended(yap, agent.id);
+  expect(toolDumps().find((d) => d.tool === 'browser_navigate')).toMatchObject({ isError: false });
+  // Its work says so in plain words; no Agent tab opened.
+  await expect(thread(main).getByTestId('chat-agent-work').getByRole('button').first()).toBeVisible();
+  const log = (await yap.invoke('agent_get', { id: agent.id })).log;
+  expect(log.some((e) => e.step === 'Opening wiki.example.com/wiki/Fort_Joy beside the chat')).toBe(true);
+  // Its answer keeps the page (its pill under the answer, its tab back with the chat).
+  const messages = await messagesOf(yap, done.conversation, 3);
+  expect(messages[2].text).toBe(OPENED);
+  expect(messages[2].pages?.map((p) => p.url)).toEqual([FORT_JOY_URL]);
+  expect((await agents(yap)).find((j) => j.id === agent.id).turnList[0].beside?.pages?.length).toBe(1);
+  await shot(main, '70-a-page-opened-beside-the-chat');
+  await main.getByTestId('chat-page').getByRole('button', { name: 'Close the panel' }).click();
+});
+
 test('its session reads Yap’s own data on request: meetings, notes, tasks and the calendar, never its memory', async ({ yap, main }) => {
   fs.rmSync(TOOLS, { force: true });
   await script(yap, READS_YAP, 'reads-yap');
@@ -755,8 +813,10 @@ test('its session reads Yap’s own data on request: meetings, notes, tasks and 
   const [listed, read] = toolDumps();
   const names = listed.tools.map((t) => t.name);
   expect(names).toEqual(expect.arrayContaining(['approve', 'list_meetings', 'search_meetings', 'get_meeting', 'search_notes', 'get_note', 'list_tasks', 'list_folders']));
-  expect(names.filter((n) => /memory|agent|browser|screen|picture|create|remember/.test(n))).toEqual([]);
-  expect(listed.tools.filter((t) => t.name !== 'approve').every((t) => t.readOnlyHint === true)).toBe(true);
+  expect(names.filter((n) => /memory|agent|browser|screen|create|remember/.test(n))).toEqual([]);
+  // (The web off: Yap's browser isn't offered, only picture files by a path: show_picture, share_files.)
+  expect(names.filter((n) => /picture|share/.test(n)).sort()).toEqual(['look_at_picture', 'share_files', 'show_picture']);
+  expect(listed.tools.filter((t) => /meeting|note|task|folder|calendar/.test(t.name)).every((t) => t.readOnlyHint === true)).toBe(true);
   // Allowed with no prompt, by Claude Code's names for them; and the call answered.
   const allowed = after(argsSeen()[0], '--allowedTools').split(',');
   expect(allowed).toEqual(expect.arrayContaining(['mcp__yap__list_tasks', 'mcp__yap__get_meeting']));

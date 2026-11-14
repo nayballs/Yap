@@ -181,6 +181,9 @@ pub struct RunSpec {
     /// A Chat run sees the screen and the pages beside the chat ([`eyes`]),
     /// as far as these gates say. Listed for the whole session, as the agent
     /// tools are; each turn says what it may use of them (`turn::Context`).
+    /// A Code chat's own session (an agent's run that [`RunSpec::reads`])
+    /// has the browser too, since 14 Nov 2026 (`agents/runner.rs`
+    /// `direct_eyes`): the pages, never the screen or acting on a page.
     pub eyes: eyes::Eyes,
     /// A plan chat's connector tools ([`connectors`]): listed for the whole
     /// session (its hash in the session's fingerprint, `chat/turn/plan.rs`),
@@ -191,8 +194,8 @@ pub struct RunSpec {
     /// meetings, notes, tasks, folders and the calendar, read only, as a
     /// plan Code chat's own session always had them ("build what we decided
     /// in yesterday's meeting"). Never Yap's memory (a Code chat's never),
-    /// the screen, the pages or connectors; never an agent Chat sent out
-    /// (Chat's model reads for its brief).
+    /// the screen or connectors; never an agent Chat sent out (Chat's model
+    /// reads for its brief). Its browser is [`RunSpec::eyes`]'.
     pub reads: bool,
 }
 

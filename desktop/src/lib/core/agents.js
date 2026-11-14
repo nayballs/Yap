@@ -122,6 +122,16 @@ const DONE = [
   [/^Using\b/, 'Used'],
   [/^Handing\b/, 'Handed'],
   [/^Asking\b/, 'Asked'],
+  // Yap's browser beside the chat (a Code chat's own session: agents/steps.rs `browser_line`).
+  [/^Opening\b/, 'Opened'],
+  [/^Going\b/, 'Went'],
+  [/^Finding\b/, 'Found'],
+  [/^Scrolling\b/, 'Scrolled'],
+  [/^Zooming\b/, 'Zoomed'],
+  [/^Switching\b/, 'Switched'],
+  [/^Closing\b/, 'Closed'],
+  [/^Showing\b/, 'Showed'],
+  [/^Sharing\b/, 'Shared'],
 ];
 const doneLine = (step) => DONE.reduce((s, [was, now]) => (was.test(s) ? s.replace(was, now) : s), String(step || ''));
 
@@ -1011,6 +1021,8 @@ export function stepKind(s) {
   if (/^(Editing|Writing)\b/.test(t)) return 'edit';
   if (/^Running\b/.test(t)) return 'command';
   if (/^Searching the web\b/.test(t) || /^Reading [a-z0-9-]+(\.[a-z0-9-]+)+\//i.test(t)) return 'web';
+  // (Yap's browser beside the chat: agents/steps.rs `browser_line`, each line ending so.)
+  if (/ beside the chat$/.test(t)) return 'web';
   if (/^(Reading|Looking)\b/.test(t)) return 'read';
   if (/^Searching the files\b/.test(t)) return 'search';
   if (/^Handing part of it to a helper\b/.test(t)) return 'helper';

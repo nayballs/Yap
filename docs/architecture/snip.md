@@ -326,8 +326,7 @@ global hook never sees keys while a Yap window has the focus.
   main window was on screen on one at the snip (`assistant::chat_viewing`
   + `notice::window_view`); else a new chat.
 - The composer: the screenshot's 120 px tile (its size and ✕ on hover:
-  "How a screenshot looks", below), the three one-tap prompts — **What's this?**, **Explain this error**, **Summarise** (each
-  sends at once, with the screenshot) — "Ask about this screenshot…" in the
+  "How a screenshot looks", below), "Ask about this screenshot…" in the
   box, the caret there (dictating into it works: Chat's mic, or the hotkey's
   in-page fallback). **Enter on an empty box asks "What's this?"**. Up to 4
   screenshots a question (snipping again adds one). They wait while another
@@ -569,7 +568,7 @@ known**: Chat lets it try, and a refusal teaches it.
 
 When the model can't: one amber line above the box, "**GPT-OSS 20B can't
 read images.** [Use Qwen3.8 27B on Groq] [Choose another model…] Send
-without the screenshot", Send and the prompts waiting meanwhile. The switch
+without the screenshot", Send waiting meanwhile. The switch
 (`vision::suggest`) is the same provider first (same key, no setup), then
 every provider with a key in Settings' order; each provider's pick is Yap's
 curated one its live list has (`PICKS`: Groq `qwen/qwen3.8-27b`, Anthropic
@@ -834,7 +833,7 @@ doesn't show it (a screenshot never goes there).
   `e2e_snip` (a 1280×720 HDR one at 240 nits through the real FP16 path, a
   960×540 one at 150 %), the hidden overlay driven by `e2e_snip_input`, how
   it went from `e2e_snip_last`: the snip in a new chat with its pixels exact,
-  Enter on an empty box, the prompts, Esc / right-click / a click, the
+  Enter on an empty box, no one-tap prompts, Esc / right-click / a click, the
   conversation Chat shows, the "can't read images" line and its switch, a
   server's refusal, saying "snip", the Settings rows, ✂ / + / the in-page
   shortcut, retention and deletion. `desktop/e2e/support/png.js` reads PNGs with
